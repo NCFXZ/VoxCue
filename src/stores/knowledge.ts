@@ -1,0 +1,114 @@
+import { create } from 'zustand';
+import { localKnowledge, type KnowledgeBase, type LocalDocument } from '../services/knowledge';
+interface KnowledgeState {
+  bases: KnowledgeBase[];
+  documents: LocalDocument[];
+  selectedId: string | null;
+  busy: boolean;
+  loading: boolean;
+  error: string | null;
+  load(): Promise<void>;
+  open(id: string | null): Promise<void>;
+  create(name: string): Promise<boolean>;
+  rename(name: string): Promise<boolean>;
+  removeBase(): Promise<boolean>;
+  importFiles(files: File[]): Promise<void>;
+  removeDocument(id: string): Promise<void>;
+}
+const message = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。');
+export const useKnowledge = create<KnowledgeState>((set, get) => ({
+  bases: [],
+  documents: [],
+  selectedId: null,
+  busy: false,
+  loading: false,
+  error: null,
+  async load() {
+    try {
+      set({ bases: await localKnowledge.listBases(), error: null });
+    } catch (error) {
+      set({ error: message(error) });
+    }
+  },
+  async open(id) {
+    set({ selectedId: id, documents: [], error: null, loading: !!id });
+    if (!id) return;
+    try {
+      const documents = await localKnowledge.listDocuments(id);
+      if (get().selectedId === id) set({ documents, loading: false });
+    } catch (error) {
+      if (get().selectedId === id) set({ error: message(error), loading: false });
+    }
+  },
+  async create(name) {
+    set({ busy: true, error: null });
+    try {
+      const base = { id: crypto.randomUUID(), name: name.trim(), createdAt: Date.now() };
+      await localKnowledge.saveBase(base);
+      await get().load();
+      await get().open(base.id);
+      return true;
+    } catch (error) {
+      set({ error: message(error) });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
+  },
+  async rename(name) {
+    const base = get().bases.find((b) => b.id === get().selectedId);
+    if (!base) return false;
+    set({ busy: true, error: null });
+    try {
+      await localKnowledge.saveBase({ ...base, name });
+      await get().load();
+      return true;
+    } catch (error) {
+      set({ error: message(error) });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
+  },
+  async removeBase() {
+    const id = get().selectedId;
+    if (!id) return false;
+    set({ busy: true, error: null });
+    try {
+      await localKnowledge.deleteBase(id);
+      await get().open(null);
+      await get().load();
+      return true;
+    } catch (error) {
+      set({ error: message(error) });
+      return false;
+    } finally {
+      set({ busy: false });
+    }
+  },
+  async importFiles(files) {
+    const id = get().selectedId;
+    if (!id) return;
+    set({ busy: true, error: null });
+    try {
+      await localKnowledge.importDocuments(id, files);
+      if (get().selectedId === id) await get().open(id);
+    } catch (error) {
+      set({ error: message(error) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+  async removeDocument(id) {
+    set({ busy: true, error: null });
+    try {
+      await localKnowledge.deleteDocument(id);
+      const baseId = get().selectedId;
+      if (baseId) await get().open(baseId);
+    } catch (error) {
+      set({ error: message(error) });
+    } finally {
+      set({ busy: false });
+    }
+  },
+}));

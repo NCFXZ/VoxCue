@@ -1,0 +1,14 @@
+node_modules/
+dist/
+dist-electron/
+test-results/
+*.log
+.pnpm-store/
+.env
+.env.*
+!.env.example
+coverage/
+*.tsbuildinfo
+credentials*.json
+credentials*.bin
+auth-data/
