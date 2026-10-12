@@ -13,7 +13,8 @@
     "format": "prettier --write src electron scripts *.json *.ts *.md *.yaml",
     "test:electron": "node scripts/electron-smoke.mjs",
     "test:floating": "node scripts/floating-smoke.mjs",
-    "test:composer": "node scripts/composer-smoke.mjs"
+    "test:composer": "node scripts/composer-smoke.mjs",
+    "test:login": "node scripts/login-smoke.mjs"
   },
   "dependencies": {
     "@fluentui/react-icons": "^2.0.0",

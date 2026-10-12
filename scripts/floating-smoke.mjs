@@ -19,7 +19,11 @@ const app = await electron.launch({
   },
 });
 try {
-  const main = await app.firstWindow();
+  const login = await app.firstWindow();
+  const [main] = await Promise.all([
+    app.waitForEvent('window'),
+    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+  ]);
   main.setDefaultTimeout(15000);
   const [floating] = await Promise.all([
     app.waitForEvent('window'),

@@ -1,10 +1,53 @@
-import { app, BrowserWindow, ipcMain } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
+import { ChatGPTAuthService } from './backend/auth/service';
+import { createAuthStorage } from './backend/auth/storage';
+let auth: ChatGPTAuthService;
+let demoSession = false;
 
 let mainWindow: BrowserWindow | null = null;
+let loginWindow: BrowserWindow | null = null;
 let interviewWindow: BrowserWindow | null = null;
 let closingMain = false;
 let captureProtected = true;
+function createLoginWindow() {
+  if (loginWindow) {
+    loginWindow.show();
+    loginWindow.focus();
+    return;
+  }
+  const win = new BrowserWindow({
+    width: 960,
+    height: 580,
+    minWidth: 860,
+    minHeight: 520,
+    frame: false,
+    transparent: true,
+    backgroundColor: '#00000000',
+    maximizable: false,
+    show: false,
+    title: 'AI Interview Copilot · 登录',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+    },
+  });
+  loginWindow = win;
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.webContents.on('will-navigate', (event) => event.preventDefault());
+  win.once('ready-to-show', () => {
+    win.show();
+    mainWindow?.close();
+  });
+  win.on('close', () => auth.cancel());
+  win.on('closed', () => {
+    loginWindow = null;
+  });
+  if (process.env.VITE_DEV_SERVER_URL) void win.loadURL(`${process.env.VITE_DEV_SERVER_URL}#login`);
+  else void win.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'login' });
+}
 function openInterview() {
   if (interviewWindow) {
     interviewWindow.restore();
@@ -53,6 +96,8 @@ function openInterview() {
 // Keep smoke tests isolated from the user's actual local documents and settings.
 if (process.env.COPILOT_TEST_USER_DATA) app.setPath('userData', process.env.COPILOT_TEST_USER_DATA);
 function createMainWindow() {
+  if (mainWindow) return;
+  closingMain = false;
   mainWindow = new BrowserWindow({
     width: 1360,
     height: 900,
@@ -72,7 +117,10 @@ function createMainWindow() {
   });
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   mainWindow.webContents.on('will-navigate', (event) => event.preventDefault());
-  mainWindow.once('ready-to-show', () => mainWindow?.show());
+  mainWindow.once('ready-to-show', () => {
+    mainWindow?.show();
+    loginWindow?.close();
+  });
   const devUrl = process.env.VITE_DEV_SERVER_URL;
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
@@ -80,13 +128,73 @@ function createMainWindow() {
     mainWindow = null;
   });
   mainWindow.on('close', () => {
+    auth.cancel();
     closingMain = true;
     interviewWindow?.close();
   });
 }
 app.whenReady().then(() => {
-  ipcMain.handle('interview:open', (event) => {
+  auth = new ChatGPTAuthService({
+    storage: createAuthStorage(),
+    openBrowser: (url) => shell.openExternal(url),
+  });
+  const requireMain = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
+  };
+  const requireLogin = (event: Electron.IpcMainInvokeEvent) => {
+    if (event.sender !== loginWindow?.webContents) throw new Error('Unauthorized window');
+  };
+  ipcMain.handle('auth:session', async (event) => {
+    if (event.sender !== loginWindow?.webContents) requireMain(event);
+    const session = demoSession
+      ? { mode: 'demo', user: { id: 'local-demo', name: '本地用户', email: '' }, expiresAt: null }
+      : await auth.session();
+    return session;
+  });
+  ipcMain.handle('auth:sign-in', async (event) => {
+    requireLogin(event);
+    demoSession = false;
+    const session = await auth.signIn();
+    createMainWindow();
+    return session;
+  });
+  ipcMain.handle('auth:cancel', (event) => {
+    requireLogin(event);
+    auth.cancel();
+  });
+  ipcMain.handle('auth:demo', (event) => {
+    requireLogin(event);
+    if (auth.isPending()) throw new Error('请先取消 ChatGPT 登录。');
+    demoSession = true;
+    createMainWindow();
+    return {
+      mode: 'demo',
+      user: { id: 'local-demo', name: '本地用户', email: '' },
+      expiresAt: null,
+    };
+  });
+  ipcMain.handle('auth:sign-out', async (event) => {
+    requireMain(event);
+    interviewWindow?.close();
+    if (demoSession) {
+      demoSession = false;
+      createLoginWindow();
+      return { warning: null };
+    }
+    const result = await auth.signOut();
+    if (result.warning && mainWindow)
+      await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        title: '退出登录',
+        message: result.warning,
+        buttons: ['确定'],
+      });
+    createLoginWindow();
+    return result;
+  });
+  ipcMain.handle('interview:open', async (event) => {
+    if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
+    if (!demoSession && !(await auth.session())) throw new Error('Please sign in first');
     openInterview();
   });
   ipcMain.handle('interview:state', (event) => {
@@ -117,9 +225,15 @@ app.whenReady().then(() => {
     if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
     if (action === 'close') win.close();
   });
-  createMainWindow();
+  void auth
+    .session()
+    .then((session) => {
+      if (session) createMainWindow();
+      else createLoginWindow();
+    })
+    .catch(() => createLoginWindow());
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createMainWindow();
+    if (BrowserWindow.getAllWindows().length === 0) createLoginWindow();
   });
 });
 app.on('window-all-closed', () => {

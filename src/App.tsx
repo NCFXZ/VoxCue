@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Moon, Sun, X, AudioLines } from './components/icons';
+import { Monitor, Moon, Sun, X } from './components/icons';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { PreparationPage } from './components/PreparationPage';
@@ -7,18 +7,23 @@ import { HistoryPage } from './components/HistoryPage';
 import { KnowledgePage } from './components/KnowledgePage';
 import { Button } from './components/ui/button';
 import { usePreparation } from './stores/preparation';
-import { mockAuth } from './services/mock';
+import { useAuth } from './stores/auth';
+import { LoginPage } from './components/LoginPage';
 type Theme = 'light' | 'dark' | 'system';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
   return value === 'light' || value === 'dark' ? value : 'system';
 }
 export function App() {
+  const isLoginWindow = location.hash === '#login';
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [collapsed, setCollapsed] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [loggedOut, setLoggedOut] = useState(false);
+  const auth = useAuth();
   const [page, setPage] = useState<'preparation' | 'history' | 'knowledge'>('preparation');
+  useEffect(() => {
+    void auth.load();
+  }, []);
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () =>
@@ -39,47 +44,54 @@ export function App() {
     return () => window.removeEventListener('keydown', handle);
   }, []);
   return (
-    <div className="app-shell">
-      <TitleBar />
+    <div className={`app-shell ${isLoginWindow ? 'login-shell' : ''}`}>
+      {!isLoginWindow && <TitleBar />}
       <div className="app-body">
-        <Sidebar
-          page={page}
-          onNavigate={setPage}
-          collapsed={collapsed}
-          onCollapse={() => setCollapsed(!collapsed)}
-          onNew={() => {
-            usePreparation.getState().reset();
-            setPage('preparation');
-          }}
-          onSettings={() => setSettings(true)}
-          onLogout={() => {
-            usePreparation.getState().reset();
-            void mockAuth.signOut();
-            setLoggedOut(true);
-          }}
-        />
-        {loggedOut ? (
-          <main className="workspace signed-out">
-            <AudioLines size={42} />
-            <h1>已退出模拟会话</h1>
-            <p>当前为本地演示，未连接认证服务。</p>
-            <Button
-              onClick={async () => {
-                await mockAuth.signIn();
-                setLoggedOut(false);
-              }}
-            >
-              返回本地演示
-            </Button>
-          </main>
-        ) : page === 'history' ? (
-          <HistoryPage />
-        ) : page === 'knowledge' ? (
-          <KnowledgePage />
+        {auth.loading ? (
+          <main className="login-loading">正在读取登录状态…</main>
+        ) : isLoginWindow || !auth.session ? (
+          <LoginPage />
         ) : (
-          <PreparationPage />
+          <>
+            <Sidebar
+              userName={auth.session.user.name}
+              accountLabel={
+                auth.session.mode === 'chatgpt'
+                  ? auth.session.user.email || 'ChatGPT 已连接'
+                  : '单用户 · Mock 演示'
+              }
+              page={page}
+              onNavigate={setPage}
+              collapsed={collapsed}
+              onCollapse={() => setCollapsed(!collapsed)}
+              onNew={() => {
+                usePreparation.getState().reset();
+                setPage('preparation');
+              }}
+              onSettings={() => setSettings(true)}
+              onLogout={async () => {
+                if (await auth.signOut()) {
+                  usePreparation.getState().reset();
+                  setSettings(false);
+                  setPage('preparation');
+                }
+              }}
+            />
+            {page === 'history' ? (
+              <HistoryPage />
+            ) : page === 'knowledge' ? (
+              <KnowledgePage />
+            ) : (
+              <PreparationPage />
+            )}
+          </>
         )}
       </div>
+      {auth.session && auth.error && (
+        <div className="auth-error" role="alert">
+          {auth.error}
+        </div>
+      )}
       {settings && (
         <div className="modal-backdrop" onClick={() => setSettings(false)}>
           <section

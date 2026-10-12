@@ -28,6 +28,7 @@ pnpm build
 pnpm test:electron
 pnpm test:floating
 pnpm test:composer
+pnpm test:login
 ```
 
 `test:electron` 会启动真实 Electron，测试界面及窗口操作，并在 `test-results/` 保存截图。`pnpm dev:web` 仅预览网页，窗口按钮需要在 Electron 中使用。
@@ -46,7 +47,7 @@ pnpm test:composer
 - 知识库创建、重命名、删除、文件选择与拖放导入、同名文件替换、文档移除、TXT/Markdown 文本预览。
 - 知识库支持 PDF、Word、PowerPoint、Excel、TXT 和 Markdown；单文件最多 20 MB，每次最多 20 个。PDF/Office 仅保存原始文件，解析与检索服务尚未接入。
 - 浅色/深色/系统主题，选择保存在本地；用户菜单仅设置和退出登录。
-- 设置仅包含外观主题；退出登录为模拟会话退出，可返回本地演示。
+- 设置仅包含外观主题；登录页支持系统浏览器 ChatGPT 授权和显式的 Mock 体验入口。登录与主界面分别使用独立窗口，登录后交接到主窗口，退出后返回登录窗口。
 - 自定义标题栏：拖动、最小化、最大化/还原、关闭。
 - 按钮与导航使用 Microsoft Fluent UI 官方 React 图标。
 
@@ -54,13 +55,23 @@ pnpm test:composer
 - 悬浮面试支持模拟转写、暂停/继续、自动或手动 Mock 回答、手动输入问题；结束后保存到本地面试记录。
 - Windows 截图保护默认开启，工具条可主动切换为允许截图/共享。关闭再打开后恢复保护；采用 Electron 标准 `setContentProtection` 接口，不保证所有捕获软件均遵守，未逐一验证会议软件。
 
-所有 AI 回复、转写和示例面试记录均为 Mock，界面明确标记模拟状态。不采集音频、不连接 ChatGPT API、不进行真实认证。模型和音频设置尚未开放。不包含截图采集、隐藏录制或会议检测规避功能。
+所有 AI 回复、转写和示例面试记录均为 Mock，界面明确标记模拟状态。不采集音频、不调用真实 AI 推理接口。ChatGPT 登录与模型调用分别管理；模型和音频设置尚未开放。不包含截图采集、隐藏录制或会议检测规避功能。
 
 个人信息保存在本机 localStorage，简历和知识库文档保存在 IndexedDB。聊天消息仅保留在当前应用会话内，点击新对话或退出模拟会话会清空聊天，但保留个人信息和本地文件。知识库不会被自动用于 Mock 聊天检索。
 
 ## 结构
 
-`electron/` 主进程与隔离 preload；`src/components/` 展示组件；`src/components/ui/` 可组合基础组件（Radix + CVA 与原生模态对话框）；`src/stores/` Zustand 状态与异步生命周期；`src/services/` Mock 聊天、个人信息、历史记录和本地文档管理服务。认证、语音识别、AI 模型和知识库检索接口留待后续接入。
+`electron/` 主进程与隔离 preload；`electron/backend/` 原生认证服务；`electron/contracts/` 公开 IPC 类型；`src/components/` 展示组件；`src/components/ui/` 可组合基础组件；`src/stores/` Zustand 状态；`src/services/` 服务适配与 Mock 实现。前后端逻辑在同一仓库分目录维护，当前无需远程服务器。项目协作背景见 `AGENTS.md`。
+
+## ChatGPT 登录
+
+按 OpenAI [本地应用登录文档](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)实现系统浏览器授权、PKCE、本机随机端口回调、state/nonce 与签名身份令牌校验。首次注册使用动态客户端，后续使用本机保存的客户端标识。应用不会收集 ChatGPT 密码，也不需要在前端填写 API Key。
+
+凭据保存在 Electron 用户数据目录 `auth-data/credentials.bin`，通过 Windows 系统加密保护；令牌不会传入渲染器、localStorage 或 Git。退出时尝试撤销远端授权并清除本机令牌，网络失败会显示未确认撤销的提示。当前未实现自动刷新，身份会话过期后需重新授权。
+
+真实账户的浏览器授权需要用户亲自完成，尚未完成真实账户端到端验证。自动化测试验证授权发起、取消、拒绝回调、身份校验、加密存储及 Mock 体验退出；不使用真实账户或生产令牌。该流程面向本地个人应用，未实现商业托管认证服务器。
+
+登录窗口默认 960×580，无标题栏、窗口按钮、外围留白或磨砂背景，保留圆角、左侧登录与右侧预览。可拖动欢迎区域移动窗口，使用 Alt+F4 关闭。主窗口保留完整窗口操作。模型选择采用支持键盘操作的自定义菜单。`pnpm test:login` 验证独立窗口交接、登录页和模型菜单；运行 `node scripts/login-smoke.mjs --dev` 验证开发模式。
 
 桌面测试使用独立的测试用户目录，不修改用户已有的简历、知识库和个人信息。可运行 `node scripts/electron-smoke.mjs --dev` 检查 Vite 与 Electron 开发模式。
 

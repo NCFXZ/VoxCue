@@ -1,7 +1,3 @@
-export interface AuthService {
-  signIn(): Promise<{ id: string; name: string }>;
-  signOut(): Promise<void>;
-}
 export interface SpeechRecognitionService {
   start(onTranscript: (text: string, final: boolean) => void, signal: AbortSignal): Promise<void>;
 }

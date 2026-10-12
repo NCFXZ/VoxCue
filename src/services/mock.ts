@@ -1,4 +1,4 @@
-import type { AIModelService, AuthService, SpeechRecognitionService } from './contracts';
+import type { AIModelService, SpeechRecognitionService } from './contracts';
 export function wait(ms: number, signal: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) return reject(new DOMException('Aborted', 'AbortError'));
@@ -41,10 +41,4 @@ export const mockAI: AIModelService = {
       onChunk(answer.slice(i, i + 3));
     }
   },
-};
-export const mockAuth: AuthService = {
-  async signIn() {
-    return { id: 'local', name: '本地用户' };
-  },
-  async signOut() {},
 };

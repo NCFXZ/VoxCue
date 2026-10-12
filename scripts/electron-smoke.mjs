@@ -20,7 +20,11 @@ const app = await electron.launch({
   },
 });
 try {
-  const page = await app.firstWindow();
+  const login = await app.firstWindow();
+  const [page] = await Promise.all([
+    app.waitForEvent('window'),
+    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+  ]);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => {
@@ -172,9 +176,11 @@ try {
   await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByRole('button', { name: '用户菜单' }).click();
-  await page.getByRole('menuitem', { name: '退出登录' }).click();
-  await page.getByRole('heading', { name: '已退出模拟会话' }).waitFor();
-  await page.getByRole('button', { name: '返回本地演示' }).click();
+  const [returnedLogin] = await Promise.all([
+    app.waitForEvent('window'),
+    page.getByRole('menuitem', { name: '退出登录' }).click(),
+  ]);
+  await returnedLogin.getByRole('heading', { name: '欢迎回来' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
     'PASS: Electron startup, unified shell, mock preparation chat, profile/resume persistence, independent history, knowledge CRUD/import/preview/persistence and user menu.',

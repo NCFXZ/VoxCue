@@ -13,6 +13,8 @@ import {
 } from './icons';
 import { Button } from './ui/button';
 interface Props {
+  userName: string;
+  accountLabel: string;
   page: 'preparation' | 'history' | 'knowledge';
   onNavigate(page: 'preparation' | 'history' | 'knowledge'): void;
   collapsed: boolean;
@@ -22,6 +24,8 @@ interface Props {
   onLogout(): void;
 }
 export function Sidebar({
+  userName,
+  accountLabel,
   page,
   onNavigate,
   collapsed,
@@ -99,10 +103,10 @@ export function Sidebar({
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button className="user-button" aria-label="用户菜单">
-              <span className="avatar">C</span>
+              <span className="avatar">{userName.slice(0, 1).toUpperCase()}</span>
               <span className="user-info">
-                <strong>本地用户</strong>
-                <small>单用户 · Mock 演示</small>
+                <strong title={userName}>{userName}</strong>
+                <small title={accountLabel}>{accountLabel}</small>
               </span>
               <ChevronsUpDown size={15} />
             </button>

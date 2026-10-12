@@ -9,7 +9,11 @@ const app = await electron.launch({
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 try {
-  const page = await app.firstWindow();
+  const login = await app.firstWindow();
+  const [page] = await Promise.all([
+    app.waitForEvent('window'),
+    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+  ]);
   page.setDefaultTimeout(15000);
   const errors = [];
   const send = page.getByRole('button', { name: '发送消息', exact: true });
@@ -27,7 +31,8 @@ try {
     await page.getByRole('button', { name: /网络搜索/ }).getAttribute('aria-pressed'),
     'true',
   );
-  await page.getByLabel('聊天模型', { exact: true }).selectOption('mock-reasoning');
+  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).click();
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'resume-draft.txt',
     mimeType: 'text/plain',
