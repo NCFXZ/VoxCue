@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, Copy, MessageSquare, Sparkles, Square, X, Settings } from './icons';
+import { ArrowUp, Check, Copy, MessageSquare, Sparkles, Square, X, Settings, Play } from './icons';
 import { Button } from './ui/button';
 import { usePreparation } from '../stores/preparation';
 import type { PersonalInfo } from '../services/preparation';
@@ -67,6 +67,7 @@ export function PreparationPage() {
                 .catch(() => usePreparation.setState({ error: '面试窗口打开失败，请重试。' }));
             }}
           >
+            <Play size={15} />
             开始面试
           </Button>
         </div>
