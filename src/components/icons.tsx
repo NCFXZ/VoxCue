@@ -1,6 +1,7 @@
 import type { ComponentType, CSSProperties } from 'react';
 import {
   Mic24Regular,
+  PaintBrush24Regular,
   Subtract24Regular,
   Square24Regular,
   Dismiss24Regular,
@@ -46,6 +47,7 @@ function icon(Component: ComponentType<{ style?: CSSProperties; 'aria-hidden'?: 
   );
 }
 export const AudioLines = icon(Mic24Regular);
+export const Appearance = icon(PaintBrush24Regular);
 export const Minus = icon(Subtract24Regular);
 export const Square = icon(Square24Regular);
 export const X = icon(Dismiss24Regular);

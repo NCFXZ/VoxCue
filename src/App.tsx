@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Moon, Sun, Settings } from './components/icons';
+import { Monitor, Moon, Sun, Settings, Appearance } from './components/icons';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { PreparationPage } from './components/PreparationPage';
@@ -109,7 +109,9 @@ export function App() {
         >
           <div className="setting-row">
             <div>
-              <strong>外观主题</strong>
+              <strong className="setting-label">
+                <Appearance size={17} />外观主题
+              </strong>
               <p>浅色、深色或跟随系统。</p>
             </div>
             <div className="theme-options">

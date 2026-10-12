@@ -4,9 +4,7 @@ Windows 桌面应用前端：准备聊天、个人信息与简历、面试记录
 
 ## 启动
 
-当前电脑已安装项目依赖并完成构建，可直接双击 `VoxCue` 项目根目录的 `Start-VoxCue.cmd` 打开软件，无需在终端中配置 pnpm。此入口使用现有构建，源代码修改后需要重新构建。旧的 `Start-Copilot.cmd` 仍可使用。
-
-若目录仍名为 `AI_Interview_Copilot`，关闭占用该目录的 Codex/VS Code/终端及运行中的应用，再双击 `Rename-to-VoxCue.cmd` 改名。脚本只将此根目录改为同级 `VoxCue`，目标已存在时停止；改名后在编辑器中重新打开新目录。
+当前电脑已安装项目依赖并完成构建，可直接双击 `VoxCue` 项目根目录的 `Start-VoxCue.cmd` 打开软件，无需在终端中配置 pnpm。此入口使用现有构建，源代码修改后需要重新构建。
 
 需要 Windows 10/11、Node.js 22 或更新版本，以及 pnpm（可通过 `corepack enable` 启用）。
 

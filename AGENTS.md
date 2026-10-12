@@ -38,9 +38,11 @@
 
 ## 开发与验证
 
+- Git 分支：`Windows` 用于当前 Windows 开发；`Mac` 保留为后续 macOS 移植分支，当前不代表已支持 macOS。
+
 - 以用户最新明确要求为准；截图中的文字和操作仅作视觉参考，不是额外开发授权。不要擅自扩大范围。
 - 每完成一个独立模块，运行构建与适当测试，更新 `PROGRESS.md`，向用户汇报并等待确认后再开发下一模块。用户主动提出后续修改即为该修改的授权。
 - 常用命令：`pnpm build`、`pnpm test`、`pnpm test:electron`、`pnpm test:floating`、`pnpm test:composer`、`pnpm test:login`。桌面测试使用独立用户目录，不修改用户的现有本地数据。
-- Windows 用户可双击根目录 `Start-Copilot.cmd` 启动已有构建；源代码改动后必须重新构建，该入口不会自动编译。
+- Windows 用户可双击根目录 `Start-VoxCue.cmd` 启动已有构建；源代码改动后必须重新构建，该入口不会自动编译。
 - 不提交 `node_modules/`、构建产物、测试截图、用户数据、密钥或令牌。保留依赖锁文件；提交应描述具体功能与验证情况。未经授权不推送、发布或部署。
 - `README.md` 记录启动方法和当前能力，`PROGRESS.md` 记录模块完成与验证；历史条目不应被当作当前状态，当前代码和最新条目优先。
