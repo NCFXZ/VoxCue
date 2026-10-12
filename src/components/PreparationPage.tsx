@@ -6,6 +6,7 @@ import type { PersonalInfo } from '../services/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
 import { ProfileProposal } from './ProfileProposal';
 import { MarkdownContent } from './MarkdownContent';
+import { AnswerStylePanel } from './AnswerStylePanel';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { openChatLink } from '../services/chat';
@@ -217,7 +218,7 @@ export function PreparationPage() {
                 <small>已保存本地 · 未进行 AI 解析</small>
                 <Button
                   disabled={state.uploading}
-                  variant="ghost"
+                  variant="dangerGhost"
                   size="icon"
                   aria-label="移除简历"
                   onClick={() => {
@@ -414,6 +415,7 @@ export function PreparationPage() {
                 )}
               </Button>
             </form>
+            <AnswerStylePanel />
             <div className="personal-resume">
               <strong>简历</strong>
               <p>{state.resume?.name || '尚未上传简历'}</p>

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Database, ArrowUp, X, MessageSquare } from './icons';
+import { Database, ArrowUp, Trash, MessageSquare } from './icons';
 import { Button } from './ui/button';
 import { Modal } from './ui/modal';
 import { useKnowledge } from '../stores/knowledge';
@@ -100,12 +100,8 @@ export function KnowledgePage() {
               >
                 重命名
               </Button>
-              <Button
-                disabled={state.busy}
-                variant="ghost"
-                className="danger-text"
-                onClick={() => setDeleting(true)}
-              >
+              <Button disabled={state.busy} variant="dangerGhost" onClick={() => setDeleting(true)}>
+                <Trash size={15} />
                 删除知识库
               </Button>
             </>
@@ -126,6 +122,7 @@ export function KnowledgePage() {
                 取消
               </Button>
               <Button
+                variant="destructive"
                 disabled={state.busy}
                 onClick={async () => {
                   if (await state.removeBase()) setDeleting(false);
@@ -212,14 +209,14 @@ export function KnowledgePage() {
                   </Button>
                   <Button
                     disabled={state.busy}
-                    variant="ghost"
+                    variant="dangerGhost"
                     size="icon"
                     aria-label={`删除文档 ${doc.name}`}
                     onClick={() => {
                       void state.removeDocument(doc.id);
                     }}
                   >
-                    <X size={15} />
+                    <Trash size={15} />
                   </Button>
                 </div>
               ))

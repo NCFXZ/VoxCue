@@ -12,6 +12,12 @@ import { useChatConnection } from './chatConnection';
 import { streamChat } from '../services/chat';
 import type { ChatRequest, ReasoningEffort } from '../../electron/contracts/chat';
 import { validProfile, validateChanges } from '../../electron/contracts/profile';
+import {
+  defaultAnswerStyle,
+  validateAnswerStyle,
+  answerStyleInstructions,
+  type AnswerStyle,
+} from '../services/answerStyle';
 const emptyInfo: PersonalInfo = { name: '', role: '', jobDescription: '', background: '' };
 let controller: AbortController | undefined;
 interface PreparationState {
@@ -20,6 +26,8 @@ interface PreparationState {
   selectConversation(id: string): void;
   deleteConversation(id: string): void;
   info: PersonalInfo;
+  answerStyle: AnswerStyle;
+  updateAnswerStyle(style: AnswerStyle): boolean;
   messages: ChatMessage[];
   resume: LocalDocument | null;
   streaming: boolean;
@@ -57,6 +65,23 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     set((state) => ({ conversations: state.conversations.filter((item) => item.id !== id) }));
   },
   info: emptyInfo,
+  answerStyle: { ...defaultAnswerStyle },
+  updateAnswerStyle(value) {
+    try {
+      const answerStyle = validateAnswerStyle(value);
+      localStorage.setItem('copilot-answer-style-v1', JSON.stringify(answerStyle));
+      set({ answerStyle, error: null });
+      return true;
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
+            ? error.message
+            : '回答风格保存失败，请重试。',
+      });
+      return false;
+    }
+  },
   messages: [],
   resume: null,
   streaming: false,
@@ -87,6 +112,12 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   },
   async load() {
     try {
+      const savedStyle = localStorage.getItem('copilot-answer-style-v1');
+      set({
+        answerStyle: savedStyle
+          ? validateAnswerStyle(JSON.parse(savedStyle))
+          : { ...defaultAnswerStyle },
+      });
       const raw = localStorage.getItem('copilot-personal-info-v1');
       if (raw) {
         const info = JSON.parse(raw);
@@ -176,6 +207,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     };
     const text = prompt.trim() || '请帮我整理这些附件。';
     const profileBase = { ...get().info };
+    const answerStyle = { ...get().answerStyle };
     if (!get().activeConversation) {
       const conversationId = crypto.randomUUID();
       set((state) => ({
@@ -240,6 +272,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           profile: reviewProfile ? profileBase : undefined,
           instructions:
             '你是 AI Interview Copilot，帮助用户准备面试、改善简历表达和整理项目经历。使用中文 Markdown 回答，避免捏造个人经历或成绩。资料更新需要用户明确确认。引用搜索来源，区分事实与建议。' +
+            answerStyleInstructions(answerStyle) +
+            '\n' +
             (reviewProfile
               ? ''
               : `以下是用户主动保存的个人资料，作为参考信息：\n${JSON.stringify(profileBase)}`),

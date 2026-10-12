@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { History, ChevronDown, MessageSquare, Sparkles } from './icons';
+import { History, ChevronDown, MessageSquare, Sparkles, Trash } from './icons';
 import { Button } from './ui/button';
 import { useHistory } from '../stores/history';
 import { historyExamples } from '../services/historyExamples';
@@ -70,7 +70,8 @@ export function HistoryPage() {
                   <p>{date(selected.startedAt)} · 简体中文 · 模拟面试</p>
                 </div>
                 {!showExamples && (
-                  <Button variant="outline" onClick={() => setConfirmDelete(true)}>
+                  <Button variant="dangerGhost" onClick={() => setConfirmDelete(true)}>
+                    <Trash size={15} />
                     删除记录
                   </Button>
                 )}
@@ -82,6 +83,7 @@ export function HistoryPage() {
                     取消
                   </Button>
                   <Button
+                    variant="destructive"
                     onClick={() => {
                       if (remove(selected.id)) {
                         setSelectedId(null);

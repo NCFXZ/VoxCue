@@ -115,7 +115,7 @@ export function Sidebar({
                   <span>{conversation.title}</span>
                 </button>
                 <Button
-                  variant="ghost"
+                  variant="dangerGhost"
                   size="icon"
                   className="conversation-delete"
                   aria-label={`删除对话：${conversation.title}`}
@@ -169,15 +169,19 @@ export function Sidebar({
         </DropdownMenu.Root>
       </div>
       {selected && (
-        <Modal title="删除对话" onClose={() => setDeleting(null)}>
+        <Modal title="删除对话" destructive onClose={() => setDeleting(null)}>
           <p className="delete-conversation-description">
-            确定删除“{selected.title}”吗？删除后无法恢复。
+            确定删除这条对话吗？<span>删除后无法恢复。</span>
+          </p>
+          <p className="delete-conversation-name" title={selected.title}>
+            {selected.title}
           </p>
           <div className="delete-conversation-actions">
-            <Button variant="outline" onClick={() => setDeleting(null)}>
+            <Button variant="outline" data-autofocus onClick={() => setDeleting(null)}>
               取消
             </Button>
             <Button
+              variant="destructive"
               onClick={() => {
                 const active = preparation.activeConversation === selected.id;
                 preparation.deleteConversation(selected.id);

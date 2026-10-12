@@ -16,6 +16,11 @@
   --selected: rgba(58, 78, 83, 0.12);
   --border-hover: #b5c3c0;
   --focus: #669b97;
+  --danger: #c52b32;
+  --danger-fill: #c52b32;
+  --danger-fill-hover: #a91f27;
+  --danger-soft: rgba(197, 43, 50, 0.08);
+  --danger-border: rgba(197, 43, 50, 0.22);
   --page-gutter: 32px;
   --radius-control: 8px;
   --radius-card: 12px;
@@ -37,6 +42,11 @@
   --selected: rgba(200, 220, 225, 0.13);
   --border-hover: #526360;
   --focus: #8cbcb3;
+  --danger: #ff858b;
+  --danger-fill: #cc3640;
+  --danger-fill-hover: #e0434e;
+  --danger-soft: rgba(255, 133, 139, 0.1);
+  --danger-border: rgba(255, 133, 139, 0.24);
   --shadow-raised: 0 2px 8px rgba(0, 0, 0, 0.18);
   --shadow-popup: 0 8px 24px rgba(0, 0, 0, 0.32);
   --shadow-dialog: 0 20px 64px rgba(0, 0, 0, 0.4);
@@ -205,6 +215,20 @@ p {
   background: transparent;
   color: var(--muted);
 }
+.button-destructive {
+  background: var(--danger-fill);
+  color: #fff;
+}
+.button-destructive:hover:not(:disabled) {
+  background: var(--danger-fill-hover);
+}
+.button-danger-ghost {
+  background: transparent;
+  color: var(--danger);
+}
+.button-danger-ghost:hover:not(:disabled) {
+  background: var(--danger-soft);
+}
 .button-icon {
   height: 32px;
   width: 32px;
@@ -303,14 +327,30 @@ p {
   opacity: 1;
 }
 .delete-conversation-description {
-  padding: 8px 24px 20px;
+  font-size: 12px;
+  line-height: 1.8;
+  color: var(--muted);
   overflow-wrap: anywhere;
+}
+.delete-conversation-description > span {
+  color: var(--danger);
+}
+.delete-conversation-name {
+  margin-top: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--soft);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .delete-conversation-actions {
   display: flex;
   justify-content: flex-end;
   gap: 8px;
-  padding: 0 24px 24px;
+  margin-top: 24px;
 }
 .sidebar-bottom {
   margin-top: auto;
@@ -890,8 +930,8 @@ p {
   display: grid;
   place-items: center;
 }
-.settings-dialog {
-  width: 550px;
+.app-dialog.settings-dialog {
+  width: 480px;
   max-width: 90vw;
   background: var(--surface);
   border: 1px solid var(--border);
@@ -899,22 +939,24 @@ p {
   box-shadow: var(--shadow-dialog);
   padding: 24px;
 }
-.settings-dialog header {
+.settings-dialog .dialog-heading {
   display: flex;
   align-items: center;
   justify-content: space-between;
   border-bottom: 1px solid var(--border);
-  padding-bottom: 20px;
+  padding-bottom: 16px;
+  margin-bottom: 0;
 }
 .settings-dialog h2 {
-  font-size: 20px;
+  font-size: 16px;
   font-weight: 600;
 }
 .setting-row {
-  padding: 28px 0;
+  padding: 20px 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 16px;
 }
 .setting-row strong {
   font-size: 13px;
@@ -955,12 +997,13 @@ p {
 }
 .settings-note {
   border-top: 1px solid var(--border);
-  padding-top: 20px;
+  padding-top: 16px;
 }
 .settings-note p {
   font-size: 11px;
   color: var(--muted);
-  margin-top: 10px;
+  margin: 0;
+  line-height: 1.8;
 }
 .signed-out {
   align-items: center;
@@ -1238,8 +1281,8 @@ p {
 }
 .delete-confirm {
   padding: 12px;
-  background: var(--soft);
-  border: 1px solid var(--border);
+  background: var(--danger-soft);
+  border: 1px solid var(--danger-border);
   border-radius: var(--radius-control);
   display: flex;
   align-items: center;
@@ -1249,6 +1292,7 @@ p {
 }
 .delete-confirm > span {
   flex: 1;
+  color: var(--danger);
 }
 .inline-error {
   padding: 12px 15px;
@@ -1353,6 +1397,47 @@ p {
   gap: 4px;
   align-items: center;
   flex-shrink: 0;
+}
+.dialog-heading .dialog-title {
+  min-width: 0;
+  flex-shrink: 1;
+  gap: 12px;
+}
+.dialog-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--soft);
+  color: var(--muted);
+  flex-shrink: 0;
+}
+.dialog-subtitle {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.destructive-dialog {
+  width: 400px;
+}
+.destructive-dialog .dialog-heading {
+  margin-bottom: 16px;
+}
+.danger-icon {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  border-radius: 12px;
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+.destructive-dialog::backdrop {
+  background: rgba(12, 18, 22, 0.4);
+  backdrop-filter: blur(4px);
 }
 .dialog-heading .ui-button {
   font-size: 11px;
@@ -1480,7 +1565,7 @@ p {
   margin-top: 25px;
 }
 .danger-text {
-  color: #b76860;
+  color: var(--danger);
 }
 .preparation-layout {
   display: flex;
@@ -1612,6 +1697,55 @@ p {
   border-top: 1px solid var(--border);
   padding-top: 22px;
   margin-top: 25px;
+}
+.answer-style-section {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+  padding-top: 24px;
+}
+.answer-style-section h3 {
+  font-size: 13px;
+  font-weight: 600;
+  margin: 0;
+}
+.answer-style-section > p {
+  margin: 8px 0 12px;
+  font-size: 10px;
+  line-height: 1.7;
+  color: var(--muted);
+}
+.answer-style-options {
+  display: grid;
+  gap: 8px;
+}
+.answer-style-options button {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: transparent;
+  text-align: left;
+}
+.answer-style-options button:hover {
+  background: var(--hover);
+}
+.answer-style-options button[aria-pressed='true'] {
+  background: var(--selected);
+  border-color: var(--focus);
+}
+.answer-style-options button > span {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.answer-style-options strong {
+  font-size: 11px;
+  font-weight: 500;
+}
+.answer-style-options small {
+  display: block;
+  color: var(--muted);
+  font-size: 10px;
+  margin-top: 4px;
 }
 .personal-resume strong {
   font-size: 12px;

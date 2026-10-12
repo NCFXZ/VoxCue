@@ -1,5 +1,5 @@
 import { useEffect, useRef, type ReactNode } from 'react';
-import { X } from '../icons';
+import { X, Trash } from '../icons';
 import { Button } from './button';
 export function Modal({
   title,
@@ -7,23 +7,34 @@ export function Modal({
   children,
   action,
   wide = false,
+  destructive = false,
+  icon,
+  subtitle,
+  className = '',
+  closeLabel = '关闭对话框',
 }: {
   title: string;
   onClose(): void;
   children: ReactNode;
   action?: ReactNode;
   wide?: boolean;
+  destructive?: boolean;
+  icon?: ReactNode;
+  subtitle?: string;
+  className?: string;
+  closeLabel?: string;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const dialog = ref.current!;
     dialog.showModal();
+    dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => dialog.close();
   }, []);
   return (
     <dialog
       ref={ref}
-      className={`app-dialog ${wide ? 'wide' : ''}`}
+      className={`app-dialog ${wide ? 'wide' : ''} ${destructive ? 'destructive-dialog' : ''} ${className}`}
       aria-label={title}
       onCancel={(event) => {
         event.preventDefault();
@@ -43,10 +54,21 @@ export function Modal({
       }}
     >
       <header className="dialog-heading">
-        <h2>{title}</h2>
+        <div className="dialog-title">
+          {destructive && (
+            <span className="danger-icon">
+              <Trash size={20} />
+            </span>
+          )}
+          {icon && !destructive && <span className="dialog-icon">{icon}</span>}
+          <div>
+            <h2>{title}</h2>
+            {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
+          </div>
+        </div>
         <div>
           {action}
-          <Button variant="ghost" size="icon" aria-label="关闭对话框" onClick={onClose}>
+          <Button variant="ghost" size="icon" aria-label={closeLabel} onClick={onClose}>
             <X size={17} />
           </Button>
         </div>

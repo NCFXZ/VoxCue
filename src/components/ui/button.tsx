@@ -4,7 +4,13 @@ import { cva, type VariantProps } from 'class-variance-authority';
 import { cn } from '../../lib/utils';
 const buttonVariants = cva('ui-button', {
   variants: {
-    variant: { default: 'button-primary', outline: 'button-outline', ghost: 'button-ghost' },
+    variant: {
+      default: 'button-primary',
+      outline: 'button-outline',
+      ghost: 'button-ghost',
+      destructive: 'button-destructive',
+      dangerGhost: 'button-danger-ghost',
+    },
     size: { default: '', icon: 'button-icon' },
   },
   defaultVariants: { variant: 'default', size: 'default' },

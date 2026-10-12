@@ -2,6 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { usePreparation } from '../src/stores/preparation';
 import { useChatConnection } from '../src/stores/chatConnection';
 import { streamChat } from '../src/services/chat';
+import { defaultAnswerStyle, validateAnswerStyle } from '../src/services/answerStyle';
 vi.mock('../src/services/chat', () => ({ streamChat: vi.fn(), failureText: vi.fn() }));
 const base = { name: '旧姓名', role: '旧岗位', jobDescription: '旧 JD', background: '已有背景' };
 beforeEach(() => {
@@ -12,7 +13,12 @@ beforeEach(() => {
     setItem: (key: string, value: string) => values.set(key, value),
   });
   usePreparation.getState().reset();
-  usePreparation.setState({ conversations: [], info: { ...base }, resume: null });
+  usePreparation.setState({
+    conversations: [],
+    info: { ...base },
+    resume: null,
+    answerStyle: { ...defaultAnswerStyle },
+  });
   useChatConnection.setState({
     live: true,
     models: [{ id: 'test', label: 'Test', description: '' }],
@@ -33,6 +39,25 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe('聊天附件更新需要同意', () => {
+  it('保存风格并发送实际指令，不改变个人资料；超长要求或存储失败不更新设置', async () => {
+    const style = { preset: 'concise' as const, custom: '使用自然口语，第一人称' };
+    expect(usePreparation.getState().updateAnswerStyle(style)).toBe(true);
+    expect(JSON.parse(localStorage.getItem('copilot-answer-style-v1')!)).toEqual(style);
+    await usePreparation.getState().send('你好');
+    const request = vi.mocked(streamChat).mock.calls[0][0];
+    expect(request.instructions).toContain('回答风格：简洁直接');
+    expect(request.instructions).toContain(style.custom);
+    expect(usePreparation.getState().info).toEqual(base);
+    expect(() => validateAnswerStyle({ ...style, custom: 'a'.repeat(1201) })).toThrow();
+    expect(() => validateAnswerStyle({ preset: 'unknown', custom: '' })).toThrow();
+    vi.spyOn(localStorage, 'setItem').mockImplementation(() => {
+      throw new Error('full');
+    });
+    expect(usePreparation.getState().updateAnswerStyle({ preset: 'detailed', custom: '' })).toBe(
+      false,
+    );
+    expect(usePreparation.getState().answerStyle).toEqual(style);
+  });
   it('仅上传聊天附件即可请求资料整理，确认之前不写入个人信息或简历', async () => {
     usePreparation.getState().addAttachments([new File(['简历内容'], 'resume.md')]);
     await usePreparation.getState().send('');

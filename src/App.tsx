@@ -1,15 +1,15 @@
 import { useEffect, useState } from 'react';
-import { Monitor, Moon, Sun, X } from './components/icons';
+import { Monitor, Moon, Sun, Settings } from './components/icons';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
 import { PreparationPage } from './components/PreparationPage';
 import { HistoryPage } from './components/HistoryPage';
 import { KnowledgePage } from './components/KnowledgePage';
-import { Button } from './components/ui/button';
 import { usePreparation } from './stores/preparation';
 import { useAuth } from './stores/auth';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
+import { Modal } from './components/ui/modal';
 type Theme = 'light' | 'dark' | 'system';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
@@ -99,62 +99,38 @@ export function App() {
         </div>
       )}
       {settings && (
-        <div className="modal-backdrop" onClick={() => setSettings(false)}>
-          <section
-            className="settings-dialog"
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="settings-title"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <header>
-              <div>
-                <p className="eyebrow">PREFERENCES</p>
-                <h2 id="settings-title">设置</h2>
-              </div>
-              <Button
-                autoFocus
-                variant="ghost"
-                size="icon"
-                aria-label="关闭设置"
-                onClick={() => setSettings(false)}
-              >
-                <X size={18} />
-              </Button>
-            </header>
-            <div className="setting-row">
-              <div>
-                <strong>外观主题</strong>
-                <p>选择适合你的工作空间</p>
-              </div>
-              <div className="theme-options">
-                {(
-                  [
-                    { value: 'light', Icon: Sun, label: '浅色' },
-                    { value: 'dark', Icon: Moon, label: '深色' },
-                    { value: 'system', Icon: Monitor, label: '系统' },
-                  ] as const
-                ).map(({ value, Icon, label }) => (
-                  <button
-                    key={value}
-                    aria-pressed={theme === value}
-                    onClick={() => setTheme(value)}
-                  >
-                    <Icon size={17} />
-                    {label}
-                  </button>
-                ))}
-              </div>
+        <Modal
+          title="设置"
+          subtitle="调整应用的外观与显示。"
+          icon={<Settings size={20} />}
+          className="settings-dialog"
+          closeLabel="关闭设置"
+          onClose={() => setSettings(false)}
+        >
+          <div className="setting-row">
+            <div>
+              <strong>外观主题</strong>
+              <p>浅色、深色或跟随系统。</p>
             </div>
-            <div className="settings-note">
-              <span className="mock-badge">
-                <span />
-                前端演示
-              </span>
-              <p>模型与音频设置将在后续模块开发。</p>
+            <div className="theme-options">
+              {(
+                [
+                  { value: 'light', Icon: Sun, label: '浅色' },
+                  { value: 'dark', Icon: Moon, label: '深色' },
+                  { value: 'system', Icon: Monitor, label: '系统' },
+                ] as const
+              ).map(({ value, Icon, label }) => (
+                <button key={value} aria-pressed={theme === value} onClick={() => setTheme(value)}>
+                  <Icon size={17} />
+                  {label}
+                </button>
+              ))}
             </div>
-          </section>
-        </div>
+          </div>
+          <div className="settings-note">
+            <p>模型与思考强度在聊天输入框中调整；回答风格在个人信息中设置。</p>
+          </div>
+        </Modal>
       )}
     </div>
   );
