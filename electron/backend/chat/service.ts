@@ -7,6 +7,7 @@ import type {
   TokenUsage,
 } from '../../contracts/chat';
 import { responseEvents } from './responses';
+import { responseActivity } from './activity';
 import { modelEfforts } from './models';
 import { reasoningEfforts } from '../../contracts/chat';
 import { validProfile } from '../../contracts/profile';
@@ -281,16 +282,26 @@ export class ChatGPTService {
       if (source && sources.size < 50) sources.set(source.url, source);
     };
     let outputLength = 0;
+    let answerText = '';
     const profileStream = request.profile ? new ProfileAnswerStream() : undefined;
     let refused = false;
+    let lastActivity = '';
     const receiveText = (text: string, refusal = false) => {
       if (refusal) refused = true;
       outputLength += text.length;
       if (outputLength > 1000000) throw new Error('回答过长，已停止接收。');
       const delta = profileStream && !refused ? profileStream.append(text) : text;
-      if (delta) emit({ id: request.id, type: 'delta', text: delta });
+      if (delta) {
+        answerText += delta;
+        emit({ id: request.id, type: 'delta', text: delta });
+      }
     };
     for await (const event of responseEvents(response, signal)) {
+      const activity = responseActivity(event);
+      if (activity && JSON.stringify(activity) !== lastActivity) {
+        lastActivity = JSON.stringify(activity);
+        emit({ id: request.id, type: 'activity', activity });
+      }
       if (
         ['response.output_text.delta', 'response.refusal.delta'].includes(event.type) &&
         typeof event.delta === 'string'
@@ -346,7 +357,16 @@ export class ChatGPTService {
       profileStream && request.profile && !refused
         ? profileStream.finish(request.profile)
         : undefined;
-    if (proposal?.delta) emit({ id: request.id, type: 'delta', text: proposal.delta });
-    return { usage, sources: [...sources.values()], warning, profileChanges: proposal?.changes };
+    if (proposal?.delta) {
+      answerText += proposal.delta;
+      emit({ id: request.id, type: 'delta', text: proposal.delta });
+    }
+    return {
+      usage,
+      sources: [...sources.values()],
+      warning,
+      profileChanges: proposal?.changes,
+      answerText,
+    };
   }
 }

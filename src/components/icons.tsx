@@ -32,6 +32,11 @@ import {
   Attach24Regular,
   Add24Regular,
   Delete24Regular,
+  ChevronUp24Regular,
+  ShieldCheckmark24Regular,
+  ShieldDismiss24Regular,
+  ArrowMaximize24Regular,
+  ArrowMinimize24Regular,
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
@@ -72,3 +77,8 @@ export const Folder = icon(Folder24Regular);
 export const Paperclip = icon(Attach24Regular);
 export const Plus = icon(Add24Regular);
 export const Trash = icon(Delete24Regular);
+export const ChevronUp = icon(ChevronUp24Regular);
+export const ShieldCheck = icon(ShieldCheckmark24Regular);
+export const ShieldOff = icon(ShieldDismiss24Regular);
+export const Expand = icon(ArrowMaximize24Regular);
+export const Shrink = icon(ArrowMinimize24Regular);

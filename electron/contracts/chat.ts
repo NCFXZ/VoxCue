@@ -54,9 +54,14 @@ export interface ChatRequest {
   turns: ChatTurn[];
   profile?: PersonalInfo;
 }
+export interface ChatActivity {
+  phase: 'waiting' | 'thinking' | 'searching' | 'reading' | 'writing' | 'processing';
+  detail?: string;
+}
 export type ChatEvent =
   | { id: string; type: 'delta'; text: string }
   | { id: string; type: 'search' }
+  | { id: string; type: 'activity'; activity: ChatActivity }
   | { id: string; type: 'sources'; sources: ChatSource[] };
 export type ChatResult =
   | {
@@ -65,6 +70,7 @@ export type ChatResult =
       sources: ChatSource[];
       warning?: string;
       profileChanges?: ProfileChanges;
+      answerText?: string;
     }
   | { ok: false; error: ChatFailure };
 export const emptyUsage = (): AppUsage => ({

@@ -881,6 +881,54 @@ p {
   background: #2b4035;
   color: #a4c1b0;
 }
+.provider-avatar {
+  background: var(--selected);
+  color: var(--foreground);
+}
+.app-logo {
+  background: #fff;
+  border-radius: 50%;
+}
+.chat-activity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.activity-dot {
+  width: 6px;
+  height: 6px;
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: currentColor;
+  animation: activity-pulse 1.4s ease-in-out infinite;
+}
+.activity-detail {
+  font-size: 11px;
+}
+@keyframes activity-pulse {
+  50% {
+    opacity: 0.25;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .activity-dot {
+    animation: none;
+  }
+}
+.provider-avatar img {
+  width: 18px;
+  height: 18px;
+}
+.dark .provider-avatar {
+  background: var(--selected);
+}
+.dark .provider-avatar img[src*='chatgpt'] {
+  filter: invert(1);
+}
 .answer-text {
   font-size: 12px;
   line-height: 2;
@@ -1719,11 +1767,18 @@ p {
   gap: 8px;
 }
 .answer-style-options button {
-  padding: 10px 12px;
+  position: relative;
+  padding: 10px 36px 10px 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-control);
   background: transparent;
   text-align: left;
+}
+.answer-style-options button > svg {
+  position: absolute;
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
 }
 .answer-style-options button:hover {
   background: var(--hover);
@@ -1817,6 +1872,7 @@ p {
   color: var(--foreground);
 }
 .floating-toolbar {
+  flex-shrink: 0;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -1841,6 +1897,26 @@ p {
   font-size: 13px;
   white-space: nowrap;
 }
+.floating-collapse {
+  -webkit-app-region: no-drag;
+}
+.floating-shell [hidden] {
+  display: none;
+}
+.floating-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.floating-bottom > .ui-button {
+  flex-shrink: 0;
+  border-radius: 50%;
+  background: var(--surface);
+}
+.floating-shell.is-collapsed {
+  justify-content: center;
+}
 .floating-mock {
   font-size: 9px;
   color: var(--muted);
@@ -1856,7 +1932,8 @@ p {
   border-radius: 18px;
 }
 .floating-controls button[aria-pressed='true'] {
-  color: #578375;
+  color: var(--foreground);
+  background: var(--selected);
 }
 .floating-panels {
   flex: 1;

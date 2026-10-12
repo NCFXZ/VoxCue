@@ -25,8 +25,17 @@ interface Window {
     ): () => void;
     windowAction(action: 'minimize' | 'maximize' | 'close'): void;
     openInterview(): Promise<void>;
-    interviewState(): Promise<{ protected: boolean; pinned: boolean; supported: boolean }>;
+    interviewState(): Promise<{
+      protected: boolean;
+      pinned: boolean;
+      supported: boolean;
+      collapsed: boolean;
+    }>;
     allowCapture(allowed: boolean): Promise<boolean>;
     togglePin(): Promise<boolean>;
+    toggleInterviewCollapse(): Promise<boolean>;
+    resizeInterview(direction: -1 | 1): Promise<void>;
+    confirmInterviewEnd(): void;
+    onInterviewEndRequested(callback: () => void): () => void;
   };
 }

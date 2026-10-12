@@ -30,9 +30,9 @@ export function AnswerStylePanel() {
             >
               <span>
                 <strong>{style.label}</strong>
-                {draft.preset === style.id && <Check size={14} />}
               </span>
               <small>{style.description}</small>
+              {draft.preset === style.id && <Check size={14} />}
             </button>
           ))}
         </div>

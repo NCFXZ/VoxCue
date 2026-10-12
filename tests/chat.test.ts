@@ -101,7 +101,13 @@ describe('原生 ChatGPT 请求与用量', () => {
       new AbortController().signal,
     );
     expect(result.sources).toEqual([{ url: 'https://example.org/source', title: '来源' }]);
-    expect(events[0]).toEqual({ id: request.id, type: 'delta', text: '你好' });
+    expect(events).toContainEqual({ id: request.id, type: 'delta', text: '你好' });
+    expect(result.answerText).toBe('你好');
+    expect(events).toContainEqual({
+      id: request.id,
+      type: 'activity',
+      activity: { phase: 'writing' },
+    });
     expect(await service.usage()).toMatchObject({
       inputTokens: 12,
       outputTokens: 3,

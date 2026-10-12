@@ -1,7 +1,8 @@
-import { AudioLines, ArrowUp, Sparkles, Volume2, Check } from './icons';
+import { ArrowUp, Sparkles, Volume2, Check } from './icons';
 import { Button } from './ui/button';
 import { useAuth } from '../stores/auth';
 import chatGPTIcon from '../assets/chatgpt.svg';
+import { AppLogo } from './AppLogo';
 export function LoginPage() {
   const auth = useAuth();
   return (
@@ -63,8 +64,8 @@ export function LoginPage() {
           </div>
           <div className="login-preview-content" aria-hidden="true">
             <div className="preview-pill">
-              <AudioLines size={13} />
-              <strong>Copilot</strong>
+              <AppLogo size={13} />
+              <strong>VoxCue</strong>
               <span>Mock 面试</span>
               <Check size={12} />
             </div>

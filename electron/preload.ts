@@ -20,6 +20,14 @@ contextBridge.exposeInMainWorld('desktop', {
   interviewState: () => ipcRenderer.invoke('interview:state'),
   allowCapture: (allowed: boolean) => ipcRenderer.invoke('interview:capture', allowed),
   togglePin: () => ipcRenderer.invoke('interview:pin'),
+  toggleInterviewCollapse: () => ipcRenderer.invoke('interview:collapse'),
+  resizeInterview: (direction: -1 | 1) => ipcRenderer.invoke('interview:resize', direction),
+  confirmInterviewEnd: () => ipcRenderer.send('interview:confirm-end'),
+  onInterviewEndRequested: (callback: () => void) => {
+    const listener = () => callback();
+    ipcRenderer.on('interview:request-end', listener);
+    return () => ipcRenderer.removeListener('interview:request-end', listener);
+  },
   windowAction: (action: 'minimize' | 'maximize' | 'close') => {
     if (['minimize', 'maximize', 'close'].includes(action))
       ipcRenderer.send('window:action', action);

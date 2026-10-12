@@ -32,7 +32,7 @@ try {
   floating.setDefaultTimeout(15000);
   const errors = [];
   floating.on('pageerror', (error) => errors.push(error.message));
-  await floating.getByRole('button', { name: '截图保护已开启' }).waitFor();
+  await floating.getByRole('button', { name: '关闭截图保护' }).waitFor();
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
@@ -41,8 +41,8 @@ try {
     ),
     true,
   );
-  await floating.getByRole('button', { name: '截图保护已开启' }).click();
-  await floating.getByRole('button', { name: '允许截图/共享', exact: true }).waitFor();
+  await floating.getByRole('button', { name: '关闭截图保护' }).click();
+  await floating.getByRole('button', { name: '开启截图保护', exact: true }).waitFor();
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
@@ -52,6 +52,25 @@ try {
     false,
   );
   await floating.screenshot({ path: 'test-results/floating-light.png' });
+  const bounds = () =>
+    app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()
+        .find((win) => win.webContents.getURL().endsWith('#interview'))
+        .getBounds(),
+    );
+  const original = await bounds();
+  await floating.getByRole('button', { name: '缩小面试窗口', exact: true }).click();
+  const smaller = await bounds();
+  assert.ok(smaller.width < original.width && smaller.height < original.height);
+  await floating.getByRole('button', { name: '放大面试窗口', exact: true }).click();
+  assert.ok(Math.abs((await bounds()).width - original.width) <= 5);
+  await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
+  await floating.getByRole('button', { name: '展开面试窗口', exact: true }).waitFor();
+  assert.ok(Math.abs((await bounds()).height - 72) <= 5);
+  assert.equal(await floating.locator('.floating-panels').isVisible(), false);
+  await floating.screenshot({ path: 'test-results/floating-collapsed.png' });
+  await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
+  assert.ok(Math.abs((await bounds()).height - original.height) <= 5);
   await floating.getByRole('button', { name: '开始模拟转写', exact: true }).click();
   await floating.getByText('模拟面试官', { exact: true }).first().waitFor();
   await floating.locator('.answer-text').first().waitFor();
@@ -68,6 +87,19 @@ try {
   });
   await floating.screenshot({ path: 'test-results/floating-dark.png' });
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
+  await floating.getByRole('button', { name: '确认结束面试', exact: true }).waitFor();
+  assert.equal(
+    await floating
+      .getByRole('button', { name: '确认结束面试', exact: true })
+      .evaluate((element) => element.classList.contains('button-destructive')),
+    true,
+  );
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);
+  await floating.screenshot({ path: 'test-results/floating-confirm.png' });
+  await floating.getByRole('button', { name: '取消结束面试', exact: true }).click();
+  // The OS close route must also request confirmation, without losing the session.
+  await floating.evaluate(() => window.desktop.windowAction('close'));
+  await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
   await main.getByRole('button', { name: '面试记录', exact: true }).click();
   await main.locator('.history-row').first().waitFor();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
@@ -76,7 +108,7 @@ try {
     app.waitForEvent('window'),
     main.getByRole('button', { name: '开始面试', exact: true }).click(),
   ]);
-  await reopened.getByRole('button', { name: '截图保护已开启' }).waitFor();
+  await reopened.getByRole('button', { name: '关闭截图保护' }).waitFor();
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
@@ -85,10 +117,11 @@ try {
     ),
     true,
   );
-  await reopened.getByRole('button', { name: '结束面试并返回', exact: true }).click();
+  await reopened.getByRole('button', { name: '结束面试', exact: true }).click();
+  await reopened.getByRole('button', { name: '确认结束面试', exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: independent floating window, default OS protection, explicit sharing toggle, reset on reopen, mock transcript/answer, pin/panel controls and history persistence.',
+    'PASS: floating collapse/restore, native resize, icon protection toggle, two-step end including OS close, cancel, reset on reopen, Mock transcript/answer, pin/panel controls and history persistence.',
   );
 } finally {
   await app.close();

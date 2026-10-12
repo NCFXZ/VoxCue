@@ -232,6 +232,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           changes: connection.live ? undefined : extractProfileChanges(prompt),
           profileBase,
           mode: connection.live ? 'live' : 'mock',
+          provider: connection.live ? 'chatgpt' : 'mock',
+          activity: { phase: 'waiting' },
           status: 'streaming',
         },
       ],
@@ -271,7 +273,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           turns,
           profile: reviewProfile ? profileBase : undefined,
           instructions:
-            '你是 AI Interview Copilot，帮助用户准备面试、改善简历表达和整理项目经历。使用中文 Markdown 回答，避免捏造个人经历或成绩。资料更新需要用户明确确认。引用搜索来源，区分事实与建议。' +
+            '你是 VoxCue，帮助用户准备面试、改善简历表达和整理项目经历。使用中文 Markdown 回答，避免捏造个人经历或成绩。资料更新需要用户明确确认。引用搜索来源，区分事实与建议。' +
             answerStyleInstructions(answerStyle) +
             '\n' +
             (reviewProfile
@@ -286,7 +288,25 @@ export const usePreparation = create<PreparationState>((set, get) => ({
               set((state) => ({
                 messages: state.messages.map((message) =>
                   message.id === id
-                    ? { ...message, content: message.content + event.text }
+                    ? {
+                        ...message,
+                        content: message.content + event.text,
+                        activity: { phase: 'writing' as const },
+                      }
+                    : message,
+                ),
+              }));
+            if (event.type === 'activity' || event.type === 'search')
+              set((state) => ({
+                messages: state.messages.map((message) =>
+                  message.id === id
+                    ? {
+                        ...message,
+                        activity:
+                          event.type === 'activity'
+                            ? event.activity
+                            : { phase: 'searching' as const },
+                      }
                     : message,
                 ),
               }));
@@ -306,6 +326,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
               ? {
                   ...message,
                   changes: validateChanges(result.profileChanges ?? {}),
+                  // Fast JSON responses can resolve before queued IPC deltas arrive.
+                  content: result.answerText ?? message.content,
                   sources: result.sources,
                   usage: result.usage,
                   status: 'completed',

@@ -1,8 +1,9 @@
 {
-  "name": "ai-interview-copilot",
+  "name": "voxcue",
+  "productName": "VoxCue",
   "version": "0.1.0",
   "private": true,
-  "description": "AI Interview Copilot Windows desktop frontend",
+  "description": "VoxCue Windows desktop interview preparation assistant",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "node scripts/dev.mjs",

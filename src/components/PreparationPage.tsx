@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, Copy, MessageSquare, Sparkles, Square, X, Settings, Play } from './icons';
+import { ArrowUp, Check, Copy, MessageSquare, Square, X, Settings, Play } from './icons';
 import { Button } from './ui/button';
 import { usePreparation } from '../stores/preparation';
 import type { PersonalInfo } from '../services/preparation';
@@ -7,6 +7,8 @@ import { ChatTools, ChatAttachments } from './ChatTools';
 import { ProfileProposal } from './ProfileProposal';
 import { MarkdownContent } from './MarkdownContent';
 import { AnswerStylePanel } from './AnswerStylePanel';
+import { ProviderIdentity } from './ProviderIdentity';
+import { ChatActivity } from './ChatActivity';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { openChatLink } from '../services/chat';
@@ -106,19 +108,18 @@ export function PreparationPage() {
                     ) : (
                       <>
                         <div className="answer-label">
-                          <span className="ai-avatar">
-                            <Sparkles size={14} />
-                          </span>
-                          <strong>Copilot</strong>
-                          <span>
-                            {message.mode === 'live'
-                              ? message.status === 'failed'
+                          <ProviderIdentity
+                            provider={
+                              message.provider ?? (message.mode === 'live' ? 'chatgpt' : 'mock')
+                            }
+                            detail={
+                              message.status === 'failed'
                                 ? '回答未完成'
                                 : message.status === 'stopped'
                                   ? '已停止'
-                                  : 'ChatGPT'
-                              : '模拟回复'}
-                          </span>
+                                  : undefined
+                            }
+                          />
                         </div>
                         {!!message.sources?.length && (
                           <div className="chat-sources" aria-label="搜索来源">
@@ -153,13 +154,13 @@ export function PreparationPage() {
                             '已停止回复。'
                           ) : message.status === 'completed' ? (
                             '服务未返回文本内容。'
-                          ) : (
-                            '正在等待回答…'
+                          ) : null}
+                          {message.status === 'streaming' && (
+                            <ChatActivity
+                              activity={message.activity}
+                              mock={message.mode !== 'live'}
+                            />
                           )}
-                          {state.streaming &&
-                            message.id === state.messages[state.messages.length - 1]?.id && (
-                              <span className="typing-caret" />
-                            )}
                         </div>
                         <ProfileProposal message={message} />
                         {message.content && (

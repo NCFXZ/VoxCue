@@ -1,11 +1,16 @@
 import { useEffect, useRef, useState } from 'react';
 import {
-  AudioLines,
   ArrowUp,
   Pause,
   Play,
   X,
-  Minus,
+  ChevronUp,
+  ChevronDown,
+  ShieldCheck,
+  ShieldOff,
+  Square,
+  Expand,
+  Shrink,
   Sparkles,
   Volume2,
   Monitor,
@@ -14,6 +19,7 @@ import {
 import { Button } from './ui/button';
 import { useInterview } from '../stores/interview';
 import { useHistory } from '../stores/history';
+import { AppLogo } from './AppLogo';
 export function FloatingInterview() {
   const state = useInterview();
   const saveError = useHistory((s) => s.error);
@@ -24,6 +30,8 @@ export function FloatingInterview() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showTranscript, setShowTranscript] = useState(true);
+  const [collapsed, setCollapsed] = useState(false);
+  const [confirmEnd, setConfirmEnd] = useState(false);
   const transcriptEnd = useRef<HTMLDivElement>(null);
   const answerEnd = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -33,6 +41,7 @@ export function FloatingInterview() {
         setProtected(value.protected);
         setPinned(value.pinned);
         setSupported(value.supported);
+        setCollapsed(value.collapsed);
       })
       .catch(() => setError('无法读取窗口隐私状态，请返回主窗口重试。'));
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -51,10 +60,12 @@ export function FloatingInterview() {
       if (current.sessionId) current.end();
     };
     window.addEventListener('beforeunload', archive);
+    const unsubscribeEnd = window.desktop?.onInterviewEndRequested(() => setConfirmEnd(true));
     return () => {
       media.removeEventListener('change', theme);
       window.removeEventListener('storage', theme);
       window.removeEventListener('beforeunload', archive);
+      unsubscribeEnd?.();
     };
   }, []);
   useEffect(() => {
@@ -76,7 +87,14 @@ export function FloatingInterview() {
   }
   const close = () => {
     state.end();
-    if (!useHistory.getState().error) window.desktop?.windowAction('close');
+    if (!useHistory.getState().error) window.desktop?.confirmInterviewEnd();
+  };
+  const resize = async (direction: -1 | 1) => {
+    try {
+      await window.desktop?.resizeInterview(direction);
+    } catch {
+      setError('窗口尺寸调整失败，请重试。');
+    }
   };
   const submit = () => {
     const text = input.trim() || [...state.transcripts].reverse().find((t) => t.final)?.text;
@@ -85,11 +103,28 @@ export function FloatingInterview() {
     void state.ask(text);
   };
   return (
-    <div className="floating-shell">
+    <div className={`floating-shell ${collapsed ? 'is-collapsed' : ''}`}>
       <header className="floating-toolbar">
         <div className="floating-brand">
-          <AudioLines size={17} />
-          <strong>Copilot</strong>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="floating-collapse"
+            aria-label={collapsed ? '展开面试窗口' : '收起面试窗口'}
+            title={collapsed ? '展开面试窗口' : '收起面试窗口'}
+            aria-expanded={!collapsed}
+            onClick={async () => {
+              try {
+                setCollapsed(await window.desktop!.toggleInterviewCollapse());
+              } catch {
+                setError('窗口收起或展开失败，请重试。');
+              }
+            }}
+          >
+            {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+          </Button>
+          <AppLogo size={17} />
+          <strong>VoxCue</strong>
           <span className="floating-mock">Mock 面试</span>
         </div>
         <div className="floating-controls">
@@ -115,29 +150,42 @@ export function FloatingInterview() {
             {pinned ? '已置顶' : '置顶'}
           </Button>
           <Button
-            variant="outline"
+            variant="ghost"
+            size="icon"
             disabled={busy}
-            aria-pressed={!protectedWindow}
+            aria-pressed={protectedWindow}
+            aria-label={protectedWindow ? '关闭截图保护' : '开启截图保护'}
+            title={protectedWindow ? '关闭截图保护' : '开启截图保护'}
             onClick={() => {
               void toggleCapture();
             }}
           >
-            {protectedWindow ? '截图保护已开启' : '允许截图/共享'}
+            {protectedWindow ? <ShieldCheck size={18} /> : <ShieldOff size={18} />}
           </Button>
           <Button
-            variant="ghost"
-            size="icon"
-            aria-label="最小化面试窗口"
-            onClick={() => window.desktop?.windowAction('minimize')}
+            variant={confirmEnd ? 'destructive' : 'dangerGhost'}
+            size={confirmEnd ? 'default' : 'icon'}
+            aria-label={confirmEnd ? '确认结束面试' : '结束面试'}
+            title={confirmEnd ? '确认结束面试并保存记录' : '结束面试'}
+            onClick={confirmEnd ? close : () => setConfirmEnd(true)}
           >
-            <Minus size={15} />
+            <Square size={16} />
+            {confirmEnd && '确认结束'}
           </Button>
-          <Button variant="ghost" size="icon" aria-label="结束面试并返回" onClick={close}>
-            <X size={16} />
-          </Button>
+          {confirmEnd && (
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="取消结束面试"
+              title="取消结束面试"
+              onClick={() => setConfirmEnd(false)}
+            >
+              <X size={16} />
+            </Button>
+          )}
         </div>
       </header>
-      <div className={`floating-panels ${showTranscript ? '' : 'answer-only'}`}>
+      <div hidden={collapsed} className={`floating-panels ${showTranscript ? '' : 'answer-only'}`}>
         {showTranscript && (
           <section className="floating-panel">
             <header>
@@ -254,9 +302,6 @@ export function FloatingInterview() {
               >
                 {state.autoAnswer ? '◉ 自动回答' : '○ 手动回答'}
               </Button>
-              <Button variant="ghost" type="button" onClick={close}>
-                结束面试
-              </Button>
               <Button
                 type="submit"
                 size="icon"
@@ -271,15 +316,35 @@ export function FloatingInterview() {
           </form>
         </section>
       </div>
-      <div className="floating-notice" role={error || saveError ? 'alert' : undefined}>
-        {error ||
-          saveError ||
-          state.error ||
-          (!supported
-            ? '当前系统不支持 Windows 截图保护。'
-            : protectedWindow
-              ? 'Windows 截图保护已开启 · 不保证所有捕获工具均遵守 · Mock 模拟'
-              : '已允许截图与屏幕共享 · 重新打开窗口后恢复保护 · Mock 模拟')}
+      <div hidden={collapsed} className="floating-bottom">
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="缩小面试窗口"
+          title="缩小面试窗口"
+          onClick={() => void resize(-1)}
+        >
+          <Shrink size={16} />
+        </Button>
+        <div className="floating-notice" role={error || saveError ? 'alert' : undefined}>
+          {error ||
+            saveError ||
+            state.error ||
+            (!supported
+              ? '当前系统不支持 Windows 截图保护。'
+              : protectedWindow
+                ? 'Windows 截图保护已开启 · 不保证所有捕获工具均遵守 · Mock 模拟'
+                : '已允许截图与屏幕共享 · 重新打开窗口后恢复保护 · Mock 模拟')}
+        </div>
+        <Button
+          variant="outline"
+          size="icon"
+          aria-label="放大面试窗口"
+          title="放大面试窗口"
+          onClick={() => void resize(1)}
+        >
+          <Expand size={16} />
+        </Button>
       </div>
     </div>
   );

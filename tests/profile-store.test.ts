@@ -39,6 +39,21 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 describe('聊天附件更新需要同意', () => {
+  it('最终正文补齐尚未送达的 IPC 增量，完成后结束活动状态', async () => {
+    vi.mocked(streamChat).mockImplementation(async (_request, emit) => {
+      emit({ id: _request.id, type: 'activity', activity: { phase: 'searching' } });
+      expect(usePreparation.getState().messages.at(-1)?.activity?.phase).toBe('searching');
+      emit({ id: _request.id, type: 'delta', text: '前半段' });
+      return { ok: true, usage: null, sources: [], answerText: '前半段和完整正文' };
+    });
+    await usePreparation.getState().send('你好');
+    expect(usePreparation.getState().messages.at(-1)).toMatchObject({
+      content: '前半段和完整正文',
+      status: 'completed',
+      provider: 'chatgpt',
+    });
+    expect(usePreparation.getState().streaming).toBe(false);
+  });
   it('保存风格并发送实际指令，不改变个人资料；超长要求或存储失败不更新设置', async () => {
     const style = { preset: 'concise' as const, custom: '使用自然口语，第一人称' };
     expect(usePreparation.getState().updateAnswerStyle(style)).toBe(true);

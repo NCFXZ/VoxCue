@@ -3,7 +3,6 @@ import { useState } from 'react';
 import { usePreparation } from '../stores/preparation';
 import { Modal } from './ui/modal';
 import {
-  AudioLines,
   MessageCirclePlus,
   History,
   Database,
@@ -17,6 +16,7 @@ import {
 } from './icons';
 import { Button } from './ui/button';
 import { UsagePanel } from './UsagePanel';
+import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
 interface Props {
   userName: string;
@@ -48,9 +48,9 @@ export function Sidebar({
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-heading">
         <span className="sidebar-wordmark">
-          <AudioLines size={22} />{' '}
+          <AppLogo size={22} />{' '}
           <strong>
-            Copilot<span>面试练习助手</span>
+            VoxCue<span>面试练习助手</span>
           </strong>
         </span>
         <Button

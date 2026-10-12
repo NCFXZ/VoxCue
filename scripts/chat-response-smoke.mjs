@@ -33,6 +33,38 @@ try {
             models: [{ slug: 'gpt-6-luna', display_name: 'Test Luna', visibility: 'list' }],
           });
         const request = JSON.parse(options.body);
+        if (request.input.at(-1).content === '状态测试') {
+          const encoder = new TextEncoder();
+          const events = [
+            { type: 'response.created' },
+            { type: 'response.output_item.added', item: { type: 'reasoning' } },
+            { type: 'response.web_search_call.searching' },
+            {
+              type: 'response.output_item.added',
+              item: {
+                type: 'web_search_call',
+                action: { type: 'open_page', url: 'https://example.com/docs' },
+              },
+            },
+            { type: 'response.output_text.delta', delta: '状态演示已完成' },
+            {
+              type: 'response.completed',
+              response: { id: 'status-test', status: 'completed', output: [] },
+            },
+          ];
+          return new Response(
+            new ReadableStream({
+              async start(controller) {
+                for (const event of events) {
+                  controller.enqueue(encoder.encode('data: ' + JSON.stringify(event) + '\n\n'));
+                  await new Promise((resolve) => setTimeout(resolve, 700));
+                }
+                controller.close();
+              },
+            }),
+            { headers: { 'content-type': 'text/event-stream' } },
+          );
+        }
         if (request.input.at(-1).content === '失败测试')
           return new Response('<html>upstream error</html>', {
             headers: { 'content-type': 'text/html' },
@@ -153,6 +185,7 @@ try {
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   const proposals = page.getByRole('region', { name: '待确认的资料更新', exact: true });
   await proposals.first().getByText('修改前', { exact: true }).first().waitFor();
+  await page.locator('.chat-answer').getByText('已整理资料', { exact: true }).waitFor();
   assert.equal(
     await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1')).name),
     '旧姓名',
@@ -178,9 +211,58 @@ try {
     { name: '新姓名', role: '原岗位', jobDescription: '新的 JD', background: '已有经历' },
   );
   await page.screenshot({ path: 'test-results/chat-response.png' });
+  assert.equal(await page.title(), 'VoxCue');
+  assert.equal(await app.evaluate(({ app }) => app.getName()), 'VoxCue');
+  assert.equal(await page.locator('.answer-label strong').first().textContent(), 'ChatGPT');
+  assert.equal(
+    await page
+      .locator('.provider-avatar img')
+      .first()
+      .evaluate((img) => img.complete && img.naturalWidth > 0),
+    true,
+  );
+  assert.ok((await page.locator('link[rel="icon"]').getAttribute('href')).endsWith('voxcue.png'));
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  const styleOption = page.getByRole('button', { name: '条理清晰', exact: false });
+  await styleOption.scrollIntoViewIfNeeded();
+  const alignment = await styleOption.evaluate((element) => {
+    const card = element.getBoundingClientRect();
+    const mark = element.querySelector('svg').getBoundingClientRect();
+    return Math.abs(card.y + card.height / 2 - mark.y - mark.height / 2);
+  });
+  assert.ok(alignment < 1);
+  await page.screenshot({ path: 'test-results/voxcue-style-alignment.png' });
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('状态测试');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  for (const label of [
+    '正在等待服务响应',
+    '正在思考',
+    '正在联网搜索',
+    '正在查询网页',
+    '正在生成回答',
+  ]) {
+    await page.locator('.chat-activity').getByText(label, { exact: false }).waitFor();
+    if (label === '正在查询网页') {
+      await page
+        .locator('.chat-activity')
+        .getByText('example.com/docs', { exact: false })
+        .waitFor();
+      await page.screenshot({ path: 'test-results/voxcue-chat-status.png' });
+    }
+  }
+  await page.locator('.chat-activity').waitFor({ state: 'detached' });
+  await page.getByText('状态演示已完成', { exact: true }).waitFor();
   console.log(
     'PASS: compact tools, Markdown/code copy, effort, usage, failure state, attachment proposal, reject/confirm and light/dark themes. Test transport only; no production account used.',
   );
+} catch (error) {
+  const current = app.windows().at(-1);
+  if (current && !current.isClosed()) {
+    await current.screenshot({ path: 'test-results/chat-response-failure.png' });
+    console.log((await current.locator('body').innerText()).slice(-2500));
+  }
+  throw error;
 } finally {
   await app.close();
 }

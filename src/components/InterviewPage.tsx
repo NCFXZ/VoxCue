@@ -148,7 +148,7 @@ export function InterviewPage() {
                     <span className="ai-avatar">
                       <Sparkles size={14} />
                     </span>
-                    <strong>Copilot</strong>
+                    <strong>Mock</strong>
                     <span>模拟回答</span>
                   </div>
                   <div className="answer-text">
@@ -207,7 +207,7 @@ export function InterviewPage() {
             <span>从这里开始。</span>
           </h1>
           <p className="welcome-description">
-            和 Copilot 一起梳理思路，练习表达。
+            和 VoxCue 一起梳理思路，练习表达。
             <br />
             从一个问题开始，让每一次回答更有底气。
           </p>

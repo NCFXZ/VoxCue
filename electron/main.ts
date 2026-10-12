@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, shell, screen } from 'electron';
 import path from 'node:path';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { createAuthStorage } from './backend/auth/storage';
@@ -15,6 +15,14 @@ let loginWindow: BrowserWindow | null = null;
 let interviewWindow: BrowserWindow | null = null;
 let closingMain = false;
 let captureProtected = true;
+let interviewCollapsed = false;
+let expandedBounds: Electron.Rectangle | undefined;
+let interviewCloseApproved = false;
+const appIcon = path.join(app.getAppPath(), 'public/voxcue.png');
+// Keep existing profiles, credentials, knowledge and usage after the product rename.
+app.setPath('userData', path.join(app.getPath('appData'), 'ai-interview-copilot'));
+app.setName('VoxCue');
+if (process.platform === 'win32') app.setAppUserModelId('com.voxcue.desktop');
 function createLoginWindow() {
   if (loginWindow) {
     loginWindow.show();
@@ -22,6 +30,7 @@ function createLoginWindow() {
     return;
   }
   const win = new BrowserWindow({
+    icon: appIcon,
     width: 960,
     height: 580,
     minWidth: 860,
@@ -31,7 +40,7 @@ function createLoginWindow() {
     backgroundColor: '#00000000',
     maximizable: false,
     show: false,
-    title: 'AI Interview Copilot · 登录',
+    title: 'VoxCue · 登录',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -60,7 +69,11 @@ function openInterview() {
     return;
   }
   captureProtected = true;
+  interviewCollapsed = false;
+  expandedBounds = undefined;
+  interviewCloseApproved = false;
   const win = new BrowserWindow({
+    icon: appIcon,
     width: 1100,
     height: 650,
     minWidth: 800,
@@ -70,7 +83,7 @@ function openInterview() {
     backgroundColor: '#00000000',
     alwaysOnTop: true,
     show: false,
-    title: 'AI Interview Copilot · 模拟面试',
+    title: 'VoxCue · 模拟面试',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -79,6 +92,12 @@ function openInterview() {
     },
   });
   interviewWindow = win;
+  win.on('close', (event) => {
+    if (!closingMain && !interviewCloseApproved) {
+      event.preventDefault();
+      win.webContents.send('interview:request-end');
+    }
+  });
   win.setContentProtection(true);
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (event) => event.preventDefault());
@@ -104,6 +123,7 @@ function createMainWindow() {
   if (mainWindow) return;
   closingMain = false;
   mainWindow = new BrowserWindow({
+    icon: appIcon,
     width: 1360,
     height: 900,
     minWidth: 960,
@@ -112,7 +132,7 @@ function createMainWindow() {
     show: false,
     backgroundColor: '#00000000',
     backgroundMaterial: 'acrylic',
-    title: 'AI Interview Copilot',
+    title: 'VoxCue',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -186,6 +206,7 @@ app.whenReady().then(() => {
   ipcMain.handle('auth:sign-out', async (event) => {
     requireMain(event);
     activeChat?.controller.abort();
+    interviewCloseApproved = true;
     interviewWindow?.close();
     if (demoSession) {
       demoSession = false;
@@ -266,6 +287,7 @@ app.whenReady().then(() => {
       protected: captureProtected,
       pinned: interviewWindow.isAlwaysOnTop(),
       supported: process.platform === 'win32',
+      collapsed: interviewCollapsed,
     };
   });
   ipcMain.handle('interview:capture', (event, allowed: unknown) => {
@@ -280,6 +302,49 @@ app.whenReady().then(() => {
     const pinned = !interviewWindow.isAlwaysOnTop();
     interviewWindow.setAlwaysOnTop(pinned);
     return pinned;
+  });
+  ipcMain.handle('interview:collapse', (event) => {
+    if (event.sender !== interviewWindow?.webContents) throw new Error('Unauthorized window');
+    const win = interviewWindow;
+    if (!interviewCollapsed) {
+      expandedBounds = win.getBounds();
+      win.setMinimumSize(660, 72);
+      win.setResizable(false);
+      win.setBounds({ ...expandedBounds, width: 660, height: 72 });
+    } else {
+      win.setResizable(true);
+      win.setMinimumSize(800, 490);
+      const bounds = expandedBounds!;
+      const area = screen.getDisplayMatching(win.getBounds()).workArea;
+      win.setBounds({
+        x: Math.max(area.x, Math.min(win.getBounds().x, area.x + area.width - bounds.width)),
+        y: Math.max(area.y, Math.min(win.getBounds().y, area.y + area.height - bounds.height)),
+        width: bounds.width,
+        height: bounds.height,
+      });
+    }
+    interviewCollapsed = !interviewCollapsed;
+    return interviewCollapsed;
+  });
+  ipcMain.handle('interview:resize', (event, direction: unknown) => {
+    if (event.sender !== interviewWindow?.webContents || (direction !== -1 && direction !== 1))
+      throw new Error('Invalid request');
+    if (interviewCollapsed) return;
+    const bounds = interviewWindow.getBounds();
+    const area = screen.getDisplayMatching(bounds).workArea;
+    const width = Math.max(800, Math.min(area.width, bounds.width + direction * 100));
+    const height = Math.max(490, Math.min(area.height, bounds.height + direction * 60));
+    interviewWindow.setBounds({
+      width,
+      height,
+      x: Math.max(area.x, Math.min(bounds.x, area.x + area.width - width)),
+      y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)),
+    });
+  });
+  ipcMain.on('interview:confirm-end', (event) => {
+    if (event.sender !== interviewWindow?.webContents) return;
+    interviewCloseApproved = true;
+    interviewWindow.close();
   });
   ipcMain.on('window:action', (event, action: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);

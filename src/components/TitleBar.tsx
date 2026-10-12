@@ -1,10 +1,11 @@
-import { AudioLines, Minus, Square, X } from './icons';
+import { Minus, Square, X } from './icons';
+import { AppLogo } from './AppLogo';
 export function TitleBar() {
   return (
     <header className="titlebar">
       <div className="title-brand">
-        <AudioLines size={16} />
-        <span>AI Interview Copilot</span>
+        <AppLogo size={16} />
+        <span>VoxCue</span>
         <span className="title-version">PREVIEW</span>
       </div>
       <div className="window-controls">

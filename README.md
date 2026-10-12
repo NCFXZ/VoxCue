@@ -1,10 +1,12 @@
-# AI Interview Copilot
+# VoxCue
 
 Windows 桌面应用前端：准备聊天、个人信息与简历、面试记录和知识库管理。
 
 ## 启动
 
-当前电脑已安装项目依赖并完成构建，可直接双击项目根目录的 `Start-Copilot.cmd` 打开软件，无需在终端中配置 pnpm。此入口使用现有构建，源代码修改后需要重新构建。
+当前电脑已安装项目依赖并完成构建，可直接双击 `VoxCue` 项目根目录的 `Start-VoxCue.cmd` 打开软件，无需在终端中配置 pnpm。此入口使用现有构建，源代码修改后需要重新构建。旧的 `Start-Copilot.cmd` 仍可使用。
+
+若目录仍名为 `AI_Interview_Copilot`，关闭占用该目录的 Codex/VS Code/终端及运行中的应用，再双击 `Rename-to-VoxCue.cmd` 改名。脚本只将此根目录改为同级 `VoxCue`，目标已存在时停止；改名后在编辑器中重新打开新目录。
 
 需要 Windows 10/11、Node.js 22 或更新版本，以及 pnpm（可通过 `corepack enable` 启用）。
 
@@ -35,6 +37,10 @@ pnpm test:login
 
 ## 当前功能
 
+- 应用名称为 VoxCue，使用用户提供的 Logo（原图保存在 `public/voxcue-source.png`），提供网页 PNG favicon 和 Windows 多尺寸 ICO。回复显示实际服务名称与 Logo，当前真实服务为 ChatGPT，模拟回复标记为 Mock。
+- ChatGPT 等待过程按真实 Responses 事件显示等待、思考、联网搜索、查询网页和生成回答等状态，只有服务提供元数据时才展示具体网页。停止、失败或完成后移除活动状态；未接入命令执行工具，不显示虚构的命令运行状态。事件参考：[OpenAI 官方文档](https://developers.openai.com/api/reference/resources/responses/streaming-events)。
+- 改名后沿用 `%APPDATA%/ai-interview-copilot` 的本机数据目录及既有存储键，保留已有账户凭据、个人信息、知识库与用量。根目录移动不会自动更新已打开的编辑器项目路径。
+
 - 参考截图实现毛玻璃侧栏、大面积留白、底部输入框；无档案、项目、邀请、付费等功能。
 - Windows 原生 Acrylic 背景材质；顶部与侧栏共用同一层磨砂背景。系统版本、透明效果设置可能影响原生材质显示。
 - 主界面是 ChatGPT 式的面试准备聊天，支持真实 ChatGPT 或明确标记的 Mock 回复、停止回复、新对话和复制；回答使用 Markdown/GFM 显示粗体、列表、引用、链接、行内代码、代码块与表格，代码块支持复制，适配浅深主题和流式输出。
@@ -52,7 +58,7 @@ pnpm test:login
 - 自定义标题栏：拖动、最小化、最大化/还原、关闭。
 - 按钮与导航使用 Microsoft Fluent UI 官方 React 图标。
 
-- 点击“开始面试”打开独立透明悬浮窗口：顶部工具条、左侧转写、右侧回答，支持置顶、隐藏转写面板、最小化、结束并返回主窗口。
+- 点击“开始面试”打开独立透明悬浮窗口：顶部工具条、左侧转写、右侧回答，支持置顶、隐藏转写面板、收起为工具栏和恢复、放大/缩小原生窗口尺寸。截图保护与结束按钮仅显示图标，悬停显示名称；结束需点击红色“确认结束”，可取消，Alt+F4 也会触发确认。
 - 悬浮面试支持模拟转写、暂停/继续、自动或手动 Mock 回答、手动输入问题；结束后保存到本地面试记录。
 - Windows 截图保护默认开启，工具条可主动切换为允许截图/共享。关闭再打开后恢复保护；采用 Electron 标准 `setContentProtection` 接口，不保证所有捕获软件均遵守，未逐一验证会议软件。
 

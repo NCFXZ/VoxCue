@@ -13,6 +13,8 @@ export interface ChatMessage {
   profileBase?: PersonalInfo;
   options?: ChatRequestOptions;
   mode?: 'live' | 'mock';
+  provider?: string;
+  activity?: import('../../electron/contracts/chat').ChatActivity;
   sources?: ChatSource[];
   usage?: TokenUsage | null;
   status?: 'streaming' | 'completed' | 'stopped' | 'failed';

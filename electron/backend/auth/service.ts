@@ -208,7 +208,7 @@ export class ChatGPTAuthService {
           const value = validateCallback(url, transaction);
           consumed = true;
           resolveCallback(value);
-          response.end('已收到授权。请返回 AI Interview Copilot 查看登录结果。');
+          response.end('已收到授权。请返回 VoxCue 查看登录结果。');
         } catch (error) {
           response.writeHead(400).end('授权回调无效。请返回应用重试。');
           // An unrelated request cannot terminate the genuine pending attempt.
