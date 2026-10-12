@@ -13,6 +13,7 @@ describe('准备聊天与个人信息', () => {
       },
     });
     usePreparation.getState().reset();
+    usePreparation.setState({ conversations: [] });
     useHistory.setState({ records: [], error: null });
   });
   afterEach(() => {
@@ -74,5 +75,39 @@ describe('准备聊天与个人信息', () => {
     expect(usePreparation.getState().attachments).toHaveLength(1);
     usePreparation.getState().reset();
     expect(usePreparation.getState().attachments).toEqual([]);
+  });
+  it('切换对话保留消息，删除其他对话不影响当前消息或个人资料', async () => {
+    const firstReply = usePreparation.getState().send('第一条对话');
+    await vi.advanceTimersByTimeAsync(10000);
+    await firstReply;
+    const first = usePreparation.getState().activeConversation!;
+    const firstMessages = usePreparation.getState().messages;
+    usePreparation.getState().reset();
+    const secondReply = usePreparation.getState().send('第二条对话');
+    await vi.advanceTimersByTimeAsync(10000);
+    await secondReply;
+    const second = usePreparation.getState().activeConversation!;
+    usePreparation.getState().selectConversation(first);
+    expect(usePreparation.getState().messages).toEqual(firstMessages);
+    const info = usePreparation.getState().info;
+    const resume = usePreparation.getState().resume;
+    usePreparation.getState().deleteConversation(second);
+    expect(usePreparation.getState().activeConversation).toBe(first);
+    expect(usePreparation.getState().messages).toEqual(firstMessages);
+    expect(usePreparation.getState().conversations.map((item) => item.id)).toEqual([first]);
+    expect(usePreparation.getState().info).toBe(info);
+    expect(usePreparation.getState().resume).toBe(resume);
+    expect(useHistory.getState().records).toEqual([]);
+  });
+  it('删除正在回复的当前对话会取消生成且不会被异步回复恢复', async () => {
+    const result = usePreparation.getState().send('正在生成的对话');
+    await vi.advanceTimersByTimeAsync(200);
+    usePreparation.getState().deleteConversation(usePreparation.getState().activeConversation!);
+    await result;
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(usePreparation.getState().streaming).toBe(false);
+    expect(usePreparation.getState().activeConversation).toBeNull();
+    expect(usePreparation.getState().messages).toEqual([]);
+    expect(usePreparation.getState().conversations).toEqual([]);
   });
 });

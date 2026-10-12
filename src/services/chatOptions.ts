@@ -12,6 +12,8 @@ export interface ChatRequestOptions {
   modelId: string;
   webSearch: boolean;
   attachments: ChatAttachment[];
+  modelLabel?: string;
+  live?: boolean;
 }
 export const chatFileAccept =
   '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg,.webp';

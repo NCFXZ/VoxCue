@@ -9,6 +9,7 @@ import { Button } from './components/ui/button';
 import { usePreparation } from './stores/preparation';
 import { useAuth } from './stores/auth';
 import { LoginPage } from './components/LoginPage';
+import { useChatConnection } from './stores/chatConnection';
 type Theme = 'light' | 'dark' | 'system';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
@@ -24,6 +25,10 @@ export function App() {
   useEffect(() => {
     void auth.load();
   }, []);
+  useEffect(() => {
+    if (!isLoginWindow && auth.session)
+      void useChatConnection.getState().load(auth.session.mode === 'chatgpt');
+  }, [auth.session?.mode, isLoginWindow]);
   useEffect(() => {
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () =>
@@ -72,6 +77,7 @@ export function App() {
               onLogout={async () => {
                 if (await auth.signOut()) {
                   usePreparation.getState().reset();
+                  usePreparation.setState({ conversations: [] });
                   setSettings(false);
                   setPage('preparation');
                 }

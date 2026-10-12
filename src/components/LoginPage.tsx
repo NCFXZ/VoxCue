@@ -51,7 +51,7 @@ export function LoginPage() {
             >
               体验 Mock 界面
             </Button>
-            <p>登录仅连接账户，聊天与转写仍为模拟功能。</p>
+            <p>登录后使用 ChatGPT 聊天，面试转写仍为模拟功能。</p>
             <small>凭据加密保存在本机，密码仅在 OpenAI 页面输入。</small>
           </div>
         </section>

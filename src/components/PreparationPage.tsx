@@ -4,9 +4,12 @@ import { Button } from './ui/button';
 import { usePreparation } from '../stores/preparation';
 import type { PersonalInfo } from '../services/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
-import { readDroppedFiles, chatModels } from '../services/chatOptions';
+import { readDroppedFiles } from '../services/chatOptions';
+import { useChatConnection } from '../stores/chatConnection';
+import { openChatLink } from '../services/chat';
 export function PreparationPage() {
   const state = usePreparation();
+  const connection = useChatConnection();
   const [input, setInput] = useState('');
   const [infoOpen, setInfoOpen] = useState(false);
   const [draft, setDraft] = useState<PersonalInfo>(state.info);
@@ -43,7 +46,7 @@ export function PreparationPage() {
         <div className="toolbar-actions">
           <span className="mock-badge">
             <span />
-            Mock 聊天
+            {connection.live ? 'ChatGPT' : 'Mock 聊天'}
           </span>
           <Button
             variant="ghost"
@@ -79,11 +82,13 @@ export function PreparationPage() {
                         {message.options && (
                           <div className="message-options">
                             <span>
-                              {
-                                chatModels.find((model) => model.id === message.options?.modelId)
-                                  ?.label
-                              }{' '}
-                              · Mock{message.options.webSearch ? ' · 网络搜索（模拟）' : ''}
+                              {message.options.modelLabel || message.options.modelId}
+                              {message.options.live ? '' : ' · Mock'}
+                              {message.options.webSearch
+                                ? message.options.live
+                                  ? ' · 网络搜索'
+                                  : ' · 网络搜索（模拟）'
+                                : ''}
                             </span>
                             {message.options.attachments.map((item) => (
                               <span key={item.id}>附件：{item.name}</span>
@@ -98,8 +103,40 @@ export function PreparationPage() {
                             <Sparkles size={14} />
                           </span>
                           <strong>Copilot</strong>
-                          <span>模拟回复</span>
+                          <span>
+                            {message.mode === 'live'
+                              ? message.status === 'failed'
+                                ? '回答未完成'
+                                : message.status === 'stopped'
+                                  ? '已停止'
+                                  : 'ChatGPT'
+                              : '模拟回复'}
+                          </span>
                         </div>
+                        {!!message.sources?.length && (
+                          <div className="chat-sources" aria-label="搜索来源">
+                            <span>来源</span>
+                            {message.sources.map((source, index) => (
+                              <button
+                                key={source.url}
+                                title={source.url}
+                                onClick={() => {
+                                  void openChatLink(source.url).catch(() =>
+                                    usePreparation.setState({ error: '无法打开来源链接。' }),
+                                  );
+                                }}
+                              >
+                                {index + 1}. {source.title}
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                        {message.usage && (
+                          <small className="answer-usage">
+                            输入 {message.usage.inputTokens.toLocaleString()} · 输出{' '}
+                            {message.usage.outputTokens.toLocaleString()} token
+                          </small>
+                        )}
                         <div className="chat-answer">
                           {message.content || '正在整理思路…'}
                           {state.streaming &&
@@ -107,7 +144,7 @@ export function PreparationPage() {
                               <span className="typing-caret" />
                             )}
                         </div>
-                        {!state.streaming &&
+                        {message.status === 'completed' &&
                           message.changes &&
                           Object.keys(message.changes).length > 0 && (
                             <div className="profile-proposal">
@@ -176,7 +213,7 @@ export function PreparationPage() {
                 {['帮我准备自我介绍', '帮我梳理项目经历', '上传我的简历'].map((label, index) => (
                   <button
                     key={label}
-                    disabled={state.streaming || state.uploading}
+                    disabled={state.streaming || state.uploading || !connection.models.length}
                     onClick={() => (index === 2 ? file.current?.click() : void state.send(label))}
                   >
                     {label}
@@ -276,7 +313,9 @@ export function PreparationPage() {
                   <Button
                     size="icon"
                     type="submit"
-                    disabled={!input.trim() && !state.attachments.length}
+                    disabled={
+                      (!input.trim() && !state.attachments.length) || !connection.models.length
+                    }
                     aria-label="发送消息"
                   >
                     <ArrowUp size={18} />
@@ -300,7 +339,11 @@ export function PreparationPage() {
               role={state.error ? 'alert' : undefined}
               className={`simulation-disclaimer ${state.error ? 'danger-text' : ''}`}
             >
-              {state.error || '当前为 Mock 准备聊天，未接入真实 AI；聊天不会保存为面试记录。'}
+              {state.error ||
+                connection.error ||
+                (connection.live
+                  ? '聊天及主动添加的附件将发送至 OpenAI；回答可能出错，请核实重要信息。'
+                  : '当前为 Mock 准备聊天，未接入真实 AI；聊天不会保存为面试记录。')}
             </p>
           </div>
         </div>

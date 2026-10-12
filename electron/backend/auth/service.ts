@@ -1,4 +1,5 @@
 import { createServer, type Server } from 'node:http';
+import { decodeJwt } from 'jose';
 import type { AuthSession, SignOutResult } from '../../contracts/auth';
 import {
   authorizationURL,
@@ -17,6 +18,7 @@ export interface CredentialRecord {
   name: string;
   email: string;
   expiresAt: number;
+  accessExpiresAt?: number;
   idToken?: string;
   accessToken?: string;
   refreshToken?: string;
@@ -39,6 +41,7 @@ export class ChatGPTAuthService {
   private loaded: Promise<void> | undefined;
   private pending: AbortController | null = null;
   private signingOut = false;
+  private refreshing: Promise<void> | undefined;
   constructor(private dependencies: Dependencies) {}
   private load() {
     return (this.loaded ??= this.dependencies.storage.read().then((record) => {
@@ -48,7 +51,7 @@ export class ChatGPTAuthService {
   async session(): Promise<AuthSession | null> {
     await this.load();
     const record = this.record;
-    return record?.idToken && record.expiresAt > Date.now()
+    return record?.idToken && (record.expiresAt > Date.now() || !!record.refreshToken)
       ? {
           mode: 'chatgpt',
           user: { id: record.subject, name: record.name, email: record.email },
@@ -62,6 +65,87 @@ export class ChatGPTAuthService {
   isPending() {
     return this.pending !== null;
   }
+  // This method is native-only. Never expose its result through IPC.
+  async access(): Promise<{ token: string; account: string }> {
+    await this.load();
+    if (this.signingOut || this.pending) throw new Error('账户正在变更，请稍后重试。');
+    let record = this.record;
+    if (!record?.accessToken) throw new Error('请重新登录 ChatGPT。');
+    if (!record.grantedScopes?.includes('chatgpt.tokens.use.direct'))
+      throw new Error('账户尚未授权使用 ChatGPT 套餐，请退出后重新登录并授权。');
+    let expiry = record.accessExpiresAt;
+    if (!expiry) {
+      try {
+        expiry = Number(decodeJwt(record.accessToken).exp) * 1000;
+      } catch {
+        /* Old records require renewal. */
+      }
+    }
+    if (!expiry || expiry < Date.now() + 60000) {
+      if (!this.refreshing)
+        this.refreshing = this.refresh().finally(() => {
+          this.refreshing = undefined;
+        });
+      await this.refreshing;
+    }
+    record = this.record;
+    if (this.signingOut || !record?.accessToken) throw new Error('请重新登录 ChatGPT。');
+    if (!record.grantedScopes?.includes('chatgpt.tokens.use.direct'))
+      throw new Error('账户未授权 ChatGPT 套餐调用，请重新登录并授权。');
+    return { token: record.accessToken, account: `${record.clientId}:${record.subject}` };
+  }
+  private async refresh() {
+    const record = this.record;
+    if (!record?.refreshToken) throw new Error('登录已过期，请重新登录 ChatGPT。');
+    const response = await (this.dependencies.fetch ?? fetch)(tokenEndpoint, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'refresh_token',
+        client_id: record.clientId,
+        refresh_token: record.refreshToken,
+        resource,
+      }),
+      signal: AbortSignal.timeout(15000),
+      redirect: 'error',
+    }).catch(() => {
+      throw new Error('无法续期登录，请检查网络后重试。');
+    });
+    if (!response.ok) {
+      if (response.status === 400 || response.status === 401) {
+        const cleared = {
+          ...record,
+          accessToken: undefined,
+          refreshToken: undefined,
+          idToken: undefined,
+          expiresAt: 0,
+        };
+        await this.dependencies.storage.write(cleared);
+        this.record = cleared;
+        throw new Error('登录授权已失效，请退出后重新登录 ChatGPT。');
+      }
+      throw new Error('登录续期暂时不可用，请稍后重试。');
+    }
+    const tokens = (await response.json()) as Record<string, unknown>;
+    if (
+      typeof tokens.access_token !== 'string' ||
+      typeof tokens.refresh_token !== 'string' ||
+      typeof tokens.expires_in !== 'number' ||
+      !Number.isFinite(tokens.expires_in) ||
+      tokens.expires_in <= 0
+    )
+      throw new Error('登录续期响应无效，请重新登录。');
+    const updated = {
+      ...record,
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+      accessExpiresAt: Date.now() + tokens.expires_in * 1000,
+      grantedScopes:
+        typeof tokens.scope === 'string' ? tokens.scope.split(' ') : record.grantedScopes,
+    };
+    await this.dependencies.storage.write(updated);
+    this.record = updated;
+  }
   async signIn(): Promise<AuthSession> {
     if (this.pending || this.signingOut) throw new Error('已有登录操作正在进行。');
     const controller = new AbortController();
@@ -69,7 +153,12 @@ export class ChatGPTAuthService {
     let server: Server | undefined;
     const timer = setTimeout(() => controller.abort(), this.dependencies.timeoutMs ?? 180000);
     try {
-      await this.load();
+      // An explicit new login can recover unreadable credentials. Keep the file
+      // untouched until a complete, verified authorization replaces it.
+      await this.load().catch(() => {
+        this.record = null;
+        this.loaded = Promise.resolve();
+      });
       const hostId = await this.dependencies.storage.hostId();
       if (controller.signal.aborted) throw new Error('登录已取消或超时，请重试。');
       let consumed = false;
@@ -183,6 +272,10 @@ export class ChatGPTAuthService {
         hostId,
         clientId,
         ...identity,
+        accessExpiresAt:
+          typeof tokens.expires_in === 'number' && tokens.expires_in > 0
+            ? Date.now() + tokens.expires_in * 1000
+            : undefined,
         idToken: tokens.id_token,
         accessToken: typeof tokens.access_token === 'string' ? tokens.access_token : undefined,
         refreshToken: typeof tokens.refresh_token === 'string' ? tokens.refresh_token : undefined,
@@ -217,6 +310,7 @@ export class ChatGPTAuthService {
     if (this.pending) throw new Error('请先取消正在进行的登录。');
     this.signingOut = true;
     try {
+      await this.refreshing?.catch(() => {});
       await this.load();
       const record = this.record;
       let warning: string | null = null;

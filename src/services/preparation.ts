@@ -1,5 +1,6 @@
 import { wait } from './mock';
 import type { ChatRequestOptions } from './chatOptions';
+import type { ChatSource, TokenUsage } from '../../electron/contracts/chat';
 export interface PersonalInfo {
   name: string;
   role: string;
@@ -13,6 +14,10 @@ export interface ChatMessage {
   changes?: Partial<PersonalInfo>;
   applied?: boolean;
   options?: ChatRequestOptions;
+  mode?: 'live' | 'mock';
+  sources?: ChatSource[];
+  usage?: TokenUsage | null;
+  status?: 'streaming' | 'completed' | 'stopped' | 'failed';
 }
 export interface PreparationChatService {
   streamReply(

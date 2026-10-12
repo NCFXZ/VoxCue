@@ -1,4 +1,7 @@
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import { useState } from 'react';
+import { usePreparation } from '../stores/preparation';
+import { Modal } from './ui/modal';
 import {
   AudioLines,
   MessageCirclePlus,
@@ -10,8 +13,11 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ArrowUpRight,
+  Trash,
 } from './icons';
 import { Button } from './ui/button';
+import { UsagePanel } from './UsagePanel';
+import { useChatConnection } from '../stores/chatConnection';
 interface Props {
   userName: string;
   accountLabel: string;
@@ -34,6 +40,10 @@ export function Sidebar({
   onSettings,
   onLogout,
 }: Props) {
+  const connection = useChatConnection();
+  const preparation = usePreparation();
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const selected = preparation.conversations.find((item) => item.id === deleting);
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-heading">
@@ -84,20 +94,47 @@ export function Sidebar({
       </nav>
       {!collapsed && (
         <div className="sidebar-conversations">
-          <p className="section-caption">当前对话</p>
-          <button onClick={() => onNavigate('preparation')} className="conversation">
-            <span className="conversation-dot" />
-            面试准备与练习
-          </button>
+          {preparation.conversations.length > 0 && <p className="section-caption">对话</p>}
+          {preparation.conversations
+            .slice()
+            .reverse()
+            .map((conversation) => (
+              <div
+                key={conversation.id}
+                className={`conversation-row ${preparation.activeConversation === conversation.id && page === 'preparation' ? 'active' : ''}`}
+              >
+                <button
+                  className="conversation"
+                  title={conversation.title}
+                  onClick={() => {
+                    preparation.selectConversation(conversation.id);
+                    onNavigate('preparation');
+                  }}
+                >
+                  <span className="conversation-dot" />
+                  <span>{conversation.title}</span>
+                </button>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="conversation-delete"
+                  aria-label={`删除对话：${conversation.title}`}
+                  onClick={() => setDeleting(conversation.id)}
+                >
+                  <Trash size={15} />
+                </Button>
+              </div>
+            ))}
         </div>
       )}
       <div className="sidebar-bottom">
+        {!collapsed && <UsagePanel />}
         {!collapsed && (
           <div className="local-note">
             <span className="status-dot" />
-            本地模拟环境
+            {connection.live ? 'ChatGPT 已连接' : '本地模拟环境'}
             <ArrowUpRight size={13} />
-            <p>从容练习，清晰表达。</p>
+            {!connection.live && <p>从容练习，清晰表达。</p>}
           </div>
         )}
         <DropdownMenu.Root>
@@ -131,6 +168,28 @@ export function Sidebar({
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </div>
+      {selected && (
+        <Modal title="删除对话" onClose={() => setDeleting(null)}>
+          <p className="delete-conversation-description">
+            确定删除“{selected.title}”吗？删除后无法恢复。
+          </p>
+          <div className="delete-conversation-actions">
+            <Button variant="outline" onClick={() => setDeleting(null)}>
+              取消
+            </Button>
+            <Button
+              onClick={() => {
+                const active = preparation.activeConversation === selected.id;
+                preparation.deleteConversation(selected.id);
+                setDeleting(null);
+                if (active) onNavigate('preparation');
+              }}
+            >
+              确认删除
+            </Button>
+          </div>
+        </Modal>
+      )}
     </aside>
   );
 }

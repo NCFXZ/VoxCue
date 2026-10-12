@@ -55,9 +55,9 @@ pnpm test:login
 - 悬浮面试支持模拟转写、暂停/继续、自动或手动 Mock 回答、手动输入问题；结束后保存到本地面试记录。
 - Windows 截图保护默认开启，工具条可主动切换为允许截图/共享。关闭再打开后恢复保护；采用 Electron 标准 `setContentProtection` 接口，不保证所有捕获软件均遵守，未逐一验证会议软件。
 
-所有 AI 回复、转写和示例面试记录均为 Mock，界面明确标记模拟状态。不采集音频、不调用真实 AI 推理接口。ChatGPT 登录与模型调用分别管理；模型和音频设置尚未开放。不包含截图采集、隐藏录制或会议检测规避功能。
+ChatGPT 登录后，准备聊天使用真实 Responses 流式回答、账户返回的模型列表和可选网络搜索，展示搜索来源。Mock 体验与悬浮面试仍为模拟功能，界面明确标记。不采集音频；音频设置尚未开放。不包含截图采集、隐藏录制或会议检测规避功能。
 
-个人信息保存在本机 localStorage，简历和知识库文档保存在 IndexedDB。聊天消息仅保留在当前应用会话内，点击新对话或退出模拟会话会清空聊天，但保留个人信息和本地文件。知识库不会被自动用于 Mock 聊天检索。
+个人信息保存在本机 localStorage，简历和知识库文档保存在 IndexedDB。聊天消息仅保留在当前应用会话内，新对话保留当前应用会话中的其他对话，侧栏支持切换和确认删除。退出或关闭应用后清空聊天，但保留个人信息和本地文件。知识库不会被自动用于 Mock 聊天检索。
 
 ## 结构
 
@@ -67,7 +67,7 @@ pnpm test:login
 
 按 OpenAI [本地应用登录文档](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)实现系统浏览器授权、PKCE、本机随机端口回调、state/nonce 与签名身份令牌校验。首次注册使用动态客户端，后续使用本机保存的客户端标识。应用不会收集 ChatGPT 密码，也不需要在前端填写 API Key。
 
-凭据保存在 Electron 用户数据目录 `auth-data/credentials.bin`，通过 Windows 系统加密保护；令牌不会传入渲染器、localStorage 或 Git。退出时尝试撤销远端授权并清除本机令牌，网络失败会显示未确认撤销的提示。当前未实现自动刷新，身份会话过期后需重新授权。
+凭据保存在 Electron 用户数据目录 `auth-data/credentials.bin`，通过 Windows 系统加密保护；令牌不会传入渲染器、localStorage 或 Git。退出时尝试撤销远端授权并清除本机令牌，网络失败会显示未确认撤销的提示。访问令牌接近过期时自动串行续期，并加密保存轮换后的刷新令牌；授权失效后需重新登录。若旧凭据无法解密，可主动重新登录，完成授权前保留原文件。
 
 真实账户的浏览器授权需要用户亲自完成，尚未完成真实账户端到端验证。自动化测试验证授权发起、取消、拒绝回调、身份校验、加密存储及 Mock 体验退出；不使用真实账户或生产令牌。该流程面向本地个人应用，未实现商业托管认证服务器。
 
@@ -80,3 +80,13 @@ pnpm test:login
 第一阶段提供开发运行和本地构建，不包含 Windows 安装包发布配置。
 
 `pnpm test:composer` 使用隔离的 Electron 用户目录检查附件菜单、文件/文件夹选择、拖放、移除、发送后清空、搜索与模型快照及无效文件校验。输入框预览保存在 `test-results/composer-light.png` 和 `test-results/composer-dark.png`。
+
+## 真实聊天与本应用用量
+
+准备聊天通过主进程调用 OpenAI Responses API，使用 ChatGPT 登录授权。模型菜单来自账户返回的可用模型列表；开启网络搜索会请求实际 web_search 工具，并显示来源。账户或模型不支持时展示真实错误，不切换为模拟回答。主动添加并发送的聊天附件会随上下文发往 OpenAI；本地保存的简历和知识库文档不会自动作为附件上传。最多 100 条消息、20 个上下文附件，附件合计 32 MB。
+
+侧栏“本应用用量”只累计本机当前账户收到的服务端 input/output/total token 与请求次数；停止或断流未返回用量的请求不计入，因此不代表账户总用量、剩余额度或账单。通过“账户用量”打开官方页面查看账户信息。统计独立保存在用户数据目录 chat-usage，不保存聊天内容。
+
+依据 [模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[会话与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)及 [预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)实现。真实调用受账户资格、工作区和模型策略限制。此次真实账户验证被现有凭据解密失败阻断，尚未确认生产端到端成功；本地测试使用模拟 HTTP/SSE 响应验证协议。
+
+`pnpm test:conversations` 验证侧栏对话切换、取消删除、确认删除和新对话状态。`node scripts/chat-live-smoke.mjs --live` 是显式真实验证入口，会使用已有授权和少量账户用量；不属于默认自动化测试。

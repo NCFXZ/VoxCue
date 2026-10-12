@@ -2,7 +2,12 @@ import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron';
 import path from 'node:path';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { createAuthStorage } from './backend/auth/storage';
+import { ChatGPTService, publicFailure, validSource } from './backend/chat/service';
+import { UsageLedger } from './backend/chat/usage';
+import { emptyUsage, type ChatRequest, type ChatResult } from './contracts/chat';
 let auth: ChatGPTAuthService;
+let chat: ChatGPTService;
+let activeChat: { id: string; controller: AbortController } | undefined;
 let demoSession = false;
 
 let mainWindow: BrowserWindow | null = null;
@@ -128,6 +133,7 @@ function createMainWindow() {
     mainWindow = null;
   });
   mainWindow.on('close', () => {
+    activeChat?.controller.abort();
     auth.cancel();
     closingMain = true;
     interviewWindow?.close();
@@ -137,6 +143,10 @@ app.whenReady().then(() => {
   auth = new ChatGPTAuthService({
     storage: createAuthStorage(),
     openBrowser: (url) => shell.openExternal(url),
+  });
+  chat = new ChatGPTService({
+    access: () => auth.access(),
+    ledger: new UsageLedger(path.join(app.getPath('userData'), 'chat-usage')),
   });
   const requireMain = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
@@ -175,6 +185,7 @@ app.whenReady().then(() => {
   });
   ipcMain.handle('auth:sign-out', async (event) => {
     requireMain(event);
+    activeChat?.controller.abort();
     interviewWindow?.close();
     if (demoSession) {
       demoSession = false;
@@ -191,6 +202,58 @@ app.whenReady().then(() => {
       });
     createLoginWindow();
     return result;
+  });
+  ipcMain.handle('chat:models', async (event, force: unknown) => {
+    requireMain(event);
+    if (demoSession) return { ok: true, models: [] };
+    try {
+      return { ok: true, models: await chat.models(force === true) };
+    } catch (error) {
+      return { ok: false, error: publicFailure(error) };
+    }
+  });
+  ipcMain.handle('chat:usage', async (event) => {
+    requireMain(event);
+    if (demoSession) return { ok: true, usage: emptyUsage() };
+    try {
+      return { ok: true, usage: await chat.usage() };
+    } catch (error) {
+      return { ok: false, error: publicFailure(error) };
+    }
+  });
+  ipcMain.handle('chat:send', async (event, request: unknown): Promise<ChatResult> => {
+    requireMain(event);
+    if (demoSession)
+      return { ok: false, error: { message: '请使用 ChatGPT 登录后调用真实模型。' } };
+    if (activeChat) return { ok: false, error: { message: '请等待当前回答完成或停止后重试。' } };
+    const controller = new AbortController();
+    const active = { id: (request as ChatRequest)?.id, controller };
+    activeChat = active;
+    try {
+      const result = await chat.stream(
+        request,
+        (value) => {
+          if (!controller.signal.aborted && !event.sender.isDestroyed())
+            event.sender.send('chat:event', value);
+        },
+        controller.signal,
+      );
+      return { ok: true, ...result };
+    } catch (error) {
+      return { ok: false, error: publicFailure(error) };
+    } finally {
+      if (activeChat === active) activeChat = undefined;
+    }
+  });
+  ipcMain.handle('chat:cancel', (event, id: unknown) => {
+    requireMain(event);
+    if (typeof id === 'string' && activeChat?.id === id) activeChat.controller.abort();
+  });
+  ipcMain.handle('chat:open-link', async (event, value: unknown) => {
+    requireMain(event);
+    const source = validSource({ url: value });
+    if (!source) throw new Error('无效的链接。');
+    await shell.openExternal(source.url);
   });
   ipcMain.handle('interview:open', async (event) => {
     if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');

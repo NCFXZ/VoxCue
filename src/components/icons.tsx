@@ -31,6 +31,7 @@ import {
   Folder24Regular,
   Attach24Regular,
   Add24Regular,
+  Delete24Regular,
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
@@ -70,3 +71,4 @@ export const Globe = icon(Globe24Regular);
 export const Folder = icon(Folder24Regular);
 export const Paperclip = icon(Attach24Regular);
 export const Plus = icon(Add24Regular);
+export const Trash = icon(Delete24Regular);

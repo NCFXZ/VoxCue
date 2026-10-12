@@ -3,9 +3,13 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from './ui/button';
 import { Check, X, Globe, Folder, Paperclip, Plus, ChevronDown, Sparkles } from './icons';
 import { usePreparation } from '../stores/preparation';
-import { chatModels, chatFileAccept } from '../services/chatOptions';
+import { chatFileAccept } from '../services/chatOptions';
+import { useChatConnection } from '../stores/chatConnection';
 export function ChatTools() {
   const state = usePreparation();
+  const connection = useChatConnection();
+  const models = connection.models;
+  const selected = models.find((model) => model.id === state.modelId) ?? models[0];
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   return (
@@ -52,13 +56,13 @@ export function ChatTools() {
         onClick={() => state.setWebSearch(!state.webSearch)}
       >
         <Globe size={14} />
-        网络搜索<span className="tool-mock">模拟</span>
+        网络搜索{!connection.live && <span className="tool-mock">模拟</span>}
       </Button>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
           <Button type="button" variant="ghost" className="model-trigger" aria-label="聊天模型">
-            <span>{chatModels.find((model) => model.id === state.modelId)?.label}</span>
-            <span className="tool-mock">Mock</span>
+            <span>{selected?.label ?? (connection.loading ? '加载模型…' : '模型不可用')}</span>
+            {!connection.live && <span className="tool-mock">Mock</span>}
             <ChevronDown size={12} />
           </Button>
         </DropdownMenu.Trigger>
@@ -70,10 +74,10 @@ export function ChatTools() {
             sideOffset={10}
           >
             <DropdownMenu.Label className="model-menu-label">
-              选择模型<span>模拟</span>
+              选择模型<span>{connection.live ? 'ChatGPT' : '模拟'}</span>
             </DropdownMenu.Label>
-            <DropdownMenu.RadioGroup value={state.modelId} onValueChange={state.setModel}>
-              {chatModels.map((model) => (
+            <DropdownMenu.RadioGroup value={selected?.id} onValueChange={state.setModel}>
+              {models.map((model) => (
                 <DropdownMenu.RadioItem
                   className="dropdown-item model-option"
                   value={model.id}
@@ -92,6 +96,25 @@ export function ChatTools() {
                 </DropdownMenu.RadioItem>
               ))}
             </DropdownMenu.RadioGroup>
+            {connection.live && (
+              <>
+                {connection.error && (
+                  <p className="model-error" role="alert">
+                    {connection.error}
+                  </p>
+                )}
+                <DropdownMenu.Separator className="dropdown-separator" />
+                <DropdownMenu.Item
+                  className="dropdown-item"
+                  disabled={connection.loading}
+                  onSelect={() => {
+                    void connection.load(true, true);
+                  }}
+                >
+                  {connection.loading ? '正在读取…' : '刷新模型列表'}
+                </DropdownMenu.Item>
+              </>
+            )}
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
