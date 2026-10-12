@@ -1,7 +1,29 @@
-export const chatModels = [
-  { id: 'mock-general', label: 'GPT · 通用', description: 'Mock · 日常准备与简历表达' },
-  { id: 'mock-reasoning', label: 'GPT · 推理', description: 'Mock · 项目梳理与分析' },
-] as const;
+import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
+export const chatModels: ChatModel[] = [
+  {
+    id: 'mock-general',
+    label: 'GPT · 通用',
+    description: 'Mock · 日常准备与简历表达',
+    reasoningEfforts: ['low', 'medium', 'high'],
+  },
+  {
+    id: 'mock-reasoning',
+    label: 'GPT · 推理',
+    description: 'Mock · 项目梳理与分析',
+    reasoningEfforts: ['low', 'medium', 'high'],
+  },
+];
+export const effortLabels: Record<ReasoningEffort | 'auto', string> = {
+  auto: '自动',
+  none: '无思考',
+  minimal: '极低',
+  low: '低 · 更快',
+  medium: '中',
+  high: '高',
+  xhigh: '极高',
+  max: '最高',
+  ultra: 'Ultra',
+};
 export interface ChatAttachment {
   id: string;
   name: string;
@@ -14,6 +36,7 @@ export interface ChatRequestOptions {
   attachments: ChatAttachment[];
   modelLabel?: string;
   live?: boolean;
+  effort?: ReasoningEffort;
 }
 export const chatFileAccept =
   '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md,.png,.jpg,.jpeg,.webp';

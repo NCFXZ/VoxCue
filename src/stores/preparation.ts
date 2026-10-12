@@ -9,7 +9,7 @@ import { localKnowledge, type LocalDocument } from '../services/knowledge';
 import { stageAttachments, type ChatAttachment } from '../services/chatOptions';
 import { useChatConnection } from './chatConnection';
 import { streamChat } from '../services/chat';
-import type { ChatRequest } from '../../electron/contracts/chat';
+import type { ChatRequest, ReasoningEffort } from '../../electron/contracts/chat';
 const emptyInfo: PersonalInfo = { name: '', role: '', jobDescription: '', background: '' };
 let controller: AbortController | undefined;
 interface PreparationState {
@@ -25,6 +25,8 @@ interface PreparationState {
   error: string | null;
   attachments: ChatAttachment[];
   modelId: string;
+  effort: ReasoningEffort | 'auto';
+  setEffort(effort: ReasoningEffort | 'auto'): void;
   webSearch: boolean;
   addAttachments(files: File[]): void;
   removeAttachment(id: string): void;
@@ -59,6 +61,10 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   error: null,
   attachments: [],
   modelId: 'mock-general',
+  effort: 'low',
+  setEffort(effort) {
+    set({ effort });
+  },
   webSearch: false,
   addAttachments(files) {
     try {
@@ -126,6 +132,9 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       modelId: selected.id,
       modelLabel: selected.label,
       live: connection.live,
+      effort: selected.reasoningEfforts?.includes(get().effort as ReasoningEffort)
+        ? (get().effort as ReasoningEffort)
+        : undefined,
       webSearch: get().webSearch,
       attachments: [...get().attachments],
     };
@@ -187,6 +196,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
         const request: ChatRequest = {
           id,
           modelId: options.modelId,
+          effort: options.effort,
           webSearch: options.webSearch,
           turns,
           instructions: `你是 AI Interview Copilot，帮助用户准备面试、改善简历表达和整理项目经历。使用中文回答，避免捏造个人经历或成绩。资料更新需要用户明确确认。引用搜索来源，区分事实与建议。以下是用户主动保存的个人资料，作为参考信息：\n${JSON.stringify(info)}`,

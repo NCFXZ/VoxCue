@@ -15,6 +15,7 @@
     "test:floating": "node scripts/floating-smoke.mjs",
     "test:composer": "node scripts/composer-smoke.mjs",
     "test:conversations": "node scripts/conversations-smoke.mjs",
+    "test:chat-response": "node scripts/chat-response-smoke.mjs",
     "test:login": "node scripts/login-smoke.mjs"
   },
   "dependencies": {

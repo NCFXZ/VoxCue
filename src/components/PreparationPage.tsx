@@ -4,7 +4,7 @@ import { Button } from './ui/button';
 import { usePreparation } from '../stores/preparation';
 import type { PersonalInfo } from '../services/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
-import { readDroppedFiles } from '../services/chatOptions';
+import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { openChatLink } from '../services/chat';
 export function PreparationPage() {
@@ -83,6 +83,9 @@ export function PreparationPage() {
                           <div className="message-options">
                             <span>
                               {message.options.modelLabel || message.options.modelId}
+                              {message.options.effort
+                                ? ` · 思考：${effortLabels[message.options.effort]}`
+                                : ''}
                               {message.options.live ? '' : ' · Mock'}
                               {message.options.webSearch
                                 ? message.options.live
@@ -138,7 +141,14 @@ export function PreparationPage() {
                           </small>
                         )}
                         <div className="chat-answer">
-                          {message.content || '正在整理思路…'}
+                          {message.content ||
+                            (message.status === 'failed'
+                              ? '请求失败，未收到回答。'
+                              : message.status === 'stopped'
+                                ? '已停止回复。'
+                                : message.status === 'completed'
+                                  ? '服务未返回文本内容。'
+                                  : '正在等待回答…')}
                           {state.streaming &&
                             message.id === state.messages[state.messages.length - 1]?.id && (
                               <span className="typing-caret" />

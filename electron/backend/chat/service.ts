@@ -6,7 +6,9 @@ import type {
   ChatFailure,
   TokenUsage,
 } from '../../contracts/chat';
-import { readEvents } from './sse';
+import { responseEvents } from './responses';
+import { modelEfforts } from './models';
+import { reasoningEfforts } from '../../contracts/chat';
 import type { UsageLedger } from './usage';
 const base = 'https://api.openai.com/v1';
 const messages: Record<string, string> = {
@@ -93,6 +95,7 @@ export function validateRequest(value: unknown): ChatRequest {
     typeof request.modelId !== 'string' ||
     request.modelId.length > 160 ||
     typeof request.webSearch !== 'boolean' ||
+    (request.effort !== undefined && !reasoningEfforts.includes(request.effort)) ||
     typeof request.instructions !== 'string' ||
     request.instructions.length > 20000 ||
     !Array.isArray(request.turns) ||
@@ -209,6 +212,7 @@ export class ChatGPTService {
         id: model.slug,
         label: model.display_name.slice(0, 120),
         description: 'ChatGPT 账户可用模型',
+        reasoningEfforts: modelEfforts(model),
       });
     }
     if (!models.length) throw new Error('当前账户没有可用模型，请检查 ChatGPT 授权或套餐。');
@@ -225,6 +229,13 @@ export class ChatGPTService {
     signal.throwIfAborted();
     if (!models.some((model) => model.id === request.modelId))
       throw new Error('所选模型当前不可用，请刷新模型列表。');
+    if (
+      request.effort &&
+      !models
+        .find((model) => model.id === request.modelId)
+        ?.reasoningEfforts?.includes(request.effort)
+    )
+      throw new Error('所选模型不支持该思考强度，请选择自动或刷新模型列表。');
     const { token, account } = await this.dependencies.access();
     const response = await this.checked(
       await (this.dependencies.fetch ?? fetch)(`${base}/responses`, {
@@ -240,6 +251,7 @@ export class ChatGPTService {
           input: buildInput(request),
           store: false,
           stream: true,
+          ...(request.effort ? { reasoning: { effort: request.effort } } : {}),
           ...(request.webSearch
             ? {
                 tools: [{ type: 'web_search' }],
@@ -252,8 +264,6 @@ export class ChatGPTService {
         redirect: 'error',
       }),
     );
-    if (!response.body || !response.headers.get('content-type')?.includes('text/event-stream'))
-      throw new Error('未收到有效的流式回答。');
     const sources = new Map<string, ChatSource>();
     let usage: TokenUsage | null = null,
       completed = false,
@@ -263,8 +273,11 @@ export class ChatGPTService {
       if (source && sources.size < 50) sources.set(source.url, source);
     };
     let outputLength = 0;
-    for await (const event of readEvents(response.body, signal)) {
-      if (event.type === 'response.output_text.delta' && typeof event.delta === 'string') {
+    for await (const event of responseEvents(response, signal)) {
+      if (
+        ['response.output_text.delta', 'response.refusal.delta'].includes(event.type) &&
+        typeof event.delta === 'string'
+      ) {
         outputLength += event.delta.length;
         if (outputLength > 1000000) throw new Error('回答过长，已停止接收。');
         emit({ id: request.id, type: 'delta', text: event.delta });
@@ -274,6 +287,24 @@ export class ChatGPTService {
       if (event.type === 'response.output_text.annotation.added') addSource(event.annotation);
       if (['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) {
         const terminal = event.response;
+        if (!outputLength) {
+          const text = (terminal?.output ?? [])
+            .flatMap((item: any) => item.content ?? [])
+            .map((content: any) =>
+              content.type === 'output_text'
+                ? content.text
+                : content.type === 'refusal'
+                  ? content.refusal
+                  : '',
+            )
+            .filter((text: unknown) => typeof text === 'string')
+            .join('');
+          if (text) {
+            if (text.length > 1000000) throw new Error('回答过长，已停止接收。');
+            outputLength = text.length;
+            emit({ id: request.id, type: 'delta', text });
+          }
+        }
         usage = parseUsage(terminal?.usage);
         if (usage && typeof terminal.id === 'string') {
           try {

@@ -2,7 +2,19 @@ export interface ChatModel {
   id: string;
   label: string;
   description: string;
+  reasoningEfforts?: ReasoningEffort[];
 }
+export const reasoningEfforts = [
+  'none',
+  'minimal',
+  'low',
+  'medium',
+  'high',
+  'xhigh',
+  'max',
+  'ultra',
+] as const;
+export type ReasoningEffort = (typeof reasoningEfforts)[number];
 export interface TokenUsage {
   inputTokens: number;
   outputTokens: number;
@@ -35,6 +47,7 @@ export interface ChatTurn {
 export interface ChatRequest {
   id: string;
   modelId: string;
+  effort?: ReasoningEffort;
   webSearch: boolean;
   instructions: string;
   turns: ChatTurn[];

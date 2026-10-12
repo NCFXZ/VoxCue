@@ -90,3 +90,7 @@ ChatGPT 登录后，准备聊天使用真实 Responses 流式回答、账户返�
 依据 [模型与推理](https://developers.openai.com/siwc/token-sharing-open-source/models-and-inference)、[会话与续期](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions)及 [预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)实现。真实调用受账户资格、工作区和模型策略限制。此次真实账户验证被现有凭据解密失败阻断，尚未确认生产端到端成功；本地测试使用模拟 HTTP/SSE 响应验证协议。
 
 `pnpm test:conversations` 验证侧栏对话切换、取消删除、确认删除和新对话状态。`node scripts/chat-live-smoke.mjs --live` 是显式真实验证入口，会使用已有授权和少量账户用量；不属于默认自动化测试。
+
+输入框模型旁可选择 Effort（思考强度），默认“低 · 更快”，也可选择自动。不支持调整的模型显示禁用菜单。档位以账户公布的能力为优先，官方已确认的 GPT-6 型号提供保守回退；较低 effort 有利于降低延迟，但网络、工具和模型负载仍会影响速度。每条消息保留本次实际发送的选择。
+
+响应接收兼容 SSE 和合法的完整 Responses JSON；JSON 完整返回不会伪装成逐字流式输出。失败或停止后清除等待状态。`pnpm test:chat-response` 使用隔离的模拟传输检查界面、IPC 和原生服务链路，不代表生产账户验证成功。官方依据：[思考强度](https://developers.openai.com/api/docs/guides/reasoning)、[GPT-6 Luna](https://developers.openai.com/api/docs/models/gpt-6-luna)。

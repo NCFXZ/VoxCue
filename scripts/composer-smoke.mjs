@@ -33,6 +33,8 @@ try {
   );
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).click();
+  await page.getByRole('button', { name: '思考强度', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '高', exact: true }).click();
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'resume-draft.txt',
     mimeType: 'text/plain',
@@ -60,6 +62,7 @@ try {
   await page.locator('.chat-answer').getByText('尚未联网检索', { exact: false }).waitFor();
   assert.equal(await page.locator('.chat-attachment').count(), 0);
   await page.locator('.message-options').getByText('附件：project.md').waitFor();
+  await page.locator('.message-options').getByText('思考：高', { exact: false }).waitFor();
   await page.getByRole('button', { name: '停止回复', exact: true }).click();
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'bad.exe',

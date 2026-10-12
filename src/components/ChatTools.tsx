@@ -3,13 +3,16 @@ import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from './ui/button';
 import { Check, X, Globe, Folder, Paperclip, Plus, ChevronDown, Sparkles } from './icons';
 import { usePreparation } from '../stores/preparation';
-import { chatFileAccept } from '../services/chatOptions';
+import { chatFileAccept, effortLabels } from '../services/chatOptions';
+import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { useChatConnection } from '../stores/chatConnection';
 export function ChatTools() {
   const state = usePreparation();
   const connection = useChatConnection();
   const models = connection.models;
   const selected = models.find((model) => model.id === state.modelId) ?? models[0];
+  const efforts = selected?.reasoningEfforts ?? [];
+  const effort = efforts.includes(state.effort as ReasoningEffort) ? state.effort : 'auto';
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   return (
@@ -115,6 +118,43 @@ export function ChatTools() {
                 </DropdownMenu.Item>
               </>
             )}
+          </DropdownMenu.Content>
+        </DropdownMenu.Portal>
+      </DropdownMenu.Root>
+      <DropdownMenu.Root>
+        <DropdownMenu.Trigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            aria-label="思考强度"
+            disabled={!efforts.length}
+            title={!efforts.length ? '当前模型未提供可调整的思考强度' : '较低强度优先响应速度'}
+          >
+            Effort · {effortLabels[effort]}
+            <ChevronDown size={12} />
+          </Button>
+        </DropdownMenu.Trigger>
+        <DropdownMenu.Portal>
+          <DropdownMenu.Content
+            className="dropdown-content"
+            side="top"
+            align="start"
+            sideOffset={10}
+          >
+            <DropdownMenu.Label className="model-menu-label">思考强度</DropdownMenu.Label>
+            <DropdownMenu.RadioGroup
+              value={effort}
+              onValueChange={(value) => state.setEffort(value as ReasoningEffort | 'auto')}
+            >
+              {['auto' as const, ...efforts].map((value) => (
+                <DropdownMenu.RadioItem className="dropdown-item" key={value} value={value}>
+                  {effortLabels[value]}
+                  <DropdownMenu.ItemIndicator className="tool-menu-check">
+                    <Check size={14} />
+                  </DropdownMenu.ItemIndicator>
+                </DropdownMenu.RadioItem>
+              ))}
+            </DropdownMenu.RadioGroup>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
