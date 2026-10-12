@@ -1,6 +1,7 @@
 import { AudioLines, ArrowUp, Sparkles, Volume2, Check } from './icons';
 import { Button } from './ui/button';
 import { useAuth } from '../stores/auth';
+import chatGPTIcon from '../assets/chatgpt.svg';
 export function LoginPage() {
   const auth = useAuth();
   return (
@@ -19,7 +20,7 @@ export function LoginPage() {
                 void auth.signIn();
               }}
             >
-              <Sparkles size={18} />
+              <img className="chatgpt-icon" src={chatGPTIcon} alt="" aria-hidden="true" />
               {auth.waiting ? '等待浏览器授权…' : 'Continue with ChatGPT'}
             </Button>
             <p className="login-explanation">使用 ChatGPT 账户，在系统浏览器中安全授权。</p>

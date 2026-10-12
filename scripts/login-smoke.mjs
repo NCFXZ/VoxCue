@@ -48,6 +48,10 @@ try {
   await assertNoOuterMargin();
   await assertWindowSize([960, 580]);
   assert.equal(await page.locator('.titlebar').count(), 0);
+  assert.equal(
+    await page.locator('.chatgpt-icon').evaluate((icon) => icon.complete && icon.naturalWidth > 0),
+    true,
+  );
   const loginId = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].id);
   assert.equal(
     await page
