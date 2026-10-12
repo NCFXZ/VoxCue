@@ -4,6 +4,8 @@ import { Button } from './ui/button';
 import { usePreparation } from '../stores/preparation';
 import type { PersonalInfo } from '../services/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
+import { ProfileProposal } from './ProfileProposal';
+import { MarkdownContent } from './MarkdownContent';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { openChatLink } from '../services/chat';
@@ -141,57 +143,23 @@ export function PreparationPage() {
                           </small>
                         )}
                         <div className="chat-answer">
-                          {message.content ||
-                            (message.status === 'failed'
-                              ? '请求失败，未收到回答。'
-                              : message.status === 'stopped'
-                                ? '已停止回复。'
-                                : message.status === 'completed'
-                                  ? '服务未返回文本内容。'
-                                  : '正在等待回答…')}
+                          {message.content ? (
+                            <MarkdownContent content={message.content} />
+                          ) : message.status === 'failed' ? (
+                            '请求失败，未收到回答。'
+                          ) : message.status === 'stopped' ? (
+                            '已停止回复。'
+                          ) : message.status === 'completed' ? (
+                            '服务未返回文本内容。'
+                          ) : (
+                            '正在等待回答…'
+                          )}
                           {state.streaming &&
                             message.id === state.messages[state.messages.length - 1]?.id && (
                               <span className="typing-caret" />
                             )}
                         </div>
-                        {message.status === 'completed' &&
-                          message.changes &&
-                          Object.keys(message.changes).length > 0 && (
-                            <div className="profile-proposal">
-                              <strong>待确认的资料更新</strong>
-                              {Object.entries(message.changes).map(([key, value]) => (
-                                <p key={key}>
-                                  <span>
-                                    {
-                                      (
-                                        {
-                                          name: '姓名',
-                                          role: '目标岗位',
-                                          jobDescription: '岗位描述',
-                                          background: '个人背景',
-                                        } as Record<string, string>
-                                      )[key]
-                                    }
-                                  </span>
-                                  {value}
-                                </p>
-                              ))}
-                              <Button
-                                variant="outline"
-                                disabled={message.applied}
-                                onClick={() => state.updateInfo(message.changes!, message.id)}
-                              >
-                                {message.applied ? (
-                                  <>
-                                    <Check size={13} />
-                                    已更新
-                                  </>
-                                ) : (
-                                  '确认更新'
-                                )}
-                              </Button>
-                            </div>
-                          )}
+                        <ProfileProposal message={message} />
                         {message.content && (
                           <Button
                             variant="ghost"

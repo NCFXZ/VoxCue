@@ -91,7 +91,7 @@ export async function* responseEvents(response: Response, signal: AbortSignal) {
           if (content.type === 'output_text' && typeof content.text === 'string')
             yield { type: 'response.output_text.delta', delta: content.text };
           if (content.type === 'refusal' && typeof content.refusal === 'string')
-            yield { type: 'response.output_text.delta', delta: content.refusal };
+            yield { type: 'response.refusal.delta', delta: content.refusal };
         }
       yield { type: `response.${value.status}`, response: value };
       return;

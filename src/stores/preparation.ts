@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import {
   mockPreparation,
   extractProfileChanges,
+  needsProfileReview,
   type ChatMessage,
   type PersonalInfo,
 } from '../services/preparation';
@@ -10,6 +11,7 @@ import { stageAttachments, type ChatAttachment } from '../services/chatOptions';
 import { useChatConnection } from './chatConnection';
 import { streamChat } from '../services/chat';
 import type { ChatRequest, ReasoningEffort } from '../../electron/contracts/chat';
+import { validProfile, validateChanges } from '../../electron/contracts/profile';
 const emptyInfo: PersonalInfo = { name: '', role: '', jobDescription: '', background: '' };
 let controller: AbortController | undefined;
 interface PreparationState {
@@ -37,6 +39,7 @@ interface PreparationState {
   reset(): void;
   stop(): void;
   updateInfo(info: Partial<PersonalInfo>, messageId?: string): boolean;
+  dismissProfile(messageId: string): void;
   uploadResume(file: File): Promise<void>;
   removeResume(): Promise<void>;
 }
@@ -104,7 +107,28 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   },
   updateInfo(info, messageId) {
     try {
+      if (messageId) {
+        const proposal = get().messages.find((message) => message.id === messageId);
+        if (
+          !proposal ||
+          proposal.status !== 'completed' ||
+          proposal.applied ||
+          proposal.dismissed ||
+          !proposal.profileBase
+        )
+          throw new Error('这份资料提案已失效，请重新整理。');
+        info = validateChanges(proposal.changes);
+        if (
+          Object.keys(info).some(
+            (key) =>
+              get().info[key as keyof PersonalInfo] !==
+              proposal.profileBase![key as keyof PersonalInfo],
+          )
+        )
+          throw new Error('个人信息已变化，为避免覆盖较新的修改，请重新生成提案。');
+      }
       const merged = { ...get().info, ...info };
+      if (!validProfile(merged)) throw new Error('个人信息格式无效或内容过长。');
       localStorage.setItem('copilot-personal-info-v1', JSON.stringify(merged));
       set((state) => ({
         info: merged,
@@ -114,10 +138,22 @@ export const usePreparation = create<PreparationState>((set, get) => ({
         ),
       }));
       return true;
-    } catch {
-      set({ error: '资料保存失败，请检查本地存储空间。' });
+    } catch (error) {
+      set({
+        error:
+          error instanceof Error && /[\u4e00-\u9fff]/.test(error.message)
+            ? error.message
+            : '资料保存失败，请检查本地存储空间。',
+      });
       return false;
     }
+  },
+  dismissProfile(messageId) {
+    set((state) => ({
+      messages: state.messages.map((message) =>
+        message.id === messageId && !message.applied ? { ...message, dismissed: true } : message,
+      ),
+    }));
   },
   async send(prompt) {
     if ((!prompt.trim() && !get().attachments.length) || get().streaming) return;
@@ -139,6 +175,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       attachments: [...get().attachments],
     };
     const text = prompt.trim() || '请帮我整理这些附件。';
+    const profileBase = { ...get().info };
     if (!get().activeConversation) {
       const conversationId = crypto.randomUUID();
       set((state) => ({
@@ -160,7 +197,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           id,
           role: 'assistant',
           content: '',
-          changes: extractProfileChanges(prompt),
+          changes: connection.live ? undefined : extractProfileChanges(prompt),
+          profileBase,
           mode: connection.live ? 'live' : 'mock',
           status: 'streaming',
         },
@@ -171,7 +209,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     }));
     try {
       if (connection.live) {
-        const info = get().info;
+        const reviewProfile = needsProfileReview(prompt, options.attachments.length);
         const turns = await Promise.all(
           get()
             .messages.filter(
@@ -199,7 +237,12 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           effort: options.effort,
           webSearch: options.webSearch,
           turns,
-          instructions: `你是 AI Interview Copilot，帮助用户准备面试、改善简历表达和整理项目经历。使用中文回答，避免捏造个人经历或成绩。资料更新需要用户明确确认。引用搜索来源，区分事实与建议。以下是用户主动保存的个人资料，作为参考信息：\n${JSON.stringify(info)}`,
+          profile: reviewProfile ? profileBase : undefined,
+          instructions:
+            '你是 AI Interview Copilot，帮助用户准备面试、改善简历表达和整理项目经历。使用中文 Markdown 回答，避免捏造个人经历或成绩。资料更新需要用户明确确认。引用搜索来源，区分事实与建议。' +
+            (reviewProfile
+              ? ''
+              : `以下是用户主动保存的个人资料，作为参考信息：\n${JSON.stringify(profileBase)}`),
         };
         const result = await streamChat(
           request,
@@ -226,7 +269,13 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           error: result.warning ?? null,
           messages: state.messages.map((message) =>
             message.id === id
-              ? { ...message, sources: result.sources, usage: result.usage, status: 'completed' }
+              ? {
+                  ...message,
+                  changes: validateChanges(result.profileChanges ?? {}),
+                  sources: result.sources,
+                  usage: result.usage,
+                  status: 'completed',
+                }
               : message,
           ),
         }));

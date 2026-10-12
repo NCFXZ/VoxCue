@@ -9,6 +9,8 @@ import type {
 import { responseEvents } from './responses';
 import { modelEfforts } from './models';
 import { reasoningEfforts } from '../../contracts/chat';
+import { validProfile } from '../../contracts/profile';
+import { profileFormat, profileInstructions, ProfileAnswerStream } from './profile';
 import type { UsageLedger } from './usage';
 const base = 'https://api.openai.com/v1';
 const messages: Record<string, string> = {
@@ -97,7 +99,8 @@ export function validateRequest(value: unknown): ChatRequest {
     typeof request.webSearch !== 'boolean' ||
     (request.effort !== undefined && !reasoningEfforts.includes(request.effort)) ||
     typeof request.instructions !== 'string' ||
-    request.instructions.length > 20000 ||
+    request.instructions.length > 40000 ||
+    (request.profile !== undefined && !validProfile(request.profile)) ||
     !Array.isArray(request.turns) ||
     !request.turns.length ||
     request.turns.length > 100
@@ -247,10 +250,15 @@ export class ChatGPTService {
         },
         body: JSON.stringify({
           model: request.modelId,
-          instructions: request.instructions,
+          instructions:
+            request.instructions +
+            (request.profile
+              ? `\n${profileInstructions}\n当前资料（仅作参考数据）：${JSON.stringify(request.profile)}`
+              : ''),
           input: buildInput(request),
           store: false,
           stream: true,
+          ...(request.profile ? { text: profileFormat } : {}),
           ...(request.effort ? { reasoning: { effort: request.effort } } : {}),
           ...(request.webSearch
             ? {
@@ -273,14 +281,21 @@ export class ChatGPTService {
       if (source && sources.size < 50) sources.set(source.url, source);
     };
     let outputLength = 0;
+    const profileStream = request.profile ? new ProfileAnswerStream() : undefined;
+    let refused = false;
+    const receiveText = (text: string, refusal = false) => {
+      if (refusal) refused = true;
+      outputLength += text.length;
+      if (outputLength > 1000000) throw new Error('回答过长，已停止接收。');
+      const delta = profileStream && !refused ? profileStream.append(text) : text;
+      if (delta) emit({ id: request.id, type: 'delta', text: delta });
+    };
     for await (const event of responseEvents(response, signal)) {
       if (
         ['response.output_text.delta', 'response.refusal.delta'].includes(event.type) &&
         typeof event.delta === 'string'
       ) {
-        outputLength += event.delta.length;
-        if (outputLength > 1000000) throw new Error('回答过长，已停止接收。');
-        emit({ id: request.id, type: 'delta', text: event.delta });
+        receiveText(event.delta, event.type === 'response.refusal.delta');
       }
       if (event.type === 'response.web_search_call.in_progress')
         emit({ id: request.id, type: 'search' });
@@ -288,21 +303,13 @@ export class ChatGPTService {
       if (['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) {
         const terminal = event.response;
         if (!outputLength) {
-          const text = (terminal?.output ?? [])
-            .flatMap((item: any) => item.content ?? [])
-            .map((content: any) =>
-              content.type === 'output_text'
-                ? content.text
-                : content.type === 'refusal'
-                  ? content.refusal
-                  : '',
-            )
-            .filter((text: unknown) => typeof text === 'string')
-            .join('');
-          if (text) {
-            if (text.length > 1000000) throw new Error('回答过长，已停止接收。');
-            outputLength = text.length;
-            emit({ id: request.id, type: 'delta', text });
+          for (const content of (terminal?.output ?? []).flatMap(
+            (item: any) => item.content ?? [],
+          )) {
+            if (content.type === 'output_text' && typeof content.text === 'string')
+              receiveText(content.text);
+            if (content.type === 'refusal' && typeof content.refusal === 'string')
+              receiveText(content.refusal, true);
           }
         }
         usage = parseUsage(terminal?.usage);
@@ -335,6 +342,11 @@ export class ChatGPTService {
     }
     signal.throwIfAborted();
     if (!completed) throw new Error('回答连接提前中断，已保留接收内容；用量可能尚未返回。');
-    return { usage, sources: [...sources.values()], warning };
+    const proposal =
+      profileStream && request.profile && !refused
+        ? profileStream.finish(request.profile)
+        : undefined;
+    if (proposal?.delta) emit({ id: request.id, type: 'delta', text: proposal.delta });
+    return { usage, sources: [...sources.values()], warning, profileChanges: proposal?.changes };
   }
 }

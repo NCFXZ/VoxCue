@@ -1,18 +1,16 @@
 import { wait } from './mock';
 import type { ChatRequestOptions } from './chatOptions';
 import type { ChatSource, TokenUsage } from '../../electron/contracts/chat';
-export interface PersonalInfo {
-  name: string;
-  role: string;
-  jobDescription: string;
-  background: string;
-}
+import type { PersonalInfo } from '../../electron/contracts/profile';
+export type { PersonalInfo } from '../../electron/contracts/profile';
 export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
   changes?: Partial<PersonalInfo>;
   applied?: boolean;
+  dismissed?: boolean;
+  profileBase?: PersonalInfo;
   options?: ChatRequestOptions;
   mode?: 'live' | 'mock';
   sources?: ChatSource[];
@@ -37,6 +35,14 @@ export function extractProfileChanges(prompt: string): Partial<PersonalInfo> {
   if (role) changes.role = role.slice(0, 100);
   if (jd) changes.jobDescription = jd.slice(0, 10000);
   return changes;
+}
+export function needsProfileReview(prompt: string, attachmentCount: number) {
+  return (
+    attachmentCount > 0 ||
+    /个人信息|个人资料|更新.{0,12}(?:简历|资料|岗位|JD|背景)|(?:姓名|目标岗位|岗位|职位|岗位描述|职位描述|JD)[：:]/i.test(
+      prompt,
+    )
+  );
 }
 export const mockPreparation: PreparationChatService = {
   async streamReply(prompt, info, onChunk, signal, options) {

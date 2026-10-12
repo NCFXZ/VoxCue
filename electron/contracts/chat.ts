@@ -1,3 +1,4 @@
+import type { PersonalInfo, ProfileChanges } from './profile';
 export interface ChatModel {
   id: string;
   label: string;
@@ -51,13 +52,20 @@ export interface ChatRequest {
   webSearch: boolean;
   instructions: string;
   turns: ChatTurn[];
+  profile?: PersonalInfo;
 }
 export type ChatEvent =
   | { id: string; type: 'delta'; text: string }
   | { id: string; type: 'search' }
   | { id: string; type: 'sources'; sources: ChatSource[] };
 export type ChatResult =
-  | { ok: true; usage: TokenUsage | null; sources: ChatSource[]; warning?: string }
+  | {
+      ok: true;
+      usage: TokenUsage | null;
+      sources: ChatSource[];
+      warning?: string;
+      profileChanges?: ProfileChanges;
+    }
   | { ok: false; error: ChatFailure };
 export const emptyUsage = (): AppUsage => ({
   inputTokens: 0,

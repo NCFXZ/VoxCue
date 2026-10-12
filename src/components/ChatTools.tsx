@@ -1,7 +1,7 @@
 import { useRef } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from './ui/button';
-import { Check, X, Globe, Folder, Paperclip, Plus, ChevronDown, Sparkles } from './icons';
+import { Check, X, Globe, Folder, Paperclip, Plus, ChevronDown } from './icons';
 import { usePreparation } from '../stores/preparation';
 import { chatFileAccept, effortLabels } from '../services/chatOptions';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
@@ -54,7 +54,7 @@ export function ChatTools() {
       <Button
         type="button"
         variant="ghost"
-        className={state.webSearch ? 'search-enabled' : ''}
+        className={`composer-tool ${state.webSearch ? 'search-enabled' : ''}`}
         aria-pressed={state.webSearch}
         onClick={() => state.setWebSearch(!state.webSearch)}
       >
@@ -63,7 +63,12 @@ export function ChatTools() {
       </Button>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
-          <Button type="button" variant="ghost" className="model-trigger" aria-label="聊天模型">
+          <Button
+            type="button"
+            variant="ghost"
+            className="composer-tool model-trigger"
+            aria-label="聊天模型"
+          >
             <span>{selected?.label ?? (connection.loading ? '加载模型…' : '模型不可用')}</span>
             {!connection.live && <span className="tool-mock">Mock</span>}
             <ChevronDown size={12} />
@@ -71,14 +76,11 @@ export function ChatTools() {
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content
-            className="dropdown-content model-menu"
+            className="dropdown-content compact-tool-menu model-menu"
             side="top"
             align="start"
             sideOffset={10}
           >
-            <DropdownMenu.Label className="model-menu-label">
-              选择模型<span>{connection.live ? 'ChatGPT' : '模拟'}</span>
-            </DropdownMenu.Label>
             <DropdownMenu.RadioGroup value={selected?.id} onValueChange={state.setModel}>
               {models.map((model) => (
                 <DropdownMenu.RadioItem
@@ -86,13 +88,7 @@ export function ChatTools() {
                   value={model.id}
                   key={model.id}
                 >
-                  <span className="model-option-icon">
-                    <Sparkles size={16} />
-                  </span>
-                  <span>
-                    <strong>{model.label}</strong>
-                    <small>{model.description}</small>
-                  </span>
+                  <span className="model-name">{model.label}</span>
                   <DropdownMenu.ItemIndicator className="model-check">
                     <Check size={15} />
                   </DropdownMenu.ItemIndicator>
@@ -126,6 +122,7 @@ export function ChatTools() {
           <Button
             type="button"
             variant="ghost"
+            className="composer-tool effort-trigger"
             aria-label="思考强度"
             disabled={!efforts.length}
             title={!efforts.length ? '当前模型未提供可调整的思考强度' : '较低强度优先响应速度'}
@@ -136,7 +133,7 @@ export function ChatTools() {
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content
-            className="dropdown-content"
+            className="dropdown-content compact-tool-menu effort-menu"
             side="top"
             align="start"
             sideOffset={10}
