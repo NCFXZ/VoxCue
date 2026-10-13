@@ -1,13 +1,30 @@
-import { app, BrowserWindow, dialog, ipcMain, shell, screen } from 'electron';
+import { app, BrowserWindow, dialog, shell, screen, systemPreferences } from 'electron';
 import path from 'node:path';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { createAuthStorage } from './backend/auth/storage';
-import { ChatGPTService, publicFailure, validSource } from './backend/chat/service';
+import { ChatGPTService } from './backend/chat/service';
 import { UsageLedger } from './backend/chat/usage';
-import { emptyUsage, type ChatRequest, type ChatResult } from './contracts/chat';
+import { registerChatIpc } from './ipc/chat';
+import { registerInterviewIpc } from './ipc/interview';
+import { registerHistoryIpc } from './ipc/history';
+import { writeFile } from 'node:fs/promises';
+import { SpeechHost } from './backend/speech/host';
+import { InterviewAccess } from './backend/speech/access';
+import { devices, probeDevice } from './backend/speech/capture';
+import { validateSpeech } from './backend/speech/validation';
+import {
+  SpeechCoordinator,
+  validateInterviewConfiguration,
+  validateInterviewModel,
+} from './application/speech';
+import { handleDesktop, onDesktop, sendDesktop } from './ipc/handle';
 let auth: ChatGPTAuthService;
 let chat: ChatGPTService;
-let activeChat: { id: string; controller: AbortController } | undefined;
+let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
+let interviewIpc: ReturnType<typeof registerInterviewIpc> | undefined;
+let historyJobs: ReturnType<typeof registerHistoryIpc> | undefined;
+let speech: SpeechHost | undefined;
+let speechSessions: SpeechCoordinator | undefined;
 let demoSession = false;
 
 let mainWindow: BrowserWindow | null = null;
@@ -18,7 +35,12 @@ let captureProtected = true;
 let interviewCollapsed = false;
 let expandedBounds: Electron.Rectangle | undefined;
 let interviewCloseApproved = false;
-const appIcon = path.join(app.getAppPath(), 'public/voxcue.png');
+let interviewResize:
+  { bounds: Electron.Rectangle; pointer: Electron.Point; edge: 'left' | 'right' } | undefined;
+const appIcon = path.join(
+  app.getAppPath(),
+  process.platform === 'win32' ? 'public/voxcue.ico' : 'public/voxcue.png',
+);
 // Keep existing profiles, credentials, knowledge and usage after the product rename.
 app.setPath('userData', path.join(app.getPath('appData'), 'ai-interview-copilot'));
 app.setName('VoxCue');
@@ -83,7 +105,8 @@ function openInterview() {
     backgroundColor: '#00000000',
     alwaysOnTop: true,
     show: false,
-    title: 'VoxCue · 模拟面试',
+    title: 'VoxCue · 面试',
+    resizable: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
@@ -95,7 +118,7 @@ function openInterview() {
   win.on('close', (event) => {
     if (!closingMain && !interviewCloseApproved) {
       event.preventDefault();
-      win.webContents.send('interview:request-end');
+      sendDesktop(win.webContents, 'interview:request-end');
     }
   });
   win.setContentProtection(true);
@@ -103,6 +126,9 @@ function openInterview() {
   win.webContents.on('will-navigate', (event) => event.preventDefault());
   win.once('ready-to-show', () => {
     win.show();
+    // Electron 38 on Windows: the default "floating" level can report and stay
+    // non-topmost. Explicit normal uses the standard Windows topmost behavior.
+    win.setAlwaysOnTop(true, 'normal');
     mainWindow?.minimize();
   });
   if (process.env.VITE_DEV_SERVER_URL)
@@ -110,11 +136,17 @@ function openInterview() {
   else void win.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'interview' });
   win.on('closed', () => {
     interviewWindow = null;
+    speechSessions?.releaseInterview(true);
+    interviewIpc?.cancel();
     captureProtected = true;
     if (!closingMain) {
       mainWindow?.restore();
       mainWindow?.focus();
     }
+  });
+  win.webContents.on('did-start-loading', () => {
+    speechSessions?.releaseInterview();
+    interviewIpc?.cancel();
   });
 }
 // Keep smoke tests isolated from the user's actual local documents and settings.
@@ -124,8 +156,8 @@ function createMainWindow() {
   closingMain = false;
   mainWindow = new BrowserWindow({
     icon: appIcon,
-    width: 1360,
-    height: 900,
+    width: 1280,
+    height: 800,
     minWidth: 960,
     minHeight: 680,
     frame: false,
@@ -150,16 +182,39 @@ function createMainWindow() {
   if (devUrl) void mainWindow.loadURL(devUrl);
   else void mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
   mainWindow.on('closed', () => {
+    speechSessions?.releaseDictation();
     mainWindow = null;
   });
+  mainWindow.webContents.on('did-start-loading', () => speechSessions?.releaseDictation());
   mainWindow.on('close', () => {
-    activeChat?.controller.abort();
+    speechSessions?.releaseDictation();
+    chatIpc?.cancelActive();
     auth.cancel();
     closingMain = true;
     interviewWindow?.close();
   });
 }
 app.whenReady().then(() => {
+  const systemAccent = () => {
+    try {
+      const color = systemPreferences.getAccentColor();
+      return /^[a-f0-9]{8}$/i.test(color) ? '#' + color.slice(0, 6) : null;
+    } catch {
+      return null;
+    }
+  };
+  handleDesktop('appearance:accent', (event) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || ![loginWindow, mainWindow, interviewWindow].includes(win))
+      throw new Error('Unauthorized window');
+    return systemAccent();
+  });
+  systemPreferences.on('accent-color-changed', () => {
+    const color = systemAccent();
+    for (const win of [loginWindow, mainWindow, interviewWindow])
+      if (win && !win.isDestroyed())
+        sendDesktop(win.webContents, 'appearance:accent-changed', color);
+  });
   auth = new ChatGPTAuthService({
     storage: createAuthStorage(),
     openBrowser: (url) => shell.openExternal(url),
@@ -174,26 +229,31 @@ app.whenReady().then(() => {
   const requireLogin = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender !== loginWindow?.webContents) throw new Error('Unauthorized window');
   };
-  ipcMain.handle('auth:session', async (event) => {
+  handleDesktop('auth:session', async (event) => {
     if (event.sender !== loginWindow?.webContents) requireMain(event);
     const session = demoSession
-      ? { mode: 'demo', user: { id: 'local-demo', name: '本地用户', email: '' }, expiresAt: null }
+      ? {
+          mode: 'demo' as const,
+          user: { id: 'local-demo', name: '本地用户', email: '' },
+          expiresAt: null,
+        }
       : await auth.session();
     return session;
   });
-  ipcMain.handle('auth:sign-in', async (event) => {
+  handleDesktop('auth:sign-in', async (event) => {
     requireLogin(event);
     demoSession = false;
     const session = await auth.signIn();
     createMainWindow();
     return session;
   });
-  ipcMain.handle('auth:cancel', (event) => {
+  handleDesktop('auth:cancel', (event) => {
     requireLogin(event);
     auth.cancel();
   });
-  ipcMain.handle('auth:demo', (event) => {
+  handleDesktop('auth:demo', (event) => {
     requireLogin(event);
+    if (app.isPackaged || !process.env.COPILOT_TEST_USER_DATA) throw Error('测试入口不可用。');
     if (auth.isPending()) throw new Error('请先取消 ChatGPT 登录。');
     demoSession = true;
     createMainWindow();
@@ -203,9 +263,10 @@ app.whenReady().then(() => {
       expiresAt: null,
     };
   });
-  ipcMain.handle('auth:sign-out', async (event) => {
+  handleDesktop('auth:sign-out', async (event) => {
     requireMain(event);
-    activeChat?.controller.abort();
+    historyJobs?.cancelAll();
+    chatIpc?.cancelActive();
     interviewCloseApproved = true;
     interviewWindow?.close();
     if (demoSession) {
@@ -224,101 +285,183 @@ app.whenReady().then(() => {
     createLoginWindow();
     return result;
   });
-  ipcMain.handle('chat:models', async (event, force: unknown) => {
-    requireMain(event);
-    if (demoSession) return { ok: true, models: [] };
-    try {
-      return { ok: true, models: await chat.models(force === true) };
-    } catch (error) {
-      return { ok: false, error: publicFailure(error) };
-    }
+  chatIpc = registerChatIpc({
+    chat,
+    requireMain,
+    isDemo: () => demoSession,
+    openLink: (url) => shell.openExternal(url),
   });
-  ipcMain.handle('chat:usage', async (event) => {
-    requireMain(event);
-    if (demoSession) return { ok: true, usage: emptyUsage() };
-    try {
-      return { ok: true, usage: await chat.usage() };
-    } catch (error) {
-      return { ok: false, error: publicFailure(error) };
-    }
+  const requireInterview = (event: Electron.IpcMainInvokeEvent) => {
+    if (
+      event.sender !== interviewWindow?.webContents ||
+      event.senderFrame !== event.sender.mainFrame
+    )
+      throw Error('Unauthorized window');
+  };
+  interviewIpc = registerInterviewIpc({
+    chat,
+    requireInterview,
+    isDemo: () => demoSession,
+    configuration: () => speechSessions?.configuration,
   });
-  ipcMain.handle('chat:send', async (event, request: unknown): Promise<ChatResult> => {
-    requireMain(event);
-    if (demoSession)
-      return { ok: false, error: { message: '请使用 ChatGPT 登录后调用真实模型。' } };
-    if (activeChat) return { ok: false, error: { message: '请等待当前回答完成或停止后重试。' } };
-    const controller = new AbortController();
-    const active = { id: (request as ChatRequest)?.id, controller };
-    activeChat = active;
-    try {
-      const result = await chat.stream(
-        request,
-        (value) => {
-          if (!controller.signal.aborted && !event.sender.isDestroyed())
-            event.sender.send('chat:event', value);
-        },
-        controller.signal,
-      );
-      return { ok: true, ...result };
-    } catch (error) {
-      return { ok: false, error: publicFailure(error) };
-    } finally {
-      if (activeChat === active) activeChat = undefined;
-    }
+  historyJobs = registerHistoryIpc({
+    chat,
+    requireMain,
+    authorizeTitle(event) {
+      if (event.senderFrame !== event.sender.mainFrame || demoSession)
+        throw Error('请先连接 ChatGPT。');
+      if (event.sender === mainWindow?.webContents) {
+        requireMain(event);
+        return undefined;
+      }
+      requireInterview(event);
+      const configuration = speechSessions?.configuration;
+      if (!configuration?.aiEnabled) throw Error('请先连接 ChatGPT。');
+      return configuration.modelId;
+    },
+    emit(event) {
+      for (const win of [mainWindow, interviewWindow])
+        if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'history:title', event);
+    },
+    async exportFile(event, request) {
+      const win = BrowserWindow.fromWebContents(event.sender)!;
+      const name =
+        request.title
+          .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
+          .replace(/[. ]+$/g, '')
+          .slice(0, 100) || '面试记录';
+      const result = await dialog.showSaveDialog(win, {
+        title: '导出面试记录',
+        defaultPath: path.join(app.getPath('downloads'), name + '.txt'),
+        filters: [{ name: '文本文件', extensions: ['txt'] }],
+      });
+      if (result.canceled || !result.filePath) return false;
+      await writeFile(result.filePath, '\uFEFF' + request.text, 'utf8');
+      return true;
+    },
   });
-  ipcMain.handle('chat:cancel', (event, id: unknown) => {
-    requireMain(event);
-    if (typeof id === 'string' && activeChat?.id === id) activeChat.controller.abort();
+  const audioHelper = app.isPackaged
+    ? path.join(process.resourcesPath, 'native/VoxCue.Audio.exe')
+    : path.join(app.getAppPath(), 'native/bin/VoxCue.Audio.exe');
+  const interviewAccess = new InterviewAccess({
+    platform: process.platform,
+    microphonePermission: () => systemPreferences.getMediaAccessStatus('microphone'),
+    devices: () => devices(audioHelper),
+    probe: (source, device) => probeDevice(audioHelper, source, device),
   });
-  ipcMain.handle('chat:open-link', async (event, value: unknown) => {
-    requireMain(event);
-    const source = validSource({ url: value });
-    if (!source) throw new Error('无效的链接。');
-    await shell.openExternal(source.url);
+  speech = new SpeechHost(
+    app.isPackaged
+      ? path.join(process.resourcesPath, 'models/speech')
+      : path.join(app.getAppPath(), 'local-models/speech'),
+    audioHelper,
+    (event) => {
+      if (speechSessions?.target === 'dictation' && mainWindow && !mainWindow.isDestroyed())
+        sendDesktop(mainWindow.webContents, 'dictation:event', event);
+      if (
+        speechSessions?.target === 'interview' &&
+        interviewWindow &&
+        !interviewWindow.isDestroyed()
+      )
+        sendDesktop(interviewWindow.webContents, 'speech:event', event);
+    },
+  );
+  speechSessions = new SpeechCoordinator(speech);
+  handleDesktop('speech:call', (event, value: unknown) => {
+    const call = validateSpeech(value);
+    if (
+      event.sender === mainWindow?.webContents &&
+      event.senderFrame === event.sender.mainFrame &&
+      call.op === 'devices'
+    )
+      return speech!.call(call);
+    requireInterview(event);
+    return speechSessions!.interview(call);
   });
-  ipcMain.handle('interview:open', async (event) => {
-    if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
+  handleDesktop('dictation:call', (event, value: unknown) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    return speechSessions!.dictation(value);
+  });
+  handleDesktop('interview:check-access', async (event, value: unknown) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    const configuration = validateInterviewConfiguration(value);
+    if (configuration.mode !== 'local') throw Error('请选择本地音频设备。');
+    return interviewAccess.check(configuration.options);
+  });
+  handleDesktop('interview:microphone-settings', (event) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame || process.platform !== 'win32')
+      throw Error('Invalid request');
+    return shell.openExternal('ms-settings:privacy-microphone');
+  });
+  handleDesktop('interview:open', async (event, value: unknown) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     if (!demoSession && !(await auth.session())) throw new Error('Please sign in first');
+    const configuration = validateInterviewConfiguration(value);
+    if (!demoSession && (configuration.mode !== 'local' || !configuration.aiEnabled))
+      throw Error('请先连接 ChatGPT 并选择回答模型。');
+    if (configuration.aiEnabled) {
+      if (demoSession) throw Error('请先登录 ChatGPT 并选择账户可用的回答模型。');
+      validateInterviewModel(configuration, await chat.models(false));
+    }
+    if (configuration.mode === 'local') {
+      const access = await interviewAccess.check(configuration.options);
+      if (!access.ready)
+        throw Error(
+          access.checks
+            .filter((check) => check.status !== 'granted')
+            .map((check) => check.message)
+            .join('\n'),
+        );
+    }
+    await speechSessions!.confirm(configuration);
     openInterview();
   });
-  ipcMain.handle('interview:state', (event) => {
-    if (event.sender !== interviewWindow?.webContents) throw new Error('Unauthorized window');
+  handleDesktop('interview:state', (event) => {
+    requireInterview(event);
     return {
       protected: captureProtected,
-      pinned: interviewWindow.isAlwaysOnTop(),
+      pinned: interviewWindow!.isAlwaysOnTop(),
       supported: process.platform === 'win32',
       collapsed: interviewCollapsed,
+      configuration: speechSessions!.configuration!,
     };
   });
-  ipcMain.handle('interview:capture', (event, allowed: unknown) => {
+  handleDesktop('interview:capture', (event, allowed: unknown) => {
     if (event.sender !== interviewWindow?.webContents || typeof allowed !== 'boolean')
       throw new Error('Invalid request');
     interviewWindow.setContentProtection(!allowed);
     captureProtected = !allowed;
     return captureProtected;
   });
-  ipcMain.handle('interview:pin', (event) => {
-    if (event.sender !== interviewWindow?.webContents) throw new Error('Unauthorized window');
-    const pinned = !interviewWindow.isAlwaysOnTop();
-    interviewWindow.setAlwaysOnTop(pinned);
-    return pinned;
+  handleDesktop('interview:pin', (event) => {
+    requireInterview(event);
+    interviewWindow!.setAlwaysOnTop(true, 'normal');
+    return interviewWindow!.isAlwaysOnTop();
   });
-  ipcMain.handle('interview:collapse', (event) => {
+  handleDesktop('interview:collapse', (event) => {
     if (event.sender !== interviewWindow?.webContents) throw new Error('Unauthorized window');
     const win = interviewWindow;
     if (!interviewCollapsed) {
       expandedBounds = win.getBounds();
-      win.setMinimumSize(660, 72);
+      interviewResize = undefined;
+      win.setMinimumSize(420, 72);
       win.setResizable(false);
-      win.setBounds({ ...expandedBounds, width: 660, height: 72 });
+      win.setBounds({
+        x: Math.round(expandedBounds.x + (expandedBounds.width - 420) / 2),
+        y: expandedBounds.y,
+        width: 420,
+        height: 72,
+      });
     } else {
-      win.setResizable(true);
+      win.setResizable(false);
       win.setMinimumSize(800, 490);
       const bounds = expandedBounds!;
-      const area = screen.getDisplayMatching(win.getBounds()).workArea;
       win.setBounds({
-        x: Math.max(area.x, Math.min(win.getBounds().x, area.x + area.width - bounds.width)),
-        y: Math.max(area.y, Math.min(win.getBounds().y, area.y + area.height - bounds.height)),
+        x: Math.round(win.getBounds().x + win.getBounds().width / 2 - bounds.width / 2),
+        y: win.getBounds().y,
         width: bounds.width,
         height: bounds.height,
       });
@@ -326,10 +469,51 @@ app.whenReady().then(() => {
     interviewCollapsed = !interviewCollapsed;
     return interviewCollapsed;
   });
-  ipcMain.handle('interview:resize', (event, direction: unknown) => {
-    if (event.sender !== interviewWindow?.webContents || (direction !== -1 && direction !== 1))
-      throw new Error('Invalid request');
+  handleDesktop('interview:resize', (event, direction: unknown) => {
+    requireInterview(event);
+    if (!interviewWindow) throw new Error('Invalid request');
     if (interviewCollapsed) return;
+    if (direction && typeof direction === 'object') {
+      const change = direction as { phase?: unknown; edge?: unknown };
+      if (change.phase === 'end') {
+        interviewResize = undefined;
+        return;
+      }
+      if (change.phase === 'start' && (change.edge === 'left' || change.edge === 'right')) {
+        interviewResize = {
+          bounds: interviewWindow.getBounds(),
+          pointer: screen.getCursorScreenPoint(),
+          edge: change.edge,
+        };
+        return;
+      }
+      if (change.phase !== 'move') throw new Error('Invalid resize');
+      if (!interviewResize) return;
+      const { bounds, pointer, edge } = interviewResize;
+      const current = screen.getCursorScreenPoint();
+      const area = screen.getDisplayMatching(bounds).workArea;
+      const center = bounds.x + bounds.width / 2;
+      const maximumWidth = Math.floor(2 * Math.min(center - area.x, area.x + area.width - center));
+      const width = Math.max(
+        Math.min(800, maximumWidth),
+        Math.min(
+          maximumWidth,
+          bounds.width + (current.x - pointer.x) * (edge === 'right' ? 2 : -2),
+        ),
+      );
+      const height = Math.max(
+        Math.min(490, area.height),
+        Math.min(area.y + area.height - bounds.y, bounds.height + current.y - pointer.y),
+      );
+      interviewWindow.setBounds({
+        x: Math.round(center - width / 2),
+        y: bounds.y,
+        width: Math.round(width),
+        height: Math.round(height),
+      });
+      return;
+    }
+    if (direction !== -1 && direction !== 1) throw new Error('Invalid request');
     const bounds = interviewWindow.getBounds();
     const area = screen.getDisplayMatching(bounds).workArea;
     const width = Math.max(800, Math.min(area.width, bounds.width + direction * 100));
@@ -341,12 +525,12 @@ app.whenReady().then(() => {
       y: Math.max(area.y, Math.min(bounds.y, area.y + area.height - height)),
     });
   });
-  ipcMain.on('interview:confirm-end', (event) => {
+  onDesktop('interview:confirm-end', (event) => {
     if (event.sender !== interviewWindow?.webContents) return;
     interviewCloseApproved = true;
     interviewWindow.close();
   });
-  ipcMain.on('window:action', (event, action: unknown) => {
+  onDesktop('window:action', (event, action: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || (win !== mainWindow && win !== interviewWindow)) return;
     if (action === 'minimize') win.minimize();
@@ -366,4 +550,9 @@ app.whenReady().then(() => {
 });
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit();
+});
+app.on('before-quit', () => {
+  historyJobs?.cancelAll();
+  speech?.stop();
+  interviewIpc?.cancel();
 });

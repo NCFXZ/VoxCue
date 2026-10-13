@@ -16,6 +16,8 @@ interface KnowledgeState {
   removeDocument(id: string): Promise<void>;
 }
 const message = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。');
+let documentRequest = 0;
+let basesRequest = 0;
 export const useKnowledge = create<KnowledgeState>((set, get) => ({
   bases: [],
   documents: [],
@@ -24,23 +26,27 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   loading: false,
   error: null,
   async load() {
+    const request = ++basesRequest;
     try {
-      set({ bases: await localKnowledge.listBases(), error: null });
+      const bases = await localKnowledge.listBases();
+      if (request === basesRequest) set({ bases });
     } catch (error) {
-      set({ error: message(error) });
+      if (request === basesRequest) set({ error: message(error) });
     }
   },
   async open(id) {
-    set({ selectedId: id, documents: [], error: null, loading: !!id });
+    const request = ++documentRequest;
+    set({ selectedId: id, documents: [], loading: !!id });
     if (!id) return;
     try {
       const documents = await localKnowledge.listDocuments(id);
-      if (get().selectedId === id) set({ documents, loading: false });
+      if (request === documentRequest) set({ documents, loading: false });
     } catch (error) {
-      if (get().selectedId === id) set({ error: message(error), loading: false });
+      if (request === documentRequest) set({ error: message(error), loading: false });
     }
   },
   async create(name) {
+    if (get().busy) return false;
     set({ busy: true, error: null });
     try {
       const base = { id: crypto.randomUUID(), name: name.trim(), createdAt: Date.now() };
@@ -56,6 +62,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     }
   },
   async rename(name) {
+    if (get().busy) return false;
     const base = get().bases.find((b) => b.id === get().selectedId);
     if (!base) return false;
     set({ busy: true, error: null });
@@ -71,12 +78,13 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     }
   },
   async removeBase() {
+    if (get().busy) return false;
     const id = get().selectedId;
     if (!id) return false;
     set({ busy: true, error: null });
     try {
       await localKnowledge.deleteBase(id);
-      await get().open(null);
+      if (get().selectedId === id) await get().open(null);
       await get().load();
       return true;
     } catch (error) {
@@ -87,6 +95,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     }
   },
   async importFiles(files) {
+    if (get().busy) return;
     const id = get().selectedId;
     if (!id) return;
     set({ busy: true, error: null });
@@ -94,17 +103,19 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
       await localKnowledge.importDocuments(id, files);
       if (get().selectedId === id) await get().open(id);
     } catch (error) {
+      if (get().selectedId === id) await get().open(id);
       set({ error: message(error) });
     } finally {
       set({ busy: false });
     }
   },
   async removeDocument(id) {
+    if (get().busy) return;
+    const baseId = get().selectedId;
     set({ busy: true, error: null });
     try {
       await localKnowledge.deleteDocument(id);
-      const baseId = get().selectedId;
-      if (baseId) await get().open(baseId);
+      if (baseId && get().selectedId === baseId) await get().open(baseId);
     } catch (error) {
       set({ error: message(error) });
     } finally {

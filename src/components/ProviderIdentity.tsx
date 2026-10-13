@@ -3,7 +3,7 @@ import { AppLogo } from './AppLogo';
 // A message retains its provider identity when the selected model changes.
 const providers: Record<string, { name: string; logo?: string }> = {
   chatgpt: { name: 'ChatGPT', logo: chatGPTLogo },
-  mock: { name: 'Mock' },
+  mock: { name: '未连接服务' },
 };
 export function ProviderIdentity({ provider, detail }: { provider: string; detail?: string }) {
   const identity = providers[provider] ?? { name: provider };

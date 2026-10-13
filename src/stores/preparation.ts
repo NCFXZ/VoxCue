@@ -20,8 +20,11 @@ import {
 } from '../services/answerStyle';
 const emptyInfo: PersonalInfo = { name: '', role: '', jobDescription: '', background: '' };
 let controller: AbortController | undefined;
+let controllerConversation: string | null = null;
 interface PreparationState {
-  conversations: Array<{ id: string; title: string; messages: ChatMessage[] }>;
+  conversations: Array<{ id: string; title: string; messages: ChatMessage[]; unread?: boolean }>;
+  viewing: boolean;
+  setViewing(value: boolean): void;
   activeConversation: string | null;
   selectConversation(id: string): void;
   deleteConversation(id: string): void;
@@ -44,7 +47,7 @@ interface PreparationState {
   setWebSearch(enabled: boolean): void;
   load(): Promise<void>;
   send(prompt: string): Promise<void>;
-  reset(): void;
+  reset(preserveReply?: boolean): void;
   stop(): void;
   updateInfo(info: Partial<PersonalInfo>, messageId?: string): boolean;
   dismissProfile(messageId: string): void;
@@ -53,15 +56,36 @@ interface PreparationState {
 }
 export const usePreparation = create<PreparationState>((set, get) => ({
   conversations: [],
+  viewing: false,
+  setViewing(viewing) {
+    set((state) => ({
+      viewing,
+      conversations: viewing
+        ? state.conversations.map((conversation) =>
+            conversation.id === state.activeConversation
+              ? { ...conversation, unread: false }
+              : conversation,
+          )
+        : state.conversations,
+    }));
+  },
   activeConversation: null,
   selectConversation(id) {
     const conversation = get().conversations.find((item) => item.id === id);
     if (!conversation || get().activeConversation === id) return;
-    get().stop();
-    set({ activeConversation: id, messages: conversation.messages, attachments: [], error: null });
+    set((state) => ({
+      activeConversation: id,
+      messages: conversation.messages,
+      attachments: [],
+      error: null,
+      conversations: state.viewing
+        ? state.conversations.map((item) => (item.id === id ? { ...item, unread: false } : item))
+        : state.conversations,
+    }));
   },
   deleteConversation(id) {
-    if (get().activeConversation === id) get().reset();
+    if (id === controllerConversation) get().stop();
+    if (get().activeConversation === id) get().reset(id !== controllerConversation);
     set((state) => ({ conversations: state.conversations.filter((item) => item.id !== id) }));
   },
   info: emptyInfo,
@@ -188,6 +212,29 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   },
   async send(prompt) {
     if ((!prompt.trim() && !get().attachments.length) || get().streaming) return;
+    // Consent is handled locally against the latest complete, validated proposal.
+    // Never ask the model to claim that local data has been saved.
+    if (/^(?:确认更新|确认保存|同意更新)[。！!\s]*$/.test(prompt.trim())) {
+      const proposal = [...get().messages]
+        .reverse()
+        .find((message) => message.role === 'assistant');
+      if (!proposal?.changes || !Object.keys(proposal.changes).length) {
+        set({
+          error:
+            '没有可确认的完整资料提案。请重新发送“更新我的简历”并等待提案卡片出现，再确认更新。',
+        });
+        return;
+      }
+      if (get().updateInfo({}, proposal.id)) {
+        set((state) => ({
+          messages: [
+            ...state.messages,
+            { id: crypto.randomUUID(), role: 'user', content: prompt.trim() },
+          ],
+        }));
+      }
+      return;
+    }
     const connection = useChatConnection.getState();
     const selected =
       connection.models.find((model) => model.id === get().modelId) ?? connection.models[0];
@@ -218,10 +265,58 @@ export const usePreparation = create<PreparationState>((set, get) => ({
         ],
       }));
     }
+    const owner = get().activeConversation!;
+    // Route every event to its originating conversation, even after navigation.
+    const update = (
+      change: Partial<PreparationState> | ((state: PreparationState) => Partial<PreparationState>),
+    ) =>
+      set((state) => {
+        const messages =
+          state.activeConversation === owner
+            ? state.messages
+            : state.conversations.find((c) => c.id === owner)?.messages;
+        if (!messages) return {};
+        const patch = typeof change === 'function' ? change({ ...state, messages }) : change;
+        const completed = patch.messages?.some(
+          (message) =>
+            message.role === 'assistant' &&
+            message.status === 'completed' &&
+            messages.find((previous) => previous.id === message.id)?.status === 'streaming',
+        );
+        const unread = completed && !(state.viewing && state.activeConversation === owner);
+        if (state.activeConversation === owner)
+          return {
+            ...patch,
+            ...(unread
+              ? {
+                  conversations: state.conversations.map((conversation) =>
+                    conversation.id === owner ? { ...conversation, unread: true } : conversation,
+                  ),
+                }
+              : {}),
+          };
+        const {
+          messages: nextMessages,
+          error: _error,
+          attachments: _attachments,
+          ...shared
+        } = patch;
+        return {
+          ...shared,
+          conversations: nextMessages
+            ? state.conversations.map((c) =>
+                c.id === owner
+                  ? { ...c, messages: nextMessages, ...(unread ? { unread: true } : {}) }
+                  : c,
+              )
+            : state.conversations,
+        };
+      });
     const current = new AbortController();
+    controllerConversation = owner;
     controller = current;
     const id = crypto.randomUUID();
-    set((state) => ({
+    update((state) => ({
       messages: [
         ...state.messages,
         { id: crypto.randomUUID(), role: 'user', content: text, options },
@@ -284,8 +379,14 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           request,
           (event) => {
             if (current.signal.aborted) return;
+            if (event.type === 'reasoning-summary')
+              update((state) => ({
+                messages: state.messages.map((message) =>
+                  message.id === id ? { ...message, reasoningSummary: event.text } : message,
+                ),
+              }));
             if (event.type === 'delta')
-              set((state) => ({
+              update((state) => ({
                 messages: state.messages.map((message) =>
                   message.id === id
                     ? {
@@ -297,7 +398,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 ),
               }));
             if (event.type === 'activity' || event.type === 'search')
-              set((state) => ({
+              update((state) => ({
                 messages: state.messages.map((message) =>
                   message.id === id
                     ? {
@@ -311,7 +412,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 ),
               }));
             if (event.type === 'sources')
-              set((state) => ({
+              update((state) => ({
                 messages: state.messages.map((message) =>
                   message.id === id ? { ...message, sources: event.sources } : message,
                 ),
@@ -319,7 +420,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           },
           current.signal,
         );
-        set((state) => ({
+        update((state) => ({
           error: result.warning ?? null,
           messages: state.messages.map((message) =>
             message.id === id
@@ -328,6 +429,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                   changes: validateChanges(result.profileChanges ?? {}),
                   // Fast JSON responses can resolve before queued IPC deltas arrive.
                   content: result.answerText ?? message.content,
+                  reasoningSummary: result.reasoningSummary ?? message.reasoningSummary,
                   sources: result.sources,
                   usage: result.usage,
                   status: 'completed',
@@ -341,7 +443,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           get().info,
           (chunk) => {
             if (!current.signal.aborted)
-              set((state) => ({
+              update((state) => ({
                 messages: state.messages.map((message) =>
                   message.id === id ? { ...message, content: message.content + chunk } : message,
                 ),
@@ -351,7 +453,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           options,
         );
         if (!current.signal.aborted)
-          set((state) => ({
+          update((state) => ({
             messages: state.messages.map((message) =>
               message.id === id ? { ...message, status: 'completed' } : message,
             ),
@@ -359,28 +461,45 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       }
     } catch (error) {
       const stopped = current.signal.aborted;
-      if (!stopped) set({ error: error instanceof Error ? error.message : '回复失败，请重试。' });
-      set((state) => ({
+      if (!stopped)
+        update({ error: error instanceof Error ? error.message : '回复失败，请重试。' });
+      update((state) => ({
         messages: state.messages.map((message) =>
-          message.id === id ? { ...message, status: stopped ? 'stopped' : 'failed' } : message,
+          message.id === id
+            ? {
+                ...message,
+                status: stopped ? 'stopped' : 'failed',
+              }
+            : message,
         ),
       }));
     } finally {
-      if (controller === current) set({ streaming: false });
+      if (controller === current) update({ streaming: false });
       if (connection.live) void useChatConnection.getState().refreshUsage();
     }
   },
   stop() {
     controller?.abort();
+    const mark = (messages: ChatMessage[]) =>
+      messages.map((message) =>
+        message.status === 'streaming'
+          ? {
+              ...message,
+              status: 'stopped' as const,
+            }
+          : message,
+      );
     set((state) => ({
       streaming: false,
-      messages: state.messages.map((message) =>
-        message.status === 'streaming' ? { ...message, status: 'stopped' } : message,
+      messages:
+        state.activeConversation === controllerConversation ? mark(state.messages) : state.messages,
+      conversations: state.conversations.map((c) =>
+        c.id === controllerConversation ? { ...c, messages: mark(c.messages) } : c,
       ),
     }));
   },
-  reset() {
-    get().stop();
+  reset(preserveReply = false) {
+    if (!preserveReply) get().stop();
     set({ activeConversation: null, messages: [], attachments: [], error: null });
   },
   async uploadResume(file) {

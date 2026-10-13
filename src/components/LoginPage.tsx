@@ -10,6 +10,10 @@ export function LoginPage() {
       <div className="login-card">
         <section className="login-form">
           <div className="login-copy">
+            <div className="login-brand">
+              <AppLogo size={42} />
+              <span>VoxCue</span>
+            </div>
             <h1>欢迎回来</h1>
             <p>登录以开始使用。</p>
           </div>
@@ -43,16 +47,7 @@ export function LoginPage() {
             {!window.desktop && <p className="login-status">ChatGPT 登录需要在桌面应用中使用。</p>}
           </div>
           <div className="login-footer">
-            <Button
-              variant="outline"
-              disabled={auth.waiting}
-              onClick={() => {
-                void auth.demo();
-              }}
-            >
-              体验 Mock 界面
-            </Button>
-            <p>登录后使用 ChatGPT 聊天，面试转写仍为模拟功能。</p>
+            <p>登录后使用 ChatGPT 准备聊天与面试回答，语音在本机转写。</p>
             <small>凭据加密保存在本机，密码仅在 OpenAI 页面输入。</small>
           </div>
         </section>
@@ -66,7 +61,7 @@ export function LoginPage() {
             <div className="preview-pill">
               <AppLogo size={13} />
               <strong>VoxCue</strong>
-              <span>Mock 面试</span>
+              <span>面试助手</span>
               <Check size={12} />
             </div>
             <div className="preview-panels">
@@ -75,9 +70,9 @@ export function LoginPage() {
                   <Volume2 size={12} />
                   转写
                 </header>
-                <small>模拟面试官</small>
+                <small>面试官</small>
                 <p>请介绍一个你最有代表性的项目。</p>
-                <span className="preview-caption">模拟转写</span>
+                <span className="preview-caption">本地转写</span>
               </div>
               <div className="preview-panel">
                 <header>

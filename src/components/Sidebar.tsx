@@ -11,11 +11,10 @@ import {
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
-  ArrowUpRight,
   Trash,
+  Loader,
 } from './icons';
 import { Button } from './ui/button';
-import { UsagePanel } from './UsagePanel';
 import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
 interface Props {
@@ -111,7 +110,27 @@ export function Sidebar({
                     onNavigate('preparation');
                   }}
                 >
-                  <span className="conversation-dot" />
+                  <span
+                    className="conversation-indicator"
+                    aria-hidden="true"
+                    title={
+                      conversation.messages.some((message) => message.status === 'streaming')
+                        ? '正在回复'
+                        : conversation.unread
+                          ? '回复完成，尚未查看'
+                          : undefined
+                    }
+                  >
+                    {conversation.messages.some((message) => message.status === 'streaming') ? (
+                      <span className="conversation-spinner">
+                        <Loader size={14} />
+                      </span>
+                    ) : (
+                      <span
+                        className={`conversation-dot ${conversation.unread ? 'is-unread' : ''}`}
+                      />
+                    )}
+                  </span>
                   <span>{conversation.title}</span>
                 </button>
                 <Button
@@ -128,12 +147,10 @@ export function Sidebar({
         </div>
       )}
       <div className="sidebar-bottom">
-        {!collapsed && <UsagePanel />}
         {!collapsed && (
           <div className="local-note">
             <span className="status-dot" />
-            {connection.live ? 'ChatGPT 已连接' : '本地模拟环境'}
-            <ArrowUpRight size={13} />
+            {connection.live ? 'ChatGPT 已连接' : 'ChatGPT 未连接'}
             {!connection.live && <p>从容练习，清晰表达。</p>}
           </div>
         )}

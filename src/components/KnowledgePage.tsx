@@ -34,7 +34,7 @@ export function KnowledgePage() {
       </header>
       <div className="management-scroll">
         <div className="management-container">
-          <p className="local-storage-note">文件仅存储在本机 · 文档解析和 AI 检索尚未接入</p>
+          <p className="local-storage-note">文档原件保存在本机</p>
           {state.error && !base && !editing && (
             <p role="alert" className="inline-error">
               {state.error}
@@ -107,9 +107,7 @@ export function KnowledgePage() {
             </>
           }
         >
-          <p className="dialog-intro">
-            管理这份知识库中的文档。原始文件保存在本机，尚未建立检索索引。
-          </p>
+          <p className="dialog-intro">支持 PDF、Office、TXT 和 Markdown 文件，本地保留原件。</p>
           {state.error && (
             <p role="alert" className="inline-error">
               {state.error}
@@ -190,8 +188,7 @@ export function KnowledgePage() {
                     <strong>{doc.name}</strong>
                     <p>
                       {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`} ·
-                      已保存本地 ·{' '}
-                      {/\.(txt|md)$/i.test(doc.name) ? '可预览文本，未索引' : '待接入解析'}
+                      已保存本地
                     </p>
                   </div>
                   <Button

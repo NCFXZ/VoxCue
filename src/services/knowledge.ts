@@ -1,25 +1,5 @@
-export interface KnowledgeBase {
-  id: string;
-  name: string;
-  createdAt: number;
-}
-export interface LocalDocument {
-  id: string;
-  baseId: string;
-  name: string;
-  size: number;
-  type: string;
-  createdAt: number;
-  blob: Blob;
-}
-export interface KnowledgeManagementService {
-  listBases(): Promise<KnowledgeBase[]>;
-  saveBase(base: KnowledgeBase): Promise<void>;
-  deleteBase(id: string): Promise<void>;
-  listDocuments(baseId: string): Promise<LocalDocument[]>;
-  importDocuments(baseId: string, files: File[]): Promise<void>;
-  deleteDocument(id: string): Promise<void>;
-}
+import type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
+export type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
 const supported = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md']);
 export const documentAccept = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md';
 export function validateFiles(files: Pick<File, 'name' | 'size'>[]) {
@@ -152,7 +132,7 @@ export const localKnowledge: KnowledgeManagementService = {
 };
 export async function previewDocument(doc: LocalDocument): Promise<string> {
   if (!/\.(txt|md)$/i.test(doc.name))
-    return '文件已保存在本地。PDF 和 Office 文档解析尚未接入，此处不生成虚假的解析结果。';
+    return '原件已保存在本地。当前仅支持 TXT 和 Markdown 文本预览。';
   return (
     (await doc.blob.slice(0, 100000).text()) +
     (doc.size > 100000 ? '\n\n…预览仅显示前 100 KB。' : '')

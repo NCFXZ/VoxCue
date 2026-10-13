@@ -17,7 +17,7 @@ export const effortLabels: Record<ReasoningEffort | 'auto', string> = {
   auto: '自动',
   none: '无思考',
   minimal: '极低',
-  low: '低 · 更快',
+  low: '轻度',
   medium: '中',
   high: '高',
   xhigh: '极高',

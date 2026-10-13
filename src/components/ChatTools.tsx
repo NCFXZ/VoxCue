@@ -40,7 +40,7 @@ export function ChatTools() {
             </DropdownMenu.Item>
             <DropdownMenu.Separator className="dropdown-separator" />
             <DropdownMenu.CheckboxItem
-              className="dropdown-item"
+              className="dropdown-item search-menu-item"
               checked={state.webSearch}
               onCheckedChange={state.setWebSearch}
             >
@@ -59,7 +59,7 @@ export function ChatTools() {
         onClick={() => state.setWebSearch(!state.webSearch)}
       >
         <Globe size={14} />
-        网络搜索{!connection.live && <span className="tool-mock">模拟</span>}
+        网络搜索
       </Button>
       <DropdownMenu.Root>
         <DropdownMenu.Trigger asChild>
@@ -68,9 +68,9 @@ export function ChatTools() {
             variant="ghost"
             className="composer-tool model-trigger"
             aria-label="聊天模型"
+            title={selected?.label}
           >
             <span>{selected?.label ?? (connection.loading ? '加载模型…' : '模型不可用')}</span>
-            {!connection.live && <span className="tool-mock">Mock</span>}
             <ChevronDown size={12} />
           </Button>
         </DropdownMenu.Trigger>
@@ -88,7 +88,9 @@ export function ChatTools() {
                   value={model.id}
                   key={model.id}
                 >
-                  <span className="model-name">{model.label}</span>
+                  <span className="model-name" title={model.label}>
+                    {model.label}
+                  </span>
                   <DropdownMenu.ItemIndicator className="model-check">
                     <Check size={15} />
                   </DropdownMenu.ItemIndicator>
@@ -127,7 +129,7 @@ export function ChatTools() {
             disabled={!efforts.length}
             title={!efforts.length ? '当前模型未提供可调整的思考强度' : '较低强度优先响应速度'}
           >
-            Effort · {effortLabels[effort]}
+            思考强度 · {effortLabels[effort]}
             <ChevronDown size={12} />
           </Button>
         </DropdownMenu.Trigger>

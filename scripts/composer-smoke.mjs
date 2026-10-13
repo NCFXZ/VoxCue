@@ -10,9 +10,11 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
+  await login.getByRole('button',{name:'Continue with ChatGPT',exact:true}).waitFor();
+  await login.waitForFunction(()=>document.visibilityState==='visible');
   const [page] = await Promise.all([
     app.waitForEvent('window'),
-    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+    login.evaluate(() => window.desktop.enterDemo()),
   ]);
   page.setDefaultTimeout(15000);
   const errors = [];
@@ -72,7 +74,8 @@ try {
   await page.getByRole('alert').getByText('不支持的文件格式：bad.exe', { exact: false }).waitFor();
   await page.getByRole('button', { name: '用户菜单' }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  await page.getByRole('button', { name: '深色', exact: true }).click();
+  await page.getByRole('button', { name: '外观主题', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置' }).click();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
@@ -83,7 +86,7 @@ try {
   await page.screenshot({ path: 'test-results/composer-dark.png' });
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: attachment menu, file selection/drop, removal after send, request model/search snapshot, explicit mock response, invalid file validation and compact sidebar.',
+    'PASS: attachment menu, file selection/drop, removal after send, request model/search snapshot, internal synthetic response, invalid file validation and compact sidebar.',
   );
 } finally {
   await app.close();

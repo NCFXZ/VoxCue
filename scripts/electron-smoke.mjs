@@ -21,9 +21,11 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
+  await login.getByRole('button', { name: 'Continue with ChatGPT', exact: true }).waitFor();
+  await login.waitForFunction(() => document.visibilityState === 'visible');
   const [page] = await Promise.all([
     app.waitForEvent('window'),
-    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+    login.evaluate(() => window.desktop.enterDemo()),
   ]);
   page.setDefaultTimeout(15000);
   const errors = [];
@@ -36,13 +38,14 @@ try {
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   assert.equal(
     await page.getByRole('button', { name: '开始面试', exact: true }).isDisabled(),
-    false,
+    true,
   );
   await page.screenshot({ path: 'test-results/welcome-light.png' });
   await page.getByRole('button', { name: '用户菜单' }).click();
   assert.equal(await page.getByRole('menuitem').count(), 2);
   await page.getByRole('menuitem', { name: '设置' }).click();
-  await page.getByRole('button', { name: '深色', exact: true }).click();
+  await page.getByRole('button', { name: '外观主题', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   assert.equal(await page.locator('html').getAttribute('class'), 'dark');
   await page.getByRole('button', { name: '关闭设置' }).click();
   await page.screenshot({ path: 'test-results/welcome-dark.png' });
@@ -66,11 +69,45 @@ try {
   await page.getByRole('button', { name: '关闭个人信息' }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
   await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
-  await page.getByRole('button', { name: '查看示例记录', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '查看示例记录', exact: true }).count(), 0);
+  // Seed isolated real-shaped records; mock records remain hidden and stored.
+  await page.evaluate(() => {
+    const records = [1, 2].map((i) => ({
+      id: 'record-' + i,
+      title: '回归测试问题 ' + i,
+      startedAt: 1000 * i,
+      endedAt: 5000 + i,
+      status: 'ended',
+      mock: false,
+      transcripts: [],
+      answers: [
+        {
+          id: 'answer-' + i,
+          question: '回归测试问题 ' + i,
+          content: 'Synthetic saved answer',
+          provider: 'chatgpt',
+        },
+      ],
+    }));
+    records.push({
+      id: 'legacy-mock',
+      title: 'Hidden mock record',
+      startedAt: 5000,
+      endedAt: 6000,
+      status: 'ended',
+      mock: true,
+      transcripts: [],
+      answers: [],
+    });
+    localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+  });
+  await page.getByRole('button', { name: '面试记录', exact: true }).click();
+  await page.locator('.history-row').nth(1).waitFor();
   assert.equal(await page.locator('.history-row').count(), 2);
   await page.screenshot({ path: 'test-results/history-dark.png' });
   await page.locator('.history-row').first().click();
-  await page.getByText('这是模拟记录示例，并非真实面试。', { exact: false }).waitFor();
+  await page.getByText('回归测试问题 2', { exact: false }).first().waitFor();
   await page.screenshot({ path: 'test-results/history-detail-dark.png' });
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.getByRole('button', { name: '创建知识库', exact: false }).first().click();
@@ -161,7 +198,7 @@ try {
           startedAt: 100,
           endedAt: 1000,
           status: 'ended',
-          mock: true,
+          mock: false,
           transcripts: [],
           answers: [],
         },
@@ -183,13 +220,13 @@ try {
   await returnedLogin.getByRole('heading', { name: '欢迎回来' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: Electron startup, unified shell, mock preparation chat, profile/resume persistence, independent history, knowledge CRUD/import/preview/persistence and user menu.',
+    'PASS: Electron startup, unified shell, internal synthetic preparation reply, profile/resume persistence, independent history, knowledge CRUD/import/preview/persistence and user menu.',
   );
 } catch (error) {
   const page = app.windows()[0];
   if (page) {
     await page.screenshot({ path: 'test-results/smoke-failure.png' });
-    console.error(await page.locator('main').innerText());
+    console.error(await page.locator('main:visible').innerText());
   }
   throw error;
 } finally {

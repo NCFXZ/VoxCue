@@ -10,9 +10,11 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
+  await login.getByRole('button',{name:'Continue with ChatGPT',exact:true}).waitFor();
+  await login.waitForFunction(()=>document.visibilityState==='visible');
   const [page] = await Promise.all([
     app.waitForEvent('window'),
-    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+    login.evaluate(() => window.desktop.enterDemo()),
   ]);
   page.setDefaultTimeout(15000);
   const errors = [];

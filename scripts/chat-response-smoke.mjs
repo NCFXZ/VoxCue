@@ -15,9 +15,11 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
+  await login.getByRole('button',{name:'Continue with ChatGPT',exact:true}).waitFor();
+  await login.waitForFunction(()=>document.visibilityState==='visible');
   const [page] = await Promise.all([
     app.waitForEvent('window'),
-    login.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+    login.evaluate(() => window.desktop.enterDemo()),
   ]);
   page.setDefaultTimeout(15000);
   // Only the test profile's transport is replaced. Renderer and IPC remain real.
@@ -93,7 +95,13 @@ try {
         });
       },
     });
-    for (const channel of ['auth:session', 'chat:models', 'chat:usage', 'chat:send'])
+    for (const channel of [
+      'auth:session',
+      'chat:models',
+      'chat:usage',
+      'chat:usage-reset',
+      'chat:send',
+    ])
       ipcMain.removeHandler(channel);
     ipcMain.handle('auth:session', () => ({
       mode: 'chatgpt',
@@ -102,6 +110,10 @@ try {
     }));
     ipcMain.handle('chat:models', async () => ({ ok: true, models: await service.models() }));
     ipcMain.handle('chat:usage', async () => ({ ok: true, usage: await service.usage() }));
+    ipcMain.handle('chat:usage-reset', async () => ({
+      ok: true,
+      usage: await service.resetUsage(),
+    }));
     ipcMain.handle('chat:send', async (event, request) => {
       try {
         return {
@@ -168,10 +180,33 @@ try {
   });
   await page.getByRole('button', { name: '复制代码', exact: true }).click();
   assert.equal(await page.evaluate(() => window.testCopiedCode), 'print("Hello")');
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '账户与用量', exact: true }).click();
   await page
     .locator('.usage-panel > strong')
     .filter({ hasText: /^6\s*token$/ })
     .waitFor();
+  assert.equal(await page.locator('.sidebar .usage-panel').count(), 0);
+  await page.getByRole('button', { name: '重置用量', exact: true }).click();
+  await page
+    .getByRole('group', { name: '确认重置用量', exact: true })
+    .getByRole('button', { name: '取消', exact: true })
+    .click();
+  await page
+    .locator('.usage-panel > strong')
+    .filter({ hasText: /^6\s*token$/ })
+    .waitFor();
+  await page.getByRole('button', { name: '重置用量', exact: true }).click();
+  await page.getByRole('button', { name: '确认重置', exact: true }).click();
+  await page.getByRole('status').filter({ hasText: '本地用量统计已重置' }).waitFor();
+  await page.getByRole('button', { name: '刷新用量', exact: true }).click();
+  await page
+    .locator('.usage-panel > strong')
+    .filter({ hasText: /^0\s*token$/ })
+    .waitFor();
+  await page.screenshot({ path: 'test-results/settings-usage-reset.png' });
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('失败测试');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.chat-answer').getByText('请求失败，未收到回答。', { exact: true }).waitFor();
@@ -201,10 +236,19 @@ try {
   await page.screenshot({ path: 'test-results/profile-proposal-light.png' });
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  await page.getByRole('button', { name: '深色', exact: true }).click();
+  await page.getByRole('button', { name: '外观主题', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.screenshot({ path: 'test-results/profile-proposal-dark.png' });
-  await proposals.last().getByRole('button', { name: '确认更新', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '旧姓名');
+  await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('确认更新');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.waitForFunction(
+    () => document.querySelector('input[placeholder="你的名字"]')?.value === '新姓名',
+  );
+  assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');
+  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
   await proposals.last().getByText('个人信息已更新', { exact: true }).waitFor();
   assert.deepEqual(
     await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1'))),
@@ -253,6 +297,13 @@ try {
   }
   await page.locator('.chat-activity').waitFor({ state: 'detached' });
   await page.getByText('状态演示已完成', { exact: true }).waitFor();
+  await page.reload();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');
+  assert.equal(await page.getByLabel('岗位描述 / JD', { exact: true }).inputValue(), '新的 JD');
+  assert.equal(await page.locator('.composer-caption').count(), 0);
+  assert.ok((await page.locator('.effort-trigger').textContent()).includes('思考强度'));
+
   console.log(
     'PASS: compact tools, Markdown/code copy, effort, usage, failure state, attachment proposal, reject/confirm and light/dark themes. Test transport only; no production account used.',
   );

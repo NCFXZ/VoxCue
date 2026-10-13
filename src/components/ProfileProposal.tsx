@@ -39,7 +39,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
           <p className="profile-consent-note">
             {stale
               ? '个人信息已变化，请重新生成提案，避免覆盖较新的修改。'
-              : '确认后仅更新以上字段，未列出的资料保持原样。'}
+              : '点击“确认更新”或在聊天中发送“确认更新”，即可保存以上字段到个人信息。'}
           </p>
           <div className="profile-proposal-actions">
             <Button variant="ghost" onClick={() => state.dismissProfile(message.id)}>

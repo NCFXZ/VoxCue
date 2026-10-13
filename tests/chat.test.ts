@@ -246,3 +246,34 @@ describe('原生授权续期', () => {
     expect(temporary.record().refreshToken).toBe('old-refresh');
   });
 });
+
+describe('本地用量重置', () => {
+  it('按账户持久化清零，保留其他账户及旧响应去重信息', async () => {
+    const usage = await ledger();
+    const tokens = { inputTokens: 8, outputTokens: 2, totalTokens: 10 };
+    await usage.add('a', 'old', tokens);
+    await usage.add('b', 'other', tokens);
+    expect(await usage.reset('a')).toMatchObject({ totalTokens: 0, requests: 0 });
+    expect(await usage.get('a')).toMatchObject({
+      inputTokens: 0,
+      outputTokens: 0,
+      totalTokens: 0,
+      requests: 0,
+    });
+    expect(await usage.get('b')).toMatchObject({ totalTokens: 10, requests: 1 });
+    await usage.add('a', 'old', tokens);
+    expect((await usage.get('a')).totalTokens).toBe(0);
+    await usage.add('a', 'new', tokens);
+    expect(await usage.get('a')).toMatchObject({ totalTokens: 10, requests: 1 });
+  });
+  it('与在先和后续写入串行执行，重置后仅累计新的请求', async () => {
+    const usage = await ledger();
+    const tokens = { inputTokens: 3, outputTokens: 1, totalTokens: 4 };
+    await Promise.all([
+      usage.add('a', 'before', tokens),
+      usage.reset('a'),
+      usage.add('a', 'after', tokens),
+    ]);
+    expect(await usage.get('a')).toMatchObject({ totalTokens: 4, requests: 1 });
+  });
+});

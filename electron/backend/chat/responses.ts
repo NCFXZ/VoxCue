@@ -2,18 +2,42 @@ import { readEvents } from './sse';
 
 // Some transports buffer a completed Responses object or omit the SSE MIME type.
 // Inspect a bounded prefix, never discard a valid answer based on headers alone.
-export async function* responseEvents(response: Response, signal: AbortSignal) {
+export async function* responseEvents(
+  response: Response,
+  signal: AbortSignal,
+  idleTimeoutMs = 60000,
+) {
+  const idle = new AbortController();
+  signal = AbortSignal.any([signal, idle.signal]);
+  let timer: ReturnType<typeof setTimeout>;
+  const touch = () => {
+    clearTimeout(timer);
+    timer = setTimeout(
+      () =>
+        idle.abort(
+          new Error('响应长时间没有新数据，已停止等待并保留正文。资料尚未保存，请检查网络后重试。'),
+        ),
+      idleTimeoutMs,
+    );
+  };
   if (!response.body) throw new Error('服务返回空响应，请重试。');
   const reader = response.body.getReader();
+  const cancel = () => {
+    void reader.cancel().catch(() => {});
+  };
+  signal.addEventListener('abort', cancel, { once: true });
+  touch();
   const chunks: Uint8Array[] = [];
   let prefix = '',
     bytes = 0,
     handedOff = false;
   const decoder = new TextDecoder();
   try {
-    while (prefix.trimStart().length < 16 && !/^[{<]/.test(prefix.trimStart()) && bytes < 4096) {
+    while (prefix.trimStart().length < 16 && !/^(?:[{<]|data:|event:|:)/.test(prefix.trimStart()) && bytes < 4096) {
       signal.throwIfAborted();
       const item = await reader.read();
+      touch();
+      signal.throwIfAborted();
       if (item.done) break;
       chunks.push(item.value);
       bytes += item.value.length;
@@ -28,6 +52,8 @@ export async function* responseEvents(response: Response, signal: AbortSignal) {
         }
         try {
           const item = await reader.read();
+          touch();
+          signal.throwIfAborted();
           if (item.done) controller.close();
           else controller.enqueue(item.value);
         } catch (error) {
@@ -59,6 +85,7 @@ export async function* responseEvents(response: Response, signal: AbortSignal) {
         while (true) {
           signal.throwIfAborted();
           const item = await jsonReader.read();
+          signal.throwIfAborted();
           if (item.done) break;
           size += item.value.length;
           if (size > 8 * 1024 * 1024) throw new Error('响应内容过大。');
@@ -66,7 +93,7 @@ export async function* responseEvents(response: Response, signal: AbortSignal) {
         }
         text += jsonDecoder.decode();
       } finally {
-        await jsonReader.cancel().catch(() => {});
+        void jsonReader.cancel().catch(() => {});
         jsonReader.releaseLock();
       }
       let value: any;
@@ -104,8 +131,10 @@ export async function* responseEvents(response: Response, signal: AbortSignal) {
       `未收到有效回答（HTTP ${response.status}，格式 ${type}）。请检查网络代理或稍后重试。`,
     );
   } finally {
+    clearTimeout(timer!);
+    signal.removeEventListener('abort', cancel);
     if (!handedOff) {
-      await reader.cancel().catch(() => {});
+      cancel();
       reader.releaseLock();
     }
   }

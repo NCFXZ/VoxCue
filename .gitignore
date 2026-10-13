@@ -12,3 +12,6 @@ coverage/
 credentials*.json
 credentials*.bin
 auth-data/
+local-models/
+release-smoke/
+native/bin/

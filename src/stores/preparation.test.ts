@@ -2,6 +2,8 @@ import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { usePreparation } from './preparation';
 import { useHistory } from './history';
+import { useChatConnection } from './chatConnection';
+import { chatModels } from '../services/chatOptions';
 describe('准备聊天与个人信息', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -14,6 +16,7 @@ describe('准备聊天与个人信息', () => {
     });
     usePreparation.getState().reset();
     usePreparation.setState({ conversations: [] });
+    useChatConnection.setState({ live: false, models: [...chatModels] });
     useHistory.setState({ records: [], error: null });
   });
   afterEach(() => {

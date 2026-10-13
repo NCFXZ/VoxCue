@@ -12,6 +12,7 @@ export function Modal({
   subtitle,
   className = '',
   closeLabel = '关闭对话框',
+  hideHeader = false,
 }: {
   title: string;
   onClose(): void;
@@ -23,6 +24,7 @@ export function Modal({
   subtitle?: string;
   className?: string;
   closeLabel?: string;
+  hideHeader?: boolean;
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -53,26 +55,28 @@ export function Modal({
         }
       }}
     >
-      <header className="dialog-heading">
-        <div className="dialog-title">
-          {destructive && (
-            <span className="danger-icon">
-              <Trash size={20} />
-            </span>
-          )}
-          {icon && !destructive && <span className="dialog-icon">{icon}</span>}
-          <div>
-            <h2>{title}</h2>
-            {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
+      {!hideHeader && (
+        <header className="dialog-heading">
+          <div className="dialog-title">
+            {destructive && (
+              <span className="danger-icon">
+                <Trash size={20} />
+              </span>
+            )}
+            {icon && !destructive && <span className="dialog-icon">{icon}</span>}
+            <div>
+              <h2>{title}</h2>
+              {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
+            </div>
           </div>
-        </div>
-        <div>
-          {action}
-          <Button variant="ghost" size="icon" aria-label={closeLabel} onClick={onClose}>
-            <X size={17} />
-          </Button>
-        </div>
-      </header>
+          <div>
+            {action}
+            <Button variant="ghost" size="icon" aria-label={closeLabel} onClick={onClose}>
+              <X size={17} />
+            </Button>
+          </div>
+        </header>
+      )}
       {children}
     </dialog>
   );

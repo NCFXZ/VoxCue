@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "kind": "authored synthetic diagnostics, not a human speech benchmark",
+  "cases": [
+    {
+      "id": "english",
+      "text": "Please explain your experience with software development and testing."
+    },
+    {
+      "id": "technical",
+      "text": "We used ROS two, P I D control, C plus plus, S T M thirty two, and a Transformer model."
+    },
+    {
+      "id": "numbers",
+      "text": "The sampling rate is forty eight thousand hertz. The control frequency is two hundred fifty hertz."
+    },
+    { "id": "short", "text": "Why this job?" },
+    {
+      "id": "chinese",
+      "text": "请介绍你在机器人控制系统中的项目经历，以及如何验证系统的可靠性。",
+      "voice": "MSTTS_V110_zhCN_HuihuiM"
+    },
+    {
+      "id": "mixed",
+      "text": "我们使用 ROS2 和 PID 控制器，采用 C++ 开发 STM32，然后测试 Transformer 模型。",
+      "voice": "MSTTS_V110_zhCN_HuihuiM"
+    },
+    {
+      "id": "long",
+      "text": "Please explain how you design a reliable robot control system. Discuss testing, errors, feedback and safety. ",
+      "repeat": 8
+    }
+  ]
+}

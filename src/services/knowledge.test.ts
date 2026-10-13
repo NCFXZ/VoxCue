@@ -1,7 +1,25 @@
 import 'fake-indexeddb/auto';
-import { describe, expect, it } from 'vitest';
-import { localKnowledge, validateFiles } from './knowledge';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { localKnowledge, validateFiles, previewDocument } from './knowledge';
+afterEach(() => vi.unstubAllGlobals());
 describe('本地知识库', () => {
+  it('文档保存、文本预览和删除独立于桌面服务，Office 原件保留', async () => {
+    vi.stubGlobal('window', {});
+    const id = crypto.randomUUID();
+    await localKnowledge.saveBase({ id, name: '原件', createdAt: Date.now() });
+    await localKnowledge.importDocuments(id, [
+      new File(['文本内容'], 'note.md'),
+      new File(['pdf bytes'], 'document.pdf'),
+    ]);
+    const docs = await localKnowledge.listDocuments(id);
+    expect(await previewDocument(docs.find((d) => d.name === 'note.md')!)).toBe('文本内容');
+    const pdf = docs.find((d) => d.name === 'document.pdf')!;
+    expect(await pdf.blob.text()).toBe('pdf bytes');
+    expect(await previewDocument(pdf)).toContain('仅支持 TXT');
+    await localKnowledge.deleteDocument(pdf.id);
+    expect(await localKnowledge.listDocuments(id)).toHaveLength(1);
+    await localKnowledge.deleteBase(id);
+  });
   it('保存与重命名、导入替换同名文件、跨实例读取，删除知识库级联删除文档', async () => {
     const base = { id: crypto.randomUUID(), name: '项目经历', createdAt: Date.now() };
     await localKnowledge.saveBase(base);

@@ -1,67 +1,22 @@
+import { ReasoningSummary } from './summary';
 import type {
   ChatRequest,
   ChatModel,
   ChatEvent,
   ChatSource,
-  ChatFailure,
   TokenUsage,
 } from '../../contracts/chat';
+import type { AIChatService } from './ports';
+import { apiError } from './errors';
+import { validateRequest, validSource } from './validation';
+export { apiError, publicFailure, ChatServiceError } from './errors';
+export { validateRequest, validSource } from './validation';
 import { responseEvents } from './responses';
 import { responseActivity } from './activity';
 import { modelEfforts } from './models';
-import { reasoningEfforts } from '../../contracts/chat';
-import { validProfile } from '../../contracts/profile';
 import { profileFormat, profileInstructions, ProfileAnswerStream } from './profile';
 import type { UsageLedger } from './usage';
 const base = 'https://api.openai.com/v1';
-const messages: Record<string, string> = {
-  subscription_sharing_user_not_eligible: '当前账户或工作区不支持 ChatGPT 套餐调用。',
-  subscription_sharing_usage_limit_exceeded:
-    '已达到当前应用或账户的使用限制，请查看 ChatGPT 账户用量。',
-  subscription_sharing_usage_unavailable: '暂时无法检查账户用量，请稍后重试。',
-  subscription_sharing_unsupported_capability:
-    '当前模型或账户不支持这次请求的功能，请关闭网络搜索或更换模型后重试。',
-  subscription_sharing_route_not_supported: '当前账户不支持该接口，请检查 ChatGPT 授权。',
-  subscription_sharing_invalid_user: 'ChatGPT 授权无效，请退出后重新登录。',
-};
-export class ChatServiceError extends Error {
-  constructor(public detail: ChatFailure) {
-    super(detail.message);
-  }
-}
-function diagnostic(value: unknown) {
-  return typeof value === 'string' && /^[\w.:[\]-]{1,160}$/.test(value) ? value : undefined;
-}
-export function apiError(
-  status: number | undefined,
-  body: any,
-  requestId?: string,
-): ChatServiceError {
-  const value = body?.error ?? body ?? {};
-  const code = diagnostic(value.code),
-    param = diagnostic(value.param);
-  const message =
-    (code && messages[code]) ||
-    (status === 401
-      ? 'ChatGPT 授权未被接受，请退出后重新登录。'
-      : status === 403
-        ? '账户权限、工作区或服务地区策略不允许此次请求。'
-        : status === 429
-          ? '请求受到使用限制，请稍后重试或查看账户用量。'
-          : status === 400
-            ? '模型不支持当前输入或工具，请更换模型或调整附件与搜索选项。'
-            : 'ChatGPT 服务暂时不可用，请稍后重试。');
-  // Never forward raw remote messages: they can contain user input or credentials.
-  return new ChatServiceError({ message, code, param, status, requestId: diagnostic(requestId) });
-}
-export function publicFailure(error: unknown): ChatFailure {
-  if (error instanceof ChatServiceError) return error.detail;
-  if (error instanceof Error && error.name === 'AbortError')
-    return { message: '回答已停止。', code: 'cancelled' };
-  if (error instanceof Error && /[\u4e00-\u9fff]/.test(error.message))
-    return { message: error.message };
-  return { message: '连接中断或请求失败，请检查网络后重试。' };
-}
 export function parseUsage(value: any): TokenUsage | null {
   if (
     !value ||
@@ -75,65 +30,6 @@ export function parseUsage(value: any): TokenUsage | null {
     outputTokens: value.output_tokens,
     totalTokens: value.total_tokens,
   };
-}
-export function validSource(value: any): ChatSource | null {
-  if (typeof value?.url !== 'string' || value.url.length > 4096) return null;
-  try {
-    const url = new URL(value.url);
-    if (!['https:', 'http:'].includes(url.protocol) || url.username || url.password) return null;
-    return {
-      url: url.href,
-      title: typeof value.title === 'string' ? value.title.slice(0, 300) : url.hostname,
-    };
-  } catch {
-    return null;
-  }
-}
-export function validateRequest(value: unknown): ChatRequest {
-  const request = value as ChatRequest;
-  if (
-    !request ||
-    typeof request.id !== 'string' ||
-    !/^[\w-]{1,80}$/.test(request.id) ||
-    typeof request.modelId !== 'string' ||
-    request.modelId.length > 160 ||
-    typeof request.webSearch !== 'boolean' ||
-    (request.effort !== undefined && !reasoningEfforts.includes(request.effort)) ||
-    typeof request.instructions !== 'string' ||
-    request.instructions.length > 40000 ||
-    (request.profile !== undefined && !validProfile(request.profile)) ||
-    !Array.isArray(request.turns) ||
-    !request.turns.length ||
-    request.turns.length > 100
-  )
-    throw new Error('聊天请求无效，请重新开始对话。');
-  let bytes = 0,
-    text = request.instructions.length,
-    files = 0;
-  for (const turn of request.turns) {
-    if (!turn || !['user', 'assistant'].includes(turn.role) || typeof turn.content !== 'string')
-      throw new Error('对话内容无效。');
-    text += turn.content.length;
-    if (turn.files !== undefined && (!Array.isArray(turn.files) || turn.role !== 'user'))
-      throw new Error('附件请求无效。');
-    for (const file of turn.files ?? []) {
-      if (
-        typeof file?.name !== 'string' ||
-        !file.name ||
-        file.name.length > 300 ||
-        !(file.bytes instanceof Uint8Array) ||
-        !file.bytes.byteLength ||
-        file.bytes.byteLength > 20 * 1024 * 1024
-      )
-        throw new Error('附件请求无效或超过 20 MB。');
-      bytes += file.bytes.byteLength;
-      files++;
-    }
-  }
-  if (text > 200000 || bytes > 32 * 1024 * 1024 || files > 20)
-    throw new Error('对话内容过多，请减少附件或开始新对话（上下文最多 20 个文件、合计 32 MB）。');
-  if (request.turns.at(-1)?.role !== 'user') throw new Error('缺少用户问题。');
-  return request;
 }
 const mimeTypes: Record<string, string> = {
   pdf: 'application/pdf',
@@ -175,9 +71,10 @@ export function buildInput(request: ChatRequest) {
 interface Dependencies {
   access(): Promise<{ token: string; account: string }>;
   ledger: UsageLedger;
+  idleTimeoutMs?: number;
   fetch?: typeof fetch;
 }
-export class ChatGPTService {
+export class ChatGPTService implements AIChatService {
   private catalog: { account: string; at: number; models: ChatModel[] } | undefined;
   constructor(private dependencies: Dependencies) {}
   private async checked(response: Response) {
@@ -223,6 +120,10 @@ export class ChatGPTService {
     this.catalog = { account, at: Date.now(), models };
     return models;
   }
+  async resetUsage() {
+    const { account } = await this.dependencies.access();
+    return this.dependencies.ledger.reset(account);
+  }
   async usage() {
     const { account } = await this.dependencies.access();
     return this.dependencies.ledger.get(account);
@@ -260,7 +161,19 @@ export class ChatGPTService {
           store: false,
           stream: true,
           ...(request.profile ? { text: profileFormat } : {}),
-          ...(request.effort ? { reasoning: { effort: request.effort } } : {}),
+          ...(request.effort ||
+          (models.find((m) => m.id === request.modelId)?.reasoningEfforts?.length &&
+            request.effort !== 'none')
+            ? {
+                reasoning: {
+                  ...(request.effort ? { effort: request.effort } : {}),
+                  ...(models.find((m) => m.id === request.modelId)?.reasoningEfforts?.length &&
+                  request.effort !== 'none'
+                    ? { summary: 'auto' }
+                    : {}),
+                },
+              }
+            : {}),
           ...(request.webSearch
             ? {
                 tools: [{ type: 'web_search' }],
@@ -281,6 +194,7 @@ export class ChatGPTService {
       const source = validSource(value);
       if (source && sources.size < 50) sources.set(source.url, source);
     };
+    const summary = new ReasoningSummary();
     let outputLength = 0;
     let answerText = '';
     const profileStream = request.profile ? new ProfileAnswerStream() : undefined;
@@ -296,8 +210,17 @@ export class ChatGPTService {
         emit({ id: request.id, type: 'delta', text: delta });
       }
     };
-    for await (const event of responseEvents(response, signal)) {
-      const activity = responseActivity(event);
+    for await (const event of responseEvents(
+      response,
+      AbortSignal.any([signal, AbortSignal.timeout(180000)]),
+      this.dependencies.idleTimeoutMs,
+    )) {
+      if (summary.receive(event))
+        emit({ id: request.id, type: 'reasoning-summary', text: summary.text });
+      const activity =
+        profileStream?.answerComplete && event.type === 'response.output_text.delta'
+          ? { phase: 'organizing' as const }
+          : responseActivity(event);
       if (activity && JSON.stringify(activity) !== lastActivity) {
         lastActivity = JSON.stringify(activity);
         emit({ id: request.id, type: 'activity', activity });
@@ -307,6 +230,13 @@ export class ChatGPTService {
         typeof event.delta === 'string'
       ) {
         receiveText(event.delta, event.type === 'response.refusal.delta');
+      }
+      if (profileStream?.answerComplete && event.type === 'response.output_text.delta') {
+        const activity = { phase: 'organizing' as const };
+        if (JSON.stringify(activity) !== lastActivity) {
+          lastActivity = JSON.stringify(activity);
+          emit({ id: request.id, type: 'activity', activity });
+        }
       }
       if (event.type === 'response.web_search_call.in_progress')
         emit({ id: request.id, type: 'search' });
@@ -366,6 +296,7 @@ export class ChatGPTService {
       sources: [...sources.values()],
       warning,
       profileChanges: proposal?.changes,
+      reasoningSummary: summary.text || undefined,
       answerText,
     };
   }

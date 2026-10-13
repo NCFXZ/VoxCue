@@ -8,16 +8,21 @@ export interface AIModelService {
     signal: AbortSignal,
   ): Promise<void>;
 }
-export interface KnowledgeBaseService {
-  search(query: string, signal?: AbortSignal): Promise<Array<{ id: string; content: string }>>;
-}
 export interface Transcript {
+  source?: 'microphone' | 'system';
+  startMs?: number;
+  endMs?: number;
   id: string;
   text: string;
   time: string;
   final: boolean;
 }
 export interface Answer {
+  sourceTranscriptIds?: string[];
+  createdAt?: number;
+  reasoningSummary?: string;
+  activity?: import('../../electron/contracts/chat').ChatActivity;
+  provider?: 'mock' | 'chatgpt';
   id: string;
   question: string;
   content: string;

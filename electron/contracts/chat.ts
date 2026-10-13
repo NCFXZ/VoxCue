@@ -45,6 +45,7 @@ export interface ChatTurn {
   content: string;
   files?: ChatFile[];
 }
+export const CHAT_TEXT_LIMIT = 200000;
 export interface ChatRequest {
   id: string;
   modelId: string;
@@ -55,11 +56,12 @@ export interface ChatRequest {
   profile?: PersonalInfo;
 }
 export interface ChatActivity {
-  phase: 'waiting' | 'thinking' | 'searching' | 'reading' | 'writing' | 'processing';
+  phase: 'waiting' | 'thinking' | 'searching' | 'reading' | 'writing' | 'processing' | 'organizing';
   detail?: string;
 }
 export type ChatEvent =
   | { id: string; type: 'delta'; text: string }
+  | { id: string; type: 'reasoning-summary'; text: string }
   | { id: string; type: 'search' }
   | { id: string; type: 'activity'; activity: ChatActivity }
   | { id: string; type: 'sources'; sources: ChatSource[] };
@@ -71,6 +73,7 @@ export type ChatResult =
       warning?: string;
       profileChanges?: ProfileChanges;
       answerText?: string;
+      reasoningSummary?: string;
     }
   | { ok: false; error: ChatFailure };
 export const emptyUsage = (): AppUsage => ({

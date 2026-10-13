@@ -147,7 +147,7 @@ try {
   const oldLogin = page;
   [page] = await Promise.all([
     app.waitForEvent('window'),
-    oldLogin.getByRole('button', { name: '体验 Mock 界面', exact: true }).click(),
+    oldLogin.evaluate(() => window.desktop.enterDemo()),
   ]);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '有什么可以帮你？' }).waitFor();
@@ -159,7 +159,7 @@ try {
     ),
     loginId,
   );
-  await assertWindowSize([1360, 900]);
+  await assertWindowSize([1280, 800]);
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.screenshot({ path: 'test-results/model-menu-light.png' });
   await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).click();
@@ -171,7 +171,8 @@ try {
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '用户菜单' }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  await page.getByRole('button', { name: '深色', exact: true }).click();
+  await page.getByRole('button', { name: '外观主题', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置' }).click();
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.screenshot({ path: 'test-results/model-menu-dark.png' });
@@ -192,7 +193,7 @@ try {
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: login gate, browser OAuth initiation, cancel/decline, native encrypted storage, explicit demo, logout and custom model menu.',
+    'PASS: login gate, browser OAuth initiation, cancel/decline, native encrypted storage, internal fixture session, logout and custom model menu.',
   );
 } finally {
   await app.close();

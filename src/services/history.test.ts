@@ -11,6 +11,62 @@ const record = (id: string, startedAt = 100): InterviewRecord => ({
   mock: true,
 });
 describe('本地历史记录', () => {
+  it('保留旧记录未知附加字段，更新标题不改写正文', () => {
+    const legacy = {
+      ...record('legacy'),
+      mock: false,
+      answers: [
+        {
+          id: 'a',
+          question: '问题',
+          content: '原有回答',
+          provider: 'chatgpt',
+          legacyMetadata: { sources: ['original'] },
+        },
+      ],
+    };
+    let raw = JSON.stringify([legacy]);
+    const service = createHistoryService({
+      getItem: () => raw,
+      setItem: (_key, value) => {
+        raw = value;
+      },
+    });
+    service.save({ ...service.list()[0], title: '新标题' });
+    expect(JSON.parse(raw)[0].answers).toEqual(legacy.answers);
+  });
+  it('旧Mock记录与真实来源记录共存，不把真实转写标成模拟', () => {
+    let raw: string | null = null;
+    const service = createHistoryService({
+      getItem: () => raw,
+      setItem: (_k, v) => {
+        raw = v;
+      },
+    });
+    service.save(record('old'));
+    service.save({
+      ...record('real'),
+      mock: false,
+      transcripts: [
+        {
+          id: 's',
+          source: 'system',
+          startMs: 1,
+          endMs: 2,
+          text: '真实终稿',
+          final: true,
+          time: '10:00',
+        },
+      ],
+    });
+    expect(
+      service
+        .list()
+        .map((r) => r.mock)
+        .sort(),
+    ).toEqual([false, true]);
+    expect(service.list().find((r) => !r.mock)?.transcripts[0].source).toBe('system');
+  });
   it('按时间排序、更新同场记录不重复，并可跨实例读取和删除', () => {
     const values = new Map<string, string>();
     const storage = {

@@ -1,7 +1,9 @@
+import voxcueLogo from '../assets/voxcue.png';
+
 export function AppLogo({ size = 22 }: { size?: number }) {
   return (
     <img
-      src="./voxcue.png"
+      src={voxcueLogo}
       className="app-logo"
       alt=""
       aria-hidden="true"

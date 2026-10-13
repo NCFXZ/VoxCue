@@ -10,7 +10,7 @@ export function AnswerStylePanel() {
   return (
     <section className="answer-style-section" aria-labelledby="answer-style-title">
       <h3 id="answer-style-title">回答风格</h3>
-      <p>用于后续准备聊天，不改变模型或思考强度。Mock 仍为预设回复。</p>
+      <p>用于后续准备聊天，不改变模型或思考强度。</p>
       <form
         onSubmit={(event) => {
           event.preventDefault();

@@ -15,6 +15,7 @@ beforeEach(() => {
   usePreparation.getState().reset();
   usePreparation.setState({
     conversations: [],
+    viewing: true,
     info: { ...base },
     resume: null,
     answerStyle: { ...defaultAnswerStyle },
@@ -113,4 +114,162 @@ describe('聊天附件更新需要同意', () => {
     expect(usePreparation.getState().updateInfo({ name: '绕过' }, message.id)).toBe(false);
     expect(usePreparation.getState().info).toEqual(base);
   });
+});
+
+describe('聊天文字确认实际保存', () => {
+  it('确认最新完整提案后持久化所有字段，不再发送确认消息给模型', async () => {
+    await usePreparation.getState().send('更新个人信息');
+    const calls = vi.mocked(streamChat).mock.calls.length;
+    await usePreparation.getState().send('确认更新');
+    expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(calls);
+    expect(usePreparation.getState().info).toEqual({
+      ...base,
+      name: '新姓名',
+      jobDescription: '新 JD',
+    });
+    expect(JSON.parse(localStorage.getItem('copilot-personal-info-v1')!)).toEqual(
+      usePreparation.getState().info,
+    );
+    expect(usePreparation.getState().messages[1].applied).toBe(true);
+    expect(usePreparation.getState().streaming).toBe(false);
+  });
+  it('没有提案、拒绝过的提案和已手动修改的提案不能通过文字确认覆盖', async () => {
+    await usePreparation.getState().send('确认更新');
+    expect(usePreparation.getState().error).toContain('没有可确认');
+    expect(streamChat).not.toHaveBeenCalled();
+    await usePreparation.getState().send('更新个人信息');
+    usePreparation.getState().dismissProfile(usePreparation.getState().messages.at(-1)!.id);
+    await usePreparation.getState().send('确认更新');
+    expect(usePreparation.getState().info).toEqual(base);
+    await usePreparation.getState().send('更新个人信息');
+    usePreparation.getState().updateInfo({ name: '手动修改' });
+    await usePreparation.getState().send('确认更新');
+    expect(usePreparation.getState().info.name).toBe('手动修改');
+    expect(usePreparation.getState().error).toContain('较新的修改');
+  });
+});
+
+describe('附带文件的确认不重复发起模型调用', () => {
+  it('确认完成提案即保存，待发送文件保留供后续使用', async () => {
+    await usePreparation.getState().send('更新个人信息');
+    const calls = vi.mocked(streamChat).mock.calls.length;
+    usePreparation.getState().addAttachments([new File(['新附件'], 'resume.md')]);
+    await usePreparation.getState().send('确认更新');
+    expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(calls);
+    expect(usePreparation.getState().info.name).toBe('新姓名');
+    expect(usePreparation.getState().attachments).toHaveLength(1);
+    expect(JSON.parse(localStorage.getItem('copilot-personal-info-v1')!).name).toBe('新姓名');
+  });
+});
+
+it('切换对话和新对话不取消生成，增量与摘要仍归属原对话', async () => {
+  let emit!: Parameters<typeof streamChat>[1];
+  let finish!: (value: any) => void;
+  let signal!: AbortSignal;
+  vi.mocked(streamChat).mockImplementation(async (_request, callback, abort) => {
+    emit = callback;
+    signal = abort;
+    return await new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  const sending = usePreparation.getState().send('后台生成');
+  await vi.waitFor(() => expect(emit).toBeTypeOf('function'));
+  const owner = usePreparation.getState().activeConversation!;
+  usePreparation.getState().reset(true);
+  usePreparation.setState((state) => ({
+    conversations: [...state.conversations, { id: 'other', title: '其他', messages: [] }],
+  }));
+  usePreparation.getState().selectConversation('other');
+  expect(signal.aborted).toBe(false);
+  emit({ id: 'event', type: 'reasoning-summary', text: '公开摘要' });
+  emit({ id: 'event', type: 'delta', text: '后台正文' });
+  expect(usePreparation.getState().messages).toEqual([]);
+  finish({
+    ok: true,
+    usage: null,
+    sources: [],
+    answerText: '完整正文',
+    reasoningSummary: '完整公开摘要',
+  });
+  await sending;
+  expect(usePreparation.getState().streaming).toBe(false);
+  expect(usePreparation.getState().conversations.find((c) => c.id === owner)?.unread).toBe(true);
+  usePreparation.getState().selectConversation(owner);
+  expect(usePreparation.getState().conversations.find((c) => c.id === owner)?.unread).toBe(false);
+  expect(usePreparation.getState().messages.at(-1)).toMatchObject({
+    content: '完整正文',
+    reasoningSummary: '完整公开摘要',
+    status: 'completed',
+  });
+});
+
+it('离开页面后原对话完成会标为未读，回到可见页面清除；当前查看完成不标记', async () => {
+  let finish!: (value: any) => void;
+  vi.mocked(streamChat).mockImplementation(
+    async () =>
+      await new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const first = usePreparation.getState().send('隐藏页面');
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  usePreparation.getState().setViewing(false);
+  finish({ ok: true, usage: null, sources: [], answerText: '后台完成' });
+  await first;
+  expect(usePreparation.getState().conversations[0].unread).toBe(true);
+  usePreparation.getState().setViewing(true);
+  expect(usePreparation.getState().conversations[0].unread).toBe(false);
+  finish = undefined as any;
+  const second = usePreparation.getState().send('正在查看');
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  finish({ ok: true, usage: null, sources: [], answerText: '前台完成' });
+  await second;
+  expect(usePreparation.getState().conversations[0].unread).toBe(false);
+});
+
+it('删除当前其他对话不会停止后台回复，完成后仍只标记原对话', async () => {
+  let finish!: (value: any) => void;
+  let signal!: AbortSignal;
+  vi.mocked(streamChat).mockImplementation(async (_request, _emit, abort) => {
+    signal = abort;
+    return await new Promise((resolve) => {
+      finish = resolve;
+    });
+  });
+  const sending = usePreparation.getState().send('后台原对话');
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  const owner = usePreparation.getState().activeConversation;
+  usePreparation.setState((state) => ({
+    conversations: [...state.conversations, { id: 'delete-other', title: '其他', messages: [] }],
+  }));
+  usePreparation.getState().selectConversation('delete-other');
+  usePreparation.getState().deleteConversation('delete-other');
+  expect(signal.aborted).toBe(false);
+  finish({ ok: true, usage: null, sources: [], answerText: '继续完成' });
+  await sending;
+  expect(usePreparation.getState().messages).toEqual([]);
+  expect(usePreparation.getState().conversations).toHaveLength(1);
+  expect(usePreparation.getState().conversations[0]).toMatchObject({ id: owner, unread: true });
+  expect(usePreparation.getState().conversations[0].messages.at(-1)?.content).toBe('继续完成');
+});
+
+it('失败与手动停止不会标成已完成未读', async () => {
+  usePreparation.getState().setViewing(false);
+  vi.mocked(streamChat).mockRejectedValueOnce(new Error('fixture failure'));
+  await usePreparation.getState().send('失败');
+  expect(usePreparation.getState().conversations[0].unread).not.toBe(true);
+  vi.mocked(streamChat).mockImplementation(
+    async (_request, _emit, signal) =>
+      await new Promise((_resolve, reject) => {
+        signal.addEventListener('abort', () => reject(new DOMException('Stopped', 'AbortError')), {
+          once: true,
+        });
+      }),
+  );
+  const sending = usePreparation.getState().send('停止');
+  await vi.waitFor(() => expect(usePreparation.getState().streaming).toBe(true));
+  usePreparation.getState().stop();
+  await sending;
+  expect(usePreparation.getState().conversations[0].unread).not.toBe(true);
 });

@@ -94,7 +94,10 @@ describe('effort 能力与请求', () => {
           return Response.json({
             models: [{ slug: 'gpt-6-luna', display_name: 'Luna', visibility: 'list' }],
           });
-        expect(JSON.parse(options!.body as string).reasoning).toEqual({ effort: 'low' });
+        expect(JSON.parse(options!.body as string).reasoning).toEqual({
+          effort: 'low',
+          summary: 'auto',
+        });
         return Response.json({
           object: 'response',
           id: 'resp-1',
@@ -118,5 +121,104 @@ describe('effort 能力与请求', () => {
     await expect(
       service.stream({ ...request, effort: 'minimal' }, () => {}, new AbortController().signal),
     ).rejects.toThrow('不支持该思考强度');
+  });
+});
+
+describe('完成事件不等待连接清理', () => {
+  it('收到 completed 后，即使底层取消一直未返回，也结束请求', async () => {
+    let cancelled = false;
+    const terminal = {
+      type: 'response.completed',
+      response: {
+        id: 'resp-open',
+        status: 'completed',
+        output: [],
+        usage: { input_tokens: 1, output_tokens: 1, total_tokens: 2 },
+      },
+    };
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              'data: {"type":"response.output_text.delta","delta":"已完成"}\n\n' +
+                `data: ${JSON.stringify(terminal)}\n\n`,
+            ),
+          );
+        },
+        cancel() {
+          cancelled = true;
+          return new Promise<void>(() => {});
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+    const service = new ChatGPTService({
+      access: async () => ({ account: 'test', token: 'test-only' }),
+      ledger: { add: async () => {} } as unknown as UsageLedger,
+      fetch: async (url: any) =>
+        String(url).endsWith('/models')
+          ? Response.json({
+              models: [{ slug: 'gpt-6-luna', display_name: 'Luna', visibility: 'list' }],
+            })
+          : response,
+    });
+    const result = await Promise.race([
+      service.stream(
+        {
+          id: 'open-stream',
+          modelId: 'gpt-6-luna',
+          webSearch: false,
+          instructions: '',
+          turns: [{ role: 'user', content: '你好' }],
+        },
+        () => {},
+        new AbortController().signal,
+      ),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('完成事件后仍在等待关闭')), 300),
+      ),
+    ]);
+    expect(result.answerText).toBe('已完成');
+    expect(result.usage?.totalTokens).toBe(2);
+    expect(cancelled).toBe(true);
+  });
+});
+
+describe('未完成的连接也必须退出等待', () => {
+  it('收到 DONE 即结束读取，但不会伪造 completed', async () => {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('data: [DONE]\n\n'));
+        },
+        cancel() {
+          return new Promise<void>(() => {});
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+    const iterator = responseEvents(response, new AbortController().signal, 100);
+    expect(await iterator.next()).toEqual({ done: true, value: undefined });
+  });
+  it('正文后连接静默时超时，取消未返回也不会继续等待', async () => {
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(
+            new TextEncoder().encode(
+              'data: {"type":"response.output_text.delta","delta":"正文"}\n\n',
+            ),
+          );
+        },
+        cancel() {
+          return new Promise<void>(() => {});
+        },
+      }),
+      { headers: { 'content-type': 'text/event-stream' } },
+    );
+    const iterator = responseEvents(response, new AbortController().signal, 30);
+    expect((await iterator.next()).value?.delta).toBe('正文');
+    await expect(iterator.next()).rejects.toThrow('没有新数据');
   });
 });

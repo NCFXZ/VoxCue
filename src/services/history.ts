@@ -8,14 +8,17 @@ export interface InterviewRecord {
   status: 'ended' | 'interrupted';
   transcripts: Transcript[];
   answers: Answer[];
-  mock: true;
+  mock: boolean;
+  titleStatus?: 'pending' | 'ready' | 'failed';
+  titleError?: string;
 }
 export interface HistoryService {
   list(): InterviewRecord[];
   save(record: InterviewRecord): void;
   remove(id: string): void;
 }
-const key = 'copilot-interview-history-v1';
+export const historyStorageKey = 'copilot-interview-history-v1';
+const key = historyStorageKey;
 export function createHistoryService(
   storage: Pick<Storage, 'getItem' | 'setItem'>,
 ): HistoryService {
@@ -35,7 +38,7 @@ export function createHistoryService(
           ['ended', 'interrupted'].includes(record.status) &&
           Array.isArray(record.transcripts) &&
           Array.isArray(record.answers) &&
-          record.mock === true,
+          typeof record.mock === 'boolean',
       )
     )
       throw new Error('历史记录数据无法读取');
@@ -44,6 +47,16 @@ export function createHistoryService(
   return {
     list,
     save(record) {
+      const previous = list().find((item) => item.id === record.id);
+      if (previous?.titleStatus === 'ready' && record.titleStatus !== 'ready')
+        record = { ...record, title: previous.title, titleStatus: 'ready', titleError: undefined };
+      if (previous?.titleStatus && !record.titleStatus)
+        record = {
+          ...record,
+          title: previous.title,
+          titleStatus: previous.titleStatus,
+          titleError: previous.titleError,
+        };
       storage.setItem(
         key,
         JSON.stringify([record, ...list().filter((item) => item.id !== record.id)]),

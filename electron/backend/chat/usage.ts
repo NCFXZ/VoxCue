@@ -31,6 +31,21 @@ export class UsageLedger {
     await this.queue;
     return (await this.read(account)).usage;
   }
+  reset(account: string) {
+    const operation = this.queue.then(async () => {
+      const record = await this.read(account);
+      const usage = emptyUsage();
+      await mkdir(this.directory, { recursive: true });
+      const file = this.file(account);
+      const temporary = file + '.' + randomUUID() + '.tmp';
+      // Keep response IDs so late duplicates cannot restore pre-reset totals.
+      await writeFile(temporary, JSON.stringify({ usage, ids: record.ids }));
+      await rename(temporary, file);
+      return usage;
+    });
+    this.queue = operation.catch(() => {});
+    return operation;
+  }
   add(account: string, id: string, tokens: TokenUsage) {
     const operation = this.queue.then(async () => {
       const record = await this.read(account);
