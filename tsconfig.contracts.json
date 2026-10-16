@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": { "types": ["node", "vite/client"] },
-  "include": ["tests/desktop-contract.types.ts", "src/env.d.ts"]
+  "include": ["test/shared/unit/desktop-contract.types.ts", "shared/src/env.d.ts"]
 }

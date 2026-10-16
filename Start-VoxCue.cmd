@@ -6,7 +6,7 @@ if not exist "node_modules\electron\dist\electron.exe" (
   pause
   exit /b 1
 )
-if not exist "dist-electron\main.js" (
+if not exist "dist-electron\shared\electron\main.js" (
   echo Build output is missing. Build the project first.
   pause
   exit /b 1

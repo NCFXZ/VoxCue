@@ -16,5 +16,5 @@ export default defineConfig({
         html.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';"),
     },
   ],
-  resolve: { alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) } },
+  resolve: { alias: { '@': fileURLToPath(new URL('./shared/src', import.meta.url)) } },
 });
