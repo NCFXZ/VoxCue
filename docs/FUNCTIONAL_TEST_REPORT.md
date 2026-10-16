@@ -15,7 +15,7 @@
 
 证据目录为 test/results/release-v0.2.0：architecture/typecheck/unit/build.log、desktop-suites.json、test-chat-response-verified.log、test-interview-layout-recheck.log、test-interview-layout-verified.log、native-suites.json、packaged-suites.json、dependency-audit.json 和 artifact-audit.json。安装包版本/清单/大小/SHA512/可解码 blockmap 一致，ASAR 根目录仅生产运行资源，固定公开更新源正确；原 0.1.1 安装包哈希不变。
 
-全部账户、AI 和权限事件使用隔离合成夹具；真实账户在线服务、真人语音质量按此前用户选择稍后验证，Mac 真机/原生音频/签名/安装未验收。测试不读取真实用户资料或凭据，不重启退役 benchmark。以下是历史 0.1.2 及此前验证记录。
+全部账户、AI 和权限事件使用隔离合成夹具；真实账户在线服务、真人语音质量按此前用户选择稍后验证，Mac 真机/原生音频/签名/安装未验收。测试不读取真实用户资料或凭据，不重启退役 benchmark。本轮公开[Windows v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)已发布并设Latest，私有源码功能提交45af921已推送main。三个服务端文件大小/SHA256、匿名清单和生产更新选择器校验通过，证据为public-verification.json。验收后移除隔离NSIS stage/artifacts与两个更新pending副本，报告/profile保留；正式安装包及installer-stage可用。以下是历史 0.1.2 及此前验证记录。
 
 ## 历史完整回归
 

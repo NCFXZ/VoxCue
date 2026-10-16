@@ -2,7 +2,7 @@
 
 更新：2026-10-16。Windows x64 使用 NSIS 安装包与 electron-updater 6.8.9；electron-builder 固定 26.15.3。现有源码仓库 `NCFXZ/VoxCue` 保持私有，更新源为独立公开仓库 `NCFXZ/VoxCue-releases`。客户端不需要 GitHub 登录或令牌。
 
-当前正式Windows版本为[v0.1.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.1.2)，已包含分平台选版与更新加载动画修复。安装包600,418,657字节，SHA256 `e5bb67711871dad5915d3e6ab66ff0bb415c9fd4994b2f7e158c2a15f8dfbaa2`；三项文件服务端大小/摘要及公开清单下载均核对通过，实际打包/原生六组专项通过。仅发布Windows x64，未签名、无Mac包，保留旧发行和私有源码工作树；审计见test/results/release-v0.1.2。
+当前正式Windows版本为[v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)，已设为Latest。包含本轮面试展示、固定字号/工具栏缩放、截图发送和工作区整理。安装包600,421,158字节，SHA256 `92b8acb151bc83b7eef664804047993d063c6b0921f24e730cdb9c831d3d6aca`；三个服务端资产大小/摘要、公开清单下载和生产分平台选择器逐项核对通过。336项单测与42组桌面/原生/实际安装包回归通过，10分钟语音按用户要求取消且不计入验收。源码已推送私有NCFXZ/VoxCue的main（功能提交45af921），历史Windows/Mac和默认Windows保持。仅Windows x64，未签名、无Mac包；旧发行保留，证据见test/results/release-v0.2.0。
 
 ## 最新源码：Windows / Apple Silicon独立发行
 
@@ -21,7 +21,7 @@ Mac DMG可供首次手动安装，但自动更新必须有arm64 ZIP；Mac清单�
 
 本轮完成Windows实际本机下载/哈希和模拟列表的分平台验证；Mac只完成选择/Provider/类型测试，不代表真机启动、签名、下载安装或完整移植通过。macOS自动更新后续还需正确签名及真机验证，参见[electron-builder文档](https://www.electron.build/v26/docs/features/auto-update/)。GitHub列表字段/分页依据[官方REST文档](https://docs.github.com/en/rest/releases/releases)。
 
-**旧客户端过渡：**已经安装的v0.1.1仍使用原全仓库Latest算法。v0.1.2已正式发布并设为Latest，旧安装版可先在应用内升级或手动安装；升级后按平台独立查找。v0.1.1自身不含新选版算法，以下旧发行记录保留作历史证据。
+**旧客户端过渡：**已经安装的v0.1.1仍使用原全仓库Latest算法。当前v0.2.0已正式发布并设为Latest，旧安装版可在应用内升级或手动安装；升级后按平台独立查找。v0.1.1自身不含新选版算法，以下旧发行记录保留作历史证据。
 
 此前修复包[v0.1.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.1.1)，600,425,395字节，SHA256 `a24a76a683f5d4919499ce51917de4a863d1cb06339fde59760110a00d80a128`，当时已通过安装目录/原生/更新下载与哈希回归并公开发布。五项对抗缺陷已修复，生产依赖审计0告警；当时公开API确认latest及三项服务端摘要一致，公开元数据下载核对通过。下面v0.1.0的包与待登录状态均为历史证据，不作为当前下载版本。
 
@@ -53,14 +53,14 @@ Mac DMG可供首次手动安装，但自动更新必须有arm64 ZIP；Mac清单�
 
 用户已创建公开的 `NCFXZ/VoxCue-releases`，只用于二进制分发，不更改源码仓库可见性。空仓库应先初始化仅描述安装与更新的 README，不推送源码历史。发布时在该仓库新建例如 `v0.1.0` 的正式 Release，将上述三个文件全部上传完成后再发布；不要将未完成的文件清单暴露为最新版本。后续先提升应用 package.json 的版本，再重新构建、验证和发布。预发布版本不会自动进入稳定更新。
 
-本轮已获发布授权，但不提交或推送私有源码。首次正式 Release 发布完成前，无法验证真实 GitHub 在线升级。当前安装包未配置 Authenticode 证书，实际签名检查为NotSigned；正式配置签名时在本机/CI 安全提供签名凭据及 `win.publisherName`，脚本将发布者名称写入更新配置。凭据不写入客户端、源码或版本元数据。
+0.2.0已按用户明确授权提交推送私有源码并公开发布三个发行文件；两仓库权限、历史分支与旧发行保持。安装包未配置Authenticode证书，实际检查为NotSigned；配置签名时须在本机/CI安全提供凭据及win.publisherName，凭据不得写入客户端、源码或版本元数据。
 
 ## 验证与恢复
 
 - `pnpm test:updates`：实际主进程/IPC/preload/React/IndexedDB，外部 updater 端口为隔离夹具。覆盖检查/下载/进度/重试、非法调用者、面试阻止、取消、保存失败与成功重启后的草稿及附件恢复。
 - `node test/windows/scripts/installer-ui-smoke.mjs updates`：在上述回归后用同一合成 profile 启动实际 NSIS staging，验证安装路径变化仍保留聊天草稿、附件原始字节及正确的应用版本。账户/updater 为夹具，不访问线上服务。
 - `pnpm test:updates:native`：真实 NsisUpdater，经本机测试 HTTP 下载实际生成的 NSIS 安装包、拒绝损坏 SHA512、核对完整文件哈希，不安装或发布。
-- `pnpm test:installer:upgrade`：独立应用 ID、无快捷方式的合成 NSIS 应用，安装到 test-results，在两个版本间验证 localStorage、IndexedDB 原件字节及设置文件保留，随后只卸载该测试安装；不访问真实 VoxCue 用户资料。
+- `pnpm test:installer:upgrade`：独立应用 ID、无快捷方式的合成 NSIS 应用，安装到 test/results，在两个版本间验证 localStorage、IndexedDB 原件字节及设置文件保留，随后只卸载该测试安装；不访问真实 VoxCue 用户资料。
 - `node test/windows/scripts/packaged-smoke.mjs --installer-stage`：验证实际安装包所用完整目录的真实 Paraformer Worker、utilityProcess、原生组件与既有资料功能。默认命令仍验证原便携包。
 - `node test/windows/scripts/installer-ui-smoke.mjs chat-progress`：用实际打包应用及隔离合成账户/HTTP/SSE 验证公开活动、处理用时、资料确认、重试和持久恢复；不访问真实账户或用户资料。copilot和adversarial两组使用同一Windows runner传入对应名称。
 

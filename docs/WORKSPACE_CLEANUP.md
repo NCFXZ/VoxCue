@@ -10,6 +10,8 @@
 
 删除前形成具体清单，并验证真实绝对路径、目录边界、重定向和运行进程。仅移除旧隔离 profile 中已知的 Chromium 缓存：581 个目录、2,207 个文件、逻辑大小 917,572,989 字节，失败 0。排除文档引用、各组最新结果、失败诊断和恢复基线；profile 数据、报告、截图、正式 release、根构建、模型/依赖、真实用户资料和凭据均保留。缓存不再作为可用验证产物；原始报告仍可追溯。
 
+0.2.0验收后再移除4项可再生成副本：nsis-upgrade-L2pCyr的stage/artifacts，以及updates-native-1VRWID的Cache/pending与platform-cache/pending。88文件、1,730,629,512字节，失败0；先核对具体路径/链接/进程，再按清单删除。其报告、截图和profile保留，正式release/installer与installer-stage保留；已移除副本不再作为可用交付物。清单和结果在verification-cleanup-plan.json、verification-cleanup-result.json。
+
 审计位于 test/results/release-v0.2.0：baseline、source-move-plan.json、cleanup-plan.json、cleanup-result.json。版本和本轮验证/上传状态以 PROGRESS 最新节及 FUNCTIONAL_TEST_REPORT 为准。
 
 ## 2026-10-16 功能回归生成副本移除

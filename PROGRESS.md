@@ -1,12 +1,14 @@
 # VoxCue 开发进度
 
-## 2026-10-16：0.2.0工作区整理、完整回归与发布（进行中）
+## 2026-10-16：0.2.0工作区整理、完整回归与发布（已完成）
 
 用户授权清理无用代码/文件、严格平台分类、完整测试，并明确源码提交推送私有NCFXZ/VoxCue及公开NCFXZ/VoxCue-releases安装包两项上传。版本提升0.2.0，保留历史Windows/Mac分支与远端默认Windows。引用图138模块无无用业务模块；7个无入边节点均为声明或动态主进程/preload/Worker/utilityProcess入口，保留。删除无消费者Shrink图标及其Fluent导入、过期interviewLayout.height字段。6组Windows原生/权限/Copilot回归及权限夹具迁至test/windows，模拟语音端口移入Windows夹具，共用打包UI回归改由Windows runner提供可执行路径。benchmarks整体Git忽略，原私有历史资料原地保留。
 
 仅清理已确认不被引用、不是各组最新且没有失败/恢复资料的旧隔离profile缓存：581项目录、2207文件、917572989字节，失败0。保留全部profile资料/报告/截图/诊断/源码前态和文档引用目录，不触碰真实用户资料、当前根构建、现有发行、模型或依赖。逐绝对路径/真实路径/子树重定向与运行进程检查、删除清单和结果位于test/results/release-v0.2.0；源码前态和平台迁移清单同时保留。
 
-138模块架构/类型、46文件336单测、Windows构建、29桌面+8原生+5安装包共42组回归最终通过，生产依赖审计0告警。chat-response旧等待文案断言更新并重跑通过；缩放首次原生鼠标采样不足，原断言/实现未变，独立复测两次通过，失败日志保留。用户随后要求不做10分钟语音，已停止并明确不计入验收，不重启。真实账户、真人语音质量和Mac真机仍未验收。0.2.0安装包600,421,158字节，SHA256 92b8acb151bc83b7eef664804047993d063c6b0921f24e730cdb9c831d3d6aca；三项文件、清单、blockmap、ASAR版本及固定公开源核对通过，未签名，仅Windows x64。上传正在进行。
+138模块架构/类型、46文件336单测、Windows构建、29桌面+8原生+5安装包共42组回归最终通过，生产依赖审计0告警。chat-response旧等待文案断言更新并重跑通过；缩放首次原生鼠标采样不足，原断言/实现未变，独立复测两次通过，失败日志保留。用户随后要求不做10分钟语音，已停止并明确不计入验收，不重启。真实账户、真人语音质量和Mac真机仍未验收。0.2.0安装包600,421,158字节，SHA256 92b8acb151bc83b7eef664804047993d063c6b0921f24e730cdb9c831d3d6aca；三项文件、清单、blockmap、ASAR版本及固定公开源核对通过，未签名，仅Windows x64。功能提交45af921f1cfcf2ca7a762f8c37dc1ff241479faf已推送私有origin/main；公开[发行v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)已发布并设Latest。三项服务端state/大小/SHA256、匿名清单下载与生产Windows分平台选择器均通过；公开README已更新，旧发行、仓库可见性、历史分支和默认Windows保持。后续发布文档提交仅补充最终结果。
+
+验收后另外移除本轮4个隔离NSIS stage/artifacts及更新pending缓存：88文件、1,730,629,512字节，失败0；正式release/installer与installer-stage保留，报告/截图/profile/恢复基线保留。清单在verification-cleanup-plan/result.json；已移除副本不再作为可用交付物。
 
 ## 2026-10-16：面试附截图与独立屏幕截取发送
 

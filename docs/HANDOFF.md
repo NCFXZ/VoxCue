@@ -1,5 +1,9 @@
 # VoxCue 当前交接
 
+2026-10-16最新完成：0.2.0清理、平台分类、336单测和42组桌面/原生/实际安装包回归通过，功能提交45af921已推送私有origin/main；公开[Windows v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)已发布并设Latest，三个服务端资产大小/SHA256、清单下载及生产分平台选版逐项核对。600,421,158字节，SHA256 92b8acb151bc83b7eef664804047993d063c6b0921f24e730cdb9c831d3d6aca，正式包与installer-stage保留；历史Windows/Mac分支、默认Windows和旧发行未改。用户要求不要10分钟语音，已停止、不计入验收、不重新启动；真人语音、真实账户和Mac真机仍未验收。
+
+清理581个旧profile缓存目录（2207文件/917,572,989字节）和验收后4项隔离安装/下载副本（88文件/1,730,629,512字节），失败0；恢复基线、报告、截图、profile、用户资料、原件、凭据、依赖/模型和退役benchmark保持。证据在test/results/release-v0.2.0；被移除验证副本不再作为可用交付物。当前源码、根构建和正式安装包均为0.2.0，不需要重复发布。以下为历史记录。
+
 2026-10-16最新发行：v0.1.2 Windows x64已打包验证并发布 https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.1.2 ，三项资产state/大小/SHA256和公开latest.yml下载逐项核对，已设为Latest供旧客户端过渡到分平台更新。实际installer-stage六组专项通过，安装包600,418,657字节，SHA256 e5bb67711871dad5915d3e6ab66ff0bb415c9fd4994b2f7e158c2a15f8dfbaa2；原0.1.0/0.1.1产物保留，没有提交或推送私有源码。根构建及installer-stage为0.1.2，正式文件在release/installer，本轮证据在test/results/release-v0.1.2。大文件前两次网络失败，按用户要求刷新草稿清除失败占位后第三次上传成功；不要重复发布。仍未签名，无Mac包，真人语音/真实账户/Mac真机未新增验收。
 
 2026-10-16最新：完整功能回归及检查更新动画修复完成。315项单测、36组功能回归（含66种UI状态、真正原生/离线RAG/更新/隔离NSIS升级/ASAR与10分钟合成音频）通过；测试路径和过时夹具已修正，原失败日志保留。真人语音按用户选择稍后测试，真实账户与Mac真机未验收，完整范围见FUNCTIONAL_TEST_REPORT.md。根构建已更新，公开安装包未重打，未提交推送发布。test/results/platform-layout-functional-20261015-697d9556验证包及本轮安装/下载副本验收后移除，portable-current-VNSxgj等报告/截图与functional-20261015-697d9556审计仍在，不把已删除测试包当作交付物。
