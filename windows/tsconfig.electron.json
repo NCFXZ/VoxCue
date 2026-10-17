@@ -16,7 +16,6 @@
   },
   "include": [
     "../shared/electron",
-    "../windows/electron",
-    "../macos/electron"
+    "electron"
   ]
 }

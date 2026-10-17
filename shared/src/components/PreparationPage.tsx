@@ -321,7 +321,7 @@ export function PreparationPage({
             {!checkingAccess && accessReport?.screenCapture && (
               <p aria-label="屏幕捕获权限检查">
                 <span className="interview-access-icon" aria-hidden="true">
-                  {accessReport.screenCapture.status === 'granted' ? (
+                  {['granted', 'not-required'].includes(accessReport.screenCapture.status) ? (
                     <Check size={14} />
                   ) : (
                     <Monitor size={14} />
@@ -329,7 +329,7 @@ export function PreparationPage({
                 </span>
                 <span>
                   {accessReport.screenCapture.message}
-                  {accessReport.screenCapture.status !== 'granted' &&
+                  {!['granted', 'not-required'].includes(accessReport.screenCapture.status) &&
                     '；可继续纯语音面试，截图功能需授权。'}
                 </span>
               </p>
@@ -338,7 +338,7 @@ export function PreparationPage({
               (!accessReport?.ready ||
                 interviewError ||
                 (accessReport?.screenCapture &&
-                  accessReport.screenCapture.status !== 'granted')) && (
+                  !['granted', 'not-required'].includes(accessReport.screenCapture.status))) && (
                 <div className="interview-access-actions">
                   <Button
                     variant="ghost"

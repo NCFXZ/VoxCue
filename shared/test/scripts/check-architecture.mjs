@@ -168,18 +168,18 @@ export function boundaryViolations(graph) {
       const fail = (reason) =>
         violations.push(`${physicalFile}:${edge.line} → ${edge.target}: ${reason}`);
       if (
-        physicalFile === 'macos/electron/screenPermission.ts' &&
+        /^(?:macos|windows)\/electron\/screenPermission\.ts$/.test(physicalFile) &&
         (!edge.typeOnly || !edge.target.startsWith('shared/electron/contracts/'))
       )
-        fail('Mac 屏幕权限仅通过注入调用权限 API，不得依赖捕获、磁盘、账户或业务实现');
+        fail('平台屏幕权限仅通过注入调用权限 API，不得依赖捕获、磁盘、账户或业务实现');
       if (
-        physicalFile === 'macos/electron/presentation.ts' &&
+        /^(?:macos|windows)\/electron\/presentation\.ts$/.test(physicalFile) &&
         !(
           target === 'electron' ||
           (edge.typeOnly && edge.target === 'shared/electron/presentation.ts')
         )
       )
-        fail('Mac 展示适配器只能调用 Electron 原生展示 API，并通过类型端口连接主进程');
+        fail('平台展示适配器只能调用 Electron 原生展示 API，并通过类型端口连接主进程');
       if (
         /^(?:shared|windows|macos)\//.test(physicalFile) &&
         /^(?:shared|windows|macos)\/test\//.test(edge.target)

@@ -1,3 +1,19 @@
+## 2026-10-17：Windows 0.2.1 发行入口
+
+本次授权将当前源码上传私有 NCFXZ/VoxCue 的 main，Windows 安装包补充到公开 NCFXZ/VoxCue-releases 已有 v0.2.1，保留 Mac 的原 DMG、arm64 ZIP、签名和 latest-mac.yml。两平台独立选择完整正式版本；Windows 的 EXE、blockmap 上传后最后上传 latest.yml，再切换 Latest。生产上传与清理状态以 GitHub 及后续记录为准。
+
+Windows 打包工具下载固定使用本平台 .cache/electron-builder，避免 electron-builder 默认写全局工具缓存。新增安装负载摘要、NSIS 压缩完整性与清单校验入口，已生成的暂存目录可直接运行离线模型/窗口回归而不重复打包；所有测试临时文件仍在系统临时根，结果不写本文。上传核验后只清理本地安装包、打包暂存与本次发布辅助文件，保留开发构建、依赖、模型、恢复基线和用户资料；macos/ 只读。
+
+## 2026-10-17：Windows 展示适配与窗口按钮修复
+
+Windows 鼠标转发退出时可能收到迟到的 mouseout；共享命中逻辑重新核对事件位置，避免鼠标仍在输入框或缩放控件上却重新开启穿透。真实鼠标回归同时检查此切换、交互锁定及窗口恢复；结果不保存在本文。
+
+本机同步根/Windows 配置，Electron 构建仅输出 shared/windows。Windows 原生展示通过既有 NativePresentation 端口动态装配，启用应用内主题、normal 置顶、透明留白穿透、面试任务栏隐藏/结束恢复与源 ICO；主进程窗口/frame/参数校验保持。浮窗 Renderer 意外退出时销毁该浮窗并恢复主窗口，重复启动优先已有窗口。Windows 屏幕状态使用 not-required，不枚举像素或模拟授权；实际截图失败仍由发送链路报错。
+
+Windows 11 22H2+ 沿用 Acrylic，并接入共享滑杆及 60/30 背景/阅读层曲线；不支持的系统保存参数并使用回退。调整 CSS 滤镜声明顺序，避免生产压缩仅保留 Chromium 忽略的前缀属性；高对比度回退关闭滤镜。紧凑布局将右上角控制层放在内容之后并显式 no-drag，防止页面拖动区吞掉最小化、最大化和关闭点击。Windows 移动适配固定起始尺寸并补偿分数 DPI 回读，静止鼠标不重复移动；Mac 原移动路径保持。
+
+Windows 回归入口改为自有系统临时目录及终端/内存结果，新增真实 HWND/鼠标/任务栏/ICO、共享语音控制器故障及隔离便携包入口；公共 WAV 只作临时输入，不采样物理设备。原生鼠标回归串行运行，旧硬件/真实安装入口仍须先核对零保留约定。实现、命令与边界见 shared/test/README.md；本文不保存本轮测试结果、验收数表或执行日志。macos/ 只读，实际账户、真人语音、外接硬件和真实安装不由合成回归代替。
+
 ## 2026-10-17：Mac 免费自动更新与独立发行入口
 
 按本次明确授权，首个 macOS 安装版 v0.2.1 已发布至公开 NCFXZ/VoxCue-releases：DMG、arm64 ZIP 和 latest-mac.yml；Windows v0.2.0 的 Latest 保留。发行链接：https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1 。用户随后明确授权将本轮自动更新、打包与回归源码提交上传至私有 NCFXZ/VoxCue 的 main；私钥仍只在本工作区。

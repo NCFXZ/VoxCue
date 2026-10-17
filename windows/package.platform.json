@@ -1,5 +1,11 @@
 {
   "scripts": {
+    "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
+    "test:windows:functional": "node test/scripts/windows-suite.mjs",
+    "test:windows:regression": "node test/scripts/windows-suite.mjs --windows",
+    "test:presentation:native": "node test/scripts/presentation-native-smoke.mjs",
+    "test:speech:adversarial": "node test/scripts/speech-adversarial-smoke.mjs",
+    "test:portable:native": "node test/scripts/portable-native-smoke.mjs",
     "build": "node scripts/build-audio.mjs && pnpm build:shared",
     "test:platform:native": "node test/scripts/platform-native-smoke.mjs",
     "test:interview:layout": "node test/scripts/interview-layout-smoke.mjs",

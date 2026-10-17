@@ -16,9 +16,10 @@ export async function exerciseInterviewWindowDrag(app, page) {
     );
     const cursor = screen.getCursorScreenPoint.bind(screen);
     const move = win.setPosition.bind(win);
+    const bounds = win.setBounds.bind(win);
     const handler = ipcMain._invokeHandlers.get('interview:move');
     const passthrough = win.setIgnoreMouseEvents.bind(win);
-    globalThis.gripTest = { cursor: cursor(), phases: [], moves: 0, ignored: [] };
+    globalThis.gripTest = { cursor: cursor(), phases: [], moves: 0, completed: 0, ignored: [] };
     win.setIgnoreMouseEvents = (ignore, ...args) => {
       globalThis.gripTest.ignored.push(ignore);
       return passthrough(ignore, ...args);
@@ -28,13 +29,23 @@ export async function exerciseInterviewWindowDrag(app, page) {
       globalThis.gripTest.moves++;
       return move(...args);
     };
+    win.setBounds = (...args) => {
+      globalThis.gripTest.moves++;
+      return bounds(...args);
+    };
     ipcMain._invokeHandlers.set('interview:move', (event, ...args) => {
       globalThis.gripTest.phases.push(args[0]?.phase);
-      return handler(event, ...args);
+      if (args[0]?.phase === 'start') globalThis.gripTest.startBounds = win.getBounds();
+      const result = handler(event, ...args);
+      return Promise.resolve(result).then((value) => {
+        if (args[0]?.phase === 'move') globalThis.gripTest.completed++;
+        return value;
+      });
     });
     globalThis.restoreGripTest = () => {
       screen.getCursorScreenPoint = cursor;
       win.setPosition = move;
+      win.setBounds = bounds;
       win.setIgnoreMouseEvents = passthrough;
       ipcMain._invokeHandlers.set('interview:move', handler);
     };
@@ -100,11 +111,21 @@ export async function exerciseInterviewWindowDrag(app, page) {
       const win = BrowserWindow.getAllWindows().find((w) =>
         w.webContents.getURL().endsWith('#interview'),
       );
-      return globalThis.gripTest.moves > 0 && win.getBounds().x !== undefined;
+      return globalThis.gripTest.completed > 0 && win.getBounds().x !== undefined;
     }, 'Grip did not reach native window movement');
+    const expectedPosition = await app.evaluate(
+      ({ screen }, point) => {
+        if (process.platform !== 'win32') return point;
+        // HWND origins occupy physical pixels. Electron reads their DIP bounds
+        // with a floored origin; e.g. y=191 at 175% maps back to y=190.
+        const resolved = screen.screenToDipPoint(screen.dipToScreenPoint(point));
+        return { x: Math.floor(resolved.x), y: Math.floor(resolved.y) };
+      },
+      { x: before.x + 48, y: before.y + 35 },
+    );
     assert.deepEqual(
       await native(),
-      { ...before, x: before.x + 48, y: before.y + 35 },
+      { ...before, ...expectedPosition },
       'Dragging must move the real native window without resizing the panels',
     );
     const previousMoves = await app.evaluate(() => globalThis.gripTest.moves);

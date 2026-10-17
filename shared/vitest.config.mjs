@@ -13,7 +13,7 @@ export default {
     cache: false,
     include: [
       'test/{unit,renderer}/**/*.test.{ts,tsx}',
-      '../{shared,windows,macos}/test/{unit,renderer}/**/*.test.{ts,tsx}',
+      '../shared/test/{unit,renderer}/**/*.test.{ts,tsx}',
     ],
   },
 };

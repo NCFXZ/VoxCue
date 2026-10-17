@@ -83,6 +83,13 @@ try {
     assert.equal(status.configuration.mode, 'local');
     if (process.platform === 'darwin')
       await nativeReady(({ app }) => !app.dock.isVisible(), 'Dock did not hide');
+    if (process.platform === 'win32')
+      await nativeReady(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        const current = windows.find((w) => w.webContents.getURL().endsWith('#interview'));
+        const main = windows.find((w) => !w.webContents.getURL().includes('#'));
+        return !!current?.isVisible() && current.isAlwaysOnTop() && !!main && !main.isVisible();
+      }, 'Windows interview must stay topmost with main hidden');
     const value = [0, 50, 100][cycle % 3];
     await floating.evaluate((value) => {
       localStorage.setItem('voxcue-frosted-transparency-v2', JSON.stringify(value));
@@ -119,6 +126,7 @@ try {
     await nativeReady(
       ({ BrowserWindow, app }) =>
         BrowserWindow.getAllWindows().length === 1 &&
+        BrowserWindow.getAllWindows()[0].isVisible() &&
         (process.platform !== 'darwin' || app.dock.isVisible()),
       'Interview window or hidden Dock leaked',
     );

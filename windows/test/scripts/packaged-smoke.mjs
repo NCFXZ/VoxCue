@@ -1,9 +1,11 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
+import { lstatSync, realpathSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 const fixtures = createRequire(import.meta.url)('../../../shared/test/scripts/rag-fixtures.cjs');
 const asar = createRequire(import.meta.url)('@electron/asar');
 const testPackage = process.argv
@@ -15,13 +17,22 @@ const packageRoot = path.resolve(
       ? 'release/installer-stage/VoxCue-win32-x64'
       : 'release-smoke/VoxCue-win32-x64'),
 );
-if (
-  testPackage &&
-  (path.dirname(path.dirname(packageRoot)) !== path.resolve('test/results') ||
+if (testPackage) {
+  const parent = path.dirname(path.dirname(packageRoot));
+  if (
+    path.dirname(parent) !== realpathSync(os.tmpdir()) ||
+    !path.basename(parent).startsWith('voxcue-test-run-') ||
     !path.basename(path.dirname(packageRoot)).startsWith('platform-layout-') ||
-    path.basename(packageRoot) !== 'VoxCue-win32-x64')
-)
-  throw Error('Unexpected test package');
+    path.basename(packageRoot) !== 'VoxCue-win32-x64' ||
+    lstatSync(parent).isSymbolicLink() ||
+    realpathSync(parent) !== parent
+  )
+    throw Error('Unexpected test package');
+  const owner = JSON.parse(readFileSync(path.join(parent, '.voxcue-test-owner.json'), 'utf8'));
+  if (owner.kind !== 'voxcue-test-run-' || !Number.isSafeInteger(owner.pid) || owner.pid <= 0)
+    throw Error('Unknown test package owner');
+  process.kill(owner.pid, 0);
+}
 const archive = path.join(packageRoot, 'resources/app.asar');
 const entries = asar
   .listPackage(archive)
@@ -43,8 +54,8 @@ const sharpPackages = entries
     return { file, version: pkg.version };
   });
 
-await mkdir('test/results', { recursive: true });
-const profile = await mkdtemp(path.resolve('test/results/portable-current-'));
+await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
+const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/portable-current-')));
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({
@@ -208,9 +219,7 @@ try {
       let rag;
       try {
         const starting = knowledge.initialize();
-        knowledge.child.stderr.on('data', (d) =>
-          fs.appendFileSync(path.join(app.getPath('userData'), 'rag-fixture-utility.log'), d),
-        );
+        knowledge.child.stderr.on('data', (d) => process.stderr.write(d));
         await starting;
         await knowledge.indexDocument(input, signal());
         await knowledge.indexDocument(
@@ -303,7 +312,14 @@ try {
     {
       pdf: Array.from(fixtures.pdf()),
       docx: Array.from(await fixtures.docx()),
-      english: Array.from(await readFile('../shared/test/fixtures/speech-audio/english.wav')),
+      english: Array.from(
+        await readFile(
+          path.join(
+            process.env.VOXCUE_SPEECH_FIXTURE_DIR ?? '../shared/test/fixtures/speech-audio',
+            'english.wav',
+          ),
+        ),
+      ),
     },
   );
   assert.equal(report.packaged, true);
@@ -330,9 +346,9 @@ try {
   assert.deepEqual(report.models.sort(), ['rag', 'speech']);
   assert.equal(report.rag.status, 'passed');
   assert.deepEqual(report.statuses, ['idle']);
-  await page.screenshot({ path: path.join(profile, 'login.png'), animations: 'disabled' });
+  await page.screenshot({ animations: 'disabled' });
   report.dependencyAudit = { sprintfJsAbsent: true, sharpPackages };
-  await writeFile(path.join(profile, 'report.json'), JSON.stringify(report, null, 2));
+  await console.log(JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ profile, ...report }));
 } finally {
   await closeUiApp(app);

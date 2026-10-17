@@ -88,7 +88,8 @@ let interviewTranscriptVisible = true;
 let interviewScale = 1;
 let lastInterviewBounds: { requested: Electron.Rectangle; actual: Electron.Rectangle } | undefined;
 let interviewCloseApproved = false;
-let interviewMove: { bounds: Electron.Rectangle; pointer: Electron.Point } | undefined;
+let interviewMove:
+  { bounds: Electron.Rectangle; pointer: Electron.Point; lastPointer: Electron.Point } | undefined;
 let interviewResize:
   | {
       bounds: Electron.Rectangle;
@@ -98,24 +99,28 @@ let interviewResize:
       scale: number;
     }
   | undefined;
-const desktopPlatform = selectDesktopPlatform();
+const platformPolicy = selectDesktopPlatform();
 const resources = desktopResources(
   {
     appPath: app.getAppPath(),
     resourcesPath: process.resourcesPath,
     packaged: app.isPackaged,
   },
-  desktopPlatform,
+  platformPolicy,
 );
 const windowPaths = { icon: resources.icon, preload: path.join(__dirname, 'preload.js') };
-const nativePresentation: NativePresentation | undefined = desktopPlatform.presentationFile
+const nativePresentation: NativePresentation | undefined = platformPolicy.presentationFile
   ? require(
-      path.join(app.getAppPath(), 'dist-electron', desktopPlatform.presentationFile),
+      path.join(app.getAppPath(), 'dist-electron', platformPolicy.presentationFile),
     ).createPresentation({
       icon: resources.icon,
       interviewOpen: () => !!interviewWindow && !interviewWindow.isDestroyed(),
     })
   : undefined;
+const desktopPlatform = {
+  ...platformPolicy,
+  presentation: nativePresentation?.capabilities ?? platformPolicy.presentation,
+};
 const indexFile = path.join(app.getAppPath(), 'dist/index.html');
 // Keep existing profiles, credentials, knowledge and usage after the product rename.
 app.setPath('userData', path.join(app.getPath('appData'), 'ai-interview-copilot'));
@@ -328,10 +333,17 @@ function openInterview() {
     speechSessions?.releaseInterview();
     interviewIpc?.cancel();
   });
+  win.webContents.on('render-process-gone', () => {
+    if (win.isDestroyed() || win !== interviewWindow) return;
+    interviewCloseApproved = true;
+    win.destroy();
+    if (!closingMain)
+      dialog.showErrorBox('面试窗口已关闭', '面试窗口发生异常，已停止本场采集并恢复主窗口。');
+  });
 }
 // Keep smoke tests isolated from the user's actual local documents and settings.
 if (process.env.COPILOT_TEST_USER_DATA) app.setPath('userData', process.env.COPILOT_TEST_USER_DATA);
-if (desktopPlatform.nativeWindowControls) {
+if (desktopPlatform.nativeWindowControls || desktopPlatform.presentationFile) {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     process.exit(0);
@@ -773,6 +785,12 @@ app.whenReady().then(() => {
       },
     });
   }
+  if (desktopPlatform.id === 'win32') {
+    const { ScreenPermission }: { ScreenPermission: new () => ScreenCaptureAccess } = require(
+      path.join(app.getAppPath(), 'dist-electron/windows/electron/screenPermission.js'),
+    );
+    screenCaptureAccess = new ScreenPermission();
+  }
   registerScreenCaptureIpc(screenCaptureAccess, requireMain);
   const checkInterviewAccess = async (options: SpeechOptions): Promise<InterviewAccessReport> => {
     const report = await interviewAccess.check(options);
@@ -932,19 +950,32 @@ app.whenReady().then(() => {
     }
     if (phase === 'start') {
       interviewResize = undefined;
+      const pointer = screen.getCursorScreenPoint();
       interviewMove = {
         bounds: interviewWindow!.getBounds(),
-        pointer: screen.getCursorScreenPoint(),
+        pointer,
+        lastPointer: pointer,
       };
       setInterviewMousePassthrough(false);
       return;
     }
     if (!interviewMove) return;
     const cursor = screen.getCursorScreenPoint();
+    if (cursor.x === interviewMove.lastPointer.x && cursor.y === interviewMove.lastPointer.y)
+      return;
+    interviewMove.lastPointer = cursor;
     const x = Math.round(interviewMove.bounds.x + cursor.x - interviewMove.pointer.x);
     const y = Math.round(interviewMove.bounds.y + cursor.y - interviewMove.pointer.y);
     const current = interviewWindow!.getBounds();
-    if (current.x !== x || current.y !== y) interviewWindow!.setPosition(x, y, false);
+    if (current.x !== x || current.y !== y) {
+      if (nativePresentation?.moveInterview)
+        return nativePresentation.moveInterview(interviewWindow!, {
+          ...interviewMove.bounds,
+          x,
+          y,
+        });
+      else interviewWindow!.setPosition(x, y, false);
+    }
   });
   handleDesktop('interview:resize', (event, direction: unknown) => {
     requireInterview(event);
@@ -995,8 +1026,13 @@ app.whenReady().then(() => {
     if (direction !== -1 && direction !== 1) throw new Error('Invalid request');
     sizeInterview(interviewScale + direction * 0.08);
   });
-  onDesktop('interview:confirm-end', (event) => {
-    if (event.sender !== interviewWindow?.webContents) return;
+  onDesktop('interview:confirm-end', (event, ...args: unknown[]) => {
+    if (
+      event.sender !== interviewWindow?.webContents ||
+      event.senderFrame !== event.sender.mainFrame ||
+      args.length
+    )
+      return;
     interviewCloseApproved = true;
     interviewWindow.close();
   });
@@ -1013,9 +1049,15 @@ app.whenReady().then(() => {
     if (args[0] && interviewMove) return;
     setInterviewMousePassthrough(args[0]);
   });
-  onDesktop('window:action', (event, action: unknown) => {
+  onDesktop('window:action', (event, action: unknown, ...extra: unknown[]) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || (win !== mainWindow && win !== interviewWindow)) return;
+    if (
+      !win ||
+      (win !== mainWindow && win !== interviewWindow) ||
+      event.senderFrame !== event.sender.mainFrame ||
+      extra.length
+    )
+      return;
     if (action === 'minimize') win.minimize();
     if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
     if (action === 'close') win.close();

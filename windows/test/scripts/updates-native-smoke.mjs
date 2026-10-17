@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
 import { mkdir, mkdtemp, readFile, writeFile, stat } from 'node:fs/promises';
@@ -7,13 +7,24 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 
-await mkdir('test/results', { recursive: true });
-const profile = await mkdtemp(path.resolve('test/results/updates-native-'));
+await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
+const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/updates-native-')));
 const require = createRequire(import.meta.url);
 const yaml = createRequire(require.resolve('electron-updater/package.json'))('js-yaml');
-const output = path.resolve('release/installer');
-const metadata = await readFile(path.join(output, 'latest.yml'), 'utf8');
-const info = yaml.load(metadata);
+const output = path.join(profile, 'download-fixture');
+await mkdir(output);
+const fixtureBytes = Buffer.from(
+  'Synthetic update transport fixture; this file is never executed.',
+);
+const digest = createHash('sha512').update(fixtureBytes).digest('base64');
+const info = {
+  version: '99.0.1',
+  path: 'VoxCue-Setup-99.0.1-x64.exe',
+  sha512: digest,
+  files: [{ url: 'VoxCue-Setup-99.0.1-x64.exe', size: fixtureBytes.length, sha512: digest }],
+};
+const metadata = yaml.dump(info);
+await writeFile(path.join(output, info.path), fixtureBytes);
 const installer = path.join(output, info.path);
 assert.equal(path.dirname(installer), output);
 const installerSize = (await stat(installer)).size;
@@ -243,14 +254,13 @@ try {
     false,
   );
   await app.evaluate(() => globalThis.platformUpdates.dispose());
-  await writeFile(
-    path.join(profile, 'report.json'),
+  await console.log(
     JSON.stringify(
       {
         passed: true,
         realNsisUpdater: true,
         rejectsCorruption: true,
-        actualInstallerHashVerified: true,
+        syntheticTransportHashVerified: true,
         installerSize,
         installed: false,
         platformIndependentSelection: true,

@@ -1,6 +1,6 @@
 # VoxCue 工作区目录
 
-> 测试结果零保留（2026-10-17）：仅在终端/内存显示，不保存报告、日志、截图或隔离 profile。测试仍暂停；会持久化结果的旧脚本须先改造，不能原样运行。Mac 117 个旧目录因 OneDrive 占用暂留；Windows 349 个此前要求跳过的目录不重试，Windows 全程只读。
+> 测试结果零保留（2026-10-17）：仅在终端/内存显示，不保存报告、日志、截图或隔离 profile。完整测试已获授权；会持久化结果的旧脚本须先改造。Mac 117 个旧占用目录及 Windows 349 个跳过目录不重试；当前 Windows 工作对 macos/ 只读。
 
 更新：2026-10-17。按用户最新授权，开发入口保留根目录，其余内容按实际用途进入 Windows、Mac 或共享目录。
 
@@ -26,7 +26,7 @@ VoxCue/
     pnpm-workspace.yaml      两个平台安装策略的共同模板
     tsconfig*.json / vite.config.mjs / vitest.config.mjs / components.json
   windows/
-    electron/                平台策略、WASAPI 采集与权限
+    electron/                平台策略、WASAPI、原生展示与屏幕能力
     native/                  C# 源码与 bin/VoxCue.Audio.exe
     public/voxcue.ico         Windows 专属图标
     scripts/                 原生构建、便携与 NSIS 打包
@@ -54,7 +54,7 @@ VoxCue/
 
 Mac native/scripts/test 已有实际实现，不添加空的未来模块；本机原生音频、窗口生命周期与双击入口的验证见根 PROGRESS 最新节。真实账户、外接设备/真人质量和正式签名分发仍需后续验收。
 
-共用设置与能力定义位于 shared/src、shared/electron/contracts/presentation.ts，主进程展示端口为 shared/electron/presentation.ts；当前具体实现为 macos/electron/presentation.ts。Windows 没有空占位适配器，缺省能力显示待适配，需在 Windows 本机接入。共享 UI 的改动不允许当前平台写入另一平台目录。
+共用设置与能力定义位于 shared/src、shared/electron/contracts/presentation.ts，展示端口为 shared/electron/presentation.ts；具体实现分别在 windows/electron/presentation.ts 和 macos/electron/presentation.ts，按平台动态装配。Windows 屏幕能力在 windows/electron/screenPermission.ts。共享 UI 改动不允许当前平台写入另一平台目录。Windows 生成配置已在本机同步，旧异平台编译输出由本机受控构建替换；macos/ 保持只读。
 
 ## 开发命令
 
@@ -62,15 +62,15 @@ Mac native/scripts/test 已有实际实现，不添加空的未来模块；本�
 
 安装后根目录 `corepack pnpm check:workspace`、`check:architecture`、`typecheck`、`test`、`build`、`dev`、`start` 自动转发到本机平台，也可以直接进入平台目录执行。Windows build 包括 WASAPI；Mac build 包括 Core Audio、共享编译和本地 VoxCue.app 入口。Windows 专属构建/打包/原生回归在 Mac 上明确报错。启动 Windows 既有构建使用 windows/Start-VoxCue.cmd，不自动编译。包版本、业务实现、IPC/OAuth 与用户存储不因目录调整改变。
 
-`shared/package.json` 声明共同依赖和命令，平台 `package.platform.json` 声明少量差异。根 `corepack pnpm sync:workspace` 只生成根与本平台入口/配置，另一平台只读报告；`sync:workspace --check --all` 可只读检查两平台漂移。共同依赖修改更新共享和本平台锁，另一平台交由其本机同步，不自动升级依赖。本轮 Windows 两项旧配置及旧 Mac 编译目录须在 Windows 本机同步后重建，Mac 不修改它们。
+`shared/package.json` 声明共同依赖和命令，平台 `package.platform.json` 声明少量差异。根 `corepack pnpm sync:workspace` 只生成根与本平台入口/配置，另一平台只读报告；`sync:workspace --check --all` 可只读检查两平台漂移。共同依赖修改更新共享和本平台锁，另一平台交由其本机同步，不自动升级依赖。Windows 旧配置已在其本机同步，旧异平台编译输出由受控构建替换；macos/ 保持只读。
 
 ## 编译、测试与资源
 
 TypeScript 只编译 shared 与本平台源码到本平台 dist-electron，Mac 仅有 shared/macos，Windows 应仅有 shared/windows；preload 与 main 同目录。平台按可信策略动态装配，暂存编译核对后替换本平台生成目录，禁止写另一平台。Vite 从 shared/index.html、shared/src、shared/public 构建本平台 dist，依赖按本平台 package exports/browser 条件解析。源码测试的 CommonJS require 使用本平台 NODE_PATH，生产模块依照正常 Node 层级寻找本平台 node_modules。
 
-单测只收集 `{shared,windows,macos}/test/{unit,renderer}/**/*.test.{ts,tsx}`。Windows 纯策略/控制器单测可以在 Mac 合成端口运行，不代表 WASAPI 真机验收。测试结果仅显示于终端/内存；必要隔离工作目录仅建在操作系统临时目录，结束、失败或取消须清理。旧脚本中仍有持久化输出，须先改造后再获准运行；不再新增 test/results 内容，历史快照不参与收集。架构检查禁止生产导入任一平台的 test，也禁止平台专属实现互相依赖；共享 Renderer/业务边界继续保持。
+单测只收集 shared 与当前平台的 `test/{unit,renderer}/**/*.test.{ts,tsx}`，不把另一平台的合成端口当作本机原生验收。测试结果仅显示于终端/内存；必要隔离工作目录仅建在操作系统临时目录，结束、失败或取消须清理。旧脚本中仍有持久化输出，须先改造后再获准运行；不再新增 test/results 内容，历史快照不参与收集。架构检查禁止生产导入任一平台的 test，也禁止平台专属实现互相依赖；共享 Renderer/业务边界继续保持。
 
-开发模型从 shared/local-models 读取；共享 Logo 原件在 shared/public，Windows ICO/native helper 在 Windows 平台目录，Mac 原生 PNG/ICNS 衍生物在 macos/public。打包仍将 PNG、ICO、白名单模型及原生助手复制到原有包内布局。Windows release/发行包保留，本次不重新打包或发布。
+开发模型从 shared/local-models 读取；共享 Logo 原件在 shared/public，Windows ICO/native helper 在 Windows 平台目录，Mac 原生 PNG/ICNS 衍生物在 macos/public。打包仍将 PNG、ICO、白名单模型及原生助手复制到原有包内布局。Windows release/发行包保留，本轮便携包仅在自有系统临时目录验证后删除，不安装或发布。
 
 ## 迁移与恢复
 

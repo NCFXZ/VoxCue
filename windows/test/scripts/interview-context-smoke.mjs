@@ -1,10 +1,10 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-await mkdir('test/results', { recursive: true });
-const profile = await mkdtemp(path.resolve('test/results/interview-context-'));
+await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
+const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/interview-context-')));
 const fixture = path.join(profile, 'main.cjs');
 const codeAnswer = [
   '我用哈希表记录已经遍历的值。',
@@ -153,10 +153,7 @@ try {
     await floating.getByRole('textbox', { name: '面试提问', exact: true }).inputValue(),
     '',
   );
-  await floating.screenshot({
-    path: path.join(profile, 'gap-active.png'),
-    animations: 'disabled',
-  });
+  await floating.screenshot({ animations: 'disabled' });
   const assertNoticeLayout = async () => {
     const boxes = await floating.evaluate(() => {
       const panels = document.querySelector('.floating-panels').getBoundingClientRect();
@@ -267,17 +264,11 @@ try {
       .getByText('系统音频发生间断，请等待转写恢复。'.repeat(4), { exact: true })
       .waitFor();
     await assertNoticeLayout();
-    await floating.screenshot({
-      path: path.join(profile, `interview-code-${theme}.png`),
-      animations: 'disabled',
-    });
+    await floating.screenshot({ animations: 'disabled' });
   }
   for (let i = 0; i < 5; i++) await floating.evaluate(() => window.desktop.resizeInterview(-1));
   await assertNoticeLayout();
-  await floating.screenshot({
-    path: path.join(profile, 'interview-small-notices.png'),
-    animations: 'disabled',
-  });
+  await floating.screenshot({ animations: 'disabled' });
   await app.evaluate(() =>
     globalThis.emitContextSpeech({ type: 'activity', source: 'system', speaking: false, level: 0 }),
   );
@@ -308,7 +299,7 @@ try {
       'notices below panels in both themes and smaller window',
     ],
   };
-  await writeFile(path.join(profile, 'result.json'), JSON.stringify(result, null, 2));
+  await console.log(JSON.stringify(result, null, 2));
   console.log({ ...result, profile });
 } finally {
   await app.evaluate(({ BrowserWindow }) => {

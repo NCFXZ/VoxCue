@@ -1,13 +1,16 @@
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { probe } from './window-probe.mjs';
 
-await mkdir('test/results', { recursive: true });
-const profile = await mkdtemp(path.resolve('test/results/interview-layout-ui-'));
+await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
+const profile = await mkdtemp(
+  path.resolve(path.join(testRoot, 'test/results/interview-layout-ui-')),
+);
 const fixture = path.join(profile, 'main.cjs');
 const nativeMouse = path.join(profile, 'mouse.exe');
 const nativeSource = path.join(profile, 'mouse.cs');
@@ -19,22 +22,25 @@ using System;
 using System.Runtime.InteropServices;
 using System.Threading;
 public static class LayoutMouse {
-  public static void Main(string[] args) { Run(int.Parse(args[0]),int.Parse(args[1]),int.Parse(args[2]),int.Parse(args[3]),args[4]=="restore"); }
+  public static void Main(string[] args) { Run(int.Parse(args[0]),int.Parse(args[1]),int.Parse(args[2]),int.Parse(args[3]),args[4]=="restore",args.Length>5?new IntPtr(long.Parse(args[5])):IntPtr.Zero); }
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
   [StructLayout(LayoutKind.Sequential)] struct Point { public int x; public int y; }
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+  [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
+  [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
   static void Move(int x,int y) {
     mouse_event(0xC001,(uint)((x-GetSystemMetrics(76)+0.5)*65536/GetSystemMetrics(78)),
       (uint)((y-GetSystemMetrics(77)+0.5)*65536/GetSystemMetrics(79)),0,UIntPtr.Zero);
   }
-  public static void Run(int x,int y,int dx,int dy,bool restore) {
+  public static void Run(int x,int y,int dx,int dy,bool restore,IntPtr expected) {
     var context=SetThreadDpiAwarenessContext(new IntPtr(-4));
     try {
       Move(x,y);
       if(restore)return;
+      if(expected==IntPtr.Zero||GetAncestor(WindowFromPoint(new Point{x=x,y=y}),2)!=expected)throw new Exception("Refusing input outside the intended synthetic test window");
       mouse_event(2,0,0,0,UIntPtr.Zero);
       // Gesture pacing, not a wait for UI readiness.
       Thread.Sleep(150);
@@ -194,10 +200,7 @@ try {
     assert.ok(gap >= 0 && gap <= 9, 'Collapsed duration must stay close to its separator');
   };
   await checkCompactDuration(main);
-  await main
-    .locator('.response-progress')
-    .last()
-    .screenshot({ path: path.join(profile, 'chat-duration-compact.png') });
+  await main.locator('.response-progress').last().screenshot({});
   await main.locator('.duration-toggle').last().click();
   await checkDivider(main);
   checks.push(
@@ -221,7 +224,7 @@ try {
   assert.equal(rows[1].y, rows[2].y);
   assert.equal(rows[3].y, rows[4].y);
   assert.ok(rows[0].y < rows[1].y && rows[1].y < rows[3].y);
-  await confirmation.screenshot({ path: path.join(profile, 'start-dialog-layout.png') });
+  await confirmation.screenshot({});
   checks.push('start dialog: full-width knowledge row, audio pair row and model/effort pair row');
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -286,10 +289,7 @@ try {
       viewport: innerHeight,
     }));
     assert.ok(placement.top > placement.panelBottom && placement.bottom <= placement.viewport);
-    await floating.screenshot({
-      path: path.join(profile, `layout-${theme}.png`),
-      animations: 'disabled',
-    });
+    await floating.screenshot({ animations: 'disabled' });
     await floating.getByRole('button', { name: '开启截图保护', exact: true }).click();
     await notice.waitFor({ state: 'hidden' });
     assert.deepEqual(await panelBoxes(), initial);
@@ -398,7 +398,7 @@ try {
     largeReading.visibleCharacters > smallReading.visibleCharacters,
     'Enlarging the panels must show more actual text at the same font size',
   );
-  await floating.screenshot({ path: path.join(profile, 'resize-more-content.png') });
+  await floating.screenshot({});
   await handle.press('ArrowDown');
   await floating.waitForFunction(
     (width) => document.querySelector('.floating-answer').getBoundingClientRect().width < width - 1,
@@ -502,6 +502,60 @@ try {
       [dipStart, dipEnd],
     );
     try {
+      const nativeHandle = await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((w) => w.webContents.getURL().endsWith('#interview'))
+          .getNativeWindowHandle()
+          .readBigUInt64LE()
+          .toString(),
+      );
+      await runMouse(
+        nativeMouse,
+        [String(Math.round(start.x)), String(Math.round(start.y)), '0', '0', 'restore'],
+        { windowsHide: true },
+      );
+      const readyDeadline = performance.now() + 5000;
+      while (probe('window', nativeHandle, path.resolve('public/voxcue.ico')).extendedStyle & 32) {
+        if (performance.now() > readyDeadline)
+          throw Error('Resize corner did not become native-interactive');
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
+      probe('move', Math.round(start.x) + 1, Math.round(start.y));
+      await target.evaluate(
+        (element) =>
+          new Promise((resolve, reject) => {
+            const deadline = performance.now() + 5000;
+            const poll = () =>
+              getComputedStyle(element).opacity === '1'
+                ? resolve()
+                : performance.now() > deadline
+                  ? reject(Error('Resize hover did not settle'))
+                  : requestAnimationFrame(poll);
+            poll();
+          }),
+      );
+      const hitDeadline = performance.now() + 5000;
+      while (!probe('hit', nativeHandle, Math.round(start.x), Math.round(start.y)).expected) {
+        if (performance.now() > hitDeadline) {
+          console.error(
+            JSON.stringify({
+              before,
+              box,
+              start,
+              cursor: probe('cursor'),
+              viewport: await floating.evaluate(() => ({
+                width: innerWidth,
+                height: innerHeight,
+                x: screenX,
+                y: screenY,
+              })),
+              current: await nativeBounds(),
+            }),
+          );
+          throw Error('Resize corner did not acquire native hit testing');
+        }
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      }
       const mouseRun = await runMouse(
         nativeMouse,
         [
@@ -510,6 +564,7 @@ try {
           String(Math.round(end.x - start.x)),
           String(Math.round(end.y - start.y)),
           'drag',
+          nativeHandle,
         ],
         { windowsHide: true },
       );
@@ -612,15 +667,10 @@ try {
   await app.evaluate(() => globalThis.layoutFinish());
   await floating.getByText('合成回答正文。', { exact: true }).waitFor();
   await checkCompactDuration(floating);
-  await floating
-    .locator('.response-progress')
-    .screenshot({ path: path.join(profile, 'interview-duration-compact.png') });
+  await floating.locator('.response-progress').screenshot({});
   await floating.locator('.duration-toggle').click();
   await checkDivider(floating);
-  await floating.screenshot({
-    path: path.join(profile, 'interview-thought.png'),
-    animations: 'disabled',
-  });
+  await floating.screenshot({ animations: 'disabled' });
   checks.push('interview shares modern progress component and public-summary disclosure');
   assert.deepEqual(errors, []);
   const result = {
@@ -637,7 +687,7 @@ try {
     actualWindowsMouseDrags: 2,
     resizeLatencyInjectedMs: 30,
   };
-  await writeFile(path.join(profile, 'result.json'), JSON.stringify(result, null, 2));
+  await console.log(JSON.stringify(result, null, 2));
   console.log(result);
 } catch (error) {
   await writeFile(
@@ -676,8 +726,7 @@ try {
     ),
   );
   for (const page of app.windows()) {
-    if (page.url().endsWith('#interview'))
-      await page.screenshot({ path: path.join(profile, 'failure.png') });
+    if (page.url().endsWith('#interview')) await page.screenshot({});
   }
   console.error(error);
   throw error;

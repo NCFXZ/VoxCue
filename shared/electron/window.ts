@@ -35,6 +35,11 @@ export function windowOptions(
   return {
     ...roleOptions[role],
     ...(role === 'main' ? platform.mainWindowOptions : {}),
+    ...(role === 'interview' &&
+    platform.id === 'win32' &&
+    platform.presentation?.interviewIconVisibility
+      ? { skipTaskbar: true }
+      : {}),
     icon: paths.icon,
     frame: false,
     ...(platform.nativeWindowControls && role !== 'interview'

@@ -1,10 +1,10 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
-const profile = path.resolve('test/results', `interview-effort-${Date.now()}`);
+const profile = path.resolve(path.join(testRoot, 'test/results'), `interview-effort-${Date.now()}`);
 await mkdir(profile, { recursive: true });
 const fixture = path.join(profile, 'main.cjs');
 // Isolated test service boundaries only. The built UI, preload, main IPC,
@@ -105,9 +105,9 @@ try {
   await selectModel('Test Model');
   await selectEffort('最高');
   assert.equal(await dialog.evaluate((e) => e.scrollWidth > e.clientWidth), false);
-  await dialog.screenshot({ path: path.join(profile, 'start-light.png'), animations: 'disabled' });
+  await dialog.screenshot({ animations: 'disabled' });
   await main.evaluate(() => document.documentElement.classList.add('dark'));
-  await dialog.screenshot({ path: path.join(profile, 'start-dark.png'), animations: 'disabled' });
+  await dialog.screenshot({ animations: 'disabled' });
   await dialog.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
