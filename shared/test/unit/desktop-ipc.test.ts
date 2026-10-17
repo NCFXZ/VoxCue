@@ -392,6 +392,7 @@ describe('受控 preload 契约', () => {
       ['togglePin', 'interview:pin', []],
       ['toggleInterviewCollapse', 'interview:collapse', []],
       ['setInterviewTranscriptVisible', 'interview:transcript', [false]],
+      ['moveInterviewWindow', 'interview:move', [{ phase: 'start' }]],
       ['resizeInterview', 'interview:resize', [-1]],
     ];
     for (const [method, channel, args] of calls) {

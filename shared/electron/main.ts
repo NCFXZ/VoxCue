@@ -88,6 +88,7 @@ let interviewTranscriptVisible = true;
 let interviewScale = 1;
 let lastInterviewBounds: { requested: Electron.Rectangle; actual: Electron.Rectangle } | undefined;
 let interviewCloseApproved = false;
+let interviewMove: { bounds: Electron.Rectangle; pointer: Electron.Point } | undefined;
 let interviewResize:
   | {
       bounds: Electron.Rectangle;
@@ -270,6 +271,7 @@ function openInterview() {
   lastInterviewBounds = undefined;
   interviewResize = undefined;
   interviewCloseApproved = false;
+  interviewMove = undefined;
   const win = new BrowserWindow(windowOptions('interview', desktopPlatform, windowPaths));
   interviewWindow = win;
   interviewMousePassthrough = false;
@@ -310,6 +312,7 @@ function openInterview() {
   });
   loadWindowPage(win, 'interview', indexFile, process.env.VITE_DEV_SERVER_URL);
   win.on('closed', () => {
+    interviewMove = undefined;
     interviewWindow = null;
     interviewMousePassthrough = false;
     speechSessions?.releaseInterview(true);
@@ -320,6 +323,7 @@ function openInterview() {
     restoreAfterInterview();
   });
   win.webContents.on('did-start-loading', () => {
+    interviewMove = undefined;
     setInterviewMousePassthrough(true);
     speechSessions?.releaseInterview();
     interviewIpc?.cancel();
@@ -888,6 +892,7 @@ app.whenReady().then(() => {
   });
   handleDesktop('interview:collapse', (event) => {
     requireInterview(event);
+    interviewMove = undefined;
     interviewResize = undefined;
     interviewCollapsed = !interviewCollapsed;
     sizeInterview(interviewScale);
@@ -895,11 +900,46 @@ app.whenReady().then(() => {
   });
   handleDesktop('interview:transcript', (event, visible: unknown) => {
     requireInterview(event);
+    interviewMove = undefined;
     if (typeof visible !== 'boolean') throw Error('Invalid transcript visibility');
     interviewResize = undefined;
     interviewTranscriptVisible = visible;
     if (!interviewCollapsed) sizeInterview(interviewScale);
     return interviewTranscriptVisible;
+  });
+  handleDesktop('interview:move', (event, ...args: unknown[]) => {
+    requireInterview(event);
+    const change = args[0];
+    if (
+      args.length !== 1 ||
+      !change ||
+      typeof change !== 'object' ||
+      Array.isArray(change) ||
+      Object.keys(change).length !== 1 ||
+      !Object.hasOwn(change, 'phase') ||
+      !['start', 'move', 'end'].includes((change as { phase: string }).phase)
+    )
+      throw Error('Invalid window move');
+    const { phase } = change as { phase: 'start' | 'move' | 'end' };
+    if (phase === 'end') {
+      interviewMove = undefined;
+      return;
+    }
+    if (phase === 'start') {
+      interviewResize = undefined;
+      interviewMove = {
+        bounds: interviewWindow!.getBounds(),
+        pointer: screen.getCursorScreenPoint(),
+      };
+      setInterviewMousePassthrough(false);
+      return;
+    }
+    if (!interviewMove) return;
+    const cursor = screen.getCursorScreenPoint();
+    const x = Math.round(interviewMove.bounds.x + cursor.x - interviewMove.pointer.x);
+    const y = Math.round(interviewMove.bounds.y + cursor.y - interviewMove.pointer.y);
+    const current = interviewWindow!.getBounds();
+    if (current.x !== x || current.y !== y) interviewWindow!.setPosition(x, y, false);
   });
   handleDesktop('interview:resize', (event, direction: unknown) => {
     requireInterview(event);
@@ -912,6 +952,7 @@ app.whenReady().then(() => {
         return;
       }
       if (change.phase === 'start' && (change.edge === 'left' || change.edge === 'right')) {
+        interviewMove = undefined;
         const pointer = screen.getCursorScreenPoint();
         interviewResize = {
           bounds: interviewWindow.getBounds(),
@@ -964,6 +1005,7 @@ app.whenReady().then(() => {
       typeof args[0] !== 'boolean'
     )
       return;
+    if (args[0] && interviewMove) return;
     setInterviewMousePassthrough(args[0]);
   });
   onDesktop('window:action', (event, action: unknown) => {

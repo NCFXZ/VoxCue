@@ -1,5 +1,11 @@
 # VoxCue 架构
 
+## 面试浮窗移动
+
+共享三条杠使用普通 no-drag 指针区域及 useInterviewWindowDrag，不再依赖会吞掉指针事件的 CSS 原生拖动。手势通过指针捕获、单帧合并和串行 IPC 发送 start/move/end；公开 DesktopAPI、preload、主进程白名单一致。interview:move 只接受当前浮窗主 frame 的单个阶段对象，拒绝坐标、其他窗口、额外字段和未知动作。位置从主进程 screen.getCursorScreenPoint 与开始时的窗口位置计算，仅改变当前浮窗位置；同一位置不重复设置，不接受 Renderer 原生参数。
+
+移动期间禁止切换鼠标穿透，结束后重新命中工具栏/面板与透明空白；命中使用窗口位置加 clientX/clientY 重建屏幕点，不直接依赖转发输入的 screenX/screenY。松开、取消、失焦、窗口关闭和重载均退休手势，收起、转写布局或缩放开始也清除旧移动状态。浮窗回归使用合成鼠标坐标，但通过真实指针捕获、preload/IPC 和 BrowserWindow 检查实际位置与尺寸，不能将其描述为物理鼠标原生操作验收。实现共用，Windows 专属目录只读；本机未进行 Windows 真机拖动验证。
+
 更新：2026-10-17。以当前代码和 PROGRESS.md 为准。
 
 ## 共用界面与平台适配约定

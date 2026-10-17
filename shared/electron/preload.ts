@@ -101,6 +101,7 @@ const desktop: DesktopAPI = {
   setInterviewMousePassthrough: (ignore) => {
     if (typeof ignore === 'boolean') send('interview:mouse-passthrough', ignore);
   },
+  moveInterviewWindow: (change) => invoke('interview:move', change),
   resizeInterview: (direction) => invoke('interview:resize', direction),
   confirmInterviewEnd: () => send('interview:confirm-end'),
   onInterviewEndRequested: (callback) => subscribe('interview:request-end', callback),

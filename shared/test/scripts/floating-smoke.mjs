@@ -2,6 +2,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { installUiAccount } from './install-ui-account.mjs';
+import { exerciseInterviewWindowDrag } from './interview-window-drag.mjs';
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -55,6 +56,20 @@ try {
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.getByRole('button', { name: '关闭截图保护' }).waitFor();
   assert.equal(
+    await main.evaluate(async () => {
+      try {
+        await window.desktop.moveInterviewWindow({ phase: 'start' });
+        return false;
+      } catch {
+        return true;
+      }
+    }),
+    true,
+    'The main window cannot move the interview window',
+  );
+  await exerciseInterviewWindowDrag(app, floating);
+
+  assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((win) => win.webContents.getURL().endsWith('#interview'))
@@ -89,6 +104,7 @@ try {
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).waitFor();
   assert.ok(Math.abs((await bounds()).height - 72) <= 5);
   assert.equal(await floating.locator('.floating-panels').isVisible(), false);
+  await exerciseInterviewWindowDrag(app, floating);
   await floating.screenshot({});
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
   assert.ok(Math.abs((await bounds()).height - original.height) <= 5);
@@ -163,7 +179,7 @@ try {
   assert.deepEqual(errors, []);
   assert.deepEqual(nativeControlErrors, [], '原生窗口回归失败，不能标记全部通过');
   console.log(
-    'PASS: start-dialog configuration, automatic synthetic transcript/answer through real session workflow, no editable session configuration or capture footer, floating native controls, two-step end timeout, reopen and history persistence.',
+    'PASS: grip pointer capture to real native window movement (synthetic cursor), expanded/collapsed dragging, cancellation/blur/reload cleanup, blank-canvas passthrough, caller/argument rejection, start configuration, floating controls, end confirmation, reopen and history persistence.',
   );
 } finally {
   // End flows above are asserted through the UI. Destroy remaining test-only

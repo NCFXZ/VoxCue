@@ -57,8 +57,10 @@ worker.on('message', (m) => {
   }
 });
 worker.on('error', (e) => errors.push(e.message));
+const fixtureRoot =
+  process.env.VOXCUE_SPEECH_FIXTURE_DIR ?? path.resolve('../shared/test/fixtures/speech-audio');
 const waves = ['chinese', 'english'].map((n) =>
-  sherpa.readWave(`../shared/test/fixtures/speech-audio/${n}.wav`, false),
+  sherpa.readWave(path.join(fixtureRoot, `${n}.wav`), false),
 );
 let offsets = [0, 0];
 const origin = performance.now(),

@@ -12,8 +12,7 @@ const waves = Object.fromEntries(
     source,
     sherpa.readWave(
       path.join(
-        config.root,
-        '../shared/test/fixtures/speech-audio',
+        config.fixtures ?? path.join(config.root, '../shared/test/fixtures/speech-audio'),
         index ? 'english.wav' : 'chinese.wav',
       ),
       false,

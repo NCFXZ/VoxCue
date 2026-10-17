@@ -64,6 +64,15 @@ desktop.interviewAnswer({
 desktop.interviewAnswer({ id: 'screen', modelId: 'model', question: 'draft', screenshot: 'only' });
 // @ts-expect-error Only a controlled capture mode is accepted, never file paths or image bytes.
 desktop.interviewAnswer({ id: 'screen', modelId: 'model', screenshot: { path: 'C:/private.png' } });
+desktop.moveInterviewWindow({ phase: 'start' });
+desktop.moveInterviewWindow({ phase: 'move' });
+desktop.moveInterviewWindow({ phase: 'end' });
+// @ts-expect-error Window movement reads the native cursor; renderer coordinates are not accepted.
+desktop.moveInterviewWindow({ phase: 'move', x: 10, y: 20 });
+// @ts-expect-error No arbitrary native actions or target windows.
+desktop.moveInterviewWindow({ phase: 'move', target: 'main' });
+// @ts-expect-error Only three fixed gesture phases are supported.
+desktop.moveInterviewWindow({ phase: 'execute' });
 desktop.setInterviewTranscriptVisible(false);
 desktop.setInterviewMousePassthrough(true);
 // @ts-expect-error Mouse passthrough only accepts a boolean, never native window options.

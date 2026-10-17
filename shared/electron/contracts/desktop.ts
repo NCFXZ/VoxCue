@@ -77,6 +77,7 @@ export interface DesktopAPI {
   toggleInterviewCollapse(): Promise<boolean>;
   setInterviewTranscriptVisible(visible: boolean): Promise<boolean>;
   setInterviewMousePassthrough(ignore: boolean): void;
+  moveInterviewWindow(change: { phase: 'start' | 'move' | 'end' }): Promise<void>;
   resizeInterview(
     change: -1 | 1 | { phase: 'start'; edge: 'left' | 'right' } | { phase: 'move' | 'end' },
   ): Promise<void>;
@@ -126,6 +127,7 @@ export interface DesktopInvokeMap {
   'interview:collapse': Invocation<DesktopAPI['toggleInterviewCollapse']>;
   'interview:transcript': Invocation<DesktopAPI['setInterviewTranscriptVisible']>;
   'interview:resize': Invocation<DesktopAPI['resizeInterview']>;
+  'interview:move': Invocation<DesktopAPI['moveInterviewWindow']>;
 }
 export interface DesktopSendMap {
   'interview:confirm-end': [];

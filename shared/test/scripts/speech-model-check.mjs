@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 const require = workspace.platformRequire,
   sherpa = require('sherpa-onnx-node');
 const { SpeechEngine } = require('./dist-electron/shared/electron/backend/speech/engine.js');
-const root = '../shared/test/fixtures/speech-audio';
+const root = process.env.VOXCUE_SPEECH_FIXTURE_DIR ?? '../shared/test/fixtures/speech-audio';
 await mkdir(root, { recursive: true });
 if (process.argv.includes('--download')) {
   const revision = '8e40c43232a1c5c66c82111efc5820d3accca11b';

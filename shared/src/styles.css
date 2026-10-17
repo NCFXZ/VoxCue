@@ -1486,6 +1486,7 @@ p {
   -webkit-app-region: no-drag;
 }
 .floating-controls .ui-button {
+  -webkit-app-region: no-drag;
   font-size: var(--type-secondary);
   border-radius: 18px;
 }
@@ -3291,7 +3292,8 @@ details[open] > summary > .disclosure-chevron {
   gap: 5px;
 }
 .floating-drag-handle {
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
+  touch-action: none;
   display: grid;
   place-items: center;
   cursor: grab;
@@ -3300,6 +3302,9 @@ details[open] > summary > .disclosure-chevron {
   border-radius: 12px;
   color: var(--muted);
   font-size: var(--type-title);
+}
+.floating-drag-handle > svg {
+  pointer-events: none;
 }
 .floating-drag-handle:hover {
   background: var(--hover);

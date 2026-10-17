@@ -24,6 +24,7 @@ import { ResponseProgress } from './ResponseProgress';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
 import { providerInfo } from '../services/providers';
+import { useInterviewWindowDrag } from './useInterviewWindowDrag';
 export function FloatingInterview() {
   const state = useInterview();
   const provider = providerInfo(state.answers.at(-1)?.provider);
@@ -33,6 +34,7 @@ export function FloatingInterview() {
   const [protectedWindow, setProtected] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
   const [confirmEnd, setConfirmEnd] = useState(false);
@@ -64,7 +66,8 @@ export function FloatingInterview() {
       desktop.setInterviewMousePassthrough(ignore);
     };
     const refresh = () => {
-      if (disposed || !pointer || pointer.buttons || dragging.current) return;
+      if (disposed || !pointer || pointer.buttons || dragging.current || windowDrag.active.current)
+        return;
       const target = document.elementFromPoint(
         pointer.x - window.screenX,
         pointer.y - window.screenY,
@@ -72,7 +75,13 @@ export function FloatingInterview() {
       apply(!target?.closest(surfaces));
     };
     const move = (event: MouseEvent) => {
-      pointer = { x: event.screenX, y: event.screenY, buttons: event.buttons };
+      // Forwarded events can report screen coordinates relative to the view.
+      // Reconstruct the screen point from the current window and viewport point.
+      pointer = {
+        x: window.screenX + event.clientX,
+        y: window.screenY + event.clientY,
+        buttons: event.buttons,
+      };
       refresh();
     };
     const release = (event: MouseEvent) => {
@@ -81,7 +90,8 @@ export function FloatingInterview() {
       queueMicrotask(refresh);
     };
     const leave = (event: MouseEvent) => {
-      if (event.relatedTarget || event.buttons || dragging.current) return;
+      if (event.relatedTarget || event.buttons || dragging.current || windowDrag.active.current)
+        return;
       pointer = undefined;
       apply(true);
     };
@@ -93,6 +103,7 @@ export function FloatingInterview() {
     window.addEventListener('mouseup', release, true);
     window.addEventListener('mouseout', leave, true);
     window.addEventListener('resize', refresh);
+    window.addEventListener('interview-window-drag-end', refresh);
     const observer = new ResizeObserver(refresh);
     document
       .querySelectorAll('.floating-toolbar, .floating-panels, .floating-notices')
@@ -105,6 +116,7 @@ export function FloatingInterview() {
       window.removeEventListener('mouseup', release, true);
       window.removeEventListener('mouseout', leave, true);
       window.removeEventListener('resize', refresh);
+      window.removeEventListener('interview-window-drag-end', refresh);
       desktop.setInterviewMousePassthrough(true);
     };
   }, []);
@@ -365,7 +377,11 @@ export function FloatingInterview() {
               <Square size={16} />
               <span>{confirmEnd ? '确认结束' : ''}</span>
             </Button>
-            <div className="floating-drag-handle" aria-label="拖动面试窗口">
+            <div
+              className="floating-drag-handle"
+              aria-label="拖动面试窗口"
+              onPointerDown={windowDrag.onPointerDown}
+            >
               <DragGrip size={20} />
             </div>
           </div>
