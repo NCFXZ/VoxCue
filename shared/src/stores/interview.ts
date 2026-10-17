@@ -187,7 +187,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
     if (get().mode === 'local') {
       const desktop = window.desktop;
       if (!desktop) {
-        set({ error: '真实语音需要 Windows 桌面应用。' });
+        set({ error: '真实语音需要桌面应用。' });
         return;
       }
       if (get().status !== 'paused') {

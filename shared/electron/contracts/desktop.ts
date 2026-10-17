@@ -1,4 +1,6 @@
 import type { KnowledgeCall, KnowledgeResult, KnowledgeStatus } from './knowledge';
+import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
+import type { PresentationCapabilities } from './presentation';
 import type { UpdateCall, UpdateState } from './updates';
 import type { AuthSession, SignOutResult } from './auth';
 import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResult } from './chat';
@@ -10,6 +12,7 @@ import type {
   InterviewAnswerRequest,
   InterviewConfiguration,
   DictationCall,
+  AudioSource,
   InterviewAccessReport,
 } from './speech';
 
@@ -26,6 +29,11 @@ export type WindowAction = 'minimize' | 'maximize' | 'close';
 
 // The complete renderer allowlist. No credentials, paths or arbitrary IPC access.
 export interface DesktopAPI {
+  readonly platform: 'macos' | 'windows' | 'unknown';
+  readonly nativeWindowControls: boolean;
+  readonly presentation: PresentationCapabilities;
+  readonly screenCapturePermissionSupported: boolean;
+  screenCapturePermission(action: ScreenCapturePermissionAction): Promise<ScreenCapturePermission>;
   updates(call: UpdateCall): Promise<UpdateState>;
   onUpdateEvent(callback: (state: UpdateState) => void): () => void;
   knowledge(call: KnowledgeCall): Promise<KnowledgeResult>;
@@ -37,6 +45,7 @@ export interface DesktopAPI {
   interviewModels(): Promise<ServiceResult<{ models: ChatModel[] }>>;
   interviewAnswer(request: InterviewAnswerRequest): Promise<ChatResult>;
   interviewCancel(id: string): Promise<void>;
+  setNativeTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   systemAccent(): Promise<string | null>;
   onSystemAccent(callback: (color: string | null) => void): () => void;
   authSession(): Promise<AuthSession | null>;
@@ -61,12 +70,13 @@ export interface DesktopAPI {
   exportHistory(request: HistoryExportRequest): Promise<boolean>;
   openInterview(configuration: InterviewConfiguration): Promise<void>;
   checkInterviewAccess(configuration: InterviewConfiguration): Promise<InterviewAccessReport>;
-  openMicrophoneSettings(): Promise<void>;
+  openMicrophoneSettings(source?: AudioSource): Promise<void>;
   interviewState(): Promise<InterviewWindowState>;
   allowCapture(allowed: boolean): Promise<boolean>;
   togglePin(): Promise<boolean>;
   toggleInterviewCollapse(): Promise<boolean>;
   setInterviewTranscriptVisible(visible: boolean): Promise<boolean>;
+  setInterviewMousePassthrough(ignore: boolean): void;
   resizeInterview(
     change: -1 | 1 | { phase: 'start'; edge: 'left' | 'right' } | { phase: 'move' | 'end' },
   ): Promise<void>;
@@ -92,6 +102,7 @@ export interface DesktopInvokeMap {
   'interview:models': Invocation<DesktopAPI['interviewModels']>;
   'interview:answer': Invocation<DesktopAPI['interviewAnswer']>;
   'interview:cancel': Invocation<DesktopAPI['interviewCancel']>;
+  'appearance:theme': Invocation<DesktopAPI['setNativeTheme']>;
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
   'auth:sign-in': Invocation<DesktopAPI['signInWithChatGPT']>;
@@ -107,6 +118,7 @@ export interface DesktopInvokeMap {
   'chat:open-link': Invocation<DesktopAPI['chatOpenLink']>;
   'interview:open': Invocation<DesktopAPI['openInterview']>;
   'interview:check-access': Invocation<DesktopAPI['checkInterviewAccess']>;
+  'interview:screen-permission': Invocation<DesktopAPI['screenCapturePermission']>;
   'interview:microphone-settings': Invocation<DesktopAPI['openMicrophoneSettings']>;
   'interview:state': Invocation<DesktopAPI['interviewState']>;
   'interview:capture': Invocation<DesktopAPI['allowCapture']>;
@@ -117,6 +129,7 @@ export interface DesktopInvokeMap {
 }
 export interface DesktopSendMap {
   'interview:confirm-end': [];
+  'interview:mouse-passthrough': [ignore: boolean];
   'window:action': [action: WindowAction];
 }
 export interface DesktopEventMap {

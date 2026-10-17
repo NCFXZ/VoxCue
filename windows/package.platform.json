@@ -1,0 +1,32 @@
+{
+  "scripts": {
+    "build": "node scripts/build-audio.mjs && pnpm build:shared",
+    "test:platform:native": "node test/scripts/platform-native-smoke.mjs",
+    "test:interview:layout": "node test/scripts/interview-layout-smoke.mjs",
+    "test:interview:effort": "node test/scripts/interview-effort-smoke.mjs",
+    "test:interview:context": "node test/scripts/interview-context-smoke.mjs",
+    "test:copilot": "node test/scripts/copilot-smoke.mjs",
+    "build:audio": "node scripts/build-audio.mjs",
+    "test:speech:devices": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-device-check.mjs",
+    "test:speech:desktop": "node test/scripts/speech-desktop-smoke.mjs",
+    "test:speech:package": "node test/scripts/speech-desktop-smoke.mjs --packaged",
+    "test:speech:reliability": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-reliability.mjs",
+    "test:speech:restart": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-restart-native.mjs",
+    "test:interview:workflow": "node test/scripts/interview-workflow-smoke.mjs",
+    "test:interview:access": "node test/scripts/interview-access-smoke.mjs",
+    "test:interview:access:native": "node test/scripts/interview-access-native.mjs",
+    "package:portable": "node scripts/package-portable.mjs",
+    "package:installer": "pnpm build && node scripts/package-installer.mjs",
+    "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
+    "test:installer:upgrade": "node test/scripts/installer-upgrade-smoke.mjs",
+    "test:package": "node test/scripts/packaged-smoke.mjs"
+  },
+  "devDependencies": {
+    "@electron/packager": "19.0.1",
+    "electron-builder": "26.15.3"
+  },
+  "optionalDependencies": {
+    "@github/copilot-sdk-win32-x64": "1.0.21",
+    "sherpa-onnx-win-x64": "1.13.8"
+  }
+}

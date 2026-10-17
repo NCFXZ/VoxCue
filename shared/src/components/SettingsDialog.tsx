@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, type CSSProperties } from 'react';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { useState } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
@@ -27,10 +27,17 @@ import { SpeechControls } from './SpeechControls';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useChatConnection } from '../stores/chatConnection';
 import { useAuth } from '../stores/auth';
-import { version } from '../../../package.json';
+import { version } from '../../package.json';
+import { pendingPresentation } from '../../electron/contracts/presentation';
 import { accentOptions, readAccentPreference, saveAccentPreference } from '../systemAccent';
+import {
+  readFrostedTransparency,
+  saveFrostedTransparency,
+  subscribeFrostedTransparency,
+} from '../frostedAppearance';
 
 export type Theme = 'light' | 'dark' | 'system';
+const platformLabels = { macos: 'macOS', windows: 'Windows', unknown: '未知平台' };
 const categories = [
   { id: 'general', label: '常规', Icon: Appearance },
   { id: 'account', label: '账户与用量', Icon: Person },
@@ -60,6 +67,12 @@ export function SettingsDialog({
   const [category, setCategory] = useState<SettingsCategory>(initialCategory);
   const [accent, setAccent] = useState(readAccentPreference);
   const [accentError, setAccentError] = useState<string | null>(null);
+  const [frostedTransparency, setFrostedTransparency] = useState(readFrostedTransparency);
+  const [frostedError, setFrostedError] = useState<string | null>(null);
+  const presentation = window.desktop?.presentation ?? pendingPresentation;
+  useEffect(() => {
+    return subscribeFrostedTransparency(setFrostedTransparency);
+  }, []);
   useEffect(() => {
     const update = () => setAccent(readAccentPreference());
     window.addEventListener('storage', update);
@@ -77,7 +90,13 @@ export function SettingsDialog({
     <Modal title="设置" className="settings-dialog" hideHeader onClose={onClose}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
-          <Button variant="ghost" size="icon" aria-label="关闭设置" onClick={onClose}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="dialog-close-button"
+            aria-label="关闭设置"
+            onClick={onClose}
+          >
             <X size={18} />
           </Button>
           <nav aria-label="设置分类">
@@ -208,6 +227,63 @@ export function SettingsDialog({
                     {accentError}
                   </p>
                 )}
+                <>
+                  <div className="settings-entry frosted-setting">
+                    <strong id="frosted-transparency-label">毛玻璃透明度</strong>
+                    <div className="frosted-adjustment">
+                      <div className="frosted-slider">
+                        <span className="frosted-endpoint is-solid" aria-hidden="true" />
+                        <div
+                          className="frosted-slider-control"
+                          style={{ '--slider-fill': `${frostedTransparency}%` } as CSSProperties}
+                        >
+                          <span className="frosted-slider-track" aria-hidden="true">
+                            <span />
+                          </span>
+                          <input
+                            id="frosted-transparency"
+                            type="range"
+                            min={0}
+                            max={100}
+                            step="any"
+                            value={frostedTransparency}
+                            aria-labelledby="frosted-transparency-label"
+                            aria-valuetext={
+                              frostedTransparency === 0
+                                ? '关闭毛玻璃'
+                                : `透明度 ${Math.round(frostedTransparency)}%`
+                            }
+                            onChange={(event) => {
+                              try {
+                                const value = event.currentTarget.valueAsNumber;
+                                saveFrostedTransparency(value);
+                                setFrostedTransparency(value);
+                                setFrostedError(null);
+                              } catch {
+                                setFrostedError('毛玻璃设置保存失败，请重试。');
+                              }
+                            }}
+                          />
+                        </div>
+                        <span className="frosted-endpoint" aria-hidden="true" />
+                      </div>
+                      <output htmlFor="frosted-transparency" className="frosted-value">
+                        {frostedTransparency === 0 ? '关' : `${Math.round(frostedTransparency)}%`}
+                      </output>
+                    </div>
+                  </div>
+                  {!presentation.frostedTransparency && (
+                    <p className="settings-hint">毛玻璃效果待适配，当前仅保存设置。</p>
+                  )}
+                  {frostedError && (
+                    <p className="danger-text" role="alert">
+                      {frostedError}
+                    </p>
+                  )}
+                </>
+                {!presentation.nativeTheme && (
+                  <p className="settings-hint">原生外观待适配，界面主题正常生效。</p>
+                )}
               </>
             )}
             {category === 'knowledge' && (
@@ -278,6 +354,19 @@ export function SettingsDialog({
                   models={connection.models}
                   live={connection.live}
                 />
+                {[
+                  ['面试浮窗置顶', '始终置顶'],
+                  ['透明空白区域穿透', presentation.interviewMousePassthrough ? '自动' : '待适配'],
+                  [
+                    '面试期间隐藏应用图标',
+                    presentation.interviewIconVisibility ? '自动' : '待适配',
+                  ],
+                ].map(([label, value]) => (
+                  <div className="settings-entry" key={label}>
+                    <strong>{label}</strong>
+                    <span className="settings-value">{value}</span>
+                  </div>
+                ))}
                 {interview.error && (
                   <p role="alert" className="danger-text">
                     {interview.error}
@@ -293,7 +382,9 @@ export function SettingsDialog({
                 </div>
                 <div className="settings-entry">
                   <strong>平台</strong>
-                  <span className="settings-value">Windows</span>
+                  <span className="settings-value">
+                    {platformLabels[window.desktop?.platform ?? 'unknown']}
+                  </span>
                 </div>
                 <div className="settings-entry">
                   <strong>知识库</strong>

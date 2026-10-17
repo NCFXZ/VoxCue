@@ -1,10 +1,9 @@
 import { Minus, Square, X } from './icons';
 export function TitleBar() {
+  const native = window.desktop?.nativeWindowControls === true;
+  if (native) return null;
   return (
     <header className="titlebar">
-      <div className="title-brand">
-        <span>VoxCue</span>
-      </div>
       <div className="window-controls">
         {(
           [

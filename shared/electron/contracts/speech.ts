@@ -1,5 +1,6 @@
 import type { ReasoningEffort } from './chat';
 import type { PersonalInfo } from './profile';
+import type { ScreenCapturePermission } from './screenCapture';
 
 export type AudioSource = 'microphone' | 'system';
 export interface AudioDevice {
@@ -17,6 +18,7 @@ export interface InterviewAccessReport {
   ready: boolean;
   devices: AudioDevice[];
   checks: InterviewAccessCheck[];
+  screenCapture?: ScreenCapturePermission;
 }
 export interface SpeechOptions {
   sources: AudioSource[];

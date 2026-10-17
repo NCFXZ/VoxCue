@@ -47,8 +47,8 @@ const paths = await packager({
   platform: 'win32',
   arch: 'x64',
   electronVersion: '38.8.6',
-  electronZipDir: existsSync(path.resolve('test/results/electron-zip'))
-    ? path.resolve('test/results/electron-zip')
+  electronZipDir: existsSync(path.resolve('.cache/electron'))
+    ? path.resolve('.cache/electron')
     : undefined,
   overwrite: true,
   prune: false,
@@ -63,6 +63,9 @@ const paths = await packager({
   ],
   afterCopy: [
     async ({ buildPath }) => {
+      await cp(path.resolve('../shared/public'), path.join(buildPath, 'public'), {
+        recursive: true,
+      });
       const copied = new Set();
       async function copyPackage(name, from = root) {
         let resolved;
@@ -160,12 +163,12 @@ const paths = await packager({
   afterComplete: [
     async ({ buildPath }) => {
       await cp(
-        path.resolve('local-models/speech'),
+        path.resolve('../shared/local-models/speech'),
         path.join(buildPath, 'resources/models/speech'),
         {
           recursive: true,
           filter: (source) => {
-            const relative = path.relative(path.resolve('local-models/speech'), source);
+            const relative = path.relative(path.resolve('../shared/local-models/speech'), source);
             return (
               relative === '' ||
               [
@@ -184,12 +187,14 @@ const paths = await packager({
       );
       if (
         !existsSync(
-          path.resolve('local-models/rag/multilingual-e5-small/onnx/model_quantized.onnx'),
+          path.resolve(
+            '../shared/local-models/rag/multilingual-e5-small/onnx/model_quantized.onnx',
+          ),
         )
       )
         throw Error('Run pnpm download:rag before packaging');
       await cp(
-        path.resolve('local-models/rag/multilingual-e5-small'),
+        path.resolve('../shared/local-models/rag/multilingual-e5-small'),
         path.join(buildPath, 'resources/models/rag/multilingual-e5-small'),
         { recursive: true },
       );

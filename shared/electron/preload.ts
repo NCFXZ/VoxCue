@@ -6,6 +6,28 @@ import type {
   DesktopEventMap,
 } from './contracts/desktop';
 
+// This is display metadata from BrowserWindow, not permission to call native APIs.
+const presentationArgument = process.argv.find((value) =>
+  value.startsWith('--voxcue-presentation='),
+);
+let presentationFlags: Record<string, unknown> = {};
+try {
+  const parsed: unknown = JSON.parse(
+    presentationArgument?.slice('--voxcue-presentation='.length) ?? '{}',
+  );
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed))
+    presentationFlags = parsed as Record<string, unknown>;
+} catch {
+  /* Missing metadata leaves platform effects pending. */
+}
+const presentation = Object.freeze({
+  frostedTransparency: presentationFlags.frostedTransparency === true,
+  nativeTheme: presentationFlags.nativeTheme === true,
+  screenCapturePermission: presentationFlags.screenCapturePermission === true,
+  interviewMousePassthrough: presentationFlags.interviewMousePassthrough === true,
+  interviewIconVisibility: presentationFlags.interviewIconVisibility === true,
+});
+
 // Keep all project imports type-only: sandboxed preload cannot require local modules.
 function invoke<K extends keyof DesktopInvokeMap>(
   channel: K,
@@ -26,6 +48,12 @@ function subscribe<K extends keyof DesktopEventMap>(
   return () => ipcRenderer.removeListener(channel, listener);
 }
 const desktop: DesktopAPI = {
+  platform:
+    process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'unknown',
+  nativeWindowControls: process.platform === 'darwin',
+  presentation,
+  screenCapturePermissionSupported: presentation.screenCapturePermission,
+  screenCapturePermission: (action) => invoke('interview:screen-permission', action),
   updates: (call) => invoke('updates:call', call),
   onUpdateEvent: (callback) => subscribe('updates:event', callback),
   updateSessionState: (hasContent) => invoke('session:state', hasContent),
@@ -43,6 +71,7 @@ const desktop: DesktopAPI = {
   interviewModels: () => invoke('interview:models'),
   interviewAnswer: (request) => invoke('interview:answer', request),
   interviewCancel: (id) => invoke('interview:cancel', id),
+  setNativeTheme: (theme) => invoke('appearance:theme', theme),
   systemAccent: () => invoke('appearance:accent'),
   onSystemAccent: (callback) => subscribe('appearance:accent-changed', callback),
   authSession: () => invoke('auth:session'),
@@ -60,12 +89,18 @@ const desktop: DesktopAPI = {
   onChatEvent: (callback) => subscribe('chat:event', callback),
   openInterview: (configuration) => invoke('interview:open', configuration),
   checkInterviewAccess: (configuration) => invoke('interview:check-access', configuration),
-  openMicrophoneSettings: () => invoke('interview:microphone-settings'),
+  openMicrophoneSettings: (source) =>
+    source === undefined
+      ? invoke('interview:microphone-settings')
+      : invoke('interview:microphone-settings', source),
   interviewState: () => invoke('interview:state'),
   allowCapture: (allowed) => invoke('interview:capture', allowed),
   togglePin: () => invoke('interview:pin'),
   toggleInterviewCollapse: () => invoke('interview:collapse'),
   setInterviewTranscriptVisible: (visible) => invoke('interview:transcript', visible),
+  setInterviewMousePassthrough: (ignore) => {
+    if (typeof ignore === 'boolean') send('interview:mouse-passthrough', ignore);
+  },
   resizeInterview: (direction) => invoke('interview:resize', direction),
   confirmInterviewEnd: () => send('interview:confirm-end'),
   onInterviewEndRequested: (callback) => subscribe('interview:request-end', callback),

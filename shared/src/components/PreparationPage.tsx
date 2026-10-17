@@ -1,5 +1,16 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { ArrowUp, Check, Copy, MessageSquare, Square, X, Person, Play, ChevronDown } from './icons';
+import {
+  ArrowUp,
+  Check,
+  Copy,
+  MessageSquare,
+  Square,
+  X,
+  Person,
+  Play,
+  ChevronDown,
+  Monitor,
+} from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
@@ -178,6 +189,37 @@ export function PreparationPage({
       if (attempt === accessAttempt.current) setCheckingAccess(false);
     }
   };
+  useEffect(() => {
+    if (!confirmInterview || !window.desktop?.screenCapturePermissionSupported) return;
+    let active = true;
+    const refresh = () => {
+      const attempt = accessAttempt.current;
+      void window
+        .desktop!.screenCapturePermission('check')
+        .then((permission) => {
+          if (active && attempt === accessAttempt.current)
+            setAccessReport((current) =>
+              current ? { ...current, screenCapture: permission } : current,
+            );
+        })
+        .catch(() => {
+          if (active && attempt === accessAttempt.current)
+            setAccessReport((current) =>
+              current
+                ? {
+                    ...current,
+                    screenCapture: { status: 'error', message: '屏幕捕获权限检查失败，请重新检查' },
+                  }
+                : current,
+            );
+        });
+    };
+    window.addEventListener('focus', refresh);
+    return () => {
+      active = false;
+      window.removeEventListener('focus', refresh);
+    };
+  }, [confirmInterview]);
   return (
     <main className="workspace preparation-workspace">
       <header className="page-toolbar">
@@ -269,38 +311,71 @@ export function PreparationPage({
             ) : (
               accessReport?.checks.map((check) => (
                 <p key={check.source} className={check.status === 'granted' ? '' : 'danger-text'}>
-                  {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
-                  {check.message}
+                  <span className="interview-access-icon" aria-hidden="true">
+                    {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
+                  </span>
+                  <span>{check.message}</span>
                 </p>
               ))
             )}
-            {!checkingAccess && (!accessReport?.ready || interviewError) && (
-              <div className="interview-access-actions">
-                <Button
-                  variant="ghost"
-                  disabled={openingInterview}
-                  onClick={() => void checkAccess(interviewConfiguration)}
-                >
-                  重新检查
-                </Button>
-                {accessReport?.checks.some(
-                  (check) => check.source === 'microphone' && check.status === 'denied',
-                ) && (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      void window
-                        .desktop!.openMicrophoneSettings()
-                        .catch(() =>
-                          setInterviewError('无法打开 Windows 设置，请手动打开麦克风隐私设置。'),
-                        )
-                    }
-                  >
-                    打开麦克风权限设置
-                  </Button>
-                )}
-              </div>
+            {!checkingAccess && accessReport?.screenCapture && (
+              <p aria-label="屏幕捕获权限检查">
+                <span className="interview-access-icon" aria-hidden="true">
+                  {accessReport.screenCapture.status === 'granted' ? (
+                    <Check size={14} />
+                  ) : (
+                    <Monitor size={14} />
+                  )}
+                </span>
+                <span>
+                  {accessReport.screenCapture.message}
+                  {accessReport.screenCapture.status !== 'granted' &&
+                    '；可继续纯语音面试，截图功能需授权。'}
+                </span>
+              </p>
             )}
+            {!checkingAccess &&
+              (!accessReport?.ready ||
+                interviewError ||
+                (accessReport?.screenCapture &&
+                  accessReport.screenCapture.status !== 'granted')) && (
+                <div className="interview-access-actions">
+                  <Button
+                    variant="ghost"
+                    disabled={openingInterview}
+                    onClick={() => void checkAccess(interviewConfiguration)}
+                  >
+                    重新检查
+                  </Button>
+                  {accessReport?.checks.some(
+                    (check) =>
+                      (check.source === 'microphone' && check.status === 'denied') ||
+                      (window.desktop?.nativeWindowControls === true &&
+                        check.source === 'system' &&
+                        check.status !== 'granted'),
+                  ) && (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        void window
+                          .desktop!.openMicrophoneSettings(
+                            window.desktop?.nativeWindowControls
+                              ? accessReport?.checks.find((check) => check.status !== 'granted')
+                                  ?.source
+                              : undefined,
+                          )
+                          .catch(() =>
+                            setInterviewError('无法打开系统设置，请手动打开音频隐私设置。'),
+                          )
+                      }
+                    >
+                      {window.desktop?.nativeWindowControls
+                        ? '打开音频权限设置'
+                        : '打开麦克风权限设置'}
+                    </Button>
+                  )}
+                </div>
+              )}
           </div>
           <p className="interview-start-description">
             音频仅在本机处理，不保存。

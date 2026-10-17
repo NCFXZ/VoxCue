@@ -1,0 +1,21 @@
+{
+  "scripts": {
+    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:shared && pnpm build:launcher",
+    "build:audio": "node scripts/build-audio.mjs",
+    "start": "node scripts/launch.mjs",
+    "dev": "node scripts/launch.mjs --dev",
+    "test:audio:native": "node test/scripts/audio-native-smoke.mjs",
+    "test:window:native": "node test/scripts/window-native-smoke.mjs",
+    "build:launcher": "node scripts/build-launcher.mjs",
+    "test:launcher": "node test/scripts/launcher-smoke.mjs",
+    "test:icons": "node test/scripts/icons-smoke.mjs",
+    "build:icons": "node scripts/build-icons.mjs",
+    "build:symbols": "node scripts/build-symbols.mjs",
+    "build:permissions": "node scripts/build-permissions.mjs",
+    "test:screen-permission": "node test/scripts/screen-permission-smoke.mjs"
+  },
+  "optionalDependencies": {
+    "@github/copilot-sdk-darwin-arm64": "1.0.21",
+    "sherpa-onnx-darwin-arm64": "1.13.8"
+  }
+}

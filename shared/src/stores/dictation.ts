@@ -16,7 +16,7 @@ export const useDictation = create<DictationState>((set, get) => ({
     if (get().phase !== 'idle') return;
     const desktop = window.desktop;
     if (!desktop) {
-      set({ error: '语音输入需要 Windows 桌面应用。' });
+      set({ error: '语音输入需要桌面应用。' });
       return;
     }
     const current = ++generation;

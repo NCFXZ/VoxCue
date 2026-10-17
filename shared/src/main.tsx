@@ -4,8 +4,27 @@ import { App } from './App';
 import { FloatingInterview } from './components/FloatingInterview';
 import './styles.css';
 import { useSystemAccent } from './systemAccent';
+import { applyFrostedAppearance, useFrostedAppearance } from './frostedAppearance';
+
+// Set the presentation scope on the document so portals and the interview window share it.
+document.documentElement.classList.add('desktop-ui');
+document.documentElement.classList.toggle(
+  'macos-ui',
+  window.desktop?.nativeWindowControls === true,
+);
+applyFrostedAppearance();
+document.documentElement.classList.toggle(
+  'frosted-ui',
+  window.desktop?.presentation?.frostedTransparency === true,
+);
+document.documentElement.classList.toggle(
+  'mouse-passthrough-ui',
+  window.desktop?.presentation?.interviewMousePassthrough === true,
+);
+
 function WindowContent() {
   useSystemAccent();
+  useFrostedAppearance();
   return location.hash === '#interview' ? <FloatingInterview /> : <App />;
 }
 ReactDOM.createRoot(document.getElementById('root')!).render(

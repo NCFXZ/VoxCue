@@ -1,3 +1,4 @@
+import workspace from './workspace.mjs';
 import { readFile, mkdir, rename, access } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -5,7 +6,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 const manifest = JSON.parse(await readFile(new URL('./rag-model.json', import.meta.url), 'utf8'));
-const root = path.resolve('local-models/rag/multilingual-e5-small');
+const root = path.join(workspace.sharedRoot, 'local-models/rag/multilingual-e5-small');
 const digest = async (file) => {
   const h = createHash('sha256');
   for await (const data of createReadStream(file)) h.update(data);

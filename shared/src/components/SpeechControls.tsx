@@ -10,6 +10,7 @@ import type {
 import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
 import { effortLabels } from '../services/chatOptions';
 import { MicrophoneTest } from './MicrophoneTest';
+import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 
 export function SpeechControls({
   value,
@@ -248,6 +249,7 @@ export function SpeechControls({
         }
         onError={setMicrophoneError}
       />
+      <ScreenCaptureSettings disabled={busy} />
       <section className="speech-settings-section speech-answer-settings" aria-label="回答设置">
         <div className="speech-section-heading">
           <h3>回答设置</h3>

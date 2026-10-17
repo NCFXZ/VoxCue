@@ -1,13 +1,19 @@
 import path from 'node:path';
-import { windows } from '../../../windows/electron/platform';
-import { macos } from '../../../macos/electron/platform';
 import type { DesktopPlatform } from './types';
 
 export function selectDesktopPlatform(
   platform: NodeJS.Platform = process.platform,
 ): DesktopPlatform {
-  if (platform === 'win32') return windows;
-  if (platform === 'darwin') return macos;
+  // Load only the selected installation. Static imports would pull both platforms
+  // into TypeScript's emit graph even when the other directory is excluded.
+  const directory = platform === 'win32' ? 'windows' : platform === 'darwin' ? 'macos' : undefined;
+  if (directory) {
+    const module = require(path.join(__dirname, '../../..', directory, 'electron/platform'));
+    const selected: DesktopPlatform = module[directory];
+    if (selected?.id !== platform)
+      throw Error('Desktop platform does not match this installation.');
+    return selected;
+  }
   // Unsupported hosts may run static/shared tests; never claim native support.
   return {
     id: platform,
@@ -25,23 +31,32 @@ interface ResourceEnvironment {
   packaged: boolean;
 }
 
-/** Resolves existing locations without changing userData or moving native assets. */
+/** Development installs own their runtime; portable weights and PNGs stay shared. */
 export function desktopResources(environment: ResourceEnvironment, platform: DesktopPlatform) {
   const { appPath, resourcesPath, packaged } = environment;
+  const sharedPath = path.resolve(appPath, '../shared');
   const modelRoot = packaged
     ? path.join(resourcesPath, 'models')
-    : path.join(appPath, 'local-models');
+    : path.join(sharedPath, 'local-models');
   return {
     icon: path.join(appPath, platform.iconFile),
     speechModels: path.join(modelRoot, 'speech'),
     ragModel: path.join(modelRoot, 'rag/multilingual-e5-small'),
-    audioHelper: platform.wasapiHelper
+    screenPermission: platform.screenPermissionFile
       ? path.join(
           packaged ? resourcesPath : appPath,
           packaged ? 'native' : 'native/bin',
-          platform.wasapiHelper,
+          platform.screenPermissionFile,
         )
       : undefined,
+    audioHelper:
+      (platform.audioHelper ?? platform.wasapiHelper)
+        ? path.join(
+            packaged ? resourcesPath : appPath,
+            packaged ? 'native' : 'native/bin',
+            (platform.audioHelper ?? platform.wasapiHelper)!,
+          )
+        : undefined,
     speechProcess: platform.speechProcessFile
       ? path.join(appPath, 'dist-electron', platform.speechProcessFile)
       : undefined,

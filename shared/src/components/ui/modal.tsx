@@ -77,7 +77,13 @@ export function Modal({
           </div>
           <div>
             {action}
-            <Button variant="ghost" size="icon" aria-label={closeLabel} onClick={onClose}>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="dialog-close-button"
+              aria-label={closeLabel}
+              onClick={onClose}
+            >
               <X size={17} />
             </Button>
           </div>

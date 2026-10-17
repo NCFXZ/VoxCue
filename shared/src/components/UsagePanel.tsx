@@ -5,7 +5,7 @@ import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
 import { ConfirmResetButton } from './ui/confirm-delete-button';
 import { useModelProvider } from './useModelProvider';
-import { ChevronRight } from './icons';
+import { Link } from './icons';
 export function UsagePanel() {
   const state = useChatConnection();
   const provider = useModelProvider();
@@ -45,24 +45,27 @@ export function UsagePanel() {
         <span>输出 {state.usage.outputTokens.toLocaleString()}</span>
       </div>
       <p>{state.usage.requests} 次已返回用量的请求</p>
-      <small>
-        {state.live ? '仅统计本机本应用，未返回的用量不计入。' : '连接模型服务后可查看本机用量。'}
-      </small>
-      {state.live && ['chatgpt', 'copilot'].includes(provider.id) && (
-        <Button
-          variant="ghost"
-          className="account-usage-link"
-          onClick={() => {
-            void openChatLink(
-              provider.id === 'copilot'
-                ? 'https://github.com/settings/copilot'
-                : 'https://chatgpt.com/settings/usage',
-            ).catch(() => {});
-          }}
-        >
-          查看账户用量 <ChevronRight size={14} />
-        </Button>
-      )}
+      <footer className="usage-footer">
+        <small>
+          {state.live ? '仅统计本机本应用，未返回的用量不计入。' : '连接模型服务后可查看本机用量。'}
+        </small>
+        {state.live && ['chatgpt', 'copilot'].includes(provider.id) && (
+          <Button
+            variant="ghost"
+            className="account-usage-link"
+            onClick={() => {
+              void openChatLink(
+                provider.id === 'copilot'
+                  ? 'https://github.com/settings/copilot'
+                  : 'https://chatgpt.com/settings/usage',
+              ).catch(() => {});
+            }}
+          >
+            <span>查看账户用量</span>
+            <Link size={14} />
+          </Button>
+        )}
+      </footer>
       {state.usageError && (
         <p className="usage-error" role="alert">
           {state.usageError}

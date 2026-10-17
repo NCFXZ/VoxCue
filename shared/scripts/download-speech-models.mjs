@@ -1,7 +1,8 @@
+import workspace from './workspace.mjs';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
-const root = path.resolve('local-models/speech');
+const root = path.join(workspace.sharedRoot, 'local-models/speech');
 await mkdir(root, { recursive: true });
 const revision = '8e40c43232a1c5c66c82111efc5820d3accca11b';
 const base = `https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/${revision}/`;

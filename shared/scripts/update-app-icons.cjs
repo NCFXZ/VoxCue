@@ -2,18 +2,19 @@
 const { app, nativeImage } = require('electron');
 const { readFileSync, writeFileSync } = require('node:fs');
 const path = require('node:path');
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  await import('./workspace.mjs'); // Reject execution from the other platform's tree.
   const source = process.argv[2];
   if (!source) throw Error('Pass the supplied PNG path.');
   const logo = nativeImage.createFromPath(source);
   if (logo.isEmpty()) throw Error('Cannot read logo.');
-  const directory = path.resolve(__dirname, '../../public');
+  const directory = path.resolve(__dirname, '../public');
   writeFileSync(path.join(directory, 'voxcue-source.png'), readFileSync(source));
   const png = logo.resize({ width: 512, height: 512, quality: 'best' }).toPNG();
   writeFileSync(path.join(directory, 'voxcue.png'), png);
   // Renderer imports this copy so Vite fingerprints updated artwork.
   writeFileSync(path.resolve(__dirname, '../src/assets/voxcue.png'), png);
-  const sizes = [16, 24, 32, 48, 64, 128, 256];
+  const sizes = process.platform === 'win32' ? [16, 24, 32, 48, 64, 128, 256] : [];
   const entries = sizes.map((size) =>
     logo.resize({ width: size, height: size, quality: 'best' }).toPNG(),
   );
@@ -31,7 +32,11 @@ app.whenReady().then(() => {
     header.writeUInt32LE(offset, at + 12);
     offset += entry.length;
   });
-  writeFileSync(path.join(directory, 'voxcue.ico'), Buffer.concat([header, ...entries]));
+  if (process.platform === 'win32')
+    writeFileSync(
+      path.resolve(__dirname, '../../windows/public/voxcue.ico'),
+      Buffer.concat([header, ...entries]),
+    );
   console.log(JSON.stringify({ sourceSize: logo.getSize(), pngSize: 512, icoSizes: sizes }));
   app.quit();
 });

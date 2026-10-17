@@ -3,7 +3,7 @@ import { mkdirSync, existsSync, statSync } from 'node:fs';
 import path from 'node:path';
 if (process.platform !== 'win32') throw Error('Windows WASAPI helper requires Windows');
 mkdirSync('native/bin', { recursive: true });
-const source = path.resolve('windows/native/WasapiCapture.cs');
+const source = path.resolve('native/WasapiCapture.cs');
 const output = path.resolve('native/bin/VoxCue.Audio.exe');
 // Reuse an unchanged helper while the user is using it in an interview. A
 // changed source still requires a successful compile; never replace a live exe.

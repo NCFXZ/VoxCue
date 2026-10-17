@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.voxcue.audio</string>
+<key>CFBundleName</key><string>VoxCue Audio</string>
+<key>NSMicrophoneUsageDescription</key><string>VoxCue 在你开始语音输入或面试后在本机转写麦克风，不保存或上传音频。</string>
+<key>NSAudioCaptureUsageDescription</key><string>VoxCue 在你开始面试后在本机转写所选播放设备的系统音频，不保存或上传音频。</string>
+</dict></plist>

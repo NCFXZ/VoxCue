@@ -27,6 +27,7 @@ export function App() {
   const [startRequest, setStartRequest] = useState(0);
   const [personalDraft, setPersonalDraft] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string | null>(null);
+  const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const auth = useAuth();
   const transientChat = usePreparation((state) => state.streaming || !!state.chatStorageError);
   useEffect(() => {
@@ -96,6 +97,7 @@ export function App() {
       void useChatConnection.getState().load(auth.session.mode !== 'demo');
   }, [auth.session?.mode, isLoginWindow]);
   useEffect(() => {
+    let active = true;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
     const apply = () =>
       document.documentElement.classList.toggle(
@@ -104,12 +106,27 @@ export function App() {
       );
     apply();
     localStorage.setItem('copilot-theme', theme);
+    if (window.desktop?.presentation?.nativeTheme) {
+      void window.desktop
+        .setNativeTheme(theme)
+        .then(() => {
+          if (active) setAppearanceError(null);
+        })
+        .catch(() => {
+          if (active) setAppearanceError('无法同步应用外观，请退出后重新打开软件。');
+        });
+    }
     media.addEventListener('change', apply);
-    return () => media.removeEventListener('change', apply);
+    return () => {
+      active = false;
+      media.removeEventListener('change', apply);
+    };
   }, [theme]);
   return (
-    <div className={`app-shell ${isLoginWindow ? 'login-shell' : ''}`}>
-      {!isLoginWindow && <TitleBar />}
+    <div
+      className={`app-shell ${isLoginWindow ? 'login-shell' : ''} ${window.desktop?.nativeWindowControls ? 'native-window-controls' : 'custom-window-controls'}`}
+    >
+      {(!isLoginWindow || window.desktop?.nativeWindowControls) && <TitleBar />}
       <div className="app-body">
         {auth.loading ? (
           <StartupScreen />
@@ -162,9 +179,9 @@ export function App() {
           </>
         )}
       </div>
-      {auth.session && (auth.error || sessionStateError) && (
+      {(appearanceError || (auth.session && (auth.error || sessionStateError))) && (
         <div className="auth-error" role="alert">
-          {auth.error || sessionStateError}
+          {appearanceError || auth.error || sessionStateError}
         </div>
       )}
       {settings && (

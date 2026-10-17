@@ -51,6 +51,64 @@ export function FloatingInterview() {
   const resizePointer = useRef<{ target: HTMLButtonElement; id: number } | null>(null);
   const currentInput = input ?? state.draftQuestion;
   useEffect(() => {
+    const desktop = window.desktop;
+    if (!desktop?.presentation?.interviewMousePassthrough) return;
+    const surfaces =
+      '.floating-toolbar, .floating-panel, .floating-resize, .floating-notices > div';
+    let disposed = false;
+    let ignored: boolean | undefined;
+    let pointer: { x: number; y: number; buttons: number } | undefined;
+    const apply = (ignore: boolean) => {
+      if (ignore === ignored) return;
+      ignored = ignore;
+      desktop.setInterviewMousePassthrough(ignore);
+    };
+    const refresh = () => {
+      if (disposed || !pointer || pointer.buttons || dragging.current) return;
+      const target = document.elementFromPoint(
+        pointer.x - window.screenX,
+        pointer.y - window.screenY,
+      );
+      apply(!target?.closest(surfaces));
+    };
+    const move = (event: MouseEvent) => {
+      pointer = { x: event.screenX, y: event.screenY, buttons: event.buttons };
+      refresh();
+    };
+    const release = (event: MouseEvent) => {
+      move(event);
+      // Resize's mouseup listener releases its drag lock later in this event.
+      queueMicrotask(refresh);
+    };
+    const leave = (event: MouseEvent) => {
+      if (event.relatedTarget || event.buttons || dragging.current) return;
+      pointer = undefined;
+      apply(true);
+    };
+    // Forwarded mouse moves keep the visible controls reachable while blank
+    // canvas areas pass clicks through. Never switch in the middle of a drag.
+    apply(true);
+    window.addEventListener('mousemove', move, true);
+    window.addEventListener('mousedown', move, true);
+    window.addEventListener('mouseup', release, true);
+    window.addEventListener('mouseout', leave, true);
+    window.addEventListener('resize', refresh);
+    const observer = new ResizeObserver(refresh);
+    document
+      .querySelectorAll('.floating-toolbar, .floating-panels, .floating-notices')
+      .forEach((element) => observer.observe(element));
+    return () => {
+      disposed = true;
+      observer.disconnect();
+      window.removeEventListener('mousemove', move, true);
+      window.removeEventListener('mousedown', move, true);
+      window.removeEventListener('mouseup', release, true);
+      window.removeEventListener('mouseout', leave, true);
+      window.removeEventListener('resize', refresh);
+      desktop.setInterviewMousePassthrough(true);
+    };
+  }, []);
+  useEffect(() => {
     // Clearing an edit pauses autofill for that transcript only. Newly received
     // interviewer speech resumes autofill; a non-empty manual edit is preserved.
     if (input === '' && editedDraft.current !== state.draftQuestion) setInput(null);

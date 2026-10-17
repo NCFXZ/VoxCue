@@ -1,8 +1,9 @@
 import type { BrowserWindow, BrowserWindowConstructorOptions } from 'electron';
 import type { DesktopPlatform } from './platform/types';
 import { interviewCanvas, interviewLayout } from './contracts/interviewLayout';
+import { pendingPresentation } from './contracts/presentation';
 
-type WindowRole = 'login' | 'main' | 'interview';
+export type WindowRole = 'login' | 'main' | 'interview';
 const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
   login: {
     width: 960,
@@ -36,6 +37,16 @@ export function windowOptions(
     ...(role === 'main' ? platform.mainWindowOptions : {}),
     icon: paths.icon,
     frame: false,
+    ...(platform.nativeWindowControls && role !== 'interview'
+      ? {
+          frame: true,
+          titleBarStyle: 'hidden' as const,
+          trafficLightPosition: { x: 16, y: 18 },
+          titleBarOverlay: false,
+          transparent: false,
+          roundedCorners: true,
+        }
+      : {}),
     show: false,
     backgroundColor: '#00000000',
     webPreferences: {
@@ -43,6 +54,9 @@ export function windowOptions(
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      additionalArguments: [
+        '--voxcue-presentation=' + JSON.stringify(platform.presentation ?? pendingPresentation),
+      ],
     },
   };
 }

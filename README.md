@@ -1,63 +1,67 @@
 # VoxCue
 
-面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，目前正式实现与运行验证为 Windows x64。可选 ChatGPT 或 GitHub Copilot 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；macOS 原生功能及分发尚未完成，不以Intel Mac为支持目标。
+> 测试结果零保留（2026-10-17）：用户已恢复完整测试授权，结果仅在终端/内存显示。共用/Mac 回归的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；Windows 专属旧持久化脚本须先在其本机改造。Mac 117 个旧目录因 OneDrive 占用暂留，Windows 349 个此前跳过目录不重试；Windows 全程只读。入口与边界见[测试说明](shared/test/README.md)。
 
-## 启动
+面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，正式发布目标为 Windows x64。可选 ChatGPT 或 GitHub Copilot 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 开发版已完成本机原生音频、系统窗口与双击启动验证，正式分发仍待完成，不以 Intel Mac 为支持目标。
 
-开发工作区可双击根目录 Start-VoxCue.cmd 使用已有构建。修改源码后先运行 pnpm build；开发需要 Windows 10/11、Node.js 22.3 或更新版本和 pnpm。分发的安装包/便携包自带 Electron/原生 CPU 语音运行库，普通用户无需安装 WSL、Python、Node.js 或 CUDA Toolkit。
+当前源码版本为 **0.2.1**。本次上传源码至私有 `NCFXZ/VoxCue` 的 `main`；公开安装包仍为 v0.2.0。Windows 配置保持只读，需在 Windows 本机运行 `corepack pnpm sync:workspace` 后重新构建以使用最新源码版本。
 
-Windows x64 提供 NSIS 安装包（`pnpm package:installer`）与设置 → 更新。安装版从独立公开的 `NCFXZ/VoxCue-releases` 检查并下载新版本，源码仓库保持私有；用户点击重启才安装，面试进行中拒绝安装，重启前等待聊天保存成功。既有用户目录、原件、聊天及记录保持；开发/便携版明确不支持自动安装。[v0.2.0 Windows 版](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)已按用户授权发布，包含本轮面试展示、固定字号缩放与截图发送功能；336项单测、42组功能回归通过，当前未配置代码签名。详见[更新与发布说明](docs/UPDATES.md)。
+## 开发与启动
 
-v0.1.2起更新候选按平台独立查找：Windows x64与Mac arm64分别从完整正式Release中按稳定版本排序，不依赖GitHub统一Latest，可分开发行、采用不同版本。清单仍分别为latest.yml/latest-mac.yml，文件名与发布要求见UPDATES.md；Mac只接受arm64 ZIP，不接收Intel/Universal包。这仅完成更新选择/适配逻辑，Mac应用移植、签名与真机更新尚未完成。当前v0.2.0已设为Latest，旧安装版可直接升级，之后采用分平台选版逻辑。
+开发使用原生 Node.js 24 LTS 与固定 pnpm 11.25.0。先在本机平台目录安装依赖：
 
-```powershell
-pnpm install
-pnpm download:speech
-pnpm download:rag
-pnpm build
-pnpm start
+```sh
+# Mac Apple Silicon
+cd macos
+COREPACK_HOME="$PWD/.tools/corepack" ELECTRON_CACHE="$PWD/.cache/electron" corepack pnpm install --frozen-lockfile
 ```
 
-pnpm dev 启动开发环境；pnpm dev:web 仅预览网页，原生窗口和音频功能需要 Electron。语音模型显式下载至 local-models/speech，不提交权重；build 包含 Windows WASAPI 助手编译，使用系统 .NET Framework64 编译器。
+Windows 在 `windows` 目录执行 `corepack pnpm install --frozen-lockfile`。无需在根目录或 shared 安装依赖，已存在的另一平台依赖保留。
 
-## 主线与跨平台开发
+安装后可回到根目录执行，命令会按当前系统转发：
 
-`main` 是唯一长期开发主线，临时分支从 `main` 创建；原 `Windows`、`Mac` 分支保留作历史参考，不长期维护两份共享业务。0.2.0 按用户授权将完整功能与平台整理提交推送到现有私有源码仓库；远端历史分支和默认 `Windows` 保持。实时远端引用已核对，上传结果以 PROGRESS 最新节为准。
+```sh
+corepack pnpm check:workspace
+corepack pnpm check:architecture
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build
+corepack pnpm start
+```
+
+Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。模型保存在 `shared/local-models`，需要时运行 `download:speech`、`download:rag`，已有通过校验的模型不用重新下载。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户、完整 Mac 分发仍待验收。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
+
+Windows x64 已发布 [v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)，原有更新交互和分平台选版保持。安装版自带运行库和模型，普通用户无需开发工具。此次整理不重新发布安装包，详见[更新说明](shared/docs/UPDATES.md)。
+
+## 工作区与主线
+
+`main` 是唯一长期开发主线；共享业务只保留一份，Windows/Mac 历史分支保留。
 
 ```text
-shared/            两平台共用生产代码
-  src/             React 展示、状态和本机存储
-  electron/        装配、窗口、业务、IPC、契约、识别 Worker、更新
-  scripts/         开发、模型下载、图标生成
-windows/           Windows 专属生产代码
-  electron/        平台策略、WASAPI 采集/权限/控制器/进程
-  native/          C# 采集助手源码
-  scripts/         助手编译、Windows 打包
-macos/electron/    Apple Silicon 平台策略；完整移植尚未完成
-test/              全部测试源码、脚本、夹具与生成结果
-  shared/          通用单测、Renderer 单测、桌面回归、夹具
-  windows/         Windows 单测、原生/便携/更新回归
-  results/         忽略的测试结果、截图、恢复快照与验证目录
+AGENTS.md / PROGRESS.md / README.md / package.json / pnpm-workspace.yaml
+windows/  专属源码、原生助手、测试源码、依赖、锁文件、构建和发行
+macos/    Core Audio、系统窗口策略、双击启动器、arm64 依赖和构建
+shared/   共用 src/electron/scripts、测试、模型、PNG/Logo 原件及文档
 ```
 
-详细入口和路径恢复见[目录说明](docs/WORKSPACE_LAYOUT.md)。根目录保留统一配置、Start-VoxCue.cmd、public原始素材、模型/依赖及运行产物；native/bin仍为兼容的助手输出位置。编译入口改为dist-electron/shared/electron/main.js，启动脚本与打包规则同步，用户数据路径不变。
+测试结果改为零保留；本次删除 101 项可清理旧产物、4,420 个文件，仍被占用或受平台只读限制的残留见上方说明。旧报告引用不作为现存交付物。源码恢复快照与纯清理审计单独放在平台 recovery，测试源码、固定输入夹具、现用依赖/模型和真实数据保留。
 
-`test/`用于功能、边界和回归验证；benchmark通常用于性能/效果比较。本仓库`benchmarks/rag-engines`已经退役，无应用依赖或可执行脚本，仅保留历史私有样本、原件、标注与派生结果，继续原地保留，不纳入自动测试，也不代表当前RAG评测能力。
-
-平台参数由 `main` 注入后台，业务不依赖窗口或平台模块。Windows Acrylic、ICO、应用 ID、隐私入口及原生资源位置集中在适配层；macOS 仅有 PNG、驻留生命周期及凭据错误标签策略，没有添加原生材质或音频实现。`safeStorage` 及既有文件/数据键保持，不迁移 Windows 用户数据。
-
-`pnpm build:shared` 编译共享 Electron TypeScript 和 Renderer，不构建 WASAPI，也不代表 macOS 可运行或已验收。`pnpm build` 保留完整 Windows 构建；现有安装和便携脚本仍仅面向 Windows x64。本轮没有添加 Mac 打包/签名配置。后续 Mac仅面向Apple Silicon arm64，需验证标题栏、窗口材质/置顶/保护、系统权限与钥匙串、arm64原生依赖和完整启动；详见 [架构整理报告](docs/CROSS_PLATFORM_REFACTOR.md)。
-
-Windows限定的`sherpa-onnx-win-x64`固定版本改为平台可选依赖，避免在其他系统安装时硬性拒绝；Windows打包仍显式要求它。锁文件只同步分类，没有升级或删除依赖。`pnpm test:platform:native`仅在Windows x64验证实际Worker加载及utilityProcess设备枚举，不启动音频采样。
+平台独立安装、独立构建；测试结果不保存。共用配置在 `shared`，平台差异在各自 `package.platform.json`。Mac 对 `windows/` 只读，Windows 对 `macos/` 只读，包括脚本的间接写入。修改声明后在本平台执行根 `corepack pnpm sync:workspace`，只生成根和本平台配置，另一平台留待其本机同步。构建只输出 shared 与当前平台，格式化/图标工具同样遵守边界。当前 Windows 两项旧配置和旧 Mac 编译目录须在 Windows 本机同步后重建，本轮保持只读。完整目录见[工作区说明](shared/docs/WORKSPACE_LAYOUT.md)。退役 benchmark 的私有输入在 `shared/benchmarks`，Windows 实测结果在 `windows/benchmarks`，不恢复实验。
 
 ## 当前功能
 
+- 设置入口、透明度参数、浮窗联动、用量链接对齐、紧凑布局及蓝色焦点外圈移除已共用；两平台分别重建后使用同一份界面。置顶、空白穿透和面试图标隐藏保持自动行为，不新增开关。共享源码不代表跨设备同步实际偏好或用户数据。
+- Mac 进入面试后自动隐藏本应用的 Dock 运行图标和主窗口，结束面试后恢复。面试浮窗保持置顶，切换桌面或进入全屏应用仍可见；工具栏周围、面板间隙等透明空白可直接点击后方应用，工具栏和面板保留操作。
+- 共用设置 → 常规提供 0–100 毛玻璃透明度连续滑杆，默认 50，0 关闭。Mac 主侧栏按全范围调节；面试浮窗背景按原效果位置 60×滑杆比例调节，输入框与转写/问题/回答气泡按 30×滑杆比例调节。滑杆拉满对应背景 60、气泡 30，调到一半对应 30、15，全程连续变化。旧四档只读映射到滑杆位置，文字保持无光晕/描边；辅助功能时使用不透明表面。Windows 可看到并保存滑杆，实际效果标明待适配，既有 Acrylic 保持。
+- 浅色/深色/跟随系统设置的网页主题共用；Mac 同时控制 VoxCue 的原生窗口外观，使透明侧栏与文字配色一致，只改变本应用。Windows 原生外观联动待其本机适配，网页主题正常生效。两端均不修改系统全局主题或原生材质种类。
+- 共用设置 → 面试设置显示屏幕权限和自动窗口行为状态。Mac 屏幕权限只有“申请权限”按钮，授权后禁用并显示“已允许”；返回应用后刷新。Windows 权限入口显示待适配并禁用，不发起请求。Mac 开场单独显示屏幕权限，未授权仍可进行纯语音面试；检查/申请不截图或录屏，不自动开启“附截图”。Windows 的穿透与任务栏图标隐藏亦待适配，既有基本置顶/最小化流程保持。
+- Mac 界面操作图标统一采用 Apple SF Symbols，资源与工具留在 macos，原有布局、主题和品牌 Logo 保持；Windows 继续使用 Fluent UI。
 - 面试输入区新增“附截图”开关，默认关闭；打开后，手动发送或自动回答题目都会附上浮窗所在屏幕的最新截图。发送按钮左侧的屏幕截取按钮只发送当前截图，不带输入框、转写或此前对话，草稿保留。所选模型需支持图片；捕获或模型失败明确报错，停止/重试可用。截图不写入磁盘或面试记录。这项功能已包含在公开v0.2.0安装包中。
 - 当前工作区面试回答默认按正常语速口述约60–90秒组织，当前问题或已确认自定义指令可覆盖时长/篇幅要求；代码题使用带语言、换行和缩进的代码框，支持流式显示与复制。回答上方显示对应问题气泡。全软件移除悬停说明，保留无障碍名称。浮窗转写/回答宽度约7:10，调整尺寸时各自宽高比保持，字号、按钮和工具栏大小固定，放大显示更多内容；缩放全程保持上方工具栏位置，下方面板围绕它扩缩。隐藏转写会收窄窗口并保留回答面板尺寸；左右底角使用互为镜像的缩放图标。未开启截图保护显示“此窗口未隐藏”，提示位于面板下方预留的透明区域，出现/消失不挤压或移动面板。转写异常恢复后清除。聊天/面试共用新版思考展示，初始为“正在思考”，公开思考与活动在正文分割线上方；实际本地检索与网页活动分别标识。开场确认中知识库独占一行，系统音频/麦克风、回答模型/思考强度分别成对并排。这些修改已包含在公开v0.2.0安装包中。
-- 登录页可选 ChatGPT / GitHub Copilot，使用系统浏览器授权，无需自行注册 OAuth App 或输入令牌。Copilot 官方 Windows x64 运行时随应用打包，凭据由其系统加密存储；VoxCue 只保存身份与服务选择。模型菜单、回复、设置及资料发送提示按实际服务/模型/供应商显示，旧回复保留原身份。实际账户订阅、模型和搜索能力仍由服务决定；详见 [Copilot 接入与验证边界](docs/COPILOT.md)。
-- 已修复 Copilot 浏览器授权后误报“Windows 凭据加密存储不可用”：客户端启用系统凭据库，同时显式保留会话隔离；加密真正不可用时仍拒绝明文保存。根目录构建已更新，正常退出后重新启动并登录即可。
-- v0.1.1 修复错误响应等待不结束、损坏记录空白界面、聊天快照字段覆盖动作、聊天 IPC frame 校验缺口及重载后旧请求阻塞。读取不删除或迁移原数据；修复说明与复验证据见 [对抗测试报告](docs/ADVERSARIAL_TEST_REPORT.md)。
-- 全界面按浅深主题统一表单高度、错误颜色和长名称处理，修正音频设备报错后的对齐、知识库紧凑上传/文档动作与记录按钮悬停对比度。覆盖默认及最小主窗口尺寸，详见 [界面检查](docs/UI_UX_REVIEW.md)；过期测试和打包暂存已清理，最新修复安装包以 PROGRESS 为准。
+- 登录页可选 ChatGPT / GitHub Copilot，使用系统浏览器授权，无需自行注册 OAuth App 或输入令牌。Copilot 官方 Windows x64 运行时随应用打包，凭据由其系统加密存储；VoxCue 只保存身份与服务选择。模型菜单、回复、设置及资料发送提示按实际服务/模型/供应商显示，旧回复保留原身份。实际账户订阅、模型和搜索能力仍由服务决定；详见 [Copilot 接入与验证边界](shared/docs/COPILOT.md)。
+- 已修复 Copilot 浏览器授权后误报“Windows 凭据加密存储不可用”：客户端启用系统凭据库，同时显式保留会话隔离；加密真正不可用时仍拒绝明文保存。Windows 构建已保留，正常退出后重新启动并登录即可。
+- v0.1.1 修复错误响应等待不结束、损坏记录空白界面、聊天快照字段覆盖动作、聊天 IPC frame 校验缺口及重载后旧请求阻塞。读取不删除或迁移原数据；修复说明与复验证据见 [对抗测试报告](windows/docs/ADVERSARIAL_TEST_REPORT.md)。
+- 全界面按浅深主题统一表单高度、错误颜色和长名称处理，修正音频设备报错后的对齐、知识库紧凑上传/文档动作与记录按钮悬停对比度。覆盖默认及最小主窗口尺寸，详见 [界面检查](shared/docs/UI_UX_REVIEW.md)；过期测试和打包暂存已清理，最新修复安装包以 PROGRESS 为准。
 - 登录按钮统一尺寸、图标位置及间距，内容区居中，预览跟随浅深主题；服务图标随主题调整对比度。展开箭头统一采用 Fluent 细折线。准备聊天一旦开始输出正文，公开思考和活动自动收进顶部“用时”，可再次展开。
 - 面试系统问题在上一条回答期间到达，会在该回答完成后继续自动提交；麦克风间断不清除系统问题，手动清空输入后遇到新的系统转写恢复回填。麦克风仍不触发问题或自动回答。当前原生采集未接入声学回声消除，扬声器声音可能被麦克风收录，建议使用耳机。
 
@@ -78,7 +82,7 @@ Windows限定的`sherpa-onnx-win-x64`固定版本改为平台可选依赖，避�
 
 新方案采用 LanceDB + 本地 E5 q8 CPU，默认 Hybrid Search 与 Local RAG；设置可切换 Function Calling，两模式共用索引。准备聊天和已确认面试问题仅在用户选择的知识库检索相关证据，未选择则跳过检索，必要片段随既有 ChatGPT 请求发送至 OpenAI；不会上传整库。主动发送的聊天附件仍随请求发送。历史原件需手动索引，旧派生数据不迁移。真实账户工具资格、语义准确率及最终回答质量尚未验收。
 
-详见 [个人信息交互与兼容](docs/PERSONAL_INFO.md)，桌面回归入口 pnpm test:profile:ui；全局字号/视觉检查 pnpm test:ui:typography。
+详见 [个人信息交互与兼容](shared/docs/PERSONAL_INFO.md)，桌面回归入口 pnpm test:profile:ui；全局字号/视觉检查 pnpm test:ui:typography。
 
 ## 数据与权限
 
@@ -113,8 +117,8 @@ pnpm test:login
 pnpm test:package
 ```
 
-桌面测试使用独立用户目录和合成账户/设备端口，结果保存在忽略的 test-results。pnpm package:portable 输出本机便携程序至 release-smoke；pnpm package:installer 输出 NSIS、blockmap 和 latest.yml 至 release/installer，固定 GitHub Releases 发布源但不自动发布。当前没有签名证书；真实账户摘要/标题质量、真人长句/技术词准确率、物理热插拔、新电脑与全部 DPI 仍未完整验收。
+后续获准的桌面测试使用操作系统临时目录和合成账户/设备端口，运行结束、失败或取消均清理，不保存结果；现有持久化脚本须先改造再运行。pnpm package:portable 输出本机便携程序至 windows/release-smoke；pnpm package:installer 输出 NSIS、blockmap 和 latest.yml 至 windows/release/installer，固定 GitHub Releases 发布源但不自动发布。当前没有签名证书；真实账户摘要/标题质量、真人长句/技术词准确率、物理热插拔、新电脑与全部 DPI 仍未完整验收。
 
-职责和公开边界见 [架构](docs/ARCHITECTURE.md)，RAG 细节见 [架构](docs/RAG_ARCHITECTURE.md) 和 [验证报告](docs/RAG_TEST_REPORT.md)，当前结果见 [进度](PROGRESS.md)，恢复入口见 [交接](docs/HANDOFF.md)，清理范围见 [清理报告](docs/WORKSPACE_CLEANUP.md)。
+职责和公开边界见 [架构](shared/docs/ARCHITECTURE.md)，RAG 细节见 [架构](shared/docs/RAG_ARCHITECTURE.md) 和 [验证报告](windows/docs/RAG_TEST_REPORT.md)，当前结果见 [进度](PROGRESS.md)，恢复入口见 [交接](shared/docs/HANDOFF.md)，清理范围见 [清理报告](shared/docs/WORKSPACE_CLEANUP.md)。
 
 语音固定使用 Paraformer 中英 INT8 + Silero，本机 CPU 实时转写；Qwen 试用与专用 CUDA 后端已按用户要求撤除，不再提供语音模型或 GPU 选择。已保存的旧选择字段读取时忽略，音频设备、回答模型与思考强度保持。当前原生采集仍依赖 Windows WASAPI；macOS/Apple Silicon 为后续移植目标。

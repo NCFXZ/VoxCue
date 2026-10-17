@@ -6,7 +6,7 @@ import config from '../electron-builder.config.cjs';
 
 const root = process.cwd();
 await new Promise((resolve, reject) => {
-  const child = spawn(process.execPath, ['windows/scripts/package-portable.mjs', '--installer'], {
+  const child = spawn(process.execPath, ['scripts/package-portable.mjs', '--installer'], {
     cwd: root,
     stdio: 'inherit',
     windowsHide: true,

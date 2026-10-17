@@ -1,9 +1,11 @@
+import workspace from './workspace.mjs';
 import { spawn } from 'node:child_process';
-import { createServer } from 'vite';
-import electron from 'electron';
+import { fileURLToPath } from 'node:url';
+const { createServer } = workspace.platformRequire('vite');
+const electron = workspace.platformRequire('electron');
 const compiler = spawn(
   process.execPath,
-  ['node_modules/typescript/bin/tsc', '-p', 'tsconfig.electron.json'],
+  [fileURLToPath(new URL('./build-electron.mjs', import.meta.url))],
   { stdio: 'inherit' },
 );
 const code = await new Promise((resolve) => compiler.on('exit', resolve));

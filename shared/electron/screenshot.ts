@@ -11,17 +11,40 @@ export async function captureInterviewScreen(
   signal.throwIfAborted();
   if (window.isDestroyed()) throw new DOMException('Aborted', 'AbortError');
   if (platform === 'darwin' && systemPreferences.getMediaAccessStatus('screen') !== 'granted')
-    throw Error('请先在系统设置中允许 VoxCue 录制屏幕，再发送截图。');
+    throw Error('请先在“设置 → 面试设置”中允许捕获屏幕，再发送截图。');
   const display = screen.getDisplayMatching(window.getBounds());
   const width = display.size.width * display.scaleFactor;
   const height = display.size.height * display.scaleFactor;
   const ratio = Math.min(1, 3840 / Math.max(width, height));
   let sources: Electron.DesktopCapturerSource[];
   try {
-    sources = await desktopCapturer.getSources({
-      types: ['screen'],
-      thumbnailSize: { width: Math.round(width * ratio), height: Math.round(height * ratio) },
-      fetchWindowIcons: false,
+    sources = await new Promise<Electron.DesktopCapturerSource[]>((resolve, reject) => {
+      let settled = false;
+      const finish = (result: Electron.DesktopCapturerSource[] | Error, failed: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        signal.removeEventListener('abort', abort);
+        if (failed) reject(result);
+        else resolve(result as Electron.DesktopCapturerSource[]);
+      };
+      const abort = () => finish(signal.reason ?? new DOMException('Aborted', 'AbortError'), true);
+      const timer = setTimeout(() => finish(Error('Screen capture timed out'), true), 10000);
+      signal.addEventListener('abort', abort, { once: true });
+      try {
+        desktopCapturer
+          .getSources({
+            types: ['screen'],
+            thumbnailSize: { width: Math.round(width * ratio), height: Math.round(height * ratio) },
+            fetchWindowIcons: false,
+          })
+          .then(
+            (value) => finish(value, false),
+            (error) => finish(error, true),
+          );
+      } catch (error) {
+        finish(error as Error, true);
+      }
     });
   } catch (error) {
     signal.throwIfAborted();

@@ -5,7 +5,7 @@ import { registerKnowledgeIpc } from './ipc/knowledge';
 import { UpdateService } from './backend/updates/service';
 import { createUpdateDriver, updateUnavailableReason } from './backend/updates/driver';
 import { registerUpdateIpc } from './ipc/updates';
-import { app, BrowserWindow, dialog, shell, screen, systemPreferences } from 'electron';
+import { app, BrowserWindow, dialog, shell, screen, systemPreferences, Menu } from 'electron';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ChatGPTAuthService } from './backend/auth/service';
@@ -23,11 +23,17 @@ import { registerChatIpc } from './ipc/chat';
 import { registerInterviewIpc } from './ipc/interview';
 import { InterviewContext } from './application/interviewContext';
 import { captureInterviewScreen } from './screenshot';
+import { registerScreenCaptureIpc } from './ipc/screenCapture';
+import type { ScreenCaptureAccess } from './contracts/screenCapture';
 import { registerHistoryIpc } from './ipc/history';
 import { writeFile } from 'node:fs/promises';
 import { SpeechHost } from './backend/speech/host';
-import { InterviewAccess } from '../../windows/electron/speech/access';
-import { devices, probeDevice } from '../../windows/electron/speech/capture';
+import type {
+  AudioDevice,
+  AudioSource,
+  InterviewAccessReport,
+  SpeechOptions,
+} from './contracts/speech';
 import { validateSpeech } from './backend/speech/validation';
 import { speechModelInstalled } from './backend/speech/models';
 import {
@@ -38,6 +44,7 @@ import {
 import { handleDesktop, onDesktop, sendDesktop } from './ipc/handle';
 import { selectDesktopPlatform, desktopResources } from './platform';
 import { windowOptions, restrictWindowNavigation, loadWindowPage } from './window';
+import type { NativePresentation } from './presentation';
 import {
   interviewPanelScale,
   fitInterviewBounds,
@@ -63,9 +70,11 @@ let speechSessions: SpeechCoordinator | undefined;
 const interviewContext = new InterviewContext();
 let demoSession = false;
 
+let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
 let interviewWindow: BrowserWindow | null = null;
+let interviewMousePassthrough = false;
 let closingMain = false;
 let sessionHasContent = false;
 let mainCloseApproved = false;
@@ -98,6 +107,14 @@ const resources = desktopResources(
   desktopPlatform,
 );
 const windowPaths = { icon: resources.icon, preload: path.join(__dirname, 'preload.js') };
+const nativePresentation: NativePresentation | undefined = desktopPlatform.presentationFile
+  ? require(
+      path.join(app.getAppPath(), 'dist-electron', desktopPlatform.presentationFile),
+    ).createPresentation({
+      icon: resources.icon,
+      interviewOpen: () => !!interviewWindow && !interviewWindow.isDestroyed(),
+    })
+  : undefined;
 const indexFile = path.join(app.getAppPath(), 'dist/index.html');
 // Keep existing profiles, credentials, knowledge and usage after the product rename.
 app.setPath('userData', path.join(app.getPath('appData'), 'ai-interview-copilot'));
@@ -192,10 +209,57 @@ function sizeInterview(scale: number, anchor = interviewWindow!.getBounds()) {
   win.setBounds(bounds, false);
   lastInterviewBounds = { requested: bounds, actual: win.getBounds() };
 }
+function pinInterview(win: BrowserWindow) {
+  if (win.isDestroyed()) return;
+  if (nativePresentation) nativePresentation.pinInterview(win);
+  else win.setAlwaysOnTop(true, 'normal');
+}
+function setInterviewMousePassthrough(ignore: boolean) {
+  const win = interviewWindow;
+  if (
+    !nativePresentation ||
+    !desktopPlatform.presentation?.interviewMousePassthrough ||
+    !win ||
+    win.isDestroyed() ||
+    ignore === interviewMousePassthrough
+  )
+    return;
+  nativePresentation.setMousePassthrough(win, ignore);
+  interviewMousePassthrough = ignore;
+}
+function hideInterviewIcon() {
+  nativePresentation?.hideInterviewIcon();
+}
+function restoreAfterInterview() {
+  const restoreMain = () => {
+    if (!closingMain && !interviewWindow) {
+      mainWindow?.restore();
+      if (nativePresentation) mainWindow?.show();
+      mainWindow?.focus();
+    }
+  };
+  if (!nativePresentation) return restoreMain();
+  if (macQuitRequested) return nativePresentation.dispose();
+  void nativePresentation
+    .restoreInterviewIcon()
+    .then(() => {
+      // A new interview can open while the asynchronous Dock restoration completes.
+      if (interviewWindow) hideInterviewIcon();
+      else restoreMain();
+    })
+    .catch(() => {
+      restoreMain();
+      dialog.showErrorBox('应用图标恢复失败', '面试已结束，请重新打开 VoxCue。');
+    });
+}
 function openInterview() {
   if (interviewWindow) {
     interviewWindow.restore();
     interviewWindow.focus();
+    if (nativePresentation) {
+      hideInterviewIcon();
+      pinInterview(interviewWindow);
+    }
     return;
   }
   captureProtected = true;
@@ -208,6 +272,8 @@ function openInterview() {
   interviewCloseApproved = false;
   const win = new BrowserWindow(windowOptions('interview', desktopPlatform, windowPaths));
   interviewWindow = win;
+  interviewMousePassthrough = false;
+  setInterviewMousePassthrough(true);
   // All expanded sizes use the controlled proportional resize path. Removing
   // OS minimums also permits the narrower answer-only and collapsed canvases.
   win.setMinimumSize(1, 1);
@@ -221,33 +287,60 @@ function openInterview() {
   });
   win.setContentProtection(true);
   restrictWindowNavigation(win);
+  if (nativePresentation) {
+    const keepOnTop = () => pinInterview(win);
+    win.on('show', keepOnTop);
+    win.on('restore', keepOnTop);
+    win.on('always-on-top-changed', (_event, onTop) => {
+      if (!onTop && !closingMain && !interviewCloseApproved) pinInterview(win);
+    });
+  }
   win.once('ready-to-show', () => {
+    if (nativePresentation) {
+      nativePresentation.prepareInterview(win);
+    }
     win.show();
-    // Electron 38 on Windows: the default "floating" level can report and stay
-    // non-topmost. Explicit normal uses the standard Windows topmost behavior.
-    win.setAlwaysOnTop(true, 'normal');
-    mainWindow?.minimize();
+    pinInterview(win);
+    if (nativePresentation) {
+      if (mainWindow) nativePresentation.hideMain(mainWindow);
+      // Showing a later interview can restore the application's Dock policy.
+      // Apply automatic icon hiding after all native window-show operations.
+      hideInterviewIcon();
+    } else mainWindow?.minimize();
   });
   loadWindowPage(win, 'interview', indexFile, process.env.VITE_DEV_SERVER_URL);
   win.on('closed', () => {
     interviewWindow = null;
+    interviewMousePassthrough = false;
     speechSessions?.releaseInterview(true);
     updates?.refresh();
     interviewIpc?.cancel();
     interviewContext.clear();
     captureProtected = true;
-    if (!closingMain) {
-      mainWindow?.restore();
-      mainWindow?.focus();
-    }
+    restoreAfterInterview();
   });
   win.webContents.on('did-start-loading', () => {
+    setInterviewMousePassthrough(true);
     speechSessions?.releaseInterview();
     interviewIpc?.cancel();
   });
 }
 // Keep smoke tests isolated from the user's actual local documents and settings.
 if (process.env.COPILOT_TEST_USER_DATA) app.setPath('userData', process.env.COPILOT_TEST_USER_DATA);
+if (desktopPlatform.nativeWindowControls) {
+  if (!app.requestSingleInstanceLock()) {
+    app.quit();
+    process.exit(0);
+  }
+  app.on('second-instance', () => {
+    const win = interviewWindow ?? mainWindow ?? loginWindow;
+    if (win && !win.isDestroyed()) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    } else app.emit('activate');
+  });
+}
 function createMainWindow() {
   if (mainWindow) return;
   closingMain = false;
@@ -266,6 +359,7 @@ function createMainWindow() {
   mainWindow.on('closed', () => {
     speechSessions?.releaseDictation();
     mainWindow = null;
+    if (macQuitRequested) app.quit();
   });
   mainWindow.webContents.on('did-start-loading', () => {
     speechSessions?.releaseDictation();
@@ -293,6 +387,7 @@ function createMainWindow() {
           noLink: true,
         })
         .then(({ response }) => {
+          if (response !== 1 && desktopPlatform.nativeWindowControls) macQuitRequested = false;
           if (response === 1 && mainWindow && !mainWindow.isDestroyed()) {
             mainCloseApproved = true;
             mainWindow.close();
@@ -312,6 +407,7 @@ function createMainWindow() {
       mainCloseTimer = setTimeout(() => {
         pendingMainClose = null;
         mainCloseApproved = false;
+        if (desktopPlatform.nativeWindowControls) macQuitRequested = false;
         dialog.showErrorBox('聊天尚未保存', '窗口已保留，请等待聊天保存完成后重试关闭。');
       }, 15000);
       return;
@@ -324,6 +420,17 @@ function createMainWindow() {
   });
 }
 app.whenReady().then(() => {
+  nativePresentation?.initialize();
+  if (desktopPlatform.nativeWindowControls) {
+    Menu.setApplicationMenu(
+      Menu.buildFromTemplate([
+        { role: 'appMenu' },
+        { role: 'fileMenu' },
+        { role: 'editMenu' },
+        { role: 'windowMenu' },
+      ]),
+    );
+  }
   const systemAccent = () => {
     try {
       const color = systemPreferences.getAccentColor();
@@ -332,6 +439,16 @@ app.whenReady().then(() => {
       return null;
     }
   };
+  handleDesktop('appearance:theme', (event, ...args) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || ![loginWindow, mainWindow].includes(win)) throw new Error('Unauthorized window');
+    if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    if (args.length !== 1 || !['system', 'light', 'dark'].includes(args[0]))
+      throw Error('Invalid theme');
+    if (!nativePresentation || !desktopPlatform.presentation?.nativeTheme)
+      throw Error('当前平台的原生外观尚未适配。');
+    nativePresentation.setTheme(args[0]);
+  });
   handleDesktop('appearance:accent', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || ![loginWindow, mainWindow, interviewWindow].includes(win))
@@ -426,6 +543,7 @@ app.whenReady().then(() => {
       mainWindow?.close();
     } else {
       mainCloseApproved = false;
+      if (desktopPlatform.nativeWindowControls) macQuitRequested = false;
     }
   });
   const requireLogin = (event: Electron.IpcMainInvokeEvent) => {
@@ -591,19 +709,69 @@ app.whenReady().then(() => {
     },
   });
   const audioHelper = resources.audioHelper;
-  const interviewAccess = new InterviewAccess({
+  if (!resources.speechProcess) throw Error('当前系统尚未支持本地音频采集。');
+  const speechDirectory = path.dirname(resources.speechProcess);
+  // Native entry paths come from the selected platform policy, never from IPC.
+  const capture: {
+    devices(helper: string): Promise<AudioDevice[]>;
+    probeDevice(
+      helper: string,
+      source: AudioSource,
+      device?: string,
+    ): Promise<{ ok: boolean; code?: string }>;
+  } = require(path.join(speechDirectory, 'capture.js'));
+  const access: {
+    InterviewAccess: new (dependencies: {
+      platform: string;
+      microphonePermission(): string;
+      devices(): Promise<AudioDevice[]>;
+      probe(source: AudioSource, device?: string): Promise<{ ok: boolean; code?: string }>;
+    }) => { check(options: SpeechOptions): Promise<InterviewAccessReport> };
+  } = require(path.join(speechDirectory, 'access.js'));
+  const interviewAccess = new access.InterviewAccess({
     platform: desktopPlatform.id,
     microphonePermission: () => systemPreferences.getMediaAccessStatus('microphone'),
     devices: async () => {
       if (!audioHelper) throw Error('当前系统尚未支持本地音频采集。');
-      return devices(audioHelper);
+      return capture.devices(audioHelper);
     },
     probe: async (source, device) => {
       if (!audioHelper) return { ok: false };
-      return probeDevice(audioHelper, source, device);
+      return capture.probeDevice(audioHelper, source, device);
     },
   });
   const speechModelRoot = resources.speechModels;
+  let screenCaptureAccess: ScreenCaptureAccess | undefined;
+  if (desktopPlatform.id === 'darwin') {
+    const {
+      ScreenPermission,
+    }: {
+      ScreenPermission: new (dependencies: {
+        mediaStatus(): string;
+        binding(): { preflight(): boolean; request(): Promise<boolean> };
+        openSettings(): Promise<void>;
+      }) => ScreenCaptureAccess;
+    } = require(path.join(app.getAppPath(), 'dist-electron/macos/electron/screenPermission.js'));
+    screenCaptureAccess = new ScreenPermission({
+      mediaStatus: () => systemPreferences.getMediaAccessStatus('screen'),
+      binding: () => {
+        if (!resources.screenPermission) throw Error('Screen permission binding unavailable');
+        return require(resources.screenPermission);
+      },
+      openSettings: () => {
+        if (!desktopPlatform.screenCaptureSettingsUrl) throw Error('Invalid request');
+        return shell.openExternal(desktopPlatform.screenCaptureSettingsUrl);
+      },
+    });
+  }
+  registerScreenCaptureIpc(screenCaptureAccess, requireMain);
+  const checkInterviewAccess = async (options: SpeechOptions): Promise<InterviewAccessReport> => {
+    const report = await interviewAccess.check(options);
+    // Screenshot access is independent and optional for an audio-only interview.
+    return screenCaptureAccess
+      ? { ...report, screenCapture: await screenCaptureAccess.call('check') }
+      : report;
+  };
   speech = new SpeechHost(
     speechModelRoot,
     audioHelper,
@@ -643,13 +811,21 @@ app.whenReady().then(() => {
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     const configuration = validateInterviewConfiguration(value);
     if (configuration.mode !== 'local') throw Error('请选择本地音频设备。');
-    return interviewAccess.check(configuration.options);
+    return checkInterviewAccess(configuration.options);
   });
-  handleDesktop('interview:microphone-settings', (event) => {
+  handleDesktop('interview:microphone-settings', (event, source: unknown = 'microphone') => {
     requireMain(event);
-    if (event.senderFrame !== event.sender.mainFrame || !desktopPlatform.microphoneSettingsUrl)
+    if (
+      event.senderFrame !== event.sender.mainFrame ||
+      !['microphone', 'system'].includes(source as string)
+    )
       throw Error('Invalid request');
-    return shell.openExternal(desktopPlatform.microphoneSettingsUrl);
+    const url =
+      source === 'system'
+        ? desktopPlatform.systemAudioSettingsUrl
+        : desktopPlatform.microphoneSettingsUrl;
+    if (!url) throw Error('Invalid request');
+    return shell.openExternal(url);
   });
   handleDesktop('interview:open', async (event, value: unknown) => {
     requireMain(event);
@@ -671,7 +847,7 @@ app.whenReady().then(() => {
       if (configuration.mode === 'local') {
         if (!speechModelInstalled(speechModelRoot))
           throw Error('本地语音模型未安装，请先下载模型后再开始面试。');
-        const access = await interviewAccess.check(configuration.options);
+        const access = await checkInterviewAccess(configuration.options);
         if (!access.ready)
           throw Error(
             access.checks
@@ -707,7 +883,7 @@ app.whenReady().then(() => {
   });
   handleDesktop('interview:pin', (event) => {
     requireInterview(event);
-    interviewWindow!.setAlwaysOnTop(true, 'normal');
+    pinInterview(interviewWindow!);
     return interviewWindow!.isAlwaysOnTop();
   });
   handleDesktop('interview:collapse', (event) => {
@@ -778,6 +954,18 @@ app.whenReady().then(() => {
     interviewCloseApproved = true;
     interviewWindow.close();
   });
+  onDesktop('interview:mouse-passthrough', (event, ...args: unknown[]) => {
+    if (
+      !nativePresentation ||
+      !desktopPlatform.presentation?.interviewMousePassthrough ||
+      event.sender !== interviewWindow?.webContents ||
+      event.senderFrame !== event.sender.mainFrame ||
+      args.length !== 1 ||
+      typeof args[0] !== 'boolean'
+    )
+      return;
+    setInterviewMousePassthrough(args[0]);
+  });
   onDesktop('window:action', (event, action: unknown) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || (win !== mainWindow && win !== interviewWindow)) return;
@@ -793,19 +981,30 @@ app.whenReady().then(() => {
     })
     .catch(() => createLoginWindow());
   app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createLoginWindow();
+    if (BrowserWindow.getAllWindows().length !== 0) return;
+    if (!desktopPlatform.nativeWindowControls) return createLoginWindow();
+    void selectionReady
+      .then(() => activeAuth().session())
+      .then((session) => {
+        if (BrowserWindow.getAllWindows().length) return;
+        if (session) createMainWindow();
+        else createLoginWindow();
+      })
+      .catch(() => createLoginWindow());
   });
 });
 app.on('window-all-closed', () => {
   if (desktopPlatform.quitOnAllWindowsClosed) app.quit();
 });
 app.on('before-quit', (event) => {
+  if (desktopPlatform.nativeWindowControls) macQuitRequested = true;
   if (mainWindow && !mainWindow.isDestroyed() && !mainCloseFlushed) {
     event.preventDefault();
     mainWindow.close();
     return;
   }
   updates?.dispose();
+  nativePresentation?.dispose();
   knowledgeCoordinator?.cancelAll();
   knowledge?.stop();
   historyJobs?.cancelAll();

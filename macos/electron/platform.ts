@@ -1,11 +1,28 @@
 import type { DesktopPlatform } from '../../shared/electron/platform/types';
 
-// Preserve the frameless shared UI. Native materials/audio/runtime packaging
-// require a later Mac implementation and hardware validation.
+// Apple Silicon development adapter; distribution/signing remains a separate task.
 export const macos: DesktopPlatform = {
   id: 'darwin',
   iconFile: 'public/voxcue.png',
-  mainWindowOptions: {},
+  mainWindowOptions: { vibrancy: 'sidebar', visualEffectState: 'followWindow' },
+  nativeWindowControls: true,
+  presentation: {
+    frostedTransparency: true,
+    nativeTheme: true,
+    screenCapturePermission: true,
+    interviewMousePassthrough: true,
+    interviewIconVisibility: true,
+  },
+  presentationFile: 'macos/electron/presentation.js',
+  audioHelper: 'VoxCue.Audio',
+  speechProcessFile: 'macos/electron/speech/process.js',
+  microphoneSettingsUrl:
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone',
+  systemAudioSettingsUrl:
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  screenCaptureSettingsUrl:
+    'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture',
+  screenPermissionFile: 'VoxCue.ScreenPermission.node',
   quitOnAllWindowsClosed: false,
   captureProtectionSupported: false,
   credentialEncryptionLabel: 'macOS 钥匙串',
