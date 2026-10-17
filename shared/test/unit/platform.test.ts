@@ -70,8 +70,11 @@ describe('桌面平台边界', () => {
         resizable: false,
       });
   });
-  it('macOS 保留驻留生命周期，不启用 Windows 材质、WASAPI 或安装包运行时', () => {
+  it('macOS 保留驻留生命周期、独立 arm64 运行时，不启用 Windows 材质或 WASAPI', () => {
     const mac = macosPolicy;
+    expect(mac.packagedCopilotRuntime).toBe(
+      'app.asar.unpacked/node_modules/@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime',
+    );
     expect(mac.quitOnAllWindowsClosed).toBe(false);
     expect(mac.captureProtectionSupported).toBe(false);
     expect(mac.credentialEncryptionLabel).toBe('macOS 钥匙串');
@@ -102,7 +105,9 @@ describe('桌面平台边界', () => {
     expect(resources.speechProcess).toBe(
       path.join(environment.appPath, 'dist-electron/macos/electron/speech/process.js'),
     );
-    expect(resources.copilotRuntime).toBeUndefined();
+    expect(resources.copilotRuntime).toBe(
+      path.join(environment.resourcesPath, mac.packagedCopilotRuntime!),
+    );
     expect(resources.screenPermission).toBe(
       path.join(environment.resourcesPath, 'native/VoxCue.ScreenPermission.node'),
     );

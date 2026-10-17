@@ -12,10 +12,17 @@
     "build:icons": "node scripts/build-icons.mjs",
     "build:symbols": "node scripts/build-symbols.mjs",
     "build:permissions": "node scripts/build-permissions.mjs",
-    "test:screen-permission": "node test/scripts/screen-permission-smoke.mjs"
+    "test:screen-permission": "node test/scripts/screen-permission-smoke.mjs",
+    "build:updater": "node scripts/build-updater.mjs",
+    "package:installer": "pnpm build && pnpm build:updater && node scripts/package-installer.mjs",
+    "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
+    "test:package": "node test/scripts/package-smoke.mjs"
   },
   "optionalDependencies": {
     "@github/copilot-sdk-darwin-arm64": "1.0.21",
     "sherpa-onnx-darwin-arm64": "1.13.8"
+  },
+  "devDependencies": {
+    "@electron/packager": "19.0.1"
   }
 }

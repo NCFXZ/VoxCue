@@ -59,6 +59,8 @@ describe('长期模块边界', () => {
     ['shared/src/components/bad.tsx', 'shared/electron/backend/speech/service.ts'],
     ['shared/src/stores/bad.ts', 'shared/src/components/PreparationPage.tsx'],
     ['shared/electron/backend/speech/bad.ts', 'shared/electron/ipc/chat.ts'],
+    ['macos/electron/updates/bad.ts', 'shared/electron/backend/auth/storage.ts'],
+    ['macos/electron/updates/bad.ts', 'shared/electron/backend/speech/service.ts'],
     ['shared/electron/backend/chat/bad.ts', 'shared/electron/application/chat.ts'],
     ['shared/electron/contracts/bad.ts', 'shared/electron/backend/auth/service.ts'],
     ['shared/electron/application/bad.ts', 'shared/electron/backend/chat/service.ts'],

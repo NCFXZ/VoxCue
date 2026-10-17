@@ -12,6 +12,7 @@ export interface DesktopPlatform {
   readonly nativeWindowControls?: boolean;
   readonly presentation?: PresentationCapabilities;
   readonly presentationFile?: string;
+  readonly updateDriverFile?: string;
   readonly audioHelper?: string;
   readonly systemAudioSettingsUrl?: string;
   readonly screenCaptureSettingsUrl?: string;

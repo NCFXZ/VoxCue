@@ -12,6 +12,7 @@
     "build:permissions": "node shared/scripts/run.mjs build:permissions",
     "build:shared": "node shared/scripts/run.mjs build:shared",
     "build:symbols": "node shared/scripts/run.mjs build:symbols",
+    "build:updater": "node shared/scripts/run.mjs build:updater",
     "check:architecture": "node shared/scripts/run.mjs check:architecture",
     "check:workspace": "node shared/scripts/run.mjs check:workspace",
     "dev": "node shared/scripts/run.mjs dev",

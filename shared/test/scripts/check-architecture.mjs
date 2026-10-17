@@ -152,6 +152,8 @@ function logicalPath(file) {
   if (file.startsWith('macos/src/')) return file.slice('macos/'.length);
   if (file === 'windows/electron/platform.ts') return 'electron/platform/windows.ts';
   if (file === 'macos/electron/platform.ts') return 'electron/platform/macos.ts';
+  if (file.startsWith('macos/electron/updates/'))
+    return file.replace('macos/electron/updates/', 'electron/backend/updates/');
   if (/^(?:windows|macos)\/electron\/speech\//.test(file))
     return file.replace(/^(?:windows|macos)\/electron\/speech\//, 'electron/backend/speech/');
   return file.startsWith('shared/') ? file.slice('shared/'.length) : file;

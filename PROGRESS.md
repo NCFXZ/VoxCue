@@ -1,3 +1,13 @@
+## 2026-10-17：Mac 免费自动更新与独立发行入口
+
+按本次明确授权，首个 macOS 安装版 v0.2.1 已发布至公开 NCFXZ/VoxCue-releases：DMG、arm64 ZIP 和 latest-mac.yml；Windows v0.2.0 的 Latest 保留。发行链接：https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1 。用户随后明确授权将本轮自动更新、打包与回归源码提交上传至私有 NCFXZ/VoxCue 的 main；私钥仍只在本工作区。
+
+Mac 打包策略显式使用 ASAR 外的官方 arm64 Copilot 可执行文件，避免 SDK 对虚拟归档路径执行 chmod。包内 Mach-O 与嵌套 bundle 按由内向外统一 ad-hoc 签名，不给数据/模型签代码，不注入多余受限权限。
+
+Mac 安装版通过 Sparkle 2.10.0 原生绑定替换并重启，固定公开发行源、清单 Ed25519 认证与流式 SHA512 校验；安装前重新检查缓存，Sparkle 独立验证 ZIP Ed25519。适配器只在明确安装后启动原生会话，沿用共享更新状态、面试阻止和本地保存握手，普通退出不会启动安装。Windows 原 electron-updater 与文件保持不变。
+
+新增本地打包/签名工具：生产运行依赖、语音/RAG 模型、arm64 原生组件及 Sparkle 放入独立 VoxCue.app；生成 DMG、ZIP 和 latest-mac.yml。工具/私钥与缓存仅在 macos；公钥随源码保存，已有公钥而私钥缺失时拒绝生成替代密钥。无 Developer ID/公证，不修改 Gatekeeper。原生更新回归使用临时独立密钥/旧新应用及 Foundation home，全部临时文件结束清理；测试结果不写本文或其他文件。构建/发行约定见 macos/docs/UPDATES.md。
+
 # VoxCue 开发进度
 
 ## 2026-10-17 面试浮窗拖动区

@@ -255,3 +255,7 @@ systemAccent hook 复用既有受控系统强调色 IPC，新增 copilot-accent-
 基础检查：pnpm check:architecture、pnpm typecheck、pnpm test、pnpm build。相关桌面 smoke 使用独立 userData。pnpm package:portable 只打包当前运行依赖、语音/RAG 模型和 WASAPI 助手；源码清理后先清除旧输出再构建，避免 TypeScript 留下已删除模块的 JS。
 
 新电脑/全部多屏 DPI、真人长句和技术词准确率、物理热插拔/权限撤销、真实账户公开摘要和标题质量仍未完整验收。合成端口测试不能替代这些验收。
+
+## Mac 免费更新适配
+
+`DesktopPlatform.updateDriverFile` 由可信平台策略选择，仅安装版主进程动态装配 `macos/electron/updates/driver`，不引入另一平台输出。共享 UpdateService 继续负责状态、面试保护与保存握手。Mac 复用固定 GitHub 分页选版及清单投影，再由 pinned Ed25519 公钥认证清单、流式下载/校验 SHA512；实际安装时临时 loopback feed 仅提供该 ZIP 给 `VoxCue.Updater.node`。Sparkle 内部进行归档 Ed25519 校验、替换和重启。Renderer/preload 无新增 URL、路径、密钥或安装命令接口。Mac 更新模块遵守与共享更新后台相同的凭据/聊天/音频/模型隔离检查。Windows 仍使用原 electron-updater。

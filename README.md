@@ -2,9 +2,9 @@
 
 > 测试结果零保留（2026-10-17）：用户已恢复完整测试授权，结果仅在终端/内存显示。共用/Mac 回归的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；Windows 专属旧持久化脚本须先在其本机改造。Mac 117 个旧目录因 OneDrive 占用暂留，Windows 349 个此前跳过目录不重试；Windows 全程只读。入口与边界见[测试说明](shared/test/README.md)。
 
-面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，正式发布目标为 Windows x64。可选 ChatGPT 或 GitHub Copilot 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 开发版已完成本机原生音频、系统窗口与双击启动验证，正式分发仍待完成，不以 Intel Mac 为支持目标。
+面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。可选 ChatGPT 或 GitHub Copilot 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前源码版本为 **0.2.1**。本次上传源码至私有 `NCFXZ/VoxCue` 的 `main`；公开安装包仍为 v0.2.0。Windows 配置保持只读，需在 Windows 本机运行 `corepack pnpm sync:workspace` 后重新构建以使用最新源码版本。
+当前源码版本为 **0.2.1**。本次上传源码至私有 `NCFXZ/VoxCue` 的 `main`；Windows 公开安装包为 v0.2.0，Mac 首个安装版 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 已发布。Windows 配置保持只读，需在 Windows 本机运行 `corepack pnpm sync:workspace` 后重新构建以使用最新源码版本。
 
 ## 开发与启动
 
@@ -29,9 +29,9 @@ corepack pnpm build
 corepack pnpm start
 ```
 
-Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。模型保存在 `shared/local-models`，需要时运行 `download:speech`、`download:rag`，已有通过校验的模型不用重新下载。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户、完整 Mac 分发仍待验收。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
+Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。模型保存在 `shared/local-models`，需要时运行 `download:speech`、`download:rag`，已有通过校验的模型不用重新下载。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 已发布 [v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)，原有更新交互和分平台选版保持。安装版自带运行库和模型，普通用户无需开发工具。此次整理不重新发布安装包，详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 已发布 [v0.2.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.0)，原有更新交互和分平台选版保持。安装版自带运行库和模型，普通用户无需开发工具。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 ## 工作区与主线
 

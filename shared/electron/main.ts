@@ -500,7 +500,12 @@ app.whenReady().then(() => {
   };
   updates = new UpdateService({
     currentVersion: app.getVersion(),
-    driver: createUpdateDriver(app.isPackaged),
+    driver:
+      app.isPackaged && desktopPlatform.updateDriverFile
+        ? require(
+            path.join(app.getAppPath(), 'dist-electron', desktopPlatform.updateDriverFile),
+          ).createMacUpdateDriver()
+        : createUpdateDriver(app.isPackaged),
     unavailableReason: updateUnavailableReason(app.isPackaged),
     isInterviewActive: interviewActive,
     prepareInstall: prepareUpdateInstall,

@@ -65,6 +65,27 @@ async function readText(fetcher: ReleaseFetch, url: URL, signal: AbortSignal, li
   }
 }
 
+/** Fixed public feed lookup shared by the independent platform installers. */
+export async function fetchPlatformUpdate(
+  target: ReleaseTarget,
+  lifetime: AbortSignal,
+  fetcher: ReleaseFetch,
+) {
+  const signal = AbortSignal.any([lifetime, AbortSignal.timeout(45000)]);
+  const candidate = await latestPlatformRelease(target, async (page) => {
+    const url = new URL(`https://api.github.com/repos/${releaseRepository}/releases`);
+    url.searchParams.set('per_page', String(releasePageSize));
+    url.searchParams.set('page', String(page));
+    return JSON.parse(await readText(fetcher, url, signal, 8 * 1024 * 1024));
+  });
+  const url = releaseAssetUrl(candidate, candidate.manifest);
+  const raw = await readText(fetcher, url, signal, manifestByteLimit);
+  const metadata = parseUpdateInfo(raw, candidate.manifest, url);
+  const selected = manifestFile(metadata, candidate);
+  signal.throwIfAborted();
+  return { candidate, selected, metadata };
+}
+
 interface PlatformUpdateInfo extends UpdateInfo {
   selectedRelease: ReleaseCandidate;
 }
@@ -80,17 +101,7 @@ export function platformReleaseProvider(
       super({ ...runtime, isUseMultipleRangeRequest: false });
     }
     async getLatestVersion(): Promise<PlatformUpdateInfo> {
-      const signal = AbortSignal.any([lifetime, AbortSignal.timeout(45000)]);
-      const candidate = await latestPlatformRelease(target, async (page) => {
-        const url = new URL(`https://api.github.com/repos/${releaseRepository}/releases`);
-        url.searchParams.set('per_page', String(releasePageSize));
-        url.searchParams.set('page', String(page));
-        return JSON.parse(await readText(fetcher, url, signal, 8 * 1024 * 1024));
-      });
-      const url = releaseAssetUrl(candidate, candidate.manifest);
-      const raw = await readText(fetcher, url, signal, manifestByteLimit);
-      const selected = manifestFile(parseUpdateInfo(raw, candidate.manifest, url), candidate);
-      signal.throwIfAborted();
+      const { candidate, selected } = await fetchPlatformUpdate(target, lifetime, fetcher);
       return {
         version: candidate.version,
         files: [{ url: selected.url, sha512: selected.sha512, size: selected.size }],

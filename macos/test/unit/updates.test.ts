@@ -1,0 +1,146 @@
+import { it, expect, afterEach, vi } from 'vitest';
+import { generateKeyPairSync, sign, createHash } from 'node:crypto';
+import { mkdtemp, rm, readFile, writeFile, lstat } from 'node:fs/promises';
+import path from 'node:path';
+import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
+import { get } from 'node:http';
+import { signedMacUpdate, macUpdatePayload } from '../../electron/updates/manifest';
+import { downloadArchive, verifyDownload } from '../../electron/updates/download';
+import { installFeed } from '../../electron/updates/install-feed';
+import type { ReleaseCandidate } from '../../../shared/electron/backend/updates/releases';
+const roots: string[] = [];
+afterEach(async () => {
+  await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
+});
+async function temp() {
+  const root = await mkdtemp(path.join(testRoot, 'mac-update-'));
+  roots.push(root);
+  return root;
+}
+function fixture() {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+  const key = Buffer.from(publicKey.export({ format: 'jwk' }).x!, 'base64url').toString('base64');
+  const bytes = Buffer.from('authenticated archive fixture');
+  const candidate: ReleaseCandidate = {
+    version: '0.2.2',
+    tag: 'v0.2.2',
+    publishedAt: Date.now(),
+    manifest: 'latest-mac.yml',
+    binary: { name: 'VoxCue-0.2.2-arm64.zip', size: bytes.length },
+  };
+  const update = {
+    version: candidate.version,
+    minimumSystemVersion: '14.2',
+    url: candidate.binary.name,
+    size: bytes.length,
+    sha512: createHash('sha512').update(bytes).digest('base64'),
+    edSignature: sign(null, bytes, privateKey).toString('base64'),
+  };
+  const metadata = {
+    version: update.version,
+    minimumSystemVersion: update.minimumSystemVersion,
+    files: [
+      {
+        ...update,
+        voxcueSignature: sign(null, macUpdatePayload(update), privateKey).toString('base64'),
+      },
+    ],
+  };
+  return { key, bytes, candidate, update, metadata };
+}
+it('accepts the pinned Ed25519 manifest and authenticates every installation field', () => {
+  const f = fixture();
+  expect(signedMacUpdate(f.metadata, f.candidate, f.key)).toEqual(f.update);
+  const mutations = [
+    (m: any) => (m.files[0].sha512 = Buffer.alloc(64).toString('base64')),
+    (m: any) => (m.files[0].edSignature = Buffer.alloc(64).toString('base64')),
+    (m: any) => (m.minimumSystemVersion = '14.3'),
+    (m: any) => (m.files[0].voxcueSignature = Buffer.alloc(64).toString('base64')),
+    (m: any) => (m.files[0].url = 'https://attacker.invalid/update.zip'),
+    (m: any) => m.files.push(m.files[0]),
+    (m: any) => (m.version = '0.2.3'),
+  ];
+  for (const mutate of mutations) {
+    const m = structuredClone(f.metadata);
+    mutate(m);
+    expect(() => signedMacUpdate(m, f.candidate, f.key)).toThrow();
+  }
+  expect(() => signedMacUpdate(f.metadata, f.candidate, fixture().key)).toThrow();
+  expect(() =>
+    signedMacUpdate(f.metadata, { ...f.candidate, manifest: 'latest.yml' }, f.key),
+  ).toThrow();
+});
+it('streams a verified download, reports progress, keeps cache private and catches local tampering', async () => {
+  const f = fixture(),
+    file = path.join(await temp(), 'update.zip');
+  const progress = vi.fn();
+  await downloadArchive(
+    new URL('https://github.com/fixture'),
+    file,
+    f.update,
+    new AbortController().signal,
+    async () => new Response(f.bytes),
+    progress,
+  );
+  expect(await readFile(file)).toEqual(f.bytes);
+  expect((await lstat(file)).mode & 0o077).toBe(0);
+  expect(progress).toHaveBeenLastCalledWith(100);
+  await writeFile(file, Buffer.alloc(f.bytes.length));
+  await expect(verifyDownload(file, f.update)).rejects.toThrow('checksum');
+});
+it.each(['truncated', 'oversized', 'wrong-hash', 'length', 'http', 'cancelled'])(
+  'rejects %s download without marking it ready',
+  async (mode) => {
+    const f = fixture(),
+      file = path.join(await temp(), 'update.zip');
+    const controller = new AbortController();
+    if (mode === 'cancelled') controller.abort();
+    const bytes =
+      mode === 'truncated'
+        ? f.bytes.subarray(1)
+        : mode === 'oversized'
+          ? Buffer.concat([f.bytes, f.bytes])
+          : mode === 'wrong-hash'
+            ? Buffer.alloc(f.bytes.length)
+            : f.bytes;
+    await expect(
+      downloadArchive(
+        new URL('https://github.com/fixture'),
+        file,
+        f.update,
+        controller.signal,
+        async () =>
+          new Response(bytes, {
+            status: mode === 'http' ? 500 : 200,
+            headers: mode === 'length' ? { 'Content-Length': '1' } : {},
+          }),
+        () => {},
+      ),
+    ).rejects.toThrow();
+  },
+);
+it('loopback installer serves only its token feed and verified archive; rejects host/path/method substitution', async () => {
+  const f = fixture(),
+    file = path.join(await temp(), 'update.zip');
+  await writeFile(file, f.bytes);
+  const feed = await installFeed(file, f.update);
+  try {
+    const response = await fetch(feed.url);
+    const text = await response.text();
+    expect(text).toContain(`sparkle:edSignature="${f.update.edSignature}"`);
+    const archive = new URL('update.zip', feed.url);
+    expect(Buffer.from(await (await fetch(archive)).arrayBuffer())).toEqual(f.bytes);
+    expect((await fetch(new URL('/update.zip', feed.url))).status).toBe(404);
+    expect((await fetch(feed.url, { method: 'POST' })).status).toBe(404);
+    const status = await new Promise<number | undefined>((resolve, reject) => {
+      const request = get(feed.url, { headers: { Host: 'attacker.invalid' } }, (response) => {
+        response.resume();
+        resolve(response.statusCode);
+      });
+      request.on('error', reject);
+    });
+    expect(status).toBe(404);
+  } finally {
+    feed.close();
+  }
+});
