@@ -1,5 +1,11 @@
 # 工作区清理结果
 
+## 2026-10-17：Windows 0.2.1 上传后的打包文件
+
+私有源码与公开 v0.2.1 Windows 三项资产上传核验后，按用户确认只清理本工作区安装包与打包文件。删除 C:\Users\fengk\Documents\Repository\VoxCue\windows\release（NSIS、更新元数据、installer-stage 及本次失败打包暂存）和 C:\Users\fengk\Documents\Repository\VoxCue\windows\.cache\release-upload-v0.2.1（一次性上传辅助文件），共 8,785 个普通文件、逻辑 2,546,694,278 字节，删除失败 0；windows/release-smoke 已不存在。该数字为文件逻辑体积，不是磁盘可用空间变化测量。
+
+删除前核对固定绝对/真实路径、无重定向、静态脚本消费者及无运行进程占用。工具依赖与缓存、现用 dist/dist-electron、源码、模型、恢复基线及真实用户数据保留。macos/ 全程只读，历史 Windows 349 个跳过目录和 Mac 117 个占用目录未重试。本次纯清理清单/数量/状态位于 windows/recovery/release-0.2.1-cleanup/{plan,result}.json，不含测试内容。
+
 ## 2026-10-17：共用设置完成后的闲置文件与冗余样式
 
 删除两个精确目标：根 `.DS_Store`，以及被当前 revision 3 开发宿主替代的 `macos/.tools/electron-dev-previous-1792255575752`（revision 2）。共 269 个普通文件、14 个包内链接，逻辑文件体积 263,943,129 字节（约 264 MB），失败 0；不是实际可用磁盘空间变化的测量。执行前核对绝对/真实路径、无外部重定向、清单一致及 lsof 无占用；运行中 Electron 的文件 inode 对应现用宿主，未关闭或修改用户程序。旧宿主已移除，历史“保留旧运行副本”的记录不再表示该副本现存。

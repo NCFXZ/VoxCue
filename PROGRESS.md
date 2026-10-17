@@ -1,5 +1,9 @@
 ## 2026-10-17：Windows 0.2.1 发行入口
 
+源码功能提交 dac0577 已上传私有 NCFXZ/VoxCue 的 main。公开 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 已补充 Windows x64 EXE、blockmap、latest.yml 并设 Latest；Mac 原三项资产保持。Windows 安装包 600,252,645 字节，SHA-256 为 6837d8b5b9da91a409888b28054b12f0115c8c5a2c9471581bedd16e5c14d31c。签名边界保持：Windows 无 Authenticode，Mac 为原 ad-hoc/Sparkle 签名。
+
+两处上传核验后已删除本工作区 windows/release（安装包、暂存应用和失败打包中间目录）及 windows/.cache/release-upload-v0.2.1；windows/release-smoke 原已不存在。合计删除 8,785 文件、2,546,694,278 字节，纯路径/数量/删除状态审计在 windows/recovery/release-0.2.1-cleanup。开发构建、工具缓存、局部依赖、离线模型、源码恢复基线和真实用户数据保留；macos/ 未修改，旧云占位跳过范围不重试。本段仅保存发行和清理元数据，不保存测试结果。
+
 本次授权将当前源码上传私有 NCFXZ/VoxCue 的 main，Windows 安装包补充到公开 NCFXZ/VoxCue-releases 已有 v0.2.1，保留 Mac 的原 DMG、arm64 ZIP、签名和 latest-mac.yml。两平台独立选择完整正式版本；Windows 的 EXE、blockmap 上传后最后上传 latest.yml，再切换 Latest。生产上传与清理状态以 GitHub 及后续记录为准。
 
 Windows 打包工具下载固定使用本平台 .cache/electron-builder，避免 electron-builder 默认写全局工具缓存。新增安装负载摘要、NSIS 压缩完整性与清单校验入口，已生成的暂存目录可直接运行离线模型/窗口回归而不重复打包；所有测试临时文件仍在系统临时根，结果不写本文。上传核验后只清理本地安装包、打包暂存与本次发布辅助文件，保留开发构建、依赖、模型、恢复基线和用户资料；macos/ 只读。
