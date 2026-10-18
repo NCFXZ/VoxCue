@@ -18,6 +18,13 @@ import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
 import config from '../../electron-builder.config.cjs';
 
 assert.equal(process.platform, 'win32');
+const previousVersion = '0.2.2';
+const currentVersion = JSON.parse(await readFile(path.resolve('package.json'), 'utf8')).version;
+assert.notEqual(
+  currentVersion,
+  previousVersion,
+  'Upgrade fixture must target the current Windows version',
+);
 const guid = randomUUID();
 const name = 'VoxCueInstallTest-' + guid;
 const project = path.join(testRoot, 'project');
@@ -286,7 +293,7 @@ async function preserved() {
 await seedData();
 let latestInstaller;
 try {
-  for (const version of ['0.2.1', '0.2.2']) {
+  for (const version of [previousVersion, currentVersion]) {
     await writeFile(
       path.join(project, 'package.json'),
       JSON.stringify({
@@ -333,12 +340,12 @@ try {
     latestInstaller = installer;
     await run(installer, ['/S', '/allusers', '/D=' + target], { fail: true });
     assert.notEqual(registry('query', registryKeys[0].replace('HKCU', 'HKLM')).status, 0);
-    await run(installer, ['/D=' + (version === '0.2.1' ? defaultTarget : ignoredTarget)], {
+    await run(installer, ['/D=' + (version === previousVersion ? defaultTarget : ignoredTarget)], {
       interactive: true,
-      choosePath: version === '0.2.1',
-      lockedPath: version === '0.2.2',
+      choosePath: version === previousVersion,
+      lockedPath: version === currentVersion,
     });
-    if (version === '0.2.2')
+    if (version === currentVersion)
       await run(installer, ['--updated', '--force-run', '/D=' + ignoredTarget], {
         interactive: true,
         autoStart: true,
@@ -359,7 +366,7 @@ try {
   assert.ok(remove, 'An actual uninstaller must be installed');
   await run(remove, ['/S', '--updated', '--delete-app-data', '_?=' + target], { fail: true });
   await preserved();
-  assert.equal(await readFile(path.join(target, 'version.txt'), 'utf8'), '0.2.2');
+  assert.equal(await readFile(path.join(target, 'version.txt'), 'utf8'), currentVersion);
   await run(remove, ['_?=' + target], { interactive: true });
   await preserved();
   for (const key of registryKeys)

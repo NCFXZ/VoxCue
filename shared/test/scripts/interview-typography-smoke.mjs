@@ -8,7 +8,7 @@ const profile = path.join(testRoot, 'interview-font-profile');
 await mkdir(profile);
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: ['.'], env });
+let app = await electron.launch({ args: ['.'], env });
 const key = 'voxcue-interview-font-size-v1';
 try {
   await installUiAccount(app, { speech: true, components: true });
@@ -186,6 +186,23 @@ try {
     floating.waitForEvent('close'),
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
   ]);
+  await page.evaluate(({ key }) => localStorage.setItem(key, '18'), { key });
+  await closeUiApp(app);
+  app = await electron.launch({ args: ['.'], env });
+  await installUiAccount(app, { speech: true, components: true });
+  const restartLogin = await app.firstWindow();
+  const [restarted] = await Promise.all([
+    app.waitForEvent('window'),
+    restartLogin.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
+  ]);
+  restarted.on('pageerror', (error) => errors.push(error.message));
+  await restarted.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await restarted.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await restarted
+    .getByRole('dialog', { name: '设置', exact: true })
+    .getByRole('button', { name: '面试设置', exact: true })
+    .click();
+  assert.equal(await restarted.getByLabel('当前面试字号').innerText(), '18 px');
   assert.deepEqual(errors, []);
   console.log(
     'PASS: font controls, live preview, limits, reset, persistence, storage failure, light/dark and minimum window; cross-window reading text sync with fixed toolbar and no horizontal overflow. Synthetic account/audio only.',

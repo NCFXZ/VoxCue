@@ -152,12 +152,31 @@ try {
     .getByRole('button', { name: '本地组件', exact: true })
     .click();
   const rows = settings.locator('.component-row');
+  await settings.evaluate(async (dialog) => {
+    await Promise.all(
+      dialog
+        .getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished),
+    );
+  });
   const panelGap = await settings.evaluate(
     (dialog) =>
       dialog.querySelector('.components-panel').getBoundingClientRect().top -
       dialog.querySelector('.settings-content-heading').getBoundingClientRect().bottom,
   );
-  assert.ok(panelGap >= 16, 'Component card must clear the heading separator');
+  // Blink layout uses 1/64 CSS px; fractional Windows DPI introduces float32
+  // noise when the two DOMRect coordinates are subtracted.
+  assert.equal(
+    await settings
+      .locator('.components-panel')
+      .evaluate((panel) => getComputedStyle(panel).marginTop),
+    '16px',
+  );
+  assert.ok(
+    Math.round(panelGap * 64) >= 16 * 64,
+    `Component card must clear the heading separator: ${panelGap}px`,
+  );
   for (const index of [0, 1]) {
     const row = rows.nth(index),
       other = rows.nth(1 - index);
@@ -238,17 +257,31 @@ try {
       (dark) => document.documentElement.classList.contains('dark') === dark,
       colorScheme === 'dark',
     );
-    assert.equal(
-      await settings.locator('.components-panel').evaluate(
-        (panel) =>
-          panel.scrollWidth <= panel.clientWidth &&
-          [...panel.querySelectorAll('.component-row')].every((row) => {
-            const rect = row.getBoundingClientRect();
-            const action = row.querySelector('.component-ready-actions').getBoundingClientRect();
-            return action.left >= rect.left && action.right <= rect.right;
-          }),
-      ),
-      true,
+    await settings.evaluate(async (dialog) => {
+      await Promise.all(
+        dialog
+          .getAnimations({ subtree: true })
+          .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+          .map((animation) => animation.finished),
+      );
+    });
+    const geometry = await settings.locator('.components-panel').evaluate((panel) => ({
+      scroll: panel.scrollWidth,
+      client: panel.clientWidth,
+      rows: [...panel.querySelectorAll('.component-row')].map((row) => ({
+        row: row.getBoundingClientRect().toJSON(),
+        action: row.querySelector('.component-ready-actions').getBoundingClientRect().toJSON(),
+      })),
+    }));
+    const layoutUnit = (value) => Math.round(value * 64);
+    assert.ok(
+      geometry.scroll <= geometry.client &&
+        geometry.rows.every(
+          ({ row, action }) =>
+            layoutUnit(action.left) >= layoutUnit(row.left) &&
+            layoutUnit(action.right) <= layoutUnit(row.right),
+        ),
+      JSON.stringify(geometry),
     );
   }
   if (process.argv.includes('--preview-components'))

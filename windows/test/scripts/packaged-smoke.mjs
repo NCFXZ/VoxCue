@@ -1,6 +1,7 @@
 import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { checkComponents } from './components-check.mjs';
+import { checkComponentRemoval } from './component-removal-check.mjs';
 import { prepareSpeechFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, readFile, cp } from 'node:fs/promises';
@@ -414,6 +415,7 @@ try {
   report.dependencyAudit = { sprintfJsAbsent: true, sharpPackages };
   await console.log(JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ profile, ...report }));
+  await checkComponentRemoval(app, page);
 } finally {
   await closeUiApp(app);
 }

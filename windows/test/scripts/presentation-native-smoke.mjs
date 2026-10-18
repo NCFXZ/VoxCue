@@ -58,6 +58,69 @@ let floating,
 try {
   await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
+  await login.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
+  const loginGeometry = await app.evaluate(({ BrowserWindow }) => {
+    const win = BrowserWindow.getAllWindows()[0];
+    win.show();
+    win.moveTop();
+    win.focus();
+    return {
+      id: win.id,
+      bounds: win.getBounds(),
+      handle: win.getNativeWindowHandle().readBigUInt64LE().toString(),
+    };
+  });
+  for (const draggable of [true, false]) {
+    const locator = draggable
+      ? login.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true })
+      : login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+    const box = await locator.boundingBox();
+    assert.ok(box);
+    const points = await app.evaluate(
+      ({ BrowserWindow, screen }, { id, box }) => {
+        const bounds = BrowserWindow.fromId(id).getContentBounds();
+        const point = {
+          x: Math.round(bounds.x + box.x + box.width / 2),
+          y: Math.round(bounds.y + box.y + box.height / 2),
+        };
+        return [point, { x: point.x + 32, y: point.y - 60 }].map((point) =>
+          screen.dipToScreenPoint(point),
+        );
+      },
+      { id: loginGeometry.id, box },
+    );
+    assert.equal(probe('desktop').interactive, true);
+    assert.equal(
+      probe('hittest', loginGeometry.handle, points[0].x, points[0].y).result,
+      draggable ? 2 : 1,
+    );
+    probe('drag', loginGeometry.handle, points[0].x, points[0].y, points[1].x, points[1].y);
+    assert.equal(
+      probe('desktop').interactive,
+      true,
+      'Native login drag requires an unlocked desktop',
+    );
+    const readBounds = () =>
+      app.evaluate(
+        ({ BrowserWindow }, id) => BrowserWindow.fromId(id).getBounds(),
+        loginGeometry.id,
+      );
+    if (draggable)
+      await until(
+        readBounds,
+        (bounds) =>
+          Math.abs(bounds.x - loginGeometry.bounds.x) > 10 ||
+          Math.abs(bounds.y - loginGeometry.bounds.y) > 10,
+        'Login background must support native dragging',
+      );
+    else
+      assert.deepEqual(
+        await readBounds(),
+        loginGeometry.bounds,
+        'Login button must not drag the native window',
+      );
+    loginGeometry.bounds = await readBounds();
+  }
   const [main] = await Promise.all([
     app.waitForEvent('window'),
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
@@ -146,6 +209,13 @@ try {
   });
   await app.evaluate(({ ipcMain }) => {
     globalThis.controlIpc = [];
+    globalThis.nativePassTrace = [];
+    ipcMain.on('interview:mouse-passthrough', (event, ignore) =>
+      globalThis.nativePassTrace.push({
+        ignore,
+        mainFrame: event.senderFrame === event.sender.mainFrame,
+      }),
+    );
     ipcMain.on('window:action', (event, ...args) =>
       globalThis.controlIpc.push({ args, mainFrame: event.senderFrame === event.sender.mainFrame }),
     );
@@ -353,12 +423,29 @@ try {
       'mousemove',
       (e) => {
         globalThis.nativeMoves.push({
+          type: e.type,
+          buttons: e.buttons,
+          hit: document.elementFromPoint(e.clientX, e.clientY)?.tagName,
           x: e.clientX,
           y: e.clientY,
           screenX: e.screenX,
           screenY: e.screenY,
         });
         if (globalThis.nativeMoves.length > 6) globalThis.nativeMoves.shift();
+      },
+      true,
+    );
+    window.addEventListener(
+      'mouseout',
+      (e) => {
+        globalThis.nativeMoves.push({
+          type: e.type,
+          buttons: e.buttons,
+          x: e.clientX,
+          y: e.clientY,
+          related: !!e.relatedTarget,
+        });
+        if (globalThis.nativeMoves.length > 12) globalThis.nativeMoves.shift();
       },
       true,
     );
@@ -375,6 +462,7 @@ try {
         box,
         cursor: probe('cursor'),
         moves: await floating.evaluate(() => globalThis.nativeMoves),
+        pass: await app.evaluate(() => globalThis.nativePassTrace),
       }),
     );
     throw error;
@@ -388,11 +476,20 @@ try {
         relatedTarget: null,
       }),
     );
+    // Native forwarding can queue a window-leave from the earlier blank point
+    // after the move onto an interactive surface has already been processed.
+    window.dispatchEvent(
+      new MouseEvent('mouseout', {
+        clientX: 0,
+        clientY: 0,
+        relatedTarget: null,
+      }),
+    );
   });
   assert.equal(
     probe('window', floatingHandle, icon).extendedStyle & 32,
     0,
-    'A queued leave at an interactive point must not re-enable passthrough',
+    'A queued leave must not override the latest interactive pointer position',
   );
   probe('click', floatingHandle, input.x, input.y);
   await floating.waitForFunction(

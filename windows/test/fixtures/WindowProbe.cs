@@ -29,6 +29,7 @@ class WindowProbe {
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr FindWindowW(string cls,string title);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr LoadImageW(IntPtr instance,string name,uint type,int cx,int cy,uint flags);
   [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string file,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window,int attribute,out int value,int bytes);
   static void Print(object value) { Console.WriteLine(new JavaScriptSerializer().Serialize(value)); }
   static string HashIcon(Icon icon) {
@@ -44,6 +45,12 @@ class WindowProbe {
   [STAThread] static int Main(string[] args) {
     try {
       SetProcessDPIAware();
+      if(args[0]=="exclusive") {
+        for(int i=1;i<args.Length;i++)using(var file=CreateFileW(@"\\?\"+args[i],0x80000000,0,IntPtr.Zero,3,0x80,IntPtr.Zero)) {
+          if(file.IsInvalid)throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"Model handle is not released: "+args[i]);
+        }
+        Print(new{exclusiveFiles=args.Length-1});return 0;
+      }
       if(args[0]=="desktop") {
         var handle=OpenInputDesktop(0,false,1);if(handle==IntPtr.Zero)throw new Exception("Input desktop unavailable");
         try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Point cursor;bool readable=GetCursorPos(out cursor);Print(new{interactive=name.ToString()=="Default"&&readable,inputDesktop=name.ToString(),cursorReadable=readable});}
@@ -53,6 +60,16 @@ class WindowProbe {
       if(args[0]=="move") {int x=int.Parse(args[1]),y=int.Parse(args[2]);mouse_event(0xC001,(uint)((x-GetSystemMetrics(76)+0.5)*65536/GetSystemMetrics(78)),(uint)((y-GetSystemMetrics(77)+0.5)*65536/GetSystemMetrics(79)),0,UIntPtr.Zero);Thread.Sleep(90);Print(new{});return 0;}
       if(args[0]=="up") {mouse_event(4,0,0,0,UIntPtr.Zero);Print(new{});return 0;}
       if(args[0]=="hit") {var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};Print(new{expected=GetAncestor(WindowFromPoint(point),2)==new IntPtr(long.Parse(args[1]))});return 0;}
+      if(args[0]=="hittest") {int x=int.Parse(args[2]),y=int.Parse(args[3]);Print(new{result=SendMessageW(new IntPtr(long.Parse(args[1])),0x84,IntPtr.Zero,new IntPtr((y<<16)|(x&0xffff))).ToInt64()});return 0;}
+      if(args[0]=="drag") {
+        var dragWindow=new IntPtr(long.Parse(args[1]));int x=int.Parse(args[2]),y=int.Parse(args[3]),endX=int.Parse(args[4]),endY=int.Parse(args[5]);
+        if(!SetCursorPos(x,y))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Thread.Sleep(100);
+        if(GetAncestor(WindowFromPoint(new Point{X=x,Y=y}),2)!=dragWindow)throw new Exception("Refusing drag outside the intended test window");
+        mouse_event(2,0,0,0,UIntPtr.Zero);Thread.Sleep(100);
+        try {for(int step=1;step<=12;step++){if(!SetCursorPos(x+(endX-x)*step/12,y+(endY-y)*step/12))throw new Exception("Native cursor became unavailable during drag");Thread.Sleep(30);}}
+        finally{mouse_event(4,0,0,0,UIntPtr.Zero);}
+        Print(new{});return 0;
+      }
       if(args[0]=="click"||args[0]=="down") {
         var expected=new IntPtr(long.Parse(args[1]));var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};
         SetCursorPos(point.X,point.Y);Thread.Sleep(100);

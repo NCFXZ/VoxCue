@@ -6,7 +6,13 @@ assert.equal(process.platform, 'win32');
 const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
 if (suites[0] === '--dpi') {
-  const allowed = ['ui-alignment', 'typography', 'components-ui', 'updates-sidebar'];
+  const allowed = [
+    'ui-alignment',
+    'typography',
+    'interview-typography',
+    'components-ui',
+    'updates-sidebar',
+  ];
   const selected = suites.length > 1 ? suites.slice(1) : allowed;
   for (const name of selected) assert.ok(allowed.includes(name), 'Unknown DPI suite: ' + name);
   for (const scale of ['1', '1.25', '1.5', '1.75', '2']) {
@@ -67,8 +73,14 @@ for (const args of commands) {
     windowsHide: true,
   });
   let output = '';
-  child.stdout.on('data', (data) => (output += data));
-  child.stderr.on('data', (data) => (output += data));
+  child.stdout.on('data', (data) => {
+    output += data;
+    if (!windowsOnly) process.stdout.write(data);
+  });
+  child.stderr.on('data', (data) => {
+    output += data;
+    if (!windowsOnly) process.stderr.write(data);
+  });
   const timer = setTimeout(() => child.kill(), windowsOnly ? 180000 : 900000);
   const code = await new Promise((resolve, reject) => {
     child.once('error', reject);
@@ -77,7 +89,7 @@ for (const args of commands) {
   if (windowsOnly) {
     console.log((code === 0 ? 'PASS ' : 'FAIL ') + args[0]);
     if (code !== 0) console.error(output);
-  } else process.stdout.write(output);
+  }
   if (code !== 0) failed = true;
 }
 if (failed) process.exitCode = 1;

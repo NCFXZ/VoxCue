@@ -97,10 +97,11 @@ export function FloatingInterview() {
     const leave = (event: MouseEvent) => {
       if (event.relatedTarget || event.buttons || dragging.current || windowDrag.active.current)
         return;
-      // Windows can deliver a queued mouseleave when forwarding is disabled.
-      // Recheck the actual hit point so that handoff cannot make a visible
-      // control click-through again while the cursor is still over it.
-      move(event);
+      // Disabling native forwarding can queue a leave with older coordinates.
+      // Keep the latest move/release point; a leave must not overwrite it and
+      // make a control click-through again. Outside this window, Windows/macOS
+      // already route input to the window under the cursor.
+      refresh();
     };
     // Forwarded mouse moves keep the visible controls reachable while blank
     // canvas areas pass clicks through. Never switch in the middle of a drag.

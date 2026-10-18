@@ -6,7 +6,7 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前源码版本为 **0.3.0**，Mac Apple Silicon 已发布 [v0.3.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.0) 并设为 Latest，提供 DMG 与签名自动更新文件。Windows x64 继续使用已有 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，其安装文件和全部历史发行保留；两个平台按各自清单独立选版，本次未在 Mac 生成 Windows 安装包。
+当前源码版本为 **0.3.0**，Windows x64 与 Mac Apple Silicon 均已发布至 [v0.3.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.0)，保留该发行的 Latest 状态。Windows 提供 NSIS 安装包、blockmap 与 latest.yml，Mac 提供 DMG、签名自动更新 ZIP 与 latest-mac.yml；两个平台按各自清单独立选版，并在所属系统构建。全部历史发行和资产保留。
 
 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。面试用量优化仅跳过明确回应的自动调用，保留有效口语、实际发言与纠正，对重复历史原文及较早无关 AI 建议做保守压缩；不降低所选模型、思考强度或默认答案篇幅。
 
@@ -35,7 +35,7 @@ corepack pnpm start
 
 Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 的 [v0.2.2 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.2.2/VoxCue-Setup-0.2.2-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用缓存。Windows 安装包未配置 Authenticode 签名；旧 v0.2.1 完整包及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 的 [v0.3.0 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.3.0/VoxCue-Setup-0.3.0-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 ## 工作区与主线
 

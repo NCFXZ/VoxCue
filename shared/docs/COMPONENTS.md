@@ -35,6 +35,10 @@ shared/test/scripts/components-ui-smoke.mjs 使用合成组件状态和独立临
 
 ## Windows 打包与隔离验证
 
+Windows 0.3.0 在本机 sync:workspace 同步共享版本，保留现有锁与固定依赖。隔离安装态 packaged-smoke 纳入 component-removal-check：真实 ASR Worker/语音 utilityProcess、ONNX/RAG 加载后检查使用中拒绝、删除互斥、进程退出与模型卸载后的文件删除，未知顶层原件/目录保护、重新下载及知识库/索引保留。仅采集端口使用合成实现，不采样物理设备；测试与模型只在系统临时目录，结果仅终端/内存。
+
+删除前的句柄核验在消费者真实退出/卸载后立即执行：临时 Win32 探针对固定清单的每个文件及包标记使用无共享的只读句柄打开，任何占用直接失败，再继续实际缓存删除。探针关闭自身句柄，不修改模型内容，不重试或等待文件占用自行消失。
+
 Windows 本机移除 Copilot 命令/可选依赖、平台运行时字段、专属回归及矩阵引用、打包复制项。共享废弃字段随最后一个消费者移除；sync:workspace 生成 0.2.2 配置，pnpm 更新本平台锁和安装结果、移除独占依赖及安装例外，不升级其他依赖。旧目录 ai-interview-copilot、历史存储键和 COPILOT_TEST_USER_DATA 隔离变量保留。
 
 package-portable.mjs 不复制模型和已移除运行时，在 resources 写入 voxcue-components.json。显式包含组件解包所需 adm-zip；E5 使用 transformers 的 Node CPU 后端，发行副本排除 onnxruntime-web，保留 onnxruntime-node、onnxruntime-common、LanceDB/Arrow 和 Windows 原生库。只处理打包副本，不手工拆删 node_modules。WASAPI/VoxCue.Audio.exe、Worker/utilityProcess 的 ASAR 解包路径、Fluent 和 electron-updater 保持。编译/发行只包含 shared/windows，不混入 Mac 模块、SF Symbols 或 Sparkle。

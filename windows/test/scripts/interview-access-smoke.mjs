@@ -132,7 +132,11 @@ try {
     globalThis.microphoneMissing = true;
   });
   await start();
-  await dialog.getByText(/麦克风设备不可用/).waitFor();
+  await dialog.getByText('设备不可用', { exact: true }).waitFor();
+  await dialog
+    .locator('.interview-access-detail')
+    .getByText('默认麦克风设备不可用，请在面试设置中重新选择。', { exact: true })
+    .waitFor();
   await blocked();
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();

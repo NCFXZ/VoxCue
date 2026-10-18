@@ -112,7 +112,57 @@ try {
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置' }).click();
+  await page.locator('.chat-column').evaluate((element) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['Delayed synthetic file'], 'pending.txt', { type: 'text/plain' }));
+    Object.defineProperty(transfer, 'items', {
+      value: [
+        {
+          webkitGetAsEntry: () => ({
+            name: 'pending.txt',
+            isFile: true,
+            file(success) {
+              globalThis.releaseDroppedFile = () => success(transfer.files[0]);
+            },
+          }),
+        },
+      ],
+    });
+    element.dispatchEvent(
+      new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  });
+  await page.waitForFunction(() => typeof globalThis.releaseDroppedFile === 'function');
   await page.getByRole('button', { name: '新对话', exact: true }).click();
+  await page.evaluate(() => globalThis.releaseDroppedFile());
+  await page
+    .getByRole('alert')
+    .getByText('读取文件期间已切换对话，请在当前对话重新拖入文件。', { exact: true })
+    .waitFor();
+  assert.equal(await page.locator('.chat-attachment').count(), 0);
+  for (const event of ['dragleave', 'blur', 'dragend']) {
+    await page.locator('.welcome').evaluate((element) => {
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['Synthetic'], 'hint.txt', { type: 'text/plain' }));
+      globalThis.hintTransfer = transfer;
+      element.dispatchEvent(
+        new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+      );
+    });
+    await page.locator('.chat-drop-hint').waitFor();
+    await page.evaluate((event) => {
+      if (event === 'dragleave')
+        document.querySelector('.chat-column').dispatchEvent(
+          new DragEvent(event, {
+            bubbles: true,
+            cancelable: true,
+            dataTransfer: globalThis.hintTransfer,
+          }),
+        );
+      else window.dispatchEvent(new Event(event));
+    }, event);
+    await page.locator('.chat-drop-hint').waitFor({ state: 'hidden' });
+  }
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'project.md',
     mimeType: 'text/markdown',

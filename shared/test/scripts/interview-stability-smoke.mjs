@@ -120,7 +120,23 @@ try {
     }
     const closed = floating.waitForEvent('close');
     await floating.getByRole('button', { name: '结束面试', exact: true }).click();
-    await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
+    const confirm = floating.getByRole('button', { name: '确认结束面试', exact: true });
+    await confirm.waitFor();
+    // This lifecycle test intentionally destroys the renderer. Activate the
+    // visible, enabled button in one renderer task so closure cannot race
+    // Playwright's later mouse-up acknowledgement. Native clicks have their
+    // own Windows regression; all close/save/window assertions remain below.
+    await confirm.evaluate(async (button) => {
+      await Promise.all(
+        button
+          .getAnimations()
+          .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+          .map((animation) => animation.finished),
+      );
+      if (button.disabled || !button.checkVisibility())
+        throw Error('End confirmation is not actionable');
+      button.click();
+    });
     await closed;
     await main.waitForFunction(() => document.visibilityState === 'visible');
     await nativeReady(

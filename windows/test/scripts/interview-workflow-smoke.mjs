@@ -236,7 +236,10 @@ try {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const noMicConfirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
-  await noMicConfirmation.getByText(/麦克风设备不可用/).waitFor();
+  await noMicConfirmation.getByText('设备不可用', { exact: true }).waitFor();
+  await noMicConfirmation
+    .getByText('所选麦克风设备不可用，请在面试设置中重新选择。', { exact: true })
+    .waitFor();
   assert.equal(
     await noMicConfirmation.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
     true,
