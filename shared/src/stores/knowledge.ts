@@ -1,5 +1,6 @@
 import { useKnowledgeIndex } from './knowledgeIndex';
 import { create } from 'zustand';
+import { componentReady } from './components';
 import { localKnowledge, type KnowledgeBase, type LocalDocument } from '../services/knowledge';
 interface KnowledgeState {
   bases: KnowledgeBase[];
@@ -47,6 +48,10 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     }
   },
   async create(name) {
+    if (!componentReady('rag')) {
+      set({ error: '请先下载并准备知识库模型，再创建知识库。' });
+      return false;
+    }
     if (get().busy) return false;
     set({ busy: true, error: null });
     try {

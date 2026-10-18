@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir } from 'node:fs/promises';

@@ -3,7 +3,6 @@ import {
   electron,
   spawnTestProcess,
 } from '../../../shared/test/scripts/test-workspace.mjs';
-import workspace from '../../../shared/scripts/workspace.mjs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 
 import path from 'node:path';

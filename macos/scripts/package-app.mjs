@@ -73,6 +73,8 @@ export async function buildMacApp(output, publicKey) {
         );
         const copied = new Set();
         async function copyPackage(name, from = root) {
+          // Installed vendor packages stay intact; only the application copy is made lean.
+          if (name === 'onnxruntime-web') return;
           let resolved;
           const require = createRequire(path.join(from, 'package.json'));
           try {
@@ -143,9 +145,7 @@ export async function buildMacApp(output, publicKey) {
         }
         for (const name of [
           'jose',
-          '@github/copilot-sdk',
-          // Required for the macOS artifact even though npm declares it optional.
-          '@github/copilot-sdk-darwin-arm64',
+          'adm-zip',
           'electron-updater',
           'sherpa-onnx-node',
           'sherpa-onnx-darwin-arm64',
@@ -172,15 +172,9 @@ export async function buildMacApp(output, publicKey) {
   await mkdir(path.join(resources, 'native'), { recursive: true });
   for (const name of ['VoxCue.Audio', 'VoxCue.ScreenPermission.node', 'VoxCue.Updater.node'])
     await cp(path.join(root, 'native/bin', name), path.join(resources, 'native', name));
-  await cp(
-    path.join(workspace.sharedRoot, 'local-models/speech'),
-    path.join(resources, 'models/speech'),
-    { recursive: true },
-  );
-  await cp(
-    path.join(workspace.sharedRoot, 'local-models/rag/multilingual-e5-small'),
-    path.join(resources, 'models/rag/multilingual-e5-small'),
-    { recursive: true },
+  await writeFile(
+    path.join(resources, 'voxcue-components.json'),
+    JSON.stringify({ schemaVersion: 1 }),
   );
   await writeFile(
     path.join(resources, 'voxcue-update.json'),

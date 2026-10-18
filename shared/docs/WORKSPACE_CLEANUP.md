@@ -1,3 +1,23 @@
+## 2026-10-18：继续本机工作区清理
+
+本轮按用户授权继续清理，暂不提交/上传 GitHub。此前经 AST 核对移除 22 处测试脚本的未使用 workspace 导入，平台约束继续由现用 test-workspace 入口承载。本次删除根 `.DS_Store` 与已被 `Reset.png` 同字节替代的 `macos/public/sf-symbols/RotateCcw.png`，共 2 个普通文件、13,285 字节；删除前核对真实路径、普通文件身份、消费者及 lsof 无占用。根 Finder 缓存可能由系统再次生成；Mac 目录的 `.DS_Store` 仍被系统索引进程占用，保留且不停止索引。
+
+没有确认可删除的独立现用业务模块；保留动态装配、Worker/utilityProcess/preload、测试临时目录助手、依赖和锁文件、签名密钥、模型资源、发行产物、真实资料与源码恢复基线。Windows 专属目录只读，历史受占用保护目录及此前明确跳过的 Windows 云占位目录不重试。纯绝对路径、用途与删除/占用状态在 `macos/recovery/workspace-cleanup-20261018/{source-cleanup,files,continued-cleanup}.json`；功能回归不保存结果到本清理记录或其他文件。
+
+## 2026-10-18 卸载旧版后的数据目录清理
+
+用户明确授权清理旧安装版重新创建的 /Users/fengkuan_zhu/Library/Application Support/ai-interview-copilot。删除前核对完整路径/真实路径、子树无链接、旧版已卸载及新旧根均无进程占用；旧根没有 auth-data 或 IndexedDB。删除旧根的 38 个普通文件、19 个子目录、1,792,514 字节。VoxCue 新根及其全部数据保留，不移除其中的历史资料或凭据；不改变未来双目录冲突时停止并保护双方数据的启动规则。纯路径/数量/删除状态审计在 macos/recovery/legacy-profile-cleanup-20261018/cleanup.json，不保存资料内容。
+
+## 2026-10-18 两套本地模型重置
+
+用户明确要求删除模型以查看首次下载。核对固定下载/运行/构建消费者、真实路径、子树无链接及 lsof 无占用后，删除 shared/local-models/speech 与 shared/local-models/rag/multilingual-e5-small 两个模型包，共 13 个普通文件、373,253,584 字节。VoxCue/component-cache 尚不存在；未删除应用数据、公开模型发行、现有安装包或 Windows 专属内容。纯路径/数量/删除状态审计在 macos/recovery/model-reset-20261018/cleanup.json，不包含测试结果。
+
+## 2026-10-18 Copilot 独立运行时清理
+
+用户明确授权移除 GitHub Copilot 接入和独立运行时。从当前 shared/macOS 删除后台、IPC、路由和品牌素材，包管理器卸载 SDK/本平台运行时及独占依赖；源码恢复基线、原凭据与用户历史原位保护。Windows 专属源码/安装结果依照平台只读限制留待其本机清理，精确路径见 COMPONENTS.md。
+
+核对精确路径、当前消费者、真实路径与进程占用后，删除 macos/release/copilot-runtime-v1.0.21 下六个独立发行文件，共 113,889,010 字节；不涉及模型或其他应用安装包。纯路径/数量/删除状态审计在 macos/recovery/copilot-removal-20261018/cleanup.json，不包含测试结果。公开同名运行时发行、附件及对应标签按授权删除。
+
 # 工作区清理结果
 
 ## 2026-10-17：共用设置完成后的闲置文件与冗余样式

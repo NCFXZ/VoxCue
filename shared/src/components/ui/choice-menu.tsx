@@ -7,17 +7,24 @@ export function ChoiceMenu<T extends string>({
   options,
   onChange,
   className = '',
+  disabled = false,
 }: {
   label: string;
   value: T;
   options: readonly { value: T; label: string }[];
   onChange(value: T): void;
   className?: string;
+  disabled?: boolean;
 }) {
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
-        <button type="button" className={`choice-trigger ${className}`} aria-label={label}>
+        <button
+          type="button"
+          className={`choice-trigger ${className}`}
+          aria-label={label}
+          disabled={disabled}
+        >
           <span>{options.find((option) => option.value === value)?.label}</span>
           <ChevronDown size={14} />
         </button>

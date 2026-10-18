@@ -1,5 +1,9 @@
 # VoxCue 架构
 
+## 独立本地组件
+
+共享 ComponentService 从固定资产下载并校验语音/RAG，按资源版本及摘要缓存到 userData/component-cache；应用版本不参与缓存键。shared 共用下载、取消/重试、状态和功能限制，主进程独立校验注册窗口主 frame，不开放 URL/路径/命令。Mac 新构建排除模型与 ONNX Web，保留 Node CPU 依赖；完整旧包和开发模式沿用原路径。界面沿用既有设计，容量统一 MB。Windows 锁及瘦身打包由其本机同步验证，Mac 保持只读。详见[组件说明](COMPONENTS.md)。
+
 ## 面试浮窗移动
 
 共享三条杠使用普通 no-drag 指针区域及 useInterviewWindowDrag，不再依赖会吞掉指针事件的 CSS 原生拖动。手势通过指针捕获、单帧合并和串行 IPC 发送 start/move/end；公开 DesktopAPI、preload、主进程白名单一致。interview:move 只接受当前浮窗主 frame 的单个阶段对象，拒绝坐标、其他窗口、额外字段和未知动作。位置从主进程 screen.getCursorScreenPoint 与开始时的窗口位置计算，仅改变当前浮窗位置；同一位置不重复设置，不接受 Renderer 原生参数。
@@ -104,9 +108,9 @@ main保留原UpdateService装配和IPC，Renderer/公开契约不变。启动检
 
 main 为唯一长期开发入口，Windows/Mac 保留历史引用；0.2.0 按用户授权提交推送完整功能和目录整理，远端默认 Windows 保持。共享 React/Store/存储、AIChatService、application、contracts 与 IPC 各保留一份实现，没有按系统复制业务；生产源码和测试按共用/平台差异组织，上传状态见 PROGRESS。
 
-`shared/electron/platform/{types,windows,macos,index}.ts` 为无 Electron 运行时依赖的纯策略/路径解析。Windows 保留 Acrylic、ICO、AppUserModelId、全部窗口关闭后退出、现有保护支持标志、固定隐私入口、WASAPI 与打包 Copilot runtime 位置；macOS 使用 PNG、关闭窗口后驻留及钥匙串错误标签，不配置 Windows 材质/原生程序，也不宣称相同截图保护保证。非目标系统不声明原生支持。
+`shared/electron/platform/{types,windows,macos,index}.ts` 为无 Electron 运行时依赖的纯策略/路径解析。Windows 保留 Acrylic、ICO、AppUserModelId、全部窗口关闭后退出、现有保护支持标志、固定隐私入口、WASAPI；macOS 使用 PNG、关闭窗口后驻留及钥匙串错误标签，不配置 Windows 材质/原生程序，也不宣称相同截图保护保证。非目标系统不声明原生支持。
 
-`shared/electron/window.ts` 共用三类窗口选项、沙箱/preload、新窗口/导航限制及生产/开发 hash 入口；不持有业务状态，也不依赖 backend/application/IPC。main 在原有时点创建/加载窗口并保留授权切窗、关闭保存握手、重载取消、浮窗保护/normal置顶、中心缩放和资源释放。没有移动 userData、模型或原生文件。平台参数只从 main 注入后台；账户存储继续使用原 safeStorage 与 credentials.bin，Copilot继续官方独立运行时。未适配音频在 SpeechHost 创建 utilityProcess 前明确拒绝，WASAPI实现仍在原专用后端。
+`shared/electron/window.ts` 共用三类窗口选项、沙箱/preload、新窗口/导航限制及生产/开发 hash 入口；不持有业务状态，也不依赖 backend/application/IPC。main 在原有时点创建/加载窗口并保留授权切窗、关闭保存握手、重载取消、浮窗保护/normal置顶、中心缩放和资源释放。没有移动 userData、模型或原生文件。平台参数只从 main 注入后台；账户存储继续使用原 safeStorage 与 credentials.bin。未适配音频在 SpeechHost 创建 utilityProcess 前明确拒绝，WASAPI实现仍在原专用后端。
 
 架构检查新增平台策略不可反向依赖业务/窗口、共享窗口不可依赖业务、backend/application不可直接依赖桌面策略/窗口；现有 Renderer、contracts、preload、推理和 Provider 限制保持。平台单测验证配置、资源位置、安全入口及不支持音频不启动进程，不能替代 Mac 真机。`build:shared` 为共享编译入口；完整 `build` 仍保留Windows原生编译，Mac仅arm64依赖、采集、外观、权限及构建分发待后续授权实施。
 
@@ -114,21 +118,13 @@ Electron 的 [窗口保护接口](https://www.electronjs.org/docs/latest/api/bro
 
 对抗测试修复补充：准备聊天所有路由同时校验主窗口和主 frame；取消先退休原生请求槽，后续旧事件/结果均丢弃，主窗口重载也执行取消，与恢复为已停止的快照一致。HTTP 非成功正文独立执行取消、空闲计时与64 KiB上限。Renderer 的 storedValues 仅为本地数据的纯校验；聊天恢复按允许字段构造状态，历史嵌套损坏保留原始存储并显示错误，读取不执行迁移或删除。pnpm overrides 仅去除未调用的 LanceDB 可选提供器及 Mammoth CLI 解析依赖；打包遵循相同排除设置，实际文本 Embedder、DOCX 解析和语音路径不变。
 
-## ChatGPT / Copilot 服务选择（最新）
+## ChatGPT 登录与模型服务
 
-`application/providers.ts` 的 SelectedChatService 在每次调用入口选择当前服务，复用既有 AIChatService、RAG 与标题队列，不按模型 ID 猜测认证来源。main 装配原 ChatGPT 服务和 `backend/copilot`，成功授权后原子保存 active service；旧安装缺少该字段仍选 ChatGPT。新增无参数 `auth:copilot-sign-in`，仅登录窗口主 frame 可调用，与 ChatGPT 共用单次登录锁和取消/关闭生命周期；preload、DesktopAPI 与编译期测试同步。
-
-CopilotRuntime 使用固定官方 SDK 1.0.21 / Windows runtime 1.0.97，独立 userData 子目录、stdio 子进程及自有控制 session。PKCE 浏览器地址只允许 GitHub authorize + 127.0.0.1 回调；SDK 完成交换与系统加密保存，拒绝明文同意分支。VoxCue 的 copilot-session.json / service.json 仅含无凭据身份与服务标识。屏蔽继承的 Copilot/GitHub/gh/OTEL 配置和令牌环境变量，独立 gh 配置目录，不借用其他应用登录。注销调用自有 runtime logout 并删除身份，失败明确提示；退出释放 session/进程。原 ChatGPT OAuth 和 userData 根路径不变。
-
-单人桌面使用 SDK `copilot-cli` 模式启用系统凭据库：固定版本的 `empty` 模式会强制禁用 keytar，导致浏览器授权进入明文同意分支。`isolatedSession` 显式保留原有隔离默认值，包括禁用 session 遥测、记忆、嵌入检索、自定义指令/插件/内置技能、定时任务和实验能力，缓存仅内存；控制和回答 session 共用该配置。原生 smoke 检查实际 spawn 环境与 SDK session.create 请求，防止再次禁用凭据库或误放开环境能力。
-
-CopilotChatService 只使用服务实际模型目录的 ID/名称/vendor/effort。每个回答单独 SDK session：禁用配置/技能发现、文件钩子、host git、远程 session 和 session store；默认无工具，只有用户开启搜索且目录实际提供时才放行 web_search/web_fetch。拒绝文件/命令/沙箱绕过权限，本地资料工具仍走原受限 LocalTools。历史作为有角色的 JSON 数据提供，附件只用内存文本/Blob；完整结构化资料复用 ProfileAnswerStream 和抽取的 verifySkillProposal，不降低来源校验或用户确认。只传真实工具活动/来源和使用量，不传 SDK extended thinking、原始错误或凭据；Copilot 无公开摘要时只显示状态。五分钟静默限制由事件重置，取消屏蔽迟到事件并清理自有 session。
-
-ModelProvider 增加可选 modelName/modelVendor，新增受请求 ID 约束的 provider 事件，让面试浮窗在正文开始前显示实际身份；最终结果校准并逐条持久保存，不改写历史。Renderer 没有 SDK、原生运行时或账户凭据依赖，架构检查对 SDK 入口和更新后台隔离增加约束。打包复制官方 Windows 可选依赖，main 使用 ASAR 外的物理 runtime.exe 路径；控制 session、浏览器流程和安装包启动均需实际原生验证。真实账户推理/订阅/联网兼容性不由合成回归保证，详见 COPILOT.md。
+只保留 ChatGPT OAuth，main 直接装配 ChatGPTAuthService 与 ChatGPTService，复用 AIChatService、RAG 和标题队列。GitHub SDK、独立运行时、登录 IPC、服务选择文件读写和路由已移除；不读取或删除旧服务身份、凭据或用户历史。旧回复的公开提供商元数据作为历史数据继续由通用 ModelProvider 展示。
 
 展示与语音恢复：ResponseProgress 在正文首次出现时折叠到“用时”，之后用户可自行展开，不随每个 chunk 重复关闭。系统问题 debounce 就绪状态在生成期间保留，回答完成后按本场状态补交；系统间断清除不完整问题，麦克风间断不影响系统缓冲。浮窗手动清空输入只覆盖当前转写版本，新系统稿到达恢复跟随；非空手动编辑保留。未引入 AEC 或修改原生采样路径。
 
-更新边界：backend/updates/driver.ts 只在 Windows 安装包存在固定 app-update.yml 时加载 electron-updater；service.ts 管理单次检查/下载/安装、版本化状态、错误及释放。IPC 仅主窗口主 frame 的 status/check/download/install 四操作，拒绝额外字段；公开契约不包含 URL、路径、凭据、发布说明 HTML 或原生下载对象。Renderer 的 services/updates、stores/updates 和 UpdatesPanel 分别负责受控调用、订阅/迟到状态过滤及展示，架构检查限定 updater 只进入更新后台，禁止其访问账户/资料/音频后台。
+更新边界：backend/updates/driver.ts 只在 Windows 安装包存在固定 app-update.yml 时加载 electron-updater；service.ts 管理单次检查/下载/安装、版本化状态、错误及释放。IPC 仅主窗口主 frame 的 status/check/download/cancel/install 五操作，拒绝额外字段；公开契约不包含 URL、路径、凭据、发布说明 HTML 或原生下载对象。Renderer 的 services/updates、stores/updates 和 UpdatesPanel 分别负责受控调用、订阅/迟到状态过滤及展示，架构检查限定 updater 只进入更新后台，禁止其访问账户/资料/音频后台。
 
 main 装配面试活动与安装准备回调，开场预检/浮窗期间拒绝安装，installing 期间拒绝新开场。更新安装复用现有关闭请求 ID 与聊天 flush 成功确认，不提前调用 quitAndInstall；取消、失败、超时及安装错误恢复关闭保护，窗口与下载结果保留。autoInstallOnAppQuit 关闭，只有显式点击可安装。NSIS 使用独立 staging 与既有原生依赖复制布局，userData/存储格式/凭据不变。发布与验证边界见 UPDATES.md。
 
@@ -210,7 +206,7 @@ floating-notices位于面板下方独立预留区域，显示“此窗口未隐�
 
 面试回答输入区新增默认关闭的“附截图”，手动/自动提交问题时每次获取当前屏幕新截图；发送按钮前的屏幕截取按钮独立提交仅截图请求，并保留输入草稿和问题缓冲。公开InterviewAnswerRequest以screenshot='attach'/'only'区分，only分支禁止question；IPC继续校验面试主frame、本场模型/effort、字段白名单，不接受Renderer图片、路径或屏幕源ID。only请求只包含固定解题指令和当次图片，不带转写、对话历史、个人信息或RAG。失败/停止/重试保留请求模式，停止按钮阻止默认表单动作，避免控制立即变成发送按钮后误提交草稿。
 
-main注入screenshot.ts原生捕获适配器，按面试浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。图像长边最多3840像素、编码最多8 MiB，优先PNG，过大转JPEG；Mac屏幕权限未获准明确失败，未宣称Mac真机验收。捕获前后检查AbortSignal和窗口销毁，取消后不进入Provider。截图只在主进程本次请求内存中作为ChatTurn.files传给既有ChatGPT input_image或Copilot blob链路；不经Renderer、剪贴板或磁盘，不存入历史。Answer仅增加可选screenshot模式元数据，旧存储键和无此字段的记录兼容。架构检查禁止截图适配器访问磁盘、账户、AI业务，也禁止application/backend直接导入该原生实现。沿用既有截图保护，不临时改变保护或隐藏窗口。
+main注入screenshot.ts原生捕获适配器，按面试浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。图像长边最多3840像素、编码最多8 MiB，优先PNG，过大转JPEG；Mac屏幕权限未获准明确失败，未宣称Mac真机验收。捕获前后检查AbortSignal和窗口销毁，取消后不进入Provider。截图只在主进程本次请求内存中作为ChatTurn.files传给既有 ChatGPT input_image 链路；不经Renderer、剪贴板或磁盘，不存入历史。Answer仅增加可选screenshot模式元数据，旧存储键和无此字段的记录兼容。架构检查禁止截图适配器访问磁盘、账户、AI业务，也禁止application/backend直接导入该原生实现。沿用既有截图保护，不临时改变保护或隐藏窗口。
 
 聊天与面试共用ResponseProgress，初始等待统一展示新版“正在思考”文字动画，移除旧圆点。Local RAG将实际检索标记为knowledge/thinking并以同一ID更新开始/完成，不能当作网页读取；真实web_search/open_page仍使用实际服务活动。公开思考、活动与用时位于response-progress底部分割线上方，正文之后自动折叠且可重新展开；不显示私有推理，不伪造实际工具步骤。面试复用已有公开摘要/活动字段，不改变历史数据格式。
 
@@ -244,7 +240,7 @@ backend/speech/models.ts 保留 Paraformer 固定文件列表和分块 SHA-256 �
 
 手动重命名通过 history store → 既有本机存储服务完成，校验 1–80 字单行标题，始终读取最新记录并仅修改标题相关字段，保存失败保留原标题与输入。可选 titleSource 标记 manual/generated，旧记录无该字段仍兼容；不迁移或批量改写数据。手动保存设置 ready，自动标题成功/失败及迟到归档都不能覆盖手动标题；再次重命名仍可用，已删除记录不复活。列表按标题筛选，开始/结束日期选项按最新要求移除。
 
-沿用 %APPDATA%/ai-interview-copilot 和所有原存储键。登录为独立窗口、系统浏览器授权；凭据仅主进程管理并系统加密，刷新串行保存轮换令牌。保护继续使用既有 Electron setContentProtection，不扩大范围或保证所有软件遵守。浮窗固定置顶、收起/展开、缩放与结束确认保持现状。
+共享 userData.ts 在 session/窗口创建前将旧 ai-interview-copilot 数据根原子重命名为 VoxCue，成功后旧路径消失；新旧目录均有内容、目录重定向或旧进程仍占用时停止。main 同时设置 userData/sessionData 为新根，测试覆盖根直接绕过真实迁移。所有原存储键及内部布局保持。登录为独立窗口、系统浏览器授权；凭据仅主进程管理并系统加密，刷新串行保存轮换令牌。保护继续使用既有 Electron setContentProtection，不扩大范围或保证所有软件遵守。浮窗固定置顶、收起/展开、缩放与结束确认保持现状。
 
 session:state沿用受控布尔IPC，仅主窗口主frame报告生成中、保存错误或未保存编辑，不传正文/附件/资料。main维护原生关闭确认（默认取消），批准后继续上述flush握手；普通聊天保留。显式退出登录先保存，再沿用登录窗口切换，避免重复确认。不改变userData、OAuth和既有存储键。
 

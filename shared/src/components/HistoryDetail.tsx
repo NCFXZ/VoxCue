@@ -23,6 +23,9 @@ import {
   ArrowUpRight,
   Loader,
   Edit,
+  Refresh,
+  X,
+  Save,
 } from './icons';
 
 export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onBack(): void }) {
@@ -195,6 +198,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
               <p className="record-title-status">
                 <span>{record.titleError || '标题生成失败。'}</span>
                 <Button variant="ghost" onClick={() => void history.generateTitle(record.id)}>
+                  <Refresh size={16} />
                   重试生成标题
                 </Button>
               </p>
@@ -364,12 +368,14 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             )}
             <div className="interview-start-actions">
               <Button type="button" variant="outline" onClick={() => setRenaming(false)}>
+                <X size={16} />
                 取消
               </Button>
               <Button
                 type="submit"
                 disabled={!titleDraft.trim() || titleDraft.trim() === record.title}
               >
+                <Save size={16} />
                 保存标题
               </Button>
             </div>

@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -382,7 +381,7 @@ try {
   assert.equal(await page.locator('.history-row').count(), 1);
   await page.screenshot({ animations: 'disabled' });
   await page.getByRole('button', { name: '知识库', exact: true }).click();
-  await page.getByRole('button', { name: '＋ 创建知识库', exact: true }).first().click();
+  await page.getByRole('button', { name: '创建知识库', exact: true }).first().click();
   await page.getByLabel('知识库名称', { exact: true }).fill('合成资料');
   await page.getByRole('button', { name: '保存', exact: true }).click();
   const base = page.getByRole('dialog', { name: '合成资料', exact: true });

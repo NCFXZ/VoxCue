@@ -4,6 +4,7 @@ import type {
   ScreenCapturePermissionAction,
 } from '../../electron/contracts/screenCapture';
 import { Button } from './ui/button';
+import { Check, Monitor, Loader } from './icons';
 export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
   const supported = window.desktop?.screenCapturePermissionSupported === true;
   const [permission, setPermission] = useState<ScreenCapturePermission | null>(null);
@@ -77,6 +78,7 @@ export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
             disabled={!supported || disabled || !!pending || granted}
             onClick={() => void run('request')}
           >
+            {granted ? <Check size={16} /> : pending ? <Loader size={16} /> : <Monitor size={16} />}
             {!supported
               ? '待适配'
               : granted

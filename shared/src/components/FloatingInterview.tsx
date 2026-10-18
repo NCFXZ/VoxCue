@@ -13,6 +13,9 @@ import {
   Copy,
   Check,
   Screenshot,
+  Refresh,
+  AudioLines,
+  Sparkles,
 } from './icons';
 import { Button } from './ui/button';
 import { useInterview } from '../stores/interview';
@@ -448,6 +451,7 @@ export function FloatingInterview() {
                   variant="outline"
                   onClick={transcriptScroll.scrollToLatest}
                 >
+                  <ChevronDown size={14} />
                   {transcriptScroll.hasNew ? '有新转写 · 返回最新' : '返回最新转写'}
                 </Button>
               )}
@@ -475,6 +479,7 @@ export function FloatingInterview() {
                 }}
               >
                 <span className="toggle-dot" />
+                <AudioLines size={14} />
                 转写
               </Button>
             </header>
@@ -573,6 +578,7 @@ export function FloatingInterview() {
                       disabled={state.generating}
                       onClick={() => void state.retryAnswer(a.id)}
                     >
+                      <Refresh size={16} />
                       重试面试回答
                     </Button>
                   )}
@@ -634,6 +640,7 @@ export function FloatingInterview() {
                     onClick={() => state.setAttachScreenshot(!state.attachScreenshot)}
                   >
                     <span className="toggle-dot" />
+                    <Screenshot size={14} />
                     附截图
                   </Button>
                   <Button
@@ -645,6 +652,7 @@ export function FloatingInterview() {
                     onClick={() => state.setAutoAnswer(!state.autoAnswer)}
                   >
                     <span className="toggle-dot" />
+                    <Sparkles size={14} />
                     自动回答
                   </Button>
                 </div>

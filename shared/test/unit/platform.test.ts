@@ -70,11 +70,8 @@ describe('桌面平台边界', () => {
         resizable: false,
       });
   });
-  it('macOS 保留驻留生命周期、独立 arm64 运行时，不启用 Windows 材质或 WASAPI', () => {
+  it('macOS 保留驻留生命周期和原生策略，不启用 Windows 材质或 WASAPI', () => {
     const mac = macosPolicy;
-    expect(mac.packagedCopilotRuntime).toBe(
-      'app.asar.unpacked/node_modules/@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime',
-    );
     expect(mac.quitOnAllWindowsClosed).toBe(false);
     expect(mac.captureProtectionSupported).toBe(false);
     expect(mac.credentialEncryptionLabel).toBe('macOS 钥匙串');
@@ -105,9 +102,6 @@ describe('桌面平台边界', () => {
     expect(resources.speechProcess).toBe(
       path.join(environment.appPath, 'dist-electron/macos/electron/speech/process.js'),
     );
-    expect(resources.copilotRuntime).toBe(
-      path.join(environment.resourcesPath, mac.packagedCopilotRuntime!),
-    );
     expect(resources.screenPermission).toBe(
       path.join(environment.resourcesPath, 'native/VoxCue.ScreenPermission.node'),
     );
@@ -127,7 +121,6 @@ describe('桌面平台边界', () => {
     expect(dev.ragModel).toBe(
       path.resolve(environment.appPath, '../shared/local-models/rag/multilingual-e5-small'),
     );
-    expect(dev.copilotRuntime).toBeUndefined();
     const macDev = desktopResources(environment, macosPolicy);
     expect(macDev.icon).toBe(path.join(environment.appPath, 'public/voxcue.png'));
     expect(macDev.speechModels).toBe(dev.speechModels);
@@ -138,12 +131,6 @@ describe('桌面平台边界', () => {
     expect(packaged.speechModels).toBe(path.join(environment.resourcesPath, 'models/speech'));
     expect(packaged.ragModel).toBe(
       path.join(environment.resourcesPath, 'models/rag/multilingual-e5-small'),
-    );
-    expect(packaged.copilotRuntime).toBe(
-      path.join(
-        environment.resourcesPath,
-        'app.asar.unpacked/node_modules/@github/copilot-sdk-win32-x64/prebuilds/win32-x64/copilot-runtime.exe',
-      ),
     );
   });
   it('其他系统不会被当成 Windows 或 macOS 支持', () => {

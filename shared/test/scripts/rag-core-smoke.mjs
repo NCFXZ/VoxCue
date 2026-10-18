@@ -10,7 +10,9 @@ const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/rag-
 const config = {
   output,
   root,
-  model: path.resolve('../shared/local-models/rag/multilingual-e5-small'),
+  model:
+    process.env.VOXCUE_TEST_RAG_MODEL ??
+    path.resolve('../shared/local-models/rag/multilingual-e5-small'),
   host: path.resolve('dist-electron/shared/electron/backend/knowledge/host.js'),
 };
 await writeFile(

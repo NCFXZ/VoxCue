@@ -11,7 +11,7 @@ export interface UpdateDriver {
   on(event: UpdateDriverEvent, listener: (...args: any[]) => void): unknown;
   removeListener(event: UpdateDriverEvent, listener: (...args: any[]) => void): unknown;
   checkForUpdates(): Promise<{ cancellationToken?: { cancel(): void } } | null>;
-  downloadUpdate(): Promise<unknown>;
+  downloadUpdate(signal?: AbortSignal): Promise<unknown>;
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
   dispose?(): void;
 }
@@ -22,10 +22,14 @@ export class UpdateService {
   private started = false;
   private listeners: Array<[UpdateDriverEvent, (...args: any[]) => void]> = [];
   private cancellation: { cancel(): void } | undefined;
+  private downloadController?: AbortController;
+  private downloadJob?: Promise<UpdateState>;
 
   constructor(
     private readonly options: {
       currentVersion: string;
+      autoDownload?: boolean;
+      saveAutoDownload?(enabled: boolean): void;
       driver?: UpdateDriver;
       unavailableReason?: string;
       isInterviewActive(): boolean;
@@ -36,6 +40,7 @@ export class UpdateService {
     this.value = {
       revision: 0,
       currentVersion: options.currentVersion,
+      autoDownload: options.autoDownload ?? true,
       phase: options.driver ? 'idle' : 'unavailable',
       availableVersion: null,
       progress: null,
@@ -76,16 +81,18 @@ export class UpdateService {
     this.listen('download-progress', (progress: { percent?: unknown }) => {
       if (
         this.value.phase === 'downloading' &&
+        !this.downloadController?.signal.aborted &&
         typeof progress?.percent === 'number' &&
         Number.isFinite(progress.percent)
       )
         this.change({ progress: Math.max(0, Math.min(100, progress.percent)) });
     });
     this.listen('update-downloaded', () => {
-      if (this.value.phase === 'downloading')
+      if (this.value.phase === 'downloading' && !this.downloadController?.signal.aborted)
         this.change({ phase: 'downloaded', progress: 100, error: null });
     });
     this.listen('error', () => {
+      if (this.value.phase === 'downloading' && this.downloadController?.signal.aborted) return;
       if (!['checking', 'downloading', 'installing'].includes(this.value.phase)) return;
       this.fail(this.value.phase);
     });
@@ -97,6 +104,24 @@ export class UpdateService {
 
   refresh() {
     this.change({});
+  }
+
+  setAutoDownload(enabled: boolean) {
+    if (this.disposed) return this.state();
+    try {
+      this.options.saveAutoDownload?.(enabled);
+      this.change({ autoDownload: enabled, error: null });
+    } catch {
+      this.change({ error: '自动下载设置未能保存，请重试。' });
+      return this.state();
+    }
+    this.maybeDownload();
+    return this.state();
+  }
+
+  private maybeDownload() {
+    if (!this.disposed && this.value.autoDownload && this.value.phase === 'available')
+      void this.download();
   }
 
   private listen(event: UpdateDriverEvent, listener: (...args: any[]) => void) {
@@ -129,12 +154,13 @@ export class UpdateService {
     if (this.started || this.disposed || !this.options.driver) return;
     this.started = true;
     await this.check();
-    if (!this.disposed && this.value.phase === 'available') await this.download();
+    if (this.downloadJob) await this.downloadJob;
   }
 
   async check() {
     if (
       this.disposed ||
+      this.downloadJob ||
       !this.options.driver ||
       !['idle', 'available', 'error'].includes(this.value.phase)
     )
@@ -148,25 +174,44 @@ export class UpdateService {
     } catch {
       if (this.value.phase === 'checking') this.fail('checking');
     }
+    this.maybeDownload();
     return this.state();
   }
 
-  async download() {
+  download() {
+    if (this.downloadJob) return this.downloadJob;
     if (
       this.disposed ||
       !this.options.driver ||
       !this.value.availableVersion ||
       !['available', 'error'].includes(this.value.phase)
     )
-      return this.state();
+      return Promise.resolve(this.state());
+    const controller = new AbortController();
+    this.downloadController = controller;
     this.change({ phase: 'downloading', progress: 0, error: null });
-    try {
-      await this.options.driver.downloadUpdate();
-      if (!this.disposed && this.value.phase === 'downloading') this.fail('downloading');
-    } catch {
-      if (this.value.phase === 'downloading') this.fail('downloading');
-    }
-    return this.state();
+    this.downloadJob = (async () => {
+      try {
+        await this.options.driver!.downloadUpdate(controller.signal);
+        if (!this.disposed && !controller.signal.aborted && this.value.phase === 'downloading')
+          this.fail('downloading');
+      } catch {
+        if (!controller.signal.aborted && this.value.phase === 'downloading')
+          this.fail('downloading');
+      }
+      if (controller.signal.aborted && this.value.phase === 'downloading')
+        this.change({ phase: 'available', progress: null, error: null });
+      return this.state();
+    })().finally(() => {
+      this.downloadController = undefined;
+      this.downloadJob = undefined;
+    });
+    return this.downloadJob;
+  }
+
+  cancel() {
+    this.downloadController?.abort();
+    return this.downloadJob ?? Promise.resolve(this.state());
   }
 
   async install() {
@@ -195,6 +240,7 @@ export class UpdateService {
 
   dispose() {
     this.disposed = true;
+    this.downloadController?.abort();
     this.cancellation?.cancel();
     this.options.driver?.dispose?.();
     for (const [event, listener] of this.listeners)

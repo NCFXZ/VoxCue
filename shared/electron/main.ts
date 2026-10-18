@@ -3,21 +3,30 @@ import { KnowledgeHost } from './backend/knowledge/host';
 import { KnowledgeCoordinator } from './application/knowledge';
 import { registerKnowledgeIpc } from './ipc/knowledge';
 import { UpdateService } from './backend/updates/service';
+import { readAutoDownload, saveAutoDownload } from './backend/updates/preferences';
 import { createUpdateDriver, updateUnavailableReason } from './backend/updates/driver';
 import { registerUpdateIpc } from './ipc/updates';
-import { app, BrowserWindow, dialog, shell, screen, systemPreferences, Menu } from 'electron';
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  shell,
+  screen,
+  systemPreferences,
+  Menu,
+  session,
+} from 'electron';
+import { existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { migrateUserData } from './userData';
+import { packagesFor } from './backend/components/catalog';
+import { ComponentService, componentPaths } from './backend/components/service';
+import { registerComponentIpc } from './ipc/components';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { createAuthStorage } from './backend/auth/storage';
 import { ChatGPTService } from './backend/chat/service';
 import type { AIChatService } from './backend/chat/ports';
-import type { AIService } from './contracts/auth';
-import { CopilotRuntime } from './backend/copilot/runtime';
-import { CopilotAuthService } from './backend/copilot/auth';
-import { CopilotChatService } from './backend/copilot/service';
-import { createCopilotLoginStorage, createServiceSelection } from './backend/copilot/storage';
-import { SelectedChatService } from './application/providers';
 import { UsageLedger } from './backend/chat/usage';
 import { registerChatIpc } from './ipc/chat';
 import { registerInterviewIpc } from './ipc/interview';
@@ -54,14 +63,12 @@ let knowledge: KnowledgeHost;
 let knowledgeCoordinator: KnowledgeCoordinator;
 let auth: ChatGPTAuthService;
 let chat: AIChatService;
-let copilotRuntime: CopilotRuntime;
-let copilotAuth: CopilotAuthService;
-let selectedService: AIService = 'chatgpt';
 let signingIn = false;
 let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
 let interviewIpc: ReturnType<typeof registerInterviewIpc> | undefined;
 let historyJobs: ReturnType<typeof registerHistoryIpc> | undefined;
 let updates: UpdateService | undefined;
+let components: ComponentService;
 let updateWasInstalling = false;
 let interviewOpening = false;
 let updateFlush: { resolve(saved: boolean): void; reject(error: Error): void } | null = null;
@@ -117,9 +124,22 @@ const nativePresentation: NativePresentation | undefined = desktopPlatform.prese
     })
   : undefined;
 const indexFile = path.join(app.getAppPath(), 'dist/index.html');
-// Keep existing profiles, credentials, knowledge and usage after the product rename.
-app.setPath('userData', path.join(app.getPath('appData'), 'ai-interview-copilot'));
 app.setName('VoxCue');
+try {
+  // Resolve/migrate before any session, credential store, model cache or window is created.
+  // Isolated test profiles must bypass real user data and migration entirely.
+  const isolated = process.env.COPILOT_TEST_USER_DATA;
+  if (isolated) mkdirSync(isolated, { recursive: true });
+  const directory = isolated ?? migrateUserData(app.getPath('appData'));
+  app.setPath('userData', directory);
+  app.setPath('sessionData', directory);
+} catch (error) {
+  dialog.showErrorBox(
+    '应用数据迁移未完成',
+    error instanceof Error ? error.message : '请检查数据目录后重试。',
+  );
+  app.exit(1);
+}
 if (desktopPlatform.appUserModelId) app.setAppUserModelId(desktopPlatform.appUserModelId);
 function interviewActive() {
   return interviewOpening || !!interviewWindow || !!speechSessions?.configuration;
@@ -176,7 +196,6 @@ function createLoginWindow() {
   });
   win.on('close', () => {
     auth.cancel();
-    copilotAuth?.cancel();
   });
   win.on('closed', () => {
     loginWindow = null;
@@ -329,8 +348,22 @@ function openInterview() {
     interviewIpc?.cancel();
   });
 }
-// Keep smoke tests isolated from the user's actual local documents and settings.
-if (process.env.COPILOT_TEST_USER_DATA) app.setPath('userData', process.env.COPILOT_TEST_USER_DATA);
+const componentRoot = path.join(app.getPath('userData'), 'component-cache');
+const componentMarker = path.join(process.resourcesPath, 'voxcue-components.json');
+const developmentModelsMissing =
+  !speechModelInstalled(resources.speechModels) ||
+  !['config.json', 'tokenizer.json', 'onnx/model_quantized.onnx'].every((file) =>
+    existsSync(path.join(resources.ragModel, file)),
+  );
+const managedComponents = app.isPackaged ? existsSync(componentMarker) : developmentModelsMissing;
+if (managedComponents) {
+  if (app.isPackaged && JSON.parse(readFileSync(componentMarker, 'utf8')).schemaVersion !== 1)
+    throw Error('Invalid component layout');
+  Object.assign(
+    resources,
+    componentPaths(componentRoot, packagesFor(process.platform, process.arch)),
+  );
+}
 if (desktopPlatform.nativeWindowControls) {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -424,6 +457,21 @@ function createMainWindow() {
   });
 }
 app.whenReady().then(() => {
+  components = new ComponentService({
+    root: componentRoot,
+    packages: packagesFor(process.platform, process.arch),
+    managed: managedComponents,
+    fetch: (url, options) => session.fromPartition('voxcue-components').fetch(String(url), options),
+    emit(state) {
+      for (const win of [mainWindow, loginWindow])
+        if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'components:event', state);
+    },
+  });
+  registerComponentIpc(components, (event) => {
+    if (![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender))
+      throw Error('Unauthorized window');
+  });
+  void components.status();
   nativePresentation?.initialize();
   if (desktopPlatform.nativeWindowControls) {
     Menu.setApplicationMenu(
@@ -469,37 +517,18 @@ app.whenReady().then(() => {
     storage: createAuthStorage(desktopPlatform.credentialEncryptionLabel),
     openBrowser: (url) => shell.openExternal(url),
   });
-  const chatGPT = new ChatGPTService({
+  chat = new ChatGPTService({
     access: () => auth.access(),
     ledger: new UsageLedger(path.join(app.getPath('userData'), 'chat-usage')),
   });
-  copilotRuntime = new CopilotRuntime(
-    path.join(app.getPath('userData'), 'copilot-runtime'),
-    resources.copilotRuntime,
-  );
-  copilotAuth = new CopilotAuthService({
-    credentialEncryptionLabel: desktopPlatform.credentialEncryptionLabel,
-    storage: createCopilotLoginStorage(),
-    control: () => copilotRuntime.control(),
-    openBrowser: (url) => shell.openExternal(url),
-  });
-  const copilot = new CopilotChatService({
-    client: () => copilotRuntime.client(),
-    access: () => copilotAuth.access(),
-    ledger: new UsageLedger(path.join(app.getPath('userData'), 'chat-usage')),
-  });
-  const selection = createServiceSelection();
-  let selectionReady = selection.read().then((service) => {
-    selectedService = service;
-  });
-  void selectionReady.catch(() => {});
-  const activeAuth = () => (selectedService === 'copilot' ? copilotAuth : auth);
-  chat = new SelectedChatService(() => (selectedService === 'copilot' ? copilot : chatGPT));
   const requireMain = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
   };
+  const updatePreferences = path.join(app.getPath('userData'), 'update-settings.json');
   updates = new UpdateService({
     currentVersion: app.getVersion(),
+    autoDownload: readAutoDownload(updatePreferences),
+    saveAutoDownload: (enabled) => saveAutoDownload(updatePreferences, enabled),
     driver:
       app.isPackaged && desktopPlatform.updateDriverFile
         ? require(
@@ -562,27 +591,22 @@ app.whenReady().then(() => {
   handleDesktop('auth:session', async (event) => {
     if (event.sender !== loginWindow?.webContents) requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
-    await selectionReady;
     const session = demoSession
       ? {
           mode: 'demo' as const,
           user: { id: 'local-demo', name: '本地用户', email: '' },
           expiresAt: null,
         }
-      : await activeAuth().session();
+      : await auth.session();
     return session;
   });
-  const signIn = async (service: AIService) => {
-    if (signingIn || auth.isPending() || copilotAuth.isPending())
-      throw Error('已有登录操作正在进行。');
+  const signIn = async () => {
+    if (signingIn || auth.isPending()) throw Error('已有登录操作正在进行。');
     signingIn = true;
     try {
       demoSession = false;
-      const session = await (service === 'copilot' ? copilotAuth : auth).signIn();
+      const session = await auth.signIn();
       if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
-      await selection.write(service);
-      selectedService = service;
-      selectionReady = Promise.resolve();
       createMainWindow();
       return session;
     } finally {
@@ -591,21 +615,16 @@ app.whenReady().then(() => {
   };
   handleDesktop('auth:sign-in', async (event) => {
     requireLogin(event);
-    return signIn('chatgpt');
-  });
-  handleDesktop('auth:copilot-sign-in', async (event) => {
-    requireLogin(event);
-    return signIn('copilot');
+    return signIn();
   });
   handleDesktop('auth:cancel', (event) => {
     requireLogin(event);
     auth.cancel();
-    copilotAuth.cancel();
   });
   handleDesktop('auth:demo', (event) => {
     requireLogin(event);
     if (app.isPackaged || !process.env.COPILOT_TEST_USER_DATA) throw Error('测试入口不可用。');
-    if (auth.isPending() || copilotAuth.isPending()) throw new Error('请先取消正在进行的登录。');
+    if (auth.isPending()) throw new Error('请先取消正在进行的登录。');
     demoSession = true;
     createMainWindow();
     return {
@@ -629,8 +648,7 @@ app.whenReady().then(() => {
       return { warning: null };
     }
     interviewIpc?.cancel();
-    const result = await activeAuth().signOut();
-    await copilotRuntime.stop();
+    const result = await auth.signOut();
     if (result.warning && mainWindow)
       await dialog.showMessageBox(mainWindow, {
         type: 'warning',
@@ -658,7 +676,7 @@ app.whenReady().then(() => {
     },
     () => chat.functionCallingStatus ?? { supported: null, reason: '当前服务尚未验证本地工具。' },
   );
-  registerKnowledgeIpc(knowledgeCoordinator, requireMain);
+  registerKnowledgeIpc(knowledgeCoordinator, requireMain, () => components.require('rag'));
   const ragChat = new RagChatService(chat, knowledge, () => knowledgeCoordinator.getMode());
   chatIpc = registerChatIpc({
     chat: ragChat,
@@ -813,6 +831,7 @@ app.whenReady().then(() => {
   handleDesktop('dictation:call', (event, value: unknown) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    if ((value as { op?: unknown })?.op === 'start') components.require('speech');
     return speechSessions!.dictation(value);
   });
   handleDesktop('interview:check-access', async (event, value: unknown) => {
@@ -839,6 +858,7 @@ app.whenReady().then(() => {
   handleDesktop('interview:open', async (event, value: unknown) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    components.require('speech');
     if (updates?.state().phase === 'installing')
       throw Error('正在准备更新，请完成或取消更新后再开始面试。');
     if (interviewOpening) throw Error('正在检查面试设备，请稍候。');
@@ -847,6 +867,7 @@ app.whenReady().then(() => {
     try {
       if (!demoSession && !(await auth.session())) throw new Error('Please sign in first');
       const configuration = validateInterviewConfiguration(value);
+      if (configuration.knowledgeBaseId) components.require('rag');
       if (!demoSession && (configuration.mode !== 'local' || !configuration.aiEnabled))
         throw Error('请先连接模型服务并选择回答模型。');
       if (configuration.aiEnabled) {
@@ -1020,8 +1041,8 @@ app.whenReady().then(() => {
     if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
     if (action === 'close') win.close();
   });
-  void selectionReady
-    .then(() => activeAuth().session())
+  void auth
+    .session()
     .then((session) => {
       if (session) createMainWindow();
       else createLoginWindow();
@@ -1030,8 +1051,8 @@ app.whenReady().then(() => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length !== 0) return;
     if (!desktopPlatform.nativeWindowControls) return createLoginWindow();
-    void selectionReady
-      .then(() => activeAuth().session())
+    void auth
+      .session()
       .then((session) => {
         if (BrowserWindow.getAllWindows().length) return;
         if (session) createMainWindow();
@@ -1051,6 +1072,7 @@ app.on('before-quit', (event) => {
     return;
   }
   updates?.dispose();
+  components?.dispose();
   nativePresentation?.dispose();
   knowledgeCoordinator?.cancelAll();
   knowledge?.stop();
@@ -1058,6 +1080,4 @@ app.on('before-quit', (event) => {
   speech?.stop();
   interviewIpc?.cancel();
   auth?.cancel();
-  copilotAuth?.cancel();
-  void copilotRuntime?.stop();
 });

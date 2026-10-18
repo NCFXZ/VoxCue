@@ -163,40 +163,6 @@ try {
       } finally {
         child.kill();
       }
-      const { CopilotRuntime } = require(
-        app.getAppPath() + '/dist-electron/shared/electron/backend/copilot/runtime.js',
-      );
-      const { desktopResources, selectDesktopPlatform } = require(
-        app.getAppPath() + '/dist-electron/shared/electron/platform/index.js',
-      );
-      const packagedResources = desktopResources(
-        {
-          appPath: app.getAppPath(),
-          resourcesPath: process.resourcesPath,
-          packaged: app.isPackaged,
-        },
-        selectDesktopPlatform(),
-      );
-      assert.ok(packagedResources.copilotRuntime.includes('app.asar.unpacked'));
-      const copilot = new CopilotRuntime(
-        path.join(app.getPath('userData'), 'copilot-probe'),
-        packagedResources.copilotRuntime,
-      );
-      let copilotTimeout;
-      try {
-        await Promise.race([
-          copilot.client(),
-          new Promise((_, reject) => {
-            copilotTimeout = setTimeout(
-              () => reject(Error('Packaged Copilot bootstrap timeout')),
-              20000,
-            );
-          }),
-        ]);
-      } finally {
-        clearTimeout(copilotTimeout);
-        await copilot.stop();
-      }
       const { KnowledgeHost } = require(
         app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
       );
@@ -255,7 +221,6 @@ try {
       return [
         'packaged login',
         'arm64 native bindings',
-        'bundled official Copilot runtime bootstrap',
         'PDF/DOCX parsing',
         'Paraformer Worker',
         'speech utilityProcess',

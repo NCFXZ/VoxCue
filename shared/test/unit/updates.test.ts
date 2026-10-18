@@ -13,27 +13,75 @@ class Driver extends EventEmitter implements UpdateDriver {
     this.emit('update-available', { version: '0.2.0', releaseNotes: '<script>private</script>' });
     return { cancellationToken: { cancel: this.cancel } };
   });
-  downloadUpdate = vi.fn(async () => {
+  downloadUpdate = vi.fn(async (_signal?: AbortSignal) => {
     this.emit('update-downloaded');
   });
   quitAndInstall = vi.fn();
 }
-function setup() {
+function setup(autoDownload = true) {
   const driver = new Driver();
   const emit = vi.fn();
   const prepareInstall = vi.fn(async () => true);
   const context = { interview: false };
+  const saveAutoDownload = vi.fn();
   const service = new UpdateService({
     currentVersion: '0.1.0',
+    autoDownload,
+    saveAutoDownload,
     driver,
     emit,
     prepareInstall,
     isInterviewActive: () => context.interview,
   });
-  return { driver, emit, prepareInstall, context, service };
+  return { driver, emit, prepareInstall, context, service, saveAutoDownload };
 }
 
 describe('应用更新生命周期', () => {
+  it('关闭自动下载只提示更新；重新开启后下载但不会自动安装', async () => {
+    const s = setup(false);
+    await s.service.start();
+    expect(s.service.state()).toMatchObject({ phase: 'available', autoDownload: false });
+    expect(s.driver.downloadUpdate).not.toHaveBeenCalled();
+    s.service.setAutoDownload(true);
+    expect(s.saveAutoDownload).toHaveBeenCalledExactlyOnceWith(true);
+    expect(s.driver.downloadUpdate).toHaveBeenCalledTimes(1);
+    expect(s.service.state()).toMatchObject({ phase: 'downloaded', autoDownload: true });
+    expect(s.driver.quitAndInstall).not.toHaveBeenCalled();
+  });
+  it('检查过程中关闭开关会阻止随后自动下载，手动下载仍可使用', async () => {
+    const s = setup();
+    let finish!: () => void;
+    s.driver.checkForUpdates.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => {
+            s.driver.emit('update-available', { version: '0.2.0' });
+            resolve(null as any);
+          };
+        }),
+    );
+    const checking = s.service.check();
+    s.service.setAutoDownload(false);
+    finish();
+    await checking;
+    expect(s.service.state()).toMatchObject({ phase: 'available', autoDownload: false });
+    expect(s.driver.downloadUpdate).not.toHaveBeenCalled();
+    await s.service.download();
+    expect(s.service.state().phase).toBe('downloaded');
+  });
+  it('偏好保存失败保留原开关与下载行为，不误显示已保存', async () => {
+    const s = setup(false);
+    await s.service.start();
+    s.saveAutoDownload.mockImplementation(() => {
+      throw Error('/private/config');
+    });
+    expect(s.service.setAutoDownload(true)).toMatchObject({
+      autoDownload: false,
+      phase: 'available',
+      error: '自动下载设置未能保存，请重试。',
+    });
+    expect(s.driver.downloadUpdate).not.toHaveBeenCalled();
+  });
   it('启动仅检查与下载；普通退出、面试和下载事件都不会自动安装', async () => {
     const s = setup();
     expect(s.driver.autoDownload).toBe(false);
@@ -99,6 +147,36 @@ describe('应用更新生命周期', () => {
     expect(s.driver.quitAndInstall).not.toHaveBeenCalled();
     await s.service.download();
     expect(s.service.state().phase).toBe('downloaded');
+  });
+  it('取消下载等待清理，忽略取消后的事件，允许重新下载而不触发安装', async () => {
+    const s = setup(false);
+    await s.service.check();
+    let finish!: () => void;
+    let signal!: AbortSignal;
+    s.driver.downloadUpdate.mockImplementationOnce((value) => {
+      signal = value!;
+      return new Promise((resolve) => {
+        finish = resolve;
+      });
+    });
+    const pending = s.service.download();
+    const cancelled = s.service.cancel();
+    expect(signal.aborted).toBe(true);
+    s.driver.emit('download-progress', { percent: 99 });
+    s.driver.emit('update-downloaded');
+    s.driver.emit('error', Error('cancelled'));
+    expect(s.service.state()).toMatchObject({ phase: 'downloading', progress: 0, error: null });
+    await s.service.check();
+    expect(s.service.download()).toBe(pending);
+    expect(s.driver.downloadUpdate).toHaveBeenCalledTimes(1);
+    finish();
+    await cancelled;
+    expect(s.service.state()).toMatchObject({ phase: 'available', progress: null, error: null });
+    await s.service.download();
+    expect(s.service.state().phase).toBe('downloaded');
+    await s.service.cancel();
+    expect(s.service.state().phase).toBe('downloaded');
+    expect(s.driver.quitAndInstall).not.toHaveBeenCalled();
   });
   it('并发检查串行且终止后不接收迟到结果', async () => {
     const s = setup();

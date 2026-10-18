@@ -1,6 +1,7 @@
 import path from 'node:path';
 import workspace from '../../scripts/workspace.mjs';
 import { spawnTestProcess } from './test-workspace.mjs';
+import { prepareModelFixtures } from './model-fixtures.mjs';
 
 const shared = [
   'login',
@@ -26,16 +27,36 @@ const shared = [
   'ui-ux',
   'typography',
   'updates',
+  'updates-sidebar',
+  'components-ui',
   'adversarial',
   'interview-stability',
   'audio-pipeline',
 ];
-const mac = ['window-native', 'screen-permission', 'icons', 'launcher', 'native-build'];
+const mac = [
+  'window-native',
+  'screen-permission',
+  'icons',
+  'launcher',
+  'native-build',
+  'user-data',
+  'updates-native',
+  'components',
+];
 const selected = process.argv.slice(2);
 const names = selected.length
   ? selected
   : [...shared, ...(process.platform === 'darwin' ? mac : [])];
+for (const name of names)
+  if (!shared.includes(name) && !(process.platform === 'darwin' && mac.includes(name)))
+    throw Error('Unknown or unavailable suite: ' + name);
 const outcomes = [];
+const models = await prepareModelFixtures();
+const modelEnvironment = {
+  VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+  VOXCUE_TEST_RAG_MODEL: models.ragModel,
+  VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+};
 for (const name of names) {
   const directory = shared.includes(name)
     ? path.join(workspace.sharedRoot, 'test/scripts')
@@ -46,13 +67,20 @@ for (const name of names) {
   const started = performance.now();
   const child = spawnTestProcess(process.execPath, [path.join(directory, name + '-smoke.mjs')], {
     cwd: workspace.platformRoot,
-    env: { ...process.env },
+    env: { ...process.env, ...modelEnvironment },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   let output = '';
-  child.stdout.on('data', (data) => (output += data));
+  let progress = '';
+  child.stdout.on('data', (data) => {
+    output += data;
+    const lines = (progress + data).split('\n');
+    progress = lines.pop();
+    for (const line of lines)
+      if (/^Interview cycle \d+\/20 passed$/.test(line)) console.log('  ' + line);
+  });
   child.stderr.on('data', (data) => (output += data));
-  const timer = setTimeout(() => child.kill('SIGTERM'), 180000);
+  const timer = setTimeout(() => child.kill('SIGTERM'), name === 'components' ? 600000 : 240000);
   const code = await new Promise((resolve, reject) => {
     child.once('error', reject);
     child.once('exit', resolve);

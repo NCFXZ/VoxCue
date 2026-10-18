@@ -68,7 +68,13 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
     );
     return { cancellationToken: { cancel: () => this.dispose() } };
   }
-  async downloadUpdate() {
+  async downloadUpdate(signal?: AbortSignal) {
+    const downloadSignal = AbortSignal.any([
+      this.lifetime.signal,
+      AbortSignal.timeout(30 * 60 * 1000),
+      ...(signal ? [signal] : []),
+    ]);
+    downloadSignal.throwIfAborted();
     if (
       !this.update ||
       !this.candidate ||
@@ -83,11 +89,11 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
         releaseAssetUrl(this.candidate, this.update.url),
         archive,
         this.update,
-        AbortSignal.any([this.lifetime.signal, AbortSignal.timeout(30 * 60 * 1000)]),
+        downloadSignal,
         (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
         (percent) => this.emit('download-progress', { percent }),
       );
-      this.lifetime.signal.throwIfAborted();
+      downloadSignal.throwIfAborted();
       this.archive = archive;
       this.emit('update-downloaded');
     } catch (error) {

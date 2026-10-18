@@ -80,7 +80,7 @@ describe('长期模块边界', () => {
     ['shared/electron/main.ts', 'electron-updater'],
     ['shared/src/services/auth.ts', '@github/copilot-sdk'],
     ['shared/electron/preload.ts', '@github/copilot-sdk'],
-    ['shared/electron/application/providers.ts', '@github/copilot-sdk'],
+    ['shared/electron/application/interviewContext.ts', '@github/copilot-sdk'],
     ['shared/electron/backend/updates/service.ts', 'shared/electron/backend/auth/storage.ts'],
     ['shared/electron/backend/updates/service.ts', 'shared/electron/backend/knowledge/service.ts'],
     ['windows/electron/platform.ts', 'shared/electron/backend/auth/storage.ts'],

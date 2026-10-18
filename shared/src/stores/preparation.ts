@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { componentReady } from './components';
 import { mergeActivityLog } from '../../electron/contracts/activity';
 import {
   mockPreparation,
@@ -185,6 +186,10 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     );
   },
   async selectKnowledgeBase(id) {
+    if (id !== null && !componentReady('rag')) {
+      set({ error: '请先下载并准备知识库模型，再选择知识库。' });
+      return false;
+    }
     try {
       if (id !== null && !(await localKnowledge.listBases()).some((base) => base.id === id))
         throw Error('所选知识库已不存在，请重新选择。');

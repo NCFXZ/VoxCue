@@ -160,3 +160,30 @@ it('a failed newer check cannot reuse a previously authenticated older offer', a
   await expect(driver.downloadUpdate()).rejects.toThrow('No newer verified update');
   expect(native.begin).not.toHaveBeenCalled();
 });
+
+it('aborting a download removes its temporary archive and preserves the verified offer for retry', async () => {
+  const { driver, native } = setup();
+  await driver.checkForUpdates();
+  const fetch = mocks.fetch.getMockImplementation()!;
+  const cancelled = vi.fn();
+  mocks.fetch.mockImplementationOnce(
+    async () => new Response(new ReadableStream({ cancel: cancelled })),
+  );
+  const controller = new AbortController();
+  const ready = vi.fn();
+  driver.on('update-downloaded', ready);
+  const pending = driver.downloadUpdate(controller.signal);
+  // Attach the rejection handler before aborting the blocked stream.
+  const rejected = expect(pending).rejects.toThrow();
+  await vi.waitFor(() => expect(mocks.fetch).toHaveBeenCalledTimes(3));
+  const directory = (driver as any).directory;
+  controller.abort();
+  await rejected;
+  await expect(access(directory)).rejects.toThrow();
+  expect(cancelled).toHaveBeenCalledOnce();
+  expect(ready).not.toHaveBeenCalled();
+  expect(native.begin).not.toHaveBeenCalled();
+  mocks.fetch.mockImplementation(fetch);
+  await driver.downloadUpdate();
+  expect(ready).toHaveBeenCalledOnce();
+});

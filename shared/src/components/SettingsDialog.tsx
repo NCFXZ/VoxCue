@@ -14,13 +14,17 @@ import {
   Check,
   ChevronsUpDown,
   Person,
-  RotateCcw,
+  Update,
+  Download,
+  ArrowUpRight,
 } from './icons';
 import { Modal } from './ui/modal';
 import { Button } from './ui/button';
 import { ChoiceMenu } from './ui/choice-menu';
 import { UsagePanel } from './UsagePanel';
 import { UpdatesPanel } from './UpdatesPanel';
+import { ComponentsPanel } from './ComponentsPanel';
+import { useComponentReady } from '../stores/components';
 import { useModelProvider } from './useModelProvider';
 import { providerInfo } from '../services/providers';
 import { SpeechControls } from './SpeechControls';
@@ -40,10 +44,11 @@ export type Theme = 'light' | 'dark' | 'system';
 const platformLabels = { macos: 'macOS', windows: 'Windows', unknown: '未知平台' };
 const categories = [
   { id: 'general', label: '常规', Icon: Appearance },
+  { id: 'components', label: '本地组件', Icon: Download },
   { id: 'account', label: '账户与用量', Icon: Person },
   { id: 'interview', label: '面试设置', Icon: Settings },
   { id: 'knowledge', label: '知识库', Icon: Database },
-  { id: 'updates', label: '更新', Icon: RotateCcw },
+  { id: 'updates', label: '更新', Icon: Update },
   { id: 'about', label: '关于', Icon: CircleHelp },
 ] as const;
 export type SettingsCategory = (typeof categories)[number]['id'];
@@ -79,7 +84,8 @@ export function SettingsDialog({
     return () => window.removeEventListener('storage', update);
   }, []);
   const knowledge = useKnowledgeIndex();
-  useEffect(() => knowledge.connect(), []);
+  const ragReady = useComponentReady('rag');
+  useEffect(() => knowledge.connect(), [ragReady]);
   const session = useAuth((state) => state.session);
   const interview = useInterviewSettings();
   const connection = useChatConnection();
@@ -126,6 +132,7 @@ export function SettingsDialog({
           </header>
           <div className="settings-content-body">
             {category === 'updates' && <UpdatesPanel />}
+            {category === 'components' && <ComponentsPanel />}
             {category === 'general' && (
               <>
                 <div className="settings-entry">
@@ -312,13 +319,14 @@ export function SettingsDialog({
                   <span className="settings-value">
                     {knowledge.state?.documents.filter((doc) => doc.available !== false).length ??
                       0}{' '}
-                    个可用文档 · {knowledge.state?.modelReady ? '模型文件就绪' : '模型未安装'}
+                    个可用文档 · {ragReady ? '模型文件就绪' : '模型未安装'}
                   </span>
                 </div>
-                {knowledge.state && !knowledge.state.modelReady && (
-                  <p className="inline-error" role="alert">
-                    资料处理组件缺失。请使用包含本地模型的完整安装包修复安装；文档原件已保留。
-                  </p>
+                {!ragReady && (
+                  <Button variant="ghost" onClick={() => setCategory('components')}>
+                    前往本地组件设置
+                    <ArrowUpRight size={14} />
+                  </Button>
                 )}
                 {knowledge.error && (
                   <p role="alert" className="inline-error">

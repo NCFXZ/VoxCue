@@ -1,11 +1,11 @@
-import { useEffect } from 'react';
 import { useUpdates } from '../stores/updates';
 import { Button } from './ui/button';
-import { Download, Loader, RotateCcw } from './icons';
+import { Download, Loader, Update } from './icons';
+import { DownloadButton } from './DownloadButton';
+import { ActionTransition } from './ActionTransition';
 
 export function UpdatesPanel() {
   const updates = useUpdates();
-  useEffect(() => updates.connect(), []);
   const state = updates.state;
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.phase);
   const downloaded = state?.phase === 'downloaded';
@@ -27,7 +27,9 @@ export function UpdatesPanel() {
                 ? `发现新版本 ${state.availableVersion}`
                 : state.lastCheckedAt && state.phase === 'idle'
                   ? '当前已是最新版本。'
-                  : '启动后自动检查并下载新版本。';
+                  : state.autoDownload
+                    ? '启动后自动检查并下载新版本。'
+                    : '启动后自动检查新版本，由你选择下载。';
   return (
     <>
       <div className="settings-entry">
@@ -35,47 +37,69 @@ export function UpdatesPanel() {
         <span className="settings-value">{state?.currentVersion ?? '—'}</span>
       </div>
       <div className="settings-entry">
-        <strong>软件更新</strong>
-        <Button
-          variant="outline"
-          disabled={busy || state?.phase === 'unavailable' || (downloaded && state.interviewActive)}
+        <div>
+          <strong id="auto-download-label">自动下载更新</strong>
+          <p id="auto-download-description">发现新版本后自动下载，安装仍需点击“重启并更新”。</p>
+        </div>
+        <button
+          type="button"
+          role="switch"
+          className="settings-switch"
+          aria-labelledby="auto-download-label"
+          aria-describedby="auto-download-description"
+          aria-checked={state?.autoDownload ?? false}
+          disabled={!state || state.phase === 'installing'}
           onClick={() =>
-            void updates.run(downloaded ? 'install' : available ? 'download' : 'check')
+            state && void updates.run({ op: 'set-auto-download', enabled: !state.autoDownload })
           }
         >
-          {busy ? (
-            <span className="update-spinner" aria-hidden="true">
-              <Loader size={16} />
-            </span>
-          ) : available ? (
-            <Download size={16} />
+          <span />
+        </button>
+      </div>
+      <div className="settings-entry">
+        <strong>软件更新</strong>
+        <ActionTransition>
+          {state?.phase === 'downloading' ? (
+            <DownloadButton
+              label="更新"
+              progress={state.progress}
+              onCancel={() => void updates.run('cancel')}
+            />
           ) : (
-            <RotateCcw size={16} />
+            <Button
+              variant="outline"
+              disabled={
+                busy || state?.phase === 'unavailable' || (downloaded && state.interviewActive)
+              }
+              onClick={() =>
+                void updates.run(downloaded ? 'install' : available ? 'download' : 'check')
+              }
+            >
+              {busy ? (
+                <span className="update-spinner" aria-hidden="true">
+                  <Loader size={16} />
+                </span>
+              ) : available ? (
+                <Download size={16} />
+              ) : (
+                <Update size={16} />
+              )}
+              {state?.phase === 'checking'
+                ? '检查中…'
+                : state?.phase === 'installing'
+                  ? '准备更新…'
+                  : downloaded
+                    ? '重启并更新'
+                    : available
+                      ? '下载更新'
+                      : '检查更新'}
+            </Button>
           )}
-          {state?.phase === 'checking'
-            ? '检查中…'
-            : state?.phase === 'downloading'
-              ? '下载中…'
-              : state?.phase === 'installing'
-                ? '准备更新…'
-                : downloaded
-                  ? '重启并更新'
-                  : available
-                    ? '下载更新'
-                    : '检查更新'}
-        </Button>
+        </ActionTransition>
       </div>
       <p className="settings-hint" role="status" aria-live="polite">
         {label}
       </p>
-      {state?.phase === 'downloading' && (
-        <progress
-          className="update-progress"
-          aria-label="更新下载进度"
-          max={100}
-          value={state.progress ?? 0}
-        />
-      )}
       <p className="settings-hint">
         更新会保留本机聊天、附件、个人资料和面试记录。安装需要点击“重启并更新”；面试进行中无法安装。
       </p>

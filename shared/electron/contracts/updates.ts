@@ -1,8 +1,10 @@
-export type UpdateCall = { op: 'status' | 'check' | 'download' | 'install' };
+export type UpdateAction = 'status' | 'check' | 'download' | 'cancel' | 'install';
+export type UpdateCall = { op: UpdateAction } | { op: 'set-auto-download'; enabled: boolean };
 
 export interface UpdateState {
   revision: number;
   currentVersion: string;
+  autoDownload: boolean;
   phase:
     | 'unavailable'
     | 'idle'

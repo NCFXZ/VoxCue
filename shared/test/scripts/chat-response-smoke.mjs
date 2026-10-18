@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -372,14 +371,35 @@ try {
   assert.ok((await page.locator('link[rel="icon"]').getAttribute('href')).endsWith('voxcue.png'));
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   const panel = page.getByRole('complementary', { name: '个人信息', exact: true });
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.effect?.getTiming().iterations === Infinity ||
+          animation.playState !== 'running',
+      ),
+  );
   const geometry = await panel
     .locator('.profile-section-actions')
     .first()
     .evaluate((element) => {
-      const buttons = [...element.querySelectorAll('button')].map((e) => e.getBoundingClientRect());
-      return Math.abs(buttons[0].y - buttons[1].y);
+      const buttons = [...element.querySelectorAll('button')].map((e) => {
+        const rect = e.getBoundingClientRect();
+        return {
+          label: e.getAttribute('aria-label') || e.textContent,
+          y: rect.y,
+          height: rect.height,
+        };
+      });
+      return {
+        buttons,
+        offset: Math.abs(
+          buttons[0].y + buttons[0].height / 2 - buttons[1].y - buttons[1].height / 2,
+        ),
+      };
     });
-  assert.ok(geometry < 1);
+  assert.ok(geometry.offset < 1, JSON.stringify(geometry));
   await page.screenshot({});
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('状态测试');

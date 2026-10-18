@@ -35,7 +35,9 @@ Mac build 包括 Core Audio 助手、屏幕权限绑定、SF Symbols 资源、El
 
 ## 界面图标
 
-Mac 的全部 45 个界面操作图标使用 [Apple SF Symbols](https://developer.apple.com/sf-symbols/)，映射与 React 适配在 macos/src。通过公开 AppKit NSImage systemSymbolName 从本机系统生成 regular/medium 透明遮罩，192px 资源只用于此 Mac 应用，位于 macos/public/sf-symbols；不复制字体或要求安装 SF Symbols 工具。可运行 corepack pnpm build:symbols 单独生成，Mac Vite 构建/开发/测试也会检查资源；缓存带系统版本指纹，缺失符号直接报错。没有新 npm 或全局依赖。
+Dock/访达应用图标沿用白底 Logo 和透明边距的 PNG/ICNS。运行时明确使用非模板彩图，在本应用或系统主题变化时重设同一图片，面试结束恢复 Dock 前后也使用该图片；不改变应用的浅色/深色/跟随系统设置。macOS 额外的图标着色或透明风格由系统管理，本应用不修改全局外观或 Dock 偏好，也不承诺禁止所有系统渲染处理。
+
+Mac 的全部 50 个界面操作图标使用 [Apple SF Symbols](https://developer.apple.com/sf-symbols/)，映射与 React 适配在 macos/src。通过公开 AppKit NSImage systemSymbolName 从本机系统生成 regular/medium 透明遮罩，192px 资源只用于此 Mac 应用，位于 macos/public/sf-symbols；不复制字体或要求安装 SF Symbols 工具。可运行 corepack pnpm build:symbols 单独生成，Mac Vite 构建/开发/测试也会检查资源；缓存带系统版本指纹，缺失符号直接报错。保存、搜索、文档和预览沿用同一接口，Windows 对应 Fluent 图标。没有新 npm 或全局依赖。
 
 构建时替换统一图标入口，Mac Renderer 不包含 Fluent UI 图标模块；Windows 原实现保持。尺寸、颜色继承、旋转、浮窗右侧缩放镜像与无障碍行为保持，品牌 Logo 独立。专项 corepack pnpm test:icons 使用隔离账户和合成音频覆盖登录、主界面、设置和浮窗，附完整浅深主题符号预览。Mac 图标单测在 Windows 跳过，不要求其生成或安装 Apple 资源。
 

@@ -60,9 +60,5 @@ export function desktopResources(environment: ResourceEnvironment, platform: Des
     speechProcess: platform.speechProcessFile
       ? path.join(appPath, 'dist-electron', platform.speechProcessFile)
       : undefined,
-    copilotRuntime:
-      packaged && platform.packagedCopilotRuntime
-        ? path.join(resourcesPath, platform.packagedCopilotRuntime)
-        : undefined,
   };
 }

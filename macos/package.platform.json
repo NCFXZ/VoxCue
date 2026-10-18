@@ -19,7 +19,6 @@
     "test:package": "node test/scripts/package-smoke.mjs"
   },
   "optionalDependencies": {
-    "@github/copilot-sdk-darwin-arm64": "1.0.21",
     "sherpa-onnx-darwin-arm64": "1.13.8"
   },
   "devDependencies": {

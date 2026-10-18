@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -86,7 +85,7 @@ try {
   };
   await open();
   assert.equal(await category('常规').getAttribute('aria-current'), 'page');
-  assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 6);
+  assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 7);
   const accent = settings.getByRole('button', { name: '主题色', exact: true });
   await accent.getByText('跟随系统', { exact: true }).waitFor();
   assert.equal(

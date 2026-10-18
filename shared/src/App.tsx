@@ -8,6 +8,8 @@ import { KnowledgePage } from './components/KnowledgePage';
 import { useDictation } from './stores/dictation';
 import { usePreparation } from './stores/preparation';
 import { useAuth } from './stores/auth';
+import { useComponents } from './stores/components';
+import { useUpdates } from './stores/updates';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
 import { useHistory } from './stores/history';
@@ -18,12 +20,21 @@ function initialTheme(): Theme {
   return value === 'light' || value === 'dark' ? value : 'system';
 }
 export function App() {
+  useEffect(() => useComponents.getState().connect(), []);
   const isLoginWindow = location.hash === '#login';
+  useEffect(() => {
+    if (!isLoginWindow) return useUpdates.getState().connect();
+  }, [isLoginWindow]);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [collapsed, setCollapsed] = useState(false);
   const [settings, setSettings] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('general');
   const [returnToInterview, setReturnToInterview] = useState(false);
+  const openComponentSettings = () => {
+    setSettingsCategory('components');
+    setReturnToInterview(false);
+    setSettings(true);
+  };
   const [startRequest, setStartRequest] = useState(0);
   const [personalDraft, setPersonalDraft] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string | null>(null);
@@ -167,6 +178,7 @@ export function App() {
               <PreparationPage
                 onDraftChange={setPersonalDraft}
                 startRequest={startRequest}
+                onComponentSettings={openComponentSettings}
                 onInterviewSettings={() => {
                   setSettingsCategory('interview');
                   setReturnToInterview(true);
@@ -175,7 +187,7 @@ export function App() {
               />
             </div>
             {page === 'history' && <HistoryPage />}
-            {page === 'knowledge' && <KnowledgePage />}
+            {page === 'knowledge' && <KnowledgePage onComponentSettings={openComponentSettings} />}
           </>
         )}
       </div>

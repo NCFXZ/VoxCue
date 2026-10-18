@@ -4,7 +4,6 @@
 
 `public/voxcue-source.png` 为用户提供的 VoxCue Logo 原文件，保持图形与颜色。`voxcue.png`（512px）及多尺寸 `voxcue.ico` 由 `shared/scripts/update-app-icons.cjs` 转换生成，用于应用、网页标签与 Windows 窗口。
 
-`copilot.svg`：来自 GitHub 官方 Primer Octicons 的 [copilot-24](https://github.com/primer/octicons/blob/main/icons/copilot-24.svg)，按其 [MIT 许可](https://github.com/primer/octicons/blob/main/LICENSE)使用，用于 GitHub Copilot 登录及回复标识。
 
 本应用自身的名称与图标保持独立，不表示 OpenAI 或 GitHub 的官方应用或背书。
 

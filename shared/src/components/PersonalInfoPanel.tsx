@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
+import { useComponentReady } from '../stores/components';
+import { ComponentsNotice } from './ComponentsNotice';
 import { usePreparation } from '../stores/preparation';
 import { localKnowledge, type KnowledgeBase } from '../services/knowledge';
 import {
@@ -10,7 +12,7 @@ import {
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { ChoiceMenu } from './ui/choice-menu';
-import { Check, X, Edit, ChevronRight } from './icons';
+import { Check, X, Edit, ChevronRight, Save, Refresh } from './icons';
 import { ProfileValue, ProfileProposal, SkillUpdatePrompt } from './ProfileProposal';
 
 const basicInfo = (info: PersonalInfo) => ({
@@ -22,7 +24,9 @@ export function PersonalInfoPanel({
   onClose,
   onDirtyChange,
   onErrorChange,
+  onComponentSettings,
 }: {
+  onComponentSettings?(): void;
   open: boolean;
   onClose(): void;
   onDirtyChange?(dirty: boolean): void;
@@ -77,6 +81,7 @@ export function PersonalInfoPanel({
       setError(null);
     } else setError(usePreparation.getState().error);
   };
+  const ragReady = useComponentReady('rag');
   const [error, setError] = useState<string | null>(null);
   const [bases, setBases] = useState<KnowledgeBase[]>([]);
   const [basesError, setBasesError] = useState<string | null>(null);
@@ -190,12 +195,14 @@ export function PersonalInfoPanel({
               setError(null);
             }}
           >
+            <X size={16} />
             取消
           </Button>
           <Button
             disabled={editor!.field === 'skills' && (!editor.text.trim() || !editor.title?.trim())}
             onClick={submitEdit}
           >
+            <Save size={16} />
             保存
           </Button>
         </div>
@@ -229,7 +236,9 @@ export function PersonalInfoPanel({
     <aside
       ref={panelRef}
       className="personal-panel personal-info-v2"
-      hidden={!open}
+      data-open={open}
+      inert={!open}
+      aria-hidden={!open}
       aria-label="个人信息"
     >
       <header>
@@ -345,6 +354,7 @@ export function PersonalInfoPanel({
           <p className="section-help">仅由你选择，本场面试只检索这个知识库。AI 不能修改选择。</p>
           <ChoiceMenu
             label="面试知识库"
+            disabled={!ragReady}
             value={state.selectedKnowledgeBaseId ?? ''}
             options={[
               { value: '', label: '不使用知识库' },
@@ -359,6 +369,7 @@ export function PersonalInfoPanel({
               });
             }}
           />
+          {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
           {(basesError || selectedMissing) && (
             <p role="alert" className="danger-text">
               {basesError || '所选知识库已删除，请重新选择或选择不使用。'}
@@ -376,7 +387,12 @@ export function PersonalInfoPanel({
           <SkillUpdatePrompt />
           {(state.info.skills ?? []).map((item) => (
             <details className="profile-entry" key={item.id}>
-              <summary>{item.title}<span className="disclosure-chevron"><ChevronRight size={14} /></span></summary>
+              <summary>
+                {item.title}
+                <span className="disclosure-chevron">
+                  <ChevronRight size={14} />
+                </span>
+              </summary>
               {renderEditor('skills', item.id)}
               <div hidden={editor?.field === 'skills' && editor.id === item.id}>
                 <ProfileValue value={[item]} hideTitle />
@@ -439,10 +455,12 @@ export function PersonalInfoPanel({
                   setError(null);
                 }}
               >
+                {conflict ? <Refresh size={16} /> : <X size={16} />}
                 {conflict ? '载入最新资料' : '取消'}
               </Button>
             )}
             <Button form="personal-info-form" type="submit" disabled={!dirty || conflict}>
+              <Save size={16} />
               保存
             </Button>
           </div>

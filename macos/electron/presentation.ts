@@ -1,10 +1,15 @@
-import { app, nativeTheme } from 'electron';
+import { app, nativeImage, nativeTheme } from 'electron';
 import type { NativePresentation } from '../../shared/electron/presentation';
 
 export function createPresentation(options: {
   icon: string;
   interviewOpen(): boolean;
 }): NativePresentation {
+  // Keep the supplied light artwork as a full-color image in every appearance.
+  const icon = nativeImage.createFromPath(options.icon);
+  icon.setTemplateImage(false);
+  const applyIcon = () => app.dock?.setIcon(icon);
+  let observingAppearance = false;
   let hideTimer: ReturnType<typeof setTimeout> | undefined;
   let lastHide = 0;
   let lastShow = 0;
@@ -25,7 +30,13 @@ export function createPresentation(options: {
     lastHide = Date.now();
   };
   return {
-    initialize: () => app.dock?.setIcon(options.icon),
+    initialize: () => {
+      if (!observingAppearance) {
+        nativeTheme.on('updated', applyIcon);
+        observingAppearance = true;
+      }
+      applyIcon();
+    },
     setTheme: (theme) => {
       nativeTheme.themeSource = theme;
     },
@@ -41,13 +52,17 @@ export function createPresentation(options: {
       cancelHide();
       const dock = app.dock;
       if (!dock) return;
-      dock.setIcon(options.icon);
+      applyIcon();
       lastShow = Date.now();
       await dock.show();
       lastShow = Date.now();
-      dock.setIcon(options.icon);
+      applyIcon();
     },
     setMousePassthrough: (win, ignore) => win.setIgnoreMouseEvents(ignore, { forward: true }),
-    dispose: cancelHide,
+    dispose: () => {
+      cancelHide();
+      if (observingAppearance) nativeTheme.removeListener('updated', applyIcon);
+      observingAppearance = false;
+    },
   };
 }

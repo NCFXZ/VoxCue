@@ -3,7 +3,7 @@ import type { ChatMessage } from '../services/preparation';
 import type { ChatActivity as Activity } from '../../electron/contracts/chat';
 import { MarkdownContent } from './MarkdownContent';
 import { ChatActivity, describeActivity } from './ChatActivity';
-import { Globe, Database, MessageSquare, ChevronRight } from './icons';
+import { Globe, Database, MessageSquare, ChevronRight, Link } from './icons';
 import { openChatLink } from '../services/chat';
 import { reasoningSections } from '../services/responseProgress';
 
@@ -179,7 +179,8 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
                                 );
                               }}
                             >
-                              {activity.detail}
+                              <Link size={13} />
+                              <span>{activity.detail}</span>
                             </button>
                           ) : (
                             <span className="progress-detail">{activity.detail}</span>

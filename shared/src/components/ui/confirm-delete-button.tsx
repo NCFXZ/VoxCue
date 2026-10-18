@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, type ButtonProps } from './button';
-import { Trash, RotateCcw, Loader } from '../icons';
+import { Trash, Reset, Loader } from '../icons';
 
 interface Props extends Omit<ButtonProps, 'onClick' | 'children' | 'variant' | 'size'> {
   target: string;
@@ -72,7 +72,7 @@ function ConfirmActionButton({
         style={{
           ...props.style,
           width:
-            width === undefined ? undefined : armed ? Math.max(compact ? 80 : 112, width) : width,
+            width === undefined ? undefined : armed ? Math.max(compact ? 100 : 112, width) : width,
         }}
         variant={armed ? 'destructive' : 'dangerGhost'}
         size={iconOnly && !armed ? 'icon' : 'default'}
@@ -125,7 +125,7 @@ function ConfirmActionButton({
           {!iconOnly && <span>{label}</span>}
         </span>
         <span className="confirm-delete-confirm" aria-hidden="true">
-          {compact ? null : busy ? <Loader size={14} /> : <Icon size={14} />}
+          {busy ? <Loader size={14} /> : <Icon size={14} />}
           <span>{busy ? `${action}中…` : `确认${action}`}</span>
         </span>
       </Button>
@@ -144,5 +144,5 @@ export function ConfirmDeleteButton(props: Props) {
 
 /** UsagePanel displays the reset service's error next to its usage statistics. */
 export function ConfirmResetButton(props: Props) {
-  return <ConfirmActionButton {...props} action="重置" icon={RotateCcw} reportError={false} />;
+  return <ConfirmActionButton {...props} action="重置" icon={Reset} reportError={false} />;
 }

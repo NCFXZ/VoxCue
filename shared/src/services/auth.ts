@@ -8,11 +8,9 @@ export interface AuthenticationService {
 }
 export const authentication: AuthenticationService = {
   session: async () => window.desktop?.authSession() ?? null,
-  async signIn(service = 'chatgpt') {
+  async signIn() {
     if (!window.desktop) throw new Error('请在桌面应用中登录模型服务。');
-    return service === 'copilot'
-      ? window.desktop.signInWithCopilot()
-      : window.desktop.signInWithChatGPT();
+    return window.desktop.signInWithChatGPT();
   },
   cancel: async () => {
     await window.desktop?.cancelSignIn();

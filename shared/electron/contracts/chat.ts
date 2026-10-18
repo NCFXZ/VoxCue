@@ -13,11 +13,6 @@ export const chatGPTProvider: ModelProvider = {
   name: 'ChatGPT',
   dataRecipient: 'OpenAI',
 };
-export const copilotProvider: ModelProvider = {
-  id: 'copilot',
-  name: 'GitHub Copilot',
-  dataRecipient: 'GitHub Copilot 及所选模型提供商',
-};
 export interface ChatModel {
   id: string;
   label: string;

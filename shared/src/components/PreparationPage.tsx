@@ -1,4 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { componentReady, useComponentReady } from '../stores/components';
+import { ComponentsNotice } from './ComponentsNotice';
 import {
   ArrowUp,
   Check,
@@ -10,6 +12,9 @@ import {
   Play,
   ChevronDown,
   Monitor,
+  Settings,
+  Refresh,
+  Save,
 } from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
@@ -38,14 +43,18 @@ import { useChatConnection } from '../stores/chatConnection';
 import { useModelProvider } from './useModelProvider';
 export function PreparationPage({
   onInterviewSettings,
+  onComponentSettings,
   startRequest = 0,
   onDraftChange,
 }: {
   onInterviewSettings?(): void;
+  onComponentSettings?(): void;
   startRequest?: number;
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
+  const speechReady = useComponentReady('speech');
+  const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
   const provider = useModelProvider();
   const interviewSettings = useInterviewSettings();
@@ -132,6 +141,11 @@ export function PreparationPage({
     void state.send(text);
   };
   const beginInterview = () => {
+    if (!componentReady('speech')) return;
+    if (state.selectedKnowledgeBaseId && !componentReady('rag')) {
+      setInterviewError('请先下载并准备已选择的知识库模型，再开始面试。');
+      return;
+    }
     setInterviewError(null);
     const configuration = resolveInterviewConfiguration(
       interviewSettings.configuration,
@@ -240,6 +254,8 @@ export function PreparationPage({
             disabled={
               !window.desktop ||
               openingInterview ||
+              !speechReady ||
+              (!!state.selectedKnowledgeBaseId && !ragReady) ||
               !connection.live ||
               connection.loading ||
               !connection.models.length
@@ -301,6 +317,7 @@ export function PreparationPage({
                 onInterviewSettings?.();
               }}
             >
+              <Settings size={16} />
               前往面试设置
             </Button>
             <span>保存后返回此处重新核对。</span>
@@ -345,6 +362,7 @@ export function PreparationPage({
                     disabled={openingInterview}
                     onClick={() => void checkAccess(interviewConfiguration)}
                   >
+                    <Refresh size={16} />
                     重新检查
                   </Button>
                   {accessReport?.checks.some(
@@ -369,6 +387,7 @@ export function PreparationPage({
                           )
                       }
                     >
+                      <Settings size={16} />
                       {window.desktop?.nativeWindowControls
                         ? '打开音频权限设置'
                         : '打开麦克风权限设置'}
@@ -398,6 +417,7 @@ export function PreparationPage({
                 setConfirmInterview(false);
               }}
             >
+              <X size={16} />
               取消
             </Button>
             <Button
@@ -431,6 +451,7 @@ export function PreparationPage({
       )}
       <div className="preparation-layout">
         <div className="chat-column">
+          <ComponentsNotice onSettings={onComponentSettings} />
           {state.messages.length ? (
             <div
               className="chat-scroll"
@@ -514,6 +535,7 @@ export function PreparationPage({
                               disabled={state.streaming || dictating || !connection.models.length}
                               onClick={() => void state.retry(message.id)}
                             >
+                              <Refresh size={16} />
                               重试回答
                             </Button>
                           )}
@@ -693,6 +715,7 @@ export function PreparationPage({
                 disabled={connection.loading}
                 onClick={() => void connection.load(true, true)}
               >
+                <Refresh size={16} />
                 重新加载模型
               </Button>
             )}
@@ -704,6 +727,7 @@ export function PreparationPage({
                   else void state.restoreChats();
                 }}
               >
+                {state.chatsReady ? <Save size={16} /> : <Refresh size={16} />}
                 {state.chatsReady ? '重试保存聊天' : '重新读取聊天'}
               </Button>
             )}
@@ -714,6 +738,7 @@ export function PreparationPage({
           onClose={closeInfo}
           onDirtyChange={onDraftChange}
           onErrorChange={setProfileError}
+          onComponentSettings={onComponentSettings}
         />
       </div>
     </main>

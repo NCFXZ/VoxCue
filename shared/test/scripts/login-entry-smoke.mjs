@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -7,6 +6,8 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 const profile = path.resolve(path.join(testRoot, 'test/results'), `login-entry-${Date.now()}`);
 await mkdir(profile, { recursive: true });
+const isolatedAppData = path.join(profile, 'app-data');
+await mkdir(isolatedAppData);
 const fixture = path.join(profile, 'main.cjs');
 await writeFile(
   fixture,
@@ -14,7 +15,9 @@ await writeFile(
 const {app}=require('electron');
 app.setAppPath(${JSON.stringify(process.cwd())});
 const setPath=app.setPath.bind(app);
-app.setPath=(name,value)=>setPath(name,name==='userData'?${JSON.stringify(profile)}:value);
+const getPath=app.getPath.bind(app);
+app.getPath=name=>name==='appData'?${JSON.stringify(isolatedAppData)}:getPath(name);
+app.setPath=(name,value)=>setPath(name,['userData','sessionData'].includes(name)?${JSON.stringify(profile)}:value);
 const {ChatGPTAuthService}=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/auth/service.js'))});
 ChatGPTAuthService.prototype.session=async()=>null;
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});

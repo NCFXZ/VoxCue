@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -14,6 +13,21 @@ const app = await electron.launch({
 });
 const checks = [],
   errors = [];
+const previewStates = new Set([
+  'login-light',
+  'personal-dark',
+  'settings-常规-dark',
+  'settings-面试设置-dark',
+  'record-answers-narrow-dark',
+  'knowledge-documents-narrow-dark',
+  'floating-dark',
+]);
+const requestedPreviews = new Set(
+  process.argv
+    .find((arg) => arg.startsWith('--preview='))
+    ?.slice(10)
+    .split(',') ?? [],
+);
 const inspect = async (page, name) => {
   await page.waitForFunction(() =>
     document
@@ -46,6 +60,49 @@ const inspect = async (page, name) => {
     ]
       .filter(visible)
       .map((e) => e.getBoundingClientRect().height);
+    const standardControls = [
+      ...active.querySelectorAll(
+        '.settings-choice,.speech-select,.knowledge-search > input,.knowledge-search > button,.knowledge-search > .choice-trigger,.history-filters input,.history-filters > button,.dialog-footer > .ui-button:not(.button-icon)',
+      ),
+    ]
+      .filter(visible)
+      .map((e) => ({
+        label: e.getAttribute('aria-label') || e.textContent.trim().slice(0, 30) || e.tagName,
+        height: e.getBoundingClientRect().height,
+      }));
+    const misalignedIcons = [
+      ...active.querySelectorAll(
+        '.ui-button > svg,.settings-choice > svg,.settings-sidebar nav button > svg,.history-filters button > svg',
+      ),
+    ]
+      .filter(visible)
+      .flatMap((icon) => {
+        const button = icon.parentElement;
+        const b = button.getBoundingClientRect(),
+          i = icon.getBoundingClientRect();
+        const offset = i.top + i.height / 2 - b.top - b.height / 2;
+        return Math.abs(offset) > 1
+          ? [{ label: button.getAttribute('aria-label') || button.textContent.trim(), offset }]
+          : [];
+      });
+    const misalignedFooters = [...active.querySelectorAll('.dialog-footer')]
+      .filter(visible)
+      .flatMap((footer) => {
+        const controls = [...footer.querySelectorAll(':scope > button')].filter(visible);
+        return controls
+          .slice(1)
+          .filter((control, index) => {
+            const previous = controls[index].getBoundingClientRect(),
+              current = control.getBoundingClientRect();
+            // Compare controls only on the same flex line; wrapped rows remain valid.
+            return (
+              Math.abs(previous.top - current.top) <
+                Math.min(previous.height, current.height) / 2 &&
+              Math.abs(previous.top + previous.height / 2 - current.top - current.height / 2) > 1
+            );
+          })
+          .map((control) => control.textContent.trim());
+      });
     const activeAnswer = document.querySelector('.record-panel-toggle.is-active');
     let activeAnswerContrast = null;
     if (activeAnswer) {
@@ -75,6 +132,9 @@ const inspect = async (page, name) => {
       overflow,
       selects,
       fields,
+      standardControls,
+      misalignedIcons,
+      misalignedFooters,
       activeAnswerContrast,
       dialogContained:
         active === document.body ||
@@ -84,8 +144,28 @@ const inspect = async (page, name) => {
           bounds.bottom <= innerHeight + 1),
     };
   });
+  if (
+    requestedPreviews.has(name) ||
+    (process.argv.includes('--preview') && (previewStates.has(name) || geometry.overflow.length))
+  )
+    console.log(
+      JSON.stringify({
+        preview: name,
+        jpeg: (await page.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString(
+          'base64',
+        ),
+      }),
+    );
+  console.log(`Inspect: ${name}`);
   assert.deepEqual(geometry.overflow, [], `${name}: horizontal overflow`);
   assert(geometry.dialogContained, `${name}: dialog outside viewport`);
+  assert.deepEqual(geometry.misalignedIcons, [], `${name}: icon not centered in its button`);
+  assert.deepEqual(geometry.misalignedFooters, [], `${name}: dialog actions not centered`);
+  assert.deepEqual(
+    geometry.standardControls.filter(({ height }) => Math.abs(height - 36) > 0.5),
+    [],
+    `${name}: inconsistent standard control heights`,
+  );
   if (geometry.activeAnswerContrast !== null)
     assert(
       geometry.activeAnswerContrast >= 4.5,
@@ -142,7 +222,7 @@ const inspect = async (page, name) => {
   await page.screenshot({ animations: 'disabled' });
 };
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -257,7 +337,15 @@ try {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
-    for (const category of ['常规', '账户与用量', '面试设置', '知识库', '更新', '关于']) {
+    for (const category of [
+      '常规',
+      '本地组件',
+      '账户与用量',
+      '面试设置',
+      '知识库',
+      '更新',
+      '关于',
+    ]) {
       await settings.getByRole('button', { name: category, exact: true }).click();
       await inspect(page, `settings-${category}-${theme}`);
       if (category === '常规') {
@@ -276,6 +364,9 @@ try {
     await page.getByRole('button', { name: '关闭设置', exact: true }).click();
     await page.getByRole('button', { name: '面试记录', exact: true }).click();
     await page.locator('.history-row').first().waitFor();
+    await page.getByRole('searchbox').fill('接口');
+    await inspect(page, `history-filtered-${theme}`);
+    await page.getByRole('button', { name: '清除筛选', exact: true }).click();
     await inspect(page, `history-${theme}`);
     await page.locator('.history-row').first().click();
     await page.getByRole('heading', { name: '接口设计与输入校验', exact: true }).waitFor();
@@ -365,7 +456,7 @@ try {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await inspect(page, 'user-menu-narrow-dark');
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  for (const category of ['常规', '账户与用量', '面试设置', '知识库', '更新', '关于']) {
+  for (const category of ['常规', '本地组件', '账户与用量', '面试设置', '知识库', '更新', '关于']) {
     await page
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: category, exact: true })
@@ -400,7 +491,7 @@ try {
   await console.log(
     JSON.stringify(
       {
-        checks,
+        checks: checks.map(({ name, geometry }) => ({ name, geometry })),
         errors,
         scope: 'Isolated synthetic account/audio/AI; actual Electron UI and computed typography',
       },

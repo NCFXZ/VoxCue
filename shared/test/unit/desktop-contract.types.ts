@@ -85,9 +85,6 @@ desktop.interviewState().then((state) => {
   const visible: boolean = state.transcriptVisible;
   void visible;
 });
-desktop.signInWithCopilot();
-// @ts-expect-error Copilot login never accepts an arbitrary URL, token or client ID.
-desktop.signInWithCopilot({ token: 'secret', url: 'https://example.com' });
 desktop.onChatEvent((event) => {
   if (event.type === 'activity') {
     const publicUrl: string | undefined = event.activity.url;
@@ -102,13 +99,16 @@ desktop.onChatEvent((event) => {
 });
 desktop.updates({ op: 'check' });
 desktop.updates({ op: 'install' });
+desktop.updates({ op: 'set-auto-download', enabled: false });
+// @ts-expect-error Auto-download preferences only accept a boolean.
+desktop.updates({ op: 'set-auto-download', enabled: 'yes' });
 desktop.onUpdateEvent((state) => {
   const revision: number = state.revision;
   void revision;
 });
 // @ts-expect-error Update requests never accept a URL, path or GitHub token.
 desktop.updates({ op: 'check', url: 'https://example.com', token: 'secret' });
-// @ts-expect-error Only four fixed update operations are exposed.
+// @ts-expect-error Only fixed update operations are exposed.
 desktop.updates({ op: 'execute' });
 const provider: AIChatService = null! as ChatGPTService;
 const frontend: Window['desktop'] = desktop;

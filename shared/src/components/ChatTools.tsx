@@ -2,7 +2,7 @@ import { useRef } from 'react';
 import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
-import { Check, Globe, Folder, Paperclip, Plus, ChevronDown } from './icons';
+import { Check, Globe, Folder, Paperclip, Plus, ChevronDown, Refresh } from './icons';
 import { usePreparation } from '../stores/preparation';
 import { chatFileAccept, effortLabels } from '../services/chatOptions';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
@@ -123,6 +123,7 @@ export function ChatTools() {
                     void connection.load(true, true);
                   }}
                 >
+                  <Refresh size={16} />
                   {connection.loading ? '正在读取…' : '刷新模型列表'}
                 </DropdownMenu.Item>
               </>

@@ -1,6 +1,22 @@
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { useEffect, useRef, useState } from 'react';
-import { Database, ArrowUp, MessageSquare, ChevronRight } from './icons';
+import {
+  Database,
+  ArrowUp,
+  MessageSquare,
+  ChevronRight,
+  Plus,
+  Edit,
+  Settings,
+  Search,
+  Loader,
+  FileText,
+  Folder,
+  X,
+  Refresh,
+  Eye,
+  Save,
+} from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { ChoiceMenu } from './ui/choice-menu';
@@ -8,7 +24,10 @@ import { Modal } from './ui/modal';
 import { useKnowledge } from '../stores/knowledge';
 import { documentAccept, previewDocument } from '../services/knowledge';
 import { useModelProvider } from './useModelProvider';
-export function KnowledgePage() {
+import { useComponentReady } from '../stores/components';
+import { ComponentsNotice } from './ComponentsNotice';
+export function KnowledgePage({ onComponentSettings }: { onComponentSettings?(): void }) {
+  const ragReady = useComponentReady('rag');
   const state = useKnowledge();
   const provider = useModelProvider();
   const index = useKnowledgeIndex();
@@ -54,16 +73,19 @@ export function KnowledgePage() {
           <strong>知识库</strong>
         </div>
         <Button
+          disabled={!ragReady}
           onClick={() => {
             setName('');
             setEditing('create');
           }}
         >
-          ＋ 创建知识库
+          <Plus size={16} />
+          创建知识库
         </Button>
       </header>
       <div className="management-scroll">
         <div className="management-container">
+          {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
           <p className="local-storage-note">
             文档原件保存在本机 ·{' '}
             {index.state?.documents.filter((doc) => doc.available !== false).length ?? 0} 个可用文档
@@ -80,12 +102,14 @@ export function KnowledgePage() {
               <h2>创建你的第一个知识库</h2>
               <Button
                 variant="outline"
+                disabled={!ragReady}
                 onClick={() => {
                   setName('');
                   setEditing('create');
                 }}
               >
-                ＋ 创建知识库
+                <Plus size={16} />
+                创建知识库
               </Button>
             </div>
           ) : (
@@ -132,6 +156,7 @@ export function KnowledgePage() {
                   setEditing('rename');
                 }}
               >
+                <Edit size={16} />
                 重命名
               </Button>
               <ConfirmDeleteButton
@@ -164,11 +189,7 @@ export function KnowledgePage() {
               {index.error}
             </p>
           )}
-          {index.state && !index.state.modelReady && (
-            <p role="alert" className="inline-error">
-              资料处理组件缺失。请使用包含本地模型的完整安装包修复安装，再重试准备；原件已保留。
-            </p>
-          )}
+          {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
           <form
             className="knowledge-search"
             onSubmit={async (event) => {
@@ -194,6 +215,7 @@ export function KnowledgePage() {
                 if (advanced) setSearchMode('hybrid');
               }}
             >
+              <Settings size={16} />
               高级选项
             </Button>
             {advanced && (
@@ -211,6 +233,7 @@ export function KnowledgePage() {
               />
             )}
             <Button type="submit" disabled={!query.trim() || index.searching}>
+              {index.searching ? <Loader size={16} /> : <Search size={16} />}
               {index.searching ? '查找中…' : '查找资料'}
             </Button>
           </form>
@@ -239,7 +262,10 @@ export function KnowledgePage() {
                       }
                     }}
                   >
-                    <strong>{hit.title}</strong>
+                    <strong>
+                      <FileText size={14} />
+                      {hit.title}
+                    </strong>
                     <small>
                       {hit.name}
                       {hit.page ? ' · 第 ' + hit.page + ' 页' : ''}
@@ -286,6 +312,7 @@ export function KnowledgePage() {
               variant="outline"
               onClick={() => fileInput.current?.click()}
             >
+              <Folder size={16} />
               选择文件
             </Button>
             <input
@@ -324,10 +351,16 @@ export function KnowledgePage() {
                   <div className="document-actions">
                     {index.requests[doc.id] ? (
                       <Button variant="ghost" onClick={() => void index.cancel(doc.id)}>
+                        <X size={16} />
                         取消准备
                       </Button>
                     ) : (
                       <Button variant="ghost" onClick={() => void index.index(doc, true)}>
+                        {index.state?.documents.some((item) => item.documentId === doc.id) ? (
+                          <Refresh size={16} />
+                        ) : (
+                          <Database size={16} />
+                        )}
                         {index.state?.documents.some((item) => item.documentId === doc.id)
                           ? '重新准备'
                           : '准备用于回答'}
@@ -344,6 +377,7 @@ export function KnowledgePage() {
                         }
                       }}
                     >
+                      <Eye size={16} />
                       预览
                     </Button>
                     <ConfirmDeleteButton
@@ -404,9 +438,11 @@ export function KnowledgePage() {
                 disabled={state.busy}
                 onClick={() => setEditing(null)}
               >
+                <X size={16} />
                 取消
               </Button>
               <Button type="submit" disabled={state.busy || !name.trim()}>
+                {state.busy ? <Loader size={16} /> : <Save size={16} />}
                 {state.busy ? '正在保存…' : '保存'}
               </Button>
             </div>

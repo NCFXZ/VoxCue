@@ -1,5 +1,7 @@
 import { registerKnowledgeIpc } from '../../../shared/electron/ipc/knowledge';
 import { registerUpdateIpc } from '../../../shared/electron/ipc/updates';
+import { registerComponentIpc } from '../../../shared/electron/ipc/components';
+import type { ComponentService } from '../../../shared/electron/backend/components/service';
 import { registerScreenCaptureIpc } from '../../../shared/electron/ipc/screenCapture';
 import type { UpdateService } from '../../../shared/electron/backend/updates/service';
 import type { KnowledgeCoordinator } from '../../../shared/electron/application/knowledge';
@@ -50,13 +52,41 @@ beforeEach(() => {
 });
 
 describe('更新 IPC 白名单', () => {
+  it('组件下载只接受已注册窗口主 frame 的固定组件和操作', async () => {
+    const sender = { mainFrame: {} },
+      event = { sender, senderFrame: undefined as unknown };
+    event.senderFrame = sender.mainFrame;
+    const service = { status: vi.fn(), download: vi.fn(), cancel: vi.fn() };
+    registerComponentIpc(service as unknown as ComponentService, (event) => {
+      if (event.sender !== sender) throw Error('Unauthorized window');
+    });
+    const handle = bridge.handlers.get('components:call')!;
+    for (const call of [
+      null,
+      [],
+      {},
+      { op: 'download', url: 'https://evil.test' },
+      { op: 'download', id: '../private' },
+      { op: 'download', id: 'copilot' },
+      { op: 'cancel', id: 'speech' },
+      { op: 'status', path: '/' },
+    ])
+      expect(() => handle(event, call)).toThrow();
+    expect(() => handle({ sender, senderFrame: {} }, { op: 'download' })).toThrow();
+    expect(() => handle({ sender: {}, senderFrame: {} }, { op: 'download' })).toThrow();
+    expect(() => handle(event, { op: 'download' }, { url: 'https://evil.test' })).toThrow();
+    await handle(event, { op: 'download', id: 'rag' });
+    expect(service.download).toHaveBeenCalledWith('rag');
+  });
   it('只接受主窗口主 frame 的固定操作；桥接订阅可释放', async () => {
     const sender = { mainFrame: {} };
     const service = {
       state: vi.fn(() => ({ phase: 'idle' })),
       check: vi.fn(),
       download: vi.fn(),
+      cancel: vi.fn(),
       install: vi.fn(),
+      setAutoDownload: vi.fn(),
     };
     registerUpdateIpc(service as unknown as UpdateService, (event) => {
       if (event.sender !== sender) throw Error('Unauthorized window');
@@ -70,6 +100,10 @@ describe('更新 IPC 白名单', () => {
       { op: 'execute' },
       { op: 'install', path: 'C:/private' },
       { op: 'check', url: 'https://example.com' },
+      { op: 'set-auto-download' },
+      { op: 'set-auto-download', enabled: 'true' },
+      { op: 'set-auto-download', enabled: true, path: '/private' },
+      { op: 'check', enabled: true },
     ])
       expect(() => handle(event, value)).toThrow();
     expect(() => handle({ sender, senderFrame: {} }, { op: 'install' })).toThrow(
@@ -79,6 +113,13 @@ describe('更新 IPC 白名单', () => {
       'Unauthorized window',
     );
     expect(service.install).not.toHaveBeenCalled();
+    await handle(event, { op: 'cancel' });
+    expect(service.cancel).toHaveBeenCalledOnce();
+    await handle(event, { op: 'set-auto-download', enabled: false });
+    expect(service.setAutoDownload).toHaveBeenCalledExactlyOnceWith(false);
+    expect(() =>
+      handle({ sender, senderFrame: {} }, { op: 'set-auto-download', enabled: true }),
+    ).toThrow('Unauthorized frame');
     expect(handle(event, { op: 'status' })).toEqual({ phase: 'idle' });
     await bridge.api!.updates({ op: 'check' });
     expect(bridge.invoke).toHaveBeenLastCalledWith('updates:call', { op: 'check' });
@@ -356,6 +397,7 @@ describe('受控 preload 契约', () => {
     const api = bridge.api!;
     const calls: Array<[keyof DesktopAPI, string, unknown[]]> = [
       ['updates', 'updates:call', [{ op: 'check' }]],
+      ['components', 'components:call', [{ op: 'download', id: 'rag' }]],
       ['updateSessionState', 'session:state', [true]],
       ['finishSessionClose', 'session:close-ready', ['close-id', true]],
       ['speech', 'speech:call', [{ op: 'status' }]],
@@ -373,7 +415,6 @@ describe('受控 preload 契约', () => {
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],
       ['signInWithChatGPT', 'auth:sign-in', []],
-      ['signInWithCopilot', 'auth:copilot-sign-in', []],
       ['cancelSignIn', 'auth:cancel', []],
       ['enterDemo', 'auth:demo', []],
       ['signOut', 'auth:sign-out', []],
@@ -419,6 +460,7 @@ describe('受控 preload 契约', () => {
         'onInterviewEndRequested',
         'onSessionCloseRequested',
         'onUpdateEvent',
+        'onComponentEvent',
       ].sort(),
     );
     await api.chatModels();

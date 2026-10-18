@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { AudioLines, Square, Loader } from './icons';
 import { Button } from './ui/button';
 import { useDictation } from '../stores/dictation';
+import { useComponentReady } from '../stores/components';
 
 export function VoiceInputButton({
   value,
@@ -15,6 +16,7 @@ export function VoiceInputButton({
   contextKey?: string | null;
 }) {
   const state = useDictation();
+  const speechReady = useComponentReady('speech');
   const active = state.phase !== 'idle';
   const loading = state.phase === 'loading' || state.phase === 'stopping';
   const mounted = useRef(true);
@@ -39,7 +41,9 @@ export function VoiceInputButton({
       aria-label={active ? '停止语音输入' : '语音输入'}
       aria-pressed={active}
       aria-busy={loading}
-      disabled={state.phase === 'stopping' || (!active && (disabled || !window.desktop))}
+      disabled={
+        state.phase === 'stopping' || (!active && (disabled || !window.desktop || !speechReady))
+      }
       onClick={() => {
         if (active) {
           void state.stop();

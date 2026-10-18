@@ -24,5 +24,6 @@ export interface DesktopPlatform {
   readonly microphoneSettingsUrl?: string;
   readonly wasapiHelper?: string;
   readonly speechProcessFile?: string;
+  /** @deprecated Ignored legacy metadata; retain until the read-only Windows policy is updated on Windows. */
   readonly packagedCopilotRuntime?: string;
 }

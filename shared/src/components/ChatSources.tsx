@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { ChatSource } from '../../electron/contracts/chat';
 import { openChatLink } from '../services/chat';
-import { ChevronRight } from './icons';
+import { ChevronRight, Link } from './icons';
 
 export function ChatSources({ sources }: { sources: ChatSource[] }) {
   const [error, setError] = useState(false);
@@ -15,7 +15,10 @@ export function ChatSources({ sources }: { sources: ChatSource[] }) {
           void openChatLink(source.url).catch(() => setError(true));
         }}
       >
-        {offset + index + 1}. {source.title}
+        <Link size={13} />
+        <span>
+          {offset + index + 1}. {source.title}
+        </span>
       </button>
     ));
   return (

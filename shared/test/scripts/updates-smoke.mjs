@@ -1,10 +1,10 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
+import { assertDownloadButton, assertInitialDownloadProgress } from './assert-download-button.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/updates-')));
@@ -14,7 +14,7 @@ const executable = process.argv
   ?.slice('--app-executable='.length);
 if (process.argv.includes('--packaged-bootstrap') && !executable)
   throw Error('Packaged bootstrap requires an executable from the platform runner');
-// Only the updater transport/installer is replaced, outside the production app.
+// Updater transport/installer and model availability are isolated fixtures.
 // IPC, window/session lifecycle, React and IndexedDB all run unchanged.
 await writeFile(
   fixture,
@@ -31,13 +31,20 @@ driver.checkForUpdates = async () => {
   driver.emit(driver.behavior === 'latest' ? 'update-not-available' : 'update-available', {version:'0.2.0'});
   return null;
 };
-driver.downloadUpdate = () => new Promise((resolve, reject) => { driver.finishDownload = resolve; driver.failDownload = reject; });
+driver.downloadUpdate = signal => new Promise((resolve, reject) => {
+  driver.finishDownload = resolve; driver.failDownload = reject;
+  signal?.addEventListener('abort', () => reject(Error('cancelled')), {once:true});
+});
 driver.quitAndInstall = () => {
   require('node:fs').writeFileSync(require('node:path').join(app.getPath('userData'), 'installed.json'), JSON.stringify({saved:true}));
   app.quit();
 };
 globalThis.updateDriver = driver;
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/updates/driver.js'))}).createUpdateDriver = () => driver;
+const components = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/components/service.js'))});
+components.ComponentService = class extends components.ComponentService {
+  constructor(options) { super({...options, managed:false}); }
+};
 globalThis.updateConfirmation = 0;
 const originalDialog = dialog.showMessageBox.bind(dialog);
 dialog.showMessageBox = (...args) => args.at(-1).title === '重启并更新 VoxCue'
@@ -46,6 +53,11 @@ require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))}
 `,
 );
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
+// This regression exercises manual download/retry; automatic mode has its own suite.
+await writeFile(
+  path.join(profile, 'update-settings.json'),
+  JSON.stringify({ schemaVersion: 1, autoDownload: false }),
+);
 delete env.ELECTRON_RUN_AS_NODE;
 let app;
 const errors = [];
@@ -182,9 +194,18 @@ try {
   await settings.getByText('发现新版本 0.2.0', { exact: true }).waitFor();
   await settings.getByRole('button', { name: '下载更新', exact: true }).click();
   await waitPhase(page, 'downloading');
-  await assertLoadingMotion(page, settings.getByRole('button', { name: '下载中…', exact: true }));
+  await assertInitialDownloadProgress(settings.locator('.download-button'));
   await app.evaluate(() => globalThis.updateDriver.emit('download-progress', { percent: 37.8 }));
   await settings.getByText('正在下载更新 37%', { exact: true }).waitFor();
+  await assertDownloadButton(
+    page,
+    settings.getByRole('button', { name: '更新，取消下载', exact: true }),
+  );
+  await settings.getByRole('button', { name: '更新，取消下载', exact: true }).hover();
+  await settings.getByRole('button', { name: '更新，取消下载', exact: true }).click();
+  await waitPhase(page, 'available');
+  await settings.getByRole('button', { name: '下载更新', exact: true }).click();
+  await waitPhase(page, 'downloading');
   await app.evaluate(() =>
     globalThis.updateDriver.failDownload(Error('synthetic checksum failure')),
   );

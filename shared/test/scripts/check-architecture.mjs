@@ -210,11 +210,7 @@ export function boundaryViolations(graph) {
         fail('公开契约只能依赖同层纯类型/工具');
       if (file === 'electron/preload.ts' && !edge.typeOnly && target !== 'electron')
         fail('沙箱 preload 的运行时依赖只能是 electron');
-      if (
-        /^@github\/copilot-sdk(?:\/|$|-)/.test(target) &&
-        !file.startsWith('electron/backend/copilot/')
-      )
-        fail('Copilot SDK 只能进入受控 Copilot 后台');
+      if (/^@github\/copilot-sdk(?:\/|$|-)/.test(target)) fail('已移除的 SDK 不得重新进入应用');
       if (
         !edge.typeOnly &&
         /^electron-updater(?:\/|$)/.test(target) &&
@@ -223,7 +219,7 @@ export function boundaryViolations(graph) {
         fail('自动更新依赖只能进入受控更新后台');
       if (
         file.startsWith('electron/backend/updates/') &&
-        /^electron\/backend\/(?:auth|chat|knowledge|speech|copilot)\//.test(target)
+        /^electron\/backend\/(?:auth|chat|knowledge|speech)\//.test(target)
       )
         fail('更新后台不得读取凭据、用户资料、音频或模型实现');
       if (
@@ -284,7 +280,7 @@ export function boundaryViolations(graph) {
         fail('原生/推理依赖仅允许进入各自受控后台，禁止已撤除的索引依赖');
       if (
         file.startsWith('electron/backend/knowledge/') &&
-        /^electron\/backend\/(?:auth|chat|speech|copilot)\//.test(target)
+        /^electron\/backend\/(?:auth|chat|speech)\//.test(target)
       )
         fail('知识后台不得访问授权、AI Provider 或音频实现');
       if (

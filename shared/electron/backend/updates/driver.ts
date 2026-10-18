@@ -1,5 +1,6 @@
 import { existsSync } from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import type { UpdateDriver } from './service';
 import { releaseTarget } from './releases';
 import type { AppUpdater } from 'electron-updater';
@@ -45,7 +46,20 @@ export function configurePlatformUpdates(
     on: (event, listener) => updater.on(event, listener),
     removeListener: (event, listener) => updater.removeListener(event, listener),
     checkForUpdates: () => updater.checkForUpdates(),
-    downloadUpdate: () => updater.downloadUpdate(),
+    downloadUpdate: async (signal) => {
+      signal?.throwIfAborted();
+      const { CancellationToken } = createRequire(require.resolve('electron-updater/package.json'))(
+        'builder-util-runtime',
+      ) as typeof import('builder-util-runtime');
+      const cancellation = new CancellationToken();
+      const abort = () => cancellation.cancel();
+      signal?.addEventListener('abort', abort, { once: true });
+      try {
+        return await updater.downloadUpdate(cancellation);
+      } finally {
+        signal?.removeEventListener('abort', abort);
+      }
+    },
     quitAndInstall: (silent, forceRun) => updater.quitAndInstall(silent, forceRun),
     dispose: () => lifetime.abort(),
   };

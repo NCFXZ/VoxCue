@@ -1,5 +1,4 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
-import workspace from '../../../shared/scripts/workspace.mjs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -58,7 +57,7 @@ try {
       return { key, size: image.getSize(), opaque };
     });
   }, symbols);
-  assert.equal(assets.length, 46);
+  assert.equal(assets.length, Object.keys(symbols).length);
   assert.ok(
     assets.every(
       (item) =>
@@ -68,8 +67,10 @@ try {
         item.opaque < 192 * 192,
     ),
   );
-  checks.push('46 个实际 AppKit SF Symbols 均非空、具有透明背景；登录图标使用本平台实现');
-  await installUiAccount(app);
+  checks.push(
+    `${assets.length} 个实际 AppKit SF Symbols 均非空、具有透明背景；登录图标使用本平台实现`,
+  );
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -117,6 +118,41 @@ try {
   const dark = await verifyIcons(page, 20);
   assert.ok(dark.some((item) => item.color !== 'rgb(0, 0, 0)'));
   await settings.screenshot({ animations: 'disabled' });
+  await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
+  const refreshSymbol = await settings
+    .getByRole('button', { name: '刷新用量', exact: true })
+    .locator('svg')
+    .getAttribute('data-sf-symbol');
+  const resetSymbol = await settings
+    .getByRole('button', { name: '重置用量', exact: true })
+    .locator('svg')
+    .first()
+    .getAttribute('data-sf-symbol');
+  const updateSymbol = await settings
+    .getByRole('button', { name: '更新', exact: true })
+    .locator('svg')
+    .getAttribute('data-sf-symbol');
+  assert.equal(refreshSymbol, symbols.Refresh);
+  assert.equal(resetSymbol, symbols.Reset);
+  assert.equal(updateSymbol, symbols.Update);
+  assert.equal(new Set([refreshSymbol, resetSymbol, updateSymbol]).size, 3);
+  if (process.argv.includes('--preview'))
+    console.log(
+      JSON.stringify({
+        preview: '重置、刷新与侧边更新入口使用不同的图标',
+        jpeg: (await settings.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'),
+      }),
+    );
+  await settings.getByRole('button', { name: '更新', exact: true }).click();
+  await settings.getByRole('button', { name: '检查更新', exact: true }).waitFor();
+  assert.equal(
+    await settings
+      .getByRole('button', { name: '检查更新', exact: true })
+      .locator('svg')
+      .getAttribute('data-sf-symbol'),
+    symbols.Update,
+  );
+  checks.push('重置、刷新和软件更新分别使用不同的图形，更新设置入口与操作按钮一致');
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   checks.push('主界面/设置含菜单、导航、主题、输入和关闭图标均为 SF Symbols，浅深主题继承颜色');
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -152,7 +188,7 @@ try {
       `<div class="card"><i style="mask-image:url(data:image/png;base64,${data})"></i><strong>${key}</strong><small>${name}</small></div>`,
     );
   }
-  const html = `<!doctype html><meta charset="utf-8"><style>body{margin:0;font:13px -apple-system;color:#222}section{padding:24px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.dark{background:#202020;color:#eee}.card{height:78px;display:flex;flex-direction:column;align-items:center;gap:5px}i{display:block;width:26px;height:26px;background:currentColor;mask-size:contain;mask-repeat:no-repeat}small{font-size:10px;opacity:.7}h2{grid-column:1/-1;margin:0 0 12px}</style><section><h2>SF Symbols · Mac · 46 icons</h2>${cards.join('')}</section><section class="dark"><h2>Dark appearance</h2>${cards.join('')}</section>`;
+  const html = `<!doctype html><meta charset="utf-8"><style>body{margin:0;font:13px -apple-system;color:#222}section{padding:24px;display:grid;grid-template-columns:repeat(5,1fr);gap:10px}.dark{background:#202020;color:#eee}.card{height:78px;display:flex;flex-direction:column;align-items:center;gap:5px}i{display:block;width:26px;height:26px;background:currentColor;mask-size:contain;mask-repeat:no-repeat}small{font-size:10px;opacity:.7}h2{grid-column:1/-1;margin:0 0 12px}</style><section><h2>SF Symbols · Mac · ${assets.length} icons</h2>${cards.join('')}</section><section class="dark"><h2>Dark appearance</h2>${cards.join('')}</section>`;
   const galleryFile = path.join(output, 'gallery.html');
   await writeFile(galleryFile, html);
   const galleryOpened = app.waitForEvent('window');

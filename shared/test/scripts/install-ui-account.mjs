@@ -1,25 +1,36 @@
 import path from 'node:path';
+import { testRoot } from './test-workspace.mjs';
 // Called only by Playwright in an isolated test process. No real OAuth/AI/audio.
 export async function closeUiApp(app) {
-  await app.evaluate(({ app, dialog }) => {
-    const path = process.getBuiltinModule('path');
-    const root = process
-      .getBuiltinModule('fs')
-      .realpathSync(process.getBuiltinModule('os').tmpdir());
-    const profile = path.resolve(app.getPath('userData'));
-    const relative = path.relative(root, profile);
-    if (
-      !relative.startsWith('voxcue-test-run-') ||
-      relative.startsWith('..') ||
-      path.isAbsolute(relative)
-    )
-      throw Error('UI teardown requires isolated temporary userData');
-    const original = dialog.showMessageBox.bind(dialog);
-    dialog.showMessageBox = (...args) =>
-      args.at(-1)?.title === '关闭 VoxCue'
-        ? Promise.resolve({ response: 1, checkboxChecked: false })
-        : original(...args);
-  });
+  await app.evaluate(
+    ({ app, dialog }, owner) => {
+      const path = process.getBuiltinModule('path');
+      const fs = process.getBuiltinModule('fs');
+      // A child can have an isolated TMPDIR below the owning run. Verify the run
+      // marker and exact owner instead of treating the child's TMPDIR as its parent.
+      const root = fs.realpathSync(owner.root);
+      const marker = JSON.parse(
+        fs.readFileSync(path.join(root, '.voxcue-test-owner.json'), 'utf8'),
+      );
+      const profile = path.resolve(app.getPath('userData'));
+      const relative = path.relative(root, profile);
+      if (
+        !path.basename(root).startsWith('voxcue-test-run-') ||
+        marker.kind !== 'voxcue-test-run-' ||
+        marker.pid !== owner.pid ||
+        !relative ||
+        relative.startsWith('..') ||
+        path.isAbsolute(relative)
+      )
+        throw Error('UI teardown requires isolated temporary userData');
+      const original = dialog.showMessageBox.bind(dialog);
+      dialog.showMessageBox = (...args) =>
+        args.at(-1)?.title === '关闭 VoxCue'
+          ? Promise.resolve({ response: 1, checkboxChecked: false })
+          : original(...args);
+    },
+    { root: testRoot, pid: process.pid },
+  );
   if (process.platform === 'darwin') {
     // macOS intentionally remains in the Dock after its last window closes.
     // Finish the normal save/close handshake before asking Playwright to quit.
@@ -44,7 +55,7 @@ export async function closeUiApp(app) {
     clearTimeout(timer);
   }
 }
-export async function installUiAccount(app, { speech = false } = {}) {
+export async function installUiAccount(app, { speech = false, components = false } = {}) {
   const speechPorts = {
     win32: 'test/fixtures/install-speech-port.cjs',
     darwin: 'test/fixtures/install-speech-port.cjs',
@@ -53,12 +64,33 @@ export async function installUiAccount(app, { speech = false } = {}) {
     throw Error('No native speech fixture for this platform');
   const speechFixture = speech ? path.resolve(speechPorts[process.platform]) : undefined;
   await app.evaluate(
-    ({ app }, { speech, speechFixture }) => {
+    ({ app }, { speech, speechFixture, components }) => {
       const require = process
         .getBuiltinModule('module')
         .createRequire(app.getAppPath() + '/package.json');
       const path = require('node:path');
       const root = app.getAppPath();
+      if (components) {
+        // These UI regressions exercise controls with synthetic model availability.
+        // Download/cache regressions keep the real component service by default.
+        const { ComponentService } = require(
+          path.join(root, 'dist-electron/shared/electron/backend/components/service.js'),
+        );
+        const original = ComponentService.prototype.state;
+        ComponentService.prototype.state = function () {
+          const state = original.call(this);
+          return {
+            ...state,
+            phase: 'ready',
+            error: null,
+            items: state.items.map((item) => ({ ...item, phase: 'ready', received: item.bytes })),
+          };
+        };
+        ComponentService.prototype.status = async function () {
+          return this.state();
+        };
+        ComponentService.prototype.ready = () => true;
+      }
       const { ChatGPTAuthService } = require(
         path.join(root, 'dist-electron/shared/electron/backend/auth/service.js'),
       );
@@ -103,9 +135,13 @@ export async function installUiAccount(app, { speech = false } = {}) {
         return { answerText: 'Synthetic interview answer', usage: null, sources: [] };
       };
       if (speech) {
+        if (components)
+          require(
+            path.join(root, 'dist-electron/shared/electron/backend/speech/models.js'),
+          ).speechModelInstalled = () => true;
         require(speechFixture)(root);
       }
     },
-    { speech, speechFixture },
+    { speech, speechFixture, components },
   );
 }

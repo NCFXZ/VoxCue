@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -45,8 +45,8 @@
     "check:workspace": "node ../shared/scripts/sync-platform-manifests.mjs --check && node ../shared/scripts/check-platform-layout.mjs"
   },
   "dependencies": {
+    "adm-zip": "0.6.1",
     "@fluentui/react-icons": "^2.0.0",
-    "@github/copilot-sdk": "1.0.21",
     "@huggingface/transformers": "4.3.1",
     "@lancedb/lancedb": "0.40.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",

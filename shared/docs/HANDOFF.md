@@ -1,3 +1,5 @@
+> 2026-10-18：GitHub Copilot 接入已按用户最新要求移除。后续模型下载、界面和 Windows 本机清理范围以 COMPONENTS.md 与 AGENTS.md 首节为准；下文为历史记录。
+
 # VoxCue 当前交接
 
 > 用户已于 2026-10-17 恢复完整功能、稳定性和对抗性测试授权；下文旧暂停状态为历史。结果只在终端/对话，必要工作文件临时使用并清理，不保存报告/日志/截图/验收数表。Windows 专属旧脚本须在其本机改造；Mac 117 个旧占用目录和 Windows 349 个跳过目录不重试，Windows 全程只读。
@@ -101,7 +103,7 @@ Mac Dock/启动器从原图生成带 96px 透明留白的 1024px 衍生图（素
 
 2026-10-15 修复 Copilot 登录后“Windows 凭据加密存储不可用”：根因是 SDK 1.0.21 的 empty 模式主动设置 COPILOT_DISABLE_KEYTAR=1，并非已确认的系统故障。CopilotRuntime 改用 copilot-cli 模式保留 OS vault，isolatedSession 显式保留原 empty 的能力限制，拒绝明文和继承外部凭据的边界不变。根目录构建已更新，正常退出后从 Start-VoxCue.cmd 重新启动并授权；不删除/迁移凭据、用户数据，也未打包、提交或发布。真实 runtime 启动环境/会话隔离、PKCE/取消及合成加密失败重试/双服务 UI 回归已通过；真实账户令牌写入与推理仍需用户正常授权验证，不能称已验收。报告 test/results/copilot-ui-Fh7dTB/report.json，基础检查见 PROGRESS 最新节。
 
-2026-10-14 最新追加：GitHub Copilot 与 ChatGPT 双服务登录已接入，官方 SDK 浏览器 PKCE 流程无需用户创建 OAuth App；此前索要 Client ID 的问题作废。只保存身份/服务选择，SDK 系统加密存储凭据；拒绝明文回退，不借用环境令牌或 gh 凭据。模型/vendor/effort 与服务提示采用实际目录，逐回复保留来源；Copilot 私有推理不展示，搜索需要实际 runtime 工具能力。正式账户授权和推理仍由用户正常使用验证，勿以合成测试声称通过。固定 SDK/运行时、恢复边界见 COPILOT.md 和 ARCHITECTURE。
+2026-10-14 最新追加：GitHub Copilot 与 ChatGPT 双服务登录已接入，官方 SDK 浏览器 PKCE 流程无需用户创建 OAuth App；此前索要 Client ID 的问题作废。只保存身份/服务选择，SDK 系统加密存储凭据；拒绝明文回退，不借用环境令牌或 gh 凭据。模型/vendor/effort 与服务提示采用实际目录，逐回复保留来源；Copilot 私有推理不展示，搜索需要实际 runtime 工具能力。正式账户授权和推理仍由用户正常使用验证，勿以合成测试声称通过。固定 SDK/运行时、恢复边界见 已撤除的 Copilot 历史说明 和 ARCHITECTURE。
 
 登录页统一按钮、图标对比度和间距，左侧内容居中、右侧预览随主题；箭头统一细折线。准备聊天正文开始后，公开进度自动收进“用时”且可展开。面试新问题在旧回答忙碌期间保留并补交，清空输入后新系统转写恢复回填；麦克风间断不清除系统问题。没有接入 AEC，扬声器回录仍需耳机等物理隔离。原生助手源未变时增量构建复用，勿为重编译停止正在进行的用户面试。最终检查/本地安装产物以 PROGRESS 首节为准；下文“尚未接入其他提供商”为旧记录。
 

@@ -10,6 +10,7 @@ import {
 } from '../../electron/contracts/profile';
 import { MarkdownContent } from './MarkdownContent';
 import { openChatLink } from '../services/chat';
+import { X, Edit, Globe, Check, History } from './icons';
 export function ProfileValue({
   value,
   hideTitle = false,
@@ -69,6 +70,7 @@ export function SkillUpdatePrompt() {
       )}
       <div>
         <Button variant="ghost" onClick={state.dismissSkillUpdate}>
+          <X size={16} />
           暂不更新
         </Button>
         <Button
@@ -92,6 +94,7 @@ export function SkillUpdatePrompt() {
             );
           }}
         >
+          {missing ? <Edit size={16} /> : <Globe size={16} />}
           {missing ? `补充${missing}` : '联网更新技能'}
         </Button>
       </div>
@@ -146,6 +149,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
         </p>
         <div className="profile-proposal-actions">
           <Button variant="outline" disabled>
+            <Check size={16} />
             确认更新
           </Button>
         </div>
@@ -193,6 +197,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
           </p>
           <div className="profile-proposal-actions">
             <Button variant="ghost" onClick={() => state.dismissProfile(message.id)}>
+              <History size={16} />
               保留旧版
             </Button>
             <Button
@@ -200,6 +205,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
               disabled={stale}
               onClick={() => state.updateInfo(message.changes!, message.id)}
             >
+              <Check size={16} />
               确认更新
             </Button>
           </div>

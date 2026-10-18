@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -49,7 +48,7 @@ async function observeDeleteMorph(control, trigger) {
 }
 
 try {
-  await installUiAccount(app);
+  await installUiAccount(app, { components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -260,9 +259,12 @@ try {
     const r = document
       .querySelector('[aria-label="确认删除：对话：未发送待删除对话"]')
       ?.getBoundingClientRect();
-    return r && r.width >= 79.5 && r.width <= 80.5;
+    return r && r.width >= 99.5 && r.width <= 100.5;
   });
-  assert.equal(await second('对话：未发送待删除对话').locator('svg').count(), 0);
+  assert.equal(
+    await second('对话：未发送待删除对话').locator('.confirm-delete-confirm svg').count(),
+    1,
+  );
   await page.locator('.sidebar').screenshot({ animations: 'disabled' });
   await second('对话：未发送待删除对话').press('Escape');
   await row.getByRole('button', { name: '删除对话：未发送待删除对话', exact: true }).click();

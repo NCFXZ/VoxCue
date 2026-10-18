@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { History, ChevronDown } from './icons';
+import { History, ChevronDown, X } from './icons';
 import { HistoryDetail } from './HistoryDetail';
 import { useHistory } from '../stores/history';
 import { historyStorageKey } from '../services/history';
@@ -65,6 +65,7 @@ export function HistoryPage() {
                     setQuery('');
                   }}
                 >
+                  <X size={14} />
                   清除筛选
                 </button>
               )}

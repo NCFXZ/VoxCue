@@ -88,6 +88,32 @@ export const electron = {
     );
     if (!(profile && path.resolve(profile).startsWith(testRoot + path.sep)) && !isolatedArgument)
       throw Error('Electron tests require this run’s temporary userData or fixture entry.');
+    const speechModels = options.env?.VOXCUE_TEST_SPEECH_MODELS;
+    const ragModel = options.env?.VOXCUE_TEST_RAG_MODEL;
+    if (speechModels && ragModel && options.args?.[0]) {
+      // Inject only development resource paths in the isolated host, before main loads.
+      // Packaged tests have no entry argument and exercise the real component cache.
+      for (const directory of [speechModels, ragModel]) {
+        const actual = fs.realpathSync(directory);
+        const run = path.relative(temporary, actual).split(path.sep)[0];
+        if (!run.startsWith(prefix) || !fs.existsSync(path.join(temporary, run, marker)))
+          throw Error('Model fixtures must belong to a temporary test run');
+      }
+      const entry = path.resolve(options.args[0]);
+      const wrapper = path.join(testRoot, 'model-entry-' + Date.now() + '.cjs');
+      fs.writeFileSync(
+        wrapper,
+        `
+const {app}=require('electron');
+app.setAppPath(${JSON.stringify(workspace.platformRoot)});
+const platform=require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/platform/index.js'))});
+const resources=platform.desktopResources;
+platform.desktopResources=(...args)=>({...resources(...args),speechModels:${JSON.stringify(speechModels)},ragModel:${JSON.stringify(ragModel)}});
+require(${JSON.stringify(entry)});
+`,
+      );
+      options = { ...options, args: [wrapper, ...options.args.slice(1)] };
+    }
     const executable = path.join(
       workspace.platformRoot,
       '.tools/electron-dev/Electron.app/Contents/MacOS/Electron',

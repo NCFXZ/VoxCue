@@ -1,12 +1,12 @@
 import { create } from 'zustand';
-import type { UpdateCall, UpdateState } from '../../electron/contracts/updates';
+import type { UpdateAction, UpdateCall, UpdateState } from '../../electron/contracts/updates';
 import { updateCall } from '../services/updates';
 
 interface UpdatesStore {
   state: UpdateState | null;
   error: string | null;
   connect(): () => void;
-  run(op: UpdateCall['op']): Promise<void>;
+  run(call: UpdateAction | UpdateCall): Promise<void>;
 }
 
 export const useUpdates = create<UpdatesStore>((set, get) => {

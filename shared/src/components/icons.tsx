@@ -22,6 +22,8 @@ import {
   Chat24Regular,
   Play24Regular,
   ArrowCounterclockwise24Regular,
+  ArrowClockwise24Regular,
+  ArrowSync24Regular,
   Sparkle24Regular,
   Speaker224Regular,
   Desktop24Regular,
@@ -45,6 +47,10 @@ import {
   DocumentArrowDown24Regular,
   PanelRightExpandRegular,
   Screenshot24Regular,
+  Save24Regular,
+  Search24Regular,
+  DocumentText24Regular,
+  Eye24Regular,
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
@@ -84,7 +90,9 @@ export const Copy = icon(Copy24Regular);
 export const MessageSquare = icon(Chat24Regular);
 
 export const Play = icon(Play24Regular);
-export const RotateCcw = icon(ArrowCounterclockwise24Regular);
+export const Reset = icon(ArrowCounterclockwise24Regular);
+export const Refresh = icon(ArrowClockwise24Regular);
+export const Update = icon(ArrowSync24Regular);
 export const Sparkles = icon(Sparkle24Regular);
 export const Volume2 = icon(Speaker224Regular);
 export const Monitor = icon(Desktop24Regular);
@@ -101,3 +109,7 @@ export const ShieldOff = icon(ShieldDismiss24Regular);
 export const Expand = icon(ArrowMaximize24Regular);
 export const Person = icon(Person24Regular);
 export const Screenshot = icon(Screenshot24Regular);
+export const Save = icon(Save24Regular);
+export const Search = icon(Search24Regular);
+export const FileText = icon(DocumentText24Regular);
+export const Eye = icon(Eye24Regular);

@@ -1,8 +1,7 @@
-import { ArrowUp, Sparkles, Volume2, Check } from './icons';
+import { ArrowUp, Sparkles, Volume2, Check, X } from './icons';
 import { Button } from './ui/button';
 import { useAuth } from '../stores/auth';
 import chatGPTIcon from '../assets/chatgpt.svg';
-import copilotIcon from '../assets/copilot.svg';
 import { AppLogo } from './AppLogo';
 export function LoginPage() {
   const auth = useAuth();
@@ -29,15 +28,7 @@ export function LoginPage() {
               <img className="service-brand-icon" src={chatGPTIcon} alt="" aria-hidden="true" />
               {auth.signingIn === 'chatgpt' ? '等待浏览器授权…' : '使用 ChatGPT 继续'}
             </Button>
-            <Button
-              className="service-login"
-              disabled={auth.waiting || !window.desktop}
-              onClick={() => void auth.signIn('copilot')}
-            >
-              <img className="service-brand-icon" src={copilotIcon} alt="" aria-hidden="true" />
-              {auth.signingIn === 'copilot' ? '等待浏览器授权…' : '使用 GitHub Copilot 继续'}
-            </Button>
-            <p className="login-explanation">选择模型服务，在系统浏览器中安全授权。</p>
+            <p className="login-explanation">在系统浏览器中安全授权 ChatGPT。</p>
             {auth.waiting && (
               <Button
                 variant="ghost"
@@ -45,6 +36,7 @@ export function LoginPage() {
                   void auth.cancel();
                 }}
               >
+                <X size={16} />
                 取消登录
               </Button>
             )}

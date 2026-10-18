@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';

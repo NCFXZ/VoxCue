@@ -16,7 +16,9 @@ await writeFile(
     fixtures:
       process.env.VOXCUE_SPEECH_FIXTURE_DIR ??
       path.join(workspace.sharedRoot, 'test/fixtures/speech-audio'),
-    model: path.join(workspace.sharedRoot, 'local-models/speech'),
+    model:
+      process.env.VOXCUE_TEST_SPEECH_MODELS ??
+      path.join(workspace.sharedRoot, 'local-models/speech'),
     processFile: path.join(workspace.sharedRoot, 'test/fixtures/audio-pipeline-process.cjs'),
   }),
 );

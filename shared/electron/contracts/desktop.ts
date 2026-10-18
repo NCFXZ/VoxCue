@@ -2,6 +2,7 @@ import type { KnowledgeCall, KnowledgeResult, KnowledgeStatus } from './knowledg
 import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
 import type { PresentationCapabilities } from './presentation';
 import type { UpdateCall, UpdateState } from './updates';
+import type { ComponentCall, ComponentState } from './components';
 import type { AuthSession, SignOutResult } from './auth';
 import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResult } from './chat';
 import type { InterviewTitleRequest, InterviewTitleEvent, HistoryExportRequest } from './history';
@@ -35,6 +36,8 @@ export interface DesktopAPI {
   readonly screenCapturePermissionSupported: boolean;
   screenCapturePermission(action: ScreenCapturePermissionAction): Promise<ScreenCapturePermission>;
   updates(call: UpdateCall): Promise<UpdateState>;
+  components(call: ComponentCall): Promise<ComponentState>;
+  onComponentEvent(callback: (state: ComponentState) => void): () => void;
   onUpdateEvent(callback: (state: UpdateState) => void): () => void;
   knowledge(call: KnowledgeCall): Promise<KnowledgeResult>;
   onKnowledgeEvent(callback: (event: KnowledgeStatus) => void): () => void;
@@ -50,7 +53,6 @@ export interface DesktopAPI {
   onSystemAccent(callback: (color: string | null) => void): () => void;
   authSession(): Promise<AuthSession | null>;
   signInWithChatGPT(): Promise<AuthSession>;
-  signInWithCopilot(): Promise<AuthSession>;
   cancelSignIn(): Promise<void>;
   enterDemo(): Promise<AuthSession>;
   signOut(): Promise<SignOutResult>;
@@ -93,6 +95,7 @@ type Invocation<F extends (...args: never[]) => unknown> = {
 // Importing runtime constants there would require a forbidden local require().
 export interface DesktopInvokeMap {
   'updates:call': Invocation<DesktopAPI['updates']>;
+  'components:call': Invocation<DesktopAPI['components']>;
   'session:state': Invocation<DesktopAPI['updateSessionState']>;
   'session:close-ready': Invocation<DesktopAPI['finishSessionClose']>;
   'knowledge:call': Invocation<DesktopAPI['knowledge']>;
@@ -107,7 +110,6 @@ export interface DesktopInvokeMap {
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
   'auth:sign-in': Invocation<DesktopAPI['signInWithChatGPT']>;
-  'auth:copilot-sign-in': Invocation<DesktopAPI['signInWithCopilot']>;
   'auth:cancel': Invocation<DesktopAPI['cancelSignIn']>;
   'auth:demo': Invocation<DesktopAPI['enterDemo']>;
   'auth:sign-out': Invocation<DesktopAPI['signOut']>;
@@ -136,6 +138,7 @@ export interface DesktopSendMap {
 }
 export interface DesktopEventMap {
   'updates:event': [state: UpdateState];
+  'components:event': [state: ComponentState];
   'session:request-close': [id: string];
   'knowledge:event': [event: KnowledgeStatus];
   'history:title': [event: InterviewTitleEvent];

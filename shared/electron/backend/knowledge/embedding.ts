@@ -16,7 +16,7 @@ export class LocalEmbedder implements Embedder {
     try {
       await access(path.join(this.modelPath, 'onnx/model_quantized.onnx'));
     } catch {
-      throw Error('本地知识库模型未安装，请使用包含本地模型的完整安装包修复安装。原件已保留。');
+      throw Error('本地知识库模型未安装，请先在本地组件中下载并完成校验。原件已保留。');
     }
     env.allowRemoteModels = false;
     env.allowLocalModels = true;

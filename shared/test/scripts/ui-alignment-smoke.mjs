@@ -1,5 +1,4 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { installUiAccount } from './install-ui-account.mjs';
 
@@ -21,8 +20,18 @@ const app = await electron.launch({
 const checks = [];
 const longName = 'A very long model name used to verify compact controls and constrained menus';
 const check = (name, passed, detail) => checks.push({ name, passed, detail });
+const settle = (page) =>
+  page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.effect?.getTiming().iterations === Infinity ||
+          animation.playState !== 'running',
+      ),
+  );
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
   const [page] = await Promise.all([
     app.waitForEvent('window'),
@@ -89,6 +98,7 @@ try {
     );
     await page.getByRole('button', { name: '个人信息', exact: true }).click();
     await page.locator('.personal-panel').waitFor();
+    await settle(page);
     const result = await composerGeometry();
     check(`composer-${width}`, !result.overflow && result.contained, result);
     check(
@@ -98,6 +108,7 @@ try {
     );
     await page.screenshot({ animations: 'disabled' });
     await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+    await settle(page);
   }
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -161,7 +172,7 @@ try {
   );
   assert.ok(
     checks.every((r) => r.passed),
-    'Visual geometry checks failed; see checks.json',
+    'Visual geometry checks failed; see terminal output',
   );
 } finally {
   await app

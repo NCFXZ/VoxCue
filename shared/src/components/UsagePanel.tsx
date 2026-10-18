@@ -5,7 +5,7 @@ import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
 import { ConfirmResetButton } from './ui/confirm-delete-button';
 import { useModelProvider } from './useModelProvider';
-import { Link } from './icons';
+import { Link, Refresh } from './icons';
 export function UsagePanel() {
   const state = useChatConnection();
   const provider = useModelProvider();
@@ -24,6 +24,7 @@ export function UsagePanel() {
             onClick={() => void state.refreshUsage()}
             aria-label="刷新用量"
           >
+            <Refresh size={16} />
             刷新
           </Button>
           <ConfirmResetButton
@@ -49,16 +50,12 @@ export function UsagePanel() {
         <small>
           {state.live ? '仅统计本机本应用，未返回的用量不计入。' : '连接模型服务后可查看本机用量。'}
         </small>
-        {state.live && ['chatgpt', 'copilot'].includes(provider.id) && (
+        {state.live && provider.id === 'chatgpt' && (
           <Button
             variant="ghost"
             className="account-usage-link"
             onClick={() => {
-              void openChatLink(
-                provider.id === 'copilot'
-                  ? 'https://github.com/settings/copilot'
-                  : 'https://chatgpt.com/settings/usage',
-              ).catch(() => {});
+              void openChatLink('https://chatgpt.com/settings/usage').catch(() => {});
             }}
           >
             <span>查看账户用量</span>

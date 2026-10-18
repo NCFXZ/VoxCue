@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Button } from './ui/button';
-import { Check, ChevronDown, AudioLines, Volume2 } from './icons';
+import { Check, ChevronDown, AudioLines, Volume2, Refresh } from './icons';
 import type {
   AudioDevice,
   AudioSource,
@@ -162,6 +162,7 @@ export function SpeechControls({
                 refresh();
               }}
             >
+              <Refresh size={16} />
               刷新设备
             </Button>
           </div>

@@ -4,8 +4,6 @@ import type { DesktopPlatform } from '../../shared/electron/platform/types';
 export const macos: DesktopPlatform = {
   id: 'darwin',
   updateDriverFile: 'macos/electron/updates/driver.js',
-  packagedCopilotRuntime:
-    'app.asar.unpacked/node_modules/@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime',
   iconFile: 'public/voxcue.png',
   mainWindowOptions: { vibrancy: 'sidebar', visualEffectState: 'followWindow' },
   nativeWindowControls: true,

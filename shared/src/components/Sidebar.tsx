@@ -12,12 +12,15 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Loader,
+  Refresh,
+  X,
 } from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
 import { useModelProvider } from './useModelProvider';
+import { SidebarUpdate } from './SidebarUpdate';
 interface Props {
   userName: string;
   accountLabel: string;
@@ -156,18 +159,24 @@ export function Sidebar({
       <div className="sidebar-bottom">
         {!collapsed && (
           <div className="local-note">
-            <span className={`status-dot ${connection.error ? 'is-error' : ''}`} />
-            <span role="status">
-              {connection.live
-                ? connection.loading
-                  ? '正在加载账户模型…'
-                  : connection.error || !connection.models.length
-                    ? '账户已授权 · 模型不可用'
-                    : `${provider.name} 可用`
-                : '未连接模型服务'}
-            </span>
+            <div className="sidebar-status-row">
+              <div className="sidebar-service-status">
+                <span className={`status-dot ${connection.error ? 'is-error' : ''}`} />
+                <span role="status">
+                  {connection.live
+                    ? connection.loading
+                      ? '正在加载账户模型…'
+                      : connection.error || !connection.models.length
+                        ? '账户已授权 · 模型不可用'
+                        : `${provider.name} 可用`
+                    : '未连接模型服务'}
+                </span>
+              </div>
+              <SidebarUpdate />
+            </div>
             {connection.error && (
               <button className="status-retry" onClick={() => void connection.load(true, true)}>
+                <Refresh size={14} />
                 重新加载模型
               </button>
             )}
@@ -212,6 +221,7 @@ export function Sidebar({
           </p>
           <div className="dialog-footer">
             <Button variant="outline" data-autofocus onClick={() => setLoggingOut(false)}>
+              <X size={16} />
               取消
             </Button>
             <Button
@@ -220,6 +230,7 @@ export function Sidebar({
                 onLogout();
               }}
             >
+              <LogOut size={16} />
               确认退出登录
             </Button>
           </div>
