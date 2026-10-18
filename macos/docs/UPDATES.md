@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。已发布 [Mac v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，旧 v0.2.1 仍为包含语音/RAG/Copilot 的完整包。0.2.2 通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；用户仍无需 Node、Python 或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
+面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。当前已发布 [Mac v0.3.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.0) 并设为 Latest；Windows 仍按平台使用既有0.2.2，全部旧发行与资产保留。0.2.2起通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；用户仍无需 Node、Python 或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。应用使用 ad-hoc 代码签名，未购买 Developer ID，也未经过 Apple 公证。首次打开时 macOS 可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。
 
@@ -39,7 +39,7 @@ corepack pnpm test:package --install-archive
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
 - `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
 
-向公开 NCFXZ/VoxCue-releases 新建正式 Release，三项上传完成后发布。保留旧 Windows 发行及其 Latest 过渡指针。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
+向公开 NCFXZ/VoxCue-releases 新建正式 Release，三项上传完成后发布，保留旧发行和资产。Latest按当次用户授权处理，本次0.3.0已明确允许设为Latest。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 

@@ -2,11 +2,15 @@
 
 当前只保留 ChatGPT 登录；GitHub Copilot 登录、IPC、后台服务、运行时清单和 SDK 依赖已从 shared/macOS/Windows 移除，不再读取旧服务选择。旧凭据、历史及存储键内容保留；仅应用数据根目录按用户授权统一迁为 VoxCue。公开 copilot-runtime-v1.0.21 发行、六个附件和对应标签已按用户授权删除；模型和其他应用发行保留。
 
-语音和 RAG 模型独立于应用版本维护。shared/electron/backend/components 使用源码固定的资源目录、ZIP 大小、SHA-256 和逐文件清单，下载源为公开 NCFXZ/VoxCue-releases 的 models-v1.0.0。Renderer 只请求状态、下载固定模型或取消，不提供 URL、路径、摘要、权限或命令。
+语音和 RAG 模型独立于应用版本维护。shared/electron/backend/components 使用源码固定的资源目录、ZIP 大小、SHA-256 和逐文件清单，下载源为公开 NCFXZ/VoxCue-releases 的 models-v1.0.0。Renderer 只请求状态、下载/删除固定模型或取消下载，不提供 URL、路径、摘要、权限或命令。
 
 模型缓存在 VoxCue 应用数据目录下的 component-cache。macOS 根为 ~/Library/Application Support/VoxCue，Windows 为 %APPDATA%/VoxCue；旧 ai-interview-copilot 根在 session 创建前整体原子重命名，成功后旧路径消失，资料、凭据、历史和模型缓存一同保留。两处有内容或旧进程占用时停止，不覆盖或合并。目录由模型 ID、资源版本和 ZIP 摘要确定，不含应用版本，因此升级后可复用。启动检查文件大小、摘要和执行权限，缺失、损坏、链接或额外内容不算就绪。
 
 下载集中在“设置 → 本地组件”，主界面显示未就绪模型的合并提示；知识库、个人信息等位置只提供打开该设置分类的快捷入口。无需先下载模型即可登录 ChatGPT 和准备聊天。
+
+受管模型在“已就绪”后提供删除图标，沿用原位短确认，删除后可重新下载。主进程只允许主窗口主 frame 按 speech/rag ID 删除固定版本缓存，使用中的面试、语音输入、资料处理或回答会拒绝删除，并发下载/删除同样拒绝。删除期间立即阻止新的模型操作；先退出空闲语音进程或卸载 RAG 模型，再核对目录、标记与完整清单，仅移除所选模型。未知内容和链接拒绝删除；知识库、索引、原件、凭据、历史及其他模型保留。完整旧包或完整开发模型不属于受管缓存，不提供此删除入口。界面与后台共用，Windows 的原生文件占用需在本机验证。
+
+删除或替换损坏缓存前另核对所选模型目录顶层只含files与.voxcue-component.json；存在额外原件、目录或重定向时拒绝操作并保留。该限制不影响固定模型文件区内损坏权重的重新下载修复。
 
 缺失提示采用原有长条卡片和多行标题/说明。准备页提示放在聊天列内，与下方聊天/输入区域共享可用宽度；个人信息展开时仍显示，随聊天列一起收窄并在该列居中，不横跨个人信息面板。窄窗口也为个人信息面板预留宽度，避免覆盖提示和设置入口。知识库与个人信息中的模型提示沿用同样的长条样式。界面源码两平台共用，Mac 不写 Windows 专属目录。
 
@@ -25,9 +29,9 @@ package-app.mjs 仅复制实际运行依赖，不再包含 GitHub SDK。模型�
 
 macos/test/scripts/components-smoke.mjs 在系统临时目录构建独立应用，使用合成账户验证模型未下载时登录、设置快捷入口、真实下载、入口限制和断网重启。临时应用、数据库、profile、资源副本及截图结束清理，结果只显示终端。
 
-该 Mac 专属脚本的 IPC 异步等待仍需在 Mac 本机改用 shared/test/scripts/wait-for-async.mjs；本轮 Windows 只读诊断，不改写或运行 macos/。共用脚本和 Windows 安装态回归已改用显式异步轮询，避免 Promise 真值让断言过早执行。
+Mac组件安装态脚本的IPC异步等待使用shared/test/scripts/wait-for-async.mjs，与共用脚本沿用显式异步轮询，逐次等待真实状态结果，避免Promise真值让断言过早执行。Windows安装态同样沿用其本机入口，Mac不改写Windows文件。
 
-shared/test/scripts/components-ui-smoke.mjs 使用合成组件状态和独立临时账户检查单个模型状态、按钮宽度过渡、延迟悬停红色取消、宽/窄窗口个人信息动画、居中与焦点恢复，不下载模型或调用真实账户。
+shared/test/scripts/components-ui-smoke.mjs 使用合成组件状态和独立临时账户检查单个模型状态、按钮宽度过渡、延迟悬停红色取消、标题间距、删除短确认与取消、宽/窄窗口个人信息动画、居中与焦点恢复，不下载或删除真实模型，不调用真实账户。--preview-components 仅在终端输出内存预览；实际缓存删除与资料保护使用系统临时目录中的微型固定模型单测。
 
 ## Windows 打包与隔离验证
 

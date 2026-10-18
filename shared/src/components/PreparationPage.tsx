@@ -41,6 +41,21 @@ import { ChatSources } from './ChatSources';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { useModelProvider } from './useModelProvider';
+const audioAccessLabels = {
+  granted: '可用',
+  denied: '未授权',
+  unavailable: '设备不可用',
+  error: '检查失败',
+};
+const screenAccessLabels = {
+  granted: '可用',
+  'not-required': '无需单独授权',
+  'not-determined': '未授权',
+  denied: '未授权',
+  restricted: '受限制',
+  unknown: '待确认',
+  error: '检查失败',
+};
 export function PreparationPage({
   onInterviewSettings,
   onComponentSettings,
@@ -56,7 +71,6 @@ export function PreparationPage({
   const speechReady = useComponentReady('speech');
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
-  const provider = useModelProvider();
   const interviewSettings = useInterviewSettings();
   const chatScroll = useFollowScroll(state.messages, state.activeConversation);
   const dictation = useDictation();
@@ -91,6 +105,8 @@ export function PreparationPage({
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewDevices, setInterviewDevices] = useState<AudioDevice[]>([]);
   const [accessReport, setAccessReport] = useState<InterviewAccessReport | null>(null);
+  const screenAccess = accessReport?.screenCapture;
+  const screenReady = screenAccess && ['granted', 'not-required'].includes(screenAccess.status);
   const [checkingAccess, setCheckingAccess] = useState(false);
   const accessAttempt = useRef(0);
   const [interviewConfiguration, setInterviewConfiguration] = useState(
@@ -111,6 +127,21 @@ export function PreparationPage({
   const [copied, setCopied] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
   const dragDepth = useRef(0);
+  useEffect(() => {
+    const resetDrag = () => {
+      dragDepth.current = 0;
+      setDragging(false);
+    };
+    resetDrag();
+    window.addEventListener('dragend', resetDrag);
+    window.addEventListener('drop', resetDrag);
+    window.addEventListener('blur', resetDrag);
+    return () => {
+      window.removeEventListener('dragend', resetDrag);
+      window.removeEventListener('drop', resetDrag);
+      window.removeEventListener('blur', resetDrag);
+    };
+  }, [state.activeConversation]);
   const [interviewKnowledgeName, setInterviewKnowledgeName] = useState('不使用知识库');
 
   useEffect(() => {
@@ -307,95 +338,106 @@ export function PreparationPage({
               <dd>{effortLabels[interviewConfiguration.effort]}</dd>
             </div>
           </dl>
-          <p className="interview-start-settings-hint">
-            <Button
-              variant="ghost"
-              disabled={openingInterview}
-              onClick={() => {
-                ++accessAttempt.current;
-                setConfirmInterview(false);
-                onInterviewSettings?.();
-              }}
-            >
-              <Settings size={16} />
-              前往面试设置
-            </Button>
-            <span>保存后返回此处重新核对。</span>
-          </p>
-          <div className="interview-access" aria-label="权限与设备检查">
+          <section
+            className="interview-access"
+            aria-label="权限与设备检查"
+            aria-busy={checkingAccess}
+          >
+            <h3>设备与权限</h3>
             {checkingAccess ? (
-              <p role="status">正在检查权限与音频设备…</p>
-            ) : (
-              accessReport?.checks.map((check) => (
-                <p key={check.source} className={check.status === 'granted' ? '' : 'danger-text'}>
-                  <span className="interview-access-icon" aria-hidden="true">
-                    {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
-                  </span>
-                  <span>{check.message}</span>
-                </p>
-              ))
-            )}
-            {!checkingAccess && accessReport?.screenCapture && (
-              <p aria-label="屏幕捕获权限检查">
-                <span className="interview-access-icon" aria-hidden="true">
-                  {['granted', 'not-required'].includes(accessReport.screenCapture.status) ? (
-                    <Check size={14} />
-                  ) : (
-                    <Monitor size={14} />
-                  )}
-                </span>
-                <span>
-                  {accessReport.screenCapture.message}
-                  {!['granted', 'not-required'].includes(accessReport.screenCapture.status) &&
-                    '；可继续纯语音面试，截图功能需授权。'}
-                </span>
+              <p className="interview-access-detail" role="status">
+                正在检查权限与音频设备…
               </p>
+            ) : (
+              <ul className="interview-access-list">
+                {accessReport?.checks.map((check) => (
+                  <li key={check.source}>
+                    <div className="interview-access-row">
+                      <span>{check.source === 'microphone' ? '麦克风' : '系统音频'}</span>
+                      <span
+                        className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
+                      >
+                        {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
+                        {audioAccessLabels[check.status]}
+                      </span>
+                    </div>
+                    {check.status !== 'granted' && (
+                      <p className="interview-access-detail danger-text">{check.message}</p>
+                    )}
+                  </li>
+                ))}
+                {screenAccess && (
+                  <li aria-label="屏幕捕获权限检查">
+                    <div className="interview-access-row">
+                      <span>屏幕截图</span>
+                      <span className="interview-access-status">
+                        {screenReady ? <Check size={14} /> : <Monitor size={14} />}
+                        {screenAccessLabels[screenAccess.status]}
+                      </span>
+                    </div>
+                    {!screenReady && (
+                      <p className="interview-access-detail">
+                        {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
+                          `${screenAccess.message} `}
+                        可继续纯语音面试，截图需授权。
+                      </p>
+                    )}
+                  </li>
+                )}
+              </ul>
             )}
-            {!checkingAccess &&
-              (!accessReport?.ready ||
-                interviewError ||
-                (accessReport?.screenCapture &&
-                  !['granted', 'not-required'].includes(accessReport.screenCapture.status))) && (
-                <div className="interview-access-actions">
+            <div className="interview-access-actions">
+              <Button
+                variant="ghost"
+                disabled={openingInterview}
+                onClick={() => {
+                  ++accessAttempt.current;
+                  setConfirmInterview(false);
+                  onInterviewSettings?.();
+                }}
+              >
+                <Settings size={16} />
+                前往面试设置
+              </Button>
+              <Button
+                variant="ghost"
+                disabled={openingInterview || checkingAccess}
+                onClick={() => void checkAccess(interviewConfiguration)}
+              >
+                <Refresh size={16} />
+                重新检查
+              </Button>
+              {!checkingAccess &&
+                accessReport?.checks.some(
+                  (check) =>
+                    (check.source === 'microphone' && check.status === 'denied') ||
+                    (window.desktop?.nativeWindowControls === true &&
+                      check.source === 'system' &&
+                      check.status !== 'granted'),
+                ) && (
                   <Button
-                    variant="ghost"
-                    disabled={openingInterview}
-                    onClick={() => void checkAccess(interviewConfiguration)}
+                    variant="outline"
+                    onClick={() =>
+                      void window
+                        .desktop!.openMicrophoneSettings(
+                          window.desktop?.nativeWindowControls
+                            ? accessReport?.checks.find((check) => check.status !== 'granted')
+                                ?.source
+                            : undefined,
+                        )
+                        .catch(() =>
+                          setInterviewError('无法打开系统设置，请手动打开音频隐私设置。'),
+                        )
+                    }
                   >
-                    <Refresh size={16} />
-                    重新检查
+                    <Settings size={16} />
+                    {window.desktop?.nativeWindowControls
+                      ? '打开音频权限设置'
+                      : '打开麦克风权限设置'}
                   </Button>
-                  {accessReport?.checks.some(
-                    (check) =>
-                      (check.source === 'microphone' && check.status === 'denied') ||
-                      (window.desktop?.nativeWindowControls === true &&
-                        check.source === 'system' &&
-                        check.status !== 'granted'),
-                  ) && (
-                    <Button
-                      variant="outline"
-                      onClick={() =>
-                        void window
-                          .desktop!.openMicrophoneSettings(
-                            window.desktop?.nativeWindowControls
-                              ? accessReport?.checks.find((check) => check.status !== 'granted')
-                                  ?.source
-                              : undefined,
-                          )
-                          .catch(() =>
-                            setInterviewError('无法打开系统设置，请手动打开音频隐私设置。'),
-                          )
-                      }
-                    >
-                      <Settings size={16} />
-                      {window.desktop?.nativeWindowControls
-                        ? '打开音频权限设置'
-                        : '打开麦克风权限设置'}
-                    </Button>
-                  )}
-                </div>
-              )}
-          </div>
+                )}
+            </div>
+          </section>
           <p className="interview-start-description">
             音频仅在本机处理，不保存。
             {interviewConfiguration.mode === 'local' &&
@@ -450,7 +492,53 @@ export function PreparationPage({
         </Modal>
       )}
       <div className="preparation-layout">
-        <div className="chat-column">
+        <div
+          className="chat-column"
+          onDragEnter={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return;
+            event.preventDefault();
+            if (!state.chatsReady) return;
+            dragDepth.current++;
+            setDragging(true);
+          }}
+          onDragOver={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return;
+            event.preventDefault();
+            event.dataTransfer.dropEffect = state.chatsReady ? 'copy' : 'none';
+          }}
+          onDragLeave={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return;
+            event.preventDefault();
+            dragDepth.current = Math.max(0, dragDepth.current - 1);
+            if (!dragDepth.current) setDragging(false);
+          }}
+          onDrop={(event) => {
+            if (!event.dataTransfer.types.includes('Files')) return;
+            event.preventDefault();
+            dragDepth.current = 0;
+            setDragging(false);
+            if (!state.chatsReady) return;
+            const conversation = state.activeConversation;
+            void readDroppedFiles(event.dataTransfer)
+              .then((files) => {
+                const current = usePreparation.getState();
+                if (!current.chatsReady) return;
+                if (current.activeConversation !== conversation)
+                  throw Error('读取文件期间已切换对话，请在当前对话重新拖入文件。');
+                current.addAttachments(files);
+              })
+              .catch((error) =>
+                usePreparation.setState({
+                  error: error instanceof Error ? error.message : '读取文件失败。',
+                }),
+              );
+          }}
+        >
+          {dragging && (
+            <div className="chat-drop-hint" role="status">
+              <span>松开以添加文件到当前对话 · 最多 20 个，每个 20 MB</span>
+            </div>
+          )}
           <ComponentsNotice onSettings={onComponentSettings} />
           {state.messages.length ? (
             <div
@@ -611,44 +699,12 @@ export function PreparationPage({
               </div>
             )}
             <form
-              className={`composer ${dragging ? 'composer-dragging' : ''}`}
-              onDragEnter={(event) => {
-                event.preventDefault();
-                if (event.dataTransfer.types.includes('Files')) {
-                  dragDepth.current++;
-                  setDragging(true);
-                }
-              }}
-              onDragOver={(event) => {
-                event.preventDefault();
-                event.dataTransfer.dropEffect = 'copy';
-              }}
-              onDragLeave={(event) => {
-                event.preventDefault();
-                dragDepth.current = Math.max(0, dragDepth.current - 1);
-                if (!dragDepth.current) setDragging(false);
-              }}
-              onDrop={(event) => {
-                event.preventDefault();
-                if (!state.chatsReady) return;
-                dragDepth.current = 0;
-                setDragging(false);
-                void readDroppedFiles(event.dataTransfer)
-                  .then(state.addAttachments)
-                  .catch((error) =>
-                    usePreparation.setState({
-                      error: error instanceof Error ? error.message : '读取文件失败。',
-                    }),
-                  );
-              }}
+              className="composer"
               onSubmit={(event) => {
                 event.preventDefault();
                 submit();
               }}
             >
-              {dragging && (
-                <div className="composer-drop-hint">松开以添加文件 · 最多 20 个，每个 20 MB</div>
-              )}
               <ChatAttachments />
               <textarea
                 ref={inputRef}
@@ -700,15 +756,14 @@ export function PreparationPage({
                 </div>
               </div>
             </form>
-            <p
-              role={visibleError ? 'alert' : undefined}
-              className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
-            >
-              {visibleError ||
-                (connection.live
-                  ? `聊天、个人资料、主动添加的附件和相关资料片段将发送至 ${provider.dataRecipient}。请核实重要信息。`
-                  : '请先连接模型服务。')}
-            </p>
+            {(visibleError || !connection.live) && (
+              <p
+                role={visibleError ? 'alert' : undefined}
+                className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
+              >
+                {visibleError || '请先连接模型服务。'}
+              </p>
+            )}
             {connection.error && (
               <Button
                 variant="outline"

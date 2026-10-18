@@ -54,6 +54,24 @@ function setup(hits = [hit]) {
   return { knowledge, provider, rag: new RagChatService(provider, knowledge, async () => 'local') };
 }
 describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
+  it('模型删除中阻止新的检索，未选择知识库的普通聊天仍可继续', async () => {
+    const { knowledge, provider } = setup();
+    const rag = new RagChatService(
+      provider,
+      knowledge,
+      async () => 'local',
+      () => {
+        throw Error('知识库模型尚未就绪');
+      },
+    );
+    await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toThrow(
+      '尚未就绪',
+    );
+    expect(knowledge.search).not.toHaveBeenCalled();
+    expect(provider.stream).not.toHaveBeenCalled();
+    await rag.stream({ ...request, knowledgeBaseId: null }, vi.fn(), new AbortController().signal);
+    expect(provider.stream).toHaveBeenCalledOnce();
+  });
   it('完整 QA/追问只加入当前请求，保持文件、历史、模型及流式事件', async () => {
     const { knowledge, provider, rag } = setup();
     const emit = vi.fn();

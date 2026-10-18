@@ -30,6 +30,12 @@ service.ComponentService=class extends service.ComponentService {
   for(const item of this.value.items)if(item.phase!=='ready'){item.phase='pending';item.received=0;}
   this.publish('cancelled');return Promise.resolve(this.state());
  }
+ remove(id){
+  this.removedId=id;
+  const item=this.value.items.find(item=>item.id===id);
+  item.phase='pending';item.received=0;this.publish('needed');
+  return Promise.resolve(this.state());
+ }
 };
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});
 `,
@@ -146,6 +152,12 @@ try {
     .getByRole('button', { name: '本地组件', exact: true })
     .click();
   const rows = settings.locator('.component-row');
+  const panelGap = await settings.evaluate(
+    (dialog) =>
+      dialog.querySelector('.components-panel').getBoundingClientRect().top -
+      dialog.querySelector('.settings-content-heading').getBoundingClientRect().bottom,
+  );
+  assert.ok(panelGap >= 16, 'Component card must clear the heading separator');
   for (const index of [0, 1]) {
     const row = rows.nth(index),
       other = rows.nth(1 - index);
@@ -211,6 +223,65 @@ try {
     await other.getByRole('button', { name: '下载', exact: true }).waitFor({ state: 'visible' });
     assert.equal(await other.getByRole('button', { name: '下载', exact: true }).isEnabled(), true);
   }
+  await app.evaluate(() => {
+    const service = globalThis.uiComponents;
+    for (const item of service.value.items) {
+      item.phase = 'ready';
+      item.received = item.bytes;
+    }
+    service.publish('ready');
+  });
+  await rows.getByText('已就绪', { exact: true }).first().waitFor();
+  for (const colorScheme of ['dark', 'light']) {
+    await page.emulateMedia({ colorScheme });
+    await page.waitForFunction(
+      (dark) => document.documentElement.classList.contains('dark') === dark,
+      colorScheme === 'dark',
+    );
+    assert.equal(
+      await settings.locator('.components-panel').evaluate(
+        (panel) =>
+          panel.scrollWidth <= panel.clientWidth &&
+          [...panel.querySelectorAll('.component-row')].every((row) => {
+            const rect = row.getBoundingClientRect();
+            const action = row.querySelector('.component-ready-actions').getBoundingClientRect();
+            return action.left >= rect.left && action.right <= rect.right;
+          }),
+      ),
+      true,
+    );
+  }
+  if (process.argv.includes('--preview-components'))
+    console.log(
+      'VOXCUE_COMPONENTS_PREVIEW:' +
+        (
+          await settings
+            .locator('.components-panel')
+            .screenshot({ type: 'jpeg', quality: 75, scale: 'css' })
+        ).toString('base64'),
+    );
+  for (const index of [0, 1]) {
+    const row = rows.nth(index),
+      other = rows.nth(1 - index);
+    const label = await row.locator('strong').innerText();
+    const remove = row.getByRole('button', { name: '删除：' + label, exact: true });
+    await remove.click();
+    assert.equal(await app.evaluate(() => globalThis.uiComponents.removedId), undefined);
+    await page.keyboard.press('Escape');
+    await remove.waitFor();
+    await remove.click();
+    const otherReady = await other.getByText('已就绪', { exact: true }).count();
+    await row.getByRole('button', { name: '确认删除：' + label, exact: true }).click();
+    await row.getByRole('button', { name: '下载', exact: true }).waitFor();
+    assert.equal(
+      await app.evaluate(() => globalThis.uiComponents.removedId),
+      index === 0 ? 'speech' : 'rag',
+    );
+    assert.equal(await other.getByText('已就绪', { exact: true }).count(), otherReady);
+    await app.evaluate(() => {
+      globalThis.uiComponents.removedId = undefined;
+    });
+  }
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
@@ -221,7 +292,7 @@ try {
   await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: independent model labels, animated download width, red icon cancellation with delayed hover, responsive personal panel/chat animation and centering, focus restoration and reduced motion. Synthetic downloads only.',
+    'PASS: independent model labels, animated download width, red icon cancellation, component spacing, light/dark delete confirmation/cancellation and download restoration, responsive personal panel/chat animation, focus and reduced motion. Synthetic component operations only.',
   );
 } finally {
   if (app) await closeUiApp(app);

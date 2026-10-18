@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { readFile, writeFile } from 'node:fs/promises';
 import { temporaryDirectory } from '../temp';
 import path from 'node:path';
@@ -37,6 +37,272 @@ async function directory() {
   return temporaryDirectory('rag-core');
 }
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
+  it('离线对比冷检索与缓存命中的本地耗时，不重复计算相同查询', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    try {
+      await core.indexDocument(
+        input('alpha', '## Q001. PID sensor?\n\nalpha PID 参数37。'),
+        signal(),
+      );
+      const cold: number[] = [],
+        warm: number[] = [];
+      for (let index = 0; index < 20; index++) {
+        const start = performance.now();
+        await core.search('PID query ' + index, 5, 'hybrid', signal());
+        cold.push(performance.now() - start);
+      }
+      const expected = await core.search('PID sensor', 5, 'hybrid', signal());
+      const before = encode.mock.calls.filter((call) => call[1] === 'query').length;
+      for (let index = 0; index < 100; index++) {
+        const start = performance.now();
+        const hits = await core.search('PID sensor', 5, 'hybrid', signal());
+        warm.push(performance.now() - start);
+        expect(hits).toEqual(expected);
+      }
+      expect(encode.mock.calls.filter((call) => call[1] === 'query')).toHaveLength(before);
+      const p95 = (values: number[]) =>
+        +values.sort((a, b) => a - b)[Math.floor(values.length * 0.95)].toFixed(3);
+      console.log(
+        'OFFLINE_RETRIEVAL_MS ' +
+          JSON.stringify({
+            coldP95: p95(cold),
+            warmP95: p95(warm),
+            repeatedQueries: warm.length,
+            additionalEncodes: 0,
+            syntheticVectors: true,
+          }),
+      );
+    } finally {
+      await core.close();
+    }
+  });
+  it('相同查询复用本地结果，参数、知识库隔离，调用方修改不污染缓存', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    const queryCount = () => encode.mock.calls.filter((call) => call[1] === 'query').length;
+    try {
+      await core.indexDocument(
+        input('alpha', '## Q001. PID sensor?\n\nalpha PID 参数37。'),
+        signal(),
+      );
+      await core.indexDocument(
+        { ...input('beta', '## Q001. PID sensor?\n\nbeta PID 参数42。'), baseId: 'base-b' },
+        signal(),
+      );
+      const [first, concurrent] = await Promise.all([
+        core.search('PID sensor', 5, 'hybrid', signal(), 'base-a'),
+        core.search('PID sensor', 5, 'hybrid', signal(), 'base-a'),
+      ]);
+      expect(queryCount()).toBe(1);
+      expect(first).toEqual(concurrent);
+      first[0].title = '被调用方改写';
+      concurrent.length = 0;
+      expect(
+        (await core.search('PID sensor', 5, 'hybrid', signal(), 'base-a'))[0].title,
+      ).not.toContain('改写');
+      expect(queryCount()).toBe(1);
+      expect((await core.search('PID sensor', 5, 'hybrid', signal(), 'base-b'))[0].documentId).toBe(
+        'beta',
+      );
+      await core.search('PID sensor', 1, 'hybrid', signal(), 'base-a');
+      await core.search('PID sensor', 5, 'vector', signal(), 'base-a');
+      await core.search('PID sensor ', 5, 'hybrid', signal(), 'base-a');
+      expect(queryCount()).toBe(5);
+      const keyword = await core.search('PID', 5, 'keyword', signal(), 'base-a');
+      expect(keyword[0].mode).toBe('keyword');
+      const cancelled = new AbortController();
+      cancelled.abort();
+      await expect(
+        core.search('PID sensor', 5, 'hybrid', cancelled.signal, 'base-a'),
+      ).rejects.toThrow();
+      await expect(core.search('PID sensor', 5, 'hybrid', signal(), "bad'base")).rejects.toThrow();
+      expect(queryCount()).toBe(5);
+    } finally {
+      await core.close();
+    }
+  });
+  it('资料更新、停用、重新索引、删除和模型卸载立即失效，失败或取消不缓存结果', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    const search = () => core.search('PID sensor', 5, 'hybrid', signal());
+    const original = input('alpha', '## Q001. PID sensor?\n\nalpha PID 参数37。');
+    try {
+      await core.indexDocument(original, signal());
+      const before = await search();
+      await core.updateDocument(
+        input('alpha', '## Q001. PID sensor?\n\nalpha PID 参数42。'),
+        signal(),
+      );
+      const updated = await search();
+      expect(updated[0].excerpt).toContain('参数42');
+      expect(await core.getItem(before[0].itemId)).toBeNull();
+      expect((await core.getItem(updated[0].itemId))!.content).toContain('参数42');
+      await core.invalidateDocument('alpha', signal());
+      expect(await search()).toEqual([]);
+      await core.indexDocument(original, signal());
+      expect((await search())[0].excerpt).toContain('参数37');
+      const queries = () => encode.mock.calls.filter((call) => call[1] === 'query').length;
+      const prior = queries();
+      await core.unloadModel();
+      expect(await search()).toHaveLength(1);
+      expect(queries()).toBe(prior + 1);
+      encode.mockRejectedValueOnce(Error('合成检索失败'));
+      await expect(core.search('PID sensor retry', 5, 'hybrid', signal())).rejects.toThrow(
+        '合成检索失败',
+      );
+      const afterFailure = queries();
+      await core.search('PID sensor retry', 5, 'hybrid', signal());
+      expect(queries()).toBe(afterFailure + 1);
+      const aborted = new AbortController();
+      const originalEncode = vectors.encode;
+      vectors.encode = async (...args) => {
+        const result = await originalEncode(...args);
+        aborted.abort();
+        return result;
+      };
+      await expect(
+        core.search('PID sensor cancelled', 5, 'hybrid', aborted.signal),
+      ).rejects.toThrow();
+      vectors.encode = originalEncode;
+      const afterAbort = queries();
+      await core.search('PID sensor cancelled', 5, 'hybrid', signal());
+      expect(queries()).toBe(afterAbort + 1);
+      await core.removeDocument('alpha', signal());
+      expect(await search()).toEqual([]);
+      await core.close();
+      await expect(search()).rejects.toThrow('已关闭');
+    } finally {
+      await core.close();
+    }
+  });
+  it('检索缓存有界并且每个知识核心实例独立', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    const other = new KnowledgeService(await directory(), embedder());
+    try {
+      await core.indexDocument(
+        input('alpha', '## Q001. PID sensor?\n\nalpha PID 参数37。'),
+        signal(),
+      );
+      await other.indexDocument(
+        input('beta', '## Q001. PID sensor?\n\nbeta PID 参数42。'),
+        signal(),
+      );
+      await core.search('PID sensor', 5, 'vector', signal());
+      expect((await other.search('PID sensor', 5, 'vector', signal()))[0].documentId).toBe('beta');
+      for (let index = 0; index < 64; index++)
+        await core.search('PID cache ' + index, 5, 'vector', signal());
+      const before = encode.mock.calls.filter((call) => call[1] === 'query').length;
+      await core.search('PID sensor', 5, 'vector', signal());
+      expect(encode.mock.calls.filter((call) => call[1] === 'query')).toHaveLength(before + 1);
+    } finally {
+      await core.close();
+      await other.close();
+    }
+  });
+  it('口语查询原样区分缓存键，不把语气词、否定或纠正合并成旧问题', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    try {
+      await core.indexDocument(input('alpha', '# PID\n\nalpha PID 使用条件。'), signal());
+      const queries = [
+        'PID sensor',
+        '嗯PID sensor',
+        'PID sensor呢',
+        '不是PID sensor',
+        '呃刚说岔了PID sensor',
+      ];
+      for (const query of queries) await core.search(query, 5, 'vector', signal());
+      expect(
+        encode.mock.calls.filter((call) => call[1] === 'query').map((call) => call[0][0]),
+      ).toEqual(queries);
+      const before = encode.mock.calls.length;
+      for (const query of queries) await core.search(query, 5, 'vector', signal());
+      expect(encode.mock.calls).toHaveLength(before);
+    } finally {
+      await core.close();
+    }
+  });
+  it('长口语查询触及字节预算时提前淘汰，仍命中最近查询且不超过预算', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    const query = (index: number) => 'PID ' + '哈'.repeat(5900) + index;
+    const queryCount = () => encode.mock.calls.filter((call) => call[1] === 'query').length;
+    try {
+      await core.indexDocument(input('alpha', '# PID\n\nalpha PID 使用条件。'), signal());
+      for (let index = 0; index < 40; index++)
+        await core.search(query(index), 5, 'vector', signal());
+      const before = queryCount();
+      await core.search(query(39), 5, 'vector', signal());
+      expect(queryCount()).toBe(before);
+      await core.search(query(0), 5, 'vector', signal());
+      expect(queryCount()).toBe(before + 1);
+      const cache = core as unknown as { searchCacheBytes: number };
+      expect(cache.searchCacheBytes).toBeLessThanOrEqual(512 * 1024);
+    } finally {
+      await core.close();
+    }
+  });
+  it('并发更新与查询按顺序读取当前提交，失败更新保留可用旧结果', async () => {
+    const vectors = embedder();
+    const encode = vi.fn(vectors.encode);
+    vectors.encode = encode;
+    const core = new KnowledgeService(await directory(), vectors);
+    const search = () => core.search('PID sensor', 5, 'vector', signal());
+    try {
+      await core.indexDocument(input('alpha', '# PID\n\nalpha PID 参数37。'), signal());
+      await search();
+      const [before, , after] = await Promise.all([
+        search(),
+        core.updateDocument(input('alpha', '# PID\n\nalpha PID 参数42。'), signal()),
+        search(),
+      ]);
+      expect(before[0].excerpt).toContain('参数37');
+      expect(after[0].excerpt).toContain('参数42');
+      encode.mockRejectedValueOnce(Error('合成索引失败'));
+      await expect(
+        core.updateDocument(input('alpha', '# PID\n\nalpha PID 参数99。'), signal()),
+      ).rejects.toThrow('合成索引失败');
+      expect((await search())[0].excerpt).toContain('参数42');
+      expect((await core.getItem(after[0].itemId))?.content).toContain('参数42');
+    } finally {
+      await core.close();
+    }
+  });
+  it('卸载模型保留资料原件、索引与打开的文档列表', async () => {
+    const dir = await directory(),
+      vectors = embedder();
+    let releases = 0;
+    vectors.close = async () => {
+      releases++;
+    };
+    const core = new KnowledgeService(dir, vectors);
+    try {
+      await core.indexDocument(input('alpha', '# PID\n\nOriginal document.'), signal());
+      const catalog = await readFile(path.join(dir, 'catalog.json'));
+      const documents = await core.listDocuments();
+      await core.unloadModel();
+      expect(releases).toBe(1);
+      expect(await readFile(path.join(dir, 'catalog.json'))).toEqual(catalog);
+      expect(await core.listDocuments()).toEqual(documents);
+      expect((await core.search('PID', 5, 'hybrid', signal()))[0].documentId).toBe('alpha');
+    } finally {
+      await core.close();
+    }
+  });
   it('中英混合三模式、完整追问、重复导入、更新、删除及重启', async () => {
     const dir = await directory();
     let core = new KnowledgeService(dir, embedder());

@@ -56,6 +56,9 @@ port.on('message', ({ data: m }) => {
             case 'close':
               await core.close();
               break;
+            case 'unload-model':
+              await core.unloadModel();
+              break;
             default:
               throw Error('未知知识库操作。');
           }

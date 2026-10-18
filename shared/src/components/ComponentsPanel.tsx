@@ -3,12 +3,13 @@ import { Button } from './ui/button';
 import { DownloadButton } from './DownloadButton';
 import { ActionTransition } from './ActionTransition';
 import { Download, Refresh, Loader } from './icons';
+import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 
 const size = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 export function ComponentsPanel() {
   const { state, error, run } = useComponents();
   if (!window.desktop?.components) return null;
-  const busy = state?.phase === 'downloading' || state?.phase === 'verifying';
+  const busy = ['downloading', 'verifying', 'removing'].includes(state?.phase ?? '');
   const items = state?.items ?? [];
   return (
     <section className="components-panel" aria-label="本地组件">
@@ -29,14 +30,33 @@ export function ComponentsPanel() {
                   ? '正在校验本地文件…'
                   : item.phase === 'verifying'
                     ? '正在校验并准备…'
-                    : item.phase === 'downloading'
-                      ? `${size(item.received)} / ${size(item.bytes)}`
-                      : `${size(item.bytes)} · 尚未下载`}
+                    : item.phase === 'removing'
+                      ? '正在删除本机模型…'
+                      : item.phase === 'downloading'
+                        ? `${size(item.received)} / ${size(item.bytes)}`
+                        : `${size(item.bytes)} · 尚未下载`}
             </span>
           </div>
           <ActionTransition>
             {item.phase === 'ready' ? (
-              <span className="component-ready">已就绪</span>
+              <span className="component-ready-actions">
+                <span className="component-ready">已就绪</span>
+                {state?.removable && (
+                  <ConfirmDeleteButton
+                    target={item.label}
+                    iconOnly
+                    compact
+                    disabled={busy || state.phase === 'checking'}
+                    warning="仅删除本机模型，可重新下载；知识库、资料和记录保留"
+                    onConfirm={() => run({ op: 'remove', id: item.id })}
+                  />
+                )}
+              </span>
+            ) : item.phase === 'removing' ? (
+              <Button variant="ghost" disabled>
+                <Loader size={16} />
+                删除中…
+              </Button>
             ) : item.phase === 'downloading' || item.phase === 'verifying' ? (
               <DownloadButton
                 label={item.label}

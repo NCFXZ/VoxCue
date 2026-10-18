@@ -480,11 +480,28 @@ app.whenReady().then(() => {
       for (const win of [mainWindow, loginWindow])
         if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'components:event', state);
     },
+    async prepareRemove(id) {
+      if (interviewOpening || interviewWindow) return false;
+      if (id === 'speech') {
+        if (speechSessions?.busy) return false;
+        await speech?.close();
+      } else {
+        if (knowledgeCoordinator?.busy || chatIpc?.isBusy()) return false;
+        await knowledge?.unloadModel();
+      }
+      return true;
+    },
   });
-  registerComponentIpc(components, (event) => {
-    if (![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender))
-      throw Error('Unauthorized window');
-  });
+  registerComponentIpc(
+    components,
+    (event) => {
+      if (![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender))
+        throw Error('Unauthorized window');
+    },
+    (event) => {
+      if (event.sender !== mainWindow?.webContents) throw Error('Unauthorized window');
+    },
+  );
   void components.status();
   nativePresentation?.initialize();
   if (desktopPlatform.nativeWindowControls) {
@@ -716,7 +733,12 @@ app.whenReady().then(() => {
     () => chat.functionCallingStatus ?? { supported: null, reason: '当前服务尚未验证本地工具。' },
   );
   registerKnowledgeIpc(knowledgeCoordinator, requireMain, () => components.require('rag'));
-  const ragChat = new RagChatService(chat, knowledge, () => knowledgeCoordinator.getMode());
+  const ragChat = new RagChatService(
+    chat,
+    knowledge,
+    () => knowledgeCoordinator.getMode(),
+    () => components.require('rag'),
+  );
   chatIpc = registerChatIpc({
     chat: ragChat,
     requireMain,

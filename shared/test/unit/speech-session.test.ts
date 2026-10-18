@@ -95,7 +95,10 @@ it('确认后仅接受相同的设备和来源，暂停或重新打开都不会�
 });
 it('语音输入固定麦克风，确认面试先冲刷尾段，之后不能抢占面试采集', async () => {
   const { port, coordinator } = setup();
-  await coordinator.dictation({ op: 'start', options: { sources: ['system'] } });
+  expect(coordinator.busy).toBe(false);
+  const starting = coordinator.dictation({ op: 'start', options: { sources: ['system'] } });
+  expect(coordinator.busy).toBe(true);
+  await starting;
   expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options: { sources: ['microphone'] } });
   expect(coordinator.target).toBe('dictation');
   await coordinator.confirm(defaultInterviewConfiguration());
@@ -109,6 +112,7 @@ it('语音输入固定麦克风，确认面试先冲刷尾段，之后不能抢�
   await coordinator.dictation({ op: 'start' });
   coordinator.releaseDictation();
   expect(coordinator.target).toBeUndefined();
+  expect(coordinator.busy).toBe(false);
 });
 it('加载中立即停止按顺序释放，失败后允许重新启动', async () => {
   const { port, coordinator } = setup();

@@ -1,8 +1,83 @@
 import { describe, it, expect } from 'vitest';
 import { SampleBuffer, PacketDecoder } from '../../../shared/electron/backend/speech/buffer';
 import { validateSpeech } from '../../../shared/electron/backend/speech/validation';
-import { QuestionBuffer } from '../../../shared/src/services/speech';
+import { QuestionBuffer, isAcknowledgementOnly } from '../../../shared/src/services/speech';
 describe('本地语音边界和问题汇总', () => {
+  it.each([
+    '嗯',
+    '好的。',
+    '嗯 好的 谢谢',
+    '明白了，谢谢您。',
+    'OK, thank you!',
+    'Got it.',
+    'THANK YOU VERY MUCH',
+    '嗯嗯嗯',
+    '呃呃，嗯嗯，好好好',
+    '嗯好的谢谢',
+    '哦哦好的明白了',
+    '嗯\t嗯\n好的',
+    'ＯＫ，ＴＨＡＮＫＳ！',
+  ])('明确回应 %s 仅跳过自动回答', (text) => {
+    expect(isAcknowledgementOnly(text)).toBe(true);
+  });
+  it.each([
+    '讲讲你的项目',
+    '继续',
+    '为什么',
+    '可以吗',
+    '明白了吗？',
+    '好的？',
+    '好在哪里',
+    '不对，我刚才说的是 PostgreSQL',
+    '谢谢，请继续解释索引',
+    '嗯，具体如何实现',
+    'Thanks. Explain the trade-off.',
+    'Yes',
+    'No',
+    'I see a race condition',
+    '',
+    '```\n好的\n```',
+    'Thank you for the explanation; why not Redis?',
+    '嗯那为啥这么选',
+    '呃就是那个PostgreSQL咋保证一致性的',
+    '好好学习这个方案有什么坑',
+    '嗯嗯没听清再说一遍',
+    '谢谢不过为啥不用Redis呢',
+    '哦我刚说岔了是异步不是同步',
+    '嗯嗯嗯？',
+    '好的\n为什么',
+    'uh so why postgres instead of redis',
+    'got it but what happens on failure',
+    '嗯你你你再把刚刚那个讲一下',
+    '额破斯格瑞那个数据库咋扩容',
+    '嗯post gree SQL要咋调优',
+    '嗯'.repeat(121),
+  ])('不确定、追问、指令和纠正 %s 继续交给模型', (text) => {
+    expect(isAcknowledgementOnly(text)).toBe(false);
+  });
+  it('组合语气词、重复词和无标点不能吞掉夹在中间的有效内容', () => {
+    const acknowledgements = ['嗯', '呃呃', '哦哦', '好的', '明白了', '谢谢', 'OK', 'got it'];
+    const questions = [
+      '为啥',
+      '咋整',
+      '继续',
+      '不对',
+      '没听清',
+      '重来一遍',
+      '说岔了是SQLite',
+      '你你你再讲讲',
+      'why',
+      'not Redis',
+    ];
+    const separators = ['', ' ', '，', '\n'];
+    for (const before of acknowledgements)
+      for (const after of acknowledgements)
+        for (const question of questions)
+          for (const separator of separators) {
+            const text = [before, question, after].join(separator);
+            expect(isAcknowledgementOnly(text), text).toBe(false);
+          }
+  });
   it('环形缓存跨边界保持顺序，满时显式失败', () => {
     const b = new SampleBuffer(4);
     b.push(new Float32Array([1, 2, 3]));

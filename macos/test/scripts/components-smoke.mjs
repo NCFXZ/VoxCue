@@ -3,6 +3,7 @@ import workspace from '../../../shared/scripts/workspace.mjs';
 import { buildMacApp } from '../../scripts/package-app.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { assertDownloadButton } from '../../../shared/test/scripts/assert-download-button.mjs';
+import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { readFile, mkdir, lstat, rename } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -154,7 +155,8 @@ try {
   const rag = settings.locator('.component-row').filter({ hasText: '知识库模型' });
   await rag.getByRole('button', { name: '下载', exact: true }).click();
   await assertDownloadButton(page, rag.locator('.download-button'));
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () =>
       (await window.desktop.components({ op: 'status' })).items.find((item) => item.id === 'rag')
         .phase === 'ready',
@@ -176,7 +178,8 @@ try {
   await notice.getByRole('button', { name: '前往设置' }).click();
   const speech = settings.locator('.component-row').filter({ hasText: '本地语音模型' });
   await speech.getByRole('button', { name: '下载', exact: true }).click();
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
     undefined,
     { timeout: 180000 },
@@ -308,7 +311,8 @@ try {
     });
   });
   page = await application.firstWindow();
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
     undefined,
     { timeout: 30000 },

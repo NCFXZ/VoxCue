@@ -69,3 +69,64 @@ it('上下文使用不可变快照，长场次按字节和条数保留近期内�
   expect(Buffer.byteLength(JSON.stringify(bounded.timeline))).toBeLessThanOrEqual(64000);
   expect(bounded.timeline.at(-1).id).toBe('question:snapshot');
 });
+it('完全重复长文本按原文引用去重，保留所有角色、先后、追问关系与当前题原文', () => {
+  const context = new InterviewContext();
+  const text = '项目实际使用 PostgreSQL，延迟为37毫秒。\n代码与空白保持原样：  x !== y;\n'.repeat(
+    10,
+  );
+  context.event(segment('system', text, 'system', 1));
+  context.event(segment('mic', text, 'microphone', 2));
+  const first = context.prepare('q1', text);
+  context.answer(first, text);
+  context.event(
+    segment('correction', text.replace('PostgreSQL', 'Redis'), 'microphone', Date.now() + 1),
+  );
+  const question = '刚才那个项目为什么选 PostgreSQL？';
+  const snapshot = context.prepare('q2', question);
+  expect(snapshot.turns.at(-1)?.content).toBe(question);
+  const data = JSON.parse(snapshot.turns[0].content.split('\n').slice(1).join('\n'));
+  const literal = new Map<string, string>();
+  const restored = data.timeline.map((entry: any) => {
+    if (entry.textRef) {
+      expect(literal.has(entry.textRef)).toBe(true);
+      const { textRef, ...rest } = entry;
+      return { ...rest, text: literal.get(textRef) };
+    }
+    literal.set(entry.id, entry.text);
+    return entry;
+  });
+  expect(data.textReferenceRule).toContain('不能把 AI 建议当成实际发言');
+  expect(
+    restored.filter((entry: any) => entry.text === text).map((entry: any) => entry.kind),
+  ).toEqual(['interviewer', 'interviewee', 'submitted_question', 'ai_suggestion']);
+  expect(restored.find((entry: any) => entry.kind === 'submitted_question')).toMatchObject({
+    questionId: 'q1',
+  });
+  expect(restored.find((entry: any) => entry.id === 'transcript:correction').text).toContain(
+    'Redis',
+  );
+  expect(Buffer.byteLength(JSON.stringify(data))).toBeLessThan(
+    Buffer.byteLength(
+      JSON.stringify({ omittedOlderEntries: data.omittedOlderEntries, timeline: restored }),
+    ),
+  );
+  const frozen = JSON.stringify(snapshot);
+  context.event(segment('later', '后来补充的事实', 'microphone', Date.now() + 2));
+  expect(JSON.stringify(snapshot)).toBe(frozen);
+});
+it('短文本和仅空白不同的内容保持原文，不为去重增加上下文大小', () => {
+  const context = new InterviewContext();
+  context.event(segment('a', '好的', 'system', 1));
+  context.event(segment('b', '好的', 'microphone', 2));
+  const text = '重要技术事实  '.repeat(20);
+  context.event(segment('c', text, 'system', 3));
+  context.event(segment('d', text.replaceAll('  ', ' '), 'microphone', 4));
+  const data = timeline(context);
+  expect(data.textReferenceRule).toBeUndefined();
+  expect(data.timeline.map((entry: any) => entry.text)).toEqual([
+    '好的',
+    '好的',
+    text,
+    text.replaceAll('  ', ' '),
+  ]);
+});

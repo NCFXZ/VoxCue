@@ -1,3 +1,11 @@
+## 2026-10-18：闲置源码副本与空编译目录
+
+本轮在shared/macOS核对导入图、脚本入口、原生动态装配、同名文件差异、绝对/真实路径和lsof占用后，删除9份无消费者的“2”号源码副本：更新偏好、组件公开契约/IPC/Store、ActionTransition、ComponentsNotice、DownloadButton、SidebarUpdate及更新偏好单测。6份与正式文件同字节；另外3份为已被当前组件删除实现覆盖的旧代码，没有独立功能。正式文件摘要保持。
+
+另移除根/shared/macOS的3个Finder缓存、6个空dist-electron副本和两棵空编译暂存树（共17个空目录）。总计12个普通文件、40,282逻辑字节，全部目标均无进程占用；该体积不代表实际磁盘可用空间增量。精确路径、数量及删除状态在macos/recovery/unused-source-cleanup-20261018/{plan,result}.json，仅为清理审计，不含测试结果。
+
+无静态入边的运行入口、Worker/utilityProcess/preload、原生平台适配，以及通过模板生成的缩放样式均有实际消费者，保留。现用测试/固定输入、依赖/锁、当前构建和工具运行时、发行、签名密钥、真实原件及源码恢复基线继续保护；Windows专属目录只读，历史受占用/跳过的测试目录不重试。本轮不提交、推送或发布；必要回归结果仅到终端/对话，临时数据退出清理。
+
 ## 2026-10-18：源码同步前的本地发行清理
 
 用户最新明确要求上传当前源码并删除本地安装包与模型。核对工作区 windows/release 的精确路径、后代无重定向及文件无占用后，移除修复安装包、blockmap 与 latest.yml，共 3 个普通文件、逻辑 233,247,356 字节。windows/release-smoke、shared/local-models/speech 与 shared/local-models/rag/multilingual-e5-small 已不存在；本次不重新下载。纯路径、用途、数量和删除状态在 windows/recovery/local-installer-cleanup-20261018/cleanup.json，不提交审计。

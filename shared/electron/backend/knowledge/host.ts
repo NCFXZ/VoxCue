@@ -128,6 +128,9 @@ export class KnowledgeHost implements KnowledgePort {
       this.stop();
     }
   }
+  async unloadModel() {
+    if (this.child) await this.send({ op: 'unload-model' }, undefined, 30000);
+  }
   stop(message = '知识库服务已关闭。') {
     const child = this.child;
     this.child = undefined;

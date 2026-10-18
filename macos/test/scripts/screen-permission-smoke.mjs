@@ -43,7 +43,7 @@ try {
   });
   if (native.granted) assert.equal(native.requestResult, true);
   checks.push('实际 arm64 Node-API 在 Electron 主进程读取屏幕授权；未授权时不自动请求');
-  await installUiAccount(app);
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app, desktopCapturer }) => {
     if (!app.getPath('userData').includes('/test/results/screen-permission-'))
       throw Error('Non-test profile');
@@ -89,12 +89,18 @@ try {
     require(root + 'macos/electron/speech/access.js').InterviewAccess.prototype.check = async (
       options,
     ) => ({
-      ready: true,
+      ready: !globalThis.screenFixture.audioDenied,
       devices: inventory,
       checks: options.sources.map((source) => ({
         source,
-        status: 'granted',
-        message: source === 'system' ? '系统音频可用' : '麦克风可用',
+        status:
+          globalThis.screenFixture.audioDenied && source === 'microphone' ? 'denied' : 'granted',
+        message:
+          globalThis.screenFixture.audioDenied && source === 'microphone'
+            ? '所选合成麦克风未获授权，请检查音频权限设置。'.repeat(5)
+            : source === 'system'
+              ? '系统音频可用'
+              : '麦克风可用',
       })),
     });
     require(root + 'shared/electron/backend/speech/host.js').SpeechHost.prototype.call = async (
@@ -126,7 +132,9 @@ try {
     true,
   );
   assert.equal(await app.evaluate(() => globalThis.screenFixture.requests), 0);
-  await dialog.screenshot({ animations: 'disabled' });
+  const preview = await dialog.screenshot({ animations: 'disabled', type: 'jpeg', quality: 75 });
+  if (process.argv.includes('--preview'))
+    console.log('VOXCUE_ACCESS_PREVIEW:' + preview.toString('base64'));
   const interviewOpened = app.waitForEvent('window');
   await dialog.getByRole('button', { name: '确认开始', exact: true }).click();
   const interview = await interviewOpened;
@@ -138,6 +146,16 @@ try {
   await start();
   await dialog.getByRole('button', { name: '前往面试设置', exact: true }).click();
   const panel = page.getByRole('region', { name: '屏幕捕获权限', exact: true });
+  const refreshDevices = page.getByRole('button', { name: '刷新设备', exact: true });
+  assert.equal((await refreshDevices.boundingBox()).height, 36);
+  assert.equal(
+    (await page.getByRole('button', { name: '麦克风设备', exact: true }).boundingBox()).height,
+    36,
+  );
+  assert.equal(
+    await refreshDevices.locator('svg').evaluate((icon) => icon.getBoundingClientRect().height),
+    16,
+  );
   await panel
     .getByRole('status', { name: '屏幕捕获权限状态' })
     .filter({ hasText: '未允许' })
@@ -198,14 +216,39 @@ try {
   // and checks access again; the main start button is behind that modal.
   await dialog.waitFor();
   const screenStatus = dialog.getByLabel('屏幕捕获权限检查', { exact: true });
-  await screenStatus.getByText('当前捕获方式无需单独申请权限。', { exact: true }).waitFor();
-  assert.equal(await screenStatus.getByText('截图功能需授权', { exact: false }).count(), 0);
+  await screenStatus.getByText('无需单独授权', { exact: true }).waitFor();
+  assert.equal(await screenStatus.getByText('截图需授权', { exact: false }).count(), 0);
   assert.equal(
     await dialog.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
     true,
   );
   assert.equal(await app.evaluate(() => globalThis.screenFixture.requests), 2);
   assert.equal(await app.evaluate(() => globalThis.screenFixture.captures), 0);
+  await app.evaluate(({ BrowserWindow }) => {
+    globalThis.screenFixture.audioDenied = true;
+    BrowserWindow.getAllWindows()
+      .find((window) => window.isVisible())
+      .setContentSize(960, 680);
+  });
+  await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
+  await dialog
+    .getByText('所选合成麦克风未获授权，请检查音频权限设置。'.repeat(5), { exact: true })
+    .waitFor();
+  assert.equal(
+    await dialog.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await dialog.locator('.interview-access').evaluate(
+      (section) =>
+        section.scrollWidth <= section.clientWidth &&
+        [...section.querySelectorAll('.interview-access-row')].every((row) => {
+          const [label, status] = row.children;
+          return label.getBoundingClientRect().right + 12 <= status.getBoundingClientRect().left;
+        }),
+    ),
+    true,
+  );
   assert.deepEqual(errors, []);
   checks.push('返回后刷新/撤销可见，未生效可打开固定设置；非法 IPC 被拒绝，无屏幕捕获');
   checks.push(

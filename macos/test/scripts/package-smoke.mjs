@@ -60,6 +60,19 @@ assert.equal(
 );
 const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
+assert.equal(
+  JSON.parse(asar.extractFile(path.join(resources, 'app.asar'), 'package.json').toString()).version,
+  version,
+);
+for (const key of ['CFBundleVersion', 'CFBundleShortVersionString'])
+  assert.equal(
+    run('/usr/libexec/PlistBuddy', [
+      '-c',
+      'Print :' + key,
+      path.join(bundle, 'Contents/Info.plist'),
+    ]).trim(),
+    version,
+  );
 assert.ok(!entries.some((file) => /^\/(?:\.tools|\.git|test|windows)\//.test(file)));
 assert.ok(!entries.some((file) => file.includes('ed25519.key')));
 assert.ok(entries.includes('/dist-electron/macos/electron/updates/driver.js'));
@@ -152,7 +165,7 @@ try {
       const assert = require('node:assert/strict');
       const { Worker } = require('node:worker_threads');
       const unpacked = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked');
-      const { ComponentService, componentPaths } = require(
+      const { ComponentService, componentPaths, componentLocation } = require(
         app.getAppPath() + '/dist-electron/shared/electron/backend/components/service.js',
       );
       const { packagesFor } = require(
@@ -165,6 +178,17 @@ try {
       try {
         assert.equal((await components.status()).phase, 'needed');
         assert.equal((await components.download()).phase, 'ready');
+        const extra = path.join(
+          componentLocation(
+            cache,
+            packages.find((item) => item.id === 'speech'),
+          ),
+          'protected-original.txt',
+        );
+        fs.writeFileSync(extra, 'Synthetic protected original');
+        assert.equal((await components.remove('speech')).phase, 'error');
+        assert.equal(fs.readFileSync(extra, 'utf8'), 'Synthetic protected original');
+        fs.unlinkSync(extra);
       } finally {
         components.dispose();
       }
@@ -297,6 +321,7 @@ try {
       return [
         'packaged login',
         'thin package downloads and offline model cache reuse',
+        'unknown component-root originals protected during deletion',
         'arm64 native bindings',
         'PDF/DOCX parsing',
         'Paraformer Worker',

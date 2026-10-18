@@ -10,6 +10,7 @@ export class RagChatService implements AIChatService {
     private provider: AIChatService,
     private knowledge: KnowledgePort,
     private mode: () => Promise<RagMode>,
+    private requireModel: () => void = () => {},
   ) {}
   models(force?: boolean) {
     return this.provider.models(force);
@@ -34,6 +35,7 @@ export class RagChatService implements AIChatService {
       signal.throwIfAborted();
       return result;
     }
+    this.requireModel();
     if ((await this.mode()) === 'function') {
       if (!this.provider.streamWithTools)
         throw Error('当前 AI Provider 不支持本地工具，请手动选择 Local RAG。');

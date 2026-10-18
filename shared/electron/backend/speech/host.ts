@@ -81,4 +81,20 @@ export class SpeechHost {
     }
     this.pending.clear();
   }
+  async close() {
+    const child = this.child;
+    if (!child) return;
+    await new Promise<void>((resolve, reject) => {
+      const exited = () => {
+        clearTimeout(timer);
+        resolve();
+      };
+      const timer = setTimeout(() => {
+        child.removeListener('exit', exited);
+        reject(Error('本地语音进程尚未退出，请稍后重试。'));
+      }, 10000);
+      child.once('exit', exited);
+      this.stop();
+    });
+  }
 }

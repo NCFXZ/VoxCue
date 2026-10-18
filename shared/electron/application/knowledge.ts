@@ -76,6 +76,7 @@ export class KnowledgeCoordinator {
   private saving = false;
   private snapshot?: Promise<KnowledgeState>;
   private changeVersion = 0;
+  private pending = 0;
   private settingReady: Promise<void>;
   constructor(
     readonly core: KnowledgePort,
@@ -117,7 +118,14 @@ export class KnowledgeCoordinator {
     if (this.tasks.size > 1000) this.tasks.delete(this.tasks.keys().next().value!);
     this.emit(status);
   }
-  async call(call: KnowledgeCall): Promise<KnowledgeValue> {
+  get busy() {
+    return this.pending > 0;
+  }
+  call(call: KnowledgeCall): Promise<KnowledgeValue> {
+    this.pending++;
+    return this.run(call).finally(() => this.pending--);
+  }
+  private async run(call: KnowledgeCall): Promise<KnowledgeValue> {
     await this.settingReady;
     if (this.settingsError) throw this.settingsError;
     if (call.op === 'cancel') {

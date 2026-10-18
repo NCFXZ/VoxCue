@@ -20,6 +20,7 @@ describe('知识库一致性快照', () => {
       vi.fn(),
     );
     const pending = coordinator.call({ op: 'status' });
+    expect(coordinator.busy).toBe(true);
     await vi.waitFor(() => expect(list).toHaveBeenCalledOnce());
     coordinator.progress({ documentId: 'new-document', phase: 'ready', completed: 1, total: 1 });
     resolve([]);
@@ -28,5 +29,6 @@ describe('知识库一致性快照', () => {
       tasks: [{ phase: 'ready' }],
     });
     expect(list).toHaveBeenCalledTimes(2);
+    expect(coordinator.busy).toBe(false);
   });
 });

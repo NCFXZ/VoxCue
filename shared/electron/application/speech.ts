@@ -77,15 +77,20 @@ export class SpeechCoordinator {
   private startingDictation = false;
   private dictationAttempt = 0;
   private dictationIntent = 0;
+  private pending = 0;
   target: 'dictation' | 'interview' | undefined;
   constructor(private port: SpeechPort) {}
+  get busy() {
+    return this.pending > 0 || this.target !== undefined || this.confirmed !== undefined;
+  }
   get configuration() {
     return this.confirmed ? structuredClone(this.confirmed) : undefined;
   }
   private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    this.pending++;
     const next = this.tail.then(operation, operation);
     this.tail = next.catch(() => {});
-    return next;
+    return next.finally(() => this.pending--);
   }
   confirm(value: unknown) {
     const configuration = validateInterviewConfiguration(value);

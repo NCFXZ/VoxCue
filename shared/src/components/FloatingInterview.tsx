@@ -28,7 +28,9 @@ import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
+import { useInterviewFontSize } from '../interviewTypography';
 export function FloatingInterview() {
+  const fontSize = useInterviewFontSize();
   const state = useInterview();
   const provider = providerInfo(state.answers.at(-1)?.provider);
   const saveError = useHistory((s) => s.error);
@@ -334,6 +336,7 @@ export function FloatingInterview() {
         style={
           {
             '--panel-height': `max(0px, calc(100dvh - ${interviewLayout.chromeHeight}px))`,
+            '--interview-font-size': `${fontSize}px`,
             '--transcript-width': `calc(var(--panel-height) * ${interviewLayout.transcriptWidth / interviewLayout.panelHeight})`,
             '--answer-width': `calc(var(--panel-height) * ${interviewLayout.answerWidth / interviewLayout.panelHeight})`,
           } as CSSProperties

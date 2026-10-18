@@ -21,6 +21,8 @@ const shared = [
   'history-branding',
   'provider-ui',
   'floating',
+  'interview-typography',
+  'interview-usage',
   'interview-screenshot',
   'delete-controls',
   'ui-alignment',

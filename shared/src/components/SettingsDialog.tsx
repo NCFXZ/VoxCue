@@ -28,6 +28,7 @@ import { useComponentReady } from '../stores/components';
 import { useModelProvider } from './useModelProvider';
 import { providerInfo } from '../services/providers';
 import { SpeechControls } from './SpeechControls';
+import { InterviewFontSettings } from './InterviewFontSettings';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useChatConnection } from '../stores/chatConnection';
 import { useAuth } from '../stores/auth';
@@ -364,24 +365,12 @@ export function SettingsDialog({
                   models={connection.models}
                   live={connection.live}
                 />
-                {[
-                  ['面试浮窗置顶', '始终置顶'],
-                  ['透明空白区域穿透', presentation.interviewMousePassthrough ? '自动' : '待适配'],
-                  [
-                    '面试期间隐藏应用图标',
-                    presentation.interviewIconVisibility ? '自动' : '待适配',
-                  ],
-                ].map(([label, value]) => (
-                  <div className="settings-entry" key={label}>
-                    <strong>{label}</strong>
-                    <span className="settings-value">{value}</span>
-                  </div>
-                ))}
                 {interview.error && (
                   <p role="alert" className="danger-text">
                     {interview.error}
                   </p>
                 )}
+                <InterviewFontSettings />
               </>
             )}
             {category === 'about' && (

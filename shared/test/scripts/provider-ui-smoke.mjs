@@ -14,7 +14,7 @@ const app = await electron.launch({
 const checks = [],
   errors = [];
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -120,10 +120,7 @@ try {
   await send.waitFor();
   await chooseModel('其他测试模型');
   await page.getByText('合成提供商 可用', { exact: true }).waitFor();
-  await page
-    .locator('.simulation-disclaimer')
-    .getByText(/发送至 合成服务公司/)
-    .waitFor();
+  assert.equal(await page.locator('.simulation-disclaimer').count(), 0);
   await page.getByRole('button', { name: '添加附件', exact: true }).click();
   await page
     .locator('.attachment-menu-hint')

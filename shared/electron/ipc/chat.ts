@@ -26,6 +26,7 @@ export function registerChatIpc(dependencies: Dependencies) {
       throw Error('Unauthorized frame');
   };
   let activeChat: { id: string; controller: AbortController } | undefined;
+  let pendingChats = 0;
   const cancelActive = () => {
     const previous = activeChat;
     activeChat = undefined;
@@ -68,6 +69,7 @@ export function registerChatIpc(dependencies: Dependencies) {
     const controller = new AbortController();
     const active = { id: (request as ChatRequest)?.id, controller };
     activeChat = active;
+    pendingChats++;
     const partial: ChatPartialResponse = {};
     try {
       controller.signal.throwIfAborted();
@@ -100,6 +102,7 @@ export function registerChatIpc(dependencies: Dependencies) {
         ...(Object.keys(partial).length ? { partial } : {}),
       };
     } finally {
+      pendingChats--;
       if (activeChat === active) activeChat = undefined;
     }
   });
@@ -113,5 +116,5 @@ export function registerChatIpc(dependencies: Dependencies) {
     if (!source) throw new Error('无效的链接。');
     await dependencies.openLink(source.url);
   });
-  return { cancelActive };
+  return { cancelActive, isBusy: () => pendingChats > 0 };
 }

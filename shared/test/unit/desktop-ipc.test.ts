@@ -56,7 +56,7 @@ describe('更新 IPC 白名单', () => {
     const sender = { mainFrame: {} },
       event = { sender, senderFrame: undefined as unknown };
     event.senderFrame = sender.mainFrame;
-    const service = { status: vi.fn(), download: vi.fn(), cancel: vi.fn() };
+    const service = { status: vi.fn(), download: vi.fn(), cancel: vi.fn(), remove: vi.fn() };
     registerComponentIpc(service as unknown as ComponentService, (event) => {
       if (event.sender !== sender) throw Error('Unauthorized window');
     });
@@ -70,6 +70,10 @@ describe('更新 IPC 白名单', () => {
       { op: 'download', id: 'copilot' },
       { op: 'cancel', id: 'speech' },
       { op: 'status', path: '/' },
+      { op: 'remove' },
+      { op: 'remove', id: '../private' },
+      { op: 'remove', id: 'speech', path: '/' },
+      Object.assign(Object.create({ op: 'remove' }), { id: 'speech', path: '/' }),
     ])
       expect(() => handle(event, call)).toThrow();
     expect(() => handle({ sender, senderFrame: {} }, { op: 'download' })).toThrow();
@@ -77,6 +81,18 @@ describe('更新 IPC 白名单', () => {
     expect(() => handle(event, { op: 'download' }, { url: 'https://evil.test' })).toThrow();
     await handle(event, { op: 'download', id: 'rag' });
     expect(service.download).toHaveBeenCalledWith('rag');
+    await handle(event, { op: 'remove', id: 'speech' });
+    expect(service.remove).toHaveBeenCalledWith('speech');
+    registerComponentIpc(
+      service as unknown as ComponentService,
+      () => {},
+      () => {
+        throw Error('Only main window can remove');
+      },
+    );
+    expect(() =>
+      bridge.handlers.get('components:call')!(event, { op: 'remove', id: 'rag' }),
+    ).toThrow('Only main window can remove');
   });
   it('只接受主窗口主 frame 的固定操作；桥接订阅可释放', async () => {
     const sender = { mainFrame: {} };
@@ -564,6 +580,7 @@ describe('聊天 IPC 与应用层边界', () => {
       );
     });
     const first = call('chat:send', request);
+    expect(lifecycle.isBusy()).toBe(true);
     expect(await call('chat:send', { ...request, id: 'other' })).toMatchObject({ ok: false });
     expect(await call('chat:usage-reset')).toMatchObject({ ok: false });
     expect(chat.resetUsage).not.toHaveBeenCalled();
@@ -572,10 +589,12 @@ describe('聊天 IPC 与应用层边界', () => {
     pending.emit({ id: request.id, type: 'delta', text: 'before' });
     expect(sender.send).toHaveBeenCalledTimes(1);
     call('chat:cancel', request.id);
+    expect(lifecycle.isBusy()).toBe(true);
     expect(pending.signal.aborted).toBe(true);
     pending.emit({ id: request.id, type: 'delta', text: 'late' });
     expect(sender.send).toHaveBeenCalledTimes(1);
     expect(await first).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(lifecycle.isBusy()).toBe(false);
     expect(await call('chat:send', { ...request, id: 'next' })).toMatchObject({
       ok: true,
       answerText: 'answer',

@@ -45,7 +45,25 @@ try {
     buffer: Buffer.from('本地简历草稿'),
   });
   await page.locator('.chat-attachment').getByText('resume-draft.txt', { exact: false }).waitFor();
-  await page.locator('.composer').evaluate((element) => {
+  assert.equal(
+    await page.locator('.chat-column').evaluate((element) => {
+      const transfer = new DataTransfer();
+      transfer.setData('text/plain', '普通文本保持浏览器行为');
+      return element.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+      );
+    }),
+    true,
+  );
+  await page.locator('.welcome').evaluate((element) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['项目素材'], 'project.md', { type: 'text/markdown' }));
+    element.dispatchEvent(
+      new DragEvent('dragenter', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  });
+  await page.locator('.chat-drop-hint').waitFor();
+  await page.locator('.welcome').evaluate((element) => {
     const transfer = new DataTransfer();
     transfer.items.add(new File(['项目素材'], 'project.md', { type: 'text/markdown' }));
     element.dispatchEvent(
@@ -70,6 +88,19 @@ try {
   await page.locator('.message-options').getByText('附件：project.md').waitFor();
   await page.locator('.message-options').getByText('思考：高', { exact: false }).waitFor();
   await page.getByRole('button', { name: '停止回复', exact: true }).click();
+  await page.locator('.chat-scroll').evaluate((element) => {
+    const transfer = new DataTransfer();
+    transfer.items.add(new File(['追问素材'], 'follow-up.txt', { type: 'text/plain' }));
+    element.dispatchEvent(
+      new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }),
+    );
+  });
+  await page.locator('.chat-attachment').getByText('follow-up.txt', { exact: false }).waitFor();
+  assert.equal(
+    await page.locator('.chat-attachment').count(),
+    1,
+    'Bubbling through chat column must add the file once',
+  );
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'bad.exe',
     mimeType: 'application/octet-stream',
@@ -90,7 +121,7 @@ try {
   await page.screenshot({});
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: attachment menu, file selection/drop, removal after send, request model/search snapshot, internal synthetic response, invalid file validation and compact sidebar.',
+    'PASS: attachment menu, file selection and whole-column drop on welcome/messages, normal text drop, single attachment insertion, removal after send, request model/search snapshot, synthetic response, invalid file validation and compact sidebar.',
   );
 } finally {
   await closeUiApp(app);

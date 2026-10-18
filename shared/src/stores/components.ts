@@ -9,7 +9,7 @@ interface ComponentsStore {
   state: ComponentState | null;
   error: string | null;
   connect(): () => void;
-  run(call: ComponentCall): Promise<void>;
+  run(call: ComponentCall): Promise<boolean>;
 }
 export const useComponents = create<ComponentsStore>((set, get) => {
   const receive = (state: ComponentState) => {
@@ -41,9 +41,13 @@ export const useComponents = create<ComponentsStore>((set, get) => {
     async run(call) {
       set({ error: null });
       try {
-        if (window.desktop?.components) receive(await window.desktop.components(call));
+        if (!window.desktop?.components) return false;
+        const state = await window.desktop.components(call);
+        receive(state);
+        return !state.error;
       } catch {
         set({ error: '本地组件操作失败，请重试。' });
+        return false;
       }
     },
   };

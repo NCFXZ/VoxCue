@@ -24,6 +24,7 @@ export class ComponentService {
   private value: ComponentState;
   private checking?: Promise<ComponentState>;
   private downloading?: Promise<ComponentState>;
+  private removing = false;
   private controller?: AbortController;
   private disposed = false;
   constructor(
@@ -33,12 +34,14 @@ export class ComponentService {
       managed: boolean;
       fetch: typeof fetch;
       emit(state: ComponentState): void;
+      prepareRemove?(id: ComponentId): Promise<boolean>;
     },
   ) {
     this.value = {
       revision: 0,
       phase: options.managed ? 'checking' : 'ready',
       error: null,
+      removable: options.managed,
       items: options.packages.map((pkg) => ({
         id: pkg.id,
         label: pkg.label,
@@ -65,6 +68,7 @@ export class ComponentService {
     if (!this.disposed) this.options.emit(this.state());
   }
   status() {
+    if (this.removing) return Promise.resolve(this.state());
     if (!this.options.managed || this.checking)
       return this.checking?.then(() => this.state()) ?? Promise.resolve(this.state());
     this.checking = this.check();
@@ -90,6 +94,7 @@ export class ComponentService {
     return this.state();
   }
   download(id?: ComponentId) {
+    if (this.removing) return Promise.reject(Error('正在删除本地组件，请稍后重试。'));
     if (this.downloading) return this.downloading;
     this.controller = new AbortController();
     this.downloading = this.run(id, this.controller.signal).finally(() => {
@@ -97,6 +102,48 @@ export class ComponentService {
       this.controller = undefined;
     });
     return this.downloading;
+  }
+  async remove(id: ComponentId) {
+    if (!this.options.managed) throw Error('此组件随应用提供，无法从设置中删除。');
+    if (this.disposed || this.removing || this.downloading || this.value.phase === 'checking')
+      throw Error('请等待当前组件操作完成后再删除。');
+    const pkg = this.options.packages.find((item) => item.id === id);
+    const item = this.value.items.find((item) => item.id === id);
+    if (!pkg || !item || item.phase !== 'ready') throw Error('该组件尚未就绪，无法删除。');
+    this.removing = true;
+    item.phase = 'removing';
+    this.publish('removing');
+    const directory = componentLocation(this.options.root, pkg);
+    let message = '组件删除失败，请检查文件占用与目录权限后重试。';
+    try {
+      // Retire consumers only after publishing a non-ready state. New model
+      // operations are rejected by their independent main-process guards.
+      if (this.options.prepareRemove && !(await this.options.prepareRemove(id))) {
+        message = '组件正在使用，请结束面试、语音输入或资料处理后再删除。';
+        throw Error('Component in use');
+      }
+      const root = await lstat(this.options.root);
+      if (
+        !root.isDirectory() ||
+        root.isSymbolicLink() ||
+        !(await this.knownRoot(directory)) ||
+        !(await this.verify(directory, pkg))
+      )
+        throw Error('Unknown component content is protected');
+      await rm(directory, { recursive: true });
+      item.phase = 'pending';
+      item.received = 0;
+      this.checking = undefined;
+      this.publish('needed');
+    } catch {
+      const intact = await this.verify(directory, pkg);
+      item.phase = intact ? 'ready' : 'pending';
+      item.received = intact ? pkg.bytes : 0;
+      this.publish('error', message);
+    } finally {
+      this.removing = false;
+    }
+    return this.state();
   }
   cancel() {
     this.controller?.abort();
@@ -187,6 +234,15 @@ export class ComponentService {
       throw Error('Invalid cache marker');
     return JSON.parse(await readFile(file, 'utf8'));
   }
+  private async knownRoot(directory: string) {
+    // Only these top-level entries belong to a published component. Preserve
+    // extra user content before either removal or replacement of a bad model.
+    const info = await lstat(directory);
+    if (!info.isDirectory() || info.isSymbolicLink()) return false;
+    return (await readdir(directory)).every(
+      (name) => name === 'files' || name === '.voxcue-component.json',
+    );
+  }
   private async install(pkg: ComponentPackage, signal: AbortSignal) {
     const item = this.value.items.find((value) => value.id === pkg.id)!;
     const stage = path.join(this.options.root, '.stage-' + pkg.id + '-' + randomUUID());
@@ -224,6 +280,7 @@ export class ComponentService {
         if (
           !existing.isDirectory() ||
           existing.isSymbolicLink() ||
+          !(await this.knownRoot(destination)) ||
           (await this.readMarker(destination)).sha256 !== pkg.sha256
         )
           throw Error('Unknown cache content is protected');

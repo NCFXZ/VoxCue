@@ -47,6 +47,92 @@ const segment = (id: string, text: string, final: boolean) => ({
     reason: 'silence' as const,
   },
 });
+it('明确回应不自动调用模型，保留原始转写与草稿，手动发送仍携带原模型和强度', async () => {
+  const desktop = window.desktop!;
+  Object.assign(desktop, {
+    onChatEvent: () => () => {},
+    interviewCancel: vi.fn(async () => {}),
+    interviewAnswer: vi.fn(async () => ({
+      ok: true,
+      answerText: '合成回答',
+      sources: [],
+      usage: null,
+    })),
+  });
+  useInterview.setState({ aiEnabled: true, modelId: 'test', effort: 'high' });
+  useInterview.getState().setAutoAnswer(true);
+  emit(segment('ack-1', '嗯', true));
+  emit(segment('ack-2', '好的，谢谢。', true));
+  await vi.advanceTimersByTimeAsync(5000);
+  expect(desktop.interviewAnswer).not.toHaveBeenCalled();
+  expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([
+    '嗯',
+    '好的，谢谢。',
+  ]);
+  expect(useInterview.getState().draftQuestion).toBe('嗯 好的，谢谢。');
+  await useInterview.getState().submitTranscript();
+  expect(desktop.interviewAnswer).toHaveBeenCalledWith(
+    expect.objectContaining({
+      question: '嗯 好的，谢谢。',
+      modelId: 'test',
+      effort: 'high',
+    }),
+  );
+});
+it('明确有效问题仍在原来的2200毫秒提交，保留无问号的提问和前置回应', async () => {
+  const desktop = window.desktop!;
+  Object.assign(desktop, {
+    onChatEvent: () => () => {},
+    interviewCancel: vi.fn(async () => {}),
+    interviewAnswer: vi.fn(async () => ({
+      ok: true,
+      answerText: '合成回答',
+      sources: [],
+      usage: null,
+    })),
+  });
+  useInterview.setState({ aiEnabled: true, modelId: 'test' });
+  useInterview.getState().setAutoAnswer(true);
+  emit(segment('ack', '好的', true));
+  await vi.advanceTimersByTimeAsync(2200);
+  emit(segment('question', '讲讲你的项目', true));
+  await vi.advanceTimersByTimeAsync(2199);
+  expect(desktop.interviewAnswer).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
+  expect(useInterview.getState().answers[0].question).toBe('好的 讲讲你的项目');
+});
+it('旧回答完成后不为排队致谢生成答案，后续纠正与追问仍正常提交', async () => {
+  let finish!: (value: unknown) => void;
+  const desktop = window.desktop!;
+  Object.assign(desktop, {
+    onChatEvent: () => () => {},
+    interviewCancel: vi.fn(async () => {}),
+    interviewAnswer: vi
+      .fn()
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue({ ok: true, answerText: '合成追问回答', sources: [], usage: null }),
+  });
+  useInterview.setState({ aiEnabled: true, modelId: 'test' });
+  useInterview.getState().setAutoAnswer(true);
+  const first = useInterview.getState().ask('之前的问题');
+  emit(segment('queued-ack', '谢谢', true));
+  await vi.advanceTimersByTimeAsync(2200);
+  finish({ ok: true, answerText: '原问题回答', sources: [], usage: null });
+  await first;
+  await vi.advanceTimersByTimeAsync(1);
+  expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
+  expect(useInterview.getState().draftQuestion).toBe('谢谢');
+  emit(segment('correction', '不对，我刚才说的是 PostgreSQL，为什么不用 Redis', true));
+  await vi.advanceTimersByTimeAsync(2200);
+  expect(desktop.interviewAnswer).toHaveBeenCalledTimes(2);
+  expect(useInterview.getState().answers.at(-1)?.question).toContain('我刚才说的是 PostgreSQL');
+});
 it('麦克风间断不阻断系统提问；旧回答忙时保留草稿，完成后自动提交已静音的新问题', async () => {
   let finish!: (value: unknown) => void;
   const desktop = window.desktop!;

@@ -42,6 +42,23 @@ export class KnowledgeService implements KnowledgePort {
   private tail: Promise<unknown> = Promise.resolve();
   private closed = false;
   private revisions = new Map<string, Revision>();
+  private searchCache = new Map<string, { hits: KnowledgeHit[]; bytes: number }>();
+  private searchCacheBytes = 0;
+  private clearSearchCache() {
+    this.searchCache.clear();
+    this.searchCacheBytes = 0;
+  }
+  private cacheSearch(key: string, hits: KnowledgeHit[]) {
+    const bytes = Buffer.byteLength(key) + Buffer.byteLength(JSON.stringify(hits));
+    if (bytes > 512 * 1024) return;
+    while (this.searchCache.size >= 64 || this.searchCacheBytes + bytes > 512 * 1024) {
+      const oldest = this.searchCache.keys().next().value!;
+      this.searchCacheBytes -= this.searchCache.get(oldest)!.bytes;
+      this.searchCache.delete(oldest);
+    }
+    this.searchCache.set(key, { hits: structuredClone(hits), bytes });
+    this.searchCacheBytes += bytes;
+  }
   constructor(
     private directory: string,
     private embedder: Embedder,
@@ -163,6 +180,7 @@ export class KnowledgeService implements KnowledgePort {
     signal.throwIfAborted();
     await rename(temporary, file);
     this.catalog = value;
+    this.clearSearchCache();
   }
   indexDocument(input: DocumentInput, signal: AbortSignal) {
     return this.enqueue(signal, async () => {
@@ -388,10 +406,20 @@ export class KnowledgeService implements KnowledgePort {
         !Number.isSafeInteger(topK) ||
         topK < 1 ||
         topK > 20 ||
-        !['keyword', 'vector', 'hybrid'].includes(mode)
+        !['keyword', 'vector', 'hybrid'].includes(mode) ||
+        (baseId !== undefined && !validId(baseId))
       )
         throw Error('无效的知识检索参数。');
       if (!this.table || !Object.keys(this.catalog.documents).length) return [];
+      // This serialized queue owns all catalog changes. An exact query can be
+      // reused only within this instance and committed index snapshot.
+      const cacheKey = JSON.stringify([query, topK, mode, baseId ?? null]);
+      const cached = this.searchCache.get(cacheKey);
+      if (cached) {
+        this.searchCache.delete(cacheKey);
+        this.searchCache.set(cacheKey, cached);
+        return structuredClone(cached.hits);
+      }
       let builder, queryVector: number[] | undefined;
       if (mode === 'keyword')
         builder = this.table.query().fullTextSearch(query, { columns: ['text'] });
@@ -407,7 +435,6 @@ export class KnowledgeService implements KnowledgePort {
           `documentId NOT IN (${this.catalog.blocked.map((id) => `'${id}'`).join(',')})`,
         );
       if (baseId) {
-        if (!validId(baseId)) throw Error('无效知识库 ID。');
         filters.push(`baseId = '${baseId}'`);
       }
       if (filters.length) builder = builder.where(filters.join(' AND '));
@@ -472,6 +499,8 @@ export class KnowledgeService implements KnowledgePort {
         });
         if (results.length === topK) break;
       }
+      signal.throwIfAborted();
+      this.cacheSearch(cacheKey, results);
       return results;
     });
   }
@@ -502,9 +531,15 @@ export class KnowledgeService implements KnowledgePort {
       return null;
     });
   }
+  async unloadModel() {
+    await this.tail.catch(() => {});
+    this.clearSearchCache();
+    await this.embedder.close();
+  }
   async close() {
     this.closed = true;
     await this.tail.catch(() => {});
+    this.clearSearchCache();
     await this.embedder.close();
     this.table?.close();
     this.connection?.close();

@@ -2,11 +2,13 @@
 
 当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。Windows/macOS 当前打包均排除模型与 ONNX Web，保留 Node CPU 推理依赖；既有发行保持。
 
-> 测试结果零保留（2026-10-17）：完整测试已获授权，结果仅在终端/内存显示。已改造入口的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；本轮在 Windows 本机工作，macos/ 经 Git 同步后严格只读。入口与边界见[测试说明](shared/test/README.md)。
+> 测试结果零保留（2026-10-17）：完整测试已获授权，结果仅在终端/内存显示。已改造入口的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；本轮在 Mac 本机工作，Windows 专属目录严格只读。入口与边界见[测试说明](shared/test/README.md)。
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前源码版本为 **0.2.2**，Windows x64 与 Mac Apple Silicon 均已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，并设为 Latest。Windows 提供自绘安装/卸载界面与首次下载模型方案，Mac 提供美化 DMG 与签名自动更新文件；两个平台使用独立更新清单。旧 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 和全部历史发行资产保留；本次发行不延伸为未来自动发布。
+当前源码版本为 **0.3.0**，Mac Apple Silicon 已发布 [v0.3.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.0) 并设为 Latest，提供 DMG 与签名自动更新文件。Windows x64 继续使用已有 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，其安装文件和全部历史发行保留；两个平台按各自清单独立选版，本次未在 Mac 生成 Windows 安装包。
+
+0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。面试用量优化仅跳过明确回应的自动调用，保留有效口语、实际发言与纠正，对重复历史原文及较早无关 AI 建议做保守压缩；不降低所选模型、思考强度或默认答案篇幅。
 
 ## 开发与启动
 

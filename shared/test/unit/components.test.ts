@@ -1,7 +1,7 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { describe, expect, it, vi } from 'vitest';
+import { mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import os from 'node:os';
+import { temporaryDirectory } from '../temp';
 import { createHash } from 'node:crypto';
 import {
   ComponentService,
@@ -15,13 +15,9 @@ import {
 } from '../../../shared/electron/backend/components/catalog';
 const Zip = require('adm-zip');
 const digest = (data: Buffer) => createHash('sha256').update(data).digest('hex');
-const temporary: string[] = [];
-afterEach(async () => {
-  await Promise.all(temporary.splice(0).map((root) => rm(root, { recursive: true, force: true })));
-});
 async function fixture() {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'voxcue-component-unit-'));
-  temporary.push(root);
+  const root = path.join(await temporaryDirectory('components'), 'cache');
+  await mkdir(root);
   const data = Buffer.from('fixed public fixture');
   const zip = new Zip();
   zip.addFile('speech/model.onnx', data);
@@ -210,5 +206,112 @@ describe('独立组件下载与版本缓存', () => {
       });
     expect((await legacy.download()).phase).toBe('ready');
     expect(f.fetcher).not.toHaveBeenCalled();
+    await expect(legacy.remove('speech')).rejects.toThrow('随应用提供');
+  });
+  it('删除仅移除所选模型，保留其他组件与用户资料，并可重新下载', async () => {
+    const f = await fixture(),
+      second = { ...f.pkg, id: 'rag' as const };
+    const service = new ComponentService({
+      root: f.root,
+      packages: [f.pkg, second],
+      managed: true,
+      fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(),
+    });
+    await service.download();
+    const original = path.join(f.root, 'original.md');
+    await writeFile(original, 'Protected user document');
+    expect((await service.remove('speech')).phase).toBe('needed');
+    expect(service.ready('speech')).toBe(false);
+    expect(service.ready('rag')).toBe(true);
+    expect(await readdir(f.root)).not.toContain(path.basename(componentLocation(f.root, f.pkg)));
+    expect(await readFile(original, 'utf8')).toBe('Protected user document');
+    expect((await service.download('speech')).phase).toBe('ready');
+    expect(f.fetcher).toHaveBeenCalledTimes(3);
+  });
+  it('使用中拒绝删除；卸载消费者期间阻止新下载和模型使用', async () => {
+    const f = await fixture();
+    const prepare = vi.fn(async () => false);
+    const service = new ComponentService({
+      root: f.root,
+      packages: [f.pkg],
+      managed: true,
+      fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(),
+      prepareRemove: prepare,
+    });
+    await service.download();
+    expect((await service.remove('speech')).error).toMatch(/正在使用/);
+    expect(service.ready('speech')).toBe(true);
+    let release!: (allowed: boolean) => void;
+    prepare.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          release = resolve;
+        }),
+    );
+    const removal = service.remove('speech');
+    expect(() => service.require('speech')).toThrow(/尚未就绪/);
+    expect((await service.status()).phase).toBe('removing');
+    await expect(service.download('speech')).rejects.toThrow(/正在删除/);
+    await expect(service.remove('speech')).rejects.toThrow(/等待当前/);
+    release(true);
+    expect((await removal).phase).toBe('needed');
+  });
+  it('删除拒绝重定向目录、未知内容及下载并发，保护原件和就绪模型', async () => {
+    const f = await fixture(),
+      service = f.service();
+    await service.download();
+    const directory = componentLocation(f.root, f.pkg);
+    await writeFile(path.join(directory, 'files', 'private.txt'), 'Protected');
+    expect((await service.remove('speech')).phase).toBe('error');
+    expect(await readFile(path.join(directory, 'files', 'private.txt'), 'utf8')).toBe('Protected');
+    await rm(path.join(directory, 'files', 'private.txt'));
+    const linked = f.service();
+    await linked.status();
+    const protectedDirectory = path.join(f.root, 'protected-component');
+    await import('node:fs/promises').then((fs) => fs.rename(directory, protectedDirectory));
+    await symlink(protectedDirectory, directory, process.platform === 'win32' ? 'junction' : 'dir');
+    expect((await linked.remove('speech')).phase).toBe('error');
+    expect(await readFile(path.join(protectedDirectory, 'files/speech/model.onnx'))).toEqual(
+      f.data,
+    );
+
+    const active = await fixture();
+    let started!: () => void;
+    const downloading = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    active.fetcher.mockImplementationOnce(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.enqueue(new Uint8Array(active.bytes.subarray(0, 2)));
+              started();
+            },
+          }),
+        ),
+    );
+    const pending = active.service(),
+      download = pending.download();
+    await downloading;
+    await expect(pending.remove('speech')).rejects.toThrow(/等待当前/);
+    await pending.cancel();
+    await download;
+  });
+  it('模型目录顶层出现未知原件时，删除和损坏后的重新下载均保留该原件', async () => {
+    const f = await fixture(),
+      service = f.service();
+    await service.download();
+    const directory = componentLocation(f.root, f.pkg);
+    const original = path.join(directory, 'user-notes.md');
+    await writeFile(original, 'Protected original outside the model files directory');
+    expect((await service.remove('speech')).phase).toBe('error');
+    expect(await readFile(original, 'utf8')).toContain('Protected original');
+    await writeFile(path.join(directory, 'files/speech/model.onnx'), 'damaged');
+    const restarted = f.service();
+    expect((await restarted.download('speech')).phase).toBe('error');
+    expect(await readFile(original, 'utf8')).toContain('Protected original');
   });
 });

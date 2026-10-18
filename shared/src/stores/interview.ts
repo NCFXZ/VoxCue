@@ -9,7 +9,7 @@ import type {
   AudioSource,
   InterviewScreenshotMode,
 } from '../../electron/contracts/speech';
-import { QuestionBuffer, interviewAnswer } from '../services/speech';
+import { QuestionBuffer, interviewAnswer, isAcknowledgementOnly } from '../services/speech';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
@@ -65,6 +65,15 @@ let questionTimer: ReturnType<typeof setTimeout> | undefined;
 let automaticQuestionReady = false;
 const questions = new QuestionBuffer();
 const submittedInterim = new Set<string>();
+function submitAutomaticTranscript() {
+  if (isAcknowledgementOnly(questions.text('system'))) {
+    // Retain the draft and original transcript for manual submission and later
+    // context. Acknowledgements alone must not queue another model request.
+    automaticQuestionReady = false;
+    return;
+  }
+  void useInterview.getState().submitTranscript();
+}
 const id = () => String(++sequence);
 const stop = () => {
   clearTimeout(questionTimer);
@@ -274,7 +283,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
                 questionTimer = setTimeout(() => {
                   automaticQuestionReady = true;
                   if (get().status === 'running' && get().autoAnswer && !get().generating)
-                    void get().submitTranscript();
+                    submitAutomaticTranscript();
                 }, 2200);
             }
             const interim = get()
@@ -571,7 +580,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
               automaticQuestionReady &&
               !get().generating
             )
-              void get().submitTranscript();
+              submitAutomaticTranscript();
           });
         }
       }
