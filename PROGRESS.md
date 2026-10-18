@@ -1,3 +1,15 @@
+## 2026-10-18：Windows 发行后的本地安装包与模型清理
+
+按用户明确要求，清除 windows/release 下的正式安装包、更新清单及打包暂存，以及 shared/local-models/speech、shared/local-models/rag/multilingual-e5-small 两套开发模型；空的模型容器目录一并移除。生成/运行消费者已核对，删除前逐级确认路径无重定向、无进程/文件占用。应用 component-cache 当前不存在，未删除用户数据根或已安装程序；源码、依赖、开发构建、真实资料/凭据、恢复基线与已发布的 Windows/Mac 0.2.2 保留，macos/ 只读。
+
+缺少开发模型时继续走设置内的组件首次下载与缓存流程，不自动补回本地权重。纯路径、数量、删除状态记录在 windows/recovery/local-release-model-cleanup-20261018/cleanup.json；不包含测试结果。用户后续明确授权将剩余发行与清理文档提交推送到私有 NCFXZ/VoxCue 的 main；清理审计、安装包和模型不提交，线上发行保持。
+
+## 2026-10-18：Windows 0.2.2 正式发行
+
+按用户本次明确授权，将私有源码 8b77781 对应的 Windows x64 安装包、对应 .exe.blockmap 和 latest.yml 追加到公开 NCFXZ/VoxCue-releases 的既有 v0.2.2，并将其设为 Latest。现有 Mac DMG、ZIP、latest-mac.yml 及全部旧发行/资产保持；不上传私有源码、密钥、打包暂存或测试产物，不改变仓库设置。Windows 安装包未配置 Authenticode 签名，Mac 的原签名与发行事实保持。
+
+正式构建入口为 windows/ 下的 package:installer。产物检查使用 test:installer:artifact，包内功能与原生窗口入口为 node test/scripts/portable-native-smoke.mjs --installer-stage；必要 profile、模型、文档和应用副本只在系统临时根并结束清理，结果仅到终端/对话。公开更新选版与完整安装包摘要可通过既有共享 Provider 和流式读取核对，无需实际安装或接触真实账户。本次发行文档按后续明确授权同步私有 main，不延伸为未来自动提交、推送或发布。
+
 ## 2026-10-18：Windows 0.2.2 本机适配
 
 Windows 安装/卸载界面采用本机 C# 自绘窗口，沿用主程序的浅色表面、字号、分隔线、蓝色圆角与 36px 控件；安装/卸载/完成按钮为右对齐 140×36px，不使用左右分栏向导。NSIS 继续负责安装、卸载及静默更新，前端只接受本次引擎创建的固定事件与进度，关闭/完成后释放自有进程和句柄；引擎失败显示明确状态、恢复关闭操作并保持失败退出码，不启动应用。界面编译入口为 windows/scripts/build-installer-ui.mjs；空负载原生预览/回归入口为 windows/test/scripts/installer-branding-smoke.mjs，包含键盘操作、真实进度、引擎故障注入与界面异常退出清理，必要文件只在系统临时根，图片仅以内存展示。

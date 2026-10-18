@@ -6,7 +6,7 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前源码版本为 **0.2.2**，Windows 本机已同步版本配置、Copilot 移除与首次下载打包方案，沿用共用界面和原生 Windows 适配。Mac Apple Silicon 已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，包含美化 DMG 与签名自动更新文件；Windows x64 保持 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 和 Latest，两个平台使用独立更新清单。本轮获授权在完整回归、修复无阻塞后同步私有源码；公开发行仍需另行授权。
+当前源码版本为 **0.2.2**，Windows x64 与 Mac Apple Silicon 均已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，并设为 Latest。Windows 提供自绘安装/卸载界面与首次下载模型方案，Mac 提供美化 DMG 与签名自动更新文件；两个平台使用独立更新清单。旧 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 和全部历史发行资产保留；本次发行不延伸为未来自动发布。
 
 ## 开发与启动
 
@@ -33,7 +33,7 @@ corepack pnpm start
 
 Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 已发布 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 并设为 Latest，原有更新交互和分平台选版保持。安装版自带运行库和模型，普通用户无需开发工具；本地安装包和打包暂存已按授权清理。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 的 [v0.2.2 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.2.2/VoxCue-Setup-0.2.2-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用缓存。Windows 安装包未配置 Authenticode 签名；旧 v0.2.1 完整包及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 ## 工作区与主线
 

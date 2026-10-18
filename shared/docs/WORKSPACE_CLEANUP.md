@@ -1,3 +1,9 @@
+## 2026-10-18：Windows 0.2.2 发布后的安装包与模型
+
+用户明确要求删除本地安装包和模型。已清理 C:\Users\fengk\Documents\Repository\VoxCue\windows\release（安装包、更新元数据及 installer-stage）、shared/local-models/speech、shared/local-models/rag/multilingual-e5-small，共 6,772 个普通文件、逻辑 1,530,865,885 字节；空模型容器一并移除。该体积为文件逻辑大小，不作为实际磁盘可用空间增量。纯路径/数量/删除状态在 windows/recovery/local-release-model-cleanup-20261018/cleanup.json，不含测试结果。
+
+删除前核对生成/运行消费者、精确绝对/解析路径、各级无重定向与进程/文件占用。VoxCue 与旧数据根的 component-cache 均不存在，未触碰应用数据根、真实资料/凭据或已安装程序；源码、依赖、开发构建、恢复基线、工具下载缓存和线上发行保留。macos/ 严格只读，Windows 349 个已跳过的云占位目录未重试。模型后续由设置内既有首次下载流程准备，不自动补回。
+
 ## 2026-10-18：继续本机工作区清理
 
 本轮按用户授权继续清理，暂不提交/上传 GitHub。此前经 AST 核对移除 22 处测试脚本的未使用 workspace 导入，平台约束继续由现用 test-workspace 入口承载。本次删除根 `.DS_Store` 与已被 `Reset.png` 同字节替代的 `macos/public/sf-symbols/RotateCcw.png`，共 2 个普通文件、13,285 字节；删除前核对真实路径、普通文件身份、消费者及 lsof 无占用。根 Finder 缓存可能由系统再次生成；Mac 目录的 `.DS_Store` 仍被系统索引进程占用，保留且不停止索引。

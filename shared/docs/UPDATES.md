@@ -2,6 +2,14 @@
 
 # Windows 安装与分平台更新
 
+## 2026-10-18 Windows / Mac 0.2.2 发行
+
+Windows x64 的 VoxCue-Setup-0.2.2-x64.exe、对应 .exe.blockmap 与 latest.yml 已追加到既有 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，现为仓库 Latest。Mac 原有 DMG、arm64 ZIP 和 latest-mac.yml 保持原资产；全部旧发行及 Windows 0.2.1 文件保留。两平台继续独立选版，旧 Windows 客户端也可经 Latest 获取本次更新。
+
+Windows 0.2.2 使用主程序风格的自绘安装/卸载窗口，保留 NSIS 后台、静默更新及用户数据保留规则。模型与 Copilot 运行时不进入新包，组件在设置内首次下载、校验并按版本/摘要缓存，升级不重复下载未变化模型。普通退出不启动安装；明确点击安装仍须本地保存成功且没有面试。Windows 安装包未配置 Authenticode 签名。
+
+正式包检查使用 test:installer:artifact；node test/scripts/portable-native-smoke.mjs --installer-stage 在临时 profile 验证实际包内组件、缓存、ASR/RAG 和原生窗口，不运行真实安装器。发布仅上传三项 Windows 发行文件，先核对资产大小/摘要及公开更新清单，再提升 Latest；不改写 Mac 资产或仓库设置。本节之后旧版本的 Latest 和测试记录均为历史事实。
+
 ## 2026-10-18 共用更新设置与侧栏提醒
 
 Windows/macOS 共用“设置 → 更新 → 自动下载更新”，默认沿用开启，偏好保存在 VoxCue 应用数据根的 update-settings.json。关闭后启动仍检查更新，只显示提醒；开启后自动下载新发现或当前已发现的更新。关闭开关不取消已开始的下载，可使用下载按钮单独取消。偏好读取失败时关闭自动下载，保存失败显示提示并保留原值；不会因此修改原生更新器的安装策略。
@@ -49,7 +57,7 @@ Mac DMG可供首次手动安装，但自动更新必须有arm64 ZIP；Mac清单�
 
 ## 本地构建
 
-先准备现有语音与资料模型，执行 `pnpm package:installer`。该命令构建应用，沿用经过原生组件验证的 Packager 依赖复制方式创建独立 `release/installer-stage`，然后由 electron-builder 生成 NSIS。不会更改或覆盖 `release-smoke` 便携包，也不会发布。
+准备本平台依赖和 Windows 开发工具后，执行 `pnpm package:installer`。该命令构建应用，沿用 Packager 依赖复制方式创建独立 `release/installer-stage`，然后由 electron-builder 生成 NSIS；不要求本地模型，模型不进入新包。不会更改或覆盖 `release-smoke` 便携包，也不会发布。
 
 仅以下三类发布文件供上传：
 

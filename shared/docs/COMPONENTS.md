@@ -37,4 +37,4 @@ package-portable.mjs 不复制模型和已移除运行时，在 resources 写入
 
 pnpm test:portable:native 在系统临时根生成便携包，验证无模型时的 ChatGPT 登录/入口限制、真实首次下载、首秒进度、取消清理、损坏响应摘要拒绝及重试；替换应用位置后阻断模型请求，复用缓存运行真实 Paraformer Worker、Windows utilityProcess、E5/LanceDB 三模式检索和 PDF/DOCX。原生展示单项使用合成模型状态，不替代前述推理。
 
-pnpm test:installer:isolated 在同一自有临时根追加 NSIS 构建，核对 latest.yml 的 SHA512、blockmap、NSIS 压缩数据及应用/组件标记/原生助手负载摘要，再执行安装态和原生窗口检查；不执行真实安装器或公开上传。临时应用、模型、profile、数据库、音频与安装包结束清理，结果仅到终端/对话。旧完整包兼容逻辑及真实缓存保持。Mac 0.2.2 与 Windows 0.2.1 既有公开资产/Latest 保持；本轮仅按当次授权同步私有源码，不发布安装包。
+pnpm test:installer:isolated 在同一自有临时根追加 NSIS 构建，核对 latest.yml 的 SHA512、blockmap、NSIS 压缩数据及应用/组件标记/原生助手负载摘要，再执行安装态和原生窗口检查；不执行真实安装器或公开上传。临时应用、模型、profile、数据库、音频与安装包结束清理，结果仅到终端/对话。旧完整包兼容逻辑及真实缓存保持。Windows 0.2.2 已按后续当次授权发布，与 Mac 0.2.2 共用既有 v0.2.2 发行和当前 Latest；原 Mac 三项及 Windows 0.2.1 等全部旧资产保留。测试入口本身不发布，正式打包及分发边界见 UPDATES.md。

@@ -1,4 +1,4 @@
-> 2026-10-18：Windows 本机已同步 0.2.2 配置、移除 Copilot 专属实现/依赖并采用组件首次下载打包。用户后续授权完整回归、修复无阻塞后提交推送本轮源码至私有 NCFXZ/VoxCue main；不上传安装包或测试产物，不发布或打标签。Mac 0.2.2 与 Windows 0.2.1 公开资产/Latest 保持，macos/ 只读。实现及隔离验证入口见 COMPONENTS.md、shared/test/README.md 与 AGENTS.md 首节；下文旧工作状态为历史记录。
+> 2026-10-18：Windows 0.2.2 源码 8b77781 已同步私有 main；用户随后授权正式打包发布三项 Windows 资产到公开既有 v0.2.2，并将其设为 Latest。Mac 原有三项及全部旧发行/资产保持，macos/ 只读。剩余发行与清理文档按用户最新明确授权提交推送至私有 main，不提交发行文件、模型、清理审计或测试产物，不变更公开发行。实现、构建与隔离验证入口见 COMPONENTS.md、UPDATES.md、shared/test/README.md 与 AGENTS.md 首节；下文旧工作状态为历史记录。
 
 # VoxCue 当前交接
 
