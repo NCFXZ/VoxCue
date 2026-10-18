@@ -1,5 +1,6 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
+import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -30,6 +31,7 @@ const {app} = require('electron');
 app.setAppPath(${JSON.stringify(process.cwd())});
 const {ChatGPTAuthService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/auth/service.js'))});
 const {ChatGPTService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))});
+const {interviewInstructions} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/application/interviewContext.js'))});
 const {SpeechHost} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/host.js'))});
 require(${JSON.stringify(path.resolve('test/fixtures/interview-access-fixture.cjs'))})(${JSON.stringify(path.resolve('dist-electron/windows/electron/speech/access.js'))});
 ChatGPTAuthService.prototype.session = async () => ({mode:'chatgpt',user:{id:'knowledge-fixture',name:'Test',email:''},expiresAt:Date.now()+3600000});
@@ -46,7 +48,7 @@ ChatGPTService.prototype.stream = async (request, emit, signal) => {
   if(globalThis.omitSummary) return {answerText:'本次没有公开摘要的测试回答',usage:null,sources:[]};
   const summary='**核对资料**\\n\\n先核对公开资料，再组织回答。';
   emit({id:request.id,type:'reasoning-summary',text:summary});
-  if(request.instructions.startsWith('你正在帮助面试者')) {
+  if(request.instructions.startsWith(interviewInstructions)) {
     const answer=request.turns.at(-1).content.includes('斐波那契')
       ? '以斐波那契为例：dp[i] = dp[i-1] + dp[i-2]，边界 dp[0]=0、dp[1]=1。时间 O(n)，空间可优化到 O(1)。'
       : '动态规划是一种将复杂问题分解为更小子问题的算法思想。核心是：定义状态、找状态转移方程、确定边界条件。';
@@ -74,7 +76,7 @@ require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))}
 );
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: [fixture], env });
+const app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
 const checks = [];
 const check = (name, detail = true) => checks.push({ name, passed: true, detail });
 const bases = [

@@ -9,7 +9,7 @@ import {
   type InterviewSkill,
 } from '../../electron/contracts/profile';
 import { MarkdownContent } from './MarkdownContent';
-import { openChatLink } from '../services/chat';
+import { PlainTextContent } from './PlainTextContent';
 import { X, Edit, Globe, Check, History } from './icons';
 export function ProfileValue({
   value,
@@ -25,21 +25,12 @@ export function ProfileValue({
     <div className="profile-value-list">
       {value.map((item) => (
         <article key={item.id}>
-          {!hideTitle && <strong>{item.title}</strong>}
-          <MarkdownContent content={item.content} />
-          {'sources' in item &&
-            (item.sources as InterviewSkill['sources']).map((source) => (
-              <a
-                key={source.url}
-                href={source.url}
-                onClick={(event) => {
-                  event.preventDefault();
-                  void openChatLink(source.url);
-                }}
-              >
-                {source.title}
-              </a>
-            ))}
+          {!hideTitle && (
+            <strong>
+              <PlainTextContent content={item.title} inline />
+            </strong>
+          )}
+          <PlainTextContent content={item.content} />
         </article>
       ))}
     </div>
@@ -84,7 +75,7 @@ export function SkillUpdatePrompt() {
             state.setDraft(
               [
                 state.draft,
-                `请帮我补充并整理${missing}摘要，先展示待确认内容。以下是${missing}内容：\n`,
+                `请根据以下内容整理${missing}摘要。简历保留个人经历、职责、项目、技术和成果；职位描述保留岗位定位、职责、任职要求及明确的优先条件。合并重复表述，保留事实和条件边界，不把岗位要求写成个人经历。仅补充缺少的摘要并展示待确认提案，不修改其他资料，也不生成技能。\n\n以下是${missing}内容：\n`,
               ]
                 .filter(Boolean)
                 .join('\n\n'),
@@ -128,8 +119,10 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                     <div className="profile-value-list">
                       {message.profilePreview!.skills!.map((skill, index) => (
                         <article key={index}>
-                          <h4>{skill.title || `技能 ${index + 1}`}</h4>
-                          <MarkdownContent content={skill.content} />
+                          <h4>
+                            <PlainTextContent content={skill.title || `技能 ${index + 1}`} inline />
+                          </h4>
+                          <PlainTextContent content={skill.content} />
                         </article>
                       ))}
                     </div>

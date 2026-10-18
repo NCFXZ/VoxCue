@@ -16,6 +16,8 @@ import {
   Refresh,
   AudioLines,
   Sparkles,
+  FontIncrease,
+  FontDecrease,
 } from './icons';
 import { Button } from './ui/button';
 import { useInterview } from '../stores/interview';
@@ -28,7 +30,11 @@ import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
-import { useInterviewFontSize } from '../interviewTypography';
+import {
+  useInterviewFontSize,
+  saveInterviewFontSize,
+  interviewFontSize,
+} from '../interviewTypography';
 export function FloatingInterview() {
   const fontSize = useInterviewFontSize();
   const state = useInterview();
@@ -39,6 +45,15 @@ export function FloatingInterview() {
   const [protectedWindow, setProtected] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const changeFontSize = (delta: number) => {
+    const failure = '面试字号保存失败，请重试。';
+    try {
+      saveInterviewFontSize(fontSize + delta);
+      setError((current) => (current === failure ? null : current));
+    } catch {
+      setError(failure);
+    }
+  };
   const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -363,6 +378,24 @@ export function FloatingInterview() {
             <strong>VoxCue</strong>
           </button>
           <div className="floating-controls">
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="字体变小"
+              disabled={fontSize <= interviewFontSize.minimum}
+              onClick={() => changeFontSize(-1)}
+            >
+              <FontDecrease size={20} />
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="字体变大"
+              disabled={fontSize >= interviewFontSize.maximum}
+              onClick={() => changeFontSize(1)}
+            >
+              <FontIncrease size={20} />
+            </Button>
             <Button
               variant="ghost"
               size="icon"

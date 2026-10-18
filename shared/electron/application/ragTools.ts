@@ -76,7 +76,7 @@ export class KnowledgeTools implements LocalTools {
     this.calls++;
     if (this.calls > 6 || this.duration > 30000)
       return JSON.stringify({
-        error: '本次工具调用预算已耗尽，请根据已有证据回答，资料不足时说明。',
+        error: '本次工具调用预算已耗尽，未取得更多资料。',
       });
     if (call.namespace !== 'voxcue_knowledge')
       return JSON.stringify({ error: '未知工具命名空间。' });
@@ -133,7 +133,7 @@ export class KnowledgeTools implements LocalTools {
           const item = await this.knowledge.getItem(args.itemId, lookup);
           lookup.throwIfAborted();
           if (!item || item.documentId !== this.allowed.get(args.itemId as string))
-            result = JSON.stringify({ error: '资料已删除、停用或更新，请重新检索。' });
+            result = JSON.stringify({ error: '资料已删除、停用或更新，本次未取得条目。' });
           else {
             result = JSON.stringify({
               untrusted: true,
@@ -149,8 +149,7 @@ export class KnowledgeTools implements LocalTools {
             });
             if (Buffer.byteLength(result, 'utf8') > 32000)
               return JSON.stringify({
-                error:
-                  '完整条目超过本次 32 KB 工具输出预算，未截断或发送；请缩小问题范围，或在知识库预览完整资料。',
+                error: '完整条目超过本次 32 KB 工具输出预算，未截断或发送。',
               });
             if (!this.fetched.has(item.itemId)) {
               this.fetched.add(item.itemId);
@@ -162,15 +161,14 @@ export class KnowledgeTools implements LocalTools {
       }
       const bytes = Buffer.byteLength(result, 'utf8');
       if (this.used + bytes > 48000)
-        return JSON.stringify({ error: '本次工具证据总预算 48 KB 已耗尽。' });
+        return JSON.stringify({ error: '本次工具证据总预算 48 KB 已耗尽，本次结果未发送。' });
       this.used += bytes;
       return result;
     } catch (error) {
       signal.throwIfAborted();
-      if (lookup.aborted)
-        return JSON.stringify({ error: '本地检索超时，未取得证据；不得编造个人事实。' });
+      if (lookup.aborted) return JSON.stringify({ error: '本地检索超时，本次未取得证据。' });
       return JSON.stringify({
-        error: '本地知识库不可用，请重试或手动改用 Local RAG；不得假装检索成功。',
+        error: '本地知识库不可用，本次未取得证据。',
       });
     } finally {
       this.duration += performance.now() - started;

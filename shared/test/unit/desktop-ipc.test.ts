@@ -217,15 +217,24 @@ describe('完整面试问题通过既有 AI 接口', () => {
     modelId: 'test',
   };
   it('普通发送不截图，附截图发送完整题目与当次图片', async () => {
-    const { call, chat, captureScreen } = interviewSetup();
+    const { call, chat, captureScreen } = interviewSetup(false, {
+      ...defaultInterviewConfiguration(),
+      aiEnabled: true,
+      modelId: 'test',
+      profile: { name: '合成候选人', language: '', customInstructions: '', skills: [] },
+    });
     await call('interview:answer', question);
     expect(captureScreen).not.toHaveBeenCalled();
+    expect(chat.stream.mock.calls[0][0].instructions).toContain(
+      '回答语言：简体中文。\n\n本场补充要求：\n无\n',
+    );
     await call('interview:answer', { ...question, id: 'attached', screenshot: 'attach' });
     expect(captureScreen).toHaveBeenCalledOnce();
     expect(chat.stream.mock.calls[1][0].turns.at(-1)).toMatchObject({
       content: question.question,
       files: [{ name: 'screenshot.png', bytes: new Uint8Array([137, 80, 78, 71]) }],
     });
+    expect(chat.stream.mock.calls[1][0].instructions).toContain('局部不清但不影响题意时继续作答');
   });
   it('仅截图不传转写、历史回答、个人信息或知识库；拒绝夹带文字和伪造截图', async () => {
     const configuration = {
@@ -234,6 +243,7 @@ describe('完整面试问题通过既有 AI 接口', () => {
       modelId: 'test',
       profile: {
         name: '私人姓名',
+        language: 'English',
         background: '私人背景',
         jobDescription: '私人JD',
         customInstructions: '私人指令',
@@ -243,6 +253,13 @@ describe('完整面试问题通过既有 AI 接口', () => {
     };
     const { call, chat, context, captureScreen } = interviewSetup(false, configuration);
     await call('interview:answer', question);
+    const ordinary = chat.stream.mock.calls[0][0];
+    expect(ordinary.instructions).toContain('回答语言：English。');
+    expect(ordinary.instructions).toContain('\n本场补充要求：\n私人指令\n');
+    expect(ordinary.instructions).toContain('仍须遵守直接作答和个人事实依据规则');
+    expect(ordinary.instructions).toContain('职位描述表示岗位要求；skills 是面试准备参考资料');
+    expect(ordinary.instructions).toContain('不能仅凭岗位要求或参考资料');
+    expect(ordinary.instructions).toContain('"background":"私人背景"');
     context.event({
       type: 'segment',
       segment: {
@@ -258,7 +275,7 @@ describe('完整面试问题通过既有 AI 接口', () => {
     const request = chat.stream.mock.calls[1][0];
     expect(request.turns).toHaveLength(1);
     expect(request.turns[0]).toMatchObject({
-      content: '请解答当前屏幕截图中的题目。',
+      content: '请直接解答当前截图中的题目。',
       files: [{ name: 'screenshot.png' }],
     });
     expect(request.knowledgeBaseId).toBeNull();
@@ -372,10 +389,10 @@ describe('完整面试问题通过既有 AI 接口', () => {
     const request = chat.stream.mock.calls[1][0];
     expect(request.turns[0].content).toContain('我实际使用 PostgreSQL');
     expect(request.turns[0].content).not.toContain('迟到建议');
-    expect(request.instructions).toContain('不能当成面试者已说过的话');
-    expect(request.instructions).toContain('只输出面试者可以直接念出的答案正文');
-    expect(request.instructions).toContain('第一人称自然口语表达');
-    expect(request.instructions).toContain('面试官肯定、致谢或收尾时，只给简短得体的直接回应');
+    expect(request.instructions).toContain('之前的 AI 建议不视为实际发言或本人经历');
+    expect(request.instructions).toContain('直接给出面试者能当场口述的第一人称答案');
+    expect(request.instructions).toContain('使用自然的日常口语');
+    expect(request.instructions).toContain('面试官肯定、致谢或收尾时，只简短回应');
   });
   it('拒绝绕过本场确认去开启 AI 或切换模型', async () => {
     const { call, chat } = interviewSetup();

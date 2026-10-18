@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { ProfileAnswerStream } from '../../../shared/electron/backend/chat/profile';
+import {
+  ProfileAnswerStream,
+  profileInstructions,
+} from '../../../shared/electron/backend/chat/profile';
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
 import type { UsageLedger } from '../../../shared/electron/backend/chat/usage';
 import { validateChanges } from '../../../shared/electron/contracts/profile';
@@ -147,6 +150,12 @@ describe('附件聊天提案原生链路', () => {
           });
         const body = JSON.parse(options!.body as string);
         expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
+        expect(body.instructions).toContain(profileInstructions);
+        expect(body.instructions).toContain('不因上传附件就自动修改个人资料');
+        expect(body.instructions).toContain('不添加联网状态、检索过程或来源核验说明');
+        expect(body.instructions).toContain('优先采用官方文档、标准和可靠的一手技术资料');
+        expect(body.instructions).toContain('不同资料存在分歧时说明条件');
+        expect(body.instructions).not.toMatch(/120–220|约80字|主动询问是否需要联网/);
         expect(body.input[0].content[1].text).toContain('用户附件内容');
         expect(body.tools).toEqual([{ type: 'web_search' }]);
         return Response.json(value);

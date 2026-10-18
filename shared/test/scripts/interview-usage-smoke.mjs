@@ -54,7 +54,11 @@ try {
       return { state: call.op === 'start' ? 'running' : 'idle', model: 'Synthetic speech' };
     };
     ChatGPTService.prototype.stream = async (request, emit) => {
-      globalThis.usageRequests.push({ ...structuredClone(request), receivedAt: Date.now() });
+      globalThis.usageRequests.push({
+        ...structuredClone(request),
+        originalRows: structuredClone(globalThis.usageOriginalRows),
+        receivedAt: Date.now(),
+      });
       const answerText = globalThis.usageAnswer;
       emit({ id: request.id, type: 'delta', text: answerText });
       return { answerText, usage: null, sources: [] };
@@ -92,39 +96,43 @@ try {
     assert.equal((await requests()).length, count);
   };
   await question.waitFor();
-  await transcript('ack', '嗯嗯嗯好的谢谢');
+  let count = 0;
+  for (const phrase of ['嗯', '好的', '谢谢', '嗯嗯嗯好的谢谢']) {
+    const sentAt = await transcript('ack-' + count, phrase);
+    await completed(++count);
+    const request = (await requests()).at(-1);
+    assert.equal(request.turns.at(-1).content, phrase);
+    assert.ok(request.receivedAt - sentAt >= 2100 && request.receivedAt - sentAt < 5000);
+    assert.equal(await question.inputValue(), '');
+  }
+  await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
+  await transcript('manual-ack', '谢谢您');
   await floating.waitForFunction(
-    () => document.querySelector('[aria-label="面试提问"]').value === '嗯嗯嗯好的谢谢',
+    () => document.querySelector('[aria-label="面试提问"]').value === '谢谢您',
   );
   await new Promise((resolve) => setTimeout(resolve, 2400));
-  assert.equal((await requests()).length, 0);
+  assert.equal((await requests()).length, count);
   await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
-  await completed(1);
+  await completed(++count);
+  assert.equal((await requests()).at(-1).turns.at(-1).content, '谢谢您');
+  await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
   const first = (await requests())[0];
-  assert.equal(first.turns.at(-1).content, '嗯嗯嗯好的谢谢');
   const longQuestion = '请介绍 PostgreSQL 项目的目标、技术选择，以及延迟指标。\n'.repeat(12);
   const sentAt = await transcript('project', longQuestion);
-  await completed(2);
-  const second = (await requests())[1];
+  await completed(++count);
+  const second = (await requests()).at(-1);
   assert.equal(second.turns.at(-1).content, longQuestion.trim());
   assert.ok(second.receivedAt - sentAt >= 2100 && second.receivedAt - sentAt < 5000);
   const actual = await app.evaluate(() => globalThis.usageAnswer);
   await transcript('actual', actual, 'microphone');
   const followUp = '呃就是刚刚那个项目为啥没选Redis';
   await transcript('follow-up', followUp);
-  await completed(3);
-  const third = (await requests())[2];
+  await completed(++count);
+  const third = (await requests()).at(-1);
   const data = JSON.parse(third.turns[0].content.split('\n').slice(1).join('\n'));
-  assert.ok(data.textReferenceRule);
-  const literal = new Map();
-  const timeline = data.timeline.map((entry) => {
-    if (entry.textRef) {
-      assert.ok(literal.has(entry.textRef));
-      return { ...entry, text: literal.get(entry.textRef) };
-    }
-    literal.set(entry.id, entry.text);
-    return entry;
-  });
+  assert.equal(data.textReferenceRule, undefined);
+  const timeline = data.timeline;
+  assert.deepEqual(timeline, third.originalRows);
   assert.ok(timeline.some((entry) => entry.kind === 'interviewee' && entry.text === actual));
   assert.ok(timeline.some((entry) => entry.kind === 'ai_suggestion' && entry.text === actual));
   assert.ok(timeline.some((entry) => entry.kind === 'interviewer' && entry.text === longQuestion));
@@ -135,8 +143,8 @@ try {
     'microphone',
   );
   await transcript('correction-follow-up', '嗯那延迟为啥从37变42了');
-  await completed(4);
-  const fourth = (await requests())[3];
+  await completed(++count);
+  const fourth = (await requests()).at(-1);
   assert.ok(fourth.turns[0].content.includes('我刚说岔了哈，延迟是42毫秒'));
   // Build a longer actual IPC conversation without waiting for synthetic
   // speech at every turn. Manual submission still uses the production store,
@@ -156,52 +164,45 @@ try {
     await transcript('long-question-' + index, `嗯介绍${topic}的${label}部分咋设计的`);
     await question.fill(`嗯介绍${topic}的${label}部分咋设计的`);
     await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
-    await completed(index + 5);
+    await completed(++count);
     await transcript(
       'long-actual-' + index,
       index === 3 ? hiddenCorrection : `${topic}这部分我负责接口设计和落地。`,
       'microphone',
     );
   }
-  const restore = (request) => {
+  const completeHistory = (request) => {
     const data = JSON.parse(request.turns[0].content.split('\n').slice(1).join('\n'));
-    const literals = new Map();
-    const rows = data.timeline.map((row) => {
-      if (row.textRef) {
-        assert.ok(
-          literals.has(row.textRef),
-          'every reference must resolve within the sent timeline',
-        );
-        const { textRef, ...metadata } = row;
-        return { ...metadata, text: literals.get(textRef) };
-      }
-      literals.set(row.id, row.text);
-      return row;
-    });
+    assert.deepEqual(Object.keys(data).sort(), ['omittedOlderEntries', 'timeline']);
+    const rows = data.timeline;
+    for (const row of rows) {
+      assert.equal(Object.hasOwn(row, 'textRef'), false);
+      assert.equal(typeof row.text, 'string');
+    }
+    assert.deepEqual(
+      rows,
+      request.originalRows,
+      'send every retained entry, including older AI suggestions',
+    );
     return { data, rows };
   };
   await transcript('explicit-return', '项目A的接口为啥采用异步');
-  await completed(19);
-  const selected = restore((await requests())[18]);
-  assert.equal(selected.data.historySelection?.mode, 'related_originals');
+  await completed(++count);
+  const returned = completeHistory((await requests()).at(-1));
+  assert.ok(Buffer.byteLength(JSON.stringify(returned.data)) >= 24000);
   const originalRows = await app.evaluate(() => globalThis.usageOriginalRows);
-  for (const row of originalRows.filter((row) => row.kind !== 'ai_suggestion'))
-    assert.deepEqual(
-      selected.rows.find((entry) => entry.id === row.id),
-      row,
-    );
+  assert.deepEqual(returned.rows, originalRows);
   assert.ok(
-    selected.rows.some((row) => row.kind === 'interviewee' && row.text === hiddenCorrection),
+    returned.rows.some((row) => row.kind === 'interviewee' && row.text === hiddenCorrection),
   );
-  const omitted = originalRows.filter((row) => !selected.rows.some((entry) => entry.id === row.id));
-  assert.ok(omitted.length > 0);
-  assert.ok(omitted.every((row) => row.kind === 'ai_suggestion'));
+  assert.ok(
+    returned.rows.some((row) => row.kind === 'ai_suggestion' && row.text.startsWith('项目B')),
+  );
   await transcript('oral-reference', '嗯项目A这块你再讲讲');
-  await completed(20);
-  const fallback = restore((await requests())[19]);
-  assert.equal(fallback.data.historySelection, undefined);
-  assert.deepEqual(fallback.rows, await app.evaluate(() => globalThis.usageOriginalRows));
+  await completed(++count);
+  completeHistory((await requests()).at(-1));
   for (const request of await requests()) {
+    completeHistory(request);
     assert.equal(request.modelId, first.modelId);
     assert.equal(request.effort, first.effort);
     assert.ok(request.instructions.includes('60–90秒'));
@@ -214,7 +215,7 @@ try {
   ]);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: offline desktop IPC, repeated/concatenated acknowledgements and manual bypass, original auto-submit interval, lossless references, actual/AI identities, oral corrections, cross-topic long-history selection preserving all real speech/questions, and colloquial-reference full fallback; model, effort and answer length preserved. Synthetic account/audio/provider only.',
+    'PASS: offline desktop IPC, normal automatic acknowledgement submission and manual send, original auto-submit interval, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
   );
 } finally {
   await closeUiApp(app);

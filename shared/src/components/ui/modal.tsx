@@ -61,35 +61,37 @@ export function Modal({
         }
       }}
     >
-      {!hideHeader && (
-        <header className="dialog-heading">
-          <div className="dialog-title">
-            {destructive && (
-              <span className="danger-icon">
-                <Trash size={20} />
-              </span>
-            )}
-            {icon && !destructive && <span className="dialog-icon">{icon}</span>}
-            <div>
-              <h2>{title}</h2>
-              {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
+      <div className="dialog-scroll">
+        {!hideHeader && (
+          <header className="dialog-heading">
+            <div className="dialog-title">
+              {destructive && (
+                <span className="danger-icon">
+                  <Trash size={20} />
+                </span>
+              )}
+              {icon && !destructive && <span className="dialog-icon">{icon}</span>}
+              <div>
+                <h2>{title}</h2>
+                {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
+              </div>
             </div>
-          </div>
-          <div>
-            {action}
-            <Button
-              variant="ghost"
-              size="icon"
-              className="dialog-close-button"
-              aria-label={closeLabel}
-              onClick={onClose}
-            >
-              <X size={17} />
-            </Button>
-          </div>
-        </header>
-      )}
-      {children}
+            <div>
+              {action}
+              <Button
+                variant="ghost"
+                size="icon"
+                className="dialog-close-button"
+                aria-label={closeLabel}
+                onClick={onClose}
+              >
+                <X size={17} />
+              </Button>
+            </div>
+          </header>
+        )}
+        {children}
+      </div>
     </dialog>
   );
 }

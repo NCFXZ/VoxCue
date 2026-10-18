@@ -73,28 +73,23 @@ function history() {
 }
 function decode(snapshot: ReturnType<InterviewContext['prepare']>) {
   const data = JSON.parse(snapshot.turns[0].content.split('\n').slice(1).join('\n'));
-  const literal = new Map<string, string>();
-  const rows: Row[] = data.timeline.map((entry: Row & { textRef?: string }) => {
-    if (!entry.textRef) {
-      literal.set(entry.id, entry.text);
-      return entry;
-    }
-    expect(literal.has(entry.textRef), 'reference must resolve to a sent earlier literal').toBe(
-      true,
-    );
-    const { textRef, ...metadata } = entry;
-    return { ...metadata, text: literal.get(textRef) };
-  });
+  expect(data).not.toHaveProperty('historySelection');
+  expect(data).not.toHaveProperty('textReferenceRule');
+  const rows: Row[] = data.timeline;
+  for (const row of rows) {
+    expect(row).not.toHaveProperty('textRef');
+    expect(typeof row.text).toBe('string');
+  }
   return { data, rows };
 }
 
-it('跨话题返回项目A时保留原问答、数字纠正、最近问答与原文身份，载荷实际变小', () => {
+it('跨话题返回项目A时发送完整时间线，包括较早无关AI建议、原问答和纠正', () => {
   const context = history();
   const question = '项目A的PostgreSQL为什么选择事务？';
   const before = originals(context);
   const snapshot = context.prepare('return-a', question);
   const { data, rows } = decode(snapshot);
-  expect(data.historySelection?.mode).toBe('related_originals');
+  expect(rows).toEqual(before);
   expect(rows.find((row) => row.id === 'transcript:actual-甲')).toEqual(
     before.find((row) => row.id === 'transcript:actual-甲'),
   );
@@ -106,12 +101,12 @@ it('跨话题返回项目A时保留原问答、数字纠正、最近问答与原
   expect(originals(context).slice(0, before.length)).toEqual(before);
   const fullBytes = Buffer.byteLength(JSON.stringify({ omittedOlderEntries: 0, timeline: before }));
   const sentBytes = Buffer.byteLength(JSON.stringify(data));
-  expect(sentBytes).toBeLessThan(fullBytes * 0.8);
+  expect(sentBytes).toBe(fullBytes);
   console.log(
     'OFFLINE_CONTEXT_BYTES ' +
       JSON.stringify({
         baseline: fullBytes,
-        optimized: sentBytes,
+        restored: sentBytes,
         originalRows: before.length,
         sentRows: rows.length,
       }),
@@ -166,8 +161,7 @@ it.each([
     round(context, label, index === 0 ? '项目A' : '项目B', index === 2 ? actual : undefined);
   const before = originals(context);
   const { rows } = decode(context.prepare('oral-reference', '项目A的接口为何选异步？'));
-  for (const row of before.filter((row) => row.kind !== 'ai_suggestion'))
-    expect(rows.find((entry) => entry.id === row.id)).toEqual(row);
+  expect(rows).toEqual(before);
   expect(rows.find((row) => row.id === 'transcript:actual-丙')?.text).toBe(actual);
 });
 
@@ -192,7 +186,7 @@ it('连续追问和后续纠正保留原始先后，不把旧AI建议覆盖到�
     const snapshot = context.prepare('follow-' + index, question);
     const { rows } = decode(snapshot);
     expect(rows.find((row) => row.id === 'transcript:actual-乙')?.text).toContain('42毫秒');
-    for (const row of rows) expect(row).toEqual(before.find((entry) => entry.id === row.id));
+    expect(rows).toEqual(before);
     context.answer(snapshot, 'AI曾建议MySQL，不能当作候选人的技术选择。');
   }
   transcript(
@@ -211,7 +205,7 @@ it('连续追问和后续纠正保留原始先后，不把旧AI建议覆盖到�
   );
 });
 
-it('多组长历史中的引用均能还原，触及保留边界后不会引用已移除原文', () => {
+it('多组长历史逐条发送保留窗口全部原文，触及边界时仅省略更早条目', () => {
   const context = history();
   for (let index = 0; index < 80; index++) {
     round(context, '长场' + String.fromCharCode(0x4e10 + index), index % 2 ? '项目A' : '项目B');
@@ -219,39 +213,36 @@ it('多组长历史中的引用均能还原，触及保留边界后不会引用�
     const { data, rows } = decode(
       context.prepare('probe-' + index, index % 3 ? '项目A的接口如何处理？' : '它为什么这样设计？'),
     );
-    for (const row of rows) expect(row).toEqual(before.find((entry) => entry.id === row.id));
+    expect(rows).toEqual(before);
     expect(data.omittedOlderEntries).toBeGreaterThanOrEqual(0);
     expect(before.length).toBeLessThanOrEqual(120);
     expect(Buffer.byteLength(JSON.stringify(before))).toBeLessThanOrEqual(64000);
   }
+  expect(
+    decode(context.prepare('bounded', '项目A为何如此设计？')).data.omittedOlderEntries,
+  ).toBeGreaterThan(0);
 });
 
 it('本地上下文组装只测CPU时间，不把夹具时间当作模型首字时间', () => {
   const context = history();
   const question = '项目A的PostgreSQL为什么选择事务？';
   context.prepare('bench', question);
-  const baseline: number[] = [],
-    optimized: number[] = [];
+  const durations: number[] = [];
   for (let index = 0; index < 300; index++) {
-    let started = performance.now();
-    JSON.stringify({
-      omittedOlderEntries: 0,
-      timeline: (context as unknown as { entries: Row[] }).entries,
-    });
-    baseline.push(performance.now() - started);
-    started = performance.now();
-    context.prepare('bench', question);
-    optimized.push(performance.now() - started);
+    const before = originals(context);
+    const started = performance.now();
+    const snapshot = context.prepare('bench', question);
+    durations.push(performance.now() - started);
+    expect(decode(snapshot).rows).toEqual(before);
   }
   const p95 = (values: number[]) =>
     +values.sort((a, b) => a - b)[Math.floor(values.length * 0.95)].toFixed(3);
   console.log(
     'OFFLINE_PREPARE_MS ' +
       JSON.stringify({
-        baselineP95: p95(baseline),
-        optimizedP95: p95(optimized),
-        samples: optimized.length,
+        prepareP95: p95(durations),
+        samples: durations.length,
       }),
   );
-  expect(p95(optimized)).toBeLessThan(50);
+  expect(p95(durations)).toBeLessThan(50);
 });

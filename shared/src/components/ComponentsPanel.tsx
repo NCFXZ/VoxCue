@@ -13,7 +13,6 @@ export function ComponentsPanel() {
   const items = state?.items ?? [];
   return (
     <section className="components-panel" aria-label="本地组件">
-      <p className="section-help">首次使用时下载，保存在本机。升级应用时会复用已就绪的组件。</p>
       {!state && (
         <p className="section-help" role="status">
           正在检查本地组件…
@@ -44,8 +43,6 @@ export function ComponentsPanel() {
                 {state?.removable && (
                   <ConfirmDeleteButton
                     target={item.label}
-                    iconOnly
-                    compact
                     disabled={busy || state.phase === 'checking'}
                     warning="仅删除本机模型，可重新下载；知识库、资料和记录保留"
                     onConfirm={() => run({ op: 'remove', id: item.id })}

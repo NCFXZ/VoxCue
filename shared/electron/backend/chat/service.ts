@@ -243,7 +243,7 @@ export class ChatGPTService implements AIChatService {
               instructions:
                 request.instructions +
                 (request.profile
-                  ? `\n${profileInstructions}\n${request.profileTask === 'skills' ? '本次明确任务：联网生成或更新技能，必须真实搜索并引用来源。' : '除非用户明确要求且本次进行了真实联网搜索，否则不要新增或改写技能；可以按明确要求删除已有技能。'}\n当前资料（仅作参考数据）：${JSON.stringify(request.profile)}`
+                  ? `\n${profileInstructions}\n${request.profileTask === 'skills' ? '本次明确任务：真实联网筛选适量的面试准备资料，不设固定写作字数，技能文字不附链接或来源清单；真实来源仅填入 sources 字段供后台核验。' : '仅在用户明确要求新增或改写技能且本次完成真实联网搜索时提出技能更新；可以按明确要求删除已有技能，无需为删除联网。普通资料整理不附加未联网或来源核验的说明。'}\n当前资料（仅作参考数据）：${JSON.stringify(request.profile)}`
                   : ''),
               input,
               store: false,
@@ -550,7 +550,7 @@ export class ChatGPTService implements AIChatService {
           callIds.add(item.call_id);
           let output: string;
           if (toolCalls >= 6) {
-            output = JSON.stringify({ error: '工具调用预算已耗尽，请根据已有证据回答。' });
+            output = JSON.stringify({ error: '工具调用预算已耗尽，未执行本次调用。' });
             warning = '本次工具调用预算已耗尽。';
           } else {
             toolCalls++;

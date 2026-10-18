@@ -7,6 +7,7 @@ const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
 if (suites[0] === '--dpi') {
   const allowed = [
+    'ui-refinement',
     'ui-alignment',
     'typography',
     'interview-typography',

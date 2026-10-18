@@ -3,11 +3,12 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 const profile = path.join(testRoot, 'profile');
 await mkdir(profile);
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 const errors = [];
@@ -42,7 +43,7 @@ try {
       return value;
     };
   });
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
   const [main] = await Promise.all([
     app.waitForEvent('window'),
@@ -78,9 +79,6 @@ try {
         .getAttribute('aria-pressed'),
       'false',
     );
-    const status = await floating.evaluate(() => window.desktop.interviewState());
-    assert.equal(status.pinned, true);
-    assert.equal(status.configuration.mode, 'local');
     if (process.platform === 'darwin')
       await nativeReady(({ app }) => !app.dock.isVisible(), 'Dock did not hide');
     if (process.platform === 'win32')
@@ -90,6 +88,9 @@ try {
         const main = windows.find((w) => !w.webContents.getURL().includes('#'));
         return !!current?.isVisible() && current.isAlwaysOnTop() && !!main && !main.isVisible();
       }, 'Windows interview must stay topmost with main hidden');
+    const status = await floating.evaluate(() => window.desktop.interviewState());
+    assert.equal(status.pinned, true);
+    assert.equal(status.configuration.mode, 'local');
     const value = [0, 50, 100][cycle % 3];
     await floating.evaluate((value) => {
       localStorage.setItem('voxcue-frosted-transparency-v2', JSON.stringify(value));
@@ -126,14 +127,30 @@ try {
     // visible, enabled button in one renderer task so closure cannot race
     // Playwright's later mouse-up acknowledgement. Native clicks have their
     // own Windows regression; all close/save/window assertions remain below.
-    await confirm.evaluate(async (button) => {
-      await Promise.all(
-        button
+    // CSS transitions can be replaced/cancelled by another UI update. Poll the
+    // current finite animations instead of awaiting a retired finished Promise.
+    await floating.waitForFunction(() => {
+      const button = document.querySelector('[aria-label="确认结束面试"]');
+      return (
+        button &&
+        !button.disabled &&
+        button.checkVisibility() &&
+        !button
           .getAnimations()
-          .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
-          .map((animation) => animation.finished),
+          .some(
+            (animation) =>
+              animation.effect?.getTiming().iterations !== Infinity &&
+              animation.playState !== 'finished' &&
+              animation.playState !== 'idle',
+          )
       );
-      if (button.disabled || !button.checkVisibility())
+    });
+    await confirm.evaluate((button) => {
+      if (
+        button.disabled ||
+        !button.checkVisibility() ||
+        button.getAttribute('aria-label') !== '确认结束面试'
+      )
         throw Error('End confirmation is not actionable');
       button.click();
     });
@@ -174,6 +191,7 @@ try {
         windows: BrowserWindow.getAllWindows().map((win) => ({
           id: win.id,
           visible: win.isVisible(),
+          pinned: win.isAlwaysOnTop(),
           url: win.webContents.getURL().split('#')[1] ?? 'main',
         })),
       })),

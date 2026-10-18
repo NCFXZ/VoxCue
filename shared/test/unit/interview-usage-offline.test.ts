@@ -95,23 +95,40 @@ it.each([
   }
 });
 
-it('连续纯语气词不触发请求，人工发送及随后的实质问题完整保留', async () => {
+it('连续明确回应逐次自动提交，手动发送及随后的实质问题完整保留', async () => {
   const { answer, emit } = await liveFixture();
-  const phrases = ['嗯嗯嗯', '呃呃', '哦哦好的明白了', '嗯好的谢谢', 'OK, thank you!'];
-  for (const phrase of phrases) {
+  const phrases = [
+    '嗯',
+    '好的',
+    '谢谢',
+    '嗯嗯嗯',
+    '呃呃',
+    '哦哦好的明白了',
+    '嗯好的谢谢',
+    'OK, thank you!',
+  ];
+  for (const [index, phrase] of phrases.entries()) {
     emit(phrase);
-    await vi.advanceTimersByTimeAsync(2200);
-    expect(answer).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2199);
+    expect(answer).toHaveBeenCalledTimes(index);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(answer).toHaveBeenCalledTimes(index + 1);
+    expect(answer.mock.calls.at(-1)?.[0].question).toBe(phrase);
+    expect(useInterview.getState().draftQuestion).toBe('');
   }
-  const original = phrases.join(' ');
-  expect(useInterview.getState().draftQuestion).toBe(original);
+  useInterview.getState().setAutoAnswer(false);
+  emit('谢谢您');
+  await vi.advanceTimersByTimeAsync(3000);
+  expect(answer).toHaveBeenCalledTimes(phrases.length);
   await useInterview.getState().submitTranscript();
-  expect(answer.mock.calls[0][0].question).toBe(original);
+  expect(answer.mock.calls.at(-1)?.[0].question).toBe('谢谢您');
+  useInterview.getState().setAutoAnswer(true);
   emit('嗯那为啥不用Redis');
   await vi.advanceTimersByTimeAsync(2200);
-  expect(answer.mock.calls[1][0].question).toBe('嗯那为啥不用Redis');
+  expect(answer.mock.calls.at(-1)?.[0].question).toBe('嗯那为啥不用Redis');
   expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([
     ...phrases,
+    '谢谢您',
     '嗯那为啥不用Redis',
   ]);
 });
@@ -208,7 +225,7 @@ it.each(['off', 'pause', 'reset'] as const)('待发口语问题在%s后不产生
   expect(answer).not.toHaveBeenCalled();
 });
 
-it('按旧静音规则与当前规则离线回放，减少回应调用但保留有效追问、纠正和时序', async () => {
+it('按优化前静音规则与恢复后的自动规则离线回放，请求、原文和时序一致', async () => {
   const phrases = [
     '介绍项目A',
     '好的',
@@ -295,10 +312,14 @@ it('按旧静音规则与当前规则离线回放，减少回应调用但保留�
   const before = await replay(false);
   const after = await replay(true);
   expect(before.requests).toHaveLength(10);
-  expect(after.requests).toHaveLength(6);
+  expect(after.requests).toHaveLength(phrases.length);
+  expect(after.requests.map((request) => request.question)).toEqual(phrases);
+  expect(after.requests.map((request) => request.question)).toEqual(
+    before.requests.map((request) => request.question),
+  );
   expect(after.transcripts).toEqual(phrases);
   expect(after.transcripts).toEqual(before.transcripts);
-  for (const phrase of [phrases[0], phrases[2], phrases[4], phrases[6], phrases[7], phrases[8]])
+  for (const phrase of phrases)
     expect(after.requests.some((request) => request.question.includes(phrase))).toBe(true);
   for (const request of [...before.requests, ...after.requests])
     expect(request).toMatchObject({ modelId: 'offline-model', effort: 'high' });
@@ -308,7 +329,7 @@ it('按旧静音规则与当前规则离线回放，减少回应调用但保留�
     'OFFLINE_REQUESTS ' +
       JSON.stringify({
         oldRule: before.requests.length,
-        optimized: after.requests.length,
+        restored: after.requests.length,
         retainedTranscripts: after.transcripts.length,
         autoSubmitMs: 2200,
       }),

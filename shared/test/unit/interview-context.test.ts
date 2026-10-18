@@ -40,7 +40,7 @@ it('保留问题、追问链与实际回答，时间排序、终稿去重、临�
   ]);
   expect(next.timeline.find((row: any) => row.kind === 'ai_suggestion').questionId).toBe('q1');
   expect(JSON.stringify(next)).not.toMatch(/临时猜测|不完整的型号|重复不能覆盖/);
-  expect(interviewInstructions).toContain('面试者实际说过的答案');
+  expect(interviewInstructions).toContain('以已确认资料和面试者实际发言为准');
   const chain = timeline(context, 'q3').timeline.filter(
     (row: any) => row.kind === 'submitted_question',
   );
@@ -69,7 +69,38 @@ it('上下文使用不可变快照，长场次按字节和条数保留近期内�
   expect(Buffer.byteLength(JSON.stringify(bounded.timeline))).toBeLessThanOrEqual(64000);
   expect(bounded.timeline.at(-1).id).toBe('question:snapshot');
 });
-it('完全重复长文本按原文引用去重，保留所有角色、先后、追问关系与当前题原文', () => {
+it('保留边界仍为120条、64000字节和每条6000字，省略数只计算移出的旧条目', () => {
+  const countBound = new InterviewContext();
+  for (let i = 0; i < 125; i++) countBound.event(segment('short-' + i, '短文本' + i, 'system', i));
+  const counted = timeline(countBound);
+  expect(counted.omittedOlderEntries).toBe(5);
+  expect(counted.timeline.map((row: any) => row.id)).toEqual(
+    Array.from({ length: 120 }, (_, i) => 'transcript:short-' + (i + 5)),
+  );
+
+  const byteBound = new InterviewContext();
+  const expected: { id: string; kind: string; text: string; at: number }[] = [];
+  for (let i = 0; i < 8; i++) {
+    const text = '中文原文'.repeat(1600) + i;
+    byteBound.event(segment('large-' + i, text, 'microphone', i));
+    expected.push({
+      id: 'transcript:large-' + i,
+      kind: 'interviewee',
+      text: text.slice(0, 6000),
+      at: i,
+    });
+  }
+  const unbounded = [...expected];
+  while (Buffer.byteLength(JSON.stringify(expected)) > 64000) expected.shift();
+  const bounded = timeline(byteBound);
+  expect(bounded.timeline).toEqual(expected);
+  expect(bounded.timeline.every((row: any) => row.text.length === 6000)).toBe(true);
+  expect(bounded.omittedOlderEntries).toBe(unbounded.length - expected.length);
+  expect(
+    Buffer.byteLength(JSON.stringify([unbounded.at(-expected.length - 1), ...expected])),
+  ).toBeGreaterThan(64000);
+});
+it('完全重复长文本逐条发送原文，保留所有角色、先后、追问关系与当前题原文', () => {
   const context = new InterviewContext();
   const text = '项目实际使用 PostgreSQL，延迟为37毫秒。\n代码与空白保持原样：  x !== y;\n'.repeat(
     10,
@@ -85,17 +116,14 @@ it('完全重复长文本按原文引用去重，保留所有角色、先后、�
   const snapshot = context.prepare('q2', question);
   expect(snapshot.turns.at(-1)?.content).toBe(question);
   const data = JSON.parse(snapshot.turns[0].content.split('\n').slice(1).join('\n'));
-  const literal = new Map<string, string>();
-  const restored = data.timeline.map((entry: any) => {
-    if (entry.textRef) {
-      expect(literal.has(entry.textRef)).toBe(true);
-      const { textRef, ...rest } = entry;
-      return { ...rest, text: literal.get(textRef) };
-    }
-    literal.set(entry.id, entry.text);
-    return entry;
-  });
-  expect(data.textReferenceRule).toContain('不能把 AI 建议当成实际发言');
+  const restored = data.timeline;
+  expect(data.textReferenceRule).toBeUndefined();
+  expect(data.historySelection).toBeUndefined();
+  for (const entry of restored) {
+    expect(entry).not.toHaveProperty('textRef');
+    expect(typeof entry.text).toBe('string');
+    expect(typeof entry.at).toBe('number');
+  }
   expect(
     restored.filter((entry: any) => entry.text === text).map((entry: any) => entry.kind),
   ).toEqual(['interviewer', 'interviewee', 'submitted_question', 'ai_suggestion']);
@@ -105,16 +133,12 @@ it('完全重复长文本按原文引用去重，保留所有角色、先后、�
   expect(restored.find((entry: any) => entry.id === 'transcript:correction').text).toContain(
     'Redis',
   );
-  expect(Buffer.byteLength(JSON.stringify(data))).toBeLessThan(
-    Buffer.byteLength(
-      JSON.stringify({ omittedOlderEntries: data.omittedOlderEntries, timeline: restored }),
-    ),
-  );
+  expect(Object.keys(data).sort()).toEqual(['omittedOlderEntries', 'timeline']);
   const frozen = JSON.stringify(snapshot);
   context.event(segment('later', '后来补充的事实', 'microphone', Date.now() + 2));
   expect(JSON.stringify(snapshot)).toBe(frozen);
 });
-it('短文本和仅空白不同的内容保持原文，不为去重增加上下文大小', () => {
+it('短文本和仅空白不同的内容均逐条保持原文', () => {
   const context = new InterviewContext();
   context.event(segment('a', '好的', 'system', 1));
   context.event(segment('b', '好的', 'microphone', 2));

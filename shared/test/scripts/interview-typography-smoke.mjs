@@ -1,3 +1,4 @@
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { mkdir } from 'node:fs/promises';
@@ -8,7 +9,7 @@ const profile = path.join(testRoot, 'interview-font-profile');
 await mkdir(profile);
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-let app = await electron.launch({ args: ['.'], env });
+let app = await electron.launch({ args: [await offlineElectronEntry()], env });
 const key = 'voxcue-interview-font-size-v1';
 try {
   await installUiAccount(app, { speech: true, components: true });
@@ -180,7 +181,84 @@ try {
     assert.ok(metrics.textareaLine >= size);
     assert.ok(Math.abs(metrics.heading - (size * 15) / 14) < 0.01);
     assert.deepEqual(await floating.locator('.floating-toolbar').boundingBox(), toolbar);
+    assert.equal(
+      await floating.getByRole('button', { name: '字体变大', exact: true }).isDisabled(),
+      size === 24,
+    );
+    assert.equal(
+      await floating.getByRole('button', { name: '字体变小', exact: true }).isDisabled(),
+      size === 12,
+    );
   }
+  await floating.getByRole('button', { name: '字体变大', exact: true }).click();
+  for (const label of ['字体变大', '字体变小']) {
+    assert.equal(
+      await floating
+        .getByRole('button', { name: label, exact: true })
+        .evaluate(
+          (button) =>
+            button.querySelectorAll('svg').length === 1 && button.textContent.trim() === '',
+        ),
+      true,
+    );
+  }
+  if (process.argv.includes('--preview-toolbar'))
+    console.log(
+      JSON.stringify({
+        preview: 'floating-font-icons',
+        jpeg: (
+          await floating
+            .locator('.floating-toolbar')
+            .screenshot({ type: 'jpeg', quality: 90, scale: 'css' })
+        ).toString('base64'),
+      }),
+    );
+  await floating.waitForFunction(
+    () => getComputedStyle(document.querySelector('.floating-question')).fontSize === '15px',
+  );
+  await floating.getByRole('button', { name: '字体变小', exact: true }).click();
+  await floating.waitForFunction(
+    () => getComputedStyle(document.querySelector('.floating-question')).fontSize === '14px',
+  );
+  await floating.evaluate((key) => {
+    const original = Storage.prototype.setItem;
+    globalThis.restoreToolbarFontStorage = () => {
+      Storage.prototype.setItem = original;
+    };
+    Storage.prototype.setItem = function (name, value) {
+      if (name === key) throw Error('Synthetic toolbar storage failure');
+      return original.call(this, name, value);
+    };
+  }, key);
+  const fontFailure = floating.getByText('面试字号保存失败，请重试。', { exact: true });
+  await floating.getByRole('button', { name: '字体变大', exact: true }).click();
+  await fontFailure.waitFor();
+  assert.equal(
+    await floating.locator('.floating-question').evaluate((e) => getComputedStyle(e).fontSize),
+    '14px',
+  );
+  await floating.evaluate(() => globalThis.restoreToolbarFontStorage());
+  await floating.getByRole('button', { name: '字体变大', exact: true }).click();
+  await floating.waitForFunction(
+    () => getComputedStyle(document.querySelector('.floating-question')).fontSize === '15px',
+  );
+  await fontFailure.waitFor({ state: 'detached', timeout: 2000 });
+  await floating.getByRole('button', { name: '字体变小', exact: true }).click();
+  await floating.keyboard.press('Control+-');
+  assert.equal(
+    await app.evaluate(({ BrowserWindow }) =>
+      BrowserWindow.getAllWindows()
+        .find((w) => w.webContents.getURL().endsWith('#interview'))
+        .webContents.getZoomFactor(),
+    ),
+    1,
+  );
+  await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
+  assert.equal(
+    await floating.locator('.floating-toolbar').evaluate((e) => e.scrollWidth > e.clientWidth + 1),
+    false,
+  );
+  await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([
     floating.waitForEvent('close'),
@@ -188,7 +266,7 @@ try {
   ]);
   await page.evaluate(({ key }) => localStorage.setItem(key, '18'), { key });
   await closeUiApp(app);
-  app = await electron.launch({ args: ['.'], env });
+  app = await electron.launch({ args: [await offlineElectronEntry()], env });
   await installUiAccount(app, { speech: true, components: true });
   const restartLogin = await app.firstWindow();
   const [restarted] = await Promise.all([

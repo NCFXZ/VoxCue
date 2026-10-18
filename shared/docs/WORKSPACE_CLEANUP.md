@@ -1,3 +1,9 @@
+## 2026-10-18：Windows 0.3.1 源码清理
+
+核对 shared/src、shared/electron 与 windows/electron 的静态导入、动态平台装配、Worker/utilityProcess/preload、脚本入口和资源消费者。移除已删除界面说明遗留的 session-note 与 attachment-menu-hint 样式；provider-ui 按现行附件菜单检查文件/文件夹/搜索入口及说明不再出现，保留提供商切换和历史身份断言，并采用导入应用前阻断网络的宿主。弃用 answerStyle 已在本轮提示词整理时删除，不恢复旧存储读取。
+
+未将无静态入边的动态入口、测试源码、固定输入或生成配置当作闲置文件删除；不拆删依赖、锁、现用构建/模型、发行或恢复基线。macos/ 严格只读，历史349个跳过目录不重试；不接触真实账户、原件和用户数据。回归及隔离安装负载入口见 shared/test/README.md，结果不记入本文。
+
 ## 2026-10-18：闲置源码副本与空编译目录
 
 本轮在shared/macOS核对导入图、脚本入口、原生动态装配、同名文件差异、绝对/真实路径和lsof占用后，删除9份无消费者的“2”号源码副本：更新偏好、组件公开契约/IPC/Store、ActionTransition、ComponentsNotice、DownloadButton、SidebarUpdate及更新偏好单测。6份与正式文件同字节；另外3份为已被当前组件删除实现覆盖的旧代码，没有独立功能。正式文件摘要保持。

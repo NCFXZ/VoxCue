@@ -26,6 +26,7 @@ const shared = [
   'interview-screenshot',
   'delete-controls',
   'ui-alignment',
+  'ui-refinement',
   'ui-ux',
   'typography',
   'updates',

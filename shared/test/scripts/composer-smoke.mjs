@@ -1,3 +1,4 @@
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
@@ -7,7 +8,7 @@ import assert from 'node:assert/strict';
 const profile = path.resolve(path.join(testRoot, 'test/results'), `composer-profile-${Date.now()}`);
 await mkdir(profile, { recursive: true });
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 try {
@@ -31,10 +32,13 @@ try {
   await page.getByRole('button', { name: '添加附件', exact: true }).click();
   await page.getByRole('menuitem', { name: '添加文件夹' }).waitFor();
   await page.getByRole('menuitemcheckbox', { name: '网络搜索' }).click();
+  assert.equal(await page.getByRole('button', { name: /网络搜索/ }).count(), 0);
+  await page.getByRole('button', { name: '添加附件', exact: true }).click();
   assert.equal(
-    await page.getByRole('button', { name: /网络搜索/ }).getAttribute('aria-pressed'),
+    await page.getByRole('menuitemcheckbox', { name: '网络搜索' }).getAttribute('aria-checked'),
     'true',
   );
+  await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).click();
   await page.getByRole('button', { name: '思考强度', exact: true }).click();

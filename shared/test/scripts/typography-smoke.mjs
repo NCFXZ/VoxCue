@@ -1,4 +1,5 @@
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/typography-')));
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: directory, VITE_DEV_SERVER_URL: '' },
 });
 const checks = [],
@@ -317,12 +318,17 @@ try {
       e.scrollTop = 0;
     });
     await inspect(page, `personal-${theme}`);
-    const section = panel.getByRole('region', { name: '自定义指令', exact: true });
+    const section = panel.locator('details[aria-label="自定义指令"]');
+    if (!(await section.evaluate((e) => e.open))) await section.locator(':scope > summary').click();
     await section.getByRole('button', { name: '编辑', exact: true }).click();
-    const editor = panel.getByRole('region', { name: '编辑自定义指令', exact: true });
-    assert.equal(await page.getByRole('dialog').count(), 0);
-    assert.equal(await section.getByRole('button', { name: '编辑', exact: true }).count(), 0);
-    assert.equal(await section.getByRole('button', { name: '删除', exact: true }).count(), 0);
+    const editor = page.getByRole('dialog', { name: '编辑自定义指令', exact: true });
+    assert.equal(await page.getByRole('dialog').count(), 1);
+    assert.equal(
+      await section.getByRole('button', { name: '编辑', exact: true }).isDisabled(),
+      true,
+    );
+    assert.equal(await section.locator('.confirm-delete').isDisabled(), true);
+    assert.equal(await panel.locator('textarea').count(), 0);
     assert.equal(await editor.getByRole('button', { name: '取消', exact: true }).count(), 1);
     assert.equal(await editor.getByRole('button', { name: '保存', exact: true }).count(), 1);
     await inspect(page, `personal-editor-${theme}`);
@@ -433,15 +439,15 @@ try {
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 680));
   await page.waitForFunction(() => innerWidth <= 970);
   await info.click();
-  await panel
-    .getByRole('region', { name: '自定义指令', exact: true })
-    .getByRole('button', { name: '编辑', exact: true })
-    .click();
+  const narrowSection = panel.locator('details[aria-label="自定义指令"]');
+  if (!(await narrowSection.evaluate((e) => e.open)))
+    await narrowSection.locator(':scope > summary').click();
+  await narrowSection.getByRole('button', { name: '编辑', exact: true }).click();
   await inspect(page, 'personal-editor-narrow-dark');
   const overflow = await panel.evaluate((e) => e.scrollWidth > e.clientWidth + 1);
   assert.equal(overflow, false);
-  await panel
-    .getByRole('region', { name: '编辑自定义指令', exact: true })
+  await page
+    .getByRole('dialog', { name: '编辑自定义指令', exact: true })
     .getByRole('button', { name: '取消', exact: true })
     .click();
   await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();

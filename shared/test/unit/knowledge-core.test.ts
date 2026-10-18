@@ -37,7 +37,7 @@ async function directory() {
   return temporaryDirectory('rag-core');
 }
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
-  it('离线对比冷检索与缓存命中的本地耗时，不重复计算相同查询', async () => {
+  it('离线重复查询每次重新编码并执行真实数据库检索', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);
     vectors.encode = encode;
@@ -55,6 +55,8 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
         cold.push(performance.now() - start);
       }
       const expected = await core.search('PID sensor', 5, 'hybrid', signal());
+      const table = (core as unknown as { table: lance.Table }).table;
+      const searches = vi.spyOn(table, 'vectorSearch');
       const before = encode.mock.calls.filter((call) => call[1] === 'query').length;
       for (let index = 0; index < 100; index++) {
         const start = performance.now();
@@ -62,7 +64,8 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
         warm.push(performance.now() - start);
         expect(hits).toEqual(expected);
       }
-      expect(encode.mock.calls.filter((call) => call[1] === 'query')).toHaveLength(before);
+      expect(encode.mock.calls.filter((call) => call[1] === 'query')).toHaveLength(before + 100);
+      expect(searches).toHaveBeenCalledTimes(100);
       const p95 = (values: number[]) =>
         +values.sort((a, b) => a - b)[Math.floor(values.length * 0.95)].toFixed(3);
       console.log(
@@ -71,7 +74,7 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
             coldP95: p95(cold),
             warmP95: p95(warm),
             repeatedQueries: warm.length,
-            additionalEncodes: 0,
+            additionalEncodes: 100,
             syntheticVectors: true,
           }),
       );
@@ -79,7 +82,7 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       await core.close();
     }
   });
-  it('相同查询复用本地结果，参数、知识库隔离，调用方修改不污染缓存', async () => {
+  it('相同查询每次检索，参数、知识库隔离，调用方修改不污染后续结果', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);
     vectors.encode = encode;
@@ -98,35 +101,40 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
         core.search('PID sensor', 5, 'hybrid', signal(), 'base-a'),
         core.search('PID sensor', 5, 'hybrid', signal(), 'base-a'),
       ]);
-      expect(queryCount()).toBe(1);
+      expect(queryCount()).toBe(2);
       expect(first).toEqual(concurrent);
       first[0].title = '被调用方改写';
       concurrent.length = 0;
       expect(
         (await core.search('PID sensor', 5, 'hybrid', signal(), 'base-a'))[0].title,
       ).not.toContain('改写');
-      expect(queryCount()).toBe(1);
+      expect(queryCount()).toBe(3);
       expect((await core.search('PID sensor', 5, 'hybrid', signal(), 'base-b'))[0].documentId).toBe(
         'beta',
       );
       await core.search('PID sensor', 1, 'hybrid', signal(), 'base-a');
       await core.search('PID sensor', 5, 'vector', signal(), 'base-a');
       await core.search('PID sensor ', 5, 'hybrid', signal(), 'base-a');
-      expect(queryCount()).toBe(5);
+      expect(queryCount()).toBe(7);
       const keyword = await core.search('PID', 5, 'keyword', signal(), 'base-a');
       expect(keyword[0].mode).toBe('keyword');
+      const table = (core as unknown as { table: lance.Table }).table;
+      const keywordSearches = vi.spyOn(table, 'query');
+      expect(await core.search('PID', 5, 'keyword', signal(), 'base-a')).toEqual(keyword);
+      expect(await core.search('PID', 5, 'keyword', signal(), 'base-a')).toEqual(keyword);
+      expect(keywordSearches).toHaveBeenCalledTimes(2);
       const cancelled = new AbortController();
       cancelled.abort();
       await expect(
         core.search('PID sensor', 5, 'hybrid', cancelled.signal, 'base-a'),
       ).rejects.toThrow();
       await expect(core.search('PID sensor', 5, 'hybrid', signal(), "bad'base")).rejects.toThrow();
-      expect(queryCount()).toBe(5);
+      expect(queryCount()).toBe(7);
     } finally {
       await core.close();
     }
   });
-  it('资料更新、停用、重新索引、删除和模型卸载立即失效，失败或取消不缓存结果', async () => {
+  it('资料更新、停用、重新索引、删除和模型卸载保持正确，失败或取消后重新检索', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);
     vectors.encode = encode;
@@ -182,7 +190,7 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       await core.close();
     }
   });
-  it('检索缓存有界并且每个知识核心实例独立', async () => {
+  it('连续重复检索始终重新执行，每个知识核心实例保持独立', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);
     vectors.encode = encode;
@@ -209,7 +217,7 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       await other.close();
     }
   });
-  it('口语查询原样区分缓存键，不把语气词、否定或纠正合并成旧问题', async () => {
+  it('口语查询每次原样检索，不把语气词、否定或纠正合并成旧问题', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);
     vectors.encode = encode;
@@ -229,12 +237,15 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       ).toEqual(queries);
       const before = encode.mock.calls.length;
       for (const query of queries) await core.search(query, 5, 'vector', signal());
-      expect(encode.mock.calls).toHaveLength(before);
+      expect(encode.mock.calls).toHaveLength(before + queries.length);
+      expect(
+        encode.mock.calls.filter((call) => call[1] === 'query').map((call) => call[0][0]),
+      ).toEqual([...queries, ...queries]);
     } finally {
       await core.close();
     }
   });
-  it('长口语查询触及字节预算时提前淘汰，仍命中最近查询且不超过预算', async () => {
+  it('长口语查询重复执行，不因查询新旧而跳过检索', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);
     vectors.encode = encode;
@@ -247,11 +258,10 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
         await core.search(query(index), 5, 'vector', signal());
       const before = queryCount();
       await core.search(query(39), 5, 'vector', signal());
-      expect(queryCount()).toBe(before);
-      await core.search(query(0), 5, 'vector', signal());
       expect(queryCount()).toBe(before + 1);
-      const cache = core as unknown as { searchCacheBytes: number };
-      expect(cache.searchCacheBytes).toBeLessThanOrEqual(512 * 1024);
+      await core.search(query(0), 5, 'vector', signal());
+      expect(queryCount()).toBe(before + 2);
+      expect(encode.mock.calls.at(-1)?.[0]).toEqual([query(0)]);
     } finally {
       await core.close();
     }

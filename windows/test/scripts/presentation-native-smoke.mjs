@@ -6,6 +6,7 @@ import { realpathSync, lstatSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 
 assert.equal(process.platform, 'win32');
 assert.equal(probe('desktop').interactive, true, 'Native mouse checks require an unlocked desktop');
@@ -48,7 +49,7 @@ const profile = path.join(testRoot, 'profile');
 await mkdir(profile);
 const app = await electron.launch({
   ...(executablePath ? { executablePath } : {}),
-  args: executablePath ? [] : ['.'],
+  args: executablePath ? [] : [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 const cursor = probe('cursor');

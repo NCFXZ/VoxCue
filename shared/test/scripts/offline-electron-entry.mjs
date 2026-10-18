@@ -6,7 +6,9 @@ import path from 'node:path';
 // Install before application imports so isolated desktop checks cannot contact
 // real services during startup. Renderer HTTP(S)/WebSocket requests are blocked
 // as well as Electron net and Node transports. Local file assets still load.
-export async function offlineElectronEntry() {
+export async function offlineElectronEntry(fixture) {
+  if (fixture && !path.resolve(fixture).startsWith(testRoot + path.sep))
+    throw Error('Offline fixture entry must belong to this temporary test run');
   const entry = path.join(testRoot, 'offline-electron-entry.cjs');
   await writeFile(
     entry,
@@ -29,7 +31,7 @@ app.on('session-created', session => session.webRequest.onBeforeRequest(
   (_details, callback) => callback({ cancel: true }),
 ));
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
-require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js'))});
+require(${JSON.stringify(fixture ?? path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js'))});
 `,
   );
   return entry;

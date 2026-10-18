@@ -18,7 +18,7 @@ import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
 import config from '../../electron-builder.config.cjs';
 
 assert.equal(process.platform, 'win32');
-const previousVersion = '0.2.2';
+const previousVersion = '0.3.0';
 const currentVersion = JSON.parse(await readFile(path.resolve('package.json'), 'utf8')).version;
 assert.notEqual(
   currentVersion,

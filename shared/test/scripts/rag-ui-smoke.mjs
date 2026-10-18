@@ -114,7 +114,7 @@ try {
   await page.getByRole('button', { name: /RAG 本地集成/ }).click();
   await page
     .getByRole('dialog', { name: 'RAG 本地集成', exact: true })
-    .getByText(/可用于回答/)
+    .getByText(/索引完成/)
     .first()
     .waitFor();
   await page

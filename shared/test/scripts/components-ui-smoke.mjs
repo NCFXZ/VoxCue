@@ -1,3 +1,4 @@
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
@@ -60,7 +61,7 @@ const assertAnimated = (widths, label) => {
   );
 };
 try {
-  app = await electron.launch({ args: [fixture], env });
+  app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
   const login = await app.firstWindow();
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
   await installUiAccount(app);

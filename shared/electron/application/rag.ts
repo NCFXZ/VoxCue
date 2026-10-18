@@ -2,9 +2,39 @@ import { KnowledgeTools } from './ragTools';
 import type { AIChatService } from '../backend/chat/ports';
 import type { KnowledgePort } from '../backend/knowledge/types';
 import type { ChatEvent, ChatRequest } from '../contracts/chat';
-import type { RagMode, KnowledgeItem } from '../contracts/knowledge';
+import type { RagMode, KnowledgeHit, KnowledgeItem } from '../contracts/knowledge';
 import { validateRequest } from '../backend/chat/validation';
 import { buildRagContext, ragInstructions } from './ragContext';
+
+// Bound even an unresponsive port without consuming a late result. The port still
+// receives the signal and owns cancellation/retirement of its native work.
+function lookupResult<T>(run: () => Promise<T>, signal: AbortSignal): Promise<T> {
+  signal.throwIfAborted();
+  return new Promise((resolve, reject) => {
+    const cleanup = () => signal.removeEventListener('abort', abort);
+    const abort = () => {
+      cleanup();
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve()
+      .then(() => {
+        signal.throwIfAborted();
+        return run();
+      })
+      .then(
+        (value) => {
+          cleanup();
+          resolve(value);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+  });
+}
+
 export class RagChatService implements AIChatService {
   constructor(
     private provider: AIChatService,
@@ -35,18 +65,19 @@ export class RagChatService implements AIChatService {
       signal.throwIfAborted();
       return result;
     }
+    const baseId = request.knowledgeBaseId;
     this.requireModel();
     if ((await this.mode()) === 'function') {
       if (!this.provider.streamWithTools)
         throw Error('当前 AI Provider 不支持本地工具，请手动选择 Local RAG。');
-      const tools = new KnowledgeTools(this.knowledge, request.knowledgeBaseId);
+      const tools = new KnowledgeTools(this.knowledge, baseId);
       const enriched = {
         ...request,
         instructions:
           request.instructions +
           '\n' +
           ragInstructions +
-          '\n必要时使用 voxcue_knowledge 工具寻找证据。先搜索再读取完整条目，通用问题可直接回答。',
+          '\n需要本地证据时，先搜索，再按需读取相关完整条目。\n\n实时面试中，检索未命中、超时、不可用或预算耗尽时，使用已取得的相关资料和通用专业知识继续回答，不要求用户重试、补充资料或切换模式，不编造个人事实，也不假装检索成功。',
       };
       const result = await this.provider.streamWithTools(
         enriched,
@@ -72,6 +103,8 @@ export class RagChatService implements AIChatService {
     }
     const started = performance.now(),
       query = request.turns.at(-1)!.content;
+    // Parameter/configuration errors are not retrieval availability failures.
+    if (query.length > 6000) throw Error('无效的知识检索参数。');
     const lookup = AbortSignal.any([signal, AbortSignal.timeout(15000)]);
     emit({
       id: request.id,
@@ -84,20 +117,54 @@ export class RagChatService implements AIChatService {
         status: 'in_progress',
       },
     });
-    const candidates = query.trim()
-      ? await this.knowledge.search(query, 5, 'hybrid', lookup, request.knowledgeBaseId)
-      : [];
-    const hits = request.knowledgeBaseId
-      ? candidates.filter((hit) => hit.baseId === request.knowledgeBaseId)
-      : candidates;
+    let candidates: KnowledgeHit[] = [];
+    let failed = false;
+    try {
+      if (query.trim())
+        candidates = await lookupResult(
+          () => this.knowledge.search(query, 5, 'hybrid', lookup, baseId),
+          lookup,
+        );
+    } catch {
+      signal.throwIfAborted();
+      failed = true;
+    }
+    if (!Array.isArray(candidates)) throw Error('知识库检索结果格式无效。');
+    const hits = baseId ? candidates.filter((hit) => hit.baseId === baseId) : candidates;
     const items = new Map<string, KnowledgeItem>();
     for (const hit of hits) {
-      lookup.throwIfAborted();
-      const item = await this.knowledge.getItem(hit.itemId, lookup);
-      if (item && item.documentId === hit.documentId) items.set(hit.itemId, item);
+      signal.throwIfAborted();
+      if (lookup.aborted) {
+        failed = true;
+        break;
+      }
+      if (typeof hit.itemId !== 'string' || !hit.itemId || hit.itemId.length > 240)
+        throw Error('知识库条目标识无效。');
+      let item: KnowledgeItem | null;
+      try {
+        item = await lookupResult(() => this.knowledge.getItem(hit.itemId, lookup), lookup);
+      } catch {
+        signal.throwIfAborted();
+        failed = true;
+        continue;
+      }
+      if (!item) {
+        failed = true;
+        continue;
+      }
+      // Identity failures remain fatal, outside the availability catch.
+      if (item.itemId !== hit.itemId || item.documentId !== hit.documentId)
+        throw Error('知识库条目身份不匹配。');
+      items.set(hit.itemId, item);
     }
-    lookup.throwIfAborted();
-    const context = buildRagContext(query, hits, items);
+    signal.throwIfAborted();
+    const context = buildRagContext(
+      query,
+      hits,
+      items,
+      undefined,
+      failed ? (items.size ? 'partial' : 'unavailable') : 'complete',
+    );
     const enriched: ChatRequest = {
       ...request,
       instructions: request.instructions + '\n' + ragInstructions,
@@ -121,10 +188,11 @@ export class RagChatService implements AIChatService {
         id: 'local-retrieval',
         kind: 'knowledge',
         phase: 'thinking',
-        detail: '检索本地资料',
-        status: 'completed',
+        detail: failed ? '本地资料未完整取得，继续回答' : '检索本地资料',
+        status: failed ? 'failed' : 'completed',
       },
     });
+    signal.throwIfAborted();
     const result = await this.provider.stream(
       enriched,
       (event) => {

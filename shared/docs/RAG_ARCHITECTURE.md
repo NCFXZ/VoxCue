@@ -4,6 +4,12 @@
 
 ## 已实现的核心与进程边界
 
+当前本地源码（未发布）已移除 KnowledgeService 精确查询结果 LRU，重复查询重新执行编码与数据库检索，keyword 模式仍只走全文检索；原 revisions/模型缓存、串行队列、知识库隔离、排序、模式/topK、取消及卸载/关闭保护保持。已发布 0.3.0 的检索缓存属于历史实现，不随本地撤销变更。
+
+当前本地第3组提示词由 application/ragContext.ts 提供：仅采用相关资料，未命中继续用通用专业知识回答；不把通用技术当个人经历，不混拼人物/项目/时期的事实，口述不带来源编号，书面沿用编号引用，节选和省略不当完整条目。rag.ts 在 Function Calling 追加按需搜索/回取和实时面试继续作答规则；工具返回空、超时、不可用或预算耗尽时不要求用户重试或切换模式，不假装取得证据。工具错误/省略输出保留实际状态，不再夹带操作指引。Local RAG 当前只捕获搜索/条目读取的可用性故障，在原15秒总检索预算内继续回答；可保留已完整读取且通过同库/文档/条目身份检查的相关资料。超时不等待迟到端口结果，不重试，不新增模型调用。参数、模式设置、条目身份错误、组件未就绪、原请求取消及 Provider 失败仍停止；不自动切换 API/模式或绕过预算。已发布0.3.0不包含这些本地调整。
+
+失败/部分成功通过当前请求参考数据的 retrievalStatus 与 knowledge 活动的 failed 状态表达，不使用通用 warning，也不改写历史格式。回退只影响本次证据，模型、effort、历史窗口、引用预算、所选库和原始资料不变；正常完成的回退答案仍写入面试上下文，后续追问可用。知识核心串行队列、取消退休、模型释放/关闭保护保持。rag 单测覆盖挂起端口超时、取消竞争、部分/空证据、身份拒绝及 Provider 不重试；profile-ui 使用离线合成端口检查普通聊天和实时面试失败后继续回答、模型/effort保持及后续上下文。
+
 `shared/electron/backend/knowledge/host.ts` 是主进程的轻量端口，按需启动独立 utilityProcess。`process.ts` 串行调度、取消和过滤终止后的事件；`service.ts` 负责 LanceDB 与完整内容关系；`embedding.ts` 只使用本地 E5 q8 CPU，384 维、query/passage 前缀、mean pooling、L2 归一化。渲染进程不加载数据库、模型或本地文件接口。
 
 KnowledgeService 接口：initialize、indexDocument、updateDocument、invalidateDocument、removeDocument、listDocuments、search、getItem、close。KnowledgeHost 实现同一端口。索引、搜索串行共享模型和数据库；取消等待队列或正在推理的请求会停止后续写入和结果发布，ONNX 单次原生推理本身在完成后检查取消。关闭释放模型和进程。

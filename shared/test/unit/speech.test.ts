@@ -1,7 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { SampleBuffer, PacketDecoder } from '../../../shared/electron/backend/speech/buffer';
 import { validateSpeech } from '../../../shared/electron/backend/speech/validation';
-import { QuestionBuffer, isAcknowledgementOnly } from '../../../shared/src/services/speech';
+import { QuestionBuffer } from '../../../shared/src/services/speech';
+const buffered = (text: string) => {
+  const buffer = new QuestionBuffer();
+  buffer.add({ id: 'original', text, source: 'system', final: true, startMs: 0, endMs: 10 });
+  return buffer.consume('system');
+};
 describe('本地语音边界和问题汇总', () => {
   it.each([
     '嗯',
@@ -17,8 +22,8 @@ describe('本地语音边界和问题汇总', () => {
     '哦哦好的明白了',
     '嗯\t嗯\n好的',
     'ＯＫ，ＴＨＡＮＫＳ！',
-  ])('明确回应 %s 仅跳过自动回答', (text) => {
-    expect(isAcknowledgementOnly(text)).toBe(true);
+  ])('明确回应 %s 与普通终稿一样进入问题缓冲', (text) => {
+    expect(buffered(text)).toBe(text);
   });
   it.each([
     '讲讲你的项目',
@@ -53,7 +58,7 @@ describe('本地语音边界和问题汇总', () => {
     '嗯post gree SQL要咋调优',
     '嗯'.repeat(121),
   ])('不确定、追问、指令和纠正 %s 继续交给模型', (text) => {
-    expect(isAcknowledgementOnly(text)).toBe(false);
+    expect(buffered(text)).toBe(text);
   });
   it('组合语气词、重复词和无标点不能吞掉夹在中间的有效内容', () => {
     const acknowledgements = ['嗯', '呃呃', '哦哦', '好的', '明白了', '谢谢', 'OK', 'got it'];
@@ -75,7 +80,7 @@ describe('本地语音边界和问题汇总', () => {
         for (const question of questions)
           for (const separator of separators) {
             const text = [before, question, after].join(separator);
-            expect(isAcknowledgementOnly(text), text).toBe(false);
+            expect(buffered(text), text).toBe(text);
           }
   });
   it('环形缓存跨边界保持顺序，满时显式失败', () => {

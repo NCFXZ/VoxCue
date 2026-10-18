@@ -56,6 +56,9 @@ export async function closeUiApp(app) {
   }
 }
 export async function installUiAccount(app, { speech = false, components = false } = {}) {
+  // Wait for main's synchronous module registration before replacing test ports.
+  // Inspector evaluation during a CommonJS load can observe partial exports.
+  await (await app.firstWindow()).waitForLoadState('domcontentloaded');
   const speechPorts = {
     win32: 'test/fixtures/install-speech-port.cjs',
     darwin: 'test/fixtures/install-speech-port.cjs',

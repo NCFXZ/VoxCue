@@ -51,6 +51,8 @@ import {
   Search24Regular,
   DocumentText24Regular,
   Eye24Regular,
+  FontIncreaseRegular,
+  FontDecreaseRegular,
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
@@ -113,3 +115,5 @@ export const Save = icon(Save24Regular);
 export const Search = icon(Search24Regular);
 export const FileText = icon(DocumentText24Regular);
 export const Eye = icon(Eye24Regular);
+export const FontIncrease = icon(FontIncreaseRegular);
+export const FontDecrease = icon(FontDecreaseRegular);

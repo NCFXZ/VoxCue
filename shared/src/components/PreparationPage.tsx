@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
 import {
@@ -33,6 +33,8 @@ import { useDictation } from '../stores/dictation';
 import { Modal } from './ui/modal';
 import { ProfileProposal } from './ProfileProposal';
 import { MarkdownContent } from './MarkdownContent';
+import { PlainTextContent } from './PlainTextContent';
+import { isSkillReply } from '../services/preparation';
 import { PersonalInfoPanel } from './PersonalInfoPanel';
 import { localKnowledge } from '../services/knowledge';
 import { ProviderIdentity } from './ProviderIdentity';
@@ -114,6 +116,28 @@ export function PreparationPage({
   );
   const interviewProvider = useModelProvider(interviewConfiguration.modelId);
   const [infoOpen, setInfoOpen] = useState(false);
+  const [panelWidth, setPanelWidth] = useState(380);
+  const [resizingInfo, setResizingInfo] = useState(false);
+  const layoutRef = useRef<HTMLDivElement>(null);
+  const resizeInfo = useRef<{ x: number; width: number } | null>(null);
+  const resizePanel = (width: number) => {
+    const maximum = Math.min(640, Math.max(300, (layoutRef.current?.clientWidth ?? 960) - 280));
+    setPanelWidth(Math.round(Math.max(300, Math.min(maximum, width))));
+  };
+  useEffect(() => {
+    const finish = () => {
+      resizeInfo.current = null;
+      setResizingInfo(false);
+    };
+    window.addEventListener('blur', finish);
+    return () => window.removeEventListener('blur', finish);
+  }, []);
+  useEffect(() => {
+    if (!infoOpen) {
+      resizeInfo.current = null;
+      setResizingInfo(false);
+    }
+  }, [infoOpen]);
   const [profileError, setProfileError] = useState<string | null>(null);
   const visibleError =
     state.chatStorageError ||
@@ -491,7 +515,13 @@ export function PreparationPage({
           </div>
         </Modal>
       )}
-      <div className="preparation-layout">
+      <div
+        ref={layoutRef}
+        className={`preparation-layout${resizingInfo ? ' is-resizing-info' : ''}`}
+        style={
+          { '--personal-panel-width': `min(${panelWidth}px, calc(100% - 260px))` } as CSSProperties
+        }
+      >
         <div
           className="chat-column"
           onDragEnter={(event) => {
@@ -548,7 +578,7 @@ export function PreparationPage({
               aria-label="聊天内容"
             >
               <div className="chat-thread">
-                {state.messages.map((message) => (
+                {state.messages.map((message, index) => (
                   <article key={message.id} className={`chat-message ${message.role}`}>
                     {message.role === 'user' ? (
                       <div className="user-bubble">
@@ -592,7 +622,9 @@ export function PreparationPage({
                           />
                         </div>
                         <ResponseProgress message={message} />
-                        <ChatSources sources={message.sources ?? []} />
+                        {!isSkillReply(message, state.messages[index - 1]) && (
+                          <ChatSources sources={message.sources ?? []} />
+                        )}
                         {message.usage && (
                           <small className="answer-usage">
                             输入 {message.usage.inputTokens.toLocaleString()} · 输出{' '}
@@ -601,7 +633,11 @@ export function PreparationPage({
                         )}
                         <div className="chat-answer">
                           {message.content ? (
-                            <MarkdownContent content={message.content} />
+                            isSkillReply(message, state.messages[index - 1]) ? (
+                              <PlainTextContent content={message.content} />
+                            ) : (
+                              <MarkdownContent content={message.content} />
+                            )
                           ) : message.status === 'failed' ? (
                             '请求失败，未收到回答。'
                           ) : message.status === 'stopped' ? (
@@ -631,9 +667,14 @@ export function PreparationPage({
                           <Button
                             variant="ghost"
                             className="chat-copy"
-                            onClick={async () => {
+                            onClick={async (event) => {
                               try {
-                                await navigator.clipboard.writeText(message.content);
+                                const text = isSkillReply(message, state.messages[index - 1])
+                                  ? (event.currentTarget
+                                      .closest('article')
+                                      ?.querySelector<HTMLElement>('.chat-answer')?.innerText ?? '')
+                                  : message.content;
+                                await navigator.clipboard.writeText(text);
                                 setCopied(message.id);
                               } catch {
                                 setCopied(null);
@@ -654,14 +695,28 @@ export function PreparationPage({
             <section className="welcome">
               <h1>今天想准备哪一部分面试？</h1>
               <div className="suggestions">
-                {['帮我准备自我介绍', '帮我梳理项目经历', '上传我的简历'].map((label, index) => (
+                {[
+                  {
+                    label: '帮我准备自我介绍',
+                    prompt:
+                      '请根据已确认的简历，结合已有职位描述，写一份可直接口述的面试自我介绍。简要交代背景，重点突出与岗位相关的经历、个人贡献和能力，前后衔接自然，避免逐项复述简历。缺少职位描述时按现有简历完成；缺少的个人事实使用明确占位，不编造。',
+                  },
+                  {
+                    label: '帮我梳理项目经历',
+                    prompt:
+                      '请根据已确认的简历，结合已有职位描述，梳理与岗位最相关的项目经历。按背景与目标、我的职责、关键方案及选择理由、难点处理、结果的顺序，整理成面试时便于讲述的内容。突出个人贡献，区分个人职责与团队成果；未提供的事实标注待补充，不虚构决策过程或量化数据。',
+                  },
+                  {
+                    label: '上传我的简历',
+                    prompt:
+                      '请根据本次上传的简历整理摘要，保留教育与工作背景、职责、项目、关键技术和已有成果，准确区分个人贡献、团队成果及进行中事项。合并重复表述，不补造事实。仅提出简历摘要的待确认更新，不修改其他资料。',
+                  },
+                ].map(({ label, prompt }, index) => (
                   <button
                     key={label}
                     disabled={!state.chatsReady || state.streaming || !connection.models.length}
                     onClick={() =>
-                      index === 2
-                        ? askProfile('请根据我上传的简历生成简历摘要，先展示待确认内容。', true)
-                        : void state.send(label)
+                      index === 2 ? askProfile(prompt, true) : void state.send(prompt)
                     }
                   >
                     {label}
@@ -724,35 +779,43 @@ export function PreparationPage({
               />
               <div className="composer-bottom">
                 <div className="composer-tools">
-                  <ChatTools />
-                </div>
-                <div className="composer-actions">
-                  <VoiceInputButton
-                    value={input}
-                    onChange={setInput}
-                    disabled={state.streaming || !state.chatsReady}
-                    contextKey={state.activeConversation}
+                  <ChatTools
+                    actions={
+                      <div className="composer-actions">
+                        <VoiceInputButton
+                          value={input}
+                          onChange={setInput}
+                          disabled={state.streaming || !state.chatsReady}
+                          contextKey={state.activeConversation}
+                        />
+                        {state.streaming ? (
+                          <Button
+                            type="button"
+                            size="icon"
+                            aria-label="停止回复"
+                            onClick={state.stop}
+                          >
+                            <Square size={13} />
+                          </Button>
+                        ) : (
+                          <Button
+                            className="send-button"
+                            size="icon"
+                            type="submit"
+                            disabled={
+                              !state.chatsReady ||
+                              dictating ||
+                              (!input.trim() && !state.attachments.length) ||
+                              !connection.models.length
+                            }
+                            aria-label="发送消息"
+                          >
+                            <ArrowUp size={20} />
+                          </Button>
+                        )}
+                      </div>
+                    }
                   />
-                  {state.streaming ? (
-                    <Button type="button" size="icon" aria-label="停止回复" onClick={state.stop}>
-                      <Square size={13} />
-                    </Button>
-                  ) : (
-                    <Button
-                      className="send-button"
-                      size="icon"
-                      type="submit"
-                      disabled={
-                        !state.chatsReady ||
-                        dictating ||
-                        (!input.trim() && !state.attachments.length) ||
-                        !connection.models.length
-                      }
-                      aria-label="发送消息"
-                    >
-                      <ArrowUp size={20} />
-                    </Button>
-                  )}
                 </div>
               </div>
             </form>
@@ -789,6 +852,59 @@ export function PreparationPage({
           </div>
         </div>
         <PersonalInfoPanel
+          resizeHandle={
+            infoOpen && (
+              <div
+                className="personal-resize-handle"
+                role="separator"
+                aria-label="调整个人信息宽度"
+                aria-orientation="vertical"
+                tabIndex={0}
+                aria-valuenow={panelWidth}
+                aria-valuemin={300}
+                aria-valuemax={640}
+                onDoubleClick={() => setPanelWidth(380)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Home') {
+                    event.preventDefault();
+                    setPanelWidth(380);
+                  }
+                  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+                    event.preventDefault();
+                    resizePanel(panelWidth + (event.key === 'ArrowLeft' ? 20 : -20));
+                  }
+                }}
+                onPointerDown={(event) => {
+                  if (event.button !== 0) return;
+                  event.preventDefault();
+                  event.currentTarget.setPointerCapture(event.pointerId);
+                  resizeInfo.current = {
+                    x: event.clientX,
+                    width: event.currentTarget.parentElement!.getBoundingClientRect().width,
+                  };
+                  setResizingInfo(true);
+                }}
+                onPointerMove={(event) => {
+                  const start = resizeInfo.current;
+                  if (start) resizePanel(start.width + start.x - event.clientX);
+                }}
+                onPointerUp={(event) => {
+                  resizeInfo.current = null;
+                  setResizingInfo(false);
+                  if (event.currentTarget.hasPointerCapture(event.pointerId))
+                    event.currentTarget.releasePointerCapture(event.pointerId);
+                }}
+                onPointerCancel={() => {
+                  resizeInfo.current = null;
+                  setResizingInfo(false);
+                }}
+                onLostPointerCapture={() => {
+                  resizeInfo.current = null;
+                  setResizingInfo(false);
+                }}
+              />
+            )
+          }
           open={infoOpen}
           onClose={closeInfo}
           onDirtyChange={onDraftChange}

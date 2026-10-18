@@ -79,8 +79,8 @@ try {
   await send('后台回复状态');
   const row = page.locator('.conversation-row').filter({ hasText: '后台回复状态' });
   const slot = await row.locator('.conversation-indicator').boundingBox();
-  assert.equal(slot.width, 14);
-  assert.equal(slot.height, 14);
+  assert.ok(Math.abs(slot.width - 14) < 0.01, 'Status slot width remains 14 CSS pixels');
+  assert.ok(Math.abs(slot.height - 14) < 0.01, 'Status slot height remains 14 CSS pixels');
   assert.notEqual(
     await row
       .locator('.conversation-spinner')

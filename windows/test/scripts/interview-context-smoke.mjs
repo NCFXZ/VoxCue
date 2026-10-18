@@ -1,5 +1,6 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
+import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -29,6 +30,17 @@ const {app}=require('electron'); app.setAppPath(${JSON.stringify(process.cwd())}
 const {ChatGPTAuthService}=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/auth/service.js'))});
 const {ChatGPTService}=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))});
 const {SpeechHost}=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/host.js'))});
+// This context regression uses synthetic speech/provider ports and requires no
+// model files. Component download/removal protections have separate regressions.
+const {ComponentService}=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/components/service.js'))});
+const componentState=ComponentService.prototype.state;
+ComponentService.prototype.state=function(){
+  const state=componentState.call(this);
+  return {...state,phase:'ready',error:null,items:state.items.map(item=>({...item,phase:'ready',received:item.bytes}))};
+};
+ComponentService.prototype.status=async function(){return this.state();};
+ComponentService.prototype.ready=()=>true;
+require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/models.js'))}).speechModelInstalled=()=>true;
 require(${JSON.stringify(path.resolve('test/fixtures/interview-access-fixture.cjs'))})(${JSON.stringify(path.resolve('dist-electron/windows/electron/speech/access.js'))});
 ChatGPTAuthService.prototype.session=async()=>({mode:'chatgpt',user:{id:'fixture',name:'Test',email:''},expiresAt:Date.now()+3600000});
 ChatGPTService.prototype.models=async()=>[{id:'test-model',label:'Test Model',description:'',reasoningEfforts:['low']}];
@@ -57,7 +69,7 @@ require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))}
 );
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: [fixture], env });
+const app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
 try {
   const errors = [];
   const main = await app.firstWindow();
@@ -119,10 +131,13 @@ try {
   await emit('q2', 'system', '为什么没有采用它？');
   await send(2, '为什么没有采用它？');
   const second = await app.evaluate(() => globalThis.contextRequests[1]);
-  assert.ok(second.instructions.includes('只输出面试者可以直接念出的答案正文'));
+  assert.ok(second.instructions.includes('直接给出面试者能当场口述的第一人称答案'));
   assert.ok(second.instructions.includes('60–90秒'));
-  assert.ok(second.instructions.includes('优先遵循用户要求'));
-  assert.ok(second.instructions.includes('Markdown 围栏代码块'));
+  assert.ok(second.instructions.includes('明确的时长、篇幅或格式要求优先'));
+  assert.ok(second.instructions.includes('使用标注语言、保留换行和缩进的代码块'));
+  assert.ok(second.instructions.includes('不反问、索要资料、请求确认或等待回复'));
+  assert.ok(second.instructions.includes('不因检索未命中而停止作答'));
+  assert.ok(second.instructions.includes('之前的 AI 建议不视为实际发言或本人经历'));
   assert.equal(second.knowledgeBaseId, null);
   const context = JSON.parse(second.turns[0].content.split('\n').slice(1).join('\n'));
   assert.ok(

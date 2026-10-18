@@ -1,4 +1,5 @@
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,7 +16,7 @@ const executable = process.argv
 const packaged = !!executable;
 const app = await electron.launch({
   ...(packaged ? { executablePath: path.resolve(executable) } : {}),
-  args: packaged ? [] : ['.'],
+  args: packaged ? [] : [await offlineElectronEntry()],
   env,
 });
 const errors = [];
@@ -59,7 +60,7 @@ try {
         const changes = Object.fromEntries(profileFields.map((field) => [field, null]));
         if (prompt === '更新简历') changes.background = '已核对的合成简历摘要';
         if (prompt === '更新 JD') changes.jobDescription = 'TypeScript、接口边界与桌面应用。';
-        if (body.instructions.includes('本次明确任务：联网生成或更新技能')) {
+        if (body.instructions.includes('本次明确任务：真实联网筛选')) {
           globalThis.skillResponseCount = (globalThis.skillResponseCount ?? 0) + 1;
           const retrieved = Array.from({ length: 7 }, (_, index) => ({
             title: `真实资料${index + 1}`,
@@ -334,7 +335,9 @@ try {
   await proposal.getByRole('button', { name: '确认更新', exact: true }).click();
   await proposal.getByText('资料已保存，补齐摘要后可联网更新面试技能。', { exact: true }).waitFor();
   await proposal.getByRole('button', { name: '补充职位描述', exact: true }).click();
-  assert.ok((await input().inputValue()).includes('先展示待确认内容'));
+  assert.ok((await input().inputValue()).includes('仅补充缺少的摘要并展示待确认提案'));
+  assert.ok((await input().inputValue()).includes('以下是职位描述内容：'));
+  assert.ok((await input().inputValue()).includes('也不生成技能'));
   assert.equal((await input().inputValue()).includes('联网更新面试技能'), false);
   await send('普通问题');
   await completed();
@@ -362,22 +365,20 @@ try {
     await latest().locator('.chat-answer').innerText(),
     '已整理3项核心技能，请确认下方提案。',
   );
-  assert.equal(await latest().locator('.chat-source-group button:visible').count(), 3);
-  assert.equal(await latest().locator('.chat-source-more').getAttribute('open'), null);
-  await latest().getByText('更多来源（4）', { exact: true }).click();
-  assert.equal(await latest().locator('.chat-source-group button:visible').count(), 7);
-  await latest().getByText('更多来源（4）', { exact: true }).click();
-  assert.equal(
-    await skillsProposal.locator('a').first().getAttribute('href'),
-    'https://example.com/docs/0/?utm_source=search',
-  );
+  assert.equal(await latest().locator('.chat-source-group').count(), 0);
+  assert.equal(await skillsProposal.locator('a').count(), 0);
   const skillRequest = await app.evaluate(() => globalThis.progressRequests.at(-1));
-  assert.ok(skillRequest.prompt.includes('3–5项核心面试技能'));
-  assert.ok(skillRequest.instructions.includes('技能完整内容只写在 changes.skills'));
+  assert.ok(skillRequest.prompt.includes('不设固定写作字数'));
+  assert.ok(skillRequest.prompt.includes('标题和正文使用纯文字'));
+  assert.ok(skillRequest.instructions.includes('完整技能资料只放在 changes.skills'));
   await latest().screenshot({});
   await skillsProposal.getByRole('button', { name: '确认更新', exact: true }).click();
   const confirmedInfo = await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1'));
   assert.equal(JSON.parse(confirmedInfo).skills.length, 3);
+  assert.equal(
+    JSON.parse(confirmedInfo).skills[0].sources[0].url,
+    'https://example.com/docs/0/?utm_source=search',
+  );
   await app.evaluate(() => {
     globalThis.failSkillReference = true;
   });
@@ -601,7 +602,7 @@ try {
           'time above separator, real title disclosures and chronological status changes',
           'trailing chevron only on hover/focus, active title shimmer and reduced motion',
           'composer grows from 2 to 11 lines, shrinks, reflows and restores drafts',
-          'compact skills proposal and folded extra sources; streamed source matching and explicit validation failure',
+          'plain skills proposal with hidden links and retained source metadata; streamed source matching and explicit validation failure',
           'empty statuses replaced, current status shimmer and no summary language preference',
         ],
         rendererErrors: errors.length,

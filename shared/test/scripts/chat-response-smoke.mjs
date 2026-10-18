@@ -1,4 +1,5 @@
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -15,7 +16,7 @@ await writeFile(
   `const {app} = require('electron'); app.setAppPath(${JSON.stringify(process.cwd())}); globalThis.chatTestModules = { ...require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))}), ...require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/usage.js'))}) }; require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});`,
 );
 const app = await electron.launch({
-  args: [fixture],
+  args: [await offlineElectronEntry(fixture)],
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 try {
@@ -177,8 +178,14 @@ try {
       };
     }),
   );
-  assert.equal(controls.length, 3);
-  assert.deepEqual(controls, Array(3).fill({ height: 32, shadow: 'none', radius: '7px' }));
+  assert.deepEqual(
+    await page
+      .locator('.composer-tool')
+      .evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label'))),
+    ['聊天模型', '思考强度'],
+  );
+  assert.equal(await page.getByRole('button', { name: '网络搜索', exact: true }).count(), 0);
+  assert.deepEqual(controls, Array(2).fill({ height: 32, shadow: 'none', radius: '7px' }));
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   assert.equal(await page.locator('.model-option-icon').count(), 0);
   assert.ok(
@@ -422,10 +429,9 @@ try {
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');
-  await page
-    .getByRole('region', { name: '职位描述摘要', exact: true })
-    .getByText('新的 JD', { exact: true })
-    .waitFor();
+  const jd = page.locator('details[aria-label="职位描述摘要"]');
+  await jd.locator(':scope > summary').click();
+  await jd.getByText('新的 JD', { exact: true }).waitFor();
   assert.equal(await page.locator('.composer-caption').count(), 0);
   assert.ok((await page.locator('.effort-trigger').textContent()).includes('思考强度'));
 

@@ -1,6 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ChatGPTService, publicFailure } from '../../../shared/electron/backend/chat/service';
 import { KnowledgeTools } from '../../../shared/electron/application/ragTools';
+import { RagChatService } from '../../../shared/electron/application/rag';
+import { ragInstructions } from '../../../shared/electron/application/ragContext';
 import type { KnowledgePort } from '../../../shared/electron/backend/knowledge/types';
 import type { LocalTools } from '../../../shared/electron/backend/chat/ports';
 import { UsageLedger } from '../../../shared/electron/backend/chat/usage';
@@ -191,7 +193,6 @@ describe('Function Calling（模拟 HTTP/SSE，真实 Provider 协议代码）',
   });
   it('搜索 -> 完整回取 -> 流式答案；命名空间、stateless 历史与 reasoning 保留且不泄露', async () => {
     const knowledge = core(),
-      runtime = new KnowledgeTools(knowledge),
       bodies: any[] = [];
     const events: any[] = [];
     const provider = await service(
@@ -205,6 +206,9 @@ describe('Function Calling（模拟 HTTP/SSE，真实 Provider 协议代码）',
         expect(body.store).toBe(false);
         expect(body.stream).toBe(true);
         expect(body.tools[0].type).toBe('namespace');
+        expect(body.instructions).toContain(ragInstructions);
+        expect(body.instructions).toContain('需要本地证据时，先搜索，再按需读取相关完整条目');
+        expect(body.instructions).toContain('实时面试中，检索未命中、超时、不可用或预算耗尽时');
         expect(body).not.toHaveProperty('previous_response_id');
         expect(body.input.some((i: any) => i.role === 'system')).toBe(false);
         if (bodies.length === 1)
@@ -240,12 +244,8 @@ describe('Function Calling（模拟 HTTP/SSE，真实 Provider 协议代码）',
         return terminal('r3', [], 'The answer is 37.');
       }),
     );
-    const result = await provider.streamWithTools(
-      request,
-      (e) => events.push(e),
-      new AbortController().signal,
-      runtime,
-    );
+    const rag = new RagChatService(provider, knowledge, async () => 'function');
+    const result = await rag.stream(request, (e) => events.push(e), new AbortController().signal);
     expect(result.answerText).toBe('The answer is 37.');
     expect(result.usage?.totalTokens).toBe(36);
     expect((await provider.usage()).totalTokens).toBe(36);

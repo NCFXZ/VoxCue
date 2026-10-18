@@ -1,4 +1,5 @@
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -9,7 +10,7 @@ await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/settings-profile-')));
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: ['.'], env });
+const app = await electron.launch({ args: [await offlineElectronEntry()], env });
 try {
   const login = await app.firstWindow();
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();

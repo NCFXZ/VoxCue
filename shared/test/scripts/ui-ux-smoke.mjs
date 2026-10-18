@@ -1,4 +1,5 @@
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,13 +9,13 @@ import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/ui-ux-fixes-')));
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 const checks = [];
 const errors = [];
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -128,7 +129,7 @@ try {
   await page.getByRole('menuitemradio', { name: '浅色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await page.locator('.nav-item.active').count(), 0);
-  await page.getByText('保存在本机', { exact: true }).waitFor();
+  assert.equal(await page.locator('.session-note').count(), 0);
   await message.fill('未发送草稿 A');
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'draft.txt',
@@ -145,7 +146,9 @@ try {
     .click();
   assert.equal(await message.inputValue(), '未发送草稿 A');
   assert.equal(await page.locator('.chat-attachment').count(), 1);
-  checks.push('per-conversation drafts and attachments, new-chat semantics, session notice');
+  checks.push(
+    'per-conversation drafts and attachments, new-chat semantics, removed session notice',
+  );
   if (!(await panel.isVisible())) await info.click();
   await panel.getByLabel('姓名', { exact: true }).fill('合成姓名');
   await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
@@ -182,9 +185,10 @@ try {
   );
   await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
   if (!(await panel.isVisible())) await info.click();
-  const instructions = panel.getByRole('region', { name: '自定义指令', exact: true });
+  const instructions = panel.locator('details[aria-label="自定义指令"]');
+  await instructions.locator(':scope > summary').click();
   await instructions.getByRole('button', { name: '编辑', exact: true }).click();
-  const editor = page.getByRole('region', { name: '编辑自定义指令', exact: true });
+  const editor = page.getByRole('dialog', { name: '编辑自定义指令', exact: true });
   await editor.getByLabel('自定义指令内容', { exact: true }).fill('自然表达，清楚有逻辑');
   await editor.getByRole('button', { name: '保存', exact: true }).click();
   if (!(await panel.isVisible())) await info.click();
@@ -386,21 +390,23 @@ try {
   await page.getByRole('button', { name: '保存', exact: true }).click();
   const base = page.getByRole('dialog', { name: '合成资料', exact: true });
   assert.equal(await base.getByRole('button', { name: '检索方式', exact: true }).count(), 0);
+  const uploadHeight = (await base.locator('.upload-dropzone').boundingBox()).height;
   await base.getByLabel('导入知识库文档', { exact: true }).setInputFiles({
     name: 'notes.md',
     mimeType: 'text/markdown',
     buffer: Buffer.from('Synthetic user interface document.'),
   });
-  await base.locator('.upload-dropzone.is-compact').waitFor();
-  await base
-    .getByText(/原件已保存/)
-    .first()
-    .waitFor();
+  await base.locator('.document-row').filter({ hasText: 'notes.md' }).waitFor();
+  assert.equal(await base.locator('.upload-dropzone.is-compact').count(), 0);
+  assert.ok(
+    Math.abs((await base.locator('.upload-dropzone').boundingBox()).height - uploadHeight) < 0.5,
+  );
+  await base.getByText('将文件拖放到此处', { exact: true }).waitFor();
   await base.getByRole('button', { name: '高级选项', exact: true }).click();
   await base.getByRole('button', { name: '检索方式', exact: true }).waitFor();
   await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
   checks.push(
-    'title-only history search, rename persistence and save failure recovery, no invented language label, compact document import and advanced retrieval options',
+    'title-only history search, rename persistence and save failure recovery, no invented language label, full-size document import and advanced retrieval options',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByRole('button', { name: '开始面试', exact: true }).click();

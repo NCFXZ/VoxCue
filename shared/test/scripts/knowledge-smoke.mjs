@@ -1,6 +1,7 @@
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
-import { closeUiApp } from './install-ui-account.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -10,13 +11,27 @@ await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/knowledge-files-')));
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: ['.'], env });
+const app = await electron.launch({ args: [await offlineElectronEntry()], env });
 try {
+  await installUiAccount(app, { components: true });
+  await app.evaluate(({ app }) => {
+    const require = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const { KnowledgeHost } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
+    );
+    KnowledgeHost.prototype.initialize = async () => {};
+    KnowledgeHost.prototype.listDocuments = async () => [];
+    KnowledgeHost.prototype.indexDocument = async ({ documentId }) => ({ documentId });
+    KnowledgeHost.prototype.invalidateDocument = async () => null;
+    KnowledgeHost.prototype.removeDocument = async () => null;
+  });
   const login = await app.firstWindow();
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
   const [page] = await Promise.all([
     app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
+    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   page.setDefaultTimeout(15000);
   const errors = [];

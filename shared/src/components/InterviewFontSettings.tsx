@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from 'react';
-import { Plus, Minus, Reset } from './icons';
+import { FontIncrease, FontDecrease, Reset } from './icons';
 import { Button } from './ui/button';
 import { MarkdownContent } from './MarkdownContent';
 import {
@@ -40,7 +40,7 @@ export function InterviewFontSettings() {
           disabled={size === interviewFontSize.maximum}
           onClick={() => change(size + 1)}
         >
-          <Plus size={16} />
+          <FontIncrease size={16} />
           字体变大
         </Button>
         <Button
@@ -48,7 +48,7 @@ export function InterviewFontSettings() {
           disabled={size === interviewFontSize.minimum}
           onClick={() => change(size - 1)}
         >
-          <Minus size={16} />
+          <FontDecrease size={16} />
           字体变小
         </Button>
         <Button

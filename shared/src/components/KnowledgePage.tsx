@@ -42,20 +42,17 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
   useEffect(() => index.connect(), []);
   const phase = (id: string) => {
     const status = index.tasks[id];
-    if (status)
-      return (
-        {
-          queued: '排队中',
-          parsing: '解析中',
-          embedding: '准备内容',
-          indexing: '保存处理结果',
-          ready: '可用于回答',
-          failed: '处理失败',
-          cancelled: '已取消',
-        }[status.phase] + (status.total ? ` ${status.completed}/${status.total}` : '')
-      );
+    if (status) {
+      if (status.phase === 'ready') return '索引完成';
+      if (status.phase === 'failed') return '索引失败';
+      if (status.phase === 'cancelled') return '已取消';
+      const percent = status.total
+        ? Math.min(99, Math.max(0, Math.floor((status.completed / status.total) * 100)))
+        : 0;
+      return `索引中 ${percent}%`;
+    }
     const doc = index.state?.documents.find((doc) => doc.documentId === id);
-    return doc ? (doc.available === false ? '旧内容已停用，请重试准备' : '可用于回答') : '尚未准备';
+    return doc ? (doc.available === false ? '索引已停用' : '索引完成') : '尚未索引';
   };
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
@@ -280,7 +277,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             文档列表 <span>{state.documents.length}</span>
           </h3>
           <div
-            className={`upload-dropzone ${state.documents.length ? 'is-compact' : ''} ${dragging ? 'dragging' : ''}`}
+            className={`upload-dropzone ${dragging ? 'dragging' : ''}`}
             onDragOver={(event) => {
               event.preventDefault();
               setDragging(true);
@@ -295,13 +292,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             <span className="knowledge-icon">
               <ArrowUp size={22} />
             </span>
-            <h3>
-              {state.busy
-                ? '正在保存到本地…'
-                : state.documents.length
-                  ? '添加文档或拖放文件'
-                  : '将文件拖放到此处'}
-            </h3>
+            <h3>{state.busy ? '正在保存到本地…' : '将文件拖放到此处'}</h3>
             <p>
               PDF、Word、PowerPoint、Excel、TXT、Markdown
               <br />
@@ -340,13 +331,15 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                   <div className="document-details">
                     <strong>{doc.name}</strong>
                     <p>
-                      {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`} ·
-                      更新时间 {new Date(doc.createdAt).toLocaleString('zh-CN')} · 原件已保存 ·{' '}
+                      {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`}
+                      {' · '}
                       {phase(doc.id)}
-                      {index.tasks[doc.id]?.error && (
-                        <span className="document-error"> · {index.tasks[doc.id].error}</span>
-                      )}
                     </p>
+                    {index.tasks[doc.id]?.error && (
+                      <p role="alert" className="document-error">
+                        {index.tasks[doc.id].error}
+                      </p>
+                    )}
                   </div>
                   <div className="document-actions">
                     {index.requests[doc.id] ? (

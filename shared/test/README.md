@@ -10,9 +10,25 @@
 
 ## 当前入口
 
-`node ../shared/test/scripts/interview-usage-offline.mjs` 从本机平台目录离线检查前两阶段的面试用量逻辑。临时预加载脚本阻断 fetch、HTTP/HTTPS及Socket/TLS实际网络连接，测试注入内存HTTP/SSE、合成转写和向量，并用临时LanceDB。加`--full`运行当前平台全部共用/Mac或Windows单测与Renderer测试，仅允许127.0.0.1合成HTTP连接，外部网络仍在DNS前阻断；每次运行先验证网络拦截器。覆盖连写/重复语气词、无标点口语、识别修订、分段/短停顿、麦克风插话、排队纠正、关闭/暂停/重置、旧/新规则回放、跨话题原文与全部真实发言保留、引用还原、长场边界、缓存隔离/失效/字节预算和并发/失败更新，数值仅到终端。CPU/本地检索计时和载荷字节只能说明相应离线环节，不能当作真实token扣量、模型答案质量、语音识别率或联网首字速度。临时拦截脚本及数据库退出清理，不读取真实账户/资料，不启动GUI或硬件。
+Windows 0.3.1 沿用完整离线单测、typecheck/build/check:architecture/check:workspace、windows-suite 共用功能/--windows 原生矩阵及 --dpi 五档缩放；GUI/原生串行。electron 在每次重载后先检查简历区默认折叠，再展开核对原件保留；conversation-status 容许0.01 CSS像素内的几何取整误差；interview-workflow 使用现行导出的主提示词识别合成面试请求，避免旧字面前缀误分流，保留临时稿/终稿/手动提交和原生交互断言。发行前另运行 installer-branding、installer-engine（0.3.0到当前版）与 portable-native --with-installer，在系统临时目录构建并核对实际安装负载、ASAR、组件下载/取消/释放及原生窗口，不执行生产安装器。components-check 先核对知识库区默认折叠，再展开检查模型未就绪时禁用、下载后的启用及设置入口，保留真实下载/取消/摘要拒绝/重试断言。仅验证通过后保留正式 exe、blockmap、latest.yml，模型与隔离资料退出清理；不记录测试结果。macos/ 只读，不能将 Windows 回归当作 Mac 验收。
 
-`node ../shared/test/scripts/interview-usage-smoke.mjs` 从本机平台目录使用临时合成账户、转写和 Provider 检查桌面IPC链路：连写/重复明确回应跳过自动调用但可手动发送、原静音提交节奏、历史引用还原、实际发言/AI建议身份、口语纠正、长历史跨话题选择及口语指代完整回退。offline-electron-entry在应用导入前阻断Node、Electron net及页面HTTP/WebSocket，使用临时profile，不采样硬件或调用真实模型，不表示真人答案质量、识别率或网络首字延迟验收。精确检索缓存由knowledge-core使用临时真实LanceDB与合成向量检查；结果仅到终端，临时数据退出清理。
+第2/4/5组最新补充由 desktop-ipc、profile-store、profile-proposal 检查资料用途、准备聊天不拼接执行面试自定义指令、外部内容边界及技能来源质量规则。rag 单测检查 Local RAG 搜索失败、完整条目部分失败/移除、原15秒预算、挂起端口超时与迟到结果、超时/取消竞争、身份/配置/参数错误不回退及 Provider 只调用一次；Function Calling 与知识核心保护沿用原入口。profile-ui 使用离线合成端口检查普通准备聊天与面试失败后继续回答、模型/effort保持，回退答案仍进入后续追问上下文；chat-progress 保留实际 Responses/SSE 的提案确认、来源核验和取消保护，并按第7组确认稿检查补充摘要入口。结果仅终端，临时资料退出清理，GUI 串行。
+
+第5组资料/技能提示词由 profile-store、profile-proposal、personal-info 单测及 profile-ui、chat-progress 桌面入口覆盖。技能按需联网、无固定写作字数，按钮继续直接发起任务；新增 plain-text 单测检查 Markdown/网址/引用的纯文字展示。桌面断言覆盖流式、完成、失败、保存及重载后的链接隐藏、显示内容复制、原文/来源元数据保留，以及普通聊天仍展示来源；确认/拒绝、实际搜索/来源匹配、取消/迟到和存储上限保护保持。截图仅内存、工作文件仅系统临时目录，结果不落盘。
+
+第6组弃用风格清理由 profile-store 覆盖：有效/损坏旧键均不再读取、不进入请求，不影响个人资料与知识库选择加载，原键和已确认自定义指令保留。第7组由 profile-ui 检查确认稿的四个真实快捷入口、完整请求、草稿/附件保留、直接发送与等待手动发送/确认的时序；profile-store 检查三种缺失摘要的新完整模板正常发送、附件保留及确认前不落盘，并保留旧提示兼容。renderer/services/preparation 检查“不生成技能”等明确否定不触发研究，独立肯定请求仍生效。第8组 history-title 单测检查新提示词传递、短标题与原输出上限、队列及取消信号/迟到保护；history-branding 使用 offline-electron-entry、合成账户/组件/语音端口及响应，检查结束面试后的标题请求、关闭后完成和失败重试，同时保留记录浏览/导出断言。代码长度上限保持，提示词另要求通常10–20字、最多30字，简单主题可更短；专项只验证协议与合成生命周期，不代表真实标题质量。
+
+本轮共用界面专项 `node ../shared/test/scripts/ui-refinement-smoke.mjs` 使用离线临时宿主，检查登录/主窗口100%缩放、五类资料默认折叠、展开/收起中间动画帧与减少动态效果、弹窗编辑、按钮文字完整、分隔栏拖动/双击复位、完整上传区在导入前后不变、索引百分比/完成状态和思考耗时字号。`typography-smoke.mjs` 与 `ui-alignment-smoke.mjs` 保留全部界面的浅深主题、最小窗口、控件/图标/长标题/溢出检查；个人信息编辑断言改为弹窗与背景操作禁用。profile-ui、components-ui、composer 和 interview-typography 保留资料确认/保存/冲突、下载/删除确认、附件与字号同步保护；它们的宿主同样在应用导入前阻断网络。GUI 串行运行，截图只在内存，全部临时资料退出清理，不用真实账户或硬件。
+
+ui-refinement 还检查五类分区快速切换反转、编辑 Escape/焦点返回/保存失败保留草稿与重试、分隔栏方向键/Home/上下限/取消及失焦/窄窗口、长弹窗内部滚动及圆角轨道内缩。加 `--preview-dialog` 仅向终端输出内存图片，供工具直接显示，不写图片文件。Windows `node test/scripts/windows-suite.mjs --dpi` 包含 ui-refinement，可在其后指定专项名。settings、knowledge、chat-response、delete-controls、ui-ux、updates-sidebar 的桌面宿主同样在应用导入前阻断网络，资料折叠与编辑弹窗断言沿用当前实现。
+
+ui-alignment 的聊天工具栏矩阵覆盖主窗口与个人信息的多组宽度、浅深色、长模型名、最多两行的控件排布，以及模型/思考同组、语音/发送对齐、32px尺寸和菜单操作；网络搜索仅在“＋”菜单勾选，外侧无独立按钮，重新打开菜单保留状态。加 `--preview-composer` 只输出内存图片。Windows 可用 `node test/scripts/windows-suite.mjs --dpi ui-alignment` 串行检查五档缩放，不改系统设置。
+
+`node ../shared/test/scripts/interview-usage-offline.mjs` 从本机平台目录离线检查当前本地撤销后的面试行为；已发布 0.3.0 的优化属于历史状态。临时预加载脚本阻断 fetch、HTTP/HTTPS及Socket/TLS实际网络连接，测试注入内存HTTP/SSE、合成转写和向量，并用临时LanceDB。加`--full`运行当前平台全部共用/平台单测与Renderer测试，仅允许127.0.0.1合成HTTP连接，外部网络仍在DNS前阻断；每次运行先验证网络拦截器。原专项入口保留，覆盖明确回应正常自动提交和手动发送、无标点口语、识别修订、分段/短停顿、麦克风插话、排队纠正、关闭/暂停/重置、优化前/恢复后规则回放、跨话题及连续追问的完整原文时间线（含全部 AI 建议）、不生成 textRef/historySelection、精确120条/64000字节/每条6000字边界和 omittedOlderEntries。检索检查重复查询重新编码并执行数据库检索、知识库/模式/topK隔离、取消、并发/失败更新和模型卸载/关闭保护；revisions/模型缓存保持。CPU/本地检索计时和载荷字节只能说明相应离线环节，不能当作真实token扣量、模型答案质量、语音识别率或联网首字速度。结果仅终端，临时拦截脚本及数据库退出清理，不读取真实账户/资料，不启动GUI或硬件。
+
+`node ../shared/test/scripts/interview-usage-smoke.mjs` 从本机平台目录使用临时合成账户、转写和 Provider 检查桌面IPC链路：明确回应按原静音节奏正常自动提交、关闭自动后手动发送、重复长文本逐条原文、实际发言/AI建议身份、口语纠正，以及长历史跨话题返回和连续追问始终完整发送保留窗口。每次请求与主进程保留窗口逐条比较，不生成 textRef/historySelection，模型/effort/默认篇幅保持。offline-electron-entry在应用导入前阻断Node、Electron net及页面HTTP/WebSocket，使用临时profile，不采样硬件或调用真实模型，不表示真人答案质量、识别率或网络首字延迟验收。重复检索由knowledge-core使用临时真实LanceDB与合成向量检查；结果仅到终端，临时数据退出清理。
+
+Windows 上下文桌面入口 `pnpm test:interview:context` 与生命周期入口 `node ../shared/test/scripts/interview-stability-smoke.mjs` 同样在应用导入前阻断网络，和用量专项串行运行。前者检查角色、追问、间断、重载保留和新场隔离，后者检查20次面试启闭、重载、保存、窗口/置顶恢复和内存边界，组件就绪状态显式使用合成夹具，不下载模型。它们不代替真实账户、物理音频、原生鼠标专项或 Mac 本机验证。
 
 IPC/IndexedDB 的异步条件使用 wait-for-async.mjs：在测试宿主中逐次 await page.evaluate 的结果再轮询，避免当前 Playwright 将 async 谓词的 Promise 当作真值而提前结束 waitForFunction。同步 DOM/动画谓词继续使用 waitForFunction。Windows 安装态取消/摘要失败检查同时等待实际下载任务结束，再断言暂存为空和摘要拒绝；不降低断言或保存诊断结果。
 
@@ -20,7 +36,7 @@ IPC/IndexedDB 的异步条件使用 wait-for-async.mjs：在测试宿主中逐�
 
 Windows 从 windows/ 运行下列已改造入口（先准备本机构建）：
 
-0.3.0 Windows 生成配置通过根 sync:workspace 同步，依赖在 windows/ 使用冻结锁。DPI 矩阵包含 interview-typography，在 100/125/150/175/200% 下检查面试字号；功能驱动实时转发终端进度。composer 补查异步读取时切换对话与拖入提示清理，presentation-native 使用原生鼠标核对登录背景拖动及按钮禁止拖动。
+当前 Windows 生成配置通过根 sync:workspace 同步，依赖在 windows/ 使用冻结锁。DPI 矩阵包含 interview-typography，在 100/125/150/175/200% 下检查面试字号；功能驱动实时转发终端进度。composer 补查异步读取时切换对话与拖入提示清理，presentation-native 使用原生鼠标核对登录背景拖动及按钮禁止拖动。
 
 隔离安装态 packaged-smoke 追加 component-removal-check：真实 Worker/utilityProcess/ONNX 模型配合合成采集端口，检查使用中拒绝、删除期间阻止新任务/下载、进程退出、RAG 卸载后的模型删除、未知顶层原件/目录保护、重新下载和知识库/索引保留。它不读取真实应用缓存，不以等待固定时长替代退出/卸载与实际文件删除断言。
 

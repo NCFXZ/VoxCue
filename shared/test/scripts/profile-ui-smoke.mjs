@@ -1,4 +1,5 @@
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -7,13 +8,13 @@ import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/personal-info-')));
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
 });
 const checks = [],
   errors = [];
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -27,8 +28,14 @@ try {
     globalThis.profileRequests = [];
     globalThis.profileSearches = [];
     globalThis.failSkills = true;
+    globalThis.holdSkills = true;
+    globalThis.profileJdRevision = 0;
     KnowledgeHost.prototype.search = async function (query, topK, mode, signal, baseId) {
       globalThis.profileSearches.push({ baseId, query });
+      if (globalThis.failProfileSearch) {
+        globalThis.failProfileSearch = false;
+        throw Error('Synthetic local retrieval unavailable');
+      }
       return [
         {
           itemId: 'chosen-item',
@@ -70,8 +77,9 @@ try {
         return { answerText: '合成面试记录', usage: null, sources: [] };
       globalThis.profileRequests.push(request);
       if (!request.profile) {
-        emit({ id: request.id, type: 'delta', text: '直接口语测试答案' });
-        return { answerText: '直接口语测试答案', usage: null, sources: [] };
+        const answerText = globalThis.profileInterviewAnswer || '直接口语测试答案';
+        emit({ id: request.id, type: 'delta', text: answerText });
+        return { answerText, usage: null, sources: [] };
       }
       const prompt = request.turns.at(-1).content;
       let changes = {};
@@ -87,7 +95,7 @@ try {
               id: 'ts-skill',
               title: 'TypeScript 运行时边界',
               content:
-                '类型检查发生在编译阶段。面试中应区分静态类型与真实输入校验，不声称有未证实经历。',
+                '**类型检查发生在编译阶段。** 面试中应区分静态类型与真实输入校验，不声称有未证实经历。\n\n[文档说明](https://www.typescriptlang.org/docs/)\nhttps://www.typescriptlang.org/docs/\n数组[1]和37毫秒保留。',
               sources: [source],
             },
           ],
@@ -98,24 +106,48 @@ try {
         changes = {
           customInstructions: '第一人称口语回答：先给结论，再用自然口语解释理由，只回答当前问题。',
         };
-      else if (prompt.includes('根据以下内容生成或更新简历摘要'))
+      else if (prompt.includes('请根据本次上传的简历整理摘要'))
         changes = {
           background: '更新简历摘要：负责 TypeScript 桌面项目，使用 React，负责接口校验。',
         };
       else if (prompt.includes('更新 JD'))
-        changes = { jobDescription: '新 JD 摘要：TypeScript、接口边界与数据校验。' };
+        changes = {
+          jobDescription:
+            '新 JD 摘要：TypeScript、接口边界与数据校验。修订' + ++globalThis.profileJdRevision,
+        };
+      else if (prompt.includes('普通联网问题')) changes = {};
       else
         changes = {
           name: '合成候选人',
           background: '简历摘要：负责本地桌面项目、使用 TypeScript 与 React；未提供具体业务指标。',
           jobDescription: 'JD 摘要：TypeScript、React、数据库与接口设计。',
         };
-      const answerText = '已整理待确认内容，请检查待保存内容。';
+      const answerText =
+        request.profileTask === 'skills'
+          ? '已整理面试资料。 [资料](https://www.typescriptlang.org/docs/)\nhttps://www.typescriptlang.org/docs/'
+          : prompt.includes('普通联网问题')
+            ? '普通回答保留[官方文档](https://www.typescriptlang.org/docs/)。'
+            : '已整理待确认内容，请检查待保存内容。';
+      if (request.profileTask === 'skills') {
+        emit({ id: request.id, type: 'sources', sources: [source] });
+        emit({
+          id: request.id,
+          type: 'profile-preview',
+          preview: { skills: changes.skills.map(({ title, content }) => ({ title, content })) },
+        });
+      }
       emit({ id: request.id, type: 'delta', text: answerText });
+      if (request.profileTask === 'skills' && globalThis.holdSkills) {
+        globalThis.holdSkills = false;
+        await new Promise((resolve) => {
+          globalThis.finishSkill = resolve;
+        });
+      }
       return {
         answerText,
         profileChanges: changes,
-        sources: request.profileTask === 'skills' ? [source] : [],
+        sources:
+          request.profileTask === 'skills' || prompt.includes('普通联网问题') ? [source] : [],
         usage: null,
       };
     };
@@ -130,6 +162,21 @@ try {
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
   const info = page.getByRole('button', { name: '个人信息', exact: true });
   const panel = page.getByRole('complementary', { name: '个人信息', exact: true });
+  const section = (label) => panel.locator('details[aria-label="' + label + '"]');
+  const settleDisclosure = (locator) =>
+    locator.evaluate(async (element) => {
+      element.getBoundingClientRect();
+      await Promise.all(
+        element
+          .getAnimations({ subtree: true })
+          .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
+  const expand = async (label) => {
+    const row = section(label);
+    if (!(await row.evaluate((e) => e.open))) await row.locator(':scope > summary').click();
+  };
   const message = page.getByRole('textbox', { name: '聊天消息', exact: true });
   const saved = () =>
     page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1') || 'null'));
@@ -142,6 +189,62 @@ try {
     await proposal().getByRole('button', { name: '确认更新', exact: true }).click();
     await proposal().getByText('个人信息已更新', { exact: true }).waitFor();
   };
+  for (const [label, prompt] of [
+    [
+      '帮我准备自我介绍',
+      '请根据已确认的简历，结合已有职位描述，写一份可直接口述的面试自我介绍。简要交代背景，重点突出与岗位相关的经历、个人贡献和能力，前后衔接自然，避免逐项复述简历。缺少职位描述时按现有简历完成；缺少的个人事实使用明确占位，不编造。',
+    ],
+    [
+      '帮我梳理项目经历',
+      '请根据已确认的简历，结合已有职位描述，梳理与岗位最相关的项目经历。按背景与目标、我的职责、关键方案及选择理由、难点处理、结果的顺序，整理成面试时便于讲述的内容。突出个人贡献，区分个人职责与团队成果；未提供的事实标注待补充，不虚构决策过程或量化数据。',
+    ],
+  ]) {
+    const count = await app.evaluate(() => globalThis.profileRequests.length);
+    await page.getByRole('button', { name: label, exact: true }).click();
+    await proposal().waitFor();
+    const requests = await app.evaluate(() => globalThis.profileRequests);
+    assert.equal(requests.length, count + 1);
+    assert.equal(requests.at(-1).turns.at(-1).content, prompt);
+    assert.equal(requests.at(-1).profileTask, undefined);
+    assert(!requests.at(-1).instructions.includes('回答风格：'));
+    assert.equal(await saved(), null);
+    await page.getByRole('button', { name: '新对话', exact: true }).click();
+    await page.locator('.welcome').waitFor();
+  }
+  await message.fill('已有的简历整理要求');
+  await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
+    name: 'pending.md',
+    mimeType: 'text/markdown',
+    buffer: Buffer.from('Existing synthetic attachment.'),
+  });
+  const beforeUpload = await app.evaluate(() => globalThis.profileRequests.length);
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser'),
+    page.getByRole('button', { name: '上传我的简历', exact: true }).click(),
+  ]);
+  await chooser.setFiles({
+    name: 'resume.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Synthetic resume for the upload shortcut.'),
+  });
+  const uploadDraft =
+    '已有的简历整理要求\n\n请根据本次上传的简历整理摘要，保留教育与工作背景、职责、项目、关键技术和已有成果，准确区分个人贡献、团队成果及进行中事项。合并重复表述，不补造事实。仅提出简历摘要的待确认更新，不修改其他资料。';
+  assert.equal(await message.inputValue(), uploadDraft);
+  assert.equal(await page.locator('.chat-attachment').count(), 2);
+  assert.equal(await app.evaluate(() => globalThis.profileRequests.length), beforeUpload);
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await proposal().waitFor();
+  const uploadRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert.equal(uploadRequest.turns.at(-1).content, uploadDraft);
+  assert.deepEqual(
+    uploadRequest.turns.at(-1).files.map((file) => file.name),
+    ['pending.md', 'resume.txt'],
+  );
+  assert.equal(await saved(), null);
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  checks.push(
+    'welcome shortcuts send full requests; resume upload preserves draft/attachments and waits for send and consent',
+  );
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   for (const name of ['选定资料', '其他资料']) {
     await page
@@ -157,6 +260,8 @@ try {
   }
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   if (!(await panel.isVisible())) await info.click();
+  assert.equal(await panel.locator('.profile-disclosure[open]').count(), 0);
+  await expand('面试知识库');
   await panel.getByRole('button', { name: '面试知识库', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '选定资料', exact: true }).click();
   await page.waitForFunction(
@@ -176,9 +281,10 @@ try {
   await send('请根据附件和以下职位描述生成简历与 JD 摘要：TypeScript 工程师');
   await proposal().waitFor();
   assert.equal(await saved(), null);
-  assert(
-    (await app.evaluate(() => globalThis.profileRequests.at(-1))).turns.at(-1).files.length === 1,
-  );
+  const summaryRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert.equal(summaryRequest.turns.at(-1).files.length, 1);
+  assert.ok(summaryRequest.instructions.includes('直接处理当前问题'));
+  assert.ok(summaryRequest.instructions.includes('待确认提案不阻塞普通聊天'));
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
     globalThis.restoreProfileStorage = () => (Storage.prototype.setItem = original);
@@ -202,9 +308,10 @@ try {
   );
   await message.fill('尚未发送的草稿');
   if (!(await panel.isVisible())) await info.click();
-  const resumeSection = panel.getByRole('region', { name: '简历摘要', exact: true });
+  await expand('简历摘要');
+  const resumeSection = section('简历摘要');
   await resumeSection.getByRole('button', { name: '编辑', exact: true }).click();
-  const resumeEditor = page.getByRole('region', { name: '编辑简历摘要', exact: true });
+  const resumeEditor = page.getByRole('dialog', { name: '编辑简历摘要', exact: true });
   await resumeEditor
     .getByLabel('内容', { exact: true })
     .fill('负责 TypeScript 桌面项目，React 与接口校验。');
@@ -232,23 +339,70 @@ try {
   assert.equal(await panel.getByText('0/10', { exact: true }).count(), 1); // Skills only.
   assert.equal(
     await panel
-      .getByRole('region', { name: '自定义指令' })
+      .locator('details[aria-label="自定义指令"]')
       .getByText(/\d+\/10/)
       .count(),
     0,
   );
-  await send('请联网生成面试技能');
+  await send('请更新 JD 摘要');
+  await confirm();
+  const preparationRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert(!preparationRequest.instructions.includes('第一人称口语回答'));
+  assert(!preparationRequest.instructions.includes('遵循用户已经确认的自定义指令'));
+  assert(preparationRequest.profile.customInstructions.includes('第一人称口语回答'));
+  await proposal().getByRole('button', { name: '联网更新技能', exact: true }).click();
   await page.getByRole('button', { name: '重试回答', exact: true }).last().waitFor();
   assert.equal((await saved()).skills, undefined);
   await page.getByRole('button', { name: '重试回答', exact: true }).last().click();
+  const preview = page.getByRole('region', { name: '正在生成的资料提案', exact: true });
+  await preview.waitFor();
+  assert.equal(await preview.getByRole('button', { name: '确认更新' }).isDisabled(), true);
+  const skillMessage = page.locator('.chat-message.assistant').last();
+  assert.equal(await skillMessage.locator('a, .chat-source-group').count(), 0);
+  assert(!/https?:|\*\*/.test(await skillMessage.innerText()));
+  assert((await preview.innerText()).includes('数组[1]和37毫秒保留'));
+  await page.evaluate(() => {
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          globalThis.skillCopied = text;
+        },
+      },
+    });
+  });
+  await skillMessage.getByRole('button', { name: '复制', exact: true }).click();
+  const copiedSkill = await page.evaluate(() => globalThis.skillCopied);
+  assert(copiedSkill.includes('已整理面试资料'));
+  assert(!/https?:/.test(copiedSkill));
+  await app.evaluate(() => globalThis.finishSkill());
+  await preview.waitFor({ state: 'hidden' });
   await proposal().waitFor();
   const research = await app.evaluate(() => globalThis.profileRequests.at(-1));
   assert.equal(research.webSearch, true);
   assert.equal(research.profileTask, 'skills');
   assert.equal(research.knowledgeBaseId, null);
+  assert(research.turns.at(-1).content.includes('不设固定写作字数'));
+  assert(research.turns.at(-1).content.includes('标题和正文使用纯文字'));
+  assert(!/120|220|3–5|附1–2/.test(research.turns.at(-1).content));
+  assert.equal(await skillMessage.locator('a, .chat-source-group').count(), 0);
   assert.equal((await saved()).skills, undefined);
   await confirm();
   assert.equal((await saved()).skills.length, 1);
+  assert.equal((await saved()).skills[0].sources[0].url, 'https://www.typescriptlang.org/docs/');
+  assert((await saved()).skills[0].content.includes('https://'));
+  await app.evaluate(() => {
+    globalThis.failProfileSearch = true;
+  });
+  const beforeOrdinaryFallback = await app.evaluate(() => globalThis.profileRequests.length);
+  await send('普通联网问题：解释类型与运行时校验');
+  const ordinaryMessage = page.locator('.chat-message.assistant').last();
+  await ordinaryMessage.locator('.chat-source-group').waitFor();
+  await ordinaryMessage.getByRole('link', { name: '官方文档', exact: true }).waitFor();
+  const ordinaryFallback = await app.evaluate(() => globalThis.profileRequests);
+  assert.equal(ordinaryFallback.length, beforeOrdinaryFallback + 1);
+  assert(ordinaryFallback.at(-1).turns.at(-1).content.includes('"retrievalStatus":"unavailable"'));
+  assert(!ordinaryFallback.at(-1).instructions.includes('第一人称口语回答'));
   await send('请更新 JD 摘要');
   await confirm();
   await proposal().getByRole('button', { name: '联网更新技能', exact: true }).waitFor();
@@ -269,12 +423,18 @@ try {
   assert.notEqual((await saved()).name, '手动预览姓名');
   await panel.getByRole('button', { name: '保存', exact: true }).click();
   assert.equal((await saved()).name, '手动预览姓名');
+  await expand('面试技能');
   await panel
     .locator('.profile-entry')
     .filter({ hasText: 'TypeScript 运行时边界' })
     .locator('summary')
     .click();
-  await panel.getByRole('link', { name: 'TypeScript 官方文档', exact: true }).waitFor();
+  const savedSkill = panel.locator('.profile-entry').filter({ hasText: 'TypeScript 运行时边界' });
+  await settleDisclosure(savedSkill);
+  assert.equal(await savedSkill.getByRole('link').count(), 0);
+  assert(!/https?:|\*\*/.test(await savedSkill.innerText()));
+  assert((await savedSkill.innerText()).includes('数组[1]和37毫秒保留'));
+  for (const label of ['简历摘要', '职位描述摘要', '自定义指令']) await expand(label);
   const alignment = await panel.locator('.profile-section').evaluateAll((sections) =>
     sections
       .filter((e) =>
@@ -304,7 +464,7 @@ try {
   await console.log(JSON.stringify(alignment, null, 2));
   await panel.locator('.personal-panel-scroll').evaluate((e) => (e.scrollTop = 0));
   await page.screenshot({ animations: 'disabled' });
-  await panel.getByRole('region', { name: '自定义指令', exact: true }).scrollIntoViewIfNeeded();
+  await section('自定义指令').scrollIntoViewIfNeeded();
   await page.screenshot({ animations: 'disabled' });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(960, 680));
   await page.waitForFunction(() => innerWidth <= 970);
@@ -338,6 +498,44 @@ try {
   assert(!interview.request.turns.at(-1).content.includes('private-other-base'));
   assert(interview.request.instructions.includes('第一人称口语回答'));
   assert(interview.request.instructions.includes('手动预览姓名'));
+  assert(
+    interview.request.instructions.includes('职位描述表示岗位要求；skills 是面试准备参考资料'),
+  );
+  const beforeFallback = await app.evaluate(() => globalThis.profileRequests.length);
+  await app.evaluate(() => {
+    globalThis.failProfileSearch = true;
+    globalThis.profileInterviewAnswer = '检索失败后的合成回答：采用输出限幅与状态监测。';
+  });
+  await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('怎样处理控制异常？');
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
+  await floating
+    .getByText('检索失败后的合成回答：采用输出限幅与状态监测。', { exact: true })
+    .waitFor();
+  const fallbackRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert(fallbackRequest.turns.at(-1).content.includes('"retrievalStatus":"unavailable"'));
+  assert(!fallbackRequest.turns.at(-1).content.includes('chosen-evidence'));
+  assert(!fallbackRequest.turns.at(-1).content.includes('private-other-base'));
+  assert.equal(fallbackRequest.modelId, interview.request.modelId);
+  assert.equal(fallbackRequest.effort, interview.request.effort);
+  await app.evaluate(() => {
+    globalThis.profileInterviewAnswer = '合成追问回答完成。';
+  });
+  await floating
+    .getByRole('textbox', { name: '面试提问', exact: true })
+    .fill('为什么采用这种处理？');
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
+  await floating.getByText('合成追问回答完成。', { exact: true }).waitFor();
+  const afterFallback = await app.evaluate(() => globalThis.profileRequests);
+  assert.equal(afterFallback.length, beforeFallback + 2);
+  assert(
+    afterFallback
+      .at(-1)
+      .turns[0].content.includes('检索失败后的合成回答：采用输出限幅与状态监测。'),
+  );
+  assert(afterFallback.at(-1).turns[0].content.includes('"kind":"ai_suggestion"'));
+  checks.push(
+    'preparation does not execute saved interview instructions; local retrieval failure answers once and remains available to follow-up context',
+  );
   await assert.rejects(
     () =>
       floating.evaluate(() =>
@@ -360,12 +558,53 @@ try {
   await info.waitFor();
   if (!(await panel.isVisible())) await info.click();
   assert.equal(await panel.getByLabel('姓名', { exact: true }).inputValue(), '手动预览姓名');
+  await expand('面试知识库');
   await panel
     .getByRole('button', { name: '面试知识库', exact: true })
     .getByText('选定资料', { exact: true })
     .waitFor();
+  await expand('面试技能');
+  const restoredSkill = panel
+    .locator('.profile-entry')
+    .filter({ hasText: 'TypeScript 运行时边界' });
+  if (!(await restoredSkill.evaluate((element) => element.open)))
+    await restoredSkill.locator('summary').click();
+  await settleDisclosure(restoredSkill);
+  assert.equal(await restoredSkill.getByRole('link').count(), 0);
+  assert(!/https?:|\*\*/.test(await restoredSkill.innerText()));
+  assert.equal((await saved()).skills[0].sources.length, 1);
   checks.push(
-    'direct inline save, source links, responsive themes, locked profile and one-base interview retrieval, reload persistence',
+    'skill button request, streaming/completed/saved plain text and copy, hidden links with original sources preserved, ordinary citations unchanged, modal edit/save, responsive themes, locked profile and one-base interview retrieval, reload persistence',
+  );
+  await expand('职位描述摘要');
+  await section('职位描述摘要').getByRole('button', { name: '编辑', exact: true }).click();
+  const jdEditor = page.getByRole('dialog', { name: '编辑职位描述摘要', exact: true });
+  await jdEditor.getByLabel('内容', { exact: true }).fill('');
+  await jdEditor.getByRole('button', { name: '保存', exact: true }).click();
+  await message.fill('补充资料前的草稿');
+  await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
+    name: 'missing-jd.txt',
+    mimeType: 'text/plain',
+    buffer: Buffer.from('Synthetic job requirements.'),
+  });
+  const beforeMissing = await app.evaluate(() => globalThis.profileRequests.length);
+  await page.getByRole('button', { name: '补充职位描述', exact: true }).click();
+  const missingDraft = await message.inputValue();
+  assert.equal(
+    missingDraft,
+    '补充资料前的草稿\n\n请根据以下内容整理职位描述摘要。简历保留个人经历、职责、项目、技术和成果；职位描述保留岗位定位、职责、任职要求及明确的优先条件。合并重复表述，保留事实和条件边界，不把岗位要求写成个人经历。仅补充缺少的摘要并展示待确认提案，不修改其他资料，也不生成技能。\n\n以下是职位描述内容：\n',
+  );
+  assert.equal(await page.locator('.chat-attachment').count(), 1);
+  assert.equal(await app.evaluate(() => globalThis.profileRequests.length), beforeMissing);
+  assert.equal((await saved()).jobDescription, '');
+  await send(missingDraft + '合成 JD：应用开发与接口集成。');
+  await proposal().waitFor();
+  const missingRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert.equal(missingRequest.profileTask, undefined);
+  assert.equal(missingRequest.turns.at(-1).files[0].name, 'missing-jd.txt');
+  assert.equal((await saved()).jobDescription, '');
+  checks.push(
+    'missing-summary shortcut preserves draft/attachments, waits for send/consent and does not trigger skill research',
   );
   assert.deepEqual(errors, []);
   await console.log(

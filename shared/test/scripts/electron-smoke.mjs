@@ -1,6 +1,7 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -15,7 +16,7 @@ const server = dev
   : undefined;
 await server?.listen();
 const app = await electron.launch({
-  args: ['.'],
+  args: [dev ? '.' : await offlineElectronEntry()],
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: profile,
@@ -90,6 +91,9 @@ try {
   });
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  const resumeSection = page.locator('details[aria-label="简历摘要"]');
+  assert.equal(await resumeSection.getAttribute('open'), null);
+  await resumeSection.locator('summary').click();
   await page.getByText('已保留原件：resume.txt', { exact: true }).waitFor();
   await page.screenshot({});
   await page.getByRole('button', { name: '关闭个人信息' }).click();
@@ -195,6 +199,8 @@ try {
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '测试用户修改');
+  assert.equal(await resumeSection.getAttribute('open'), null);
+  await resumeSection.locator('summary').click();
   await page.getByText('已保留原件：resume.txt', { exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭个人信息' }).click();
   await page.getByRole('button', { name: '知识库', exact: true }).click();

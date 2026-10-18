@@ -40,6 +40,7 @@ describe('桌面平台边界', () => {
   it.each(['login', 'main', 'interview'] as const)('%s 窗口始终使用沙箱和同一 preload', (role) => {
     const options = windowOptions(role, windowsPolicy, paths);
     expect(options.webPreferences).toEqual({
+      zoomFactor: 1,
       preload: paths.preload,
       contextIsolation: true,
       nodeIntegration: false,
@@ -144,13 +145,29 @@ describe('桌面平台边界', () => {
     expect(native.fork).not.toHaveBeenCalled();
   });
   it('每类窗口拒绝新窗口和导航，加载入口及 hash 保持一致', () => {
-    const contents = { setWindowOpenHandler: vi.fn(), on: vi.fn() };
+    const contents = {
+      setWindowOpenHandler: vi.fn(),
+      on: vi.fn(),
+      setZoomFactor: vi.fn(),
+      setVisualZoomLevelLimits: vi.fn(async () => {}),
+    };
     restrictWindowNavigation({ webContents: contents } as any);
     expect(contents.setWindowOpenHandler.mock.calls[0][0]({})).toEqual({ action: 'deny' });
     const event = { preventDefault: vi.fn() };
-    expect(contents.on.mock.calls[0][0]).toBe('will-navigate');
-    contents.on.mock.calls[0][1](event);
+    contents.on.mock.calls.find(([name]) => name === 'will-navigate')![1](event);
     expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(contents.setZoomFactor).toHaveBeenCalledWith(1);
+    expect(contents.setVisualZoomLevelLimits).toHaveBeenCalledWith(1, 1);
+    const input = contents.on.mock.calls.find(([name]) => name === 'before-input-event')![1];
+    for (const key of ['+', '=', '-', '_', '0', 'Add', 'Subtract']) {
+      const blocked = { preventDefault: vi.fn() };
+      input(blocked, { key, control: true });
+      expect(blocked.preventDefault).toHaveBeenCalledOnce();
+    }
+    const allowed = { preventDefault: vi.fn() };
+    input(allowed, { key: '+', control: false });
+    input(allowed, { key: 'c', control: true });
+    expect(allowed.preventDefault).not.toHaveBeenCalled();
     for (const role of ['login', 'main', 'interview'] as const) {
       const window = { loadURL: vi.fn(), loadFile: vi.fn() };
       loadWindowPage(window, role, '/index.html', 'http://127.0.0.1:5173');

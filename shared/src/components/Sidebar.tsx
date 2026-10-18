@@ -100,7 +100,6 @@ export function Sidebar({
       {!collapsed && (
         <div className="sidebar-conversations">
           <p className="section-caption">聊天记录</p>
-          <p className="session-note">保存在本机</p>
           {preparation.conversations
             .slice()
             .reverse()

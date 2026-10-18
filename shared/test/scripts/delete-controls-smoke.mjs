@@ -1,5 +1,6 @@
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/delete-controls-')));
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: directory, VITE_DEV_SERVER_URL: '' },
 });
 const checks = [],
@@ -158,6 +159,9 @@ try {
   const second = (target) => page.getByRole('button', { name: '确认删除：' + target, exact: true });
   await info.click();
   await settle(page);
+  for (const label of ['简历摘要', '职位描述摘要', '自定义指令', '面试技能'])
+    await panel.locator(`details[aria-label="${label}"] > summary`).click();
+  await settle(page);
   const resume = first('简历摘要');
   await resume.scrollIntoViewIfNeeded();
   const before = await resume.boundingBox();
@@ -240,8 +244,8 @@ try {
   await first('自定义指令').click();
   await second('自定义指令').click();
   assert.equal((await saved()).customInstructions, '');
-  const skills = panel.getByRole('region', { name: '面试技能', exact: true });
-  await skills.locator('summary').click();
+  const skills = panel.locator('details[aria-label="面试技能"]');
+  await skills.locator('.profile-entry > summary').click();
   await skills.getByRole('button', { name: '删除技能：合成技能', exact: true }).click();
   await second('技能：合成技能').click();
   assert.deepEqual((await saved()).skills, []);

@@ -35,6 +35,15 @@ export interface PreparationChatService {
     options?: ChatRequestOptions,
   ): Promise<void>;
 }
+export function isSkillReply(message: ChatMessage, previous?: ChatMessage): boolean {
+  return (
+    message.role === 'assistant' &&
+    (!!message.changes?.skills ||
+      !!message.profilePreview?.skills ||
+      !!message.errorCode?.startsWith('skill_') ||
+      (previous?.role === 'user' && previous.options?.profileTask === 'skills'))
+  );
+}
 export function extractProfileChanges(prompt: string): Partial<PersonalInfo> {
   const changes: Partial<PersonalInfo> = {};
   const name = prompt.match(/(?:^|\n)姓名[：:]\s*([^\n]+)/)?.[1]?.trim();
@@ -57,8 +66,13 @@ export function needsSkillResearch(prompt: string) {
     /(?:补充|整理).{0,12}(?:简历|职位描述|JD)/i.test(prompt)
   )
     return false;
+  // Explicit negative commands are not requests to start skill research.
+  const affirmative = prompt.replace(
+    /(?:不要|不需要|无需|禁止|不)(?:再|立即|自动|主动)?(?:联网)?(?:生成|更新|重做|补充|添加|整理|完善|修改|做一套)(?:面试)?(?:技能|面试知识|知识点)/g,
+    '',
+  );
   return /(?:生成|更新|重做|补充|添加|整理|完善|修改|做一套).{0,20}(?:技能|面试知识|知识点)|(?:技能|面试知识|知识点).{0,20}(?:生成|更新|重做|补充|添加|整理|完善|修改)/.test(
-    prompt,
+    affirmative,
   );
 }
 export const mockPreparation: PreparationChatService = {

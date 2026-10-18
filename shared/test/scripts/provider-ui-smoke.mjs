@@ -4,11 +4,12 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/provider-ui-')));
 const app = await electron.launch({
-  args: ['.'],
+  args: [await offlineElectronEntry()],
   env: { ...process.env, COPILOT_TEST_USER_DATA: directory, VITE_DEV_SERVER_URL: '' },
 });
 const checks = [],
@@ -122,10 +123,10 @@ try {
   await page.getByText('合成提供商 可用', { exact: true }).waitFor();
   assert.equal(await page.locator('.simulation-disclaimer').count(), 0);
   await page.getByRole('button', { name: '添加附件', exact: true }).click();
-  await page
-    .locator('.attachment-menu-hint')
-    .filter({ hasText: '发送时上传至 合成服务公司' })
-    .waitFor();
+  assert.equal(await page.locator('.attachment-menu-hint').count(), 0);
+  await page.getByRole('menuitem', { name: '添加文件', exact: true }).waitFor();
+  await page.getByRole('menuitem', { name: '添加文件夹', exact: true }).waitFor();
+  await page.getByRole('menuitemcheckbox', { name: '网络搜索', exact: true }).waitFor();
   await page.keyboard.press('Escape');
   await input.fill('第二条合成提问');
   await send.click();
