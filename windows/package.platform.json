@@ -1,21 +1,22 @@
 {
   "scripts": {
     "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
+    "test:installer:isolated": "node test/scripts/portable-native-smoke.mjs --with-installer",
     "test:windows:functional": "node test/scripts/windows-suite.mjs",
     "test:windows:regression": "node test/scripts/windows-suite.mjs --windows",
     "test:presentation:native": "node test/scripts/presentation-native-smoke.mjs",
     "test:speech:adversarial": "node test/scripts/speech-adversarial-smoke.mjs",
     "test:portable:native": "node test/scripts/portable-native-smoke.mjs",
+    "test:ui:dpi": "node test/scripts/windows-suite.mjs --dpi",
     "build": "node scripts/build-audio.mjs && pnpm build:shared",
     "test:platform:native": "node test/scripts/platform-native-smoke.mjs",
     "test:interview:layout": "node test/scripts/interview-layout-smoke.mjs",
     "test:interview:effort": "node test/scripts/interview-effort-smoke.mjs",
     "test:interview:context": "node test/scripts/interview-context-smoke.mjs",
-    "test:copilot": "node test/scripts/copilot-smoke.mjs",
     "build:audio": "node scripts/build-audio.mjs",
     "test:speech:devices": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-device-check.mjs",
     "test:speech:desktop": "node test/scripts/speech-desktop-smoke.mjs",
-    "test:speech:package": "node test/scripts/speech-desktop-smoke.mjs --packaged",
+    "test:speech:package": "node test/scripts/portable-native-smoke.mjs",
     "test:speech:reliability": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-reliability.mjs",
     "test:speech:restart": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-restart-native.mjs",
     "test:interview:workflow": "node test/scripts/interview-workflow-smoke.mjs",
@@ -32,7 +33,6 @@
     "electron-builder": "26.15.3"
   },
   "optionalDependencies": {
-    "@github/copilot-sdk-win32-x64": "1.0.21",
     "sherpa-onnx-win-x64": "1.13.8"
   }
 }

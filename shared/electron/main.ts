@@ -64,6 +64,7 @@ let knowledgeCoordinator: KnowledgeCoordinator;
 let auth: ChatGPTAuthService;
 let chat: AIChatService;
 let signingIn = false;
+let cancelLoginWait: (() => void) | undefined;
 let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
 let interviewIpc: ReturnType<typeof registerInterviewIpc> | undefined;
 let historyJobs: ReturnType<typeof registerHistoryIpc> | undefined;
@@ -200,6 +201,7 @@ function createLoginWindow() {
     mainWindow?.close();
   });
   win.on('close', () => {
+    cancelLoginWait?.();
     auth.cancel();
   });
   win.on('closed', () => {
@@ -619,6 +621,30 @@ app.whenReady().then(() => {
       demoSession = false;
       const session = await auth.signIn();
       if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
+      // Fast reauthentication can finish while the signed-out main window is
+      // still flushing its chat store. Wait for its normal saved close before
+      // creating the next window; createMainWindow deliberately reuses no window.
+      if (mainWindow) {
+        const outgoing = mainWindow;
+        if (!mainCloseApproved) throw Error('主窗口尚未完成退出，请稍后重试。');
+        await new Promise<void>((resolve, reject) => {
+          const finish = (error?: Error) => {
+            clearTimeout(timer);
+            outgoing.removeListener('closed', closed);
+            cancelLoginWait = undefined;
+            if (error) reject(error);
+            else resolve();
+          };
+          const closed = () => finish();
+          const timer = setTimeout(() => {
+            finish(Error('聊天尚未保存，请完成保存后重试登录。'));
+          }, 15000);
+          cancelLoginWait = () => finish(Error('登录已取消。'));
+          outgoing.once('closed', closed);
+          outgoing.close();
+        });
+        if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
+      }
       createMainWindow();
       return session;
     } finally {
@@ -631,6 +657,7 @@ app.whenReady().then(() => {
   });
   handleDesktop('auth:cancel', (event) => {
     requireLogin(event);
+    cancelLoginWait?.();
     auth.cancel();
   });
   handleDesktop('auth:demo', (event) => {

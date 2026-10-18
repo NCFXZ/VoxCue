@@ -1,3 +1,17 @@
+## 2026-10-18：Windows 0.2.2 本机适配
+
+Windows 安装/卸载界面采用本机 C# 自绘窗口，沿用主程序的浅色表面、字号、分隔线、蓝色圆角与 36px 控件；安装/卸载/完成按钮为右对齐 140×36px，不使用左右分栏向导。NSIS 继续负责安装、卸载及静默更新，前端只接受本次引擎创建的固定事件与进度，关闭/完成后释放自有进程和句柄；引擎失败显示明确状态、恢复关闭操作并保持失败退出码，不启动应用。界面编译入口为 windows/scripts/build-installer-ui.mjs；空负载原生预览/回归入口为 windows/test/scripts/installer-branding-smoke.mjs，包含键盘操作、真实进度、引擎故障注入与界面异常退出清理，必要文件只在系统临时根，图片仅以内存展示。
+
+Windows 从指定 13e7e0c 基线同步 main，移除 Copilot 专属命令、平台字段、SDK/运行时打包项及独占依赖/安装例外；共享废弃平台字段一并移除。使用本平台 pnpm 同步 0.2.2 配置与锁，不改 macos/、不升级依赖、不改变历史存储键或真实缓存。
+
+Windows 打包排除模型与 ONNX Web，显式包含组件解包依赖 adm-zip、Node CPU 推理库及 WASAPI 助手；resources/voxcue-components.json 启用既有组件服务。旧完整包继续沿原路径。快速重新登录等待退出中的主窗口完成原保存关闭流程，再创建新主窗口。
+
+Windows 下载动作使用 Fluent 的独立向下箭头与底部托线，替换文档叠加箭头；共用 Download 接口、按钮尺寸及模型/更新交互保持，Mac 原生图标映射不变。
+
+隔离便携包入口覆盖真实固定模型下载、首秒进度、取消/重试、损坏响应校验、入口限制、应用替换/离线缓存复用及真实 ASR Worker、utilityProcess、E5/LanceDB。test:installer:isolated 在同一系统临时根构建 NSIS，验证清单/blockmap/安装负载摘要，随后运行安装态功能与原生窗口回归；不安装到真实环境。Windows 回归矩阵新增合成数据迁移与语音故障、原生展示入口；test:ui:dpi 使用本应用进程的 100/125/150/175/200% 缩放验证共用界面，不修改系统 DPI。删除控件几何回归等待有限动画结束；IPC/IndexedDB 条件用显式异步轮询，避免 Playwright 将 Promise 当成已满足的条件。
+
+实现与入口见 shared/docs/COMPONENTS.md、shared/test/README.md；结果只输出终端/对话，临时应用、模型、profile、数据库与安装包结束清理。用户后续授权完整回归、修复无阻塞后，将本轮源码提交推送至私有 NCFXZ/VoxCue 的 main；不上传安装包或测试产物，不发布或打标签。保留 Mac 0.2.2 与 Windows 0.2.1 既有发行事实及 Latest。
+
 ## 2026-10-18：Mac 0.2.2 正式发行流程
 
 用户后续明确授权将本次打包脚本、安装包验证入口和发行文档提交推送到私有 NCFXZ/VoxCue 的 main，与已发布的 0.2.2 保持一致；仅此源码同步，发行文件、私钥和测试产物不提交，Windows 专属文件及公开发行保持。

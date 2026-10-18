@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { createHash } from 'node:crypto';
@@ -156,7 +156,17 @@ describe('独立组件下载与版本缓存', () => {
     const original = path.join(f.root, 'protected');
     await writeFile(original, 'original');
     await rm(file);
-    await symlink(original, file);
+    if (process.platform === 'win32') {
+      // Junctions exercise real reparse-point rejection without requiring
+      // SeCreateSymbolicLinkPrivilege or changing the host's Developer Mode.
+      const protectedDirectory = path.join(f.root, 'protected-directory');
+      await mkdir(protectedDirectory);
+      await writeFile(path.join(protectedDirectory, 'model.onnx'), 'original');
+      await rm(path.dirname(file), { recursive: true });
+      await symlink(protectedDirectory, path.dirname(file), 'junction');
+      expect((await f.service().status()).phase).toBe('needed');
+      expect(await readFile(path.join(protectedDirectory, 'model.onnx'), 'utf8')).toBe('original');
+    } else await symlink(original, file);
     expect((await f.service().status()).phase).toBe('needed');
     expect(await readFile(original, 'utf8')).toBe('original');
   });

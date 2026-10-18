@@ -118,6 +118,15 @@ require(${JSON.stringify(entry)});
       workspace.platformRoot,
       '.tools/electron-dev/Electron.app/Contents/MacOS/Electron',
     );
+    const scale = options.env?.VOXCUE_TEST_SCALE_FACTOR;
+    if (scale) {
+      if (process.platform !== 'win32' || !['1', '1.25', '1.5', '1.75', '2'].includes(scale))
+        throw Error('Unsupported isolated Windows DPI factor');
+      options = {
+        ...options,
+        args: [...(options.args ?? []), '--force-device-scale-factor=' + scale],
+      };
+    }
     const app = await workspace.platformRequire('playwright')._electron.launch({
       ...(process.platform === 'darwin' && fs.existsSync(executable)
         ? { executablePath: executable }

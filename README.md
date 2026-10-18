@@ -1,12 +1,12 @@
 # VoxCue
 
-当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。Mac 0.2.2 安装包已排除模型和 ONNX Web，Windows 专属依赖清理与瘦身打包待其本机完成；旧发行保持。
+当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。Windows/macOS 当前打包均排除模型与 ONNX Web，保留 Node CPU 推理依赖；既有发行保持。
 
-> 测试结果零保留（2026-10-17）：完整测试已获授权，结果仅在终端/内存显示。已改造入口的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；跨平台目录原则上只读，本轮仅允许同步远端已有 Windows 文件。入口与边界见[测试说明](shared/test/README.md)。
+> 测试结果零保留（2026-10-17）：完整测试已获授权，结果仅在终端/内存显示。已改造入口的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；本轮在 Windows 本机工作，macos/ 经 Git 同步后严格只读。入口与边界见[测试说明](shared/test/README.md)。
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前源码版本为 **0.2.2**，已整合远端 Windows 0.2.1 修复，Mac 打包使用新的浅色 DMG 安装布局。Windows 专属文件沿用远端原样，最新版本配置及 Copilot 清理仍需在 Windows 本机完成，运行 `corepack pnpm sync:workspace` 后重新构建。Mac Apple Silicon 已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，包含美化 DMG 与签名自动更新文件；Windows x64 保持 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 和 Latest，两个平台使用独立更新清单。每次后续源码上传或发行仍需当次授权。
+当前源码版本为 **0.2.2**，Windows 本机已同步版本配置、Copilot 移除与首次下载打包方案，沿用共用界面和原生 Windows 适配。Mac Apple Silicon 已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，包含美化 DMG 与签名自动更新文件；Windows x64 保持 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 和 Latest，两个平台使用独立更新清单。本轮获授权在完整回归、修复无阻塞后同步私有源码；公开发行仍需另行授权。
 
 ## 开发与启动
 
@@ -119,10 +119,16 @@ pnpm test:floating
 pnpm test:composer
 pnpm test:login
 pnpm test:package
+pnpm test:windows:functional
+pnpm test:windows:regression
+pnpm test:installer:isolated
+pnpm test:ui:dpi
 ```
 
 后续获准的桌面测试使用操作系统临时目录和合成账户/设备端口，运行结束、失败或取消均清理，不保存结果；现有持久化脚本须先改造再运行。pnpm package:portable 输出本机便携程序至 windows/release-smoke；pnpm package:installer 输出 NSIS、blockmap 和 latest.yml 至 windows/release/installer，固定 GitHub Releases 发布源但不自动发布。当前没有签名证书；真实账户摘要/标题质量、真人长句/技术词准确率、物理热插拔、新电脑与全部 DPI 仍未完整验收。
 
+Windows 安装/卸载窗沿用主程序的浅色、蓝色圆角按钮和字号，主操作为右对齐 140×36px；自绘界面由现有 Windows .NET Framework 工具编译，安装/卸载与静默更新仍使用 NSIS。可在 windows/ 执行 `node test/scripts/installer-branding-smoke.mjs --preview` 查看空负载原生样例，图片只在内存，临时文件结束清理。
+
 职责和公开边界见 [架构](shared/docs/ARCHITECTURE.md)，RAG 细节见 [架构](shared/docs/RAG_ARCHITECTURE.md) 和 [验证报告](windows/docs/RAG_TEST_REPORT.md)，当前结果见 [进度](PROGRESS.md)，恢复入口见 [交接](shared/docs/HANDOFF.md)，清理范围见 [清理报告](shared/docs/WORKSPACE_CLEANUP.md)。
 
-语音固定使用 Paraformer 中英 INT8 + Silero，本机 CPU 实时转写；Qwen 试用与专用 CUDA 后端已按用户要求撤除，不再提供语音模型或 GPU 选择。已保存的旧选择字段读取时忽略，音频设备、回答模型与思考强度保持。当前原生采集仍依赖 Windows WASAPI；macOS/Apple Silicon 为后续移植目标。
+语音固定使用 Paraformer 中英 INT8 + Silero，本机 CPU 实时转写；Qwen 试用与专用 CUDA 后端已按用户要求撤除，不再提供语音模型或 GPU 选择。已保存的旧选择字段读取时忽略，音频设备、回答模型与思考强度保持。原生采集分别使用 Windows WASAPI 与 macOS 14.2+ Core Audio，平台真机验证边界见各自文档。

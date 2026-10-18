@@ -1,6 +1,6 @@
 # 本地组件下载与缓存
 
-当前只保留 ChatGPT 登录；GitHub Copilot 登录、IPC、后台服务、运行时清单和 SDK 依赖已从 shared/macOS 移除，不再读取旧服务选择。旧凭据、历史及存储键内容保留；仅应用数据根目录按用户授权统一迁为 VoxCue。公开 copilot-runtime-v1.0.21 发行、六个附件和对应标签已按用户授权删除；模型和其他应用发行保留。
+当前只保留 ChatGPT 登录；GitHub Copilot 登录、IPC、后台服务、运行时清单和 SDK 依赖已从 shared/macOS/Windows 移除，不再读取旧服务选择。旧凭据、历史及存储键内容保留；仅应用数据根目录按用户授权统一迁为 VoxCue。公开 copilot-runtime-v1.0.21 发行、六个附件和对应标签已按用户授权删除；模型和其他应用发行保留。
 
 语音和 RAG 模型独立于应用版本维护。shared/electron/backend/components 使用源码固定的资源目录、ZIP 大小、SHA-256 和逐文件清单，下载源为公开 NCFXZ/VoxCue-releases 的 models-v1.0.0。Renderer 只请求状态、下载固定模型或取消，不提供 URL、路径、摘要、权限或命令。
 
@@ -25,16 +25,16 @@ package-app.mjs 仅复制实际运行依赖，不再包含 GitHub SDK。模型�
 
 macos/test/scripts/components-smoke.mjs 在系统临时目录构建独立应用，使用合成账户验证模型未下载时登录、设置快捷入口、真实下载、入口限制和断网重启。临时应用、数据库、profile、资源副本及截图结束清理，结果只显示终端。
 
+该 Mac 专属脚本的 IPC 异步等待仍需在 Mac 本机改用 shared/test/scripts/wait-for-async.mjs；本轮 Windows 只读诊断，不改写或运行 macos/。共用脚本和 Windows 安装态回归已改用显式异步轮询，避免 Promise 真值让断言过早执行。
+
 shared/test/scripts/components-ui-smoke.mjs 使用合成组件状态和独立临时账户检查单个模型状态、按钮宽度过渡、延迟悬停红色取消、宽/窄窗口个人信息动画、居中与焦点恢复，不下载模型或调用真实账户。
 
-## Windows 本机待办
+## Windows 打包与隔离验证
 
-直接复用 shared 界面、状态、模型限制和缓存，不复制页面。Mac 对 windows/ 只读，以下专属删除和构建必须在 Windows 本机完成：
+Windows 本机移除 Copilot 命令/可选依赖、平台运行时字段、专属回归及矩阵引用、打包复制项。共享废弃字段随最后一个消费者移除；sync:workspace 生成 0.2.2 配置，pnpm 更新本平台锁和安装结果、移除独占依赖及安装例外，不升级其他依赖。旧目录 ai-interview-copilot、历史存储键和 COPILOT_TEST_USER_DATA 隔离变量保留。
 
-- package.platform.json 的 @github/copilot-sdk-win32-x64 可选依赖。
-- electron/platform.ts 的 packagedCopilotRuntime 字段；共享类型暂留无消费者的兼容字段以保持现有 Windows 配置可编译，Windows 专属字段删除后可一并移除该兼容声明。
-- scripts/package-portable.mjs 的 SDK/平台运行时复制项。
-- test/scripts/copilot-smoke.mjs 专属回归及仅用于该回归的命令/引用。
-- 执行 sync:workspace，再用包管理器更新本平台锁与安装结果，移除 SDK、运行时及独占依赖，保留共同依赖安全策略。
+package-portable.mjs 不复制模型和已移除运行时，在 resources 写入 voxcue-components.json。显式包含组件解包所需 adm-zip；E5 使用 transformers 的 Node CPU 后端，发行副本排除 onnxruntime-web，保留 onnxruntime-node、onnxruntime-common、LanceDB/Arrow 和 Windows 原生库。只处理打包副本，不手工拆删 node_modules。WASAPI/VoxCue.Audio.exe、Worker/utilityProcess 的 ASAR 解包路径、Fluent 和 electron-updater 保持。编译/发行只包含 shared/windows，不混入 Mac 模块、SF Symbols 或 Sparkle。
 
-Windows 打包入口另需排除模型、写入同格式 voxcue-components.json；排除 ONNX Web 前在本机验证 CPU 推理和知识库流程。原生音频、凭据、窗口及 electron-updater 保持原实现，另行验证首次下载、取消/重试、修复、升级复用、离线重启、ChatGPT 登录和入口限制。Mac 不代替 Windows 验收。
+pnpm test:portable:native 在系统临时根生成便携包，验证无模型时的 ChatGPT 登录/入口限制、真实首次下载、首秒进度、取消清理、损坏响应摘要拒绝及重试；替换应用位置后阻断模型请求，复用缓存运行真实 Paraformer Worker、Windows utilityProcess、E5/LanceDB 三模式检索和 PDF/DOCX。原生展示单项使用合成模型状态，不替代前述推理。
+
+pnpm test:installer:isolated 在同一自有临时根追加 NSIS 构建，核对 latest.yml 的 SHA512、blockmap、NSIS 压缩数据及应用/组件标记/原生助手负载摘要，再执行安装态和原生窗口检查；不执行真实安装器或公开上传。临时应用、模型、profile、数据库、音频与安装包结束清理，结果仅到终端/对话。旧完整包兼容逻辑及真实缓存保持。Mac 0.2.2 与 Windows 0.2.1 既有公开资产/Latest 保持；本轮仅按当次授权同步私有源码，不发布安装包。

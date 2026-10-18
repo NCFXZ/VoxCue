@@ -1,3 +1,4 @@
+import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -13,6 +14,16 @@ const app = await electron.launch({
 });
 const checks = [],
   errors = [];
+const settle = (page) =>
+  page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.effect?.getTiming().iterations === Infinity ||
+          animation.playState !== 'running',
+      ),
+  );
 
 async function observeDeleteMorph(control, trigger) {
   await control.evaluate((button) => {
@@ -70,7 +81,7 @@ try {
   page.on('pageerror', (e) => errors.push(e.message));
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
-  await page.waitForFunction(async () =>
+  await waitForAsync(page, async () =>
     (await indexedDB.databases()).some(({ name }) => name === 'copilot-local-documents'),
   );
   await page.evaluate(async () => {
@@ -146,6 +157,7 @@ try {
   const first = (target) => panel.getByRole('button', { name: '删除：' + target, exact: true });
   const second = (target) => page.getByRole('button', { name: '确认删除：' + target, exact: true });
   await info.click();
+  await settle(page);
   const resume = first('简历摘要');
   await resume.scrollIntoViewIfNeeded();
   const before = await resume.boundingBox();
@@ -164,6 +176,7 @@ try {
       document.querySelector('[aria-label="确认删除：简历摘要"]')?.getBoundingClientRect().width >=
       111.5,
   );
+  await settle(page);
   const after = await confirm.boundingBox();
   assert(Math.abs(before.y - after.y) < 1);
   assert(Math.abs(before.x + before.width - after.x - after.width) < 1);

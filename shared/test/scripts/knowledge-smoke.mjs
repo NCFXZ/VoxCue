@@ -1,3 +1,4 @@
+import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
@@ -39,18 +40,22 @@ try {
     ]);
     await page.waitForFunction(() => document.querySelectorAll('.document-row').length === 2);
     await base.getByRole('button', { name: '选择文件', exact: true }).waitFor({ state: 'visible' });
-    await page.waitForFunction(async (expected) => {
-      const db = await new Promise((resolve) => {
-        const r = indexedDB.open('copilot-local-documents', 1);
-        r.onsuccess = () => resolve(r.result);
-      });
-      const docs = await new Promise((resolve) => {
-        const r = db.transaction('documents').objectStore('documents').getAll();
-        r.onsuccess = () => resolve(r.result);
-      });
-      db.close();
-      return (await docs.find((d) => d.name === 'note.md')?.blob.text()) === expected;
-    }, text);
+    await waitForAsync(
+      page,
+      async (expected) => {
+        const db = await new Promise((resolve) => {
+          const r = indexedDB.open('copilot-local-documents', 1);
+          r.onsuccess = () => resolve(r.result);
+        });
+        const docs = await new Promise((resolve) => {
+          const r = db.transaction('documents').objectStore('documents').getAll();
+          r.onsuccess = () => resolve(r.result);
+        });
+        db.close();
+        return (await docs.find((d) => d.name === 'note.md')?.blob.text()) === expected;
+      },
+      text,
+    );
   };
   await upload('第一版');
   await upload('第二版');

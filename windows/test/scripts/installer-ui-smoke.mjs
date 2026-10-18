@@ -8,7 +8,6 @@ const suites = {
   'chat-progress': '../shared/test/scripts/chat-progress-smoke.mjs',
   adversarial: '../shared/test/scripts/adversarial-smoke.mjs',
   updates: '../shared/test/scripts/updates-smoke.mjs',
-  copilot: 'test/scripts/copilot-smoke.mjs',
 };
 if (!Object.hasOwn(suites, suite)) throw Error('Unknown installer UI suite');
 const executable = await realpath(
@@ -16,10 +15,10 @@ const executable = await realpath(
 );
 const allowed = path.resolve('release/installer-stage') + path.sep;
 if (!executable.startsWith(allowed)) throw Error('Installer executable escapes staging');
-const args =
-  suite === 'copilot'
-    ? ['--installer-stage']
-    : [...(suite === 'updates' ? ['--packaged-bootstrap'] : []), '--app-executable=' + executable];
+const args = [
+  ...(suite === 'updates' ? ['--packaged-bootstrap'] : []),
+  '--app-executable=' + executable,
+];
 const child = spawn(process.execPath, [suites[suite], ...args], {
   cwd: root,
   stdio: 'inherit',

@@ -37,28 +37,33 @@ export async function prepareModelFixtures() {
   try {
     const state = await service.download();
     if (state.phase !== 'ready') throw Error(state.error ?? 'Temporary models are not ready');
-    const speechFixtures = path.join(testRoot, 'speech-audio');
-    await mkdir(speechFixtures);
-    const revision = '8e40c43232a1c5c66c82111efc5820d3accca11b';
-    // Legacy fixture names identify the two input channels; these are official
-    // public examples, not a labelled accuracy corpus or recorded user audio.
-    for (const [index, name, sha256] of [
-      [0, 'chinese.wav', '7d93384ca14702cc584a7a33fe2fed92e89e708549161cb12ea38c916882103b'],
-      [1, 'english.wav', '8bfb42c963e623ebab31b81ff4404867d07d3102507c87ac14577c4c61663b8c'],
-    ]) {
-      const response = await fetch(
-        `https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/${revision}/test_wavs/${index}.wav`,
-        { signal: AbortSignal.timeout(30000) },
-      );
-      if (!response.ok) throw Error('Public audio fixture HTTP ' + response.status);
-      const bytes = Buffer.from(await response.arrayBuffer());
-      if (createHash('sha256').update(bytes).digest('hex') !== sha256)
-        throw Error('Public audio fixture checksum mismatch');
-      await writeFile(path.join(speechFixtures, name), bytes);
-    }
-    console.log('Temporary public audio: fixed revisions and checksums verified');
+    const speechFixtures = await prepareSpeechFixtures();
     return { ...componentPaths(root, packages), speechFixtures };
   } finally {
     service.dispose();
   }
+}
+
+export async function prepareSpeechFixtures() {
+  const speechFixtures = path.join(testRoot, 'speech-audio');
+  await mkdir(speechFixtures, { recursive: true });
+  const revision = '8e40c43232a1c5c66c82111efc5820d3accca11b';
+  // Legacy fixture names identify the two input channels; these are official
+  // public examples, not a labelled accuracy corpus or recorded user audio.
+  for (const [index, name, sha256] of [
+    [0, 'chinese.wav', '7d93384ca14702cc584a7a33fe2fed92e89e708549161cb12ea38c916882103b'],
+    [1, 'english.wav', '8bfb42c963e623ebab31b81ff4404867d07d3102507c87ac14577c4c61663b8c'],
+  ]) {
+    const response = await fetch(
+      `https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/${revision}/test_wavs/${index}.wav`,
+      { signal: AbortSignal.timeout(30000) },
+    );
+    if (!response.ok) throw Error('Public audio fixture HTTP ' + response.status);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    if (createHash('sha256').update(bytes).digest('hex') !== sha256)
+      throw Error('Public audio fixture checksum mismatch');
+    await writeFile(path.join(speechFixtures, name), bytes);
+  }
+  console.log('Temporary public audio: fixed revisions and checksums verified');
+  return speechFixtures;
 }

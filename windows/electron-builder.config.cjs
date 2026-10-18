@@ -25,5 +25,6 @@ module.exports = {
     shortcutName: 'VoxCue',
     differentialPackage: true,
     runAfterFinish: true,
+    include: '.cache/installer-ui/installer.nsh',
   },
 };

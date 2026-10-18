@@ -1,3 +1,4 @@
+import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
@@ -95,7 +96,8 @@ const openUpdates = async (page) => {
   return settings;
 };
 const waitPhase = (page, phase) =>
-  page.waitForFunction(
+  waitForAsync(
+    page,
     async (phase) => (await window.desktop.updates({ op: 'status' })).phase === phase,
     phase,
   );
@@ -233,7 +235,8 @@ try {
     page.evaluate((configuration) => window.desktop.openInterview(configuration), configuration),
   ]);
   await interview.waitForLoadState();
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.updates({ op: 'status' })).interviewActive,
   );
   assert.equal(
@@ -256,7 +259,8 @@ try {
   const interviewClosed = interview.waitForEvent('close');
   await interview.evaluate(() => window.desktop.confirmInterviewEnd());
   await interviewClosed;
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => !(await window.desktop.updates({ op: 'status' })).interviewActive,
   );
   await page.evaluate(() => window.desktop.updateSessionState(true));

@@ -70,7 +70,7 @@ TypeScript 只编译 shared 与本平台源码到本平台 dist-electron，Mac �
 
 单测只收集 shared 与当前平台的 `test/{unit,renderer}/**/*.test.{ts,tsx}`，不把另一平台的合成端口当作本机原生验收。测试结果仅显示于终端/内存；必要隔离工作目录仅建在操作系统临时目录，结束、失败或取消须清理。旧脚本中仍有持久化输出，须先改造后再获准运行；不再新增 test/results 内容，历史快照不参与收集。架构检查禁止生产导入任一平台的 test，也禁止平台专属实现互相依赖；共享 Renderer/业务边界继续保持。
 
-开发模型从 shared/local-models 读取；共享 Logo 原件在 shared/public，Windows ICO/native helper 在 Windows 平台目录，Mac 原生 PNG/ICNS 衍生物在 macos/public。打包仍将 PNG、ICO、白名单模型及原生助手复制到原有包内布局。Windows release/发行包保留，本轮便携包仅在自有系统临时目录验证后删除，不安装或发布。
+开发模型完整时从 shared/local-models 读取，缺失时复用组件首次下载流程；共享 Logo 原件在 shared/public，Windows ICO/native helper 在 Windows 平台目录，Mac 原生 PNG/ICNS 衍生物在 macos/public。两平台当前打包仅复制品牌、运行依赖和各自原生助手，以 resources/voxcue-components.json 启用组件缓存，不内嵌模型；无标记的旧完整包保留 resources/models 兼容。Windows release/发行包保留，验证包仅在自有系统临时目录使用后删除，不安装或发布。
 
 ## 迁移与恢复
 

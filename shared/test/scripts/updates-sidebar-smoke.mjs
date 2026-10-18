@@ -1,3 +1,4 @@
+import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
@@ -66,7 +67,8 @@ const launch = async () => {
   return page;
 };
 const phase = (page, expected) =>
-  page.waitForFunction(
+  waitForAsync(
+    page,
     async (expected) => (await window.desktop.updates({ op: 'status' })).phase === expected,
     expected,
   );

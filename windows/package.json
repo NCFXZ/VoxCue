@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -44,21 +44,22 @@
     "test:adversarial": "node ../shared/test/scripts/adversarial-smoke.mjs",
     "check:workspace": "node ../shared/scripts/sync-platform-manifests.mjs --check && node ../shared/scripts/check-platform-layout.mjs",
     "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
+    "test:installer:isolated": "node test/scripts/portable-native-smoke.mjs --with-installer",
     "test:windows:functional": "node test/scripts/windows-suite.mjs",
     "test:windows:regression": "node test/scripts/windows-suite.mjs --windows",
     "test:presentation:native": "node test/scripts/presentation-native-smoke.mjs",
     "test:speech:adversarial": "node test/scripts/speech-adversarial-smoke.mjs",
     "test:portable:native": "node test/scripts/portable-native-smoke.mjs",
+    "test:ui:dpi": "node test/scripts/windows-suite.mjs --dpi",
     "build": "node scripts/build-audio.mjs && pnpm build:shared",
     "test:platform:native": "node test/scripts/platform-native-smoke.mjs",
     "test:interview:layout": "node test/scripts/interview-layout-smoke.mjs",
     "test:interview:effort": "node test/scripts/interview-effort-smoke.mjs",
     "test:interview:context": "node test/scripts/interview-context-smoke.mjs",
-    "test:copilot": "node test/scripts/copilot-smoke.mjs",
     "build:audio": "node scripts/build-audio.mjs",
     "test:speech:devices": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-device-check.mjs",
     "test:speech:desktop": "node test/scripts/speech-desktop-smoke.mjs",
-    "test:speech:package": "node test/scripts/speech-desktop-smoke.mjs --packaged",
+    "test:speech:package": "node test/scripts/portable-native-smoke.mjs",
     "test:speech:reliability": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-reliability.mjs",
     "test:speech:restart": "node ../shared/test/scripts/run-electron-node.mjs test/scripts/speech-restart-native.mjs",
     "test:interview:workflow": "node test/scripts/interview-workflow-smoke.mjs",
@@ -71,8 +72,8 @@
     "test:package": "node test/scripts/packaged-smoke.mjs"
   },
   "dependencies": {
+    "adm-zip": "0.6.1",
     "@fluentui/react-icons": "^2.0.0",
-    "@github/copilot-sdk": "1.0.21",
     "@huggingface/transformers": "4.3.1",
     "@lancedb/lancedb": "0.40.0",
     "@radix-ui/react-dropdown-menu": "^2.1.16",
@@ -110,7 +111,6 @@
   },
   "packageManager": "pnpm@11.25.0",
   "optionalDependencies": {
-    "@github/copilot-sdk-win32-x64": "1.0.21",
     "sherpa-onnx-win-x64": "1.13.8"
   }
 }

@@ -125,6 +125,24 @@ try {
       updater.logger = null;
       updater.forceDevUpdateConfig = true;
       updater.disableDifferentialDownload = true;
+      // The raw generic updater takes CancellationToken. UpdateService's port
+      // now takes AbortSignal; production configurePlatformUpdates bridges it.
+      // Keep this independent generic transport probe on that same public port.
+      const { CancellationToken } = process
+        .getBuiltinModule('module')
+        .createRequire(require.resolve('electron-updater/package.json'))('builder-util-runtime');
+      const download = updater.downloadUpdate.bind(updater);
+      updater.downloadUpdate = async (signal) => {
+        const cancellation = new CancellationToken();
+        const abort = () => cancellation.cancel();
+        signal?.throwIfAborted();
+        signal?.addEventListener('abort', abort, { once: true });
+        try {
+          return await download(cancellation);
+        } finally {
+          signal?.removeEventListener('abort', abort);
+        }
+      };
       globalThis.nativeUpdater = updater;
       globalThis.nativeUpdates = new UpdateService({
         currentVersion: '0.0.0',

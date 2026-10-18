@@ -1,3 +1,4 @@
+import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -60,7 +61,7 @@ try {
     .getByText('Synthetic saved partial', { exact: true })
     .waitFor();
   // Wait for the real IndexedDB commit, not an arbitrary sleep.
-  await page.waitForFunction(async () => {
+  await waitForAsync(page, async () => {
     const db = await new Promise((resolve) => {
       const r = indexedDB.open('voxcue-preparation-chats', 1);
       r.onsuccess = () => resolve(r.result);

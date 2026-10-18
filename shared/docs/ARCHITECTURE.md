@@ -2,7 +2,7 @@
 
 ## 独立本地组件
 
-共享 ComponentService 从固定资产下载并校验语音/RAG，按资源版本及摘要缓存到 userData/component-cache；应用版本不参与缓存键。shared 共用下载、取消/重试、状态和功能限制，主进程独立校验注册窗口主 frame，不开放 URL/路径/命令。Mac 新构建排除模型与 ONNX Web，保留 Node CPU 依赖；完整旧包和开发模式沿用原路径。界面沿用既有设计，容量统一 MB。Windows 锁及瘦身打包由其本机同步验证，Mac 保持只读。详见[组件说明](COMPONENTS.md)。
+共享 ComponentService 从固定资产下载并校验语音/RAG，按资源版本及摘要缓存到 userData/component-cache；应用版本不参与缓存键。shared 共用下载、取消/重试、状态和功能限制，主进程独立校验注册窗口主 frame，不开放 URL/路径/命令。Windows/macOS 新构建排除模型与 ONNX Web，保留 adm-zip、Node CPU 依赖和各平台原生助手；resources/voxcue-components.json 启用缓存，完整旧包仍沿原路径。开发模型完整时复用原目录，否则使用同一组件服务。Windows 锁及生成配置已在其本机同步，Mac 目录保持只读。详见[组件说明](COMPONENTS.md)。
 
 ## Windows 原生展示
 

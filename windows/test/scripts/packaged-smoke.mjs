@@ -1,6 +1,9 @@
+import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { checkComponents } from './components-check.mjs';
+import { prepareSpeechFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
-import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, cp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -37,6 +40,35 @@ const archive = path.join(packageRoot, 'resources/app.asar');
 const entries = asar
   .listPackage(archive)
   .map((file) => file.replaceAll('\\', '/').replace(/^\//, ''));
+assert.ok(
+  !entries.some((file) =>
+    /node_modules\/(?:onnxruntime-web(?:\/|$)|@github\/copilot-sdk(?:\/|-)|koffi(?:\/|$))/.test(
+      file,
+    ),
+  ),
+);
+assert.ok(
+  !entries.some((file) =>
+    /(?:dist-electron\/macos\/|backend\/copilot\/|Sparkle|sf-symbols)/i.test(file),
+  ),
+);
+assert.ok(
+  !entries.some((file) => /\.(?:dylib|so(?:\.\d+)*|icns)$|\.framework\//i.test(file)),
+  'Foreign platform native libraries must not enter the Windows package',
+);
+for (const dependency of ['adm-zip', 'onnxruntime-node', 'sherpa-onnx-win-x64', '@lancedb/lancedb'])
+  assert.ok(
+    entries.some((file) => file.includes('node_modules/' + dependency + '/')),
+    dependency,
+  );
+assert.deepEqual(
+  JSON.parse(await readFile(path.join(packageRoot, 'resources/voxcue-components.json'), 'utf8')),
+  { schemaVersion: 1 },
+);
+assert.equal(
+  (await import('node:fs')).existsSync(path.join(packageRoot, 'resources/models')),
+  false,
+);
 assert.equal(
   entries.some((file) => /(?:^|\/)sprintf-js\//.test(file)),
   false,
@@ -56,17 +88,43 @@ const sharpPackages = entries
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/portable-current-')));
+const speechFixtures = process.env.VOXCUE_SPEECH_FIXTURE_DIR ?? (await prepareSpeechFixtures());
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({
+let app = await electron.launch({
   executablePath: path.join(packageRoot, 'VoxCue.exe'),
   args: [],
   env,
 });
 try {
-  const page = await app.firstWindow();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  let { page, errors } = await checkComponents(app);
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
+  assert.deepEqual(errors, []);
+  await closeUiApp(app);
+  // Replace the application in a new location while retaining only this run's cache.
+  // The source package stays available to the caller's subsequent native checks.
+  const replacement = path.join(testRoot, 'replacement/VoxCue-win32-x64');
+  await cp(packageRoot, replacement, { recursive: true });
+  app = await electron.launch({
+    executablePath: path.join(replacement, 'VoxCue.exe'),
+    args: [],
+    env,
+  });
+  await app.evaluate(({ session }) => {
+    globalThis.componentRequests = [];
+    session.fromPartition('voxcue-components').webRequest.onBeforeRequest((details, callback) => {
+      globalThis.componentRequests.push(details.url);
+      callback({ cancel: true });
+    });
+  });
+  page = await app.firstWindow();
+  await waitForAsync(
+    page,
+    async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
+    undefined,
+    { timeout: 30000 },
+  );
+  assert.deepEqual(await app.evaluate(() => globalThis.componentRequests), []);
   const report = await app.evaluate(
     async ({ app, utilityProcess }, fixture) => {
       const require = process
@@ -77,7 +135,17 @@ try {
       const { Worker } = require('node:worker_threads');
       const unpacked = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked');
       const speech = path.join(unpacked, 'dist-electron/shared/electron/backend/speech');
-      const model = path.join(process.resourcesPath, 'models/speech');
+      const { componentPaths } = require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/components/service.js',
+      );
+      const { packagesFor } = require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/components/catalog.js',
+      );
+      const models = componentPaths(
+        path.join(app.getPath('userData'), 'component-cache'),
+        packagesFor(process.platform, process.arch),
+      );
+      const model = models.speechModels;
       const helper = path.join(process.resourcesPath, 'native/VoxCue.Audio.exe');
       const worker = new Worker(path.join(speech, 'worker.js'));
       let workerLoaded = false;
@@ -203,7 +271,7 @@ try {
         app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
       );
       const directory = path.join(app.getPath('userData'), 'rag-package-verification'),
-        ragModel = path.join(process.resourcesPath, 'models/rag/multilingual-e5-small');
+        ragModel = models.ragModel;
       let knowledge = new KnowledgeHost(directory, ragModel);
       const signal = () => new AbortController().signal;
       const input = {
@@ -303,7 +371,7 @@ try {
         workerLoaded,
         statuses,
         nativeHelper: fs.existsSync(helper),
-        models: fs.readdirSync(path.join(process.resourcesPath, 'models')),
+        models: fs.readdirSync(path.join(app.getPath('userData'), 'component-cache')),
         noOldBackend: !fs.existsSync(
           path.join(unpacked, 'dist-electron/shared/electron/backend/retrieval'),
         ),
@@ -312,14 +380,7 @@ try {
     {
       pdf: Array.from(fixtures.pdf()),
       docx: Array.from(await fixtures.docx()),
-      english: Array.from(
-        await readFile(
-          path.join(
-            process.env.VOXCUE_SPEECH_FIXTURE_DIR ?? '../shared/test/fixtures/speech-audio',
-            'english.wav',
-          ),
-        ),
-      ),
+      english: Array.from(await readFile(path.join(speechFixtures, 'english.wav'))),
     },
   );
   assert.equal(report.packaged, true);
@@ -334,6 +395,7 @@ try {
       'LICENSE-sherpa.txt',
       'LICENSE-silero.txt',
       'manifest.json',
+      'NOTICE.txt',
       'README.md',
       'silero_vad.onnx',
       'tokens.txt',
@@ -343,7 +405,9 @@ try {
   assert.equal(report.interviewContext, true);
   assert.equal(report.nativeHelper, true);
   assert.equal(report.noOldBackend, true);
-  assert.deepEqual(report.models.sort(), ['rag', 'speech']);
+  assert.equal(report.models.length, 2);
+  assert.ok(report.models.every((name) => /^(speech|rag)-1\.0\.0-[a-f0-9]{64}$/.test(name)));
+  assert.deepEqual(await app.evaluate(() => globalThis.componentRequests), []);
   assert.equal(report.rag.status, 'passed');
   assert.deepEqual(report.statuses, ['idle']);
   await page.screenshot({ animations: 'disabled' });

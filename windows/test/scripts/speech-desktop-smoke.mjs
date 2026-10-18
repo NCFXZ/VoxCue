@@ -1,12 +1,21 @@
+import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { _electron as electron } from 'playwright';
-import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import {
+  testRoot,
+  electron,
+  spawnTestProcess as spawn,
+} from '../../../shared/test/scripts/test-workspace.mjs';
+import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const packaged = process.argv.includes('--packaged');
+if (!process.argv.includes('--hardware-audio'))
+  throw Error('Physical audio is opt-in: confirm the current scope, then pass --hardware-audio.');
+if (packaged)
+  throw Error('Use test:speech:package for isolated cached-model package verification.');
 const profile = path.resolve(
+  testRoot,
   'test/results',
   `speech-${packaged ? 'packaged' : 'desktop'}-${Date.now()}`,
 );
@@ -41,7 +50,8 @@ try {
   await composer.fill('已有问题');
   await main.getByRole('button', { name: '语音输入', exact: true }).click();
   await main.getByRole('button', { name: '停止语音输入', exact: true }).waitFor();
-  await main.waitForFunction(
+  await waitForAsync(
+    main,
     async () => (await window.desktop.dictation({ op: 'status' })).state === 'running',
   );
   // The native microphone lifecycle is real. Controlled recognizer events below
@@ -98,7 +108,7 @@ try {
     .click();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
-  await main.screenshot({ path: path.join(profile, 'start-dialog.png') });
+  await main.screenshot();
   const [page] = await Promise.all([
     app.waitForEvent('window'),
     main.getByRole('button', { name: '确认开始', exact: true }).click(),
@@ -123,7 +133,8 @@ try {
       if (e.type === 'metrics') window.speechTest.metrics.push(e);
     });
   });
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.speech({ op: 'status' })).state === 'running',
   );
   assert.equal(
@@ -179,7 +190,8 @@ try {
     window.speechTest.events.some((e) => e.final && e.text.includes('explain')),
   );
   await page.evaluate(() => window.desktop.speech({ op: 'pause' }));
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.speech({ op: 'status' })).state === 'paused',
   );
   await app.evaluate(({ BrowserWindow }) => {
@@ -225,14 +237,15 @@ try {
   await page.getByRole('button', { name: '发送面试问题', exact: true }).click();
   await page.locator('.answer-text').first().waitFor();
   assert.ok(await page.getByText('Synthetic interview answer', { exact: true }).count());
-  await page.screenshot({ path: path.join(profile, 'speech.png') });
+  await page.screenshot();
   await page.evaluate(async () =>
     window.desktop.speech({
       op: 'start',
       options: (await window.desktop.interviewState()).configuration.options,
     }),
   );
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.speech({ op: 'status' })).state === 'running',
   );
   await page.reload();
@@ -244,14 +257,14 @@ try {
     ),
     'Reload should synchronously preserve received real transcripts',
   );
-  await page.waitForFunction(
+  await waitForAsync(
+    page,
     async () => (await window.desktop.speech({ op: 'status' })).state === 'running',
   );
   assert.equal(await page.getByRole('button', { name: '转写模式', exact: true }).count(), 0);
   await page.getByRole('button', { name: '结束面试', exact: true }).click();
   await page.getByRole('button', { name: '确认结束面试', exact: true }).click();
-  await writeFile(
-    path.join(profile, 'result.json'),
+  console.log(
     JSON.stringify(
       {
         packaged,

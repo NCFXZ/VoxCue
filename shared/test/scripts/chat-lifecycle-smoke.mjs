@@ -222,18 +222,44 @@ try {
     0,
   );
   assert.equal(await page.locator('.conversation-row').count(), 1);
+  await app.evaluate(({ BrowserWindow }) => {
+    const contents = BrowserWindow.getAllWindows().find(
+      (win) => !win.webContents.getURL().includes('#login'),
+    ).webContents;
+    const send = contents.send.bind(contents);
+    contents.send = (channel, ...args) => {
+      if (channel === 'session:request-close') {
+        globalThis.releaseLogoutSave = () => send(channel, ...args);
+        return;
+      }
+      send(channel, ...args);
+    };
+  });
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
   const [login] = await Promise.all([
     app.waitForEvent('window'),
     page.getByRole('button', { name: '确认退出登录', exact: true }).click(),
   ]);
-  [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
+  await login.getByRole('button', { name: '取消登录', exact: true }).waitFor();
+  assert.equal(page.isClosed(), false);
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);
+  await login.getByRole('button', { name: '取消登录', exact: true }).click();
+  await login.getByText('登录已取消。', { exact: true }).waitFor();
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);
+  const nextMain = app.waitForEvent('window');
+  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
+  await login.getByRole('button', { name: '取消登录', exact: true }).waitFor();
+  await app.evaluate(() => {
+    if (!globalThis.releaseLogoutSave) throw Error('Logout save handshake was not requested');
+    globalThis.releaseLogoutSave();
+  });
+  page = await nextMain;
   await page.locator('.conversation-row').filter({ hasText: '更新简历' }).waitFor();
-  checks.push('explicit deletion survives restart, logout/login preserves remaining ordinary chat');
+  checks.push(
+    'explicit deletion survives restart; fast reauthentication waits for outgoing save, supports cancellation and preserves remaining chat',
+  );
   assert.deepEqual(errors, []);
   await console.log(JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ directory, checks, errors }));

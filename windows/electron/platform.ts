@@ -19,6 +19,4 @@ export const windows: DesktopPlatform = {
   microphoneSettingsUrl: 'ms-settings:privacy-microphone',
   wasapiHelper: 'VoxCue.Audio.exe',
   speechProcessFile: 'windows/electron/speech/process.js',
-  packagedCopilotRuntime:
-    'app.asar.unpacked/node_modules/@github/copilot-sdk-win32-x64/prebuilds/win32-x64/copilot-runtime.exe',
 };

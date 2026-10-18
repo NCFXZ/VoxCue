@@ -23,7 +23,7 @@ threads.Worker = class extends RealWorker {
   }
 };
 const root = process.cwd(),
-  model = path.resolve('../shared/local-models/speech');
+  model = process.env.VOXCUE_TEST_SPEECH_MODELS ?? path.resolve('../shared/local-models/speech');
 const capture = require(path.join(root, 'dist-electron/windows/electron/speech/capture.js'));
 capture.devices = async () =>
   missing ? [] : [{ id: 'synthetic', name: 'Synthetic device', source: 'system', default: true }];

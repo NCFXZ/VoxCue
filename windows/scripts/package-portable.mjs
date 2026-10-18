@@ -1,6 +1,6 @@
 import { packager } from '@electron/packager';
 import { createRequire } from 'node:module';
-import { readFile, cp, mkdir } from 'node:fs/promises';
+import { readFile, cp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync, realpathSync as fsRealPath, lstatSync, readFileSync } from 'node:fs';
 import os from 'node:os';
@@ -83,6 +83,8 @@ const paths = await packager({
       });
       const copied = new Set();
       async function copyPackage(name, from = root) {
+        // E5 uses Node CPU inference; the CJS bundle needs no separate Web package.
+        if (name === 'onnxruntime-web') return;
         let resolved;
         const require = createRequire(path.join(from, 'package.json'));
         try {
@@ -158,10 +160,8 @@ const paths = await packager({
         }
       }
       for (const name of [
+        'adm-zip',
         'jose',
-        '@github/copilot-sdk',
-        // Required for the Windows artifact even though npm declares it optional.
-        '@github/copilot-sdk-win32-x64',
         'electron-updater',
         'sherpa-onnx-node',
         'sherpa-onnx-win-x64',
@@ -177,41 +177,9 @@ const paths = await packager({
   ],
   afterComplete: [
     async ({ buildPath }) => {
-      await cp(
-        path.resolve('../shared/local-models/speech'),
-        path.join(buildPath, 'resources/models/speech'),
-        {
-          recursive: true,
-          filter: (source) => {
-            const relative = path.relative(path.resolve('../shared/local-models/speech'), source);
-            return (
-              relative === '' ||
-              [
-                'encoder.int8.onnx',
-                'decoder.int8.onnx',
-                'tokens.txt',
-                'silero_vad.onnx',
-                'manifest.json',
-                'README.md',
-                'LICENSE-sherpa.txt',
-                'LICENSE-silero.txt',
-              ].includes(relative)
-            );
-          },
-        },
-      );
-      if (
-        !existsSync(
-          path.resolve(
-            '../shared/local-models/rag/multilingual-e5-small/onnx/model_quantized.onnx',
-          ),
-        )
-      )
-        throw Error('Run pnpm download:rag before packaging');
-      await cp(
-        path.resolve('../shared/local-models/rag/multilingual-e5-small'),
-        path.join(buildPath, 'resources/models/rag/multilingual-e5-small'),
-        { recursive: true },
+      await writeFile(
+        path.join(buildPath, 'resources/voxcue-components.json'),
+        JSON.stringify({ schemaVersion: 1 }) + '\n',
       );
       await mkdir(path.join(buildPath, 'resources/native'), { recursive: true });
       await cp(

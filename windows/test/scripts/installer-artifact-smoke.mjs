@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { createRequire } from 'node:module';
-import { createReadStream } from 'node:fs';
+import { createReadStream, realpathSync, lstatSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 import { open, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
@@ -15,9 +16,28 @@ const yaml = createRequire(require.resolve('electron-updater/package.json'))('js
 const sevenZip = await getPath7za();
 const version = JSON.parse(await readFile('package.json', 'utf8')).version;
 const name = `VoxCue-Setup-${version}-x64.exe`;
-const installer = path.resolve('release/installer', name);
-const stage = path.resolve('release/installer-stage/VoxCue-win32-x64');
-const manifest = yaml.load(await readFile('release/installer/latest.yml', 'utf8'));
+const testRelease = process.argv
+  .find((arg) => arg.startsWith('--test-release='))
+  ?.slice('--test-release='.length);
+if (testRelease) {
+  const directory = path.resolve(testRelease);
+  assert.equal(path.dirname(directory), realpathSync(os.tmpdir()));
+  assert.ok(path.basename(directory).startsWith('voxcue-test-run-'));
+  assert.equal(lstatSync(directory).isSymbolicLink(), false);
+  assert.equal(realpathSync(directory), directory);
+  const owner = JSON.parse(readFileSync(path.join(directory, '.voxcue-test-owner.json'), 'utf8'));
+  assert.equal(owner.kind, 'voxcue-test-run-');
+  assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0);
+  process.kill(owner.pid, 0);
+}
+const output = testRelease
+  ? path.join(testRelease, 'installer')
+  : path.resolve('release/installer');
+const installer = path.join(output, name);
+const stage = testRelease
+  ? path.join(testRelease, 'platform-layout-portable/VoxCue-win32-x64')
+  : path.resolve('release/installer-stage/VoxCue-win32-x64');
+const manifest = yaml.load(await readFile(path.join(output, 'latest.yml'), 'utf8'));
 assert.equal(manifest.version, version);
 assert.equal(manifest.path, name);
 const binary = manifest.files.find((file) => file.url === name);
@@ -82,6 +102,7 @@ for (const file of [
   'VoxCue.exe',
   'resources/app.asar',
   'resources/app-update.yml',
+  'resources/voxcue-components.json',
   'resources/native/VoxCue.Audio.exe',
 ]) {
   const hash = createHash('sha256');

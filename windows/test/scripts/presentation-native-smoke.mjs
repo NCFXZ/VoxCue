@@ -56,7 +56,7 @@ const icon = path.resolve('public/voxcue.ico');
 let floating,
   closedByControl = false;
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
   const [main] = await Promise.all([
     app.waitForEvent('window'),

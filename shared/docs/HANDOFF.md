@@ -1,8 +1,10 @@
-> 2026-10-18：GitHub Copilot 接入已按用户最新要求移除。后续模型下载、界面和 Windows 本机清理范围以 COMPONENTS.md 与 AGENTS.md 首节为准；下文为历史记录。
+> 2026-10-18：Windows 本机已同步 0.2.2 配置、移除 Copilot 专属实现/依赖并采用组件首次下载打包。用户后续授权完整回归、修复无阻塞后提交推送本轮源码至私有 NCFXZ/VoxCue main；不上传安装包或测试产物，不发布或打标签。Mac 0.2.2 与 Windows 0.2.1 公开资产/Latest 保持，macos/ 只读。实现及隔离验证入口见 COMPONENTS.md、shared/test/README.md 与 AGENTS.md 首节；下文旧工作状态为历史记录。
 
 # VoxCue 当前交接
 
-> 2026-10-18 当前工作为 Mac 本地备份与远端主线合并，用户仅授权原样同步远端已有 Windows 文件；本轮不在 Mac 修改其实现/配置或运行其原生测试，不上传 GitHub。源码版本 0.2.2，Windows 配置和 Copilot 专属清理仍由 Windows 本机完成。以下 Windows 续作说明记录远端已合入实现。
+当前 Windows 入口：test:windows:functional、test:windows:regression、test:installer:isolated、test:ui:dpi。模型及安装态验证使用自有系统临时根，结束清理，不动真实资料/凭据/缓存。窗口保存与快速重新登录、异步 IPC/IndexedDB 测试等待已修正；测试结果仅到终端/对话。Mac 专属 components-smoke 的异步等待适配由 Mac 本机继续，不在 Windows 改写。
+
+> 2026-10-18 历史 Mac 主线合并记录：当时用户仅授权原样同步远端已有 Windows 文件，不在 Mac 修改其实现/配置或运行其原生测试，不上传 GitHub。源码版本 0.2.2，Windows 配置和 Copilot 专属清理留待 Windows 本机完成。以下 Windows 续作说明记录远端已合入实现。
 
 > 用户已于 2026-10-17 恢复完整功能、稳定性和对抗性测试授权；下文旧暂停状态为历史。结果只在终端/对话，必要工作文件临时使用并清理，不保存报告/日志/截图/验收数表。当前在 Windows 续作，macos/ 只读；Mac 117 个旧占用目录和 Windows 349 个跳过目录不重试。
 
@@ -12,9 +14,9 @@
 
 Windows 配置经本机生成器同步，构建边界为 shared/windows。`windows/electron/presentation.ts` 实现共享展示端口；运行时按系统版本声明 Acrylic 表面能力，应用主题、normal 置顶、转发穿透和任务栏恢复不调用 Mac API。`screenPermission.ts` 返回 not-required，申请/打开设置请求明确拒绝；检查本身不捕获屏幕。共享截图的取消、超时和内存约束保留。面试 Renderer 退出会恢复主窗口，单实例复用已打开窗口。
 
-右上角窗口按钮需在内容后形成 no-drag 控制层；不可仅依靠视觉 z-index 覆盖页面拖动区域。Windows 分数 DPI 下浮窗移动固定手势起始尺寸并补偿回读，测试按原生像素网格检查位置、严格保持尺寸。CSS 滤镜以前缀属性在前、标准属性在后，保证生产压缩保留有效属性；强制高对比度使用不透明回退。共享偏好、60/30 曲线、Fluent 图标和原有用户数据位置保持。
+右上角窗口按钮需在内容后形成 no-drag 控制层；不可仅依靠视觉 z-index 覆盖页面拖动区域。Windows 分数 DPI 下浮窗移动固定手势起始尺寸并补偿回读，测试按原生像素网格检查位置、严格保持尺寸。CSS 滤镜以前缀属性在前、标准属性在后，保证生产压缩保留有效属性；强制高对比度使用不透明回退。共享偏好、60/30 曲线、Fluent 图标及历史存储键/内部布局保持；数据根迁移规则见 COMPONENTS.md。
 
-命令见 shared/test/README.md。已改造的 Windows 脚本使用 test-workspace，自有临时 profile/文档/便携包结束清理；真实鼠标回归串行。其余旧硬件/真实安装脚本仍有持久化或真实环境副作用，不能直接运行。本轮不提交推送或发布，不用合成账户、捕获端口或图片代替真实服务/硬件/截图验收；完整退出重开才能加载新的 main/preload。
+命令见 shared/test/README.md。已改造的 Windows 脚本使用 test-workspace，自有临时 profile/文档/便携包结束清理；真实鼠标回归串行。其余旧硬件/真实安装脚本仍有持久化或真实环境副作用，不能直接运行。源码同步范围见本页首节，不用合成账户、捕获端口或图片代替真实服务/硬件/截图验收；完整退出重开才能加载新的 main/preload。
 
 ## 2026-10-17 故障恢复与测试入口
 

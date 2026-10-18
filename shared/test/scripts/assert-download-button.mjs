@@ -19,7 +19,9 @@ async function settle(button) {
 }
 
 export async function assertInitialDownloadProgress(button) {
-  // Leave the pointer where the download click landed during initial feedback.
+  // The progress label can change the control's geometry. Hover its actual
+  // bounds while the initial guard is active, then keep the pointer there.
+  await button.hover();
   await settle(button);
   const initialBounds = await button.boundingBox();
   const feedback = await button.evaluate(async (element) => {

@@ -1,29 +1,40 @@
-import { mkdir, writeFile } from 'node:fs/promises';
-import path from 'node:path';
 import assert from 'node:assert/strict';
-import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
+import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 
 assert.equal(process.platform, 'win32');
-const fixtures = path.join(testRoot, 'public-audio');
-await mkdir(fixtures);
-// Fixed public inputs, never microphone/loopback recordings. Names are fixture
-// roles only; these checks do not claim English/Chinese recognition accuracy.
-for (const [name, index] of [
-  ['chinese.wav', 0],
-  ['english.wav', 1],
-]) {
-  const response = await fetch(
-    'https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/8e40c43232a1c5c66c82111efc5820d3accca11b/test_wavs/' +
-      index +
-      '.wav',
-  );
-  if (!response.ok) throw Error('Public audio HTTP ' + response.status);
-  const bytes = Buffer.from(await response.arrayBuffer());
-  assert.equal(bytes.toString('ascii', 0, 4), 'RIFF');
-  await writeFile(path.join(fixtures, name), bytes);
-}
 const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
+if (suites[0] === '--dpi') {
+  const allowed = ['ui-alignment', 'typography', 'components-ui', 'updates-sidebar'];
+  const selected = suites.length > 1 ? suites.slice(1) : allowed;
+  for (const name of selected) assert.ok(allowed.includes(name), 'Unknown DPI suite: ' + name);
+  for (const scale of ['1', '1.25', '1.5', '1.75', '2']) {
+    for (const name of selected) {
+      const child = spawnTestProcess(
+        process.execPath,
+        ['../shared/test/scripts/' + name + '-smoke.mjs'],
+        {
+          env: { ...process.env, VOXCUE_TEST_SCALE_FACTOR: scale },
+          stdio: ['ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+        },
+      );
+      let output = '';
+      child.stdout.on('data', (data) => (output += data));
+      child.stderr.on('data', (data) => (output += data));
+      const timer = setTimeout(() => child.kill(), 180000);
+      const code = await new Promise((resolve, reject) => {
+        child.once('error', reject);
+        child.once('exit', resolve);
+      }).finally(() => clearTimeout(timer));
+      if (code !== 0) console.error(output);
+      assert.equal(code, 0, name + ' at DPI ' + scale);
+      console.log('PASS DPI ' + scale + ' ' + name);
+    }
+  }
+  process.exit(0);
+}
 const commands = windowsOnly
   ? [
       'platform-native',
@@ -32,14 +43,26 @@ const commands = windowsOnly
       'interview-layout',
       'interview-workflow',
       'interview-context',
-      'copilot',
       'updates-native',
+      'user-data',
+      'speech-adversarial',
+      'presentation-native',
     ].map((name) => ['test/scripts/' + name + '-smoke.mjs'])
   : [['../shared/test/scripts/functional-suite.mjs', ...suites]];
+const models = windowsOnly ? await prepareModelFixtures() : null;
 let failed = false;
 for (const args of commands) {
   const child = spawnTestProcess(process.execPath, args, {
-    env: { ...process.env, VOXCUE_SPEECH_FIXTURE_DIR: fixtures },
+    env: {
+      ...process.env,
+      ...(models
+        ? {
+            VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+            VOXCUE_TEST_RAG_MODEL: models.ragModel,
+            VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+          }
+        : {}),
+    },
     stdio: ['ignore', 'pipe', 'pipe'],
     windowsHide: true,
   });
