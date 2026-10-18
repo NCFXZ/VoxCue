@@ -6,6 +6,14 @@
 
 当前源码共用“设置 → 更新 → 自动下载更新”，默认开启并本机保存；关闭后仅检查和提醒。有更新时，ChatGPT 可用状态行右侧显示下载图标、主题色圆环或重启安装图标，取消仅显示红色关闭图标，全部状态保持 32×32 图标操作范围。侧栏不显示百分比或取消文字，设置内保留完整文字与百分比，点击使用现有更新流程。关闭设置后进度继续刷新，关闭自动下载不取消已开始的下载；只有明确点击安装且保存成功、无面试时才进入 Sparkle。原生签名与安装边界不变，已发布安装包不自动重写。
 
+## DMG 窗口与本地预览
+
+后续构建的 DMG 使用 600×400 浅色品牌背景、左右排列的 VoxCue/Applications 图标、主题色箭头及简短安装说明，背景含普通和 Retina 两种分辨率。布局写入镜像内 `.DS_Store`，不修改用户 Finder 全局偏好；图标仍是真实可拖拽文件和 Applications 链接。
+
+`scripts/dmg-layout.json` 是背景和图标坐标的唯一配置，`native/DmgArtwork.mm` 用 AppKit 离屏绘图。构建端使用 Command Line Tools 的 Python 3（3.7+）及两份固定 SHA-256 的 MIT 纯 Python wheel（[ds_store](https://github.com/dmgbuild/ds_store)、[mac_alias](https://github.com/dmgbuild/mac_alias)）；仅缓存在 `macos/.cache/dmg-tools` 并直接 zip 导入，不用 pip、不全局安装、不进入应用，最终用户无需开发工具。
+
+在 macos/ 执行 `node test/scripts/dmg-smoke.mjs`，仅用自有系统临时目录核对压缩镜像内布局、拖拽目标和签名副本，结束卸载并清理。加 `--preview` 时通过内存输出共用素材与坐标的内容预览；它不是 Finder 截图，系统标题栏、选中态等仍由 Finder 渲染。该入口不读取发行私钥，不生成正式 release，也不上传。
+
 ## 本地发行
 
 所有依赖、工具、缓存均在 `macos/`，禁止全局安装。先在当前平台按仓库入口同步配置和安装依赖，模型放 `shared/local-models`。执行：

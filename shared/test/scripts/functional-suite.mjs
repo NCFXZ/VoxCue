@@ -42,6 +42,7 @@ const mac = [
   'user-data',
   'updates-native',
   'components',
+  'dmg',
 ];
 const selected = process.argv.slice(2);
 const names = selected.length

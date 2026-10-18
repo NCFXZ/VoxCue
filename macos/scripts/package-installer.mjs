@@ -2,17 +2,8 @@ import workspace from '../../shared/scripts/workspace.mjs';
 import { buildMacApp } from './package-app.mjs';
 import { updateSigningKey } from './update-signing.mjs';
 import { sparkleTools } from './sparkle-tools.mjs';
-import {
-  mkdtemp,
-  mkdir,
-  cp,
-  symlink,
-  rm,
-  readFile,
-  writeFile,
-  stat,
-  lstat,
-} from 'node:fs/promises';
+import { createMacDmg } from './dmg.mjs';
+import { mkdtemp, mkdir, rm, readFile, writeFile, stat, lstat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash, sign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -79,22 +70,7 @@ try {
     path.join(output, 'latest-mac.yml'),
     JSON.stringify({ version, minimumSystemVersion, files: [file] }, null, 2) + '\n',
   );
-  const image = path.join(stage, 'image');
-  await mkdir(image);
-  await cp(app, path.join(image, 'VoxCue.app'), { recursive: true, verbatimSymlinks: true });
-  await symlink('/Applications', path.join(image, 'Applications'));
-  run('/usr/bin/hdiutil', [
-    'create',
-    '-volname',
-    `VoxCue ${version}`,
-    '-srcfolder',
-    image,
-    '-ov',
-    '-format',
-    'UDZO',
-    path.join(output, `VoxCue-${version}-arm64.dmg`),
-  ]);
-  run('/usr/bin/hdiutil', ['verify', path.join(output, `VoxCue-${version}-arm64.dmg`)]);
+  await createMacDmg(app, path.join(output, `VoxCue-${version}-arm64.dmg`), stage, version);
   completed = true;
   console.log(`Created signed-update ZIP, DMG and latest-mac.yml in ${output}`);
 } finally {

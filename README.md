@@ -6,7 +6,7 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前本地源码版本为 **0.2.2**，已建立合并前的本地备份分支，并整合远端 Windows 0.2.1 修复；本轮仅本地提交，不上传 GitHub 或重发安装包。Windows 专属文件沿用远端原样，最新版本配置及 Copilot 清理仍需在 Windows 本机完成，运行 `corepack pnpm sync:workspace` 后重新构建。已发布的 Windows x64 与 Mac Apple Silicon 安装文件仍为 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1)，使用独立平台更新清单。
+当前源码版本为 **0.2.2**，已整合远端 Windows 0.2.1 修复，Mac 打包使用新的浅色 DMG 安装布局。Windows 专属文件沿用远端原样，最新版本配置及 Copilot 清理仍需在 Windows 本机完成，运行 `corepack pnpm sync:workspace` 后重新构建。已发布的 Windows x64 与 Mac Apple Silicon 安装文件仍为 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1)，使用独立平台更新清单；源码更新不自动发布新安装包。
 
 ## 开发与启动
 
