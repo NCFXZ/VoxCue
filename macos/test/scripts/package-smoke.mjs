@@ -1,6 +1,6 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, lstat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -8,6 +8,8 @@ import { createRequire } from 'node:module';
 import { createHash } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { signMacApp } from '../../scripts/sign-app.mjs';
+import { dmgTools } from '../../scripts/dmg-tools.mjs';
+import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
@@ -61,6 +63,51 @@ const entries = asar.listPackage(path.join(resources, 'app.asar'));
 assert.ok(!entries.some((file) => /^\/(?:\.tools|\.git|test|windows)\//.test(file)));
 assert.ok(!entries.some((file) => file.includes('ed25519.key')));
 assert.ok(entries.includes('/dist-electron/macos/electron/updates/driver.js'));
+assert.ok(
+  !entries.some((file) =>
+    /node_modules\/(?:onnxruntime-web(?:\/|$)|@github\/copilot-sdk(?:\/|-))/.test(file),
+  ),
+);
+assert.ok(!entries.some((file) => file.includes('/backend/copilot/')));
+assert.ok(entries.some((file) => file.includes('/onnxruntime-node/')));
+assert.equal(await lstat(path.join(resources, 'models')).catch(() => null), null);
+const tools = await dmgTools();
+const layout = JSON.parse(await readFile(tools.layout, 'utf8'));
+const mount = path.join(testRoot, 'dmg-mount');
+await mkdir(mount);
+await withMountedDmg(
+  path.join(release, `VoxCue-${version}-arm64.dmg`),
+  mount,
+  async () => {
+    const stored = JSON.parse(dmgLayout(tools, 'read', mount));
+    assert.deepEqual(stored.positions, {
+      'VoxCue.app': [layout.application.x, layout.application.y],
+      Applications: [layout.destination.x, layout.destination.y],
+    });
+    assert.equal(stored.destination, '/Applications');
+    assert.equal(stored.iconView.iconSize, layout.iconSize);
+    assert.equal(stored.iconView.backgroundType, 2);
+    assert.equal(stored.window.ShowToolbar, false);
+    assert.equal(stored.window.ShowSidebar, false);
+    const dmgApp = path.join(mount, 'VoxCue.app');
+    run('/usr/bin/codesign', ['--verify', '--deep', '--strict', dmgApp]);
+    for (const file of ['Contents/MacOS/VoxCue', 'Contents/Resources/app.asar'])
+      assert.deepEqual(
+        await readFile(path.join(dmgApp, file)),
+        await readFile(path.join(bundle, file)),
+      );
+    const info = run('/usr/bin/tiffutil', [
+      '-info',
+      path.join(mount, '.background/background.tiff'),
+    ]);
+    assert.equal((info.match(/^Directory at /gm) ?? []).length, 2);
+    assert.match(info, /Resolution: 144, 144/);
+  },
+  true,
+);
+console.log(
+  'PASS: final DMG preserves the signed ZIP app, installation layout and Retina background.',
+);
 const installArchive = process.argv.includes('--install-archive');
 if (installArchive) {
   run('/usr/libexec/PlistBuddy', [
@@ -96,7 +143,7 @@ try {
   await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
   const fixtures = require(path.join(workspace.sharedRoot, 'test/scripts/rag-fixtures.cjs'));
   const checks = await app.evaluate(
-    async ({ app, utilityProcess }, fixture) => {
+    async ({ app, utilityProcess, net }, fixture) => {
       const require = process
         .getBuiltinModule('module')
         .createRequire(app.getAppPath() + '/package.json');
@@ -105,7 +152,36 @@ try {
       const assert = require('node:assert/strict');
       const { Worker } = require('node:worker_threads');
       const unpacked = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked');
-      const model = path.join(process.resourcesPath, 'models/speech');
+      const { ComponentService, componentPaths } = require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/components/service.js',
+      );
+      const { packagesFor } = require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/components/catalog.js',
+      );
+      const cache = path.join(app.getPath('userData'), 'artifact-components');
+      const packages = packagesFor(process.platform, process.arch);
+      const options = { root: cache, packages, managed: true, emit() {} };
+      const components = new ComponentService({ ...options, fetch: net.fetch.bind(net) });
+      try {
+        assert.equal((await components.status()).phase, 'needed');
+        assert.equal((await components.download()).phase, 'ready');
+      } finally {
+        components.dispose();
+      }
+      const cached = new ComponentService({
+        ...options,
+        fetch() {
+          throw Error('Verified cache must not require network');
+        },
+      });
+      try {
+        assert.equal((await cached.status()).phase, 'ready');
+        assert.equal((await cached.download()).phase, 'ready');
+      } finally {
+        cached.dispose();
+      }
+      const models = componentPaths(cache, packages);
+      const model = models.speechModels;
       const worker = new Worker(
         path.join(unpacked, 'dist-electron/shared/electron/backend/speech/worker.js'),
       );
@@ -168,7 +244,7 @@ try {
       );
       const knowledge = new KnowledgeHost(
         path.join(app.getPath('userData'), 'rag'),
-        path.join(process.resourcesPath, 'models/rag/multilingual-e5-small'),
+        models.ragModel,
       );
       try {
         await knowledge.initialize();
@@ -220,6 +296,7 @@ try {
       assert.ok(fs.existsSync(path.join(app.getAppPath(), 'public/voxcue.png')));
       return [
         'packaged login',
+        'thin package downloads and offline model cache reuse',
         'arm64 native bindings',
         'PDF/DOCX parsing',
         'Paraformer Worker',

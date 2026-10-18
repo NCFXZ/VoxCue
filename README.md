@@ -1,12 +1,12 @@
 # VoxCue
 
-当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。后续 Mac 构建排除模型和 ONNX Web，Windows 专属依赖清理与瘦身打包待其本机完成；已发布 v0.2.1 保持原发行，本次未重发安装包。
+当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。Mac 0.2.2 安装包已排除模型和 ONNX Web，Windows 专属依赖清理与瘦身打包待其本机完成；旧发行保持。
 
 > 测试结果零保留（2026-10-17）：完整测试已获授权，结果仅在终端/内存显示。已改造入口的必要工作文件使用临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；跨平台目录原则上只读，本轮仅允许同步远端已有 Windows 文件。入口与边界见[测试说明](shared/test/README.md)。
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前源码版本为 **0.2.2**，已整合远端 Windows 0.2.1 修复，Mac 打包使用新的浅色 DMG 安装布局。Windows 专属文件沿用远端原样，最新版本配置及 Copilot 清理仍需在 Windows 本机完成，运行 `corepack pnpm sync:workspace` 后重新构建。已发布的 Windows x64 与 Mac Apple Silicon 安装文件仍为 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1)，使用独立平台更新清单；源码更新不自动发布新安装包。
+当前源码版本为 **0.2.2**，已整合远端 Windows 0.2.1 修复，Mac 打包使用新的浅色 DMG 安装布局。Windows 专属文件沿用远端原样，最新版本配置及 Copilot 清理仍需在 Windows 本机完成，运行 `corepack pnpm sync:workspace` 后重新构建。Mac Apple Silicon 已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，包含美化 DMG 与签名自动更新文件；Windows x64 保持 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 和 Latest，两个平台使用独立更新清单。每次后续源码上传或发行仍需当次授权。
 
 ## 开发与启动
 

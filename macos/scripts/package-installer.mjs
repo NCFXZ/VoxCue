@@ -19,7 +19,7 @@ const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8
 const output = path.join(root, 'release', version);
 if (await lstat(output).catch(() => false))
   throw Error('Release output already exists; do not overwrite an existing release');
-const { key, publicKey, privateKeyFile } = await updateSigningKey({ create: true });
+const { key, publicKey, privateKeyFile } = await updateSigningKey();
 const tools = await sparkleTools();
 const stage = await mkdtemp(path.join(os.tmpdir(), 'voxcue-package-'));
 let completed = false;

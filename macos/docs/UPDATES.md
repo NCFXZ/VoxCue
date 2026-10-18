@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。已发布 v0.2.1 仍为包含语音/RAG/Copilot 的完整包。当前源码后续构建通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；用户仍无需 Node、Python 或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
+面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。已发布 [Mac v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，旧 v0.2.1 仍为包含语音/RAG/Copilot 的完整包。0.2.2 通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；用户仍无需 Node、Python 或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。应用使用 ad-hoc 代码签名，未购买 Developer ID，也未经过 Apple 公证。首次打开时 macOS 可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。
 
@@ -8,7 +8,7 @@
 
 ## DMG 窗口与本地预览
 
-后续构建的 DMG 使用 600×400 浅色品牌背景、左右排列的 VoxCue/Applications 图标、主题色箭头及简短安装说明，背景含普通和 Retina 两种分辨率。布局写入镜像内 `.DS_Store`，不修改用户 Finder 全局偏好；图标仍是真实可拖拽文件和 Applications 链接。
+0.2.2 起的 DMG 使用 600×400 浅色品牌背景、左右排列的 VoxCue/Applications 图标、主题色箭头及简短安装说明，背景含普通和 Retina 两种分辨率。布局写入镜像内 `.DS_Store`，不修改用户 Finder 全局偏好；图标仍是真实可拖拽文件和 Applications 链接。
 
 `scripts/dmg-layout.json` 是背景和图标坐标的唯一配置，`native/DmgArtwork.mm` 用 AppKit 离屏绘图。构建端使用 Command Line Tools 的 Python 3（3.7+）及两份固定 SHA-256 的 MIT 纯 Python wheel（[ds_store](https://github.com/dmgbuild/ds_store)、[mac_alias](https://github.com/dmgbuild/mac_alias)）；仅缓存在 `macos/.cache/dmg-tools` 并直接 zip 导入，不用 pip、不全局安装、不进入应用，最终用户无需开发工具。
 
@@ -16,7 +16,7 @@
 
 ## 本地发行
 
-所有依赖、工具、缓存均在 `macos/`，禁止全局安装。先在当前平台按仓库入口同步配置和安装依赖，模型放 `shared/local-models`。执行：
+所有依赖、工具、缓存均在 `macos/`，禁止全局安装。先在当前平台按仓库入口同步配置和安装依赖；安装包不嵌入模型，独立模型资源保持原发行。执行：
 
 ```sh
 # 在 macos/ 内，使用本工作区的 corepack/pnpm 环境
@@ -31,7 +31,7 @@ corepack pnpm package:installer
 corepack pnpm test:package --install-archive
 ```
 
-首次打包创建 `macos/.tools/update-signing/ed25519.key`（0600）与公开 `macos/update-public-key.json`。**保管并自行备份该私钥；后续每次更新必须使用同一私钥。** 私钥不提交 Git、不上传 GitHub、不进入应用。已有公钥而缺失/错配私钥时打包失败，禁止自动轮换。公钥需随源码保留，安装包 Info.plist 与运行配置均固定该公钥。
+发行打包必须已有 `macos/.tools/update-signing/ed25519.key`（0600）与公开 `macos/update-public-key.json`，不在打包时创建密钥。**保管并自行备份该私钥；每次更新必须使用同一私钥。** 私钥不提交 Git、不上传 GitHub、不进入应用。缺失/错配私钥时打包失败，禁止自动轮换。公钥需随源码保留，安装包 Info.plist 与运行配置均固定该公钥。
 
 发行仅包含 `macos/release/<版本>/` 内三项：
 
@@ -47,4 +47,4 @@ corepack pnpm test:package --install-archive
 
 `test:updates:native` 使用独立临时密钥和旧/新应用，包含签名拒绝、取消与真实替换/重启；Foundation 缓存通过本进程 CFFIXED_USER_HOME 隔离到临时目录，不改用户 HOME。测试只到终端，成功/失败/取消均清理，不使用真实资料或发行私钥。共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手；其外部更新器是夹具，不能单独作为原生安装证明。
 
-`test:package` 从最终 ZIP 解压实际应用，使用临时 profile 验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX 与离线 RAG。`--install-archive` 仅将临时副本的宿主版本降为 0.2.0，让 Sparkle 认证并准备生产 ZIP，再在提交替换前取消；发行文件不变。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不安装或发布测试版本。两种模式均不修改真实安装或用户资料。
+`test:package` 从最终 ZIP 解压实际应用，核对最终 DMG 的相同签名副本、安装布局和 Retina 背景，确认不嵌入模型、已移除 SDK 或 ONNX Web。临时 profile 内实际下载并验证两套模型，再断网复用缓存，验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX 与离线 RAG。`--install-archive` 仅将临时副本的宿主版本降为 0.2.0，让 Sparkle 认证并准备生产 ZIP，再在提交替换前取消；发行文件不变。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不安装或发布测试版本。两种模式均不修改真实安装或用户资料。

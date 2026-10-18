@@ -19,9 +19,9 @@
 
 ## Mac 打包与检查
 
-package-app.mjs 仅复制实际运行依赖，不再包含 GitHub SDK。模型及 onnxruntime-web 不进入包，保留 onnxruntime-node 和实际运行依赖，不手动修改 node_modules 的厂商文件。包内 voxcue-components.json 的 schemaVersion: 1 启用模型缓存；没有标记的完整旧包沿用原模型路径。开发入口在 shared/local-models 两套模型完整时使用该目录，任一套缺失则使用同一 component-cache 与设置下载流程，下载完成后重启仍复用缓存。已发布安装包不重写。
+package-app.mjs 仅复制实际运行依赖，不再包含 GitHub SDK。模型及 onnxruntime-web 不进入包，保留 onnxruntime-node 和实际运行依赖，不手动修改 node_modules 的厂商文件。包内 voxcue-components.json 的 schemaVersion: 1 启用模型缓存；没有标记的完整旧包沿用原模型路径。开发入口在 shared/local-models 两套模型完整时使用该目录，任一套缺失则使用同一 component-cache 与设置下载流程，下载完成后重启仍复用缓存。Mac 0.2.2 已按此布局发布；旧安装包不重写。
 
-手动查看首次下载时，先退出当前工作区应用；本机两套开发模型已按用户要求删除，重新打开 macos/VoxCue.app 后进入“设置 → 本地组件”下载。若以后需要再次清空下载状态，仅删除 VoxCue/component-cache 内对应模型的版本目录，不删除整个应用数据根；重启后重新检查。/Applications 内的旧完整安装版不包含当前改动。
+手动查看首次下载时，先退出当前工作区应用；本机两套开发模型已按用户要求删除，重新打开 macos/VoxCue.app 后进入“设置 → 本地组件”下载。若以后需要再次清空下载状态，仅删除 VoxCue/component-cache 内对应模型的版本目录，不删除整个应用数据根；重启后重新检查。/Applications 内的 0.2.1 旧完整安装版不包含当前改动，0.2.2 安装版使用组件缓存。
 
 macos/test/scripts/components-smoke.mjs 在系统临时目录构建独立应用，使用合成账户验证模型未下载时登录、设置快捷入口、真实下载、入口限制和断网重启。临时应用、数据库、profile、资源副本及截图结束清理，结果只显示终端。
 

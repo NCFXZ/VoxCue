@@ -1,6 +1,6 @@
-# Mac 开发版：原生音频、窗口与启动入口
+# Mac 开发与发行：原生音频、窗口与启动入口
 
-更新：2026-10-17。目标为 Apple Silicon arm64、macOS 14.2+；正式公开安装包仍只有 Windows x64。当前 Mac 是项目内开发版，没有生成独立分发安装包或公证。
+更新：2026-10-18。目标为 Apple Silicon arm64、macOS 14.2+；独立 Mac 安装版已发布 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，包含美化 DMG 与签名更新 ZIP/清单，使用独立模型缓存。应用为 ad-hoc 签名，未经过 Apple 公证；下文 macos/VoxCue.app 仍是依赖工作区的开发启动入口，发行说明见 [Mac 安装与免费自动更新](UPDATES.md)。
 
 用户已恢复完整功能、面试稳定性与对抗性测试授权，下文此前暂停状态为历史。共用/Mac 回归入口遵守临时目录与结果零保留，执行输出只在终端/对话；Windows 仍只读。Mac Dock 连续面试的隐藏期限同时考虑最近 hide/show，show 完成后刷新期限；原生组件被现用应用占用时使用临时目录编译验证，不覆盖已加载组件。入口与合成/真实权限边界见 shared/test/README.md，不保存本轮报告或验收数表。
 

@@ -80,9 +80,21 @@ try {
     installed = true;
     // File Provider can reattach Finder metadata when the app enters the workspace.
     // This is our generated launcher only; quarantine/provenance are never removed.
-    if (spawnSync('/usr/bin/xattr', ['-p', 'com.apple.FinderInfo', target]).status === 0)
-      run('/usr/bin/xattr', ['-d', 'com.apple.FinderInfo', target]);
-    run('/usr/bin/codesign', ['--verify', '--deep', '--strict', target]);
+    // The provider can attach it between a presence check and verification.
+    // Bound retries to this freshly generated bundle; never clear security attributes.
+    for (let attempt = 0; ; attempt++) {
+      const metadata = spawnSync('/usr/bin/xattr', ['-d', 'com.apple.FinderInfo', target]);
+      if (metadata.error) throw metadata.error;
+      const verification = spawnSync(
+        '/usr/bin/codesign',
+        ['--verify', '--deep', '--strict', target],
+        { encoding: 'utf8' },
+      );
+      if (!verification.error && verification.status === 0) break;
+      if (attempt === 4 || verification.error)
+        throw verification.error ?? Error(verification.stderr);
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    }
   } catch (error) {
     if (installed) await rename(target, bundle);
     if (existing) await rename(previous, target);
