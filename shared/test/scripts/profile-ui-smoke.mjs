@@ -25,6 +25,9 @@ try {
     const { KnowledgeHost } = require(
       app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
     );
+    const { KnowledgeError } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/errors.js',
+    );
     globalThis.profileRequests = [];
     globalThis.profileSearches = [];
     globalThis.failSkills = true;
@@ -34,7 +37,7 @@ try {
       globalThis.profileSearches.push({ baseId, query });
       if (globalThis.failProfileSearch) {
         globalThis.failProfileSearch = false;
-        throw Error('Synthetic local retrieval unavailable');
+        throw new KnowledgeError('unavailable', 'Synthetic local retrieval unavailable');
       }
       return [
         {
@@ -298,10 +301,14 @@ try {
   assert.equal(await saved(), null);
   await page.evaluate(() => globalThis.restoreProfileStorage());
   await confirm();
-  await proposal()
+  await page
+    .locator('.skill-update-prompt')
     .getByText('简历或职位描述已更新，是否联网更新面试技能？', { exact: true })
     .waitFor();
-  await proposal().getByRole('button', { name: '暂不更新', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '暂不更新', exact: true })
+    .click();
   assert((await saved()).background.includes('简历摘要'));
   checks.push(
     'attachment summaries preview/consent, storage failure recovery and proactive skill question',
@@ -319,7 +326,10 @@ try {
   assert.equal(await message.inputValue(), '尚未发送的草稿');
   assert((await saved()).background.includes('接口校验'));
   assert.equal(await resumeEditor.count(), 0);
-  await proposal().getByRole('button', { name: '暂不更新', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '暂不更新', exact: true })
+    .click();
   await send('把我的自然语言要求整理为自定义指令：自然口语，先给结论');
   await proposal().waitFor();
   assert.equal((await saved()).customInstructions, undefined);
@@ -350,7 +360,10 @@ try {
   assert(!preparationRequest.instructions.includes('第一人称口语回答'));
   assert(!preparationRequest.instructions.includes('遵循用户已经确认的自定义指令'));
   assert(preparationRequest.profile.customInstructions.includes('第一人称口语回答'));
-  await proposal().getByRole('button', { name: '联网更新技能', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '联网更新技能', exact: true })
+    .click();
   await page.getByRole('button', { name: '重试回答', exact: true }).last().waitFor();
   assert.equal((await saved()).skills, undefined);
   await page.getByRole('button', { name: '重试回答', exact: true }).last().click();
@@ -405,8 +418,14 @@ try {
   assert(!ordinaryFallback.at(-1).instructions.includes('第一人称口语回答'));
   await send('请更新 JD 摘要');
   await confirm();
-  await proposal().getByRole('button', { name: '联网更新技能', exact: true }).waitFor();
-  await proposal().getByRole('button', { name: '暂不更新', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '联网更新技能', exact: true })
+    .waitFor();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '暂不更新', exact: true })
+    .click();
   await send('请修改知识库选择');
   await page.getByText('资料更新包含未知字段。', { exact: true }).waitFor();
   assert.equal(
@@ -605,6 +624,33 @@ try {
   assert.equal((await saved()).jobDescription, '');
   checks.push(
     'missing-summary shortcut preserves draft/attachments, waits for send/consent and does not trigger skill research',
+  );
+  // A manually saved summary must offer the same action without an AI proposal
+  // in this conversation, including after chat deletion/reload.
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  if (!(await panel.isVisible())) await info.click();
+  await expand('职位描述摘要');
+  await section('职位描述摘要').getByRole('button', { name: '编辑', exact: true }).click();
+  await jdEditor.getByLabel('内容', { exact: true }).fill('手动合成 JD：接口开发。');
+  await jdEditor.getByRole('button', { name: '保存', exact: true }).click();
+  assert.equal(await page.locator('.skill-update-prompt').count(), 1);
+  const manualSkills = page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '联网更新技能', exact: true });
+  await manualSkills.waitFor();
+  assert.equal(await page.locator('.chat-message').count(), 0);
+  await page.reload();
+  await manualSkills.waitFor();
+  const beforeManualSkill = await app.evaluate(() => globalThis.profileRequests.length);
+  await manualSkills.click();
+  await proposal().waitFor();
+  const manualSkillRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert.equal(await app.evaluate(() => globalThis.profileRequests.length), beforeManualSkill + 1);
+  assert.equal(manualSkillRequest.profileTask, 'skills');
+  assert.equal(manualSkillRequest.profile.jobDescription, '手动合成 JD：接口开发。');
+  assert.equal(await page.locator('.skill-update-prompt').count(), 1);
+  checks.push(
+    'manual summaries offer one chat skill action without an AI proposal and after reload; the action sends once',
   );
   assert.deepEqual(errors, []);
   await console.log(

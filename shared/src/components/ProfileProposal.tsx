@@ -158,13 +158,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
       message.changes![key] === '' ||
       (Array.isArray(message.changes![key]) && !(message.changes![key] as unknown[]).length),
   );
-  const latestSummary = [...state.messages]
-    .reverse()
-    .find(
-      (item) =>
-        item.applied &&
-        (item.changes?.background !== undefined || item.changes?.jobDescription !== undefined),
-    );
   return (
     <section className="profile-proposal" aria-label="待确认的资料更新">
       <strong>
@@ -209,10 +202,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
           )}
         </>
       )}
-      {message.applied &&
-        latestSummary?.id === message.id &&
-        (message.changes.background !== undefined ||
-          message.changes.jobDescription !== undefined) && <SkillUpdatePrompt />}
     </section>
   );
 }

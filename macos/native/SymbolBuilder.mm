@@ -15,8 +15,13 @@ int main(int argc, const char *argv[]) {
             if (![name isKindOfClass:[NSString class]]) return 1;
             NSImage *symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
             if (!symbol) { fprintf(stderr, "Unavailable SF Symbol: %s\n", [name UTF8String]); return 1; }
+            BOOL fontDecrease = [key isEqualToString:@"FontDecrease"];
+            BOOL fontIncrease = [key isEqualToString:@"FontIncrease"];
+            BOOL fontAdjustment = fontDecrease || fontIncrease;
             NSImageSymbolConfiguration *configuration = [NSImageSymbolConfiguration
-                configurationWithPointSize:20 weight:NSFontWeightRegular scale:NSImageSymbolScaleMedium];
+                configurationWithPointSize:20
+                weight:fontAdjustment ? NSFontWeightSemibold : NSFontWeightRegular
+                scale:NSImageSymbolScaleMedium];
             symbol = [symbol imageWithSymbolConfiguration:configuration];
             const NSInteger side = 192;
             NSBitmapImageRep *bitmap = [[NSBitmapImageRep alloc]
@@ -31,9 +36,13 @@ int main(int argc, const char *argv[]) {
             CGContextClearRect(cg, CGRectMake(0, 0, side, side));
             CGContextScaleCTM(cg, 8, 8); // 24pt canvas at 8x for Retina and larger UI controls.
             NSSize size = [symbol size];
-            CGFloat ratio = MIN(20.0 / size.width, 20.0 / size.height);
+            // Normalizing both native A glyphs to 20pt erases their size cue.
+            // Keep a clear small/large pair on one baseline, including at 16px.
+            CGFloat extent = fontDecrease ? 14.0 : fontIncrease ? 22.0 : 20.0;
+            CGFloat ratio = MIN(extent / size.width, extent / size.height);
             size = NSMakeSize(size.width * ratio, size.height * ratio);
-            [symbol drawInRect:NSMakeRect((24-size.width)/2, (24-size.height)/2, size.width, size.height)
+            CGFloat bottom = fontAdjustment ? 2.0 : (24-size.height)/2;
+            [symbol drawInRect:NSMakeRect((24-size.width)/2, bottom, size.width, size.height)
                 fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0
                 respectFlipped:NO hints:nil];
             [NSGraphicsContext restoreGraphicsState];

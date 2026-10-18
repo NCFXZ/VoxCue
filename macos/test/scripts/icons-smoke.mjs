@@ -53,8 +53,16 @@ try {
       );
       const bitmap = image.toBitmap();
       let opaque = 0;
-      for (let index = 3; index < bitmap.length; index += 4) if (bitmap[index] > 0) opaque++;
-      return { key, size: image.getSize(), opaque };
+      let top = 192;
+      let bottom = -1;
+      for (let index = 3; index < bitmap.length; index += 4)
+        if (bitmap[index] > 0) {
+          opaque++;
+          const y = Math.floor(index / 4 / 192);
+          top = Math.min(top, y);
+          bottom = Math.max(bottom, y);
+        }
+      return { key, size: image.getSize(), opaque, inkHeight: bottom - top + 1, bottom };
     });
   }, symbols);
   assert.equal(assets.length, Object.keys(symbols).length);
@@ -67,8 +75,18 @@ try {
         item.opaque < 192 * 192,
     ),
   );
+  const smallFont = assets.find((item) => item.key === 'FontDecrease');
+  const largeFont = assets.find((item) => item.key === 'FontIncrease');
+  assert.ok(smallFont.inkHeight >= 70, JSON.stringify(smallFont));
+  assert.ok(
+    largeFont.inkHeight >= smallFont.inkHeight * 1.45,
+    JSON.stringify({ smallFont, largeFont }),
+  );
+  // Native side bearings can differ by a fraction of a point after scaling.
+  assert.ok(Math.abs(smallFont.bottom - largeFont.bottom) <= 8);
   checks.push(
     `${assets.length} 个实际 AppKit SF Symbols 均非空、具有透明背景；登录图标使用本平台实现`,
+    '字号图标原生笔画加粗、基线对齐，大 A 的实际像素高度至少为小 A 的 1.45 倍',
   );
   await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
@@ -153,6 +171,18 @@ try {
     symbols.Update,
   );
   checks.push('重置、刷新和软件更新分别使用不同的图形，更新设置入口与操作按钮一致');
+  await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  for (const [label, key] of [
+    ['字体变大', 'FontIncrease'],
+    ['字体变小', 'FontDecrease'],
+  ])
+    assert.equal(
+      await settings
+        .getByRole('button', { name: label, exact: true })
+        .locator('svg')
+        .getAttribute('data-sf-symbol'),
+      symbols[key],
+    );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   checks.push('主界面/设置含菜单、导航、主题、输入和关闭图标均为 SF Symbols，浅深主题继承颜色');
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -164,6 +194,17 @@ try {
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).waitFor();
   await verifyIcons(floating, 10);
+  for (const [label, key] of [
+    ['字体变大', 'FontIncrease'],
+    ['字体变小', 'FontDecrease'],
+  ])
+    assert.equal(
+      await floating
+        .getByRole('button', { name: label, exact: true })
+        .locator('svg')
+        .getAttribute('data-sf-symbol'),
+      symbols[key],
+    );
   assert.equal(
     await floating
       .locator('.resize-right svg')

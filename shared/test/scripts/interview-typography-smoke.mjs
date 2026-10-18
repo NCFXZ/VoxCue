@@ -245,6 +245,11 @@ try {
   await fontFailure.waitFor({ state: 'detached', timeout: 2000 });
   await floating.getByRole('button', { name: '字体变小', exact: true }).click();
   await floating.keyboard.press('Control+-');
+  if (process.platform === 'darwin') {
+    await floating.keyboard.press('Meta+-');
+    await floating.keyboard.press('Meta+=');
+    await floating.keyboard.press('Meta+0');
+  }
   assert.equal(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()

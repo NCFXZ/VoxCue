@@ -146,6 +146,9 @@ try {
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   const personal = page.getByRole('complementary', { name: '个人信息' });
+  const knowledgeSection = personal.locator('details[aria-label="面试知识库"]');
+  assert.equal(await knowledgeSection.getAttribute('open'), null);
+  await knowledgeSection.locator(':scope > summary').click();
   assert.equal(
     await personal.getByRole('button', { name: '面试知识库', exact: true }).isDisabled(),
     true,

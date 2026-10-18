@@ -5,6 +5,7 @@ import type { ChatEvent, ChatRequest } from '../contracts/chat';
 import type { RagMode, KnowledgeHit, KnowledgeItem } from '../contracts/knowledge';
 import { validateRequest } from '../backend/chat/validation';
 import { buildRagContext, ragInstructions } from './ragContext';
+import { knowledgeUnavailable } from '../backend/knowledge/errors';
 
 // Bound even an unresponsive port without consuming a late result. The port still
 // receives the signal and owns cancellation/retirement of its native work.
@@ -125,8 +126,9 @@ export class RagChatService implements AIChatService {
           () => this.knowledge.search(query, 5, 'hybrid', lookup, baseId),
           lookup,
         );
-    } catch {
+    } catch (error) {
       signal.throwIfAborted();
+      if (!knowledgeUnavailable(error) && !(lookup.aborted && error === lookup.reason)) throw error;
       failed = true;
     }
     if (!Array.isArray(candidates)) throw Error('知识库检索结果格式无效。');
@@ -143,8 +145,10 @@ export class RagChatService implements AIChatService {
       let item: KnowledgeItem | null;
       try {
         item = await lookupResult(() => this.knowledge.getItem(hit.itemId, lookup), lookup);
-      } catch {
+      } catch (error) {
         signal.throwIfAborted();
+        if (!knowledgeUnavailable(error) && !(lookup.aborted && error === lookup.reason))
+          throw error;
         failed = true;
         continue;
       }

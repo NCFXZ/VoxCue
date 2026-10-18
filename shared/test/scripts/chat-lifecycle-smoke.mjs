@@ -125,19 +125,22 @@ try {
   await page.screenshot({});
   await app.evaluate(() => globalThis.finishPreview());
   await proposals().last().getByRole('button', { name: '确认更新', exact: true }).click();
-  await proposals()
-    .last()
+  await page
+    .locator('.skill-update-prompt')
     .getByText('还缺少职位描述摘要，请先提供并确认后再生成技能。', { exact: true })
     .waitFor();
   const count = await app.evaluate(() => globalThis.requests.length);
-  await proposals().last().getByRole('button', { name: '补充职位描述', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '补充职位描述', exact: true })
+    .click();
   assert.match(await input().inputValue(), /职位描述/);
   assert.equal(await app.evaluate(() => globalThis.requests.length), count);
   await input().fill('更新JD：岗位需要软件开发和专业沟通');
   await send().click();
   await proposals().last().getByRole('button', { name: '确认更新', exact: true }).click();
-  const updateSkills = proposals()
-    .last()
+  const updateSkills = page
+    .locator('.skill-update-prompt')
     .getByRole('button', { name: '联网更新技能', exact: true });
   assert.equal(await updateSkills.isEnabled(), true);
   await updateSkills.click();

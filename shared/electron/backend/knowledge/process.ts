@@ -1,6 +1,7 @@
 import { KnowledgeService } from './service';
 import { parseDocument } from './parser';
 import { LocalEmbedder } from './embedding';
+import { KnowledgeError } from './errors';
 const port = process.parentPort!;
 let core: KnowledgeService;
 let active: string | undefined;
@@ -60,12 +61,20 @@ port.on('message', ({ data: m }) => {
               await core.unloadModel();
               break;
             default:
-              throw Error('未知知识库操作。');
+              throw new KnowledgeError('invalid_request', '未知知识库操作。');
           }
         signal.throwIfAborted();
         port.postMessage({ id: m.id, value });
       } catch (error) {
-        port.postMessage({ id: m.id, error: publicError(error) });
+        port.postMessage({
+          id: m.id,
+          error: publicError(error),
+          errorCode: signal.aborted
+            ? 'cancelled'
+            : error instanceof KnowledgeError
+              ? error.code
+              : 'unavailable',
+        });
       } finally {
         controllers.delete(m.id);
         active = undefined;

@@ -19,7 +19,13 @@ const settle = (page) =>
   );
 const errors = [];
 async function fixedZoom(page) {
-  for (const key of ['Control+-', 'Control+=', 'Control+Shift+=', 'Control+0']) {
+  for (const key of [
+    'Control+-',
+    'Control+=',
+    'Control+Shift+=',
+    'Control+0',
+    ...(process.platform === 'darwin' ? ['Meta+-', 'Meta+=', 'Meta+Shift+=', 'Meta+0'] : []),
+  ]) {
     await page.keyboard.press(key);
     assert.equal(
       await app.evaluate(
@@ -31,6 +37,19 @@ async function fixedZoom(page) {
       ),
       1,
     );
+  }
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send('Input.synthesizePinchGesture', {
+      x: 180,
+      y: 160,
+      scaleFactor: 1.5,
+      relativeSpeed: 800,
+      gestureSourceType: 'touch',
+    });
+    assert.equal(await page.evaluate(() => visualViewport.scale), 1);
+  } finally {
+    await session.detach();
   }
 }
 try {

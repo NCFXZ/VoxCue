@@ -88,6 +88,25 @@ export const electron = {
     );
     if (!(profile && path.resolve(profile).startsWith(testRoot + path.sep)) && !isolatedArgument)
       throw Error('Electron tests require this run’s temporary userData or fixture entry.');
+    // Legacy development checks share the same pre-import network boundary.
+    // Keep explicit Vite previews and packaged download fixtures on their own
+    // transports; their callers own those narrower network fixtures.
+    const entryArgument = options.args?.[0];
+    if (
+      entryArgument &&
+      !options.env?.VITE_DEV_SERVER_URL &&
+      path.basename(entryArgument) !== 'offline-electron-entry.cjs' &&
+      (path.resolve(entryArgument) === workspace.platformRoot ||
+        path.resolve(entryArgument).startsWith(testRoot + path.sep))
+    ) {
+      const { offlineElectronEntry } = await import('./offline-electron-entry.mjs');
+      const fixture =
+        path.resolve(entryArgument) === workspace.platformRoot ? undefined : entryArgument;
+      options = {
+        ...options,
+        args: [await offlineElectronEntry(fixture), ...options.args.slice(1)],
+      };
+    }
     const speechModels = options.env?.VOXCUE_TEST_SPEECH_MODELS;
     const ragModel = options.env?.VOXCUE_TEST_RAG_MODEL;
     if (speechModels && ragModel && options.args?.[0]) {

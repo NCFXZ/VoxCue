@@ -10,6 +10,10 @@
 
 ## 当前入口
 
+Mac 0.3.1 本地修复增加知识库错误码跨进程回归：knowledge-host 与 rag 覆盖参数/配置/完整性/未就绪/关闭/取消不可回退、可用性故障回退和期限竞争；未知错误不降级。profile-ui 覆盖手动摘要保存、空聊天和重载后的单一技能更新入口。ui-refinement 与 interview-typography 在 Mac 覆盖 Cmd 缩放，前者使用合成触摸手势检查视觉缩放限制；不采样物理触控板。旧开发态桌面入口统一在应用导入前阻断网络，明确 Vite 预览及安装态固定模型下载按各自传输夹具处理。
+
+Mac 0.3.1 发行授权后运行 dmg 与正式 package-smoke：固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据和 SHA512，核对应用内公钥、版本及 DMG/ZIP 内容一致。updates-native 会在系统偏好目录建立临时测试域，当前仅系统临时目录的范围不运行该入口，也不运行 package-smoke 的 --install-archive。更新编排、签名和回环 feed 由单测及合成 updates/updates-sidebar 检查，不能记作原生 Sparkle 替换验收。components 使用临时测试 .app 检查真实组件流程；正式发行仅保留已授权三项，打包暂存和验证资料退出清理。物理音频及真实屏幕采样继续不执行。
+
 Windows 0.3.1 沿用完整离线单测、typecheck/build/check:architecture/check:workspace、windows-suite 共用功能/--windows 原生矩阵及 --dpi 五档缩放；GUI/原生串行。electron 在每次重载后先检查简历区默认折叠，再展开核对原件保留；conversation-status 容许0.01 CSS像素内的几何取整误差；interview-workflow 使用现行导出的主提示词识别合成面试请求，避免旧字面前缀误分流，保留临时稿/终稿/手动提交和原生交互断言。发行前另运行 installer-branding、installer-engine（0.3.0到当前版）与 portable-native --with-installer，在系统临时目录构建并核对实际安装负载、ASAR、组件下载/取消/释放及原生窗口，不执行生产安装器。components-check 先核对知识库区默认折叠，再展开检查模型未就绪时禁用、下载后的启用及设置入口，保留真实下载/取消/摘要拒绝/重试断言。仅验证通过后保留正式 exe、blockmap、latest.yml，模型与隔离资料退出清理；不记录测试结果。macos/ 只读，不能将 Windows 回归当作 Mac 验收。
 
 第2/4/5组最新补充由 desktop-ipc、profile-store、profile-proposal 检查资料用途、准备聊天不拼接执行面试自定义指令、外部内容边界及技能来源质量规则。rag 单测检查 Local RAG 搜索失败、完整条目部分失败/移除、原15秒预算、挂起端口超时与迟到结果、超时/取消竞争、身份/配置/参数错误不回退及 Provider 只调用一次；Function Calling 与知识核心保护沿用原入口。profile-ui 使用离线合成端口检查普通准备聊天与面试失败后继续回答、模型/effort保持，回退答案仍进入后续追问上下文；chat-progress 保留实际 Responses/SSE 的提案确认、来源核验和取消保护，并按第7组确认稿检查补充摘要入口。结果仅终端，临时资料退出清理，GUI 串行。
@@ -109,6 +113,6 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 
 单测仅收集 {shared,windows,macos}/test/{unit,renderer}/**/*.test.{ts,tsx}，不扫描历史快照或生成探针。依赖仅安装在当前平台，源码测试的 CommonJS require 使用当前平台 NODE_PATH。根命令由平台转发，另一平台目录只读；不在那里安装依赖、生成配置或运行产物。
 
-保留的 Mac 专项源码包括 audio-native-smoke.mjs、window-native-smoke.mjs、launcher-smoke.mjs、screen-permission-smoke.mjs、icons-smoke.mjs。SF Symbols 现有 52 个映射，重置/刷新/更新分别为 Reset/Refresh/Update；icons-smoke 核对用量按钮和更新入口的实际符号，`--preview` 仅在内存展示对应界面。原生资源检查和合成 UI 不能替代真实账户、硬件或原生视觉验收。屏幕权限检查不自动申请新授权或修改 TCC。图标和删除控件回归通过 installUiAccount 的 components: true 显式注入合成模型可用状态，不下载模型；组件下载/缓存回归默认不启用该夹具，仍验证真实组件服务。
+保留的 Mac 专项源码包括 audio-native-smoke.mjs、window-native-smoke.mjs、launcher-smoke.mjs、screen-permission-smoke.mjs、icons-smoke.mjs。SF Symbols 现有 54 个映射（包含字号减小/增大），重置/刷新/更新分别为 Reset/Refresh/Update；icons-smoke 核对用量按钮和更新入口的实际符号，`--preview` 仅在内存展示对应界面。原生资源检查和合成 UI 不能替代真实账户、硬件或原生视觉验收。屏幕权限检查不自动申请新授权或修改 TCC。图标和删除控件回归通过 installUiAccount 的 components: true 显式注入合成模型可用状态，不下载模型；组件下载/缓存回归默认不启用该夹具，仍验证真实组件服务。
 
 所有后续获准测试使用合成账户/文档/设备或显式公共样本，不读取真实凭据、真人音频和用户资料。不得自动重启已取消的十分钟语音或退役 benchmark。在线漏洞审计需要单独明确元数据外发授权，历史一次授权不自动延续。

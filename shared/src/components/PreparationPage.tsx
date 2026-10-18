@@ -31,7 +31,7 @@ import type {
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useDictation } from '../stores/dictation';
 import { Modal } from './ui/modal';
-import { ProfileProposal } from './ProfileProposal';
+import { ProfileProposal, SkillUpdatePrompt } from './ProfileProposal';
 import { MarkdownContent } from './MarkdownContent';
 import { PlainTextContent } from './PlainTextContent';
 import { isSkillReply } from '../services/preparation';
@@ -689,11 +689,13 @@ export function PreparationPage({
                     )}
                   </article>
                 ))}
+                <SkillUpdatePrompt />
               </div>
             </div>
           ) : (
             <section className="welcome">
               <h1>今天想准备哪一部分面试？</h1>
+              <SkillUpdatePrompt />
               <div className="suggestions">
                 {[
                   {

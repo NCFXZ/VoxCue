@@ -333,8 +333,14 @@ try {
   await send('更新简历');
   const proposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
   await proposal.getByRole('button', { name: '确认更新', exact: true }).click();
-  await proposal.getByText('资料已保存，补齐摘要后可联网更新面试技能。', { exact: true }).waitFor();
-  await proposal.getByRole('button', { name: '补充职位描述', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByText('资料已保存，补齐摘要后可联网更新面试技能。', { exact: true })
+    .waitFor();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '补充职位描述', exact: true })
+    .click();
   assert.ok((await input().inputValue()).includes('仅补充缺少的摘要并展示待确认提案'));
   assert.ok((await input().inputValue()).includes('以下是职位描述内容：'));
   assert.ok((await input().inputValue()).includes('也不生成技能'));
@@ -357,7 +363,10 @@ try {
   await send('更新 JD');
   const jdProposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
   await jdProposal.getByRole('button', { name: '确认更新', exact: true }).click();
-  await jdProposal.getByRole('button', { name: '联网更新技能', exact: true }).click();
+  await page
+    .locator('.skill-update-prompt')
+    .getByRole('button', { name: '联网更新技能', exact: true })
+    .click();
   const skillsProposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
   await skillsProposal.getByRole('button', { name: '确认更新', exact: true }).waitFor();
   assert.equal(await skillsProposal.locator('.profile-value-list > article').count(), 3);

@@ -9,6 +9,7 @@ import type {
   KnowledgeStatus,
 } from '../../contracts/knowledge';
 import type { DocumentInput, KnowledgePort } from './types';
+import { KnowledgeError, knowledgeErrorFromWire } from './errors';
 export class KnowledgeHost implements KnowledgePort {
   private child?: UtilityProcess;
   private ready?: Promise<void>;
@@ -37,8 +38,11 @@ export class KnowledgeHost implements KnowledgePort {
         this.child?.postMessage({ cancel: id });
         reject(error);
       };
-      const abort = () => finish(Error('知识库操作已取消。'));
-      const timer = setTimeout(() => finish(Error('本地知识库服务超时，请稍后重试。')), timeout);
+      const abort = () => finish(new KnowledgeError('cancelled', '知识库操作已取消。'));
+      const timer = setTimeout(
+        () => finish(new KnowledgeError('unavailable', '本地知识库服务超时，请稍后重试。')),
+        timeout,
+      );
       const cleanup = () => {
         clearTimeout(timer);
         signal.removeEventListener('abort', abort);
@@ -48,7 +52,7 @@ export class KnowledgeHost implements KnowledgePort {
       try {
         this.child!.postMessage({ id, ...call });
       } catch (error) {
-        finish(error as Error);
+        finish(new KnowledgeError('unavailable', '本地知识库进程不可用。'));
       }
     });
   }
@@ -73,10 +77,10 @@ export class KnowledgeHost implements KnowledgePort {
       if (!p) return;
       this.pending.delete(m.id);
       p.cleanup();
-      m.error ? p.reject(Error(m.error)) : p.resolve(m.value);
+      m.error ? p.reject(knowledgeErrorFromWire(m.error, m.errorCode)) : p.resolve(m.value);
     });
     child.on('exit', () => {
-      if (this.child === child) this.stop('本地知识库进程已退出，请重试。');
+      if (this.child === child) this.stop('本地知识库进程已退出，请重试。', 'unavailable');
     });
     this.ready = this.send<void>(
       { init: { directory: this.directory, modelPath: this.modelPath } },
@@ -131,14 +135,14 @@ export class KnowledgeHost implements KnowledgePort {
   async unloadModel() {
     if (this.child) await this.send({ op: 'unload-model' }, undefined, 30000);
   }
-  stop(message = '知识库服务已关闭。') {
+  stop(message = '知识库服务已关闭。', code: 'closed' | 'unavailable' = 'closed') {
     const child = this.child;
     this.child = undefined;
     this.ready = undefined;
     child?.kill();
     for (const p of this.pending.values()) {
       p.cleanup();
-      p.reject(Error(message));
+      p.reject(new KnowledgeError(code, message));
     }
     this.pending.clear();
   }

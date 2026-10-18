@@ -37,6 +37,31 @@ async function directory() {
   return temporaryDirectory('rag-core');
 }
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
+  it.each([null, [], { schemaVersion: 99, documents: {} }])(
+    '参数和损坏配置 %j 保留不可回退的错误码',
+    async (catalog) => {
+      const root = await directory();
+      const core = new KnowledgeService(root, embedder());
+      try {
+        await expect(
+          core.search('PID', 5, 'hybrid', signal(), 'constructor'),
+        ).rejects.toMatchObject({
+          code: 'invalid_request',
+        });
+      } finally {
+        await core.close();
+      }
+      await writeFile(path.join(root, 'catalog.json'), JSON.stringify(catalog));
+      const incompatible = new KnowledgeService(root, embedder());
+      try {
+        await expect(incompatible.search('PID', 5, 'hybrid', signal())).rejects.toMatchObject({
+          code: 'configuration',
+        });
+      } finally {
+        await incompatible.close();
+      }
+    },
+  );
   it('离线重复查询每次重新编码并执行真实数据库检索', async () => {
     const vectors = embedder();
     const encode = vi.fn(vectors.encode);

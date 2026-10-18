@@ -1,3 +1,43 @@
+## 2026-10-18 本轮源码同步：Windows Codex 接续提示词
+
+以下用于 Windows 本机后续接续；编写提示词不代表已在 Windows 执行适配或验收。本轮 Mac 只提交 shared/Mac 源码、测试与文档，windows/ 未改，公开发行保持。
+
+```text
+请在 Windows 本机接续私有 NCFXZ/VoxCue 的 main，完成本次 Mac 0.3.1 源码同步后的 Windows 适配和安全范围内完整回归，发现问题直接修复。
+
+先读 AGENTS.md、PROGRESS.md、shared/test/README.md、shared/docs/HANDOFF.md，检查本机分支、差异、进程占用及远端提交。最低比较基线为 d60a651f878a5dde4afbad733adf3aceac4638e0，再同步包含本节的最新 main；保护未提交工作，禁止 reset/clean 或整文件覆盖。允许通过 Git 拉齐远端已有 macos/ 文件，完成同步后 macos/ 严格只读。页面与业务继续 shared 单一实现，只在 Windows 修改必要的 windows/、shared/ 和根入口，不复制 Mac 或共享页面；依赖按 Windows 冻结锁安装，不升级，不自动变更版本。
+
+本次新增共享修复：
+1. shared/electron/backend/knowledge/errors.ts 定义 unavailable、invalid_request、configuration、integrity、not_ready、cancelled、closed。knowledge process/host 跨 utilityProcess 传递并恢复错误码，缺失或未知 wire 错误码按 integrity 处理；KnowledgeService 和 LocalEmbedder 保留参数、目录/schema、向量、未就绪等明确错误类别。
+2. application/rag.ts 的 Local RAG 只回退明确的 unavailable 或原有 15 秒检索期限产生的实际取消原因。参数/配置/完整性/未就绪/关闭/取消、端口未分类错误及条目身份不匹配不得被吞掉；原始请求取消优先，期限竞争不能降级完整性错误。保持检索范围、证据预算、部分有效资料、一次 Provider 调用及迟到保护，不增加重试或模型调用。
+3. SkillUpdatePrompt 从某一份已保存提案内部移到聊天消息区/空聊天欢迎区，页面一次只展示一个入口。手动保存简历或 JD、缺少另一份摘要、切换/删除聊天、重载后仍可补齐摘要或联网更新技能；资料提案确认、流式失败重试、来源后台核验、纯文字展示及附件/草稿保护保持，侧栏不重复展示。
+4. shared/test/scripts/test-workspace.mjs 对旧开发态 Electron 入口在应用导入前统一安装离线拦截，再装配临时模型路径。显式 Vite 预览和安装态固定模型下载仍由各自传输夹具管理，不能绕开断网保护或注入真实缓存路径。聊天专项已按新的全局技能入口定位；ui-refinement 增加合成 pinch 检查，Cmd 缩放检查仅在 Mac 分支执行。
+
+本次没有重新修改提示词或恢复用量优化。d60a651 的八组提示词/旧风格移除、固定 100% 页面缩放、字号偏好、折叠动画/弹窗编辑/分隔栏/圆角滚动/窄输入栏保持。继续正常提交“嗯/好的/谢谢”等回应；保留 2200ms 静音、系统终稿限定、去重/排队/取消/迟到保护，发送原 120 条/64000 字节/每条 6000 字边界内完整原文及身份/时间/问题关联；不恢复 textRef、相关历史筛选或 KnowledgeService 精确查询结果 LRU。用量统计、token 账本及重置、模型/effort/篇幅、revisions/模型等既有缓存与隔离保护保持。
+
+Mac 专属内容已在所属平台完成：FontDecrease/FontIncrease 的 SF Symbols 导出、生成与明显大小/笔画差异，Mac package.json 同步 0.3.1，Mac 组件测试适配默认折叠，正式包固定公钥直接验证 ZIP Ed25519/清单/SHA512 及 DMG/ZIP 一致性。不要把 SF Symbols 或 Mac 包验证复制到 Windows；Windows 继续使用现有 Fluent 字号图标。Mac 回归及发行不能作为 Windows 验收依据。
+
+Windows 待本机验证：
+- 类型、架构、平台边界、生成配置检查与 Windows 实际构建；不要让构建写入 macos/。
+- 完整离线单测，重点 knowledge-host、knowledge-core、rag、profile-store/proposal 和恢复行为专项；合成 utilityProcess 的错误码跨进程、超时/取消/退出/关闭及迟到响应，和本机 E5/LanceDB/ONNX 模型未就绪、卸载、损坏配置、重复检索与知识库隔离。
+- shared 的 profile-ui、chat-progress、chat-lifecycle、interview-usage、interview-typography、ui-refinement、composer、updates/sidebar、components；核对手动保存摘要、空聊天/重载、单一技能入口、保存失败重试及完整历史。Windows 专属脚本如仍假定技能入口位于旧提案内部，只调整操作定位，保留保护断言；故障夹具使用明确错误类别，不能靠宽泛 catch 放行。
+- windows/test/scripts/windows-suite.mjs 的共用矩阵、--windows 原生矩阵和 --dpi 五档（100/125/150/175/200%），覆盖 Ctrl 缩放/合成 pinch、Fluent 图标、最小窗口、浅深主题、Acrylic/置顶/鼠标穿透/原生拖动缩放、WASAPI 合成捕获、Worker/utilityProcess 与组件释放/删除后的文件占用。原生鼠标及 GUI 必须串行，桌面未解锁则明确报告环境阻塞，不跳过断言或更改系统设置。
+
+安全边界：仅合成账户、资料、转写/响应、采集端口和固定公开模型/音频。必要测试文件、模型和 profile 只在系统临时目录，成功/失败/取消/退出清理；截图仅内存，结果仅终端/对话，不保存报告、日志、指标、trace 或测试数据库。不读取真实凭据/简历/知识库/记录，不采样真人音频或真实屏幕，不恢复十分钟语音；此前 Windows 349 个跳过目录和 Mac 旧占用目录不重试。保留原件、索引及未知文件，组件删除检查真实进程退出、模型卸载和文件占用。
+
+Mac 0.3.1 已追加至公开 NCFXZ/VoxCue-releases 的既有 v0.3.1；原 Windows 0.3.1 安装包未重建，尚不含本次新增共享修复。Windows、Mac、旧发行资产及 v0.3.0 Latest 保持。此次接续仅本机同步、修复与验证，不自动提交/推送、打安装包、上传或替换公开资产，不改版本、标签、Latest 或仓库设置；后续源码同步或发行另需用户授权。最终说明 Windows 实际修改、验证范围、剩余限制及临时数据清理状态，不能把 Mac 验证当作 Windows 已通过。
+```
+
+## 2026-10-18 Mac 0.3.1 已发布
+
+按用户追加授权，Mac arm64 DMG、更新 ZIP 和 latest-mac.yml 已追加到既有公开 v0.3.1，正式三项位于 macos/release/0.3.1；沿用原 Ed25519 密钥与固定公钥。Windows 与全部旧资产、标签和 v0.3.0 Latest 保留，两个平台按各自完整资产选中 0.3.1。当前私有源码尚未提交或推送，不延伸未来发布授权；windows/ 在 Mac 继续只读，shared 仍为唯一页面与业务实现。正式包/线上更新验证入口及系统临时目录边界见 shared/test/README.md，不保存测试结果，不执行真实安装替换或物理采样。
+
+## 2026-10-18 Mac 本地 0.3.1 审查修复（发行前记录）
+
+本机已同步 0.3.1 生成配置，字号减小/增大使用真实 SF Symbols。共享 Local RAG 通过知识库错误码区分可回退故障与必须停止的错误，技能更新提示独立显示在聊天区域。以下 Windows 交接中“补图标/同步配置”是此次修复前的待办，后续先核对本机差异，不重复覆盖。当前授权仅本地修复和安全回归，Windows 只读，不提交、推送、打安装包或发布。线上 Mac 仍为 0.3.0，Windows 仍为 0.3.1，Latest 保持。
+
+字号对使用加粗的原生 SF Symbols，保留明显的大小差异和共用基线；不要分别归一化到同样大小。Windows 0.3.1 源码基线为 d60a651：现用提示词、用量优化撤销和共用界面从该基线继续复用；当前另有上述 Local RAG 错误分类、聊天技能更新提示及 Mac 平台适配修复，不能描述为与已发布 Windows 二进制逐字节相同。当前 Mac 0.3.1 是本地开发构建。
+
 ## 2026-10-18 当前接续（Windows 0.3.1 已发布）
 
 最新授权已完成 Windows x64 0.3.1 的清理与公开发行，正式三项位于 windows/release/0.3.1 和 https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.1 。共享/根/Windows 版本为0.3.1；旧发行、资产和 v0.3.0 Latest 保持，Mac 仍使用其完整0.3.0发行。用户随后明确授权本轮共享/Windows 源码、测试与文档提交推送至私有 main；排除发行、模型、构建/测试产物、清理审计、真实资料和密钥。当前 Windows 工作期间 macos/ 严格只读，下面的共享功能现包含在 Windows 0.3.1；Mac 须在本机补齐字号图标、同步配置并验证，后续提交/打包/发行另需用户授权。

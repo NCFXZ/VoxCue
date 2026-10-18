@@ -92,3 +92,5 @@ export const Save = icon('Save');
 export const Search = icon('Search');
 export const FileText = icon('FileText');
 export const Eye = icon('Eye');
+export const FontIncrease = icon('FontIncrease');
+export const FontDecrease = icon('FontDecrease');

@@ -1,4 +1,5 @@
 import * as lance from '@lancedb/lancedb';
+import { KnowledgeError } from './errors';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, writeFile, copyFile, rename, open } from 'node:fs/promises';
@@ -70,14 +71,22 @@ export class KnowledgeService implements KnowledgePort {
       value = JSON.parse(await readFile(path.join(this.directory, 'catalog.json'), 'utf8'));
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        throw Error('知识库目录损坏。原件与备份已保留，请恢复 catalog 备份后重试。');
+        throw new KnowledgeError(
+          'configuration',
+          '知识库目录损坏。原件与备份已保留，请恢复 catalog 备份后重试。',
+        );
       value = this.catalog;
     }
+    if (!value || typeof value !== 'object' || Array.isArray(value))
+      throw new KnowledgeError(
+        'configuration',
+        '知识库 Schema 或模型版本不兼容，原数据已保留，不能自动覆盖。',
+      );
     if (
       value.blocked &&
       (!Array.isArray(value.blocked) || value.blocked.some((id) => !validId(id)))
     )
-      throw Error('知识库停用状态损坏，数据已保留。');
+      throw new KnowledgeError('configuration', '知识库停用状态损坏，数据已保留。');
     if (
       value.schemaVersion !== 1 ||
       value.modelVersion !== MODEL_REVISION ||
@@ -92,18 +101,25 @@ export class KnowledgeService implements KnowledgePort {
           !/^rev-[\w-]+\.json$/.test(e.revision),
       )
     )
-      throw Error('知识库 Schema 或模型版本不兼容，原数据已保留，不能自动覆盖。');
+      throw new KnowledgeError(
+        'configuration',
+        '知识库 Schema 或模型版本不兼容，原数据已保留，不能自动覆盖。',
+      );
     this.connection = await lance.connect(path.join(this.directory, 'lance'));
     if (value.tableName) {
       if (!/^chunks_[a-f0-9]+$/.test(value.tableName) || !Number.isSafeInteger(value.tableVersion))
-        throw Error('知识库索引版本无效。');
+        throw new KnowledgeError('configuration', '知识库索引版本无效。');
       try {
         this.table = await this.connection.openTable(value.tableName);
         await this.table.checkout(value.tableVersion!);
       } catch {
-        throw Error('知识库索引无法恢复，原目录与 catalog 备份已保留。');
+        throw new KnowledgeError(
+          'unavailable',
+          '知识库索引无法恢复，原目录与 catalog 备份已保留。',
+        );
       }
-    } else if (Object.keys(value.documents).length) throw Error('知识库元数据缺少索引。');
+    } else if (Object.keys(value.documents).length)
+      throw new KnowledgeError('configuration', '知识库元数据缺少索引。');
     for (const e of Object.values(value.documents)) await this.readRevision(e.revision);
     this.catalog = value;
   }
@@ -112,7 +128,7 @@ export class KnowledgeService implements KnowledgePort {
       .catch(() => {})
       .then(async () => {
         signal.throwIfAborted();
-        if (this.closed) throw Error('知识库服务已关闭。');
+        if (this.closed) throw new KnowledgeError('closed', '知识库服务已关闭。');
         await this.initialize();
         signal.throwIfAborted();
         return run();
@@ -126,14 +142,21 @@ export class KnowledgeService implements KnowledgePort {
     try {
       revision = JSON.parse(await readFile(path.join(this.directory, 'revisions', name), 'utf8'));
     } catch {
-      throw Error('知识库完整内容文件缺失或损坏，原件未删除，请重新索引该文档。');
+      throw new KnowledgeError(
+        'unavailable',
+        '知识库完整内容文件缺失或损坏，原件未删除，请重新索引该文档。',
+      );
     }
     if (
+      !revision ||
+      typeof revision !== 'object' ||
       !Array.isArray(revision.items) ||
       typeof revision.text !== 'string' ||
-      revision.items.some((i) => typeof i.itemId !== 'string' || typeof i.content !== 'string')
+      revision.items.some(
+        (i) => !i || typeof i.itemId !== 'string' || typeof i.content !== 'string',
+      )
     )
-      throw Error('知识库内容格式异常。');
+      throw new KnowledgeError('integrity', '知识库内容格式异常。');
     this.revisions.set(name, revision);
     return revision;
   }
@@ -177,7 +200,7 @@ export class KnowledgeService implements KnowledgePort {
         !input.bytes.length ||
         input.bytes.length > 20 * 1024 * 1024
       )
-        throw Error('无效的知识文档参数。');
+        throw new KnowledgeError('invalid_request', '无效的知识文档参数。');
       const old = this.catalog.documents[input.documentId];
       const contentHash = sha(input.bytes);
       const publish = (
@@ -203,7 +226,8 @@ export class KnowledgeService implements KnowledgePort {
       publish('parsing');
       const parsed = await this.parse(input);
       signal.throwIfAborted();
-      if (parsed.text.length > 8_000_000) throw Error('解析后的文字超过 8 MB，请拆分文档。');
+      if (parsed.text.length > 8_000_000)
+        throw new KnowledgeError('invalid_request', '解析后的文字超过 8 MB，请拆分文档。');
       await this.embedder.initialize();
       signal.throwIfAborted();
       const units = searchUnits(parsed.items, this.embedder, signal);
@@ -320,7 +344,7 @@ export class KnowledgeService implements KnowledgePort {
   }
   invalidateDocument(id: string, signal: AbortSignal) {
     return this.enqueue(signal, async () => {
-      if (!validId(id)) throw Error('无效文档 ID。');
+      if (!validId(id)) throw new KnowledgeError('invalid_request', '无效文档 ID。');
       if (this.catalog.documents[id] && !this.catalog.blocked?.includes(id))
         await this.commit(
           { ...this.catalog, blocked: [...(this.catalog.blocked ?? []), id] },
@@ -331,7 +355,7 @@ export class KnowledgeService implements KnowledgePort {
   }
   removeDocument(id: string, signal: AbortSignal) {
     return this.enqueue(signal, async () => {
-      if (!validId(id)) throw Error('无效文档 ID。');
+      if (!validId(id)) throw new KnowledgeError('invalid_request', '无效文档 ID。');
       if (!this.catalog.documents[id]) return null;
       const documents = { ...this.catalog.documents };
       delete documents[id];
@@ -391,7 +415,7 @@ export class KnowledgeService implements KnowledgePort {
         !['keyword', 'vector', 'hybrid'].includes(mode) ||
         (baseId !== undefined && !validId(baseId))
       )
-        throw Error('无效的知识检索参数。');
+        throw new KnowledgeError('invalid_request', '无效的知识检索参数。');
       if (!this.table || !Object.keys(this.catalog.documents).length) return [];
       let builder, queryVector: number[] | undefined;
       if (mode === 'keyword')
@@ -430,7 +454,7 @@ export class KnowledgeService implements KnowledgePort {
         if (!entry || seen.has(row.rootItemId)) continue;
         const revision = await this.readRevision(entry.revision),
           item = revision.items.find((i) => i.itemId === row.rootItemId);
-        if (!item) throw Error('索引与完整内容不一致。');
+        if (!item) throw new KnowledgeError('integrity', '索引与完整内容不一致。');
         const key = sha(item.content);
         if (seen.has(key)) continue;
         seen.add(row.rootItemId);
@@ -441,7 +465,8 @@ export class KnowledgeService implements KnowledgePort {
             : mode === 'hybrid'
               ? row._relevance_score
               : row._score;
-        if (!Number.isFinite(score)) throw Error('知识检索返回无效分数。');
+        if (!Number.isFinite(score))
+          throw new KnowledgeError('integrity', '知识检索返回无效分数。');
         const values = row.vector?.toArray?.() ?? row.vector;
         const similarity =
           mode === 'vector'

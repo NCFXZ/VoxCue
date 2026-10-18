@@ -5,7 +5,7 @@ import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
-import { createHash } from 'node:crypto';
+import { createHash, verify } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { signMacApp } from '../../scripts/sign-app.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
@@ -32,7 +32,11 @@ assert.equal(
 );
 const resources = path.join(bundle, 'Contents/Resources');
 const config = JSON.parse(await readFile(path.join(resources, 'voxcue-update.json'), 'utf8'));
-const { signedMacUpdate } = require(
+const pinned = JSON.parse(
+  await readFile(path.join(workspace.platformRoot, 'update-public-key.json'), 'utf8'),
+);
+assert.equal(config.publicKey, pinned.publicKey);
+const { signedMacUpdate, publicUpdateKey } = require(
   path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/manifest.js'),
 );
 const metadata = JSON.parse(await readFile(path.join(release, 'latest-mac.yml'), 'utf8'));
@@ -47,9 +51,23 @@ const update = signedMacUpdate(
   },
   config.publicKey,
 );
+assert.equal(update.minimumSystemVersion, '14.2');
+assert.equal(
+  verify(
+    null,
+    await readFile(zip),
+    publicUpdateKey(pinned.publicKey),
+    Buffer.from(update.edSignature, 'base64'),
+  ),
+  true,
+  'The final update archive must authenticate with the existing pinned public key',
+);
 const hash = createHash('sha512');
 for await (const chunk of createReadStream(zip)) hash.update(chunk);
 assert.equal(hash.digest('base64'), update.sha512);
+console.log(
+  'PASS: final ZIP Ed25519 signature, signed update metadata and SHA512 match the pinned public key.',
+);
 assert.equal(
   run('/usr/libexec/PlistBuddy', [
     '-c',

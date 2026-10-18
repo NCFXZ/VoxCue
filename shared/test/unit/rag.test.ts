@@ -1,4 +1,8 @@
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import {
+  KnowledgeError,
+  knowledgeErrorFromWire,
+} from '../../../shared/electron/backend/knowledge/errors';
 import { RagChatService } from '../../../shared/electron/application/rag';
 import { buildRagContext, ragInstructions } from '../../../shared/electron/application/ragContext';
 import type { KnowledgePort } from '../../../shared/electron/backend/knowledge/types';
@@ -55,6 +59,50 @@ function setup(hits = [hit]) {
 }
 afterEach(() => vi.restoreAllMocks());
 describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
+  it.each(['search', 'getItem'] as const)(
+    '%s 只回退明确的可用性故障，保留跨进程错误分类',
+    async (operation) => {
+      for (const code of [
+        'invalid_request',
+        'configuration',
+        'integrity',
+        'not_ready',
+        'closed',
+        'cancelled',
+      ] as const) {
+        const { knowledge, provider, rag } = setup();
+        const error = knowledgeErrorFromWire('合成知识库错误', code);
+        vi.mocked(knowledge[operation]).mockRejectedValue(error);
+        await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toBe(
+          error,
+        );
+        expect(provider.stream).not.toHaveBeenCalled();
+      }
+      const { knowledge, provider, rag } = setup();
+      vi.mocked(knowledge[operation]).mockRejectedValue(Error('Unexpected implementation error'));
+      await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toThrow(
+        'Unexpected',
+      );
+      expect(provider.stream).not.toHaveBeenCalled();
+    },
+  );
+  it('期限同时到达时也不能把完整性错误降级为可回退故障', async () => {
+    const { knowledge, provider, rag } = setup();
+    const timeout = new AbortController();
+    vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    vi.spyOn(AbortSignal, 'any').mockReturnValue(timeout.signal);
+    const remove = timeout.signal.removeEventListener.bind(timeout.signal);
+    // Abort between the port rejection's listener cleanup and its catch. The
+    // actual rejection is still an integrity error, not the timeout reason.
+    vi.spyOn(timeout.signal, 'removeEventListener').mockImplementation((...args) => {
+      remove(...args);
+      timeout.abort(new DOMException('Synthetic deadline', 'TimeoutError'));
+    });
+    const error = new KnowledgeError('integrity', '合成条目身份错误');
+    vi.mocked(knowledge.search).mockRejectedValue(error);
+    await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toBe(error);
+    expect(provider.stream).not.toHaveBeenCalled();
+  });
   it('模型删除中阻止新的检索，未选择知识库的普通聊天仍可继续', async () => {
     const { knowledge, provider } = setup();
     const rag = new RagChatService(
@@ -112,7 +160,9 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
     expect(enriched.instructions).toContain('技术文档用于解释技术，不能当作本人经历');
     expect(result.answerText).toBe('测试流');
     expect(result.rag).toMatchObject({ hits: 0, evidenceCount: 0 });
-    vi.mocked(knowledge.search).mockRejectedValue(Error('索引无法恢复'));
+    vi.mocked(knowledge.search).mockRejectedValue(
+      new KnowledgeError('unavailable', '索引无法恢复'),
+    );
     const emit = vi.fn();
     const fallback = await rag.stream(request, emit, new AbortController().signal);
     expect(provider.stream).toHaveBeenCalledTimes(2);
@@ -139,7 +189,10 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
         { ...other, baseId: 'other', itemId: 'private:1' },
       ]);
       const read = vi.mocked(knowledge.getItem).mockResolvedValueOnce(item);
-      if (failure === 'failed') read.mockRejectedValueOnce(Error('Synthetic content unavailable'));
+      if (failure === 'failed')
+        read.mockRejectedValueOnce(
+          new KnowledgeError('unavailable', 'Synthetic content unavailable'),
+        );
       else read.mockResolvedValueOnce(null);
       const scoped = {
         ...request,
@@ -248,7 +301,9 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
   it('失败活动到达时取消，不得开始回退模型请求', async () => {
     const { knowledge, provider, rag } = setup();
     const controller = new AbortController();
-    vi.mocked(knowledge.search).mockRejectedValue(Error('Synthetic retrieval failure'));
+    vi.mocked(knowledge.search).mockRejectedValue(
+      new KnowledgeError('unavailable', 'Synthetic retrieval failure'),
+    );
     await expect(
       rag.stream(
         request,
@@ -262,7 +317,9 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
   });
   it('回退后的模型错误原样停止，不重新检索或重复模型调用', async () => {
     const { knowledge, provider, rag } = setup();
-    vi.mocked(knowledge.search).mockRejectedValue(Error('Synthetic retrieval failure'));
+    vi.mocked(knowledge.search).mockRejectedValue(
+      new KnowledgeError('unavailable', 'Synthetic retrieval failure'),
+    );
     const error = Error('Synthetic provider failure');
     vi.mocked(provider.stream).mockRejectedValue(error);
     await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toBe(error);
