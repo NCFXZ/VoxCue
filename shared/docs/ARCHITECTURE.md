@@ -4,6 +4,18 @@
 
 共享 ComponentService 从固定资产下载并校验语音/RAG，按资源版本及摘要缓存到 userData/component-cache；应用版本不参与缓存键。shared 共用下载、取消/重试、状态和功能限制，主进程独立校验注册窗口主 frame，不开放 URL/路径/命令。Mac 新构建排除模型与 ONNX Web，保留 Node CPU 依赖；完整旧包和开发模式沿用原路径。界面沿用既有设计，容量统一 MB。Windows 锁及瘦身打包由其本机同步验证，Mac 保持只读。详见[组件说明](COMPONENTS.md)。
 
+## Windows 原生展示
+
+转发退出可能带来迟到的 mouseout；共享 leave 处理重新命中事件坐标，不在可交互区域盲目开启穿透。真正的透明留白仍交给后方窗口，按下、选择、拖动和缩放锁定保持。
+
+`windows/electron/presentation.ts` 通过 NativePresentation 端口按平台策略动态装配；不静态引入 Mac 模块。适配器可提供运行时能力，主进程在创建窗口前将其布尔描述交给沙箱 preload；能力不替代窗口、主 frame 和精确参数校验。Windows 11 22H2+ 的 Acrylic 沿用材质种类，共享 CSS 提供滑杆遮罩与 60/30 浮窗曲线，不调用 setOpacity。旧系统保留参数及不透明回退；forced-colors/减少透明偏好关闭滤镜，不改注册表或系统主题。
+
+主题仅设置 VoxCue 的 nativeTheme.themeSource。面试使用 normal 置顶，显示/恢复/意外关闭置顶时重用共享 pinInterview，不定时聚焦。空白穿透使用 setIgnoreMouseEvents 的 forward，交互命中与按下/拖动锁定继续共用。主窗口隐藏并跳过任务栏，浮窗自身跳过任务栏；结束后在无新面试时恢复主窗口任务栏入口与源 ICO，不修改用户固定项。Renderer 意外退出沿用关闭释放流程并恢复主窗口。
+
+Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，截图不落盘、不进 Renderer/历史。
+
+紧凑窗口的控制层在内容之后生成 no-drag 排除区，按钮本身也明确 no-drag，防止后生成的页面拖动区覆盖。Windows 浮窗移动端口以手势起始尺寸 setBounds，并补偿分数 DPI 的尺寸回读；原生像素网格决定坐标，静止鼠标不重复发原生移动。Mac 未实现此可选端口时保持原 setPosition 路径。CSS 中前缀滤镜先于标准滤镜，避免压缩后丢失有效标准声明。
+
 ## 面试浮窗移动
 
 共享三条杠使用普通 no-drag 指针区域及 useInterviewWindowDrag，不再依赖会吞掉指针事件的 CSS 原生拖动。手势通过指针捕获、单帧合并和串行 IPC 发送 start/move/end；公开 DesktopAPI、preload、主进程白名单一致。interview:move 只接受当前浮窗主 frame 的单个阶段对象，拒绝坐标、其他窗口、额外字段和未知动作。位置从主进程 screen.getCursorScreenPoint 与开始时的窗口位置计算，仅改变当前浮窗位置；同一位置不重复设置，不接受 Renderer 原生参数。
@@ -22,7 +34,7 @@ contracts/presentation.ts 定义纯布尔能力和全 false 的待适配缺省�
 
 shared/electron/presentation.ts 仅定义 NativePresentation 类型端口；main 按当前平台策略动态装配 macos/electron/presentation.ts，不静态导入两平台。Mac 适配器只调用 Electron 原生展示 API，持有 Dock hide 节流计时器，接收图标和面试窗口存活查询；面试生命周期、关闭保存、授权与竞态仍由 main 协调。架构约束仅允许该适配器依赖 electron 与 type-only 类型端口，纯平台 types 仅增加对纯 PresentationCapabilities 的 type-only 引用。
 
-滑杆的 0–100 参数、默认 50、保存与 60/30 浮窗映射已共用；原生效果就绪时才加 frosted-ui 样式门控，鼠标穿透使用独立 mouse-passthrough-ui 门控，Mac 字体/图标差异仍留 macos-ui。Windows 保留现有 Acrylic、normal 置顶和主窗口最小化，没有创建空适配器；其滑杆可保存，但毛玻璃效果、原生主题、屏幕权限、穿透和任务栏图标隐藏显示待适配，权限按钮禁用且不请求。Mac 当前对 windows/ 只读，Windows 专属实现和运行验证留待其本机完成。后续新功能/界面调整先按 AGENTS 询问同步范围并给建议，本轮已明确授权的 1–10 不重复询问。
+滑杆的 0–100 参数、默认 50、保存与 60/30 浮窗映射共用；原生效果就绪时加 frosted-ui，穿透使用独立 mouse-passthrough-ui，Mac 字体/图标差异仍留 macos-ui。Windows 当前接线见本文首节，不再按历史待适配状态处理。后续新功能/界面调整先按 AGENTS 询问同步范围，本轮已明确授权的 1–10 不重复询问。
 
 ## Mac 面试窗口生命周期
 
@@ -38,13 +50,13 @@ Dock 恢复前及 show Promise 完成后均显式 setIcon(resources.icon)，避�
 
 透明的 BrowserWindow 矩形不会因网页背景不可见而自动成为鼠标空洞。Mac 在创建/重载浮窗时默认 setIgnoreMouseEvents(true, { forward: true })；FloatingInterview 根据鼠标屏幕位置与当前网页命中，保留工具栏、双面板、缩放热区及提示卡交互，其余透明画布穿透。外层容器 pointer-events:none、可见表面 auto，防止空容器占据网页命中。按下/拖动/缩放时不切换，mouseup 后释放锁再刷新；ResizeObserver 与 resize 处理布局变化，卸载释放监听并保留穿透，不轮询或抢焦点。
 
-公开契约和 preload 使用布尔型 setInterviewMousePassthrough，发送固定 interview:mouse-passthrough；共享命中逻辑仅在 presentation.interviewMousePassthrough 就绪时订阅。主进程独立验证当前平台适配器/能力、当前浮窗、主 frame、恰好一个布尔参数，只调整该浮窗并跳过重复状态。没有任意窗口/原生选项/命令或路径输入。Windows 尚无适配器，不订阅且主进程拒绝该操作。公共契约编译断言和既有 preload 白名单同步，未运行测试。
+公开契约和 preload 使用布尔型 setInterviewMousePassthrough，发送固定 interview:mouse-passthrough；共享命中逻辑仅在 presentation.interviewMousePassthrough 就绪时订阅。主进程独立验证当前平台适配器/能力、当前浮窗、主 frame、恰好一个布尔参数，只调整该浮窗并跳过重复状态。没有任意窗口/原生选项/命令或路径输入。Windows 同样由本机适配器接入，公共契约编译断言与 preload 白名单保持同步。
 
 ## Mac 原生外观与界面主题
 
 App 在登录/主窗口启动及主题偏好切换时，按 presentation.nativeTheme 能力调用受限 setNativeTheme。公开契约、preload 与 appearance:theme 频道一致；主进程校验已注册登录/主窗口、主 frame、恰好一个 light/dark/system 字符串和本机适配能力，再经类型端口调用 Mac 的 Electron nativeTheme.themeSource。它只覆盖 VoxCue 本进程的原生外观；system 移除覆盖并跟随系统，不写 macOS 偏好或影响其他应用。失败在界面提示，旧 effect 的异步回执不能覆盖新状态。
 
-网页继续通过既有 copilot-theme 与媒体查询应用主题；原生外观变化后系统模式的媒体查询会刷新，浮窗沿用已有存储/媒体事件处理。sidebar vibrancy 材质保持；连续透明度设置仅调整网页表面，主侧栏最高端零遮罩，浮窗保留薄底与局部阅读衬底，辅助功能时回退不透明。Windows 仍可切换网页主题，设置注明原生外观待适配，不发起原生请求；主进程也拒绝未适配调用。
+网页继续通过既有 copilot-theme 与媒体查询应用主题；原生外观变化后系统模式的媒体查询刷新，浮窗沿用存储/媒体事件。Mac sidebar vibrancy 材质保持，Windows 经本机适配器设置应用 nativeTheme；连续透明度仅调整网页表面，辅助功能时回退不透明。
 
 ## 共用连续毛玻璃设置
 
@@ -52,7 +64,7 @@ shared/src/frostedAppearance 仅为 Renderer 外观偏好，不调用原生材�
 
 WindowContent 在主/登录/面试各窗口挂载同一个偏好订阅，同窗口自定义事件与跨窗口 storage 事件只读应用 CSS 变量，不回写循环。主侧栏按原滑杆 0–100 插值；总比例 scale=value/100，浮窗面板、工具栏和模糊从原曲线的 60×scale 取值，阅读/输入底色从 30×scale 取值。滑杆 100 对应背景/阅读层 60/30，50 对应 30/15，不再在 60 后停滞。拉满时面板浅/深不透明度 0.632/0.692、工具栏 0.768/0.804、阅读/输入 0.812/0.856、附加模糊 19.2px。主侧栏高透明度仅调整主题文字颜色，浮窗不响应该字色增强；文字阴影、细描边和图标 drop-shadow 全部撤除。60/30 为相对效果位置，不等于原生窗口整体透光率；辅助功能时各窗口均回退不透明并关闭背景滤镜。
 
-原生窗口配置、材质、应用外观 IPC 和 Windows 文件均不因该滑杆改变；Windows 同样渲染、保存滑杆与计算 CSS 参数，但 frosted-ui 能力门控未开启，不应用这些表面效果。Windows 本机后续接入能力时复用同一映射，不复制 UI 或修改存储格式。
+滑杆不改变原生材质种类或窗口整体 alpha。Windows 已通过本机展示适配器按系统支持情况开启 frosted-ui，复用同一映射、设置组件和存储格式。
 
 ## Mac 界面图标
 

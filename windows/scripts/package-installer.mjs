@@ -5,6 +5,9 @@ import path from 'node:path';
 import config from '../electron-builder.config.cjs';
 
 const root = process.cwd();
+// Builder's Windows default ignores XDG_CACHE_HOME. Keep NSIS/7-Zip downloads
+// in this platform's dependency cache even without a shell activation script.
+process.env.ELECTRON_BUILDER_CACHE = path.join(root, '.cache/electron-builder');
 await new Promise((resolve, reject) => {
   const child = spawn(process.execPath, ['scripts/package-portable.mjs', '--installer'], {
     cwd: root,

@@ -20,6 +20,12 @@
 
 # 工作区清理结果
 
+## 2026-10-17：Windows 0.2.1 上传后的打包文件
+
+私有源码与公开 v0.2.1 Windows 三项资产上传核验后，按用户确认只清理本工作区安装包与打包文件。删除 C:\Users\fengk\Documents\Repository\VoxCue\windows\release（NSIS、更新元数据、installer-stage 及本次失败打包暂存）和 C:\Users\fengk\Documents\Repository\VoxCue\windows\.cache\release-upload-v0.2.1（一次性上传辅助文件），共 8,785 个普通文件、逻辑 2,546,694,278 字节，删除失败 0；windows/release-smoke 已不存在。该数字为文件逻辑体积，不是磁盘可用空间变化测量。
+
+删除前核对固定绝对/真实路径、无重定向、静态脚本消费者及无运行进程占用。工具依赖与缓存、现用 dist/dist-electron、源码、模型、恢复基线及真实用户数据保留。macos/ 全程只读，历史 Windows 349 个跳过目录和 Mac 117 个占用目录未重试。本次纯清理清单/数量/状态位于 windows/recovery/release-0.2.1-cleanup/{plan,result}.json，不含测试内容。
+
 ## 2026-10-17：共用设置完成后的闲置文件与冗余样式
 
 删除两个精确目标：根 `.DS_Store`，以及被当前 revision 3 开发宿主替代的 `macos/.tools/electron-dev-previous-1792255575752`（revision 2）。共 269 个普通文件、14 个包内链接，逻辑文件体积 263,943,129 字节（约 264 MB），失败 0；不是实际可用磁盘空间变化的测量。执行前核对绝对/真实路径、无外部重定向、清单一致及 lsof 无占用；运行中 Electron 的文件 inode 对应现用宿主，未关闭或修改用户程序。旧宿主已移除，历史“保留旧运行副本”的记录不再表示该副本现存。
@@ -43,7 +49,6 @@ CSS 格式/差异检查与 Mac Vite 生产构建通过，保留既有大分块�
 退出软件后复核确认 VoxCue 无残留进程；68 个候选旧测试目录仍被 fileproviderd 占用，暂留为历史保留例外，不停止同步或强删。Windows 全程只读，349 个此前跳过的云占位目录不再遍历。183 项当前源码/原件/锁/运行时和 123 项 Windows 文件哈希保持；根三目录及局部依赖保持。没有运行测试、构建或打包。
 
 此前文档引用的已移除玻璃测试、截图、恢复副本与旧宿主不再作为现存交付物；保留历史事实，不恢复撤回功能。
-
 
 更新：2026-10-17。最新目录及保留策略见首节；以下旧 test/results 路径仅为历史运行记录，不作为当前可用交付物。
 
@@ -71,7 +76,6 @@ Mac 构建原本同时输出 Windows 模块。修正编译入口与静态装配�
 
 删除前形成绝对路径清单，逐项检查真实路径、子树无链接、测试生成入口及运行进程，未停止现有正常应用或触碰真实用户资料。源码前态、Windows 保持核对和清理审计另在 macos/recovery/native-audio-20261017；test-retention-plan.json、test-retention-process-check.json、test-retention-result.json 记录精确结果。未清理依赖/模型/发行或源码；Windows 剩余 349 个 OneDrive 云占位目录继续按用户要求跳过。
 
-
 ## 2026-10-17：三目录迁移与测试历史重置
 
 按用户最新授权，将根目录非入口文件分别归入 windows、macos、shared，并同步实际依赖、构建、测试、资源与文档消费者。AGENTS/PROGRESS 保留根目录；root package.json 只转发本机平台命令，各平台有独立安装结果与锁，shared 仅声明共用依赖，不建立共享 node_modules。
@@ -85,7 +89,6 @@ Mac 构建原本同时输出 Windows 模块。修正编译入口与静态装配�
 确认无用的 Qwen 下载残片、误建根包缓存及本轮过期本地生成结果共 22 项、119 文件、4,023,742 字节已按清单删除。最终单测新生成的 rag-tools 结果已按时间裁剪为 5 份。详细 local-cleanup-plan/result、clear-history-plan/result、retention-plan/result 和 final-path-integrity 在上述 recovery 目录；没有整库 reset/clean，没有按文件大小/忽略规则删除功能。
 
 当前最终检查全部通过：配置同步、138 模块架构、三组类型、336 项单测、Mac 共享构建、隔离登录/聊天、原生 RAG utilityProcess、1 秒合成静音 ASR Worker。当前报告在 macos/test/results/workspace-check-20261017，具体范围见根 PROGRESS.md。Windows 原生和完整 Mac 移植仍需其对应后续验收；未打包/提交/推送/发布，未启动十分钟语音。
-
 
 ## 2026-10-16：0.2.0 清理与平台分类
 

@@ -1,10 +1,10 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
-const profile = path.resolve('test/results', `interview-access-${Date.now()}`);
+const profile = path.resolve(path.join(testRoot, 'test/results'), `interview-access-${Date.now()}`);
 await mkdir(profile, { recursive: true });
 const fixture = path.join(profile, 'main.cjs');
 // Only external/native service ports are fixtures. Main IPC, preload, IDB,
@@ -89,7 +89,7 @@ try {
   await dialog.getByText(/麦克风权限未开启/).waitFor();
   await blocked();
   assert.equal(await count(), 1);
-  await page.screenshot({ path: path.join(profile, 'microphone-denied.png') });
+  await page.screenshot({});
   const bypass = await page.evaluate(async () => {
     try {
       await window.desktop.openInterview({
@@ -151,7 +151,7 @@ try {
     await dialog.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
     true,
   );
-  await page.screenshot({ path: path.join(profile, 'microphone-disabled.png') });
+  await page.screenshot({});
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     dialog.getByRole('button', { name: '确认开始', exact: true }).click(),
@@ -197,8 +197,7 @@ try {
     assert.equal(/mock|模拟/i.test(await settings.innerText()), false);
   }
   assert.deepEqual(errors, []);
-  await writeFile(
-    path.join(profile, 'result.json'),
+  await console.log(
     JSON.stringify(
       {
         passed: 7,

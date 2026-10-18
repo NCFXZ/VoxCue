@@ -1,10 +1,10 @@
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-await mkdir('test/results', { recursive: true });
-const profile = await mkdtemp(path.resolve('test/results/copilot-ui-'));
+await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
+const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/copilot-ui-')));
 const packaged = process.argv.includes('--installer-stage');
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -261,7 +261,7 @@ try {
     assert.equal(buttons[0].width, buttons[1].width);
     assert.equal(buttons[0].filter, buttons[1].filter);
     if (theme === 'dark') assert.ok(buttons[0].filter.includes('invert(1)'));
-    await login.screenshot({ path: path.join(profile, `login-${theme}.png`) });
+    await login.screenshot({});
   }
   await login.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true }).click();
   await login.getByRole('alert').filter({ hasText: '加密存储不可用' }).waitFor();
@@ -302,7 +302,7 @@ try {
       'GitHub Copilot · Copilot Test Model · Test Vendor',
     ),
   );
-  await reply.screenshot({ path: path.join(profile, 'copilot-reply.png') });
+  await reply.screenshot({});
   checks.push(
     'actual adapter events through IPC/preload, no raw reasoning, collapse during answer streaming, usage and identity',
   );
@@ -337,8 +337,7 @@ try {
     'sign out and switch to ChatGPT; existing local conversation and original reply identity retained',
   );
   assert.deepEqual(errors, []);
-  await writeFile(
-    path.join(profile, 'report.json'),
+  await console.log(
     JSON.stringify(
       { passed: true, packaged, native, checks, rendererErrors: errors.length },
       null,
@@ -349,7 +348,7 @@ try {
 } catch (error) {
   for (const [index, window] of app.windows().entries()) {
     if (window.isClosed()) continue;
-    await window.screenshot({ path: path.join(profile, `failure-${index}.png`) }).catch(() => {});
+    await window.screenshot({}).catch(() => {});
     console.error(
       JSON.stringify({
         profile,

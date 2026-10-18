@@ -11,9 +11,9 @@ function launch(tail: string) {
     [
       '--input-type=module',
       '-e',
-      `import {testRoot} from ${JSON.stringify(moduleUrl)}; console.log(JSON.stringify({root:testRoot})); ${tail}`,
+      `import {testRoot} from ${JSON.stringify(moduleUrl)}; process.on('message', value => { if(value === 'SIGTERM') process.emit('SIGTERM'); }); process.channel?.unref(); console.log(JSON.stringify({root:testRoot})); ${tail}`,
     ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
+    { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] },
   );
   let output = '';
   const first = new Promise<string>((resolve, reject) => {
@@ -39,7 +39,10 @@ it('取消时清理临时目录并保留取消退出状态', async () => {
   const { child, first } = launch('setInterval(()=>{},1000)');
   const root = await first;
   const exited = once(child, 'exit');
-  child.kill('SIGTERM');
+  // Windows TerminateProcess is uncatchable. Test cooperative cancellation;
+  // the next case separately verifies recovery after forced termination.
+  if (process.platform === 'win32') child.send('SIGTERM');
+  else child.kill('SIGTERM');
   expect((await exited)[0]).toBe(143);
   expect(existsSync(root)).toBe(false);
 });

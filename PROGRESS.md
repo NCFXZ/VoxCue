@@ -1,3 +1,9 @@
+## 2026-10-18：本地备份与远端主线整合
+
+按用户明确授权，合并前源码保存在本地 codex/backup-pre-merge-20261018 分支，当前 main 合入远端既有 Windows 0.2.1 提交。本轮只做本地提交，不上传 GitHub 或发布安装包；Windows 专属文件保持远端原样，不在 Mac 改写实现、生成配置或运行其原生测试。
+
+共享入口保留模型下载与缓存、VoxCue 数据根迁移、图标和更新交互，同时接入远端运行时展示能力、Windows 单实例/窗口恢复与拖动修复。屏幕设置保留 Mac 权限按钮图标，并沿用 Windows not-required 的状态与无需申请的行为；文档保留两端发行历史和当前 0.2.2 源码范围。共用/Mac 回归继续使用自有临时目录并退出清理，不持久化结果；Windows 0.2.2 配置、依赖清理与原生构建仍由其本机执行。
+
 ## 2026-10-18：恢复工作区清理与功能回归
 
 按用户最新指令恢复本机可执行范围的清理、完整功能回归与问题修复，暂不提交或上传 GitHub。当前本地版本保持 0.2.2，不同步远端 Windows 文件，不创建或发布发行产物。
@@ -72,6 +78,26 @@ RAG 未就绪时限制创建知识库及选择；语音未就绪时限制面试/
 
 本文只记录代码和入口，不保存测试结果/数表/日志。组件及更新回归的必要应用、profile、资源和数据库均位于自有系统临时目录并在结束清理；单测缓存关闭。
 
+## 2026-10-17：Windows 0.2.1 发行入口
+
+源码功能提交 dac0577 已上传私有 NCFXZ/VoxCue 的 main。公开 [v0.2.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1) 已补充 Windows x64 EXE、blockmap、latest.yml 并设 Latest；Mac 原三项资产保持。Windows 安装包 600,252,645 字节，SHA-256 为 6837d8b5b9da91a409888b28054b12f0115c8c5a2c9471581bedd16e5c14d31c。签名边界保持：Windows 无 Authenticode，Mac 为原 ad-hoc/Sparkle 签名。
+
+两处上传核验后已删除本工作区 windows/release（安装包、暂存应用和失败打包中间目录）及 windows/.cache/release-upload-v0.2.1；windows/release-smoke 原已不存在。合计删除 8,785 文件、2,546,694,278 字节，纯路径/数量/删除状态审计在 windows/recovery/release-0.2.1-cleanup。开发构建、工具缓存、局部依赖、离线模型、源码恢复基线和真实用户数据保留；macos/ 未修改，旧云占位跳过范围不重试。本段仅保存发行和清理元数据，不保存测试结果。
+
+本次授权将当前源码上传私有 NCFXZ/VoxCue 的 main，Windows 安装包补充到公开 NCFXZ/VoxCue-releases 已有 v0.2.1，保留 Mac 的原 DMG、arm64 ZIP、签名和 latest-mac.yml。两平台独立选择完整正式版本；Windows 的 EXE、blockmap 上传后最后上传 latest.yml，再切换 Latest。生产上传与清理状态以 GitHub 及后续记录为准。
+
+Windows 打包工具下载固定使用本平台 .cache/electron-builder，避免 electron-builder 默认写全局工具缓存。新增安装负载摘要、NSIS 压缩完整性与清单校验入口，已生成的暂存目录可直接运行离线模型/窗口回归而不重复打包；所有测试临时文件仍在系统临时根，结果不写本文。上传核验后只清理本地安装包、打包暂存与本次发布辅助文件，保留开发构建、依赖、模型、恢复基线和用户资料；macos/ 只读。
+
+## 2026-10-17：Windows 展示适配与窗口按钮修复
+
+Windows 鼠标转发退出时可能收到迟到的 mouseout；共享命中逻辑重新核对事件位置，避免鼠标仍在输入框或缩放控件上却重新开启穿透。真实鼠标回归同时检查此切换、交互锁定及窗口恢复；结果不保存在本文。
+
+本机同步根/Windows 配置，Electron 构建仅输出 shared/windows。Windows 原生展示通过既有 NativePresentation 端口动态装配，启用应用内主题、normal 置顶、透明留白穿透、面试任务栏隐藏/结束恢复与源 ICO；主进程窗口/frame/参数校验保持。浮窗 Renderer 意外退出时销毁该浮窗并恢复主窗口，重复启动优先已有窗口。Windows 屏幕状态使用 not-required，不枚举像素或模拟授权；实际截图失败仍由发送链路报错。
+
+Windows 11 22H2+ 沿用 Acrylic，并接入共享滑杆及 60/30 背景/阅读层曲线；不支持的系统保存参数并使用回退。调整 CSS 滤镜声明顺序，避免生产压缩仅保留 Chromium 忽略的前缀属性；高对比度回退关闭滤镜。紧凑布局将右上角控制层放在内容之后并显式 no-drag，防止页面拖动区吞掉最小化、最大化和关闭点击。Windows 移动适配固定起始尺寸并补偿分数 DPI 回读，静止鼠标不重复移动；Mac 原移动路径保持。
+
+Windows 回归入口改为自有系统临时目录及终端/内存结果，新增真实 HWND/鼠标/任务栏/ICO、共享语音控制器故障及隔离便携包入口；公共 WAV 只作临时输入，不采样物理设备。原生鼠标回归串行运行，旧硬件/真实安装入口仍须先核对零保留约定。实现、命令与边界见 shared/test/README.md；本文不保存本轮测试结果、验收数表或执行日志。macos/ 只读，实际账户、真人语音、外接硬件和真实安装不由合成回归代替。
+
 ## 2026-10-17：Mac 免费自动更新与独立发行入口
 
 按本次明确授权，首个 macOS 安装版 v0.2.1 已发布至公开 NCFXZ/VoxCue-releases：DMG、arm64 ZIP 和 latest-mac.yml；Windows v0.2.0 的 Latest 保留。发行链接：https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.1 。用户随后明确授权将本轮自动更新、打包与回归源码提交上传至私有 NCFXZ/VoxCue 的 main；私钥仍只在本工作区。
@@ -120,18 +146,18 @@ CSS 格式、差异与 Mac Vite 生产构建通过，保留既有大分块提示
 
 按用户明确确认，将此前 1–10 项的界面、参数、状态和通用交互纳入 shared；自动行为不新增开关。当前 Mac 对 windows/ 全程只读，Windows 实际效果继续留待其本机实现，不能把共享入口当作原生能力验收。
 
-| 项 | 共用结果 | 当前平台实现/后续边界 |
-| --- | --- | --- |
-| 1 毛玻璃滑杆 | 两端显示 0–100，默认 50、0 关闭，本机保存同一参数 | Mac 效果生效；Windows 保存并注明效果待适配 |
-| 2 浮窗透明度联动 | 背景按 60×滑杆比例、输入/转写/问题/回答阅读层按 30×比例 | 共用映射与样式，按原生效果就绪状态启用 |
-| 3 应用主题联动 | 共用 light/dark/system 偏好和调用契约 | Mac 原生主题经平台适配器生效；Windows 网页主题正常，原生待适配，不修改系统主题/材质 |
-| 4 屏幕权限 | 共用单按钮权限入口、禁用/状态展示 | Mac 使用原公开 API；Windows 显示待适配且不请求，不伪造 granted |
-| 5 面试浮窗置顶 | 共用置顶要求和只读状态，无开关 | Mac floating/恢复置顶保持；Windows normal 基本置顶保持 |
-| 6 透明空白穿透 | 共用命中、拖动锁定、布局重算逻辑 | Mac 原生穿透就绪；Windows 待适配且不调用 |
-| 7 面试图标隐藏/恢复 | 共用自动生命周期要求和只读状态 | Mac Dock 隐藏/图标恢复及竞态处理保持；Windows 任务栏待适配 |
-| 8 用量链接 | 说明同排最右端、垂直居中，保留悬浮左右内边距 | 共用排版、链接图标与地址 |
-| 9 紧凑布局 | 移除重复标题/顶部空条，品牌紧凑、内容铺满 | Mac 避让原生红绿灯；Windows 右上窗口按钮保留并预留宽度，登录无按钮 |
-| 10 焦点外圈 | 文档级移除蓝色描边，覆盖 Portal 菜单与浮窗 | 两平台共用，键盘操作/aria/菜单高亮保持 |
+| 项                  | 共用结果                                                | 当前平台实现/后续边界                                                               |
+| ------------------- | ------------------------------------------------------- | ----------------------------------------------------------------------------------- |
+| 1 毛玻璃滑杆        | 两端显示 0–100，默认 50、0 关闭，本机保存同一参数       | Mac 效果生效；Windows 保存并注明效果待适配                                          |
+| 2 浮窗透明度联动    | 背景按 60×滑杆比例、输入/转写/问题/回答阅读层按 30×比例 | 共用映射与样式，按原生效果就绪状态启用                                              |
+| 3 应用主题联动      | 共用 light/dark/system 偏好和调用契约                   | Mac 原生主题经平台适配器生效；Windows 网页主题正常，原生待适配，不修改系统主题/材质 |
+| 4 屏幕权限          | 共用单按钮权限入口、禁用/状态展示                       | Mac 使用原公开 API；Windows 显示待适配且不请求，不伪造 granted                      |
+| 5 面试浮窗置顶      | 共用置顶要求和只读状态，无开关                          | Mac floating/恢复置顶保持；Windows normal 基本置顶保持                              |
+| 6 透明空白穿透      | 共用命中、拖动锁定、布局重算逻辑                        | Mac 原生穿透就绪；Windows 待适配且不调用                                            |
+| 7 面试图标隐藏/恢复 | 共用自动生命周期要求和只读状态                          | Mac Dock 隐藏/图标恢复及竞态处理保持；Windows 任务栏待适配                          |
+| 8 用量链接          | 说明同排最右端、垂直居中，保留悬浮左右内边距            | 共用排版、链接图标与地址                                                            |
+| 9 紧凑布局          | 移除重复标题/顶部空条，品牌紧凑、内容铺满               | Mac 避让原生红绿灯；Windows 右上窗口按钮保留并预留宽度，登录无按钮                  |
+| 10 焦点外圈         | 文档级移除蓝色描边，覆盖 Portal 菜单与浮窗              | 两平台共用，键盘操作/aria/菜单高亮保持                                              |
 
 新增纯 PresentationCapabilities 契约，可信平台策略经 BrowserWindow additionalArguments 提供冻结布尔展示元数据；缺省全部待适配。沙箱 preload 运行时仍只依赖 electron，main 独立校验原生调用权限。shared/electron/presentation.ts 仅定义小型原生展示类型端口，Mac 的 Dock、应用主题和原生穿透调用移至 macos/electron/presentation.ts；主进程保留生命周期、关闭保存与异步恢复竞态，不创建 Windows 空模块或复制页面。既有平台架构约束只增加对纯能力契约的窄 type-only 例外，并为 Mac 展示适配器增加依赖限制；公开契约断言和现有 API/窗口选项断言已同步源码，未执行测试。
 
@@ -374,7 +400,6 @@ Node.js pkg 安装已核对为原生 arm64 v24.22.0（npm 11.19.1、Corepack 0.3
 最终验证（macOS arm64）：check:workspace、138 模块架构检查（0 越层、0 运行时环）、三组 typecheck、46 文件 336 项单测和 Mac 共享 build 通过；Vite 现有大 chunk 提示保留。实际 Electron 38.8.6 隔离登录入口 3 项、聊天进度回归全部断言及正常退出通过；E5/LanceDB 原生 utilityProcess 的 PDF/DOCX、keyword/vector/hybrid、合成 Provider 工具协议、重启/更新/删除与缺模型拒绝通过；Paraformer/Silero 实际 ASR Worker 在 arm64 Electron Node 22.22.0 下加载、处理 1 秒合成静音、冲刷退出通过（模型加载约 720ms）。结果在 macos/test/results/workspace-check-20261017、login-entry-1792221101892、chat-progress-Ct3IxP、rag-native-dcrDJE。
 
 本轮未生成安装包，未提交/推送/发布。Windows 原生执行、WASAPI/NSIS 重打包、真实账户、真人语音、Mac 原生采集/权限/完整窗口行为与签名分发仍未新增验收。十分钟语音继续不运行。历史所有旧测试路径仅作记录，当前能力与验证以本节及代码为准。
-
 
 ## 2026-10-16：0.2.0工作区整理、完整回归与发布（已完成）
 
@@ -817,12 +842,14 @@ Renderer 保持 contextIsolation、sandbox 开启，nodeIntegration 关闭；统
 源码与测试结果不会自动代表跨机、真实账户、全部多屏/DPI 或真人准确率通过。当前启动入口须使用本轮重新构建，历史便携输出已清除。
 
 ### 2026-10-13 RAG 第二阶段验收
+
 - 新授权五阶段任务继续推进。PDF/MD/TXT/DOCX 在正式 utilityProcess 本地解析，PDF 页码与 DOCX 段落保留；扫描件/损坏/不支持格式明确失败、原件保留。
 - 受控 knowledge IPC、任务进度、取消/重试/重建与三模式检索 UI 已接通；同名替换备份到独立 IndexedDB，替换前旧索引持久停用。既有原件库版本不变，旧资料不自动迁移。
 - 164 项单测、类型检查、架构检查和构建通过；Electron 原生核心烟测 test-results/rag-native-xYgKJD（真实 PDF/DOCX/E5/LanceDB），UI 烟测 test-results/rag-ui-9nv1th 及原件管理回归通过。原生原子文件与 OAuth 回环测试需在常规宿主权限执行，沙箱限制失败未通过放宽断言解决。
 - 进入第三阶段：现有 AIChatService 的 Local RAG 编排；账户真实回答尚未验收。
 
 ### 2026-10-13 RAG 第三阶段验收
+
 - 默认 Local RAG 经 AIChatService 包装复用既有授权、模型、流式、取消与失败处理；准备聊天及完整面试问题接通，ASR 事件与记录标题逻辑不改。
 - 统一 Context Builder 恢复完整 QA/追问，按来源/检索排名组织与去重，48 KB UTF-8 保守字节预算（不是服务端精确 token 数），超大完整条目整条省略并计数；不可信数据与个人事实不足规则随请求下发。
 - 无关候选先按词面或独立余弦 >=0.70 过滤，阈值尚无语义真值校准，不能宣称准确率提高。
@@ -830,6 +857,7 @@ Renderer 保持 contextIsolation、sandbox 开启，nodeIntegration 关闭；统
 - 自动进入第四阶段 Function Calling。
 
 ### 2026-10-13 RAG 第四阶段验收
+
 - 在现有 ChatGPTService Responses 客户端中接入命名空间 search_knowledge_base / get_knowledge_item，两个模式共用同一 KnowledgePort。未改 OAuth、未切付费 API。
 - 流式参数按 output_index 拼接，严格验证 call_id、参数和命名空间；store:false/stream:true 手动保留当前请求所需 output/加密 reasoning/工具回填，不向 Renderer 显示私有 reasoning。
 - 每次最多 6 次工具执行、4 轮响应，末轮禁用工具；完整条目输出 32 KB、总工具证据 48 KB，超限明确错误，取消阻断续轮与迟到事件。读取条目仅限本次搜索返回 ID。

@@ -2,7 +2,8 @@ import { packager } from '@electron/packager';
 import { createRequire } from 'node:module';
 import { readFile, cp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
-import { existsSync, realpathSync as fsRealPath } from 'node:fs';
+import { existsSync, realpathSync as fsRealPath, lstatSync, readFileSync } from 'node:fs';
+import os from 'node:os';
 const root = process.cwd();
 const require = createRequire(import.meta.url);
 const yaml = createRequire(require.resolve('electron-updater/package.json'))('js-yaml');
@@ -16,33 +17,47 @@ const testOutput = process.argv
 const output = path.resolve(
   testOutput ?? (installer ? 'release/installer-stage' : 'release-smoke'),
 );
-if (
-  testOutput &&
-  (installer ||
-    path.dirname(output) !== path.join(root, 'test/results') ||
-    !path.basename(output).startsWith('platform-layout-'))
-)
-  throw Error('Unsafe verification output');
+if (testOutput) {
+  const parent = path.dirname(output);
+  if (
+    installer ||
+    path.dirname(parent) !== fsRealPath(os.tmpdir()) ||
+    !path.basename(parent).startsWith('voxcue-test-run-') ||
+    !path.basename(output).startsWith('platform-layout-') ||
+    lstatSync(parent).isSymbolicLink() ||
+    fsRealPath(parent) !== parent
+  )
+    throw Error('Unsafe verification output');
+  const owner = JSON.parse(readFileSync(path.join(parent, '.voxcue-test-owner.json'), 'utf8'));
+  if (owner.kind !== 'voxcue-test-run-' || !Number.isSafeInteger(owner.pid) || owner.pid <= 0)
+    throw Error('Unknown verification owner');
+  process.kill(owner.pid, 0);
+}
 // Packager may replace only this generated output, never a user profile or arbitrary path.
 if (
   !testOutput &&
   output !== path.join(root, installer ? 'release/installer-stage' : 'release-smoke')
 )
   throw Error('Unsafe portable output');
-if ((installer || testOutput) && existsSync(path.dirname(output))) {
+if (installer && existsSync(path.dirname(output))) {
   const parent = fsRealPath(path.dirname(output));
   if (path.relative(root, parent).startsWith('..') || path.isAbsolute(path.relative(root, parent)))
     throw Error('Installer parent escapes workspace');
 }
 if (existsSync(output)) {
   const real = fsRealPath(output);
-  if (path.relative(root, real).startsWith('..') || path.isAbsolute(path.relative(root, real)))
+  const allowedRoot = testOutput ? path.dirname(output) : root;
+  if (
+    path.relative(allowedRoot, real).startsWith('..') ||
+    path.isAbsolute(path.relative(allowedRoot, real))
+  )
     throw Error('Portable output escapes workspace');
 }
 const paths = await packager({
   icon: path.resolve('public/voxcue.ico'),
   dir: root,
   out: output,
+  ...(testOutput ? { tmpdir: path.dirname(output) } : {}),
   name: 'VoxCue',
   platform: 'win32',
   arch: 'x64',

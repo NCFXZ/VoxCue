@@ -10,6 +10,25 @@
 
 ## 当前入口
 
+2026-10-18 本轮在 Mac 合并远端已有 Windows 修复，只运行共用及 Mac 回归；Windows 专属文件保持远端原样，以下 Windows 命令仍由其本机执行。屏幕权限回归同时用合成 not-required 状态检查共享界面，无真实 Windows 授权或硬件验收含义。
+
+Windows 从 windows/ 运行下列已改造入口（先准备本机构建）：
+
+```powershell
+pnpm test:windows:functional
+pnpm test:windows:regression
+pnpm test:presentation:native
+pnpm test:speech:adversarial
+pnpm test:portable:native
+pnpm test:installer:artifact
+```
+
+`test:portable:native -- --installer-stage` 可验证已生成的安装包暂存目录，不重复打包；临时 WAV、profile 和原生探针仍在系统临时根清理。`test:installer:artifact` 校验 NSIS 压缩数据、更新清单 SHA512、blockmap 及暂存目录与实际安装负载的文件摘要，不执行安装。生产打包使用 windows/.cache/electron-builder 保存工具依赖，不写全局构建缓存。
+
+functional 使用共享矩阵；regression 顺序运行平台、面试权限/思考/布局/工作流/上下文、Copilot 与更新传输回归。presentation 使用真实 HWND、任务栏 UIAutomation 和鼠标检查 Acrylic、ICO、窗口按钮、置顶及留白穿透，只向自有测试窗口发送点击，并恢复鼠标位置。所有桌面/鼠标测试必须串行，不能与另一个 GUI 测试同时运行；窗口遮挡时拒绝向其他应用发送输入。speech:adversarial 使用合成 WASAPI 端口驱动真实 Windows 控制器/Worker，验证失败与重启，不采样硬件。portable 仅在有自有进程标记的系统临时根生成便携包，运行实际 Worker/RAG 并清理，不覆盖 release、不安装或发布。
+
+Windows 上述驱动将固定公开 WAV 临时下载为输入，不声明真人语音质量；临时包、profile、文档和探针同样由 test-workspace 管理。已改造的单项入口包含 platform-native、interview-access/effort/layout/workflow/context、copilot、updates-native、packaged；其他旧物理音频、原生权限/安装升级脚本仍需核对并改造持久化和真实环境副作用，不能直接运行。单测仅收集 shared 和当前平台的 unit/renderer。下文原 Windows“全程只读/全部旧脚本未改造”是 Mac 工作期间的历史说明，当前 macos/ 只读。
+
 从本机平台目录执行；依赖、构建与公开样本需已准备：
 
 ```sh

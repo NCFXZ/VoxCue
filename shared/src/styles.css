@@ -131,8 +131,8 @@ p {
   min-width: 760px;
   overflow: hidden;
   background: var(--sidebar);
-  backdrop-filter: blur(32px) saturate(125%);
   -webkit-backdrop-filter: blur(32px) saturate(125%);
+  backdrop-filter: blur(32px) saturate(125%);
 }
 .dark .app-shell {
   background: var(--sidebar);
@@ -143,7 +143,7 @@ p {
   align-items: center;
   justify-content: space-between;
   user-select: none;
-  -webkit-app-region: drag;
+  -webkit-app-region: no-drag;
 }
 .window-controls {
   display: flex;
@@ -151,6 +151,7 @@ p {
   -webkit-app-region: no-drag;
 }
 .window-controls button {
+  -webkit-app-region: no-drag;
   border: 0;
   background: transparent;
   width: 46px;
@@ -2144,8 +2145,8 @@ p {
 }
 .app-shell.login-shell {
   background: var(--surface);
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
   border-radius: var(--radius-dialog);
 }
 .login-copy {
@@ -4955,8 +4956,8 @@ small {
   --sidebar: var(--soft);
 }
 .frosted-ui .app-shell:not(.login-shell) {
-  backdrop-filter: var(--frosted-main-filter, blur(36px) saturate(130%));
   -webkit-backdrop-filter: var(--frosted-main-filter, blur(36px) saturate(130%));
+  backdrop-filter: var(--frosted-main-filter, blur(36px) saturate(130%));
 }
 .mouse-passthrough-ui
   :is(.floating-viewport, .floating-shell, .floating-panels, .floating-notices) {
@@ -4968,13 +4969,13 @@ small {
 }
 .frosted-ui .floating-panel {
   background: rgb(var(--frosted-panel-tint) / var(--frosted-panel-opacity));
-  backdrop-filter: var(--frosted-panel-filter, blur(24px));
   -webkit-backdrop-filter: var(--frosted-panel-filter, blur(24px));
+  backdrop-filter: var(--frosted-panel-filter, blur(24px));
 }
 .frosted-ui .floating-toolbar {
   background: rgb(var(--frosted-chrome-tint) / var(--frosted-chrome-opacity));
-  backdrop-filter: var(--frosted-panel-filter, blur(24px));
   -webkit-backdrop-filter: var(--frosted-panel-filter, blur(24px));
+  backdrop-filter: var(--frosted-panel-filter, blur(24px));
 }
 .frosted-ui .floating-shell :is(.answer-bubble, .floating-composer),
 .frosted-ui .floating-panel .transcript-item p {
@@ -4989,8 +4990,8 @@ small {
   );
 }
 .frosted-ui .floating-shell.is-resizing .floating-panel {
-  backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 :root.frosted-ui[data-frosted-legible='true'] .sidebar {
   --foreground: #172025;
@@ -5009,15 +5010,15 @@ small {
   color: var(--muted);
   opacity: 1;
 }
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   :root.frosted-ui {
     --sidebar: var(--soft);
   }
   .frosted-ui .app-shell:not(.login-shell),
   .frosted-ui .floating-panel,
   .frosted-ui .floating-toolbar {
-    backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    backdrop-filter: none;
   }
   :root.frosted-ui .floating-panel,
   :root.frosted-ui .floating-toolbar,

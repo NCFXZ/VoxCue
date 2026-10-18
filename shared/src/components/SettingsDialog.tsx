@@ -280,7 +280,9 @@ export function SettingsDialog({
                     </div>
                   </div>
                   {!presentation.frostedTransparency && (
-                    <p className="settings-hint">毛玻璃效果待适配，当前仅保存设置。</p>
+                    <p className="settings-hint">
+                      当前系统未提供毛玻璃透明度效果，设置仍会保存在本机。
+                    </p>
                   )}
                   {frostedError && (
                     <p className="danger-text" role="alert">

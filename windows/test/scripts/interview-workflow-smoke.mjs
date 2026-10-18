@@ -1,10 +1,15 @@
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { probe } from './window-probe.mjs';
+const cursorBefore = probe('cursor');
 
-const profile = path.resolve('test/results', `interview-workflow-${Date.now()}`);
+const profile = path.resolve(
+  path.join(testRoot, 'test/results'),
+  `interview-workflow-${Date.now()}`,
+);
 await mkdir(profile, { recursive: true });
 const fixture = path.join(profile, 'main.cjs');
 // Only external/native service ports are fixtures. Main IPC, preload, IDB,
@@ -181,10 +186,7 @@ try {
     Math.abs(module.x + module.width / 2 - body.x - body.width / 2) <= 1,
     'Microphone module centered',
   );
-  await main.screenshot({
-    path: path.join(profile, 'microphone-meter-light.png'),
-    animations: 'disabled',
-  });
+  await main.screenshot({ animations: 'disabled' });
   await main.waitForTimeout(10500);
   assert.equal(
     await settings.getByRole('button', { name: '停止测试', exact: true }).isVisible(),
@@ -209,7 +211,7 @@ try {
     .locator('.speech-device-error')
     .getByText(/麦克风访问被拒绝/)
     .waitFor();
-  await main.screenshot({ path: path.join(profile, 'microphone-permission.png') });
+  await main.screenshot({});
   await app.evaluate(() => {
     globalThis.microphoneDenied = false;
     globalThis.microphoneMissing = true;
@@ -231,7 +233,7 @@ try {
     await noMicConfirmation.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
     true,
   );
-  await main.screenshot({ path: path.join(profile, 'start-without-microphone.png') });
+  await main.screenshot({});
   await noMicConfirmation.getByRole('button', { name: '取消', exact: true }).click();
   check('无麦克风与权限错误内联提示，开场阻止缺失设备');
   await app.evaluate(() => {
@@ -243,7 +245,7 @@ try {
   await settings.getByRole('button', { name: '面试回答思考强度', exact: true }).click();
   await main.getByRole('menuitemradio', { name: '轻度', exact: true }).waitFor();
   await main.getByRole('menuitemradio', { name: '高', exact: true }).click();
-  await main.screenshot({ path: path.join(profile, 'interview-settings-light.png') });
+  await main.screenshot({});
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   check('音频禁用、所选设备测试及释放、模型与思考强度设置');
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -257,7 +259,7 @@ try {
   assert.equal(await confirmation.getByText(/确认后自动转写，请先取得参与者同意/).count(), 0);
   await confirmation.getByText(/音频仅在本机处理，不保存/).waitFor();
   await confirmation.getByRole('button', { name: '前往面试设置', exact: true }).waitFor();
-  await main.screenshot({ path: path.join(profile, 'start-confirmation.png') });
+  await main.screenshot({});
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     confirmation.getByRole('button', { name: '确认开始', exact: true }).click(),
@@ -363,10 +365,8 @@ try {
     0,
   );
   assert.equal(await floating.getByText('已完成 5 个步骤', { exact: true }).count(), 0);
-  await floating.screenshot({ path: path.join(profile, 'answer-cards-light.png') });
-  await floating
-    .locator('.floating-answer')
-    .screenshot({ path: path.join(profile, 'answer-panel-light.png'), animations: 'disabled' });
+  await floating.screenshot({});
+  await floating.locator('.floating-answer').screenshot({ animations: 'disabled' });
   check('回答独立圆角气泡、上方摘要默认收起、不编造步骤数');
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('');
   await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
@@ -396,7 +396,7 @@ try {
   const collapsed = await toolbarPosition();
   assert.ok(Math.abs(original.center - collapsed.center) <= 1);
   assert.ok(Math.abs(original.top - collapsed.top) <= 1);
-  await floating.screenshot({ path: path.join(profile, 'collapsed.png') });
+  await floating.screenshot({});
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
   await size(floating, 1060, 664);
   const restored = await toolbarPosition();
@@ -406,7 +406,7 @@ try {
     await floating
       .locator('.floating-drag-handle')
       .evaluate((node) => getComputedStyle(node).webkitAppRegion),
-    'drag',
+    'no-drag',
   );
   assert.equal(
     await floating
@@ -421,7 +421,65 @@ try {
     () => getComputedStyle(document.querySelector('.resize-right')).opacity === '0',
   );
   assert.equal(await handle.evaluate((node) => getComputedStyle(node).opacity), '0');
-  await handle.hover();
+  const hoverBox = await handle.boundingBox();
+  const hoverPoint = await app.evaluate(({ BrowserWindow, screen }, box) => {
+    const bounds = BrowserWindow.getAllWindows()
+      .find((w) => w.webContents.getURL().endsWith('#interview'))
+      .getContentBounds();
+    return screen.dipToScreenPoint({
+      x: Math.round(bounds.x + box.x + box.width / 2),
+      y: Math.round(bounds.y + box.y + box.height / 2),
+    });
+  }, hoverBox);
+  await floating.bringToFront();
+  await floating.evaluate(() => {
+    globalThis.hoverEvents = [];
+    window.addEventListener(
+      'mousemove',
+      (e) => {
+        globalThis.hoverEvents.push({
+          x: e.clientX,
+          y: e.clientY,
+          screenX: e.screenX,
+          screenY: e.screenY,
+          target: e.target?.closest?.('.floating-resize')?.className,
+        });
+        if (globalThis.hoverEvents.length > 8) globalThis.hoverEvents.shift();
+      },
+      true,
+    );
+  });
+  probe('move', hoverPoint.x, hoverPoint.y);
+  const hoverHandle = await app.evaluate(({ BrowserWindow }) =>
+    BrowserWindow.getAllWindows()
+      .find((w) => w.webContents.getURL().endsWith('#interview'))
+      .getNativeWindowHandle()
+      .readBigUInt64LE()
+      .toString(),
+  );
+  const hitDeadline = performance.now() + 5000;
+  while (probe('window', hoverHandle, path.resolve('public/voxcue.ico')).extendedStyle & 32) {
+    if (performance.now() > hitDeadline) {
+      console.error(
+        JSON.stringify({
+          hoverBox,
+          hoverPoint,
+          cursor: probe('cursor'),
+          events: await floating.evaluate(() => globalThis.hoverEvents),
+        }),
+      );
+      throw Error('Resize region did not disable native passthrough');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 30));
+  }
+  // Forwarded movement first unlocks the HWND. A subsequent physical movement
+  // supplies ordinary native hover instead of relying on CDP hover synthesis.
+  probe('move', hoverPoint.x + 1, hoverPoint.y);
+  assert.equal(
+    probe('hit', hoverHandle, hoverPoint.x + 1, hoverPoint.y).expected,
+    true,
+    'Idle resize surface must receive native hit testing',
+  );
   await floating.waitForFunction(
     () => getComputedStyle(document.querySelector('.resize-right')).opacity === '1',
   );
@@ -453,15 +511,12 @@ try {
     screen.getCursorScreenPoint = globalThis.originalCursor;
   });
   await size(floating, resized.width, resized.height);
-  await floating.screenshot({ path: path.join(profile, 'floating-light.png') });
+  await floating.screenshot({});
   await floating.evaluate(() => {
     localStorage.setItem('copilot-theme', 'dark');
     window.dispatchEvent(new Event('storage'));
   });
-  await floating.screenshot({
-    path: path.join(profile, 'floating-dark.png'),
-    animations: 'disabled',
-  });
+  await floating.screenshot({ animations: 'disabled' });
   check('悬停缩放图标、拖动尺寸真实 IPC、工具栏中心及顶部固定；系统指针位置使用夹具');
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await floating.getByRole('button', { name: '确认结束面试', exact: true }).waitFor();
@@ -472,7 +527,7 @@ try {
   await floating.getByRole('button', { name: '结束面试', exact: true }).waitFor();
   await floating.evaluate(() => window.desktop.windowAction('close'));
   await floating.getByRole('button', { name: '确认结束面试', exact: true }).waitFor();
-  await floating.screenshot({ path: path.join(profile, 'end-confirmation.png') });
+  await floating.screenshot({});
   await Promise.all([
     floating.waitForEvent('close'),
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
@@ -526,7 +581,7 @@ try {
     .getByText(/第 27 段回答/)
     .waitFor();
   await main.locator('.reasoning-summary summary').click();
-  await main.screenshot({ path: path.join(profile, 'chat-reasoning-summary.png') });
+  await main.screenshot({});
   check('切页后台继续、真实活动状态先出现、公开摘要到达后可展开、流式阅读不强制拉底');
   await app.evaluate(() => {
     globalThis.omitSummary = true;
@@ -540,9 +595,11 @@ try {
   );
   check('完成后没有公开摘要则不显示空入口，不伪造思考文本');
   assert.deepEqual(errors, []);
-  await writeFile(path.join(profile, 'result.json'), JSON.stringify({ checks, errors }, null, 2));
+  await console.log(JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, profile, checks }, null, 2));
 } finally {
+  probe('up');
+  probe('move', cursorBefore.x, cursorBefore.y);
   await app.evaluate(({ BrowserWindow }) => {
     for (const win of BrowserWindow.getAllWindows()) win.destroy();
   });

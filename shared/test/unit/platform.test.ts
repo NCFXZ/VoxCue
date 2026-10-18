@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
 import { selectDesktopPlatform, desktopResources } from '../../../shared/electron/platform';
 import { windows as windowsPolicy } from '../../../windows/electron/platform';
-import { pendingPresentation } from '../../../shared/electron/contracts/presentation';
 import { macos as macosPolicy } from '../../../macos/electron/platform';
 import {
   windowOptions,
@@ -45,7 +44,7 @@ describe('桌面平台边界', () => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      additionalArguments: ['--voxcue-presentation=' + JSON.stringify(pendingPresentation)],
+      additionalArguments: ['--voxcue-presentation=' + JSON.stringify(windowsPolicy.presentation)],
     });
     expect(options.icon).toBe(paths.icon);
     if (role !== 'main') expect(options).not.toHaveProperty('backgroundMaterial');

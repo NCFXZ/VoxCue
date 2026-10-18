@@ -1,4 +1,4 @@
-import { _electron as electron } from 'playwright';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -7,8 +7,8 @@ import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs'
 // Windows regression only: real native loading/enumeration, no audio capture.
 assert.equal(process.platform, 'win32', 'This native smoke requires Windows x64.');
 assert.equal(process.arch, 'x64', 'This native smoke requires Windows x64.');
-await mkdir('test/results', { recursive: true });
-const profile = await mkdtemp(path.resolve('test/results/platform-native-'));
+await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
+const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/platform-native-')));
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
@@ -76,7 +76,7 @@ try {
   });
   assert.equal(report.workerLoaded, true);
   assert.equal(report.utilityProcessState, 'idle');
-  await writeFile(path.join(profile, 'report.json'), JSON.stringify(report, null, 2));
+  await console.log(JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ ...report, profile }, null, 2));
 } finally {
   await closeUiApp(app);

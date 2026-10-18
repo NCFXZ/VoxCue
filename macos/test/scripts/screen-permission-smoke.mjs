@@ -57,6 +57,7 @@ try {
     ];
     globalThis.screenFixture = {
       granted: false,
+      notRequired: false,
       grantOnRequest: true,
       requests: 0,
       settings: 0,
@@ -65,6 +66,10 @@ try {
     const { ScreenPermission } = require(root + 'macos/electron/screenPermission.js');
     const original = ScreenPermission.prototype.call;
     ScreenPermission.prototype.call = function (action) {
+      if (globalThis.screenFixture.notRequired) {
+        if (action !== 'check') throw Error('Permission request is not required');
+        return { status: 'not-required', message: '当前捕获方式无需单独申请权限。' };
+      }
       this.dependencies = {
         binding: () => ({
           preflight: () => globalThis.screenFixture.granted,
@@ -177,8 +182,35 @@ try {
   const fixture = await app.evaluate(() => globalThis.screenFixture);
   assert.equal(fixture.requests, 2);
   assert.equal(fixture.captures, 0);
+  await app.evaluate(() => {
+    globalThis.screenFixture.notRequired = true;
+  });
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await panel
+    .getByRole('status', { name: '屏幕捕获权限状态' })
+    .filter({ hasText: '无需单独授权' })
+    .waitFor();
+  assert.equal(await panel.getByRole('button').count(), 0);
+  await panel.getByRole('heading', { name: '屏幕捕获', exact: true }).waitFor();
+  await panel.getByText('当前捕获方式无需单独申请权限。', { exact: false }).waitFor();
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  // Closing settings opened from the start dialog automatically returns there
+  // and checks access again; the main start button is behind that modal.
+  await dialog.waitFor();
+  const screenStatus = dialog.getByLabel('屏幕捕获权限检查', { exact: true });
+  await screenStatus.getByText('当前捕获方式无需单独申请权限。', { exact: true }).waitFor();
+  assert.equal(await screenStatus.getByText('截图功能需授权', { exact: false }).count(), 0);
+  assert.equal(
+    await dialog.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
+    true,
+  );
+  assert.equal(await app.evaluate(() => globalThis.screenFixture.requests), 2);
+  assert.equal(await app.evaluate(() => globalThis.screenFixture.captures), 0);
   assert.deepEqual(errors, []);
   checks.push('返回后刷新/撤销可见，未生效可打开固定设置；非法 IPC 被拒绝，无屏幕捕获');
+  checks.push(
+    '合成 not-required 状态不显示申请按钮或错误授权提示，开场仍可继续；不替代 Windows 原生验收',
+  );
   await closeUiApp(app);
   const report = {
     status: 'passed',

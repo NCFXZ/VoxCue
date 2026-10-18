@@ -47,12 +47,13 @@ export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
     };
   }, [supported]);
   const granted = permission?.status === 'granted';
+  const notRequired = permission?.status === 'not-required';
   return (
     <section className="speech-settings-section screen-capture-settings" aria-label="屏幕捕获权限">
       <div className="screen-capture-row">
         <div className="screen-capture-summary">
           <div className="screen-capture-heading">
-            <h3>允许捕获屏幕</h3>
+            <h3>{notRequired ? '屏幕捕获' : '允许捕获屏幕'}</h3>
             <span className="screen-capture-status" role="status" aria-label="屏幕捕获权限状态">
               {!supported
                 ? '待适配'
@@ -60,34 +61,46 @@ export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
                   ? '正在申请…'
                   : pending === 'check'
                     ? '正在检查…'
-                    : granted
-                      ? '已允许'
-                      : permission?.status === 'restricted'
-                        ? '受系统限制'
-                        : permission?.status === 'error' || permission?.status === 'unknown'
-                          ? '无法确认'
-                          : '未允许'}
+                    : notRequired
+                      ? '无需单独授权'
+                      : granted
+                        ? '已允许'
+                        : permission?.status === 'restricted'
+                          ? '受系统限制'
+                          : permission?.status === 'error' || permission?.status === 'unknown'
+                            ? '无法确认'
+                            : '未允许'}
             </span>
           </div>
-          <p className="screen-capture-description">仅在截图时使用，不持续录屏。</p>
+          <p className="screen-capture-description">
+            {notRequired ? permission.message + ' ' : ''}仅在截图时使用，不持续录屏。
+          </p>
         </div>
-        <div className="screen-capture-actions">
-          <Button
-            type="button"
-            variant="outline"
-            disabled={!supported || disabled || !!pending || granted}
-            onClick={() => void run('request')}
-          >
-            {granted ? <Check size={16} /> : pending ? <Loader size={16} /> : <Monitor size={16} />}
-            {!supported
-              ? '待适配'
-              : granted
-                ? '已允许'
-                : pending === 'request'
-                  ? '正在申请…'
-                  : '申请权限'}
-          </Button>
-        </div>
+        {!notRequired && (
+          <div className="screen-capture-actions">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={!supported || disabled || !!pending || granted}
+              onClick={() => void run('request')}
+            >
+              {granted ? (
+                <Check size={16} />
+              ) : pending ? (
+                <Loader size={16} />
+              ) : (
+                <Monitor size={16} />
+              )}
+              {!supported
+                ? '待适配'
+                : granted
+                  ? '已允许'
+                  : pending === 'request'
+                    ? '正在申请…'
+                    : '申请权限'}
+            </Button>
+          </div>
+        )}
       </div>
       {(error || permission?.status === 'error' || permission?.status === 'unknown') && (
         <p role="alert" className="danger-text">
