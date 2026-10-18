@@ -1,6 +1,7 @@
 using System;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Windows.Forms;
@@ -12,16 +13,23 @@ class InstallerWindow : Form {
     Accent=Color.FromArgb(0,103,180), Soft=Color.FromArgb(247,248,249);
   readonly Image logo;
   readonly string version, language, mode;
-  readonly bool preview, allowRun;
+  readonly bool preview, allowRun, canChangePath;
+  readonly string pathFile;
+  string installPath;
   readonly Label brand=new Label(), metadata=new Label(), status=new Label(), percentage=new Label();
   readonly ActionButton primary=new ActionButton(), close=new ActionButton();
+  readonly ActionButton browse=new ActionButton();
+  readonly Label locationLabel=new Label();
+  readonly PathDisplay locationValue=new PathDisplay();
+  readonly ToolTip locationTip=new ToolTip();
   readonly LaunchChoice launch=new LaunchChoice();
+  readonly LaunchChoice keepData=new LaunchChoice();
   readonly ProgressTrack progress=new ProgressTrack();
   readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer();
   string phase="ready";
   int percent;
   public static string[] Arguments;
-  EventWaitHandle startEvent, cancelEvent, installingEvent, doneEvent, failedEvent, finishEvent, runEvent;
+  EventWaitHandle startEvent, cancelEvent, installingEvent, doneEvent, failedEvent, finishEvent, runEvent, deleteDataEvent;
   System.Diagnostics.Process owner;
   IntPtr ownerWindow;
   bool approvedClose;
@@ -43,6 +51,10 @@ class InstallerWindow : Form {
     preview=Option("--preview")!=""; version=Option("--version","0.2.2"); language=Option("--language","2052");
     mode=Option("--mode","install");
     allowRun=Option("--run-after-finish","true")=="true";
+    canChangePath=Option("--can-change-path","true")=="true";
+    pathFile=Option("--path-file");
+    installPath=Option("--install-path");
+    if(installPath=="")installPath=Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),"Programs","VoxCue");
     using(var source=Image.FromFile(Option("--logo")))logo=new Bitmap(source);
     AutoScaleMode=AutoScaleMode.None;
     ClientSize=new Size(480,248); FormBorderStyle=FormBorderStyle.None;
@@ -62,8 +74,15 @@ class InstallerWindow : Form {
     close.Text=Local("Close","关闭","關閉");close.Click+=delegate{Close();};
     AcceptButton=primary;CancelButton=close;
     launch.SetBounds(28,122,380,30);launch.Text=Local("Open VoxCue","打开 VoxCue","開啟 VoxCue");launch.Checked=true;
+    keepData.SetBounds(28,122,380,30);keepData.Text=Local("Keep my data","保留用户数据","保留使用者資料");keepData.Checked=true;
+    locationLabel.SetBounds(28,114,380,24);locationLabel.Text=Local("Installation location","安装位置","安裝位置");locationLabel.ForeColor=Muted;
+    locationValue.SetBounds(28,140,328,36);locationValue.Text=installPath;
+    locationValue.AccessibleName=locationLabel.Text;locationTip.SetToolTip(locationValue,installPath);
+    locationValue.Font=new Font("Segoe UI",8.5f,FontStyle.Regular,GraphicsUnit.Point);
+    browse.SetBounds(368,140,84,36);browse.Text=Local("Browse","选择","選擇");browse.Fill=Soft;browse.Ink=Foreground;browse.Secondary=true;
+    browse.Enabled=canChangePath;browse.Click+=delegate{ChoosePath();};
     progress.SetBounds(28,157,424,6);
-    Controls.AddRange(new Control[]{brand,metadata,status,percentage,primary,close,launch,progress});
+    Controls.AddRange(new Control[]{brand,metadata,status,percentage,primary,close,launch,keepData,progress,locationLabel,locationValue,browse});
     foreach(var control in new Control[]{brand,metadata})control.MouseDown+=Drag;
     MouseDown+=Drag;
     float scale=DpiScale(this);
@@ -85,6 +104,7 @@ class InstallerWindow : Form {
       failedEvent=EventWaitHandle.OpenExisting(prefix+"-failed");
       finishEvent=EventWaitHandle.OpenExisting(prefix+"-finish");
       runEvent=EventWaitHandle.OpenExisting(prefix+"-run");
+      deleteDataEvent=EventWaitHandle.OpenExisting(prefix+"-delete-data");
     }
     SetPhase(preview?Option("--preview"):"ready");
     timer.Start();
@@ -106,26 +126,50 @@ class InstallerWindow : Form {
     if(e.Button==MouseButtons.Left){ReleaseCapture();SendMessageW(Handle,0xA1,new IntPtr(2),IntPtr.Zero);}
   }
   void SetPhase(string value) {
-    phase=value; bool running=value=="installing",done=value=="done",failed=value=="failed",uninstall=mode=="uninstall";
-    status.Visible=!done || uninstall || !allowRun;
+    phase=value; bool running=value=="installing",starting=value=="starting",done=value=="done",failed=value=="failed",uninstall=mode=="uninstall";
+    bool choosingData=uninstall && value=="ready";
+    bool choosingPath=!uninstall && value=="ready";
+    keepData.Visible=choosingData;
+    locationLabel.Visible=choosingPath;locationValue.Visible=choosingPath;browse.Visible=choosingPath;
+    status.Visible=!choosingData && !choosingPath && (!done || uninstall || !allowRun);
     status.Text=failed?(uninstall?Local("Uninstall failed","卸载失败","解除安裝失敗"):Local("Installation failed","安装失败","安裝失敗")):
       running?(uninstall?Local("Uninstalling…","正在卸载…","正在解除安裝…"):Local("Installing…","正在安装…","正在安裝…")):
+      starting?Local("Preparing…","正在准备…","正在準備…"):
       done?(uninstall?Local("VoxCue has been removed","VoxCue 已卸载","VoxCue 已解除安裝"):Local("Installation complete","安装完成","安裝完成")):
       uninstall?Local("Your data will be kept","保留个人数据","保留個人資料"):Local("Ready to install","准备安装","準備安裝");
     launch.Visible=done && !uninstall && allowRun;
     progress.Visible=running;percentage.Visible=running;
-    primary.Enabled=!running;
-    primary.Text=failed?Local("Close","关闭","關閉"):done?Local("Finish","完成"):running?(uninstall?Local("Uninstalling…","正在卸载…","正在解除安裝…"):Local("Installing…","正在安装…","正在安裝…")):
+    primary.Enabled=!running&&!starting;
+    primary.Text=failed?Local("Close","关闭","關閉"):done?Local("Finish","完成"):starting?Local("Preparing…","正在准备…","正在準備…"):running?(uninstall?Local("Uninstalling…","正在卸载…","正在解除安裝…"):Local("Installing…","正在安装…","正在安裝…")):
       uninstall?Local("Uninstall","卸载","解除安裝"):Local("Install","安装","安裝");
-    close.Enabled=!running;
+    close.Enabled=!running&&!starting;
     if(running) {percent=preview?42:0;UpdateProgress();}
     Invalidate();
   }
   void UpdateProgress(){progress.Value=percent;percentage.Text=percent+"%";}
+  void ChoosePath() {
+    if(!canChangePath||phase!="ready")return;
+    using(var picker=new FolderBrowserDialog()) {
+      picker.Description=Local("Choose the installation folder","选择安装文件夹","選擇安裝資料夾");
+      picker.SelectedPath=Directory.Exists(installPath)?installPath:Path.GetDirectoryName(installPath);
+      if(picker.ShowDialog(this)!=DialogResult.OK)return;
+      var selected=Path.GetFullPath(picker.SelectedPath);
+      if(selected.Length>Path.GetPathRoot(selected).Length)selected=selected.TrimEnd(Path.DirectorySeparatorChar);
+      if(!String.Equals(Path.GetFileName(selected),"VoxCue",StringComparison.OrdinalIgnoreCase))selected=Path.Combine(selected,"VoxCue");
+      installPath=selected;locationValue.Text=selected;locationTip.SetToolTip(locationValue,selected);
+    }
+  }
   void ActivatePrimary() {
     if(phase=="ready") {
       if(preview){SetPhase("installing");return;}
-      startEvent.Set();SetPhase("installing");
+      if(mode=="install"&&canChangePath&&pathFile!="") {
+        try{File.WriteAllText(pathFile,installPath+"\r\n",new System.Text.UnicodeEncoding(false,false));}
+        catch{MessageBox.Show(this,Local("Unable to use this installation location.","无法使用此安装位置。","無法使用此安裝位置。"),"VoxCue");return;}
+      }
+      if(mode=="uninstall"&&!keepData.Checked) {
+        deleteDataEvent.Set();
+      }
+      startEvent.Set();SetPhase("starting");
     }else if(phase=="done"||phase=="failed") {
       if(!preview){if(phase=="done"&&launch.Checked&&mode!="uninstall"&&allowRun)runEvent.Set();finishEvent.Set();}
       approvedClose=true;Close();
@@ -160,14 +204,14 @@ class InstallerWindow : Form {
   }
   protected override void OnFormClosing(FormClosingEventArgs e) {
     if(!approvedClose) {
-      if(phase=="installing" && !preview){e.Cancel=true;return;}
+      if((phase=="starting"||phase=="installing") && !preview){e.Cancel=true;return;}
       if(!preview){if(phase=="done"||phase=="failed")finishEvent.Set();else cancelEvent.Set();}
     }
     base.OnFormClosing(e);
   }
   protected override void Dispose(bool disposing) {
-    if(disposing){timer.Dispose();logo.Dispose();if(owner!=null)owner.Dispose();
-      foreach(var handle in new[]{startEvent,cancelEvent,installingEvent,doneEvent,failedEvent,finishEvent,runEvent})if(handle!=null)handle.Dispose();}
+    if(disposing){timer.Dispose();locationTip.Dispose();logo.Dispose();if(owner!=null)owner.Dispose();
+      foreach(var handle in new[]{startEvent,cancelEvent,installingEvent,doneEvent,failedEvent,finishEvent,runEvent,deleteDataEvent})if(handle!=null)handle.Dispose();}
     base.Dispose(disposing);
   }
   [STAThread] static int Main(string[] args) {
@@ -175,7 +219,7 @@ class InstallerWindow : Form {
     try{using(var window=new InstallerWindow())Application.Run(window);return 0;}catch{return 1;}
   }
   class ActionButton : Button {
-    public Color Fill,Ink; public bool IsClose;bool hovered,pressed;
+    public Color Fill,Ink; public bool IsClose,Secondary;bool hovered,pressed;
     public ActionButton(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);
       FlatStyle=FlatStyle.Flat;FlatAppearance.BorderSize=0;Cursor=Cursors.Hand;}
     protected override void OnMouseEnter(EventArgs e){hovered=true;Invalidate();base.OnMouseEnter(e);}
@@ -185,11 +229,19 @@ class InstallerWindow : Form {
     protected override void OnPaint(PaintEventArgs e) {
       e.Graphics.Clear(Surface);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;
       float scale=DpiScale(this);var box=new RectangleF(0,0,Width-1,Height-1);
-      var fill=!Enabled?Soft:IsClose?(hovered?Color.FromArgb(246,226,228):Surface):pressed?Color.FromArgb(0,77,135):hovered?Color.FromArgb(0,90,160):Fill;
+      var fill=!Enabled?Soft:IsClose?(hovered?Color.FromArgb(246,226,228):Surface):Secondary?(pressed?Border:hovered?Color.FromArgb(239,241,243):Fill):pressed?Color.FromArgb(0,77,135):hovered?Color.FromArgb(0,90,160):Fill;
       using(var shape=Rounded(box,8*scale))using(var brush=new SolidBrush(fill))e.Graphics.FillPath(brush,shape);
       if(IsClose){using(var pen=new Pen(hovered?Color.FromArgb(197,43,50):Ink,1.5f*scale)){
         float midX=Width/2f,midY=Height/2f,r=4*scale;e.Graphics.DrawLine(pen,midX-r,midY-r,midX+r,midY+r);e.Graphics.DrawLine(pen,midX+r,midY-r,midX-r,midY+r);}}
       else TextRenderer.DrawText(e.Graphics,Text,Font,ClientRectangle,Enabled?Ink:Muted,TextFormatFlags.HorizontalCenter|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPadding);
+    }
+  }
+  class PathDisplay : Control {
+    public PathDisplay(){SetStyle(ControlStyles.UserPaint|ControlStyles.AllPaintingInWmPaint|ControlStyles.OptimizedDoubleBuffer,true);AccessibleRole=AccessibleRole.Text;TabStop=false;}
+    protected override void OnTextChanged(EventArgs e){base.OnTextChanged(e);Invalidate();}
+    protected override void OnPaint(PaintEventArgs e){e.Graphics.Clear(Surface);e.Graphics.SmoothingMode=SmoothingMode.AntiAlias;float scale=DpiScale(this);
+      using(var shape=Rounded(new RectangleF(0,0,Width-1,Height-1),8*scale))using(var brush=new SolidBrush(Soft))using(var pen=new Pen(Border,scale)){e.Graphics.FillPath(brush,shape);e.Graphics.DrawPath(pen,shape);}
+      TextRenderer.DrawText(e.Graphics,Text,Font,new Rectangle((int)(8*scale),0,Width-(int)(16*scale),Height),Foreground,TextFormatFlags.SingleLine|TextFormatFlags.EndEllipsis|TextFormatFlags.VerticalCenter|TextFormatFlags.NoPadding);
     }
   }
   class LaunchChoice : CheckBox {

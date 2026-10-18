@@ -2,6 +2,12 @@
 
 # Windows 安装与分平台更新
 
+## 源码修复：安装衔接与卸载选择（安装包尚未发布）
+
+首次安装默认位于当前用户程序目录，可通过“选择”更改位置；所选父目录使用 VoxCue 子文件夹。已有安装显示并锁定原路径，选择按钮置灰，更新或覆盖安装的 /D 参数不能改变目录。
+
+Windows 自绘前端通过 customInstallMode 跳过隐藏的用户范围交互，固定为当前 Windows 用户安装；拒绝所有用户安装参数和已检测到的机器范围安装，不提权或替换其他用户程序，收到引擎开始信号后才显示进度。卸载只提供默认勾选的“保留用户数据”复选框，不二次确认；取消勾选后点击卸载，仅在交互卸载成功时清理当前用户的 VoxCue 与旧 ai-interview-copilot 应用数据根，先拒绝重定向目录，失败不显示成功。应用更新与静默卸载保留数据，命令行不能绕过复选框，外部原始文件保持。正式模板的隔离入口为 windows/ 下的 node test/scripts/installer-engine-smoke.mjs。已发布 0.2.2 的安装包尚不包含这批本地修复。
+
 ## 2026-10-18 Windows / Mac 0.2.2 发行
 
 Windows x64 的 VoxCue-Setup-0.2.2-x64.exe、对应 .exe.blockmap 与 latest.yml 已追加到既有 [v0.2.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.2.2)，现为仓库 Latest。Mac 原有 DMG、arm64 ZIP 和 latest-mac.yml 保持原资产；全部旧发行及 Windows 0.2.1 文件保留。两平台继续独立选版，旧 Windows 客户端也可经 Latest 获取本次更新。

@@ -1,6 +1,7 @@
 ; The visible interface is drawn with the app's visual rules. NSIS retains
 ; extraction, current-user installation, uninstall and silent updater behavior.
 !include LogicLib.nsh
+!include TextFunc.nsh
 Var VoxCueEvents
 Var VoxCueStart
 Var VoxCueCancel
@@ -10,6 +11,51 @@ Var VoxCueFailed
 Var VoxCueFinish
 Var VoxCueRun
 Var VoxCueUiProcess
+Var VoxCueDeleteData
+Var VoxCueInstallDirectory
+Var VoxCueCanChangePath
+!define VOXCUE_INSTALLER_DATA_INCLUDE "${__FILEDIR__}\installer-data.nsh"
+
+; Only the current Windows user is supported. Reject machine installs before
+; Builder's hidden page can elevate or select an all-users installation.
+!macro VoxCueCurrentUserOnly
+  ClearErrors
+  ${GetParameters} $0
+  ${GetOptions} $0 "--delete-app-data" $1
+  ${IfNot} ${Errors}
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONSTOP "Choose whether to keep your data in the VoxCue uninstaller."
+    ${EndIf}
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+  ClearErrors
+  ${If} ${isForAllUsers}
+  ${OrIf} $hasPerMachineInstallation == "1"
+    ${IfNot} ${Silent}
+      MessageBox MB_OK|MB_ICONSTOP "VoxCue only supports the current Windows user. An all-users installation cannot be changed here."
+    ${EndIf}
+    SetErrorLevel 2
+    Quit
+  ${EndIf}
+  !insertmacro setInstallModePerUser
+  StrCpy $VoxCueCanChangePath "true"
+  ${If} $hasPerUserInstallation == "1"
+    StrCpy $INSTDIR $perUserInstallationFolder
+    StrCpy $VoxCueCanChangePath "false"
+  ${EndIf}
+!macroend
+!macro customInit
+  !insertmacro VoxCueCurrentUserOnly
+!macroend
+!macro customUnInit
+  !insertmacro VoxCueCurrentUserOnly
+!macroend
+
+; The self-drawn frontend has no install-scope page to click through.
+!macro customInstallMode
+  StrCpy $isForceCurrentInstall "1"
+!macroend
 
 !macro VoxCueEvent NAME HANDLE
   System::Call 'kernel32::CreateEventW(p0,i1,i0,w "$VoxCueEvents-${NAME}")p.r0'
@@ -23,6 +69,10 @@ Var VoxCueUiProcess
 
 !macro VoxCueInit
   HideWindow
+  !ifdef VOXCUE_INSTALLER_PREVIEW
+    StrCpy $VoxCueCanChangePath "true"
+  !endif
+  StrCpy $VoxCueInstallDirectory $INSTDIR
   System::Call 'kernel32::GetCurrentProcessId()i.r0'
   StrCpy $VoxCueEvents "Local\VoxCue-Installer-$0-$HWNDPARENT"
   !insertmacro VoxCueEvent start $VoxCueStart
@@ -32,6 +82,7 @@ Var VoxCueUiProcess
   !insertmacro VoxCueEvent failed $VoxCueFailed
   !insertmacro VoxCueEvent finish $VoxCueFinish
   !insertmacro VoxCueEvent run $VoxCueRun
+  !insertmacro VoxCueEvent delete-data $VoxCueDeleteData
   InitPluginsDir
   File /oname=$PLUGINSDIR\VoxCue.Setup.UI.exe "${VOXCUE_INSTALLER_FRONTEND}"
   File /oname=$PLUGINSDIR\brand.png "${VOXCUE_INSTALLER_LOGO}"
@@ -45,8 +96,12 @@ Var VoxCueUiProcess
   !else
     StrCpy $2 "true"
   !endif
+  StrCpy $3 $VoxCueCanChangePath
+  !ifdef BUILD_UNINSTALLER
+    StrCpy $3 "false"
+  !endif
   System::Call 'kernel32::GetCurrentProcessId()i.r0'
-  StrCpy $0 '$\"$PLUGINSDIR\VoxCue.Setup.UI.exe$\" $\"--owner=$0$\" $\"--window=$HWNDPARENT$\" $\"--events=$VoxCueEvents$\" $\"--version=${VERSION}$\" $\"--language=$LANGUAGE$\" $\"--mode=$1$\" $\"--run-after-finish=$2$\" $\"--logo=$PLUGINSDIR\brand.png$\"'
+  StrCpy $0 '$\"$PLUGINSDIR\VoxCue.Setup.UI.exe$\" $\"--owner=$0$\" $\"--window=$HWNDPARENT$\" $\"--events=$VoxCueEvents$\" $\"--version=${VERSION}$\" $\"--language=$LANGUAGE$\" $\"--mode=$1$\" $\"--run-after-finish=$2$\" $\"--logo=$PLUGINSDIR\brand.png$\" $\"--install-path=$INSTDIR$\" $\"--can-change-path=$3$\" $\"--path-file=$PLUGINSDIR\install-path.txt$\"'
   ; NSIS is 32-bit; retain only the process we create for this installation.
   System::Call 'kernel32::GlobalAlloc(i0x40,i68)p.r1'
   System::Call '*$1(i68)'
@@ -83,6 +138,7 @@ Var VoxCueUiProcess
   System::Call 'kernel32::CloseHandle(p $VoxCueFailed)'
   System::Call 'kernel32::CloseHandle(p $VoxCueFinish)'
   System::Call 'kernel32::CloseHandle(p $VoxCueRun)'
+  System::Call 'kernel32::CloseHandle(p $VoxCueDeleteData)'
 !macroend
 
 !ifdef BUILD_UNINSTALLER
@@ -126,6 +182,44 @@ Var VoxCueUiProcess
       ${EndIf}
       System::Call 'kernel32::WaitForSingleObject(p $VoxCueStart,i50)i.r0'
     ${LoopUntil} $0 == 0
+    !ifndef BUILD_UNINSTALLER
+      !ifndef VOXCUE_INSTALLER_PREVIEW
+        ${If} $hasPerUserInstallation != "1"
+          ClearErrors
+          FileOpen $0 "$PLUGINSDIR\install-path.txt" r
+          IfErrors voxcue_path_invalid
+          FileReadUTF16LE $0 $1
+          FileClose $0
+          ${TrimNewLines} $1 $1
+          StrCmp $1 "" voxcue_path_invalid
+          ; Canonicalize without requiring the new VoxCue subfolder to exist.
+          System::Call 'kernel32::GetFullPathNameW(w r1,i ${NSIS_MAX_STRLEN},w .r3,p0)i.r4'
+          ${If} $4 == 0
+          ${OrIf} $4 >= ${NSIS_MAX_STRLEN}
+            Goto voxcue_path_invalid
+          ${EndIf}
+          StrCpy $1 $3
+          StrCmp $1 $INSTDIR voxcue_path_valid
+          ; Browse always selects VoxCue's own subdirectory, never a generic
+          ; parent folder that the uninstaller could later remove recursively.
+          ${GetFileName} $1 $2
+          StrCmp $2 "VoxCue" voxcue_path_valid voxcue_path_invalid
+          voxcue_path_invalid:
+          System::Call 'kernel32::SetEvent(p $VoxCueFailed)'
+          ${Do}
+            System::Call 'kernel32::WaitForSingleObject(p $VoxCueUiProcess,i0)i.r0'
+            ${If} $0 == 0
+              ${ExitDo}
+            ${EndIf}
+            System::Call 'kernel32::WaitForSingleObject(p $VoxCueFinish,i50)i.r0'
+          ${LoopUntil} $0 == 0
+          SetErrorLevel 2
+          Quit
+          voxcue_path_valid:
+          StrCpy $VoxCueInstallDirectory $1
+        ${EndIf}
+      !endif
+    !endif
     Abort
   FunctionEnd
 !macroend
@@ -133,13 +227,21 @@ Var VoxCueUiProcess
 !macro VoxCueBegin PREFIX
   Function ${PREFIX}VoxCueBegin
     HideWindow
+    !ifndef BUILD_UNINSTALLER
+      !ifndef VOXCUE_INSTALLER_PREVIEW
+        ; Builder's scope helper reapplies /D; restore our selected or locked
+        ; directory after that helper, immediately before file installation.
+        StrCpy $INSTDIR $VoxCueInstallDirectory
+      !endif
+    !endif
     System::Call 'kernel32::SetEvent(p $VoxCueInstalling)'
     Abort
   FunctionEnd
   ; MUI calls the instfiles leave hook when extraction finishes, including Abort.
   ; A failed hidden engine must remain closable through the visible frontend.
   Function ${PREFIX}VoxCueFilesFinished
-    IfAbort 0 voxcue_files_succeeded
+    IfAbort voxcue_files_failed voxcue_files_succeeded
+    voxcue_files_failed:
     ${IfNot} ${Silent}
       System::Call 'kernel32::SetEvent(p $VoxCueFailed)'
       ${Do}
@@ -153,8 +255,22 @@ Var VoxCueUiProcess
     SetErrorLevel 2
     Quit
     voxcue_files_succeeded:
+    !ifdef BUILD_UNINSTALLER
+      !ifndef VOXCUE_INSTALLER_PREVIEW
+        ${IfNot} ${Silent}
+        ${AndIfNot} ${isUpdated}
+          System::Call 'kernel32::WaitForSingleObject(p $VoxCueDeleteData,i0)i.r0'
+          ${If} $0 == 0
+            Call un.VoxCueRemoveData
+            IfErrors voxcue_files_failed
+          ${EndIf}
+        ${EndIf}
+      !endif
+    !endif
   FunctionEnd
-  !define MUI_PAGE_CUSTOMFUNCTION_LEAVE ${PREFIX}VoxCueFilesFinished
+  !ifndef BUILD_UNINSTALLER
+    !define MUI_PAGE_CUSTOMFUNCTION_LEAVE ${PREFIX}VoxCueFilesFinished
+  !endif
 !macroend
 
 !macro VoxCueFinish PREFIX
@@ -200,6 +316,9 @@ Var VoxCueUiProcess
   Page custom VoxCueFinish
 !macroend
 !macro customUnWelcomePage
+  !ifndef VOXCUE_INSTALLER_PREVIEW
+    !include "${VOXCUE_INSTALLER_DATA_INCLUDE}"
+  !endif
   !insertmacro VoxCueWelcome "un."
   !insertmacro VoxCueBegin "un."
   UninstPage custom un.VoxCueWelcome

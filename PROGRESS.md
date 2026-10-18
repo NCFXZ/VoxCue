@@ -1,3 +1,29 @@
+## 2026-10-18：安装修复源码同步与本地发行清理
+
+按用户最新要求，将当前 Windows 安装修复、隔离回归入口、环境判定与工作区文档整理提交推送至私有 NCFXZ/VoxCue 的 main。公开 0.2.2 安装包未替换，安装路径与卸载数据选项仍属于尚未公开分发的源码修复；不将本次源码同步表述为全部原生功能验收或重新发布。
+
+删除 windows/release 中本地修复安装包、blockmap 及 latest.yml，共 3 个普通文件、逻辑 233,247,356 字节；便携暂存与两套 shared/local-models 模型已不存在，不自动补回。纯路径、数量和删除状态见 windows/recovery/local-installer-cleanup-20261018/cleanup.json，不提交审计或测试产物。保留依赖、开发构建、恢复基线、真实用户数据及线上 Windows/Mac 发行，macos/ 只读。
+
+## 2026-10-18：Windows 原生回归环境判定
+
+WindowProbe 的桌面检查同时核对 Default 输入桌面与光标读取成功；读取失败直接报错，不把零坐标当作有效位置。interview-layout 与 interview-workflow 在启动及真实鼠标阶段复核环境，缩放在拖动后再次核对；屏保/锁屏不跳过原生断言，也不自动解锁或改变系统设置。入口、隔离与串行约定见 shared/test/README.md，结果仍只到终端/对话。
+
+## 2026-10-18：Windows 工作区清理
+
+按用户要求核对共享与 Windows 的静态/动态引用、脚本入口和文件占用。保留当前业务模块、平台动态装配、Worker/utilityProcess/preload、测试助手及固定夹具；移除四份过时测试结果/界面审查报告，现用入口和验证边界统一引用 shared/test/README.md。已解压的 Node 工具压缩包、安装界面编译中间文件及旧工具日志一并清理，共 20 个普通文件、逻辑 37,587,310 字节；不代表实际磁盘可用空间增量。
+
+纯路径、用途、数量与删除状态在 windows/recovery/workspace-cleanup-20261018/cleanup.json，不记录测试结果。历史 shared 锁基准保留，运行依赖、平台锁、开发构建、当前修复安装包及未提交的安装器修改保持；不触碰真实用户数据或恢复基线，不自动补回模型。macos/ 只读，349 个云占位目录不重试，本次不提交、推送或发布。
+
+## 2026-10-18：Windows 安装衔接与卸载数据选项
+
+自绘安装器通过 customInstallMode 固定为当前 Windows 用户，避免隐藏的用户范围页等待下一步；拒绝所有用户安装参数和已检测到的机器范围安装，不提权、不替换其他用户程序。前端点击开始后先等待引擎信号，再显示实际安装进度。
+
+首次安装显示系统当前用户程序目录作为默认位置，可通过原生文件夹选择器选择其他位置；使用所选父目录的 VoxCue 子目录。检测到既有安装时显示原路径并禁用选择按钮，主安装器在文件处理前恢复已选/锁定目录，覆盖安装与更新的 /D 参数不能迁移既有安装。
+
+卸载页新增默认勾选的“保留用户数据”复选框；按用户最新要求不再二次确认，取消勾选后点击卸载即按该选择执行，切换选项本身不删除文件。只有成功的交互卸载才清理当前用户的 VoxCue 与 ai-interview-copilot 数据根，更新/静默流程不删除数据，拒绝命令行绕过复选框；先检查双方路径及后代，拒绝重定向，删除失败保持失败状态与非零退出码。外部原件不在删除范围。
+
+新增 Windows 入口 node test/scripts/installer-engine-smoke.mjs，使用正式 Builder 模板、独立 GUID 和临时安装目录，覆盖真实安装/更新/卸载、数据选择和路径保护；原界面样例继续覆盖多语言、取消与故障。必要安装、合成数据、注册项与临时文件结束清理，不保存测试结果。源码同步按本节最新授权执行，已发布的 0.2.2 安装包尚未包含此修复。
+
 ## 2026-10-18：Windows 发行后的本地安装包与模型清理
 
 按用户明确要求，清除 windows/release 下的正式安装包、更新清单及打包暂存，以及 shared/local-models/speech、shared/local-models/rag/multilingual-e5-small 两套开发模型；空的模型容器目录一并移除。生成/运行消费者已核对，删除前逐级确认路径无重定向、无进程/文件占用。应用 component-cache 当前不存在，未删除用户数据根或已安装程序；源码、依赖、开发构建、真实资料/凭据、恢复基线与已发布的 Windows/Mac 0.2.2 保留，macos/ 只读。
@@ -491,7 +517,7 @@ Node.js pkg 安装已核对为原生 arm64 v24.22.0（npm 11.19.1、Corepack 0.3
 
 用户最新授权将当前软件打包并上传GitHub。package.json提升到0.1.2，Windows完整构建、136模块架构零越层/运行时环、三组typecheck与diff检查通过。生成release/installer/VoxCue-Setup-0.1.2-x64.exe（600,418,657字节）、对应blockmap（624,347字节）及latest.yml（349字节）；SHA256为e5bb67711871dad5915d3e6ab66ff0bb415c9fd4994b2f7e158c2a15f8dfbaa2。清单version/文件名/大小/SHA512、blockmap解码及全文件覆盖、ASAR版本/根目录白名单/固定公开更新源均核对通过，原v0.1.1安装包哈希未变。安装包仍为NotSigned，没有Mac包，也未提交或推送私有源码。
 
-实际installer-stage的六组专项回归全部通过：真实Worker/utilityProcess/模型/离线RAG、官方Copilot运行时、更新动画及跨启动草稿/附件字节恢复、聊天进度、异常与取消、真实NsisUpdater损坏包拒绝和新安装包完整SHA512。全部隔离userData/合成账户，未使用真实麦克风/用户资料；此前315单测与36组完整功能验收仍见FUNCTIONAL_TEST_REPORT。本轮审计、前态、构建、校验和专项日志在test/results/release-v0.1.2。
+实际installer-stage的六组专项回归全部通过：真实Worker/utilityProcess/模型/离线RAG、官方Copilot运行时、更新动画及跨启动草稿/附件字节恢复、聊天进度、异常与取消、真实NsisUpdater损坏包拒绝和新安装包完整SHA512。全部隔离userData/合成账户，未使用真实麦克风/用户资料；旧验收报告已清理，现用入口见shared/test/README.md。本轮审计、前态、构建、校验和专项日志在test/results/release-v0.1.2。
 
 已在正常GitHub登录会话发布 https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.1.2 ，三项文件全部上传成功、正式非预发布并设为Latest，供旧版过渡到分平台选版逻辑。600MB安装包前两次遇到存储请求网络错误，用户要求重试后刷新草稿并移除失败空占位，第三次单独上传成功。公开API确认三项资产state/大小/SHA256逐项匹配本地校验，公开latest.yml下载字节哈希一致，legacy Latest指向v0.1.2；证据在public-release.json，发布页面截图为published.jpg。没有推送私有源码或改变仓库可见性，旧版发行保留；根构建和当前installer-stage均为0.1.2。
 
@@ -501,7 +527,7 @@ Node.js pkg 安装已核对为原生 arm64 v24.22.0（npm 11.19.1、Corepack 0.3
 
 最终136模块架构零越层/运行时环、三组typecheck、Windows build和diff检查通过；43文件315单测及36组桌面/原生/便携回归通过，含66种UI状态、实际E5/LanceDB/原生Worker/utilityProcess、更新损坏包拒绝和600,425,395字节SHA512、隔离NSIS 0.1.0→0.2.0保留数据、系统回环三轮暂停恢复/崩溃释放、10分钟合成双通道音频（最大队列800ms、无错误）及当前ASAR验证。首次默认单测并发解析超时、测试路径和旧夹具失败均保留日志；原断言/时限下单独复测与两个Worker的315项完整复测通过。用户选择真人语音稍后，未采集真实麦克风；真实账户、真人质量/长时稳定性及Mac真机未验收。
 
-与清理前基线核对242份源码/测试，234份未变，变化仅2份动画生产源码与6份测试。验收后安全移除5项可再生成便携/测试安装/更新缓存，9,031文件、3,337,255,901字节；报告/截图/失败日志、隔离资料及全部恢复基线保留。没有修改真实用户数据/凭据、benchmarks、模型/依赖、正式release或进行提交推送发布；根构建已更新，公开v0.1.1未重打。本轮证据在test/results/functional-20261015-697d9556，详细范围见docs/FUNCTIONAL_TEST_REPORT.md。
+与清理前基线核对242份源码/测试，234份未变，变化仅2份动画生产源码与6份测试。验收后安全移除5项可再生成便携/测试安装/更新缓存，9,031文件、3,337,255,901字节；报告/截图/失败日志、隔离资料及全部恢复基线保留。没有修改真实用户数据/凭据、benchmarks、模型/依赖、正式release或进行提交推送发布；根构建已更新，公开v0.1.1未重打。本轮证据在test/results/functional-20261015-697d9556，旧报告已清理，现用入口见shared/test/README.md。
 
 ## 2026-10-15：AGENTS当前规则更新与重复生成文件清理
 
@@ -573,7 +599,7 @@ AGENTS、README、ARCHITECTURE、HANDOFF、WORKSPACE_CLEANUP及详细CROSS_PLATF
 
 v0.1.1 NSIS已生成并发布：https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.1.1 。本地release/installer/VoxCue-Setup-0.1.1-x64.exe为600,425,395字节（约573MiB），blockmap624,707字节、latest.yml349字节；SHA-256 a24a76a683f5d4919499ce51917de4a863d1cb06339fde59760110a00d80a128。版本、SHA512元数据、固定公开更新源与ASAR公开边界已核对，实际签名仍NotSigned。仅上传以上三项，旧v0.1.0未上传。正常GitHub浏览器NCFXZ会话发布；无需登录的公开API独立确认非草稿/非预发布、latest=v0.1.1、三项大小及服务端SHA256与本地逐一一致，实际公开latest.yml下载哈希一致。公开README仅更新下载版本（ac8de0ac80a1f5e74cc23ebb7d2f37716f1f9c52），没有推送私有源码。证据为release-v0.1.1/public-release.json、verification.json及published.png。
 
-源码/私有仓库不提交推送，真实数据/凭据/原件不触碰。完整历史问题与复验见docs/ADVERSARIAL_TEST_REPORT.md；包审计和零告警JSON见test-results/release-v0.1.1。此前10分钟语音soak属于初测证据，本轮包内原生回归不替代新的数小时稳定性或真实账户推理验收。
+源码/私有仓库不提交推送，真实数据/凭据/原件不触碰。历史报告已清理，现用对抗回归见shared/test/README.md；包审计和零告警JSON见test-results/release-v0.1.1。此前10分钟语音soak属于初测证据，本轮包内原生回归不替代新的数小时稳定性或真实账户推理验收。
 
 ## 最新：对抗性与稳定性测试（2026-10-15）
 
@@ -583,7 +609,7 @@ v0.1.1 NSIS已生成并发布：https://github.com/NCFXZ/VoxCue-releases/release
 
 10分钟真实Paraformer/Silero双通道合成PCM通过：墙钟600.211秒、音频1200.064秒、最大积压320ms、177终稿/1548临时事件、错误0、结束线程-1；另12轮加载/冲刷/终止1200帧全部确认与释放，真实Worker/测试采集子进程崩溃清理通过。RSS有小幅增长，不能从短测判定数小时无泄漏。依赖审计发现3 high/1 moderate四条公开公告，独立ASAR检查确认嵌套sharp0.33.5及sprintf-js1.0.3被打包；顶层sharp0.35.5不替代嵌套版本，现有业务可达漏洞利用未证实。
 
-完整步骤、优先级、源码位置、通过项与限制见docs/ADVERSARIAL_TEST_REPORT.md；证据集中test-results/adversarial-20261015/，其他报告路径已列明。测试均独立userData/合成资料，不触碰真实凭据/原件，不进行语音精度实验。真实账户完整登录/续期/推理、不同硬件/休眠/热拔插及长达数小时运行仍未验收；建议修复已发现问题后再公开发布。
+历史报告已清理，现用入口及边界见shared/test/README.md；证据集中test-results/adversarial-20261015/，其他报告路径已列明。测试均独立userData/合成资料，不触碰真实凭据/原件，不进行语音精度实验。真实账户完整登录/续期/推理、不同硬件/休眠/热拔插及长达数小时运行仍未验收；建议修复已发现问题后再公开发布。
 
 ## 最新：Windows v0.1.0 安装包与发行准备（2026-10-15）
 
@@ -605,7 +631,7 @@ pnpm package:installer重新构建当前全部修复，包含Paraformer CPU/Sile
 
 最终视觉报告为test-results/typography-DdYpSG/report.json（66态，错误0），选中回答按钮实际悬停对比度浅色14.68:1、深色13.67:1。清理后UI/UX七组通过（ui-ux-fixes-7zdjH9）；追加个人信息完整提案/技能四组（personal-info-iBcpMC）与公开进度/来源/长输入十三组（chat-progress-7tP4nT）回归及截图复查通过，全部为隔离合成内容。
 
-根目录当前构建已更新，正常退出再通过Start-VoxCue.cmd启动。现有release/installer安装包是旧产物，本轮没有打包、提交、推送、发布或部署；恢复和清理说明已同步README、HANDOFF、UI_UX_REVIEW与WORKSPACE_CLEANUP。
+根目录当前构建已更新，正常退出再通过Start-VoxCue.cmd启动。现有release/installer安装包是旧产物，本轮没有打包、提交、推送、发布或部署；恢复和清理说明已同步README、HANDOFF与WORKSPACE_CLEANUP。
 
 ## 最新：Copilot 登录凭据存储修复（2026-10-15）
 
@@ -727,7 +753,7 @@ Copilot 复用 AIChatService 与资料校验，单请求隔离 session，禁用�
 
 ## UI 审查修复与截图反馈调整
 
-用户授权修复审查全部问题，并持续提供截图反馈。本轮落实 19 项修复/调整：资料保存与发送范围、会话清空说明及默认取消的关闭/退出确认；个人信息草稿保留/失败恢复/外部更新冲突、固定保存栏；按对话保存草稿与附件；正文/控件/对比度；AI 独立停止、迟到结果隔离和原位重试；开场直达设置并返回预检；新结果定位、逐条服务身份/复制；知识库普通/高级视图与紧凑导入；窄窗抽屉；标题搜索；导航/未读语义、键盘缩放及细节统一。完整对照见 docs/UI_UX_REVIEW.md。
+用户授权修复审查全部问题，并持续提供截图反馈。本轮落实 19 项修复/调整：资料保存与发送范围、会话清空说明及默认取消的关闭/退出确认；个人信息草稿保留/失败恢复/外部更新冲突、固定保存栏；按对话保存草稿与附件；正文/控件/对比度；AI 独立停止、迟到结果隔离和原位重试；开场直达设置并返回预检；新结果定位、逐条服务身份/复制；知识库普通/高级视图与紧凑导入；窄窗抽屉；标题搜索；导航/未读语义、键盘缩放及细节统一。旧审查报告已清理，现用界面检查入口见 shared/test/README.md。
 
 最新反馈覆盖先前方案：侧栏浅灰圆角底使用内缩 18×3px 圆头短条，不保留整条侧边描边；顶部去掉回答风格入口，只保留个人信息与开始面试。回答风格档位和补充要求立即自动保存，无保存/放弃按钮，个人信息仍需确认保存。浮窗移除品牌旁面试/讲话状态和双路等待提示，仅在转写标题右侧显示语音模型加载/就绪/未就绪，异常保持可见。面试主进程指令只要求第一人称、逻辑清楚且专业的口语正文，不加意图分析、引导/建议、标题、引号包装或资料编号，RAG 引用规则同步遵循口述格式；准备聊天语义独立。
 
@@ -745,7 +771,7 @@ Copilot 复用 AIChatService 与资料校验，单请求隔离 session，禁用�
 
 ## UI 与交互审查及无引用样式清理
 
-本段为修复前审查：用户要求完整审视 UI/UX 并提供建议，随后授权顺手删除确认废弃或未使用的内容。检查登录、准备聊天、个人信息、五类设置、知识库、记录与浮窗共25个实际窗口状态，覆盖浅深主题、1280×800及最小960×680；使用独立userData及合成账户/设备/回复，不访问真实账户资料、不采集音频。复现个人信息关闭丢失未保存修改、新对话沿用旧输入草稿；发现与优先级见 docs/UI_UX_REVIEW.md，当前修复状态以上方最新条目为准。
+本段为修复前审查：用户要求完整审视 UI/UX 并提供建议，随后授权顺手删除确认废弃或未使用的内容。检查登录、准备聊天、个人信息、五类设置、知识库、记录与浮窗共25个实际窗口状态，覆盖浅深主题、1280×800及最小960×680；使用独立userData及合成账户/设备/回复，不访问真实账户资料、不采集音频。复现个人信息关闭丢失未保存修改、新对话沿用旧输入草稿；旧审查报告已清理，当前修复状态以上方最新条目为准。
 
 引用核对后仅清理 src/styles.css 中无Renderer消费者的旧记录详情/保存内容、旧输入标题、旧浮窗底栏/提示、旧登录标识/加载态规则。当前LanceDB实现仍有实际消费者且PROGRESS记录后续授权，保留；没有以历史旧方案撤除记录删除当前功能。原有未提交修改、真实用户目录、原件、凭据、历史和恢复基线保留。
 
@@ -797,7 +823,7 @@ Copilot 复用 AIChatService 与资料校验，单请求隔离 session，禁用�
 - 正式 utilityProcess 60 次热 Hybrid：Mean12.60/P5012.60/P9513.70/P9914.59 ms；Local 预处理 P9516.02 ms，不含 GPT/ASR。新进程打开加首次查询约1.41秒。分项模型初始化656ms、纯DB Hybrid P958.83ms、全文获取 P950.72ms（分项不含IPC）。完整目录57.25MiB含历史/完整内容；工作集约551MiB为观测值。
 - 最终包 test-results/portable-current-eZHoKv/report.json：真实语音 Worker/utility、离线E5/LanceDB、PDF/DOCX、三模式、完整QA、重启删除通过。补齐 apache-arrow 运行时 peer；asar 无旧 retrieval。包约1724.69MiB，模型/产物/测试资料忽略，不提交推送或发布。
 - 一次 UI 快照竞态已修复并加一致性测试；最终知识库 UI rag-ui-oRELWQ，原件/取消焦点 knowledge-files-eVvLGg 通过。
-- 详细架构、文件职责、可重现命令、原始结果、A/B/C 成本和未验收限制见 docs/RAG_ARCHITECTURE.md / docs/RAG_TEST_REPORT.md。下方保留历史阶段记录。
+- 现用架构见 shared/docs/RAG_ARCHITECTURE.md，回归入口与边界见 shared/test/README.md；旧报告已清理。下方保留历史阶段记录。
 
 ## 2026-10-13：RAG 第一阶段历史记录
 
@@ -805,7 +831,7 @@ Copilot 复用 AIChatService 与资料校验，单请求隔离 session，禁用�
 
 第一阶段新增 electron/backend/knowledge 的 KnowledgeService、轻量 Host、utilityProcess、E5 q8 与 Q&A/辅助片段。LanceDB 使用固定版本快照 + 不可变完整内容 revision + 原子 catalog 提交及备份；重复导入幂等、更新/删除限定文档，未提交版本不会污染恢复。新增受控依赖边界及针对性架构测试；未连接 GPT、未修改面试回答流程。
 
-architecture 95 文件/零越层及环、typecheck、26 文件/161 单测、build 通过。正式后台 utilityProcess 真实 E5/LanceDB 烟测 test-results/rag-native-hhryNZ/result.json 通过三语言三模式、长答案、重启、更新/删除及模型缺失；合成资料，不证明语义准确率。公开原生依赖下载超时，复用同版本 benchmark 依赖和已有官方 Electron ZIP 后实际加载通过，包缓存补齐中。详情 docs/RAG_ARCHITECTURE.md、docs/RAG_TEST_REPORT.md。
+architecture 95 文件/零越层及环、typecheck、26 文件/161 单测、build 通过。正式后台 utilityProcess 真实 E5/LanceDB 烟测 test-results/rag-native-hhryNZ/result.json 通过三语言三模式、长答案、重启、更新/删除及模型缺失；合成资料，不证明语义准确率。公开原生依赖下载超时，复用同版本 benchmark 依赖和已有官方 Electron ZIP 后实际加载通过，包缓存补齐中。现用架构及入口见 shared/docs/RAG_ARCHITECTURE.md、shared/test/README.md；旧报告已清理。
 
 下一步自动进入第二阶段：Node 本地 PDF/MD/TXT（及合理成本 DOCX）解析、原件兼容备份、索引状态与安全 IPC/UI。第三至五阶段尚未完成。
 

@@ -27,12 +27,33 @@ class InstallerProbe {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetWindowTextW(IntPtr window, StringBuilder text, int count);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int GetClassNameW(IntPtr window, StringBuilder text, int count);
   [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr window, int message, IntPtr w, IntPtr l);
+  [DllImport("user32.dll")] static extern IntPtr SendMessageTimeoutW(IntPtr window,int message,IntPtr w,IntPtr value,uint flags,uint timeout,out IntPtr result);
+  [DllImport("kernel32.dll")] static extern IntPtr OpenProcess(uint access,bool inherit,uint pid);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll")] static extern IntPtr VirtualAllocEx(IntPtr process,IntPtr address,UIntPtr size,uint allocation,uint protection);
+  [DllImport("kernel32.dll")] static extern bool VirtualFreeEx(IntPtr process,IntPtr address,UIntPtr size,uint operation);
+  [DllImport("kernel32.dll")] static extern bool WriteProcessMemory(IntPtr process,IntPtr address,byte[] data,UIntPtr length,out UIntPtr written);
   [DllImport("user32.dll")] static extern bool PostMessageW(IntPtr window, int message, IntPtr w, IntPtr l);
   [DllImport("user32.dll")] static extern IntPtr GetDC(IntPtr window);
   [DllImport("user32.dll")] static extern int ReleaseDC(IntPtr window, IntPtr dc);
   [DllImport("gdi32.dll")] static extern IntPtr SelectObject(IntPtr dc, IntPtr item);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern int DrawTextW(IntPtr dc, string text, int length, ref Rect rect, uint flags);
   [DllImport("user32.dll")] static extern bool PrintWindow(IntPtr window, IntPtr dc, uint flags);
+  [DllImport("oleacc.dll")] static extern int AccessibleObjectFromWindow(IntPtr window,uint objectId,ref Guid iid,[MarshalAs(UnmanagedType.Interface)]out object value);
+  static bool Selected(IntPtr window) {
+    var iid=new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");object value;
+    if(AccessibleObjectFromWindow(window,0xFFFFFFFC,ref iid,out value)!=0)return false;
+    try{return (Convert.ToInt32(((Accessibility.IAccessible)value).get_accState(0))&0x10)!=0;}
+    finally{Marshal.ReleaseComObject(value);}
+  }
+  static void Toggle(IntPtr window) {
+    var iid=new Guid("618736E0-3C3D-11CF-810C-00AA00389B71");object value;
+    if(AccessibleObjectFromWindow(window,0xFFFFFFFC,ref iid,out value)!=0)throw new Exception("Owned checkbox is inaccessible");
+    try{var accessible=(Accessibility.IAccessible)value;
+      if(Convert.ToInt32(accessible.get_accRole(0))!=0x2C)throw new Exception("Owned control is not a checkbox");
+      accessible.accDoDefaultAction(0);
+    }finally{Marshal.ReleaseComObject(value);}
+  }
   static string Text(IntPtr window) { var value=new StringBuilder(4096); GetWindowTextW(window,value,value.Capacity); return value.ToString(); }
   static string Class(IntPtr window) { var value=new StringBuilder(256); GetClassNameW(window,value,value.Capacity); return value.ToString(); }
   static void Print(object value) { Console.WriteLine(new JavaScriptSerializer{MaxJsonLength=4000000}.Serialize(value)); }
@@ -46,7 +67,7 @@ class InstallerProbe {
         foreach(var process in System.Diagnostics.Process.GetProcessesByName("VoxCue.Setup.UI"))using(process) {
           try{var info=new ProcessBasicInfo();int returned;
             if(NtQueryInformationProcess(process.Handle,0,ref info,Marshal.SizeOf(info),out returned)==0 && info.Parent.ToInt64()==pid)found=process.Id;
-          }catch(InvalidOperationException){}
+          }catch(InvalidOperationException){}catch(System.ComponentModel.Win32Exception){}
         }
         Print(new{pid=found});return 0;
       }
@@ -56,6 +77,20 @@ class InstallerProbe {
         return true;
       },IntPtr.Zero);
       if(main==IntPtr.Zero) { Print(new{ready=false}); return 0; }
+      if(args[1]=="folder") {
+        if(Class(main)!="#32770")throw new Exception("Owned folder dialog is not open");
+        // BFFM_SETSELECTIONW is above WM_USER: Windows does not marshal its
+        // string between processes. Allocate it only in this owned fixture.
+        var process=OpenProcess(0x28,false,pid);if(process==IntPtr.Zero)throw new Exception("Cannot access owned folder picker");
+        var bytes=Encoding.Unicode.GetBytes(args[2]+"\0");
+        var remote=VirtualAllocEx(process,IntPtr.Zero,new UIntPtr((uint)bytes.Length),0x3000,4);bool sent=false;
+        try{UIntPtr written;IntPtr result;
+          if(remote==IntPtr.Zero || !WriteProcessMemory(process,remote,bytes,new UIntPtr((uint)bytes.Length),out written))throw new Exception("Cannot select owned folder");
+          sent=SendMessageTimeoutW(main,0x467,new IntPtr(1),remote,2,5000,out result)!=IntPtr.Zero;
+          if(!sent)throw new Exception("Folder selection timed out");
+        }finally{if(sent&&remote!=IntPtr.Zero)VirtualFreeEx(process,remote,UIntPtr.Zero,0x8000);CloseHandle(process);}
+        Print(new{ready=true});return 0;
+      }
       // Match the fixture's coordinate system when PrintWindow paints a
       // DPI-virtualized NSIS window into an in-memory bitmap.
       SetThreadDpiAwarenessContext(GetWindowDpiAwarenessContext(main));
@@ -65,6 +100,17 @@ class InstallerProbe {
         Print(new{ready=true});return 0;
       }
       if(args[1]=="close") { PostMessageW(main,0x10,IntPtr.Zero,IntPtr.Zero); Print(new{ready=true}); return 0; }
+      if(args[1]=="button" || args[1]=="toggle") {
+        IntPtr target=IntPtr.Zero;
+        EnumChildWindows(main,delegate(IntPtr child,IntPtr unused){
+          if(Text(child)==args[2] && IsWindowVisible(child) && IsWindowEnabled(child)){target=child;return false;}return true;
+        },IntPtr.Zero);
+        if(target==IntPtr.Zero)throw new Exception("Owned enabled control not found");
+        if(args[1]=="toggle"){Toggle(target);Print(new{ready=true});return 0;}
+        // BM_CLICK can fail on an inactive dialog. Notify only the owned
+        // button's parent, without activating or clicking another application.
+        PostMessageW(main,0x111,new IntPtr(GetDlgCtrlID(target)&0xFFFF),target);Print(new{ready=true});return 0;
+      }
       Rect bounds; GetWindowRect(main,out bounds);
       var controls=new List<object>();
       EnumChildWindows(main,delegate(IntPtr child,IntPtr unused) {
@@ -80,7 +126,7 @@ class InstallerProbe {
           requiredHeight=measured.Bottom-measured.Top;
           if(previous!=IntPtr.Zero)SelectObject(dc,previous);ReleaseDC(child,dc);
         }
-        controls.Add(new{id=GetDlgCtrlID(child),type,text,enabled=IsWindowEnabled(child),x=rect.Left-bounds.Left,y=rect.Top-bounds.Top,
+        controls.Add(new{id=GetDlgCtrlID(child),type,text,enabled=IsWindowEnabled(child),selected=type.IndexOf("BUTTON",StringComparison.OrdinalIgnoreCase)>=0 && Selected(child),x=rect.Left-bounds.Left,y=rect.Top-bounds.Top,
           width=rect.Right-rect.Left,height=rect.Bottom-rect.Top,requiredHeight,fontName}); return true;
       },IntPtr.Zero);
       string png=null;
@@ -92,7 +138,7 @@ class InstallerProbe {
           using(var memory=new MemoryStream()) { bitmap.Save(memory,ImageFormat.Png); png=Convert.ToBase64String(memory.ToArray()); }
         }
       }
-      Print(new{ready=true,title=Text(main),width=bounds.Right-bounds.Left,height=bounds.Bottom-bounds.Top,controls,png}); return 0;
+      Print(new{ready=true,title=Text(main),className=Class(main),width=bounds.Right-bounds.Left,height=bounds.Bottom-bounds.Top,controls,png}); return 0;
     }catch(Exception error){Console.Error.WriteLine(error.Message);return 1;}
   }
 }

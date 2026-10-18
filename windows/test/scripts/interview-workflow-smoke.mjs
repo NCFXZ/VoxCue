@@ -4,6 +4,14 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { probe } from './window-probe.mjs';
+function requireDesktop() {
+  assert.equal(
+    probe('desktop').interactive,
+    true,
+    'Native workflow checks require an unlocked desktop',
+  );
+}
+requireDesktop();
 const cursorBefore = probe('cursor');
 
 const profile = path.resolve(
@@ -422,6 +430,7 @@ try {
   );
   assert.equal(await handle.evaluate((node) => getComputedStyle(node).opacity), '0');
   const hoverBox = await handle.boundingBox();
+  requireDesktop();
   const hoverPoint = await app.evaluate(({ BrowserWindow, screen }, box) => {
     const bounds = BrowserWindow.getAllWindows()
       .find((w) => w.webContents.getURL().endsWith('#interview'))

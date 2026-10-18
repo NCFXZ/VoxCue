@@ -29,6 +29,7 @@ const compileProbe = spawnSync(
     '/target:exe',
     '/r:System.Drawing.dll',
     '/r:System.Web.Extensions.dll',
+    '/r:Accessibility.dll',
     '/out:' + probe,
     path.resolve('test/fixtures/InstallerProbe.cs'),
   ],
@@ -75,15 +76,17 @@ function checkPage(page) {
 }
 
 for (const [language, ready, install, finish, operation = 'install'] of [
-  [2052, '准备安装', '安装', '完成'],
-  [1033, 'Ready to install', 'Install', 'Finish'],
-  [1028, '準備安裝', '安裝', '完成'],
-  [2052, '保留个人数据', '卸载', '完成', 'uninstall'],
-  [1033, 'Your data will be kept', 'Uninstall', 'Finish', 'uninstall'],
-  [1028, '保留個人資料', '解除安裝', '完成', 'uninstall'],
+  [2052, '安装位置', '安装', '完成'],
+  [1033, 'Installation location', 'Install', 'Finish'],
+  [1028, '安裝位置', '安裝', '完成'],
+  [2052, '保留用户数据', '卸载', '完成', 'uninstall'],
+  [1033, 'Keep my data', 'Uninstall', 'Finish', 'uninstall'],
+  [1028, '保留使用者資料', '解除安裝', '完成', 'uninstall'],
 ]) {
   const uninstall = operation === 'uninstall';
   if (process.argv.includes('--uninstall-only') && !uninstall) continue;
+  if (process.argv.includes('--install-only') && uninstall) continue;
+  if (process.argv.includes('--preview-only') && language !== 2052) continue;
   const executable = path.join(testRoot, `VoxCue-${operation}-Preview-${language}.exe`);
   const generator = uninstall
     ? path.join(testRoot, `uninstaller-generator-${language}.exe`)
@@ -94,6 +97,7 @@ for (const [language, ready, install, finish, operation = 'install'] of [
     `
 Unicode true
 Name "VoxCue"
+InstallDir "$LOCALAPPDATA\\Programs\\VoxCue"
 OutFile "${generator}"
 RequestExecutionLevel user
 !include FileFunc.nsh
@@ -164,6 +168,7 @@ SectionEnd`
     'failure',
     'silent-failure',
   ]) {
+    if (process.argv.includes('--preview-only') && scenario !== 'complete') continue;
     const child = spawnTestProcess(
       executable,
       [
@@ -201,6 +206,18 @@ SectionEnd`
       const contentLeft = first.controls.find((control) => control.text === ready).x;
       assert.ok(Math.abs(first.width - primary.x - primary.width - contentLeft) <= 2);
       assert.ok(first.controls.some((control) => control.text === ready));
+      if (uninstall) {
+        const choice = first.controls.find((control) => control.text === ready);
+        assert.equal(choice.selected, true, 'Keep data is checked by default');
+        for (const other of first.controls.filter((control) => control !== choice))
+          assert.ok(
+            choice.x + choice.width <= other.x ||
+              other.x + other.width <= choice.x ||
+              choice.y + choice.height <= other.y ||
+              other.y + other.height <= choice.y,
+            'The data choice must not be covered by another control',
+          );
+      }
       if (scenario === 'cancel') {
         inspect(frontend, 'key', '27');
         assert.equal(await exited(child), 1);
@@ -280,13 +297,17 @@ SectionEnd`
       language,
       operation,
       fixture: 'custom-ui-with-no-op-nsis',
-      complete: true,
-      cancel: true,
-      silent: true,
-      frontendCrash: true,
-      keyboard: true,
-      nonzeroEngineProgress: true,
-      engineFailure: true,
+      ...(process.argv.includes('--preview-only')
+        ? { previewOnly: true, complete: true }
+        : {
+            complete: true,
+            cancel: true,
+            silent: true,
+            frontendCrash: true,
+            keyboard: true,
+            nonzeroEngineProgress: true,
+            engineFailure: true,
+          }),
     }),
   );
 }

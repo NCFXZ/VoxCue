@@ -22,7 +22,7 @@ VoxCue/
     docs/                    共享架构、产品和交接文档
     benchmarks/rag-engines/  退役实验的私有输入与可移植缓存，不执行实验
     package.json             共享依赖/命令声明模板，不在这里安装
-    pnpm-lock.yaml           共同依赖解析与完整性基准
+    pnpm-lock.yaml           历史共同解析基准，只读保留；现用锁在各平台目录
     pnpm-workspace.yaml      两个平台安装策略的共同模板
     tsconfig*.json / vite.config.mjs / vitest.config.mjs / components.json
   windows/
@@ -31,7 +31,7 @@ VoxCue/
     public/voxcue.ico         Windows 专属图标
     scripts/                 原生构建、便携与 NSIS 打包
     test/                    Windows 专属测试/固定夹具；旧结果只读暂留，不新增
-    docs/                    Windows 安装、原生音频与实测验收报告
+    docs/                    Windows 安装与原生音频说明
     benchmarks/              退役实验的 Windows 实测结果与工件
     node_modules/ .pnpm-store/ dist/ dist-electron/ release/
     Start-VoxCue.cmd

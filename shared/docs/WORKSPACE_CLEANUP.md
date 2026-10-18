@@ -1,3 +1,15 @@
+## 2026-10-18：源码同步前的本地发行清理
+
+用户最新明确要求上传当前源码并删除本地安装包与模型。核对工作区 windows/release 的精确路径、后代无重定向及文件无占用后，移除修复安装包、blockmap 与 latest.yml，共 3 个普通文件、逻辑 233,247,356 字节。windows/release-smoke、shared/local-models/speech 与 shared/local-models/rag/multilingual-e5-small 已不存在；本次不重新下载。纯路径、用途、数量和删除状态在 windows/recovery/local-installer-cleanup-20261018/cleanup.json，不提交审计。
+
+已安装应用及其数据目录保持，不将用户数据根纳入清理。源码、依赖、开发构建、恢复基线、公开 Windows/Mac 发行及 Latest 保留；macos/ 未改，349 个云占位目录不重试。当前源码同步不包含公开 0.2.2 安装包替换或后续自动发布。
+
+## 2026-10-18：Windows 当前工作区
+
+按当前用户清理要求，核对源码引用图、静态/动态入口、脚本消费者及精确路径/重定向/占用后，移除四份过时测试报告、已解压的 Node 工具压缩包、安装界面编译中间文件与旧工具日志，共 20 个普通文件、逻辑 37,587,310 字节。旧报告引用改为现用测试入口与架构说明，不复制保存结果；纯路径、用途、数量和删除状态见 windows/recovery/workspace-cleanup-20261018/cleanup.json。
+
+未发现可独立删除的业务模块；动态平台入口、Worker/utilityProcess/preload、固定输入和测试助手保留。历史 shared 锁基准、依赖及平台锁、开发构建、当前本地修复安装包、未提交安装器修复和源码恢复基线保留。macos/ 未改，349 个云占位目录不重试；不读取/删除真实用户资料、凭据或已安装程序，不补回模型，不提交、推送或发布。
+
 ## 2026-10-18：Windows 0.2.2 发布后的安装包与模型
 
 用户明确要求删除本地安装包和模型。已清理 C:\Users\fengk\Documents\Repository\VoxCue\windows\release（安装包、更新元数据及 installer-stage）、shared/local-models/speech、shared/local-models/rag/multilingual-e5-small，共 6,772 个普通文件、逻辑 1,530,865,885 字节；空模型容器一并移除。该体积为文件逻辑大小，不作为实际磁盘可用空间增量。纯路径/数量/删除状态在 windows/recovery/local-release-model-cleanup-20261018/cleanup.json，不含测试结果。
@@ -106,11 +118,11 @@ Mac 构建原本同时输出 Windows 模块。修正编译入口与静态装配�
 
 0.2.0验收后再移除4项可再生成副本：nsis-upgrade-L2pCyr的stage/artifacts，以及updates-native-1VRWID的Cache/pending与platform-cache/pending。88文件、1,730,629,512字节，失败0；先核对具体路径/链接/进程，再按清单删除。其报告、截图和profile保留，正式release/installer与installer-stage保留；已移除副本不再作为可用交付物。清单和结果在verification-cleanup-plan.json、verification-cleanup-result.json。
 
-审计位于 test/results/release-v0.2.0：baseline、source-move-plan.json、cleanup-plan.json、cleanup-result.json。版本和本轮验证/上传状态以 PROGRESS 最新节及 FUNCTIONAL_TEST_REPORT 为准。
+审计位于 test/results/release-v0.2.0：baseline、source-move-plan.json、cleanup-plan.json、cleanup-result.json。版本和上传状态以 PROGRESS 相应条目为准；旧报告已清理，现用入口见 ../test/README.md。
 
 ## 2026-10-16 功能回归生成副本移除
 
-36组功能回归通过后，仅移除本轮5项可再生成内容：platform-layout-functional-20261015-697d9556便携副本、nsis-upgrade-ZsqYJX的stage/artifacts、updates-native-lR72ZR的Cache/pending和platform-cache/pending。共9,031文件、逻辑3,337,255,901字节，失败0；删除前形成具体清单，递归真实路径与重定向检查、工作区范围及各目标运行进程检查通过。测试NSIS应用已正常卸载，报告/截图/失败日志/合成资料/源码快照和既有恢复基线保留；正式release、根构建、真实用户数据/凭据/原件、benchmarks及模型/依赖未动。审计见test/results/functional-20261015-697d9556/cleanup-plan.json和cleanup-result.json，完整验收范围见FUNCTIONAL_TEST_REPORT.md。portable-current-VNSxgj/report.json仍为历史验证证据，所用测试包已经移除，不作为可用交付物。
+36组功能回归通过后，仅移除本轮5项可再生成内容：platform-layout-functional-20261015-697d9556便携副本、nsis-upgrade-ZsqYJX的stage/artifacts、updates-native-lR72ZR的Cache/pending和platform-cache/pending。共9,031文件、逻辑3,337,255,901字节，失败0；删除前形成具体清单，递归真实路径与重定向检查、工作区范围及各目标运行进程检查通过。测试NSIS应用已正常卸载，报告/截图/失败日志/合成资料/源码快照和既有恢复基线保留；正式release、根构建、真实用户数据/凭据/原件、benchmarks及模型/依赖未动。审计见test/results/functional-20261015-697d9556/cleanup-plan.json和cleanup-result.json，旧报告已清理，现用入口见../test/README.md。portable-current-VNSxgj/report.json仍为历史验证证据，所用测试包已经移除，不作为可用交付物。
 
 ## 2026-10-15 AGENTS更新与生成产物精简
 
@@ -157,7 +169,7 @@ AGENTS.md已将已完成任务的重复“最新授权”整理为当前状态�
 
 本次审查生成的10个隔离profile目录和已弃用的启动脚本也已清除；删除前验证每个绝对路径均在test-results/ui-ux-audit内。保留有效截图、复现值与可复现检查脚本。
 
-架构106模块零越层/运行时环、类型、33文件203项测试、构建通过；独立userData与合成端口的25个Electron界面状态在清理后复查。审查结果见docs/UI_UX_REVIEW.md。未提交、推送或发布。
+架构106模块零越层/运行时环、类型、33文件203项测试、构建通过；独立userData与合成端口的25个Electron界面状态在清理后复查。旧审查报告已清理，现用界面入口见../test/README.md。未提交、推送或发布。
 
 ## 2026-10-14 本次范围
 

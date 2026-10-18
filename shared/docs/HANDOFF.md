@@ -90,7 +90,7 @@ Mac Dock/启动器从原图生成带 96px 透明留白的 1024px 衍生图（素
 
 2026-10-16最新发行：v0.1.2 Windows x64已打包验证并发布 https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.1.2 ，三项资产state/大小/SHA256和公开latest.yml下载逐项核对，已设为Latest供旧客户端过渡到分平台更新。实际installer-stage六组专项通过，安装包600,418,657字节，SHA256 e5bb67711871dad5915d3e6ab66ff0bb415c9fd4994b2f7e158c2a15f8dfbaa2；原0.1.0/0.1.1产物保留，没有提交或推送私有源码。根构建及installer-stage为0.1.2，正式文件在release/installer，本轮证据在test/results/release-v0.1.2。大文件前两次网络失败，按用户要求刷新草稿清除失败占位后第三次上传成功；不要重复发布。仍未签名，无Mac包，真人语音/真实账户/Mac真机未新增验收。
 
-2026-10-16最新：完整功能回归及检查更新动画修复完成。315项单测、36组功能回归（含66种UI状态、真正原生/离线RAG/更新/隔离NSIS升级/ASAR与10分钟合成音频）通过；测试路径和过时夹具已修正，原失败日志保留。真人语音按用户选择稍后测试，真实账户与Mac真机未验收，完整范围见FUNCTIONAL_TEST_REPORT.md。根构建已更新，公开安装包未重打，未提交推送发布。test/results/platform-layout-functional-20261015-697d9556验证包及本轮安装/下载副本验收后移除，portable-current-VNSxgj等报告/截图与functional-20261015-697d9556审计仍在，不把已删除测试包当作交付物。
+2026-10-16最新：完整功能回归及检查更新动画修复完成。315项单测、36组功能回归（含66种UI状态、真正原生/离线RAG/更新/隔离NSIS升级/ASAR与10分钟合成音频）通过；测试路径和过时夹具已修正，原失败日志保留。真人语音按用户选择稍后测试，真实账户与Mac真机未验收；旧报告已清理，现用入口见../test/README.md。根构建已更新，公开安装包未重打，未提交推送发布。test/results/platform-layout-functional-20261015-697d9556验证包及本轮安装/下载副本验收后移除，portable-current-VNSxgj等报告/截图与functional-20261015-697d9556审计仍在，不把已删除测试包当作交付物。
 
 2026-10-15最新清理：AGENTS已更新为当前状态和长期保留/清理规则，删除test/results内265项过期合成运行目录/下载缓存及已验收便携副本，逻辑约7.64GB；保留必要报告/截图、各组最近结果、全部迁移/恢复快照与生产资源。platform-layout-20261015已移除，其验收证据仍在portable-current-kD1Dco及platform-folders-20261015；不要把该旧测试副本当作现存安装产物。业务源码未改，不重复打包/发布；核对与清单见WORKSPACE_CLEANUP最新节和test/results/workspace-tidy-20261015。
 
@@ -112,7 +112,7 @@ Mac Dock/启动器从原图生成带 96px 透明留白的 1024px 衍生图（素
 
 2026-10-15 最新全界面检查：登录、聊天、个人信息、设置六页及菜单、知识库各态、记录与回答栏、开场和浮窗共66个状态，浅深主题及1280×800/960×680；局部修复设备卡片报错错位、表单高度/标签间距、长下拉名称、文档动作分组和错误行、紧凑上传区横排、主题错误颜色、记录选中按钮悬停对比度及标题重试尺寸。没有重写窗口/OAuth/存储或移除现有功能。清除24个无消费者类的42个CSS选择器及一个未用导入；引用图确认其余业务/图标在用。
 
-过期生成条目1085个、35037文件、逻辑大小约5.04GB已删除，清单/验证在test/results/visual-cleanup-20261015。保留真实用户目录、原件、凭据、模型、依赖、私有/派生/历史数据和恢复基线。release/installer-stage与release-smoke暂存已清除，release/installer现有安装包保留，不能当作本轮版本；根目录构建已更新，正常退出后Start-VoxCue.cmd加载。没有打包、提交、推送或发布。详细界面对照和清理边界见UI_UX_REVIEW、WORKSPACE_CLEANUP及PROGRESS最新节。
+过期生成条目1085个、35037文件、逻辑大小约5.04GB已删除，清单/验证在test/results/visual-cleanup-20261015。保留真实用户目录、原件、凭据、模型、依赖、私有/派生/历史数据和恢复基线。release/installer-stage与release-smoke暂存已清除，release/installer现有安装包保留，不能当作本轮版本；根目录构建已更新，正常退出后Start-VoxCue.cmd加载。没有打包、提交、推送或发布。现用界面入口见../test/README.md，清理边界见WORKSPACE_CLEANUP及PROGRESS最新节。
 
 2026-10-15 修复 Copilot 登录后“Windows 凭据加密存储不可用”：根因是 SDK 1.0.21 的 empty 模式主动设置 COPILOT_DISABLE_KEYTAR=1，并非已确认的系统故障。CopilotRuntime 改用 copilot-cli 模式保留 OS vault，isolatedSession 显式保留原 empty 的能力限制，拒绝明文和继承外部凭据的边界不变。根目录构建已更新，正常退出后从 Start-VoxCue.cmd 重新启动并授权；不删除/迁移凭据、用户数据，也未打包、提交或发布。真实 runtime 启动环境/会话隔离、PKCE/取消及合成加密失败重试/双服务 UI 回归已通过；真实账户令牌写入与推理仍需用户正常授权验证，不能称已验收。报告 test/results/copilot-ui-Fh7dTB/report.json，基础检查见 PROGRESS 最新节。
 
@@ -140,7 +140,7 @@ Mac Dock/启动器从原图生成带 96px 透明留白的 1024px 衍生图（素
 
 以下为历史轮次，回答风格自动保存/前后对比已被最新方案覆盖。
 
-2026-10-14 最新 UI 轮次：审查 19 项问题已修复/按用户反馈调整，见 PROGRESS 首节和 UI_UX_REVIEW 修复对照。根目录界面/主进程构建已更新；Start-VoxCue.cmd 使用当前输出，正常退出再启动可加载。便携包仍为下文上一轮清理版本，不含本轮 UI 修复。正在运行的原生采集进程会占用 native/bin/VoxCue.Audio.exe；不要为重编译终止用户面试或读取其数据。
+2026-10-14 最新 UI 轮次：审查 19 项问题已修复/按用户反馈调整，历史修复见 PROGRESS 相应条目，现用检查入口见 ../test/README.md。根目录界面/主进程构建已更新；Start-VoxCue.cmd 使用当前输出，正常退出再启动可加载。便携包仍为下文上一轮清理版本，不含本轮 UI 修复。正在运行的原生采集进程会占用 native/bin/VoxCue.Audio.exe；不要为重编译终止用户面试或读取其数据。
 
 最新交互：短圆头侧栏选中条；顶部仅个人信息与开始面试；回答风格自动保存；转写标题右侧只显示语音模型就绪提示；面试指令只输出直接可念的专业口语正文。记录仅标题搜索，详情支持重命名。新增可选 titleSource 兼容旧记录；手动标题优先，不迁移旧数据、不允许迟到自动任务/旧归档覆盖。session:state 布尔 IPC 和原生关闭保护同步公开契约，仍默认取消，显式退出避免重复确认。真实语音/模型输出质量未因此验收，旧试用不恢复。
 
@@ -166,6 +166,6 @@ InterviewContext 主进程维护最近120条/约64KB原生终稿、问题链和�
 
 基础检查：pnpm check:architecture、pnpm typecheck、pnpm test、pnpm build。桌面检查：pnpm test:knowledge、test:settings、test:interview:workflow、test:interview:access、test:interview:effort、test:history、test:composer、test:conversations:status、test:ui:alignment、test:electron、test:floating、test:login。全部使用隔离目录和合成服务；不批量调用真实账户或采集真人音频。
 
-Start-VoxCue.cmd 使用已构建输出，不自动编译；便携构建入口为 pnpm package:portable。当前验证结果见 PROGRESS.md 和 docs/RAG_TEST_REPORT.md；本轮未提交、推送或发布。
+Start-VoxCue.cmd 使用已构建输出，不自动编译；便携构建入口为 pnpm package:portable。现用实现见根 PROGRESS.md，回归入口与边界见 ../test/README.md；旧报告已清理；本轮未提交、推送或发布。
 
 本轮修改前源码快照在忽略目录 test/results/workspace-cleanup-baseline/sources.json，只用于按文件/逻辑块恢复，不能覆盖后续工作；没有保存真实用户资料或读取封存题目。历史准确率失败不因撤除功能变为通过。真人语音准确率、物理设备/跨机/全部 DPI 和真实账户摘要/标题质量仍未完整验收。

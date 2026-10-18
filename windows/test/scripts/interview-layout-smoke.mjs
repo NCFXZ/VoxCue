@@ -7,6 +7,15 @@ import { promisify } from 'node:util';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { probe } from './window-probe.mjs';
 
+function requireDesktop() {
+  assert.equal(
+    probe('desktop').interactive,
+    true,
+    'Native resize checks require an unlocked desktop',
+  );
+}
+requireDesktop();
+
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(
   path.resolve(path.join(testRoot, 'test/results/interview-layout-ui-')),
@@ -480,6 +489,7 @@ try {
     ['right', -0.08],
     ['left', 0.1],
   ]) {
+    requireDesktop();
     await floating.bringToFront();
     const target = floating.getByRole('button', {
       name: edge === 'right' ? '拖动右下角调整尺寸' : '拖动左下角调整尺寸',
@@ -568,6 +578,7 @@ try {
         ],
         { windowsHide: true },
       );
+      requireDesktop();
       await floating.locator('.floating-shell.is-resizing').waitFor({ state: 'hidden' });
       const after = await nativeBounds();
       const resizeUpdates =

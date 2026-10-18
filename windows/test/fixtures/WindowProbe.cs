@@ -46,10 +46,10 @@ class WindowProbe {
       SetProcessDPIAware();
       if(args[0]=="desktop") {
         var handle=OpenInputDesktop(0,false,1);if(handle==IntPtr.Zero)throw new Exception("Input desktop unavailable");
-        try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Print(new{interactive=name.ToString()=="Default"});}
+        try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Point cursor;bool readable=GetCursorPos(out cursor);Print(new{interactive=name.ToString()=="Default"&&readable,inputDesktop=name.ToString(),cursorReadable=readable});}
         finally{CloseDesktop(handle);}return 0;
       }
-      if(args[0]=="cursor") {Point p;GetCursorPos(out p);Print(new{x=p.X,y=p.Y});return 0;}
+      if(args[0]=="cursor") {Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Print(new{x=p.X,y=p.Y});return 0;}
       if(args[0]=="move") {int x=int.Parse(args[1]),y=int.Parse(args[2]);mouse_event(0xC001,(uint)((x-GetSystemMetrics(76)+0.5)*65536/GetSystemMetrics(78)),(uint)((y-GetSystemMetrics(77)+0.5)*65536/GetSystemMetrics(79)),0,UIntPtr.Zero);Thread.Sleep(90);Print(new{});return 0;}
       if(args[0]=="up") {mouse_event(4,0,0,0,UIntPtr.Zero);Print(new{});return 0;}
       if(args[0]=="hit") {var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};Print(new{expected=GetAncestor(WindowFromPoint(point),2)==new IntPtr(long.Parse(args[1]))});return 0;}
