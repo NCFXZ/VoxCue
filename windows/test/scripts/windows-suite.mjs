@@ -1,8 +1,15 @@
 import assert from 'node:assert/strict';
 import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { probe } from './window-probe.mjs';
 
 assert.equal(process.platform, 'win32');
+const requireDesktop = () =>
+  assert.equal(
+    probe('desktop').interactive,
+    true,
+    'Windows GUI matrix requires an unlocked input desktop',
+  );
 const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
 if (suites[0] === '--dpi') {
@@ -18,6 +25,7 @@ if (suites[0] === '--dpi') {
   for (const name of selected) assert.ok(allowed.includes(name), 'Unknown DPI suite: ' + name);
   for (const scale of ['1', '1.25', '1.5', '1.75', '2']) {
     for (const name of selected) {
+      requireDesktop();
       const child = spawnTestProcess(
         process.execPath,
         ['../shared/test/scripts/' + name + '-smoke.mjs'],
@@ -42,23 +50,35 @@ if (suites[0] === '--dpi') {
   }
   process.exit(0);
 }
+const nativeNames = [
+  'platform-native',
+  'interview-access',
+  'interview-effort',
+  'interview-layout',
+  'interview-workflow',
+  'interview-context',
+  'updates-native',
+  'user-data',
+  'speech-adversarial',
+  'components-native',
+  'presentation-native',
+  'rag-core',
+];
+const selectedNative = windowsOnly && suites.length > 1 ? suites.slice(1) : nativeNames;
+if (windowsOnly)
+  for (const name of selectedNative)
+    assert.ok(nativeNames.includes(name), 'Unknown native suite: ' + name);
 const commands = windowsOnly
-  ? [
-      'platform-native',
-      'interview-access',
-      'interview-effort',
-      'interview-layout',
-      'interview-workflow',
-      'interview-context',
-      'updates-native',
-      'user-data',
-      'speech-adversarial',
-      'presentation-native',
-    ].map((name) => ['test/scripts/' + name + '-smoke.mjs'])
+  ? selectedNative.map((name) => [
+      name === 'rag-core'
+        ? '../shared/test/scripts/rag-core-smoke.mjs'
+        : 'test/scripts/' + name + '-smoke.mjs',
+    ])
   : [['../shared/test/scripts/functional-suite.mjs', ...suites]];
 const models = windowsOnly ? await prepareModelFixtures() : null;
 let failed = false;
 for (const args of commands) {
+  requireDesktop();
   const child = spawnTestProcess(process.execPath, args, {
     env: {
       ...process.env,

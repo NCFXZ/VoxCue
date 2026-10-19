@@ -1,7 +1,9 @@
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
 import { spawnTestProcess } from './test-workspace.mjs';
 import { prepareModelFixtures } from './model-fixtures.mjs';
+import assert from 'node:assert/strict';
 
 const shared = [
   'login',
@@ -18,6 +20,7 @@ const shared = [
   'knowledge',
   'rag-ui',
   'rag-core',
+  'knowledge-host',
   'history-branding',
   'provider-ui',
   'floating',
@@ -56,12 +59,26 @@ for (const name of names)
     throw Error('Unknown or unavailable suite: ' + name);
 const outcomes = [];
 const models = await prepareModelFixtures();
+const desktopProbe =
+  process.platform === 'win32'
+    ? (
+        await import(
+          pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+        )
+      ).probe
+    : undefined;
 const modelEnvironment = {
   VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
   VOXCUE_TEST_RAG_MODEL: models.ragModel,
   VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
 };
 for (const name of names) {
+  if (desktopProbe)
+    assert.equal(
+      desktopProbe('desktop').interactive,
+      true,
+      'Shared GUI matrix requires an unlocked input desktop',
+    );
   const directory = shared.includes(name)
     ? path.join(workspace.sharedRoot, 'test/scripts')
     : process.platform === 'darwin' && mac.includes(name)

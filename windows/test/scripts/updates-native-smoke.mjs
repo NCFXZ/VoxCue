@@ -95,10 +95,25 @@ await writeFile(
   fixture,
   `const {app}=require('electron'); app.setPath('userData',${JSON.stringify(profile)}); app.whenReady();`,
 );
-const env = { ...process.env, ELECTRON_RUN_AS_NODE: undefined };
+const env = {
+  ...process.env,
+  ELECTRON_RUN_AS_NODE: undefined,
+  VOXCUE_TEST_LOOPBACK_PORT: String(server.address().port),
+};
 let app;
 try {
   app = await electron.launch({ args: [fixture], env });
+  await app.evaluate(({ net }, port) => {
+    const assert = process
+      .getBuiltinModule('module')
+      .createRequire(process.cwd() + '/package.json')('node:assert/strict');
+    for (const attempt of [
+      () => fetch('https://example.invalid'),
+      () => net.request('http://127.0.0.1:' + (port === 65535 ? 65534 : port + 1)),
+      () => net.request('https://example.invalid'),
+    ])
+      assert.throws(attempt, /Offline desktop regression forbids network access/);
+  }, server.address().port);
   await app.evaluate(
     async ({ app }, { root, profile, port }) => {
       await app.whenReady();

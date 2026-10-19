@@ -58,6 +58,7 @@ import {
   interviewPanelScale,
   fitInterviewBounds,
   draggedInterviewScale,
+  interviewLayout,
 } from './contracts/interviewLayout';
 let knowledge: KnowledgeHost;
 let knowledgeCoordinator: KnowledgeCoordinator;
@@ -1060,12 +1061,19 @@ app.whenReady().then(() => {
       if (change.phase === 'start' && (change.edge === 'left' || change.edge === 'right')) {
         interviewMove = undefined;
         const pointer = screen.getCursorScreenPoint();
+        const bounds = interviewWindow.getBounds();
         interviewResize = {
-          bounds: interviewWindow.getBounds(),
+          bounds,
           pointer,
           lastPointer: pointer,
           edge: change.edge,
-          scale: interviewScale,
+          // The panels are sized from viewport height. At fractional Windows
+          // DPI the last requested scale and actual HWND bounds can differ;
+          // anchor this gesture to the visible geometry to avoid an initial jump.
+          scale: Math.max(
+            0,
+            (bounds.height - interviewLayout.chromeHeight) / interviewLayout.panelHeight,
+          ),
         };
         return;
       }

@@ -1,0 +1,77 @@
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { mkdir, writeFile } from 'node:fs/promises';
+import workspace from '../../../shared/scripts/workspace.mjs';
+import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
+import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
+import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
+import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { checkComponents } from './components-check.mjs';
+import { checkComponentRemoval } from './component-removal-check.mjs';
+
+assert.equal(process.platform, 'win32');
+const profile = path.join(testRoot, 'profile');
+await mkdir(profile);
+const fixture = path.join(testRoot, 'managed-components.cjs');
+await writeFile(
+  fixture,
+  [
+    "const path = require('node:path');",
+    'const root = ' + JSON.stringify(workspace.platformRoot) + ';',
+    'const temporary = ' + JSON.stringify(testRoot) + ';',
+    "require('electron').app.setAppPath(root);",
+    "const platform = require(path.join(root, 'dist-electron/shared/electron/platform/index.js'));",
+    'const resources = platform.desktopResources;',
+    'platform.desktopResources = (...args) => ({',
+    '  ...resources(...args),',
+    "  speechModels: path.join(temporary, 'missing-speech'),",
+    "  ragModel: path.join(temporary, 'missing-rag'),",
+    '});',
+    "require(path.join(root, 'dist-electron/shared/electron/main.js'));",
+  ].join('\n'),
+);
+const env = {
+  ...process.env,
+  COPILOT_TEST_USER_DATA: profile,
+  VITE_DEV_SERVER_URL: '',
+};
+// Force the production managed component-cache path in this temporary profile.
+// Other native suites may pass unmanaged fixtures; this one tests real removal.
+delete env.VOXCUE_TEST_SPEECH_MODELS;
+delete env.VOXCUE_TEST_RAG_MODEL;
+delete env.ELECTRON_RUN_AS_NODE;
+const launch = async () =>
+  electron.launch({
+    args: [await offlineElectronEntry(fixture, { componentDownloads: true })],
+    env,
+  });
+let app;
+try {
+  app = await launch();
+  const { errors } = await checkComponents(app);
+  assert.deepEqual(errors, []);
+  await closeUiApp(app);
+  app = await launch();
+  const login = await app.firstWindow();
+  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await app.evaluate(({ session }) => {
+    globalThis.componentReuseRequests = [];
+    session.fromPartition('voxcue-components').webRequest.onBeforeRequest((details, callback) => {
+      globalThis.componentReuseRequests.push(details.url);
+      callback({ cancel: true });
+    });
+  });
+  await waitForAsync(
+    login,
+    async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
+    undefined,
+    { timeout: 30000 },
+  );
+  assert.deepEqual(await app.evaluate(() => globalThis.componentReuseRequests), []);
+  await checkComponentRemoval(app, login);
+  console.log(
+    'PASS: Windows development build, real managed components, cache reuse, native exclusive handles and removal; no package or installer created.',
+  );
+} finally {
+  if (app) await closeUiApp(app);
+}

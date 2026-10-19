@@ -26,7 +26,7 @@ await writeFile(
 const {app}=require('electron');const fs=require('node:fs/promises');const path=require('node:path');const assert=require('node:assert/strict');
 const config=require('./config.json');app.setPath('userData',path.join(config.output,'userData'));
 app.whenReady().then(async()=>{
- const {KnowledgeHost}=require(config.host);const events=[];let host=new KnowledgeHost(path.join(config.output,'knowledge'),config.model,e=>events.push(e));
+ const {KnowledgeHost}=require(config.host);const {KnowledgeError}=require(path.join(config.root,'dist-electron/shared/electron/backend/knowledge/errors.js'));const events=[];let host=new KnowledgeHost(path.join(config.output,'knowledge'),config.model,e=>events.push(e));
  const signal=()=>new AbortController().signal;const input=(id,text)=>({documentId:id,baseId:'smoke',name:id+'.md',bytes:Buffer.from(text)});
  const results=[];const fixtures=require(path.join(config.root,'../shared/test/scripts/rag-fixtures.cjs'));
  try{
@@ -38,6 +38,7 @@ app.whenReady().then(async()=>{
   const body='传感器提离采用 PID 闭环控制。 '+'The eddy current sensor uses PID feedback to control lift-off. '.repeat(150)+' tailguardxyz is retained.';
   const a=input('sensor','## Q001. How do you control sensor lift-off?\\n\\n'+body+'\\n\\n### 追问 1：怎样限幅？\\n\\n限制输出并保留完整追问。');
   const first=await host.indexDocument(a,signal());assert.ok(first.chunkCount>first.itemCount);
+  await assert.rejects(host.search('sensor',0,'hybrid',signal()),e=>e instanceof KnowledgeError&&e.code==='invalid_request');
   assert.equal((await host.indexDocument(a,signal())).updatedAt,first.updatedAt);
   for(const query of ['传感器提离如何闭环控制','How is sensor lift-off controlled?','Eddy Current PID 控制'])for(const mode of ['keyword','vector','hybrid']){
     const hits=await host.search(query,5,mode,signal());assert.ok(hits.length);const item=await host.getItem(hits[0].itemId);assert.ok(item.content.includes('tailguardxyz'));results.push({mode,count:hits.length});
@@ -69,7 +70,9 @@ app.whenReady().then(async()=>{
   assert.equal((await host.search('sensor',5,'hybrid',signal())).length,0);
   await host.close();
   const missing=new KnowledgeHost(path.join(config.output,'missing-db'),path.join(config.output,'missing-model'));
-  try{await assert.rejects(missing.indexDocument(input('x','## Q001. Sensor?\\n\\nA complete local answer.'),signal()),/模型未安装/);}finally{await missing.close();}
+  try{await assert.rejects(missing.indexDocument(input('x','## Q001. Sensor?\\n\\nA complete local answer.'),signal()),e=>e instanceof KnowledgeError&&e.code==='not_ready'&&/模型未安装/.test(e.message));}finally{await missing.close();}
+  const damagedRoot=path.join(config.output,'damaged-catalog');await fs.mkdir(damagedRoot);await fs.writeFile(path.join(damagedRoot,'catalog.json'),'null');
+  const damaged=new KnowledgeHost(damagedRoot,config.model);try{await assert.rejects(damaged.initialize(),e=>e instanceof KnowledgeError&&e.code==='configuration');assert.equal(await fs.readFile(path.join(damagedRoot,'catalog.json'),'utf8'),'null');}finally{await damaged.close();}
   console.log(JSON.stringify({status:'passed',node:process.version,electron:process.versions.electron,results,events:events.map(e=>({phase:e.phase,completed:e.completed,total:e.total})),longAnswerChunks:first.chunkCount},null,2));app.exit(0);
  }catch(error){await host.close().catch(()=>{});console.error(JSON.stringify({status:'failed',error:String(error),stack:error.stack},null,2));app.exit(1);}
 });`,

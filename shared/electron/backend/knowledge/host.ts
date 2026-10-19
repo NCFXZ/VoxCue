@@ -35,7 +35,12 @@ export class KnowledgeHost implements KnowledgePort {
         if (!p) return;
         this.pending.delete(id);
         p.cleanup();
-        this.child?.postMessage({ cancel: id });
+        try {
+          this.child?.postMessage({ cancel: id });
+        } catch {
+          // The port may already be gone. Preserve the original cancellation,
+          // timeout or availability error after retiring this pending request.
+        }
         reject(error);
       };
       const abort = () => finish(new KnowledgeError('cancelled', '知识库操作已取消。'));
@@ -125,15 +130,42 @@ export class KnowledgeHost implements KnowledgePort {
     return this.call<KnowledgeItem | null>('item', { itemId }, signal);
   }
   async close() {
-    if (!this.child) return;
+    const child = this.child;
+    if (!child) return;
+    let onExit = () => {};
+    const exited = new Promise<void>((resolve) => {
+      onExit = () => resolve();
+      child.once('exit', onExit);
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       await this.send({ op: 'close' }, undefined, 10000);
     } finally {
       this.stop();
+      try {
+        await Promise.race([
+          exited,
+          new Promise<never>((_resolve, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(new KnowledgeError('unavailable', '知识库进程未能及时退出，模型尚未删除。')),
+              10000,
+            );
+          }),
+        ]);
+      } finally {
+        clearTimeout(timer);
+        child.removeListener('exit', onExit);
+      }
     }
   }
   async unloadModel() {
-    if (this.child) await this.send({ op: 'unload-model' }, undefined, 30000);
+    if (!this.child) return;
+    await this.send({ op: 'unload-model' }, undefined, 30000);
+    // ONNX can retain mapped model handles until the utility process exits.
+    // Retire the idle consumer before component deletion; the next operation
+    // reopens the same catalog/index without changing its persisted data.
+    await this.close();
   }
   stop(message = '知识库服务已关闭。', code: 'closed' | 'unavailable' = 'closed') {
     const child = this.child;

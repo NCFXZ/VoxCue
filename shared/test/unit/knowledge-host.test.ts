@@ -74,3 +74,92 @@ it('进程退出属于可用性故障，主动关闭和取消不能回退；迟�
   other.host.stop();
   await closed;
 });
+
+it('发送失败时取消消息也可能失败，仍保留可用性错误码并清理请求', async () => {
+  const { host, child } = setup();
+  await host.initialize();
+  child.postMessage.mockImplementation(() => {
+    throw Error('synthetic disconnected utility port');
+  });
+  await expect(
+    host.search('synthetic', 5, 'hybrid', new AbortController().signal),
+  ).rejects.toMatchObject({
+    name: 'KnowledgeError',
+    code: 'unavailable',
+  });
+  expect((host as any).pending.size).toBe(0);
+});
+
+it('取消时端口已退出仍返回 cancelled，迟到响应不能恢复请求', async () => {
+  const { host, child } = setup();
+  await host.initialize();
+  child.postMessage.mockImplementation((message: any) => {
+    if (message.cancel) throw Error('synthetic closed cancel port');
+  });
+  const controller = new AbortController();
+  const pending = host.search('synthetic', 5, 'hybrid', controller.signal);
+  const rejected = expect(pending).rejects.toMatchObject({ code: 'cancelled' });
+  await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(2));
+  const id = child.postMessage.mock.calls[1][0].id;
+  controller.abort();
+  await rejected;
+  child.emit('message', { id, value: ['late'] });
+  expect((host as any).pending.size).toBe(0);
+});
+
+it('超时后发送取消失败仍保留 unavailable，并清除定时器和请求', async () => {
+  const { host, child } = setup();
+  await host.initialize();
+  child.postMessage.mockImplementation((message: any) => {
+    if (message.cancel) throw Error('synthetic closed timeout port');
+  });
+  vi.useFakeTimers();
+  try {
+    const pending = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'unavailable' });
+    await vi.advanceTimersByTimeAsync(30001);
+    await rejected;
+    expect((host as any).pending.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it.each([undefined, 'future-code'])(
+  '缺失或未知 wire 错误码 %s 按 integrity 处理',
+  async (errorCode) => {
+    const { host, child } = setup();
+    await host.initialize();
+    const pending = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'integrity' });
+    await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(2));
+    child.emit('message', {
+      id: child.postMessage.mock.calls[1][0].id,
+      error: 'synthetic wire error',
+      errorCode,
+    });
+    await rejected;
+  },
+);
+
+it('模型卸载必须等真实 exit 事件，不能在 kill 返回时宣称文件已释放', async () => {
+  const { host, child } = setup();
+  await host.initialize();
+  child.postMessage.mockImplementation((message: any) => {
+    if (['unload-model', 'close'].includes(message.op))
+      queueMicrotask(() => child.emit('message', { id: message.id, value: null }));
+  });
+  let completed = false;
+  const unloading = host.unloadModel().then(() => {
+    completed = true;
+  });
+  await vi.waitFor(() => expect(child.kill).toHaveBeenCalledTimes(1));
+  expect(completed).toBe(false);
+  expect(child.listenerCount('exit')).toBe(2);
+  child.emit('exit', 0);
+  await unloading;
+  expect(completed).toBe(true);
+  expect(child.listenerCount('exit')).toBe(1);
+  expect((host as any).child).toBeUndefined();
+});

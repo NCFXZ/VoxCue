@@ -10,6 +10,12 @@
 
 ## 当前入口
 
+Windows 接续 53476ab 增加 `node ../shared/test/scripts/knowledge-host-smoke.mjs`：启动前断网、真实 utilityProcess 和正式 process/host、合成 KnowledgeService 工作，无 BrowserWindow；检查七类错误码、未知 wire 码、实际15秒 Local RAG 期限、取消/退出/关闭及迟到结果。离线用量专项包含 knowledge-host 单测。`node test/scripts/components-native-smoke.mjs` 在当前 Windows 开发构建直接复用正式组件下载与删除断言，固定公开模型只进入临时受管缓存，检查取消/校验、重载复用、真实模型释放、独占句柄及删除/重下后的原件和索引保留，不打包或执行安装器。共用矩阵纳入 knowledge-host，Windows --windows 矩阵纳入 components-native 和 rag-core；rag-core 补真实进程的参数/未就绪/损坏配置错误类别。`--windows` 后可指定固定清单内的专项名，仅重跑选定项，默认仍完整运行。所有入口串行 GUI/原生、临时数据退出清理，结果仅终端。
+
+离线宿主默认不放行网络，只有自有临时fixture可显式声明 `loopbackPort` 或 `componentDownloads`；前者仅允许HTTP 127.0.0.1的该端口，后者限后台固定模型清单及对应下载资产，不放开账户/普通网页。updates-native 使用声明端口的合成HTTP，保留实际NsisUpdater摘要校验与拒绝安装，并断言外网/其他端口仍拒绝。角点原生跟手检查先用物理像素比较再换算DIP，保留3 DIP限值，避免Windows分数DPI坐标读回取整产生额外误差。组件删除仍在实际exit/ONNX释放后立即做无共享打开，不靠重试文件占用放行。
+
+角点拖动起始比例取当前实际窗口高度，原生layout专项覆盖左右边角、持续更新与工具栏中心/顶部固定，Windows --windows 可重复指定 interview-layout 做串行稳定性检查；不修改系统DPI，也不放宽3 DIP误差限值。
+
 Mac 0.3.1 本地修复增加知识库错误码跨进程回归：knowledge-host 与 rag 覆盖参数/配置/完整性/未就绪/关闭/取消不可回退、可用性故障回退和期限竞争；未知错误不降级。profile-ui 覆盖手动摘要保存、空聊天和重载后的单一技能更新入口。ui-refinement 与 interview-typography 在 Mac 覆盖 Cmd 缩放，前者使用合成触摸手势检查视觉缩放限制；不采样物理触控板。旧开发态桌面入口统一在应用导入前阻断网络，明确 Vite 预览及安装态固定模型下载按各自传输夹具处理。
 
 Mac 0.3.1 发行授权后运行 dmg 与正式 package-smoke：固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据和 SHA512，核对应用内公钥、版本及 DMG/ZIP 内容一致。updates-native 会在系统偏好目录建立临时测试域，当前仅系统临时目录的范围不运行该入口，也不运行 package-smoke 的 --install-archive。更新编排、签名和回环 feed 由单测及合成 updates/updates-sidebar 检查，不能记作原生 Sparkle 替换验收。components 使用临时测试 .app 检查真实组件流程；正式发行仅保留已授权三项，打包暂存和验证资料退出清理。物理音频及真实屏幕采样继续不执行。

@@ -104,7 +104,14 @@ export const electron = {
         path.resolve(entryArgument) === workspace.platformRoot ? undefined : entryArgument;
       options = {
         ...options,
-        args: [await offlineElectronEntry(fixture), ...options.args.slice(1)],
+        args: [
+          await offlineElectronEntry(fixture, {
+            loopbackPort: options.env?.VOXCUE_TEST_LOOPBACK_PORT
+              ? Number(options.env.VOXCUE_TEST_LOOPBACK_PORT)
+              : undefined,
+          }),
+          ...options.args.slice(1),
+        ],
       };
     }
     const speechModels = options.env?.VOXCUE_TEST_SPEECH_MODELS;

@@ -93,7 +93,7 @@ BrowserWindow.prototype.setBounds=function(...args){
   const interview=this.webContents.getURL().endsWith('#interview');
   if(interview)globalThis.layoutStats.bounds++;
   const result=setBounds.apply(this,args);
-  if(interview)globalThis.layoutBoundsTrace.push(this.getBounds());
+  if(interview)globalThis.layoutBoundsTrace.push({...this.getBounds(),requested:args[0]});
   return result;
 };
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});
@@ -610,13 +610,23 @@ try {
       );
       const endBox = await target.boundingBox();
       const cursor = await app.evaluate(({ screen }) => screen.getCursorScreenPoint());
-      const distance = Math.hypot(
-        after.x + endBox.x + endBox.width / 2 - cursor.x,
-        after.y + endBox.y + endBox.height / 2 - cursor.y,
+      const nativeCursor = probe('cursor');
+      // getCursorScreenPoint rounds DIP coordinates at fractional Windows DPI.
+      // Compare physical points first so that readback rounding is not counted
+      // as an extra drag error. Keep the original three-DIP accuracy limit.
+      const corner = await app.evaluate(
+        ({ screen }, point) => ({
+          physical: screen.dipToScreenPoint(point),
+          scale: screen.getDisplayNearestPoint(point).scaleFactor,
+        }),
+        { x: after.x + endBox.x + endBox.width / 2, y: after.y + endBox.y + endBox.height / 2 },
       );
+      const distance =
+        Math.hypot(corner.physical.x - nativeCursor.x, corner.physical.y - nativeCursor.y) /
+        corner.scale;
       assert.ok(
         distance <= 3,
-        `Dragged corner must follow the actual cursor within DPI rounding: ${JSON.stringify({ edge, before, after, cursor, dipStart, dipEnd, start, end, mouseOutput: mouseRun.stdout, distance, resizeUpdates })}`,
+        `Dragged corner must follow the actual cursor within DPI rounding: ${JSON.stringify({ edge, before, after, cursor, nativeCursor, corner, dipStart, dipEnd, start, end, endBox, frames: frames.slice(-4), viewport: await floating.evaluate(() => ({ width: innerWidth, height: innerHeight, ratio: devicePixelRatio })), mouseOutput: mouseRun.stdout, distance, resizeUpdates })}`,
       );
       nativeDrags.push({ edge, before, after, resizeUpdates, cursorDistance: distance });
     } finally {

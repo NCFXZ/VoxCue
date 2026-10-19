@@ -58,6 +58,7 @@ const names = [
   'interview-screenshot-store',
   'interview-settings',
   'knowledge-core',
+  'knowledge-host',
   'knowledge-coordinator',
   'rag',
   'rag-tools',
