@@ -18,6 +18,7 @@ if (suites[0] === '--dpi') {
     'ui-alignment',
     'typography',
     'interview-typography',
+    'interview-ux',
     'components-ui',
     'updates-sidebar',
   ];
@@ -60,6 +61,9 @@ const nativeNames = [
   'updates-native',
   'user-data',
   'speech-adversarial',
+  'echo-cancellation',
+  'wasapi-packets',
+  'electron-output',
   'components-native',
   'presentation-native',
   'rag-core',

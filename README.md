@@ -2,11 +2,11 @@
 
 当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。Windows/macOS 当前打包均排除模型与 ONNX Web，保留 Node CPU 推理依赖；既有发行保持。
 
-> 测试结果零保留：结果仅在终端/内存显示。已改造入口的必要工作文件使用系统临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；本轮在 Mac 本机修复，windows/ 严格只读。入口与边界见[测试说明](shared/test/README.md)。
+> 测试结果零保留：结果仅在终端/内存显示。已改造入口的必要工作文件使用系统临时目录并清理，不保存报告、日志、截图或 profile；旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；当前Windows本机接续中macos/严格只读。入口与边界见[测试说明](shared/test/README.md)。
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地语音输入、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前共享与Mac源码版本为 **0.5.0**，Mac arm64已发布至[v0.5.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.0)；Windows仍保留0.3.1配置及[现有安装包](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.1)，须在Windows本机同步、构建与验收，完整任务见[Windows 0.5.0接续提示词](shared/docs/WINDOWS_0.5.0_HANDOFF.md)。Mac发行提供DMG、签名自动更新ZIP和latest-mac.yml，沿用原Ed25519密钥及固定本地代码签名证书。本轮源码按用户最新单次授权同步私有main；两个平台按各自完整资产独立选版，全部Windows和历史资产、既有Latest保留。
+当前共享及两平台源码配置版本为 **0.5.0**，Windows x64 与 Mac arm64 均已发布至[v0.5.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.0)。Windows 提供安装包、blockmap 和 latest.yml；Mac 提供 DMG、签名自动更新 ZIP 和 latest-mac.yml，沿用原 Ed25519 密钥及固定本地代码签名证书。两个平台按各自完整资产独立选版，旧发行、Mac 资产、既有 Latest 和标签保留。Windows 实现及原生差异见[0.5.0 接续清单](shared/docs/WINDOWS_0.5.0_HANDOFF.md)，本轮共享/Windows 源码按用户追加授权同步私有 main。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 
@@ -14,7 +14,7 @@
 
 ## 开发与启动
 
-0.5.0共用界面增加独立面试背景透明度和字号滑块、分层预览、不透明浮窗设置、自动应用与设备刷新、紧凑设备状态和记录知识库名称前缀；提示词沿用已确认的八组最小修改，指定主题技能允许缺少简历/JD，整套生成仍要求两者齐全。Mac以完整系统混音为参考在本地处理麦克风回声；合成音频检查不代表真实外放和同时说话质量验收。两平台使用同一共享实现，各自原生构建与验收独立进行。
+0.5.0共用界面增加独立面试背景透明度和字号滑块、分层预览、不透明浮窗设置、自动应用与设备刷新、紧凑设备状态和记录知识库名称前缀；提示词沿用已确认的八组最小修改，指定主题技能允许缺少简历/JD，整套生成仍要求两者齐全。双音源时Mac/Windows分别以Core Audio/WASAPI完整系统混音为参考在本地处理麦克风回声，单音源保持原路；合成音频检查不代表真实外放和同时说话质量验收。两平台使用同一共享实现，各自原生构建与验收独立进行。
 
 开发使用原生 Node.js 24 LTS 与固定 pnpm 11.25.0。先在本机平台目录安装依赖：
 
@@ -39,7 +39,7 @@ corepack pnpm start
 
 Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 的 [v0.3.0 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.3.0/VoxCue-Setup-0.3.0-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 的 [v0.5.0 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.0/VoxCue-Setup-0.5.0-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 Mac开发宿主、启动器与后续正式应用使用固定本地自签名证书；公开指纹在`macos/local-signing-public.json`，私密身份在被Git忽略的`macos/.tools/development-signing/`，请安全备份并在清理时保留。身份缺失/错配会停止构建，不自动换证书或回退ad-hoc；现有登录信息和Sparkle更新密钥保持。已发布旧安装包未自动重建，首次切换签名可能仍需一次授权。详见[固定本地签名与登录保留](macos/docs/MACOS_PORT.md#固定本地签名与登录保留)。
 

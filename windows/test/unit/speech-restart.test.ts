@@ -13,6 +13,7 @@ vi.mock('node:worker_threads', async () => {
         this.messages.push(message);
         queueMicrotask(() => {
           if (message.op === 'init') this.emit('message', { ready: true });
+          if (message.op === 'prepare') this.emit('message', { prepared: message.id });
           if (message.op === 'flush') this.emit('message', { flushed: message.id });
           if (message.op === 'audio')
             this.emit('message', { ack: message.sequence, ms: message.ms });
@@ -113,4 +114,42 @@ it('故障退出的旧 Worker 迟到错误不能停止新 Worker', async () => {
   old.emit('error', Error('old worker error'));
   expect(events).toHaveLength(count);
   expect((await service.call({ op: 'status' })).state).toBe('running');
+});
+
+it('uses the shared QPC across delayed helper startup and drains capture packets before Worker flush', async () => {
+  const { service } = controller();
+  await service.call({ op: 'start', options: { sources: ['system', 'microphone'] } });
+  const worker = state.workers[0];
+  expect(worker.messages.find((m: any) => m.op === 'init').preprocessorFile).toMatch(
+    /[\\/]windows[\\/]electron[\\/]speech[\\/]echoCancellation\.js$/,
+  );
+  expect(worker.messages.find((m: any) => m.op === 'prepare').sources).toEqual([
+    'system',
+    'microphone',
+  ]);
+  const [system, mic] = state.captures;
+  system.packet({ ...packet(), timestamp: 123456.25 });
+  mic.packet({ ...packet(), timestamp: 123481.25 });
+  mic.stop = async () => mic.packet({ ...packet(), timestamp: 123491.25 });
+  await service.call({ op: 'pause' });
+  const audio = worker.messages.filter((m: any) => m.op === 'audio');
+  expect(audio.map((m: any) => m.captureClock)).toEqual([123456.25, 123481.25, 123491.25]);
+  expect(worker.messages.at(-1).op).toBe('flush');
+  const count = audio.length;
+  mic.packet(packet());
+  expect(worker.messages.filter((m: any) => m.op === 'audio')).toHaveLength(count);
+});
+
+it('does not anchor transcript time to an invalid first WASAPI timestamp', async () => {
+  const { service } = controller();
+  await service.call({ op: 'start', options: { sources: ['microphone'] } });
+  const before = Date.now();
+  state.captures[0].packet({ ...packet(4), timestamp: 0 });
+  state.captures[0].packet({ ...packet(), timestamp: 987654321 });
+  state.captures[0].packet({ ...packet(), timestamp: 987654331 });
+  const audio = state.workers[0].messages.filter((m: any) => m.op === 'audio');
+  expect(audio.map((m: any) => m.captureClock)).toEqual([undefined, 987654321, 987654331]);
+  expect(audio.every((m: any) => m.timestamp >= before && m.timestamp <= Date.now() + 10)).toBe(
+    true,
+  );
 });

@@ -71,7 +71,51 @@ try {
       handle: win.getNativeWindowHandle().readBigUInt64LE().toString(),
     };
   });
+  // Windows may deny focus to a newly launched background process. Activate
+  // only this synthetic window with a guarded click on its inert brand, then
+  // restore normal z-order before testing native dragging and button exclusion.
+  const brandBox = await login.locator('.login-brand').boundingBox();
+  assert.ok(brandBox);
+  const activation = await app.evaluate(
+    ({ BrowserWindow, screen }, { id, box }) => {
+      const win = BrowserWindow.fromId(id);
+      if (win.isAlwaysOnTop()) throw Error('Login unexpectedly topmost before activation');
+      win.setAlwaysOnTop(true, 'normal');
+      win.moveTop();
+      const bounds = win.getContentBounds();
+      return screen.dipToScreenPoint({
+        x: Math.round(bounds.x + box.x + box.width / 2),
+        y: Math.round(bounds.y + box.y + box.height / 2),
+      });
+    },
+    { id: loginGeometry.id, box: brandBox },
+  );
+  await until(
+    () => probe('hit', loginGeometry.handle, activation.x, activation.y),
+    (value) => value.expected,
+    'Synthetic login must be unobscured before activation',
+  );
+  probe('click', loginGeometry.handle, activation.x, activation.y);
+  await app.evaluate(
+    ({ BrowserWindow }, id) => BrowserWindow.fromId(id).setAlwaysOnTop(false),
+    loginGeometry.id,
+  );
+  await until(
+    () => probe('window', loginGeometry.handle, icon),
+    (value) => value.foreground && !(value.extendedStyle & 8),
+    'Synthetic login must be foreground with normal z-order before dragging',
+  );
   for (const draggable of [true, false]) {
+    await app.evaluate(({ app, BrowserWindow }, id) => {
+      const win = BrowserWindow.fromId(id);
+      app.focus({ steal: true });
+      win.show();
+      win.moveTop();
+      win.focus();
+    }, loginGeometry.id);
+    await login.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
     const locator = draggable
       ? login.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true })
       : login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
@@ -91,6 +135,11 @@ try {
       { id: loginGeometry.id, box },
     );
     assert.equal(probe('desktop').interactive, true);
+    await until(
+      () => probe('hit', loginGeometry.handle, points[0].x, points[0].y),
+      (value) => value.expected,
+      'Synthetic login must be unobscured before native dragging',
+    );
     assert.equal(
       probe('hittest', loginGeometry.handle, points[0].x, points[0].y).result,
       draggable ? 2 : 1,

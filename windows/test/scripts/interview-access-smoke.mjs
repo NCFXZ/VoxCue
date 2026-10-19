@@ -111,7 +111,11 @@ try {
     globalThis.microphoneDenied = false;
   });
   await dialog.getByRole('button', { name: '重新检查', exact: true }).click();
-  await dialog.getByText('麦克风可用', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
+  assert.equal(
+    await dialog.getByRole('button', { name: '测试麦克风', exact: true }).isEnabled(),
+    true,
+  );
   assert.equal(
     await dialog.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
     true,
@@ -150,7 +154,11 @@ try {
     globalThis.microphoneDenied = true;
   });
   await start();
-  await dialog.getByText('系统音频可用', { exact: true }).waitFor();
+  await dialog.getByRole('button', { name: '测试系统声音', exact: true }).waitFor();
+  assert.equal(
+    await dialog.getByRole('button', { name: '测试系统声音', exact: true }).isEnabled(),
+    true,
+  );
   assert.equal(
     await dialog.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
     true,

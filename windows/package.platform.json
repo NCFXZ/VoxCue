@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "test:speech:aec": "node test/scripts/echo-cancellation-smoke.mjs",
     "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
     "test:installer:isolated": "node test/scripts/portable-native-smoke.mjs --with-installer",
     "test:windows:functional": "node test/scripts/windows-suite.mjs",
@@ -27,6 +28,9 @@
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
     "test:installer:upgrade": "node test/scripts/installer-upgrade-smoke.mjs",
     "test:package": "node test/scripts/packaged-smoke.mjs"
+  },
+  "dependencies": {
+    "@ennuicastr/webrtcaec3.js": "0.3.0"
   },
   "devDependencies": {
     "@electron/packager": "19.0.1",

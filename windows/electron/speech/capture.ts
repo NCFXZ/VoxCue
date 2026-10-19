@@ -57,6 +57,7 @@ export function devices(helper: string): Promise<AudioDevice[]> {
 }
 export class WasapiCapture {
   private child?: ChildProcessWithoutNullStreams;
+  private closed?: Promise<void>;
   private stopping = false;
   constructor(
     private helper: string,
@@ -66,6 +67,7 @@ export class WasapiCapture {
     private failure: (message: string) => void,
   ) {}
   start(): Promise<void> {
+    this.stopping = false;
     return new Promise((resolve, reject) => {
       const child = spawn(
         this.helper,
@@ -73,11 +75,15 @@ export class WasapiCapture {
         { windowsHide: true },
       );
       this.child = child;
+      // exit can precede the last stdout packet. close follows all pipe data.
+      this.closed = new Promise((done) => child.once('close', () => done()));
       const decoder = new PacketDecoder();
       let lines = '';
       let started = false;
       const timer = setTimeout(() => {
-        void this.stop();
+        // Startup already reports its deadline; a forced cleanup must not create
+        // an unhandled rejection while the controller performs its own teardown.
+        void this.stop().catch(() => {});
         reject(Error('音频设备启动超时。'));
       }, 8000);
       child.stdout.on('data', (b) => {
@@ -125,20 +131,24 @@ export class WasapiCapture {
     this.stopping = true;
     const child = this.child;
     if (!child) return;
-    await new Promise<void>((resolve) => {
+    await new Promise<void>((resolve, reject) => {
+      let killed: NodeJS.Timeout | undefined;
+      let forced = false;
       const timer = setTimeout(() => {
+        forced = true;
         child.kill();
-        resolve();
+        killed = setTimeout(() => reject(Error('音频采集进程未能退出。')), 1000);
       }, 1500);
-      child.once('exit', () => {
+      void this.closed!.then(() => {
         clearTimeout(timer);
-        resolve();
+        clearTimeout(killed);
+        if (forced) reject(Error('音频采集未能正常结束，末尾音频可能不完整。'));
+        else if (child.exitCode !== 0) reject(Error('音频采集进程异常结束，请重新开始。'));
+        else resolve();
       });
-      if (child.exitCode !== null) {
-        clearTimeout(timer);
-        resolve();
-      } else child.stdin.end();
+      if (child.exitCode === null) child.stdin.end();
     });
     this.child = undefined;
+    this.closed = undefined;
   }
 }

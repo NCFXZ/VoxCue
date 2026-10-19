@@ -1,7 +1,7 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { createServer } from 'node:http';
 import { createReadStream } from 'node:fs';
-import { mkdir, mkdtemp, readFile, writeFile, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import assert from 'node:assert/strict';

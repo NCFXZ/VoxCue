@@ -372,7 +372,6 @@ export function FloatingInterview() {
             className="floating-brand floating-collapse"
             aria-label={collapsed ? '展开面试窗口' : '收起面试窗口'}
             aria-expanded={!collapsed}
-            title={collapsed ? '展开面试窗口' : '收起面试窗口'}
             onClick={async () => {
               try {
                 setCollapsed(await window.desktop!.toggleInterviewCollapse());
@@ -390,7 +389,6 @@ export function FloatingInterview() {
               variant="ghost"
               size="icon"
               aria-label="面试设置"
-              title="面试设置"
               onClick={() => setSettingsOpen(true)}
             >
               <Settings size={19} />
@@ -401,7 +399,6 @@ export function FloatingInterview() {
               disabled={busy}
               aria-pressed={protectedWindow}
               aria-label={protectedWindow ? '关闭截图保护' : '开启截图保护'}
-              title={protectedWindow ? '截图保护已开启，点击关闭' : '截图保护已关闭，点击开启'}
               onClick={() => {
                 void toggleCapture();
               }}
@@ -414,7 +411,6 @@ export function FloatingInterview() {
               variant={confirmEnd ? 'destructive' : 'dangerGhost'}
               size="icon"
               aria-label={confirmEnd ? '确认结束面试' : '结束面试'}
-              title={confirmEnd ? '再次点击结束并保存本场面试' : '结束面试'}
               onClick={confirmEnd ? close : () => setConfirmEnd(true)}
             >
               <Square size={16} />
@@ -423,7 +419,6 @@ export function FloatingInterview() {
             <div
               className="floating-drag-handle"
               aria-label="拖动面试窗口"
-              title="拖动面试窗口"
               onPointerDown={windowDrag.onPointerDown}
             >
               <DragGrip size={20} />
@@ -670,7 +665,6 @@ export function FloatingInterview() {
               <textarea
                 aria-label="面试提问"
                 placeholder="输入问题，或按 Enter 发送最新面试官问题…"
-                title="Enter 发送，Shift+Enter 换行"
                 rows={2}
                 value={currentInput}
                 onChange={(event) => {
@@ -707,7 +701,6 @@ export function FloatingInterview() {
                     size="icon"
                     className="floating-screenshot-button"
                     aria-label="截取图像"
-                    title="截取图像，加入待发送截图，最多5张"
                     aria-busy={state.capturingScreenshot}
                     data-expanded={state.capturingScreenshot || state.screenshots.length > 0}
                     disabled={
@@ -734,7 +727,6 @@ export function FloatingInterview() {
                       type="button"
                       size="icon"
                       aria-label="停止当前回答"
-                      title="停止当前回答"
                       onClick={(event) => {
                         // Stopping immediately replaces this control with Submit.
                         // Cancel the click's default action before React updates it.
@@ -758,7 +750,6 @@ export function FloatingInterview() {
                           !state.screenshots.length)
                       }
                       aria-label="发送面试问题"
-                      title="发送问题（Enter）；换行（Shift+Enter）"
                     >
                       <ArrowUp size={20} />
                     </Button>

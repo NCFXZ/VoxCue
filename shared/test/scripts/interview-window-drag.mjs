@@ -1,4 +1,16 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import workspace from '../../scripts/workspace.mjs';
+
+const nativeProbe =
+  process.platform === 'win32'
+    ? (
+        await import(
+          pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+        )
+      ).probe
+    : undefined;
 
 // Only cursor input is synthetic. Pointer capture, preload, IPC and BrowserWindow
 // movement run through the production path in this runner's isolated process.
@@ -10,6 +22,7 @@ export async function exerciseInterviewWindowDrag(app, page) {
         .getBounds(),
     );
   const before = await native();
+  const originalCursor = nativeProbe?.('cursor');
   await app.evaluate(({ screen, ipcMain, BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows().find((w) =>
       w.webContents.getURL().endsWith('#interview'),
@@ -87,6 +100,31 @@ export async function exerciseInterviewWindowDrag(app, page) {
       );
   });
   try {
+    if (nativeProbe) {
+      // CDP holds a synthetic button without moving the OS cursor. If the moved
+      // transparent HWND crosses that cursor, Windows forwards a real buttons=0
+      // move and correctly ends the gesture. Keep that unrelated cursor outside
+      // the tested window's movement envelope; native input has its own suite.
+      const parked = await app.evaluate(({ screen }, bounds) => {
+        const display = screen.getDisplayMatching(bounds).workArea;
+        const candidates = [
+          { x: display.x + 2, y: display.y + 2 },
+          { x: display.x + display.width - 2, y: display.y + 2 },
+          { x: display.x + 2, y: display.y + display.height - 2 },
+          { x: display.x + display.width - 2, y: display.y + display.height - 2 },
+        ];
+        const point = candidates.find(
+          ({ x, y }) =>
+            x < bounds.x - 128 ||
+            y < bounds.y - 128 ||
+            x > bounds.x + bounds.width + 128 ||
+            y > bounds.y + bounds.height + 128,
+        );
+        if (!point) throw Error('Synthetic drag needs an OS cursor outside its movement envelope');
+        return screen.dipToScreenPoint(point);
+      }, before);
+      nativeProbe('move', parked.x, parked.y);
+    }
     const grip = page.locator('.floating-drag-handle');
     assert.equal(
       await grip.evaluate((e) => getComputedStyle(e).webkitAppRegion),
@@ -241,13 +279,17 @@ export async function exerciseInterviewWindowDrag(app, page) {
   } finally {
     await page.mouse.up().catch(() => {});
     await page.evaluate(() => window.desktop.moveInterviewWindow({ phase: 'end' })).catch(() => {});
-    await app.evaluate(({ BrowserWindow }, bounds) => {
-      globalThis.restoreGripTest();
-      BrowserWindow.getAllWindows()
-        .find((w) => w.webContents.getURL().endsWith('#interview'))
-        .setBounds(bounds);
-      delete globalThis.gripTest;
-      delete globalThis.restoreGripTest;
-    }, before);
+    try {
+      await app.evaluate(({ BrowserWindow }, bounds) => {
+        globalThis.restoreGripTest();
+        BrowserWindow.getAllWindows()
+          .find((w) => w.webContents.getURL().endsWith('#interview'))
+          .setBounds(bounds);
+        delete globalThis.gripTest;
+        delete globalThis.restoreGripTest;
+      }, before);
+    } finally {
+      if (nativeProbe && originalCursor) nativeProbe('move', originalCursor.x, originalCursor.y);
+    }
   }
 }

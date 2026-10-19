@@ -25,7 +25,6 @@ import { UsagePanel } from './UsagePanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ComponentsPanel } from './ComponentsPanel';
 import { useComponentReady } from '../stores/components';
-import { useModelProvider } from './useModelProvider';
 import { providerInfo } from '../services/providers';
 import { SpeechControls } from './SpeechControls';
 import { InterviewFontSettings } from './InterviewFontSettings';
@@ -90,7 +89,6 @@ export function SettingsDialog({
   const session = useAuth((state) => state.session);
   const interview = useInterviewSettings();
   const connection = useChatConnection();
-  const provider = useModelProvider();
   const accountProvider = providerInfo(session?.mode);
   const selectedTheme = themes.find((item) => item.value === theme)!;
   return (

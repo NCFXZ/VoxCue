@@ -88,7 +88,7 @@ try {
     ]);
     floating.setDefaultTimeout(20000);
     floating.on('pageerror', (error) => errors.push(error.message));
-    await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+    await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
     await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
     return floating;
   };
@@ -131,13 +131,16 @@ try {
   await emit('q2', 'system', '为什么没有采用它？');
   await send(2, '为什么没有采用它？');
   const second = await app.evaluate(() => globalThis.contextRequests[1]);
-  assert.ok(second.instructions.includes('直接给出面试者能当场口述的第一人称答案'));
+  assert.ok(second.instructions.includes('直接写出面试者能当场口述的第一人称答案'));
   assert.ok(second.instructions.includes('60–90秒'));
   assert.ok(second.instructions.includes('明确的时长、篇幅或格式要求优先'));
-  assert.ok(second.instructions.includes('使用标注语言、保留换行和缩进的代码块'));
-  assert.ok(second.instructions.includes('不反问、索要资料、请求确认或等待回复'));
-  assert.ok(second.instructions.includes('不因检索未命中而停止作答'));
-  assert.ok(second.instructions.includes('之前的 AI 建议不视为实际发言或本人经历'));
+  assert.ok(second.instructions.includes('需要代码时用标注语言的代码块，保留换行和缩进'));
+  assert.ok(second.instructions.includes('不向用户反问、索要资料、请求确认或等待回复'));
+  assert.ok(second.instructions.includes('依据通用专业知识照常回答，不提检索过程'));
+  assert.ok(
+    second.instructions.includes('AI 建议只是此前生成的参考，不等于面试者说过的话或本人经历'),
+  );
+  assert.ok(second.instructions.includes('实际发言缺失时可借助最近的 AI 建议理解所指'));
   assert.equal(second.knowledgeBaseId, null);
   const context = JSON.parse(second.turns[0].content.split('\n').slice(1).join('\n'));
   assert.ok(
@@ -159,10 +162,10 @@ try {
     }),
   );
   await emit('broken', 'system', '被中断的半句', true, 'discontinuity');
-  await floating.getByText('音频间断，片段可能不完整', { exact: true }).waitFor();
+  await floating.getByText('被中断的半句', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '系统音频：异常', exact: true }).hover();
   await floating
-    .getByRole('status')
-    .getByText('系统音频发生短暂间断，转写已继续。', { exact: true })
+    .getByRole('tooltip', { name: '系统音频：系统音频发生短暂间断，转写已继续。', exact: true })
     .waitFor();
   assert.equal(
     await floating.getByRole('textbox', { name: '面试提问', exact: true }).inputValue(),
@@ -213,7 +216,7 @@ try {
   );
   await floating.getByRole('alert').waitFor({ state: 'hidden' });
   await floating.reload();
-  await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   await emit('q3', 'system', '那么并发量怎么处理？');
   await send(3, '那么并发量怎么处理？');
   const third = await app.evaluate(() => globalThis.contextRequests[2]);
@@ -262,7 +265,18 @@ try {
     codeQuestion,
   );
   assert.equal(await floating.locator('[title], [data-focus-tip]').count(), 0);
-  assert.equal(await main.locator('[title], [data-focus-tip]').count(), 0);
+  // Current selection labels retain their full names when ellipsized. Ordinary
+  // controls still have no hover tips; readiness reasons use their own tooltip.
+  assert.equal(
+    await main
+      .locator('[title]:not(.choice-trigger > span):not(.speech-select > span), [data-focus-tip]')
+      .count(),
+    0,
+  );
+  for (const label of await main
+    .locator('.choice-trigger > span[title], .speech-select > span[title]')
+    .all())
+    assert.equal(await label.getAttribute('title'), (await label.textContent()).trim());
   await lastAnswer.locator('.floating-question').scrollIntoViewIfNeeded();
   for (const theme of ['light', 'dark']) {
     await floating.evaluate((theme) => {

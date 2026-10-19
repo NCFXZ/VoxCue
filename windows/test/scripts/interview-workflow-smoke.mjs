@@ -5,6 +5,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { probe } from './window-probe.mjs';
+import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 function requireDesktop() {
   assert.equal(
     probe('desktop').interactive,
@@ -178,63 +179,65 @@ try {
     await settings.getByRole('button', { name: '麦克风设备', exact: true }).isDisabled(),
     false,
   );
+  assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
+  await chooseMic('测试麦克风设备');
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  const audioCheck = main.getByRole('dialog', { name: '开始面试', exact: true });
+  const testStarted = Date.now();
+  await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).click();
+  await audioCheck.getByRole('button', { name: '停止麦克风测试', exact: true }).waitFor();
   assert.equal(
-    await settings.getByRole('button', { name: '测试麦克风', exact: true }).isDisabled(),
+    await audioCheck.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
     true,
   );
-  await chooseMic('测试麦克风设备');
-  await settings.getByRole('button', { name: '测试麦克风', exact: true }).click();
-  await settings.getByRole('button', { name: '停止测试', exact: true }).waitFor();
   await main.waitForFunction(
     () => Number(document.querySelector('[role="meter"]').getAttribute('aria-valuenow')) > 50,
   );
-  const meter = await settings.getByRole('meter').boundingBox();
-  const module = await settings.locator('.microphone-test').boundingBox();
-  const body = await settings.locator('.settings-content-body').boundingBox();
-  assert.ok(meter.width >= 250, 'Meter must be longer');
-  assert.ok(
-    Math.abs(module.x + module.width / 2 - body.x - body.width / 2) <= 1,
-    'Microphone module centered',
-  );
+  const meter = await audioCheck
+    .getByRole('meter', { name: '麦克风电平', exact: true })
+    .boundingBox();
+  assert.ok(meter.width > 0, 'Inline meter is visible');
   await main.screenshot({ animations: 'disabled' });
-  await main.waitForTimeout(10500);
-  assert.equal(
-    await settings.getByRole('button', { name: '停止测试', exact: true }).isVisible(),
-    true,
-  );
   const micCalls = await app.evaluate(() => globalThis.speechCalls);
   assert.deepEqual(micCalls.at(-1).options, { sources: ['microphone'], microphone: 'fixture-mic' });
-  await settings.getByRole('button', { name: '常规', exact: true }).click();
-  await main.waitForTimeout(100);
+  await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
+  assert.ok(Date.now() - testStarted >= 9000, 'Ten-second self-test is not retired early');
   assert.equal(await app.evaluate(() => globalThis.speechCalls.at(-1).op), 'stop');
-  check('对数音量条加长居中、超过十秒持续测试、切换设置分类自动停止');
-  await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).click();
+  await audioCheck.getByRole('button', { name: '停止麦克风测试', exact: true }).waitFor();
+  await audioCheck.getByRole('button', { name: '取消', exact: true }).click();
+  await waitForAsync(main, async () => {
+    const state = await window.desktop.dictation({ op: 'status' });
+    return state.state === 'idle';
+  });
+  assert.equal(await app.evaluate(() => globalThis.speechCalls.at(-1).op), 'stop');
+  check('开场行内真实活动电平、十秒上限、测试中禁止确认及关闭释放');
   await app.evaluate(() => {
     globalThis.microphoneDenied = true;
   });
-  await settings.getByRole('button', { name: '测试麦克风', exact: true }).click();
-  await settings
-    .getByRole('button', { name: '麦克风设备', exact: true })
-    .getByText('麦克风不可用，请检查设备或权限', { exact: true })
-    .waitFor();
-  await settings
-    .locator('.speech-device-error')
-    .getByText(/麦克风访问被拒绝/)
-    .waitFor();
+  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await audioCheck.getByText(/麦克风权限未开启/).waitFor();
+  assert.equal(
+    await audioCheck.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
+    true,
+  );
   await main.screenshot({});
+  await audioCheck.getByRole('button', { name: '取消', exact: true }).click();
+  await main.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await app.evaluate(() => {
     globalThis.microphoneDenied = false;
     globalThis.microphoneMissing = true;
   });
-  await settings.getByRole('button', { name: '刷新设备', exact: true }).click();
+  await main.evaluate(() => window.dispatchEvent(new Event('focus')));
+  assert.equal(await settings.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);
   await settings
     .getByRole('button', { name: '麦克风设备', exact: true })
     .getByText('所选麦克风已不可用', { exact: true })
     .waitFor();
-  assert.equal(
-    await settings.getByRole('button', { name: '测试麦克风', exact: true }).isDisabled(),
-    true,
-  );
+  assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const noMicConfirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
@@ -260,7 +263,7 @@ try {
   await main.getByRole('menuitemradio', { name: '高', exact: true }).click();
   await main.screenshot({});
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  check('音频禁用、所选设备测试及释放、模型与思考强度设置');
+  check('音频禁用、所选设备自检及释放、设备自动刷新、模型与思考强度设置');
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
   assert.equal(await confirmation.locator('.speech-controls').count(), 0);
@@ -271,7 +274,10 @@ try {
   await summary.getByText('高', { exact: true }).waitFor();
   assert.equal(await confirmation.getByText(/确认后自动转写，请先取得参与者同意/).count(), 0);
   await confirmation.getByText(/音频仅在本机处理，不保存/).waitFor();
-  await confirmation.getByRole('button', { name: '前往面试设置', exact: true }).waitFor();
+  assert.equal(
+    await confirmation.getByRole('button', { name: '前往面试设置', exact: true }).count(),
+    0,
+  );
   await main.screenshot({});
   const [floating] = await Promise.all([
     app.waitForEvent('window'),

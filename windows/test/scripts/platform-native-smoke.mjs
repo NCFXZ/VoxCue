@@ -1,5 +1,5 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';

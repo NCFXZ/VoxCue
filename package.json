@@ -62,6 +62,7 @@
     "test:screen-permission": "node shared/scripts/run.mjs test:screen-permission",
     "test:settings": "node shared/scripts/run.mjs test:settings",
     "test:speech:adversarial": "node shared/scripts/run.mjs test:speech:adversarial",
+    "test:speech:aec": "node shared/scripts/run.mjs test:speech:aec",
     "test:speech:desktop": "node shared/scripts/run.mjs test:speech:desktop",
     "test:speech:devices": "node shared/scripts/run.mjs test:speech:devices",
     "test:speech:model": "node shared/scripts/run.mjs test:speech:model",

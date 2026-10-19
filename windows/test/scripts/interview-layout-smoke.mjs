@@ -244,7 +244,7 @@ try {
   ]);
   floating.setDefaultTimeout(20000);
   floating.on('pageerror', (error) => errors.push(error.message));
-  await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   await assert.rejects(
     () => main.evaluate(() => window.desktop.setInterviewTranscriptVisible(false)),
     /Unauthorized/,

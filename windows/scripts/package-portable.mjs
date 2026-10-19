@@ -160,6 +160,7 @@ const paths = await packager({
         }
       }
       for (const name of [
+        '@ennuicastr/webrtcaec3.js',
         'adm-zip',
         'jose',
         'electron-updater',

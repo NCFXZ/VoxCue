@@ -4,6 +4,18 @@ import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { pathToFileURL } from 'node:url';
+import workspace from '../../scripts/workspace.mjs';
+
+const nativeProbe =
+  process.platform === 'win32'
+    ? (
+        await import(
+          pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+        )
+      ).probe
+    : undefined;
+const originalCursor = nativeProbe?.('cursor');
 
 const screenshotOption = process.argv.slice(2).find((value) => value.startsWith('--screenshots='));
 if (process.argv.slice(2).some((value) => value !== screenshotOption))
@@ -206,7 +218,7 @@ try {
   const brand = await page.locator('.sidebar-wordmark').evaluate((e) => ({
     font: getComputedStyle(e.querySelector('strong')).fontSize,
     title: getComputedStyle(document.querySelector('.page-toolbar .breadcrumb > strong')).fontSize,
-    logo: e.querySelector('.app-logo').getBoundingClientRect().width,
+    logo: parseFloat(getComputedStyle(e.querySelector('.app-logo')).width),
   }));
   assert.equal(brand.font, brand.title);
   assert.equal(brand.logo, 24);
@@ -531,6 +543,20 @@ try {
     );
   };
   if (passthrough) {
+    if (nativeProbe) {
+      // CDP mouse movement leaves the Windows cursor unchanged. The production
+      // stale-leave guard checks that cursor, so move it onto this window's own
+      // blank corner before checking actual native passthrough at every DPI.
+      const point = await app.evaluate(({ BrowserWindow, screen }, url) => {
+        const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url);
+        win.moveTop();
+        win.focus();
+        const bounds = win.getContentBounds();
+        return screen.dipToScreenPoint({ x: bounds.x + 2, y: bounds.y + 2 });
+      }, floating.url());
+      assert.equal(nativeProbe('desktop').interactive, true);
+      nativeProbe('move', point.x, point.y);
+    }
     await floating.mouse.move(2, 2);
     await waitNativePassthrough(true);
   }
@@ -766,5 +792,6 @@ try {
     }),
   );
 } finally {
+  if (nativeProbe && originalCursor) nativeProbe('move', originalCursor.x, originalCursor.y);
   await closeUiApp(app);
 }

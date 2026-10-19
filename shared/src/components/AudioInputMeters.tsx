@@ -27,9 +27,7 @@ export function AudioInputMeters({
         const level = active && value && now - value.at < 800 ? microphoneLevel(value.level) : 0;
         return (
           <div className="audio-meter-row" key={source}>
-            <span title={source === 'system' ? '所选播放设备上所有应用的声音' : undefined}>
-              {source === 'system' ? '系统声音' : '我的麦克风'}
-            </span>
+            <span>{source === 'system' ? '系统声音' : '我的麦克风'}</span>
             <div
               className="audio-meter-track"
               role="meter"

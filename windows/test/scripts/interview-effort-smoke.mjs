@@ -120,7 +120,7 @@ try {
     async () => (await window.desktop.interviewState()).configuration,
   );
   assert.equal(confirmed.effort, 'max');
-  await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   assert.equal(
     await floating.getByRole('button', { name: '面试回答思考强度', exact: true }).count(),
     0,
@@ -173,7 +173,7 @@ try {
   await automatic.getByText('Fixture answer 2', { exact: true }).waitFor();
   assert.equal(await app.evaluate(() => 'effort' in globalThis.interviewRequests[1]), false);
   console.log(
-    `PASS: model-supported effort/default low/unknown auto, locked configuration after reload, tamper rejection and UI→IPC→AI request effort. Screenshots: ${profile}`,
+    'PASS: model-supported effort/default low/unknown auto, confirmed defaults after reload, tamper rejection and UI→IPC→AI request effort; temporary profile cleaned at exit.',
   );
 } finally {
   await app.evaluate(({ BrowserWindow }) => {

@@ -326,8 +326,9 @@ export class SpeechController {
             if (epoch !== this.epoch) return;
             this.lastAudio.set(source, Date.now());
             this.rates.set(source, p.rate);
+            const validClock = !(p.flags & 4) && Number.isFinite(p.timestamp);
             let anchor = this.anchors.get(source);
-            if (!anchor) {
+            if (!anchor && validClock) {
               anchor = { native: p.timestamp, wall: Date.now() };
               this.anchors.set(source, anchor);
             }
@@ -336,8 +337,8 @@ export class SpeechController {
               p.samples,
               p.rate,
               p.flags,
-              p.flags & 4 ? Date.now() : anchor.wall + p.timestamp - anchor.native,
-              p.flags & 4 ? undefined : p.timestamp,
+              validClock ? anchor!.wall + p.timestamp - anchor!.native : Date.now(),
+              validClock ? p.timestamp : undefined,
             );
           },
           (m) => {

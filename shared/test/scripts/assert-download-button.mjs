@@ -111,8 +111,12 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
       assert.equal(after.width, before.width);
       assert.equal(after.height, before.height);
       if (iconOnly) {
-        assert.equal(after.width, 32);
-        assert.equal(after.height, 32);
+        const size = await button.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return { width: parseFloat(style.width), height: parseFloat(style.height) };
+        });
+        assert.equal(size.width, 32);
+        assert.equal(size.height, 32);
       }
       await page.mouse.move(1, 1);
       await page.keyboard.press('Tab');

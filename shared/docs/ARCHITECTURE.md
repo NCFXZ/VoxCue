@@ -1,5 +1,11 @@
 # VoxCue 架构
 
+## Windows 0.5.0 本地回声处理
+
+Windows SpeechController在同一共享Worker中装配固定本地echoCancellation模块；路径仅来自平台构造器，prepare完成后才启动WASAPI。所选render端点保持完整应用混音和原系统转写，仅双音源麦克风经过固定AEC3 WASM；不改变系统设备或音量，不增加UI开关。两路GetBuffer首样本的QPC（100ns转ms）是共同单调时钟，墙钟仅供转写时间。时间戳无效/主机静音旁路滤波并保留连续重采样，不改变ASR输入采样率；参考缺失最多等待80ms后保留麦克风。48kHz/10ms重采样、有限参考队列、滤波延迟补偿、间断和停止冲刷在Windows适配器完成。
+
+原生助手停止后读完缓存，WasapiCapture等待close（含stdout末包），drainBeforeRetire保持回调有效直到两路停止，之后共享Worker flush并等待确认；退出、强制停止及DSP错误仍显式失败。开发和便携装配都包含AEC3 JS/WASM/license、sherpa和本机ONNX资源，不导入Mac模块。下方Windows旧退休顺序和未处理AEC的描述为历史基线。
+
 ## 当前共享面试上下文与检索（Windows 0.3.1；Mac 本地 0.3.1）
 
 两阶段用量优化已在共享源码局部撤销；已发布 0.3.0 仍保留原优化行为。speech/QuestionBuffer 与 interview store 不做明确回应分类，系统终稿按原 2200ms 静音和自动回答条件提交，麦克风不触发回答；忙时排队、手动临时稿、片段去重、取消与迟到保护保持。

@@ -57,11 +57,19 @@ assert.ok(
   !entries.some((file) => /\.(?:dylib|so(?:\.\d+)*|icns)$|\.framework\//i.test(file)),
   'Foreign platform native libraries must not enter the Windows package',
 );
-for (const dependency of ['adm-zip', 'onnxruntime-node', 'sherpa-onnx-win-x64', '@lancedb/lancedb'])
+for (const dependency of [
+  '@ennuicastr/webrtcaec3.js',
+  'adm-zip',
+  'onnxruntime-node',
+  'sherpa-onnx-win-x64',
+  '@lancedb/lancedb',
+])
   assert.ok(
     entries.some((file) => file.includes('node_modules/' + dependency + '/')),
     dependency,
   );
+for (const file of ['dist/webrtcaec3-0.3.0.js', 'dist/webrtcaec3-0.3.0.wasm', 'license.js'])
+  assert.ok(entries.includes('node_modules/@ennuicastr/webrtcaec3.js/' + file), file);
 assert.deepEqual(
   JSON.parse(await readFile(path.join(packageRoot, 'resources/voxcue-components.json'), 'utf8')),
   { schemaVersion: 1 },
@@ -165,9 +173,27 @@ try {
               message.error ? reject(Error(message.error)) : resolve();
             }
           });
-          worker.postMessage({ op: 'init', directory: model });
+          worker.postMessage({
+            op: 'init',
+            directory: model,
+            preprocessorFile: path.join(
+              unpacked,
+              'dist-electron/windows/electron/speech/echoCancellation.js',
+            ),
+          });
         });
         workerLoaded = true;
+        await new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(Error('Packaged AEC prepare timeout')), 10000);
+          const listener = (message) => {
+            if (message.prepared !== 9 && !message.error) return;
+            clearTimeout(timer);
+            worker.off('message', listener);
+            message.error ? reject(Error(message.error)) : resolve();
+          };
+          worker.on('message', listener);
+          worker.postMessage({ op: 'prepare', id: 9, sources: ['system', 'microphone'] });
+        });
         await new Promise((resolve, reject) => {
           const timer = setTimeout(() => reject(Error('Packaged ASR gap reset timeout')), 15000);
           const listener = (message) => {
@@ -196,6 +222,25 @@ try {
             timestamp: Date.now(),
             sequence: 2,
             ms: 100,
+          });
+          worker.postMessage({
+            op: 'audio',
+            source: 'microphone',
+            samples: new Float32Array(883),
+            rate: 44100,
+            timestamp: Date.now(),
+            captureClock: 100,
+            sequence: 3,
+            ms: 20,
+          });
+          worker.postMessage({
+            op: 'audio',
+            source: 'microphone',
+            samples: new Float32Array(883),
+            rate: 44100,
+            timestamp: Date.now(),
+            sequence: 4,
+            ms: 20,
           });
           worker.postMessage({ op: 'flush', id: 7, reason: 'pause' });
         });

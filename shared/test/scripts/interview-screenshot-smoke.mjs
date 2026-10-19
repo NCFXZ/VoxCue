@@ -86,8 +86,12 @@ try {
   const brandBounds = await main.locator('.sidebar-heading').evaluate((heading) => {
     const brand = heading.querySelector('.sidebar-wordmark').getBoundingClientRect();
     const control = heading.querySelector('button').getBoundingClientRect();
-    const logo = heading.querySelector('.app-logo').getBoundingClientRect();
-    return { gap: control.left - brand.right, width: logo.width, height: logo.height };
+    const logo = getComputedStyle(heading.querySelector('.app-logo'));
+    return {
+      gap: control.left - brand.right,
+      width: parseFloat(logo.width),
+      height: parseFloat(logo.height),
+    };
   });
   assert.ok(brandBounds.gap >= 0);
   assert.equal(brandBounds.width, 24);
@@ -346,8 +350,10 @@ try {
   checks.push(
     'text sends do not capture; image-only send excludes history; capture failure stays visible; retry reuses staged pixels',
   );
-  assert.equal(await camera.getAttribute('title'), '截取图像，加入待发送截图，最多5张');
-  assert.equal(await send.getAttribute('title'), '发送问题（Enter）；换行（Shift+Enter）');
+  assert.equal(await camera.getAttribute('aria-label'), '截取图像');
+  assert.equal(await send.getAttribute('aria-label'), '发送面试问题');
+  assert.equal(await camera.getAttribute('title'), null);
+  assert.equal(await send.getAttribute('title'), null);
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([
     floating.waitForEvent('close'),

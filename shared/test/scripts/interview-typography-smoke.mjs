@@ -99,10 +99,10 @@ try {
   assert.equal(await settings.locator('.display-slider-icon').count(), 4);
   const thumb = await slider.evaluate((e) => ({
     color: getComputedStyle(e, '::-webkit-slider-thumb').backgroundColor,
-    track: e
-      .closest('.frosted-slider-control')
-      .querySelector('.frosted-slider-track')
-      .getBoundingClientRect().height,
+    track: parseFloat(
+      getComputedStyle(e.closest('.frosted-slider-control').querySelector('.frosted-slider-track'))
+        .height,
+    ),
   }));
   assert.equal(thumb.track, 6);
   await slider.fill('18');

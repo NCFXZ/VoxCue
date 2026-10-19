@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.3.1",
+  "version": "0.5.0",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -43,6 +43,7 @@
     "test:chat:lifecycle": "node ../shared/test/scripts/chat-lifecycle-smoke.mjs",
     "test:adversarial": "node ../shared/test/scripts/adversarial-smoke.mjs",
     "check:workspace": "node ../shared/scripts/sync-platform-manifests.mjs --check && node ../shared/scripts/check-platform-layout.mjs",
+    "test:speech:aec": "node test/scripts/echo-cancellation-smoke.mjs",
     "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
     "test:installer:isolated": "node test/scripts/portable-native-smoke.mjs --with-installer",
     "test:windows:functional": "node test/scripts/windows-suite.mjs",
@@ -90,7 +91,8 @@
     "remark-gfm": "^4.0.1",
     "sherpa-onnx-node": "1.13.8",
     "tailwind-merge": "^3.0.0",
-    "zustand": "^5.0.0"
+    "zustand": "^5.0.0",
+    "@ennuicastr/webrtcaec3.js": "0.3.0"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.0.0",

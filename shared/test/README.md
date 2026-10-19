@@ -26,6 +26,10 @@ Mac目录内运行 `node test/scripts/app-icon-smoke.mjs`，用临时透明合�
 
 # VoxCue 测试入口
 
+Windows 0.5.0新增`node test/scripts/echo-cancellation-smoke.mjs`，`--runtime-bundle`检查临时ASAR，`--packaged`构建并清理临时完整便携布局（不生成安装器）；均使用真实Electron Worker、固定本地AEC3 WASM与sherpa重采样，推理替身只收集DSP输出。`wasapi-packets-smoke.mjs`编译生产C#纯转换器，用合成多声道包验证混音/QPC/标志/分片解码，不实例化音频设备；`electron-output-smoke.mjs`验证Windows真实无共享文件锁、部分写入回滚、并发锁和目录身份。它们纳入Windows原生矩阵；五档DPI增加interview-ux，保留原有六组。AEC单测覆盖延迟回声、独立同时人声、0/120ms声学延迟、35ms启动差/持续时钟漂移、参考失效/缺失、四档采样率、尾段/间断及20次重连；capture-drain与speech-restart检查管道末包/prepare/QPC/旧回调。全部结果只在终端，临时资料退出清理；不采样硬件或真实屏幕。
+
+原生矩阵传入临时公开模型路径时，以及AEC `--packaged`入口，另以实际Paraformer/VAD/ONNX验证同一AEC Worker和44.1kHz/QPC失效后的连续输入、flush与退出；不使用推理替身通过该附加检查。
+
 更新：2026-10-17。用户已重新授权完整功能、面试稳定性和对抗性测试及故障修复。Liquid Glass 及其专项仍已撤回，不恢复原 test:all、test:materials、test:readability 等入口。
 
 ## 结果零保留
@@ -122,6 +126,8 @@ node ../shared/test/scripts/run-electron-node.mjs ../shared/test/scripts/speech-
 functional-suite 顺序覆盖共用界面与本机原生窗口/权限/图标/启动器、用户数据迁移、更新和模型缓存；Mac 矩阵同时包含 dmg，核对临时压缩镜像的 Finder 布局、Retina 素材、拖拽目标、签名及取消卸载清理。运行前使用正式固定资源目录/摘要在本次临时根准备模型，并下载固定 revision/摘要的官方公开音频。开发态测试通过独立宿主注入临时模型路径，安装态回归仍使用真实组件缓存；不补回工作区或真实 userData 的模型。interview-stability 为重复面试、重载、Dock/置顶与透明度联动；audio-pipeline 使用合成采集端口驱动真实 utilityProcess、控制器、ASR Worker，并验证进程强制退出后的恢复。Mac native-build 只在临时目录编译/签名验证原生音频、权限绑定和启动器，不覆盖现用组件。
 
 interview-stability 在确认按钮可见、可用且有限动画结束后，于单个 Renderer 任务中触发关闭处理器，再等待真实关闭、保存、主窗口/Dock 恢复和内存检查，避免预期销毁页面与 Playwright 鼠标动作回执竞态；原生按钮命中和真实点击由平台原生专项独立检查，不忽略页面异常。Windows presentation-native 还覆盖输入区新位置之后到达的旧空白离开事件，防止原生转发切换重新启用输入区穿透。
+
+floating 的合成拖动仍使用真实指针捕获、preload、IPC 和 BrowserWindow；Windows 运行时暂将 OS 光标停放在测试窗口运动范围外，退出时恢复，避免透明 HWND 移动扫过静止系统光标产生无按键转发事件并结束 CDP 手势。真实鼠标操作继续由 presentation-native 覆盖。interview-screenshot 明确检查按钮可访问名称及普通 title 缺失，五张上限、失败原图重试、仅图上下文隔离和结果不落盘断言保持。
 
 updates-sidebar 使用合成更新器及独立临时账户，覆盖侧栏状态对齐、各状态固定 32×32、仅圆环进度/取消图标、设置内完整百分比、自动下载开关保存、关闭设置后的后台进度和明确点击安装。updates-smoke 的手动下载/面试阻止/保存恢复回归使用独立模型可用状态夹具，不下载模型或更新包，不调用真实安装器；这些回归不代替原生安装或 Windows 本机验收。截图只在内存，结束清理全部临时资料。
 

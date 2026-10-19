@@ -25,6 +25,7 @@ const shared = [
   'provider-ui',
   'floating',
   'interview-typography',
+  'interview-ux',
   'interview-usage',
   'interview-screenshot',
   'delete-controls',

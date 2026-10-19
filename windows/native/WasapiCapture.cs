@@ -34,6 +34,29 @@ class WasapiCapture {
     Console.WriteLine(json.Serialize(list));
   }
   static void Status(object status) { Console.Error.WriteLine(json.Serialize(status)); }
+  // Pure packet conversion also exercised with synthetic interleaved audio.
+  static void WritePacket(BinaryWriter output, WaveFormat wave, bool floating, byte[] raw, uint flags, ulong qpc, ref bool havePosition) {
+    int bytesPerSample=wave.bits/8,frames=raw.Length/wave.blockAlign;
+    float[] mono=new float[frames];
+    for(int i=0;i<frames;++i) {
+      double sum=0;
+      for(int c=0;c<wave.channels;++c) {
+        int p=i*wave.blockAlign+c*bytesPerSample; double v;
+        if(floating) v=BitConverter.ToSingle(raw,p);
+        else if(wave.bits==16) v=BitConverter.ToInt16(raw,p)/32768.0;
+        else if(wave.bits==24) { int n=raw[p]|(raw[p+1]<<8)|(raw[p+2]<<16); if((n&0x800000)!=0) n|=unchecked((int)0xff000000); v=n/8388608.0; }
+        else v=BitConverter.ToInt32(raw,p)/2147483648.0;
+        sum+=Double.IsNaN(v)||Double.IsInfinity(v)?0:v;
+      }
+      mono[i]=(float)Math.Max(-1,Math.Min(1,sum/wave.channels));
+    }
+    // The first discontinuity has no previous captured audio to lose.
+    if(!havePosition)flags&=~1u;
+    havePosition=true;
+    // QPC from GetBuffer is already in 100ns units, common to both processes.
+    output.Write(17+mono.Length*4); output.Write((byte)1); output.Write(wave.rate); output.Write(qpc/10000.0); output.Write(flags);
+    byte[] samples=new byte[mono.Length*4]; Buffer.BlockCopy(mono,0,samples,0,samples.Length); output.Write(samples); output.Flush();
+  }
   static int Main(string[] args) {
     Console.OutputEncoding=new UTF8Encoding(false);
     IMMDeviceEnumerator enumerator=null;
@@ -71,47 +94,30 @@ class WasapiCapture {
       if(checkOnly) { Console.WriteLine(json.Serialize(new {ok=true})); return; }
       var output=new BinaryWriter(Console.OpenStandardOutput()); var clock=Stopwatch.StartNew();
       Check(client.Start()); Status(new { type="started", source=source, rate=wave.rate, channels=wave.channels, bits=wave.bits, floating=floating });
-      long lastDefaultCheck=0; bool havePosition=false;
-      while(!stopping) {
-        if(clock.ElapsedMilliseconds-lastDefaultCheck>1000) {
+      long lastDefaultCheck=0; bool havePosition=false,stopped=false;
+      while(true) {
+        // Stop new capture first, then drain every already captured packet.
+        // stdout closes only after this tail has reached the parent process.
+        if(stopping && !stopped) { Check(client.Stop()); stopped=true; }
+        if(!stopped && clock.ElapsedMilliseconds-lastDefaultCheck>1000) {
           lastDefaultCheck=clock.ElapsedMilliseconds;
           uint state; Check(device.GetState(out state)); if(state!=1) throw new InvalidOperationException("Audio device disconnected; select a device and restart");
           if(requested.Length==0 && Default(e,flow)!=selected) throw new InvalidOperationException("Default audio device changed; restart capture");
         }
         uint packet; Check(capture.GetNextPacketSize(out packet));
-        while(packet>0 && !stopping) {
+        while(packet>0) {
           IntPtr data; uint frames,flags; ulong position,qpc; Check(capture.GetBuffer(out data,out frames,out flags,out position,out qpc));
           try {
             if(frames>192000) throw new InvalidOperationException("Invalid WASAPI packet length");
-            int bytesPerSample=wave.bits/8; byte[] raw=new byte[checked((int)frames*wave.blockAlign)]; if((flags&2)==0) Marshal.Copy(data,raw,0,raw.Length);
-            float[] mono=new float[frames];
-            for(int i=0;i<frames;++i) {
-              double sum=0;
-              for(int c=0;c<wave.channels;++c) {
-                int p=i*wave.blockAlign+c*bytesPerSample; double v;
-                if(floating) v=BitConverter.ToSingle(raw,p);
-                else if(wave.bits==16) v=BitConverter.ToInt16(raw,p)/32768.0;
-                else if(wave.bits==24) { int n=raw[p]|(raw[p+1]<<8)|(raw[p+2]<<16); if((n&0x800000)!=0) n|=unchecked((int)0xff000000); v=n/8388608.0; }
-                else v=BitConverter.ToInt32(raw,p)/2147483648.0;
-                sum+=Double.IsNaN(v)||Double.IsInfinity(v)?0:v;
-              }
-              mono[i]=(float)Math.Max(-1,Math.Min(1,sum/wave.channels));
-            }
-            // Preserve WASAPI's own glitch flags. In loopback, a device-position
-            // jump during no playback does not by itself establish lost speech.
-            // Windows can mark the first packet discontinuous: there is no prior
-            // captured packet to lose. Subsequent flags remain observable.
-            if(!havePosition)flags&=~1u;
-            havePosition=true;
-            // Length-prefixed packets: type(1), rate(u32), QPC ms(f64), flags(u32), mono float32.
-            output.Write(17+mono.Length*4); output.Write((byte)1); output.Write(wave.rate); output.Write(qpc/10000.0); output.Write(flags);
-            byte[] samples=new byte[mono.Length*4]; Buffer.BlockCopy(mono,0,samples,0,samples.Length); output.Write(samples); output.Flush();
+            byte[] raw=new byte[checked((int)frames*wave.blockAlign)]; if((flags&2)==0) Marshal.Copy(data,raw,0,raw.Length);
+            WritePacket(output,wave,floating,raw,flags,qpc,ref havePosition);
           } finally { Check(capture.ReleaseBuffer(frames)); }
           Check(capture.GetNextPacketSize(out packet));
         }
+        if(stopped) break;
         Thread.Sleep(5);
       }
-      Check(client.Stop()); Status(new {type="stopped",source=source});
+      Status(new {type="stopped",source=source});
     } finally { if(client!=null) try {client.Stop();} catch {} Release(capture); Release(client); Release(device); if(format!=IntPtr.Zero) Marshal.FreeCoTaskMem(format); }
   }
   [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant p);
