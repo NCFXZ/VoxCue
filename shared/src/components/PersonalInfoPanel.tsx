@@ -139,7 +139,7 @@ export function PersonalInfoPanel({
     state.info.background,
     state.info.jobDescription,
     state.info.customInstructions?.length,
-    state.selectedKnowledgeBaseId,
+    state.selectedKnowledgeBaseId && !selectedMissing,
     state.info.skills?.length,
   ].filter(Boolean).length;
   const renderEditor = () =>
@@ -241,26 +241,37 @@ export function PersonalInfoPanel({
         <header>
           <div>
             <h2>个人信息</h2>
-            <small>{completed}/5 已完善</small>
+            <small>{completed}/5 已添加</small>
           </div>
           <Button variant="ghost" size="icon" aria-label="关闭个人信息" onClick={onClose}>
             <X size={16} />
           </Button>
         </header>
         <div className="personal-panel-scroll">
-          <p className="panel-description">
-            资料保存在本机，必要内容用于聊天和本场面试。AI 更新会先展示提案，确认后保存。
-          </p>
           <div className="profile-overview" aria-label="资料概览">
             {[
               { label: '简历', ready: !!state.info.background },
               { label: '职位描述', ready: !!state.info.jobDescription },
-              { label: '自定义指令', ready: !!state.info.customInstructions?.length },
-              { label: '面试知识库', ready: !!state.selectedKnowledgeBaseId && !selectedMissing },
+              {
+                label: '自定义指令',
+                ready: !!state.info.customInstructions?.length,
+              },
+              {
+                label: '面试知识库',
+                ready: !!state.selectedKnowledgeBaseId && !selectedMissing,
+              },
               { label: '技能', ready: !!state.info.skills?.length },
             ].map((item) => (
-              <span key={item.label} className={item.ready ? 'is-ready' : ''}>
-                <Check size={13} />
+              <span
+                key={item.label}
+                className={item.ready ? 'is-ready' : ''}
+                aria-label={`${item.label}：${item.ready ? '已添加' : '未添加'}`}
+              >
+                {item.ready ? (
+                  <Check size={13} />
+                ) : (
+                  <span className="profile-empty-circle" aria-hidden="true" />
+                )}
                 {item.label}
               </span>
             ))}
@@ -358,7 +369,6 @@ export function PersonalInfoPanel({
                 <ChevronRight size={16} />
               </span>
             </summary>
-            <p className="section-help">仅由你选择，本场面试只检索这个知识库。AI 不能修改选择。</p>
             <ChoiceMenu
               label="面试知识库"
               disabled={!ragReady}

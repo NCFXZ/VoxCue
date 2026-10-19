@@ -12,13 +12,25 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
 const checks = [],
   errors = [];
+let glyphExtents;
 const verifyIcons = async (page, minimum) => {
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.effect?.getTiming().iterations === Infinity ||
+          animation.playState !== 'running',
+      ),
+  );
   const icons = await page.locator('svg').evaluateAll((elements) =>
     elements.map((element) => ({
       name: element.getAttribute('data-sf-symbol'),
       mask: !!element.querySelector('mask image'),
       color: getComputedStyle(element.querySelector('rect') || element).fill,
       width: element.getBoundingClientRect().width,
+      font: parseFloat(getComputedStyle(element).fontSize),
+      visible: element.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
     })),
   );
   assert.ok(
@@ -28,6 +40,21 @@ const verifyIcons = async (page, minimum) => {
   // The profile editor stays mounted inside a hidden panel; only visible SVGs
   // have nonzero bounds, while every mounted icon still needs a system symbol.
   assert.ok(icons.filter((item) => item.width > 0).length >= minimum, JSON.stringify(icons));
+  if (glyphExtents) {
+    const small = icons.filter(
+      (item) =>
+        item.visible &&
+        item.width > 0 &&
+        !['textformat.size.smaller', 'textformat.size.larger'].includes(item.name) &&
+        item.width * glyphExtents[item.name] < item.font * 0.98,
+    );
+    assert.deepEqual(
+      small,
+      [],
+      'Visible native artwork should match the adjacent font, allowing for transparent asset margins: ' +
+        JSON.stringify(small),
+    );
+  }
   await page.evaluate(async () => {
     await Promise.all(
       [...document.querySelectorAll('svg image')].map(async (element) => {
@@ -55,17 +82,38 @@ try {
       let opaque = 0;
       let top = 192;
       let bottom = -1;
+      let left = 192,
+        right = -1;
       for (let index = 3; index < bitmap.length; index += 4)
         if (bitmap[index] > 0) {
           opaque++;
           const y = Math.floor(index / 4 / 192);
           top = Math.min(top, y);
           bottom = Math.max(bottom, y);
+          const x = ((index - 3) / 4) % 192;
+          left = Math.min(left, x);
+          right = Math.max(right, x);
         }
-      return { key, size: image.getSize(), opaque, inkHeight: bottom - top + 1, bottom };
+      return {
+        key,
+        size: image.getSize(),
+        opaque,
+        inkWidth: right - left + 1,
+        inkHeight: bottom - top + 1,
+        bottom,
+      };
     });
   }, symbols);
   assert.equal(assets.length, Object.keys(symbols).length);
+  glyphExtents = Object.fromEntries(
+    assets.map((item) => [symbols[item.key], Math.max(item.inkWidth, item.inkHeight) / 192]),
+  );
+  assert.ok(
+    assets
+      .filter((item) => !item.key.startsWith('Font'))
+      .every((item) => Math.abs(Math.max(item.inkWidth, item.inkHeight) - 160) <= 2),
+    'Standard symbols normalize actual visible ink; the small/large font pair stays distinct.',
+  );
   assert.ok(
     assets.every(
       (item) =>
@@ -172,17 +220,8 @@ try {
   );
   checks.push('重置、刷新和软件更新分别使用不同的图形，更新设置入口与操作按钮一致');
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
-  for (const [label, key] of [
-    ['字体变大', 'FontIncrease'],
-    ['字体变小', 'FontDecrease'],
-  ])
-    assert.equal(
-      await settings
-        .getByRole('button', { name: label, exact: true })
-        .locator('svg')
-        .getAttribute('data-sf-symbol'),
-      symbols[key],
-    );
+  await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
+  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).waitFor();
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   checks.push('主界面/设置含菜单、导航、主题、输入和关闭图标均为 SF Symbols，浅深主题继承颜色');
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -194,17 +233,13 @@ try {
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).waitFor();
   await verifyIcons(floating, 10);
-  for (const [label, key] of [
-    ['字体变大', 'FontIncrease'],
-    ['字体变小', 'FontDecrease'],
-  ])
-    assert.equal(
-      await floating
-        .getByRole('button', { name: label, exact: true })
-        .locator('svg')
-        .getAttribute('data-sf-symbol'),
-      symbols[key],
-    );
+  assert.equal(
+    await floating
+      .getByRole('button', { name: '面试设置', exact: true })
+      .locator('svg')
+      .getAttribute('data-sf-symbol'),
+    symbols.Settings,
+  );
   assert.equal(
     await floating
       .locator('.resize-right svg')

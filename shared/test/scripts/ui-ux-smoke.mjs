@@ -232,7 +232,10 @@ try {
   });
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
-  await page.getByText('账户已授权 · 模型不可用', { exact: true }).waitFor();
+  await page
+    .locator('.preparation-workspace')
+    .getByRole('button', { name: '重新加载模型', exact: true })
+    .waitFor();
   await app.evaluate(() => {
     globalThis.failModels = false;
   });
@@ -240,7 +243,11 @@ try {
     .locator('.preparation-workspace')
     .getByRole('button', { name: '重新加载模型', exact: true })
     .click();
-  await page.getByText('ChatGPT 可用', { exact: true }).waitFor();
+  await page
+    .locator('.preparation-workspace')
+    .getByRole('button', { name: '重新加载模型', exact: true })
+    .waitFor({ state: 'hidden' });
+  assert.equal(await page.getByText('ChatGPT 可用', { exact: true }).count(), 0);
   await app.evaluate(() => {
     globalThis.failNext = true;
   });
@@ -410,8 +417,16 @@ try {
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
-  await page.getByRole('button', { name: '前往面试设置', exact: true }).click();
+  const startDialog = page.getByRole('dialog', { name: '开始面试', exact: true });
+  assert.equal(
+    await startDialog.getByRole('button', { name: '前往面试设置', exact: true }).count(),
+    0,
+  );
+  await startDialog.getByRole('button', { name: '取消', exact: true }).click();
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  await dialog.getByRole('button', { name: '面试设置', exact: true }).click();
   assert.equal(
     await dialog
       .getByRole('button', { name: '面试设置', exact: true })
@@ -421,6 +436,7 @@ try {
   await page.getByRole('button', { name: '麦克风设备', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '不使用麦克风', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await page.getByRole('button', { name: '开始面试', exact: true }).click();
   await page.getByRole('dialog', { name: '开始面试', exact: true }).waitFor();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -438,7 +454,7 @@ try {
   await floating.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#008c95',
   );
-  await floating.getByRole('status').filter({ hasText: '语音模型已就绪' }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   assert.equal(await floating.locator('.floating-toolbar [role="status"]').count(), 0);
   assert.equal(await floating.getByLabel('音频输入状态', { exact: true }).count(), 0);
   await assert.rejects(

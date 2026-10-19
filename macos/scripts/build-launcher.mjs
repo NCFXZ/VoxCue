@@ -4,11 +4,13 @@ import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import { prepareRuntime } from './prepare-runtime.mjs';
+import { loadDevelopmentSigning, signLocalCode, verifyLocalApp } from './development-signing.mjs';
 if (path.resolve(process.cwd()) !== workspace.platformRoot)
   throw Error('Run from the macos installation.');
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required.');
 await prepareRuntime();
+const signing = await loadDevelopmentSigning();
 // Build a fresh bundle so Finder metadata on the existing launcher cannot invalidate signing.
 const stage = await mkdtemp(path.join(os.tmpdir(), 'voxcue-launcher-build-'));
 try {
@@ -39,7 +41,7 @@ try {
   <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>NSMicrophoneUsageDescription</key><string>VoxCue 在本机转写麦克风，不保存或上传音频。</string>
   <key>NSAudioCaptureUsageDescription</key><string>VoxCue 在本机转写系统音频，不保存或上传音频。</string>
-  <key>NSScreenCaptureUsageDescription</key><string>VoxCue 仅在你手动截图或开启附截图后捕获当前屏幕，用于回答当次问题，不持续录屏。</string>
+  <key>NSScreenCaptureUsageDescription</key><string>VoxCue 仅在你点击截图按钮时捕获当前屏幕，图像暂存，点击发送后才用于回答，不持续录屏。</string>
   </dict></plist>\n`,
   );
   run('/usr/bin/xcrun', [
@@ -56,8 +58,8 @@ try {
     '-o',
     path.join(contents, 'MacOS/VoxCue'),
   ]);
-  run('/usr/bin/codesign', ['--force', '--sign', '-', bundle]);
-  run('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);
+  signLocalCode(bundle, signing, 'com.voxcue.launcher');
+  verifyLocalApp(bundle, signing, 'com.voxcue.launcher');
   const target = path.resolve('VoxCue.app');
   const previous = path.join(stage, 'previous.app');
   const existing = await lstat(target).catch((error) => {
@@ -85,14 +87,13 @@ try {
     for (let attempt = 0; ; attempt++) {
       const metadata = spawnSync('/usr/bin/xattr', ['-d', 'com.apple.FinderInfo', target]);
       if (metadata.error) throw metadata.error;
-      const verification = spawnSync(
-        '/usr/bin/codesign',
-        ['--verify', '--deep', '--strict', target],
-        { encoding: 'utf8' },
-      );
-      if (!verification.error && verification.status === 0) break;
-      if (attempt === 4 || verification.error)
-        throw verification.error ?? Error(verification.stderr);
+      try {
+        verifyLocalApp(target, signing, 'com.voxcue.launcher');
+        break;
+      } catch (error) {
+        if (attempt === 4 || !/resource fork|Finder information|detritus/.test(error.message))
+          throw error;
+      }
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   } catch (error) {

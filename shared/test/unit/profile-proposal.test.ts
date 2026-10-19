@@ -6,6 +6,8 @@ import {
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
 import type { UsageLedger } from '../../../shared/electron/backend/chat/usage';
 import { validateChanges } from '../../../shared/electron/contracts/profile';
+import { validateRequest } from '../../../shared/electron/backend/chat/validation';
+import { verifySkillProposal } from '../../../shared/electron/backend/chat/proposal';
 const base = {
   name: '旧姓名',
   role: '开发工程师',
@@ -15,6 +17,94 @@ const base = {
 const changes = { name: '新姓名', jobDescription: '新的 JD', background: null };
 const answer = '**已整理**，请确认。\n```python\nprint("你好")\n```';
 describe('资料提案协议', () => {
+  it.each([
+    { background: '', jobDescription: '' },
+    { background: '已确认简历', jobDescription: '' },
+    { background: '', jobDescription: '已确认JD' },
+  ])('后台仅对当前明确主题放行缺摘要请求，不能借历史或附件放行：%j', (summaries) => {
+    const request = {
+      id: 'topic',
+      modelId: 'synthetic',
+      webSearch: true,
+      instructions: '',
+      profile: { ...base, ...summaries },
+      profileTask: 'skills' as const,
+      turns: [{ role: 'user' as const, content: '请新增Kafka技能' }],
+    };
+    expect(validateRequest(request)).toEqual(request);
+    for (const prompt of [
+      '请生成技能',
+      '请生成一套完整的面试技能',
+      '不要生成Kafka技能',
+      '请解释Kafka',
+    ]) {
+      expect(() =>
+        validateRequest({
+          ...request,
+          turns: [
+            request.turns[0],
+            {
+              role: 'user',
+              content: prompt,
+              files: [{ name: 'topic.txt', bytes: new TextEncoder().encode('请新增Kafka技能') }],
+            },
+          ],
+        }),
+      ).toThrow('请求无效');
+    }
+    expect(() => validateRequest({ ...request, webSearch: false })).toThrow('请求无效');
+    expect(() => validateRequest({ ...request, turns: [{ role: 'user', content: 123 }] })).toThrow(
+      '请求无效',
+    );
+  });
+  it('指定主题仍须本次真实搜索和逐项来源匹配，整套条件与仅删除规则保留', () => {
+    const source = { title: '合成来源', url: 'https://example.com/kafka' };
+    const skill = { id: 'kafka', title: 'Kafka', content: '合成知识', sources: [source] };
+    const request = {
+      id: 'topic',
+      modelId: 'synthetic',
+      webSearch: true,
+      instructions: '',
+      profile: { ...base, background: '', jobDescription: '', skills: [skill] },
+      turns: [{ role: 'user' as const, content: '请改写Kafka技能' }],
+    };
+    const next = () => ({ skills: [{ ...skill, content: '本次检索后的内容' }] });
+    const sources = new Map([[source.url, source]]);
+    expect(verifySkillProposal(request, next(), sources, true)).toBeUndefined();
+    expect(() => verifySkillProposal(request, next(), sources, false)).toThrow('真实联网');
+    expect(() => verifySkillProposal(request, next(), new Map(), true)).toThrow('真实联网');
+    expect(() =>
+      verifySkillProposal(
+        request,
+        {
+          skills: [
+            {
+              ...next().skills[0],
+              sources: [{ ...source, url: 'https://example.com/unreturned' }],
+            },
+          ],
+        },
+        sources,
+        true,
+      ),
+    ).toThrow('真实检索来源');
+    expect(() =>
+      verifySkillProposal(
+        { ...request, turns: [{ role: 'user', content: '生成技能' }] },
+        next(),
+        sources,
+        true,
+      ),
+    ).toThrow('先确认');
+    expect(
+      verifySkillProposal(
+        { ...request, webSearch: false, turns: [{ role: 'user', content: '删除Kafka技能' }] },
+        { skills: [] },
+        new Map(),
+        false,
+      ),
+    ).toBeUndefined();
+  });
   it('资料与技能逐字预览正确解码转义，仅完整提案可通过最终校验', () => {
     const stream = new ProfileAnswerStream();
     stream.append('{"answer":"已整理","changes":{"background":"第一行\\n中文\\u4f');
@@ -151,10 +241,10 @@ describe('附件聊天提案原生链路', () => {
         const body = JSON.parse(options!.body as string);
         expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });
         expect(body.instructions).toContain(profileInstructions);
-        expect(body.instructions).toContain('不因上传附件就自动修改个人资料');
-        expect(body.instructions).toContain('不添加联网状态、检索过程或来源核验说明');
-        expect(body.instructions).toContain('优先采用官方文档、标准和可靠的一手技术资料');
-        expect(body.instructions).toContain('不同资料存在分歧时说明条件');
+        expect(body.instructions).toContain('上传附件本身不代表要求修改资料');
+        expect(body.instructions).toContain('不写联网状态、检索过程或来源核验说明');
+        expect(body.instructions).toContain('优先采用官方文档、标准和可靠的一手资料');
+        expect(body.instructions).toContain('资料有分歧时说明条件');
         expect(body.instructions).not.toMatch(/120–220|约80字|主动询问是否需要联网/);
         expect(body.input[0].content[1].text).toContain('用户附件内容');
         expect(body.tools).toEqual([{ type: 'web_search' }]);

@@ -20,7 +20,7 @@ KnowledgeService 每次查询执行既有串行检索，不再持有精确查询
 
 主题仅设置 VoxCue 的 nativeTheme.themeSource。面试使用 normal 置顶，显示/恢复/意外关闭置顶时重用共享 pinInterview，不定时聚焦。空白穿透使用 setIgnoreMouseEvents 的 forward，交互命中与按下/拖动锁定继续共用。主窗口隐藏并跳过任务栏，浮窗自身跳过任务栏；结束后在无新面试时恢复主窗口任务栏入口与源 ICO，不修改用户固定项。Renderer 意外退出沿用关闭释放流程并恢复主窗口。
 
-Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，截图不落盘、不进 Renderer/历史。
+Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，截图不落盘或进入历史，Renderer只获得输入框缩略图和不透明ID。
 
 紧凑窗口的控制层在内容之后生成 no-drag 排除区，按钮本身也明确 no-drag，防止后生成的页面拖动区覆盖。Windows 浮窗移动端口以手势起始尺寸 setBounds，并补偿分数 DPI 的尺寸回读；原生像素网格决定坐标，静止鼠标不重复发原生移动。Mac 未实现此可选端口时保持原 setPosition 路径。CSS 中前缀滤镜先于标准滤镜，避免压缩后丢失有效标准声明。
 
@@ -70,15 +70,15 @@ App 在登录/主窗口启动及主题偏好切换时，按 presentation.nativeT
 
 shared/src/frostedAppearance 仅为 Renderer 外观偏好，不调用原生材质或系统设置。设置使用原生 range 输入配合圆形滑块和连续填充轨道，范围 0–100、step=any，默认 50。v2 本机数值需为有限且在范围内的 JSON number；损坏值回退 50，旧 v1 四档只读映射为 0/25/50/100，不删除旧键。保存失败在界面提示。
 
-WindowContent 在主/登录/面试各窗口挂载同一个偏好订阅，同窗口自定义事件与跨窗口 storage 事件只读应用 CSS 变量，不回写循环。主侧栏按原滑杆 0–100 插值；总比例 scale=value/100，浮窗面板、工具栏和模糊从原曲线的 60×scale 取值，阅读/输入底色从 30×scale 取值。滑杆 100 对应背景/阅读层 60/30，50 对应 30/15，不再在 60 后停滞。拉满时面板浅/深不透明度 0.632/0.692、工具栏 0.768/0.804、阅读/输入 0.812/0.856、附加模糊 19.2px。主侧栏高透明度仅调整主题文字颜色，浮窗不响应该字色增强；文字阴影、细描边和图标 drop-shadow 全部撤除。60/30 为相对效果位置，不等于原生窗口整体透光率；辅助功能时各窗口均回退不透明并关闭背景滤镜。
+WindowContent 在主/登录/面试各窗口挂载同一个偏好订阅，同窗口自定义事件与跨窗口 storage 事件只读应用 CSS 变量，不回写循环。主侧栏按常规滑杆 0–100 插值；面试背景使用独立本机偏好与滑块，总比例 scale=interviewValue/100，主设置预览与实际浮窗共用分层表面。frostedProfiles保存原始曲线，浮窗面板、工具栏和模糊从原曲线的 60×scale 取值，阅读/输入底色从 30×scale 取值。滑杆 100 对应背景/阅读层 60/30，50 对应 30/15，不再在 60 后停滞。拉满时面板浅/深不透明度 0.632/0.692、工具栏 0.768/0.804、阅读/输入 0.812/0.856、附加模糊 19.2px。主侧栏高透明度仅调整主题文字颜色，浮窗不响应该字色增强；文字阴影、细描边和图标 drop-shadow 全部撤除。60/30 为相对效果位置，不等于原生窗口整体透光率；辅助功能时各窗口均回退不透明并关闭背景滤镜。
 
 滑杆不改变原生材质种类或窗口整体 alpha。Windows 已通过本机展示适配器按系统支持情况开启 frosted-ui，复用同一映射、设置组件和存储格式。
 
 ## Mac 界面图标
 
-界面继续使用 shared/src/components/icons 的统一命名与尺寸契约。Windows 默认解析原 Fluent React 实现；Mac 的 Vite 插件只把解析到该精确入口的相对导入映射至 macos/src/icons.tsx，不修改业务组件或判断运行时平台，构建拒绝任何 Fluent UI 模块进入 Mac Renderer。Mac renderer 目录加入本平台类型与架构检查，适用与共享 Renderer 相同的原生/后台访问禁令。
+界面继续使用 shared/src/components/icons 的统一命名与随文字缩放的尺寸契约。Windows 默认解析原 Fluent React 实现；Mac 的 Vite 插件只把解析到该精确入口的相对导入映射至 macos/src/icons.tsx，不修改业务组件或判断运行时平台，构建拒绝任何 Fluent UI 模块进入 Mac Renderer。Mac renderer 目录加入本平台类型与架构检查，适用与共享 Renderer 相同的原生/后台访问禁令。
 
-macos/src/symbols.json 对应全部 45 个接口。AppKit SymbolBuilder 通过 NSImage imageWithSystemSymbolName 和 regular/medium 配置生成本平台 192px 透明 PNG；React 用独立 SVG alpha mask 和 currentColor 显示，保留现有 SVG CSS、固定尺寸、旋转/镜像、键盘焦点及按钮无障碍名称。生成器缺失符号时明确失败，不混用图标。工具、系统版本指纹与资源仅在 Mac .tools/.cache/public，build:symbols 或 Mac Vite 构建/开发/测试入口准备；产品启动不编译或下载，不需 SF Symbols 应用、字体包或新增 npm 依赖。应用和 Provider Logo 原件保持。
+macos/src/symbols.json 对应全部公共语义图标接口。AppKit SymbolBuilder 通过 NSImage imageWithSystemSymbolName 和 regular/medium 配置生成本平台 192px 透明 PNG；React 用独立 SVG alpha mask 和 currentColor 显示，标准图形按真实透明像素边界拟合到20/24画布，字号小/大图形保留差异；shared CSS统一随字号缩放并保留独立大图标，旋转/镜像、键盘焦点及按钮无障碍名称。生成器缺失符号时明确失败，不混用图标。工具、系统版本指纹与资源仅在 Mac .tools/.cache/public，build:symbols 或 Mac Vite 构建/开发/测试入口准备；产品启动不编译或下载，不需 SF Symbols 应用、字体包或新增 npm 依赖。应用和 Provider Logo 原件保持。
 
 ## Mac 屏幕权限
 
@@ -90,13 +90,17 @@ InterviewAccessReport 的可选 screenCapture 与 AudioSource/checks 分开，�
 
 当前平台对另一平台目录只读，覆盖代码、配置、依赖、图标、生成结果及同步/格式化/清理脚本。共享变更保持另一平台契约，待办由其本机同步。sync-platform-manifests 只生成根与当前平台配置；根构建/格式化先检查本平台配置，不能调用旧的跨平台写入命令。
 
-Electron TypeScript 入口只含 shared/electron 与本平台 electron。平台策略通过白名单目录动态加载；main 根据所选策略的 speechProcess 路径装配同目录 access/capture，路径不来自 Renderer/IPC。原生控制器和共用 Worker 边界保持；架构检查禁止 shared 静态导入平台实现，防止 TypeScript 自动把另一平台加入输出。build-electron 在本平台缓存暂存编译、拒绝异平台输出，核对后替换本平台生成目录；实际 Mac 启动回归还检查 require.cache 没有 Windows 模块。
+Electron TypeScript 入口只含 shared/electron 与本平台 electron。平台策略通过白名单目录动态加载；main 根据所选策略的 speechProcess 路径装配同目录 access/capture，路径不来自 Renderer/IPC。原生控制器和共用 Worker 边界保持；架构检查禁止 shared 静态导入平台实现，防止 TypeScript 自动把另一平台加入输出。build-electron 在系统临时目录编译、拒绝异平台输出，核对后原地更新本平台受管文件并保留输出目录身份；写入失败使用临时备份回滚，同输出由进程锁串行保护；实际 Mac 启动回归还检查 require.cache 没有 Windows 模块。
 
 check:workspace 增加项目文件与生成目录检查。厂商依赖内部的跨平台资料、恢复档案和受保护私有历史资料保留，不手工拆删。Windows 旧配置与 dist-electron/macos 本轮只报告，留待 Windows 本机 sync:workspace、build。Mac Dock/启动器取 macos/public 的带透明边距衍生图，原件/Windows ICO 保持。
 
 ## 2026-10-17 Mac 原生音频与窗口增量
 
+共用SpeechCoordinator另管理audio-test资源归属：主窗口经dictation的test/test-stop调用传递固定音源与测试令牌，后台10秒期限，事件路由仅状态/电平，测试转写不外传。显式interview:reconnect-audio仅面试主frame可调用，只改变音源/设备，保留系统来源，成功后更新confirmed.options；当前模型/资料锁定不变。取消、停止、结束与迟到重连均保护已有会话。Renderer的自动提交状态与取消本次沿用原2200ms时序，取消不改原始转写和手动草稿。
+
 macos/electron/speech 适配 Core Audio 助手，windows/electron/speech 继续适配 WASAPI；原队列/ASR Worker/冲刷控制器抽至 shared/electron/backend/speech/controller，通过小型 CaptureAdapter 注入设备枚举和采集。业务/IPC/Renderer 不导入原生助手或推理。Mac 的 drainBeforeRetire 先排空尾包，Windows 默认原退休顺序不变。主进程按平台装配开场权限检查和既有 SpeechHost，未复制业务。
+
+Mac适配器通过可信preprocessorFile向同一Worker装配echoCancellation，路径不来自Renderer/IPC；准备握手完成后才开始采集。双音源时，以所选输出设备所有应用的混音作为WebRTC AEC3参考，仅处理麦克风后送入原ASR；单音源原路保留。原生共同单调时钟与独立转写墙钟分别传递；48kHz/10ms帧、80ms等待、有界参考、缺失旁路和滤波尾段冲刷在Mac预处理器内完成，间断重置两个ASR通道。运行时错误显式停止。Mac专属固定WASM依赖随应用复制，不改变Windows依赖/处理，也不更改系统设备或音量。
 
 macos/native/AudioCapture.mm 使用输出设备专属私有 tap 与独立 HAL 麦克风，使用既有有界 PCM 协议，无视频/音频落盘。原生无锁有界队列、格式/设备/默认路由变化检查及异常显式失败；系统权限由短时零采样启动请求，不假借 screen 状态。Mac 开发宿主、用途说明、ad-hoc 签名及双击启动器均局部生成，不修改厂商 node_modules、用户资料或全局应用。
 
@@ -139,6 +143,8 @@ Electron 的 [窗口保护接口](https://www.electronjs.org/docs/latest/api/bro
 对抗测试修复补充：准备聊天所有路由同时校验主窗口和主 frame；取消先退休原生请求槽，后续旧事件/结果均丢弃，主窗口重载也执行取消，与恢复为已停止的快照一致。HTTP 非成功正文独立执行取消、空闲计时与64 KiB上限。Renderer 的 storedValues 仅为本地数据的纯校验；聊天恢复按允许字段构造状态，历史嵌套损坏保留原始存储并显示错误，读取不执行迁移或删除。pnpm overrides 仅去除未调用的 LanceDB 可选提供器及 Mammoth CLI 解析依赖；打包遵循相同排除设置，实际文本 Embedder、DOCX 解析和语音路径不变。
 
 ## ChatGPT 登录与模型服务
+
+ChatGPTAuthService的本地HTTP回调页由backend/auth/callbackPage纯静态模板生成，main注入共用PNG品牌资源；开发从shared/public读取，安装版从dist读取，不依赖平台原生ICO或外网。页面适配浅深色/窄屏，固定文案区分收到/无效/已使用/不存在，收到授权仅提示返回应用继续验证。请求参数与账户、授权码、令牌不进入HTML；无脚本、表单或外部字体/资源，CSP仅放行样式SHA-256及data图片，响应no-store/no-referrer/nosniff。Host/方法/路径/state/PKCE、回调一次消费与后续身份验证/凭据写入保持原流程。
 
 只保留 ChatGPT OAuth，main 直接装配 ChatGPTAuthService 与 ChatGPTService，复用 AIChatService、RAG 和标题队列。GitHub SDK、独立运行时、登录 IPC、服务选择文件读写和路由已移除；不读取或删除旧服务身份、凭据或用户历史。旧回复的公开提供商元数据作为历史数据继续由通用 ModelProvider 展示。
 
@@ -228,9 +234,9 @@ FloatingInterview在每个回答前直接展示已提交问题气泡；全软件
 
 floating-notices位于面板下方独立预留区域，显示“此窗口未隐藏”或异常时不挤压/移动面板，长提示在此区域内滚动。interview store以speechWarnings按音源保存间断提示，同源健康activity或新有效segment清除，discontinuity终稿不视作恢复；speechError与回答error分开，running只清除语音错误。截图保护提示依据既有主进程返回状态显示，开启后消失，没有扩大保护能力或迁移数据。开场只读确认的知识库独占一行，音频设备与模型/effort分别成对并排。
 
-面试回答输入区新增默认关闭的“附截图”，手动/自动提交问题时每次获取当前屏幕新截图；发送按钮前的屏幕截取按钮独立提交仅截图请求，并保留输入草稿和问题缓冲。公开InterviewAnswerRequest以screenshot='attach'/'only'区分，only分支禁止question；IPC继续校验面试主frame、本场模型/effort、字段白名单，不接受Renderer图片、路径或屏幕源ID。only请求只包含固定解题指令和当次图片，不带转写、对话历史、个人信息或RAG。失败/停止/重试保留请求模式，停止按钮阻止默认表单动作，避免控制立即变成发送按钮后误提交草稿。
+面试输入区仅保留显式截图按钮，interview:screenshot受控IPC提供capture/remove/clear三种操作，校验面试主frame及字段白名单。主进程暂存最多五张原图，捕获串行并可取消；Renderer只获取不透明ID和长边最多240px的JPEG缩略图，输入框展示可移除缩略图及数量/5。InterviewAnswerRequest只接收question及screenshotIds，不接受Renderer图片、路径、命令或屏幕源ID；ID须唯一、属于本场暂存且最多五个。发送不再次捕获，只有手动操作提交图片，自动回答仅文字且不消费待发送图片。无文字的图片请求只使用固定解题指令与原图，不附转写、对话历史、个人资料或RAG。
 
-main注入screenshot.ts原生捕获适配器，按面试浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。图像长边最多3840像素、编码最多8 MiB，优先PNG，过大转JPEG；Mac屏幕权限未获准明确失败，未宣称Mac真机验收。捕获前后检查AbortSignal和窗口销毁，取消后不进入Provider。截图只在主进程本次请求内存中作为ChatTurn.files传给既有 ChatGPT input_image 链路；不经Renderer、剪贴板或磁盘，不存入历史。Answer仅增加可选screenshot模式元数据，旧存储键和无此字段的记录兼容。架构检查禁止截图适配器访问磁盘、账户、AI业务，也禁止application/backend直接导入该原生实现。沿用既有截图保护，不临时改变保护或隐藏窗口。
+main注入screenshot.ts原生捕获适配器，按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应原图，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空暂存并取消在途捕获，迟到图像丢弃。原图与预览不经剪贴板或磁盘，也不存入历史；Answer仅保留旧有screenshot模式元数据，旧存储键及历史兼容。架构检查继续禁止截图适配器访问磁盘、账户或AI业务，以及application/backend直接导入原生捕获实现。沿用既有截图保护，不临时改变保护或隐藏窗口。
 
 聊天与面试共用ResponseProgress，初始等待统一展示新版“正在思考”文字动画，移除旧圆点。Local RAG将实际检索标记为knowledge/thinking并以同一ID更新开始/完成，不能当作网页读取；真实web_search/open_page仍使用实际服务活动。公开思考、活动与用时位于response-progress底部分割线上方，正文之后自动折叠且可重新展开；不显示私有推理，不伪造实际工具步骤。面试复用已有公开摘要/活动字段，不改变历史数据格式。
 

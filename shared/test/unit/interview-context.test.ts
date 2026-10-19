@@ -40,7 +40,7 @@ it('保留问题、追问链与实际回答，时间排序、终稿去重、临�
   ]);
   expect(next.timeline.find((row: any) => row.kind === 'ai_suggestion').questionId).toBe('q1');
   expect(JSON.stringify(next)).not.toMatch(/临时猜测|不完整的型号|重复不能覆盖/);
-  expect(interviewInstructions).toContain('以已确认资料和面试者实际发言为准');
+  expect(interviewInstructions).toContain('以已确认资料和面试者本场实际发言为准');
   const chain = timeline(context, 'q3').timeline.filter(
     (row: any) => row.kind === 'submitted_question',
   );

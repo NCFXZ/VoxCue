@@ -61,7 +61,9 @@ export const useHistory = create<HistoryState>((set) => ({
         ...record,
         ...(event.title
           ? {
-              title: event.title,
+              title: record.knowledgeBaseName
+                ? `「${record.knowledgeBaseName}」${event.title}`
+                : event.title,
               titleSource: 'generated' as const,
               titleStatus: 'ready' as const,
               titleError: undefined,

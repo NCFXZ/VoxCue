@@ -5,8 +5,8 @@
 #include <cstdio>
 #include <initializer_list>
 
-// Deterministic Mac-only derivative. Preserve the supplied artwork and its alpha;
-// use transparent margins instead of changing its shape or adding a background.
+// Scale only: the latest supplied PNG owns the artwork, corner shape and alpha.
+// Mac adds transparent outer margins without redrawing or clipping the source.
 static bool png(CGImageRef source, size_t side, NSString *file) {
     CGColorSpaceRef color = CGColorSpaceCreateDeviceRGB();
     CGContextRef context = CGBitmapContextCreate(nullptr, side, side, 8, side * 4, color,
@@ -43,7 +43,7 @@ int main(int argc, const char *argv[]) {
                 ok = png(image, size * scale, [@(argv[3]) stringByAppendingPathComponent:name]) && ok;
             }
         CGImageRelease(image);
-        if (ok) puts("Mac icon: 1024 canvas, 832 artwork, 96 transparent inset per side.");
+        if (ok) puts("Mac icon: supplied contour and alpha preserved, 832 artwork on 1024 canvas, 96 transparent inset per side.");
         return ok ? 0 : 1;
     }
 }

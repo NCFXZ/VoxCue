@@ -5,6 +5,11 @@ import {
   saveFrostedTransparency,
   subscribeFrostedTransparency,
 } from '../../../shared/src/frostedAppearance';
+import {
+  readInterviewTransparency,
+  saveInterviewTransparency,
+  subscribeInterviewTransparency,
+} from '../../../shared/src/interviewAppearance';
 const key = 'voxcue-frosted-transparency-v2';
 const values = new Map<string, string>();
 const properties = new Map<string, string>();
@@ -81,17 +86,49 @@ it('非法值与存储拒绝均明确失败，保留旧值，不广播虚假的�
   expect(() => saveFrostedTransparency(60)).toThrow('denied');
   expect(changed).not.toHaveBeenCalled();
 });
-it('关闭为不透明，滑杆最大时背景与阅读层保持 60/30 映射，不产生非有限样式值', () => {
-  saveFrostedTransparency(0);
+it('面试独立保存与同步，保留旧版背景60/阅读30的曲线和不透明下限', () => {
+  expect(readInterviewTransparency()).toBe(20);
+  const changed = vi.fn();
+  const unsubscribe = subscribeInterviewTransparency(changed);
+  saveInterviewTransparency(0);
   expect(properties.get('--frosted-panel-light')).toBe('1');
-  expect(properties.get('--frosted-reading-light')).toBe('1');
   saveFrostedTransparency(100);
+  expect(properties.get('--frosted-panel-light')).toBe('1');
+  expect(readInterviewTransparency()).toBe(0);
+  saveInterviewTransparency(100);
   expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.632);
+  expect(Number(properties.get('--frosted-panel-dark'))).toBeCloseTo(0.692);
+  expect(Number(properties.get('--frosted-chrome-light'))).toBeCloseTo(0.768);
+  expect(Number(properties.get('--frosted-chrome-dark'))).toBeCloseTo(0.804);
   expect(Number(properties.get('--frosted-reading-light'))).toBeCloseTo(0.812);
-  expect(properties.get('--frosted-main-filter')).toBe('none');
+  expect(Number(properties.get('--frosted-reading-dark'))).toBeCloseTo(0.856);
+  expect(properties.get('--frosted-panel-filter')).toBe('blur(19.2px)');
+  expect(readFrostedTransparency()).toBe(100);
+  saveFrostedTransparency(0);
+  expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.632);
+  expect(changed).toHaveBeenCalledTimes(2);
+  values.set('voxcue-interview-background-transparency-v1', '30');
+  events.dispatchEvent(
+    Object.assign(new Event('storage'), { key: 'voxcue-interview-background-transparency-v1' }),
+  );
+  expect(changed).toHaveBeenLastCalledWith(30);
+  unsubscribe();
+  saveInterviewTransparency(50);
+  expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.888);
+  expect(Number(properties.get('--frosted-panel-dark'))).toBeCloseTo(0.916);
+  expect(Number(properties.get('--frosted-reading-light'))).toBeCloseTo(0.916);
+  expect(Number(properties.get('--frosted-reading-dark'))).toBeCloseTo(0.94);
+  expect(properties.get('--frosted-panel-filter')).toBe('blur(17.6px)');
   for (let value = 0; value <= 100; value += 0.5) {
-    values.set(key, JSON.stringify(value));
+    saveInterviewTransparency(value);
     applyFrostedAppearance();
     expect([...properties.values()].some((value) => /NaN|Infinity/.test(value))).toBe(false);
+  }
+  for (const value of [NaN, Infinity, -1, 101])
+    expect(() => saveInterviewTransparency(value)).toThrow();
+  for (const invalid of ['null', '"100"', '{}', '-1', '101', 'broken']) {
+    values.set('voxcue-interview-background-transparency-v1', invalid);
+    expect(readInterviewTransparency()).toBe(20);
+    expect(values.get('voxcue-interview-background-transparency-v1')).toBe(invalid);
   }
 });

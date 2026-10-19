@@ -1,4 +1,4 @@
-import { useId } from 'react';
+import { useId, type CSSProperties } from 'react';
 import symbols from './symbols.json';
 
 const masks = import.meta.glob('../public/sf-symbols/*.png', {
@@ -17,9 +17,12 @@ function icon(name: keyof typeof symbols) {
     return (
       <svg
         aria-hidden={true}
+        data-ui-icon={true}
         data-sf-symbol={symbols[name]}
         viewBox="0 0 24 24"
-        style={{ width: size, height: size, flexShrink: 0 }}
+        style={
+          { width: size, height: size, flexShrink: 0, '--icon-size': `${size}px` } as CSSProperties
+        }
       >
         <defs>
           <mask
@@ -64,6 +67,7 @@ export const PanelLeftOpen = icon('PanelLeftOpen');
 export const ArrowUpRight = icon('ArrowUpRight');
 export const ArrowUp = icon('ArrowUp');
 export const Check = icon('Check');
+export const Warning = icon('Warning');
 export const ChevronDown = icon('ChevronDown');
 export const CircleHelp = icon('CircleHelp');
 export const Copy = icon('Copy');

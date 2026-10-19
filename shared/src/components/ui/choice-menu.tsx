@@ -16,6 +16,7 @@ export function ChoiceMenu<T extends string>({
   className?: string;
   disabled?: boolean;
 }) {
+  const selectedLabel = options.find((option) => option.value === value)?.label;
   return (
     <DropdownMenu.Root>
       <DropdownMenu.Trigger asChild>
@@ -25,7 +26,7 @@ export function ChoiceMenu<T extends string>({
           aria-label={label}
           disabled={disabled}
         >
-          <span>{options.find((option) => option.value === value)?.label}</span>
+          <span title={selectedLabel}>{selectedLabel}</span>
           <ChevronDown size={14} />
         </button>
       </DropdownMenu.Trigger>

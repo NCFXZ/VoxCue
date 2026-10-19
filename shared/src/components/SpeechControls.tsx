@@ -1,16 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect } from 'react';
 import * as Menu from '@radix-ui/react-dropdown-menu';
 import { Button } from './ui/button';
-import { Check, ChevronDown, AudioLines, Volume2, Refresh } from './icons';
-import type {
-  AudioDevice,
-  AudioSource,
-  InterviewConfiguration,
-} from '../../electron/contracts/speech';
+import { Check, ChevronDown, AudioLines, Volume2 } from './icons';
+import type { AudioSource, InterviewConfiguration } from '../../electron/contracts/speech';
 import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
 import { effortLabels } from '../services/chatOptions';
-import { MicrophoneTest } from './MicrophoneTest';
 import { ScreenCaptureSettings } from './ScreenCaptureSettings';
+import { useAudioDevices } from './useAudioDevices';
 
 export function SpeechControls({
   value,
@@ -25,34 +21,11 @@ export function SpeechControls({
   models: ChatModel[];
   live: boolean;
 }) {
-  const [devices, setDevices] = useState<AudioDevice[]>([]);
-  const [error, setError] = useState('');
-  const [microphoneError, setMicrophoneError] = useState('');
-  const [devicesLoading, setDevicesLoading] = useState(true);
-  const [devicesLoaded, setDevicesLoaded] = useState(false);
+  const { devices, loading: devicesLoading, loaded: devicesLoaded, error } = useAudioDevices();
   const microphoneAvailable = devices.some(
     (d) =>
       d.source === 'microphone' && (!value.options.microphone || d.id === value.options.microphone),
   );
-  const refresh = () => {
-    setDevicesLoading(true);
-    void window.desktop
-      ?.speech({ op: 'devices' })
-      .then((r) => {
-        setDevices(r.devices ?? []);
-        setDevicesLoaded(true);
-        setMicrophoneError('');
-        setError('');
-      })
-      .catch(() => {
-        setDevicesLoaded(false);
-        setError('无法读取音频设备，请刷新设备列表。');
-      })
-      .finally(() => setDevicesLoading(false));
-  };
-  useEffect(() => {
-    refresh();
-  }, [value.mode]);
   const model = models.find((m) => m.id === value.modelId);
   const efforts = model?.reasoningEfforts ?? [];
   useEffect(() => {
@@ -101,7 +74,7 @@ export function SpeechControls({
             disabled={busy || disabled}
             aria-label={label}
           >
-            <span>{selectedLabel}</span>
+            <span title={selectedLabel}>{selectedLabel}</span>
             <ChevronDown size={12} />
           </Button>
         </Menu.Trigger>
@@ -154,17 +127,6 @@ export function SpeechControls({
         <section className="speech-settings-section" aria-label="音频设备">
           <div className="speech-section-heading">
             <h3>音频设备</h3>
-            <Button
-              type="button"
-              variant="ghost"
-              disabled={busy}
-              onClick={() => {
-                refresh();
-              }}
-            >
-              <Refresh size={16} />
-              刷新设备
-            </Button>
           </div>
           <div className="speech-device-grid">
             {(['system', 'microphone'] as AudioSource[]).map((source) => {
@@ -195,7 +157,6 @@ export function SpeechControls({
                         .map((d) => ({ id: d.id, label: d.name })),
                     ],
                     (device) => {
-                      if (microphone) setMicrophoneError('');
                       change({
                         options: {
                           ...value.options,
@@ -214,46 +175,30 @@ export function SpeechControls({
                     devicesLoading
                       ? '正在读取设备…'
                       : microphone && enabled
-                        ? microphoneError
-                          ? '麦克风不可用，请检查设备或权限'
-                          : error
-                            ? '设备读取失败，请刷新'
-                            : devicesLoaded && !microphoneAvailable
-                              ? value.options.microphone
-                                ? '所选麦克风已不可用'
-                                : '未检测到麦克风'
-                              : undefined
+                        ? error
+                          ? '设备读取失败'
+                          : devicesLoaded && !microphoneAvailable
+                            ? value.options.microphone
+                              ? '所选麦克风已不可用'
+                              : '未检测到麦克风'
+                            : undefined
                         : undefined,
                   )}
-                  {microphone &&
-                    enabled &&
-                    (microphoneError || error || (devicesLoaded && !microphoneAvailable)) && (
-                      <small className="speech-device-error" role="alert">
-                        {microphoneError ||
-                          error ||
-                          '请连接麦克风并刷新设备，或选择“不使用麦克风”。'}
-                      </small>
-                    )}
+                  {microphone && enabled && (error || (devicesLoaded && !microphoneAvailable)) && (
+                    <small className="speech-device-error" role="alert">
+                      {error || '请连接麦克风，或选择“不使用麦克风”。'}
+                    </small>
+                  )}
                 </div>
               );
             })}
           </div>
         </section>
       }
-      <MicrophoneTest
-        device={value.options.microphone}
-        disabled={
-          busy ||
-          devicesLoading ||
-          !value.options.sources.includes('microphone') ||
-          (devicesLoaded && !microphoneAvailable)
-        }
-        onError={setMicrophoneError}
-      />
       <ScreenCaptureSettings disabled={busy} />
-      <section className="speech-settings-section speech-answer-settings" aria-label="回答设置">
+      <section className="speech-settings-section speech-answer-settings" aria-label="模型设置">
         <div className="speech-section-heading">
-          <h3>回答设置</h3>
+          <h3>模型设置</h3>
         </div>
         <div className="speech-setting-row">
           <span className="speech-setting-label">回答模型</span>

@@ -40,6 +40,13 @@ export function desktopResources(environment: ResourceEnvironment, platform: Des
     : path.join(sharedPath, 'local-models');
   return {
     icon: path.join(appPath, platform.iconFile),
+    // Browser branding always uses the shared PNG, including Windows whose
+    // native window icon is ICO. Vite copies this file into packaged dist/.
+    brandLogo: path.join(
+      packaged ? appPath : sharedPath,
+      packaged ? 'dist' : 'public',
+      'voxcue.png',
+    ),
     speechModels: path.join(modelRoot, 'speech'),
     ragModel: path.join(modelRoot, 'rag/multilingual-e5-small'),
     screenPermission: platform.screenPermissionFile

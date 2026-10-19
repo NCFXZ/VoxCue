@@ -14,6 +14,7 @@ export interface NativeCapture {
 }
 export interface CaptureAdapter {
   readonly drainBeforeRetire?: boolean;
+  readonly preprocessorFile?: string;
   devices(helper: string): Promise<AudioDevice[]>;
   create(
     helper: string,
@@ -56,11 +57,16 @@ export class SpeechController {
     );
     return result;
   }
-  private state(state: SpeechStatus['state'], error?: string) {
+  private state(
+    state: SpeechStatus['state'],
+    error?: string,
+    failureSource?: SpeechStatus['failureSource'],
+  ) {
     this.status = {
       state,
       model: speechModelName,
       ...(error ? { error } : {}),
+      ...(failureSource ? { failureSource } : {}),
     };
     this.emit({ type: 'status', status: this.status });
     return this.status;
@@ -95,13 +101,16 @@ export class SpeechController {
               inferenceMs: m.inferenceMs,
             });
         }
-        if (m.flushed) {
-          this.flushers.get(m.flushed)?.resolve();
-          this.flushers.delete(m.flushed);
+        const completed = m.flushed ?? m.prepared;
+        if (completed) {
+          this.flushers.get(completed)?.resolve();
+          this.flushers.delete(completed);
         }
         if (m.error) {
           clearTimeout(timer);
           reject(Error(m.error));
+          for (const pending of this.flushers.values()) pending.reject(Error(m.error));
+          this.flushers.clear();
           this.fail(m.error);
         }
       });
@@ -109,7 +118,7 @@ export class SpeechController {
         if (this.worker !== worker) return;
         clearTimeout(timer);
         reject(Error('语音识别进程异常，请检查模型后重新开始。'));
-        this.fail('语音识别进程异常，请重新开始。');
+        this.fail('语音识别进程异常，请重新开始。', 'model');
       });
       worker.on('exit', () => {
         if (this.worker !== worker) return;
@@ -121,12 +130,16 @@ export class SpeechController {
         for (const pending of this.flushers.values())
           pending.reject(Error('语音识别进程在尾段处理完成前退出，请重新开始。'));
         this.flushers.clear();
-        if (this.captures.size) this.fail('语音识别进程已退出，采集已停止。');
-        else if (flushing) this.state('error', '语音识别进程在尾段处理完成前退出，请重新开始。');
+        if (this.captures.size) this.fail('语音识别进程已退出，采集已停止。', 'model');
+        else if (flushing)
+          this.state('error', '语音识别进程在尾段处理完成前退出，请重新开始。', 'model');
       });
       worker.postMessage({
         op: 'init',
         directory: this.model,
+        ...(this.adapter.preprocessorFile
+          ? { preprocessorFile: this.adapter.preprocessorFile }
+          : {}),
       });
     });
     return this.ready;
@@ -137,6 +150,7 @@ export class SpeechController {
     rate: number,
     flags = 0,
     timestamp = Date.now(),
+    captureClock?: number,
   ) {
     if (flags & 1) {
       this.discontinuities++;
@@ -150,7 +164,7 @@ export class SpeechController {
         message: `${source === 'system' ? '系统音频' : '麦克风'}发生短暂间断，转写已继续；不完整片段不会自动用于回答。`,
       });
       if (gaps.length >= 5) {
-        this.fail('音频在十秒内连续中断五次，采集已停止；请检查设备或降低负载后重新开始。');
+        this.fail('音频在十秒内连续中断五次，采集已停止；请检查设备或降低负载后重新开始。', source);
         return;
       }
     }
@@ -179,19 +193,20 @@ export class SpeechController {
         samples,
         rate,
         timestamp,
+        ...(captureClock !== undefined ? { captureClock } : {}),
         sequence: ++this.sequence,
         ms,
       },
       [samples.buffer as ArrayBuffer],
     );
   }
-  private fail(message: string) {
+  private fail(message: string, failureSource: SpeechStatus['failureSource'] = 'service') {
     if (this.status.state === 'error') return;
-    this.state('error', message);
+    this.state('error', message, failureSource);
     void this.call({ op: 'stop' })
-      .then(() => this.state('error', message))
+      .then(() => this.state('error', message, failureSource))
       .catch(() => {
-        this.state('error', message);
+        this.state('error', message, failureSource);
         const worker = this.worker;
         this.worker = undefined;
         this.ready = undefined;
@@ -226,7 +241,7 @@ export class SpeechController {
         this.queued = 0;
         await worker?.terminate();
         const message = '音频采集未能正常停止，请重新开始。';
-        this.state('error', message);
+        this.state('error', message, 'service');
         throw Error(message);
       }
       if (this.worker && this.ready) {
@@ -273,11 +288,35 @@ export class SpeechController {
         throw Error('未发现' + (source === 'system' ? '播放' : '麦克风') + '设备。');
     }
     this.state('loading');
+    let startupFailure: SpeechStatus['failureSource'] = 'model';
     try {
       await this.load();
       this.checkStartup();
+      if (this.adapter.preprocessorFile) {
+        startupFailure = 'service';
+        const id = ++this.sequence;
+        await new Promise<void>((resolve, reject) => {
+          const timer = setTimeout(() => {
+            this.flushers.delete(id);
+            reject(Error('本地回声消除初始化超时，请重新开始。'));
+          }, 10000);
+          this.flushers.set(id, {
+            resolve: () => {
+              clearTimeout(timer);
+              resolve();
+            },
+            reject: (error) => {
+              clearTimeout(timer);
+              reject(error);
+            },
+          });
+          this.worker!.postMessage({ op: 'prepare', id, sources: call.options.sources });
+        });
+        this.checkStartup();
+      }
       const epoch = ++this.epoch;
       for (const source of call.options.sources) {
+        startupFailure = source;
         this.lastAudio.set(source, Date.now());
         const capture = this.adapter.create(
           this.helper,
@@ -298,10 +337,11 @@ export class SpeechController {
               p.rate,
               p.flags,
               p.flags & 4 ? Date.now() : anchor.wall + p.timestamp - anchor.native,
+              p.flags & 4 ? undefined : p.timestamp,
             );
           },
           (m) => {
-            if (epoch === this.epoch) this.fail(m);
+            if (epoch === this.epoch) this.fail(m, source);
           },
         );
         this.captures.set(source, capture);
@@ -339,7 +379,11 @@ export class SpeechController {
       this.worker = undefined;
       await Promise.allSettled(captures.map(async (capture) => capture.stop()));
       await old?.terminate();
-      return this.state('error', (error as Error).message);
+      return this.state(
+        'error',
+        (error as Error).message,
+        this.status.failureSource ?? startupFailure,
+      );
     }
   }
   async close() {

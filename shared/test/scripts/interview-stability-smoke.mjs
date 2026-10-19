@@ -74,10 +74,13 @@ try {
     floating.on('pageerror', (error) => errors.push(error.message));
     await floating.locator('.answer-text').first().waitFor();
     assert.equal(
-      await floating
-        .getByRole('button', { name: '发送题目时附当前截图', exact: true })
-        .getAttribute('aria-pressed'),
-      'false',
+      await floating.getByRole('button', { name: '发送题目时附当前截图', exact: true }).count(),
+      0,
+    );
+    assert.equal(await floating.locator('.floating-screenshot-preview').count(), 0);
+    assert.equal(
+      await floating.getByRole('button', { name: '截取图像', exact: true }).isEnabled(),
+      true,
     );
     if (process.platform === 'darwin')
       await nativeReady(({ app }) => !app.dock.isVisible(), 'Dock did not hide');

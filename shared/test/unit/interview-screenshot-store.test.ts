@@ -3,9 +3,22 @@ import { useInterview } from '../../../shared/src/stores/interview';
 import type { SpeechEvent } from '../../../shared/electron/contracts/speech';
 let emit: (event: SpeechEvent) => void;
 const answer = vi.fn();
+const screenshot = vi.fn();
+let captureCount = 0;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
+  captureCount = 0;
+  screenshot
+    .mockReset()
+    .mockImplementation(async (call) =>
+      call.op === 'capture'
+        ? {
+            ok: true,
+            screenshot: { id: 'shot-' + ++captureCount, preview: 'data:image/jpeg;base64,fixture' },
+          }
+        : { ok: true },
+    );
   answer.mockReset().mockResolvedValue({ ok: true, answerText: '回答', usage: null, sources: [] });
   vi.stubGlobal('window', {
     desktop: {
@@ -16,6 +29,7 @@ beforeEach(() => {
       },
       onChatEvent: () => () => {},
       interviewAnswer: answer,
+      interviewScreenshot: screenshot,
       interviewCancel: vi.fn(async () => {}),
     },
   });
@@ -32,11 +46,34 @@ afterEach(() => {
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });
-it('默认不截图，打开附截图后手动和自动问题都带捕获意图，关闭后恢复普通请求', async () => {
-  expect(useInterview.getState().attachScreenshot).toBe(false);
-  useInterview.getState().setAttachScreenshot(true);
-  await useInterview.getState().submitTranscript('手动题目');
-  expect(answer.mock.calls[0][0]).toMatchObject({ question: '手动题目', screenshot: 'attach' });
+it('截取只暂存、不消耗草稿或发送请求，手动发送包含原图片引用', async () => {
+  useInterview.setState({ draftQuestion: '未发送转写' });
+  await useInterview.getState().captureScreenshot();
+  expect(answer).not.toHaveBeenCalled();
+  expect(useInterview.getState().draftQuestion).toBe('未发送转写');
+  expect(useInterview.getState().screenshots).toHaveLength(1);
+  await useInterview.getState().submitTranscript('', true);
+  expect(answer.mock.calls[0][0]).toMatchObject({ screenshotIds: ['shot-1'] });
+  expect(answer.mock.calls[0][0]).not.toHaveProperty('question');
+  expect(useInterview.getState().screenshots).toHaveLength(0);
+  expect(useInterview.getState().draftQuestion).toBe('未发送转写');
+  expect(useInterview.getState().answers[0].screenshot).toBe('only');
+});
+it('限制五张，移除后可继续截取；手动问题带全部图像引用', async () => {
+  for (let i = 0; i < 6; i++) await useInterview.getState().captureScreenshot();
+  expect(useInterview.getState().screenshots).toHaveLength(5);
+  expect(captureCount).toBe(5);
+  await useInterview.getState().removeScreenshot('shot-2');
+  await useInterview.getState().captureScreenshot();
+  await useInterview.getState().submitTranscript('解释这些图', true);
+  expect(answer.mock.calls[0][0]).toMatchObject({
+    question: '解释这些图',
+    screenshotIds: ['shot-1', 'shot-3', 'shot-4', 'shot-5', 'shot-6'],
+  });
+  expect(useInterview.getState().screenshots).toHaveLength(0);
+});
+it('自动问题只发文字，不带走待发送截图，也不再次捕获', async () => {
+  await useInterview.getState().captureScreenshot();
   useInterview.getState().setAutoAnswer(true);
   emit({
     type: 'segment',
@@ -45,29 +82,55 @@ it('默认不截图，打开附截图后手动和自动问题都带捕获意图�
       source: 'system',
       text: '自动问题',
       final: true,
-      startMs: Date.now(),
-      endMs: Date.now() + 10,
+      startMs: 1,
+      endMs: 2,
       reason: 'silence',
     },
   });
   await vi.advanceTimersByTimeAsync(2300);
-  expect(answer.mock.calls[1][0]).toMatchObject({ question: '自动问题', screenshot: 'attach' });
-  useInterview.getState().setAttachScreenshot(false);
-  await useInterview.getState().submitTranscript('普通题目');
-  expect(answer.mock.calls[2][0]).not.toHaveProperty('screenshot');
+  expect(answer.mock.calls[0][0]).toMatchObject({ question: '自动问题' });
+  expect(answer.mock.calls[0][0]).not.toHaveProperty('screenshotIds');
+  expect(useInterview.getState().screenshots).toHaveLength(1);
+  expect(captureCount).toBe(1);
 });
-it('仅截图不带题目且不消耗转写草稿，生成中不能重复发送', async () => {
-  emit({
-    type: 'segment',
-    segment: {
-      id: 'draft',
-      source: 'system',
-      text: '未发送转写',
-      final: false,
-      startMs: 1,
-      endMs: 2,
-    },
+it('失败重试使用相同截图而不重新采集，移除后明确拒绝重试', async () => {
+  await useInterview.getState().captureScreenshot();
+  answer.mockResolvedValueOnce({ ok: false, error: { message: '模型失败' } });
+  await useInterview.getState().submitTranscript('带图问题', true);
+  const failed = useInterview.getState().answers.at(-1)!;
+  expect(useInterview.getState().screenshots).toHaveLength(1);
+  await useInterview.getState().retryAnswer(failed.id);
+  expect(answer.mock.calls[1][0]).toMatchObject({
+    question: '带图问题',
+    screenshotIds: ['shot-1'],
   });
+  expect(captureCount).toBe(1);
+  expect(useInterview.getState().screenshots).toHaveLength(0);
+  await useInterview.getState().retryAnswer(failed.id);
+  expect(answer).toHaveBeenCalledTimes(2);
+  expect(useInterview.getState().error).toContain('原截图已移除');
+});
+it('捕获串行，结束或重置丢弃迟到图像；截图不进入归档', async () => {
+  let finish!: (value: unknown) => void;
+  screenshot.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = useInterview.getState().captureScreenshot();
+  await useInterview.getState().captureScreenshot();
+  expect(useInterview.getState().capturingScreenshot).toBe(true);
+  useInterview.getState().reset();
+  finish({ ok: true, screenshot: { id: 'late', preview: 'data:image/png;base64,fixture' } });
+  await pending;
+  expect(useInterview.getState().screenshots).toHaveLength(0);
+  expect(useInterview.getState().capturingScreenshot).toBe(false);
+  expect(answer).not.toHaveBeenCalled();
+});
+
+it('停止保留待发送截图，重试仍使用原引用且不会重复捕获', async () => {
+  await useInterview.getState().captureScreenshot();
   let finish!: (value: unknown) => void;
   answer.mockImplementationOnce(
     () =>
@@ -75,34 +138,14 @@ it('仅截图不带题目且不消耗转写草稿，生成中不能重复发送'
         finish = resolve;
       }),
   );
-  const pending = useInterview.getState().submitScreenshot();
-  await useInterview.getState().submitScreenshot();
-  expect(answer).toHaveBeenCalledOnce();
-  expect(answer.mock.calls[0][0]).toMatchObject({ screenshot: 'only' });
-  expect(answer.mock.calls[0][0]).not.toHaveProperty('question');
-  expect(useInterview.getState().draftQuestion).toBe('未发送转写');
-  finish({ ok: true, answerText: '截图回答', usage: null, sources: [] });
+  const pending = useInterview.getState().submitTranscript('带图问题', true);
+  useInterview.getState().stopAnswer();
+  const stopped = useInterview.getState().answers.at(-1)!;
+  finish({ ok: true, answerText: '迟到回答', usage: null, sources: [] });
   await pending;
-  expect(useInterview.getState().draftQuestion).toBe('未发送转写');
-  expect(useInterview.getState().answers[0]).toMatchObject({
-    question: '当前屏幕截图',
-    screenshot: 'only',
-  });
-});
-it('重试保留原截图模式，未连接服务不能以模拟答案替代截图请求', async () => {
-  answer.mockResolvedValueOnce({ ok: false, error: { message: '截取失败' } });
-  useInterview.getState().setAttachScreenshot(true);
-  await useInterview.getState().ask('带图问题');
-  const failed = useInterview.getState().answers.at(-1)!;
-  useInterview.getState().setAttachScreenshot(false);
-  await useInterview.getState().retryAnswer(failed.id);
-  expect(answer.mock.calls[1][0]).toMatchObject({ question: '带图问题', screenshot: 'attach' });
-  useInterview.setState({ aiEnabled: false });
-  await useInterview.getState().submitScreenshot();
-  expect(answer).toHaveBeenCalledTimes(2);
-  expect(useInterview.getState().answers.at(-1)).toMatchObject({
-    status: 'failed',
-    error: '截图回答需要先连接模型服务。',
-    content: '',
-  });
+  expect(useInterview.getState().screenshots).toHaveLength(1);
+  expect(useInterview.getState().answers.at(-1)?.status).toBe('stopped');
+  await useInterview.getState().retryAnswer(stopped.id);
+  expect(answer.mock.calls[1][0]).toMatchObject({ screenshotIds: ['shot-1'] });
+  expect(captureCount).toBe(1);
 });

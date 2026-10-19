@@ -111,8 +111,8 @@ try {
       JSON.stringify({
         name: '合成用户',
         language: '简体中文',
-        background: '合成简历。'.repeat(80),
-        jobDescription: '合成职位描述',
+        background: '# 合成简历标题\n\n' + '合成简历。'.repeat(80),
+        jobDescription: '## 合成职位描述\n\n合成职责要求',
         customInstructions: '合成指令',
         skills: [
           { id: 'synthetic-skill', title: '合成技能', content: '合成技能内容', sources: [] },
@@ -181,6 +181,15 @@ try {
         !(await section.locator('.profile-entry').evaluate((e) => e.open))
       )
         await section.locator('.profile-entry > summary').click();
+      const reading = section.locator(
+        '.profile-summary .markdown-content,.profile-entry > div .plain-text-content',
+      );
+      assert.ok((await reading.count()) > 0);
+      for (const content of await reading.all()) {
+        assert.equal(await content.evaluate((e) => getComputedStyle(e).fontSize), '12px');
+        for (const heading of await content.locator('h1,h2,h3,h4,h5,h6').all())
+          assert.equal(await heading.evaluate((e) => getComputedStyle(e).fontSize), '14px');
+      }
       await section.getByRole('button', { name: '编辑', exact: true }).click();
       const editor = page.getByRole('dialog', {
         name: label === '面试技能' ? '编辑技能' : '编辑' + label,
@@ -188,6 +197,10 @@ try {
       });
       await editor.waitFor();
       assert.equal(await editor.locator('textarea').count(), 1);
+      assert.equal(
+        await editor.locator('textarea').evaluate((e) => getComputedStyle(e).fontSize),
+        '12px',
+      );
       assert.equal(await panel.locator('textarea').count(), 0);
       assert.equal(await editor.evaluate((e) => e.scrollWidth > e.clientWidth + 1), false);
       await editor.getByRole('button', { name: '取消', exact: true }).click();

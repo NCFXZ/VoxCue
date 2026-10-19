@@ -144,17 +144,16 @@ try {
   await closed;
   checks.push('屏幕权限单独显示；未授权仍可通过真实主进程打开纯语音浮窗，不截图');
   await start();
-  await dialog.getByRole('button', { name: '前往面试设置', exact: true }).click();
+  assert.equal(await dialog.getByRole('button', { name: '前往面试设置', exact: true }).count(), 0);
+  await dialog.getByRole('button', { name: '取消', exact: true }).click();
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '面试设置', exact: true }).click();
   const panel = page.getByRole('region', { name: '屏幕捕获权限', exact: true });
-  const refreshDevices = page.getByRole('button', { name: '刷新设备', exact: true });
-  assert.equal((await refreshDevices.boundingBox()).height, 36);
+  assert.equal(await page.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);
   assert.equal(
     (await page.getByRole('button', { name: '麦克风设备', exact: true }).boundingBox()).height,
     36,
-  );
-  assert.equal(
-    await refreshDevices.locator('svg').evaluate((icon) => icon.getBoundingClientRect().height),
-    16,
   );
   await panel
     .getByRole('status', { name: '屏幕捕获权限状态' })
@@ -212,8 +211,8 @@ try {
   await panel.getByRole('heading', { name: '屏幕捕获', exact: true }).waitFor();
   await panel.getByText('当前捕获方式无需单独申请权限。', { exact: false }).waitFor();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
-  // Closing settings opened from the start dialog automatically returns there
-  // and checks access again; the main start button is behind that modal.
+  // Settings now opens from the user menu; starting again rechecks permissions.
+  await start();
   await dialog.waitFor();
   const screenStatus = dialog.getByLabel('屏幕捕获权限检查', { exact: true });
   await screenStatus.getByText('无需单独授权', { exact: true }).waitFor();

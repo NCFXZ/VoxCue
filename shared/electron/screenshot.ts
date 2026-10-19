@@ -1,8 +1,35 @@
-import { desktopCapturer, screen, systemPreferences, type BrowserWindow } from 'electron';
+import {
+  desktopCapturer,
+  nativeImage,
+  screen,
+  systemPreferences,
+  type BrowserWindow,
+} from 'electron';
 import type { ChatFile } from './contracts/chat';
 
 // Capture only when an authenticated interview request explicitly asks for it.
-// Image bytes stay in this request; they never enter Renderer, clipboard or disk.
+// Full image bytes remain in main-process memory. Only a small composer preview
+// enters Renderer; neither copy is written to disk or the clipboard.
+export async function captureInterviewScreenshot(
+  window: BrowserWindow,
+  platform: NodeJS.Platform,
+  signal: AbortSignal,
+): Promise<{ file: ChatFile; preview: string }> {
+  const file = await captureInterviewScreen(window, platform, signal);
+  const image = nativeImage.createFromBuffer(Buffer.from(file.bytes));
+  const size = image.getSize();
+  const ratio = Math.min(1, 240 / Math.max(size.width, size.height));
+  const preview = image
+    .resize({
+      width: Math.max(1, Math.round(size.width * ratio)),
+      height: Math.max(1, Math.round(size.height * ratio)),
+      quality: 'best',
+    })
+    .toJPEG(75);
+  signal.throwIfAborted();
+  return { file, preview: `data:image/jpeg;base64,${preview.toString('base64')}` };
+}
+
 export async function captureInterviewScreen(
   window: BrowserWindow,
   platform: NodeJS.Platform,

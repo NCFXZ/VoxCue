@@ -7,6 +7,7 @@ const root = workspace.platformRoot;
 const require = workspace.platformRequire;
 const { packager } = await import(require.resolve('@electron/packager'));
 import { signMacApp } from './sign-app.mjs';
+import { loadDevelopmentSigning } from './development-signing.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -15,6 +16,9 @@ const overrides =
 const includedDependency = (owner, dependency) => overrides[`${owner}>${dependency}`] !== '-';
 
 export async function buildMacApp(output, publicKey) {
+  // Fail before packaging if the established identity is unavailable; never rotate
+  // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
+  const signing = await loadDevelopmentSigning();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
   const paths = await packager({
@@ -37,8 +41,7 @@ export async function buildMacApp(output, publicKey) {
       LSMinimumSystemVersion: '14.2',
       NSMicrophoneUsageDescription: 'VoxCue 在本机转写麦克风，不保存或上传音频。',
       NSAudioCaptureUsageDescription: 'VoxCue 在本机转写系统音频，不保存或上传音频。',
-      NSScreenCaptureUsageDescription:
-        'VoxCue 仅在你手动截图或开启附截图后捕获当前屏幕，不持续录屏。',
+      NSScreenCaptureUsageDescription: 'VoxCue 仅在你点击截图按钮时捕获当前屏幕，不持续录屏。',
       SUPublicEDKey: publicKey,
       SUEnableAutomaticChecks: false,
       SUAutomaticallyUpdate: false,
@@ -149,6 +152,7 @@ export async function buildMacApp(output, publicKey) {
           'electron-updater',
           'sherpa-onnx-node',
           'sherpa-onnx-darwin-arm64',
+          '@ennuicastr/webrtcaec3.js',
           '@lancedb/lancedb',
           '@huggingface/transformers',
           // The Transformers CJS bundle imports this directly, outside its declared dependencies.
@@ -182,7 +186,7 @@ export async function buildMacApp(output, publicKey) {
   );
   await mkdir(path.join(resources, 'licenses'), { recursive: true });
   await cp(path.join(tools, 'LICENSE'), path.join(resources, 'licenses/Sparkle.txt'));
-  // Ad-hoc signatures support arm64 loading. Update authenticity comes from the pinned Ed25519 key.
-  await signMacApp(app);
+  // Keychain continuity uses our fixed certificate; update authenticity still uses Ed25519.
+  await signMacApp(app, { signing });
   return app;
 }

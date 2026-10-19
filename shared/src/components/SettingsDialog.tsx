@@ -142,7 +142,7 @@ export function SettingsDialog({
                     <DropdownMenu.Trigger asChild>
                       <button className="settings-choice" aria-label="外观主题">
                         <selectedTheme.Icon size={18} />
-                        {selectedTheme.label}
+                        <span className="settings-choice-label">{selectedTheme.label}</span>
                         <ChevronsUpDown size={14} />
                       </button>
                     </DropdownMenu.Trigger>
@@ -183,7 +183,9 @@ export function SettingsDialog({
                         ) : (
                           <span className="accent-swatch" style={{ background: accent }} />
                         )}
-                        {accentOptions.find((option) => option.value === accent)!.label}
+                        <span className="settings-choice-label">
+                          {accentOptions.find((option) => option.value === accent)!.label}
+                        </span>
                         <ChevronsUpDown size={14} />
                       </button>
                     </DropdownMenu.Trigger>
@@ -299,7 +301,9 @@ export function SettingsDialog({
             {category === 'knowledge' && (
               <>
                 <div className="settings-entry">
-                  <strong>资料使用方式</strong>
+                  <div>
+                    <strong>资料使用方式</strong>
+                  </div>
                   <ChoiceMenu
                     className="settings-choice"
                     label="资料使用方式"
@@ -313,10 +317,6 @@ export function SettingsDialog({
                     onChange={(mode) => void knowledge.setMode(mode)}
                   />
                 </div>
-                <p className="settings-hint">
-                  默认在回答前自动查找相关资料；按需方式由当前账户模型决定是否查询。资料原件保存在本机，必要片段会发送至
-                  {provider.dataRecipient}。
-                </p>
                 <div className="settings-entry">
                   <strong>本机资料</strong>
                   <span className="settings-value">

@@ -8,6 +8,7 @@ import { createRequire } from 'node:module';
 import { createHash, verify } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { signMacApp } from '../../scripts/sign-app.mjs';
+import { localSigningCertificate, verifyLocalApp } from '../../scripts/development-signing.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 const require = createRequire(import.meta.url);
@@ -25,7 +26,8 @@ const run = (command, args) => {
 };
 run('/usr/bin/ditto', ['-x', '-k', zip, root]);
 const bundle = path.join(root, 'VoxCue.app');
-run('/usr/bin/codesign', ['--verify', '--deep', '--strict', bundle]);
+const signing = await localSigningCertificate();
+verifyLocalApp(bundle, signing, 'com.voxcue.app');
 assert.equal(
   run('/usr/bin/lipo', ['-archs', path.join(bundle, 'Contents/MacOS/VoxCue')]).trim(),
   'arm64',
@@ -91,8 +93,32 @@ for (const key of ['CFBundleVersion', 'CFBundleShortVersionString'])
     ]).trim(),
     version,
   );
+const bundleIcon = run('/usr/libexec/PlistBuddy', [
+  '-c',
+  'Print :CFBundleIconFile',
+  path.join(bundle, 'Contents/Info.plist'),
+]).trim();
+assert.equal(path.basename(bundleIcon), bundleIcon);
+assert.deepEqual(
+  await readFile(
+    path.join(resources, bundleIcon.endsWith('.icns') ? bundleIcon : bundleIcon + '.icns'),
+  ),
+  await readFile(path.join(workspace.platformRoot, 'public/voxcue.icns')),
+  'The final application must carry the current branded ICNS artwork',
+);
 assert.ok(!entries.some((file) => /^\/(?:\.tools|\.git|test|windows)\//.test(file)));
 assert.ok(!entries.some((file) => file.includes('ed25519.key')));
+assert.ok(
+  !entries.some((file) =>
+    /development-signing|keychain-password|local-signing-public|\.keychain-db/.test(file),
+  ),
+);
+assert.ok(entries.includes('/dist-electron/macos/electron/speech/echoCancellation.js'));
+assert.ok(entries.some((file) => file.endsWith('/webrtcaec3.js/dist/webrtcaec3-0.3.0.wasm')));
+assert.equal(
+  await lstat(path.join(resources, 'native/VoxCue.WindowMaterial.node')).catch(() => null),
+  null,
+);
 assert.ok(entries.includes('/dist-electron/macos/electron/updates/driver.js'));
 assert.ok(
   !entries.some((file) =>
@@ -121,7 +147,7 @@ await withMountedDmg(
     assert.equal(stored.window.ShowToolbar, false);
     assert.equal(stored.window.ShowSidebar, false);
     const dmgApp = path.join(mount, 'VoxCue.app');
-    run('/usr/bin/codesign', ['--verify', '--deep', '--strict', dmgApp]);
+    verifyLocalApp(dmgApp, signing, 'com.voxcue.app');
     for (const file of ['Contents/MacOS/VoxCue', 'Contents/Resources/app.asar'])
       assert.deepEqual(
         await readFile(path.join(dmgApp, file)),
@@ -242,7 +268,14 @@ try {
             clearTimeout(timeout);
             message.error ? reject(Error(message.error)) : resolve();
           });
-          worker.postMessage({ op: 'init', directory: model });
+          worker.postMessage({
+            op: 'init',
+            directory: model,
+            preprocessorFile: path.join(
+              unpacked,
+              'dist-electron/macos/electron/speech/echoCancellation.js',
+            ),
+          });
         });
       } finally {
         await worker.terminate();
@@ -342,7 +375,7 @@ try {
         'unknown component-root originals protected during deletion',
         'arm64 native bindings',
         'PDF/DOCX parsing',
-        'Paraformer Worker',
+        'Paraformer Worker with packaged local AEC WASM',
         'speech utilityProcess',
         'offline E5/LanceDB keyword/vector/hybrid',
         'pinned Sparkle updater configuration',

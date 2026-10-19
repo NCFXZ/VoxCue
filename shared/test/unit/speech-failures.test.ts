@@ -20,6 +20,12 @@ vi.mock('node:worker_threads', async () => {
             else if (runtime.mode !== 'stall-flushing')
               this.emit('message', { flushed: message.id });
           }
+          if (message.op === 'prepare') {
+            if (runtime.mode === 'error-preparing')
+              this.emit('message', { error: 'synthetic AEC failure' });
+            else if (runtime.mode !== 'stall-preparing')
+              this.emit('message', { prepared: message.id });
+          }
         });
       }
       async terminate() {
@@ -42,8 +48,9 @@ afterEach(async () => {
   await Promise.allSettled(controllers.splice(0).map((controller) => controller.close()));
   vi.useRealTimers();
 });
-function controller(start = async () => {}, stop = async () => {}) {
+function controller(start = async () => {}, stop = async () => {}, preprocessorFile?: string) {
   const instance = new SpeechController('model', 'helper', () => {}, {
+    preprocessorFile,
     devices: async () => [{ id: 'mic', source: 'microphone', name: 'Synthetic', default: true }],
     create: () => ({ start, stop }),
   });
@@ -64,6 +71,32 @@ it('ASR Worker 在初始化前退出时立即结束加载，允许重新启动�
   runtime.mode = 'ready';
   expect(await service.call(begin)).toMatchObject({ state: 'running' });
 });
+it('prepares optional audio processing before opening capture, and can restart after a preparation failure', async () => {
+  const start = vi.fn(async () => {});
+  const service = controller(start, async () => {}, 'synthetic-trusted-adapter.js');
+  runtime.mode = 'error-preparing';
+  const failed = service.call(begin);
+  await vi.advanceTimersByTimeAsync(1);
+  expect(await failed).toMatchObject({ state: 'error', error: 'synthetic AEC failure' });
+  expect(start).not.toHaveBeenCalled();
+  runtime.mode = 'ready';
+  expect(await service.call(begin)).toMatchObject({ state: 'running' });
+  expect(start).toHaveBeenCalledTimes(1);
+});
+it('retires a stalled audio preprocessor without opening a capture device', async () => {
+  const start = vi.fn(async () => {});
+  const service = controller(start, async () => {}, 'synthetic-trusted-adapter.js');
+  runtime.mode = 'stall-preparing';
+  const pending = service.call(begin);
+  await vi.advanceTimersByTimeAsync(10001);
+  expect(await pending).toMatchObject({
+    state: 'error',
+    error: expect.stringContaining('回声消除初始化超时'),
+  });
+  expect(start).not.toHaveBeenCalled();
+  runtime.mode = 'ready';
+  expect(await service.call(begin)).toMatchObject({ state: 'running' });
+});
 it('启动失败且采集清理也抛错时仍退休 Worker、报告首个故障并允许重试', async () => {
   const start = vi
     .fn()
@@ -77,6 +110,7 @@ it('启动失败且采集清理也抛错时仍退休 Worker、报告首个故障
   await expect(service.call(begin)).resolves.toMatchObject({
     state: 'error',
     error: 'synthetic device disconnected',
+    failureSource: 'microphone',
   });
   expect(await service.call(begin)).toMatchObject({ state: 'running' });
   expect(runtime.workers).toHaveLength(2);
@@ -163,7 +197,7 @@ it('采集启动期间同步报错不能再广播 running，失败后可重新�
     },
   );
   controllers.push(service);
-  expect(await service.call(begin)).toMatchObject({ state: 'error' });
+  expect(await service.call(begin)).toMatchObject({ state: 'error', failureSource: 'microphone' });
   expect(states).not.toContain('running');
   await vi.advanceTimersByTimeAsync(1);
   expect(await service.call(begin)).toMatchObject({ state: 'running' });

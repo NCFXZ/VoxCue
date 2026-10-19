@@ -60,7 +60,7 @@ try {
         const changes = Object.fromEntries(profileFields.map((field) => [field, null]));
         if (prompt === '更新简历') changes.background = '已核对的合成简历摘要';
         if (prompt === '更新 JD') changes.jobDescription = 'TypeScript、接口边界与桌面应用。';
-        if (body.instructions.includes('本次明确任务：真实联网筛选')) {
+        if (body.instructions.includes('本次任务：按技能规则生成技能更新提案。')) {
           globalThis.skillResponseCount = (globalThis.skillResponseCount ?? 0) + 1;
           const retrieved = Array.from({ length: 7 }, (_, index) => ({
             title: `真实资料${index + 1}`,
@@ -377,9 +377,10 @@ try {
   assert.equal(await latest().locator('.chat-source-group').count(), 0);
   assert.equal(await skillsProposal.locator('a').count(), 0);
   const skillRequest = await app.evaluate(() => globalThis.progressRequests.at(-1));
-  assert.ok(skillRequest.prompt.includes('不设固定写作字数'));
-  assert.ok(skillRequest.prompt.includes('标题和正文使用纯文字'));
-  assert.ok(skillRequest.instructions.includes('完整技能资料只放在 changes.skills'));
+  assert.ok(skillRequest.prompt.includes('根据已确认的简历和职位描述联网搜索'));
+  assert.ok(skillRequest.instructions.includes('不凑数量，不设固定字数'));
+  assert.ok(skillRequest.instructions.includes('标题和正文只写文字'));
+  assert.ok(skillRequest.instructions.includes('完整内容只放在 changes'));
   await latest().screenshot({});
   await skillsProposal.getByRole('button', { name: '确认更新', exact: true }).click();
   const confirmedInfo = await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1'));

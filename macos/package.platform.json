@@ -18,6 +18,9 @@
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
     "test:package": "node test/scripts/package-smoke.mjs"
   },
+  "dependencies": {
+    "@ennuicastr/webrtcaec3.js": "0.3.0"
+  },
   "optionalDependencies": {
     "sherpa-onnx-darwin-arm64": "1.13.8"
   },

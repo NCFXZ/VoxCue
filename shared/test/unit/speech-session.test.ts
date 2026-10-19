@@ -16,6 +16,116 @@ function setup() {
   };
   return { port, coordinator: new SpeechCoordinator(port) };
 }
+it('双音源自检限时10秒，过期停止令牌不影响新的采集', async () => {
+  vi.useFakeTimers();
+  const { coordinator, port } = setup();
+  try {
+    const options = {
+      sources: ['system', 'microphone'] as const,
+      microphone: 'mic-1',
+      system: 'out-1',
+    };
+    await coordinator.dictation({
+      op: 'test',
+      id: 'test-1',
+      options: { ...options, sources: [...options.sources] },
+    });
+    expect(coordinator.target).toBe('audio-test');
+    expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options });
+    await coordinator.dictation({ op: 'test-stop', id: 'old-test' });
+    expect(coordinator.target).toBe('audio-test');
+    await vi.advanceTimersByTimeAsync(9999);
+    expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(port.call).toHaveBeenLastCalledWith({ op: 'stop' });
+    expect(coordinator.target).toBeUndefined();
+    await coordinator.dictation({ op: 'start' });
+    const count = port.call.mock.calls.length;
+    await coordinator.dictation({ op: 'test-stop', id: 'test-1' });
+    expect(port.call).toHaveBeenCalledTimes(count);
+    expect(coordinator.target).toBe('dictation');
+  } finally {
+    coordinator.releaseDictation();
+    vi.useRealTimers();
+  }
+});
+it('自检不能抢占面试，取消尚未启动的自检不采集音频', async () => {
+  const { coordinator, port } = setup();
+  const checking = coordinator.dictation({
+    op: 'test',
+    id: 'check',
+    options: { sources: ['system'] },
+  });
+  const canceled = coordinator.dictation({ op: 'test-stop', id: 'check' });
+  await checking;
+  await canceled;
+  expect(port.call).not.toHaveBeenCalled();
+  await coordinator.confirm(defaultInterviewConfiguration());
+  await expect(
+    coordinator.dictation({ op: 'test', id: 'during-interview', options: { sources: ['system'] } }),
+  ).rejects.toThrow('先结束');
+  coordinator.releaseInterview(true);
+});
+it('音频恢复只改变本场设备，强制退休故障宿主并保留模型及资料配置', async () => {
+  const { coordinator, port } = setup();
+  await expect(coordinator.reconnect()).rejects.toThrow('先开始');
+  await coordinator.confirm(defaultInterviewConfiguration());
+  const before = coordinator.configuration!;
+  port.call.mockRejectedValueOnce(Error('synthetic stop failed'));
+  const options = { sources: ['system'] as ('system' | 'microphone')[], system: 'new-output' };
+  await expect(coordinator.reconnect(options)).resolves.toMatchObject({ state: 'running' });
+  expect(coordinator.configuration).toEqual({ ...before, options });
+  expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options });
+  await expect(coordinator.interview({ op: 'start', options: before.options })).rejects.toThrow(
+    '已锁定',
+  );
+  expect(() => coordinator.reconnect({ sources: ['microphone'] })).toThrow('系统音频');
+  coordinator.releaseInterview(true);
+});
+it('设备重连失败不提交新设备；关闭期间迟到的连接不能重启采集', async () => {
+  const { coordinator, port } = setup();
+  await coordinator.confirm(defaultInterviewConfiguration());
+  const options = coordinator.configuration!.options;
+  port.call
+    .mockResolvedValueOnce({ state: 'idle', model: 'test' })
+    .mockRejectedValueOnce(Error('synthetic reconnect failed'));
+  await expect(coordinator.reconnect({ sources: ['system'], system: 'gone' })).rejects.toThrow(
+    'reconnect failed',
+  );
+  expect(coordinator.configuration!.options).toEqual(options);
+  let finish;
+  port.call.mockResolvedValueOnce({ state: 'idle', model: 'test' }).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = coordinator.reconnect();
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  coordinator.releaseInterview(true);
+  finish({ state: 'running', model: 'test' });
+  expect(await pending).toMatchObject({ state: 'idle' });
+  expect(coordinator.configuration).toBeUndefined();
+  expect(coordinator.target).toBeUndefined();
+});
+it('停止旧音频期间结束面试，不能迟到后打开新采集', async () => {
+  const { coordinator, port } = setup();
+  await coordinator.confirm(defaultInterviewConfiguration());
+  let finishStop;
+  port.call.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finishStop = resolve;
+      }),
+  );
+  const pending = coordinator.reconnect();
+  await vi.waitFor(() => expect(finishStop).toBeTypeOf('function'));
+  coordinator.releaseInterview(true);
+  finishStop({ state: 'idle', model: 'test' });
+  expect(await pending).toMatchObject({ state: 'idle' });
+  expect(port.call).toHaveBeenCalledTimes(1);
+  expect(coordinator.target).toBeUndefined();
+});
 it('确认设置校验系统音频、AI 和长度，并隔离外部引用', () => {
   const config = defaultInterviewConfiguration();
   for (const value of [
@@ -168,4 +278,37 @@ it('麦克风测试只允许所选麦克风，设备输入仍经过原生校验'
     'Invalid audio device',
   );
   coordinator.releaseDictation();
+});
+
+it('面试中只更新可用模型与思考强度，资料、知识库、音频和会话保持', async () => {
+  const { coordinator, port } = setup();
+  await coordinator.confirm({
+    ...defaultInterviewConfiguration(),
+    aiEnabled: true,
+    modelId: 'old',
+    knowledgeBaseId: 'kb',
+    knowledgeBaseName: '研发面试',
+  });
+  const before = coordinator.configuration!;
+  const models = [
+    { id: 'next', label: 'Next', description: '', reasoningEfforts: ['low' as const] },
+  ];
+  expect(() => coordinator.updateModel({ modelId: 'missing', effort: 'auto' }, models)).toThrow(
+    '可用',
+  );
+  expect(() => coordinator.updateModel({ modelId: 'next', effort: 'high' }, models)).toThrow(
+    '不支持',
+  );
+  expect(() =>
+    coordinator.updateModel({ modelId: 'next', effort: 'auto', profile: {} }, models),
+  ).toThrow('无效');
+  expect(coordinator.configuration).toEqual(before);
+  expect(coordinator.updateModel({ modelId: 'next', effort: 'low' }, models)).toEqual({
+    modelId: 'next',
+    effort: 'low',
+  });
+  expect(coordinator.configuration).toEqual({ ...before, modelId: 'next', effort: 'low' });
+  expect(port.call).not.toHaveBeenCalled();
+  coordinator.releaseInterview(true);
+  expect(() => coordinator.updateModel({ modelId: 'next', effort: 'low' }, models)).toThrow('请先');
 });

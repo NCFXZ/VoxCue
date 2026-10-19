@@ -207,8 +207,8 @@ describe('Function Calling（模拟 HTTP/SSE，真实 Provider 协议代码）',
         expect(body.stream).toBe(true);
         expect(body.tools[0].type).toBe('namespace');
         expect(body.instructions).toContain(ragInstructions);
-        expect(body.instructions).toContain('需要本地证据时，先搜索，再按需读取相关完整条目');
-        expect(body.instructions).toContain('实时面试中，检索未命中、超时、不可用或预算耗尽时');
+        expect(body.instructions).toContain('需要本地证据时，先搜索，再按需读取相关的完整条目');
+        expect(body.instructions).toContain('实时面试中不要求用户重试、补充资料或切换模式');
         expect(body).not.toHaveProperty('previous_response_id');
         expect(body.input.some((i: any) => i.role === 'system')).toBe(false);
         if (bodies.length === 1)

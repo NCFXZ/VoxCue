@@ -34,6 +34,21 @@ beforeEach(() => {
   vi.stubGlobal('window', { desktop: { generateInterviewTitle: vi.fn(async () => {}) } });
   useHistory.setState({ records: [], error: null });
 });
+it('知识库名称按本场快照添加到AI标题，重试不重复添加且保留手动命名', async () => {
+  useHistory.getState().save({ ...record(), knowledgeBaseName: '研发面试' });
+  useHistory.getState().applyTitle({ recordId: 'history-r', error: '可重试' });
+  await useHistory.getState().generateTitle('history-r', 'model');
+  useHistory.getState().applyTitle({ recordId: 'history-r', title: '项目架构与排障' });
+  expect(useHistory.getState().records[0].title).toBe('「研发面试」项目架构与排障');
+  useHistory.getState().applyTitle({ recordId: 'history-r', title: '重复结果' });
+  expect(useHistory.getState().records[0].title).toBe('「研发面试」项目架构与排障');
+  useHistory.getState().rename('history-r', '我的复盘');
+  useHistory.getState().applyTitle({ recordId: 'history-r', title: '迟到结果' });
+  expect(useHistory.getState().records[0].title).toBe('我的复盘');
+  useHistory.getState().save({ ...record(), id: 'no-kb' });
+  useHistory.getState().applyTitle({ recordId: 'no-kb', title: '无知识库的面试' });
+  expect(useHistory.getState().records.find((r) => r.id === 'no-kb')?.title).toBe('无知识库的面试');
+});
 describe('历史时间线、关联与持久化', () => {
   it('准确关联系统片段，歧义旧记录和麦克风不产生假定位', () => {
     const r = record(),

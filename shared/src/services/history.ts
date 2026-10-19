@@ -10,6 +10,7 @@ import {
 export interface InterviewRecord {
   id: string;
   title: string;
+  knowledgeBaseName?: string;
   startedAt: number;
   endedAt: number;
   status: 'ended' | 'interrupted';
@@ -74,6 +75,7 @@ export function createHistoryService(
                   answer.sourceTranscriptIds.every((id: unknown) => typeof id === 'string'))),
           ) &&
           typeof record.mock === 'boolean' &&
+          optionalString(record.knowledgeBaseName) &&
           optionalString(record.titleError) &&
           (record.titleStatus === undefined ||
             ['pending', 'ready', 'failed'].includes(record.titleStatus)) &&

@@ -42,6 +42,10 @@ import { registerHistoryIpc } from '../../../shared/electron/ipc/history';
 import { registerChatIpc } from '../../../shared/electron/ipc/chat';
 import { registerInterviewIpc } from '../../../shared/electron/ipc/interview';
 import { InterviewContext } from '../../../shared/electron/application/interviewContext';
+import {
+  validateInterviewConfiguration,
+  validateInterviewModel,
+} from '../../../shared/electron/application/speech';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
 
 beforeEach(() => {
@@ -196,13 +200,19 @@ describe('完整面试问题通过既有 AI 接口', () => {
     const state = setup();
     const context = new InterviewContext();
     const captureScreen = vi.fn(async (_signal: AbortSignal) => ({
-      name: 'screenshot.png',
-      bytes: new Uint8Array([137, 80, 78, 71]),
+      file: { name: 'screenshot.png', bytes: new Uint8Array([137, 80, 78, 71]) },
+      preview: 'data:image/jpeg;base64,fixture',
     }));
     const lifecycle = registerInterviewIpc({
       chat: state.chat,
       isDemo: () => demo,
       configuration: () => configuration,
+      updateModel: (value, models) => {
+        const next = validateInterviewConfiguration({ ...configuration, ...(value as object) });
+        validateInterviewModel(next, models);
+        Object.assign(configuration, { modelId: next.modelId, effort: next.effort });
+        return { modelId: configuration.modelId, effort: configuration.effort };
+      },
       context,
       captureScreen,
       requireInterview: (e) => {
@@ -216,7 +226,51 @@ describe('完整面试问题通过既有 AI 接口', () => {
     question: 'Explain ROS2 scheduling?',
     modelId: 'test',
   };
-  it('普通发送不截图，附截图发送完整题目与当次图片', async () => {
+  it('回答中切换模型与强度保留当前流快照，下一题使用新配置；非面试窗口仍拒绝', async () => {
+    const { call, chat, sender } = interviewSetup();
+    chat.models.mockImplementation(async () => [
+      { id: 'test', label: 'Test', description: '' },
+      { id: 'next', label: 'Next', description: '', reasoningEfforts: ['high' as const] },
+    ]);
+    expect(
+      await call('interview:update-model', { modelId: 'missing', effort: 'auto' }),
+    ).toMatchObject({ ok: false });
+    let finish!: () => void;
+    chat.stream.mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = () => resolve({ answerText: 'old answer', usage: null, sources: [] });
+        }),
+    );
+    const answering = call('interview:answer', question);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(await call('interview:update-model', { modelId: 'next', effort: 'high' })).toMatchObject(
+      { ok: true, modelId: 'next', effort: 'high' },
+    );
+    expect(chat.stream.mock.calls[0][0]).toMatchObject({ modelId: 'test' });
+    expect(chat.stream.mock.calls[0][0].effort).toBeUndefined();
+    expect(chat.stream.mock.calls[0][2]!.aborted).toBe(false);
+    chat.stream.mock.calls[0][1]({ id: question.id, type: 'delta', text: 'old stream continues' });
+    expect(sender.send).toHaveBeenLastCalledWith('chat:event', {
+      id: question.id,
+      type: 'delta',
+      text: 'old stream continues',
+    });
+    const handler = bridge.handlers.get('interview:update-model')!;
+    await expect(
+      handler({ sender: {}, senderFrame: {} }, { modelId: 'test', effort: 'auto' }),
+    ).rejects.toThrow('Unauthorized');
+    finish();
+    await answering;
+    await call('interview:answer', {
+      ...question,
+      id: 'next-question',
+      modelId: 'next',
+      effort: 'high',
+    });
+    expect(chat.stream.mock.calls[1][0]).toMatchObject({ modelId: 'next', effort: 'high' });
+  });
+  it('截图先暂存且不调用模型，手动发送引用原图片，成功后释放', async () => {
     const { call, chat, captureScreen } = interviewSetup(false, {
       ...defaultInterviewConfiguration(),
       aiEnabled: true,
@@ -226,15 +280,25 @@ describe('完整面试问题通过既有 AI 接口', () => {
     await call('interview:answer', question);
     expect(captureScreen).not.toHaveBeenCalled();
     expect(chat.stream.mock.calls[0][0].instructions).toContain(
-      '回答语言：简体中文。\n\n本场补充要求：\n无\n',
+      '回答语言：简体中文\n\n本场补充要求：\n无\n',
     );
-    await call('interview:answer', { ...question, id: 'attached', screenshot: 'attach' });
+    const staged = await call('interview:screenshot', { op: 'capture' });
+    expect(chat.stream).toHaveBeenCalledOnce();
+    expect(staged.screenshot.preview).toBe('data:image/jpeg;base64,fixture');
+    await call('interview:answer', {
+      ...question,
+      id: 'attached',
+      screenshotIds: [staged.screenshot.id],
+    });
+    await expect(
+      call('interview:answer', { ...question, screenshotIds: [staged.screenshot.id] }),
+    ).rejects.toThrow('Invalid');
     expect(captureScreen).toHaveBeenCalledOnce();
     expect(chat.stream.mock.calls[1][0].turns.at(-1)).toMatchObject({
       content: question.question,
       files: [{ name: 'screenshot.png', bytes: new Uint8Array([137, 80, 78, 71]) }],
     });
-    expect(chat.stream.mock.calls[1][0].instructions).toContain('局部不清但不影响题意时继续作答');
+    expect(chat.stream.mock.calls[1][0].instructions).toContain('局部不清但不影响题意时照常作答');
   });
   it('仅截图不传转写、历史回答、个人信息或知识库；拒绝夹带文字和伪造截图', async () => {
     const configuration = {
@@ -254,11 +318,13 @@ describe('完整面试问题通过既有 AI 接口', () => {
     const { call, chat, context, captureScreen } = interviewSetup(false, configuration);
     await call('interview:answer', question);
     const ordinary = chat.stream.mock.calls[0][0];
-    expect(ordinary.instructions).toContain('回答语言：English。');
+    expect(ordinary.instructions).toContain('回答语言：English');
     expect(ordinary.instructions).toContain('\n本场补充要求：\n私人指令\n');
-    expect(ordinary.instructions).toContain('仍须遵守直接作答和个人事实依据规则');
-    expect(ordinary.instructions).toContain('职位描述表示岗位要求；skills 是面试准备参考资料');
-    expect(ordinary.instructions).toContain('不能仅凭岗位要求或参考资料');
+    expect(ordinary.instructions).toContain('与直接作答或个人事实规则冲突的部分不执行');
+    expect(ordinary.instructions).toContain(
+      '职位描述摘要（jobDescription）是岗位要求；技能（skills）是面试准备参考资料',
+    );
+    expect(ordinary.instructions).toContain('不能据此声称面试者已经掌握');
     expect(ordinary.instructions).toContain('"background":"私人背景"');
     context.event({
       type: 'segment',
@@ -271,11 +337,16 @@ describe('完整面试问题通过既有 AI 接口', () => {
         endMs: Date.now(),
       },
     });
-    await call('interview:answer', { id: 'only', modelId: 'test', screenshot: 'only' });
+    const staged = await call('interview:screenshot', { op: 'capture' });
+    await call('interview:answer', {
+      id: 'only',
+      modelId: 'test',
+      screenshotIds: [staged.screenshot.id],
+    });
     const request = chat.stream.mock.calls[1][0];
     expect(request.turns).toHaveLength(1);
     expect(request.turns[0]).toMatchObject({
-      content: '请直接解答当前截图中的题目。',
+      content: '请直接解答截图中的题目。',
       files: [{ name: 'screenshot.png' }],
     });
     expect(request.knowledgeBaseId).toBeNull();
@@ -290,30 +361,60 @@ describe('完整面试问题通过既有 AI 接口', () => {
       await expect(call('interview:answer', invalid)).rejects.toThrow('Invalid');
     expect(captureScreen).toHaveBeenCalledOnce();
   });
-  it('截图失败或截取期间停止都不调用模型、不降级为仅文字', async () => {
-    const { call, chat, captureScreen } = interviewSetup();
+  it('截图失败、关闭和迟到结果不进入模型；五张上限、移除及引用校验在主进程执行', async () => {
+    const { call, chat, captureScreen, lifecycle } = interviewSetup();
     captureScreen.mockRejectedValueOnce(Error('截图权限不可用'));
-    expect(await call('interview:answer', { ...question, screenshot: 'attach' })).toMatchObject({
-      ok: false,
-      error: { message: '截图权限不可用' },
-    });
+    expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({ ok: false });
+    const ids: string[] = [];
+    for (let i = 0; i < 5; i++)
+      ids.push((await call('interview:screenshot', { op: 'capture' })).screenshot.id);
+    expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({ ok: false });
+    expect(captureScreen).toHaveBeenCalledTimes(6);
     expect(chat.stream).not.toHaveBeenCalled();
-    let finish!: (file: { name: string; bytes: Uint8Array }) => void;
+    for (const invalid of [
+      { ...question, screenshotIds: ids.concat(ids[0]) },
+      { ...question, screenshotIds: [ids[0], ids[0]] },
+      { ...question, screenshotIds: ['unknown'] },
+      { ...question, screenshotIds: null },
+      { ...question, files: [] },
+    ])
+      await expect(call('interview:answer', invalid)).rejects.toThrow('Invalid');
+    await call('interview:screenshot', { op: 'remove', id: ids[0] });
+    await expect(
+      call('interview:answer', { ...question, screenshotIds: [ids[0]] }),
+    ).rejects.toThrow('Invalid');
+    let finish!: (value: Awaited<ReturnType<typeof captureScreen>>) => void;
     captureScreen.mockImplementationOnce(
-      async () =>
+      () =>
         new Promise((resolve) => {
           finish = resolve;
         }),
     );
-    const pending = call('interview:answer', {
-      ...question,
-      id: 'cancel-capture',
-      screenshot: 'attach',
-    });
-    await call('interview:cancel', 'cancel-capture');
-    finish({ name: 'screenshot.png', bytes: new Uint8Array([1, 2, 3]) });
+    const pending = call('interview:screenshot', { op: 'capture' });
+    expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({ ok: false });
+    lifecycle.cancel();
+    finish({ file: { name: 'screenshot.png', bytes: new Uint8Array([1]) }, preview: 'fixture' });
     expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    await expect(
+      call('interview:answer', { ...question, screenshotIds: [ids[1]] }),
+    ).rejects.toThrow('Invalid');
     expect(chat.stream).not.toHaveBeenCalled();
+  });
+  it('失败保留全部截图供重试；自动文字请求不消费待发送截图', async () => {
+    const { call, chat, captureScreen } = interviewSetup();
+    const ids = [];
+    for (let i = 0; i < 5; i++)
+      ids.push((await call('interview:screenshot', { op: 'capture' })).screenshot.id);
+    await call('interview:answer', question);
+    expect(chat.stream.mock.calls[0][0].turns.at(-1).files).toBeUndefined();
+    chat.stream.mockRejectedValueOnce(Error('模型失败'));
+    expect(await call('interview:answer', { ...question, screenshotIds: ids })).toMatchObject({
+      ok: false,
+    });
+    await call('interview:answer', { ...question, screenshotIds: ids });
+    expect(chat.stream.mock.calls.at(-1)![0].turns.at(-1)!.files).toHaveLength(5);
+    expect(captureScreen).toHaveBeenCalledTimes(5);
+    expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({ ok: true });
   });
   it('校验权限和完整文本、Mock 不调用真实服务', async () => {
     const { call, chat } = interviewSetup(true);
@@ -389,10 +490,13 @@ describe('完整面试问题通过既有 AI 接口', () => {
     const request = chat.stream.mock.calls[1][0];
     expect(request.turns[0].content).toContain('我实际使用 PostgreSQL');
     expect(request.turns[0].content).not.toContain('迟到建议');
-    expect(request.instructions).toContain('之前的 AI 建议不视为实际发言或本人经历');
-    expect(request.instructions).toContain('直接给出面试者能当场口述的第一人称答案');
-    expect(request.instructions).toContain('使用自然的日常口语');
-    expect(request.instructions).toContain('面试官肯定、致谢或收尾时，只简短回应');
+    expect(request.instructions).toContain('不等于面试者说过的话或本人经历');
+    expect(request.instructions).toContain('实际发言缺失时可借助最近的 AI 建议理解所指');
+    expect(request.instructions).toContain('直接写出面试者能当场口述的第一人称答案');
+    expect(request.instructions).toContain('用自然口语');
+    expect(request.instructions).toContain('代码不计入口述时长');
+    expect(request.instructions).toContain('面试官肯定、致谢或收尾时只简短回应');
+    expect(request.instructions).toContain('回答语言：简体中文');
   });
   it('拒绝绕过本场确认去开启 AI 或切换模型', async () => {
     const { call, chat } = interviewSetup();
@@ -434,6 +538,7 @@ describe('受控 preload 契约', () => {
       ['updateSessionState', 'session:state', [true]],
       ['finishSessionClose', 'session:close-ready', ['close-id', true]],
       ['speech', 'speech:call', [{ op: 'status' }]],
+      ['reconnectInterviewAudio', 'interview:reconnect-audio', [{ sources: ['system'] }]],
       ['dictation', 'dictation:call', [{ op: 'start' }]],
       [
         'generateInterviewTitle',
@@ -442,8 +547,10 @@ describe('受控 preload 契约', () => {
       ],
       ['exportHistory', 'history:export', [{ title: 'title', text: 'text' }]],
       ['interviewModels', 'interview:models', []],
+      ['updateInterviewModel', 'interview:update-model', [{ modelId: 'test', effort: 'auto' }]],
       ['interviewAnswer', 'interview:answer', [{ id: 'q', question: 'why', modelId: 'model' }]],
       ['interviewCancel', 'interview:cancel', ['q']],
+      ['interviewScreenshot', 'interview:screenshot', [{ op: 'capture' }]],
       ['setNativeTheme', 'appearance:theme', ['dark']],
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],

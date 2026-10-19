@@ -29,13 +29,10 @@ export function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [settings, setSettings] = useState(false);
   const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('general');
-  const [returnToInterview, setReturnToInterview] = useState(false);
   const openComponentSettings = () => {
     setSettingsCategory('components');
-    setReturnToInterview(false);
     setSettings(true);
   };
-  const [startRequest, setStartRequest] = useState(0);
   const [personalDraft, setPersonalDraft] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string | null>(null);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
@@ -161,7 +158,6 @@ export function App() {
               }}
               onSettings={() => {
                 setSettingsCategory('general');
-                setReturnToInterview(false);
                 setSettings(true);
               }}
               onLogout={async () => {
@@ -176,13 +172,7 @@ export function App() {
             <div className="preparation-route" hidden={page !== 'preparation'}>
               <PreparationPage
                 onDraftChange={setPersonalDraft}
-                startRequest={startRequest}
                 onComponentSettings={openComponentSettings}
-                onInterviewSettings={() => {
-                  setSettingsCategory('interview');
-                  setReturnToInterview(true);
-                  setSettings(true);
-                }}
               />
             </div>
             {page === 'history' && <HistoryPage />}
@@ -203,10 +193,6 @@ export function App() {
           onThemeChange={setTheme}
           onClose={() => {
             setSettings(false);
-            if (returnToInterview) {
-              setReturnToInterview(false);
-              setStartRequest((value) => value + 1);
-            }
           }}
         />
       )}

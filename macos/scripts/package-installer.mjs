@@ -3,6 +3,7 @@ import { buildMacApp } from './package-app.mjs';
 import { updateSigningKey } from './update-signing.mjs';
 import { sparkleTools } from './sparkle-tools.mjs';
 import { createMacDmg } from './dmg.mjs';
+import { localSigningCertificate, verifyLocalApp } from './development-signing.mjs';
 import { mkdtemp, mkdir, rm, readFile, writeFile, stat, lstat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash, sign } from 'node:crypto';
@@ -33,7 +34,7 @@ for (const signal of ['SIGINT', 'SIGTERM'])
   });
 try {
   const app = await buildMacApp(path.join(stage, 'bundle'), publicKey);
-  run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app]);
+  verifyLocalApp(app, await localSigningCertificate(), 'com.voxcue.app');
   await mkdir(output, { recursive: true });
   const filename = `VoxCue-${version}-arm64.zip`;
   const zip = path.join(output, filename);

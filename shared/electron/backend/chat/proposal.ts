@@ -1,4 +1,8 @@
-import { skillContentChanged, type ProfileChanges } from '../../contracts/profile';
+import {
+  skillContentChanged,
+  skillResearchScope,
+  type ProfileChanges,
+} from '../../contracts/profile';
 import type { ChatRequest, ChatSource } from '../../contracts/chat';
 import { sourceKey } from './validation';
 import { ChatServiceError } from './errors';
@@ -13,6 +17,8 @@ export function verifySkillProposal(
   if (!changes?.skills || !request.profile || !skillContentChanged(request.profile, changes.skills))
     return;
   if (
+    ((!request.profile.background.trim() || !request.profile.jobDescription.trim()) &&
+      skillResearchScope(request.turns.at(-1)?.content ?? '') !== 'topic') ||
     (changes.background !== undefined && changes.background !== request.profile.background) ||
     (changes.jobDescription !== undefined &&
       changes.jobDescription !== request.profile.jobDescription)

@@ -31,11 +31,11 @@ import { UsageLedger } from './backend/chat/usage';
 import { registerChatIpc } from './ipc/chat';
 import { registerInterviewIpc } from './ipc/interview';
 import { InterviewContext } from './application/interviewContext';
-import { captureInterviewScreen } from './screenshot';
+import { captureInterviewScreenshot } from './screenshot';
 import { registerScreenCaptureIpc } from './ipc/screenCapture';
 import type { ScreenCaptureAccess } from './contracts/screenCapture';
 import { registerHistoryIpc } from './ipc/history';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
 import { SpeechHost } from './backend/speech/host';
 import type {
   AudioDevice,
@@ -548,6 +548,7 @@ app.whenReady().then(() => {
   auth = new ChatGPTAuthService({
     storage: createAuthStorage(desktopPlatform.credentialEncryptionLabel),
     openBrowser: (url) => shell.openExternal(url),
+    callbackLogo: () => readFile(resources.brandLogo),
   });
   chat = new ChatGPTService({
     access: () => auth.access(),
@@ -758,8 +759,10 @@ app.whenReady().then(() => {
     requireInterview,
     isDemo: () => demoSession,
     configuration: () => speechSessions?.configuration,
+    updateModel: (value, models) => speechSessions!.updateModel(value, models),
     context: interviewContext,
-    captureScreen: (signal) => captureInterviewScreen(interviewWindow!, desktopPlatform.id, signal),
+    captureScreen: (signal) =>
+      captureInterviewScreenshot(interviewWindow!, desktopPlatform.id, signal),
   });
   historyJobs = registerHistoryIpc({
     chat,
@@ -871,7 +874,13 @@ app.whenReady().then(() => {
     speechModelRoot,
     audioHelper,
     (event) => {
-      if (speechSessions?.target === 'dictation' && mainWindow && !mainWindow.isDestroyed())
+      if (
+        (speechSessions?.target === 'dictation' ||
+          (speechSessions?.target === 'audio-test' &&
+            (event.type === 'status' || event.type === 'activity'))) &&
+        mainWindow &&
+        !mainWindow.isDestroyed()
+      )
         sendDesktop(mainWindow.webContents, 'dictation:event', event);
       if (
         speechSessions?.target === 'interview' &&
@@ -899,8 +908,13 @@ app.whenReady().then(() => {
   handleDesktop('dictation:call', (event, value: unknown) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
-    if ((value as { op?: unknown })?.op === 'start') components.require('speech');
+    if (['start', 'test'].includes((value as { op: string })?.op)) components.require('speech');
     return speechSessions!.dictation(value);
+  });
+  handleDesktop('interview:reconnect-audio', (event, options) => {
+    requireInterview(event);
+    components.require('speech');
+    return speechSessions!.reconnect(options);
   });
   handleDesktop('interview:check-access', async (event, value: unknown) => {
     requireMain(event);

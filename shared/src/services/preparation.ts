@@ -2,6 +2,7 @@ import { wait } from './mock';
 import type { ChatRequestOptions } from './chatOptions';
 import type { ChatSource, TokenUsage } from '../../electron/contracts/chat';
 import type { PersonalInfo } from '../../electron/contracts/profile';
+import { skillResearchScope } from '../../electron/contracts/profile';
 export type { PersonalInfo } from '../../electron/contracts/profile';
 export interface ChatMessage {
   id: string;
@@ -61,19 +62,7 @@ export function needsProfileReview(prompt: string, attachmentCount: number) {
   );
 }
 export function needsSkillResearch(prompt: string) {
-  if (
-    /(?:供|用于|以便)(?:确认后|之后|后续)?(?:联网)?(?:更新|生成)(?:面试)?技能/.test(prompt) &&
-    /(?:补充|整理).{0,12}(?:简历|职位描述|JD)/i.test(prompt)
-  )
-    return false;
-  // Explicit negative commands are not requests to start skill research.
-  const affirmative = prompt.replace(
-    /(?:不要|不需要|无需|禁止|不)(?:再|立即|自动|主动)?(?:联网)?(?:生成|更新|重做|补充|添加|整理|完善|修改|做一套)(?:面试)?(?:技能|面试知识|知识点)/g,
-    '',
-  );
-  return /(?:生成|更新|重做|补充|添加|整理|完善|修改|做一套).{0,20}(?:技能|面试知识|知识点)|(?:技能|面试知识|知识点).{0,20}(?:生成|更新|重做|补充|添加|整理|完善|修改)/.test(
-    affirmative,
-  );
+  return skillResearchScope(prompt) !== undefined;
 }
 export const mockPreparation: PreparationChatService = {
   async streamReply(prompt, info, onChunk, signal, options) {

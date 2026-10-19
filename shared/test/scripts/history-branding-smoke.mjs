@@ -315,7 +315,7 @@ try {
   assert.equal(
     createHash('sha256').update(assets[0]).digest('hex'),
     // The supplied artwork is repository-owned; do not depend on a developer's desktop copy.
-    'ce57ceeabcb4a23510fd7dca22234ecd7ff6a50c86f042731c6f03687edcb3f7',
+    '00dad880a587b123f225be5978eac719591025d128f30bdb9b39b460000da0ef',
   );
   assert.deepEqual(assets[1], assets[3]);
   assert.equal(assets[1].readUInt32BE(16), 512);

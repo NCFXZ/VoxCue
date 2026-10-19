@@ -19,7 +19,6 @@ import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
-import { useModelProvider } from './useModelProvider';
 import { SidebarUpdate } from './SidebarUpdate';
 interface Props {
   userName: string;
@@ -44,17 +43,13 @@ export function Sidebar({
   onLogout,
 }: Props) {
   const connection = useChatConnection();
-  const provider = useModelProvider();
   const preparation = usePreparation();
   const [loggingOut, setLoggingOut] = useState(false);
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
       <div className="sidebar-heading">
         <span className="sidebar-wordmark">
-          <AppLogo size={22} />{' '}
-          <strong>
-            VoxCue<span>面试练习助手</span>
-          </strong>
+          <AppLogo size={24} /> <strong>VoxCue</strong>
         </span>
         <Button
           variant="ghost"
@@ -159,18 +154,6 @@ export function Sidebar({
         {!collapsed && (
           <div className="local-note">
             <div className="sidebar-status-row">
-              <div className="sidebar-service-status">
-                <span className={`status-dot ${connection.error ? 'is-error' : ''}`} />
-                <span role="status">
-                  {connection.live
-                    ? connection.loading
-                      ? '正在加载账户模型…'
-                      : connection.error || !connection.models.length
-                        ? '账户已授权 · 模型不可用'
-                        : `${provider.name} 可用`
-                    : '未连接模型服务'}
-                </span>
-              </div>
               <SidebarUpdate />
             </div>
             {connection.error && (
@@ -179,7 +162,6 @@ export function Sidebar({
                 重新加载模型
               </button>
             )}
-            {!connection.live && <p>从容练习，清晰表达。</p>}
           </div>
         )}
         <DropdownMenu.Root>

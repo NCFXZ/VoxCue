@@ -16,6 +16,7 @@ import {
   ArrowUpRight24Regular,
   ArrowUp24Regular,
   Checkmark24Regular,
+  Warning24Regular,
   ChevronDown24Regular,
   QuestionCircle24Regular,
   Copy24Regular,
@@ -56,9 +57,21 @@ import {
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
-function icon(Component: ComponentType<{ style?: CSSProperties; 'aria-hidden'?: boolean }>) {
+function icon(
+  Component: ComponentType<{
+    style?: CSSProperties;
+    'aria-hidden'?: boolean;
+    'data-ui-icon'?: boolean;
+  }>,
+) {
   return ({ size = 20 }: { size?: number; strokeWidth?: number }) => (
-    <Component aria-hidden={true} style={{ width: size, height: size, flexShrink: 0 }} />
+    <Component
+      aria-hidden={true}
+      data-ui-icon={true}
+      style={
+        { width: size, height: size, flexShrink: 0, '--icon-size': `${size}px` } as CSSProperties
+      }
+    />
   );
 }
 export const AudioLines = icon(Mic24Regular);
@@ -86,6 +99,7 @@ export const PanelLeftOpen = icon(PanelLeftExpand24Regular);
 export const ArrowUpRight = icon(ArrowUpRight24Regular);
 export const ArrowUp = icon(ArrowUp24Regular);
 export const Check = icon(Checkmark24Regular);
+export const Warning = icon(Warning24Regular);
 export const ChevronDown = icon(ChevronDown24Regular);
 export const CircleHelp = icon(QuestionCircle24Regular);
 export const Copy = icon(Copy24Regular);

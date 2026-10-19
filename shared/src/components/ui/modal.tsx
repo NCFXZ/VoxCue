@@ -13,6 +13,8 @@ export function Modal({
   className = '',
   closeLabel = '关闭对话框',
   hideHeader = false,
+  footer,
+  backdrop = 'viewport',
 }: {
   title: string;
   onClose(): void;
@@ -25,6 +27,8 @@ export function Modal({
   className?: string;
   closeLabel?: string;
   hideHeader?: boolean;
+  footer?: ReactNode;
+  backdrop?: 'viewport' | 'transparent';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
@@ -44,6 +48,7 @@ export function Modal({
       ref={ref}
       className={`app-dialog ${wide ? 'wide' : ''} ${destructive ? 'destructive-dialog' : ''} ${className}`}
       aria-label={title}
+      data-backdrop={backdrop}
       onCancel={(event) => {
         event.preventDefault();
         onClose();
@@ -56,8 +61,13 @@ export function Modal({
             event.clientX > rect.right ||
             event.clientY < rect.top ||
             event.clientY > rect.bottom
-          )
+          ) {
+            // Consume the dismissing click; it must not activate a control
+            // beneath the native dialog or reach a different application.
+            event.preventDefault();
+            event.stopPropagation();
             onClose();
+          }
         }
       }}
     >
@@ -92,6 +102,7 @@ export function Modal({
         )}
         {children}
       </div>
+      {footer && <div className="modal-footer">{footer}</div>}
     </dialog>
   );
 }

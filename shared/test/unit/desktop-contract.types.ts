@@ -53,17 +53,25 @@ desktop.screenCapturePermission('open-settings');
 desktop.screenCapturePermission({ url: 'https://example.com' });
 // @ts-expect-error Only the three fixed permission actions are exposed.
 desktop.screenCapturePermission('grant');
-desktop.interviewAnswer({ id: 'screen', modelId: 'model', screenshot: 'only' });
+desktop.interviewScreenshot({ op: 'capture' });
+desktop.interviewScreenshot({ op: 'remove', id: 'screenshot-id' });
+desktop.interviewScreenshot({ op: 'clear' });
+desktop.reconnectInterviewAudio({ sources: ['system'], system: 'output' });
+desktop.dictation({ op: 'test', id: 'audio-test', options: { sources: ['system', 'microphone'] } });
+desktop.dictation({ op: 'test-stop', id: 'audio-test' });
+// @ts-expect-error Audio recovery accepts devices only, never a model change.
+desktop.reconnectInterviewAudio({ sources: ['system'], modelId: 'other' });
+desktop.interviewAnswer({ id: 'screen', modelId: 'model', screenshotIds: ['screenshot-id'] });
 desktop.interviewAnswer({
   id: 'attach',
   modelId: 'model',
   question: '解释题目',
-  screenshot: 'attach',
+  screenshotIds: ['screenshot-id'],
 });
-// @ts-expect-error Screenshot-only requests cannot include draft or transcript text.
-desktop.interviewAnswer({ id: 'screen', modelId: 'model', question: 'draft', screenshot: 'only' });
-// @ts-expect-error Only a controlled capture mode is accepted, never file paths or image bytes.
-desktop.interviewAnswer({ id: 'screen', modelId: 'model', screenshot: { path: 'C:/private.png' } });
+// @ts-expect-error Captures never accept arbitrary paths or source IDs.
+desktop.interviewScreenshot({ op: 'capture', path: '/private.png' });
+// @ts-expect-error Only references to staged images may be submitted.
+desktop.interviewAnswer({ id: 'screen', modelId: 'model', files: [{ bytes: new Uint8Array() }] });
 desktop.moveInterviewWindow({ phase: 'start' });
 desktop.moveInterviewWindow({ phase: 'move' });
 desktop.moveInterviewWindow({ phase: 'end' });
@@ -195,3 +203,7 @@ desktop.knowledge({
   // @ts-expect-error Paths never enter the renderer bridge.
   path: 'C:/private',
 });
+
+desktop.updateInterviewModel({ modelId: 'test', effort: 'auto' });
+// @ts-expect-error Model updates cannot replace the frozen profile.
+desktop.updateInterviewModel({ modelId: 'test', effort: 'auto', profile: {} });

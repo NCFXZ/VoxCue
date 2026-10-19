@@ -15,7 +15,7 @@ const errors = [],
   checks = [];
 try {
   assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), profile);
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -65,8 +65,10 @@ try {
         imageFormat: images[0]?.image_url.startsWith('data:image/png;base64,'),
       };
       globalThis.screenshotRequests.push(record);
-      if (globalThis.screenshotFixture.providerMode === 'fail')
+      if (globalThis.screenshotFixture.providerMode === 'fail') {
+        emit({ id: request.id, type: 'delta', text: '合成未完成回答' });
         throw Error('当前模型不支持图片输入');
+      }
       const answerText = '截图回归回答 ' + globalThis.screenshotRequests.length;
       emit({ id: request.id, type: 'delta', text: answerText });
       return { answerText, usage: null, sources: [] };
@@ -78,6 +80,19 @@ try {
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   main.setDefaultTimeout(20000);
+  const sidebarLogo = main.locator('.sidebar-wordmark .app-logo');
+  await sidebarLogo.waitFor();
+  assert.equal(await sidebarLogo.getAttribute('width'), '24');
+  const brandBounds = await main.locator('.sidebar-heading').evaluate((heading) => {
+    const brand = heading.querySelector('.sidebar-wordmark').getBoundingClientRect();
+    const control = heading.querySelector('button').getBoundingClientRect();
+    const logo = heading.querySelector('.app-logo').getBoundingClientRect();
+    return { gap: control.left - brand.right, width: logo.width, height: logo.height };
+  });
+  assert.ok(brandBounds.gap >= 0);
+  assert.equal(brandBounds.width, 24);
+  assert.equal(brandBounds.height, 24);
+  const logoSource = await sidebarLogo.getAttribute('src');
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -87,8 +102,12 @@ try {
       .click(),
   ]);
   floating.setDefaultTimeout(20000);
+  assert.equal(
+    await floating.locator('.floating-toolbar .app-logo').getAttribute('src'),
+    logoSource,
+  );
   floating.on('pageerror', (error) => errors.push(error.message));
-  await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
   let nativeCapture;
   if (process.argv.includes('--native-capture')) {
@@ -181,204 +200,154 @@ try {
       };
     },
   );
-  const attach = floating.getByRole('button', { name: '发送题目时附当前截图', exact: true });
-  const camera = floating.getByRole('button', { name: '仅发送当前屏幕截图', exact: true });
+  assert.equal(
+    await floating.getByRole('button', { name: '发送题目时附当前截图', exact: true }).count(),
+    0,
+  );
+  const camera = floating.getByRole('button', { name: '截取图像', exact: true });
   const send = floating.getByRole('button', { name: '发送面试问题', exact: true });
   const input = floating.getByRole('textbox', { name: '面试提问', exact: true });
-  assert.equal(await attach.getAttribute('aria-pressed'), 'false');
-  assert.equal(await camera.isEnabled(), true);
-  const cameraBox = await camera.boundingBox(),
-    sendBox = await send.boundingBox();
-  assert.ok(cameraBox.x + cameraBox.width <= sendBox.x && Math.abs(cameraBox.y - sendBox.y) < 1);
-  assert.equal(await floating.locator('[title]').count(), 0);
+  const previews = floating.locator('.floating-screenshot-preview');
   const requests = () => app.evaluate(() => globalThis.screenshotRequests);
   const captured = () => app.evaluate(() => globalThis.screenshotFixture.count);
+  const waitCount = async (count) => {
+    await floating.waitForFunction(
+      (count) => document.querySelectorAll('.floating-screenshot-preview').length === count,
+      count,
+    );
+    await camera.getByText(count + '/5', { exact: true }).waitFor({ state: 'attached' });
+    await floating.waitForFunction(
+      () =>
+        !document
+          .querySelector('.floating-screenshot-button')
+          .getAnimations()
+          .some((animation) => animation.playState === 'running'),
+    );
+  };
   const waitAnswer = async (count) => {
-    await app.evaluate((_electron, count) => (globalThis.screenshotExpected = count), count);
     await floating.getByText('截图回归回答 ' + count, { exact: true }).waitFor();
     return (await requests()).at(-1);
   };
-  await input.fill('草稿文字不能发送');
+  const collapsedWidth = (await camera.boundingBox()).width;
+  assert.ok(collapsedWidth <= 36);
+  await input.fill('解释这些截图，先保留我的草稿');
   await camera.click();
-  const only = await waitAnswer(1);
-  assert.equal(await input.inputValue(), '草稿文字不能发送');
-  assert.equal(only.turns.length, 1);
-  assert.equal(only.imageInputs, 1);
-  assert.equal(only.imageFormat, true);
-  assert.equal(only.knowledgeBaseId, null);
-  assert.ok(!JSON.stringify(only).includes('草稿文字'));
-  await floating.getByText('仅发送当前截图', { exact: true }).waitFor();
+  await waitCount(1);
+  assert.equal(await input.inputValue(), '解释这些截图，先保留我的草稿');
+  assert.equal((await requests()).length, 0);
   assert.equal(await captured(), 1);
-  await attach.click();
-  await input.fill('请解释截图中的 Python 题目');
-  await send.click();
-  const withQuestion = await waitAnswer(2);
-  assert.equal(withQuestion.turns.at(-1).content, '请解释截图中的 Python 题目');
-  assert.equal(withQuestion.imageInputs, 1);
-  assert.equal(await captured(), 2);
-  assert.notEqual(withQuestion.turns.at(-1).files[0].hash, only.turns[0].files[0].hash);
-  await attach.click();
-  await input.fill('普通文字问题');
-  await send.click();
-  const plain = await waitAnswer(3);
-  assert.equal(plain.imageInputs, 0);
-  assert.equal(await captured(), 2);
-  checks.push(
-    'default off; screenshot button before send; screenshot-only preserves draft; attached questions get a fresh image; off sends text only',
-  );
-  await attach.click();
-  await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
-  await app.evaluate(() =>
-    globalThis.screenshotSpeech({
-      type: 'segment',
-      segment: {
-        id: 'auto-image',
-        source: 'system',
-        text: '自动题目也附截图',
-        final: true,
-        startMs: Date.now(),
-        endMs: Date.now() + 10,
-        reason: 'silence',
-      },
-    }),
-  );
-  const automatic = await waitAnswer(4);
-  assert.equal(automatic.turns.at(-1).content, '自动题目也附截图');
-  assert.equal(automatic.imageInputs, 1);
-  await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
-  await input.fill('保留我的输入，不随截图发出');
-  await app.evaluate(() => {
-    globalThis.screenshotSpeech({
-      type: 'segment',
-      segment: {
-        id: 'private-mic',
-        source: 'microphone',
-        text: '麦克风转写不要带到仅截图请求',
-        final: true,
-        startMs: Date.now(),
-        endMs: Date.now() + 10,
-      },
-    });
-    globalThis.screenshotSpeech({
-      type: 'segment',
-      segment: {
-        id: 'private-system',
-        source: 'system',
-        text: '系统临时转写不要发送',
-        final: false,
-        startMs: Date.now(),
-        endMs: Date.now() + 10,
-      },
-    });
-  });
-  await camera.click();
-  const isolated = await waitAnswer(5);
-  assert.equal(isolated.turns.length, 1);
-  assert.equal(isolated.imageInputs, 1);
-  assert.ok(
-    !JSON.stringify(isolated).match(
-      /保留我的输入|麦克风转写|系统临时转写|普通文字问题|自动题目也附截图|截图回归回答/,
-    ),
-  );
-  assert.equal(await input.inputValue(), '保留我的输入，不随截图发出');
-  checks.push(
-    'automatic interviewer questions attach a fresh screenshot; screenshot-only excludes all draft/transcript/conversation history',
-  );
-  await app.evaluate(() => {
-    globalThis.screenshotFixture.mode = 'hold';
-  });
-  await camera.click();
-  await floating
-    .locator('.floating-answer-item')
-    .last()
-    .locator('.activity-detail')
-    .filter({ hasText: '正在截取当前屏幕' })
-    .waitFor();
-  assert.equal(await app.evaluate(() => typeof globalThis.screenshotFixture.finish), 'function');
-  assert.equal(await camera.isDisabled(), true);
-  await floating.getByRole('button', { name: '停止当前回答', exact: true }).click();
-  await app.evaluate(() => {
-    globalThis.screenshotFixture.finish();
-    globalThis.screenshotFixture.mode = 'normal';
-  });
-  await floating
-    .locator('.floating-answer-item')
-    .last()
-    .getByText('已停止回复。', { exact: true })
-    .waitFor();
-  assert.equal((await requests()).length, 5);
-  await app.evaluate(() => {
-    globalThis.screenshotFixture.mode = 'fail';
-  });
-  await camera.click();
-  await floating
-    .locator('.floating-answer-item')
-    .last()
-    .getByText('无法截取当前屏幕，请检查屏幕录制权限后重试。', { exact: true })
-    .waitFor();
-  assert.equal((await requests()).length, 5);
-  await app.evaluate(() => {
-    globalThis.screenshotFixture.mode = 'normal';
-  });
-  await floating
-    .locator('.floating-answer-item')
-    .last()
-    .getByRole('button', { name: '重试面试回答', exact: true })
-    .click();
-  const retried = await waitAnswer(6);
-  assert.equal(retried.turns.length, 1);
-  assert.equal(retried.imageInputs, 1);
-  assert.equal(await input.inputValue(), '保留我的输入，不随截图发出');
-  checks.push(
-    'cancel during capture prevents provider call; capture failure is visible; retry preserves screenshot-only intent and captures again',
-  );
-  await app.evaluate(() => {
-    globalThis.screenshotFixture.providerMode = 'fail';
-  });
-  await camera.click();
-  await floating
-    .locator('.floating-answer-item')
-    .last()
-    .getByText('当前模型不支持图片输入', { exact: true })
-    .waitFor();
-  assert.equal((await requests()).length, 7);
-  assert.equal((await requests()).at(-1).imageInputs, 1);
+  assert.ok((await camera.boundingBox()).width > collapsedWidth + 20);
   assert.equal(
-    await floating
-      .getByRole('button', { name: '关闭截图保护', exact: true })
-      .getAttribute('aria-pressed'),
-    'true',
+    await previews
+      .locator('img')
+      .evaluateAll((images) => images.every((image) => image.complete && image.naturalWidth > 0)),
+    true,
   );
-  const handle = floating.getByRole('button', { name: '拖动右下角调整尺寸', exact: true });
-  for (let i = 0; i < 4; i++) await handle.press('ArrowDown');
+  for (let count = 2; count <= 5; count++) {
+    await camera.click();
+    await waitCount(count);
+  }
+  assert.equal(await camera.isDisabled(), true);
+  const removeSize = await floating
+    .getByRole('button', { name: '移除截图 1', exact: true })
+    .boundingBox();
+  assert.ok(removeSize.width <= 24 && removeSize.height <= 24);
+  assert.equal(await captured(), 5);
+  assert.equal((await requests()).length, 0);
+  await floating.getByRole('button', { name: '移除截图 2', exact: true }).click();
+  await waitCount(4);
+  await camera.click();
+  await waitCount(5);
+  const resize = floating.getByRole('button', { name: '拖动右下角调整尺寸', exact: true });
+  for (let i = 0; i < 4; i++) await resize.press('ArrowDown');
   for (const theme of ['light', 'dark']) {
     await floating.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
       theme,
     );
-    const layout = await floating.locator('.floating-composer').evaluate((node) => {
+    const bounds = await floating.locator('.floating-composer').evaluate((node) => {
       const form = node.getBoundingClientRect(),
         options = node.querySelector('.floating-composer-options').getBoundingClientRect(),
         actions = node.querySelector('.floating-composer-actions').getBoundingClientRect();
       return {
-        left: options.left,
-        right: actions.right,
-        formLeft: form.left,
-        formRight: form.right,
-        optionsRight: options.right,
-        actionsLeft: actions.left,
+        left: options.left - form.left,
+        right: form.right - actions.right,
+        gap: actions.left - options.right,
       };
     });
-    assert.ok(
-      layout.left >= layout.formLeft &&
-        layout.right <= layout.formRight &&
-        layout.optionsRight < layout.actionsLeft,
-    );
-    await floating.locator('.floating-composer').screenshot({});
+    assert.ok(bounds.left >= 0 && bounds.right >= 0 && bounds.gap > 0);
+    const preview = await floating.locator('.floating-composer').screenshot({});
+    if (process.argv.includes('--preview') && theme === 'light')
+      console.log('VOXCUE_PREVIEW:' + preview.toString('base64'));
   }
+  await send.click();
+  const multi = await waitAnswer(1);
+  await waitCount(0);
+  assert.equal(multi.imageInputs, 5);
+  assert.equal(multi.turns.at(-1).content, '解释这些截图，先保留我的草稿');
+  assert.equal(new Set(multi.turns.at(-1).files.map((file) => file.hash)).size, 5);
+  assert.equal(await captured(), 6);
   checks.push(
-    'unsupported image input stays an explicit failure; capture protection unchanged; controls fit minimum panel in both themes',
+    'capture stages previews without sending; count expands through 5/5, remove/add works, manual send uses all five original images',
   );
+  await input.fill('纯文字问题');
+  await send.click();
+  const text = await waitAnswer(2);
+  assert.equal(text.imageInputs, 0);
+  assert.equal(await captured(), 6);
+  await input.fill('');
+  await camera.click();
+  await waitCount(1);
+  await send.click();
+  const only = await waitAnswer(3);
+  await waitCount(0);
+  assert.equal(only.turns.length, 1);
+  assert.equal(only.imageInputs, 1);
+  assert.equal(only.knowledgeBaseId, null);
+  assert.ok(!JSON.stringify(only.turns).includes('纯文字问题'));
+  await app.evaluate(() => {
+    globalThis.screenshotFixture.mode = 'fail';
+  });
+  await camera.click();
+  await floating
+    .getByText('无法截取当前屏幕，请检查屏幕录制权限后重试。', { exact: true })
+    .waitFor();
+  assert.equal((await requests()).length, 3);
+  assert.equal(await previews.count(), 0);
+  await app.evaluate(() => {
+    globalThis.screenshotFixture.mode = 'normal';
+    globalThis.screenshotFixture.providerMode = 'fail';
+  });
+  await camera.click();
+  await waitCount(1);
+  const capturesBeforeRetry = await captured();
+  await send.click();
+  await floating
+    .locator('.floating-answer-item')
+    .last()
+    .getByText('当前模型不支持图片输入', { exact: true })
+    .waitFor();
+  const failureBubble = floating.locator('.floating-answer-item').last().locator('.answer-bubble');
+  assert.equal(
+    await failureBubble.getByRole('button', { name: '重试面试回答', exact: true }).count(),
+    1,
+  );
+  assert.equal(await failureBubble.getByRole('alert').textContent(), '当前模型不支持图片输入');
+  assert.equal(await previews.count(), 1);
+  const failedHash = (await requests()).at(-1).turns.at(-1).files[0].hash;
+  await app.evaluate(() => {
+    globalThis.screenshotFixture.providerMode = 'normal';
+  });
+  await floating.getByRole('button', { name: '重试面试回答', exact: true }).last().click();
+  const retried = await waitAnswer(5);
+  await waitCount(0);
+  assert.equal(await captured(), capturesBeforeRetry);
+  assert.equal(retried.turns.at(-1).files[0].hash, failedHash);
+  checks.push(
+    'text sends do not capture; image-only send excludes history; capture failure stays visible; retry reuses staged pixels',
+  );
+  assert.equal(await camera.getAttribute('title'), '截取图像，加入待发送截图，最多5张');
+  assert.equal(await send.getAttribute('title'), '发送问题（Enter）；换行（Shift+Enter）');
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([
     floating.waitForEvent('close'),
@@ -386,28 +355,25 @@ try {
   ]);
   const history = await main.evaluate(() => localStorage.getItem('copilot-interview-history-v1'));
   assert.ok(history?.includes('"screenshot":"only"'));
-  assert.ok(!history.match(/data:image|iVBORw0KGgo|"bytes"/));
+  assert.ok(!history.match(/data:image|iVBORw0KGgo|"bytes"|"preview"|screenshotIds/));
   assert.deepEqual(errors, []);
-  const result = {
-    passed: true,
-    profile,
-    checks,
-    nativeCapture,
-    requests: (await requests()).length,
-    captures: await captured(),
-    errors,
-    liveAccount: false,
-    nativeAudio: false,
-    screenshotsUploadedToRealProvider: false,
-    screenshotPixelsSaved: false,
-  };
-  await console.log(JSON.stringify(result, null, 2));
-  console.log(result);
-} catch (error) {
-  console.error(error);
-  for (const page of app.windows())
-    if (page.url().endsWith('#interview')) await page.screenshot({});
-  throw error;
+  console.log(
+    JSON.stringify(
+      {
+        passed: true,
+        checks,
+        requests: (await requests()).length,
+        captures: await captured(),
+        liveAccount: false,
+        nativeAudio: false,
+        realScreenCapture: !!nativeCapture,
+        nativeCapture,
+        screenshotPixelsSaved: false,
+      },
+      null,
+      2,
+    ),
+  );
 } finally {
   await app.evaluate(({ BrowserWindow }) => {
     for (const window of BrowserWindow.getAllWindows()) window.destroy();

@@ -109,6 +109,7 @@ describe('桌面平台边界', () => {
   it('开发资源分离共享模型与平台运行时，不涉及用户数据路径', () => {
     const windows = windowsPolicy;
     const dev = desktopResources(environment, windows);
+    expect(dev.brandLogo).toBe(path.resolve(environment.appPath, '../shared/public/voxcue.png'));
     expect(dev.screenPermission).toBeUndefined();
     expect(dev.icon).toBe(path.join(environment.appPath, 'public/voxcue.ico'));
     expect(dev.audioHelper).toBe(path.join(environment.appPath, 'native/bin/VoxCue.Audio.exe'));
@@ -125,6 +126,7 @@ describe('桌面平台边界', () => {
     expect(macDev.icon).toBe(path.join(environment.appPath, 'public/voxcue.png'));
     expect(macDev.speechModels).toBe(dev.speechModels);
     const packaged = desktopResources({ ...environment, packaged: true }, windows);
+    expect(packaged.brandLogo).toBe(path.join(environment.appPath, 'dist/voxcue.png'));
     expect(packaged.audioHelper).toBe(
       path.join(environment.resourcesPath, 'native/VoxCue.Audio.exe'),
     );

@@ -120,6 +120,7 @@ describe('Local authentication service', () => {
       storage: data.storage,
       fetch: network,
       verify,
+      callbackLogo: async () => Buffer.from('synthetic-local-logo'),
       openBrowser: async (address) => {
         const url = new URL(address);
         const callback = new URL(url.searchParams.get('redirect_uri')!);
@@ -128,11 +129,40 @@ describe('Local authentication service', () => {
           code: 'bad',
           client_id: 'oaiapp_test',
         }).toString();
-        expect((await fetch(callback)).status).toBe(400);
+        const invalid = await fetch(callback);
+        expect(invalid.status).toBe(400);
+        expect(await invalid.text()).toContain('未能确认授权');
         expect(network).not.toHaveBeenCalled();
         callback.searchParams.set('state', url.searchParams.get('state')!);
         callback.searchParams.set('code', 'one-time-code');
-        expect((await fetch(callback)).status).toBe(200);
+        const received = await fetch(callback);
+        expect(received.status).toBe(200);
+        expect(received.headers.get('content-type')).toBe('text/html; charset=utf-8');
+        expect(received.headers.get('cache-control')).toBe('no-store');
+        expect(received.headers.get('referrer-policy')).toBe('no-referrer');
+        expect(received.headers.get('x-content-type-options')).toBe('nosniff');
+        expect(received.headers.get('content-security-policy')).toMatch(
+          /^default-src 'none'; style-src 'sha256-[^']+'; img-src data:;/,
+        );
+        const html = await received.text();
+        expect(html).toContain('授权已收到');
+        expect(html).toContain('你现在可以关闭此页面');
+        expect(html).toContain(
+          'data:image/png;base64,' + Buffer.from('synthetic-local-logo').toString('base64'),
+        );
+        expect(html).not.toMatch(/<(?:script|form|iframe)\b|https?:\/\//i);
+        for (const secret of [
+          'one-time-code',
+          url.searchParams.get('state')!,
+          'secret-access',
+          'secret-refresh',
+        ])
+          expect(html).not.toContain(secret);
+        // Receiving a code is not yet a verified application session.
+        expect(html).not.toContain('登录成功');
+        const repeated = await fetch(callback);
+        expect(repeated.status).toBe(409);
+        expect(await repeated.text()).toContain('授权链接已使用');
       },
     });
     const session = await service.signIn();

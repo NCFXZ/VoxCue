@@ -23,7 +23,9 @@ beforeEach(() => {
   });
   useInterview.getState().reset();
   useInterview.setState({ configurationLocked: false });
-  useInterview.getState().configure({ mode: 'local', aiEnabled: false });
+  useInterview
+    .getState()
+    .configure({ mode: 'local', aiEnabled: false, options: { sources: ['microphone', 'system'] } });
   useInterview.getState().setAutoAnswer(false);
   useInterview.getState().start();
   emit({ type: 'status', status: { state: 'running', model: 'test' } });
@@ -46,6 +48,50 @@ const segment = (id: string, text: string, final: boolean) => ({
     endMs: Date.now() + 500,
     reason: 'silence' as const,
   },
+});
+it('自动回答保留2200ms静音等待，不再提供待提交计时和取消状态', async () => {
+  const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
+  useInterview.getState().setAutoAnswer(true);
+  emit(segment('normal', '请介绍项目', true));
+  await vi.advanceTimersByTimeAsync(2199);
+  expect(ask).not.toHaveBeenCalled();
+  await vi.advanceTimersByTimeAsync(1);
+  expect(ask).toHaveBeenCalledWith('请介绍项目', ['normal'], []);
+  expect(useInterview.getState()).not.toHaveProperty('autoSubmitAt');
+  expect(useInterview.getState()).not.toHaveProperty('cancelAutoSubmit');
+  expect(useInterview.getState().transcripts.at(-1)?.text).toBe('请介绍项目');
+  ask.mockRestore();
+});
+it('重连音频保留本场记录和回答，恢复后继续接收两路活动及问题', async () => {
+  emit(segment('before-reconnect', '已有问题', true));
+  const sessionId = useInterview.getState().sessionId;
+  useInterview.setState({
+    answers: [{ id: 'saved-answer', question: '已有问题', content: '已有回答', createdAt: 0 }],
+    screenshots: [{ id: 'shot', preview: 'synthetic' }],
+  });
+  emit({
+    type: 'status',
+    status: { state: 'error', model: 'test', error: 'synthetic disconnected' },
+  });
+  Object.assign(window.desktop!, {
+    reconnectInterviewAudio: vi.fn(async () => ({ state: 'running', model: 'test' })),
+  });
+  expect(
+    await useInterview.getState().reconnectAudio({ sources: ['system'], system: 'changed' }),
+  ).toBe(true);
+  expect(useInterview.getState()).toMatchObject({
+    sessionId,
+    status: 'running',
+    options: { sources: ['system'], system: 'changed' },
+  });
+  expect(useInterview.getState().transcripts[0].text).toBe('已有问题');
+  expect(useInterview.getState().answers[0].content).toBe('已有回答');
+  expect(useInterview.getState().screenshots[0].id).toBe('shot');
+  emit({ type: 'activity', source: 'system', speaking: true, level: 0.2 });
+  emit(segment('after-reconnect', '新问题', true));
+  expect(useInterview.getState().audioLevels.system?.level).toBe(0.2);
+  expect(useInterview.getState().audioLevels.system?.inputAt).toBe(Date.now());
+  expect(useInterview.getState().draftQuestion).toBe('新问题');
 });
 it('明确回应按2200毫秒自动提交，关闭自动回答后仍可手动发送', async () => {
   const desktop = window.desktop!;
@@ -256,6 +302,21 @@ it('各音源恢复只清除自身间断提示，静音活动也能恢复，语�
   expect(useInterview.getState().speechError).toBeNull();
   expect(useInterview.getState().error).toBe('回答服务失败');
 });
+it('中断后的迟到活动不恢复输入或清除故障提示，恢复时不复用旧电平', async () => {
+  await Promise.resolve();
+  emit({ type: 'activity', source: 'system', speaking: true, level: 0.2 });
+  expect(useInterview.getState().audioLevels.system?.inputAt).toBe(Date.now());
+  emit({ type: 'gap', source: 'system', message: '系统采集断开' });
+  emit({
+    type: 'status',
+    status: { state: 'error', model: 'test', error: '系统采集断开', failureSource: 'system' },
+  });
+  emit({ type: 'activity', source: 'system', speaking: true, level: 0.2 });
+  expect(useInterview.getState().audioLevels).toEqual({});
+  expect(useInterview.getState().speechWarnings.system).toBe('系统采集断开');
+  emit({ type: 'status', status: { state: 'running', model: 'test' } });
+  expect(useInterview.getState().audioLevels).toEqual({});
+});
 it('临时结果原位替换，终稿冻结且去重，手动整理后消费一次', async () => {
   emit(segment('s', '请', false));
   emit(segment('s', '请介绍项目', false));
@@ -390,4 +451,84 @@ it('结束等待较慢句末识别时只保存尾段，不重新触发自动回�
   finish();
   await ending;
   expect(useInterview.getState().status).toBe('ended');
+});
+
+it('切换模型期间保留到期问题，后台成功后用新设置提交；结束后的迟到更新不回写', async () => {
+  const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
+  let finish!: (value: unknown) => void;
+  Object.assign(window.desktop!, {
+    updateInterviewModel: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  });
+  useInterview.getState().setAutoAnswer(true);
+  const changing = useInterview.getState().updateModel('next', 'low');
+  emit(segment('model-change', '如何设计接口', true));
+  await vi.advanceTimersByTimeAsync(2200);
+  expect(ask).not.toHaveBeenCalled();
+  finish({ ok: true, modelId: 'next', effort: 'low' });
+  expect(await changing).toBe(true);
+  expect(useInterview.getState()).toMatchObject({
+    modelId: 'next',
+    effort: 'low',
+    updatingModel: false,
+  });
+  expect(ask).toHaveBeenCalledWith('如何设计接口', ['model-change'], []);
+  const late = useInterview.getState().updateModel('late', 'high');
+  useInterview.getState().reset();
+  finish({ ok: true, modelId: 'late', effort: 'high' });
+  expect(await late).toBe(false);
+  expect(useInterview.getState().modelId).toBe('next');
+  expect(useInterview.getState().updatingModel).toBe(false);
+  ask.mockRestore();
+});
+
+it('回答过程中设置下一题模型和强度，不取消当前回答，到期的后续问题使用新设置', async () => {
+  let finish!: (value: unknown) => void;
+  let onChat!: (event: ChatEvent) => void;
+  const answer = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    )
+    .mockResolvedValue({ ok: true, answerText: 'next answer', provider: 'chatgpt' });
+  const cancel = vi.fn(async () => {});
+  Object.assign(window.desktop!, {
+    onChatEvent: (listener: (event: ChatEvent) => void) => {
+      onChat = listener;
+      return () => {};
+    },
+    interviewAnswer: answer,
+    interviewCancel: cancel,
+    updateInterviewModel: vi.fn(async () => ({ ok: true, modelId: 'next', effort: 'high' })),
+  });
+  useInterview.setState({ aiEnabled: true, modelId: 'old', effort: 'low' });
+  useInterview.getState().setAutoAnswer(true);
+  const current = useInterview.getState().ask('当前问题');
+  expect(answer.mock.calls[0][0]).toMatchObject({ modelId: 'old', effort: 'low' });
+  expect(await useInterview.getState().updateModel('next', 'high')).toBe(true);
+  expect(useInterview.getState().generating).toBe(true);
+  expect(cancel).not.toHaveBeenCalled();
+  onChat({ id: answer.mock.calls[0][0].id, type: 'delta', text: 'old stream continues' });
+  expect(useInterview.getState().answers[0].content).toBe('old stream continues');
+  emit(segment('next-question', '后续问题', true));
+  await vi.advanceTimersByTimeAsync(2200);
+  expect(answer).toHaveBeenCalledTimes(1);
+  finish({ ok: true, answerText: 'old answer', provider: 'chatgpt' });
+  await current;
+  await vi.advanceTimersByTimeAsync(0);
+  expect(answer).toHaveBeenCalledTimes(2);
+  expect(answer.mock.calls[1][0]).toMatchObject({
+    question: '后续问题',
+    modelId: 'next',
+    effort: 'high',
+  });
+  expect(useInterview.getState().answers[0].content).toBe('old answer');
+  expect(cancel).not.toHaveBeenCalled();
 });

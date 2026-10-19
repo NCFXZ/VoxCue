@@ -40,10 +40,17 @@ try {
     height: element.getBoundingClientRect().height,
     viewportHeight: innerHeight,
     brandTop: element.querySelector('.sidebar-wordmark').getBoundingClientRect().top,
+    brandHeight: element.querySelector('.sidebar-wordmark').getBoundingClientRect().height,
+    headingTop: element.querySelector('.sidebar-heading').getBoundingClientRect().top,
+    collapseCenter: (() => {
+      const box = element.querySelector('.sidebar-heading button').getBoundingClientRect();
+      return box.top + box.height / 2;
+    })(),
   }));
   assert.equal(metrics.top, 0);
   assert.equal(metrics.height, metrics.viewportHeight);
-  assert.equal(metrics.brandTop, 44);
+  assert.equal(metrics.headingTop, 44);
+  assert.equal(metrics.brandTop + metrics.brandHeight / 2, metrics.collapseCenter);
   assert.deepEqual(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()

@@ -7,16 +7,18 @@ import type {
   SpeechStatus,
   InterviewConfiguration,
   AudioSource,
-  InterviewScreenshotMode,
+  InterviewScreenshot,
 } from '../../electron/contracts/speech';
 import { QuestionBuffer, interviewAnswer } from '../services/speech';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
+import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
   mode: 'local' | 'mock';
   speech: SpeechStatus;
   options: SpeechOptions;
   configurationLocked: boolean;
+  knowledgeBaseName?: string;
   initialize(configuration: InterviewConfiguration): void;
   pendingQuestion: string;
   draftQuestion: string;
@@ -26,12 +28,19 @@ interface InterviewState {
   configure(
     value: Partial<Pick<InterviewState, 'mode' | 'options' | 'aiEnabled' | 'modelId' | 'effort'>>,
   ): void;
-  submitTranscript(editedQuestion?: string): Promise<void>;
+  submitTranscript(editedQuestion?: string, includeScreenshots?: boolean): Promise<void>;
   status: Status;
   autoAnswer: boolean;
-  attachScreenshot: boolean;
-  setAttachScreenshot(enabled: boolean): void;
-  submitScreenshot(): Promise<void>;
+  updatingModel: boolean;
+  updateModel(modelId: string, effort: ReasoningEffort | 'auto'): Promise<boolean>;
+  audioLevels: AudioLevels;
+  reconnecting: boolean;
+  reconnectAudio(options?: SpeechOptions): Promise<boolean>;
+  screenshots: InterviewScreenshot[];
+  capturingScreenshot: boolean;
+  captureScreenshot(): Promise<void>;
+  removeScreenshot(id: string): Promise<void>;
+  clearScreenshots(): void;
   transcripts: Transcript[];
   answers: Answer[];
   generating: boolean;
@@ -49,11 +58,7 @@ interface InterviewState {
   end(): Promise<void>;
   reset(): void;
   setAutoAnswer(enabled: boolean): void;
-  ask(
-    question: string,
-    sourceTranscriptIds?: string[],
-    screenshot?: InterviewScreenshotMode | false,
-  ): Promise<void>;
+  ask(question: string, sourceTranscriptIds?: string[], screenshotIds?: string[]): Promise<void>;
 }
 let speechController: AbortController | undefined;
 let answerController: AbortController | undefined;
@@ -64,6 +69,8 @@ let unsubscribeSpeech: (() => void) | undefined;
 let questionTimer: ReturnType<typeof setTimeout> | undefined;
 let automaticQuestionReady = false;
 const questions = new QuestionBuffer();
+const answerScreenshots = new Map<string, string[]>();
+let screenshotEpoch = 0;
 const submittedInterim = new Set<string>();
 const id = () => String(++sequence);
 const stop = () => {
@@ -81,8 +88,10 @@ export const useInterview = create<InterviewState>((set, get) => ({
     if (get().configurationLocked) return;
     set({
       ...structuredClone(configuration),
+      knowledgeBaseName: configuration.knowledgeBaseName,
       configurationLocked: true,
-      attachScreenshot: false,
+      screenshots: [],
+      capturingScreenshot: false,
     });
     get().start();
   },
@@ -109,11 +118,25 @@ export const useInterview = create<InterviewState>((set, get) => ({
       set({ pendingQuestion: '', draftQuestion: '' });
     }
   },
-  async submitTranscript(editedQuestion) {
+  async submitTranscript(editedQuestion, includeScreenshots = false) {
     try {
       clearTimeout(questionTimer);
-      const question = editedQuestion?.trim() || get().draftQuestion || questions.text('system');
-      if (!question.trim() || get().generating) return;
+
+      const screenshotIds = includeScreenshots ? get().screenshots.map((shot) => shot.id) : [];
+      const question =
+        editedQuestion?.trim() ||
+        (screenshotIds.length ? '' : get().draftQuestion || questions.text('system'));
+      if (
+        (!question.trim() && !screenshotIds.length) ||
+        get().generating ||
+        get().updatingModel ||
+        (includeScreenshots && get().capturingScreenshot)
+      )
+        return;
+      if (!question.trim()) {
+        await get().ask('', undefined, screenshotIds);
+        return;
+      }
       automaticQuestionReady = false;
       const sourceTranscriptIds = [
         ...new Set([
@@ -129,22 +152,119 @@ export const useInterview = create<InterviewState>((set, get) => ({
         if (row.source === 'system' && !row.final) submittedInterim.add(row.id);
       questions.consume('system');
       set({ pendingQuestion: '', draftQuestion: '' });
-      await get().ask(question, sourceTranscriptIds);
+      await get().ask(question, sourceTranscriptIds, screenshotIds);
     } catch (error) {
       set({ error: (error as Error).message });
     }
   },
   status: 'idle',
   autoAnswer: true,
-  attachScreenshot: false,
-  setAttachScreenshot(enabled) {
-    set({ attachScreenshot: enabled });
+  audioLevels: {},
+  reconnecting: false,
+  updatingModel: false,
+  async updateModel(modelId, effort) {
+    if (get().updatingModel || get().status === 'ended') return false;
+    const session = get().sessionId;
+    set({ updatingModel: true });
+    try {
+      const result = await window.desktop!.updateInterviewModel({ modelId, effort });
+      if (get().sessionId !== session || get().status === 'ended') return false;
+      if (!result.ok) throw Error(result.error.message);
+      set({ modelId: result.modelId, effort: result.effort ?? 'auto' });
+      return true;
+    } finally {
+      if (get().sessionId === session) {
+        set({ updatingModel: false });
+        if (
+          automaticQuestionReady &&
+          get().autoAnswer &&
+          get().status === 'running' &&
+          !get().generating
+        )
+          void get().submitTranscript();
+      }
+    }
   },
-  async submitScreenshot() {
-    if (get().generating) return;
+  async reconnectAudio(options) {
+    if (get().reconnecting || get().speech.state === 'loading' || get().status === 'ended')
+      return false;
+    const attempt = startAttempt,
+      session = get().sessionId;
     clearTimeout(questionTimer);
     automaticQuestionReady = false;
-    await get().ask('当前屏幕截图', undefined, 'only');
+    set({
+      reconnecting: true,
+      status: 'paused',
+      speechError: null,
+      audioLevels: {},
+      speech: { model: get().speech.model, state: 'loading' },
+    });
+    try {
+      const result = await window.desktop!.reconnectInterviewAudio(options);
+      if (attempt !== startAttempt || get().sessionId !== session || get().status === 'ended')
+        return false;
+      if (result.state !== 'running')
+        throw Error(result.error ?? '音频连接失败，请检查设备后重试。');
+      questions.clear();
+      set({
+        speech: result,
+        status: 'running',
+        options: options ?? get().options,
+        speechWarnings: {},
+        pendingQuestion: '',
+        draftQuestion: '',
+      });
+      return true;
+    } catch (error) {
+      if (attempt === startAttempt)
+        set({
+          speechError: (error as Error).message,
+          speech: { ...get().speech, state: 'error' },
+          status: 'paused',
+        });
+      return false;
+    } finally {
+      if (attempt === startAttempt) set({ reconnecting: false });
+    }
+  },
+  screenshots: [],
+  capturingScreenshot: false,
+  async captureScreenshot() {
+    if (get().capturingScreenshot || get().generating || get().screenshots.length >= 5) return;
+    const epoch = screenshotEpoch;
+    set({ capturingScreenshot: true, error: null });
+    try {
+      if (!get().aiEnabled || !window.desktop) throw Error('截图回答需要先连接模型服务。');
+      const result = await window.desktop.interviewScreenshot({ op: 'capture' });
+      if (epoch !== screenshotEpoch) return;
+      if (!result.ok) throw Error(result.error.message);
+      if (!result.screenshot) throw Error('未能获取截图，请重试。');
+      set((state) => ({ screenshots: [...state.screenshots, result.screenshot!] }));
+    } catch (error) {
+      if (epoch === screenshotEpoch) set({ error: (error as Error).message });
+    } finally {
+      if (epoch === screenshotEpoch) set({ capturingScreenshot: false });
+    }
+  },
+  async removeScreenshot(id) {
+    if (get().generating) return;
+    const epoch = screenshotEpoch;
+    try {
+      const result = await window.desktop?.interviewScreenshot({ op: 'remove', id });
+      if (epoch !== screenshotEpoch) return;
+      if (!result?.ok)
+        throw Error(result && !result.ok ? result.error.message : '移除截图失败，请重试。');
+      set((state) => ({ screenshots: state.screenshots.filter((shot) => shot.id !== id) }));
+    } catch (error) {
+      if (epoch === screenshotEpoch) set({ error: (error as Error).message });
+    }
+  },
+  clearScreenshots() {
+    ++screenshotEpoch;
+    answerScreenshots.clear();
+    set({ screenshots: [], capturingScreenshot: false });
+    if (typeof window !== 'undefined')
+      void window.desktop?.interviewScreenshot?.({ op: 'clear' }).catch(() => {});
   },
   transcripts: [],
   answers: [],
@@ -170,7 +290,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
       return;
     useHistory.getState().save({
       id: state.sessionId,
-      title: '面试记录',
+      title: state.knowledgeBaseName ? `「${state.knowledgeBaseName}」面试记录` : '面试记录',
+      ...(state.knowledgeBaseName ? { knowledgeBaseName: state.knowledgeBaseName } : {}),
       startedAt: state.startedAt,
       endedAt: state.endedAt ?? Date.now(),
       status,
@@ -199,15 +320,41 @@ export const useInterview = create<InterviewState>((set, get) => ({
           answers: [],
           pendingQuestion: '',
           draftQuestion: '',
+          audioLevels: {},
+          reconnecting: false,
           sessionId: crypto.randomUUID(),
           startedAt: Date.now(),
           endedAt: null,
         });
       }
       unsubscribeSpeech?.();
+      const listeningSession = get().sessionId;
       unsubscribeSpeech = desktop.onSpeechEvent((event) => {
+        if (get().sessionId !== listeningSession) return;
+        if (
+          event.type === 'activity' &&
+          (get().speech.state !== 'running' ||
+            get().status !== 'running' ||
+            !get().options.sources.includes(event.source))
+        )
+          return;
+        if (event.type === 'activity')
+          set((s) => ({
+            audioLevels: {
+              ...s.audioLevels,
+              [event.source]: recordAudioLevel(
+                s.audioLevels[event.source],
+                event.level,
+                event.speaking,
+                Date.now(),
+              ),
+            },
+          }));
         if (event.type === 'gap') {
-          set((s) => ({ speechWarnings: { ...s.speechWarnings, [event.source]: event.message } }));
+          set((s) => ({
+            speechWarnings: { ...s.speechWarnings, [event.source]: event.message },
+            audioLevels: { ...s.audioLevels, [event.source]: undefined },
+          }));
           if (event.source === 'system') {
             clearTimeout(questionTimer);
             automaticQuestionReady = false;
@@ -216,8 +363,13 @@ export const useInterview = create<InterviewState>((set, get) => ({
           }
         }
         if (event.type === 'status') {
+          if (event.status.state === 'error' || event.status.state === 'paused') {
+            clearTimeout(questionTimer);
+            automaticQuestionReady = false;
+          }
           set({
             speech: event.status,
+            ...(event.status.state !== 'running' ? { audioLevels: {} } : {}),
             ...(event.status.state === 'running'
               ? { status: 'running' as const, speechError: null }
               : event.status.state === 'paused'
@@ -256,6 +408,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
           }));
           // Microphone text is always the interviewee, never an AI question.
           if (segment.source !== 'system') return;
+          if (get().reconnecting) return;
           if (finishingSession === get().sessionId) return;
           if (segment.reason === 'discontinuity') {
             clearTimeout(questionTimer);
@@ -267,15 +420,23 @@ export const useInterview = create<InterviewState>((set, get) => ({
           if (submittedInterim.has(segment.id)) return;
           clearTimeout(questionTimer);
           automaticQuestionReady = false;
+
           try {
             if (questions.add(segment)) {
               set({ pendingQuestion: questions.text('system') });
-              if (get().autoAnswer && segment.reason === 'silence')
+              if (get().autoAnswer && segment.reason === 'silence') {
                 questionTimer = setTimeout(() => {
                   automaticQuestionReady = true;
-                  if (get().status === 'running' && get().autoAnswer && !get().generating)
+
+                  if (
+                    get().status === 'running' &&
+                    get().autoAnswer &&
+                    !get().generating &&
+                    !get().updatingModel
+                  )
                     void get().submitTranscript();
                 }, 2200);
+              }
             }
             const interim = get()
               .transcripts.filter(
@@ -293,7 +454,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
         error: null,
         speechError: null,
         speechWarnings: {},
-        speech: { ...get().speech, state: 'loading' },
+        speech: { model: get().speech.model, state: 'loading' },
       });
       const sessionId = get().sessionId;
       void desktop
@@ -373,16 +534,29 @@ export const useInterview = create<InterviewState>((set, get) => ({
       void window.desktop
         ?.speech({ op: 'pause' })
         .catch((error) => set({ error: (error as Error).message }));
-    set({ status: 'paused', generating: false });
+    set({
+      status: 'paused',
+      generating: false,
+
+      audioLevels: {},
+      reconnecting: false,
+    });
   },
   async end() {
+    get().clearScreenshots();
     ++startAttempt;
     const sessionId = get().sessionId;
     stop();
     get().stopAnswer();
     if (get().mode === 'local') {
       finishingSession = sessionId;
-      set({ status: 'paused', generating: false });
+      set({
+        status: 'paused',
+        generating: false,
+
+        audioLevels: {},
+        reconnecting: false,
+      });
       try {
         await window.desktop?.speech({ op: 'stop' });
       } catch (error) {
@@ -405,6 +579,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
       await useHistory.getState().generateTitle(current.sessionId, current.modelId);
   },
   reset() {
+    get().clearScreenshots();
     finishingSession = null;
     ++startAttempt;
     stop();
@@ -417,6 +592,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
     get().archive(get().status === 'ended' ? 'ended' : 'interrupted');
     set({
       status: 'idle',
+      knowledgeBaseName: undefined,
+      updatingModel: false,
       transcripts: [],
       answers: [],
       generating: false,
@@ -428,18 +605,21 @@ export const useInterview = create<InterviewState>((set, get) => ({
       endedAt: null,
       pendingQuestion: '',
       draftQuestion: '',
-      attachScreenshot: false,
+      audioLevels: {},
+      reconnecting: false,
+      screenshots: [],
+      capturingScreenshot: false,
       speech: { ...get().speech, state: 'idle' },
     });
   },
-  async ask(question, sourceTranscriptIds, screenshot) {
-    if (!question.trim()) return;
+  async ask(question, sourceTranscriptIds, screenshotIds = []) {
+    if (get().updatingModel || (!question.trim() && !screenshotIds.length)) return;
     if (get().status === 'ended') {
       get().reset();
     }
     if (!get().sessionId)
       set({ sessionId: crypto.randomUUID(), startedAt: Date.now(), endedAt: null });
-    const screenshotMode = screenshot ?? (get().attachScreenshot ? 'attach' : undefined);
+    const screenshotMode = screenshotIds.length ? (question.trim() ? 'attach' : 'only') : undefined;
     answerController?.abort();
     set((state) => ({
       answers: state.answers.map((answer) =>
@@ -449,12 +629,13 @@ export const useInterview = create<InterviewState>((set, get) => ({
     const controller = new AbortController();
     answerController = controller;
     const answerId = id();
+    if (screenshotIds.length) answerScreenshots.set(answerId, screenshotIds);
     set((state) => ({
       answers: [
         ...state.answers,
         {
           id: answerId,
-          question: question.trim(),
+          question: question.trim() || '截图中的题目',
           sourceTranscriptIds,
           ...(screenshotMode ? { screenshot: screenshotMode } : {}),
           createdAt: Date.now(),
@@ -508,10 +689,12 @@ export const useInterview = create<InterviewState>((set, get) => ({
                 ),
               }));
           },
-          screenshotMode || undefined,
+          screenshotIds,
         );
         controller.signal.throwIfAborted();
+        answerScreenshots.delete(answerId);
         set((state) => ({
+          screenshots: state.screenshots.filter((shot) => !screenshotIds.includes(shot.id)),
           answers: state.answers.map((a) =>
             a.id === answerId
               ? { ...a, provider: provider ?? a.provider, status: 'completed' as const }
@@ -590,6 +773,19 @@ export const useInterview = create<InterviewState>((set, get) => ({
   async retryAnswer(id) {
     const answer = get().answers.find((a) => a.id === id);
     if (!answer || get().generating || !['failed', 'stopped'].includes(answer.status ?? '')) return;
-    await get().ask(answer.question, answer.sourceTranscriptIds, answer.screenshot ?? false);
+    const screenshotIds = answerScreenshots.get(answer.id) ?? [];
+    if (
+      answer.screenshot &&
+      (!screenshotIds.length ||
+        screenshotIds.some((id) => !get().screenshots.some((shot) => shot.id === id)))
+    ) {
+      set({ error: '原截图已移除，请重新截图后发送。' });
+      return;
+    }
+    await get().ask(
+      answer.screenshot === 'only' ? '' : answer.question,
+      answer.sourceTranscriptIds,
+      screenshotIds,
+    );
   },
 }));

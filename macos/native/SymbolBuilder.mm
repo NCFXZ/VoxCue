@@ -46,6 +46,40 @@ int main(int argc, const char *argv[]) {
                 fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0
                 respectFlipped:NO hints:nil];
             [NSGraphicsContext restoreGraphicsState];
+            if (!fontAdjustment) {
+                // SF Symbols include different transparent side bearings inside
+                // NSImage.size. Fit the actual ink to a common 20/24 canvas so
+                // the shared em sizing matches Fluent's visible artwork too.
+                NSInteger left = side, right = -1, top = side, last = -1;
+                const unsigned char *pixels = [bitmap bitmapData];
+                for (NSInteger y = 0; y < side; ++y)
+                    for (NSInteger x = 0; x < side; ++x)
+                        if (pixels[y * [bitmap bytesPerRow] + x * 4 + 3]) {
+                            left = MIN(left, x); right = MAX(right, x);
+                            top = MIN(top, y); last = MAX(last, y);
+                        }
+                if (right < left || last < top) return 1;
+                CGRect bounds = CGRectMake(left, top, right-left+1, last-top+1);
+                CGImageRef cropped = CGImageCreateWithImageInRect([bitmap CGImage], bounds);
+                if (!cropped) return 1;
+                NSImage *ink = [[NSImage alloc] initWithCGImage:cropped size:bounds.size];
+                CGImageRelease(cropped);
+                NSBitmapImageRep *normalized = [[NSBitmapImageRep alloc]
+                    initWithBitmapDataPlanes:nullptr pixelsWide:side pixelsHigh:side bitsPerSample:8
+                    samplesPerPixel:4 hasAlpha:YES isPlanar:NO colorSpaceName:NSDeviceRGBColorSpace
+                    bytesPerRow:side * 4 bitsPerPixel:32];
+                if (!normalized) return 1;
+                [NSGraphicsContext saveGraphicsState];
+                [NSGraphicsContext setCurrentContext:[NSGraphicsContext graphicsContextWithBitmapImageRep:normalized]];
+                CGContextClearRect([[NSGraphicsContext currentContext] CGContext], CGRectMake(0, 0, side, side));
+                CGFloat fit = 160.0 / MAX(bounds.size.width, bounds.size.height);
+                NSSize painted = NSMakeSize(bounds.size.width * fit, bounds.size.height * fit);
+                [ink drawInRect:NSMakeRect((side-painted.width)/2, (side-painted.height)/2, painted.width, painted.height)
+                    fromRect:NSZeroRect operation:NSCompositingOperationCopy fraction:1.0
+                    respectFlipped:NO hints:nil];
+                [NSGraphicsContext restoreGraphicsState];
+                bitmap = normalized;
+            }
             NSData *png = [bitmap representationUsingType:NSBitmapImageFileTypePNG properties:@{}];
             NSString *file = [@(argv[2]) stringByAppendingPathComponent:[key stringByAppendingString:@".png"]];
             if (!png || ![png writeToFile:file options:NSDataWritingAtomic error:&error]) return 1;

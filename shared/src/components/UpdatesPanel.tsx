@@ -39,14 +39,12 @@ export function UpdatesPanel() {
       <div className="settings-entry">
         <div>
           <strong id="auto-download-label">自动下载更新</strong>
-          <p id="auto-download-description">发现新版本后自动下载，安装仍需点击“重启并更新”。</p>
         </div>
         <button
           type="button"
           role="switch"
           className="settings-switch"
           aria-labelledby="auto-download-label"
-          aria-describedby="auto-download-description"
           aria-checked={state?.autoDownload ?? false}
           disabled={!state || state.phase === 'installing'}
           onClick={() =>
@@ -100,9 +98,7 @@ export function UpdatesPanel() {
       <p className="settings-hint" role="status" aria-live="polite">
         {label}
       </p>
-      <p className="settings-hint">
-        更新会保留本机聊天、附件、个人资料和面试记录。安装需要点击“重启并更新”；面试进行中无法安装。
-      </p>
+      <p className="settings-hint">更新会保留本机聊天、附件、个人资料和面试记录。</p>
       {(updates.error || state?.error) && (
         <p className="inline-error" role="alert">
           {updates.error || state?.error}

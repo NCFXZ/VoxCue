@@ -232,7 +232,7 @@ describe('聊天文字确认实际保存', () => {
     });
     await usePreparation.getState().send('讲讲面试准备');
     const next = vi.mocked(streamChat).mock.calls.at(-1)![0];
-    expect(next.instructions).toContain('待确认提案不阻塞普通聊天');
+    expect(next.instructions).toContain('用户明确要求按该指令试写面试回答时除外');
     expect(next.turns.find((turn) => turn.role === 'assistant')?.content).toContain('已成功保存');
     expect(next.profileTask).toBeUndefined();
     const calls = vi.mocked(streamChat).mock.calls.length;
@@ -361,6 +361,52 @@ describe('聊天文字确认实际保存', () => {
 });
 
 describe('摘要、指令与技能需要逐次确认', () => {
+  it.each([
+    { background: '', jobDescription: '' },
+    { background: '已确认简历', jobDescription: '' },
+    { background: '', jobDescription: '已确认JD' },
+  ])('指定主题可缺摘要，整套生成仍拒绝，提案确认前不保存：%j', async (summaries) => {
+    usePreparation.setState({ info: { ...base, ...summaries } });
+    await usePreparation.getState().generateSkills();
+    expect(streamChat).not.toHaveBeenCalled();
+    const skill = { id: 'kafka', title: 'Kafka', content: '合成检索资料', sources: [] };
+    vi.mocked(streamChat).mockResolvedValueOnce({
+      ok: true,
+      usage: null,
+      sources: [],
+      profileChanges: { skills: [skill] },
+    });
+    await usePreparation.getState().send('帮我加一条Kafka');
+    const request = vi.mocked(streamChat).mock.calls[0][0];
+    expect(request).toMatchObject({
+      profileTask: 'skills',
+      webSearch: true,
+      knowledgeBaseId: null,
+      profile: summaries,
+    });
+    expect(usePreparation.getState().info.skills).toBeUndefined();
+    const id = usePreparation.getState().messages.at(-1)!.id;
+    expect(usePreparation.getState().updateInfo({}, id)).toBe(true);
+    expect(usePreparation.getState().info.skills).toEqual([skill]);
+    expect(usePreparation.getState().info).toMatchObject(summaries);
+  });
+  it('指定主题失败后可重试，否定请求与普通技术提问不启动技能研究', async () => {
+    usePreparation.setState({ info: { ...base, background: '', jobDescription: '' } });
+    vi.mocked(streamChat).mockRejectedValueOnce(new Error('合成搜索失败'));
+    await usePreparation.getState().send('请新增Kafka技能');
+    const failed = usePreparation.getState().messages.at(-1)!;
+    expect(failed.status).toBe('failed');
+    expect(failed.changes).toBeUndefined();
+    await usePreparation.getState().retry(failed.id);
+    expect(vi.mocked(streamChat).mock.calls.at(-1)![0]).toMatchObject({
+      profileTask: 'skills',
+      webSearch: true,
+    });
+    for (const prompt of ['不要生成Kafka技能', '解释Kafka消费顺序']) {
+      await usePreparation.getState().send(prompt);
+      expect(vi.mocked(streamChat).mock.calls.at(-1)![0].profileTask).toBeUndefined();
+    }
+  });
   it('摘要确认后主动提示技能更新，未确认或拒绝不改变原资料或调用技能生成', async () => {
     await usePreparation.getState().send('更新个人信息');
     expect(usePreparation.getState().skillsNeedUpdate).toBe(false);
@@ -399,8 +445,8 @@ describe('摘要、指令与技能需要逐次确认', () => {
       },
     });
     expect(request.turns.flatMap((turn) => turn.files ?? [])).toEqual([]);
-    expect(request.turns.at(-1)?.content).toContain('不设固定写作字数');
-    expect(request.turns.at(-1)?.content).toContain('标题和正文使用纯文字');
+    expect(request.turns.at(-1)?.content).toContain('作为技能更新提案');
+    expect(request.turns.at(-1)?.content).toContain('不要把参考资料写成我已掌握的技能或经历');
     expect(request.turns.at(-1)?.content).not.toMatch(/120|220|3–5|附1–2/);
     expect(usePreparation.getState().messages.at(-1)?.changes?.skills?.[0].sources).toEqual(
       skill.sources,

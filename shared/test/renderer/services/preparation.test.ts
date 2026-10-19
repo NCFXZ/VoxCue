@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { skillResearchScope } from '../../../../shared/electron/contracts/profile';
 import {
   extractProfileChanges,
   isSkillReply,
@@ -6,6 +7,33 @@ import {
   type ChatMessage,
 } from '../../../../shared/src/services/preparation';
 describe('聊天资料更新识别', () => {
+  it.each([
+    ['请生成技能', 'all'],
+    ['请生成一套完整的面试技能', 'all'],
+    ['帮我生成3条技能', 'all'],
+    ['帮我生成一整套技能', 'all'],
+    ['帮我生成一套岗位技能', 'all'],
+    ['帮我加一条Kafka', 'topic'],
+    ['请新增一条关于数据库事务的技能', 'topic'],
+    ['请生成Kafka消息可靠性技能', 'topic'],
+    ['新增技能：Kafka消费顺序', 'topic'],
+    ['请把Kafka技能改写得简洁一些', 'topic'],
+    ['不要生成Kafka技能', undefined],
+    ['不加一条Kafka', undefined],
+    ['请只整理简历，供后续生成Kafka技能', undefined],
+    ['先整理简历，之后生成Kafka技能', undefined],
+    ['Kafka是什么', undefined],
+    ['解释“生成Kafka技能”是什么意思', undefined],
+    ['怎么生成Kafka技能', undefined],
+    ['给简历加一条Kafka项目经历', undefined],
+    ['给自定义指令加一条英文回答', undefined],
+    ['删除Kafka技能', undefined],
+    ['请生成技能，但不要修改简历', 'all'],
+    ['不生成技能。改为更新面试技能', 'all'],
+  ] as const)('仅明确指定主题的技能操作使用例外：%s', (prompt, scope) => {
+    expect(skillResearchScope(prompt)).toBe(scope);
+    expect(needsSkillResearch(prompt)).toBe(scope !== undefined);
+  });
   it.each([
     ['不生成技能', false],
     ['请只补充JD，不生成技能', false],

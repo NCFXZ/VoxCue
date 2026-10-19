@@ -83,11 +83,6 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
       <div className="management-scroll">
         <div className="management-container">
           {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
-          <p className="local-storage-note">
-            文档原件保存在本机 ·{' '}
-            {index.state?.documents.filter((doc) => doc.available !== false).length ?? 0} 个可用文档
-            · 回答时会发送必要的相关片段至 {provider.dataRecipient}
-          </p>
           {state.error && !base && !editing && (
             <p role="alert" className="inline-error">
               {state.error}

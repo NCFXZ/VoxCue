@@ -61,10 +61,8 @@ const launch = async () => {
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   page.setDefaultTimeout(20000);
-  await page
-    .locator('.sidebar-service-status')
-    .getByText('ChatGPT 可用', { exact: true })
-    .waitFor();
+  await page.getByRole('button', { name: '聊天模型', exact: true }).waitFor();
+  assert.equal(await page.locator('.sidebar-service-status').count(), 0);
   return page;
 };
 const phase = (page, expected) =>
@@ -89,23 +87,17 @@ const closeSettings = async (settings) => {
 };
 const aligned = async (page) => {
   const geometry = await page.locator('.sidebar-status-row').evaluate((element) => {
-    const label = element.querySelector('[role="status"]');
     const icon = element.querySelector('.sidebar-update');
     const row = element.getBoundingClientRect(),
-      text = label.getBoundingClientRect(),
       button = icon.getBoundingClientRect();
     return {
-      offset: (text.top + text.bottom - button.top - button.bottom) / 2,
       fits: button.right <= row.right + 1,
-      clipped: label.scrollWidth > label.clientWidth + 1,
+      left: button.left - row.left,
       width: button.width,
       height: button.height,
     };
   });
-  assert.ok(
-    Math.abs(geometry.offset) <= 1 && geometry.fits && !geometry.clipped,
-    JSON.stringify(geometry),
-  );
+  assert.ok(geometry.fits && geometry.left >= 0 && geometry.left <= 1, JSON.stringify(geometry));
   assert.equal(geometry.width, 32);
   assert.equal(geometry.height, 32);
 };

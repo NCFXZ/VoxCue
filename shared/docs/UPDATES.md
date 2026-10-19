@@ -1,6 +1,6 @@
 > 2026-10-17：Mac 已新增免费 Sparkle/Ed25519 更新适配与独立 DMG/ZIP 构建。以下 Windows 发行记录与旧“Mac 待实现”描述为历史；Mac 当前流程见 [macos/docs/UPDATES.md](../../macos/docs/UPDATES.md)。测试结果零保留，历史结果路径不作为可用交付物。
 
-> 2026-10-18 当前发行：[Windows / Mac v0.3.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.1) 提供 Windows exe、blockmap、latest.yml，以及 Mac DMG、arm64 更新 ZIP、latest-mac.yml。两个平台按各自完整资产独立选版，v0.3.0 Latest、全部 Windows 和旧发行资产保留。本次 Mac 沿用原签名密钥，不提交或推送私有源码，windows/ 只读；下文旧版及 Latest 描述属于历史状态。
+> 2026-10-19 当前发行：[Mac v0.5.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.0)提供DMG、arm64更新ZIP和latest-mac.yml，沿用固定本地代码证书与原Ed25519密钥；Windows仍选用[0.3.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.1)的exe、blockmap和latest.yml。两个平台按各自完整资产独立选版，全部旧资产及既有v0.3.1 Latest保留。本轮未提交或推送私有源码，windows/只读；下文旧版及Latest描述属于历史状态。
 
 # Windows 安装与分平台更新
 

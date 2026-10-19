@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { decodeJwt } from 'jose';
 import type { AuthSession, SignOutResult } from '../../contracts/auth';
+import { createAuthCallbackPage } from './callbackPage';
 import {
   authorizationURL,
   createTransaction,
@@ -32,6 +33,7 @@ export interface AuthStorage {
 interface Dependencies {
   storage: AuthStorage;
   openBrowser(url: string): Promise<void>;
+  callbackLogo?: () => Promise<Buffer>;
   fetch?: typeof fetch;
   verify?: typeof verifyIdentity;
   timeoutMs?: number;
@@ -160,6 +162,9 @@ export class ChatGPTAuthService {
         this.loaded = Promise.resolve();
       });
       const hostId = await this.dependencies.storage.hostId();
+      // A missing branding asset must not prevent an otherwise valid login.
+      const logo = await this.dependencies.callbackLogo?.().catch(() => undefined);
+      const page = createAuthCallbackPage(logo);
       if (controller.signal.aborted) throw new Error('登录已取消或超时，请重试。');
       let consumed = false;
       let resolveCallback!: (value: { code: string; clientId: string }) => void;
@@ -172,9 +177,8 @@ export class ChatGPTAuthService {
       void callback.catch(() => {});
       let transaction: ReturnType<typeof createTransaction>;
       server = createServer((request, response) => {
-        response.setHeader('Content-Type', 'text/plain; charset=utf-8');
-        response.setHeader('Cache-Control', 'no-store');
-        response.setHeader('Content-Security-Policy', "default-src 'none'; frame-ancestors 'none'");
+        for (const [header, value] of Object.entries(page.headers))
+          response.setHeader(header, value);
         if (
           !transaction ||
           request.method !== 'GET' ||
@@ -182,35 +186,35 @@ export class ChatGPTAuthService {
           !request.url ||
           request.url.length > 20000
         ) {
-          response.writeHead(400).end('Invalid callback');
+          response.writeHead(400).end(page.render('invalid'));
           return;
         }
         let url: URL;
         try {
           url = new URL(request.url!, transaction.redirectUri);
         } catch {
-          response.writeHead(400).end('Invalid URL');
+          response.writeHead(400).end(page.render('invalid'));
           return;
         }
         if (url.origin !== new URL(transaction.redirectUri).origin) {
-          response.writeHead(400).end('Invalid origin');
+          response.writeHead(400).end(page.render('invalid'));
           return;
         }
         if (url.pathname !== '/auth/callback') {
-          response.writeHead(404).end('Not found');
+          response.writeHead(404).end(page.render('not-found'));
           return;
         }
         if (consumed) {
-          response.writeHead(409).end('Callback already used');
+          response.writeHead(409).end(page.render('used'));
           return;
         }
         try {
           const value = validateCallback(url, transaction);
           consumed = true;
           resolveCallback(value);
-          response.end('已收到授权。请返回 VoxCue 查看登录结果。');
+          response.end(page.render('received'));
         } catch (error) {
-          response.writeHead(400).end('授权回调无效。请返回应用重试。');
+          response.writeHead(400).end(page.render('invalid'));
           // An unrelated request cannot terminate the genuine pending attempt.
           if (url.searchParams.get('state') === transaction.state) {
             consumed = true;

@@ -1,3 +1,29 @@
+## 构建目录身份与不透明设置（2026-10-19）
+
+electron-output单测覆盖连续更新的目录身份、过期编译文件、部分写入失败回滚、未知原件/重定向/空编译拒绝和并发构建锁。实际构建回归核对正常输出身份与编号目录；仅编译/回滚暂存在系统临时目录，退出清理，不保存测试报告。
+
+interview-ux检查设置在常规0/50/100及浅深色下均不透明、无背景滤镜，改变底层画面不改变设置内部像素；透明外围、阴影、首击关闭、自动保存与面试60/30独立规则保持。紧凑状态继续检查两路实际电平衰减、勾/警告、悬停原因与减少动态效果。专用设置原生材质及几何IPC已移除，Mac开发和Windows本机验收分别执行。
+
+## 分层面试预览与图标比例（2026-10-19）
+
+interview-ux-smoke检查24px/18px侧栏品牌、常规尺寸且随文字缩放的公共图标、开场说明位于操作分割线上方且无前往面试设置按钮。浮窗设置无完成/应用按钮；透明backdrop外围像素不变，面板在常规0–100及浅深色下保持不透明、向下阴影生效、dialog存在时原生穿透为false，首次点击面试区域仅关闭而不误触结束。预览与实际面试在相同滑块位置使用相同背景/阅读层，独立面试偏好沿用旧版60/30曲线。开场双音源测试和设置页无麦克风测试仍覆盖。interview-typography覆盖12–24字号与0–100效果位置、浅深色/窄屏、预览输入框及即时保存；Mac icons检查实际alpha边界/图文比例，typography检查36px控件及窄窗口。仅临时合成账户/资料/音频端口与离线响应，不采样硬件或保存测试结果；用户要求的合成截图可指定输出目录交付。
+
+## 授权回调页面（2026-10-19）
+
+auth既有loopback合成登录测试检查收到/无效/重复回调的HTML与HTTP状态、固定内嵌Logo、CSP/no-store/no-referrer/nosniff，以及页面无脚本、外部请求、授权参数或令牌；收到回调不显示未经验证的登录成功。platform检查开发共用PNG与安装版dist路径，避免Windows原生ICO误用于网页。真实账户、浏览器官方授权、原登录密文与系统钥匙串不参与；必要视觉检查使用独立临时浏览器profile和合成页面，只截取页面内存，不保存截图或报告。
+
+## Mac 固定本地签名（2026-10-19）
+
+Mac目录运行`node test/scripts/development-signing-smoke.mjs`，使用同一固定本地证书对开发/正式两组不同资源内容的临时Mach-O与内嵌助手签名，检查不同CDHash仍具有相同designated requirement、开发权限声明保留、嵌套标识正确和替代ad-hoc签名被拒绝；重复读取身份须不轮换证书。`--packaged`另外调用正式buildMacApp，在临时目录构建实际完整应用并检查固定身份及签名材料不入包，不读取发行Ed25519私钥、不生成安装包或修改公开发行。测试不接触真实登录密文或Safe Storage项；不能替代旧身份首次系统授权的人工验证。所有合成文件由test-workspace退出清理，结果仅终端。
+
+## Mac 应用图标轮廓（2026-10-19）
+
+Mac目录内运行 `node test/scripts/app-icon-smoke.mjs`，用临时透明合成图检查原生生成器保留原图透明通道、不增加底板或圆角裁切，以及透明留白、中心图案、十个尺寸表示和ICNS结构，并核对最新共享Logo原字节保持。只在系统临时目录生成夹具，退出清理；无需GUI或真实屏幕/音频。主侧栏Logo为24px，由截图界面专项核对。
+
+## 截图暂存专项（2026-10-19）
+
+`pnpm test:interview:screenshot` 使用隔离离线Electron宿主、合成账户/语音与合成屏幕图像，覆盖截图不发送、输入框预览、1/5至5/5展开计数、五张限制、移除后补拍、五图手动发送、纯文字/仅图片、失败保留及原图重试、浅深布局与记录不含图像。截图仅在内存，临时profile退出清理；不进行真实屏幕或音频采样。该入口还断言部分回答失败后的错误和重试位于回答气泡内；ui-refinement覆盖个人资料正文/编辑12px与标题14px，typography保留其他控件14px规范。单测interview-screenshot-store/desktop-ipc另覆盖自动回答不消费截图、停止、关闭/重置和迟到结果，以及ID/字段/数量和主进程释放校验。
+
 # VoxCue 测试入口
 
 更新：2026-10-17。用户已重新授权完整功能、面试稳定性和对抗性测试及故障修复。Liquid Glass 及其专项仍已撤回，不恢复原 test:all、test:materials、test:readability 等入口。
@@ -111,14 +137,6 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 
 ## 源码与边界
 
-面试字号专项为 `node ../shared/test/scripts/interview-typography-smoke.mjs`，使用合成账户/音频和系统临时 profile 检查设置预览、12–24px 边界、重置、本机保存失败、浅深主题、最小窗口及实际浮窗的跨窗口字号同步；工具栏与按钮尺寸保持。`--preview` 只在终端输出内存预览，结束清理，不操作真实模型、凭据或音频。
+共用面试体验入口为`node ../shared/test/scripts/interview-ux-smoke.mjs`：隔离合成账户、组件下载替身、音频端口及模型响应，覆盖原组件提示、资料标记、权限行内分路10秒自检/仅电平事件、2200ms自动回答、原地音频恢复、音频/模型即时设置及回答中变更后仅影响下一题、独立显示滑块及浅深色/较小浮窗。`interview-typography-smoke.mjs`覆盖字号/背景滑块边界、键盘、存储失败、重载/重启与跨窗口同步、文字图标缩放及原生100%缩放；`updates-sidebar-smoke.mjs`检查靠左更新图标及下载/安装交互。默认不保存截图；只有用户要求交付时传`--screenshots=<明确交付目录>`，其余临时文件退出删除。共享单测覆盖后台测试期限/令牌、资源独占、音频重连竞争、模型/effort验证、知识库名前缀与手动标题保护，以及preload契约。Mac测试不代表Windows原生已验收。
 
-旧功能、对抗、RAG 和界面审查结果报告不再作为交付物保留；当前入口集中在本文。合成账户、固定公开音频和本地检索回归不能证明真实账户资格、真人识别/回答质量、语义检索准确率或全部硬件兼容性。已取消的十分钟语音及退役实验不自动恢复。
-
-共享单测在 shared/test/unit，Renderer 单测在 shared/test/renderer，共享回归和固定夹具在 shared/test/scripts、fixtures。Windows WASAPI/NSIS 等专属测试在 windows/test；Mac 权限、原生音频、窗口、启动器和 SF Symbols 测试在 macos/test。固定公共音频输入在 shared/test/fixtures/speech-audio，不作为生成结果删除。
-
-单测仅收集 {shared,windows,macos}/test/{unit,renderer}/**/*.test.{ts,tsx}，不扫描历史快照或生成探针。依赖仅安装在当前平台，源码测试的 CommonJS require 使用当前平台 NODE_PATH。根命令由平台转发，另一平台目录只读；不在那里安装依赖、生成配置或运行产物。
-
-保留的 Mac 专项源码包括 audio-native-smoke.mjs、window-native-smoke.mjs、launcher-smoke.mjs、screen-permission-smoke.mjs、icons-smoke.mjs。SF Symbols 现有 54 个映射（包含字号减小/增大），重置/刷新/更新分别为 Reset/Refresh/Update；icons-smoke 核对用量按钮和更新入口的实际符号，`--preview` 仅在内存展示对应界面。原生资源检查和合成 UI 不能替代真实账户、硬件或原生视觉验收。屏幕权限检查不自动申请新授权或修改 TCC。图标和删除控件回归通过 installUiAccount 的 components: true 显式注入合成模型可用状态，不下载模型；组件下载/缓存回归默认不启用该夹具，仍验证真实组件服务。
-
-所有后续获准测试使用合成账户/文档/设备或显式公共样本，不读取真实凭据、真人音频和用户资料。不得自动重启已取消的十分钟语音或退役 benchmark。在线漏洞审计需要单独明确元数据外发授权，历史一次授权不自动延续。
+设备自动枚举单测`audio-devices.test.ts`覆盖打开/焦点/设备通知/可见性/定时、并发合并、错误恢复及卸载后的迟到结果。`interview-ux-smoke.mjs`追加主/浮窗设备自动更新、无刷新按钮、白色滑块与两端图标、透明度预览、无电平尾部状态及固定底部说明，按用户要求可交付0/75透明度对照截图。`interview-typography-smoke.mjs`沿用键盘/范围/跨窗口/存储失败与窄窗口验证，并检查预览透明度随偏好改变。

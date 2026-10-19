@@ -4,13 +4,17 @@ import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
+import os from 'node:os';
 import { buildMacIcons } from './build-icons.mjs';
+import { loadDevelopmentSigning, verifyLocalApp } from './development-signing.mjs';
+import { signMacApp } from './sign-app.mjs';
 
 // A local development host gives TCC a named app with explicit usage strings.
 // Vendor node_modules and the user's installed applications are never modified.
 export async function prepareRuntime() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64')
     throw Error('Apple Silicon required.');
+  const signing = await loadDevelopmentSigning();
   const { icns } = await buildMacIcons();
   const root = workspace.platformRoot;
   const require = createRequire(path.join(root, 'package.json'));
@@ -21,14 +25,17 @@ export async function prepareRuntime() {
   const expected = JSON.stringify({
     electron: version,
     identity: 'com.voxcue.development',
-    revision: 3,
+    revision: 4,
+    signingCertificate: signing.sha256,
     icon: createHash('sha256')
       .update(await readFile(icns))
       .digest('hex'),
   });
   if ((await readFile(marker, 'utf8').catch(() => '')) !== expected) {
     await mkdir(path.dirname(directory), { recursive: true });
-    const staging = await mkdtemp(path.join(root, '.tools/electron-host-'));
+    // Build outside the File Provider workspace so it cannot reattach FinderInfo
+    // to nested bundles between individual inside-out signing operations.
+    const staging = await mkdtemp(path.join(os.tmpdir(), 'voxcue-electron-host-'));
     const stagedApp = path.join(staging, 'Electron.app');
     try {
       await cp(
@@ -48,7 +55,7 @@ export async function prepareRuntime() {
         NSAudioCaptureUsageDescription:
           'VoxCue 在你开始面试后在本机转写系统音频，不保存或上传音频。',
         NSScreenCaptureUsageDescription:
-          'VoxCue 仅在你手动截图或开启附截图后捕获当前屏幕，用于回答当次面试问题，不持续录屏。',
+          'VoxCue 仅在你点击截图按钮时捕获当前屏幕，图像暂存，点击发送后才用于回答，不持续录屏。',
       })) {
         const result = spawnSync('/usr/bin/plutil', ['-replace', key, '-string', value, plist], {
           stdio: 'inherit',
@@ -56,19 +63,32 @@ export async function prepareRuntime() {
         if (result.status || result.error)
           throw Error('Unable to prepare development audio usage descriptions.');
       }
-      const signed = spawnSync(
-        '/usr/bin/codesign',
-        [
-          '--force',
-          '--deep',
-          '--sign',
-          '-',
-          '--preserve-metadata=entitlements,requirements,flags,runtime',
+      for (let attempt = 0; ; attempt++) {
+        // File Provider can attach Finder metadata to this fresh staging bundle
+        // during the copy, including nested frameworks. Remove only this fresh
+        // bundle's display metadata, acting on symlinks themselves; preserve
+        // quarantine, provenance, vendor files and running development hosts.
+        const metadata = spawnSync('/usr/bin/xattr', [
+          '-r',
+          '-s',
+          '-d',
+          'com.apple.FinderInfo',
           stagedApp,
-        ],
-        { stdio: 'inherit' },
-      );
-      if (signed.status || signed.error) throw Error('Unable to sign local development host.');
+        ]);
+        if (metadata.error) throw metadata.error;
+        try {
+          await signMacApp(stagedApp, {
+            signing,
+            identifier: 'com.voxcue.development',
+            preserveMetadata: true,
+          });
+          break;
+        } catch (error) {
+          if (attempt === 4 || !/resource fork|Finder information|detritus/.test(error.message))
+            throw error;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
       await writeFile(path.join(staging, 'voxcue-runtime.json'), expected);
       const previous = directory + '-previous-' + Date.now();
       let moved = false;
@@ -79,9 +99,30 @@ export async function prepareRuntime() {
         .catch((error) => {
           if (error.code !== 'ENOENT') throw error;
         });
+      let installed = false;
       try {
         await rename(staging, directory);
+        installed = true;
+        for (let attempt = 0; ; attempt++) {
+          const metadata = spawnSync('/usr/bin/xattr', [
+            '-r',
+            '-s',
+            '-d',
+            'com.apple.FinderInfo',
+            app,
+          ]);
+          if (metadata.error) throw metadata.error;
+          try {
+            verifyLocalApp(app, signing, 'com.voxcue.development');
+            break;
+          } catch (error) {
+            if (attempt === 4 || !/resource fork|Finder information|detritus/.test(error.message))
+              throw error;
+          }
+          await new Promise((resolve) => setTimeout(resolve, 150));
+        }
       } catch (error) {
+        if (installed) await rename(directory, staging);
         if (moved) await rename(previous, directory);
         throw error;
       }
@@ -91,5 +132,6 @@ export async function prepareRuntime() {
       await rm(staging, { recursive: true, force: true });
     }
   }
+  verifyLocalApp(app, signing, 'com.voxcue.development', { strict: false });
   return { directory, executable: path.join(app, 'Contents/MacOS/Electron') };
 }

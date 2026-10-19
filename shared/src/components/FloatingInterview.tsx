@@ -13,11 +13,12 @@ import {
   Copy,
   Check,
   Screenshot,
+  Loader,
+  X,
   Refresh,
   AudioLines,
   Sparkles,
-  FontIncrease,
-  FontDecrease,
+  Settings,
 } from './icons';
 import { Button } from './ui/button';
 import { useInterview } from '../stores/interview';
@@ -26,15 +27,15 @@ import { AppLogo } from './AppLogo';
 import { useFollowScroll } from './useFollowScroll';
 import { MarkdownContent } from './MarkdownContent';
 import { ResponseProgress } from './ResponseProgress';
+import { InterviewAudioRecovery } from './InterviewAudioRecovery';
+import { InterviewSettingsPanel } from './InterviewSettingsPanel';
+import { InterviewSubmissionStatus } from './InterviewSubmissionStatus';
+import { InterviewReadiness } from './InterviewReadiness';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
-import {
-  useInterviewFontSize,
-  saveInterviewFontSize,
-  interviewFontSize,
-} from '../interviewTypography';
+import { useInterviewFontSize } from '../interviewTypography';
 export function FloatingInterview() {
   const fontSize = useInterviewFontSize();
   const state = useInterview();
@@ -45,15 +46,7 @@ export function FloatingInterview() {
   const [protectedWindow, setProtected] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const changeFontSize = (delta: number) => {
-    const failure = '面试字号保存失败，请重试。';
-    try {
-      saveInterviewFontSize(fontSize + delta);
-      setError((current) => (current === failure ? null : current));
-    } catch {
-      setError(failure);
-    }
-  };
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
@@ -76,7 +69,7 @@ export function FloatingInterview() {
     const desktop = window.desktop;
     if (!desktop?.presentation?.interviewMousePassthrough) return;
     const surfaces =
-      '.floating-toolbar, .floating-panel, .floating-resize, .floating-notices > div';
+      '.floating-toolbar, .floating-panel, .floating-resize, .floating-notices > div, dialog[open]';
     let disposed = false;
     let ignored: boolean | undefined;
     let pointer: { x: number; y: number; buttons: number } | undefined;
@@ -86,6 +79,12 @@ export function FloatingInterview() {
       desktop.setInterviewMousePassthrough(ignore);
     };
     const refresh = () => {
+      // A modal's backdrop is a dismiss target across the whole canvas. Native
+      // click-through must stay off even when elementFromPoint reports no panel.
+      if (!disposed && document.querySelector('dialog[open]')) {
+        apply(false);
+        return;
+      }
       if (disposed || !pointer || pointer.buttons || dragging.current || windowDrag.active.current)
         return;
       const target = document.elementFromPoint(
@@ -128,12 +127,20 @@ export function FloatingInterview() {
     window.addEventListener('resize', refresh);
     window.addEventListener('interview-window-drag-end', refresh);
     const observer = new ResizeObserver(refresh);
+    const dialogs = new MutationObserver(refresh);
+    dialogs.observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ['open'],
+    });
     document
       .querySelectorAll('.floating-toolbar, .floating-panels, .floating-notices')
       .forEach((element) => observer.observe(element));
     return () => {
       disposed = true;
       observer.disconnect();
+      dialogs.disconnect();
       window.removeEventListener('mousemove', move, true);
       window.removeEventListener('mousedown', move, true);
       window.removeEventListener('mouseup', release, true);
@@ -158,12 +165,6 @@ export function FloatingInterview() {
           (t.source === 'system' || (!t.source && state.mode === 'mock')),
       )?.text ||
     '';
-  const speechModelLabel =
-    state.speech.state === 'running'
-      ? '语音模型已就绪'
-      : state.speech.state === 'loading'
-        ? '语音模型加载中…'
-        : '语音模型未就绪';
   useEffect(() => {
     if (!confirmEnd || ending) return;
     const timer = setTimeout(() => setConfirmEnd(false), 3000);
@@ -262,10 +263,16 @@ export function FloatingInterview() {
     }
   };
   const submit = () => {
-    if (state.generating || (!currentInput.trim() && !latestQuestion.trim())) return;
-    const text = currentInput.trim() || latestQuestion;
+    if (
+      state.generating ||
+      state.updatingModel ||
+      state.capturingScreenshot ||
+      (!currentInput.trim() && !latestQuestion.trim() && !state.screenshots.length)
+    )
+      return;
+    const text = currentInput.trim() || (state.screenshots.length ? '' : latestQuestion);
     setInput(null);
-    if (state.mode === 'local') void state.submitTranscript(text);
+    if (state.mode === 'local') void state.submitTranscript(text, true);
     else void state.ask(text);
   };
   // Keep only the latest pointer intent and one native resize in flight.
@@ -365,6 +372,7 @@ export function FloatingInterview() {
             className="floating-brand floating-collapse"
             aria-label={collapsed ? '展开面试窗口' : '收起面试窗口'}
             aria-expanded={!collapsed}
+            title={collapsed ? '展开面试窗口' : '收起面试窗口'}
             onClick={async () => {
               try {
                 setCollapsed(await window.desktop!.toggleInterviewCollapse());
@@ -381,20 +389,11 @@ export function FloatingInterview() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="字体变小"
-              disabled={fontSize <= interviewFontSize.minimum}
-              onClick={() => changeFontSize(-1)}
+              aria-label="面试设置"
+              title="面试设置"
+              onClick={() => setSettingsOpen(true)}
             >
-              <FontDecrease size={20} />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="字体变大"
-              disabled={fontSize >= interviewFontSize.maximum}
-              onClick={() => changeFontSize(1)}
-            >
-              <FontIncrease size={20} />
+              <Settings size={19} />
             </Button>
             <Button
               variant="ghost"
@@ -402,6 +401,7 @@ export function FloatingInterview() {
               disabled={busy}
               aria-pressed={protectedWindow}
               aria-label={protectedWindow ? '关闭截图保护' : '开启截图保护'}
+              title={protectedWindow ? '截图保护已开启，点击关闭' : '截图保护已关闭，点击开启'}
               onClick={() => {
                 void toggleCapture();
               }}
@@ -414,6 +414,7 @@ export function FloatingInterview() {
               variant={confirmEnd ? 'destructive' : 'dangerGhost'}
               size="icon"
               aria-label={confirmEnd ? '确认结束面试' : '结束面试'}
+              title={confirmEnd ? '再次点击结束并保存本场面试' : '结束面试'}
               onClick={confirmEnd ? close : () => setConfirmEnd(true)}
             >
               <Square size={16} />
@@ -422,6 +423,7 @@ export function FloatingInterview() {
             <div
               className="floating-drag-handle"
               aria-label="拖动面试窗口"
+              title="拖动面试窗口"
               onPointerDown={windowDrag.onPointerDown}
             >
               <DragGrip size={20} />
@@ -439,13 +441,9 @@ export function FloatingInterview() {
                   <Volume2 size={16} />
                   转写
                 </h2>
-                <span
-                  className={`neutral-badge ${state.speech.state === 'error' ? 'danger-text' : ''}`}
-                  role="status"
-                >
-                  {speechModelLabel}
-                </span>
+                <InterviewReadiness />
               </header>
+              <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />
               <div
                 className="floating-scroll"
                 {...transcriptScroll.scrollProps}
@@ -466,11 +464,7 @@ export function FloatingInterview() {
                   >
                     <div className="transcript-meta">
                       <strong>
-                        {t.source
-                          ? t.source === 'system'
-                            ? '面试官 · 系统音频'
-                            : '面试者 · 麦克风'
-                          : '面试官'}
+                        {t.source ? (t.source === 'system' ? '面试官' : '面试者') : '面试官'}
                       </strong>
                       <time>{t.time}</time>
                     </div>
@@ -522,6 +516,7 @@ export function FloatingInterview() {
                 转写
               </Button>
             </header>
+            {!showTranscript && <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />}
             <div
               className="floating-scroll"
               {...answerScroll.scrollProps}
@@ -551,7 +546,7 @@ export function FloatingInterview() {
                     {a.screenshot && (
                       <span className="floating-screenshot-label">
                         <Screenshot size={14} />
-                        {a.screenshot === 'only' ? '仅发送当前截图' : '附当前截图'}
+                        {a.screenshot === 'only' ? '截图提问' : '附截图'}
                       </span>
                     )}
                   </div>
@@ -610,22 +605,24 @@ export function FloatingInterview() {
                     {state.generating && a.id === state.answers.at(-1)?.id && (
                       <span className="typing-caret" />
                     )}
+                    {a.error && a.content && (
+                      <p className="message-error" role="alert">
+                        {a.error}
+                      </p>
+                    )}
+                    {(a.status === 'failed' || a.status === 'stopped') && (
+                      <div className="floating-answer-actions">
+                        <Button
+                          variant="outline"
+                          disabled={state.generating}
+                          onClick={() => void state.retryAnswer(a.id)}
+                        >
+                          <Refresh size={16} />
+                          重试面试回答
+                        </Button>
+                      </div>
+                    )}
                   </div>
-                  {(a.status === 'failed' || a.status === 'stopped') && (
-                    <Button
-                      variant="outline"
-                      disabled={state.generating}
-                      onClick={() => void state.retryAnswer(a.id)}
-                    >
-                      <Refresh size={16} />
-                      重试面试回答
-                    </Button>
-                  )}
-                  {a.error && a.content && (
-                    <p className="message-error" role="alert">
-                      {a.error}
-                    </p>
-                  )}
                   {(copied === a.id || copyError === a.id) && (
                     <small role="status">
                       {copyError === a.id ? '复制失败，请选择文字后复制。' : '已复制回答'}
@@ -651,9 +648,29 @@ export function FloatingInterview() {
                 submit();
               }}
             >
+              {state.screenshots.length > 0 && (
+                <div className="floating-screenshot-previews" role="group" aria-label="待发送截图">
+                  {state.screenshots.map((shot, index) => (
+                    <div className="floating-screenshot-preview" key={shot.id}>
+                      <img src={shot.preview} alt={`截图 ${index + 1}`} />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        aria-label={`移除截图 ${index + 1}`}
+                        disabled={state.generating}
+                        onClick={() => void state.removeScreenshot(shot.id)}
+                      >
+                        <X size={12} />
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              )}
               <textarea
                 aria-label="面试提问"
-                placeholder="输入问题，或空发最新面试官问题…"
+                placeholder="输入问题，或按 Enter 发送最新面试官问题…"
+                title="Enter 发送，Shift+Enter 换行"
                 rows={2}
                 value={currentInput}
                 onChange={(event) => {
@@ -667,21 +684,8 @@ export function FloatingInterview() {
                   }
                 }}
               />
-              <div>
+              <div className="floating-composer-toolbar">
                 <div className="floating-composer-options">
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    className="floating-toggle"
-                    aria-label="发送题目时附当前截图"
-                    aria-pressed={state.attachScreenshot}
-                    disabled={!state.aiEnabled}
-                    onClick={() => state.setAttachScreenshot(!state.attachScreenshot)}
-                  >
-                    <span className="toggle-dot" />
-                    <Screenshot size={14} />
-                    附截图
-                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
@@ -692,8 +696,9 @@ export function FloatingInterview() {
                   >
                     <span className="toggle-dot" />
                     <Sparkles size={14} />
-                    自动回答
+                    自动回答：{state.autoAnswer ? '开' : '关'}
                   </Button>
+                  <InterviewSubmissionStatus />
                 </div>
                 <div className="floating-composer-actions">
                   <Button
@@ -701,17 +706,35 @@ export function FloatingInterview() {
                     variant="ghost"
                     size="icon"
                     className="floating-screenshot-button"
-                    aria-label="仅发送当前屏幕截图"
-                    disabled={state.generating || !state.aiEnabled}
-                    onClick={() => void state.submitScreenshot()}
+                    aria-label="截取图像"
+                    title="截取图像，加入待发送截图，最多5张"
+                    aria-busy={state.capturingScreenshot}
+                    data-expanded={state.capturingScreenshot || state.screenshots.length > 0}
+                    disabled={
+                      state.generating ||
+                      state.capturingScreenshot ||
+                      !state.aiEnabled ||
+                      state.screenshots.length >= 5
+                    }
+                    onClick={() => void state.captureScreenshot()}
                   >
-                    <Screenshot size={18} />
+                    {state.capturingScreenshot ? (
+                      <span className="update-spinner">
+                        <Loader size={18} />
+                      </span>
+                    ) : (
+                      <Screenshot size={18} />
+                    )}
+                    <span className="floating-screenshot-count" aria-live="polite">
+                      {state.screenshots.length}/5
+                    </span>
                   </Button>
                   {state.generating ? (
                     <Button
                       type="button"
                       size="icon"
                       aria-label="停止当前回答"
+                      title="停止当前回答"
                       onClick={(event) => {
                         // Stopping immediately replaces this control with Submit.
                         // Cancel the click's default action before React updates it.
@@ -727,9 +750,15 @@ export function FloatingInterview() {
                       type="submit"
                       size="icon"
                       disabled={
-                        state.generating || (!currentInput.trim() && !latestQuestion.trim())
+                        state.generating ||
+                        state.updatingModel ||
+                        state.capturingScreenshot ||
+                        (!currentInput.trim() &&
+                          !latestQuestion.trim() &&
+                          !state.screenshots.length)
                       }
                       aria-label="发送面试问题"
+                      title="发送问题（Enter）；换行（Shift+Enter）"
                     >
                       <ArrowUp size={20} />
                     </Button>
@@ -760,11 +789,6 @@ export function FloatingInterview() {
                 {error || saveError || state.error}
               </div>
             )}
-            {state.speechError && (
-              <div className="floating-error" role="alert">
-                {state.speechError}
-              </div>
-            )}
             {Object.entries(state.speechWarnings).map(([source, message]) => (
               <div key={source} className="floating-warning" role="status">
                 {message}
@@ -773,6 +797,7 @@ export function FloatingInterview() {
           </footer>
         )}
       </div>
+      {settingsOpen && <InterviewSettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

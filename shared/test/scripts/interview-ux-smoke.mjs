@@ -1,0 +1,770 @@
+import { testRoot, electron } from './test-workspace.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+
+const screenshotOption = process.argv.slice(2).find((value) => value.startsWith('--screenshots='));
+if (process.argv.slice(2).some((value) => value !== screenshotOption))
+  throw Error('Only --screenshots=<requested-output-directory> is supported');
+const screenshots = screenshotOption ? path.resolve(screenshotOption.slice(14)) : undefined;
+if (screenshots) await mkdir(screenshots, { recursive: true });
+const profile = path.join(testRoot, 'interview-ux');
+await mkdir(profile);
+const app = await electron.launch({
+  args: [await offlineElectronEntry()],
+  env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
+});
+const checks = [];
+async function capture(page, name) {
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (a) =>
+          a.effect?.target?.closest?.('.interview-readiness-symbol') ||
+          a.effect?.getTiming().iterations === Infinity ||
+          a.playState !== 'running',
+      ),
+  );
+  if (screenshots)
+    await page.screenshot({
+      path: path.join(screenshots, name + '.png'),
+      type: 'png',
+      scale: 'css',
+    });
+}
+async function geometry(page) {
+  const result = await page.evaluate(() => {
+    const visible = (e) =>
+      e.getBoundingClientRect().width > 0 && e.getBoundingClientRect().height > 0;
+    return {
+      overflow: [
+        ...document.querySelectorAll(
+          '.audio-check,.audio-input-meters,.audio-recovery,.interview-submission-status,.interview-settings-dialog,.audio-device-editor',
+        ),
+      ]
+        .filter(visible)
+        .filter((e) => e.scrollWidth > e.clientWidth + 1)
+        .map((e) => e.className),
+      dialogs: [...document.querySelectorAll('dialog[open]')].map((e) => {
+        const r = e.getBoundingClientRect();
+        return (
+          r.left >= -1 && r.right <= innerWidth + 1 && r.top >= -1 && r.bottom <= innerHeight + 1
+        );
+      }),
+      echoCopy: document.body.innerText.includes('回声消除'),
+    };
+  });
+  assert.deepEqual(result.overflow, []);
+  assert.ok(result.dialogs.every(Boolean));
+  assert.equal(result.echoCopy, false);
+}
+try {
+  await installUiAccount(app, { speech: true, components: true });
+  await app.evaluate(({ app }) => {
+    const require = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const { ComponentService } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/components/service.js',
+    );
+    const { SpeechHost } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/speech/host.js',
+    );
+    const { ChatGPTService } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/chat/service.js',
+    );
+    const platform = process.platform === 'darwin' ? 'macos' : 'windows';
+    const { InterviewAccess } = require(
+      app.getAppPath() + '/dist-electron/' + platform + '/electron/speech/access.js',
+    );
+    InterviewAccess.prototype.check = async (options) => ({
+      ready: true,
+      checks: options.sources.map((source) => ({
+        source,
+        status: 'granted',
+        message: 'Synthetic',
+      })),
+      devices: [
+        { id: 'output', source: 'system', name: '合成播放设备', default: true },
+        { id: 'input', source: 'microphone', name: '合成麦克风', default: true },
+      ],
+    });
+    globalThis.uxNeedSpeech = true;
+    globalThis.uxComponentRevision = 0;
+    globalThis.uxDownloads = [];
+    globalThis.uxCalls = [];
+    globalThis.uxAnswers = 0;
+    globalThis.uxDevices = [
+      { id: 'output', source: 'system', name: '合成播放设备', default: true },
+      { id: 'input', source: 'microphone', name: '合成麦克风', default: true },
+    ];
+    globalThis.uxRequests = [];
+    globalThis.uxHold = false;
+    const state = ComponentService.prototype.state;
+    ComponentService.prototype.state = function () {
+      const result = state.call(this);
+      return {
+        ...result,
+        revision: result.revision + globalThis.uxComponentRevision,
+        phase: globalThis.uxNeedSpeech ? 'needed' : 'ready',
+        items: result.items.map((item) => ({
+          ...item,
+          phase: globalThis.uxNeedSpeech && item.id === 'speech' ? 'pending' : 'ready',
+        })),
+      };
+    };
+    ComponentService.prototype.ready = (id) => !(id === 'speech' && globalThis.uxNeedSpeech);
+    ComponentService.prototype.download = async function (id) {
+      globalThis.uxDownloads.push(id);
+      globalThis.uxNeedSpeech = false;
+      globalThis.uxComponentRevision++;
+      return this.state();
+    };
+    SpeechHost.prototype.call = async function (call) {
+      globalThis.uxCalls.push(call);
+      globalThis.uxHost = this;
+      const devices = globalThis.uxDevices;
+      if (call.op === 'devices') return { state: 'idle', model: 'Synthetic', devices };
+      clearInterval(globalThis.uxLevels);
+      const status = {
+        state: call.op === 'start' ? 'running' : call.op === 'pause' ? 'paused' : 'idle',
+        model: 'Synthetic',
+      };
+      if (call.op === 'start')
+        globalThis.uxLevels = setInterval(() => {
+          for (const source of call.options.sources)
+            this.emit({
+              type: 'activity',
+              source,
+              speaking: true,
+              level: source === 'system' ? 0.08 : 0.04,
+            });
+        }, 100);
+      this.emit({ type: 'status', status });
+      return status;
+    };
+    SpeechHost.prototype.stop = function () {
+      clearInterval(globalThis.uxLevels);
+    };
+    ChatGPTService.prototype.models = async () => [
+      { id: 'test-model', label: 'Test Model', description: '', reasoningEfforts: ['low', 'high'] },
+      { id: 'next-model', label: '验证模型', description: '', reasoningEfforts: ['high'] },
+    ];
+    ChatGPTService.prototype.stream = async function (request, emit, signal) {
+      const answering = !request.id.startsWith('history-title-');
+      if (answering) {
+        globalThis.uxAnswers++;
+        globalThis.uxRequests.push({ modelId: request.modelId, effort: request.effort });
+      }
+      const held = answering && globalThis.uxHold;
+      if (held) {
+        globalThis.uxHold = false;
+        globalThis.uxCurrentSignal = signal;
+      }
+      const text = request.id.startsWith('history-title-')
+        ? '项目介绍与追问'
+        : held
+          ? '当前回答继续使用原模型。'
+          : '我会先确认问题和边界，再结合已知事实说明实现方法。';
+      emit({ id: request.id, type: 'delta', text });
+      if (held)
+        await new Promise((resolve) => {
+          globalThis.uxFinish = resolve;
+        });
+      return {
+        answerText: text,
+        usage: null,
+        sources: [],
+        provider: { id: 'chatgpt', name: 'ChatGPT', dataRecipient: 'OpenAI' },
+      };
+    };
+  });
+  const login = await app.firstWindow();
+  const [page] = await Promise.all([
+    app.waitForEvent('window'),
+    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
+  ]);
+  page.setDefaultTimeout(15000);
+  await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
+  await page.getByLabel('本地组件提示', { exact: true }).waitFor();
+  assert.ok(await page.getByRole('button', { name: '开始面试', exact: true }).isDisabled());
+  await geometry(page);
+  await capture(page, '01-readiness');
+  await page
+    .getByLabel('本地组件提示', { exact: true })
+    .getByRole('button', { name: '前往设置', exact: true })
+    .click();
+  await page.getByRole('button', { name: '下载', exact: true }).click();
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await page.getByLabel('本地组件提示', { exact: true }).waitFor({ state: 'hidden' });
+  assert.deepEqual(await app.evaluate(() => globalThis.uxDownloads), ['speech']);
+  assert.equal(await page.getByText('ChatGPT 可用', { exact: true }).count(), 0);
+  assert.equal(await page.getByText('面试练习助手', { exact: true }).count(), 0);
+  const brand = await page.locator('.sidebar-wordmark').evaluate((e) => ({
+    font: getComputedStyle(e.querySelector('strong')).fontSize,
+    title: getComputedStyle(document.querySelector('.page-toolbar .breadcrumb > strong')).fontSize,
+    logo: e.querySelector('.app-logo').getBoundingClientRect().width,
+  }));
+  assert.equal(brand.font, brand.title);
+  assert.equal(brand.logo, 24);
+  checks.push('restored compact component notice and simpler sidebar');
+
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  const panel = page.getByRole('complementary', { name: '个人信息', exact: true });
+  assert.equal(await panel.locator('.profile-empty-circle').count(), 5);
+  assert.equal(await panel.locator('.profile-overview .is-ready').count(), 0);
+  await capture(page, '02-profile-empty');
+  for (const [name, text] of [
+    ['简历摘要', '合成资料：负责检索服务和客户端研发，带领四人团队完成性能改进。'],
+    ['职位描述摘要', '合成岗位：客户端工程师，关注跨平台体验与稳定性。'],
+  ]) {
+    const section = panel.locator(`details[aria-label="${name}"]`);
+    await section.locator(':scope > summary').click();
+    await section.getByRole('button', { name: '编辑', exact: true }).click();
+    const editor = page.getByRole('dialog', { name: '编辑' + name, exact: true });
+    await editor.getByRole('textbox').fill(text);
+    await editor.getByRole('button', { name: '保存', exact: true }).click();
+    await editor.waitFor({ state: 'hidden' });
+    await section.locator(':scope > summary').click();
+  }
+  assert.equal(await panel.locator('.profile-overview .is-ready').count(), 2);
+  assert.equal(await panel.locator('.profile-empty-circle').count(), 3);
+  await panel.locator('.personal-panel-scroll').evaluate((element) => (element.scrollTop = 0));
+  await capture(page, '03-profile-saved');
+  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  assert.equal(await panel.getByText('可选', { exact: true }).count(), 0);
+  checks.push('profile completion without optional labels or redundant instructions');
+
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  await settings.getByRole('slider', { name: '面试字体大小', exact: true }).fill('16');
+  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).fill('25');
+  await settings.getByRole('heading', { name: '模型设置', exact: true }).waitFor();
+  assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
+  assert.equal(await settings.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);
+  await app.evaluate(() =>
+    globalThis.uxDevices.push({ id: 'input-2', source: 'microphone', name: '合成麦克风2' }),
+  );
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await settings.getByRole('button', { name: '麦克风设备', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '合成麦克风2', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await settings.locator('.settings-content').evaluate((element) => (element.scrollTop = 0));
+  await capture(page, '09-display-settings');
+  const opacitySlider = settings.getByRole('slider', { name: '面试背景透明度', exact: true });
+  await opacitySlider.fill('0');
+  await capture(page, '10-preview-solid');
+  await opacitySlider.fill('75');
+  await capture(page, '11-preview-transparent');
+  const preview = settings.locator('.interview-preview-scene');
+  await preview.scrollIntoViewIfNeeded();
+  if (screenshots)
+    await preview.screenshot({
+      path: path.join(screenshots, '12-layered-preview.png'),
+      scale: 'css',
+    });
+  const layers = await preview.evaluate((e) =>
+    Object.fromEntries(
+      [
+        '.floating-panel',
+        '.floating-toolbar',
+        '.answer-bubble',
+        '.floating-composer',
+        '.transcript-item p',
+      ].map((selector) => [selector, getComputedStyle(e.querySelector(selector)).backgroundColor]),
+    ),
+  );
+  assert.notEqual(layers['.floating-panel'], layers['.answer-bubble']);
+  assert.notEqual(layers['.floating-toolbar'], layers['.floating-panel']);
+  assert.equal(layers['.answer-bubble'], layers['.floating-composer']);
+  const undersized = await settings
+    .locator('svg[data-ui-icon]')
+    .evaluateAll((icons) =>
+      icons
+        .filter(
+          (e) =>
+            e.getBoundingClientRect().width > 0 &&
+            e.getBoundingClientRect().width < parseFloat(getComputedStyle(e).fontSize) * 1.19,
+        )
+        .map((e) => e.outerHTML),
+    );
+  assert.deepEqual(undersized, []);
+  await opacitySlider.fill('25');
+  await settings.getByRole('button', { name: '常规', exact: true }).click();
+  await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).fill('70');
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('voxcue-interview-background-transparency-v1')),
+    '25',
+  );
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  const start = page.getByRole('dialog', { name: '开始面试', exact: true });
+  await page.evaluate(() => {
+    globalThis.uxTestEvents = [];
+    globalThis.uxRemoveListener = window.desktop.onDictationEvent((event) =>
+      globalThis.uxTestEvents.push(event),
+    );
+  });
+  await start.getByRole('button', { name: '测试系统声音', exact: true }).click();
+  await start.getByRole('button', { name: '停止系统声音测试' }).waitFor();
+  await app.evaluate(() =>
+    globalThis.uxHost.emit({
+      type: 'segment',
+      segment: {
+        id: 'test-private',
+        source: 'system',
+        text: '此测试转写不得进入资料或面试',
+        final: true,
+        startMs: Date.now(),
+        endMs: Date.now() + 300,
+        reason: 'silence',
+      },
+    }),
+  );
+  await start.getByRole('meter', { name: '系统声音电平', exact: true }).waitFor();
+  assert.equal(
+    await start.getByRole('button', { name: '停止系统声音测试', exact: true }).innerText(),
+    '停止',
+  );
+  await start.getByRole('meter', { name: '系统声音电平', exact: true }).evaluate(
+    (e) =>
+      new Promise((resolve) => {
+        const check = () =>
+          Number(e.getAttribute('aria-valuenow')) > 0 ? resolve() : requestAnimationFrame(check);
+        check();
+      }),
+  );
+  assert.ok(await start.getByRole('button', { name: '确认开始', exact: true }).isDisabled());
+  assert.ok(
+    await start.getByRole('button', { name: '确认开始', exact: true }).evaluate((element) => {
+      const r = element.getBoundingClientRect();
+      return r.top >= 0 && r.bottom <= innerHeight;
+    }),
+  );
+  await geometry(page);
+  assert.equal(await start.getByText('有输入', { exact: true }).count(), 0);
+  assert.equal(await start.locator('.modal-footer .interview-start-description').count(), 1);
+  assert.equal(await start.getByRole('button', { name: '前往面试设置', exact: true }).count(), 0);
+  assert.ok(
+    await start
+      .locator('.modal-footer')
+      .evaluate(
+        (e) =>
+          e.querySelector('.interview-start-description').getBoundingClientRect().bottom <=
+          e.querySelector('.interview-start-actions').getBoundingClientRect().top,
+      ),
+  );
+  await capture(page, '04-audio-check');
+  await start.getByRole('button', { name: '测试系统声音', exact: true }).waitFor();
+  await start.getByText('已检测到声音', { exact: true }).waitFor();
+  await start.getByRole('button', { name: '测试麦克风', exact: true }).click();
+  await start.getByRole('meter', { name: '麦克风电平', exact: true }).waitFor();
+  await start.getByRole('button', { name: '停止麦克风测试', exact: true }).click();
+  await start.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
+  const testEvents = await page.evaluate(() => {
+    globalThis.uxRemoveListener();
+    return globalThis.uxTestEvents.map((e) => e.type);
+  });
+  assert.ok(testEvents.includes('activity'));
+  assert.ok(!testEvents.includes('segment'));
+  checks.push('10-second dual-source test, activity-only routing, release before interview');
+
+  // Observe from creation: production deduplicates unchanged native states.
+  // A late observer can miss an already-enabled passthrough state entirely.
+  await app.evaluate(({ BrowserWindow }) => {
+    const original = BrowserWindow.prototype.setIgnoreMouseEvents;
+    globalThis.uxRestorePassthrough = () => {
+      BrowserWindow.prototype.setIgnoreMouseEvents = original;
+    };
+    BrowserWindow.prototype.setIgnoreMouseEvents = function (ignore, ...args) {
+      globalThis.uxIgnored = ignore;
+      return original.call(this, ignore, ...args);
+    };
+  });
+  const [floating] = await Promise.all([
+    app.waitForEvent('window'),
+    start.getByRole('button', { name: '确认开始', exact: true }).click(),
+  ]);
+  floating.setDefaultTimeout(15000);
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
+  await app.evaluate(() => clearInterval(globalThis.uxLevels));
+  const badge = (label, status) =>
+    floating.getByRole('status', { name: `${label}：${status}`, exact: true });
+  await badge('系统音频', '正常').waitFor();
+  await app.evaluate(() => {
+    globalThis.uxHost.emit({ type: 'activity', source: 'microphone', speaking: true, level: 0.08 });
+    globalThis.uxHost.emit({ type: 'activity', source: 'system', speaking: false, level: 0.04 });
+  });
+  await badge('麦克风', '有输入').waitFor();
+  await badge('系统音频', '有输入').waitFor();
+  assert.equal(await badge('语音模型', '有输入').count(), 0);
+  const bars = floating.locator(
+    '.interview-ready-badge[aria-label^="麦克风："] .interview-readiness-level i',
+  );
+  assert.equal(await bars.count(), 3);
+  assert.equal(await bars.first().evaluate((e) => getComputedStyle(e).transitionDuration), '0.09s');
+  const firstLevel = await bars.first().evaluate((e) => getComputedStyle(e).transform);
+  await app.evaluate(() =>
+    globalThis.uxHost.emit({ type: 'activity', source: 'microphone', speaking: false, level: 0 }),
+  );
+  await floating.waitForFunction((before) => {
+    const bar = document.querySelector(
+      '.interview-ready-badge[aria-label^="麦克风："] .interview-readiness-level i',
+    );
+    return bar && getComputedStyle(bar).transform !== before;
+  }, firstLevel);
+  await badge('麦克风', '正常').waitFor();
+  await badge('系统音频', '正常').waitFor();
+  await app.evaluate(() => {
+    globalThis.uxBadgeActivity = setInterval(
+      () =>
+        globalThis.uxHost.emit({
+          type: 'activity',
+          source: 'microphone',
+          speaking: true,
+          level: 0.06,
+        }),
+      100,
+    );
+    globalThis.uxHost.emit({
+      type: 'gap',
+      source: 'system',
+      message: '合成播放设备连接中断，请检查设备连接。',
+    });
+  });
+  await badge('麦克风', '有输入').waitFor();
+  await badge('系统音频', '异常').hover();
+  await floating
+    .getByRole('tooltip', { name: '系统音频：合成播放设备连接中断，请检查设备连接。', exact: true })
+    .waitFor();
+  await capture(floating, '15-compact-status');
+  await app.evaluate(() => {
+    clearInterval(globalThis.uxBadgeActivity);
+    globalThis.uxHost.emit({ type: 'activity', source: 'system', speaking: false, level: 0 });
+  });
+  await badge('系统音频', '正常').waitFor();
+  await floating.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(await bars.first().evaluate((e) => getComputedStyle(e).transitionDuration), '0s');
+  await floating.emulateMedia({ reducedMotion: 'no-preference' });
+  checks.push(
+    'compact status uses actual source activity with animated decay, source-specific warning tooltip, disabled/paused states and reduced-motion support',
+  );
+  await app.evaluate(() =>
+    globalThis.uxHost.emit({
+      type: 'segment',
+      segment: {
+        id: 'pending-1',
+        source: 'system',
+        text: '请介绍一个你负责过的项目。',
+        final: true,
+        startMs: Date.now(),
+        endMs: Date.now() + 300,
+        reason: 'silence',
+      },
+    }),
+  );
+  assert.equal(await floating.getByRole('button', { name: '取消本次', exact: true }).count(), 0);
+  assert.equal(await floating.getByText('待提交问题', { exact: true }).count(), 0);
+  await floating
+    .locator('.floating-composer-options')
+    .getByRole('status')
+    .filter({ hasText: '正在收听' })
+    .waitFor();
+  await floating
+    .getByText('我会先确认问题和边界，再结合已知事实说明实现方法。', { exact: true })
+    .waitFor();
+  await app.evaluate(() => {
+    clearInterval(globalThis.uxLevels);
+    globalThis.uxHost.emit({
+      type: 'status',
+      status: {
+        state: 'error',
+        model: 'Synthetic',
+        error: '所选音频设备已断开。',
+        failureSource: 'system',
+      },
+    });
+  });
+  await floating.getByRole('button', { name: '重新连接音频', exact: true }).waitFor();
+  await badge('系统音频', '异常').waitFor();
+  await badge('麦克风', '已暂停').waitFor();
+  await badge('语音模型', '已暂停').waitFor();
+  await geometry(floating);
+  await capture(floating, '06-audio-recovery');
+  await floating.getByRole('button', { name: '重新连接音频', exact: true }).click();
+  await badge('语音模型', '正常').waitFor();
+  assert.ok(
+    await floating
+      .getByText('我会先确认问题和边界，再结合已知事实说明实现方法。', { exact: true })
+      .isVisible(),
+  );
+  assert.ok((await floating.getByText('请介绍一个你负责过的项目。', { exact: true }).count()) > 0);
+  await app.evaluate(() => {
+    globalThis.uxHold = true;
+  });
+  await floating
+    .getByRole('textbox', { name: '面试提问', exact: true })
+    .fill('如何设计清晰的接口？');
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
+  await floating.getByRole('button', { name: '停止当前回答', exact: true }).waitFor();
+  await floating.getByText('当前回答继续使用原模型。', { exact: true }).waitFor();
+  const clearCorner = { x: 12, y: 12, width: 48, height: 24 };
+  const unobscured = await floating.screenshot({ clip: clearCorner, scale: 'css' });
+  const passthrough = await floating.evaluate(
+    () => window.desktop.presentation.interviewMousePassthrough,
+  );
+  const waitNativePassthrough = async (expected) => {
+    assert.ok(
+      await app.evaluate(async (_electron, expected) => {
+        const deadline = Date.now() + 3000;
+        while (Date.now() < deadline) {
+          if (globalThis.uxIgnored === expected) return true;
+          await new Promise((resolve) => setTimeout(resolve, 10));
+        }
+        return false;
+      }, expected),
+    );
+  };
+  if (passthrough) {
+    await floating.mouse.move(2, 2);
+    await waitNativePassthrough(true);
+  }
+  await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  const devices = floating.getByRole('dialog', { name: '面试设置', exact: true });
+  assert.equal(
+    await floating.evaluate(() => typeof window.desktop.setInterviewSettingsMaterial),
+    'undefined',
+  );
+  assert.ok(
+    unobscured.equals(await floating.screenshot({ clip: clearCorner, scale: 'css' })),
+    'Opaque settings leave the rest of the window clear',
+  );
+  if (passthrough) {
+    await waitNativePassthrough(false);
+    await floating.mouse.move(2, 2);
+    await floating.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
+    assert.equal(await app.evaluate(() => globalThis.uxIgnored), false);
+  }
+  // Dismissal consumes the first click on both the transcript and toolbar.
+  await floating.mouse.click(45, 190);
+  await devices.waitFor({ state: 'hidden' });
+  await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  const end = await floating.getByRole('button', { name: '结束面试', exact: true }).boundingBox();
+  await floating.mouse.click(end.x + end.width / 2, end.y + end.height / 2);
+  await devices.waitFor({ state: 'hidden' });
+  assert.equal(
+    await floating.getByRole('button', { name: '确认结束面试', exact: true }).count(),
+    0,
+  );
+  await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  assert.equal(await devices.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);
+  await app.evaluate(() =>
+    globalThis.uxDevices.push({ id: 'output-2', source: 'system', name: '合成播放设备2' }),
+  );
+  await floating.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await devices.getByRole('button', { name: '选择播放设备', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: '合成播放设备2', exact: true }).waitFor();
+  await floating.keyboard.press('Escape');
+  await devices.getByRole('button', { name: '选择麦克风', exact: true }).click();
+  await devices.getByRole('menuitemradio', { name: '不使用麦克风', exact: true }).click();
+  await badge('麦克风', '未启用').waitFor();
+  const configuration = await floating.evaluate(() => window.desktop.interviewState());
+  assert.deepEqual(configuration.configuration.options.sources, ['system']);
+  await devices.getByRole('button', { name: '面试回答模型', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: '验证模型', exact: true }).click();
+  await floating.waitForFunction(
+    async () => (await window.desktop.interviewState()).configuration.modelId === 'next-model',
+  );
+  await devices.getByRole('button', { name: '面试思考强度', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: '高', exact: true }).click();
+  await floating.waitForFunction(
+    async () => (await window.desktop.interviewState()).configuration.effort === 'high',
+  );
+  const slider = devices.getByRole('slider', { name: '面试字体大小', exact: true });
+  await slider.fill('18');
+  const background = devices.getByRole('slider', { name: '面试背景透明度', exact: true });
+  await background.fill('75');
+  const actualLayers = await floating.evaluate(() =>
+    Object.fromEntries(
+      [
+        '.floating-panel',
+        '.floating-toolbar',
+        '.answer-bubble',
+        '.floating-composer',
+        '.transcript-item p',
+      ].map((selector) => [
+        selector,
+        getComputedStyle(document.querySelector(selector)).backgroundColor,
+      ]),
+    ),
+  );
+  assert.deepEqual(
+    actualLayers,
+    layers,
+    'Preview and real interview must use identical material at the same slider position',
+  );
+  await background.fill('35');
+  assert.equal(
+    await floating.evaluate(() => localStorage.getItem('voxcue-frosted-transparency-v2')),
+    '70',
+  );
+  assert.equal(await devices.getByRole('button', { name: /应用.*设置/ }).count(), 0);
+  assert.equal(await devices.getByRole('button', { name: '完成', exact: true }).count(), 0);
+  assert.equal(await devices.locator('.display-slider-icon').count(), 4);
+  assert.equal(await devices.getByText('当前回答结束后可修改', { exact: true }).count(), 0);
+  await geometry(floating);
+  const backdrop = await devices.evaluate((e) => {
+    const style = getComputedStyle(e, '::backdrop');
+    return {
+      clip: style.clipPath,
+      filter: style.backdropFilter,
+      color: style.backgroundColor,
+      shadow: getComputedStyle(e).boxShadow,
+      surface: getComputedStyle(e).backgroundColor,
+      surfaceFilter: getComputedStyle(e).backdropFilter,
+    };
+  });
+  assert.equal(backdrop.clip, 'none');
+  assert.equal(backdrop.color, 'rgba(0, 0, 0, 0)');
+  assert.equal(backdrop.filter, 'none');
+  assert.equal(backdrop.surface, 'rgb(255, 255, 255)');
+  assert.equal(backdrop.surfaceFilter, 'none');
+  assert.ok(backdrop.shadow.includes('16px 40px'));
+  const beforeMaterial = backdrop.surface;
+  await page.evaluate(() => {
+    localStorage.setItem('voxcue-frosted-transparency-v2', '50');
+    window.dispatchEvent(new Event('voxcue-frosted-transparency-changed'));
+  });
+  await floating.waitForFunction(
+    () => document.documentElement.dataset.frostedTransparency === '50',
+  );
+  assert.equal(await devices.evaluate((e) => getComputedStyle(e).backgroundColor), beforeMaterial);
+  assert.equal(await background.inputValue(), '35');
+  for (const value of [0, 50, 100]) {
+    await page.evaluate((value) => {
+      localStorage.setItem('voxcue-frosted-transparency-v2', String(value));
+      window.dispatchEvent(new Event('voxcue-frosted-transparency-changed'));
+    }, value);
+    await floating.waitForFunction(
+      (value) => document.documentElement.dataset.frostedTransparency === String(value),
+      value,
+    );
+    const main = await page.locator('.app-shell').evaluate((e) => ({
+      color: getComputedStyle(e).backgroundColor,
+      filter: getComputedStyle(e).backdropFilter,
+    }));
+    for (const theme of ['light', 'dark']) {
+      await floating.evaluate(
+        (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
+        theme,
+      );
+      const surface = await devices.evaluate((e) => ({
+        color: getComputedStyle(e).backgroundColor,
+        filter: getComputedStyle(e).backdropFilter,
+      }));
+      assert.equal(surface.color, theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(28, 32, 35)');
+      assert.equal(surface.filter, 'none');
+      if (value === 100) {
+        assert.equal(main.filter, 'none');
+        assert.equal(Number(main.color.match(/[\d.]+/g)[3]), 0);
+        assert.notEqual(surface.color, main.color);
+      }
+      await capture(floating, `14-settings-opaque-${value}-${theme}`);
+    }
+    await floating.evaluate(() => document.documentElement.classList.remove('dark'));
+    assert.equal(await background.inputValue(), '35');
+  }
+  await page.evaluate(() => {
+    localStorage.setItem('voxcue-frosted-transparency-v2', '50');
+    window.dispatchEvent(new Event('voxcue-frosted-transparency-changed'));
+  });
+  await floating.waitForFunction(
+    () => document.documentElement.dataset.frostedTransparency === '50',
+  );
+  await floating.emulateMedia({ forcedColors: 'active' });
+  assert.equal(await devices.evaluate((e) => getComputedStyle(e).backdropFilter), 'none');
+  await floating.emulateMedia({ forcedColors: 'none' });
+  const settingsBox = await devices.boundingBox();
+  const opaqueSample = { x: settingsBox.x + 10, y: settingsBox.y + 60, width: 80, height: 35 };
+  const covered = await floating.screenshot({ clip: opaqueSample, scale: 'css' });
+  await floating.locator('.floating-panels').evaluate((e) => {
+    e.style.filter = 'invert(1)';
+  });
+  const changedBackground = await floating.screenshot({ clip: opaqueSample, scale: 'css' });
+  await floating.locator('.floating-panels').evaluate((e) => {
+    e.style.removeProperty('filter');
+  });
+  assert.ok(
+    covered.equals(changedBackground),
+    'Opaque settings must hide changes in the underlying interview',
+  );
+  await capture(floating, '07-interview-settings');
+  await devices.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await devices.waitFor({ state: 'hidden' });
+  if (passthrough) {
+    await floating.mouse.move(2, 2);
+    await waitNativePassthrough(true);
+  }
+  await app.evaluate(() => globalThis.uxRestorePassthrough());
+  assert.equal(await app.evaluate(() => globalThis.uxCurrentSignal.aborted), false);
+  assert.equal((await app.evaluate(() => globalThis.uxRequests))[1].modelId, 'test-model');
+  await app.evaluate(() => globalThis.uxFinish());
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).waitFor();
+  await floating
+    .getByRole('textbox', { name: '面试提问', exact: true })
+    .fill('新的追问应该如何回答？');
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).waitFor();
+  assert.deepEqual((await app.evaluate(() => globalThis.uxRequests)).at(-1), {
+    modelId: 'next-model',
+    effort: 'high',
+  });
+  checks.push(
+    'device/model choices save directly without Apply; active answer continues on old settings and next question uses new model/effort',
+  );
+  await capture(floating, '05-interview');
+  const metadata = await floating
+    .locator('.transcript-meta')
+    .first()
+    .evaluate((e) => {
+      const label = e.querySelector('strong').getBoundingClientRect(),
+        time = e.querySelector('time').getBoundingClientRect();
+      return { gap: time.left - label.right, text: e.textContent };
+    });
+  assert.ok(metadata.gap >= 0 && metadata.gap < 16);
+  assert.ok(!metadata.text.includes('系统音频'));
+  checks.push(
+    'compact status beside auto-answer, nearby timestamps, green readiness, in-place audio and model settings, independent display sliders',
+  );
+  for (const theme of ['light', 'dark']) {
+    await floating.evaluate(
+      (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
+      theme,
+    );
+    await geometry(floating);
+    await floating.evaluate(() => window.desktop.resizeInterview(-1));
+    await geometry(floating);
+  }
+  await capture(floating, '08-interview-dark');
+  checks.push(
+    'light/dark and smaller native interview bounds, automatic device refresh in both settings, custom sliders and live opacity scene, footer privacy and meters without trailing status',
+  );
+  await floating.getByRole('button', { name: '结束面试', exact: true }).click();
+  await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
+  console.log(
+    JSON.stringify({
+      status: 'passed',
+      checks,
+      screenshots: screenshots ?? 'none',
+      physicalCapture: false,
+      realAccounts: false,
+    }),
+  );
+} finally {
+  await closeUiApp(app);
+}

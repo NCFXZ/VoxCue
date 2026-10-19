@@ -24,7 +24,7 @@ const app = await electron.launch({
   },
 });
 try {
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
   const [main] = await Promise.all([
     app.waitForEvent('window'),
@@ -114,7 +114,13 @@ try {
     await floating.getByRole('button', { name: /开始采集|暂停采集|继续采集|停止采集/ }).count(),
     0,
   );
-  await floating.getByText('面试官 · 系统音频', { exact: true }).first().waitFor();
+  const interviewer = floating.locator('.transcript-item.interviewer').first();
+  await interviewer
+    .locator('.transcript-meta strong')
+    .getByText('面试官', { exact: true })
+    .waitFor();
+  await interviewer.locator('.transcript-meta time').waitFor();
+  assert.equal(await floating.getByText('面试官 · 系统音频', { exact: true }).count(), 0);
   await floating.locator('.answer-text').first().waitFor();
   assert.equal(
     await floating.locator('.floating-question').first().innerText(),

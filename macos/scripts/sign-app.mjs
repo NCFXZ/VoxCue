@@ -1,9 +1,13 @@
 import { readdir, open } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
 import path from 'node:path';
-// Non-hardened ad-hoc distribution has no Team ID and needs no restricted entitlements.
+import { loadDevelopmentSigning, signLocalCode, verifyLocalApp } from './development-signing.mjs';
+// A fixed local certificate keeps Keychain's designated requirement stable.
 // Sign all Mach-O code and nested bundles from inside out, without signing model/data files.
-export async function signMacApp(app) {
+export async function signMacApp(
+  app,
+  { signing, identifier = 'com.voxcue.app', preserveMetadata = false } = {},
+) {
+  signing ??= await loadDevelopmentSigning();
   const targets = [];
   const magic = new Set([
     'feedface',
@@ -37,17 +41,7 @@ export async function signMacApp(app) {
   await visit(app);
   targets.sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
   for (const file of [...targets, app]) {
-    const result = spawnSync(
-      '/usr/bin/codesign',
-      ['--force', '--sign', '-', '--options', '0', file],
-      { encoding: 'utf8' },
-    );
-    if (result.error || result.status)
-      throw result.error ?? Error(`Ad-hoc signing failed: ${result.stderr}`);
+    signLocalCode(file, signing, file === app ? identifier : undefined, { preserveMetadata });
   }
-  const verification = spawnSync('/usr/bin/codesign', ['--verify', '--deep', '--strict', app], {
-    encoding: 'utf8',
-  });
-  if (verification.error || verification.status)
-    throw verification.error ?? Error(verification.stderr);
+  verifyLocalApp(app, signing, identifier);
 }

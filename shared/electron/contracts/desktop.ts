@@ -8,9 +8,12 @@ import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResu
 import type { InterviewTitleRequest, InterviewTitleEvent, HistoryExportRequest } from './history';
 import type {
   SpeechCall,
+  SpeechOptions,
   SpeechStatus,
   SpeechEvent,
   InterviewAnswerRequest,
+  InterviewScreenshot,
+  InterviewScreenshotCall,
   InterviewConfiguration,
   DictationCall,
   AudioSource,
@@ -42,11 +45,18 @@ export interface DesktopAPI {
   knowledge(call: KnowledgeCall): Promise<KnowledgeResult>;
   onKnowledgeEvent(callback: (event: KnowledgeStatus) => void): () => void;
   speech(call: SpeechCall): Promise<SpeechStatus>;
+  reconnectInterviewAudio(options?: SpeechOptions): Promise<SpeechStatus>;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   dictation(call: DictationCall): Promise<SpeechStatus>;
   onDictationEvent(callback: (event: SpeechEvent) => void): () => void;
   interviewModels(): Promise<ServiceResult<{ models: ChatModel[] }>>;
+  updateInterviewModel(
+    value: Pick<InterviewConfiguration, 'modelId' | 'effort'>,
+  ): Promise<ServiceResult<{ modelId: string; effort: InterviewConfiguration['effort'] }>>;
   interviewAnswer(request: InterviewAnswerRequest): Promise<ChatResult>;
+  interviewScreenshot(
+    call: InterviewScreenshotCall,
+  ): Promise<ServiceResult<{ screenshot?: InterviewScreenshot }>>;
   interviewCancel(id: string): Promise<void>;
   setNativeTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   systemAccent(): Promise<string | null>;
@@ -102,9 +112,12 @@ export interface DesktopInvokeMap {
   'history:generate-title': Invocation<DesktopAPI['generateInterviewTitle']>;
   'history:export': Invocation<DesktopAPI['exportHistory']>;
   'speech:call': Invocation<DesktopAPI['speech']>;
+  'interview:reconnect-audio': Invocation<DesktopAPI['reconnectInterviewAudio']>;
   'dictation:call': Invocation<DesktopAPI['dictation']>;
   'interview:models': Invocation<DesktopAPI['interviewModels']>;
+  'interview:update-model': Invocation<DesktopAPI['updateInterviewModel']>;
   'interview:answer': Invocation<DesktopAPI['interviewAnswer']>;
+  'interview:screenshot': Invocation<DesktopAPI['interviewScreenshot']>;
   'interview:cancel': Invocation<DesktopAPI['interviewCancel']>;
   'appearance:theme': Invocation<DesktopAPI['setNativeTheme']>;
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;

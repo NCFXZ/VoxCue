@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
+import { AudioCheck } from './AudioCheck';
 import {
   ArrowUp,
   Check,
@@ -59,14 +60,10 @@ const screenAccessLabels = {
   error: '检查失败',
 };
 export function PreparationPage({
-  onInterviewSettings,
   onComponentSettings,
-  startRequest = 0,
   onDraftChange,
 }: {
-  onInterviewSettings?(): void;
   onComponentSettings?(): void;
-  startRequest?: number;
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
@@ -104,6 +101,7 @@ export function PreparationPage({
   }, [input, state.activeConversation]);
   const [confirmInterview, setConfirmInterview] = useState(false);
   const [openingInterview, setOpeningInterview] = useState(false);
+  const [testingAudio, setTestingAudio] = useState(false);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewDevices, setInterviewDevices] = useState<AudioDevice[]>([]);
   const [accessReport, setAccessReport] = useState<InterviewAccessReport | null>(null);
@@ -214,9 +212,6 @@ export function PreparationPage({
     setConfirmInterview(true);
     void checkAccess(configuration);
   };
-  useEffect(() => {
-    if (startRequest) beginInterview();
-  }, [startRequest]);
   const audioName = (source: 'system' | 'microphone') => {
     if (!interviewConfiguration.options.sources.includes(source)) return '不使用麦克风';
     const id = interviewConfiguration.options[source];
@@ -242,6 +237,7 @@ export function PreparationPage({
         const selectedBase = (await localKnowledge.listBases()).find(
           (base) => base.id === configuration.knowledgeBaseId,
         );
+        if (attempt !== accessAttempt.current) return;
         if (!selectedBase) throw Error('所选面试知识库已删除，请在个人信息中重新选择。');
         setInterviewKnowledgeName(selectedBase.name);
       } else setInterviewKnowledgeName('不使用知识库');
@@ -327,7 +323,63 @@ export function PreparationPage({
           title="开始面试"
           className="interview-start-dialog"
           icon={<Play size={20} />}
-          subtitle="请核对当前面试设置。"
+          subtitle="音频、模型和显示设置可在面试中调整。"
+          footer={
+            <>
+              <p className="interview-start-description">
+                音频仅在本机处理，不保存。
+                {interviewConfiguration.mode === 'local' &&
+                  interviewConfiguration.aiEnabled &&
+                  ` 回答所需文字与资料会发送至 ${interviewProvider.dataRecipient}。`}
+              </p>
+              <div className="interview-start-actions">
+                <Button
+                  variant="outline"
+                  data-autofocus
+                  disabled={openingInterview}
+                  onClick={() => {
+                    ++accessAttempt.current;
+                    setConfirmInterview(false);
+                  }}
+                >
+                  <X size={16} />
+                  取消
+                </Button>
+                <Button
+                  disabled={
+                    openingInterview ||
+                    testingAudio ||
+                    checkingAccess ||
+                    !accessReport?.ready ||
+                    !interviewConfiguration.modelId
+                  }
+                  onClick={async () => {
+                    if (!window.desktop || openingInterview) return;
+                    setOpeningInterview(true);
+                    try {
+                      await window.desktop.openInterview({
+                        ...interviewConfiguration,
+                        ...(interviewConfiguration.knowledgeBaseId
+                          ? { knowledgeBaseName: interviewKnowledgeName }
+                          : {}),
+                      });
+                      setConfirmInterview(false);
+                    } catch (error) {
+                      setAccessReport(null);
+                      setInterviewError(
+                        error instanceof Error ? error.message : '面试窗口打开失败，请重试。',
+                      );
+                    } finally {
+                      setOpeningInterview(false);
+                    }
+                  }}
+                >
+                  <Play size={15} />
+                  {openingInterview ? '正在打开…' : '确认开始'}
+                </Button>
+              </div>
+            </>
+          }
           onClose={() => {
             if (!openingInterview) {
               ++accessAttempt.current;
@@ -373,59 +425,59 @@ export function PreparationPage({
                 正在检查权限与音频设备…
               </p>
             ) : (
-              <ul className="interview-access-list">
-                {accessReport?.checks.map((check) => (
-                  <li key={check.source}>
-                    <div className="interview-access-row">
-                      <span>{check.source === 'microphone' ? '麦克风' : '系统音频'}</span>
-                      <span
-                        className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
-                      >
-                        {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
-                        {audioAccessLabels[check.status]}
-                      </span>
-                    </div>
-                    {check.status !== 'granted' && (
-                      <p className="interview-access-detail danger-text">{check.message}</p>
+              <AudioCheck
+                options={interviewConfiguration.options}
+                disabled={openingInterview || checkingAccess}
+                onBusyChange={setTestingAudio}
+              >
+                {({ button, result }) => (
+                  <ul className="interview-access-list">
+                    {accessReport?.checks.map((check) => (
+                      <li key={check.source}>
+                        <div className="interview-access-row">
+                          <span>{check.source === 'microphone' ? '麦克风' : '系统音频'}</span>
+                          <div className="interview-access-controls">
+                            <span
+                              className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
+                            >
+                              {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
+                              {audioAccessLabels[check.status]}
+                            </span>
+                            {button(check.source, check.status === 'granted')}
+                          </div>
+                        </div>
+                        {result(check.source)}
+                        {check.status !== 'granted' && (
+                          <p className="interview-access-detail danger-text">{check.message}</p>
+                        )}
+                      </li>
+                    ))}
+                    {screenAccess && (
+                      <li aria-label="屏幕捕获权限检查">
+                        <div className="interview-access-row">
+                          <span>屏幕截图</span>
+                          <span className="interview-access-status">
+                            {screenReady ? <Check size={14} /> : <Monitor size={14} />}
+                            {screenAccessLabels[screenAccess.status]}
+                          </span>
+                        </div>
+                        {!screenReady && (
+                          <p className="interview-access-detail">
+                            {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
+                              `${screenAccess.message} `}
+                            可继续纯语音面试，截图需授权。
+                          </p>
+                        )}
+                      </li>
                     )}
-                  </li>
-                ))}
-                {screenAccess && (
-                  <li aria-label="屏幕捕获权限检查">
-                    <div className="interview-access-row">
-                      <span>屏幕截图</span>
-                      <span className="interview-access-status">
-                        {screenReady ? <Check size={14} /> : <Monitor size={14} />}
-                        {screenAccessLabels[screenAccess.status]}
-                      </span>
-                    </div>
-                    {!screenReady && (
-                      <p className="interview-access-detail">
-                        {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
-                          `${screenAccess.message} `}
-                        可继续纯语音面试，截图需授权。
-                      </p>
-                    )}
-                  </li>
+                  </ul>
                 )}
-              </ul>
+              </AudioCheck>
             )}
             <div className="interview-access-actions">
               <Button
                 variant="ghost"
-                disabled={openingInterview}
-                onClick={() => {
-                  ++accessAttempt.current;
-                  setConfirmInterview(false);
-                  onInterviewSettings?.();
-                }}
-              >
-                <Settings size={16} />
-                前往面试设置
-              </Button>
-              <Button
-                variant="ghost"
-                disabled={openingInterview || checkingAccess}
+                disabled={openingInterview || checkingAccess || testingAudio}
                 onClick={() => void checkAccess(interviewConfiguration)}
               >
                 <Refresh size={16} />
@@ -462,57 +514,11 @@ export function PreparationPage({
                 )}
             </div>
           </section>
-          <p className="interview-start-description">
-            音频仅在本机处理，不保存。
-            {interviewConfiguration.mode === 'local' &&
-              interviewConfiguration.aiEnabled &&
-              ` 回答会将必要的本场问题、追问、你的回答文字和相关资料片段发送至 ${interviewProvider.dataRecipient}；结束后仅使用问题生成标题。`}
-          </p>
           {interviewError && (
             <p role="alert" className="danger-text">
               {interviewError}
             </p>
           )}
-          <div className="interview-start-actions">
-            <Button
-              variant="outline"
-              data-autofocus
-              disabled={openingInterview}
-              onClick={() => {
-                ++accessAttempt.current;
-                setConfirmInterview(false);
-              }}
-            >
-              <X size={16} />
-              取消
-            </Button>
-            <Button
-              disabled={
-                openingInterview ||
-                checkingAccess ||
-                !accessReport?.ready ||
-                !interviewConfiguration.modelId
-              }
-              onClick={async () => {
-                if (!window.desktop || openingInterview) return;
-                setOpeningInterview(true);
-                try {
-                  await window.desktop.openInterview(interviewConfiguration);
-                  setConfirmInterview(false);
-                } catch (error) {
-                  setAccessReport(null);
-                  setInterviewError(
-                    error instanceof Error ? error.message : '面试窗口打开失败，请重试。',
-                  );
-                } finally {
-                  setOpeningInterview(false);
-                }
-              }}
-            >
-              <Play size={15} />
-              {openingInterview ? '正在打开…' : '确认开始'}
-            </Button>
-          </div>
         </Modal>
       )}
       <div

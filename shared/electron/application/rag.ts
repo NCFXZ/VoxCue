@@ -78,7 +78,7 @@ export class RagChatService implements AIChatService {
           request.instructions +
           '\n' +
           ragInstructions +
-          '\n需要本地证据时，先搜索，再按需读取相关完整条目。\n\n实时面试中，检索未命中、超时、不可用或预算耗尽时，使用已取得的相关资料和通用专业知识继续回答，不要求用户重试、补充资料或切换模式，不编造个人事实，也不假装检索成功。',
+          '\n需要本地证据时，先搜索，再按需读取相关的完整条目。检索未命中、超时、不可用或预算耗尽时，用已取得的相关资料和通用专业知识继续完成回答，不假装检索成功；实时面试中不要求用户重试、补充资料或切换模式。',
       };
       const result = await this.provider.streamWithTools(
         enriched,

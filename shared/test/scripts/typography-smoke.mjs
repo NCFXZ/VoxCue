@@ -205,6 +205,9 @@ const inspect = async (page, name) => {
         const s = getComputedStyle(e);
         return {
           tag: e.tagName,
+          expectedControlSize: e.matches('.profile-edit-dialog textarea.profile-editor-input')
+            ? 12
+            : 14,
           className: e.className,
           label: e.getAttribute('aria-label') || e.textContent.trim().slice(0, 50),
           size: parseFloat(s.fontSize),
@@ -216,7 +219,8 @@ const inspect = async (page, name) => {
   const invalid = rows.filter((row) => ![12, 14, 15, 18].includes(row.size));
   assert.deepEqual(invalid, [], `${name}: unexpected type sizes`);
   const wrongControls = rows.filter(
-    (row) => ['BUTTON', 'INPUT', 'TEXTAREA'].includes(row.tag) && row.size !== 14,
+    (row) =>
+      ['BUTTON', 'INPUT', 'TEXTAREA'].includes(row.tag) && row.size !== row.expectedControlSize,
   );
   assert.deepEqual(wrongControls, [], `${name}: inconsistent control text`);
   checks.push({ name, rows, geometry });
@@ -480,7 +484,7 @@ try {
     start.getByRole('button', { name: '确认开始', exact: true }).click(),
   ]);
   floating.setDefaultTimeout(15000);
-  await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   await inspect(floating, 'floating-light');
   await floating.evaluate(() => document.documentElement.classList.add('dark'));
   await inspect(floating, 'floating-dark');

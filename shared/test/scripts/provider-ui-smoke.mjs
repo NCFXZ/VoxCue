@@ -52,7 +52,8 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   const input = page.getByRole('textbox', { name: '聊天消息', exact: true });
   const send = page.getByRole('button', { name: '发送消息', exact: true });
-  await page.getByText('ChatGPT 可用', { exact: true }).waitFor();
+  await page.getByRole('button', { name: '聊天模型', exact: true }).waitFor();
+  assert.equal(await page.getByText('ChatGPT 可用', { exact: true }).count(), 0);
   const openSettings = async () => {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -120,7 +121,10 @@ try {
   await page.locator('.chat-answer').getByText('ChatGPT的合成回答', { exact: true }).waitFor();
   await send.waitFor();
   await chooseModel('其他测试模型');
-  await page.getByText('合成提供商 可用', { exact: true }).waitFor();
+  await page
+    .getByRole('button', { name: '聊天模型', exact: true })
+    .getByText('其他测试模型', { exact: true })
+    .waitFor();
   assert.equal(await page.locator('.simulation-disclaimer').count(), 0);
   await page.getByRole('button', { name: '添加附件', exact: true }).click();
   assert.equal(await page.locator('.attachment-menu-hint').count(), 0);
@@ -147,10 +151,8 @@ try {
   );
 
   await page.getByRole('button', { name: '知识库', exact: true }).click();
-  await page
-    .locator('.local-storage-note')
-    .getByText(/合成服务公司/)
-    .waitFor();
+  await page.getByRole('button', { name: '创建知识库', exact: true }).first().waitFor();
+  assert.equal(await page.locator('.local-storage-note').count(), 0);
   await openSettings();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   const category = (name) =>
@@ -160,7 +162,7 @@ try {
   await category('知识库').click();
   assert.equal(await settings.getByText(/按需查找需要账户模型支持/).count(), 0);
   assert.equal(await settings.getByText('高级诊断', { exact: true }).count(), 0);
-  await settings.getByText(/必要片段会发送至\s*合成服务公司/).waitFor();
+  assert.equal(await settings.getByText(/必要片段会发送至/).count(), 0);
   await category('关于').click();
   assert.equal(await settings.getByText(/通过聊天准备面试/).count(), 0);
   await category('面试设置').click();

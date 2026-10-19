@@ -53,11 +53,23 @@ macos/native/ScreenPermission.mm 为 Node-API 8 绑定，在 Electron 自身身�
 
 macos/native/AudioCapture.mm 使用 Core Audio。系统音频是绑定所选输出设备的私有 process tap；麦克风使用所选输入设备的 HAL IOProc。仅聚合 tap，不把双向物理设备的麦克风混入系统音源；不改变默认设备、采样率、硬件音量或播放静音状态。两个音源各自输出已有 Float32 PCM 包协议，经 utilityProcess 送入唯一共用 Paraformer/Silero Worker，没有新增推理后端。
 
+同时采集系统与麦克风时，Mac在该Worker的ASR之前自动启用软件消回声：@ennuicastr/webrtcaec3.js固定0.3.0，JS/WASM和许可证在本机随包加载。参考是所选输出设备全部应用的混音，系统转写保留原流；麦克风重采样到48kHz并以10ms帧处理。使用两路原生共同单调时钟，参考最多等待80ms；参考缺失时旁路保留麦克风，单音源听写不处理。停止/暂停排空滤波延迟与最后短帧，间断重置两路边界；准备或处理失败显式停止，不靠播放静音、改音量或文字去重掩盖问题。合成测试不等于真实房间、外放音量及双方同时说话的质量验收。
+
 采集只在明确语音/面试操作后开始；不录制视频、不保存或上传采集音频。设备 UID 持久选择失效时明确失败，不改默认；设备、默认路由或采样率变化、非法格式和积压均停止并报错。当前支持 HAL 的小端 Float32/Float64 与有符号 Int16/Int32 紧密 PCM，按通道转单声道。无锁单生产者/单消费者原生队列同时受 32 包和 1.5 秒限制；原有 ASR 两秒队列门槛保持。Mac 停止时先停止 IOProc、排空已收到尾包，再退休回调并冲刷 ASR；Windows 原有退休时机保持。
 
 Apple 没有公开的系统音频授权状态查询。按照[官方 Core Audio taps 文档](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps)，首次从 tap 聚合设备启动时系统才询问授权。Mac 检查因此短暂启动零采样 IOProc 后立即释放，用于请求授权和验证原生初始化结果；它不读取缓冲、不返回音频、不加载 ASR，不拿 screen 或 microphone 的状态替代系统音源。真正的音源可用性还依赖后续采集帧和运行错误。禁用麦克风时不请求其权限。
 
-macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Electron 宿主副本；厂商 node_modules 不修改。辅助程序和本地启动器使用 ad-hoc 开发签名，不读取证书/钥匙串密钥，不等同 Developer ID 分发签名或公证。正常系统权限由用户决定，应用不修改 TCC 数据库或自动开启权限。
+macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Electron 宿主副本；厂商 node_modules 不修改。开发宿主、启动器与后续正式应用共用固定本地自签名证书，不等同 Developer ID 分发签名或公证。正常系统权限由用户决定，应用不修改 TCC 数据库或自动开启权限。
+
+## 固定本地签名与登录保留
+
+2026-10-19起，源码的开发和正式打包入口复用同一证书；已发布的旧安装包仍保留原ad-hoc签名。公开指纹在`macos/local-signing-public.json`，身份与口令仅保存在被Git忽略的`macos/.tools/development-signing/`专用钥匙串目录，目录0700、文件0600，私钥不可导出。构建只解锁此专用钥匙串，按证书指纹与原bundle ID签名并核对资源，不修改登录钥匙串的现有项或ACL，也不将自签名证书加入系统信任。Sparkle既有Ed25519密钥及公钥不变。
+
+首次准备身份的显式入口是仓库根的`node macos/scripts/setup-development-signing.mjs`。本机身份已建立，后续构建无需重新创建；该入口重复运行也只复用原身份。**请保管并自行安全备份整个私密目录，禁止在清理缓存时删除，不上传或打包。** 新机器或目录丢失时需恢复原身份；有公开指纹后setup拒绝生成替代证书，构建缺失/错配也不会回退ad-hoc。
+
+应用名、bundle ID、userData路径、登录密文和现有`VoxCue Safe Storage`项保持，不重置登录。首次从旧签名切换时macOS仍可能要求一次授权；确认是本机VoxCue后，由用户在系统窗口选择“始终允许”可保存本次信任。固定身份减少后续重建的重复授权，不能保证系统永不提示；不自动输入密码或点击系统授权。
+
+Mac目录运行`node test/scripts/development-signing-smoke.mjs`检查开发/正式两组不同构建的稳定身份、嵌套助手和开发权限声明保留、替代签名拒绝；追加`--packaged`会在系统临时目录构建实际正式应用并核对证书和密钥排除，不生成DMG/更新ZIP或发布。临时文件退出清理，输出仅终端，不访问现有登录资料。
 
 ## macOS 窗口
 
@@ -65,7 +77,7 @@ macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Ele
 
 开发宿主的 CFBundleIconFile 指向包内 voxcue.icns，与现有 Mac 应用图标同源；宿主缓存纳入 ICNS 内容摘要。结束面试恢复 Dock 时，在显示前后重设 VoxCue 图标，避免回退到 Electron 默认图标。宿主通过暂存生成、保留旧运行副本后切换，不原地改写正在运行的宿主。
 
-Mac 图标使用本平台 IconBuilder 从共享高分辨率原图生成：1024px 画布内素材 832px、四边各 96px 透明留白，配套全尺寸 ICNS。Dock 与启动器共用 macos/public 衍生图，保留原图圆角/透明度，不添加背景、不改原件/Renderer Logo/Windows ICO。[Apple 图标设计建议](https://developer.apple.com/design/human-interface-guidelines/app-icons/)可作后续设计参考；本次只修正现有素材的可见尺寸。正常退出再双击 VoxCue.app 可使用新图标，不需要重启 Dock 或清理系统缓存。
+Mac 图标使用本平台 IconBuilder 从共享高分辨率原图生成：1024px 画布内素材832px、四边各96px透明留白，配套全尺寸ICNS。Dock与启动器共用macos/public衍生图。2026-10-19用户最终提供新的PNG，当前仅缩放并保留其轮廓和透明通道，不再叠加前一版自绘连续圆角或白色底板；共用原件原字节保留，两平台图标由同一源派生。原生检查入口为`node test/scripts/app-icon-smoke.mjs`，以临时透明合成图检查不增加底板/裁切、各尺寸与ICNS结构，退出清理。正常退出再双击VoxCue.app使用新的本地开发图标，无需重启Dock或清理系统缓存。
 
 主窗口、登录窗口使用 Electron hidden 标题样式保留原生左上角红绿灯，内容铺满顶边，仅侧栏品牌区避让控件；Mac 使用系统字体，不显示 Windows 自绘右侧按钮。菜单采用 macOS 应用/文件/编辑/窗口角色，Dock 使用 VoxCue 图标。登录窗口保持固定用途，绿色缩放不可用。面试浮窗继续保留已确认的透明工具面板与结束确认交互，不额外占用其双面板布局。
 

@@ -103,6 +103,11 @@ try {
             },
           ],
         };
+        if (prompt.includes('Kafka'))
+          changes.skills = [
+            ...(request.profile.skills ?? []),
+            { id: 'kafka-topic', title: 'Kafka', content: '合成主题资料', sources: [source] },
+          ];
       } else if (prompt.includes('知识库选择')) changes = { knowledgeBaseId: 'other-base' };
       else if (prompt.includes('删除全部自定义指令')) changes = { customInstructions: '' };
       else if (prompt.includes('自然语言要求'))
@@ -287,7 +292,7 @@ try {
   const summaryRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
   assert.equal(summaryRequest.turns.at(-1).files.length, 1);
   assert.ok(summaryRequest.instructions.includes('直接处理当前问题'));
-  assert.ok(summaryRequest.instructions.includes('待确认提案不阻塞普通聊天'));
+  assert.ok(summaryRequest.instructions.includes('用户明确要求按该指令试写面试回答时除外'));
   await page.evaluate(() => {
     const original = Storage.prototype.setItem;
     globalThis.restoreProfileStorage = () => (Storage.prototype.setItem = original);
@@ -395,8 +400,8 @@ try {
   assert.equal(research.webSearch, true);
   assert.equal(research.profileTask, 'skills');
   assert.equal(research.knowledgeBaseId, null);
-  assert(research.turns.at(-1).content.includes('不设固定写作字数'));
-  assert(research.turns.at(-1).content.includes('标题和正文使用纯文字'));
+  assert(research.turns.at(-1).content.includes('作为技能更新提案'));
+  assert(research.turns.at(-1).content.includes('不要把参考资料写成我已掌握的技能或经历'));
   assert(!/120|220|3–5|附1–2/.test(research.turns.at(-1).content));
   assert.equal(await skillMessage.locator('a, .chat-source-group').count(), 0);
   assert.equal((await saved()).skills, undefined);
@@ -503,7 +508,7 @@ try {
   ]);
   floating.setDefaultTimeout(20000);
   floating.on('pageerror', (error) => errors.push(error.message));
-  await floating.getByText('语音模型已就绪', { exact: true }).waitFor();
+  await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('TypeScript');
   await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
@@ -518,7 +523,9 @@ try {
   assert(interview.request.instructions.includes('第一人称口语回答'));
   assert(interview.request.instructions.includes('手动预览姓名'));
   assert(
-    interview.request.instructions.includes('职位描述表示岗位要求；skills 是面试准备参考资料'),
+    interview.request.instructions.includes(
+      '职位描述摘要（jobDescription）是岗位要求；技能（skills）是面试准备参考资料',
+    ),
   );
   const beforeFallback = await app.evaluate(() => globalThis.profileRequests.length);
   await app.evaluate(() => {
@@ -600,6 +607,28 @@ try {
   const jdEditor = page.getByRole('dialog', { name: '编辑职位描述摘要', exact: true });
   await jdEditor.getByLabel('内容', { exact: true }).fill('');
   await jdEditor.getByRole('button', { name: '保存', exact: true }).click();
+  const beforeTopic = await app.evaluate(() => globalThis.profileRequests.length);
+  await send('请生成一套完整的面试技能');
+  assert.equal(await app.evaluate(() => globalThis.profileRequests.length), beforeTopic);
+  await send('帮我加一条Kafka');
+  await proposal().waitFor();
+  const topicRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
+  assert.equal(topicRequest.profileTask, 'skills');
+  assert.equal(topicRequest.webSearch, true);
+  assert.equal(topicRequest.profile.jobDescription, '');
+  assert.equal((await saved()).jobDescription, '');
+  assert.equal(
+    (await saved()).skills.some((skill) => skill.id === 'kafka-topic'),
+    false,
+  );
+  await send('不更新');
+  assert.equal(
+    (await saved()).skills.some((skill) => skill.id === 'kafka-topic'),
+    false,
+  );
+  checks.push(
+    'named-topic skill request passes real UI/IPC with missing JD; full generation remains blocked and rejected proposal does not save',
+  );
   await message.fill('补充资料前的草稿');
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'missing-jd.txt',

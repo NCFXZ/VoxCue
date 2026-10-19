@@ -1,7 +1,6 @@
 import type {
   AudioSource,
   InterviewConfiguration,
-  InterviewScreenshotMode,
   SpeechSegment,
 } from '../../electron/contracts/speech';
 import type { ChatActivity, ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
@@ -79,7 +78,7 @@ export async function interviewAnswer(
   onSummary?: (text: string) => void,
   onActivity?: (activity: ChatActivity) => void,
   onProvider?: (provider: import('../../electron/contracts/chat').ModelProvider) => void,
-  screenshot?: InterviewScreenshotMode,
+  screenshotIds?: string[],
 ) {
   const desktop = window.desktop;
   if (!desktop) throw Error('真实回答需要桌面应用。');
@@ -99,9 +98,8 @@ export async function interviewAnswer(
   try {
     const result = await desktop.interviewAnswer({
       id,
-      ...(screenshot === 'only'
-        ? { screenshot: 'only' as const }
-        : { question, ...(screenshot === 'attach' ? { screenshot: 'attach' as const } : {}) }),
+      ...(question.trim() ? { question } : {}),
+      ...(screenshotIds?.length ? { screenshotIds } : {}),
       modelId,
       ...(effort === 'auto' ? {} : { effort }),
     });
