@@ -18,39 +18,55 @@ async function settle(button) {
   });
 }
 
-export async function assertInitialDownloadProgress(button) {
-  await button.page().bringToFront();
-  // The progress label can change the control's geometry. Hover its actual
-  // bounds while the initial guard is active, then keep the pointer there.
-  await button.hover();
-  await settle(button);
-  // The progress label may have moved the control since the first hover.
-  await button.hover();
-  await button.evaluate(() => new Promise(requestAnimationFrame));
-  const initialBounds = await button.boundingBox();
-  const feedback = await button.evaluate(async (element) => {
-    const read = () => ({
-      hovered: element.matches(':hover'),
-      progress: getComputedStyle(element.querySelector('.download-button-progress')).visibility,
-      cancel: getComputedStyle(element.querySelector('.download-button-cancel')).visibility,
-      disabled: element.getAttribute('aria-disabled'),
-    });
-    const initial = read();
-    await new Promise((resolve) => setTimeout(resolve, 400));
-    return [initial, read()];
-  });
-  for (const state of feedback)
-    assert.deepEqual(state, {
+const clockPages = new WeakSet();
+export async function assertInitialDownloadProgress(button, start) {
+  const page = button.page();
+  await page.bringToFront();
+  if (!clockPages.has(page)) {
+    await page.clock.install();
+    clockPages.add(page);
+  }
+  // Freeze before mounting the control. Locator/animation work must not consume
+  // its one-second guard; inspect actual UI at 0, 400, 999 and 1000 ms instead.
+  await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));
+  try {
+    const started = Promise.resolve().then(start);
+    started.catch(() => {});
+    await button.waitFor({ state: 'visible' });
+    await button.hover();
+    const initialBounds = await button.boundingBox();
+    const read = () =>
+      button.evaluate((element) => ({
+        hovered: element.matches(':hover'),
+        progress: getComputedStyle(element.querySelector('.download-button-progress')).visibility,
+        cancel: getComputedStyle(element.querySelector('.download-button-cancel')).visibility,
+        disabled: element.getAttribute('aria-disabled'),
+      }));
+    const guarded = {
       hovered: true,
       progress: 'visible',
       cancel: 'hidden',
       disabled: 'true',
-    });
-  await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
-  assert.equal(await button.getAttribute('aria-disabled'), 'false');
-  const finalBounds = await button.boundingBox();
-  assert.equal(finalBounds.width, initialBounds.width);
-  assert.equal(finalBounds.height, initialBounds.height);
+    };
+    assert.deepEqual(await read(), guarded);
+    await page.clock.runFor(400);
+    const result = await started;
+    await button.hover();
+    assert.deepEqual(await read(), guarded);
+    await page.clock.runFor(599);
+    assert.deepEqual(await read(), guarded);
+    await button.evaluate((element) => element.click());
+    assert.deepEqual(await read(), guarded, 'First-second clicks cannot cancel');
+    await page.clock.runFor(1);
+    await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
+    assert.equal(await button.getAttribute('aria-disabled'), 'false');
+    const finalBounds = await button.boundingBox();
+    assert.equal(finalBounds.width, initialBounds.width);
+    assert.equal(finalBounds.height, initialBounds.height);
+    return result;
+  } finally {
+    await page.clock.resume();
+  }
 }
 
 export async function assertDownloadButton(page, button, { iconOnly = false } = {}) {

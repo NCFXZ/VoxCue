@@ -41,6 +41,11 @@ export async function signMacApp(
   await visit(app);
   targets.sort((a, b) => b.split(path.sep).length - a.split(path.sep).length);
   for (const file of [...targets, app]) {
+    if (file === path.join(app, 'Contents/Resources/native/VoxCue.Credentials')) {
+      // Preserve the standalone helper's exact CDHash across application releases.
+      verifyLocalApp(file, signing, 'com.voxcue.credentials');
+      continue;
+    }
     signLocalCode(file, signing, file === app ? identifier : undefined, { preserveMetadata });
   }
   verifyLocalApp(app, signing, identifier);

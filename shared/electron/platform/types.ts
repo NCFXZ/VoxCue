@@ -21,6 +21,7 @@ export interface DesktopPlatform {
   readonly quitOnAllWindowsClosed: boolean;
   readonly captureProtectionSupported: boolean;
   readonly credentialEncryptionLabel: string;
+  readonly credentialEncryptionFile?: string;
   readonly microphoneSettingsUrl?: string;
   readonly wasapiHelper?: string;
   readonly speechProcessFile?: string;

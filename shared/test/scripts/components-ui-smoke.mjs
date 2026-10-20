@@ -210,6 +210,9 @@ try {
       const row = rows.nth(index),
         other = rows.nth((index + 1) % rowCount);
       await row.getByRole('button', { name: '下载', exact: true }).hover();
+      const progress = row.locator('.download-button');
+      // CSS transitions use the compositor clock. Inspect them in real time,
+      // then start a separate download under the controlled JS timer below.
       const widths = await row.evaluate(async (row) => {
         const samples = [row.querySelector('button').getBoundingClientRect().width];
         row.querySelector('button').click();
@@ -250,8 +253,13 @@ try {
       );
       assert.equal(await other.getByText(/尚未下载/).isVisible(), true);
       assert.equal(await settings.getByText('准备中…', { exact: true }).count(), 0);
-      const progress = row.locator('.download-button');
-      await assertInitialDownloadProgress(progress);
+      await progress.hover();
+      await progress.locator('.download-button-cancel').waitFor({ state: 'visible' });
+      await progress.click();
+      await row.getByRole('button', { name: '下载', exact: true }).waitFor();
+      await assertInitialDownloadProgress(progress, () =>
+        row.getByRole('button', { name: '下载', exact: true }).click(),
+      );
       await assertDownloadButton(page, progress);
       if (index === 0 && process.argv.includes('--preview')) {
         // Keep cancellation visible while screenshot clipping adjusts the viewport.

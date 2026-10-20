@@ -21,7 +21,7 @@ const app = await electron.launch({
 const errors = [];
 const checks = [];
 try {
-  await installUiAccount(app);
+  await installUiAccount(app, { components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -64,6 +64,19 @@ try {
       }
       if (/只保存|只更新|确认保存/.test(prompt))
         return { answerText: '请在提案卡片勾选后点击保存所选。', usage: null, sources: [] };
+      if (prompt.includes('操作标签'))
+        return {
+          answerText: '请查看不同操作的状态标签。',
+          usage: null,
+          sources: [],
+          profileChanges: {
+            name: '新增姓名',
+            language: '简体中文',
+            background: '更新后的摘要',
+            jobDescription: '相同职位',
+            customInstructions: '',
+          },
+        };
       const skills = [
         {
           id: 'cpp',
@@ -116,6 +129,7 @@ try {
         sources: [],
         profileChanges: {
           name: '合成测试姓名',
+          language: 'English',
           background: paragraphs
             .concat(paragraphs, paragraphs, ['简历全文末尾标记。'])
             .join('\n\n'),
@@ -186,11 +200,17 @@ try {
   };
   const box = (name) => proposal().getByRole('checkbox', { name, exact: true });
   const save = () => proposal().getByRole('button', { name: '保存所选', exact: true });
+  const languageRow = () =>
+    proposal().locator(':scope > .proposal-rows > .proposal-row').filter({ hasText: '面试语言' });
   await send('更新多项个人信息');
   await save().waitFor();
-  assert.equal(await proposal().locator(':scope > .proposal-rows > *').count(), 5);
+  await capture('mac-overview', page);
+  assert.equal(await proposal().locator(':scope > .proposal-rows > *').count(), 6);
   assert.equal(await proposal().locator('.proposal-skill-row').count(), 0);
-  assert.ok((await proposal().boundingBox()).height < 650);
+  // Retain the original five-row budget while also covering the added language row.
+  assert.ok(
+    (await proposal().boundingBox()).height - (await languageRow().boundingBox()).height < 650,
+  );
   const rows = await proposal()
     .locator('.proposal-excerpt')
     .evaluateAll((nodes) =>
@@ -271,6 +291,13 @@ try {
   await reader.waitFor();
   await reader.getByRole('checkbox', { name: '保存简历摘要', exact: true }).check();
   await capture('full-text-reader', reader);
+  await reader.locator('.dialog-scroll').evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  const tail = await reader.getByText('简历全文末尾标记。', { exact: true }).boundingBox();
+  const scrollArea = await reader.locator('.dialog-scroll').boundingBox();
+  assert.ok(tail.y >= scrollArea.y && tail.y + tail.height <= scrollArea.y + scrollArea.height + 1);
+  await capture('full-text-reader-end', reader);
   await reader.press('Escape');
   await view
     .evaluate(
@@ -286,7 +313,7 @@ try {
     'full text dialog shows complete content, shares selection, restores focus and never saves itself',
   );
 
-  for (const label of ['保存职位描述摘要', '保存自定义指令', '保存技能'])
+  for (const label of ['保存面试语言', '保存职位描述摘要', '保存自定义指令', '保存技能'])
     await box(label).uncheck();
   for (const theme of ['light', 'dark']) {
     await page.evaluate(
@@ -324,12 +351,15 @@ try {
   assert.equal((await saved()).name, base.name);
   assert.equal((await saved()).jobDescription, base.jobDescription);
   assert.equal((await saved()).customInstructions, base.customInstructions);
+  assert.equal((await saved()).language, base.language);
   assert.deepEqual((await saved()).skills, base.skills);
   assert.ok((await saved()).background.endsWith('简历全文末尾标记。'));
   assert.equal(await proposal().getByText('已保存', { exact: true }).count(), 1);
-  assert.equal(await proposal().getByText('未采用', { exact: true }).count(), 3);
+  assert.equal(await proposal().getByText('未采用', { exact: true }).count(), 4);
   assert.equal(await proposal().locator('.proposal-row-main > div.proposal-excerpt').count(), 0);
-  assert.ok((await proposal().boundingBox()).height < 400);
+  assert.ok(
+    (await proposal().boundingBox()).height - (await languageRow().boundingBox()).height < 400,
+  );
   await capture('compact-saved');
   checks.push(
     'light/dark/narrow layout, persisted selection, one-click partial save and compact saved results',
@@ -356,6 +386,7 @@ try {
   await proposal().getByRole('button', { name: '查看技能：Rust 与系统编程', exact: true }).click();
   const skillReader = page.getByRole('dialog', { name: 'Rust 与系统编程', exact: true });
   await skillReader.getByRole('note').waitFor();
+  await capture('skill-source-review', skillReader);
   assert.equal(
     await skillReader.locator('.skill-source-issue code').innerText(),
     'https://example.com/unverified',
@@ -390,7 +421,9 @@ try {
   await send('删除技能');
   await box('保存技能').uncheck();
   assert.equal(await save().isDisabled(), true);
+  await capture('empty-selection');
   await box('删除技能：C++ 并发与内存管理').check();
+  await capture('skill-delete-selection');
   await save().click();
   await proposal().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.deepEqual(
@@ -398,11 +431,13 @@ try {
     ['qt', 'rust'],
   );
   assert.deepEqual((await saved()).skills[0], base.skills[1]);
+  await capture('skill-deleted');
   checks.push('only explicitly selected deletion executes; empty selection disables save');
   const beforeStreaming = await saved();
   await send('流式逐项');
   const streaming = page.getByRole('region', { name: '正在生成的资料提案', exact: true }).last();
   await streaming.getByRole('status', { name: '姓名正在生成', exact: true }).waitFor();
+  await capture('streaming-name', streaming);
   assert.equal(await streaming.locator('.proposal-heading .proposal-field-loading').count(), 0);
   await app.evaluate(() => globalThis.advanceSelectionPreview());
   await streaming.getByRole('button', { name: '展开技能清单', exact: true }).click();
@@ -423,17 +458,51 @@ try {
     await streaming.getByRole('button', { name: '保存所选', exact: true }).isDisabled(),
     true,
   );
+  await capture('streaming-skills', streaming);
   await app.evaluate(() => globalThis.finishSelectionPreview());
   await streaming
     .getByRole('status', { name: '技能二正在生成', exact: true })
     .waitFor({ state: 'hidden' });
   assert.equal(await streaming.locator('.proposal-field-loading').count(), 0);
+  await capture('streaming-fields-complete', streaming);
   await page.getByRole('button', { name: '停止回复', exact: true }).click();
   await page.getByRole('button', { name: '停止回复', exact: true }).waitFor({ state: 'hidden' });
   assert.equal(await streaming.locator('.proposal-field-loading').count(), 0);
   assert.deepEqual(await saved(), beforeStreaming);
+  await capture('streaming-stopped', streaming);
   checks.push(
     'streaming fields and individual skills stop loading independently, header has no spinner, stop cannot save incomplete content',
+  );
+  const beforeKeeping = await saved();
+  await send('更新多项个人信息');
+  await proposal().getByRole('button', { name: '保留原资料', exact: true }).click();
+  await proposal().getByText('已保留原资料', { exact: true }).waitFor();
+  assert.deepEqual(await saved(), beforeKeeping);
+  await capture('proposal-kept');
+  await page.evaluate((info) => {
+    localStorage.setItem(
+      'copilot-personal-info-v1',
+      JSON.stringify({
+        ...info,
+        name: '',
+        background: '已有摘要',
+        jobDescription: '相同职位',
+        customInstructions: '已有指令',
+      }),
+    );
+  }, beforeKeeping);
+  await page.reload();
+  await input().waitFor();
+  await send('操作标签');
+  await save().waitFor();
+  const operations = proposal().locator('.proposal-operation');
+  assert.equal(await operations.filter({ hasText: /^待新增$/ }).count(), 1);
+  assert.equal(await operations.filter({ hasText: /^待修改$/ }).count(), 1);
+  assert.equal(await operations.filter({ hasText: /^待删除$/ }).count(), 1);
+  assert.equal(await operations.filter({ hasText: /^保持原内容$/ }).count(), 2);
+  await capture('field-operation-states');
+  checks.push(
+    'keeping the current profile resolves the proposal without writing any field or skill',
   );
   assert.deepEqual(errors, []);
   console.log(

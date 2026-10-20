@@ -67,7 +67,7 @@ macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Ele
 
 首次准备身份的显式入口是仓库根的`node macos/scripts/setup-development-signing.mjs`。本机身份已建立，后续构建无需重新创建；该入口重复运行也只复用原身份。**请保管并自行安全备份整个私密目录，禁止在清理缓存时删除，不上传或打包。** 新机器或目录丢失时需恢复原身份；有公开指纹后setup拒绝生成替代证书，构建缺失/错配也不会回退ad-hoc。
 
-应用名、bundle ID、userData路径、登录密文和现有`VoxCue Safe Storage`项保持，不重置登录。首次从旧签名切换时macOS仍可能要求一次授权；确认是本机VoxCue后，由用户在系统窗口选择“始终允许”可保存本次信任。固定身份减少后续重建的重复授权，不能保证系统永不提示；不自动输入密码或点击系统授权。
+应用名、bundle ID、userData 路径、登录密文和现有 `VoxCue Safe Storage` 项保持，不重置登录。仅固定应用证书不能证明历史钥匙串项授权和自签名代码的 partition identity 会跨版本保持。0.5.5 改由独立固定签名的 `VoxCue.Credentials` 执行加解密，原字节随应用复用；首次从旧项读取同一密码后创建助手自有保护项，不删除或修改旧项/ACL，不改变原 v10 密文格式。首次迁移仍可能需要系统授权，拒绝时保留原资料；不自动输入密码或点击授权，不承诺系统永不提示。机制及固定副本保护见 [Mac 凭据说明](CREDENTIALS.md)。
 
 Mac目录运行`node test/scripts/development-signing-smoke.mjs`检查开发/正式两组不同构建的稳定身份、嵌套助手和开发权限声明保留、替代签名拒绝；追加`--packaged`会在系统临时目录构建实际正式应用并核对证书和密钥排除，不生成DMG/更新ZIP或发布。临时文件退出清理，输出仅终端，不访问现有登录资料。
 

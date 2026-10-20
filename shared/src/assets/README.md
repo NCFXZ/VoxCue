@@ -4,7 +4,6 @@
 
 `public/voxcue-source.png` 为用户提供的 VoxCue Logo 原文件，保持图形与颜色。`voxcue.png`（512px）及多尺寸 `voxcue.ico` 由 `shared/scripts/update-app-icons.cjs` 转换生成，用于应用、网页标签与 Windows 窗口。
 
-
 本应用自身的名称与图标保持独立，不表示 OpenAI 或 GitHub 的官方应用或背书。
 
 更新图标：`pnpm exec electron shared/scripts/update-app-icons.cjs <原图绝对路径>`，保留原图并生成 16/24/32/48/64/128/256 像素 ICO。ChatGPT 的服务图标保持独立。

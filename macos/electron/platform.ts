@@ -28,4 +28,5 @@ export const macos: DesktopPlatform = {
   quitOnAllWindowsClosed: false,
   captureProtectionSupported: false,
   credentialEncryptionLabel: 'macOS 钥匙串',
+  credentialEncryptionFile: 'macos/electron/credentials.js',
 };

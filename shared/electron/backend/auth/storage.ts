@@ -3,7 +3,27 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { CredentialRecord, AuthStorage } from './service';
-export function createAuthStorage(credentialEncryptionLabel = '系统凭据加密'): AuthStorage {
+export interface CredentialEncryption {
+  encrypt(value: string): Buffer | Promise<Buffer>;
+  decrypt(value: Buffer): string | Promise<string>;
+}
+export function createAuthStorage(
+  credentialEncryptionLabel = '系统凭据加密',
+  encryption?: CredentialEncryption,
+): AuthStorage {
+  const usesElectronEncryption = !encryption;
+  encryption ??= {
+    encrypt(value) {
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error(`${credentialEncryptionLabel}不可用，登录信息未保存。`);
+      return safeStorage.encryptString(value);
+    },
+    decrypt(value) {
+      if (!safeStorage.isEncryptionAvailable())
+        throw new Error(`${credentialEncryptionLabel}不可用，请稍后重试。`);
+      return safeStorage.decryptString(value);
+    },
+  };
   const directory = path.join(app.getPath('userData'), 'auth-data');
   const credentials = path.join(directory, 'credentials.bin');
   async function atomicWrite(target: string, value: string | Buffer) {
@@ -14,7 +34,7 @@ export function createAuthStorage(credentialEncryptionLabel = '系统凭据加�
   }
   return {
     async hostId() {
-      if (!safeStorage.isEncryptionAvailable())
+      if (usesElectronEncryption && !safeStorage.isEncryptionAvailable())
         throw new Error(`${credentialEncryptionLabel}不可用，请稍后重试。`);
       const file = path.join(directory, 'host-id');
       try {
@@ -36,9 +56,7 @@ export function createAuthStorage(credentialEncryptionLabel = '系统凭据加�
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
         throw error;
       }
-      if (!safeStorage.isEncryptionAvailable())
-        throw new Error(`${credentialEncryptionLabel}不可用，请稍后重试。`);
-      const record = JSON.parse(safeStorage.decryptString(value)) as CredentialRecord;
+      const record = JSON.parse(await encryption.decrypt(value)) as CredentialRecord;
       if (
         record.version !== 1 ||
         !record.clientId?.startsWith('oaiapp_') ||
@@ -49,9 +67,7 @@ export function createAuthStorage(credentialEncryptionLabel = '系统凭据加�
       return record;
     },
     async write(record) {
-      if (!safeStorage.isEncryptionAvailable())
-        throw new Error(`${credentialEncryptionLabel}不可用，登录信息未保存。`);
-      await atomicWrite(credentials, safeStorage.encryptString(JSON.stringify(record)));
+      await atomicWrite(credentials, await encryption.encrypt(JSON.stringify(record)));
     },
   };
 }

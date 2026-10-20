@@ -14,7 +14,7 @@ const server = dev
   : undefined;
 await server?.listen();
 const app = await electron.launch({
-  args: ['.'],
+  args: ['.', ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : [])],
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: profile,
@@ -111,7 +111,8 @@ try {
   await fetch(denied);
   await page.getByRole('alert').getByText('未完成 ChatGPT 授权', { exact: false }).waitFor();
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
-  // Native DPAPI storage test writes fake, expiring credentials then removes them.
+  // DPAPI on Windows, Chromium's synthetic Keychain on Mac. Never access a real
+  // Safe Storage password merely because userData is an isolated directory.
   const nativeStorage = await app.evaluate(async ({ app, safeStorage }) => {
     const require = process
       .getBuiltinModule('module')

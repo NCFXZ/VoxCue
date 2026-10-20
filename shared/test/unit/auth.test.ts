@@ -98,6 +98,30 @@ describe('ChatGPT OAuth identity boundary', () => {
   });
 });
 describe('Local authentication service', () => {
+  it('retries storage after a temporary Keychain denial without rewriting credentials', async () => {
+    const record: CredentialRecord = {
+      version: 1,
+      hostId: 'host',
+      clientId: 'oaiapp_fixture',
+      subject: 'subject',
+      name: 'Synthetic',
+      email: '',
+      expiresAt: Date.now() + 10000,
+      idToken: 'synthetic-only',
+    };
+    const read = vi.fn().mockRejectedValueOnce(Error('Keychain denied')).mockResolvedValue(record);
+    const write = vi.fn();
+    const service = new ChatGPTAuthService({
+      storage: { read, write, hostId: async () => 'host' },
+      openBrowser: async () => {},
+    });
+    const first = await Promise.allSettled([service.session(), service.session()]);
+    expect(first.every((result) => result.status === 'rejected')).toBe(true);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect((await service.session())?.user.name).toBe('Synthetic');
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(write).not.toHaveBeenCalled();
+  });
   it('validates loopback before exchange, persists issued registration and exposes no credentials', async () => {
     const data = memoryStorage();
     const network = vi.fn<typeof fetch>().mockResolvedValue(

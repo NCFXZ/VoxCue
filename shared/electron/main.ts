@@ -573,7 +573,20 @@ app.whenReady().then(() => {
         sendDesktop(win.webContents, 'appearance:accent-changed', color);
   });
   auth = new ChatGPTAuthService({
-    storage: createAuthStorage(desktopPlatform.credentialEncryptionLabel),
+    storage: createAuthStorage(
+      desktopPlatform.credentialEncryptionLabel,
+      desktopPlatform.credentialEncryptionFile
+        ? require(
+            path.join(app.getAppPath(), 'dist-electron', desktopPlatform.credentialEncryptionFile),
+          ).createCredentialEncryption(
+            path.join(
+              app.isPackaged ? process.resourcesPath : app.getAppPath(),
+              app.isPackaged ? 'native' : 'native/bin',
+              'VoxCue.Credentials',
+            ),
+          )
+        : undefined,
+    ),
     openBrowser: (url) => shell.openExternal(url),
     callbackLogo: () => readFile(resources.brandLogo),
   });

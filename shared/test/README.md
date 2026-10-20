@@ -1,3 +1,9 @@
+## Mac 0.5.5 回归入口
+
+`functional-suite.mjs` 默认串行执行共享界面/业务及 Mac 原生矩阵。另在仓库根目录执行 `node macos/test/scripts/qwen-regression.mjs`，一次下载认证自有临时 Paraformer/Qwen 组件，依次检查 CPU/Metal 原生流式识别、实际裁剪、Worker/AEC、后台模型/设备切换及实际句柄释放与受管删除。`audio-synthetic-smoke.mjs` 使用合成捕获端口，不启动会采集物理设备的旧 audio-native 入口。
+
+`credential-upgrade-smoke.mjs` 使用独立临时钥匙串，检查历史 ad-hoc 授权、固定助手跨版本与旧 v10 密文兼容。登录和 user-data 迁移夹具使用 Chromium 合成 Keychain；隔离 userData 本身并不能隔离系统 Safe Storage，禁止以该理由读取真实登录项。正式包检查使用 `package-smoke.mjs`，签名和更新验证仍使用既有固定身份/公钥，不替换真实安装。
+
 ## Windows 0.5.5 回归入口
 
 资料提案专项 `profile-selection-smoke.mjs` 已纳入共享完整矩阵及 Windows 五档 DPI。入口覆盖多长字段紧凑排版、单滚动区详情、连续圆角及胶囊标签、勾选双向动画/键盘/减少动态效果、逐字段和逐技能保存/删除、保留未选已有内容及来源、重载持久化、文字确认不落盘，以及真实流式解析下姓名/技能分别完成后隐藏 loading。总标题不显示 loading，部分提案和停止不能保存。默认不保存图片，仅用户指定 `--screenshots` 时交付合成界面。

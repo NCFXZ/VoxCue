@@ -46,9 +46,17 @@ export class ChatGPTAuthService {
   private refreshing: Promise<void> | undefined;
   constructor(private dependencies: Dependencies) {}
   private load() {
-    return (this.loaded ??= this.dependencies.storage.read().then((record) => {
-      this.record = record;
-    }));
+    return (this.loaded ??= this.dependencies.storage
+      .read()
+      .then((record) => {
+        this.record = record;
+      })
+      .catch((error) => {
+        // Denied/temporarily locked Keychain must not poison every later login
+        // attempt in this process. Keep storage untouched and permit a retry.
+        this.loaded = undefined;
+        throw error;
+      }));
   }
   async session(): Promise<AuthSession | null> {
     await this.load();

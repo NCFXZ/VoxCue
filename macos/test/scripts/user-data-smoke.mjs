@@ -24,6 +24,7 @@ await writeFile(
   baseline,
   `
 const {app,BrowserWindow}=require('electron');
+app.commandLine.appendSwitch('use-mock-keychain');
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
 app.setName('VoxCue');
 app.setPath('userData',${JSON.stringify(legacy)});
@@ -38,11 +39,16 @@ app.on('window-all-closed',()=>app.quit());
 await writeFile(
   next,
   `
-const {app}=require('electron');
+const {app,safeStorage}=require('electron');
+app.commandLine.appendSwitch('use-mock-keychain');
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
 const getPath=app.getPath.bind(app);
 app.getPath=name=>name==='appData'?${JSON.stringify(appData)}:getPath(name);
-// Only the catalog transport is synthetic; encrypted storage/auth session are unchanged.
+// Exercise the production storage/migration/session with the real v10 cipher
+// and a synthetic Chromium password. Native helper identity/Keychain access is
+// checked separately by credential-upgrade-smoke in an owned temporary keychain.
+const cryptoPort=require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/macos/electron/credentials.js'))});
+cryptoPort.createCredentialEncryption=()=>({encrypt:value=>safeStorage.encryptString(value),decrypt:value=>safeStorage.decryptString(value)});
 const {ChatGPTService}=require(${JSON.stringify(chat)});
 ChatGPTService.prototype.models=async()=>[{id:'fixture-model',label:'Fixture',description:'',provider:{id:'chatgpt',name:'ChatGPT',dataRecipient:'OpenAI'},reasoningEfforts:['low']}];
 ChatGPTService.prototype.usage=async()=>({requests:0,inputTokens:0,outputTokens:0,totalTokens:0,updatedAt:null});

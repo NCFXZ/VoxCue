@@ -112,12 +112,11 @@ try {
     await aligned(page);
     await page.screenshot(); // Buffer only.
   }
-  await sidebar.getByRole('button', { name: '下载更新', exact: true }).click();
-  await phase(page, 'downloading');
   const progress = sidebar.locator('.download-button');
-  // Keep the pointer on the icon throughout the initial feedback delay.
-  await progress.hover();
-  await assertInitialDownloadProgress(progress);
+  await assertInitialDownloadProgress(progress, async () => {
+    await sidebar.getByRole('button', { name: '下载更新', exact: true }).click();
+    await phase(page, 'downloading');
+  });
   await page.locator('.breadcrumb').hover();
   await app.evaluate(() => globalThis.updateDriver.emit('download-progress', { percent: 37.8 }));
   await progress.locator('[role="progressbar"][aria-valuenow="37.8"]').waitFor();

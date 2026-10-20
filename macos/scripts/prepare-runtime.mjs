@@ -8,6 +8,7 @@ import os from 'node:os';
 import { buildMacIcons } from './build-icons.mjs';
 import { loadDevelopmentSigning, verifyLocalApp } from './development-signing.mjs';
 import { signMacApp } from './sign-app.mjs';
+import { buildCredentials } from './build-credentials.mjs';
 
 // A local development host gives TCC a named app with explicit usage strings.
 // Vendor node_modules and the user's installed applications are never modified.
@@ -15,6 +16,7 @@ export async function prepareRuntime() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64')
     throw Error('Apple Silicon required.');
   const signing = await loadDevelopmentSigning();
+  await buildCredentials();
   const { icns } = await buildMacIcons();
   const root = workspace.platformRoot;
   const require = createRequire(path.join(root, 'package.json'));

@@ -47,8 +47,7 @@ export function authorizationURL(transaction: Transaction) {
     code_challenge_method: 'S256',
     code_challenge: createHash('sha256').update(transaction.verifier).digest('base64url'),
   });
-  if (transaction.clientId === 'dynamic_agent_client')
-    params.set('agent_name_hint', 'VoxCue');
+  if (transaction.clientId === 'dynamic_agent_client') params.set('agent_name_hint', 'VoxCue');
   else if (transaction.email) params.set('login_hint', transaction.email);
   return `${authorizeEndpoint}?${params}`;
 }

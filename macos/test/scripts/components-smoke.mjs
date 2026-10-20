@@ -52,8 +52,9 @@ const launch = () =>
       ...process.env,
       COPILOT_TEST_USER_DATA: profile,
       VITE_DEV_SERVER_URL: '',
-      HOME: path.join(testRoot, 'home'),
       CFFIXED_USER_HOME: path.join(testRoot, 'home'),
+      XDG_CACHE_HOME: path.join(testRoot, 'cache'),
+      XDG_STATE_HOME: path.join(testRoot, 'state'),
       TMPDIR: path.join(testRoot, 'tmp'),
     },
   });

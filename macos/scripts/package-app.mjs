@@ -9,6 +9,7 @@ const { packager } = await import(require.resolve('@electron/packager'));
 import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
 import { buildQwen } from './build-qwen.mjs';
+import { buildCredentials } from './build-credentials.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -20,6 +21,7 @@ export async function buildMacApp(output, publicKey) {
   // Fail before packaging if the established identity is unavailable; never rotate
   // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
   const signing = await loadDevelopmentSigning();
+  await buildCredentials();
   await buildQwen();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
@@ -176,7 +178,12 @@ export async function buildMacApp(output, publicKey) {
     { recursive: true, verbatimSymlinks: true },
   );
   await mkdir(path.join(resources, 'native'), { recursive: true });
-  for (const name of ['VoxCue.Audio', 'VoxCue.ScreenPermission.node', 'VoxCue.Updater.node'])
+  for (const name of [
+    'VoxCue.Audio',
+    'VoxCue.ScreenPermission.node',
+    'VoxCue.Updater.node',
+    'VoxCue.Credentials',
+  ])
     await cp(path.join(root, 'native/bin', name), path.join(resources, 'native', name));
   // Only the build's authenticated canonical file set enters the application.
   // File Provider may retain numbered copies; they are never runtime resources.

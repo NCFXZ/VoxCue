@@ -33,6 +33,13 @@ assert.equal(
   'arm64',
 );
 const resources = path.join(bundle, 'Contents/Resources');
+const credentialHelper = path.join(resources, 'native/VoxCue.Credentials');
+verifyLocalApp(credentialHelper, signing, 'com.voxcue.credentials');
+assert.deepEqual(
+  await readFile(credentialHelper),
+  await readFile(path.join(workspace.platformRoot, 'native/bin/VoxCue.Credentials')),
+  'Packaging must preserve the fixed credential helper bytes and Keychain identity',
+);
 const config = JSON.parse(await readFile(path.join(resources, 'voxcue-update.json'), 'utf8'));
 const pinned = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'update-public-key.json'), 'utf8'),
@@ -120,6 +127,7 @@ assert.equal(
   null,
 );
 assert.ok(entries.includes('/dist-electron/macos/electron/updates/driver.js'));
+assert.ok(entries.includes('/dist-electron/macos/electron/credentials.js'));
 assert.ok(
   !entries.some((file) =>
     /node_modules\/(?:onnxruntime-web(?:\/|$)|@github\/copilot-sdk(?:\/|-))/.test(file),
