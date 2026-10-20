@@ -204,7 +204,7 @@ try {
   assert.equal(/mock|模拟/i.test(await page.locator('body').innerText()), false);
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  for (const name of ['常规', '账户与用量', '面试设置', '关于']) {
+  for (const name of ['个性化', '账户与用量', '面试设置', '关于']) {
     await settings.getByRole('button', { name, exact: true }).click();
     assert.equal(/mock|模拟/i.test(await settings.innerText()), false);
   }

@@ -67,6 +67,7 @@ const desktop: DesktopAPI = {
   onInterviewTitle: (callback) => subscribe('history:title', callback),
   exportHistory: (request) => invoke('history:export', request),
   speech: (call) => invoke('speech:call', call),
+  speechHardware: () => invoke('speech:hardware'),
   onSpeechEvent: (callback) => subscribe('speech:event', callback),
   dictation: (call) => invoke('dictation:call', call),
   reconnectInterviewAudio: (options) => invoke('interview:reconnect-audio', options),

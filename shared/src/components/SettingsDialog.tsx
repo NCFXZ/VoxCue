@@ -43,7 +43,7 @@ import {
 export type Theme = 'light' | 'dark' | 'system';
 const platformLabels = { macos: 'macOS', windows: 'Windows', unknown: '未知平台' };
 const categories = [
-  { id: 'general', label: '常规', Icon: Appearance },
+  { id: 'general', label: '个性化', Icon: Appearance },
   { id: 'components', label: '本地组件', Icon: Download },
   { id: 'account', label: '账户与用量', Icon: Person },
   { id: 'interview', label: '面试设置', Icon: Settings },
@@ -162,7 +162,7 @@ export function SettingsDialog({
                           >
                             <Icon size={16} />
                             <span>{label}</span>
-                            <DropdownMenu.ItemIndicator className="settings-theme-check">
+                            <DropdownMenu.ItemIndicator className="settings-theme-check dropdown-check">
                               <Check size={15} />
                             </DropdownMenu.ItemIndicator>
                           </DropdownMenu.RadioItem>
@@ -221,7 +221,7 @@ export function SettingsDialog({
                               />
                             )}
                             <span>{option.label}</span>
-                            <DropdownMenu.ItemIndicator className="settings-theme-check">
+                            <DropdownMenu.ItemIndicator className="settings-theme-check dropdown-check">
                               <Check size={15} />
                             </DropdownMenu.ItemIndicator>
                           </DropdownMenu.RadioItem>

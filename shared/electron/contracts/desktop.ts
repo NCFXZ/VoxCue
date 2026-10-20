@@ -11,6 +11,7 @@ import type {
   SpeechOptions,
   SpeechStatus,
   SpeechEvent,
+  SpeechHardware,
   InterviewAnswerRequest,
   InterviewScreenshot,
   InterviewScreenshotCall,
@@ -45,6 +46,7 @@ export interface DesktopAPI {
   knowledge(call: KnowledgeCall): Promise<KnowledgeResult>;
   onKnowledgeEvent(callback: (event: KnowledgeStatus) => void): () => void;
   speech(call: SpeechCall): Promise<SpeechStatus>;
+  speechHardware(): Promise<SpeechHardware>;
   reconnectInterviewAudio(options?: SpeechOptions): Promise<SpeechStatus>;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   dictation(call: DictationCall): Promise<SpeechStatus>;
@@ -112,6 +114,7 @@ export interface DesktopInvokeMap {
   'history:generate-title': Invocation<DesktopAPI['generateInterviewTitle']>;
   'history:export': Invocation<DesktopAPI['exportHistory']>;
   'speech:call': Invocation<DesktopAPI['speech']>;
+  'speech:hardware': Invocation<DesktopAPI['speechHardware']>;
   'interview:reconnect-audio': Invocation<DesktopAPI['reconnectInterviewAudio']>;
   'dictation:call': Invocation<DesktopAPI['dictation']>;
   'interview:models': Invocation<DesktopAPI['interviewModels']>;

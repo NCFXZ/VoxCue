@@ -61,6 +61,9 @@ class WasapiCapture {
     Console.OutputEncoding=new UTF8Encoding(false);
     IMMDeviceEnumerator enumerator=null;
     try {
+      // Query the driver before creating any audio object. No audio permission,
+      // model weights, CUDA Toolkit or NVIDIA runtime DLLs are needed here.
+      if(args.Length==1 && args[0]=="cuda-check") { Console.WriteLine(json.Serialize(CudaHardware())); return 0; }
       enumerator=(IMMDeviceEnumerator)new MMDeviceEnumerator();
       if(args.Length==0 || args[0]=="devices") { Devices(enumerator); return 0; }
       if(args[0]=="check") {
@@ -75,6 +78,37 @@ class WasapiCapture {
       return 0;
     } catch(Exception ex) { Status(new { type="error", code="0x"+ex.HResult.ToString("X8"), message=ex.Message }); return 1; }
     finally { Release(enumerator); }
+  }
+  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern IntPtr LoadLibraryExW(string file,IntPtr reserved,uint flags);
+  [DllImport("kernel32.dll",CharSet=CharSet.Ansi,ExactSpelling=true)] static extern IntPtr GetProcAddress(IntPtr module,string name);
+  [DllImport("kernel32.dll")] static extern bool FreeLibrary(IntPtr module);
+  [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int CuInit(uint flags);
+  [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int CuDriverGetVersion(out int version);
+  [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int CuDeviceGet(out int device,int ordinal);
+  [UnmanagedFunctionPointer(CallingConvention.Winapi)] delegate int CuDeviceComputeCapability(out int major,out int minor,int device);
+  static T CudaFunction<T>(IntPtr module,string name) where T:class {
+    IntPtr address=GetProcAddress(module,name);
+    if(address==IntPtr.Zero) throw new EntryPointNotFoundException(name);
+    return Marshal.GetDelegateForFunctionPointer(address,typeof(T)) as T;
+  }
+  static object CudaHardware() {
+    IntPtr module=LoadLibraryExW(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),"nvcuda.dll"),IntPtr.Zero,0x800);
+    if(module==IntPtr.Zero) return new {cuda=false,reason="driver-unavailable"};
+    try {
+      int version,device,major,minor;
+      int initialized=CudaFunction<CuInit>(module,"cuInit")(0);
+      if(initialized==100) return new {cuda=false,reason="unsupported-gpu"};
+      if(initialized!=0) return new {cuda=false,reason="driver-unavailable"};
+      if(CudaFunction<CuDriverGetVersion>(module,"cuDriverGetVersion")(out version)!=0) return new {cuda=false,reason="driver-unavailable"};
+      // The shipped runtime uses CUDA 12.9 PTX, which needs a compatible JIT driver.
+      if(version<12090) return new {cuda=false,reason="driver-outdated"};
+      // Match ordinal zero used by the shipped Rust runtime, including CUDA_VISIBLE_DEVICES.
+      if(CudaFunction<CuDeviceGet>(module,"cuDeviceGet")(out device,0)!=0 ||
+         CudaFunction<CuDeviceComputeCapability>(module,"cuDeviceComputeCapability")(out major,out minor,device)!=0 || major<8)
+        return new {cuda=false,reason="unsupported-gpu"};
+      return new {cuda=true};
+    } catch { return new {cuda=false,reason="driver-unavailable"}; }
+    finally { FreeLibrary(module); }
   }
   static void Capture(IMMDeviceEnumerator e,string source,string requested,bool checkOnly=false) {
     IMMDevice device=null; IAudioClient client=null; IAudioCaptureClient capture=null; IntPtr format=IntPtr.Zero;

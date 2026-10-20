@@ -44,7 +44,11 @@ export class PacketDecoder {
       const rate = p.readUInt32LE(1);
       if (rate < 8000 || rate > 192000) throw Error('Invalid audio rate');
       const samples = new Float32Array((length - 17) / 4);
-      for (let i = 0; i < samples.length; i++) samples[i] = p.readFloatLE(17 + i * 4);
+      for (let i = 0; i < samples.length; i++) {
+        const sample = p.readFloatLE(17 + i * 4);
+        if (!Number.isFinite(sample)) throw Error('Invalid audio sample');
+        samples[i] = sample;
+      }
       packets.push({ rate, timestamp: p.readDoubleLE(5), flags: p.readUInt32LE(13), samples });
       this.pending = this.pending.subarray(4 + length);
     }

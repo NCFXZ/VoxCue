@@ -18,7 +18,7 @@ export async function prepareModelFixtures() {
       'dist-electron/shared/electron/backend/components/catalog.js',
     ),
   );
-  const packages = packagesFor(process.platform, process.arch);
+  const packages = packagesFor(process.platform, process.arch).filter((pkg) => !pkg.optional);
   const root = path.join(testRoot, 'models');
   let previous;
   const service = new ComponentService({

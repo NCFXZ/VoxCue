@@ -48,6 +48,7 @@ export function desktopResources(environment: ResourceEnvironment, platform: Des
       'voxcue.png',
     ),
     speechModels: path.join(modelRoot, 'speech'),
+    qwenModels: undefined as string | undefined,
     ragModel: path.join(modelRoot, 'rag/multilingual-e5-small'),
     screenPermission: platform.screenPermissionFile
       ? path.join(

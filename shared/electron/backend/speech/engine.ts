@@ -43,7 +43,7 @@ export class SpeechEngine {
               model: path.join(this.directory, 'silero_vad.onnx'),
               threshold: 0.5,
               minSpeechDuration: 0.25,
-              minSilenceDuration: 0.7,
+              minSilenceDuration: 0.8,
               windowSize: 512,
               maxSpeechDuration: 20,
             },
@@ -82,6 +82,7 @@ export class SpeechEngine {
       const detected = s.vad.isDetected();
       if (detected && !s.active) {
         s.active = true;
+        this.emit({ type: 'speech-start', source });
         s.start = Math.max(s.origin, end - 250);
       }
       const text = String(this.recognizer.getResult(s.stream).text ?? '').trim();

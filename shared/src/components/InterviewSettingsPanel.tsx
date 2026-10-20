@@ -8,6 +8,7 @@ import { ChoiceMenu } from './ui/choice-menu';
 import { Modal } from './ui/modal';
 import { Settings } from './icons';
 import { useAudioDevices } from './useAudioDevices';
+import { SpeechModelSettings } from './SpeechModelSettings';
 
 export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
   const state = useInterview();
@@ -112,9 +113,13 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
       </section>
       <section className="interview-settings-section">
         <h3>模型设置</h3>
-        <div className="audio-device-editor">
-          <label>
-            回答模型
+        <SpeechModelSettings
+          options={options}
+          disabled={busy || state.speech.state === 'loading'}
+          onChange={(next) => void changeAudio(next)}
+        >
+          <div className="speech-setting-row">
+            <span className="speech-setting-label">回答模型</span>
             <ChoiceMenu
               label="面试回答模型"
               value={modelId}
@@ -126,9 +131,9 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
               }
               onChange={(id) => void changeModel(id, 'auto')}
             />
-          </label>
-          <label>
-            思考强度
+          </div>
+          <div className="speech-setting-row">
+            <span className="speech-setting-label">思考强度</span>
             <ChoiceMenu
               label="面试思考强度"
               value={effort}
@@ -142,8 +147,8 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
               ]}
               onChange={(value) => void changeModel(modelId, value as ReasoningEffort | 'auto')}
             />
-          </label>
-        </div>
+          </div>
+        </SpeechModelSettings>
       </section>
       <section className="interview-settings-section interview-display-settings">
         <h3>显示设置</h3>

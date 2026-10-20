@@ -20,7 +20,7 @@ export function registerComponentIpc(
         Object.keys(value).length !== 2 ||
         !Object.hasOwn(value, 'op') ||
         !Object.hasOwn(value, 'id') ||
-        !['speech', 'rag'].includes(value.id as string)
+        !['speech', 'qwen', 'rag'].includes(value.id as string)
       )
         throw Error('Invalid component request');
       authorizeRemove(event);
@@ -29,7 +29,7 @@ export function registerComponentIpc(
     if (value.op === 'download') {
       if (
         Object.keys(value).some((key) => !['op', 'id'].includes(key)) ||
-        (Object.hasOwn(value, 'id') && !['speech', 'rag'].includes(value.id as string))
+        (Object.hasOwn(value, 'id') && !['speech', 'qwen', 'rag'].includes(value.id as string))
       )
         throw Error('Invalid component request');
       return service.download(value.id as ComponentId | undefined);

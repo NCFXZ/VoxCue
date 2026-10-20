@@ -470,7 +470,7 @@ p {
   background: var(--surface);
   border: 1px solid var(--border);
   padding: 6px;
-  border-radius: var(--radius-card);
+  border-radius: var(--radius-control);
   min-width: 198px;
   box-shadow: var(--shadow-popup);
   z-index: 20;
@@ -487,8 +487,26 @@ p {
   outline: none;
   cursor: pointer;
 }
-.dropdown-item[data-highlighted] {
+.dropdown-content .dropdown-item[data-highlighted]:not([data-disabled]),
+.dropdown-content .dropdown-item[data-state='checked']:not([data-disabled]) {
+  color: var(--foreground);
   background: var(--hover);
+  box-shadow: none;
+}
+.dropdown-item > .dropdown-check {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: inherit;
+  margin-left: auto;
+}
+.dropdown-item[data-disabled] {
+  color: var(--muted);
+  background: transparent;
+  box-shadow: none;
+  opacity: 0.45;
+  cursor: default;
 }
 .dropdown-separator {
   height: 1px;
@@ -2130,7 +2148,7 @@ p {
   height: 26px;
   min-height: 26px;
   padding: 3px 8px;
-  border-radius: 7px;
+  border-radius: var(--radius-control);
   gap: 6px;
   font-size: var(--type-secondary);
   font-weight: 400;
@@ -2166,7 +2184,7 @@ p {
   min-width: 200px;
   max-width: min(360px, calc(100vw - 24px));
   padding: 6px;
-  border-radius: 12px;
+  border-radius: var(--radius-control);
 }
 .compact-tool-menu {
   box-shadow: var(--shadow-popup);
@@ -2176,10 +2194,7 @@ p {
   padding: 5px 9px;
   font-size: var(--type-body);
   line-height: 20px;
-  border-radius: 7px;
-}
-.compact-tool-menu .dropdown-item[data-state='checked'] {
-  background: var(--hover);
+  border-radius: var(--radius-control);
 }
 .model-name {
   flex: 1;
@@ -2204,15 +2219,8 @@ p {
   gap: 10px;
   cursor: pointer;
 }
-.model-option[data-state='checked'] {
-  background: var(--hover);
-}
-.model-menu .model-option[data-state='checked'] {
-  color: var(--foreground);
-}
 .model-check {
   color: inherit;
-  margin-left: 10px;
 }
 .app-shell.login-shell {
   background: var(--surface);
@@ -2524,14 +2532,8 @@ p {
   }
 }
 
-/* Search selection follows the native system accent in both appearance modes. */
-.search-menu-item[data-state='checked'] {
-  color: var(--accent);
-}
-
 /* System accent is shared across all windows and both appearance modes. */
-.nav-item.active,
-.model-option[data-state='checked'] {
+.nav-item.active {
   color: var(--accent);
 }
 .composer-actions {
@@ -2539,12 +2541,6 @@ p {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
-}
-.composer-actions .voice-input-button {
-  color: var(--foreground);
-}
-.voice-input-button[aria-disabled='true'] {
-  cursor: default;
 }
 
 .settings-dialog {
@@ -2678,7 +2674,7 @@ p {
   background: var(--soft);
   color: var(--foreground);
   font: inherit;
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   height: var(--control-height);
   max-width: 100%;
   padding: 0 12px;
@@ -2990,6 +2986,40 @@ p {
   font-weight: 500;
   overflow-wrap: anywhere;
 }
+.speech-model-settings {
+  display: grid;
+  gap: 20px;
+}
+.speech-model-group {
+  display: grid;
+  gap: 12px;
+}
+.speech-model-group + .speech-model-group {
+  border-top: 1px solid var(--border);
+  padding-top: 20px;
+}
+.speech-model-group > h4 {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  font-weight: 500;
+}
+.speech-model-settings .speech-setting-row > :is(.choice-trigger, .speech-select) {
+  width: 100%;
+}
+.speech-model-settings .speech-effort-row {
+  margin: 0;
+}
+.speech-model-notices {
+  display: grid;
+  gap: 6px;
+  padding-top: 2px;
+}
+.speech-model-notices > p {
+  margin: 0;
+  font-size: var(--type-secondary);
+  line-height: 1.55;
+}
 .speech-effort-row .speech-setting-label {
   margin-left: 0;
 }
@@ -3139,24 +3169,6 @@ p {
   }
   .speech-device-grid {
     grid-template-columns: 1fr;
-  }
-}
-.voice-input-button.is-recording {
-  color: var(--danger);
-  background: var(--selected);
-}
-.voice-input-spinner {
-  display: inline-flex;
-  animation: voice-input-loading 1s linear infinite;
-}
-@keyframes voice-input-loading {
-  to {
-    transform: rotate(360deg);
-  }
-}
-@media (prefers-reduced-motion: reduce) {
-  .voice-input-spinner {
-    animation-duration: 2s;
   }
 }
 
@@ -4100,12 +4112,12 @@ details[open] > summary > .disclosure-chevron {
   min-width: 0;
   overflow-wrap: anywhere;
 }
-.choice-trigger:hover,
-.choice-trigger[data-state='open'] {
+.choice-trigger:hover:not(:disabled),
+.choice-trigger[data-state='open']:not(:disabled) {
   background: var(--hover);
 }
 .choice-trigger.settings-choice {
-  border-radius: 999px;
+  border-radius: var(--radius-control);
   background: var(--soft);
 }
 .knowledge-search .choice-trigger {
@@ -4211,7 +4223,8 @@ details[open] > summary > .disclosure-chevron {
   display: flex;
   align-items: center;
   min-width: 0;
-  max-width: calc(100% - 36px);
+  /* Reserve two 32px actions and two 4px gaps before flex line wrapping. */
+  max-width: calc(100% - 72px);
   gap: 4px;
 }
 .composer-model-tools .effort-trigger {
@@ -4339,7 +4352,7 @@ details[open] > summary > .disclosure-chevron {
   border-bottom: 1px solid var(--border);
 }
 .personal-panel-scroll {
-  padding: 0 20px 20px;
+  padding: 16px 20px 20px;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -4498,17 +4511,20 @@ details[open] > summary > .disclosure-chevron {
 .profile-overview {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px 14px;
-  padding: 12px;
-  background: var(--soft);
-  border-radius: var(--radius-card);
+  gap: 8px;
   font-size: var(--type-secondary);
   color: var(--muted);
 }
 .profile-overview > span {
   display: inline-flex;
   align-items: center;
-  gap: 5px;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 5px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--soft);
+  white-space: nowrap;
 }
 .profile-overview .is-ready {
   color: var(--accent);
@@ -5449,8 +5465,18 @@ small {
   min-height: 88px;
   padding: 18px 0;
 }
-.component-row + .component-row {
+.component-row + .component-row,
+.component-group + .component-group {
   border-top: 1px solid var(--border);
+}
+.component-group > h3 {
+  margin: 0;
+  padding-top: 18px;
+  font-size: var(--type-body);
+  font-weight: 600;
+}
+.component-group > .component-row {
+  margin-left: 12px;
 }
 .component-copy {
   display: flex;
@@ -5460,9 +5486,10 @@ small {
   flex: 1;
   overflow-wrap: anywhere;
 }
-.component-copy strong {
+.component-copy .component-model-name {
   font-size: var(--type-body);
-  font-weight: 500;
+  font-weight: 400;
+  color: var(--foreground);
 }
 .component-copy span,
 .component-ready {

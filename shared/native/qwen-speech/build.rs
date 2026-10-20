@@ -1,0 +1,1 @@
+fn main() { let dir = std::env::var("VOXCUE_VAD_LIB").expect("set VOXCUE_VAD_LIB to the CPU-only speech.cpp import-library directory"); println!("cargo:rustc-link-search=native={dir}"); println!("cargo:rustc-link-lib=dylib=speech"); println!("cargo:rerun-if-env-changed=VOXCUE_VAD_LIB"); }

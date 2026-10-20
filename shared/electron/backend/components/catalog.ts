@@ -1,6 +1,15 @@
 import type { ComponentId } from '../../contracts/components';
+import { qwenPackage } from './qwen-catalog';
 
-export interface ComponentPackage {
+export interface ComponentArchive {
+  tag: string;
+  asset: string;
+  bytes: number;
+  sha256: string;
+  files: { path: string; bytes: number; sha256: string; mode: number }[];
+}
+export interface ComponentPackage extends ComponentArchive {
+  optional?: boolean;
   id: ComponentId;
   target: string;
   label: string;
@@ -11,6 +20,7 @@ export interface ComponentPackage {
   sha256: string;
   directory: string;
   files: { path: string; bytes: number; sha256: string; mode: number }[];
+  parts?: ComponentArchive[];
 }
 
 // Fixed trust roots from the independently published resources. Never accept a renderer URL or remote catalog.
@@ -143,6 +153,7 @@ export const componentPackages: ComponentPackage[] = [
       },
     ],
   },
+  qwenPackage,
 ];
 
 export function packagesFor(platform: string, arch: string) {

@@ -8,7 +8,10 @@ import {
   componentLocation,
   componentPaths,
 } from '../../../shared/electron/backend/components/service';
-import { unpackComponent } from '../../../shared/electron/backend/components/archive';
+import {
+  unpackComponent,
+  unpackComponentFile,
+} from '../../../shared/electron/backend/components/archive';
 import {
   packagesFor,
   type ComponentPackage,
@@ -46,6 +49,97 @@ async function fixture() {
   return { root, pkg, bytes, data, fetcher, service };
 }
 describe('独立组件下载与版本缓存', () => {
+  it('默认下载只准备必需组件，Qwen 由用户单独选取下载', async () => {
+    const f = await fixture();
+    const qwen = { ...f.pkg, id: 'qwen' as const, optional: true };
+    const service = new ComponentService({
+      root: f.root,
+      packages: [f.pkg, qwen],
+      managed: true,
+      fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(),
+    });
+    expect((await service.download()).phase).toBe('ready');
+    expect(service.ready('speech')).toBe(true);
+    expect(service.ready('qwen')).toBe(false);
+    expect(f.fetcher).toHaveBeenCalledTimes(1);
+    await service.download('qwen');
+    expect(service.ready('qwen')).toBe(true);
+    expect(f.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it('逐块解压固定归档，无需读入整个模型', async () => {
+    const f = await fixture();
+    const archive = path.join(f.root, 'fixture.zip');
+    await writeFile(archive, f.bytes);
+    await unpackComponentFile(
+      archive,
+      f.pkg,
+      path.join(f.root, 'output'),
+      new AbortController().signal,
+    );
+    expect(await readFile(path.join(f.root, 'output/speech/model.onnx'))).toEqual(f.data);
+  });
+  it('Qwen 一个组件依次下载三个资源，任一失败均不启用，重试后离线复用', async () => {
+    const f = await fixture();
+    const archives = ['asr', 'aligner', 'runtime'].map((name) => {
+      const data = Buffer.from(`synthetic ${name}`),
+        zip = new Zip();
+      const file = {
+        path: `qwen/${name}/fixture.bin`,
+        bytes: data.length,
+        sha256: digest(data),
+        mode: 0o644,
+      };
+      zip.addFile(file.path, data);
+      const bytes: Buffer = zip.toBuffer();
+      return {
+        bytes,
+        part: {
+          tag: f.pkg.tag,
+          asset: `${name}.zip`,
+          bytes: bytes.length,
+          sha256: digest(bytes),
+          files: [file],
+        },
+      };
+    });
+    const pkg: ComponentPackage = {
+      ...f.pkg,
+      id: 'qwen',
+      directory: 'qwen',
+      bytes: archives.reduce((sum, item) => sum + item.bytes.length, 0),
+      sha256: digest(Buffer.from('combined fixed resource identity')),
+      files: archives.flatMap((item) => item.part.files),
+      parts: archives.map((item) => item.part),
+    };
+    let fail = true;
+    const fetcher = vi.fn(async (url) => {
+      const part = archives.find((item) => String(url).endsWith(item.part.asset))!;
+      if (fail && part === archives[1]) throw Error('synthetic interrupted alignment resource');
+      return new Response(new Uint8Array(part.bytes));
+    });
+    const service = new ComponentService({
+      root: f.root,
+      packages: [f.pkg, pkg],
+      managed: false,
+      managedIds: ['qwen'],
+      fetch: fetcher as typeof fetch,
+      emit: vi.fn(),
+    });
+    expect(service.ready('speech')).toBe(true);
+    expect((await service.download('qwen')).phase).toBe('error');
+    expect(service.ready('qwen')).toBe(false);
+    expect(await readdir(f.root)).toEqual([]);
+    fail = false;
+    expect((await service.download('qwen')).phase).toBe('ready');
+    expect(service.ready('qwen')).toBe(true);
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    await service.download('qwen');
+    expect(fetcher).toHaveBeenCalledTimes(5);
+    await expect(service.remove('speech')).rejects.toThrow('随应用提供');
+    expect((await service.remove('qwen')).phase).toBe('needed');
+    expect(service.ready('speech')).toBe(true);
+  });
   it('不在状态检查时联网；按组件下载、完整校验，重启及应用升级后离线复用', async () => {
     const f = await fixture(),
       service = f.service();
@@ -192,7 +286,7 @@ describe('独立组件下载与版本缓存', () => {
   });
   it('固定平台包和缓存入口，安装完整包及开发版保留原加载方式', async () => {
     expect(packagesFor('darwin', 'arm64').map((p) => p.id)).toEqual(['speech', 'rag']);
-    expect(packagesFor('win32', 'x64').map((p) => p.id)).toEqual(['speech', 'rag']);
+    expect(packagesFor('win32', 'x64').map((p) => p.id)).toEqual(['speech', 'rag', 'qwen']);
     expect(() => packagesFor('darwin', 'x64')).toThrow();
     const paths = componentPaths('/cache', packagesFor('darwin', 'arm64'));
     expect(paths.ragModel).toContain('multilingual-e5-small');

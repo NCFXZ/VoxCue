@@ -85,7 +85,7 @@ try {
     assert.equal(await settings.isVisible(), true);
   };
   await open();
-  assert.equal(await category('常规').getAttribute('aria-current'), 'page');
+  assert.equal(await category('个性化').getAttribute('aria-current'), 'page');
   assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 7);
   const accent = settings.getByRole('button', { name: '主题色', exact: true });
   await accent.getByText('跟随系统', { exact: true }).waitFor();
@@ -140,7 +140,7 @@ try {
   await page.getByRole('menuitemradio', { name: '浅色', exact: true }).click();
   await geometry();
   await knowledgeMenu('light');
-  await category('常规').click();
+  await category('个性化').click();
   await page.screenshot({ animations: 'disabled' });
   await category('账户与用量').click();
   await settings.getByRole('region', { name: '本应用用量' }).waitFor();
@@ -151,7 +151,7 @@ try {
   await page.screenshot({ animations: 'disabled' });
   await category('关于').click();
   await settings.getByText('VoxCue', { exact: true }).waitFor();
-  await category('常规').click();
+  await category('个性化').click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await knowledgeMenu('dark');

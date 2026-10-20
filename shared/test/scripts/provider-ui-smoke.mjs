@@ -92,16 +92,7 @@ try {
       iconHeight: 20,
     });
     if (name === '发送消息') {
-      const voice = window.getByRole('button', { name: '语音输入', exact: true });
-      const bounds = await voice.boundingBox(),
-        sendBounds = await button.boundingBox();
-      assert.equal(bounds.width, 32);
-      assert.equal(bounds.height, 32);
-      assert.ok(Math.abs(bounds.y - sendBounds.y) < 0.01);
-      assert.equal(
-        await voice.locator('svg').evaluate((icon) => getComputedStyle(icon).width),
-        '20px',
-      );
+      assert.equal(await window.getByRole('button', { name: '语音输入', exact: true }).count(), 0);
     }
     await window.waitForFunction((name) => {
       const button = document.querySelector('[aria-label="' + name + '"]');
@@ -169,7 +160,7 @@ try {
   assert.equal(await settings.getByText('设置用于下一场面试。', { exact: true }).count(), 0);
   await settings.getByRole('button', { name: '面试回答模型', exact: true }).click();
   await settings.getByRole('menuitemradio', { name: '其他测试模型', exact: true }).click();
-  await category('常规').click();
+  await category('个性化').click();
   await settings.getByRole('button', { name: '外观主题', exact: true }).click();
   await settings.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
@@ -182,7 +173,7 @@ try {
   await page.locator('.composer').screenshot({});
   await input.fill('');
   checks.push(
-    'requested settings explanations removed; theme-colored circular send with 20px arrow, matched microphone geometry and unchanged enabled/disabled behavior in light/dark',
+    'requested settings explanations removed; circular send with 20px arrow, no chat dictation button, and unchanged enabled/disabled behavior in light/dark',
   );
 
   await page.getByRole('button', { name: '开始面试', exact: true }).click();

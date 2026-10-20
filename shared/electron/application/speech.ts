@@ -169,7 +169,9 @@ export class SpeechCoordinator {
           call.options.sources.length !== options.sources.length ||
           call.options.sources.some((s) => !options.sources.includes(s)) ||
           (call.options.microphone ?? '') !== (options.microphone ?? '') ||
-          (call.options.system ?? '') !== (options.system ?? '')
+          (call.options.system ?? '') !== (options.system ?? '') ||
+          (call.options.speechModel ?? 'paraformer') !== (options.speechModel ?? 'paraformer') ||
+          (call.options.inferenceDevice ?? 'cuda') !== (options.inferenceDevice ?? 'cuda')
         )
           throw Error('本场面试设置已锁定，请结束面试后重新设置。');
         return this.port.call({ op: 'start', options: structuredClone(options) });
@@ -201,6 +203,12 @@ export class SpeechCoordinator {
                 },
         })
       : undefined;
+    // The preflight test returns only audio levels; keep it independent of the
+    // interview's potentially expensive Qwen selection.
+    if (call.op === 'test' && options?.op === 'start') {
+      delete options.options.speechModel;
+      delete options.options.inferenceDevice;
+    }
     const intent = call.op === 'status' ? this.dictationIntent : ++this.dictationIntent;
     if (call.op !== 'status') {
       this.clearTest();

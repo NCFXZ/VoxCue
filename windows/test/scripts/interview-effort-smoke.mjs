@@ -56,8 +56,10 @@ try {
   };
   await openSettings();
   const dialog = main.getByRole('dialog', { name: '设置', exact: true });
-  assert.equal(await dialog.getByRole('button', { name: '语音识别模型', exact: true }).count(), 0);
-  assert.equal(await dialog.getByRole('button', { name: '语音推理设备', exact: true }).count(), 0);
+  assert.equal(await dialog.getByRole('button', { name: '语音识别模型', exact: true }).count(), 1);
+  const inferenceDevice = dialog.getByRole('button', { name: '语音推理设备', exact: true });
+  assert.equal(await inferenceDevice.innerText(), 'CPU');
+  assert.equal(await inferenceDevice.isDisabled(), true);
 
   const effort = dialog.getByRole('button', { name: '面试回答思考强度', exact: true });
   assert.match(await effort.innerText(), /轻度/);

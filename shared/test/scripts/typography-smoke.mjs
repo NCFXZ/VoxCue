@@ -17,7 +17,7 @@ const checks = [],
 const previewStates = new Set([
   'login-light',
   'personal-dark',
-  'settings-常规-dark',
+  'settings-个性化-dark',
   'settings-面试设置-dark',
   'record-answers-narrow-dark',
   'knowledge-documents-narrow-dark',
@@ -348,7 +348,7 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
     for (const category of [
-      '常规',
+      '个性化',
       '本地组件',
       '账户与用量',
       '面试设置',
@@ -358,7 +358,7 @@ try {
     ]) {
       await settings.getByRole('button', { name: category, exact: true }).click();
       await inspect(page, `settings-${category}-${theme}`);
-      if (category === '常规') {
+      if (category === '个性化') {
         for (const menu of ['外观主题', '主题色']) {
           await settings.getByRole('button', { name: menu, exact: true }).click();
           await inspect(page, `settings-menu-${menu}-${theme}`);
@@ -466,7 +466,15 @@ try {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await inspect(page, 'user-menu-narrow-dark');
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  for (const category of ['常规', '本地组件', '账户与用量', '面试设置', '知识库', '更新', '关于']) {
+  for (const category of [
+    '个性化',
+    '本地组件',
+    '账户与用量',
+    '面试设置',
+    '知识库',
+    '更新',
+    '关于',
+  ]) {
     await page
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: category, exact: true })

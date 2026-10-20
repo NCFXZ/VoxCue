@@ -538,6 +538,7 @@ describe('受控 preload 契约', () => {
       ['updateSessionState', 'session:state', [true]],
       ['finishSessionClose', 'session:close-ready', ['close-id', true]],
       ['speech', 'speech:call', [{ op: 'status' }]],
+      ['speechHardware', 'speech:hardware', []],
       ['reconnectInterviewAudio', 'interview:reconnect-audio', [{ sources: ['system'] }]],
       ['dictation', 'dictation:call', [{ op: 'start' }]],
       [

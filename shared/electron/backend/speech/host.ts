@@ -13,15 +13,19 @@ export class SpeechHost {
     private helper: string | undefined,
     private emit: (e: SpeechEvent) => void,
     private processFile?: string,
+    private qwenDirectory?: string,
   ) {}
   private send(data: any): Promise<any> {
     return new Promise((resolve, reject) => {
       const id = randomUUID();
-      const timer = setTimeout(() => {
-        this.pending.delete(id);
-        reject(Error('本地语音服务超时。'));
-        this.stop();
-      }, 70000);
+      const timer = setTimeout(
+        () => {
+          this.pending.delete(id);
+          reject(Error('本地语音服务超时。'));
+          this.stop();
+        },
+        this.qwenDirectory ? 200000 : 70000,
+      );
       this.pending.set(id, { resolve, reject, timer });
       this.child!.postMessage({ id, ...data });
     });
@@ -62,7 +66,12 @@ export class SpeechHost {
         },
       });
     });
-    this.ready = this.send({ init: true, model: this.model, helper: this.helper });
+    this.ready = this.send({
+      init: true,
+      model: this.model,
+      helper: this.helper,
+      qwenDirectory: this.qwenDirectory,
+    });
     return this.ready;
   }
   async call(call: SpeechCall): Promise<SpeechStatus> {
@@ -84,6 +93,7 @@ export class SpeechHost {
   async close() {
     const child = this.child;
     if (!child) return;
+    if (this.qwenDirectory) await this.send({ close: true });
     await new Promise<void>((resolve, reject) => {
       const exited = () => {
         clearTimeout(timer);

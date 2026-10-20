@@ -13,7 +13,7 @@ export function ComponentsNotice({
   const state = useComponents((store) => store.state);
   if (!window.desktop?.components || !state) return null;
   const missing = state.items.filter(
-    (item) => item.phase !== 'ready' && (!only || item.id === only),
+    (item) => item.phase !== 'ready' && (only ? item.id === only : !item.optional),
   );
   if (!missing.length) return null;
   return (

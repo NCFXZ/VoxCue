@@ -37,7 +37,12 @@ export function createPresentation(options: {
           false,
         );
     },
-    pinInterview: (win) => win.setAlwaysOnTop(true, 'normal'),
+    pinInterview(win) {
+      // Chromium can retain a floating level after Windows has demoted the
+      // HWND behind the taskbar. Reset that stale level before restoring it.
+      if (!win.isAlwaysOnTop()) win.setAlwaysOnTop(false, 'normal');
+      win.setAlwaysOnTop(true, 'normal');
+    },
     prepareInterview(win) {
       interview = win;
       win.setIcon(options.icon);

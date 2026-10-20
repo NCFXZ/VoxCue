@@ -25,6 +25,7 @@ if (process.argv.includes('--runtime-bundle')) {
   for (const file of [
     'shared/electron/backend/speech/worker.js',
     'shared/electron/backend/speech/engine.js',
+    'shared/electron/backend/speech/qwen.js',
     'shared/electron/backend/speech/buffer.js',
     'shared/electron/backend/speech/models.js',
     'windows/electron/speech/echoCancellation.js',

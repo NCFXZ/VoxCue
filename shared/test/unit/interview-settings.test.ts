@@ -55,6 +55,8 @@ it('retired ASR settings are ignored without losing audio devices or answer pref
     const { useInterviewSettings } = await import('../../../shared/src/stores/interviewSettings');
     const configuration = useInterviewSettings.getState().configuration;
     expect(configuration.options).toEqual({
+      speechModel: 'paraformer',
+      inferenceDevice: 'cuda',
       sources: ['system'],
       microphone: undefined,
       system: 'speaker',
@@ -62,6 +64,8 @@ it('retired ASR settings are ignored without losing audio devices or answer pref
     expect(configuration).toMatchObject({ modelId: 'known', effort: 'high' });
     useInterviewSettings.getState().update(configuration);
     expect(JSON.parse(saved)).toEqual({
+      speechModel: 'paraformer',
+      inferenceDevice: 'cuda',
       microphoneEnabled: false,
       system: 'speaker',
       modelId: 'known',

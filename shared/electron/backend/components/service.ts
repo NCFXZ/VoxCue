@@ -3,8 +3,8 @@ import { constants } from 'node:fs';
 import { mkdir, lstat, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
 import type { ComponentId, ComponentState } from '../../contracts/components';
-import type { ComponentPackage } from './catalog';
-import { unpackComponent } from './archive';
+import type { ComponentPackage, ComponentArchive } from './catalog';
+import { unpackComponentFile } from './archive';
 
 export function componentLocation(root: string, pkg: ComponentPackage) {
   return path.join(root, `${pkg.id}-${pkg.version}-${pkg.sha256}`);
@@ -17,6 +17,7 @@ export function componentPaths(root: string, packages: ComponentPackage[]) {
   return {
     speechModels: location('speech'),
     ragModel: location('rag'),
+    ...(packages.some((pkg) => pkg.id === 'qwen') ? { qwenModels: location('qwen') } : {}),
   };
 }
 
@@ -32,6 +33,7 @@ export class ComponentService {
       root: string;
       packages: ComponentPackage[];
       managed: boolean;
+      managedIds?: ComponentId[];
       fetch: typeof fetch;
       emit(state: ComponentState): void;
       prepareRemove?(id: ComponentId): Promise<boolean>;
@@ -39,20 +41,28 @@ export class ComponentService {
   ) {
     this.value = {
       revision: 0,
-      phase: options.managed ? 'checking' : 'ready',
+      phase: options.managed || options.managedIds?.length ? 'checking' : 'ready',
       error: null,
-      removable: options.managed,
+      removable: options.managed || !!options.managedIds?.length,
       items: options.packages.map((pkg) => ({
         id: pkg.id,
         label: pkg.label,
         bytes: pkg.bytes,
-        received: options.managed ? 0 : pkg.bytes,
-        phase: options.managed ? 'pending' : 'ready',
+        received: this.managed(pkg.id) ? 0 : pkg.bytes,
+        phase: this.managed(pkg.id) ? 'pending' : 'ready',
+        removable: this.managed(pkg.id),
+        ...(pkg.optional ? { optional: true } : {}),
       })),
     };
   }
   state(): ComponentState {
     return structuredClone(this.value);
+  }
+  private managed(id: ComponentId) {
+    return this.options.managed || !!this.options.managedIds?.includes(id);
+  }
+  private requiredReady() {
+    return this.value.items.every((item) => item.optional || item.phase === 'ready');
   }
   ready(id: ComponentId) {
     return this.value.items.some((item) => item.id === id && item.phase === 'ready');
@@ -69,7 +79,7 @@ export class ComponentService {
   }
   status() {
     if (this.removing) return Promise.resolve(this.state());
-    if (!this.options.managed || this.checking)
+    if ((!this.options.managed && !this.options.managedIds?.length) || this.checking)
       return this.checking?.then(() => this.state()) ?? Promise.resolve(this.state());
     this.checking = this.check();
     return this.checking;
@@ -79,6 +89,7 @@ export class ComponentService {
       await this.directory(this.options.root);
       await this.cleanAbandoned();
       for (const pkg of this.options.packages) {
+        if (!this.managed(pkg.id)) continue;
         const item = this.value.items.find((value) => value.id === pkg.id)!;
         item.phase = 'checking';
         this.publish('checking');
@@ -86,7 +97,7 @@ export class ComponentService {
         item.phase = valid ? 'ready' : 'pending';
         item.received = valid ? pkg.bytes : 0;
       }
-      this.publish(this.value.items.every((item) => item.phase === 'ready') ? 'ready' : 'needed');
+      this.publish(this.requiredReady() ? 'ready' : 'needed');
     } catch {
       this.publish('error', '无法检查本地组件缓存，请确认应用数据目录可写后重试。');
       this.checking = undefined;
@@ -104,7 +115,7 @@ export class ComponentService {
     return this.downloading;
   }
   async remove(id: ComponentId) {
-    if (!this.options.managed) throw Error('此组件随应用提供，无法从设置中删除。');
+    if (!this.managed(id)) throw Error('此组件随应用提供，无法从设置中删除。');
     if (this.disposed || this.removing || this.downloading || this.value.phase === 'checking')
       throw Error('请等待当前组件操作完成后再删除。');
     const pkg = this.options.packages.find((item) => item.id === id);
@@ -119,7 +130,7 @@ export class ComponentService {
       // Retire consumers only after publishing a non-ready state. New model
       // operations are rejected by their independent main-process guards.
       if (this.options.prepareRemove && !(await this.options.prepareRemove(id))) {
-        message = '组件正在使用，请结束面试、语音输入或资料处理后再删除。';
+        message = '组件正在使用，请结束面试、音频测试或资料处理后再删除。';
         throw Error('Component in use');
       }
       const root = await lstat(this.options.root);
@@ -134,7 +145,7 @@ export class ComponentService {
       item.phase = 'pending';
       item.received = 0;
       this.checking = undefined;
-      this.publish('needed');
+      this.publish(this.requiredReady() ? 'ready' : 'needed');
     } catch {
       const intact = await this.verify(directory, pkg);
       item.phase = intact ? 'ready' : 'pending';
@@ -156,13 +167,19 @@ export class ComponentService {
   private async run(id: ComponentId | undefined, signal: AbortSignal) {
     try {
       await this.status();
-      if (!this.options.managed) return this.state();
+      if (!this.options.managed && !this.options.managedIds?.length) return this.state();
       for (const pkg of this.options.packages) {
-        if ((id && pkg.id !== id) || this.ready(pkg.id)) continue;
+        if (
+          !this.managed(pkg.id) ||
+          (!id && pkg.optional) ||
+          (id && pkg.id !== id) ||
+          this.ready(pkg.id)
+        )
+          continue;
         signal.throwIfAborted();
         await this.install(pkg, signal);
       }
-      this.publish(this.value.items.every((item) => item.phase === 'ready') ? 'ready' : 'needed');
+      this.publish(this.requiredReady() ? 'ready' : 'needed');
     } catch {
       for (const item of this.value.items)
         if (item.phase !== 'ready') {
@@ -256,14 +273,20 @@ export class ComponentService {
       item.phase = 'downloading';
       item.received = 0;
       this.publish('downloading');
-      const archive = path.join(stage, 'download.zip');
-      await this.downloadArchive(pkg, archive, signal, (received) => {
-        item.received = received;
-        this.publish('downloading');
-      });
-      item.phase = 'verifying';
-      this.publish('verifying');
-      await unpackComponent(await readFile(archive), pkg, path.join(stage, 'files'), signal);
+      let completed = 0;
+      for (const [index, part] of (pkg.parts ?? [pkg]).entries()) {
+        const archive = path.join(stage, `download-${index}.zip`);
+        item.phase = 'downloading';
+        await this.downloadArchive(part, archive, signal, (received) => {
+          item.received = completed + received;
+          this.publish('downloading');
+        });
+        item.phase = 'verifying';
+        this.publish('verifying');
+        await unpackComponentFile(archive, part, path.join(stage, 'files'), signal);
+        completed += part.bytes;
+        await rm(archive);
+      }
       await writeFile(
         path.join(stage, '.voxcue-component.json'),
         JSON.stringify({ sha256: pkg.sha256 }),
@@ -271,7 +294,6 @@ export class ComponentService {
       );
       if (!(await this.verify(stage, pkg))) throw Error('Invalid installed component');
       signal.throwIfAborted();
-      await rm(archive);
       await rm(path.join(stage, '.owner.json'));
       const destination = componentLocation(this.options.root, pkg);
       let replaced: string | undefined;
@@ -304,13 +326,17 @@ export class ComponentService {
     }
   }
   private async downloadArchive(
-    pkg: ComponentPackage,
+    pkg: ComponentArchive,
     file: string,
     signal: AbortSignal,
     progress: (bytes: number) => void,
   ) {
     const timeout = new AbortController();
-    const combined = AbortSignal.any([signal, timeout.signal, AbortSignal.timeout(20 * 60 * 1000)]);
+    const combined = AbortSignal.any([
+      signal,
+      timeout.signal,
+      AbortSignal.timeout(120 * 60 * 1000),
+    ]);
     let idle = setTimeout(() => timeout.abort(), 45000);
     const refresh = () => {
       clearTimeout(idle);
@@ -374,7 +400,7 @@ export class ComponentService {
   }
   private async cleanAbandoned() {
     for (const name of await readdir(this.options.root)) {
-      if (!/^\.stage-(speech|rag)-[a-f0-9-]{36}$/.test(name)) continue;
+      if (!/^\.stage-(speech|qwen|rag)-[a-f0-9-]{36}$/.test(name)) continue;
       const directory = path.join(this.options.root, name);
       try {
         const stat = await lstat(directory);

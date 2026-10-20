@@ -111,6 +111,18 @@ describe('本地语音边界和问题汇总', () => {
     ]);
     expect(() => new PacketDecoder().push(Buffer.from([255, 255, 255, 255]))).toThrow();
   });
+  it.each([NaN, Infinity, -Infinity])(
+    '损坏采样 %s 在音频管道边界被拒绝，不进入重采样与识别',
+    (sample) => {
+      const packet = Buffer.alloc(25);
+      packet.writeUInt32LE(21, 0);
+      packet[4] = 1;
+      packet.writeUInt32LE(16000, 5);
+      packet.writeDoubleLE(1000, 9);
+      packet.writeFloatLE(sample, 21);
+      expect(() => new PacketDecoder().push(packet)).toThrow('Invalid audio sample');
+    },
+  );
   it('来源白名单、数量、重复、设备长度受控，无路径透传', () => {
     for (const v of [
       null,

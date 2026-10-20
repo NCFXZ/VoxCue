@@ -25,6 +25,22 @@ const app = await electron.launch({
 });
 try {
   await installUiAccount(app, { speech: true, components: true });
+  await app.evaluate(({ app }) => {
+    globalThis.pinMaxDepth = 0;
+    app.on('browser-window-created', (_event, win) => {
+      if (!win.getTitle().includes('面试')) return;
+      const pin = win.setAlwaysOnTop.bind(win);
+      let depth = 0;
+      win.setAlwaysOnTop = (...args) => {
+        globalThis.pinMaxDepth = Math.max(globalThis.pinMaxDepth, ++depth);
+        try {
+          return pin(...args);
+        } finally {
+          depth--;
+        }
+      };
+    });
+  });
   const login = await app.firstWindow();
   const [main] = await Promise.all([
     app.waitForEvent('window'),
@@ -138,6 +154,11 @@ try {
         .isAlwaysOnTop(),
     );
   assert.equal(await nativePinned(), true);
+  assert.equal(
+    await app.evaluate(() => globalThis.pinMaxDepth),
+    1,
+    'Native pin events must not recursively re-enter pinning',
+  );
   assert.equal(await floating.getByRole('button', { name: /^(置顶|已置顶)$/ }).count(), 0);
   assert.equal(await floating.evaluate(() => window.desktop.togglePin()), true);
   await floating.evaluate(() => {

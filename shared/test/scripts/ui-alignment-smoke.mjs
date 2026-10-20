@@ -105,6 +105,16 @@ try {
         (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
         theme,
       );
+      const overviewSpacing = await page.locator('.personal-panel').evaluate((panel) => {
+        const header = panel.querySelector('header').getBoundingClientRect();
+        const first = panel.querySelector('.profile-overview > span').getBoundingClientRect();
+        return first.top - header.bottom;
+      });
+      check(
+        `profile-overview-spacing-${width}-${theme}`,
+        overviewSpacing >= 16 - 1 / 64,
+        overviewSpacing,
+      );
       for (const panelWidth of [300, 380, 520, 640]) {
         const separator = page.getByRole('separator', { name: '调整个人信息宽度' });
         await separator.focus();
@@ -185,7 +195,7 @@ try {
     const rows = [...element.querySelectorAll('.speech-setting-row')];
     return {
       devices: [...element.querySelectorAll('.speech-device')].map(rect),
-      selects: rows.map((r) => rect(r.querySelector('.speech-select'))),
+      selects: rows.map((r) => rect(r.querySelector('button[aria-haspopup="menu"]'))),
       textLeft: rect(element.querySelector('.speech-answer-settings .speech-setting-label')).left,
       effortLeft: rect(element.querySelector('.speech-effort-row .speech-setting-label')).left,
       overflow: element.scrollWidth > element.clientWidth + 1,

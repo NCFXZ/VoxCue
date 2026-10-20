@@ -28,10 +28,12 @@ export async function offlineElectronEntry(
         )
         .packagesFor(process.platform, process.arch)
     : [];
-  const modelUrls = packages.map(
-    (pkg) =>
-      'https://github.com/NCFXZ/VoxCue-releases/releases/download/' + pkg.tag + '/' + pkg.asset,
-  );
+  const modelUrls = packages
+    .flatMap((pkg) => pkg.parts ?? [pkg])
+    .map(
+      (pkg) =>
+        'https://github.com/NCFXZ/VoxCue-releases/releases/download/' + pkg.tag + '/' + pkg.asset,
+    );
   const entry = path.join(testRoot, 'offline-electron-entry.cjs');
   await writeFile(
     entry,

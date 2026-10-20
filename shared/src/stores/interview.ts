@@ -12,6 +12,7 @@ import type {
 import { QuestionBuffer, interviewAnswer } from '../services/speech';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
+import { automaticAnswerDelay } from '../../electron/contracts/speechSettings';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
   mode: 'local' | 'mock';
@@ -362,6 +363,10 @@ export const useInterview = create<InterviewState>((set, get) => ({
             set({ pendingQuestion: '', draftQuestion: '' });
           }
         }
+        if (event.type === 'speech-start' && event.source === 'system') {
+          clearTimeout(questionTimer);
+          automaticQuestionReady = false;
+        }
         if (event.type === 'status') {
           if (event.status.state === 'error' || event.status.state === 'paused') {
             clearTimeout(questionTimer);
@@ -395,6 +400,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
         }
         if (event.type === 'segment') {
           const segment = event.segment;
+          if (segment.continuationOf && submittedInterim.has(segment.continuationOf))
+            submittedInterim.add(segment.id);
           const existing = get().transcripts.find((t) => t.id === segment.id);
           if (existing?.final) return;
           const row = {
@@ -435,7 +442,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
                     !get().updatingModel
                   )
                     void get().submitTranscript();
-                }, 2200);
+                }, automaticAnswerDelay(get().options));
               }
             }
             const interim = get()

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AudioSource, SpeechOptions } from '../../electron/contracts/speech';
-import { useDictation } from '../stores/dictation';
 import { AudioInputMeters, type AudioLevels } from './AudioInputMeters';
 import { Button } from './ui/button';
 import { AudioLines, Square } from './icons';
@@ -105,7 +104,6 @@ export function AudioCheck({
     setSeen((old) => ({ ...old, [selected]: false }));
     notify.current(true);
     try {
-      await useDictation.getState().stop();
       if (current !== generation.current) return;
       const result = await window.desktop!.dictation({
         op: 'test',

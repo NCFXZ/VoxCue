@@ -54,7 +54,9 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
             >
               <Globe size={16} />
               网络搜索
-              <span className="tool-menu-check">{state.webSearch && <Check size={14} />}</span>
+              <span className="tool-menu-check dropdown-check">
+                {state.webSearch && <Check size={14} />}
+              </span>
             </DropdownMenu.CheckboxItem>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
@@ -87,7 +89,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
                     key={model.id}
                   >
                     <span className="model-name">{model.label}</span>
-                    <DropdownMenu.ItemIndicator className="model-check">
+                    <DropdownMenu.ItemIndicator className="model-check dropdown-check">
                       <Check size={15} />
                     </DropdownMenu.ItemIndicator>
                   </DropdownMenu.RadioItem>
@@ -150,7 +152,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
                 {['auto' as const, ...efforts].map((value) => (
                   <DropdownMenu.RadioItem className="dropdown-item" key={value} value={value}>
                     {effortLabels[value]}
-                    <DropdownMenu.ItemIndicator className="tool-menu-check">
+                    <DropdownMenu.ItemIndicator className="tool-menu-check dropdown-check">
                       <Check size={14} />
                     </DropdownMenu.ItemIndicator>
                   </DropdownMenu.RadioItem>

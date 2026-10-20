@@ -124,7 +124,9 @@ export async function checkComponents(application) {
   await notice.getByRole('button', { name: '前往设置' }).click();
   let settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
-  assert.equal(await settings.locator('.component-row').count(), 2);
+  assert.equal(await settings.locator('.component-row').count(), 3);
+  const speechGroup = settings.getByRole('region', { name: '本地语音模型', exact: true });
+  assert.equal(await speechGroup.locator('.component-row').count(), 2);
   for (const dark of [false, true]) {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
     assert.ok(
@@ -138,7 +140,14 @@ export async function checkComponents(application) {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   const blocked = await page.evaluate(async () => {
     try {
-      await window.desktop.openInterview({});
+      await window.desktop.openInterview({
+        mode: 'local',
+        options: { sources: ['system'] },
+        aiEnabled: false,
+        autoAnswer: true,
+        modelId: '',
+        effort: 'auto',
+      });
       return false;
     } catch (error) {
       return String(error).includes('本地语音模型');
@@ -166,8 +175,8 @@ export async function checkComponents(application) {
   );
   await personal.locator('.components-notice').getByRole('button', { name: '前往设置' }).click();
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
-  const rag = settings.locator('.component-row').filter({ hasText: '知识库模型' });
-  const speech = settings.locator('.component-row').filter({ hasText: '本地语音模型' });
+  const rag = settings.locator('.component-row[data-component-id="rag"]');
+  const speech = settings.locator('.component-row[data-component-id="speech"]');
   await rag.getByRole('button', { name: '下载', exact: true }).click();
   await assertInitialDownloadProgress(rag.locator('.download-button'));
   assert.equal(await speech.getByRole('button', { name: '下载', exact: true }).isDisabled(), true);
@@ -254,7 +263,7 @@ export async function checkComponents(application) {
   );
   const state = await page.evaluate(() => window.desktop.components({ op: 'status' }));
   assert.equal(state.phase, 'ready');
-  assert.ok(state.items.every((item) => item.phase === 'ready'));
+  assert.ok(state.items.every((item) => item.optional || item.phase === 'ready'));
   const requests = await application.evaluate(() => globalThis.componentRequests);
   for (const name of ['VoxCue-Models-Speech-1.0.0.zip', 'VoxCue-Models-RAG-1.0.0.zip'])
     assert.equal(

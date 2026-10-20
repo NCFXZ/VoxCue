@@ -8,6 +8,7 @@ import type {
   AudioDevice,
 } from '../../contracts/speech';
 import type { AudioPacket } from './buffer';
+import { speechSelection } from '../../contracts/speechSettings';
 export interface NativeCapture {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -43,11 +44,15 @@ export class SpeechController {
   private status: SpeechStatus = { state: 'idle', model: speechModelName };
   private serial = Promise.resolve();
   private epoch = 0;
+  private selection = speechSelection({ sources: [] });
+  private chunkMs?: number;
+  private alignmentDevice?: string;
   constructor(
     private model: string,
     private helper: string,
     private emit: (e: SpeechEvent) => void,
     private adapter: CaptureAdapter,
+    private qwenDirectory?: string,
   ) {}
   call(call: SpeechCall): Promise<SpeechStatus> {
     const result = this.serial.then(() => this.execute(call));
@@ -64,7 +69,12 @@ export class SpeechController {
   ) {
     this.status = {
       state,
-      model: speechModelName,
+      model:
+        this.selection.speechModel === 'qwen'
+          ? `Qwen3-ASR 0.6B · ${this.selection.inferenceDevice.toUpperCase()}${this.alignmentDevice === 'cpu' && this.selection.inferenceDevice === 'cuda' ? ' · 对齐 CPU' : ''} · 本地`
+          : speechModelName,
+      ...this.selection,
+      ...(this.chunkMs ? { chunkMs: this.chunkMs } : {}),
       ...(error ? { error } : {}),
       ...(failureSource ? { failureSource } : {}),
     };
@@ -76,14 +86,19 @@ export class SpeechController {
     const worker = new Worker(path.join(__dirname, 'worker.js'));
     this.worker = worker;
     this.ready = new Promise<void>((resolve, reject) => {
-      const timer = setTimeout(() => {
-        reject(Error('语音模型加载超时。'));
-        void worker.terminate();
-      }, 60000);
+      const timer = setTimeout(
+        () => {
+          reject(Error('语音模型加载超时。'));
+          void worker.terminate();
+        },
+        this.selection.speechModel === 'qwen' ? 180000 : 60000,
+      );
       worker.on('message', (m) => {
         if (this.worker !== worker) return;
         if (m.ready) {
           clearTimeout(timer);
+          this.chunkMs = m.chunkMs;
+          this.alignmentDevice = m.alignmentDevice;
           resolve();
         }
         if (m.event) this.emit(m.event);
@@ -101,7 +116,7 @@ export class SpeechController {
               inferenceMs: m.inferenceMs,
             });
         }
-        const completed = m.flushed ?? m.prepared;
+        const completed = m.flushed ?? m.prepared ?? m.closed;
         if (completed) {
           this.flushers.get(completed)?.resolve();
           this.flushers.delete(completed);
@@ -136,7 +151,8 @@ export class SpeechController {
       });
       worker.postMessage({
         op: 'init',
-        directory: this.model,
+        directory: this.selection.speechModel === 'qwen' ? this.qwenDirectory : this.model,
+        ...this.selection,
         ...(this.adapter.preprocessorFile
           ? { preprocessorFile: this.adapter.preprocessorFile }
           : {}),
@@ -169,7 +185,7 @@ export class SpeechController {
       }
     }
     const ms = (samples.length / rate) * 1000;
-    if (this.queued + ms > 2000) {
+    if (this.queued + ms > (this.selection.speechModel === 'qwen' ? 30000 : 2000)) {
       this.droppedSamples += samples.length;
       this.emit({
         type: 'metrics',
@@ -181,7 +197,7 @@ export class SpeechController {
         audioMs: 0,
         inferenceMs: 0,
       });
-      this.fail('识别积压超过两秒，采集已停止；未静默丢弃音频，请降低并发负载后重试。');
+      this.fail('识别积压超过安全上限，采集已停止；请使用 CUDA 或降低并发负载后重试。');
       return;
     }
     this.queued += ms;
@@ -248,10 +264,13 @@ export class SpeechController {
         const id = ++this.sequence;
         try {
           await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(() => {
-              this.flushers.delete(id);
-              reject(Error('语音尾段处理超时。'));
-            }, 5000);
+            const timer = setTimeout(
+              () => {
+                this.flushers.delete(id);
+                reject(Error('语音尾段处理超时。'));
+              },
+              this.selection.speechModel === 'qwen' ? 120000 : 5000,
+            );
             this.flushers.set(id, {
               resolve: () => {
                 clearTimeout(timer);
@@ -279,6 +298,11 @@ export class SpeechController {
     }
     if (call.op !== 'start') throw Error('Invalid speech operation');
     if (this.captures.size) return this.status;
+    const selection = speechSelection(call.options);
+    if (selection.speechModel === 'qwen' && !this.qwenDirectory)
+      throw Error('当前平台尚未接入 Qwen 原生推理。');
+    if (JSON.stringify(selection) !== JSON.stringify(this.selection)) await this.retireWorker();
+    this.selection = selection;
     const available = await this.adapter.devices(this.helper);
     for (const source of call.options.sources) {
       const selected = call.options[source];
@@ -392,10 +416,34 @@ export class SpeechController {
       await this.call({ op: 'stop' });
     } finally {
       clearInterval(this.timer);
-      const worker = this.worker;
-      this.worker = undefined;
-      this.ready = undefined;
-      await worker?.terminate();
+      await this.retireWorker();
     }
+  }
+  private async retireWorker() {
+    const worker = this.worker;
+    if (!worker) return;
+    if (this.selection.speechModel === 'qwen') {
+      const id = ++this.sequence;
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, 5000);
+        this.flushers.set(id, {
+          resolve: () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          reject: () => {
+            clearTimeout(timer);
+            resolve();
+          },
+        });
+        worker.postMessage({ op: 'close', id });
+      });
+      this.flushers.delete(id);
+    }
+    this.worker = undefined;
+    this.ready = undefined;
+    this.chunkMs = undefined;
+    this.alignmentDevice = undefined;
+    await worker.terminate();
   }
 }

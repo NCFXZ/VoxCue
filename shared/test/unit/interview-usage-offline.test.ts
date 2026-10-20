@@ -81,7 +81,7 @@ it.each([
     const text = prefix + question;
     const before = answer.mock.calls.length;
     const segment = emit(text);
-    await vi.advanceTimersByTimeAsync(2199);
+    await vi.advanceTimersByTimeAsync(999);
     expect(answer).toHaveBeenCalledTimes(before);
     await vi.advanceTimersByTimeAsync(1);
     expect(answer).toHaveBeenCalledTimes(before + 1);
@@ -109,7 +109,7 @@ it('连续明确回应逐次自动提交，手动发送及随后的实质问题�
   ];
   for (const [index, phrase] of phrases.entries()) {
     emit(phrase);
-    await vi.advanceTimersByTimeAsync(2199);
+    await vi.advanceTimersByTimeAsync(999);
     expect(answer).toHaveBeenCalledTimes(index);
     await vi.advanceTimersByTimeAsync(1);
     expect(answer).toHaveBeenCalledTimes(index + 1);
@@ -124,7 +124,7 @@ it('连续明确回应逐次自动提交，手动发送及随后的实质问题�
   expect(answer.mock.calls.at(-1)?.[0].question).toBe('谢谢您');
   useInterview.getState().setAutoAnswer(true);
   emit('嗯那为啥不用Redis');
-  await vi.advanceTimersByTimeAsync(2200);
+  await vi.advanceTimersByTimeAsync(1000);
   expect(answer.mock.calls.at(-1)?.[0].question).toBe('嗯那为啥不用Redis');
   expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([
     ...phrases,
@@ -142,7 +142,7 @@ it('临时语气词不会提前回答，终稿修订、重复终稿和迟到临�
   emit(text, { id: 'revised' });
   emit('嗯', { id: 'revised', final: false });
   emit(text, { id: 'revised' });
-  await vi.advanceTimersByTimeAsync(2200);
+  await vi.advanceTimersByTimeAsync(1000);
   expect(answer).toHaveBeenCalledOnce();
   expect(answer.mock.calls[0][0].question).toBe(text);
   expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([text]);
@@ -158,7 +158,7 @@ it('语气词后出现尚未完成的问句会取消旧定时器，等完整终�
   await vi.advanceTimersByTimeAsync(3000);
   expect(answer).not.toHaveBeenCalled();
   emit('那那个项目咋做回滚', { id: 'half' });
-  await vi.advanceTimersByTimeAsync(2200);
+  await vi.advanceTimersByTimeAsync(1000);
   expect(answer).toHaveBeenCalledOnce();
   expect(answer.mock.calls[0][0].question).toBe('嗯好的 那那个项目咋做回滚');
 });
@@ -170,9 +170,9 @@ it('长句分段和短停顿合并，麦克风插话不触发模型或丢掉系�
   expect(answer).not.toHaveBeenCalled();
   emit('我刚说岔了是SQLite', { source: 'microphone' });
   const second = emit('就是那个一致性咋处理');
-  await vi.advanceTimersByTimeAsync(1200);
+  await vi.advanceTimersByTimeAsync(999);
   const third = emit('尤其是并发写入的时候');
-  await vi.advanceTimersByTimeAsync(2199);
+  await vi.advanceTimersByTimeAsync(999);
   expect(answer).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1);
   expect(answer).toHaveBeenCalledOnce();
@@ -200,9 +200,9 @@ it('生成期间排队的口语纠正只提交一次，保留排队语气词和�
   );
   const pending = useInterview.getState().ask('介绍项目A');
   emit('嗯嗯嗯');
-  await vi.advanceTimersByTimeAsync(2200);
+  await vi.advanceTimersByTimeAsync(1000);
   emit('不是不是我刚讲反了是SQLite');
-  await vi.advanceTimersByTimeAsync(2200);
+  await vi.advanceTimersByTimeAsync(1000);
   expect(answer).toHaveBeenCalledOnce();
   finish({ ok: true, answerText: '旧回答', usage: null, sources: [] });
   await pending;
@@ -217,7 +217,7 @@ it('生成期间排队的口语纠正只提交一次，保留排队语气词和�
 it.each(['off', 'pause', 'reset'] as const)('待发口语问题在%s后不产生后台调用', async (action) => {
   const { answer, emit } = await liveFixture();
   emit('嗯嗯那咋保证实时性');
-  await vi.advanceTimersByTimeAsync(2199);
+  await vi.advanceTimersByTimeAsync(999);
   if (action === 'off') useInterview.getState().setAutoAnswer(false);
   else if (action === 'pause') useInterview.getState().pause();
   else useInterview.getState().reset();
@@ -297,7 +297,7 @@ it('按优化前静音规则与恢复后的自动规则离线回放，请求、�
           endMs: Date.now() + 10,
         },
       });
-      await vi.advanceTimersByTimeAsync(2200);
+      await vi.advanceTimersByTimeAsync(1000);
       const manual = automatic ? undefined : useInterview.getState().submitTranscript();
       await vi.advanceTimersByTimeAsync(20);
       await manual;
@@ -323,15 +323,15 @@ it('按优化前静音规则与恢复后的自动规则离线回放，请求、�
     expect(after.requests.some((request) => request.question.includes(phrase))).toBe(true);
   for (const request of [...before.requests, ...after.requests])
     expect(request).toMatchObject({ modelId: 'offline-model', effort: 'high' });
-  expect(before.delays.every((delay) => delay === 2200)).toBe(true);
-  expect(after.delays.every((delay) => delay === 2200)).toBe(true);
+  expect(before.delays.every((delay) => delay === 1000)).toBe(true);
+  expect(after.delays.every((delay) => delay === 1000)).toBe(true);
   console.log(
     'OFFLINE_REQUESTS ' +
       JSON.stringify({
         oldRule: before.requests.length,
         restored: after.requests.length,
         retainedTranscripts: after.transcripts.length,
-        autoSubmitMs: 2200,
+        autoSubmitMs: 1000,
       }),
   );
 });

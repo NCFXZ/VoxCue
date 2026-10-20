@@ -23,6 +23,7 @@ try {
   const errors = [];
   const send = page.getByRole('button', { name: '发送消息', exact: true });
   await send.waitFor();
+  assert.equal(await page.getByRole('button', { name: '语音输入', exact: true }).count(), 0);
   const dimensions = await send.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return { width: rect.width, height: rect.height };

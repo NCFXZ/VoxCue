@@ -1,0 +1,2 @@
+# Preserve the fixed upstream PTX bytes, including its authenticated CRLF format.
+vendor/qwen-aligner/ptx/*.ptx -text whitespace=cr-at-eol,-blank-at-eof

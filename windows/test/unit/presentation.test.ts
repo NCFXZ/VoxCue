@@ -15,6 +15,7 @@ const windowPort = () => ({
   isDestroyed: vi.fn(() => false),
   setIcon: vi.fn(),
   setSkipTaskbar: vi.fn(),
+  isAlwaysOnTop: vi.fn(() => false),
   setAlwaysOnTop: vi.fn(),
   setIgnoreMouseEvents: vi.fn(),
   hide: vi.fn(),
@@ -50,7 +51,13 @@ it('重复面试恢复主窗口与源图标，迟到恢复不会暴露新的面�
   }
   expect(main.setIcon).toHaveBeenCalledTimes(20);
   port.pinInterview(floating as unknown as BrowserWindow);
+  expect(floating.setAlwaysOnTop).toHaveBeenNthCalledWith(1, false, 'normal');
   expect(floating.setAlwaysOnTop).toHaveBeenCalledWith(true, 'normal');
+  floating.setAlwaysOnTop.mockClear();
+  floating.isAlwaysOnTop.mockReturnValue(true);
+  port.pinInterview(floating as unknown as BrowserWindow);
+  expect(floating.setAlwaysOnTop).toHaveBeenCalledTimes(1);
+  expect(floating.setAlwaysOnTop).toHaveBeenLastCalledWith(true, 'normal');
   port.setMousePassthrough(floating as unknown as BrowserWindow, true);
   expect(floating.setIgnoreMouseEvents).toHaveBeenCalledWith(true, { forward: true });
   port.setTheme('dark');

@@ -1,4 +1,4 @@
-export type ComponentId = 'speech' | 'rag';
+export type ComponentId = 'speech' | 'qwen' | 'rag';
 export interface ComponentState {
   revision: number;
   phase:
@@ -17,6 +17,8 @@ export interface ComponentState {
     label: string;
     bytes: number;
     received: number;
+    removable?: boolean;
+    optional?: boolean;
     phase: 'pending' | 'checking' | 'downloading' | 'verifying' | 'removing' | 'ready';
   }[];
 }

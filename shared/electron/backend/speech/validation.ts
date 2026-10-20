@@ -19,7 +19,21 @@ export function validateSpeech(value: unknown): SpeechCall {
       (typeof v.options[source] !== 'string' || v.options[source].length > 512)
     )
       throw Error('Invalid audio device');
-  if (Object.keys(v.options).some((key) => !['sources', 'microphone', 'system'].includes(key)))
+  if (
+    v.options.speechModel !== undefined &&
+    !['paraformer', 'qwen'].includes(v.options.speechModel)
+  )
+    throw Error('Invalid speech model');
+  if (
+    v.options.inferenceDevice !== undefined &&
+    !['cpu', 'cuda'].includes(v.options.inferenceDevice)
+  )
+    throw Error('Invalid speech inference device');
+  if (
+    Object.keys(v.options).some(
+      (key) => !['sources', 'microphone', 'system', 'speechModel', 'inferenceDevice'].includes(key),
+    )
+  )
     throw Error('Invalid speech option');
   return {
     op: 'start',
@@ -27,6 +41,8 @@ export function validateSpeech(value: unknown): SpeechCall {
       sources: v.options.sources,
       ...(v.options.microphone ? { microphone: v.options.microphone } : {}),
       ...(v.options.system ? { system: v.options.system } : {}),
+      ...(v.options.speechModel ? { speechModel: v.options.speechModel } : {}),
+      ...(v.options.inferenceDevice ? { inferenceDevice: v.options.inferenceDevice } : {}),
     },
   };
 }

@@ -16,6 +16,16 @@ function setup() {
   };
   return { port, coordinator: new SpeechCoordinator(port) };
 }
+it('开场电平自检不会继承面试的 Qwen/CUDA 推理选择', async () => {
+  const { coordinator, port } = setup();
+  await coordinator.dictation({
+    op: 'test',
+    id: 'qwen-audio-test',
+    options: { sources: ['system'], speechModel: 'qwen', inferenceDevice: 'cuda' },
+  });
+  expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options: { sources: ['system'] } });
+  coordinator.releaseDictation();
+});
 it('双音源自检限时10秒，过期停止令牌不影响新的采集', async () => {
   vi.useFakeTimers();
   const { coordinator, port } = setup();

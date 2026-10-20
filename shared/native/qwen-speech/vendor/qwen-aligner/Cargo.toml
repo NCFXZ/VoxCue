@@ -1,0 +1,59 @@
+[package]
+name = "qwen-forced-aligner-rs"
+version = "0.1.0"
+edition = "2021"
+description = "Qwen3 forced aligner in Rust — word-level alignment, hand-written CUDA / CPU engines."
+
+[[bin]]
+name = "qwen-aligner"
+path = "src/main.rs"
+
+[features]
+# Both engines compile in by default so a single binary (e.g. a desktop app)
+# can pick either at runtime via DeviceRequest.  Downstream crates can opt
+# out of either side to shrink the binary.
+default = ["cuda", "cpu"]
+
+# CUDA engine: cudarc-driven cuBLAS + NVRTC-compiled fused kernels.
+# Hot path has no DL framework on it; cudarc is just a CUDA driver binding.
+cuda = ["dep:cudarc"]
+
+# CPU engine: gemm handles every matmul (with forced rayon parallelism for
+# the m=1 lm_head GEMV that burn-flex would otherwise leave single-threaded),
+# and rayon parallelises every hand-written elementwise / reduction op.
+# Tensors are f32 (Vec<f32>) — modern x86 has no native f16 SIMD outside
+# Sapphire Rapids, so f32 ends up faster than f16 with upcast.
+cpu = ["dep:gemm", "dep:rayon"]
+
+[dependencies]
+# CUDA runtime + cuBLAS + NVRTC, runtime-linked via cudart64_*.dll / libcuda.so.
+# All matmul/softmax/rmsnorm/rotary/attention etc. is implemented either via
+# cuBLAS HGEMM or via the hand-written kernels in src/kernels/kernels.cu
+# (NVRTC-compiled at runtime).  No DL framework on the inference path.
+cudarc = { version = "0.19.7", features = ["cublas", "f16", "nvrtc", "cuda-12090"], optional = true }
+gemm = { version = "0.18", optional = true }
+rayon = { version = "1", optional = true }
+libm = "0.2"
+half = "2"
+tokenizers = { version = "0.22", features = ["onig"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+hound = "3"
+rustfft = "6"
+anyhow = "1"
+safetensors = "0.4"
+# mmap + zero-copy slice for safetensors weight loading (weights.rs). bytes is
+# pinned to >=1.11: Bytes::from_owner landed in 1.9, and 1.11 fixed a to_vec
+# memory-leak (#773) that the older from_owner path could trigger.
+memmap2 = "0.9"
+bytes = "1.11"
+thiserror = "2"
+clap = { version = "4", features = ["derive"] }
+# Pure-Rust port of nagisa (BiLSTM-CRF Japanese tokenizer). byte-for-byte
+# identical to upstream Python `nagisa`, so JA word boundaries match the
+# reference qwen_asr implementation exactly. Model is embedded in nagisa_rs
+# (Tagger::embedded) — no external models/.../nagisa/ directory required.
+nagisa_rs = { git = "https://github.com/eclipse005/nagisa-rs.git", rev = "cd7726e78ede8451c72cc0fabfd55d2c4ed62442" }
+log = "0.4"
+env_logger = "0.11"
+

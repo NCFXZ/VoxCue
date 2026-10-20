@@ -3,6 +3,13 @@ import type { PersonalInfo } from './profile';
 import type { ScreenCapturePermission } from './screenCapture';
 
 export type AudioSource = 'microphone' | 'system';
+export type SpeechModelId = 'paraformer' | 'qwen';
+export type SpeechInferenceDevice = 'cpu' | 'cuda';
+export interface SpeechHardware {
+  cuda: boolean;
+  reason?:
+    'unsupported-gpu' | 'driver-unavailable' | 'driver-outdated' | 'unavailable' | 'platform';
+}
 export interface AudioDevice {
   id: string;
   name: string;
@@ -24,6 +31,8 @@ export interface SpeechOptions {
   sources: AudioSource[];
   microphone?: string;
   system?: string;
+  speechModel?: SpeechModelId;
+  inferenceDevice?: SpeechInferenceDevice;
 }
 // Audio/model are confirmed before opening. autoAnswer supplies only
 // the initial value of the floating window's mutable automatic-answer toggle.
@@ -64,6 +73,9 @@ export interface SpeechStatus {
   error?: string;
   failureSource?: 'model' | 'service' | AudioSource;
   devices?: AudioDevice[];
+  speechModel?: SpeechModelId;
+  inferenceDevice?: SpeechInferenceDevice;
+  chunkMs?: number;
 }
 export interface SpeechSegment {
   id: string;
@@ -72,9 +84,12 @@ export interface SpeechSegment {
   final: boolean;
   startMs: number;
   endMs: number;
-  reason?: 'silence' | 'limit' | 'pause' | 'stop' | 'discontinuity';
+  reason?: 'silence' | 'sentence' | 'limit' | 'pause' | 'stop' | 'discontinuity';
+  speechModel?: SpeechModelId;
+  continuationOf?: string;
 }
 export type SpeechEvent =
+  | { type: 'speech-start'; source: AudioSource }
   | { type: 'gap'; source: AudioSource; message: string }
   | { type: 'status'; status: SpeechStatus }
   | { type: 'segment'; segment: SpeechSegment }

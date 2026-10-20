@@ -307,7 +307,7 @@ try {
     );
   assert.deepEqual(undersized, []);
   await opacitySlider.fill('25');
-  await settings.getByRole('button', { name: '常规', exact: true }).click();
+  await settings.getByRole('button', { name: '个性化', exact: true }).click();
   await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).fill('70');
   assert.equal(
     await page.evaluate(() => localStorage.getItem('voxcue-interview-background-transparency-v1')),

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
+import { speechComponent } from '../../electron/contracts/speechSettings';
 import { ComponentsNotice } from './ComponentsNotice';
 import { AudioCheck } from './AudioCheck';
 import {
@@ -21,7 +22,6 @@ import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
-import { VoiceInputButton } from './VoiceInputButton';
 import { useFollowScroll } from './useFollowScroll';
 import { defaultInterviewConfiguration, resolveInterviewConfiguration } from '../services/speech';
 import type {
@@ -30,7 +30,6 @@ import type {
   InterviewConfiguration,
 } from '../../electron/contracts/speech';
 import { useInterviewSettings } from '../stores/interviewSettings';
-import { useDictation } from '../stores/dictation';
 import { Modal } from './ui/modal';
 import { ProfileProposal, SkillUpdatePrompt } from './ProfileProposal';
 import { MarkdownContent } from './MarkdownContent';
@@ -67,13 +66,12 @@ export function PreparationPage({
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
-  const speechReady = useComponentReady('speech');
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
   const interviewSettings = useInterviewSettings();
+  const selectedSpeechComponent = speechComponent(interviewSettings.configuration.options);
+  const speechReady = useComponentReady(selectedSpeechComponent);
   const chatScroll = useFollowScroll(state.messages, state.activeConversation);
-  const dictation = useDictation();
-  const dictating = dictation.phase !== 'idle';
   const input = state.draft;
   const setInput = state.setDraft;
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -139,7 +137,6 @@ export function PreparationPage({
   const [profileError, setProfileError] = useState<string | null>(null);
   const visibleError =
     state.chatStorageError ||
-    dictation.error ||
     connection.error ||
     (state.error &&
     !state.messages.some((message) => message.error === state.error) &&
@@ -189,12 +186,12 @@ export function PreparationPage({
     });
   };
   const submit = () => {
-    if ((!input.trim() && !state.attachments.length) || state.streaming || dictating) return;
+    if ((!input.trim() && !state.attachments.length) || state.streaming) return;
     const text = input;
     void state.send(text);
   };
   const beginInterview = () => {
-    if (!componentReady('speech')) return;
+    if (!componentReady(selectedSpeechComponent)) return;
     if (state.selectedKnowledgeBaseId && !componentReady('rag')) {
       setInterviewError('请先下载并准备已选择的知识库模型，再开始面试。');
       return;
@@ -662,7 +659,7 @@ export function PreparationPage({
                           message.id === state.messages.at(-1)?.id && (
                             <Button
                               variant="outline"
-                              disabled={state.streaming || dictating || !connection.models.length}
+                              disabled={state.streaming || !connection.models.length}
                               onClick={() => void state.retry(message.id)}
                             >
                               <Refresh size={16} />
@@ -775,7 +772,6 @@ export function PreparationPage({
                 aria-label="聊天消息"
                 placeholder="询问面试准备问题，或告诉我你的目标岗位…"
                 value={input}
-                readOnly={dictating}
                 onChange={(event) => setInput(event.target.value)}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
@@ -790,12 +786,6 @@ export function PreparationPage({
                   <ChatTools
                     actions={
                       <div className="composer-actions">
-                        <VoiceInputButton
-                          value={input}
-                          onChange={setInput}
-                          disabled={state.streaming || !state.chatsReady}
-                          contextKey={state.activeConversation}
-                        />
                         {state.streaming ? (
                           <Button
                             type="button"
@@ -812,7 +802,6 @@ export function PreparationPage({
                             type="submit"
                             disabled={
                               !state.chatsReady ||
-                              dictating ||
                               (!input.trim() && !state.attachments.length) ||
                               !connection.models.length
                             }

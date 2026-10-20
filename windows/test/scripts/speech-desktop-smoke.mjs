@@ -47,59 +47,8 @@ try {
   assert.equal(unauthorized, true);
   main.setDefaultTimeout(30000);
   const composer = main.getByRole('textbox', { name: '聊天消息', exact: true });
-  await composer.fill('已有问题');
-  await main.getByRole('button', { name: '语音输入', exact: true }).click();
-  await main.getByRole('button', { name: '停止语音输入', exact: true }).waitFor();
-  await waitForAsync(
-    main,
-    async () => (await window.desktop.dictation({ op: 'status' })).state === 'running',
-  );
-  // The native microphone lifecycle is real. Controlled recognizer events below
-  // verify composer editing without depending on someone speaking at the device.
-  const dictationEvent = (text, final, source = 'microphone') =>
-    app.evaluate(
-      ({ BrowserWindow }, payload) => {
-        BrowserWindow.getAllWindows()
-          .find((w) => !w.webContents.getURL().includes('#'))
-          .webContents.send('dictation:event', { type: 'segment', segment: payload });
-      },
-      { id: 'composer-test', source, text, final, startMs: Date.now(), endMs: Date.now() + 1000 },
-    );
-  await dictationEvent('语音', false);
-  await dictationEvent('语音输入问题', true);
-  await dictationEvent('迟到临时文字', false);
-  await dictationEvent('系统音频不能写进草稿', true, 'system');
-  await main.waitForFunction(() =>
-    document
-      .querySelector('textarea[aria-label="聊天消息"]')
-      .value.includes('已有问题 语音输入问题'),
-  );
-  assert.equal(
-    await main.locator('.chat-message').count(),
-    0,
-    'Dictation must not send a chat request',
-  );
-  assert.equal(
-    await composer.getAttribute('readonly'),
-    '',
-    'Prevent edits from being overwritten during live dictation',
-  );
-  await main.getByRole('button', { name: '停止语音输入', exact: true }).click();
-  await main.getByRole('button', { name: '语音输入', exact: true }).waitFor();
-  assert.equal(
-    (await main.evaluate(() => window.desktop.dictation({ op: 'status' }))).state,
-    'idle',
-  );
-  assert.ok((await composer.inputValue()).includes('语音输入问题'));
-  await composer.fill('');
-  // A second click during loading must safely stop and allow another session.
-  await main.getByRole('button', { name: '语音输入', exact: true }).click();
-  await main.getByRole('button', { name: '停止语音输入', exact: true }).click();
-  await main.getByRole('button', { name: '语音输入', exact: true }).waitFor();
-  assert.equal(
-    (await main.evaluate(() => window.desktop.dictation({ op: 'status' }))).state,
-    'idle',
-  );
+  assert.equal(await main.getByRole('button', { name: '语音输入', exact: true }).count(), 0);
+  assert.equal(await composer.getAttribute('readonly'), null);
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   assert.equal(await main.getByRole('button', { name: '问题来源', exact: true }).count(), 0);
   await main

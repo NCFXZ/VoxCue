@@ -5,7 +5,6 @@ import { Sidebar } from './components/Sidebar';
 import { PreparationPage } from './components/PreparationPage';
 import { HistoryPage } from './components/HistoryPage';
 import { KnowledgePage } from './components/KnowledgePage';
-import { useDictation } from './stores/dictation';
 import { usePreparation } from './stores/preparation';
 import { useAuth } from './stores/auth';
 import { useComponents } from './stores/components';
@@ -94,9 +93,6 @@ export function App() {
       document.removeEventListener('visibilitychange', update);
     };
   }, [page, settings, auth.session?.mode]);
-  useEffect(() => {
-    if (page !== 'preparation') void useDictation.getState().stop();
-  }, [page]);
   useEffect(() => {
     void auth.load();
   }, []);

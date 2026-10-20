@@ -37,6 +37,7 @@ import type { ScreenCaptureAccess } from './contracts/screenCapture';
 import { registerHistoryIpc } from './ipc/history';
 import { readFile, writeFile } from 'node:fs/promises';
 import { SpeechHost } from './backend/speech/host';
+import { SpeechHardwareProbe } from './backend/speech/hardware';
 import type {
   AudioDevice,
   AudioSource,
@@ -45,6 +46,7 @@ import type {
 } from './contracts/speech';
 import { validateSpeech } from './backend/speech/validation';
 import { speechModelInstalled } from './backend/speech/models';
+import { speechComponent } from './contracts/speechSettings';
 import {
   SpeechCoordinator,
   validateInterviewConfiguration,
@@ -237,10 +239,18 @@ function sizeInterview(scale: number, anchor = interviewWindow!.getBounds()) {
   win.setBounds(bounds, false);
   lastInterviewBounds = { requested: bounds, actual: win.getBounds() };
 }
+const pinningInterviews = new WeakSet<BrowserWindow>();
 function pinInterview(win: BrowserWindow) {
-  if (win.isDestroyed()) return;
-  if (nativePresentation) nativePresentation.pinInterview(win);
-  else win.setAlwaysOnTop(true, 'normal');
+  if (win.isDestroyed() || pinningInterviews.has(win)) return;
+  pinningInterviews.add(win);
+  try {
+    // Windows can emit always-on-top-changed before its native level update
+    // returns. Do not recursively re-enter the same update from that event.
+    if (nativePresentation) nativePresentation.pinInterview(win);
+    else win.setAlwaysOnTop(true, 'normal');
+  } finally {
+    pinningInterviews.delete(win);
+  }
 }
 function setInterviewMousePassthrough(ignore: boolean) {
   const win = interviewWindow;
@@ -379,6 +389,12 @@ if (managedComponents) {
     componentPaths(componentRoot, packagesFor(process.platform, process.arch)),
   );
 }
+// Optional Qwen is managed even in development installs with bundled legacy models.
+if (process.platform === 'win32')
+  resources.qwenModels = componentPaths(
+    componentRoot,
+    packagesFor(process.platform, process.arch),
+  ).qwenModels;
 if (desktopPlatform.nativeWindowControls || desktopPlatform.presentationFile) {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
@@ -472,10 +488,12 @@ function createMainWindow() {
   });
 }
 app.whenReady().then(() => {
+  const speechHardware = new SpeechHardwareProbe(resources.audioHelper, desktopPlatform.id);
   components = new ComponentService({
     root: componentRoot,
     packages: packagesFor(process.platform, process.arch),
     managed: managedComponents,
+    managedIds: process.platform === 'win32' ? ['qwen'] : [],
     fetch: (url, options) => session.fromPartition('voxcue-components').fetch(String(url), options),
     emit(state) {
       for (const win of [mainWindow, loginWindow])
@@ -483,7 +501,7 @@ app.whenReady().then(() => {
     },
     async prepareRemove(id) {
       if (interviewOpening || interviewWindow) return false;
-      if (id === 'speech') {
+      if (id === 'speech' || id === 'qwen') {
         if (speechSessions?.busy) return false;
         await speech?.close();
       } else {
@@ -892,8 +910,16 @@ app.whenReady().then(() => {
       }
     },
     resources.speechProcess,
+    resources.qwenModels,
   );
   speechSessions = new SpeechCoordinator(speech);
+  handleDesktop('speech:hardware', (event) => {
+    if (event.sender === mainWindow?.webContents) {
+      requireMain(event);
+      if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    } else requireInterview(event);
+    return speechHardware.read();
+  });
   handleDesktop('speech:call', (event, value: unknown) => {
     const call = validateSpeech(value);
     if (
@@ -911,9 +937,17 @@ app.whenReady().then(() => {
     if (['start', 'test'].includes((value as { op: string })?.op)) components.require('speech');
     return speechSessions!.dictation(value);
   });
-  handleDesktop('interview:reconnect-audio', (event, options) => {
+  handleDesktop('interview:reconnect-audio', async (event, options) => {
     requireInterview(event);
-    components.require('speech');
+    const validated = validateSpeech({
+      op: 'start',
+      options: options ?? speechSessions?.configuration?.options,
+    });
+    if (validated.op !== 'start') throw Error('Invalid speech options');
+    if (validated.options.speechModel === 'qwen' && process.platform !== 'win32')
+      throw Error('当前平台尚未接入 Qwen 原生推理。');
+    await speechHardware.require(validated.options);
+    components.require(speechComponent(validated.options));
     return speechSessions!.reconnect(options);
   });
   handleDesktop('interview:check-access', async (event, value: unknown) => {
@@ -940,7 +974,6 @@ app.whenReady().then(() => {
   handleDesktop('interview:open', async (event, value: unknown) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
-    components.require('speech');
     if (updates?.state().phase === 'installing')
       throw Error('正在准备更新，请完成或取消更新后再开始面试。');
     if (interviewOpening) throw Error('正在检查面试设备，请稍候。');
@@ -949,6 +982,10 @@ app.whenReady().then(() => {
     try {
       if (!demoSession && !(await auth.session())) throw new Error('Please sign in first');
       const configuration = validateInterviewConfiguration(value);
+      if (configuration.options.speechModel === 'qwen' && process.platform !== 'win32')
+        throw Error('当前平台尚未接入 Qwen 原生推理。');
+      await speechHardware.require(configuration.options);
+      components.require(speechComponent(configuration.options));
       if (configuration.knowledgeBaseId) components.require('rag');
       if (!demoSession && (configuration.mode !== 'local' || !configuration.aiEnabled))
         throw Error('请先连接模型服务并选择回答模型。');
@@ -957,7 +994,7 @@ app.whenReady().then(() => {
         validateInterviewModel(configuration, await chat.models(false));
       }
       if (configuration.mode === 'local') {
-        if (!speechModelInstalled(speechModelRoot))
+        if (configuration.options.speechModel !== 'qwen' && !speechModelInstalled(speechModelRoot))
           throw Error('本地语音模型未安装，请先下载模型后再开始面试。');
         const access = await checkInterviewAccess(configuration.options);
         if (!access.ready)

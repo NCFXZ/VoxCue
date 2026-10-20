@@ -407,9 +407,16 @@ try {
       return {
         speechDecoded,
         speechModelFiles: fs.readdirSync(model).sort(),
+        qwenBackendPresent: typeof require(path.join(speech, 'qwen.js')).QwenEngine === 'function',
+        qwenComponent: packagesFor(process.platform, process.arch)
+          .filter((item) => item.id === 'qwen')
+          .map((item) => ({
+            optional: item.optional,
+            assets: item.parts.map((part) => part.asset),
+          })),
         retiredSpeechBackendAbsent: !fs
           .readdirSync(speech)
-          .some((file) => /^(qwen|compute\.)/i.test(file)),
+          .some((file) => /^(qwen(?!\.js$)|compute\.)/i.test(file)),
         speechGapReset,
         interviewContext,
         rag,
@@ -432,6 +439,17 @@ try {
   assert.equal(report.packaged, true);
   assert.equal(report.workerLoaded, true);
   assert.equal(report.speechDecoded, true);
+  assert.equal(report.qwenBackendPresent, true);
+  assert.deepEqual(report.qwenComponent, [
+    {
+      optional: true,
+      assets: [
+        'VoxCue-Qwen-ASR-1.0.0.zip',
+        'VoxCue-Qwen-Aligner-1.0.0.zip',
+        'VoxCue-Qwen-Windows-x64-Runtime-1.0.0.zip',
+      ],
+    },
+  ]);
   assert.equal(report.retiredSpeechBackendAbsent, true);
   assert.deepEqual(
     report.speechModelFiles,

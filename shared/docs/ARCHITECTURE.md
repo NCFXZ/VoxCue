@@ -1,5 +1,9 @@
 # VoxCue 架构
 
+## Qwen Windows 接入
+
+语音模型与设备由 SpeechOptions 确认、主进程验证，Worker 通过固定受管组件路径加载 Rust 进程。四句缓冲及原版对齐器负责真实音频裁剪。Paraformer 与 Qwen 均在 0.8 秒静音后收尾；只有 silence 终稿触发自动回答，两者收到终稿后均再检测 1000ms，恢复说话取消检测。具体原生进程、资源认证与 Mac 接续见 [QWEN_WINDOWS_HANDOFF.md](QWEN_WINDOWS_HANDOFF.md)。下文旧 2200ms 为历史基线，当前提交等待以此段为准。
+
 ## Windows 0.5.0 本地回声处理
 
 Windows SpeechController在同一共享Worker中装配固定本地echoCancellation模块；路径仅来自平台构造器，prepare完成后才启动WASAPI。所选render端点保持完整应用混音和原系统转写，仅双音源麦克风经过固定AEC3 WASM；不改变系统设备或音量，不增加UI开关。两路GetBuffer首样本的QPC（100ns转ms）是共同单调时钟，墙钟仅供转写时间。时间戳无效/主机静音旁路滤波并保留连续重采样，不改变ASR输入采样率；参考缺失最多等待80ms后保留麦克风。48kHz/10ms重采样、有限参考队列、滤波延迟补偿、间断和停止冲刷在Windows适配器完成。
@@ -24,7 +28,7 @@ KnowledgeService 每次查询执行既有串行检索，不再持有精确查询
 
 `windows/electron/presentation.ts` 通过 NativePresentation 端口按平台策略动态装配；不静态引入 Mac 模块。适配器可提供运行时能力，主进程在创建窗口前将其布尔描述交给沙箱 preload；能力不替代窗口、主 frame 和精确参数校验。Windows 11 22H2+ 的 Acrylic 沿用材质种类，共享 CSS 提供滑杆遮罩与 60/30 浮窗曲线，不调用 setOpacity。旧系统保留参数及不透明回退；forced-colors/减少透明偏好关闭滤镜，不改注册表或系统主题。
 
-主题仅设置 VoxCue 的 nativeTheme.themeSource。面试使用 normal 置顶，显示/恢复/意外关闭置顶时重用共享 pinInterview，不定时聚焦。空白穿透使用 setIgnoreMouseEvents 的 forward，交互命中与按下/拖动锁定继续共用。主窗口隐藏并跳过任务栏，浮窗自身跳过任务栏；结束后在无新面试时恢复主窗口任务栏入口与源 ICO，不修改用户固定项。Renderer 意外退出沿用关闭释放流程并恢复主窗口。
+主题仅设置 VoxCue 的 nativeTheme.themeSource。面试使用 normal 置顶，显示/恢复/意外关闭置顶时重用共享 pinInterview，不定时聚焦。共用入口按窗口防止同步状态回调重入；Windows 发现 HWND 已失去置顶时先清除 Chromium 旧层级，再恢复 normal 置顶，避免缓存状态与原生窗口不一致。空白穿透使用 setIgnoreMouseEvents 的 forward，交互命中与按下/拖动锁定继续共用。主窗口隐藏并跳过任务栏，浮窗自身跳过任务栏；结束后在无新面试时恢复主窗口任务栏入口与源 ICO，不修改用户固定项。Renderer 意外退出沿用关闭释放流程并恢复主窗口。
 
 Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，截图不落盘或进入历史，Renderer只获得输入框缩略图和不透明ID。
 
@@ -188,7 +192,7 @@ PersonalInfoPanel 负责默认折叠的资料展示、共用弹窗编辑/取消/
 
 - shared/src/components：展示和输入；shared/src/stores：界面状态、异步生命周期、取消和跨对话归属；shared/src/services：受控桌面接口适配、本机存储、内部测试实现。
 - shared/electron/main.ts：窗口、权限、服务装配及应用生命周期；shared/electron/ipc：调用窗口校验、白名单路由和请求取消。
-- shared/electron/application/speech.ts：语音输入与面试的串行资源归属、确认配置和锁定；historyTitle.ts：后台标题队列及模型无关的 AI 接口协调。
+- shared/electron/application/speech.ts：音源自检与面试的串行资源归属、确认配置和锁定；historyTitle.ts：后台标题队列及模型无关的 AI 接口协调。
 - shared/electron/backend/auth：系统浏览器授权和系统加密凭据；backend/chat：账户模型、Responses SSE/JSON、公开摘要、资料提案和本应用用量。
 - shared/electron/application/knowledge.ts 与 rag*.ts：索引生命周期、共享上下文与两种 RAG 编排；backend/knowledge：本地解析、E5、LanceDB、不可变 revision 和原子 catalog，耗时任务在独立 utilityProcess。
 - shared/electron/backend/speech：WASAPI 采集助手、独立 utilityProcess/Worker、本地 ASR/VAD。耗时推理不运行在 Renderer 或主进程。
@@ -258,7 +262,7 @@ contracts/chat.ts 的 reasoningEfforts 只含 Responses 参数有效值，不包
 
 设置 → 面试设置管理下场设备、麦克风禁用/测试、模型和 effort。开始弹窗只读确认并预检；主进程再检查一次。系统音频固定面试官，麦克风固定面试者，仅系统音频进入问题缓冲。明确禁用麦克风才跳过其权限，不自动替换失效设备。
 
-SpeechCoordinator 保留确认副本；主窗口语音输入固定默认麦克风，不能抢占已确认面试。重载先同步保存已接收文字、释放旧服务，再使用本场配置自动开始。正常结束等待尾段；音频不保存、不上传。麦克风测试离开设置/分类或换设备时停止。
+SpeechCoordinator 保留确认副本；开场音源自检不能抢占已确认面试，准备聊天不再提供语音输入。重载先同步保存已接收文字、释放旧服务，再使用本场配置自动开始。正常结束等待尾段；音频不保存、不上传。麦克风测试离开设置/分类或换设备时停止。
 
 Windows 权限通过 getMediaAccessStatus 与 WASAPI 无采样初始化检查；check 在 Start/读取缓冲前返回并释放。隐私入口仅接受固定 ms-settings:privacy-microphone，不暴露任意 URL/命令。原生 helper 由 build:audio 构建，模型开发目录 local-models/speech，包内 resources/models/speech。
 

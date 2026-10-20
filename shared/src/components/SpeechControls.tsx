@@ -7,6 +7,7 @@ import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
 import { effortLabels } from '../services/chatOptions';
 import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 import { useAudioDevices } from './useAudioDevices';
+import { SpeechModelSettings } from './SpeechModelSettings';
 
 export function SpeechControls({
   value,
@@ -66,7 +67,7 @@ export function SpeechControls({
       displayLabel ?? choices.find((c) => c.id === selected)?.label ?? placeholder;
     return (
       <Menu.Root>
-        <Menu.Trigger asChild>
+        <Menu.Trigger asChild disabled={busy || disabled}>
           <Button
             type="button"
             variant="outline"
@@ -93,7 +94,7 @@ export function SpeechControls({
                 disabled={c.disabled}
               >
                 <span>{c.label}</span>
-                <Menu.ItemIndicator>
+                <Menu.ItemIndicator className="dropdown-check">
                   <Check size={13} />
                 </Menu.ItemIndicator>
               </Menu.RadioItem>
@@ -200,31 +201,37 @@ export function SpeechControls({
         <div className="speech-section-heading">
           <h3>模型设置</h3>
         </div>
-        <div className="speech-setting-row">
-          <span className="speech-setting-label">回答模型</span>
-          {live ? (
-            choose(
-              '面试回答模型',
-              value.modelId,
-              models,
-              selectModel,
-              !models.length,
-              '正在读取模型…',
-            )
-          ) : (
-            <span className="speech-current-answer">请先连接模型服务</span>
-          )}
-        </div>
-        <div className="speech-setting-row speech-effort-row">
-          <span className="speech-setting-label">思考强度</span>
-          {choose(
-            '面试回答思考强度',
-            value.effort,
-            ['auto' as const, ...efforts].map((id) => ({ id, label: effortLabels[id] })),
-            (effort) => change({ effort: effort as ReasoningEffort | 'auto' }),
-            !live || !efforts.length,
-          )}
-        </div>
+        <SpeechModelSettings
+          options={value.options}
+          disabled={busy}
+          onChange={(options) => change({ options })}
+        >
+          <div className="speech-setting-row">
+            <span className="speech-setting-label">回答模型</span>
+            {live ? (
+              choose(
+                '面试回答模型',
+                value.modelId,
+                models,
+                selectModel,
+                !models.length,
+                '正在读取模型…',
+              )
+            ) : (
+              <span className="speech-current-answer">请先连接模型服务</span>
+            )}
+          </div>
+          <div className="speech-setting-row speech-effort-row">
+            <span className="speech-setting-label">思考强度</span>
+            {choose(
+              '面试回答思考强度',
+              value.effort,
+              ['auto' as const, ...efforts].map((id) => ({ id, label: effortLabels[id] })),
+              (effort) => change({ effort: effort as ReasoningEffort | 'auto' }),
+              !live || !efforts.length,
+            )}
+          </div>
+        </SpeechModelSettings>
       </section>
       {error && (
         <small role="alert" className="danger-text">

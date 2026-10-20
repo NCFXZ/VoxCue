@@ -102,7 +102,7 @@ try {
     await completed(++count);
     const request = (await requests()).at(-1);
     assert.equal(request.turns.at(-1).content, phrase);
-    assert.ok(request.receivedAt - sentAt >= 2100 && request.receivedAt - sentAt < 5000);
+    assert.ok(request.receivedAt - sentAt >= 1000 && request.receivedAt - sentAt < 5000);
     assert.equal(await question.inputValue(), '');
   }
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
@@ -122,7 +122,7 @@ try {
   await completed(++count);
   const second = (await requests()).at(-1);
   assert.equal(second.turns.at(-1).content, longQuestion.trim());
-  assert.ok(second.receivedAt - sentAt >= 2100 && second.receivedAt - sentAt < 5000);
+  assert.ok(second.receivedAt - sentAt >= 1000 && second.receivedAt - sentAt < 5000);
   const actual = await app.evaluate(() => globalThis.usageAnswer);
   await transcript('actual', actual, 'microphone');
   const followUp = '呃就是刚刚那个项目为啥没选Redis';
