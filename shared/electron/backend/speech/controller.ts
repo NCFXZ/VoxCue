@@ -3,12 +3,14 @@ import path from 'node:path';
 import type {
   AudioSource,
   SpeechCall,
+  SpeechServiceCall,
+  SpeechOptions,
   SpeechEvent,
   SpeechStatus,
   AudioDevice,
 } from '../../contracts/speech';
 import type { AudioPacket } from './buffer';
-import { speechSelection } from '../../contracts/speechSettings';
+import { sameAudioCapture, speechSelection } from '../../contracts/speechSettings';
 export interface NativeCapture {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -16,6 +18,7 @@ export interface NativeCapture {
 export interface CaptureAdapter {
   readonly drainBeforeRetire?: boolean;
   readonly preprocessorFile?: string;
+  readonly qwenRuntime?: string;
   devices(helper: string): Promise<AudioDevice[]>;
   create(
     helper: string,
@@ -31,6 +34,8 @@ export class SpeechController {
   private ready?: Promise<void>;
   private captures = new Map<AudioSource, NativeCapture>();
   private queued = 0;
+  private pendingAudio = new Map<number, { source: AudioSource; ms: number }>();
+  private processedThrough = new Map<AudioSource, number>();
   private maxQueue = 0;
   private sequence = 0;
   private discontinuities = 0;
@@ -47,6 +52,16 @@ export class SpeechController {
   private selection = speechSelection({ sources: [] });
   private chunkMs?: number;
   private alignmentDevice?: string;
+  private options?: SpeechOptions;
+  private reloadAfterStop = false;
+  private switching?: {
+    id: number;
+    selection: ReturnType<typeof speechSelection>;
+    options: SpeechOptions;
+    phase: 'loading' | 'waiting';
+    resolve(status: SpeechStatus): void;
+    reject(error: Error): void;
+  };
   constructor(
     private model: string,
     private helper: string,
@@ -54,7 +69,13 @@ export class SpeechController {
     private adapter: CaptureAdapter,
     private qwenDirectory?: string,
   ) {}
-  call(call: SpeechCall): Promise<SpeechStatus> {
+  call(call: SpeechServiceCall): Promise<SpeechStatus> {
+    if (call.op === 'switch-recognizer') return this.switchRecognizer(call.options);
+    if (call.op === 'cancel-switch') {
+      this.cancelSwitch();
+      return Promise.resolve(this.status);
+    }
+    if (call.op === 'stop' || call.op === 'pause') this.cancelSwitch(false);
     const result = this.serial.then(() => this.execute(call));
     this.serial = result.then(
       () => {},
@@ -71,15 +92,65 @@ export class SpeechController {
       state,
       model:
         this.selection.speechModel === 'qwen'
-          ? `Qwen3-ASR 0.6B · ${this.selection.inferenceDevice.toUpperCase()}${this.alignmentDevice === 'cpu' && this.selection.inferenceDevice === 'cuda' ? ' · 对齐 CPU' : ''} · 本地`
+          ? `Qwen3-ASR 0.6B · ${this.selection.inferenceDevice === 'metal' ? 'Metal' : this.selection.inferenceDevice.toUpperCase()}${this.alignmentDevice === 'cpu' && this.selection.inferenceDevice !== 'cpu' ? ' · 对齐 CPU' : ''} · 本地`
           : speechModelName,
       ...this.selection,
       ...(this.chunkMs ? { chunkMs: this.chunkMs } : {}),
       ...(error ? { error } : {}),
       ...(failureSource ? { failureSource } : {}),
+      ...(this.switching ? { switching: this.switching.phase } : {}),
     };
     this.emit({ type: 'status', status: this.status });
     return this.status;
+  }
+  private cancelSwitch(publish = true) {
+    const change = this.switching;
+    if (!change) return;
+    this.switching = undefined;
+    // A commit notification may already be in flight when pause cancels its
+    // promise. Retire the recognizer after draining so resume cannot reuse a
+    // different model under the old confirmed selection.
+    if (!publish) this.reloadAfterStop = true;
+    this.worker?.postMessage({ op: 'cancel-switch' });
+    change.reject(Error('语音切换已取消，仍使用原配置。'));
+    if (publish) this.state(this.status.state);
+    else this.status = { ...this.status, switching: undefined };
+  }
+  private switchRecognizer(options: SpeechOptions): Promise<SpeechStatus> {
+    if (
+      this.switching ||
+      this.status.state !== 'running' ||
+      !this.worker ||
+      !this.options ||
+      !sameAudioCapture(this.options, options)
+    )
+      return Promise.reject(Error('语音切换需要保持当前采集设备且没有其他切换正在进行。'));
+    const selection = speechSelection(options);
+    if (selection.speechModel === 'qwen' && !this.qwenDirectory)
+      return Promise.reject(Error('当前平台尚未接入 Qwen 原生推理。'));
+    if (JSON.stringify(selection) === JSON.stringify(this.selection))
+      return Promise.resolve(this.status);
+    return new Promise((resolve, reject) => {
+      const id = ++this.sequence;
+      this.switching = {
+        id,
+        selection,
+        options: structuredClone(options),
+        phase: 'loading',
+        resolve,
+        reject,
+      };
+      this.state('running');
+      this.worker!.postMessage({
+        op: 'stage-recognizer',
+        id,
+        options: {
+          ...selection,
+          directory: selection.speechModel === 'qwen' ? this.qwenDirectory : this.model,
+          runtimeFile: this.adapter.qwenRuntime,
+        },
+      });
+    });
   }
   private load() {
     if (this.ready) return this.ready;
@@ -102,8 +173,38 @@ export class SpeechController {
           resolve();
         }
         if (m.event) this.emit(m.event);
+        const change = this.switching;
+        if (change && m.switchPhase === change.id) {
+          change.phase = m.phase;
+          this.state('running');
+        }
+        if (change && m.switched === change.id) {
+          this.switching = undefined;
+          this.selection = change.selection;
+          this.options = change.options;
+          this.chunkMs = m.chunkMs;
+          this.alignmentDevice = m.alignmentDevice;
+          change.resolve(this.state('running'));
+        }
+        if (change && m.switchError === change.id) {
+          this.switching = undefined;
+          this.state('running');
+          change.reject(Error(m.message));
+        }
         if (m.ack) {
-          this.queued = Math.max(0, this.queued - m.ms);
+          const packet = this.pendingAudio.get(m.ack);
+          if (!packet) return;
+          this.pendingAudio.delete(m.ack);
+          this.queued = Math.max(0, this.queued - packet.ms);
+          for (const source of ['microphone', 'system'] as const) {
+            const through = m.progress?.[source];
+            if (typeof through === 'number' && Number.isFinite(through))
+              this.processedThrough.set(
+                source,
+                Math.max(this.processedThrough.get(source) ?? -Infinity, through),
+              );
+            if (source === packet.source || through !== undefined) this.progress(source);
+          }
           if (m.ack % 100 === 0)
             this.emit({
               type: 'metrics',
@@ -153,12 +254,21 @@ export class SpeechController {
         op: 'init',
         directory: this.selection.speechModel === 'qwen' ? this.qwenDirectory : this.model,
         ...this.selection,
+        runtimeFile: this.adapter.qwenRuntime,
         ...(this.adapter.preprocessorFile
           ? { preprocessorFile: this.adapter.preprocessorFile }
           : {}),
       });
     });
     return this.ready;
+  }
+  private progress(source: AudioSource) {
+    this.emit({
+      type: 'audio-progress',
+      source,
+      pending: [...this.pendingAudio.values()].some((packet) => packet.source === source),
+      processedThroughMs: this.processedThrough.get(source),
+    });
   }
   private audio(
     source: AudioSource,
@@ -197,11 +307,16 @@ export class SpeechController {
         audioMs: 0,
         inferenceMs: 0,
       });
-      this.fail('识别积压超过安全上限，采集已停止；请使用 CUDA 或降低并发负载后重试。');
+      this.fail('识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。');
       return;
     }
     this.queued += ms;
     this.maxQueue = Math.max(this.maxQueue, this.queued);
+    const sequence = ++this.sequence;
+    this.pendingAudio.set(sequence, { source, ms });
+    // Publish the backlog before the worker can emit a final. A final decoded
+    // from old audio is insufficient while newer system audio is unchecked.
+    this.progress(source);
     this.worker?.postMessage(
       {
         op: 'audio',
@@ -210,7 +325,7 @@ export class SpeechController {
         rate,
         timestamp,
         ...(captureClock !== undefined ? { captureClock } : {}),
-        sequence: ++this.sequence,
+        sequence,
         ms,
       },
       [samples.buffer as ArrayBuffer],
@@ -218,6 +333,7 @@ export class SpeechController {
   }
   private fail(message: string, failureSource: SpeechStatus['failureSource'] = 'service') {
     if (this.status.state === 'error') return;
+    this.cancelSwitch(false);
     this.state('error', message, failureSource);
     void this.call({ op: 'stop' })
       .then(() => this.state('error', message, failureSource))
@@ -255,6 +371,8 @@ export class SpeechController {
         this.worker = undefined;
         this.ready = undefined;
         this.queued = 0;
+        this.pendingAudio.clear();
+        this.processedThrough.clear();
         await worker?.terminate();
         const message = '音频采集未能正常停止，请重新开始。';
         this.state('error', message, 'service');
@@ -288,12 +406,17 @@ export class SpeechController {
           this.worker = undefined;
           this.ready = undefined;
           this.queued = 0;
+          this.pendingAudio.clear();
+          this.processedThrough.clear();
           await worker?.terminate();
           this.state('error', (error as Error).message);
           throw error;
         }
       }
       this.queued = 0;
+      this.pendingAudio.clear();
+      this.processedThrough.clear();
+      if (this.reloadAfterStop) await this.retireWorker();
       return this.state(call.op === 'pause' ? 'paused' : 'idle');
     }
     if (call.op !== 'start') throw Error('Invalid speech operation');
@@ -316,7 +439,7 @@ export class SpeechController {
     try {
       await this.load();
       this.checkStartup();
-      if (this.adapter.preprocessorFile) {
+      {
         startupFailure = 'service';
         const id = ++this.sequence;
         await new Promise<void>((resolve, reject) => {
@@ -373,18 +496,20 @@ export class SpeechController {
         await capture.start();
         this.checkStartup();
       }
-      // Render loopback emits no packets when Windows has no playback. Supply
-      // explicit timed silence so VAD can finalize without inventing speech.
-      this.timer = setInterval(() => {
-        for (const source of this.captures.keys()) {
-          const last = this.lastAudio.get(source)!;
-          const rate = this.rates.get(source);
-          if (rate && Date.now() - last >= 200) {
-            this.lastAudio.set(source, Date.now());
-            this.audio(source, new Float32Array(Math.round(rate / 5)), rate);
+      // Preserve the Windows loopback compatibility path. Core Audio supplies
+      // its own PCM clock: a stalled Mac capture cannot prove silence.
+      if (process.platform === 'win32')
+        this.timer = setInterval(() => {
+          for (const source of this.captures.keys()) {
+            const last = this.lastAudio.get(source)!;
+            const rate = this.rates.get(source);
+            if (rate && Date.now() - last >= 200) {
+              this.lastAudio.set(source, Date.now());
+              this.audio(source, new Float32Array(Math.round(rate / 5)), rate);
+            }
           }
-        }
-      }, 100);
+        }, 100);
+      this.options = structuredClone(call.options);
       return this.state('running');
     } catch (error) {
       // Retire callbacks first. A second cleanup failure must not hide the
@@ -395,6 +520,8 @@ export class SpeechController {
       const captures = [...this.captures.values()];
       this.captures.clear();
       this.queued = 0;
+      this.pendingAudio.clear();
+      this.processedThrough.clear();
       this.lastAudio.clear();
       this.rates.clear();
       this.anchors.clear();
@@ -420,9 +547,10 @@ export class SpeechController {
     }
   }
   private async retireWorker() {
+    this.reloadAfterStop = false;
     const worker = this.worker;
     if (!worker) return;
-    if (this.selection.speechModel === 'qwen') {
+    {
       const id = ++this.sequence;
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 5000);
@@ -442,6 +570,8 @@ export class SpeechController {
     }
     this.worker = undefined;
     this.ready = undefined;
+    this.pendingAudio.clear();
+    this.processedThrough.clear();
     this.chunkMs = undefined;
     this.alignmentDevice = undefined;
     await worker.terminate();

@@ -132,6 +132,8 @@ describe('本地语音边界和问题汇总', () => {
       { op: 'start', options: { sources: ['system'], asrModel: 'C:/untrusted-model' } },
       { op: 'start', options: { sources: ['system'], computeDevice: 'cuda --command' } },
       { op: 'start', options: { sources: ['system'], computeDevice: 'nvidia' } },
+      { op: 'start', options: { sources: ['system'], inferenceDevice: 'metal --command' } },
+      { op: 'start', options: { sources: ['system'], runtimeFile: '/tmp/untrusted' } },
       { op: 'start', options: { sources: ['system'], system: 'x'.repeat(513) } },
     ])
       expect(() => validateSpeech(v)).toThrow();
@@ -142,6 +144,15 @@ describe('本地语音边界和问题汇总', () => {
     expect(validateSpeech({ op: 'start', options: { sources: ['system'] } })).toEqual({
       op: 'start',
       options: { sources: ['system'] },
+    });
+    expect(
+      validateSpeech({
+        op: 'start',
+        options: { sources: ['system'], speechModel: 'qwen', inferenceDevice: 'metal' },
+      }),
+    ).toEqual({
+      op: 'start',
+      options: { sources: ['system'], speechModel: 'qwen', inferenceDevice: 'metal' },
     });
   });
   it('临时文本不入问题、终稿去重、跨短停顿合并、双路独立消费', () => {

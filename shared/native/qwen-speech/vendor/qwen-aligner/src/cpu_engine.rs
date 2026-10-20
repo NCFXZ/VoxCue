@@ -378,7 +378,7 @@ pub(crate) fn matmul_av(attn: &CpuTensor, v: &CpuTensor) -> CpuTensor {
 //  swap_dims_12 + reshape to [1, s, dm] is unchanged.
 // ═══════════════════════════════════════════════════════════════════════
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn audio_attention_flash(
     q: &CpuTensor, k: &CpuTensor, v: &CpuTensor,
     nh: usize, s: usize, hd: usize, scale: f32,
@@ -470,7 +470,7 @@ fn audio_attention_flash(
     CpuTensor::new(out, vec![1, nh, s, hd])
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 fn audio_attention_flash(
     _q: &CpuTensor, _k: &CpuTensor, _v: &CpuTensor,
     _nh: usize, _s: usize, _hd: usize, _scale: f32,
@@ -764,7 +764,7 @@ fn prefill_attention(
 //  Both fit comfortably in L1 (32-48 KB).
 // ═══════════════════════════════════════════════════════════════════════
 
-#[cfg(target_arch = "x86_64")]
+#[cfg(any(target_arch = "x86_64", target_arch = "aarch64"))]
 fn prefill_attention_flash(
     q: &CpuTensor,
     k_cache: &[f32], v_cache: &[f32],
@@ -885,7 +885,7 @@ fn prefill_attention_flash(
     CpuTensor::new(out, vec![b, nqh, s, hd])
 }
 
-#[cfg(not(target_arch = "x86_64"))]
+#[cfg(not(any(target_arch = "x86_64", target_arch = "aarch64")))]
 fn prefill_attention_flash(
     _q: &CpuTensor, _k_cache: &[f32], _v_cache: &[f32],
     _b: usize, _nqh: usize, _nkvh: usize, _max_seq: usize, _hd: usize, _cur_len: usize,
@@ -988,6 +988,97 @@ unsafe fn conv_nhwc_direct(
     accs
 }
 
+
+// ARM keeps the original aligner, layouts and accumulation order. Two NEON
+// vectors represent the same eight lanes as the x86 kernels above.
+#[cfg(target_arch = "aarch64")]
+unsafe fn dot_qk_avx2(a: &[f32], b: &[f32]) -> f32 {
+    use std::arch::aarch64::*;
+    debug_assert_eq!(a.len(), b.len());
+    debug_assert_eq!(a.len() % 8, 0);
+    let mut lo = vdupq_n_f32(0.0);
+    let mut hi = vdupq_n_f32(0.0);
+    for i in (0..a.len()).step_by(8) {
+        lo = vfmaq_f32(lo, vld1q_f32(a.as_ptr().add(i)), vld1q_f32(b.as_ptr().add(i)));
+        hi = vfmaq_f32(hi, vld1q_f32(a.as_ptr().add(i + 4)), vld1q_f32(b.as_ptr().add(i + 4)));
+    }
+    let mut lanes = [0.0; 4];
+    vst1q_f32(lanes.as_mut_ptr(), vaddq_f32(lo, hi));
+    (lanes[0] + lanes[2]) + (lanes[1] + lanes[3])
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn axpy_avx2(out: &mut [f32], w: f32, v: &[f32]) {
+    use std::arch::aarch64::*;
+    debug_assert_eq!(out.len(), v.len());
+    debug_assert_eq!(out.len() % 8, 0);
+    for i in (0..out.len()).step_by(4) {
+        let value = vfmaq_n_f32(vld1q_f32(out.as_ptr().add(i)), vld1q_f32(v.as_ptr().add(i)), w);
+        vst1q_f32(out.as_mut_ptr().add(i), value);
+    }
+}
+
+#[cfg(target_arch = "aarch64")]
+unsafe fn conv_nhwc_direct(
+    x_ptr: *const f32, w_ptr: *const f32, c_in: usize, c_out: usize, n_full: usize,
+    b: usize, f: usize, t: usize, ifo: usize, ito: usize,
+) -> [f32; 512] {
+    let mut accs = [0.0f32; 512];
+    debug_assert!(c_out <= 512);
+    for ic in 0..c_in {
+        for kk in 0..9usize {
+            let fi = (ifo * 2) as isize + (kk / 3) as isize - 1;
+            let ti = (ito * 2) as isize + (kk % 3) as isize - 1;
+            let x = if fi >= 0 && fi < f as isize && ti >= 0 && ti < t as isize {
+                *x_ptr.add((b * f + fi as usize) * t * c_in + ti as usize * c_in + ic)
+            } else { 0.0 };
+            let weights = std::slice::from_raw_parts(w_ptr.add((ic * 9 + kk) * c_out), c_out);
+            axpy_avx2(&mut accs[..n_full], x, &weights[..n_full]);
+            for c in n_full..c_out { accs[c] += x * weights[c]; }
+        }
+    }
+    accs
+}
+
+#[cfg(all(test, target_arch = "aarch64"))]
+mod arm_kernel_tests {
+    use super::*;
+    #[test]
+    fn neon_dot_and_axpy_match_fused_reference() {
+        let a: Vec<f32> = (0..128).map(|i| ((i * 13 % 37) as f32 - 18.0) / 19.0).collect();
+        let b: Vec<f32> = (0..128).map(|i| ((i * 7 % 23) as f32 - 11.0) / 13.0).collect();
+        let mut lanes = [0.0f32; 8];
+        for i in 0..a.len() { lanes[i % 8] = a[i].mul_add(b[i], lanes[i % 8]); }
+        let sum = ((lanes[0]+lanes[4])+(lanes[2]+lanes[6]))+((lanes[1]+lanes[5])+(lanes[3]+lanes[7]));
+        assert_eq!(unsafe { dot_qk_avx2(&a, &b) }, sum);
+        let mut output = a.clone();
+        unsafe { axpy_avx2(&mut output, 0.375, &b); }
+        for i in 0..a.len() { assert_eq!(output[i], 0.375f32.mul_add(b[i], a[i])); }
+    }
+    #[test]
+    fn neon_convolution_preserves_padding_channels_and_tail() {
+        let (channels, outputs, frequency, time) = (3, 13, 5, 7);
+        let x: Vec<f32> = (0..channels*frequency*time).map(|i| (i % 17) as f32 / 17.0).collect();
+        let w: Vec<f32> = (0..channels*9*outputs).map(|i| (i % 11) as f32 / 11.0).collect();
+        for fo in 0..3 { for to in 0..4 {
+            let actual = unsafe { conv_nhwc_direct(x.as_ptr(), w.as_ptr(), channels, outputs, 8, 0, frequency, time, fo, to) };
+            for c in 0..outputs {
+                let mut expected = 0.0f32;
+                for ic in 0..channels { for k in 0..9 {
+                    let f = (fo*2+k/3) as isize-1;
+                    let t = (to*2+k%3) as isize-1;
+                    let value = if f >= 0 && f < frequency as isize && t >= 0 && t < time as isize {
+                        x[(f as usize*time+t as usize)*channels+ic]
+                    } else { 0.0 };
+                    let weight = w[(ic*9+k)*outputs+c];
+                    expected = if c < 8 { value.mul_add(weight, expected) } else { expected + value*weight };
+                }}
+                assert_eq!(actual[c], expected);
+            }
+            assert!(actual[outputs..].iter().all(|v| *v == 0.0));
+        }}
+    }
+}
 
 // ═══════════════════════════════════════════════════════════════════════
 //  Audio encoder — full CPU port mirroring gpu_audio_encoder.rs

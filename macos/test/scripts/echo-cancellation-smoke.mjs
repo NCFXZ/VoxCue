@@ -22,7 +22,10 @@ if (process.argv.includes('--runtime-bundle')) {
   );
   for (const file of [
     'shared/electron/backend/speech/worker.js',
+    'shared/electron/backend/speech/recognizer.js',
+    'shared/electron/backend/speech/recognition.js',
     'shared/electron/backend/speech/engine.js',
+    'shared/electron/backend/speech/qwen.js',
     'shared/electron/backend/speech/buffer.js',
     'macos/electron/speech/echoCancellation.js',
   ]) {
@@ -89,13 +92,14 @@ require('node:module').syncBuiltinESMExports();
     'const {parentPort,workerData}=require("node:worker_threads");' +
     'globalThis.fetch=()=>{throw Error("No network");};' +
     'require("node:net").Socket.prototype.connect=globalThis.fetch;' +
-    'require.cache[workerData.engine]={exports:{SpeechEngine:class {' +
-    'audioMs=0;inferenceMs=0;constructor(_d,emit){this.emit=emit;}' +
+    'require.cache[workerData.engine]={exports:{Recognizer:class {' +
+    'static async load(_o,emit){return new this(emit);}' +
+    'audioMs=0;inferenceMs=0;metadata={};healthy=true;constructor(emit){this.emit=emit;}' +
     'feed(source,samples,rate,timestamp){this.emit({source,samples,rate,timestamp});}' +
-    'discontinuity(){}flush(){}}}};' +
+    'processedThrough(){}canSwitch(){return true;}async close(){}discontinuity(){}flush(){}}}};' +
     'require(workerData.entry);',
     {eval:true,workerData:{
-      engine:path.join(runtime,'dist-electron/shared/electron/backend/speech/engine.js'),
+      engine:path.join(runtime,'dist-electron/shared/electron/backend/speech/recognizer.js'),
       entry:path.join(runtime,'dist-electron/shared/electron/backend/speech/worker.js')
     }});
   const events = [];

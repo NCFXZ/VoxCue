@@ -3,7 +3,19 @@ import { useInterview } from '../../src/stores/interview';
 import type { SpeechEvent, SpeechSegment } from '../../electron/contracts/speech';
 import type { ChatEvent } from '../../electron/contracts/chat';
 
+let audioEvents: ((event: SpeechEvent) => void) | undefined;
+async function advanceAudio(ms: number) {
+  await vi.advanceTimersByTimeAsync(ms);
+  audioEvents?.({
+    type: 'audio-progress',
+    source: 'system',
+    pending: false,
+    processedThroughMs: Date.now(),
+  });
+  await vi.advanceTimersByTimeAsync(0);
+}
 afterEach(() => {
+  audioEvents = undefined;
   useInterview.getState().reset();
   useInterview.setState({ configurationLocked: false });
   vi.useRealTimers();
@@ -27,6 +39,7 @@ async function liveFixture() {
       speech: vi.fn(async () => ({ state: 'running', model: 'offline-synthetic' })),
       onSpeechEvent: (callback: typeof receive) => {
         receive = callback;
+        audioEvents = callback;
         return () => {
           receive = () => {};
         };
@@ -43,7 +56,7 @@ async function liveFixture() {
     .configure({ mode: 'local', aiEnabled: true, modelId: 'offline-model', effort: 'high' });
   useInterview.getState().setAutoAnswer(true);
   useInterview.getState().start();
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   receive({ type: 'status', status: { state: 'running', model: 'offline-synthetic' } });
   let serial = 0;
   const emit = (text: string, patch: Partial<SpeechSegment> = {}) => {
@@ -54,7 +67,8 @@ async function liveFixture() {
       final: true,
       reason: 'silence',
       startMs: Date.now(),
-      endMs: Date.now() + 10,
+      endMs: Date.now(),
+      silenceStartMs: Date.now() - 800,
       ...patch,
     };
     receive({ type: 'segment', segment });
@@ -81,9 +95,9 @@ it.each([
     const text = prefix + question;
     const before = answer.mock.calls.length;
     const segment = emit(text);
-    await vi.advanceTimersByTimeAsync(999);
+    await advanceAudio(999);
     expect(answer).toHaveBeenCalledTimes(before);
-    await vi.advanceTimersByTimeAsync(1);
+    await advanceAudio(1);
     expect(answer).toHaveBeenCalledTimes(before + 1);
     expect(answer.mock.calls.at(-1)?.[0]).toMatchObject({
       question: text,
@@ -109,22 +123,22 @@ it('连续明确回应逐次自动提交，手动发送及随后的实质问题�
   ];
   for (const [index, phrase] of phrases.entries()) {
     emit(phrase);
-    await vi.advanceTimersByTimeAsync(999);
+    await advanceAudio(999);
     expect(answer).toHaveBeenCalledTimes(index);
-    await vi.advanceTimersByTimeAsync(1);
+    await advanceAudio(1);
     expect(answer).toHaveBeenCalledTimes(index + 1);
     expect(answer.mock.calls.at(-1)?.[0].question).toBe(phrase);
     expect(useInterview.getState().draftQuestion).toBe('');
   }
   useInterview.getState().setAutoAnswer(false);
   emit('谢谢您');
-  await vi.advanceTimersByTimeAsync(3000);
+  await advanceAudio(3000);
   expect(answer).toHaveBeenCalledTimes(phrases.length);
   await useInterview.getState().submitTranscript();
   expect(answer.mock.calls.at(-1)?.[0].question).toBe('谢谢您');
   useInterview.getState().setAutoAnswer(true);
   emit('嗯那为啥不用Redis');
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(answer.mock.calls.at(-1)?.[0].question).toBe('嗯那为啥不用Redis');
   expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([
     ...phrases,
@@ -136,29 +150,29 @@ it('连续明确回应逐次自动提交，手动发送及随后的实质问题�
 it('临时语气词不会提前回答，终稿修订、重复终稿和迟到临时结果不引发重复调用', async () => {
   const { answer, emit } = await liveFixture();
   emit('嗯', { id: 'revised', final: false });
-  await vi.advanceTimersByTimeAsync(3000);
+  await advanceAudio(3000);
   expect(answer).not.toHaveBeenCalled();
   const text = '嗯嗯不是这个我想问PostgreSQL的并发问题';
   emit(text, { id: 'revised' });
   emit('嗯', { id: 'revised', final: false });
   emit(text, { id: 'revised' });
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(answer).toHaveBeenCalledOnce();
   expect(answer.mock.calls[0][0].question).toBe(text);
   expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([text]);
-  await vi.advanceTimersByTimeAsync(6000);
+  await advanceAudio(6000);
   expect(answer).toHaveBeenCalledOnce();
 });
 
 it('语气词后出现尚未完成的问句会取消旧定时器，等完整终稿再发送', async () => {
   const { answer, emit } = await liveFixture();
   emit('嗯好的');
-  await vi.advanceTimersByTimeAsync(500);
+  await advanceAudio(500);
   emit('那那个', { id: 'half', final: false });
-  await vi.advanceTimersByTimeAsync(3000);
+  await advanceAudio(3000);
   expect(answer).not.toHaveBeenCalled();
   emit('那那个项目咋做回滚', { id: 'half' });
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(answer).toHaveBeenCalledOnce();
   expect(answer.mock.calls[0][0].question).toBe('嗯好的 那那个项目咋做回滚');
 });
@@ -166,15 +180,15 @@ it('语气词后出现尚未完成的问句会取消旧定时器，等完整终�
 it('长句分段和短停顿合并，麦克风插话不触发模型或丢掉系统问题', async () => {
   const { answer, emit } = await liveFixture();
   const first = emit('嗯说说PostgreSQL', { reason: 'limit' });
-  await vi.advanceTimersByTimeAsync(3000);
+  await advanceAudio(3000);
   expect(answer).not.toHaveBeenCalled();
   emit('我刚说岔了是SQLite', { source: 'microphone' });
   const second = emit('就是那个一致性咋处理');
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   const third = emit('尤其是并发写入的时候');
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   expect(answer).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(answer).toHaveBeenCalledOnce();
   expect(answer.mock.calls[0][0].question).toBe(
     '嗯说说PostgreSQL 就是那个一致性咋处理 尤其是并发写入的时候',
@@ -200,32 +214,32 @@ it('生成期间排队的口语纠正只提交一次，保留排队语气词和�
   );
   const pending = useInterview.getState().ask('介绍项目A');
   emit('嗯嗯嗯');
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   emit('不是不是我刚讲反了是SQLite');
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(answer).toHaveBeenCalledOnce();
   finish({ ok: true, answerText: '旧回答', usage: null, sources: [] });
   await pending;
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(answer).toHaveBeenCalledTimes(2);
   expect(answer.mock.calls[1][0].question).toBe('嗯嗯嗯 不是不是我刚讲反了是SQLite');
   expect(useInterview.getState().draftQuestion).toBe('');
-  await vi.advanceTimersByTimeAsync(6000);
+  await advanceAudio(6000);
   expect(answer).toHaveBeenCalledTimes(2);
 });
 
 it.each(['off', 'pause', 'reset'] as const)('待发口语问题在%s后不产生后台调用', async (action) => {
   const { answer, emit } = await liveFixture();
   emit('嗯嗯那咋保证实时性');
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   if (action === 'off') useInterview.getState().setAutoAnswer(false);
   else if (action === 'pause') useInterview.getState().pause();
   else useInterview.getState().reset();
-  await vi.advanceTimersByTimeAsync(6000);
+  await advanceAudio(6000);
   expect(answer).not.toHaveBeenCalled();
 });
 
-it('按优化前静音规则与恢复后的自动规则离线回放，请求、原文和时序一致', async () => {
+it('手动与1800ms音频静音自动规则离线回放，请求和原文一致', async () => {
   const phrases = [
     '介绍项目A',
     '好的',
@@ -251,6 +265,7 @@ it('按优化前静音规则与恢复后的自动规则离线回放，请求、�
         speech: vi.fn(async () => ({ state: 'running', model: 'offline-synthetic' })),
         onSpeechEvent: (callback: typeof emit) => {
           emit = callback;
+          audioEvents = callback;
           return () => {};
         },
         onChatEvent: (callback: typeof chatEvent) => {
@@ -281,7 +296,7 @@ it('按优化前静音规则与恢复后的自动规则离线回放，请求、�
       .configure({ mode: 'local', aiEnabled: true, modelId: 'offline-model', effort: 'high' });
     useInterview.getState().setAutoAnswer(automatic);
     useInterview.getState().start();
-    await vi.advanceTimersByTimeAsync(1);
+    await advanceAudio(1);
     emit({ type: 'status', status: { state: 'running', model: 'offline-synthetic' } });
     for (const [index, text] of phrases.entries()) {
       arrivals.push(Date.now());
@@ -294,12 +309,13 @@ it('按优化前静音规则与恢复后的自动规则离线回放，请求、�
           final: true,
           reason: 'silence',
           startMs: Date.now(),
-          endMs: Date.now() + 10,
+          endMs: Date.now(),
+          silenceStartMs: Date.now() - 800,
         },
       });
-      await vi.advanceTimersByTimeAsync(1000);
+      await advanceAudio(1000);
       const manual = automatic ? undefined : useInterview.getState().submitTranscript();
-      await vi.advanceTimersByTimeAsync(20);
+      await advanceAudio(20);
       await manual;
     }
     const transcripts = useInterview.getState().transcripts.map((row) => row.text);
@@ -331,7 +347,9 @@ it('按优化前静音规则与恢复后的自动规则离线回放，请求、�
         oldRule: before.requests.length,
         restored: after.requests.length,
         retainedTranscripts: after.transcripts.length,
-        autoSubmitMs: 1000,
+        silenceBeforeFinalMs: 800,
+        totalSilenceMs: 1800,
+        remainingAudioMs: 1000,
       }),
   );
 });

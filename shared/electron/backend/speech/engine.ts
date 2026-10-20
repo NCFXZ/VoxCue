@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { AudioSource, SpeechEvent, SpeechSegment } from '../../contracts/speech';
 import { SampleBuffer } from './buffer';
 import { verifyModel, paraformerFiles } from './models';
+import { speechSegmentationSilenceMs } from '../../contracts/speechSettings';
 // Official JS package has JSDoc, but no TypeScript declarations. Keep it inside this adapter.
 const sherpa = require('sherpa-onnx-node');
 export class SpeechEngine {
@@ -43,7 +44,7 @@ export class SpeechEngine {
               model: path.join(this.directory, 'silero_vad.onnx'),
               threshold: 0.5,
               minSpeechDuration: 0.25,
-              minSilenceDuration: 0.8,
+              minSilenceDuration: speechSegmentationSilenceMs / 1000,
               windowSize: 512,
               maxSpeechDuration: 20,
             },
@@ -119,6 +120,14 @@ export class SpeechEngine {
     this.audioMs += (samples.length / rate) * 1000;
     this.inferenceMs += performance.now() - started;
   }
+  processedThrough(source: AudioSource): number | undefined {
+    const state = this.sources.get(source);
+    return state ? state.origin + state.samples / 16 : undefined;
+  }
+  canSwitch(source: AudioSource) {
+    const state = this.sources.get(source);
+    return !state || (!state.active && !state.vad.isDetected());
+  }
   private finalize(source: AudioSource, s: any, reason: SpeechSegment['reason']) {
     s.stream.acceptWaveform({ sampleRate: 16000, samples: new Float32Array(6400) });
     s.stream.inputFinished();
@@ -135,6 +144,9 @@ export class SpeechEngine {
           startMs: s.start,
           endMs: s.origin + s.samples / 16,
           reason,
+          ...(reason === 'silence'
+            ? { silenceStartMs: s.origin + s.samples / 16 - speechSegmentationSilenceMs }
+            : {}),
         },
       });
     s.stream = this.recognizer.createStream();

@@ -26,3 +26,9 @@ export type ComponentCall =
   | { op: 'status' | 'cancel' }
   | { op: 'download'; id?: ComponentId }
   | { op: 'remove'; id: ComponentId };
+
+export function hasReadySpeechModel(state: ComponentState) {
+  return state.items.some(
+    (item) => (item.id === 'speech' || item.id === 'qwen') && item.phase === 'ready',
+  );
+}

@@ -6,6 +6,44 @@ import type { SpeechHardware } from '../../electron/contracts/speech';
 
 beforeEach(() => vi.resetAllMocks());
 describe('CUDA availability and independent CPU inference', () => {
+  it('probes the owned Mac Metal runtime and rejects cross-platform devices', async () => {
+    native.execFile.mockImplementation((_file, _args, _options, done) =>
+      done(null, '{"metal":true}'),
+    );
+    const mac = new SpeechHardwareProbe('audio', 'darwin', '/app/native/qwen/voxcue-qwen');
+    await expect(mac.read()).resolves.toEqual({ cuda: false, metal: true });
+    expect(native.execFile.mock.calls[0].slice(0, 2)).toEqual([
+      '/app/native/qwen/voxcue-qwen',
+      ['metal-check'],
+    ]);
+    await expect(
+      mac.require({ sources: ['system'], speechModel: 'qwen', inferenceDevice: 'metal' }),
+    ).resolves.toBeUndefined();
+    await expect(
+      mac.require({ sources: ['system'], speechModel: 'qwen', inferenceDevice: 'cuda' }),
+    ).rejects.toThrow(/CPU/);
+    await expect(
+      new SpeechHardwareProbe('audio', 'win32').require({
+        sources: ['system'],
+        speechModel: 'qwen',
+        inferenceDevice: 'metal',
+      }),
+    ).rejects.toThrow(/Metal/);
+  });
+  it('fails closed when the Metal runtime errors or returns malformed data', async () => {
+    native.execFile.mockImplementation((_file, _args, _options, done) =>
+      done(Error('timeout'), '{"metal":true}'),
+    );
+    const probe = new SpeechHardwareProbe('audio', 'darwin', '/app/native/qwen/voxcue-qwen');
+    await expect(probe.read()).resolves.toEqual({
+      cuda: false,
+      metal: false,
+      reason: 'unavailable',
+    });
+    await expect(
+      probe.require({ sources: ['system'], speechModel: 'qwen', inferenceDevice: 'metal' }),
+    ).rejects.toThrow(/CPU/);
+  });
   it('queries only the owned helper and merges concurrent requests', async () => {
     let finish: (error: Error | null, stdout: string) => void;
     native.execFile.mockImplementation((_file, _args, _options, done) => {

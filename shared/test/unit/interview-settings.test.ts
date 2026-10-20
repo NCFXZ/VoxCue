@@ -75,3 +75,26 @@ it('retired ASR settings are ignored without losing audio devices or answer pref
     vi.unstubAllGlobals();
   }
 });
+it('preserves explicit Metal and answer preferences when restoring Mac speech settings', async () => {
+  vi.stubGlobal('localStorage', {
+    getItem: () =>
+      JSON.stringify({
+        speechModel: 'qwen',
+        inferenceDevice: 'metal',
+        system: 'speaker',
+        modelId: 'answer',
+        effort: 'high',
+      }),
+  });
+  try {
+    vi.resetModules();
+    const { useInterviewSettings } = await import('../../../shared/src/stores/interviewSettings');
+    expect(useInterviewSettings.getState().configuration).toMatchObject({
+      modelId: 'answer',
+      effort: 'high',
+      options: { speechModel: 'qwen', inferenceDevice: 'metal', system: 'speaker' },
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

@@ -49,6 +49,23 @@ async function fixture() {
   return { root, pkg, bytes, data, fetcher, service };
 }
 describe('独立组件下载与版本缓存', () => {
+  it('只安装Qwen也满足语音就绪，删除最后一个语音模型才变为缺失', async () => {
+    const f = await fixture();
+    const qwen = { ...f.pkg, id: 'qwen' as const, optional: true };
+    const service = new ComponentService({
+      root: f.root,
+      packages: [f.pkg, qwen],
+      managed: true,
+      fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(),
+    });
+    expect((await service.download('qwen')).phase).toBe('ready');
+    expect(service.ready('speech')).toBe(false);
+    expect(service.ready('qwen')).toBe(true);
+    expect((await service.remove('qwen')).phase).toBe('needed');
+    expect(service.ready('qwen')).toBe(false);
+    service.dispose();
+  });
   it('默认下载只准备必需组件，Qwen 由用户单独选取下载', async () => {
     const f = await fixture();
     const qwen = { ...f.pkg, id: 'qwen' as const, optional: true };
@@ -285,7 +302,27 @@ describe('独立组件下载与版本缓存', () => {
     ).rejects.toThrow();
   });
   it('固定平台包和缓存入口，安装完整包及开发版保留原加载方式', async () => {
-    expect(packagesFor('darwin', 'arm64').map((p) => p.id)).toEqual(['speech', 'rag']);
+    expect(packagesFor('darwin', 'arm64').map((p) => p.id)).toEqual(['speech', 'rag', 'qwen']);
+    const qwen = packagesFor('darwin', 'arm64').find((pkg) => pkg.id === 'qwen')!;
+    expect(qwen.parts).toHaveLength(2);
+    expect(qwen.files.every((file) => !file.path.includes('/runtime/'))).toBe(true);
+    expect(qwen.parts?.every((part) => !part.asset.includes('Windows'))).toBe(true);
+    expect(qwen.version).toBe('1.0.1');
+    expect(qwen.files.find((file) => file.path === 'qwen/aligner/model.gguf')?.sha256).toBe(
+      '539df5dd0fe1721e378ac13bfac9a26b1260dafb62d892c518c1f21244762636',
+    );
+    expect(qwen.files.some((file) => file.path === 'qwen/aligner/model.safetensors')).toBe(false);
+    const windowsQwen = packagesFor('win32', 'x64').find((pkg) => pkg.id === 'qwen')!;
+    expect(windowsQwen.version).toBe('1.0.0');
+    expect(windowsQwen.parts).toHaveLength(3);
+    expect(windowsQwen.files.some((file) => file.path === 'qwen/aligner/model.safetensors')).toBe(
+      true,
+    );
+    expect(
+      windowsQwen.files.some(
+        (file) => file.path.endsWith('.gguf') && file.path.includes('/aligner/'),
+      ),
+    ).toBe(false);
     expect(packagesFor('win32', 'x64').map((p) => p.id)).toEqual(['speech', 'rag', 'qwen']);
     expect(() => packagesFor('darwin', 'x64')).toThrow();
     const paths = componentPaths('/cache', packagesFor('darwin', 'arm64'));

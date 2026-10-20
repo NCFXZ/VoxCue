@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。当前Mac为[v0.5.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.0)，Windows仍为0.3.1；本次仅追加Mac三项，保留全部旧资产和既有v0.3.1 Latest。两平台按完整资产独立选版。0.2.2起通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；用户仍无需 Node、Python 或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
+面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。当前Mac为[v0.5.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.2)，Windows为[v0.5.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.1)；本次仅新增Mac三项，保留全部旧资产和既有v0.3.1 Latest。两平台按完整资产独立选版。0.2.2起通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；0.5.2的Qwen Metal使用随应用签名的私有MLX/CPython，用户仍无需另装Node、Python或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书，减少重建/升级后的重复钥匙串授权，未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
@@ -40,7 +40,7 @@ corepack pnpm test:package
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
 - `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
 
-按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后更新发行说明。Latest 按当次授权处理，本次 Mac 0.3.1 保留 v0.3.0 Latest。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
+按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。Latest 按当次授权处理，本次Mac 0.5.2保留既有v0.3.1 Latest。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 

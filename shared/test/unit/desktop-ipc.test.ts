@@ -56,6 +56,35 @@ beforeEach(() => {
 });
 
 describe('更新 IPC 白名单', () => {
+  it('面试浮窗只读组件状态，不能通过状态授权下载、取消或删除组件', async () => {
+    const sender = { mainFrame: {} },
+      event = { sender, senderFrame: undefined as unknown };
+    event.senderFrame = sender.mainFrame;
+    const service = { status: vi.fn(), download: vi.fn(), cancel: vi.fn(), remove: vi.fn() };
+    registerComponentIpc(
+      service as unknown as ComponentService,
+      () => {
+        throw Error('main only');
+      },
+      undefined,
+      (event) => {
+        if (event.sender !== sender) throw Error('unauthorized');
+      },
+    );
+    const handle = bridge.handlers.get('components:call')!;
+    await handle(event, { op: 'status' });
+    expect(service.status).toHaveBeenCalledOnce();
+    for (const call of [
+      { op: 'download', id: 'qwen' },
+      { op: 'remove', id: 'qwen' },
+      { op: 'cancel' },
+      { op: 'status', id: 'qwen' },
+    ])
+      expect(() => handle(event, call)).toThrow('main only');
+    expect(() => handle({ sender, senderFrame: {} }, { op: 'status' })).toThrow('Unauthorized');
+    expect(service.download).not.toHaveBeenCalled();
+    expect(service.remove).not.toHaveBeenCalled();
+  });
   it('组件下载只接受已注册窗口主 frame 的固定组件和操作', async () => {
     const sender = { mainFrame: {} },
       event = { sender, senderFrame: undefined as unknown };

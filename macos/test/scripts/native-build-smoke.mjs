@@ -1,11 +1,15 @@
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
+import assert from 'node:assert/strict';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required');
 const root = workspace.platformRoot;
+const qwen = path.join(root, 'native/bin/qwen');
+const qwenFiles = JSON.parse(readFileSync(path.join(qwen, 'build.json'), 'utf8')).files;
 const run = (command, args, env = process.env) => {
   const result = spawnSync(command, args, { cwd: root, env, encoding: 'utf8' });
   if (result.error) throw result.error;
@@ -13,6 +17,16 @@ const run = (command, args, env = process.env) => {
   return result.stdout;
 };
 const common = ['clang++', '-std=c++17', '-arch', 'arm64', '-mmacosx-version-min=14.2', '-O2'];
+for (const file of Object.keys(qwenFiles).filter(
+  (file) => file === 'voxcue-qwen' || file.endsWith('.dylib'),
+)) {
+  const output = run('/usr/bin/otool', ['-l', path.join(qwen, file)]);
+  const version = output.match(/\bminos (\d+)\.(\d+)/);
+  assert.ok(
+    version && (Number(version[1]) < 14 || (Number(version[1]) === 14 && Number(version[2]) <= 2)),
+    'Qwen must not raise the application macOS 14.2 minimum: ' + file,
+  );
+}
 const audio = path.join(testRoot, 'VoxCue.Audio');
 run('/usr/bin/xcrun', [
   ...common,

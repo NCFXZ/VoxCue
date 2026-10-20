@@ -1,5 +1,7 @@
 import type { ComponentId } from '../../contracts/components';
 import { qwenPackage } from './qwen-catalog';
+import { qwenInt8Aligner } from './qwen-int8-catalog';
+import { createHash } from 'node:crypto';
 
 export interface ComponentArchive {
   tag: string;
@@ -164,5 +166,22 @@ export function packagesFor(platform: string, arch: string) {
         ? 'windows-x64'
         : undefined;
   if (!target) throw Error('当前平台不支持本地组件下载。');
-  return componentPackages.filter((p) => p.target === 'all' || p.target === target);
+  const packages = componentPackages.filter((p) => p.target === 'all' || p.target === target);
+  if (target === 'macos-arm64') {
+    // Mac ships its signed runtime with GGUF support. Keep the old Windows
+    // runtime/model pair together until a Windows build is verified separately.
+    const parts = [qwenPackage.parts![0], qwenInt8Aligner];
+    packages.push({
+      ...qwenPackage,
+      target,
+      version: '1.0.1',
+      parts,
+      files: parts.flatMap((part) => part.files),
+      bytes: parts.reduce((sum, part) => sum + part.bytes, 0),
+      sha256: createHash('sha256')
+        .update(parts.map((part) => part.sha256).join('\n'))
+        .digest('hex'),
+    });
+  }
+  return packages;
 }

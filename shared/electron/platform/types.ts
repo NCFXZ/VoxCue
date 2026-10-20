@@ -24,4 +24,5 @@ export interface DesktopPlatform {
   readonly microphoneSettingsUrl?: string;
   readonly wasapiHelper?: string;
   readonly speechProcessFile?: string;
+  readonly qwenRuntimeFile?: string;
 }

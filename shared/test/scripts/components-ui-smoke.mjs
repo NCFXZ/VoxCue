@@ -16,7 +16,7 @@ const {app}=require('electron');
 app.setAppPath(${JSON.stringify(process.cwd())});
 const service=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/components/service.js'))});
 const hardware=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/hardware.js'))});
-globalThis.uiSpeechHardware={cuda:true};
+globalThis.uiSpeechHardware=process.platform==='darwin'?{cuda:false,metal:true}:{cuda:true};
 hardware.SpeechHardwareProbe=class {
  read(){return Promise.resolve(globalThis.uiSpeechHardware);}
  require(){return Promise.resolve();}
@@ -175,7 +175,7 @@ try {
   await knowledgeGroup.getByText('multilingual-e5-small', { exact: true }).waitFor();
   await speechGroup.getByText('Paraformer 中英 INT8', { exact: true }).waitFor();
   assert.equal(await speechGroup.getByText('知识库模型', { exact: true }).count(), 0);
-  if (process.platform === 'win32')
+  if (['win32', 'darwin'].includes(process.platform))
     await speechGroup.getByText('Qwen3-ASR 0.6B', { exact: true }).waitFor();
   for (const name of await rows.locator('.component-model-name').all())
     assert.equal(await name.evaluate((element) => getComputedStyle(element).fontWeight), '400');
@@ -235,7 +235,10 @@ try {
                 .filter(
                   (animation) =>
                     animation.effect?.getTiming().iterations !== Infinity &&
-                    animation.playState === 'running',
+                    animation.playState === 'running' &&
+                    animation.effect
+                      ?.getKeyframes()
+                      .some((frame) => 'width' in frame || 'minWidth' in frame),
                 ).length,
           ),
         0,
@@ -382,7 +385,7 @@ try {
     assert.equal(await settings.getByRole('menuitemradio').count(), 0);
   };
   await assertDisabledMenu();
-  if (process.platform === 'win32') {
+  if (['win32', 'darwin'].includes(process.platform)) {
     const speechModel = modelSettings.getByRole('button', { name: '语音识别模型', exact: true });
     await speechModel.click();
     const menuPreview = process.argv.find((argument) => argument.startsWith('--menu-preview='));
@@ -424,11 +427,42 @@ try {
     assert.equal(await device.evaluate((element) => getComputedStyle(element).opacity), '1');
     await device.click();
     assert.equal(
-      await settings.getByRole('menuitemradio', { name: 'CUDA（推荐）', exact: true }).count(),
+      await settings
+        .getByRole('menuitemradio', {
+          name: process.platform === 'darwin' ? 'Metal（推荐）' : 'CUDA（推荐）',
+          exact: true,
+        })
+        .count(),
       1,
     );
     await settings.getByRole('menuitemradio', { name: 'CPU', exact: true }).click();
     await modelSettings.getByRole('alert').filter({ hasText: '性能可能不足' }).waitFor();
+    if (process.argv.includes('--memory-preview')) {
+      for (const colorScheme of ['light', 'dark']) {
+        await page.emulateMedia({ colorScheme });
+        await page.waitForFunction(
+          (dark) => document.documentElement.classList.contains('dark') === dark,
+          colorScheme === 'dark',
+        );
+        await modelSettings.evaluate(async (element) => {
+          await new Promise((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(resolve)),
+          );
+          await Promise.all(
+            element
+              .getAnimations({ subtree: true })
+              .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+              .map((animation) => animation.finished.catch(() => {})),
+          );
+        });
+        console.log(
+          'VOXCUE_MODEL_PREVIEW:' +
+            (await modelSettings.screenshot({ type: 'jpeg', quality: 80, scale: 'css' })).toString(
+              'base64',
+            ),
+        );
+      }
+    }
   }
   const formRows = await modelSettings.locator('.speech-setting-row').evaluateAll((rows) =>
     rows.map((row) => ({
@@ -463,7 +497,7 @@ try {
     assert.ok(Math.abs(row.control.width - formRows[0].control.width) < 1);
     assert.ok(row.label.right <= row.control.left);
   }
-  if (process.platform === 'win32')
+  if (['win32', 'darwin'].includes(process.platform))
     assert.ok(
       await modelSettings
         .locator('.speech-model-notices')
@@ -473,15 +507,20 @@ try {
             notice.previousElementSibling.getBoundingClientRect().bottom,
         ),
     );
-  if (process.platform === 'win32') {
+  if (['win32', 'darwin'].includes(process.platform)) {
     await device.click();
-    await settings.getByRole('menuitemradio', { name: 'CUDA（推荐）', exact: true }).click();
+    await settings
+      .getByRole('menuitemradio', {
+        name: process.platform === 'darwin' ? 'Metal（推荐）' : 'CUDA（推荐）',
+        exact: true,
+      })
+      .click();
   }
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  if (process.platform === 'win32') {
+  if (['win32', 'darwin'].includes(process.platform)) {
     for (const reason of ['unsupported-gpu', 'driver-unavailable', 'driver-outdated']) {
       await app.evaluate((_electron, reason) => {
-        globalThis.uiSpeechHardware = { cuda: false, reason };
+        globalThis.uiSpeechHardware = { cuda: false, metal: false, reason };
         const service = globalThis.uiComponents;
         const qwen = service.value.items.find((item) => item.id === 'qwen');
         qwen.phase = 'ready';
@@ -494,6 +533,8 @@ try {
         .getByRole('navigation', { name: '设置分类' })
         .getByRole('button', { name: '面试设置', exact: true })
         .click();
+      await modelSettings.getByRole('button', { name: '语音识别模型', exact: true }).click();
+      await settings.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
       await device.getByText('CPU', { exact: true }).waitFor();
       await modelSettings.getByRole('alert').filter({ hasText: '性能可能不足' }).waitFor();
       assert.equal(await modelSettings.getByText(/当前显卡|NVIDIA 驱动/).count(), 0);
@@ -532,7 +573,12 @@ try {
       await page.keyboard.press('Escape');
       await assertDisabledMenu();
       assert.equal(
-        await settings.getByRole('menuitemradio', { name: 'CUDA（推荐）', exact: true }).count(),
+        await settings
+          .getByRole('menuitemradio', {
+            name: process.platform === 'darwin' ? 'Metal（推荐）' : 'CUDA（推荐）',
+            exact: true,
+          })
+          .count(),
         0,
       );
       assert.equal(await modelSettings.getByRole('alert').count(), 1);
@@ -554,6 +600,10 @@ try {
         qwen.phase = 'pending';
         qwen.received = 0;
         service.publish('needed');
+      });
+      await page.waitForFunction(() => {
+        const value = JSON.parse(localStorage.getItem('copilot-interview-settings-v1'));
+        return value.speechModel === 'paraformer' && value.inferenceDevice === 'cpu';
       });
       await page.getByRole('button', { name: '用户菜单', exact: true }).click();
       await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -590,6 +640,117 @@ try {
       await app.evaluate(() => globalThis.uiComponents.cancel());
       await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
     }
+    await app.evaluate(() => {
+      const service = globalThis.uiComponents;
+      const qwen = service.value.items.find((item) => item.id === 'qwen');
+      qwen.phase = 'ready';
+      qwen.received = qwen.bytes;
+      service.publish('ready');
+    });
+    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await settings
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '面试设置', exact: true })
+      .click();
+    const selectedSpeech = modelSettings.getByRole('button', { name: '语音识别模型', exact: true });
+    assert.match(await selectedSpeech.innerText(), /Paraformer/);
+    await selectedSpeech.click();
+    await settings.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
+    const beforeRemoval = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('copilot-interview-settings-v1')),
+    );
+    await settings
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '本地组件', exact: true })
+      .click();
+    const qwenRow = settings.locator('.component-row[data-component-id="qwen"]');
+    await qwenRow.getByRole('button', { name: '删除：Qwen3-ASR 0.6B', exact: true }).click();
+    await qwenRow.getByRole('button', { name: '确认删除：Qwen3-ASR 0.6B', exact: true }).click();
+    await qwenRow.getByRole('button', { name: '下载', exact: true }).waitFor();
+    await page.waitForFunction(() => {
+      const value = JSON.parse(localStorage.getItem('copilot-interview-settings-v1'));
+      return value.speechModel === 'paraformer' && value.inferenceDevice === 'cpu';
+    });
+    assert.deepEqual(
+      await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-interview-settings-v1'))),
+      { ...beforeRemoval, speechModel: 'paraformer', inferenceDevice: 'cpu' },
+    );
+    await settings
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '面试设置', exact: true })
+      .click();
+    await selectedSpeech.getByText('Paraformer 中英 INT8', { exact: true }).waitFor();
+    await assertDisabledMenu();
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await page.reload();
+    await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
+    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await settings
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '面试设置', exact: true })
+      .click();
+    await selectedSpeech.getByText('Paraformer 中英 INT8', { exact: true }).waitFor();
+    assert.equal(await device.isDisabled(), true);
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await app.evaluate(() => {
+      const service = globalThis.uiComponents;
+      for (const item of service.value.items) {
+        item.phase = 'ready';
+        item.received = item.bytes;
+      }
+      service.publish('ready');
+    });
+    await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await settings
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '本地组件', exact: true })
+      .click();
+    const paraformerRow = settings.locator('.component-row[data-component-id="speech"]');
+    await paraformerRow
+      .getByRole('button', { name: '删除：Paraformer 中英 INT8', exact: true })
+      .click();
+    await paraformerRow
+      .getByRole('button', { name: '确认删除：Paraformer 中英 INT8', exact: true })
+      .click();
+    await paraformerRow.getByRole('button', { name: '下载', exact: true }).waitFor();
+    await page.waitForFunction(() => {
+      const value = JSON.parse(localStorage.getItem('copilot-interview-settings-v1'));
+      return value.speechModel === 'qwen' && value.inferenceDevice === 'cpu';
+    });
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    assert.equal(await page.getByLabel('本地组件提示', { exact: true }).count(), 0);
+    await page
+      .getByLabel('语音推理性能提示', { exact: true })
+      .getByText('语音识别模块性能受限', { exact: true })
+      .waitFor();
+    assert.equal(
+      await page.getByRole('button', { name: '开始面试', exact: true }).isEnabled(),
+      true,
+    );
+    if (process.argv.includes('--readiness-preview'))
+      console.log(
+        'VOXCUE_READINESS_PREVIEW:' +
+          (await page.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString('base64'),
+      );
+    await page
+      .getByLabel('语音推理性能提示', { exact: true })
+      .getByRole('button', { name: '前往设置', exact: true })
+      .click();
+    await modelSettings.waitFor();
+    assert.equal(
+      await settings
+        .getByRole('navigation', { name: '设置分类' })
+        .getByRole('button', { name: '面试设置', exact: true })
+        .getAttribute('aria-current'),
+      'page',
+    );
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await page.reload();
+    await page.getByLabel('语音推理性能提示', { exact: true }).waitFor();
+    assert.equal(await page.getByLabel('本地组件提示', { exact: true }).count(), 0);
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await page.getByRole('button', { name: '个人信息', exact: true }).click();

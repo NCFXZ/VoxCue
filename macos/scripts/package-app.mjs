@@ -8,6 +8,7 @@ const require = workspace.platformRequire;
 const { packager } = await import(require.resolve('@electron/packager'));
 import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
+import { buildQwen } from './build-qwen.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -19,6 +20,7 @@ export async function buildMacApp(output, publicKey) {
   // Fail before packaging if the established identity is unavailable; never rotate
   // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
   const signing = await loadDevelopmentSigning();
+  await buildQwen();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
   const paths = await packager({
@@ -176,6 +178,15 @@ export async function buildMacApp(output, publicKey) {
   await mkdir(path.join(resources, 'native'), { recursive: true });
   for (const name of ['VoxCue.Audio', 'VoxCue.ScreenPermission.node', 'VoxCue.Updater.node'])
     await cp(path.join(root, 'native/bin', name), path.join(resources, 'native', name));
+  // Only the build's authenticated canonical file set enters the application.
+  // File Provider may retain numbered copies; they are never runtime resources.
+  const qwenRoot = path.join(root, 'native/bin/qwen');
+  const qwenBuild = JSON.parse(await readFile(path.join(qwenRoot, 'build.json'), 'utf8'));
+  for (const file of Object.keys(qwenBuild.files)) {
+    const destination = path.join(resources, 'native/qwen', file);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await cp(path.join(qwenRoot, file), destination);
+  }
   await writeFile(
     path.join(resources, 'voxcue-components.json'),
     JSON.stringify({ schemaVersion: 1 }),

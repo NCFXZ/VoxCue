@@ -143,6 +143,65 @@ export async function installUiAccount(app, { speech = false, components = false
             path.join(root, 'dist-electron/shared/electron/backend/speech/models.js'),
           ).speechModelInstalled = () => true;
         require(speechFixture)(root);
+        const { SpeechHost } = require(
+          path.join(root, 'dist-electron/shared/electron/backend/speech/host.js'),
+        );
+        const call = SpeechHost.prototype.call;
+        const stop = SpeechHost.prototype.stop;
+        const clearClock = (host) => {
+          clearTimeout(host.syntheticFinal);
+          clearInterval(host.syntheticProgress);
+        };
+        // Both native fixtures retain their platform access checks. Drive the
+        // common synthetic audio timeline here, including processed silence.
+        SpeechHost.prototype.call = async function (request) {
+          if (request.op === 'devices' || request.op === 'status') return call.call(this, request);
+          clearClock(this);
+          const result = await call.call(this, { op: 'status' });
+          if (request.op === 'start' && request.options.sources.includes('system')) {
+            this.syntheticFinal = setTimeout(() => {
+              const at = Date.now();
+              this.emit({ type: 'audio-progress', source: 'system', pending: true });
+              this.emit({
+                type: 'segment',
+                segment: {
+                  id: 'synthetic-system',
+                  source: 'system',
+                  text: 'Synthetic interviewer question',
+                  final: true,
+                  startMs: at - 1800,
+                  endMs: at,
+                  silenceStartMs: at - 800,
+                  reason: 'silence',
+                },
+              });
+              this.emit({
+                type: 'audio-progress',
+                source: 'system',
+                pending: false,
+                processedThroughMs: at,
+              });
+            }, 50);
+            this.syntheticProgress = setInterval(
+              () =>
+                this.emit({
+                  type: 'audio-progress',
+                  source: 'system',
+                  pending: false,
+                  processedThroughMs: Date.now(),
+                }),
+              50,
+            );
+          }
+          return {
+            ...result,
+            state: request.op === 'start' ? 'running' : request.op === 'pause' ? 'paused' : 'idle',
+          };
+        };
+        SpeechHost.prototype.stop = function () {
+          clearClock(this);
+          return stop.call(this);
+        };
       }
     },
     { speech, speechFixture, components },

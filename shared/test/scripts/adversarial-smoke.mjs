@@ -94,10 +94,11 @@ try {
       modelId: 'test-model',
       instructions: '',
       webSearch: false,
+      knowledgeBaseId: null,
       turns: [{ role: 'user', content: 'new request' }],
     }),
   );
-  assert.equal(next.ok, true);
+  assert.equal(next.ok, true, JSON.stringify(next));
   await app.evaluate(() => {
     const old = globalThis.auditHeld;
     old.emit({ id: old.id, type: 'delta', text: 'Forbidden late text' });

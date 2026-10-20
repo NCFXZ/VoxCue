@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.5.0",
+  "version": "0.5.2",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -43,7 +43,7 @@
     "test:chat:lifecycle": "node ../shared/test/scripts/chat-lifecycle-smoke.mjs",
     "test:adversarial": "node ../shared/test/scripts/adversarial-smoke.mjs",
     "check:workspace": "node ../shared/scripts/sync-platform-manifests.mjs --check && node ../shared/scripts/check-platform-layout.mjs",
-    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:shared && pnpm build:launcher",
+    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
     "build:audio": "node scripts/build-audio.mjs",
     "test:audio:native": "node test/scripts/audio-native-smoke.mjs",
     "test:window:native": "node test/scripts/window-native-smoke.mjs",
@@ -57,7 +57,8 @@
     "build:updater": "node scripts/build-updater.mjs",
     "package:installer": "pnpm build && pnpm build:updater && node scripts/package-installer.mjs",
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
-    "test:package": "node test/scripts/package-smoke.mjs"
+    "test:package": "node test/scripts/package-smoke.mjs",
+    "build:qwen": "node scripts/build-qwen.mjs"
   },
   "dependencies": {
     "adm-zip": "0.6.1",

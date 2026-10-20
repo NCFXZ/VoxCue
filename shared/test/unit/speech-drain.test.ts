@@ -12,6 +12,8 @@ vi.mock('node:worker_threads', async () => {
           if (message.op === 'audio')
             this.emit('message', { ack: message.sequence, ms: message.ms });
           if (message.op === 'flush') this.emit('message', { flushed: message.id });
+          if (message.op === 'prepare') this.emit('message', { prepared: message.id });
+          if (message.op === 'close') this.emit('message', { closed: message.id });
         });
       }
       async terminate() {

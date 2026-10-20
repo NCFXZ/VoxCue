@@ -6,6 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
 
 const nativeProbe =
   process.platform === 'win32'
@@ -18,8 +19,11 @@ const nativeProbe =
 const originalCursor = nativeProbe?.('cursor');
 
 const screenshotOption = process.argv.slice(2).find((value) => value.startsWith('--screenshots='));
-if (process.argv.slice(2).some((value) => value !== screenshotOption))
-  throw Error('Only --screenshots=<requested-output-directory> is supported');
+const memoryPreview = process.argv.includes('--memory-preview');
+if (
+  process.argv.slice(2).some((value) => value !== screenshotOption && value !== '--memory-preview')
+)
+  throw Error('Only --screenshots=<requested-output-directory> and --memory-preview are supported');
 const screenshots = screenshotOption ? path.resolve(screenshotOption.slice(14)) : undefined;
 if (screenshots) await mkdir(screenshots, { recursive: true });
 const profile = path.join(testRoot, 'interview-ux');
@@ -46,6 +50,57 @@ async function capture(page, name) {
       type: 'png',
       scale: 'css',
     });
+  if (memoryPreview && ['settings-layout-wide-light', 'settings-layout-narrow-dark'].includes(name))
+    console.log(
+      'VOXCUE_SETTINGS_PREVIEW:' +
+        (
+          await page
+            .getByRole('dialog', { name: '面试设置', exact: true })
+            .screenshot({ type: 'jpeg', quality: 60, scale: 'css' })
+        ).toString('base64'),
+    );
+}
+async function settingsLayout(dialog) {
+  const result = await dialog.evaluate((element) => {
+    const rect = (node) => node.getBoundingClientRect().toJSON();
+    const rows = [...element.querySelectorAll('.speech-setting-row')].map((row) => {
+      const label = row.querySelector('.speech-setting-label');
+      const range = document.createRange();
+      range.selectNodeContents(label);
+      return {
+        text: label.textContent,
+        lines: range.getClientRects().length,
+        label: rect(label),
+        control: rect(row.querySelector('.choice-trigger')),
+        row: rect(row),
+      };
+    });
+    return {
+      rows,
+      sections: [...element.querySelectorAll('.interview-settings-section')].map(rect),
+      overflow: element.scrollWidth > element.clientWidth + 1,
+      audio: [...element.querySelectorAll('.audio-device-editor .choice-trigger')].map(rect),
+      groups: [...element.querySelectorAll('.speech-model-group')].map((group) => ({
+        width: group.clientWidth,
+        scrollWidth: group.scrollWidth,
+      })),
+    };
+  });
+  assert.equal(result.overflow, false);
+  assert.equal(result.rows.length, 4);
+  for (const row of result.rows) {
+    assert.equal(row.lines, 1, `${row.text}: label must remain horizontal`);
+    assert.ok(
+      row.control.top >= row.label.bottom + 5,
+      `${row.text}: control belongs below its label`,
+    );
+    assert.ok(Math.abs(row.row.width - row.control.width) < 1);
+    assert.ok(row.control.width >= 150);
+  }
+  for (let i = 1; i < result.sections.length; i++)
+    assert.ok(result.sections[i].top >= result.sections[i - 1].bottom);
+  for (const group of result.groups) assert.ok(group.scrollWidth <= group.width + 1);
+  return result;
 }
 async function geometry(page) {
   const result = await page.evaluate(() => {
@@ -115,6 +170,8 @@ try {
     ];
     globalThis.uxRequests = [];
     globalThis.uxHold = false;
+    globalThis.uxHoldSpeech = false;
+    globalThis.uxFailSpeech = false;
     const state = ComponentService.prototype.state;
     ComponentService.prototype.state = function () {
       const result = state.call(this);
@@ -124,11 +181,13 @@ try {
         phase: globalThis.uxNeedSpeech ? 'needed' : 'ready',
         items: result.items.map((item) => ({
           ...item,
-          phase: globalThis.uxNeedSpeech && item.id === 'speech' ? 'pending' : 'ready',
+          phase:
+            globalThis.uxNeedSpeech && ['speech', 'qwen'].includes(item.id) ? 'pending' : 'ready',
         })),
       };
     };
-    ComponentService.prototype.ready = (id) => !(id === 'speech' && globalThis.uxNeedSpeech);
+    ComponentService.prototype.ready = (id) =>
+      !(['speech', 'qwen'].includes(id) && globalThis.uxNeedSpeech);
     ComponentService.prototype.download = async function (id) {
       globalThis.uxDownloads.push(id);
       globalThis.uxNeedSpeech = false;
@@ -140,11 +199,36 @@ try {
       globalThis.uxHost = this;
       const devices = globalThis.uxDevices;
       if (call.op === 'devices') return { state: 'idle', model: 'Synthetic', devices };
+      if (call.op === 'switch-recognizer') {
+        const previous = this.uxStatus;
+        this.emit({ type: 'status', status: { ...previous, switching: 'loading' } });
+        globalThis.uxSpeechWait = () =>
+          this.emit({ type: 'status', status: { ...previous, switching: 'waiting' } });
+        if (globalThis.uxHoldSpeech)
+          await new Promise((resolve) => {
+            globalThis.uxSpeechFinish = resolve;
+          });
+        if (globalThis.uxFailSpeech) {
+          this.emit({ type: 'status', status: previous });
+          throw Error('合成候选加载失败，仍使用原配置。');
+        }
+        const status = {
+          state: 'running',
+          model: 'Synthetic',
+          speechModel: call.options.speechModel,
+          inferenceDevice: call.options.inferenceDevice,
+        };
+        this.uxStatus = status;
+        this.emit({ type: 'status', status });
+        return status;
+      }
       clearInterval(globalThis.uxLevels);
+      clearInterval(globalThis.uxProgress);
       const status = {
         state: call.op === 'start' ? 'running' : call.op === 'pause' ? 'paused' : 'idle',
         model: 'Synthetic',
       };
+      this.uxStatus = status;
       if (call.op === 'start')
         globalThis.uxLevels = setInterval(() => {
           for (const source of call.options.sources)
@@ -155,11 +239,23 @@ try {
               level: source === 'system' ? 0.08 : 0.04,
             });
         }, 100);
+      if (call.op === 'start')
+        globalThis.uxProgress = setInterval(
+          () =>
+            this.emit({
+              type: 'audio-progress',
+              source: 'system',
+              pending: false,
+              processedThroughMs: Date.now(),
+            }),
+          100,
+        );
       this.emit({ type: 'status', status });
       return status;
     };
     SpeechHost.prototype.stop = function () {
       clearInterval(globalThis.uxLevels);
+      clearInterval(globalThis.uxProgress);
     };
     ChatGPTService.prototype.models = async () => [
       { id: 'test-model', label: 'Test Model', description: '', reasoningEfforts: ['low', 'high'] },
@@ -209,7 +305,10 @@ try {
     .getByLabel('本地组件提示', { exact: true })
     .getByRole('button', { name: '前往设置', exact: true })
     .click();
-  await page.getByRole('button', { name: '下载', exact: true }).click();
+  await page
+    .locator('.component-row[data-component-id="speech"]')
+    .getByRole('button', { name: '下载', exact: true })
+    .click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByLabel('本地组件提示', { exact: true }).waitFor({ state: 'hidden' });
   assert.deepEqual(await app.evaluate(() => globalThis.uxDownloads), ['speech']);
@@ -333,7 +432,8 @@ try {
         text: '此测试转写不得进入资料或面试',
         final: true,
         startMs: Date.now(),
-        endMs: Date.now() + 300,
+        endMs: Date.now(),
+        silenceStartMs: Date.now() - 800,
         reason: 'silence',
       },
     }),
@@ -475,7 +575,8 @@ try {
         text: '请介绍一个你负责过的项目。',
         final: true,
         startMs: Date.now(),
-        endMs: Date.now() + 300,
+        endMs: Date.now(),
+        silenceStartMs: Date.now() - 800,
         reason: 'silence',
       },
     }),
@@ -531,16 +632,42 @@ try {
     () => window.desktop.presentation.interviewMousePassthrough,
   );
   const waitNativePassthrough = async (expected) => {
-    assert.ok(
-      await app.evaluate(async (_electron, expected) => {
-        const deadline = Date.now() + 3000;
-        while (Date.now() < deadline) {
-          if (globalThis.uxIgnored === expected) return true;
-          await new Promise((resolve) => setTimeout(resolve, 10));
-        }
-        return false;
-      }, expected),
+    const matched = await app.evaluate(async (_electron, expected) => {
+      const deadline = Date.now() + 3000;
+      while (Date.now() < deadline) {
+        if (globalThis.uxIgnored === expected) return true;
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      return false;
+    }, expected);
+    assert.equal(
+      matched,
+      true,
+      JSON.stringify({
+        expected,
+        actual: await app.evaluate(() => globalThis.uxIgnored),
+        document: await floating.evaluate(() => ({
+          corner: document.elementFromPoint(2, 2)?.outerHTML.slice(0, 300),
+          dialogs: [...document.querySelectorAll('dialog[open]')].map((d) =>
+            d.getAttribute('aria-label'),
+          ),
+        })),
+      }),
     );
+  };
+  const moveToBlankCorner = async () => {
+    await floating.mouse.move(2, 2);
+    if (process.platform === 'darwin') {
+      // Native forwarding can replay the stationary OS cursor after a CDP move.
+      // Supply this fixture's viewport input directly; hit testing, preload/IPC
+      // and the real BrowserWindow passthrough call remain under test.
+      await floating.evaluate(() =>
+        window.dispatchEvent(
+          new MouseEvent('mousemove', { clientX: 2, clientY: 2, bubbles: true }),
+        ),
+      );
+    }
+    await waitNativePassthrough(true);
   };
   if (passthrough) {
     if (nativeProbe) {
@@ -557,11 +684,11 @@ try {
       assert.equal(nativeProbe('desktop').interactive, true);
       nativeProbe('move', point.x, point.y);
     }
-    await floating.mouse.move(2, 2);
-    await waitNativePassthrough(true);
+    await moveToBlankCorner();
   }
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
   const devices = floating.getByRole('dialog', { name: '面试设置', exact: true });
+  await settingsLayout(devices);
   assert.equal(
     await floating.evaluate(() => typeof window.desktop.setInterviewSettingsMaterial),
     'undefined',
@@ -601,15 +728,92 @@ try {
   await badge('麦克风', '未启用').waitFor();
   const configuration = await floating.evaluate(() => window.desktop.interviewState());
   assert.deepEqual(configuration.configuration.options.sources, ['system']);
+  const captureCalls = () =>
+    app.evaluate(
+      () =>
+        globalThis.uxCalls.filter((call) => ['start', 'stop', 'pause'].includes(call.op)).length,
+    );
+  const capturesBefore = await captureCalls();
+  await app.evaluate(() => {
+    globalThis.uxHoldSpeech = true;
+  });
+  await devices.getByRole('button', { name: '语音识别模型', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
+  await devices.getByRole('status').filter({ hasText: '原配置继续转写' }).waitFor();
+  assert.equal(
+    await devices.getByRole('button', { name: '语音识别模型', exact: true }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await devices.getByRole('button', { name: '选择播放设备', exact: true }).isDisabled(),
+    true,
+  );
+  assert.equal(
+    await devices.getByRole('button', { name: '面试回答模型', exact: true }).isDisabled(),
+    false,
+  );
+  await waitForAsync(app, () => typeof globalThis.uxSpeechWait === 'function');
+  await app.evaluate(() => globalThis.uxSpeechWait());
+  await devices.getByRole('status').filter({ hasText: '等待语音停顿' }).waitFor();
   await devices.getByRole('button', { name: '面试回答模型', exact: true }).click();
   await floating.getByRole('menuitemradio', { name: '验证模型', exact: true }).click();
-  await floating.waitForFunction(
+  await waitForAsync(
+    floating,
     async () => (await window.desktop.interviewState()).configuration.modelId === 'next-model',
   );
   await devices.getByRole('button', { name: '面试思考强度', exact: true }).click();
   await floating.getByRole('menuitemradio', { name: '高', exact: true }).click();
-  await floating.waitForFunction(
+  await waitForAsync(
+    floating,
     async () => (await window.desktop.interviewState()).configuration.effort === 'high',
+  );
+  assert.equal(await app.evaluate(() => globalThis.uxCurrentSignal.aborted), false);
+  await app.evaluate(() => {
+    globalThis.uxHoldSpeech = false;
+    globalThis.uxSpeechFinish();
+  });
+  await waitForAsync(
+    floating,
+    async () =>
+      (await window.desktop.interviewState()).configuration.options.speechModel === 'qwen',
+  );
+  await devices.getByRole('button', { name: '语音推理设备', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: 'CPU', exact: true }).click();
+  await waitForAsync(
+    floating,
+    async () =>
+      (await window.desktop.interviewState()).configuration.options.inferenceDevice === 'cpu',
+  );
+  await app.evaluate(() => {
+    globalThis.uxFailSpeech = true;
+  });
+  await devices.getByRole('button', { name: '语音推理设备', exact: true }).click();
+  await floating
+    .getByRole('menuitemradio', {
+      name: process.platform === 'darwin' ? 'Metal（推荐）' : 'CUDA（推荐）',
+      exact: true,
+    })
+    .click();
+  await devices.getByRole('alert').filter({ hasText: '合成候选加载失败' }).waitFor();
+  assert.equal(
+    (await floating.evaluate(() => window.desktop.interviewState())).configuration.options
+      .inferenceDevice,
+    'cpu',
+  );
+  assert.equal(await floating.getByText('音频采集中断', { exact: true }).count(), 0);
+  await app.evaluate(() => {
+    globalThis.uxFailSpeech = false;
+  });
+  await devices.getByRole('button', { name: '语音识别模型', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: 'Paraformer 中英 INT8', exact: true }).click();
+  await waitForAsync(
+    floating,
+    async () =>
+      (await window.desktop.interviewState()).configuration.options.speechModel === 'paraformer',
+  );
+  assert.equal(await captureCalls(), capturesBefore);
+  checks.push(
+    'background speech/model device switches preserve capture; pending switch leaves answer model editable; failure retains old device without capture error',
   );
   const slider = devices.getByRole('slider', { name: '面试字体大小', exact: true });
   await slider.fill('18');
@@ -715,8 +919,13 @@ try {
   await floating.emulateMedia({ forcedColors: 'active' });
   assert.equal(await devices.evaluate((e) => getComputedStyle(e).backdropFilter), 'none');
   await floating.emulateMedia({ forcedColors: 'none' });
+  // Restoring the normal palette can start finite color transitions. Compare
+  // the opaque surface only after those transitions have settled.
+  await capture(floating, 'settings-palette-settled');
   const settingsBox = await devices.boundingBox();
-  const opaqueSample = { x: settingsBox.x + 10, y: settingsBox.y + 60, width: 80, height: 35 };
+  // Sample only the panel's inner padding: text antialiasing may differ by one
+  // channel value when Chromium recomposites an unrelated filtered layer.
+  const opaqueSample = { x: settingsBox.x + 8, y: settingsBox.y + 60, width: 8, height: 120 };
   const covered = await floating.screenshot({ clip: opaqueSample, scale: 'css' });
   await floating.locator('.floating-panels').evaluate((e) => {
     e.style.filter = 'invert(1)';
@@ -725,16 +934,32 @@ try {
   await floating.locator('.floating-panels').evaluate((e) => {
     e.style.removeProperty('filter');
   });
-  assert.ok(
-    covered.equals(changedBackground),
-    'Opaque settings must hide changes in the underlying interview',
+  const pixelDifference = await app.evaluate(
+    ({ nativeImage }, images) => {
+      const [a, b] = images.map((value) =>
+        nativeImage.createFromBuffer(Buffer.from(value, 'base64')).toBitmap(),
+      );
+      let changed = 0,
+        max = 0;
+      for (let i = 0; i < a.length; i++) {
+        if (a[i] !== b[i]) changed++;
+        max = Math.max(max, Math.abs(a[i] - b[i]));
+      }
+      return { changed, max, first: [...a.subarray(0, 4)], second: [...b.subarray(0, 4)] };
+    },
+    [covered.toString('base64'), changedBackground.toString('base64')],
+  );
+  assert.equal(
+    pixelDifference.changed,
+    0,
+    'Opaque settings must hide changes in the underlying interview: ' +
+      JSON.stringify(pixelDifference),
   );
   await capture(floating, '07-interview-settings');
   await devices.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await devices.waitFor({ state: 'hidden' });
   if (passthrough) {
-    await floating.mouse.move(2, 2);
-    await waitNativePassthrough(true);
+    await moveToBlankCorner();
   }
   await app.evaluate(() => globalThis.uxRestorePassthrough());
   assert.equal(await app.evaluate(() => globalThis.uxCurrentSignal.aborted), false);
@@ -777,6 +1002,66 @@ try {
     await geometry(floating);
   }
   await capture(floating, '08-interview-dark');
+  const originalWindow = await app.evaluate(({ BrowserWindow }, url) => {
+    const window = BrowserWindow.getAllWindows().find(
+      (window) => window.webContents.getURL() === url,
+    );
+    return { size: window.getContentSize(), minimum: window.getMinimumSize() };
+  }, floating.url());
+  for (const [width, columns] of [
+    [960, 2],
+    [620, 2],
+    [440, 1],
+  ]) {
+    await app.evaluate(
+      ({ BrowserWindow }, { url, width }) => {
+        const window = BrowserWindow.getAllWindows().find(
+          (window) => window.webContents.getURL() === url,
+        );
+        window.setMinimumSize(360, 420);
+        window.setContentSize(width, 780);
+      },
+      { url: floating.url(), width },
+    );
+    for (const theme of ['light', 'dark']) {
+      await floating.evaluate(
+        (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
+        theme,
+      );
+      await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+      const layout = await settingsLayout(devices);
+      if (columns === 2) {
+        assert.ok(Math.abs(layout.audio[0].top - layout.audio[1].top) < 1);
+        assert.ok(Math.abs(layout.rows[0].control.top - layout.rows[1].control.top) < 1);
+      } else {
+        assert.ok(layout.audio[1].top > layout.audio[0].bottom);
+        assert.ok(layout.rows[1].label.top > layout.rows[0].control.bottom);
+      }
+      if (width === 960 || width === 440) {
+        await devices.locator('.dialog-scroll').evaluate((element) => {
+          element.scrollTop = 0;
+        });
+        if (width === 440)
+          await devices.locator('.speech-model-group').last().scrollIntoViewIfNeeded();
+        await capture(floating, `settings-layout-${width === 960 ? 'wide' : 'narrow'}-${theme}`);
+      }
+      await devices.getByRole('button', { name: '关闭对话框', exact: true }).click();
+      await devices.waitFor({ state: 'hidden' });
+    }
+  }
+  await app.evaluate(
+    ({ BrowserWindow }, { url, originalWindow }) => {
+      const window = BrowserWindow.getAllWindows().find(
+        (window) => window.webContents.getURL() === url,
+      );
+      window.setContentSize(...originalWindow.size);
+      window.setMinimumSize(...originalWindow.minimum);
+    },
+    { url: floating.url(), originalWindow },
+  );
+  checks.push(
+    'settings sections stack vertically; paired fields have horizontal labels above full-width controls; 960/620/440 widths in both themes fit without overflow',
+  );
   checks.push(
     'light/dark and smaller native interview bounds, automatic device refresh in both settings, custom sliders and live opacity scene, footer privacy and meters without trailing status',
   );

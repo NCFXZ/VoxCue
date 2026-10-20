@@ -4,6 +4,16 @@ import type { SpeechEvent } from '../../../shared/electron/contracts/speech';
 import type { ChatEvent } from '../../../shared/electron/contracts/chat';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
 let emit: (e: SpeechEvent) => void;
+async function advanceAudio(ms: number) {
+  await vi.advanceTimersByTimeAsync(ms);
+  emit({
+    type: 'audio-progress',
+    source: 'system',
+    pending: false,
+    processedThroughMs: Date.now(),
+  });
+  await vi.advanceTimersByTimeAsync(0);
+}
 beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
@@ -45,24 +55,25 @@ const segment = (id: string, text: string, final: boolean) => ({
     final,
     source: 'system' as const,
     startMs: Date.now(),
-    endMs: Date.now() + 500,
+    endMs: Date.now(),
+    silenceStartMs: Date.now() - 800,
     reason: 'silence' as const,
   },
 });
-it('Paraformer 收到静音终稿后等待1000ms自动回答', async () => {
+it('Paraformer 从静音起点累计1800ms自动回答，800ms分段计入其中', async () => {
   const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
   useInterview.getState().setAutoAnswer(true);
   emit(segment('normal', '请介绍项目', true));
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   expect(ask).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(ask).toHaveBeenCalledWith('请介绍项目', ['normal'], []);
   expect(useInterview.getState()).not.toHaveProperty('autoSubmitAt');
   expect(useInterview.getState()).not.toHaveProperty('cancelAutoSubmit');
   expect(useInterview.getState().transcripts.at(-1)?.text).toBe('请介绍项目');
   ask.mockRestore();
 });
-it('Qwen 标点固定不提交，800ms静音终稿后再等待1000ms；恢复说话取消提交', async () => {
+it('Qwen 标点固定不提交，静音累计1800ms提交；恢复说话取消提交', async () => {
   useInterview.setState({
     options: { sources: ['system'], speechModel: 'qwen', inferenceDevice: 'cuda' },
   });
@@ -76,16 +87,16 @@ it('Qwen 标点固定不提交，800ms静音终稿后再等待1000ms；恢复说
       speechModel: 'qwen',
     },
   });
-  await vi.advanceTimersByTimeAsync(2000);
+  await advanceAudio(2000);
   expect(ask).not.toHaveBeenCalled();
   emit(segment('tail', '后三句。', true));
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   expect(ask).not.toHaveBeenCalled();
   emit({ type: 'speech-start', source: 'system' });
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(ask).not.toHaveBeenCalled();
   emit(segment('last', '接着说完。', true));
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(ask).toHaveBeenCalledWith('第一句。 后三句。 接着说完。', ['fixed', 'tail', 'last'], []);
   ask.mockRestore();
 });
@@ -103,7 +114,7 @@ it('手动发送过的 Qwen 临时稿，裁剪后不会再次自动发送后续�
   });
   emit(segment('continuation', '后续修订。', true));
   useInterview.getState().setAutoAnswer(true);
-  await vi.advanceTimersByTimeAsync(2000);
+  await advanceAudio(2000);
   expect(ask).not.toHaveBeenCalled();
   ask.mockRestore();
 });
@@ -138,7 +149,83 @@ it('重连音频保留本场记录和回答，恢复后继续接收两路活动�
   expect(useInterview.getState().audioLevels.system?.inputAt).toBe(Date.now());
   expect(useInterview.getState().draftQuestion).toBe('新问题');
 });
-it('明确回应按1000毫秒自动提交，关闭自动回答后仍可手动发送', async () => {
+it.each(['model', 'device'] as const)(
+  '后台切换语音 %s 保留问题、回答和原1800ms截止点',
+  async (kind) => {
+    const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
+    try {
+      if (kind === 'device')
+        useInterview.setState({
+          options: {
+            ...useInterview.getState().options,
+            speechModel: 'qwen',
+            inferenceDevice: 'metal',
+          },
+        });
+      useInterview.getState().setAutoAnswer(true);
+      emit(segment('pending', '切换前的问题', true));
+      let finish!: (value: any) => void;
+      Object.assign(window.desktop!, {
+        reconnectInterviewAudio: vi.fn(() => new Promise((resolve) => (finish = resolve))),
+      });
+      const options = {
+        ...useInterview.getState().options,
+        speechModel: 'qwen' as const,
+        inferenceDevice: 'cpu' as const,
+      };
+      const sessionId = useInterview.getState().sessionId;
+      const pending = useInterview.getState().reconnectAudio(options);
+      expect(useInterview.getState()).toMatchObject({
+        status: 'running',
+        switchingSpeech: true,
+        reconnecting: false,
+        pendingQuestion: '切换前的问题',
+        draftQuestion: '切换前的问题',
+      });
+      emit({ type: 'status', status: { state: 'running', model: 'old', switching: 'waiting' } });
+      await advanceAudio(999);
+      expect(ask).not.toHaveBeenCalled();
+      finish({ state: 'running', model: 'new' });
+      expect(await pending).toBe(true);
+      expect(useInterview.getState()).toMatchObject({
+        sessionId,
+        options,
+        switchingSpeech: false,
+        draftQuestion: '切换前的问题',
+      });
+      await advanceAudio(1);
+      expect(ask).toHaveBeenCalledWith('切换前的问题', ['pending'], []);
+    } finally {
+      ask.mockRestore();
+    }
+  },
+);
+it('后台语音切换失败恢复原选项，仍接收语音，避免误报采集中断', async () => {
+  emit(segment('saved', '保留的问题', true));
+  const options = useInterview.getState().options;
+  Object.assign(window.desktop!, {
+    reconnectInterviewAudio: vi.fn(async () => {
+      throw Error('新模型加载失败');
+    }),
+  });
+  expect(
+    await useInterview
+      .getState()
+      .reconnectAudio({ ...options, speechModel: 'qwen', inferenceDevice: 'metal' }),
+  ).toBe(false);
+  expect(useInterview.getState()).toMatchObject({
+    options,
+    status: 'running',
+    reconnecting: false,
+    switchingSpeech: false,
+    speechError: null,
+    speechSwitchError: '新模型加载失败',
+    draftQuestion: '保留的问题',
+  });
+  emit(segment('later', '后续问题', true));
+  expect(useInterview.getState().draftQuestion).toBe('保留的问题 后续问题');
+});
+it('明确回应按音频静音截止点自动提交，关闭自动回答后仍可手动发送', async () => {
   const desktop = window.desktop!;
   Object.assign(desktop, {
     onChatEvent: () => () => {},
@@ -154,10 +241,10 @@ it('明确回应按1000毫秒自动提交，关闭自动回答后仍可手动发
   useInterview.getState().setAutoAnswer(true);
   emit(segment('ack-1', '嗯', true));
   emit(segment('ack-2', '好的，谢谢。', true));
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   expect(desktop.interviewAnswer).not.toHaveBeenCalled();
   expect(useInterview.getState().draftQuestion).toBe('嗯 好的，谢谢。');
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
   expect(useInterview.getState().draftQuestion).toBe('');
   expect(useInterview.getState().transcripts.map((row) => row.text)).toEqual([
@@ -168,7 +255,7 @@ it('明确回应按1000毫秒自动提交，关闭自动回答后仍可手动发
   expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
   useInterview.getState().setAutoAnswer(false);
   emit(segment('manual-ack', '谢谢', true));
-  await vi.advanceTimersByTimeAsync(3000);
+  await advanceAudio(3000);
   expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
   await useInterview.getState().submitTranscript();
   expect(desktop.interviewAnswer).toHaveBeenCalledTimes(2);
@@ -181,7 +268,7 @@ it('明确回应按1000毫秒自动提交，关闭自动回答后仍可手动发
     }),
   );
 });
-it('明确有效问题在终稿后1000毫秒提交，保留无问号的提问和前置回应', async () => {
+it('明确有效问题在静音累计1800毫秒提交，保留无问号的提问和前置回应', async () => {
   const desktop = window.desktop!;
   Object.assign(desktop, {
     onChatEvent: () => () => {},
@@ -196,11 +283,11 @@ it('明确有效问题在终稿后1000毫秒提交，保留无问号的提问和
   useInterview.setState({ aiEnabled: true, modelId: 'test' });
   useInterview.getState().setAutoAnswer(true);
   emit(segment('ack', '好的', true));
-  await vi.advanceTimersByTimeAsync(500);
+  await advanceAudio(500);
   emit(segment('question', '讲讲你的项目', true));
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   expect(desktop.interviewAnswer).not.toHaveBeenCalled();
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
   expect(useInterview.getState().answers[0].question).toBe('好的 讲讲你的项目');
 });
@@ -224,15 +311,15 @@ it('旧回答完成后正常提交排队致谢，后续纠正与追问仍正常�
   useInterview.getState().setAutoAnswer(true);
   const first = useInterview.getState().ask('之前的问题');
   emit(segment('queued-ack', '谢谢', true));
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   finish({ ok: true, answerText: '原问题回答', sources: [], usage: null });
   await first;
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(desktop.interviewAnswer).toHaveBeenCalledTimes(2);
   expect(useInterview.getState().answers.at(-1)?.question).toBe('谢谢');
   expect(useInterview.getState().draftQuestion).toBe('');
   emit(segment('correction', '不对，我刚才说的是 PostgreSQL，为什么不用 Redis', true));
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(desktop.interviewAnswer).toHaveBeenCalledTimes(3);
   expect(useInterview.getState().answers.at(-1)?.question).toContain('我刚才说的是 PostgreSQL');
 });
@@ -255,17 +342,17 @@ it('麦克风间断不阻断系统提问；旧回答忙时保留草稿，完成�
   useInterview.setState({ aiEnabled: true, modelId: 'test' });
   useInterview.getState().setAutoAnswer(true);
   const first = useInterview.getState().ask('之前的问题');
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   emit({ type: 'gap', source: 'microphone', message: '麦克风短暂间断' });
   emit(segment('recovered-interim', '恢复后新问题', false));
   expect(useInterview.getState().draftQuestion).toBe('恢复后新问题');
   emit(segment('recovered-interim', '恢复后的完整新问题', true));
-  await vi.advanceTimersByTimeAsync(3000);
+  await advanceAudio(3000);
   expect(desktop.interviewAnswer).toHaveBeenCalledTimes(1);
   expect(useInterview.getState().draftQuestion).toBe('恢复后的完整新问题');
   finish({ ok: true, answerText: '旧回答完成', sources: [], usage: null });
   await first;
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   expect(desktop.interviewAnswer).toHaveBeenCalledTimes(2);
   expect(useInterview.getState().answers.at(-1)?.question).toBe('恢复后的完整新问题');
   expect(useInterview.getState().draftQuestion).toBe('');
@@ -290,7 +377,7 @@ it('停止AI回答不停止转写，迟到结果丢弃，重试保留问题关�
   });
   useInterview.setState({ aiEnabled: true, modelId: 'test' });
   const pending = useInterview.getState().ask('待取消的问题', ['source-id']);
-  await vi.advanceTimersByTimeAsync(1);
+  await advanceAudio(1);
   chatEvent({ id: requestId, type: 'delta', text: '保留的部分' });
   const id = useInterview.getState().answers.at(-1)!.id;
   useInterview.getState().stopAnswer();
@@ -323,13 +410,13 @@ it('间断前的半句不自动回答，恢复后的新问题仍能提交，面�
     type: 'segment',
     segment: { ...segment('half', '中断前的半句', true).segment, reason: 'discontinuity' },
   });
-  await vi.advanceTimersByTimeAsync(4000);
+  await advanceAudio(4000);
   expect(useInterview.getState().answers).toHaveLength(0);
   expect(useInterview.getState().draftQuestion).toBe('');
   expect(useInterview.getState().speechWarnings.system).toContain('转写已继续');
   emit(segment('recovered', '恢复后的完整问题', true));
   expect(useInterview.getState().speechWarnings.system).toBeUndefined();
-  await vi.advanceTimersByTimeAsync(12000);
+  await advanceAudio(12000);
   expect(useInterview.getState().answers.at(-1)?.question).toBe('恢复后的完整问题');
 });
 it('各音源恢复只清除自身间断提示，静音活动也能恢复，语音错误不覆盖回答错误', async () => {
@@ -372,7 +459,7 @@ it('临时结果原位替换，终稿冻结且去重，手动整理后消费一�
   emit(segment('s', '重复终稿', true));
   expect(useInterview.getState().transcripts[0].text).toBe('请介绍项目');
   const answer = useInterview.getState().submitTranscript('请介绍机器人项目');
-  await vi.advanceTimersByTimeAsync(12000);
+  await advanceAudio(12000);
   await answer;
   expect(useInterview.getState().answers[0].question).toBe('请介绍机器人项目');
   await useInterview.getState().submitTranscript();
@@ -381,13 +468,13 @@ it('临时结果原位替换，终稿冻结且去重，手动整理后消费一�
 it('短停顿后新文本阻止提前提交，暂停后不会自动触发AI', async () => {
   useInterview.getState().setAutoAnswer(true);
   emit(segment('one', '前半句', true));
-  await vi.advanceTimersByTimeAsync(999);
+  await advanceAudio(999);
   emit(segment('two', '后半句', false));
-  await vi.advanceTimersByTimeAsync(2000);
+  await advanceAudio(2000);
   expect(useInterview.getState().answers).toHaveLength(0);
   emit(segment('two', '后半句', true));
   useInterview.getState().pause();
-  await vi.advanceTimersByTimeAsync(4000);
+  await advanceAudio(4000);
   expect(useInterview.getState().answers).toHaveLength(0);
   expect(useInterview.getState().pendingQuestion).toBe('前半句 后半句');
 });
@@ -426,12 +513,12 @@ it('麦克风只记录面试者发言，不能成为问题或触发自动回答'
   useInterview.getState().setAutoAnswer(true);
   const microphone = segment('mic', '我的回答', true);
   emit({ ...microphone, segment: { ...microphone.segment, source: 'microphone' } });
-  await vi.advanceTimersByTimeAsync(4000);
+  await advanceAudio(4000);
   expect(useInterview.getState().transcripts[0].source).toBe('microphone');
   expect(useInterview.getState().pendingQuestion).toBe('');
   expect(useInterview.getState().answers).toHaveLength(0);
   emit(segment('system', '面试官的问题', true));
-  await vi.advanceTimersByTimeAsync(12000);
+  await advanceAudio(12000);
   expect(useInterview.getState().answers[0].question).toBe('面试官的问题');
 });
 it('面试回答使用确认的思考强度并传过前端服务适配', async () => {
@@ -462,7 +549,7 @@ it('临时面试官文字可立即提交，迟到终稿不会重复进入下一�
   expect(useInterview.getState().draftQuestion).toBe('未等静音的问题');
   expect(useInterview.getState().pendingQuestion).toBe('');
   const sending = useInterview.getState().submitTranscript();
-  await vi.advanceTimersByTimeAsync(12000);
+  await advanceAudio(12000);
   await sending;
   expect(useInterview.getState().answers[0].question).toBe('未等静音的问题');
   emit(segment('early', '迟到完整终稿', true));
@@ -475,7 +562,7 @@ it('面试中关闭自动回答取消已排队问题，仍保留草稿用于手�
   useInterview.getState().setAutoAnswer(true);
   emit(segment('toggle', '待提交的问题', true));
   useInterview.getState().setAutoAnswer(false);
-  await vi.advanceTimersByTimeAsync(4000);
+  await advanceAudio(4000);
   expect(useInterview.getState().answers).toHaveLength(0);
   expect(useInterview.getState().draftQuestion).toBe('待提交的问题');
 });
@@ -490,7 +577,7 @@ it('结束等待较慢句末识别时只保存尾段，不重新触发自动回�
   useInterview.getState().setAutoAnswer(true);
   const ending = useInterview.getState().end();
   emit(segment('tail', '句末识别迟到尾段', true));
-  await vi.advanceTimersByTimeAsync(5000);
+  await advanceAudio(5000);
   expect(useInterview.getState().answers).toHaveLength(0);
   expect(useInterview.getState().transcripts.at(-1)?.text).toBe('句末识别迟到尾段');
   finish();
@@ -512,7 +599,7 @@ it('切换模型期间保留到期问题，后台成功后用新设置提交；�
   useInterview.getState().setAutoAnswer(true);
   const changing = useInterview.getState().updateModel('next', 'low');
   emit(segment('model-change', '如何设计接口', true));
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(ask).not.toHaveBeenCalled();
   finish({ ok: true, modelId: 'next', effort: 'low' });
   expect(await changing).toBe(true);
@@ -563,11 +650,11 @@ it('回答过程中设置下一题模型和强度，不取消当前回答，到�
   onChat({ id: answer.mock.calls[0][0].id, type: 'delta', text: 'old stream continues' });
   expect(useInterview.getState().answers[0].content).toBe('old stream continues');
   emit(segment('next-question', '后续问题', true));
-  await vi.advanceTimersByTimeAsync(1000);
+  await advanceAudio(1000);
   expect(answer).toHaveBeenCalledTimes(1);
   finish({ ok: true, answerText: 'old answer', provider: 'chatgpt' });
   await current;
-  await vi.advanceTimersByTimeAsync(0);
+  await advanceAudio(0);
   expect(answer).toHaveBeenCalledTimes(2);
   expect(answer.mock.calls[1][0]).toMatchObject({
     question: '后续问题',

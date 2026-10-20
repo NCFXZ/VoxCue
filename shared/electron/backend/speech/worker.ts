@@ -1,8 +1,8 @@
 import { parentPort } from 'node:worker_threads';
-import { SpeechEngine } from './engine';
-import { QwenEngine } from './qwen';
+import { Recognizer } from './recognizer';
+import { RecognitionRouter } from './recognition';
 import type { AudioPreprocessor, ConsumeAudio } from './preprocessor';
-let engine: SpeechEngine | QwenEngine;
+let engine: RecognitionRouter;
 let preprocessor: AudioPreprocessor | undefined;
 let preprocessing = false;
 let feeding = Promise.resolve();
@@ -13,7 +13,7 @@ const fail = (error?: unknown) => {
   if (failed) return;
   failed = true;
   preprocessor?.close();
-  if (engine instanceof QwenEngine) void engine.close();
+  void engine?.close().catch(() => {});
   parentPort!.postMessage({
     error:
       error instanceof Error && qwen
@@ -28,28 +28,56 @@ const consume: ConsumeAudio = (source, samples, rate, timestamp) => {
   void feeding.catch(fail);
 };
 parentPort!.on('message', (m) => {
+  // Loading a candidate must never occupy the serial capture/AEC queue.
+  if (m.op === 'stage-recognizer') {
+    if (failed || !engine) {
+      parentPort!.postMessage({ switchError: m.id, message: '语音服务尚未就绪。' });
+      return;
+    }
+    void engine
+      .stage(m.options, (phase) => parentPort!.postMessage({ switchPhase: m.id, phase }))
+      .then((metadata) => {
+        qwen = m.options.speechModel === 'qwen';
+        parentPort!.postMessage({ switched: m.id, ...metadata });
+      })
+      .catch((error) =>
+        parentPort!.postMessage({
+          switchError: m.id,
+          message: error instanceof Error ? error.message : '语音切换失败，仍使用原配置。',
+        }),
+      );
+    return;
+  }
+  if (m.op === 'cancel-switch') {
+    engine?.cancel();
+    return;
+  }
   messages = messages
     .then(async () => {
       if (m.op === 'close') {
         preprocessor?.close();
         await feeding.catch(() => {});
-        if (engine instanceof QwenEngine) await engine.close();
+        await engine?.close();
         parentPort!.postMessage({ closed: m.id });
         return;
       }
       if (failed) return;
       if (m.op === 'init') {
         const start = performance.now();
-        let metadata = {};
-        if (m.speechModel === 'qwen') {
-          qwen = true;
-          const loaded = await QwenEngine.load(m.directory, m.inferenceDevice, (event) =>
-            parentPort!.postMessage({ event }),
-          );
-          engine = loaded.engine;
-          metadata = { chunkMs: loaded.chunkMs, alignmentDevice: loaded.alignmentDevice };
-        } else
-          engine = new SpeechEngine(m.directory, (event) => parentPort!.postMessage({ event }));
+        qwen = m.speechModel === 'qwen';
+        engine = new RecognitionRouter(
+          (options, emit, signal) => Recognizer.load(options, emit, signal),
+          (event) => parentPort!.postMessage({ event }),
+        );
+        await engine.initialize(
+          {
+            directory: m.directory,
+            speechModel: m.speechModel,
+            inferenceDevice: m.inferenceDevice,
+            runtimeFile: m.runtimeFile,
+          },
+          m.sources ?? [],
+        );
         if (m.preprocessorFile) {
           preprocessing = true;
           const factory: {
@@ -60,9 +88,14 @@ parentPort!.on('message', (m) => {
           } = require(m.preprocessorFile);
           preprocessor = await factory.createAudioPreprocessor(consume, fail);
         }
-        parentPort!.postMessage({ ready: true, loadMs: performance.now() - start, ...metadata });
+        parentPort!.postMessage({
+          ready: true,
+          loadMs: performance.now() - start,
+          ...engine.metadata,
+        });
       } else if (m.op === 'prepare') {
         preprocessor?.start(m.sources);
+        engine.prepare(m.sources);
         parentPort!.postMessage({ prepared: m.id });
       } else if (m.op === 'audio') {
         if (preprocessor)
@@ -75,6 +108,10 @@ parentPort!.on('message', (m) => {
           ms: m.ms,
           audioMs: engine.audioMs,
           inferenceMs: engine.inferenceMs,
+          progress: {
+            microphone: engine.processedThrough('microphone'),
+            system: engine.processedThrough('system'),
+          },
         });
       } else if (m.op === 'gap') {
         const sources = preprocessor?.discontinuity(m.source) ?? [m.source];
@@ -90,5 +127,5 @@ parentPort!.on('message', (m) => {
     .catch(fail);
 });
 parentPort!.on('close', () => {
-  if (engine instanceof QwenEngine) void engine.close();
+  void engine?.close().catch(() => {});
 });

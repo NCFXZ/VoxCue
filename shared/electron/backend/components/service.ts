@@ -2,7 +2,11 @@ import path from 'node:path';
 import { constants } from 'node:fs';
 import { mkdir, lstat, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { createHash, randomUUID } from 'node:crypto';
-import type { ComponentId, ComponentState } from '../../contracts/components';
+import {
+  hasReadySpeechModel,
+  type ComponentId,
+  type ComponentState,
+} from '../../contracts/components';
 import type { ComponentPackage, ComponentArchive } from './catalog';
 import { unpackComponentFile } from './archive';
 
@@ -62,7 +66,12 @@ export class ComponentService {
     return this.options.managed || !!this.options.managedIds?.includes(id);
   }
   private requiredReady() {
-    return this.value.items.every((item) => item.optional || item.phase === 'ready');
+    return this.value.items.every(
+      (item) =>
+        item.optional ||
+        item.phase === 'ready' ||
+        (item.id === 'speech' && hasReadySpeechModel(this.value)),
+    );
   }
   ready(id: ComponentId) {
     return this.value.items.some((item) => item.id === id && item.phase === 'ready');

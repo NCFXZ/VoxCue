@@ -35,8 +35,22 @@ try {
     globalThis.usageRequests = [];
     globalThis.usageAnswer = '合成项目使用 PostgreSQL，延迟为37毫秒。\n'.repeat(15);
     SpeechHost.prototype.call = async function (call) {
-      globalThis.usageTranscript = (id, text, source = 'system') => {
+      clearInterval(globalThis.usageProgressTimer);
+      if (call.op === 'start')
+        globalThis.usageProgressTimer = setInterval(
+          () =>
+            this.emit({
+              type: 'audio-progress',
+              source: 'system',
+              pending: Boolean(globalThis.usagePending),
+              processedThroughMs: Date.now(),
+            }),
+          50,
+        );
+      globalThis.usageSpeechStart = () => this.emit({ type: 'speech-start', source: 'system' });
+      globalThis.usageTranscript = (id, text, source = 'system', elapsedSilence = 800) => {
         const at = Date.now();
+        this.emit({ type: 'audio-progress', source, pending: true, processedThroughMs: at });
         this.emit({
           type: 'segment',
           segment: {
@@ -44,10 +58,17 @@ try {
             text,
             source,
             final: true,
-            startMs: at,
-            endMs: at + 10,
+            startMs: at - elapsedSilence - 1000,
+            endMs: at - elapsedSilence + 800,
+            silenceStartMs: at - elapsedSilence,
             reason: 'silence',
           },
+        });
+        this.emit({
+          type: 'audio-progress',
+          source,
+          pending: Boolean(globalThis.usagePending),
+          processedThroughMs: at,
         });
         return at;
       };
@@ -105,6 +126,34 @@ try {
     assert.ok(request.receivedAt - sentAt >= 1000 && request.receivedAt - sentAt < 5000);
     assert.equal(await question.inputValue(), '');
   }
+  // Delayed final decoding consumes the same 1800ms audio silence budget.
+  let lateAt = await app.evaluate(() =>
+    globalThis.usageTranscript('late-1200', '终稿延迟测试一', 'system', 1200),
+  );
+  await completed(++count);
+  let delay = (await requests()).at(-1).receivedAt - lateAt;
+  assert.ok(delay >= 600 && delay < 1400, '1200ms elapsed silence leaves about 600ms');
+  lateAt = await app.evaluate(() =>
+    globalThis.usageTranscript('late-2100', '终稿延迟测试二', 'system', 2100),
+  );
+  await completed(++count);
+  delay = (await requests()).at(-1).receivedAt - lateAt;
+  assert.ok(delay < 900, 'expired silence budget adds no 1000ms wait');
+  await app.evaluate(() => {
+    globalThis.usagePending = true;
+  });
+  await app.evaluate(() => globalThis.usageTranscript('backlogged', '积压前半句', 'system', 2100));
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+  assert.equal((await requests()).length, count, 'unchecked system audio blocks submission');
+  await app.evaluate(() => {
+    globalThis.usageSpeechStart();
+    globalThis.usagePending = false;
+  });
+  await new Promise((resolve) => setTimeout(resolve, 1100));
+  assert.equal((await requests()).length, count, 'resumed speech cancels old deadline');
+  await transcript('backlog-continued', '接着补充完整问题');
+  await completed(++count);
+  assert.equal((await requests()).at(-1).turns.at(-1).content, '积压前半句 接着补充完整问题');
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
   await transcript('manual-ack', '谢谢您');
   await floating.waitForFunction(
@@ -215,7 +264,7 @@ try {
   ]);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: offline desktop IPC, normal automatic acknowledgement submission and manual send, original auto-submit interval, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
+    'PASS: offline desktop IPC, normal automatic acknowledgement submission and manual send, 1800ms audio silence deadline including delayed finals, backlog/resumption guards, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
   );
 } finally {
   await closeUiApp(app);

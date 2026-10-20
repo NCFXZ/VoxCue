@@ -60,9 +60,11 @@ const screenAccessLabels = {
 };
 export function PreparationPage({
   onComponentSettings,
+  onSpeechSettings,
   onDraftChange,
 }: {
   onComponentSettings?(): void;
+  onSpeechSettings?(): void;
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
@@ -572,7 +574,11 @@ export function PreparationPage({
               <span>松开以添加文件到当前对话 · 最多 20 个，每个 20 MB</span>
             </div>
           )}
-          <ComponentsNotice onSettings={onComponentSettings} />
+          <ComponentsNotice
+            onSettings={onComponentSettings}
+            onPerformanceSettings={onSpeechSettings}
+            speechOptions={interviewSettings.configuration.options}
+          />
           {state.messages.length ? (
             <div
               className="chat-scroll"

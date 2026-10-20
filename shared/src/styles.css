@@ -5742,11 +5742,23 @@ svg[data-ui-icon] {
     0 4px 12px rgb(0 0 0 / 0.24);
 }
 .interview-settings-dialog .dialog-scroll {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  column-gap: 20px;
+  display: block;
 }
-.interview-settings-dialog :is(.dialog-heading, .interview-display-settings, .danger-text) {
+.interview-settings-dialog :is(.audio-device-editor, .speech-model-group) {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px 20px;
+}
+.interview-settings-dialog .speech-setting-row {
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr);
+  align-content: start;
+  gap: 8px;
+}
+.interview-settings-dialog .speech-setting-label {
+  white-space: nowrap;
+  overflow-wrap: normal;
+}
+.interview-settings-dialog .speech-model-group > :is(h4, .speech-model-notices) {
   grid-column: 1 / -1;
 }
 .interview-start-dialog .modal-footer .interview-start-description {
@@ -5754,8 +5766,8 @@ svg[data-ui-icon] {
   font-size: 12px;
   line-height: 1.6;
 }
-@media (max-width: 600px) {
-  .interview-settings-dialog .dialog-scroll {
-    grid-template-columns: 1fr;
+@media (max-width: 560px) {
+  .interview-settings-dialog :is(.audio-device-editor, .speech-model-group) {
+    grid-template-columns: minmax(0, 1fr);
   }
 }

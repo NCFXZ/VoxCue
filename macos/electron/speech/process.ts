@@ -3,8 +3,19 @@ const port = process.parentPort!;
 let controller: SpeechController;
 port.on('message', async ({ data: m }) => {
   try {
+    if (m.close) {
+      await controller?.close();
+      port.postMessage({ id: m.id });
+      return;
+    }
     if (m.init)
-      controller = new SpeechController(m.model, m.helper, (event) => port.postMessage({ event }));
+      controller = new SpeechController(
+        m.model,
+        m.helper,
+        (event) => port.postMessage({ event }),
+        m.qwenDirectory,
+        m.qwenRuntime,
+      );
     const value = m.init ? undefined : await controller.call(m.call);
     port.postMessage({ id: m.id, value });
   } catch (error) {

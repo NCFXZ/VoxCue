@@ -49,6 +49,13 @@ export function desktopResources(environment: ResourceEnvironment, platform: Des
     ),
     speechModels: path.join(modelRoot, 'speech'),
     qwenModels: undefined as string | undefined,
+    qwenRuntime: platform.qwenRuntimeFile
+      ? path.join(
+          packaged ? resourcesPath : appPath,
+          packaged ? 'native' : 'native/bin',
+          platform.qwenRuntimeFile,
+        )
+      : undefined,
     ragModel: path.join(modelRoot, 'rag/multilingual-e5-small'),
     screenPermission: platform.screenPermissionFile
       ? path.join(

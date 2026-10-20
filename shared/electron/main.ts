@@ -390,7 +390,7 @@ if (managedComponents) {
   );
 }
 // Optional Qwen is managed even in development installs with bundled legacy models.
-if (process.platform === 'win32')
+if (packagesFor(process.platform, process.arch).some((pkg) => pkg.id === 'qwen'))
   resources.qwenModels = componentPaths(
     componentRoot,
     packagesFor(process.platform, process.arch),
@@ -488,15 +488,19 @@ function createMainWindow() {
   });
 }
 app.whenReady().then(() => {
-  const speechHardware = new SpeechHardwareProbe(resources.audioHelper, desktopPlatform.id);
+  const speechHardware = new SpeechHardwareProbe(
+    resources.audioHelper,
+    desktopPlatform.id,
+    resources.qwenRuntime,
+  );
   components = new ComponentService({
     root: componentRoot,
     packages: packagesFor(process.platform, process.arch),
     managed: managedComponents,
-    managedIds: process.platform === 'win32' ? ['qwen'] : [],
+    managedIds: ['qwen'],
     fetch: (url, options) => session.fromPartition('voxcue-components').fetch(String(url), options),
     emit(state) {
-      for (const win of [mainWindow, loginWindow])
+      for (const win of [mainWindow, loginWindow, interviewWindow])
         if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'components:event', state);
     },
     async prepareRemove(id) {
@@ -519,6 +523,11 @@ app.whenReady().then(() => {
     },
     (event) => {
       if (event.sender !== mainWindow?.webContents) throw Error('Unauthorized window');
+    },
+    (event) => {
+      if (event.sender === interviewWindow?.webContents) requireInterview(event);
+      else if (![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender))
+        throw Error('Unauthorized window');
     },
   );
   void components.status();
@@ -911,6 +920,7 @@ app.whenReady().then(() => {
     },
     resources.speechProcess,
     resources.qwenModels,
+    resources.qwenRuntime,
   );
   speechSessions = new SpeechCoordinator(speech);
   handleDesktop('speech:hardware', (event) => {
@@ -934,8 +944,13 @@ app.whenReady().then(() => {
   handleDesktop('dictation:call', (event, value: unknown) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
-    if (['start', 'test'].includes((value as { op: string })?.op)) components.require('speech');
-    return speechSessions!.dictation(value);
+    const fallback =
+      !components.ready('speech') && components.ready('qwen')
+        ? { speechModel: 'qwen' as const, inferenceDevice: 'cpu' as const }
+        : undefined;
+    if (['start', 'test'].includes((value as { op: string })?.op))
+      components.require(fallback ? 'qwen' : 'speech');
+    return speechSessions!.dictation(value, fallback);
   });
   handleDesktop('interview:reconnect-audio', async (event, options) => {
     requireInterview(event);
@@ -944,7 +959,7 @@ app.whenReady().then(() => {
       options: options ?? speechSessions?.configuration?.options,
     });
     if (validated.op !== 'start') throw Error('Invalid speech options');
-    if (validated.options.speechModel === 'qwen' && process.platform !== 'win32')
+    if (validated.options.speechModel === 'qwen' && !resources.qwenModels)
       throw Error('当前平台尚未接入 Qwen 原生推理。');
     await speechHardware.require(validated.options);
     components.require(speechComponent(validated.options));
@@ -982,7 +997,7 @@ app.whenReady().then(() => {
     try {
       if (!demoSession && !(await auth.session())) throw new Error('Please sign in first');
       const configuration = validateInterviewConfiguration(value);
-      if (configuration.options.speechModel === 'qwen' && process.platform !== 'win32')
+      if (configuration.options.speechModel === 'qwen' && !resources.qwenModels)
         throw Error('当前平台尚未接入 Qwen 原生推理。');
       await speechHardware.require(configuration.options);
       components.require(speechComponent(configuration.options));

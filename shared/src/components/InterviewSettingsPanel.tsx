@@ -20,6 +20,10 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
   const [modelLoading, setModelLoading] = useState(true);
   const [error, setError] = useState('');
   const busy = state.reconnecting || state.updatingModel;
+  const audioBusy = busy || state.switchingSpeech;
+  useEffect(() => {
+    if (!state.switchingSpeech && !state.reconnecting) setOptions(structuredClone(state.options));
+  }, [state.options, state.switchingSpeech, state.reconnecting]);
   useEffect(() => {
     let disposed = false;
     void window
@@ -44,7 +48,8 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
     setOptions(next);
     if (!(await state.reconnectAudio(next))) {
       setOptions(structuredClone(useInterview.getState().options));
-      setError(useInterview.getState().speechError ?? '音频连接失败，请重试。');
+      const current = useInterview.getState();
+      setError(current.speechSwitchError ?? current.speechError ?? '音频连接失败，请重试。');
     }
   };
   const changeModel = async (id: string, nextEffort: ReasoningEffort | 'auto') => {
@@ -77,7 +82,7 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
               {source === 'system' ? '系统声音 · 播放设备' : '麦克风'}
               <ChoiceMenu
                 label={source === 'system' ? '选择播放设备' : '选择麦克风'}
-                disabled={loading || busy || state.speech.state === 'loading'}
+                disabled={loading || audioBusy || state.speech.state === 'loading'}
                 value={
                   source === 'microphone' && !options.sources.includes(source)
                     ? '__off__'
@@ -115,7 +120,8 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         <h3>模型设置</h3>
         <SpeechModelSettings
           options={options}
-          disabled={busy || state.speech.state === 'loading'}
+          disabled={audioBusy || state.speech.state === 'loading'}
+          switching={state.switchingSpeech ? (state.speech.switching ?? 'loading') : undefined}
           onChange={(next) => void changeAudio(next)}
         >
           <div className="speech-setting-row">
@@ -154,9 +160,9 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         <h3>显示设置</h3>
         <InterviewDisplayControls />
       </section>
-      {(error || devicesError) && (
+      {(error || state.speechSwitchError || devicesError) && (
         <p className="danger-text" role="alert">
-          {error || devicesError}
+          {error || state.speechSwitchError || devicesError}
         </p>
       )}
     </Modal>

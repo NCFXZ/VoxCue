@@ -5,11 +5,13 @@ import {
   validateInterviewModel,
 } from '../../../shared/electron/application/speech';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
-import type { SpeechCall } from '../../../shared/electron/contracts/speech';
+import type { SpeechServiceCall } from '../../../shared/electron/contracts/speech';
 function setup() {
   const port = {
-    call: vi.fn(async (call: SpeechCall) => ({
-      state: call.op === 'start' ? ('running' as const) : ('idle' as const),
+    call: vi.fn(async (call: SpeechServiceCall) => ({
+      state: ['start', 'switch-recognizer'].includes(call.op)
+        ? ('running' as const)
+        : ('idle' as const),
       model: 'test',
     })),
     stop: vi.fn(),
@@ -25,6 +27,89 @@ it('开场电平自检不会继承面试的 Qwen/CUDA 推理选择', async () =>
   });
   expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options: { sources: ['system'] } });
   coordinator.releaseDictation();
+});
+it.each(['start', 'test'] as const)(
+  '仅安装Qwen时%s通过可信CPU回退保留语音输入与自检',
+  async (op) => {
+    const { coordinator, port } = setup();
+    const fallback = { speechModel: 'qwen' as const, inferenceDevice: 'cpu' as const };
+    await coordinator.dictation(
+      op === 'start'
+        ? { op }
+        : {
+            op,
+            id: 'only-qwen',
+            options: { sources: ['microphone'], speechModel: 'qwen', inferenceDevice: 'metal' },
+          },
+      fallback,
+    );
+    expect(port.call).toHaveBeenLastCalledWith({
+      op: 'start',
+      options: { sources: ['microphone'], ...fallback },
+    });
+    coordinator.releaseDictation();
+  },
+);
+
+it.each(['qwen', 'device'] as const)(
+  '面试中切换 %s 保持采集，成功才提交设置；回答设置仍能独立更新',
+  async (kind) => {
+    const { coordinator, port } = setup();
+    const configuration = {
+      ...defaultInterviewConfiguration(),
+      aiEnabled: true,
+      modelId: 'old',
+      options: {
+        sources: ['system' as const],
+        speechModel: kind === 'qwen' ? ('paraformer' as const) : ('qwen' as const),
+        inferenceDevice: 'cpu' as const,
+      },
+    };
+    await coordinator.confirm(configuration);
+    await coordinator.interview({ op: 'start', options: configuration.options });
+    const options = {
+      ...configuration.options,
+      speechModel: 'qwen' as const,
+      inferenceDevice: 'metal' as const,
+    };
+    let finish!: (value: any) => void;
+    port.call.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    port.stop.mockClear();
+    const pending = coordinator.reconnect(options);
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    expect(port.call).toHaveBeenLastCalledWith({ op: 'switch-recognizer', options });
+    expect(port.stop).not.toHaveBeenCalled();
+    expect(coordinator.configuration!.options).toEqual(configuration.options);
+    coordinator.updateModel({ modelId: 'next', effort: 'auto' }, [
+      { id: 'next', label: 'Next', description: '' },
+    ]);
+    finish({ state: 'running', model: 'new recognizer' });
+    await pending;
+    expect(coordinator.configuration).toMatchObject({ modelId: 'next', options });
+    coordinator.releaseInterview(true);
+  },
+);
+it('后台语音切换不阻塞暂停和结束，迟到成功不能写入确认配置', async () => {
+  for (const end of [false, true]) {
+    const { coordinator, port } = setup();
+    const configuration = defaultInterviewConfiguration();
+    await coordinator.confirm(configuration);
+    await coordinator.interview({ op: 'start', options: configuration.options });
+    let finish!: (value: any) => void;
+    port.call.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const pending = coordinator.reconnect({
+      ...configuration.options,
+      speechModel: 'qwen',
+      inferenceDevice: 'metal',
+    });
+    await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+    if (end) coordinator.releaseInterview(true);
+    else await coordinator.interview({ op: 'pause' });
+    finish({ state: 'running', model: 'late recognizer' });
+    expect(await pending).toMatchObject({ state: 'idle' });
+    expect(coordinator.configuration?.options.speechModel).toBeUndefined();
+    coordinator.releaseInterview(true);
+  }
 });
 it('双音源自检限时10秒，过期停止令牌不影响新的采集', async () => {
   vi.useFakeTimers();

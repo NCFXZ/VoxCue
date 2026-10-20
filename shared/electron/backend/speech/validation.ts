@@ -26,7 +26,7 @@ export function validateSpeech(value: unknown): SpeechCall {
     throw Error('Invalid speech model');
   if (
     v.options.inferenceDevice !== undefined &&
-    !['cpu', 'cuda'].includes(v.options.inferenceDevice)
+    !['cpu', 'cuda', 'metal'].includes(v.options.inferenceDevice)
   )
     throw Error('Invalid speech inference device');
   if (

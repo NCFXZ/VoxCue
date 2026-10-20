@@ -33,6 +33,14 @@ export function speechComponent(options: SpeechOptions) {
   return speechSelection(options).speechModel === 'qwen' ? ('qwen' as const) : ('speech' as const);
 }
 
-export function automaticAnswerDelay(_options: SpeechOptions) {
-  return 1000;
+export const speechSegmentationSilenceMs = 800;
+export const automaticAnswerSilenceMs = 1800;
+
+export function sameAudioCapture(a: SpeechOptions, b: SpeechOptions) {
+  return (
+    a.sources.length === b.sources.length &&
+    a.sources.every((source) => b.sources.includes(source)) &&
+    (a.microphone ?? '') === (b.microphone ?? '') &&
+    (a.system ?? '') === (b.system ?? '')
+  );
 }

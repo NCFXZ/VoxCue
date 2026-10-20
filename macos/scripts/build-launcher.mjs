@@ -1,5 +1,5 @@
 import workspace from '../../shared/scripts/workspace.mjs';
-import { mkdir, writeFile, readFile, copyFile, mkdtemp, lstat, rename, rm } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, copyFile, mkdtemp, lstat, rm, rmdir } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
@@ -13,6 +13,7 @@ await prepareRuntime();
 const signing = await loadDevelopmentSigning();
 // Build a fresh bundle so Finder metadata on the existing launcher cannot invalidate signing.
 const stage = await mkdtemp(path.join(os.tmpdir(), 'voxcue-launcher-build-'));
+let preserveBackup = false;
 try {
   const bundle = path.join(stage, 'VoxCue.app');
   const contents = path.join(bundle, 'Contents');
@@ -61,7 +62,13 @@ try {
   signLocalCode(bundle, signing, 'com.voxcue.launcher');
   verifyLocalApp(bundle, signing, 'com.voxcue.launcher');
   const target = path.resolve('VoxCue.app');
-  const previous = path.join(stage, 'previous.app');
+  const previous = path.join(stage, 'previous');
+  const files = [
+    'Contents/Info.plist',
+    'Contents/MacOS/VoxCue',
+    'Contents/Resources/voxcue.icns',
+    'Contents/_CodeSignature/CodeResources',
+  ];
   const existing = await lstat(target).catch((error) => {
     if (error.code !== 'ENOENT') throw error;
   });
@@ -74,12 +81,28 @@ try {
     const occupied = spawnSync('/usr/sbin/lsof', ['-t', '+D', target], { encoding: 'utf8' });
     if (occupied.error || occupied.stdout.trim())
       throw Error('Close the development launcher before rebuilding it');
-    await rename(target, previous);
+    for (const file of files) {
+      let current = target;
+      for (const part of file.split('/')) {
+        current = path.join(current, part);
+        if ((await lstat(current)).isSymbolicLink())
+          throw Error('Launcher contains a redirected managed path');
+      }
+      if (!(await lstat(path.join(target, file))).isFile())
+        throw Error('Invalid managed launcher file');
+      await mkdir(path.dirname(path.join(previous, file)), { recursive: true });
+      await copyFile(path.join(target, file), path.join(previous, file));
+    }
   }
-  let installed = false;
   try {
-    await rename(bundle, target);
-    installed = true;
+    // Keep the bundle/directory identities so File Provider cannot resurrect the
+    // old directory as a numbered app while a same-named directory replaces it.
+    for (const file of files) {
+      await mkdir(path.dirname(path.join(target, file)), { recursive: true });
+      await writeFile(path.join(target, file), await readFile(path.join(bundle, file)), {
+        mode: (await lstat(path.join(bundle, file))).mode & 0o777,
+      });
+    }
     // File Provider can reattach Finder metadata when the app enters the workspace.
     // This is our generated launcher only; quarantine/provenance are never removed.
     // The provider can attach it between a presence check and verification.
@@ -97,11 +120,31 @@ try {
       await new Promise((resolve) => setTimeout(resolve, 150));
     }
   } catch (error) {
-    if (installed) await rename(target, bundle);
-    if (existing) await rename(previous, target);
+    try {
+      if (existing) {
+        for (const file of files)
+          await writeFile(path.join(target, file), await readFile(path.join(previous, file)));
+      } else {
+        for (const file of files) await rm(path.join(target, file), { force: true });
+        for (const directory of [
+          'Contents/_CodeSignature',
+          'Contents/Resources',
+          'Contents/MacOS',
+          'Contents',
+          '',
+        ])
+          await rmdir(path.join(target, directory));
+      }
+    } catch (rollback) {
+      preserveBackup = true;
+      throw new AggregateError(
+        [error, rollback],
+        'Launcher rollback failed; backup retained at ' + stage,
+      );
+    }
     throw error;
   }
   console.log('Created macos/VoxCue.app. Double-click it to open the existing local build.');
 } finally {
-  await rm(stage, { recursive: true, force: true });
+  if (!preserveBackup) await rm(stage, { recursive: true, force: true });
 }

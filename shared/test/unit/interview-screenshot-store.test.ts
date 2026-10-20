@@ -9,16 +9,14 @@ beforeEach(() => {
   vi.useFakeTimers();
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
   captureCount = 0;
-  screenshot
-    .mockReset()
-    .mockImplementation(async (call) =>
-      call.op === 'capture'
-        ? {
-            ok: true,
-            screenshot: { id: 'shot-' + ++captureCount, preview: 'data:image/jpeg;base64,fixture' },
-          }
-        : { ok: true },
-    );
+  screenshot.mockReset().mockImplementation(async (call) =>
+    call.op === 'capture'
+      ? {
+          ok: true,
+          screenshot: { id: 'shot-' + ++captureCount, preview: 'data:image/jpeg;base64,fixture' },
+        }
+      : { ok: true },
+  );
   answer.mockReset().mockResolvedValue({ ok: true, answerText: '回答', usage: null, sources: [] });
   vi.stubGlobal('window', {
     desktop: {
@@ -83,11 +81,19 @@ it('自动问题只发文字，不带走待发送截图，也不再次捕获', a
       text: '自动问题',
       final: true,
       startMs: 1,
-      endMs: 2,
+      endMs: Date.now(),
+      silenceStartMs: Date.now() - 800,
       reason: 'silence',
     },
   });
-  await vi.advanceTimersByTimeAsync(2300);
+  await vi.advanceTimersByTimeAsync(1000);
+  emit({
+    type: 'audio-progress',
+    source: 'system',
+    pending: false,
+    processedThroughMs: Date.now(),
+  });
+  await vi.advanceTimersByTimeAsync(0);
   expect(answer.mock.calls[0][0]).toMatchObject({ question: '自动问题' });
   expect(answer.mock.calls[0][0]).not.toHaveProperty('screenshotIds');
   expect(useInterview.getState().screenshots).toHaveLength(1);

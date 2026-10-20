@@ -1,13 +1,14 @@
 import type {
   DictationCall,
   InterviewConfiguration,
-  SpeechCall,
+  SpeechServiceCall,
   SpeechStatus,
   SpeechOptions,
 } from '../contracts/speech';
 import { validateSpeech } from '../backend/speech/validation';
 import { reasoningEfforts, type ChatModel } from '../contracts/chat';
 import { validProfile } from '../contracts/profile';
+import { sameAudioCapture, speechSelection } from '../contracts/speechSettings';
 
 export function validateInterviewConfiguration(value: unknown): InterviewConfiguration {
   if (!value || typeof value !== 'object') throw Error('无效的面试设置。');
@@ -71,7 +72,7 @@ export function validateInterviewModel(configuration: InterviewConfiguration, mo
 }
 
 interface SpeechPort {
-  call(call: SpeechCall): Promise<SpeechStatus>;
+  call(call: SpeechServiceCall): Promise<SpeechStatus>;
   stop(): void;
 }
 const idle = (): SpeechStatus => ({
@@ -87,6 +88,8 @@ export class SpeechCoordinator {
   private dictationAttempt = 0;
   private dictationIntent = 0;
   private pending = 0;
+  private running = false;
+  private reconnectAttempt = 0;
   private testId?: string;
   private testTimer?: ReturnType<typeof setTimeout>;
   target: 'dictation' | 'audio-test' | 'interview' | undefined;
@@ -136,29 +139,57 @@ export class SpeechCoordinator {
     const call = value === undefined ? undefined : validateSpeech({ op: 'start', options: value });
     if (call?.op === 'start' && !call.options.sources.includes('system'))
       throw Error('面试需保留系统音频。');
+    const attempt = ++this.reconnectAttempt;
     return this.serialize(async () => {
       if (!this.confirmed || this.confirmed.mode !== 'local') throw Error('请先开始本地语音面试。');
       const configuration = this.confirmed;
       const options = call?.op === 'start' ? structuredClone(call.options) : this.confirmed.options;
+      if (
+        value &&
+        this.running &&
+        sameAudioCapture(configuration.options, options) &&
+        JSON.stringify(speechSelection(configuration.options)) !==
+          JSON.stringify(speechSelection(options))
+      ) {
+        // Return the promise in a container so pause/end never queue behind model loading.
+        return {
+          change: this.port.call({ op: 'switch-recognizer', options }),
+          configuration,
+          options,
+        };
+      }
       try {
         await this.port.call({ op: 'stop' });
       } catch {
         /* Retire a failed native host before reconnecting. */
       }
       this.port.stop();
-      if (this.confirmed !== configuration) return idle();
+      if (this.confirmed !== configuration || attempt !== this.reconnectAttempt)
+        return { status: idle() };
       this.target = 'interview';
       const status = await this.port.call({ op: 'start', options });
-      if (this.confirmed !== configuration) {
+      if (this.confirmed !== configuration || attempt !== this.reconnectAttempt) {
         this.port.stop();
-        return idle();
+        return { status: idle() };
       }
       if (status.state === 'running') configuration.options = options;
+      this.running = status.state === 'running';
+      return { status };
+    }).then(async (result) => {
+      if ('status' in result) return result.status!;
+      const status = await result.change;
+      if (this.confirmed !== result.configuration || attempt !== this.reconnectAttempt)
+        return idle();
+      if (status.state === 'running') result.configuration.options = result.options;
       return status;
     });
   }
   interview(value: unknown) {
     const call = validateSpeech(value);
+    if (call.op === 'pause' || call.op === 'stop') {
+      ++this.reconnectAttempt;
+      this.running = false;
+    }
     return this.serialize(async () => {
       const configuration = this.confirmed;
       if (!configuration) throw Error('请先确认开始面试。');
@@ -174,13 +205,15 @@ export class SpeechCoordinator {
           (call.options.inferenceDevice ?? 'cuda') !== (options.inferenceDevice ?? 'cuda')
         )
           throw Error('本场面试设置已锁定，请结束面试后重新设置。');
-        return this.port.call({ op: 'start', options: structuredClone(options) });
+        const status = await this.port.call({ op: 'start', options: structuredClone(options) });
+        this.running = status.state === 'running';
+        return status;
       }
       if (configuration.mode === 'mock') return idle();
       return this.port.call(call);
     });
   }
-  dictation(value: unknown) {
+  dictation(value: unknown, fallback?: Pick<SpeechOptions, 'speechModel' | 'inferenceDevice'>) {
     const call = value as DictationCall;
     if (!call || !['start', 'stop', 'status', 'test', 'test-stop'].includes(call.op))
       throw Error('无效的语音输入操作。');
@@ -203,11 +236,12 @@ export class SpeechCoordinator {
                 },
         })
       : undefined;
-    // The preflight test returns only audio levels; keep it independent of the
-    // interview's potentially expensive Qwen selection.
-    if (call.op === 'test' && options?.op === 'start') {
+    // Prefer the lightweight Paraformer for dictation and preflight. The trusted
+    // main process supplies a Qwen fallback only when it is the installed model.
+    if (options?.op === 'start') {
       delete options.options.speechModel;
       delete options.options.inferenceDevice;
+      Object.assign(options.options, fallback);
     }
     const intent = call.op === 'status' ? this.dictationIntent : ++this.dictationIntent;
     if (call.op !== 'status') {
@@ -285,6 +319,8 @@ export class SpeechCoordinator {
     this.testId = undefined;
   }
   releaseInterview(close = false) {
+    ++this.reconnectAttempt;
+    this.running = false;
     if (close) this.confirmed = undefined;
     this.target = this.confirmed ? 'interview' : undefined;
     this.port.stop();

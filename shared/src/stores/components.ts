@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { useInterviewSettings } from './interviewSettings';
 import type {
   ComponentId,
   ComponentState,
@@ -13,7 +14,10 @@ interface ComponentsStore {
 }
 export const useComponents = create<ComponentsStore>((set, get) => {
   const receive = (state: ComponentState) => {
-    if (!get().state || state.revision >= get().state!.revision) set({ state, error: null });
+    if (!get().state || state.revision >= get().state!.revision) {
+      set({ state, error: null });
+      useInterviewSettings.getState().reconcileSpeechModel(state);
+    }
   };
   return {
     state: null,

@@ -3,6 +3,7 @@ import type { DesktopPlatform } from '../../shared/electron/platform/types';
 // Apple Silicon native and packaged resource strategy.
 export const macos: DesktopPlatform = {
   id: 'darwin',
+  qwenRuntimeFile: 'qwen/voxcue-qwen',
   updateDriverFile: 'macos/electron/updates/driver.js',
   iconFile: 'public/voxcue.png',
   mainWindowOptions: { vibrancy: 'sidebar', visualEffectState: 'followWindow' },

@@ -1,4 +1,4 @@
-//! Safetensors weight loading — single-file and sharded index.
+//! Weight loading — dense safetensors (single/sharded) or fixed GGUF Q8_0.
 //!
 //! Weights are mmap'd and shared across all tensors via `bytes::Bytes` O(1)
 //! refcount+range slices, avoiding the previous `std::fs::read` (full file
@@ -16,6 +16,13 @@ use memmap2::Mmap;
 use crate::raw_tensor::RawTensor;
 
 pub(crate) fn load_weights(model_dir: &Path) -> anyhow::Result<HashMap<String, RawTensor>> {
+    let gguf_path = model_dir.join("model.gguf");
+    if gguf_path.exists() {
+        anyhow::ensure!(!model_dir.join("model.safetensors").exists()
+            && !model_dir.join("model.safetensors.index.json").exists(),
+            "ambiguous aligner weights: GGUF and safetensors both present");
+        return crate::gguf::load(&gguf_path);
+    }
     let index_path = model_dir.join("model.safetensors.index.json");
     if index_path.exists() {
         let idx: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&index_path)?)?;
@@ -69,6 +76,7 @@ fn load_safetensors_file(path: &Path) -> anyhow::Result<HashMap<String, RawTenso
                 data: buf.slice(offset..offset + len),
                 shape: view.shape().to_vec(),
                 dtype: view.dtype(),
+                q8_0: false,
             },
         );
     }

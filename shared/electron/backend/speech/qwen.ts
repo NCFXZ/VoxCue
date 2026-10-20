@@ -8,6 +8,7 @@ import type {
   SpeechSegment,
   SpeechInferenceDevice,
 } from '../../contracts/speech';
+import { speechSegmentationSilenceMs } from '../../contracts/speechSettings';
 const sherpa = require('sherpa-onnx-node');
 
 interface Source {
@@ -15,6 +16,8 @@ interface Source {
   origin: number;
   start: number;
   rate: number;
+  samples: number;
+  active: boolean;
   resampler?: {
     resample(samples: Float32Array): Float32Array;
     flush(samples: Float32Array): Float32Array;
@@ -39,10 +42,16 @@ export class QwenEngine {
     directory: string,
     device: SpeechInferenceDevice,
     private emit: (event: SpeechEvent) => void,
+    runtimeFile?: string,
   ) {
-    const runtime = path.join(directory, 'runtime');
+    if (process.platform !== 'win32' && (process.platform !== 'darwin' || !runtimeFile))
+      throw Error('当前平台尚未接入 Qwen 原生推理。');
+    const runtime =
+      process.platform === 'darwin' ? path.dirname(runtimeFile!) : path.join(directory, 'runtime');
     this.child = spawn(
-      path.join(runtime, device === 'cpu' ? 'voxcue-qwen-cpu.exe' : 'voxcue-qwen.exe'),
+      process.platform === 'darwin'
+        ? runtimeFile!
+        : path.join(runtime, device === 'cpu' ? 'voxcue-qwen-cpu.exe' : 'voxcue-qwen.exe'),
       [directory, device],
       {
         cwd: runtime,
@@ -73,8 +82,9 @@ export class QwenEngine {
     directory: string,
     device: SpeechInferenceDevice,
     emit: (event: SpeechEvent) => void,
+    runtimeFile?: string,
   ) {
-    const engine = new QwenEngine(directory, device, emit);
+    const engine = new QwenEngine(directory, device, emit, runtimeFile);
     try {
       const metadata = await new Promise<{ chunkMs: number; alignmentDevice: string }>(
         (resolve, reject) => {
@@ -84,7 +94,7 @@ export class QwenEngine {
           );
           const failed = () => {
             clearTimeout(timer);
-            reject(Error('Qwen 启动失败；CUDA 需要可用的 NVIDIA 驱动，也可在模型设置中选择 CPU。'));
+            reject(Error('Qwen 启动失败，请检查本地组件、内存和所选推理设备。'));
           };
           engine.child.once('error', failed);
           engine.child.once('exit', failed);
@@ -137,6 +147,7 @@ export class QwenEngine {
     const state = this.sources.get(source);
     if (!state) return;
     if (value.type === 'speech_start') {
+      state.active = true;
       this.emit({ type: 'speech-start', source });
       return;
     }
@@ -160,9 +171,13 @@ export class QwenEngine {
         endMs: end,
         speechModel: 'qwen',
         ...(final ? { reason } : {}),
+        ...(final && reason === 'silence'
+          ? { silenceStartMs: end - speechSegmentationSilenceMs }
+          : {}),
       },
     });
     if (final) {
+      if (value.type === 'tail_final' && reason === 'silence') state.active = false;
       const previous = state.id;
       state.id = randomUUID();
       state.start = Number(value.type === 'committed' ? value.cut_ms : value.audio_ms);
@@ -191,7 +206,7 @@ export class QwenEngine {
       const seq = ++this.sequence;
       const timer = setTimeout(() => {
         this.pending.delete(seq);
-        reject(Error('Qwen 推理超时，请降低负载或使用 CUDA。'));
+        reject(Error('Qwen 推理超时，请降低负载或切换推理设备后重试。'));
         this.child.kill();
       }, 120000);
       this.pending.set(seq, { resolve, reject, timer });
@@ -218,9 +233,11 @@ export class QwenEngine {
     if (!state) {
       state = {
         id: randomUUID(),
-        origin: timestamp - (samples.length / rate) * 1000,
+        origin: timestamp,
         start: 0,
         rate,
+        samples: 0,
+        active: false,
         ...(rate !== 16000 ? { resampler: new sherpa.LinearResampler(rate, 16000) } : {}),
       };
       this.sources.set(source, state);
@@ -232,7 +249,18 @@ export class QwenEngine {
     for (const value of samples) energy += value * value;
     const level = Math.min(1, Math.sqrt(energy / Math.max(1, samples.length)) * 4);
     this.emit({ type: 'activity', source, speaking: level > 0.015, level });
-    await this.accept(source, state.resampler ? state.resampler.resample(samples) : samples);
+    const converted = state.resampler ? state.resampler.resample(samples) : samples;
+    await this.accept(source, converted);
+    state.samples += converted.length;
+  }
+  processedThrough(source: AudioSource): number | undefined {
+    const state = this.sources.get(source);
+    // The pinned native VAD consumes complete 512-sample frames. Unprocessed
+    // PCM/resampler tails cannot count as confirmed silence.
+    return state ? state.origin + Math.floor(state.samples / 512) * 32 : undefined;
+  }
+  canSwitch(source: AudioSource) {
+    return !this.sources.get(source)?.active;
   }
   async discontinuity(source: AudioSource) {
     const state = this.sources.get(source);

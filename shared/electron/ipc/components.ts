@@ -6,15 +6,17 @@ export function registerComponentIpc(
   service: ComponentService,
   authorize: (event: Electron.IpcMainInvokeEvent) => void,
   authorizeRemove: (event: Electron.IpcMainInvokeEvent) => void = authorize,
+  authorizeStatus: (event: Electron.IpcMainInvokeEvent) => void = authorize,
 ) {
   handleDesktop('components:call', (event, ...args: unknown[]) => {
-    authorize(event);
     if (event.senderFrame !== event.sender.mainFrame || args.length !== 1)
       throw Error('Unauthorized component request');
     const call = args[0];
     if (!call || typeof call !== 'object' || Array.isArray(call))
       throw Error('Invalid component request');
     const value = call as Record<string, unknown>;
+    if (value.op === 'status' && Object.keys(value).length === 1) authorizeStatus(event);
+    else authorize(event);
     if (value.op === 'remove') {
       if (
         Object.keys(value).length !== 2 ||

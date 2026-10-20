@@ -285,7 +285,14 @@ export function signLocalCode(file, signing, identifier, { preserveMetadata = tr
     signing.keychain,
     '--timestamp=none',
     ...(preserveMetadata ? ['--preserve-metadata=entitlements,flags,runtime'] : ['--options', '0']),
-    ...(identifier ? ['--requirements', '=' + developmentRequirement(signing, identifier)] : []),
+    ...(identifier
+      ? [
+          '--identifier',
+          identifier,
+          '--requirements',
+          '=' + developmentRequirement(signing, identifier),
+        ]
+      : []),
     file,
   ]);
 }

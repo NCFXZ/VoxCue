@@ -11,6 +11,7 @@ vi.mock('node:worker_threads', async () => {
       }
       postMessage(message: any) {
         queueMicrotask(() => {
+          if (message.op === 'close') this.emit('message', { closed: message.id });
           if (message.op === 'init') {
             if (runtime.mode === 'exit-loading') this.emit('exit', 1);
             else this.emit('message', { ready: true });

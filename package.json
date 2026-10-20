@@ -1,6 +1,6 @@
 {
   "name": "voxcue-workspace",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "private": true,
   "description": "Command dispatcher; dependencies are installed separately inside windows/ and macos/.",
   "packageManager": "pnpm@11.25.0",
@@ -10,6 +10,7 @@
     "build:icons": "node shared/scripts/run.mjs build:icons",
     "build:launcher": "node shared/scripts/run.mjs build:launcher",
     "build:permissions": "node shared/scripts/run.mjs build:permissions",
+    "build:qwen": "node shared/scripts/run.mjs build:qwen",
     "build:shared": "node shared/scripts/run.mjs build:shared",
     "build:symbols": "node shared/scripts/run.mjs build:symbols",
     "build:updater": "node shared/scripts/run.mjs build:updater",

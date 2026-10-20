@@ -1,6 +1,6 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
 import { randomUUID } from 'node:crypto';
-import type { SpeechCall, SpeechEvent, SpeechStatus } from '../../contracts/speech';
+import type { SpeechServiceCall, SpeechEvent, SpeechStatus } from '../../contracts/speech';
 export class SpeechHost {
   private child?: UtilityProcess;
   private ready?: Promise<any>;
@@ -14,6 +14,7 @@ export class SpeechHost {
     private emit: (e: SpeechEvent) => void,
     private processFile?: string,
     private qwenDirectory?: string,
+    private qwenRuntime?: string,
   ) {}
   private send(data: any): Promise<any> {
     return new Promise((resolve, reject) => {
@@ -22,12 +23,24 @@ export class SpeechHost {
         () => {
           this.pending.delete(id);
           reject(Error('本地语音服务超时。'));
-          this.stop();
+          if (data.call?.op === 'switch-recognizer') {
+            try {
+              this.child?.postMessage({ id: randomUUID(), call: { op: 'cancel-switch' } });
+            } catch {
+              /* A closed port already rejects its pending calls. */
+            }
+          } else this.stop();
         },
-        this.qwenDirectory ? 200000 : 70000,
+        data.call?.op === 'switch-recognizer' ? 310000 : this.qwenDirectory ? 200000 : 70000,
       );
       this.pending.set(id, { resolve, reject, timer });
-      this.child!.postMessage({ id, ...data });
+      try {
+        this.child!.postMessage({ id, ...data });
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(id);
+        reject(error);
+      }
     });
   }
   private start() {
@@ -71,10 +84,11 @@ export class SpeechHost {
       model: this.model,
       helper: this.helper,
       qwenDirectory: this.qwenDirectory,
+      qwenRuntime: this.qwenRuntime,
     });
     return this.ready;
   }
-  async call(call: SpeechCall): Promise<SpeechStatus> {
+  async call(call: SpeechServiceCall): Promise<SpeechStatus> {
     if (!this.helper || !this.processFile) throw Error('当前系统尚未支持本地音频采集。');
     await this.start();
     return this.send({ call });

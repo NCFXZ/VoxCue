@@ -1,5 +1,9 @@
 # Qwen Windows 接入与 Mac 接续
 
+> 当前接续请使用 [Mac 0.5.2 修改与 Windows 逐项核对清单](WINDOWS_0.5.2_HANDOFF.md)。该文档汇总后台模型/设备交接、800ms/1800ms音频时钟、模型删除回退及Q8_0兼容边界；下文保留Windows 0.5.1首次接入的历史说明，冲突时以新清单为准。
+
+2026-10-20共享规则更新：Paraformer/Qwen保留800ms分段，自动回答按最后一次系统语音结束后的已处理音频累计1800ms；取消终稿后额外1000ms，只有终稿就绪且后续系统音频无积压才提交。重新开口、去重、排队及结束保护保持。下述旧等待规则及Mac接续限制为Windows交接时的历史状态，当前Mac接入见[QWEN_MACOS.md](QWEN_MACOS.md)；Windows仍需本机回归。
+
 Windows 生产链路复用 shared 页面/业务、WASAPI、AEC、设备选择、会话锁定和恢复入口。可选 Paraformer/Qwen3-ASR 0.6B；Paraformer 固定 CPU，Qwen 可选 CPU/CUDA，兼容设备默认 CUDA，CPU 有性能警告。不满足 CUDA 兼容条件时仍可下载和选择 Qwen，只隐藏 CUDA 并改用 CPU，不强制更换语音模型，也不显示额外的不兼容提示。“常规”显示名改为“个性化”。准备聊天不再提供语音输入；开场音源自检仍走原 Paraformer，面试语音模型不改变回答模型及当前回答快照。
 
 模型设置按“回答生成”（回答模型、思考强度）在上、“语音识别”（语音模型、推理设备）在下分组，主设置与浮窗复用。组件页按“本地语音模型”（Paraformer、Qwen）及“知识库模型”（multilingual-e5-small）分组，模型名称使用常规字重并提供简短用途说明。

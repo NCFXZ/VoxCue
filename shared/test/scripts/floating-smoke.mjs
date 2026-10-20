@@ -28,12 +28,12 @@ try {
   await app.evaluate(({ app }) => {
     globalThis.pinMaxDepth = 0;
     app.on('browser-window-created', (_event, win) => {
-      if (!win.getTitle().includes('面试')) return;
       const pin = win.setAlwaysOnTop.bind(win);
       let depth = 0;
       win.setAlwaysOnTop = (...args) => {
         globalThis.pinMaxDepth = Math.max(globalThis.pinMaxDepth, ++depth);
         try {
+          win.emit('always-on-top-changed', {}, false);
           return pin(...args);
         } finally {
           depth--;

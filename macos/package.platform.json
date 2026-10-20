@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:shared && pnpm build:launcher",
+    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
     "build:audio": "node scripts/build-audio.mjs",
     "start": "node scripts/launch.mjs",
     "dev": "node scripts/launch.mjs --dev",
@@ -16,7 +16,8 @@
     "build:updater": "node scripts/build-updater.mjs",
     "package:installer": "pnpm build && pnpm build:updater && node scripts/package-installer.mjs",
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
-    "test:package": "node test/scripts/package-smoke.mjs"
+    "test:package": "node test/scripts/package-smoke.mjs",
+    "build:qwen": "node scripts/build-qwen.mjs"
   },
   "dependencies": {
     "@ennuicastr/webrtcaec3.js": "0.3.0"

@@ -1,8 +1,12 @@
 # VoxCue 架构
 
-## Qwen Windows 接入
+## Qwen Windows 与 Mac 接入
 
-语音模型与设备由 SpeechOptions 确认、主进程验证，Worker 通过固定受管组件路径加载 Rust 进程。四句缓冲及原版对齐器负责真实音频裁剪。Paraformer 与 Qwen 均在 0.8 秒静音后收尾；只有 silence 终稿触发自动回答，两者收到终稿后均再检测 1000ms，恢复说话取消检测。具体原生进程、资源认证与 Mac 接续见 [QWEN_WINDOWS_HANDOFF.md](QWEN_WINDOWS_HANDOFF.md)。下文旧 2200ms 为历史基线，当前提交等待以此段为准。
+语音模型/推理设备的独立切换使用RecognitionRouter：原采集Worker保留AEC与连续输入，Recognizer将Paraformer/Qwen分别放在可释放的独立Worker；候选后台加载，两路当前VAD均空闲后用各路最多300ms处理后PCM预热并切换唯一事件来源。候选加载/预热失败或超时保留旧识别，暂停/结束/断流取消；等待加载不阻塞协调器的捕获串行队列。旧识别器关闭/Worker退出释放ONNX或原生进程。只改变识别配置时保留问题、草稿、1800ms截止点及排队/去重，音源或物理设备变更继续停启重连。回答模型/effort仍是当前回答原快照、后续问题新配置。
+
+浮窗设置纵向分区、标签在控件上方，窄屏单列；读取/订阅组件状态以准确显示模型可用性。组件IPC仅为已授权面试主frame开放无额外字段的status，修改操作保持原授权。
+
+语音模型与设备由 SpeechOptions 确认、主进程验证，Worker 通过固定受管组件路径加载 Rust 进程。四句缓冲及原版对齐器负责真实音频裁剪。Paraformer 与 Qwen 均在 0.8 秒静音后收尾；自动回答统一从最后一次系统语音结束起按已处理音频累计1800ms，800ms分段包含其中，不再从终稿到达后额外等待1000ms。两种引擎回传VAD静音起点，Worker确认处理进度，控制器标记各路未处理包；仅系统silence终稿就绪、音频进度到达截止点且无待检查系统音频才提交。识别/IPC延迟计入预算，墙钟等待不能代替静音证据；重新开口取消旧截止点，去重、忙时排队及结束保护保持。Windows具体原生进程和资源认证见 [QWEN_WINDOWS_HANDOFF.md](QWEN_WINDOWS_HANDOFF.md)。Mac平台通过可信运行时路径注入同一Worker/QwenEngine，ASR选择Metal/CPU，Mac对齐器使用Q8_0磁盘权重和原Rust CPU计算；平台硬件探测使用无模型、无音频的metal-check协议，开始与重连独立校验。Mac签名运行时属于应用原生资源，组件仅认证同一ASR/Aligner归档，平台缓存摘要独立。细节见 [QWEN_MACOS.md](QWEN_MACOS.md)。下文旧 2200ms 为历史基线，当前音频静音截止规则以此段为准。
 
 ## Windows 0.5.0 本地回声处理
 

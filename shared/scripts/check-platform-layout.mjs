@@ -27,6 +27,10 @@ function visit(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     if (entry.name.startsWith('.') || skipped.has(entry.name)) continue;
     const file = path.join(directory, entry.name);
+    // The private CPython stdlib/vendor tree contains upstream cross-platform
+    // support files. build:qwen authenticates every byte and checks all Mach-O
+    // deployment targets; it is not project-owned Windows/Mac source.
+    if (entry.isDirectory() && file === path.join(platformRoot, 'native/bin/qwen/python')) continue;
     if (entry.isSymbolicLink()) {
       violations.push(`Redirected project source: ${path.relative(repositoryRoot, file)}`);
     } else if (entry.isDirectory()) visit(file);

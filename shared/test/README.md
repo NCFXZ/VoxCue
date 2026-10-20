@@ -1,8 +1,22 @@
+## Mac 0.5.1与Qwen Metal入口
+
+`renderer/stores/components.test.ts`与`components-ui-smoke.mjs`检查删除当前语音模型后切到另一已安装模型/CPU、持久化及页面重载；任一语音模型就绪不误报缺失，Qwen/CPU性能提示及设置入口准确。检查中/删除失败/无替代/旧revision保护和重新下载不抢回选择，音频与回答配置保持。
+
+采集停顿专项覆盖Mac不补造静音、系统/麦克风进度仅由实际包确认；识别器关闭失败时仍等待其他实例释放。`speech-soak.mjs --seconds=300`可通过`VOXCUE_TEST_SPEECH_MODELS`与`VOXCUE_SPEECH_FIXTURE_DIR`使用自有临时模型/固定公开音频，退出前执行关闭握手并等待Worker终止。Qwen删除专项同时确认ASR safetensors及当前Q8_0 GGUF存在且无文件占用，不能以缺失旧BF16路径冒充释放检查。
+
+ForcedAligner Q8_0对照使用`shared/native/qwen-speech/examples/aligner-bench.rs`和`macos/test/scripts/qwen-aligner-compare.py`：固定公开FLEURS中英文各20条、两种语速合成TTS、交替运行同一Rust计算/安全裁剪，比较逐词时间戳及加载/推理。GGUF/Q8_0单测覆盖符号、精度还原、坏比例、截断/计数/形状和名字映射；原BF16仍可对照。Mac组件1.0.1使用Q8_0，Windows旧组件/运行时保持BF16。数值只到终端，详情见QWEN_MACOS。
+
+Mac Metal使用随应用固定签名的私有CPython/MLX运行时，原始BF16权重、500ms流式块；CPU保留Rust1000ms。`qwen-native-smoke`额外检查原版异步对齐期间仍有临时稿、实时新增音频不丢失、MLX/Rust实际后端及退出。原生Cargo测试覆盖有界队列、轮换、取消、工作线程失败和过期结果。`qwen-comparison-workspace.mjs --prepare`配合开发`VOXCUE_PYTHON`准备隔离工具/原始权重，`qwen-comparison-corpus.py`固定中英文FLEURS各20条，`qwen-compare.py --backend=rust|mlx|native`同配置比较速度、WER/CER，`--realtime-seconds=30`按20ms包输入双路；结果仅终端，工具/输入退出清理。数字书写差异仍计错，小样本不代表真人面试准确率，详见QWEN_MACOS。
+
+Mac的`qwen-native-smoke.mjs <临时已认证组件>`使用原BF16 ASR、Q8_0或BF16对齐器及合成TTS验证Metal/CPU流式推理、四句实际裁剪、静音和EOF退出，并将推理/对齐耗时及活动音频窗口仅输出终端。`qwen-worker-smoke.mjs <临时已认证组件>`通过生产Mac utilityProcess/controller/Worker/AEC与44.1kHz重采样验证相同链路，捕获端口为合成输入。`audio-synthetic-smoke.mjs`覆盖Mac采集适配器的合成进程、分片、非有限样本拒绝、尾包和20轮真实退出。原audio-native入口会采集物理设备，不在本轮执行。
+
+`components-ui-smoke.mjs`共用Metal/CUDA及无加速设备的菜单/禁用/下载/警告断言；`--memory-preview`仅向终端输出内存图片。共享桌面入口的`VOXCUE_TEST_SCALE_FACTOR=1/1.25/1.5/1.75/2`在Mac与Windows均只影响独立测试Electron，不改系统显示设置。Mac签名、临时完整应用与组件生命周期仍沿用原专项；详细平台装配见[QWEN_MACOS.md](../docs/QWEN_MACOS.md)。所有输出遵守下文零保留规则。
+
 ## Windows 0.5.1 对抗与界面回归（2026-10-20）
 
 语音包边界单测增加 NaN/正负无穷采样拒绝，阻止损坏数据进入重采样与识别。浮窗专项检查实际置顶状态及原生同步事件不会递归调用置顶；Windows 展示端口另覆盖丢失层级后的缓存重置和正常置顶时不做多余重置。20 轮面试及四次重载仍检查窗口退出、主窗口恢复和预热后的内存增长。
 
-界面矩阵沿用“个性化”名称、统一 8px 控件圆角及终稿后 1000ms 提交规则。ui-alignment 同时检查个人信息标签距标题分割线至少 16px、模型/思考强度同组，以及长名称、窄聊天列下发送按钮对齐；五档 DPI 复用相同检查。ChoiceMenu 按最近的原生 dialog 计算避让边界，组件界面专项将带 CPU 提示的模型控件滚到弹窗底边，检查菜单翻转后四边仍保留 8px 间距。组件原生专项使用完整有效的面试配置验证缺模型阻止开场，并以组件 ID 定位分组后的下载项，保留实际下载认证、取消、进程退出和独占句柄检查。
+界面矩阵沿用“个性化”名称、统一 8px 控件圆角及按音频静音累计1800ms、800ms分段计入其中的提交规则。ui-alignment 同时检查个人信息标签距标题分割线至少 16px、模型/思考强度同组，以及长名称、窄聊天列下发送按钮对齐；五档 DPI 复用相同检查。ChoiceMenu 按最近的原生 dialog 计算避让边界，组件界面专项将带 CPU 提示的模型控件滚到弹窗底边，检查菜单翻转后四边仍保留 8px 间距。组件原生专项使用完整有效的面试配置验证缺模型阻止开场，并以组件 ID 定位分组后的下载项，保留实际下载认证、取消、进程退出和独占句柄检查。
 
 `windows/test/scripts/qwen-native-smoke.py <component> --device cpu --wave <固定合成 WAV>` 也执行真实 CPU 识别，检查中间稿、静音终稿和退出；省略 WAV 的 CPU 模式只覆盖加载及静音。CUDA 模式可用 `--require-crop` 检查四句裁剪，终端仅输出处理音频时长、最大窗口、裁剪次数等摘要。输入及 CUDA 缓存只放自有系统临时目录，结束清理，不采样物理设备。
 
@@ -151,6 +165,13 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 
 ## 源码与边界
 
-共用面试体验入口为`node ../shared/test/scripts/interview-ux-smoke.mjs`：隔离合成账户、组件下载替身、音频端口及模型响应，覆盖原组件提示、资料标记、权限行内分路10秒自检/仅电平事件、静音800ms收尾、终稿后1000ms自动回答、原地音频恢复、音频/模型即时设置及回答中变更后仅影响下一题、独立显示滑块及浅深色/较小浮窗。`interview-typography-smoke.mjs`覆盖字号/背景滑块边界、键盘、存储失败、重载/重启与跨窗口同步、文字图标缩放及原生100%缩放；`updates-sidebar-smoke.mjs`检查靠左更新图标及下载/安装交互。默认不保存截图；只有用户要求交付时传`--screenshots=<明确交付目录>`，其余临时文件退出删除。共享单测覆盖后台测试期限/令牌、资源独占、音频重连竞争、模型/effort验证、知识库名前缀与手动标题保护，以及preload契约。Mac测试不代表Windows原生已验收。
+共用面试体验入口为`node ../shared/test/scripts/interview-ux-smoke.mjs`：隔离合成账户、组件下载替身、音频端口及模型响应，覆盖原组件提示、资料标记、权限行内分路10秒自检/仅电平事件、静音800ms收尾、音频静音累计1800ms自动回答（包含800ms分段）、延迟终稿与音频积压/重新开口保护、原地音频恢复、音频/模型即时设置及回答中变更后仅影响下一题、独立显示滑块及浅深色/较小浮窗。`interview-typography-smoke.mjs`覆盖字号/背景滑块边界、键盘、存储失败、重载/重启与跨窗口同步、文字图标缩放及原生100%缩放；`updates-sidebar-smoke.mjs`检查靠左更新图标及下载/安装交互。默认不保存截图；只有用户要求交付时传`--screenshots=<明确交付目录>`，其余临时文件退出删除。共享单测覆盖后台测试期限/令牌、资源独占、音频重连竞争、模型/effort验证、知识库名前缀与手动标题保护，以及preload契约。Mac测试不代表Windows原生已验收。
 
 设备自动枚举单测`audio-devices.test.ts`覆盖打开/焦点/设备通知/可见性/定时、并发合并、错误恢复及卸载后的迟到结果。`interview-ux-smoke.mjs`追加主/浮窗设备自动更新、无刷新按钮、白色滑块与两端图标、透明度预览、无电平尾部状态及固定底部说明，按用户要求可交付0/75透明度对照截图。`interview-typography-smoke.mjs`沿用键盘/范围/跨窗口/存储失败与窄窗口验证，并检查预览透明度随偏好改变。
+
+自动回答边界单测：`automatic-question.test.ts`、`speech-endpoint.test.ts`和`speech-progress.test.ts`，覆盖两种引擎的音频时间、未处理帧/包、迟到终稿和墙钟停顿不触发；`speech-store`/`interview-usage-offline`保留去重、排队、结束和手动提交回归。
+## 识别器后台切换与设置排版（2026-10-20）
+
+speech-switch/speech-progress/speech-host/speech-session/speech-store覆盖后台加载期间持续处理、双路空闲交接、300ms PCM及时间戳边界、候选预热事件隔离、失败/超时保留旧配置、暂停/结束取消、迟到保护、原问题和1800ms截止点、回答模型独立更新。desktop-ipc限定浮窗组件status只读。interview-ux覆盖切换中回答设置仍可编辑、失败回退、原回答快照，以及960/620/440宽度的浅深色横向标签/控件和窄屏单列；截图可仅内存预览，结果不落盘。
+
+Mac `node test/scripts/speech-switch-smoke.mjs --download`在自有临时目录通过生产ComponentService下载/认证固定公开Paraformer、原始Qwen ASR与当前Q8_0 Aligner，使用44.1kHz合成音频、实际AEC/utilityProcess/两层Worker/原生识别器验证模型与Metal/CPU交接和释放。不是硬件采集或真人质量测试，不读真实账户/模型缓存；临时文件退出清理。Windows专属夹具及本机原生验收仍留待Windows接续。

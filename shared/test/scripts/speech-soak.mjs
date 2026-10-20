@@ -67,7 +67,11 @@ const origin = performance.now(),
   cpu = process.cpuUsage();
 try {
   await reply(
-    { op: 'init', directory: path.resolve('../shared/local-models/speech') },
+    {
+      op: 'init',
+      directory:
+        process.env.VOXCUE_TEST_SPEECH_MODELS ?? path.resolve('../shared/local-models/speech'),
+    },
     (value) => value.ready,
     'ASR initialization',
   );
@@ -126,7 +130,11 @@ try {
       'ASR memory growth exceeded 256 MiB after warmup',
     );
 } finally {
-  await worker.terminate();
+  try {
+    await reply({ op: 'close', id: 2 }, (value) => value.closed === 2, 'ASR model release');
+  } finally {
+    await worker.terminate();
+  }
   console.log(
     JSON.stringify(
       {

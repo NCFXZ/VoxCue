@@ -4,9 +4,10 @@ import type { ScreenCapturePermission } from './screenCapture';
 
 export type AudioSource = 'microphone' | 'system';
 export type SpeechModelId = 'paraformer' | 'qwen';
-export type SpeechInferenceDevice = 'cpu' | 'cuda';
+export type SpeechInferenceDevice = 'cpu' | 'cuda' | 'metal';
 export interface SpeechHardware {
   cuda: boolean;
+  metal?: boolean;
   reason?:
     'unsupported-gpu' | 'driver-unavailable' | 'driver-outdated' | 'unavailable' | 'platform';
 }
@@ -67,6 +68,9 @@ export type InterviewAnswerRequest = {
 };
 export type SpeechCall =
   { op: 'devices' | 'status' | 'pause' | 'stop' } | { op: 'start'; options: SpeechOptions };
+// Only the authenticated main-process interview coordinator can create these.
+export type SpeechServiceCall =
+  SpeechCall | { op: 'switch-recognizer'; options: SpeechOptions } | { op: 'cancel-switch' };
 export interface SpeechStatus {
   state: 'idle' | 'loading' | 'running' | 'paused' | 'error';
   model: string;
@@ -76,6 +80,7 @@ export interface SpeechStatus {
   speechModel?: SpeechModelId;
   inferenceDevice?: SpeechInferenceDevice;
   chunkMs?: number;
+  switching?: 'loading' | 'waiting';
 }
 export interface SpeechSegment {
   id: string;
@@ -87,9 +92,18 @@ export interface SpeechSegment {
   reason?: 'silence' | 'sentence' | 'limit' | 'pause' | 'stop' | 'discontinuity';
   speechModel?: SpeechModelId;
   continuationOf?: string;
+  // Beginning of the VAD-confirmed trailing silence on the capture timeline.
+  // It is independent of when final decoding / IPC finishes.
+  silenceStartMs?: number;
 }
 export type SpeechEvent =
   | { type: 'speech-start'; source: AudioSource }
+  | {
+      type: 'audio-progress';
+      source: AudioSource;
+      pending: boolean;
+      processedThroughMs?: number;
+    }
   | { type: 'gap'; source: AudioSource; message: string }
   | { type: 'status'; status: SpeechStatus }
   | { type: 'segment'; segment: SpeechSegment }

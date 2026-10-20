@@ -146,8 +146,11 @@ require(${JSON.stringify(entry)});
     );
     const scale = options.env?.VOXCUE_TEST_SCALE_FACTOR;
     if (scale) {
-      if (process.platform !== 'win32' || !['1', '1.25', '1.5', '1.75', '2'].includes(scale))
-        throw Error('Unsupported isolated Windows DPI factor');
+      if (
+        !['win32', 'darwin'].includes(process.platform) ||
+        !['1', '1.25', '1.5', '1.75', '2'].includes(scale)
+      )
+        throw Error('Unsupported isolated desktop scale factor');
       options = {
         ...options,
         args: [...(options.args ?? []), '--force-device-scale-factor=' + scale],

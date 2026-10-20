@@ -169,6 +169,10 @@ export function App() {
               <PreparationPage
                 onDraftChange={setPersonalDraft}
                 onComponentSettings={openComponentSettings}
+                onSpeechSettings={() => {
+                  setSettingsCategory('interview');
+                  setSettings(true);
+                }}
               />
             </div>
             {page === 'history' && <HistoryPage />}

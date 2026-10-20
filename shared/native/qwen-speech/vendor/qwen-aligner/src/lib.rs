@@ -15,6 +15,7 @@ pub mod batch;
 // Abstraction modules.
 pub(crate) mod raw_tensor;
 mod weights;
+mod gguf;
 pub mod backend;
 
 // The CUDA engine modules.

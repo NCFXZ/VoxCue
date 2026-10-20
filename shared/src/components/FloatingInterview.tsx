@@ -22,6 +22,7 @@ import {
 } from './icons';
 import { Button } from './ui/button';
 import { useInterview } from '../stores/interview';
+import { useComponents } from '../stores/components';
 import { useHistory } from '../stores/history';
 import { AppLogo } from './AppLogo';
 import { useFollowScroll } from './useFollowScroll';
@@ -37,6 +38,7 @@ import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
 import { useInterviewFontSize } from '../interviewTypography';
 export function FloatingInterview() {
+  useEffect(() => useComponents.getState().connect(), []);
   const fontSize = useInterviewFontSize();
   const state = useInterview();
   const provider = providerInfo(state.answers.at(-1)?.provider);

@@ -9,10 +9,10 @@ import type {
   AudioSource,
   InterviewScreenshot,
 } from '../../electron/contracts/speech';
-import { QuestionBuffer, interviewAnswer } from '../services/speech';
+import { AutomaticQuestionGate, QuestionBuffer, interviewAnswer } from '../services/speech';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
-import { automaticAnswerDelay } from '../../electron/contracts/speechSettings';
+import { sameAudioCapture, speechSelection } from '../../electron/contracts/speechSettings';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
   mode: 'local' | 'mock';
@@ -36,6 +36,8 @@ interface InterviewState {
   updateModel(modelId: string, effort: ReasoningEffort | 'auto'): Promise<boolean>;
   audioLevels: AudioLevels;
   reconnecting: boolean;
+  switchingSpeech: boolean;
+  speechSwitchError: string | null;
   reconnectAudio(options?: SpeechOptions): Promise<boolean>;
   screenshots: InterviewScreenshot[];
   capturingScreenshot: boolean;
@@ -67,7 +69,7 @@ let sequence = 0;
 let startAttempt = 0;
 let finishingSession: string | null = null;
 let unsubscribeSpeech: (() => void) | undefined;
-let questionTimer: ReturnType<typeof setTimeout> | undefined;
+const automaticQuestion = new AutomaticQuestionGate();
 let automaticQuestionReady = false;
 const questions = new QuestionBuffer();
 const answerScreenshots = new Map<string, string[]>();
@@ -75,7 +77,7 @@ let screenshotEpoch = 0;
 const submittedInterim = new Set<string>();
 const id = () => String(++sequence);
 const stop = () => {
-  clearTimeout(questionTimer);
+  automaticQuestion.reset();
   automaticQuestionReady = false;
   speechController?.abort();
   answerController?.abort();
@@ -121,8 +123,6 @@ export const useInterview = create<InterviewState>((set, get) => ({
   },
   async submitTranscript(editedQuestion, includeScreenshots = false) {
     try {
-      clearTimeout(questionTimer);
-
       const screenshotIds = includeScreenshots ? get().screenshots.map((shot) => shot.id) : [];
       const question =
         editedQuestion?.trim() ||
@@ -138,6 +138,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
         await get().ask('', undefined, screenshotIds);
         return;
       }
+      automaticQuestion.cancel();
       automaticQuestionReady = false;
       const sourceTranscriptIds = [
         ...new Set([
@@ -162,6 +163,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
   autoAnswer: true,
   audioLevels: {},
   reconnecting: false,
+  switchingSpeech: false,
+  speechSwitchError: null,
   updatingModel: false,
   async updateModel(modelId, effort) {
     if (get().updatingModel || get().status === 'ended') return false;
@@ -187,14 +190,44 @@ export const useInterview = create<InterviewState>((set, get) => ({
     }
   },
   async reconnectAudio(options) {
-    if (get().reconnecting || get().speech.state === 'loading' || get().status === 'ended')
+    if (
+      get().reconnecting ||
+      get().switchingSpeech ||
+      get().speech.state === 'loading' ||
+      get().status === 'ended'
+    )
       return false;
     const attempt = startAttempt,
       session = get().sessionId;
-    clearTimeout(questionTimer);
+    const continuous =
+      !!options &&
+      get().status === 'running' &&
+      get().speech.state === 'running' &&
+      sameAudioCapture(get().options, options) &&
+      JSON.stringify(speechSelection(get().options)) !== JSON.stringify(speechSelection(options));
+    if (continuous) {
+      set({ switchingSpeech: true, speechSwitchError: null });
+      try {
+        const result = await window.desktop!.reconnectInterviewAudio(options);
+        if (attempt !== startAttempt || get().sessionId !== session || get().status === 'ended')
+          return false;
+        if (result.state !== 'running') throw Error(result.error ?? '语音切换失败，仍使用原配置。');
+        set({ speech: result, options });
+        return true;
+      } catch (error) {
+        if (attempt === startAttempt && get().sessionId === session)
+          set({ speechSwitchError: (error as Error).message });
+        return false;
+      } finally {
+        if (attempt === startAttempt && get().sessionId === session)
+          set({ switchingSpeech: false });
+      }
+    }
+    automaticQuestion.reset();
     automaticQuestionReady = false;
     set({
       reconnecting: true,
+      speechSwitchError: null,
       status: 'paused',
       speechError: null,
       audioLevels: {},
@@ -277,7 +310,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
   startedAt: null,
   endedAt: null,
   setAutoAnswer(enabled) {
-    clearTimeout(questionTimer);
+    automaticQuestion.cancel();
     automaticQuestionReady = false;
     set({ autoAnswer: enabled });
   },
@@ -323,6 +356,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
           draftQuestion: '',
           audioLevels: {},
           reconnecting: false,
+          switchingSpeech: false,
+          speechSwitchError: null,
           sessionId: crypto.randomUUID(),
           startedAt: Date.now(),
           endedAt: null,
@@ -339,6 +374,26 @@ export const useInterview = create<InterviewState>((set, get) => ({
             !get().options.sources.includes(event.source))
         )
           return;
+        if (event.type === 'audio-progress') {
+          if (
+            event.source !== 'system' ||
+            get().reconnecting ||
+            finishingSession === get().sessionId
+          )
+            return;
+          automaticQuestion.progress(event);
+          automaticQuestionReady = automaticQuestion.ready();
+          if (
+            automaticQuestionReady &&
+            get().status === 'running' &&
+            get().speech.state === 'running' &&
+            get().autoAnswer &&
+            !get().generating &&
+            !get().updatingModel
+          )
+            void get().submitTranscript();
+          return;
+        }
         if (event.type === 'activity')
           set((s) => ({
             audioLevels: {
@@ -357,19 +412,19 @@ export const useInterview = create<InterviewState>((set, get) => ({
             audioLevels: { ...s.audioLevels, [event.source]: undefined },
           }));
           if (event.source === 'system') {
-            clearTimeout(questionTimer);
+            automaticQuestion.cancel();
             automaticQuestionReady = false;
             questions.clear();
             set({ pendingQuestion: '', draftQuestion: '' });
           }
         }
         if (event.type === 'speech-start' && event.source === 'system') {
-          clearTimeout(questionTimer);
+          automaticQuestion.cancel();
           automaticQuestionReady = false;
         }
         if (event.type === 'status') {
-          if (event.status.state === 'error' || event.status.state === 'paused') {
-            clearTimeout(questionTimer);
+          if (event.status.state !== 'running') {
+            automaticQuestion.reset();
             automaticQuestionReady = false;
           }
           set({
@@ -418,31 +473,34 @@ export const useInterview = create<InterviewState>((set, get) => ({
           if (get().reconnecting) return;
           if (finishingSession === get().sessionId) return;
           if (segment.reason === 'discontinuity') {
-            clearTimeout(questionTimer);
+            automaticQuestion.cancel();
             automaticQuestionReady = false;
             questions.clear();
             set({ pendingQuestion: '', draftQuestion: '' });
             return;
           }
           if (submittedInterim.has(segment.id)) return;
-          clearTimeout(questionTimer);
+          automaticQuestion.cancel();
           automaticQuestionReady = false;
 
           try {
             if (questions.add(segment)) {
               set({ pendingQuestion: questions.text('system') });
-              if (get().autoAnswer && segment.reason === 'silence') {
-                questionTimer = setTimeout(() => {
-                  automaticQuestionReady = true;
-
-                  if (
-                    get().status === 'running' &&
-                    get().autoAnswer &&
-                    !get().generating &&
-                    !get().updatingModel
-                  )
-                    void get().submitTranscript();
-                }, automaticAnswerDelay(get().options));
+              if (
+                get().autoAnswer &&
+                get().status === 'running' &&
+                get().speech.state === 'running' &&
+                segment.reason === 'silence'
+              ) {
+                automaticQuestion.final(segment);
+                automaticQuestionReady = automaticQuestion.ready();
+                if (
+                  automaticQuestionReady &&
+                  get().status === 'running' &&
+                  !get().generating &&
+                  !get().updatingModel
+                )
+                  void get().submitTranscript();
               }
             }
             const interim = get()
@@ -547,6 +605,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
 
       audioLevels: {},
       reconnecting: false,
+      switchingSpeech: false,
+      speechSwitchError: null,
     });
   },
   async end() {
@@ -563,6 +623,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
 
         audioLevels: {},
         reconnecting: false,
+        switchingSpeech: false,
+        speechSwitchError: null,
       });
       try {
         await window.desktop?.speech({ op: 'stop' });
@@ -614,6 +676,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
       draftQuestion: '',
       audioLevels: {},
       reconnecting: false,
+      switchingSpeech: false,
+      speechSwitchError: null,
       screenshots: [],
       capturingScreenshot: false,
       speech: { ...get().speech, state: 'idle' },
@@ -768,6 +832,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
     }
   },
   stopAnswer() {
+    automaticQuestion.cancel();
     automaticQuestionReady = false;
     answerController?.abort();
     set((state) => ({
