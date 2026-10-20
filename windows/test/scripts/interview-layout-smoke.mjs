@@ -38,11 +38,11 @@ public static class LayoutMouse {
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
   [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
-  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint dx,uint dy,uint data,UIntPtr extra);
   static void Move(int x,int y) {
-    mouse_event(0xC001,(uint)((x-GetSystemMetrics(76)+0.5)*65536/GetSystemMetrics(78)),
-      (uint)((y-GetSystemMetrics(77)+0.5)*65536/GetSystemMetrics(79)),0,UIntPtr.Zero);
+    // Per-monitor-v2 coordinates are already physical pixels. Avoid converting
+    // them through asynchronous normalized mouse_event coordinates again.
+    if(!SetCursorPos(x,y))throw new Exception("Native cursor unavailable on the input desktop");
   }
   public static void Run(int x,int y,int dx,int dy,bool restore,IntPtr expected) {
     var context=SetThreadDpiAwarenessContext(new IntPtr(-4));
@@ -222,19 +222,38 @@ try {
   const rows = await confirmation.locator('.interview-start-summary > div').evaluateAll((nodes) =>
     nodes.map((node) => {
       const box = node.getBoundingClientRect();
-      return { title: node.querySelector('dt').textContent, x: box.x, y: box.y, width: box.width };
+      return {
+        title: node.querySelector('dt').textContent,
+        value: node.querySelector('dd').textContent,
+        x: box.x,
+        y: box.y,
+        width: box.width,
+      };
     }),
   );
   assert.deepEqual(
     rows.map((row) => row.title),
-    ['面试知识库', '面试官 · 系统音频', '面试者 · 麦克风', '回答模型', '思考强度'],
+    [
+      '面试知识库',
+      '面试官 · 系统音频',
+      '面试者 · 麦克风',
+      '语音模型',
+      '推理设备',
+      '回答模型',
+      '思考强度',
+    ],
   );
   assert.ok(rows[0].width > rows[1].width * 2);
   assert.equal(rows[1].y, rows[2].y);
   assert.equal(rows[3].y, rows[4].y);
-  assert.ok(rows[0].y < rows[1].y && rows[1].y < rows[3].y);
+  assert.equal(rows[5].y, rows[6].y);
+  assert.equal(rows[3].value, 'Paraformer 中英 INT8');
+  assert.equal(rows[4].value, 'CPU');
+  assert.ok(rows[0].y < rows[1].y && rows[1].y < rows[3].y && rows[3].y < rows[5].y);
   await confirmation.screenshot({});
-  checks.push('start dialog: full-width knowledge row, audio pair row and model/effort pair row');
+  checks.push(
+    'start dialog: full-width knowledge, paired audio, actual speech/device and answer model/effort rows',
+  );
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     main
@@ -526,8 +545,28 @@ try {
       );
       const readyDeadline = performance.now() + 5000;
       while (probe('window', nativeHandle, path.resolve('public/voxcue.ico')).extendedStyle & 32) {
-        if (performance.now() > readyDeadline)
+        if (performance.now() > readyDeadline) {
+          console.error(
+            JSON.stringify({
+              edge,
+              before,
+              box,
+              start,
+              cursor: probe('cursor'),
+              hit: probe('hit', nativeHandle, Math.round(start.x), Math.round(start.y)),
+              viewport: await floating.evaluate(() => ({
+                width: innerWidth,
+                height: innerHeight,
+                x: screenX,
+                y: screenY,
+                focused: document.hasFocus(),
+                resizing: document.querySelector('.floating-shell')?.className,
+              })),
+              current: await nativeBounds(),
+            }),
+          );
           throw Error('Resize corner did not become native-interactive');
+        }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
       probe('move', Math.round(start.x) + 1, Math.round(start.y));

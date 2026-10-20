@@ -28,6 +28,10 @@ if (process.argv.includes('--runtime-bundle')) {
     'shared/electron/backend/speech/qwen.js',
     'shared/electron/backend/speech/buffer.js',
     'shared/electron/backend/speech/models.js',
+    'shared/electron/backend/speech/recognition.js',
+    'shared/electron/backend/speech/recognizer.js',
+    'shared/electron/backend/speech/recognizer-worker.js',
+    'shared/electron/contracts/speechSettings.js',
     'windows/electron/speech/echoCancellation.js',
   ]) {
     const destination = path.join(input, 'dist-electron', file);
@@ -46,7 +50,7 @@ if (process.argv.includes('--runtime-bundle')) {
   const archive = path.join(testRoot, 'app.asar');
   await createPackageWithOptions(input, archive, {
     unpackDir:
-      '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/windows/electron/speech}',
+      '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/contracts,dist-electron/windows/electron/speech}',
   });
   runtime = archive + '.unpacked';
 }
@@ -102,13 +106,15 @@ require('node:module').syncBuiltinESMExports();
     'const {parentPort,workerData}=require("node:worker_threads");' +
     'globalThis.fetch=()=>{throw Error("No network");};' +
     'require("node:net").Socket.prototype.connect=globalThis.fetch;' +
-    'require.cache[workerData.engine]={exports:{SpeechEngine:class {' +
-    'audioMs=0;inferenceMs=0;constructor(_d,emit){this.emit=emit;}' +
-    'feed(source,samples,rate,timestamp){this.emit({source,samples,rate,timestamp});}' +
+    'require.cache[workerData.engine]={exports:{Recognizer:class {' +
+    'static async load(_o,emit){return new this(emit);}' +
+    'audioMs=0;inferenceMs=0;metadata={};healthy=true;progress=new Map();constructor(emit){this.emit=emit;}' +
+    'feed(source,samples,rate,timestamp){this.progress.set(source,timestamp);this.emit({source,samples,rate,timestamp});}' +
+    'processedThrough(source){return this.progress.get(source);}canSwitch(){return true;}async close(){this.healthy=false;}' +
     'discontinuity(){}flush(){}}}};' +
     'require(workerData.entry);',
     {eval:true,workerData:{
-      engine:path.join(runtime,'dist-electron/shared/electron/backend/speech/engine.js'),
+      engine:path.join(runtime,'dist-electron/shared/electron/backend/speech/recognizer.js'),
       entry:path.join(runtime,'dist-electron/shared/electron/backend/speech/worker.js')
     }});
   const events = [];

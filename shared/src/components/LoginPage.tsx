@@ -1,7 +1,7 @@
 import { ArrowUp, Sparkles, Volume2, Check, X } from './icons';
 import { Button } from './ui/button';
 import { useAuth } from '../stores/auth';
-import chatGPTIcon from '../assets/chatgpt.svg';
+import chatGPTIcon from '../assets/chatgpt.svg?inline';
 import { AppLogo } from './AppLogo';
 export function LoginPage() {
   const auth = useAuth();

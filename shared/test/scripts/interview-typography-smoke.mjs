@@ -15,7 +15,18 @@ const opacityKey = 'voxcue-interview-background-transparency-v1';
 const errors = [];
 try {
   await installUiAccount(app, { speech: true, components: true });
-  await app.evaluate(({ app }) => {
+  await app.evaluate(async ({ app, session }) => {
+    // Fixed branding must remain available when a separate image asset fails.
+    // Keep this regression offline while denying only that local SVG resource.
+    session.defaultSession.webRequest.onBeforeRequest((request, callback) => {
+      const url = new URL(request.url);
+      callback({
+        cancel:
+          ['http:', 'https:', 'ws:', 'wss:'].includes(url.protocol) ||
+          (url.protocol === 'file:' && /\/chatgpt[^/]*\.svg$/.test(url.pathname)),
+      });
+    });
+    await session.defaultSession.clearCache();
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
@@ -26,10 +37,25 @@ try {
       const answerText =
         '先说明目标，再介绍自己的工作和结果。\n\n### 实现要点\n\n保持清晰的接口与可靠的本地存储。';
       emit({ id: request.id, type: 'delta', text: answerText });
-      return { answerText, usage: null, sources: [] };
+      return {
+        provider: { id: 'chatgpt', name: 'ChatGPT', dataRecipient: 'OpenAI' },
+        answerText,
+        usage: null,
+        sources: [],
+      };
     };
   });
   const login = await app.firstWindow();
+  await login.reload();
+  const checkBrandImage = async (target, selector) => {
+    const image = target.locator(selector).first();
+    await image.evaluate(async (image) => image.decode());
+    assert.equal(
+      await image.evaluate((image) => image.naturalWidth > 0 && image.naturalHeight > 0),
+      true,
+    );
+  };
+  await checkBrandImage(login, '.service-brand-icon');
   const [page] = await Promise.all([
     app.waitForEvent('window'),
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
@@ -46,6 +72,7 @@ try {
   };
   await openSettings();
   const settings = page.getByRole('region', { name: '面试界面', exact: true });
+  await checkBrandImage(settings, '.provider-avatar img');
   const slider = settings.getByRole('slider', { name: '面试字体大小', exact: true });
   for (const width of [1280, 960]) {
     await app.evaluate(
@@ -57,6 +84,7 @@ try {
     );
     for (const theme of ['light', 'dark']) {
       await page.emulateMedia({ colorScheme: theme });
+      await checkBrandImage(settings, '.provider-avatar img');
       for (const size of [24, 12, 14]) {
         await slider.fill(String(size));
         const metrics = await settings.evaluate((section) => ({
@@ -144,6 +172,7 @@ try {
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.locator('.transcript-item > p').first().waitFor();
   await floating.locator('.answer-text h3').first().waitFor();
+  await checkBrandImage(floating, '.provider-avatar img');
   const toolbar = await floating.locator('.floating-toolbar').boundingBox();
   for (const size of [18, 24, 12, 14]) {
     await page.evaluate(({ key, size }) => localStorage.setItem(key, String(size)), { key, size });

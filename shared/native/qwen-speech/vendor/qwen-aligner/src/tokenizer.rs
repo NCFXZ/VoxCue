@@ -109,9 +109,13 @@ mod tests {
 
     #[test]
     fn special_token_ids_are_preserved() {
-        let root = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("models")
-            .join("Qwen3-ForcedAligner-0.6B");
+        let root = std::env::var_os("VOXCUE_TEST_QWEN_ALIGNER")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("models")
+                    .join("Qwen3-ForcedAligner-0.6B")
+            });
         let tokenizer = load_qwen_tokenizer(&root).unwrap();
         assert_eq!(tokenizer.token_to_id("<|audio_start|>"), Some(151669));
         assert_eq!(tokenizer.token_to_id("<|audio_end|>"), Some(151670));

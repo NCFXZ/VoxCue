@@ -186,6 +186,10 @@ try {
     }),
   );
 } catch (error) {
+  for (const page of app.windows())
+    if (!page.isClosed())
+      console.error('Synthetic window:', (await page.locator('body').innerText()).slice(-5000));
+  console.error('Renderer errors:', errors);
   console.error(
     JSON.stringify(
       await app.evaluate(({ BrowserWindow, app }) => ({

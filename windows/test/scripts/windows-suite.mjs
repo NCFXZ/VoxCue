@@ -22,16 +22,29 @@ if (suites[0] === '--dpi') {
     'components-ui',
     'updates-sidebar',
   ];
-  const selected = suites.length > 1 ? suites.slice(1) : allowed;
+  const scales = ['1', '1.25', '1.5', '1.75', '2'];
+  const scaleOptions = suites.slice(1).filter((arg) => arg.startsWith('--scale='));
+  assert.ok(scaleOptions.length <= 1, 'Use one --scale=<DPI factor>');
+  const requestedScale = scaleOptions[0]?.slice(8);
+  assert.ok(!scaleOptions.length || scales.includes(requestedScale), 'Unknown DPI scale');
+  const names = suites.slice(1).filter((arg) => !arg.startsWith('--scale='));
+  const selected = names.length ? names : allowed;
   for (const name of selected) assert.ok(allowed.includes(name), 'Unknown DPI suite: ' + name);
-  for (const scale of ['1', '1.25', '1.5', '1.75', '2']) {
+  const models = await prepareModelFixtures();
+  for (const scale of requestedScale ? [requestedScale] : scales) {
     for (const name of selected) {
       requireDesktop();
       const child = spawnTestProcess(
         process.execPath,
         ['../shared/test/scripts/' + name + '-smoke.mjs'],
         {
-          env: { ...process.env, VOXCUE_TEST_SCALE_FACTOR: scale },
+          env: {
+            ...process.env,
+            VOXCUE_TEST_SCALE_FACTOR: scale,
+            VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+            VOXCUE_TEST_RAG_MODEL: models.ragModel,
+            VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+          },
           stdio: ['ignore', 'pipe', 'pipe'],
           windowsHide: true,
         },

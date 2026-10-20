@@ -21,13 +21,18 @@ fn main() -> anyhow::Result<()> {
     let root = std::env::args()
         .nth(1)
         .ok_or_else(|| anyhow::anyhow!("model directory required"))?;
-    // Match the M3 Pro production alignment pool, outside ASR timing.
-    std::env::set_var("RAYON_NUM_THREADS", "2");
+    let device = match std::env::args().nth(2).as_deref().unwrap_or("cpu") {
+        "cpu" => DeviceRequest::Cpu,
+        #[cfg(feature = "cuda")]
+        "cuda" => DeviceRequest::Cuda(0),
+        _ => anyhow::bail!("expected cpu or cuda"),
+    };
+    std::env::set_var("RAYON_NUM_THREADS", if cfg!(target_os = "macos") { "2" } else { "4" });
     let start = Instant::now();
     let model = Qwen3ForcedAligner::load(
         Path::new(&root),
         ModelOptions {
-            device: DeviceRequest::Cpu,
+            device,
         },
     )?;
     emit(json!({"type":"ready","load_ms":start.elapsed().as_secs_f64()*1000.}));

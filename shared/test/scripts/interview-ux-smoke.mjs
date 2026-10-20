@@ -693,6 +693,24 @@ try {
     }
     await moveToBlankCorner();
   }
+  await floating.evaluate(() => {
+    window.uxDialogEvents = [];
+    for (const type of ['pointerdown', 'cancel', 'close'])
+      document.addEventListener(
+        type,
+        (event) => {
+          const target = event.target;
+          window.uxDialogEvents.push({
+            type,
+            trusted: event.isTrusted,
+            tag: target.tagName,
+            label: target.getAttribute?.('aria-label'),
+          });
+          window.uxDialogEvents = window.uxDialogEvents.slice(-20);
+        },
+        true,
+      );
+  });
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
   const devices = floating.getByRole('dialog', { name: '面试设置', exact: true });
   await settingsLayout(devices);
@@ -1096,6 +1114,22 @@ try {
       realAccounts: false,
     }),
   );
+} catch (error) {
+  for (const window of app.windows().filter((window) => window.url().endsWith('#interview')))
+    console.error(
+      'SETTINGS_DIAGNOSTIC',
+      JSON.stringify(
+        await window.evaluate(() => ({
+          events: window.uxDialogEvents,
+          focused: document.hasFocus(),
+          dialogs: [...document.querySelectorAll('dialog')].map((dialog) => ({
+            label: dialog.getAttribute('aria-label'),
+            open: dialog.open,
+          })),
+        })),
+      ),
+    );
+  throw error;
 } finally {
   if (nativeProbe && originalCursor) nativeProbe('move', originalCursor.x, originalCursor.y);
   await closeUiApp(app);

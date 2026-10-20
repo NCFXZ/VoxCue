@@ -138,6 +138,15 @@ export async function installUiAccount(app, { speech = false, components = false
         return { answerText: 'Synthetic interview answer', usage: null, sources: [] };
       };
       if (speech) {
+        const { SpeechHardwareProbe } = require(
+          path.join(root, 'dist-electron/shared/electron/backend/speech/hardware.js'),
+        );
+        // Shared UI scenarios use a deterministic platform capability. Actual
+        // driver probing is verified separately by the native Windows suite.
+        SpeechHardwareProbe.prototype.read = async () => ({
+          cuda: process.platform === 'win32',
+          metal: process.platform === 'darwin',
+        });
         if (components)
           require(
             path.join(root, 'dist-electron/shared/electron/backend/speech/models.js'),

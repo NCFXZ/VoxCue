@@ -1,4 +1,4 @@
-import chatGPTLogo from '../assets/chatgpt.svg';
+import chatGPTLogo from '../assets/chatgpt.svg?inline';
 import { MessageSquare } from './icons';
 import type { ModelProvider } from '../../electron/contracts/chat';
 import { providerInfo } from '../services/providers';

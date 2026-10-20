@@ -1,10 +1,30 @@
+## Windows 0.5.3 本地接续入口
+
+发行前使用 `windows-suite.mjs`、`--windows` 与 `--dpi` 分别串行检查共享功能、Windows 原生和五档缩放。`interview-typography-smoke.mjs` 另阻断独立 ChatGPT SVG 文件，实际解码登录、预览和面试回答标识并保留浅深色检查；固定标识随 Renderer 内嵌，记录及包级入口同样检查解码。正式安装器用 `installer-artifact-smoke.mjs` 核对 SHA512、blockmap 和实际负载，`portable-native-smoke.mjs --installer-stage` 运行同一 ASAR，`installer-engine-smoke.mjs` 以独立 GUID 验证 0.5.1→当前版本安装/更新/卸载与资料保护，不运行真实身份的安装器。
+
+Windows 配置由共享版本源生成 0.5.3，沿用共享功能矩阵与 `windows/test/scripts/windows-suite.mjs` 的原生/五档 DPI 入口。GUI 语音夹具使用合成平台能力；实际 CUDA 探测由原生入口验证。Windows AEC 的源代码与 ASAR 夹具均经过 Recognizer/RecognitionRouter，不再替换已退到内层 Worker 的旧引擎入口。
+
+`node test/scripts/qwen-component-smoke.mjs` 从当前生产目录真实下载 Windows Qwen 1.0.1 的原 ASR、Q8_0 和 Runtime 1.0.1。入口检查下载取消无半组件、三份归档及全部文件认证、离线复用、实际 CPU/CUDA/Worker、六次后台切换、独占句柄及受管删除，并保留临时合成的旧缓存哨兵；仅使用自有临时根与固定公开音频，退出清理。开发机 Python 通过 `VOXCUE_PYTHON` 指定，不属于用户安装依赖。
+
+五档 DPI 默认完整执行；定位单项时可用 `windows-suite.mjs --dpi --scale=2 interview-ux` 只复测指定档位/入口，所有原断言保持。面试设置夹具在失败时仅输出该隔离页面的关闭/取消/指针事件类型与对话框状态，不保存图像或报告。
+
+WASAPI `wasapi-packets-smoke.mjs` 在无硬件的 C# 探针中检查完整混音、分片、QPC 和 LoopbackSilence 的设备时钟前进、冻结、跳变、无效位置及迟到真实包。排空后补静音只使用 [IAudioClock 实际位置及频率](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/nf-audioclient-iaudioclock-getposition)，保留 50ms 余量，不能外推墙钟；共享 speech-progress 检查两路停顿均不凭定时器推进。
+
+`node test/scripts/qwen-regression.mjs --source=<固定公开1.0.0 staging内qwen目录> --build=<本次系统临时BuildRoot>` 先认证原包逐文件摘要，在自有临时根链接只读公开输入并复制本次新 CPU/CUDA EXE，通过生产组件认证器下载固定 Q8_0。固定上游 c5ef096 的中英文音频带 SHA256；同一个 aligner-bench 分别以 CPU/CUDA 比较 BF16/Q8_0 的逐词时间戳、安全切点和加载/推理。实际长语音裁剪夹具只压缩低于 -66dBFS、至少 300ms 的静音段至 160ms，非静音采样逐字节保留，原始音频仍用于时间戳对照。后续检查重叠双音源公平裁剪、生产 Worker/AEC、双向模型/设备切换、失败/取消及存在性前置的 Windows 独占句柄。重建入口增加 `-Examples` 与 `-Tests`；开发机可用 `VOXCUE_PYTHON` 指定 Python，用户安装不需要 Python。ASR 仍为原始 BF16，生产组件目录不引用尚未发布的新 Runtime。
+
+`python windows/scripts/package-qwen-runtime.py <干净runtime> <输出目录> --version 1.0.1` 仅准备一个不可覆盖的新 Runtime ZIP 和逐文件固定摘要，不上传、覆盖旧资产或修改生产信任根。测试结果仅终端/内存；所有输入和运行资料在自有系统临时根，退出清理。原生/GUI 串行，不读真实账户/资料、不采样物理音频或屏幕。
+
+`speech-progress.test.ts` 另覆盖 Qwen→Paraformer 的旧队列继承：超过 2 秒的已接受音频不误停，交接期间新增音频与旧队列一起追平，总队列仍不能超过原 30 秒；ACK 确认全部积压降至 2 秒内后恢复 Paraformer 原预算，乱序 ACK 仅扣减真实确认的音频。`qwen-regression.mjs --checks=switch` 可只复测实际六次切换及文件释放，省略该选项时执行完整矩阵。
+
+`build-qwen.ps1 -Cpu -Tests` 分别检查应用引擎与实际引用的对齐库，不编译未随应用分发的上游 CLI。分词器原断言保留，可通过仅测试使用的 `VOXCUE_TEST_QWEN_ALIGNER` 指定自有临时根内、固定摘要认证的公开 vocab/merges/tokenizer_config，避免把模型夹具放入源码目录；未设置时保留原上游路径。
+
 ## Mac 0.5.1与Qwen Metal入口
 
 `renderer/stores/components.test.ts`与`components-ui-smoke.mjs`检查删除当前语音模型后切到另一已安装模型/CPU、持久化及页面重载；任一语音模型就绪不误报缺失，Qwen/CPU性能提示及设置入口准确。检查中/删除失败/无替代/旧revision保护和重新下载不抢回选择，音频与回答配置保持。
 
 采集停顿专项覆盖Mac不补造静音、系统/麦克风进度仅由实际包确认；识别器关闭失败时仍等待其他实例释放。`speech-soak.mjs --seconds=300`可通过`VOXCUE_TEST_SPEECH_MODELS`与`VOXCUE_SPEECH_FIXTURE_DIR`使用自有临时模型/固定公开音频，退出前执行关闭握手并等待Worker终止。Qwen删除专项同时确认ASR safetensors及当前Q8_0 GGUF存在且无文件占用，不能以缺失旧BF16路径冒充释放检查。
 
-ForcedAligner Q8_0对照使用`shared/native/qwen-speech/examples/aligner-bench.rs`和`macos/test/scripts/qwen-aligner-compare.py`：固定公开FLEURS中英文各20条、两种语速合成TTS、交替运行同一Rust计算/安全裁剪，比较逐词时间戳及加载/推理。GGUF/Q8_0单测覆盖符号、精度还原、坏比例、截断/计数/形状和名字映射；原BF16仍可对照。Mac组件1.0.1使用Q8_0，Windows旧组件/运行时保持BF16。数值只到终端，详情见QWEN_MACOS。
+ForcedAligner Q8_0对照使用`shared/native/qwen-speech/examples/aligner-bench.rs`和`macos/test/scripts/qwen-aligner-compare.py`：固定公开FLEURS中英文各20条、两种语速合成TTS、交替运行同一Rust计算/安全裁剪，比较逐词时间戳及加载/推理。GGUF/Q8_0单测覆盖符号、精度还原、坏比例、截断/计数/形状和名字映射；原BF16仍可对照。两平台当前组件1.0.1使用Q8_0；Windows的1.0.0 BF16/Runtime旧资源保留，原始ASR不量化。数值只到终端，详情见QWEN_MACOS及本节Windows入口。
 
 Mac Metal使用随应用固定签名的私有CPython/MLX运行时，原始BF16权重、500ms流式块；CPU保留Rust1000ms。`qwen-native-smoke`额外检查原版异步对齐期间仍有临时稿、实时新增音频不丢失、MLX/Rust实际后端及退出。原生Cargo测试覆盖有界队列、轮换、取消、工作线程失败和过期结果。`qwen-comparison-workspace.mjs --prepare`配合开发`VOXCUE_PYTHON`准备隔离工具/原始权重，`qwen-comparison-corpus.py`固定中英文FLEURS各20条，`qwen-compare.py --backend=rust|mlx|native`同配置比较速度、WER/CER，`--realtime-seconds=30`按20ms包输入双路；结果仅终端，工具/输入退出清理。数字书写差异仍计错，小样本不代表真人面试准确率，详见QWEN_MACOS。
 

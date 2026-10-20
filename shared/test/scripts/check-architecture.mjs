@@ -98,14 +98,15 @@ export function sourceGraph(root) {
               options,
               ts.sys,
             ).resolvedModule;
-            const asset = path.resolve(path.dirname(absolute), edge.target);
+            const assetTarget = edge.target.replace(/\?inline$/, '');
+            const asset = path.resolve(path.dirname(absolute), assetTarget);
             return {
               ...edge,
               target:
                 resolved && !resolved.isExternalLibraryImport
                   ? slash(path.relative(root, resolved.resolvedFileName))
                   : edge.target.startsWith('.') &&
-                      /\.(?:png|svg|css)$/.test(edge.target) &&
+                      /\.(?:png|svg|css)$/.test(assetTarget) &&
                       fs.existsSync(asset)
                     ? slash(path.relative(root, asset))
                     : edge.target,

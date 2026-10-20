@@ -16,6 +16,9 @@ import {
   packagesFor,
   type ComponentPackage,
 } from '../../../shared/electron/backend/components/catalog';
+import { qwenPackage } from '../../electron/backend/components/qwen-catalog';
+import { qwenInt8Aligner } from '../../electron/backend/components/qwen-int8-catalog';
+import { qwenWindowsRuntime } from '../../electron/backend/components/qwen-windows-runtime-catalog';
 const Zip = require('adm-zip');
 const digest = (data: Buffer) => createHash('sha256').update(data).digest('hex');
 async function fixture() {
@@ -49,6 +52,28 @@ async function fixture() {
   return { root, pkg, bytes, data, fetcher, service };
 }
 describe('独立组件下载与版本缓存', () => {
+  it('Windows Q8_0升级保留原ASR和旧资源信任根，Mac不下载Windows运行时', () => {
+    const windows = packagesFor('win32', 'x64').find((pkg) => pkg.id === 'qwen')!;
+    const mac = packagesFor('darwin', 'arm64').find((pkg) => pkg.id === 'qwen')!;
+    expect(windows.parts).toEqual([qwenPackage.parts![0], qwenInt8Aligner, qwenWindowsRuntime]);
+    expect(mac.parts).toEqual([qwenPackage.parts![0], qwenInt8Aligner]);
+    expect(windows.sha256).toBe('73e15188b94e7cd8684b7a33afbdb5e6b770bcd3ad6c8f441928c19231ea7987');
+    expect(windows.files.find((file) => file.path === 'qwen/asr/model.safetensors')?.sha256).toBe(
+      '79d6cbd4c98c7bbffe9db2edac07f56cd6637d0d5944b27f6c2b8353840323ea',
+    );
+    expect(qwenWindowsRuntime.sha256).toBe(
+      'cf991cd03dd56c37647830ae2de3337b3ace7a5454c2595edd345b8f8468ca70',
+    );
+    expect(qwenWindowsRuntime.files).toHaveLength(400);
+    for (const name of ['voxcue-qwen.exe', 'voxcue-qwen-cpu.exe'])
+      expect(windows.files.some((file) => file.path === 'qwen/runtime/' + name)).toBe(true);
+    expect(qwenPackage.version).toBe('1.0.0');
+    expect(qwenPackage.parts!.at(-1)!.asset).toBe('VoxCue-Qwen-Windows-x64-Runtime-1.0.0.zip');
+    expect(qwenPackage.files.some((file) => file.path === 'qwen/aligner/model.safetensors')).toBe(
+      true,
+    );
+    expect(componentLocation('/cache', windows)).not.toBe(componentLocation('/cache', qwenPackage));
+  });
   it('只安装Qwen也满足语音就绪，删除最后一个语音模型才变为缺失', async () => {
     const f = await fixture();
     const qwen = { ...f.pkg, id: 'qwen' as const, optional: true };
@@ -313,16 +338,16 @@ describe('独立组件下载与版本缓存', () => {
     );
     expect(qwen.files.some((file) => file.path === 'qwen/aligner/model.safetensors')).toBe(false);
     const windowsQwen = packagesFor('win32', 'x64').find((pkg) => pkg.id === 'qwen')!;
-    expect(windowsQwen.version).toBe('1.0.0');
+    expect(windowsQwen.version).toBe('1.0.1');
     expect(windowsQwen.parts).toHaveLength(3);
     expect(windowsQwen.files.some((file) => file.path === 'qwen/aligner/model.safetensors')).toBe(
-      true,
+      false,
     );
     expect(
       windowsQwen.files.some(
         (file) => file.path.endsWith('.gguf') && file.path.includes('/aligner/'),
       ),
-    ).toBe(false);
+    ).toBe(true);
     expect(packagesFor('win32', 'x64').map((p) => p.id)).toEqual(['speech', 'rag', 'qwen']);
     expect(() => packagesFor('darwin', 'x64')).toThrow();
     const paths = componentPaths('/cache', packagesFor('darwin', 'arm64'));

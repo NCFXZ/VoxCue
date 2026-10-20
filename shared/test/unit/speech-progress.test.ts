@@ -94,22 +94,19 @@ it('未确认音频不能靠墙钟超时变成已处理，暂停重启不复用�
   captures.get('system')!(packet());
   expect(last('system')).toMatchObject({ pending: true, processedThroughMs: undefined });
 });
-it.runIf(process.platform === 'darwin')(
-  'Mac采集停顿不补造静音，两路进度都必须等待真实采集包',
-  async () => {
-    captures.get('system')!(packet());
-    captures.get('microphone')!(packet());
-    const audio = runtime.messages.filter((message) => message.op === 'audio');
-    ack(audio[0], 1800, undefined);
-    ack(audio[1], 1800, 1800);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(runtime.messages.filter((message) => message.op === 'audio')).toHaveLength(2);
-    expect(last('system')).toMatchObject({ pending: false, processedThroughMs: 1800 });
-    expect(last('microphone')).toMatchObject({ pending: false, processedThroughMs: 1800 });
-    captures.get('system')!(packet());
-    expect(last('system')).toMatchObject({ pending: true, processedThroughMs: 1800 });
-  },
-);
+it('采集停顿不按墙钟补造静音，两路进度都必须等待原生采集包', async () => {
+  captures.get('system')!(packet());
+  captures.get('microphone')!(packet());
+  const audio = runtime.messages.filter((message) => message.op === 'audio');
+  ack(audio[0], 1800, undefined);
+  ack(audio[1], 1800, 1800);
+  await vi.advanceTimersByTimeAsync(2000);
+  expect(runtime.messages.filter((message) => message.op === 'audio')).toHaveLength(2);
+  expect(last('system')).toMatchObject({ pending: false, processedThroughMs: 1800 });
+  expect(last('microphone')).toMatchObject({ pending: false, processedThroughMs: 1800 });
+  captures.get('system')!(packet());
+  expect(last('system')).toMatchObject({ pending: true, processedThroughMs: 1800 });
+});
 it('热切换不重建采集或清空进度，收到交接确认才更新当前选择', async () => {
   // This fixture has no Qwen directory; use the trusted platform port explicitly.
   Object.assign(controller, { qwenDirectory: 'synthetic-qwen' });
@@ -178,4 +175,60 @@ it('候选失败保持原语音状态，暂停立即取消未完成的设备切�
     state: 'running',
     speechModel: 'paraformer',
   });
+});
+
+async function selectModel(speechModel: 'qwen' | 'paraformer') {
+  Object.assign(controller, { qwenDirectory: 'synthetic-qwen' });
+  const pending = controller.call({
+    op: 'switch-recognizer',
+    options: { sources: ['system', 'microphone'], speechModel, inferenceDevice: 'cpu' },
+  });
+  const stage = runtime.messages.filter((m) => m.op === 'stage-recognizer').at(-1);
+  runtime.workers.at(-1).emit('message', { switched: stage.id, chunkMs: 1000 });
+  await pending;
+}
+it('Qwen切回Paraformer不把继承积压误判为新模型超载，排空后恢复2秒上限', async () => {
+  await selectModel('qwen');
+  for (let i = 0; i < 15; i++) captures.get('system')!(packet());
+  const inherited = runtime.messages.filter((m) => m.op === 'audio');
+  await selectModel('paraformer');
+  captures.get('system')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  // Out-of-order ACKs shrink only the actual acknowledged audio duration.
+  for (const message of inherited.slice(1)) ack(message);
+  captures.get('microphone')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  ack(inherited[0]);
+  for (let i = 0; i < 8; i++) captures.get('system')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  captures.get('system')!(packet());
+  expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);
+});
+it('新旧音频一同追平后才恢复Paraformer预算，不在旧队列排空中途误停', async () => {
+  await selectModel('qwen');
+  for (let i = 0; i < 15; i++) captures.get('system')!(packet());
+  await selectModel('paraformer');
+  const inherited = runtime.messages.filter((m) => m.op === 'audio');
+  for (let i = 0; i < 15; i++) captures.get('system')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  for (const message of inherited) ack(message);
+  // Merely processing the pre-handoff packets is insufficient: live input
+  // accepted while draining still needs to catch up within the same 30s cap.
+  captures.get('microphone')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  const accepted = runtime.messages.filter((m) => m.op === 'audio').slice(inherited.length);
+  for (const message of accepted.slice(0, 11)) ack(message);
+  for (let i = 0; i < 5; i++) captures.get('system')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  captures.get('microphone')!(packet());
+  expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);
+});
+it('交接继承和新增音频合计仍受原30秒绝对上限保护', async () => {
+  await selectModel('qwen');
+  for (let i = 0; i < 149; i++) captures.get('system')!(packet());
+  await selectModel('paraformer');
+  captures.get('microphone')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  captures.get('microphone')!(packet());
+  expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);
 });

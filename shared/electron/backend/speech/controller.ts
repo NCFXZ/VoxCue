@@ -35,15 +35,13 @@ export class SpeechController {
   private captures = new Map<AudioSource, NativeCapture>();
   private queued = 0;
   private pendingAudio = new Map<number, { source: AudioSource; ms: number }>();
+  private drainingQwenQueue = false;
   private processedThrough = new Map<AudioSource, number>();
   private maxQueue = 0;
   private sequence = 0;
   private discontinuities = 0;
   private recentGaps = new Map<AudioSource, number[]>();
   private droppedSamples = 0;
-  private lastAudio = new Map<AudioSource, number>();
-  private timer?: NodeJS.Timeout;
-  private rates = new Map<AudioSource, number>();
   private flushers = new Map<number, { resolve(): void; reject(error: Error): void }>();
   private anchors = new Map<AudioSource, { native: number; wall: number }>();
   private status: SpeechStatus = { state: 'idle', model: speechModelName };
@@ -180,6 +178,13 @@ export class SpeechController {
         }
         if (change && m.switched === change.id) {
           this.switching = undefined;
+          // Qwen can have a valid backlog larger than Paraformer's 2s budget.
+          // Keep its existing 30s cap while the new recognizer catches up;
+          // ACKs restore 2s as soon as the entire accepted backlog fits again.
+          this.drainingQwenQueue =
+            this.selection.speechModel === 'qwen' &&
+            change.selection.speechModel === 'paraformer' &&
+            this.queued > 2000;
           this.selection = change.selection;
           this.options = change.options;
           this.chunkMs = m.chunkMs;
@@ -196,6 +201,7 @@ export class SpeechController {
           if (!packet) return;
           this.pendingAudio.delete(m.ack);
           this.queued = Math.max(0, this.queued - packet.ms);
+          if (this.queued <= 2000) this.drainingQwenQueue = false;
           for (const source of ['microphone', 'system'] as const) {
             const through = m.progress?.[source];
             if (typeof through === 'number' && Number.isFinite(through))
@@ -295,7 +301,8 @@ export class SpeechController {
       }
     }
     const ms = (samples.length / rate) * 1000;
-    if (this.queued + ms > (this.selection.speechModel === 'qwen' ? 30000 : 2000)) {
+    const limit = this.selection.speechModel === 'qwen' || this.drainingQwenQueue ? 30000 : 2000;
+    if (this.queued + ms > limit) {
       this.droppedSamples += samples.length;
       this.emit({
         type: 'metrics',
@@ -355,15 +362,11 @@ export class SpeechController {
       return { ...this.status, devices: await this.adapter.devices(this.helper) };
     if (call.op === 'pause' || call.op === 'stop') {
       if (!this.adapter.drainBeforeRetire) ++this.epoch;
-      clearInterval(this.timer);
-      this.timer = undefined;
       const stopped = await Promise.allSettled(
         [...this.captures.values()].map(async (capture) => capture.stop()),
       );
       if (this.adapter.drainBeforeRetire) ++this.epoch;
       this.captures.clear();
-      this.lastAudio.clear();
-      this.rates.clear();
       this.anchors.clear();
       this.recentGaps.clear();
       if (stopped.some((result) => result.status === 'rejected')) {
@@ -415,12 +418,14 @@ export class SpeechController {
       }
       this.queued = 0;
       this.pendingAudio.clear();
+      this.drainingQwenQueue = false;
       this.processedThrough.clear();
       if (this.reloadAfterStop) await this.retireWorker();
       return this.state(call.op === 'pause' ? 'paused' : 'idle');
     }
     if (call.op !== 'start') throw Error('Invalid speech operation');
     if (this.captures.size) return this.status;
+    this.drainingQwenQueue = false;
     const selection = speechSelection(call.options);
     if (selection.speechModel === 'qwen' && !this.qwenDirectory)
       throw Error('当前平台尚未接入 Qwen 原生推理。');
@@ -464,15 +469,12 @@ export class SpeechController {
       const epoch = ++this.epoch;
       for (const source of call.options.sources) {
         startupFailure = source;
-        this.lastAudio.set(source, Date.now());
         const capture = this.adapter.create(
           this.helper,
           source,
           call.options[source],
           (p) => {
             if (epoch !== this.epoch) return;
-            this.lastAudio.set(source, Date.now());
-            this.rates.set(source, p.rate);
             const validClock = !(p.flags & 4) && Number.isFinite(p.timestamp);
             let anchor = this.anchors.get(source);
             if (!anchor && validClock) {
@@ -496,34 +498,19 @@ export class SpeechController {
         await capture.start();
         this.checkStartup();
       }
-      // Preserve the Windows loopback compatibility path. Core Audio supplies
-      // its own PCM clock: a stalled Mac capture cannot prove silence.
-      if (process.platform === 'win32')
-        this.timer = setInterval(() => {
-          for (const source of this.captures.keys()) {
-            const last = this.lastAudio.get(source)!;
-            const rate = this.rates.get(source);
-            if (rate && Date.now() - last >= 200) {
-              this.lastAudio.set(source, Date.now());
-              this.audio(source, new Float32Array(Math.round(rate / 5)), rate);
-            }
-          }
-        }, 100);
+      // Native adapters own silence: Windows loopback uses its advancing
+      // endpoint clock. Wall time alone cannot establish processed silence.
       this.options = structuredClone(call.options);
       return this.state('running');
     } catch (error) {
       // Retire callbacks first. A second cleanup failure must not hide the
       // original startup error or leave this controller stuck with captures.
       ++this.epoch;
-      clearInterval(this.timer);
-      this.timer = undefined;
       const captures = [...this.captures.values()];
       this.captures.clear();
       this.queued = 0;
       this.pendingAudio.clear();
       this.processedThrough.clear();
-      this.lastAudio.clear();
-      this.rates.clear();
       this.anchors.clear();
       this.recentGaps.clear();
       this.ready = undefined;
@@ -542,12 +529,12 @@ export class SpeechController {
     try {
       await this.call({ op: 'stop' });
     } finally {
-      clearInterval(this.timer);
       await this.retireWorker();
     }
   }
   private async retireWorker() {
     this.reloadAfterStop = false;
+    this.drainingQwenQueue = false;
     const worker = this.worker;
     if (!worker) return;
     {

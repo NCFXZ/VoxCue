@@ -12,6 +12,7 @@ export async function checkComponents(application) {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
+  await page.locator('.service-brand-icon').evaluate(async (image) => image.decode());
   assert.equal(await page.locator('.service-login').count(), 1);
   assert.equal(await page.getByRole('button', { name: /GitHub/ }).count(), 0);
   assert.equal(

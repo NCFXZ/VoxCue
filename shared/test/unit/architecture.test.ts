@@ -7,10 +7,49 @@ import {
   boundaryViolations,
   runtimeCycles,
   checkArchitecture,
+  sourceGraph,
   ipcCoverage,
 } from '../scripts/check-architecture.mjs';
 
 describe('长期模块边界', () => {
+  it('Vite内嵌资源必须存在，查询参数不能放行缺失资源或内部模块', () => {
+    const root = mkdtempSync(path.join(tmpdir(), 'voxcue-inline-architecture-'));
+    try {
+      for (const directory of [
+        'shared/src/assets',
+        'shared/electron',
+        'windows/electron',
+        'macos/electron',
+        'macos/src',
+      ])
+        mkdirSync(path.join(root, directory), { recursive: true });
+      writeFileSync(
+        path.join(root, 'shared/src/assets/logo.svg'),
+        '<svg xmlns="http://www.w3.org/2000/svg"/>',
+      );
+      writeFileSync(
+        path.join(root, 'shared/src/sample.tsx'),
+        `
+        import logo from './assets/logo.svg?inline';
+        import missing from './assets/missing.svg?inline';
+        import hidden from '../electron/private.ts?inline';
+      `,
+      );
+      const graph = sourceGraph(root);
+      expect(graph.get('shared/src/sample.tsx')![0].target).toBe('shared/src/assets/logo.svg');
+      const violations = boundaryViolations(graph);
+      expect(violations).toHaveLength(2);
+      expect(violations.join('\n')).toContain('missing.svg?inline');
+      expect(violations.join('\n')).toContain('private.ts?inline');
+    } finally {
+      if (
+        path.dirname(root) !== path.resolve(tmpdir()) ||
+        !path.basename(root).startsWith('voxcue-inline-architecture-')
+      )
+        throw Error('Unexpected architecture fixture path');
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it('当前实际源码没有越层依赖或运行时环', () => {
     const result = checkArchitecture(process.cwd());
     expect(result.violations).toEqual([]);

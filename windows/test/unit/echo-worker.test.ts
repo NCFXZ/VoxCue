@@ -18,10 +18,15 @@ it('loads the actual optional AEC in the shared worker, drains tails before flus
     }).outputText, file);
     // Replace inference alone: audio preprocessing, worker protocol and lifecycle
     // are production code. No model, account, audio device or transport is used.
-    require.cache[workerData.engine] = {exports: {SpeechEngine: class {
+    require.cache[workerData.engine] = {exports: {Recognizer: class {
+      static async load(_options, emit) {return new this(emit);}
       audioMs = 0; inferenceMs = 0;
-      constructor(_directory, emit) {this.emit = emit;}
-      feed(source, samples, rate, timestamp) {this.emit({test:'audio', source, samples, rate, timestamp});}
+      metadata = {}; healthy = true; progress = new Map();
+      constructor(emit) {this.emit = emit;}
+      feed(source, samples, rate, timestamp) {this.progress.set(source, timestamp); this.emit({test:'audio', source, samples, rate, timestamp});}
+      processedThrough(source) {return this.progress.get(source);}
+      canSwitch() {return true;}
+      async close() {this.healthy = false;}
       discontinuity(source) {this.emit({test:'gap', source});}
       flush(reason) {this.emit({test:'flush', reason});}
     }}};
@@ -30,7 +35,7 @@ it('loads the actual optional AEC in the shared worker, drains tails before flus
     {
       eval: true,
       workerData: {
-        engine: path.join(root, 'shared/electron/backend/speech/engine.ts'),
+        engine: path.join(root, 'shared/electron/backend/speech/recognizer.ts'),
         entry: path.join(root, 'shared/electron/backend/speech/worker.ts'),
       },
     },

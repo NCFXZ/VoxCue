@@ -6,7 +6,7 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地面试语音识别、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前共享、根及Mac源码配置版本为 **0.5.3**，Windows配置保留0.5.1，待其本机接续。Mac支持[Qwen Metal/CPU流式识别](shared/docs/QWEN_MACOS.md)，Paraformer保持CPU；Mac Qwen组件为1.0.1（Q8_0对齐器），Windows Qwen及其他模型组件保持原版本。已发布[Mac arm64 v0.5.3](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.3)，Windows x64仍为[v0.5.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.1)。Mac提供DMG、签名更新ZIP及latest-mac.yml，沿用原Ed25519密钥和固定本地代码签名证书；Windows提供安装包、blockmap及latest.yml。两平台按各自完整资产独立选版，旧发行/资产和既有v0.3.1 Latest保持。Windows接续使用相对0.5.1的[0.5.3完整修改与逐项核对报告](shared/docs/WINDOWS_0.5.3_HANDOFF.md)，累计包含0.5.2语音修改和0.5.3界面调整；旧0.5.2清单保留供参考。本次另按用户授权同步核对后的共享/Mac源码与文档，不改写已发布资产，也不代表Windows原生验收完成。
+当前共享、根及两平台源码配置版本为 **0.5.3**，Windows 接续入口见[测试说明](shared/test/README.md)。Mac 支持[Qwen Metal/CPU 流式识别](shared/docs/QWEN_MACOS.md)，Windows 使用 Rust CPU/CUDA，Paraformer 保持 CPU；两平台 Qwen 组件均为 1.0.1（原始 BF16 ASR 与 Q8_0 对齐器），Windows 另下载 Runtime 1.0.1，其他模型组件保持原版本。已发布 [Windows x64 与 Mac arm64 v0.5.3](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.3)，发行说明同时列出两平台内容。Windows 提供安装包、blockmap 及 latest.yml；Mac 提供 DMG、签名更新 ZIP 及 latest-mac.yml，沿用原 Ed25519 密钥和固定本地代码签名证书。两平台按各自完整资产独立选版，旧发行/资产、标签及既有 Latest 保留。Windows 相对 0.5.1 的[完整修改与逐项核对报告](shared/docs/WINDOWS_0.5.3_HANDOFF.md)累计包含 0.5.2 语音修改和 0.5.3 界面调整，旧 0.5.2 清单保留供参考。Mac 0.5.3 源码已同步；本次 Windows 安装包发行不自动提交或推送私有源码。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 
@@ -43,7 +43,7 @@ corepack pnpm start
 
 Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 的 [v0.5.1 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.1/VoxCue-Setup-0.5.1-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 的 [v0.5.3 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.3/VoxCue-Setup-0.5.3-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项保留于 windows/release/0.5.3。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 Mac开发宿主、启动器与后续正式应用使用固定本地自签名证书；公开指纹在`macos/local-signing-public.json`，私密身份在被Git忽略的`macos/.tools/development-signing/`，请安全备份并在清理时保留。身份缺失/错配会停止构建，不自动换证书或回退ad-hoc；现有登录信息和Sparkle更新密钥保持。已发布旧安装包未自动重建，首次切换签名可能仍需一次授权。详见[固定本地签名与登录保留](macos/docs/MACOS_PORT.md#固定本地签名与登录保留)。
 
@@ -143,4 +143,4 @@ Windows 安装/卸载窗沿用主程序的浅色、蓝色圆角按钮和字号�
 
 职责和公开边界见 [架构](shared/docs/ARCHITECTURE.md)，RAG 细节见 [RAG 架构](shared/docs/RAG_ARCHITECTURE.md)，回归入口和验证边界见 [测试说明](shared/test/README.md)，当前实现见 [进度](PROGRESS.md)，恢复入口见 [交接](shared/docs/HANDOFF.md)，清理范围见 [清理记录](shared/docs/WORKSPACE_CLEANUP.md)。
 
-语音可选 Paraformer 中英 INT8 或 Qwen3-ASR 0.6B 原始BF16，两者共用800ms分段和系统语音结束后1800ms自动回答。Paraformer使用CPU；Mac Qwen Metal使用MLX、500ms流式块与原版异步CPU对齐，CPU仍使用Rust、1000ms块；ASR保留原始BF16，Mac对齐器使用Q8_0磁盘权重并沿用原Rust计算。语音模型/推理设备在后台准备并于共同停顿交接，回答模型保持当前回答快照及下一题新选择。原生采集分别使用 Windows WASAPI 与 macOS 14.2+ Core Audio，平台真机验证边界见各自文档。
+语音可选 Paraformer 中英 INT8 或 Qwen3-ASR 0.6B 原始BF16，两者共用800ms分段和系统语音结束后1800ms自动回答。Paraformer使用CPU；Mac Qwen Metal使用MLX、500ms流式块与原版异步CPU对齐，CPU仍使用Rust、1000ms块；Windows Qwen使用Rust CPU/CUDA及独立Runtime 1.0.1；两平台ASR保留原始BF16，对齐器使用Q8_0磁盘权重并沿用原Rust计算。语音模型/推理设备在后台准备并于共同停顿交接，回答模型保持当前回答快照及下一题新选择。原生采集分别使用 Windows WASAPI 与 macOS 14.2+ Core Audio，平台真机验证边界见各自文档。

@@ -14,6 +14,7 @@ class WasapiCapture {
   static JavaScriptSerializer json = new JavaScriptSerializer();
   static Guid AudioClientId = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
   static Guid CaptureClientId = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
+  static Guid AudioClockId = new Guid("CD63314F-3FBA-4a1b-812C-EF96358728E7");
   static void Check(int hr) { if (hr < 0) Marshal.ThrowExceptionForHR(hr); }
   static void Release(object o) { if (o != null && Marshal.IsComObject(o)) Marshal.ReleaseComObject(o); }
   static string Id(IMMDevice device) { string id; Check(device.GetId(out id)); return id; }
@@ -111,7 +112,7 @@ class WasapiCapture {
     finally { FreeLibrary(module); }
   }
   static void Capture(IMMDeviceEnumerator e,string source,string requested,bool checkOnly=false) {
-    IMMDevice device=null; IAudioClient client=null; IAudioCaptureClient capture=null; IntPtr format=IntPtr.Zero;
+    IMMDevice device=null; IAudioClient client=null; IAudioCaptureClient capture=null; IAudioClock audioClock=null; IntPtr format=IntPtr.Zero;
     int flow=source=="system"?0:1;
     try {
       if(requested.Length==0) Check(e.GetDefaultAudioEndpoint(flow,0,out device)); else Check(e.GetDevice(requested,out device));
@@ -126,6 +127,17 @@ class WasapiCapture {
       object service; Check(client.GetService(ref CaptureClientId,out service)); capture=(IAudioCaptureClient)service;
       // Permission/device preflight: never Start or read an audio buffer.
       if(checkOnly) { Console.WriteLine(json.Serialize(new {ok=true})); return; }
+      ulong clockFrequency=0;
+      if(source=="system") {
+        // Loopback can omit PCM while the render endpoint is silent. Obtain
+        // evidence from the running endpoint, never extrapolate a wall timer.
+        object clockService;
+        if(client.GetService(ref AudioClockId,out clockService)>=0) {
+          audioClock=(IAudioClock)clockService;
+          if(audioClock.GetFrequency(out clockFrequency)!=0)clockFrequency=0;
+        }
+      }
+      var silence=new LoopbackSilence(wave.rate);
       var output=new BinaryWriter(Console.OpenStandardOutput()); var clock=Stopwatch.StartNew();
       Check(client.Start()); Status(new { type="started", source=source, rate=wave.rate, channels=wave.channels, bits=wave.bits, floating=floating });
       long lastDefaultCheck=0; bool havePosition=false,stopped=false;
@@ -144,15 +156,28 @@ class WasapiCapture {
           try {
             if(frames>192000) throw new InvalidOperationException("Invalid WASAPI packet length");
             byte[] raw=new byte[checked((int)frames*wave.blockAlign)]; if((flags&2)==0) Marshal.Copy(data,raw,0,raw.Length);
+            if(silence.Packet(qpc,frames,flags))flags|=1;
             WritePacket(output,wave,floating,raw,flags,qpc,ref havePosition);
           } finally { Check(capture.ReleaseBuffer(frames)); }
           Check(capture.GetNextPacketSize(out packet));
         }
         if(stopped) break;
+        if(audioClock!=null && clockFrequency>0) {
+          ulong position,clockQpc,startQpc;
+          int hr=audioClock.GetPosition(out position,out clockQpc);
+          // A packet may arrive while the clock query is in flight. Give real
+          // PCM priority before publishing any inferred silent interval.
+          Check(capture.GetNextPacketSize(out packet));
+          if(packet==0) {
+            int silenceFrames=silence.Poll(clockFrequency,position,clockQpc,hr==0,out startQpc);
+            if(silenceFrames>0)
+              WritePacket(output,wave,floating,new byte[silenceFrames*wave.blockAlign],2,startQpc,ref havePosition);
+          }
+        }
         Thread.Sleep(5);
       }
       Status(new {type="stopped",source=source});
-    } finally { if(client!=null) try {client.Stop();} catch {} Release(capture); Release(client); Release(device); if(format!=IntPtr.Zero) Marshal.FreeCoTaskMem(format); }
+    } finally { if(client!=null) try {client.Stop();} catch {} Release(audioClock); Release(capture); Release(client); Release(device); if(format!=IntPtr.Zero) Marshal.FreeCoTaskMem(format); }
   }
   [DllImport("ole32.dll")] static extern int PropVariantClear(ref PropVariant p);
   [StructLayout(LayoutKind.Sequential,Pack=2)] struct WaveFormat { public ushort tag,channels; public uint rate,bytesPerSecond; public ushort blockAlign,bits,extra; }
@@ -181,5 +206,45 @@ class WasapiCapture {
   }
   [ComImport,Guid("C8ADBD64-E71E-48A0-A4DE-185C395CD317"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] interface IAudioCaptureClient {
     [PreserveSig] int GetBuffer(out IntPtr data,out uint frames,out uint flags,out ulong position,out ulong qpc); [PreserveSig] int ReleaseBuffer(uint frames); [PreserveSig] int GetNextPacketSize(out uint frames);
+  }
+  [ComImport,Guid("CD63314F-3FBA-4A1B-812C-EF96358728E7"),InterfaceType(ComInterfaceType.InterfaceIsIUnknown)] interface IAudioClock {
+    [PreserveSig] int GetFrequency(out ulong frequency);
+    [PreserveSig] int GetPosition(out ulong position,out ulong qpc);
+    [PreserveSig] int GetCharacteristics(out uint characteristics);
+  }
+}
+
+// Pure clock accounting, exercised without COM or hardware. Keep 50ms behind
+// the confirmed device position and emit at most 100ms per drained poll.
+sealed class LoopbackSilence {
+  readonly uint rate;
+  double anchor=-1,next=-1,covered=-1,lastQpc=-1;
+  ulong origin,lastPosition;
+  public LoopbackSilence(uint sampleRate) {rate=sampleRate;}
+  public bool Packet(ulong qpc,uint frames,uint flags) {
+    if((flags&4)!=0 || qpc==0) {anchor=next=covered=lastQpc=-1;return false;}
+    bool overlap=covered>=0 && qpc+10000<covered;
+    next=qpc+frames*10000000.0/rate;
+    covered=-1;
+    if((flags&1)!=0 || overlap)anchor=-1;
+    return overlap;
+  }
+  public int Poll(ulong frequency,ulong position,ulong qpc,bool valid,out ulong start) {
+    start=0;
+    if(!valid || frequency==0 || qpc==0) {anchor=next=covered=lastQpc=-1;return 0;}
+    double through=anchor+(position>=origin?(position-origin)*10000000.0/frequency:0);
+    if(anchor<0 || position<lastPosition || qpc<lastQpc || Math.Abs(through-qpc)>500000) {
+      anchor=qpc;origin=position;lastPosition=position;lastQpc=qpc;
+      // A stalled/jumping clock discards the uncertain interval, no catch-up.
+      next=Math.Max(next,qpc);return 0;
+    }
+    lastPosition=position;lastQpc=qpc;
+    if(next<0)next=qpc;
+    if(through-next<1500000)return 0;
+    start=(ulong)next;
+    int frames=(int)(rate/10);
+    next+=frames*10000000.0/rate;
+    covered=next;
+    return frames;
   }
 }

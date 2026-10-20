@@ -28,6 +28,7 @@ async function launch() {
       globalThis.requests.push({
         webSearch: request.webSearch,
         profileTask: request.profileTask,
+        prompt: request.turns.at(-1).content,
         fileBytes: request.turns.at(-1).files?.map((file) => [...file.bytes]),
       });
       const prompt = request.turns.at(-1).content;
@@ -267,6 +268,7 @@ try {
   await console.log(JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ directory, checks, errors }));
 } catch (error) {
+  if (app) console.error('Synthetic requests:', await app.evaluate(() => globalThis.requests));
   if (page && !page.isClosed()) {
     await page.screenshot({});
     console.log((await page.locator('body').innerText()).slice(-1800));

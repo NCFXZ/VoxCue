@@ -38,6 +38,7 @@ if (testPackage) {
   process.kill(owner.pid, 0);
 }
 const archive = path.join(packageRoot, 'resources/app.asar');
+const expectedVersion = JSON.parse(await readFile('package.json', 'utf8')).version;
 const entries = asar
   .listPackage(archive)
   .map((file) => file.replaceAll('\\', '/').replace(/^\//, ''));
@@ -107,6 +108,12 @@ let app = await electron.launch({
 });
 try {
   let { page, errors } = await checkComponents(app);
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  await settings.locator('.provider-avatar img').evaluate(async (image) => image.decode());
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   assert.deepEqual(errors, []);
   await closeUiApp(app);
@@ -405,6 +412,7 @@ try {
         .prepare('package-question', 'Synthetic follow-up')
         .turns[0].content.includes('interviewee');
       return {
+        appVersion: app.getVersion(),
         speechDecoded,
         speechModelFiles: fs.readdirSync(model).sort(),
         qwenBackendPresent: typeof require(path.join(speech, 'qwen.js')).QwenEngine === 'function',
@@ -412,6 +420,8 @@ try {
           .filter((item) => item.id === 'qwen')
           .map((item) => ({
             optional: item.optional,
+            version: item.version,
+            sha256: item.sha256,
             assets: item.parts.map((part) => part.asset),
           })),
         retiredSpeechBackendAbsent: !fs
@@ -437,16 +447,19 @@ try {
     },
   );
   assert.equal(report.packaged, true);
+  assert.equal(report.appVersion, expectedVersion);
   assert.equal(report.workerLoaded, true);
   assert.equal(report.speechDecoded, true);
   assert.equal(report.qwenBackendPresent, true);
   assert.deepEqual(report.qwenComponent, [
     {
       optional: true,
+      version: '1.0.1',
+      sha256: '73e15188b94e7cd8684b7a33afbdb5e6b770bcd3ad6c8f441928c19231ea7987',
       assets: [
         'VoxCue-Qwen-ASR-1.0.0.zip',
-        'VoxCue-Qwen-Aligner-1.0.0.zip',
-        'VoxCue-Qwen-Windows-x64-Runtime-1.0.0.zip',
+        'VoxCue-Qwen-Aligner-Q8_0-1.0.0.zip',
+        'VoxCue-Qwen-Windows-x64-Runtime-1.0.1.zip',
       ],
     },
   ]);

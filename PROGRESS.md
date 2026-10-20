@@ -1,3 +1,33 @@
+## 2026-10-20：Windows 0.5.3 清理与源码同步
+
+用户最新授权清理工作空间并将本轮 shared/Windows 源码、测试、配置及文档同步至既有私有 main。核对 GitHub 主线及明确源码清单，排除安装包、模型、构建/依赖、测试产物、清理审计、真实资料和密钥；不延伸为未来自动同步或再次改写公开发行。
+
+清理已无消费者的 ChatGPT 图片路径选择器：固定 SVG 已内嵌，深色显示统一由现用 service-brand-icon 规则承担。移除未被脚本或文档引用的旧 Windows 编译清理计划；现用构建、正式发行、模型/Runtime、依赖/锁及恢复基线保留，macos/ 只读，历史跳过目录不重试。
+
+## 2026-10-20：Windows 0.5.3 发行
+
+按用户当次授权向现有 [v0.5.3](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.3) 追加 Windows x64 EXE、blockmap 和 latest.yml，并将发行标题与说明更新为 Windows/Mac 合并内容。Windows 正式三项保留于 windows/release/0.5.3；EXE 为 232341990 字节，SHA256 06fd3e88cb2d6a065428a38a2df159aed746080626ce49e2831ae2859711d70b。现有 Mac 三项、模型资源、旧发行、标签及既有 Latest 保留，不提交/推送私有源码或替换真实安装。
+
+用户反馈设置预览的 ChatGPT 图标加载失败，登录和 ProviderIdentity 统一将固定 SVG 内嵌到 Renderer，保持原图形、尺寸与浅深主题样式。回归入口阻断独立 SVG 文件后实际解码登录、预览和浮窗标识；记录和真实 ASAR 同样检查解码。架构检查识别受支持的资源内嵌标记，仍拒绝缺失资源与未解析内部模块；包级检查固定当前 Qwen 1.0.1 的组合与摘要。
+
+发行装配沿用现有 NSIS 和未配置 Authenticode 签名的 Windows 方式，更新说明保留该事实。实际包校验 SHA512、blockmap、负载及 ASAR；安装/升级/卸载沿用同一模板并使用隔离测试身份与临时目录。测试结果仅终端/对话，临时资料退出清理；真实账户、物理音频和真实安装不用于回归。
+
+## 2026-10-20：Windows Qwen Runtime 1.0.1 与 Q8_0 资源接续
+
+按用户当次授权，向现有 models-v1.0.0 追加 VoxCue-Qwen-Windows-x64-Runtime-1.0.1.zip 及逐文件 manifest。ZIP 为 713276200 字节，SHA256 cf991cd03dd56c37647830ae2de3337b3ace7a5454c2595edd345b8f8468ca70；原 Runtime 1.0.0、BF16 等旧资产、模型标签、Latest 和发行说明保持。
+
+Windows Qwen 组件 1.0.1 由原 ASR、已有 Q8_0 Aligner 与新 Runtime 三份固定归档组成；新 Runtime 清单独立保存，旧 qwen-catalog 的 1.0.0 信任根保留。Mac 继续只引用原 ASR 和 Q8_0 两份归档，运行时仍随 Mac 应用提供。未提交/推送源码、未发行 Windows 安装包或替换真实安装。
+
+## 2026-10-20：Windows 0.5.3 本地对齐
+
+由共享版本源同步 Windows 0.5.3，复用共享页面、1800ms 音频静音判定、识别器后台交接、模型回退及界面改动。Windows 回环兼容静音改由 WASAPI 的 IAudioClock 实际位置驱动；共享层移除墙钟补零，原生路径保留排空、50ms 安全余量、冻结/跳变/无效 QPC 保护和迟到真实包的间断处理。
+
+Qwen 切回 Paraformer 时，不立刻把已接受的大队列套用较小预算而误停采集；追平期间总队列保持原 30 秒上限，ACK 确认全部待处理音频降至 2 秒内后恢复 Paraformer 原预算。对应回归覆盖新旧音频一起排空、乱序 ACK 及两项原有上限。
+
+Windows AEC 单测及 ASAR 夹具接续 Recognizer/RecognitionRouter 动态入口。共享 GUI 语音夹具使用明确的平台合成硬件能力，删除检查等待真实列表刷新；原生驱动与独占句柄另行验证。新增 Windows Qwen 临时固定资源、CPU/CUDA 同条件 BF16/Q8_0 词边界/安全裁剪、生产 Worker 和后台双向切换入口，结果仅到终端/对话。共用 aligner-bench 可明确选择 CPU/CUDA，CPU 构建不编入 CUDA 分支。
+
+独立 Runtime 准备脚本只生成新版本资源及固定逐文件摘要，不上传或自动激活；生产 Windows 仍保留既有 BF16/Runtime 组合，资源发布和目录启用需当次授权。macos/、依赖版本/锁、旧公开资源/Latest 与真实安装保持原位。
+
 ## 2026-10-20：0.5.3 源码同步与 Windows 累计对照
 
 用户追加一次源码提交/推送授权，允许核对共享/Mac源码、测试和文档后同步私有main。新增shared/docs/WINDOWS_0.5.3_HANDOFF.md，相对Windows 0.5.1源码79e35d3累计整理0.5.2语音计时/交接/异步对齐/Q8_0/组件回退及0.5.3界面修改，附完整受管文件清单、Windows逐项操作和通过标准。Mac专属、Windows原生和待资源发布事项分开，不以Mac验证代替Windows验收。

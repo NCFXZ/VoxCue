@@ -349,6 +349,10 @@ try {
   await page.screenshot({ animations: 'disabled' });
   await second('知识库：待删资料').click();
   await base.waitFor({ state: 'detached' });
+  await page
+    .locator('.knowledge-card')
+    .filter({ hasText: '待删资料' })
+    .waitFor({ state: 'detached' });
   assert.equal(await page.locator('.knowledge-card').count(), 1);
   await page.locator('.knowledge-card').filter({ hasText: '保留资料' }).click();
   const retained = page.getByRole('dialog', { name: '保留资料', exact: true });

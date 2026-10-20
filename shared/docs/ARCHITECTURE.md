@@ -2,6 +2,8 @@
 
 ## Qwen Windows 与 Mac 接入
 
+当前两平台Qwen组件均为1.0.1，复用原始BF16 ASR归档及固定Q8_0 Aligner。Windows第三份归档为已发布的Runtime 1.0.1，由`qwen-windows-runtime-catalog.ts`固定ZIP与逐文件摘要；Mac继续使用随应用签名的运行时，不下载Windows归档。历史1.0.0 BF16/Runtime信任根和公开资源保留；缓存路径包括组件版本与组合摘要，三份归档完整认证后才原子启用Windows新组件。
+
 语音模型/推理设备的独立切换使用RecognitionRouter：原采集Worker保留AEC与连续输入，Recognizer将Paraformer/Qwen分别放在可释放的独立Worker；候选后台加载，两路当前VAD均空闲后用各路最多300ms处理后PCM预热并切换唯一事件来源。候选加载/预热失败或超时保留旧识别，暂停/结束/断流取消；等待加载不阻塞协调器的捕获串行队列。旧识别器关闭/Worker退出释放ONNX或原生进程。只改变识别配置时保留问题、草稿、1800ms截止点及排队/去重，音源或物理设备变更继续停启重连。回答模型/effort仍是当前回答原快照、后续问题新配置。
 
 浮窗设置纵向分区、标签在控件上方，窄屏单列；读取/订阅组件状态以准确显示模型可用性。组件IPC仅为已授权面试主frame开放无额外字段的status，修改操作保持原授权。
@@ -9,6 +11,8 @@
 语音模型与设备由 SpeechOptions 确认、主进程验证，Worker 通过固定受管组件路径加载 Rust 进程。四句缓冲及原版对齐器负责真实音频裁剪。Paraformer 与 Qwen 均在 0.8 秒静音后收尾；自动回答统一从最后一次系统语音结束起按已处理音频累计1800ms，800ms分段包含其中，不再从终稿到达后额外等待1000ms。两种引擎回传VAD静音起点，Worker确认处理进度，控制器标记各路未处理包；仅系统silence终稿就绪、音频进度到达截止点且无待检查系统音频才提交。识别/IPC延迟计入预算，墙钟等待不能代替静音证据；重新开口取消旧截止点，去重、忙时排队及结束保护保持。Windows具体原生进程和资源认证见 [QWEN_WINDOWS_HANDOFF.md](QWEN_WINDOWS_HANDOFF.md)。Mac平台通过可信运行时路径注入同一Worker/QwenEngine，ASR选择Metal/CPU，Mac对齐器使用Q8_0磁盘权重和原Rust CPU计算；平台硬件探测使用无模型、无音频的metal-check协议，开始与重连独立校验。Mac签名运行时属于应用原生资源，组件仅认证同一ASR/Aligner归档，平台缓存摘要独立。细节见 [QWEN_MACOS.md](QWEN_MACOS.md)。下文旧 2200ms 为历史基线，当前音频静音截止规则以此段为准。
 
 ## Windows 0.5.0 本地回声处理
+
+Windows 0.5.3 将回环无 PCM 时的兼容静音移到 WASAPI 原生端。仅在已排空捕获缓冲、IAudioClock 的实际设备位置持续前进且 QPC/频率一致时输出静音，保留 50ms 余量；冻结、失效或时钟跳变丢弃不确定区间，不能用墙钟外推。迟到真实包与补齐范围重叠时发送间断，重新建立识别边界。麦克风不走回环补齐；共享控制器两路均不按定时器制造进度。
 
 Windows SpeechController在同一共享Worker中装配固定本地echoCancellation模块；路径仅来自平台构造器，prepare完成后才启动WASAPI。所选render端点保持完整应用混音和原系统转写，仅双音源麦克风经过固定AEC3 WASM；不改变系统设备或音量，不增加UI开关。两路GetBuffer首样本的QPC（100ns转ms）是共同单调时钟，墙钟仅供转写时间。时间戳无效/主机静音旁路滤波并保留连续重采样，不改变ASR输入采样率；参考缺失最多等待80ms后保留麦克风。48kHz/10ms重采样、有限参考队列、滤波延迟补偿、间断和停止冲刷在Windows适配器完成。
 

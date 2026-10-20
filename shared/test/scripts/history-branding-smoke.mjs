@@ -173,6 +173,10 @@ try {
   );
   await main.getByRole('button', { name: '查看回答：请介绍机器人控制项目', exact: true }).click();
   await main.getByRole('complementary', { name: 'AI 回答', exact: true }).waitFor();
+  await main
+    .locator('.record-answer-content .provider-avatar img')
+    .first()
+    .evaluate(async (image) => image.decode());
   assert.equal(
     await main.locator('.record-answer-content .markdown-content strong').innerText(),
     '项目概况',

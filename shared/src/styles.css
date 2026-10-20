@@ -800,9 +800,6 @@ p {
 .dark .provider-avatar {
   background: var(--selected);
 }
-.dark .provider-avatar img[src*='chatgpt'] {
-  filter: invert(1);
-}
 .answer-text {
   font-size: var(--type-body);
   line-height: 2;

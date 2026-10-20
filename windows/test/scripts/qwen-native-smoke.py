@@ -4,6 +4,7 @@ No capture devices, user profile, recordings or retained transcript files.
 import argparse
 import base64
 import io
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -19,6 +20,7 @@ parser.add_argument('component', type=Path)
 parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda')
 parser.add_argument('--wave', type=Path)
 parser.add_argument('--require-crop', action='store_true')
+parser.add_argument('--repeat', type=int, choices=range(1, 5), default=1)
 args = parser.parse_args()
 runtime = args.component / 'runtime'
 environment = dict(os.environ, PATH=str(runtime) + os.pathsep + os.environ.get('PATH', ''), RAYON_NUM_THREADS='4')
@@ -48,6 +50,7 @@ def send(op, source='system', **fields):
     wait('ack', sequence)
 try:
     ready = wait('ready')
+    assert ready['async_alignment'] is True, 'This test requires the rebuilt 0.5.3 runtime'
     assert ready['device'] == args.device
     assert ready['chunk_ms'] == (500 if args.device == 'cuda' and ready['vram_bytes'] >= 4*1024**3 else 1000)
     send('start')
@@ -64,9 +67,11 @@ try:
         with wave.open(io.BytesIO(data)) as audio:
             assert audio.getframerate() == 16000 and audio.getnchannels() == 1 and audio.getsampwidth() == 2
             pcm = audio.readframes(audio.getnframes())
-        combined = pcm + bytes(32000) if args.wave else (pcm + bytes(4800))*6 + bytes(32000)
+        combined = (pcm + bytes(4800)) * args.repeat + bytes(32000) if args.wave else (pcm + bytes(4800))*6 + bytes(32000)
         for offset in range(0, len(combined), 6400):
             send('audio', audio=base64.b64encode(combined[offset:offset+6400]).decode())
+            if offset and offset % 320000 == 0:
+                print(json.dumps(dict(device=args.device, processed_input_ms=offset//32)), flush=True)
     send('finish')
     send('finish', 'microphone')
     child.stdin.close()
@@ -81,9 +86,11 @@ try:
                 assert event['removed_chunk_ms'] > 0 and event['cut_ms'] > event['window_start_ms']
         if args.require_crop:
             if not any(event['type'] == 'committed' for event in all_events):
-                print('SYNTHETIC_DIAGNOSTIC', json.dumps([event for event in all_events if event['type'] in ['partial', 'tail_final', 'alignment_deferred']][-4:], ensure_ascii=False))
+                print('SYNTHETIC_DIAGNOSTIC', json.dumps([dict(type=event['type'], characters=len(event.get('text', '')), buffer_ms=event.get('buffer_ms')) for event in all_events if event['type'] in ['partial', 'tail_final', 'alignment_deferred']][-4:]))
             assert any(event['type'] == 'committed' for event in all_events), 'Four-sentence crop did not occur'
-    print(json.dumps(dict(device=ready['device'], chunk_ms=ready['chunk_ms'], alignment_device=ready['alignment_device'], load_ms=ready['load_ms'], partials=sum(event['type']=='partial' for event in all_events), crops=sum(event['type']=='committed' for event in all_events), audio_ms=max((event.get('audio_ms', 0) for event in all_events), default=0), max_buffer_ms=max((event.get('buffer_ms', 0) for event in all_events), default=0), exited=child.returncode), ensure_ascii=False))
+    transcript = ''.join(event.get('text', '') for event in all_events if event.get('session') == 'system' and event['type'] in ['committed', 'tail_final'])
+    normalized = ''.join(c for c in transcript.lower() if c.isalnum())
+    print(json.dumps(dict(device=ready['device'], chunk_ms=ready['chunk_ms'], alignment_device=ready['alignment_device'], load_ms=ready['load_ms'], partials=sum(event['type']=='partial' for event in all_events), crops=sum(event['type']=='committed' for event in all_events), audio_ms=max((event.get('audio_ms', 0) for event in all_events), default=0), max_buffer_ms=max((event.get('buffer_ms', 0) for event in all_events), default=0), transcript_sha256=hashlib.sha256(normalized.encode()).hexdigest(), characters=len(normalized), exited=child.returncode), ensure_ascii=False))
 finally:
     if child.poll() is None:
         child.kill()

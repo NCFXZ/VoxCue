@@ -19,8 +19,12 @@ if (!process.argv.includes('--node')) {
     process.exitCode = code ?? 1;
   });
 } else {
-  const [component, wave] = process.argv.slice(2);
+  const [component, wave, device = 'cuda', option] = process.argv
+    .slice(2)
+    .filter((arg) => arg !== '--node');
   assert(component && wave);
+  assert.ok(['cpu', 'cuda'].includes(device));
+  assert.ok(option === undefined || option === '--no-crop');
   const worker = new Worker(
     path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/speech/worker.js'),
   );
@@ -61,7 +65,7 @@ if (!process.argv.includes('--node')) {
         op: 'init',
         directory: component,
         speechModel: 'qwen',
-        inferenceDevice: 'cuda',
+        inferenceDevice: device,
         preprocessorFile: path.join(
           workspace.platformRoot,
           'dist-electron/windows/electron/speech/echoCancellation.js',
@@ -69,7 +73,7 @@ if (!process.argv.includes('--node')) {
       },
       (message) => message.ready,
     );
-    assert.equal(ready.chunkMs, 500);
+    assert.equal(ready.chunkMs, device === 'cpu' ? 1000 : 500);
     const prepared = ++sequence;
     await send(
       { op: 'prepare', id: prepared, sources: ['system', 'microphone'] },
@@ -88,8 +92,13 @@ if (!process.argv.includes('--node')) {
       cursor += 8 + size + (size % 2);
     }
     assert(pcm);
-    const samples = new Float32Array(pcm.length / 2 + 16000);
-    for (let i = 0; i < pcm.length / 2; i++) samples[i] = pcm.readInt16LE(i * 2) / 32768;
+    // Preserve a live tail while the asynchronous four-sentence cut finishes.
+    const stride = pcm.length / 2 + 2400;
+    const repeats = option === '--no-crop' ? 1 : 2;
+    const samples = new Float32Array(stride * repeats + 16000);
+    for (let repeat = 0; repeat < repeats; repeat++)
+      for (let i = 0; i < pcm.length / 2; i++)
+        samples[repeat * stride + i] = pcm.readInt16LE(i * 2) / 32768;
     for (let offset = 0; offset < samples.length; offset += 1600) {
       const block = samples.slice(offset, offset + 1600),
         seq = ++sequence;
@@ -113,7 +122,7 @@ if (!process.argv.includes('--node')) {
       .filter((event) => event.type === 'segment')
       .map((event) => event.segment);
     assert(segments.some((segment) => !segment.final && segment.text));
-    assert(segments.some((segment) => segment.reason === 'sentence'));
+    if (option !== '--no-crop') assert(segments.some((segment) => segment.reason === 'sentence'));
     assert(segments.some((segment) => segment.reason === 'silence'));
     assert(
       segments.every((segment) => segment.source === 'system' && segment.speechModel === 'qwen'),
@@ -121,7 +130,7 @@ if (!process.argv.includes('--node')) {
     const close = ++sequence;
     await send({ op: 'close', id: close }, (message) => message.closed === close);
     console.log(
-      'Qwen production worker: resampling/AEC, partials, sentence crop, silence final and native exit passed.',
+      `Qwen production worker (${device}): resampling/AEC, partials, ${option === '--no-crop' ? 'short transcription' : 'sentence crop'}, silence final and native exit passed.`,
     );
   } finally {
     await worker.terminate();
