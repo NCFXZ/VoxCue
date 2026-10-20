@@ -1,6 +1,6 @@
 # Mac Qwen 流式识别
 
-Mac 0.5.2沿用Windows相同Qwen3-ASR 0.6B原始BF16权重，ASR可选Metal或CPU；ForcedAligner默认使用Q8_0磁盘权重和原Rust CPU计算。Paraformer继续固定CPU。这是用户在0.5.1交接基础上追加的原生接入，Windows交接中“Mac尚未接入”的描述属于此前状态。Windows本轮逐项接续见[0.5.2核对清单](WINDOWS_0.5.2_HANDOFF.md)。
+Mac 0.5.2起沿用Windows相同Qwen3-ASR 0.6B原始BF16权重，当前0.5.3保留以下识别实现。ASR可选Metal或CPU；ForcedAligner默认使用Q8_0磁盘权重和原Rust CPU计算，Paraformer继续固定CPU。这是用户在0.5.1交接基础上追加的原生接入，Windows交接中“Mac尚未接入”的描述属于此前状态。Windows累计接续见[0.5.1→0.5.3完整核对报告](WINDOWS_0.5.3_HANDOFF.md)。
 
 ## 流式和平台边界
 

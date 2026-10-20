@@ -134,7 +134,7 @@ try {
   assert.equal(await main.locator('.history-row').count(), 1);
   await main.locator('.history-row').click();
   await main.locator('.record-transcript-row').nth(119).waitFor();
-  assert.equal(await main.locator('.record-answer-panel').count(), 0);
+  assert.equal(await main.getByRole('complementary', { name: 'AI 回答', exact: true }).count(), 0);
   assert.equal(await main.locator('.record-transcript-row time').nth(80).innerText(), '1:20');
   const centered = await main.locator('.record-reading-column').evaluate((el) => {
     const r = el.getBoundingClientRect(),
@@ -148,6 +148,29 @@ try {
   assert(Math.abs(centered.r.left + centered.r.right - (centered.p.left * 2 + centered.width)) < 3);
   await main.screenshot({});
   checks.push('centered timeline, elapsed times, 120 rows, legacy Mock hidden');
+  for (const expanded of [true, false]) {
+    const positions = await main.evaluate(async () => {
+      const panel = document.querySelector('.record-answer-panel');
+      const values = [panel.getBoundingClientRect().left];
+      document.querySelector('[aria-label="AI 回答面板"]').click();
+      const started = performance.now();
+      while (performance.now() - started < 300) {
+        await new Promise(requestAnimationFrame);
+        values.push(panel.getBoundingClientRect().left);
+      }
+      return values;
+    });
+    const [start, end] = [positions[0], positions.at(-1)];
+    assert.ok(expanded ? start > end + 200 : end > start + 200);
+    assert.ok(
+      positions.some((x) => x > Math.min(start, end) + 2 && x < Math.max(start, end) - 2),
+      'Answer rail must move through intermediate positions when opening and closing',
+    );
+  }
+  assert.equal(await main.locator('.record-answer-panel').evaluate((panel) => panel.inert), true);
+  checks.push(
+    'answer rail animates open and closed, with hidden content excluded from interaction',
+  );
   await main.getByRole('button', { name: '查看回答：请介绍机器人控制项目', exact: true }).click();
   await main.getByRole('complementary', { name: 'AI 回答', exact: true }).waitFor();
   assert.equal(

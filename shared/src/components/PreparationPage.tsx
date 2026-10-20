@@ -1,6 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
-import { speechComponent } from '../../electron/contracts/speechSettings';
+import {
+  speechComponent,
+  speechModelLabels,
+  speechSelection,
+} from '../../electron/contracts/speechSettings';
 import { ComponentsNotice } from './ComponentsNotice';
 import { AudioCheck } from './AudioCheck';
 import {
@@ -12,7 +16,6 @@ import {
   X,
   Person,
   Play,
-  ChevronDown,
   Monitor,
   Settings,
   Refresh,
@@ -36,6 +39,7 @@ import { MarkdownContent } from './MarkdownContent';
 import { PlainTextContent } from './PlainTextContent';
 import { isSkillReply } from '../services/preparation';
 import { PersonalInfoPanel } from './PersonalInfoPanel';
+import { FollowLatestButton } from './FollowLatestButton';
 import { localKnowledge } from '../services/knowledge';
 import { ProviderIdentity } from './ProviderIdentity';
 import { ResponseProgress } from './ResponseProgress';
@@ -49,6 +53,7 @@ const audioAccessLabels = {
   unavailable: '设备不可用',
   error: '检查失败',
 };
+const inferenceDeviceLabels = { cpu: 'CPU', cuda: 'CUDA', metal: 'Metal' } as const;
 const screenAccessLabels = {
   granted: '可用',
   'not-required': '无需单独授权',
@@ -112,6 +117,7 @@ export function PreparationPage({
   const [interviewConfiguration, setInterviewConfiguration] = useState(
     defaultInterviewConfiguration,
   );
+  const interviewSpeech = speechSelection(interviewConfiguration.options);
   const interviewProvider = useModelProvider(interviewConfiguration.modelId);
   const [infoOpen, setInfoOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(380);
@@ -398,6 +404,14 @@ export function PreparationPage({
             <div>
               <dt>面试者 · 麦克风</dt>
               <dd>{audioName('microphone')}</dd>
+            </div>
+            <div>
+              <dt>语音模型</dt>
+              <dd>{speechModelLabels[interviewSpeech.speechModel]}</dd>
+            </div>
+            <div>
+              <dt>推理设备</dt>
+              <dd>{inferenceDeviceLabels[interviewSpeech.inferenceDevice]}</dd>
             </div>
             <div>
               <dt>回答模型</dt>
@@ -738,15 +752,12 @@ export function PreparationPage({
             </section>
           )}
           <div className="composer-area chat-composer">
-            {!chatScroll.following && state.messages.length > 0 && (
-              <Button
-                className="follow-latest"
-                variant="outline"
+            {(state.streaming || !chatScroll.following) && state.messages.length > 0 && (
+              <FollowLatestButton
+                label={chatScroll.hasNew ? '有新回复 · 返回最新' : '返回最新回复'}
+                busy={state.streaming}
                 onClick={chatScroll.scrollToLatest}
-              >
-                <ChevronDown size={15} />
-                {chatScroll.hasNew ? '有新回复 · 返回最新' : '返回最新回复'}
-              </Button>
+              />
             )}
             {state.resume && (
               <div className="resume-chip">

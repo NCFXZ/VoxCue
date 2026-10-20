@@ -1,6 +1,6 @@
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { mkdir, writeFile, readFile, realpath } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, realpath, access } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
@@ -174,23 +174,23 @@ app.whenReady().then(async()=>{
 `,
   );
   await run(workspace.platformRequire('electron'), [testRoot, '--no-sandbox']);
-  const handles = spawnSync(
-    '/usr/sbin/lsof',
-    [
-      '-t',
-      '--',
-      path.join(paths.qwenModels, 'asr/model.safetensors'),
-      path.join(paths.qwenModels, 'aligner/model.safetensors'),
-      path.join(paths.speechModels, 'encoder.int8.onnx'),
-      path.join(paths.speechModels, 'decoder.int8.onnx'),
-      path.join(root, 'native/bin/qwen/voxcue-qwen'),
-      path.join(root, 'native/bin/qwen/python/bin/python3.12'),
-    ],
-    { encoding: 'utf8', timeout: 10000 },
-  );
+  const releasedFiles = [
+    path.join(paths.qwenModels, 'asr/model.safetensors'),
+    path.join(paths.qwenModels, 'aligner/model.gguf'),
+    path.join(paths.speechModels, 'encoder.int8.onnx'),
+    path.join(paths.speechModels, 'decoder.int8.onnx'),
+    path.join(root, 'native/bin/qwen/voxcue-qwen'),
+    path.join(root, 'native/bin/qwen/python/bin/python3.12'),
+  ];
+  for (const file of releasedFiles) await access(file);
+  const handles = spawnSync('/usr/sbin/lsof', ['-t', '--', ...releasedFiles], {
+    encoding: 'utf8',
+    timeout: 10000,
+  });
   assert.equal(handles.error, undefined);
   assert.equal(handles.status, 1);
   assert.equal(handles.stdout.trim(), '');
+  assert.equal(handles.stderr.trim(), '');
   console.log('PASS: original model files have no remaining process handles.');
 } finally {
   service.dispose();

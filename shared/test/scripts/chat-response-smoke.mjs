@@ -185,7 +185,7 @@ try {
     ['聊天模型', '思考强度'],
   );
   assert.equal(await page.getByRole('button', { name: '网络搜索', exact: true }).count(), 0);
-  assert.deepEqual(controls, Array(2).fill({ height: 32, shadow: 'none', radius: '8px' }));
+  assert.deepEqual(controls, Array(2).fill({ height: 32, shadow: 'none', radius: '16px' }));
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   assert.equal(await page.locator('.model-option-icon').count(), 0);
   assert.ok(

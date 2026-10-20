@@ -75,6 +75,22 @@ try {
       'Menu must be visible above the native dialog',
     );
     await geometry();
+    await selected.hover();
+    assert.equal(
+      await selected.evaluate(
+        (element) => getComputedStyle(element).backgroundColor !== 'rgba(0, 0, 0, 0)',
+      ),
+      true,
+      'Hovered menu items retain feedback',
+    );
+    await page.mouse.move(0, 0);
+    await page.waitForFunction(() => {
+      const selected = document.querySelector('[role="menuitemradio"][aria-checked="true"]');
+      return selected && getComputedStyle(selected).backgroundColor === 'rgba(0, 0, 0, 0)';
+    });
+    assert.equal(await selected.locator('.dropdown-check').count(), 1);
+    await page.keyboard.press('ArrowDown');
+    assert.equal(await settings.locator('[role="menuitemradio"][data-highlighted]').count(), 1);
     await page.screenshot({ animations: 'disabled' });
     await page.keyboard.press('Escape');
     await selected.waitFor({ state: 'detached' });
@@ -87,7 +103,29 @@ try {
   await open();
   assert.equal(await category('个性化').getAttribute('aria-current'), 'page');
   assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 7);
-  const accent = settings.getByRole('button', { name: '主题色', exact: true });
+  // A modal Radix menu temporarily hides sibling controls from accessibility.
+  const accent = settings.getByRole('button', { name: '主题色', exact: true, includeHidden: true });
+  const themeMenu = settings.getByRole('button', {
+    name: '外观主题',
+    exact: true,
+    includeHidden: true,
+  });
+  // Exercise ownership even when native dialog outside-dismiss events are absent.
+  // The open menu can cover the next trigger, so activate its actual key handler.
+  for (const trigger of [themeMenu, accent, themeMenu, accent, themeMenu, accent]) {
+    await trigger.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
+    assert.equal(await page.getByRole('menu').count(), 1);
+    assert.equal(await settings.locator('[aria-haspopup="menu"][aria-expanded="true"]').count(), 1);
+    assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+    assert.equal(
+      await page.getByRole('menu').getAttribute('aria-labelledby'),
+      await trigger.getAttribute('id'),
+    );
+  }
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '主题色');
+  assert.equal(await page.getByRole('menu').count(), 0);
+  assert.equal(await settings.isVisible(), true);
   await accent.getByText('跟随系统', { exact: true }).waitFor();
   assert.equal(
     await settings

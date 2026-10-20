@@ -1,4 +1,4 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import * as DropdownMenu from './dropdown-menu';
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from '../icons';
 

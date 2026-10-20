@@ -1,5 +1,5 @@
 import { useRef, type ReactNode } from 'react';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import * as DropdownMenu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { Check, Globe, Folder, Paperclip, Plus, ChevronDown, Refresh, Sparkles } from './icons';
@@ -33,7 +33,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
         </DropdownMenu.Trigger>
         <DropdownMenu.Portal>
           <DropdownMenu.Content
-            className="dropdown-content"
+            className="dropdown-content composer-menu"
             side="top"
             align="start"
             sideOffset={10}
@@ -76,7 +76,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="dropdown-content compact-tool-menu model-menu"
+              className="dropdown-content compact-tool-menu composer-menu model-menu"
               side="top"
               align="start"
               sideOffset={10}
@@ -139,7 +139,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="dropdown-content compact-tool-menu effort-menu"
+              className="dropdown-content compact-tool-menu composer-menu effort-menu"
               side="top"
               align="start"
               sideOffset={10}

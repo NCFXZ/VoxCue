@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import * as Menu from '@radix-ui/react-dropdown-menu';
+import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { Check, ChevronDown, AudioLines, Volume2 } from './icons';
 import type { AudioSource, InterviewConfiguration } from '../../electron/contracts/speech';

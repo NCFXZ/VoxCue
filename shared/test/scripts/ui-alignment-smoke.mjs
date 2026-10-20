@@ -68,6 +68,34 @@ try {
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('GPT test', { exact: true })
     .waitFor();
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
+      theme,
+    );
+    const surfaces = [];
+    for (const label of ['添加附件', '聊天模型', '思考强度']) {
+      const trigger = page.getByRole('button', { name: label, exact: true });
+      await trigger.hover();
+      await settle(page);
+      surfaces.push(
+        await trigger.evaluate((element) => {
+          const style = getComputedStyle(element);
+          return {
+            height: element.getBoundingClientRect().height,
+            radius: style.borderRadius,
+            curve: style.getPropertyValue('corner-top-left-shape'),
+            background: style.backgroundColor,
+            shadow: style.boxShadow,
+          };
+        }),
+      );
+    }
+    assert.deepEqual(surfaces[1], surfaces[0], `${theme}: composer hover surfaces differ`);
+    assert.deepEqual(surfaces[2], surfaces[0], `${theme}: composer hover surfaces differ`);
+    check(`composer-hover-family-${theme}`, true, surfaces);
+    await page.mouse.move(0, 0);
+  }
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.getByRole('menuitemradio', { name: longName, exact: true }).click();
   const composerGeometry = () =>

@@ -26,6 +26,7 @@ import { useComponents } from '../stores/components';
 import { useHistory } from '../stores/history';
 import { AppLogo } from './AppLogo';
 import { useFollowScroll } from './useFollowScroll';
+import { FollowLatestButton } from './FollowLatestButton';
 import { MarkdownContent } from './MarkdownContent';
 import { ResponseProgress } from './ResponseProgress';
 import { InterviewAudioRecovery } from './InterviewAudioRecovery';
@@ -476,14 +477,10 @@ export function FloatingInterview() {
                 ))}
               </div>
               {!transcriptScroll.following && (
-                <Button
-                  className="follow-latest"
-                  variant="outline"
+                <FollowLatestButton
+                  label={transcriptScroll.hasNew ? '有新转写 · 返回最新' : '返回最新转写'}
                   onClick={transcriptScroll.scrollToLatest}
-                >
-                  <ChevronDown size={14} />
-                  {transcriptScroll.hasNew ? '有新转写 · 返回最新' : '返回最新转写'}
-                </Button>
+                />
               )}
             </section>
           )}
@@ -628,15 +625,12 @@ export function FloatingInterview() {
                 </article>
               ))}
             </div>
-            {!answerScroll.following && (
-              <Button
-                className="follow-latest"
-                variant="outline"
+            {(state.generating || !answerScroll.following) && (
+              <FollowLatestButton
+                label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
+                busy={state.generating}
                 onClick={answerScroll.scrollToLatest}
-              >
-                <ChevronDown size={14} />
-                {answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
-              </Button>
+              />
             )}
             <form
               className="floating-composer"

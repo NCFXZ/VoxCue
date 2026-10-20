@@ -160,7 +160,7 @@ try {
       ].map((e) => parseFloat(getComputedStyle(e).fontSize)),
       icons: [...document.querySelectorAll('.floating-question > svg')].map((e) => ({
         width: e.getBoundingClientRect().width,
-        text: parseFloat(getComputedStyle(e.parentElement).fontSize),
+        size: parseFloat(e.style.getPropertyValue('--icon-size')),
       })),
       overflow: [
         ...document.querySelectorAll('.floating-panel,.floating-scroll,.floating-composer'),
@@ -172,7 +172,7 @@ try {
       JSON.stringify(metrics),
     );
     assert.ok(
-      metrics.icons.every((m) => m.width / m.text >= 1.19),
+      metrics.icons.every((m) => Math.abs(m.width - m.size) < 0.01),
       JSON.stringify(metrics),
     );
     assert.equal(metrics.overflow, false);

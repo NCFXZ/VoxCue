@@ -264,12 +264,15 @@ try {
     await content.fill(originalInstructions);
     await editor.getByRole('button', { name: '保存', exact: true }).click();
     await editor.waitFor({ state: 'detached' });
+    await page.bringToFront();
     const separator = page.getByRole('separator', { name: '调整个人信息宽度' });
     await panel.locator('.personal-panel-scroll').evaluate((e) => (e.scrollTop = 0));
     const initial = (await panel.boundingBox()).width;
     const grip = await separator.boundingBox();
     await page.mouse.move(grip.x + grip.width / 2, grip.y + 120);
     await page.mouse.down();
+    assert.equal(await page.locator('.is-resizing-info').count(), 1);
+    assert.equal(await separator.evaluate((e) => getComputedStyle(e).cursor), 'col-resize');
     await page.mouse.move(grip.x - 80, grip.y + 120, { steps: 6 });
     await page.mouse.up();
     await settle(page);

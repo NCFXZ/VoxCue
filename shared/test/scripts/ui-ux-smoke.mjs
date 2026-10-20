@@ -14,6 +14,30 @@ const app = await electron.launch({
 });
 const checks = [];
 const errors = [];
+const previewLatest = async (page, preview) => {
+  if (!process.argv.includes('--preview-latest')) return;
+  const bounds = await page.locator('.chat-composer').boundingBox();
+  const column = await page.locator('.chat-column').boundingBox();
+  console.log(
+    JSON.stringify({
+      preview,
+      jpeg: (
+        await page.screenshot({
+          type: 'jpeg',
+          quality: 85,
+          scale: 'css',
+          animations: 'disabled',
+          clip: {
+            x: column.x,
+            y: bounds.y - 80,
+            width: column.width,
+            height: bounds.height + 92,
+          },
+        })
+      ).toString('base64'),
+    }),
+  );
+};
 try {
   await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
@@ -261,6 +285,70 @@ try {
   checks.push(
     'removed settings shortcuts, system/default and chosen accent, truthful model state and retry, inline answer retry without duplicate question',
   );
+  await message.fill('延迟回答');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await app.evaluate(async () => await globalThis.delayedReady);
+  const activityButton = page.locator('.chat-composer > .follow-latest[aria-busy="true"]');
+  await activityButton.waitFor();
+  const motion = await activityButton.evaluate(async (button) => {
+    const dots = [...button.querySelectorAll('.follow-latest-dots > span')];
+    const samples = [];
+    for (let frame = 0; frame < 12; frame++) {
+      await new Promise(requestAnimationFrame);
+      samples.push(dots.map((dot) => getComputedStyle(dot).transform).join('|'));
+    }
+    const style = getComputedStyle(button);
+    const host = button.parentElement;
+    const fade = getComputedStyle(host, '::before');
+    const hostBounds = host.getBoundingClientRect();
+    const column = host.closest('.chat-column').getBoundingClientRect();
+    const transform = new DOMMatrix(fade.transform);
+    const fadeLeft = hostBounds.left + parseFloat(fade.left) + transform.m41;
+    return {
+      count: dots.length,
+      moving: new Set(samples).size > 1,
+      width: style.width,
+      height: style.height,
+      radius: style.borderRadius,
+      position: style.position,
+      fade: fade.backgroundImage,
+      fadePointerEvents: fade.pointerEvents,
+      fadeLeftGap: fadeLeft - column.left,
+      fadeRightGap: column.right - fadeLeft - parseFloat(fade.width),
+      fadeBottomGap:
+        host.querySelector('.composer').getBoundingClientRect().top -
+        (hostBounds.top + parseFloat(fade.top) + parseFloat(fade.height)),
+    };
+  });
+  assert.equal(motion.count, 3);
+  assert.equal(motion.moving, true);
+  assert.equal(motion.width, motion.height);
+  assert.equal(motion.radius, '50%');
+  assert.equal(motion.position, 'absolute');
+  assert.ok(motion.fade.includes('linear-gradient'));
+  assert.equal(motion.fadePointerEvents, 'none');
+  assert.ok(Math.abs(motion.fadeLeftGap) < 1, JSON.stringify(motion));
+  assert.ok(Math.abs(motion.fadeRightGap) < 1, JSON.stringify(motion));
+  assert.ok(Math.abs(motion.fadeBottomGap) < 1, JSON.stringify(motion));
+  await previewLatest(page, 'busy-latest-and-composer-fade');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  assert.deepEqual(
+    await activityButton
+      .locator('.follow-latest-dots > span')
+      .evaluateAll((dots) => dots.map((dot) => getComputedStyle(dot).animationName)),
+    ['none', 'none', 'none'],
+  );
+  await activityButton.click();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await app.evaluate(() => globalThis.finishDelayed());
+  await page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
+  await activityButton.waitFor({ state: 'hidden' });
+  await app.evaluate(() => {
+    globalThis.delayedReady = new Promise((resolve) => (globalThis.resolveDelayedReady = resolve));
+  });
+  checks.push(
+    'circular latest action, three bouncing dots while answering, reduced motion and noninteractive composer fade',
+  );
   await message.fill('长回答');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.waitForFunction(
@@ -273,6 +361,7 @@ try {
     e.dispatchEvent(new Event('scroll'));
   });
   await page.getByRole('button', { name: '返回最新回复', exact: true }).waitFor();
+  await previewLatest(page, 'circle-arrow-and-composer-fade');
   await message.fill('新的问题');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.getByRole('button', { name: '有新回复 · 返回最新', exact: true }).click();

@@ -1,7 +1,7 @@
 import { useEffect, type CSSProperties } from 'react';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { useState } from 'react';
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import * as DropdownMenu from './ui/dropdown-menu';
 import {
   Appearance,
   Settings,
@@ -138,7 +138,10 @@ export function SettingsDialog({
                   <strong>主题</strong>
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
-                      <button className="settings-choice" aria-label="外观主题">
+                      <button
+                        className="settings-choice settings-appearance-choice"
+                        aria-label="外观主题"
+                      >
                         <selectedTheme.Icon size={18} />
                         <span className="settings-choice-label">{selectedTheme.label}</span>
                         <ChevronsUpDown size={14} />
@@ -175,7 +178,10 @@ export function SettingsDialog({
                   <strong>主题色</strong>
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
-                      <button className="settings-choice" aria-label="主题色">
+                      <button
+                        className="settings-choice settings-appearance-choice"
+                        aria-label="主题色"
+                      >
                         {accent === 'system' ? (
                           <Monitor size={18} />
                         ) : (

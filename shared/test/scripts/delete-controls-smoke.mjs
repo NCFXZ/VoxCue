@@ -6,6 +6,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { verifyContinuousCorners } from './continuous-corners.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/delete-controls-')));
@@ -232,6 +233,16 @@ try {
   await first('职位描述摘要').click();
   await second('职位描述摘要').click();
   await panel.getByText('删除失败，请重试。', { exact: true }).waitFor();
+  await settle(page);
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
+      theme,
+    );
+    await settle(page);
+    await verifyContinuousCorners(page, `delete-error-${theme}`);
+    await page.screenshot({ animations: 'disabled' });
+  }
   assert.equal((await saved()).jobDescription, '合成 JD 摘要');
   await page.evaluate(() => globalThis.restoreDeleteStorage());
   await first('职位描述摘要').click();

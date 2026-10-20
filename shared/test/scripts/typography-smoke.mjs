@@ -5,6 +5,11 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import {
+  verifyContinuousCorners,
+  verifyCornerRendering,
+  verifyCallbackCorners,
+} from './continuous-corners.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/typography-')));
@@ -39,6 +44,9 @@ const inspect = async (page, name) => {
           animation.playState !== 'running',
       ),
   );
+  const corners = await verifyContinuousCorners(page, name);
+  if (name === 'login-light')
+    console.log(JSON.stringify({ cornerRendering: await verifyCornerRendering(page, app) }));
   const geometry = await page.evaluate(() => {
     const visible = (e) => e.getBoundingClientRect().width > 0;
     const active = document.querySelector('dialog[open]:last-of-type') ?? document.body;
@@ -223,7 +231,7 @@ const inspect = async (page, name) => {
       ['BUTTON', 'INPUT', 'TEXTAREA'].includes(row.tag) && row.size !== row.expectedControlSize,
   );
   assert.deepEqual(wrongControls, [], `${name}: inconsistent control text`);
-  checks.push({ name, rows, geometry });
+  checks.push({ name, rows, geometry, corners });
   await page.screenshot({ animations: 'disabled' });
 };
 try {
@@ -317,6 +325,16 @@ try {
       theme,
     );
     await inspect(page, `preparation-${theme}`);
+    for (const [label, menu] of [
+      ['添加附件', 'attachments'],
+      ['聊天模型', 'model'],
+      ['思考强度', 'effort'],
+    ]) {
+      await page.getByRole('button', { name: label, exact: true }).click();
+      await page.mouse.move(0, 0);
+      await inspect(page, `chat-menu-${menu}-${theme}`);
+      await page.keyboard.press('Escape');
+    }
     await info.click();
     await panel.locator('.personal-panel-scroll').evaluate((e) => {
       e.scrollTop = 0;
@@ -345,6 +363,7 @@ try {
     await editor.getByRole('button', { name: '取消', exact: true }).click();
     await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+    await inspect(page, `user-menu-${theme}`);
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
     for (const category of [
@@ -506,10 +525,12 @@ try {
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
   ]);
   assert.deepEqual(errors, []);
+  const callbacks = await verifyCallbackCorners(app);
   await console.log(
     JSON.stringify(
       {
-        checks: checks.map(({ name, geometry }) => ({ name, geometry })),
+        checks: checks.map(({ name, geometry, corners }) => ({ name, geometry, corners })),
+        callbacks,
         errors,
         scope: 'Isolated synthetic account/audio/AI; actual Electron UI and computed typography',
       },
@@ -517,7 +538,9 @@ try {
       2,
     ),
   );
-  console.log(JSON.stringify({ directory, states: checks.length, errors }));
+  console.log(
+    JSON.stringify({ directory, states: checks.length, callbacks: callbacks.length, errors }),
+  );
 } catch (error) {
   const page = app.windows().at(-1);
   if (page && !page.isClosed()) await page.screenshot({});

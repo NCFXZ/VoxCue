@@ -6,13 +6,15 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地面试语音识别、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前共享、根及Mac源码配置版本为 **0.5.2**，Windows配置保留0.5.1，待其本机接续。Mac新增[Qwen Metal/CPU流式识别](shared/docs/QWEN_MACOS.md)，Paraformer保持CPU；Mac Qwen组件为1.0.1（Q8_0对齐器），Windows Qwen及其他模型组件保持原版本。已发布[Mac arm64 v0.5.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.2)，Windows x64仍为[v0.5.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.1)。Mac提供DMG、签名更新ZIP及latest-mac.yml，沿用原Ed25519密钥和固定本地代码签名证书；Windows提供安装包、blockmap及latest.yml。两平台按各自完整资产独立选版，旧发行/资产和既有Latest保持。Windows本轮修改说明与逐项验收见[0.5.2核对清单](shared/docs/WINDOWS_0.5.2_HANDOFF.md)；用户在应用发行后另行授权将本轮共享/Mac源码、测试和文档同步至私有main；Windows须使用包含新清单的本次源码提交或更新main核对。
+当前共享、根及Mac源码配置版本为 **0.5.3**，Windows配置保留0.5.1，待其本机接续。Mac支持[Qwen Metal/CPU流式识别](shared/docs/QWEN_MACOS.md)，Paraformer保持CPU；Mac Qwen组件为1.0.1（Q8_0对齐器），Windows Qwen及其他模型组件保持原版本。已发布[Mac arm64 v0.5.3](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.3)，Windows x64仍为[v0.5.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.1)。Mac提供DMG、签名更新ZIP及latest-mac.yml，沿用原Ed25519密钥和固定本地代码签名证书；Windows提供安装包、blockmap及latest.yml。两平台按各自完整资产独立选版，旧发行/资产和既有v0.3.1 Latest保持。Windows接续使用相对0.5.1的[0.5.3完整修改与逐项核对报告](shared/docs/WINDOWS_0.5.3_HANDOFF.md)，累计包含0.5.2语音修改和0.5.3界面调整；旧0.5.2清单保留供参考。本次另按用户授权同步核对后的共享/Mac源码与文档，不改写已发布资产，也不代表Windows原生验收完成。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 
 0.3.1 已撤销上述四项机制：明确回应恢复正常自动提交；每次发送既有 120 条/64000 字节、每条最多 6000 字窗口内完整原文；重复查询重新检索。用量统计/token 账本及重置、2200ms 静音与生命周期保护、模型/effort/默认篇幅、其他 0.3.0 功能和 Windows 修复保持。面试/准备聊天/资料及技能/标题提示词按确认稿调整；Local RAG 搜索或读取故障、超时后可继续回答，取消与配置/身份/模型错误保护保持。实现与入口见 [进度](PROGRESS.md) 和 [测试说明](shared/test/README.md)，依赖不升级。
 
 ## 开发与启动
+
+0.5.3统一图标尺寸、同类控件的连续圆角与悬停背景，并为指定控件采用胶囊或圆形；下拉菜单保持单个展开、选中项仅尾部勾选。聊天输入区使用整列渐隐和圆形返回最新按钮，生成时显示跳动圆点；面试记录回答侧栏增加开合动画，开场摘要增加语音模型与推理设备。文本和分隔栏保留对应光标，清理失效样式，以下0.5.2的语音与回答逻辑保持。
 
 0.5.2包含面试中语音模型/推理设备的后台切换：旧识别器继续转写，新配置就绪并等到两路语音停顿后交接，失败保留原配置；问题、草稿及去重/排队保持。回答模型和思考强度仍对下一题生效，当前回答使用原快照。800ms识别分段保留，自动回答从系统语音结束累计1800ms，不再追加终稿后1000ms等待。浮窗设置标签置于控件上方，窄屏单列；删除当前模型后切到另一已安装模型，任一语音模型就绪即可，Qwen/CPU单独显示性能提示。
 

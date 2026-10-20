@@ -1,4 +1,4 @@
-import * as DropdownMenu from '@radix-ui/react-dropdown-menu';
+import * as DropdownMenu from './ui/dropdown-menu';
 import { useState } from 'react';
 import { usePreparation } from '../stores/preparation';
 import { Modal } from './ui/modal';
@@ -177,7 +177,7 @@ export function Sidebar({
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>
             <DropdownMenu.Content
-              className="dropdown-content"
+              className="dropdown-content user-menu"
               side="top"
               align="start"
               sideOffset={8}

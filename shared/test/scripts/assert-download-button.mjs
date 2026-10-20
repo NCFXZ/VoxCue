@@ -19,10 +19,14 @@ async function settle(button) {
 }
 
 export async function assertInitialDownloadProgress(button) {
+  await button.page().bringToFront();
   // The progress label can change the control's geometry. Hover its actual
   // bounds while the initial guard is active, then keep the pointer there.
   await button.hover();
   await settle(button);
+  // The progress label may have moved the control since the first hover.
+  await button.hover();
+  await button.evaluate(() => new Promise(requestAnimationFrame));
   const initialBounds = await button.boundingBox();
   const feedback = await button.evaluate(async (element) => {
     const read = () => ({
@@ -50,6 +54,7 @@ export async function assertInitialDownloadProgress(button) {
 }
 
 export async function assertDownloadButton(page, button, { iconOnly = false } = {}) {
+  await page.bringToFront();
   const dark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   try {
     for (const theme of ['light', 'dark']) {
@@ -90,6 +95,8 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
         iconOnly ? '' : '取消',
       );
       assert.equal(await button.locator('.download-button-cancel svg').count(), 1);
+      await button.hover();
+      await settle(button);
       const cancel = await button.evaluate((element) => {
         const probe = document.createElement('span');
         probe.style.color = 'var(--danger-fill)';
@@ -98,13 +105,16 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
         probe.remove();
         const style = getComputedStyle(element);
         return {
+          hovered: element.matches(':hover'),
+          focused: document.hasFocus(),
           background: style.backgroundColor,
           border: style.borderColor,
           color: style.color,
           danger,
         };
       });
-      assert.equal(cancel.background, cancel.danger);
+      assert.equal(cancel.hovered, true, JSON.stringify(cancel));
+      assert.equal(cancel.background, cancel.danger, JSON.stringify(cancel));
       assert.equal(cancel.border, cancel.danger);
       assert.equal(cancel.color, 'rgb(255, 255, 255)');
       const after = await button.boundingBox();

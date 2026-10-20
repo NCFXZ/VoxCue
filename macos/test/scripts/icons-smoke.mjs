@@ -29,7 +29,9 @@ const verifyIcons = async (page, minimum) => {
       mask: !!element.querySelector('mask image'),
       color: getComputedStyle(element.querySelector('rect') || element).fill,
       width: element.getBoundingClientRect().width,
-      font: parseFloat(getComputedStyle(element).fontSize),
+      canvasWidth: parseFloat(getComputedStyle(element).width),
+      canvasHeight: parseFloat(getComputedStyle(element).height),
+      size: parseFloat(element.style.getPropertyValue('--icon-size')),
       visible: element.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
     })),
   );
@@ -40,18 +42,28 @@ const verifyIcons = async (page, minimum) => {
   // The profile editor stays mounted inside a hidden panel; only visible SVGs
   // have nonzero bounds, while every mounted icon still needs a system symbol.
   assert.ok(icons.filter((item) => item.width > 0).length >= minimum, JSON.stringify(icons));
+  assert.deepEqual(
+    icons.filter(
+      (item) =>
+        item.visible &&
+        (Math.abs(item.canvasWidth - item.size) > 0.01 ||
+          Math.abs(item.canvasHeight - item.size) > 0.01),
+    ),
+    [],
+    'Icons must use their intended component sizes without extra enlargement.',
+  );
   if (glyphExtents) {
     const small = icons.filter(
       (item) =>
         item.visible &&
         item.width > 0 &&
         !['textformat.size.smaller', 'textformat.size.larger'].includes(item.name) &&
-        item.width * glyphExtents[item.name] < item.font * 0.98,
+        item.canvasWidth * glyphExtents[item.name] < item.size * 0.6,
     );
     assert.deepEqual(
       small,
       [],
-      'Visible native artwork should match the adjacent font, allowing for transparent asset margins: ' +
+      'Native artwork keeps its normal canvas and transparent asset margins: ' +
         JSON.stringify(small),
     );
   }
@@ -108,11 +120,15 @@ try {
   glyphExtents = Object.fromEntries(
     assets.map((item) => [symbols[item.key], Math.max(item.inkWidth, item.inkHeight) / 192]),
   );
+  const standardAssets = assets.filter((item) => !item.key.startsWith('Font'));
   assert.ok(
-    assets
-      .filter((item) => !item.key.startsWith('Font'))
-      .every((item) => Math.abs(Math.max(item.inkWidth, item.inkHeight) - 160) <= 2),
-    'Standard symbols normalize actual visible ink; the small/large font pair stays distinct.',
+    standardAssets.every((item) => Math.max(item.inkWidth, item.inkHeight) <= 162),
+    'Standard symbols must retain transparent margins inside their normal canvas.',
+  );
+  const chevron = assets.find((item) => item.key === 'ChevronDown');
+  assert.ok(
+    chevron.inkWidth / chevron.size.width < 0.75,
+    'The native chevron must keep its side bearings instead of filling a common ink width.',
   );
   assert.ok(
     assets.every(

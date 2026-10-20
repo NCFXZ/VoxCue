@@ -84,7 +84,13 @@ Windows 0.3.1 沿用完整离线单测、typecheck/build/check:architecture/chec
 
 ui-refinement 还检查五类分区快速切换反转、编辑 Escape/焦点返回/保存失败保留草稿与重试、分隔栏方向键/Home/上下限/取消及失焦/窄窗口、长弹窗内部滚动及圆角轨道内缩。加 `--preview-dialog` 仅向终端输出内存图片，供工具直接显示，不写图片文件。Windows `node test/scripts/windows-suite.mjs --dpi` 包含 ui-refinement，可在其后指定专项名。settings、knowledge、chat-response、delete-controls、ui-ux、updates-sidebar 的桌面宿主同样在应用导入前阻断网络，资料折叠与编辑弹窗断言沿用当前实现。
 
+`typography-smoke.mjs` 通过 `continuous-corners.mjs` 检查每个实际页面的可见圆角、菜单及选中伪元素，并核对文本输入的I形及其他区域的默认箭头光标；已展开菜单核对与其aria-labelledby关联触发框的四角半径和曲线一致；授权返回页覆盖四种状态、宽窄布局和浅深色。切换圆弧基线时核对半径、尺寸及阴影数值不变，圆形和胶囊Switch分别保留各自轮廓。内存像素比较覆盖多档半径的连续角/圆弧差异、子内容裁切、外阴影及圆形控件；使用同图色块作颜色基准以兼容显示色彩配置。该检查核对四次超椭圆G3目标样式的原生渲染，不宣称Chromium的贝塞尔近似路径严格满足G3。可用既有VOXCUE_TEST_SCALE_FACTOR=1/1.25/1.5/1.75/2逐进程串行复核，不改系统缩放；图片只在内存、结果不落盘。`ui-ux-smoke.mjs --preview-latest`仅在终端展示输入区渐隐、圆形箭头和输出三点的内存图片。
+
 ui-alignment 的聊天工具栏矩阵覆盖主窗口与个人信息的多组宽度、浅深色、长模型名、最多两行的控件排布，以及模型/思考同组、语音/发送对齐、32px尺寸和菜单操作；网络搜索仅在“＋”菜单勾选，外侧无独立按钮，重新打开菜单保留状态。加 `--preview-composer` 只输出内存图片。Windows 可用 `node test/scripts/windows-suite.mjs --dpi ui-alignment` 串行检查五档缩放，不改系统设置。
+
+共用菜单封装`src/components/ui/dropdown-menu.tsx`协调同一renderer内只打开一个根菜单，替换关闭不恢复旧焦点，普通关闭和卸载保持清理。菜单选中仅尾部勾选，悬停/键盘当前项独立高亮。ui-ux沿用真实聊天列核对渐隐的左右覆盖及与输入区无缝连接，不拦截点击。
+
+同类表面复核将附件菜单纳入实际页面矩阵，检查所有弹层的共用阴影、展开触发框在指针移开后仍保留反馈、已选项无常驻底色；同时核对主/面试输入框、浮窗、回答卡片和返回按钮的抬升阴影，以及状态标签的圆弧胶囊和紧凑操作的共用控件半径。保留弹层/触发框角形一致性、图标居中、工具行及表单几何检查。
 
 `node ../shared/test/scripts/interview-usage-offline.mjs` 从本机平台目录离线检查当前本地撤销后的面试行为；已发布 0.3.0 的优化属于历史状态。临时预加载脚本阻断 fetch、HTTP/HTTPS及Socket/TLS实际网络连接，测试注入内存HTTP/SSE、合成转写和向量，并用临时LanceDB。加`--full`运行当前平台全部共用/平台单测与Renderer测试，仅允许127.0.0.1合成HTTP连接，外部网络仍在DNS前阻断；每次运行先验证网络拦截器。原专项入口保留，覆盖明确回应正常自动提交和手动发送、无标点口语、识别修订、分段/短停顿、麦克风插话、排队纠正、关闭/暂停/重置、优化前/恢复后规则回放、跨话题及连续追问的完整原文时间线（含全部 AI 建议）、不生成 textRef/historySelection、精确120条/64000字节/每条6000字边界和 omittedOlderEntries。检索检查重复查询重新编码并执行数据库检索、知识库/模式/topK隔离、取消、并发/失败更新和模型卸载/关闭保护；revisions/模型缓存保持。CPU/本地检索计时和载荷字节只能说明相应离线环节，不能当作真实token扣量、模型答案质量、语音识别率或联网首字速度。结果仅终端，临时拦截脚本及数据库退出清理，不读取真实账户/资料，不启动GUI或硬件。
 

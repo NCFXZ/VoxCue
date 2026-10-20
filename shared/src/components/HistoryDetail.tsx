@@ -67,15 +67,28 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
           hour12: false,
         })
       : '';
+  const scrollToAnswer = (id: string) => {
+    const answer = answerRows.current.get(id);
+    const scroll = answer?.closest<HTMLElement>('.record-answer-scroll');
+    if (!answer || !scroll) return;
+    // Scroll only this rail; scrollIntoView can shift its clipped ancestors
+    // horizontally while the panel is still sliding into the window.
+    const bounds = answer.getBoundingClientRect();
+    const viewport = scroll.getBoundingClientRect();
+    if (bounds.top < viewport.top + 16) scroll.scrollTop += bounds.top - viewport.top - 16;
+    else if (bounds.bottom > viewport.bottom - 16)
+      scroll.scrollTop += Math.min(
+        bounds.top - viewport.top - 16,
+        bounds.bottom - viewport.bottom + 16,
+      );
+  };
   useEffect(() => {
     if (models.length && record.titleStatus !== 'ready' && record.titleStatus !== 'failed')
       void history.generateTitle(record.id);
   }, [record.id, models]);
   useEffect(() => {
     if (!showAnswers || !focusedAnswer) return;
-    const frame = requestAnimationFrame(() =>
-      answerRows.current.get(focusedAnswer)?.scrollIntoView({ block: 'nearest' }),
-    );
+    const frame = requestAnimationFrame(() => scrollToAnswer(focusedAnswer));
     return () => cancelAnimationFrame(frame);
   }, [showAnswers, focusedAnswer]);
   const locate = (id: string) => {
@@ -92,8 +105,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
     setFocusedAnswer(id);
     requestAnimationFrame(() => answerRows.current.get(id)?.focus({ preventScroll: true }));
     // Repeated clicks must also locate an answer after the rail was manually scrolled.
-    if (showAnswers)
-      requestAnimationFrame(() => answerRows.current.get(id)?.scrollIntoView({ block: 'nearest' }));
+    if (showAnswers) requestAnimationFrame(() => scrollToAnswer(id));
   };
   return (
     <main className="workspace history-detail">
@@ -130,7 +142,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             aria-label="AI 回答面板"
             aria-expanded={showAnswers}
             aria-controls="record-answer-panel"
-            onClick={() => setShowAnswers(!showAnswers)}
+            onClick={() => setShowAnswers((open) => !open)}
           >
             <span>{answers.length} 条 AI 回答</span>
             <PanelRight size={16} />
@@ -251,93 +263,96 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             })}
           </div>
         </div>
-        {showAnswers && (
-          <aside id="record-answer-panel" className="record-answer-panel" aria-label="AI 回答">
-            <header>
-              <div>
-                <h2>AI 回答</h2>
-                <p>本场面试中提问并保存的 AI 回答。</p>
-              </div>
-              <Button
-                variant="ghost"
-                size="icon"
-                aria-label="收起 AI 回答"
-                onClick={() => {
-                  setShowAnswers(false);
-                  requestAnimationFrame(() =>
-                    document
-                      .querySelector<HTMLButtonElement>('[aria-label="AI 回答面板"]')
-                      ?.focus(),
-                  );
-                }}
-              >
-                <PanelRight size={17} />
-              </Button>
-            </header>
-            <div className="record-answer-scroll">
-              {!answers.length && (
-                <p className="empty-inline record-empty">本场面试尚未保存 AI 回答。</p>
-              )}
-              {answers.map((answer) => {
-                const ids = associations.byAnswer.get(answer.id) ?? [];
-                return (
-                  <article
-                    className={`record-answer ${focusedAnswer === answer.id ? 'is-located' : ''}`}
-                    key={answer.id}
-                    ref={(node) => {
-                      if (node) answerRows.current.set(answer.id, node);
-                      else answerRows.current.delete(answer.id);
-                    }}
-                    aria-label={`回答：${answer.question}`}
-                    tabIndex={-1}
-                  >
-                    <div className="record-answer-meta">
-                      <span>{ids.length ? '转录提问' : '手动提问'}</span>
-                      <time>{time(answer.createdAt)}</time>
-                    </div>
-                    <p className="record-answer-question">{answer.question}</p>
-                    {ids.length > 0 && (
-                      <button className="record-answer-link" onClick={() => locate(ids[0])}>
-                        <ArrowUpRight size={13} />
-                        定位到原问题
-                      </button>
-                    )}
-                    <div className="record-answer-content">
-                      <h3>
-                        <ProviderIdentity
-                          provider={answer.provider ?? 'unknown'}
-                          detail={
-                            answer.status === 'stopped'
-                              ? '已停止'
-                              : answer.status === 'failed'
-                                ? '回答未完成'
-                                : undefined
-                          }
-                        />
-                      </h3>
-                      {answer.reasoningSummary && (
-                        <details className="reasoning-summary">
-                          <summary>
-                            推理摘要
-                            <span className="disclosure-chevron">
-                              <ChevronRight size={14} />
-                            </span>
-                          </summary>
-                          <MarkdownContent content={answer.reasoningSummary} />
-                        </details>
-                      )}
-                      {answer.content ? (
-                        <MarkdownContent content={answer.content} />
-                      ) : (
-                        <p className="empty-inline">这条回答没有保存内容。</p>
-                      )}
-                    </div>
-                  </article>
-                );
-              })}
+        <aside
+          id="record-answer-panel"
+          className="record-answer-panel"
+          aria-label="AI 回答"
+          data-open={showAnswers}
+          inert={!showAnswers}
+          aria-hidden={!showAnswers}
+        >
+          <header>
+            <div>
+              <h2>AI 回答</h2>
+              <p>本场面试中提问并保存的 AI 回答。</p>
             </div>
-          </aside>
-        )}
+            <Button
+              variant="ghost"
+              size="icon"
+              aria-label="收起 AI 回答"
+              onClick={() => {
+                setShowAnswers(false);
+                requestAnimationFrame(() =>
+                  document.querySelector<HTMLButtonElement>('[aria-label="AI 回答面板"]')?.focus(),
+                );
+              }}
+            >
+              <PanelRight size={17} />
+            </Button>
+          </header>
+          <div className="record-answer-scroll">
+            {!answers.length && (
+              <p className="empty-inline record-empty">本场面试尚未保存 AI 回答。</p>
+            )}
+            {answers.map((answer) => {
+              const ids = associations.byAnswer.get(answer.id) ?? [];
+              return (
+                <article
+                  className={`record-answer ${focusedAnswer === answer.id ? 'is-located' : ''}`}
+                  key={answer.id}
+                  ref={(node) => {
+                    if (node) answerRows.current.set(answer.id, node);
+                    else answerRows.current.delete(answer.id);
+                  }}
+                  aria-label={`回答：${answer.question}`}
+                  tabIndex={-1}
+                >
+                  <div className="record-answer-meta">
+                    <span>{ids.length ? '转录提问' : '手动提问'}</span>
+                    <time>{time(answer.createdAt)}</time>
+                  </div>
+                  <p className="record-answer-question">{answer.question}</p>
+                  {ids.length > 0 && (
+                    <button className="record-answer-link" onClick={() => locate(ids[0])}>
+                      <ArrowUpRight size={13} />
+                      定位到原问题
+                    </button>
+                  )}
+                  <div className="record-answer-content">
+                    <h3>
+                      <ProviderIdentity
+                        provider={answer.provider ?? 'unknown'}
+                        detail={
+                          answer.status === 'stopped'
+                            ? '已停止'
+                            : answer.status === 'failed'
+                              ? '回答未完成'
+                              : undefined
+                        }
+                      />
+                    </h3>
+                    {answer.reasoningSummary && (
+                      <details className="reasoning-summary">
+                        <summary>
+                          推理摘要
+                          <span className="disclosure-chevron">
+                            <ChevronRight size={14} />
+                          </span>
+                        </summary>
+                        <MarkdownContent content={answer.reasoningSummary} />
+                      </details>
+                    )}
+                    {answer.content ? (
+                      <MarkdownContent content={answer.content} />
+                    ) : (
+                      <p className="empty-inline">这条回答没有保存内容。</p>
+                    )}
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+        </aside>
       </div>
       {renaming && (
         <Modal title="重命名标题" onClose={() => setRenaming(false)}>

@@ -393,18 +393,25 @@ try {
   assert.notEqual(layers['.floating-panel'], layers['.answer-bubble']);
   assert.notEqual(layers['.floating-toolbar'], layers['.floating-panel']);
   assert.equal(layers['.answer-bubble'], layers['.floating-composer']);
-  const undersized = await settings
+  const misSizedIcons = await settings
     .locator('svg[data-ui-icon]')
     .evaluateAll((icons) =>
       icons
         .filter(
           (e) =>
             e.getBoundingClientRect().width > 0 &&
-            e.getBoundingClientRect().width < parseFloat(getComputedStyle(e).fontSize) * 1.19,
+            (Math.abs(
+              parseFloat(getComputedStyle(e).width) -
+                parseFloat(e.style.getPropertyValue('--icon-size')),
+            ) > 0.01 ||
+              Math.abs(
+                parseFloat(getComputedStyle(e).height) -
+                  parseFloat(e.style.getPropertyValue('--icon-size')),
+              ) > 0.01),
         )
         .map((e) => e.outerHTML),
     );
-  assert.deepEqual(undersized, []);
+  assert.deepEqual(misSizedIcons, []);
   await opacitySlider.fill('25');
   await settings.getByRole('button', { name: '个性化', exact: true }).click();
   await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).fill('70');
@@ -734,6 +741,19 @@ try {
         globalThis.uxCalls.filter((call) => ['start', 'stop', 'pause'].includes(call.op)).length,
     );
   const capturesBefore = await captureCalls();
+  for (const label of ['选择播放设备', '选择麦克风', '选择播放设备', '选择麦克风']) {
+    const trigger = devices.getByRole('button', { name: label, exact: true, includeHidden: true });
+    await trigger.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
+    assert.equal(await floating.getByRole('menu').count(), 1);
+    assert.equal(await devices.locator('[aria-haspopup="menu"][aria-expanded="true"]').count(), 1);
+    assert.equal(
+      await floating.getByRole('menu').getAttribute('aria-labelledby'),
+      await trigger.getAttribute('id'),
+    );
+  }
+  await floating.keyboard.press('Escape');
+  assert.equal(await floating.getByRole('menu').count(), 0);
+  assert.equal(await captureCalls(), capturesBefore);
   await app.evaluate(() => {
     globalThis.uxHoldSpeech = true;
   });

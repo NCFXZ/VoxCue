@@ -50,6 +50,8 @@ const styles = `
   --warning-bg: #fcf3e3;
 }
 * { box-sizing: border-box; }
+/* Match desktop surfaces; unsupported external browsers retain their radius. */
+*, *::before, *::after { corner-shape: superellipse(2); cursor: default !important; }
 body {
   min-width: 280px;
   min-height: 100vh;
@@ -64,7 +66,7 @@ body {
 .card {
   padding: 38px 40px 30px;
   border: 1px solid var(--border);
-  border-radius: 28px;
+  border-radius: 40px;
   background: var(--card);
   box-shadow: 0 24px 80px -32px rgba(38, 56, 86, .19), 0 2px 8px rgba(38, 56, 86, .025);
   text-align: center;
@@ -80,6 +82,7 @@ body {
   height: 72px;
   margin: 36px auto 23px;
   border-radius: 50%;
+  corner-shape: round;
   background: var(--success-bg);
   color: var(--success);
   box-shadow: 0 0 0 8px color-mix(in srgb, var(--success-bg) 36%, transparent);
@@ -88,7 +91,7 @@ body {
 .notice .status-mark { color: var(--warning); background: var(--warning-bg); box-shadow: none; }
 h1 { margin: 0; font-size: 30px; font-weight: 650; line-height: 1.4; letter-spacing: -.6px; }
 .description { max-width: 340px; margin: 13px auto 28px; color: var(--muted); font-size: 15px; line-height: 1.85; }
-.next-step { display: flex; align-items: center; gap: 13px; padding: 18px; border-radius: 16px; background: var(--inset); text-align: left; }
+.next-step { display: flex; align-items: center; gap: 13px; padding: 18px; border-radius: 28px; background: var(--inset); text-align: left; }
 .next-step svg { flex: 0 0 auto; width: 23px; height: 23px; color: var(--muted); }
 .next-step strong { display: block; font-size: 14px; font-weight: 600; line-height: 1.65; }
 .next-step p { margin: 3px 0 0; color: var(--muted); font-size: 12px; line-height: 1.7; }
@@ -113,7 +116,7 @@ h1 { margin: 0; font-size: 30px; font-weight: 650; line-height: 1.4; letter-spac
 }
 @media (max-width: 420px) {
   body { padding: 24px 16px; }
-  .card { padding: 30px 22px 25px; border-radius: 24px; }
+  .card { padding: 30px 22px 25px; border-radius: 36px; }
   h1 { font-size: 27px; }
   .next-step { padding: 15px; }
 }
