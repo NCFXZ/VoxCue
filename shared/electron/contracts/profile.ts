@@ -18,6 +18,19 @@ export interface ProfileSource {
 export interface InterviewSkill extends ProfileEntry {
   sources: ProfileSource[];
 }
+/** Proposal diagnostics; unverified citations are retained here, never in verified sources. */
+export const skillSourceIssueReasons = [
+  'search_disabled',
+  'search_incomplete',
+  'search_sources_missing',
+  'skill_sources_missing',
+  'source_unmatched',
+] as const;
+export interface SkillSourceIssue {
+  skillId: string;
+  reason: (typeof skillSourceIssueReasons)[number];
+  sources: ProfileSource[];
+}
 export interface PersonalInfo {
   name: string;
   /** Legacy storage field, excluded from active editing and AI context. */
@@ -100,8 +113,13 @@ export type ProfileField = (typeof profileFields)[number];
 export type ProfileChanges = Partial<Pick<PersonalInfo, ProfileField>>;
 /** Read-only streaming content; never accepted as a saved proposal. */
 export type ProfilePreview = Partial<Record<Exclude<ProfileField, 'skills'>, string>> & {
-  skills?: Array<{ title: string; content: string }>;
+  skills?: Array<{ id?: string; title: string; content: string }>;
 };
+/** Incomplete streamed values only; this progress never authorizes saving. */
+export interface ProfileGeneration {
+  fields: ProfileField[];
+  skillIndexes: number[];
+}
 export const profileLabels: Record<ProfileField, string> = {
   name: '姓名',
   language: '面试语言',
@@ -205,14 +223,56 @@ export function skillContentChanged(base: PersonalInfo, next: InterviewSkill[]) 
     (skill) => !(base.skills ?? []).some((old) => JSON.stringify(old) === JSON.stringify(skill)),
   );
 }
+export function skillProposalEntries(base: InterviewSkill[], next: InterviewSkill[]) {
+  return [
+    ...next.map((skill) => {
+      const previous = base.find((entry) => entry.id === skill.id);
+      const kind = !previous
+        ? 'add'
+        : JSON.stringify(previous) === JSON.stringify(skill)
+          ? 'keep'
+          : 'update';
+      return { skill, kind: kind as 'add' | 'keep' | 'update' | 'remove' };
+    }),
+    ...base
+      .filter((skill) => !next.some((entry) => entry.id === skill.id))
+      .map((skill) => ({ skill, kind: 'remove' as const })),
+  ];
+}
+/** Apply selected IDs only. Unselected current entries and their ordering survive unchanged. */
+export function mergeSelectedSkills(
+  current: InterviewSkill[],
+  next: InterviewSkill[],
+  ids: string[],
+) {
+  const selected = new Set(ids);
+  const proposed = new Map(next.map((skill) => [skill.id, skill]));
+  return [
+    ...current.flatMap((skill) =>
+      !selected.has(skill.id) ? [skill] : proposed.has(skill.id) ? [proposed.get(skill.id)!] : [],
+    ),
+    ...next.filter(
+      (skill) => selected.has(skill.id) && !current.some((entry) => entry.id === skill.id),
+    ),
+  ];
+}
 export function profileProposalStale(
   info: PersonalInfo,
   base: PersonalInfo,
   changes: ProfileChanges,
+  skillIds?: string[],
 ) {
   return (
     profileFields.some(
-      (field) => changes[field] !== undefined && !sameProfileField(info, base, field),
+      (field) =>
+        changes[field] !== undefined &&
+        (field === 'skills' && skillIds
+          ? skillIds.some(
+              (id) =>
+                JSON.stringify(info.skills?.find((skill) => skill.id === id)) !==
+                JSON.stringify(base.skills?.find((skill) => skill.id === id)),
+            )
+          : !sameProfileField(info, base, field)),
     ) ||
     (changes.skills !== undefined &&
       (!sameProfileField(info, base, 'background') ||

@@ -20,6 +20,11 @@ import {
   validateChanges,
   profileProposalStale,
   skillResearchScope,
+  profileFields,
+  profileLabels,
+  type ProfileField,
+  skillProposalEntries,
+  mergeSelectedSkills,
 } from '../../electron/contracts/profile';
 const emptyInfo: PersonalInfo = { name: '', jobDescription: '', background: '' };
 let controller: AbortController | undefined;
@@ -64,6 +69,8 @@ interface PreparationState {
   retry(id: string): Promise<void>;
   reset(preserveReply?: boolean): void;
   stop(): void;
+  selectProfileFields(messageId: string, fields: ProfileField[]): void;
+  selectSkillIds(messageId: string, ids: string[]): void;
   updateInfo(info: Partial<PersonalInfo>, messageId?: string): boolean;
   dismissProfile(messageId: string): void;
   removeResume(): Promise<boolean>;
@@ -173,6 +180,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     set({ skillsNeedUpdate: false });
   },
   async generateSkills() {
+    get().dismissSkillUpdate();
     await get().send(
       '请根据已确认的简历和职位描述联网搜索，整理与岗位和我的背景相关、对面试准备有帮助的资料，作为技能更新提案。内容专业、清楚、适量；不要把参考资料写成我已掌握的技能或经历。保留未要求变更的已有条目。',
       undefined,
@@ -258,7 +266,55 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       set({ error: '本地资料读取失败，请重试。现有数据已保留。' });
     }
   },
+  selectProfileFields(messageId, fields) {
+    set((state) => ({
+      messages: state.messages.map((message) =>
+        message.id === messageId &&
+        message.status === 'completed' &&
+        !message.applied &&
+        !message.dismissed &&
+        fields.every(
+          (field) => profileFields.includes(field) && message.changes?.[field] !== undefined,
+        )
+          ? { ...message, selectedProfileFields: [...new Set(fields)], error: undefined }
+          : message,
+      ),
+    }));
+  },
+  selectSkillIds(messageId, ids) {
+    set((state) => ({
+      messages: state.messages.map((message) => {
+        if (
+          message.id !== messageId ||
+          message.status !== 'completed' ||
+          message.applied ||
+          message.dismissed ||
+          !message.profileBase ||
+          !message.changes?.skills
+        )
+          return message;
+        const entries = skillProposalEntries(
+          message.profileBase.skills ?? [],
+          message.changes.skills,
+        );
+        if (ids.some((id) => !entries.some((entry) => entry.skill.id === id))) return message;
+        const selected =
+          message.selectedProfileFields ??
+          profileFields.filter((field) => message.changes?.[field] !== undefined);
+        return {
+          ...message,
+          selectedSkillIds: [...new Set(ids)],
+          selectedProfileFields: profileFields.filter((field) =>
+            field === 'skills' ? ids.length > 0 : selected.includes(field),
+          ),
+          error: undefined,
+        };
+      }),
+    }));
+  },
   updateInfo(info, messageId) {
+    let savedFields: ProfileField[] | undefined;
+    let savedSkillIds: string[] | undefined;
     try {
       if (messageId) {
         const proposal = get().messages.find((message) => message.id === messageId);
@@ -270,9 +326,37 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           !proposal.profileBase
         )
           throw new Error('这份资料提案已失效，请重新整理。');
-        info = validateChanges(proposal.changes);
-        if (profileProposalStale(get().info, proposal.profileBase, info))
+        const changes = validateChanges(proposal.changes);
+        let selected =
+          proposal.selectedProfileFields ??
+          profileFields.filter((field) => changes[field] !== undefined);
+        if (selected.includes('skills') && changes.skills) {
+          const entries = skillProposalEntries(proposal.profileBase.skills ?? [], changes.skills);
+          const skillIds = proposal.selectedSkillIds ?? entries.map((entry) => entry.skill.id);
+          if (skillIds.some((id) => !entries.some((entry) => entry.skill.id === id)))
+            throw Error('所选技能不在这份提案中，现有资料未修改。');
+          savedSkillIds = skillIds;
+          if (entries.length && !savedSkillIds.length)
+            selected = selected.filter((field) => field !== 'skills');
+        }
+        if (!selected.length) throw Error('请至少勾选一项要保存的资料。');
+        if (
+          selected.some((field) => !profileFields.includes(field) || changes[field] === undefined)
+        )
+          throw Error('指定字段不在这份提案中，现有资料未修改。');
+        savedFields = [...new Set(selected)];
+        info = Object.fromEntries(savedFields.map((field) => [field, changes[field]]));
+        if (profileProposalStale(get().info, proposal.profileBase, info, savedSkillIds))
           throw new Error('个人信息已变化，为避免覆盖较新的修改，请重新生成提案。');
+        if (info.skills) {
+          info.skills = mergeSelectedSkills(
+            get().info.skills ?? [],
+            info.skills,
+            savedSkillIds ?? [],
+          );
+          if (info.skills.length > 10)
+            throw Error('保存后技能将超过10项，请减少新增项或勾选需要删除的已有技能。');
+        }
       }
       const merged = { ...get().info, ...info };
       if (!validProfile(merged)) throw new Error('个人信息格式无效或内容过长。');
@@ -289,7 +373,18 @@ export const usePreparation = create<PreparationState>((set, get) => ({
               : state.skillsNeedUpdate,
         error: null,
         messages: state.messages.map((message) =>
-          message.id === messageId ? { ...message, applied: true, error: undefined } : message,
+          message.id === messageId
+            ? {
+                ...message,
+                applied: true,
+                selectedProfileFields: savedFields,
+                appliedProfileFields: savedFields,
+                ...(savedFields?.includes('skills')
+                  ? { selectedSkillIds: savedSkillIds, appliedSkillIds: savedSkillIds }
+                  : {}),
+                error: undefined,
+              }
+            : message,
         ),
       }));
       return true;
@@ -303,7 +398,14 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       if (messageId)
         set((state) => ({
           messages: state.messages.map((message) =>
-            message.id === messageId ? { ...message, error: state.error || undefined } : message,
+            message.id === messageId
+              ? {
+                  ...message,
+                  ...(savedFields ? { selectedProfileFields: savedFields } : {}),
+                  ...(savedSkillIds ? { selectedSkillIds: savedSkillIds } : {}),
+                  error: state.error || undefined,
+                }
+              : message,
           ),
         }));
       return false;
@@ -334,76 +436,6 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       return;
     if ((!prompt.trim() && !get().attachments.length && !retryUser) || get().streaming) return;
     if (retryUser) prompt = retryUser.content;
-    const yes = /^(?:确认|确定|同意|确认更新|确认保存|同意更新|同意保存)[。！!\s]*$/.test(
-      prompt.trim(),
-    );
-    const no = /^(?:拒绝|拒绝更新|取消更新|保留旧版|不更新|暂不更新|不同意|取消)[。！!\s]*$/.test(
-      prompt.trim(),
-    );
-    const explicitConfirmation = /^(?:确认更新|确认保存|同意更新|同意保存)[。！!\s]*$/.test(
-      prompt.trim(),
-    );
-    if (!retryId && (yes || no)) {
-      const proposal = [...get().messages]
-        .reverse()
-        .find((message) => message.role === 'assistant');
-      const hasProposal = !!proposal?.changes && !!Object.keys(proposal.changes).length;
-      const acknowledge = (content: string) =>
-        set((state) => ({
-          draft: '',
-          error: null,
-          messages: [
-            ...state.messages,
-            { id: crypto.randomUUID(), role: 'user', content: prompt.trim() },
-            {
-              id: crypto.randomUUID(),
-              role: 'assistant',
-              status: 'completed',
-              mode: 'live',
-              provider: { id: 'voxcue', name: 'VoxCue', dataRecipient: '本机' },
-              content,
-            },
-          ],
-        }));
-      if (hasProposal && !proposal!.applied && !proposal!.dismissed) {
-        if (yes) {
-          if (get().updateInfo({}, proposal!.id))
-            acknowledge('资料已确认并保存到本机，可以继续聊天。');
-        } else {
-          get().dismissProfile(proposal!.id);
-          acknowledge('已保留原资料，可以继续聊天。');
-        }
-        return;
-      }
-      // A saved proposal is not pending again. A separate skills question never locks chat.
-      if (get().skillsNeedUpdate && !explicitConfirmation) {
-        if (no) {
-          get().dismissSkillUpdate();
-          acknowledge('已保存的资料保持不变，本次暂不联网更新技能。');
-        } else if (get().info.background.trim() && get().info.jobDescription.trim()) {
-          await get().generateSkills();
-        } else {
-          get().dismissSkillUpdate();
-          acknowledge(
-            '已确认的资料已经保存。简历和职位描述摘要尚未齐全，本次暂不生成技能；可以继续聊天或补充缺少的摘要。',
-          );
-        }
-        return;
-      }
-      if (hasProposal && proposal!.applied) {
-        acknowledge('这份资料已确认并保存，无需再次确认，可以继续聊天。');
-        return;
-      }
-      if (explicitConfirmation) {
-        if (hasProposal) get().updateInfo({}, proposal!.id);
-        else
-          set({
-            error:
-              '没有可确认的完整资料提案。请重新发送“更新我的简历”并等待提案卡片出现，再确认更新。',
-          });
-        return;
-      }
-    }
     const skillTask =
       task === 'skills' ||
       retryUser?.options?.profileTask === 'skills' ||
@@ -550,7 +582,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 message.changes &&
                 Object.keys(message.changes).length
                   ? message.applied
-                    ? '\n\n[本机操作状态：用户已在应用中确认这份提案，资料已成功保存。不要再要求发送确认或拒绝；当前资料以本次提供的 profile 为准。]'
+                    ? `\n\n[本机操作状态：用户已在应用中确认这份提案，已成功保存：${(message.appliedProfileFields ?? profileFields.filter((field) => message.changes?.[field] !== undefined)).map((field) => profileLabels[field]).join('、')}；其余字段保持原值。${message.appliedSkillIds ? `技能仅应用ID：${message.appliedSkillIds.join('、')}；未选中的已有技能保持不变。` : ''}不要再要求发送确认或拒绝；当前资料以本次提供的 profile 为准。]`
                     : message.dismissed
                       ? '\n\n[本机操作状态：用户已拒绝这份提案并保留旧资料，不再等待确认。]'
                       : '\n\n[本机操作状态：这份提案尚未保存；用户可以继续普通聊天，不必先确认或拒绝。]'
@@ -595,7 +627,13 @@ export const usePreparation = create<PreparationState>((set, get) => ({
             if (event.type === 'profile-preview')
               update((state) => ({
                 messages: state.messages.map((message) =>
-                  message.id === id ? { ...message, profilePreview: event.preview } : message,
+                  message.id === id
+                    ? {
+                        ...message,
+                        profilePreview: event.preview,
+                        profileGeneration: event.generation,
+                      }
+                    : message,
                 ),
               }));
             if (event.type === 'reasoning-summary')
@@ -657,7 +695,9 @@ export const usePreparation = create<PreparationState>((set, get) => ({
               ? {
                   ...message,
                   changes: validateChanges(result.profileChanges ?? {}),
+                  skillSourceIssues: result.skillSourceIssues,
                   profilePreview: undefined,
+                  profileGeneration: undefined,
                   // Fast JSON responses can resolve before queued IPC deltas arrive.
                   content: result.answerText ?? message.content,
                   provider: result.provider ?? message.provider,

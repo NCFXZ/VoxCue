@@ -1,3 +1,11 @@
+## Windows 0.5.5 回归入口
+
+资料提案专项 `profile-selection-smoke.mjs` 已纳入共享完整矩阵及 Windows 五档 DPI。入口覆盖多长字段紧凑排版、单滚动区详情、连续圆角及胶囊标签、勾选双向动画/键盘/减少动态效果、逐字段和逐技能保存/删除、保留未选已有内容及来源、重载持久化、文字确认不落盘，以及真实流式解析下姓名/技能分别完成后隐藏 loading。总标题不显示 loading，部分提案和停止不能保存。默认不保存图片，仅用户指定 `--screenshots` 时交付合成界面。
+
+版本由共享源生成 Windows 0.5.5；共享矩阵 34 项，原生矩阵 15 项，五档 DPI 每档 8 项。依赖与锁保持现有版本，macos/ 只读；下列安装包、更新、公开模型和隔离安装引擎入口继续用于本版。
+
+`node test/scripts/installer-ui-smoke.mjs profile-selection` 在实际安装器暂存 ASAR 中复用全部逐项资料检查，继续使用隔离账户与临时 userData；与包内 chat-progress、adversarial、updates 三项串行运行。
+
 ## Windows 0.5.3 本地接续入口
 
 发行前使用 `windows-suite.mjs`、`--windows` 与 `--dpi` 分别串行检查共享功能、Windows 原生和五档缩放。`interview-typography-smoke.mjs` 另阻断独立 ChatGPT SVG 文件，实际解码登录、预览和面试回答标识并保留浅深色检查；固定标识随 Renderer 内嵌，记录及包级入口同样检查解码。正式安装器用 `installer-artifact-smoke.mjs` 核对 SHA512、blockmap 和实际负载，`portable-native-smoke.mjs --installer-stage` 运行同一 ASAR，`installer-engine-smoke.mjs` 以独立 GUID 验证 0.5.1→当前版本安装/更新/卸载与资料保护，不运行真实身份的安装器。
@@ -5,6 +13,8 @@
 Windows 配置由共享版本源生成 0.5.3，沿用共享功能矩阵与 `windows/test/scripts/windows-suite.mjs` 的原生/五档 DPI 入口。GUI 语音夹具使用合成平台能力；实际 CUDA 探测由原生入口验证。Windows AEC 的源代码与 ASAR 夹具均经过 Recognizer/RecognitionRouter，不再替换已退到内层 Worker 的旧引擎入口。
 
 `node test/scripts/qwen-component-smoke.mjs` 从当前生产目录真实下载 Windows Qwen 1.0.1 的原 ASR、Q8_0 和 Runtime 1.0.1。入口检查下载取消无半组件、三份归档及全部文件认证、离线复用、实际 CPU/CUDA/Worker、六次后台切换、独占句柄及受管删除，并保留临时合成的旧缓存哨兵；仅使用自有临时根与固定公开音频，退出清理。开发机 Python 通过 `VOXCUE_PYTHON` 指定，不属于用户安装依赖。
+
+Qwen 原生 Python 入口先核对组件所在临时根的所有者标记，将 `CUDA_CACHE_PATH` 固定在该根；Worker 与切换入口同样使用各自 testRoot 的 GPU 缓存。推理结束、失败或取消后随测试根清理，不使用用户默认 GPU 编译缓存。
 
 五档 DPI 默认完整执行；定位单项时可用 `windows-suite.mjs --dpi --scale=2 interview-ux` 只复测指定档位/入口，所有原断言保持。面试设置夹具在失败时仅输出该隔离页面的关闭/取消/指针事件类型与对话框状态，不保存图像或报告。
 
@@ -196,6 +206,7 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 设备自动枚举单测`audio-devices.test.ts`覆盖打开/焦点/设备通知/可见性/定时、并发合并、错误恢复及卸载后的迟到结果。`interview-ux-smoke.mjs`追加主/浮窗设备自动更新、无刷新按钮、白色滑块与两端图标、透明度预览、无电平尾部状态及固定底部说明，按用户要求可交付0/75透明度对照截图。`interview-typography-smoke.mjs`沿用键盘/范围/跨窗口/存储失败与窄窗口验证，并检查预览透明度随偏好改变。
 
 自动回答边界单测：`automatic-question.test.ts`、`speech-endpoint.test.ts`和`speech-progress.test.ts`，覆盖两种引擎的音频时间、未处理帧/包、迟到终稿和墙钟停顿不触发；`speech-store`/`interview-usage-offline`保留去重、排队、结束和手动提交回归。
+
 ## 识别器后台切换与设置排版（2026-10-20）
 
 speech-switch/speech-progress/speech-host/speech-session/speech-store覆盖后台加载期间持续处理、双路空闲交接、300ms PCM及时间戳边界、候选预热事件隔离、失败/超时保留旧配置、暂停/结束取消、迟到保护、原问题和1800ms截止点、回答模型独立更新。desktop-ipc限定浮窗组件status只读。interview-ux覆盖切换中回答设置仍可编辑、失败回退、原回答快照，以及960/620/440宽度的浅深色横向标签/控件和窄屏单列；截图可仅内存预览，结果不落盘。

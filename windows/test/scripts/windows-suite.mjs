@@ -16,6 +16,7 @@ if (suites[0] === '--dpi') {
   const allowed = [
     'ui-refinement',
     'ui-alignment',
+    'profile-selection',
     'typography',
     'interview-typography',
     'interview-ux',

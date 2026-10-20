@@ -69,6 +69,61 @@ afterEach(() => {
   vi.unstubAllGlobals();
   vi.clearAllMocks();
 });
+it.each(['button', 'reject', 'stale'])(
+  '来源未核验提案先保留，明确操作才保存，警告不丢失：%s',
+  async (action) => {
+    const skills = [
+      { id: 'unverified', title: '待审阅技能', content: '完整保留的合成资料', sources: [] },
+    ];
+    const skillSourceIssues = [
+      {
+        skillId: 'unverified',
+        reason: 'source_unmatched' as const,
+        sources: [{ title: '未匹配', url: 'https://example.com/unmatched' }],
+      },
+    ];
+    vi.mocked(streamChat).mockResolvedValueOnce({
+      ok: true,
+      usage: null,
+      sources: [],
+      answerText: '请审阅',
+      profileChanges: { skills },
+      skillSourceIssues,
+    });
+    await usePreparation.getState().send('更新技能');
+    const message = usePreparation.getState().messages.at(-1)!;
+    expect(message).toMatchObject({ status: 'completed', changes: { skills }, skillSourceIssues });
+    expect(usePreparation.getState().info).toEqual(base);
+    if (action === 'reject') {
+      usePreparation.getState().dismissProfile(message.id);
+    } else if (action === 'stale') {
+      usePreparation.getState().updateInfo({ skills: [{ ...skills[0], content: '较新修改' }] });
+      expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+      expect(usePreparation.getState().info.skills?.[0].content).toBe('较新修改');
+    } else {
+      expect(usePreparation.getState().updateInfo({}, message.id)).toBe(true);
+      expect(usePreparation.getState().info.skills).toEqual(skills);
+      expect(
+        usePreparation.getState().messages.find((entry) => entry.id === message.id)?.applied,
+      ).toBe(true);
+    }
+    expect(
+      usePreparation.getState().messages.find((entry) => entry.id === message.id)
+        ?.skillSourceIssues,
+    ).toEqual(skillSourceIssues);
+    if (action === 'reject') expect(usePreparation.getState().info).toEqual(base);
+  },
+);
+it('选择联网更新后立即收起提示，失败后也不重新弹出', async () => {
+  usePreparation.setState({ skillsNeedUpdate: true });
+  vi.mocked(streamChat).mockImplementationOnce(async () => {
+    expect(usePreparation.getState().skillsNeedUpdate).toBe(false);
+    throw Error('合成请求失败');
+  });
+  await usePreparation.getState().generateSkills();
+  expect(usePreparation.getState().skillsNeedUpdate).toBe(false);
+  expect(usePreparation.getState().messages.at(-1)?.status).toBe('failed');
+});
 describe('聊天附件更新需要同意', () => {
   it('流式预览只读，停止后拒绝迟到预览和不完整确认', async () => {
     let late!: Parameters<typeof streamChat>[1];
@@ -211,8 +266,8 @@ describe('聊天附件更新需要同意', () => {
   });
 });
 
-describe('聊天文字确认实际保存', () => {
-  it('无JD时按钮保存后无需再次确认，普通聊天继续；确认不再发起模型请求', async () => {
+describe('资料提案保存与后续聊天', () => {
+  it('无JD时按钮保存后普通聊天继续，并传递实际保存状态', async () => {
     usePreparation.setState({ info: { ...base, jobDescription: '' } });
     vi.mocked(streamChat).mockResolvedValueOnce({
       ok: true,
@@ -235,9 +290,7 @@ describe('聊天文字确认实际保存', () => {
     expect(next.instructions).toContain('用户明确要求按该指令试写面试回答时除外');
     expect(next.turns.find((turn) => turn.role === 'assistant')?.content).toContain('已成功保存');
     expect(next.profileTask).toBeUndefined();
-    const calls = vi.mocked(streamChat).mock.calls.length;
-    await usePreparation.getState().send('确认');
-    expect(streamChat).toHaveBeenCalledTimes(calls);
+
     expect(usePreparation.getState().info).toMatchObject({
       background: '新简历摘要',
       jobDescription: '',
@@ -245,20 +298,27 @@ describe('聊天文字确认实际保存', () => {
     expect(usePreparation.getState()).toMatchObject({
       streaming: false,
       error: null,
-      skillsNeedUpdate: false,
+      skillsNeedUpdate: true,
     });
   });
-  it.each(['确认', '拒绝'])(
-    '普通“%s”在待确认提案上本地处理，不占用AI请求或阻止下条消息',
+  it.each(['确认', '拒绝', '确认更新', '确认保存', '只保存简历摘要', '只更新姓名'])(
+    '聊天文字不再操作提案或资料：%s',
     async (text) => {
       await usePreparation.getState().send('更新简历');
+      const proposal = usePreparation.getState().messages.at(-1)!;
+      vi.mocked(streamChat).mockResolvedValueOnce({
+        ok: true,
+        usage: null,
+        sources: [],
+        answerText: '请在提案中勾选并点击保存所选。',
+      });
       await usePreparation.getState().send(text);
-      expect(streamChat).toHaveBeenCalledTimes(1);
-      expect(usePreparation.getState().messages[1]).toMatchObject(
-        text === '确认' ? { applied: true } : { dismissed: true },
-      );
-      await usePreparation.getState().send('继续普通聊天');
       expect(streamChat).toHaveBeenCalledTimes(2);
+      expect(usePreparation.getState().info).toEqual(base);
+      const unchanged = usePreparation.getState().messages.find((m) => m.id === proposal.id)!;
+      expect(unchanged.applied).not.toBe(true);
+      expect(unchanged.dismissed).not.toBe(true);
+      expect(unchanged.selectedProfileFields).toEqual(proposal.selectedProfileFields);
     },
   );
   it.each([
@@ -328,10 +388,12 @@ describe('聊天文字确认实际保存', () => {
     ).toBe(333000);
     now.mockRestore();
   });
-  it('确认最新完整提案后持久化所有字段，不再发送确认消息给模型', async () => {
+  it('按钮保存完整提案后持久化所有字段，不再请求模型', async () => {
     await usePreparation.getState().send('更新个人信息');
     const calls = vi.mocked(streamChat).mock.calls.length;
-    await usePreparation.getState().send('确认更新');
+    expect(
+      usePreparation.getState().updateInfo({}, usePreparation.getState().messages.at(-1)!.id),
+    ).toBe(true);
     expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(calls);
     expect(usePreparation.getState().info).toEqual({
       ...base,
@@ -344,19 +406,215 @@ describe('聊天文字确认实际保存', () => {
     expect(usePreparation.getState().messages[1].applied).toBe(true);
     expect(usePreparation.getState().streaming).toBe(false);
   });
-  it('没有提案、拒绝过的提案和已手动修改的提案不能通过文字确认覆盖', async () => {
-    await usePreparation.getState().send('确认更新');
-    expect(usePreparation.getState().error).toContain('没有可确认');
+  it('没有提案、拒绝过的提案和已手动修改的提案不能被保存覆盖', async () => {
+    expect(usePreparation.getState().updateInfo({}, 'missing')).toBe(false);
     expect(streamChat).not.toHaveBeenCalled();
     await usePreparation.getState().send('更新个人信息');
-    usePreparation.getState().dismissProfile(usePreparation.getState().messages.at(-1)!.id);
-    await usePreparation.getState().send('确认更新');
+    const dismissed = usePreparation.getState().messages.at(-1)!;
+    usePreparation.getState().dismissProfile(dismissed.id);
+    expect(usePreparation.getState().updateInfo({}, dismissed.id)).toBe(false);
     expect(usePreparation.getState().info).toEqual(base);
     await usePreparation.getState().send('更新个人信息');
+    const stale = usePreparation.getState().messages.at(-1)!;
     usePreparation.getState().updateInfo({ name: '手动修改' });
-    await usePreparation.getState().send('确认更新');
+    expect(usePreparation.getState().updateInfo({}, stale.id)).toBe(false);
     expect(usePreparation.getState().info.name).toBe('手动修改');
     expect(usePreparation.getState().error).toContain('较新的修改');
+  });
+});
+
+describe('逐项勾选保存', () => {
+  const changes = {
+    name: '提案姓名',
+    background: '提案简历',
+    jobDescription: '提案JD',
+    language: 'English',
+    customInstructions: '提案指令',
+    skills: [],
+  };
+  const prepare = async () => {
+    vi.mocked(streamChat).mockResolvedValueOnce({
+      ok: true,
+      usage: null,
+      sources: [],
+      profileChanges: changes,
+    });
+    await usePreparation.getState().send('更新个人信息');
+    return usePreparation.getState().messages.at(-1)!;
+  };
+  it('仅保存勾选字段，不采用调用者额外传入的字段值，历史记录反映实际保存范围', async () => {
+    const message = await prepare();
+    usePreparation.getState().selectProfileFields(message.id, ['background']);
+    expect(usePreparation.getState().info).toEqual(base);
+    expect(usePreparation.getState().updateInfo({ name: '未授权覆盖' }, message.id)).toBe(true);
+    expect(usePreparation.getState().info).toEqual({ ...base, background: changes.background });
+    expect(usePreparation.getState().messages.find((m) => m.id === message.id)).toMatchObject({
+      applied: true,
+      appliedProfileFields: ['background'],
+      changes,
+    });
+    await usePreparation.getState().send('继续聊天');
+    const request = vi.mocked(streamChat).mock.calls.at(-1)![0];
+    expect(request.profile?.name).toBe(base.name);
+    expect(request.turns.find((turn) => turn.content.includes('本机操作状态'))?.content).toContain(
+      '已成功保存：简历摘要；其余字段保持原值',
+    );
+  });
+  it('空选择不能保存，重新勾选后一次点击直接保存', async () => {
+    const message = await prepare();
+    usePreparation.getState().selectProfileFields(message.id, []);
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+    expect(usePreparation.getState().info).toEqual(base);
+    usePreparation.getState().selectProfileFields(message.id, ['jobDescription']);
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(true);
+    expect(usePreparation.getState().info).toEqual({
+      ...base,
+      jobDescription: changes.jobDescription,
+    });
+    expect(streamChat).toHaveBeenCalledTimes(1);
+  });
+  it('未选字段的较新修改保留，所选字段及技能依赖摘要的冲突仍拒绝', async () => {
+    const message = await prepare();
+    usePreparation.getState().updateInfo({ name: '较新姓名' });
+    usePreparation.getState().selectProfileFields(message.id, ['background']);
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(true);
+    expect(usePreparation.getState().info).toEqual({
+      ...base,
+      name: '较新姓名',
+      background: changes.background,
+    });
+    const second = await prepare();
+    usePreparation.getState().updateInfo({ background: '较新简历' });
+    usePreparation.getState().selectProfileFields(second.id, ['background']);
+    expect(usePreparation.getState().updateInfo({}, second.id)).toBe(false);
+    usePreparation.getState().selectProfileFields(second.id, ['skills']);
+    expect(usePreparation.getState().updateInfo({}, second.id)).toBe(false);
+    expect(usePreparation.getState().info.skills).toBeUndefined();
+  });
+  it.each(['failed', 'stopped', 'dismissed', 'absent'])('无效提案不能保存：%s', async (status) => {
+    const message = await prepare();
+    if (status === 'dismissed') usePreparation.getState().dismissProfile(message.id);
+    else if (status === 'absent') usePreparation.setState({ messages: [] });
+    else
+      usePreparation.setState({
+        messages: [{ ...message, status: status as 'failed' | 'stopped' }],
+      });
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+    expect(usePreparation.getState().info).toEqual(base);
+    expect(streamChat).toHaveBeenCalledTimes(1);
+  });
+  it('忽略不在提案中的勾选；损坏的选择数据不能保存', async () => {
+    await usePreparation.getState().send('更新资料');
+    const message = usePreparation.getState().messages.at(-1)!;
+    usePreparation.getState().selectProfileFields(message.id, ['language']);
+    expect(usePreparation.getState().messages.at(-1)?.selectedProfileFields).toEqual(
+      message.selectedProfileFields,
+    );
+    usePreparation.setState({ messages: [{ ...message, selectedProfileFields: ['language'] }] });
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+    expect(usePreparation.getState().info).toEqual(base);
+  });
+  it('写入失败保留勾选和原资料，重试按钮直接保存', async () => {
+    const message = await prepare();
+    usePreparation.getState().selectProfileFields(message.id, ['background']);
+    const write = vi.spyOn(localStorage, 'setItem').mockImplementationOnce(() => {
+      throw Error('quota');
+    });
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+    expect(usePreparation.getState().info).toEqual(base);
+    expect(usePreparation.getState().messages.find((m) => m.id === message.id)).toMatchObject({
+      selectedProfileFields: ['background'],
+    });
+    expect(usePreparation.getState().messages.find((m) => m.id === message.id)?.applied).not.toBe(
+      true,
+    );
+    write.mockRestore();
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(true);
+    expect(usePreparation.getState().info).toEqual({ ...base, background: changes.background });
+    expect(streamChat).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('逐条技能选择保存', () => {
+  const old = { id: 'old', title: 'C++', content: '原C++', sources: [] };
+  const keep = {
+    id: 'keep',
+    title: 'Qt',
+    content: '原Qt',
+    sources: [{ title: '原始来源', url: 'https://example.com/qt' }],
+  };
+  const changed = { ...old, content: '新C++' };
+  const added = { id: 'add', title: 'Rust', content: '新增Rust', sources: [] };
+  const omitted = { id: 'omit', title: 'Python', content: '未选Python', sources: [] };
+  const prepare = async (skills = [changed, added, omitted]) => {
+    usePreparation.setState({ info: { ...base, skills: [old, keep] } });
+    vi.mocked(streamChat).mockResolvedValueOnce({
+      ok: true,
+      usage: null,
+      sources: [],
+      profileChanges: { skills },
+    });
+    await usePreparation.getState().send('更新技能');
+    return usePreparation.getState().messages.at(-1)!;
+  };
+  it('混合修改/新增只应用勾选项，遗漏的已有条目不被误删', async () => {
+    const proposal = await prepare();
+    usePreparation.getState().selectSkillIds(proposal.id, ['old', 'add']);
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(true);
+    expect(usePreparation.getState().info.skills).toEqual([changed, keep, added]);
+    expect(
+      usePreparation.getState().messages.find((message) => message.id === proposal.id),
+    ).toMatchObject({ appliedSkillIds: ['old', 'add'], appliedProfileFields: ['skills'] });
+    expect(streamChat).toHaveBeenCalledTimes(1);
+  });
+  it('删除提案只有勾选的已有技能被删除，其余不清空', async () => {
+    const proposal = await prepare([]);
+    usePreparation.getState().selectSkillIds(proposal.id, ['old']);
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(true);
+    expect(usePreparation.getState().info.skills).toEqual([keep]);
+  });
+  it('未选技能的较新修改及并发新增保持，所选冲突仍拒绝', async () => {
+    const proposal = await prepare();
+    const newer = { ...keep, content: '较新Qt' };
+    usePreparation.getState().updateInfo({ skills: [old, newer, omitted] });
+    usePreparation.getState().selectSkillIds(proposal.id, ['old', 'add']);
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(true);
+    expect(usePreparation.getState().info.skills).toEqual([changed, newer, omitted, added]);
+    const second = await prepare();
+    usePreparation.getState().updateInfo({ skills: [{ ...old, content: '较新C++' }, keep] });
+    usePreparation.getState().selectSkillIds(second.id, ['old']);
+    expect(usePreparation.getState().updateInfo({}, second.id)).toBe(false);
+    expect(usePreparation.getState().info.skills?.[0].content).toBe('较新C++');
+  });
+  it('取消所有技能后不能空保存，可同时仅保存其他字段', async () => {
+    const proposal = await prepare();
+    usePreparation.getState().selectSkillIds(proposal.id, []);
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(false);
+    usePreparation.setState({
+      messages: usePreparation
+        .getState()
+        .messages.map((message) =>
+          message.id === proposal.id
+            ? { ...message, changes: { ...message.changes, name: '仅保存姓名' } }
+            : message,
+        ),
+    });
+    usePreparation.getState().selectProfileFields(proposal.id, ['name']);
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(true);
+    expect(usePreparation.getState().info.name).toBe('仅保存姓名');
+    expect(usePreparation.getState().info.skills).toEqual([old, keep]);
+  });
+  it('选中新增但未删除已有技能导致超过十项时明确拒绝，不截断或偷删', async () => {
+    const proposal = await prepare();
+    const ten = Array.from({ length: 10 }, (_, index) => ({ ...old, id: 's' + index }));
+    usePreparation.setState({
+      info: { ...base, skills: ten },
+      messages: [{ ...proposal, profileBase: { ...base, skills: ten } }],
+    });
+    usePreparation.getState().selectSkillIds(proposal.id, ['add']);
+    expect(usePreparation.getState().updateInfo({}, proposal.id)).toBe(false);
+    expect(usePreparation.getState().error).toContain('超过10项');
+    expect(usePreparation.getState().info.skills).toEqual(ten);
   });
 });
 
@@ -482,7 +740,9 @@ describe('摘要、指令与技能需要逐次确认', () => {
     });
     await usePreparation.getState().send('删除全部自定义指令');
     expect(usePreparation.getState().info.customInstructions).toBe(instruction.content);
-    await usePreparation.getState().send('确认更新');
+    expect(
+      usePreparation.getState().updateInfo({}, usePreparation.getState().messages.at(-1)!.id),
+    ).toBe(true);
     expect(usePreparation.getState().info.customInstructions).toEqual('');
     vi.mocked(streamChat).mockResolvedValueOnce({
       ok: true,
@@ -496,12 +756,14 @@ describe('摘要、指令与技能需要逐次确认', () => {
   });
 });
 
-describe('附带文件的确认不重复发起模型调用', () => {
+describe('附带文件的按钮保存不重复发起模型调用', () => {
   it('确认完成提案即保存，待发送文件保留供后续使用', async () => {
     await usePreparation.getState().send('更新个人信息');
     const calls = vi.mocked(streamChat).mock.calls.length;
     usePreparation.getState().addAttachments([new File(['新附件'], 'resume.md')]);
-    await usePreparation.getState().send('确认更新');
+    expect(
+      usePreparation.getState().updateInfo({}, usePreparation.getState().messages.at(-1)!.id),
+    ).toBe(true);
     expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(calls);
     expect(usePreparation.getState().info.name).toBe('新姓名');
     expect(usePreparation.getState().attachments).toHaveLength(1);

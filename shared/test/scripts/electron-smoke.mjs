@@ -60,7 +60,7 @@ try {
     .getByRole('textbox', { name: '聊天消息' })
     .fill('姓名：测试用户\n岗位：前端工程师\nJD：负责 React 桌面应用');
   await page.getByRole('button', { name: '发送消息' }).click();
-  await page.getByRole('button', { name: '确认更新', exact: true }).click();
+  await page.getByRole('button', { name: '保存所选', exact: true }).click();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '测试用户');
   assert.equal(await page.getByLabel('目标岗位', { exact: true }).count(), 0);

@@ -194,8 +194,8 @@ try {
   };
   const proposal = () => page.getByRole('region', { name: '待确认的资料更新', exact: true }).last();
   const confirm = async () => {
-    await proposal().getByRole('button', { name: '确认更新', exact: true }).click();
-    await proposal().getByText('个人信息已更新', { exact: true }).waitFor();
+    await proposal().getByRole('button', { name: '保存所选', exact: true }).click();
+    await proposal().getByText('已保存所选资料', { exact: true }).waitFor();
   };
   for (const [label, prompt] of [
     [
@@ -301,7 +301,7 @@ try {
       return original.call(this, key, value);
     };
   });
-  await proposal().getByRole('button', { name: '确认更新', exact: true }).click();
+  await proposal().getByRole('button', { name: '保存所选', exact: true }).click();
   await page.getByText('资料保存失败，请检查本地存储空间。', { exact: true }).first().waitFor();
   assert.equal(await saved(), null);
   await page.evaluate(() => globalThis.restoreProfileStorage());
@@ -340,8 +340,8 @@ try {
   assert.equal((await saved()).customInstructions, undefined);
   await confirm();
   await send('删除全部自定义指令');
-  await proposal().getByText('未填写 / 清空', { exact: true }).waitFor();
-  await proposal().getByRole('button', { name: '保留旧版', exact: true }).click();
+  await proposal().getByText('清空内容', { exact: true }).waitFor();
+  await proposal().getByRole('button', { name: '保留原资料', exact: true }).click();
   assert((await saved()).customInstructions.includes('口语'));
   await send('删除全部自定义指令');
   await confirm();
@@ -374,7 +374,7 @@ try {
   await page.getByRole('button', { name: '重试回答', exact: true }).last().click();
   const preview = page.getByRole('region', { name: '正在生成的资料提案', exact: true });
   await preview.waitFor();
-  assert.equal(await preview.getByRole('button', { name: '确认更新' }).isDisabled(), true);
+  assert.equal(await preview.getByRole('button', { name: '保存所选' }).isDisabled(), true);
   const skillMessage = page.locator('.chat-message.assistant').last();
   assert.equal(await skillMessage.locator('a, .chat-source-group').count(), 0);
   assert(!/https?:|\*\*/.test(await skillMessage.innerText()));
@@ -637,6 +637,7 @@ try {
   });
   const beforeMissing = await app.evaluate(() => globalThis.profileRequests.length);
   await page.getByRole('button', { name: '补充职位描述', exact: true }).click();
+  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
   const missingDraft = await message.inputValue();
   assert.equal(
     missingDraft,
@@ -672,12 +673,13 @@ try {
   await manualSkills.waitFor();
   const beforeManualSkill = await app.evaluate(() => globalThis.profileRequests.length);
   await manualSkills.click();
+  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
   await proposal().waitFor();
   const manualSkillRequest = await app.evaluate(() => globalThis.profileRequests.at(-1));
   assert.equal(await app.evaluate(() => globalThis.profileRequests.length), beforeManualSkill + 1);
   assert.equal(manualSkillRequest.profileTask, 'skills');
   assert.equal(manualSkillRequest.profile.jobDescription, '手动合成 JD：接口开发。');
-  assert.equal(await page.locator('.skill-update-prompt').count(), 1);
+  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
   checks.push(
     'manual summaries offer one chat skill action without an AI proposal and after reload; the action sends once',
   );

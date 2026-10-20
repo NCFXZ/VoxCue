@@ -117,7 +117,7 @@ try {
   const preview = page.getByRole('region', { name: '正在生成的资料提案', exact: true });
   await preview.getByText('简历摘要第一部分', { exact: true }).waitFor();
   assert.equal(
-    await preview.getByRole('button', { name: '确认更新', exact: true }).isDisabled(),
+    await preview.getByRole('button', { name: '保存所选', exact: true }).isDisabled(),
     true,
   );
   assert.equal(await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1')), null);
@@ -125,7 +125,7 @@ try {
   await preview.getByText(/项目与专业技能第二部分/).waitFor();
   await page.screenshot({});
   await app.evaluate(() => globalThis.finishPreview());
-  await proposals().last().getByRole('button', { name: '确认更新', exact: true }).click();
+  await proposals().last().getByRole('button', { name: '保存所选', exact: true }).click();
   await page
     .locator('.skill-update-prompt')
     .getByText('还缺少职位描述摘要，请先提供并确认后再生成技能。', { exact: true })
@@ -139,7 +139,7 @@ try {
   assert.equal(await app.evaluate(() => globalThis.requests.length), count);
   await input().fill('更新JD：岗位需要软件开发和专业沟通');
   await send().click();
-  await proposals().last().getByRole('button', { name: '确认更新', exact: true }).click();
+  await proposals().last().getByRole('button', { name: '保存所选', exact: true }).click();
   const updateSkills = page
     .locator('.skill-update-prompt')
     .getByRole('button', { name: '联网更新技能', exact: true });

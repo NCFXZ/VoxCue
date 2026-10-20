@@ -1,10 +1,12 @@
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { Worker } from 'node:worker_threads';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
+process.env.CUDA_CACHE_PATH = path.join(testRoot, 'cuda-cache');
+await fs.mkdir(process.env.CUDA_CACHE_PATH);
 if (!process.argv.includes('--node')) {
   const child = spawnTestProcess(
     workspace.platformRequire('electron'),

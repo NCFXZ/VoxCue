@@ -23,7 +23,18 @@ parser.add_argument('--require-crop', action='store_true')
 parser.add_argument('--repeat', type=int, choices=range(1, 5), default=1)
 args = parser.parse_args()
 runtime = args.component / 'runtime'
-environment = dict(os.environ, PATH=str(runtime) + os.pathsep + os.environ.get('PATH', ''), RAYON_NUM_THREADS='4')
+run_root = next((parent for parent in args.component.resolve().parents
+                 if parent.name.startswith('voxcue-test-run-')
+                 and (parent / '.voxcue-test-owner.json').is_file()), None)
+if run_root is None:
+    raise RuntimeError('Qwen native checks require an owned temporary component')
+owner = json.loads((run_root / '.voxcue-test-owner.json').read_text(encoding='utf-8'))
+if owner.get('kind') != 'voxcue-test-run-' or not isinstance(owner.get('pid'), int) or owner['pid'] <= 0:
+    raise RuntimeError('Invalid temporary component owner')
+cuda_cache = run_root / 'qwen-cuda-cache'
+cuda_cache.mkdir(exist_ok=True)
+environment = dict(os.environ, PATH=str(runtime) + os.pathsep + os.environ.get('PATH', ''),
+                   RAYON_NUM_THREADS='4', CUDA_CACHE_PATH=str(cuda_cache))
 child = subprocess.Popen([str(runtime / ('voxcue-qwen-cpu.exe' if args.device == 'cpu' else 'voxcue-qwen.exe')), str(args.component), args.device], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=None if os.environ.get("VOXCUE_QWEN_DIAGNOSTICS") else subprocess.DEVNULL, env=environment, cwd=runtime, creationflags=subprocess.CREATE_NO_WINDOW)
 events = queue.Queue()
 def read():

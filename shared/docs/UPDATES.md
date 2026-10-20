@@ -1,3 +1,5 @@
+> 2026-10-20 Windows 0.5.5：[Windows x64 发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.5) 提供 EXE、blockmap 和 latest.yml，正式三项保留于 windows/release/0.5.5。资料提案支持逐字段/逐技能勾选、紧凑长内容、待保存标签与独立生成状态；来源问题逐项保留供审阅，仅卡片按钮保存。沿用现有组件和安装/更新信任配置，Mac 0.5.3、全部旧资产及既有 Latest 保留。发行完成后用户另行授权本次私有源码同步，详见 [Mac 逐项检查清单](MACOS_0.5.5_HANDOFF.md)，不再次改写公开资产。下文较早版本的当前状态均按历史理解。
+
 > 2026-10-17：Mac 已新增免费 Sparkle/Ed25519 更新适配与独立 DMG/ZIP 构建。以下 Windows 发行记录与旧“Mac 待实现”描述为历史；Mac 当前流程见 [macos/docs/UPDATES.md](../../macos/docs/UPDATES.md)。测试结果零保留，历史结果路径不作为可用交付物。
 
 > 2026-10-20 Windows 当前发行：[v0.5.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.1)，包含 Windows x64 安装包、blockmap 和 latest.yml，本地正式三项位于 windows/release/0.5.1。新增可选 Qwen3-ASR 0.6B CPU/CUDA 组件、四句缓冲和实际音频裁剪；Paraformer 与 Qwen 均为 800ms 静音收尾、终稿后 1000ms 自动提交检测。模型沿用独立 models-v1.0.0，不进入安装包。Mac 最新完整发行仍为 0.5.0，macos/ 只读；旧资产、发行及既有 v0.3.1 Latest 保留。此次仅公开发布 Windows 发行文件，不提交或推送私有源码。下文较早的“当前”描述按日期视为历史。

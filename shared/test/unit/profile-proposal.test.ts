@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   ProfileAnswerStream,
   profileInstructions,
@@ -57,7 +57,7 @@ describe('资料提案协议', () => {
       '请求无效',
     );
   });
-  it('指定主题仍须本次真实搜索和逐项来源匹配，整套条件与仅删除规则保留', () => {
+  it('来源问题逐项返回，保留内容供确认；整套条件与仅删除规则保留', () => {
     const source = { title: '合成来源', url: 'https://example.com/kafka' };
     const skill = { id: 'kafka', title: 'Kafka', content: '合成知识', sources: [source] };
     const request = {
@@ -71,9 +71,18 @@ describe('资料提案协议', () => {
     const next = () => ({ skills: [{ ...skill, content: '本次检索后的内容' }] });
     const sources = new Map([[source.url, source]]);
     expect(verifySkillProposal(request, next(), sources, true)).toBeUndefined();
-    expect(() => verifySkillProposal(request, next(), sources, false)).toThrow('真实联网');
-    expect(() => verifySkillProposal(request, next(), new Map(), true)).toThrow('真实联网');
-    expect(() =>
+    for (const [webSearch, completed, actual, reason] of [
+      [false, true, sources, 'search_disabled'],
+      [true, false, sources, 'search_incomplete'],
+      [true, true, new Map(), 'search_sources_missing'],
+    ] as const) {
+      const changes = next();
+      expect(verifySkillProposal({ ...request, webSearch }, changes, actual, completed)).toEqual([
+        { skillId: skill.id, reason, sources: [source] },
+      ]);
+      expect(changes.skills[0]).toEqual({ ...skill, content: '本次检索后的内容', sources: [] });
+    }
+    expect(
       verifySkillProposal(
         request,
         {
@@ -87,7 +96,13 @@ describe('资料提案协议', () => {
         sources,
         true,
       ),
-    ).toThrow('真实检索来源');
+    ).toEqual([
+      {
+        skillId: skill.id,
+        reason: 'source_unmatched',
+        sources: [{ ...source, url: 'https://example.com/unreturned' }],
+      },
+    ]);
     expect(() =>
       verifySkillProposal(
         { ...request, turns: [{ role: 'user', content: '生成技能' }] },
@@ -105,6 +120,42 @@ describe('资料提案协议', () => {
       ),
     ).toBeUndefined();
   });
+  it('部分和全部来源失败不丢弃任何技能，未改条目不重验，未核验引用单独保留', () => {
+    const source = { title: '工具来源', url: 'https://example.com/actual' };
+    const unverified = { title: '未检索引用', url: 'https://example.com/unreturned' };
+    const old = { id: 'old', title: '原有技能', content: '保留原文', sources: [unverified] };
+    const skills = [
+      old,
+      { id: 'valid', title: '已匹配', content: '有效内容', sources: [source] },
+      { id: 'partial', title: '部分匹配', content: '部分内容', sources: [source, unverified] },
+      { id: 'none', title: '全部失配', content: '完整保留内容', sources: [unverified] },
+      { id: 'missing', title: '缺少引用', content: '没有引用的内容', sources: [] },
+    ];
+    const changes = { skills: structuredClone(skills) };
+    const request = {
+      id: 'mixed',
+      modelId: 'synthetic',
+      webSearch: true,
+      instructions: '',
+      profile: { ...base, skills: [old] },
+      turns: [{ role: 'user' as const, content: '更新技能' }],
+    };
+    expect(verifySkillProposal(request, changes, new Map([[source.url, source]]), true)).toEqual([
+      { skillId: 'partial', reason: 'source_unmatched', sources: [unverified] },
+      { skillId: 'none', reason: 'source_unmatched', sources: [unverified] },
+      { skillId: 'missing', reason: 'skill_sources_missing', sources: [] },
+    ]);
+    expect(changes.skills.map(({ sources: _sources, ...entry }) => entry)).toEqual(
+      skills.map(({ sources: _sources, ...entry }) => entry),
+    );
+    expect(changes.skills.map((entry) => entry.sources)).toEqual([
+      [unverified],
+      [source],
+      [source],
+      [],
+      [],
+    ]);
+  });
   it('资料与技能逐字预览正确解码转义，仅完整提案可通过最终校验', () => {
     const stream = new ProfileAnswerStream();
     stream.append('{"answer":"已整理","changes":{"background":"第一行\\n中文\\u4f');
@@ -113,7 +164,7 @@ describe('资料提案协议', () => {
     stream.append('60","skills":[{"id":"s","title":"控制","content":"闭环\\n逐步');
     expect(stream.preview()).toEqual({
       background: '第一行\n中文你',
-      skills: [{ title: '控制', content: '闭环\n逐步' }],
+      skills: [{ id: 's', title: '控制', content: '闭环\n逐步' }],
     });
     stream.append('说明","sources":[]}]}}');
     expect(stream.finish(base).changes.background).toBe('第一行\n中文你');
@@ -129,6 +180,50 @@ describe('资料提案协议', () => {
     );
     expect(stream.preview()).toEqual({ background: '长'.repeat(10000) });
     expect(() => stream.finish(base)).toThrow();
+  });
+  it('技能稳定 ID 完整到达后才用于预览操作判定，非法 ID 不传给界面', () => {
+    const stream = new ProfileAnswerStream();
+    stream.append('{"answer":"预览","changes":{"skills":[{"id":"qt');
+    expect(stream.preview()?.skills?.[0]).not.toHaveProperty('id');
+    stream.append('-desktop","title":"Qt","content":"新内容');
+    expect(stream.preview()?.skills?.[0]?.id).toBe('qt-desktop');
+    const invalid = new ProfileAnswerStream();
+    invalid.append('{"answer":"预览","changes":{"skills":[{"id":"../invalid","title":"Qt"');
+    expect(invalid.preview()?.skills?.[0]).not.toHaveProperty('id');
+  });
+  it('字段按实际字符串闭合停止 loading，不依赖固定字段顺序或回复完成', () => {
+    const stream = new ProfileAnswerStream();
+    stream.append('{"answer":"预览","changes":{"customInstructions":"先说\\"结论\\"');
+    expect(stream.preview()).toEqual({ customInstructions: '先说"结论"' });
+    expect(stream.generation).toEqual({ fields: ['customInstructions'], skillIndexes: [] });
+    stream.append('","name":"新姓名');
+    expect(stream.preview()).toEqual({ name: '新姓名', customInstructions: '先说"结论"' });
+    expect(stream.generation).toEqual({ fields: ['name'], skillIndexes: [] });
+    stream.append('"');
+    stream.preview();
+    expect(stream.generation).toEqual({ fields: [], skillIndexes: [] });
+    expect(() => stream.finish(base)).toThrow('不完整');
+  });
+  it('已完成技能不受后一条生成影响，闭合空数组与尾部空白不产生虚假技能', () => {
+    const stream = new ProfileAnswerStream();
+    stream.append(
+      '{"answer":"预览","changes":{"skills":[{"id":"one","title":"一","content":"完整内容","sources":[]},{"id":"two","title":"二","content":"部分',
+    );
+    expect(stream.preview()?.skills).toHaveLength(2);
+    expect(stream.generation).toEqual({ fields: ['skills'], skillIndexes: [1] });
+    stream.append('内容","sources":[]}');
+    stream.preview();
+    expect(stream.generation).toEqual({ fields: ['skills'], skillIndexes: [] });
+    stream.append(']}}');
+    stream.preview();
+    expect(stream.generation).toEqual({ fields: [], skillIndexes: [] });
+    const empty = new ProfileAnswerStream();
+    empty.append('{"answer":"删除","changes":{"skills":[  ');
+    expect(empty.preview()).toEqual({ skills: [] });
+    expect(empty.generation).toEqual({ fields: ['skills'], skillIndexes: [] });
+    empty.append(']}}');
+    empty.preview();
+    expect(empty.generation).toEqual({ fields: [], skillIndexes: [] });
   });
   it('逐字符 JSON 流只显示 Markdown 回答，不显示字段协议或转义符', () => {
     const stream = new ProfileAnswerStream();
@@ -188,6 +283,7 @@ describe('附件聊天提案原生链路', () => {
             ),
     });
     const previews: unknown[] = [];
+    const generations: unknown[] = [];
     let completed = false;
     const result = service
       .stream(
@@ -202,6 +298,7 @@ describe('附件聊天提案原生链路', () => {
         (event) => {
           if (event.type === 'profile-preview') {
             previews.push(event.preview);
+            generations.push(event.generation);
             markPreview();
           }
         },
@@ -222,6 +319,7 @@ describe('附件聊天提案原生链路', () => {
     expect(completed).toBe(false);
     expect(base.background).toBe('已有项目');
     send({ type: 'response.output_text.delta', delta: json.slice(cut) });
+    await vi.waitFor(() => expect(generations.at(-1)).toEqual({ fields: [], skillIndexes: [] }));
     send({
       type: 'response.completed',
       response: { id: 'complete', status: 'completed', output: [] },

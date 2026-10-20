@@ -318,20 +318,20 @@ try {
   });
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   const proposals = page.getByRole('region', { name: '待确认的资料更新', exact: true });
-  await proposals.first().getByText('待保存内容', { exact: true }).first().waitFor();
+  await proposals.first().getByText('选择要保存的资料', { exact: true }).first().waitFor();
   await page.locator('.chat-answer').getByText('已整理资料', { exact: true }).waitFor();
   assert.equal(
     await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1')).name),
     '旧姓名',
   );
-  await proposals.first().getByRole('button', { name: '保留旧版', exact: true }).click();
+  await proposals.first().getByRole('button', { name: '保留原资料', exact: true }).click();
   assert.equal(
     await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1')).name),
     '旧姓名',
   );
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('更新个人信息');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await proposals.last().getByRole('button', { name: '确认更新', exact: true }).waitFor();
+  await proposals.last().getByRole('button', { name: '保存所选', exact: true }).waitFor();
   await page.screenshot({});
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -352,14 +352,13 @@ try {
   await page.screenshot({});
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '旧姓名');
-  await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('确认更新');
-  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await proposals.last().getByRole('button', { name: '保存所选', exact: true }).click();
   await page.waitForFunction(
     () => document.querySelector('input[placeholder="你的名字"]')?.value === '新姓名',
   );
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');
   await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
-  await proposals.last().getByText('个人信息已更新', { exact: true }).waitFor();
+  await proposals.last().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.deepEqual(
     await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1'))),
     { name: '新姓名', role: '原岗位', jobDescription: '新的 JD', background: '已有经历' },

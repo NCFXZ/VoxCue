@@ -7,6 +7,7 @@ import {
   type PersonalInfo,
   type ProfileChanges,
   type ProfilePreview,
+  type ProfileGeneration,
 } from '../../contracts/profile';
 const entryProperties = {
   id: { type: 'string' },
@@ -74,7 +75,7 @@ export const profileInstructions = `你可以读取当前个人资料，并在�
 
 自定义指令：一份字符串正文。把用户要求整理成明确、可执行的面试回答指令，支持补充、修改和删除，保留未要求变更的内容。
 
-技能：仅在用户明确要求新增、改写或删除时修改。整套自动生成须同时具备已确认的简历和JD摘要；缺少任意一份时，在 answer 中说明可先补充，不开始生成，也不影响其他聊天。用户明确指定主题要求新增或改写时，允许摘要不齐，仅围绕该主题生成，不推测岗位要求或个人经历。新增或改写须在本次完成真实网络搜索。搜索失败或不可用时不提出新增或改写提案，只在 answer 中简短说明，不凭记忆生成。仅删除时无需联网，不顺带生成替代条目。保留未要求变更的条目及其稳定 id。
+技能：仅在用户明确要求新增、改写或删除时修改。整套自动生成须同时具备已确认的简历和JD摘要；缺少任意一份时，在 answer 中说明可先补充，不开始生成，也不影响其他聊天。用户明确指定主题要求新增或改写时，允许摘要不齐，仅围绕该主题生成，不推测岗位要求或个人经历。新增或改写应在本次完成真实网络搜索。搜索失败、不可用或来源不足时，如已有生成内容，保留完整待审阅提案，如实说明来源未核验，不声称已完成检索或核验，由用户审阅后决定是否保存。仅删除时无需联网，不顺带生成替代条目。保留未要求变更的条目及其稳定 id。
 
 技能内容：围绕岗位要求、简历中的相关经历、技术和项目，或用户明确指定的主题，筛选对面试准备真正有帮助的内容，优先核心知识、关键原理、常用方法、常见考点和必要注意事项。主题和篇幅按需确定，合并重复主题，不凑数量，不设固定字数，不默认展开长篇教程。优先采用官方文档、标准和可靠的一手资料，注意版本和适用条件；资料有分歧时说明条件，不把过时结论当成通用规则。不把参考资料写成用户已掌握的能力或实际经历。
 
@@ -82,12 +83,13 @@ export const profileInstructions = `你可以读取当前个人资料，并在�
 
 存储限制（仅为保护上限，不是写作目标，不为接近上限而扩写）：技能最多10项；id 为1–64个字母、数字、下划线或短横线；标题最多80字符；每项正文最多6000字符；自定义指令最多16384字符；所有资料合计最多40000字符。超限时在 answer 中说明需分次处理，不静默截断。数组返回完整新列表，空数组表示全部删除；空字符串表示清除；null 表示不更新。
 
-确认：changes 只是待确认提案。用户点击确认，或用文字明确确认最近一份完整有效提案后，才由应用保存；保存前不说已更新，一次确认不适用于下一份提案，不指定确认用语。以应用提供的本机操作状态为准：已保存或已拒绝的提案不再索要确认，待确认提案不阻塞普通聊天。`;
+确认：changes 只是待确认提案。用户仅通过提案卡片逐项勾选并点击“保存所选”来保存，未选字段和未选中的已有技能保持原值；点击后直接保存，不要求二次确认。聊天中的“确认”“只保存…”等文字不执行保存，不据此宣称已保存，也不重复生成同一提案；如用户用文字要求保存，简短提示在提案卡片上勾选并点击“保存所选”。以应用提供的本机操作状态及实际已保存字段为准：已保存或已拒绝的提案不再索要确认，待确认提案不阻塞普通聊天。`;
 
 // Only stream the answer string, never expose the JSON protocol in the chat UI.
 export class ProfileAnswerStream {
   raw = '';
   answerComplete = false;
+  generation?: ProfileGeneration;
   private visible = '';
   private answerEnd = 0;
   append(chunk: string) {
@@ -128,12 +130,17 @@ export class ProfileAnswerStream {
     return delta;
   }
   preview(): ProfilePreview | undefined {
+    this.generation = undefined;
     if (!this.answerComplete) return;
     const match = this.raw.slice(this.answerEnd).match(/^\s*,\s*"changes"\s*:\s*/);
     if (!match) return;
-    const changes = partialValue(this.raw.slice(this.answerEnd + match[0].length));
-    if (!changes || typeof changes !== 'object' || Array.isArray(changes)) return;
+    const parsed = partialValue(this.raw.slice(this.answerEnd + match[0].length));
+    const changes = parsed?.value;
+    if (!parsed || !changes || typeof changes !== 'object' || Array.isArray(changes)) return;
     const preview: ProfilePreview = {};
+    const generation: ProfileGeneration = { fields: [], skillIndexes: [] };
+    const incomplete = (...path: Array<string | number>) =>
+      !parsed.completePaths.has(JSON.stringify(path));
     let remaining = 40000;
     const text = (value: unknown, limit: number) => {
       if (typeof value !== 'string') return '';
@@ -143,14 +150,27 @@ export class ProfileAnswerStream {
     };
     for (const key of profileFields) {
       const value = (changes as Record<string, unknown>)[key];
-      if (key !== 'skills' && typeof value === 'string')
+      if (key !== 'skills' && typeof value === 'string') {
         preview[key] = text(value, profileLimits[key]);
-      if (key === 'skills' && Array.isArray(value))
-        preview.skills = value.slice(0, 10).map((item) => ({
-          title: text(item?.title, 80),
-          content: text(item?.content, 6000),
-        }));
+        if (incomplete(key)) generation.fields.push(key);
+      }
+      if (key === 'skills' && Array.isArray(value)) {
+        if (incomplete(key)) generation.fields.push(key);
+        preview.skills = value.slice(0, 10).map((item, index) => {
+          if (incomplete(key, index)) generation.skillIndexes.push(index);
+          return {
+            ...(!incomplete(key, index, 'id') &&
+            typeof item?.id === 'string' &&
+            /^[\w-]{1,64}$/.test(item.id)
+              ? { id: item.id }
+              : {}),
+            title: text(item?.title, 80),
+            content: text(item?.content, 6000),
+          };
+        });
+      }
     }
+    this.generation = generation;
     return Object.keys(preview).length ? preview : undefined;
   }
   finish(base: PersonalInfo): { delta: string; changes: ProfileChanges } {
@@ -179,9 +199,10 @@ export class ProfileAnswerStream {
 
 // Parse only completed tokens and the available prefix of a string. No code evaluation,
 // guessed closing values or partial data ever enters finish()/validateChanges().
-function partialValue(raw: string): unknown {
+function partialValue(raw: string): { value: unknown; completePaths: Set<string> } | undefined {
   let position = 0,
     nodes = 0;
+  const completePaths = new Set<string>();
   const whitespace = () => {
     while (/\s/.test(raw[position] ?? '') && position < raw.length) position++;
   };
@@ -202,10 +223,14 @@ function partialValue(raw: string): unknown {
     }
     return { value: JSON.parse('"' + raw.slice(start, end) + '"'), complete: false };
   };
-  const value = (depth: number): unknown => {
+  const value = (depth: number, path: Array<string | number>): unknown => {
     if (depth > 12 || ++nodes > 1024) return;
     whitespace();
-    if (raw[position] === '"') return string().value;
+    if (raw[position] === '"') {
+      const item = string();
+      if (item.complete) completePaths.add(JSON.stringify(path));
+      return item.value;
+    }
     if (raw[position] === '{') {
       position++;
       const result: Record<string, unknown> = Object.create(null);
@@ -216,12 +241,15 @@ function partialValue(raw: string): unknown {
         if (!key.complete) break;
         whitespace();
         if (raw[position++] !== ':') break;
-        result[key.value] = value(depth + 1);
+        result[key.value] = value(depth + 1, [...path, key.value]);
         whitespace();
         if (raw[position] !== ',') break;
         position++;
       }
-      if (raw[position] === '}') position++;
+      if (raw[position] === '}') {
+        position++;
+        completePaths.add(JSON.stringify(path));
+      }
       return result;
     }
     if (raw[position] === '[') {
@@ -229,15 +257,18 @@ function partialValue(raw: string): unknown {
       const result: unknown[] = [];
       while (position < raw.length) {
         whitespace();
-        if (raw[position] === ']') break;
+        if (position >= raw.length || raw[position] === ']') break;
         const start = position;
-        result.push(value(depth + 1));
+        result.push(value(depth + 1, [...path, result.length]));
         if (position === start) break;
         whitespace();
         if (raw[position] !== ',') break;
         position++;
       }
-      if (raw[position] === ']') position++;
+      if (raw[position] === ']') {
+        position++;
+        completePaths.add(JSON.stringify(path));
+      }
       return result;
     }
     const scalar = raw.slice(position).match(/^(null|true|false|-?\d+(?:\.\d+)?)/)?.[0];
@@ -247,7 +278,7 @@ function partialValue(raw: string): unknown {
     }
   };
   try {
-    return value(0);
+    return { value: value(0, []), completePaths };
   } catch {
     return undefined;
   }

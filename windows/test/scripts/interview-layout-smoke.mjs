@@ -503,6 +503,19 @@ try {
   const originalCursor = await app.evaluate(({ screen }) =>
     screen.dipToScreenPoint(screen.getCursorScreenPoint()),
   );
+  await floating.evaluate(() => {
+    window.layoutNativePointerEvents = [];
+    window.addEventListener('mousemove', (event) => {
+      const events = window.layoutNativePointerEvents;
+      events.push({
+        x: event.clientX,
+        y: event.clientY,
+        buttons: event.buttons,
+        target: document.elementFromPoint(event.clientX, event.clientY)?.className,
+      });
+      if (events.length > 6) events.shift();
+    });
+  });
   const nativeDrags = [];
   for (const [edge, change] of [
     ['right', -0.08],
@@ -552,6 +565,8 @@ try {
               before,
               box,
               start,
+              originalCursor,
+              pointerEvents: await floating.evaluate(() => window.layoutNativePointerEvents),
               cursor: probe('cursor'),
               hit: probe('hit', nativeHandle, Math.round(start.x), Math.round(start.y)),
               viewport: await floating.evaluate(() => ({

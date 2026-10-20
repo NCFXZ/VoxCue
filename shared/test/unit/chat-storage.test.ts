@@ -2,6 +2,53 @@ import 'fake-indexeddb/auto';
 import { expect, it, vi } from 'vitest';
 import { localChats, type ChatSnapshot } from '../../../shared/src/services/chats';
 
+it('来源未核验提案及问题在确认前后均完整恢复', async () => {
+  const message = {
+    id: 'proposal',
+    role: 'assistant' as const,
+    status: 'completed' as const,
+    content: '请审阅',
+    profileBase: { name: '', background: '', jobDescription: '' },
+    changes: {
+      name: '未采用姓名',
+      skills: [{ id: 's', title: '合成技能', content: '完整正文', sources: [] }],
+    },
+    selectedProfileFields: ['skills' as const],
+    selectedSkillIds: ['s'],
+    skillSourceIssues: [
+      {
+        skillId: 's',
+        reason: 'source_unmatched' as const,
+        sources: [{ title: '待核验', url: 'https://example.com/unreturned' }],
+      },
+    ],
+  };
+  const snapshot: ChatSnapshot = {
+    conversations: [{ id: 'c', title: '来源审阅', messages: [message] }],
+    activeConversation: 'c',
+    draft: '',
+    attachments: [],
+    modelId: 'test',
+    effort: 'low',
+    webSearch: true,
+  };
+  for (const applied of [false, true]) {
+    const savedMessage = {
+      ...message,
+      applied,
+      ...(applied ? { appliedProfileFields: ['skills' as const], appliedSkillIds: ['s'] } : {}),
+    };
+    await localChats.write({
+      ...snapshot,
+      conversations: [{ ...snapshot.conversations[0], messages: [savedMessage] }],
+    });
+    expect((await localChats.read())?.conversations[0].messages[0]).toEqual({
+      ...savedMessage,
+      options: undefined,
+    });
+  }
+});
+
 it('聊天、草稿与附件恢复；同一附件只保存一次；删除仅回收聊天自有附件', async () => {
   const attachment = {
     id: 'chat-file',
@@ -40,6 +87,7 @@ it('聊天、草稿与附件恢复；同一附件只保存一次；删除仅回�
               },
             ],
             profilePreview: { background: '未完成摘要' },
+            profileGeneration: { fields: ['background'], skillIndexes: [] },
           },
         ],
       },
@@ -74,6 +122,7 @@ it('聊天、草稿与附件恢复；同一附件只保存一次；删除仅回�
     ],
   });
   expect(restored.draft).toBe('最新草稿');
+  expect(restored.conversations[0].messages[1].profileGeneration).toBeUndefined();
   // A failing metadata write aborts the whole transaction and leaves the last version.
   put.mockRestore();
   const nativePut = IDBObjectStore.prototype.put;

@@ -17,6 +17,7 @@ const shared = [
   'chat-progress',
   'chat-lifecycle',
   'profile-ui',
+  'profile-selection',
   'knowledge',
   'rag-ui',
   'rag-core',

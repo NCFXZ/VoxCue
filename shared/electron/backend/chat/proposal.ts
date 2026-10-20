@@ -2,10 +2,10 @@ import {
   skillContentChanged,
   skillResearchScope,
   type ProfileChanges,
+  type SkillSourceIssue,
 } from '../../contracts/profile';
 import type { ChatRequest, ChatSource } from '../../contracts/chat';
 import { sourceKey } from './validation';
-import { ChatServiceError } from './errors';
 
 /** The same confirmation/source boundary applies to every AI service. */
 export function verifySkillProposal(
@@ -13,7 +13,7 @@ export function verifySkillProposal(
   changes: ProfileChanges | undefined,
   sources: Map<string, ChatSource>,
   completedSearch: boolean,
-): string | undefined {
+): SkillSourceIssue[] | undefined {
   if (!changes?.skills || !request.profile || !skillContentChanged(request.profile, changes.skills))
     return;
   if (
@@ -24,29 +24,39 @@ export function verifySkillProposal(
       changes.jobDescription !== request.profile.jobDescription)
   )
     throw Error('请先确认简历和职位描述摘要，再联网生成技能。');
-  if (!request.webSearch || !completedSearch || !sources.size)
-    throw new ChatServiceError({
-      code: 'skill_search_unverified',
-      message: '未取得真实联网查询及来源，技能未更新，请重新联网生成。',
-    });
-  let removed = 0;
+  const searchIssue = !request.webSearch
+    ? 'search_disabled'
+    : !completedSearch
+      ? 'search_incomplete'
+      : !sources.size
+        ? 'search_sources_missing'
+        : undefined;
+  const issues: SkillSourceIssue[] = [];
   for (const skill of changes.skills) {
     if ((request.profile.skills ?? []).some((old) => JSON.stringify(old) === JSON.stringify(skill)))
       continue;
     const matched = new Map<string, ChatSource>();
+    const unmatched: ChatSource[] = [];
     for (const source of skill.sources) {
       const key = sourceKey(source.url),
-        verified = key && sources.get(key);
+        verified = !searchIssue && key && sources.get(key);
       if (key && verified) matched.set(key, verified);
-      else removed++;
+      else unmatched.push(source);
     }
-    if (!matched.size)
-      throw new ChatServiceError({
-        code: 'skill_sources_unverified',
-        message:
-          '技能引用未能对应本次真实检索来源，提案未通过校验，尚未保存。已保留收到的内容，请重试。',
+    const reason =
+      searchIssue ??
+      (!skill.sources.length
+        ? 'skill_sources_missing'
+        : unmatched.length
+          ? 'source_unmatched'
+          : undefined);
+    if (reason)
+      issues.push({
+        skillId: skill.id,
+        reason,
+        sources: unmatched,
       });
     skill.sources = [...matched.values()];
   }
-  if (removed) return `已移除${removed}个未匹配的引用；每项技能仍保留本次真实来源，请确认内容。`;
+  return issues.length ? issues : undefined;
 }

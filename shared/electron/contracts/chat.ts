@@ -1,4 +1,10 @@
-import type { PersonalInfo, ProfileChanges, ProfilePreview } from './profile';
+import type {
+  PersonalInfo,
+  ProfileChanges,
+  ProfilePreview,
+  ProfileGeneration,
+  SkillSourceIssue,
+} from './profile';
 import type { ChatActivity } from './activity';
 export type { ChatActivity } from './activity';
 export interface ModelProvider {
@@ -73,7 +79,7 @@ export interface ChatRequest {
 }
 export type ChatEvent =
   | { id: string; type: 'provider'; provider: ModelProvider }
-  | { id: string; type: 'profile-preview'; preview: ProfilePreview }
+  | { id: string; type: 'profile-preview'; preview: ProfilePreview; generation?: ProfileGeneration }
   | { id: string; type: 'delta'; text: string }
   | { id: string; type: 'reasoning-summary'; text: string }
   | { id: string; type: 'search' }
@@ -105,6 +111,7 @@ export type ChatResult =
         toolCalls?: number;
       };
       profileChanges?: ProfileChanges;
+      skillSourceIssues?: SkillSourceIssue[];
       answerText?: string;
       reasoningSummary?: string;
       activities?: ChatActivity[];

@@ -197,7 +197,7 @@ try {
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await message.fill('更新个人资料提案');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await page.getByRole('button', { name: '确认更新', exact: true }).click();
+  await page.getByRole('button', { name: '保存所选', exact: true }).click();
   if (!(await panel.isVisible())) await info.click();
   await panel.getByText('基本信息已有更新', { exact: true }).waitFor();
   assert.equal(await panel.getByRole('button', { name: '保存', exact: true }).isDisabled(), true);

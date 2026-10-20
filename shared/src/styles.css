@@ -1455,22 +1455,6 @@ p {
   padding: 16px;
   margin-top: 15px;
 }
-.profile-proposal > strong {
-  font-size: var(--type-body);
-  font-weight: 500;
-}
-.profile-proposal p {
-  font-size: var(--type-secondary);
-  line-height: 1.8;
-  white-space: pre-wrap;
-  margin: 12px 0;
-  overflow-wrap: anywhere;
-}
-.profile-proposal p > span {
-  color: var(--muted);
-  display: block;
-  margin-bottom: 3px;
-}
 @media (max-width: 1150px) {
   .personal-panel {
     width: 300px;
@@ -2378,36 +2362,84 @@ p {
   margin-top: 10px;
 }
 
-.profile-change {
-  margin-top: 14px;
+.profile-field-choice {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
 }
-.profile-change h4 {
-  font-size: var(--type-body);
-  font-weight: 600;
-  margin: 0 0 7px;
+.profile-field-choice input[type='checkbox'] {
+  appearance: none;
+  position: relative;
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  padding: 0;
+  flex-shrink: 0;
+  border: 1.5px solid var(--muted);
+  border-radius: 6px;
+  background: var(--surface);
+  box-shadow: none;
+  transition:
+    background-color 160ms ease,
+    border-color 160ms ease,
+    transform 140ms ease;
 }
-.profile-preview {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 10px;
+.profile-field-choice:hover input[type='checkbox'] {
+  border-color: var(--accent);
 }
-.profile-preview > div {
-  padding: 10px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  min-width: 0;
+.profile-field-choice input[type='checkbox']:is(:checked, :indeterminate) {
+  border-color: var(--accent);
+  background: var(--accent);
 }
-.profile-preview > div > span {
-  color: var(--muted);
-  font-size: var(--type-secondary);
+.profile-field-choice input[type='checkbox']:active {
+  transform: scale(0.92);
 }
-.profile-proposal .profile-preview p {
-  margin: 5px 0 0;
-  max-height: 200px;
-  overflow: auto;
+.profile-field-choice input[type='checkbox']:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
-.profile-proposal .profile-consent-note {
-  color: var(--muted);
+.profile-field-choice input[type='checkbox']::before,
+.profile-field-choice input[type='checkbox']::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  opacity: 0;
+  transition:
+    opacity 140ms ease,
+    transform 160ms ease;
+  pointer-events: none;
+}
+.profile-field-choice input[type='checkbox']::before {
+  width: 5px;
+  height: 8px;
+  border: solid var(--surface);
+  border-width: 0 1.8px 1.8px 0;
+  border-radius: 0;
+  transform: translate(-50%, -60%) rotate(45deg) scale(0.5);
+}
+.profile-field-choice input[type='checkbox']:checked:not(:indeterminate)::before {
+  opacity: 1;
+  transform: translate(-50%, -60%) rotate(45deg) scale(1);
+}
+.profile-field-choice input[type='checkbox']::after {
+  width: 8px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--surface);
+  transform: translate(-50%, -50%) scaleX(0.5);
+}
+.profile-field-choice input[type='checkbox']:indeterminate::after {
+  opacity: 1;
+  transform: translate(-50%, -50%) scaleX(1);
+}
+@media (prefers-reduced-motion: reduce) {
+  .profile-field-choice input[type='checkbox'],
+  .profile-field-choice input[type='checkbox']::before,
+  .profile-field-choice input[type='checkbox']::after {
+    transition: none;
+  }
 }
 .profile-proposal-actions {
   display: flex;
@@ -2538,11 +2570,6 @@ p {
 .markdown-table th {
   background: var(--soft);
   font-weight: 600;
-}
-@media (max-width: 900px) {
-  .profile-preview {
-    grid-template-columns: 1fr;
-  }
 }
 
 /* System accent is shared across all windows and both appearance modes. */
@@ -4972,8 +4999,7 @@ details[open] > summary > .disclosure-chevron {
   margin-bottom: 10px;
 }
 .profile-summary .markdown-content,
-.profile-entry .markdown-content,
-.profile-preview .markdown-content {
+.profile-entry .markdown-content {
   font-size: var(--type-body);
   line-height: 1.8;
   overflow-wrap: anywhere;
@@ -5082,6 +5108,24 @@ details[open] > summary > .disclosure-chevron {
   margin-bottom: 6px;
   font-size: var(--type-body);
 }
+.skill-source-issue {
+  margin-top: 8px;
+  padding: 8px 12px;
+  border-left: 2px solid var(--accent);
+  background: var(--soft);
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  overflow-wrap: anywhere;
+}
+.skill-source-issue ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+}
+.skill-source-issue code {
+  display: block;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
 .plain-text-content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -5097,11 +5141,6 @@ details[open] > summary > .disclosure-chevron {
 .personal-info-v2 .profile-entry > summary {
   font-size: var(--type-body);
   line-height: 1.5;
-}
-.profile-preview > div {
-  min-width: 0;
-  max-height: 360px;
-  overflow-y: auto;
 }
 .skill-update-prompt {
   border: 1px solid var(--border-hover);
@@ -5156,7 +5195,6 @@ details[open] > summary > .disclosure-chevron {
 h3,
 h4,
 .profile-section h3,
-.profile-change h4,
 .profile-entry > summary,
 .floating-panel h2,
 .record-transcript-heading,
@@ -5178,7 +5216,6 @@ h4,
 .record-transcript-text,
 .profile-summary .markdown-content,
 .profile-entry .markdown-content,
-.profile-preview .markdown-content,
 .document-preview {
   font-size: var(--type-body);
   font-weight: 400;
@@ -5194,8 +5231,7 @@ h4,
 .login-explanation,
 .login-footer p,
 .login-footer small,
-.record-answer-panel > header p,
-.profile-proposal .profile-consent-note {
+.record-answer-panel > header p {
   font-size: var(--type-secondary);
   font-weight: 400;
   line-height: var(--line-secondary);
@@ -5861,5 +5897,223 @@ svg[data-ui-icon] {
 @media (max-width: 560px) {
   .interview-settings-dialog :is(.audio-device-editor, .speech-model-group) {
     grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Compact proposal list; full content uses one accessible reading dialog. */
+.proposal-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 12px;
+}
+.proposal-heading strong {
+  font-size: var(--type-body);
+  font-weight: 600;
+}
+.proposal-heading > span,
+.proposal-footer-note {
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  line-height: 1.6;
+}
+.proposal-heading > span {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+.proposal-rows {
+  border-top: 1px solid var(--border);
+}
+.proposal-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 14px 0;
+}
+.proposal-rows > .proposal-row + *,
+.proposal-rows > .proposal-skills + * {
+  border-top: 1px solid var(--border);
+}
+.proposal-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.profile-proposal[data-resolved] .proposal-row {
+  padding: 9px 0;
+}
+.proposal-row-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+.proposal-field-loading {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.proposal-field-loading > svg {
+  animation: conversation-spin 1s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .proposal-field-loading > svg {
+    animation: none;
+  }
+}
+.proposal-row-title > strong,
+.proposal-row-title .profile-field-choice {
+  font-size: var(--type-body);
+  font-weight: 500;
+  min-width: 0;
+}
+.profile-field-choice {
+  min-height: 24px;
+}
+.proposal-row-title .profile-field-choice > span {
+  overflow-wrap: anywhere;
+}
+.proposal-excerpt {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  white-space: normal;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  line-height: 1.65;
+  margin-top: 5px;
+}
+.proposal-excerpt.is-short {
+  color: var(--text);
+  font-size: var(--type-body);
+}
+.proposal-excerpt .plain-text-content {
+  white-space: normal;
+}
+.proposal-view {
+  flex-shrink: 0;
+  padding: 5px 9px;
+  min-height: 30px;
+  font-size: var(--type-secondary);
+}
+.proposal-view > span {
+  display: inline-flex;
+  transition: transform 180ms ease;
+}
+.proposal-view > span.is-expanded {
+  transform: rotate(180deg);
+}
+.proposal-skill-rows {
+  padding-left: 24px;
+}
+.proposal-skill-row {
+  border-top: 1px solid var(--border);
+}
+.proposal-status,
+.proposal-operation,
+.proposal-warning {
+  font-size: var(--type-caption, 11px);
+  font-weight: 400;
+  line-height: 1.5;
+  color: var(--muted);
+}
+.proposal-status.is-saved {
+  color: var(--accent);
+}
+.proposal-operation {
+  padding: 2px 7px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--surface);
+}
+.proposal-operation.is-removal {
+  color: var(--danger);
+}
+.proposal-warning {
+  color: var(--warning, var(--muted));
+}
+.proposal-footer {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.proposal-footer-note {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.proposal-footer .danger-text {
+  flex-basis: 100%;
+  font-size: var(--type-secondary);
+}
+.proposal-result {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.proposal-reader .dialog-heading {
+  align-items: flex-start;
+}
+.proposal-reader .dialog-heading > div:last-child {
+  flex-shrink: 0;
+}
+.proposal-reader .profile-field-choice {
+  font-size: var(--type-secondary);
+  font-weight: 400;
+  white-space: nowrap;
+}
+.proposal-reader-content {
+  margin-top: 20px;
+  font-size: var(--type-body);
+  line-height: var(--line-body);
+  overflow-wrap: anywhere;
+}
+.proposal-reader-content .profile-value-list > article {
+  padding: 0;
+  border: 0;
+}
+.proposal-reader-content .skill-source-issue {
+  margin-top: 20px;
+}
+.proposal-reader-content .markdown-content p {
+  max-height: none;
+  overflow: visible;
+}
+@media (max-width: 650px) {
+  .profile-proposal {
+    padding: 14px;
+  }
+  .proposal-row {
+    gap: 8px;
+  }
+  .proposal-footer .profile-proposal-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+  .proposal-skill-rows {
+    padding-left: 16px;
+  }
+  .proposal-reader .dialog-heading {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .proposal-reader .dialog-heading > div:last-child {
+    margin-left: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .proposal-view > span {
+    transition: none;
   }
 }

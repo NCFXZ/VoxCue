@@ -11,7 +11,13 @@ export interface ChatMessage {
   reasoningSummary?: string;
   changes?: Partial<PersonalInfo>;
   profilePreview?: import('../../electron/contracts/profile').ProfilePreview;
+  profileGeneration?: import('../../electron/contracts/profile').ProfileGeneration;
+  skillSourceIssues?: import('../../electron/contracts/profile').SkillSourceIssue[];
   applied?: boolean;
+  selectedProfileFields?: import('../../electron/contracts/profile').ProfileField[];
+  appliedProfileFields?: import('../../electron/contracts/profile').ProfileField[];
+  selectedSkillIds?: string[];
+  appliedSkillIds?: string[];
   dismissed?: boolean;
   profileBase?: PersonalInfo;
   options?: ChatRequestOptions;
@@ -78,7 +84,7 @@ export const mockPreparation: PreparationChatService = {
     }
     const changes = extractProfileChanges(prompt);
     const answer = Object.keys(changes).length
-      ? '我识别到了你提供的资料信息。你可以检查下方内容，再点击“确认更新”保存到本机。\n\n这是一条模拟回复，仅识别明确标注的姓名和 JD。其他经历可在右上角“个人信息”中编辑。'
+      ? '我识别到了你提供的资料信息。请检查下方提案，勾选要保存的内容，再点击“保存所选”保存到本机。\n\n这是一条模拟回复，仅识别明确标注的姓名和 JD。其他经历可在右上角“个人信息”中编辑。'
       : /简历|履历/.test(prompt)
         ? '我们可以先从简历的表达结构入手：\n\n1. 用一句话概括你的专业方向与目标岗位。\n2. 每段项目经历依次写清背景、你的职责、关键行动和结果。\n3. 优先保留与目标岗位相关的经历，使用真实数据说明贡献。\n\n你可以通过输入框左下角上传简历，或把需要修改的段落粘贴给我。\n\n当前为 Mock 演示：文件只保存在本机，PDF 和 Word 解析、AI 简历分析尚未接入。'
         : /项目/.test(prompt)

@@ -1,7 +1,12 @@
 import type { ChatMessage } from './preparation';
 import type { ChatAttachment, ChatRequestOptions } from './chatOptions';
 import { reasoningEfforts, type ReasoningEffort } from '../../electron/contracts/chat';
-import { validProfile } from '../../electron/contracts/profile';
+import {
+  validProfile,
+  skillSourceIssueReasons,
+  profileFields,
+  skillProposalEntries,
+} from '../../electron/contracts/profile';
 import {
   storedObject,
   storedProvider,
@@ -31,7 +36,7 @@ export interface ChatSnapshot {
   skillsNeedUpdate?: boolean;
 }
 type StoredAttachment = Omit<ChatAttachment, 'file'>;
-type StoredMessage = Omit<ChatMessage, 'options'> & {
+type StoredMessage = Omit<ChatMessage, 'options' | 'profileGeneration'> & {
   options?: Omit<ChatRequestOptions, 'attachments'> & { attachments: StoredAttachment[] };
 };
 type StoredSnapshot = Omit<ChatSnapshot, 'conversations' | 'attachments'> & {
@@ -88,6 +93,8 @@ function storedMessage(value: unknown) {
             !item.every(
               (skill) =>
                 storedObject(skill) &&
+                (skill.id === undefined ||
+                  (typeof skill.id === 'string' && /^[\w-]{1,64}$/.test(skill.id))) &&
                 typeof skill.title === 'string' &&
                 typeof skill.content === 'string',
             )
@@ -96,6 +103,57 @@ function storedMessage(value: unknown) {
     )
       return false;
   }
+  for (const key of ['selectedProfileFields', 'appliedProfileFields']) {
+    const fields = value[key];
+    if (fields === undefined) continue;
+    if (
+      !Array.isArray(fields) ||
+      fields.length > profileFields.length ||
+      new Set(fields).size !== fields.length ||
+      !fields.every(
+        (field) => profileFields.includes(field) && value.changes?.[field] !== undefined,
+      ) ||
+      (key === 'appliedProfileFields' && (!value.applied || !fields.length))
+    )
+      return false;
+  }
+  for (const key of ['selectedSkillIds', 'appliedSkillIds']) {
+    const ids = value[key];
+    if (ids === undefined) continue;
+    const entries = skillProposalEntries(
+      value.profileBase?.skills ?? [],
+      value.changes?.skills ?? [],
+    );
+    if (
+      !Array.isArray(value.changes?.skills) ||
+      !Array.isArray(ids) ||
+      ids.length > 20 ||
+      new Set(ids).size !== ids.length ||
+      !ids.every(
+        (id) => typeof id === 'string' && entries.some((entry) => entry.skill.id === id),
+      ) ||
+      (key === 'appliedSkillIds' &&
+        (!value.applied || !value.appliedProfileFields?.includes('skills')))
+    )
+      return false;
+  }
+  if (
+    value.skillSourceIssues !== undefined &&
+    (!Array.isArray(value.skillSourceIssues) ||
+      value.skillSourceIssues.length > 10 ||
+      !value.skillSourceIssues.every(
+        (issue) =>
+          storedObject(issue) &&
+          typeof issue.skillId === 'string' &&
+          /^[\w-]{1,64}$/.test(issue.skillId) &&
+          value.changes?.skills?.some((skill: { id: string }) => skill.id === issue.skillId) &&
+          skillSourceIssueReasons.includes(issue.reason) &&
+          Array.isArray(issue.sources) &&
+          issue.sources.length <= 10 &&
+          storedSources(issue.sources),
+      ))
+  )
+    return false;
   if (
     value.options !== undefined &&
     (!storedObject(value.options) ||
@@ -216,12 +274,16 @@ export const localChats = {
       conversations: snapshot.conversations.map((c) => ({
         ...c,
         attachments: pack(c.attachments),
-        messages: c.messages.map((m) => ({
-          ...m,
-          ...(m.options
-            ? { options: { ...m.options, attachments: pack(m.options.attachments) } }
-            : {}),
-        })),
+        messages: c.messages.map((m) => {
+          const message = { ...m };
+          delete message.profileGeneration;
+          return {
+            ...message,
+            ...(message.options
+              ? { options: { ...message.options, attachments: pack(message.options.attachments) } }
+              : {}),
+          };
+        }),
       })),
     };
     const db = await openDatabase();

@@ -6,6 +6,8 @@ import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-wo
 import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { prepareQwenAudio } from './qwen-fixtures.mjs';
 
+process.env.CUDA_CACHE_PATH = path.join(testRoot, 'cuda-cache');
+await mkdir(process.env.CUDA_CACHE_PATH);
 const [component, voice, option] = process.argv.slice(2);
 assert.ok(component && voice, 'Use a temporary verified Qwen component and fixed public wave');
 assert.ok(option === undefined || option === '--skip-dual');

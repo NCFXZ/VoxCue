@@ -228,7 +228,7 @@ describe('本场知识库范围不可被模型扩大', () => {
   });
 });
 
-describe('技能必须来自真实完成的网络查询', () => {
+describe('技能来源核验与可审阅提案', () => {
   const run = (
     searched: boolean,
     sources: object[],
@@ -300,18 +300,31 @@ describe('技能必须来自真实完成的网络查询', () => {
       new AbortController().signal,
     );
   };
-  it('仅开启搜索不算联网成功；无来源或虚构来源都不返回可保存提案', async () => {
-    await expect(run(false, [])).rejects.toThrow('真实联网');
-    await expect(run(true, [])).rejects.toThrow('来源');
-    await expect(
-      run(true, [source], {
-        ...skill,
-        sources: [{ title: '虚构', url: 'https://example.com/invented' }],
-      }),
-    ).rejects.toThrow('本次真实检索');
+  it('搜索未完成、无工具来源或引用失配均保留完整提案并返回具体问题', async () => {
+    for (const [searched, actual, reason] of [
+      [false, [], 'search_incomplete'],
+      [true, [], 'search_sources_missing'],
+    ] as const) {
+      const result = await run(searched, [...actual]);
+      expect(result.profileChanges?.skills).toEqual([{ ...skill, sources: [] }]);
+      expect(result.skillSourceIssues).toEqual([
+        { skillId: skill.id, reason, sources: skill.sources },
+      ]);
+      expect(result.answerText).toBe('请确认技能');
+    }
+    const unverified = { title: '虚构', url: 'https://example.com/invented' };
+    const failed = await run(true, [source], {
+      ...skill,
+      sources: [unverified],
+    });
+    expect(failed.profileChanges?.skills).toEqual([{ ...skill, sources: [] }]);
+    expect(failed.skillSourceIssues).toEqual([
+      { skillId: skill.id, reason: 'source_unmatched', sources: [unverified] },
+    ]);
     const result = await run(true, [source]);
     expect(result.profileChanges?.skills).toEqual([skill]);
     expect(result.sources).toEqual([source]);
+    expect(result.skillSourceIssues).toBeUndefined();
   });
   it('流式完成事件的真实来源不依赖终态再次携带，同页锚点/追踪参数可匹配并使用真实元数据', async () => {
     const actual = { title: '真实工具标题', url: source.url + '?utm_source=search#overview' };
@@ -337,16 +350,24 @@ describe('技能必须来自真实完成的网络查询', () => {
       sources: [actual, { title: '未检索', url: 'https://example.com/missing' }],
     });
     expect(result.profileChanges?.skills?.[0].sources).toEqual([actual]);
-    expect(result.warning).toContain('移除1个未匹配');
+    expect(result.skillSourceIssues).toEqual([
+      {
+        skillId: skill.id,
+        reason: 'source_unmatched',
+        sources: [{ title: '未检索', url: 'https://example.com/missing' }],
+      },
+    ]);
     expect(result.sources).toHaveLength(70);
   });
   it.each([
     'https://www.typescriptlang.org/other/',
     'https://other.example/docs/',
     source.url + '?version=1',
-  ])('路径/域名/有意义的参数不同仍拒绝：%s', async (url) => {
-    await expect(
-      run(true, [source], { ...skill, sources: [{ title: '错误引用', url }] }),
-    ).rejects.toMatchObject({ detail: { code: 'skill_sources_unverified' } });
+  ])('路径/域名/有意义的参数不同仍标为未核验，但保留可确认内容：%s', async (url) => {
+    const result = await run(true, [source], { ...skill, sources: [{ title: '错误引用', url }] });
+    expect(result.skillSourceIssues).toEqual([
+      { skillId: skill.id, reason: 'source_unmatched', sources: [{ title: '错误引用', url }] },
+    ]);
+    expect(result.profileChanges?.skills).toEqual([{ ...skill, sources: [] }]);
   });
 });

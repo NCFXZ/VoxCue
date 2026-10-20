@@ -14,6 +14,10 @@ const executable = process.argv
   .find((arg) => arg.startsWith('--app-executable='))
   ?.slice('--app-executable='.length);
 const packaged = !!executable;
+const screenshotDirectory = process.argv
+  .find((arg) => arg.startsWith('--screenshots='))
+  ?.slice('--screenshots='.length);
+if (screenshotDirectory) await mkdir(path.resolve(screenshotDirectory), { recursive: true });
 const app = await electron.launch({
   ...(packaged ? { executablePath: path.resolve(executable) } : {}),
   args: packaged ? [] : [await offlineElectronEntry()],
@@ -73,7 +77,11 @@ try {
             sources: [
               {
                 title: '模型标题',
-                url: globalThis.failSkillReference
+                url: (
+                  globalThis.failSkillReference === 'partial'
+                    ? index === 0
+                    : globalThis.failSkillReference
+                )
                   ? 'https://example.com/unretrieved'
                   : `https://example.com/docs/${index}/#section`,
               },
@@ -272,6 +280,13 @@ try {
     await page.getByRole('button', { name: '发送消息', exact: true }).click();
   };
   const completed = () => page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
+  const capture = async (name, target = page) => {
+    if (screenshotDirectory)
+      await target.screenshot({
+        path: path.join(path.resolve(screenshotDirectory), name + '.png'),
+        animations: 'disabled',
+      });
+  };
   await input().waitFor();
   await page.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
   const measureInput = () =>
@@ -332,19 +347,26 @@ try {
   await lineCount(2);
   await send('更新简历');
   const proposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
-  await proposal.getByRole('button', { name: '确认更新', exact: true }).click();
+  await proposal.getByRole('button', { name: '保存所选', exact: true }).click();
   await page
     .locator('.skill-update-prompt')
     .getByText('资料已保存，补齐摘要后可联网更新面试技能。', { exact: true })
     .waitFor();
+  await capture('prompt-before', page.locator('.skill-update-prompt'));
   await page
     .locator('.skill-update-prompt')
     .getByRole('button', { name: '补充职位描述', exact: true })
     .click();
+  await page.locator('.skill-update-prompt').waitFor({ state: 'hidden' });
   assert.ok((await input().inputValue()).includes('仅补充缺少的摘要并展示待确认提案'));
   assert.ok((await input().inputValue()).includes('以下是职位描述内容：'));
   assert.ok((await input().inputValue()).includes('也不生成技能'));
   assert.equal((await input().inputValue()).includes('联网更新面试技能'), false);
+  await capture('prompt-after');
+  await page.reload();
+  await input().waitFor();
+  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
+  assert.ok((await input().inputValue()).includes('以下是职位描述内容：'));
   await send('普通问题');
   await completed();
   const next = await app.evaluate(() => globalThis.progressRequests.at(-1));
@@ -354,22 +376,21 @@ try {
   assert.equal(next.instructions.includes('公开推理摘要和进度说明优先使用简体中文'), false);
   const requests = await app.evaluate(() => globalThis.progressRequests.length);
   await send('确认');
-  await latest()
-    .getByText(/尚未齐全/)
-    .waitFor();
-  assert.equal(await app.evaluate(() => globalThis.progressRequests.length), requests);
+  await latest().getByText('普通问题已回答', { exact: true }).waitFor();
+  assert.equal(await app.evaluate(() => globalThis.progressRequests.length), requests + 1);
+  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
   await send('继续提问');
   await completed();
   await send('更新 JD');
   const jdProposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
-  await jdProposal.getByRole('button', { name: '确认更新', exact: true }).click();
+  await jdProposal.getByRole('button', { name: '保存所选', exact: true }).click();
   await page
     .locator('.skill-update-prompt')
     .getByRole('button', { name: '联网更新技能', exact: true })
     .click();
   const skillsProposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
-  await skillsProposal.getByRole('button', { name: '确认更新', exact: true }).waitFor();
-  assert.equal(await skillsProposal.locator('.profile-value-list > article').count(), 3);
+  await skillsProposal.getByRole('button', { name: '保存所选', exact: true }).waitFor();
+  assert.equal(await skillsProposal.locator('.proposal-skill-row').count(), 3);
   assert.equal(
     await latest().locator('.chat-answer').innerText(),
     '已整理3项核心技能，请确认下方提案。',
@@ -382,7 +403,7 @@ try {
   assert.ok(skillRequest.instructions.includes('标题和正文只写文字'));
   assert.ok(skillRequest.instructions.includes('完整内容只放在 changes'));
   await latest().screenshot({});
-  await skillsProposal.getByRole('button', { name: '确认更新', exact: true }).click();
+  await skillsProposal.getByRole('button', { name: '保存所选', exact: true }).click();
   const confirmedInfo = await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1'));
   assert.equal(JSON.parse(confirmedInfo).skills.length, 3);
   assert.equal(
@@ -393,41 +414,82 @@ try {
     globalThis.failSkillReference = true;
   });
   await send('请联网更新面试技能');
-  await latest().getByText('资料提案未通过来源校验', { exact: true }).waitFor();
+  const review = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
+  await review.getByRole('button', { name: '保存所选', exact: true }).waitFor();
   const skillSeparation = await latest()
-    .locator('.profile-value-list > article')
+    .locator('.proposal-skill-row')
     .evaluateAll((nodes) =>
       nodes.map((node) => {
         const style = getComputedStyle(node);
         return {
-          margin: parseFloat(style.marginTop),
           padding: parseFloat(style.paddingTop),
           border: parseFloat(style.borderTopWidth),
         };
       }),
     );
   assert.equal(skillSeparation.length, 3);
-  assert.ok(
-    skillSeparation
-      .slice(1)
-      .every((item) => item.margin > 0 && item.padding > 0 && item.border > 0),
-  );
-  await latest().getByText('提案校验失败', { exact: true }).waitFor();
+  assert.ok(skillSeparation.slice(1).every((item) => item.padding > 0 && item.border > 0));
+  assert.equal(await review.locator('.proposal-skill-row .proposal-warning').count(), 3);
+  await review
+    .getByRole('button', {
+      name:
+        '查看技能：' +
+        (await review.locator('.proposal-skill-row .profile-field-choice').first().innerText()),
+      exact: true,
+    })
+    .click();
+  const sourceReader = page.getByRole('dialog');
+  assert.equal(await sourceReader.getByRole('note').count(), 1);
   assert.equal(
-    await latest().getByRole('button', { name: '确认更新', exact: true }).isEnabled(),
-    false,
+    await sourceReader.locator('.skill-source-issue code').innerText(),
+    'https://example.com/unretrieved',
+  );
+  await sourceReader.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(
+    await review.getByRole('button', { name: '保存所选', exact: true }).isEnabled(),
+    true,
   );
   assert.equal((await latest().innerText()).includes('生成已中断'), false);
   assert.equal(
     await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1')),
     confirmedInfo,
   );
-  await latest().screenshot({});
+  await capture('source-review-light', review);
+  await page.evaluate(() => document.documentElement.classList.add('dark'));
+  await capture('source-review-dark', review);
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
+  await review.getByRole('button', { name: '保存所选', exact: true }).click();
+  const unverifiedSaved = JSON.parse(
+    await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1')),
+  );
+  assert.equal(unverifiedSaved.skills.length, 3);
+  assert.ok(
+    unverifiedSaved.skills.every(
+      (skill) => skill.content.includes('版本2') && skill.sources.length === 0,
+    ),
+  );
+  assert.equal(await review.locator('.proposal-skill-row .proposal-warning').count(), 3);
+  await page.reload();
+  await latest().getByText('已保存所选资料', { exact: true }).waitFor();
+  assert.equal(await latest().locator('.proposal-skill-row .proposal-warning').count(), 3);
+  await app.evaluate(() => {
+    globalThis.failSkillReference = 'partial';
+  });
+  await send('请联网更新面试技能');
+  await review.getByRole('button', { name: '保存所选', exact: true }).waitFor();
+  assert.equal(await review.locator('.proposal-skill-row .proposal-warning').count(), 1);
+  await review.getByRole('button', { name: '保存所选', exact: true }).click();
+  await review.getByText('已保存所选资料', { exact: true }).waitFor();
+  const mixedSaved = JSON.parse(
+    await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1')),
+  );
+  assert.deepEqual(
+    mixedSaved.skills.map((skill) => skill.sources.length),
+    [0, 1, 1],
+  );
   await app.evaluate(() => {
     globalThis.failSkillReference = false;
   });
-  await latest().getByRole('button', { name: '重试回答', exact: true }).click();
-  await latest().getByRole('region', { name: '待确认的资料更新', exact: true }).waitFor();
   await page.evaluate(() => {
     window.restoreProgressClock = Date.now;
     window.progressEpoch = Date.now();
@@ -602,7 +664,7 @@ try {
         passed: true,
         checks: [
           'button consent without JD does not gate chat',
-          'plain consent is local',
+          'plain consent after dismissing the prompt does not revive it',
           'JD draft is not skills research',
           'saved resolution enters history',
           'real Responses SSE public commentary/search/read/find',
@@ -612,7 +674,8 @@ try {
           'time above separator, real title disclosures and chronological status changes',
           'trailing chevron only on hover/focus, active title shimmer and reduced motion',
           'composer grows from 2 to 11 lines, shrinks, reflows and restores drafts',
-          'plain skills proposal with hidden links and retained source metadata; streamed source matching and explicit validation failure',
+          'source problems identify skills and URLs in detail dialogs without blocking complete proposals; button save, mixed/all-unverified sources and reload persistence',
+          'both skill prompt actions dismiss immediately and remain dismissed on reload',
           'empty statuses replaced, current status shimmer and no summary language preference',
         ],
         rendererErrors: errors.length,

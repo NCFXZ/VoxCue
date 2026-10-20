@@ -5,6 +5,7 @@ const root = process.cwd();
 if (process.platform !== 'win32') throw Error('Windows installer validation requires Windows');
 const suite = process.argv[2];
 const suites = {
+  'profile-selection': '../shared/test/scripts/profile-selection-smoke.mjs',
   'chat-progress': '../shared/test/scripts/chat-progress-smoke.mjs',
   adversarial: '../shared/test/scripts/adversarial-smoke.mjs',
   updates: '../shared/test/scripts/updates-smoke.mjs',

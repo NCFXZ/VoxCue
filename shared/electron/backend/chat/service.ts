@@ -351,9 +351,15 @@ export class ChatGPTService implements AIChatService {
         if (outputLength > 1000000) throw new Error('回答过长，已停止接收。');
         const delta = profileStream && !refused ? profileStream.append(text) : text;
         const preview = !refused ? profileStream?.preview() : undefined;
-        if (preview && JSON.stringify(preview) !== lastPreview) {
-          lastPreview = JSON.stringify(preview);
-          emit({ id: request.id, type: 'profile-preview', preview });
+        const previewState = JSON.stringify([preview, profileStream?.generation]);
+        if (preview && previewState !== lastPreview) {
+          lastPreview = previewState;
+          emit({
+            id: request.id,
+            type: 'profile-preview',
+            preview,
+            generation: profileStream?.generation,
+          });
         }
         if (delta) {
           answerText += delta;
@@ -596,13 +602,12 @@ export class ChatGPTService implements AIChatService {
         profileStream && request.profile && !refused
           ? profileStream.finish(request.profile)
           : undefined;
-      const proposalWarning = verifySkillProposal(
+      const skillSourceIssues = verifySkillProposal(
         request,
         proposal?.changes,
         sources,
         completedWebSearch,
       );
-      warning = [warning, proposalWarning].filter(Boolean).join(' ') || undefined;
       if (proposal?.delta) {
         answerText += proposal.delta;
         emit({ id: request.id, type: 'delta', text: proposal.delta });
@@ -614,6 +619,7 @@ export class ChatGPTService implements AIChatService {
         sources: [...sources.values()],
         warning,
         profileChanges: proposal?.changes,
+        skillSourceIssues,
         reasoningSummary: (previousSummary + summary.text).trim() || undefined,
         activities: activities.length ? activities : undefined,
         answerText: previousAnswer + answerText,
