@@ -1,3 +1,21 @@
+## Mac 0.5.6 全量回归与发行入口
+
+用户随后明确授权全量测试、UI复核、Mac发行及源码同步，覆盖下节此前的定向限制。使用 `pnpm test` 运行本平台全部单测，`pnpm build` 与 `pnpm build:updater` 编译完整Mac运行时；`functional-suite.mjs` 默认串行运行35组共享与9组Mac检查。另执行合成捕获、打包AEC、独立临时钥匙串升级、固定签名/打包、应用图标及Qwen专项，最后验证实际发行ZIP/DMG与线上更新。
+
+模型必须通过 `VOXCUE_TEST_COMPONENT_CACHE` 明确指定授权缓存根。`components-smoke.mjs`、`qwen-regression.mjs`、`package-smoke.mjs` 已支持同一只读校验/临时复制流程，结束重新核对正式源，所有测试副本随自有临时根退出清理。复用模式不重复下载模型；组件下载控件/失败/取消继续由共享合成矩阵检查，原有实际下载分支保留供其他授权环境执行，不把本轮复用称为重新下载验收。
+
+Qwen专项串行执行CPU/Metal原生流、实际裁剪、44.1kHz生产Worker/AEC、后台模型/设备切换、临时签名ASAR中的Qwen Worker及模型句柄释放/受管删除。最终包检查继续核对固定凭据助手字节、固定公钥、Ed25519/SHA512、DMG布局和真实离线ASR/RAG；发布后 `package-smoke.mjs --online` 只在隔离实际安装版进程中模拟旧版本并下载验证更新，不替换真实安装。
+
+## Mac 0.5.6 此前定向接续与截图
+
+上一轮用户要求暂不做全量测试（已由上节最新授权覆盖）。当时Mac本机同步生成配置，执行工作区/架构/类型检查及 `build:shared`；定向单测仅选 `desktop-ipc`、`interview-screenshot-store`、`verify-model-cache` 三个文件（44项），界面仅运行以下四个入口，GUI 串行。未运行默认完整矩阵、完整单测、原生语音、钥匙串、权限或正式包回归。
+
+在 `macos/` 中直接运行 `node ../shared/test/scripts/<入口>-smoke.mjs`，入口为 `interview-retry`、`interview-typography`、`interview-screenshot`、`profile-selection`。这些合成界面入口不需要真实模型，不经 `functional-suite.mjs` 提前准备/下载模型。`interview-retry` 另覆盖三段等待停止、空回答、长错误、36px渐隐/末行、阅读暂停、三点/箭头及减少动态效果、最小窗口，以及等待/活动阶段结束、关闭、销毁的六个生命周期场景。
+
+以上四个入口默认不保存图片。仅用户明确要求截图时传 `--screenshots=<聊天可视化目录绝对路径>`，保存应用窗口/控件的合成截图；不是采集用户真实屏幕。重试截图覆盖浅深主题、停止、空/部分正文失败与最小窗口，字号入口交付12/14/18/24px实际浮窗及设置预览，技能入口交付无来源提示的详情、勾选及保存状态。账户、资料、合成捕获和临时profile仍在系统临时根退出清理，截图不纳入Git。
+
+模型复制机制只用8项合成小文件单测确认，不代表本轮已运行正式模型的CPU/Metal识别或验证真实缓存。后续需要时仍须明确指定授权路径、先验证再复制、退出清理；不能自动扫描真实用户目录。
+
 ## 0.5.6 回归与模型复用
 
 新增 `interview-retry-smoke.mjs`，覆盖首次请求加三次重试、第四次恢复、耗尽/手动重试、部分正文替换、等待/活动请求停止、迟到输出与下一题；同时检查服务名旁固定字号状态和连续圆角。入口纳入共享功能矩阵（35项）及 Windows 五档DPI（每档9项）。`interview-screenshot-smoke.mjs` 检查警告随对应回答等量滚动、输入位置固定、与回答气泡共用32px连续角及原截图复用。
@@ -17,7 +35,7 @@ pnpm test:ui:dpi
 
 ## Mac 0.5.5 回归入口
 
-`functional-suite.mjs` 默认串行执行共享界面/业务及 Mac 原生矩阵。另在仓库根目录执行 `node macos/test/scripts/qwen-regression.mjs`，一次下载认证自有临时 Paraformer/Qwen 组件，依次检查 CPU/Metal 原生流式识别、实际裁剪、Worker/AEC、后台模型/设备切换及实际句柄释放与受管删除。`audio-synthetic-smoke.mjs` 使用合成捕获端口，不启动会采集物理设备的旧 audio-native 入口。
+`functional-suite.mjs` 默认串行执行共享界面/业务及 Mac 原生矩阵。另在仓库根目录执行 `node macos/test/scripts/qwen-regression.mjs`，传入明确授权的 `VOXCUE_TEST_COMPONENT_CACHE` 时先认证再复制自有临时 Paraformer/Qwen 组件，依次检查 CPU/Metal 原生流式识别、实际裁剪、Worker/AEC、后台模型/设备切换及实际句柄释放与受管删除。`audio-synthetic-smoke.mjs` 使用合成捕获端口，不启动会采集物理设备的旧 audio-native 入口。
 
 `credential-upgrade-smoke.mjs` 使用独立临时钥匙串，检查历史 ad-hoc 授权、固定助手跨版本与旧 v10 密文兼容。登录和 user-data 迁移夹具使用 Chromium 合成 Keychain；隔离 userData 本身并不能隔离系统 Safe Storage，禁止以该理由读取真实登录项。正式包检查使用 `package-smoke.mjs`，签名和更新验证仍使用既有固定身份/公钥，不替换真实安装。
 

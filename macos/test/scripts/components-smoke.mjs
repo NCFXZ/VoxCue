@@ -2,6 +2,8 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { buildMacApp } from '../../scripts/package-app.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
+import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
 import { assertDownloadButton } from '../../../shared/test/scripts/assert-download-button.mjs';
 import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { readFile, mkdir, lstat, rename } from 'node:fs/promises';
@@ -58,6 +60,21 @@ const launch = () =>
       TMPDIR: path.join(testRoot, 'tmp'),
     },
   });
+const cacheSource = process.env.VOXCUE_TEST_COMPONENT_CACHE;
+const { packagesFor } = require(
+  path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/catalog.js'),
+);
+const { componentLocation } = require(
+  path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/service.js'),
+);
+const cachedPackages = packagesFor(process.platform, process.arch).filter((pkg) => !pkg.optional);
+if (cacheSource)
+  await stageModelFixtures(
+    path.resolve(cacheSource),
+    path.join(profile, 'component-cache'),
+    cachedPackages,
+    componentLocation,
+  );
 let application = await launch();
 try {
   let page = await application.firstWindow();
@@ -117,130 +134,144 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   const start = page.getByRole('button', { name: '开始面试', exact: true });
   await start.waitFor();
-  assert.equal(await start.isDisabled(), true);
-  assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
-  const notice = page.locator('.chat-column > .components-notice');
-  await notice.getByText(/本地语音模型、知识库模型/).waitFor();
-  assert.equal(await page.getByRole('button', { name: '下载', exact: true }).count(), 0);
-  await notice.getByRole('button', { name: '前往设置' }).click();
-  let settings = page.getByRole('dialog', { name: '设置', exact: true });
-  await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
-  assert.equal(await settings.locator('.component-row').count(), 3);
-  for (const dark of [false, true]) {
-    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
-    assert.ok(
-      await settings.locator('.components-panel').evaluate((element) => {
-        const bounds = element.getBoundingClientRect();
-        return bounds.left >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight;
-      }),
-    );
-    await page.screenshot(); // Buffer only, never written.
-  }
-  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  const blocked = await page.evaluate(async () => {
-    try {
-      await window.desktop.openInterview({
-        mode: 'local',
-        options: { sources: ['system'], speechModel: 'paraformer', inferenceDevice: 'cpu' },
-        autoAnswer: true,
-        aiEnabled: true,
-        modelId: 'test-model',
-        effort: 'low',
-      });
-      return false;
-    } catch (error) {
-      return String(error).includes('本地语音模型');
+  if (!cacheSource) {
+    assert.equal(await start.isDisabled(), true);
+    assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
+    const notice = page.locator('.chat-column > .components-notice');
+    await notice.getByText(/本地语音模型、知识库模型/).waitFor();
+    assert.equal(await page.getByRole('button', { name: '下载', exact: true }).count(), 0);
+    await notice.getByRole('button', { name: '前往设置' }).click();
+    let settings = page.getByRole('dialog', { name: '设置', exact: true });
+    await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
+    assert.equal(await settings.locator('.component-row').count(), 3);
+    for (const dark of [false, true]) {
+      await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+      assert.ok(
+        await settings.locator('.components-panel').evaluate((element) => {
+          const bounds = element.getBoundingClientRect();
+          return bounds.left >= 0 && bounds.right <= innerWidth && bounds.bottom <= innerHeight;
+        }),
+      );
+      await page.screenshot(); // Buffer only, never written.
     }
-  });
-  assert.equal(blocked, true);
-  await page.getByRole('button', { name: '知识库', exact: true }).click();
-  for (const button of await page.getByRole('button', { name: '创建知识库', exact: false }).all())
-    assert.equal(await button.isDisabled(), true);
-  await page
-    .locator('.management-container > .components-notice')
-    .getByRole('button', { name: '前往设置' })
-    .click();
-  await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
-  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await page.getByRole('button', { name: '新对话', exact: true }).click();
-  await page.getByRole('button', { name: '个人信息', exact: true }).click();
-  const personal = page.getByRole('complementary', { name: '个人信息' });
-  const knowledgeSection = personal.locator('details[aria-label="面试知识库"]');
-  assert.equal(await knowledgeSection.getAttribute('open'), null);
-  await knowledgeSection.locator(':scope > summary').click();
-  assert.equal(
-    await personal.getByRole('button', { name: '面试知识库', exact: true }).isDisabled(),
-    true,
-  );
-  await personal.locator('.components-notice').getByRole('button', { name: '前往设置' }).click();
-  await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
-  const rag = settings.locator('.component-row[data-component-id="rag"]');
-  await rag.getByRole('button', { name: '下载', exact: true }).click();
-  try {
-    await assertDownloadButton(page, rag.locator('.download-button'));
-  } finally {
-    await application.evaluate(() => globalThis.releaseComponentDownload());
-  }
-  await waitForAsync(
-    page,
-    async () =>
-      (await window.desktop.components({ op: 'status' })).items.find((item) => item.id === 'rag')
-        .phase === 'ready',
-    undefined,
-    { timeout: 180000 },
-  );
-  await rag.getByText('已就绪', { exact: true }).waitFor();
-  assert.match(await rag.innerText(), /85\.0 MB/);
-  assert.doesNotMatch(await settings.innerText(), /MiB/);
-  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await page.waitForFunction(
-    () => !document.querySelector('[aria-label="面试知识库"].choice-trigger')?.disabled,
-  );
-  assert.equal(
-    await personal.getByRole('button', { name: '面试知识库', exact: true }).isEnabled(),
-    true,
-  );
-  await page.getByRole('button', { name: '关闭个人信息' }).click();
-  await notice.getByRole('button', { name: '前往设置' }).click();
-  const speech = settings.locator('.component-row[data-component-id="speech"]');
-  await speech.getByRole('button', { name: '下载', exact: true }).click();
-  await waitForAsync(
-    page,
-    async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
-    undefined,
-    { timeout: 180000 },
-  );
-  await speech.getByText('已就绪', { exact: true }).waitFor();
-  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  assert.equal(await start.isEnabled(), true);
-  assert.equal(await notice.count(), 0);
-  await page.getByRole('button', { name: '知识库', exact: true }).click();
-  assert.equal(
-    await page.getByRole('button', { name: '创建知识库', exact: false }).first().isEnabled(),
-    true,
-  );
-  const state = await page.evaluate(() => window.desktop.components({ op: 'status' }));
-  assert.equal(state.phase, 'ready');
-  assert.deepEqual(Object.fromEntries(state.items.map((item) => [item.id, item.phase])), {
-    speech: 'ready',
-    rag: 'ready',
-    qwen: 'pending',
-  });
-  assert.equal(state.items.find((item) => item.id === 'qwen').optional, true);
-  const requests = await application.evaluate(() => globalThis.componentRequests);
-  for (const name of ['VoxCue-Models-Speech-1.0.0.zip', 'VoxCue-Models-RAG-1.0.0.zip'])
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    const blocked = await page.evaluate(async () => {
+      try {
+        await window.desktop.openInterview({
+          mode: 'local',
+          options: { sources: ['system'], speechModel: 'paraformer', inferenceDevice: 'cpu' },
+          autoAnswer: true,
+          aiEnabled: true,
+          modelId: 'test-model',
+          effort: 'low',
+        });
+        return false;
+      } catch (error) {
+        return String(error).includes('本地语音模型');
+      }
+    });
+    assert.equal(blocked, true);
+    await page.getByRole('button', { name: '知识库', exact: true }).click();
+    for (const button of await page.getByRole('button', { name: '创建知识库', exact: false }).all())
+      assert.equal(await button.isDisabled(), true);
+    await page
+      .locator('.management-container > .components-notice')
+      .getByRole('button', { name: '前往设置' })
+      .click();
+    await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await page.getByRole('button', { name: '新对话', exact: true }).click();
+    await page.getByRole('button', { name: '个人信息', exact: true }).click();
+    const personal = page.getByRole('complementary', { name: '个人信息' });
+    const knowledgeSection = personal.locator('details[aria-label="面试知识库"]');
+    assert.equal(await knowledgeSection.getAttribute('open'), null);
+    await knowledgeSection.locator(':scope > summary').click();
     assert.equal(
-      requests.filter(
-        (url) =>
-          url.startsWith('https://github.com/NCFXZ/VoxCue-releases/releases/download/') &&
-          url.endsWith('/' + name),
-      ).length,
-      1,
+      await personal.getByRole('button', { name: '面试知识库', exact: true }).isDisabled(),
+      true,
     );
-  assert.ok(requests.every((url) => !url.includes('copilot')));
-  console.log(
-    'PASS: ChatGPT-only login before downloads; settings shortcuts, theme rings, MB and speech/RAG feature guards.',
-  );
+    await personal.locator('.components-notice').getByRole('button', { name: '前往设置' }).click();
+    await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
+    const rag = settings.locator('.component-row[data-component-id="rag"]');
+    await rag.getByRole('button', { name: '下载', exact: true }).click();
+    try {
+      await assertDownloadButton(page, rag.locator('.download-button'));
+    } finally {
+      await application.evaluate(() => globalThis.releaseComponentDownload());
+    }
+    await waitForAsync(
+      page,
+      async () =>
+        (await window.desktop.components({ op: 'status' })).items.find((item) => item.id === 'rag')
+          .phase === 'ready',
+      undefined,
+      { timeout: 180000 },
+    );
+    await rag.getByText('已就绪', { exact: true }).waitFor();
+    assert.match(await rag.innerText(), /85\.0 MB/);
+    assert.doesNotMatch(await settings.innerText(), /MiB/);
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    await page.waitForFunction(
+      () => !document.querySelector('[aria-label="面试知识库"].choice-trigger')?.disabled,
+    );
+    assert.equal(
+      await personal.getByRole('button', { name: '面试知识库', exact: true }).isEnabled(),
+      true,
+    );
+    await page.getByRole('button', { name: '关闭个人信息' }).click();
+    await notice.getByRole('button', { name: '前往设置' }).click();
+    const speech = settings.locator('.component-row[data-component-id="speech"]');
+    await speech.getByRole('button', { name: '下载', exact: true }).click();
+    await waitForAsync(
+      page,
+      async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
+      undefined,
+      { timeout: 180000 },
+    );
+    await speech.getByText('已就绪', { exact: true }).waitFor();
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    assert.equal(await start.isEnabled(), true);
+    assert.equal(await notice.count(), 0);
+    await page.getByRole('button', { name: '知识库', exact: true }).click();
+    assert.equal(
+      await page.getByRole('button', { name: '创建知识库', exact: false }).first().isEnabled(),
+      true,
+    );
+    const state = await page.evaluate(() => window.desktop.components({ op: 'status' }));
+    assert.equal(state.phase, 'ready');
+    assert.deepEqual(Object.fromEntries(state.items.map((item) => [item.id, item.phase])), {
+      speech: 'ready',
+      rag: 'ready',
+      qwen: 'pending',
+    });
+    assert.equal(state.items.find((item) => item.id === 'qwen').optional, true);
+    const requests = await application.evaluate(() => globalThis.componentRequests);
+    for (const name of ['VoxCue-Models-Speech-1.0.0.zip', 'VoxCue-Models-RAG-1.0.0.zip'])
+      assert.equal(
+        requests.filter(
+          (url) =>
+            url.startsWith('https://github.com/NCFXZ/VoxCue-releases/releases/download/') &&
+            url.endsWith('/' + name),
+        ).length,
+        1,
+      );
+    assert.ok(requests.every((url) => !url.includes('copilot')));
+    console.log(
+      'PASS: ChatGPT-only login before downloads; settings shortcuts, theme rings, MB and speech/RAG feature guards.',
+    );
+  } else {
+    await waitForAsync(
+      page,
+      async () => (await window.desktop.components({ op: 'status' })).phase === 'ready',
+      undefined,
+      { timeout: 30000 },
+    );
+    assert.equal(await start.isEnabled(), true);
+    assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
+    console.log(
+      'PASS: authenticated model copies are ready without downloads; real E5/Paraformer and relocation checks follow. Download controls remain covered by the shared components UI suite.',
+    );
+  }
   const searches = await page.evaluate(async () => {
     const indexed = await window.desktop.knowledge({
       op: 'import',
@@ -415,6 +446,9 @@ try {
 } finally {
   await closeUiApp(application).catch(() => application.close());
 }
+if (cacheSource)
+  for (const pkg of cachedPackages)
+    await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);
 console.log(
   'Temporary application, profile, downloaded components and screenshots are not retained.',
 );

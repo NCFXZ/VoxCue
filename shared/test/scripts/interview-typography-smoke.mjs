@@ -6,6 +6,16 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 const profile = path.join(testRoot, 'interview-font-profile');
+const screenshotDirectory = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+if (screenshotDirectory) await mkdir(path.resolve(screenshotDirectory), { recursive: true });
+const capture = async (target, name) => {
+  if (screenshotDirectory)
+    await target.screenshot({
+      path: path.join(path.resolve(screenshotDirectory), name + '.png'),
+      animations: 'disabled',
+      scale: 'css',
+    });
+};
 await mkdir(profile);
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
@@ -139,6 +149,24 @@ try {
             .evaluate((element) => getComputedStyle(element).fontSize),
           '14px',
         );
+        if (screenshotDirectory && width === 1280 && size === 24) {
+          const content = page.locator('.settings-content');
+          const top = await content.evaluate((node) => node.scrollTop);
+          await capture(
+            page.getByRole('dialog', { name: '设置', exact: true }),
+            'font-preview-24px-' + theme,
+          );
+          await settings
+            .getByRole('textbox', { name: '预览输入框', exact: true })
+            .scrollIntoViewIfNeeded();
+          await capture(
+            page.getByRole('dialog', { name: '设置', exact: true }),
+            'font-preview-input-24px-' + theme,
+          );
+          await content.evaluate((node, top) => {
+            node.scrollTop = top;
+          }, top);
+        }
       }
     }
   }
@@ -250,6 +278,7 @@ try {
     );
     assert.ok(Math.abs(metrics.heading - (size * 15) / 14) < 0.01);
     assert.deepEqual(await floating.locator('.floating-toolbar').boundingBox(), toolbar);
+    await capture(floating, 'font-actual-' + size + 'px');
   }
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
   const floatSettings = floating.getByRole('dialog', { name: '面试设置', exact: true });

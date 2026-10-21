@@ -9,6 +9,8 @@ await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(
   path.resolve(path.join(testRoot, 'test/results/interview-screenshot-ui-')),
 );
+const screenshotDirectory = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+if (screenshotDirectory) await mkdir(path.resolve(screenshotDirectory), { recursive: true });
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
@@ -213,6 +215,14 @@ try {
   const send = floating.getByRole('button', { name: '发送面试问题', exact: true });
   const input = floating.getByRole('textbox', { name: '面试提问', exact: true });
   const previews = floating.locator('.floating-screenshot-preview');
+  const capture = async (name) => {
+    if (screenshotDirectory)
+      await floating.screenshot({
+        path: path.join(path.resolve(screenshotDirectory), name + '.png'),
+        animations: 'disabled',
+        scale: 'css',
+      });
+  };
   const requests = () => app.evaluate(() => globalThis.screenshotRequests);
   const captured = () => app.evaluate(() => globalThis.screenshotFixture.count);
   const waitCount = async (count) => {
@@ -258,6 +268,7 @@ try {
     .boundingBox();
   assert.ok(removeSize.width <= 24 && removeSize.height <= 24);
   assert.equal(await captured(), 5);
+  await capture('five-staged-images');
   assert.equal((await requests()).length, 0);
   await floating.getByRole('button', { name: '移除截图 2', exact: true }).click();
   await waitCount(4);
@@ -352,6 +363,7 @@ try {
       .evaluate((node) => getComputedStyle(node).borderRadius),
   );
   await verifyContinuousCorners(floating, 'interview answer failure');
+  await capture('failed-image-retained');
   assert.equal(
     await floating.locator('.floating-notices').getByText('当前模型不支持图片输入').count(),
     0,
@@ -396,6 +408,7 @@ try {
   await waitCount(0);
   assert.equal(await captured(), capturesBeforeRetry);
   assert.equal(retried.turns.at(-1).files[0].hash, failedHash);
+  await capture('image-retry-completed');
   checks.push(
     'text sends do not capture; image-only send excludes history; failure alert scrolls with its answer while input stays fixed; retry reuses staged pixels',
   );

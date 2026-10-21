@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。当前两平台均为[v0.5.5](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.5)；本次仅追加 Mac 三项并补充发行说明，保留 Windows、全部旧资产及既有 Latest。两平台按完整资产独立选版。0.2.2起通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；0.5.2起Qwen Metal使用随应用签名的私有MLX/CPython，用户仍无需另装Node、Python或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
+面向 Apple Silicon arm64、macOS 14.2+。首次下载 `VoxCue-<版本>-arm64.dmg`，将 VoxCue 拖入 Applications 后打开。当前两平台均为[v0.5.6](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.6)，本次追加Mac三项、更新发行说明并按用户明确要求设为Latest，保留Windows与全部旧资产。两平台按完整资产独立选版。0.2.2起通过[独立组件](../../shared/docs/COMPONENTS.md)首次下载并复用资源缓存，包内排除模型和 ONNX Web，GitHub SDK 已移除；0.5.2起Qwen Metal使用随应用签名的私有MLX/CPython，用户仍无需另装Node、Python或开发工具。安装版首次进入主窗口后检查并下载更新，在“设置 → 更新”点击“重启并更新”。面试期间禁止安装，重启前等待本地聊天保存成功；普通退出不启动更新安装。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
@@ -40,7 +40,7 @@ corepack pnpm test:package
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
 - `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
 
-按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。Latest 按当次授权处理，本次 Mac 0.5.5 保留既有 v0.5.5 Latest。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
+按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。Latest 按当次授权处理，本次Mac 0.5.6按用户明确授权将v0.5.6设为Latest。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 
@@ -48,4 +48,4 @@ corepack pnpm test:package
 
 `test:updates:native` 使用独立临时密钥和旧/新应用，包含签名拒绝、取消与真实替换/重启，不使用真实资料或发行私钥。但 CFFIXED_USER_HOME 不能保证 Sparkle/Launch Services/cfprefsd 的全部偏好写入都留在临时目录；入口会清理专用测试域，严格“必要文件仅系统临时目录”的任务仍须排除它。共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手；其外部更新器是夹具，不能单独作为原生安装证明。
 
-`test:package` 使用现有固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据与 SHA512，核对应用内公钥、版本及凭据助手的固定签名和原始字节。从最终 ZIP 解压实际应用，核对最终 DMG 的相同签名副本、安装布局和 Retina 背景，确认不嵌入模型、已移除 SDK 或 ONNX Web。临时 profile 内实际下载并验证两套模型，再断网复用缓存，验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX 与离线 RAG。`--install-archive` 将临时副本的宿主版本降为 0.2.0，让 Sparkle 准备生产 ZIP 后取消，不替换真实安装；仍可能涉及临时目录外的原生偏好，严格限定全部原生写入仅临时目录的任务须排除该选项。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不触发原生安装或发布测试版本。
+`test:package` 使用现有固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据与 SHA512，核对应用内公钥、版本及凭据助手的固定签名和原始字节。从最终 ZIP 解压实际应用，核对最终 DMG 的相同签名副本、安装布局和 Retina 背景，确认不嵌入模型、已移除 SDK 或 ONNX Web。明确设置 `VOXCUE_TEST_COMPONENT_CACHE` 时只读校验正式模型后复制到临时profile，再断网复用，验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX与离线RAG；结束删除副本并复核源模型。未设置时保留原固定公开下载分支，正式目录不得直接作为隔离Electron的组件根。`--install-archive` 将临时副本的宿主版本降为 0.2.0，让 Sparkle 准备生产 ZIP 后取消，不替换真实安装；仍可能涉及临时目录外的原生偏好，严格限定全部原生写入仅临时目录的任务须排除该选项。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不触发原生安装或发布测试版本。

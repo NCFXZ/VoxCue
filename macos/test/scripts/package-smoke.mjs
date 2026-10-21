@@ -1,3 +1,5 @@
+import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
+import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { readFile, mkdir, lstat } from 'node:fs/promises';
@@ -189,6 +191,21 @@ if (installArchive) {
 }
 const profile = path.join(testRoot, 'profile');
 await mkdir(path.join(testRoot, 'tmp'));
+const cacheSource = process.env.VOXCUE_TEST_COMPONENT_CACHE;
+const { packagesFor } = require(
+  path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/catalog.js'),
+);
+const { componentLocation } = require(
+  path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/service.js'),
+);
+const cachedPackages = packagesFor(process.platform, process.arch).filter((pkg) => !pkg.optional);
+if (cacheSource)
+  await stageModelFixtures(
+    path.resolve(cacheSource),
+    path.join(profile, 'artifact-components'),
+    cachedPackages,
+    componentLocation,
+  );
 const app = await electron.launch({
   executablePath: path.join(bundle, 'Contents/MacOS/VoxCue'),
   args: [],
@@ -228,7 +245,7 @@ try {
       const options = { root: cache, packages, managed: true, emit() {} };
       const components = new ComponentService({ ...options, fetch: net.fetch.bind(net) });
       try {
-        assert.equal((await components.status()).phase, 'needed');
+        assert.equal((await components.status()).phase, fixture.reuse ? 'ready' : 'needed');
         assert.equal((await components.download()).phase, 'ready');
         const extra = path.join(
           componentLocation(
@@ -379,7 +396,9 @@ try {
       assert.ok(fs.existsSync(path.join(app.getAppPath(), 'public/voxcue.png')));
       return [
         'packaged login',
-        'thin package downloads and offline model cache reuse',
+        fixture.reuse
+          ? 'authenticated local copies and offline model cache reuse'
+          : 'thin package downloads and offline model cache reuse',
         'unknown component-root originals protected during deletion',
         'arm64 native bindings',
         'PDF/DOCX parsing',
@@ -389,7 +408,11 @@ try {
         'pinned Sparkle updater configuration',
       ];
     },
-    { pdf: Array.from(fixtures.pdf()), docx: Array.from(await fixtures.docx()) },
+    {
+      pdf: Array.from(fixtures.pdf()),
+      docx: Array.from(await fixtures.docx()),
+      reuse: !!cacheSource,
+    },
   );
   console.log('PASS: ' + checks.join(', '));
   if (installArchive) {
@@ -475,3 +498,7 @@ try {
 } finally {
   await app.close();
 }
+
+if (cacheSource)
+  for (const pkg of cachedPackages)
+    await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);
