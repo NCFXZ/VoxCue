@@ -124,15 +124,22 @@ export async function interviewAnswer(
   onActivity?: (activity: ChatActivity) => void,
   onProvider?: (provider: import('../../electron/contracts/chat').ModelProvider) => void,
   screenshotIds?: string[],
+  onRetry?: (attempt: number, limit: number) => void,
 ) {
   const desktop = window.desktop;
   if (!desktop) throw Error('真实回答需要桌面应用。');
   signal.throwIfAborted();
   const id = crypto.randomUUID();
+  let replaceNextText = false;
   const unsubscribe = desktop.onChatEvent((e) => {
     if (signal.aborted || e.id !== id) return;
-    if (e.type === 'delta') onText(e.text, false);
-    else if (e.type === 'reasoning-summary') onSummary?.(e.text);
+    if (e.type === 'delta') {
+      onText(e.text, replaceNextText);
+      replaceNextText = false;
+    } else if (e.type === 'interview-retry') {
+      replaceNextText = true;
+      onRetry?.(e.attempt, e.limit);
+    } else if (e.type === 'reasoning-summary') onSummary?.(e.text);
     else if (e.type === 'activity') onActivity?.(e.activity);
     else if (e.type === 'provider') onProvider?.(e.provider);
   });

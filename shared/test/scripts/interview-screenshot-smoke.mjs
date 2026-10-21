@@ -4,6 +4,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { verifyContinuousCorners } from './continuous-corners.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(
   path.resolve(path.join(testRoot, 'test/results/interview-screenshot-ui-')),
@@ -327,28 +328,76 @@ try {
   const capturesBeforeRetry = await captured();
   await send.click();
   await floating
-    .locator('.floating-answer-item')
-    .last()
+    .locator('.floating-answer-item:last-child .interview-answer-failure')
     .getByText('当前模型不支持图片输入', { exact: true })
     .waitFor();
-  const failureBubble = floating.locator('.floating-answer-item').last().locator('.answer-bubble');
+  const failedAnswer = floating.locator('.floating-answer-item').last();
+  const failureCard = failedAnswer.locator('.interview-answer-failure');
   assert.equal(
-    await failureBubble.getByRole('button', { name: '重试面试回答', exact: true }).count(),
+    await failureCard.getByRole('button', { name: '重试面试回答', exact: true }).count(),
     1,
   );
-  assert.equal(await failureBubble.getByRole('alert').textContent(), '当前模型不支持图片输入');
+  assert.equal(
+    await failureCard.locator('.interview-answer-failure-reason').textContent(),
+    '当前模型不支持图片输入',
+  );
+  assert.equal(await failureCard.getAttribute('role'), 'alert');
+  assert.equal(await failureCard.getByText('已自动重试 3 次，仍未完成。').count(), 1);
+  assert.equal(await failedAnswer.locator('.interview-answer-status').innerText(), '生成失败');
+  assert.equal(await failedAnswer.locator('.answer-bubble').innerText(), '合成未完成回答');
+  assert.equal(
+    await failureCard.evaluate((node) => getComputedStyle(node).borderRadius),
+    await failedAnswer
+      .locator('.answer-bubble')
+      .evaluate((node) => getComputedStyle(node).borderRadius),
+  );
+  await verifyContinuousCorners(floating, 'interview answer failure');
+  assert.equal(
+    await floating.locator('.floating-notices').getByText('当前模型不支持图片输入').count(),
+    0,
+  );
+  assert.equal(await floating.locator('.floating-composer .interview-answer-failure').count(), 0);
+  const answerScroll = floating.locator('.floating-answer .floating-scroll');
+  const scrollBefore = await answerScroll.evaluate((node) => ({
+    top: node.scrollTop,
+    cardTop: node.querySelector('.interview-answer-failure').getBoundingClientRect().top,
+  }));
+  const inputBefore = await input.boundingBox();
+  await answerScroll.evaluate((node) => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event('scroll'));
+  });
+  const scrollAfter = await answerScroll.evaluate((node) => ({
+    top: node.scrollTop,
+    cardTop: node.querySelector('.interview-answer-failure').getBoundingClientRect().top,
+  }));
+  assert.ok(scrollBefore.top > scrollAfter.top);
+  assert.ok(
+    Math.abs(scrollAfter.cardTop - scrollBefore.cardTop - (scrollBefore.top - scrollAfter.top)) < 1,
+    'failure alert must move with its answer when scrolling',
+  );
+  assert.deepEqual(await input.boundingBox(), inputBefore);
+  await failureCard
+    .getByRole('button', { name: '重试面试回答', exact: true })
+    .click({ trial: true });
   assert.equal(await previews.count(), 1);
+  assert.equal((await requests()).length, 7);
   const failedHash = (await requests()).at(-1).turns.at(-1).files[0].hash;
+  assert.ok(
+    (await requests())
+      .slice(3)
+      .every((request) => request.turns.at(-1).files[0].hash === failedHash),
+  );
   await app.evaluate(() => {
     globalThis.screenshotFixture.providerMode = 'normal';
   });
   await floating.getByRole('button', { name: '重试面试回答', exact: true }).last().click();
-  const retried = await waitAnswer(5);
+  const retried = await waitAnswer(8);
   await waitCount(0);
   assert.equal(await captured(), capturesBeforeRetry);
   assert.equal(retried.turns.at(-1).files[0].hash, failedHash);
   checks.push(
-    'text sends do not capture; image-only send excludes history; capture failure stays visible; retry reuses staged pixels',
+    'text sends do not capture; image-only send excludes history; failure alert scrolls with its answer while input stays fixed; retry reuses staged pixels',
   );
   assert.equal(await camera.getAttribute('aria-label'), '截取图像');
   assert.equal(await send.getAttribute('aria-label'), '发送面试问题');

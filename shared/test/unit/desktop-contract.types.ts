@@ -94,6 +94,11 @@ desktop.interviewState().then((state) => {
   void visible;
 });
 desktop.onChatEvent((event) => {
+  if (event.type === 'interview-retry') {
+    const attempt: number = event.attempt;
+    const limit: number = event.limit;
+    void [attempt, limit];
+  }
   if (event.type === 'activity') {
     const publicUrl: string | undefined = event.activity.url;
     if (event.activity.kind === 'reasoning') {

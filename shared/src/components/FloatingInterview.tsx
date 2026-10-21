@@ -35,6 +35,7 @@ import { InterviewSubmissionStatus } from './InterviewSubmissionStatus';
 import { InterviewReadiness } from './InterviewReadiness';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
+import { InterviewAnswerFailure, InterviewAnswerStatus } from './InterviewAnswerStatus';
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
 import { useInterviewFontSize } from '../interviewTypography';
@@ -43,12 +44,15 @@ export function FloatingInterview() {
   const fontSize = useInterviewFontSize();
   const state = useInterview();
   const provider = providerInfo(state.answers.at(-1)?.provider);
+  const failedAnswer = state.answers.at(-1)?.status === 'failed' ? state.answers.at(-1) : undefined;
   const saveError = useHistory((s) => s.error);
   const [input, setInput] = useState<string | null>(null);
   const editedDraft = useRef('');
   const [protectedWindow, setProtected] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const noticeError =
+    error || saveError || (state.error !== failedAnswer?.error ? state.error : null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
@@ -545,18 +549,12 @@ export function FloatingInterview() {
                     )}
                   </div>
                   <div className="floating-answer-meta">
-                    <span className="provider-identity">
-                      <ProviderIdentity
-                        provider={a.provider ?? 'unknown'}
-                        detail={
-                          a.status === 'stopped'
-                            ? '已停止'
-                            : a.status === 'failed'
-                              ? '回答未完成'
-                              : undefined
-                        }
-                      />
-                    </span>
+                    <div className="interview-answer-identity">
+                      <span className="provider-identity">
+                        <ProviderIdentity provider={a.provider ?? 'unknown'} />
+                      </span>
+                      <InterviewAnswerStatus answer={a} />
+                    </div>
                     {a.content && (
                       <Button
                         variant="ghost"
@@ -586,37 +584,40 @@ export function FloatingInterview() {
                       startedAt: a.createdAt,
                     }}
                   />
-                  <div className="answer-text answer-bubble">
-                    {a.content ? (
-                      <MarkdownContent content={a.content} />
-                    ) : state.generating && a.id === state.answers.at(-1)?.id ? (
-                      '正在生成回答…'
-                    ) : a.status === 'stopped' ? (
-                      '已停止回复。'
-                    ) : (
-                      a.error || '未收到回答。'
-                    )}
-                    {state.generating && a.id === state.answers.at(-1)?.id && (
-                      <span className="typing-caret" />
-                    )}
-                    {a.error && a.content && (
-                      <p className="message-error" role="alert">
-                        {a.error}
-                      </p>
-                    )}
-                    {(a.status === 'failed' || a.status === 'stopped') && (
-                      <div className="floating-answer-actions">
-                        <Button
-                          variant="outline"
-                          disabled={state.generating}
-                          onClick={() => void state.retryAnswer(a.id)}
-                        >
-                          <Refresh size={16} />
-                          重试面试回答
-                        </Button>
-                      </div>
-                    )}
-                  </div>
+                  {(a.content || (!a.retry && a.status !== 'failed' && a.status !== 'stopped')) && (
+                    <div className="answer-text answer-bubble">
+                      {a.content ? (
+                        <MarkdownContent content={a.content} />
+                      ) : state.generating && a.id === state.answers.at(-1)?.id ? (
+                        <span className="answer-pending">正在生成回答…</span>
+                      ) : (
+                        '未收到回答。'
+                      )}
+                      {state.generating && a.id === state.answers.at(-1)?.id && (
+                        <span className="typing-caret" />
+                      )}
+                    </div>
+                  )}
+                  {a.status === 'failed' && (
+                    <InterviewAnswerFailure
+                      answer={a}
+                      disabled={state.generating}
+                      live={a.id === failedAnswer?.id}
+                      onRetry={() => void state.retryAnswer(a.id)}
+                    />
+                  )}
+                  {a.status === 'stopped' && (
+                    <div className="floating-answer-actions">
+                      <Button
+                        variant="outline"
+                        disabled={state.generating}
+                        onClick={() => void state.retryAnswer(a.id)}
+                      >
+                        <Refresh size={16} />
+                        重试面试回答
+                      </Button>
+                    </div>
+                  )}
                   {(copied === a.id || copyError === a.id) && (
                     <small role="status">
                       {copyError === a.id ? '复制失败，请选择文字后复制。' : '已复制回答'}
@@ -625,13 +626,6 @@ export function FloatingInterview() {
                 </article>
               ))}
             </div>
-            {(state.generating || !answerScroll.following) && (
-              <FollowLatestButton
-                label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
-                busy={state.generating}
-                onClick={answerScroll.scrollToLatest}
-              />
-            )}
             <form
               className="floating-composer"
               onSubmit={(event) => {
@@ -639,6 +633,13 @@ export function FloatingInterview() {
                 submit();
               }}
             >
+              {(state.generating || !answerScroll.following) && (
+                <FollowLatestButton
+                  label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
+                  busy={state.generating}
+                  onClick={answerScroll.scrollToLatest}
+                />
+              )}
               {state.screenshots.length > 0 && (
                 <div className="floating-screenshot-previews" role="group" aria-label="待发送截图">
                   {state.screenshots.map((shot, index) => (
@@ -771,9 +772,9 @@ export function FloatingInterview() {
                 此窗口未隐藏
               </div>
             )}
-            {(error || saveError || state.error) && (
+            {noticeError && (
               <div className="floating-error" role="alert">
-                {error || saveError || state.error}
+                {noticeError}
               </div>
             )}
             {Object.entries(state.speechWarnings).map(([source, message]) => (

@@ -19,6 +19,7 @@ export interface Transcript {
   final: boolean;
 }
 export interface Answer {
+  retry?: { attempt: number; limit: number };
   screenshot?: import('../../electron/contracts/speech').InterviewScreenshotMode;
   status?: 'streaming' | 'completed' | 'stopped' | 'failed';
   error?: string;

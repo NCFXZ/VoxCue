@@ -255,6 +255,88 @@ describe('完整面试问题通过既有 AI 接口', () => {
     question: 'Explain ROS2 scheduling?',
     modelId: 'test',
   };
+  it('失败后最多自动重试三次，复用问题快照并丢弃旧尝试的迟到事件', async () => {
+    vi.useFakeTimers();
+    try {
+      const { call, chat, sender, context } = interviewSetup();
+      const prepare = vi.spyOn(context, 'prepare');
+      const saved = vi.spyOn(context, 'answer');
+      const callbacks: Parameters<AIChatService['stream']>[1][] = [];
+      chat.stream.mockImplementation(async (_request, emit) => {
+        callbacks.push(emit);
+        if (callbacks.length < 4) throw Error('连接中断');
+        emit({ id: question.id, type: 'delta', text: '成功正文' });
+        return { answerText: '成功正文', usage: null, sources: [] };
+      });
+      const pending = call('interview:answer', question);
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(await pending).toMatchObject({ ok: true, answerText: '成功正文' });
+      expect(chat.stream).toHaveBeenCalledTimes(4);
+      expect(prepare).toHaveBeenCalledOnce();
+      expect(saved).toHaveBeenCalledOnce();
+      const request = chat.stream.mock.calls[0][0];
+      expect(chat.stream.mock.calls.every(([value]) => value === request)).toBe(true);
+      expect(
+        sender.send.mock.calls
+          .map(([, event]) => event)
+          .filter((event) => event.type === 'interview-retry'),
+      ).toEqual(
+        [1, 2, 3].map((attempt) => ({
+          id: question.id,
+          type: 'interview-retry',
+          attempt,
+          limit: 3,
+        })),
+      );
+      const sent = sender.send.mock.calls.length;
+      for (const emit of callbacks) emit({ id: question.id, type: 'delta', text: '迟到内容' });
+      expect(sender.send).toHaveBeenCalledTimes(sent);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it.each(['manual', 'end'] as const)('%s 取消重试等待后不再发起请求', async (mode) => {
+    vi.useFakeTimers();
+    try {
+      const { call, chat, lifecycle } = interviewSetup();
+      chat.stream.mockRejectedValue(Error('连接中断'));
+      const pending = call('interview:answer', question);
+      await vi.advanceTimersByTimeAsync(0);
+      if (mode === 'manual') await call('interview:cancel', question.id);
+      else lifecycle.cancel();
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+      expect(chat.stream).toHaveBeenCalledOnce();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it('自动重试中的活动请求被停止后不再重试，空回答同样最多尝试四次', async () => {
+    vi.useFakeTimers();
+    try {
+      const { call, chat } = interviewSetup();
+      chat.stream.mockRejectedValueOnce(Error('连接中断')).mockImplementationOnce(
+        async (_request, _emit, signal) =>
+          new Promise((_resolve, reject) => {
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+          }),
+      );
+      const pending = call('interview:answer', question);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(chat.stream).toHaveBeenCalledTimes(2);
+      await call('interview:cancel', question.id);
+      await vi.advanceTimersByTimeAsync(10000);
+      expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+      expect(chat.stream).toHaveBeenCalledTimes(2);
+      chat.stream.mockClear().mockResolvedValue({ answerText: '', usage: null, sources: [] });
+      const empty = call('interview:answer', { ...question, id: 'empty-question' });
+      await vi.advanceTimersByTimeAsync(3500);
+      expect(await empty).toMatchObject({ ok: false });
+      expect(chat.stream).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('回答中切换模型与强度保留当前流快照，下一题使用新配置；非面试窗口仍拒绝', async () => {
     const { call, chat, sender } = interviewSetup();
     chat.models.mockImplementation(async () => [
@@ -436,10 +518,11 @@ describe('完整面试问题通过既有 AI 接口', () => {
       ids.push((await call('interview:screenshot', { op: 'capture' })).screenshot.id);
     await call('interview:answer', question);
     expect(chat.stream.mock.calls[0][0].turns.at(-1).files).toBeUndefined();
-    chat.stream.mockRejectedValueOnce(Error('模型失败'));
+    chat.stream.mockRejectedValue(Error('模型失败'));
     expect(await call('interview:answer', { ...question, screenshotIds: ids })).toMatchObject({
       ok: false,
     });
+    chat.stream.mockResolvedValue({ answerText: '重试成功', usage: null, sources: [] });
     await call('interview:answer', { ...question, screenshotIds: ids });
     expect(chat.stream.mock.calls.at(-1)![0].turns.at(-1)!.files).toHaveLength(5);
     expect(captureScreen).toHaveBeenCalledTimes(5);

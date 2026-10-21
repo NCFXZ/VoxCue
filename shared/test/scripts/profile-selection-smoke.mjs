@@ -385,11 +385,11 @@ try {
   await box('保存技能：Rust 与系统编程').check();
   await proposal().getByRole('button', { name: '查看技能：Rust 与系统编程', exact: true }).click();
   const skillReader = page.getByRole('dialog', { name: 'Rust 与系统编程', exact: true });
-  await skillReader.getByRole('note').waitFor();
+  assert.equal(await skillReader.getByRole('note').count(), 0);
   await capture('skill-source-review', skillReader);
-  assert.equal(
-    await skillReader.locator('.skill-source-issue code').innerText(),
-    'https://example.com/unverified',
+  assert.doesNotMatch(
+    await skillReader.innerText(),
+    /来源未核验|来源待核验|example\.com\/unverified/,
   );
   await skillReader.getByRole('button', { name: '关闭对话框', exact: true }).click();
   for (const theme of ['light', 'dark']) {
@@ -412,10 +412,14 @@ try {
   await proposal().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.deepEqual((await saved()).skills[1], base.skills[1]);
   await proposal().getByRole('button', { name: '查看技能：Rust 与系统编程', exact: true }).click();
-  assert.equal(await page.getByRole('dialog').getByRole('note').count(), 1);
+  assert.equal(await page.getByRole('dialog').getByRole('note').count(), 0);
+  assert.doesNotMatch(
+    await page.getByRole('dialog').innerText(),
+    /来源未核验|来源待核验|example\.com\/unverified/,
+  );
   await page.getByRole('dialog').getByRole('button', { name: '关闭对话框' }).click();
   checks.push(
-    'individual skills, mixed parent checkbox, source issue details and retained unchecked skill bytes after reload',
+    'individual skills, mixed parent checkbox, removed source notes and retained unchecked skill bytes after reload',
   );
 
   await send('删除技能');

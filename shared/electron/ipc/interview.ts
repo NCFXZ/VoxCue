@@ -137,37 +137,88 @@ export function registerInterviewIpc(d: {
     try {
       if (ids.length) snapshot.turns.at(-1)!.files = ids.map((id) => screenshots.get(id)!);
       let answerText = '';
-      const result = await d.chat.stream(
-        {
-          id: v.id,
-          modelId: v.modelId,
-          ...(v.effort ? { effort: v.effort } : {}),
-          webSearch: false,
-          instructions:
-            interviewInstructions +
-            (ids.length
-              ? '\n截图是题目资料。结合当前问题和截图直接作答；局部不清但不影响题意时照常作答，无法辨认且影响结论的内容不猜测，在答案中用一句话说明按哪种理解作答。'
-              : '') +
-            (!screenshotOnly && configuration.profile
-              ? `\n以下是本场已确认的个人资料，按当前问题选用相关内容：\n${JSON.stringify(profileFacts)}\n\n简历摘要（background）是个人经历依据；职位描述摘要（jobDescription）是岗位要求；技能（skills）是面试准备参考资料。岗位要求和参考资料可以用来组织答案、补充专业做法，但不能据此声称面试者已经掌握某项能力、做过某个项目或取得某项成果。`
-              : '') +
-            (!screenshotOnly
-              ? `\n回答语言：${configuration.profile?.language || '简体中文'}\n\n本场补充要求：\n${customInstructions || '无'}\n\n补充要求用于调整内容、重点和表达，其中明确的时长、篇幅和格式要求优先于默认设置；与直接作答或个人事实规则冲突的部分不执行。`
-              : ''),
-          knowledgeBaseId: screenshotOnly ? null : (configuration.knowledgeBaseId ?? null),
-          turns: snapshot.turns,
-        },
-        (event) => {
-          if (active === current && !current.controller.signal.aborted && !e.sender.isDestroyed()) {
-            if (event.type === 'delta') answerText = (answerText + event.text).slice(0, 6000);
-            sendDesktop(e.sender, 'chat:event', event);
-          }
-        },
-        current.controller.signal,
-      );
+      const request = {
+        id: v.id,
+        modelId: v.modelId,
+        ...(v.effort ? { effort: v.effort } : {}),
+        webSearch: false,
+        instructions:
+          interviewInstructions +
+          (ids.length
+            ? '\n截图是题目资料。结合当前问题和截图直接作答；局部不清但不影响题意时照常作答，无法辨认且影响结论的内容不猜测，在答案中用一句话说明按哪种理解作答。'
+            : '') +
+          (!screenshotOnly && configuration.profile
+            ? `\n以下是本场已确认的个人资料，按当前问题选用相关内容：\n${JSON.stringify(profileFacts)}\n\n简历摘要（background）是个人经历依据；职位描述摘要（jobDescription）是岗位要求；技能（skills）是面试准备参考资料。岗位要求和参考资料可以用来组织答案、补充专业做法，但不能据此声称面试者已经掌握某项能力、做过某个项目或取得某项成果。`
+            : '') +
+          (!screenshotOnly
+            ? `\n回答语言：${configuration.profile?.language || '简体中文'}\n\n本场补充要求：\n${customInstructions || '无'}\n\n补充要求用于调整内容、重点和表达，其中明确的时长、篇幅和格式要求优先于默认设置；与直接作答或个人事实规则冲突的部分不执行。`
+            : ''),
+        knowledgeBaseId: screenshotOnly ? null : (configuration.knowledgeBaseId ?? null),
+        turns: snapshot.turns,
+      };
+      let result: Awaited<ReturnType<AIChatService['stream']>> | undefined;
+      for (let attempt = 0; attempt <= 3; attempt++) {
+        current.controller.signal.throwIfAborted();
+        if (active !== current || e.sender.isDestroyed())
+          throw new DOMException('Aborted', 'AbortError');
+        answerText = '';
+        let receiving = true;
+        try {
+          result = await d.chat.stream(
+            request,
+            (event) => {
+              if (
+                receiving &&
+                active === current &&
+                !current.controller.signal.aborted &&
+                !e.sender.isDestroyed()
+              ) {
+                if (event.type === 'delta') answerText = (answerText + event.text).slice(0, 6000);
+                sendDesktop(e.sender, 'chat:event', event);
+              }
+            },
+            current.controller.signal,
+          );
+          current.controller.signal.throwIfAborted();
+          if (!(result.answerText ?? answerText).trim()) throw Error('未收到有效回答，请重试。');
+          break;
+        } catch (error) {
+          receiving = false;
+          current.controller.signal.throwIfAborted();
+          if (active !== current || e.sender.isDestroyed())
+            throw new DOMException('Aborted', 'AbortError');
+          if (attempt === 3) throw error;
+          sendDesktop(e.sender, 'chat:event', {
+            id: v.id,
+            type: 'interview-retry',
+            attempt: attempt + 1,
+            limit: 3,
+          });
+          await new Promise<void>((resolve, reject) => {
+            const signal = current.controller.signal;
+            const cancel = () => {
+              clearTimeout(timer);
+              signal.removeEventListener('abort', cancel);
+              reject(signal.reason);
+            };
+            const timer = setTimeout(
+              () => {
+                signal.removeEventListener('abort', cancel);
+                resolve();
+              },
+              500 * 2 ** attempt,
+            );
+            signal.addEventListener('abort', cancel, { once: true });
+            if (signal.aborted) cancel();
+          });
+        } finally {
+          receiving = false;
+        }
+      }
       current.controller.signal.throwIfAborted();
       if (active !== current || e.sender.isDestroyed())
         throw new DOMException('Aborted', 'AbortError');
+      if (!result) throw Error('未收到有效回答，请重试。');
       if (!result.warning) d.context.answer(snapshot, result.answerText ?? answerText);
       for (const id of ids) screenshots.delete(id);
       return { ok: true, ...result };

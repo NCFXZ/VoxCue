@@ -761,6 +761,21 @@ export const useInterview = create<InterviewState>((set, get) => ({
               }));
           },
           screenshotIds,
+          (attempt, limit) => {
+            if (!controller.signal.aborted)
+              set((state) => ({
+                answers: state.answers.map((answer) =>
+                  answer.id === answerId
+                    ? {
+                        ...answer,
+                        retry: { attempt, limit },
+                        reasoningSummary: undefined,
+                        activity: { phase: 'waiting' },
+                      }
+                    : answer,
+                ),
+              }));
+          },
         );
         controller.signal.throwIfAborted();
         answerScreenshots.delete(answerId);
@@ -768,7 +783,12 @@ export const useInterview = create<InterviewState>((set, get) => ({
           screenshots: state.screenshots.filter((shot) => !screenshotIds.includes(shot.id)),
           answers: state.answers.map((a) =>
             a.id === answerId
-              ? { ...a, provider: provider ?? a.provider, status: 'completed' as const }
+              ? {
+                  ...a,
+                  provider: provider ?? a.provider,
+                  status: 'completed' as const,
+                  retry: undefined,
+                }
               : a,
           ),
         }));

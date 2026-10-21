@@ -39,6 +39,7 @@
   --radius-control: 14px;
   --radius-composer-tool: 16px;
   --radius-card: 20px;
+  --radius-interview-answer: 32px;
   --radius-dialog: 32px;
   --shadow-raised: 0 2px 8px rgba(24, 35, 40, 0.06);
   --shadow-popup: 0 8px 24px rgba(24, 35, 40, 0.14);
@@ -1654,6 +1655,102 @@ p {
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 12px;
+}
+.interview-answer-identity {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  min-width: 0;
+  gap: 8px;
+}
+.interview-answer-status {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: 5px;
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  corner-shape: round;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  line-height: 1.4;
+  white-space: nowrap;
+}
+.interview-answer-status.is-retrying {
+  color: var(--accent);
+  border-color: var(--border-hover);
+  background: var(--selected);
+}
+.interview-answer-status.is-failed {
+  color: var(--danger);
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+.interview-answer-failure {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 10px;
+  margin: 12px 0 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--danger) 55%, var(--border));
+  border-radius: var(--radius-interview-answer);
+  background: color-mix(in srgb, var(--surface) 94%, var(--danger));
+  box-shadow: var(--shadow-raised);
+  color: var(--foreground);
+  overflow-wrap: anywhere;
+}
+.interview-answer-failure-heading {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.interview-answer-failure-icon {
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  corner-shape: round;
+  background: var(--danger-soft);
+  color: var(--danger);
+}
+.interview-answer-failure-heading strong {
+  color: var(--danger);
+  font-size: var(--type-section);
+  font-weight: 600;
+  line-height: var(--line-title);
+}
+.interview-answer-failure-heading p {
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  line-height: var(--line-secondary);
+}
+.interview-answer-failure-reason {
+  grid-column: 1 / -1;
+  margin: 8px 0 0;
+  max-height: 1.6em;
+  overflow-y: auto;
+  font-size: var(--type-body);
+  line-height: 1.6;
+  user-select: text;
+}
+.interview-answer-failure-actions {
+  grid-column: 2;
+  grid-row: 1;
+  align-self: center;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+.interview-answer-failure-actions .ui-button {
+  min-height: 32px;
+  height: auto;
+  padding: 7px 10px;
+  font-size: var(--type-secondary);
+  line-height: var(--line-control);
 }
 .floating-composer {
   margin: 8px;
@@ -3664,7 +3761,8 @@ details[open] > summary > .disclosure-chevron {
   border-bottom: 1px solid var(--border);
 }
 .floating-answer .floating-scroll {
-  padding: 18px 18px 22px;
+  padding: 18px 18px 36px;
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
 }
 .floating-answer-item + .floating-answer-item {
   border-top: 0;
@@ -3687,7 +3785,7 @@ details[open] > summary > .disclosure-chevron {
 .answer-bubble {
   padding: 14px 16px;
   border: 1px solid var(--border);
-  border-radius: 32px;
+  border-radius: var(--radius-interview-answer);
   background: color-mix(in srgb, var(--surface) 70%, transparent);
   box-shadow: var(--shadow-raised);
   font-size: var(--type-body);
@@ -3704,6 +3802,8 @@ details[open] > summary > .disclosure-chevron {
   margin-bottom: 0;
 }
 .floating-answer .floating-composer {
+  position: relative;
+  flex-shrink: 0;
   margin: 0 8px 8px;
   padding: 15px 16px 10px;
 }
@@ -4400,7 +4500,8 @@ details[open] > summary > .disclosure-chevron {
   background: var(--surface);
   box-shadow: var(--shadow-raised);
 }
-.chat-composer > .follow-latest {
+.chat-composer > .follow-latest,
+.floating-composer > .follow-latest {
   position: absolute;
   z-index: 2;
   left: 50%;
@@ -5108,24 +5209,6 @@ details[open] > summary > .disclosure-chevron {
   margin-bottom: 6px;
   font-size: var(--type-body);
 }
-.skill-source-issue {
-  margin-top: 8px;
-  padding: 8px 12px;
-  border-left: 2px solid var(--accent);
-  background: var(--soft);
-  color: var(--muted);
-  font-size: var(--type-secondary);
-  overflow-wrap: anywhere;
-}
-.skill-source-issue ul {
-  margin: 6px 0 0;
-  padding-left: 18px;
-}
-.skill-source-issue code {
-  display: block;
-  white-space: normal;
-  overflow-wrap: anywhere;
-}
 .plain-text-content {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -5269,22 +5352,15 @@ h4,
 .field-label {
   font-weight: 500;
 }
-/* Reading text changes independently of window geometry and native controls. */
+/* Only conversation bubbles follow the interview reading size. */
 .floating-shell .response-progress {
-  --response-status-font-size: var(--interview-font-size, 14px);
+  --response-status-font-size: var(--type-body);
 }
 :is(.floating-shell, .interview-preview-shell)
-  :is(
-    .transcript-item > p,
-    .floating-question,
-    .answer-text,
-    .answer-text .markdown-content,
-    .floating-composer textarea
-  ),
-.interview-font-sample {
+  :is(.transcript-item > p, .floating-question, .answer-bubble, .answer-bubble .markdown-content) {
   font-size: var(--interview-font-size, 14px);
 }
-:is(.floating-shell, .interview-preview-shell) .answer-text .markdown-content {
+:is(.floating-shell, .interview-preview-shell) .answer-bubble .markdown-content {
   --type-title: calc(var(--interview-font-size, 14px) * 18 / 14);
   --type-section: calc(var(--interview-font-size, 14px) * 15 / 14);
 }
@@ -6014,8 +6090,7 @@ svg[data-ui-icon] {
   border-top: 1px solid var(--border);
 }
 .proposal-status,
-.proposal-operation,
-.proposal-warning {
+.proposal-operation {
   font-size: var(--type-caption, 11px);
   font-weight: 400;
   line-height: 1.5;
@@ -6032,9 +6107,6 @@ svg[data-ui-icon] {
 }
 .proposal-operation.is-removal {
   color: var(--danger);
-}
-.proposal-warning {
-  color: var(--warning, var(--muted));
 }
 .proposal-footer {
   display: flex;
@@ -6082,9 +6154,6 @@ svg[data-ui-icon] {
 .proposal-reader-content .profile-value-list > article {
   padding: 0;
   border: 0;
-}
-.proposal-reader-content .skill-source-issue {
-  margin-top: 20px;
 }
 .proposal-reader-content .markdown-content p {
   max-height: none;

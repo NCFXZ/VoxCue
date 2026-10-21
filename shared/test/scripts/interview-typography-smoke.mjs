@@ -13,6 +13,33 @@ let app = await electron.launch({ args: [await offlineElectronEntry()], env });
 const key = 'voxcue-interview-font-size-v1';
 const opacityKey = 'voxcue-interview-background-transparency-v1';
 const errors = [];
+const fixedTextStyles = (scope) =>
+  scope.evaluate((root) => {
+    const bubbles = '.transcript-item > p,.floating-question,.answer-bubble';
+    return [...root.querySelectorAll('*')]
+      .filter(
+        (element) =>
+          element instanceof HTMLElement &&
+          element.getClientRects().length &&
+          !element.closest(bubbles) &&
+          (element.matches('input,textarea') ||
+            [...element.childNodes].some(
+              (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim(),
+            )),
+      )
+      .map((element) => {
+        const path = [];
+        for (let current = element; current !== root; current = current.parentElement)
+          path.unshift([...current.parentElement.children].indexOf(current));
+        return {
+          path: path.join('/'),
+          font: getComputedStyle(element).fontSize,
+          placeholder: element.matches('input,textarea')
+            ? getComputedStyle(element, '::placeholder').fontSize
+            : undefined,
+        };
+      });
+  });
 try {
   await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(async ({ app, session }) => {
@@ -85,6 +112,7 @@ try {
     for (const theme of ['light', 'dark']) {
       await page.emulateMedia({ colorScheme: theme });
       await checkBrandImage(settings, '.provider-avatar img');
+      const fixedPreview = await fixedTextStyles(settings);
       for (const size of [24, 12, 14]) {
         await slider.fill(String(size));
         const metrics = await settings.evaluate((section) => ({
@@ -104,6 +132,13 @@ try {
           JSON.stringify(metrics),
         );
         assert.equal(metrics.overflow, false);
+        assert.deepEqual(await fixedTextStyles(settings), fixedPreview);
+        assert.equal(
+          await settings
+            .getByRole('textbox', { name: '预览输入框', exact: true })
+            .evaluate((element) => getComputedStyle(element).fontSize),
+          '14px',
+        );
       }
     }
   }
@@ -174,6 +209,7 @@ try {
   await floating.locator('.answer-text h3').first().waitFor();
   await checkBrandImage(floating, '.provider-avatar img');
   const toolbar = await floating.locator('.floating-toolbar').boundingBox();
+  const fixedInterview = await fixedTextStyles(floating.locator('body'));
   for (const size of [18, 24, 12, 14]) {
     await page.evaluate(({ key, size }) => localStorage.setItem(key, String(size)), { key, size });
     await floating.waitForFunction(
@@ -184,7 +220,7 @@ try {
     const metrics = await floating.evaluate(() => ({
       text: [
         ...document.querySelectorAll(
-          '.transcript-item > p,.floating-question,.answer-text,.answer-text .markdown-content,.floating-composer textarea',
+          '.transcript-item > p,.floating-question,.answer-bubble,.answer-bubble .markdown-content',
         ),
       ].map((e) => parseFloat(getComputedStyle(e).fontSize)),
       icons: [...document.querySelectorAll('.floating-question > svg')].map((e) => ({
@@ -205,6 +241,13 @@ try {
       JSON.stringify(metrics),
     );
     assert.equal(metrics.overflow, false);
+    assert.deepEqual(await fixedTextStyles(floating.locator('body')), fixedInterview);
+    assert.equal(
+      await floating
+        .getByRole('textbox', { name: '面试提问', exact: true })
+        .evaluate((element) => getComputedStyle(element).fontSize),
+      '14px',
+    );
     assert.ok(Math.abs(metrics.heading - (size * 15) / 14) < 0.01);
     assert.deepEqual(await floating.locator('.floating-toolbar').boundingBox(), toolbar);
   }
@@ -267,7 +310,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: display sliders, preview, keyboard and limits, storage failures, persistence, font/icon scaling, independent opacity, cross-window sync, light/dark and minimum bounds; synthetic account/audio only.',
+    'PASS: bubble-only font scaling, fixed input/placeholder and all text outside bubbles, display sliders, preview, keyboard and limits, storage failures, persistence, icons, independent opacity, cross-window sync, light/dark and minimum bounds; synthetic account/audio only.',
   );
 } finally {
   await closeUiApp(app);

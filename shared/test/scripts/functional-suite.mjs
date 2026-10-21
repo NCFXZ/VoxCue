@@ -29,6 +29,7 @@ const shared = [
   'interview-ux',
   'interview-usage',
   'interview-screenshot',
+  'interview-retry',
   'delete-controls',
   'ui-alignment',
   'ui-refinement',

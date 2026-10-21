@@ -429,7 +429,7 @@ try {
     );
   assert.equal(skillSeparation.length, 3);
   assert.ok(skillSeparation.slice(1).every((item) => item.padding > 0 && item.border > 0));
-  assert.equal(await review.locator('.proposal-skill-row .proposal-warning').count(), 3);
+  assert.equal(await review.locator('.proposal-warning').count(), 0);
   await review
     .getByRole('button', {
       name:
@@ -439,10 +439,10 @@ try {
     })
     .click();
   const sourceReader = page.getByRole('dialog');
-  assert.equal(await sourceReader.getByRole('note').count(), 1);
-  assert.equal(
-    await sourceReader.locator('.skill-source-issue code').innerText(),
-    'https://example.com/unretrieved',
+  assert.equal(await sourceReader.getByRole('note').count(), 0);
+  assert.doesNotMatch(
+    await sourceReader.innerText(),
+    /来源未核验|来源待核验|example\.com\/unretrieved/,
   );
   await sourceReader.getByRole('button', { name: '关闭对话框', exact: true }).click();
   assert.equal(
@@ -468,16 +468,16 @@ try {
       (skill) => skill.content.includes('版本2') && skill.sources.length === 0,
     ),
   );
-  assert.equal(await review.locator('.proposal-skill-row .proposal-warning').count(), 3);
+  assert.equal(await review.locator('.proposal-warning').count(), 0);
   await page.reload();
   await latest().getByText('已保存所选资料', { exact: true }).waitFor();
-  assert.equal(await latest().locator('.proposal-skill-row .proposal-warning').count(), 3);
+  assert.equal(await latest().locator('.proposal-warning').count(), 0);
   await app.evaluate(() => {
     globalThis.failSkillReference = 'partial';
   });
   await send('请联网更新面试技能');
   await review.getByRole('button', { name: '保存所选', exact: true }).waitFor();
-  assert.equal(await review.locator('.proposal-skill-row .proposal-warning').count(), 1);
+  assert.equal(await review.locator('.proposal-warning').count(), 0);
   await review.getByRole('button', { name: '保存所选', exact: true }).click();
   await review.getByText('已保存所选资料', { exact: true }).waitFor();
   const mixedSaved = JSON.parse(
@@ -674,7 +674,7 @@ try {
           'time above separator, real title disclosures and chronological status changes',
           'trailing chevron only on hover/focus, active title shimmer and reduced motion',
           'composer grows from 2 to 11 lines, shrinks, reflows and restores drafts',
-          'source problems identify skills and URLs in detail dialogs without blocking complete proposals; button save, mixed/all-unverified sources and reload persistence',
+          'source notes hidden in proposals and detail dialogs; button save, mixed/all-unverified source metadata and reload persistence',
           'both skill prompt actions dismiss immediately and remain dismissed on reload',
           'empty statuses replaced, current status shimmer and no summary language preference',
         ],

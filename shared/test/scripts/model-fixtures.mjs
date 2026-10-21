@@ -1,12 +1,39 @@
 import path from 'node:path';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
+import assert from 'node:assert/strict';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot } from './test-workspace.mjs';
+import { verifyCachedComponent } from './verify-model-cache.mjs';
 
-// Full regressions own their public model downloads; never populate workspace or user caches.
+export async function stageModelFixtures(cache, staged, packages, componentLocation) {
+  const relative = path.relative(testRoot, path.resolve(staged));
+  assert.ok(
+    relative && !relative.startsWith('..') && !path.isAbsolute(relative),
+    'Model copy must belong to this temporary run',
+  );
+  assert.equal(typeof componentLocation, 'function');
+  for (const pkg of packages) {
+    const source = componentLocation(cache, pkg);
+    const destination = componentLocation(staged, pkg);
+    await verifyCachedComponent(source, pkg);
+    for (const file of pkg.files) {
+      const output = path.join(destination, 'files', file.path);
+      await mkdir(path.dirname(output), { recursive: true });
+      await copyFile(path.join(source, 'files', file.path), output);
+    }
+    await writeFile(
+      path.join(destination, '.voxcue-component.json'),
+      JSON.stringify({ sha256: pkg.sha256 }),
+    );
+    await verifyCachedComponent(destination, pkg);
+  }
+}
+
+// Models come from fixed public downloads or an explicitly authorized read-only
+// cache. Test processes still receive independent files in their owned run.
 export async function prepareModelFixtures() {
-  const { ComponentService, componentPaths } = workspace.platformRequire(
+  const { ComponentService, componentPaths, componentLocation } = workspace.platformRequire(
     path.join(
       workspace.platformRoot,
       'dist-electron/shared/electron/backend/components/service.js',
@@ -19,6 +46,15 @@ export async function prepareModelFixtures() {
     ),
   );
   const packages = packagesFor(process.platform, process.arch).filter((pkg) => !pkg.optional);
+  if (process.env.VOXCUE_TEST_COMPONENT_CACHE) {
+    const cache = path.resolve(process.env.VOXCUE_TEST_COMPONENT_CACHE);
+    const staged = path.join(testRoot, 'cached-models');
+    await stageModelFixtures(cache, staged, packages, componentLocation);
+    console.log(
+      'Existing models: fixed catalog hashes verified; isolated copy, no download; source cache preserved',
+    );
+    return { ...componentPaths(staged, packages), speechFixtures: await prepareSpeechFixtures() };
+  }
   const root = path.join(testRoot, 'models');
   let previous;
   const service = new ComponentService({

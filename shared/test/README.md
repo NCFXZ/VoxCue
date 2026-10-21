@@ -1,3 +1,20 @@
+## 0.5.6 回归与模型复用
+
+新增 `interview-retry-smoke.mjs`，覆盖首次请求加三次重试、第四次恢复、耗尽/手动重试、部分正文替换、等待/活动请求停止、迟到输出与下一题；同时检查服务名旁固定字号状态和连续圆角。入口纳入共享功能矩阵（35项）及 Windows 五档DPI（每档9项）。`interview-screenshot-smoke.mjs` 检查警告随对应回答等量滚动、输入位置固定、与回答气泡共用32px连续角及原截图复用。
+
+已有模型经明确授权可通过 `VOXCUE_TEST_COMPONENT_CACHE` 指定正式组件缓存根目录。`model-fixtures.mjs` 只读按固定清单核对标记、全部文件、大小和SHA256，然后复制至自有系统临时目录，并再次校验副本；不对原目录调用组件下载/修复/删除。每次创建独立副本，测试结束清理全部测试内容，保留正式原模型；不保留模型测试缓存。未提供此变量的其他开发环境仍可使用原固定公开下载夹具。`verify-model-cache.test.ts` 覆盖只读成功、损坏、缺失、额外文件、错误标记、链接拒绝、副本独立性和临时目标边界。
+
+Windows 示例（PowerShell，源码根目录）：
+
+```powershell
+$env:VOXCUE_TEST_COMPONENT_CACHE = '<用户明确授权的 component-cache 绝对路径>'
+pnpm test:windows:functional
+pnpm test:windows:regression
+pnpm test:ui:dpi
+```
+
+`windows/test/scripts/qwen-installed-smoke.mjs` 同样要求显式缓存根和开发机 `VOXCUE_PYTHON`。先只读校验已安装Qwen，再复制至自有临时根，使用固定公开音频串行执行CPU/CUDA、原生/生产Worker、六次后台切换和测试副本句柄释放；结束再次校验正式源哈希，清理副本和CUDA缓存。该入口不执行真实安装/删除，也不接触账户或采样硬件；用户安装不需要Python。组件下载/损坏/取消的既有测试继续在隔离数据上执行。
+
 ## Mac 0.5.5 回归入口
 
 `functional-suite.mjs` 默认串行执行共享界面/业务及 Mac 原生矩阵。另在仓库根目录执行 `node macos/test/scripts/qwen-regression.mjs`，一次下载认证自有临时 Paraformer/Qwen 组件，依次检查 CPU/Metal 原生流式识别、实际裁剪、Worker/AEC、后台模型/设备切换及实际句柄释放与受管删除。`audio-synthetic-smoke.mjs` 使用合成捕获端口，不启动会采集物理设备的旧 audio-native 入口。

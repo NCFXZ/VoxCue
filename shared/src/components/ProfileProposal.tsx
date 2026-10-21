@@ -10,20 +10,12 @@ import {
   profileValue,
   type ProfileEntry,
   type InterviewSkill,
-  type SkillSourceIssue,
   type ProfileField,
   skillProposalEntries,
 } from '../../electron/contracts/profile';
 import { MarkdownContent } from './MarkdownContent';
 import { PlainTextContent } from './PlainTextContent';
 import { X, Edit, Globe, Check, History, ChevronDown, Loader } from './icons';
-const sourceIssueLabels: Record<SkillSourceIssue['reason'], string> = {
-  search_disabled: '本次未开启网络搜索，无法核验引用。',
-  search_incomplete: '未取得本次网络搜索完成的记录，无法核验引用。',
-  search_sources_missing: '本次搜索未返回可用于核验的来源。',
-  skill_sources_missing: '这项技能没有提供引用来源。',
-  source_unmatched: '以下引用未匹配到本次联网工具返回的来源。',
-};
 function ProposalLoading({ active, label }: { active: boolean; label: string }) {
   if (!active) return null;
   return (
@@ -35,11 +27,9 @@ function ProposalLoading({ active, label }: { active: boolean; label: string }) 
 export function ProfileValue({
   value,
   hideTitle = false,
-  sourceIssues,
 }: {
   value: string | ProfileEntry[] | InterviewSkill[] | undefined;
   hideTitle?: boolean;
-  sourceIssues?: SkillSourceIssue[];
 }) {
   if (!value || (Array.isArray(value) && !value.length))
     return <p className="empty-inline">未填写 / 清空</p>;
@@ -54,28 +44,6 @@ export function ProfileValue({
             </strong>
           )}
           <PlainTextContent content={item.content} />
-          {sourceIssues
-            ?.filter((issue) => issue.skillId === item.id)
-            .map((issue) => (
-              <div
-                className="skill-source-issue"
-                role="note"
-                aria-label={`${item.title}来源校验问题`}
-                key={issue.skillId}
-              >
-                <p>来源未核验：{sourceIssueLabels[issue.reason]}</p>
-                {issue.sources.length > 0 && (
-                  <ul>
-                    {issue.sources.map((source, index) => (
-                      <li key={index}>
-                        <span>{source.title}</span>
-                        <code>{source.url}</code>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ))}
         </article>
       ))}
     </div>
@@ -176,9 +144,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
   const savedCount =
     savedFields.filter((field) => field !== 'skills').length +
     (savedFields.includes('skills') ? savedSkillIds.length : 0);
-  const sourceIssues = message.skillSourceIssues ?? [];
-  const hasSourceIssues =
-    selected.includes('skills') && sourceIssues.some((issue) => skillIds.includes(issue.skillId));
   const expanded = skillsExpanded ?? fields.length === 1;
   const operation = (kind: 'add' | 'update' | 'remove' | 'keep') =>
     !resolved && (
@@ -298,9 +263,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                       label="技能"
                     />
                     {operation(fieldOperation(field))}
-                    {sourceIssues.length > 0 && (
-                      <span className="proposal-warning">来源待核验</span>
-                    )}
                   </div>
                   <span className="proposal-excerpt">
                     {pending
@@ -344,9 +306,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                           {(complete || message.profilePreview?.skills?.[index]?.id) &&
                             operation(kind)}
                           {status('skills', skill.id)}
-                          {sourceIssues.some((issue) => issue.skillId === skill.id) && (
-                            <span className="proposal-warning">来源待核验</span>
-                          )}
                         </div>
                         {!resolved && (
                           <div className="proposal-excerpt">
@@ -416,9 +375,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                   ? '请选择要保存的内容'
                   : '未选中的内容保持不变'}
             </span>
-            {hasSourceIssues && (
-              <span className="proposal-warning">部分技能来源待核验，可查看详情后保存。</span>
-            )}
           </div>
           <div className="profile-proposal-actions">
             <Button variant="ghost" onClick={() => state.dismissProfile(message.id)}>
@@ -484,7 +440,6 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
             <ProfileValue
               value={readingSkill ? [readingSkill.skill] : (values[reading.field] as string)}
               hideTitle={!!readingSkill}
-              sourceIssues={sourceIssues}
             />
           </div>
         </Modal>

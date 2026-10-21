@@ -1,7 +1,9 @@
 import { beforeEach, afterEach, expect, it, vi } from 'vitest';
 import { useInterview } from '../../../shared/src/stores/interview';
 import type { SpeechEvent } from '../../../shared/electron/contracts/speech';
+import type { ChatEvent } from '../../../shared/electron/contracts/chat';
 let emit: (event: SpeechEvent) => void;
+let emitChat: (event: ChatEvent) => void;
 const answer = vi.fn();
 const screenshot = vi.fn();
 let captureCount = 0;
@@ -25,7 +27,10 @@ beforeEach(() => {
         emit = callback;
         return () => {};
       },
-      onChatEvent: () => () => {},
+      onChatEvent: (callback: typeof emitChat) => {
+        emitChat = callback;
+        return () => {};
+      },
       interviewAnswer: answer,
       interviewScreenshot: screenshot,
       interviewCancel: vi.fn(async () => {}),
@@ -154,4 +159,40 @@ it('停止保留待发送截图，重试仍使用原引用且不会重复捕获'
   await useInterview.getState().retryAnswer(stopped.id);
   expect(answer.mock.calls[1][0]).toMatchObject({ screenshotIds: ['shot-1'] });
   expect(captureCount).toBe(1);
+});
+
+it('自动重试保留已有正文到新输出到达，随后替换而不拼接；停止忽略重试和迟到输出', async () => {
+  let finish!: (value: unknown) => void;
+  answer.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const pending = useInterview.getState().submitTranscript('需要重试的问题');
+  const requestId = answer.mock.calls[0][0].id;
+  emitChat({ id: requestId, type: 'delta', text: '旧尝试正文' });
+  emitChat({ id: requestId, type: 'reasoning-summary', text: '旧摘要' });
+  emitChat({ id: requestId, type: 'interview-retry', attempt: 1, limit: 3 });
+  expect(useInterview.getState().answers.at(-1)).toMatchObject({
+    content: '旧尝试正文',
+    retry: { attempt: 1, limit: 3 },
+    reasoningSummary: undefined,
+  });
+  emitChat({ id: requestId, type: 'delta', text: '新尝试' });
+  emitChat({ id: requestId, type: 'delta', text: '正文' });
+  expect(useInterview.getState().answers.at(-1)?.content).toBe('新尝试正文');
+  useInterview.getState().stopAnswer();
+  emitChat({ id: requestId, type: 'interview-retry', attempt: 2, limit: 3 });
+  emitChat({ id: requestId, type: 'delta', text: '停止后的迟到内容' });
+  finish({ ok: false, error: { message: '已取消' } });
+  await pending;
+  expect(useInterview.getState().answers.at(-1)).toMatchObject({
+    status: 'stopped',
+    content: '新尝试正文',
+    retry: { attempt: 1, limit: 3 },
+  });
+  expect(useInterview.getState().error).toBeNull();
+  expect(useInterview.getState().generating).toBe(false);
+  expect(answer).toHaveBeenCalledOnce();
 });

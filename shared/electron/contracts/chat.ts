@@ -79,6 +79,7 @@ export interface ChatRequest {
 }
 export type ChatEvent =
   | { id: string; type: 'provider'; provider: ModelProvider }
+  | { id: string; type: 'interview-retry'; attempt: number; limit: number }
   | { id: string; type: 'profile-preview'; preview: ProfilePreview; generation?: ProfileGeneration }
   | { id: string; type: 'delta'; text: string }
   | { id: string; type: 'reasoning-summary'; text: string }

@@ -8,7 +8,7 @@ import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 
 // Runs only after packaged inference, against that run's temporary profile and
 // real managed models. Replace capture, never Worker/ONNX or deletion logic.
-export async function checkComponentRemoval(application, page) {
+export async function checkComponentRemoval(application, page, restoreCached) {
   const handleFixture = path.join(testRoot, 'exclusive-handle-fixture');
   fs.writeFileSync(handleFixture, 'synthetic handle fixture');
   const held = fs.openSync(handleFixture, 'r');
@@ -289,7 +289,10 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
         .fromPartition('voxcue-components')
         .webRequest.onBeforeRequest((_details, callback) => callback({}));
     });
-    state = await page.evaluate(() => window.desktop.components({ op: 'download' }));
+    if (restoreCached) {
+      await restoreCached();
+      state = await page.evaluate(() => window.desktop.components({ op: 'status' }));
+    } else state = await page.evaluate(() => window.desktop.components({ op: 'download' }));
     assert.equal(state.phase, 'ready', state.error);
     await application.evaluate(({ session }) => {
       globalThis.removalNetworkAttempts = [];
@@ -334,7 +337,7 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
     assert.match(original.value.content, /Keep this synthetic knowledge and its index/);
     assert.deepEqual(await application.evaluate(() => globalThis.removalNetworkAttempts), []);
     console.log(
-      'PASS: live Windows ONNX unload, speech process exit, locked-operation guards, protected originals, model deletion/redownload and preserved knowledge/index.',
+      `PASS: live Windows ONNX unload, speech process exit, locked-operation guards, protected originals, model deletion/${restoreCached ? 'verified local restore' : 'redownload'} and preserved knowledge/index.`,
     );
   } finally {
     await application.evaluate(() => globalThis.restoreRemovalChecks());

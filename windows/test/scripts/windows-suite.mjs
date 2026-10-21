@@ -19,6 +19,7 @@ if (suites[0] === '--dpi') {
     'profile-selection',
     'typography',
     'interview-typography',
+    'interview-retry',
     'interview-ux',
     'components-ui',
     'updates-sidebar',

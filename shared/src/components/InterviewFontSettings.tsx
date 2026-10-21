@@ -28,7 +28,7 @@ export function InterviewFontSettings() {
       <header className="interview-font-heading">
         <div>
           <h3>面试界面</h3>
-          <p className="section-help">调整转写、问题、回答和输入文字的大小。</p>
+          <p className="section-help">仅调整转写、问题和回答气泡中的文字大小。</p>
         </div>
       </header>
       <InterviewDisplayControls />
@@ -99,7 +99,6 @@ export function InterviewFontSettings() {
               </div>
               <div className="floating-composer">
                 <textarea
-                  className="interview-font-sample"
                   aria-label="预览输入框"
                   tabIndex={-1}
                   readOnly

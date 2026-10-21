@@ -556,6 +556,10 @@ try {
         [String(Math.round(start.x)), String(Math.round(start.y)), '0', '0', 'restore'],
         { windowsHide: true },
       );
+      // SetCursorPos alone can leave a transparent Electron window without a
+      // forwarded mousemove. Send the same native move used by the hover check
+      // before waiting for click-through to turn off. No press occurs here.
+      probe('move', Math.round(start.x) + 1, Math.round(start.y));
       const readyDeadline = performance.now() + 5000;
       while (probe('window', nativeHandle, path.resolve('public/voxcue.ico')).extendedStyle & 32) {
         if (performance.now() > readyDeadline) {

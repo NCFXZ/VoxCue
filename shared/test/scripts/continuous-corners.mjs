@@ -18,6 +18,8 @@ export async function verifyContinuousCorners(page, name) {
     const hoverColor = getComputedStyle(probe).backgroundColor;
     const popupShadow = getComputedStyle(probe).boxShadow;
     const controlRadius = getComputedStyle(probe).borderRadius;
+    probe.style.borderRadius = 'var(--radius-interview-answer)';
+    const answerRadius = getComputedStyle(probe).borderRadius;
     probe.style.boxShadow = 'var(--shadow-raised)';
     const raisedShadow = getComputedStyle(probe).boxShadow;
     probe.remove();
@@ -87,7 +89,8 @@ export async function verifyContinuousCorners(page, name) {
             '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,' +
             '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
             '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
-            '.mock-badge,.screen-capture-status,.record-transcript-heading span,.preview-pill',
+            '.mock-badge,.screen-capture-status,.record-transcript-heading span,.preview-pill,' +
+            '.interview-answer-status',
         );
         const roundMenu = element.matches('.composer-menu');
         const label = element.tagName + '.' + element.getAttribute('class') + (pseudo ?? '');
@@ -104,11 +107,13 @@ export async function verifyContinuousCorners(page, name) {
             wrongSurfaces.push(label + ': compact action differs from standard action corners');
           if (
             element.matches(
-              '.composer,.floating-composer,.follow-latest,.floating-toolbar,.floating-panel,.answer-bubble',
+              '.composer,.floating-composer,.follow-latest,.floating-toolbar,.floating-panel,.answer-bubble,.interview-answer-failure',
             ) &&
             style.boxShadow !== raisedShadow
           )
             wrongSurfaces.push(label + ': inconsistent raised surface shadow');
+          if (element.matches('.interview-answer-failure') && style.borderRadius !== answerRadius)
+            wrongSurfaces.push(label + ': failure alert differs from answer bubble corners');
           if (element.matches('.dropdown-item') && style.boxShadow !== 'none')
             wrongSurfaces.push(label + ': menu item adds an elevation shadow');
           if (
