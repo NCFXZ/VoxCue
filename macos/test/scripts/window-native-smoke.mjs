@@ -2,6 +2,7 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { composerPage } from './native-ui.mjs';
 import { installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -30,9 +31,10 @@ try {
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   page.on('pageerror', (error) => errors.push(error.message));
-  const input = () => page.getByRole('textbox', { name: '聊天消息', exact: true });
+  const surface = await composerPage(app, page);
+  const input = () => surface.getByRole('textbox', { name: '聊天消息', exact: true });
   await input().waitFor();
-  await page.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
+  await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
   assert.equal(await page.locator('.window-controls').count(), 0);
   assert.equal(await page.locator('.titlebar').count(), 0);
   const metrics = await page.locator('.app-body').evaluate((element) => ({
@@ -50,7 +52,8 @@ try {
   assert.equal(metrics.top, 0);
   assert.equal(metrics.height, metrics.viewportHeight);
   assert.equal(metrics.headingTop, 44);
-  assert.equal(metrics.brandTop + metrics.brandHeight / 2, metrics.collapseCenter);
+  assert.equal(metrics.collapseCenter, 25);
+  assert.ok(metrics.brandTop >= 44);
   assert.deepEqual(
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
@@ -98,12 +101,13 @@ try {
   const next = app.waitForEvent('window');
   await app.evaluate(({ app }) => app.emit('activate'));
   const reopened = await next;
-  await reopened.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
-  await reopened.waitForFunction(
+  const restored = await composerPage(app, reopened);
+  await restored.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
+  await restored.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === 'Mac 窗口恢复测试草稿',
   );
   assert.equal(
-    await reopened.getByRole('textbox', { name: '聊天消息', exact: true }).inputValue(),
+    await restored.getByRole('textbox', { name: '聊天消息', exact: true }).inputValue(),
     'Mac 窗口恢复测试草稿',
   );
   checks.push('Dock 激活恢复已登录主窗口和本机草稿');

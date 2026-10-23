@@ -112,6 +112,7 @@ export const Update = icon(ArrowSync24Regular);
 export const Sparkles = icon(Sparkle24Regular);
 export const Volume2 = icon(Speaker224Regular);
 export const Monitor = icon(Desktop24Regular);
+export const SystemTheme = Monitor;
 export const Moon = icon(WeatherMoon24Regular);
 export const Sun = icon(WeatherSunny24Regular);
 export const Globe = icon(Globe24Regular);

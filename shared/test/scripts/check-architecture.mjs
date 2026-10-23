@@ -191,6 +191,13 @@ export function boundaryViolations(graph) {
         (physicalFile.startsWith('macos/') && edge.target.startsWith('windows/'))
       )
         fail('Windows 与 macOS 专属实现不得相互依赖');
+      if (
+        physicalFile.startsWith('macos/src/') &&
+        /^shared\/src\/components\/ui\/(?:appearance-control|material-button|material-surface)\.tsx$/.test(
+          edge.target,
+        )
+      )
+        fail('平台组件通过纯展示契约实现端口，不得导入共享回退组件');
       if (physicalFile.startsWith('shared/') && /^(?:windows|macos)\//.test(edge.target))
         fail('共用源码不得静态依赖平台实现；主进程仅动态装配所选平台');
       if (edge.target.startsWith('.') || edge.target.startsWith('@/'))

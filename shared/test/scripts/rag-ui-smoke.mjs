@@ -30,9 +30,9 @@ try {
   await page.getByRole('button', { name: '保存', exact: true }).click();
   const base = page.getByRole('dialog', { name: 'RAG 本地集成', exact: true });
   assert.equal(
-    await base.getByLabel('知识库检索问题').evaluate((e) => getComputedStyle(e).fontSize),
-    '14px',
-    'Search controls use the shared 14px body typography',
+    await base.getByLabel('知识库检索问题').count(),
+    0,
+    'Retired manual search stays out of the document management layout',
   );
   assert.equal(await base.locator('select').count(), 0);
   await base.getByLabel('导入知识库文档').setInputFiles([
@@ -63,50 +63,39 @@ try {
     undefined,
     { timeout: 120000 },
   );
-  await base.getByRole('button', { name: '高级选项', exact: true }).click();
+  assert.equal(await base.locator('.document-row').count(), 3);
+  assert.equal(await base.getByText(/索引完成/).count(), 3);
+  // The manual search/preview UI was retired. Keep real indexed retrieval
+  // coverage at its public IPC port; import/status/persistence remain UI checks.
   for (const mode of ['hybrid', 'keyword', 'vector']) {
-    await base.getByLabel('知识库检索问题').fill('eddy current PID lift-off');
-    await base.getByRole('button', { name: '检索方式', exact: true }).click();
-    await base
-      .getByRole('menuitemradio', {
-        name: { hybrid: '混合', keyword: '关键词', vector: '向量' }[mode],
-        exact: true,
-      })
-      .click();
-    await base.getByRole('button', { name: '查找资料', exact: true }).click();
-    try {
-      await base.locator('.knowledge-hits button').first().waitFor({ timeout: 10000 });
-    } catch (error) {
-      const status = await page.evaluate(() => window.desktop.knowledge({ op: 'status' }));
-      const direct = await page.evaluate(
-        (mode) =>
-          window.desktop.knowledge({
-            op: 'search',
-            requestId: crypto.randomUUID(),
-            query: 'eddy current PID lift-off',
-            mode,
-            topK: 5,
-          }),
+    const result = await page.evaluate(async (mode) => {
+      const status = await window.desktop.knowledge({ op: 'status' });
+      if (!status.ok) throw Error(status.error);
+      const doc = status.value.documents.find((doc) => doc.name === 'sensor.md');
+      const hits = await window.desktop.knowledge({
+        op: 'search',
+        requestId: crypto.randomUUID(),
+        query: 'eddy current PID lift-off',
+        baseId: doc.baseId,
         mode,
-      );
-      console.log(
-        JSON.stringify({
-          diagnostic: true,
-          mode,
-          query: await base.getByLabel('知识库检索问题').inputValue(),
-          alerts: await base.getByRole('alert').allTextContents(),
-          documents: status.ok ? status.value.documents.length : status.error,
-          direct: direct.ok ? direct.value.length : direct.error,
-        }),
-      );
-      await page.screenshot({});
-      throw error;
-    }
-    await base.locator('.knowledge-hits button').filter({ hasText: 'sensor.md' }).first().click();
-    const preview = page.getByRole('dialog', { name: /How does the eddy/ });
-    await preview.getByText(/Tailxyz parameter is 37/).waitFor();
-    await preview.getByText(/限制输出并保留追问/).waitFor();
-    await preview.getByRole('button', { name: '关闭对话框', exact: true }).click();
+        topK: 5,
+      });
+      if (!hits.ok) throw Error(hits.error);
+      const hit = hits.value.find((hit) => hit.name === 'sensor.md');
+      if (!hit) throw Error('Indexed sensor document missing for ' + mode);
+      const item = await window.desktop.knowledge({
+        op: 'item',
+        requestId: crypto.randomUUID(),
+        itemId: hit.itemId,
+      });
+      if (!item.ok) throw Error(item.error);
+      return item.value;
+    }, mode);
+    const content = [result.content, ...(result.followUps ?? []).map((item) => item.content)].join(
+      '\n',
+    );
+    assert.match(content, /Tailxyz parameter is 37/);
+    assert.match(content, /限制输出并保留追问/);
   }
   await page.screenshot({ animations: 'disabled' });
   await page.reload();

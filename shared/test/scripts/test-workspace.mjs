@@ -61,8 +61,21 @@ export function trackTestProcess(child) {
   });
   return child;
 }
-export function spawnTestProcess(...args) {
-  return trackTestProcess(spawn(...args));
+export function spawnTestProcess(command, args, options) {
+  // Native-only fixtures need the same fixed, signed Mac host as UI fixtures.
+  // Keep packaged executables and Electron's Node-mode ABI checks untouched.
+  const developmentHost = path.join(
+    workspace.platformRoot,
+    '.tools/electron-dev/Electron.app/Contents/MacOS/Electron',
+  );
+  if (
+    process.platform === 'darwin' &&
+    command === workspace.platformRequire('electron') &&
+    (options?.env ?? process.env).ELECTRON_RUN_AS_NODE !== '1' &&
+    fs.existsSync(developmentHost)
+  )
+    command = developmentHost;
+  return trackTestProcess(spawn(command, args, options));
 }
 function cleanup() {
   if (cleaned) return;
@@ -113,6 +126,31 @@ export const electron = {
           ...options.args.slice(1),
         ],
       };
+    }
+    const webRenderer = options.env?.VOXCUE_TEST_WEB_RENDERER;
+    if (webRenderer && options.args?.[0]) {
+      const actual = fs.realpathSync(webRenderer);
+      const run = path.relative(temporary, actual).split(path.sep)[0];
+      if (!run.startsWith(prefix) || !fs.existsSync(path.join(temporary, run, marker)))
+        throw Error('Web renderer must belong to a temporary test run');
+      const entry = path.resolve(options.args[0]);
+      const wrapper = path.join(testRoot, 'web-renderer-entry.cjs');
+      fs.writeFileSync(
+        wrapper,
+        `
+const {app,BrowserWindow}=require('electron');
+app.setAppPath(${JSON.stringify(workspace.platformRoot)});
+const platform=require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/platform/index.js'))});
+const select=platform.selectDesktopPlatform;
+platform.selectDesktopPlatform=(...args)=>({...select(...args),presentationBindingFile:undefined});
+const load=BrowserWindow.prototype.loadFile;
+BrowserWindow.prototype.loadFile=function(file,...args){
+  return load.call(this, file===${JSON.stringify(path.join(workspace.platformRoot, 'dist/index.html'))} ? ${JSON.stringify(actual)} : file,...args);
+};
+require(${JSON.stringify(entry)});
+`,
+      );
+      options = { ...options, args: [wrapper, ...options.args.slice(1)] };
     }
     const speechModels = options.env?.VOXCUE_TEST_SPEECH_MODELS;
     const ragModel = options.env?.VOXCUE_TEST_RAG_MODEL;

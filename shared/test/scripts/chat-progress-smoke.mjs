@@ -324,7 +324,16 @@ try {
   await page.locator('.composer').screenshot({});
   await input().fill('');
   await lineCount(2);
-  await input().fill('项目描述与候选人经历。'.repeat(30));
+  // Use an uncapped six-line fixture at the current composer width. A fixed
+  // paragraph may already hit eleven lines, or keep the same line count after
+  // the input's newly constrained maximum width changes.
+  const wrappingDraft = await input().evaluate((node) => {
+    const context = document.createElement('canvas').getContext('2d');
+    context.font = getComputedStyle(node).font;
+    const columns = Math.floor((node.clientWidth - 2) / context.measureText('测').width);
+    return '测'.repeat(columns * 6 - 1);
+  });
+  await input().fill(wrappingDraft);
   await page.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]').clientHeight > 40,
   );

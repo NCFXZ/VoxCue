@@ -17,6 +17,13 @@ const run = (command, args, env = process.env) => {
   return result.stdout;
 };
 const common = ['clang++', '-std=c++17', '-arch', 'arm64', '-mmacosx-version-min=14.2', '-O2'];
+const glassBinding = path.join(root, 'native/bin/VoxCue.SidebarGlass.node');
+assert.match(run('/usr/bin/otool', ['-l', glassBinding]), /\bminos 14\.2\b/);
+assert.match(
+  run('/usr/bin/nm', ['-m', glassBinding]),
+  /weak external _OBJC_CLASS_\$_NSGlassEffectView/,
+  'Older macOS must be able to load the binding before choosing the shared fallback',
+);
 for (const file of Object.keys(qwenFiles).filter(
   (file) => file === 'voxcue-qwen' || file.endsWith('.dylib'),
 )) {
@@ -79,6 +86,22 @@ console.log(
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
   }).trim(),
+);
+console.log(
+  run(
+    workspace.platformRequire('electron'),
+    [
+      '-e',
+      `
+const binding=require(${JSON.stringify(path.join(root, 'native/bin/VoxCue.SidebarGlass.node'))});
+const names=['apply','configureButton','popUpMenu','configureScrollChrome','detachSurface','attachSurface','configureContentControls','configureInterviewMaterials','configureInterviewAppearance'];
+if(names.some(name=>typeof binding[name]!=='function') || typeof binding.available!=='boolean' || 'configureSwitch' in binding)
+  throw Error('Invalid native presentation ABI');
+console.log('Liquid Glass Node-API exports loaded; removed switch is absent');
+`,
+    ],
+    { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
+  ).trim(),
 );
 console.log(
   'Core Audio, screen-permission binding and launcher compiled/verified in temporary storage; running production binaries were not overwritten.',

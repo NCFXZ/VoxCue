@@ -109,6 +109,88 @@ describe('独立组件下载与版本缓存', () => {
     expect(service.ready('qwen')).toBe(true);
     expect(f.fetcher).toHaveBeenCalledTimes(2);
   });
+  it('单项下载只检查所选缓存及安装结果，不重新校验其他已就绪组件', async () => {
+    const f = await fixture();
+    const packages = [f.pkg, { ...f.pkg, id: 'qwen' as const }, { ...f.pkg, id: 'rag' as const }];
+    const emit = vi.fn();
+    const service = new ComponentService({
+      root: f.root,
+      packages,
+      managed: true,
+      fetch: f.fetcher as typeof fetch,
+      emit,
+    });
+    await service.download();
+    await service.remove('speech'); // Invalidates the previous full-cache check.
+    emit.mockClear();
+    f.fetcher.mockClear();
+    const verify = vi.spyOn(
+      service as unknown as { verify(directory: string, pkg: ComponentPackage): Promise<boolean> },
+      'verify',
+    );
+    expect((await service.download('speech')).phase).toBe('ready');
+    expect(f.fetcher).toHaveBeenCalledTimes(1);
+    expect(verify.mock.calls.map(([, pkg]) => pkg.id)).toEqual(['speech', 'speech']);
+    for (const [state] of emit.mock.calls) {
+      expect(
+        state.items
+          .filter((item: { id: string }) => item.id !== 'speech')
+          .map((item: { phase: string }) => item.phase),
+      ).toEqual(['ready', 'ready']);
+    }
+    service.dispose();
+  });
+  it('单项缓存离线复用及下载中的状态查询均不触发其他组件校验', async () => {
+    const f = await fixture();
+    const packages = [f.pkg, { ...f.pkg, id: 'rag' as const }];
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetcher = vi.fn(async () => {
+      await gate;
+      return new Response(new Uint8Array(f.bytes));
+    });
+    const service = new ComponentService({
+      root: f.root,
+      packages,
+      managed: true,
+      fetch: fetcher as typeof fetch,
+      emit: vi.fn(),
+    });
+    const verify = vi.spyOn(
+      service as unknown as { verify(directory: string, pkg: ComponentPackage): Promise<boolean> },
+      'verify',
+    );
+    const pending = service.download('speech');
+    try {
+      await vi.waitFor(() => expect(fetcher).toHaveBeenCalledTimes(1));
+      expect((await service.status()).phase).toBe('downloading');
+      expect(verify.mock.calls.map(([, pkg]) => pkg.id)).toEqual(['speech']);
+    } finally {
+      release();
+      await pending;
+    }
+    verify.mockClear();
+    expect(
+      (await service.download('speech')).items.find((item) => item.id === 'speech')?.phase,
+    ).toBe('ready');
+    expect(verify.mock.calls.map(([, pkg]) => pkg.id)).toEqual(['speech']);
+    expect(service.state().items.find((item) => item.id === 'rag')?.phase).toBe('pending');
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    await writeFile(
+      path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx'),
+      Buffer.alloc(f.data.length),
+    );
+    verify.mockClear();
+    await service.download('speech');
+    expect(fetcher).toHaveBeenCalledTimes(2);
+    expect(verify.mock.calls.map(([, pkg]) => pkg.id)).toEqual(['speech', 'speech']);
+    expect(
+      await readFile(path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx')),
+    ).toEqual(f.data);
+    service.dispose();
+  });
   it('逐块解压固定归档，无需读入整个模型', async () => {
     const f = await fixture();
     const archive = path.join(f.root, 'fixture.zip');

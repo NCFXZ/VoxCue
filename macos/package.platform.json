@@ -1,6 +1,7 @@
 {
   "scripts": {
-    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
+    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:sidebar-glass && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
+    "build:sidebar-glass": "node scripts/build-sidebar-glass.mjs",
     "build:audio": "node scripts/build-audio.mjs",
     "start": "node scripts/launch.mjs",
     "dev": "node scripts/launch.mjs --dev",

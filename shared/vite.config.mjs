@@ -1,10 +1,14 @@
 import path from 'node:path';
+import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import workspace from './scripts/workspace.mjs';
 
-const { platformRequire, platformRoot, sharedRoot, repositoryRoot, platformName } = workspace;
-if (platformName === 'macos')
-  await import(pathToFileURL(path.join(platformRoot, 'scripts/build-symbols.mjs')).href);
+const { platformRequire, platformRoot, sharedRoot, repositoryRoot } = workspace;
+// Only the selected platform may contribute native renderer adapters.
+const rendererConfig = path.join(platformRoot, 'renderer.config.mjs');
+const renderer = fs.existsSync(rendererConfig)
+  ? (await import(pathToFileURL(rendererConfig).href)).default
+  : { plugins: [], build: {} };
 const load = async (name) => import(pathToFileURL(platformRequire.resolve(name)).href);
 const { default: react } = await load('@vitejs/plugin-react');
 const { default: tailwindcss } = await load('@tailwindcss/vite');
@@ -23,27 +27,10 @@ export default {
   build: {
     outDir: path.join(platformRoot, 'dist'),
     emptyOutDir: true,
-    ...(platformName === 'macos' ? { assetsInlineLimit: 0 } : {}),
+    ...renderer.build,
   },
   plugins: [
-    {
-      name: 'platform-ui-icons',
-      enforce: 'pre',
-      resolveId(source, importer) {
-        if (platformName !== 'macos' || !importer || !source.startsWith('.')) return null;
-        const target = path.resolve(path.dirname(importer.split('?')[0]), source);
-        const sharedIcons = path.join(sharedRoot, 'src/components/icons');
-        if (target === sharedIcons || target === sharedIcons + '.tsx')
-          return path.join(platformRoot, 'src/icons.tsx');
-        return null;
-      },
-      generateBundle() {
-        if (platformName === 'macos')
-          for (const module of this.getModuleIds())
-            if (module.includes('/@fluentui/'))
-              this.error('Mac UI must use SF Symbols; Fluent UI entered the renderer build.');
-      },
-    },
+    ...renderer.plugins,
     {
       name: 'platform-dependencies',
       enforce: 'pre',

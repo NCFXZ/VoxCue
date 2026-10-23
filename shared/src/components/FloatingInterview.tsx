@@ -1,3 +1,4 @@
+import { interviewAlwaysDark } from './ui/appearance-control';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   ArrowUp,
@@ -224,7 +225,7 @@ export function FloatingInterview() {
       const value = localStorage.getItem('copilot-theme');
       document.documentElement.classList.toggle(
         'dark',
-        value === 'dark' || (value !== 'light' && media.matches),
+        interviewAlwaysDark || value === 'dark' || (value !== 'light' && media.matches),
       );
     };
     theme();
@@ -610,6 +611,7 @@ export function FloatingInterview() {
                     <div className="floating-answer-actions">
                       <Button
                         variant="outline"
+                        className="interview-answer-retry"
                         disabled={state.generating}
                         onClick={() => void state.retryAnswer(a.id)}
                       >
@@ -633,13 +635,12 @@ export function FloatingInterview() {
                 submit();
               }}
             >
-              {(state.generating || !answerScroll.following) && (
-                <FollowLatestButton
-                  label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
-                  busy={state.generating}
-                  onClick={answerScroll.scrollToLatest}
-                />
-              )}
+              <FollowLatestButton
+                label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
+                busy={state.generating}
+                visible={state.generating || !answerScroll.following}
+                onClick={answerScroll.scrollToLatest}
+              />
               {state.screenshots.length > 0 && (
                 <div className="floating-screenshot-previews" role="group" aria-label="待发送截图">
                   {state.screenshots.map((shot, index) => (

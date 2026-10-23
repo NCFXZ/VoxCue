@@ -2,6 +2,7 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { composerPage, chooseNativeMenu } from './native-ui.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -185,12 +186,17 @@ try {
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
   const page = await mainOpened;
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
-  await page.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
+  const surface = await composerPage(app, page);
+  await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
+  await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
   await verifyIcons(page, 10);
   await page.screenshot({ animations: 'disabled' });
-  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await chooseNativeMenu(
+    app,
+    page,
+    page.getByRole('button', { name: '用户菜单', exact: true }),
+    '设置',
+  );
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.waitFor();
   await verifyIcons(page, 20);
@@ -237,7 +243,10 @@ try {
   checks.push('重置、刷新和软件更新分别使用不同的图形，更新设置入口与操作按钮一致');
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
-  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).waitFor();
+  assert.equal(
+    await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
+    (await page.evaluate(() => window.desktop.presentation.liquidGlass)) ? 0 : 1,
+  );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   checks.push('主界面/设置含菜单、导航、主题、输入和关闭图标均为 SF Symbols，浅深主题继承颜色');
   await page.getByRole('button', { name: '开始面试', exact: true }).click();

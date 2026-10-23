@@ -2,6 +2,7 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { composerPage, chooseNativeMenu } from './native-ui.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -119,7 +120,11 @@ try {
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
   const page = await next;
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
+  await (
+    await composerPage(app, page)
+  )
+    .getByRole('textbox', { name: '聊天消息', exact: true })
+    .waitFor();
   const start = () => page.getByRole('button', { name: '开始面试', exact: true }).click();
   await start();
   const dialog = page.getByRole('dialog', { name: '开始面试' });
@@ -146,8 +151,12 @@ try {
   await start();
   assert.equal(await dialog.getByRole('button', { name: '前往面试设置', exact: true }).count(), 0);
   await dialog.getByRole('button', { name: '取消', exact: true }).click();
-  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await chooseNativeMenu(
+    app,
+    page,
+    page.getByRole('button', { name: '用户菜单', exact: true }),
+    '设置',
+  );
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
   const panel = page.getByRole('region', { name: '屏幕捕获权限', exact: true });
   assert.equal(await page.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);

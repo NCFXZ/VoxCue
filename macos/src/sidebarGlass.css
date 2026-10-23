@@ -1,0 +1,321 @@
+/* Only the sidebar exposes native glass. Keep the original web surface/filter
+   over the rest of the window. */
+:root.macos-ui.sidebar-liquid-glass .app-shell:not(.login-shell) {
+  isolation: isolate;
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root.macos-ui.sidebar-liquid-glass .app-shell:not(.login-shell)::after {
+  content: '';
+  position: absolute;
+  inset: 0 0 0 var(--macos-sidebar-width);
+  z-index: -1;
+  pointer-events: none;
+  background: var(--sidebar);
+  -webkit-backdrop-filter: var(--frosted-main-filter, blur(32px) saturate(125%));
+  backdrop-filter: var(--frosted-main-filter, blur(32px) saturate(125%));
+}
+:root.macos-ui.sidebar-liquid-glass .app-body > .sidebar {
+  /* The native material is the complete background: no web tint or blur. */
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root.macos-ui.sidebar-liquid-glass-off .app-body > .sidebar {
+  background: var(--soft);
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+:root.macos-ui .macos-material-button.is-native {
+  opacity: 0;
+}
+:root.macos-ui.sidebar-liquid-glass :is(.preparation-workspace, .management-page, .history-detail) {
+  background: transparent;
+}
+:root.macos-ui.sidebar-liquid-glass
+  .app-shell:has(.preparation-route:not([hidden]), .management-page, .history-detail)::after {
+  content: none;
+}
+:root.macos-ui.native-scroll-chrome .workspace > .page-toolbar .breadcrumb strong {
+  opacity: 0;
+}
+.macos-composer-slot > .composer {
+  border-radius: 40px;
+  background: var(--surface);
+}
+.macos-follow-slot {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  align-self: center;
+  margin: 8px auto;
+}
+:root.macos-ui .macos-follow-slot > .follow-latest {
+  margin: 0;
+}
+:root.macos-ui .macos-follow-slot.is-projected > .follow-latest {
+  opacity: 0;
+}
+:root.macos-ui .macos-projected-follow > .follow-latest {
+  margin: 0;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  color: color-mix(in srgb, var(--foreground) 82%, transparent);
+}
+:root.macos-ui .macos-projected-follow[data-emphasized='true'] > .follow-latest {
+  background: transparent;
+  color: var(--foreground);
+}
+.macos-presentation-document,
+.macos-presentation-document > .chat-composer {
+  background: transparent;
+}
+.macos-presentation-document {
+  margin: 0;
+  overflow: hidden;
+}
+:root.macos-ui .macos-projected-composer > .composer {
+  border-radius: 40px;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.macos-system-menu {
+  opacity: 0;
+  pointer-events: none;
+}
+:root.macos-ui .app-dialog::backdrop {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root.macos-ui.macos-window-inactive
+  .sidebar
+  :is(.nav-item, .sidebar-section-label, .sidebar-wordmark),
+:root.macos-ui.macos-window-inactive .preparation-workspace > .page-toolbar .breadcrumb strong {
+  color: var(--muted);
+}
+:root.macos-ui.macos-window-inactive .sidebar .nav-item svg {
+  filter: grayscale(1);
+}
+
+.macos-follow-slot[hidden] {
+  display: none;
+}
+:root.macos-ui .macos-content-native {
+  opacity: 0 !important;
+}
+:root.macos-ui .chat-copy.macos-content-native.ui-button {
+  /* Preserve the system Push content inset in both hover states while its
+     leading image aligns with the answer, rather than the capsule edge. */
+  margin-left: -12px;
+  padding-inline: 10px;
+}
+:root.macos-ui .frosted-slider-control:has(input.macos-content-native) > .frosted-slider-track {
+  visibility: hidden;
+}
+:root.macos-ui .download-button.macos-content-native {
+  opacity: 1 !important;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+:root.macos-ui
+  :is(.management-page, .settings-dialog, .personal-panel, .app-dialog, .record-toolbar-actions)
+  button.ui-button:not(.button-icon):not([aria-haspopup='menu']):not([role='switch']) {
+  padding-inline: 20px;
+  font-size: 14px;
+}
+:root.macos-ui .confirm-delete.ui-button {
+  padding-inline: 0;
+  min-width: 0;
+}
+:root.macos-ui .history-filters input[type='search'] {
+  border-radius: 999px;
+  corner-shape: round;
+  min-height: 36px;
+}
+:root.macos-ui .settings-switch[data-native-control-style='switch'] {
+  width: 54px;
+  height: 24px;
+}
+:root.macos-ui.macos-interview-glass .floating-viewport .macos-native-interview-material {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root.macos-ui.macos-interview-glass .interview-settings-dialog::backdrop {
+  background: transparent;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root.macos-ui.native-scroll-chrome .app-dialog,
+:root.macos-ui.macos-interview-glass .interview-settings-dialog {
+  box-shadow: none;
+}
+:root.macos-ui .floating-toolbar {
+  padding-inline: 18px;
+}
+:root.macos-ui .floating-brand {
+  padding-inline: 14px;
+}
+:root.macos-ui .interview-answer-retry {
+  border-radius: 999px;
+  corner-shape: round;
+}
+:root.macos-ui.macos-interview-glass .interview-settings-dialog .macos-content-native {
+  opacity: 0 !important;
+}
+:root.macos-ui.macos-interview-glass .floating-end.button-destructive {
+  color: var(--danger);
+}
+:root.macos-ui {
+  --macos-page-foreground: var(--foreground);
+  --macos-page-muted: var(--muted);
+}
+:root.macos-ui.macos-interview-glass :is(.floating-toolbar, .floating-panel) {
+  --foreground: #e7ebed;
+  --muted: #b4bdc8;
+  color: var(--foreground);
+}
+:root.macos-ui.macos-interview-glass .floating-panel .interview-ready-badge[data-state='normal'] {
+  color: #89cba5;
+  border-color: #589e76;
+}
+:root.macos-ui.macos-interview-glass .floating-panel .interview-ready-badge[data-state='input'] {
+  color: #75c4ff;
+  border-color: #75c4ffa6;
+}
+:root.macos-ui.macos-interview-glass
+  :is(
+    .floating-panel .interview-ready-badge[data-state='error'],
+    .floating-answer-meta .interview-answer-status.is-failed
+  ) {
+  color: #ff858b;
+}
+:root.macos-ui.macos-interview-glass
+  :is(
+    .transcript-item > p,
+    .floating-question,
+    .answer-bubble,
+    .floating-composer,
+    .floating-notices > div,
+    .interview-answer-failure,
+    .floating-toolbar button,
+    .floating-drag-handle,
+    .floating-panel > header button
+  ) {
+  --foreground: var(--macos-page-foreground);
+  --muted: var(--macos-page-muted);
+}
+:root.macos-ui.macos-interview-glass
+  :is(
+    .transcript-item > p,
+    .floating-question,
+    .answer-bubble,
+    .floating-composer,
+    .floating-brand,
+    .floating-drag-handle
+  ) {
+  color: var(--foreground);
+}
+:root.macos-ui .macos-native-panel-material {
+  /* The native backplate replaces even state-specific shared bubble fills. */
+  background: transparent !important;
+  border-color: transparent;
+  box-shadow: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+:root.macos-ui .app-dialog[data-native-preview] {
+  background: transparent;
+}
+:root.macos-ui .app-dialog[data-native-preview]::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background: var(--surface);
+  border-radius: inherit;
+  clip-path: var(--macos-preview-cutout);
+}
+:root.macos-ui .app-dialog[data-native-preview] .interview-preview-scene {
+  background: transparent;
+  border-color: transparent;
+}
+:root.macos-ui
+  .interview-preview-scene
+  :is(.floating-toolbar, .floating-panel).macos-native-panel-material {
+  --foreground: #e7ebed;
+  --muted: #b4bdc8;
+  color: var(--foreground);
+}
+:root.macos-ui
+  .interview-preview-scene
+  :is(.transcript-item > p, .floating-question, .answer-bubble, .floating-composer) {
+  --foreground: var(--macos-page-foreground);
+  --muted: var(--macos-page-muted);
+  color: var(--foreground);
+}
+:root.macos-ui [data-interview-preview-button].macos-content-native {
+  opacity: 1 !important;
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+:root.macos-ui .app-shell:has(dialog[data-native-preview]) > .app-body {
+  clip-path: var(--macos-preview-page-cutout);
+}
+:root.macos-ui .interview-preview-scene [data-interview-preview-button] {
+  --foreground: var(--macos-page-foreground);
+  --muted: var(--macos-page-muted);
+  color: var(--foreground);
+}
+:root.macos-ui :is(.interview-settings-dialog, .interview-start-dialog) .dialog-icon {
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  box-shadow: none;
+}
+:root.macos-ui.macos-interview-glass
+  .floating-toolbar
+  :is(button, .floating-drag-handle):not(:hover):not(:focus-visible):not(:active):not(
+    .button-destructive
+  ) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+:root.macos-ui.macos-interview-glass
+  .floating-toolbar
+  :is(button, .floating-drag-handle):not(:hover):not(:focus-visible):not(:active):not(
+    .button-destructive
+  ) {
+  --foreground: #e7ebed;
+  --muted: #b4bdc8;
+}
+:root.macos-ui.macos-interview-glass
+  .floating-toolbar
+  :is(button, .floating-drag-handle):not(.floating-end):not(:hover):not(:focus-visible):not(
+    :active
+  ) {
+  color: var(--foreground);
+}
+:root.macos-ui
+  .interview-preview-scene
+  .floating-toolbar
+  [data-interview-preview-button]:not(:hover) {
+  --foreground: #e7ebed;
+  --muted: #b4bdc8;
+  color: var(--foreground);
+}
+:root.macos-ui .interview-preview-scene {
+  --macos-page-foreground: #e7ebed;
+  --macos-page-muted: #98a5ac;
+}

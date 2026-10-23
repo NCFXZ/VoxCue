@@ -1,4 +1,4 @@
-import { useEffect, type CSSProperties } from 'react';
+import { useEffect } from 'react';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { useState } from 'react';
 import * as DropdownMenu from './ui/dropdown-menu';
@@ -7,7 +7,7 @@ import {
   Settings,
   CircleHelp,
   Database,
-  Monitor,
+  SystemTheme,
   Moon,
   Sun,
   X,
@@ -35,10 +35,10 @@ import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
 import { accentOptions, readAccentPreference, saveAccentPreference } from '../systemAccent';
 import {
-  readFrostedTransparency,
-  saveFrostedTransparency,
-  subscribeFrostedTransparency,
-} from '../frostedAppearance';
+  AppearanceControl,
+  appearanceLabel,
+  appearanceSettingAvailable,
+} from './ui/appearance-control';
 
 export type Theme = 'light' | 'dark' | 'system';
 const platformLabels = { macos: 'macOS', windows: 'Windows', unknown: '未知平台' };
@@ -55,7 +55,7 @@ export type SettingsCategory = (typeof categories)[number]['id'];
 const themes = [
   { value: 'light', label: '浅色', Icon: Sun },
   { value: 'dark', label: '深色', Icon: Moon },
-  { value: 'system', label: '跟随系统', Icon: Monitor },
+  { value: 'system', label: '跟随系统', Icon: SystemTheme },
 ] as const;
 
 export function SettingsDialog({
@@ -72,12 +72,8 @@ export function SettingsDialog({
   const [category, setCategory] = useState<SettingsCategory>(initialCategory);
   const [accent, setAccent] = useState(readAccentPreference);
   const [accentError, setAccentError] = useState<string | null>(null);
-  const [frostedTransparency, setFrostedTransparency] = useState(readFrostedTransparency);
   const [frostedError, setFrostedError] = useState<string | null>(null);
   const presentation = window.desktop?.presentation ?? pendingPresentation;
-  useEffect(() => {
-    return subscribeFrostedTransparency(setFrostedTransparency);
-  }, []);
   useEffect(() => {
     const update = () => setAccent(readAccentPreference());
     window.addEventListener('storage', update);
@@ -183,7 +179,7 @@ export function SettingsDialog({
                         aria-label="主题色"
                       >
                         {accent === 'system' ? (
-                          <Monitor size={18} />
+                          <SystemTheme size={18} />
                         ) : (
                           <span className="accent-swatch" style={{ background: accent }} />
                         )}
@@ -219,7 +215,7 @@ export function SettingsDialog({
                             value={option.value}
                           >
                             {option.value === 'system' ? (
-                              <Monitor size={16} />
+                              <SystemTheme size={16} />
                             ) : (
                               <span
                                 className="accent-swatch"
@@ -241,62 +237,24 @@ export function SettingsDialog({
                     {accentError}
                   </p>
                 )}
-                <>
-                  <div className="settings-entry frosted-setting">
-                    <strong id="frosted-transparency-label">毛玻璃透明度</strong>
-                    <div className="frosted-adjustment">
-                      <div className="frosted-slider">
-                        <span className="frosted-endpoint is-solid" aria-hidden="true" />
-                        <div
-                          className="frosted-slider-control"
-                          style={{ '--slider-fill': `${frostedTransparency}%` } as CSSProperties}
-                        >
-                          <span className="frosted-slider-track" aria-hidden="true">
-                            <span />
-                          </span>
-                          <input
-                            id="frosted-transparency"
-                            type="range"
-                            min={0}
-                            max={100}
-                            step="any"
-                            value={frostedTransparency}
-                            aria-labelledby="frosted-transparency-label"
-                            aria-valuetext={
-                              frostedTransparency === 0
-                                ? '关闭毛玻璃'
-                                : `透明度 ${Math.round(frostedTransparency)}%`
-                            }
-                            onChange={(event) => {
-                              try {
-                                const value = event.currentTarget.valueAsNumber;
-                                saveFrostedTransparency(value);
-                                setFrostedTransparency(value);
-                                setFrostedError(null);
-                              } catch {
-                                setFrostedError('毛玻璃设置保存失败，请重试。');
-                              }
-                            }}
-                          />
-                        </div>
-                        <span className="frosted-endpoint" aria-hidden="true" />
-                      </div>
-                      <output htmlFor="frosted-transparency" className="frosted-value">
-                        {frostedTransparency === 0 ? '关' : `${Math.round(frostedTransparency)}%`}
-                      </output>
+                {appearanceSettingAvailable && (
+                  <>
+                    <div className="settings-entry frosted-setting">
+                      <strong id="appearance-effect-label">{appearanceLabel}</strong>
+                      <AppearanceControl onError={setFrostedError} />
                     </div>
-                  </div>
-                  {!presentation.frostedTransparency && (
-                    <p className="settings-hint">
-                      当前系统未提供毛玻璃透明度效果，设置仍会保存在本机。
-                    </p>
-                  )}
-                  {frostedError && (
-                    <p className="danger-text" role="alert">
-                      {frostedError}
-                    </p>
-                  )}
-                </>
+                    {!presentation.frostedTransparency && (
+                      <p className="settings-hint">
+                        当前系统未提供毛玻璃透明度效果，设置仍会保存在本机。
+                      </p>
+                    )}
+                    {frostedError && (
+                      <p className="danger-text" role="alert">
+                        {frostedError}
+                      </p>
+                    )}
+                  </>
+                )}
                 {!presentation.nativeTheme && (
                   <p className="settings-hint">原生外观待适配，界面主题正常生效。</p>
                 )}

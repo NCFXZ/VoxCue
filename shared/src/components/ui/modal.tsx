@@ -6,6 +6,7 @@ export function Modal({
   onClose,
   children,
   action,
+  titleAction,
   wide = false,
   destructive = false,
   icon,
@@ -20,6 +21,7 @@ export function Modal({
   onClose(): void;
   children: ReactNode;
   action?: ReactNode;
+  titleAction?: ReactNode;
   wide?: boolean;
   destructive?: boolean;
   icon?: ReactNode;
@@ -82,7 +84,10 @@ export function Modal({
               )}
               {icon && !destructive && <span className="dialog-icon">{icon}</span>}
               <div>
-                <h2>{title}</h2>
+                <div className="dialog-title-line">
+                  <h2>{title}</h2>
+                  {titleAction}
+                </div>
                 {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
               </div>
             </div>

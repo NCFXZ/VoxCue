@@ -23,7 +23,7 @@ await writeFile(path.join(output, 'config.json'), JSON.stringify(config));
 await writeFile(
   path.join(output, 'main.cjs'),
   `
-const {app}=require('electron');const fs=require('node:fs/promises');const path=require('node:path');const assert=require('node:assert/strict');
+const {app,dialog}=require('electron');dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(91);};process.on('uncaughtException',error=>{console.error(error.stack);app.exit(92);});const fs=require('node:fs/promises');const path=require('node:path');const assert=require('node:assert/strict');
 const config=require('./config.json');app.setPath('userData',path.join(config.output,'userData'));
 app.whenReady().then(async()=>{
  const {KnowledgeHost}=require(config.host);const {KnowledgeError}=require(path.join(config.root,'dist-electron/shared/electron/backend/knowledge/errors.js'));const events=[];let host=new KnowledgeHost(path.join(config.output,'knowledge'),config.model,e=>events.push(e));
@@ -90,6 +90,7 @@ const code = await new Promise((resolve, reject) => {
   child.stdout.on('data', (d) => (log += d));
   child.stderr.on('data', (d) => (log += d));
   const timer = setTimeout(() => {
+    console.error(log);
     child.kill();
     reject(Error('RAG native smoke timeout'));
   }, 180000);

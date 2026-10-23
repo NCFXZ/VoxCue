@@ -1,11 +1,5 @@
 import { create } from 'zustand';
-import type {
-  KnowledgeHit,
-  KnowledgeItem,
-  KnowledgeState,
-  KnowledgeStatus,
-  RagMode,
-} from '../../electron/contracts/knowledge';
+import type { KnowledgeState, KnowledgeStatus, RagMode } from '../../electron/contracts/knowledge';
 import type { LocalDocument } from '../services/knowledgeTypes';
 import { knowledgeCall, indexOriginal, hasKnowledgeEngine } from '../services/knowledgeIndex';
 interface IndexState {
@@ -13,19 +7,13 @@ interface IndexState {
   tasks: Record<string, KnowledgeStatus>;
   requests: Record<string, string>;
   error: string | null;
-  hits: KnowledgeHit[];
-  searching: boolean;
   refresh(): Promise<void>;
   connect(): () => void;
   index(doc: LocalDocument, force?: boolean): Promise<void>;
-  cancel(documentId: string): Promise<void>;
-  search(query: string, baseId: string, mode?: 'keyword' | 'vector' | 'hybrid'): Promise<void>;
-  item(id: string): Promise<KnowledgeItem | null>;
   setMode(mode: RagMode): Promise<void>;
 }
 const message = (e: unknown) => (e instanceof Error ? e.message : '知识库操作失败。');
-let searchVersion = 0,
-  subscriptions = 0,
+let subscriptions = 0,
   refreshVersion = 0,
   eventVersion = 0;
 let unsubscribe: (() => void) | undefined;
@@ -34,8 +22,6 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => ({
   tasks: {},
   requests: {},
   error: null,
-  hits: [],
-  searching: false,
   async refresh() {
     if (!hasKnowledgeEngine()) return;
     const version = ++refreshVersion,
@@ -123,36 +109,6 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => ({
       });
       await get().refresh();
     }
-  },
-  async cancel(documentId) {
-    const requestId = get().requests[documentId];
-    if (requestId) await knowledgeCall({ op: 'cancel', requestId });
-  },
-  async search(query, baseId, mode = 'hybrid') {
-    const version = ++searchVersion;
-    set({ searching: true, error: null, hits: [] });
-    try {
-      const hits = (await knowledgeCall({
-        op: 'search',
-        requestId: crypto.randomUUID(),
-        query,
-        baseId,
-        mode,
-        topK: 5,
-      })) as KnowledgeHit[];
-      if (version === searchVersion) set({ hits });
-    } catch (e) {
-      if (version === searchVersion) set({ error: message(e) });
-    } finally {
-      if (version === searchVersion) set({ searching: false });
-    }
-  },
-  async item(itemId) {
-    return (await knowledgeCall({
-      op: 'item',
-      requestId: crypto.randomUUID(),
-      itemId,
-    })) as KnowledgeItem | null;
   },
   async setMode(mode) {
     try {

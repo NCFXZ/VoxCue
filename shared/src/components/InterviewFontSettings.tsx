@@ -1,3 +1,4 @@
+import { interviewAlwaysDark } from './ui/appearance-control';
 import type { CSSProperties } from 'react';
 import { MarkdownContent } from './MarkdownContent';
 import { InterviewDisplayControls } from './InterviewDisplayControls';
@@ -15,6 +16,8 @@ import {
   Sparkles,
   Screenshot,
   Volume2,
+  Square,
+  DragGrip,
 } from './icons';
 
 export function InterviewFontSettings() {
@@ -32,19 +35,33 @@ export function InterviewFontSettings() {
         </div>
       </header>
       <InterviewDisplayControls />
-      <div className="interview-preview-scene" role="region" aria-label="面试字号预览">
+      <div
+        className={`interview-preview-scene${interviewAlwaysDark ? ' dark' : ''}`}
+        role="region"
+        aria-label="面试字号预览"
+      >
         {/* Use the real surface classes, so chrome, panels and bubbles retain
             their distinct opacity and accessibility contrast rules. */}
         <div className="interview-preview-shell">
           <div className="floating-toolbar">
-            <span className="floating-brand">
+            <span className="floating-brand" data-interview-preview-button>
               <ChevronUp size={16} />
               <AppLogo size={17} />
               <strong>VoxCue</strong>
             </span>
             <span className="interview-preview-tools">
-              <Settings size={19} />
-              <ShieldCheck size={18} />
+              <span className="interview-preview-icon" data-interview-preview-button>
+                <Settings size={19} />
+              </span>
+              <span className="interview-preview-icon" data-interview-preview-button>
+                <ShieldCheck size={18} />
+              </span>
+              <span className="interview-preview-icon danger-text" data-interview-preview-button>
+                <Square size={17} />
+              </span>
+              <span className="interview-preview-icon" data-interview-preview-button>
+                <DragGrip size={18} />
+              </span>
             </span>
           </div>
           <div className="interview-font-preview">
@@ -78,7 +95,10 @@ export function InterviewFontSettings() {
                   <MessageSquare size={17} />
                   回答
                 </h2>
-                <span className="interview-preview-tools">
+                <span
+                  className="interview-preview-tools interview-preview-capsule"
+                  data-interview-preview-button
+                >
                   <AudioLines size={14} />
                   转写
                 </span>
@@ -106,7 +126,10 @@ export function InterviewFontSettings() {
                   placeholder="输入问题…"
                 />
                 <div className="floating-composer-toolbar">
-                  <span className="interview-preview-tools">
+                  <span
+                    className="interview-preview-tools interview-preview-capsule"
+                    data-interview-preview-button
+                  >
                     <Sparkles size={14} />
                     自动回答
                   </span>

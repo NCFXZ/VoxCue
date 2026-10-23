@@ -185,7 +185,7 @@ try {
     ['聊天模型', '思考强度'],
   );
   assert.equal(await page.getByRole('button', { name: '网络搜索', exact: true }).count(), 0);
-  assert.deepEqual(controls, Array(2).fill({ height: 32, shadow: 'none', radius: '16px' }));
+  assert.deepEqual(controls, Array(2).fill({ height: 32, shadow: 'none', radius: '999px' }));
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   assert.equal(await page.locator('.model-option-icon').count(), 0);
   assert.ok(
@@ -235,12 +235,11 @@ try {
   assert.match(await confirmReset.getAttribute('aria-description'), /无法撤销.*不影响 ChatGPT/);
   assert.match(await counter.textContent(), /^6\s*token$/);
   assert.equal(await app.evaluate(() => globalThis.usageResetAttempts), 0);
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('[aria-label="确认重置：本应用的本地用量统计"]')
-        ?.getBoundingClientRect().width >= 111.5,
-  );
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[aria-label="确认重置：本应用的本地用量统计"]');
+    const content = button?.querySelector('.confirm-delete-confirm');
+    return button && content && button.getBoundingClientRect().width >= content.scrollWidth + 23.5;
+  });
   const armedReset = await confirmReset.boundingBox();
   assert.ok(Math.abs(beforeReset.y - armedReset.y) < 1);
   assert.ok(Math.abs(beforeReset.x + beforeReset.width - armedReset.x - armedReset.width) < 1);
@@ -357,7 +356,7 @@ try {
     () => document.querySelector('input[placeholder="你的名字"]')?.value === '新姓名',
   );
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await proposals.last().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.deepEqual(
     await page.evaluate(() => JSON.parse(localStorage.getItem('copilot-personal-info-v1'))),
@@ -386,6 +385,18 @@ try {
           animation.playState !== 'running',
       ),
   );
+  const resumeSection = panel.locator('.profile-disclosure').first();
+  await resumeSection.locator(':scope > summary').click();
+  await page.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.effect?.getTiming().iterations === Infinity ||
+          animation.playState !== 'running',
+      ),
+  );
+  await resumeSection.locator('.profile-section-actions').scrollIntoViewIfNeeded();
   const geometry = await panel
     .locator('.profile-section-actions')
     .first()

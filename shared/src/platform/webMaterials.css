@@ -1,0 +1,170 @@
+/* Native adapters keep their own materials. This sheet paints only the shared
+   fallback, using the same layout slots and dimensions as the native UI. */
+:root.web-materials {
+  --web-material-opacity: calc((0.6 + var(--frosted-opacity-light, 0.5) * 0.4) * 100%);
+  --web-material-fill: color-mix(in srgb, var(--surface) var(--web-material-opacity), transparent);
+  --web-material-filter: blur(24px) saturate(125%);
+  --web-control-fill: color-mix(in srgb, var(--foreground) 7%, transparent);
+  --web-control-hover: color-mix(in srgb, var(--foreground) 13%, transparent);
+}
+:root.web-materials.dark {
+  --web-material-opacity: calc((0.6 + var(--frosted-opacity-dark, 0.64) * 0.4) * 100%);
+}
+:root.web-materials
+  :is(.ui-button, .choice-trigger, .settings-choice, .speech-select, .dropdown-item) {
+  border-radius: 999px;
+  corner-shape: round;
+}
+.web-materials .ui-button {
+  background: var(--web-control-fill);
+  border-color: transparent;
+  color: var(--foreground);
+}
+.web-materials :is(.button-primary, .interview-start-trigger) {
+  color: var(--accent);
+}
+.web-materials :is(.download-button, .sidebar-update) {
+  color: var(--accent);
+}
+.web-materials :is(.button-destructive, .button-danger-ghost) {
+  color: var(--danger);
+}
+.web-materials .ui-button:hover:not(:disabled),
+.web-materials .ui-button[data-state='open']:not(:disabled),
+.web-materials .ui-button:focus-visible,
+.web-materials :is(.choice-trigger, .settings-choice, .speech-select):hover:not(:disabled),
+.web-materials
+  :is(.choice-trigger, .settings-choice, .speech-select)[data-state='open']:not(:disabled),
+.web-materials .user-button:hover,
+.web-materials .user-button[data-state='open'] {
+  background: var(--web-control-hover);
+}
+:root.web-materials .record-panel-toggle.is-active {
+  background: var(--web-control-fill);
+  border-color: transparent;
+  color: var(--foreground);
+}
+:root.web-materials .record-panel-toggle.is-active:hover:not(:disabled),
+:root.web-materials .record-panel-toggle.is-active:focus-visible {
+  background: var(--web-control-hover);
+  color: var(--foreground);
+}
+.web-materials .ui-button.button-icon {
+  border-radius: 50%;
+  corner-shape: round;
+}
+.web-materials .floating-drag-handle {
+  border-radius: 50%;
+  corner-shape: round;
+}
+.web-materials .send-button.ui-button {
+  color: #fff;
+  background: var(--system-accent);
+}
+.web-materials .send-button.ui-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--system-accent) 85%, white);
+}
+.web-materials :is(.chat-copy, [data-native-reveal-on-hover]).ui-button {
+  background: transparent;
+}
+.web-materials .chat-copy.ui-button {
+  justify-content: flex-start;
+  /* Align the leading artwork with the answer, including its 1px border. */
+  margin-left: -9px;
+}
+.web-materials :is(.chat-copy, [data-native-reveal-on-hover]).ui-button:hover:not(:disabled),
+.web-materials :is(.chat-copy, [data-native-reveal-on-hover]).ui-button:focus-visible {
+  background: var(--web-control-hover);
+}
+.web-materials :is(.choice-trigger, .settings-choice, .speech-select) {
+  background: var(--web-control-fill);
+  border-color: transparent;
+}
+.web-materials .dropdown-content {
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+  border-radius: 20px;
+  corner-shape: superellipse(2);
+}
+.web-materials :is(.chat-composer .composer, .floating-composer, .follow-latest.ui-button) {
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+  border-color: color-mix(in srgb, var(--foreground) 12%, transparent);
+  box-shadow: var(--shadow-raised);
+}
+.web-materials .chat-composer .composer {
+  border-radius: 40px;
+  corner-shape: superellipse(2);
+}
+.web-materials .follow-latest.ui-button:hover:not(:disabled),
+.web-materials .follow-latest.ui-button:focus-visible {
+  background: color-mix(in srgb, var(--web-material-fill) 88%, var(--foreground));
+  color: var(--foreground);
+  box-shadow: var(--shadow-popup);
+}
+.web-materials :is(.floating-shell, .interview-preview-shell) {
+  --web-material-fill: rgb(var(--frosted-panel-tint) / var(--frosted-reading-opacity, 0.92));
+  --web-material-filter: blur(24px) saturate(125%);
+}
+:root.web-materials
+  :is(.floating-shell, .interview-preview-shell)
+  :is(
+    .transcript-item > p,
+    .floating-question,
+    .answer-bubble,
+    .floating-composer,
+    .floating-notices > div,
+    .interview-answer-failure
+  ) {
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+}
+:root.web-materials[data-interview-transparency='0']
+  :is(.floating-shell, .interview-preview-shell) {
+  --web-material-filter: none;
+}
+.web-materials :is(.preparation-workspace, .management-page) > .page-toolbar::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--web-header-opacity, 0);
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+  border-bottom: 1px solid var(--border);
+}
+.web-materials :is(.preparation-workspace, .management-page) > .page-toolbar {
+  isolation: isolate;
+  background: transparent;
+}
+.web-materials .app-dialog::backdrop {
+  background: transparent;
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
+}
+.web-materials .app-dialog {
+  box-shadow: 0 0 26px rgb(0 0 0 / 0.22);
+}
+.web-materials.dark .app-dialog {
+  box-shadow: 0 0 26px rgb(255 255 255 / 0.18);
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  :root.web-materials,
+  :root.web-materials :is(.floating-shell, .interview-preview-shell) {
+    --web-material-fill: var(--surface);
+    --web-material-filter: none;
+  }
+}
+:root.web-materials[data-frosted-transparency='0'] {
+  --web-material-fill: var(--surface);
+  --web-material-filter: none;
+}
+
+.web-materials .floating-brand {
+  padding-inline: 14px;
+}

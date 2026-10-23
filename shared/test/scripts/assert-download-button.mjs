@@ -115,7 +115,7 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
       await settle(button);
       const cancel = await button.evaluate((element) => {
         const probe = document.createElement('span');
-        probe.style.color = 'var(--danger-fill)';
+        probe.style.color = 'var(--danger)';
         document.body.append(probe);
         const danger = getComputedStyle(probe).color;
         probe.remove();
@@ -130,9 +130,9 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
         };
       });
       assert.equal(cancel.hovered, true, JSON.stringify(cancel));
-      assert.equal(cancel.background, cancel.danger, JSON.stringify(cancel));
-      assert.equal(cancel.border, cancel.danger);
-      assert.equal(cancel.color, 'rgb(255, 255, 255)');
+      assert.notEqual(cancel.background, cancel.danger, JSON.stringify(cancel));
+      assert.notEqual(cancel.border, cancel.danger);
+      assert.equal(cancel.color, cancel.danger);
       const after = await button.boundingBox();
       assert.equal(after.width, before.width);
       assert.equal(after.height, before.height);
@@ -141,8 +141,8 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
           const style = getComputedStyle(element);
           return { width: parseFloat(style.width), height: parseFloat(style.height) };
         });
-        assert.equal(size.width, 32);
-        assert.equal(size.height, 32);
+        assert.equal(size.width, 36);
+        assert.equal(size.height, 36);
       }
       await page.mouse.move(1, 1);
       await page.keyboard.press('Tab');

@@ -175,7 +175,7 @@ try {
   );
   if (!(await panel.isVisible())) await info.click();
   await panel.getByLabel('姓名', { exact: true }).fill('合成姓名');
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   if (!(await panel.isVisible())) await info.click();
   assert.equal(await panel.getByLabel('姓名', { exact: true }).inputValue(), '合成姓名');
   await page.evaluate(() => {
@@ -193,7 +193,7 @@ try {
   await panel.getByRole('button', { name: '保存', exact: true }).click();
   await panel.locator('.personal-save-bar').waitFor({ state: 'hidden' });
   await panel.getByLabel('姓名', { exact: true }).fill('未保存的另一姓名');
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await message.fill('更新个人资料提案');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
@@ -207,7 +207,7 @@ try {
     await panel.getByRole('button', { name: '面试语言', exact: true }).innerText(),
     'English',
   );
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   if (!(await panel.isVisible())) await info.click();
   const instructions = panel.locator('details[aria-label="自定义指令"]');
   await instructions.locator(':scope > summary').click();
@@ -232,7 +232,7 @@ try {
     saveGeometry.top >= 0 && saveGeometry.bottom <= saveGeometry.viewport,
     JSON.stringify(saveGeometry),
   );
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
   checks.push(
     'personal drafts, direct single instruction editing, save failure recovery, concurrent profile update, sticky save and narrow drawer',
@@ -299,8 +299,9 @@ try {
     }
     const style = getComputedStyle(button);
     const host = button.parentElement;
-    const fade = getComputedStyle(host, '::before');
-    const hostBounds = host.getBoundingClientRect();
+    const columnNode = host.closest('.chat-column');
+    const fade = getComputedStyle(columnNode, '::after');
+    const hostBounds = columnNode.getBoundingClientRect();
     const column = host.closest('.chat-column').getBoundingClientRect();
     const transform = new DOMMatrix(fade.transform);
     const fadeLeft = hostBounds.left + parseFloat(fade.left) + transform.m41;
@@ -316,8 +317,7 @@ try {
       fadeLeftGap: fadeLeft - column.left,
       fadeRightGap: column.right - fadeLeft - parseFloat(fade.width),
       fadeBottomGap:
-        host.querySelector('.composer').getBoundingClientRect().top -
-        (hostBounds.top + parseFloat(fade.top) + parseFloat(fade.height)),
+        column.bottom - (hostBounds.top + parseFloat(fade.top) + parseFloat(fade.height)),
     };
   });
   assert.equal(motion.count, 3);
@@ -407,7 +407,7 @@ try {
       marker.height === 18 &&
       marker.width === 3 &&
       marker.left > 0 &&
-      marker.radius >= marker.width &&
+      marker.radius === 999 &&
       marker.shadow === 'none',
     JSON.stringify(marker),
   );
@@ -438,7 +438,8 @@ try {
   assert.equal(await page.getByLabel('结束日期', { exact: true }).count(), 0);
   await page.getByLabel('搜索标题', { exact: true }).fill('不存在的标题');
   await page.getByText('没有符合条件的面试记录。', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '清除筛选', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '清除筛选', exact: true }).count(), 0);
+  await page.getByLabel('搜索标题', { exact: true }).fill('');
   assert.equal(await page.locator('.history-row').count(), 2);
   assert.equal(await page.getByText('中文（简体）', { exact: false }).count(), 0);
   await page.locator('.history-row').filter({ hasText: '项目面试' }).click();
@@ -498,11 +499,16 @@ try {
     Math.abs((await base.locator('.upload-dropzone').boundingBox()).height - uploadHeight) < 0.5,
   );
   await base.getByText('将文件拖放到此处', { exact: true }).waitFor();
-  await base.getByRole('button', { name: '高级选项', exact: true }).click();
-  await base.getByRole('button', { name: '检索方式', exact: true }).waitFor();
+  assert.equal(await base.getByRole('button', { name: '高级选项', exact: true }).count(), 0);
+  assert.deepEqual(
+    await base
+      .locator('.document-actions button')
+      .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
+    ['删除文档 notes.md'],
+  );
   await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
   checks.push(
-    'title-only history search, rename persistence and save failure recovery, no invented language label, full-size document import and advanced retrieval options',
+    'title-only history search, rename persistence and save failure recovery, no invented language label, full-size document import and delete-only document actions',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByRole('button', { name: '开始面试', exact: true }).click();

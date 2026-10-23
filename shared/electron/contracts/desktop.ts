@@ -31,6 +31,93 @@ export interface InterviewWindowState {
   configuration: InterviewConfiguration;
 }
 export type WindowAction = 'minimize' | 'maximize' | 'close';
+export interface GlassSurfacePlacement {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+export type GlassButtonAction = 'sidebar' | 'profile' | 'start';
+export interface ScrollChromeState {
+  area: GlassSurfacePlacement;
+  title: GlassSurfacePlacement;
+  titleText: string;
+  composer: GlassSurfacePlacement | null;
+  follow: GlassSurfacePlacement | null;
+  followHovered: boolean;
+  modal: GlassSurfacePlacement | null;
+  modalRadius: number;
+  topHeight: number;
+  headerOpacity: number;
+  titleOpacity: number;
+  foregroundColor: string;
+}
+export interface NativeMenuRequest {
+  anchor: GlassSurfacePlacement;
+  side: 'top' | 'bottom';
+  align: 'start' | 'end';
+  width: number;
+  items: {
+    label: string;
+    separator: boolean;
+    disabled: boolean;
+    checked: boolean;
+    symbol: string | null;
+    symbolColor: string | null;
+  }[];
+}
+export interface GlassButtonPlacement extends GlassSurfacePlacement {
+  enabled: boolean;
+  disabled: boolean;
+  behindContent: boolean;
+  foregroundColor: string;
+  hovered: boolean;
+  pressed: boolean;
+}
+export interface ContentControlPlacement extends GlassSurfacePlacement {
+  id: number;
+  kind:
+    | 'button'
+    | 'button-glass'
+    | 'button-hover'
+    | 'font-slider'
+    | 'popup'
+    | 'search'
+    | 'switch'
+    | 'button-background'
+    | 'progress';
+  label: string;
+  value: string;
+  symbol: string | null;
+  symbolColor: string | null;
+  color: string;
+  disabled: boolean;
+  covered: boolean;
+  overGlass: boolean;
+  pressed: boolean;
+  focused: boolean;
+  checked: boolean;
+  hovered: boolean;
+  trailing: boolean;
+  opacity: number;
+}
+export interface InterviewMaterialPlacement extends GlassSurfacePlacement {
+  id: number;
+  style:
+    | 'clear'
+    | 'regular'
+    | 'regular-dark'
+    | 'regular-interactive'
+    | 'regular-follow-hover'
+    | 'dialog-halo'
+    | 'preview-scene';
+  radius: number;
+  round: boolean;
+  dark: boolean;
+  clip: GlassSurfacePlacement;
+  fadeBottom: number;
+  opacity: number;
+}
 
 // The complete renderer allowlist. No credentials, paths or arbitrary IPC access.
 export interface DesktopAPI {
@@ -61,6 +148,27 @@ export interface DesktopAPI {
   ): Promise<ServiceResult<{ screenshot?: InterviewScreenshot }>>;
   interviewCancel(id: string): Promise<void>;
   setNativeTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
+  /** Mac-only background port. Zero removes the effect; layout stays in shared React. */
+  setSidebarGlass(
+    width: number,
+    toolbarHeight?: number,
+    surfaceColor?: string,
+    dark?: boolean,
+  ): Promise<boolean>;
+  setGlassButton(
+    action: GlassButtonAction,
+    placement: GlassButtonPlacement | null,
+  ): Promise<boolean>;
+  onGlassButton(callback: (action: GlassButtonAction) => void): () => void;
+  setScrollChrome(state: ScrollChromeState | null): Promise<boolean>;
+  setContentControls(controls: ContentControlPlacement[]): Promise<boolean>;
+  setInterviewMaterials(materials: InterviewMaterialPlacement[]): Promise<boolean>;
+  onContentSearch(callback: (id: number, value: string) => void): () => void;
+  onContentToggle(callback: (id: number, checked: boolean) => void): () => void;
+  onContentRange(callback: (id: number, value: number) => void): () => void;
+  windowFocused(): Promise<boolean>;
+  onWindowFocus(callback: (focused: boolean) => void): () => void;
+  popUpNativeMenu(request: NativeMenuRequest): Promise<number | null>;
   systemAccent(): Promise<string | null>;
   onSystemAccent(callback: (color: string | null) => void): () => void;
   authSession(): Promise<AuthSession | null>;
@@ -123,6 +231,13 @@ export interface DesktopInvokeMap {
   'interview:screenshot': Invocation<DesktopAPI['interviewScreenshot']>;
   'interview:cancel': Invocation<DesktopAPI['interviewCancel']>;
   'appearance:theme': Invocation<DesktopAPI['setNativeTheme']>;
+  'appearance:sidebar-glass': Invocation<DesktopAPI['setSidebarGlass']>;
+  'appearance:glass-button': Invocation<DesktopAPI['setGlassButton']>;
+  'appearance:scroll-chrome': Invocation<DesktopAPI['setScrollChrome']>;
+  'appearance:content-controls': Invocation<DesktopAPI['setContentControls']>;
+  'appearance:interview-materials': Invocation<DesktopAPI['setInterviewMaterials']>;
+  'appearance:window-focus': Invocation<DesktopAPI['windowFocused']>;
+  'appearance:native-menu': Invocation<DesktopAPI['popUpNativeMenu']>;
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
   'auth:sign-in': Invocation<DesktopAPI['signInWithChatGPT']>;
@@ -153,6 +268,7 @@ export interface DesktopSendMap {
   'window:action': [action: WindowAction];
 }
 export interface DesktopEventMap {
+  'appearance:window-focus-changed': [focused: boolean];
   'updates:event': [state: UpdateState];
   'components:event': [state: ComponentState];
   'session:request-close': [id: string];
@@ -161,6 +277,10 @@ export interface DesktopEventMap {
   'speech:event': [event: SpeechEvent];
   'dictation:event': [event: SpeechEvent];
   'appearance:accent-changed': [color: string | null];
+  'appearance:glass-button-clicked': [action: GlassButtonAction];
+  'appearance:content-search': [id: number, value: string];
+  'appearance:content-toggle': [id: number, checked: boolean];
+  'appearance:content-range': [id: number, value: number];
   'chat:event': [event: ChatEvent];
   'interview:request-end': [];
 }

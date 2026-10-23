@@ -60,7 +60,7 @@ export function InterviewAnswerFailure({
         {answer.error || '未收到有效回答，请重新生成。'}
       </p>
       <div className="interview-answer-failure-actions">
-        <Button disabled={disabled} onClick={onRetry}>
+        <Button className="interview-answer-retry" disabled={disabled} onClick={onRetry}>
           <Refresh size={15} />
           重试面试回答
         </Button>

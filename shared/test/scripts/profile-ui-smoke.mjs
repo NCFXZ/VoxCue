@@ -184,6 +184,7 @@ try {
   const expand = async (label) => {
     const row = section(label);
     if (!(await row.evaluate((e) => e.open))) await row.locator(':scope > summary').click();
+    await settleDisclosure(row);
   };
   const message = page.getByRole('textbox', { name: '聊天消息', exact: true });
   const saved = () =>
@@ -280,7 +281,7 @@ try {
     JSON.parse(localStorage.getItem('copilot-interview-knowledge-base-v1')),
   );
   assert.equal(await panel.getByText('官方题库', { exact: false }).count(), 0);
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: 'resume.md',
     mimeType: 'text/markdown',
@@ -481,7 +482,7 @@ try {
   );
   assert.equal(alignment.length, 3);
   for (const row of alignment) {
-    assert(Math.abs(row.headingX - row.cardX) < 1);
+    assert(Math.abs(row.headingX - row.cardX) < 1, JSON.stringify(row));
     assert(Math.abs(row.actionY[0] - row.actionY[1]) < 1);
     assert(Math.abs(row.cardRight - row.actionRight) < 1);
   }
@@ -497,7 +498,7 @@ try {
   assert.equal(await panel.evaluate((element) => getComputedStyle(element).position), 'absolute');
   await panel.locator('.personal-panel-scroll').evaluate((e) => (e.scrollTop = 0));
   await page.screenshot({ animations: 'disabled' });
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
   const start = page.getByRole('dialog', { name: '开始面试', exact: true });

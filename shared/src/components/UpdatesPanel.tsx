@@ -44,6 +44,7 @@ export function UpdatesPanel() {
           type="button"
           role="switch"
           className="settings-switch"
+          data-native-control-style="switch"
           aria-labelledby="auto-download-label"
           aria-checked={state?.autoDownload ?? false}
           disabled={!state || state.phase === 'installing'}

@@ -75,18 +75,11 @@ try {
   await upload('第一版');
   await upload('第二版');
   const note = () => base.locator('.document-row').filter({ hasText: 'note.md' });
-  await note().getByRole('button', { name: '预览', exact: true }).click();
-  const preview = page.getByRole('dialog', { name: 'note.md', exact: true });
-  await preview.getByText('第二版', { exact: true }).waitFor();
-  await preview.getByRole('button', { name: '关闭对话框', exact: true }).click();
-  await base
-    .locator('.document-row')
-    .filter({ hasText: 'document.pdf' })
-    .getByRole('button', { name: '预览', exact: true })
-    .click();
-  const pdf = page.getByRole('dialog', { name: 'document.pdf', exact: true });
-  await pdf.getByText(/当前仅支持 TXT 和 Markdown/).waitFor();
-  await pdf.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(
+    await base.getByRole('button', { name: /^(预览|取消准备|重新准备|准备用于回答)$/ }).count(),
+    0,
+  );
+  assert.equal(await note().locator('.document-actions button').count(), 1);
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   await page.screenshot({ animations: 'disabled' });
   await base.getByRole('button', { name: '重命名', exact: true }).click();

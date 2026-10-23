@@ -87,18 +87,18 @@ export class ComponentService {
     if (!this.disposed) this.options.emit(this.state());
   }
   status() {
-    if (this.removing) return Promise.resolve(this.state());
+    if (this.removing || this.downloading) return Promise.resolve(this.state());
     if ((!this.options.managed && !this.options.managedIds?.length) || this.checking)
       return this.checking?.then(() => this.state()) ?? Promise.resolve(this.state());
     this.checking = this.check();
     return this.checking;
   }
-  private async check() {
+  private async check(id?: ComponentId) {
     try {
       await this.directory(this.options.root);
       await this.cleanAbandoned();
       for (const pkg of this.options.packages) {
-        if (!this.managed(pkg.id)) continue;
+        if (!this.managed(pkg.id) || (id && pkg.id !== id)) continue;
         const item = this.value.items.find((value) => value.id === pkg.id)!;
         item.phase = 'checking';
         this.publish('checking');
@@ -175,8 +175,15 @@ export class ComponentService {
   }
   private async run(id: ComponentId | undefined, signal: AbortSignal) {
     try {
-      await this.status();
       if (!this.options.managed && !this.options.managedIds?.length) return this.state();
+      if (id) {
+        // A selected download revalidates only its own cache. An already-running
+        // startup scan finishes first; status observers never start another scan
+        // during this operation. Other component readiness stays unchanged.
+        await this.checking;
+        signal.throwIfAborted();
+        await this.check(id);
+      } else await this.status();
       for (const pkg of this.options.packages) {
         if (
           !this.managed(pkg.id) ||

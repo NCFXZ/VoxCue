@@ -34,14 +34,31 @@ function ConfirmActionButton({
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
-  const [width, setWidth] = useState<number>();
-  const button = useRef<HTMLButtonElement>(null);
+  const [widths, setWidths] = useState({ idle: iconOnly ? (compact ? 32 : 36) : 88, confirm: 128 });
+  const idleContent = useRef<HTMLSpanElement>(null);
+  const confirmContent = useRef<HTMLSpanElement>(null);
   const inFlight = useRef(false);
   const armedRevision = useRef<unknown>(undefined);
   useLayoutEffect(() => {
-    const measured = button.current?.getBoundingClientRect().width;
-    if (measured) setWidth(measured);
-  }, [label, iconOnly, active]);
+    // Measure intrinsic content, never the animated button or native artwork.
+    // Both states keep enough room for the system title, icon and end caps.
+    const measure = () => {
+      const idle = iconOnly
+        ? compact
+          ? 32
+          : 36
+        : Math.ceil((idleContent.current?.scrollWidth ?? 48) + 40);
+      const confirm = Math.ceil((confirmContent.current?.scrollWidth ?? 77) + 24);
+      setWidths((previous) =>
+        previous.idle === idle && previous.confirm === confirm ? previous : { idle, confirm },
+      );
+    };
+    const observer = new ResizeObserver(measure);
+    if (idleContent.current) observer.observe(idleContent.current);
+    if (confirmContent.current) observer.observe(confirmContent.current);
+    measure();
+    return () => observer.disconnect();
+  }, [label, iconOnly, compact]);
   useEffect(() => {
     if (inFlight.current) return;
     setArmed(false);
@@ -66,13 +83,11 @@ function ConfirmActionButton({
     <span className={`confirm-delete-control ${armed ? 'is-confirming' : ''}`}>
       <Button
         {...props}
-        ref={button}
         type={props.type || 'button'}
         className={`confirm-delete ${className} ${compact ? 'is-compact' : ''} ${armed ? 'is-confirming' : ''}`}
         style={{
           ...props.style,
-          width:
-            width === undefined ? undefined : armed ? Math.max(compact ? 100 : 112, width) : width,
+          width: armed ? widths.confirm : widths.idle,
         }}
         variant={armed ? 'destructive' : 'dangerGhost'}
         size={iconOnly && !armed ? 'icon' : 'default'}
@@ -120,11 +135,11 @@ function ConfirmActionButton({
           }
         }}
       >
-        <span className="confirm-delete-idle" aria-hidden="true">
-          {compact && armed ? null : <Icon size={14} />}
+        <span ref={idleContent} className="confirm-delete-idle" aria-hidden="true">
+          <Icon size={iconOnly && !compact ? 17 : 14} />
           {!iconOnly && <span>{label}</span>}
         </span>
-        <span className="confirm-delete-confirm" aria-hidden="true">
+        <span ref={confirmContent} className="confirm-delete-confirm" aria-hidden="true">
           {busy ? <Loader size={14} /> : <Icon size={14} />}
           <span>{busy ? `${action}中…` : `确认${action}`}</span>
         </span>
@@ -139,7 +154,7 @@ function ConfirmActionButton({
 }
 
 export function ConfirmDeleteButton(props: Props) {
-  return <ConfirmActionButton {...props} action="删除" icon={Trash} />;
+  return <ConfirmActionButton {...props} iconOnly action="删除" icon={Trash} />;
 }
 
 /** UsagePanel displays the reset service's error next to its usage statistics. */

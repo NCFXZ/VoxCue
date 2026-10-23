@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.5.6",
+  "version": "0.5.7",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -43,7 +43,8 @@
     "test:chat:lifecycle": "node ../shared/test/scripts/chat-lifecycle-smoke.mjs",
     "test:adversarial": "node ../shared/test/scripts/adversarial-smoke.mjs",
     "check:workspace": "node ../shared/scripts/sync-platform-manifests.mjs --check && node ../shared/scripts/check-platform-layout.mjs",
-    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
+    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:sidebar-glass && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
+    "build:sidebar-glass": "node scripts/build-sidebar-glass.mjs",
     "build:audio": "node scripts/build-audio.mjs",
     "test:audio:native": "node test/scripts/audio-native-smoke.mjs",
     "test:window:native": "node test/scripts/window-native-smoke.mjs",

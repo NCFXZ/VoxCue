@@ -16,6 +16,7 @@ import {
   X,
 } from './icons';
 import { Button } from './ui/button';
+import { MaterialButton } from './ui/material-button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
@@ -51,14 +52,16 @@ export function Sidebar({
         <span className="sidebar-wordmark">
           <AppLogo size={24} /> <strong>VoxCue</strong>
         </span>
-        <Button
+        <MaterialButton
+          materialAction="sidebar"
+          className="sidebar-toggle-button"
           variant="ghost"
           size="icon"
           onClick={onCollapse}
           aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
         >
           {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
-        </Button>
+        </MaterialButton>
       </div>
       <nav aria-label="主导航">
         <button

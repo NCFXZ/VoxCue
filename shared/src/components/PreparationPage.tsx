@@ -22,6 +22,8 @@ import {
   Save,
 } from './icons';
 import { Button } from './ui/button';
+import { MaterialButton } from './ui/material-button';
+import { MaterialSurface } from './ui/material-surface';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
@@ -82,6 +84,59 @@ export function PreparationPage({
   const input = state.draft;
   const setInput = state.setDraft;
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const composerArea = useRef<HTMLDivElement>(null);
+  const workspace = useRef<HTMLElement>(null);
+  const [startActionWidth, setStartActionWidth] = useState<number>();
+  useLayoutEffect(() => {
+    const button = workspace.current?.querySelector<HTMLButtonElement>('.interview-start-trigger');
+    if (!button) return;
+    const measure = () => setStartActionWidth(button.getBoundingClientRect().width);
+    const observer = new ResizeObserver(measure);
+    observer.observe(button);
+    measure();
+    return () => observer.disconnect();
+  }, []);
+  useLayoutEffect(() => {
+    const area = composerArea.current!;
+    const column = area.closest<HTMLElement>('.chat-column')!;
+    let frame = 0;
+    let notice: Element | null = null;
+    const update = () => {
+      column.style.setProperty(
+        '--chat-notice-space',
+        notice ? `${notice.getBoundingClientRect().height + 12}px` : '0px',
+      );
+      column.style.setProperty(
+        '--chat-composer-height',
+        `${area.getBoundingClientRect().height}px`,
+      );
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(chatScroll.syncLayout);
+    };
+    const resize = new ResizeObserver(update);
+    resize.observe(area);
+    // Keep the notice fixed while the chat scroller extends behind the toolbar.
+    // Its measured space protects the first message and adapts to wrapped copy.
+    const locateNotice = () => {
+      const next = column.querySelector(':scope > .components-notice');
+      if (next === notice) return;
+      if (notice) resize.unobserve(notice);
+      notice = next;
+      if (notice) resize.observe(notice);
+      update();
+    };
+    const changes = new MutationObserver(locateNotice);
+    changes.observe(column, { childList: true, subtree: true });
+    locateNotice();
+    update();
+    return () => {
+      cancelAnimationFrame(frame);
+      resize.disconnect();
+      changes.disconnect();
+      column.style.removeProperty('--chat-composer-height');
+      column.style.removeProperty('--chat-notice-space');
+    };
+  }, []);
   useLayoutEffect(() => {
     const element = inputRef.current;
     if (!element) return;
@@ -291,22 +346,26 @@ export function PreparationPage({
     };
   }, [confirmInterview]);
   return (
-    <main className="workspace preparation-workspace">
+    <main ref={workspace} className="workspace preparation-workspace">
       <header className="page-toolbar">
         <div className="breadcrumb">
           <strong>面试准备</strong>
         </div>
         <div className="toolbar-actions">
-          <Button
+          <MaterialButton
+            materialAction="profile"
             variant="ghost"
             aria-label="个人信息"
             aria-expanded={infoOpen}
+            aria-controls="personal-info-panel"
             onClick={() => (infoOpen ? closeInfo() : openInfo())}
           >
             <Person size={15} />
             个人信息
-          </Button>
-          <Button
+          </MaterialButton>
+          <MaterialButton
+            materialAction="start"
+            className="interview-start-trigger"
             disabled={
               !window.desktop ||
               openingInterview ||
@@ -320,7 +379,7 @@ export function PreparationPage({
           >
             <Play size={15} />
             开始面试
-          </Button>
+          </MaterialButton>
         </div>
       </header>
       {confirmInterview && (
@@ -351,6 +410,7 @@ export function PreparationPage({
                   取消
                 </Button>
                 <Button
+                  style={{ width: startActionWidth, paddingInline: 8 }}
                   disabled={
                     openingInterview ||
                     testingAudio ||
@@ -490,6 +550,7 @@ export function PreparationPage({
             <div className="interview-access-actions">
               <Button
                 variant="ghost"
+                style={{ width: startActionWidth, paddingInline: 8 }}
                 disabled={openingInterview || checkingAccess || testingAudio}
                 onClick={() => void checkAccess(interviewConfiguration)}
               >
@@ -751,14 +812,13 @@ export function PreparationPage({
               </div>
             </section>
           )}
-          <div className="composer-area chat-composer">
-            {(state.streaming || !chatScroll.following) && state.messages.length > 0 && (
-              <FollowLatestButton
-                label={chatScroll.hasNew ? '有新回复 · 返回最新' : '返回最新回复'}
-                busy={state.streaming}
-                onClick={chatScroll.scrollToLatest}
-              />
-            )}
+          <div ref={composerArea} className="composer-area chat-composer">
+            <FollowLatestButton
+              visible={(state.streaming || !chatScroll.following) && state.messages.length > 0}
+              label={chatScroll.hasNew ? '有新回复 · 返回最新' : '返回最新回复'}
+              busy={state.streaming}
+              onClick={chatScroll.scrollToLatest}
+            />
             {state.resume && (
               <div className="resume-chip">
                 <MessageSquare size={14} />
@@ -775,64 +835,70 @@ export function PreparationPage({
                 />
               </div>
             )}
-            <form
-              className="composer"
-              onSubmit={(event) => {
-                event.preventDefault();
-                submit();
-              }}
-            >
-              <ChatAttachments />
-              <textarea
-                ref={inputRef}
-                disabled={!state.chatsReady}
-                aria-label="聊天消息"
-                placeholder="询问面试准备问题，或告诉我你的目标岗位…"
-                value={input}
-                onChange={(event) => setInput(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
-                    event.preventDefault();
-                    submit();
-                  }
+            <MaterialSurface>
+              <form
+                className="composer"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submit();
                 }}
-                rows={2}
-              />
-              <div className="composer-bottom">
-                <div className="composer-tools">
-                  <ChatTools
-                    actions={
-                      <div className="composer-actions">
-                        {state.streaming ? (
-                          <Button
-                            type="button"
-                            size="icon"
-                            aria-label="停止回复"
-                            onClick={state.stop}
-                          >
-                            <Square size={13} />
-                          </Button>
-                        ) : (
-                          <Button
-                            className="send-button"
-                            size="icon"
-                            type="submit"
-                            disabled={
-                              !state.chatsReady ||
-                              (!input.trim() && !state.attachments.length) ||
-                              !connection.models.length
-                            }
-                            aria-label="发送消息"
-                          >
-                            <ArrowUp size={20} />
-                          </Button>
-                        )}
-                      </div>
+              >
+                <ChatAttachments />
+                <textarea
+                  ref={inputRef}
+                  disabled={!state.chatsReady}
+                  aria-label="聊天消息"
+                  placeholder="询问面试准备问题，或告诉我你的目标岗位…"
+                  value={input}
+                  onChange={(event) => setInput(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (
+                      event.key === 'Enter' &&
+                      !event.shiftKey &&
+                      !event.nativeEvent.isComposing
+                    ) {
+                      event.preventDefault();
+                      submit();
                     }
-                  />
+                  }}
+                  rows={2}
+                />
+                <div className="composer-bottom">
+                  <div className="composer-tools">
+                    <ChatTools
+                      actions={
+                        <div className="composer-actions">
+                          {state.streaming ? (
+                            <Button
+                              type="button"
+                              size="icon"
+                              aria-label="停止回复"
+                              onClick={state.stop}
+                            >
+                              <Square size={13} />
+                            </Button>
+                          ) : (
+                            <Button
+                              className="send-button"
+                              size="icon"
+                              type="submit"
+                              disabled={
+                                !state.chatsReady ||
+                                (!input.trim() && !state.attachments.length) ||
+                                !connection.models.length
+                              }
+                              aria-label="发送消息"
+                            >
+                              <ArrowUp size={20} />
+                            </Button>
+                          )}
+                        </div>
+                      }
+                    />
+                  </div>
                 </div>
-              </div>
-            </form>
+              </form>
+            </MaterialSurface>
             {(visibleError || !connection.live) && (
               <p
                 role={visibleError ? 'alert' : undefined}
@@ -920,7 +986,6 @@ export function PreparationPage({
             )
           }
           open={infoOpen}
-          onClose={closeInfo}
           onDirtyChange={onDraftChange}
           onErrorChange={setProfileError}
           onComponentSettings={onComponentSettings}

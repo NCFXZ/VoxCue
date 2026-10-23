@@ -21,6 +21,7 @@ vi.mock('electron', () => ({
   nativeImage: { createFromPath: native.loadImage },
 }));
 import { createPresentation } from '../../electron/presentation';
+import { pendingPresentation } from '../../../shared/electron/contracts/presentation';
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(10000);
@@ -31,6 +32,39 @@ beforeEach(() => {
   native.loadImage.mockReturnValue(native.image);
 });
 afterEach(() => vi.useRealTimers());
+it('旧系统明确不支持 Liquid Glass 时不调用原生材质或强制面试深色', () => {
+  const material = {
+    available: false,
+    configureInterviewAppearance: vi.fn(),
+    configureButton: vi.fn(),
+  };
+  const port = createPresentation({
+    icon: 'icon.png',
+    capabilities: pendingPresentation,
+    material: material as any,
+    interviewOpen: () => false,
+  });
+  expect(port.capabilities?.liquidGlass).toBe(false);
+  const win = { setVisibleOnAllWorkspaces: vi.fn(), isDestroyed: () => false };
+  port.prepareInterview(win as any);
+  expect(port.setGlassButton!(win as any, 'start', null, vi.fn())).toBe(false);
+  expect(material.configureInterviewAppearance).not.toHaveBeenCalled();
+  expect(material.configureButton).not.toHaveBeenCalled();
+  expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
+  port.dispose();
+});
+it('只有原生模块明确支持才向共享页面宣告 Liquid Glass 能力', () => {
+  for (const available of [true, false, undefined]) {
+    const port = createPresentation({
+      icon: 'icon.png',
+      capabilities: pendingPresentation,
+      material: { available } as any,
+      interviewOpen: () => false,
+    });
+    expect(port.capabilities?.liquidGlass).toBe(available === true);
+    port.dispose();
+  }
+});
 it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置顶不抢焦点', () => {
   const port = createPresentation({ icon: 'icon.png', interviewOpen: () => true });
   for (const theme of ['dark', 'light', 'system'] as const) {
@@ -119,5 +153,41 @@ it('刚恢复 Dock 后再次开始面试，隐藏也必须避开 show 的一秒�
   expect(native.hide).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1);
   expect(native.hide).toHaveBeenCalledOnce();
+  port.dispose();
+});
+
+it('面试只允许当前可见返回按钮的隔离前景，不开放任意弹窗或输入框投影', () => {
+  const material = {
+    configureInterviewAppearance: vi.fn(),
+    configureInterviewMaterials: vi.fn(() => true),
+  };
+  let open!: (request: { url: string; frameName: string }) => { action: string };
+  const win = {
+    once: vi.fn(),
+    isDestroyed: () => false,
+    getNativeWindowHandle: () => Buffer.alloc(8),
+    setVisibleOnAllWorkspaces: vi.fn(),
+    webContents: {
+      on: vi.fn(),
+      setWindowOpenHandler: vi.fn((handler) => {
+        open = handler;
+      }),
+    },
+  };
+  const port = createPresentation({
+    icon: 'icon.png',
+    material: material as any,
+    interviewOpen: () => true,
+  });
+  port.prepareInterview(win as any);
+  const request = { url: 'about:blank', frameName: 'voxcue-follow-surface-1' };
+  expect(open(request).action).toBe('deny');
+  port.setInterviewMaterials!(win as any, [{ style: 'regular-interactive' } as any]);
+  expect(open(request).action).toBe('allow');
+  expect(open({ ...request, frameName: 'voxcue-composer-surface-1' }).action).toBe('deny');
+  expect(open({ ...request, url: 'https://example.com' }).action).toBe('deny');
+  expect(open({ ...request, frameName: 'arbitrary' }).action).toBe('deny');
+  port.setInterviewMaterials!(win as any, []);
+  expect(open(request).action).toBe('deny');
   port.dispose();
 });

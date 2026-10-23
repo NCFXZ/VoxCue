@@ -117,9 +117,7 @@ try {
         };
         const samples = [read()];
         document
-          .querySelector(
-            open ? 'button[aria-label="个人信息"]' : 'button[aria-label="关闭个人信息"]',
-          )
+          .querySelector(open ? 'button[aria-label="个人信息"]' : 'button[aria-label="个人信息"]')
           .click();
         const start = performance.now();
         while (performance.now() - start < 350) {
@@ -298,7 +296,8 @@ try {
       }
       service.publish('ready');
     });
-    await rows.getByText('已就绪', { exact: true }).first().waitFor();
+    await rows.locator('.component-ready-actions').first().waitFor();
+    assert.equal(await rows.getByText('已就绪', { exact: true }).count(), 0);
     for (const colorScheme of ['dark', 'light']) {
       await page.emulateMedia({ colorScheme });
       await page.waitForFunction(
@@ -351,14 +350,14 @@ try {
       await page.keyboard.press('Escape');
       await remove.waitFor();
       await remove.click();
-      const otherReady = await other.getByText('已就绪', { exact: true }).count();
+      const otherReady = await other.locator('.component-ready-actions').count();
       await row.getByRole('button', { name: '确认删除：' + label, exact: true }).click();
       await row.getByRole('button', { name: '下载', exact: true }).waitFor();
       assert.equal(
         await app.evaluate(() => globalThis.uiComponents.removedId),
         await row.getAttribute('data-component-id'),
       );
-      assert.equal(await other.getByText('已就绪', { exact: true }).count(), otherReady);
+      assert.equal(await other.locator('.component-ready-actions').count(), otherReady);
       await app.evaluate(() => {
         globalThis.uiComponents.removedId = undefined;
       });
@@ -766,7 +765,7 @@ try {
     await page.locator('.personal-panel').evaluate((el) => el.getAnimations().length),
     0,
   );
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
     modelsOnly

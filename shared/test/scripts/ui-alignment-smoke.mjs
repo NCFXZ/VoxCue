@@ -83,16 +83,28 @@ try {
           const style = getComputedStyle(element);
           return {
             height: element.getBoundingClientRect().height,
+            centerY: element.getBoundingClientRect().y + element.getBoundingClientRect().height / 2,
             radius: style.borderRadius,
             curve: style.getPropertyValue('corner-top-left-shape'),
             background: style.backgroundColor,
+            label: element.getAttribute('aria-label'),
+            hovered: element.matches(':hover'),
+            disabled: element.matches(':disabled'),
             shadow: style.boxShadow,
           };
         }),
       );
     }
-    assert.deepEqual(surfaces[1], surfaces[0], `${theme}: composer hover surfaces differ`);
-    assert.deepEqual(surfaces[2], surfaces[0], `${theme}: composer hover surfaces differ`);
+    assert.equal(surfaces[0].height, 36);
+    assert.equal(surfaces[0].radius, '50%');
+    assert.equal(surfaces[1].height, 32);
+    assert.equal(surfaces[2].height, 32);
+    for (const surface of surfaces.slice(1)) {
+      assert.ok(Math.abs(surface.centerY - surfaces[0].centerY) < 1);
+      assert.equal(surface.curve, surfaces[0].curve);
+      assert.equal(surface.background, surfaces[0].background, JSON.stringify(surfaces));
+      assert.equal(surface.shadow, surfaces[0].shadow);
+    }
     check(`composer-hover-family-${theme}`, true, surfaces);
     await page.mouse.move(0, 0);
   }
@@ -159,7 +171,10 @@ try {
           !result.overflow &&
             result.contained &&
             lines.length <= 2 &&
-            result.rects.every(({ height }) => Math.abs(height - 32) < 0.5),
+            result.rects.every(
+              ({ label, height }) =>
+                Math.abs(height - (['聊天模型', '思考强度'].includes(label) ? 32 : 36)) < 0.5,
+            ),
           result,
         );
         check(
@@ -208,7 +223,7 @@ try {
       result,
     );
     await page.screenshot({ animations: 'disabled' });
-    await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+    await page.getByRole('button', { name: '个人信息', exact: true }).click();
     await settle(page);
   }
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();

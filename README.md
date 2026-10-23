@@ -1,18 +1,22 @@
 # VoxCue
 
+当前跨平台 UI 以[共用布局与平台控件](shared/docs/PLATFORM_UI.md)为准：布局、业务与展示契约共用，Mac AppKit/Liquid Glass 实现单独维护。
+
 当前源码只保留 ChatGPT 登录，GitHub Copilot 接入已移除。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，后续升级复用同版本缓存；主界面及相关页面只提供设置快捷入口。按钮内显示主题色圆环及百分比，悬停切换取消，容量显示 MB。Windows/macOS 当前打包均排除模型与 ONNX Web，保留 Node CPU 推理依赖；既有发行保持。
 
 > 测试结果零保留：结果仅在终端/内存显示。已改造入口的必要工作文件使用系统临时目录并清理，不保存报告、日志或 profile；截图仅在用户明确要求时交付于聊天可视化目录。旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；本轮Mac接续中windows/严格只读。入口与边界见[测试说明](shared/test/README.md)。
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地面试语音识别、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前 shared、根及两平台配置版本均为 **0.5.6**；Mac 已按[0.5.6 交接清单](shared/docs/MACOS_0.5.6_HANDOFF.md)同步生成配置，完成776项单测、44组功能矩阵和补充原生/包级回归，并修复窄浮窗“转写”标题换行。Windows 使用 Rust CPU/CUDA，Mac 支持 [Qwen Metal/CPU 流式识别](shared/docs/QWEN_MACOS.md)，Paraformer 保持 CPU；两平台 Qwen 组件均为 1.0.1（原始 BF16 ASR 与 Q8_0 对齐器），Windows 另下载 Runtime 1.0.1。[v0.5.6](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.6) 已设为Latest，提供 Windows x64 安装包、blockmap、latest.yml 和 Mac arm64 DMG、签名 ZIP、latest-mac.yml。两平台按各自完整资产独立选版；旧发行、模型与标签保留，Latest现指向v0.5.6。0.5.5 共享修改与 Mac 接续原始清单见 [交接文档](shared/docs/MACOS_0.5.5_HANDOFF.md)，本机验证入口见[测试说明](shared/test/README.md)。本轮Mac三项已追加至既有v0.5.6，原Windows资产与旧发行保持；源码按本次明确清单同步，不替换真实安装。
+当前共享版本源、根和 Mac 配置为 **0.5.7**。本版区分共用布局与平台原生控件，macOS 26+ 使用 AppKit Liquid Glass，旧 macOS 与 Windows 共用胶囊/圆形控件和毛玻璃回退；Windows 生成配置由 Windows 本机执行 `pnpm sync:workspace` 更新。固定模型、依赖与锁保持。公开稳定安装包仍为 [v0.5.6](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.6)，本次仅同步源码；Mac 原生/共享回退的测试范围和入口见[测试说明](shared/test/README.md)。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 
 0.3.1 已撤销上述四项机制：明确回应恢复正常自动提交；每次发送既有 120 条/64000 字节、每条最多 6000 字窗口内完整原文；重复查询重新检索。用量统计/token 账本及重置、2200ms 静音与生命周期保护、模型/effort/默认篇幅、其他 0.3.0 功能和 Windows 修复保持。面试/准备聊天/资料及技能/标题提示词按确认稿调整；Local RAG 搜索或读取故障、超时后可继续回答，取消与配置/身份/模型错误保护保持。实现与入口见 [进度](PROGRESS.md) 和 [测试说明](shared/test/README.md)，依赖不升级。
 
 ## 开发与启动
+
+2026-10-22 本地 Mac 适配为侧栏和输入框接入原生 Regular Liquid Glass；顶部同用 Regular，按背后内容渐显虚化，下拉菜单使用 NSMenu 系统材质并保留原图标。原生圆形/胶囊按钮无着色，开始面试文字与图标使用主题色。材质全部位于 `macos/`，布局与业务继续共用 `shared/`，输入框保留原连续圆角。0.5.7 按当前生产原生界面与共享毛玻璃回退分别进行完整本机回归，不改变已发布 v0.5.6。实现与边界见 [Mac 说明](macos/docs/MACOS_PORT.md)。
 
 0.5.6 为面试回答增加与聊天一致的底部渐隐；字号仅调整对话气泡，输入框及状态文字固定。生成失败最多追加3次自动重试，手动停止/结束/关闭可取消；重试次数显示在服务名称旁，紧凑错误卡随对应回答滚动，与回答气泡共用32px连续角。技能提案的来源未核验整块提示和警告标签移除，后台来源核验/保存兼容保持；提示词未改。回归可在明确授权后校验并复制已有正式模型至临时目录，测试结束删除副本，保留原模型。完整行为、逐文件清单、Windows验证及Mac接续结果见[0.5.6交接](shared/docs/MACOS_0.5.6_HANDOFF.md)。
 
@@ -45,7 +49,7 @@ corepack pnpm build
 corepack pnpm start
 ```
 
-Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。需要 Apple Silicon、macOS 14.2+ 与 Command Line Tools；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
+Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。运行需要 Apple Silicon、macOS 14.2+；原生玻璃绑定的开发编译需要提供NSGlassEffectView的macOS 26+ SDK，部署最低版本仍为14.2，旧系统采用共享回退；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
 Windows x64 的 [v0.5.6 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.6/VoxCue-Setup-0.5.6-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项保留于 windows/release/0.5.6。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
@@ -58,8 +62,8 @@ Mac 开发宿主、启动器与正式应用复用固定本地自签名证书。0
 ```text
 AGENTS.md / PROGRESS.md / README.md / package.json / pnpm-workspace.yaml
 windows/  专属源码、原生助手、测试源码、依赖、锁文件、构建和发行
-macos/    Core Audio、系统窗口策略、双击启动器、arm64 依赖和构建
-shared/   共用 src/electron/scripts、测试、模型、PNG/Logo 原件及文档
+macos/    AppKit 控件/材质、SF Symbols、原生承载、Core Audio、arm64 依赖和构建
+shared/   共用布局/业务/展示契约/网页回退、测试、PNG/Logo 原件及文档
 ```
 
 测试结果改为零保留；本次删除 101 项可清理旧产物、4,420 个文件，仍被占用或受平台只读限制的残留见上方说明。旧报告引用不作为现存交付物。源码恢复快照与纯清理审计单独放在平台 recovery，测试源码、固定输入夹具、现用依赖/模型和真实数据保留。

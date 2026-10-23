@@ -96,7 +96,7 @@ try {
   await resumeSection.locator('summary').click();
   await page.getByText('已保留原件：resume.txt', { exact: true }).waitFor();
   await page.screenshot({});
-  await page.getByRole('button', { name: '关闭个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息' }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
   await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '查看示例记录', exact: true }).count(), 0);
@@ -160,19 +160,8 @@ try {
   ]);
   await baseDialog.getByText('project.md', { exact: true }).waitFor();
   await baseDialog.getByText('job.pdf', { exact: true }).waitFor();
-  await baseDialog
-    .locator('.document-row')
-    .filter({ hasText: 'project.md' })
-    .getByRole('button', { name: '预览' })
-    .click();
-  await page
-    .getByRole('dialog', { name: 'project.md', exact: true })
-    .getByText('使用 React 构建桌面应用', { exact: false })
-    .waitFor();
-  await page
-    .getByRole('dialog', { name: 'project.md', exact: true })
-    .getByRole('button', { name: '关闭对话框' })
-    .click();
+  if (await baseDialog.getByRole('button', { name: '预览', exact: true }).count())
+    throw Error('文档列表仅保留删除操作');
   await baseDialog.getByLabel('导入知识库文档').setInputFiles({
     name: 'blocked.exe',
     mimeType: 'application/octet-stream',
@@ -202,7 +191,7 @@ try {
   assert.equal(await resumeSection.getAttribute('open'), null);
   await resumeSection.locator('summary').click();
   await page.getByText('已保留原件：resume.txt', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '关闭个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息' }).click();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.getByRole('button', { name: 'React 面试资料', exact: false }).click();
   const savedDialog = page.getByRole('dialog', { name: 'React 面试资料', exact: true });

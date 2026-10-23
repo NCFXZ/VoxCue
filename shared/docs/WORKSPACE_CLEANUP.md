@@ -1,3 +1,9 @@
+## 2026-10-23：0.5.7 分层与弃用代码清理
+
+核对生产导入图、Vite 平台替换、原生动态装配、Worker/preload 与测试消费者后，删除已移除 Liquid Glass 开关的 React 实现、设置写入接口、专用 switch IPC/事件/生命周期、原生 configureSwitch/NSSwitch 分支及无消费者样式。现用自动下载 NSSwitch 由 content-controls 承载，保留；旧偏好只读兼容及辅助功能回退保留。删除旧手动知识库检索/预览的 store 状态与操作、无消费者 CSS、个人信息卡片内关闭移除后的 onClose 参数和对应旧入口测试；底层检索、RAG、取消/索引及三模式真实检索覆盖保留。删除知识库顶部旧 over-glass 属性选择器，实际已使用 standalone-glass 且继承统一36px尺寸。
+
+Mac 替换插件从公共 Vite 配置迁至 macos/renderer.config.mjs，展示 props 抽至纯共享契约；这属于移动现用职责，不当作闲置源码删除。导入图中无静态入边的页面入口、Worker、动态平台/更新/语音模块和三个构建替换组件均有运行消费者，保留。能力驱动的外观设置统一后删除Mac AppearanceControl副本，shared保留旧macOS/Windows毛玻璃控件与主题策略。未发现其他可独立删除的业务文件；当前未提交原生源码、依赖/锁、模型/固定运行时、现用构建、发行和恢复基线保持，Windows只读及历史跳过目录保持。
+
 ## 2026-10-21：Mac 0.5.6 发行前清理
 
 核对生产/测试静态消费者与动态入口、绝对/真实路径及lsof占用后，移除仓库根 `.DS_Store`（10,244逻辑字节）。该Finder元数据没有运行消费者；DMG安装布局使用的是镜像内独立 `.DS_Store`，不受影响。当前源码、测试及动态Worker/utilityProcess入口均保留，未发现需删除的独立业务模块。

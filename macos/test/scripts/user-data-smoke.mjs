@@ -4,6 +4,7 @@ import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs'
 import { mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { composerPage } from './native-ui.mjs';
 
 const appData = path.join(testRoot, 'application-data');
 const legacy = path.join(appData, 'ai-interview-copilot');
@@ -181,12 +182,13 @@ try {
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
-  await page.waitForFunction(
+  const surface = await composerPage(app, page);
+  await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
+  await surface.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === '迁移前的合成草稿',
   );
   await page.locator('.chat-answer').getByText('迁移前的合成回答', { exact: true }).waitFor();
-  await page.locator('.chat-attachment').getByText('migration.txt', { exact: false }).waitFor();
+  await surface.locator('.chat-attachment').getByText('migration.txt', { exact: false }).waitFor();
   assert.equal(
     await page.evaluate(() => document.documentElement.classList.contains('dark')),
     true,
@@ -241,8 +243,9 @@ try {
   app = undefined;
   app = await launch(next);
   page = await app.firstWindow();
-  await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
-  await page.waitForFunction(
+  const reopenedSurface = await composerPage(app, page);
+  await reopenedSurface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
+  await reopenedSurface.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === '迁移前的合成草稿',
   );
   assert.equal((await page.evaluate(() => window.desktop.authSession())).user.id, 'migration-user');

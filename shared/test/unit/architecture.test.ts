@@ -55,6 +55,19 @@ describe('长期模块边界', () => {
     expect(result.violations).toEqual([]);
     expect(result.cycles).toEqual([]);
   });
+  it('平台组件不能通过类型或实现导入共享回退控件；纯展示契约可共用', () => {
+    const graph = new Map([
+      [
+        'macos/src/MaterialButton.tsx',
+        [
+          { target: 'shared/src/components/ui/material-button.tsx', typeOnly: true, line: 1 },
+          { target: 'shared/src/platform/controls.ts', typeOnly: true, line: 2 },
+        ],
+      ],
+    ]);
+    expect(boundaryViolations(graph)).toHaveLength(1);
+    expect(boundaryViolations(graph)[0]).toContain('纯展示契约');
+  });
   it('区分 type-only、重导出、动态 import 和 CommonJS require', () => {
     const edges = dependencies(
       'sample.ts',

@@ -19,6 +19,10 @@ const app = await electron.launch({
 });
 const checks = [],
   errors = [];
+let applicationOutput = '';
+app.process().stderr.on('data', (data) => {
+  applicationOutput = (applicationOutput + data).slice(-8000);
+});
 const previewStates = new Set([
   'login-light',
   'personal-dark',
@@ -71,7 +75,7 @@ const inspect = async (page, name) => {
       .map((e) => e.getBoundingClientRect().height);
     const standardControls = [
       ...active.querySelectorAll(
-        '.settings-choice,.speech-select,.knowledge-search > input,.knowledge-search > button,.knowledge-search > .choice-trigger,.history-filters input,.history-filters > button,.dialog-footer > .ui-button:not(.button-icon)',
+        '.settings-choice,.speech-select,.history-filters input,.history-filters > button,.dialog-footer > .ui-button:not(.button-icon)',
       ),
     ]
       .filter(visible)
@@ -213,7 +217,9 @@ const inspect = async (page, name) => {
         const s = getComputedStyle(e);
         return {
           tag: e.tagName,
-          expectedControlSize: e.matches('.profile-edit-dialog textarea.profile-editor-input')
+          expectedControlSize: e.matches(
+            '.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.markdown-code-block > header .ui-button',
+          )
             ? 12
             : 14,
           className: e.className,
@@ -347,7 +353,16 @@ try {
     assert.equal(await page.getByRole('dialog').count(), 1);
     assert.equal(
       await section.getByRole('button', { name: '编辑', exact: true }).isDisabled(),
+      false,
+    );
+    assert.equal(
+      await section.getByRole('button', { name: '编辑', exact: true }).evaluate((button) => {
+        const box = button.getBoundingClientRect();
+        const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+        return document.querySelector('dialog[open]')?.contains(hit);
+      }),
       true,
+      'The modal blocks the background while its edit trigger remains available for focus restoration',
     );
     assert.equal(await section.locator('.confirm-delete').isDisabled(), true);
     assert.equal(await panel.locator('textarea').count(), 0);
@@ -361,7 +376,7 @@ try {
       '14px',
     );
     await editor.getByRole('button', { name: '取消', exact: true }).click();
-    await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+    await page.getByRole('button', { name: '个人信息', exact: true }).click();
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await inspect(page, `user-menu-${theme}`);
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -395,7 +410,8 @@ try {
     await page.locator('.history-row').first().waitFor();
     await page.getByRole('searchbox').fill('接口');
     await inspect(page, `history-filtered-${theme}`);
-    await page.getByRole('button', { name: '清除筛选', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '清除筛选', exact: true }).count(), 0);
+    await page.getByRole('searchbox').fill('');
     await inspect(page, `history-${theme}`);
     await page.locator('.history-row').first().click();
     await page.getByRole('heading', { name: '接口设计与输入校验', exact: true }).waitFor();
@@ -433,16 +449,7 @@ try {
     });
     await library.locator('.document-error').waitFor();
     await inspect(page, `knowledge-documents-error-${theme}`);
-    await library.getByRole('button', { name: '高级选项', exact: true }).click();
-    await library.getByRole('button', { name: '检索方式', exact: true }).click();
-    await inspect(page, `knowledge-search-menu-${theme}`);
-    await page.keyboard.press('Escape');
-    await library.getByRole('button', { name: '预览', exact: true }).click();
-    await inspect(page, `knowledge-preview-${theme}`);
-    await page
-      .getByRole('dialog', { name: fileName, exact: true })
-      .getByRole('button', { name: '关闭对话框', exact: true })
-      .click();
+    assert.equal(await library.getByRole('button', { name: '预览', exact: true }).count(), 0);
     await library.getByRole('button', { name: '重命名', exact: true }).click();
     await inspect(page, `knowledge-rename-${theme}`);
     await page
@@ -473,7 +480,7 @@ try {
     .getByRole('dialog', { name: '编辑自定义指令', exact: true })
     .getByRole('button', { name: '取消', exact: true })
     .click();
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
   await page.locator('.history-row').first().click();
   await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
@@ -542,6 +549,11 @@ try {
     JSON.stringify({ directory, states: checks.length, callbacks: callbacks.length, errors }),
   );
 } catch (error) {
+  console.error('Owned UI diagnostic', {
+    exitCode: app.process().exitCode,
+    signalCode: app.process().signalCode,
+    output: applicationOutput,
+  });
   const page = app.windows().at(-1);
   if (page && !page.isClosed()) await page.screenshot({});
   throw error;

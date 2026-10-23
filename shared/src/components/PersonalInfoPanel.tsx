@@ -23,7 +23,6 @@ const basicInfo = (info: PersonalInfo) => ({
 });
 export function PersonalInfoPanel({
   open,
-  onClose,
   onDirtyChange,
   onErrorChange,
   onComponentSettings,
@@ -31,7 +30,6 @@ export function PersonalInfoPanel({
 }: {
   onComponentSettings?(): void;
   open: boolean;
-  onClose(): void;
   onDirtyChange?(dirty: boolean): void;
   onErrorChange?(error: string | null): void;
   resizeHandle?: ReactNode;
@@ -230,6 +228,7 @@ export function PersonalInfoPanel({
   return (
     <>
       <aside
+        id="personal-info-panel"
         ref={panelRef}
         className="personal-panel personal-info-v2"
         data-open={open}
@@ -243,9 +242,6 @@ export function PersonalInfoPanel({
             <h2>个人信息</h2>
             <small>{completed}/5 已添加</small>
           </div>
-          <Button variant="ghost" size="icon" aria-label="关闭个人信息" onClick={onClose}>
-            <X size={16} />
-          </Button>
         </header>
         <div className="personal-panel-scroll">
           <div className="profile-overview" aria-label="资料概览">
@@ -343,11 +339,14 @@ export function PersonalInfoPanel({
               <div className="profile-section-actions">
                 <Button
                   variant="ghost"
-                  disabled={state.streaming || !!editor}
+                  size="icon"
+                  className="action-icon-button"
+                  aria-label="编辑"
+                  title={'编辑' + profileLabels[field]}
+                  disabled={state.streaming}
                   onClick={() => edit(field)}
                 >
                   <Edit size={14} />
-                  编辑
                 </Button>
                 <ConfirmDeleteButton
                   target={profileLabels[field]}
@@ -414,11 +413,13 @@ export function PersonalInfoPanel({
                   <div className="profile-section-actions">
                     <Button
                       variant="ghost"
-                      disabled={!!editor}
+                      size="icon"
+                      className="action-icon-button"
+                      aria-label="编辑"
+                      title={'编辑技能：' + item.title}
                       onClick={() => edit('skills', item.id)}
                     >
                       <Edit size={14} />
-                      编辑
                     </Button>
                     <ConfirmDeleteButton
                       target={'技能：' + item.title}

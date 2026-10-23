@@ -1,4 +1,6 @@
 import workspace from './workspace.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 const { platformName, platformRoot, platformRequire } = workspace;
 const targets = [
@@ -6,6 +8,12 @@ const targets = [
   '../shared/electron/**/*.ts',
   '../shared/scripts/*.{mjs,cjs}',
   '../shared/test/{unit,renderer,scripts}/**/*.{ts,tsx,mjs,cjs}',
+  ...(fs.existsSync(path.join(platformRoot, 'src'))
+    ? [`../${platformName}/src/**/*.{ts,tsx,css}`]
+    : []),
+  ...(fs.existsSync(path.join(platformRoot, 'renderer.config.mjs'))
+    ? [`../${platformName}/renderer.config.mjs`]
+    : []),
   `../${platformName}/electron/**/*.ts`,
   `../${platformName}/scripts/*.mjs`,
   `../${platformName}/test/{unit,scripts,fixtures}/**/*.{ts,tsx,mjs,cjs}`,

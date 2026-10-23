@@ -176,11 +176,11 @@ try {
   const confirm = second('简历摘要');
   assert.equal(await confirm.evaluate((e, previous) => e === previous, handle), true);
   assert.equal(await confirm.evaluate((e) => e.classList.contains('button-destructive')), true);
-  await page.waitForFunction(
-    () =>
-      document.querySelector('[aria-label="确认删除：简历摘要"]')?.getBoundingClientRect().width >=
-      111.5,
-  );
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[aria-label="确认删除：简历摘要"]');
+    const content = button?.querySelector('.confirm-delete-confirm');
+    return button && content && button.getBoundingClientRect().width >= content.scrollWidth + 23.5;
+  });
   await settle(page);
   const after = await confirm.boundingBox();
   assert(Math.abs(before.y - after.y) < 1);
@@ -198,7 +198,7 @@ try {
   await panel.getByLabel('姓名', { exact: true }).focus();
   await resume.waitFor();
   await resume.click();
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await info.click();
   await resume.waitFor();
   assert.equal((await saved()).background, '合成简历摘要');
@@ -263,7 +263,7 @@ try {
   checks.push(
     'failed storage keeps content and supports retry; instructions and skills use the same control in narrow dark layout',
   );
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
     name: '附件.txt',

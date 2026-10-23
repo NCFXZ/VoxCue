@@ -79,6 +79,7 @@ export const Update = icon('Update');
 export const Sparkles = icon('Sparkles');
 export const Volume2 = icon('Volume2');
 export const Monitor = icon('Monitor');
+export const SystemTheme = icon('SystemTheme');
 export const Moon = icon('Moon');
 export const Sun = icon('Sun');
 export const Globe = icon('Globe');

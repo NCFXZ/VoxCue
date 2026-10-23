@@ -110,13 +110,22 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
   return (
     <main className="workspace history-detail">
       <header className="page-toolbar record-detail-toolbar">
-        <button className="record-back" onClick={onBack} aria-label="返回面试记录">
-          <ChevronLeft size={16} />
-          <span>{record.title}</span>
-        </button>
+        <div className="history-heading-transition">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="record-back"
+            data-native-control-style="standalone-glass"
+            onClick={onBack}
+            aria-label="返回面试记录"
+          >
+            <ChevronLeft size={16} />
+          </Button>
+        </div>
         <div className="record-toolbar-actions">
           <Button
             variant="outline"
+            data-native-control-style="standalone-glass"
             disabled={exporting}
             onClick={async () => {
               setExporting(true);
@@ -138,17 +147,19 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
           </Button>
           <Button
             variant="outline"
+            data-native-control-style="standalone-glass"
             className={showAnswers ? 'record-panel-toggle is-active' : 'record-panel-toggle'}
             aria-label="AI 回答面板"
             aria-expanded={showAnswers}
             aria-controls="record-answer-panel"
             onClick={() => setShowAnswers((open) => !open)}
           >
-            <span>{answers.length} 条 AI 回答</span>
             <PanelRight size={16} />
+            <span>{answers.length} 条 AI 回答</span>
           </Button>
           <ConfirmDeleteButton
             key={record.id}
+            data-native-control-style="standalone-glass"
             iconOnly
             target={'面试记录：' + record.title}
             aria-label="删除记录"
@@ -182,6 +193,8 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                   <Button
                     variant="ghost"
                     size="icon"
+                    className="action-icon-button"
+                    data-native-reveal-on-hover
                     aria-label="重命名标题"
                     onClick={() => {
                       setTitleDraft(record.title);
@@ -189,7 +202,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                       setRenaming(true);
                     }}
                   >
-                    <Edit size={16} />
+                    <Edit size={17} />
                   </Button>
                 </div>
                 <p>
@@ -276,19 +289,6 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
               <h2>AI 回答</h2>
               <p>本场面试中提问并保存的 AI 回答。</p>
             </div>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="收起 AI 回答"
-              onClick={() => {
-                setShowAnswers(false);
-                requestAnimationFrame(() =>
-                  document.querySelector<HTMLButtonElement>('[aria-label="AI 回答面板"]')?.focus(),
-                );
-              }}
-            >
-              <PanelRight size={17} />
-            </Button>
           </header>
           <div className="record-answer-scroll">
             {!answers.length && (

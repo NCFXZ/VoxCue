@@ -71,7 +71,6 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
       title="面试设置"
       icon={<Settings size={20} />}
       className="interview-settings-dialog"
-      backdrop="transparent"
       onClose={onClose}
     >
       <section className="interview-settings-section">

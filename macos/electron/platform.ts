@@ -16,6 +16,7 @@ export const macos: DesktopPlatform = {
     interviewIconVisibility: true,
   },
   presentationFile: 'macos/electron/presentation.js',
+  presentationBindingFile: 'VoxCue.SidebarGlass.node',
   audioHelper: 'VoxCue.Audio',
   speechProcessFile: 'macos/electron/speech/process.js',
   microphoneSettingsUrl:

@@ -6,13 +6,14 @@ export async function verifyContinuousCorners(page, name) {
   const result = await page.evaluate(() => {
     if (!CSS.supports('corner-shape', 'superellipse(2)'))
       throw Error('The desktop renderer does not support continuous corners');
+    const fallback = document.documentElement.classList.contains('web-materials');
     const probe = document.createElement('span');
     document.body.append(probe);
     probe.style.cornerShape = 'superellipse(2)';
     const continuous = getComputedStyle(probe).getPropertyValue('corner-top-left-shape');
     probe.style.cornerShape = 'round';
     const round = getComputedStyle(probe).getPropertyValue('corner-top-left-shape');
-    probe.style.backgroundColor = 'var(--hover)';
+    probe.style.backgroundColor = fallback ? 'var(--web-control-hover)' : 'var(--hover)';
     probe.style.boxShadow = 'var(--shadow-popup)';
     probe.style.borderRadius = 'var(--radius-control)';
     const hoverColor = getComputedStyle(probe).backgroundColor;
@@ -84,15 +85,22 @@ export async function verifyContinuousCorners(page, name) {
         const radii = sides.map((side) => style.getPropertyValue('border-' + side + '-radius'));
         if (!radii.some((radius) => parseFloat(radius) > 0)) continue;
         const circle = radii.every((radius) => radius === '50%');
-        const capsule = element.matches(
-          '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
-            '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,' +
-            '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
-            '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
-            '.mock-badge,.screen-capture-status,.record-transcript-heading span,.preview-pill,' +
-            '.interview-answer-status',
-        );
-        const roundMenu = element.matches('.composer-menu');
+        const capsule =
+          (pseudo === '::before' && element.matches('.nav-item.active,.conversation-row.active')) ||
+          (fallback &&
+            !pseudo &&
+            element.matches(
+              '.ui-button:not(.button-icon),.choice-trigger,.settings-choice,.speech-select,.dropdown-item',
+            )) ||
+          element.matches(
+            '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
+              '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,' +
+              '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
+              '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
+              '.mock-badge,.screen-capture-status,.record-transcript-heading span,.preview-pill,' +
+              '.interview-answer-status,.suggestions button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
+          );
+        const roundMenu = !fallback && element.matches('.composer-menu');
         const label = element.tagName + '.' + element.getAttribute('class') + (pseudo ?? '');
         if (!pseudo) {
           if (
@@ -101,6 +109,7 @@ export async function verifyContinuousCorners(page, name) {
           )
             wrongSurfaces.push(label + ': inconsistent tooltip corners or shadow');
           if (
+            !fallback &&
             element.matches('.confirm-delete.is-compact.ui-button') &&
             style.borderRadius !== controlRadius
           )
@@ -156,6 +165,14 @@ export async function verifyContinuousCorners(page, name) {
         wrongSurfaces.push(menu.className + ': inconsistent popup shadow');
       if (triggerStyle.backgroundColor !== hoverColor)
         wrongSurfaces.push(trigger.className + ': open dropdown loses its hover feedback');
+      if (fallback) {
+        if (
+          menuStyle.borderRadius !== '20px' ||
+          menuStyle.getPropertyValue('corner-top-left-shape') !== continuous
+        )
+          wrongMenus.push(menu.className + ': fallback popup contour');
+        continue;
+      }
       for (const side of sides) {
         for (const property of ['border-' + side + '-radius', 'corner-' + side + '-shape']) {
           if (menuStyle.getPropertyValue(property) !== triggerStyle.getPropertyValue(property))
@@ -222,7 +239,9 @@ export async function verifyCornerRendering(page, app) {
   await page.evaluate(() => {
     const probe = document.createElement('div');
     probe.id = 'continuous-corner-render-probe';
-    probe.className = 'ui-button';
+    // Buttons are capsules in the shared fallback. Exercise a continuous
+    // reading card here, then verify the circular send control separately.
+    probe.className = 'profile-summary';
     probe.style.cssText =
       'position:fixed;left:40px;top:40px;width:120px;height:80px;z-index:2147483647;' +
       'border:0;overflow:hidden;background:#008060;box-shadow:0 0 0 6px #f00;pointer-events:auto;';

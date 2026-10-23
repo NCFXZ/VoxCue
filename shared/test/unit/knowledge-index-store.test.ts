@@ -66,22 +66,4 @@ describe('索引状态生命周期', () => {
     b();
     expect(remove).toHaveBeenCalledOnce();
   });
-  it('新的检索完成后，旧请求迟到结果不会替换它', async () => {
-    let resolve!: (value: unknown) => void;
-    const old = new Promise((r) => {
-      resolve = r;
-    });
-    vi.stubGlobal('window', {
-      desktop: {
-        knowledge: vi.fn(async (call) =>
-          call.query === 'old' ? old : { ok: true, value: [{ itemId: 'new' }] },
-        ),
-      },
-    });
-    const first = useKnowledgeIndex.getState().search('old', 'base');
-    await useKnowledgeIndex.getState().search('new', 'base');
-    resolve({ ok: true, value: [{ itemId: 'old' }] });
-    await first;
-    expect(useKnowledgeIndex.getState().hits.map((hit) => hit.itemId)).toEqual(['new']);
-  });
 });

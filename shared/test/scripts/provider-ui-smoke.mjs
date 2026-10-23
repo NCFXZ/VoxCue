@@ -62,7 +62,7 @@ try {
     await page.getByRole('button', { name: '聊天模型', exact: true }).click();
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
   };
-  const sendAppearance = async (window, name) => {
+  const sendAppearance = async (window, name, size = 36) => {
     await window.mouse.move(0, 0);
     const button = window.getByRole('button', { name, exact: true });
     await button.waitFor();
@@ -84,8 +84,8 @@ try {
       };
     });
     assert.deepEqual(style, {
-      width: 32,
-      height: 32,
+      width: size,
+      height: size,
       radius: '50%',
       color: 'rgb(255, 255, 255)',
       iconWidth: 20,
@@ -190,7 +190,7 @@ try {
     .locator('.floating-answer-meta strong')
     .getByText('合成提供商', { exact: true })
     .waitFor();
-  await sendAppearance(floating, '发送面试问题');
+  await sendAppearance(floating, '发送面试问题', 32);
   await floating.locator('.floating-composer').screenshot({});
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([

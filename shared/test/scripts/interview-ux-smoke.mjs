@@ -345,7 +345,7 @@ try {
   assert.equal(await panel.locator('.profile-empty-circle').count(), 3);
   await panel.locator('.personal-panel-scroll').evaluate((element) => (element.scrollTop = 0));
   await capture(page, '03-profile-saved');
-  await page.getByRole('button', { name: '关闭个人信息', exact: true }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await panel.getByText('可选', { exact: true }).count(), 0);
   checks.push('profile completion without optional labels or redundant instructions');
 
@@ -902,7 +902,7 @@ try {
   assert.equal(backdrop.filter, 'none');
   assert.equal(backdrop.surface, 'rgb(255, 255, 255)');
   assert.equal(backdrop.surfaceFilter, 'none');
-  assert.ok(backdrop.shadow.includes('16px 40px'));
+  assert.ok(backdrop.shadow.includes('0px 0px 26px 0px'), JSON.stringify(backdrop));
   const beforeMaterial = backdrop.surface;
   await page.evaluate(() => {
     localStorage.setItem('voxcue-frosted-transparency-v2', '50');

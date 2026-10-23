@@ -207,7 +207,7 @@ try {
       undefined,
       { timeout: 180000 },
     );
-    await rag.getByText('已就绪', { exact: true }).waitFor();
+    await rag.locator('.component-ready-actions').waitFor();
     assert.match(await rag.innerText(), /85\.0 MB/);
     assert.doesNotMatch(await settings.innerText(), /MiB/);
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
@@ -218,7 +218,7 @@ try {
       await personal.getByRole('button', { name: '面试知识库', exact: true }).isEnabled(),
       true,
     );
-    await page.getByRole('button', { name: '关闭个人信息' }).click();
+    await page.getByRole('button', { name: '个人信息' }).click();
     await notice.getByRole('button', { name: '前往设置' }).click();
     const speech = settings.locator('.component-row[data-component-id="speech"]');
     await speech.getByRole('button', { name: '下载', exact: true }).click();
@@ -228,7 +228,7 @@ try {
       undefined,
       { timeout: 180000 },
     );
-    await speech.getByText('已就绪', { exact: true }).waitFor();
+    await speech.locator('.component-ready-actions').waitFor();
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
     assert.equal(await start.isEnabled(), true);
     assert.equal(await notice.count(), 0);

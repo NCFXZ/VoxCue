@@ -204,7 +204,9 @@ try {
       assert.equal(await panel.locator('textarea').count(), 0);
       assert.equal(await editor.evaluate((e) => e.scrollWidth > e.clientWidth + 1), false);
       await editor.getByRole('button', { name: '取消', exact: true }).click();
-      await page.waitForFunction(() => document.activeElement?.textContent.includes('编辑'));
+      await page.waitForFunction(
+        () => document.activeElement?.getAttribute('aria-label') === '编辑',
+      );
       for (const button of await section.locator('.profile-section-actions button').all()) {
         assert.equal(
           await button.evaluate((e) => {
@@ -314,7 +316,7 @@ try {
     while (await panel.locator('.profile-disclosure[open]').count())
       await panel.locator('.profile-disclosure[open]').first().locator(':scope > summary').click();
     await settle(page);
-    await page.getByRole('button', { name: '关闭个人信息' }).click();
+    await page.getByRole('button', { name: '个人信息' }).click();
     console.log(`Profile refinement ${theme} passed`);
   }
   await app.evaluate(
@@ -336,7 +338,7 @@ try {
   );
   await page.keyboard.press('Home');
   await settle(page);
-  await page.getByRole('button', { name: '关闭个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息' }).click();
   await app.evaluate(
     ({ BrowserWindow }, url) =>
       BrowserWindow.getAllWindows()

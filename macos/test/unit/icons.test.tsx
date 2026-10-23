@@ -12,9 +12,7 @@ describe.skipIf(process.platform !== 'darwin')('Mac SF Symbols 的共享界面�
   });
   it('覆盖全部现有图标接口且不改变尺寸、颜色继承和无障碍归属', () => {
     const source = readFileSync(path.resolve('../shared/src/components/icons.tsx'), 'utf8');
-    const names = [...source.matchAll(/export const (\w+) = icon\(/g)]
-      .map((item) => item[1])
-      .sort();
+    const names = [...source.matchAll(/export const (\w+) = /g)].map((item) => item[1]).sort();
     expect(Object.keys(icons).sort()).toEqual(names);
     expect(Object.keys(symbols).sort()).toEqual(names);
     for (const Icon of Object.values(icons)) {
@@ -42,7 +40,7 @@ describe.skipIf(process.platform !== 'darwin')('Mac SF Symbols 的共享界面�
   });
   it('只替换公共图标入口，涵盖相邻组件和基础控件，不误替换其他模块', () => {
     const plugin = vite.plugins.find(
-      (item: { name?: string }) => item.name === 'platform-ui-icons',
+      (item: { name?: string }) => item.name === 'macos-ui-adapters',
     );
     const root = path.resolve('..');
     const mac = path.join(root, 'macos/src/icons.tsx');

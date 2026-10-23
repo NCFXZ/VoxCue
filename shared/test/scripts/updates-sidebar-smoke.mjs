@@ -98,8 +98,8 @@ const aligned = async (page) => {
     };
   });
   assert.ok(geometry.fits && geometry.left >= 0 && geometry.left <= 1, JSON.stringify(geometry));
-  assert.equal(geometry.width, 32);
-  assert.equal(geometry.height, 32);
+  assert.equal(geometry.width, 36);
+  assert.equal(geometry.height, 36);
 };
 try {
   let page = await launch();
