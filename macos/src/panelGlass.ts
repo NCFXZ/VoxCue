@@ -1,15 +1,30 @@
 import type { InterviewMaterialPlacement } from '../../shared/electron/contracts/desktop';
 import { materialOpacity } from './materialGeometry';
+import { readLiquidGlass, subscribeLiquidGlass } from './liquidGlassPreference';
+
+// The login has no top-layer dialog. Punch only its CSS background paint,
+// keeping all sample text in the shared renderer above the native materials.
+function loginCutout(outer: DOMRect, card: DOMRect) {
+  const x = card.x - outer.x,
+    y = card.y - outer.y;
+  return `path(evenodd, "M0 0H${outer.width}V${outer.height}H0Z M${x} ${y}H${x + card.width}V${y + card.height}H${x}Z")`;
+}
 
 // Shared panes and the interview preview retain their DOM, layout and input.
 // AppKit draws only their backplates beneath Chromium's transparent paint.
 if (
   window.desktop?.platform === 'macos' &&
   window.desktop.presentation?.liquidGlass === true &&
-  !location.hash
+  (!location.hash || location.hash === '#login')
 ) {
   const desktop = window.desktop,
     root = document.documentElement;
+  const login = location.hash === '#login';
+  const accessibility = [
+    matchMedia('(prefers-reduced-transparency: reduce)'),
+    matchMedia('(prefers-contrast: more)'),
+    matchMedia('(forced-colors: active)'),
+  ];
   const selector =
     '.personal-panel,.record-answer-panel,.interview-preview-scene,.interview-preview-scene :is(.floating-toolbar,.floating-panel,.transcript-item > p,.floating-question,.answer-bubble,.floating-composer)';
   const ids = new WeakMap<Element, number>();
@@ -27,12 +42,15 @@ if (
         dialog: HTMLElement | null;
         cutout: string;
         bodyCutout: string;
+        loginCutout: string;
       }
     | undefined;
   const clear = () => {
     for (const element of painted) element.classList.remove('macos-native-panel-material');
     painted = [];
     root.style.removeProperty('--macos-preview-page-cutout');
+    root.classList.remove('macos-login-preview');
+    root.style.removeProperty('--macos-login-preview-cutout');
     for (const dialog of document.querySelectorAll<HTMLElement>('[data-native-preview]')) {
       delete dialog.dataset.nativePreview;
       dialog.style.removeProperty('--macos-preview-cutout');
@@ -44,7 +62,7 @@ if (
     while (queued && !disposed) {
       const next = queued;
       queued = undefined;
-      const key = JSON.stringify([next.materials, next.cutout, next.bodyCutout]);
+      const key = JSON.stringify([next.materials, next.cutout, next.bodyCutout, next.loginCutout]);
       if (key === applied) continue;
       try {
         const active = await desktop.setInterviewMaterials(next.materials);
@@ -66,6 +84,12 @@ if (
           next.dialog.style.setProperty('--macos-preview-cutout', next.cutout);
           root.style.setProperty('--macos-preview-page-cutout', next.bodyCutout);
         } else root.style.removeProperty('--macos-preview-page-cutout');
+        root.classList.toggle('macos-login-preview', active && !!next.loginCutout);
+        if (active && next.loginCutout) {
+          root.style.setProperty('--macos-login-preview-cutout', next.loginCutout);
+        } else {
+          root.style.removeProperty('--macos-login-preview-cutout');
+        }
       } catch {
         // Restore legible shared surfaces when a native update fails. Leaving
         // transparent markers behind would expose an unrelated stale backplate.
@@ -79,7 +103,9 @@ if (
     frame = 0;
     const materials: InterviewMaterialPlacement[] = [],
       elements: HTMLElement[] = [];
-    const enabled = root.classList.contains('sidebar-liquid-glass');
+    const enabled = login
+      ? readLiquidGlass() && !accessibility.some((media) => media.matches)
+      : root.classList.contains('sidebar-liquid-glass');
     let preview: HTMLElement | null = null;
     if (enabled)
       for (const element of document.querySelectorAll<HTMLElement>(selector)) {
@@ -89,12 +115,16 @@ if (
           getComputedStyle(element).visibility === 'hidden'
         )
           continue;
-        const area = element.getBoundingClientRect();
+        // The neutral login background covers the whole right column. An
+        // interior scene-shaped cutout would leave two unnecessary seams.
+        const loginScene = login && element.matches('.interview-preview-scene');
+        const geometry = loginScene ? element.closest<HTMLElement>('.login-preview')! : element;
+        const area = geometry.getBoundingClientRect();
         let left = Math.max(0, area.left),
           top = Math.max(0, area.top),
           right = Math.min(innerWidth, area.right),
           bottom = Math.min(innerHeight, area.bottom);
-        for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+        for (let parent = geometry.parentElement; parent; parent = parent.parentElement) {
           const css = getComputedStyle(parent),
             box = parent.getBoundingClientRect();
           if (/(auto|hidden|scroll|clip)/.test(css.overflowX)) {
@@ -109,17 +139,22 @@ if (
         if (right <= left || bottom <= top || area.width <= 0 || area.height <= 0) continue;
         let id = ids.get(element);
         if (!id) ids.set(element, (id = ++serial));
-        const css = getComputedStyle(element);
+        const css = getComputedStyle(geometry);
         materials.push({
           id,
           style: element.matches('.interview-preview-scene')
-            ? 'preview-scene'
+            ? login
+              ? 'preview-login-scene'
+              : 'preview-scene'
             : element.matches('.floating-toolbar,.floating-panel')
               ? 'clear'
               : 'regular',
           radius: parseFloat(css.borderTopLeftRadius) || 0,
           round: css.getPropertyValue('corner-shape') === 'round',
-          dark: !!element.closest('.interview-preview-scene'),
+          dark:
+            login && element.matches('.interview-preview-scene')
+              ? root.classList.contains('dark')
+              : !!element.closest('.interview-preview-scene'),
           x: area.x,
           y: area.y,
           width: area.width,
@@ -150,7 +185,21 @@ if (
       dialog.style.setProperty('--macos-preview-cutout', cutout);
       root.style.setProperty('--macos-preview-page-cutout', bodyCutout);
     }
-    queued = { materials, elements, dialog, cutout, bodyCutout };
+    const shell = preview?.closest<HTMLElement>('.login-shell');
+    const card = preview?.closest<HTMLElement>('.login-preview');
+    const loginBackground =
+      shell && card ? loginCutout(shell.getBoundingClientRect(), card.getBoundingClientRect()) : '';
+    if (root.classList.contains('macos-login-preview')) {
+      root.style.setProperty('--macos-login-preview-cutout', loginBackground);
+    }
+    queued = {
+      materials,
+      elements,
+      dialog,
+      cutout,
+      bodyCutout,
+      loginCutout: loginBackground,
+    };
     void flush();
     if (performance.now() < until) update();
   };
@@ -208,6 +257,8 @@ if (
   document.addEventListener('transitionrun', transition, true);
   document.addEventListener('scroll', update, true);
   window.addEventListener('resize', update);
+  const unsubscribe = subscribeLiquidGlass(update);
+  for (const media of accessibility) media.addEventListener('change', update);
   locate();
   const dispose = () => {
     disposed = true;
@@ -216,6 +267,8 @@ if (
     resize.disconnect();
     changes.disconnect();
     appearance.disconnect();
+    unsubscribe();
+    for (const media of accessibility) media.removeEventListener('change', update);
     clear();
     document.removeEventListener('transitionrun', transition, true);
     document.removeEventListener('scroll', update, true);

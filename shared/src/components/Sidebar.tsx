@@ -154,19 +154,17 @@ export function Sidebar({
         </div>
       )}
       <div className="sidebar-bottom">
-        {!collapsed && (
-          <div className="local-note">
-            <div className="sidebar-status-row">
-              <SidebarUpdate />
-            </div>
-            {connection.error && (
-              <button className="status-retry" onClick={() => void connection.load(true, true)}>
-                <Refresh size={14} />
-                重新加载模型
-              </button>
-            )}
+        <div className="local-note">
+          <div className="sidebar-status-row">
+            <SidebarUpdate />
           </div>
-        )}
+          {!collapsed && connection.error && (
+            <button className="status-retry" onClick={() => void connection.load(true, true)}>
+              <Refresh size={14} />
+              重新加载模型
+            </button>
+          )}
+        </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
             <button className="user-button" aria-label="用户菜单">

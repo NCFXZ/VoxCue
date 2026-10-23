@@ -8,7 +8,7 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地面试语音识别、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前共享版本源、根和 Mac 配置为 **0.5.7**。本版区分共用布局与平台原生控件，macOS 26+ 使用 AppKit Liquid Glass，旧 macOS 与 Windows 共用胶囊/圆形控件和毛玻璃回退；Windows 生成配置由 Windows 本机执行 `pnpm sync:workspace` 更新。固定模型、依赖与锁保持。公开稳定安装包仍为 [v0.5.6](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.6)，本次仅同步源码；Mac 原生/共享回退的测试范围和入口见[测试说明](shared/test/README.md)。
+当前共享版本源、根和 Mac 配置为 **0.5.8**。0.5.8补充侧栏更新胶囊交互、44px搜索框与新版登录预览，详见[Windows累计交接](shared/docs/WINDOWS_0.5.7_HANDOFF.md#0-058-新增交接优先于下文历史规格)；本次仅同步源码，尚无0.5.8安装包。本版区分共用布局与平台原生控件，macOS 26+ 使用 AppKit Liquid Glass，旧 macOS 与 Windows 共用胶囊/圆形控件和毛玻璃回退；Windows 生成配置由 Windows 本机执行 `pnpm sync:workspace` 更新。固定模型、依赖与锁保持。Mac arm64 安装包、签名更新 ZIP 和清单已发布至 [v0.5.7](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.7)；Windows 安装包继续使用 [v0.5.6](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.6)。Mac 原生/共享回退的测试范围和入口见[测试说明](shared/test/README.md)。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 

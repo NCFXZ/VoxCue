@@ -1,4 +1,5 @@
-import { ArrowUp, Sparkles, Volume2, Check, X } from './icons';
+import { X } from './icons';
+import { InterviewPreview } from './InterviewPreview';
 import { Button } from './ui/button';
 import { useAuth } from '../stores/auth';
 import chatGPTIcon from '../assets/chatgpt.svg?inline';
@@ -19,7 +20,9 @@ export function LoginPage() {
           </div>
           <div className="login-actions">
             <Button
+              variant="outline"
               className="service-login"
+              data-native-control-style="standalone-glass"
               disabled={auth.waiting || !window.desktop}
               onClick={() => {
                 void auth.signIn();
@@ -28,7 +31,6 @@ export function LoginPage() {
               <img className="service-brand-icon" src={chatGPTIcon} alt="" aria-hidden="true" />
               {auth.signingIn === 'chatgpt' ? '等待浏览器授权…' : '使用 ChatGPT 继续'}
             </Button>
-            <p className="login-explanation">在系统浏览器中安全授权 ChatGPT。</p>
             {auth.waiting && (
               <Button
                 variant="ghost"
@@ -53,47 +55,8 @@ export function LoginPage() {
           </div>
         </section>
         <aside className="login-preview" aria-label="应用界面预览">
-          <div className="preview-landscape" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
           <div className="login-preview-content" aria-hidden="true">
-            <div className="preview-pill">
-              <AppLogo size={13} />
-              <strong>VoxCue</strong>
-              <span>面试助手</span>
-              <Check size={12} />
-            </div>
-            <div className="preview-panels">
-              <div className="preview-panel">
-                <header>
-                  <Volume2 size={12} />
-                  转写
-                </header>
-                <small>面试官</small>
-                <p>请介绍一个你最有代表性的项目。</p>
-                <span className="preview-caption">本地转写</span>
-              </div>
-              <div className="preview-panel">
-                <header>
-                  <Sparkles size={12} />
-                  回答
-                </header>
-                <p>可以从背景、个人贡献和结果展开。</p>
-                <div className="preview-lines">
-                  <span />
-                  <span />
-                  <span />
-                  <span />
-                </div>
-                <div className="preview-input">
-                  输入问题…
-                  <ArrowUp size={13} />
-                </div>
-              </div>
-            </div>
-            <p className="login-preview-label">从准备到表达，保持从容。</p>
+            <InterviewPreview compact label="面试界面预览" />
           </div>
         </aside>
       </div>

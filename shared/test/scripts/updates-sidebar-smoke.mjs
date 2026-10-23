@@ -45,7 +45,6 @@ const env = {
   ...process.env,
   COPILOT_TEST_USER_DATA: profile,
   VITE_DEV_SERVER_URL: '',
-  HOME: path.join(testRoot, 'home'),
   CFFIXED_USER_HOME: path.join(testRoot, 'home'),
   TMPDIR: path.join(testRoot, 'tmp'),
 };
@@ -86,6 +85,18 @@ const closeSettings = async (settings) => {
   await settings.waitFor({ state: 'hidden' });
 };
 const aligned = async (page) => {
+  await page.locator('.sidebar-update').evaluate(async (element) => {
+    await new Promise(requestAnimationFrame);
+    for (;;) {
+      element.getBoundingClientRect();
+      const animations = element
+        .getAnimations()
+        .filter((animation) => animation.playState === 'running');
+      if (!animations.length) return;
+      await Promise.all(animations.map((animation) => animation.finished.catch(() => {})));
+      await new Promise(requestAnimationFrame);
+    }
+  });
   const geometry = await page.locator('.sidebar-status-row').evaluate((element) => {
     const icon = element.querySelector('.sidebar-update');
     const row = element.getBoundingClientRect(),
@@ -95,11 +106,33 @@ const aligned = async (page) => {
       left: button.left - row.left,
       width: button.width,
       height: button.height,
+      collapsed: !!element.closest('.collapsed'),
+      centered: Math.abs(button.x + button.width / 2 - row.x - row.width / 2) < 1,
     };
   });
-  assert.ok(geometry.fits && geometry.left >= 0 && geometry.left <= 1, JSON.stringify(geometry));
+  assert.ok(
+    geometry.fits &&
+      (geometry.collapsed ? geometry.centered : geometry.left >= 0 && geometry.left <= 1),
+    JSON.stringify(geometry),
+  );
   assert.equal(geometry.width, 36);
   assert.equal(geometry.height, 36);
+};
+const collapsedAction = async (page, button) => {
+  await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
+  await page.waitForFunction(() =>
+    document.querySelector('.sidebar')?.classList.contains('collapsed'),
+  );
+  await button.hover();
+  await aligned(page);
+  assert.equal(await button.innerText(), '', 'Collapsed sidebar actions have no visible text');
+  await page.keyboard.press('Tab');
+  await button.focus();
+  await aligned(page);
+  assert.equal(await button.innerText(), '');
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+  await page.mouse.move(800, 100);
+  await button.evaluate((node) => node.blur());
 };
 try {
   let page = await launch();
@@ -139,7 +172,8 @@ try {
     await progress.locator('.download-ring').evaluate((el) => getComputedStyle(el).color),
     await progress.evaluate((el) => getComputedStyle(el).color),
   );
-  await assertDownloadButton(page, progress, { iconOnly: true });
+  await assertDownloadButton(page, progress, { iconOnly: true, hoverLabel: '取消下载' });
+  await collapsedAction(page, progress);
   if (process.argv.includes('--preview')) {
     await page.keyboard.press('Tab');
     await progress.focus();
@@ -188,9 +222,25 @@ try {
   await closeSettings(settings);
   await app.evaluate(() => globalThis.updateDriver.finishDownload());
   await phase(page, 'downloaded');
-  const install = sidebar.getByRole('button', { name: '重启并更新', exact: true });
+  const install = sidebar.getByRole('button', { name: '重启以更新', exact: true });
   await install.waitFor();
   await aligned(page);
+  await install.hover();
+  await install.locator('.sidebar-update-label').waitFor({ state: 'visible' });
+  await install.evaluate(async (element) => {
+    await Promise.all(
+      element.getAnimations().map((animation) => animation.finished.catch(() => {})),
+    );
+  });
+  const expanded = await install.boundingBox();
+  assert.ok(expanded.width > 36 && expanded.height === 36);
+  assert.equal(await install.innerText(), '重启以更新');
+  await page.mouse.move(800, 100);
+  await aligned(page);
+  await collapsedAction(page, install);
+  await page.keyboard.press('Tab');
+  await install.focus();
+  await install.locator('.sidebar-update-label').waitFor({ state: 'visible' });
   await page.evaluate(() => window.desktop.updateSessionState(true));
   await install.click();
   await phase(page, 'downloaded');
@@ -209,7 +259,7 @@ try {
   settings = await openUpdates(page);
   assert.equal(await toggle().getAttribute('aria-checked'), 'false');
   console.log(
-    'PASS: sidebar fixed 32px icon across update states, themed ring without visible percentage, icon-only red cancel with first-second feedback, settings percentage, automatic download opt-in, background progress, persistent opt-out and explicit save-protected install.',
+    'PASS: sidebar 36px circles expand to cancel/restart capsules on hover and keyboard focus; themed progress ring, first-second guard, automatic-download preference and explicit save-protected install.',
   );
 } finally {
   if (app) await closeUiApp(app);

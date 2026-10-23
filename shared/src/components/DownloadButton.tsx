@@ -7,6 +7,7 @@ export function DownloadButton({
   progress,
   status,
   iconOnly = false,
+  hoverLabel,
   className = '',
   onCancel,
 }: {
@@ -14,6 +15,7 @@ export function DownloadButton({
   progress: number | null;
   status?: string;
   iconOnly?: boolean;
+  hoverLabel?: string;
   className?: string;
   onCancel(): void;
 }) {
@@ -32,6 +34,8 @@ export function DownloadButton({
       variant="outline"
       size={iconOnly ? 'icon' : undefined}
       className={`download-button${iconOnly ? ' is-icon-only' : ''}${cancelReady ? ' is-cancellable' : ''} ${className}`}
+      data-hover-label={hoverLabel}
+      data-native-control-style={hoverLabel ? 'over-glass' : undefined}
       aria-label={cancelReady ? `${label}，取消下载` : `${label}下载中`}
       aria-disabled={!cancelReady}
       onClick={() => {
@@ -69,7 +73,11 @@ export function DownloadButton({
       </span>
       <span className="download-button-cancel" aria-hidden="true">
         <X size={iconOnly ? 17 : 16} />
-        {!iconOnly && '取消'}
+        {hoverLabel ? (
+          <span className="download-button-cancel-label">{hoverLabel}</span>
+        ) : (
+          !iconOnly && '取消'
+        )}
       </span>
     </Button>
   );

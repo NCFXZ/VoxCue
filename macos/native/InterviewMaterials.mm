@@ -14,6 +14,46 @@
 - (BOOL)isFlipped { return YES; }
 - (NSView *)hitTest:(NSPoint)point { return nil; }
 @end
+// Website showcase artwork stays behind the actual native glass surfaces.
+static id previewColor(NSUInteger rgb,CGFloat alpha=1) {
+    return (__bridge id)[NSColor colorWithSRGBRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:alpha].CGColor;
+}
+@interface VoxCueLoginBackdrop : NSView
+@property(nonatomic) BOOL dark;
+@property(nonatomic,strong) CAGradientLayer *base;
+@property(nonatomic,strong) CAGradientLayer *blue;
+@property(nonatomic,strong) CAGradientLayer *peach;
+- (void)configure:(BOOL)dark;
+@end
+@implementation VoxCueLoginBackdrop
+- (instancetype)initWithFrame:(NSRect)frame {
+    if((self=[super initWithFrame:frame])) {
+        self.layer=[CALayer layer];self.wantsLayer=YES;
+        self.base=[CAGradientLayer layer];[self.layer addSublayer:self.base];
+        self.blue=[CAGradientLayer layer];self.peach=[CAGradientLayer layer];
+        for(CAGradientLayer *glow in @[self.blue,self.peach]) {
+            glow.type=kCAGradientLayerRadial;glow.startPoint=CGPointMake(.5,.5);glow.endPoint=CGPointMake(1,1);
+            [self.layer addSublayer:glow];
+        }
+    }
+    return self;
+}
+- (void)configure:(BOOL)dark {
+    self.dark=dark;
+    CGFloat w=NSWidth(self.bounds),h=NSHeight(self.bounds),strength=dark?.48:1;
+    CAGradientLayer *base=self.base;base.frame=self.bounds;
+    base.colors=dark?@[previewColor(0x344b60),previewColor(0x54525c),previewColor(0x77604f)]:@[previewColor(0xbfcad7),previewColor(0xe2d8d0),previewColor(0xe8c4a4)];
+    base.locations=@[@0,@(dark?.5:.48),@1];
+    CGFloat extent=(w*.8660254+h*.5)/2;
+    base.startPoint=CGPointMake(.5-.8660254*extent/MAX(1,w),.5+.5*extent/MAX(1,h));
+    base.endPoint=CGPointMake(1-base.startPoint.x,1-base.startPoint.y);
+    self.blue.frame=CGRectMake(-.33*w,-.05*h,.9*w,1.8*h);
+    self.peach.frame=CGRectMake(.36*w,-.8*h,.9*w,1.8*h);
+    self.blue.colors=@[previewColor(0xaeb8e8,.79*strength),previewColor(0xaeb8e8,.79*strength),previewColor(0xbcc7e0,.4*strength),previewColor(0xbcc7e0,0)];
+    self.peach.colors=@[previewColor(0xffdab2,.8*strength),previewColor(0xffdab2,.8*strength),previewColor(0xedaa7f,.44*strength),previewColor(0xedaa7f,0)];
+    self.blue.locations=@[@0,@.08,@.45,@.7];self.peach.locations=@[@0,@.05,@.45,@.7];
+}
+@end
 @interface VoxCuePreviewBackdrop : NSView
 @end
 @implementation VoxCuePreviewBackdrop
@@ -139,7 +179,9 @@ napi_value VoxCueConfigureInterviewMaterials(napi_env env,napi_callback_info inf
             NSNumber *key=@((uint32_t)number(env,item,"id"));[seen addObject:key];
             char style[24]={};size_t styleLength=0;
             napi_get_value_string_utf8(env,property(env,item,"style"),style,sizeof(style),&styleLength);
-            BOOL preview=std::strcmp(style,"preview-scene")==0,halo=std::strcmp(style,"dialog-halo")==0,darkNotice=std::strcmp(style,"regular-dark")==0;
+            BOOL loginPreview=std::strcmp(style,"preview-login-scene")==0;
+            bool dark=false;napi_get_value_bool(env,property(env,item,"dark"),&dark);
+            BOOL preview=loginPreview || std::strcmp(style,"preview-scene")==0,halo=std::strcmp(style,"dialog-halo")==0,darkNotice=std::strcmp(style,"regular-dark")==0;
             if(std::strcmp(style,"regular-interactive")==0 || std::strcmp(style,"regular-follow-hover")==0) {
                 followFrame=[manager.plane convertRect:rectangle(env,item) toView:host];
                 followEmphasized=std::strcmp(style,"regular-follow-hover")==0;
@@ -152,7 +194,7 @@ napi_value VoxCueConfigureInterviewMaterials(napi_env env,napi_callback_info inf
             VoxCueInterviewMaterial *view=manager.views[key];
             if(!view) {
                 view=[[VoxCueInterviewMaterial alloc] initWithFrame:NSZeroRect];view.clipsToBounds=YES;view.wantsLayer=YES;
-                if(preview || halo) { view.scene=halo?[[VoxCueInterviewDialogHalo alloc] initWithFrame:NSZeroRect]:[[VoxCuePreviewBackdrop alloc] initWithFrame:NSZeroRect];[view addSubview:view.scene]; }
+                if(preview || halo) { view.scene=halo?[[VoxCueInterviewDialogHalo alloc] initWithFrame:NSZeroRect]:loginPreview?[[VoxCueLoginBackdrop alloc] initWithFrame:NSZeroRect]:[[VoxCuePreviewBackdrop alloc] initWithFrame:NSZeroRect];[view addSubview:view.scene]; }
                 else {
                 view.glass=[[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
                 view.glass.tintColor=nil;view.glass.contentView=[[NSView alloc] initWithFrame:NSZeroRect];
@@ -171,7 +213,6 @@ napi_value VoxCueConfigureInterviewMaterials(napi_env env,napi_callback_info inf
             view.dimming.hidden=!clear;
             // Interview and preview surfaces stay dark. Main-window cards
             // inherit their own window appearance.
-            bool dark=false;napi_get_value_bool(env,property(env,item,"dark"),&dark);
             view.glass.appearance=clear || dark?[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]:nil;
             view.identifier=halo?@"voxcue-dialog-halo":preview?@"voxcue-interview-preview-scene":clear?@"voxcue-interview-clear":darkNotice?@"voxcue-interview-dark-notice":@"voxcue-interview-regular";
             CGFloat radius=number(env,item,"radius");bool rounded=false;
@@ -179,14 +220,22 @@ napi_value VoxCueConfigureInterviewMaterials(napi_env env,napi_callback_info inf
             view.glass.cornerRadius=rounded?radius:0;
             view.alphaValue=number(env,item,"opacity");
             NSRect area=rectangle(env,item),clip=rectangle(env,property(env,item,"clip"));
+            // Chromium already cuts the login backdrop out of its opaque page.
+            // Cover its antialiased edge instead of compositing two coincident
+            // rounded masks, which reveals the window behind as a bright seam.
+            if(loginPreview) { area=NSInsetRect(area,-1,-1);clip=NSInsetRect(clip,-1,-1); }
             view.clipsToBounds=!NSEqualRects(area,clip);
             view.frame=clip;view.glass.frame=NSOffsetRect(area,-clip.origin.x,-clip.origin.y);
             view.dimming.frame=view.glass.frame;
             NSView *surface=preview || halo?view.scene:view.glass;
             if(preview || halo)view.scene.frame=NSOffsetRect(area,-clip.origin.x,-clip.origin.y);
+            if(loginPreview) {
+                [(VoxCueLoginBackdrop *)view.scene configure:dark];
+                view.scene.appearance=[NSAppearance appearanceNamed:dark?NSAppearanceNameDarkAqua:NSAppearanceNameAqua];
+            } else if(preview)[view.scene setNeedsDisplay:YES];
             if(halo) { ((VoxCueInterviewDialogHalo *)view.scene).radius=radius;[view.scene setNeedsDisplay:YES]; }
             surface.wantsLayer=YES;
-            if(!halo && (!rounded || preview)) {
+            if(!halo && !loginPreview && (!rounded || preview)) {
                 CAShapeLayer *contour=[CAShapeLayer layer];
                 CGPathRef path=rounded?CGPathCreateWithRoundedRect(surface.bounds,radius,radius,nullptr):VoxCueContinuousContour(surface.bounds.size,radius);
                 contour.path=path;CGPathRelease(path);surface.layer.mask=contour;
@@ -212,7 +261,8 @@ napi_value VoxCueConfigureInterviewMaterials(napi_env env,napi_callback_info inf
         }
         VoxCueRefreshContentControlPlacement(host);
         VoxCueUpdateInterviewFollow(host,followFrame,!NSIsEmptyRect(followFrame),modalFrame,modalRadius,followEmphasized);
-        [CATransaction commit];napi_get_boolean(env,true,&result);return result;
+        [CATransaction commit];
+        napi_get_boolean(env,true,&result);return result;
     }
     napi_get_boolean(env,false,&result);return result;
 }

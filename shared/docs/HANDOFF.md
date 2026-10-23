@@ -1,3 +1,7 @@
+## 2026-10-23 Windows 0.5.7 接续（累计至0.5.8）
+
+完整的0.5.6→0.5.7变化、125个历史变更文件，以及0.5.8新增的更新操作、44px搜索框、登录按钮/面试预览和本机验收步骤见 [WINDOWS_0.5.7_HANDOFF.md](WINDOWS_0.5.7_HANDOFF.md)。当前共享版本源为0.5.8，Windows本机先执行 `pnpm sync:workspace`；Windows与回退Mac共用shared胶囊/圆形及毛玻璃，页面布局与Mac最终实现一致。历史过程说明如有冲突，以该文档0.5.8补充与AGENTS当前规则为准。
+
 ## 2026-10-22 Mac Liquid Glass 本地接续
 
 0.5.7：共用布局和平台控件已分层，最新规则见 [PLATFORM_UI.md](PLATFORM_UI.md)。Mac 构建扩展/原生材质在 macos，Windows 专属未改。macOS 26以下与Windows共用shared胶囊/圆形及毛玻璃回退，按原生能力选择，不复制页面；先完成当前Liquid Glass测试再核对回退。Windows 本机先执行 `pnpm sync:workspace` 同步0.5.7生成配置，再构建及完成 Windows 原生/DPI 验收；Mac 本机检查不代表 Windows 验收。依赖/锁、固定模型/运行时和公开发行保持。本次仅同步源码。

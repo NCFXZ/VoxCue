@@ -107,6 +107,9 @@
 :root.macos-ui .macos-content-native {
   opacity: 0 !important;
 }
+:root.macos-ui .service-login.macos-content-native {
+  transition: none;
+}
 :root.macos-ui .chat-copy.macos-content-native.ui-button {
   /* Preserve the system Push content inset in both hover states while its
      leading image aligns with the answer, rather than the capsule edge. */
@@ -122,6 +125,9 @@
   border-color: transparent;
   box-shadow: none;
 }
+:root.macos-ui .sidebar-update.download-button.macos-content-native {
+  opacity: 0 !important;
+}
 :root.macos-ui
   :is(.management-page, .settings-dialog, .personal-panel, .app-dialog, .record-toolbar-actions)
   button.ui-button:not(.button-icon):not([aria-haspopup='menu']):not([role='switch']) {
@@ -131,11 +137,6 @@
 :root.macos-ui .confirm-delete.ui-button {
   padding-inline: 0;
   min-width: 0;
-}
-:root.macos-ui .history-filters input[type='search'] {
-  border-radius: 999px;
-  corner-shape: round;
-  min-height: 36px;
 }
 :root.macos-ui .settings-switch[data-native-control-style='switch'] {
   width: 54px;
@@ -230,6 +231,30 @@
   box-shadow: none;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+:root.macos-ui.macos-login-preview .login-shell {
+  isolation: isolate;
+  background: transparent;
+}
+:root.macos-ui.macos-login-preview .login-card,
+:root.macos-ui.macos-login-preview .login-preview {
+  background: transparent;
+}
+:root.macos-ui.macos-login-preview .login-preview::before,
+:root.macos-ui.macos-login-preview .login-preview::after {
+  display: none;
+}
+:root.macos-ui.macos-login-preview .login-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  border-radius: inherit;
+}
+:root.macos-ui.macos-login-preview .login-shell::before {
+  background: var(--surface);
+  clip-path: var(--macos-login-preview-cutout);
 }
 :root.macos-ui .app-dialog[data-native-preview] {
   background: transparent;

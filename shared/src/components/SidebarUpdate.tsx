@@ -15,6 +15,7 @@ export function SidebarUpdate() {
       className="sidebar-update"
       iconOnly
       label="更新"
+      hoverLabel="取消下载"
       progress={state.progress}
       onCancel={() => void run('cancel')}
     />
@@ -22,8 +23,9 @@ export function SidebarUpdate() {
     <Button
       variant="ghost"
       size="icon"
-      className="sidebar-update"
-      aria-label={installing ? '正在准备更新' : downloaded ? '重启并更新' : '下载更新'}
+      className={`sidebar-update${installing ? '' : ' sidebar-update-expandable'}`}
+      data-native-control-style="over-glass"
+      aria-label={installing ? '正在准备更新' : downloaded ? '重启以更新' : '下载更新'}
       disabled={installing || (downloaded && state.interviewActive)}
       onClick={() => void run(downloaded ? 'install' : 'download')}
     >
@@ -36,6 +38,7 @@ export function SidebarUpdate() {
       ) : (
         <Download size={17} />
       )}
+      <span className="sidebar-update-label">{downloaded ? '重启以更新' : '下载更新'}</span>
     </Button>
   );
 }

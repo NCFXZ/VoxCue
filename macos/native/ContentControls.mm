@@ -2,6 +2,7 @@
 #include "LiquidGlassControls.h"
 #include "ScrollChrome.h"
 #include "InterviewMaterials.h"
+#include "ChatGPTBrand.h"
 #import <objc/runtime.h>
 #include <cstring>
 #include <cmath>
@@ -13,7 +14,6 @@ API_AVAILABLE(macos(26.0))
 @interface VoxCueContentHost : NSView <NSSearchFieldDelegate>
 @property(nonatomic,strong) NSControl *control;
 @property(nonatomic,strong) NSProgressIndicator *progress;
-@property(nonatomic,strong) NSGlassEffectView *glass;
 @property(nonatomic,weak) VoxCueContentManager *manager;
 @property(nonatomic) uint32_t identity;
 @property(nonatomic) BOOL search;
@@ -149,15 +149,11 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 if(search) {
                     NSSearchField *field=[[NSSearchField alloc] initWithFrame:NSZeroRect];
                     field.delegate=view;field.sendsSearchStringImmediately=YES;field.maximumRecents=0;field.recentsAutosaveName=nil;
-                    field.bordered=NO;field.bezeled=NO;field.drawsBackground=NO;
+                    field.bezeled=YES;field.bezelStyle=NSTextFieldRoundedBezel;
+                    field.borderShape=NSControlBorderShapeCapsule;
                     field.maximumNumberOfLines=1;field.cell.usesSingleLineMode=YES;field.cell.scrollable=YES;
                     field.focusRingType=NSFocusRingTypeNone;
-                    view.glass=[[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
-                    view.glass.style=NSGlassEffectViewStyleRegular;view.glass.tintColor=nil;
-                    if(@available(macOS 27.0,*))view.glass.effectIsInteractive=YES;
-                    NSView *content=[[NSView alloc] initWithFrame:NSZeroRect];
-                    [content addSubview:field];view.glass.contentView=content;
-                    [view addSubview:view.glass];view.control=field;
+                    [view addSubview:field];view.control=field;
                 } else if(slider) {
                     NSSlider *control=[[NSSlider alloc] initWithFrame:NSZeroRect];
                     control.identifier=@"voxcue-content-font-slider";control.sliderType=NSSliderTypeLinear;
@@ -195,13 +191,13 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
             NSColor *color=[NSColor colorWithSRGBRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:1];
             if(search) {
                 NSSearchField *field=(NSSearchField *)view.control;NSString *value=string(env,item,"value");
+                field.controlSize=NSControlSizeExtraLarge;
                 if(![field.stringValue isEqualToString:value])field.stringValue=value;
-                field.placeholderString=label;field.textColor=color;view.glass.frame=view.bounds;view.glass.cornerRadius=height/2;
-                // A search field's text cell uses its natural single-line
-                // height. Stretch the glass container, not the text editor.
-                NSSize fitting=[field sizeThatFits:NSMakeSize(width-24,height)];
-                CGFloat fieldHeight=MIN(height,ceil(fitting.height));
-                field.frame=NSMakeRect(12,round((height-fieldHeight)/2),MAX(0,width-24),fieldHeight);
+                field.placeholderString=label;field.textColor=color;
+                // Keep the complete system search field. Removing its bezel
+                // changes the field editor's insets and overlaps the search
+                // icon/placeholder on focus; AppKit owns all three together.
+                field.frame=view.bounds;
             } else if(slider) {
                 NSSlider *control=(NSSlider *)view.control;control.controlSize=NSControlSizeRegular;
                 control.doubleValue=string(env,item,"value").doubleValue;
@@ -224,15 +220,21 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 if(control.state!=checked)control.animator.state=checked;
             } else {
                 NSButton *button=(NSButton *)view.control;NSString *symbol=background?@"":string(env,item,"symbol");
+                BOOL brand=[symbol isEqualToString:@"brand.chatgpt"];
                 button.appearance=background && overGlass?[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]:nil;
                 BOOL trailing=boolean(env,item,"trailing");
                 NSArray *artwork=@[kind,label,symbol,string(env,item,"color"),string(env,item,"symbolColor"),@(overGlass),@(trailing),@(height<=36),@(height<32),@(background && fabs(width-height)<1)];
                 if(![view.artwork isEqual:artwork]) {
                 view.artwork=artwork;
                 button.font=[NSFont systemFontOfSize:height<32?12:14 weight:NSFontWeightMedium];
-                NSImage *image=symbol.length?[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]:nil;
-                image=[image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:label.length?(height<32?13:14):17 weight:NSFontWeightRegular]];
-                image=[image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[color]]];
+                NSImage *image=!brand && symbol.length?[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]:nil;
+                if(brand) {
+                    image=[[NSImage alloc] initWithData:[NSData dataWithBytes:VoxCueChatGPTBrand length:sizeof(VoxCueChatGPTBrand)]];
+                    image.size=NSMakeSize(22,22);[image setTemplate:YES];
+                } else {
+                    image=[image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:label.length?(height<32?13:14):17 weight:NSFontWeightRegular]];
+                    image=[image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[color]]];
+                }
                 NSString *symbolColor=string(env,item,"symbolColor");
                 if(symbolColor.length) {
                     unsigned int tint=0;sscanf(symbolColor.UTF8String,"#%x",&tint);
@@ -244,7 +246,6 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 button.bezelStyle=[kind isEqualToString:@"button-glass"]?NSBezelStyleGlass:NSBezelStylePush;
                 if(overGlass) { button.tintProminence=NSTintProminenceNone;button.bezelColor=nil; }
                 button.controlSize=overGlass || height<=36?NSControlSizeRegular:NSControlSizeLarge;
-                button.borderShape=background?(fabs(width-height)<1?NSControlBorderShapeCircle:NSControlBorderShapeCapsule):(!label.length?NSControlBorderShapeCircle:NSControlBorderShapeCapsule);
                 button.contentTintColor=color;
                 if(popup) {
                     NSPopUpButton *choice=(NSPopUpButton *)button;[choice removeAllItems];[choice addItemWithTitle:label];
@@ -257,6 +258,9 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                     button.attributedTitle=[[NSAttributedString alloc] initWithString:label attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:button.font}];
                 }
                 }
+                // Shape follows geometry while shared hover/confirmation widths
+                // animate, even when their title disappears before shrinking.
+                button.borderShape=fabs(width-height)<1?NSControlBorderShapeCircle:NSControlBorderShapeCapsule;
                 BOOL highlighted=button.enabled && (boolean(env,item,"pressed") || boolean(env,item,"hovered"));
                 button.bordered=YES;
                 button.showsBorderOnlyWhileMouseInside=[kind isEqualToString:@"button-hover"];

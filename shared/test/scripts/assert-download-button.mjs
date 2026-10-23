@@ -54,14 +54,32 @@ export async function assertInitialDownloadProgress(button, start) {
     await button.hover();
     assert.deepEqual(await read(), guarded);
     await page.clock.runFor(599);
+    await page.bringToFront();
+    await button.hover();
     assert.deepEqual(await read(), guarded);
     await button.evaluate((element) => element.click());
+    await button.hover();
     assert.deepEqual(await read(), guarded, 'First-second clicks cannot cancel');
     await page.clock.runFor(1);
     await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
     assert.equal(await button.getAttribute('aria-disabled'), 'false');
+    const hoverLabel = await button.getAttribute('data-hover-label');
+    if (hoverLabel) {
+      // The fake clock verifies the cancellation guard, while CSS transitions
+      // use Chromium's compositor timeline. Inspect their settled endpoint.
+      await button.evaluate((element) => {
+        element.getBoundingClientRect();
+        for (const animation of element.getAnimations())
+          if (animation.effect?.getTiming().iterations !== Infinity) animation.finish();
+      });
+    }
     const finalBounds = await button.boundingBox();
-    assert.equal(finalBounds.width, initialBounds.width);
+    if (hoverLabel)
+      assert.ok(
+        finalBounds.width > initialBounds.width,
+        JSON.stringify({ initialBounds, finalBounds }),
+      );
+    else assert.equal(finalBounds.width, initialBounds.width);
     assert.equal(finalBounds.height, initialBounds.height);
     return result;
   } finally {
@@ -69,7 +87,7 @@ export async function assertInitialDownloadProgress(button, start) {
   }
 }
 
-export async function assertDownloadButton(page, button, { iconOnly = false } = {}) {
+export async function assertDownloadButton(page, button, { iconOnly = false, hoverLabel } = {}) {
   await page.bringToFront();
   const dark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   try {
@@ -108,7 +126,7 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
       await settle(button);
       assert.equal(
         await button.locator('.download-button-cancel').innerText(),
-        iconOnly ? '' : '取消',
+        hoverLabel ?? (iconOnly ? '' : '取消'),
       );
       assert.equal(await button.locator('.download-button-cancel svg').count(), 1);
       await button.hover();
@@ -134,14 +152,16 @@ export async function assertDownloadButton(page, button, { iconOnly = false } = 
       assert.notEqual(cancel.border, cancel.danger);
       assert.equal(cancel.color, cancel.danger);
       const after = await button.boundingBox();
-      assert.equal(after.width, before.width);
+      if (hoverLabel) assert.ok(after.width > before.width);
+      else assert.equal(after.width, before.width);
       assert.equal(after.height, before.height);
       if (iconOnly) {
         const size = await button.evaluate((element) => {
           const style = getComputedStyle(element);
           return { width: parseFloat(style.width), height: parseFloat(style.height) };
         });
-        assert.equal(size.width, 36);
+        if (hoverLabel) assert.ok(size.width > 36);
+        else assert.equal(size.width, 36);
         assert.equal(size.height, 36);
       }
       await page.mouse.move(1, 1);

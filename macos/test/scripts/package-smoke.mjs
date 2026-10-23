@@ -1,6 +1,7 @@
 import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
+import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { readFile, mkdir, lstat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -415,6 +416,67 @@ try {
     },
   );
   console.log('PASS: ' + checks.join(', '));
+  const packagedGlass = await app.evaluate(() => {
+    const require = process.getBuiltinModule('module').createRequire(process.resourcesPath + '/');
+    return require(process.resourcesPath + '/native/VoxCue.SidebarGlass.node').available;
+  });
+  await installUiAccount(app, { components: true, speech: true });
+  const [mainPage] = await Promise.all([
+    app.waitForEvent('window'),
+    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
+  ]);
+  assert.equal(
+    await mainPage.evaluate(() => window.desktop.presentation.liquidGlass),
+    packagedGlass,
+  );
+  if (packagedGlass) {
+    await mainPage.waitForFunction(() =>
+      document.documentElement.classList.contains('native-scroll-chrome'),
+    );
+    await mainPage.waitForFunction(
+      () => document.querySelectorAll('.macos-material-button.is-native').length === 3,
+    );
+    const start = await mainPage
+      .getByRole('button', { name: '开始面试', exact: true })
+      .boundingBox();
+    const toolbar = await mainPage.locator('.page-toolbar').boundingBox();
+    assert.equal(start.height, 36);
+    assert.ok(Math.abs(start.y + start.height / 2 - toolbar.y - toolbar.height / 2) < 1);
+    const deadline = Date.now() + 15000;
+    let composer;
+    while (!composer && Date.now() < deadline) {
+      for (const candidate of app.context().pages())
+        if (!candidate.isClosed() && (await candidate.title()) === 'VoxCue composer') {
+          composer = candidate;
+          break;
+        }
+      if (!composer) await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    assert.ok(composer, 'The final packaged application must project its native composer');
+    const input = composer.getByRole('textbox', { name: '聊天消息', exact: true });
+    await input.fill('Packaged Liquid Glass regression');
+    assert.equal(await input.evaluate((node) => getComputedStyle(node).fontSize), '14px');
+    assert.equal(
+      await composer.locator('form').evaluate((node) => getComputedStyle(node).borderRadius),
+      '40px',
+    );
+    await composer.getByRole('button', { name: '发送消息', exact: true }).click();
+    await mainPage.locator('.chat-message.assistant').waitFor();
+    assert.equal(
+      await mainPage
+        .locator('.conversation-row.active')
+        .evaluate((node) => getComputedStyle(node, '::before').borderRadius),
+      '999px',
+    );
+    console.log(
+      'PASS: final packaged Liquid Glass binding, three aligned native buttons, styled 40px composer, synthetic chat and shared capsule marker.',
+    );
+  } else {
+    await mainPage.waitForFunction(() =>
+      document.documentElement.classList.contains('web-materials'),
+    );
+    console.log('PASS: final packaged application selects the shared non-Liquid-Glass fallback.');
+  }
   if (installArchive) {
     const { installFeed } = require(
       path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/install-feed.js'),
@@ -496,7 +558,7 @@ try {
     );
   }
 } finally {
-  await app.close();
+  await closeUiApp(app);
 }
 
 if (cacheSource)

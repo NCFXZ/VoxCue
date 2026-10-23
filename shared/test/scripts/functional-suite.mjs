@@ -56,6 +56,8 @@ const mac = [
   'components',
   'dmg',
   'sidebar-glass',
+  'login-controls',
+  'sidebar-updates',
   'content-controls',
   'component-controls',
   'interview-glass',
@@ -65,7 +67,13 @@ const mac = [
   'development-signing',
   'app-icon',
 ];
-const nativeUI = ['sidebar-glass', 'component-controls', 'interview-glass'];
+const nativeUI = [
+  'login-controls',
+  'sidebar-updates',
+  'sidebar-glass',
+  'component-controls',
+  'interview-glass',
+];
 const nativeBinding = path.join(workspace.platformRoot, 'native/bin/VoxCue.SidebarGlass.node');
 const liquidGlassAvailable =
   process.platform === 'darwin' &&
@@ -159,15 +167,21 @@ for (const name of names) {
     [
       path.join(
         directory,
-        ['content-controls', 'component-controls'].includes(name)
+        ['content-controls', 'component-controls', 'login-controls', 'sidebar-updates'].includes(
+          name,
+        )
           ? 'sidebar-glass-smoke.mjs'
           : name + '-smoke.mjs',
       ),
-      ...(name === 'content-controls'
-        ? ['--content-only']
-        : name === 'component-controls'
-          ? ['--components-only']
-          : []),
+      ...(name === 'login-controls'
+        ? ['--login-only']
+        : name === 'sidebar-updates'
+          ? ['--updates-only']
+          : name === 'content-controls'
+            ? ['--content-only']
+            : name === 'component-controls'
+              ? ['--components-only']
+              : []),
     ],
     {
       cwd: workspace.platformRoot,

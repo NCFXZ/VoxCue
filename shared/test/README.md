@@ -1,8 +1,12 @@
-## 0.5.7 跨平台 UI 与 Mac 原生验收
+## 0.5.8 跨平台 UI 与 Mac 原生验收
 
-`functional-suite.mjs` 在 Mac 默认先运行当前 Liquid Glass 的三组界面专项：`sidebar-glass`（实际输入/工具栏/原生菜单/缩放/失焦）、其内含 `content-controls`（所有内容页、复制、原生搜索、确认/删除/重置、开关/滑杆、设置预览/滚动和开场）、`component-controls`（固定提示条、原生进度/取消、组件状态），以及 `interview-glass`（实际 Clear/Regular、深色可读性、三点/箭头、输入、设置、拖动/缩放/重载/回退）。这些使用生产 Mac 构建和实际 AppKit，不禁用材质；原生探针只操作自有合成窗口。
+登录亮面原生控件定向入口：在 `macos/` 执行 `node test/scripts/sidebar-glass-smoke.mjs --login-only`，检查实际Glass胶囊、原品牌图标、浅黑/深白文字、悬停及合成登录命中；可追加 `--screenshots=<明确绝对目录>` 交付两种主题的原生截图。登录窗口仅开放固定品牌按钮和只读预览背景的有界展示请求；预览检查一个跟随主题亮度的官网首屏配色底景、三项Clear、五项Regular及上下边缘像素连续性和860×520布局，拒绝其他面试材质。`web-materials` 同时检查回退登录文字/面试预览毛玻璃、44px胶囊搜索、聚焦/输入/清除及两种主题，也支持显式截图目录。
 
-随后36组共享业务/布局测试使用单独编译到临时目录的真实网页回退 renderer。编译断言回退端口存在且 Mac 实现未进入 bundle；测试启动器仅在已验证临时根内替换 loadFile/原生绑定，产品无测试开关。此组用于共用业务与 Windows 网页回退兼容性，不能作为 Liquid Glass 视觉验收或 Windows 原生验收。Mac 的14组其他专项保留原生窗口、权限接口、图标、启动器/编译/资料迁移/更新/组件/DMG，并覆盖合成采集、AEC、隔离钥匙串、固定签名及图标原轮廓。实际支持Liquid Glass时默认共53组串行；旧macOS跳过三组仅能在原生玻璃上验收的专项，运行其余50组，不把跳过项算作通过；`qwen-regression.mjs` 另覆盖真实 CPU/Metal 推理与后台切换。
+侧栏更新操作定向入口：在 `macos/` 执行 `node test/scripts/sidebar-glass-smoke.mjs --updates-only`，使用合成更新驱动检查实际AppKit中性Push圆形/胶囊、浅深色、鼠标/键盘展开、首秒保护、取消与下载完成，收起侧栏始终36px图标。需要交付截图时追加 `--screenshots=<明确绝对目录>`；用户要求停留演示时追加`--preview`，保持在合成“重启以更新”，关闭窗口或终端Enter后退出清理，不执行真实安装。共用 `updates-sidebar` 核对同样的回退交互及自动下载/保存确认；`content-controls` 追加空白原生搜索框聚焦检查，覆盖系统胶囊、图标/编辑器间距及输入/清除/滚动。
+
+`functional-suite.mjs` 在 Mac 默认先运行当前 Liquid Glass 的五组界面专项：`login-controls`（原生亮面登录、黑白文字及图文居中）、`sidebar-updates`（更新圆形/胶囊和收起侧栏）、`sidebar-glass`（实际输入/工具栏/原生菜单/缩放/失焦）、其内含 `content-controls`（所有内容页、复制、原生搜索、确认/删除/重置、开关/滑杆、设置预览/滚动和开场）、`component-controls`（固定提示条、原生进度/取消、组件状态），以及 `interview-glass`（实际 Clear/Regular、深色可读性、三点/箭头、输入、设置、拖动/缩放/重载/回退）。这些使用生产 Mac 构建和实际 AppKit，不禁用材质；原生探针只操作自有合成窗口。
+
+随后36组共享业务/布局测试使用单独编译到临时目录的真实网页回退 renderer。编译断言回退端口存在且 Mac 实现未进入 bundle；测试启动器仅在已验证临时根内替换 loadFile/原生绑定，产品无测试开关。此组用于共用业务与 Windows 网页回退兼容性，不能作为 Liquid Glass 视觉验收或 Windows 原生验收。Mac 的14组其他专项保留原生窗口、权限接口、图标、启动器/编译/资料迁移/更新/组件/DMG，并覆盖合成采集、AEC、隔离钥匙串、固定签名及图标原轮廓。实际支持Liquid Glass时默认共55组串行；旧macOS跳过五组仅能在原生玻璃上验收的专项，运行其余50组，不把跳过项算作通过；`qwen-regression.mjs` 另覆盖真实 CPU/Metal 推理与后台切换。
 
 `web-materials` 使用相同毛玻璃实现，分别核对Mac旧系统能力路径和Windows窗口控件布局；检查胶囊/圆形、菜单、40px输入轮廓、顶部覆盖、返回按钮、悬停及设置/窄窗。旧Mac路径可在macos运行 `node ../shared/test/scripts/web-materials-smoke.mjs --preview` 逐张人工检查；图片仅在测试临时根存放、退出清理。能力模拟不等于旧系统真机验收。
 

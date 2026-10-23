@@ -674,6 +674,7 @@ export async function checkContentControls({
   const search = await page.locator('input[type=search]').boundingBox();
   const pane = await page.locator('.history-page').boundingBox();
   assert.ok(search.width > pane.width - 100, 'Search must span the main content pane');
+  assert.equal(search.height, 44, 'Search reserves the shared taller control row');
   await probe('clickAt', { x: search.x + 100, y: search.y + search.height / 2 });
   await page.waitForTimeout(100);
   const editingSearch = flatten((await state()).tree).find(
@@ -681,6 +682,26 @@ export async function checkContentControls({
   );
   assert.ok(editingSearch?.editing, 'Pointer must focus the native search editor');
   assert.equal(editingSearch.focusRingType, 1, 'Search must not draw a rectangular focus ring');
+  assert.equal(editingSearch.bezeled, true, 'Use the complete AppKit search field');
+  assert.equal(editingSearch.borderShape, 1, 'Search uses the system capsule shape');
+  assert.ok(
+    editingSearch.textLeft > 0 && Math.abs(editingSearch.editorLeft - editingSearch.textLeft) <= 1,
+    'The editor must use AppKit searchTextBounds, not the icon hit area: ' +
+      JSON.stringify({ editor: editingSearch.editorLeft, text: editingSearch.textLeft }),
+  );
+  assert.equal(
+    await page.locator('input[type=search]').evaluate((node) => getComputedStyle(node).opacity),
+    '0',
+    'The shared search paints no second text layer while AppKit owns the field',
+  );
+  await capture('content-history-search-focused');
+  // An explicit preview pause can move focus to the user's foreground app.
+  await probe('clickAt', { x: search.x + 100, y: search.y + search.height / 2 });
+  await poll(
+    state,
+    (value) => flatten(value.tree).some((node) => node.class === 'NSSearchField' && node.editing),
+    'Native search focus must be restored after preview',
+  );
   await probe('typeText', '合成记录7');
   await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 1);
   assert.equal(await page.locator('input[type=search]').inputValue(), '合成记录7');

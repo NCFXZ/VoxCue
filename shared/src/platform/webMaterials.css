@@ -53,6 +53,10 @@
   border-radius: 50%;
   corner-shape: round;
 }
+.web-materials .sidebar-update.ui-button {
+  border-radius: 999px;
+  corner-shape: round;
+}
 .web-materials .floating-drag-handle {
   border-radius: 50%;
   corner-shape: round;

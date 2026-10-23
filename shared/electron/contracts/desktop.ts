@@ -110,7 +110,8 @@ export interface InterviewMaterialPlacement extends GlassSurfacePlacement {
     | 'regular-interactive'
     | 'regular-follow-hover'
     | 'dialog-halo'
-    | 'preview-scene';
+    | 'preview-scene'
+    | 'preview-login-scene';
   radius: number;
   round: boolean;
   dark: boolean;

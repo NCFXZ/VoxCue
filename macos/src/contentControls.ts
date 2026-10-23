@@ -1,5 +1,6 @@
 import type { ContentControlPlacement } from '../../shared/electron/contracts/desktop';
 import { materialColor, materialOpacity } from './materialGeometry';
+import { readLiquidGlass } from './liquidGlassPreference';
 
 export function applyContentRange(element: HTMLElement | undefined, value: number) {
   if (
@@ -33,6 +34,11 @@ export function contentControl(
   const slider = input && element.type === 'range';
   const progress = element.matches('.download-ring[role="progressbar"]');
   const download = element.matches('.download-button');
+  const sidebarUpdate = element.matches('.sidebar-update');
+  const login = location.hash === '#login' && element.matches('.service-login');
+  const cancelling =
+    download &&
+    getComputedStyle(element.querySelector('.download-button-cancel')!).visibility === 'visible';
   // Confirmation buttons retain both animation layers in the DOM;
   // only the current layer supplies native text and its leading icon.
   const content = element.matches('.confirm-delete')
@@ -43,10 +49,7 @@ export function contentControl(
       ) ?? element)
     : download
       ? (element.querySelector<HTMLElement>(
-          getComputedStyle(element.querySelector('.download-button-cancel')!).visibility ===
-            'visible'
-            ? '.download-button-cancel'
-            : '.download-button-progress',
+          cancelling ? '.download-button-cancel' : '.download-button-progress',
         ) ?? element)
       : element;
   const swatch = content.querySelector('.accent-swatch');
@@ -63,7 +66,9 @@ export function contentControl(
     : progress
       ? (element.getAttribute('aria-label') ?? '')
       : content.innerText.trim().replace(/\s+/g, ' ');
-  const danger = element.matches('.button-danger-ghost,.button-destructive');
+  const danger =
+    element.matches('.button-danger-ghost,.button-destructive') || (sidebarUpdate && cancelling);
+  const accent = element.classList.contains('button-primary') || (sidebarUpdate && !download);
   // Match AppKit's actual backing surface rather than the action's shape.
   // Dialogs/settings use content controls; native glass panes and sidebar use
   // over-glass artwork, including their expanded confirmation state.
@@ -72,7 +77,7 @@ export function contentControl(
     (['over-glass', 'standalone-glass'].includes(element.dataset.nativeControlStyle ?? '') ||
       (!element.closest('dialog[open]') &&
         !!element.closest('.macos-native-panel-material,.sidebar')));
-  const systemForeground = element.classList.contains('button-primary') || overGlass;
+  const systemForeground = !login && (accent || overGlass);
   return {
     id,
     x,
@@ -83,7 +88,7 @@ export function contentControl(
       ? 'font-slider'
       : progress
         ? 'progress'
-        : preview || download
+        : preview || (download && !sidebarUpdate)
           ? 'button-background'
           : toggle
             ? 'switch'
@@ -102,19 +107,15 @@ export function contentControl(
       : progress
         ? (element.getAttribute('aria-valuenow') ?? '')
         : '',
-    symbol: preview
-      ? null
-      : (symbol?.getAttribute('data-sf-symbol') ?? (swatch ? 'circle.fill' : null)),
+    symbol: login
+      ? 'brand.chatgpt'
+      : preview
+        ? null
+        : (symbol?.getAttribute('data-sf-symbol') ?? (swatch ? 'circle.fill' : null)),
     symbolColor: swatch ? materialColor(swatch, 'background-color') : null,
     color: materialColor(
       danger || systemForeground ? root : element,
-      danger
-        ? '--danger'
-        : element.classList.contains('button-primary')
-          ? '--accent'
-          : systemForeground
-            ? '--foreground'
-            : 'color',
+      danger ? '--danger' : accent ? '--accent' : systemForeground ? '--foreground' : 'color',
     ),
     disabled: element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true',
     covered: !!modal && !modal.contains(element),
@@ -133,7 +134,7 @@ export function contentControl(
 if (
   window.desktop?.platform === 'macos' &&
   window.desktop.presentation?.liquidGlass === true &&
-  !location.hash
+  (!location.hash || location.hash === '#login')
 ) {
   const desktop = window.desktop,
     root = document.documentElement;
@@ -149,7 +150,7 @@ if (
   const selector =
     'button,input[type="search"],input[type="range"][aria-label="面试字体大小"],[data-interview-preview-button],.download-ring[role="progressbar"]';
   const excluded =
-    '.macos-material-button,.follow-latest,.user-button,.sidebar-update,.conversation-delete,.nav-item,.conversation,.knowledge-card,.history-row,.record-answer-link,.settings-sidebar nav button,.composer button,.chat-composer button,.floating-toolbar button,.floating-composer button';
+    '.macos-material-button,.follow-latest,.user-button,.conversation-delete,.nav-item,.conversation,.knowledge-card,.history-row,.record-answer-link,.settings-sidebar nav button,.composer button,.chat-composer button,.floating-toolbar button,.floating-composer button';
   const clear = () => {
     for (const element of elements.values()) element.classList.remove('macos-content-native');
     elements.clear();
@@ -239,6 +240,13 @@ if (
       next = new Map<number, HTMLElement>();
     const modal = [...document.querySelectorAll('dialog[open]')].at(-1);
     for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+      // Keep the unhovered update progress ring alone. Only its cancel action
+      // acquires a native button; the shared download guard still owns clicks.
+      if (
+        element.matches('.sidebar-update.download-button') &&
+        getComputedStyle(element.querySelector('.download-button-cancel')!).visibility !== 'visible'
+      )
+        continue;
       if (
         element.matches('.floating-toolbar [data-interview-preview-button]') &&
         !element.matches(':hover,:focus-visible,:active')
@@ -254,7 +262,14 @@ if (
       if (
         !toggle &&
         !element.matches('input[type="range"]') &&
-        !root.classList.contains('sidebar-liquid-glass')
+        !root.classList.contains('sidebar-liquid-glass') &&
+        !(
+          location.hash === '#login' &&
+          (element.matches('.service-login') ||
+            (root.classList.contains('macos-login-preview') &&
+              element.hasAttribute('data-interview-preview-button'))) &&
+          readLiquidGlass()
+        )
       )
         continue;
       if (

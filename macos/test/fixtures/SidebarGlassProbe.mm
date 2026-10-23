@@ -76,7 +76,7 @@ static NSDictionary *tree(NSView *view, NSInteger depth) {
         @"appearance": view.effectiveAppearance.name, @"class": NSStringFromClass(view.class), @"frame": NSStringFromRect(view.frame),
         @"bounds": NSStringFromRect(view.bounds), @"opaque": @(view.isOpaque),
         @"hidden": @(view.isHidden), @"alpha": @(view.alphaValue), @"identifier": view.identifier ?: @"",
-        @"layerOpaque": @(view.layer.opaque),
+        @"layerOpaque": @(view.layer.opaque), @"layerMasked": @(view.layer.mask!=nil),
         @"layerBackground": view.layer.backgroundColor ? color([NSColor colorWithCGColor:view.layer.backgroundColor]) : @[],
     } mutableCopy];
     if([view.identifier isEqualToString:@"voxcue-header-title"] || [view isKindOfClass:NSButton.class]) {
@@ -104,6 +104,10 @@ static NSDictionary *tree(NSView *view, NSInteger depth) {
     if ([view isKindOfClass:NSSearchField.class]) {
         NSSearchField *field=(NSSearchField *)view;
         node[@"value"]=field.stringValue;node[@"textBounds"]=NSStringFromRect(field.searchTextBounds);
+        node[@"bezeled"]=@(field.bezeled);
+        if(@available(macOS 26.0,*))node[@"borderShape"]=@(field.borderShape);
+        node[@"textLeft"]=@(NSMinX(field.searchTextBounds));
+        if(field.currentEditor)node[@"editorLeft"]=@(NSMinX([field convertRect:field.currentEditor.bounds fromView:field.currentEditor]));
         node[@"focusRingType"]=@(field.focusRingType);
         NSView *container=field.superview;
         while(container && ![NSStringFromClass(container.class) isEqualToString:@"VoxCueContentHost"])container=container.superview;
@@ -117,6 +121,12 @@ static NSDictionary *tree(NSView *view, NSInteger depth) {
     }
     if ([view isKindOfClass:NSButton.class]) node[@"image"] = @(((NSButton *)view).image != nil);
     if ([NSStringFromClass(view.class) isEqualToString:@"VoxCueContentHost"]) node[@"contentId"] = [view valueForKey:@"identity"];
+    if ([NSStringFromClass(view.class) isEqualToString:@"VoxCueLoginBackdrop"]) {
+        node[@"dark"] = [view valueForKey:@"dark"];
+        CAGradientLayer *base=[view valueForKey:@"base"];
+        node[@"baseAttached"]=@(base.superlayer==view.layer);
+        node[@"baseColor"]=base.colors.count?color([NSColor colorWithCGColor:(__bridge CGColorRef)base.colors[0]]):@[];
+    }
     if ([NSStringFromClass(view.class) isEqualToString:@"VoxCueForegroundSurface"] && [view.layer.mask isKindOfClass:CAShapeLayer.class]) {
         CGPathRef mask=((CAShapeLayer *)view.layer.mask).path;
         node[@"maskEmpty"]=@(CGPathIsEmpty(mask));
@@ -126,10 +136,14 @@ static NSDictionary *tree(NSView *view, NSInteger depth) {
         node[@"behindContent"] = [view valueForKey:@"behindContent"];
     if (@available(macOS 26.0, *)) if ([view isKindOfClass:NSButton.class]) {
         NSButton *button = (NSButton *)view;
-        BOOL inGlassContent=NO;
-        for(NSView *ancestor=view.superview;ancestor;ancestor=ancestor.superview)
-            if([ancestor.identifier isEqualToString:@"voxcue-over-glass-content"]) { inGlassContent=YES;break; }
+        BOOL inGlassContent=NO,inSystemGlassContent=NO;
+        for(NSView *ancestor=view.superview;ancestor;ancestor=ancestor.superview) {
+            if([ancestor.identifier isEqualToString:@"voxcue-over-glass-content"])inGlassContent=YES;
+            if([ancestor isKindOfClass:NSGlassEffectView.class] &&
+               [view isDescendantOf:((NSGlassEffectView *)ancestor).contentView])inSystemGlassContent=YES;
+        }
         node[@"inGlassContent"]=@(inGlassContent);
+        node[@"inSystemGlassContent"]=@(inSystemGlassContent);
         node[@"windowKey"]=@(view.window.isKeyWindow);
         node[@"bezelStyle"] = @(button.bezelStyle); node[@"borderShape"] = @(button.borderShape);
         node[@"title"] = button.title; node[@"enabled"] = @(button.enabled);

@@ -47,6 +47,66 @@ try {
     };
   });
   const login = await app.firstWindow();
+  const signIn = login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+  await signIn.waitFor();
+  for (const dark of [false, true]) {
+    await login.emulateMedia({ colorScheme: dark ? 'dark' : 'light' });
+    await login.waitForFunction(
+      (dark) => document.documentElement.classList.contains('dark') === dark,
+      dark,
+    );
+    await login.waitForFunction(
+      (dark) =>
+        getComputedStyle(document.querySelector('.service-login')).color ===
+        (dark ? 'rgb(255, 255, 255)' : 'rgb(0, 0, 0)'),
+      dark,
+    );
+    assert.equal(
+      await signIn.evaluate((node) => getComputedStyle(node).color),
+      dark ? 'rgb(255, 255, 255)' : 'rgb(0, 0, 0)',
+    );
+    assert.equal(await signIn.evaluate((node) => getComputedStyle(node).borderRadius), '999px');
+    assert.equal(await signIn.evaluate((node) => getComputedStyle(node).justifyContent), 'center');
+    assert.equal(await login.locator('.login-explanation').count(), 0);
+    const scene = login.locator('.login-preview .interview-preview-scene');
+    assert.equal(await scene.locator('.floating-panel').count(), 2);
+    assert.equal(await scene.locator('.provider-identity').innerText(), 'ChatGPT');
+    assert.equal(await scene.locator('.macos-native-panel-material').count(), 0);
+    assert.equal(await scene.evaluate((node) => getComputedStyle(node).backgroundImage), 'none');
+    const backdrop = await login.locator('.login-preview').evaluate((node) => ({
+      background: getComputedStyle(node).backgroundImage,
+      glow: getComputedStyle(node, '::before').opacity,
+    }));
+    assert.ok(backdrop.background.includes(dark ? 'rgb(52, 75, 96)' : 'rgb(191, 202, 215)'));
+    assert.equal(backdrop.glow, dark ? '0.48' : '1');
+    assert.match(
+      await scene
+        .locator('.floating-composer')
+        .evaluate((node) => getComputedStyle(node).backdropFilter),
+      /blur\(24px\)/,
+    );
+    if (process.argv.some((arg) => arg.startsWith('--screenshots='))) {
+      const directory = process.argv.find((arg) => arg.startsWith('--screenshots=')).slice(14);
+      assert.ok(path.isAbsolute(directory));
+      await mkdir(directory, { recursive: true });
+      await login.screenshot({
+        path: path.join(directory, 'fallback-login-' + (dark ? 'dark' : 'light') + '.png'),
+        animations: 'disabled',
+      });
+    }
+  }
+  await (await app.browserWindow(login)).evaluate((win) => win.setSize(860, 520));
+  await login.waitForFunction(() => innerWidth === 860 && innerHeight === 520);
+  assert.ok(
+    await login.locator('.login-preview .interview-font-preview').evaluate((node) => {
+      const panels = [...node.children].map((child) => child.getBoundingClientRect());
+      return (
+        panels[0].right < panels[1].left &&
+        panels.every((box) => box.top >= 0 && box.bottom <= innerHeight)
+      );
+    }),
+    'Minimum login retains both preview panels side by side within the window',
+  );
   const [page] = await Promise.all([
     app.waitForEvent('window'),
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
@@ -120,6 +180,41 @@ try {
     'rgba(0, 0, 0, 0)',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await page.getByRole('button', { name: '面试记录', exact: true }).click();
+  await page.evaluate(() => {
+    const records = ['项目讨论', '自我介绍'].map((title, i) => ({
+      id: 'synthetic-search-' + i,
+      title,
+      titleStatus: 'ready',
+      startedAt: Date.now() - i * 60000,
+      endedAt: Date.now(),
+      status: 'ended',
+      mock: false,
+      transcripts: [],
+      answers: [],
+    }));
+    localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+  });
+  await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 2);
+  const search = page.getByRole('searchbox', { name: '搜索标题' });
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    await search.focus();
+    assert.deepEqual(
+      await search.evaluate((node) => ({
+        height: node.getBoundingClientRect().height,
+        radius: getComputedStyle(node).borderRadius,
+        opacity: getComputedStyle(node).opacity,
+      })),
+      { height: 44, radius: '999px', opacity: '1' },
+    );
+    await search.fill('项目');
+    await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 1);
+    await search.fill('');
+    await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 2);
+  }
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
   for (const [width, dark] of [
     [1280, false],
     [960, true],

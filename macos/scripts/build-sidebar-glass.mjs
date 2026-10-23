@@ -1,5 +1,5 @@
 import workspace from '../../shared/scripts/workspace.mjs';
-import { mkdir, copyFile, mkdtemp, rename, rm } from 'node:fs/promises';
+import { mkdir, copyFile, mkdtemp, readFile, writeFile, rename, rm } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,6 +18,13 @@ export async function buildSidebarGlass() {
   const staging = await mkdtemp(path.join(root, 'native/bin/.sidebar-glass-build-'));
   const output = path.join(staging, 'VoxCue.SidebarGlass.node');
   try {
+    // Embed the original shared brand artwork, without another asset copy or
+    // any renderer-provided path/data in the native control contract.
+    const brand = await readFile(path.join(workspace.sharedRoot, 'src/assets/chatgpt.svg'));
+    await writeFile(
+      path.join(staging, 'ChatGPTBrand.h'),
+      `static const unsigned char VoxCueChatGPTBrand[]={${[...brand].join(',')}};\n`,
+    );
     for (const [command, args] of [
       [
         '/usr/bin/xcrun',
@@ -35,6 +42,8 @@ export async function buildSidebarGlass() {
           '-O2',
           '-I',
           headers,
+          '-I',
+          staging,
           path.join(root, 'native/SidebarGlass.mm'),
           path.join(root, 'native/LiquidGlassControls.mm'),
           path.join(root, 'native/NativeMenu.mm'),

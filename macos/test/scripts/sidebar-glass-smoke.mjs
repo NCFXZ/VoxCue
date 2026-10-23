@@ -7,6 +7,8 @@ import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { checkContentControls } from './content-controls-check.mjs';
 import { checkComponentControls } from './component-controls-check.mjs';
+import { checkSidebarUpdates } from './sidebar-updates-check.mjs';
+import { checkLoginControls } from './login-controls-check.mjs';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required.');
@@ -43,12 +45,33 @@ if (compilation.status !== 0) throw Error('Native sidebar probe compilation fail
 
 for (const name of ['profile', 'tmp', 'home'])
   await mkdir(path.join(testRoot, name), { recursive: true });
+if (process.argv.includes('--updates-only'))
+  await writeFile(
+    path.join(testRoot, 'profile/update-settings.json'),
+    JSON.stringify({ schemaVersion: 1, autoDownload: false }),
+  );
 const fixture = path.join(testRoot, 'sidebar-glass.cjs');
 await writeFile(
   fixture,
   `const {app,dialog}=require('electron');
   dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(91);};
   process.on('uncaughtException',error=>{console.error(error.stack);app.exit(92);});
+  ${
+    process.argv.includes('--updates-only')
+      ? `
+  const {EventEmitter}=require('node:events');
+  const driver=new EventEmitter();
+  driver.checkForUpdates=async()=>{driver.emit('update-available',{version:'9.9.9'});};
+  driver.downloadUpdate=signal=>new Promise((resolve,reject)=>{
+    driver.finish=()=>{driver.emit('update-downloaded');resolve();};
+    signal.addEventListener('abort',()=>reject(Error('cancelled')),{once:true});
+  });
+  driver.quitAndInstall=()=>{throw Error('Native UI test must not install updates');};
+  globalThis.sidebarUpdateDriver=driver;
+  require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/updates/driver.js'))}).createUpdateDriver=()=>driver;
+  `
+      : ''
+  }
   require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});`,
 );
 const env = {
@@ -88,6 +111,12 @@ try {
     .on('exit', (code, signal) => console.log('test application exited', { code, signal }));
   const login = await app.firstWindow();
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  if (process.argv.includes('--login-only')) {
+    await checkLoginControls({ app, page: login, probeFile, poll });
+    await closeUiApp(app);
+    app = undefined;
+    process.exit(0); // test-workspace's exit hook removes the owned temporary root.
+  }
   await installUiAccount(app, { components: true, speech: true });
   await app.evaluate(({ app, session, BrowserWindow, webContents }) => {
     // A rebuild may remove the original hashed CSS asset. Deny stylesheet
@@ -333,7 +362,14 @@ try {
     );
     return native.menuItems;
   };
-  if (process.argv.includes('--components-only')) {
+  if (process.argv.includes('--updates-only')) {
+    await checkSidebarUpdates({ app, page, state, poll, probe, probeFile });
+    if (preview) {
+      console.log('更新演示已停在“重启以更新”，按 Enter 后关闭演示；不会执行真实更新。');
+      await Promise.race([pausePreview(), page.waitForEvent('close', { timeout: 0 })]);
+      process.stdin.pause();
+    }
+  } else if (process.argv.includes('--components-only')) {
     await checkComponentControls({ app, page, state, poll, capture, choose });
   } else if (process.argv.includes('--content-only') || process.argv.includes('--copy-only')) {
     await checkContentControls({

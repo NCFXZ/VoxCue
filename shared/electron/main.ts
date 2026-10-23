@@ -668,7 +668,7 @@ app.whenReady().then(() => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (
       !win ||
-      ![mainWindow, interviewWindow].includes(win) ||
+      ![mainWindow, interviewWindow, loginWindow].includes(win) ||
       event.senderFrame !== event.sender.mainFrame
     )
       throw Error('Unauthorized window');
@@ -679,6 +679,19 @@ app.whenReady().then(() => {
       args.length !== 1 ||
       !Array.isArray(controls) ||
       controls.length > 256 ||
+      (win === loginWindow &&
+        (controls.length > 8 ||
+          controls.some(
+            (item) =>
+              !(
+                (item?.kind === 'button-glass' && item?.symbol === 'brand.chatgpt') ||
+                (item?.kind === 'button-background' &&
+                  item?.overGlass === true &&
+                  item?.symbol === null &&
+                  item?.label === '')
+              ),
+          ) ||
+          controls.filter((item) => item?.kind === 'button-glass').length > 1)) ||
       controls.some((item) => {
         if (
           !item ||
@@ -796,7 +809,7 @@ app.whenReady().then(() => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (
       !win ||
-      ![mainWindow, interviewWindow].includes(win) ||
+      ![mainWindow, interviewWindow, loginWindow].includes(win) ||
       event.senderFrame !== event.sender.mainFrame
     )
       throw Error('Unauthorized window');
@@ -827,6 +840,15 @@ app.whenReady().then(() => {
       args.length !== 1 ||
       !Array.isArray(materials) ||
       materials.length > 256 ||
+      (win === loginWindow &&
+        (materials.length > 16 ||
+          (materials.length > 0 &&
+            materials.filter((item) => item?.style === 'preview-login-scene').length !== 1) ||
+          materials.some(
+            (item) =>
+              (item?.style !== 'preview-login-scene' && item?.dark !== true) ||
+              !['preview-login-scene', 'clear', 'regular'].includes(item?.style),
+          ))) ||
       materials.some((item) => {
         if (
           !item ||
@@ -843,16 +865,18 @@ app.whenReady().then(() => {
         ids.add(item.id);
         return (
           !(
-            win === mainWindow
-              ? ['clear', 'regular', 'preview-scene']
-              : [
-                  'clear',
-                  'regular',
-                  'regular-dark',
-                  'regular-interactive',
-                  'regular-follow-hover',
-                  'dialog-halo',
-                ]
+            win === loginWindow
+              ? ['clear', 'regular', 'preview-login-scene']
+              : win === mainWindow
+                ? ['clear', 'regular', 'preview-scene']
+                : [
+                    'clear',
+                    'regular',
+                    'regular-dark',
+                    'regular-interactive',
+                    'regular-follow-hover',
+                    'dialog-halo',
+                  ]
           ).includes(item.style) ||
           !rectangle(item) ||
           !rectangle(item.clip, true) ||
