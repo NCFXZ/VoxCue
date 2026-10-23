@@ -6,7 +6,6 @@ export function captureError(code?: string) {
   if (code === 'permission-denied')
     return '音频权限未开启，请在 macOS 隐私与安全性设置中允许 VoxCue 访问麦克风或录制系统音频后重试。';
   if (code === 'device-unavailable') return '所选音频设备已断开，请刷新并重新选择设备。';
-  if (code === 'unsupported-os') return '原生系统音频需要 macOS 14.2 或更新版本。';
   if (code === 'device-changed-or-backpressure')
     return '音频设备、采样率或默认设备已变化，或采集积压超限；采集已停止，请检查设备后重新开始。';
   return 'macOS 音频设备无法初始化，请检查设备和隐私权限后重试。';

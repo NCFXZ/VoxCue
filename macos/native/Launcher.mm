@@ -10,7 +10,7 @@ int main(int argc, char *argv[]) {
         NSString *runtime = [root stringByAppendingPathComponent:@".tools/electron-dev"];
         NSString *executable = [runtime stringByAppendingPathComponent:@"Electron.app/Contents/MacOS/Electron"];
         NSFileManager *files = NSFileManager.defaultManager;
-        NSArray *required = @[@"package.json", @"dist/index.html", @"dist-electron/shared/electron/main.js", @"native/bin/VoxCue.Audio", @"native/bin/VoxCue.ScreenPermission.node", @"public/voxcue.png"];
+        NSArray *required = @[@"package.json", @"dist/index.html", @"dist-electron/shared/electron/main.js", @"native/bin/VoxCue.Audio", @"native/bin/VoxCue.ScreenPermission.node", @"native/bin/VoxCue.SidebarGlass.node", @"public/voxcue.png"];
         BOOL ready = [files isExecutableFileAtPath:executable];
         for (NSString *name in required) ready = ready && [files fileExistsAtPath:[root stringByAppendingPathComponent:name]];
         if (ready) {

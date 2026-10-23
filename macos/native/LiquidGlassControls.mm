@@ -69,7 +69,7 @@ napi_value VoxCueConfigureGlassButton(napi_env env, napi_callback_info info) {
     napi_value placement = args[2];
     NSView *host = ((__bridge NSView *)pointer).window.contentView;
     bool active = false;
-    if (@available(macOS 26.0, *)) {
+    {
         if (host) {
             napi_value nullValue; bool remove = false;
             napi_get_null(env, &nullValue); napi_strict_equals(env, placement, nullValue, &remove);
@@ -78,15 +78,14 @@ napi_value VoxCueConfigureGlassButton(napi_env env, napi_callback_info info) {
                 [view removeFromSuperview];
                 objc_setAssociatedObject(host, key, nil, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             } else {
-                double x = 0, y = 0, width = 0, height = 0; bool enabled = false;
+                double x = 0, y = 0, width = 0, height = 0;
                 double *numbers[] = {&x, &y, &width, &height};
                 const char *names[] = {"x", "y", "width", "height"};
                 for (size_t index = 0; index < sizeof(numbers) / sizeof(numbers[0]); index++) {
                     napi_value value; napi_get_named_property(env, placement, names[index], &value);
                     napi_get_value_double(env, value, numbers[index]);
                 }
-                napi_value state; napi_get_named_property(env, placement, "enabled", &state);
-                napi_get_value_bool(env, state, &enabled);
+                napi_value state;
                 if (!view) {
                     view = [[VoxCueGlassControlHost alloc] initWithFrame:NSZeroRect];
                     {
@@ -149,7 +148,7 @@ napi_value VoxCueConfigureGlassButton(napi_env env, napi_callback_info info) {
                     napi_get_named_property(env,placement,"pressed",&state);napi_get_value_bool(env,state,&pressed);
                     BOOL highlighted=button.enabled && (hovered || pressed);
                     if(button.cell.highlighted!=highlighted)[button highlight:highlighted];
-                    button.bezelStyle = enabled ? NSBezelStyleGlass : NSBezelStyleFlexiblePush;
+                    button.bezelStyle = NSBezelStyleGlass;
                     button.frame = view.bounds;
                 }
                 VoxCueRaiseGlassControls(host);

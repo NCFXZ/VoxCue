@@ -50,7 +50,7 @@ if (
     frame = requestAnimationFrame(() => {
       frame = 0;
       const workspace = document.querySelector<HTMLElement>(
-        '.preparation-route:not([hidden]) .preparation-workspace, .management-page',
+        '.preparation-route:not([hidden]) .preparation-workspace, .management-page, .history-detail',
       );
       const column = workspace?.querySelector('.chat-column') ?? workspace;
       const toolbar = workspace?.querySelector('.page-toolbar');
@@ -62,7 +62,6 @@ if (
         root.classList.contains('sidebar-liquid-glass') &&
         column &&
         toolbar &&
-        title &&
         (!composer || composer.getClientRects().length)
       ) {
         const area = rectangle(workspace!),
@@ -81,9 +80,9 @@ if (
         )
           queued = {
             area,
-            title: rectangle(title),
-            titleText: title.textContent?.trim() ?? '',
-            titleOpacity: materialOpacity(title),
+            title: title ? rectangle(title) : null,
+            titleText: title?.textContent?.trim() ?? '',
+            titleOpacity: title ? materialOpacity(title) : 0,
             composer: form,
             follow: follow?.getClientRects().length ? rectangle(follow) : null,
             followHovered: !!follow?.getClientRects().length && followHovered,

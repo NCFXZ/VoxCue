@@ -60,8 +60,7 @@ API_AVAILABLE(macos(26.0))
 }
 @end
 bool VoxCueIsContentControl(NSView *view) {
-    if(@available(macOS 26.0,*))return [view isKindOfClass:VoxCueContentHost.class];
-    return false;
+    return [view isKindOfClass:VoxCueContentHost.class];
 }
 static void deliver(napi_env env,napi_value callback,void *,void *data) {
     auto *change=static_cast<ContentChange *>(data);
@@ -93,7 +92,7 @@ static char managerKey;
 // Reproject from the saved window-space rect after either update, so moving a
 // glass contentView cannot move its already positioned controls a second time.
 void VoxCueRefreshContentControlPlacement(NSView *host) {
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueContentManager *manager=objc_getAssociatedObject(host,&managerKey);
         for(VoxCueContentHost *view in manager.views.allValues) {
             NSRect rect=view.hostRect;
@@ -123,7 +122,7 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
     std::memcpy(&pointer,bytes,sizeof(pointer));NSView *host=((__bridge NSView *)pointer).window.contentView;
     uint32_t size=0;napi_get_array_length(env,args[1],&size);
     if(!host || size>256){napi_get_boolean(env,false,&result);return result;}
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueContentManager *manager=objc_getAssociatedObject(host,&managerKey);
         if(!manager && size) {
             manager=[VoxCueContentManager new];manager.views=[NSMutableDictionary dictionary];
@@ -283,5 +282,5 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
         }
         VoxCueRefreshContentControlPlacement(host);
         napi_get_boolean(env,true,&result);return result;
-    }napi_get_boolean(env,false,&result);return result;
+    }
 }

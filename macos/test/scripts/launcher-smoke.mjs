@@ -7,10 +7,19 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/launcher-native-')));
 const executable = path.resolve('VoxCue.app/Contents/MacOS/VoxCue');
+assert.equal(
+  execFileSync(
+    '/usr/libexec/PlistBuddy',
+    ['-c', 'Print :LSMinimumSystemVersion', path.resolve('VoxCue.app/Contents/Info.plist')],
+    { encoding: 'utf8' },
+  ).trim(),
+  '26.0',
+);
 const env = { ...process.env, COPILOT_TEST_USER_DATA: output, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ executablePath: executable, args: [], env });

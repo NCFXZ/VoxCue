@@ -1,8 +1,7 @@
 import { headerCoverage } from './chromeGeometry';
 import './webMaterials.css';
 
-// Shared fallback for Windows, older macOS and unavailable native materials.
-// Native adapters announce successful installation with their bounded scope.
+// Windows/shared web materials. Mac replaces the initialization port at build time.
 export function installWebMaterials() {
   const root = document.documentElement;
   let frame = 0;

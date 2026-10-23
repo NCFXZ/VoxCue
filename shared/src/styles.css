@@ -262,6 +262,9 @@ p {
   border-color: transparent;
   box-shadow: none;
 }
+.ui-button[data-native-reveal-on-hover]:focus-visible:not(:disabled) {
+  background: var(--hover);
+}
 .button-destructive {
   background: var(--danger-fill);
   color: #fff;

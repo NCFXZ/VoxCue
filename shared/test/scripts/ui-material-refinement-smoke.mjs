@@ -52,6 +52,16 @@ const hoverOnly = async (page, button) => {
     'rgba(0, 0, 0, 0)',
   );
   assert.deepEqual(await button.boundingBox(), before);
+  await page.keyboard.press('Tab');
+  await button.focus();
+  await page.mouse.move(1, 1);
+  await settle(page);
+  assert.equal(await button.evaluate((e) => e.matches(':focus-visible')), true);
+  assert.notEqual(
+    await button.evaluate((e) => getComputedStyle(e).backgroundColor),
+    'rgba(0, 0, 0, 0)',
+  );
+  assert.deepEqual(await button.boundingBox(), before);
 };
 const centeredFont = async (scope) => {
   assert.equal(await scope.getByRole('slider', { name: '面试背景透明度', exact: true }).count(), 0);
@@ -123,6 +133,7 @@ try {
   for (const dark of [false, true]) {
     await theme(page, dark);
     await modalStyle(settings);
+    await captureRequested(page, 'main-settings-' + (dark ? 'dark' : 'light'));
   }
   assert.equal(
     await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),

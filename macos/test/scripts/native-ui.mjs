@@ -5,7 +5,6 @@ import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 // Native material content is a separate owned WebContents. Keep the parent
 // page for window assertions, and locate the actual input surface for typing.
 export async function composerPage(app, parent) {
-  const native = await parent.evaluate(() => window.desktop.presentation.liquidGlass === true);
   const deadline = Date.now() + 15000;
   do {
     for (const page of app.context().pages()) {
@@ -15,13 +14,6 @@ export async function composerPage(app, parent) {
         return page;
       }
     }
-    if (
-      !native &&
-      (await parent.evaluate(
-        () => !!document.querySelector('[aria-label="聊天消息"]')?.checkVisibility(),
-      ))
-    )
-      return parent;
     await new Promise((resolve) => setTimeout(resolve, 50));
   } while (Date.now() < deadline);
   throw Error('Owned composer surface did not appear');
@@ -29,11 +21,6 @@ export async function composerPage(app, parent) {
 
 let probeFile;
 export async function chooseNativeMenu(app, page, trigger, title) {
-  if (!(await page.evaluate(() => window.desktop.presentation.liquidGlass))) {
-    await trigger.click();
-    await page.getByRole('menuitem', { name: title, exact: true }).click();
-    return;
-  }
   if (!probeFile) {
     probeFile = path.join(testRoot, 'NativeUIProbe.node');
     const result = spawnSync(

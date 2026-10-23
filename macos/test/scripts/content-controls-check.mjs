@@ -1052,17 +1052,6 @@ export async function checkContentControls({
       ),
     'Preview uses the same black backing strength as the real interview',
   );
-  const previewColors = () =>
-    settings.locator('.interview-preview-scene').evaluate((scene) => {
-      const bubble = scene.querySelector('.answer-bubble'),
-        css = getComputedStyle(bubble);
-      return {
-        scene: getComputedStyle(scene).backgroundImage,
-        bubble: css.backgroundColor,
-        text: css.color,
-        tint: css.getPropertyValue('--frosted-panel-tint').trim(),
-      };
-    });
   const previewFills = await settings
     .locator('.interview-preview-scene .macos-native-panel-material')
     .evaluateAll((nodes) =>
@@ -1081,31 +1070,16 @@ export async function checkContentControls({
     localStorage.setItem('voxcue-liquid-glass-enabled-v1', 'false');
     window.dispatchEvent(new Event('storage'));
   });
-  await page.waitForFunction(
-    () =>
-      !document.documentElement.classList.contains('sidebar-liquid-glass') &&
-      !document.querySelector('[data-native-preview]'),
-  );
-  const fallback = await previewColors();
-  assert.equal(
-    fallback.tint,
-    '29 35 39',
-    'A dark preview must own its dark tint in a light application',
-  );
-  assert.equal(fallback.text, 'rgb(231, 235, 237)');
-  assert.match(fallback.bubble, /^rgba?\(29, 35, 39/);
-  assert.match(
-    fallback.scene,
-    /rgb\(65, 109, 123\)/,
-    'The preview scene itself must use the dark gradient',
-  );
-  await capture('content-settings-interview-fallback');
-  await page.evaluate(() => {
-    localStorage.setItem('voxcue-liquid-glass-enabled-v1', 'true');
-    window.dispatchEvent(new Event('storage'));
-  });
+  await page.waitForTimeout(150);
   await page.waitForFunction(() => document.querySelector('dialog[data-native-preview]'));
-  assert.equal((await previewColors()).bubble, 'rgba(0, 0, 0, 0)');
+  assert.equal(
+    await settings
+      .locator('.answer-bubble')
+      .first()
+      .evaluate((node) => getComputedStyle(node).backgroundColor),
+    'rgba(0, 0, 0, 0)',
+    'Legacy preference cannot switch the native preview to a web surface',
+  );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.locator('.preparation-workspace').waitFor();

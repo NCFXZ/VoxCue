@@ -133,7 +133,12 @@ export async function verifyContinuousCorners(page, name) {
             element.matches(
               '.composer,.floating-composer,.follow-latest,.floating-toolbar,.floating-panel,.answer-bubble,.interview-answer-failure',
             ) &&
-            style.boxShadow !== raisedShadowFor(element)
+            style.boxShadow !==
+              (!fallback &&
+              window.desktop?.presentation?.liquidGlass === true &&
+              element.matches('.macos-native-interview-material,.macos-native-panel-material')
+                ? 'none'
+                : raisedShadowFor(element))
           )
             wrongSurfaces.push(label + ': inconsistent raised surface shadow');
           if (element.matches('.interview-answer-failure') && style.borderRadius !== answerRadius)

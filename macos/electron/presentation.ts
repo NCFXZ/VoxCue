@@ -7,21 +7,22 @@ export function createPresentation(options: {
   material?: NativeMaterial;
   interviewOpen(): boolean;
 }): NativePresentation {
+  const glass = options.material;
+  if (glass?.available !== true)
+    throw Error('VoxCue for Mac requires macOS 26 or later and the Liquid Glass native binding.');
   // Keep the supplied light artwork as a full-color image in every appearance.
   const icon = nativeImage.createFromPath(options.icon);
   icon.setTemplateImage(false);
   const applyIcon = () => app.dock?.setIcon(icon);
-  const glass = options.material?.available === false ? undefined : options.material;
   const interviewWindows = new Set<BrowserWindow>();
   const applyInterviewAppearance = () => {
     for (const win of interviewWindows)
-      if (!win.isDestroyed()) glass?.configureInterviewAppearance(win.getNativeWindowHandle());
+      if (!win.isDestroyed()) glass.configureInterviewAppearance(win.getNativeWindowHandle());
   };
   const applyAppearance = () => {
     applyIcon();
     applyInterviewAppearance();
   };
-  const glassWindows = new WeakSet<Electron.BrowserWindow>();
   const buttonEpochs = new WeakMap<Electron.BrowserWindow, Map<string, number>>();
   type SurfaceKind = 'composer' | 'follow';
   const surfaces = new WeakMap<Electron.BrowserWindow, Map<SurfaceKind, Electron.BrowserWindow>>();
@@ -61,7 +62,7 @@ export function createPresentation(options: {
       const view = owned.get(kind);
       owned.delete(kind);
       if (!view) return;
-      if (!win.isDestroyed()) glass?.detachSurface(win.getNativeWindowHandle(), kind);
+      if (!win.isDestroyed()) glass.detachSurface(win.getNativeWindowHandle(), kind);
       if (!view.isDestroyed()) view.destroy();
     };
     const closeAll = () => {
@@ -72,7 +73,6 @@ export function createPresentation(options: {
       const kind = match?.[1] as SurfaceKind | undefined;
       const state = chromeStates.get(win);
       if (
-        !glass ||
         url !== 'about:blank' ||
         !kind ||
         (interview ? kind !== 'follow' || !interviewFollowWindows.has(win) : !state)
@@ -139,11 +139,11 @@ export function createPresentation(options: {
   };
   return {
     capabilities: options.capabilities
-      ? Object.freeze({ ...options.capabilities, liquidGlass: glass?.available === true })
+      ? Object.freeze({ ...options.capabilities, liquidGlass: true })
       : undefined,
     configureMain: (win) => configureSurfaces(win),
     setScrollChrome: (win, state) => {
-      if (!glass || win.isDestroyed()) return false;
+      if (win.isDestroyed()) return false;
       chromeStates.set(win, state);
       for (const [kind, view] of surfaces.get(win) ?? []) {
         const area = state?.[kind];
@@ -157,11 +157,11 @@ export function createPresentation(options: {
       return active;
     },
     setContentControls: (win, controls, changed) => {
-      if (!glass || win.isDestroyed()) return false;
+      if (win.isDestroyed()) return false;
       return glass.configureContentControls(win.getNativeWindowHandle(), controls, changed);
     },
     setInterviewMaterials: (win, materials) => {
-      if (!glass || win.isDestroyed()) return false;
+      if (win.isDestroyed()) return false;
       const active = glass.configureInterviewMaterials(win.getNativeWindowHandle(), materials);
       if (interviewWindows.has(win)) {
         if (
@@ -182,11 +182,11 @@ export function createPresentation(options: {
       return active;
     },
     popUpNativeMenu: (win, request) => {
-      if (!glass || win.isDestroyed()) return null;
+      if (win.isDestroyed()) return null;
       return glass.popUpMenu(win.getNativeWindowHandle(), request);
     },
     setGlassButton: (win, action, placement, clicked) => {
-      if (!glass || win.isDestroyed()) return false;
+      if (win.isDestroyed()) return false;
       let epochs = buttonEpochs.get(win);
       if (!epochs) buttonEpochs.set(win, (epochs = new Map()));
       const epoch = (epochs.get(action) ?? 0) + (placement === null ? 1 : 0);
@@ -196,27 +196,15 @@ export function createPresentation(options: {
       });
     },
     setSidebarGlass: (win, width, toolbarHeight = 0, surfaceColor = '#ffffff', dark = false) => {
-      if (!glass || win.isDestroyed()) return false;
+      if (win.isDestroyed()) return false;
       const handle = win.getNativeWindowHandle();
       try {
-        let active = glass.apply(handle, width, toolbarHeight, surfaceColor, dark);
-        if (active && !glassWindows.has(win)) {
-          glassWindows.add(win);
-          win.setVibrancy(null);
-          // Removing Electron's old backing can relayout native children. Ensure
-          // the actual foreground remains inside NSGlassEffectView.contentView.
-          active = glass.apply(handle, width, toolbarHeight, surfaceColor, dark);
-        }
-        if (!active && glassWindows.delete(win)) win.setVibrancy('sidebar');
+        const active = glass.apply(handle, width, toolbarHeight, surfaceColor, dark);
         win.setWindowButtonPosition({ x: 16, y: 18 });
         return active;
       } catch (error) {
         // Never leave the Electron foreground reparented after a failed attach.
-        try {
-          glass.apply(handle, 0, 0, surfaceColor, dark);
-        } finally {
-          if (glassWindows.delete(win)) win.setVibrancy('sidebar');
-        }
+        glass.apply(handle, 0, 0, surfaceColor, dark);
         throw error;
       }
     },
@@ -233,12 +221,12 @@ export function createPresentation(options: {
     },
     pinInterview: (win) => win.setAlwaysOnTop(true, 'floating'),
     prepareInterview: (win) => {
-      if (glass && !interviewWindows.has(win)) {
+      if (!interviewWindows.has(win)) {
         interviewWindows.add(win);
         configureSurfaces(win, true);
         win.once('closed', () => interviewWindows.delete(win));
       }
-      glass?.configureInterviewAppearance(win.getNativeWindowHandle());
+      glass.configureInterviewAppearance(win.getNativeWindowHandle());
       win.setVisibleOnAllWorkspaces(true, {
         visibleOnFullScreen: true,
         skipTransformProcessType: true,

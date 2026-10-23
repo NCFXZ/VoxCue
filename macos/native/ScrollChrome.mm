@@ -64,15 +64,6 @@ static CGPathRef dialogPath(NSRect frame,CGFloat radius) {
     CGAffineTransform translation=CGAffineTransformMakeTranslation(frame.origin.x,frame.origin.y);
     CGPathRef result=CGPathCreateCopyByTransformingPath(local,&translation);CGPathRelease(local);return result;
 }
-void VoxCueDrawDialogHalo(NSRect bounds, NSRect dialog, CGFloat radius, BOOL dark) {
-    CGContextRef context=NSGraphicsContext.currentContext.CGContext;
-    CGContextSaveGState(context);CGContextAddRect(context,bounds);
-    CGPathRef hole=dialogPath(dialog,radius);CGContextAddPath(context,hole);CGContextEOClip(context);
-    NSColor *glow=[NSColor colorWithWhite:dark?1:0 alpha:dark?.24:.25];
-    NSShadow *shadow=[NSShadow new];shadow.shadowOffset=NSZeroSize;shadow.shadowBlurRadius=24;shadow.shadowColor=glow;[shadow set];
-    CGContextAddPath(context,hole);CGContextSetFillColorWithColor(context,(dark?NSColor.whiteColor:NSColor.blackColor).CGColor);CGContextFillPath(context);
-    CGPathRelease(hole);CGContextRestoreGState(context);
-}
 @interface VoxCueModalBackground : NSView
 @property(nonatomic) NSRect exclusion;
 @property(nonatomic) CGFloat radius;
@@ -80,8 +71,12 @@ void VoxCueDrawDialogHalo(NSRect bounds, NSRect dialog, CGFloat radius, BOOL dar
 @implementation VoxCueModalBackground
 - (NSView *)hitTest:(NSPoint)point { return nil; }
 - (void)drawRect:(NSRect)dirty {
-    BOOL dark=[[self.effectiveAppearance bestMatchFromAppearancesWithNames:@[NSAppearanceNameAqua,NSAppearanceNameDarkAqua]] isEqualToString:NSAppearanceNameDarkAqua];
-    VoxCueDrawDialogHalo(self.bounds,self.exclusion,self.radius,dark);
+    CGContextRef context=NSGraphicsContext.currentContext.CGContext;
+    CGContextSaveGState(context);CGContextAddRect(context,self.bounds);
+    CGPathRef hole=dialogPath(self.exclusion,self.radius);
+    CGContextAddPath(context,hole);CGContextEOClip(context);
+    [[NSColor colorWithWhite:0 alpha:.4] setFill];NSRectFill(self.bounds);
+    CGPathRelease(hole);CGContextRestoreGState(context);
 }
 @end
 static char chromeKey;
@@ -103,7 +98,7 @@ static NSColor *followHoverTint(NSView *surface,BOOL emphasized) {
     return [NSColor colorWithWhite:dark?1:0 alpha:.12];
 }
 void VoxCueUpdateInterviewFollow(NSView *host, NSRect frame, BOOL visible, NSRect modal, CGFloat modalRadius, BOOL emphasized) {
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueInterviewFollow *follow=objc_getAssociatedObject(host,&interviewFollowKey);
         if(!follow && visible) {
             follow=[VoxCueInterviewFollow new];
@@ -131,33 +126,31 @@ void VoxCueUpdateInterviewFollow(NSView *host, NSRect frame, BOOL visible, NSRec
     }
 }
 bool VoxCuePositionScrollingControl(NSView *host, NSView *control) {
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         if(!chrome)return false;
         NSRect frame=control.frame;NSView *parent=VoxCueSharedRendererHost(host);
         [parent addSubview:control positioned:NSWindowBelow relativeTo:chrome];
         control.frame=[parent convertRect:frame fromView:host];return true;
     }
-    return false;
 }
 bool VoxCueIsScrollChrome(NSView *view) {
-    if(@available(macOS 26.0,*)) return [view isKindOfClass:VoxCueScrollChrome.class] || [view isKindOfClass:VoxCueModalBackground.class];
-    return false;
+    return [view isKindOfClass:VoxCueScrollChrome.class] || [view isKindOfClass:VoxCueModalBackground.class];
 }
 NSView *VoxCueModalBackdropAnchor(NSView *host) {
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         return chrome.blocked?chrome.modalBackdrop:nil;
-    } return nil;
+    }
 }
 NSRect VoxCueModalExclusion(NSView *host) {
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         if(chrome.blocked)return chrome.modalBackdrop.exclusion;
     }return NSZeroRect;
 }
 void VoxCueRemoveScrollChrome(NSView *host) {
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         [chrome.composer detach];[chrome.follow detach];[chrome.modalBackdrop removeFromSuperview];[chrome removeFromSuperview];
         objc_setAssociatedObject(host,&chromeKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
@@ -186,7 +179,7 @@ napi_value VoxCueConfigureScrollChrome(napi_env env,napi_callback_info info) {
     if(!host || !NSThread.isMainThread) {napi_get_boolean(env,false,&result);return result;}
     napi_get_null(env,&nullValue);napi_strict_equals(env,args[1],nullValue,&remove);
     if(remove) {VoxCueRemoveScrollChrome(host);napi_get_boolean(env,false,&result);return result;}
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         if(!chrome) {
             chrome=[[VoxCueScrollChrome alloc] initWithFrame:host.bounds];chrome.host=host;
@@ -202,8 +195,9 @@ napi_value VoxCueConfigureScrollChrome(napi_env env,napi_callback_info info) {
             chrome.modalBackdrop=[[VoxCueModalBackground alloc] initWithFrame:host.bounds];
             objc_setAssociatedObject(host,&chromeKey,chrome,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         }
-        napi_value area,title,composer,modal;bool absentModal=false;
+        napi_value area,title,composer,modal;bool absentModal=false,absentTitle=false;
         napi_get_named_property(env,args[1],"area",&area);napi_get_named_property(env,args[1],"title",&title);
+        napi_strict_equals(env,title,nullValue,&absentTitle);
         napi_get_named_property(env,args[1],"composer",&composer);napi_get_named_property(env,args[1],"modal",&modal);napi_strict_equals(env,modal,nullValue,&absentModal);
         bool blocked=!absentModal;NSRect excluded=blocked?rect(env,modal,host):NSZeroRect;CGFloat modalRadius=number(env,args[1],"modalRadius");
         NSView *main=VoxCueSharedRendererHost(host);chrome.blocked=blocked;
@@ -221,7 +215,8 @@ napi_value VoxCueConfigureScrollChrome(napi_env env,napi_callback_info info) {
         napi_get_named_property(env,args[1],"titleText",&titleValue);
         napi_get_value_string_utf8(env,titleValue,titleText,sizeof(titleText),&titleLength);
         chrome.title.stringValue=[NSString stringWithUTF8String:titleText];
-        NSRect titleFrame=[chrome convertRect:rect(env,title,host) fromView:host];
+        chrome.title.hidden=absentTitle;
+        NSRect titleFrame=absentTitle?NSZeroRect:[chrome convertRect:rect(env,title,host) fromView:host];
         CGFloat titleCenter=NSMidY(titleFrame),scale=host.window.backingScaleFactor ?: 1;
         // The shared line box includes CSS leading. Center AppKit's natural
         // label height in that box rather than drawing at its upper edge.
@@ -259,7 +254,7 @@ napi_value VoxCueConfigureScrollChrome(napi_env env,napi_callback_info info) {
             mask.path=path;CGPathRelease(path);surface.layer.mask=mask;[surface place];
         }
         napi_get_boolean(env,true,&result);
-    } else napi_get_boolean(env,false,&result);
+    }
     return result;
 }
 static bool isFollow(napi_env env,napi_value value) {
@@ -269,7 +264,7 @@ static bool isFollow(napi_env env,napi_value value) {
 napi_value VoxCueDetachSurface(napi_env env,napi_callback_info info) {
     size_t count=2;napi_value args[2],result;napi_get_cb_info(env,info,&count,args,nullptr,nullptr);
     NSView *host=count==2?getHost(env,args[0]):nil;
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         if(isFollow(env,args[1])){[chrome.follow detach];chrome.follow=nil;}
         else{[chrome.composer detach];chrome.composer=nil;}
@@ -283,7 +278,7 @@ napi_value VoxCueDetachSurface(napi_env env,napi_callback_info info) {
 napi_value VoxCueAttachSurface(napi_env env,napi_callback_info info) {
     size_t count=3;napi_value args[3],result;napi_get_cb_info(env,info,&count,args,nullptr,nullptr);
     NSView *host=count==3?getHost(env,args[0]):nil,*web=count==3?getHost(env,args[1]):nil;
-    if(@available(macOS 26.0,*)) {
+    {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
         VoxCueInterviewFollow *interview=objc_getAssociatedObject(host,&interviewFollowKey);
         if((chrome || (isFollow(env,args[2]) && interview)) && web && web.window!=host.window) {

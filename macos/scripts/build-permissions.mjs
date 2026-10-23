@@ -24,7 +24,7 @@ for (const [command, args] of [
       'dynamic_lookup',
       '-arch',
       'arm64',
-      '-mmacosx-version-min=14.2',
+      '-mmacosx-version-min=26.0',
       '-O2',
       '-I',
       headers,

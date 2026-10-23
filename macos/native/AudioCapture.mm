@@ -249,7 +249,6 @@ static int failure(NSString *code, OSStatus status = 0) {
 int main(int argc, const char *argv[]) {
     @autoreleasepool {
         signal(SIGPIPE, SIG_IGN);
-        if (@available(macOS 14.2, *)) {} else return failure(@"unsupported-os");
         if (argc == 2 && strcmp(argv[1], "devices") == 0) {
             NSArray *devices = inventory(); if (!devices) return failure(@"inventory-failed");
             json(NSFileHandle.fileHandleWithStandardOutput, devices); return 0;

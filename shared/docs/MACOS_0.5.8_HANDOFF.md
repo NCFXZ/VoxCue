@@ -1,5 +1,9 @@
 # Windows → Mac 0.5.8 本轮源码交接
 
+**2026-10-23最新Mac范围：仅支持macOS 26+ Liquid Glass。用户已取消下文历史清单中的旧Mac回退验收；Windows及其shared网页实现保持。Mac旧开关偏好、回退预览及专属构建/测试已删除，缺少有效原生展示绑定时拒绝启动；启动器、应用包和新更新清单最低26.0。版本仍为0.5.8，本轮仅同步私有源码，不发布或改写现有安装包。**
+
+用户随后明确授权将本轮已核对的源码、测试及文档提交推送至既有私有`NCFXZ/VoxCue`的`main`，覆盖下文针对本轮的不提交限制，仅限本次源码同步。Windows回传及当前验证范围见[WINDOWS_0.5.7_HANDOFF.md](WINDOWS_0.5.7_HANDOFF.md)顶部；版本保持0.5.8，不发布安装包，不改写既有发行、Latest或真实安装。
+
 日期：2026-10-23。版本保持 **0.5.8**。本轮父基线为 `9aa94749ec18a93c51139d2de3c3f54695f5ed85`（此前0.5.8侧栏、搜索、登录同步）。本文只列该基线之后的 Windows 接续、界面修订、反馈修复和回归入口；更早累计说明保留在 [WINDOWS_0.5.7_HANDOFF.md](WINDOWS_0.5.7_HANDOFF.md)。冲突处以本文及用户最后追加的“结束确认/截图展开胶囊、面试设置不压暗”为准。
 
 用户已授权本轮对最终代码执行 Windows 全量回归及 UI 检查，发现问题直接修复复测，核对后将源码提交推送至既有私有 `NCFXZ/VoxCue` 的 `main`。随后追加授权生成 Windows 0.5.8 安装包，上传既有公开 `NCFXZ/VoxCue-releases` 并设为Latest；向已经存在的Mac `v0.5.8` 追加Windows EXE、blockmap、latest.yml，保留原Mac和其他版本资产、标签及真实安装。此项覆盖本轮此前仅定向、不提交和不发行的限制；源码提交仍排除发行文件。
@@ -23,7 +27,7 @@ Windows正式三项已追加到[现有v0.5.8发行](https://github.com/NCFXZ/Vox
 | U03  | 图2：主窗口设置使用40%黑色背景遮罩，去掉弹窗边缘阴影/泛白，不叠加整窗虚化。                                                                                                                                                                                                                               | `macos/src/sidebarGlass.css`现有透明backdrop覆盖需要本机调整；`macos/native/ScrollChrome.mm`的原生NSShadow不能继续叠光晕。实际原生前景/输入投影也需一起压暗，不能只覆盖网页背景。关闭恢复亮度，焦点恢复、Esc和模态阻止背景操作保持。    |
 | U04  | 图3：记录搜索保持44px胶囊，网页左右内边距20px，文字不贴边，保留搜索和系统清除。入口`styles.css`。                                                                                                                                                                                                         | 回退直接继承。Liquid Glass继续完整`NSSearchField`及系统ExtraLarge尺寸，由AppKit统一管理图标/占位文字/编辑器间距；不要机械给原生控件再叠网页20px。检查中文输入、光标、清除和滚动遮挡。                                                   |
 | U05  | 图4/5：知识库创建/重命名及文档详情沿用40%黑色遮罩、无边缘阴影和光晕。背景不能操作。共用`webMaterials.css`。                                                                                                                                                                                               | 同U03处理原生覆盖及阴影；分别验创建、取消、保存、重命名、详情文档滚动、关闭和焦点恢复。自动索引与二次确认删除保持。                                                                                                                     |
-| U06  | 图7：移除主设置“毛玻璃透明度”行和错误/提示分支；`readFrostedTransparency()`固定60，不再读写旧偏好。`SettingsDialog.tsx`、`frostedAppearance.ts`及已无消费者的旧滑杆专属样式一并清理。                                                                                                                     | 三条路径均不再显示该行。旧值0/100/off/损坏值与存储不可用都不能改变固定效果；旧存储不删除、不重写。Mac `liquidGlassPreference.ts`仍消费读取接口，因此不能直接删除该导出。                                                                |
+| U06  | 图7：移除主设置“毛玻璃透明度”行和错误/提示分支；`readFrostedTransparency()`固定60，不再读写旧偏好。`SettingsDialog.tsx`、`frostedAppearance.ts`及已无消费者的旧滑杆专属样式一并清理。                                                                                                                     | 三条路径均不再显示该行。旧值0/100/off/损坏值与存储不可用都不能改变固定效果；旧存储不删除、不重写。Mac旧偏好消费者已按最新26+范围删除；读取导出仍由Windows共用实现使用，不删除。                                                                |
 | U07  | 图8/9：主设置与浮窗设置移除“面试背景透明度”；`interviewAppearance.ts`固定原60%曲线。只保留字号，整组水平居中，宽度不超过420px，12–24、步进1和保存行为保持。                                                                                                                                               | 两个设置入口都验默认/最小/最大字号、鼠标、键盘、滚动、保存失败、重载、跨窗口和重启。原生字号仍由现用`NSSlider`端口承载，不能删除字号功能。                                                                                              |
 | U08  | “60%”是原换算曲线的参数，不是直接把表面alpha设成0.6。主毛玻璃浅/深alpha分别0.4/0.512、blur28.8px；面试外层浅/深0.8496/0.8872、阅读层0.8992/0.928、panel blur19.52px。                                                                                                                                     | 回退与Windows使用同一曲线。Liquid Glass本身继续公开Clear/Regular API和本机原生承载；不要把网页alpha数值硬套到AppKit或额外叠造玻璃。原生参考效果仍需Mac本机核对，Windows未证明其视觉等同。                                               |
 | U09  | 面试启动后只保留黑色：`appearance-control.tsx`只保留共用`interviewAlwaysDark=true`，实际浮窗及设置/登录只读预览统一深色；`main.tsx`在`#interview`首帧加入dark，避免闪白。主窗口仍可切主题。                                                                                                               | 以主窗口浅/深/跟随系统、系统明暗变化和重载实际驱动，检查浮窗及两个预览始终深色；不要在测试里强行移除dark来制造产品已不支持的白色面试。                                                                                                  |
@@ -116,3 +120,15 @@ Windows正式三项已追加到[现有v0.5.8发行](https://github.com/NCFXZ/Vox
 | `shared/docs/MACOS_0.5.8_HANDOFF.md`、`WINDOWS_0.5.7_HANDOFF.md`、`PLATFORM_UI.md`、`shared/test/README.md`、`PROGRESS.md`                                                     | 本轮逐条交接、最新规格、测试入口及源码同步范围。                 |
 
 根`package.json`仅为生成配置的换行同步；版本语义原已是0.5.8。Mac专属目录、两平台锁、共享原生资源、固定运行时与公开发行资产均不在本次源码提交范围。
+
+## 七、Mac 接续实现入口（不保存测试报告）
+
+本机接续基线为`95a9bce2b5e623ace3c5aa44ca89dd20f96d16b8`，版本保持0.5.8。当前授权仅同步、修复和验证，不延伸本文开头的Windows提交/发行授权；不提交推送、不发布或改写现有安装包、Latest及真实安装。
+
+- U03/U05：`macos/native/ScrollChrome.mm`在共享模态轮廓之外绘制40%黑色覆盖，包含原生输入/返回前景投影和控件，不再绘制NSShadow。原生ScrollChrome启用时让网页backdrop透明，Windows保留shared遮罩。
+- U10：删除原`dialog-halo`展示和绘制，改为有界`modal-exclusion`几何，用于返回材质的模态裁切；该条不创建可见原生表面。共享透明模态、穿透暂停和关闭恢复逻辑保持。
+- U14：截图按钮进入既有AppKit over-glass背板端口，空态32px圆形、展开76×32px胶囊，5/5使用系统禁用外观；布局/数量/捕获/发送仍由shared驱动。原生专项直接核对对应NSButton的位置、宽高、borderShape和禁用状态。
+- U12/U13：Mac顶部查询包含共享`.history-detail`，`ScrollChromeState.title`允许null并在主进程校验，原生隐藏重复标题；实际高度、覆盖与正文仍由shared唯一布局及headerCoverage提供。
+- 原生补充入口：`sidebar-glass-smoke.mjs --content-only`含`handoff-content-check.mjs`，`--handoff-only`可单独检查输入/提案悬停、键盘、模态原生前景压暗/恢复、明暗窄窗长记录及正文/顶部像素。面试专项追加设置开关前后四个空白角落像素一致性。输出仅终端/对话，不把该入口说明当作已通过记录。
+- 原生交互夹具只向本进程自有NSWindow投递鼠标事件；菜单先确认原生焦点，再等待该次NSMenu跟踪代数更新并结束，避免读取前一次菜单或隐藏投影宿主的状态。悬停、菜单图标及正文像素断言保持。
+- Mac最低系统26.0，保留SF Symbols和AppKit。`platform/materials`仅为共享初始化端口：Mac替换为NativeMaterials，Windows默认调用webMaterials；Mac构建拒绝网页材质模块及CSS。旧Mac兼容和预览文件已删除，通用shared测试宿主不属于Mac产品回退机制。固定模型/运行时、凭据助手及历史更新清单签名认证保持。

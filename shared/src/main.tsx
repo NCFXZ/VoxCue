@@ -3,7 +3,7 @@ import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { FloatingInterview } from './components/FloatingInterview';
 import './styles.css';
-import { installWebMaterials } from './platform/webMaterials';
+import { installPlatformMaterials } from './platform/materials';
 import { useSystemAccent } from './systemAccent';
 import { applyFrostedAppearance, useFrostedAppearance } from './frostedAppearance';
 
@@ -15,8 +15,8 @@ document.documentElement.classList.toggle(
   window.desktop?.nativeWindowControls === true,
 );
 applyFrostedAppearance();
-const disposeWebMaterials = installWebMaterials();
-if (import.meta.hot) import.meta.hot.dispose(disposeWebMaterials);
+const disposeMaterials = installPlatformMaterials();
+if (import.meta.hot) import.meta.hot.dispose(disposeMaterials);
 document.documentElement.classList.toggle(
   'frosted-ui',
   window.desktop?.presentation?.frostedTransparency === true,

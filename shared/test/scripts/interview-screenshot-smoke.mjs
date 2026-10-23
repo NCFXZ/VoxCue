@@ -115,6 +115,10 @@ try {
   );
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
+  if (process.env.VOXCUE_TEST_EXPECT_NATIVE_UI === '1')
+    await floating.waitForFunction(() =>
+      document.documentElement.classList.contains('macos-interview-glass'),
+    );
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
   let nativeCapture;
   if (process.argv.includes('--native-capture')) {
@@ -215,6 +219,24 @@ try {
   const send = floating.getByRole('button', { name: '发送面试问题', exact: true });
   const input = floating.getByRole('textbox', { name: '面试提问', exact: true });
   const previews = floating.locator('.floating-screenshot-preview');
+  await floating.evaluate(() => {
+    window.syntheticScreenshotEvents = [];
+    for (const type of ['pointerdown', 'pointerup', 'click'])
+      document.addEventListener(
+        type,
+        (event) => {
+          const button = event.target.closest?.('button');
+          if (button)
+            window.syntheticScreenshotEvents.push({
+              type,
+              label: button.getAttribute('aria-label') ?? button.innerText.trim(),
+              at: performance.now(),
+            });
+          window.syntheticScreenshotEvents = window.syntheticScreenshotEvents.slice(-30);
+        },
+        true,
+      );
+  });
   const capture = async (name) => {
     if (screenshotDirectory)
       await floating.screenshot({
@@ -260,7 +282,36 @@ try {
   const collapsedWidth = (await camera.boundingBox()).width;
   assert.ok(collapsedWidth <= 36);
   await input.fill('解释这些截图，先保留我的草稿');
+  await app.evaluate(() => {
+    globalThis.screenshotFixture.mode = 'hold';
+  });
   await camera.click();
+  await floating.waitForFunction(
+    () =>
+      document.querySelector('.floating-screenshot-button').getAttribute('aria-busy') === 'true',
+  );
+  await floating.waitForFunction(
+    () =>
+      !document
+        .querySelector('.floating-screenshot-button')
+        .getAnimations()
+        .some((animation) => animation.playState === 'running'),
+  );
+  assert.equal(await camera.isDisabled(), true);
+  assert.deepEqual(
+    await camera.evaluate((button) => ({
+      width: Math.round(button.getBoundingClientRect().width),
+      height: Math.round(button.getBoundingClientRect().height),
+      iconOnly: button.classList.contains('button-icon'),
+      radius: getComputedStyle(button).borderTopLeftRadius,
+      corner: getComputedStyle(button).cornerShape,
+    })),
+    { width: 76, height: 32, iconOnly: false, radius: '999px', corner: 'round' },
+  );
+  await app.evaluate(() => {
+    globalThis.screenshotFixture.mode = 'normal';
+    globalThis.screenshotFixture.finish();
+  });
   await waitCount(1);
   assert.equal(await input.inputValue(), '解释这些截图，先保留我的草稿');
   assert.equal((await requests()).length, 0);
@@ -407,6 +458,11 @@ try {
   await failureCard
     .getByRole('button', { name: '重试面试回答', exact: true })
     .click({ trial: true });
+  if ((await previews.count()) !== 1)
+    console.error('Synthetic screenshot retention mismatch', {
+      captures: await captured(),
+      events: await floating.evaluate(() => window.syntheticScreenshotEvents),
+    });
   assert.equal(await previews.count(), 1);
   assert.equal((await requests()).length, 7);
   const failedHash = (await requests()).at(-1).turns.at(-1).files[0].hash;

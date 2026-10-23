@@ -7,12 +7,7 @@ let surfaceSequence = 0;
 
 // This is a presentation document only. Its React nodes, handlers, contexts and
 // business state still belong to the one shared parent tree.
-export function MaterialSurface(props: MaterialSurfaceProps) {
-  if (window.desktop?.presentation?.liquidGlass !== true) return <>{props.children}</>;
-  return <NativeMaterialSurface {...props} />;
-}
-
-function NativeMaterialSurface({
+export function MaterialSurface({
   children,
   kind = 'composer',
   active = true,

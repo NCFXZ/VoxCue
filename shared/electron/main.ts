@@ -629,14 +629,13 @@ app.whenReady().then(() => {
         typeof placement !== 'object' ||
         Array.isArray(placement) ||
         Object.keys(placement).sort().join(',') !==
-          'behindContent,disabled,enabled,foregroundColor,height,hovered,pressed,width,x,y' ||
+          'behindContent,disabled,foregroundColor,height,hovered,pressed,width,x,y' ||
         typeof placement.hovered !== 'boolean' ||
         typeof placement.pressed !== 'boolean' ||
         typeof placement.behindContent !== 'boolean' ||
         typeof placement.foregroundColor !== 'string' ||
         !/^#[a-f0-9]{6}$/i.test(placement.foregroundColor) ||
         typeof placement.disabled !== 'boolean' ||
-        typeof placement.enabled !== 'boolean' ||
         !(['x', 'y', 'width', 'height'] as const).every(
           (key) => typeof placement[key] === 'number' && Number.isFinite(placement[key]),
         ) ||
@@ -875,7 +874,7 @@ app.whenReady().then(() => {
                     'regular-dark',
                     'regular-interactive',
                     'regular-follow-hover',
-                    'dialog-halo',
+                    'modal-exclusion',
                   ]
           ).includes(item.style) ||
           !rectangle(item) ||
@@ -931,7 +930,7 @@ app.whenReady().then(() => {
           Object.keys(state).sort().join(',') !==
             'area,composer,follow,followHovered,foregroundColor,headerOpacity,modal,modalRadius,title,titleOpacity,titleText,topHeight' ||
           !rectangle(state.area) ||
-          !rectangle(state.title) ||
+          (state.title !== null && !rectangle(state.title)) ||
           typeof state.titleText !== 'string' ||
           state.titleText.length > 100 ||
           (state.composer !== null && !rectangle(state.composer)) ||

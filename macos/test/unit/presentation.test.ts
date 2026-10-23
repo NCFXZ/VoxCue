@@ -22,6 +22,11 @@ vi.mock('electron', () => ({
 }));
 import { createPresentation } from '../../electron/presentation';
 import { pendingPresentation } from '../../../shared/electron/contracts/presentation';
+const presentation = (options: Parameters<typeof createPresentation>[0]) =>
+  createPresentation({
+    material: { available: true, configureInterviewAppearance: vi.fn() } as any,
+    ...options,
+  });
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(10000);
@@ -32,41 +37,30 @@ beforeEach(() => {
   native.loadImage.mockReturnValue(native.image);
 });
 afterEach(() => vi.useRealTimers());
-it('旧系统明确不支持 Liquid Glass 时不调用原生材质或强制面试深色', () => {
-  const material = {
-    available: false,
-    configureInterviewAppearance: vi.fn(),
-    configureButton: vi.fn(),
-  };
-  const port = createPresentation({
+it.each([undefined, { available: false }, { available: undefined }])(
+  'Mac没有有效原生绑定时拒绝启动，不创建旧系统回退：%s',
+  (material) => {
+    expect(() =>
+      createPresentation({
+        icon: 'icon.png',
+        material: material as any,
+        interviewOpen: () => false,
+      }),
+    ).toThrow(/macOS 26/);
+    expect(native.loadImage).not.toHaveBeenCalled();
+  },
+);
+it('Mac始终宣告Liquid Glass能力，不接受旧的关闭能力参数', () => {
+  const port = presentation({
     icon: 'icon.png',
     capabilities: pendingPresentation,
-    material: material as any,
     interviewOpen: () => false,
   });
-  expect(port.capabilities?.liquidGlass).toBe(false);
-  const win = { setVisibleOnAllWorkspaces: vi.fn(), isDestroyed: () => false };
-  port.prepareInterview(win as any);
-  expect(port.setGlassButton!(win as any, 'start', null, vi.fn())).toBe(false);
-  expect(material.configureInterviewAppearance).not.toHaveBeenCalled();
-  expect(material.configureButton).not.toHaveBeenCalled();
-  expect(win.setVisibleOnAllWorkspaces).toHaveBeenCalledOnce();
+  expect(port.capabilities?.liquidGlass).toBe(true);
   port.dispose();
 });
-it('只有原生模块明确支持才向共享页面宣告 Liquid Glass 能力', () => {
-  for (const available of [true, false, undefined]) {
-    const port = createPresentation({
-      icon: 'icon.png',
-      capabilities: pendingPresentation,
-      material: { available } as any,
-      interviewOpen: () => false,
-    });
-    expect(port.capabilities?.liquidGlass).toBe(available === true);
-    port.dispose();
-  }
-});
 it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置顶不抢焦点', () => {
-  const port = createPresentation({ icon: 'icon.png', interviewOpen: () => true });
+  const port = presentation({ icon: 'icon.png', interviewOpen: () => true });
   for (const theme of ['dark', 'light', 'system'] as const) {
     port.setTheme(theme);
     expect(native.theme.themeSource).toBe(theme);
@@ -77,6 +71,9 @@ it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置�
     setIgnoreMouseEvents: vi.fn(),
     hide: vi.fn(),
     focus: vi.fn(),
+    once: vi.fn(),
+    getNativeWindowHandle: () => Buffer.alloc(8),
+    webContents: { on: vi.fn(), setWindowOpenHandler: vi.fn() },
   };
   port.pinInterview(win as any);
   port.prepareInterview(win as any);
@@ -89,7 +86,7 @@ it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置�
 });
 it('隐藏节流任务在面试结束/释放后不执行，不能让已恢复的 Dock 再消失', async () => {
   let open = true;
-  const port = createPresentation({ icon: 'icon.png', interviewOpen: () => open });
+  const port = presentation({ icon: 'icon.png', interviewOpen: () => open });
   port.hideInterviewIcon();
   expect(native.hide).toHaveBeenCalledTimes(1);
   port.hideInterviewIcon();
@@ -104,7 +101,7 @@ it('隐藏节流任务在面试结束/释放后不执行，不能让已恢复的
   expect(native.hide).toHaveBeenCalledTimes(2);
 });
 it('Dock 显示前及异步完成后均恢复应用图标，并取消迟到的隐藏任务', async () => {
-  const port = createPresentation({ icon: 'voxcue.png', interviewOpen: () => true });
+  const port = presentation({ icon: 'voxcue.png', interviewOpen: () => true });
   port.initialize();
   port.hideInterviewIcon();
   port.hideInterviewIcon();
@@ -126,7 +123,7 @@ it('Dock 显示前及异步完成后均恢复应用图标，并取消迟到的�
   port.dispose();
 });
 it('主题变化始终重用原始彩图，不显示隐藏的 Dock，释放后停止监听', () => {
-  const port = createPresentation({ icon: 'voxcue.png', interviewOpen: () => true });
+  const port = presentation({ icon: 'voxcue.png', interviewOpen: () => true });
   expect(native.loadImage).toHaveBeenCalledExactlyOnceWith('voxcue.png');
   expect(native.image.setTemplateImage).toHaveBeenCalledExactlyOnceWith(false);
   port.initialize();
@@ -145,7 +142,7 @@ it('主题变化始终重用原始彩图，不显示隐藏的 Dock，释放后�
   expect(native.theme.removeListener).toHaveBeenCalledExactlyOnceWith('updated', updated);
 });
 it('刚恢复 Dock 后再次开始面试，隐藏也必须避开 show 的一秒保护期', async () => {
-  const port = createPresentation({ icon: 'voxcue.png', interviewOpen: () => true });
+  const port = presentation({ icon: 'voxcue.png', interviewOpen: () => true });
   await port.restoreInterviewIcon();
   port.hideInterviewIcon();
   expect(native.hide).not.toHaveBeenCalled();
@@ -158,6 +155,7 @@ it('刚恢复 Dock 后再次开始面试，隐藏也必须避开 show 的一秒�
 
 it('面试只允许当前可见返回按钮的隔离前景，不开放任意弹窗或输入框投影', () => {
   const material = {
+    available: true,
     configureInterviewAppearance: vi.fn(),
     configureInterviewMaterials: vi.fn(() => true),
   };

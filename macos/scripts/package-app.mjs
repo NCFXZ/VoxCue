@@ -44,7 +44,7 @@ export async function buildMacApp(output, publicKey) {
     overwrite: false,
     prune: false,
     extendInfo: {
-      LSMinimumSystemVersion: '14.2',
+      LSMinimumSystemVersion: '26.0',
       NSMicrophoneUsageDescription: 'VoxCue 在本机转写麦克风，不保存或上传音频。',
       NSAudioCaptureUsageDescription: 'VoxCue 在本机转写系统音频，不保存或上传音频。',
       NSScreenCaptureUsageDescription: 'VoxCue 仅在你点击截图按钮时捕获当前屏幕，不持续录屏。',

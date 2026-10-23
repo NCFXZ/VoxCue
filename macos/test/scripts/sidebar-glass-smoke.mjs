@@ -9,9 +9,15 @@ import { checkContentControls } from './content-controls-check.mjs';
 import { checkComponentControls } from './component-controls-check.mjs';
 import { checkSidebarUpdates } from './sidebar-updates-check.mjs';
 import { checkLoginControls } from './login-controls-check.mjs';
+import { checkHandoffContent } from './handoff-content-check.mjs';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required.');
+const screenshotDirectory = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+if (screenshotDirectory) {
+  assert.ok(path.isAbsolute(screenshotDirectory));
+  await mkdir(screenshotDirectory, { recursive: true });
+}
 const probeFile = path.join(testRoot, 'SidebarGlassProbe.node');
 const compilation = spawnSync(
   '/usr/bin/xcrun',
@@ -270,7 +276,9 @@ try {
     );
   }
   const capture = async (label) => {
-    const output = path.join(testRoot, label + '.png');
+    if (screenshotDirectory) await probe('backdrop', 2);
+    const output = path.resolve(screenshotDirectory ?? testRoot, label + '.png');
+    assert.ok(output.startsWith(path.resolve(screenshotDirectory ?? testRoot) + path.sep));
     const source = await page.evaluate(() => ({
       native: document.documentElement.classList.contains('native-scroll-chrome'),
       title: document.querySelector(
@@ -287,7 +295,7 @@ try {
         if (!source.native)
           return !title && !nodes.some((node) => node.class === 'VoxCueModalBackground');
         if (source.title && title?.text !== source.title) return false;
-        if (source.detail && title) return false;
+        if (source.detail && title && !title.hidden) return false;
         if (source.modal) {
           const native = nodes.find((n) => n.class === 'VoxCueModalBackground');
           const numbers = native?.exclusion?.match(/-?[\d.]+/g)?.map(Number);
@@ -304,7 +312,7 @@ try {
       'Native header/modal geometry must match the current route and dialog',
     );
     await app.evaluate(
-      async ({ app, BrowserWindow }, { file, output }) => {
+      async ({ app, BrowserWindow, nativeImage }, { file, output }) => {
         const require = process
           .getBuiltinModule('module')
           .createRequire(process.cwd() + '/package.json');
@@ -315,8 +323,11 @@ try {
         win.setContentProtection(false);
         try {
           await new Promise((resolve) => setTimeout(resolve, 300));
-          const { png } = await require(file).snapshot(win.getNativeWindowHandle());
-          require('node:fs').writeFileSync(output, png);
+          const result = await require(file).snapshot(win.getNativeWindowHandle());
+          require('node:fs').writeFileSync(
+            output,
+            nativeImage.createFromBuffer(result.png).crop(result.crop).toPNG(),
+          );
         } finally {
           win.setContentProtection(protectedWindow);
         }
@@ -339,13 +350,30 @@ try {
   );
   const choose = async (trigger, keys) => {
     const anchor = await trigger.boundingBox();
+    await app.evaluate(({ app, BrowserWindow }) => {
+      app.focus({ steal: true });
+      BrowserWindow.getAllWindows()
+        .find((win) => win.getTitle() === 'VoxCue')
+        .focus();
+    });
+    await poll(state, (value) => value.windowKey, 'The owned menu window must have native focus');
+    const previousGeneration = (await state()).menuGeneration;
     if (typeof keys === 'string') await probe('selectMenuItem', keys);
     else await probe('menuKeys', keys);
-    await trigger.click();
-    await page.waitForFunction(
-      () => !document.querySelector('.dropdown-content[data-state="open"]'),
+    // Route through the owned NSWindow so clicking out of a projected composer
+    // also transfers native focus before AppKit starts menu tracking.
+    await probe('clickAt', {
+      x: anchor.x + anchor.width / 2,
+      y: anchor.y + anchor.height / 2,
+    });
+    const native = await poll(
+      state,
+      (value) => value.menuGeneration > previousGeneration && !value.menuTracking,
+      'The requested native menu must complete its own tracking cycle',
     );
-    const native = await state();
+    await trigger
+      .page()
+      .waitForFunction(() => !document.querySelector('.dropdown-content[data-state="open"]'));
     if (native.menuFrame?.height) {
       const menu = native.menuFrame;
       assert.ok(
@@ -371,6 +399,8 @@ try {
     }
   } else if (process.argv.includes('--components-only')) {
     await checkComponentControls({ app, page, state, poll, capture, choose });
+  } else if (process.argv.includes('--handoff-only')) {
+    await checkHandoffContent({ app, page, state, probe, probeFile, poll, choose, capture });
   } else if (process.argv.includes('--content-only') || process.argv.includes('--copy-only')) {
     await checkContentControls({
       app,
@@ -382,6 +412,8 @@ try {
       choose,
       copyOnly: process.argv.includes('--copy-only'),
     });
+    if (!process.argv.includes('--copy-only'))
+      await checkHandoffContent({ app, page, state, probe, probeFile, poll, choose, capture });
   } else {
     assert.ok(surface);
     const input = surface.getByRole('textbox', { name: '聊天消息', exact: true });
@@ -665,17 +697,10 @@ try {
       localStorage.setItem('voxcue-liquid-glass-enabled-v1', 'false');
       window.dispatchEvent(new Event('storage'));
     });
-    await page.waitForFunction(
-      () => !document.documentElement.classList.contains('native-scroll-chrome'),
-    );
     assert.equal(
       await page.evaluate(() => localStorage.getItem('voxcue-liquid-glass-enabled-v1')),
       'false',
     );
-    await page.evaluate(() => {
-      localStorage.setItem('voxcue-liquid-glass-enabled-v1', 'true');
-      window.dispatchEvent(new Event('storage'));
-    });
     await page.waitForFunction(() =>
       document.documentElement.classList.contains('native-scroll-chrome'),
     );
@@ -689,7 +714,7 @@ try {
             return candidate;
       },
       Boolean,
-      'Composer did not return after enabling glass',
+      'Composer must remain native despite obsolete preferences',
     );
     await verifyComposer();
     await page.reload();
@@ -697,6 +722,7 @@ try {
       document.documentElement.classList.contains('native-scroll-chrome'),
     );
     await checkContentControls({ app, page, state, probe, poll, capture, choose });
+    await checkHandoffContent({ app, page, state, probe, probeFile, poll, choose, capture });
     console.log(
       'native menus, settings stacking, focus appearance, paused reading, resize and reload passed',
     );

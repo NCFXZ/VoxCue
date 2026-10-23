@@ -22,11 +22,6 @@
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-:root.macos-ui.sidebar-liquid-glass-off .app-body > .sidebar {
-  background: var(--soft);
-  -webkit-backdrop-filter: none;
-  backdrop-filter: none;
-}
 :root.macos-ui .macos-material-button.is-native {
   opacity: 0;
 }
@@ -86,7 +81,7 @@
   opacity: 0;
   pointer-events: none;
 }
-:root.macos-ui .app-dialog::backdrop {
+:root.macos-ui.native-scroll-chrome .app-dialog::backdrop {
   background: transparent;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;

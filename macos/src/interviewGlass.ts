@@ -3,7 +3,6 @@ import type {
   GlassSurfacePlacement,
   InterviewMaterialPlacement,
 } from '../../shared/electron/contracts/desktop';
-import { readLiquidGlass, subscribeLiquidGlass } from './liquidGlassPreference';
 import { materialColor } from './materialGeometry';
 import { contentControl, applyContentRange } from './contentControls';
 
@@ -19,12 +18,7 @@ if (
   const regularSelector =
     '.transcript-item > p,.floating-question,.answer-bubble,.floating-composer,.floating-notices > div,.interview-answer-failure,.follow-latest.ui-button,.floating-composer .macos-follow-slot';
   const buttonSelector =
-    '.floating-toolbar button,.floating-drag-handle,.floating-panel > header button,.interview-answer-retry';
-  const accessibility = [
-    matchMedia('(prefers-reduced-transparency: reduce)'),
-    matchMedia('(prefers-contrast: more)'),
-    matchMedia('(forced-colors: active)'),
-  ];
+    '.floating-toolbar button,.floating-drag-handle,.floating-panel > header button,.interview-answer-retry,.floating-screenshot-button';
   let sequence = 0,
     frame = 0,
     disposed = false,
@@ -132,127 +126,115 @@ if (
       buttons: ContentControlPlacement[] = [],
       elements: HTMLElement[] = [],
       controls: HTMLElement[] = [];
-    if (readLiquidGlass() && !accessibility.some((media) => media.matches)) {
-      for (const selector of [clearSelector, regularSelector])
-        for (const element of document.querySelectorAll<HTMLElement>(selector)) {
-          if (element.matches('.follow-latest.ui-button') && element.closest('.floating-composer'))
-            continue;
-          const box = geometry(element);
-          if (!box || materials.length >= 256) continue;
-          const css = getComputedStyle(element);
-          materials.push({
-            id: identity(element),
-            style:
-              selector === clearSelector
-                ? 'clear'
-                : element.matches('.floating-composer .macos-follow-slot')
-                  ? followHovered
-                    ? 'regular-follow-hover'
-                    : 'regular-interactive'
-                  : element.matches('.floating-capture-notice')
-                    ? 'regular-dark'
-                    : 'regular',
-            radius: element.matches('.follow-latest')
-              ? box.width / 2
-              : Math.min(1000, parseFloat(css.borderTopLeftRadius) || 0),
-            round: css.getPropertyValue('corner-shape') === 'round',
-            dark: true,
-            opacity: 1,
-            ...box,
-          });
-          elements.push(element);
-        }
-      const modal = document.querySelector('dialog[open]');
-      if (modal && materials.length < 256) {
-        const box = rect(modal),
-          x = box.x - 32,
-          y = box.y - 32;
-        materials.push({
-          id: identity(modal),
-          style: 'dialog-halo',
-          radius: parseFloat(getComputedStyle(modal).borderTopLeftRadius) || 0,
-          round: false,
-          dark: true,
-          opacity: 1,
-          fadeBottom: 0,
-          x,
-          y,
-          width: box.width + 64,
-          height: box.height + 64,
-          clip: {
-            x: Math.max(0, x),
-            y: Math.max(0, y),
-            width: Math.min(innerWidth, x + box.width + 64) - Math.max(0, x),
-            height: Math.min(innerHeight, y + box.height + 64) - Math.max(0, y),
-          },
-        });
-      }
-      for (const element of document.querySelectorAll<HTMLElement>(buttonSelector)) {
-        if (
-          (element.closest('.floating-toolbar') || element.matches('.follow-latest')) &&
-          !element.matches(':hover,:focus-visible,:active,.button-destructive')
-        )
+    for (const selector of [clearSelector, regularSelector])
+      for (const element of document.querySelectorAll<HTMLElement>(selector)) {
+        if (element.matches('.follow-latest.ui-button') && element.closest('.floating-composer'))
           continue;
         const box = geometry(element);
-        if (
-          !box ||
-          box.width < 12 ||
-          box.height < 12 ||
-          box.height > 100 ||
-          box.clip.width !== box.width ||
-          box.clip.height !== box.height
-        )
-          continue;
-        const { x, y, width, height } = box;
-        if (element.matches('.interview-answer-retry')) {
-          buttons.push({ ...contentControl(element, identity(element), modal), overGlass: true });
-          controls.push(element);
-          continue;
-        }
-        buttons.push({
+        if (!box || materials.length >= 256) continue;
+        const css = getComputedStyle(element);
+        materials.push({
           id: identity(element),
-          x,
-          y,
-          width,
-          height,
-          kind: 'button-background',
-          label: '',
-          value: '',
-          symbol: null,
-          symbolColor: null,
-          color: materialColor(root, '--foreground'),
-          disabled: element.matches(':disabled'),
-          covered: !!modal,
-          overGlass: true,
-          pressed: element.matches(':active') || element.getAttribute('aria-pressed') === 'true',
-          focused: element.matches(':focus-visible'),
-          checked: false,
-          hovered: element.matches(':hover'),
-          trailing: false,
+          style:
+            selector === clearSelector
+              ? 'clear'
+              : element.matches('.floating-composer .macos-follow-slot')
+                ? followHovered
+                  ? 'regular-follow-hover'
+                  : 'regular-interactive'
+                : element.matches('.floating-capture-notice')
+                  ? 'regular-dark'
+                  : 'regular',
+          radius: element.matches('.follow-latest')
+            ? box.width / 2
+            : Math.min(1000, parseFloat(css.borderTopLeftRadius) || 0),
+          round: css.getPropertyValue('corner-shape') === 'round',
+          dark: true,
           opacity: 1,
+          ...box,
         });
         elements.push(element);
       }
-      // The floating settings dialog uses the same content-area AppKit
-      // controls as the main settings, while interview buttons keep their size.
-      if (modal)
-        for (const element of modal.querySelectorAll<HTMLElement>(
-          'button,input[type="range"][aria-label="面试字体大小"]',
-        )) {
-          const box = geometry(element);
-          if (
-            !box ||
-            box.height > 100 ||
-            box.width < 12 ||
-            box.height < 12 ||
-            box.width !== box.clip.width ||
-            box.height !== box.clip.height
-          )
-            continue;
-          buttons.push(contentControl(element, identity(element), modal));
-          controls.push(element);
-        }
+    const modal = document.querySelector('dialog[open]');
+    if (modal && materials.length < 256) {
+      const box = rect(modal);
+      materials.push({
+        id: identity(modal),
+        style: 'modal-exclusion',
+        radius: parseFloat(getComputedStyle(modal).borderTopLeftRadius) || 0,
+        round: false,
+        dark: true,
+        opacity: 1,
+        fadeBottom: 0,
+        ...box,
+        clip: box,
+      });
     }
+    for (const element of document.querySelectorAll<HTMLElement>(buttonSelector)) {
+      if (
+        (element.closest('.floating-toolbar') || element.matches('.follow-latest')) &&
+        !element.matches(':hover,:focus-visible,:active,.button-destructive')
+      )
+        continue;
+      const box = geometry(element);
+      if (
+        !box ||
+        box.width < 12 ||
+        box.height < 12 ||
+        box.height > 100 ||
+        box.clip.width !== box.width ||
+        box.clip.height !== box.height
+      )
+        continue;
+      const { x, y, width, height } = box;
+      if (element.matches('.interview-answer-retry')) {
+        buttons.push({ ...contentControl(element, identity(element), modal), overGlass: true });
+        controls.push(element);
+        continue;
+      }
+      buttons.push({
+        id: identity(element),
+        x,
+        y,
+        width,
+        height,
+        kind: 'button-background',
+        label: '',
+        value: '',
+        symbol: null,
+        symbolColor: null,
+        color: materialColor(root, '--foreground'),
+        disabled: element.matches(':disabled'),
+        covered: !!modal,
+        overGlass: true,
+        pressed: element.matches(':active') || element.getAttribute('aria-pressed') === 'true',
+        focused: element.matches(':focus-visible'),
+        checked: false,
+        hovered: element.matches(':hover'),
+        trailing: false,
+        opacity: 1,
+      });
+      elements.push(element);
+    }
+    // The floating settings dialog uses the same content-area AppKit
+    // controls as the main settings, while interview buttons keep their size.
+    if (modal)
+      for (const element of modal.querySelectorAll<HTMLElement>(
+        'button,input[type="range"][aria-label="面试字体大小"]',
+      )) {
+        const box = geometry(element);
+        if (
+          !box ||
+          box.height > 100 ||
+          box.width < 12 ||
+          box.height < 12 ||
+          box.width !== box.clip.width ||
+          box.height !== box.clip.height
+        )
+          continue;
+        buttons.push(contentControl(element, identity(element), modal));
+        controls.push(element);
+      }
     queued = { materials, buttons, elements, controls };
     void flush();
   };
@@ -320,7 +302,6 @@ if (
   });
   const appearance = new MutationObserver(schedule);
   appearance.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
-  const unsubscribe = subscribeLiquidGlass(schedule);
   const removeRange = desktop.onContentRange((id, value) =>
     applyContentRange(
       paintedControls.find((element) => identity(element) === id),
@@ -339,7 +320,6 @@ if (
   ] as const;
   for (const event of events) document.addEventListener(event, schedule, true);
   window.addEventListener('resize', schedule);
-  for (const media of accessibility) media.addEventListener('change', schedule);
   locate();
   const dispose = () => {
     disposed = true;
@@ -349,13 +329,11 @@ if (
     resize.disconnect();
     changes.disconnect();
     appearance.disconnect();
-    unsubscribe();
     removeRange();
     clear();
     root.classList.remove('macos-interview-glass');
     for (const event of events) document.removeEventListener(event, schedule, true);
     window.removeEventListener('resize', schedule);
-    for (const media of accessibility) media.removeEventListener('change', schedule);
     void desktop
       .setContentControls([])
       .then(() => desktop.setInterviewMaterials([]))

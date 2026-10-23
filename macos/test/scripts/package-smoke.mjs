@@ -63,7 +63,7 @@ const update = signedMacUpdate(
   },
   config.publicKey,
 );
-assert.equal(update.minimumSystemVersion, '14.2');
+assert.equal(update.minimumSystemVersion, '26.0');
 assert.equal(
   verify(
     null,
@@ -429,7 +429,8 @@ try {
     await mainPage.evaluate(() => window.desktop.presentation.liquidGlass),
     packagedGlass,
   );
-  if (packagedGlass) {
+  assert.equal(packagedGlass, true, 'Mac package requires the Liquid Glass binding');
+  {
     await mainPage.waitForFunction(() =>
       document.documentElement.classList.contains('native-scroll-chrome'),
     );
@@ -471,11 +472,6 @@ try {
     console.log(
       'PASS: final packaged Liquid Glass binding, three aligned native buttons, styled 40px composer, synthetic chat and shared capsule marker.',
     );
-  } else {
-    await mainPage.waitForFunction(() =>
-      document.documentElement.classList.contains('web-materials'),
-    );
-    console.log('PASS: final packaged application selects the shared non-Liquid-Glass fallback.');
   }
   if (installArchive) {
     const { installFeed } = require(

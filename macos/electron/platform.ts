@@ -6,7 +6,7 @@ export const macos: DesktopPlatform = {
   qwenRuntimeFile: 'qwen/voxcue-qwen',
   updateDriverFile: 'macos/electron/updates/driver.js',
   iconFile: 'public/voxcue.png',
-  mainWindowOptions: { vibrancy: 'sidebar', visualEffectState: 'followWindow' },
+  mainWindowOptions: {},
   nativeWindowControls: true,
   presentation: {
     frostedTransparency: true,

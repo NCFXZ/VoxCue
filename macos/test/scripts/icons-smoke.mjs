@@ -245,7 +245,7 @@ try {
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
   assert.equal(
     await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
-    (await page.evaluate(() => window.desktop.presentation.liquidGlass)) ? 0 : 1,
+    0,
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   checks.push('主界面/设置含菜单、导航、主题、输入和关闭图标均为 SF Symbols，浅深主题继承颜色');

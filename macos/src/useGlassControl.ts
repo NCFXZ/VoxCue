@@ -7,13 +7,12 @@ import { materialColor } from './materialGeometry';
 export function useGlassControl(
   ref: RefObject<HTMLButtonElement | null>,
   kind: GlassButtonAction,
-  enabled: boolean,
   disabled: boolean,
-  activate: (enabled: boolean) => void,
+  activate: () => void,
 ) {
   const [native, setNative] = useState(false);
-  const current = useRef({ enabled, disabled, activate });
-  current.current = { enabled, disabled, activate };
+  const current = useRef({ disabled, activate });
+  current.current = { disabled, activate };
   const synchronize = useRef<() => Promise<void>>(async () => {});
   useEffect(() => {
     const desktop = window.desktop;
@@ -67,7 +66,6 @@ export function useGlassControl(
                 y: rect.y,
                 width: rect.width,
                 height: rect.height,
-                enabled: current.current.enabled,
               }
             : null;
           const value = placement && {
@@ -127,18 +125,18 @@ export function useGlassControl(
       attributes: true,
       attributeFilter: ['class', 'style'],
     });
-    const activated = (value: boolean) => {
+    const activated = () => {
       if (!disposed && visible() && !covered() && !current.current.disabled) {
         if (document.querySelector('[role="menu"][data-state="open"]'))
           element.dispatchEvent(
             new PointerEvent('pointerdown', { bubbles: true, pointerType: 'mouse', button: 0 }),
           );
-        current.current.activate(value);
+        current.current.activate();
         if (element.isConnected) element.focus({ preventScroll: true });
       }
     };
     const remove = desktop.onGlassButton((action) => {
-      if (action === kind) activated(true);
+      if (action === kind) activated();
     });
     const transition = () => {
       transitionUntil = performance.now() + 350;
@@ -171,6 +169,6 @@ export function useGlassControl(
   }, [kind]);
   useEffect(() => {
     void synchronize.current();
-  }, [enabled, disabled]);
+  }, [disabled]);
   return { native, synchronize };
 }

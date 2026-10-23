@@ -20,6 +20,11 @@ export async function checkLoginControls({ app, page, probeFile, poll }) {
       );
     }, probeFile);
   const button = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+  assert.equal(await button.count(), 1);
+  const brand = button.locator('img.service-brand-icon');
+  assert.equal(await brand.count(), 1);
+  await brand.evaluate((image) => image.decode());
+  assert.ok(await brand.evaluate((image) => image.complete && image.naturalWidth > 0));
   await app.evaluate(({ BrowserWindow }, file) => {
     const require = process
       .getBuiltinModule('module')
@@ -199,7 +204,24 @@ export async function checkLoginControls({ app, page, probeFile, poll }) {
     page.evaluate(() => window.desktop.setContentControls([{ kind: 'search' }])),
   );
   await assert.rejects(
-    page.evaluate(() => window.desktop.setInterviewMaterials([{ style: 'dialog-halo' }])),
+    page.evaluate(() =>
+      window.desktop.setInterviewMaterials([
+        {
+          id: 1,
+          style: 'modal-exclusion',
+          dark: true,
+          round: false,
+          x: 1,
+          y: 1,
+          width: 100,
+          height: 100,
+          radius: 20,
+          opacity: 1,
+          fadeBottom: 0,
+          clip: { x: 1, y: 1, width: 100, height: 100 },
+        },
+      ]),
+    ),
   );
   await (await app.browserWindow(page)).evaluate((win) => win.setSize(860, 520));
   await page.waitForFunction(() => innerWidth === 860 && innerHeight === 520);

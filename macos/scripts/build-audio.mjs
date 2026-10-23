@@ -18,7 +18,7 @@ for (const [command, args] of [
       '-O2',
       '-arch',
       'arm64',
-      '-mmacosx-version-min=14.2',
+      '-mmacosx-version-min=26.0',
       'native/AudioCapture.mm',
       '-framework',
       'Foundation',
@@ -37,4 +37,4 @@ for (const [command, args] of [
   if (result.error) throw result.error;
   if (result.status) process.exit(result.status);
 }
-console.log('Built local arm64 Core Audio helper (macOS 14.2+).');
+console.log('Built local arm64 Core Audio helper (macOS 26+).');

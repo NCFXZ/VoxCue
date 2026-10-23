@@ -80,11 +80,13 @@ const liquidGlassAvailable =
   process.platform === 'darwin' &&
   existsSync(nativeBinding) &&
   workspace.platformRequire(nativeBinding).available === true;
+if (process.platform === 'darwin')
+  assert.ok(liquidGlassAvailable, 'Mac testing requires macOS 26+ and the Liquid Glass binding.');
 const selected = process.argv.slice(2);
 const names = selected.length
   ? selected
   : [
-      ...(liquidGlassAvailable ? nativeUI : []),
+      ...(process.platform === 'darwin' ? nativeUI : []),
       ...shared,
       ...(process.platform === 'darwin'
         ? mac.filter((name) => !nativeUI.includes(name) && name !== 'content-controls')
@@ -95,8 +97,6 @@ for (const name of names)
     throw Error('Unknown or unavailable suite: ' + name);
   else if (!liquidGlassAvailable && [...nativeUI, 'content-controls'].includes(name))
     throw Error('This suite requires actual macOS Liquid Glass: ' + name);
-if (process.platform === 'darwin' && !liquidGlassAvailable)
-  console.log('Liquid Glass unavailable: exercising shared fallback and other Mac capabilities.');
 // Shared DOM/business tests exercise the real web fallback bundle. AppKit
 // controls/menus/projections have their own native matrix, with real tracking.
 let webRenderer;

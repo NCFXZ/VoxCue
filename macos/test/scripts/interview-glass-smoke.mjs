@@ -8,6 +8,11 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 const probeFile = path.join(testRoot, 'InterviewGlassProbe.node');
+const screenshotDirectory = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+if (screenshotDirectory) {
+  assert.ok(path.isAbsolute(screenshotDirectory));
+  await mkdir(screenshotDirectory, { recursive: true });
+}
 const compiled = spawnSync(
   '/usr/bin/xcrun',
   [
@@ -128,11 +133,44 @@ try {
       { file: probeFile, op, value },
     );
   const state = async () => JSON.parse(await probe('inspect'));
+  const cornerPixels = () =>
+    app.evaluate(async ({ BrowserWindow, nativeImage }, file) => {
+      const require = process
+        .getBuiltinModule('module')
+        .createRequire(process.cwd() + '/package.json');
+      const win = BrowserWindow.getAllWindows().find((win) =>
+        win.webContents.getURL().endsWith('#interview'),
+      );
+      const result = await require(file).snapshot(win.getNativeWindowHandle());
+      const image = nativeImage.createFromBuffer(result.png);
+      const { x, y, width, height } = result.crop;
+      return [
+        [x + 3, y + 3],
+        [x + width - 6, y + 3],
+        [x + 3, y + height - 6],
+        [x + width - 6, y + height - 6],
+      ].map(([x, y]) =>
+        image
+          .crop({ x: Math.round(x), y: Math.round(y), width: 2, height: 2 })
+          .toBitmap()
+          .toString('base64'),
+      );
+    }, probeFile);
   const capture = async (label, backdrop = 2) => {
     await probe('backdrop', backdrop);
     await page.waitForTimeout(300);
-    const { png } = await probe('snapshot');
-    const output = path.join(testRoot, label + '.png');
+    const png = await app.evaluate(async ({ BrowserWindow, nativeImage }, file) => {
+      const require = process
+        .getBuiltinModule('module')
+        .createRequire(process.cwd() + '/package.json');
+      const win = BrowserWindow.getAllWindows().find((win) =>
+        win.webContents.getURL().endsWith('#interview'),
+      );
+      const result = await require(file).snapshot(win.getNativeWindowHandle());
+      return nativeImage.createFromBuffer(result.png).crop(result.crop).toPNG();
+    }, probeFile);
+    const output = path.resolve(screenshotDirectory ?? testRoot, label + '.png');
+    assert.ok(output.startsWith(path.resolve(screenshotDirectory ?? testRoot) + path.sep));
     await writeFile(output, png);
     console.log(JSON.stringify({ preview: output }));
     if (process.argv.includes('--preview') || process.argv.includes('--preview=' + label)) {
@@ -183,17 +221,22 @@ try {
   );
   await page.mouse.move(10, 10);
   await page.waitForTimeout(100);
-  const idleGlassButtons = flatten((await state()).tree).filter(
-    (node) => node.class === 'NSButton' && node.bezelStyle === 1 && node.inGlassContent,
-  ).length;
-  assert.ok(idleGlassButtons <= 2, 'Toolbar icons must not keep idle button backplates');
+  const toolbarRect = await page.locator('.floating-toolbar').boundingBox();
+  const toolbarButtons = (value) =>
+    flatten(value.tree).filter(
+      (node) =>
+        node.class === 'NSButton' &&
+        node.bezelStyle === 1 &&
+        node.inGlassContent &&
+        node.centerY >= toolbarRect.y &&
+        node.centerY <= toolbarRect.y + toolbarRect.height,
+    );
+  const idleGlassButtons = toolbarButtons(await state()).length;
+  assert.equal(idleGlassButtons, 0, 'Toolbar icons must not keep idle button backplates');
   await page.getByRole('button', { name: '面试设置', exact: true }).hover();
   await poll(
     state,
-    (value) =>
-      flatten(value.tree).filter(
-        (node) => node.class === 'NSButton' && node.bezelStyle === 1 && node.inGlassContent,
-      ).length > idleGlassButtons,
+    (value) => toolbarButtons(value).length > idleGlassButtons,
     'Toolbar hover must reveal native glass',
   );
   await page.mouse.move(10, 10);
@@ -397,13 +440,20 @@ try {
   await page.evaluate(() => window.desktop.resizeInterview(-1));
   await page.waitForTimeout(350);
   assert.equal(await input.inputValue(), '缩放后仍可输入');
+  const clearCorners = await cornerPixels();
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '面试设置', exact: true });
   await settings.waitFor();
-  await poll(
-    state,
-    (value) => flatten(value.tree).some((node) => node.identifier === 'voxcue-dialog-halo'),
-    'Settings receive a native halo',
+  await page.waitForTimeout(200);
+  assert.equal(
+    flatten((await state()).tree).some((node) => node.identifier === 'voxcue-dialog-halo'),
+    false,
+    'Interview settings must not add a native halo',
+  );
+  assert.deepEqual(
+    await cornerPixels(),
+    clearCorners,
+    'Opening interview settings must preserve all four empty-corner pixels',
   );
   assert.equal(
     await settings.evaluate((node) => getComputedStyle(node, '::backdrop').backgroundColor),
@@ -530,39 +580,107 @@ try {
   await page.waitForFunction(() =>
     document.documentElement.classList.contains('macos-interview-glass'),
   );
+  if (screenshotDirectory) {
+    await app.evaluate(
+      ({ desktopCapturer, nativeImage, screen, BrowserWindow, systemPreferences }) => {
+        const status = systemPreferences.getMediaAccessStatus.bind(systemPreferences);
+        systemPreferences.getMediaAccessStatus = (type) =>
+          type === 'screen' ? 'granted' : status(type);
+        desktopCapturer.getSources = async () => {
+          const win = BrowserWindow.getAllWindows().find((win) =>
+            win.webContents.getURL().endsWith('#interview'),
+          );
+          return [
+            {
+              id: 'screen:synthetic',
+              display_id: String(screen.getDisplayMatching(win.getBounds()).id),
+              thumbnail: nativeImage.createFromBitmap(Buffer.from([70, 140, 200, 255]), {
+                width: 1,
+                height: 1,
+              }),
+            },
+          ];
+        };
+      },
+    );
+    const camera = page.getByRole('button', { name: '截取图像', exact: true });
+    await page.waitForFunction(
+      () => !document.querySelector('.floating-screenshot-button').disabled,
+    );
+    const cameraBackplate = async (width, shape, enabled) => {
+      const box = await camera.boundingBox();
+      await poll(
+        state,
+        (value) =>
+          flatten(value.tree).some(
+            (node) =>
+              node.class === 'NSButton' &&
+              node.inGlassContent &&
+              node.bezelStyle === 1 &&
+              node.borderShape === shape &&
+              node.frameWidth === width &&
+              node.frameHeight === 32 &&
+              node.enabled === enabled &&
+              Math.abs(node.centerX - box.x - box.width / 2) < 1 &&
+              Math.abs(node.centerY - box.y - box.height / 2) < 1,
+          ),
+        'Screenshot must have the actual native circle/capsule, including its disabled state',
+      );
+    };
+    await cameraBackplate(32, 3, true);
+    await camera.click();
+    await page.waitForFunction(
+      () => document.querySelectorAll('.floating-screenshot-preview').length === 1,
+    );
+    await capture('interview-screenshot-one');
+    await cameraBackplate(76, 1, true);
+    for (let count = 2; count <= 5; count++) {
+      await camera.click();
+      await page.waitForFunction(
+        (count) => document.querySelectorAll('.floating-screenshot-preview').length === count,
+        count,
+      );
+    }
+    await capture('interview-screenshot-five');
+    await cameraBackplate(76, 1, false);
+  }
   await page.getByRole('button', { name: '结束面试', exact: true }).click();
   const endConfirm = page.getByRole('button', { name: '确认结束面试', exact: true });
   await endConfirm.waitFor();
   await page.waitForTimeout(250);
   const endRect = await endConfirm.boundingBox();
   assert.equal(endRect.height, 32);
-  assert.ok(endRect.width > endRect.height);
-  assert.ok(
-    flatten((await state()).tree).some(
-      (node) =>
-        node.class === 'NSButton' &&
-        node.bezelStyle === 1 &&
-        node.inGlassContent &&
-        node.borderShape === 1,
-    ),
+  assert.equal(endRect.width, 104);
+  const confirmationState = await poll(
+    state,
+    (value) =>
+      flatten(value.tree).some(
+        (node) =>
+          node.class === 'NSButton' &&
+          Math.abs(node.centerX - endRect.x - endRect.width / 2) < 1 &&
+          Math.abs(node.centerY - endRect.y - endRect.height / 2) < 1 &&
+          node.frameWidth === 104 &&
+          node.frameHeight === 32 &&
+          node.bezelStyle === 1 &&
+          node.inGlassContent &&
+          node.borderShape === 1,
+      ),
+    'The actual end confirmation must have a 104×32 native capsule backplate',
   );
+  assert.ok(confirmationState);
+  await capture('interview-end-confirm-capsule');
   await page.getByRole('button', { name: '结束面试', exact: true }).waitFor();
   await page.evaluate(() => {
     localStorage.setItem('voxcue-liquid-glass-enabled-v1', 'false');
     window.dispatchEvent(new Event('storage'));
   });
-  await page.waitForFunction(
-    () => !document.documentElement.classList.contains('macos-interview-glass'),
-  );
-  assert.ok(
-    !flatten((await state()).tree).some((node) => node.identifier === 'voxcue-interview-materials'),
-  );
-  await page.evaluate(() => {
-    localStorage.setItem('voxcue-liquid-glass-enabled-v1', 'true');
-    window.dispatchEvent(new Event('storage'));
-  });
+  await page.waitForTimeout(150);
   await page.waitForFunction(() =>
     document.documentElement.classList.contains('macos-interview-glass'),
+  );
+  assert.ok(
+    flatten((await state()).tree).some((node) => node.identifier === 'voxcue-interview-materials'),
+    'Legacy preferences cannot disable Liquid Glass',
   );
   assert.equal(
     await main.evaluate(async () => {

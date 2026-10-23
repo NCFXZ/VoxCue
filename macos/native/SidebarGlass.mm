@@ -65,7 +65,6 @@ CGPathRef VoxCueContinuousContour(NSSize size, CGFloat requestedRadius) {
 @property(nonatomic, weak) NSView *mainWeb;
 @property(nonatomic, weak) NSView *mainPaint;
 @property(nonatomic, strong) VoxCueGlassContent *foreground;
-@property(nonatomic, strong) NSVisualEffectView *remainingVibrancy;
 @property(nonatomic, strong) VoxCueChatBackground *chatBackground;
 @property(nonatomic, strong) NSColor *originalWindowBackground;
 @property(nonatomic) BOOL originalWindowOpaque;
@@ -83,11 +82,6 @@ CGPathRef VoxCueContinuousContour(NSSize size, CGFloat requestedRadius) {
     self.foreground.rendererBounds = bounds;
     self.glass.frame = bounds;
     [self.foreground resizeSubviewsWithOldSize:NSZeroSize];
-    self.remainingVibrancy.frame = NSMakeRect(NSMinX(bounds) + width, NSMinY(bounds),
-                                            NSWidth(bounds) - width, NSHeight(bounds) - self.toolbarHeight);
-    // Preparation's body is opaque except for the two native glass surfaces.
-    // Do not leave the legacy vibrancy underneath either exposed surface.
-    self.remainingVibrancy.hidden = self.toolbarHeight > 0;
     NSRect chat = NSMakeRect(width, 0, NSWidth(bounds) - width, NSHeight(bounds));
     self.chatBackground.frame = chat;
     self.chatBackground.hidden = self.toolbarHeight == 0;
@@ -136,16 +130,6 @@ void VoxCuePositionGlassControl(NSView *host, NSView *control, bool behindConten
     [parent addSubview:control positioned:(behindContent || blur) ? NSWindowBelow : NSWindowAbove relativeTo:web];
 }
 
-static NSVisualEffectView *sidebarVibrancy(NSView *view) {
-    if ([view isKindOfClass:NSVisualEffectView.class] &&
-        ((NSVisualEffectView *)view).material == NSVisualEffectMaterialSidebar)
-        return (NSVisualEffectView *)view;
-    for (NSView *child in view.subviews) {
-        if (NSVisualEffectView *match = sidebarVibrancy(child)) return match;
-    }
-    return nil;
-}
-
 static void restoreFirstResponder(NSWindow *window, NSResponder *responder) {
     if (responder != window.firstResponder && [responder isKindOfClass:NSView.class] &&
         ((NSView *)responder).window == window) [window makeFirstResponder:responder];
@@ -175,7 +159,7 @@ static napi_value apply(napi_env env, napi_callback_info info) {
     }
     bool active = false;
     @autoreleasepool {
-        if (@available(macOS 26.0, *)) {
+        {
             void *pointer = nullptr;
             std::memcpy(&pointer, bytes, sizeof(pointer));
             NSView *nativeView = (__bridge NSView *)pointer;
@@ -197,9 +181,6 @@ static napi_value apply(napi_env env, napi_callback_info info) {
                     restoreFirstResponder(window, responder);
                 } else {
                     if (!background) {
-                        NSVisualEffectView *original = sidebarVibrancy(host);
-                        NSView *backing = original;
-                        while (backing.superview && backing.superview != host) backing = backing.superview;
                         background = [[VoxCueSidebarBackground alloc] initWithFrame:host.bounds];
                         background.originalWindowBackground = window.backgroundColor;
                         background.originalWindowOpaque = window.isOpaque;
@@ -223,30 +204,19 @@ static napi_value apply(napi_env env, napi_callback_info info) {
                         background.foreground = foreground;
                         glass.contentView = foreground;
                         background.glass = glass;
-                        // Electron's full-window vibrancy is disabled by the Mac port
-                        // after this view is ready. Its replacement never enters the
-                        // sidebar, so no old blur remains beneath the exposed glass.
-                        NSVisualEffectView *remaining = [[NSVisualEffectView alloc] initWithFrame:NSZeroRect];
-                        remaining.material = original ? original.material : NSVisualEffectMaterialSidebar;
-                        remaining.blendingMode = original ? original.blendingMode : NSVisualEffectBlendingModeBehindWindow;
-                        remaining.state = original ? original.state : NSVisualEffectStateFollowsWindowActiveState;
-                        remaining.emphasized = original ? original.emphasized : NO;
-                        background.remainingVibrancy = remaining;
                         background.chatBackground = [[VoxCueChatBackground alloc] initWithFrame:NSZeroRect];
                         background.chatBackground.clipsToBounds = YES;
                         background.chatBackground.wantsLayer = YES;
                         [renderer addSubview:background.chatBackground];
-                        [background addSubview:remaining];
                         [background addSubview:glass];
-                        [host addSubview:background positioned:NSWindowAbove relativeTo:backing != host ? backing : nil];
+                        [host addSubview:background positioned:NSWindowAbove relativeTo:nil];
                         objc_setAssociatedObject(host, &sidebarKey, background,
                                                  OBJC_ASSOCIATION_RETAIN_NONATOMIC);
                     }
-                    // Also reconcile after Electron relayouts its native children.
-                    // The actual web content belongs to glass.contentView; retain
-                    // only Electron's managed legacy backing outside this subtree.
+                    // Reconcile Electron's native children into glass.contentView,
+                    // leaving only the other bounded native presentation layers.
                     for (NSView *view in [host.subviews copy]) {
-                        if (view != background && !sidebarVibrancy(view) && !VoxCueIsGlassControl(view) && !VoxCueIsScrollChrome(view) && !VoxCueIsContentControl(view)) {
+                        if (view != background && !VoxCueIsGlassControl(view) && !VoxCueIsScrollChrome(view) && !VoxCueIsContentControl(view)) {
                             [background.foreground.renderer addSubview:view];
                             if(!background.mainPaint) background.mainPaint=view;
                             if(view.subviews.count) background.mainWeb=view;
@@ -297,9 +267,7 @@ static napi_value initialize(napi_env env, napi_value exports) {
     };
     napi_define_properties(env, exports, sizeof(properties) / sizeof(properties[0]), properties);
     napi_value available;
-    bool supported=false;
-    if (@available(macOS 26.0, *)) supported=true;
-    napi_get_boolean(env, supported, &available);
+    napi_get_boolean(env, true, &available);
     napi_set_named_property(env, exports, "available", available);
     return exports;
 }

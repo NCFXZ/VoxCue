@@ -2,11 +2,45 @@
 
 日期：2026-10-23。交接对象：Windows 本机接续人员或编码代理。
 
-本轮Windows最终代码全量回归、修复及向Mac的逐条接续清单，见[MACOS_0.5.8_HANDOFF.md](MACOS_0.5.8_HANDOFF.md)。用户最新已授权核对后将本轮源码推送至既有私有仓库main，版本保持0.5.8；覆盖本页下文此前仅定向、不提交的限制，不延伸为安装包发行。
+本轮Windows最终代码全量回归、修复及向Mac的逐条接续清单，见[MACOS_0.5.8_HANDOFF.md](MACOS_0.5.8_HANDOFF.md)。Mac从`95a9bce2b5e623ace3c5aa44ca89dd20f96d16b8`接续后的最新回传见下一节。用户已授权将本轮核对后的源码、测试及文档提交推送至既有私有`NCFXZ/VoxCue`的`main`，版本保持0.5.8；覆盖本页下文此前仅定向、不提交的限制，本次不发布安装包。
 
-**Windows 的页面结构、尺寸、间距和交互以 Mac 最终界面为基准；按钮、下拉触发框使用同款胶囊或圆形，Liquid Glass 材质使用 Windows 毛玻璃替代。** 布局和可以共用的业务继续维护在 `shared/`；回退 Mac 与 Windows 共用一套设计元素。Mac 的 AppKit 控件、Liquid Glass 绑定和承载层留在 `macos/`，Windows 不移植这套原生实现。
+**Mac现仅支持macOS 26+ Liquid Glass，已取消旧系统回退。Windows继续使用既有shared胶囊/圆形控件、毛玻璃和Fluent图标，界面及系统适配不因Mac取消回退而改变。** 页面结构、尺寸、间距、交互和可以共用的业务仍唯一维护在`shared/`。Mac的AppKit控件、SF Symbols、Liquid Glass绑定和承载层留在`macos/`，Windows不移植这套原生实现。
 
 本文整理最终实现，覆盖历史交接中与之冲突的椭圆标记、普通矩形按钮、整窗压暗、输入框宽度和重复关闭入口等过程方案。附录包含此次 0.5.6→0.5.7 的全部 125 个变更文件。
+
+## 本轮 Mac 0.5.8 回传：取消旧系统回退
+
+本节优先于下文所有“旧Mac/回退Mac”、关闭Liquid Glass、旧最低系统、旧矩阵数量和原生待办描述。历史0.5.6→0.5.8交接及文件清单继续保留，不能据此恢复已取消的Mac支持路径。
+
+### 支持范围与删除边界
+
+1. Mac仅支持Apple Silicon arm64、macOS 26及以上，必须具备有效Liquid Glass原生绑定；缺失或无效时拒绝创建展示层，不切换网页材质。开发启动器、应用打包配置和新生成更新清单的最低系统均为26.0，原生绑定直接链接`NSGlassEffectView`。
+2. 已删除Mac旧Liquid Glass布尔偏好及其单测、旧系统材质切换和兼容分支、旧vibrancy承载。工作区中的“VoxCue 网页回退预览.app”、专属原生启动器、构建/预览脚本及派生renderer一并移除；不再提供旧Mac外观预览或验收入口。
+3. Windows使用的`shared/src/platform/webMaterials.ts/.css`、默认网页控件、Fluent图标、无障碍样式、布局和共用业务均保留。本轮Mac接续没有改写`windows/`；四份版本配置均为0.5.8，依赖、锁及固定运行时保持。
+4. `shared/src/platform/materials.ts`新增有界初始化端口，Windows默认仍调用原有`installWebMaterials`；Mac构建替换为`macos/src/NativeMaterials.tsx`。Mac构建拒绝网页材质模块/CSS、Fluent及Windows实现进入bundle，不能为清理Mac而删除Windows的shared实现。
+5. 原生失败后的视图层级、焦点和透明标记清理继续保留；辅助功能由AppKit及shared通用语义处理。固定Qwen/CPython、Electron、凭据助手的原始基线与身份，以及历史更新清单签名认证保持；这些不属于旧Mac视觉回退。
+
+### 本轮界面修复与验证
+
+Mac已落实下文此前交接的原生待办：输入区附件/模型/思考强度等指定动作默认无背景，仅悬停/键盘聚焦显示底板；主设置/知识库由原生展示层40%压暗且覆盖独立输入前景；面试设置透明、无光晕；面试及两个预览固定深色，移除透明度控件后保留原60%曲线及居中字号；结束确认与截图展开使用32px高胶囊；记录详情顶部使用实际Regular，正文不再被大面积覆盖。页面和业务仍只有shared一份。
+
+| 检查范围 | 本轮结果与证据 | 限制 |
+| --- | --- | --- |
+| 工作区、架构、类型、格式及生产构建 | 通过；配置同步，架构无越界/循环，Mac renderer边界检查通过 | 不代表另一平台原生通过 |
+| 全部单测 | 通过，77个文件、785项；保留缺失/无效原生绑定拒绝启动断言 | 使用隔离合成输入 |
+| 共享功能矩阵 | 通过，37/37，包含20轮面试、截图暂存/重试、更新及音频管线 | 使用临时通用shared网页renderer，核对Windows共用实现和业务；不是Mac产品回退，也不是Windows真机验收 |
+| Mac原生专项 | 通过；真实AppKit登录、更新、侧栏/投影、设置压暗、记录顶部/正文像素及面试Clear/Regular；旧关闭偏好不能停用原生材质 | 实际环境为macOS 27.0.1 arm64；macOS 26真机未验证，不再承诺26以下支持 |
+| Mac五档缩放 | 通过，100/125/150/175/200%共5/5，串行使用实际Liquid Glass截图流程 | Electron缩放，不代表物理多显示器DPI验收 |
+| 临时签名应用 | 通过；最低系统26.0、包内容/固定身份、首次运行、固定公开组件下载、实际离线E5/LanceDB与Paraformer Worker、移位/离线缓存复用 | 不是正式发行ZIP/DMG验收；临时包、模型、资料与截图退出清理 |
+| Windows原生与DPI、macOS 26真机、真实账户及硬件 | 未验证 | Windows须本机执行；本轮仅合成账户/资料/音频/捕获及自有窗口 |
+
+GUI和原生检查均串行，原断言保持。共享测试宿主以测试专用的不绘制材质端口复用Electron主题、Dock和鼠标穿透行为，没有向产品加入旧Mac开关。Mac新增的`handoff-content-check.mjs`和`ui-refinement-matrix.mjs`均为测试源码，输出、模型及安装包不进入源码提交。
+
+### Windows 接续要求及发行边界
+
+- 拉取包含本轮回传的`main`，在Windows本机运行`pnpm sync:workspace`并按第9节执行工作区/架构/类型、构建、全部单测、共享功能、Windows原生及五档DPI；发现问题直接修复复测。不要恢复Mac旧系统分支或复制Mac原生实现。
+- 重点确认默认材质初始化仍走shared网页实现，保留Windows控件、Fluent图标、胶囊/圆形、40px连续输入轮廓、模态遮罩及业务交互；共同布局修在shared，Windows系统适配修在windows，macos在Windows本机只读。
+- 本次只提交推送私有源码，版本保持0.5.8；不创建或发布安装包/发行/标签，不修改Latest、既有资产或真实安装。现存Mac 0.5.8安装包不能视为包含本轮修改；若后续获准发行，须重新生成并验证正式包。
 
 ## 最新界面修订：固定透明度、悬停控件与弹窗遮罩
 
@@ -21,11 +55,11 @@
 7. 面试设置取消边缘泛白，不压暗、不虚化后方窗口，模态阻止背景操作和焦点恢复保持；结束确认保持原32px高度、危险色和二次确认，展开时移除圆形图标按钮类型，使用999px圆角的104px宽胶囊且无额外阴影，避免50%圆角被横向拉成椭圆。
 8. 记录详情顶部接入聊天同款共用毛玻璃；转写滚入后显示，滚回顶端清空，覆盖完整内容宽度。工具栏自身定位，毛玻璃伪元素只覆盖工具栏实际高度；共享ResizeObserver同步高度，转写滚动视口延伸至其后，标题初始留白和AI回答卡片位置保持。中间正文容器允许转写进入顶部区域，窗口边界仍由workspace裁切；错误提示存在时保留原有正文布局。回归须比较工具栏下方正文的实际像素，并确认顶部确实虚化后方转写，不能只断言backdrop-filter字符串。
 
-共用实现和 Windows/回退路径由本机修改。`macos/`保持只读，Mac 本机仍需处理并实际验收：`sidebarGlass.css`对主设置/知识库的透明遮罩覆盖、`ScrollChrome.mm`/面试原生层的NSShadow光晕、记录详情在`scrollChrome.ts`中的承载入口，以及原生按钮的悬停/确认背板和胶囊轮廓。面试设置本身继续透明遮罩，不能随主设置一起压暗。不要从 Windows 仿制或改写 AppKit 材质；共享的显示标记、字号布局、固定材质参数、确认按钮类型和深色策略已经同步，不能据此宣称这些原生项完成。原生搜索继续使用完整NSSearchField的系统内边距。
+此前Windows交接将透明遮罩覆盖、原生NSShadow光晕、记录详情承载，以及原生按钮的悬停/确认背板和胶囊轮廓列为Mac待办；本轮Mac已修复并验证，结果见顶部回传。面试设置本身继续透明遮罩，不能随主设置一起压暗。Windows本机继续将`macos/`保持只读，不仿制或改写AppKit材质；保留shared显示标记、字号布局、固定材质参数、确认按钮类型和深色策略。Mac原生搜索继续使用完整NSSearchField的系统内边距。
 
 旧透明度偏好不再读取或写入，保留原始存储；业务资料、账户、语音与回答流程不变。共用定向入口为`ui-material-refinement`、`web-materials`、`interview-typography`、`interview-ux`、`profile-selection`、`ui-alignment`及`interview-stability`，后者保留20轮开关与4次重载；Windows另运行`presentation-native`检查实际窗口。结果仅在终端/对话报告，不保存新截图，不提交或发行。
 
-## 0. 0.5.8 新增交接（优先于下文历史规格）
+## 0. 早期0.5.8新增交接（历史，当前范围以顶部Mac回传为准）
 
 本轮以 `f11215f852e7c01655ec2d78f02d716b7504a62e` 为父基线，源码版本为 **0.5.8**。改动未包含在已发布0.5.7安装包中；本次只同步源码，不创建0.5.8安装包或公开发行。文件名按用户要求继续沿用本交接文档。下文0.5.6→0.5.7历史及125项清单保留，冲突处以本节为准。
 
@@ -70,8 +104,8 @@ Mac本轮已完成相关原生/共用回退定向验证，并交付取消交界�
 | Mac 0.5.6 比较基线      | `50a0be05058a214bea73828d3884545ba7a6e475`                                                               |
 | 0.5.7 实现提交          | `f11215f852e7c01655ec2d78f02d716b7504a62e`                                                               |
 | 较早 Windows 0.5.6 提交 | `41a46ec3b740b5052af5dfb37b1b0de26b6f4766`；从此接续须同时保留中间的 Mac 0.5.6 提交                      |
-| 版本现状                | `shared/package.json`、根调度器和 Mac 配置为 0.5.8；Windows 生成配置仍为 0.5.6，由 Windows 本机同步0.5.8 |
-| 本轮平台文件            | 0.5.7及0.5.8均未改动 `windows/`，也未改动两平台依赖锁                                                    |
+| 版本现状                | `shared/package.json`、根调度器、Mac及Windows生成配置均为0.5.8；后续配置同步只在本平台执行 |
+| 本轮平台文件            | 本轮Mac接续未改动`windows/`，两平台依赖锁保持；此前Windows提交见`95a9bce`及Mac交接 |
 | 现行架构说明            | [PLATFORM_UI.md](PLATFORM_UI.md)；协作与范围规则见 [AGENTS.md](../../AGENTS.md)                          |
 | 旧版功能背景            | [0.5.6 交接](MACOS_0.5.6_HANDOFF.md)中的重试、截图、字号与模型隔离继续适用；控件外观以本文为准           |
 
@@ -200,10 +234,10 @@ git diff 41a46ec3b740b5052af5dfb37b1b0de26b6f4766..f11215f852e7c01655ec2d78f02d7
 
 ### 6.1 shared 的唯一实现
 
-- `shared/src/components/`：页面、布局、表单、操作语义、状态、滚动和可访问性。非 Liquid Glass 元素（例如选中标记）修改后同时覆盖 Liquid Glass Mac、回退 Mac 和 Windows。
+- `shared/src/components/`：页面、布局、表单、操作语义、状态、滚动和可访问性。非Liquid Glass元素（例如选中标记）共同覆盖当前Mac和Windows，不再维护旧Mac路径。
 - `shared/src/platform/controls.ts`：按钮和表面端口的纯 props；`ui/material-button.tsx` 返回共享 Button，`ui/material-surface.tsx` 直接返回已有子树，不创建 Windows 原生投影。
-- `shared/src/platform/webMaterials.ts/css`：共同回退材质、控件轮廓、悬停、菜单、顶部、输入区、设置光晕和辅助功能回退。`chromeGeometry.ts` 共用背后内容覆盖计算，避免每平台另写一套滚动条件。
-- `shared/src/components/ui/appearance-control.tsx`：读取能力决定设置项，不按“Mac/Windows”复制设置页面；保留非 Liquid Glass 的透明度和主题跟随。
+- `shared/src/platform/materials.ts`：材质初始化纯端口；Windows默认接入`webMaterials.ts/css`，保留胶囊/圆形、毛玻璃、悬停、菜单、顶部、输入区、模态遮罩及辅助功能样式；Mac替换该端口，不打包网页材质。`chromeGeometry.ts`共用背后内容覆盖计算。
+- `shared/src/components/ui/appearance-control.tsx`：主设置及面试设置不再提供透明度控件，材质固定原60%曲线；实际面试和两个预览固定深色，主窗口主题仍独立。不按平台复制设置页面。
 - `shared/electron/`：账户/聊天、持久化、RAG/知识库、组件管理、语音协调、取消与通用生命周期，以及经过校验的展示 IPC 契约。
 - `shared/vite.config.mjs`：可选加载当前平台 `renderer.config.mjs`，不再保存 Mac 图标和控件替换清单。Windows 没有扩展时直接用 shared；不得为了材质复制页面。
 
@@ -214,7 +248,7 @@ git diff 41a46ec3b740b5052af5dfb37b1b0de26b6f4766..f11215f852e7c01655ec2d78f02d7
 | 待核对点         | 源码线索与处理原则                                                                                                                                   |
 | ---------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 文字按钮宽度     | Mac 内容区文字按钮有20px横向内边距；shared 普通按钮基础为12px。按 Mac 的最终视觉留白对齐共用回退，同时保留确认删除“固有内容+24px”及104px编辑窗的特例 |
-| 搜索外观         | Mac `NSSearchField` 为胶囊、36px档；Windows 当前保留 `input[type=search]`，核对其胶囊、清除按钮、图标和宽度，不接入 Mac 搜索投影                     |
+| 搜索外观         | 当前Mac为完整`NSSearchField` ExtraLarge，三端早期共用布局已统一44px行；Windows保留shared搜索，核对胶囊、清除、图标及宽度，不接入Mac投影 |
 | 面试顶栏两端     | Mac 外层工具栏横向18px，品牌内部14px；shared 回退已有品牌14px。外层留白若仍不一致，将适合共用的布局补到 shared，避免阴影紧贴图标                     |
 | 面试标题图标     | Mac 有去底框的标题图标处理；Windows 对照24px无背景/无边框/无阴影承载，不盲目复用系统bezel补偿                                                        |
 | 顶部亮面例外     | Mac 明确指定的准备页顶栏、知识库+、记录详情操作应在 Windows 有相应层次；普通内容按钮保持中性，不整体做亮面                                           |
@@ -222,7 +256,7 @@ git diff 41a46ec3b740b5052af5dfb37b1b0de26b6f4766..f11215f852e7c01655ec2d78f02d7
 | 复制对齐         | Mac 用系统内容内边距补偿，shared回退为`margin-left:-9px`。按 Windows 实际图标与正文左缘测量，不能复制Mac的-12px补偿                                  |
 | 失焦/启用状态    | Mac 交给原生控件和窗口外观；Windows 需验证自己的焦点/禁用反馈，不套用Mac常量或取消Windows可访问焦点                                                  |
 
-普通布局或回退样式的补齐应进入 shared，使旧 Mac 和 Windows 同时得到改动。确实依赖 Windows 系统的窗口背板、标题栏、采集、权限、凭据、更新执行、原生拖动/缩放仍位于 `windows/`；本机接续时 `macos/` 只读。
+普通布局及共同交互的补齐应进入shared，覆盖当前Mac和Windows；网页材质及控件仍保留在shared供Windows使用。确实依赖Windows系统的窗口背板、标题栏、采集、权限、凭据、更新执行、原生拖动/缩放仍位于`windows/`；Windows本机接续时`macos/`只读。
 
 ### 6.3 Mac 专属实现供行为参考
 
@@ -246,7 +280,7 @@ UI去掉就绪标签，保留检查前各行下载/删除形态和冲突禁用�
 
 ### 7.3 已清理内容
 
-- 已移除的Mac Liquid Glass设置开关、专用写入/订阅/IPC及原生configureSwitch分支；保留旧偏好只读兼容、辅助功能回退和现用自动下载更新开关。
+- 已移除Mac Liquid Glass设置开关、旧偏好读取/订阅及其单测、原生configureSwitch和旧系统材质切换分支；现用自动下载更新开关保留。系统辅助功能由AppKit及shared通用语义处理，不恢复旧Mac网页回退。
 - 不再单独维护Mac AppearanceControl副本，能力策略和非原生设置共用。
 - 知识库页面撤掉手动准备/重建/取消准备/预览及旧搜索展示状态、方法和死样式；自动索引、后台检索、索引删除及服务端取消能力保留。检索模式仍可在既有设置中使用。
 - 移除个人信息不用的onClose属性、卡片内重复关闭、旧状态/按钮覆盖和无消费者样式；保留动态入口、Worker、utilityProcess、preload和测试助手。
@@ -256,18 +290,18 @@ UI去掉就绪标签，保留检查前各行下载/删除形态和冲突禁用�
 
 ## 8. Windows 执行顺序
 
-1. 阅读当前`AGENTS.md`、本文、`PLATFORM_UI.md`和测试说明；核对分支、未提交修改及源码是否包含`f11215f`。安全拉齐主线，保护本机改动。
+1. 阅读当前`AGENTS.md`、本文顶部回传、`PLATFORM_UI.md`和测试说明；核对分支、未提交修改及源码是否包含`95a9bce`之后的本轮Mac修改。安全拉齐主线，保护本机改动。
 2. 在Windows仓库根运行`pnpm sync:workspace`。由共享源生成本平台0.5.8配置，核对变更清单；依赖按Windows冻结锁安装，不升级版本或把Mac锁复制过来。
 3. 先构建当前shared回退，逐项执行第3–5节。已经共用的改动先验收，缺口再修复；第6.2节特别核对，不从旧版Windows截图重新设计。
 4. 共用布局/控件问题修在shared；系统背板、标题栏及Windows原生问题修在windows。Mac专属只读，不为了Windows复制AppKit或整页源码。
 5. 完成静态、单测、共享功能、Windows原生、五档DPI及模型隔离回归。GUI/原生鼠标操作串行，失败直接修复后复测相关范围。
 6. 交付Windows实际变更、逐项验收范围与剩余限制。提交、安装包发行、标签/Latest或真实安装替换继续按当次明确授权执行；本文不触发这些外部操作。
 
-以后新提出的界面/布局需求，按AGENTS先确认要覆盖Liquid Glass Mac、回退Mac、Windows中的哪些路径并提出建议。本文已经明确“共用布局与普通元素同步、Windows用毛玻璃”，落实本文时不必重复询问这一范围。
+以后新提出的界面/布局需求，按AGENTS先确认是否覆盖当前Liquid Glass Mac及Windows并提出建议；旧Mac已取消支持。本文已经明确共用布局/普通元素同步、Windows保留毛玻璃，落实本文时不必重复询问这一范围。
 
 ## 9. Windows 本机验收入口
 
-以下命令供Windows本机执行。本次Mac的实际Liquid Glass检查和共用回退能力模拟，只提供行为参考；Windows的系统材质、标题栏、字体、DPI、输入和原生运行时仍待Windows验收。
+以下命令供Windows本机执行。本次Mac的实际Liquid Glass检查和37项共享网页测试只提供对应范围的证据；Windows的系统材质、标题栏、字体、DPI、输入和原生运行时仍须Windows本机验收。
 
 仓库根基础检查：
 
@@ -288,7 +322,7 @@ pnpm test:windows:regression
 pnpm test:ui:dpi
 ```
 
-`functional-suite.mjs`当前Windows共享范围36组，含新增`web-materials`；Windows专属入口保留15组，DPI默认100/125/150/175/200%各9组。执行时以当前脚本清单为准，不把Mac三组Liquid Glass专项算作Windows通过项。
+`functional-suite.mjs`当前Windows共享范围37组，包含`web-materials`及`ui-material-refinement`；Windows专属入口保留15组，DPI默认100/125/150/175/200%每档12组、共60组。执行时以当前脚本清单为准，不把Mac原生专项算作Windows通过项；本轮Mac回传没有重新执行Windows真机矩阵。
 
 针对本轮界面的集中复核，在`windows/`中运行：
 
@@ -420,12 +454,12 @@ node ../shared/test/scripts/functional-suite.mjs web-materials composer chat-res
 | A    | [macos/renderer.config.mjs](../../macos/renderer.config.mjs)                         | Mac入口、SF Symbols和三个展示适配端口；打包边界       |
 | A    | [macos/scripts/build-sidebar-glass.mjs](../../macos/scripts/build-sidebar-glass.mjs) | Node-API绑定编译/签名后原子替换，保护运行中旧映射     |
 | M    | [macos/scripts/package-app.mjs](../../macos/scripts/package-app.mjs)                 | 原生材质资源纳入Mac临时/正式打包装配                  |
-| A    | [macos/src/MaterialButton.tsx](../../macos/src/MaterialButton.tsx)                   | 固定动作原生按钮及能力不可用时共享回退                |
+| A    | [macos/src/MaterialButton.tsx](../../macos/src/MaterialButton.tsx)                   | 固定动作原生按钮，Mac能力不可用时不再提供网页回退 |
 | A    | [macos/src/MaterialSurface.tsx](../../macos/src/MaterialSurface.tsx)                 | 输入/返回原生前景投影、CSSOM样式与失败恢复            |
 | A    | [macos/src/contentControls.ts](../../macos/src/contentControls.ts)                   | 内容控件识别、表面类型、几何/裁切与受控值同步         |
 | M    | [macos/src/icons.tsx](../../macos/src/icons.tsx)                                     | 跟随系统主题图标的Mac导出                             |
 | A    | [macos/src/interviewGlass.ts](../../macos/src/interviewGlass.ts)                     | 面试/预览材质几何、按钮与深色原生层                   |
-| A    | [macos/src/liquidGlassPreference.ts](../../macos/src/liquidGlassPreference.ts)       | 旧Liquid Glass/透明度偏好只读兼容及订阅               |
+| A（历史，现已删除） | `macos/src/liquidGlassPreference.ts` | 旧偏好兼容已删除；当前26+初始化见[NativeMaterials.tsx](../../macos/src/NativeMaterials.tsx) |
 | A    | [macos/src/materialGeometry.ts](../../macos/src/materialGeometry.ts)                 | Mac展示几何与裁切计算                                 |
 | A    | [macos/src/menuGlass.ts](../../macos/src/menuGlass.ts)                               | 共享菜单内容转换到原生NSMenu                          |
 | A    | [macos/src/panelGlass.ts](../../macos/src/panelGlass.ts)                             | 面试设置预览的原生材质、合成底景与裁切                |
@@ -433,7 +467,7 @@ node ../shared/test/scripts/functional-suite.mjs web-materials composer chat-res
 | A    | [macos/src/scrollChrome.ts](../../macos/src/scrollChrome.ts)                         | 聊天/管理页顶部覆盖与原生滚动几何发布                 |
 | A    | [macos/src/settingsScroll.ts](../../macos/src/settingsScroll.ts)                     | 设置滚动几何合帧发布，避免控件与文字错位              |
 | A    | [macos/src/sidebarGlass.css](../../macos/src/sidebarGlass.css)                       | Mac原生透明占位、控件补偿及材质专属样式               |
-| A    | [macos/src/sidebarGlass.ts](../../macos/src/sidebarGlass.ts)                         | Mac原生材质安装/卸载与能力回退入口                    |
+| A    | [macos/src/sidebarGlass.ts](../../macos/src/sidebarGlass.ts)                         | Mac原生材质安装/卸载与失败清理，已移除旧偏好切换 |
 | M    | [macos/src/symbols.json](../../macos/src/symbols.json)                               | 新增跟随系统SF Symbol映射                             |
 | A    | [macos/src/useGlassControl.ts](../../macos/src/useGlassControl.ts)                   | 固定原生按钮的状态、指针和几何同步                    |
 | A    | [macos/src/windowFocus.ts](../../macos/src/windowFocus.ts)                           | Mac主窗口焦点外观同步                                 |
@@ -448,14 +482,14 @@ node ../shared/test/scripts/functional-suite.mjs web-materials composer chat-res
 | A    | [macos/test/scripts/content-controls-check.mjs](../../macos/test/scripts/content-controls-check.mjs)     | 原生内容按钮/菜单、搜索/开关/滑杆、设置与管理页检查   |
 | M    | [macos/test/scripts/icons-smoke.mjs](../../macos/test/scripts/icons-smoke.mjs)                           | 投影输入区、原生菜单、透明度能力与图标检查适配        |
 | A    | [macos/test/scripts/interview-glass-smoke.mjs](../../macos/test/scripts/interview-glass-smoke.mjs)       | 真实面试Liquid Glass、可读性、返回/重试与窗口生命周期 |
-| M    | [macos/test/scripts/native-build-smoke.mjs](../../macos/test/scripts/native-build-smoke.mjs)             | 绑定导出、旧系统最低版本/弱链接和既有原生ABI检查      |
+| M    | [macos/test/scripts/native-build-smoke.mjs](../../macos/test/scripts/native-build-smoke.mjs)             | 绑定导出、最低26.0/直接链接及原生ABI；固定运行时基线保持 |
 | A    | [macos/test/scripts/native-ui.mjs](../../macos/test/scripts/native-ui.mjs)                               | 投影输入页和原生菜单的共用测试助手                    |
 | M    | [macos/test/scripts/screen-permission-smoke.mjs](../../macos/test/scripts/screen-permission-smoke.mjs)   | 权限测试的隔离账户/凭据边界适配                       |
 | A    | [macos/test/scripts/sidebar-glass-smoke.mjs](../../macos/test/scripts/sidebar-glass-smoke.mjs)           | 实际主窗口Glass、胶囊标记、输入/菜单/缩放/重载检查    |
 | M    | [macos/test/scripts/user-data-smoke.mjs](../../macos/test/scripts/user-data-smoke.mjs)                   | 迁移测试兼容投影输入和原生附件菜单                    |
 | M    | [macos/test/scripts/window-native-smoke.mjs](../../macos/test/scripts/window-native-smoke.mjs)           | 原生窗口几何、投影草稿与侧栏位置检查                  |
 | M    | [macos/test/unit/icons.test.tsx](../../macos/test/unit/icons.test.tsx)                                   | Mac图标映射与实际资源约束                             |
-| A    | [macos/test/unit/liquid-glass-preference.test.ts](../../macos/test/unit/liquid-glass-preference.test.ts) | 旧偏好读取、非法值和透明度兼容                        |
+| A（历史，现已删除） | `macos/test/unit/liquid-glass-preference.test.ts` | 旧偏好单测已删除；缺失/无效原生绑定拒绝启动见[presentation.test.ts](../../macos/test/unit/presentation.test.ts) |
 | M    | [macos/test/unit/presentation.test.ts](../../macos/test/unit/presentation.test.ts)                       | 有界展示资源、能力与生命周期                          |
 
 ## 11. 可交给 Windows 接续任务的说明

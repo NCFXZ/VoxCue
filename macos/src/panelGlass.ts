@@ -1,6 +1,5 @@
 import type { InterviewMaterialPlacement } from '../../shared/electron/contracts/desktop';
 import { materialOpacity } from './materialGeometry';
-import { readLiquidGlass, subscribeLiquidGlass } from './liquidGlassPreference';
 
 // The login has no top-layer dialog. Punch only its CSS background paint,
 // keeping all sample text in the shared renderer above the native materials.
@@ -20,11 +19,6 @@ if (
   const desktop = window.desktop,
     root = document.documentElement;
   const login = location.hash === '#login';
-  const accessibility = [
-    matchMedia('(prefers-reduced-transparency: reduce)'),
-    matchMedia('(prefers-contrast: more)'),
-    matchMedia('(forced-colors: active)'),
-  ];
   const selector =
     '.personal-panel,.record-answer-panel,.interview-preview-scene,.interview-preview-scene :is(.floating-toolbar,.floating-panel,.transcript-item > p,.floating-question,.answer-bubble,.floating-composer)';
   const ids = new WeakMap<Element, number>();
@@ -103,9 +97,7 @@ if (
     frame = 0;
     const materials: InterviewMaterialPlacement[] = [],
       elements: HTMLElement[] = [];
-    const enabled = login
-      ? readLiquidGlass() && !accessibility.some((media) => media.matches)
-      : root.classList.contains('sidebar-liquid-glass');
+    const enabled = login || root.classList.contains('sidebar-liquid-glass');
     let preview: HTMLElement | null = null;
     if (enabled)
       for (const element of document.querySelectorAll<HTMLElement>(selector)) {
@@ -257,8 +249,6 @@ if (
   document.addEventListener('transitionrun', transition, true);
   document.addEventListener('scroll', update, true);
   window.addEventListener('resize', update);
-  const unsubscribe = subscribeLiquidGlass(update);
-  for (const media of accessibility) media.addEventListener('change', update);
   locate();
   const dispose = () => {
     disposed = true;
@@ -267,8 +257,6 @@ if (
     resize.disconnect();
     changes.disconnect();
     appearance.disconnect();
-    unsubscribe();
-    for (const media of accessibility) media.removeEventListener('change', update);
     clear();
     document.removeEventListener('transitionrun', transition, true);
     document.removeEventListener('scroll', update, true);

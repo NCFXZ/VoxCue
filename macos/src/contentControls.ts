@@ -1,6 +1,5 @@
 import type { ContentControlPlacement } from '../../shared/electron/contracts/desktop';
 import { materialColor, materialOpacity } from './materialGeometry';
-import { readLiquidGlass } from './liquidGlassPreference';
 
 export function applyContentRange(element: HTMLElement | undefined, value: number) {
   if (
@@ -267,8 +266,7 @@ if (
           location.hash === '#login' &&
           (element.matches('.service-login') ||
             (root.classList.contains('macos-login-preview') &&
-              element.hasAttribute('data-interview-preview-button'))) &&
-          readLiquidGlass()
+              element.hasAttribute('data-interview-preview-button')))
         )
       )
         continue;

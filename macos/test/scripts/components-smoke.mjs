@@ -16,6 +16,14 @@ const { publicKey } = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'update-public-key.json'), 'utf8'),
 );
 const bundle = await buildMacApp(path.join(testRoot, 'bundle'), publicKey);
+assert.equal(
+  execFileSync(
+    '/usr/libexec/PlistBuddy',
+    ['-c', 'Print :LSMinimumSystemVersion', path.join(bundle, 'Contents/Info.plist')],
+    { encoding: 'utf8' },
+  ).trim(),
+  '26.0',
+);
 const resources = path.join(bundle, 'Contents/Resources');
 assert.equal(
   JSON.parse(
@@ -83,6 +91,12 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
   assert.equal(await page.locator('.service-login').count(), 1);
+  const loginButton = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+  assert.equal(await loginButton.count(), 1);
+  const loginBrand = loginButton.locator('img.service-brand-icon');
+  assert.equal(await loginBrand.count(), 1);
+  await loginBrand.evaluate((image) => image.decode());
+  assert.ok(await loginBrand.evaluate((image) => image.complete && image.naturalWidth > 0));
   assert.equal(await page.getByRole('button', { name: /GitHub/ }).count(), 0);
   assert.equal(
     await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')),

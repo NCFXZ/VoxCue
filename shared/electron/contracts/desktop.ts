@@ -40,7 +40,7 @@ export interface GlassSurfacePlacement {
 export type GlassButtonAction = 'sidebar' | 'profile' | 'start';
 export interface ScrollChromeState {
   area: GlassSurfacePlacement;
-  title: GlassSurfacePlacement;
+  title: GlassSurfacePlacement | null;
   titleText: string;
   composer: GlassSurfacePlacement | null;
   follow: GlassSurfacePlacement | null;
@@ -67,7 +67,6 @@ export interface NativeMenuRequest {
   }[];
 }
 export interface GlassButtonPlacement extends GlassSurfacePlacement {
-  enabled: boolean;
   disabled: boolean;
   behindContent: boolean;
   foregroundColor: string;
@@ -109,7 +108,7 @@ export interface InterviewMaterialPlacement extends GlassSurfacePlacement {
     | 'regular-dark'
     | 'regular-interactive'
     | 'regular-follow-hover'
-    | 'dialog-halo'
+    | 'modal-exclusion'
     | 'preview-scene'
     | 'preview-login-scene';
   radius: number;

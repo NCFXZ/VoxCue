@@ -1,10 +1,14 @@
 # Mac 开发与发行：原生音频、窗口与启动入口
 
-0.5.7 的当前职责边界见 [共用布局与平台控件](../../shared/docs/PLATFORM_UI.md)。Mac renderer 扩展在 `macos/renderer.config.mjs`，控件 props 使用 shared 的纯展示契约；页面仍只有 shared 一份。实际 Liquid Glass 面试与预览固定深色；macOS 26 以下、原生绑定不可用或 Windows 使用 shared 毛玻璃回退，保留透明度与主题跟随。主进程通过公开系统可用性检查宣告能力，旧系统不启用原生材质观察器/投影。旧 Liquid Glass 设置开关的专用原生/IPC 分支已清除，更新 NSSwitch、历史偏好读取和辅助功能回退保留。
+0.5.8当前仅支持Apple Silicon arm64、macOS 26+，只使用Liquid Glass和SF Symbols。当前边界见[共用布局与平台控件](../../shared/docs/PLATFORM_UI.md)。Mac renderer通过有界端口接入AppKit，页面及业务仍只有shared一份；Windows使用的网页材质和控件保持。旧Mac回退、旧Liquid Glass布尔偏好及预览入口已删除；没有有效原生绑定时拒绝启动。启动器、正式应用包及新生成更新清单最低系统均为26.0。固定Qwen/CPython、Electron及凭据助手保持原有基线和身份，不为提高应用最低系统而替换这些固定运行时。
+
+0.5.8最新弹窗规则覆盖下文旧光晕描述：主设置/知识库使用原生40%黑色覆盖，包含实际前景投影，轮廓内留出共享对话框；面试设置不压暗、不虚化、无光晕，只使用有界`modal-exclusion`几何裁切返回按钮并保留模态。记录详情顶部复用Regular及共享headerCoverage，标题几何可为空，不复制正文标题。面试和预览固定深色，主窗口主题独立。
+
+Mac只保留`VoxCue.app`开发启动器。原生更新失败时仍清理视图层级和临时透明标记，避免丢失输入或暴露陈旧背板；这些故障清理不构成旧系统兼容入口。Windows共用的网页材质、无障碍语义和共享功能测试继续保留，Mac生产bundle不导入webMaterials。
 
 原生模块构建先在本平台临时 staging 完整编译/签名，再原子替换 `.node`，不原地覆盖正在运行进程映射的二进制。原生导出数量及几何读取数量按数组长度计算，避免控件删减时漏读高度或越界导出；本机原生 ABI 与36px工具栏/标题对齐由实际窗口检查。
 
-更新：2026-10-18。目标为 Apple Silicon arm64、macOS 14.2+；独立 Mac 安装版已发布 [v0.3.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.3.0) 并设为Latest，包含美化 DMG 与签名更新 ZIP/清单，使用独立模型缓存。Windows仍使用既有0.2.2，旧发行及资产保留。应用为 ad-hoc 签名，未经过 Apple 公证；下文 macos/VoxCue.app 仍是依赖工作区的开发启动入口，发行说明见 [Mac 安装与免费自动更新](UPDATES.md)。
+以下2026-10-18起的版本、旧最低系统、ad-hoc签名及兼容描述为历史记录，不覆盖顶部macOS 26+和固定签名的当前准则；既有发行资产不自动重建。当前安装及更新入口见[Mac安装与免费自动更新](UPDATES.md)。
 
 用户已恢复完整功能、面试稳定性与对抗性测试授权，下文此前暂停状态为历史。共用/Mac 回归入口遵守临时目录与结果零保留，执行输出只在终端/对话；Windows 仍只读。Mac Dock 连续面试的隐藏期限同时考虑最近 hide/show，show 完成后刷新期限；原生组件被现用应用占用时使用临时目录编译验证，不覆盖已加载组件。入口与合成/真实权限边界见 shared/test/README.md，不保存本轮报告或验收数表。
 

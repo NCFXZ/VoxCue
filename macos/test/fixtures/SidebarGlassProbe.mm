@@ -211,6 +211,7 @@ static napi_value inspect(napi_env env, napi_callback_info info) {
     NSDictionary *state = @{
         @"menuFrame": lastMenu,
         @"menuItems": objc_getAssociatedObject(view,&lastMenuItemsKey) ?: @[],
+        @"menuGeneration": @(menuGeneration), @"menuTracking": @(trackingMenu != nil),
         @"trafficLights": controls,
         @"windowKey": @(view.window.isKeyWindow),
         @"windowAppearance": view.window.effectiveAppearance.name,
@@ -262,6 +263,21 @@ static napi_value clickAt(napi_env env, napi_callback_info info) {
     NSDictionary *details = @{ @"nativeSwitch":@(nativeSwitch),@"nativeSlider":@(nativeSlider), @"hit": hit ? NSStringFromClass(hit.class) : @"nil", @"point": NSStringFromPoint([hit convertPoint:local fromView:view]), @"frame": hit ? NSStringFromRect(hit.frame) : @"nil" };
     NSData *json = [NSJSONSerialization dataWithJSONObject:details options:0 error:nil];
     napi_create_string_utf8(env, (const char *)json.bytes, json.length, &result); return result;
+}
+static napi_value moveAt(napi_env env,napi_callback_info info) {
+    size_t count=2;napi_value args[2],value,result;double x=0,y=0;
+    napi_get_cb_info(env,info,&count,args,nullptr,nullptr);NSView *view=host(env,args[0]);
+    napi_get_named_property(env,args[1],"x",&value);napi_get_value_double(env,value,&x);
+    napi_get_named_property(env,args[1],"y",&value);napi_get_value_double(env,value,&y);
+    if(x<0 || y<0 || x>=NSWidth(view.bounds) || y>=NSHeight(view.bounds)) {
+        napi_throw_error(env,nullptr,"Mouse movement must stay inside the owned window");return nullptr;
+    }
+    NSPoint point=[view convertPoint:NSMakePoint(x,view.isFlipped?y:NSHeight(view.bounds)-y) toView:nil];
+    NSEvent *event=[NSEvent mouseEventWithType:NSEventTypeMouseMoved location:point modifierFlags:0
+        timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:view.window.windowNumber context:nil
+        eventNumber:0 clickCount:0 pressure:0];
+    [view.window sendEvent:event];
+    napi_get_undefined(env,&result);return result;
 }
 static char backdropKey;
 static napi_value backdrop(napi_env env, napi_callback_info info) {
@@ -419,6 +435,15 @@ static napi_value typeOwnText(napi_env env,napi_callback_info info) {
     [client insertText:characters replacementRange:NSMakeRange(NSNotFound,0)];
     napi_get_undefined(env,&result);return result;
 }
+static void setHeaderHidden(NSView *view,BOOL hidden) {
+    if([view.identifier isEqualToString:@"voxcue-header-material"])view.hidden=hidden;
+    for(NSView *child in view.subviews)setHeaderHidden(child,hidden);
+}
+static napi_value headerHidden(napi_env env,napi_callback_info info) {
+    size_t count=2;napi_value args[2],result;bool hidden=false;
+    napi_get_cb_info(env,info,&count,args,nullptr,nullptr);napi_get_value_bool(env,args[1],&hidden);
+    setHeaderHidden(host(env,args[0]),hidden);napi_get_undefined(env,&result);return result;
+}
 static napi_value initialize(napi_env env, napi_value exports) {
     [NSNotificationCenter.defaultCenter addObserverForName:NSMenuDidBeginTrackingNotification object:nil queue:nil usingBlock:^(NSNotification *notification) {
         if(!menuOwner || ![notification.object isKindOfClass:NSMenu.class]) return;
@@ -450,10 +475,12 @@ static napi_value initialize(napi_env env, napi_value exports) {
         {"snapshot", nullptr, snapshot, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"clickSwitch", nullptr, clickSwitch, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"clickAt", nullptr, clickAt, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"moveAt", nullptr, moveAt, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"menuKeys", nullptr, menuKeys, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"selectMenuItem", nullptr, selectMenuItem, nullptr, nullptr, nullptr, napi_default, nullptr},
         {"typeText", nullptr, typeOwnText, nullptr, nullptr, nullptr, napi_default, nullptr},
+        {"headerHidden", nullptr, headerHidden, nullptr, nullptr, nullptr, napi_default, nullptr},
     };
-    napi_define_properties(env, exports, 9, properties); return exports;
+    napi_define_properties(env, exports, 11, properties); return exports;
 }
 NAPI_MODULE(voxcue_sidebar_glass_probe, initialize)

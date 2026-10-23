@@ -142,6 +142,28 @@ const {app,BrowserWindow}=require('electron');
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
 const platform=require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/platform/index.js'))});
 const select=platform.selectDesktopPlatform;
+const policy=select();
+if(policy.id!=='darwin'||!policy.presentationFile) throw Error('Shared renderer host requires the selected Mac window adapter');
+const presentation=require(require('node:path').join(${JSON.stringify(workspace.platformRoot)},'dist-electron',policy.presentationFile));
+const createPresentation=presentation.createPresentation;
+// The generic shared renderer has no AppKit consumers. Keep the real Electron
+// theme/Dock/mouse-passthrough behavior, with an explicit test-only material port.
+const material={
+  available:true,
+  configureInterviewAppearance(){},
+  configureInterviewMaterials(){return false;},
+  configureContentControls(){return false;},
+  configureScrollChrome(){return false;},
+  attachSurface(){return false;},
+  detachSurface(){},
+  popUpMenu(){return null;},
+  apply(){return false;},
+  configureButton(){return false;},
+};
+presentation.createPresentation=options=>{
+  const port=createPresentation({...options,material});
+  return {...port,capabilities:{...port.capabilities,liquidGlass:false}};
+};
 platform.selectDesktopPlatform=(...args)=>({...select(...args),presentationBindingFile:undefined});
 const load=BrowserWindow.prototype.loadFile;
 BrowserWindow.prototype.loadFile=function(file,...args){

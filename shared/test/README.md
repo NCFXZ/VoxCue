@@ -1,5 +1,11 @@
 ## 0.5.8 最新界面定向入口
 
+Mac当前仅支持macOS 26+ Liquid Glass，不再构建或测试旧Mac网页回退。`macos/test/scripts/ui-refinement-matrix.mjs`串行运行100/125/150/175/200%五档Electron缩放，每档一组实际Liquid Glass截图流程，共5组，包含捕获中的76×32px胶囊、1/5至5/5、移除/发送归零与失败重试。该入口不读取或下载模型，全部账户/语音/捕获均为合成，退出清理；不能代替物理多显示器DPI。
+
+Mac在`macos/`运行`node test/scripts/sidebar-glass-smoke.mjs --content-only`，包含`handoff-content-check.mjs`的实际原生窗口像素检查；`--handoff-only`可独立复测新增的输入投影40%压暗/恢复、悬停/键盘、未保存/已保存提案及长记录顶部后方渲染/正文不被遮挡。明暗主题和窄窗均使用自有合成背景与窗口，解码像素只保留内存；用户明确要求截图时，可传`--screenshots=<绝对目录>`保存裁切到自有窗口的原生截图，省略参数仍不交付图片。`interview-glass-smoke.mjs`同时比较面试设置开关前后四个空白角落像素，不能用原生属性代替实际外观。`login-controls`的材质拒绝检查使用结构有效的越权modal-exclusion请求。
+
+Mac旧回退预览及其专属源码、构建输出和测试已删除。原生绑定缺失/无效时，主进程拒绝创建Mac展示层；旧偏好不得关闭Liquid Glass。启动器和临时签名包检查最低系统26.0；原生ABI检查NSGlassEffectView为直接链接，固定Qwen运行时仍按原基线认证。
+
 `node ../shared/test/scripts/ui-material-refinement-smoke.mjs`覆盖输入/提案按钮默认透明与真实悬停、主设置/知识库弹窗压暗且无光晕、面试设置背景透明、搜索20px内边距及原生清除、主/浮窗固定原曲线60%、居中字号、只保留深色面试、结束确认胶囊及阴影和记录详情顶部毛玻璃。记录检查包含材质高度、工具栏下正文像素不受覆盖、顶部实际虚化后方转写以及回到顶端清空，不能仅检查滤镜声明。只使用隔离合成账户/资料/音频端口，不保留截图或报告。共享默认矩阵新增此项，当前37组；Mac原生部分仍必须在Mac本机验收。
 
 `frosted-appearance.test.ts`检查旧值和存储失败均不改变固定曲线、不读写原始偏好；`interview-typography`保留字号范围/键盘/保存失败/重载/跨窗口同步，改为验证背景控件已移除且材质固定；`interview-ux`继续覆盖原业务，并验证明暗系统输入下仍为深色、固定材质、面试设置无光晕且透明角落像素在开关设置前后不变，模态打开时仍禁用鼠标穿透。下文关于可调背景或白色面试的旧记录仅为历史。
@@ -18,11 +24,11 @@ Windows的`windows-suite.mjs --dpi`包含`web-materials`、`ui-material-refineme
 
 侧栏更新操作定向入口：在 `macos/` 执行 `node test/scripts/sidebar-glass-smoke.mjs --updates-only`，使用合成更新驱动检查实际AppKit中性Push圆形/胶囊、浅深色、鼠标/键盘展开、首秒保护、取消与下载完成，收起侧栏始终36px图标。需要交付截图时追加 `--screenshots=<明确绝对目录>`；用户要求停留演示时追加`--preview`，保持在合成“重启以更新”，关闭窗口或终端Enter后退出清理，不执行真实安装。共用 `updates-sidebar` 核对同样的回退交互及自动下载/保存确认；`content-controls` 追加空白原生搜索框聚焦检查，覆盖系统胶囊、图标/编辑器间距及输入/清除/滚动。
 
-`functional-suite.mjs` 在 Mac 默认先运行当前 Liquid Glass 的五组界面专项：`login-controls`（原生亮面登录、黑白文字及图文居中）、`sidebar-updates`（更新圆形/胶囊和收起侧栏）、`sidebar-glass`（实际输入/工具栏/原生菜单/缩放/失焦）、其内含 `content-controls`（所有内容页、复制、原生搜索、确认/删除/重置、开关/滑杆、设置预览/滚动和开场）、`component-controls`（固定提示条、原生进度/取消、组件状态），以及 `interview-glass`（实际 Clear/Regular、深色可读性、三点/箭头、输入、设置、拖动/缩放/重载/回退）。这些使用生产 Mac 构建和实际 AppKit，不禁用材质；原生探针只操作自有合成窗口。
+`functional-suite.mjs` 在 Mac 默认先运行当前 Liquid Glass 的五组界面专项：`login-controls`（原生亮面登录、黑白文字及图文居中）、`sidebar-updates`（更新圆形/胶囊和收起侧栏）、`sidebar-glass`（实际输入/工具栏/原生菜单/缩放/失焦）、其内含 `content-controls`（所有内容页、复制、原生搜索、确认/删除/重置、开关/滑杆、设置预览/滚动和开场）、`component-controls`（固定提示条、原生进度/取消、组件状态），以及 `interview-glass`（实际 Clear/Regular、深色可读性、三点/箭头、输入、设置、拖动/缩放/重载及旧关闭偏好无效）。这些使用生产 Mac 构建和实际 AppKit，不禁用材质；原生探针只操作自有合成窗口。
 
-随后37组共享业务/布局测试使用单独编译到临时目录的真实网页回退 renderer。编译断言回退端口存在且 Mac 实现未进入 bundle；测试启动器仅在已验证临时根内替换 loadFile/原生绑定，产品无测试开关。此组用于共用业务与 Windows 网页回退兼容性，不能作为 Liquid Glass 视觉验收或 Windows 原生验收。Mac 的14组其他专项保留原生窗口、权限接口、图标、启动器/编译/资料迁移/更新/组件/DMG，并覆盖合成采集、AEC、隔离钥匙串、固定签名及图标原轮廓。实际支持Liquid Glass时默认共56组串行；旧macOS跳过五组仅能在原生玻璃上验收的专项，运行其余51组，不把跳过项算作通过；`qwen-regression.mjs` 另覆盖真实 CPU/Metal 推理与后台切换。
+随后37组共享业务/布局测试使用临时编译的通用shared网页renderer，保留Windows默认图标、材质和控件；编译断言共享端口存在且Mac实现未进入bundle。测试宿主仅在自有临时根替换loadFile，注入不绘制材质的测试端口，并复用Mac适配器的Electron主题、Dock与鼠标穿透行为；这是通用业务/Windows共用实现检查，不是Mac产品回退机制，不能作为Mac外观或Windows原生验收。产品没有此测试开关。Mac默认必须具备Liquid Glass绑定，原生专项不再按旧系统跳过；其他原生窗口、权限接口、图标、启动器/编译/迁移/更新/组件/DMG、合成采集、AEC、隔离钥匙串和固定签名入口保持。`qwen-regression.mjs`另覆盖真实CPU/Metal推理与后台切换。
 
-`web-materials` 使用相同毛玻璃实现，分别核对Mac旧系统能力路径和Windows窗口控件布局；检查胶囊/圆形、菜单、40px输入轮廓、顶部覆盖、返回按钮、悬停及设置/窄窗。旧Mac路径可在macos运行 `node ../shared/test/scripts/web-materials-smoke.mjs --preview` 逐张人工检查；图片仅在测试临时根存放、退出清理。能力模拟不等于旧系统真机验收。
+`web-materials` 继续核对Windows共用网页材质及按窗口控件能力预留的共享布局：胶囊/圆形、菜单、40px输入轮廓、顶部覆盖、返回按钮、悬停及设置/窄窗。在Mac上由共享矩阵提供临时通用renderer，不作为旧Mac产品或旧系统预览入口；图片仅在测试临时根存放、退出清理。Mac产品外观只由实际AppKit专项验收。
 
 所有模型从固定公开资源下载到自动清理的临时目录，或按明确授权缓存先认证再复制；不触碰真实资料/账户，不采样硬件。结果只在终端/内存，临时资料退出清理。测试源码/固定输入可入 Git，模型、构建/包、结果和私密材料不可入 Git。
 

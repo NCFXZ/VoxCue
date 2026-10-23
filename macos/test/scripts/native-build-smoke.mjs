@@ -16,13 +16,13 @@ const run = (command, args, env = process.env) => {
   if (result.status !== 0) throw Error(result.stderr || `${command} failed`);
   return result.stdout;
 };
-const common = ['clang++', '-std=c++17', '-arch', 'arm64', '-mmacosx-version-min=14.2', '-O2'];
+const common = ['clang++', '-std=c++17', '-arch', 'arm64', '-mmacosx-version-min=26.0', '-O2'];
 const glassBinding = path.join(root, 'native/bin/VoxCue.SidebarGlass.node');
-assert.match(run('/usr/bin/otool', ['-l', glassBinding]), /\bminos 14\.2\b/);
-assert.match(
+assert.match(run('/usr/bin/otool', ['-l', glassBinding]), /\bminos 26\.0\b/);
+assert.doesNotMatch(
   run('/usr/bin/nm', ['-m', glassBinding]),
   /weak external _OBJC_CLASS_\$_NSGlassEffectView/,
-  'Older macOS must be able to load the binding before choosing the shared fallback',
+  'Mac requires Liquid Glass directly; its class must no longer be weak-linked for older systems',
 );
 for (const file of Object.keys(qwenFiles).filter(
   (file) => file === 'voxcue-qwen' || file.endsWith('.dylib'),
@@ -31,7 +31,7 @@ for (const file of Object.keys(qwenFiles).filter(
   const version = output.match(/\bminos (\d+)\.(\d+)/);
   assert.ok(
     version && (Number(version[1]) < 14 || (Number(version[1]) === 14 && Number(version[2]) <= 2)),
-    'Qwen must not raise the application macOS 14.2 minimum: ' + file,
+    'The pinned Qwen runtime deployment baseline remains unchanged: ' + file,
   );
 }
 const audio = path.join(testRoot, 'VoxCue.Audio');

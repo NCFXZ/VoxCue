@@ -13,5 +13,4 @@ NSView *VoxCueSharedPaintView(NSView *host);
 NSView *VoxCueModalBackdropAnchor(NSView *host);
 NSRect VoxCueModalExclusion(NSView *host);
 CGPathRef VoxCueContinuousContour(NSSize size, CGFloat radius);
-void VoxCueDrawDialogHalo(NSRect bounds, NSRect dialog, CGFloat radius, BOOL dark);
 bool VoxCuePositionScrollingControl(NSView *host, NSView *control);

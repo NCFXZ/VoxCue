@@ -54,7 +54,7 @@ try {
     sha512: hash.digest('base64'),
     edSignature,
   };
-  const minimumSystemVersion = '14.2';
+  const minimumSystemVersion = '26.0';
   const payload = Buffer.from(
     JSON.stringify([
       'voxcue-macos-update-v1',

@@ -1,4 +1,3 @@
-import { readLiquidGlass, subscribeLiquidGlass } from './liquidGlassPreference';
 import { materialColor } from './materialGeometry';
 import './sidebarGlass.css';
 import './scrollChrome';
@@ -9,8 +8,7 @@ import './interviewGlass';
 import './panelGlass';
 import './settingsScroll';
 
-if (location.hash === '#interview' && window.desktop?.presentation?.liquidGlass === true)
-  document.documentElement.classList.add('dark');
+if (location.hash === '#interview') document.documentElement.classList.add('dark');
 
 // Loaded only by the Mac renderer entry. Shared React owns the complete layout.
 if (
@@ -22,11 +20,6 @@ if (
   const desktop = window.desktop;
   const root = document.documentElement;
   const mount = document.getElementById('root')!;
-  const accessibility = [
-    matchMedia('(prefers-reduced-transparency: reduce)'),
-    matchMedia('(prefers-contrast: more)'),
-    matchMedia('(forced-colors: active)'),
-  ];
   let sidebar: HTMLElement | null = null;
   let toolbar: HTMLElement | null = null;
   let disposed = false;
@@ -61,15 +54,12 @@ if (
     frame = requestAnimationFrame(() => {
       frame = 0;
       const width = sidebar?.isConnected ? sidebar.getBoundingClientRect().width : 0;
-      root.classList.toggle('sidebar-liquid-glass-off', !readLiquidGlass());
       root.style.setProperty('--macos-sidebar-width', `${width}px`);
-      const enabled = readLiquidGlass() && !accessibility.some((media) => media.matches);
       pending = {
         dark: root.classList.contains('dark'),
         surfaceColor: materialColor(root, '--surface'),
-        width: enabled ? Math.min(320, width) : 0,
-        toolbarHeight:
-          enabled && toolbar ? Math.min(96, toolbar.getBoundingClientRect().height) : 0,
+        width: Math.min(320, width),
+        toolbarHeight: toolbar ? Math.min(96, toolbar.getBoundingClientRect().height) : 0,
       };
       void flush();
     });
@@ -114,9 +104,7 @@ if (
   });
   const appearance = new MutationObserver(update);
   appearance.observe(root, { attributes: true, attributeFilter: ['class'] });
-  const unsubscribe = subscribeLiquidGlass(update);
   document.addEventListener('scroll', update, true);
-  for (const media of accessibility) media.addEventListener('change', update);
   locate();
 
   const dispose = () => {
@@ -125,11 +113,8 @@ if (
     resize.disconnect();
     mutations.disconnect();
     appearance.disconnect();
-    unsubscribe();
     document.removeEventListener('scroll', update, true);
-    for (const media of accessibility) media.removeEventListener('change', update);
     root.classList.remove('sidebar-liquid-glass');
-    root.classList.remove('sidebar-liquid-glass-off');
     root.style.removeProperty('--macos-sidebar-width');
     void desktop.setSidebarGlass(0).catch(() => {});
     window.removeEventListener('beforeunload', dispose);
