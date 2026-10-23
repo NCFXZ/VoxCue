@@ -204,7 +204,7 @@ try {
     proposal().locator(':scope > .proposal-rows > .proposal-row').filter({ hasText: '面试语言' });
   await send('更新多项个人信息');
   await save().waitFor();
-  await capture('mac-overview', page);
+  await capture('proposal-overview', page);
   assert.equal(await proposal().locator(':scope > .proposal-rows > *').count(), 6);
   assert.equal(await proposal().locator('.proposal-skill-row').count(), 0);
   // Retain the original five-row budget while also covering the added language row.

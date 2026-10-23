@@ -21,7 +21,6 @@ const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_U
 delete env.ELECTRON_RUN_AS_NODE;
 let app = await electron.launch({ args: [await offlineElectronEntry()], env });
 const key = 'voxcue-interview-font-size-v1';
-const opacityKey = 'voxcue-interview-background-transparency-v1';
 const errors = [];
 const fixedTextStyles = (scope) =>
   scope.evaluate((root) => {
@@ -170,24 +169,21 @@ try {
       }
     }
   }
-  const opacity = settings.getByRole('slider', { name: '面试背景透明度', exact: true });
-  const previewStyle = async () =>
-    settings
-      .locator('.interview-font-preview > section')
-      .first()
-      .evaluate((e) => getComputedStyle(e).backgroundColor);
-  await opacity.fill('0');
-  const solid = await previewStyle();
-  await opacity.fill('100');
-  const clear = await previewStyle();
-  assert.notEqual(solid, clear);
+  assert.equal(
+    await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => document.documentElement.dataset.interviewTransparency),
+    '60',
+  );
   assert.equal(
     await settings
       .locator('.interview-preview-scene')
       .evaluate((e) => getComputedStyle(e).backgroundImage === 'none'),
     false,
   );
-  assert.equal(await settings.locator('.display-slider-icon').count(), 4);
+  assert.equal(await settings.locator('.display-slider-icon').count(), 2);
   const thumb = await slider.evaluate((e) => ({
     color: getComputedStyle(e, '::-webkit-slider-thumb').backgroundColor,
     track: parseFloat(
@@ -197,13 +193,15 @@ try {
   }));
   assert.equal(thumb.track, 6);
   await slider.fill('18');
-  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).fill('37');
+  await page.evaluate(() =>
+    localStorage.setItem('voxcue-interview-background-transparency-v1', '37'),
+  );
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.reload();
   await openSettings();
   assert.equal(await slider.inputValue(), '18');
   assert.equal(
-    await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).inputValue(),
+    await page.evaluate(() => localStorage.getItem('voxcue-interview-background-transparency-v1')),
     '37',
   );
   await page.evaluate((key) => {
@@ -236,6 +234,23 @@ try {
   await floating.locator('.transcript-item > p').first().waitFor();
   await floating.locator('.answer-text h3').first().waitFor();
   await checkBrandImage(floating, '.provider-avatar img');
+  await floating.evaluate(async () => {
+    await document.fonts.ready;
+    await Promise.all(
+      [...document.querySelectorAll('img')].map((image) => image.decode().catch(() => {})),
+    );
+    await new Promise(requestAnimationFrame);
+    await new Promise(requestAnimationFrame);
+  });
+  await floating.waitForFunction(() =>
+    document
+      .getAnimations()
+      .every(
+        (animation) =>
+          animation.effect?.getTiming().iterations === Infinity ||
+          animation.playState !== 'running',
+      ),
+  );
   const toolbar = await floating.locator('.floating-toolbar').boundingBox();
   const fixedInterview = await fixedTextStyles(floating.locator('body'));
   for (const size of [18, 24, 12, 14]) {
@@ -277,18 +292,30 @@ try {
       '14px',
     );
     assert.ok(Math.abs(metrics.heading - (size * 15) / 14) < 0.01);
-    assert.deepEqual(await floating.locator('.floating-toolbar').boundingBox(), toolbar);
+    assert.deepEqual(
+      await floating.locator('.floating-toolbar').boundingBox(),
+      toolbar,
+      JSON.stringify(
+        await floating.locator('.floating-toolbar').evaluate((node) =>
+          [...node.querySelectorAll('*')].map((item) => ({
+            class: item.className,
+            width: item.getBoundingClientRect().width,
+            font: getComputedStyle(item).font,
+            transform: getComputedStyle(item).transform,
+          })),
+        ),
+      ),
+    );
     await capture(floating, 'font-actual-' + size + 'px');
   }
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
   const floatSettings = floating.getByRole('dialog', { name: '面试设置', exact: true });
   await floatSettings.getByRole('slider', { name: '面试字体大小', exact: true }).fill('18');
-  await floatSettings.getByRole('slider', { name: '面试背景透明度', exact: true }).fill('62');
-  await page.waitForFunction(
-    ({ key, opacityKey }) =>
-      localStorage.getItem(key) === '18' && localStorage.getItem(opacityKey) === '62',
-    { key, opacityKey },
+  assert.equal(
+    await floatSettings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
+    0,
   );
+  await page.waitForFunction((key) => localStorage.getItem(key) === '18', key);
   assert.equal(
     await floating.evaluate(() => localStorage.getItem('voxcue-frosted-transparency-v2')),
     null,
@@ -334,12 +361,12 @@ try {
     '18',
   );
   assert.equal(
-    await restarted.getByRole('slider', { name: '面试背景透明度', exact: true }).inputValue(),
-    '62',
+    await restarted.evaluate(() => document.documentElement.dataset.interviewTransparency),
+    '60',
   );
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: bubble-only font scaling, fixed input/placeholder and all text outside bubbles, display sliders, preview, keyboard and limits, storage failures, persistence, icons, independent opacity, cross-window sync, light/dark and minimum bounds; synthetic account/audio only.',
+    'PASS: bubble-only font scaling, fixed input/placeholder and all text outside bubbles, centered font slider, preview, keyboard and limits, storage failures, persistence, icons, fixed 60% material, cross-window sync, dark interview and minimum bounds; synthetic account/audio only.',
   );
 } finally {
   await closeUiApp(app);

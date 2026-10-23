@@ -90,6 +90,23 @@ export function restrictWindowNavigation(win: Pick<BrowserWindow, 'webContents'>
   win.webContents.on('will-navigate', (event) => event.preventDefault());
 }
 
+export function whenWindowReady(win: BrowserWindow, platform: DesktopPlatform, show: () => void) {
+  const dispose = () => {
+    win.removeListener('ready-to-show', ready);
+    win.webContents.removeListener('did-finish-load', ready);
+    win.removeListener('closed', dispose);
+  };
+  const ready = () => {
+    dispose();
+    if (!win.isDestroyed()) show();
+  };
+  win.once('ready-to-show', ready);
+  win.once('closed', dispose);
+  // A hidden Acrylic/transparent HWND can defer its first paint indefinitely.
+  // Show the loaded Windows page without waiting for that paint to reveal it.
+  if (platform.id === 'win32') win.webContents.once('did-finish-load', ready);
+}
+
 export function loadWindowPage(
   win: Pick<BrowserWindow, 'loadURL' | 'loadFile'>,
   role: WindowRole,

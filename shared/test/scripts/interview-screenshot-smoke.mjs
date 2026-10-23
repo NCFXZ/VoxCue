@@ -238,6 +238,20 @@ try {
           .getAnimations()
           .some((animation) => animation.playState === 'running'),
     );
+    const shape = await camera.evaluate((button) => ({
+      iconOnly: button.classList.contains('button-icon'),
+      radius: getComputedStyle(button).borderTopLeftRadius,
+      corner: getComputedStyle(button).cornerShape,
+      height: Math.round(button.getBoundingClientRect().height * 100) / 100,
+      overflow: button.scrollWidth > button.clientWidth + 1,
+    }));
+    assert.equal(shape.height, 32);
+    assert.equal(shape.overflow, false);
+    assert.equal(shape.iconOnly, count === 0);
+    if (count > 0) {
+      assert.equal(shape.radius, '999px');
+      assert.equal(shape.corner, 'round');
+    }
   };
   const waitAnswer = async (count) => {
     await floating.getByText('截图回归回答 ' + count, { exact: true }).waitFor();
@@ -277,9 +291,10 @@ try {
   const resize = floating.getByRole('button', { name: '拖动右下角调整尺寸', exact: true });
   for (let i = 0; i < 4; i++) await resize.press('ArrowDown');
   for (const theme of ['light', 'dark']) {
-    await floating.evaluate(
-      (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
-      theme,
+    await floating.emulateMedia({ colorScheme: theme });
+    assert.equal(
+      await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
+      true,
     );
     const bounds = await floating.locator('.floating-composer').evaluate((node) => {
       const form = node.getBoundingClientRect(),

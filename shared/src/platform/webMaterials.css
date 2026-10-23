@@ -53,6 +53,13 @@
   border-radius: 50%;
   corner-shape: round;
 }
+.web-materials
+  :is(.management-page, .settings-dialog, .personal-panel, .app-dialog, .record-toolbar-actions)
+  button.ui-button:not(.button-icon):not(.confirm-delete):not(.action-transition *):not(
+    [aria-haspopup='menu']
+  ):not([role='switch']) {
+  padding-inline: 20px;
+}
 .web-materials .sidebar-update.ui-button {
   border-radius: 999px;
   corner-shape: round;
@@ -130,7 +137,9 @@
   :is(.floating-shell, .interview-preview-shell) {
   --web-material-filter: none;
 }
-.web-materials :is(.preparation-workspace, .management-page) > .page-toolbar::before {
+.web-materials
+  :is(.preparation-workspace, .management-page, .history-detail)
+  > .page-toolbar::before {
   content: '';
   position: absolute;
   inset: 0;
@@ -142,20 +151,20 @@
   backdrop-filter: var(--web-material-filter);
   border-bottom: 1px solid var(--border);
 }
-.web-materials :is(.preparation-workspace, .management-page) > .page-toolbar {
+.web-materials :is(.preparation-workspace, .management-page, .history-detail) > .page-toolbar {
   isolation: isolate;
   background: transparent;
 }
 .web-materials .app-dialog::backdrop {
-  background: transparent;
+  background: rgb(0 0 0 / 0.4);
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
 }
-.web-materials .app-dialog {
-  box-shadow: 0 0 26px rgb(0 0 0 / 0.22);
+.web-materials .interview-settings-dialog::backdrop {
+  background: transparent;
 }
-.web-materials.dark .app-dialog {
-  box-shadow: 0 0 26px rgb(255 255 255 / 0.18);
+.web-materials .app-dialog {
+  box-shadow: none;
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   :root.web-materials,
@@ -171,4 +180,33 @@
 
 .web-materials .floating-brand {
   padding-inline: 14px;
+}
+.web-materials .floating-toolbar :is(.ui-button, .floating-drag-handle):not(.button-destructive) {
+  background: transparent;
+  border-color: transparent;
+  box-shadow: none;
+}
+.web-materials .floating-toolbar .floating-end.is-confirming {
+  background: var(--web-control-fill);
+  color: var(--danger);
+  border-color: transparent;
+  box-shadow: none;
+  filter: none;
+}
+.web-materials .floating-toolbar .floating-end.is-confirming:is(:hover, :focus-visible) {
+  background: var(--web-control-hover);
+}
+.web-materials
+  .floating-toolbar
+  :is(.ui-button, .floating-drag-handle):is(:hover, :focus-visible, :active):not(:disabled):not(
+    .button-destructive
+  ) {
+  background: var(--web-control-hover);
+}
+.web-materials :is(.interview-settings-dialog, .interview-start-dialog) .dialog-icon {
+  width: 24px;
+  height: 24px;
+  background: none;
+  border: none;
+  box-shadow: none;
 }

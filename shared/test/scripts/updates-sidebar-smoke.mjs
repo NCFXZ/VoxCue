@@ -2,6 +2,7 @@ import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -144,7 +145,12 @@ try {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
     await aligned(page);
     await page.screenshot(); // Buffer only.
+    await captureRequested(page, 'download-idle-' + (dark ? 'dark' : 'light'));
   }
+  const available = sidebar.getByRole('button', { name: '下载更新', exact: true });
+  await available.hover();
+  await available.locator('.sidebar-update-label').waitFor({ state: 'visible' });
+  await captureRequested(page, 'download-expanded');
   const progress = sidebar.locator('.download-button');
   await assertInitialDownloadProgress(progress, async () => {
     await sidebar.getByRole('button', { name: '下载更新', exact: true }).click();
@@ -173,6 +179,9 @@ try {
     await progress.evaluate((el) => getComputedStyle(el).color),
   );
   await assertDownloadButton(page, progress, { iconOnly: true, hoverLabel: '取消下载' });
+  await progress.hover();
+  await progress.locator('.download-button-cancel').waitFor({ state: 'visible' });
+  await captureRequested(page, 'cancel-expanded');
   await collapsedAction(page, progress);
   if (process.argv.includes('--preview')) {
     await page.keyboard.press('Tab');
@@ -235,6 +244,7 @@ try {
   const expanded = await install.boundingBox();
   assert.ok(expanded.width > 36 && expanded.height === 36);
   assert.equal(await install.innerText(), '重启以更新');
+  await captureRequested(page, 'restart-expanded');
   await page.mouse.move(800, 100);
   await aligned(page);
   await collapsedAction(page, install);

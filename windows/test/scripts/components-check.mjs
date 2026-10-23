@@ -12,7 +12,11 @@ export async function checkComponents(application) {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
-  await page.locator('.service-brand-icon').evaluate(async (image) => image.decode());
+  const loginButton = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+  assert.equal(await loginButton.count(), 1);
+  const loginBrand = loginButton.locator('.service-brand-icon');
+  assert.equal(await loginBrand.count(), 1);
+  await loginBrand.evaluate(async (image) => image.decode());
   assert.equal(await page.locator('.service-login').count(), 1);
   assert.equal(await page.getByRole('button', { name: /GitHub/ }).count(), 0);
   assert.equal(
@@ -223,7 +227,7 @@ export async function checkComponents(application) {
   await application.evaluate(() => {
     globalThis.ragMode = 'real';
   });
-  await rag.getByRole('button', { name: '重试下载', exact: true }).click();
+  await rag.getByRole('button', { name: '下载', exact: true }).click();
   await assertDownloadButton(page, rag.locator('.download-button'));
   await waitForAsync(
     page,
@@ -233,7 +237,8 @@ export async function checkComponents(application) {
     undefined,
     { timeout: 180000 },
   );
-  await rag.getByText('已就绪', { exact: true }).waitFor();
+  await rag.getByRole('button', { name: '删除：multilingual-e5-small', exact: true }).waitFor();
+  assert.equal(await rag.getByText('已就绪', { exact: true }).count(), 0);
   assert.match(await rag.innerText(), /85\.0 MB/);
   assert.doesNotMatch(await settings.innerText(), /MiB/);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
@@ -244,7 +249,8 @@ export async function checkComponents(application) {
     await personal.getByRole('button', { name: '面试知识库', exact: true }).isEnabled(),
     true,
   );
-  await page.getByRole('button', { name: '关闭个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
+  await personal.waitFor({ state: 'hidden' });
   await notice.getByRole('button', { name: '前往设置' }).click();
   await speech.getByRole('button', { name: '下载', exact: true }).click();
   await waitForAsync(
@@ -253,7 +259,8 @@ export async function checkComponents(application) {
     undefined,
     { timeout: 180000 },
   );
-  await speech.getByText('已就绪', { exact: true }).waitFor();
+  await speech.getByRole('button', { name: '删除：Paraformer 中英 INT8', exact: true }).waitFor();
+  assert.equal(await speech.getByText('已就绪', { exact: true }).count(), 0);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await start.isEnabled(), true);
   assert.equal(await notice.count(), 0);

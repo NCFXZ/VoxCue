@@ -12,7 +12,7 @@ export function installWebMaterials() {
       root.classList.toggle('web-materials', fallback);
     if (!fallback) return;
     const workspace = document.querySelector(
-      '.preparation-route:not([hidden]) .preparation-workspace, .management-page',
+      '.preparation-route:not([hidden]) .preparation-workspace, .management-page, .history-detail',
     );
     const toolbar = workspace?.querySelector('.page-toolbar');
     const column = workspace?.querySelector('.chat-column') ?? workspace;

@@ -4,9 +4,7 @@ import {
   saveInterviewFontSize,
   useInterviewFontSize,
 } from '../interviewTypography';
-import { saveInterviewTransparency, useInterviewTransparency } from '../interviewAppearance';
 import { FontDecrease, FontIncrease } from './icons';
-import { interviewTransparencyAvailable } from './ui/appearance-control';
 
 function DisplaySlider({
   title,
@@ -75,7 +73,6 @@ function DisplaySlider({
 }
 export function InterviewDisplayControls() {
   const size = useInterviewFontSize();
-  const transparency = useInterviewTransparency();
   const [error, setError] = useState('');
   const save = (operation: () => void) => {
     try {
@@ -86,9 +83,7 @@ export function InterviewDisplayControls() {
     }
   };
   return (
-    <div
-      className={`interview-display-controls${interviewTransparencyAvailable ? '' : ' single-setting'}`}
-    >
+    <div className="interview-display-controls single-setting">
       <DisplaySlider
         title="字体大小"
         name="面试字体大小"
@@ -100,19 +95,6 @@ export function InterviewDisplayControls() {
         endIcon={<FontIncrease size={22} />}
         onChange={(value) => save(() => saveInterviewFontSize(value))}
       />
-      {interviewTransparencyAvailable && (
-        <DisplaySlider
-          title="背景透明度"
-          name="面试背景透明度"
-          value={transparency}
-          minimum={0}
-          maximum={100}
-          unit="%"
-          startIcon={<span className="frosted-endpoint is-solid" />}
-          endIcon={<span className="frosted-endpoint" />}
-          onChange={(value) => save(() => saveInterviewTransparency(value))}
-        />
-      )}
       {error && (
         <p className="danger-text" role="alert">
           {error}

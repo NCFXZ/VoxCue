@@ -54,7 +54,7 @@ import {
 } from './application/speech';
 import { handleDesktop, onDesktop, sendDesktop } from './ipc/handle';
 import { selectDesktopPlatform, desktopResources } from './platform';
-import { windowOptions, restrictWindowNavigation, loadWindowPage } from './window';
+import { windowOptions, whenWindowReady, restrictWindowNavigation, loadWindowPage } from './window';
 import type { NativePresentation } from './presentation';
 import {
   interviewPanelScale,
@@ -204,7 +204,7 @@ function createLoginWindow() {
   const win = new BrowserWindow(windowOptions('login', desktopPlatform, windowPaths));
   loginWindow = win;
   restrictWindowNavigation(win);
-  win.once('ready-to-show', () => {
+  whenWindowReady(win, desktopPlatform, () => {
     win.show();
     mainWindow?.close();
   });
@@ -339,7 +339,7 @@ function openInterview() {
       if (!onTop && !closingMain && !interviewCloseApproved) pinInterview(win);
     });
   }
-  win.once('ready-to-show', () => {
+  whenWindowReady(win, desktopPlatform, () => {
     if (nativePresentation) {
       nativePresentation.prepareInterview(win);
     }
@@ -432,7 +432,7 @@ function createMainWindow() {
   };
   mainWindow.on('focus', () => focusChanged(true));
   mainWindow.on('blur', () => focusChanged(false));
-  mainWindow.once('ready-to-show', () => {
+  whenWindowReady(mainWindow, desktopPlatform, () => {
     mainWindow?.show();
     loginWindow?.close();
     void updates?.start();

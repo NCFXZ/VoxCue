@@ -55,7 +55,6 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
         <Button
           data-native-control-style="standalone-glass"
           aria-label="创建知识库"
-          title="创建知识库"
           size="icon"
           disabled={!ragReady}
           onClick={() => {
@@ -133,7 +132,6 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
               className="action-icon-button"
               data-native-reveal-on-hover
               aria-label="重命名"
-              title="重命名"
               onClick={() => {
                 setName(base.name);
                 setEditing('rename');

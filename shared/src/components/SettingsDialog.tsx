@@ -34,11 +34,6 @@ import { useAuth } from '../stores/auth';
 import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
 import { accentOptions, readAccentPreference, saveAccentPreference } from '../systemAccent';
-import {
-  AppearanceControl,
-  appearanceLabel,
-  appearanceSettingAvailable,
-} from './ui/appearance-control';
 
 export type Theme = 'light' | 'dark' | 'system';
 const platformLabels = { macos: 'macOS', windows: 'Windows', unknown: '未知平台' };
@@ -72,7 +67,6 @@ export function SettingsDialog({
   const [category, setCategory] = useState<SettingsCategory>(initialCategory);
   const [accent, setAccent] = useState(readAccentPreference);
   const [accentError, setAccentError] = useState<string | null>(null);
-  const [frostedError, setFrostedError] = useState<string | null>(null);
   const presentation = window.desktop?.presentation ?? pendingPresentation;
   useEffect(() => {
     const update = () => setAccent(readAccentPreference());
@@ -236,24 +230,6 @@ export function SettingsDialog({
                   <p className="danger-text" role="alert">
                     {accentError}
                   </p>
-                )}
-                {appearanceSettingAvailable && (
-                  <>
-                    <div className="settings-entry frosted-setting">
-                      <strong id="appearance-effect-label">{appearanceLabel}</strong>
-                      <AppearanceControl onError={setFrostedError} />
-                    </div>
-                    {!presentation.frostedTransparency && (
-                      <p className="settings-hint">
-                        当前系统未提供毛玻璃透明度效果，设置仍会保存在本机。
-                      </p>
-                    )}
-                    {frostedError && (
-                      <p className="danger-text" role="alert">
-                        {frostedError}
-                      </p>
-                    )}
-                  </>
                 )}
                 {!presentation.nativeTheme && (
                   <p className="settings-hint">原生外观待适配，界面主题正常生效。</p>

@@ -14,11 +14,14 @@ const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
 if (suites[0] === '--dpi') {
   const allowed = [
+    'web-materials',
+    'ui-material-refinement',
     'ui-refinement',
     'ui-alignment',
     'profile-selection',
     'typography',
     'interview-typography',
+    'interview-screenshot',
     'interview-retry',
     'interview-ux',
     'components-ui',
@@ -33,37 +36,47 @@ if (suites[0] === '--dpi') {
   const selected = names.length ? names : allowed;
   for (const name of selected) assert.ok(allowed.includes(name), 'Unknown DPI suite: ' + name);
   const models = await prepareModelFixtures();
-  for (const scale of requestedScale ? [requestedScale] : scales) {
-    for (const name of selected) {
-      requireDesktop();
-      const child = spawnTestProcess(
-        process.execPath,
-        ['../shared/test/scripts/' + name + '-smoke.mjs'],
-        {
-          env: {
-            ...process.env,
-            VOXCUE_TEST_SCALE_FACTOR: scale,
-            VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
-            VOXCUE_TEST_RAG_MODEL: models.ragModel,
-            VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+  const failures = [];
+  const cursor = probe('cursor');
+  try {
+    for (const scale of requestedScale ? [requestedScale] : scales) {
+      for (const name of selected) {
+        requireDesktop();
+        // A pending native WM_MOUSEMOVE can replace Chromium's injected hover.
+        // Park the real pointer outside the controls while the isolated UI runs.
+        probe('move', 0, 0);
+        const child = spawnTestProcess(
+          process.execPath,
+          ['../shared/test/scripts/' + name + '-smoke.mjs'],
+          {
+            env: {
+              ...process.env,
+              VOXCUE_TEST_SCALE_FACTOR: scale,
+              VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+              VOXCUE_TEST_RAG_MODEL: models.ragModel,
+              VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+            },
+            stdio: ['ignore', 'pipe', 'pipe'],
+            windowsHide: true,
           },
-          stdio: ['ignore', 'pipe', 'pipe'],
-          windowsHide: true,
-        },
-      );
-      let output = '';
-      child.stdout.on('data', (data) => (output += data));
-      child.stderr.on('data', (data) => (output += data));
-      const timer = setTimeout(() => child.kill(), 180000);
-      const code = await new Promise((resolve, reject) => {
-        child.once('error', reject);
-        child.once('exit', resolve);
-      }).finally(() => clearTimeout(timer));
-      if (code !== 0) console.error(output);
-      assert.equal(code, 0, name + ' at DPI ' + scale);
-      console.log('PASS DPI ' + scale + ' ' + name);
+        );
+        let output = '';
+        child.stdout.on('data', (data) => (output += data));
+        child.stderr.on('data', (data) => (output += data));
+        const timer = setTimeout(() => child.kill(), 180000);
+        const code = await new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('exit', resolve);
+        }).finally(() => clearTimeout(timer));
+        if (code !== 0) console.error(output);
+        if (code !== 0) failures.push({ scale, name });
+        console.log((code === 0 ? 'PASS DPI ' : 'FAIL DPI ') + scale + ' ' + name);
+      }
     }
+  } finally {
+    probe('move', cursor.x, cursor.y);
   }
+  assert.deepEqual(failures, [], 'Windows DPI matrix failures');
   process.exit(0);
 }
 const nativeNames = [

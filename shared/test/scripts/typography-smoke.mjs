@@ -5,6 +5,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 import {
   verifyContinuousCorners,
   verifyCornerRendering,
@@ -82,6 +83,7 @@ const inspect = async (page, name) => {
       .map((e) => ({
         label: e.getAttribute('aria-label') || e.textContent.trim().slice(0, 30) || e.tagName,
         height: e.getBoundingClientRect().height,
+        expectedHeight: e.matches('.history-filters input[type="search"]') ? 44 : 36,
       }));
     const misalignedIcons = [
       ...active.querySelectorAll(
@@ -170,12 +172,15 @@ const inspect = async (page, name) => {
       }),
     );
   console.log(`Inspect: ${name}`);
+  await captureRequested(page, name);
   assert.deepEqual(geometry.overflow, [], `${name}: horizontal overflow`);
   assert(geometry.dialogContained, `${name}: dialog outside viewport`);
   assert.deepEqual(geometry.misalignedIcons, [], `${name}: icon not centered in its button`);
   assert.deepEqual(geometry.misalignedFooters, [], `${name}: dialog actions not centered`);
   assert.deepEqual(
-    geometry.standardControls.filter(({ height }) => Math.abs(height - 36) > 0.5),
+    geometry.standardControls.filter(
+      ({ height, expectedHeight }) => Math.abs(height - expectedHeight) > 0.5,
+    ),
     [],
     `${name}: inconsistent standard control heights`,
   );
@@ -217,11 +222,13 @@ const inspect = async (page, name) => {
         const s = getComputedStyle(e);
         return {
           tag: e.tagName,
-          expectedControlSize: e.matches(
-            '.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.markdown-code-block > header .ui-button',
-          )
-            ? 12
-            : 14,
+          expectedControlSize: e.matches('.login-interview-preview textarea')
+            ? 11
+            : e.matches(
+                  '.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.markdown-code-block > header .ui-button',
+                )
+              ? 12
+              : 14,
           className: e.className,
           label: e.getAttribute('aria-label') || e.textContent.trim().slice(0, 50),
           size: parseFloat(s.fontSize),
@@ -230,7 +237,10 @@ const inspect = async (page, name) => {
         };
       }),
   );
-  const invalid = rows.filter((row) => ![12, 14, 15, 18].includes(row.size));
+  const invalid = rows.filter(
+    (row) =>
+      ![12, 14, 15, 18].includes(row.size) && !(row.expectedControlSize === 11 && row.size === 11),
+  );
   assert.deepEqual(invalid, [], `${name}: unexpected type sizes`);
   const wrongControls = rows.filter(
     (row) =>

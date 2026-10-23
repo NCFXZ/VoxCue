@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InterviewRecord } from '../services/history';
 import {
   duration,
@@ -39,8 +39,23 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
   const [renaming, setRenaming] = useState(false);
   const [titleDraft, setTitleDraft] = useState(record.title);
   const [renameError, setRenameError] = useState<string | null>(null);
+  const toolbar = useRef<HTMLElement>(null);
   const rows = useRef(new Map<string, HTMLElement>());
   const answerRows = useRef(new Map<string, HTMLElement>());
+  useLayoutEffect(() => {
+    const header = toolbar.current;
+    const workspace = header?.parentElement;
+    if (!header || !workspace) return;
+    const update = () =>
+      workspace.style.setProperty(
+        '--record-toolbar-height',
+        `${header.getBoundingClientRect().height}px`,
+      );
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(header);
+    return () => observer.disconnect();
+  }, []);
   const answers = useMemo(() => visibleAnswers(record), [record]);
   const associations = useMemo(() => {
     const byAnswer = new Map(answers.map((answer) => [answer.id, sourceIds(record, answer)]));
@@ -109,7 +124,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
   };
   return (
     <main className="workspace history-detail">
-      <header className="page-toolbar record-detail-toolbar">
+      <header ref={toolbar} className="page-toolbar record-detail-toolbar">
         <div className="history-heading-transition">
           <Button
             variant="ghost"

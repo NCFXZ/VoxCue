@@ -5,6 +5,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/ui-ux-fixes-')));
@@ -15,6 +16,7 @@ const app = await electron.launch({
 const checks = [];
 const errors = [];
 const previewLatest = async (page, preview) => {
+  await captureRequested(page, preview);
   if (!process.argv.includes('--preview-latest')) return;
   const bounds = await page.locator('.chat-composer').boundingBox();
   const column = await page.locator('.chat-column').boundingBox();

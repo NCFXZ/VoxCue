@@ -22,7 +22,6 @@ export function FollowLatestButton({
         size="icon"
         aria-label={label}
         aria-busy={busy}
-        title={busy ? `正在回复 · ${label}` : label}
         onClick={onClick}
         style={visible ? undefined : { display: 'none' }}
       >

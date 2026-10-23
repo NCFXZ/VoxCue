@@ -39,6 +39,10 @@ export async function offlineElectronEntry(
     entry,
     [
       "const { app, net } = require('electron');",
+      // A direct fixture entry otherwise reports the Electron host's version.
+      'app.getVersion = () => require(' +
+        JSON.stringify(path.join(workspace.platformRoot, 'package.json')) +
+        ').version;',
       'const loopbackPort = ' + JSON.stringify(loopbackPort ?? null) + ';',
       'const modelUrls = new Set(' + JSON.stringify(modelUrls) + ');',
       "const deny = () => { throw Error('Offline desktop regression forbids network access'); };",

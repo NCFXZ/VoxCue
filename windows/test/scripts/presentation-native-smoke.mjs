@@ -386,9 +386,17 @@ try {
       localStorage.setItem('voxcue-frosted-transparency-v2', JSON.stringify(value));
       window.dispatchEvent(new StorageEvent('storage', { key: 'voxcue-frosted-transparency-v2' }));
     }, value);
-    await main.waitForFunction(
-      (value) => document.documentElement.dataset.frostedTransparency === String(value),
-      value,
+    assert.equal(
+      await main.evaluate(() => document.documentElement.dataset.frostedTransparency),
+      '60',
+    );
+    assert.equal(
+      await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
+      '60',
+    );
+    assert.equal(
+      await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
+      true,
     );
     const surface = await floating.evaluate(() => {
       const style = getComputedStyle(document.documentElement);
@@ -399,6 +407,8 @@ try {
       };
     });
     assert.ok(surface.reading >= surface.panel);
+    assert.ok(Math.abs(surface.panel - 0.8496) < 0.000001);
+    assert.ok(Math.abs(surface.reading - 0.8992) < 0.000001);
     assert.equal(surface.shadow, 'none');
     assert.equal(
       await app.evaluate(({ BrowserWindow }) =>

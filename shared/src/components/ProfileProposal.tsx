@@ -273,6 +273,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                 <Button
                   variant="ghost"
                   className="proposal-view"
+                  data-native-reveal-on-hover
                   aria-expanded={expanded}
                   aria-label={expanded ? '收起技能清单' : '展开技能清单'}
                   onClick={() => setSkillsExpanded(!expanded)}
@@ -316,6 +317,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                       <Button
                         variant="ghost"
                         className="proposal-view"
+                        data-native-reveal-on-hover
                         aria-label={`查看技能：${skill.title}`}
                         onClick={() => setReading({ field: 'skills', skillId: skill.id })}
                       >
@@ -355,6 +357,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                 <Button
                   variant="ghost"
                   className="proposal-view"
+                  data-native-reveal-on-hover
                   aria-label={`查看${profileLabels[field]}`}
                   onClick={() => setReading({ field })}
                 >

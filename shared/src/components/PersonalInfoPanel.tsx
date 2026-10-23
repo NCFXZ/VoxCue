@@ -342,7 +342,6 @@ export function PersonalInfoPanel({
                   size="icon"
                   className="action-icon-button"
                   aria-label="编辑"
-                  title={'编辑' + profileLabels[field]}
                   disabled={state.streaming}
                   onClick={() => edit(field)}
                 >
@@ -416,7 +415,6 @@ export function PersonalInfoPanel({
                       size="icon"
                       className="action-icon-button"
                       aria-label="编辑"
-                      title={'编辑技能：' + item.title}
                       onClick={() => edit('skills', item.id)}
                     >
                       <Edit size={14} />

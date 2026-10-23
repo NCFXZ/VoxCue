@@ -24,6 +24,21 @@ export async function verifyContinuousCorners(page, name) {
     probe.style.boxShadow = 'var(--shadow-raised)';
     const raisedShadow = getComputedStyle(probe).boxShadow;
     probe.remove();
+    // A permanently dark interview preview can sit inside a light main window.
+    // Compare each surface with the standard token from its actual theme scope.
+    const scopedShadows = new Map();
+    const raisedShadowFor = (element) => {
+      const scope = element.closest('.dark') ?? document.documentElement;
+      if (!scopedShadows.has(scope)) {
+        const sample = document.createElement('span');
+        sample.style.position = 'absolute';
+        sample.style.boxShadow = 'var(--shadow-raised)';
+        scope.append(sample);
+        scopedShadows.set(scope, getComputedStyle(sample).boxShadow);
+        sample.remove();
+      }
+      return scopedShadows.get(scope);
+    };
     const sides = ['top-left', 'top-right', 'bottom-right', 'bottom-left'];
     const samples = [];
     const wrong = [];
@@ -90,11 +105,11 @@ export async function verifyContinuousCorners(page, name) {
           (fallback &&
             !pseudo &&
             element.matches(
-              '.ui-button:not(.button-icon),.choice-trigger,.settings-choice,.speech-select,.dropdown-item',
+              '.ui-button:not(.button-icon),.choice-trigger,.settings-choice,.speech-select,.dropdown-item,.history-filters input[type="search"]',
             )) ||
           element.matches(
             '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
-              '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,' +
+              '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,.interview-preview-capsule,' +
               '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
               '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
               '.mock-badge,.screen-capture-status,.record-transcript-heading span,' +
@@ -118,7 +133,7 @@ export async function verifyContinuousCorners(page, name) {
             element.matches(
               '.composer,.floating-composer,.follow-latest,.floating-toolbar,.floating-panel,.answer-bubble,.interview-answer-failure',
             ) &&
-            style.boxShadow !== raisedShadow
+            style.boxShadow !== raisedShadowFor(element)
           )
             wrongSurfaces.push(label + ': inconsistent raised surface shadow');
           if (element.matches('.interview-answer-failure') && style.borderRadius !== answerRadius)

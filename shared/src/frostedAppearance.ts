@@ -1,25 +1,10 @@
 import { useEffect } from 'react';
-import { applyInterviewAppearance, subscribeInterviewTransparency } from './interviewAppearance';
+import { applyInterviewAppearance } from './interviewAppearance';
 import { frostedProfileAt } from './frostedProfiles';
 
-const storageKey = 'voxcue-frosted-transparency-v2';
-const legacyKey = 'voxcue-frosted-strength-v1';
-const legacyValues: Record<string, number> = { off: 0, weak: 25, medium: 50, strong: 100 };
-const changedEvent = 'voxcue-frosted-transparency-changed';
+// Keep the existing 60% material curve without reading or rewriting old preferences.
 export function readFrostedTransparency(): number {
-  try {
-    const saved = localStorage.getItem(storageKey);
-    if (saved !== null) {
-      const value: unknown = JSON.parse(saved);
-      return typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= 100
-        ? value
-        : 50;
-    }
-    const legacy = localStorage.getItem(legacyKey);
-    return legacy && Object.hasOwn(legacyValues, legacy) ? legacyValues[legacy] : 50;
-  } catch {
-    return 50;
-  }
+  return 60;
 }
 
 export function applyFrostedAppearance() {
@@ -40,34 +25,8 @@ export function applyFrostedAppearance() {
   applyInterviewAppearance();
 }
 
-export function saveFrostedTransparency(value: number) {
-  if (!Number.isFinite(value) || value < 0 || value > 100) throw Error('无效的毛玻璃透明度。');
-  localStorage.setItem(storageKey, JSON.stringify(value));
-  applyFrostedAppearance();
-  window.dispatchEvent(new Event(changedEvent));
-}
-
-export function subscribeFrostedTransparency(callback: (value: number) => void) {
-  const update = () => callback(readFrostedTransparency());
-  const stored = (event: StorageEvent) => {
-    if (!event.key || event.key === storageKey || event.key === legacyKey) update();
-  };
-  window.addEventListener('storage', stored);
-  window.addEventListener(changedEvent, update);
-  return () => {
-    window.removeEventListener('storage', stored);
-    window.removeEventListener(changedEvent, update);
-  };
-}
-
 export function useFrostedAppearance() {
   useEffect(() => {
     applyFrostedAppearance();
-    const unsubscribeMain = subscribeFrostedTransparency(applyFrostedAppearance);
-    const unsubscribeInterview = subscribeInterviewTransparency(applyInterviewAppearance);
-    return () => {
-      unsubscribeMain();
-      unsubscribeInterview();
-    };
   }, []);
 }

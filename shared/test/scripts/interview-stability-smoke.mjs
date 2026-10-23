@@ -53,13 +53,10 @@ try {
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
-  const slider = main.getByRole('slider', { name: '毛玻璃透明度', exact: true });
-  await slider.focus();
-  await main.keyboard.press('Home');
-  await main.waitForFunction(() => localStorage.getItem('voxcue-frosted-transparency-v2') === '0');
-  await main.keyboard.press('End');
-  await main.waitForFunction(
-    () => localStorage.getItem('voxcue-frosted-transparency-v2') === '100',
+  assert.equal(await main.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(), 0);
+  assert.equal(
+    await main.evaluate(() => document.documentElement.dataset.frostedTransparency),
+    '60',
   );
   await main.getByRole('button', { name: '关闭设置', exact: true }).click();
   for (let cycle = 0; cycle < 20; cycle++) {
@@ -78,6 +75,12 @@ try {
       0,
     );
     assert.equal(await floating.locator('.floating-screenshot-preview').count(), 0);
+    // The answer bubble mounts before the synthetic stream has finished.
+    // Capture correctly stays disabled until generation releases the composer.
+    await floating.waitForFunction(() => {
+      const camera = document.querySelector('[aria-label="截取图像"]');
+      return camera instanceof HTMLButtonElement && !camera.disabled;
+    });
     assert.equal(
       await floating.getByRole('button', { name: '截取图像', exact: true }).isEnabled(),
       true,
@@ -99,9 +102,13 @@ try {
       localStorage.setItem('voxcue-frosted-transparency-v2', JSON.stringify(value));
       window.dispatchEvent(new StorageEvent('storage', { key: 'voxcue-frosted-transparency-v2' }));
     }, value);
-    await floating.waitForFunction(
-      (value) => document.documentElement.dataset.frostedTransparency === String(value),
-      value,
+    assert.equal(
+      await floating.evaluate(() => document.documentElement.dataset.frostedTransparency),
+      '60',
+    );
+    assert.equal(
+      await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
+      true,
     );
     assert.equal(
       await floating

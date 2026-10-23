@@ -44,6 +44,7 @@ export function FloatingInterview() {
   useEffect(() => useComponents.getState().connect(), []);
   const fontSize = useInterviewFontSize();
   const state = useInterview();
+  const screenshotExpanded = state.capturingScreenshot || state.screenshots.length > 0;
   const provider = providerInfo(state.answers.at(-1)?.provider);
   const failedAnswer = state.answers.at(-1)?.status === 'failed' ? state.answers.at(-1) : undefined;
   const saveError = useHistory((s) => s.error);
@@ -417,7 +418,7 @@ export function FloatingInterview() {
               className={`floating-end ${confirmEnd ? 'is-confirming' : ''}`}
               disabled={ending}
               variant={confirmEnd ? 'destructive' : 'dangerGhost'}
-              size="icon"
+              size={confirmEnd ? 'default' : 'icon'}
               aria-label={confirmEnd ? '确认结束面试' : '结束面试'}
               onClick={confirmEnd ? close : () => setConfirmEnd(true)}
             >
@@ -696,11 +697,11 @@ export function FloatingInterview() {
                   <Button
                     type="button"
                     variant="ghost"
-                    size="icon"
+                    size={screenshotExpanded ? 'default' : 'icon'}
                     className="floating-screenshot-button"
                     aria-label="截取图像"
                     aria-busy={state.capturingScreenshot}
-                    data-expanded={state.capturingScreenshot || state.screenshots.length > 0}
+                    data-expanded={screenshotExpanded}
                     disabled={
                       state.generating ||
                       state.capturingScreenshot ||

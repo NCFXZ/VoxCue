@@ -354,7 +354,10 @@ try {
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).fill('16');
-  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).fill('25');
+  assert.equal(
+    await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
+    0,
+  );
   await settings.getByRole('heading', { name: '模型设置', exact: true }).waitFor();
   assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
   assert.equal(await settings.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);
@@ -367,11 +370,10 @@ try {
   await page.keyboard.press('Escape');
   await settings.locator('.settings-content').evaluate((element) => (element.scrollTop = 0));
   await capture(page, '09-display-settings');
-  const opacitySlider = settings.getByRole('slider', { name: '面试背景透明度', exact: true });
-  await opacitySlider.fill('0');
-  await capture(page, '10-preview-solid');
-  await opacitySlider.fill('75');
-  await capture(page, '11-preview-transparent');
+  assert.equal(
+    await page.evaluate(() => document.documentElement.dataset.interviewTransparency),
+    '60',
+  );
   const preview = settings.locator('.interview-preview-scene');
   await preview.scrollIntoViewIfNeeded();
   if (screenshots)
@@ -412,12 +414,14 @@ try {
         .map((e) => e.outerHTML),
     );
   assert.deepEqual(misSizedIcons, []);
-  await opacitySlider.fill('25');
   await settings.getByRole('button', { name: '个性化', exact: true }).click();
-  await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).fill('70');
   assert.equal(
-    await page.evaluate(() => localStorage.getItem('voxcue-interview-background-transparency-v1')),
-    '25',
+    await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
+    '60',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -718,10 +722,19 @@ try {
     await floating.evaluate(() => typeof window.desktop.setInterviewSettingsMaterial),
     'undefined',
   );
-  assert.ok(
-    unobscured.equals(await floating.screenshot({ clip: clearCorner, scale: 'css' })),
-    'Opaque settings leave the rest of the window clear',
+  const settingsCorner = await floating.screenshot({ clip: clearCorner, scale: 'css' });
+  assert.equal(
+    unobscured.equals(settingsCorner),
+    true,
+    'Interview settings leave the background unchanged',
   );
+  const clearPixels = await app.evaluate(({ nativeImage }, bytes) => {
+    const pixels = nativeImage.createFromBuffer(Buffer.from(bytes, 'base64')).toBitmap();
+    let valid = true;
+    for (let i = 0; i < pixels.length; i += 4) valid &&= pixels[i + 3] === 0;
+    return { valid, first: [...pixels.subarray(0, 4)] };
+  }, settingsCorner.toString('base64'));
+  assert.equal(clearPixels.valid, true, JSON.stringify(clearPixels));
   if (passthrough) {
     await waitNativePassthrough(false);
     await floating.mouse.move(2, 2);
@@ -731,6 +744,11 @@ try {
   // Dismissal consumes the first click on both the transcript and toolbar.
   await floating.mouse.click(45, 190);
   await devices.waitFor({ state: 'hidden' });
+  assert.equal(
+    unobscured.equals(await floating.screenshot({ clip: clearCorner, scale: 'css' })),
+    true,
+    'Closing settings preserves the clear background',
+  );
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
   const end = await floating.getByRole('button', { name: '结束面试', exact: true }).boundingBox();
   await floating.mouse.click(end.x + end.width / 2, end.y + end.height / 2);
@@ -855,8 +873,10 @@ try {
   );
   const slider = devices.getByRole('slider', { name: '面试字体大小', exact: true });
   await slider.fill('18');
-  const background = devices.getByRole('slider', { name: '面试背景透明度', exact: true });
-  await background.fill('75');
+  assert.equal(
+    await devices.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
+    0,
+  );
   const actualLayers = await floating.evaluate(() =>
     Object.fromEntries(
       [
@@ -874,16 +894,15 @@ try {
   assert.deepEqual(
     actualLayers,
     layers,
-    'Preview and real interview must use identical material at the same slider position',
+    'Preview and real interview must use the identical fixed 60% material',
   );
-  await background.fill('35');
   assert.equal(
-    await floating.evaluate(() => localStorage.getItem('voxcue-frosted-transparency-v2')),
-    '70',
+    await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
+    '60',
   );
   assert.equal(await devices.getByRole('button', { name: /应用.*设置/ }).count(), 0);
   assert.equal(await devices.getByRole('button', { name: '完成', exact: true }).count(), 0);
-  assert.equal(await devices.locator('.display-slider-icon').count(), 4);
+  assert.equal(await devices.locator('.display-slider-icon').count(), 2);
   assert.equal(await devices.getByText('当前回答结束后可修改', { exact: true }).count(), 0);
   await geometry(floating);
   const backdrop = await devices.evaluate((e) => {
@@ -900,60 +919,41 @@ try {
   assert.equal(backdrop.clip, 'none');
   assert.equal(backdrop.color, 'rgba(0, 0, 0, 0)');
   assert.equal(backdrop.filter, 'none');
-  assert.equal(backdrop.surface, 'rgb(255, 255, 255)');
+  assert.equal(backdrop.surface, 'rgb(28, 32, 35)');
   assert.equal(backdrop.surfaceFilter, 'none');
-  assert.ok(backdrop.shadow.includes('0px 0px 26px 0px'), JSON.stringify(backdrop));
+  assert.equal(backdrop.shadow, 'none');
   const beforeMaterial = backdrop.surface;
-  await page.evaluate(() => {
-    localStorage.setItem('voxcue-frosted-transparency-v2', '50');
-    window.dispatchEvent(new Event('voxcue-frosted-transparency-changed'));
-  });
-  await floating.waitForFunction(
-    () => document.documentElement.dataset.frostedTransparency === '50',
-  );
-  assert.equal(await devices.evaluate((e) => getComputedStyle(e).backgroundColor), beforeMaterial);
-  assert.equal(await background.inputValue(), '35');
   for (const value of [0, 50, 100]) {
     await page.evaluate((value) => {
       localStorage.setItem('voxcue-frosted-transparency-v2', String(value));
-      window.dispatchEvent(new Event('voxcue-frosted-transparency-changed'));
+      localStorage.setItem('voxcue-interview-background-transparency-v1', String(value));
+      window.dispatchEvent(new StorageEvent('storage', { key: 'voxcue-frosted-transparency-v2' }));
     }, value);
-    await floating.waitForFunction(
-      (value) => document.documentElement.dataset.frostedTransparency === String(value),
-      value,
+    assert.equal(
+      await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
+      '60',
     );
-    const main = await page.locator('.app-shell').evaluate((e) => ({
-      color: getComputedStyle(e).backgroundColor,
-      filter: getComputedStyle(e).backdropFilter,
-    }));
+    assert.equal(
+      await floating.evaluate(() => document.documentElement.dataset.frostedTransparency),
+      '60',
+    );
+    assert.equal(
+      await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
+      '60',
+    );
     for (const theme of ['light', 'dark']) {
-      await floating.evaluate(
-        (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
-        theme,
+      await floating.emulateMedia({ colorScheme: theme });
+      assert.equal(
+        await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
+        true,
       );
-      const surface = await devices.evaluate((e) => ({
-        color: getComputedStyle(e).backgroundColor,
-        filter: getComputedStyle(e).backdropFilter,
-      }));
-      assert.equal(surface.color, theme === 'light' ? 'rgb(255, 255, 255)' : 'rgb(28, 32, 35)');
-      assert.equal(surface.filter, 'none');
-      if (value === 100) {
-        assert.equal(main.filter, 'none');
-        assert.equal(Number(main.color.match(/[\d.]+/g)[3]), 0);
-        assert.notEqual(surface.color, main.color);
-      }
-      await capture(floating, `14-settings-opaque-${value}-${theme}`);
+      assert.equal(
+        await devices.evaluate((e) => getComputedStyle(e).backgroundColor),
+        beforeMaterial,
+      );
+      assert.equal(await devices.evaluate((e) => getComputedStyle(e).backdropFilter), 'none');
     }
-    await floating.evaluate(() => document.documentElement.classList.remove('dark'));
-    assert.equal(await background.inputValue(), '35');
   }
-  await page.evaluate(() => {
-    localStorage.setItem('voxcue-frosted-transparency-v2', '50');
-    window.dispatchEvent(new Event('voxcue-frosted-transparency-changed'));
-  });
-  await floating.waitForFunction(
-    () => document.documentElement.dataset.frostedTransparency === '50',
-  );
   await floating.emulateMedia({ forcedColors: 'active' });
   assert.equal(await devices.evaluate((e) => getComputedStyle(e).backdropFilter), 'none');
   await floating.emulateMedia({ forcedColors: 'none' });
@@ -1028,12 +1028,13 @@ try {
   assert.ok(metadata.gap >= 0 && metadata.gap < 16);
   assert.ok(!metadata.text.includes('系统音频'));
   checks.push(
-    'compact status beside auto-answer, nearby timestamps, green readiness, in-place audio and model settings, independent display sliders',
+    'compact status beside auto-answer, nearby timestamps, green readiness, in-place audio and model settings, centered font slider and fixed 60% material',
   );
   for (const theme of ['light', 'dark']) {
-    await floating.evaluate(
-      (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
-      theme,
+    await floating.emulateMedia({ colorScheme: theme });
+    assert.equal(
+      await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
+      true,
     );
     await geometry(floating);
     await floating.evaluate(() => window.desktop.resizeInterview(-1));
@@ -1062,9 +1063,10 @@ try {
       { url: floating.url(), width },
     );
     for (const theme of ['light', 'dark']) {
-      await floating.evaluate(
-        (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
-        theme,
+      await floating.emulateMedia({ colorScheme: theme });
+      assert.equal(
+        await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
+        true,
       );
       await floating.getByRole('button', { name: '面试设置', exact: true }).click();
       const layout = await settingsLayout(devices);
@@ -1101,7 +1103,7 @@ try {
     'settings sections stack vertically; paired fields have horizontal labels above full-width controls; 960/620/440 widths in both themes fit without overflow',
   );
   checks.push(
-    'light/dark and smaller native interview bounds, automatic device refresh in both settings, custom sliders and live opacity scene, footer privacy and meters without trailing status',
+    'fixed dark interview and smaller native interview bounds, automatic device refresh in both settings, font slider and fixed opacity scene, footer privacy and meters without trailing status',
   );
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();

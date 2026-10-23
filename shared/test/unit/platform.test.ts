@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import path from 'node:path';
+import { EventEmitter } from 'node:events';
 import { selectDesktopPlatform, desktopResources } from '../../../shared/electron/platform';
 import { windows as windowsPolicy } from '../../../windows/electron/platform';
 import { macos as macosPolicy } from '../../../macos/electron/platform';
@@ -7,6 +8,7 @@ import {
   windowOptions,
   restrictWindowNavigation,
   loadWindowPage,
+  whenWindowReady,
 } from '../../../shared/electron/window';
 
 const native = vi.hoisted(() => ({ fork: vi.fn() }));
@@ -17,6 +19,36 @@ const paths = { icon: '/application/icon', preload: '/application/preload.js' };
 const environment = { appPath: '/application', resourcesPath: '/resources', packaged: false };
 
 describe('桌面平台边界', () => {
+  it('Windows 完成加载但没有首帧时仍显示一次；后续首帧和重载不重复显示', () => {
+    const win = Object.assign(new EventEmitter(), {
+      webContents: new EventEmitter(),
+      isDestroyed: () => false,
+    });
+    const show = vi.fn();
+    whenWindowReady(win as Parameters<typeof whenWindowReady>[0], windowsPolicy, show);
+    win.webContents.emit('did-finish-load');
+    expect(show).toHaveBeenCalledTimes(1);
+    win.emit('ready-to-show');
+    win.webContents.emit('did-finish-load');
+    expect(show).toHaveBeenCalledTimes(1);
+  });
+  it('Mac 仍等待原生首帧；已关闭的窗口不再显示', () => {
+    const win = Object.assign(new EventEmitter(), {
+      webContents: new EventEmitter(),
+      isDestroyed: () => false,
+    });
+    const show = vi.fn();
+    whenWindowReady(win as Parameters<typeof whenWindowReady>[0], macosPolicy, show);
+    win.webContents.emit('did-finish-load');
+    expect(show).not.toHaveBeenCalled();
+    win.emit('ready-to-show');
+    expect(show).toHaveBeenCalledTimes(1);
+    whenWindowReady(win as Parameters<typeof whenWindowReady>[0], windowsPolicy, show);
+    win.emit('closed');
+    win.webContents.emit('did-finish-load');
+    win.emit('ready-to-show');
+    expect(show).toHaveBeenCalledTimes(1);
+  });
   it('Windows 保留 Acrylic、系统应用 ID、退出策略和原生能力', () => {
     const windows = windowsPolicy;
     expect(windowOptions('main', windows, paths)).toMatchObject({

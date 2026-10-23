@@ -5,6 +5,7 @@ import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 const entry = path.join(testRoot, 'web-materials.cjs');
 await writeFile(
@@ -96,7 +97,10 @@ try {
     }
   }
   await (await app.browserWindow(login)).evaluate((win) => win.setSize(860, 520));
-  await login.waitForFunction(() => innerWidth === 860 && innerHeight === 520);
+  // Native window bounds round to physical pixels at fractional Windows DPI.
+  await login.waitForFunction(
+    () => Math.abs(innerWidth - 860) <= 1 && Math.abs(innerHeight - 520) <= 1,
+  );
   assert.ok(
     await login.locator('.login-preview .interview-font-preview').evaluate((node) => {
       const panels = [...node.children].map((child) => child.getBoundingClientRect());
@@ -107,6 +111,14 @@ try {
     }),
     'Minimum login retains both preview panels side by side within the window',
   );
+  for (const colorScheme of ['light', 'dark']) {
+    await login.emulateMedia({ colorScheme });
+    await login.waitForFunction(
+      (dark) => document.documentElement.classList.contains('dark') === dark,
+      colorScheme === 'dark',
+    );
+    await captureRequested(login, 'minimum-login-' + colorScheme);
+  }
   const [page] = await Promise.all([
     app.waitForEvent('window'),
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
@@ -133,6 +145,7 @@ try {
     assert.equal(idle.radius, '40px');
     assert.match(idle.curve, /superellipse|squircle/);
     assert.match(idle.filter, /blur\(24px\)/);
+    await captureRequested(page, 'preparation-' + (dark ? 'dark' : 'light'));
     await page.getByRole('button', { name: '聊天模型', exact: true }).click();
     const menu = page.getByRole('menu');
     assert.match(
@@ -146,6 +159,7 @@ try {
         .evaluate((node) => getComputedStyle(node).borderRadius),
       '999px',
     );
+    await captureRequested(page, 'model-menu-' + (dark ? 'dark' : 'light'));
     await page.keyboard.press('Escape');
   }
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('共享回退材质检查');
@@ -168,16 +182,29 @@ try {
   const before = await latest.evaluate((node) => getComputedStyle(node).backgroundColor);
   await latest.hover();
   assert.notEqual(await latest.evaluate((node) => getComputedStyle(node).backgroundColor), before);
+  await captureRequested(page, 'scrolled-header-follow');
   await latest.click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
-  await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).waitFor();
+  assert.equal(
+    await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),
+    0,
+  );
+  assert.equal(
+    await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
+    '60',
+  );
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
-  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).waitFor();
+  assert.equal(
+    await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
+    0,
+  );
+  await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
+  await captureRequested(page, 'settings-interview-preview');
   assert.equal(
     await settings.evaluate((node) => getComputedStyle(node, '::backdrop').backgroundColor),
-    'rgba(0, 0, 0, 0)',
+    'rgba(0, 0, 0, 0.4)',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
@@ -203,16 +230,52 @@ try {
     await search.focus();
     assert.deepEqual(
       await search.evaluate((node) => ({
-        height: node.getBoundingClientRect().height,
+        height: Math.round(node.getBoundingClientRect().height * 100) / 100,
         radius: getComputedStyle(node).borderRadius,
         opacity: getComputedStyle(node).opacity,
       })),
       { height: 44, radius: '999px', opacity: '1' },
     );
+    await captureRequested(page, 'search-empty-focused-' + (dark ? 'dark' : 'light'));
     await search.fill('项目');
     await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 1);
-    await search.fill('');
+    await captureRequested(page, 'search-filtered-' + (dark ? 'dark' : 'light'));
+    const searchBounds = await search.boundingBox();
+    const clearInset = await search.evaluate(
+      (e) => parseFloat(getComputedStyle(e).paddingRight) + 6,
+    );
+    await page.mouse.click(
+      searchBounds.x + searchBounds.width - clearInset,
+      searchBounds.y + searchBounds.height / 2,
+    );
+    assert.equal(await search.inputValue(), '', 'The native search clear control clears input');
     await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 2);
+  }
+  await page.evaluate(() => {
+    const records = Array.from({ length: 32 }, (_, i) => ({
+      id: 'synthetic-scroll-' + i,
+      title: '合成面试记录 ' + (i + 1),
+      titleStatus: 'ready',
+      startedAt: Date.now() - i * 60000,
+      endedAt: Date.now(),
+      status: 'ended',
+      mock: false,
+      transcripts: [],
+      answers: [],
+    }));
+    localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
+    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+  });
+  await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 32);
+  await page.locator('.management-scroll').evaluate((node) => {
+    node.scrollTop = 320;
+  });
+  await page.waitForFunction(
+    () => Number(document.documentElement.style.getPropertyValue('--web-header-opacity')) === 1,
+  );
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    await captureRequested(page, 'history-scrolled-header-' + (dark ? 'dark' : 'light'));
   }
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   for (const [width, dark] of [
@@ -228,6 +291,7 @@ try {
           node.getBoundingClientRect().left < 0 || node.getBoundingClientRect().right > innerWidth,
       );
     assert.equal(overflow, false);
+    await captureRequested(page, 'composer-width-' + width);
     if (process.argv.includes('--preview')) {
       const file = path.join(testRoot, `web-materials-${width}-${dark ? 'dark' : 'light'}.png`);
       await page.screenshot({ path: file, animations: 'disabled' });

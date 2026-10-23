@@ -7,6 +7,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { verifyContinuousCorners } from './continuous-corners.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/delete-controls-')));
@@ -187,6 +188,7 @@ try {
   assert(Math.abs(before.x + before.width - after.x - after.width) < 1);
   assert.equal(await confirm.evaluate((e) => getComputedStyle(e).fontSize), '14px');
   await page.screenshot({ animations: 'disabled' });
+  await captureRequested(page, 'personal-delete-confirm');
   await resume.waitFor({ state: 'visible', timeout: 5000 });
   assert.equal((await saved()).background, '合成简历摘要');
   checks.push(
@@ -242,6 +244,7 @@ try {
     await settle(page);
     await verifyContinuousCorners(page, `delete-error-${theme}`);
     await page.screenshot({ animations: 'disabled' });
+    await captureRequested(page, 'delete-error-' + theme);
   }
   assert.equal((await saved()).jobDescription, '合成 JD 摘要');
   await page.evaluate(() => globalThis.restoreDeleteStorage());
@@ -294,6 +297,7 @@ try {
     1,
   );
   await page.locator('.sidebar').screenshot({ animations: 'disabled' });
+  await captureRequested(page, 'sidebar-delete-confirm');
   await second('对话：未发送待删除对话').press('Escape');
   await row.getByRole('button', { name: '删除对话：未发送待删除对话', exact: true }).click();
   await second('对话：未发送待删除对话').click();
@@ -317,6 +321,7 @@ try {
   await base.getByRole('button', { name: '删除文档 待删.md', exact: true }).click();
   assert.equal(await page.getByRole('dialog').count(), 1);
   assert.equal(await base.locator('.document-row').count(), 1);
+  await captureRequested(page, 'document-delete-confirm');
   await second('文档：待删.md').click();
   await base.locator('.document-row').waitFor({ state: 'detached' });
   assert.equal(await page.evaluate(() => globalThis.documentDeleteCalls['delete-doc-1']), 1);
@@ -329,6 +334,7 @@ try {
     true,
   );
   await page.screenshot({ animations: 'disabled' });
+  await captureRequested(page, 'knowledge-delete-confirm-light');
   await observeDeleteMorph(second('知识库：待删资料'), () =>
     second('知识库：待删资料').press('Escape'),
   );
@@ -343,6 +349,7 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.evaluate(() => document.documentElement.classList.add('dark'));
   await observeDeleteMorph(deleteBase, () => deleteBase.click());
+  await captureRequested(page, 'knowledge-delete-confirm-dark');
   checks.push(
     'knowledge confirmation and cancellation crossfade on the same button in light/dark themes; reduced motion remains immediate',
   );
@@ -365,6 +372,7 @@ try {
   await page.locator('.history-row').filter({ hasText: '合成面试记录' }).click();
   await page.getByRole('button', { name: '删除记录', exact: true }).click();
   assert.equal(await page.getByRole('dialog').count(), 0);
+  await captureRequested(page, 'history-delete-confirm');
   await second('面试记录：合成面试记录').press('Escape');
   await page.getByRole('button', { name: '删除记录', exact: true }).click();
   await second('面试记录：合成面试记录').click();

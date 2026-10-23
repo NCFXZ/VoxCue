@@ -9,6 +9,7 @@ import { testRoot } from './test-workspace.mjs';
 
 const shared = [
   'web-materials',
+  'ui-material-refinement',
   'login',
   'login-entry',
   'electron',
@@ -148,73 +149,81 @@ const modelEnvironment = {
   VOXCUE_TEST_RAG_MODEL: models.ragModel,
   VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
 };
-for (const name of names) {
-  if (desktopProbe)
-    assert.equal(
-      desktopProbe('desktop').interactive,
-      true,
-      'Shared GUI matrix requires an unlocked input desktop',
-    );
-  const directory = shared.includes(name)
-    ? path.join(workspace.sharedRoot, 'test/scripts')
-    : process.platform === 'darwin' && mac.includes(name)
-      ? path.join(workspace.platformRoot, 'test/scripts')
-      : undefined;
-  if (!directory) throw Error('Unknown or unavailable suite: ' + name);
-  const started = performance.now();
-  const child = spawnTestProcess(
-    process.execPath,
-    [
-      path.join(
-        directory,
-        ['content-controls', 'component-controls', 'login-controls', 'sidebar-updates'].includes(
-          name,
-        )
-          ? 'sidebar-glass-smoke.mjs'
-          : name + '-smoke.mjs',
-      ),
-      ...(name === 'login-controls'
-        ? ['--login-only']
-        : name === 'sidebar-updates'
-          ? ['--updates-only']
-          : name === 'content-controls'
-            ? ['--content-only']
-            : name === 'component-controls'
-              ? ['--components-only']
-              : []),
-    ],
-    {
-      cwd: workspace.platformRoot,
-      env: {
-        ...process.env,
-        ...modelEnvironment,
-        ...(shared.includes(name) && webRenderer ? { VOXCUE_TEST_WEB_RENDERER: webRenderer } : {}),
+const cursor = desktopProbe?.('cursor');
+try {
+  for (const name of names) {
+    if (desktopProbe)
+      assert.equal(
+        desktopProbe('desktop').interactive,
+        true,
+        'Shared GUI matrix requires an unlocked input desktop',
+      );
+    desktopProbe?.('move', 0, 0);
+    const directory = shared.includes(name)
+      ? path.join(workspace.sharedRoot, 'test/scripts')
+      : process.platform === 'darwin' && mac.includes(name)
+        ? path.join(workspace.platformRoot, 'test/scripts')
+        : undefined;
+    if (!directory) throw Error('Unknown or unavailable suite: ' + name);
+    const started = performance.now();
+    const child = spawnTestProcess(
+      process.execPath,
+      [
+        path.join(
+          directory,
+          ['content-controls', 'component-controls', 'login-controls', 'sidebar-updates'].includes(
+            name,
+          )
+            ? 'sidebar-glass-smoke.mjs'
+            : name + '-smoke.mjs',
+        ),
+        ...(name === 'login-controls'
+          ? ['--login-only']
+          : name === 'sidebar-updates'
+            ? ['--updates-only']
+            : name === 'content-controls'
+              ? ['--content-only']
+              : name === 'component-controls'
+                ? ['--components-only']
+                : []),
+      ],
+      {
+        cwd: workspace.platformRoot,
+        env: {
+          ...process.env,
+          ...modelEnvironment,
+          ...(shared.includes(name) && webRenderer
+            ? { VOXCUE_TEST_WEB_RENDERER: webRenderer }
+            : {}),
+        },
+        stdio: ['ignore', 'pipe', 'pipe'],
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
-    },
-  );
-  let output = '';
-  let progress = '';
-  child.stdout.on('data', (data) => {
-    output += data;
-    const lines = (progress + data).split('\n');
-    progress = lines.pop();
-    for (const line of lines)
-      if (/^Interview cycle \d+\/20 passed$/.test(line)) console.log('  ' + line);
-  });
-  child.stderr.on('data', (data) => (output += data));
-  const timer = setTimeout(
-    () => child.kill('SIGTERM'),
-    ['components', 'content-controls'].includes(name) ? 600000 : 240000,
-  );
-  const code = await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', resolve);
-  }).finally(() => clearTimeout(timer));
-  const outcome = { name, passed: code === 0, ms: Math.round(performance.now() - started) };
-  outcomes.push(outcome);
-  console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${name} (${outcome.ms}ms)`);
-  if (!outcome.passed) console.error(output);
+    );
+    let output = '';
+    let progress = '';
+    child.stdout.on('data', (data) => {
+      output += data;
+      const lines = (progress + data).split('\n');
+      progress = lines.pop();
+      for (const line of lines)
+        if (/^Interview cycle \d+\/20 passed$/.test(line)) console.log('  ' + line);
+    });
+    child.stderr.on('data', (data) => (output += data));
+    const timer = setTimeout(
+      () => child.kill('SIGTERM'),
+      ['components', 'content-controls'].includes(name) ? 600000 : 240000,
+    );
+    const code = await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', resolve);
+    }).finally(() => clearTimeout(timer));
+    const outcome = { name, passed: code === 0, ms: Math.round(performance.now() - started) };
+    outcomes.push(outcome);
+    console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${name} (${outcome.ms}ms)`);
+    if (!outcome.passed) console.error(output);
+  }
+} finally {
+  if (desktopProbe && cursor) desktopProbe('move', cursor.x, cursor.y);
 }
 console.log(
   JSON.stringify({

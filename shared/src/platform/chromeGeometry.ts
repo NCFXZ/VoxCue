@@ -2,7 +2,7 @@
 export function headerCoverage(column: Element, header: DOMRect): number {
   let overlap = 0;
   for (const content of column.querySelectorAll(
-    '.chat-message, .management-container > *, .knowledge-grid > *, .history-timeline > *',
+    '.chat-message, .management-container > *, .knowledge-grid > *, .history-timeline > *, .record-reading-column > *, .record-answer-scroll > *',
   )) {
     const bounds = content.getBoundingClientRect();
     if (

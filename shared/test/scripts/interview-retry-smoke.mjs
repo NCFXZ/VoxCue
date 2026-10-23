@@ -98,6 +98,10 @@ try {
   page.setDefaultTimeout(20000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
+  await page
+    .locator('.transcript-item > p')
+    .getByText('Synthetic interviewer question', { exact: true })
+    .waitFor();
   await page.getByRole('button', { name: '转写面板', exact: true }).click();
   await main.evaluate(() => localStorage.setItem('voxcue-interview-font-size-v1', '24'));
   const latest = () => page.locator('.floating-answer-item').last();
@@ -349,9 +353,16 @@ try {
       ]);
       target.on('pageerror', (error) => errors.push(error.message));
       await target.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
+      // The deterministic speech fixture arrives 50 ms after capture starts.
+      // Let its initial autofill settle before Playwright selects/replaces text.
+      await target
+        .locator('.transcript-item > p')
+        .getByText('Synthetic interviewer question', { exact: true })
+        .waitFor();
       const question = '生命周期' + phase + '-' + action;
       await target.getByRole('textbox', { name: '面试提问', exact: true }).fill(question);
       await target.getByRole('button', { name: '发送面试问题', exact: true }).click();
+      assert.equal(await target.locator('.floating-question').last().innerText(), question);
       if (phase === '等待')
         await target
           .locator('.interview-answer-status')
@@ -362,6 +373,11 @@ try {
           .locator('.activity-detail')
           .filter({ hasText: '活动重试请求已开始' })
           .waitFor();
+      assert.equal(
+        await calls(question),
+        phase === '等待' ? 1 : 2,
+        JSON.stringify(await app.evaluate(() => globalThis.retryFixture.calls)),
+      );
       lifecycleCalls.push([question, phase === '等待' ? 1 : 2]);
       if (action === '关闭')
         await app.evaluate(({ BrowserWindow }) =>
@@ -389,7 +405,8 @@ try {
   }
   // A cancelled first wait must remain quiet after its original 500ms deadline.
   await new Promise((resolve) => setTimeout(resolve, 650));
-  for (const [question, count] of lifecycleCalls) assert.equal(await calls(question), count);
+  for (const [question, count] of lifecycleCalls)
+    assert.equal(await calls(question), count, 'Cancelled lifecycle request: ' + question);
   assert.equal(await app.evaluate(() => globalThis.retryFixture.aborts), 4);
   assert.doesNotMatch(
     await main.evaluate(() => localStorage.getItem('copilot-interview-history-v1') ?? ''),

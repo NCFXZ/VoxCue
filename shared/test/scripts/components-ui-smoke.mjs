@@ -5,6 +5,7 @@ import { assertInitialDownloadProgress, assertDownloadButton } from './assert-do
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { captureRequested } from './capture-requested.mjs';
 
 for (const name of ['profile', 'tmp', 'home'])
   await mkdir(path.join(testRoot, name), { recursive: true });
@@ -140,6 +141,7 @@ try {
       );
       assert.equal(samples.at(-1).inert, !open);
       assert.equal(samples.at(-1).hidden, String(!open));
+      if (width === 1400 && open) await captureRequested(page, 'notice-with-personal-card');
       if (width === 1400 && open && process.argv.includes('--preview'))
         console.log(
           JSON.stringify({
@@ -251,8 +253,10 @@ try {
       );
       assert.equal(await other.getByText(/尚未下载/).isVisible(), true);
       assert.equal(await settings.getByText('准备中…', { exact: true }).count(), 0);
+      await captureRequested(page, 'component-' + index + '-progress');
       await progress.hover();
       await progress.locator('.download-button-cancel').waitFor({ state: 'visible' });
+      await captureRequested(page, 'component-' + index + '-cancel');
       await progress.click();
       await row.getByRole('button', { name: '下载', exact: true }).waitFor();
       await assertInitialDownloadProgress(progress, () =>
@@ -298,6 +302,7 @@ try {
     });
     await rows.locator('.component-ready-actions').first().waitFor();
     assert.equal(await rows.getByText('已就绪', { exact: true }).count(), 0);
+    await captureRequested(page, 'components-ready');
     for (const colorScheme of ['dark', 'light']) {
       await page.emulateMedia({ colorScheme });
       await page.waitForFunction(
