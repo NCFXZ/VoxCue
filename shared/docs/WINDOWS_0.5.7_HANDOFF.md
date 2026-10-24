@@ -1,8 +1,8 @@
 # Windows 0.5.7 交接（累计补充至0.5.8）：共用布局、胶囊控件与毛玻璃
 
-## 2026-10-24 0.5.9 源码接续（最新）
+## 2026-10-24 0.5.9 最终交接（最新）
 
-本轮确定 v7 RAG，清理闲置样式/代码并完整验证 Mac 与共用逻辑，只提交推送 0.5.9 源码。逐项行为、Windows 固定运行时/生成配置同步及本机验收见 [WINDOWS_0.5.9_HANDOFF.md](WINDOWS_0.5.9_HANDOFF.md)。用户明确 Windows 界面只在 Windows 本机测试，Mac 不再运行通用网页 UI 代验；下文各轮“不提交/0.5.8保持”是已被本次源码同步授权覆盖的历史限制，不授权任何发行或真实安装。
+本轮主实现已推送私有main，用户随后授权发布Mac 0.5.9。全部最终行为、80项Windows逐条检查、固定依赖/打包待办及183文件改动清单见[WINDOWS_0.5.9_HANDOFF.md](WINDOWS_0.5.9_HANDOFF.md)；直接交给Windows Codex的任务见[WINDOWS_0.5.9_CODEX_PROMPT.md](WINDOWS_0.5.9_CODEX_PROMPT.md)。本文下方为历史，冲突处以0.5.9最终清单为准。Windows界面只由Windows本机验收，Mac不代验；本次Mac发行不授权Windows发行或真实安装替换。
 
 ## 2026-10-24 最新：换题、比较与陌生项目 v7（本地，未提交）
 

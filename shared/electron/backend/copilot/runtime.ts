@@ -1,6 +1,37 @@
-import { CopilotClient, type CopilotSession, type SessionConfig } from '@github/copilot-sdk';
+import {
+  CopilotClient,
+  RuntimeConnection,
+  type CopilotSession,
+  type SessionConfig,
+} from '@github/copilot-sdk';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+
+const requirePackage = createRequire(__filename);
+// The official subprocess must run from the package's physical unpacked tree.
+// SDK auto-discovery can stat/chmod an ASAR virtual path, which cannot execute.
+export function copilotRuntimeConnection() {
+  const target =
+    process.platform === 'darwin' && process.arch === 'arm64'
+      ? 'darwin-arm64'
+      : process.platform === 'win32' && process.arch === 'x64'
+        ? 'win32-x64'
+        : null;
+  if (!target) throw Error('当前平台无法启动固定 Copilot 运行时。');
+  const manifest = requirePackage.resolve(`@github/copilot-sdk-${target}/package.json`);
+  if (requirePackage(manifest).version !== '1.0.21')
+    throw Error('固定 Copilot 运行时不可用，请重新安装软件。');
+  const binary = path.join(
+    path.dirname(manifest),
+    'prebuilds',
+    target,
+    process.platform === 'win32' ? 'copilot-runtime.exe' : 'copilot-runtime',
+  );
+  return RuntimeConnection.forStdio({
+    path: binary.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2'),
+  });
+}
 
 export const isolatedSession: SessionConfig = {
   availableTools: [],
@@ -45,6 +76,7 @@ export class CopilotRuntime {
           if (/^(?:COPILOT_|GITHUB_|GH_|OTEL_)/i.test(key)) delete env[key];
         env.GH_CONFIG_DIR = path.join(this.directory, 'gh-unused');
         const client = new CopilotClient({
+          connection: copilotRuntimeConnection(),
           // SDK 1.0.21 forces COPILOT_DISABLE_KEYTAR=1 in empty mode,
           // which makes browser OAuth finish with needs-plaintext-consent.
           // This single-user desktop needs the OS vault; sessions stay isolated above.

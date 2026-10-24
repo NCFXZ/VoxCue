@@ -356,3 +356,7 @@ systemAccent hook 复用既有受控系统强调色 IPC，新增 copilot-accent-
 截图查看器的左右翻页与胶囊页码覆盖图片显示，不另占行列。content-controls的regular-overlay类型限定最多3项、44px高/160px宽，仅接受左右chevron空标题或1–5页码；不接受路径、字节或任意图形。Mac在Chromium前以实际NSGlassEffectView Regular及contentView绘制原生按钮/页码，命中与键盘语义仍来自共享DOM；Windows使用shared毛玻璃。记录保存按钮与关闭共用36px圆形区域/17px图标，Mac始终由同一NSButton绘制，原生悬停边框回调在控件进入最终窗口层级后同步并重绘，不在悬停时切换网页/原生图标；面试设置共享Modal显式透明backdrop，不压暗或虚化后方。
 
 顶部按钮只在材质完全显示时进入header.contentView，其他阶段保留独立原生承载，避免继承材质渐隐；每次材质/模态状态更新都按已保存窗口几何重新定位，移除顶部先迁出控件。图片Regular的contentView同帧明确尺寸，不依赖后续AppKit布局才获得非零bounds。图片普通像素滚动平移（包括两指惯性），ctrl+wheel捏合/快捷滚轮及行/页滚轮缩放；不按滚动幅度猜测鼠标/触控板型号。
+
+## 0.5.9 固定子进程的打包执行路径
+
+Copilot主进程适配器通过`copilotRuntimeConnection()`核对固定1.0.21平台包，并以官方`RuntimeConnection.forStdio`选择`app.asar.unpacked`下真实可执行文件；不让SDK自动对ASAR虚拟路径chmod，也不使用环境指定的其他CLI。邻接runtime.node和资源随本平台包保留。Codex仍由既有`unpackedUsagePath()`处理固定0.164.0别名路径。两者不扩展到Renderer、不改SDK或凭据模式。最终包新增隔离ASAR握手探针，Windows依赖复制/包级断言和实际启动须其本机完成。

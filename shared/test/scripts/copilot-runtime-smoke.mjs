@@ -5,6 +5,9 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 
 const { CopilotClient } = workspace.platformRequire('@github/copilot-sdk');
+const { copilotRuntimeConnection } = workspace.platformRequire(
+  path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/copilot/runtime.js'),
+);
 const directory = path.join(testRoot, 'copilot');
 await mkdir(directory, { recursive: true });
 const env = { ...process.env };
@@ -24,6 +27,7 @@ Object.assign(env, {
 // Handshake only: empty mode disables the OS vault, ambient login and telemetry.
 // No session, account query, OAuth flow, model query or inference is created.
 const client = new CopilotClient({
+  connection: copilotRuntimeConnection(),
   mode: 'empty',
   baseDirectory: directory,
   workingDirectory: directory,

@@ -1,3 +1,7 @@
+## 2026-10-24 Mac 0.5.9 最终发行包检查
+
+用户授权本次Mac DMG/ZIP/清单发行。`node test/scripts/package-smoke.mjs --install-archive`在自有临时副本验证最终签名/摘要/DMG/应用/薄包模型与实际Sparkle归档校验后取消；`node test/scripts/package-runtimes-smoke.mjs`实际加载最终ASAR内固定SDK并完成Copilot无登录ping及断网Codex空账户RPC。后者曾复现SDK自动发现ASAR虚拟路径chmod失败，生产现用固定真实unpacked路径和官方stdio连接，开发握手同步该入口。所有测试串行、退出清理，不替换真实安装。Mac v0.5.9发布后`package-smoke.mjs --online`已通过公开0.5.9版本选择、签名清单认证、完整更新ZIP下载与SHA512校验，旧Latest和其他资产保持。Windows对应包内握手和打包依赖另见0.5.9交接，不能用Mac通过代验。
+
 ## 2026-10-24 0.5.9 完整验收已恢复
 
 本轮完整单测为89文件/902项；Mac功能矩阵29组另加官方进度条专项、五档缩放及Qwen完整专项通过。修复Copilot退出并发读取后重跑单测与登录专项。冻结240/160/200/172检索评估只复核，公开集门槛未全部达到，不与功能测试通过混用；保留已接受v7，不调整模型/索引或评估标签。
