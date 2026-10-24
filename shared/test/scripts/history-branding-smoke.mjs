@@ -61,6 +61,22 @@ try {
   });
   await login.reload();
   await login.locator('.startup-screen .app-logo').waitFor();
+  const startup = await login.locator('.startup-screen').evaluate((element) => ({
+    shadow: getComputedStyle(element.querySelector('.app-logo')).boxShadow,
+    filter: getComputedStyle(element.querySelector('.app-logo')).filter,
+    animation: getComputedStyle(element.querySelector('.startup-title')).animationName,
+    indicators: element.querySelectorAll('[role="progressbar"],.ui-spinner').length,
+  }));
+  assert.equal(startup.shadow, 'none');
+  assert.ok(startup.filter.startsWith('drop-shadow('));
+  assert.equal(startup.animation, 'startup-title-sweep');
+  assert.equal(startup.indicators, 0);
+  await login.emulateMedia({ reducedMotion: 'reduce' });
+  assert.equal(
+    await login.locator('.startup-title').evaluate((node) => getComputedStyle(node).animationName),
+    'none',
+  );
+  await login.emulateMedia({ reducedMotion: 'no-preference' });
   await login.screenshot({});
   await app.evaluate(() => {
     globalThis.delayStartup = false;

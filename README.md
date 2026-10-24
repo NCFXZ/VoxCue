@@ -8,11 +8,11 @@
 
 面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地面试语音识别、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
 
-当前共享版本源、根和 Mac 配置为 **0.5.9**，Mac 已正式发布：[安装 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-0.5.9-arm64.dmg)、[签名更新 ZIP](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-0.5.9-arm64.zip)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.9)。保留原 Latest v0.5.8，应用按本平台完整资产的最高版本更新。ChatGPT 使用一次官方托管登录提供聊天与额度，Copilot 接回固定官方 SDK；Local RAG 固定为 `local-v7-current-source-first`，现有模型和索引保留。软件强调色跟随系统，Mac 使用官方 AppKit 进度条及菜单；额度、启动页、账户卡片和输入区的共用修订见 [0.5.9 Windows 接续](shared/docs/WINDOWS_0.5.9_HANDOFF.md)。Mac 仅支持 macOS 26+ Liquid Glass；Windows 保留 shared 胶囊控件和网页材质。Windows 在本机同步配置、依赖并验证自己的界面，Mac 不代跑 Windows 界面矩阵。测试入口与实际边界见[测试说明](shared/test/README.md)；下文旧版本说明保留为历史，不代表本轮发行状态。
+当前共享版本源、根和平台配置为 **0.5.9**。本版下载：[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-Setup-0.5.9-x64.exe)、[Mac 安装 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-0.5.9-arm64.dmg)、[Mac 签名更新 ZIP](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-0.5.9-arm64.zip)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.9)。应用按本平台完整资产的最高版本更新，本次不调整 GitHub Latest。ChatGPT 使用一次官方托管登录提供聊天与额度，旧授权可能需要正常重新登录一次，已有资料和记录保留；Copilot 接回固定官方 SDK。Local RAG 固定为 `local-v7-current-source-first`，现有模型和索引保留。软件强调色跟随系统，Mac 使用官方 AppKit 进度条及菜单；额度、启动页、账户卡片和输入区的共用修订见 [0.5.9 Windows 接续](shared/docs/WINDOWS_0.5.9_HANDOFF.md)。Mac 仅支持 macOS 26+ Liquid Glass；Windows 保留 shared 胶囊控件和网页材质，并修正记录转录滚动条覆盖顶部操作的问题。Windows 包沿用既有未配置 Authenticode 的方式，模型仍单独下载。测试入口与实际边界见[测试说明](shared/test/README.md)；下文旧版本说明保留为历史，不代表本轮发行状态。
 
 本版新增面试已发送截图归档：缩略图位于提问气泡内，面试记录可查看原图并通过系统对话框保存。查看器支持左右键翻页、捏合缩放、两指平移及拖拽；保存仅在记录中提供。
 
-Windows开发者请按[0.5.9逐项交接](shared/docs/WINDOWS_0.5.9_HANDOFF.md)的80项检查与改动清单接续，任务可直接复制[Windows Codex prompt](shared/docs/WINDOWS_0.5.9_CODEX_PROMPT.md)。本轮Mac发行不替代Windows本机验收。
+Windows开发者请按[0.5.9逐项交接](shared/docs/WINDOWS_0.5.9_HANDOFF.md)的80项检查与改动清单接续，任务可直接复制[Windows Codex prompt](shared/docs/WINDOWS_0.5.9_CODEX_PROMPT.md)。两端界面分别在本机验收，不能以另一平台的结果替代。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 

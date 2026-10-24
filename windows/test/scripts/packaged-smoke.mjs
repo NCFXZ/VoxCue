@@ -2,6 +2,7 @@ import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { checkComponents } from './components-check.mjs';
 import { checkComponentRemoval } from './component-removal-check.mjs';
+import { checkPackageRuntimes } from './package-runtimes-check.mjs';
 import { prepareSpeechFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, readFile, cp } from 'node:fs/promises';
@@ -43,20 +44,16 @@ const entries = asar
   .listPackage(archive)
   .map((file) => file.replaceAll('\\', '/').replace(/^\//, ''));
 assert.ok(
-  !entries.some((file) =>
-    /node_modules\/(?:onnxruntime-web(?:\/|$)|@github\/copilot-sdk(?:\/|-)|koffi(?:\/|$))/.test(
-      file,
-    ),
-  ),
+  !entries.some((file) => /node_modules\/(?:onnxruntime-web(?:\/|$)|koffi(?:\/|$))/.test(file)),
 );
-assert.ok(
-  !entries.some((file) =>
-    /(?:dist-electron\/macos\/|backend\/copilot\/|Sparkle|sf-symbols)/i.test(file),
-  ),
-);
+assert.ok(!entries.some((file) => /(?:dist-electron\/macos\/|Sparkle|sf-symbols)/i.test(file)));
 assert.ok(
   !entries.some((file) => /\.(?:dylib|so(?:\.\d+)*|icns)$|\.framework\//i.test(file)),
   'Foreign platform native libraries must not enter the Windows package',
+);
+assert.ok(
+  !entries.some((file) => /\.(?:onnx|safetensors|gguf)$/i.test(file)),
+  'Model weights stay external',
 );
 for (const dependency of [
   '@ennuicastr/webrtcaec3.js',
@@ -64,11 +61,67 @@ for (const dependency of [
   'onnxruntime-node',
   'sherpa-onnx-win-x64',
   '@lancedb/lancedb',
+  '@github/copilot-sdk',
+  '@github/copilot-sdk-win32-x64',
+  '@openai/codex',
+  '@openai/codex-win32-x64',
 ])
   assert.ok(
     entries.some((file) => file.includes('node_modules/' + dependency + '/')),
     dependency,
   );
+assert.ok(
+  !entries.some((file) => /^(?:test|scripts|src|electron|local-models|\.git|\.tools)\//.test(file)),
+);
+assert.ok(
+  !entries.some((file) =>
+    /(?:^|\/)(?:ed25519\.key|auth\.json|credentials\.json|\.env)$|\.(?:pem|keychain-db)$/.test(
+      file,
+    ),
+  ),
+);
+assert.ok(
+  !entries.some((file) =>
+    /node_modules\/(?:@github\/copilot-sdk-|@openai\/codex-)(?!win32-x64\/)[^/]+\//.test(file),
+  ),
+);
+for (const [name, version] of [
+  ['@github/copilot-sdk', '1.0.21'],
+  ['@github/copilot-sdk-win32-x64', '1.0.21'],
+  ['@openai/codex', '0.164.0'],
+  ['@openai/codex-win32-x64', '0.164.0-win32-x64'],
+])
+  assert.equal(
+    JSON.parse(asar.extractFile(archive, path.normalize('node_modules/' + name + '/package.json')))
+      .version,
+    version,
+  );
+for (const file of [
+  'dist-electron/shared/electron/backend/copilot/runtime.js',
+  'dist-electron/shared/electron/backend/chat/codexUsage.js',
+  'node_modules/@github/copilot-sdk/dist/cjs/index.js',
+  ...[
+    'copilot-runtime.exe',
+    'runtime.node',
+    'dpapi.node',
+    'msal-node-runtime.node',
+    'msalruntime.dll',
+  ].map((file) => 'node_modules/@github/copilot-sdk-win32-x64/prebuilds/win32-x64/' + file),
+  'node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe',
+])
+  assert.ok(entries.includes(file), file);
+for (const file of entries.filter((file) =>
+  /^node_modules\/(?:@github\/copilot-sdk-win32-x64|@openai\/codex-win32-x64)\/.*\.(?:exe|node|dll)$/.test(
+    file,
+  ),
+)) {
+  const bytes = await readFile(path.join(archive + '.unpacked', file));
+  assert.equal(bytes.toString('ascii', 0, 2), 'MZ', file);
+  const header = bytes.readUInt32LE(0x3c);
+  assert.equal(bytes.toString('ascii', header, header + 4), 'PE\0\0', file);
+  assert.equal(bytes.readUInt16LE(header + 4), 0x8664, 'Expected Windows x64: ' + file);
+}
+await checkPackageRuntimes(packageRoot);
 for (const file of ['dist/webrtcaec3-0.3.0.js', 'dist/webrtcaec3-0.3.0.wasm', 'license.js'])
   assert.ok(entries.includes('node_modules/@ennuicastr/webrtcaec3.js/' + file), file);
 assert.deepEqual(

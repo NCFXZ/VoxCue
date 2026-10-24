@@ -2,6 +2,12 @@
 
 本文是本次更新的最终交接清单。Windows 开发者须逐项检查源码、实际打包结果与本机行为，不能把 Mac 的通过结果登记为 Windows 通过。复制给 Windows Codex 的完整任务见 [WINDOWS_0.5.9_CODEX_PROMPT.md](WINDOWS_0.5.9_CODEX_PROMPT.md)。
 
+## 2026-10-24 Windows 发行补充
+
+用户在本机接续后追加授权清理、生成 Windows 安装包并补入既有公开 `NCFXZ/VoxCue-releases` 的 `v0.5.9`，同时将核对后的源码上传私有 `NCFXZ/VoxCue` 的 main；覆盖下文接续任务原有的暂不提交/发行限制，仅限本次。Windows 只增加 `VoxCue-Setup-0.5.9-x64.exe`、同名 `.blockmap` 和 `latest.yml`，不覆盖既有 Mac、旧版本或模型资产，不更改当前 Latest、签名身份或真实安装。
+
+Windows 沿用既有 NSIS 和未配置 Authenticode 的发行方式；`package:installer` 只生成本地包，上传在完整负载核对之后单独执行。三项正式文件保留在 `windows/release/0.5.9`，打包暂存和诊断退出清理，不纳入源码提交。固定 Copilot/Codex、系统凭据保护、RAG v7、模型与索引保持；旧 ChatGPT 授权可能需要正常重新登录一次，不清理已有资料和记录。真实安装/升级、物理音频、触控板、多显示器、真实学生 Auto 和最终 LLM 质量不由隔离夹具代验。逐项运行结果仍只在终端/对话报告。
+
 ## 1. 基线、范围与状态
 
 - 主实现提交：`a1d79ff42d1719e85817c39a20ac7d304c9536a5`；对比起点：`1630c65614c72ce0b9da3168a0eccec9404acbe4`。发行/交接补充继续进入私有 `NCFXZ/VoxCue` 的 `main`，开始时记录实际 HEAD。
@@ -14,16 +20,16 @@
 
 ## 2. Windows 同步、依赖和包内容（P）
 
-下表每个 ID 都是独立检查项；本文件列出的 Windows 项当前均为**待本机验收**。即使某命令成功，仍需检查它没有漏收本文对应场景。
+下表每个 ID 都是独立检查项；Mac 交接时 Windows 项均待本机验收，不能沿用 Mac 结果。Windows 本机执行结果只在本轮终端/对话报告，文档保留入口与兼容约定。即使某命令成功，仍需检查它没有漏收本文对应场景。
 
 | ID | 必须检查或完成的内容 | 入口与通过标准 |
 | --- | --- | --- |
 | P01 | 保护工作区，确认基线和版本 | 记录 `git status`/HEAD；保留本地修改再同步 main，不覆盖别人的工作。 |
 | P02 | 补齐两个 Windows 固定平台包 | `windows/package.platform.json`：`@github/copilot-sdk-win32-x64`=`1.0.21`；`@openai/codex-win32-x64`=`npm:@openai/codex@0.164.0-win32-x64`。不得改成最新版。 |
 | P03 | 生成 Windows 配置与锁 | 根执行 `pnpm sync:workspace`，在 `windows/` 本机安装并最小化更新锁，再用冻结锁确认可复现；根/Windows 均为0.5.9，保留 shared 的覆盖与 allowBuilds，尤其不启用不使用的 Koffi FFI 构建。不要复制 Mac node_modules/锁/原生二进制。 |
-| P04 | 修正 Windows 便携/安装打包依赖 | `windows/scripts/package-portable.mjs` 当前显式复制清单尚缺两个 SDK 主包及两个 win32-x64 平台包。加入固定 `@github/copilot-sdk`、Copilot win32-x64、`@openai/codex` 和 Codex win32-x64，递归依赖仍按现有平台过滤和版本布局处理。 |
+| P04 | 修正 Windows 便携/安装打包依赖 | `windows/scripts/package-portable.mjs` 显式复制固定 `@github/copilot-sdk`、Copilot win32-x64、`@openai/codex` 和 Codex win32-x64，递归依赖仍按现有平台过滤和版本布局处理；不包含未使用的 Koffi FFI。须以本机最终包复核。 |
 | P05 | 运行时实际文件可执行 | 包内 Copilot wrapper、runtime.node及邻接资源和 Codex `vendor/x86_64-pc-windows-msvc/bin/codex.exe` 完整；执行路径指向包的真实 unpacked 文件，不能指向开发仓库、asar 虚拟路径或下载另一版运行时。发行补丁已在 shared 的 `copilotRuntimeConnection()` 中固定版本并经官方 `RuntimeConnection.forStdio` 传入真实 unpacked 路径，修复SDK自动发现时对ASAR虚拟路径chmod失败；Windows仍须整包实测，不回退到SDK自动路径。 |
-| P06 | 更新旧包级断言 | `windows/test/scripts/packaged-smoke.mjs` 仍禁止 `@github/copilot-sdk`/`backend/copilot`，这是旧行为。改成验证固定 Windows SDK/运行时**存在且能启动**；继续禁止 Mac/Sparkle/SF Symbols、外平台二进制、ONNX Web、模型、密钥及开发/测试文件，不能简单删除全部排除断言。 |
+| P06 | 更新旧包级断言 | `windows/test/scripts/packaged-smoke.mjs` 验证固定 Windows SDK/运行时**存在且能启动**，由 `package-runtimes-check.mjs` 从实际 ASAR 加载生产选择器并握手；继续禁止 Mac/Sparkle/SF Symbols、外平台二进制、ONNX Web、模型、密钥及开发/测试文件，不能简单删除全部排除断言。 |
 | P07 | 最终包内运行时握手 | 使用临时空账户、无自动登录、无遥测/会话/推理的 Copilot ping，以及网络禁止的 Codex 空账户/伪造令牌 RPC 夹具，实际从 ASAR 加载并启动外部二进制。开发态握手通过不代表包内可执行。 |
 | P08 | 正式模型仍外置 | 薄包不内嵌 Paraformer/E5/Qwen，首次下载采用现有固定清单/摘要；后续更新及移动位置复用已验证缓存；测试只使用临时模型副本/下载。 |
 | P09 | 依赖边界与平台检查 | `pnpm check:architecture`、`check:workspace`、类型与构建通过；Renderer/preload 不导入 SDK、数据库或平台实现，SDK 仅专用后台适配器使用。 |
@@ -172,6 +178,14 @@ node ../shared/test/scripts/rag-unseen-oral-smoke.mjs --public-transfer
 测试用自有合成账户/资料/捕获和固定公开临时模型/音频；如用户明确指定正式缓存，只读认证后复制至临时根，绝不直接对正式根执行组件status/download/remove。临时profile、数据库、模型、截图和探针退出清理，不保存包含真实资料/凭据的日志或截图；保留必要源码/测试修改与简洁交接结论。
 
 ## 10. 逐项验收的交付要求
+
+Windows 本机接续适配入口：固定平台包在 `windows/package.platform.json`，配置由根 `sync:workspace` 仅生成本平台。包级检查包含 Copilot 邻接 DLL/Node 绑定、Codex EXE、精确版本和真实 unpacked 执行路径；Copilot 仅 stdio，Koffi 不构建、不入包。`test:portable:native` 与 `test:installer:isolated` 均纳入两个包内运行时握手，不执行生产安装器。
+
+截图原生命中补充入口：在 `windows/` 串行执行 `node ../shared/test/scripts/interview-screenshot-smoke.mjs --native-hits`，使用同一合成图像/临时导出，检查 Windows 原生 HWND 下的中心/四边命中、HTCLIENT/no-drag、36px/17px 几何、浅深色图标稳定和区域外悬停。真实保存对话框及物理触控板仍须与合成对话框端口/事件区分。
+
+共用旧夹具按当前行为适配：普通登录使用托管运行时合成取消/拒绝端口；未知错误不凭文案重试；已删除的知识库设置分类不恢复；官方用量链接用次要字号；账户卡菜单打开使用自身悬停色；新窗口读取同一合成系统强调色。额度布局等待原生实际内容尺寸，DOMRect 按 Chromium 的 1/64 CSS 像素布局单位核对精确 4px；不更改布局值或产品重试策略。Windows 迁移夹具要求旧 SIWC 重新登录，同时逐字节保留旧密文、host 身份、原件、附件和模型/索引哨兵。
+
+Windows 记录页滚动条不得伸入固定工具栏。网页材质沿用正文向上滚入材质的布局，单独将垂直轨道上边距绑定 `--record-toolbar-height`；Mac 原生路径保持。`node test/scripts/history-scrollbar-smoke.mjs` 以实际滑块像素、滚动后的固定工具栏和导出按钮命中检查五档缩放、宽窄窗、浅深色及回答栏开关，预览仅在交互临时会话保留。
 
 1. 对P/A/U/S/R/M每个ID报告 `通过 / 失败 / 阻塞 / 不适用`，附实际命令或检查动作；“不适用”必须说明平台理由，不把未跑写成通过。
 2. 失败先判断产品、固定依赖打包、旧夹具还是环境阻塞；保留复现方式，按当前范围修复并定向重测，相关范围再回归。不得为绿灯删除检查、替换题目/事实、提高容错或升级SDK/模型。

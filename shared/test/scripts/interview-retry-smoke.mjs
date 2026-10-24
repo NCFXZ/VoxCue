@@ -81,7 +81,12 @@ try {
             resolve({ answerText, usage: null, sources: [] });
         });
       }
-      if (question === '长错误') throw Error('合成网络错误：连接暂时不可用。'.repeat(40));
+      if (question === '长错误')
+        throw new ChatServiceError({
+          code: 'network_error',
+          message: '合成网络错误：连接暂时不可用。'.repeat(40),
+        });
+      if (question === '未知错误') throw Error('合成网络错误文案不授予重试权限。');
       if (question === '空回答') return { answerText: '', usage: null, sources: [] };
       if (attempt === 1 && ['自动恢复', '全部失败'].includes(question))
         emit({ id: request.id, type: 'delta', text: '前次未完成的正文。' });
@@ -217,11 +222,15 @@ try {
   assert.equal(await page.getByText('停止后的迟到输出', { exact: true }).count(), 0);
   assert.equal(await app.evaluate(() => globalThis.retryFixture.aborts), 1);
 
-  for (const question of ['长错误', '空回答']) {
+  for (const [question, attempts] of [
+    ['长错误', 4],
+    ['空回答', 4],
+    ['未知错误', 1],
+  ]) {
     await send(question);
     const card = latest().locator('.interview-answer-failure');
     await card.waitFor();
-    assert.equal(await calls(question), 4);
+    assert.equal(await calls(question), attempts);
     assert.equal(await latest().locator('.answer-bubble').count(), 0);
     assert.equal(await card.getAttribute('role'), 'alert');
     assert.equal(

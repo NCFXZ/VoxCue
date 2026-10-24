@@ -2,6 +2,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { verifyContinuousCorners } from './continuous-corners.mjs';
@@ -632,8 +633,10 @@ try {
     const target = process
       .getBuiltinModule('path')
       .join(app.getPath('userData'), 'synthetic-image-export.png');
+    globalThis.imageRealSaveDialog = dialog.showSaveDialog.bind(dialog);
     dialog.showSaveDialog = async (owner) => {
       if (owner.getTitle() !== 'VoxCue') throw Error('Wrong save owner');
+      globalThis.imageExportCalls = (globalThis.imageExportCalls ?? 0) + 1;
       return { canceled: false, filePath: target };
     };
     return target;
@@ -653,6 +656,13 @@ try {
       ).images[0].id,
   );
   assert.equal(exportedHash, originals.find((image) => image.id === firstReference).sha256);
+  if (process.argv.includes('--native-hits')) {
+    assert.equal(process.platform, 'win32', 'Native Windows hit checks require Windows');
+    const { checkImageSaveHit } = await import(
+      pathToFileURL(path.resolve('test/scripts/image-save-hit-check.mjs')).href
+    );
+    await checkImageSaveHit(app, main, viewer);
+  }
   await app.evaluate(({ dialog }) => {
     dialog.showSaveDialog = async () => ({ canceled: true });
   });
@@ -673,8 +683,80 @@ try {
   await firstImage.click();
   await close.click();
   await viewer.waitFor({ state: 'hidden' });
+  // Exercise real missing/corrupt archived bytes, only in this owned profile.
+  const requestsBeforeImageFailures = (await requests()).length;
+  await app.evaluate(async ({ app }, id) => {
+    const fs = process.getBuiltinModule('fs/promises'),
+      path = process.getBuiltinModule('path');
+    const file = path.join(app.getPath('userData'), 'interview-images-v1', id + '.image');
+    globalThis.imageReadFixture = { file, bytes: await fs.readFile(file) };
+  }, firstReference);
+  for (const mode of ['missing', 'corrupt']) {
+    await app.evaluate(async (_electron, mode) => {
+      const fs = process.getBuiltinModule('fs/promises'),
+        fixture = globalThis.imageReadFixture;
+      if (mode === 'missing') await fs.unlink(fixture.file);
+      else await fs.writeFile(fixture.file, Buffer.from('synthetic corrupt image'));
+    }, mode);
+    await firstImage.click();
+    await viewer
+      .getByRole('alert')
+      .getByText('无法读取图片，文件可能已移除。', { exact: true })
+      .waitFor();
+    assert.equal(await viewer.locator('.interview-image-canvas img').count(), 0);
+    await viewer.press('Escape');
+    await viewer.waitFor({ state: 'hidden' });
+    await app.evaluate(async () => {
+      const fixture = globalThis.imageReadFixture;
+      await process.getBuiltinModule('fs/promises').writeFile(fixture.file, fixture.bytes);
+    });
+  }
+  await app.evaluate(({ app }, id) => {
+    const load = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const { InterviewImageStore } = load(
+      './dist-electron/shared/electron/backend/interview/images.js',
+    );
+    const read = InterviewImageStore.prototype.read;
+    globalThis.restoreImageRead = () => {
+      InterviewImageStore.prototype.read = read;
+    };
+    InterviewImageStore.prototype.read = function (current) {
+      if (current === id)
+        return new Promise((resolve, reject) => {
+          globalThis.releaseImageRead = () => read.call(this, current).then(resolve, reject);
+        });
+      return read.call(this, current);
+    };
+  }, firstReference);
+  await firstImage.click();
+  await viewer.getByText('正在读取原图…', { exact: true }).waitFor();
+  await viewer.press('ArrowRight');
+  const secondOriginal = viewer.getByRole('img', { name: '截图 2 原图', exact: true });
+  await secondOriginal.waitFor();
+  const secondSource = await secondOriginal.getAttribute('src');
+  await app.evaluate(async () => {
+    await globalThis.releaseImageRead();
+    globalThis.restoreImageRead();
+  });
+  await main.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.equal(
+    await secondOriginal.getAttribute('src'),
+    secondSource,
+    'Late first-image read cannot replace the current image',
+  );
+  await viewer.press('Escape');
+  await viewer.waitFor({ state: 'hidden' });
+  assert.equal(
+    (await requests()).length,
+    requestsBeforeImageFailures,
+    'Image read failures and paging never submit model requests',
+  );
   checks.push(
-    'bubble thumbnails, durable originals, live/history viewers, keyboard paging, pinch zoom, pixel pan, drag/reset, exact-byte export, cancel/error and close/reopen',
+    'bubble thumbnails, durable originals, live/history viewers, keyboard paging, pinch zoom, pixel pan, drag/reset, exact-byte export, cancel/error, missing/corrupt bytes, late reads and close/reopen',
   );
   assert.deepEqual(errors, []);
   console.log(

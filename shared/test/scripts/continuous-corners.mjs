@@ -17,6 +17,8 @@ export async function verifyContinuousCorners(page, name) {
     probe.style.boxShadow = 'var(--shadow-popup)';
     probe.style.borderRadius = 'var(--radius-control)';
     const hoverColor = getComputedStyle(probe).backgroundColor;
+    probe.style.backgroundColor = 'var(--account-card-hover-surface)';
+    const accountHoverColor = getComputedStyle(probe).backgroundColor;
     const popupShadow = getComputedStyle(probe).boxShadow;
     const controlRadius = getComputedStyle(probe).borderRadius;
     probe.style.borderRadius = 'var(--radius-interview-answer)';
@@ -183,7 +185,10 @@ export async function verifyContinuousCorners(page, name) {
         triggerStyle = getComputedStyle(trigger);
       if (menuStyle.boxShadow !== popupShadow)
         wrongSurfaces.push(menu.className + ': inconsistent popup shadow');
-      if (triggerStyle.backgroundColor !== hoverColor)
+      if (
+        triggerStyle.backgroundColor !==
+        (trigger.matches('.user-button') ? accountHoverColor : hoverColor)
+      )
         wrongSurfaces.push(trigger.className + ': open dropdown loses its hover feedback');
       if (fallback) {
         if (

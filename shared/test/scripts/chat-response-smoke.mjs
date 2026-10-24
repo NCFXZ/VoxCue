@@ -247,7 +247,7 @@ try {
     await usage
       .getByRole('link', { name: '查看官方用量', exact: true })
       .evaluate((node) => getComputedStyle(node).fontSize),
-    '14px',
+    '12px',
   );
   await page.screenshot({});
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();

@@ -1,3 +1,13 @@
+## 2026-10-24 Windows 0.5.9 接续入口
+
+先按 WINDOWS_0.5.9_HANDOFF.md 同步本机固定依赖/配置，macos/ 只读。`test:windows:functional`、`test:windows:regression`、`test:ui:dpi` 串行覆盖共享界面、本平台原生及五档缩放；旧夹具使用当前托管登录、系统强调色、账户卡悬停色和六个设置分类，保留未知错误不重试及原排版要求。额度窗口对照原生实际内容宽度，间距按 Chromium 的 1/64 CSS 像素单位核对 4px，避免分数 DPI 的浮点表示差异。
+
+`test:portable:native` 和 `test:installer:isolated` 在自有临时根构建负载并检查薄包、固定 win32-x64 SDK/运行时、真实 ASAR 代码与 unpacked 可执行路径。包内 Copilot 使用 empty stdio ping；Codex 使用临时空 file store/伪造令牌和拒绝代理，无真实 OAuth/推理。Koffi 不构建、不入包；继续拒绝模型、外平台二进制、密钥和本项目开发/测试文件。隔离安装只检查负载，不执行生产安装器。
+
+在 `windows/` 执行 `node ../shared/test/scripts/interview-screenshot-smoke.mjs --native-hits`，复用完整合成截图链路，另由 `image-save-hit-check.mjs` 检查实际 HWND 的中心/四边、HTCLIENT/no-drag、浅深色稳定图标和外部悬停；`ImageSaveDialog.cs` 仅操作精确 PID/HWND 所属系统保存对话框，以临时 profile 为默认目录，验证真实保存/取消及字节一致。真实触控板、多显示器、账户推理和物理采样另行区分，不由合成事件代验。所有产物退出清理，结果只到终端/对话。
+
+`node test/scripts/history-scrollbar-smoke.mjs` 使用合成长记录，逐档检查100/125/150/175/200%下浅深色、1280/960宽度及回答栏开关。只给滑块临时标记色，从实际窗口像素定位轨道起点，确认不进入固定工具栏，并检查正文滚动及导出命中；不以 DOM 样式存在代替像素验证。`--scale=1.75` 可定向复测；交互终端的 `--preview` 仅在本次临时根保留两张自有窗口预览，回车或退出清理。
+
 ## 2026-10-24 Mac 0.5.9 最终发行包检查
 
 用户授权本次Mac DMG/ZIP/清单发行。`node test/scripts/package-smoke.mjs --install-archive`在自有临时副本验证最终签名/摘要/DMG/应用/薄包模型与实际Sparkle归档校验后取消；`node test/scripts/package-runtimes-smoke.mjs`实际加载最终ASAR内固定SDK并完成Copilot无登录ping及断网Codex空账户RPC。后者曾复现SDK自动发现ASAR虚拟路径chmod失败，生产现用固定真实unpacked路径和官方stdio连接，开发握手同步该入口。所有测试串行、退出清理，不替换真实安装。Mac v0.5.9发布后`package-smoke.mjs --online`已通过公开0.5.9版本选择、签名清单认证、完整更新ZIP下载与SHA512校验，旧Latest和其他资产保持。Windows对应包内握手和打包依赖另见0.5.9交接，不能用Mac通过代验。

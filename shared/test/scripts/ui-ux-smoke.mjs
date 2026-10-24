@@ -243,7 +243,8 @@ try {
   assert.equal(await page.getByRole('button', { name: '调整聊天模型', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '调整回答风格', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '主题色', exact: true }).count(), 0);
-  await app.evaluate(({ BrowserWindow }) => {
+  await app.evaluate(({ BrowserWindow, systemPreferences }) => {
+    systemPreferences.getAccentColor = () => '8764b8ff';
     for (const win of BrowserWindow.getAllWindows())
       win.webContents.send('appearance:accent-changed', '#8764b8');
   });
@@ -543,7 +544,8 @@ try {
   await floating.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#8764b8',
   );
-  await app.evaluate(({ BrowserWindow }) => {
+  await app.evaluate(({ BrowserWindow, systemPreferences }) => {
+    systemPreferences.getAccentColor = () => '008c95ff';
     for (const win of BrowserWindow.getAllWindows())
       win.webContents.send('appearance:accent-changed', '#008c95');
   });
@@ -639,7 +641,9 @@ try {
   await returnedLogin.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#008c95',
   );
-  checks.push('accent synchronizes between main/floating windows and persists into login');
+  checks.push(
+    'new main/floating/login windows read the same synthetic system accent and receive its updates',
+  );
   assert.deepEqual(errors, []);
   await console.log(
     JSON.stringify(

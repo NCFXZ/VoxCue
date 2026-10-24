@@ -12,6 +12,14 @@
   --web-material-opacity: calc((0.6 + var(--frosted-opacity-dark, 0.64) * 0.4) * 100%);
   --web-menu-highlight-foreground: #1c2023;
 }
+/* The transcript still scrolls behind the fixed header material, while its
+   scrollbar starts below that header instead of painting over its actions. */
+.web-materials
+  .record-detail-toolbar
+  + .record-detail-body
+  .record-transcript-scroll::-webkit-scrollbar-track:vertical {
+  margin-top: var(--record-toolbar-height, 64px);
+}
 .web-materials .dropdown-content .dropdown-item[data-highlighted]:not([data-disabled]) {
   color: var(--web-menu-highlight-foreground);
   background: var(--accent);

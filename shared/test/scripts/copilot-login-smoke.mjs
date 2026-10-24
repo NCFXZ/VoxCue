@@ -167,8 +167,16 @@ try {
       [1280, 800],
       [960, 680],
     ]) {
-      await mainWindow.evaluate((win, size) => win.setSize(...size), [width, height]);
-      await main.waitForFunction((width) => window.innerWidth === width, width);
+      // Windows fractional DPI rounds content bounds to physical pixels. Wait
+      // for the actual native content width, preserving exact renderer agreement.
+      const contentWidth = await mainWindow.evaluate(
+        (win, size) => {
+          win.setContentSize(...size);
+          return win.getContentSize()[0];
+        },
+        [width, height],
+      );
+      await main.waitForFunction((width) => window.innerWidth === width, contentWidth);
       await app.evaluate(() => {
         globalThis.copilotLoginFixture.holdQuota = true;
       });
@@ -403,6 +411,7 @@ try {
         titleGap:
           card.querySelector('.account-quota-summary').getBoundingClientRect().top -
           card.querySelector('header').getBoundingClientRect().bottom,
+        rowGap: getComputedStyle(card).rowGap,
         barGap:
           card
             .querySelector('.account-quota-progress,.quota-skeleton-progress')
@@ -423,8 +432,11 @@ try {
     assert.ok(Math.abs(geometry.reset - geometry.remaining) < 1);
     assert.deepEqual(geometry.resetFont, geometry.remainingFont);
     assert.equal(geometry.resetColor, geometry.remainingColor);
-    assert.equal(geometry.titleGap, 4);
-    assert.equal(geometry.barGap, geometry.titleGap, 'Both quota windows have equal row gaps');
+    assert.equal(geometry.rowGap, '4px');
+    // Normalize DOMRect float representation to Chromium's 1/64 CSS-pixel
+    // layout unit; fractional Windows DPI otherwise produces 3.99999046.
+    assert.equal(Math.round(geometry.titleGap * 64), 4 * 64);
+    assert.equal(Math.round(geometry.barGap * 64), 4 * 64, 'Both quota windows have 4px row gaps');
   }
   await app.evaluate(() => {
     globalThis.chatGPTUsageFixture.hold = true;

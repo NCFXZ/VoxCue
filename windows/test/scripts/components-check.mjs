@@ -17,12 +17,12 @@ export async function checkComponents(application) {
   const loginBrand = loginButton.locator('.service-brand-icon');
   assert.equal(await loginBrand.count(), 1);
   await loginBrand.evaluate(async (image) => image.decode());
-  assert.equal(await page.locator('.service-login').count(), 1);
-  assert.equal(await page.getByRole('button', { name: /GitHub/ }).count(), 0);
+  assert.equal(await page.locator('.service-login').count(), 2);
   assert.equal(
-    await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')),
-    false,
+    await page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true }).count(),
+    1,
   );
+  assert.equal(await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')), true);
   await installUiAccount(application);
   await application.evaluate(({ app }) => {
     const require = process
@@ -182,8 +182,9 @@ export async function checkComponents(application) {
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
   const rag = settings.locator('.component-row[data-component-id="rag"]');
   const speech = settings.locator('.component-row[data-component-id="speech"]');
-  await rag.getByRole('button', { name: '下载', exact: true }).click();
-  await assertInitialDownloadProgress(rag.locator('.download-button'));
+  await assertInitialDownloadProgress(rag.locator('.download-button'), () =>
+    rag.getByRole('button', { name: '下载', exact: true }).click(),
+  );
   assert.equal(await speech.getByRole('button', { name: '下载', exact: true }).isDisabled(), true);
   await rag.locator('.download-button').click();
   await waitForAsync(
@@ -284,7 +285,7 @@ export async function checkComponents(application) {
     );
   assert.ok(requests.every((url) => !url.includes('copilot')));
   console.log(
-    'PASS: ChatGPT-only login before downloads; settings shortcuts, theme rings, MB and speech/RAG feature guards.',
+    'PASS: ChatGPT/Copilot login before downloads; settings shortcuts, theme rings, MB and speech/RAG feature guards.',
   );
   return { page, errors };
 }

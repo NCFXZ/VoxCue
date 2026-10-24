@@ -194,9 +194,10 @@ try {
   });
   await settings.getByRole('button', { name: '检查更新', exact: true }).click();
   await settings.getByText('发现新版本 0.2.0', { exact: true }).waitFor();
-  await settings.getByRole('button', { name: '下载更新', exact: true }).click();
-  await waitPhase(page, 'downloading');
-  await assertInitialDownloadProgress(settings.locator('.download-button'));
+  await assertInitialDownloadProgress(settings.locator('.download-button'), async () => {
+    await settings.getByRole('button', { name: '下载更新', exact: true }).click();
+    await waitPhase(page, 'downloading');
+  });
   await app.evaluate(() => globalThis.updateDriver.emit('download-progress', { percent: 37.8 }));
   await settings.getByText('正在下载更新 37%', { exact: true }).waitFor();
   await assertDownloadButton(

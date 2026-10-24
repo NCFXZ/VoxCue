@@ -84,7 +84,8 @@ const paths = await packager({
       const copied = new Set();
       async function copyPackage(name, from = root) {
         // E5 uses Node CPU inference; the CJS bundle needs no separate Web package.
-        if (name === 'onnxruntime-web') return;
+        if (name === 'onnxruntime-web' || name === 'koffi') return;
+        // Copilot uses only the official stdio subprocess, never the optional FFI host.
         let resolved;
         const require = createRequire(path.join(from, 'package.json'));
         try {
@@ -160,6 +161,10 @@ const paths = await packager({
         }
       }
       for (const name of [
+        '@github/copilot-sdk',
+        '@github/copilot-sdk-win32-x64',
+        '@openai/codex',
+        '@openai/codex-win32-x64',
         '@ennuicastr/webrtcaec3.js',
         'adm-zip',
         'jose',

@@ -16,7 +16,8 @@ const checks = [],
   errors = [];
 try {
   await installUiAccount(app, { speech: true, components: true });
-  await app.evaluate(({ app }) => {
+  await app.evaluate(({ app, systemPreferences }) => {
+    systemPreferences.getAccentColor = () => '8764b8ff';
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
@@ -153,7 +154,7 @@ try {
     settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name, exact: true });
-  await category('知识库').click();
+  assert.equal(await category('知识库').count(), 0, 'Retired knowledge settings must not return');
   assert.equal(await settings.getByText(/按需查找需要账户模型支持/).count(), 0);
   assert.equal(await settings.getByText('高级诊断', { exact: true }).count(), 0);
   assert.equal(await settings.getByText(/必要片段会发送至/).count(), 0);

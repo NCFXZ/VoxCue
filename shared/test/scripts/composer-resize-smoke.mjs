@@ -1,6 +1,6 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { closeUiApp } from './install-ui-account.mjs';
+import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const app = await electron.launch({
@@ -12,11 +12,12 @@ const app = await electron.launch({
   },
 });
 try {
+  await installUiAccount(app);
   const login = await app.firstWindow();
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
   const [page] = await Promise.all([
     app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
+    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   page.setDefaultTimeout(10000);
   let surface = page;

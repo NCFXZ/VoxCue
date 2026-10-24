@@ -1,8 +1,9 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
-import { mkdir } from 'node:fs/promises';
+import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 const { createServer } = workspace.platformRequire('vite');
@@ -13,8 +14,33 @@ const server = dev
   ? await createServer({ server: { host: '127.0.0.1', port: 5174, strictPort: true } })
   : undefined;
 await server?.listen();
+const fixture = path.join(testRoot, 'managed-login.cjs');
+await writeFile(
+  fixture,
+  `
+const {app}=require('electron');
+const root=process.cwd();app.setAppPath(root);
+const {CodexUsageRuntime}=require(root+'/dist-electron/shared/electron/backend/chat/codexUsage.js');
+// Exercise the current managed login port, never the retired SIWC callback.
+// Real runtime protocol and URL validation have their own isolated checks.
+CodexUsageRuntime.prototype.login=async function(open,signal){
+ await open('https://auth.openai.com/oauth/authorize?client_id=synthetic-managed-client&state=synthetic&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback');
+ await new Promise((resolve,reject)=>{
+  globalThis.__declineManagedLogin=()=>reject(Error('未完成 ChatGPT 授权'));
+  if(signal.aborted)reject(Error('登录已取消'));
+  else signal.addEventListener('abort',()=>reject(Error('登录已取消')),{once:true});
+ });
+};
+CodexUsageRuntime.prototype.cancel=function(){};
+CodexUsageRuntime.prototype.logout=async function(){};
+require(root+'/dist-electron/shared/electron/main.js');
+`,
+);
 const app = await electron.launch({
-  args: ['.', ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : [])],
+  args: [
+    await offlineElectronEntry(fixture, dev ? { loopbackPort: 5174 } : {}),
+    ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : []),
+  ],
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: profile,
@@ -87,7 +113,7 @@ try {
   assert.ok(address);
   const authorization = new URL(address);
   assert.equal(authorization.origin, 'https://auth.openai.com');
-  assert.equal(authorization.searchParams.get('client_id'), 'dynamic_agent_client');
+  assert.equal(authorization.searchParams.get('client_id'), 'synthetic-managed-client');
   const callback = new URL(authorization.searchParams.get('redirect_uri'));
   assert.equal(callback.hostname, '127.0.0.1');
   await page.getByRole('button', { name: '取消登录', exact: true }).click();
@@ -108,7 +134,8 @@ try {
     state: deniedAuth.searchParams.get('state'),
     error: 'access_denied',
   }).toString();
-  await fetch(denied);
+  assert.equal(denied.hostname, '127.0.0.1');
+  await app.evaluate(() => globalThis.__declineManagedLogin());
   await page.getByRole('alert').getByText('未完成 ChatGPT 授权', { exact: false }).waitFor();
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   // DPAPI on Windows, Chromium's synthetic Keychain on Mac. Never access a real

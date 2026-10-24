@@ -1,3 +1,11 @@
+## 2026-10-24：Windows 0.5.9 发行前整理
+
+核对生产导入、动态平台/Worker/utilityProcess 入口和测试消费者，保留现用源码与本轮验收夹具；没有为扩大清理数量删除仍有消费者的代码。Windows 前后端另用 noUnusedLocals/noUnusedParameters 检查闲置声明，执行结果只在终端报告。
+
+核对精确绝对路径、真实路径、无重定向、进程引用和独占文件访问后，删除 `windows/release/installer-stage` 中旧 0.5.8 生成暂存树；正式 0.5.8 安装器、blockmap 和摘要清单保持。删除 `windows/release/installer` 内两份与 `windows/release/0.5.5` 归档逐字节相同的旧安装器/blockmap，以及 `windows/release/0.5.8/builder-debug.yml` 构建诊断。正式历史发行、当前 dist/dist-electron、依赖/锁、模型、原件、索引、恢复基线和历史349个跳过目录均保留，macos/只读。
+
+本次正式 Windows 0.5.9 三项资产单独保留在 `windows/release/0.5.9`；临时测试产物、上传辅助文件和重复打包暂存退出清理。源码提交不包含发行包、模型、清理审计、凭据或测试结果。
+
 ## 2026-10-24：0.5.9 源码整理
 
 恢复完整验收后，重新核对全部新增生产模块、Worker/utilityProcess/preload、AppKit 展示端口与测试入口，前后端额外启用 noUnusedLocals/noUnusedParameters 检查均无闲置声明。截图查看器曾用的 titleAction 仍由知识库重命名使用，不能删除；截图原图存储、评估夹具和平台端口均有实际消费者。未为扩大清理数量删除现用文件，历史占用/跳过目录继续保留。

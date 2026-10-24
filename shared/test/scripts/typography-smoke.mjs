@@ -391,15 +391,8 @@ try {
     await inspect(page, `user-menu-${theme}`);
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
-    for (const category of [
-      '个性化',
-      '本地组件',
-      '账户与用量',
-      '面试设置',
-      '知识库',
-      '更新',
-      '关于',
-    ]) {
+    assert.equal(await settings.getByRole('button', { name: '知识库', exact: true }).count(), 0);
+    for (const category of ['个性化', '本地组件', '账户与用量', '面试设置', '更新', '关于']) {
       await settings.getByRole('button', { name: category, exact: true }).click();
       await inspect(page, `settings-${category}-${theme}`);
       if (category === '个性化') {
@@ -504,15 +497,7 @@ try {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await inspect(page, 'user-menu-narrow-dark');
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  for (const category of [
-    '个性化',
-    '本地组件',
-    '账户与用量',
-    '面试设置',
-    '知识库',
-    '更新',
-    '关于',
-  ]) {
+  for (const category of ['个性化', '本地组件', '账户与用量', '面试设置', '更新', '关于']) {
     await page
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: category, exact: true })
