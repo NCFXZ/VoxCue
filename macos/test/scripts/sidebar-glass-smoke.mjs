@@ -5,11 +5,12 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
-import { checkContentControls } from './content-controls-check.mjs';
+import { checkContentControls, checkChatRetry } from './content-controls-check.mjs';
 import { checkComponentControls } from './component-controls-check.mjs';
 import { checkSidebarUpdates } from './sidebar-updates-check.mjs';
 import { checkLoginControls } from './login-controls-check.mjs';
 import { checkHandoffContent } from './handoff-content-check.mjs';
+import { checkProgressControls } from './progress-controls-check.mjs';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required.');
@@ -101,7 +102,11 @@ const poll = async (read, expected, message) => {
 };
 const contentPreview = process.argv.includes('--content-preview');
 const previewLabel = process.argv.find((arg) => arg.startsWith('--preview='))?.slice(10);
-const preview = process.argv.includes('--preview') || contentPreview || !!previewLabel;
+const preview =
+  process.argv.includes('--preview') ||
+  contentPreview ||
+  !!previewLabel ||
+  process.argv.includes('--login-preview');
 const pausePreview = async () => {
   if (!preview) return;
   process.stdin.resume();
@@ -117,6 +122,83 @@ try {
     .on('exit', (code, signal) => console.log('test application exited', { code, signal }));
   const login = await app.firstWindow();
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  if (process.argv.includes('--login-preview')) {
+    const loginTheme = process.argv.find((arg) => arg.startsWith('--login-theme='))?.slice(14);
+    if (loginTheme) {
+      assert.ok(['light', 'dark'].includes(loginTheme));
+      await login.evaluate((theme) => localStorage.setItem('copilot-theme', theme), loginTheme);
+      await login.reload();
+      await login.waitForFunction(
+        (dark) => document.documentElement.classList.contains('dark') === dark,
+        loginTheme === 'dark',
+      );
+    }
+    await login.waitForFunction(
+      () => document.querySelectorAll('.service-login.macos-content-native').length === 2,
+    );
+    if (loginTheme) {
+      await poll(
+        () =>
+          app.evaluate(({ BrowserWindow }, file) => {
+            const require = process
+              .getBuiltinModule('module')
+              .createRequire(process.cwd() + '/package.json');
+            return JSON.parse(
+              require(file).inspect(BrowserWindow.getAllWindows()[0].getNativeWindowHandle()),
+            );
+          }, probeFile),
+        (value) =>
+          flatten(value.tree).some(
+            (node) => node.class === 'VoxCueLoginBackdrop' && node.dark === (loginTheme === 'dark'),
+          ),
+        'The native login background must match the requested preview theme',
+      );
+    }
+    await app.evaluate(({ app, BrowserWindow }, file) => {
+      app.focus({ steal: true });
+      const win = BrowserWindow.getAllWindows()[0];
+      const require = process
+        .getBuiltinModule('module')
+        .createRequire(process.cwd() + '/package.json');
+      require(file).backdrop(win.getNativeWindowHandle(), 2);
+      win.focus();
+    }, probeFile);
+    if (screenshotDirectory) {
+      await login.screenshot();
+      await app.evaluate(
+        async ({ BrowserWindow, nativeImage }, { file, output }) => {
+          const require = process
+            .getBuiltinModule('module')
+            .createRequire(process.cwd() + '/package.json');
+          const win = BrowserWindow.getAllWindows()[0];
+          const protectedWindow = win.isContentProtected();
+          win.setContentProtection(false);
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 300));
+            const result = await require(file).snapshot(win.getNativeWindowHandle());
+            require('node:fs').writeFileSync(
+              output,
+              nativeImage.createFromBuffer(result.png).crop(result.crop).toPNG(),
+            );
+          } finally {
+            win.setContentProtection(protectedWindow);
+          }
+        },
+        {
+          file: probeFile,
+          output: path.join(
+            screenshotDirectory,
+            loginTheme ? `login-preview-${loginTheme}.png` : 'login-preview.png',
+          ),
+        },
+      );
+    }
+    console.log('Isolated login preview is open. Close the window or press Enter to clean up.');
+    await Promise.race([pausePreview(), login.waitForEvent('close', { timeout: 0 })]);
+    await closeUiApp(app);
+    app = undefined;
+    process.exit(0);
+  }
   if (process.argv.includes('--login-only')) {
     await checkLoginControls({ app, page: login, probeFile, poll });
     await closeUiApp(app);
@@ -128,7 +210,9 @@ try {
     // A rebuild may remove the original hashed CSS asset. Deny stylesheet
     // reloads by projection children while preserving the offline boundary.
     session.defaultSession.webRequest.onBeforeRequest((request, callback) => {
-      const contents = webContents.fromId(request.webContentsId),
+      const contents = Number.isSafeInteger(request.webContentsId)
+          ? webContents.fromId(request.webContentsId)
+          : null,
         win = contents && BrowserWindow.fromWebContents(contents);
       callback({
         cancel:
@@ -247,9 +331,10 @@ try {
       .find((win) => win.getTitle() === 'VoxCue')
       .focus();
   });
-  await page.waitForFunction(
-    () => !document.documentElement.classList.contains('macos-window-inactive'),
-  );
+  if (!process.argv.includes('--theme-only') && !process.argv.includes('--progress-only'))
+    await page.waitForFunction(
+      () => !document.documentElement.classList.contains('macos-window-inactive'),
+    );
   const aligned = await poll(
     state,
     (value) =>
@@ -349,6 +434,14 @@ try {
     ),
   );
   const choose = async (trigger, keys) => {
+    // Native clicks do not perform Playwright's automatic scroll-into-view.
+    // An offscreen dropdown can otherwise dismiss the surrounding modal.
+    await trigger.scrollIntoViewIfNeeded();
+    await trigger
+      .page()
+      .evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
     const anchor = await trigger.boundingBox();
     await app.evaluate(({ app, BrowserWindow }) => {
       app.focus({ steal: true });
@@ -356,20 +449,59 @@ try {
         .find((win) => win.getTitle() === 'VoxCue')
         .focus();
     });
-    await poll(state, (value) => value.windowKey, 'The owned menu window must have native focus');
+    if (!process.argv.includes('--theme-only'))
+      await poll(state, (value) => value.windowKey, 'The owned menu window must have native focus');
     const previousGeneration = (await state()).menuGeneration;
     if (typeof keys === 'string') await probe('selectMenuItem', keys);
     else await probe('menuKeys', keys);
     // Route through the owned NSWindow so clicking out of a projected composer
     // also transfers native focus before AppKit starts menu tracking.
-    await probe('clickAt', {
-      x: anchor.x + anchor.width / 2,
-      y: anchor.y + anchor.height / 2,
-    });
-    const native = await poll(
-      state,
-      (value) => value.menuGeneration > previousGeneration && !value.menuTracking,
-      'The requested native menu must complete its own tracking cycle',
+    if (process.argv.includes('--theme-only') && !(await state()).windowKey)
+      await trigger.evaluate((node) =>
+        node.dispatchEvent(
+          new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }),
+        ),
+      );
+    else
+      await probe('clickAt', {
+        x: anchor.x + anchor.width / 2,
+        y: anchor.y + anchor.height / 2,
+      });
+    let native;
+    try {
+      native = await poll(
+        state,
+        (value) => value.menuGeneration > previousGeneration && !value.menuTracking,
+        'The requested native menu must complete its own tracking cycle',
+      );
+    } catch (error) {
+      const value = await state();
+      console.error('Native menu tracking diagnostics', {
+        trigger: await trigger.getAttribute('aria-label', { timeout: 500 }).catch(() => null),
+        anchor,
+        current: await trigger.boundingBox({ timeout: 500 }).catch(() => null),
+        dialogs: await page.locator('dialog[open]').allTextContents(),
+        previousGeneration,
+        menuGeneration: value.menuGeneration,
+        menuTracking: value.menuTracking,
+        controls: flatten(value.tree)
+          .filter((node) => node.class === 'NSPopUpButton')
+          .map(({ title, frameX, frameY, frameWidth, frameHeight, enabled, hidden }) => ({
+            title,
+            frameX,
+            frameY,
+            frameWidth,
+            frameHeight,
+            enabled,
+            hidden,
+          })),
+      });
+      throw error;
+    }
+    assert.equal(
+      native.menuKeyTimeout,
+      false,
+      'Native menu must respond to keyboard events before the watchdog',
     );
     await trigger
       .page()
@@ -390,7 +522,142 @@ try {
     );
     return native.menuItems;
   };
-  if (process.argv.includes('--updates-only')) {
+  if (process.argv.includes('--theme-only')) {
+    await app.evaluate(({ app }) => {
+      const require = process
+        .getBuiltinModule('module')
+        .createRequire(app.getAppPath() + '/package.json');
+      require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/chat/service.js',
+      ).ChatGPTService.prototype.accountUsage = async () => ({
+        provider: 'chatgpt',
+        status: 'available',
+        plan: 'plus',
+        queriedAt: Date.now(),
+        quotas: [
+          {
+            id: 'weekly',
+            label: '每周额度',
+            unit: 'percent',
+            total: null,
+            used: 54,
+            remaining: null,
+            remainingPercent: 46,
+            unlimited: false,
+            state: 'available',
+            additionalUsageAllowed: null,
+            advisory: false,
+            resetAt: Date.now() + 6 * 86400000,
+            resetEstimated: false,
+          },
+        ],
+      });
+    });
+    await choose(page.getByRole('button', { name: '用户菜单', exact: true }), '设置');
+    const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    await settings.waitFor();
+    const flatten = (node) => [node, ...(node.children ?? []).flatMap(flatten)];
+    for (const theme of ['浅色', '深色']) {
+      await settings.getByRole('button', { name: '个性化', exact: true }).click();
+      await choose(settings.getByRole('button', { name: '外观主题', exact: true }), theme);
+      assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
+      const rows = await choose(
+        settings.getByRole('button', { name: '外观主题', exact: true }),
+        theme,
+      );
+      assert.ok(
+        rows.every((row) => !row.customView),
+        'NSMenu must draw every standard row',
+      );
+      assert.ok(rows.every((row) => row.imageVisible));
+      assert.ok(rows.find((row) => row.title === theme).checked);
+      await app.evaluate(({ BrowserWindow }) => {
+        for (const win of BrowserWindow.getAllWindows())
+          win.webContents.send('appearance:accent-changed', '#8764b8');
+      });
+      await page.waitForFunction(
+        () => document.documentElement.style.getPropertyValue('--system-accent') === '#8764b8',
+      );
+      await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
+      const bar = settings.getByRole('progressbar', { name: '每周额度剩余比例', exact: true });
+      await bar.waitFor();
+      await poll(
+        state,
+        (value) =>
+          flatten(value.tree).some(
+            (node) =>
+              node.class === 'NSProgressIndicator' &&
+              node.progressStyle === 0 &&
+              !node.indeterminate &&
+              Math.abs(node.value - 46) < 0.01,
+          ),
+        'Quota uses a real system NSProgressIndicator bar',
+      );
+      const geometry = await settings.locator('.account-quota').evaluate((card) => {
+        const title = card.querySelector('header').getBoundingClientRect(),
+          reset = card.querySelector('.account-quota-reset'),
+          remaining = card.querySelector('.account-quota-remaining'),
+          bar = card.querySelector('.account-quota-progress');
+        return {
+          gap: reset.getBoundingClientRect().top - title.bottom,
+          barGap: bar.getBoundingClientRect().top - reset.getBoundingClientRect().bottom,
+          aligned: reset.getBoundingClientRect().y === remaining.getBoundingClientRect().y,
+          matching: ['fontSize', 'fontWeight', 'color'].every(
+            (name) => getComputedStyle(reset)[name] === getComputedStyle(remaining)[name],
+          ),
+        };
+      });
+      assert.equal(geometry.gap, 4);
+      assert.equal(geometry.barGap, geometry.gap);
+      assert.ok(geometry.aligned && geometry.matching);
+      await capture('official-controls-' + theme);
+      await settings.getByRole('button', { name: '个性化', exact: true }).click();
+      const keyboardRows = await choose(
+        settings.getByRole('button', { name: '外观主题', exact: true }),
+        [125, 36],
+      );
+      const startIndex = (await state()).menuKeyStart;
+      const selectedLabel =
+        keyboardRows[(startIndex + 1 + keyboardRows.length) % keyboardRows.length].title;
+      const options = { 浅色: 'light', 深色: 'dark', 跟随系统: 'system' };
+      assert.equal(
+        await page.evaluate(() => localStorage.getItem('copilot-theme')),
+        options[selectedLabel],
+      );
+      const beforeEscape = await page.evaluate(() => localStorage.getItem('copilot-theme'));
+      await choose(settings.getByRole('button', { name: '外观主题', exact: true }), [53]);
+      assert.equal(await page.evaluate(() => localStorage.getItem('copilot-theme')), beforeEscape);
+    }
+    console.log(
+      'PASS: standard NSMenu rows/icons/checkmarks/keyboard, system-accent-only settings and real NSProgressIndicator bars with compact quota geometry in light/dark.',
+    );
+  } else if (process.argv.includes('--rag-settings-only')) {
+    await choose(page.getByRole('button', { name: '用户菜单', exact: true }), '设置');
+    const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    await settings.waitFor();
+    const navigation = settings.getByRole('navigation', { name: '设置分类' });
+    assert.equal(await navigation.getByRole('button').count(), 6);
+    assert.equal(await navigation.getByRole('button', { name: '知识库', exact: true }).count(), 0);
+    assert.equal(
+      await settings.getByRole('button', { name: '资料使用方式', exact: true }).count(),
+      0,
+    );
+    for (const name of ['个性化', '本地组件', '账户与用量', '面试设置', '更新', '关于'])
+      assert.equal(await navigation.getByRole('button', { name, exact: true }).count(), 1);
+    const old = await page.evaluate(() =>
+      window.desktop.knowledge({ op: 'settings', mode: 'function' }),
+    );
+    assert.equal(old.ok, false);
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '知识库', exact: true }).count(), 1);
+    console.log(
+      'Actual AppKit menu and settings: Knowledge category removed; six categories and main Knowledge management preserved.',
+    );
+  } else if (process.argv.includes('--progress-only')) {
+    await checkProgressControls({ app, page, state, poll, probeFile, capture });
+  } else if (process.argv.includes('--chat-retry-only')) {
+    await checkChatRetry({ app, page, state, poll, probe });
+  } else if (process.argv.includes('--updates-only')) {
     await checkSidebarUpdates({ app, page, state, poll, probe, probeFile });
     if (preview) {
       console.log('更新演示已停在“重启以更新”，按 Enter 后关闭演示；不会执行真实更新。');
@@ -614,11 +881,7 @@ try {
     );
     await choose(page.getByRole('button', { name: '用户菜单', exact: true }), '设置');
     await settings.waitFor();
-    const accents = await choose(
-      settings.getByRole('button', { name: '主题色', exact: true }),
-      [53],
-    );
-    assert.ok(accents.filter((item) => !item.separator).every((item) => item.imageVisible));
+    assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
     const themeItems = await choose(
       settings.getByRole('button', { name: '外观主题', exact: true }),
       '深色',

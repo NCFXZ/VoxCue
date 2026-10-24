@@ -1,9 +1,11 @@
 import type { KnowledgeCall, KnowledgeResult, KnowledgeStatus } from './knowledge';
+import type { InterviewImage, InterviewImageCall } from './interviewImages';
 import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
 import type { PresentationCapabilities } from './presentation';
 import type { UpdateCall, UpdateState } from './updates';
 import type { ComponentCall, ComponentState } from './components';
 import type { AuthSession, SignOutResult } from './auth';
+import type { AccountUsage } from './accountUsage';
 import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResult } from './chat';
 import type { InterviewTitleRequest, InterviewTitleEvent, HistoryExportRequest } from './history';
 import type {
@@ -51,6 +53,8 @@ export interface ScrollChromeState {
   headerOpacity: number;
   titleOpacity: number;
   foregroundColor: string;
+  /** Interview settings only: clip the header to its dialog's continuous contour. */
+  headerRadius?: number;
 }
 export interface NativeMenuRequest {
   anchor: GlassSurfacePlacement;
@@ -79,12 +83,14 @@ export interface ContentControlPlacement extends GlassSurfacePlacement {
     | 'button'
     | 'button-glass'
     | 'button-hover'
+    | 'regular-overlay'
     | 'font-slider'
     | 'popup'
     | 'search'
     | 'switch'
     | 'button-background'
-    | 'progress';
+    | 'progress'
+    | 'progress-bar';
   label: string;
   value: string;
   symbol: string | null;
@@ -145,7 +151,10 @@ export interface DesktopAPI {
   interviewAnswer(request: InterviewAnswerRequest): Promise<ChatResult>;
   interviewScreenshot(
     call: InterviewScreenshotCall,
-  ): Promise<ServiceResult<{ screenshot?: InterviewScreenshot }>>;
+  ): Promise<ServiceResult<{ screenshot?: InterviewScreenshot; images?: InterviewImage[] }>>;
+  interviewImage(
+    call: InterviewImageCall,
+  ): Promise<ServiceResult<{ dataUrl?: string; canceled?: boolean }>>;
   interviewCancel(id: string): Promise<void>;
   setNativeTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   /** Mac-only background port. Zero removes the effect; layout stays in shared React. */
@@ -173,11 +182,13 @@ export interface DesktopAPI {
   onSystemAccent(callback: (color: string | null) => void): () => void;
   authSession(): Promise<AuthSession | null>;
   signInWithChatGPT(): Promise<AuthSession>;
+  signInWithCopilot(): Promise<AuthSession>;
   cancelSignIn(): Promise<void>;
   enterDemo(): Promise<AuthSession>;
   signOut(): Promise<SignOutResult>;
   chatModels(force?: boolean): Promise<ServiceResult<{ models: ChatModel[] }>>;
   chatUsage(): Promise<ServiceResult<{ usage: AppUsage }>>;
+  chatAccountUsage(): Promise<ServiceResult<{ usage: AccountUsage | null }>>;
   chatResetUsage(): Promise<ServiceResult<{ usage: AppUsage }>>;
   chatSend(request: ChatRequest): Promise<ChatResult>;
   chatCancel(id: string): Promise<void>;
@@ -229,6 +240,7 @@ export interface DesktopInvokeMap {
   'interview:update-model': Invocation<DesktopAPI['updateInterviewModel']>;
   'interview:answer': Invocation<DesktopAPI['interviewAnswer']>;
   'interview:screenshot': Invocation<DesktopAPI['interviewScreenshot']>;
+  'interview:image': Invocation<DesktopAPI['interviewImage']>;
   'interview:cancel': Invocation<DesktopAPI['interviewCancel']>;
   'appearance:theme': Invocation<DesktopAPI['setNativeTheme']>;
   'appearance:sidebar-glass': Invocation<DesktopAPI['setSidebarGlass']>;
@@ -241,11 +253,13 @@ export interface DesktopInvokeMap {
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
   'auth:sign-in': Invocation<DesktopAPI['signInWithChatGPT']>;
+  'auth:copilot-sign-in': Invocation<DesktopAPI['signInWithCopilot']>;
   'auth:cancel': Invocation<DesktopAPI['cancelSignIn']>;
   'auth:demo': Invocation<DesktopAPI['enterDemo']>;
   'auth:sign-out': Invocation<DesktopAPI['signOut']>;
   'chat:models': Invocation<DesktopAPI['chatModels']>;
   'chat:usage': Invocation<DesktopAPI['chatUsage']>;
+  'chat:account-usage': Invocation<DesktopAPI['chatAccountUsage']>;
   'chat:usage-reset': Invocation<DesktopAPI['chatResetUsage']>;
   'chat:send': Invocation<DesktopAPI['chatSend']>;
   'chat:cancel': Invocation<DesktopAPI['chatCancel']>;

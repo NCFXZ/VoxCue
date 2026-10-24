@@ -369,6 +369,20 @@ try {
   assert.equal(multi.turns.at(-1).content, '解释这些截图，先保留我的草稿');
   assert.equal(new Set(multi.turns.at(-1).files.map((file) => file.hash)).size, 5);
   assert.equal(await captured(), 6);
+  const sentImages = floating.locator('.floating-question .interview-image-thumbnail');
+  assert.equal(await sentImages.count(), 5, 'Sent thumbnails stay inside the question bubble');
+  await sentImages.first().click();
+  const liveViewer = floating.getByRole('dialog', { name: '截图', exact: true });
+  await liveViewer.locator('.interview-image-canvas img').waitFor();
+  assert.equal(await liveViewer.getAttribute('data-backdrop'), 'transparent');
+  assert.equal(await liveViewer.getByRole('button', { name: '保存图片', exact: true }).count(), 0);
+  await liveViewer.press('ArrowRight');
+  await liveViewer
+    .locator('.interview-image-position')
+    .getByText('2 / 5', { exact: true })
+    .waitFor();
+  await liveViewer.press('Escape');
+  await liveViewer.waitFor({ state: 'hidden' });
   checks.push(
     'capture stages previews without sending; count expands through 5/5, remove/add works, manual send uses all five original images',
   );
@@ -387,6 +401,9 @@ try {
   assert.equal(only.imageInputs, 1);
   assert.equal(only.knowledgeBaseId, null);
   assert.ok(!JSON.stringify(only.turns).includes('纯文字问题'));
+  const onlyBubble = floating.locator('.floating-question').last();
+  assert.ok(!(await onlyBubble.innerText()).includes('截图中的题目'));
+  assert.ok((await onlyBubble.innerText()).includes('截图提问'));
   await app.evaluate(() => {
     globalThis.screenshotFixture.mode = 'fail';
   });
@@ -419,7 +436,7 @@ try {
     '当前模型不支持图片输入',
   );
   assert.equal(await failureCard.getAttribute('role'), 'alert');
-  assert.equal(await failureCard.getByText('已自动重试 3 次，仍未完成。').count(), 1);
+  assert.equal(await failureCard.getByText('已自动重试 3 次，仍未完成。').count(), 0);
   assert.equal(await failedAnswer.locator('.interview-answer-status').innerText(), '生成失败');
   assert.equal(await failedAnswer.locator('.answer-bubble').innerText(), '合成未完成回答');
   assert.equal(
@@ -464,7 +481,11 @@ try {
       events: await floating.evaluate(() => window.syntheticScreenshotEvents),
     });
   assert.equal(await previews.count(), 1);
-  assert.equal((await requests()).length, 7);
+  assert.equal(
+    (await requests()).length,
+    4,
+    'Unsupported/unknown failures are not automatically retried',
+  );
   const failedHash = (await requests()).at(-1).turns.at(-1).files[0].hash;
   assert.ok(
     (await requests())
@@ -475,7 +496,7 @@ try {
     globalThis.screenshotFixture.providerMode = 'normal';
   });
   await floating.getByRole('button', { name: '重试面试回答', exact: true }).last().click();
-  const retried = await waitAnswer(8);
+  const retried = await waitAnswer(5);
   await waitCount(0);
   assert.equal(await captured(), capturesBeforeRetry);
   assert.equal(retried.turns.at(-1).files[0].hash, failedHash);
@@ -495,6 +516,166 @@ try {
   const history = await main.evaluate(() => localStorage.getItem('copilot-interview-history-v1'));
   assert.ok(history?.includes('"screenshot":"only"'));
   assert.ok(!history.match(/data:image|iVBORw0KGgo|"bytes"|"preview"|screenshotIds/));
+  const imageIds = [
+    ...new Set(
+      JSON.parse(history).flatMap((record) =>
+        record.answers.flatMap((answer) => answer.images?.map((image) => image.id) ?? []),
+      ),
+    ),
+  ];
+  assert.ok(imageIds.length > 0, 'Sent screenshots remain referenced in the archived record');
+  const originals = await app.evaluate(async ({ app }, ids) => {
+    const fs = process.getBuiltinModule('fs/promises');
+    const path = process.getBuiltinModule('path');
+    const crypto = process.getBuiltinModule('crypto');
+    const folder = path.join(app.getPath('userData'), 'interview-images-v1');
+    const results = [];
+    for (const id of ids) {
+      const bytes = await fs.readFile(path.join(folder, id + '.image'));
+      const preview = await fs.readFile(path.join(folder, id + '.preview'), 'utf8');
+      results.push({
+        id,
+        sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
+        preview: preview.startsWith('data:image/jpeg;base64,'),
+      });
+    }
+    return results;
+  }, imageIds);
+  assert.ok(originals.every((image) => image.preview));
+  await main.getByRole('button', { name: '面试记录', exact: true }).click();
+  await main.locator('.history-row').first().click();
+  const firstImage = main.locator('.record-images-section .interview-image-thumbnail').first();
+  await firstImage.locator('img').waitFor();
+  await firstImage.click();
+  const viewer = main.getByRole('dialog', { name: '截图', exact: true });
+  await viewer.locator('.interview-image-canvas img').waitFor();
+  const displayedOriginal = await main.evaluate(async () => {
+    const record = JSON.parse(localStorage.getItem('copilot-interview-history-v1'))[0];
+    const reference = record.answers.find((answer) => answer.images?.length).images[0];
+    const result = await window.desktop.interviewImage({ op: 'read', id: reference.id });
+    return (
+      result.ok &&
+      document.querySelector('.interview-image-canvas img').getAttribute('src') === result.dataUrl
+    );
+  });
+  assert.equal(
+    displayedOriginal,
+    true,
+    'The viewer receives stored original bytes, not the thumbnail',
+  );
+  assert.equal(await viewer.getByRole('button', { name: '原始大小', exact: true }).count(), 0);
+  assert.equal(
+    await viewer.getByRole('button', { name: '保存图片', exact: true }).isEnabled(),
+    true,
+  );
+  const save = viewer.getByRole('button', { name: '保存图片', exact: true });
+  const close = viewer.getByRole('button', { name: '关闭截图', exact: true });
+  const saveBox = await save.boundingBox(),
+    closeBox = await close.boundingBox();
+  assert.equal(saveBox.width, closeBox.width);
+  assert.equal(saveBox.height, closeBox.height);
+  assert.equal(saveBox.y, closeBox.y);
+  assert.ok(saveBox.x + saveBox.width <= closeBox.x, 'Save stays beside close at the top right');
+  const canvas = viewer.locator('.interview-image-canvas');
+  const transform = () =>
+    canvas.locator('img').evaluate((image) => {
+      const matrix = new DOMMatrixReadOnly(getComputedStyle(image).transform);
+      return { scale: matrix.a, x: matrix.e, y: matrix.f };
+    });
+  await canvas.evaluate((node) => {
+    const rect = node.getBoundingClientRect();
+    node.dispatchEvent(
+      new WheelEvent('wheel', {
+        ctrlKey: true,
+        deltaY: -80,
+        clientX: rect.x + rect.width / 2,
+        clientY: rect.y + rect.height / 2,
+        bubbles: true,
+        cancelable: true,
+      }),
+    );
+  });
+  await main.waitForFunction(() =>
+    document.querySelector('.interview-image-canvas').hasAttribute('data-zoomed'),
+  );
+  const zoomed = await transform();
+  assert.ok(zoomed.scale > 1);
+  const canvasBox = await canvas.boundingBox();
+  await main.mouse.move(canvasBox.x + canvasBox.width / 2, canvasBox.y + canvasBox.height / 2);
+  await main.mouse.wheel(40, 30);
+  await main.waitForFunction(() => {
+    const matrix = new DOMMatrixReadOnly(
+      getComputedStyle(document.querySelector('.interview-image-canvas img')).transform,
+    );
+    return matrix.e !== 0 || matrix.f !== 0;
+  });
+  const panned = await transform();
+  assert.equal(panned.scale, zoomed.scale, 'Two-finger pixel scrolling pans without zoom');
+  await main.mouse.down();
+  await main.mouse.move(
+    canvasBox.x + canvasBox.width / 2 + 30,
+    canvasBox.y + canvasBox.height / 2 + 20,
+  );
+  await main.mouse.up();
+  const dragged = await transform();
+  assert.ok(dragged.x !== panned.x || dragged.y !== panned.y);
+  await canvas.dblclick();
+  await main.waitForFunction(
+    () => !document.querySelector('.interview-image-canvas').hasAttribute('data-zoomed'),
+  );
+  assert.deepEqual(await transform(), { scale: 1, x: 0, y: 0 });
+  await viewer.press('ArrowRight');
+  await viewer.locator('.interview-image-position').getByText('2 / 5', { exact: true }).waitFor();
+  await viewer.press('ArrowLeft');
+  await viewer.locator('.interview-image-position').getByText('1 / 5', { exact: true }).waitFor();
+  const exportPath = await app.evaluate(({ app, dialog }) => {
+    const target = process
+      .getBuiltinModule('path')
+      .join(app.getPath('userData'), 'synthetic-image-export.png');
+    dialog.showSaveDialog = async (owner) => {
+      if (owner.getTitle() !== 'VoxCue') throw Error('Wrong save owner');
+      return { canceled: false, filePath: target };
+    };
+    return target;
+  });
+  await save.click();
+  await main.waitForFunction(
+    () => document.querySelector('.interview-image-save').getAttribute('aria-busy') === 'false',
+  );
+  const exportedHash = await app.evaluate(async (_electron, target) => {
+    const bytes = await process.getBuiltinModule('fs/promises').readFile(target);
+    return process.getBuiltinModule('crypto').createHash('sha256').update(bytes).digest('hex');
+  }, exportPath);
+  const firstReference = await main.evaluate(
+    () =>
+      JSON.parse(localStorage.getItem('copilot-interview-history-v1'))[0].answers.find(
+        (answer) => answer.images?.length,
+      ).images[0].id,
+  );
+  assert.equal(exportedHash, originals.find((image) => image.id === firstReference).sha256);
+  await app.evaluate(({ dialog }) => {
+    dialog.showSaveDialog = async () => ({ canceled: true });
+  });
+  await save.click();
+  await main.waitForFunction(
+    () => document.querySelector('.interview-image-save').getAttribute('aria-busy') === 'false',
+  );
+  assert.equal(await viewer.locator('.danger-text').count(), 0);
+  await app.evaluate(({ dialog }) => {
+    dialog.showSaveDialog = async () => {
+      throw Error('Synthetic export failure');
+    };
+  });
+  await save.click();
+  await viewer.getByText('保存图片失败，请检查目标位置权限和可用空间。', { exact: true }).waitFor();
+  await viewer.press('Escape');
+  await viewer.waitFor({ state: 'hidden' });
+  await firstImage.click();
+  await close.click();
+  await viewer.waitFor({ state: 'hidden' });
+  checks.push(
+    'bubble thumbnails, durable originals, live/history viewers, keyboard paging, pinch zoom, pixel pan, drag/reset, exact-byte export, cancel/error and close/reopen',
+  );
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify(
@@ -507,7 +688,8 @@ try {
         nativeAudio: false,
         realScreenCapture: !!nativeCapture,
         nativeCapture,
-        screenshotPixelsSaved: false,
+        screenshotPixelsSaved: true,
+        archivedImages: originals.length,
       },
       null,
       2,

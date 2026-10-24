@@ -484,7 +484,7 @@ try {
   );
   await capture(page, '04-audio-check');
   await start.getByRole('button', { name: '测试系统声音', exact: true }).waitFor();
-  await start.getByText('已检测到声音', { exact: true }).waitFor();
+  assert.equal(await start.locator('.audio-check-inline').count(), 0);
   await start.getByRole('button', { name: '测试麦克风', exact: true }).click();
   await start.getByRole('meter', { name: '麦克风电平', exact: true }).waitFor();
   await start.getByRole('button', { name: '停止麦克风测试', exact: true }).click();

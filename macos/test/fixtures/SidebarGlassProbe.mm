@@ -88,12 +88,19 @@ static NSDictionary *tree(NSView *view, NSInteger depth) {
         node[@"text"]=((NSTextField *)view).stringValue;
         node[@"frameHeight"]=@(NSHeight(view.frame));node[@"fittingHeight"]=@(view.fittingSize.height);
     }
+    if([view.identifier isEqualToString:@"voxcue-image-page-number"]) {
+        node[@"text"]=((NSTextField *)view).stringValue;
+        node[@"frameWidth"]=@(NSWidth(view.frame));node[@"frameHeight"]=@(NSHeight(view.frame));
+    }
     if([NSStringFromClass(view.class) isEqualToString:@"VoxCueModalBackground"]) node[@"exclusion"]=NSStringFromRect([[view valueForKey:@"exclusion"] rectValue]);
     if ([view isKindOfClass:NSProgressIndicator.class]) {
         NSProgressIndicator *progress=(NSProgressIndicator *)view;
         node[@"progressStyle"]=@(progress.style);node[@"indeterminate"]=@(progress.indeterminate);
         node[@"value"]=@(progress.doubleValue);node[@"controlSize"]=@(progress.controlSize);
         node[@"frameWidth"]=@(NSWidth(progress.frame));node[@"frameHeight"]=@(NSHeight(progress.frame));
+        node[@"drawingHeight"]=@(NSHeight(progress.bounds));
+        NSView *root=progress.window.contentView;NSRect rect=[progress convertRect:progress.bounds toView:root];
+        node[@"centerY"]=@(root.isFlipped?NSMidY(rect):NSHeight(root.bounds)-NSMidY(rect));
     }
     if ([view isKindOfClass:NSSwitch.class]) node[@"state"] = @(((NSSwitch *)view).state);
     if ([view isKindOfClass:NSSlider.class]) {
@@ -158,11 +165,17 @@ static NSDictionary *tree(NSView *view, NSInteger depth) {
         node[@"frameHeight"]=@(NSHeight(button.frame));node[@"controlSize"]=@(button.controlSize);
         NSRect imageFrame=[button convertRect:[button.cell imageRectForBounds:button.bounds] toView:view.window.contentView];
         node[@"imageLeft"]=@(NSMinX(imageFrame));
+        node[@"imageWidth"]=@(NSWidth(imageFrame));node[@"imageHeight"]=@(NSHeight(imageFrame));
+        node[@"imageCenterX"]=@(NSMidX(imageFrame));
+        node[@"imageCenterY"]=@(view.window.contentView.isFlipped?NSMidY(imageFrame):NSHeight(view.window.contentView.bounds)-NSMidY(imageFrame));
         NSView *contentHost=button.superview;
-        if([NSStringFromClass(contentHost.class) isEqualToString:@"VoxCueContentHost"])
+        if([NSStringFromClass(contentHost.class) isEqualToString:@"VoxCueContentHost"]) {
+            node[@"hoverEmphasized"]=[contentHost valueForKey:@"hoverEmphasized"];
+            node[@"borderEmphasized"]=[contentHost valueForKey:@"borderEmphasized"];
             for(NSView *sibling in contentHost.superview.subviews)
                 if([NSStringFromClass(sibling.class) isEqualToString:@"VoxCueScrollChrome"])
                     node[@"underScrollChrome"]=@([contentHost.superview.subviews indexOfObject:contentHost]<[contentHost.superview.subviews indexOfObject:sibling]);
+        }
         node[@"tintProminence"] = @(button.tintProminence);
         node[@"bezelColor"] = color(button.bezelColor);
         node[@"foregroundColor"] = color(button.contentTintColor);
@@ -210,6 +223,8 @@ static napi_value inspect(napi_env env, napi_callback_info info) {
     NSDictionary *lastMenu=objc_getAssociatedObject(view,&lastMenuFrameKey) ?: @{};
     NSDictionary *state = @{
         @"menuFrame": lastMenu,
+        @"menuKeyTimeout": objc_getAssociatedObject(view,@selector(keyDown:)) ?: @NO,
+        @"menuKeyStart": objc_getAssociatedObject(view,@selector(keyUp:)) ?: @(-1),
         @"menuItems": objc_getAssociatedObject(view,&lastMenuItemsKey) ?: @[],
         @"menuGeneration": @(menuGeneration), @"menuTracking": @(trackingMenu != nil),
         @"trafficLights": controls,
@@ -405,6 +420,8 @@ static napi_value menuKeys(napi_env env,napi_callback_info info) {
                 NSDictionary *geometry=@{@"x":@(frame.origin.x),@"y":@(root.isFlipped?frame.origin.y:NSHeight(root.bounds)-NSMaxY(frame)),@"width":@(frame.size.width),@"height":@(frame.size.height)};
                 objc_setAssociatedObject(root,&lastMenuFrameKey,geometry,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             }
+            if(i==0)
+                objc_setAssociatedObject(root,@selector(keyUp:),@([trackingMenu indexOfItem:trackingMenu.highlightedItem]),OBJC_ASSOCIATION_RETAIN_NONATOMIC);
             unichar character=key==125?NSDownArrowFunctionKey:key==126?NSUpArrowFunctionKey:key==53?0x1b:0x0d;
             NSString *text=[NSString stringWithCharacters:&character length:1];
             for(NSNumber *kind in @[@(NSEventTypeKeyDown),@(NSEventTypeKeyUp)]) {
@@ -413,13 +430,17 @@ static napi_value menuKeys(napi_env env,napi_callback_info info) {
             }
         });
     }
+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW,5*NSEC_PER_SEC),dispatch_get_main_queue(),^{
+        if(trackingMenu && menuGeneration==generation){objc_setAssociatedObject(window.contentView,@selector(keyDown:),@YES,OBJC_ASSOCIATION_RETAIN_NONATOMIC);[trackingMenu cancelTracking];}
+    });
     napi_get_undefined(env,&result);return result;
 }
 static napi_value selectMenuItem(napi_env env,napi_callback_info info) {
     size_t count=2,length=0;napi_value args[2],result;char title[512]={};
     napi_get_cb_info(env,info,&count,args,nullptr,nullptr);
     menuOwner=host(env,args[0]);napi_get_value_string_utf8(env,args[1],title,sizeof(title),&length);
-    menuSelection=[NSString stringWithUTF8String:title];napi_get_undefined(env,&result);return result;
+    menuSelection=[NSString stringWithUTF8String:title];
+    napi_get_undefined(env,&result);return result;
 }
 static napi_value typeOwnText(napi_env env,napi_callback_info info) {
     size_t count=2,length=0;napi_value args[2],result;char text[512]={};
@@ -452,7 +473,9 @@ static napi_value initialize(napi_env env, napi_value exports) {
         for(NSMenuItem *item in ((NSMenu *)notification.object).itemArray) {
             BOOL visible=item.image!=nil;
             if(@available(macOS 27.0,*))visible=visible && item.preferredImageVisibility==NSMenuItemImageVisibilityVisible;
-            [items addObject:@{@"title":item.title,@"image":@(item.image!=nil),@"imageVisible":@(visible),@"separator":@(item.isSeparatorItem)}];
+            NSMutableDictionary *row=[@{@"title":item.title,@"image":@(item.image!=nil),@"imageVisible":@(visible),@"separator":@(item.isSeparatorItem),@"checked":@(item.state==NSControlStateValueOn)} mutableCopy];
+            row[@"customView"]=@(item.view!=nil);
+            [items addObject:row];
         }
         objc_setAssociatedObject(menuOwner,&lastMenuItemsKey,items,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
         if(menuSelection) {
@@ -460,7 +483,7 @@ static napi_value initialize(napi_env env, napi_value exports) {
             dispatch_after(dispatch_time(DISPATCH_TIME_NOW,300*NSEC_PER_MSEC),dispatch_get_main_queue(),^{
                 if(trackingMenu!=menu)return;
                 NSInteger index=[menu indexOfItemWithTitle:title];
-                if(index>=0) [menu performActionForItemAtIndex:index];
+                if(index>=0)[menu performActionForItemAtIndex:index];
                 [menu cancelTracking];
             });
         }

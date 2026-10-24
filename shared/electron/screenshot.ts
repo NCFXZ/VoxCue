@@ -8,8 +8,8 @@ import {
 import type { ChatFile } from './contracts/chat';
 
 // Capture only when an authenticated interview request explicitly asks for it.
-// Full image bytes remain in main-process memory. Only a small composer preview
-// enters Renderer; neither copy is written to disk or the clipboard.
+// Draft image bytes remain in main-process memory; only a small preview enters
+// Renderer. Explicitly sent images are archived separately for local history.
 export async function captureInterviewScreenshot(
   window: BrowserWindow,
   platform: NodeJS.Platform,

@@ -8,7 +8,7 @@ interface HistoryState {
   error: string | null;
   load(): void;
   save(record: InterviewRecord): void;
-  remove(id: string): boolean;
+  remove(id: string): Promise<boolean>;
   rename(id: string, title: string): boolean;
   generateTitle(id: string, modelId?: string): Promise<void>;
   applyTitle(event: InterviewTitleEvent): void;
@@ -93,11 +93,34 @@ export const useHistory = create<HistoryState>((set) => ({
       set({ error: '记录保存失败，请检查本地存储空间。当前对话仍可查看。' });
     }
   },
-  remove(id) {
+  async remove(id) {
     try {
+      const removed = localHistory.list().find((record) => record.id === id);
       localHistory.remove(id);
       generating.delete(id);
-      set({ records: localHistory.list(), error: null });
+      const records = localHistory.list();
+      set({ records, error: null });
+      const retained = new Set(
+        records.flatMap((record) =>
+          record.answers.flatMap((answer) => answer.images?.map((image) => image.id) ?? []),
+        ),
+      );
+      const ids = [
+        ...new Set(
+          removed?.answers.flatMap((answer) => answer.images?.map((image) => image.id) ?? []) ?? [],
+        ),
+      ].filter((id) => !retained.has(id));
+      try {
+        for (let offset = 0; offset < ids.length; offset += 100) {
+          const result = await window.desktop?.interviewImage({
+            op: 'remove',
+            ids: ids.slice(offset, offset + 100),
+          });
+          if (!result?.ok) throw Error('Image cleanup failed');
+        }
+      } catch {
+        set({ error: '面试记录已删除，但部分截图清理失败，请稍后重试。' });
+      }
       return true;
     } catch {
       set({ error: '删除失败，本地记录未更改。' });

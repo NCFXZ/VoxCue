@@ -1,4 +1,5 @@
 #include "ScrollChrome.h"
+#include "ContentControls.h"
 #import <objc/runtime.h>
 #import <QuartzCore/QuartzCore.h>
 #include <cstring>
@@ -137,6 +138,14 @@ bool VoxCuePositionScrollingControl(NSView *host, NSView *control) {
 bool VoxCueIsScrollChrome(NSView *view) {
     return [view isKindOfClass:VoxCueScrollChrome.class] || [view isKindOfClass:VoxCueModalBackground.class];
 }
+NSView *VoxCueScrollHeaderContent(NSView *host, NSRect control) {
+    VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
+    // Only the material fades. Controls must not inherit its empty/partial
+    // opacity, so they join the actual contentView once the glass is opaque.
+    if(!chrome || chrome.blocked || chrome.header.hidden || chrome.header.alphaValue<1)return nil;
+    NSRect frame=[chrome convertRect:control fromView:host];
+    return NSContainsRect(chrome.header.frame,frame)?chrome.header.contentView:nil;
+}
 NSView *VoxCueModalBackdropAnchor(NSView *host) {
     {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
@@ -152,8 +161,11 @@ NSRect VoxCueModalExclusion(NSView *host) {
 void VoxCueRemoveScrollChrome(NSView *host) {
     {
         VoxCueScrollChrome *chrome=objc_getAssociatedObject(host,&chromeKey);
-        [chrome.composer detach];[chrome.follow detach];[chrome.modalBackdrop removeFromSuperview];[chrome removeFromSuperview];
         objc_setAssociatedObject(host,&chromeKey,nil,OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+        // Move controls out before retiring their old header, even when the
+        // renderer's control snapshot has not changed between routes.
+        VoxCueRefreshContentControlPlacement(host);
+        [chrome.composer detach];[chrome.follow detach];[chrome.modalBackdrop removeFromSuperview];[chrome removeFromSuperview];
     }
 }
 static NSView *getHost(napi_env env,napi_value value) {
@@ -210,6 +222,13 @@ napi_value VoxCueConfigureScrollChrome(napi_env env,napi_callback_info info) {
         chrome.frame=main.bounds;
         NSRect headerRect=rect(env,area,host);headerRect.origin.y=host.isFlipped?number(env,area,"y"):NSMaxY(headerRect)-number(env,args[1],"topHeight");headerRect.size.height=number(env,args[1],"topHeight");
         chrome.header.frame=[chrome convertRect:headerRect fromView:host];
+        chrome.header.wantsLayer=YES;
+        CGFloat headerRadius=number(env,args[1],"headerRadius");
+        if(headerRadius>0) {
+            CAShapeLayer *mask=[CAShapeLayer layer];
+            CGPathRef path=dialogPath([chrome.header convertRect:rect(env,area,host) fromView:host],headerRadius);
+            mask.path=path;CGPathRelease(path);chrome.header.layer.mask=mask;
+        } else chrome.header.layer.mask=nil;
         chrome.header.alphaValue=number(env,args[1],"headerOpacity");
         napi_value titleValue;char titleText[512]={};size_t titleLength=0;
         napi_get_named_property(env,args[1],"titleText",&titleValue);
@@ -253,6 +272,9 @@ napi_value VoxCueConfigureScrollChrome(napi_env env,napi_callback_info info) {
             }
             mask.path=path;CGPathRelease(path);surface.layer.mask=mask;[surface place];
         }
+        // The two presentation ports can update independently. Reparent after
+        // every material/opacity/modal update using saved window coordinates.
+        VoxCueRefreshContentControlPlacement(host);
         napi_get_boolean(env,true,&result);
     }
     return result;

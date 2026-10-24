@@ -58,7 +58,8 @@ export interface InterviewScreenshot {
   id: string;
   preview: string;
 }
-export type InterviewScreenshotCall = { op: 'capture' | 'clear' } | { op: 'remove'; id: string };
+export type InterviewScreenshotCall =
+  { op: 'capture' | 'clear' } | { op: 'remove'; id: string } | { op: 'archive'; ids: string[] };
 export type InterviewAnswerRequest = {
   id: string;
   modelId: string;

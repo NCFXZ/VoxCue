@@ -1,5 +1,5 @@
 import { readEvents } from './sse';
-import { ChatServiceError } from './errors';
+import { ChatServiceError, networkFailure } from './errors';
 
 // Error bodies are untrusted streams too: headers alone do not finish a request.
 export async function readErrorResponse(
@@ -51,6 +51,9 @@ export async function readErrorResponse(
     } catch {
       return null;
     }
+  } catch (error) {
+    deadline.throwIfAborted();
+    throw networkFailure(error);
   } finally {
     clearTimeout(timer);
     deadline.removeEventListener('abort', cancel);
@@ -80,6 +83,10 @@ export async function requestResponse(
   );
   try {
     return await fetcher(url, { ...init, signal: AbortSignal.any([signal, waiting.signal]) });
+  } catch (error) {
+    signal.throwIfAborted();
+    waiting.signal.throwIfAborted();
+    throw networkFailure(error);
   } finally {
     clearTimeout(timer);
   }
@@ -108,7 +115,8 @@ export async function* responseEvents(
       idleTimeoutMs,
     );
   };
-  if (!response.body) throw new Error('服务返回空响应，请重试。');
+  if (!response.body)
+    throw new ChatServiceError({ code: 'empty_response', message: '服务返回空响应，请重试。' });
   const reader = response.body.getReader();
   const cancel = () => {
     void reader.cancel().catch(() => {});
@@ -229,6 +237,9 @@ export async function* responseEvents(
     throw new Error(
       `未收到有效回答（HTTP ${response.status}，格式 ${type}）。请检查网络代理或稍后重试。`,
     );
+  } catch (error) {
+    signal.throwIfAborted();
+    throw networkFailure(error);
   } finally {
     clearTimeout(timer!);
     signal.removeEventListener('abort', cancel);

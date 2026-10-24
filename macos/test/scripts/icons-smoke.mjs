@@ -207,30 +207,11 @@ try {
   assert.ok(dark.some((item) => item.color !== 'rgb(0, 0, 0)'));
   await settings.screenshot({ animations: 'disabled' });
   await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
-  const refreshSymbol = await settings
-    .getByRole('button', { name: '刷新用量', exact: true })
-    .locator('svg')
-    .getAttribute('data-sf-symbol');
-  const resetSymbol = await settings
-    .getByRole('button', { name: '重置用量', exact: true })
-    .locator('svg')
-    .first()
-    .getAttribute('data-sf-symbol');
-  const updateSymbol = await settings
-    .getByRole('button', { name: '更新', exact: true })
-    .locator('svg')
-    .getAttribute('data-sf-symbol');
-  assert.equal(refreshSymbol, symbols.Refresh);
-  assert.equal(resetSymbol, symbols.Reset);
-  assert.equal(updateSymbol, symbols.Update);
-  assert.equal(new Set([refreshSymbol, resetSymbol, updateSymbol]).size, 3);
-  if (process.argv.includes('--preview'))
-    console.log(
-      JSON.stringify({
-        preview: '重置、刷新与侧边更新入口使用不同的图标',
-        jpeg: (await settings.screenshot({ type: 'jpeg', quality: 65 })).toString('base64'),
-      }),
-    );
+  const officialUsage = settings.getByRole('link', { name: '查看官方用量', exact: true });
+  assert.equal(await officialUsage.getAttribute('href'), 'https://chatgpt.com/settings/usage');
+  assert.equal(await officialUsage.locator('svg').count(), 0);
+  assert.equal(await settings.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
+  assert.equal(new Set([symbols.Refresh, symbols.Reset, symbols.Update]).size, 3);
   await settings.getByRole('button', { name: '更新', exact: true }).click();
   await settings.getByRole('button', { name: '检查更新', exact: true }).waitFor();
   assert.equal(

@@ -123,7 +123,7 @@ describe('历史时间线、关联与持久化', () => {
     useHistory.getState().applyTitle({ recordId: 'history-r', error: '失败' });
     expect(useHistory.getState().records[0].titleStatus).toBe('failed');
     await useHistory.getState().generateTitle('history-r', 'model');
-    useHistory.getState().remove('history-r');
+    await useHistory.getState().remove('history-r');
     useHistory.getState().applyTitle({ recordId: 'history-r', title: '迟到标题' });
     expect(useHistory.getState().records).toEqual([]);
   });
@@ -147,7 +147,7 @@ describe('历史时间线、关联与持久化', () => {
     useHistory.getState().load();
     expect(useHistory.getState().records[0].title).toBe('再次修改');
   });
-  it('无效标题、存储失败和已删除记录不覆盖原件或复活记录', () => {
+  it('无效标题、存储失败和已删除记录不覆盖原件或复活记录', async () => {
     useHistory.getState().save(record());
     const before = storage.getItem('copilot-interview-history-v1');
     for (const title of ['', '   ', 'x'.repeat(81), '第一行\n第二行'])
@@ -158,7 +158,7 @@ describe('历史时间线、关联与持久化', () => {
     expect(useHistory.getState().rename('history-r', '不会保存')).toBe(false);
     fail.mockRestore();
     expect(storage.getItem('copilot-interview-history-v1')).toBe(before);
-    useHistory.getState().remove('history-r');
+    await useHistory.getState().remove('history-r');
     expect(useHistory.getState().rename('history-r', '已删除')).toBe(false);
     expect(createHistoryService(storage).list()).toEqual([]);
   });

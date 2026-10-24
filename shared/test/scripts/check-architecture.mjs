@@ -218,7 +218,11 @@ export function boundaryViolations(graph) {
         fail('公开契约只能依赖同层纯类型/工具');
       if (file === 'electron/preload.ts' && !edge.typeOnly && target !== 'electron')
         fail('沙箱 preload 的运行时依赖只能是 electron');
-      if (/^@github\/copilot-sdk(?:\/|$|-)/.test(target)) fail('已移除的 SDK 不得重新进入应用');
+      if (
+        /^@github\/copilot-sdk(?:\/|$|-)/.test(target) &&
+        !file.startsWith('electron/backend/copilot/')
+      )
+        fail('Copilot SDK 只能由专用后台适配器访问');
       if (
         !edge.typeOnly &&
         /^electron-updater(?:\/|$)/.test(target) &&

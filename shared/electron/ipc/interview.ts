@@ -1,10 +1,12 @@
 import type { AIChatService } from '../backend/chat/ports';
-import { publicFailure } from '../backend/chat/errors';
+import { publicFailure, ChatServiceError } from '../backend/chat/errors';
+import { retryableChatError } from '../application/chatRetry';
 import type { InterviewAnswerRequest, InterviewConfiguration } from '../contracts/speech';
 import { reasoningEfforts, type ChatFile, type ChatModel } from '../contracts/chat';
 import { InterviewContext, interviewInstructions } from '../application/interviewContext';
 import { handleDesktop, sendDesktop } from './handle';
 import { randomUUID } from 'node:crypto';
+import type { InterviewImage } from '../contracts/interviewImages';
 export function registerInterviewIpc(d: {
   chat: AIChatService;
   requireInterview: (e: Electron.IpcMainInvokeEvent) => void;
@@ -16,10 +18,13 @@ export function registerInterviewIpc(d: {
   ) => Pick<InterviewConfiguration, 'modelId' | 'effort'>;
   context: InterviewContext;
   captureScreen: (signal: AbortSignal) => Promise<{ file: ChatFile; preview: string }>;
+  archiveImages: (
+    images: { id: string; preview: string; file: ChatFile }[],
+  ) => Promise<InterviewImage[]>;
 }) {
   let active: { id: string; controller: AbortController } | undefined;
   let capture: AbortController | undefined;
-  const screenshots = new Map<string, ChatFile>();
+  const screenshots = new Map<string, { file: ChatFile; preview: string }>();
   const clearScreenshots = () => {
     capture?.abort();
     capture = undefined;
@@ -30,11 +35,21 @@ export function registerInterviewIpc(d: {
     if (
       !call ||
       typeof call !== 'object' ||
-      !['capture', 'remove', 'clear'].includes(call.op) ||
+      !['capture', 'remove', 'clear', 'archive'].includes(call.op) ||
       Object.keys(call).some(
-        (key) => !['op', ...(call.op === 'remove' ? ['id'] : [])].includes(key),
+        (key) =>
+          ![
+            'op',
+            ...(call.op === 'remove' ? ['id'] : call.op === 'archive' ? ['ids'] : []),
+          ].includes(key),
       ) ||
-      (call.op === 'remove' && (typeof call.id !== 'string' || call.id.length > 100))
+      (call.op === 'remove' && (typeof call.id !== 'string' || call.id.length > 100)) ||
+      (call.op === 'archive' &&
+        (!Array.isArray(call.ids) ||
+          !call.ids.length ||
+          call.ids.length > 5 ||
+          new Set(call.ids).size !== call.ids.length ||
+          call.ids.some((id) => typeof id !== 'string' || !screenshots.has(id))))
     )
       throw Error('Invalid screenshot operation');
     if (call.op === 'clear') {
@@ -47,6 +62,16 @@ export function registerInterviewIpc(d: {
     }
     if (d.isDemo() || !d.configuration()?.aiEnabled)
       return { ok: false, error: { message: '截图回答需要先连接模型服务。' } };
+    if (call.op === 'archive') {
+      const images = call.ids.map((id) => ({ id, ...screenshots.get(id)! }));
+      try {
+        const saved = await d.archiveImages(images);
+        d.requireInterview(e);
+        return { ok: true, images: saved };
+      } catch {
+        return { ok: false, error: { message: '截图保存失败，请检查本机存储空间后重试。' } };
+      }
+    }
     if (capture || screenshots.size >= 5)
       return {
         ok: false,
@@ -60,7 +85,7 @@ export function registerInterviewIpc(d: {
       if (capture !== controller || e.sender.isDestroyed())
         throw new DOMException('Aborted', 'AbortError');
       const id = randomUUID();
-      screenshots.set(id, file);
+      screenshots.set(id, { file, preview });
       return { ok: true, screenshot: { id, preview } };
     } catch (error) {
       return { ok: false, error: publicFailure(error) };
@@ -134,8 +159,14 @@ export function registerInterviewIpc(d: {
     const question = screenshotOnly ? '请直接解答截图中的题目。' : v.question!.trim();
     const snapshot = d.context.prepare(v.id, question, !screenshotOnly);
     const { customInstructions, role: _legacyRole, ...profileFacts } = configuration.profile ?? {};
+    const scope = d.chat.beginRequest?.({
+      references: false,
+      retrievalQuery: snapshot.retrievalQuery,
+    });
+    const dispose = () => scope?.dispose();
+    current.controller.signal.addEventListener('abort', dispose, { once: true });
     try {
-      if (ids.length) snapshot.turns.at(-1)!.files = ids.map((id) => screenshots.get(id)!);
+      if (ids.length) snapshot.turns.at(-1)!.files = ids.map((id) => screenshots.get(id)!.file);
       let answerText = '';
       const request = {
         id: v.id,
@@ -164,7 +195,7 @@ export function registerInterviewIpc(d: {
         answerText = '';
         let receiving = true;
         try {
-          result = await d.chat.stream(
+          result = await (scope?.stream ?? d.chat.stream.bind(d.chat))(
             request,
             (event) => {
               if (
@@ -180,14 +211,18 @@ export function registerInterviewIpc(d: {
             current.controller.signal,
           );
           current.controller.signal.throwIfAborted();
-          if (!(result.answerText ?? answerText).trim()) throw Error('未收到有效回答，请重试。');
+          if (!(result.answerText ?? answerText).trim())
+            throw new ChatServiceError({
+              code: 'empty_response',
+              message: '未收到有效回答，请重试。',
+            });
           break;
         } catch (error) {
           receiving = false;
           current.controller.signal.throwIfAborted();
           if (active !== current || e.sender.isDestroyed())
             throw new DOMException('Aborted', 'AbortError');
-          if (attempt === 3) throw error;
+          if (attempt === 3 || !retryableChatError(error)) throw error;
           sendDesktop(e.sender, 'chat:event', {
             id: v.id,
             type: 'interview-retry',
@@ -218,13 +253,16 @@ export function registerInterviewIpc(d: {
       current.controller.signal.throwIfAborted();
       if (active !== current || e.sender.isDestroyed())
         throw new DOMException('Aborted', 'AbortError');
-      if (!result) throw Error('未收到有效回答，请重试。');
+      if (!result)
+        throw new ChatServiceError({ code: 'empty_response', message: '未收到有效回答，请重试。' });
       if (!result.warning) d.context.answer(snapshot, result.answerText ?? answerText);
       for (const id of ids) screenshots.delete(id);
       return { ok: true, ...result };
     } catch (error) {
       return { ok: false, error: publicFailure(error) };
     } finally {
+      scope?.dispose();
+      current.controller.signal.removeEventListener('abort', dispose);
       if (active === current) active = undefined;
     }
   });

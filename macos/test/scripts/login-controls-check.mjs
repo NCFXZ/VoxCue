@@ -25,6 +25,9 @@ export async function checkLoginControls({ app, page, probeFile, poll }) {
   assert.equal(await brand.count(), 1);
   await brand.evaluate((image) => image.decode());
   assert.ok(await brand.evaluate((image) => image.complete && image.naturalWidth > 0));
+  const copilot = page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true });
+  assert.equal(await copilot.count(), 1);
+  await copilot.locator('img.service-brand-icon').evaluate((image) => image.decode());
   await app.evaluate(({ BrowserWindow }, file) => {
     const require = process
       .getBuiltinModule('module')
@@ -118,6 +121,25 @@ export async function checkLoginControls({ app, page, probeFile, poll }) {
     assert.equal(native.frameHeight, 46);
     assert.equal(native.focusRingType, 1);
     assert.ok(native.titleColor.slice(0, 3).every((value) => Math.abs(value - foreground) < 0.01));
+    const copilotNative = flatten(value.tree).find(
+      (node) => node.class === 'NSButton' && node.title === '使用 GitHub Copilot 继续',
+    );
+    assert.ok(copilotNative, 'Copilot also uses an actual AppKit login control');
+    for (const key of [
+      'bezelStyle',
+      'borderShape',
+      'frameHeight',
+      'focusRingType',
+      'contentCentered',
+      'image',
+    ])
+      assert.equal(copilotNative[key], native[key]);
+    assert.ok(
+      copilotNative.foregroundColor
+        .slice(0, 3)
+        .every((value) => Math.abs(value - foreground) < 0.01),
+    );
+    assert.equal(await copilot.evaluate((node) => getComputedStyle(node).opacity), '0');
     assert.equal(await button.evaluate((node) => getComputedStyle(node).opacity), '0');
     await button.hover();
     await poll(
@@ -125,6 +147,16 @@ export async function checkLoginControls({ app, page, probeFile, poll }) {
       (value) =>
         flatten(value.tree).some((node) => node.title === '使用 ChatGPT 继续' && node.highlighted),
       'Login keeps native hover feedback',
+    );
+    await page.mouse.move(900, 550);
+    await copilot.hover();
+    await poll(
+      inspect,
+      (value) =>
+        flatten(value.tree).some(
+          (node) => node.title === '使用 GitHub Copilot 继续' && node.highlighted,
+        ),
+      'Copilot keeps the same native hover feedback',
     );
     await page.mouse.move(900, 550);
     // Wait for Chromium's GPU frame as well as AppKit properties. Capturing
@@ -202,6 +234,34 @@ export async function checkLoginControls({ app, page, probeFile, poll }) {
   }
   await assert.rejects(
     page.evaluate(() => window.desktop.setContentControls([{ kind: 'search' }])),
+  );
+  await assert.rejects(
+    page.evaluate(() => {
+      const control = {
+        id: 900,
+        kind: 'button-glass',
+        symbol: 'brand.copilot',
+        label: 'Duplicate',
+        x: 20,
+        y: 50,
+        width: 200,
+        height: 46,
+        value: '',
+        symbolColor: null,
+        color: '#000000',
+        disabled: false,
+        covered: false,
+        overGlass: true,
+        pressed: false,
+        focused: false,
+        checked: false,
+        hovered: false,
+        trailing: false,
+        opacity: 1,
+      };
+      return window.desktop.setContentControls([control, { ...control, id: 901 }]);
+    }),
+    'Login permits only one native button per fixed brand',
   );
   await assert.rejects(
     page.evaluate(() =>

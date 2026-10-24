@@ -38,6 +38,13 @@ app.whenReady().then(async()=>{
   const body='传感器提离采用 PID 闭环控制。 '+'The eddy current sensor uses PID feedback to control lift-off. '.repeat(150)+' tailguardxyz is retained.';
   const a=input('sensor','## Q001. How do you control sensor lift-off?\\n\\n'+body+'\\n\\n### 追问 1：怎样限幅？\\n\\n限制输出并保留完整追问。');
   const first=await host.indexDocument(a,signal());assert.ok(first.chunkCount>first.itemCount);
+  const committed=await host.version('smoke',signal());assert.match(committed,/^[a-f0-9]{64}$/);
+  const prepared=await host.prepareQuery('上一题：PID 控制\\n当前追问：这种方法怎样限幅？','这种方法怎样限幅？',signal());assert.ok(prepared.includes('PID'));
+  const childHit=(await host.search('怎样限幅',5,'hybrid',signal(),'smoke',{rawLimit:60}))[0];assert.ok(childHit.matchedItemId);assert.match(childHit.revision,/^[a-f0-9]{64}$/);
+  const expected={baseId:'smoke',documentId:'sensor',revision:childHit.revision};
+  const detailed=await host.getItem(childHit.itemId,signal(),expected);assert.ok(detailed.rootContent.includes('tailguardxyz'));assert.equal(detailed.source.baseId,'smoke');
+  assert.equal(await host.getItem(childHit.itemId,signal(),{...expected,baseId:'other'}),null);
+
   await assert.rejects(host.search('sensor',0,'hybrid',signal()),e=>e instanceof KnowledgeError&&e.code==='invalid_request');
   assert.equal((await host.indexDocument(a,signal())).updatedAt,first.updatedAt);
   for(const query of ['传感器提离如何闭环控制','How is sensor lift-off controlled?','Eddy Current PID 控制'])for(const mode of ['keyword','vector','hybrid']){
@@ -45,25 +52,13 @@ app.whenReady().then(async()=>{
   }
   const {RagChatService}=require(path.join(config.root,'dist-electron/shared/electron/application/rag.js'));
   let sent;const provider={models:async()=>[],usage:async()=>({}),resetUsage:async()=>({}),stream:async(req,emit,sig)=>{sig.throwIfAborted();sent=req;emit({id:req.id,type:'delta',text:'synthetic provider output'});return {usage:null,sources:[],answerText:'synthetic provider output'};}};
-  const rag=new RagChatService(provider,host,async()=>'local');
-  const request={id:'native-rag',modelId:'synthetic-provider',instructions:'Answer the question',webSearch:false,turns:[{role:'user',content:'How is sensor lift-off controlled?'}]};
+  const rag=new RagChatService(provider,host);
+  const request={id:'native-rag',knowledgeBaseId:'smoke',modelId:'synthetic-provider',instructions:'Answer the question',webSearch:false,turns:[{role:'user',content:'How is sensor lift-off controlled?'}]};
   const completion=await rag.stream(request,()=>{},signal());assert.ok(sent.turns[0].content.includes('tailguardxyz'));assert.ok(sent.turns[0].content.includes('完整追问'));assert.equal(completion.rag.evidenceCount,1);results.push({rag:completion.rag,provider:'synthetic, no live account'});
-  const {ChatGPTService}=require(path.join(config.root,'dist-electron/shared/electron/backend/chat/service.js'));const {UsageLedger}=require(path.join(config.root,'dist-electron/shared/electron/backend/chat/usage.js'));
-  let toolRound=0;const transport=async(url,options)=>{
-    if(String(url).endsWith('/models'))return Response.json({models:[{slug:'synthetic-account-model',display_name:'Synthetic',visibility:'list'}]});
-    const body=JSON.parse(options.body);assert.equal(body.store,false);assert.equal(body.stream,true);assert.equal(body.tools[0].type,'namespace');toolRound++;
-    const fn=(name,args,id)=>({type:'function_call',namespace:'voxcue_knowledge',name,arguments:JSON.stringify(args),call_id:id});
-    if(toolRound===1)return Response.json({object:'response',id:'fc-round-1',status:'completed',output:[fn('search_knowledge_base',{query:'sensor lift-off',topK:5,mode:'hybrid'},'call-search')],usage:{input_tokens:10,output_tokens:2,total_tokens:12}});
-    if(toolRound===2){const output=body.input.find(i=>i.type==='function_call_output'&&i.call_id==='call-search');const itemId=JSON.parse(output.output).candidates[0].itemId;return Response.json({object:'response',id:'fc-round-2',status:'completed',output:[fn('get_knowledge_item',{itemId},'call-item')],usage:{input_tokens:10,output_tokens:2,total_tokens:12}});}
-    assert.ok(body.input.some(i=>i.type==='function_call_output'&&i.output.includes('tailguardxyz')));
-    return Response.json({object:'response',id:'fc-final',status:'completed',output:[{type:'message',content:[{type:'output_text',text:'synthetic function answer'}]}],usage:{input_tokens:10,output_tokens:2,total_tokens:12}});
-  };
-  const actualProvider=new ChatGPTService({access:async()=>({token:'synthetic-only',account:'synthetic-only'}),ledger:new UsageLedger(path.join(config.output,'usage')),fetch:transport});
-  const functionRag=new RagChatService(actualProvider,host,async()=>'function');const functionResult=await functionRag.stream({...request,modelId:'synthetic-account-model'},()=>{},signal());assert.equal(functionResult.answerText,'synthetic function answer');assert.equal(functionResult.rag.toolCalls,2);results.push({functionRag:functionResult.rag,provider:'actual protocol, synthetic HTTP, no live account'});
-  assert.ok(events.some(e=>e.phase==='embedding'));assert.ok(events.some(e=>e.phase==='ready'));
   await host.close();host=new KnowledgeHost(path.join(config.output,'knowledge'),config.model);
   assert.equal((await host.listDocuments()).length,1);
   await host.updateDocument(input('sensor','## Q001. PID sensor update?\\n\\nnewrevisionxyz replaces old parameters.'),signal());
+  assert.notEqual(await host.version('smoke',signal()),committed);assert.equal(await host.getItem(childHit.itemId,signal(),expected),null);
   assert.equal((await host.search('tailguardxyz',5,'keyword',signal())).length,0);
   assert.ok((await host.search('newrevisionxyz',5,'keyword',signal())).length);
   await host.removeDocument('sensor',signal());assert.equal((await host.listDocuments()).length,0);

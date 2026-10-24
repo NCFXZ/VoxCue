@@ -207,13 +207,14 @@ export function Sidebar({
               取消
             </Button>
             <Button
+              variant="dangerGhost"
               onClick={() => {
                 setLoggingOut(false);
                 onLogout();
               }}
             >
               <LogOut size={16} />
-              确认退出登录
+              退出登录
             </Button>
           </div>
         </Modal>

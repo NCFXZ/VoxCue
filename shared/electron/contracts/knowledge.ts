@@ -1,5 +1,4 @@
 export type KnowledgeMode = 'keyword' | 'vector' | 'hybrid';
-export type RagMode = 'local' | 'function';
 export type KnowledgePhase =
   'queued' | 'parsing' | 'embedding' | 'indexing' | 'ready' | 'failed' | 'cancelled';
 export interface KnowledgeDocument {
@@ -23,7 +22,9 @@ export interface KnowledgeItem {
   source?: Pick<
     KnowledgeDocument,
     'name' | 'format' | 'updatedAt' | 'contentHash' | 'modelVersion' | 'indexVersion'
-  >;
+  > & { baseId?: string; revision?: string };
+  /** Original root body, before getItem appends the compatible full follow-ups. */
+  rootContent?: string;
   itemId: string;
   documentId: string;
   kind: 'qa' | 'text';
@@ -43,6 +44,11 @@ export interface KnowledgeItem {
 export interface KnowledgeHit {
   chunkId: string;
   itemId: string;
+  matchedItemId?: string;
+  /** Read-time selection, tied to the same root/revision; no index schema change. */
+  matchedItemIds?: string[];
+  grounding?: { contrast: number; contextual: boolean };
+  revision?: string;
   documentId: string;
   name: string;
   title: string;
@@ -53,6 +59,11 @@ export interface KnowledgeHit {
   mode: KnowledgeMode;
   page?: number;
   section: string;
+}
+export interface KnowledgeItemExpectation {
+  baseId: string;
+  documentId: string;
+  revision: string;
 }
 export interface KnowledgeStatus {
   requestId?: string;
@@ -66,8 +77,6 @@ export interface KnowledgeState {
   documents: KnowledgeDocument[];
   tasks: KnowledgeStatus[];
   modelReady: boolean;
-  mode: RagMode;
-  functionCalling: { supported: boolean | null; reason: string };
   error?: string;
 }
 export type KnowledgeCall =
@@ -92,8 +101,7 @@ export type KnowledgeCall =
       mode?: KnowledgeMode;
       baseId?: string;
     }
-  | { op: 'item'; requestId: string; itemId: string }
-  | { op: 'settings'; mode: RagMode };
+  | { op: 'item'; requestId: string; itemId: string; expected?: KnowledgeItemExpectation };
 export type KnowledgeValue =
   KnowledgeState | KnowledgeDocument | KnowledgeHit[] | KnowledgeItem | null;
 export type KnowledgeResult = { ok: true; value: KnowledgeValue } | { ok: false; error: string };

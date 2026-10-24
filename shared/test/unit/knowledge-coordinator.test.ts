@@ -16,7 +16,6 @@ describe('知识库一致性快照', () => {
     const coordinator = new KnowledgeCoordinator(
       { listDocuments: list } as unknown as KnowledgePort,
       dir,
-      dir,
       vi.fn(),
     );
     const pending = coordinator.call({ op: 'status' });

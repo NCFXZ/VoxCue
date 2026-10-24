@@ -131,12 +131,21 @@ assert.equal(
 );
 assert.ok(entries.includes('/dist-electron/macos/electron/updates/driver.js'));
 assert.ok(entries.includes('/dist-electron/macos/electron/credentials.js'));
+assert.ok(!entries.some((file) => /node_modules\/onnxruntime-web(?:\/|$)/.test(file)));
+assert.ok(entries.includes('/dist-electron/shared/electron/backend/copilot/runtime.js'));
+assert.ok(entries.includes('/dist-electron/shared/electron/backend/chat/codexUsage.js'));
+assert.ok(entries.includes('/node_modules/@openai/codex/package.json'));
 assert.ok(
-  !entries.some((file) =>
-    /node_modules\/(?:onnxruntime-web(?:\/|$)|@github\/copilot-sdk(?:\/|-))/.test(file),
+  entries.includes(
+    '/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
   ),
 );
-assert.ok(!entries.some((file) => file.includes('/backend/copilot/')));
+assert.ok(entries.includes('/node_modules/@github/copilot-sdk/dist/cjs/index.js'));
+assert.ok(
+  entries.includes(
+    '/node_modules/@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime',
+  ),
+);
 assert.ok(entries.some((file) => file.includes('/onnxruntime-node/')));
 assert.equal(await lstat(path.join(resources, 'models')).catch(() => null), null);
 const tools = await dmgTools();

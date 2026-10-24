@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -20,6 +20,10 @@
     "test:chat-response": "node ../shared/test/scripts/chat-response-smoke.mjs",
     "test:chat:progress": "node ../shared/test/scripts/chat-progress-smoke.mjs",
     "test:login": "node ../shared/test/scripts/login-smoke.mjs",
+    "test:copilot": "node ../shared/test/scripts/copilot-login-smoke.mjs",
+    "test:copilot:runtime": "node ../shared/test/scripts/copilot-runtime-smoke.mjs",
+    "test:chatgpt:single-login": "node ../shared/test/scripts/chatgpt-single-login-smoke.mjs",
+    "test:chatgpt:usage:runtime": "node ../shared/test/scripts/chatgpt-usage-runtime-smoke.mjs",
     "test:settings": "node ../shared/test/scripts/settings-smoke.mjs",
     "test:ui:alignment": "node ../shared/test/scripts/ui-alignment-smoke.mjs",
     "test:ui:ux": "node ../shared/test/scripts/ui-ux-smoke.mjs",
@@ -81,6 +85,8 @@
     "sherpa-onnx-node": "1.13.8",
     "tailwind-merge": "^3.0.0",
     "zustand": "^5.0.0",
+    "@github/copilot-sdk": "1.0.21",
+    "@openai/codex": "0.164.0",
     "@ennuicastr/webrtcaec3.js": "0.3.0"
   },
   "devDependencies": {
@@ -101,6 +107,8 @@
   },
   "packageManager": "pnpm@11.25.0",
   "optionalDependencies": {
-    "sherpa-onnx-darwin-arm64": "1.13.8"
+    "sherpa-onnx-darwin-arm64": "1.13.8",
+    "@github/copilot-sdk-darwin-arm64": "1.0.21",
+    "@openai/codex-darwin-arm64": "npm:@openai/codex@0.164.0-darwin-arm64"
   }
 }

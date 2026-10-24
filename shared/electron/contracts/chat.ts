@@ -19,6 +19,11 @@ export const chatGPTProvider: ModelProvider = {
   name: 'ChatGPT',
   dataRecipient: 'OpenAI',
 };
+export const copilotProvider: ModelProvider = {
+  id: 'copilot',
+  name: 'GitHub Copilot',
+  dataRecipient: 'GitHub Copilot',
+};
 export interface ChatModel {
   id: string;
   label: string;
@@ -48,6 +53,19 @@ export interface AppUsage extends TokenUsage {
 export interface ChatSource {
   title: string;
   url: string;
+}
+export interface LocalChatSource {
+  reference: string;
+  itemId: string;
+  documentId: string;
+  baseId: string;
+  revision: string;
+  source: string;
+  title: string;
+  page?: number;
+  section: string;
+  matchedItemId?: string;
+  scope?: 'excerpt';
 }
 export interface ChatFailure {
   message: string;
@@ -101,15 +119,15 @@ export type ChatResult =
       provider?: ModelProvider;
       usage: TokenUsage | null;
       sources: ChatSource[];
+      localSources?: LocalChatSource[];
       warning?: string;
       rag?: {
-        mode: 'local' | 'function';
+        mode: 'local';
         hits: number;
         evidenceCount: number;
         omitted: number;
         contextBytes: number;
         retrievalMs: number;
-        toolCalls?: number;
       };
       profileChanges?: ProfileChanges;
       skillSourceIssues?: SkillSourceIssue[];

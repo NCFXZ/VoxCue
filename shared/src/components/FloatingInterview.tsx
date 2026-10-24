@@ -1,4 +1,5 @@
 import { interviewAlwaysDark } from './ui/appearance-control';
+import { InterviewImages } from './InterviewImages';
 import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   ArrowUp,
@@ -541,8 +542,12 @@ export function FloatingInterview() {
                   className="floating-answer-item"
                   aria-label={`回答：${a.question}`}
                 >
-                  <div className="floating-question" aria-label="面试问题">
-                    {a.question}
+                  <div
+                    className={`floating-question${a.images?.length ? ' has-images' : ''}`}
+                    aria-label="面试问题"
+                  >
+                    {a.screenshot !== 'only' && <span>{a.question}</span>}
+                    <InterviewImages images={a.images} inInterview />
                     {a.screenshot && (
                       <span className="floating-screenshot-label">
                         <Screenshot size={14} />
@@ -723,6 +728,7 @@ export function FloatingInterview() {
                   </Button>
                   {state.generating ? (
                     <Button
+                      className="send-button"
                       type="button"
                       size="icon"
                       aria-label="停止当前回答"
@@ -733,7 +739,7 @@ export function FloatingInterview() {
                         state.stopAnswer();
                       }}
                     >
-                      <Square size={15} />
+                      <Square size={18} />
                     </Button>
                   ) : (
                     <Button

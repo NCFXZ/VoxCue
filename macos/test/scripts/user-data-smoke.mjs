@@ -1,6 +1,6 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -179,6 +179,17 @@ try {
   }
   app = await launch(next);
   page = await app.firstWindow();
+  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  assert.equal(
+    await page.evaluate(() => window.desktop.authSession()),
+    null,
+    'Legacy SIWC credentials require the current managed login',
+  );
+  await installUiAccount(app);
+  [page] = await Promise.all([
+    app.waitForEvent('window'),
+    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
+  ]);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -197,7 +208,10 @@ try {
     await page.evaluate(() => localStorage.getItem('migration-history-fixture')),
     'history-is-preserved',
   );
-  assert.equal((await page.evaluate(() => window.desktop.authSession())).user.id, 'migration-user');
+  assert.equal(
+    (await page.evaluate(() => window.desktop.authSession())).user.id,
+    'synthetic-account',
+  );
   assert.deepEqual(
     await app.evaluate(({ app }) => [app.getPath('userData'), app.getPath('sessionData')]),
     [destination, destination],
@@ -243,12 +257,20 @@ try {
   app = undefined;
   app = await launch(next);
   page = await app.firstWindow();
+  await installUiAccount(app);
+  [page] = await Promise.all([
+    app.waitForEvent('window'),
+    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
+  ]);
   const reopenedSurface = await composerPage(app, page);
   await reopenedSurface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await reopenedSurface.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === '迁移前的合成草稿',
   );
-  assert.equal((await page.evaluate(() => window.desktop.authSession())).user.id, 'migration-user');
+  assert.equal(
+    (await page.evaluate(() => window.desktop.authSession())).user.id,
+    'synthetic-account',
+  );
   assert.equal(await lstat(legacy).catch(() => null), null);
   console.log(
     'PASS: repeated launch reuses VoxCue with no recreated legacy directory or repeat migration.',

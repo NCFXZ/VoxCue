@@ -34,12 +34,14 @@ assert.equal(
   true,
 );
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
+assert.ok(!entries.some((name) => /node_modules\/onnxruntime-web(?:\/|$)/.test(name)));
+assert.ok(entries.includes('/dist-electron/shared/electron/backend/copilot/runtime.js'));
+assert.ok(entries.includes('/node_modules/@github/copilot-sdk/dist/cjs/index.js'));
 assert.ok(
-  !entries.some((name) =>
-    /node_modules\/(?:onnxruntime-web(?:\/|$)|@github\/copilot-sdk(?:\/|-))/.test(name),
+  entries.includes(
+    '/node_modules/@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime',
   ),
 );
-assert.ok(!entries.some((name) => name.includes('/backend/copilot/')));
 assert.ok(entries.some((name) => name.includes('/onnxruntime-node/')));
 assert.ok(entries.some((name) => name.includes('/adm-zip/')));
 assert.equal(await lstat(path.join(resources, 'models')).catch(() => null), null);
@@ -48,7 +50,7 @@ assert.equal(
   1,
 );
 console.log(
-  'PASS: temporary signed Mac application contains Node CPU dependencies and excludes models, removed SDK and ONNX Web.',
+  'PASS: temporary signed Mac application contains Copilot and Node CPU dependencies and excludes models and ONNX Web.',
 );
 const profile = path.join(testRoot, 'profile');
 let activeBundle = bundle;
@@ -90,18 +92,18 @@ try {
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
-  assert.equal(await page.locator('.service-login').count(), 1);
+  assert.equal(await page.locator('.service-login').count(), 2);
   const loginButton = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
   assert.equal(await loginButton.count(), 1);
   const loginBrand = loginButton.locator('img.service-brand-icon');
   assert.equal(await loginBrand.count(), 1);
   await loginBrand.evaluate((image) => image.decode());
   assert.ok(await loginBrand.evaluate((image) => image.complete && image.naturalWidth > 0));
-  assert.equal(await page.getByRole('button', { name: /GitHub/ }).count(), 0);
   assert.equal(
-    await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')),
-    false,
+    await page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true }).count(),
+    1,
   );
+  assert.equal(await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')), true);
   await installUiAccount(application);
   await application.evaluate(({ session }) => {
     globalThis.componentRequests = [];
@@ -271,7 +273,7 @@ try {
       );
     assert.ok(requests.every((url) => !url.includes('copilot')));
     console.log(
-      'PASS: ChatGPT-only login before downloads; settings shortcuts, theme rings, MB and speech/RAG feature guards.',
+      'PASS: ChatGPT/Copilot login before downloads; settings shortcuts, theme rings, MB and speech/RAG feature guards.',
     );
   } else {
     await waitForAsync(

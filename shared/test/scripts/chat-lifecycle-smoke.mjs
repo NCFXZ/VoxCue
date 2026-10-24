@@ -243,7 +243,7 @@ try {
   await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
   const [login] = await Promise.all([
     app.waitForEvent('window'),
-    page.getByRole('button', { name: '确认退出登录', exact: true }).click(),
+    page.getByRole('button', { name: '退出登录', exact: true }).click(),
   ]);
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
   await login.getByRole('button', { name: '取消登录', exact: true }).waitFor();

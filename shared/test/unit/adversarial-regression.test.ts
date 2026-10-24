@@ -77,7 +77,7 @@ it('错误正文限制 64 KiB；手动取消与无效 JSON 均完成清理', asy
   await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
   expect(canceled).toBe(true);
 });
-it('六条聊天路由拒绝合法窗口的子 frame 与缺失 frame', async () => {
+it('聊天路由拒绝合法窗口的子 frame 与缺失 frame', async () => {
   const sender = { mainFrame: {}, isDestroyed: () => false, send: vi.fn() };
   const models = vi.fn(async () => []),
     openLink = vi.fn(async () => {});
@@ -92,6 +92,8 @@ it('六条聊天路由拒绝合法窗口的子 frame 与缺失 frame', async () 
   for (const channel of [
     'chat:models',
     'chat:usage',
+    'chat:account-usage',
+
     'chat:usage-reset',
     'chat:send',
     'chat:cancel',

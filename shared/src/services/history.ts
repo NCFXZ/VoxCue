@@ -1,4 +1,5 @@
 import type { Answer, Transcript } from './contracts';
+import { validInterviewImages } from '../../electron/contracts/interviewImages';
 import {
   storedObject,
   storedProvider,
@@ -64,6 +65,7 @@ export function createHistoryService(
               ['id', 'question', 'content'].every((key) => typeof answer[key] === 'string') &&
               storedProvider(answer.provider) &&
               storedActivity(answer.activity) &&
+              (answer.images === undefined || validInterviewImages(answer.images)) &&
               optionalString(answer.error) &&
               optionalString(answer.reasoningSummary) &&
               (answer.screenshot === undefined || ['attach', 'only'].includes(answer.screenshot)) &&

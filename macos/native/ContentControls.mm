@@ -3,6 +3,7 @@
 #include "ScrollChrome.h"
 #include "InterviewMaterials.h"
 #include "ChatGPTBrand.h"
+#include "CopilotBrand.h"
 #import <objc/runtime.h>
 #include <cstring>
 #include <cmath>
@@ -14,6 +15,7 @@ API_AVAILABLE(macos(26.0))
 @interface VoxCueContentHost : NSView <NSSearchFieldDelegate>
 @property(nonatomic,strong) NSControl *control;
 @property(nonatomic,strong) NSProgressIndicator *progress;
+@property(nonatomic,strong) NSGlassEffectView *regularGlass;
 @property(nonatomic,weak) VoxCueContentManager *manager;
 @property(nonatomic) uint32_t identity;
 @property(nonatomic) BOOL search;
@@ -24,6 +26,7 @@ API_AVAILABLE(macos(26.0))
 @property(nonatomic) BOOL background;
 @property(nonatomic) BOOL scrolling;
 @property(nonatomic) BOOL borderEmphasized;
+@property(nonatomic) BOOL hoverEmphasized;
 @property(nonatomic) NSRect hostRect;
 @property(nonatomic,strong) NSArray *artwork;
 @end
@@ -99,6 +102,7 @@ void VoxCueRefreshContentControlPlacement(NSView *host) {
             NSView *backdrop=VoxCueModalBackdropAnchor(host);
             view.hidden=view.covered && backdrop && NSIntersectsRect(rect,VoxCueModalExclusion(host));
             NSView *glassContent=view.overGlass && !view.search && !view.toggle && !view.slider && !view.progress?VoxCueInterviewGlassContent(host,rect):nil;
+            if(!glassContent && view.overGlass && !view.covered)glassContent=VoxCueScrollHeaderContent(host,rect);
             if(!glassContent && view.overGlass && !view.covered)glassContent=VoxCueSidebarGlassContent(host,rect);
             if(glassContent) {
                 [glassContent addSubview:view];view.frame=[glassContent convertRect:rect fromView:host];
@@ -109,6 +113,22 @@ void VoxCueRefreshContentControlPlacement(NSView *host) {
             } else {
                 view.frame=rect;
                 if((!view.search && !view.scrolling) || view.covered || !VoxCuePositionScrollingControl(host,view))VoxCuePositionGlassControl(host,view,view.covered);
+            }
+            if([view.control isKindOfClass:NSButton.class]) {
+                NSButton *button=(NSButton *)view.control;
+                if(button.showsBorderOnlyWhileMouseInside) {
+                    // AppKit's tracking callback needs the final attached
+                    // control/window, not the still-unmounted drawing view.
+                    BOOL emphasized=view.hoverEmphasized && button.enabled && !view.hidden && view.window;
+                    if(view.borderEmphasized!=emphasized) {
+                        view.borderEmphasized=emphasized;
+                        NSPoint local=emphasized?NSMakePoint(NSMidX(button.bounds),NSMidY(button.bounds)):NSMakePoint(-1,-1);
+                        NSPoint location=[button convertPoint:local toView:nil];
+                        NSEvent *event=[NSEvent enterExitEventWithType:emphasized?NSEventTypeMouseEntered:NSEventTypeMouseExited location:location modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:view.window.windowNumber context:nil eventNumber:0 trackingNumber:0 userData:nullptr];
+                        if(emphasized)[button.cell mouseEntered:event];else [button.cell mouseExited:event];
+                        button.needsDisplay=YES;
+                    }
+                }
             }
         }
     }
@@ -139,13 +159,21 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
         for(uint32_t index=0;index<size;index++) {
             napi_value item;napi_get_element(env,args[1],index,&item);uint32_t identity=(uint32_t)number(env,item,"id");
             NSNumber *key=@(identity);[seen addObject:key];NSString *kind=string(env,item,"kind");
-            BOOL indicator=[kind isEqualToString:@"progress"],overGlass=boolean(env,item,"overGlass");
+            BOOL bar=[kind isEqualToString:@"progress-bar"];
+            BOOL indicator=bar || [kind isEqualToString:@"progress"],overGlass=boolean(env,item,"overGlass");
             BOOL slider=[kind isEqualToString:@"font-slider"];
+            BOOL regularOverlay=[kind isEqualToString:@"regular-overlay"];
+            BOOL badge=regularOverlay && !string(env,item,"symbol").length;
             BOOL search=[kind isEqualToString:@"search"],popup=[kind isEqualToString:@"popup"],toggle=[kind isEqualToString:@"switch"],background=[kind isEqualToString:@"button-background"];
             VoxCueContentHost *view=manager.views[key];
             if(!view) {
                 view=[[VoxCueContentHost alloc] initWithFrame:NSZeroRect];view.manager=manager;view.identity=identity;view.search=search;view.toggle=toggle;view.slider=slider;
-                if(search) {
+                if(badge) {
+                    NSTextField *label=[NSTextField labelWithString:@""];
+                    label.alignment=NSTextAlignmentCenter;label.maximumNumberOfLines=1;
+                    label.identifier=@"voxcue-image-page-number";
+                    view.control=label;[view addSubview:label];
+                } else if(search) {
                     NSSearchField *field=[[NSSearchField alloc] initWithFrame:NSZeroRect];
                     field.delegate=view;field.sendsSearchStringImmediately=YES;field.maximumRecents=0;field.recentsAutosaveName=nil;
                     field.bezeled=YES;field.bezelStyle=NSTextFieldRoundedBezel;
@@ -160,9 +188,9 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                     control.target=view;control.action=@selector(sliderChanged:);view.control=control;[view addSubview:control];
                 } else if(indicator) {
                     NSProgressIndicator *progress=[[NSProgressIndicator alloc] initWithFrame:NSZeroRect];
-                    progress.identifier=@"voxcue-content-progress";
-                    progress.style=NSProgressIndicatorStyleSpinning;progress.controlSize=NSControlSizeSmall;
-                    progress.minValue=0;progress.maxValue=100;progress.displayedWhenStopped=YES;
+                    progress.identifier=bar?@"voxcue-content-progress-bar":@"voxcue-content-progress";
+                    progress.style=bar?NSProgressIndicatorStyleBar:NSProgressIndicatorStyleSpinning;
+                    progress.controlSize=NSControlSizeSmall;progress.minValue=0;progress.maxValue=100;progress.displayedWhenStopped=YES;
                     progress.accessibilityElement=NO;view.progress=progress;[view addSubview:progress];
                 } else if(toggle) {
                     NSSwitch *control=[[NSSwitch alloc] initWithFrame:NSZeroRect];
@@ -178,17 +206,39 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 view.control.accessibilityElement=NO;manager.views[key]=view;
                 view.control.focusRingType=NSFocusRingTypeNone;
             }
+            if(regularOverlay && !view.regularGlass) {
+                view.regularGlass=[[NSGlassEffectView alloc] initWithFrame:NSZeroRect];
+                view.regularGlass.style=NSGlassEffectViewStyleRegular;view.regularGlass.tintColor=nil;
+                view.regularGlass.contentView=[[NSView alloc] initWithFrame:NSZeroRect];
+                view.regularGlass.contentView.autoresizingMask=NSViewWidthSizable|NSViewHeightSizable;
+                view.regularGlass.identifier=@"voxcue-image-overlay-regular";
+                [view addSubview:view.regularGlass];[view.regularGlass.contentView addSubview:view.control];
+            }
             CGFloat x=number(env,item,"x"),y=number(env,item,"y"),width=number(env,item,"width"),height=number(env,item,"height");
             view.hostRect=NSMakeRect(x,host.isFlipped?y:NSHeight(host.bounds)-y-height,width,height);
             view.overGlass=overGlass;view.background=background;
-            view.scrolling=[kind isEqualToString:@"button-hover"];
+            view.scrolling=[kind isEqualToString:@"button-hover"] && string(env,item,"label").length;
             view.frame=NSMakeRect(x,host.isFlipped?y:NSHeight(host.bounds)-y-height,width,height);
             view.covered=boolean(env,item,"covered");view.control.enabled=!boolean(env,item,"disabled") && !view.covered;
             view.alphaValue=number(env,item,"opacity");
+            if(regularOverlay) {
+                view.regularGlass.frame=view.bounds;view.regularGlass.cornerRadius=height/2;
+                // New glass is initially zero-sized. Establish its content
+                // geometry in this update rather than reading deferred layout
+                // bounds and leaving the arrow/label at zero width.
+                view.regularGlass.contentView.frame=view.regularGlass.bounds;
+                if(@available(macOS 27.0,*))view.regularGlass.effectIsInteractive=!badge;
+            }
             NSString *label=background?@"":string(env,item,"label");
             unsigned int rgb=0;sscanf(string(env,item,"color").UTF8String,"#%x",&rgb);
             NSColor *color=[NSColor colorWithSRGBRed:((rgb>>16)&255)/255.0 green:((rgb>>8)&255)/255.0 blue:(rgb&255)/255.0 alpha:1];
-            if(search) {
+            if(badge) {
+                NSTextField *label=(NSTextField *)view.control;
+                label.stringValue=string(env,item,"label");label.textColor=color;
+                label.font=[NSFont monospacedDigitSystemFontOfSize:12 weight:NSFontWeightMedium];
+                NSRect frame=view.regularGlass.contentView.bounds;CGFloat h=label.fittingSize.height;
+                frame.origin.y=(NSHeight(frame)-h)/2;frame.size.height=h;label.frame=frame;
+            } else if(search) {
                 NSSearchField *field=(NSSearchField *)view.control;NSString *value=string(env,item,"value");
                 field.controlSize=NSControlSizeExtraLarge;
                 if(![field.stringValue isEqualToString:value])field.stringValue=value;
@@ -209,6 +259,9 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                     [progress stopAnimation:nil];progress.indeterminate=indeterminate;
                 }
                 if(indeterminate)[progress startAnimation:nil];else progress.doubleValue=value.doubleValue;
+                // Use AppKit's recommended content-area size without scaling
+                // or tinting. The small bar has layout insets around its track.
+                if(bar)progress.frame=NSMakeRect(0,0,width,height);
                 [progress sizeToFit];
                 progress.frame=NSMakeRect(round((width-NSWidth(progress.frame))/2),round((height-NSHeight(progress.frame))/2),NSWidth(progress.frame),NSHeight(progress.frame));
             } else if(toggle) {
@@ -219,7 +272,8 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 if(control.state!=checked)control.animator.state=checked;
             } else {
                 NSButton *button=(NSButton *)view.control;NSString *symbol=background?@"":string(env,item,"symbol");
-                BOOL brand=[symbol isEqualToString:@"brand.chatgpt"];
+                BOOL copilotBrand=[symbol isEqualToString:@"brand.copilot"];
+                BOOL brand=copilotBrand || [symbol isEqualToString:@"brand.chatgpt"];
                 button.appearance=background && overGlass?[NSAppearance appearanceNamed:NSAppearanceNameDarkAqua]:nil;
                 BOOL trailing=boolean(env,item,"trailing");
                 NSArray *artwork=@[kind,label,symbol,string(env,item,"color"),string(env,item,"symbolColor"),@(overGlass),@(trailing),@(height<=36),@(height<32),@(background && fabs(width-height)<1)];
@@ -228,9 +282,11 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 button.font=[NSFont systemFontOfSize:height<32?12:14 weight:NSFontWeightMedium];
                 NSImage *image=!brand && symbol.length?[NSImage imageWithSystemSymbolName:symbol accessibilityDescription:nil]:nil;
                 if(brand) {
-                    image=[[NSImage alloc] initWithData:[NSData dataWithBytes:VoxCueChatGPTBrand length:sizeof(VoxCueChatGPTBrand)]];
+                    image=[[NSImage alloc] initWithData:copilotBrand?[NSData dataWithBytes:VoxCueCopilotBrand length:sizeof(VoxCueCopilotBrand)]:[NSData dataWithBytes:VoxCueChatGPTBrand length:sizeof(VoxCueChatGPTBrand)]];
                     image.size=NSMakeSize(22,22);[image setTemplate:YES];
                 } else {
+                    // Icon-only actions use the same symbol configuration as
+                    // the dialog close button in both idle and hover states.
                     image=[image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPointSize:label.length?(height<32?13:14):17 weight:NSFontWeightRegular]];
                     image=[image imageWithSymbolConfiguration:[NSImageSymbolConfiguration configurationWithPaletteColors:@[color]]];
                 }
@@ -252,7 +308,7 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                     display.attributedTitle=[[NSAttributedString alloc] initWithString:label attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:button.font}];
                     if(@available(macOS 27.0,*))if(image)display.preferredImageVisibility=NSMenuItemImageVisibilityVisible;
                 } else {
-                    button.imageHugsTitle=YES;button.alignment=[kind isEqualToString:@"button-hover"]?NSTextAlignmentLeft:NSTextAlignmentCenter;
+                    button.imageHugsTitle=YES;button.alignment=[kind isEqualToString:@"button-hover"] && label.length?NSTextAlignmentLeft:NSTextAlignmentCenter;
                     button.title=label;button.image=image;button.imagePosition=background?NSNoImage:label.length?(trailing?NSImageTrailing:NSImageLeading):NSImageOnly;
                     button.attributedTitle=[[NSAttributedString alloc] initWithString:label attributes:@{NSForegroundColorAttributeName:color,NSFontAttributeName:button.font}];
                 }
@@ -260,20 +316,20 @@ napi_value VoxCueConfigureContentControls(napi_env env,napi_callback_info info) 
                 // Shape follows geometry while shared hover/confirmation widths
                 // animate, even when their title disappears before shrinking.
                 button.borderShape=fabs(width-height)<1?NSControlBorderShapeCircle:NSControlBorderShapeCapsule;
-                BOOL highlighted=button.enabled && (boolean(env,item,"pressed") || boolean(env,item,"hovered"));
-                button.bordered=YES;
-                button.showsBorderOnlyWhileMouseInside=[kind isEqualToString:@"button-hover"];
-                if(button.showsBorderOnlyWhileMouseInside) {
-                    BOOL emphasized=highlighted || boolean(env,item,"focused");
-                    if(view.borderEmphasized!=emphasized) {
-                        view.borderEmphasized=emphasized;
-                        NSEvent *event=[NSEvent enterExitEventWithType:emphasized?NSEventTypeMouseEntered:NSEventTypeMouseExited location:NSZeroPoint modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:host.window.windowNumber context:nil eventNumber:0 trackingNumber:0 userData:nullptr];
-                        if(emphasized)[button.cell mouseEntered:event];else [button.cell mouseExited:event];
-                    }
-                }
+                BOOL hoverOnly=[kind isEqualToString:@"button-hover"],iconHover=hoverOnly && !label.length;
+                if(iconHover)button.identifier=@"voxcue-image-save";
+                BOOL emphasized=button.enabled && (boolean(env,item,"pressed") || boolean(env,item,"hovered") || boolean(env,item,"focused"));
+                BOOL highlighted=button.enabled && (boolean(env,item,"pressed") || (!iconHover && boolean(env,item,"hovered")));
+                // Keep the system cell's layout insets fixed. Hover only
+                // reveals its existing bezel; it must not press or resize the
+                // symbol, nor switch the button's bordered layout mode.
+                button.bordered=!regularOverlay;
+                if(regularOverlay || iconHover)button.imageScaling=NSImageScaleNone;
+                button.showsBorderOnlyWhileMouseInside=hoverOnly;
+                view.hoverEmphasized=emphasized;
                 if(button.cell.highlighted!=highlighted)[button highlight:highlighted];
                 button.cell.showsFirstResponder=NO;
-                button.frame=view.bounds;
+                button.frame=regularOverlay?view.regularGlass.contentView.bounds:view.bounds;
             }
         }
         for(NSNumber *key in [manager.views.allKeys copy])if(![seen containsObject:key]) {

@@ -109,6 +109,10 @@ export async function installUiAccount(app, { speech = false, components = false
             }
           : null;
       ChatGPTAuthService.prototype.session = async () => session();
+      ChatGPTAuthService.prototype.usageIdentity = async () => ({
+        account: 'synthetic-account',
+        email: 'synthetic@example.test',
+      });
       ChatGPTAuthService.prototype.signIn = async () => {
         globalThis.uiAccountActive = true;
         return session();
@@ -117,6 +121,14 @@ export async function installUiAccount(app, { speech = false, components = false
         globalThis.uiAccountActive = false;
         return { warning: null };
       };
+      const { CodexUsageRuntime } = require(
+        path.join(root, 'dist-electron/shared/electron/backend/chat/codexUsage.js'),
+      );
+      CodexUsageRuntime.prototype.account = async () => ({
+        email: 'synthetic@example.test',
+        planType: 'unknown',
+      });
+      CodexUsageRuntime.prototype.limits = async () => ({});
       ChatGPTService.prototype.models = async () => [
         {
           id: 'test-model',

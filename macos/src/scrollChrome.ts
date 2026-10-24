@@ -121,7 +121,7 @@ if (
   };
   document.addEventListener('transitionrun', fade, true);
   const changes = new MutationObserver(locate);
-  changes.observe(document.getElementById('root')!, {
+  changes.observe(document.body, {
     childList: true,
     subtree: true,
     attributes: true,

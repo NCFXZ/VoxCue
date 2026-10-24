@@ -249,7 +249,7 @@ try {
     app.waitForEvent('window'),
     (async () => {
       await page.getByRole('menuitem', { name: '退出登录' }).click();
-      await page.getByRole('button', { name: '确认退出登录', exact: true }).click();
+      await page.getByRole('button', { name: '退出登录', exact: true }).click();
     })(),
   ]);
   await returnedLogin.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();

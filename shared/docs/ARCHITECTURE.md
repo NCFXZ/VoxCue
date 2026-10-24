@@ -1,5 +1,10 @@
 # VoxCue 架构
 
+## 2026-10-24 RAG 本地改造
+
+单一 Local RAG、分类有限重试、请求作用域证据复用、主进程索引/开场互斥及可信追问检索共用 shared。保留原模型/索引和管理页面，唯一删除的设置界面是整个知识库分类。诊断仅测试注入；完整流程及兼容边界以 [RAG 架构](RAG_ARCHITECTURE.md) 为准，下文旧 Function 记录仅作历史。
+
+
 当前跨平台 UI 以[共用布局与平台控件](PLATFORM_UI.md)为准：布局、业务与展示契约共用，Mac AppKit/Liquid Glass 实现单独维护。
 
 ## 面试生成重试
@@ -30,7 +35,7 @@ Windows SpeechController在同一共享Worker中装配固定本地echoCancellati
 
 两阶段用量优化已在共享源码局部撤销；已发布 0.3.0 仍保留原优化行为。speech/QuestionBuffer 与 interview store 不做明确回应分类，系统终稿按原 2200ms 静音和自动回答条件提交，麦克风不触发回答；忙时排队、手动临时稿、片段去重、取消与迟到保护保持。
 
-主进程 InterviewContext 每次序列化完整保留窗口，各条直接发送 text，保持 kind、at、questionId/previousQuestionId，包含真实发言、已提交问题、AI 建议和 gap。不生成 textRef/textReferenceRule 或 historySelection，不增加摘要/分类调用。原 120 条、64000 字节、每条 6000 字及 omittedOlderEntries 边界不变；当前问题仍在最后，RAG 仍用它检索。上下文快照、场次 revision 和迟到回答保护保持，记录格式不改。
+主进程 InterviewContext 每次序列化完整保留窗口，各条直接发送 text，保持 kind、at、questionId/previousQuestionId，包含真实发言、已提交问题、AI 建议和 gap。不生成 textRef/textReferenceRule 或 historySelection，不增加摘要/分类调用。原 120 条、64000 字节、每条 6000 字及 omittedOlderEntries 边界不变；当前问题仍在最后，RAG 仅在可信连续追问时派生有界检索主题。上下文快照、场次 revision 和迟到回答保护保持，记录格式不改。
 
 KnowledgeService 每次查询执行既有串行检索，不再持有精确查询结果 LRU；revisions 和模型缓存、知识库隔离、检索排序/模式/topK、取消与模型卸载/关闭保持。用量统计/token 账本和重置由原有服务负责，不受本次撤销影响。
 
@@ -46,7 +51,7 @@ KnowledgeService 每次查询执行既有串行检索，不再持有精确查询
 
 主题仅设置 VoxCue 的 nativeTheme.themeSource。面试使用 normal 置顶，显示/恢复/意外关闭置顶时重用共享 pinInterview，不定时聚焦。共用入口按窗口防止同步状态回调重入；Windows 发现 HWND 已失去置顶时先清除 Chromium 旧层级，再恢复 normal 置顶，避免缓存状态与原生窗口不一致。空白穿透使用 setIgnoreMouseEvents 的 forward，交互命中与按下/拖动锁定继续共用。主窗口隐藏并跳过任务栏，浮窗自身跳过任务栏；结束后在无新面试时恢复主窗口任务栏入口与源 ICO，不修改用户固定项。Renderer 意外退出沿用关闭释放流程并恢复主窗口。
 
-Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，截图不落盘或进入历史，Renderer只获得输入框缩略图和不透明ID。
+Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，草稿只在内存，Renderer获得缩略图和不透明ID。0.5.9起仅显式发送的截图另行归档，读取原图也须用户点击，不在捕获或权限查询时保存。
 
 紧凑窗口的控制层在内容之后生成 no-drag 排除区，按钮本身也明确 no-drag，防止后生成的页面拖动区覆盖。Windows 浮窗移动端口以手势起始尺寸 setBounds，并补偿分数 DPI 的尺寸回读；原生像素网格决定坐标，静止鼠标不重复发原生移动。Mac 未实现此可选端口时保持原 setPosition 路径。CSS 中前缀滤镜先于标准滤镜，避免压缩后丢失有效标准声明。
 
@@ -184,11 +189,25 @@ Electron 的 [窗口保护接口](https://www.electronjs.org/docs/latest/api/bro
 
 对抗测试修复补充：准备聊天所有路由同时校验主窗口和主 frame；取消先退休原生请求槽，后续旧事件/结果均丢弃，主窗口重载也执行取消，与恢复为已停止的快照一致。HTTP 非成功正文独立执行取消、空闲计时与64 KiB上限。Renderer 的 storedValues 仅为本地数据的纯校验；聊天恢复按允许字段构造状态，历史嵌套损坏保留原始存储并显示错误，读取不执行迁移或删除。pnpm overrides 仅去除未调用的 LanceDB 可选提供器及 Mammoth CLI 解析依赖；打包遵循相同排除设置，实际文本 Embedder、DOCX 解析和语音路径不变。
 
-## ChatGPT 登录与模型服务
+## 账户额度
+
+当前生产 ChatGPT 登录、聊天和额度共用固定官方 Codex 0.164.0 的托管 OAuth。ManagedChatGPTAuth 通过公开 account/read、getAuthStatus（includeToken/refreshToken）向主进程取得同一有效会话；其工作区来自官方托管令牌，SIWC 的 encrypted_auth_metadata 不解码也不伪造。公开 AuthSession 仅含受限身份及过期时间，账户标识按用户/工作区稳定哈希；access/refresh 令牌、原生参数和路径不进入 Renderer。旧 SIWC 授权代码仅保留既有兼容与回归边界，生产构造器明确注入 managed；旧凭据不自动读取或移植，必要时用户正常重新登录一次。
+
+ChatGPTService 按可信原生 access 的 chatgptAccountId 选择固定 https://chatgpt.com/backend-api/codex 的模型目录及 Responses，发送同一 Bearer/ChatGPT-Account-Id。继续复用所有原有输入、SSE/JSON、资料提案、来源验证、本地工具、取消和账本处理；不借 Codex 开放线程或本机工具，不接受 Renderer 提供端点。官方运行时负责托管令牌续期和 keyring-only 存储，使用本应用专属 CODEX_HOME；不记录 stderr、不使用环境令牌/明文回退，不读取其他 Codex 安装的登录项。此适配固定于运行时0.164.0，真实账户网络兼容性仍需用户在正常授权后确认。
+
+账户额度只读取当前同一会话，核对官方快照的 accountId（若有）及读取前后身份；旧账户/退出期间的迟到结果丢弃。返回五小时/周则分别显示，缺失不补齐，读取失败不触发登录。已删除 connection_required、独立连接/取消 IPC、UI/store 状态和 usage-binding.bin 消费者；唯一授权入口是登录页，设置只提供额度刷新及官方文字链接。此前两套授权的实现描述由本段覆盖。
+
+额度与音量横条沿 shared 唯一布局、语义和数值更新，Mac 有界 progress-bar 类型仅接受0–100及 content 承载，实际绘制为 NSProgressIndicator 的 determinate bar。Windows 保留 shared 胶囊轨道/填充（999px、corner-shape:round），不导入 AppKit。聊天与面试停止按钮共用发送的实心主题色样式，业务取消不变。
+
+`contracts/accountUsage.ts` 是纯展示契约；`chat:account-usage` 仅接受主窗口主frame零参数请求。SelectedChatService/RagChatService委派当前服务的可选accountUsage能力，不以本地token账本代替。Copilot使用现有隔离控制会话的quota.refresh读取官方套餐和额度；读取前后核对同一身份，错误使用固定公开文案，原始SDK错误、提供商身份/账户标识及任意字段不出IPC。
+
+backend/copilot/quota只投影账户快照，忽略准入状态与其他提供商；权威预算可展示比例及已用，参考余额不推算消费、比例或重置。失败/缺失保留null，0/0不判耗尽；AI Credits、请求数、token与未知单位分开，不做货币/token换算。兼容快照的tokenBasedBilling不能单独证明单位为AI Credits。现有本机账本与逐回复统计继续保留，设置页已移除本应用累计计数和重置入口。Renderer以加载代际和查询版本排除旧账户迟到结果，提供刷新和官方用量入口；查询时间字段不在界面展示，数据可能有服务聚合延迟。布局在shared，Mac继续使用现有AppKit content展示，不新增原生IPC或平台分叉。
+
+## ChatGPT / GitHub Copilot 登录与模型服务
 
 ChatGPTAuthService的本地HTTP回调页由backend/auth/callbackPage纯静态模板生成，main注入共用PNG品牌资源；开发从shared/public读取，安装版从dist读取，不依赖平台原生ICO或外网。页面适配浅深色/窄屏，固定文案区分收到/无效/已使用/不存在，收到授权仅提示返回应用继续验证。请求参数与账户、授权码、令牌不进入HTML；无脚本、表单或外部字体/资源，CSP仅放行样式SHA-256及data图片，响应no-store/no-referrer/nosniff。Host/方法/路径/state/PKCE、回调一次消费与后续身份验证/凭据写入保持原流程。
 
-只保留 ChatGPT OAuth，main 直接装配 ChatGPTAuthService 与 ChatGPTService，复用 AIChatService、RAG 和标题队列。GitHub SDK、独立运行时、登录 IPC、服务选择文件读写和路由已移除；不读取或删除旧服务身份、凭据或用户历史。旧回复的公开提供商元数据作为历史数据继续由通用 ModelProvider 展示。
+2026-10-24 恢复 GitHub Copilot，与 ChatGPT 共用登录页面和 AIChatService/RAG/标题队列。main 装配两套授权/模型适配器，通过 SelectedChatService 按成功登录后保存的服务选择路由，不能通过模型 ID 切换账户。service.json 缺失时沿用 ChatGPT；失败登录不覆盖选择。Copilot 公开身份保存在 copilot-session.json，OAuth 令牌仅由固定官方 SDK/原生运行时 1.0.21 的系统凭据库管理，禁止明文同意、环境令牌、gh 认证及任意命令/文件工具。运行时使用独立工作目录，禁用配置发现、技能、文件钩子和会话遥测；只开放已授权网络搜索及有界本地知识工具。SDK 仅允许 backend/copilot 适配器导入。auth:copilot-sign-in 仅接受登录窗口主 frame 的零参数调用；取消/退出释放对应流程。Mac 两个品牌按钮由 AppKit Glass 绘制，shared 保留唯一布局和点击逻辑；Windows 使用共用网页控件。既有凭据和用户历史保留。
 
 展示与语音恢复：ResponseProgress 在正文首次出现时折叠到“用时”，之后用户可自行展开，不随每个 chunk 重复关闭。系统问题 debounce 就绪状态在生成期间保留，回答完成后按本场状态补交；系统间断清除不完整问题，麦克风间断不影响系统缓冲。浮窗手动清空输入只覆盖当前转写版本，新系统稿到达恢复跟随；非空手动编辑保留。未引入 AEC 或修改原生采样路径。
 
@@ -216,7 +235,7 @@ PersonalInfoPanel 负责默认折叠的资料展示、共用弹窗编辑/取消/
 
 共享 Modal 外层负责圆角裁切，dialog-scroll 内层负责长内容滚动并给轨道上下内缩；设置的内部布局保持侧栏与内容分别滚动。浮窗字号按钮沿用同一偏好读写和同步机制，保存失败不改变字号，重试成功只清除该字号错误。
 
-知识库选择独立于 AI 资料，UI 始终发送一个 ID 或 null。RagChatService/KnowledgeTools 限定单库、过滤越界结果并校验文档归属，null 跳过检索。SpeechCoordinator 保存主进程确认时深拷贝的资料/选择，本场回答只能使用该副本；interview IPC 拒绝 Renderer 额外覆盖字段。契约、校验、preload 调用方与编译期/桌面回归同步。沿用全部窗口、音频与凭据边界。
+知识库选择独立于 AI 资料，UI 始终发送一个 ID 或 null。RagChatService 限定单库、过滤越界结果并校验文档归属，null/undefined 跳过所有检索和模型访问。SpeechCoordinator 保存主进程确认时深拷贝的资料/选择，本场回答只能使用该副本；interview IPC 拒绝 Renderer 额外覆盖字段。契约、校验、preload 调用方与编译期/桌面回归同步。沿用全部窗口、音频与凭据边界。
 
 统一字号 token 为18/15/14/12px（标题/分区/正文和控件/辅助说明），共享角色规则覆盖全部 Renderer 窗口，不因明暗或窄窗改变字号。浅深主题与窄窗口回归入口见 test:ui:typography。
 
@@ -242,7 +261,7 @@ chat:send 的失败结果增加可选 ChatPartialResponse，只含本请求已�
 
 阶段合并复用 contracts/activity.ts：若新旧状态之间没有公开 reasoning 文本，删除旧空状态并追加最新状态；实际工具和公开说明保留。有公开思考内容才保留前一阶段。迟到完成事件不复活已替换状态；当前阶段与当前标题共用滑过高亮，结束/停止关闭，减少动画偏好同时生效。公开思考不设置语言要求，缺少摘要的提示文案移除“可以继续聊天。”，聊天权限行为保持。
 
-准备聊天通过 preparation store → chat service → preload → chat IPC → AIChatService.stream；面试回答通过 interview store → speech service → interview IPC → 同一 AI 接口。本轮新授权接入 RagChatService，默认 Local RAG 在既有 AIChatService 之前检索本地证据；Function 模式使用同一核心的受限工具循环。记录标题继续使用原始 Provider，不读取知识库。详情见 RAG_ARCHITECTURE.md。
+准备聊天通过 preparation store → chat service → preload → chat IPC → AIChatService.stream；面试回答通过 interview store → speech service → interview IPC → 同一 AI 接口。本轮新授权接入 RagChatService，唯一 Local RAG 在既有 AIChatService 之前检索本地证据；自定义知识库工具循环已删除。记录标题继续使用原始 Provider，不读取知识库。详情见 RAG_ARCHITECTURE.md。
 
 请求保留 ID、取消语义和公开进度。事件只更新发起对话，切页/新建/切换对话不取消后台回答；显式停止、删除该对话、退出或关闭释放资源。最终正文和公开摘要校准流式事件。服务失败显示错误，不静默转为 Mock；不转发私有 reasoning/encrypted_content。
 
@@ -266,9 +285,9 @@ PreparationPage 通过 useLayoutEffect 和 textarea 宽度 ResizeObserver，在�
 
 面试 IPC 对完整问题、模型与思考强度进行运行时校验，并核对主进程保存的开场配置。模型、设备和 effort 开场锁定；自动回答是可变的运行时选项。未知请求字段拒绝进入 AI 服务。
 
-application/interviewContext.ts 在主进程维护本场原生终稿、已校验提交问题及完成的AI建议。main 仅将面试所属 SpeechHost 事件送入上下文；Renderer 不能提交或伪造麦克风上下文。按时间记录面试官/面试者、提交问题的前序ID、AI建议和转写间断，AI建议不视作实际口述。最近120条/约64KB、每条最多6000字，省略条数明确；无额外模型总结、凭据或磁盘读写。重载/暂停保留，关闭/新场清空。IPC 在生成前拍快照、成功且未取消后保存建议，迟到/失败/不完整结果不写入；RAG的末尾查询仍是当前问题。
+application/interviewContext.ts 在主进程维护本场原生终稿、已校验提交问题及完成的AI建议。main 仅将面试所属 SpeechHost 事件送入上下文；Renderer 不能提交或伪造麦克风上下文。按时间记录面试官/面试者、提交问题的前序ID、AI建议和转写间断，AI建议不视作实际口述。最近120条/约64KB、每条最多6000字，省略条数明确；无额外模型总结、凭据或磁盘读写。重载/暂停保留，关闭/新场清空。IPC 在生成前拍快照、成功且未取消后保存建议，迟到/失败/不完整结果不写入；RAG 只对可信指代追问派生有界本地主题查询，生成问题与历史不变。
 
-当前共享 0.3.1 的面试主提示词由 interviewInstructions 在主进程统一提供：第一人称、专业且有逻辑的自然口语，先回应问题，再讲理由和做法；不反问、索要资料或请求确认，含糊指代结合上下文理解，只有未知条件影响结论时才简短说明假设。知识库无相关内容仍依据通用专业知识回答；个人经历以确认资料和实际发言为准，不把通用方案当成真实经历，也不把资料缺失说成面试者没做过或答不上来。默认口述约60–90秒，明确时长、篇幅或格式要求优先，肯定/致谢/收尾简短回应。代码保留语言、换行和缩进，沿用既有MarkdownContent渲染与复制；AI建议不当作实际发言，缺失转写不补造。interview IPC 第2组追加本场资料、回答语言和补充要求，补充要求不能覆盖直接作答及个人事实依据规则；截图局部不清但题意可判断时继续回答，不猜测不可见内容。仅截图模式仍不附资料/历史/RAG。第3组RAG规则按需采用相关资料，未命中继续用通用专业知识回答，保留个人事实、引用格式和完整条目边界；Function Calling 工具错误输出只陈述状态，追加规则要求实时面试继续作答，不要求用户重试或切换模式。检索流程、预算、取消及实际服务故障保护保持，详见 RAG_ARCHITECTURE.md；准备聊天保持独立指令。已发布0.3.0不包含这些0.3.1提示词修改。
+当前共享 0.3.1 的面试主提示词由 interviewInstructions 在主进程统一提供：第一人称、专业且有逻辑的自然口语，先回应问题，再讲理由和做法；不反问、索要资料或请求确认，含糊指代结合上下文理解，只有未知条件影响结论时才简短说明假设。知识库无相关内容仍依据通用专业知识回答；个人经历以确认资料和实际发言为准，不把通用方案当成真实经历，也不把资料缺失说成面试者没做过或答不上来。默认口述约60–90秒，明确时长、篇幅或格式要求优先，肯定/致谢/收尾简短回应。代码保留语言、换行和缩进，沿用既有MarkdownContent渲染与复制；AI建议不当作实际发言，缺失转写不补造。interview IPC 第2组追加本场资料、回答语言和补充要求，补充要求不能覆盖直接作答及个人事实依据规则；截图局部不清但题意可判断时继续回答，不猜测不可见内容。仅截图模式仍不附资料/历史/RAG。第3组RAG规则按需采用相关资料，未命中继续用通用专业知识回答，保留个人事实、引用格式和完整条目边界；自定义知识库 Function Calling 已退役，设置中的知识库分类已删除，原生网络搜索保持。检索流程、预算、取消及实际服务故障保护保持，详见 RAG_ARCHITECTURE.md；准备聊天保持独立指令。已发布0.3.0不包含这些0.3.1提示词修改。
 
 准备聊天第4组主提示词在 shared/src/stores/preparation.ts，当前本地版本直接处理用户问题，信息不足先完成可确定部分，关键缺失影响结果时才简短询问；个人事实与示例/建议分开，网络来源真实引用，资料修改需确认保存，待确认提案不阻塞聊天。准备聊天按精简确认稿使用附件/网页/引用数据，不再拼接执行已保存自定义指令，字段保留供资料编辑；后台第5组资料提案协议保持；已弃用的第6组回答风格不再参与请求。第7组欢迎页自我介绍/项目经历按钮按进一步确认稿发送完整请求，未知个人事实明确占位或待补充，区分个人与团队成果；上传简历和补充缺失摘要限制更新范围，仅追加草稿，保留附件及手动发送/逐次确认。needsSkillResearch 排除明确否定的技能操作后再匹配肯定请求，不将摘要模板的“不生成技能”当作任务，原任务显式标记、缺失摘要检查和联网来源保护保持。模型/effort 和保存/取消保护保持，不将准备聊天的澄清规则追加到面试浮窗。第8组 historyTitle.ts 按确认提示词生成一到两个主要主题的短标题，通常10–20字、最多30字，简单主题可更短，无明确主题时回退“面试记录”；这些是提示词要求，既有代码输出上限及任务生命周期保持。
 
@@ -276,13 +295,15 @@ FloatingInterview在每个回答前直接展示已提交问题气泡；全软件
 
 floating-notices位于面板下方独立预留区域，显示“此窗口未隐藏”或异常时不挤压/移动面板，长提示在此区域内滚动。interview store以speechWarnings按音源保存间断提示，同源健康activity或新有效segment清除，discontinuity终稿不视作恢复；speechError与回答error分开，running只清除语音错误。截图保护提示依据既有主进程返回状态显示，开启后消失，没有扩大保护能力或迁移数据。开场只读确认的知识库独占一行，音频设备与模型/effort分别成对并排。
 
-面试输入区仅保留显式截图按钮，interview:screenshot受控IPC提供capture/remove/clear三种操作，校验面试主frame及字段白名单。主进程暂存最多五张原图，捕获串行并可取消；Renderer只获取不透明ID和长边最多240px的JPEG缩略图，输入框展示可移除缩略图及数量/5。InterviewAnswerRequest只接收question及screenshotIds，不接受Renderer图片、路径、命令或屏幕源ID；ID须唯一、属于本场暂存且最多五个。发送不再次捕获，只有手动操作提交图片，自动回答仅文字且不消费待发送图片。无文字的图片请求只使用固定解题指令与原图，不附转写、对话历史、个人资料或RAG。
+面试输入区仅保留显式截图按钮，interview:screenshot受控IPC提供capture/remove/clear/archive四种操作，校验面试主frame及字段白名单。主进程暂存最多五张原图，捕获串行并可取消；捕获时Renderer只获取不透明ID和长边最多240px的JPEG缩略图，输入框展示可移除缩略图及数量/5。InterviewAnswerRequest只接收question及screenshotIds，不接受Renderer图片、路径、命令或屏幕源ID；ID须唯一、属于本场暂存且最多五个。显式发送先归档本次图片，保存失败保留草稿并阻止模型请求，成功后在对应问题下显示缩略图。发送不再次捕获，自动回答仅文字且不消费待发送图片。无文字的图片请求只使用固定解题指令与原图，不附转写、对话历史、个人资料或RAG。
 
-main注入screenshot.ts原生捕获适配器，按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应原图，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空暂存并取消在途捕获，迟到图像丢弃。原图与预览不经剪贴板或磁盘，也不存入历史；Answer仅保留旧有screenshot模式元数据，旧存储键及历史兼容。架构检查继续禁止截图适配器访问磁盘、账户或AI业务，以及application/backend直接导入原生捕获实现。沿用既有截图保护，不临时改变保护或隐藏窗口。
+main注入screenshot.ts原生捕获适配器，按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应内存草稿，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空内存暂存并取消在途捕获，迟到图像丢弃。沿用既有截图保护，不临时改变保护或隐藏窗口。
+
+0.5.9的backend/interview/images.ts独立管理已发送图片，捕获适配器本身仍不访问磁盘。原始发送字节及缩略图分别保存在userData/interview-images-v1的UUID.image与UUID.preview，串行、临时文件原子写入及失败批次回收；重试按相同ID/字节幂等保存，不重新编码原图。记录仅存Answer.images的ID数组，不存base64或路径；缩略图在记录打开后按ID读取，原图只在点击时通过interview:image读取。该IPC仅接受主窗/面试主frame、有界ID和read/preview/save/remove，save与remove仅主窗可用，面试只读；save经系统保存对话框导出原始字节，Renderer不能指定写入路径或内容，拒绝路径、文件内容及符号链接。删除记录先保存元数据，再清理没有其他记录引用的原图与缩略图；文件读取失败显示明确状态，旧无图记录不迁移。共享InterviewImages将缩略图置于提问气泡内，纯图提问隐藏占位文字，标识在图片下方。查看器标题为“截图”，独立渲染在body弹层，左上标题、右上保存和关闭、图片两侧翻页；初始适应窗口显示，支持左右键翻页、滚轮/触控板锚点缩放与有界拖拽，双击复位；保存仅记录主窗的图标按钮，面试中隐藏并使用透明backdrop。Mac原生材质和控件观察body以覆盖Portal打开/关闭，不遗留遮罩及裁切。Mac排除缩略图的普通按钮投影，工具栏继续使用AppKit。图片不进入后续问题、RAG或TXT导出，TXT仅说明图片数量与应用内查看方式。
 
 聊天与面试共用ResponseProgress，初始等待统一展示新版“正在思考”文字动画，移除旧圆点。Local RAG将实际检索标记为knowledge/thinking并以同一ID更新开始/完成，不能当作网页读取；真实web_search/open_page仍使用实际服务活动。公开思考、活动与用时位于response-progress底部分割线上方，正文之后自动折叠且可重新展开；不显示私有推理，不伪造实际工具步骤。面试复用已有公开摘要/活动字段，不改变历史数据格式。
 
-contracts/chat.ts 的 reasoningEfforts 只含 Responses 参数有效值，不包含 Codex 客户端的 Ultra 模式。backend/chat/models.ts 对目录排序、去重并与已知模型官方范围取交集；目录缺失仅对已明确模型族使用官方能力，未知模型保持自动。GPT-6.1-Sol 的最高值为 max，参考 [官方模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。旧面试设置的无效值读取为自动；参数拒绝不误判为 Function Calling 工具不支持。
+contracts/chat.ts 的 reasoningEfforts 只含 Responses 参数有效值，不包含 Codex 客户端的 Ultra 模式。backend/chat/models.ts 对目录排序、去重并与已知模型官方范围取交集；目录缺失仅对已明确模型族使用官方能力，未知模型保持自动。GPT-6.1-Sol 的最高值为 max，参考 [官方模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。旧面试设置的无效值读取为自动；参数拒绝仍保留准确错误分类，不自动短间隔重试。
 
 ## 本机文档存储
 
@@ -329,3 +350,9 @@ systemAccent hook 复用既有受控系统强调色 IPC，新增 copilot-accent-
 `DesktopPlatform.updateDriverFile` 由可信平台策略选择，仅安装版主进程动态装配 `macos/electron/updates/driver`，不引入另一平台输出。共享 UpdateService 继续负责状态、面试保护与保存握手。Mac 复用固定 GitHub 分页选版及清单投影，再由 pinned Ed25519 公钥认证清单、流式下载/校验 SHA512；实际安装时临时 loopback feed 仅提供该 ZIP 给 `VoxCue.Updater.node`。Sparkle 内部进行归档 Ed25519 校验、替换和重启。Renderer/preload 无新增 URL、路径、密钥或安装命令接口。Mac 更新模块遵守与共享更新后台相同的凭据/聊天/音频/模型隔离检查。Windows 仍使用原 electron-updater。
 
 2026-10-22展示层补充：Mac内容控件只同步外观，布局不随原生标记改变；几何按帧合并，NSButton图文缓存独立于几何。共享确认控件依据固有内容计算两态宽度，保留二次操作和取消边界。原生材质展示端口另用于主窗口卡片及面试设置预览（无动作能力，仍限制主帧、数量、样式、颜色和几何）；预览底景为独立原生渐变，Clear/Regular仍由NSGlassEffectView渲染。预览区域对网页背景做局部绘制裁切，关闭、滚动或回退时清除。浮窗设置使用同一内容控件/NSMenu转换，原面试控件尺寸保持。
+
+面试设置顶部复用现用scroll-chrome的NSGlassEffectView Regular及原生标题，headerRadius仅该面试窗口固定标题可用，composer/follow/modal必须为空；不开放登录窗口或新的业务动作。共享Modal测量悬浮标题高度和正文覆盖量，初始避让后允许正文滚入，Windows用共用网页材质。Mac裁切原生顶部到对话框连续轮廓，未覆盖时关闭按钮为内容区，完全覆盖后进入实际glass.contentView，避免玻璃渐显令按钮一并消失。正文仍为共享Web滚动，不宣称NSScrollView或官方滚动边缘效果。
+
+截图查看器的左右翻页与胶囊页码覆盖图片显示，不另占行列。content-controls的regular-overlay类型限定最多3项、44px高/160px宽，仅接受左右chevron空标题或1–5页码；不接受路径、字节或任意图形。Mac在Chromium前以实际NSGlassEffectView Regular及contentView绘制原生按钮/页码，命中与键盘语义仍来自共享DOM；Windows使用shared毛玻璃。记录保存按钮与关闭共用36px圆形区域/17px图标，Mac始终由同一NSButton绘制，原生悬停边框回调在控件进入最终窗口层级后同步并重绘，不在悬停时切换网页/原生图标；面试设置共享Modal显式透明backdrop，不压暗或虚化后方。
+
+顶部按钮只在材质完全显示时进入header.contentView，其他阶段保留独立原生承载，避免继承材质渐隐；每次材质/模态状态更新都按已保存窗口几何重新定位，移除顶部先迁出控件。图片Regular的contentView同帧明确尺寸，不依赖后续AppKit布局才获得非零bounds。图片普通像素滚动平移（包括两指惯性），ctrl+wheel捏合/快捷滚轮及行/页滚轮缩放；不按滚动幅度猜测鼠标/触控板型号。

@@ -21,7 +21,6 @@ export function AudioCheck({
   const [phase, setPhase] = useState<'idle' | 'loading' | 'running' | 'stopping'>('idle');
   const [source, setSource] = useState<AudioSource | null>(null);
   const [levels, setLevels] = useState<AudioLevels>({});
-  const [seen, setSeen] = useState<Partial<Record<AudioSource, boolean>>>({});
   const [error, setError] = useState('');
   const token = useRef<string | undefined>(undefined);
   const running = useRef(false);
@@ -50,14 +49,12 @@ export function AudioCheck({
     setPhase('idle');
     setSource(null);
     setLevels({});
-    setSeen({});
     setError('');
     running.current = false;
     const unsubscribe = window.desktop?.onDictationEvent((event) => {
       if (!token.current) return;
       if (event.type === 'activity') {
         setLevels((old) => ({ ...old, [event.source]: { level: event.level, at: Date.now() } }));
-        if (event.level > 0.001) setSeen((old) => ({ ...old, [event.source]: true }));
       }
       if (event.type === 'status') {
         if (event.status.state === 'error') {
@@ -101,7 +98,6 @@ export function AudioCheck({
     setPhase('loading');
     setError('');
     setLevels({});
-    setSeen((old) => ({ ...old, [selected]: false }));
     notify.current(true);
     try {
       if (current !== generation.current) return;
@@ -143,21 +139,15 @@ export function AudioCheck({
       );
     },
     result: (selected) =>
-      source === selected ? (
+      source === selected && (phase === 'running' || phase === 'loading' || error) ? (
         <div className="audio-check-inline">
-          {phase === 'running' || phase === 'loading' ? (
-            <>
-              <AudioInputMeters
-                levels={levels}
-                sources={[selected]}
-                active={phase === 'running'}
-                only={selected}
-              />
-            </>
-          ) : (
-            !error && (
-              <small role="status">{seen[selected] ? '已检测到声音' : '未检测到声音'}</small>
-            )
+          {(phase === 'running' || phase === 'loading') && (
+            <AudioInputMeters
+              levels={levels}
+              sources={[selected]}
+              active={phase === 'running'}
+              only={selected}
+            />
           )}
           {error && (
             <p role="alert" className="danger-text">

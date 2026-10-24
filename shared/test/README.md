@@ -1,3 +1,61 @@
+## 2026-10-24 0.5.9 完整验收已恢复
+
+本轮完整单测为89文件/902项；Mac功能矩阵29组另加官方进度条专项、五档缩放及Qwen完整专项通过。修复Copilot退出并发读取后重跑单测与登录专项。冻结240/160/200/172检索评估只复核，公开集门槛未全部达到，不与功能测试通过混用；保留已接受v7，不调整模型/索引或评估标签。
+
+用户重新授权完整测试、清理及 UI 对齐，覆盖下文暂停/截图定向限制。Mac 运行实际 AppKit/Liquid Glass、共用逻辑、隔离迁移/更新/打包及固定公开临时模型专项，GUI/原生串行；Windows 网页界面、DPI 及系统集成仅 Windows 本机执行。截图端到端及原生保存命中纳入 Mac 矩阵。默认矩阵为源码验收，使用临时签名应用检查打包；仅显式选择 package 时校验已生成的正式发行资产，源码上传不要求生成发行ZIP/DMG。progress-controls检查官方横条，image-save-hit检查真实AppKit命中；后者可加 --preview 串行查看浅深截图，临时图片随退出清理。使用隔离合成账户/资料/捕获，不访问真实凭据或采样硬件，临时资料退出清理。测试通过后仅提交推送 0.5.9 源码，不发布安装包或标签。
+
+## 2026-10-24 面试已发送图片归档（截图定向测试已授权）
+
+用户最新仅恢复新增截图功能的定向测试和修复，其他矩阵仍暂停。仅隔离合成账户/图像、自有窗口，无真实账户、屏幕/音频采样或模型调用，临时原图/导出/profile退出清理；Mac只测实际AppKit，Windows界面由Windows本机验收。
+
+已执行通过24项：interview-images、history-images、image-viewport、interview-screenshot-store全部用例，以及desktop-ipc按“截图”筛选的5项。覆盖跨实例读取、原图字节、原子保存/回收/幂等、路径/符号链接/大小限制、引用与删除保护、发送/失败/停止/重试/迟到、存储失败阻止模型请求、主frame/角色/字段边界及保存取消/错误。不支持图片或未知错误不自动重试，旧UI夹具按现有规则修正，生产重试策略不变。
+
+`pnpm test:interview:screenshot`已通过发送五图/纯图/纯文字、失败重试复用原图、气泡内缩略图与标签、记录ID/原图、面试隐藏保存、左右键、捏合缩放/像素平移/拖拽/复位、实际文件导出字节一致、取消/错误、关闭重开。`macos/test/scripts/image-save-hit-check.mjs`以实际AppKit合成鼠标事件检查浅/深及1280×800、1000×720：保存位于关闭左侧，20个内部点击与8个外部悬停点通过，悬停图标坐标一致；Regular箭头/页码非零布局、原生页码更新及关闭后的控件/遮罩清理通过。查看器no-drag消除背景拖动区域干扰；不执行系统安装或其他功能测试。
+
+## 2026-10-24 官方组件与系统配色定向入口
+
+Mac在macos/串行运行 `node test/scripts/sidebar-glass-smoke.mjs --theme-only` 和 `--progress-only`：检查标准NSMenu行无自定义view、图标/勾选/原生键盘/Escape、主题色选项移除及系统强调色事件；核对官方NSProgressIndicator Small/Bar自然尺寸/中心、五小时和每周0/25/43/100数值及内存像素、合成麦克风/系统电平和聊天/面试停止行为。额度卡片摘要同字号/颜色/行，间距4px，骨架与结果匹配。
+
+共享 `settings-smoke.mjs` 验证无主题色选项、旧颜色偏好忽略、系统颜色热更新和重启，明暗主题仍可保存；`web-materials-smoke.mjs` 核对Windows共用菜单/胶囊及合成系统色事件。accent-contrast/account-usage-ui/desktop-ipc/architecture单测保持对比度、契约与边界验证。Windows网页界面检查只在Windows本机执行，Mac不启用VOXCUE_TEST_WEB_RENDERER代验；不需要模型。结果仅终端/对话，GUI及原生串行，所有资料/探针退出清理。
+
+## 2026-10-24 RAG 定向入口
+
+v7后新增公开题源验证入口为`rag-unseen-oral-smoke.mjs --public-transfer`，仍从本机平台目录运行，可设置`VOXCUE_RAG_UNSEEN_FEATURES=1`做内存逐题对照。该夹具在v7生产源码/编译后端冻结后编写，不导入旧题集：16个Go/Python/服务调用/消息/事务及公开设计主题各6轮，共96个连续场景，另加16个换题、8个比较、20个无关、16个无前文/间断/AI建议、8个未收录项目及8个缺失事实，共172个场景、16份参考资料。逐主题保留不同于前组的公开题源和官方事实来源，口语改写及短笔记仍由开发方整理，CPython锁问题明确限定3.12；不冒充独立真人访谈或真实公司当前架构。
+
+新旧后端使用同一已冻结输入；只对原公开200题和新172题做评估，不按它们的分数来回调参。原200题protocol中的implementation为首次v6基线的历史记录，当前实际版本看UNSEEN_RUNTIME.selection；不为显示新版本而改动既有题集哈希。新组沿用事前90%/80%/5%/5%工程门槛及整段六轮统计，门槛不因结果改变。仅固定公开临时E5、隔离索引及截取证据的合成Provider，结果只终端/对话，退出清理；未评估最终生成质量或Windows本机原生。开发验证使用rag-grounding及knowledge-core机制测试和既有rag-validation夹具，公开评估前已冻结生产。
+
+本轮公开题只评估入口：在本机平台目录执行 `VOXCUE_RAG_UNSEEN_FEATURES=1 node ../shared/test/scripts/rag-unseen-oral-smoke.mjs --public`（Windows先设置同名环境变量）。`fixtures/rag-public-interview.ts`固定200个场景：20个公开主题各6轮口语链、20个明确换题、10个比较、20个无关、20个无前文/间断/AI建议/未收录案例及10个缺失具体事实。题源逐主题保留JavaGuide、H5BP和System Design Primer链接，答案要点另附官方文档来源；中文笔记和口语追问是整理改写，并非公开原文全文或真实面试转写。Twitter/Pastebin属于公开设计练习，不冒充实际公司的当前生产架构；负载均衡会话保持另可参考NGINX官方`https://nginx.org/en/docs/http/load_balancing.html`，Twitter高扇出取舍的补充一手材料为Raffi Krikorian的公开演讲`https://www.infoq.com/presentations/Twitter-Timeline-Scalability/`。
+
+公开集在首次检索前固定题目、资料、事实及门槛，并打印源码/编译后端和数据指纹；观察后不改生产实现、标签或门槛。`PUBLIC_SUMMARY`按所需事实是否实际注入统计首问、早/晚追问、换题、比较、无关/含糊误注入和已知案例污染，`PUBLIC_CHAIN`检查每个六轮链是否完整。事前工程门槛为独立明确首问覆盖90%、追问80%、无关误注入和已知案例污染各不超过5%，不是行业标准；未知案例误借资料单列，不被“已知案例无污染”掩盖。完整根与事实覆盖同时核对，空结果也必须是正常完成而非超时或故障。资料缺少具体事实时，相关背景既不算已回答，也不自动当作无关误注入；未调用真实生成模型，不验证其会否编造。只用固定公开临时E5及测试数据库，生产和真实资料不变，退出清理，结果只终端/对话；不提交或发布。看过结果后本集成为已知评估集，不能再宣称下一轮独立验证。
+
+在本机平台目录执行 `pnpm typecheck`、`pnpm build:shared`、`pnpm check:architecture`，以及 rag、rag-reliability、rag-accuracy、knowledge-core、knowledge-parsing、knowledge-index-store、personal-info、desktop-ipc、chat、chat-responses、copilot 相关单测。Function 专用 rag-tools 已删除，不能再加入矩阵。`knowledge-host-smoke.mjs` 保留真实 utilityProcess 的错误、15秒期限、取消/退出与迟到结果回归。
+
+`node ../shared/test/scripts/rag-validation-smoke.mjs` 自动在自有临时目录下载校验固定公开 RAG 模型，使用真实 E5/LanceDB 对照旧/新策略和候选池；夹具为100个合成问题加20个留出问题，检查旧成功案例保留、召回/排名、证据精度、误命中与暖态本地准备时间。无真实账户生成，不把该时间视为联网 TTFT；结果仅终端，模型/数据退出清理，不能使用正式缓存。
+
+`node ../shared/test/scripts/rag-colloquial-smoke.mjs` 单独执行120个固定口语场景、19份合成资料的探索评估，覆盖技术词/省略表达、口语追问、中文项目、话题纠正、转写谐音、无答案和无前文的含糊问句。使用生产E5/LanceDB及上下文/证据编排，分别输出目标候选/证据覆盖、追问内容缺失、其他项目混入及空结果情况；相关但缺少具体事实的题单独统计，不把所有相关证据误计为假阳性。退出成功只表示评估完成和结构/隔离断言通过，不表示检索质量达标。Provider只截取实际证据，不调用真实AI或评价其答案。固定公开模型校验后仅在临时根使用，结果到终端，模型/索引/profile退出清理。两个平台共用此入口，Mac执行不代表Windows本机验收。
+
+该入口可设置 `VOXCUE_RAG_AUDIT_ALL_CASES=1` 输出有界逐题覆盖/证据ID，用于内存中的前后对照；设置 `VOXCUE_RAG_AUDIT_ASSERT_QUALITY=1` 则额外要求固定题集的有答案场景均取得所需证据、无其他项目混入、无关/无主题场景不注入资料。未设置质量开关时仍是探索审计。题目与资料不能为通过断言而改写；这组已用于修复的合成题不是独立泛化准确率验证。
+
+`node ../shared/test/scripts/rag-unseen-oral-smoke.mjs` 使用冻结 local-v5 后另写的240场景集合；它已用于本轮改进，现在是已知回归集。20份资料各含两个根问题；包含120个连续口语追问及项目切换、双项目比较、实际转写、间断、AI建议、无关问题和缺失事实。加 `--transfer` 切换到冻结v6后独立编写的160题、16份新资料，技术主题、项目名、事实及问法不导入旧集，包含同文件近名项目和更多连续口语追问。新集合首次观测后不再据其结果调整本轮生产实现，也不能再作为下一轮独立留出集。
+
+两种集合都先冻结源码/编译后端指纹、题目/资料/所需事实标签，再以同一固定公开临时E5、真实LanceDB及生产InterviewContext/RagChatService执行，末尾核对源码、标签及索引版本未变。分别计全部目标根覆盖、全部所需事实覆盖、无其他项目的完整覆盖；无主题/无关问题单计误注入，缺失具体事实不冒充无关负样本。`wrongProjectCases`摘要只统计可回答项目题，陌生项目误借旧资料还须查看`unknown_project`分组，不能将前者为零解释为所有项目问题均无误判。默认输出分组和每组至多两个失败样例，`VOXCUE_RAG_UNSEEN_VERBOSE=1` 可输出全部合成逐题详情，`VOXCUE_RAG_UNSEEN_FEATURES=1` 输出逐题简要特征供内存对照。测试专用`VOXCUE_RAG_TEST_BACKEND`可指向修改前已冻结的编译后端，用同一夹具比较；不能用当前源码重新编译后冒充旧版。
+
+结果仅终端/内存，退出清理全部临时模型、资料和profile。完成不表示所有题命中或生成答案正确，不调用真实账户，Mac结果不替代Windows本机验收。当前目标是满足常规面试辅助，优先项目隔离、无关误注入和连续追问的实用覆盖，不为全部通过增加特例。合成题由同一开发方编写，不是独立人工标注的真实面试样本。
+
+Mac `node test/scripts/sidebar-glass-smoke.mjs --rag-settings-only` 使用真实 AppKit 菜单定向检查移除范围；共享 `settings-smoke.mjs` 检查知识库设置分类/模式入口已删除，其他设置保持；`composer-resize-smoke.mjs` 使用隔离合成窗口检查输入自动折行、连续换行及清空后高度/原生前景同步。GUI/原生必须串行，Windows需本机复验。下文 Function Calling 的旧记录均已由本轮退役方案覆盖。
+
+2026-10-24 最新覆盖：test:chatgpt:single-login 通过断网合成底层运行时/网络端口，保留实际生产登录、聊天和额度装配，核对一次授权、登录后自动读取、刷新不再授权、同会话模型/回答、重启恢复及退出。managed-auth.test.ts 覆盖同会话聊天/图片/文本附件/额度、取消重试、迟到会话及退出警告；codex-usage-runtime 检查公开RPC交接、托管令牌限制、过期/API key/不透明SIWC拒绝。test:chatgpt:usage:runtime 的测试专属 file store 仅包含伪造令牌，断网核对实际固定运行时；生产始终 keyring-only。GUI offline 入口在main导入前替换凭据进程端口，其他UI夹具不会访问真实系统登录项。旧独立用量连接和绑定测试已移除，不再有第二套OAuth入口。Windows需本机同步依赖并验收。结果仅终端/内存，临时目录退出清理，无真实账户/硬件。
+
+2026-10-24 定向增补：chatgpt-quota.test.ts 校验五小时+周、仅周、多桶优先及缺失/无效窗口；codex-usage-runtime.test.ts 校验独立环境、keyring-only、账户 RPC 白名单、登录取消及不安全 URL 拒绝。auth-storage 校验绑定元数据单独加密，不重写聊天凭据。test:chatgpt:usage:runtime 在独立空目录断网启动固定 Codex，仅用测试专属空 file store 避免访问系统凭据，验证 stdio 初始化/空账户；产品保持 keyring-only。test:copilot 增补 ChatGPT 合成连接取消/重试、双窗口、仅周、读取失败和浅深色。Mac sidebar-glass-smoke.mjs --progress-only 串行核对实际 NSProgressIndicator 与0/100像素差、合成麦克风/系统音量及聊天/面试实心停止的取消行为。上述不代表真实订阅或 Windows 原生验收，结果仅终端/内存，临时资料退出清理。
+
+## 2026-10-24 账户额度定向入口
+
+account-quota.test.ts覆盖官方单位、小数、重置、缺失/失败、参考0/0、准入状态隔离及身份/错误边界；account-usage-store.test.ts检查迟到结果与并发刷新；account-usage-ui.test.tsx检查未知不显示0、明确耗尽、加载骨架无虚构数字和ChatGPT官方窗口/连接入口。test:copilot通过断网合成账户验证设置的可用/耗尽/缺失/错误、浅深色与content刷新控件，并核对常规/最小窗口的全宽卡片、标签/数值紧凑同行、无溢出、首次/刷新延迟的骨架扫光与减少动态效果，以及文字超链接的目标/鼠标/键盘激活；Mac content-only和shared chat-response/settings保留官方入口与原账本兼容断言。已移除的UI本地重置不再作为验收对象，本机账本后台单测仍保留。结果仅终端/内存，临时资料退出清理；不读取真实账户余额或凭据。
+
+## 2026-10-24 Copilot 恢复定向入口
+
+`pnpm test:copilot` 用断网合成账户端口验证授权适配器、IPC 和页面的取消重试、服务路由、重启恢复及切回 ChatGPT；`pnpm test:copilot:runtime` 在禁用登录、凭据访问和遥测的 empty 模式启动固定官方原生进程并做 JSON-RPC ping，不创建账户或推理会话。Mac 原生登录由 `node test/scripts/sidebar-glass-smoke.mjs --login-only` 串行验证，两种品牌均为 Glass 胶囊。相关单测为 copilot/auth/auth-storage/desktop-ipc/providers/architecture。临时资料退出清理，不读取真实凭据；Windows 原生打包需本机接续。`--login-preview` 保持隔离登录窗口，关闭或终端 Enter 后清理；仅用户要求保存时指定 `--screenshots=<绝对目录>`。
+
 ## 0.5.8 最新界面定向入口
 
 Mac当前仅支持macOS 26+ Liquid Glass，不再构建或测试旧Mac网页回退。`macos/test/scripts/ui-refinement-matrix.mjs`串行运行100/125/150/175/200%五档Electron缩放，每档一组实际Liquid Glass截图流程，共5组，包含捕获中的76×32px胶囊、1/5至5/5、移除/发送归零与失败重试。该入口不读取或下载模型，全部账户/语音/捕获均为合成，退出清理；不能代替物理多显示器DPI。
@@ -26,9 +84,9 @@ Windows的`windows-suite.mjs --dpi`包含`web-materials`、`ui-material-refineme
 
 `functional-suite.mjs` 在 Mac 默认先运行当前 Liquid Glass 的五组界面专项：`login-controls`（原生亮面登录、黑白文字及图文居中）、`sidebar-updates`（更新圆形/胶囊和收起侧栏）、`sidebar-glass`（实际输入/工具栏/原生菜单/缩放/失焦）、其内含 `content-controls`（所有内容页、复制、原生搜索、确认/删除/重置、开关/滑杆、设置预览/滚动和开场）、`component-controls`（固定提示条、原生进度/取消、组件状态），以及 `interview-glass`（实际 Clear/Regular、深色可读性、三点/箭头、输入、设置、拖动/缩放/重载及旧关闭偏好无效）。这些使用生产 Mac 构建和实际 AppKit，不禁用材质；原生探针只操作自有合成窗口。
 
-随后37组共享业务/布局测试使用临时编译的通用shared网页renderer，保留Windows默认图标、材质和控件；编译断言共享端口存在且Mac实现未进入bundle。测试宿主仅在自有临时根替换loadFile，注入不绘制材质的测试端口，并复用Mac适配器的Electron主题、Dock与鼠标穿透行为；这是通用业务/Windows共用实现检查，不是Mac产品回退机制，不能作为Mac外观或Windows原生验收。产品没有此测试开关。Mac默认必须具备Liquid Glass绑定，原生专项不再按旧系统跳过；其他原生窗口、权限接口、图标、启动器/编译/迁移/更新/组件/DMG、合成采集、AEC、隔离钥匙串和固定签名入口保持。`qwen-regression.mjs`另覆盖真实CPU/Metal推理与后台切换。
+0.5.9 起 Mac 不再构建或运行 Windows 的 shared 网页界面矩阵。Mac 随后运行共用后端/运行时/音频逻辑、明确支持实际 Mac 投影的单次登录/账户/输入换行夹具，以及其他 Mac 原生窗口、权限接口、图标、启动器/编译/迁移/更新/组件/临时包、合成采集、AEC、隔离钥匙串和固定签名入口。Mac 默认必须具备 Liquid Glass 绑定；入口拒绝在 Mac 选择 Windows 专属网页 UI 用例。`qwen-regression.mjs` 另覆盖真实 CPU/Metal 推理与后台切换。
 
-`web-materials` 继续核对Windows共用网页材质及按窗口控件能力预留的共享布局：胶囊/圆形、菜单、40px输入轮廓、顶部覆盖、返回按钮、悬停及设置/窄窗。在Mac上由共享矩阵提供临时通用renderer，不作为旧Mac产品或旧系统预览入口；图片仅在测试临时根存放、退出清理。Mac产品外观只由实际AppKit专项验收。
+`web-materials` 等网页 UI 用例在 Windows 本机核对 shared 胶囊/圆形、菜单、40px输入轮廓、顶部覆盖、返回按钮、悬停及设置/窄窗。Mac 的外观只由实际 AppKit 专项验收；Mac 共用单测/后端通过不能视为 Windows UI、DPI 或本机集成通过。本文后续旧版本矩阵数量/跨平台运行说明为历史，以本节平台边界为准。
 
 所有模型从固定公开资源下载到自动清理的临时目录，或按明确授权缓存先认证再复制；不触碰真实资料/账户，不采样硬件。结果只在终端/内存，临时资料退出清理。测试源码/固定输入可入 Git，模型、构建/包、结果和私密材料不可入 Git。
 
@@ -149,7 +207,7 @@ Mac目录内运行 `node test/scripts/app-icon-smoke.mjs`，用临时透明合�
 
 ## 截图暂存专项（2026-10-19）
 
-`pnpm test:interview:screenshot` 使用隔离离线Electron宿主、合成账户/语音与合成屏幕图像，覆盖截图不发送、输入框预览、1/5至5/5展开计数、五张限制、移除后补拍、五图手动发送、纯文字/仅图片、失败保留及原图重试、浅深布局与记录不含图像。截图仅在内存，临时profile退出清理；不进行真实屏幕或音频采样。该入口还断言部分回答失败后的错误和重试位于回答气泡内；ui-refinement覆盖个人资料正文/编辑12px与标题14px，typography保留其他控件14px规范。单测interview-screenshot-store/desktop-ipc另覆盖自动回答不消费截图、停止、关闭/重置和迟到结果，以及ID/字段/数量和主进程释放校验。
+`pnpm test:interview:screenshot` 使用隔离离线Electron宿主、合成账户/语音与合成屏幕图像，覆盖截图不发送、输入框预览、1/5至5/5展开计数、五张限制、移除后补拍、五图手动发送、纯文字/仅图片、失败保留及原图重试、浅深布局。0.5.9源码增加已发送截图的独立文件归档、记录仅存ID、缩略图和原图查看断言；草稿仍只在内存，临时图片/profile退出清理，新增用例待恢复测试后执行。不进行真实屏幕或音频采样。该入口还断言部分回答失败后的错误和重试位于回答气泡内；ui-refinement覆盖个人资料正文/编辑12px与标题14px，typography保留其他控件14px规范。单测interview-screenshot-store/desktop-ipc另覆盖自动回答不消费截图、停止、关闭/重置和迟到结果，以及ID/字段/数量和主进程释放校验。
 
 # VoxCue 测试入口
 
@@ -195,7 +253,7 @@ Mac 0.3.1 发行授权后运行 dmg 与正式 package-smoke：固定公钥直接
 
 Windows 0.3.1 沿用完整离线单测、typecheck/build/check:architecture/check:workspace、windows-suite 共用功能/--windows 原生矩阵及 --dpi 五档缩放；GUI/原生串行。electron 在每次重载后先检查简历区默认折叠，再展开核对原件保留；conversation-status 容许0.01 CSS像素内的几何取整误差；interview-workflow 使用现行导出的主提示词识别合成面试请求，避免旧字面前缀误分流，保留临时稿/终稿/手动提交和原生交互断言。发行前另运行 installer-branding、installer-engine（0.3.0到当前版）与 portable-native --with-installer，在系统临时目录构建并核对实际安装负载、ASAR、组件下载/取消/释放及原生窗口，不执行生产安装器。components-check 先核对知识库区默认折叠，再展开检查模型未就绪时禁用、下载后的启用及设置入口，保留真实下载/取消/摘要拒绝/重试断言。仅验证通过后保留正式 exe、blockmap、latest.yml，模型与隔离资料退出清理；不记录测试结果。macos/ 只读，不能将 Windows 回归当作 Mac 验收。
 
-第2/4/5组最新补充由 desktop-ipc、profile-store、profile-proposal 检查资料用途、准备聊天不拼接执行面试自定义指令、外部内容边界及技能来源质量规则。rag 单测检查 Local RAG 搜索失败、完整条目部分失败/移除、原15秒预算、挂起端口超时与迟到结果、超时/取消竞争、身份/配置/参数错误不回退及 Provider 只调用一次；Function Calling 与知识核心保护沿用原入口。profile-ui 使用离线合成端口检查普通准备聊天与面试失败后继续回答、模型/effort保持，回退答案仍进入后续追问上下文；chat-progress 保留实际 Responses/SSE 的提案确认、来源核验和取消保护，并按第7组确认稿检查补充摘要入口。结果仅终端，临时资料退出清理，GUI 串行。
+第2/4/5组最新补充由 desktop-ipc、profile-store、profile-proposal 检查资料用途、准备聊天不拼接执行面试自定义指令、外部内容边界及技能来源质量规则。rag 单测检查 Local RAG 搜索失败、完整条目部分失败/移除、原15秒预算、挂起端口超时与迟到结果、超时/取消竞争、身份/配置/参数错误不回退及 Provider 只调用一次；Function Calling 已退役，知识核心保护保留。profile-ui 使用离线合成端口检查普通准备聊天与面试失败后继续回答、模型/effort保持，回退答案仍进入后续追问上下文；chat-progress 保留实际 Responses/SSE 的提案确认、来源核验和取消保护，并按第7组确认稿检查补充摘要入口。结果仅终端，临时资料退出清理，GUI 串行。
 
 第5组资料/技能提示词由 profile-store、profile-proposal、personal-info 单测及 profile-ui、chat-progress 桌面入口覆盖。技能按需联网、无固定写作字数，按钮继续直接发起任务；新增 plain-text 单测检查 Markdown/网址/引用的纯文字展示。桌面断言覆盖流式、完成、失败、保存及重载后的链接隐藏、显示内容复制、原文/来源元数据保留，以及普通聊天仍展示来源；确认/拒绝、实际搜索/来源匹配、取消/迟到和存储上限保护保持。截图仅内存、工作文件仅系统临时目录，结果不落盘。
 

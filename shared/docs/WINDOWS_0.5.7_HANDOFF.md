@@ -1,5 +1,111 @@
 # Windows 0.5.7 交接（累计补充至0.5.8）：共用布局、胶囊控件与毛玻璃
 
+## 2026-10-24 0.5.9 源码接续（最新）
+
+本轮确定 v7 RAG，清理闲置样式/代码并完整验证 Mac 与共用逻辑，只提交推送 0.5.9 源码。逐项行为、Windows 固定运行时/生成配置同步及本机验收见 [WINDOWS_0.5.9_HANDOFF.md](WINDOWS_0.5.9_HANDOFF.md)。用户明确 Windows 界面只在 Windows 本机测试，Mac 不再运行通用网页 UI 代验；下文各轮“不提交/0.5.8保持”是已被本次源码同步授权覆盖的历史限制，不授权任何发行或真实安装。
+
+## 2026-10-24 最新：换题、比较与陌生项目 v7（本地，未提交）
+
+用户授权优先修这三处，明确不再靠补关键词；Mac/Windows通过shared后端同步，界面、固定模型、现有索引、版本0.5.8及依赖保持，不提交推送或发布。`local-v7-current-source-first`先判断当前问题，缺少主题依据时才借可信历史；技术标识从语料标题派生，正文偶然引用不剥夺标题归属。比较按已识别来源分配原始60条总预算，轮转排序后受候选12/证据5限制。未知项目在当前问题中出现即阻止借旧来源；中文名分词片段恢复保留“该项目”等指代边界。没有新增口语同义词表、远程改写或模型，不迁移或重建真实索引。机制及容量边界见RAG_ARCHITECTURE.md。
+
+新增rag-grounding中的来源归属、跨句比较、项目纠正/未知名及候选不饥饿单测；knowledge-core使用真实临时LanceDB和合成向量验证当前主题压过历史、40个根的大来源不挤掉另一来源、未知项目返回空及索引版本不变。原公开200场景保持原题/事实/门槛，只在生产冻结后评估一次；随后另取不同公开题源编写172场景/16份资料，冻结后执行新旧后端对照，观察结果不再修改生产。Windows在本机构建shared后运行相关rag/interview-context/knowledge-core单测、`rag-validation-smoke.mjs`及`rag-unseen-oral-smoke.mjs --public`和`--public-transfer`；只用固定公开临时E5和测试库，退出清理，结果终端/对话。Windows专属未改写，Mac结果不代表Windows本机已运行；不调用真实账户或验证最终AI答案准确率。
+
+## 2026-10-24 最新：连续追问与来源隔离 v6（本地，未提交）
+
+用户要求继续优化连续追问、项目隔离和无关问题误命中，明确不再靠补口语关键词，目标够常规面试使用，无需全部命中。Mac/Windows同步通过shared后端实现，界面、现有模型及索引保持；本节覆盖下文v5句式扩充与原120题全通过的验收要求。本轮不提交、推送或发布。
+
+`local-v6-grounded-thread`以结构化可信问题链提出至多6条前文，由所选库实际语料及既有向量验证当前问题是否承接；AI建议不作检索来源，间断停止前溯。来源词典从标题与所属正文派生，按文档/根/revision隔离，可辨认的同文件项目进一步按根限制；纠正与比较以当前问题为准。通用技术资料使用背景中心化对比和语料自身低频词支持，重复问法也只从实际标题派生；没有新增口语关键词表。每根最多5个关联追问组成有界证据束，避免只带故障却遗漏恢复。候选12/原始60/证据5、15秒/48KB/512token及固定E5、qa-linked-v2保持，不迁移、重建或清理真实索引。实现细节与边界见RAG_ARCHITECTURE.md。
+
+在Windows本机目录构建shared后运行rag-grounding/rag-accuracy/rag-reliability/rag/interview-context相关单测，以及 `node ../shared/test/scripts/rag-unseen-oral-smoke.mjs`（原240题回归）和同命令加`--transfer`（冻结v6后另写160题/16份资料）。两套均以固定公开临时E5和合成资料核对实际证据，退出清理；按覆盖、项目混入、无关/含糊误注入分组，保留漏召回，不把完成评估当作全部命中。160题首次观测后生产保持冻结，不据此继续调参。陌生项目误判需单列，不能用已知项目题污染为零掩盖。结果仅终端/对话，不是真实AI答案准确率；Windows专属未改写，Mac验证不替代Windows本机运行。
+
+## 2026-10-24 新口语留出评估（冻结实现，不改界面）
+
+用户质疑原120题调参后的过拟合，要求全新大量口语/追问评估。shared新增 `rag-unseen-oral.ts` 与 `rag-unseen-oral-smoke.mjs`/执行器，固定240场景、20份新资料、每份两个根问题，不复用旧题或旧资料；先冻结生产源码、编译后端和事实标签，再用固定公开临时E5与实际LanceDB、InterviewContext、RagChatService检查具体事实覆盖、项目混入及无关/含糊问题误注入。本轮不按结果调整生产规则，不改模型、索引、界面或依赖；原120题全通过不能作为泛化达标结论。
+
+Windows可在本机平台目录构建shared后运行 `node ../shared/test/scripts/rag-unseen-oral-smoke.mjs`，默认打印摘要、分组和有界失败样例，需逐题详情可设置 `VOXCUE_RAG_UNSEEN_VERBOSE=1`。结果仅终端/内存，临时模型/数据库/profile退出清理，不是真实AI回答准确率。Windows专属只读，Mac测量不能替代Windows本机验收；仍不提交推送或发行。
+
+## 2026-10-24 最新：口语 RAG 三处修复（不改界面）
+
+用户授权Mac/Windows共用shared修复，覆盖下文只评估的阶段：新增ragQuery纯本地规范化及可信主题判定，补齐口语追问与“刚才说的是”主题重述；当前问题/历史原文、AI建议身份、间断和新主题边界保持。项目范围从根标题识别中英文归属，纠正与比较按当前问题处理，正文交叉提及不能借用其他项目。绝对cosine门槛保持0.84，只对无内容词支持且0.84–0.86之间高度近似的候选簇增加歧义过滤；无主题的参数/指代问题不选取具体证据。
+
+候选12/原始60/证据5、15秒/48KB/512tokens、固定E5 Q8和qa-linked-v2保持，不重建或迁移真实索引。Windows专属、界面、模型、依赖和版本均未改写。Windows本机重建shared后运行相关rag/interview-context单测及原有rag-validation，再设置 `VOXCUE_RAG_AUDIT_ASSERT_QUALITY=1` 执行原120题rag-colloquial入口；可另设置ALL_CASES记录到终端用于逐题对照。测试只用校验后的固定公开临时模型与合成资料，退出清理，不代表真人语义/真实AI回答或Windows原生已验收；不提交推送或发行。
+
+## 2026-10-24 最新补充：Copilot Auto 与额度摘要
+
+shared 已修正 Auto 的请求兼容风险：准备聊天携带资料时，Auto 通过提示词提供既有 JSON schema，不强制不一定受路由支持的原生 responseSchema；现有流式解析、完整资料校验、来源核验和保存确认保持。Auto 不发送仅含虚拟 auto 的 allowedModels，具体模型仍有精确限制；不再强制 reasoningSummary。账户实际模型目录与原权限隔离不变。query 错误不再猜测 HTTP 400，优先采用官方状态码和有界结构化代码。未通过真实账户调用确认本次拒绝的直接原因或修复结果。
+
+Copilot 重置时间按官方预算、精确兼容快照键读取；缺失时限时补查公开 account.getQuota 当前账户接口，只借用对应额度的 ISO 重置日期，失败不影响原数字，不推算日期。卡片有重置时使用“左倒计时、右剩余百分比”，替代已用/剩余数量；无重置时数量明细与百分比共用一行。加载骨架匹配这两种结构，底部 Mac 官方横条与 Windows 系统色胶囊保持。本轮遵守停止追加测试要求，仅必要构建；Windows 本机复核有/无重置、刷新占位和 Auto 普通聊天/资料提案，专属目录未改写，版本与依赖保持，不提交推送或发行。
+
+## 2026-10-24 启动、额度名称与小项同步
+
+音频测试已在shared同步删除结束后的“已检测到声音/未检测到声音”文字与专用状态/样式，结束后无空白结果行；音量条、测试/停止按钮、错误提示及音频逻辑保持。仅必要构建，未追加回归测试，Windows本机复核。
+
+额度卡片已按用户最新要求移除“包含额度”项，明细和加载骨架只保留已用/剩余；后台总额与百分比计算不变。shared启动Logo阴影跟随透明轮廓，移除矩形box-shadow；VoxCue文字柔和扫光，prefers-reduced-motion时静态。额度窗口显示“5小时额度”，真实窗口规则和官方Mac进度条保持。聊天滚动条只在个人信息展开时变细，收起采用普通样式。退出确认按钮文字为“退出登录”，与删除同为红色前景，原确认/保存/退出保护保持。用户确认两端同步，Windows专属未改写；本轮仅必要构建和隔离合成预览，不追加Mac回归，Windows本机复核这些共用界面。
+
+## 2026-10-24 最新覆盖：系统强调色与官方 Mac 组件
+
+用户最新确认两端移除主题色选择，旧 copilot-accent-color-v1 仅留作未读取历史数据；不再读取、写入或监听其变化。shared通过现有systemAccent/onSystemAccent跟随系统，保留普通文字对比度处理和独立明暗主题设置。Windows保留共用胶囊横条和菜单，无AppKit复制；在本机验证系统强调色变化、重启忽略旧偏好、登录/主窗口/面试同步，以及浅深色/高DPI。
+
+Mac恢复官方NSProgressIndicator Small/Bar及标准NSMenu，无容量条替代、自定义菜单行或主题色高亮参数。按推荐自然尺寸居中，五小时/每周摘要同一行、12px灰色、上下4px间距及已知骨架结构保持。此项覆盖下文软件自选颜色、NSLevelIndicator与自定义菜单行的历史方案。Windows专属未改写，依赖/版本保持，不提交推送或发行。用户随后明确停止Mac侧追加测试，Windows共用界面由Windows本机继续验收。
+
+## 2026-10-24 最新：额度紧凑排版与 Mac 主题色
+
+shared 五小时/每周额度标题独立一行，重置倒计时与剩余数值置于第二行两端，同为12px中性次要文字；横条在底部，上下行间距统一4px，骨架沿用同一结构。Mac 通过完整NSLevelIndicator cell及公开bounds缩放修复6px横条上沿裁切；Windows保留共用胶囊绘制。Mac/Windows同步排版；Windows维持共用胶囊横条/软件主题色及现有菜单，需在本机核对浅深色、窄窗和加载几何。Mac 最新按用户选择也跟随软件主题色：容量/音量采用官方可着色 NSLevelIndicator，菜单用公开 NSMenuItem.view 扩展行高亮，保留 NSMenu 材质与业务。覆盖下文保留 Mac 系统配色的历史决定；Windows不得复制 Mac 原生实现。不修改系统设置、依赖/锁、版本或发行。
+
+
+## 2026-10-24 RAG 与输入换行同步（本地，未提交）
+
+用户新授权口语化RAG专项评估：shared新增 `rag-colloquial-smoke.mjs`、隔离执行器和固定120场景夹具，两端共用。Windows可在本机平台目录运行该入口；只下载校验固定公开临时E5，以真实LanceDB和生产上下文/证据编排检查目标覆盖、追问遗漏及其他项目混入，结果终端，退出清理。此轮未改生产检索、模型/索引或任何界面，也未进行真实AI回答或Windows本机验收；评估完成不代表质量达标，不扩大到其他回归或发行。
+
+Windows 复用 shared 的单一 Local RAG，删除 Function Calling schema/执行循环、模式契约/持久化和设置中整个知识库标签页；主侧栏知识库管理、原件、固定模型与 qa-linked-v2 索引保持。旧 settings.json 只读忽略；keyword/vector/hybrid 保留。分类重试、同题完整证据复用/版本失效、索引与选库开场门禁、根+匹配追问精选及可信追问查询也共用 shared。无新的引用预览界面。实现边界见 RAG_ARCHITECTURE.md。
+
+输入换行使用实际挂载编辑器的即时尺寸测量，保留外观与布局参数；Mac 额外同步投影位置，Windows 不复制其原生实现。Windows 本机请执行 typecheck/build、相关 rag/reliability/accuracy/knowledge-core/desktop-ipc 单测、knowledge-host、settings 与 composer-resize 专项及原生缩放核对。真实 E5 对照入口 rag-validation 只下载固定公开临时模型，结果终端，退出清理。Mac 结果不能替代 Windows 原生验收。
+
+版本仍为 0.5.8，无依赖/锁/模型变更。本轮 Windows 专属只读，不提交、推送、发布或安装。
+
+
+套餐显示补充（2026-10-24）：shared兼容固定官方运行时的prolite/promax，显示为ChatGPT Pro；多桶额度缺失套餐时仍读取旧格式快照的套餐元数据，未识别则由同一登录账户官方planType兜底。额度不重复旧窗口，不按窗口/比例推测套餐，缺失或陌生值仍仅显示ChatGPT。Plus预览为合成数据，不能作为真实账户套餐。Windows专属未改写，本机重建后核对Plus/Pro变体/未知套餐。
+
+浅色账户卡片最新补充（2026-10-24）：用户最终要求常态稍白：shared 使用90%白色调和的44%半透明底板（覆盖先前36%方案），悬停/键盘聚焦/菜单打开仍使用68%白色提亮；边框降至8%前景色、阴影降至3%。避免常态接近纯白导致悬停没有提亮空间，白底也保留明暗差。Windows 需本机重建检查，Mac 原生侧栏材质与深色卡片参数保持。
+
+2026-10-24 最新额度/卡片补充：周窗口标题改为“每周额度”，重置倒计时置于标题下、进度条置于卡片底部，骨架复用同一结构。删除已用百分比与重置分割线；一天及以上显示“x天x小时后重置”，一小时至一天显示“x小时x分钟后重置”，不足一小时只显示“x分钟后重置”，面板打开时每分钟更新，到期等待官方快照而不重置数字。刷新保留上次快照仅供骨架确定卡片数量及标题/横条/指标/重置行结构，不显示旧值；失败或切换账户清空，首次未知按服务提供无数值占位。ChatGPT 仍只显示实际返回的五小时/周窗口。启动转圈删除；账户卡片悬停提亮，深色底板改为45%表面混合并减弱阴影。用户明确保留 Mac 原生进度条和菜单的系统配色；Windows 共用额度/音量胶囊用软件选择的主题色，菜单高亮用同色系可读色和浅深色前景，不修改系统设置。Windows 专属未改写，需本机重建验收明暗/DPI、颜色切换、分钟倒计时及一/两卡加载几何。
+
+2026-10-24 账户卡片增补：用户确认 Mac/Windows 同步。shared 侧栏姓名/邮箱使用紧凑控件行高和2px间距；卡片增加浅深色底色、细边框与轻阴影，悬停、键盘聚焦和菜单打开使用共用表面反馈，网页材质不再覆盖该卡片的悬停底色。保留轮廓、头像、长邮箱省略及收起布局。Mac 实际 Liquid Glass 和共用网页路径的合成账户检查通过；Windows 本机重建后复核浅深色、长邮箱、键盘菜单、侧栏收起与DPI，专属目录未改写。
+
+## 2026-10-24 最新覆盖：ChatGPT 统一一次登录
+
+用户明确要求 Mac/Windows 同步：登录页一次官方 ChatGPT 托管授权后，聊天、模型及额度复用固定 Codex 0.164.0 的同一会话。shared 已移除单独连接用量 UI/IPC/状态/绑定消费者；打开账户与用量直接读取实际五小时/周，刷新不再打开授权，失败保留暂不可用与官方链接。旧SIWC会话需正常重新登录一次；已由本应用托管的会话可恢复，不读取其他应用凭据。主进程经公开 getAuthStatus RPC 取得会话，聊天沿用既有 Responses 流式/附件/资料/工具处理，固定后端与工作区头；令牌不进入网页、日志或URL。下文“独立用量授权”和邮箱配对为历史，由本段覆盖。
+
+Windows 专属仍未改写：先按下节加入固定 win32-x64 别名并同步 shared 生成配置/锁与打包清单。本机执行 managed-auth/codex-usage-runtime/chatgpt-quota/chat/account-usage/desktop-ipc 单测及 test:chatgpt:single-login、test:chatgpt:usage:runtime、test:copilot；验证一次登录后直接额度、重启不再授权、不同工作区及退出不串数据，保留所有请求/文件、原生加密及取消断言。Mac 合成协议和GUI不能替代 Windows 真机或真实账户验收。版本0.5.8，无发行/提交推送授权；横条胶囊和两处实心停止/18px图标要求保持。
+
+## 2026-10-24 最新增补：ChatGPT 用量与进度条/停止按钮
+
+shared 已接入固定 @openai/codex 0.164.0 的官方 app-server 账户额度；保留原 ChatGPT 聊天登录及推理。在账户与用量点击“连接 ChatGPT 用量”，用户用同一账户和工作区完成官方浏览器授权。邮箱与当前身份会核对；SIWC 工作区元数据不透明，不能宣称工作区自动核对。独立 CODEX_HOME、keyring-only、单独系统加密绑定元数据；不读取用户 Codex 登录、不接受环境令牌/明文回退、不执行线程/工具/推理。实际返回五小时和周则都显示，只返回周则只显示周；无效/缺失/失败不伪造数字，继续使用骨架占位及官方文字链接。
+
+Windows 专属未修改，本机待办：在 windows/package.platform.json optionalDependencies 加入 `"@openai/codex-win32-x64": "npm:@openai/codex@0.164.0-win32-x64"`，sync:workspace 后更新 Windows 锁，保留其他固定版本。打包显式复制 @openai/codex 与 win32-x64 别名及递归依赖，核对 `vendor/x86_64-pc-windows-msvc/bin/codex.exe` 存在；不复制 darwin 包。Windows Credential Manager 和实际便携包需本机验证。
+
+额度、麦克风与系统音频横条在 Windows 必须使用胶囊轨道及胶囊填充，shared 已设置999px和 corner-shape:round；Mac 使用实际 AppKit NSProgressIndicator content bar，不移植其实现。聊天与面试停止按钮均复用发送的实心主题色圆形、白色停止图标，保留原取消行为。
+
+定向运行 chatgpt-quota/codex-usage-runtime/account-usage-store/account-usage-ui/auth-storage/desktop-ipc 单测、test:chatgpt:usage:runtime 和 test:copilot；本机检查浅深色、连接取消重试/关闭设置、账户切换、五小时+周/仅周和缺失失败状态，以及两处停止和音量胶囊。Mac --progress-only 只能证明本机 AppKit，不替代 Windows 原生验收。仅隔离合成账户/资料、无真实凭据和硬件，GUI/原生串行，结果零保留；版本0.5.8，不提交推送或发行。
+
+2026-10-24 账户额度增补（两端共用）：shared新增有界chat:account-usage和纯账户额度契约，Copilot调用固定SDK1.0.21的隔离控制会话quota.refresh；显示官方套餐、剩余额度、单位和重置时间。权威预算/参考余额/准入状态分别处理，缺失/失败不显示0，未知单位不误标AI Credits，查询前后核对身份并丢弃旧账户迟到响应。ChatGPT 额度接入以本页最新增补为准。设置移除本应用累计token和重置按钮，原账本/逐回复用量保留。Windows专属未修改，本机重建后运行account-quota/account-usage-ui/account-usage-store/desktop-ipc单测及test:copilot，核对正常/耗尽/读取失败与浅深色。旧设置、字号、图标和聊天回归中的本地重置断言已按新行为调整；不得恢复旧UI或以本地token推算额度。沿用隔离合成、结果零保留与本轮不发行限制。
+
+账户额度排版同步增补：shared卡片占满可用宽度，标题/剩余比例同排，包含/已用/剩余改为标签与数值同行，按内容宽度紧凑排列，窄空间可整组换行，重置时间独立一行；套餐及来源说明收紧，按用户最新要求移除底部“查询时间”第二行。首次读取/刷新时使用匹配卡片结构的浅深色扫光骨架屏，减少动态效果时静止；仅播报加载状态，不生成虚构余额/进度，成功或失败后退出。“查看官方用量”为带下划线的主题色文字超链接，鼠标和键盘经原受控外链接口打开官方页面，不再使用按钮底板或原生按钮。test:copilot包含浅深色、常规/最小窗口几何、延迟读取占位/减少动态效果及链接目标与键盘激活检查；Windows需本机验证。
+
+2026-10-24 聊天重试增补：用户确认“重试回答”同步 Mac/Windows，shared 为该按钮统一胶囊轮廓和 content 展示标记；Windows 自动沿用现有共用中性按钮样式，点击/禁用/重试逻辑不变。Mac 专用收集器将其接入标准 AppKit content 控件；Windows 不导入该实现，需在本机重建核对。
+
+## 2026-10-24 增补：恢复 GitHub Copilot 登录
+
+本节覆盖历史 Copilot 撤销描述。Mac 仍仅 macOS 26+，版本保持0.5.8。shared 恢复 ChatGPT/Copilot 双登录、授权取消/退出、成功登录服务选择与重启恢复，以及按账户实际目录的模型/供应商路由。资料预览与技能来源问题复用最新 shared 校验；凭据由官方运行时系统凭据库保护，拒绝明文同意、环境令牌、gh 认证、本机命令和文件权限。登录选择在本机保存，不新增多账户管理或云同步。
+
+Mac 已恢复 SDK/arm64 原生包1.0.21、原生品牌绘制和打包清单；windows/ 未改写。Windows 本机接续：
+
+1. 在 windows/package.platform.json 的 optionalDependencies 恢复 @github/copilot-sdk-win32-x64: 1.0.21。shared/package.json 已提供 @github/copilot-sdk: 1.0.21；在 Windows 运行 sync:workspace，再更新自己的依赖锁。保留其余固定依赖，shared 的 koffi: false 禁止无关 FFI 构建，使用官方独立进程。
+2. Windows 打包清单显式包含 SDK、win32-x64 原生包及递归依赖，按既有流程处理可执行资源；不得复制 Mac AppKit，也不恢复已删除的 copilot-runtime-v1.0.21 公开发行。将 Windows 专属旧“无 Copilot SDK/后台”和“唯一登录按钮”断言更新为双品牌及对应 SDK/平台包存在，保留模型/ONNX Web 排除和品牌解码验证。
+3. 本机执行架构、类型、构建，以及 Copilot/auth/IPC/provider 单测、test:copilot、test:copilot:runtime。核对双按钮、等待互斥、取消重试、重启恢复、Copilot 模型路由及退出切回 ChatGPT；Windows 原生加密与实际便携包需本机验收。仅隔离合成资料与自有窗口，测试结果零保留。
+
+Mac 定向入口见 PROGRESS；合成授权及无登录运行时握手不证明真实 GitHub 订阅/网络调用已验收。真实授权由用户在浏览器亲自完成。本次未创建发行或替换真实安装，不授权自动提交推送。
+
 日期：2026-10-23。交接对象：Windows 本机接续人员或编码代理。
 
 本轮Windows最终代码全量回归、修复及向Mac的逐条接续清单，见[MACOS_0.5.8_HANDOFF.md](MACOS_0.5.8_HANDOFF.md)。Mac从`95a9bce2b5e623ace3c5aa44ca89dd20f96d16b8`接续后的最新回传见下一节。用户已授权将本轮核对后的源码、测试及文档提交推送至既有私有`NCFXZ/VoxCue`的`main`，版本保持0.5.8；覆盖本页下文此前仅定向、不提交的限制，本次不发布安装包。

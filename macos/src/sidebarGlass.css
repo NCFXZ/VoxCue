@@ -102,6 +102,12 @@
 :root.macos-ui .macos-content-native {
   opacity: 0 !important;
 }
+:root.macos-ui :is(.account-quota-progress, .audio-meter-track).macos-content-native {
+  background: transparent;
+}
+:root.macos-ui :is(.account-quota-progress, .audio-meter-track).macos-content-native > span {
+  visibility: hidden;
+}
 :root.macos-ui .service-login.macos-content-native {
   transition: none;
 }
@@ -148,6 +154,12 @@
   background: transparent;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+}
+:root.macos-ui.native-interview-header .interview-settings-dialog > .dialog-heading::before {
+  display: none;
+}
+:root.macos-ui.native-interview-header .interview-settings-dialog > .dialog-heading h2 {
+  opacity: 0;
 }
 :root.macos-ui.native-scroll-chrome .app-dialog,
 :root.macos-ui.macos-interview-glass .interview-settings-dialog {

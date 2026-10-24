@@ -27,6 +27,12 @@ const providerReply: ChatResult = { ok: true, provider: modelProvider, usage: nu
 void [providerModel, providerReply];
 
 declare const desktop: DesktopAPI;
+desktop.chatAccountUsage();
+// @ts-expect-error Account quota uses the signed-in service, never a renderer token or account.
+desktop.chatAccountUsage({ token: 'private', account: 'other' });
+desktop.signInWithCopilot();
+// @ts-expect-error Copilot login accepts no token, URL or runtime path.
+desktop.signInWithCopilot({ token: 'forbidden' });
 const runningPlatform: 'macos' | 'windows' | 'unknown' = desktop.platform;
 void runningPlatform;
 const frostedEffectReady: boolean = desktop.presentation.frostedTransparency;
@@ -56,6 +62,16 @@ desktop.screenCapturePermission('grant');
 desktop.interviewScreenshot({ op: 'capture' });
 desktop.interviewScreenshot({ op: 'remove', id: 'screenshot-id' });
 desktop.interviewScreenshot({ op: 'clear' });
+desktop.interviewScreenshot({ op: 'archive', ids: ['screenshot-id'] });
+desktop.interviewImage({ op: 'read', id: 'screenshot-id' });
+desktop.interviewImage({ op: 'save', id: 'screenshot-id' });
+// @ts-expect-error Saving uses a native dialog, never a renderer path.
+desktop.interviewImage({ op: 'save', id: 'screenshot-id', path: '/private/image.png' });
+desktop.interviewImage({ op: 'remove', ids: ['screenshot-id'] });
+// @ts-expect-error Stored images are addressed by opaque IDs, never renderer file paths.
+desktop.interviewImage({ op: 'read', path: '/private/image.png' });
+// @ts-expect-error Renderer cannot write original image bytes into the archive.
+desktop.interviewScreenshot({ op: 'archive', bytes: new Uint8Array() });
 desktop.reconnectInterviewAudio({ sources: ['system'], system: 'output' });
 desktop.dictation({ op: 'test', id: 'audio-test', options: { sources: ['system', 'microphone'] } });
 desktop.dictation({ op: 'test-stop', id: 'audio-test' });
@@ -210,5 +226,9 @@ desktop.knowledge({
 });
 
 desktop.updateInterviewModel({ modelId: 'test', effort: 'auto' });
+// @ts-expect-error Removed secondary usage login must not re-enter the public bridge.
+desktop.chatConnectAccountUsage({ url: 'https://example.test', token: 'private' });
+// @ts-expect-error A separate usage-login cancellation port no longer exists.
+desktop.chatCancelAccountUsageConnection('other-login');
 // @ts-expect-error Model updates cannot replace the frozen profile.
 desktop.updateInterviewModel({ modelId: 'test', effort: 'auto', profile: {} });

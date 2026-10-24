@@ -17,7 +17,15 @@ beforeEach(() => {
           ok: true,
           screenshot: { id: 'shot-' + ++captureCount, preview: 'data:image/jpeg;base64,fixture' },
         }
-      : { ok: true },
+      : call.op === 'archive'
+        ? {
+            ok: true,
+            images: call.ids.map((id: string) => ({
+              id,
+              preview: 'data:image/jpeg;base64,fixture',
+            })),
+          }
+        : { ok: true },
   );
   answer.mockReset().mockResolvedValue({ ok: true, answerText: '回答', usage: null, sources: [] });
   vi.stubGlobal('window', {
@@ -61,6 +69,10 @@ it('截取只暂存、不消耗草稿或发送请求，手动发送包含原图�
   expect(useInterview.getState().screenshots).toHaveLength(0);
   expect(useInterview.getState().draftQuestion).toBe('未发送转写');
   expect(useInterview.getState().answers[0].screenshot).toBe('only');
+  expect(useInterview.getState().answers[0].images).toEqual([
+    { id: 'shot-1', preview: 'data:image/jpeg;base64,fixture' },
+  ]);
+  expect(screenshot).toHaveBeenCalledWith({ op: 'archive', ids: ['shot-1'] });
 });
 it('限制五张，移除后可继续截取；手动问题带全部图像引用', async () => {
   for (let i = 0; i < 6; i++) await useInterview.getState().captureScreenshot();
@@ -121,7 +133,7 @@ it('失败重试使用相同截图而不重新采集，移除后明确拒绝重�
   expect(answer).toHaveBeenCalledTimes(2);
   expect(useInterview.getState().error).toContain('原截图已移除');
 });
-it('捕获串行，结束或重置丢弃迟到图像；截图不进入归档', async () => {
+it('捕获串行，结束或重置丢弃迟到图像；未发送的截图不归档', async () => {
   let finish!: (value: unknown) => void;
   screenshot.mockImplementationOnce(
     () =>
@@ -138,6 +150,40 @@ it('捕获串行，结束或重置丢弃迟到图像；截图不进入归档', a
   expect(useInterview.getState().screenshots).toHaveLength(0);
   expect(useInterview.getState().capturingScreenshot).toBe(false);
   expect(answer).not.toHaveBeenCalled();
+  expect(screenshot.mock.calls.some(([call]) => call.op === 'archive')).toBe(false);
+});
+
+it('原图保存失败不发送模型请求，保留待发送图片和明确错误', async () => {
+  await useInterview.getState().captureScreenshot();
+  screenshot.mockImplementation(async (call) =>
+    call.op === 'archive' ? { ok: false, error: { message: '截图保存失败' } } : { ok: true },
+  );
+  await useInterview.getState().submitTranscript('带图问题', true);
+  expect(answer).not.toHaveBeenCalled();
+  expect(useInterview.getState().screenshots).toHaveLength(1);
+  expect(useInterview.getState().answers.at(-1)).toMatchObject({
+    status: 'failed',
+    error: '截图保存失败',
+  });
+});
+
+it('已发送图在实时回答中保留缩略图，归档仅写ID；未发送图不进入记录', async () => {
+  let raw: string | null = null;
+  vi.stubGlobal('localStorage', {
+    getItem: () => raw,
+    setItem: (_key: string, value: string) => {
+      raw = value;
+    },
+  });
+  await useInterview.getState().captureScreenshot();
+  await useInterview.getState().captureScreenshot();
+  await useInterview.getState().ask('只发送第一张', undefined, ['shot-1']);
+  useInterview.getState().archive('ended');
+  const saved = JSON.parse(raw!)[0];
+  expect(saved.answers[0].images).toEqual([{ id: 'shot-1' }]);
+  expect(JSON.stringify(saved)).not.toMatch(/data:image|preview|bytes|shot-2/);
+  expect(useInterview.getState().answers[0].images?.[0].preview).toContain('data:image/');
+  expect(useInterview.getState().screenshots.map((shot) => shot.id)).toEqual(['shot-2']);
 });
 
 it('停止保留待发送截图，重试仍使用原引用且不会重复捕获', async () => {
@@ -150,6 +196,7 @@ it('停止保留待发送截图，重试仍使用原引用且不会重复捕获'
       }),
   );
   const pending = useInterview.getState().submitTranscript('带图问题', true);
+  await vi.waitFor(() => expect(answer).toHaveBeenCalledTimes(1));
   useInterview.getState().stopAnswer();
   const stopped = useInterview.getState().answers.at(-1)!;
   finish({ ok: true, answerText: '迟到回答', usage: null, sources: [] });

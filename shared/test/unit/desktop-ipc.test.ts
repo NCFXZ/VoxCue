@@ -41,12 +41,79 @@ import '../../../shared/electron/preload';
 import { registerHistoryIpc } from '../../../shared/electron/ipc/history';
 import { registerChatIpc } from '../../../shared/electron/ipc/chat';
 import { registerInterviewIpc } from '../../../shared/electron/ipc/interview';
+import { registerInterviewImageIpc } from '../../../shared/electron/ipc/interviewImages';
+import type { InterviewImageStore } from '../../../shared/electron/backend/interview/images';
+import { ChatServiceError } from '../../../shared/electron/backend/chat/errors';
 import { InterviewContext } from '../../../shared/electron/application/interviewContext';
 import {
   validateInterviewConfiguration,
   validateInterviewModel,
 } from '../../../shared/electron/application/speech';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
+
+describe('归档截图 IPC', () => {
+  it('仅授权主frame可读取有界ID，只有主窗口可保存/删除；不泄露本地路径', async () => {
+    const main = { mainFrame: {} },
+      floating = { mainFrame: {} };
+    const store = {
+      read: vi.fn(async () => 'data:image/png;base64,eA=='),
+      preview: vi.fn(async () => 'data:image/jpeg;base64,eA=='),
+      original: vi.fn(async () => ({ bytes: Buffer.from('original'), extension: 'png' as const })),
+      remove: vi.fn(async () => {}),
+    };
+    const saveFile = vi.fn(async () => true);
+    registerInterviewImageIpc({
+      store: store as unknown as InterviewImageStore,
+      saveFile,
+      requireReader(event) {
+        if (![main, floating].includes(event.sender as any)) throw Error('Unauthorized');
+      },
+      requireMain(event) {
+        if (event.sender !== main) throw Error('Main only');
+      },
+    });
+    const route = bridge.handlers.get('interview:image')!;
+    const mainEvent = { sender: main, senderFrame: main.mainFrame };
+    const floatingEvent = { sender: floating, senderFrame: floating.mainFrame };
+    const id = '11111111-1111-4111-8111-111111111111';
+    expect(await route(mainEvent, { op: 'preview', id })).toMatchObject({ ok: true });
+    expect(await route(floatingEvent, { op: 'read', id })).toMatchObject({ ok: true });
+    await expect(route(floatingEvent, { op: 'save', id })).rejects.toThrow('Main only');
+    expect(saveFile).not.toHaveBeenCalled();
+    expect(await route(mainEvent, { op: 'save', id })).toEqual({ ok: true, canceled: false });
+    expect(saveFile).toHaveBeenCalledWith(mainEvent, {
+      bytes: Buffer.from('original'),
+      extension: 'png',
+    });
+    saveFile.mockResolvedValueOnce(false);
+    expect(await route(mainEvent, { op: 'save', id })).toEqual({ ok: true, canceled: true });
+    await expect(route({ sender: {}, senderFrame: {} }, { op: 'read', id })).rejects.toThrow(
+      'Unauthorized',
+    );
+    await expect(route({ sender: main, senderFrame: {} }, { op: 'read', id })).rejects.toThrow();
+    await expect(route(floatingEvent, { op: 'remove', ids: [id] })).rejects.toThrow('Main only');
+    for (const input of [
+      { op: 'read', id: '../file' },
+      { op: 'read', id, path: '/private/image.png' },
+      { op: 'save', id, path: '/private/image.png' },
+      { op: 'save', id, bytes: new Uint8Array([1]) },
+      { op: 'remove', ids: Array(101).fill(id) },
+      { op: 'write', id },
+    ])
+      await expect(route(mainEvent, input)).rejects.toThrow();
+    await expect(route(mainEvent, { op: 'read', id }, { path: '/private' })).rejects.toThrow();
+    expect(store.remove).not.toHaveBeenCalled();
+    expect(await route(mainEvent, { op: 'remove', ids: [id] })).toMatchObject({ ok: true });
+    store.read.mockRejectedValueOnce(Error('ENOENT /private/synthetic/image.png'));
+    const failed = await route(mainEvent, { op: 'read', id });
+    expect(failed.ok).toBe(false);
+    expect(JSON.stringify(failed)).not.toContain('/private');
+    saveFile.mockRejectedValueOnce(Error('EACCES /private/destination.png'));
+    const saveFailed = await route(mainEvent, { op: 'save', id });
+    expect(saveFailed.ok).toBe(false);
+    expect(JSON.stringify(saveFailed)).not.toContain('/private');
+  });
+});
 
 beforeEach(() => {
   bridge.invoke.mockClear();
@@ -244,6 +311,7 @@ describe('完整面试问题通过既有 AI 接口', () => {
       },
       context,
       captureScreen,
+      archiveImages: vi.fn(async (images) => images.map(({ id, preview }) => ({ id, preview }))),
       requireInterview: (e) => {
         if (e.sender !== state.sender) throw Error('Unauthorized window');
       },
@@ -264,7 +332,8 @@ describe('完整面试问题通过既有 AI 接口', () => {
       const callbacks: Parameters<AIChatService['stream']>[1][] = [];
       chat.stream.mockImplementation(async (_request, emit) => {
         callbacks.push(emit);
-        if (callbacks.length < 4) throw Error('连接中断');
+        if (callbacks.length < 4)
+          throw new ChatServiceError({ message: '连接中断', code: 'network_error' });
         emit({ id: question.id, type: 'delta', text: '成功正文' });
         return { answerText: '成功正文', usage: null, sources: [] };
       });
@@ -299,7 +368,9 @@ describe('完整面试问题通过既有 AI 接口', () => {
     vi.useFakeTimers();
     try {
       const { call, chat, lifecycle } = interviewSetup();
-      chat.stream.mockRejectedValue(Error('连接中断'));
+      chat.stream.mockRejectedValue(
+        new ChatServiceError({ message: '连接中断', code: 'network_error' }),
+      );
       const pending = call('interview:answer', question);
       await vi.advanceTimersByTimeAsync(0);
       if (mode === 'manual') await call('interview:cancel', question.id);
@@ -315,12 +386,14 @@ describe('完整面试问题通过既有 AI 接口', () => {
     vi.useFakeTimers();
     try {
       const { call, chat } = interviewSetup();
-      chat.stream.mockRejectedValueOnce(Error('连接中断')).mockImplementationOnce(
-        async (_request, _emit, signal) =>
-          new Promise((_resolve, reject) => {
-            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
-          }),
-      );
+      chat.stream
+        .mockRejectedValueOnce(new ChatServiceError({ message: '连接中断', code: 'network_error' }))
+        .mockImplementationOnce(
+          async (_request, _emit, signal) =>
+            new Promise((_resolve, reject) => {
+              signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            }),
+        );
       const pending = call('interview:answer', question);
       await vi.advanceTimersByTimeAsync(500);
       expect(chat.stream).toHaveBeenCalledTimes(2);
@@ -333,6 +406,45 @@ describe('完整面试问题通过既有 AI 接口', () => {
       await vi.advanceTimersByTimeAsync(3500);
       expect(await empty).toMatchObject({ ok: false });
       expect(chat.stream).toHaveBeenCalledTimes(4);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+  it.each([400, 401, 403, 429, 500])('确定性或未批准的 %s 错误不自动重试', async (status) => {
+    const { call, chat } = interviewSetup();
+    chat.stream.mockRejectedValue(new ChatServiceError({ message: '拒绝', status }));
+    expect(await call('interview:answer', question)).toMatchObject({ ok: false });
+    expect(chat.stream).toHaveBeenCalledOnce();
+  });
+  it('未知错误不猜测文案重试，结束时释放请求作用域', async () => {
+    const { call, chat } = interviewSetup();
+    const stream = vi.fn().mockRejectedValue(Error('network temporarily unavailable'));
+    const dispose = vi.fn();
+    const beginRequest = vi.fn(() => ({ stream, dispose }));
+    Object.assign(chat, { beginRequest });
+    expect(await call('interview:answer', question)).toMatchObject({ ok: false });
+    expect(beginRequest).toHaveBeenCalledOnce();
+    expect(stream).toHaveBeenCalledOnce();
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(chat.stream).not.toHaveBeenCalled();
+  });
+  it('重试共享单一请求作用域，完成后清除证据', async () => {
+    vi.useFakeTimers();
+    try {
+      const { call, chat } = interviewSetup();
+      const stream = vi
+        .fn()
+        .mockRejectedValueOnce(new ChatServiceError({ message: '暂时故障', status: 503 }))
+        .mockResolvedValue({ answerText: '完成', usage: null, sources: [] });
+      const dispose = vi.fn(),
+        beginRequest = vi.fn(() => ({ stream, dispose }));
+      Object.assign(chat, { beginRequest });
+      const pending = call('interview:answer', question);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(await pending).toMatchObject({ ok: true });
+      expect(beginRequest).toHaveBeenCalledOnce();
+      expect(stream).toHaveBeenCalledTimes(2);
+      expect(dispose).toHaveBeenCalledOnce();
     } finally {
       vi.useRealTimers();
     }
@@ -664,6 +776,7 @@ describe('受控 preload 契约', () => {
       ['interviewAnswer', 'interview:answer', [{ id: 'q', question: 'why', modelId: 'model' }]],
       ['interviewCancel', 'interview:cancel', ['q']],
       ['interviewScreenshot', 'interview:screenshot', [{ op: 'capture' }]],
+      ['interviewImage', 'interview:image', [{ op: 'read', id: 'stored-image' }]],
       ['setNativeTheme', 'appearance:theme', ['dark']],
       ['setSidebarGlass', 'appearance:sidebar-glass', [230, 0, '#ffffff', false]],
       ['setGlassButton', 'appearance:glass-button', ['sidebar', null]],
@@ -696,11 +809,13 @@ describe('受控 preload 契约', () => {
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],
       ['signInWithChatGPT', 'auth:sign-in', []],
+      ['signInWithCopilot', 'auth:copilot-sign-in', []],
       ['cancelSignIn', 'auth:cancel', []],
       ['enterDemo', 'auth:demo', []],
       ['signOut', 'auth:sign-out', []],
       ['chatModels', 'chat:models', [true]],
       ['chatUsage', 'chat:usage', []],
+      ['chatAccountUsage', 'chat:account-usage', []],
       ['chatResetUsage', 'chat:usage-reset', []],
       ['chatSend', 'chat:send', [{ id: 'q' }]],
       ['chatCancel', 'chat:cancel', ['q']],
@@ -821,6 +936,7 @@ function setup(demo = false) {
   const chat = {
     models: vi.fn(async () => [{ id: 'test', label: 'Test', description: '' }]),
     usage: vi.fn(async () => emptyUsage()),
+    accountUsage: vi.fn(async () => null),
     resetUsage: vi.fn(async () => emptyUsage()),
     stream: vi.fn<AIChatService['stream']>(async () => completion),
   };
@@ -838,6 +954,21 @@ function setup(demo = false) {
   return { chat, openLink, lifecycle, call, sender };
 }
 describe('聊天 IPC 与应用层边界', () => {
+  it('账户额度只接受主窗口主 frame 的零参数读取，不接收账户、令牌或 URL', async () => {
+    const { chat, call, sender } = setup();
+    expect(await call('chat:account-usage')).toEqual({ ok: true, usage: null });
+    chat.accountUsage.mockClear();
+    await expect(
+      call('chat:account-usage', { token: 'private', url: 'https://example.test' }),
+    ).rejects.toThrow('Invalid request');
+    for (const senderFrame of [undefined, {}])
+      await expect(
+        bridge.handlers.get('chat:account-usage')!({ sender, senderFrame }),
+      ).rejects.toThrow('Unauthorized');
+    expect(chat.accountUsage).not.toHaveBeenCalled();
+    expect(bridge.handlers.has('chat:account-usage-connect')).toBe(false);
+    expect(bridge.handlers.has('chat:account-usage-connect-cancel')).toBe(false);
+  });
   it('未授权窗口不能访问任一聊天路由', async () => {
     const { chat, openLink } = setup();
     for (const channel of bridge.handlers.keys())
@@ -852,6 +983,7 @@ describe('聊天 IPC 与应用层边界', () => {
     const { chat, call } = setup(true);
     expect(await call('chat:models')).toEqual({ ok: true, models: [] });
     expect(await call('chat:usage')).toEqual({ ok: true, usage: emptyUsage() });
+    expect(await call('chat:account-usage')).toEqual({ ok: true, usage: null });
     expect(await call('chat:usage-reset')).toEqual({ ok: true, usage: emptyUsage() });
     expect(await call('chat:send', request)).toMatchObject({ ok: false });
     for (const method of Object.values(chat)) expect(method).not.toHaveBeenCalled();

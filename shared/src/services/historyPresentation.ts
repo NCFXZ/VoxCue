@@ -68,6 +68,8 @@ export function exportRecord(record: InterviewRecord): string {
   lines.push('AI 回答', '');
   for (const answer of visibleAnswers(record)) {
     lines.push(`问题：${answer.question}`, answer.content || '这条回答没有保存内容。', '');
+    if (answer.images?.length)
+      lines.push(`已保存截图：${answer.images.length}张（原图在应用面试记录中查看）`, '');
     if (answer.reasoningSummary) lines.push('公开推理摘要：', answer.reasoningSummary, '');
   }
   return lines.join('\r\n');

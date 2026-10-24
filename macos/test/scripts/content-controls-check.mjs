@@ -1,5 +1,94 @@
 import assert from 'node:assert/strict';
 
+export async function checkChatRetry({ app, page, state, poll, probe }) {
+  const flatten = (node) => [node, ...(node.children ?? []).flatMap(flatten)];
+  await app.evaluate(({ app }) => {
+    const require = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const { ChatGPTService } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/chat/service.js',
+    );
+    let fail = true;
+    ChatGPTService.prototype.stream = async (request, emit) => {
+      if (fail) {
+        fail = false;
+        throw Error('Synthetic retry style failure');
+      }
+      fail = true;
+      const answerText = '合成重试成功';
+      emit({ id: request.id, type: 'delta', text: answerText });
+      return { answerText, usage: null, sources: [] };
+    };
+  });
+  const composer = await poll(
+    async () => {
+      for (const candidate of app.context().pages())
+        if (!candidate.isClosed() && (await candidate.title()) === 'VoxCue composer')
+          return candidate;
+    },
+    Boolean,
+    'Projected composer missing',
+  );
+  for (const theme of ['light', 'dark']) {
+    await app.evaluate(({ nativeTheme }, theme) => {
+      nativeTheme.themeSource = theme;
+    }, theme);
+    await page.emulateMedia({ colorScheme: theme });
+    await composer
+      .getByRole('textbox', { name: '聊天消息', exact: true })
+      .fill('合成检查：重试按钮 content 样式。');
+    await composer.getByRole('button', { name: '发送消息', exact: true }).click();
+    const retry = page.getByRole('button', { name: '重试回答', exact: true });
+    await retry.waitFor();
+    await retry.scrollIntoViewIfNeeded();
+    await poll(
+      state,
+      (value) =>
+        flatten(value.tree).some(
+          (node) =>
+            node.class === 'NSButton' &&
+            node.title === '重试回答' &&
+            node.enabled &&
+            node.bezelStyle === 1 &&
+            !node.inGlassContent &&
+            !node.inSystemGlassContent &&
+            node.frameHeight === 36 &&
+            node.borderShape === 1 &&
+            node.controlSize === 0 &&
+            node.image &&
+            node.contentCentered,
+        ),
+      'Retry must be a regular 36px AppKit content capsule',
+    );
+    assert.equal(await retry.evaluate((node) => getComputedStyle(node).borderRadius), '999px');
+    await retry.focus();
+    await page.waitForFunction(() => document.activeElement?.matches('.chat-retry'));
+    await retry.hover();
+    await poll(
+      state,
+      (value) => flatten(value.tree).some((node) => node.title === '重试回答' && node.highlighted),
+      'Retry keeps native hover feedback',
+    );
+    const users = await page.locator('.chat-message.user').count();
+    if (theme === 'light') {
+      const box = await retry.boundingBox();
+      await probe('clickAt', { x: box.x + box.width / 2, y: box.y + box.height / 2 });
+    } else await retry.press('Enter');
+    await retry.waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => !document.querySelector('[aria-label="停止回复"]'));
+    assert.equal(
+      await page.locator('.chat-message.user').count(),
+      users,
+      'Retry cannot duplicate the user question',
+    );
+    assert.equal(await page.locator('.chat-answer').last().innerText(), '合成重试成功');
+  }
+  console.log(
+    'PASS: light/dark AppKit content retry capsule, centered artwork, hover, mouse/keyboard retry and no duplicate question.',
+  );
+}
+
 export async function checkContentControls({
   app,
   page,
@@ -13,6 +102,14 @@ export async function checkContentControls({
   const flatten = (node) => [node, ...(node.children ?? []).flatMap(flatten)];
   const header = (value) =>
     flatten(value.tree).find((node) => node.identifier === 'voxcue-header-material');
+  const visibleButtons = (node, parentAlpha = 1, parentHidden = false) => {
+    const alpha = parentAlpha * (node.alpha ?? 1);
+    const hidden = parentHidden || node.hidden;
+    return [
+      ...(node.class === 'NSButton' && !hidden && alpha > 0.99 ? [node] : []),
+      ...(node.children ?? []).flatMap((child) => visibleButtons(child, alpha, hidden)),
+    ];
+  };
   const checkIconSizes = async () => {
     const sizes = await page.locator('button.button-icon').evaluateAll((buttons) =>
       buttons
@@ -743,6 +840,21 @@ export async function checkContentControls({
         .length === 4,
     'Requested management toolbar controls use native glass bezels',
   );
+  const toolbarRects = await detail
+    .locator('.record-detail-toolbar button')
+    .evaluateAll((buttons) =>
+      buttons.map((button) => {
+        const { x, y, width, height } = button.getBoundingClientRect();
+        return { x, y, width, height };
+      }),
+    );
+  const toolbarVisible = (value) =>
+    toolbarRects.every((rect) => visibleButtons(value.tree).some((node) => at(node, rect)));
+  await poll(
+    state,
+    (value) => header(value)?.alpha === 0 && toolbarVisible(value),
+    'Transparent empty record header must keep all toolbar controls visible',
+  );
   const recordRename = detail.getByRole('button', { name: '重命名标题', exact: true });
   await recordRename.hover();
   const recordRenameRect = await recordRename.boundingBox();
@@ -757,6 +869,16 @@ export async function checkContentControls({
           node.borderShape === 3,
       ),
     'Record rename reveals a flat circle without the glass highlight',
+  );
+  await recordRename.click();
+  const renameDialog = page.getByRole('dialog', { name: '重命名标题', exact: true });
+  await renameDialog.waitFor();
+  await renameDialog.getByRole('button', { name: '取消', exact: true }).click();
+  await renameDialog.waitFor({ state: 'hidden' });
+  await poll(
+    state,
+    toolbarVisible,
+    'Closing a record dialog must restore native toolbar controls without a layout change',
   );
   await page.mouse.move(900, 650);
   const answerToggle = detail.getByRole('button', { name: 'AI 回答面板', exact: true });
@@ -801,8 +923,12 @@ export async function checkContentControls({
   await settings.waitFor();
   await poll(
     state,
-    (value) => flatten(value.tree).filter((node) => node.class === 'NSPopUpButton').length >= 2,
-    'Content dropdowns must use native NSPopUpButton',
+    (value) =>
+      flatten(value.tree).some(
+        (node) =>
+          node.class === 'NSPopUpButton' && ['浅色', '深色', '跟随系统'].includes(node.title),
+      ),
+    'The appearance selector must use an actual NSPopUpButton after removing accent selection',
   );
   const items = await choose(settings.getByRole('button', { name: '外观主题', exact: true }), [53]);
   assert.ok(items.filter((item) => !item.separator).every((item) => item.imageVisible));
@@ -811,7 +937,7 @@ export async function checkContentControls({
     0,
   );
   await choose(settings.getByRole('button', { name: '外观主题', exact: true }), '跟随系统');
-  for (const name of ['外观主题', '主题色']) {
+  for (const name of ['外观主题']) {
     assert.equal(
       await settings
         .getByRole('button', { name, exact: true })
@@ -826,41 +952,17 @@ export async function checkContentControls({
   await choose(settings.getByRole('button', { name: '外观主题', exact: true }), '深色');
   await page.waitForFunction(() => document.documentElement.classList.contains('dark'));
   await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
-  const reset = settings.getByRole('button', { name: '重置用量', exact: true });
-  await reset.waitFor();
-  for (let cycle = 0; cycle < 3; cycle++) {
-    await reset.click();
-    const animation = await settings.locator('.confirm-delete').evaluate(async (node) => {
-      const widths = [],
-        gaps = [];
-      let last = performance.now(),
-        start = last;
-      await new Promise((resolve) => {
-        const tick = (now) => {
-          widths.push(node.getBoundingClientRect().width);
-          gaps.push(now - last);
-          last = now;
-          if (now - start < 240) requestAnimationFrame(tick);
-          else resolve();
-        };
-        requestAnimationFrame(tick);
-      });
-      return { widths, gaps };
-    });
-    const compactWidth = await settings
-      .locator('.confirm-delete-confirm')
-      .evaluate((node) => Math.ceil(node.scrollWidth + 24));
-    assert.ok(
-      Math.abs(animation.widths.at(-1) - compactWidth) < 1,
-      'Reset expands to its intrinsic content plus compact end padding',
-    );
-    assert.ok(
-      animation.widths.length >= 5 && Math.max(...animation.gaps) < 130,
-      'Reset expansion must remain responsive',
-    );
-    await settings.locator('.confirm-delete').press('Escape');
-    await page.waitForTimeout(250);
-  }
+  const officialUsage = settings.getByRole('link', { name: '查看官方用量', exact: true });
+  await officialUsage.waitFor();
+  assert.equal(await settings.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
+  await poll(
+    state,
+    (value) =>
+      !flatten(value.tree).some(
+        (node) => node.class === 'NSButton' && node.title === '查看官方用量',
+      ),
+    'Official usage is a text hyperlink without a native button',
+  );
   await settings.getByRole('button', { name: '更新', exact: true }).click();
   const autoDownload = settings.getByRole('switch', { name: '自动下载更新', exact: true });
   await page.waitForFunction(() =>

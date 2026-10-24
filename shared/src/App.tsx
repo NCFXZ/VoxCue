@@ -99,7 +99,7 @@ export function App() {
   useEffect(() => {
     if (!isLoginWindow && auth.session)
       void useChatConnection.getState().load(auth.session.mode !== 'demo');
-  }, [auth.session?.mode, isLoginWindow]);
+  }, [auth.session?.mode, auth.session?.user.id, isLoginWindow]);
   useEffect(() => {
     let active = true;
     const media = window.matchMedia('(prefers-color-scheme: dark)');

@@ -112,7 +112,7 @@ export async function verifyContinuousCorners(page, name) {
               '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,.interview-preview-capsule,' +
               '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
               '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
-              '.mock-badge,.screen-capture-status,.record-transcript-heading span,' +
+              '.screen-capture-status,.record-transcript-heading span,' +
               '.interview-answer-status,.suggestions button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
           );
         const roundMenu = !fallback && element.matches('.composer-menu');

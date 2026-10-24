@@ -153,7 +153,7 @@ export function createPresentation(options: {
         if (oldWidth !== width || oldHeight !== height) view.setContentSize(width, height);
       }
       const active = glass.configureScrollChrome(win.getNativeWindowHandle(), state);
-      win.setWindowButtonPosition({ x: 16, y: 18 });
+      if (!interviewWindows.has(win)) win.setWindowButtonPosition({ x: 16, y: 18 });
       return active;
     },
     setContentControls: (win, controls, changed) => {

@@ -12,7 +12,6 @@ import {
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
 import type { UsageLedger } from '../../../shared/electron/backend/chat/usage';
 import { RagChatService } from '../../../shared/electron/application/rag';
-import { KnowledgeTools } from '../../../shared/electron/application/ragTools';
 import type { KnowledgePort } from '../../../shared/electron/backend/knowledge/types';
 import type { AIChatService } from '../../../shared/electron/backend/chat/ports';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
@@ -147,16 +146,15 @@ const request = {
   turns: [{ role: 'user' as const, content: 'TypeScript' }],
 };
 describe('本场知识库范围不可被模型扩大', () => {
-  it('Local 仅读取所选库，未选择时连搜索/Function入口都不调用', async () => {
+  it('Local 仅读取所选库，未选择时不调用检索入口', async () => {
     const knowledge = core();
     const provider: AIChatService = {
       stream: vi.fn(async () => ({ answerText: 'answer', usage: null, sources: [] })),
-      streamWithTools: vi.fn(),
       models: vi.fn(),
       usage: vi.fn(),
       resetUsage: vi.fn(),
     };
-    const rag = new RagChatService(provider, knowledge, async () => 'local');
+    const rag = new RagChatService(provider, knowledge);
     await rag.stream(
       { ...request, knowledgeBaseId: 'chosen' },
       vi.fn(),
@@ -164,67 +162,23 @@ describe('本场知识库范围不可被模型扩大', () => {
     );
     expect(knowledge.search).toHaveBeenCalledWith(
       'TypeScript',
-      5,
+      12,
       'hybrid',
       expect.any(AbortSignal),
       'chosen',
+      { rawLimit: 60, grounded: true },
     );
     expect(knowledge.getItem).toHaveBeenCalledTimes(1);
     const enriched = vi.mocked(provider.stream).mock.calls[0][0];
     expect(enriched.turns[0].content).toContain('chosen-evidence');
     expect(enriched.turns[0].content).not.toContain('private-other-base');
     vi.mocked(knowledge.search).mockClear();
-    await new RagChatService(provider, knowledge, async () => 'function').stream(
+    await new RagChatService(provider, knowledge).stream(
       { ...request, knowledgeBaseId: null },
       vi.fn(),
       new AbortController().signal,
     );
     expect(knowledge.search).not.toHaveBeenCalled();
-    expect(provider.streamWithTools).not.toHaveBeenCalled();
-  });
-  it('Function 拒绝扩大范围参数，不能读取其他库条目或替换的文档', async () => {
-    const knowledge = core();
-    const tools = new KnowledgeTools(knowledge, 'chosen');
-    const signal = new AbortController().signal;
-    const call = (name: string, args: object) => ({
-      namespace: 'voxcue_knowledge',
-      name,
-      arguments: JSON.stringify(args),
-      call_id: 'c',
-    });
-    expect(
-      await tools.execute(
-        call('search_knowledge_base', {
-          query: 'TypeScript',
-          topK: 5,
-          mode: 'hybrid',
-          baseId: 'other',
-        }),
-        signal,
-      ),
-    ).toContain('无效');
-    expect(knowledge.search).not.toHaveBeenCalled();
-    const search = await tools.execute(
-      call('search_knowledge_base', { query: 'TypeScript', topK: 5, mode: 'hybrid' }),
-      signal,
-    );
-    expect(search).not.toContain('private-other-base');
-    expect(await tools.execute(call('get_knowledge_item', { itemId: 'b' }), signal)).toContain(
-      '必须来自',
-    );
-    expect(knowledge.getItem).not.toHaveBeenCalled();
-    vi.mocked(knowledge.getItem).mockResolvedValueOnce({
-      itemId: 'a',
-      documentId: 'other',
-      title: 'x',
-      content: 'leak',
-      kind: 'text',
-      section: '',
-      followUpIds: [],
-    });
-    expect(await tools.execute(call('get_knowledge_item', { itemId: 'a' }), signal)).not.toContain(
-      'leak',
-    );
   });
 });
 

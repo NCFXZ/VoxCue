@@ -2,6 +2,7 @@ import type {
   ContentControlPlacement,
   GlassSurfacePlacement,
   InterviewMaterialPlacement,
+  ScrollChromeState,
 } from '../../shared/electron/contracts/desktop';
 import { materialColor } from './materialGeometry';
 import { contentControl, applyContentRange } from './contentControls';
@@ -30,6 +31,7 @@ if (
         buttons: ContentControlPlacement[];
         elements: HTMLElement[];
         controls: HTMLElement[];
+        header: ScrollChromeState | null;
       }
     | undefined;
   let painted: HTMLElement[] = [];
@@ -56,14 +58,16 @@ if (
     while (queued && !disposed) {
       const next = queued;
       queued = undefined;
-      const key = JSON.stringify([next.materials, next.buttons]);
+      const key = JSON.stringify([next.materials, next.buttons, next.header]);
       if (key === applied) continue;
       try {
         const active = await desktop.setInterviewMaterials(next.materials);
+        const headerActive = await desktop.setScrollChrome(active ? next.header : null);
         await desktop.setContentControls(active ? next.buttons : []);
         applied = key;
         clear();
         root.classList.toggle('macos-interview-glass', active);
+        root.classList.toggle('native-interview-header', active && headerActive && !!next.header);
         if (active) {
           painted = next.elements;
           for (const element of painted) element.classList.add('macos-native-interview-material');
@@ -104,6 +108,13 @@ if (
       if (/(auto|scroll|hidden|clip)/.test(css.overflowX)) {
         left = Math.max(left, box.left);
         right = Math.min(right, box.right);
+      }
+      if (
+        parent.matches('.dialog-scroll') &&
+        parent.parentElement?.hasAttribute('data-overlay-header')
+      ) {
+        const header = parent.parentElement.querySelector(':scope > .dialog-heading');
+        if (header) top = Math.max(top, header.getBoundingClientRect().bottom);
       }
       if (parent.matches('.floating-answer .floating-scroll')) fadeEnd = box.bottom;
     }
@@ -155,7 +166,29 @@ if (
         });
         elements.push(element);
       }
-    const modal = document.querySelector('dialog[open]');
+    const modal = [...document.querySelectorAll<HTMLElement>('dialog[open]')].at(-1);
+    let header: ScrollChromeState | null = null;
+    if (modal?.matches('.interview-settings-dialog[data-overlay-header]')) {
+      const heading = modal.querySelector<HTMLElement>(':scope > .dialog-heading');
+      const title = heading?.querySelector('h2');
+      if (heading && title)
+        header = {
+          area: rect(modal),
+          title: rect(title),
+          titleText: title.textContent?.trim() ?? '',
+          composer: null,
+          follow: null,
+          followHovered: false,
+          modal: null,
+          modalRadius: 0,
+          topHeight: heading.getBoundingClientRect().height,
+          headerOpacity:
+            Number(getComputedStyle(modal).getPropertyValue('--dialog-header-opacity')) || 0,
+          titleOpacity: 1,
+          foregroundColor: materialColor(root, '--foreground'),
+          headerRadius: parseFloat(getComputedStyle(modal).borderTopLeftRadius) || 0,
+        };
+    }
     if (modal && materials.length < 256) {
       const box = rect(modal);
       materials.push({
@@ -220,7 +253,7 @@ if (
     // controls as the main settings, while interview buttons keep their size.
     if (modal)
       for (const element of modal.querySelectorAll<HTMLElement>(
-        'button,input[type="range"][aria-label="面试字体大小"]',
+        'button,input[type="range"][aria-label="面试字体大小"],.interview-image-position',
       )) {
         const box = geometry(element);
         if (
@@ -235,7 +268,7 @@ if (
         buttons.push(contentControl(element, identity(element), modal));
         controls.push(element);
       }
-    queued = { materials, buttons, elements, controls };
+    queued = { materials, buttons, elements, controls, header };
     void flush();
   };
   function schedule() {
@@ -292,13 +325,21 @@ if (
       return;
     locate();
   });
-  changes.observe(document.getElementById('root')!, {
+  changes.observe(document.body, {
     subtree: true,
     childList: true,
     characterData: true,
     attributes: true,
     attributeOldValue: true,
-    attributeFilter: ['class', 'style', 'hidden', 'open', 'disabled', 'aria-pressed'],
+    attributeFilter: [
+      'class',
+      'style',
+      'hidden',
+      'open',
+      'disabled',
+      'aria-pressed',
+      'data-native-control-style',
+    ],
   });
   const appearance = new MutationObserver(schedule);
   appearance.observe(root, { attributes: true, attributeFilter: ['class', 'style'] });
@@ -331,11 +372,12 @@ if (
     appearance.disconnect();
     removeRange();
     clear();
-    root.classList.remove('macos-interview-glass');
+    root.classList.remove('macos-interview-glass', 'native-interview-header');
     for (const event of events) document.removeEventListener(event, schedule, true);
     window.removeEventListener('resize', schedule);
     void desktop
       .setContentControls([])
+      .then(() => desktop.setScrollChrome(null))
       .then(() => desktop.setInterviewMaterials([]))
       .catch(() => {});
   };

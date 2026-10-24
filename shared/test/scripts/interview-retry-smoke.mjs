@@ -26,6 +26,9 @@ try {
     const { ChatGPTService } = require(
       app.getAppPath() + '/dist-electron/shared/electron/backend/chat/service.js',
     );
+    const { ChatServiceError } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/chat/errors.js',
+    );
     globalThis.retryFixture = { calls: {}, aborts: 0, recovered: false };
     ChatGPTService.prototype.stream = async (request, emit, signal) => {
       if (request.id.startsWith('history-title-'))
@@ -82,7 +85,10 @@ try {
       if (question === '空回答') return { answerText: '', usage: null, sources: [] };
       if (attempt === 1 && ['自动恢复', '全部失败'].includes(question))
         emit({ id: request.id, type: 'delta', text: '前次未完成的正文。' });
-      throw Error('合成连接中断，请检查网络后重试。');
+      throw new ChatServiceError({
+        code: 'network_error',
+        message: '合成连接中断，请检查网络后重试。',
+      });
     };
   });
   const login = await app.firstWindow();

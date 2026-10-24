@@ -1,32 +1,26 @@
 import type { AppUsage, ChatEvent, ChatModel, ChatRequest, ChatResult } from '../../contracts/chat';
+import type { AccountUsage } from '../../contracts/accountUsage';
 
 export type ChatCompletion = Omit<Extract<ChatResult, { ok: true }>, 'ok'>;
-export interface LocalToolCall {
-  name: string;
-  namespace?: string;
-  arguments: string;
-  call_id: string;
+export interface ChatRequestScope {
+  stream(
+    request: ChatRequest,
+    emit: (event: ChatEvent) => void,
+    signal: AbortSignal,
+  ): Promise<ChatCompletion>;
+  dispose(): void;
 }
-export interface LocalTools {
-  definitions: Record<string, unknown>[];
-  execute(call: LocalToolCall, signal: AbortSignal): Promise<string>;
-}
-
 // Native application code depends on this port, not a specific AI provider.
 export interface AIChatService {
-  readonly functionCallingStatus?: { supported: boolean | null; reason: string };
+  /** Main-process-only options; never accepted from Renderer or sent to a provider. */
+  beginRequest?(options?: { retrievalQuery?: string; references?: boolean }): ChatRequestScope;
   models(force?: boolean): Promise<ChatModel[]>;
+  accountUsage?(): Promise<AccountUsage | null>;
   usage(): Promise<AppUsage>;
   resetUsage(): Promise<AppUsage>;
   stream(
     request: ChatRequest,
     emit: (event: ChatEvent) => void,
     signal: AbortSignal,
-  ): Promise<ChatCompletion>;
-  streamWithTools?(
-    request: ChatRequest,
-    emit: (event: ChatEvent) => void,
-    signal: AbortSignal,
-    tools: LocalTools,
   ): Promise<ChatCompletion>;
 }

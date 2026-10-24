@@ -3,6 +3,7 @@ import { InterviewPreview } from './InterviewPreview';
 import { Button } from './ui/button';
 import { useAuth } from '../stores/auth';
 import chatGPTIcon from '../assets/chatgpt.svg?inline';
+import copilotIcon from '../assets/copilot.svg?inline';
 import { AppLogo } from './AppLogo';
 export function LoginPage() {
   const auth = useAuth();
@@ -19,18 +20,27 @@ export function LoginPage() {
             <p>登录以开始使用。</p>
           </div>
           <div className="login-actions">
-            <Button
-              variant="outline"
-              className="service-login"
-              data-native-control-style="standalone-glass"
-              disabled={auth.waiting || !window.desktop}
-              onClick={() => {
-                void auth.signIn();
-              }}
-            >
-              <img className="service-brand-icon" src={chatGPTIcon} alt="" aria-hidden="true" />
-              {auth.signingIn === 'chatgpt' ? '等待浏览器授权…' : '使用 ChatGPT 继续'}
-            </Button>
+            {(
+              [
+                ['chatgpt', 'ChatGPT', chatGPTIcon],
+                ['copilot', 'GitHub Copilot', copilotIcon],
+              ] as const
+            ).map(([service, name, icon]) => (
+              <Button
+                key={service}
+                variant="outline"
+                className="service-login"
+                data-login-service={service}
+                data-native-control-style="standalone-glass"
+                disabled={auth.waiting || !window.desktop}
+                onClick={() => {
+                  void auth.signIn(service);
+                }}
+              >
+                <img className="service-brand-icon" src={icon} alt="" aria-hidden="true" />
+                {auth.signingIn === service ? '等待浏览器授权…' : `使用 ${name} 继续`}
+              </Button>
+            ))}
             {auth.waiting && (
               <Button
                 variant="ghost"

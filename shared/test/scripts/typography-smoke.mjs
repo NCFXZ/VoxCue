@@ -403,16 +403,18 @@ try {
       await settings.getByRole('button', { name: category, exact: true }).click();
       await inspect(page, `settings-${category}-${theme}`);
       if (category === '个性化') {
-        for (const menu of ['外观主题', '主题色']) {
+        for (const menu of ['外观主题']) {
           await settings.getByRole('button', { name: menu, exact: true }).click();
           await inspect(page, `settings-menu-${menu}-${theme}`);
           await page.keyboard.press('Escape');
         }
       }
       if (category === '账户与用量') {
-        await settings.getByRole('button', { name: '重置用量', exact: true }).click();
-        await inspect(page, `usage-confirm-${theme}`);
-        await page.keyboard.press('Escape');
+        assert.equal(
+          await settings.getByRole('button', { name: '重置用量', exact: true }).count(),
+          0,
+        );
+        await inspect(page, `account-usage-${theme}`);
       }
     }
     await page.getByRole('button', { name: '关闭设置', exact: true }).click();

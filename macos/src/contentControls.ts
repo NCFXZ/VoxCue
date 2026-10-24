@@ -31,7 +31,11 @@ export function contentControl(
   const preview = element.hasAttribute('data-interview-preview-button');
   const input = element instanceof HTMLInputElement;
   const slider = input && element.type === 'range';
+  const regularOverlay = element.matches('.interview-image-navigation,.interview-image-position');
   const progress = element.matches('.download-ring[role="progressbar"]');
+  const progressBar = element.matches(
+    '.account-quota-progress[role="progressbar"],.audio-meter-track[role="meter"]',
+  );
   const download = element.matches('.download-button');
   const sidebarUpdate = element.matches('.sidebar-update');
   const login = location.hash === '#login' && element.matches('.service-login');
@@ -51,7 +55,6 @@ export function contentControl(
           cancelling ? '.download-button-cancel' : '.download-button-progress',
         ) ?? element)
       : element;
-  const swatch = content.querySelector('.accent-swatch');
   const symbol = [...content.querySelectorAll<SVGElement>('svg[data-sf-symbol]')].find(
     (icon) =>
       !icon.closest('.dropdown-check') &&
@@ -62,7 +65,7 @@ export function contentControl(
   const { x, y, width, height } = element.getBoundingClientRect();
   const sourceLabel = input
     ? element.placeholder
-    : progress
+    : progress || progressBar
       ? (element.getAttribute('aria-label') ?? '')
       : content.innerText.trim().replace(/\s+/g, ' ');
   const danger =
@@ -73,6 +76,8 @@ export function contentControl(
   // over-glass artwork, including their expanded confirmation state.
   const overGlass =
     !slider &&
+    !progressBar &&
+    element.dataset.nativeControlStyle !== 'content' &&
     (['over-glass', 'standalone-glass'].includes(element.dataset.nativeControlStyle ?? '') ||
       (!element.closest('dialog[open]') &&
         !!element.closest('.macos-native-panel-material,.sidebar')));
@@ -83,45 +88,59 @@ export function contentControl(
     y,
     width,
     height,
-    kind: slider
-      ? 'font-slider'
-      : progress
-        ? 'progress'
-        : preview || (download && !sidebarUpdate)
-          ? 'button-background'
-          : toggle
-            ? 'switch'
-            : input
-              ? 'search'
-              : element.getAttribute('aria-haspopup') === 'menu'
-                ? 'popup'
-                : element.matches('.chat-copy')
-                  ? 'button-hover'
-                  : element.dataset.nativeControlStyle === 'standalone-glass'
-                    ? 'button-glass'
-                    : 'button',
+    kind: regularOverlay
+      ? 'regular-overlay'
+      : slider
+        ? 'font-slider'
+        : progressBar
+          ? 'progress-bar'
+          : progress
+            ? 'progress'
+            : preview || (download && !sidebarUpdate)
+              ? 'button-background'
+              : toggle
+                ? 'switch'
+                : input
+                  ? 'search'
+                  : element.getAttribute('aria-haspopup') === 'menu'
+                    ? 'popup'
+                    : element.matches('.chat-copy,.interview-image-save')
+                      ? 'button-hover'
+                      : element.dataset.nativeControlStyle === 'standalone-glass'
+                        ? 'button-glass'
+                        : 'button',
     label: preview ? '' : sourceLabel.slice(0, 300),
     value: input
       ? element.value.slice(0, 6000)
-      : progress
+      : progress || progressBar
         ? (element.getAttribute('aria-valuenow') ?? '')
         : '',
     symbol: login
-      ? 'brand.chatgpt'
+      ? element.dataset.loginService === 'copilot'
+        ? 'brand.copilot'
+        : 'brand.chatgpt'
       : preview
         ? null
-        : (symbol?.getAttribute('data-sf-symbol') ?? (swatch ? 'circle.fill' : null)),
-    symbolColor: swatch ? materialColor(swatch, 'background-color') : null,
+        : (symbol?.getAttribute('data-sf-symbol') ?? null),
+    symbolColor: null,
     color: materialColor(
-      danger || systemForeground ? root : element,
-      danger ? '--danger' : accent ? '--accent' : systemForeground ? '--foreground' : 'color',
+      danger || systemForeground || regularOverlay ? root : element,
+      danger
+        ? '--danger'
+        : accent
+          ? '--accent'
+          : systemForeground || regularOverlay
+            ? '--foreground'
+            : 'color',
     ),
     disabled: element.matches(':disabled') || element.getAttribute('aria-disabled') === 'true',
     covered: !!modal && !modal.contains(element),
     overGlass: preview || overGlass,
     pressed: element.matches(':active'),
     focused: element.matches(':focus-visible'),
-    hovered: element.matches(':hover'),
+    hovered:
+      element.matches(':hover') &&
+      (!element.matches('.interview-image-save') || document.hasFocus()),
     trailing: element.dataset.nativeSymbolPosition === 'trailing',
     opacity: materialOpacity(element),
     checked: toggle && element.getAttribute('aria-checked') === 'true',
@@ -147,9 +166,9 @@ if (
   let queued:
     { controls: ContentControlPlacement[]; elements: Map<number, HTMLElement> } | undefined;
   const selector =
-    'button,input[type="search"],input[type="range"][aria-label="面试字体大小"],[data-interview-preview-button],.download-ring[role="progressbar"]';
+    'button,input[type="search"],input[type="range"][aria-label="面试字体大小"],[data-interview-preview-button],.download-ring[role="progressbar"],.account-quota-progress[role="progressbar"],.audio-meter-track[role="meter"],.interview-image-position';
   const excluded =
-    '.macos-material-button,.follow-latest,.user-button,.conversation-delete,.nav-item,.conversation,.knowledge-card,.history-row,.record-answer-link,.settings-sidebar nav button,.composer button,.chat-composer button,.floating-toolbar button,.floating-composer button';
+    '.macos-material-button,.follow-latest,.user-button,.conversation-delete,.nav-item,.conversation,.knowledge-card,.history-row,.record-answer-link,.interview-image-thumbnail,.settings-sidebar nav button,.composer button,.chat-composer button,.floating-toolbar button,.floating-composer button';
   const clear = () => {
     for (const element of elements.values()) element.classList.remove('macos-content-native');
     elements.clear();
@@ -189,7 +208,7 @@ if (
       element.closest('[hidden],[inert]') ||
       style.visibility === 'hidden' ||
       rect.width < 12 ||
-      rect.height < 12 ||
+      rect.height < (element.matches('.account-quota-progress,.audio-meter-track') ? 4 : 12) ||
       rect.height > 100 ||
       rect.x < 0 ||
       rect.y < 0 ||
@@ -276,11 +295,11 @@ if (
         controls.length >= 256
       )
         continue;
-      // Copy and the component-notice action use standard content buttons;
+      // Copy, answer retry and the component-notice action use content buttons;
       // response timing/disclosures retain their shared presentation.
       if (
         element.tagName === 'BUTTON' &&
-        !element.matches('.chat-copy,.components-notice button') &&
+        !element.matches('.chat-copy,.chat-retry,.components-notice button') &&
         element.dataset.nativeControlStyle !== 'over-glass' &&
         element.closest('.preparation-workspace,.floating-panel,.interview-workspace') &&
         !element.closest('.personal-panel,.app-dialog')
@@ -339,7 +358,7 @@ if (
     if (records.some((record) => record.type === 'childList')) locate();
     else update();
   });
-  mutations.observe(document.getElementById('root')!, {
+  mutations.observe(document.body, {
     subtree: true,
     childList: true,
     characterData: true,
@@ -354,6 +373,7 @@ if (
       'data-state',
       'open',
       'hidden',
+      'data-native-control-style',
     ],
   });
   const appearance = new MutationObserver(update);

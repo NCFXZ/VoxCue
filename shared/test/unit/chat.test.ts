@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
   ChatGPTService,
+  ChatServiceError,
   publicFailure,
   validSource,
 } from '../../../shared/electron/backend/chat/service';
@@ -58,6 +59,22 @@ function sse(events: unknown[]) {
   );
 }
 describe('原生 ChatGPT 请求与用量', () => {
+  it.each([
+    new TypeError('synthetic connection reset'),
+    new DOMException('synthetic deadline', 'TimeoutError'),
+  ])('模型目录的受控网络故障也保留分类', async (error) => {
+    const service = new ChatGPTService({
+      access: async () => ({ account: 'synthetic', token: 'synthetic' }),
+      ledger: await ledger(),
+      fetch: vi.fn().mockRejectedValue(error),
+    });
+    const failure = await service.models().catch((value) => value);
+    expect(failure).toBeInstanceOf(ChatServiceError);
+    expect(failure.detail.code).toBe(
+      error instanceof TypeError ? 'network_error' : 'response_headers_timeout',
+    );
+    expect(failure.message).not.toContain('synthetic');
+  });
   it('使用账户模型顺序、完整上下文和实际搜索工具，保留来源与服务端用量', async () => {
     const usage = await ledger();
     const transport = vi.fn(async (url: any, options?: RequestInit) => {

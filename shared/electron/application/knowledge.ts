@@ -1,6 +1,4 @@
-import { mkdir, readFile, writeFile, rename, copyFile } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import type { KnowledgePort } from '../backend/knowledge/types';
 import type {
@@ -8,7 +6,6 @@ import type {
   KnowledgeState,
   KnowledgeStatus,
   KnowledgeValue,
-  RagMode,
 } from '../contracts/knowledge';
 
 const id = (v: unknown): v is string =>
@@ -25,13 +22,18 @@ export function validateKnowledge(value: unknown): KnowledgeCall {
     remove: ['op', 'requestId', 'documentId'],
     cancel: ['op', 'requestId'],
     search: ['op', 'requestId', 'query', 'topK', 'mode', 'baseId'],
-    item: ['op', 'requestId', 'itemId'],
-    settings: ['op', 'mode'],
+    item: ['op', 'requestId', 'itemId', 'expected'],
   };
   if (!Object.hasOwn(fields, v.op) || Object.keys(v).some((key) => !fields[v.op].includes(key)))
     throw Error('未知知识库操作或字段。');
   const optional =
-    v.op === 'search' ? ['topK', 'mode', 'baseId'] : v.op === 'import' ? ['force'] : [];
+    v.op === 'search'
+      ? ['topK', 'mode', 'baseId']
+      : v.op === 'import'
+        ? ['force']
+        : v.op === 'item'
+          ? ['expected']
+          : [];
   if (fields[v.op].some((key) => !optional.includes(key) && !Object.hasOwn(v, key)))
     throw Error('知识库请求缺少必要字段。');
   if ('requestId' in v && !id(v.requestId)) throw Error('无效请求 ID。');
@@ -64,49 +66,33 @@ export function validateKnowledge(value: unknown): KnowledgeCall {
     (typeof v.itemId !== 'string' || v.itemId.length > 240 || !/^[\w:-]+$/.test(v.itemId))
   )
     throw Error('无效知识单元 ID。');
-  if (v.op === 'settings' && !['local', 'function'].includes(v.mode))
-    throw Error('无效 RAG 模式。');
+  if (
+    v.op === 'item' &&
+    v.expected !== undefined &&
+    (!v.expected ||
+      typeof v.expected !== 'object' ||
+      Array.isArray(v.expected) ||
+      Object.keys(v.expected).length !== 3 ||
+      !id(v.expected.baseId) ||
+      !id(v.expected.documentId) ||
+      typeof v.expected.revision !== 'string' ||
+      !/^[a-f0-9]{64}$/.test(v.expected.revision))
+  )
+    throw Error('无效资料版本。');
   return v;
 }
 export class KnowledgeCoordinator {
   private active = new Map<string, { controller: AbortController; documentId?: string }>();
   private tasks = new Map<string, KnowledgeStatus>();
-  private mode: RagMode = 'local';
-  private settingsError: unknown;
-  private saving = false;
   private snapshot?: Promise<KnowledgeState>;
   private changeVersion = 0;
   private pending = 0;
-  private settingReady: Promise<void>;
   constructor(
     readonly core: KnowledgePort,
-    private directory: string,
     private modelPath: string,
     private emit: (status: KnowledgeStatus) => void,
-    private functionStatus: () => KnowledgeState['functionCalling'] = () => ({
-      supported: null,
-      reason: 'OAuth 文档允许命名空间工具，当前账户与模型尚未实测。',
-    }),
-  ) {
-    this.settingReady = this.loadSettings().catch((error) => {
-      this.settingsError = error;
-    });
-  }
-  private async loadSettings() {
-    try {
-      const value = JSON.parse(await readFile(path.join(this.directory, 'settings.json'), 'utf8'));
-      if (!['local', 'function'].includes(value.mode)) throw Error();
-      this.mode = value.mode;
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
-        throw Error('知识库设置损坏，原设置已保留，请恢复 settings 备份。');
-    }
-  }
-  async getMode() {
-    await this.settingReady;
-    if (this.settingsError) throw this.settingsError;
-    return this.mode;
-  }
+    private isInterviewActive: () => boolean = () => false,
+  ) {}
   progress(status: KnowledgeStatus) {
     this.changeVersion++;
     const requestId = [...this.active.entries()].find(
@@ -121,40 +107,23 @@ export class KnowledgeCoordinator {
   get busy() {
     return this.pending > 0;
   }
+  get indexing() {
+    return [...this.active.values()].some((request) => request.documentId !== undefined);
+  }
+  assertInterviewReady(baseId?: string | null) {
+    if (baseId && this.indexing)
+      throw Error('知识库资料仍在索引，请等待完成或不使用知识库开始面试。');
+  }
   call(call: KnowledgeCall): Promise<KnowledgeValue> {
     this.pending++;
     return this.run(call).finally(() => this.pending--);
   }
   private async run(call: KnowledgeCall): Promise<KnowledgeValue> {
-    await this.settingReady;
-    if (this.settingsError) throw this.settingsError;
+    if (call.op === 'import' && this.isInterviewActive())
+      throw Error('面试期间暂不启动资料索引，请结束面试后重试。');
     if (call.op === 'cancel') {
       this.active.get(call.requestId)?.controller.abort();
       return null;
-    }
-    if (call.op === 'settings') {
-      if (call.mode === this.mode) return null;
-      if (this.saving) throw Error('设置正在保存，请稍后重试。');
-      this.saving = true;
-      try {
-        await mkdir(this.directory, { recursive: true });
-        const file = path.join(this.directory, 'settings.json'),
-          temp = file + '.tmp-' + randomUUID();
-        try {
-          await copyFile(
-            file,
-            path.join(this.directory, 'settings-backup-' + randomUUID() + '.json'),
-          );
-        } catch (e) {
-          if ((e as NodeJS.ErrnoException).code !== 'ENOENT') throw e;
-        }
-        await writeFile(temp, JSON.stringify({ mode: call.mode }), { flag: 'wx' });
-        await rename(temp, file);
-        this.mode = call.mode;
-        return null;
-      } finally {
-        this.saving = false;
-      }
     }
     if (call.op === 'status') {
       return (this.snapshot ??= (async () => {
@@ -168,8 +137,6 @@ export class KnowledgeCoordinator {
           documents,
           tasks: [...this.tasks.values()],
           modelReady: existsSync(path.join(this.modelPath, 'onnx/model_quantized.onnx')),
-          mode: this.mode,
-          functionCalling: this.functionStatus(),
         };
         return state;
       })().finally(() => {
@@ -210,7 +177,7 @@ export class KnowledgeCoordinator {
             call.baseId,
           );
         case 'item':
-          return await this.core.getItem(call.itemId, signal);
+          return await this.core.getItem(call.itemId, signal, call.expected);
       }
     } catch (error) {
       if (documentId)

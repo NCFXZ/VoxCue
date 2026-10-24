@@ -1,9 +1,11 @@
 // Geometry is shared; each renderer decides how to paint the covered header.
-export function headerCoverage(column: Element, header: DOMRect): number {
+export function headerCoverage(
+  column: Element,
+  header: DOMRect,
+  selector = '.chat-message, .management-container > *, .knowledge-grid > *, .history-timeline > *, .record-reading-column > *, .record-answer-scroll > *',
+): number {
   let overlap = 0;
-  for (const content of column.querySelectorAll(
-    '.chat-message, .management-container > *, .knowledge-grid > *, .history-timeline > *, .record-reading-column > *, .record-answer-scroll > *',
-  )) {
+  for (const content of column.querySelectorAll(selector)) {
     const bounds = content.getBoundingClientRect();
     if (
       bounds.bottom > header.top &&

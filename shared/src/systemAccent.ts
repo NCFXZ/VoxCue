@@ -1,31 +1,5 @@
 import { useEffect } from 'react';
 
-export const accentOptions = [
-  { value: 'system', label: '跟随系统' },
-  { value: '#0078d4', label: '蓝色' },
-  { value: '#008c95', label: '青色' },
-  { value: '#16835d', label: '绿色' },
-  { value: '#8764b8', label: '紫色' },
-  { value: '#d96b27', label: '橙色' },
-  { value: '#c74a85', label: '粉色' },
-] as const;
-export type AccentPreference = (typeof accentOptions)[number]['value'];
-const accentKey = 'copilot-accent-color-v1';
-const accentChanged = 'voxcue-accent-changed';
-export function readAccentPreference(): AccentPreference {
-  try {
-    const value = localStorage.getItem(accentKey);
-    return accentOptions.find((option) => option.value === value)?.value ?? 'system';
-  } catch {
-    return 'system';
-  }
-}
-export function saveAccentPreference(value: AccentPreference) {
-  if (!accentOptions.some((option) => option.value === value)) throw Error('无效的主题色。');
-  localStorage.setItem(accentKey, value);
-  window.dispatchEvent(new Event(accentChanged));
-}
-
 // Keep the system hue while maintaining readable text on both themed surfaces.
 export function readableAccent(color: string, dark: boolean) {
   const rgb = color
@@ -58,8 +32,7 @@ export function useSystemAccent() {
     let current: string | null = null;
     const apply = () => {
       if (!active) return;
-      const preference = readAccentPreference();
-      const color = preference === 'system' ? current : preference;
+      const color = current;
       const style = document.documentElement.style;
       if (!color || !/^#[a-f0-9]{6}$/i.test(color)) {
         style.removeProperty('--system-accent');
@@ -80,11 +53,6 @@ export function useSystemAccent() {
       current = color;
       apply();
     });
-    const stored = (event: StorageEvent) => {
-      if (!event.key || event.key === accentKey) apply();
-    };
-    window.addEventListener('storage', stored);
-    window.addEventListener(accentChanged, apply);
     void desktop
       ?.systemAccent()
       .then((color) => {
@@ -98,8 +66,6 @@ export function useSystemAccent() {
       active = false;
       observer.disconnect();
       unsubscribe?.();
-      window.removeEventListener('storage', stored);
-      window.removeEventListener(accentChanged, apply);
     };
   }, []);
 }

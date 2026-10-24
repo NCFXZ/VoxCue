@@ -20,11 +20,16 @@ export async function buildSidebarGlass() {
   try {
     // Embed the original shared brand artwork, without another asset copy or
     // any renderer-provided path/data in the native control contract.
-    const brand = await readFile(path.join(workspace.sharedRoot, 'src/assets/chatgpt.svg'));
-    await writeFile(
-      path.join(staging, 'ChatGPTBrand.h'),
-      `static const unsigned char VoxCueChatGPTBrand[]={${[...brand].join(',')}};\n`,
-    );
+    for (const [file, name] of [
+      ['chatgpt', 'ChatGPT'],
+      ['copilot', 'Copilot'],
+    ]) {
+      const brand = await readFile(path.join(workspace.sharedRoot, `src/assets/${file}.svg`));
+      await writeFile(
+        path.join(staging, `${name}Brand.h`),
+        `static const unsigned char VoxCue${name}Brand[]={${[...brand].join(',')}};\n`,
+      );
+    }
     for (const [command, args] of [
       [
         '/usr/bin/xcrun',

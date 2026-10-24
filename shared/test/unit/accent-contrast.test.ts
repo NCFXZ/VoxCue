@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { accentOptions, readableAccent } from '../../../shared/src/systemAccent';
+import { readableAccent } from '../../../shared/src/systemAccent';
 const luminance = (hex: string) =>
   hex
     .slice(1)
@@ -16,7 +16,11 @@ it('系统强调色在浅深表面都保持普通文字对比度，包括极浅�
       '#459bac',
       '#0078d4',
       '#ff00ff',
-      ...accentOptions.filter((option) => option.value !== 'system').map((option) => option.value),
+      '#008c95',
+      '#16835d',
+      '#8764b8',
+      '#d96b27',
+      '#c74a85',
     ]) {
       const result = readableAccent(color, dark);
       const a = luminance(result);

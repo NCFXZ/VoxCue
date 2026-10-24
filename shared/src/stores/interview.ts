@@ -13,6 +13,7 @@ import { AutomaticQuestionGate, QuestionBuffer, interviewAnswer } from '../servi
 import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
 import { sameAudioCapture, speechSelection } from '../../electron/contracts/speechSettings';
+import { validInterviewImages } from '../../electron/contracts/interviewImages';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
   mode: 'local' | 'mock';
@@ -330,7 +331,16 @@ export const useInterview = create<InterviewState>((set, get) => ({
       endedAt: state.endedAt ?? Date.now(),
       status,
       transcripts: structuredClone(state.transcripts),
-      answers: structuredClone(state.answers),
+      answers: structuredClone(
+        state.answers.map((answer) =>
+          answer.images?.length
+            ? {
+                ...answer,
+                images: answer.images.map(({ id }) => ({ id })),
+              }
+            : answer,
+        ),
+      ),
       mock: state.mode === 'mock',
     });
   },
@@ -700,6 +710,9 @@ export const useInterview = create<InterviewState>((set, get) => ({
     const controller = new AbortController();
     answerController = controller;
     const answerId = id();
+    const sentImages = get()
+      .screenshots.filter((shot) => screenshotIds.includes(shot.id))
+      .map((shot) => ({ ...shot }));
     if (screenshotIds.length) answerScreenshots.set(answerId, screenshotIds);
     set((state) => ({
       answers: [
@@ -709,6 +722,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
           question: question.trim() || '截图中的题目',
           sourceTranscriptIds,
           ...(screenshotMode ? { screenshot: screenshotMode } : {}),
+          ...(sentImages.length ? { images: sentImages } : {}),
           createdAt: Date.now(),
           content: '',
           provider: state.aiEnabled ? 'unknown' : 'mock',
@@ -723,6 +737,26 @@ export const useInterview = create<InterviewState>((set, get) => ({
       if (screenshotMode && !get().aiEnabled) throw Error('截图回答需要先连接模型服务。');
       if (get().aiEnabled) {
         if (!get().modelId) throw Error('请选择账户模型后启用真实回答。');
+        if (screenshotMode) {
+          const saved = await window.desktop!.interviewScreenshot({
+            op: 'archive',
+            ids: screenshotIds,
+          });
+          controller.signal.throwIfAborted();
+          if (!saved.ok) throw Error(saved.error.message);
+          if (
+            !validInterviewImages(saved.images) ||
+            saved.images.length !== screenshotIds.length ||
+            saved.images.some((image, index) => image.id !== screenshotIds[index])
+          )
+            throw Error('截图保存未完成，请重试。');
+          set((state) => ({
+            answers: state.answers.map((answer) =>
+              answer.id === answerId ? { ...answer, images: saved.images } : answer,
+            ),
+          }));
+          get().archive('interrupted');
+        }
         const provider = await interviewAnswer(
           question,
           get().modelId,

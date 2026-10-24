@@ -14,6 +14,19 @@ export class ChatServiceError extends Error {
     super(detail.message);
   }
 }
+export function networkFailure(error: unknown): unknown {
+  if (error instanceof Error && error.name === 'TimeoutError')
+    return new ChatServiceError({
+      code: 'response_headers_timeout',
+      message: '等待模型服务响应超时，请稍后重试。',
+    });
+  if (error instanceof TypeError && !(error instanceof ChatServiceError))
+    return new ChatServiceError({
+      code: 'network_error',
+      message: '模型服务连接中断，请稍后重试。',
+    });
+  return error;
+}
 function diagnostic(value: unknown) {
   return typeof value === 'string' && /^[\w.:[\]-]{1,160}$/.test(value) ? value : undefined;
 }

@@ -8,8 +8,8 @@ import type {
   ChatSource,
   TokenUsage,
 } from '../../contracts/chat';
-import type { AIChatService, LocalTools, LocalToolCall } from './ports';
-import { apiError, ChatServiceError } from './errors';
+import type { AIChatService } from './ports';
+import { apiError, ChatServiceError, networkFailure } from './errors';
 import { validateRequest, validSource, sourceKey } from './validation';
 export { apiError, publicFailure, ChatServiceError } from './errors';
 export { validateRequest, validSource } from './validation';
@@ -19,7 +19,9 @@ import { modelEfforts } from './models';
 import { profileFormat, profileInstructions, ProfileAnswerStream } from './profile';
 import { verifySkillProposal } from './proposal';
 import type { UsageLedger } from './usage';
-const base = 'https://api.openai.com/v1';
+import type { ChatGPTAccountUsage } from './accountUsage';
+const apiBase = 'https://api.openai.com/v1';
+const managedBase = 'https://chatgpt.com/backend-api/codex';
 export function parseUsage(value: any): TokenUsage | null {
   if (
     !value ||
@@ -72,19 +74,31 @@ export function buildInput(request: ChatRequest) {
   });
 }
 interface Dependencies {
-  access(): Promise<{ token: string; account: string }>;
+  access(): Promise<{ token: string; account: string; chatgptAccountId?: string }>;
   ledger: UsageLedger;
   idleTimeoutMs?: number;
   responseHeadersTimeoutMs?: number;
   fetch?: typeof fetch;
+  accountUsage?: ChatGPTAccountUsage;
 }
 export class ChatGPTService implements AIChatService {
-  functionCallingStatus: { supported: boolean | null; reason: string } = {
-    supported: null,
-    reason: '命名空间工具已实现；当前账户与模型尚未完成真实调用验证。',
-  };
   private catalog: { account: string; at: number; models: ChatModel[] } | undefined;
   constructor(private dependencies: Dependencies) {}
+  private async connection() {
+    const access = await this.dependencies.access();
+    const managed = !!access.chatgptAccountId;
+    return {
+      account: access.account,
+      base: managed ? managedBase : apiBase,
+      managed,
+      headers: {
+        authorization: `Bearer ${access.token}`,
+        ...(managed
+          ? { 'ChatGPT-Account-Id': access.chatgptAccountId!, originator: 'voxcue' }
+          : {}),
+      },
+    };
+  }
   private async checked(response: Response, signal = AbortSignal.timeout(20000)) {
     if (!response.ok) {
       const body = await readErrorResponse(response, signal, this.dependencies.idleTimeoutMs);
@@ -93,17 +107,24 @@ export class ChatGPTService implements AIChatService {
     return response;
   }
   async models(force = false): Promise<ChatModel[]> {
-    const { token, account } = await this.dependencies.access();
+    const { account, base, headers, managed } = await this.connection();
     if (!force && this.catalog?.account === account && Date.now() - this.catalog.at < 300000)
       return this.catalog.models;
     const response = await this.checked(
-      await (this.dependencies.fetch ?? fetch)(`${base}/models`, {
-        headers: { authorization: `Bearer ${token}` },
-        signal: AbortSignal.timeout(20000),
-        redirect: 'error',
+      await (this.dependencies.fetch ?? fetch)(
+        `${base}/models${managed ? '?client_version=0.164.0' : ''}`,
+        {
+          headers,
+          signal: AbortSignal.timeout(20000),
+          redirect: 'error',
+        },
+      ).catch((error) => {
+        throw networkFailure(error);
       }),
     );
-    const data = (await response.json()) as any;
+    const data = (await response.json().catch((error) => {
+      throw networkFailure(error);
+    })) as any;
     if (!Array.isArray(data.models)) throw new Error('模型列表响应无效，请重试。');
     const ids = new Set<string>();
     const models: ChatModel[] = [];
@@ -133,6 +154,9 @@ export class ChatGPTService implements AIChatService {
     const { account } = await this.dependencies.access();
     return this.dependencies.ledger.reset(account);
   }
+  accountUsage() {
+    return this.dependencies.accountUsage?.read() ?? Promise.resolve(null);
+  }
   async usage() {
     const { account } = await this.dependencies.access();
     return this.dependencies.ledger.get(account);
@@ -140,45 +164,7 @@ export class ChatGPTService implements AIChatService {
   async stream(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
     return this.run(value, emit, signal);
   }
-  async streamWithTools(
-    value: ChatRequest,
-    emit: (event: ChatEvent) => void,
-    signal: AbortSignal,
-    tools: LocalTools,
-  ) {
-    try {
-      const result = await this.run(value, emit, signal, tools);
-      this.functionCallingStatus = {
-        supported: true,
-        reason: `模型 ${value.modelId} 已接受命名空间工具请求；是否实际检索以本次工具事件为准。`,
-      };
-      return result;
-    } catch (error) {
-      if (
-        error instanceof ChatServiceError &&
-        error.detail.param !== 'reasoning.effort' &&
-        (error.detail.status === 400 ||
-          error.detail.code === 'subscription_sharing_unsupported_capability')
-      ) {
-        this.functionCallingStatus = {
-          supported: false,
-          reason: `模型 ${value.modelId} 最近一次本地工具请求未被接受，请手动改用 Local RAG 或更换模型。`,
-        };
-        throw new ChatServiceError({
-          ...error.detail,
-          message:
-            '当前账户或模型未接受本地 Function Calling 请求。请手动改用 Local RAG 或更换账户可用模型；未切换到其他 API。',
-        });
-      }
-      throw error;
-    }
-  }
-  private async run(
-    value: unknown,
-    emit: (event: ChatEvent) => void,
-    signal: AbortSignal,
-    tools?: LocalTools,
-  ) {
+  private async run(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
     const request = validateRequest(value);
     const models = await this.models();
     signal.throwIfAborted();
@@ -191,20 +177,12 @@ export class ChatGPTService implements AIChatService {
         ?.reasoningEfforts?.includes(request.effort)
     )
       throw new Error('所选模型不支持该思考强度，请选择自动或刷新模型列表。');
-    const { token, account } = await this.dependencies.access();
+    const { account, base, headers } = await this.connection();
     const input: Record<string, unknown>[] = buildInput(request);
     emit({ id: request.id, type: 'provider', provider: { ...chatGPTProvider } });
     // Active reasoning, searches and heartbeats can legitimately exceed three minutes.
     // Header waiting and stream inactivity have independent, cancellable limits.
     const deadline = signal;
-    const callIds = new Set<string>();
-    let toolCalls = 0;
-    let accumulatedUsage: TokenUsage = { inputTokens: 0, outputTokens: 0, totalTokens: 0 },
-      receivedUsage = false,
-      previousAnswer = '',
-      previousSummary = '';
-    const accumulatedSources = new Map<string, ChatSource>();
-    let accumulatedWarning: string | undefined;
     let completedWebSearch = false;
     let activities: ChatActivity[] = [];
     let phase: ChatActivity['phase'] | undefined;
@@ -224,9 +202,8 @@ export class ChatGPTService implements AIChatService {
       }
       recordActivity(activity);
     };
-    for (let round = 0; round < 4; round++) {
+    {
       deadline.throwIfAborted();
-      const exhausted = !!tools && (round === 3 || toolCalls >= 6);
       const response = await this.checked(
         await requestResponse(
           this.dependencies.fetch ?? fetch,
@@ -234,7 +211,7 @@ export class ChatGPTService implements AIChatService {
           {
             method: 'POST',
             headers: {
-              authorization: `Bearer ${token}`,
+              ...headers,
               'content-type': 'application/json',
               accept: 'text/event-stream',
             },
@@ -269,20 +246,6 @@ export class ChatGPTService implements AIChatService {
                     include: ['web_search_call.action.sources'],
                   }
                 : {}),
-              ...(tools
-                ? {
-                    tools: [
-                      ...tools.definitions,
-                      ...(request.webSearch ? [{ type: 'web_search' }] : []),
-                    ],
-                    tool_choice: exhausted ? 'none' : 'auto',
-                    parallel_tool_calls: false,
-                    include: [
-                      ...(request.webSearch ? ['web_search_call.action.sources'] : []),
-                      'reasoning.encrypted_content',
-                    ],
-                  }
-                : {}),
             }),
             redirect: 'error',
           },
@@ -291,11 +254,10 @@ export class ChatGPTService implements AIChatService {
         ),
         deadline,
       );
-      const sources = accumulatedSources;
+      const sources = new Map<string, ChatSource>();
       let usage: TokenUsage | null = null,
         completed = false,
-        warning: string | undefined = accumulatedWarning;
-      let terminalOutput: Record<string, any>[] = [];
+        warning: string | undefined;
       const streamedItems = new Map<number, Record<string, any>>();
       const commentary = new Map<number, string>();
       const publishCommentary = (index: number, item: any, text: string, completed = false) => {
@@ -333,7 +295,7 @@ export class ChatGPTService implements AIChatService {
         for (const part of summary.entries) {
           if (itemId !== undefined && !part.id.startsWith(`${itemId}:`)) continue;
           if (!part.text.trim() || publishedSummaries.get(part.id) === part.text) continue;
-          const id = `public-summary-${round}-${part.id}`;
+          const id = `public-summary-0-${part.id}`;
           if (!publishedSummaries.has(part.id)) publishActivity({ phase: 'thinking' });
           publishedSummaries.set(part.id, part.text);
           publishActivity({ id, kind: 'reasoning', phase: 'thinking', detail: part.text }, false);
@@ -382,25 +344,9 @@ export class ChatGPTService implements AIChatService {
             typeof event.item === 'object'
           )
             streamedItems.set(event.output_index, { ...event.item });
-          const item = streamedItems.get(event.output_index);
-          if (item?.type === 'function_call') {
-            if (
-              event.type === 'response.function_call_arguments.delta' &&
-              typeof event.delta === 'string'
-            )
-              item.arguments = (item.arguments ?? '') + event.delta;
-            if (
-              event.type === 'response.function_call_arguments.done' &&
-              typeof event.arguments === 'string'
-            )
-              item.arguments = event.arguments;
-            if (typeof item.arguments === 'string' && item.arguments.length > 12000)
-              throw Error('工具参数流超过长度限制，已停止。');
-          }
         }
         const summaryChanged = summary.receive(event);
-        if (summaryChanged)
-          emit({ id: request.id, type: 'reasoning-summary', text: previousSummary + summary.text });
+        if (summaryChanged) emit({ id: request.id, type: 'reasoning-summary', text: summary.text });
         const commentaryItem = streamedItems.get(event.output_index);
         const activity =
           commentaryItem?.phase === 'commentary' && event.type === 'response.output_text.delta'
@@ -481,22 +427,6 @@ export class ChatGPTService implements AIChatService {
             )
           )
             completedWebSearch = true;
-          if (tools) {
-            if (
-              !Array.isArray(terminal?.output) ||
-              terminal.output.length > 100 ||
-              Buffer.byteLength(JSON.stringify(terminal.output), 'utf8') > 1000000
-            )
-              throw Error('工具响应格式异常或过长，已停止。');
-            terminalOutput = terminal.output.length
-              ? terminal.output.map((item: Record<string, any>) => {
-                  const streamed = [...streamedItems.values()].find(
-                    (value) => value.id === item.id && value.type === item.type,
-                  );
-                  return { ...streamed, ...item };
-                })
-              : [...streamedItems.values()];
-          }
           if (!outputLength) {
             for (const content of (terminal?.output ?? [])
               .filter((item: any) => item.phase !== 'commentary')
@@ -532,72 +462,11 @@ export class ChatGPTService implements AIChatService {
           throw apiError(undefined, event, response.headers.get('x-request-id') ?? undefined);
       }
       signal.throwIfAborted();
-      if (!completed) throw new Error('回答连接提前中断，已保留接收内容；用量可能尚未返回。');
-      if (usage) {
-        receivedUsage = true;
-        accumulatedUsage.inputTokens += usage.inputTokens;
-        accumulatedUsage.outputTokens += usage.outputTokens;
-        accumulatedUsage.totalTokens += usage.totalTokens;
-      }
-      const calls = terminalOutput.filter((item) => item.type === 'function_call');
-      if (tools && calls.length) {
-        if (exhausted)
-          throw Error('模型在工具预算耗尽后仍要求调用工具，已停止，请手动改用 Local RAG。');
-        const outputs: Record<string, unknown>[] = [];
-        for (const item of calls) {
-          if (
-            typeof item.call_id !== 'string' ||
-            !/^[\w-]{1,64}$/.test(item.call_id) ||
-            callIds.has(item.call_id) ||
-            typeof item.name !== 'string' ||
-            typeof item.arguments !== 'string'
-          )
-            throw Error('工具调用 ID 或参数格式异常，已停止。');
-          callIds.add(item.call_id);
-          let output: string;
-          if (toolCalls >= 6) {
-            output = JSON.stringify({ error: '工具调用预算已耗尽，未执行本次调用。' });
-            warning = '本次工具调用预算已耗尽。';
-          } else {
-            toolCalls++;
-            deadline.throwIfAborted();
-            publishActivity({
-              id: item.call_id,
-              kind: 'knowledge',
-              status: 'in_progress',
-              phase: 'reading',
-              detail: '查询本地知识库',
-            });
-            output = await tools.execute(item as unknown as LocalToolCall, deadline);
-            deadline.throwIfAborted();
-            if (Buffer.byteLength(output, 'utf8') > 48000)
-              throw Error('本地工具输出超过预算，已停止。');
-            try {
-              if (JSON.parse(output).error)
-                warning = '部分本地工具未取得证据；请检查资料或检索状态。';
-            } catch {}
-            publishActivity({
-              id: item.call_id,
-              kind: 'knowledge',
-              status: 'completed',
-              phase: 'reading',
-              detail: '查询本地知识库',
-            });
-          }
-          outputs.push({ type: 'function_call_output', call_id: item.call_id, output });
-        }
-        // store:false requires the actual output items, including encrypted reasoning, in each continuation.
-        // These remain only in this native request; private reasoning is never emitted to Renderer.
-        input.push(...terminalOutput, ...outputs);
-        if (Buffer.byteLength(JSON.stringify(input), 'utf8') > 500000)
-          throw Error('工具会话上下文超过预算，请缩小问题范围。');
-        previousAnswer += answerText;
-        previousSummary += summary.text ? summary.text + '\n\n' : '';
-        accumulatedWarning = warning;
-        continue;
-      }
-      if (tools && !answerText.trim())
-        throw Error('工具会话结束但没有返回回答，请重试或手动改用 Local RAG。');
+      if (!completed)
+        throw new ChatServiceError({
+          code: 'connection_closed',
+          message: '回答连接提前中断，已保留接收内容；用量可能尚未返回。',
+        });
       const proposal =
         profileStream && request.profile && !refused
           ? profileStream.finish(request.profile)
@@ -614,17 +483,16 @@ export class ChatGPTService implements AIChatService {
       }
       if (phase) recordActivity({ id: phaseId, kind: 'status', phase, status: 'completed' });
       return {
-        usage: receivedUsage ? accumulatedUsage : null,
+        usage,
         provider: { ...chatGPTProvider },
         sources: [...sources.values()],
         warning,
         profileChanges: proposal?.changes,
         skillSourceIssues,
-        reasoningSummary: (previousSummary + summary.text).trim() || undefined,
+        reasoningSummary: summary.text.trim() || undefined,
         activities: activities.length ? activities : undefined,
-        answerText: previousAnswer + answerText,
+        answerText: answerText,
       };
     }
-    throw Error('工具调用轮次超过上限，请手动改用 Local RAG。');
   }
 }

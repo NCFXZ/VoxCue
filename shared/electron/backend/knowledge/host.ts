@@ -7,8 +7,9 @@ import type {
   KnowledgeHit,
   KnowledgeMode,
   KnowledgeStatus,
+  KnowledgeItemExpectation,
 } from '../../contracts/knowledge';
-import type { DocumentInput, KnowledgePort } from './types';
+import type { DocumentInput, KnowledgePort, KnowledgeSearchOptions } from './types';
 import { KnowledgeError, knowledgeErrorFromWire } from './errors';
 export class KnowledgeHost implements KnowledgePort {
   private child?: UtilityProcess;
@@ -123,11 +124,18 @@ export class KnowledgeHost implements KnowledgePort {
     mode: KnowledgeMode = 'hybrid',
     signal: AbortSignal,
     baseId?: string,
+    options?: KnowledgeSearchOptions,
   ) {
-    return this.call<KnowledgeHit[]>('search', { query, topK, mode, baseId }, signal);
+    return this.call<KnowledgeHit[]>('search', { query, topK, mode, baseId, options }, signal);
   }
-  getItem(itemId: string, signal?: AbortSignal) {
-    return this.call<KnowledgeItem | null>('item', { itemId }, signal);
+  version(baseId: string, signal: AbortSignal) {
+    return this.call<string>('version', { baseId }, signal);
+  }
+  prepareQuery(query: string, fallback: string, signal: AbortSignal) {
+    return this.call<string>('prepare-query', { query, fallback }, signal);
+  }
+  getItem(itemId: string, signal?: AbortSignal, expected?: KnowledgeItemExpectation) {
+    return this.call<KnowledgeItem | null>('item', { itemId, expected }, signal);
   }
   async close() {
     const child = this.child;

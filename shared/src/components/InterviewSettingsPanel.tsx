@@ -6,7 +6,6 @@ import { InterviewDisplayControls } from './InterviewDisplayControls';
 import { effortLabels } from '../services/chatOptions';
 import { ChoiceMenu } from './ui/choice-menu';
 import { Modal } from './ui/modal';
-import { Settings } from './icons';
 import { useAudioDevices } from './useAudioDevices';
 import { SpeechModelSettings } from './SpeechModelSettings';
 
@@ -69,7 +68,9 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
   return (
     <Modal
       title="面试设置"
-      icon={<Settings size={20} />}
+      fixedHeader
+      overlayHeader
+      backdrop="transparent"
       className="interview-settings-dialog"
       onClose={onClose}
     >

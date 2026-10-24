@@ -153,6 +153,10 @@ export async function buildMacApp(output, publicKey) {
           }
         }
         for (const name of [
+          '@openai/codex',
+          '@openai/codex-darwin-arm64',
+          '@github/copilot-sdk',
+          '@github/copilot-sdk-darwin-arm64',
           'jose',
           'adm-zip',
           'electron-updater',

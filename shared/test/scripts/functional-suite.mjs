@@ -5,12 +5,15 @@ import workspace from '../../scripts/workspace.mjs';
 import { spawnTestProcess } from './test-workspace.mjs';
 import { prepareModelFixtures } from './model-fixtures.mjs';
 import assert from 'node:assert/strict';
-import { testRoot } from './test-workspace.mjs';
 
 const shared = [
   'web-materials',
   'ui-material-refinement',
   'login',
+  'copilot-login',
+  'copilot-runtime',
+  'chatgpt-single-login',
+  'chatgpt-usage-runtime',
   'login-entry',
   'electron',
   'settings',
@@ -61,12 +64,29 @@ const mac = [
   'sidebar-updates',
   'content-controls',
   'component-controls',
+  'progress-controls',
   'interview-glass',
+  'image-save-hit',
   'audio-synthetic',
   'echo-cancellation',
   'credential-upgrade',
   'development-signing',
   'app-icon',
+  'package',
+];
+// These shared fixtures explicitly support the actual Mac renderer/projection.
+const nativeShared = [
+  'composer-resize',
+  'copilot-login',
+  'chatgpt-single-login',
+  'interview-screenshot',
+];
+const commonLogic = [
+  'copilot-runtime',
+  'chatgpt-usage-runtime',
+  'rag-core',
+  'knowledge-host',
+  'audio-pipeline',
 ];
 const nativeUI = [
   'login-controls',
@@ -87,52 +107,32 @@ const names = selected.length
   ? selected
   : [
       ...(process.platform === 'darwin' ? nativeUI : []),
-      ...shared,
+      ...(process.platform === 'darwin' ? [...commonLogic, ...nativeShared] : shared),
       ...(process.platform === 'darwin'
-        ? mac.filter((name) => !nativeUI.includes(name) && name !== 'content-controls')
+        ? mac.filter(
+            (name) => !nativeUI.includes(name) && !['content-controls', 'package'].includes(name),
+          )
         : []),
     ];
 for (const name of names)
-  if (!shared.includes(name) && !(process.platform === 'darwin' && mac.includes(name)))
+  if (
+    !shared.includes(name) &&
+    !(process.platform === 'darwin' && nativeShared.includes(name)) &&
+    !(process.platform === 'darwin' && mac.includes(name))
+  )
     throw Error('Unknown or unavailable suite: ' + name);
   else if (!liquidGlassAvailable && [...nativeUI, 'content-controls'].includes(name))
     throw Error('This suite requires actual macOS Liquid Glass: ' + name);
-// Shared DOM/business tests exercise the real web fallback bundle. AppKit
-// controls/menus/projections have their own native matrix, with real tracking.
-let webRenderer;
-if (process.platform === 'darwin' && names.some((name) => shared.includes(name))) {
-  const config = (
-    await import(pathToFileURL(path.join(workspace.sharedRoot, 'vite.config.mjs')).href)
-  ).default;
-  const { build } = await import(pathToFileURL(workspace.platformRequire.resolve('vite')).href);
-  webRenderer = path.join(testRoot, 'web-renderer/dist/index.html');
-  await build({
-    ...config,
-    configFile: false,
-    plugins: [
-      ...config.plugins.filter((plugin) => !plugin.name?.startsWith('macos-')),
-      {
-        name: 'shared-fallback-boundary',
-        generateBundle() {
-          const modules = [...this.getModuleIds()];
-          assert.ok(
-            !modules.some((file) =>
-              file.startsWith(path.join(workspace.platformRoot, 'src') + path.sep),
-            ),
-            'Mac controls must not enter the shared fallback',
-          );
-          for (const port of ['appearance-control', 'material-button', 'material-surface'])
-            assert.ok(
-              modules.includes(path.join(workspace.sharedRoot, 'src/components/ui', port + '.tsx')),
-              'Shared fallback port missing: ' + port,
-            );
-        },
-      },
-    ],
-    build: { ...config.build, outDir: path.dirname(webRenderer), assetsInlineLimit: 4096 },
-    logLevel: 'error',
-  });
-  console.log('Shared UI scope: actual web fallback renderer; AppKit scope runs separately.');
+if (process.platform === 'darwin') {
+  for (const name of names)
+    if (shared.includes(name) && !commonLogic.includes(name) && !nativeShared.includes(name))
+      throw Error('Windows web UI suites must run on Windows; use the Mac native suite: ' + name);
+  assert.ok(!process.env.VOXCUE_TEST_WEB_RENDERER, 'Mac tests require the actual native renderer');
+  console.log('Mac UI scope: actual AppKit/Liquid Glass only; Windows UI runs on Windows.');
+  if (!selected.length)
+    console.log(
+      'Source validation: temporary packaged-app coverage; final release artifacts require explicit package suite.',
+    );
 }
 const outcomes = [];
 const models = await prepareModelFixtures();
@@ -159,11 +159,12 @@ try {
         'Shared GUI matrix requires an unlocked input desktop',
       );
     desktopProbe?.('move', 0, 0);
-    const directory = shared.includes(name)
-      ? path.join(workspace.sharedRoot, 'test/scripts')
-      : process.platform === 'darwin' && mac.includes(name)
-        ? path.join(workspace.platformRoot, 'test/scripts')
-        : undefined;
+    const directory =
+      shared.includes(name) || nativeShared.includes(name)
+        ? path.join(workspace.sharedRoot, 'test/scripts')
+        : process.platform === 'darwin' && mac.includes(name)
+          ? path.join(workspace.platformRoot, 'test/scripts')
+          : undefined;
     if (!directory) throw Error('Unknown or unavailable suite: ' + name);
     const started = performance.now();
     const child = spawnTestProcess(
@@ -171,11 +172,17 @@ try {
       [
         path.join(
           directory,
-          ['content-controls', 'component-controls', 'login-controls', 'sidebar-updates'].includes(
-            name,
-          )
+          [
+            'content-controls',
+            'component-controls',
+            'progress-controls',
+            'login-controls',
+            'sidebar-updates',
+          ].includes(name)
             ? 'sidebar-glass-smoke.mjs'
-            : name + '-smoke.mjs',
+            : name === 'image-save-hit'
+              ? 'image-save-hit-check.mjs'
+              : name + '-smoke.mjs',
         ),
         ...(name === 'login-controls'
           ? ['--login-only']
@@ -185,16 +192,16 @@ try {
               ? ['--content-only']
               : name === 'component-controls'
                 ? ['--components-only']
-                : []),
+                : name === 'progress-controls'
+                  ? ['--progress-only']
+                  : []),
       ],
       {
         cwd: workspace.platformRoot,
         env: {
           ...process.env,
           ...modelEnvironment,
-          ...(shared.includes(name) && webRenderer
-            ? { VOXCUE_TEST_WEB_RENDERER: webRenderer }
-            : {}),
+          ...(process.platform === 'darwin' ? { VOXCUE_TEST_WEB_RENDERER: '' } : {}),
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },

@@ -50,6 +50,16 @@ export function registerChatIpc(dependencies: Dependencies) {
       return { ok: false, error: publicFailure(error) };
     }
   });
+  handleDesktop('chat:account-usage', async (event, ...args) => {
+    requireMain(event);
+    if (args.length) throw Error('Invalid request');
+    if (dependencies.isDemo()) return { ok: true, usage: null };
+    try {
+      return { ok: true, usage: (await chat.accountUsage?.()) ?? null };
+    } catch (error) {
+      return { ok: false, error: publicFailure(error) };
+    }
+  });
   handleDesktop('chat:usage-reset', async (event) => {
     requireMain(event);
     if (dependencies.isDemo()) return { ok: true, usage: emptyUsage() };

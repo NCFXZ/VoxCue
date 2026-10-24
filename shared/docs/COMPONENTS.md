@@ -4,7 +4,9 @@ Mac 0.5.1可选Qwen组件使用原始BF16 ASR和独立Q8_0 Aligner归档；固�
 
 Windows 新增可选 Qwen3-ASR 0.6B 语音组件，一个组件自动下载原版 ASR、原版 ForcedAligner 和 Windows Runtime 三个资源。固定资源/逐文件摘要在 qwen-catalog.ts；大 ZIP 流式认证解压，三项全部通过后才发布缓存。CPU 与 CUDA 程序、CPU-only VAD 和所需 DLL 随运行时提供，无需 WSL/Python/CUDA Toolkit。开发模式已有 Paraformer/RAG 不受可选 Qwen 缓存影响。完整规则和 Mac 待接续项见 [QWEN_WINDOWS_HANDOFF.md](QWEN_WINDOWS_HANDOFF.md)。
 
-当前只保留 ChatGPT 登录；GitHub Copilot 登录、IPC、后台服务、运行时清单和 SDK 依赖已从 shared/macOS/Windows 移除，不再读取旧服务选择。旧凭据、历史及存储键内容保留；仅应用数据根目录按用户授权统一迁为 VoxCue。公开 copilot-runtime-v1.0.21 发行、六个附件和对应标签已按用户授权删除；模型和其他应用发行保留。
+2026-10-24 ChatGPT 统一登录、聊天与账户额度使用固定 @openai/codex 0.164.0，Mac 显式分发 @openai/codex-darwin-arm64（npm:@openai/codex@0.164.0-darwin-arm64）。该运行时随应用打包和签名，不走模型下载；Windows 本机需加入对应 win32-x64 别名、锁及打包项。聊天与额度共用本应用独立的官方托管系统凭据库，只登录一次，不读取用户其他 Codex 登录。
+
+2026-10-24 恢复 ChatGPT / GitHub Copilot 双登录。固定 @github/copilot-sdk 1.0.21 与当前平台原生包随应用提供，不使用本地组件下载入口，也不依赖已删除的 copilot-runtime-v1.0.21 公开发行。Mac 生成配置和依赖锁包含 SDK 与 @github/copilot-sdk-darwin-arm64 1.0.21；Windows 专属仍只读，需由 Windows 本机同步 SDK、@github/copilot-sdk-win32-x64 1.0.21、锁文件及打包依赖。其他模型、发行与存储键保持。
 
 语音和 RAG 模型独立于应用版本维护。shared/electron/backend/components 使用源码固定的资源目录、ZIP 大小、SHA-256 和逐文件清单，下载源为公开 NCFXZ/VoxCue-releases 的 models-v1.0.0。Renderer 只请求状态、下载/删除固定模型或取消下载，不提供 URL、路径、摘要、权限或命令。
 

@@ -159,6 +159,28 @@ try {
         .evaluate((node) => getComputedStyle(node).borderRadius),
       '999px',
     );
+    const item = menu.locator('[role="menuitemradio"]').first();
+    for (const accent of ['#16835d', '#8764b8']) {
+      await app.evaluate(({ BrowserWindow }, color) => {
+        for (const window of BrowserWindow.getAllWindows())
+          window.webContents.send('appearance:accent-changed', color);
+      }, accent);
+      await item.hover();
+      await page.waitForFunction(() => {
+        const node = document.querySelector('[role="menuitemradio"][data-highlighted]');
+        const expected = document.documentElement.style.getPropertyValue('--accent-readable');
+        if (!node || !/^#[a-f0-9]{6}$/i.test(expected)) return false;
+        const rgb = expected
+          .slice(1)
+          .match(/../g)
+          .map((x) => parseInt(x, 16));
+        return getComputedStyle(node).backgroundColor === `rgb(${rgb.join(', ')})`;
+      });
+      assert.equal(
+        await item.evaluate((node) => getComputedStyle(node).color),
+        dark ? 'rgb(28, 32, 35)' : 'rgb(255, 255, 255)',
+      );
+    }
     await captureRequested(page, 'model-menu-' + (dark ? 'dark' : 'light'));
     await page.keyboard.press('Escape');
   }

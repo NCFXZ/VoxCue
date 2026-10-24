@@ -1,3 +1,4 @@
+import { useTextareaSize } from './useTextareaSize';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
 import {
@@ -83,7 +84,7 @@ export function PreparationPage({
   const chatScroll = useFollowScroll(state.messages, state.activeConversation);
   const input = state.draft;
   const setInput = state.setDraft;
-  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const inputRef = useTextareaSize(input);
   const composerArea = useRef<HTMLDivElement>(null);
   const workspace = useRef<HTMLElement>(null);
   const [startActionWidth, setStartActionWidth] = useState<number>();
@@ -137,28 +138,6 @@ export function PreparationPage({
       column.style.removeProperty('--chat-notice-space');
     };
   }, []);
-  useLayoutEffect(() => {
-    const element = inputRef.current;
-    if (!element) return;
-    const resize = () => {
-      const line = parseFloat(getComputedStyle(element).lineHeight);
-      if (!Number.isFinite(line)) return;
-      element.style.height = 'auto';
-      element.style.overflowY = 'hidden';
-      const height = Math.max(line * 2, Math.min(element.scrollHeight, line * 11));
-      element.style.height = `${height}px`;
-      element.style.overflowY = element.scrollHeight > height + 1 ? 'auto' : 'hidden';
-    };
-    resize();
-    let width = element.clientWidth;
-    const observer = new ResizeObserver(() => {
-      if (element.clientWidth === width) return;
-      width = element.clientWidth;
-      resize();
-    });
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [input, state.activeConversation]);
   const [confirmInterview, setConfirmInterview] = useState(false);
   const [openingInterview, setOpeningInterview] = useState(false);
   const [testingAudio, setTestingAudio] = useState(false);
@@ -386,7 +365,6 @@ export function PreparationPage({
         <Modal
           title="开始面试"
           className="interview-start-dialog"
-          icon={<Play size={20} />}
           subtitle="音频、模型和显示设置可在面试中调整。"
           footer={
             <>
@@ -597,7 +575,7 @@ export function PreparationPage({
       )}
       <div
         ref={layoutRef}
-        className={`preparation-layout${resizingInfo ? ' is-resizing-info' : ''}`}
+        className={`preparation-layout${infoOpen ? ' has-personal-info' : ''}${resizingInfo ? ' is-resizing-info' : ''}`}
         style={
           { '--personal-panel-width': `min(${panelWidth}px, calc(100% - 260px))` } as CSSProperties
         }
@@ -740,6 +718,8 @@ export function PreparationPage({
                           message.id === state.messages.at(-1)?.id && (
                             <Button
                               variant="outline"
+                              className="chat-retry"
+                              data-native-control-style="content"
                               disabled={state.streaming || !connection.models.length}
                               onClick={() => void state.retry(message.id)}
                             >
@@ -870,12 +850,13 @@ export function PreparationPage({
                         <div className="composer-actions">
                           {state.streaming ? (
                             <Button
+                              className="send-button"
                               type="button"
                               size="icon"
                               aria-label="停止回复"
                               onClick={state.stop}
                             >
-                              <Square size={13} />
+                              <Square size={18} />
                             </Button>
                           ) : (
                             <Button

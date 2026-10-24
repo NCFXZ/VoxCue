@@ -86,6 +86,20 @@ export async function offlineElectronEntry(
       '  (details, callback) => callback({ cancel: !allowed(details.url) }),',
       '));',
       'app.setAppPath(' + JSON.stringify(workspace.platformRoot) + ');',
+      // GUI regressions must never start a credential-owning subprocess. A
+      // specific synthetic login fixture may replace these ports afterwards.
+      'const { CodexUsageRuntime } = require(' +
+        JSON.stringify(
+          path.join(
+            workspace.platformRoot,
+            'dist-electron/shared/electron/backend/chat/codexUsage.js',
+          ),
+        ) +
+        ');',
+      'CodexUsageRuntime.prototype.account = async () => null;',
+      "CodexUsageRuntime.prototype.access = async () => { throw Error('Synthetic account is not signed in'); };",
+      "CodexUsageRuntime.prototype.login = async () => { throw Error('GUI test requires an explicit synthetic login fixture'); };",
+      'CodexUsageRuntime.prototype.limits = async () => ({});',
       'require(' +
         JSON.stringify(
           fixture ?? path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js'),

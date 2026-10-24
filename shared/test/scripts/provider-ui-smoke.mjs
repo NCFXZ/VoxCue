@@ -102,8 +102,11 @@ try {
   };
   assert.equal(await send.isDisabled(), true);
   await openSettings();
-  await page.getByRole('button', { name: '主题色', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: '紫色', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '主题色', exact: true }).count(), 0);
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const win of BrowserWindow.getAllWindows())
+      win.webContents.send('appearance:accent-changed', '#8764b8');
+  });
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await input.fill('第一条合成提问');
   await sendAppearance(page, '发送消息');

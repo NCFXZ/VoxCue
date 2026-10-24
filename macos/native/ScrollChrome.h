@@ -11,6 +11,7 @@ NSView *VoxCueSharedRendererHost(NSView *host);
 NSView *VoxCueSharedWebView(NSView *host);
 NSView *VoxCueSharedPaintView(NSView *host);
 NSView *VoxCueModalBackdropAnchor(NSView *host);
+NSView *VoxCueScrollHeaderContent(NSView *host, NSRect control);
 NSRect VoxCueModalExclusion(NSView *host);
 CGPathRef VoxCueContinuousContour(NSSize size, CGFloat radius);
 bool VoxCuePositionScrollingControl(NSView *host, NSView *control);

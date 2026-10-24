@@ -49,10 +49,16 @@ port.on('message', ({ data: m }) => {
               value = await core.listDocuments();
               break;
             case 'search':
-              value = await core.search(m.query, m.topK, m.mode, signal, m.baseId);
+              value = await core.search(m.query, m.topK, m.mode, signal, m.baseId, m.options);
               break;
             case 'item':
-              value = await core.getItem(m.itemId, signal);
+              value = await core.getItem(m.itemId, signal, m.expected);
+              break;
+            case 'version':
+              value = await core.version(m.baseId, signal);
+              break;
+            case 'prepare-query':
+              value = await core.prepareQuery(m.query, m.fallback, signal);
               break;
             case 'close':
               await core.close();

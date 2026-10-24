@@ -6,6 +6,7 @@ import * as lance from '@lancedb/lancedb';
 import { KnowledgeService } from '../../../shared/electron/backend/knowledge/service';
 import { parseText, searchUnits } from '../../../shared/electron/backend/knowledge/chunks';
 import type { Embedder } from '../../../shared/electron/backend/knowledge/types';
+import { encodeRetrievalContext } from '../../electron/contracts/retrievalContext';
 const signal = () => new AbortController().signal;
 // Test-only synthetic vectors isolate storage, cancellation and content relationships.
 const embedder = (): Embedder => ({
@@ -37,6 +38,125 @@ async function directory() {
   return temporaryDirectory('rag-core');
 }
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
+  it('prioritizes current identity, reserves comparison sources and rejects an absent project', async () => {
+    const core = new KnowledgeService(await directory(), embedder());
+    try {
+      await core.indexDocument(
+        input(
+          'dominant',
+          Array.from(
+            { length: 40 },
+            (_, i) =>
+              `## Q${i + 1}. 松鹤项目第${i + 1}路方案？\n\n松鹤项目第${i + 1}路保留独立批次记录。`,
+          ).join('\n\n'),
+        ),
+        signal(),
+      );
+      await core.indexDocument(
+        input('second', '## Q1. 青栎项目如何恢复？\n\n青栎项目恢复先核对摘要。'),
+        signal(),
+      );
+      await core.indexDocument(
+        input(
+          'current',
+          '## Q1. VectorRouter如何分流？\n\nVectorRouter按分区分流。\n\n## Q2. VectorRouter如何确认？\n\nVectorRouter维护确认窗口。',
+        ),
+        signal(),
+      );
+      const version = await core.version('base-a', signal());
+      const comparison = await core.search(
+        '松鹤项目参数怎么取，青栎项目恢复怎么做？',
+        12,
+        'hybrid',
+        signal(),
+        'base-a',
+        { rawLimit: 60, grounded: true },
+      );
+      expect(new Set(comparison.slice(0, 5).map((h) => h.documentId))).toEqual(
+        new Set(['dominant', 'second']),
+      );
+      const previous = ['松鹤项目第1路方案如何处理？'];
+      const current = await core.search(
+        encodeRetrievalContext('VectorRouter如何分流？', previous)!,
+        12,
+        'hybrid',
+        signal(),
+        'base-a',
+        { rawLimit: 60, grounded: true, history: previous },
+      );
+      expect(current.length).toBeGreaterThan(0);
+      expect(current.every((hit) => hit.documentId === 'current')).toBe(true);
+      const absent = await core.search(
+        encodeRetrievalContext('不是松鹤，改问AuroraDesk项目的指标。', previous)!,
+        12,
+        'hybrid',
+        signal(),
+        'base-a',
+        { rawLimit: 60, grounded: true, history: previous },
+      );
+      expect(absent).toEqual([]);
+      expect(await core.version('base-a', signal())).toBe(version);
+    } finally {
+      await core.close();
+    }
+  });
+  it('committed versions and matched children remain scoped across update, disable and restart', async () => {
+    const root = await directory(),
+      traces: any[] = [];
+    let core = new KnowledgeService(root, embedder(), undefined, undefined, (trace) =>
+      traces.push(trace),
+    );
+    try {
+      await core.indexDocument(
+        input(
+          'alpha',
+          '## Q001. PID principle?\n\nPID root.\n\n### 追问 1：PID saturation?\n\nSaturation limit.\n\n### 追问 2：PID optimize?\n\nFilter derivative.',
+        ),
+        signal(),
+      );
+      const version = await core.version('base-a', signal());
+      const hits = await core.search('PID saturation', 12, 'hybrid', signal(), 'base-a', {
+        rawLimit: 60,
+      });
+      expect(hits[0].matchedItemId).toBeTruthy();
+      expect(hits[0].revision).toMatch(/^[a-f0-9]{64}$/);
+      const expected = { baseId: 'base-a', documentId: 'alpha', revision: hits[0].revision! };
+      const item = await core.getItem(hits[0].itemId, signal(), expected);
+      expect(item?.rootContent).toContain('PID root');
+      expect(item?.content).toContain('Filter derivative');
+      expect(
+        await core.getItem(hits[0].itemId, signal(), { ...expected, baseId: 'base-b' }),
+      ).toBeNull();
+      expect(traces[0]).toMatchObject({ distinctRoots: 1, hits: [hits[0].itemId] });
+      expect(JSON.stringify(traces[0])).not.toContain('Saturation limit');
+      await core.close();
+      core = new KnowledgeService(root, embedder());
+      expect(await core.version('base-a', signal())).toBe(version);
+      await core.indexDocument(input('alpha', '## Q001. PID new revision?\n\nNew body.'), signal());
+      expect(await core.version('base-a', signal())).not.toBe(version);
+      expect(await core.getItem(hits[0].itemId, signal(), expected)).toBeNull();
+      const updated = await core.version('base-a', signal());
+      await core.invalidateDocument('alpha', signal());
+      expect(await core.version('base-a', signal())).not.toBe(updated);
+    } finally {
+      await core.close();
+    }
+  });
+  it('topic token checks do not add query encodes; oversize hints fall back within 512 tokens', async () => {
+    const encoder = embedder();
+    encoder.encode = vi.fn(encoder.encode);
+    const core = new KnowledgeService(await directory(), encoder);
+    try {
+      const long = 'x'.repeat(900);
+      expect(await core.prepareQuery(long, 'PID current', signal())).toBe('PID current');
+      expect(
+        (await core.prepareQuery(long, 'PID ' + long + ' correction', signal())).length,
+      ).toBeLessThanOrEqual(512);
+      expect(encoder.encode).not.toHaveBeenCalled();
+    } finally {
+      await core.close();
+    }
+  });
   it.each([null, [], { schemaVersion: 99, documents: {} }])(
     '参数和损坏配置 %j 保留不可回退的错误码',
     async (catalog) => {

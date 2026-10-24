@@ -1,5 +1,6 @@
 import type { SpeechEvent } from '../contracts/speech';
 import type { ChatTurn } from '../contracts/chat';
+import { encodeRetrievalContext } from '../contracts/retrievalContext';
 
 interface Entry {
   id: string;
@@ -73,6 +74,7 @@ export class InterviewContext {
     // Snapshot previous context before adding the current question. RAG continues
     // to search using the final user turn, which remains the current question.
     const turns: ChatTurn[] = [];
+    const retrievalQuery = includeHistory ? this.retrievalQuery(question) : undefined;
     if (includeHistory && this.entries.length)
       turns.push({
         role: 'user',
@@ -90,7 +92,29 @@ export class InterviewContext {
       previousQuestionId: this.previousQuestionId,
     });
     this.previousQuestionId = questionId;
-    return { turns, revision: this.revision, questionId };
+    return {
+      turns,
+      revision: this.revision,
+      questionId,
+      ...(retrievalQuery ? { retrievalQuery } : {}),
+    };
+  }
+  private retrievalQuery(question: string) {
+    // Propose the bounded trusted question chain; corpus grounding decides
+    // whether it applies. No list of follow-up phrases controls admission.
+    const previous: string[] = [];
+    for (let index = this.entries.length - 1; index >= 0 && previous.length < 6; index--) {
+      const entry = this.entries[index];
+      if (entry.kind === 'gap') break;
+      if (
+        !['submitted_question', 'interviewer'].includes(entry.kind) ||
+        entry.text.trim() === question.trim()
+      )
+        continue;
+      if (entry.text.trim().length < 6 || entry.text === '请直接解答截图中的题目。') continue;
+      previous.unshift(entry.text);
+    }
+    return encodeRetrievalContext(question, previous);
   }
   answer(snapshot: { revision: number; questionId: string }, text: string) {
     if (snapshot.revision !== this.revision || !text.trim()) return;

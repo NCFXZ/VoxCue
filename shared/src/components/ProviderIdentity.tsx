@@ -1,4 +1,5 @@
 import chatGPTLogo from '../assets/chatgpt.svg?inline';
+import copilotLogo from '../assets/copilot.svg?inline';
 import { MessageSquare } from './icons';
 import type { ModelProvider } from '../../electron/contracts/chat';
 import { providerInfo } from '../services/providers';
@@ -12,7 +13,8 @@ export function ProviderIdentity({
 }) {
   const info = providerInfo(provider);
   const name = info.id === 'unknown' ? '服务来源未记录' : info.name;
-  const logo = info.id === 'chatgpt' ? chatGPTLogo : undefined;
+  const logo =
+    info.id === 'chatgpt' ? chatGPTLogo : info.id === 'copilot' ? copilotLogo : undefined;
   return (
     <>
       <span className="ai-avatar provider-avatar">
@@ -22,11 +24,7 @@ export function ProviderIdentity({
           <MessageSquare size={18} />
         )}
       </span>
-      <strong>
-        {name}
-        {info.modelName ? ` · ${info.modelName}` : ''}
-        {info.modelVendor ? ` · ${info.modelVendor}` : ''}
-      </strong>
+      <strong className="provider-name">{name}</strong>
       {detail && <span>{detail}</span>}
     </>
   );

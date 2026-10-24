@@ -1,5 +1,4 @@
 import { presentationDocuments } from './presentationDocuments';
-import { materialColor } from './materialGeometry';
 
 // Shared Radix state and item actions remain authoritative. On Mac, NSMenu
 // supplies the actual popup, material and keyboard tracking instead of placing
@@ -68,11 +67,8 @@ if (
             symbol:
               [...row.querySelectorAll('svg[data-sf-symbol]')]
                 .find((icon) => !icon.closest('.dropdown-check'))
-                ?.getAttribute('data-sf-symbol') ??
-              (row.querySelector('.accent-swatch') ? 'circle.fill' : null),
-            symbolColor: row.querySelector('.accent-swatch')
-              ? materialColor(row.querySelector('.accent-swatch')!, 'background-color')
-              : null,
+                ?.getAttribute('data-sf-symbol') ?? null,
+            symbolColor: null,
           })),
         });
         if (disposed || !menu.isConnected) return;

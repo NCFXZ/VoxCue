@@ -22,7 +22,24 @@ function utilityFixture() {
   require('node:module').syncBuiltinESMExports();
   const { KnowledgeService } = require(config.service);
   const { KnowledgeError } = require(config.errors);
-  KnowledgeService.prototype.search = async function (query, _topK, _mode, signal) {
+  KnowledgeService.prototype.search = async function (
+    query,
+    _topK,
+    _mode,
+    signal,
+    baseId,
+    options,
+  ) {
+    if (query === 'grounded-contract') {
+      require('node:assert/strict').deepEqual(
+        { baseId, options },
+        {
+          baseId: 'synthetic-base',
+          options: { rawLimit: 60, grounded: true, history: ['可信前文'] },
+        },
+      );
+      return [];
+    }
     if (query.startsWith('code:'))
       throw new KnowledgeError(query.slice(5), 'synthetic knowledge failure');
     if (query === 'unknown-wire')
@@ -100,6 +117,14 @@ async function runInElectron() {
       code: 'integrity',
     });
     assert.deepEqual(await host.search('next', 5, 'hybrid', signal()), []);
+    assert.deepEqual(
+      await host.search('grounded-contract', 12, 'hybrid', signal(), 'synthetic-base', {
+        rawLimit: 60,
+        grounded: true,
+        history: ['可信前文'],
+      }),
+      [],
+    );
 
     let providerCalls = 0;
     const provider = {
@@ -109,7 +134,7 @@ async function runInElectron() {
         return { usage: null, sources: [], answerText: 'synthetic direct answer' };
       },
     };
-    const rag = new RagChatService(provider, host, async () => 'local');
+    const rag = new RagChatService(provider, host);
     const request = (question) => ({
       id: 'synthetic-knowledge-wire',
       modelId: 'synthetic-model',

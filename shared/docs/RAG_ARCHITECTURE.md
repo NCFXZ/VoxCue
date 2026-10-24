@@ -1,63 +1,51 @@
 # VoxCue LanceDB RAG 架构
 
-五阶段本地实现已接通；真实账户生成/工具能力、人工语义准确率、无答案拒答率及真人回答质量仍未验收。回归入口与范围见 [测试说明](../test/README.md)，不保留历史测试报告。退役实验不恢复执行，既有私有输入与源码恢复基线保留。
+当前 0.5.8 仅使用 Local RAG。自定义知识库 Function Calling、工具 schema、多轮 continuation、模式设置及设置中的整个“知识库”标签页已退役。主侧栏知识库管理、原件、模型和索引保留；ChatGPT/Copilot 原生网络搜索、附件、流式回答、思考摘要、资料提案及账户流程保持。
 
-## 已实现的核心与进程边界
+## 检索与证据
 
-当前共享 0.3.1 源码已移除 KnowledgeService 精确查询结果 LRU，重复查询重新执行编码与数据库检索，keyword 模式仍只走全文检索；原 revisions/模型缓存、串行队列、知识库隔离、排序、模式/topK、取消及卸载/关闭保护保持。已发布 0.3.0 的检索缓存属于历史实现，不随本地撤销变更。
+准备聊天和已确认的面试问题共用 `RagChatService → KnowledgeHost → utilityProcess → KnowledgeService`。`knowledgeBaseId` 为 null 或省略时不访问知识端口、模型和状态；明确选择时只搜索该库。记录标题继续使用原始 Provider。Renderer 不加载数据库或模型。
 
-当前共享第3组提示词由 application/ragContext.ts 提供：仅采用相关资料，未命中继续用通用专业知识回答；不把通用技术当个人经历，不混拼人物/项目/时期的事实，口述不带来源编号，书面沿用编号引用，节选和省略不当完整条目。rag.ts 在 Function Calling 追加按需搜索/回取和实时面试继续作答规则；工具返回空、超时、不可用或预算耗尽时不要求用户重试或切换模式，不假装取得证据。工具错误/省略输出保留实际状态，不再夹带操作指引。本轮本地修复通过 KnowledgeError.code 跨 utilityProcess 传递错误分类，未知错误码按完整性故障停止；Local RAG 只捕获明确标记 unavailable 的搜索/条目读取可用性故障，在原15秒总检索预算内继续回答；可保留已完整读取且通过同库/文档/条目身份检查的相关资料。超时不等待迟到端口结果，不重试，不新增模型调用。参数、模式设置、条目身份错误、组件未就绪、原请求取消及 Provider 失败仍停止；不自动切换 API/模式或绕过预算。已发布0.3.0不包含这些0.3.1调整，本轮错误分类修复尚未发布。
+`local-v7-current-source-first` 保留候选12、原始chunk池60、最多回取5个根。生成路径通过有界grounded选项，复用已提交LanceDB向量，以同库背景中心化后的cosine及语料自身词面支持判断来源；不再让单个绝对cosine或口语句式列表决定准入。无具名主题时只接纳通用技术来源：背景对比至少0.10，且有语料低频词面支持、原始cosine至少0.84；没有词面支持时背景对比需0.55。有可信主题的追问需当前问题对该来源至少0.10，或由语料中重复出现的问法提供承接支持。重复问法只从实际条目标题派生，查询间cosine至少0.92；它不能建立独立问题的项目身份。数值是检索门槛，不是正确概率。无可靠依据时返回空证据，不用其他项目凑数。管理接口原有keyword/vector/hybrid和FTS不变；不混加BM25、RRF或cosine原始分数。兼容旧测试端口的v5选择器保留，不是实际知识服务的生成入口。
 
-失败/部分成功通过当前请求参考数据的 retrievalStatus 与 knowledge 活动的 failed 状态表达，不使用通用 warning，也不改写历史格式。回退只影响本次证据，模型、effort、历史窗口、引用预算、所选库和原始资料不变；正常完成的回退答案仍写入面试上下文，后续追问可用。知识核心串行队列、取消退休、模型释放/关闭保护保持。rag 单测覆盖挂起端口超时、取消竞争、部分/空证据、身份拒绝及 Provider 不重试；profile-ui 使用离线合成端口检查普通聊天和实时面试失败后继续回答、模型/effort保持及后续上下文。
+来源词典从根标题间的稳定片段与所属正文的一致性派生，主体可出现在标题任意位置；正文中的跨项目提及不改变归属。技术标识的归属按标题确定，CamelCase/大写标识可来自单个标题，不因另一份正文偶然引用它而消失。当前问题先独立确定来源：具名来源优先，否则采用既有语义准入且有低频标题词支持的当前来源；当前没有足够主题依据时才提议历史来源。标题词支持要求一个英文标识或至少两个中文词对，不增加技术词或口语同义词表。
 
-`shared/electron/backend/knowledge/host.ts` 是主进程的轻量端口，按需启动独立 utilityProcess。`process.ts` 串行调度、取消和过滤终止后的事件；`service.ts` 负责 LanceDB 与完整内容关系；`embedding.ts` 只使用本地 E5 q8 CPU，384 维、query/passage 前缀、mean pooling、L2 归一化。渲染进程不加载数据库、模型或本地文件接口。
+技术比较保留当前多个子句中的来源。项目纠正保留最后具名子句；多个子句分别提问时按封闭疑问语法保留各方。每个已识别来源独立获得原始60条总预算的一部分，按来源轮转排列，避免单个大文档挤掉另一方。可辨认的同文件项目继续按所属根隔离；最多5个来源及最终证据预算仍可能限制更复杂比较，未识别来源不能保证覆盖。当前明确包含未知项目时，即使同句提及旧项目也返回空证据；分词把新中文名拆成单字时恢复有界相邻片段，但“该项目”等指代不能被拼成新名称。约束仍使用实际documentId、rootItemId及revision；只建立查询时内存视图，不写新元数据、不迁移或重建索引。
 
-KnowledgeService 接口：initialize、indexDocument、updateDocument、invalidateDocument、removeDocument、listDocuments、search、getItem、close。KnowledgeHost 实现同一端口。索引、搜索串行共享模型和数据库；取消等待队列或正在推理的请求会停止后续写入和结果发布，ONNX 单次原生推理本身在完成后检查取消。关闭释放模型和进程。
+`KnowledgeHit.itemId` 仍是根条目，`matchedItemId` 保留实际匹配。新路径通过`matchedItemIds`提供同一根下最多5个依赖追问，先保留匹配项，再补齐父问题关联内容，避免有故障描述却丢掉恢复步骤。所有子条目必须同根、同文档、同库和同revision；跨根、重复或超过上限拒绝。`getItem`仍返回完整根与关联追问，证据节选明确标记，48KB预算保持。旧端口无新元数据时保留旧的单匹配/完整内容兼容。
 
-## 存储与失败恢复
+15 秒是整次检索期限，48,000 UTF-8 字节是证据预算，均不放宽。超预算整项省略、同项/同内容去重，个人经历仍优先简历。参考数据是附于当前问题的不可信 JSON，不改写原问题/历史，不上传整库，不把文档指令提升为系统规则。仅明确可用性故障允许 complete/partial/unavailable 回退；参数、身份、版本、完整性、模型未就绪与取消仍停止。无相关资料属于正常空结果，继续通用回答。
 
-数据库目录由主进程装配，正式接入使用沿用 userData 下的新独立版本目录，绝不写入 asar，不读取或迁移撤除方案遗留索引。知识库原件继续保存在现有 IndexedDB。
+## 面试重试与索引调度
 
-LanceDB 行只保存 chunkId、itemId、rootItemId、documentId、baseId、有界检索 text 和 vector。完整提取文本与知识条目在不可变 revision JSON 中保存；辅助检索片段不重复存整段答案。catalog.json 记录 schemaVersion、固定模型 revision、LanceDB 表名/精确版本，以及文档元数据和 revision 引用。文档元数据含文件名、类型、标题、内容哈希、时间、原件引用、知识单元和片段数。
+面试最多四次生成尝试，间隔 500/1000/2000ms。集中类型策略仅重试受控网络中断、响应等待/空闲超时、空响应及明确 502/503/504；400/401/403/429、其他未批准状态、额度/权限/参数/模型/配置/完整性和未知错误不猜测文案重试。主动取消立即停止等待和迟到事件。
 
-更新先解析/Embedding、写新内容 revision，再使用 LanceDB mergeInsert 原子替换该 documentId 的行并重建原生 ICU FTS。最后将新表版本与内容引用写入临时 catalog、同步文件、保留旧 catalog 的独立备份并 rename 提交。读者只打开已提交 catalog 指定的 LanceDB 版本。崩溃留下的未提交数据版本不会进入查询；下次写入从已提交快照 restore 后再更新。没有假设跨文件/数据库事务，没有自动 vacuum 或删除旧版本。
+`beginRequest` 作用域仅在同一题重试期间保留成功且完整的非空证据。身份包含请求、有效检索词、模型配置、附件摘要和选择策略版本；每次重试核对所选库的已提交文档/revision 令牌。删除、停用、更新或请求改变使其失效。部分/失败结果不缓存；成功、最终失败、取消和结束释放。没有跨请求 LRU。
 
-删除只影响目标 documentId 的当前索引及 catalog 条目；LanceDB 历史版本和 catalog 备份用于恢复，不自动清理。备份恢复必须先关闭应用、保留现目录，再恢复同目录中的匹配 catalog 备份；不能只复制单个数据库文件或随意修改版本号。未知 Schema/模型版本、内容文件缺失和数据库损坏明确失败，不静默清空或重建。
+KnowledgeCoordinator 在主进程拒绝面试期间新增导入/重建；原件不会因此删除。已有长索引仍由原串行核心完成，选库开场检查及实际打开再次拒绝在其后排队，提示结束索引后重试；无库面试不等待知识核心。保留数据库串行一致性，不抢占正在写入的索引。
 
-## Q&A 与检索表示
+面试上下文提出最多6个可信面试官终稿/已提交问题，单项200字、整个内部传输1000字；不再要求命中追问句式。AI建议不参与提取，截图默认问题跳过，转写间断/暂停停止向前查找。当前问题与历史结构化分开，由语料来源确定是否承接；普通用户文本不能冒充内部历史。明确新来源覆盖旧来源，语义不支持当前问题时不强行承接。生成问题、完整原始历史、附件、截图和面试口吻均保持。
 
-解析保留主问题、答案、子追问、parentId/followUpIds、章节、行号及可用页码。代码围栏中的 Markdown 标题不作为边界。完整答案存储一次；超过模型长度的检索表示拆成辅助单元，每片带问题与父级 ID，使用实际 tokenizer 检查 ≤512 tokens。查询恢复完整主 Q&A 及关联追问，按 rootItemId 和完全相同内容去重。此策略解决覆盖和对应关系，不代表已经证明相关性提高；第五阶段需与旧策略对照。
+语料视图首次建立时，用同一个固定E5分批编码至多64个语料重复问法，随后按所选库/revision缓存这些只读向量、来源词典及最多20000条既有向量的背景摘要。暖态普通生成只编码当前问题；具名连续追问最多再编码一次“可信主题＋当前问题”。没有具名主题时最多探测3个历史问题的语义来源，每次都遵守现有512token限制、取消和整次15秒期限，不调用额外远程生成或新增模型。不缓存用户问题或跨请求证据；真实候选仍从完整已提交表读取，超过摘要采样数的资料不会被排除。库、停用状态、删除或revision变化使视图失效。首次建立视图有额外本地准备成本，不能用暖态耗时代表冷启动或大型资料库表现。
 
-沿用 benchmark：原生 BM25/ICU（关闭 stemming/stopwords/ascii folding，开启 lowercase）、精确 cosine、默认 RRF hybrid。默认 Top-K=10，最大 20；不比较不同模式的原始分数。短名单超取后按父级合并。没有引入 reranker 或大型 RAG 框架。
+## 存储与进程边界
 
-## 原件兼容与应用入口
+固定 multilingual-e5-small revision `761b726dd34fb83930e26aab4e9ac3899aa1fa78`、Q8 CPU、384 维、query/passage 前缀、mean pooling 和 L2 归一化保持。`qa-linked-v2`、LanceDB schema、catalog、不可变 revisions、原件 IndexedDB 和模型版本均不迁移或重置。废弃的 `knowledge-v1/settings.json` 只读忽略，有效、损坏或不可读均不影响初始化；旧 settings 操作按未知操作拒绝。
 
-原件 IndexedDB `copilot-local-documents` v1/bases/documents 不变。同名替换及简历替换前，旧原件备份到独立 `voxcue-original-backups` v1/versions；备份失败拒绝覆盖。替换前持久停用旧索引，失败、取消或重启均不再把它当作新原件证据。删除先移除目标索引，再删除目标原件，失败明确报错。历史原件需手动索引；新导入自动处理，`indexVersion=qa-linked-v2` 与模型 revision 分别记录。
+数据库只写 userData，不写 asar。更新先解析/Embedding，写不可变 revision，用 mergeInsert 替换目标行并重建 ICU FTS，最后同步并原子提交 catalog；读者只打开已提交版本。保留 catalog 备份、恢复与取消退休、模型释放/关闭机制，不自动 vacuum 或清理历史版本。替换前停用旧索引；原件备份失败拒绝覆盖。多个独立应用进程并发写同目录仍未支持。
 
-KnowledgeCoordinator 管理任务与 Local/Function 设置；主窗口主 frame 经 `knowledge:call` 操作白名单访问，`knowledge:event` 反馈 queued/parsing/embedding/indexing/ready/failed/cancelled。每次最多 24 个受控请求，同文档不能并行导入。设置在 knowledge-v1/settings.json 原子替换并备份。页面与设置共享单一事件订阅，重载能恢复任务和取消 ID。
+PDF/DOCX/Markdown/TXT 的既有解析、分页、Q&A 父子关系及辅助分块保持，模型按实际 tokenizer 检查长度。扫描 PDF 仍需 OCR，复杂表格/公式/阅读顺序没有新增保证。原件和知识库管理界面不因本轮更改。
 
-PDF 使用 pdf-parse 官方 worker，在独立进程内补充 Electron 缺失的 DOM 几何类型，只接受字节、禁用 eval；Q&A 跨页保留 page/endPage，普通文字保留页码。DOCX 使用 mammoth 提取原始文字，不执行 HTML。Markdown/TXT 使用 UTF-8，标题/自然段/代码围栏保留，明确问题标记建立父子关系。扫描 PDF 需要 OCR；损坏/加密/不支持格式明确失败。DOC/PPT/XLS 等仅保留原件。
+## 本地来源与离线验证
 
-原件备份可从 Electron DevTools IndexedDB 导出恢复，目前没有一键恢复 UI。知识核心由单一 Host 串行写入，未实现多个 VoxCue 进程并发写同目录的协调锁；支持关闭重开与独立只读 Lance 句柄。
+后端可返回同库、文档、根/匹配条目、章节/页码、revision 和节选标记；受控 item 操作在读取前验证来源身份及当前版本。按用户最新范围不新增引用预览界面或更改聊天展示。
 
-## Local RAG 与上下文
+测试专用注入观察器提供原始 chunk/根 ID、候选/短名单、成功读取、过滤/预算/使用原因及耗时，不记录真实问题、原文、文件名或凭据。生产不装配观察器。`rag-validation-smoke.mjs` 在自有临时目录下载校验固定公开模型，以真实 E5/LanceDB 对照旧 Local 选择策略和新策略；夹具为 100 个可检查合成问题及 20 个留出问题，覆盖改写、不同项目、连续追问和无答案。比较候选池、召回、排名、证据精度、错误证据、误命中及本地暖态耗时，保护旧成功案例。结果仅终端，模型与数据库退出清理。
 
-准备聊天和最终确认的面试问题经 RagChatService → Hybrid Top-K 5 → 完整条目回取 → ragContext → 既有 ChatGPTService；ASR 临时事件不新增触发。记录标题继续使用原始 Provider，不读取知识库。上下文仅加入当前请求，不写回原聊天历史。简历优先用于个人经历，其他结果保持检索排名。
+合成标签不是独立人工标注用户语料；本地准备/mock Provider 首段时间不是实际账户 TTFT。真实账户生成质量、真人语义准确率、复杂文件解析和 Windows 本机原生表现仍需相应环境验收。入口见 [测试说明](../test/README.md)。
 
-48 KB UTF-8 是保守字节预算，不是 GPT 精确 token 计数。完整 Q&A 超限整条省略并计数，不把截断正文称为完整答案。词面重合或独立 cosine ≥0.70 是当前候选过滤规则，尚无人工语义真值校准。资料以不可信 JSON 传入，开发者规则禁止执行文档指令、混拼来源指标或推测缺失个人事实；通用知识可回答并区分。提示和输入边界不能保证模型永不幻觉或抵抗所有提示注入。
+补充口语审计入口 `rag-colloquial-smoke.mjs`：固定120个场景与19份合成资料，保留口语中的“咋办”“那它”“那你们”等表达，通过实际检索和证据边界区分召回遗漏、过滤遗漏、追问内容缺失及其他项目资料混入。含糊问题和相关但缺少具体事实的问题单列，不冒充普通已知答案。该审计不调整生产参数，也不调用真实生成模型；完成评估不等于准确率达标，结果仅终端/对话。
 
-## Function Calling RAG
+`rag-unseen-oral-smoke.mjs` 默认使用已知240题回归集；`--transfer` 使用冻结v6后另写的160题、16份新资料，增加长链口语追问、陌生项目、同文件近名项目、纠正、间断和无关问题。资料、所需事实、源码与编译后端均在运行前记录指纹，运行后核对。新集合查看结果后即成为已知评估集，不据其结果继续调参或宣称独立真人准确率。按用户最新要求，目标是足够支持常规面试，不追求全部命中；报告完整证据覆盖和项目污染、无关/含糊误注入，保留漏召回与误判。缺失具体事实即使有相关背景，也不能视为已取到答案；此处没有验证生成模型是否会拒绝编造。
 
-现有 ChatGPTService 增加原生 streamWithTools，不增加另一套 OAuth 或付费 API。`voxcue_knowledge` namespace 提供 search_knowledge_base(query, topK, mode) 与 get_knowledge_item(itemId)，后者仅能读取本次搜索返回的 ID。strict schema/additionalProperties=false 之外仍进行运行时 JSON、字段、类型、模式、长度与 ID 校验。
-
-按 output_index 拼接 arguments delta，按 call_id 回填；store:false/stream:true 手动保留当前请求必要的 output、加密 reasoning 与 function_call_output。私有 reasoning 不进入 Renderer/日志，只有真实公开摘要可显示。最多 6 次执行、4 轮响应，末轮禁用工具；查找 15 秒、累计本地工具处理 30 秒、整次响应会话 180 秒。完整条目最多 32 KB，工具总证据 48 KB，超限明确错误，取消阻断续轮及迟到事件。用量合计实际收到的每轮服务端 token。
-
-设置默认 Local，Function 模式持久保存。能力初始未知，请求拒绝时明确失败并提示手动切回 Local，不暗中换 API。协议依据：[OAuth 预览限制](https://developers.openai.com/siwc/token-sharing-open-source/preview-limitations)、[Function calling](https://developers.openai.com/api/docs/guides/function-calling)。文档允许 namespace 工具，但账户与模型仍受限制；当前真实账户尚未验通。
-
-## 模型与隐私
-
-公开模型固定 revision `761b726dd34fb83930e26aab4e9ac3899aa1fa78`。`pnpm download:rag` 显示约 129 MiB 下载说明，仅请求公开模型 URL，校验五个文件 SHA256；正常推理关闭远程模型访问。开发模型在 local-models/rag，Git 忽略。首次缺失时明确提示安装，不暗中下载，不转 Mock。
-
-Local RAG 与 Function Calling 共用同一个 KnowledgePort 和数据库，复用现有 AIChatService；仅必要证据进入用户已选择的 AI 请求，禁止上传整库。工具参数不接受 SQL、路径或命令。知识内容是不可信数据，不能提升为系统指令。
-
-Windows 便携包在 resources/models/rag 下携带模型；asar 解包知识/语音进程和运行依赖，按实际 hoisted 层级复制，保留不同 ONNX 版本并过滤其他平台原生产物。数据库只写 userData。复杂 PDF 阅读顺序、表格、公式、任意 Q&A 排版及跨机部署仍有验证限制。
+公开200场景由`--public`运行，题目、事实与首次门槛保持，仅用于评估；夹具protocol记录首次v6基线，实际执行版本以运行时selection为准。v7以机制单测及既有开发兼容夹具完成修改并冻结后再评估该集，观察结果后不继续调整。随后另取Devinterview、Arialdo Martini和Karan Pratap Singh的公开题源整理172场景/16份资料，通过`--public-transfer`验证，并用冻结的修改前编译后端比较。同一人改写和标注的口语链及短笔记不能代替独立真人面试、完整长文档解析或真实生成答案验证；结果仅终端/对话。

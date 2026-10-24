@@ -4,7 +4,7 @@ export interface AuthUser {
   name: string;
   email: string;
 }
-export type AIService = 'chatgpt';
+export type AIService = 'chatgpt' | 'copilot';
 export interface AuthSession {
   mode: AIService | 'demo';
   user: AuthUser;

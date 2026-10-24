@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import type { KnowledgeState, KnowledgeStatus, RagMode } from '../../electron/contracts/knowledge';
+import type { KnowledgeState, KnowledgeStatus } from '../../electron/contracts/knowledge';
 import type { LocalDocument } from '../services/knowledgeTypes';
 import { knowledgeCall, indexOriginal, hasKnowledgeEngine } from '../services/knowledgeIndex';
 interface IndexState {
@@ -10,7 +10,6 @@ interface IndexState {
   refresh(): Promise<void>;
   connect(): () => void;
   index(doc: LocalDocument, force?: boolean): Promise<void>;
-  setMode(mode: RagMode): Promise<void>;
 }
 const message = (e: unknown) => (e instanceof Error ? e.message : '知识库操作失败。');
 let subscriptions = 0,
@@ -108,14 +107,6 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => ({
         return { requests };
       });
       await get().refresh();
-    }
-  },
-  async setMode(mode) {
-    try {
-      await knowledgeCall({ op: 'settings', mode });
-      await get().refresh();
-    } catch (e) {
-      set({ error: message(e) });
     }
   },
 }));

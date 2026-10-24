@@ -111,13 +111,7 @@ try {
         });
       },
     });
-    for (const channel of [
-      'auth:session',
-      'chat:models',
-      'chat:usage',
-      'chat:usage-reset',
-      'chat:send',
-    ])
+    for (const channel of ['auth:session', 'chat:models', 'chat:usage', 'chat:send'])
       ipcMain.removeHandler(channel);
     ipcMain.handle('auth:session', () => ({
       mode: 'chatgpt',
@@ -126,17 +120,6 @@ try {
     }));
     ipcMain.handle('chat:models', async () => ({ ok: true, models: await service.models() }));
     ipcMain.handle('chat:usage', async () => ({ ok: true, usage: await service.usage() }));
-    globalThis.usageResetAttempts = 0;
-    ipcMain.handle('chat:usage-reset', async () => {
-      globalThis.usageResetAttempts++;
-      if (globalThis.rejectUsageReset)
-        return { ok: false, error: { message: '合成用量重置失败，请重试。' } };
-      if (globalThis.holdUsageReset)
-        await new Promise((resolve) => {
-          globalThis.releaseUsageReset = resolve;
-        });
-      return { ok: true, usage: await service.resetUsage() };
-    });
     ipcMain.handle('chat:send', async (event, request) => {
       try {
         return {
@@ -212,97 +195,19 @@ try {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page.getByRole('button', { name: '账户与用量', exact: true }).click();
-  await page
-    .locator('.usage-panel > strong')
-    .filter({ hasText: /^6\s*token$/ })
+  const usage = page.getByRole('region', { name: '账户额度', exact: true });
+  await usage
+    .getByText('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。', { exact: true })
     .waitFor();
+  assert.equal(await usage.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
+  assert.equal(await usage.getByRole('link', { name: '查看官方用量', exact: true }).count(), 1);
   assert.equal(await page.locator('.sidebar .usage-panel').count(), 0);
-  const usage = page.getByRole('region', { name: '本应用用量', exact: true });
-  const reset = usage.getByRole('button', { name: '重置用量', exact: true });
-  const confirmReset = usage.getByRole('button', {
-    name: '确认重置：本应用的本地用量统计',
-    exact: true,
-  });
-  const counter = usage.locator(':scope > strong');
-  const originalButton = await reset.elementHandle();
-  const beforeReset = await reset.boundingBox();
-  await reset.click();
+  const localLedger = await page.evaluate(() => window.desktop.chatUsage());
   assert.equal(
-    await confirmReset.evaluate((element, original) => element === original, originalButton),
-    true,
+    localLedger.usage.totalTokens,
+    6,
+    'Existing local ledger remains intact, independently of account quota',
   );
-  assert.equal(await usage.locator('.usage-reset-confirm').count(), 0);
-  assert.match(await confirmReset.getAttribute('aria-description'), /无法撤销.*不影响 ChatGPT/);
-  assert.match(await counter.textContent(), /^6\s*token$/);
-  assert.equal(await app.evaluate(() => globalThis.usageResetAttempts), 0);
-  await page.waitForFunction(() => {
-    const button = document.querySelector('[aria-label="确认重置：本应用的本地用量统计"]');
-    const content = button?.querySelector('.confirm-delete-confirm');
-    return button && content && button.getBoundingClientRect().width >= content.scrollWidth + 23.5;
-  });
-  const armedReset = await confirmReset.boundingBox();
-  assert.ok(Math.abs(beforeReset.y - armedReset.y) < 1);
-  assert.ok(Math.abs(beforeReset.x + beforeReset.width - armedReset.x - armedReset.width) < 1);
-  assert.equal(
-    await confirmReset.evaluate((element) => getComputedStyle(element).fontSize),
-    '14px',
-  );
-  await page.screenshot({});
-  await page.keyboard.press('Escape');
-  await reset.waitFor();
-  assert.equal(await page.getByRole('dialog', { name: '设置', exact: true }).isVisible(), true);
-  await reset.click();
-  await usage.getByRole('button', { name: '刷新用量', exact: true }).focus();
-  await reset.waitFor();
-  await reset.click();
-  await reset.waitFor({ timeout: 5000 });
-  assert.equal(await app.evaluate(() => globalThis.usageResetAttempts), 0);
-  await reset.click();
-  await page.getByRole('button', { name: '关于', exact: true }).click();
-  await page.getByRole('button', { name: '账户与用量', exact: true }).click();
-  await reset.waitFor();
-  assert.equal(await confirmReset.count(), 0);
-  await app.evaluate(() => {
-    globalThis.rejectUsageReset = true;
-  });
-  await reset.click();
-  await confirmReset.click();
-  await usage.getByRole('alert').filter({ hasText: '合成用量重置失败' }).waitFor();
-  await reset.waitFor();
-  assert.match(await counter.textContent(), /^6\s*token$/);
-  assert.equal(await app.evaluate(() => globalThis.usageResetAttempts), 1);
-  await app.evaluate(() => {
-    globalThis.rejectUsageReset = false;
-    globalThis.holdUsageReset = true;
-  });
-  await reset.click();
-  await confirmReset.click();
-  await page.waitForFunction(
-    () =>
-      document
-        .querySelector('[aria-label="确认重置：本应用的本地用量统计"]')
-        ?.getAttribute('aria-busy') === 'true',
-  );
-  assert.equal(await confirmReset.isDisabled(), true);
-  await confirmReset.evaluate((element) => {
-    element.click();
-    element.click();
-  });
-  assert.equal(await app.evaluate(() => globalThis.usageResetAttempts), 2);
-  assert.match(await counter.textContent(), /^6\s*token$/);
-  await app.evaluate(() => {
-    globalThis.releaseUsageReset();
-  });
-  await reset.waitFor();
-  assert.equal(await reset.isEnabled(), true);
-  assert.equal(await usage.getByRole('alert').count(), 0);
-  assert.equal(await usage.getByRole('status').count(), 0);
-  assert.equal(await usage.getByText('已完成', { exact: true }).count(), 0);
-  await page.getByRole('button', { name: '刷新用量', exact: true }).click();
-  await page
-    .locator('.usage-panel > strong')
-    .filter({ hasText: /^0\s*token$/ })
-    .waitFor();
   await page.screenshot({});
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('失败测试');
@@ -337,16 +242,14 @@ try {
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '账户与用量', exact: true }).click();
-  await page.getByRole('button', { name: '重置用量', exact: true }).click();
-  await confirmReset.waitFor();
+  assert.equal(await page.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
   assert.equal(
-    await confirmReset.evaluate((element) => getComputedStyle(element).fontSize),
+    await usage
+      .getByRole('link', { name: '查看官方用量', exact: true })
+      .evaluate((node) => getComputedStyle(node).fontSize),
     '14px',
   );
   await page.screenshot({});
-  await page.keyboard.press('Escape');
-  await reset.waitFor();
-  assert.equal(await app.evaluate(() => globalThis.usageResetAttempts), 2);
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.screenshot({});
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
@@ -446,7 +349,7 @@ try {
   assert.ok((await page.locator('.effort-trigger').textContent()).includes('思考强度'));
 
   console.log(
-    'PASS: compact tools, Markdown/code copy, effort, same-button usage reset/cancellation/failure retry/single-flight and light/dark typography, failure state, attachment proposal, reject/confirm. Test transport only; no production account used.',
+    'PASS: compact tools, Markdown/code copy, effort, official account usage entry, preserved local ledger and light/dark typography, failure state, attachment proposal, reject/confirm. Test transport only; no production account used.',
   );
 } catch (error) {
   const current = app.windows().at(-1);

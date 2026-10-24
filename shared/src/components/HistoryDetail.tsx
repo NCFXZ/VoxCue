@@ -13,6 +13,7 @@ import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
 import { MarkdownContent } from './MarkdownContent';
+import { InterviewImages } from './InterviewImages';
 import { ProviderIdentity } from './ProviderIdentity';
 import {
   ChevronLeft,
@@ -180,8 +181,8 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             aria-label="删除记录"
             revision={record.title}
             active={!renaming}
-            onConfirm={() => {
-              const saved = history.remove(record.id);
+            onConfirm={async () => {
+              const saved = await history.remove(record.id);
               if (saved) onBack();
               return saved;
             }}
@@ -246,6 +247,19 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             <p className="record-facts">
               {duration(record)} · 本地语音转录 · {answers.length} 条 AI 回答
             </p>
+            {answers.some((answer) => answer.images?.length) && (
+              <section className="record-images-section" aria-label="面试截图">
+                <h2 className="record-transcript-heading">已发送截图</h2>
+                {answers
+                  .filter((answer) => answer.images?.length)
+                  .map((answer) => (
+                    <div className="record-image-question" key={answer.id}>
+                      <p>{answer.question}</p>
+                      <InterviewImages images={answer.images} />
+                    </div>
+                  ))}
+              </section>
+            )}
             <h2 className="record-transcript-heading">
               面试转录 <span>{record.transcripts.length}</span>
             </h2>
@@ -327,6 +341,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     <time>{time(answer.createdAt)}</time>
                   </div>
                   <p className="record-answer-question">{answer.question}</p>
+                  <InterviewImages images={answer.images} />
                   {ids.length > 0 && (
                     <button className="record-answer-link" onClick={() => locate(ids[0])}>
                       <ArrowUpRight size={13} />

@@ -112,18 +112,22 @@ try {
     .click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  await page.getByRole('button', { name: '知识库', exact: true }).last().click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
-  await settings.getByRole('button', { name: '资料使用方式', exact: true }).click();
-  await settings.getByRole('menuitemradio', { name: '由模型按需查找', exact: true }).click();
+  assert.equal(
+    await settings
+      .getByRole('navigation')
+      .getByRole('button', { name: '知识库', exact: true })
+      .count(),
+    0,
+  );
+  assert.equal(
+    await settings.getByRole('button', { name: '资料使用方式', exact: true }).count(),
+    0,
+  );
   await waitForAsync(page, async () => {
-    const r = await window.desktop.knowledge({ op: 'status' });
-    return r.ok && r.value.mode === 'function';
+    const result = await window.desktop.knowledge({ op: 'settings', mode: 'function' });
+    return !result.ok;
   });
-  await settings.getByRole('button', { name: '资料使用方式', exact: true }).click();
-  await settings
-    .getByRole('menuitemradio', { name: '自动查找相关资料（默认）', exact: true })
-    .click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.deepEqual(errors, []);
   const result = {

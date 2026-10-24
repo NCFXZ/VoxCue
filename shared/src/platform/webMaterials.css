@@ -6,9 +6,18 @@
   --web-material-filter: blur(24px) saturate(125%);
   --web-control-fill: color-mix(in srgb, var(--foreground) 7%, transparent);
   --web-control-hover: color-mix(in srgb, var(--foreground) 13%, transparent);
+  --web-menu-highlight-foreground: #fff;
 }
 :root.web-materials.dark {
   --web-material-opacity: calc((0.6 + var(--frosted-opacity-dark, 0.64) * 0.4) * 100%);
+  --web-menu-highlight-foreground: #1c2023;
+}
+.web-materials .dropdown-content .dropdown-item[data-highlighted]:not([data-disabled]) {
+  color: var(--web-menu-highlight-foreground);
+  background: var(--accent);
+}
+.web-materials :is(.account-quota-progress, .audio-meter-track) > span {
+  background: var(--system-accent);
 }
 :root.web-materials
   :is(.ui-button, .choice-trigger, .settings-choice, .speech-select, .dropdown-item) {
@@ -34,9 +43,7 @@
 .web-materials .ui-button:focus-visible,
 .web-materials :is(.choice-trigger, .settings-choice, .speech-select):hover:not(:disabled),
 .web-materials
-  :is(.choice-trigger, .settings-choice, .speech-select)[data-state='open']:not(:disabled),
-.web-materials .user-button:hover,
-.web-materials .user-button[data-state='open'] {
+  :is(.choice-trigger, .settings-choice, .speech-select)[data-state='open']:not(:disabled) {
   background: var(--web-control-hover);
 }
 :root.web-materials .record-panel-toggle.is-active {
@@ -154,6 +161,17 @@
 .web-materials :is(.preparation-workspace, .management-page, .history-detail) > .page-toolbar {
   isolation: isolate;
   background: transparent;
+}
+.web-materials .app-dialog[data-overlay-header] > .dialog-heading::before {
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+}
+.web-materials :is(.interview-image-navigation.ui-button, .interview-image-position) {
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+  border: 1px solid var(--border);
 }
 .web-materials .app-dialog::backdrop {
   background: rgb(0 0 0 / 0.4);

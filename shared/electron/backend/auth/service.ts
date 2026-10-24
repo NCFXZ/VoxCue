@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { decodeJwt } from 'jose';
 import type { AuthSession, SignOutResult } from '../../contracts/auth';
 import { createAuthCallbackPage } from './callbackPage';
+import type { ManagedChatGPTAuth } from './managed';
 import {
   authorizationURL,
   createTransaction,
@@ -31,6 +32,7 @@ export interface AuthStorage {
   write(record: CredentialRecord): Promise<void>;
 }
 interface Dependencies {
+  managed?: ManagedChatGPTAuth;
   storage: AuthStorage;
   openBrowser(url: string): Promise<void>;
   callbackLogo?: () => Promise<Buffer>;
@@ -59,6 +61,7 @@ export class ChatGPTAuthService {
       }));
   }
   async session(): Promise<AuthSession | null> {
+    if (this.dependencies.managed) return this.dependencies.managed.session();
     await this.load();
     const record = this.record;
     return record?.idToken && (record.expiresAt > Date.now() || !!record.refreshToken)
@@ -70,13 +73,39 @@ export class ChatGPTAuthService {
       : null;
   }
   cancel() {
+    if (this.dependencies.managed) return this.dependencies.managed.cancel();
     this.pending?.abort();
   }
   isPending() {
+    if (this.dependencies.managed) return this.dependencies.managed.isPending();
     return this.pending !== null;
   }
+  async usageIdentity() {
+    if (this.dependencies.managed) {
+      const access = await this.dependencies.managed.access();
+      return {
+        account: access.account,
+        email: access.email,
+        chatgptAccountId: access.chatgptAccountId,
+      };
+    }
+    await this.load();
+    const record = this.record;
+    if (
+      this.signingOut ||
+      this.pending ||
+      !record?.idToken ||
+      (!record.refreshToken && record.expiresAt <= Date.now())
+    )
+      throw new Error('请先登录 ChatGPT。');
+    const account = `${record.clientId}:${record.subject}`;
+    if (this.signingOut || this.pending || this.record !== record)
+      throw new Error('账户正在变更，请稍后重试。');
+    return { account, email: record.email };
+  }
   // This method is native-only. Never expose its result through IPC.
-  async access(): Promise<{ token: string; account: string }> {
+  async access(): Promise<{ token: string; account: string; chatgptAccountId?: string }> {
+    if (this.dependencies.managed) return this.dependencies.managed.access();
     await this.load();
     if (this.signingOut || this.pending) throw new Error('账户正在变更，请稍后重试。');
     let record = this.record;
@@ -157,6 +186,7 @@ export class ChatGPTAuthService {
     this.record = updated;
   }
   async signIn(): Promise<AuthSession> {
+    if (this.dependencies.managed) return this.dependencies.managed.signIn();
     if (this.pending || this.signingOut) throw new Error('已有登录操作正在进行。');
     const controller = new AbortController();
     this.pending = controller;
@@ -318,6 +348,7 @@ export class ChatGPTAuthService {
     }
   }
   async signOut(): Promise<SignOutResult> {
+    if (this.dependencies.managed) return this.dependencies.managed.signOut();
     if (this.signingOut) throw new Error('正在退出登录，请稍候。');
     if (this.pending) throw new Error('请先取消正在进行的登录。');
     this.signingOut = true;

@@ -10,6 +10,7 @@ import type { AIChatService } from '../../../shared/electron/backend/chat/ports'
 import type { KnowledgeHit, KnowledgeItem } from '../../../shared/electron/contracts/knowledge';
 const request = {
   id: 'rag-test',
+  knowledgeBaseId: 'chosen',
   modelId: 'account-model',
   webSearch: false,
   instructions: '简洁回答',
@@ -25,6 +26,7 @@ const item: KnowledgeItem = {
   section: 'PID',
 };
 const hit: KnowledgeHit = {
+  baseId: 'chosen',
   itemId: item.itemId,
   chunkId: 'doc:1:0',
   documentId: 'doc',
@@ -55,7 +57,7 @@ function setup(hits = [hit]) {
       return { usage: null, sources: [], answerText: '测试流' };
     }),
   };
-  return { knowledge, provider, rag: new RagChatService(provider, knowledge, async () => 'local') };
+  return { knowledge, provider, rag: new RagChatService(provider, knowledge) };
 }
 afterEach(() => vi.restoreAllMocks());
 describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
@@ -105,14 +107,9 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
   });
   it('模型删除中阻止新的检索，未选择知识库的普通聊天仍可继续', async () => {
     const { knowledge, provider } = setup();
-    const rag = new RagChatService(
-      provider,
-      knowledge,
-      async () => 'local',
-      () => {
-        throw Error('知识库模型尚未就绪');
-      },
-    );
+    const rag = new RagChatService(provider, knowledge, () => {
+      throw Error('知识库模型尚未就绪');
+    });
     await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toThrow(
       '尚未就绪',
     );
@@ -127,10 +124,11 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
     const result = await rag.stream(request, emit, new AbortController().signal);
     expect(knowledge.search).toHaveBeenCalledWith(
       request.turns[0].content,
-      5,
+      12,
       'hybrid',
       expect.any(AbortSignal),
-      undefined,
+      'chosen',
+      { rawLimit: 60, grounded: true },
     );
     const enriched = vi.mocked(provider.stream).mock.calls[0][0];
     expect(enriched.turns[0].content).toContain('尾部参数 37');
@@ -336,12 +334,6 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
       ),
     ).rejects.toThrow('无效');
     expect(knowledge.search).not.toHaveBeenCalled();
-    const invalidMode = new RagChatService(provider, knowledge, async () => {
-      throw Error('Synthetic settings failure');
-    });
-    await expect(
-      invalidMode.stream(request, vi.fn(), new AbortController().signal),
-    ).rejects.toThrow('settings');
     vi.mocked(knowledge.getItem).mockResolvedValue({ ...item, documentId: 'other-document' });
     await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toThrow(
       '身份不匹配',

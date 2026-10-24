@@ -49,84 +49,30 @@ try {
       'Settings and document rows must fit the window',
     );
   };
-  const knowledgeMenu = async (theme) => {
-    await category('知识库').click();
-    const trigger = settings.getByRole('button', { name: '资料使用方式', exact: true });
-    assert.equal(await settings.locator('select').count(), 0);
+  const noKnowledgeSettings = async () => {
+    assert.equal(await category('知识库').count(), 0);
     assert.equal(
-      await settings.locator('.settings-value').evaluate((e) => getComputedStyle(e).fontSize),
-      '14px',
-    );
-    await trigger.focus();
-    await page.keyboard.press('ArrowDown');
-    const selected = settings.getByRole('menuitemradio', {
-      name: '自动查找相关资料（默认）',
-      exact: true,
-    });
-    await selected.waitFor();
-    assert.equal(await selected.getAttribute('aria-checked'), 'true');
-    assert.equal(await selected.evaluate((e) => getComputedStyle(e).fontSize), '14px');
-    assert.equal(
-      await selected.evaluate((e) => {
-        const r = e.getBoundingClientRect();
-        return e.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2));
-      }),
-      true,
-      'Menu must be visible above the native dialog',
+      await settings.getByRole('button', { name: '资料使用方式', exact: true }).count(),
+      0,
     );
     await geometry();
-    await selected.hover();
-    assert.equal(
-      await selected.evaluate(
-        (element) => getComputedStyle(element).backgroundColor !== 'rgba(0, 0, 0, 0)',
-      ),
-      true,
-      'Hovered menu items retain feedback',
-    );
-    await page.mouse.move(0, 0);
-    await page.waitForFunction(() => {
-      const selected = document.querySelector('[role="menuitemradio"][aria-checked="true"]');
-      return selected && getComputedStyle(selected).backgroundColor === 'rgba(0, 0, 0, 0)';
-    });
-    assert.equal(await selected.locator('.dropdown-check').count(), 1);
-    await page.keyboard.press('ArrowDown');
-    assert.equal(await settings.locator('[role="menuitemradio"][data-highlighted]').count(), 1);
-    await page.screenshot({ animations: 'disabled' });
-    await page.keyboard.press('Escape');
-    await selected.waitFor({ state: 'detached' });
-    await page.waitForFunction(
-      () => document.activeElement?.getAttribute('aria-label') === '资料使用方式',
-    );
-    assert.equal(await trigger.evaluate((e) => document.activeElement === e), true);
-    assert.equal(await settings.isVisible(), true);
   };
   await open();
   assert.equal(await category('个性化').getAttribute('aria-current'), 'page');
-  assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 7);
-  // A modal Radix menu temporarily hides sibling controls from accessibility.
-  const accent = settings.getByRole('button', { name: '主题色', exact: true, includeHidden: true });
-  const themeMenu = settings.getByRole('button', {
-    name: '外观主题',
-    exact: true,
-    includeHidden: true,
-  });
-  // Exercise ownership even when native dialog outside-dismiss events are absent.
-  // The open menu can cover the next trigger, so activate its actual key handler.
-  for (const trigger of [themeMenu, accent, themeMenu, accent, themeMenu, accent]) {
-    await trigger.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
+  assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 6);
+  assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
+  const themeMenu = settings.getByRole('button', { name: '外观主题', exact: true });
+  for (let attempt = 0; attempt < 3; attempt++) {
+    await themeMenu.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
     assert.equal(await page.getByRole('menu').count(), 1);
     assert.equal(await settings.locator('[aria-haspopup="menu"][aria-expanded="true"]').count(), 1);
-    assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
-    assert.equal(
-      await page.getByRole('menu').getAttribute('aria-labelledby'),
-      await trigger.getAttribute('id'),
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('aria-label') === '外观主题',
     );
+    assert.equal(await page.getByRole('menu').count(), 0);
+    assert.equal(await settings.isVisible(), true);
   }
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '主题色');
-  assert.equal(await page.getByRole('menu').count(), 0);
-  assert.equal(await settings.isVisible(), true);
-  await accent.getByText('跟随系统', { exact: true }).waitFor();
   assert.equal(
     await settings
       .getByRole('button', { name: /调整聊天模型|调整聊天思考强度|调整回答风格/ })
@@ -143,30 +89,11 @@ try {
   await page.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#0078d4',
   );
-  await accent.click();
-  await settings.getByRole('menuitemradio', { name: '紫色', exact: true }).click();
-  await systemColor('#16835d');
+  await page.evaluate(() => localStorage.setItem('copilot-accent-color-v1', '#008c95'));
+  await systemColor('#8764b8');
   await page.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#8764b8',
   );
-  await page.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    globalThis.restoreAccentStorage = () => (Storage.prototype.setItem = original);
-    Storage.prototype.setItem = function (key, value) {
-      if (key === 'copilot-accent-color-v1') throw Error('Synthetic storage failure');
-      return original.call(this, key, value);
-    };
-  });
-  await accent.click();
-  await settings.getByRole('menuitemradio', { name: '橙色', exact: true }).click();
-  await settings.getByRole('alert').getByText('主题色保存失败', { exact: false }).waitFor();
-  assert.equal(
-    await page.evaluate(() => localStorage.getItem('copilot-accent-color-v1')),
-    '#8764b8',
-  );
-  await page.evaluate(() => globalThis.restoreAccentStorage());
-  await accent.click();
-  await settings.getByRole('menuitemradio', { name: '蓝色', exact: true }).click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.keyboard.press('Escape');
   assert.equal(
@@ -177,22 +104,19 @@ try {
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '浅色', exact: true }).click();
   await geometry();
-  await knowledgeMenu('light');
+  await noKnowledgeSettings();
   await category('个性化').click();
   await page.screenshot({ animations: 'disabled' });
   await category('账户与用量').click();
-  await settings.getByRole('region', { name: '本应用用量' }).waitFor();
-  assert.equal(
-    await settings.getByRole('button', { name: '重置用量', exact: true }).isDisabled(),
-    true,
-  );
+  await settings.getByRole('region', { name: '账户额度' }).waitFor();
+  assert.equal(await settings.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
   await page.screenshot({ animations: 'disabled' });
   await category('关于').click();
   await settings.getByText('VoxCue', { exact: true }).waitFor();
   await category('个性化').click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
-  await knowledgeMenu('dark');
+  await noKnowledgeSettings();
   await category('面试设置').click();
   await page.screenshot({ animations: 'disabled' });
   await app.evaluate(({ BrowserWindow }) => {
@@ -202,7 +126,7 @@ try {
   });
   await page.waitForFunction(() => innerWidth <= 620);
   await geometry();
-  await knowledgeMenu('narrow');
+  await noKnowledgeSettings();
   await page.screenshot({ animations: 'disabled' });
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.reload();
@@ -211,12 +135,11 @@ try {
     await page.locator('html').evaluate((element) => element.classList.contains('dark')),
     true,
   );
-  await accent.getByText('蓝色', { exact: true }).waitFor();
-  await page.waitForFunction(
-    () => document.documentElement.style.getPropertyValue('--system-accent') === '#0078d4',
+  assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('copilot-accent-color-v1')),
+    '#008c95',
   );
-  await accent.click();
-  await settings.getByRole('menuitemradio', { name: '跟随系统', exact: true }).click();
   await systemColor('#c74a85');
   await page.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#c74a85',

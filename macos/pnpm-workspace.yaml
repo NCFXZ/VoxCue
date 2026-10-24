@@ -17,6 +17,8 @@ allowBuilds:
   protobufjs: true
   # NSIS packaging does not use Squirrel.Windows or its install scripts.
   electron-winstaller: false
+  # Copilot uses the bundled subprocess, not the optional in-process FFI.
+  koffi: false
 
 supportedArchitectures:
   os: [darwin]

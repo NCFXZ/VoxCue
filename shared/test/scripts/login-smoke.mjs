@@ -190,7 +190,7 @@ try {
     app.waitForEvent('window'),
     (async () => {
       await oldMain.getByRole('menuitem', { name: '退出登录', exact: true }).click();
-      await oldMain.getByRole('button', { name: '确认退出登录', exact: true }).click();
+      await oldMain.getByRole('button', { name: '退出登录', exact: true }).click();
     })(),
   ]);
   page.on('pageerror', (error) => errors.push(error.message));

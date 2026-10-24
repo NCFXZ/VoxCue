@@ -146,11 +146,8 @@ export function MaterialSurface({
     const align = () => {
       const rect = area.getBoundingClientRect();
       if (rect.width <= 0 || rect.height <= 0) return;
-      const style = `position:absolute;left:${rect.x}px;top:${rect.y}px;width:${rect.width}px;margin:0;transform:none;bottom:auto`;
-      if (target.dataset.geometry !== style) {
-        target.style.cssText = style;
-        target.dataset.geometry = style;
-      }
+      // Width affects wrapping; measure it before deriving the anchored top.
+      if (target.style.width !== `${rect.width}px`) target.style.width = `${rect.width}px`;
       const height = target.getBoundingClientRect().height;
       if (
         kind === 'composer' &&
@@ -158,21 +155,22 @@ export function MaterialSurface({
         Math.abs(area.getBoundingClientRect().height - height) > 0.1
       )
         area.style.height = `${height}px`;
+      const current = area.getBoundingClientRect();
+      const style = `position:absolute;left:${current.x}px;top:${current.y}px;width:${current.width}px;margin:0;transform:none;bottom:auto`;
+      if (target.dataset.geometry !== style) {
+        target.style.cssText = style;
+        target.dataset.geometry = style;
+      }
     };
-    let frame = 0;
-    const schedule = () => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(align);
-    };
-    const resize = new ResizeObserver(schedule);
-    // Centred slots can move while their capped width remains unchanged.
+    // ResizeObserver runs before paint. An extra animation frame leaves the
+    // foreground one layout behind the native material during rapid edits.
+    const resize = new ResizeObserver(align);
     for (let ancestor: Element | null = area; ancestor; ancestor = ancestor.parentElement)
       resize.observe(ancestor);
     resize.observe(target);
     window.addEventListener('resize', align);
     align();
     return () => {
-      cancelAnimationFrame(frame);
       resize.disconnect();
       window.removeEventListener('resize', align);
     };

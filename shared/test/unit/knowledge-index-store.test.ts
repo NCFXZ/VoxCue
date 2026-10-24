@@ -4,13 +4,11 @@ import type { KnowledgeState, KnowledgeStatus } from '../../../shared/electron/c
 const state: KnowledgeState = {
   documents: [],
   tasks: [],
-  mode: 'local',
   modelReady: true,
-  functionCalling: { supported: null, reason: 'test' },
 };
 afterEach(() => vi.unstubAllGlobals());
 describe('索引状态生命周期', () => {
-  it('页面/设置共享一次订阅，迟到快照不覆盖更新事件，最后退出才解除订阅', async () => {
+  it('页面消费者共享一次订阅，迟到快照不覆盖更新事件，最后退出才解除订阅', async () => {
     let listener!: (status: KnowledgeStatus) => void, resolve!: (value: unknown) => void;
     const old = new Promise((r) => {
         resolve = r;

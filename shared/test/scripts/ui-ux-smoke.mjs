@@ -242,12 +242,11 @@ try {
   await settings();
   assert.equal(await page.getByRole('button', { name: '调整聊天模型', exact: true }).count(), 0);
   assert.equal(await page.getByRole('button', { name: '调整回答风格', exact: true }).count(), 0);
-  await page
-    .getByRole('button', { name: '主题色', exact: true })
-    .getByText('跟随系统', { exact: true })
-    .waitFor();
-  await page.getByRole('button', { name: '主题色', exact: true }).click();
-  await page.getByRole('menuitemradio', { name: '紫色', exact: true }).click();
+  assert.equal(await page.getByRole('button', { name: '主题色', exact: true }).count(), 0);
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const win of BrowserWindow.getAllWindows())
+      win.webContents.send('appearance:accent-changed', '#8764b8');
+  });
   await page.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#8764b8',
   );
@@ -544,9 +543,9 @@ try {
   await floating.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#8764b8',
   );
-  await page.evaluate(() => {
-    localStorage.setItem('copilot-accent-color-v1', '#008c95');
-    window.dispatchEvent(new Event('voxcue-accent-changed'));
+  await app.evaluate(({ BrowserWindow }) => {
+    for (const win of BrowserWindow.getAllWindows())
+      win.webContents.send('appearance:accent-changed', '#008c95');
   });
   await floating.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#008c95',
@@ -634,7 +633,7 @@ try {
   await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
   const [returnedLogin] = await Promise.all([
     app.waitForEvent('window'),
-    page.getByRole('button', { name: '确认退出登录', exact: true }).click(),
+    page.getByRole('button', { name: '退出登录', exact: true }).click(),
   ]);
   await returnedLogin.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
   await returnedLogin.waitForFunction(
