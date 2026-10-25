@@ -1,7 +1,6 @@
 import { Minus, Square, X } from './icons';
 export function TitleBar() {
-  const native = window.desktop?.nativeWindowControls === true;
-  if (native) return null;
+  if (window.desktop?.platform === 'macos') return null;
   return (
     <header className="titlebar">
       <div className="window-controls">

@@ -67,15 +67,8 @@ try {
   const session = await page.evaluate(() => window.desktop.authSession());
   assert.equal(session.mode, 'chatgpt');
   assert.ok(!JSON.stringify(session).includes('synthetic-private'));
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.removeHandler('appearance:native-menu');
-    ipcMain.handle('appearance:native-menu', (_event, request) =>
-      request.items.findIndex((item) => item.label === '设置'),
-    );
-  });
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-  if (process.platform !== 'darwin')
-    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
   await settings.getByText('5小时额度', { exact: true }).waitFor();
@@ -88,21 +81,7 @@ try {
   await settings.getByText('剩余 75%', { exact: true }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  let composer = page;
-  if (process.platform === 'darwin') {
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
-      for (const candidate of app.context().pages())
-        if (
-          candidate !== page &&
-          !candidate.isClosed() &&
-          (await candidate.title()) === 'VoxCue composer'
-        )
-          composer = candidate;
-      if (composer !== page) break;
-      await new Promise((resolve) => setTimeout(resolve, 30));
-    }
-  }
+  const composer = page;
   await composer
     .getByRole('textbox', { name: '聊天消息', exact: true })
     .fill('Synthetic single login question');

@@ -22,11 +22,7 @@ vi.mock('electron', () => ({
 }));
 import { createPresentation } from '../../electron/presentation';
 import { pendingPresentation } from '../../../shared/electron/contracts/presentation';
-const presentation = (options: Parameters<typeof createPresentation>[0]) =>
-  createPresentation({
-    material: { available: true, configureInterviewAppearance: vi.fn() } as any,
-    ...options,
-  });
+const presentation = createPresentation;
 beforeEach(() => {
   vi.useFakeTimers();
   vi.setSystemTime(10000);
@@ -37,26 +33,17 @@ beforeEach(() => {
   native.loadImage.mockReturnValue(native.image);
 });
 afterEach(() => vi.useRealTimers());
-it.each([undefined, { available: false }, { available: undefined }])(
-  'Mac没有有效原生绑定时拒绝启动，不创建旧系统回退：%s',
-  (material) => {
-    expect(() =>
-      createPresentation({
-        icon: 'icon.png',
-        material: material as any,
-        interviewOpen: () => false,
-      }),
-    ).toThrow(/macOS 26/);
-    expect(native.loadImage).not.toHaveBeenCalled();
-  },
-);
-it('Mac始终宣告Liquid Glass能力，不接受旧的关闭能力参数', () => {
+it('Mac无需原生展示绑定即可初始化，共用界面不依赖系统玻璃能力', () => {
   const port = presentation({
     icon: 'icon.png',
     capabilities: pendingPresentation,
     interviewOpen: () => false,
   });
-  expect(port.capabilities?.liquidGlass).toBe(true);
+  expect(port.capabilities).toEqual(pendingPresentation);
+  expect(port).not.toHaveProperty('setContentControls');
+  expect(port).not.toHaveProperty('popUpNativeMenu');
+  port.initialize();
+  expect(native.icon).toHaveBeenCalled();
   port.dispose();
 });
 it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置顶不抢焦点', () => {
@@ -67,6 +54,7 @@ it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置�
   }
   const win = {
     setAlwaysOnTop: vi.fn(),
+    setVibrancy: vi.fn(),
     setVisibleOnAllWorkspaces: vi.fn(),
     setIgnoreMouseEvents: vi.fn(),
     hide: vi.fn(),
@@ -82,6 +70,7 @@ it('只设置本应用外观，系统/浅/深均通过原生端口，窗口置�
   expect(win.setAlwaysOnTop).toHaveBeenCalledWith(true, 'floating');
   expect(win.setIgnoreMouseEvents).toHaveBeenCalledWith(true, { forward: true });
   expect(win.focus).not.toHaveBeenCalled();
+  expect(win.setVibrancy).not.toHaveBeenCalled();
   port.dispose();
 });
 it('隐藏节流任务在面试结束/释放后不执行，不能让已恢复的 Dock 再消失', async () => {
@@ -150,42 +139,5 @@ it('刚恢复 Dock 后再次开始面试，隐藏也必须避开 show 的一秒�
   expect(native.hide).not.toHaveBeenCalled();
   await vi.advanceTimersByTimeAsync(1);
   expect(native.hide).toHaveBeenCalledOnce();
-  port.dispose();
-});
-
-it('面试只允许当前可见返回按钮的隔离前景，不开放任意弹窗或输入框投影', () => {
-  const material = {
-    available: true,
-    configureInterviewAppearance: vi.fn(),
-    configureInterviewMaterials: vi.fn(() => true),
-  };
-  let open!: (request: { url: string; frameName: string }) => { action: string };
-  const win = {
-    once: vi.fn(),
-    isDestroyed: () => false,
-    getNativeWindowHandle: () => Buffer.alloc(8),
-    setVisibleOnAllWorkspaces: vi.fn(),
-    webContents: {
-      on: vi.fn(),
-      setWindowOpenHandler: vi.fn((handler) => {
-        open = handler;
-      }),
-    },
-  };
-  const port = createPresentation({
-    icon: 'icon.png',
-    material: material as any,
-    interviewOpen: () => true,
-  });
-  port.prepareInterview(win as any);
-  const request = { url: 'about:blank', frameName: 'voxcue-follow-surface-1' };
-  expect(open(request).action).toBe('deny');
-  port.setInterviewMaterials!(win as any, [{ style: 'regular-interactive' } as any]);
-  expect(open(request).action).toBe('allow');
-  expect(open({ ...request, frameName: 'voxcue-composer-surface-1' }).action).toBe('deny');
-  expect(open({ ...request, url: 'https://example.com' }).action).toBe('deny');
-  expect(open({ ...request, frameName: 'arbitrary' }).action).toBe('deny');
-  port.setInterviewMaterials!(win as any, []);
-  expect(open(request).action).toBe('deny');
   port.dispose();
 });

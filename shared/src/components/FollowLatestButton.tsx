@@ -1,6 +1,5 @@
 import { ArrowUp } from './icons';
 import { Button } from './ui/button';
-import { MaterialSurface } from './ui/material-surface';
 
 export function FollowLatestButton({
   label,
@@ -14,7 +13,7 @@ export function FollowLatestButton({
   onClick(): void;
 }) {
   return (
-    <MaterialSurface kind="follow" active={visible}>
+    <>
       <Button
         className="follow-latest"
         type="button"
@@ -22,6 +21,7 @@ export function FollowLatestButton({
         size="icon"
         aria-label={label}
         aria-busy={busy}
+        aria-hidden={!visible}
         onClick={onClick}
         style={visible ? undefined : { display: 'none' }}
       >
@@ -37,6 +37,6 @@ export function FollowLatestButton({
           </span>
         )}
       </Button>
-    </MaterialSurface>
+    </>
   );
 }

@@ -1,14 +1,8 @@
 import path from 'node:path';
-import fs from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import workspace from './scripts/workspace.mjs';
 
 const { platformRequire, platformRoot, sharedRoot, repositoryRoot } = workspace;
-// Only the selected platform may contribute native renderer adapters.
-const rendererConfig = path.join(platformRoot, 'renderer.config.mjs');
-const renderer = fs.existsSync(rendererConfig)
-  ? (await import(pathToFileURL(rendererConfig).href)).default
-  : { plugins: [], build: {} };
 const load = async (name) => import(pathToFileURL(platformRequire.resolve(name)).href);
 const { default: react } = await load('@vitejs/plugin-react');
 const { default: tailwindcss } = await load('@tailwindcss/vite');
@@ -27,10 +21,25 @@ export default {
   build: {
     outDir: path.join(platformRoot, 'dist'),
     emptyOutDir: true,
-    ...renderer.build,
   },
   plugins: [
-    ...renderer.plugins,
+    ...(workspace.platformName === 'macos'
+      ? [
+          {
+            name: 'macos-symbol-icons',
+            enforce: 'pre',
+            resolveId(source, importer) {
+              if (!importer || !source.startsWith('.')) return null;
+              const resolved = path.resolve(path.dirname(importer), source);
+              const icons = path.join(sharedRoot, 'src/components/icons');
+              // Only artwork differs. Controls, materials and pages stay shared.
+              return resolved === icons || resolved === icons + '.tsx'
+                ? path.join(platformRoot, 'src/icons.tsx')
+                : null;
+            },
+          },
+        ]
+      : []),
     {
       name: 'platform-dependencies',
       enforce: 'pre',

@@ -1,11 +1,16 @@
 # VoxCue 架构
 
+## 2026-10-25 当前共用界面
+
+Mac 已撤除原生展示适配，直接使用与 Windows 相同的 shared按钮、Radix下拉菜单、毛玻璃及页面布局；Mac图标按最新要求使用SF Symbols；不再存在原生控件/材质几何投影、macOS26启动门槛。新构建最低为 Apple Silicon/macOS 14.2，系统音频、权限、凭据、Dock/窗口生命周期与更新保留。详见 [共用桌面界面](PLATFORM_UI.md)。以下历史原生展示描述均已被此项替代，不能继续作为当前实现或测试入口。
+
+
 ## 2026-10-24 RAG 本地改造
 
 单一 Local RAG、分类有限重试、请求作用域证据复用、主进程索引/开场互斥及可信追问检索共用 shared。保留原模型/索引和管理页面，唯一删除的设置界面是整个知识库分类。诊断仅测试注入；完整流程及兼容边界以 [RAG 架构](RAG_ARCHITECTURE.md) 为准，下文旧 Function 记录仅作历史。
 
 
-当前跨平台 UI 以[共用布局与平台控件](PLATFORM_UI.md)为准：布局、业务与展示契约共用，Mac AppKit/Liquid Glass 实现单独维护。
+当前跨平台 UI 以[共用桌面界面](PLATFORM_UI.md)为准：布局、业务、内部控件和材质共用；Mac图标为SF Symbols，Windows为Fluent；平台仅保留系统集成。
 
 ## 面试生成重试
 
@@ -65,7 +70,7 @@ Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 M
 
 ## 共用界面与平台适配约定
 
-Windows 与 Mac 使用 shared/src 中同一份 React 页面、设置组件、状态和偏好校验/保存代码。Vite 从 shared 构建界面，依赖和输出分别留在当前平台；已有 Mac 图标适配在编译时替换统一入口。后续通用设置只维护一个入口、参数和交互，系统能力由共享契约连接 windows/、macos/ 的具体实现，不复制两套 UI，也不把原生细节直接放入通用设置组件。
+Windows 与 Mac 使用 shared/src 中同一份 React 页面、设置组件、状态和偏好校验/保存代码。Vite 从 shared 构建界面，依赖和输出分别留在当前平台；两端共用内部控件和网页材质；Mac编译时只将公共图标入口替换为SF Symbols，Windows仍用Fluent。后续通用设置只维护一个入口、参数和交互，系统能力由共享契约连接 windows/、macos/ 的具体实现，不复制两套 UI，也不把原生细节直接放入通用设置组件。
 
 用户已授权此前清单 1–10 全部共用：透明度滑杆、浮窗背景/阅读层联动、应用主题联动、屏幕权限入口、持续置顶、透明画布穿透、面试期间图标隐藏/结束恢复、用量链接对齐、紧凑窗口布局及移除蓝色焦点外圈。置顶、穿透和图标隐藏保持自动行为，仅提供只读状态，不新增开关。Windows/Mac 各自重建使用这份源码；不跨设备同步偏好值或用户数据。
 
@@ -73,7 +78,7 @@ contracts/presentation.ts 定义纯布尔能力和全 false 的待适配缺省�
 
 shared/electron/presentation.ts 仅定义 NativePresentation 类型端口；main 按当前平台策略动态装配 macos/electron/presentation.ts，不静态导入两平台。Mac 适配器只调用 Electron 原生展示 API，持有 Dock hide 节流计时器，接收图标和面试窗口存活查询；面试生命周期、关闭保存、授权与竞态仍由 main 协调。架构约束仅允许该适配器依赖 electron 与 type-only 类型端口，纯平台 types 仅增加对纯 PresentationCapabilities 的 type-only 引用。
 
-滑杆的 0–100 参数、默认 50、保存与 60/30 浮窗映射共用；原生效果就绪时加 frosted-ui，穿透使用独立 mouse-passthrough-ui，Mac 字体/图标差异仍留 macos-ui。Windows 当前接线见本文首节，不再按历史待适配状态处理。后续新功能/界面调整先按 AGENTS 询问同步范围，本轮已明确授权的 1–10 不重复询问。
+材质及透明度策略共用，穿透使用独立 mouse-passthrough-ui。系统集成通过平台端口接入；不复制页面或建立另一套控件。
 
 ## Mac 面试窗口生命周期
 
@@ -85,7 +90,7 @@ captureInterviewScreen 对原生 getSources 增加十秒期限及 AbortSignal �
 
 Dock 恢复前及 show Promise 完成后均显式 setIcon(resources.icon)，避免只在启动时指定的图标被宿主默认图标覆盖。Mac 开发宿主生成器复制现有 ICNS 到包内并设置 CFBundleIconFile；缓存指纹包含图标 SHA256，图标变化时生成新宿主，保留旧运行副本。应用标识、权限说明和本地开发签名方式不变，不修改厂商 Electron、系统 Dock 或真实用户资料。
 
-统一 pinInterview 入口在 Mac 使用 floating 层级，Windows 保留 normal。Mac 浮窗在显示、恢复及置顶被意外关闭时重新应用置顶，失焦不重设层级、不调用 focus；所有桌面及全屏可见通过 setVisibleOnAllWorkspaces 配置，在 Dock 已隐藏的应用模式下跳过额外进程类型切换。重复启动优先聚焦面试浮窗。结束确认、音频释放、原生材质与 Windows 最小化流程保持。当前仅完成编译，运行测试仍暂停。
+统一 pinInterview 入口在 Mac 使用 floating 层级，Windows 保留 normal。Mac 浮窗在显示、恢复及置顶被意外关闭时重新应用置顶，失焦不重设层级、不调用 focus；所有桌面及全屏可见通过 setVisibleOnAllWorkspaces 配置，在 Dock 已隐藏的应用模式下跳过额外进程类型切换。重复启动优先聚焦面试浮窗。结束确认、音频释放、原生材质与 Windows 最小化流程保持。当前验证边界见测试说明及PROGRESS.md。
 
 透明的 BrowserWindow 矩形不会因网页背景不可见而自动成为鼠标空洞。Mac 在创建/重载浮窗时默认 setIgnoreMouseEvents(true, { forward: true })；FloatingInterview 根据鼠标屏幕位置与当前网页命中，保留工具栏、双面板、缩放热区及提示卡交互，其余透明画布穿透。外层容器 pointer-events:none、可见表面 auto，防止空容器占据网页命中。按下/拖动/缩放时不切换，mouseup 后释放锁再刷新；ResizeObserver 与 resize 处理布局变化，卸载释放监听并保留穿透，不轮询或抢焦点。
 
@@ -97,19 +102,11 @@ App 在登录/主窗口启动及主题偏好切换时，按 presentation.nativeT
 
 网页继续通过既有 copilot-theme 与媒体查询应用主题；原生外观变化后系统模式的媒体查询刷新，浮窗沿用存储/媒体事件。Mac sidebar vibrancy 材质保持，Windows 经本机适配器设置应用 nativeTheme；连续透明度仅调整网页表面，辅助功能时回退不透明。
 
-## 共用连续毛玻璃设置
+## 共用毛玻璃与图标
 
-shared/src/frostedAppearance 仅为 Renderer 外观偏好，不调用原生材质或系统设置。设置使用原生 range 输入配合圆形滑块和连续填充轨道，范围 0–100、step=any，默认 50。v2 本机数值需为有限且在范围内的 JSON number；损坏值回退 50，旧 v1 四档只读映射为 0/25/50/100，不删除旧键。保存失败在界面提示。
+`webMaterials.ts`在所有产品窗口启用同一材质样式；`headerCoverage`根据共享滚动内容测量工具栏覆盖。透明度固定60%，减少透明度、高对比和强制颜色模式切换为不透明表面。主题、系统强调色和面试阅读尺寸仍共用状态。
 
-WindowContent 在主/登录/面试各窗口挂载同一个偏好订阅，同窗口自定义事件与跨窗口 storage 事件只读应用 CSS 变量，不回写循环。主侧栏按常规滑杆 0–100 插值；面试背景使用独立本机偏好与滑块，总比例 scale=interviewValue/100，主设置预览与实际浮窗共用分层表面。frostedProfiles保存原始曲线，浮窗面板、工具栏和模糊从原曲线的 60×scale 取值，阅读/输入底色从 30×scale 取值。滑杆 100 对应背景/阅读层 60/30，50 对应 30/15，不再在 60 后停滞。拉满时面板浅/深不透明度 0.632/0.692、工具栏 0.768/0.804、阅读/输入 0.812/0.856、附加模糊 19.2px。主侧栏高透明度仅调整主题文字颜色，浮窗不响应该字色增强；文字阴影、细描边和图标 drop-shadow 全部撤除。60/30 为相对效果位置，不等于原生窗口整体透光率；辅助功能时各窗口均回退不透明并关闭背景滤镜。
-
-滑杆不改变原生材质种类或窗口整体 alpha。Windows 已通过本机展示适配器按系统支持情况开启 frosted-ui，复用同一映射、设置组件和存储格式。
-
-## Mac 界面图标
-
-界面继续使用 shared/src/components/icons 的统一命名与随文字缩放的尺寸契约。Windows 默认解析原 Fluent React 实现；Mac 的 Vite 插件只把解析到该精确入口的相对导入映射至 macos/src/icons.tsx，不修改业务组件或判断运行时平台，构建拒绝任何 Fluent UI 模块进入 Mac Renderer。Mac renderer 目录加入本平台类型与架构检查，适用与共享 Renderer 相同的原生/后台访问禁令。
-
-macos/src/symbols.json 对应全部公共语义图标接口。AppKit SymbolBuilder 通过 NSImage imageWithSystemSymbolName 和 regular/medium 配置生成本平台 192px 透明 PNG；React 用独立 SVG alpha mask 和 currentColor 显示，标准图形按真实透明像素边界拟合到20/24画布，字号小/大图形保留差异；shared CSS统一随字号缩放并保留独立大图标，旋转/镜像、键盘焦点及按钮无障碍名称。生成器缺失符号时明确失败，不混用图标。工具、系统版本指纹与资源仅在 Mac .tools/.cache/public，build:symbols 或 Mac Vite 构建/开发/测试入口准备；产品启动不编译或下载，不需 SF Symbols 应用、字体包或新增 npm 依赖。应用和 Provider Logo 原件保持。
+图标接口由`shared/src/components/icons.tsx`定义；Windows使用Fluent，Mac通过仅限图标的Vite解析器使用`macos/src/icons.tsx`与构建时生成的SF Symbols资源。尺寸、颜色继承、SVG布局和无障碍归属保持一致；不恢复平台内容控件或材质替换。应用与Provider品牌资源保持。
 
 ## Mac 屏幕权限
 
@@ -135,23 +132,7 @@ Mac适配器通过可信preprocessorFile向同一Worker装配echoCancellation，
 
 macos/native/AudioCapture.mm 使用输出设备专属私有 tap 与独立 HAL 麦克风，使用既有有界 PCM 协议，无视频/音频落盘。原生无锁有界队列、格式/设备/默认路由变化检查及异常显式失败；系统权限由短时零采样启动请求，不假借 screen 状态。Mac 开发宿主、用途说明、ad-hoc 签名及双击启动器均局部生成，不修改厂商 node_modules、用户资料或全局应用。
 
-macos 平台策略启用 main/login 原生红绿灯与标准 sidebar vibrancy，Renderer 经 preload 使用受控展示端口；系统字体、原生菜单、Dock 恢复、保存后退出和单实例均仅作用于 Mac。面试 HUD 保留已确认布局。2026-10-22 本地 Mac 外观适配：材质、原生控件与承载实现均在 `macos/`；页面布局和业务逻辑继续共用 `shared/`。侧栏采用 `NSGlassEffectView Regular`，无着色、内部直角，实际 Electron 前景位于 `contentView`。启用时保存并清除窗口不透明底色，关闭/重载/失败时恢复；Liquid Glass设置开关按用户要求移除，保留旧系统和辅助功能回退，不改写其他表面的旧透明度参数。
-
-侧栏折叠、个人信息和开始面试使用无着色原生 over-glass 按钮，分别为圆形与胶囊；仅开始面试文字/图标使用主题色。原生层按主窗口真实焦点和共享主题调整外观，菜单或设置打开时保留这些按钮的原生样式。
-
-顶部与输入框直接使用相同的 AppKit `NSGlassEffectView Regular` 材质；共享消息边界进入顶部时渐显，无内容覆盖时背景透明。虚化由 AppKit 渲染，不宣称已实现 `NSScrollEdgeEffectStyle`。输入框采用 Regular，无着色，保留原 40px 连续轮廓。其实际网页前景由独立原生合成表面放进玻璃 `contentView`，React portal 仍属于同一共享状态树。输入前景持续跟随共享锚点的几何位置，随个人信息栏、侧栏动画与窗口尺寸同步，避免只监听尺寸而漏掉位置变化造成裁切。返回最新消息按钮使用同一 Regular 材质，前景仍复用共享箭头/加载三点，悬停不清除原生背景；macOS 27+ 通过公开 `effectIsInteractive` 启用系统玻璃交互提亮，26 保留 Regular 背景。聊天背景原生不透明底层阻止顶部/输入框采样桌面；聊天滚动铺满底部，渐隐移至整列底端，保留末尾阅读空间及暂停阅读行为。
-
-账户和其他下拉菜单直接使用 NSMenu 的系统材质、布局与键盘跟踪。AppKit 没有公开的菜单 Regular/Clear 选择参数；不添加网页色罩或模拟玻璃。原项目的前置 SF Symbols 继续显示，macOS 27+ 显式设置 preferredImageVisibility=visible，避免系统默认隐藏已有图标；选中勾选仍由系统菜单承担。菜单按实际点击区域和原生菜单固有尺寸贴边定位。设置仍使用共享 dialog；原生覆盖层按共享对话框边界做路径差集避让，不能用异或产生轮廓外的矩形残影，避免输入框盖住设置。用户最新允许压暗或虚化，现选择一次统一压暗背景，保留后方 Glass 外观，关闭设置后恢复；不再添加整窗 sheet 虚化材质。
-
-知识库与面试记录顶部沿用同一原生 Regular 覆盖层，按共享内容边界渐显；知识库创建为36px圆形 + over-glass，与侧栏开关同尺寸。记录状态标记和知识库说明/检索区移除，重命名紧邻标题。折叠侧栏收窄为84px，开关随共享锚点移动。面试记录搜索横跨主内容区，以原生 NSSearchField 的自然单行高度居中放入 Regular；查询仍由共享 React 状态筛选，仅保留搜索框内清除入口。普通 content area 按钮与弹出触发框应用于聊天页/面试页之外的操作区域，包括个人信息栏和设置，按钮按实际承载表面选择：原生玻璃上使用AppKit NSButton/NSPopUpButton Glass（over-glass），不透明内容区使用Push（content），单图标保持36px；下拉使用NSPopUpButton，保留原图标；聊天耗时及面试操作等按钮沿用原样；复制按钮仅按用户追加要求改为圆弧胶囊，保持原颜色、尺寸与业务行为。编辑、重命名和删除默认仅圆形图标，删除首次点击展开确认胶囊，二次才执行；原 Esc/失焦/超时取消保持。原生控件同步 details 的折叠状态及匿名内容裁切，避免隐藏的编辑/删除和选择框露出。面试记录详情顶部导出、AI回答面板、删除三个动作单独使用 AppKit Glass，删除展开后继续为玻璃胶囊。普通按钮的原生绘制层不接收点击，保留共享元素的真实指针、键盘、表单和文件选择流程；搜索文本通过有界展示端口同步，不新增业务状态来源。
-
-面试浮窗及其预览、侧栏聊天记录紧凑按钮保持原尺寸；其他单图标操作统一36×36px，与侧栏开关一致，删除展开胶囊同为36px高，默认即使用危险红色；原生 SF Symbol 同步显式颜色，网页确认内容作光学居中微调。原生胶囊按钮启用 imageHugsTitle，将图标和标题作为一组居中；共享按钮统一控件行高，面试浮窗及预览保持原尺寸。聊天技能更新提示和三个建议入口按单独要求改为胶囊，输入框仍保留原40px连续轮廓。准备页原生标题按自然文字高度居中，与顶部按钮共用横向中心线；零尺寸隐藏锚点不创建前景投影，恢复聊天路由后重试；窗口缩放使在途几何过期时保留已安装的原生输入层，并以新布局重试，避免销毁正在编辑的前景。更新设置中的“自动下载更新”改为原生 NSSwitch，NSSwitch直接接收原生鼠标追踪，通过有界的appearance:content-toggle事件同步共享元素；键盘、保存和更新业务仍由原共享设置处理，此开关不依赖侧栏 Liquid Glass 偏好开启。
-
-面试浮窗单独适配原生 Liquid Glass：工具栏、转写和回答面板使用 Clear、无着色；转写气泡、问题/回答、异常提示与输入框使用和主聊天输入框相同的 Regular。按共享 DOM 的真实几何及滚动裁切放置 AppKit 背板，网页仅在原生启用后清除旧色罩/模糊，原文字、选择、输入和业务状态保持在同一 Chromium 前景。顶部折叠/品牌、设置、截图保护、结束、拖动及面板顶部操作使用 NSButton Glass 背板，保留来源图标与品牌内容、32px 原尺寸和既有事件；不改主聊天输入框轮廓。展示端口仅限面试主 frame，材质类型、数量、几何及裁切有界；旧系统、关闭偏好与辅助功能回退旧外观，收起/切换/卸载清理原生背板。Clear 背板使用局部 DarkAqua 与协调浅色文字/状态前景，避免浅色主题在暗背景上出现暗字；面试窗口及其预览固定深色，主进程在面试窗口准备时设置局部DarkAqua，Regular阅读面、输入与over-glass按钮同用深色。
-
-共享层仅增加有界几何、颜色、透明度和固定动作的主窗口及面试主 frame 展示端口和固定资源装配；材质不共享。仅运行本轮展示端口、偏好、平台边界和隔离 GUI 的定向检查，不恢复全量矩阵。仅使用合成账户/资料、受控背景与自有窗口，不访问真实账户/凭据或采样硬件，临时内容退出清理、结果只在终端/内存。不改 Windows 专属、依赖/锁、版本、发行或真实安装，不提交推送。
-
-以下旧 Mac 未实现描述为此前状态，以此节和 PROGRESS 最新记录为准。
+Mac平台策略保留Electron窗口/Dock生命周期、系统快捷键、主题与鼠标穿透；登录、主窗与面试的应用内控件全部来自shared。输入框与返回按钮留在当前页面，取消独立前景WebContents和几何投影。材质/按钮/菜单端口、原生绘制绑定、构建生成器及专项探针已删除，详见[共用桌面界面](PLATFORM_UI.md)。
 
 ## 实际目录与测试边界
 
@@ -197,17 +178,17 @@ ChatGPTService 按可信原生 access 的 chatgptAccountId 选择固定 https://
 
 账户额度只读取当前同一会话，核对官方快照的 accountId（若有）及读取前后身份；旧账户/退出期间的迟到结果丢弃。返回五小时/周则分别显示，缺失不补齐，读取失败不触发登录。已删除 connection_required、独立连接/取消 IPC、UI/store 状态和 usage-binding.bin 消费者；唯一授权入口是登录页，设置只提供额度刷新及官方文字链接。此前两套授权的实现描述由本段覆盖。
 
-额度与音量横条沿 shared 唯一布局、语义和数值更新，Mac 有界 progress-bar 类型仅接受0–100及 content 承载，实际绘制为 NSProgressIndicator 的 determinate bar。Windows 保留 shared 胶囊轨道/填充（999px、corner-shape:round），不导入 AppKit。聊天与面试停止按钮共用发送的实心主题色样式，业务取消不变。
+额度与音量横条沿shared唯一布局、语义和数值更新，两端均采用胶囊轨道/填充（999px、corner-shape:round）并跟随系统强调色。聊天与面试停止按钮共用发送的实心主题色样式，业务取消不变。
 
 `contracts/accountUsage.ts` 是纯展示契约；`chat:account-usage` 仅接受主窗口主frame零参数请求。SelectedChatService/RagChatService委派当前服务的可选accountUsage能力，不以本地token账本代替。Copilot使用现有隔离控制会话的quota.refresh读取官方套餐和额度；读取前后核对同一身份，错误使用固定公开文案，原始SDK错误、提供商身份/账户标识及任意字段不出IPC。
 
-backend/copilot/quota只投影账户快照，忽略准入状态与其他提供商；权威预算可展示比例及已用，参考余额不推算消费、比例或重置。失败/缺失保留null，0/0不判耗尽；AI Credits、请求数、token与未知单位分开，不做货币/token换算。兼容快照的tokenBasedBilling不能单独证明单位为AI Credits。现有本机账本与逐回复统计继续保留，设置页已移除本应用累计计数和重置入口。Renderer以加载代际和查询版本排除旧账户迟到结果，提供刷新和官方用量入口；查询时间字段不在界面展示，数据可能有服务聚合延迟。布局在shared，Mac继续使用现有AppKit content展示，不新增原生IPC或平台分叉。
+backend/copilot/quota只投影账户快照，忽略准入状态与其他提供商；权威预算可展示比例及已用，参考余额不推算消费、比例或重置。失败/缺失保留null，0/0不判耗尽；AI Credits、请求数、token与未知单位分开，不做货币/token换算。兼容快照的tokenBasedBilling不能单独证明单位为AI Credits。现有本机账本与逐回复统计继续保留，设置页已移除本应用累计计数和重置入口。Renderer以加载代际和查询版本排除旧账户迟到结果，提供刷新和官方用量入口；查询时间字段不在界面展示，数据可能有服务聚合延迟。布局和控件均在shared，两端共用，无原生展示IPC或平台分叉。
 
 ## ChatGPT / GitHub Copilot 登录与模型服务
 
 ChatGPTAuthService的本地HTTP回调页由backend/auth/callbackPage纯静态模板生成，main注入共用PNG品牌资源；开发从shared/public读取，安装版从dist读取，不依赖平台原生ICO或外网。页面适配浅深色/窄屏，固定文案区分收到/无效/已使用/不存在，收到授权仅提示返回应用继续验证。请求参数与账户、授权码、令牌不进入HTML；无脚本、表单或外部字体/资源，CSP仅放行样式SHA-256及data图片，响应no-store/no-referrer/nosniff。Host/方法/路径/state/PKCE、回调一次消费与后续身份验证/凭据写入保持原流程。
 
-2026-10-24 恢复 GitHub Copilot，与 ChatGPT 共用登录页面和 AIChatService/RAG/标题队列。main 装配两套授权/模型适配器，通过 SelectedChatService 按成功登录后保存的服务选择路由，不能通过模型 ID 切换账户。service.json 缺失时沿用 ChatGPT；失败登录不覆盖选择。Copilot 公开身份保存在 copilot-session.json，OAuth 令牌仅由固定官方 SDK/原生运行时 1.0.21 的系统凭据库管理，禁止明文同意、环境令牌、gh 认证及任意命令/文件工具。运行时使用独立工作目录，禁用配置发现、技能、文件钩子和会话遥测；只开放已授权网络搜索及有界本地知识工具。SDK 仅允许 backend/copilot 适配器导入。auth:copilot-sign-in 仅接受登录窗口主 frame 的零参数调用；取消/退出释放对应流程。Mac 两个品牌按钮由 AppKit Glass 绘制，shared 保留唯一布局和点击逻辑；Windows 使用共用网页控件。既有凭据和用户历史保留。
+2026-10-24 恢复 GitHub Copilot，与 ChatGPT 共用登录页面和 AIChatService/RAG/标题队列。main 装配两套授权/模型适配器，通过 SelectedChatService 按成功登录后保存的服务选择路由，不能通过模型 ID 切换账户。service.json 缺失时沿用 ChatGPT；失败登录不覆盖选择。Copilot 公开身份保存在 copilot-session.json，OAuth 令牌仅由固定官方 SDK/原生运行时 1.0.21 的系统凭据库管理，禁止明文同意、环境令牌、gh 认证及任意命令/文件工具。运行时使用独立工作目录，禁用配置发现、技能、文件钩子和会话遥测；只开放已授权网络搜索及有界本地知识工具。SDK 仅允许 backend/copilot 适配器导入。auth:copilot-sign-in 仅接受登录窗口主 frame 的零参数调用；取消/退出释放对应流程。两端品牌按钮均由shared绘制，复用唯一布局和点击逻辑。既有凭据和用户历史保留。
 
 展示与语音恢复：ResponseProgress 在正文首次出现时折叠到“用时”，之后用户可自行展开，不随每个 chunk 重复关闭。系统问题 debounce 就绪状态在生成期间保留，回答完成后按本场状态补交；系统间断清除不完整问题，麦克风间断不影响系统缓冲。浮窗手动清空输入只覆盖当前转写版本，新系统稿到达恢复跟随；非空手动编辑保留。未引入 AEC 或修改原生采样路径。
 
@@ -299,7 +280,7 @@ floating-notices位于面板下方独立预留区域，显示“此窗口未隐�
 
 main注入screenshot.ts原生捕获适配器，按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应内存草稿，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空内存暂存并取消在途捕获，迟到图像丢弃。沿用既有截图保护，不临时改变保护或隐藏窗口。
 
-0.5.9的backend/interview/images.ts独立管理已发送图片，捕获适配器本身仍不访问磁盘。原始发送字节及缩略图分别保存在userData/interview-images-v1的UUID.image与UUID.preview，串行、临时文件原子写入及失败批次回收；重试按相同ID/字节幂等保存，不重新编码原图。记录仅存Answer.images的ID数组，不存base64或路径；缩略图在记录打开后按ID读取，原图只在点击时通过interview:image读取。该IPC仅接受主窗/面试主frame、有界ID和read/preview/save/remove，save与remove仅主窗可用，面试只读；save经系统保存对话框导出原始字节，Renderer不能指定写入路径或内容，拒绝路径、文件内容及符号链接。删除记录先保存元数据，再清理没有其他记录引用的原图与缩略图；文件读取失败显示明确状态，旧无图记录不迁移。共享InterviewImages将缩略图置于提问气泡内，纯图提问隐藏占位文字，标识在图片下方。查看器标题为“截图”，独立渲染在body弹层，左上标题、右上保存和关闭、图片两侧翻页；初始适应窗口显示，支持左右键翻页、滚轮/触控板锚点缩放与有界拖拽，双击复位；保存仅记录主窗的图标按钮，面试中隐藏并使用透明backdrop。Mac原生材质和控件观察body以覆盖Portal打开/关闭，不遗留遮罩及裁切。Mac排除缩略图的普通按钮投影，工具栏继续使用AppKit。图片不进入后续问题、RAG或TXT导出，TXT仅说明图片数量与应用内查看方式。
+0.5.9的backend/interview/images.ts独立管理已发送图片，捕获适配器本身仍不访问磁盘。原始发送字节及缩略图分别保存在userData/interview-images-v1的UUID.image与UUID.preview，串行、临时文件原子写入及失败批次回收；重试按相同ID/字节幂等保存，不重新编码原图。记录仅存Answer.images的ID数组，不存base64或路径；缩略图在记录打开后按ID读取，原图只在点击时通过interview:image读取。该IPC仅接受主窗/面试主frame、有界ID和read/preview/save/remove，save与remove仅主窗可用，面试只读；save经系统保存对话框导出原始字节，Renderer不能指定写入路径或内容，拒绝路径、文件内容及符号链接。删除记录先保存元数据，再清理没有其他记录引用的原图与缩略图；文件读取失败显示明确状态，旧无图记录不迁移。共享InterviewImages将缩略图置于提问气泡内，纯图提问隐藏占位文字，标识在图片下方。查看器标题为“截图”，独立渲染在body弹层，左上标题、右上保存和关闭、图片两侧翻页；初始适应窗口显示，支持左右键翻页、滚轮/触控板锚点缩放与有界拖拽，双击复位；保存仅记录主窗的图标按钮，面试中隐藏并使用透明backdrop。Mac原生材质和控件观察body以覆盖Portal打开/关闭，不遗留遮罩及裁切。缩略图与工具栏都使用shared控件，不进行原生投影。图片不进入后续问题、RAG或TXT导出，TXT仅说明图片数量与应用内查看方式。
 
 聊天与面试共用ResponseProgress，初始等待统一展示新版“正在思考”文字动画，移除旧圆点。Local RAG将实际检索标记为knowledge/thinking并以同一ID更新开始/完成，不能当作网页读取；真实web_search/open_page仍使用实际服务活动。公开思考、活动与用时位于response-progress底部分割线上方，正文之后自动折叠且可重新展开；不显示私有推理，不伪造实际工具步骤。面试复用已有公开摘要/活动字段，不改变历史数据格式。
 
@@ -349,13 +330,13 @@ systemAccent hook 复用既有受控系统强调色 IPC，新增 copilot-accent-
 
 `DesktopPlatform.updateDriverFile` 由可信平台策略选择，仅安装版主进程动态装配 `macos/electron/updates/driver`，不引入另一平台输出。共享 UpdateService 继续负责状态、面试保护与保存握手。Mac 复用固定 GitHub 分页选版及清单投影，再由 pinned Ed25519 公钥认证清单、流式下载/校验 SHA512；实际安装时临时 loopback feed 仅提供该 ZIP 给 `VoxCue.Updater.node`。Sparkle 内部进行归档 Ed25519 校验、替换和重启。Renderer/preload 无新增 URL、路径、密钥或安装命令接口。Mac 更新模块遵守与共享更新后台相同的凭据/聊天/音频/模型隔离检查。Windows 仍使用原 electron-updater。
 
-2026-10-22展示层补充：Mac内容控件只同步外观，布局不随原生标记改变；几何按帧合并，NSButton图文缓存独立于几何。共享确认控件依据固有内容计算两态宽度，保留二次操作和取消边界。原生材质展示端口另用于主窗口卡片及面试设置预览（无动作能力，仍限制主帧、数量、样式、颜色和几何）；预览底景为独立原生渐变，Clear/Regular仍由NSGlassEffectView渲染。预览区域对网页背景做局部绘制裁切，关闭、滚动或回退时清除。浮窗设置使用同一内容控件/NSMenu转换，原面试控件尺寸保持。
+## 共用界面细节
 
-面试设置顶部复用现用scroll-chrome的NSGlassEffectView Regular及原生标题，headerRadius仅该面试窗口固定标题可用，composer/follow/modal必须为空；不开放登录窗口或新的业务动作。共享Modal测量悬浮标题高度和正文覆盖量，初始避让后允许正文滚入，Windows用共用网页材质。Mac裁切原生顶部到对话框连续轮廓，未覆盖时关闭按钮为内容区，完全覆盖后进入实际glass.contentView，避免玻璃渐显令按钮一并消失。正文仍为共享Web滚动，不宣称NSScrollView或官方滚动边缘效果。
+确认删除在同一按钮内按内容展开，保持二次操作、Esc/失焦/超时取消与失败重试。图标在收起/展开时保持同一尺寸；滚动裁切由共同DOM/CSS负责，不再向原生控件发送几何或切换绘制层。
 
-截图查看器的左右翻页与胶囊页码覆盖图片显示，不另占行列。content-controls的regular-overlay类型限定最多3项、44px高/160px宽，仅接受左右chevron空标题或1–5页码；不接受路径、字节或任意图形。Mac在Chromium前以实际NSGlassEffectView Regular及contentView绘制原生按钮/页码，命中与键盘语义仍来自共享DOM；Windows使用shared毛玻璃。记录保存按钮与关闭共用36px圆形区域/17px图标，Mac始终由同一NSButton绘制，原生悬停边框回调在控件进入最终窗口层级后同步并重绘，不在悬停时切换网页/原生图标；面试设置共享Modal显式透明backdrop，不压暗或虚化后方。
+面试设置固定顶部由共享Modal测量标题高度及正文覆盖量，正文可以滚入顶部后方；材质随覆盖量渐显，按钮透明度独立。面试设置明确使用透明backdrop，保留模态阻止背景操作。
 
-顶部按钮只在材质完全显示时进入header.contentView，其他阶段保留独立原生承载，避免继承材质渐隐；每次材质/模态状态更新都按已保存窗口几何重新定位，移除顶部先迁出控件。图片Regular的contentView同帧明确尺寸，不依赖后续AppKit布局才获得非零bounds。图片普通像素滚动平移（包括两指惯性），ctrl+wheel捏合/快捷滚轮及行/页滚轮缩放；不按滚动幅度猜测鼠标/触控板型号。
+截图查看器的翻页圆形按钮和胶囊页码覆盖图片，记录保存与关闭同为36px区域/17px图标，保存默认无底板、悬停或键盘聚焦显示。像素滚动（含两指惯性）只平移图片，Ctrl+滚轮/捏合及行页滚轮缩放，边界/拖拽/双击复位共用；不猜测硬件型号。缩略图/原图与记录ID/保存权限仍由现有业务契约控制，界面退役没有扩大文件或截图访问能力。
 
 ## 0.5.9 固定子进程的打包执行路径
 

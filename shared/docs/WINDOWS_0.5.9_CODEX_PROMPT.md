@@ -1,9 +1,17 @@
+# 当前版本提示
+
+0.5.9→0.5.10 请使用 [0.5.10逐条查验提示词](WINDOWS_0.5.10_CODEX_PROMPT.md) 和 [完整交接报告](WINDOWS_0.5.10_HANDOFF.md)。以下为历史提示词，不应覆盖当前最终实现或恢复退役的原生展示层。
+
+---
+
 # 交给 Windows Codex 的任务
 
 将下方整段复制给 Windows 仓库中的 Codex。完整清单见 [WINDOWS_0.5.9_HANDOFF.md](WINDOWS_0.5.9_HANDOFF.md)。
 
 ```text
 请接续 VoxCue 0.5.9，按 shared/docs/WINDOWS_0.5.9_HANDOFF.md 的每个 P/A/U/S/R/M 编号逐条检查、测试并处理版本范围内的不一致。
+
+最新材质要求：除侧边栏之外全部使用shared聊天输入框的网页毛玻璃，不恢复局部系统玻璃绑定/IPC或整窗面试Acrylic。面试主背景保留透视，箭头防透字、正文渐出与末行可读性保留；以交接文档最新覆盖项为准。
 
 先阅读仓库 AGENTS.md、该交接文档和 shared/test/README.md。记录当前HEAD与git status，保护已有未提交修改后同步私有NCFXZ/VoxCue的main；基线须包含a1d79ff及后续发行/交接补充。不要reset/clean覆盖现有工作。当前在Windows工作，macos/只读，布局与业务优先复用shared，不移植AppKit/Liquid Glass或复制页面。
 

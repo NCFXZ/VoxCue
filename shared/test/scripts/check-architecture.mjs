@@ -84,6 +84,7 @@ export function sourceGraph(root) {
   };
   const graph = new Map();
   function visit(directory) {
+    if (!fs.existsSync(directory)) return;
     for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
       const absolute = path.join(directory, entry.name);
       if (entry.isDirectory()) visit(absolute);
@@ -122,6 +123,7 @@ export function sourceGraph(root) {
     'windows/electron',
     'macos/electron',
     'macos/src',
+    'windows/src',
   ])
     visit(path.join(root, directory));
   return graph;
@@ -164,10 +166,19 @@ export function boundaryViolations(graph) {
   const violations = [];
   for (const [physicalFile, edges] of graph) {
     const file = logicalPath(physicalFile);
+    if (/^(?:macos|windows)\/src\//.test(physicalFile) && physicalFile !== 'macos/src/icons.tsx')
+      violations.push(
+        `${physicalFile}: 界面必须唯一保留在 shared/src，不得恢复平台控件或材质替换层`,
+      );
     for (const edge of edges) {
       const target = logicalPath(edge.target);
       const fail = (reason) =>
         violations.push(`${physicalFile}:${edge.line} → ${edge.target}: ${reason}`);
+      if (
+        physicalFile === 'macos/src/icons.tsx' &&
+        !['react', 'macos/src/symbols.json'].includes(edge.target)
+      )
+        fail('Mac图标适配仅允许React与本平台SF Symbols清单，不得恢复控件或材质');
       if (
         /^(?:macos|windows)\/electron\/screenPermission\.ts$/.test(physicalFile) &&
         (!edge.typeOnly || !edge.target.startsWith('shared/electron/contracts/'))
@@ -180,7 +191,7 @@ export function boundaryViolations(graph) {
           (edge.typeOnly && edge.target === 'shared/electron/presentation.ts')
         )
       )
-        fail('平台展示适配器只能调用 Electron 原生展示 API，并通过类型端口连接主进程');
+        fail('平台展示适配器仅允许 Electron 和主进程类型端口');
       if (
         /^(?:shared|windows|macos)\//.test(physicalFile) &&
         /^(?:shared|windows|macos)\/test\//.test(edge.target)
@@ -191,13 +202,6 @@ export function boundaryViolations(graph) {
         (physicalFile.startsWith('macos/') && edge.target.startsWith('windows/'))
       )
         fail('Windows 与 macOS 专属实现不得相互依赖');
-      if (
-        physicalFile.startsWith('macos/src/') &&
-        /^shared\/src\/components\/ui\/(?:appearance-control|material-button|material-surface)\.tsx$/.test(
-          edge.target,
-        )
-      )
-        fail('平台组件通过纯展示契约实现端口，不得导入共享回退组件');
       if (physicalFile.startsWith('shared/') && /^(?:windows|macos)\//.test(edge.target))
         fail('共用源码不得静态依赖平台实现；主进程仅动态装配所选平台');
       if (edge.target.startsWith('.') || edge.target.startsWith('@/'))

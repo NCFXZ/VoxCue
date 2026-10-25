@@ -10,10 +10,6 @@ import { applyFrostedAppearance, useFrostedAppearance } from './frostedAppearanc
 // Set the presentation scope on the document so portals and the interview window share it.
 document.documentElement.classList.add('desktop-ui');
 if (location.hash === '#interview') document.documentElement.classList.add('dark');
-document.documentElement.classList.toggle(
-  'macos-ui',
-  window.desktop?.nativeWindowControls === true,
-);
 applyFrostedAppearance();
 const disposeMaterials = installPlatformMaterials();
 if (import.meta.hot) import.meta.hot.dispose(disposeMaterials);

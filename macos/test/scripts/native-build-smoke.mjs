@@ -16,14 +16,7 @@ const run = (command, args, env = process.env) => {
   if (result.status !== 0) throw Error(result.stderr || `${command} failed`);
   return result.stdout;
 };
-const common = ['clang++', '-std=c++17', '-arch', 'arm64', '-mmacosx-version-min=26.0', '-O2'];
-const glassBinding = path.join(root, 'native/bin/VoxCue.SidebarGlass.node');
-assert.match(run('/usr/bin/otool', ['-l', glassBinding]), /\bminos 26\.0\b/);
-assert.doesNotMatch(
-  run('/usr/bin/nm', ['-m', glassBinding]),
-  /weak external _OBJC_CLASS_\$_NSGlassEffectView/,
-  'Mac requires Liquid Glass directly; its class must no longer be weak-linked for older systems',
-);
+const common = ['clang++', '-std=c++17', '-arch', 'arm64', '-mmacosx-version-min=14.2', '-O2'];
 for (const file of Object.keys(qwenFiles).filter(
   (file) => file === 'voxcue-qwen' || file.endsWith('.dylib'),
 )) {
@@ -34,6 +27,35 @@ for (const file of Object.keys(qwenFiles).filter(
     'The pinned Qwen runtime deployment baseline remains unchanged: ' + file,
   );
 }
+// Verify the pinned runtime executables/bindings as well as our own deployment flags.
+// This reads Mach-O metadata only and never starts an account or captures hardware.
+const runtimeFiles = [
+  'electron/dist/Electron.app/Contents/MacOS/Electron',
+  'electron/dist/Electron.app/Contents/Frameworks/Electron Framework.framework/Electron Framework',
+  '@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime',
+  '@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex',
+  '@lancedb/lancedb-darwin-arm64/lancedb.darwin-arm64.node',
+  'sherpa-onnx-darwin-arm64/sherpa-onnx.node',
+  'sherpa-onnx-darwin-arm64/libonnxruntime.dylib',
+  'onnxruntime-node/bin/napi-v6/darwin/arm64/onnxruntime_binding.node',
+  'onnxruntime-node/bin/napi-v6/darwin/arm64/libonnxruntime.1.dylib',
+];
+for (const file of runtimeFiles) {
+  const output = run('/usr/bin/otool', [
+    '-arch',
+    'arm64',
+    '-l',
+    path.join(root, 'node_modules', file),
+  ]);
+  const minimum = output.match(/\bminos (\d+)\.(\d+)/);
+  assert.ok(
+    minimum && (Number(minimum[1]) < 14 || (Number(minimum[1]) === 14 && Number(minimum[2]) <= 2)),
+    'Pinned runtime exceeds macOS 14.2: ' + file,
+  );
+}
+console.log(
+  'PASS: Electron, Copilot, Codex, LanceDB, Sherpa and ONNX Mach-O targets support the 14.2 deployment floor.',
+);
 const audio = path.join(testRoot, 'VoxCue.Audio');
 run('/usr/bin/xcrun', [
   ...common,
@@ -70,11 +92,12 @@ run('/usr/bin/xcrun', [
   '-fobjc-arc',
   'native/Launcher.mm',
   '-framework',
-  'AppKit',
+  'Foundation',
   '-o',
   launcher,
 ]);
 for (const file of [audio, binding, launcher]) {
+  assert.match(run('/usr/bin/otool', ['-l', file]), /\bminos 14\.2\b/);
   run('/usr/bin/codesign', ['--force', '--sign', '-', file]);
   run('/usr/bin/codesign', ['--verify', '--strict', file]);
   if (!run('/usr/bin/file', [file]).includes('arm64'))
@@ -86,22 +109,6 @@ console.log(
     ...process.env,
     ELECTRON_RUN_AS_NODE: '1',
   }).trim(),
-);
-console.log(
-  run(
-    workspace.platformRequire('electron'),
-    [
-      '-e',
-      `
-const binding=require(${JSON.stringify(path.join(root, 'native/bin/VoxCue.SidebarGlass.node'))});
-const names=['apply','configureButton','popUpMenu','configureScrollChrome','detachSurface','attachSurface','configureContentControls','configureInterviewMaterials','configureInterviewAppearance'];
-if(names.some(name=>typeof binding[name]!=='function') || typeof binding.available!=='boolean' || 'configureSwitch' in binding)
-  throw Error('Invalid native presentation ABI');
-console.log('Liquid Glass Node-API exports loaded; removed switch is absent');
-`,
-    ],
-    { ...process.env, ELECTRON_RUN_AS_NODE: '1' },
-  ).trim(),
 );
 console.log(
   'Core Audio, screen-permission binding and launcher compiled/verified in temporary storage; running production binaries were not overwritten.',

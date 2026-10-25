@@ -23,8 +23,6 @@ import {
   Save,
 } from './icons';
 import { Button } from './ui/button';
-import { MaterialButton } from './ui/material-button';
-import { MaterialSurface } from './ui/material-surface';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
 import { ChatTools, ChatAttachments } from './ChatTools';
@@ -331,8 +329,7 @@ export function PreparationPage({
           <strong>面试准备</strong>
         </div>
         <div className="toolbar-actions">
-          <MaterialButton
-            materialAction="profile"
+          <Button
             variant="ghost"
             aria-label="个人信息"
             aria-expanded={infoOpen}
@@ -341,9 +338,8 @@ export function PreparationPage({
           >
             <Person size={15} />
             个人信息
-          </MaterialButton>
-          <MaterialButton
-            materialAction="start"
+          </Button>
+          <Button
             className="interview-start-trigger"
             disabled={
               !window.desktop ||
@@ -358,7 +354,7 @@ export function PreparationPage({
           >
             <Play size={15} />
             开始面试
-          </MaterialButton>
+          </Button>
         </div>
       </header>
       {confirmInterview && (
@@ -539,7 +535,7 @@ export function PreparationPage({
                 accessReport?.checks.some(
                   (check) =>
                     (check.source === 'microphone' && check.status === 'denied') ||
-                    (window.desktop?.nativeWindowControls === true &&
+                    (window.desktop?.platform === 'macos' &&
                       check.source === 'system' &&
                       check.status !== 'granted'),
                 ) && (
@@ -548,7 +544,7 @@ export function PreparationPage({
                     onClick={() =>
                       void window
                         .desktop!.openMicrophoneSettings(
-                          window.desktop?.nativeWindowControls
+                          window.desktop?.platform === 'macos'
                             ? accessReport?.checks.find((check) => check.status !== 'granted')
                                 ?.source
                             : undefined,
@@ -559,7 +555,7 @@ export function PreparationPage({
                     }
                   >
                     <Settings size={16} />
-                    {window.desktop?.nativeWindowControls
+                    {window.desktop?.platform === 'macos'
                       ? '打开音频权限设置'
                       : '打开麦克风权限设置'}
                   </Button>
@@ -719,7 +715,7 @@ export function PreparationPage({
                             <Button
                               variant="outline"
                               className="chat-retry"
-                              data-native-control-style="content"
+
                               disabled={state.streaming || !connection.models.length}
                               onClick={() => void state.retry(message.id)}
                             >
@@ -815,7 +811,7 @@ export function PreparationPage({
                 />
               </div>
             )}
-            <MaterialSurface>
+            <>
               <form
                 className="composer"
                 onSubmit={(event) => {
@@ -879,7 +875,7 @@ export function PreparationPage({
                   </div>
                 </div>
               </form>
-            </MaterialSurface>
+            </>
             {(visibleError || !connection.live) && (
               <p
                 role={visibleError ? 'alert' : undefined}

@@ -20,41 +20,18 @@ try {
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   page.setDefaultTimeout(10000);
-  let surface = page;
-  for (let attempt = 0; attempt < 100; attempt++) {
-    const child = await Promise.all(
-      app
-        .context()
-        .pages()
-        .map(async (value) => ({ value, title: await value.title().catch(() => '') })),
-    );
-    const projected = child.find((value) => value.title === 'VoxCue composer');
-    if (projected) {
-      surface = projected.value;
-      break;
-    }
-    if (
-      process.platform !== 'darwin' &&
-      (await page.locator('textarea[aria-label="聊天消息"]').count())
-    )
-      break;
-    await new Promise((resolve) => setTimeout(resolve, 50));
-  }
+  const surface = page;
   const input = surface.getByRole('textbox', { name: '聊天消息', exact: true });
   await input.waitFor();
   const dimensions = async () => ({
     foreground: await surface.locator('.composer').boundingBox(),
-    area: await page
-      .locator(surface === page ? '.composer-area' : '.macos-composer-slot')
-      .boundingBox(),
+    area: await page.locator('.composer-area').boundingBox(),
     text: await input.evaluate((element) => ({
       height: element.clientHeight,
       scrollHeight: element.scrollHeight,
       value: element.value.length,
     })),
   });
-  if (process.platform === 'darwin')
-    assert.notEqual(surface, page, 'Actual Mac composer projection required');
   const samples = [];
   for (const [label, text] of [
     ['short', '一行'],

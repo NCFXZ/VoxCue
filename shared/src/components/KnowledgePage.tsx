@@ -53,7 +53,6 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           <strong>知识库</strong>
         </div>
         <Button
-          data-native-control-style="standalone-glass"
           aria-label="创建知识库"
           size="icon"
           disabled={!ragReady}
@@ -130,7 +129,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
               variant="ghost"
               size="icon"
               className="action-icon-button"
-              data-native-reveal-on-hover
+              data-reveal-on-hover
               aria-label="重命名"
               onClick={() => {
                 setName(base.name);

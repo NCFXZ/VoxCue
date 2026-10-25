@@ -27,6 +27,10 @@ const providerReply: ChatResult = { ok: true, provider: modelProvider, usage: nu
 void [providerModel, providerReply];
 
 declare const desktop: DesktopAPI;
+// @ts-expect-error Removed native UI projection is not a renderer capability.
+desktop.setContentControls([]);
+// @ts-expect-error Native menus are retired; menus render in shared React.
+desktop.popUpNativeMenu({});
 desktop.chatAccountUsage();
 // @ts-expect-error Account quota uses the signed-in service, never a renderer token or account.
 desktop.chatAccountUsage({ token: 'private', account: 'other' });

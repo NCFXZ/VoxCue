@@ -143,10 +143,14 @@ try {
     'Synthetic interviewer question',
   );
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-  await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 1);
-  assert.equal(await floating.locator('.floating-panel').count(), 1);
+  await floating.waitForFunction(
+    () => document.querySelectorAll('.floating-panel:not([hidden])').length === 1,
+  );
+  assert.equal(await floating.locator('.floating-panel:visible').count(), 1);
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-  await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 2);
+  await floating.waitForFunction(
+    () => document.querySelectorAll('.floating-panel:not([hidden])').length === 2,
+  );
   const nativePinned = () =>
     app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()

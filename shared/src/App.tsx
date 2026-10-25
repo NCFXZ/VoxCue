@@ -128,7 +128,7 @@ export function App() {
   }, [theme]);
   return (
     <div
-      className={`app-shell ${isLoginWindow ? 'login-shell' : ''} ${window.desktop?.nativeWindowControls ? 'native-window-controls' : 'custom-window-controls'}`}
+      className={`app-shell ${isLoginWindow ? 'login-shell' : ''} ${window.desktop?.platform === 'macos' ? 'native-window-controls' : 'custom-window-controls'}`}
     >
       <div className="app-body">
         {auth.loading ? (
@@ -180,7 +180,7 @@ export function App() {
           </>
         )}
       </div>
-      {(!isLoginWindow || window.desktop?.nativeWindowControls) && <TitleBar />}
+      {!isLoginWindow && <TitleBar />}
       {(appearanceError || (auth.session && (auth.error || sessionStateError))) && (
         <div className="auth-error" role="alert">
           {appearanceError || auth.error || sessionStateError}

@@ -778,34 +778,6 @@ describe('受控 preload 契约', () => {
       ['interviewScreenshot', 'interview:screenshot', [{ op: 'capture' }]],
       ['interviewImage', 'interview:image', [{ op: 'read', id: 'stored-image' }]],
       ['setNativeTheme', 'appearance:theme', ['dark']],
-      ['setSidebarGlass', 'appearance:sidebar-glass', [230, 0, '#ffffff', false]],
-      ['setGlassButton', 'appearance:glass-button', ['sidebar', null]],
-      ['setScrollChrome', 'appearance:scroll-chrome', [null]],
-      ['setContentControls', 'appearance:content-controls', [[]]],
-      ['setInterviewMaterials', 'appearance:interview-materials', [[]]],
-      ['windowFocused', 'appearance:window-focus', []],
-      [
-        'popUpNativeMenu',
-        'appearance:native-menu',
-        [
-          {
-            anchor: { x: 10, y: 10, width: 100, height: 32 },
-            side: 'bottom',
-            align: 'start',
-            width: 200,
-            items: [
-              {
-                label: '合成菜单',
-                separator: false,
-                disabled: false,
-                checked: false,
-                symbol: 'paperclip',
-                symbolColor: null,
-              },
-            ],
-          },
-        ],
-      ],
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],
       ['signInWithChatGPT', 'auth:sign-in', []],
@@ -841,7 +813,6 @@ describe('受控 preload 契约', () => {
         ...calls.map(([method]) => method),
         'windowAction',
         'platform',
-        'nativeWindowControls',
         'presentation',
         'screenCapturePermissionSupported',
         'confirmInterviewEnd',
@@ -853,11 +824,6 @@ describe('受控 preload 契约', () => {
         'onSpeechEvent',
         'onDictationEvent',
         'onSystemAccent',
-        'onGlassButton',
-        'onWindowFocus',
-        'onContentSearch',
-        'onContentToggle',
-        'onContentRange',
         'onInterviewEndRequested',
         'onSessionCloseRequested',
         'onUpdateEvent',
@@ -885,24 +851,8 @@ describe('受控 preload 契约', () => {
     expect(callback).toHaveBeenCalledExactlyOnceWith(payload);
     stop();
     expect(bridge.listeners.has('chat:event')).toBe(false);
-    const search = vi.fn();
-    const stopSearch = bridge.api!.onContentSearch(search);
-    bridge.listeners.get('appearance:content-search')!({ sender: 'private-event' }, 3, '合成检索');
-    expect(search).toHaveBeenCalledExactlyOnceWith(3, '合成检索');
-    stopSearch();
-    expect(bridge.listeners.has('appearance:content-search')).toBe(false);
-    const toggled = vi.fn();
-    const stopToggle = bridge.api!.onContentToggle(toggled);
-    bridge.listeners.get('appearance:content-toggle')!({ sender: 'private-event' }, 4, true);
-    expect(toggled).toHaveBeenCalledExactlyOnceWith(4, true);
-    stopToggle();
-    expect(bridge.listeners.has('appearance:content-toggle')).toBe(false);
-    const ranged = vi.fn();
-    const stopRange = bridge.api!.onContentRange(ranged);
-    bridge.listeners.get('appearance:content-range')!({ sender: 'private-event' }, 5, 20);
-    expect(ranged).toHaveBeenCalledExactlyOnceWith(5, 20);
-    stopRange();
-    expect(bridge.listeners.has('appearance:content-range')).toBe(false);
+    expect(bridge.api).not.toHaveProperty('setContentControls');
+    expect(bridge.api).not.toHaveProperty('popUpNativeMenu');
     const accent = vi.fn();
     const end = vi.fn();
     const stopAccent = bridge.api!.onSystemAccent(accent);

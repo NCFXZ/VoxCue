@@ -6,7 +6,7 @@ import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.
 import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
 import { assertDownloadButton } from '../../../shared/test/scripts/assert-download-button.mjs';
 import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
-import { readFile, mkdir, lstat, rename } from 'node:fs/promises';
+import { readFile, mkdir, lstat, rename, access } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -22,9 +22,17 @@ assert.equal(
     ['-c', 'Print :LSMinimumSystemVersion', path.join(bundle, 'Contents/Info.plist')],
     { encoding: 'utf8' },
   ).trim(),
-  '26.0',
+  '14.2',
 );
 const resources = path.join(bundle, 'Contents/Resources');
+assert.equal(
+  await access(path.join(resources, 'native/VoxCue.SidebarGlass.node')).then(
+    () => true,
+    () => false,
+  ),
+  false,
+  'The removed native presentation binding must not ship',
+);
 assert.equal(
   JSON.parse(
     execFileSync(path.join(resources, 'native/qwen/voxcue-qwen'), ['metal-check'], {
@@ -34,6 +42,10 @@ assert.equal(
   true,
 );
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
+assert.ok(
+  entries.includes('/public/sf-symbols/Settings.png'),
+  'Mac SF Symbols must ship with the shared controls',
+);
 assert.ok(!entries.some((name) => /node_modules\/onnxruntime-web(?:\/|$)/.test(name)));
 assert.ok(entries.includes('/dist-electron/shared/electron/backend/copilot/runtime.js'));
 assert.ok(entries.includes('/node_modules/@github/copilot-sdk/dist/cjs/index.js'));

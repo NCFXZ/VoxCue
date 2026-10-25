@@ -141,10 +141,6 @@ const nativePresentation: NativePresentation | undefined = platformPolicy.presen
     ).createPresentation({
       capabilities: platformPolicy.presentation,
       icon: resources.icon,
-      material:
-        resources.presentationBinding && existsSync(resources.presentationBinding)
-          ? require(resources.presentationBinding)
-          : undefined,
       interviewOpen: () => !!interviewWindow && !interviewWindow.isDestroyed(),
     })
   : undefined;
@@ -382,8 +378,6 @@ function openInterview() {
   });
   win.webContents.on('did-start-loading', () => {
     interviewMove = undefined;
-    nativePresentation?.setContentControls?.(win, [], () => {});
-    nativePresentation?.setInterviewMaterials?.(win, []);
     setInterviewMousePassthrough(true);
     speechSessions?.releaseInterview();
     interviewIpc?.cancel();
@@ -418,7 +412,7 @@ if (packagesFor(process.platform, process.arch).some((pkg) => pkg.id === 'qwen')
     componentRoot,
     packagesFor(process.platform, process.arch),
   ).qwenModels;
-if (desktopPlatform.nativeWindowControls || desktopPlatform.presentationFile) {
+if (desktopPlatform.id === 'darwin' || desktopPlatform.presentationFile) {
   if (!app.requestSingleInstanceLock()) {
     app.quit();
     process.exit(0);
@@ -441,13 +435,6 @@ function createMainWindow() {
   pendingMainClose = null;
   mainWindow = new BrowserWindow(windowOptions('main', desktopPlatform, windowPaths));
   restrictWindowNavigation(mainWindow);
-  nativePresentation?.configureMain?.(mainWindow);
-  const focusChanged = (focused: boolean) => {
-    if (mainWindow && !mainWindow.isDestroyed())
-      sendDesktop(mainWindow.webContents, 'appearance:window-focus-changed', focused);
-  };
-  mainWindow.on('focus', () => focusChanged(true));
-  mainWindow.on('blur', () => focusChanged(false));
   whenWindowReady(mainWindow, desktopPlatform, () => {
     mainWindow?.show();
     loginWindow?.close();
@@ -460,14 +447,6 @@ function createMainWindow() {
     if (macQuitRequested) app.quit();
   });
   mainWindow.webContents.on('did-start-loading', () => {
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      nativePresentation?.setScrollChrome?.(mainWindow, null);
-      nativePresentation?.setContentControls?.(mainWindow, [], () => {});
-      nativePresentation?.setInterviewMaterials?.(mainWindow, []);
-      for (const action of ['sidebar', 'profile', 'start'] as const)
-        nativePresentation?.setGlassButton?.(mainWindow, action, null, () => {});
-      nativePresentation?.setSidebarGlass?.(mainWindow, 0);
-    }
     speechSessions?.releaseDictation();
     chatIpc?.cancelActive();
   });
@@ -493,7 +472,7 @@ function createMainWindow() {
           noLink: true,
         })
         .then(({ response }) => {
-          if (response !== 1 && desktopPlatform.nativeWindowControls) macQuitRequested = false;
+          if (response !== 1 && desktopPlatform.id === 'darwin') macQuitRequested = false;
           if (response === 1 && mainWindow && !mainWindow.isDestroyed()) {
             mainCloseApproved = true;
             mainWindow.close();
@@ -513,7 +492,7 @@ function createMainWindow() {
       mainCloseTimer = setTimeout(() => {
         pendingMainClose = null;
         mainCloseApproved = false;
-        if (desktopPlatform.nativeWindowControls) macQuitRequested = false;
+        if (desktopPlatform.id === 'darwin') macQuitRequested = false;
         dialog.showErrorBox('聊天尚未保存', '窗口已保留，请等待聊天保存完成后重试关闭。');
       }, 15000);
       return;
@@ -571,7 +550,7 @@ app.whenReady().then(() => {
   );
   void components.status();
   nativePresentation?.initialize();
-  if (desktopPlatform.nativeWindowControls) {
+  if (desktopPlatform.id === 'darwin') {
     Menu.setApplicationMenu(
       Menu.buildFromTemplate([
         { role: 'appMenu' },
@@ -604,471 +583,6 @@ app.whenReady().then(() => {
     if (!win || ![loginWindow, mainWindow, interviewWindow].includes(win))
       throw new Error('Unauthorized window');
     return systemAccent();
-  });
-  handleDesktop('appearance:sidebar-glass', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== mainWindow || event.senderFrame !== event.sender.mainFrame)
-      throw Error('Unauthorized window');
-    const width = args[0];
-    const toolbarHeight = args[1];
-    const surfaceColor = args[2];
-    const dark = args[3];
-    if (
-      args.length !== 4 ||
-      typeof dark !== 'boolean' ||
-      typeof surfaceColor !== 'string' ||
-      !/^#[a-f0-9]{6}$/i.test(surfaceColor) ||
-      typeof width !== 'number' ||
-      !Number.isFinite(width) ||
-      width < 0 ||
-      width > 320 ||
-      width > win.getContentBounds().width ||
-      typeof toolbarHeight !== 'number' ||
-      !Number.isFinite(toolbarHeight) ||
-      toolbarHeight < 0 ||
-      toolbarHeight > 96
-    )
-      throw Error('Invalid sidebar width');
-    return (
-      nativePresentation?.setSidebarGlass?.(win, width, toolbarHeight, surfaceColor, dark) ?? false
-    );
-  });
-  handleDesktop('appearance:glass-button', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== mainWindow || event.senderFrame !== event.sender.mainFrame)
-      throw Error('Unauthorized window');
-    const [action, placement] = args;
-    if (args.length !== 2 || !['sidebar', 'profile', 'start'].includes(action))
-      throw Error('Invalid material action');
-    if (
-      placement !== null &&
-      (!placement ||
-        typeof placement !== 'object' ||
-        Array.isArray(placement) ||
-        Object.keys(placement).sort().join(',') !==
-          'behindContent,disabled,foregroundColor,height,hovered,pressed,width,x,y' ||
-        typeof placement.hovered !== 'boolean' ||
-        typeof placement.pressed !== 'boolean' ||
-        typeof placement.behindContent !== 'boolean' ||
-        typeof placement.foregroundColor !== 'string' ||
-        !/^#[a-f0-9]{6}$/i.test(placement.foregroundColor) ||
-        typeof placement.disabled !== 'boolean' ||
-        !(['x', 'y', 'width', 'height'] as const).every(
-          (key) => typeof placement[key] === 'number' && Number.isFinite(placement[key]),
-        ) ||
-        placement.x < 0 ||
-        placement.y < 0 ||
-        placement.width < 28 ||
-        placement.width > 220 ||
-        placement.height < 28 ||
-        placement.height > 48 ||
-        placement.x + placement.width > win.getContentBounds().width ||
-        placement.y + placement.height > win.getContentBounds().height)
-    )
-      throw Error('Invalid button placement');
-    return (
-      nativePresentation?.setGlassButton?.(win, action, placement, () => {
-        if (!win.isDestroyed() && win === mainWindow)
-          sendDesktop(win.webContents, 'appearance:glass-button-clicked', action);
-      }) ?? false
-    );
-  });
-  handleDesktop('appearance:window-focus', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || win !== mainWindow || event.senderFrame !== event.sender.mainFrame || args.length)
-      throw Error('Unauthorized window');
-    return win.isFocused();
-  });
-  const nativeFontControls = new WeakMap<BrowserWindow, Set<number>>();
-  handleDesktop('appearance:content-controls', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (
-      !win ||
-      ![mainWindow, interviewWindow, loginWindow].includes(win) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw Error('Unauthorized window');
-    const controls = args[0],
-      bounds = win.getContentBounds();
-    const ids = new Set<number>();
-    if (
-      args.length !== 1 ||
-      !Array.isArray(controls) ||
-      controls.length > 256 ||
-      controls.filter((item) => item?.kind === 'regular-overlay').length > 3 ||
-      (win === loginWindow &&
-        (controls.length > 8 ||
-          controls.some(
-            (item) =>
-              !(
-                (item?.kind === 'button-glass' &&
-                  ['brand.chatgpt', 'brand.copilot'].includes(item?.symbol ?? '')) ||
-                (item?.kind === 'button-background' &&
-                  item?.overGlass === true &&
-                  item?.symbol === null &&
-                  item?.label === '')
-              ),
-          ) ||
-          controls.filter((item) => item?.kind === 'button-glass').length > 2 ||
-          ['brand.chatgpt', 'brand.copilot'].some(
-            (symbol) => controls.filter((item) => item?.symbol === symbol).length > 1,
-          ))) ||
-      controls.some((item) => {
-        if (
-          !item ||
-          typeof item !== 'object' ||
-          Object.keys(item).sort().join(',') !==
-            'checked,color,covered,disabled,focused,height,hovered,id,kind,label,opacity,overGlass,pressed,symbol,symbolColor,trailing,value,width,x,y'
-        )
-          return true;
-        if (
-          !Number.isSafeInteger(item.id) ||
-          item.id < 1 ||
-          item.id > 1_000_000_000 ||
-          ids.has(item.id)
-        )
-          return true;
-        ids.add(item.id);
-        return (
-          ![
-            'button',
-            'button-glass',
-            'button-hover',
-            'regular-overlay',
-            'font-slider',
-            'popup',
-            'search',
-            'switch',
-            'button-background',
-            'progress',
-            'progress-bar',
-          ].includes(item.kind) ||
-          (item.kind === 'regular-overlay' &&
-            (win === loginWindow ||
-              item.overGlass ||
-              item.height > 44 ||
-              item.width > 160 ||
-              typeof item.label !== 'string' ||
-              (item.symbol === null
-                ? !/^[1-5] \/ [1-5]$/.test(item.label)
-                : !['chevron.left', 'chevron.right'].includes(item.symbol) ||
-                  item.label !== ''))) ||
-          (item.kind === 'font-slider' &&
-            (!/^\d+$/.test(item.value) ||
-              Number(item.value) < 12 ||
-              Number(item.value) > 24 ||
-              item.overGlass)) ||
-          (item.kind === 'progress-bar' && (item.value === '' || item.overGlass)) ||
-          (['progress', 'progress-bar'].includes(item.kind) &&
-            item.value !== '' &&
-            (typeof item.value !== 'string' ||
-              !/^\d+(?:\.\d+)?(?:e-\d+)?$/.test(item.value) ||
-              !Number.isFinite(Number(item.value)) ||
-              Number(item.value) < 0 ||
-              Number(item.value) > 100)) ||
-          (win === interviewWindow &&
-            !(
-              (item.kind === 'button-background' && item.overGlass === true) ||
-              ['button', 'popup', 'font-slider', 'progress-bar', 'regular-overlay'].includes(
-                item.kind,
-              )
-            )) ||
-          typeof item.label !== 'string' ||
-          item.label.length > 300 ||
-          typeof item.value !== 'string' ||
-          item.value.length > 6000 ||
-          typeof item.color !== 'string' ||
-          !/^#[a-f0-9]{6}$/i.test(item.color) ||
-          (item.symbol !== null &&
-            (typeof item.symbol !== 'string' || !/^[a-z0-9.]{1,100}$/i.test(item.symbol))) ||
-          (item.symbolColor !== null &&
-            (typeof item.symbolColor !== 'string' || !/^#[a-f0-9]{6}$/i.test(item.symbolColor))) ||
-          !(
-            [
-              'disabled',
-              'covered',
-              'overGlass',
-              'pressed',
-              'focused',
-              'checked',
-              'hovered',
-              'trailing',
-            ] as const
-          ).every((key) => typeof item[key] === 'boolean') ||
-          typeof item.opacity !== 'number' ||
-          !Number.isFinite(item.opacity) ||
-          item.opacity < 0 ||
-          item.opacity > 1 ||
-          !(['x', 'y', 'width', 'height'] as const).every(
-            (key) => typeof item[key] === 'number' && Number.isFinite(item[key]),
-          ) ||
-          item.x < 0 ||
-          item.y < 0 ||
-          item.width < 12 ||
-          item.height < (item.kind === 'progress-bar' ? 4 : 12) ||
-          item.height > 100 ||
-          item.x + item.width > bounds.width + 1 ||
-          item.y + item.height > bounds.height + 1
-        );
-      })
-    )
-      throw Error('Invalid content controls');
-    nativeFontControls.set(
-      win,
-      new Set(
-        controls
-          .filter((item) => item.kind === 'font-slider' && !item.disabled && !item.covered)
-          .map((item) => item.id),
-      ),
-    );
-    return (
-      nativePresentation?.setContentControls?.(win, controls, (id, value) => {
-        if (win.isDestroyed()) return;
-        if (typeof value === 'number') {
-          if (
-            Number.isInteger(value) &&
-            value >= 12 &&
-            value <= 24 &&
-            nativeFontControls.get(win)?.has(id)
-          )
-            sendDesktop(win.webContents, 'appearance:content-range', id, value);
-          return;
-        }
-        if (win !== mainWindow) return;
-        if (typeof value === 'boolean')
-          sendDesktop(win.webContents, 'appearance:content-toggle', id, value);
-        else sendDesktop(win.webContents, 'appearance:content-search', id, value.slice(0, 6000));
-      }) ?? false
-    );
-  });
-  handleDesktop('appearance:interview-materials', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (
-      !win ||
-      ![mainWindow, interviewWindow, loginWindow].includes(win) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw Error('Unauthorized window');
-    const materials = args[0],
-      bounds = win.getContentBounds(),
-      ids = new Set<number>();
-    const rectangle = (value: unknown, clip = false) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-      const area = value as Record<string, number>;
-      return (
-        (clip ? Object.keys(area).sort().join(',') === 'height,width,x,y' : true) &&
-        ['x', 'y', 'width', 'height'].every(
-          (key) =>
-            typeof area[key] === 'number' &&
-            Number.isFinite(area[key]) &&
-            Math.abs(area[key]) <= 100_000,
-        ) &&
-        area.width > 0 &&
-        area.height > 0 &&
-        (!clip ||
-          (area.x >= 0 &&
-            area.y >= 0 &&
-            area.x + area.width <= bounds.width + 1 &&
-            area.y + area.height <= bounds.height + 1))
-      );
-    };
-    if (
-      args.length !== 1 ||
-      !Array.isArray(materials) ||
-      materials.length > 256 ||
-      (win === loginWindow &&
-        (materials.length > 16 ||
-          (materials.length > 0 &&
-            materials.filter((item) => item?.style === 'preview-login-scene').length !== 1) ||
-          materials.some(
-            (item) =>
-              (item?.style !== 'preview-login-scene' && item?.dark !== true) ||
-              !['preview-login-scene', 'clear', 'regular'].includes(item?.style),
-          ))) ||
-      materials.some((item) => {
-        if (
-          !item ||
-          typeof item !== 'object' ||
-          Array.isArray(item) ||
-          Object.keys(item).sort().join(',') !==
-            'clip,dark,fadeBottom,height,id,opacity,radius,round,style,width,x,y' ||
-          !Number.isSafeInteger(item.id) ||
-          item.id < 1 ||
-          item.id > 1_000_000_000 ||
-          ids.has(item.id)
-        )
-          return true;
-        ids.add(item.id);
-        return (
-          !(
-            win === loginWindow
-              ? ['clear', 'regular', 'preview-login-scene']
-              : win === mainWindow
-                ? ['clear', 'regular', 'preview-scene']
-                : [
-                    'clear',
-                    'regular',
-                    'regular-dark',
-                    'regular-interactive',
-                    'regular-follow-hover',
-                    'modal-exclusion',
-                  ]
-          ).includes(item.style) ||
-          !rectangle(item) ||
-          !rectangle(item.clip, true) ||
-          typeof item.radius !== 'number' ||
-          typeof item.round !== 'boolean' ||
-          typeof item.dark !== 'boolean' ||
-          !Number.isFinite(item.radius) ||
-          item.radius < 0 ||
-          item.radius > 1000 ||
-          typeof item.fadeBottom !== 'number' ||
-          !Number.isFinite(item.fadeBottom) ||
-          item.fadeBottom < 0 ||
-          item.fadeBottom > 1000 ||
-          typeof item.opacity !== 'number' ||
-          !Number.isFinite(item.opacity) ||
-          item.opacity < 0 ||
-          item.opacity > 1
-        );
-      })
-    )
-      throw Error('Invalid interview materials');
-    return nativePresentation?.setInterviewMaterials?.(win, materials) ?? false;
-  });
-  handleDesktop('appearance:scroll-chrome', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (
-      !win ||
-      ![mainWindow, interviewWindow].includes(win) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw Error('Unauthorized window');
-    const state = args[0],
-      bounds = win.getContentBounds();
-    const rectangle = (value: unknown) => {
-      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
-      const area = value as Record<string, unknown>;
-      return (
-        Object.keys(area).sort().join(',') === 'height,width,x,y' &&
-        ['x', 'y', 'width', 'height'].every(
-          (key) => typeof area[key] === 'number' && Number.isFinite(area[key]),
-        ) &&
-        Number(area.x) >= 0 &&
-        Number(area.y) >= 0 &&
-        Number(area.width) > 0 &&
-        Number(area.height) > 0 &&
-        Number(area.x) + Number(area.width) <= bounds.width + 1 &&
-        Number(area.y) + Number(area.height) <= bounds.height + 1
-      );
-    };
-    if (
-      args.length !== 1 ||
-      (state !== null &&
-        (!state ||
-          typeof state !== 'object' ||
-          Array.isArray(state) ||
-          Object.keys(state)
-            .filter((key) => key !== 'headerRadius')
-            .sort()
-            .join(',') !==
-            'area,composer,follow,followHovered,foregroundColor,headerOpacity,modal,modalRadius,title,titleOpacity,titleText,topHeight' ||
-          !rectangle(state.area) ||
-          (state.title !== null && !rectangle(state.title)) ||
-          typeof state.titleText !== 'string' ||
-          state.titleText.length > 100 ||
-          (state.composer !== null && !rectangle(state.composer)) ||
-          (state.follow !== null && !rectangle(state.follow)) ||
-          typeof state.followHovered !== 'boolean' ||
-          (state.modal !== null && !rectangle(state.modal)) ||
-          typeof state.foregroundColor !== 'string' ||
-          !/^#[a-f0-9]{6}$/i.test(state.foregroundColor) ||
-          !(['topHeight', 'headerOpacity', 'modalRadius', 'titleOpacity'] as const).every(
-            (key) =>
-              typeof state[key] === 'number' && Number.isFinite(state[key]) && state[key] >= 0,
-          ) ||
-          state.headerOpacity > 1 ||
-          state.titleOpacity > 1 ||
-          state.topHeight > 96 ||
-          state.modalRadius > 128 ||
-          (state.headerRadius !== undefined &&
-            (win !== interviewWindow ||
-              typeof state.headerRadius !== 'number' ||
-              !Number.isFinite(state.headerRadius) ||
-              state.headerRadius < 0 ||
-              state.headerRadius > 128)) ||
-          (win === interviewWindow &&
-            (state.composer !== null ||
-              state.follow !== null ||
-              state.modal !== null ||
-              state.followHovered ||
-              state.titleText !== '面试设置' ||
-              state.title === null ||
-              state.headerRadius === undefined ||
-              state.topHeight > state.area.height))))
-    )
-      throw Error('Invalid scroll chrome');
-    return nativePresentation?.setScrollChrome?.(win, state) ?? false;
-  });
-  handleDesktop('appearance:native-menu', (event, ...args) => {
-    const win = BrowserWindow.fromWebContents(event.sender);
-    if (
-      !win ||
-      ![mainWindow, interviewWindow].includes(win) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw Error('Unauthorized window');
-    const request = args[0];
-    if (
-      args.length !== 1 ||
-      !request ||
-      typeof request !== 'object' ||
-      Array.isArray(request) ||
-      Object.keys(request).sort().join(',') !== 'align,anchor,items,side,width' ||
-      !['top', 'bottom'].includes(request.side) ||
-      !['start', 'end'].includes(request.align) ||
-      typeof request.width !== 'number' ||
-      !Number.isFinite(request.width) ||
-      request.width < 32 ||
-      request.width > win.getContentBounds().width ||
-      !request.anchor ||
-      typeof request.anchor !== 'object' ||
-      Array.isArray(request.anchor) ||
-      Object.keys(request.anchor).sort().join(',') !== 'height,width,x,y' ||
-      !(['x', 'y', 'width', 'height'] as const).every(
-        (key) => typeof request.anchor[key] === 'number' && Number.isFinite(request.anchor[key]),
-      ) ||
-      request.anchor.x < 0 ||
-      request.anchor.y < 0 ||
-      request.anchor.width <= 0 ||
-      request.anchor.height <= 0 ||
-      request.anchor.x + request.anchor.width > win.getContentBounds().width + 1 ||
-      request.anchor.y + request.anchor.height > win.getContentBounds().height + 1 ||
-      !Array.isArray(request.items) ||
-      !request.items.length ||
-      request.items.length > 128 ||
-      request.items.some(
-        (item) =>
-          !item ||
-          typeof item !== 'object' ||
-          Array.isArray(item) ||
-          Object.keys(item).sort().join(',') !==
-            'checked,disabled,label,separator,symbol,symbolColor' ||
-          typeof item.label !== 'string' ||
-          item.label.length > 200 ||
-          (item.symbol !== null &&
-            (typeof item.symbol !== 'string' ||
-              item.symbol.length > 100 ||
-              !/^[a-z0-9.]+$/.test(item.symbol))) ||
-          (item.symbolColor !== null &&
-            (typeof item.symbolColor !== 'string' || !/^#[a-f0-9]{6}$/i.test(item.symbolColor))) ||
-          !(['separator', 'disabled', 'checked'] as const).every(
-            (key) => typeof item[key] === 'boolean',
-          ),
-      )
-    )
-      throw Error('Invalid native menu');
-    return nativePresentation?.popUpNativeMenu?.(win, request) ?? null;
   });
   systemPreferences.on('accent-color-changed', () => {
     const color = systemAccent();
@@ -1191,7 +705,7 @@ app.whenReady().then(() => {
       mainWindow?.close();
     } else {
       mainCloseApproved = false;
-      if (desktopPlatform.nativeWindowControls) macQuitRequested = false;
+      if (desktopPlatform.id === 'darwin') macQuitRequested = false;
     }
   });
   const requireLogin = (event: Electron.IpcMainInvokeEvent) => {
@@ -1803,7 +1317,7 @@ app.whenReady().then(() => {
     .catch(() => createLoginWindow());
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length !== 0) return;
-    if (!desktopPlatform.nativeWindowControls) return createLoginWindow();
+    if (desktopPlatform.id !== 'darwin') return createLoginWindow();
     void selectionReady
       .then(() => activeAuth().session())
       .then((session) => {
@@ -1818,7 +1332,7 @@ app.on('window-all-closed', () => {
   if (desktopPlatform.quitOnAllWindowsClosed) app.quit();
 });
 app.on('before-quit', (event) => {
-  if (desktopPlatform.nativeWindowControls) macQuitRequested = true;
+  if (desktopPlatform.id === 'darwin') macQuitRequested = true;
   if (mainWindow && !mainWindow.isDestroyed() && !mainCloseFlushed) {
     event.preventDefault();
     mainWindow.close();

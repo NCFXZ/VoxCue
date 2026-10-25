@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
-import { History, ChevronDown } from './icons';
+import { History, ChevronDown, X } from './icons';
+import { Button } from './ui/button';
 import { HistoryDetail } from './HistoryDetail';
 import { useHistory } from '../stores/history';
 import { historyStorageKey } from '../services/history';
@@ -8,6 +9,7 @@ export function HistoryPage() {
   const records = allRecords.filter((record) => !record.mock);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [changing, setChanging] = useState(false);
+  const searchInput = useRef<HTMLInputElement>(null);
   const transition = useRef(0);
   useEffect(() => () => window.clearTimeout(transition.current), []);
   const select = (id: string | null) => {
@@ -60,15 +62,32 @@ export function HistoryPage() {
             <div className="management-container">
               {records.length > 0 && (
                 <div className="history-filters" role="search" aria-label="筛选面试记录">
-                  <label className="history-search-label">
-                    <span className="sr-only">搜索标题</span>
+                  <div className="history-search-label">
                     <input
+                      ref={searchInput}
                       type="search"
+                      aria-label="搜索标题"
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
                       placeholder="搜索面试记录"
                     />
-                  </label>
+                    {query && (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="history-search-clear"
+                        aria-label="清除搜索"
+                        data-reveal-on-hover
+                        onClick={() => {
+                          setQuery('');
+                          searchInput.current?.focus();
+                        }}
+                      >
+                        <X size={14} />
+                      </Button>
+                    )}
+                  </div>
                   <span role="status">{filtered.length} 条结果</span>
                 </div>
               )}

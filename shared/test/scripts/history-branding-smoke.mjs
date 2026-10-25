@@ -189,6 +189,15 @@ try {
   );
   await main.getByRole('button', { name: '查看回答：请介绍机器人控制项目', exact: true }).click();
   await main.getByRole('complementary', { name: 'AI 回答', exact: true }).waitFor();
+  await main.locator('.record-answer-scroll').evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await main.getByRole('button', { name: '查看回答：请介绍机器人控制项目', exact: true }).click();
+  await main.waitForFunction(() => {
+    const answer = document.querySelector('.record-answer.is-located');
+    const header = document.querySelector('.record-answer-panel > header');
+    return answer.getBoundingClientRect().top >= header.getBoundingClientRect().bottom;
+  });
   await main
     .locator('.record-answer-content .provider-avatar img')
     .first()

@@ -6,8 +6,7 @@ export const macos: DesktopPlatform = {
   qwenRuntimeFile: 'qwen/voxcue-qwen',
   updateDriverFile: 'macos/electron/updates/driver.js',
   iconFile: 'public/voxcue.png',
-  mainWindowOptions: {},
-  nativeWindowControls: true,
+  mainWindowOptions: { vibrancy: 'sidebar', visualEffectState: 'followWindow' },
   presentation: {
     frostedTransparency: true,
     nativeTheme: true,
@@ -16,7 +15,6 @@ export const macos: DesktopPlatform = {
     interviewIconVisibility: true,
   },
   presentationFile: 'macos/electron/presentation.js',
-  presentationBindingFile: 'VoxCue.SidebarGlass.node',
   audioHelper: 'VoxCue.Audio',
   speechProcessFile: 'macos/electron/speech/process.js',
   microphoneSettingsUrl:

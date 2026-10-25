@@ -24,6 +24,7 @@ beforeEach(() => {
     setItem: vi.fn((key: string, value: string) => values.set(key, value)),
   };
   vi.stubGlobal('localStorage', storage);
+  vi.stubGlobal('window', { desktop: { platform: 'windows' } });
   vi.stubGlobal('document', {
     documentElement: {
       dataset: {},
@@ -36,37 +37,52 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it('主窗口和面试固定沿用60%效果，忽略全部旧值且不读写偏好', () => {
+it('主窗口和面试使用最高透明档，忽略全部旧值且不读写偏好', () => {
   for (const value of ['0', '20', '60', '100', 'off', 'strong', 'broken']) {
     for (const key of keys) values.set(key, value);
-    expect(readFrostedTransparency()).toBe(60);
-    expect(readInterviewTransparency()).toBe(60);
+    expect(readFrostedTransparency()).toBe(100);
+    expect(readInterviewTransparency()).toBe(100);
     applyFrostedAppearance();
-    expect(document.documentElement.dataset.frostedTransparency).toBe('60');
-    expect(document.documentElement.dataset.interviewTransparency).toBe('60');
+    expect(document.documentElement.dataset.frostedTransparency).toBe('100');
+    expect(document.documentElement.dataset.interviewTransparency).toBe('100');
     for (const key of keys) expect(values.get(key)).toBe(value);
   }
   expect(storage.getItem).not.toHaveBeenCalled();
   expect(storage.setItem).not.toHaveBeenCalled();
 });
-it('主窗口保留原60%曲线与虚化，不把60直接当作表面不透明度', () => {
+it('Mac和Windows共用旧曲线最高档，不读写旧偏好', () => {
+  vi.stubGlobal('window', { desktop: { platform: 'macos' } });
   applyFrostedAppearance();
-  expect(Number(properties.get('--frosted-opacity-light'))).toBeCloseTo(0.4, 10);
-  expect(Number(properties.get('--frosted-opacity-dark'))).toBeCloseTo(0.512, 10);
-  expect(properties.get('--frosted-main-filter')).toBe('blur(28.8px) saturate(130%)');
+  expect(readFrostedTransparency()).toBe(100);
+  expect(readInterviewTransparency()).toBe(100);
+  expect(document.documentElement.dataset.frostedTransparency).toBe('100');
+  expect(document.documentElement.dataset.interviewTransparency).toBe('100');
+  expect(properties.get('--frosted-main-filter')).toBe('none');
+  expect(properties.has('--web-material-min-opacity')).toBe(false);
+  expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.632);
+  expect(Number(properties.get('--frosted-panel-dark'))).toBeCloseTo(0.692);
+  expect(storage.getItem).not.toHaveBeenCalled();
+  expect(storage.setItem).not.toHaveBeenCalled();
+  vi.stubGlobal('window', { desktop: { platform: 'windows' } });
+  applyFrostedAppearance();
+  expect(document.documentElement.dataset.frostedTransparency).toBe('100');
+  expect(properties.has('--web-material-min-opacity')).toBe(false);
 });
-it('面试外层和阅读层保留原60%设置的独立曲线', () => {
+it('主窗口最高档不叠加网页滤镜，交给系统材质', () => {
+  applyFrostedAppearance();
+  expect(Number(properties.get('--frosted-opacity-light'))).toBeCloseTo(0, 10);
+  expect(Number(properties.get('--frosted-opacity-dark'))).toBeCloseTo(0, 10);
+  expect(properties.get('--frosted-main-filter')).toBe('none');
+});
+it('面试大背景保留60曲线，内部玻璃不再设置独立底色', () => {
   applyInterviewAppearance();
+  expect(properties.has('--frosted-reading-dark')).toBe(false);
+  expect(properties.has('--frosted-chrome-dark')).toBe(false);
   for (const [key, value] of Object.entries({
-    '--frosted-panel-light': 0.8496,
-    '--frosted-panel-dark': 0.8872,
-    '--frosted-chrome-light': 0.916,
-    '--frosted-chrome-dark': 0.9248,
-    '--frosted-reading-light': 0.8992,
-    '--frosted-reading-dark': 0.928,
+    '--frosted-panel-light': 0.632,
+    '--frosted-panel-dark': 0.692,
   }))
     expect(Number(properties.get(key))).toBeCloseTo(value, 10);
-  expect(properties.get('--frosted-panel-filter')).toBe('blur(19.52px)');
 });
 it('存储不可用时仍有相同固定材质；重新应用不接受迟到的旧值', () => {
   storage.getItem.mockImplementation(() => {

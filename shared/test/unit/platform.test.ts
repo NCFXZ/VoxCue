@@ -113,12 +113,18 @@ describe('桌面平台边界', () => {
       titleBarStyle: 'hidden',
       titleBarOverlay: false,
       trafficLightPosition: { x: 16, y: 18 },
+      transparent: false,
     });
-    expect(windowOptions('main', mac, paths)).not.toHaveProperty('vibrancy');
+    expect(windowOptions('main', mac, paths)).toMatchObject({
+      vibrancy: 'sidebar',
+      visualEffectState: 'followWindow',
+    });
     expect(windowOptions('login', mac, paths)).toMatchObject({
       frame: true,
       titleBarStyle: 'hidden',
       titleBarOverlay: false,
+      trafficLightPosition: { x: 16, y: 18 },
+      transparent: false,
       width: 960,
       height: 580,
       minHeight: 520,

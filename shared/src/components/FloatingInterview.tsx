@@ -1,9 +1,8 @@
 import { interviewAlwaysDark } from './ui/appearance-control';
 import { InterviewImages } from './InterviewImages';
-import { useEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   ArrowUp,
-  ChevronUp,
   ChevronDown,
   ShieldCheck,
   ShieldOff,
@@ -33,19 +32,22 @@ import { MarkdownContent } from './MarkdownContent';
 import { ResponseProgress } from './ResponseProgress';
 import { InterviewAudioRecovery } from './InterviewAudioRecovery';
 import { InterviewSettingsPanel } from './InterviewSettingsPanel';
-import { InterviewSubmissionStatus } from './InterviewSubmissionStatus';
 import { InterviewReadiness } from './InterviewReadiness';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
 import { InterviewAnswerFailure, InterviewAnswerStatus } from './InterviewAnswerStatus';
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
+import { useInterviewPanelMotion } from './useInterviewPanelMotion';
 import { useInterviewFontSize } from '../interviewTypography';
+import { useTextareaSize } from './useTextareaSize';
 export function FloatingInterview() {
   useEffect(() => useComponents.getState().connect(), []);
   const fontSize = useInterviewFontSize();
   const state = useInterview();
   const screenshotExpanded = state.capturingScreenshot || state.screenshots.length > 0;
+  const macScreenshotShortcut = window.desktop?.platform === 'macos';
+  const screenshotButton = useRef<HTMLButtonElement>(null);
   const provider = providerInfo(state.answers.at(-1)?.provider);
   const failedAnswer = state.answers.at(-1)?.status === 'failed' ? state.answers.at(-1) : undefined;
   const saveError = useHistory((s) => s.error);
@@ -60,6 +62,26 @@ export function FloatingInterview() {
   const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => {
+    const capture = (event: KeyboardEvent) => {
+      if (
+        event.defaultPrevented ||
+        event.isComposing ||
+        !event.ctrlKey ||
+        event.metaKey ||
+        event.altKey ||
+        event.shiftKey ||
+        event.key.toLowerCase() !== 's' ||
+        collapsed ||
+        document.querySelector('dialog[open]')
+      )
+        return;
+      event.preventDefault();
+      if (!event.repeat) screenshotButton.current?.click();
+    };
+    window.addEventListener('keydown', capture);
+    return () => window.removeEventListener('keydown', capture);
+  }, [collapsed]);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [ending, setEnding] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -75,6 +97,21 @@ export function FloatingInterview() {
   const dragging = useRef(false);
   const resizePointer = useRef<{ target: HTMLButtonElement; id: number } | null>(null);
   const currentInput = input ?? state.draftQuestion;
+  const inputRef = useTextareaSize(currentInput, 1, 6);
+  const shell = useRef<HTMLDivElement>(null);
+  const panelMotion = useInterviewPanelMotion({
+    shell,
+    collapsed,
+    transcriptVisible: showTranscript,
+    setCollapsed,
+    setTranscriptVisible: setShowTranscript,
+    canStart: () => !dragging.current && !resizing && !windowDrag.active.current,
+    onError: setError,
+  });
+  useLayoutEffect(() => {
+    transcriptScroll.syncLayout();
+    answerScroll.syncLayout();
+  }, [collapsed, showTranscript]);
   useEffect(() => {
     const desktop = window.desktop;
     if (!desktop?.presentation?.interviewMousePassthrough) return;
@@ -333,6 +370,7 @@ export function FloatingInterview() {
       aria-label={edge === 'left' ? '拖动左下角调整尺寸' : '拖动右下角调整尺寸'}
       aria-describedby="resize-keyboard-hint"
       onKeyDown={(event) => {
+        if (panelMotion.busy.current) return;
         if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '+', '-'].includes(event.key))
           return;
         event.preventDefault();
@@ -341,7 +379,7 @@ export function FloatingInterview() {
           .catch(() => setError('无法调整窗口尺寸。'));
       }}
       onPointerDown={(event) => {
-        if (event.button !== 0) return;
+        if (event.button !== 0 || panelMotion.busy.current) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         resizePointer.current = { target: event.currentTarget, id: event.pointerId };
@@ -366,6 +404,8 @@ export function FloatingInterview() {
   return (
     <div className="floating-viewport">
       <div
+        ref={shell}
+        data-panel-motion={panelMotion.motion ?? undefined}
         style={
           {
             '--panel-height': `max(0px, calc(100dvh - ${interviewLayout.chromeHeight}px))`,
@@ -382,15 +422,12 @@ export function FloatingInterview() {
             className="floating-brand floating-collapse"
             aria-label={collapsed ? '展开面试窗口' : '收起面试窗口'}
             aria-expanded={!collapsed}
-            onClick={async () => {
-              try {
-                setCollapsed(await window.desktop!.toggleInterviewCollapse());
-              } catch {
-                setError('窗口收起或展开失败，请重试。');
-              }
-            }}
+            aria-disabled={!!panelMotion.motion}
+            onClick={() => void panelMotion.toggleCollapsed()}
           >
-            {collapsed ? <ChevronDown size={16} /> : <ChevronUp size={16} />}
+            <span className="floating-collapse-chevron">
+              <ChevronDown size={16} />
+            </span>
             <AppLogo size={17} />
             <strong>VoxCue</strong>
           </button>
@@ -423,13 +460,20 @@ export function FloatingInterview() {
               aria-label={confirmEnd ? '确认结束面试' : '结束面试'}
               onClick={confirmEnd ? close : () => setConfirmEnd(true)}
             >
-              <Square size={16} />
-              <span>{confirmEnd ? '确认结束' : ''}</span>
+              <span className="button-morph-idle" aria-hidden="true">
+                <Square size={16} />
+              </span>
+              <span className="button-morph-expanded" aria-hidden="true">
+                <Square size={16} />
+                <span>确认结束</span>
+              </span>
             </Button>
             <div
               className="floating-drag-handle"
               aria-label="拖动面试窗口"
-              onPointerDown={windowDrag.onPointerDown}
+              onPointerDown={(event) => {
+                if (!panelMotion.busy.current) windowDrag.onPointerDown(event);
+              }}
             >
               <DragGrip size={20} />
             </div>
@@ -439,59 +483,61 @@ export function FloatingInterview() {
           hidden={collapsed}
           className={`floating-panels ${showTranscript ? '' : 'answer-only'}`}
         >
-          {showTranscript && (
-            <section className="floating-panel">
-              <header>
-                <h2>
-                  <Volume2 size={16} />
-                  转写
-                </h2>
-                <InterviewReadiness />
-              </header>
+          <section className="floating-panel floating-transcript" hidden={!showTranscript}>
+            <InterviewChromeBase />
+            <header>
+              <h2>
+                <Volume2 size={16} />
+                转写
+              </h2>
+              <InterviewReadiness />
+            </header>
+            <div className="floating-audio-recovery">
               <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />
-              <div
-                className="floating-scroll"
-                {...transcriptScroll.scrollProps}
-                tabIndex={0}
-                aria-label="面试转写"
-              >
-                {!state.transcripts.length && (
-                  <div className="floating-empty">
-                    <Volume2 size={26} />
-                    <p>等待面试官或面试者讲话…</p>
-                    <span>面试官在左侧，面试者在右侧</span>
-                  </div>
-                )}
-                {state.transcripts.map((t) => (
-                  <article
-                    className={`transcript-item ${t.source === 'microphone' ? 'interviewee' : 'interviewer'}`}
-                    key={t.id}
-                  >
-                    <div className="transcript-meta">
-                      <strong>
-                        {t.source ? (t.source === 'system' ? '面试官' : '面试者') : '面试官'}
-                      </strong>
-                      <time>{t.time}</time>
-                    </div>
-                    <p>
-                      {t.text}
-                      {!t.final && state.status === 'running' && <span className="typing-caret" />}
-                    </p>
-                    {t.reason === 'discontinuity' && (
-                      <small className="transcript-gap">音频间断，片段可能不完整</small>
-                    )}
-                  </article>
-                ))}
-              </div>
-              {!transcriptScroll.following && (
-                <FollowLatestButton
-                  label={transcriptScroll.hasNew ? '有新转写 · 返回最新' : '返回最新转写'}
-                  onClick={transcriptScroll.scrollToLatest}
-                />
+            </div>
+            <div
+              className="floating-scroll"
+              {...transcriptScroll.scrollProps}
+              tabIndex={0}
+              aria-label="面试转写"
+            >
+              {!state.transcripts.length && (
+                <div className="floating-empty">
+                  <Volume2 size={26} />
+                  <p>等待面试官或面试者讲话…</p>
+                  <span>面试官在左侧，面试者在右侧</span>
+                </div>
               )}
-            </section>
-          )}
+              {state.transcripts.map((t) => (
+                <article
+                  className={`transcript-item ${t.source === 'microphone' ? 'interviewee' : 'interviewer'}`}
+                  key={t.id}
+                >
+                  <div className="transcript-meta">
+                    <strong>
+                      {t.source ? (t.source === 'system' ? '面试官' : '面试者') : '面试官'}
+                    </strong>
+                    <time>{t.time}</time>
+                  </div>
+                  <p>
+                    {t.text}
+                    {!t.final && state.status === 'running' && <span className="typing-caret" />}
+                  </p>
+                  {t.reason === 'discontinuity' && (
+                    <small className="transcript-gap">音频间断，片段可能不完整</small>
+                  )}
+                </article>
+              ))}
+            </div>
+            {!transcriptScroll.following && (
+              <FollowLatestButton
+                label={transcriptScroll.hasNew ? '有新转写 · 返回最新' : '返回最新转写'}
+                onClick={transcriptScroll.scrollToLatest}
+              />
+            )}
+          </section>
           <section className="floating-panel floating-answer">
+            <InterviewChromeBase />
             <header>
               <h2>
                 <MessageSquare size={17} />
@@ -502,22 +548,19 @@ export function FloatingInterview() {
                 className="floating-toggle"
                 aria-label="转写面板"
                 aria-pressed={showTranscript}
-                onClick={async () => {
-                  try {
-                    setShowTranscript(
-                      await window.desktop!.setInterviewTranscriptVisible(!showTranscript),
-                    );
-                  } catch {
-                    setError('无法切换转写面板。');
-                  }
-                }}
+                aria-disabled={!!panelMotion.motion}
+                onClick={() => void panelMotion.toggleTranscript()}
               >
                 <span className="toggle-dot" />
                 <AudioLines size={14} />
                 转写
               </Button>
             </header>
-            {!showTranscript && <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />}
+            <div className="floating-audio-recovery">
+              {!showTranscript && (
+                <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />
+              )}
+            </div>
             <div
               className="floating-scroll"
               {...answerScroll.scrollProps}
@@ -634,6 +677,12 @@ export function FloatingInterview() {
                 </article>
               ))}
             </div>
+            <FollowLatestButton
+              label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
+              busy={state.generating}
+              visible={state.generating || !answerScroll.following}
+              onClick={answerScroll.scrollToLatest}
+            />
             <form
               className="floating-composer"
               onSubmit={(event) => {
@@ -641,12 +690,6 @@ export function FloatingInterview() {
                 submit();
               }}
             >
-              <FollowLatestButton
-                label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
-                busy={state.generating}
-                visible={state.generating || !answerScroll.following}
-                onClick={answerScroll.scrollToLatest}
-              />
               {state.screenshots.length > 0 && (
                 <div className="floating-screenshot-previews" role="group" aria-label="待发送截图">
                   {state.screenshots.map((shot, index) => (
@@ -667,9 +710,10 @@ export function FloatingInterview() {
                 </div>
               )}
               <textarea
+                ref={inputRef}
                 aria-label="面试提问"
                 placeholder="输入问题，或按 Enter 发送最新面试官问题…"
-                rows={2}
+                rows={1}
                 value={currentInput}
                 onChange={(event) => {
                   editedDraft.current = state.draftQuestion;
@@ -696,17 +740,18 @@ export function FloatingInterview() {
                     <Sparkles size={14} />
                     自动回答：{state.autoAnswer ? '开' : '关'}
                   </Button>
-                  <InterviewSubmissionStatus />
                 </div>
                 <div className="floating-composer-actions">
                   <Button
+                    ref={screenshotButton}
                     type="button"
                     variant="ghost"
-                    size={screenshotExpanded ? 'default' : 'icon'}
                     className="floating-screenshot-button"
                     aria-label="截取图像"
+                    aria-keyshortcuts="Control+s"
                     aria-busy={state.capturingScreenshot}
                     data-expanded={screenshotExpanded}
+                    data-shortcut-platform={macScreenshotShortcut ? 'macos' : 'windows'}
                     disabled={
                       state.generating ||
                       state.capturingScreenshot ||
@@ -722,6 +767,14 @@ export function FloatingInterview() {
                     ) : (
                       <Screenshot size={18} />
                     )}
+                    <span className="floating-screenshot-text">截图</span>
+                    <kbd
+                      className="floating-screenshot-shortcut"
+                      aria-hidden="true"
+                      hidden={screenshotExpanded}
+                    >
+                      {macScreenshotShortcut ? '⌃S' : 'Ctrl+S'}
+                    </kbd>
                     <span className="floating-screenshot-count" aria-live="polite">
                       {state.screenshots.length}/5
                     </span>
@@ -794,6 +847,16 @@ export function FloatingInterview() {
         )}
       </div>
       {settingsOpen && <InterviewSettingsPanel onClose={() => setSettingsOpen(false)} />}
+    </div>
+  );
+}
+
+// Chat has an opaque page behind its blurred controls. Provide that same base
+// locally, below the scrolling content, without hiding the interview backdrop.
+function InterviewChromeBase() {
+  return (
+    <div className="floating-chrome-base" aria-hidden="true">
+      <span className="floating-follow-base" />
     </div>
   );
 }

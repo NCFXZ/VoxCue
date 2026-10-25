@@ -10,7 +10,6 @@ import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
 import { buildQwen } from './build-qwen.mjs';
 import { buildCredentials } from './build-credentials.mjs';
-import { buildSidebarGlass } from './build-sidebar-glass.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -23,7 +22,6 @@ export async function buildMacApp(output, publicKey) {
   // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
   const signing = await loadDevelopmentSigning();
   await buildCredentials();
-  await buildSidebarGlass();
   await buildQwen();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
@@ -44,7 +42,7 @@ export async function buildMacApp(output, publicKey) {
     overwrite: false,
     prune: false,
     extendInfo: {
-      LSMinimumSystemVersion: '26.0',
+      LSMinimumSystemVersion: '14.2',
       NSMicrophoneUsageDescription: 'VoxCue 在本机转写麦克风，不保存或上传音频。',
       NSAudioCaptureUsageDescription: 'VoxCue 在本机转写系统音频，不保存或上传音频。',
       NSScreenCaptureUsageDescription: 'VoxCue 仅在你点击截图按钮时捕获当前屏幕，不持续录屏。',
@@ -187,7 +185,6 @@ export async function buildMacApp(output, publicKey) {
   for (const name of [
     'VoxCue.Audio',
     'VoxCue.ScreenPermission.node',
-    'VoxCue.SidebarGlass.node',
     'VoxCue.Updater.node',
     'VoxCue.Credentials',
   ])

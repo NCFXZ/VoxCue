@@ -13,10 +13,6 @@ await writeFile(
   `
 const {app,dialog}=require('electron');
 dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(91);};
-const platform=require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/platform/index.js'))});
-const select=platform.selectDesktopPlatform;
-platform.selectDesktopPlatform=(...args)=>({...select(...args),presentationBindingFile:undefined,
-  ...(process.env.VOXCUE_TEST_WEB_RENDERER ? {nativeWindowControls:false} : {})});
 require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js'))});
 `,
 );
@@ -125,8 +121,24 @@ try {
   ]);
   page.setDefaultTimeout(15000);
   await page.waitForFunction(() => document.documentElement.classList.contains('web-materials'));
-  assert.equal(await page.evaluate(() => window.desktop.presentation.liquidGlass), false);
+  assert.equal(await page.evaluate(() => 'setContentControls' in window.desktop), false);
   assert.equal(await page.locator('.macos-content-native,.macos-composer-slot').count(), 0);
+  const idleClassWrites = await page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    let writes = 0;
+    const observer = new MutationObserver((records) => {
+      writes += records.length;
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    observer.disconnect();
+    return writes;
+  });
+  assert.ok(
+    idleClassWrites <= 2,
+    'Idle material observation must not schedule a perpetual animation loop: ' + idleClassWrites,
+  );
+
   for (const dark of [false, true]) {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
     const start = page.getByRole('button', { name: '开始面试', exact: true });
@@ -166,24 +178,110 @@ try {
           window.webContents.send('appearance:accent-changed', color);
       }, accent);
       await item.hover();
-      await page.waitForFunction(() => {
-        const node = document.querySelector('[role="menuitemradio"][data-highlighted]');
-        const expected = document.documentElement.style.getPropertyValue('--accent-readable');
-        if (!node || !/^#[a-f0-9]{6}$/i.test(expected)) return false;
-        const rgb = expected
-          .slice(1)
-          .match(/../g)
-          .map((x) => parseInt(x, 16));
-        return getComputedStyle(node).backgroundColor === `rgb(${rgb.join(', ')})`;
-      });
+      await page
+        .waitForFunction((accent) => {
+          const node = document.querySelector('[role="menuitemradio"][data-highlighted]');
+          return (
+            node &&
+            document.documentElement.style.getPropertyValue('--system-accent') === accent &&
+            getComputedStyle(node).backgroundColor === 'rgba(128, 128, 128, 0.2)'
+          );
+        }, accent)
+        .catch(async (error) => {
+          console.error(
+            await item.evaluate((node) => ({
+              highlighted: node.hasAttribute('data-highlighted'),
+              background: getComputedStyle(node).backgroundColor,
+              accent: document.documentElement.style.getPropertyValue('--system-accent'),
+            })),
+          );
+          throw error;
+        });
       assert.equal(
         await item.evaluate((node) => getComputedStyle(node).color),
-        dark ? 'rgb(28, 32, 35)' : 'rgb(255, 255, 255)',
+        dark ? 'rgb(231, 235, 237)' : 'rgb(37, 41, 43)',
       );
     }
     await captureRequested(page, 'model-menu-' + (dark ? 'dark' : 'light'));
     await page.keyboard.press('Escape');
   }
+  const checkPanelHeader = async (selector, name) => {
+    const panel = page.locator(selector);
+    const scroll = panel.locator('.personal-panel-scroll, .record-answer-scroll');
+    const header = panel.locator(':scope > header');
+    await page.waitForFunction((selector) => {
+      const panel = document.querySelector(selector);
+      const header = panel.querySelector(':scope > header');
+      return (
+        parseFloat(panel.style.getPropertyValue('--panel-header-height')) ===
+          header.getBoundingClientRect().height && panel.clientWidth > 250
+      );
+    }, selector);
+    for (const dark of [false, true]) {
+      await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+      await scroll.evaluate((node) => {
+        node.scrollTop = 0;
+      });
+      await page.waitForFunction(
+        (selector) =>
+          getComputedStyle(document.querySelector(selector + ' > header'), '::before').opacity ===
+          '0',
+        selector,
+      );
+      const initial = await header.boundingBox();
+      const first = await scroll.locator(':scope > :visible').first().boundingBox();
+      assert.ok(
+        first.y >= initial.y + initial.height - 1,
+        'First row must clear the fixed heading: ' + JSON.stringify({ initial, first }),
+      );
+      await scroll.evaluate((node) => {
+        node.scrollTop = 180;
+      });
+      await page.waitForFunction(
+        (selector) =>
+          getComputedStyle(document.querySelector(selector + ' > header'), '::before').opacity ===
+          '1',
+        selector,
+      );
+      const scrolled = await header.boundingBox();
+      assert.ok(
+        Math.abs(scrolled.y - initial.y) < 1,
+        'Heading stays fixed while content scrolls behind it',
+      );
+      const material = await header.evaluate((node) => {
+        const own = getComputedStyle(node, '::before');
+        const chat = getComputedStyle(document.querySelector('.page-toolbar'), '::before');
+        return {
+          filter: own.backdropFilter,
+          fill: own.backgroundColor,
+          chatFilter: chat.backdropFilter,
+          chatFill: chat.backgroundColor,
+        };
+      });
+      assert.equal(material.filter, material.chatFilter);
+      assert.equal(material.fill, material.chatFill);
+      assert.match(material.filter, /blur\(24px\)/);
+      await captureRequested(page, name + '-header-' + (dark ? 'dark' : 'light'));
+      await scroll.evaluate((node) => {
+        node.scrollTop = node.scrollHeight;
+      });
+      assert.ok(
+        await scroll.evaluate((node) => {
+          const last = node.lastElementChild.getBoundingClientRect();
+          const box = node.getBoundingClientRect();
+          return last.bottom <= box.bottom + 1;
+        }),
+        'Last row remains fully reachable',
+      );
+    }
+    await scroll.evaluate((node) => {
+      node.scrollTop = 0;
+    });
+  };
+  const infoToggle = page.getByRole('button', { name: '个人信息', exact: true });
+  if ((await infoToggle.getAttribute('aria-expanded')) !== 'true') await infoToggle.click();
+  await checkPanelHeader('.personal-panel', 'personal');
+  await infoToggle.click();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('共享回退材质检查');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.chat-copy').waitFor();
@@ -215,7 +313,7 @@ try {
   );
   assert.equal(
     await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
-    '60',
+    '100',
   );
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   assert.equal(
@@ -262,15 +360,27 @@ try {
     await search.fill('项目');
     await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 1);
     await captureRequested(page, 'search-filtered-' + (dark ? 'dark' : 'light'));
-    const searchBounds = await search.boundingBox();
-    const clearInset = await search.evaluate(
-      (e) => parseFloat(getComputedStyle(e).paddingRight) + 6,
+    const clear = page.getByRole('button', { name: '清除搜索', exact: true });
+    await page.mouse.move(1, 1);
+    await clear.evaluate((node) => node.blur());
+    await page.waitForFunction(() =>
+      document
+        .getAnimations()
+        .every(
+          (animation) =>
+            animation.effect?.getTiming().iterations === Infinity ||
+            animation.playState !== 'running',
+        ),
     );
-    await page.mouse.click(
-      searchBounds.x + searchBounds.width - clearInset,
-      searchBounds.y + searchBounds.height / 2,
+    assert.equal(
+      await clear.evaluate((node) => getComputedStyle(node).backgroundColor),
+      'rgba(0, 0, 0, 0)',
     );
-    assert.equal(await search.inputValue(), '', 'The native search clear control clears input');
+    assert.equal(await clear.evaluate((node) => getComputedStyle(node).borderRadius), '50%');
+    await clear.click();
+    assert.equal(await search.inputValue(), '');
+    assert.equal(await search.evaluate((node) => document.activeElement === node), true);
+    assert.equal(await clear.count(), 0);
     await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 2);
   }
   await page.evaluate(() => {
@@ -283,7 +393,16 @@ try {
       status: 'ended',
       mock: false,
       transcripts: [],
-      answers: [],
+      answers: Array.from({ length: 8 }, (_, j) => ({
+        id: 'answer-' + j,
+        question: '合成问题 ' + (j + 1),
+        content: Array.from(
+          { length: 5 },
+          () => '这是一段用于滚动与标题毛玻璃检查的合成回答。',
+        ).join('\n\n'),
+        provider: 'chatgpt',
+        createdAt: Date.now(),
+      })),
     }));
     localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
     window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
@@ -299,6 +418,9 @@ try {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
     await captureRequested(page, 'history-scrolled-header-' + (dark ? 'dark' : 'light'));
   }
+  await page.locator('.history-row').first().click();
+  await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
+  await checkPanelHeader('.record-answer-panel', 'record-answer');
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   for (const [width, dark] of [
     [1280, false],
@@ -314,6 +436,9 @@ try {
       );
     assert.equal(overflow, false);
     await captureRequested(page, 'composer-width-' + width);
+    await infoToggle.click();
+    await checkPanelHeader('.personal-panel', 'personal-width-' + width);
+    await infoToggle.click();
     if (process.argv.includes('--preview')) {
       const file = path.join(testRoot, `web-materials-${width}-${dark ? 'dark' : 'light'}.png`);
       await page.screenshot({ path: file, animations: 'disabled' });

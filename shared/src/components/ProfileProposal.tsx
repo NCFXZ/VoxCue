@@ -73,10 +73,6 @@ export function SkillUpdatePrompt() {
         </p>
       )}
       <div>
-        <Button variant="ghost" onClick={state.dismissSkillUpdate}>
-          <X size={16} />
-          暂不更新
-        </Button>
         <Button
           variant="outline"
           disabled={state.streaming}
@@ -101,6 +97,10 @@ export function SkillUpdatePrompt() {
         >
           {missing ? <Edit size={16} /> : <Globe size={16} />}
           {missing ? `补充${missing}` : '联网更新技能'}
+        </Button>
+        <Button variant="ghost" onClick={state.dismissSkillUpdate}>
+          <X size={16} />
+          暂不更新
         </Button>
       </div>
     </div>
@@ -273,7 +273,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                 <Button
                   variant="ghost"
                   className="proposal-view"
-                  data-native-reveal-on-hover
+                  data-reveal-on-hover
                   aria-expanded={expanded}
                   aria-label={expanded ? '收起技能清单' : '展开技能清单'}
                   onClick={() => setSkillsExpanded(!expanded)}
@@ -317,7 +317,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                       <Button
                         variant="ghost"
                         className="proposal-view"
-                        data-native-reveal-on-hover
+                        data-reveal-on-hover
                         aria-label={`查看技能：${skill.title}`}
                         onClick={() => setReading({ field: 'skills', skillId: skill.id })}
                       >
@@ -357,7 +357,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                 <Button
                   variant="ghost"
                   className="proposal-view"
-                  data-native-reveal-on-hover
+                  data-reveal-on-hover
                   aria-label={`查看${profileLabels[field]}`}
                   onClick={() => setReading({ field })}
                 >

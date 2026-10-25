@@ -31,7 +31,7 @@ export function LoginPage() {
                 variant="outline"
                 className="service-login"
                 data-login-service={service}
-                data-native-control-style="standalone-glass"
+
                 disabled={auth.waiting || !window.desktop}
                 onClick={() => {
                   void auth.signIn(service);

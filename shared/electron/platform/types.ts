@@ -9,10 +9,8 @@ export interface DesktopPlatform {
     BrowserWindowConstructorOptions,
     'backgroundMaterial' | 'vibrancy' | 'visualEffectState'
   >;
-  readonly nativeWindowControls?: boolean;
   readonly presentation?: PresentationCapabilities;
   readonly presentationFile?: string;
-  readonly presentationBindingFile?: string;
   readonly updateDriverFile?: string;
   readonly audioHelper?: string;
   readonly systemAudioSettingsUrl?: string;

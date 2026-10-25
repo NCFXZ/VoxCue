@@ -35,7 +35,7 @@ export function DownloadButton({
       size={iconOnly ? 'icon' : undefined}
       className={`download-button${iconOnly ? ' is-icon-only' : ''}${cancelReady ? ' is-cancellable' : ''} ${className}`}
       data-hover-label={hoverLabel}
-      data-native-control-style={hoverLabel ? 'over-glass' : undefined}
+
       aria-label={cancelReady ? `${label}，取消下载` : `${label}下载中`}
       aria-disabled={!cancelReady}
       onClick={() => {

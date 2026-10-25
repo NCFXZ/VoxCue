@@ -48,13 +48,6 @@ export function desktopResources(environment: ResourceEnvironment, platform: Des
       'voxcue.png',
     ),
     speechModels: path.join(modelRoot, 'speech'),
-    presentationBinding: platform.presentationBindingFile
-      ? path.join(
-          packaged ? resourcesPath : appPath,
-          packaged ? 'native' : 'native/bin',
-          platform.presentationBindingFile,
-        )
-      : undefined,
     qwenModels: undefined as string | undefined,
     qwenRuntime: platform.qwenRuntimeFile
       ? path.join(

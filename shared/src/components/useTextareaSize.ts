@@ -2,7 +2,7 @@ import { useCallback, useLayoutEffect, useState } from 'react';
 
 // A material portal can replace the editor without changing its value. Follow
 // the mounted element and its owning window, rather than a stale parent ref.
-export function useTextareaSize(value: string) {
+export function useTextareaSize(value: string, minRows = 2, maxRows = 11) {
   const [element, setElement] = useState<HTMLTextAreaElement | null>(null);
   const ref = useCallback((node: HTMLTextAreaElement | null) => setElement(node), []);
   useLayoutEffect(() => {
@@ -14,7 +14,7 @@ export function useTextareaSize(value: string) {
       if (!Number.isFinite(line)) return;
       element.style.height = 'auto';
       element.style.overflowY = 'hidden';
-      const height = Math.max(line * 2, Math.min(element.scrollHeight, line * 11));
+      const height = Math.max(line * minRows, Math.min(element.scrollHeight, line * maxRows));
       element.style.height = `${height}px`;
       element.style.overflowY = element.scrollHeight > height + 1 ? 'auto' : 'hidden';
     };
@@ -35,6 +35,6 @@ export function useTextareaSize(value: string) {
       element.removeEventListener('input', measure);
       view.removeEventListener('resize', measure);
     };
-  }, [element, value]);
+  }, [element, value, minRows, maxRows]);
   return ref;
 }

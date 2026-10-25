@@ -1,8 +1,8 @@
+import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { composerPage, chooseNativeMenu } from './native-ui.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -186,17 +186,14 @@ try {
   await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
   const page = await mainOpened;
   page.on('pageerror', (error) => errors.push(error.message));
-  const surface = await composerPage(app, page);
+  const surface = page;
   await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
   await verifyIcons(page, 10);
   await page.screenshot({ animations: 'disabled' });
-  await chooseNativeMenu(
-    app,
-    page,
-    page.getByRole('button', { name: '用户菜单', exact: true }),
-    '设置',
-  );
+  await captureRequested(page, 'mac-sf-main');
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.waitFor();
   await verifyIcons(page, 20);
@@ -285,6 +282,7 @@ try {
   }, galleryFile);
   const gallery = await galleryOpened;
   await gallery.screenshot({ fullPage: true });
+  await captureRequested(gallery, 'mac-sf-gallery');
   await gallery.close();
   assert.deepEqual(errors, []);
   await console.log(JSON.stringify({ status: 'passed', checks, assets, errors }, null, 2));

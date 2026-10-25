@@ -88,15 +88,9 @@ try {
   assert.equal(models.models[0].provider.id, 'copilot');
   assert.equal(models.models[0].id, 'synthetic-copilot');
   // Menu tracking is outside this test; select Settings through its existing action.
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.removeHandler('appearance:native-menu');
-    ipcMain.handle('appearance:native-menu', (_event, request) =>
-      request.items.findIndex((item) => item.label === '设置'),
-    );
-  });
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   const settingsMenu = main.getByRole('menuitem', { name: '设置', exact: true });
-  if (process.platform !== 'darwin') await settingsMenu.click();
+  await settingsMenu.click();
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
   await settings.waitFor();
   await app.evaluate(() => {
@@ -292,12 +286,6 @@ try {
       );
       await main.screenshot();
     }
-    if (process.platform === 'darwin')
-      await main.waitForFunction(() =>
-        document
-          .querySelector('[aria-label="刷新账户额度"]')
-          ?.classList.contains('macos-content-native'),
-      );
   }
   assert.notEqual(
     skeletonColors[0],
@@ -327,15 +315,8 @@ try {
   const switched = await page.evaluate(() => window.desktop.chatModels(true));
   assert.ok(switched.ok);
   assert.equal(switched.models[0].provider.id, 'chatgpt');
-  await app.evaluate(({ ipcMain }) => {
-    ipcMain.removeHandler('appearance:native-menu');
-    ipcMain.handle('appearance:native-menu', (_event, request) =>
-      request.items.findIndex((item) => item.label === '设置'),
-    );
-  });
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
-  if (process.platform !== 'darwin')
-    await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const chatGPTSettings = page.getByRole('dialog', { name: '设置', exact: true });
   await chatGPTSettings.getByRole('button', { name: '账户与用量', exact: true }).click();
   await app.evaluate(({ app }) => {

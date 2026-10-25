@@ -263,10 +263,15 @@ try {
   const scroll = page.locator('.floating-answer .floating-scroll');
   const style = await scroll.evaluate((node) => ({
     mask: getComputedStyle(node).maskImage,
-    padding: getComputedStyle(node).paddingBottom,
+    padding: parseFloat(getComputedStyle(node).paddingBottom),
+    composerHeight: node.parentElement.querySelector('.floating-composer').getBoundingClientRect()
+      .height,
   }));
   assert.match(style.mask, /36px/);
-  assert.equal(style.padding, '36px');
+  assert.ok(
+    style.padding >= style.composerHeight + 36,
+    'Final content clears the overlay composer and bottom fade',
+  );
   await scroll.evaluate((node) => {
     node.scrollTop = 0;
     node.dispatchEvent(new Event('scroll'));
@@ -278,7 +283,7 @@ try {
     .getByText('最后一行：返回最新后，这一行应完整可读。', { exact: true })
     .waitFor({ state: 'attached' });
   assert.equal(await scroll.evaluate((node) => node.scrollTop), readingTop);
-  const follow = page.locator('.floating-composer > .follow-latest');
+  const follow = page.locator('.floating-answer > .follow-latest');
   assert.equal(await follow.locator('.follow-latest-dots > span').count(), 3);
   await capture('fade-reading-while-generating');
   await page.emulateMedia({ reducedMotion: 'reduce' });

@@ -39,7 +39,7 @@ try {
   <key>CFBundleIconFile</key><string>voxcue.icns</string>
   <key>CFBundleVersion</key><string>${version}</string>
   <key>CFBundleShortVersionString</key><string>${version}</string>
-  <key>LSMinimumSystemVersion</key><string>26.0</string>
+  <key>LSMinimumSystemVersion</key><string>14.2</string>
   <key>NSMicrophoneUsageDescription</key><string>VoxCue 在本机转写麦克风，不保存或上传音频。</string>
   <key>NSAudioCaptureUsageDescription</key><string>VoxCue 在本机转写系统音频，不保存或上传音频。</string>
   <key>NSScreenCaptureUsageDescription</key><string>VoxCue 仅在你点击截图按钮时捕获当前屏幕，图像暂存，点击发送后才用于回答，不持续录屏。</string>
@@ -52,10 +52,10 @@ try {
     '-O2',
     '-arch',
     'arm64',
-    '-mmacosx-version-min=26.0',
+    '-mmacosx-version-min=14.2',
     'native/Launcher.mm',
     '-framework',
-    'AppKit',
+    'Foundation',
     '-o',
     path.join(contents, 'MacOS/VoxCue'),
   ]);

@@ -116,10 +116,9 @@ try {
   );
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
-  if (process.env.VOXCUE_TEST_EXPECT_NATIVE_UI === '1')
-    await floating.waitForFunction(() =>
-      document.documentElement.classList.contains('macos-interview-glass'),
-    );
+  await floating.waitForFunction(() =>
+    document.documentElement.classList.contains('web-materials'),
+  );
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
   let nativeCapture;
   if (process.argv.includes('--native-capture')) {
@@ -194,9 +193,10 @@ try {
           });
         const pixels = Buffer.alloc(4 * 4 * 4);
         for (let i = 0; i < pixels.length; i += 4) {
-          pixels[i] = fixture.count * 25;
-          pixels[i + 1] = 100;
-          pixels[i + 2] = 180;
+          // Include bright and dark screenshots when inspecting overlay controls.
+          pixels[i] = fixture.count === 1 ? 255 : fixture.count === 2 ? 0 : fixture.count * 25;
+          pixels[i + 1] = fixture.count === 1 ? 255 : fixture.count === 2 ? 0 : 100;
+          pixels[i + 2] = fixture.count === 1 ? 255 : fixture.count === 2 ? 0 : 180;
           pixels[i + 3] = 255;
         }
         const window = BrowserWindow.getAllWindows().find((win) =>
@@ -217,6 +217,12 @@ try {
     0,
   );
   const camera = floating.getByRole('button', { name: '截取图像', exact: true });
+  assert.equal(await camera.locator('.floating-screenshot-text').innerText(), '截图');
+  assert.equal(await floating.locator('.floating-composer-options').getByRole('status').count(), 0);
+  const labelWidth = (await camera.locator('.floating-screenshot-text').boundingBox()).width + 6;
+  const macShortcut = await floating.evaluate(() => window.desktop.platform === 'macos');
+  assert.equal(await camera.locator('kbd').innerText(), macShortcut ? '⌃S' : 'Ctrl+S');
+  assert.equal(await camera.getAttribute('aria-keyshortcuts'), 'Control+s');
   const send = floating.getByRole('button', { name: '发送面试问题', exact: true });
   const input = floating.getByRole('textbox', { name: '面试提问', exact: true });
   const previews = floating.locator('.floating-screenshot-preview');
@@ -270,23 +276,24 @@ try {
     }));
     assert.equal(shape.height, 32);
     assert.equal(shape.overflow, false);
-    assert.equal(shape.iconOnly, count === 0);
-    if (count > 0) {
-      assert.equal(shape.radius, '999px');
-      assert.equal(shape.corner, 'round');
-    }
+    assert.equal(shape.iconOnly, false);
+    assert.equal(shape.radius, '999px');
+    assert.equal(shape.corner, 'round');
+    assert.equal(await camera.locator('kbd').isVisible(), count === 0);
   };
   const waitAnswer = async (count) => {
     await floating.getByText('截图回归回答 ' + count, { exact: true }).waitFor();
     return (await requests()).at(-1);
   };
   const collapsedWidth = (await camera.boundingBox()).width;
-  assert.ok(collapsedWidth <= 36);
+  assert.equal(collapsedWidth, (macShortcut ? 72 : 92) + labelWidth);
   await input.fill('解释这些截图，先保留我的草稿');
   await app.evaluate(() => {
     globalThis.screenshotFixture.mode = 'hold';
   });
-  await camera.click();
+  await input.press('Control+Alt+s');
+  assert.equal(await captured(), 0, 'Extra modifiers must not trigger the screenshot shortcut');
+  await input.press('Control+s');
   await floating.waitForFunction(
     () =>
       document.querySelector('.floating-screenshot-button').getAttribute('aria-busy') === 'true',
@@ -307,8 +314,17 @@ try {
       radius: getComputedStyle(button).borderTopLeftRadius,
       corner: getComputedStyle(button).cornerShape,
     })),
-    { width: 76, height: 32, iconOnly: false, radius: '999px', corner: 'round' },
+    {
+      width: 76 + labelWidth,
+      height: 32,
+      iconOnly: false,
+      radius: '999px',
+      corner: 'round',
+    },
   );
+  const busyCaptures = await captured();
+  await input.press('Control+s');
+  assert.equal(await captured(), busyCaptures, 'Shortcut obeys the busy button guard');
   await app.evaluate(() => {
     globalThis.screenshotFixture.mode = 'normal';
     globalThis.screenshotFixture.finish();
@@ -317,7 +333,7 @@ try {
   assert.equal(await input.inputValue(), '解释这些截图，先保留我的草稿');
   assert.equal((await requests()).length, 0);
   assert.equal(await captured(), 1);
-  assert.ok((await camera.boundingBox()).width > collapsedWidth + 20);
+  assert.equal((await camera.boundingBox()).width, 76 + labelWidth);
   assert.equal(
     await previews
       .locator('img')
@@ -333,6 +349,14 @@ try {
     .getByRole('button', { name: '移除截图 1', exact: true })
     .boundingBox();
   assert.ok(removeSize.width <= 24 && removeSize.height <= 24);
+  const remove = floating.getByRole('button', { name: '移除截图 1', exact: true });
+  const removeStyle = await remove.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { fill: style.backgroundColor, color: style.color, shadow: style.boxShadow };
+  });
+  assert.equal(removeStyle.fill, 'rgb(52, 58, 62)');
+  assert.equal(removeStyle.color, 'rgb(255, 255, 255)');
+  assert.notEqual(removeStyle.shadow, 'none');
   assert.equal(await captured(), 5);
   await capture('five-staged-images');
   assert.equal((await requests()).length, 0);
@@ -375,9 +399,60 @@ try {
   await sentImages.first().click();
   const liveViewer = floating.getByRole('dialog', { name: '截图', exact: true });
   await liveViewer.locator('.interview-image-canvas img').waitFor();
+  const viewerCaptures = await captured();
+  await liveViewer.press('Control+s');
+  assert.equal(await captured(), viewerCaptures, 'Viewer keyboard input must not capture again');
+  const overlays = await liveViewer.evaluate((viewer) =>
+    ['.is-previous', '.is-next', '.interview-image-position'].map((selector) => {
+      const node = viewer.querySelector(selector);
+      const style = getComputedStyle(node);
+      return {
+        fill: style.backgroundColor,
+        filter: style.backdropFilter,
+        opacity: style.opacity,
+        border: style.borderTopColor,
+        iconOpacity: node.querySelector('svg')
+          ? getComputedStyle(node.querySelector('svg')).opacity
+          : null,
+      };
+    }),
+  );
+  for (const overlay of overlays) {
+    assert.equal(overlay.border, 'rgba(0, 0, 0, 0)');
+    assert.equal(overlay.opacity, '1', 'Disabled navigation must not fade its glass backing');
+    assert.equal(overlay.fill, overlays[2].fill);
+    assert.equal(overlay.filter, overlays[2].filter);
+  }
+  assert.equal(overlays[0].iconOpacity, '0.42');
+  assert.equal(overlays[1].iconOpacity, '1');
+  await liveViewer.locator('.is-next').hover();
+  assert.equal(
+    await liveViewer.locator('.is-next').evaluate((node) => getComputedStyle(node).borderTopColor),
+    'rgba(0, 0, 0, 0)',
+  );
+  await capture('borderless-image-viewer');
+  assert.equal(
+    await liveViewer.getByRole('button', { name: '上一张截图', exact: true }).isDisabled(),
+    true,
+  );
   assert.equal(await liveViewer.getAttribute('data-backdrop'), 'transparent');
+  assert.deepEqual(
+    await liveViewer.evaluate((node) => {
+      const style = getComputedStyle(node, '::backdrop');
+      return { fill: style.backgroundColor, filter: style.backdropFilter };
+    }),
+    { fill: 'rgba(0, 0, 0, 0)', filter: 'none' },
+  );
   assert.equal(await liveViewer.getByRole('button', { name: '保存图片', exact: true }).count(), 0);
   await liveViewer.press('ArrowRight');
+  assert.equal(
+    await liveViewer.getByRole('button', { name: '上一张截图', exact: true }).isEnabled(),
+    true,
+  );
+  assert.equal(
+    await liveViewer.locator('.is-previous > svg').evaluate((e) => getComputedStyle(e).opacity),
+    '1',
+  );
   await liveViewer
     .locator('.interview-image-position')
     .getByText('2 / 5', { exact: true })
@@ -454,6 +529,12 @@ try {
   );
   assert.equal(await floating.locator('.floating-composer .interview-answer-failure').count(), 0);
   const answerScroll = floating.locator('.floating-answer .floating-scroll');
+  // Viewer focus restoration can leave this pane at the top; establish a
+  // scrollable starting point before checking that the failure card moves.
+  await answerScroll.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+    node.dispatchEvent(new Event('scroll'));
+  });
   const scrollBefore = await answerScroll.evaluate((node) => ({
     top: node.scrollTop,
     cardTop: node.querySelector('.interview-answer-failure').getBoundingClientRect().top,

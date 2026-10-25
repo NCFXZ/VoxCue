@@ -602,9 +602,10 @@ try {
   assert((await bounds()).width > before.width);
   await floating.screenshot({ animations: 'disabled' });
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
-  assert.equal(await floating.locator('.floating-panels').isHidden(), true);
+  await floating.locator('.floating-panels').waitFor({ state: 'hidden' });
   await floating.screenshot({ animations: 'disabled' });
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
+  await floating.locator('.floating-panels').waitFor({ state: 'visible' });
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([
     floating.waitForEvent('close'),

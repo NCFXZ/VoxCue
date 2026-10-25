@@ -1,5 +1,5 @@
 // Original material curve, shared by the main window and the independent
-// interview control. Reading surfaces deliberately use a lower curve position.
+// interview background. Internal glass surfaces use the shared chat material.
 const profiles = [
   {
     value: 0,
@@ -8,11 +8,6 @@ const profiles = [
     blur: 0,
     panelLight: 1,
     panelDark: 1,
-    chromeLight: 1,
-    chromeDark: 1,
-    panelBlur: 0,
-    readingLight: 1,
-    readingDark: 1,
   },
   {
     value: 25,
@@ -21,11 +16,6 @@ const profiles = [
     blur: 20,
     panelLight: 0.92,
     panelDark: 0.94,
-    chromeLight: 0.96,
-    chromeDark: 0.96,
-    panelBlur: 16,
-    readingLight: 0.86,
-    readingDark: 0.9,
   },
   {
     value: 50,
@@ -34,11 +24,6 @@ const profiles = [
     blur: 36,
     panelLight: 0.76,
     panelDark: 0.82,
-    chromeLight: 0.86,
-    chromeDark: 0.88,
-    panelBlur: 24,
-    readingLight: 0.62,
-    readingDark: 0.68,
   },
   {
     value: 100,
@@ -47,14 +32,14 @@ const profiles = [
     blur: 0,
     panelLight: 0.12,
     panelDark: 0.18,
-    chromeLight: 0.4,
-    chromeDark: 0.5,
-    panelBlur: 0,
-    readingLight: 0.16,
-    readingDark: 0.24,
   },
 ] as const;
 type ProfileKey = Exclude<keyof (typeof profiles)[number], 'value'>;
+
+// Shared preview preset, explicitly enabled for both desktop platforms.
+export function readMaterialTransparency(): number {
+  return 100;
+}
 
 export function frostedProfileAt(value: number) {
   const upperIndex = Math.max(

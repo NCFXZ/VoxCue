@@ -4,7 +4,7 @@ async function settle(button) {
   await button.evaluate(async (element) => {
     while (element.isConnected) {
       const active = element
-        .getAnimations()
+        .getAnimations({ subtree: true })
         .filter(
           (animation) =>
             animation.effect?.getTiming().iterations !== Infinity &&
@@ -69,7 +69,7 @@ export async function assertInitialDownloadProgress(button, start) {
       // use Chromium's compositor timeline. Inspect their settled endpoint.
       await button.evaluate((element) => {
         element.getBoundingClientRect();
-        for (const animation of element.getAnimations())
+        for (const animation of element.getAnimations({ subtree: true }))
           if (animation.effect?.getTiming().iterations !== Infinity) animation.finish();
       });
     }
@@ -98,6 +98,7 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
       );
       await page.mouse.move(1, 1);
       await button.locator('.download-button-progress').waitFor({ state: 'visible' });
+      await settle(button);
       const ring = button.locator('[role="progressbar"]');
       const state = await ring.evaluate((element) => {
         const probe = document.createElement('span');
@@ -122,6 +123,7 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
       const before = await button.boundingBox();
       await button.hover();
       await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
+      await settle(button);
       assert.equal(await button.locator('.download-button-progress').isVisible(), false);
       await settle(button);
       assert.equal(

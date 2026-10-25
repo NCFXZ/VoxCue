@@ -4,7 +4,6 @@ import { closeUiApp, installUiAccount } from '../../../shared/test/scripts/insta
 import { mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { composerPage } from './native-ui.mjs';
 
 const appData = path.join(testRoot, 'application-data');
 const legacy = path.join(appData, 'ai-interview-copilot');
@@ -193,7 +192,7 @@ try {
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  const surface = await composerPage(app, page);
+  const surface = page;
   await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await surface.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === '迁移前的合成草稿',
@@ -262,7 +261,7 @@ try {
     app.waitForEvent('window'),
     page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
-  const reopenedSurface = await composerPage(app, page);
+  const reopenedSurface = page;
   await reopenedSurface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await reopenedSurface.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === '迁移前的合成草稿',

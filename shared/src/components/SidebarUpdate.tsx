@@ -24,21 +24,25 @@ export function SidebarUpdate() {
       variant="ghost"
       size="icon"
       className={`sidebar-update${installing ? '' : ' sidebar-update-expandable'}`}
-      data-native-control-style="over-glass"
       aria-label={installing ? '正在准备更新' : downloaded ? '重启以更新' : '下载更新'}
       disabled={installing || (downloaded && state.interviewActive)}
       onClick={() => void run(downloaded ? 'install' : 'download')}
     >
-      {installing ? (
-        <span className="update-spinner" aria-hidden="true">
-          <Loader size={17} />
-        </span>
-      ) : downloaded ? (
-        <Update size={17} />
-      ) : (
-        <Download size={17} />
-      )}
-      <span className="sidebar-update-label">{downloaded ? '重启以更新' : '下载更新'}</span>
+      <span className="sidebar-update-idle" aria-hidden="true">
+        {installing ? (
+          <span className="update-spinner">
+            <Loader size={17} />
+          </span>
+        ) : downloaded ? (
+          <Update size={17} />
+        ) : (
+          <Download size={17} />
+        )}
+      </span>
+      <span className="sidebar-update-expanded" aria-hidden="true">
+        {downloaded ? <Update size={17} /> : <Download size={17} />}
+        <span className="sidebar-update-label">{downloaded ? '重启以更新' : '下载更新'}</span>
+      </span>
     </Button>
   );
 }

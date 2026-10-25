@@ -42,7 +42,7 @@ export function windowOptions(
       : {}),
     icon: paths.icon,
     frame: false,
-    ...(platform.nativeWindowControls && role !== 'interview'
+    ...(platform.id === 'darwin' && role !== 'interview'
       ? {
           frame: true,
           titleBarStyle: 'hidden' as const,

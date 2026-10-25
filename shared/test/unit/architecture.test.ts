@@ -55,18 +55,20 @@ describe('长期模块边界', () => {
     expect(result.violations).toEqual([]);
     expect(result.cycles).toEqual([]);
   });
-  it('平台组件不能通过类型或实现导入共享回退控件；纯展示契约可共用', () => {
-    const graph = new Map([
-      [
-        'macos/src/MaterialButton.tsx',
-        [
-          { target: 'shared/src/components/ui/material-button.tsx', typeOnly: true, line: 1 },
-          { target: 'shared/src/platform/controls.ts', typeOnly: true, line: 2 },
-        ],
-      ],
-    ]);
-    expect(boundaryViolations(graph)).toHaveLength(1);
-    expect(boundaryViolations(graph)[0]).toContain('纯展示契约');
+  it('平台不得恢复独立界面实现，哪怕不导入任何模块', () => {
+    for (const platform of ['macos', 'windows']) {
+      const graph = new Map([[`${platform}/src/Control.tsx`, []]]);
+      expect(boundaryViolations(graph)).toHaveLength(1);
+      expect(boundaryViolations(graph)[0]).toContain('shared/src');
+    }
+  });
+  it('Mac仅允许SF Symbols图标适配，不扩大到控件或系统调用', () => {
+    const graph = (target: string) =>
+      new Map([['macos/src/icons.tsx', [{ target, line: 1, typeOnly: false }]]]);
+    expect(boundaryViolations(graph('react'))).toEqual([]);
+    expect(boundaryViolations(graph('macos/src/symbols.json'))).toEqual([]);
+    for (const target of ['electron', 'node:fs', 'shared/src/components/ui/button.tsx'])
+      expect(boundaryViolations(graph(target))).not.toEqual([]);
   });
   it('区分 type-only、重导出、动态 import 和 CommonJS require', () => {
     const edges = dependencies(

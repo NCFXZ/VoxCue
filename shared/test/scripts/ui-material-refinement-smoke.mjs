@@ -46,7 +46,26 @@ const hoverOnly = async (page, button) => {
   const before = await button.boundingBox();
   await button.hover();
   await settle(page);
-  assert.equal(await button.evaluate((e) => e.matches(':hover')), true);
+  assert.equal(
+    await button.evaluate((e) => e.matches(':hover')),
+    true,
+    JSON.stringify(
+      await button.evaluate((e) => {
+        const box = e.getBoundingClientRect();
+        return {
+          label: e.getAttribute('aria-label'),
+          box: box.toJSON(),
+          hovered: [...document.querySelectorAll(':hover')].map(
+            (node) => node.tagName + '.' + node.className,
+          ),
+          hit: document
+            .elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)
+            ?.outerHTML.slice(0, 300),
+          focused: document.hasFocus(),
+        };
+      }),
+    ),
+  );
   assert.notEqual(
     await button.evaluate((e) => getComputedStyle(e).backgroundColor),
     'rgba(0, 0, 0, 0)',
@@ -202,12 +221,8 @@ try {
   }));
   assert.deepEqual(searchStyle, { left: '20px', height: 44 });
   await search.fill('合成');
-  const searchBox = await search.boundingBox();
-  const clearInset = await search.evaluate((e) => parseFloat(getComputedStyle(e).paddingRight) + 6);
-  await page.mouse.click(
-    searchBox.x + searchBox.width - clearInset,
-    searchBox.y + searchBox.height / 2,
-  );
+  const clearBox = await page.getByRole('button', { name: '清除搜索', exact: true }).boundingBox();
+  await page.mouse.click(clearBox.x + clearBox.width / 2, clearBox.y + clearBox.height / 2);
   assert.equal(await search.inputValue(), '');
   await page.locator('.history-row').click();
   await page.locator('.record-transcript-scroll').evaluate((e) => (e.scrollTop = 320));
@@ -315,12 +330,16 @@ try {
       interview: document.documentElement.dataset.interviewTransparency,
       saved: localStorage.getItem('voxcue-frosted-transparency-v2'),
     })),
-    { main: '60', interview: '60', saved: '0' },
+    {
+      main: '100',
+      interview: '100',
+      saved: '0',
+    },
   );
   await Promise.all([floating.waitForEvent('close'), confirm.click()]);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: all ten UI refinements, hover-only controls, dim/no-glow dialogs, search inset/clear, frozen 60% curves, centered font, dark interview, end confirmation and frosted record header; synthetic data only.',
+    'PASS: all ten UI refinements, hover-only controls, dim/no-glow dialogs, search inset/clear, platform transparency presets, centered font, dark interview, end confirmation and frosted record header; synthetic data only.',
   );
 } finally {
   await app

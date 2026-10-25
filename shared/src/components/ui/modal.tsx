@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ReactNode, type KeyboardEventHandler } from 'react';
+import { useEffect, useRef, type ReactNode, type KeyboardEventHandler } from 'react';
 import { headerCoverage } from '../../platform/chromeGeometry';
 import { X, Trash } from '../icons';
 import { Button } from './button';
@@ -42,7 +42,6 @@ export function Modal({
   backdrop?: 'viewport' | 'transparent';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  const [headerCovered, setHeaderCovered] = useState(false);
   useEffect(() => {
     const dialog = ref.current!;
     const previousFocus = document.activeElement as HTMLElement | null;
@@ -65,7 +64,6 @@ export function Modal({
       frame = 0;
       const rect = heading.getBoundingClientRect();
       const opacity = headerCoverage(dialog, rect, '.dialog-scroll > *');
-      setHeaderCovered(opacity >= 1);
       for (const [name, value] of [
         ['--dialog-header-height', rect.height + 'px'],
         ['--dialog-header-opacity', String(opacity)],
@@ -110,9 +108,7 @@ export function Modal({
           size="icon"
           className="dialog-close-button"
           data-autofocus={initialFocus === 'close' ? '' : undefined}
-          data-native-control-style={
-            overlayHeader ? (headerCovered ? 'over-glass' : 'content') : undefined
-          }
+
           aria-label={closeLabel}
           onClick={onClose}
         >

@@ -194,7 +194,7 @@ try {
     .locator('.floating-answer-meta strong')
     .getByText('合成提供商', { exact: true })
     .waitFor();
-  await sendAppearance(floating, '发送面试问题', 32);
+  await sendAppearance(floating, '发送面试问题', 36);
   await floating.locator('.floating-composer').screenshot({});
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([

@@ -1,10 +1,10 @@
 import { useEffect } from 'react';
 import { applyInterviewAppearance } from './interviewAppearance';
-import { frostedProfileAt } from './frostedProfiles';
+import { frostedProfileAt, readMaterialTransparency } from './frostedProfiles';
 
-// Keep the existing 60% material curve without reading or rewriting old preferences.
+// Shared preset only; do not read or rewrite old preferences.
 export function readFrostedTransparency(): number {
-  return 60;
+  return readMaterialTransparency();
 }
 
 export function applyFrostedAppearance() {
@@ -18,6 +18,7 @@ export function applyFrostedAppearance() {
   };
   const root = document.documentElement;
   root.style.removeProperty('--frosted-reading-opacity');
+  root.style.removeProperty('--web-material-min-opacity');
   for (const [name, setting] of Object.entries(properties))
     root.style.setProperty(name, String(setting));
   root.dataset.frostedTransparency = String(value);

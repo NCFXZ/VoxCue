@@ -91,12 +91,11 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
     // horizontally while the panel is still sliding into the window.
     const bounds = answer.getBoundingClientRect();
     const viewport = scroll.getBoundingClientRect();
-    if (bounds.top < viewport.top + 16) scroll.scrollTop += bounds.top - viewport.top - 16;
+    const header = scroll.parentElement?.querySelector(':scope > header');
+    const visibleTop = Math.max(viewport.top, header?.getBoundingClientRect().bottom ?? 0) + 16;
+    if (bounds.top < visibleTop) scroll.scrollTop += bounds.top - visibleTop;
     else if (bounds.bottom > viewport.bottom - 16)
-      scroll.scrollTop += Math.min(
-        bounds.top - viewport.top - 16,
-        bounds.bottom - viewport.bottom + 16,
-      );
+      scroll.scrollTop += Math.min(bounds.top - visibleTop, bounds.bottom - viewport.bottom + 16);
   };
   useEffect(() => {
     if (models.length && record.titleStatus !== 'ready' && record.titleStatus !== 'failed')
@@ -131,7 +130,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             variant="ghost"
             size="icon"
             className="record-back"
-            data-native-control-style="standalone-glass"
+
             onClick={onBack}
             aria-label="返回面试记录"
           >
@@ -141,7 +140,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
         <div className="record-toolbar-actions">
           <Button
             variant="outline"
-            data-native-control-style="standalone-glass"
+
             disabled={exporting}
             onClick={async () => {
               setExporting(true);
@@ -163,7 +162,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
           </Button>
           <Button
             variant="outline"
-            data-native-control-style="standalone-glass"
+
             className={showAnswers ? 'record-panel-toggle is-active' : 'record-panel-toggle'}
             aria-label="AI 回答面板"
             aria-expanded={showAnswers}
@@ -175,7 +174,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
           </Button>
           <ConfirmDeleteButton
             key={record.id}
-            data-native-control-style="standalone-glass"
+
             iconOnly
             target={'面试记录：' + record.title}
             aria-label="删除记录"
@@ -210,7 +209,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     variant="ghost"
                     size="icon"
                     className="action-icon-button"
-                    data-native-reveal-on-hover
+                    data-reveal-on-hover
                     aria-label="重命名标题"
                     onClick={() => {
                       setTitleDraft(record.title);

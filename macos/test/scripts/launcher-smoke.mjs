@@ -18,7 +18,7 @@ assert.equal(
     ['-c', 'Print :LSMinimumSystemVersion', path.resolve('VoxCue.app/Contents/Info.plist')],
     { encoding: 'utf8' },
   ).trim(),
-  '26.0',
+  '14.2',
 );
 const env = { ...process.env, COPILOT_TEST_USER_DATA: output, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;

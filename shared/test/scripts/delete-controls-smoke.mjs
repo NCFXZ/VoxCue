@@ -31,6 +31,8 @@ const settle = (page) =>
 async function observeDeleteMorph(control, trigger) {
   await control.evaluate((button) => {
     const measure = () => ({
+      radius: getComputedStyle(button).borderTopLeftRadius,
+      border: getComputedStyle(button).borderTopColor,
       idle: Number(getComputedStyle(button.querySelector('.confirm-delete-idle')).opacity),
       confirm: Number(getComputedStyle(button.querySelector('.confirm-delete-confirm')).opacity),
     });
@@ -58,7 +60,52 @@ async function observeDeleteMorph(control, trigger) {
   await trigger();
   const frames = await control.page().evaluate(() => globalThis.deleteMorph);
   assert(frames.some(({ idle, confirm }) => idle > 0 && idle < 1 && confirm > 0 && confirm < 1));
-  assert.deepEqual(frames.at(-1), { idle: frames[0].confirm, confirm: frames[0].idle });
+  assert.ok(frames.every((frame) => frame.radius === '999px'));
+  assert.ok(frames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
+  assert.deepEqual(frames.at(-1), {
+    radius: '999px',
+    border: 'rgba(0, 0, 0, 0)',
+    idle: frames[0].confirm,
+    confirm: frames[0].idle,
+  });
+}
+
+async function observeRoundCapMorph(control, trigger) {
+  await control.evaluate((button) => {
+    globalThis.roundCapFrames = new Promise((resolve) => {
+      const frames = [];
+      const start = performance.now();
+      const sample = () => {
+        const box = button.getBoundingClientRect();
+        frames.push({
+          width: box.width,
+          right: box.right,
+          height: box.height,
+          radius: getComputedStyle(button).borderTopLeftRadius,
+        });
+        if (performance.now() - start < 450) requestAnimationFrame(sample);
+        else resolve(frames);
+      };
+      requestAnimationFrame(sample);
+    });
+  });
+  await trigger();
+  const frames = await control.page().evaluate(() => globalThis.roundCapFrames);
+  assert.ok(frames.length > 5);
+  assert.ok(
+    frames.every((frame) => frame.radius === '999px'),
+    'End caps stay circular, never percentage-based ellipses',
+  );
+  assert.ok(frames.every((frame) => Math.abs(frame.right - frames[0].right) < 1));
+  assert.ok(frames.every((frame) => frame.height === frames[0].height));
+  assert.ok(
+    frames.some(
+      (frame) =>
+        frame.width > Math.min(frames[0].width, frames.at(-1).width) + 0.1 &&
+        frame.width < Math.max(frames[0].width, frames.at(-1).width) - 0.1,
+    ),
+    'Shape must interpolate',
+  );
 }
 
 try {
@@ -169,7 +216,9 @@ try {
   const before = await resume.boundingBox();
   const scroll = await panel.locator('.personal-panel-scroll').evaluate((e) => e.scrollTop);
   const handle = await resume.elementHandle();
-  await resume.click();
+  await observeRoundCapMorph(resume, () =>
+    observeDeleteMorph(resume, () => resume.evaluate((node) => node.click())),
+  );
   assert.equal((await saved()).background, '合成简历摘要');
   assert.equal(await page.getByRole('dialog').count(), 0);
   assert.equal(await panel.getByRole('region', { name: '确认删除资料', exact: true }).count(), 0);
@@ -189,10 +238,51 @@ try {
   assert.equal(await confirm.evaluate((e) => getComputedStyle(e).fontSize), '14px');
   await page.screenshot({ animations: 'disabled' });
   await captureRequested(page, 'personal-delete-confirm');
+  // Intrinsic title changes cover capsule-to-capsule resizing without changing real data.
+  await observeRoundCapMorph(confirm, () =>
+    confirm.evaluate((node) => (node.style.fontSize = '16px')),
+  );
+  await observeRoundCapMorph(confirm, () =>
+    confirm.evaluate((node) => (node.style.fontSize = '14px')),
+  );
+  await observeRoundCapMorph(confirm, () =>
+    observeDeleteMorph(confirm, () => confirm.press('Escape')),
+  );
+  await resume.click();
   await resume.waitFor({ state: 'visible', timeout: 5000 });
   assert.equal((await saved()).background, '合成简历摘要');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await resume.evaluate((node) => node.click());
+  assert.equal(
+    await confirm.evaluate((node) =>
+      node.getAnimations({ subtree: true }).some((animation) => animation.playState === 'running'),
+    ),
+    false,
+  );
+  await confirm.press('Escape');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await resume.evaluate((node) => node.click());
+  await page.waitForFunction(() => {
+    const button = document.querySelector('[aria-label="确认删除：简历摘要"]');
+    return button
+      .getAnimations()
+      .some((animation) => animation.currentTime > 90 && animation.currentTime < 230);
+  });
+  await confirm.press('Escape');
+  await resume.evaluate((node) => node.click());
+  await settle(page);
+  assert.equal(
+    await confirm.evaluate(
+      (node) => getComputedStyle(node.querySelector('.confirm-delete-confirm')).opacity,
+    ),
+    '1',
+  );
+  await confirm.press('Escape');
+  await settle(page);
+  assert.equal((await resume.boundingBox()).width, before.width);
+  assert.equal((await saved()).background, '合成简历摘要');
   checks.push(
-    'same button, position and scroll; smooth width, red confirmation and three-second cancellation',
+    'resume uses original crossfade with circular end caps throughout resizing; rapid interruption/re-arm, reduced motion, same position and three-second cancellation',
   );
   await resume.click();
   await confirm.press('Escape');
@@ -298,6 +388,16 @@ try {
   );
   await page.locator('.sidebar').screenshot({ animations: 'disabled' });
   await captureRequested(page, 'sidebar-delete-confirm');
+  const chatDelete = second('对话：未发送待删除对话');
+  assert.equal(
+    await chatDelete.evaluate((node) => getComputedStyle(node).borderTopColor),
+    'rgba(0, 0, 0, 0)',
+  );
+  await chatDelete.hover();
+  assert.equal(
+    await chatDelete.evaluate((node) => getComputedStyle(node).borderTopColor),
+    'rgba(0, 0, 0, 0)',
+  );
   await second('对话：未发送待删除对话').press('Escape');
   await row.getByRole('button', { name: '删除对话：未发送待删除对话', exact: true }).click();
   await second('对话：未发送待删除对话').click();

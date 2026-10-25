@@ -1,18 +1,16 @@
 # VoxCue
 
-当前跨平台 UI 以[共用布局与平台控件](shared/docs/PLATFORM_UI.md)为准：布局、业务与展示契约共用，Mac AppKit/Liquid Glass 实现单独维护。
+当前共享版本源为 **0.5.10**。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
-当前源码支持 ChatGPT 和 GitHub Copilot 登录。Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权，凭据由运行时系统凭据库保护；Windows 依赖与打包需按[接续说明](shared/docs/WINDOWS_0.5.9_HANDOFF.md)在本机同步。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；打包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
+Mac **0.5.10** 已正式发布：[安装 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.10/VoxCue-0.5.10-arm64.dmg)、[签名更新 ZIP](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.10/VoxCue-0.5.10-arm64.zip)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.10)。已发布的 [0.5.9](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.9) 安装包保持原样，其中旧 Mac 包仍要求 macOS 26+；Windows 本机配置、依赖和界面验收继续由 Windows 接续。当前应用按本平台完整资产的最高版本检查更新，GitHub Latest 保持 v0.5.9。
 
-> 测试结果零保留：结果仅在终端/内存显示。已改造入口的必要工作文件使用系统临时目录并清理，不保存报告、日志或 profile；截图仅在用户明确要求时交付于聊天可视化目录。旧硬件/安装脚本须先核对。Mac 117 个旧占用目录和 Windows 349 个此前跳过目录不重试；本轮Mac接续中windows/严格只读。入口与边界见[测试说明](shared/test/README.md)。
+当前源码支持 ChatGPT 和 GitHub Copilot 登录。ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权。凭据由现有系统保护接口保存；Local RAG 固定为 local-v7-current-source-first，模型、索引和依赖保持。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；安装包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
 
-面向 Windows x64/macOS Apple Silicon（arm64）共同开发的桌面面试准备应用，发行目标为 Windows x64 和 macOS Apple Silicon。ChatGPT 聊天、个人信息与简历、本地知识库检索与 RAG、本地面试语音识别、独立面试悬浮窗口和面试记录；Mac 具有原生音频、系统窗口和独立安装包构建，采用免费签名更新方案，不以 Intel Mac 为支持目标。
+0.5.10 收拢共用界面的毛玻璃、固定标题、滚动渐出和紧凑面试输入区，统一圆形/胶囊切换动画并修复收起时的椭圆；收起侧栏使用正方形底板。面试截图按钮显示文字与平台快捷键，有图片时改为数量。截图归档、原图查看/保存及资料确认流程保持，完整差异和60项验收见[0.5.10 Windows 交接](shared/docs/WINDOWS_0.5.10_HANDOFF.md)，可直接使用[Windows逐条查验提示词](shared/docs/WINDOWS_0.5.10_CODEX_PROMPT.md)；历史80项清单仍见[0.5.9交接](shared/docs/WINDOWS_0.5.9_HANDOFF.md)。
 
-当前共享版本源、根和平台配置为 **0.5.9**。本版下载：[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-Setup-0.5.9-x64.exe)、[Mac 安装 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-0.5.9-arm64.dmg)、[Mac 签名更新 ZIP](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.9/VoxCue-0.5.9-arm64.zip)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.9)。应用按本平台完整资产的最高版本更新，本次不调整 GitHub Latest。ChatGPT 使用一次官方托管登录提供聊天与额度，旧授权可能需要正常重新登录一次，已有资料和记录保留；Copilot 接回固定官方 SDK。Local RAG 固定为 `local-v7-current-source-first`，现有模型和索引保留。软件强调色跟随系统，Mac 使用官方 AppKit 进度条及菜单；额度、启动页、账户卡片和输入区的共用修订见 [0.5.9 Windows 接续](shared/docs/WINDOWS_0.5.9_HANDOFF.md)。Mac 仅支持 macOS 26+ Liquid Glass；Windows 保留 shared 胶囊控件和网页材质，并修正记录转录滚动条覆盖顶部操作的问题。Windows 包沿用既有未配置 Authenticode 的方式，模型仍单独下载。测试入口与实际边界见[测试说明](shared/test/README.md)；下文旧版本说明保留为历史，不代表本轮发行状态。
+> 功能和UI验证使用隔离合成账户、资料、捕获及固定公开临时模型/音频，GUI串行，退出清理；不访问真实账户/资料或采样硬件。测试产物不进入源码或安装包。Windows视觉/DPI须其本机验收，Mac结果不能代替。历史117个Mac占用目录和349个Windows跳过目录继续保护。入口和边界见[测试说明](shared/test/README.md)。
 
-本版新增面试已发送截图归档：缩略图位于提问气泡内，面试记录可查看原图并通过系统对话框保存。查看器支持左右键翻页、捏合缩放、两指平移及拖拽；保存仅在记录中提供。
-
-Windows开发者请按[0.5.9逐项交接](shared/docs/WINDOWS_0.5.9_HANDOFF.md)的80项检查与改动清单接续，任务可直接复制[Windows Codex prompt](shared/docs/WINDOWS_0.5.9_CODEX_PROMPT.md)。两端界面分别在本机验收，不能以另一平台的结果替代。
+面试显式发送的图片在提问气泡内保留缩略图，原图及缩略图单独保存在本机，记录仅存图片ID。查看器支持左右键翻页、捏合缩放、两指平移及拖拽；仅记录页提供系统保存对话框，面试中查看不压暗背景。未发送图片继续仅在内存，失败/停止保留原图供重试，旧记录兼容。
 
 已发布 0.3.0 增加面试字号调整与预览、全聊天区域文件拖放、受控本地模型删除，并改进登录布局和权限提示。该发行的两阶段用量优化包括明确回应自动过滤、重复历史原文引用、较早无关 AI 建议选择和精确检索缓存。
 
@@ -53,7 +51,7 @@ corepack pnpm build
 corepack pnpm start
 ```
 
-Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。运行需要 Apple Silicon、macOS 14.2+；原生玻璃绑定的开发编译需要提供NSGlassEffectView的macOS 26+ SDK，部署最低版本仍为14.2，旧系统采用共享回退；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
+Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。运行需要 Apple Silicon、macOS 14.2+；使用Xcode命令行工具构建必要系统助手，不再依赖macOS 26的界面SDK；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
 Windows x64 的 [v0.5.6 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.6/VoxCue-Setup-0.5.6-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包未配置 Authenticode 签名；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项保留于 windows/release/0.5.6。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
@@ -66,7 +64,7 @@ Mac 开发宿主、启动器与正式应用复用固定本地自签名证书。0
 ```text
 AGENTS.md / PROGRESS.md / README.md / package.json / pnpm-workspace.yaml
 windows/  专属源码、原生助手、测试源码、依赖、锁文件、构建和发行
-macos/    AppKit 控件/材质、SF Symbols、原生承载、Core Audio、arm64 依赖和构建
+macos/    Core Audio、权限/凭据/窗口/更新系统集成、arm64 依赖和构建
 shared/   共用布局/业务/展示契约/网页回退、测试、PNG/Logo 原件及文档
 ```
 
@@ -87,7 +85,7 @@ Windows 清单 1–10 已接入当前共享界面及本机展示适配器，下�
 - 共用设置 → 常规提供 0–100 毛玻璃透明度连续滑杆，默认 50，0 关闭。主界面按全范围调节；面试界面单独提供背景透明度滑杆（默认20），独立保存，不随毛玻璃滑杆变化，沿用背景60/阅读30的旧分段曲线，预览与实窗一致。浮窗设置使用不透明面板和层级阴影，外围保持清晰，外部首次点击仅关闭设置。旧四档只读映射，文字无光晕/描边；辅助功能使用不透明表面。Windows 11 22H2+ 沿用 Acrylic，旧系统保存参数并回退，不改变整个窗口的 alpha。
 - 浅色/深色/跟随系统的网页与本应用原生主题通过各平台适配器联动，两端均不修改系统全局主题或原生材质种类。
 - 共用设置 → 面试设置显示屏幕权限和自动窗口状态。Mac 沿用独立申请流程；Windows 当前捕获方式无需单独申请，实际捕获仍可能失败。查询不截图或录屏，不自动截取图像，纯语音可继续。Windows 面试使用 normal 置顶、透明留白穿透与任务栏入口隐藏/结束恢复，不改变用户固定项。
-- Mac 界面操作图标统一采用 Apple SF Symbols，资源与工具留在 macos，原有布局、主题和品牌 Logo 保持；Windows 继续使用 Fluent UI。
+- Mac/Windows共用Fluent UI操作图标、尺寸和无障碍语义，应用及服务品牌Logo保持。
 - 面试输入区的截图按钮仅截取并暂存图像，在输入框显示可移除的缩略图与数量/5，最多五张；点击发送才提交文字与图像，空文字可只发送截图。自动回答只发送文字，不消耗待发送截图；所选模型须支持图片。0.5.9起，显式发送的图片在对应问题下显示缩略图，并将原图与缩略图单独保存在本机，面试记录仅存图片ID。点击缩略图打开“截图”，适应窗口显示原图、两侧切换多图，并通过系统对话框保存图片；删除记录清理不再引用的图片。未发送的草稿仍仅在内存，结束/关闭/重载清空。请求失败或停止保留原图供重试，不重新捕获；保存失败则保留草稿并阻止模型请求。旧记录保持兼容，此前未保存的截图无法补回。失败与停止的重试入口位于对应回答下方，并随回答滚动。个人信息中简历、JD、自定义指令与技能的正文/编辑文本为12px，标题14px。主界面左上角Logo为24px，VoxCue字样与18px页面标题一致，两平台应用图标使用用户最新提供的Logo，Mac保留原图圆角与透明边缘。
 - 当前工作区面试回答默认按正常语速口述约60–90秒组织，当前问题或已确认自定义指令可覆盖时长/篇幅要求；代码题使用带语言、换行和缩进的代码框，支持流式显示与复制。回答上方显示对应问题气泡。全软件移除悬停说明，保留无障碍名称。浮窗转写/回答宽度约7:10，调整尺寸时各自宽高比保持，字号、按钮和工具栏大小固定，放大显示更多内容；缩放全程保持上方工具栏位置，下方面板围绕它扩缩。隐藏转写会收窄窗口并保留回答面板尺寸；左右底角使用互为镜像的缩放图标。未开启截图保护显示“此窗口未隐藏”，提示位于面板下方预留的透明区域，出现/消失不挤压或移动面板。转写异常恢复后清除。聊天/面试共用新版思考展示，初始为“正在思考”，公开思考与活动在正文分割线上方；实际本地检索与网页活动分别标识。开场确认中知识库独占一行，系统音频/麦克风、回答模型/思考强度分别成对并排。这些修改已包含在公开v0.2.0安装包中。
 - v0.1.1 修复错误响应等待不结束、损坏记录空白界面、聊天快照字段覆盖动作、聊天 IPC frame 校验缺口及重载后旧请求阻塞。读取不删除或迁移原数据；现用回归入口见 [测试说明](shared/test/README.md)。
@@ -108,7 +106,7 @@ Windows 清单 1–10 已接入当前共享界面及本机展示适配器，下�
 - 面试回答要求第一人称自然口语、逻辑清楚且专业，只给可直接念出的正文；不加意图分析、作答建议、标题、整段引号或资料编号，肯定/致谢/收尾只作简短直接回应。不会因此编造个人经历；真实模型输出质量仍需实际使用检验。
 - 面试回答结合本场近期问题、追问和面试者实际回答；AI 建议单独标记，不视作你已经说过的话。暂停/重载保留本场上下文，结束清空。短暂音频间断会提示并分段恢复，不完整片段不自动用于回答；持续中断仍停止报错。
 - 记录列表仅保留标题搜索；详情可重命名标题，手动标题不会被自动生成或迟到归档覆盖。转录时间线和可展开回答栏支持双向定位、后台 AI 标题、原生 TXT 导出和确认删除。窄窗辅助栏覆盖显示；旧模拟记录仅从 UI 过滤，存储保留。
-- 浅色/深色/系统外观可以设置，强调色直接跟随系统，不再提供软件主题色选择；自动同步主窗口、登录和浮窗。标题18px、分区标题15px、正文及控件14px、辅助说明12px；Windows共享毛玻璃和Fluent UI图标，Mac使用AppKit/Liquid Glass/SF Symbols，应用Logo与服务图标独立。
+- 浅色/深色/系统外观可以设置，强调色直接跟随系统，不再提供软件主题色选择；自动同步主窗口、登录和浮窗。标题18px、分区标题15px、正文及控件14px、辅助说明12px；两端共用毛玻璃和Fluent UI图标，应用Logo与服务图标独立。
 
 新方案采用 LanceDB + 本地 E5 q8 CPU，仅使用 Hybrid Search 与 Local RAG；自定义知识库 Function Calling 及设置中的知识库标签页已移除，主侧栏知识库管理保留。准备聊天和已确认面试问题仅在用户选择的知识库检索相关证据，未选择则跳过检索，必要片段随既有请求发送至当前所选服务（OpenAI 或 GitHub Copilot 及其实际模型提供商）；不会上传整库。主动发送的聊天附件仍随请求发送。历史原件需手动索引，旧派生数据不迁移。真实账户生成、独立人工语义准确率及最终回答质量尚未验收。
 

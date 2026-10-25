@@ -13,6 +13,9 @@
   --line-body: 1.75;
   --line-control: 1.4;
   --line-secondary: 1.6;
+  --button-morph-duration: 220ms;
+  --button-morph-easing: ease;
+  --button-morph-shift: 3px;
   font-size: var(--type-body);
   font-weight: 400;
   line-height: var(--line-body);
@@ -243,7 +246,8 @@ p {
   justify-content: center;
   gap: 7px;
   white-space: nowrap;
-  border-radius: var(--radius-control);
+  border-radius: 999px;
+  corner-shape: round;
   font-weight: 500;
   font-size: var(--type-body);
   line-height: var(--line-control);
@@ -273,12 +277,12 @@ p {
   background: transparent;
   color: var(--muted);
 }
-.ui-button[data-native-reveal-on-hover]:not(:hover):not(:focus-visible) {
+.ui-button[data-reveal-on-hover]:not(:hover):not(:focus-visible) {
   background: transparent;
   border-color: transparent;
   box-shadow: none;
 }
-.ui-button[data-native-reveal-on-hover]:focus-visible:not(:disabled) {
+.ui-button[data-reveal-on-hover]:focus-visible:not(:disabled) {
   background: var(--hover);
 }
 .button-destructive {
@@ -442,29 +446,91 @@ p {
   background: transparent;
 }
 .sidebar-update.ui-button {
+  position: relative;
   border-radius: 999px;
   corner-shape: round;
   overflow: hidden;
   white-space: nowrap;
   interpolate-size: allow-keywords;
   transition:
-    width 220ms ease,
-    padding-inline 220ms ease,
-    background-color 140ms ease;
+    width var(--button-morph-duration) var(--button-morph-easing),
+    background-color var(--button-morph-duration) var(--button-morph-easing),
+    color var(--button-morph-duration) var(--button-morph-easing);
 }
-.sidebar-update-label {
-  display: none;
+.sidebar-update-expandable.ui-button,
+.sidebar-update.download-button.ui-button {
+  padding-inline: 12px;
 }
 .sidebar:not(.collapsed)
   .sidebar-update-expandable.ui-button:is(:hover, :focus-visible):not(:disabled),
 .sidebar:not(.collapsed) .sidebar-update.download-button.is-cancellable:is(:hover, :focus-visible) {
   width: max-content;
-  padding-inline: 12px;
 }
-.sidebar:not(.collapsed)
-  .sidebar-update-expandable:is(:hover, :focus-visible):not(:disabled)
-  .sidebar-update-label {
-  display: inline;
+.sidebar-update-idle {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin-left: -8.5px;
+  margin-top: -8.5px;
+}
+:root
+  .sidebar
+  .sidebar-update.ui-button
+  :is(
+    .sidebar-update-idle,
+    .sidebar-update-expanded,
+    .download-button-progress,
+    .download-button-cancel
+  ) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: max-content;
+  justify-self: center;
+  gap: 7px;
+  pointer-events: none;
+  transition:
+    opacity var(--button-morph-duration) var(--button-morph-easing),
+    transform var(--button-morph-duration) var(--button-morph-easing),
+    visibility 0s linear var(--button-morph-duration);
+}
+:root .sidebar .sidebar-update.ui-button :is(.sidebar-update-idle, .download-button-progress) {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition-delay: 0s;
+}
+:root .sidebar .sidebar-update.ui-button :is(.sidebar-update-expanded, .download-button-cancel) {
+  opacity: 0;
+  transform: translateY(var(--button-morph-shift));
+  visibility: hidden;
+}
+:root
+  .sidebar:not(.collapsed)
+  .sidebar-update-expandable.ui-button:is(:hover, :focus-visible):not(:disabled)
+  .sidebar-update-idle,
+:root
+  .sidebar
+  .sidebar-update.download-button.is-cancellable:is(:hover, :focus-visible)
+  .download-button-progress {
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--button-morph-shift)));
+  visibility: hidden;
+  transition-delay: 0s, 0s, var(--button-morph-duration);
+}
+:root
+  .sidebar:not(.collapsed)
+  .sidebar-update-expandable.ui-button:is(:hover, :focus-visible):not(:disabled)
+  .sidebar-update-expanded,
+:root
+  .sidebar
+  .sidebar-update.download-button.is-cancellable:is(:hover, :focus-visible)
+  .download-button-cancel {
+  opacity: 1;
+  transform: translateY(0);
+  visibility: visible;
+  transition-delay: 0s;
 }
 .collapsed .sidebar-update .download-button-cancel-label {
   display: none;
@@ -482,7 +548,16 @@ p {
   min-width: 0;
 }
 @media (prefers-reduced-motion: reduce) {
-  .sidebar-update.ui-button {
+  .sidebar-update.ui-button,
+  :root
+    .sidebar
+    .sidebar-update.ui-button
+    :is(
+      .sidebar-update-idle,
+      .sidebar-update-expanded,
+      .download-button-progress,
+      .download-button-cancel
+    ) {
     transition: none;
   }
 }
@@ -565,19 +640,21 @@ p {
 .collapsed .sidebar-heading {
   justify-content: center;
 }
-.collapsed .nav-item {
-  justify-content: center;
-  padding: 12px;
-}
+.collapsed .nav-item,
 .collapsed .user-button {
+  width: 44px;
+  height: 44px;
+  flex-shrink: 0;
+  margin-inline: auto;
   justify-content: center;
-  padding: 8px 0;
+  padding: 0;
 }
 .dropdown-content {
   background: var(--surface);
   border: 1px solid var(--border);
   padding: 6px;
-  border-radius: var(--radius-control);
+  border-radius: 20px;
+  corner-shape: superellipse(2);
   min-width: 198px;
   box-shadow: var(--shadow-popup);
   z-index: 20;
@@ -593,7 +670,8 @@ p {
   font-size: var(--type-body);
   padding: 7px 10px;
   min-height: 32px;
-  border-radius: var(--radius-control);
+  border-radius: 999px;
+  corner-shape: round;
   outline: none;
 }
 .dropdown-content .dropdown-item[data-highlighted]:not([data-disabled]) {
@@ -1136,7 +1214,6 @@ p {
 }
 .app-dialog::backdrop {
   background: #18232840;
-  backdrop-filter: blur(8px);
 }
 .app-dialog[data-backdrop='transparent']::backdrop {
   background: transparent;
@@ -1233,7 +1310,6 @@ p {
 }
 .destructive-dialog::backdrop {
   background: rgba(12, 18, 22, 0.4);
-  backdrop-filter: blur(4px);
 }
 .dialog-heading .ui-button {
   font-size: var(--type-secondary);
@@ -1602,6 +1678,27 @@ p {
 .floating-collapse {
   -webkit-app-region: no-drag;
 }
+.floating-collapse-chevron {
+  display: inline-flex;
+  transform: rotate(180deg);
+  transition: transform 220ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.is-collapsed .floating-collapse-chevron,
+[data-panel-motion='collapse'] .floating-collapse-chevron {
+  transform: rotate(0deg);
+}
+[data-panel-motion='expand'] .floating-collapse-chevron {
+  transform: rotate(180deg);
+}
+.floating-shell[data-panel-motion] .floating-resize {
+  pointer-events: none;
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .floating-collapse-chevron {
+    transition: none;
+  }
+}
 .floating-shell [hidden] {
   display: none;
 }
@@ -1641,7 +1738,7 @@ p {
   overflow: hidden;
   border: 1px solid rgba(210, 217, 220, 0.7);
   background: rgba(250, 250, 252, 0.9);
-  backdrop-filter: blur(24px);
+  backdrop-filter: none;
   border-radius: 34px;
   box-shadow: var(--shadow-raised);
 }
@@ -1869,7 +1966,8 @@ p {
   gap: 8px;
 }
 .floating-screenshot-button.ui-button {
-  width: 32px;
+  --screenshot-shortcut-width: 44px;
+  width: calc(54px + 2em + var(--screenshot-shortcut-width));
   height: 32px;
   min-height: 32px;
   padding: 0;
@@ -1877,11 +1975,27 @@ p {
   overflow: hidden;
   flex-shrink: 0;
   transition: width 180ms ease;
-}
-.floating-screenshot-button.ui-button[data-expanded='true'] {
-  width: 76px;
   border-radius: 999px;
   corner-shape: round;
+}
+.floating-screenshot-button[data-shortcut-platform='macos'] {
+  --screenshot-shortcut-width: 24px;
+}
+.floating-screenshot-button.ui-button[data-expanded='true'] {
+  width: calc(82px + 2em);
+}
+.floating-screenshot-text {
+  flex-shrink: 0;
+  margin-left: 6px;
+  white-space: nowrap;
+}
+.floating-screenshot-shortcut {
+  width: var(--screenshot-shortcut-width);
+  margin-left: 6px;
+  font: inherit;
+  font-size: var(--type-secondary);
+  white-space: nowrap;
+  opacity: 0.72;
 }
 .floating-screenshot-button.ui-button:not(:disabled) {
   color: var(--foreground);
@@ -1929,8 +2043,8 @@ p {
   min-width: 20px;
   min-height: 20px;
   position: absolute;
-  top: 2px;
-  right: 2px;
+  top: 4px;
+  right: 4px;
   width: 20px;
   height: 20px;
   padding: 0;
@@ -3096,7 +3210,8 @@ p {
   background: var(--soft);
   color: var(--foreground);
   font: inherit;
-  border-radius: var(--radius-control);
+  border-radius: 999px;
+  corner-shape: round;
   height: var(--control-height);
   max-width: 100%;
   padding: 0 12px;
@@ -3512,7 +3627,8 @@ p {
   height: var(--control-height);
   min-height: var(--control-height);
   padding: 0 10px;
-  border-radius: var(--radius-control);
+  border-radius: 999px;
+  corner-shape: round;
   font-size: var(--type-body);
   justify-content: space-between;
 }
@@ -3789,7 +3905,7 @@ details[open] > summary > .disclosure-chevron {
   width: max-content;
   height: 48px;
   max-width: 100%;
-  padding: 6px 18px;
+  padding: 7px;
   gap: 8px;
   -webkit-app-region: no-drag;
 }
@@ -3803,10 +3919,10 @@ details[open] > summary > .disclosure-chevron {
   flex: 0 0 auto;
   justify-content: flex-start;
   gap: 7px;
-  height: 34px;
+  height: 32px;
 }
-.floating-brand:hover {
-  color: var(--accent);
+.floating-brand:is(:hover, :focus-visible) {
+  background: var(--hover);
 }
 .floating-controls {
   gap: 5px;
@@ -3840,12 +3956,14 @@ details[open] > summary > .disclosure-chevron {
   padding: 12px 16px;
 }
 .floating-end.ui-button {
+  position: relative;
   width: 32px;
   overflow: hidden;
   gap: 0;
   transition:
-    width 220ms ease,
-    background-color 220ms ease;
+    width var(--button-morph-duration) var(--button-morph-easing),
+    background-color var(--button-morph-duration) var(--button-morph-easing),
+    color var(--button-morph-duration) var(--button-morph-easing);
 }
 .floating-end.ui-button.is-confirming {
   width: 104px;
@@ -3873,8 +3991,8 @@ details[open] > summary > .disclosure-chevron {
   border-radius: 50%;
   corner-shape: round;
   margin-left: auto;
-  width: 32px;
-  height: 32px;
+  width: 36px;
+  height: 36px;
 }
 .floating-toggle.ui-button {
   border: 1px solid var(--border);
@@ -3994,7 +4112,6 @@ details[open] > summary > .disclosure-chevron {
 }
 .floating-answer .floating-scroll {
   padding: 18px 18px 36px;
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
 }
 .floating-answer-item + .floating-answer-item {
   border-top: 0;
@@ -4037,10 +4154,12 @@ details[open] > summary > .disclosure-chevron {
   position: relative;
   flex-shrink: 0;
   margin: 0 8px 8px;
-  padding: 15px 16px 10px;
+  padding: 10px 16px 8px;
 }
 .floating-answer .floating-composer textarea {
-  min-height: 56px;
+  display: block;
+  padding: 0;
+  min-height: 1lh;
   font-size: var(--type-body);
 }
 
@@ -4526,7 +4645,8 @@ details[open] > summary > .disclosure-chevron {
   min-width: 0;
   max-width: 100%;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: 999px;
+  corner-shape: round;
   background: var(--surface);
   color: var(--foreground);
   padding: 0 10px;
@@ -4548,7 +4668,8 @@ details[open] > summary > .disclosure-chevron {
   background: var(--hover);
 }
 .choice-trigger.settings-choice {
-  border-radius: var(--radius-control);
+  border-radius: 999px;
+  corner-shape: round;
   background: var(--soft);
 }
 .choice-menu {
@@ -4699,8 +4820,7 @@ details[open] > summary > .disclosure-chevron {
   background: var(--surface);
   box-shadow: var(--shadow-raised);
 }
-.chat-composer > .follow-latest,
-.floating-composer > .follow-latest {
+.chat-composer > .follow-latest {
   position: absolute;
   z-index: 2;
   left: 50%;
@@ -4835,6 +4955,32 @@ details[open] > summary > .disclosure-chevron {
   padding: 0 20px;
   font: inherit;
   line-height: var(--line-control);
+}
+.history-search-label {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 160px;
+}
+.history-search-label input {
+  width: 100%;
+  min-width: 0;
+  padding-right: 44px;
+}
+.history-search-label input::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+}
+.history-search-clear.ui-button {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  color: var(--muted);
+  padding: 0;
 }
 .history-filters > span {
   flex-basis: 100%;
@@ -5022,15 +5168,6 @@ details[open] > summary > .disclosure-chevron {
 }
 .audio-device-editor .choice-trigger {
   width: 100%;
-}
-.interview-submission-status {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--muted);
-  font-size: 12px;
-  padding: 0 3px;
 }
 .floating-composer-options {
   min-width: 0;
@@ -5411,6 +5548,7 @@ details[open] > summary > .disclosure-chevron {
 .skill-update-prompt > div {
   display: flex;
   flex-wrap: wrap;
+  justify-content: center;
   gap: 6px;
   margin-top: 10px;
 }
@@ -5574,9 +5712,6 @@ h4,
 .interview-preview-scene.dark {
   --frosted-panel-tint: 29 35 39;
   --frosted-panel-opacity: var(--frosted-panel-dark, 0.82);
-  --frosted-chrome-tint: 34 41 45;
-  --frosted-chrome-opacity: var(--frosted-chrome-dark, 0.88);
-  --frosted-reading-opacity: var(--frosted-reading-dark, 0.68);
   background:
     radial-gradient(circle at 12% 18%, #416d7b 0 18%, transparent 18.5%),
     linear-gradient(135deg, #476b60 0 45%, #435c7a 45% 76%, #685777 76%);
@@ -5766,13 +5901,15 @@ small {
   border-radius: 999px;
   corner-shape: round;
   transition:
-    width 220ms ease,
-    padding 220ms ease,
-    background-color 220ms ease,
-    color 220ms ease;
+    width var(--button-morph-duration) var(--button-morph-easing),
+    padding var(--button-morph-duration) var(--button-morph-easing),
+    background-color var(--button-morph-duration) var(--button-morph-easing),
+    color var(--button-morph-duration) var(--button-morph-easing);
 }
 .confirm-delete-idle,
-.confirm-delete-confirm {
+.confirm-delete-confirm,
+.button-morph-idle,
+.button-morph-expanded {
   white-space: nowrap;
   display: inline-flex;
   align-items: center;
@@ -5781,26 +5918,30 @@ small {
   flex-shrink: 0;
   pointer-events: none;
   transition:
-    opacity 220ms ease,
-    transform 220ms ease;
+    opacity var(--button-morph-duration) var(--button-morph-easing),
+    transform var(--button-morph-duration) var(--button-morph-easing);
 }
-.confirm-delete-idle {
+.confirm-delete-idle,
+.button-morph-idle {
   opacity: 1;
   transform: translateY(0);
 }
-.confirm-delete-confirm {
+.confirm-delete-confirm,
+.button-morph-expanded {
   position: absolute;
   left: 50%;
   margin-inline-start: -1px;
   top: 50%;
   opacity: 0;
-  transform: translate(-50%, calc(-50% + 3px));
+  transform: translate(-50%, calc(-50% + var(--button-morph-shift)));
 }
-.confirm-delete.is-confirming .confirm-delete-idle {
+.confirm-delete.is-confirming .confirm-delete-idle,
+.floating-end.is-confirming .button-morph-idle {
   opacity: 0;
-  transform: translateY(-3px);
+  transform: translateY(calc(-1 * var(--button-morph-shift)));
 }
-.confirm-delete.is-confirming .confirm-delete-confirm {
+.confirm-delete.is-confirming .confirm-delete-confirm,
+.floating-end.is-confirming .button-morph-expanded {
   opacity: 1;
   transform: translate(-50%, -50%);
 }
@@ -5842,8 +5983,11 @@ small {
 }
 @media (prefers-reduced-motion: reduce) {
   .confirm-delete.ui-button,
+  .floating-end.ui-button,
   .confirm-delete-idle,
-  .confirm-delete-confirm {
+  .confirm-delete-confirm,
+  .button-morph-idle,
+  .button-morph-expanded {
     transition: none;
   }
 }
@@ -6035,7 +6179,7 @@ small {
 .confirm-delete.is-confirming.ui-button:hover:not(:disabled) {
   color: var(--danger);
   background: var(--hover);
-  border-color: var(--border);
+  border-color: transparent;
 }
 .choice-trigger:disabled {
   opacity: 0.5;
@@ -6047,9 +6191,6 @@ small {
   --frosted-opacity: var(--frosted-opacity-light, 0.5);
   --frosted-panel-tint: 250 250 252;
   --frosted-panel-opacity: var(--frosted-panel-light, 0.76);
-  --frosted-chrome-tint: 248 249 250;
-  --frosted-chrome-opacity: var(--frosted-chrome-light, 0.86);
-  --frosted-reading-opacity: var(--frosted-reading-light, 0.62);
   --sidebar: rgb(var(--frosted-tint) / var(--frosted-opacity));
 }
 :root.frosted-ui.dark {
@@ -6057,9 +6198,6 @@ small {
   --frosted-opacity: var(--frosted-opacity-dark, 0.64);
   --frosted-panel-tint: 29 35 39;
   --frosted-panel-opacity: var(--frosted-panel-dark, 0.82);
-  --frosted-chrome-tint: 34 41 45;
-  --frosted-chrome-opacity: var(--frosted-chrome-dark, 0.88);
-  --frosted-reading-opacity: var(--frosted-reading-dark, 0.68);
 }
 :root.frosted-ui[data-frosted-transparency='0'] {
   --sidebar: var(--soft);
@@ -6078,25 +6216,8 @@ small {
 }
 .frosted-ui .floating-panel {
   background: rgb(var(--frosted-panel-tint) / var(--frosted-panel-opacity));
-  -webkit-backdrop-filter: var(--frosted-panel-filter, blur(24px));
-  backdrop-filter: var(--frosted-panel-filter, blur(24px));
-}
-.frosted-ui .floating-toolbar {
-  background: rgb(var(--frosted-chrome-tint) / var(--frosted-chrome-opacity));
-  -webkit-backdrop-filter: var(--frosted-panel-filter, blur(24px));
-  backdrop-filter: var(--frosted-panel-filter, blur(24px));
-}
-.frosted-ui :is(.floating-shell, .interview-preview-shell) :is(.answer-bubble, .floating-composer),
-.frosted-ui .floating-panel .transcript-item p {
-  background: rgb(var(--frosted-panel-tint) / var(--frosted-reading-opacity, 0.92));
-}
-.frosted-ui .floating-panel .transcript-item.interviewee p,
-.frosted-ui .floating-question {
-  background: color-mix(
-    in srgb,
-    var(--selected) 8%,
-    rgb(var(--frosted-panel-tint) / var(--frosted-reading-opacity, 0.92))
-  );
+  -webkit-backdrop-filter: none;
+  backdrop-filter: none;
 }
 .frosted-ui .floating-shell.is-resizing .floating-panel {
   -webkit-backdrop-filter: none;
@@ -6279,11 +6400,6 @@ small {
 :root.desktop-ui .dialog-close-button:focus-visible {
   background: var(--hover);
   color: var(--foreground);
-}
-
-.native-window-controls,
-body:has(.native-window-controls) {
-  font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
 }
 
 /* Use the component's intended size on both platforms, with no extra font-based

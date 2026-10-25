@@ -89,6 +89,8 @@ const aligned = async (page) => {
   await page.locator('.sidebar-update').evaluate(async (element) => {
     await new Promise(requestAnimationFrame);
     for (;;) {
+      if (getComputedStyle(element).borderTopLeftRadius !== '999px')
+        throw new Error('Update action must retain round end caps while shrinking');
       element.getBoundingClientRect();
       const animations = element
         .getAnimations()
@@ -119,6 +121,45 @@ const aligned = async (page) => {
   assert.equal(geometry.width, 36);
   assert.equal(geometry.height, 36);
 };
+const morph = async (button, idleSelector, expandedSelector, trigger, expanded) => {
+  await button.evaluate(
+    (element, selectors) => {
+      globalThis.updateMorphFrames = new Promise((resolve) => {
+        const frames = [];
+        const start = performance.now();
+        const sample = () => {
+          const style = getComputedStyle(element);
+          frames.push({
+            width: element.getBoundingClientRect().width,
+            radius: style.borderTopLeftRadius,
+            border: style.borderTopColor,
+            idle: Number(getComputedStyle(element.querySelector(selectors[0])).opacity),
+            expanded: Number(getComputedStyle(element.querySelector(selectors[1])).opacity),
+          });
+          if (performance.now() - start < 450) requestAnimationFrame(sample);
+          else resolve(frames);
+        };
+        sample();
+      });
+    },
+    [idleSelector, expandedSelector],
+  );
+  await trigger();
+  const frames = await button.page().evaluate(() => globalThis.updateMorphFrames);
+  assert.ok(frames.every((frame) => frame.radius === '999px'));
+  assert.ok(frames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
+  assert.ok(
+    frames.some(
+      (frame) => frame.idle > 0 && frame.idle < 1 && frame.expanded > 0 && frame.expanded < 1,
+    ),
+    'Icon and full label crossfade together',
+  );
+  assert.equal(frames.at(-1).idle, expanded ? 0 : 1);
+  assert.equal(frames.at(-1).expanded, expanded ? 1 : 0);
+  assert.ok(
+    expanded ? frames.at(-1).width > frames[0].width : frames.at(-1).width < frames[0].width,
+  );
+};
 const collapsedAction = async (page, button) => {
   await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
   await page.waitForFunction(() =>
@@ -126,6 +167,19 @@ const collapsedAction = async (page, button) => {
   );
   await button.hover();
   await aligned(page);
+  for (const dark of [false, true]) {
+    await page.evaluate((value) => document.documentElement.classList.toggle('dark', value), dark);
+    for (const control of await page.locator('.sidebar .nav-item, .sidebar .user-button').all()) {
+      await control.hover();
+      const box = await control.boundingBox();
+      const sidebarBox = await page.locator('.sidebar').boundingBox();
+      assert.equal(box.width, 44);
+      assert.equal(box.height, 44);
+      assert.ok(Math.abs(box.x + box.width / 2 - sidebarBox.x - sidebarBox.width / 2) < 1);
+    }
+    await page.getByRole('button', { name: '面试记录', exact: true }).hover();
+    await captureRequested(page, 'sidebar-square-' + (dark ? 'dark' : 'light'));
+  }
   assert.equal(await button.innerText(), '', 'Collapsed sidebar actions have no visible text');
   await page.keyboard.press('Tab');
   await button.focus();
@@ -148,9 +202,33 @@ try {
     await captureRequested(page, 'download-idle-' + (dark ? 'dark' : 'light'));
   }
   const available = sidebar.getByRole('button', { name: '下载更新', exact: true });
+  await morph(
+    available,
+    '.sidebar-update-idle',
+    '.sidebar-update-expanded',
+    () => available.hover(),
+    true,
+  );
+  await morph(
+    available,
+    '.sidebar-update-idle',
+    '.sidebar-update-expanded',
+    () => page.mouse.move(800, 100),
+    false,
+  );
   await available.hover();
   await available.locator('.sidebar-update-label').waitFor({ state: 'visible' });
-  await captureRequested(page, 'download-expanded');
+  await available.focus();
+  await available.evaluate(async (element) => {
+    element.getBoundingClientRect();
+    await Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+  });
+  await captureRequested(page, 'download-expanded', { animations: 'allow' });
+  await available.evaluate((element) => element.blur());
   const progress = sidebar.locator('.download-button');
   await assertInitialDownloadProgress(progress, async () => {
     await sidebar.getByRole('button', { name: '下载更新', exact: true }).click();
@@ -179,9 +257,35 @@ try {
     await progress.evaluate((el) => getComputedStyle(el).color),
   );
   await assertDownloadButton(page, progress, { iconOnly: true, hoverLabel: '取消下载' });
+  await aligned(page);
+  await morph(
+    progress,
+    '.download-button-progress',
+    '.download-button-cancel',
+    () => progress.hover(),
+    true,
+  );
+  await morph(
+    progress,
+    '.download-button-progress',
+    '.download-button-cancel',
+    () => page.mouse.move(800, 100),
+    false,
+  );
   await progress.hover();
   await progress.locator('.download-button-cancel').waitFor({ state: 'visible' });
-  await captureRequested(page, 'cancel-expanded');
+  await progress.focus();
+  await progress.evaluate(async (element) => {
+    element.getBoundingClientRect();
+    await Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+  });
+  await captureRequested(page, 'cancel-expanded', { animations: 'allow' });
+  await progress.evaluate((element) => element.blur());
   await collapsedAction(page, progress);
   if (process.argv.includes('--preview')) {
     await page.keyboard.press('Tab');
@@ -234,6 +338,20 @@ try {
   const install = sidebar.getByRole('button', { name: '重启以更新', exact: true });
   await install.waitFor();
   await aligned(page);
+  await morph(
+    install,
+    '.sidebar-update-idle',
+    '.sidebar-update-expanded',
+    () => install.hover(),
+    true,
+  );
+  await morph(
+    install,
+    '.sidebar-update-idle',
+    '.sidebar-update-expanded',
+    () => page.mouse.move(800, 100),
+    false,
+  );
   await install.hover();
   await install.locator('.sidebar-update-label').waitFor({ state: 'visible' });
   await install.evaluate(async (element) => {

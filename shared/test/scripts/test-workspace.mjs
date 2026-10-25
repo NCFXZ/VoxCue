@@ -127,53 +127,6 @@ export const electron = {
         ],
       };
     }
-    const webRenderer = options.env?.VOXCUE_TEST_WEB_RENDERER;
-    if (webRenderer && options.args?.[0]) {
-      const actual = fs.realpathSync(webRenderer);
-      const run = path.relative(temporary, actual).split(path.sep)[0];
-      if (!run.startsWith(prefix) || !fs.existsSync(path.join(temporary, run, marker)))
-        throw Error('Web renderer must belong to a temporary test run');
-      const entry = path.resolve(options.args[0]);
-      const wrapper = path.join(testRoot, 'web-renderer-entry.cjs');
-      fs.writeFileSync(
-        wrapper,
-        `
-const {app,BrowserWindow}=require('electron');
-app.setAppPath(${JSON.stringify(workspace.platformRoot)});
-const platform=require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/platform/index.js'))});
-const select=platform.selectDesktopPlatform;
-const policy=select();
-if(policy.id!=='darwin'||!policy.presentationFile) throw Error('Shared renderer host requires the selected Mac window adapter');
-const presentation=require(require('node:path').join(${JSON.stringify(workspace.platformRoot)},'dist-electron',policy.presentationFile));
-const createPresentation=presentation.createPresentation;
-// The generic shared renderer has no AppKit consumers. Keep the real Electron
-// theme/Dock/mouse-passthrough behavior, with an explicit test-only material port.
-const material={
-  available:true,
-  configureInterviewAppearance(){},
-  configureInterviewMaterials(){return false;},
-  configureContentControls(){return false;},
-  configureScrollChrome(){return false;},
-  attachSurface(){return false;},
-  detachSurface(){},
-  popUpMenu(){return null;},
-  apply(){return false;},
-  configureButton(){return false;},
-};
-presentation.createPresentation=options=>{
-  const port=createPresentation({...options,material});
-  return {...port,capabilities:{...port.capabilities,liquidGlass:false}};
-};
-platform.selectDesktopPlatform=(...args)=>({...select(...args),presentationBindingFile:undefined});
-const load=BrowserWindow.prototype.loadFile;
-BrowserWindow.prototype.loadFile=function(file,...args){
-  return load.call(this, file===${JSON.stringify(path.join(workspace.platformRoot, 'dist/index.html'))} ? ${JSON.stringify(actual)} : file,...args);
-};
-require(${JSON.stringify(entry)});
-`,
-      );
-      options = { ...options, args: [wrapper, ...options.args.slice(1)] };
-    }
     const speechModels = options.env?.VOXCUE_TEST_SPEECH_MODELS;
     const ragModel = options.env?.VOXCUE_TEST_RAG_MODEL;
     if (speechModels && ragModel && options.args?.[0]) {

@@ -13,13 +13,13 @@ export function useFollowScroll(value: unknown, identity?: unknown) {
   }, [identity]);
   useLayoutEffect(() => {
     const node = ref.current;
-    if (node && follow.current) node.scrollTop = node.scrollHeight;
+    if (node?.clientHeight && follow.current) node.scrollTop = node.scrollHeight;
     else if (node) setHasNew(true);
   }, [value, identity]);
   return {
     syncLayout: () => {
       const node = ref.current;
-      if (node && follow.current) node.scrollTop = node.scrollHeight;
+      if (node?.clientHeight && follow.current) node.scrollTop = node.scrollHeight;
     },
     following,
     hasNew,

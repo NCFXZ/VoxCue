@@ -2,8 +2,31 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { composerPage } from './native-ui.mjs';
 import { installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
+import { execFileSync } from 'node:child_process';
+
+const materialProbe = path.join(testRoot, 'window-material-probe.node');
+execFileSync('/usr/bin/xcrun', [
+  'clang++',
+  '-std=c++17',
+  '-fobjc-arc',
+  '-DNAPI_VERSION=8',
+  '-bundle',
+  '-undefined',
+  'dynamic_lookup',
+  '-arch',
+  'arm64',
+  '-mmacosx-version-min=14.2',
+  '-I',
+  path.resolve('.cache/node-api-headers'),
+  'test/fixtures/window-material-probe.mm',
+  '-framework',
+  'AppKit',
+  '-o',
+  materialProbe,
+]);
+execFileSync('/usr/bin/codesign', ['--force', '--sign', '-', materialProbe], { stdio: 'pipe' });
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/window-native-')));
@@ -24,6 +47,7 @@ try {
     { x: 16, y: 18 },
   );
   await login.screenshot({});
+  await captureRequested(login, 'mac-login-native-chrome');
   checks.push('登录窗口使用系统左上角控件，HTML 中没有 Windows 窗口按钮');
   await installUiAccount(app);
   const [page] = await Promise.all([
@@ -31,10 +55,25 @@ try {
     login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
   ]);
   page.on('pageerror', (error) => errors.push(error.message));
-  const surface = await composerPage(app, page);
+  const surface = page;
   const input = () => surface.getByRole('textbox', { name: '聊天消息', exact: true });
   await input().waitFor();
   await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
+  const material = await app.evaluate(({ app, BrowserWindow }, probePath) => {
+    if (!app.getPath('userData').includes('/test/results/window-native-'))
+      throw Error('Non-test profile');
+    const require = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const win = BrowserWindow.getAllWindows().find((win) => win.getTitle() === 'VoxCue');
+    return require(probePath).probe(win.getNativeWindowHandle());
+  }, materialProbe);
+  assert.ok(material.sidebars > 0 && material.visible > 0, JSON.stringify(material));
+  assert.equal(
+    await page.locator('body').evaluate((node) => getComputedStyle(node).backgroundColor),
+    'rgba(0, 0, 0, 0)',
+  );
+  checks.push('真实原生窗口包含可见的旧版sidebar vibrancy，网页无不透明底板遮挡');
   assert.equal(await page.locator('.window-controls').count(), 0);
   assert.equal(await page.locator('.titlebar').count(), 0);
   const metrics = await page.locator('.app-body').evaluate((element) => ({
@@ -68,9 +107,39 @@ try {
     ),
   );
   await page.screenshot({ animations: 'disabled' });
+  await captureRequested(page, 'mac-main-native-chrome-light');
   await page.emulateMedia({ colorScheme: 'dark' });
   await page.waitForFunction(() => document.documentElement.classList.contains('dark'));
   await page.screenshot({ animations: 'disabled' });
+  await captureRequested(page, 'mac-main-native-chrome-dark');
+  await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
+  await page.waitForFunction(() => {
+    const sidebar = document.querySelector('.sidebar');
+    const toggle = sidebar.querySelector('.sidebar-toggle-button').getBoundingClientRect();
+    return sidebar.classList.contains('collapsed') && Math.abs(toggle.top - 54) < 1;
+  });
+  assert.equal(await page.locator('.window-controls').count(), 0);
+  await captureRequested(page, 'mac-main-native-chrome-collapsed');
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+  const main = await app.browserWindow(page);
+  assert.equal(await main.evaluate((win) => win.isFullScreenable()), true);
+  await main.evaluate(
+    (win) =>
+      new Promise((resolve) => {
+        win.once('minimize', () => resolve());
+        win.minimize();
+      }),
+  );
+  assert.equal(await main.evaluate((win) => win.isMinimized()), true);
+  await main.evaluate(
+    (win) =>
+      new Promise((resolve) => {
+        win.once('restore', () => resolve());
+        win.restore();
+      }),
+  );
+  await page.waitForFunction(() => document.visibilityState === 'visible');
+  checks.push('原生最小化/恢复可用，侧栏收起不遮挡红绿灯，主窗保留系统全屏能力');
   checks.push('主窗口内容从顶部铺满，品牌紧接原生红绿灯下方，菜单和浅深主题正常');
   // Cancel Cmd+Q while an unsaved operation exists. A later red-button close
   // must still leave the Mac app resident rather than replaying the canceled quit.
@@ -101,7 +170,7 @@ try {
   const next = app.waitForEvent('window');
   await app.evaluate(({ app }) => app.emit('activate'));
   const reopened = await next;
-  const restored = await composerPage(app, reopened);
+  const restored = reopened;
   await restored.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await restored.waitForFunction(
     () => document.querySelector('[aria-label="聊天消息"]')?.value === 'Mac 窗口恢复测试草稿',

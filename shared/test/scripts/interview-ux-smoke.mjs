@@ -109,7 +109,7 @@ async function geometry(page) {
     return {
       overflow: [
         ...document.querySelectorAll(
-          '.audio-check,.audio-input-meters,.audio-recovery,.interview-submission-status,.interview-settings-dialog,.audio-device-editor',
+          '.audio-check,.audio-input-meters,.audio-recovery,.interview-settings-dialog,.audio-device-editor',
         ),
       ]
         .filter(visible)
@@ -372,7 +372,7 @@ try {
   await capture(page, '09-display-settings');
   assert.equal(
     await page.evaluate(() => document.documentElement.dataset.interviewTransparency),
-    '60',
+    '100',
   );
   const preview = settings.locator('.interview-preview-scene');
   await preview.scrollIntoViewIfNeeded();
@@ -389,12 +389,20 @@ try {
         '.answer-bubble',
         '.floating-composer',
         '.transcript-item p',
-      ].map((selector) => [selector, getComputedStyle(e.querySelector(selector)).backgroundColor]),
+      ].map((selector) => {
+        const style = getComputedStyle(e.querySelector(selector));
+        return [selector, { fill: style.backgroundColor, image: style.backgroundImage }];
+      }),
     ),
   );
-  assert.notEqual(layers['.floating-panel'], layers['.answer-bubble']);
-  assert.notEqual(layers['.floating-toolbar'], layers['.floating-panel']);
-  assert.equal(layers['.answer-bubble'], layers['.floating-composer']);
+  assert.notEqual(layers['.floating-panel'].fill, layers['.answer-bubble'].fill);
+  assert.equal(layers['.floating-toolbar'].fill, layers['.floating-panel'].fill);
+  assert.equal(
+    layers['.floating-toolbar'].image,
+    `linear-gradient(${layers['.answer-bubble'].fill}, ${layers['.answer-bubble'].fill}), none`,
+  );
+  assert.notEqual(layers['.answer-bubble'].fill, layers['.floating-composer'].fill);
+  assert.equal(layers['.answer-bubble'].fill, layers['.transcript-item p'].fill);
   const misSizedIcons = await settings
     .locator('svg[data-ui-icon]')
     .evaluateAll((icons) =>
@@ -421,7 +429,7 @@ try {
   );
   assert.equal(
     await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
-    '60',
+    '100',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -594,11 +602,7 @@ try {
   );
   assert.equal(await floating.getByRole('button', { name: '取消本次', exact: true }).count(), 0);
   assert.equal(await floating.getByText('待提交问题', { exact: true }).count(), 0);
-  await floating
-    .locator('.floating-composer-options')
-    .getByRole('status')
-    .filter({ hasText: '正在收听' })
-    .waitFor();
+  assert.equal(await floating.locator('.floating-composer-options').getByRole('status').count(), 0);
   await floating
     .getByText('我会先确认问题和边界，再结合已知事实说明实现方法。', { exact: true })
     .waitFor();
@@ -885,20 +889,20 @@ try {
         '.answer-bubble',
         '.floating-composer',
         '.transcript-item p',
-      ].map((selector) => [
-        selector,
-        getComputedStyle(document.querySelector(selector)).backgroundColor,
-      ]),
+      ].map((selector) => {
+        const style = getComputedStyle(document.querySelector(selector));
+        return [selector, { fill: style.backgroundColor, image: style.backgroundImage }];
+      }),
     ),
   );
   assert.deepEqual(
     actualLayers,
     layers,
-    'Preview and real interview must use the identical fixed 60% material',
+    'Preview and real interview must share the same reading and chat chrome materials',
   );
   assert.equal(
     await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
-    '60',
+    '100',
   );
   assert.equal(await devices.getByRole('button', { name: /应用.*设置/ }).count(), 0);
   assert.equal(await devices.getByRole('button', { name: '完成', exact: true }).count(), 0);
@@ -931,15 +935,15 @@ try {
     }, value);
     assert.equal(
       await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
-      '60',
+      '100',
     );
     assert.equal(
       await floating.evaluate(() => document.documentElement.dataset.frostedTransparency),
-      '60',
+      '100',
     );
     assert.equal(
       await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
-      '60',
+      '100',
     );
     for (const theme of ['light', 'dark']) {
       await floating.emulateMedia({ colorScheme: theme });

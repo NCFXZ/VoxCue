@@ -1,3 +1,41 @@
+# 当前测试入口（2026-10-25）
+
+面试新增interview-motion和interview-chrome共用专项，检查动画圆角、快速切换、减少动态效果及草稿/滚动保留；chrome用高对比合成文字证明标题、返回最新圆形箭头和输入框不被正文穿透，并验证末行可读。web-materials核对共用网页材质、菜单、顶部及浅深色。侧边栏之外已统一聊天输入框材质，本轮局部系统绑定及interview-backdrop测试已移除；Windows无需局部原生模糊适配，但实际界面/DPI仍须本机验收。
+
+Mac图标最新使用SF Symbols；build:shared自动生成资源，pnpm test:icons检查56项资源及登录/主窗/设置/面试浅深色图标。Mac功能矩阵已加入icons；内部控件/材质仍共用。
+
+Mac 运行与 Windows 相同的产品 Renderer；旧原生展示探针及其入口已删除。下文标有历史日期的 Liquid Glass/AppKit 专项记录保留供追溯，不再执行。
+
+在本平台目录执行：
+
+```sh
+corepack pnpm typecheck
+corepack pnpm check:architecture
+corepack pnpm check:workspace
+corepack pnpm build
+corepack pnpm test
+node ../shared/test/scripts/functional-suite.mjs
+# Mac 追加缩放视觉矩阵与10分钟合成语音稳定性
+node test/scripts/ui-refinement-matrix.mjs
+node ../shared/test/scripts/functional-suite.mjs speech-soak
+```
+
+完整功能矩阵包含实际界面的登录、账户额度、聊天/取消/重试、个人信息/技能编辑删除、知识库与RAG、面试、截图归档/查看/保存、更新、组件、对抗输入和20轮面试稳定性；Mac追加音频合成、权限、窗口生命周期、固定凭据助手、14.2编译目标与隔离签名薄包。默认不测试旧发行安装包，不更新真实安装。`package-smoke.mjs`仅用于未来重新生成并明确指定的新发行包。
+
+测试使用隔离合成账户/资料及固定公开临时模型，GUI串行、退出清理。共用UI测试在Mac通过不等于Windows本机/DPI通过，14.2编译/ABI通过不等于旧macOS实机通过。临时输出仅终端或本次测试目录。
+
+---
+
+## 技能卡片原生操作回归（2026-10-24）
+
+在`macos/`执行`node test/scripts/sidebar-glass-smoke.mjs --skills-only`，使用断网合成账户/技能验证实际AppKit编辑和删除按钮：原生图标位于不透明卡片上方，浅深色、嵌套折叠、长内容滚动、小窗口、鼠标编辑保存、删除确认/取消及重载持久化。`--preview`可逐次查看临时窗口截图，回车继续，退出清理；不访问真实资料或采样硬件。Windows共享页面保持，由其本机验证对应行为，不在Mac运行网页界面代验。
+
+同一入口追加个人信息简历/JD/指令/知识库选择/技能控件在上下边界半露出时的原生mask与完整几何、可见/裁切区域鼠标命中、无网页回切及非法clip拒绝；`node test/scripts/interview-glass-smoke.mjs`追加顶部5个持续存在的AppKit over-glass控件、仅hover显示边框、移出/单独键盘焦点不显示背景、悬停前后图标位置不变，以及原折叠、拖动、设置与结束确认流程。悬停验收同时比较实际原生截图的图标外围像素，避免仅凭内部状态判断背景已经绘制。预览只捕获隔离自有窗口，退出删除。
+
+Mac的`node test/scripts/sidebar-glass-smoke.mjs --content-only`另检查32px侧栏删除在常态、确认、取消时的同一原生控件身份及图标宽高，并核对离开行后隐藏；36px知识库删除也比较两态原生图标尺寸。`--preview=content-sidebar-delete-confirm`可临时查看两态截图，退出清理。
+
+`node test/scripts/sidebar-glass-smoke.mjs --delete-only`为删除控件独立定向入口，使用合成对话/知识库验证浅深色AppKit图标尺寸、仅按钮hover显示背景、展开/取消不换原生身份、行离开隐藏以及二次删除。`--preview=delete-icon-hover-dark`临时查看深色hover，退出清理。
+
 ## 2026-10-24 Windows 0.5.9 接续入口
 
 先按 WINDOWS_0.5.9_HANDOFF.md 同步本机固定依赖/配置，macos/ 只读。`test:windows:functional`、`test:windows:regression`、`test:ui:dpi` 串行覆盖共享界面、本平台原生及五档缩放；旧夹具使用当前托管登录、系统强调色、账户卡悬停色和六个设置分类，保留未知错误不重试及原排版要求。额度窗口对照原生实际内容宽度，间距按 Chromium 的 1/64 CSS 像素单位核对 4px，避免分数 DPI 的浮点表示差异。

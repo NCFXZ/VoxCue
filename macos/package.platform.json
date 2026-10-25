@@ -1,7 +1,6 @@
 {
   "scripts": {
-    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:sidebar-glass && pnpm build:symbols && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
-    "build:sidebar-glass": "node scripts/build-sidebar-glass.mjs",
+    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
     "build:audio": "node scripts/build-audio.mjs",
     "start": "node scripts/launch.mjs",
     "dev": "node scripts/launch.mjs --dev",
@@ -9,16 +8,18 @@
     "test:window:native": "node test/scripts/window-native-smoke.mjs",
     "build:launcher": "node scripts/build-launcher.mjs",
     "test:launcher": "node test/scripts/launcher-smoke.mjs",
-    "test:icons": "node test/scripts/icons-smoke.mjs",
     "build:icons": "node scripts/build-icons.mjs",
-    "build:symbols": "node scripts/build-symbols.mjs",
     "build:permissions": "node scripts/build-permissions.mjs",
     "test:screen-permission": "node test/scripts/screen-permission-smoke.mjs",
     "build:updater": "node scripts/build-updater.mjs",
     "package:installer": "pnpm build && pnpm build:updater && node scripts/package-installer.mjs",
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
     "test:package": "node test/scripts/package-smoke.mjs",
-    "build:qwen": "node scripts/build-qwen.mjs"
+    "build:qwen": "node scripts/build-qwen.mjs",
+    "build:symbols": "node scripts/build-symbols.mjs",
+    "build:shared": "pnpm build:symbols && tsc --noEmit && node ../shared/scripts/build-electron.mjs && vite build --config ../shared/vite.config.mjs",
+    "dev:web": "pnpm build:symbols && vite --config ../shared/vite.config.mjs --host 127.0.0.1",
+    "test:icons": "node test/scripts/icons-smoke.mjs"
   },
   "dependencies": {
     "@ennuicastr/webrtcaec3.js": "0.3.0"

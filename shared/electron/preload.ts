@@ -21,7 +21,6 @@ try {
   /* Missing metadata leaves platform effects pending. */
 }
 const presentation = Object.freeze({
-  liquidGlass: presentationFlags.liquidGlass === true,
   frostedTransparency: presentationFlags.frostedTransparency === true,
   nativeTheme: presentationFlags.nativeTheme === true,
   screenCapturePermission: presentationFlags.screenCapturePermission === true,
@@ -51,7 +50,6 @@ function subscribe<K extends keyof DesktopEventMap>(
 const desktop: DesktopAPI = {
   platform:
     process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'unknown',
-  nativeWindowControls: process.platform === 'darwin',
   presentation,
   screenCapturePermissionSupported: presentation.screenCapturePermission,
   screenCapturePermission: (action) => invoke('interview:screen-permission', action),
@@ -80,19 +78,6 @@ const desktop: DesktopAPI = {
   interviewImage: (call) => invoke('interview:image', call),
   interviewCancel: (id) => invoke('interview:cancel', id),
   setNativeTheme: (theme) => invoke('appearance:theme', theme),
-  setSidebarGlass: (width, toolbarHeight = 0, surfaceColor = '#ffffff', dark = false) =>
-    invoke('appearance:sidebar-glass', width, toolbarHeight, surfaceColor, dark),
-  setGlassButton: (action, placement) => invoke('appearance:glass-button', action, placement),
-  onGlassButton: (callback) => subscribe('appearance:glass-button-clicked', callback),
-  setScrollChrome: (state) => invoke('appearance:scroll-chrome', state),
-  setContentControls: (controls) => invoke('appearance:content-controls', controls),
-  setInterviewMaterials: (materials) => invoke('appearance:interview-materials', materials),
-  onContentSearch: (callback) => subscribe('appearance:content-search', callback),
-  onContentToggle: (callback) => subscribe('appearance:content-toggle', callback),
-  onContentRange: (callback) => subscribe('appearance:content-range', callback),
-  windowFocused: () => invoke('appearance:window-focus'),
-  onWindowFocus: (callback) => subscribe('appearance:window-focus-changed', callback),
-  popUpNativeMenu: (request) => invoke('appearance:native-menu', request),
   systemAccent: () => invoke('appearance:accent'),
   onSystemAccent: (callback) => subscribe('appearance:accent-changed', callback),
   authSession: () => invoke('auth:session'),

@@ -26,7 +26,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
             variant="ghost"
             size="icon"
             aria-label="添加附件"
-            data-native-reveal-on-hover
+            data-reveal-on-hover
             disabled={!state.chatsReady}
           >
             <Plus size={16} />
@@ -70,7 +70,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
               variant="ghost"
               className="composer-tool model-trigger"
               aria-label="聊天模型"
-              data-native-reveal-on-hover
+              data-reveal-on-hover
             >
               <span>{selected?.label ?? (connection.loading ? '加载模型…' : '模型不可用')}</span>
               <ChevronDown size={12} />
@@ -127,7 +127,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
               variant="ghost"
               className="composer-tool effort-trigger"
               aria-label="思考强度"
-              data-native-reveal-on-hover
+              data-reveal-on-hover
               disabled={!efforts.length}
             >
               <span className="effort-compact-icon">

@@ -6,6 +6,9 @@ if (path.resolve(process.cwd()) !== workspace.platformRoot)
   throw Error('Run from the macos installation.');
 const runtime = await prepareRuntime();
 const development = process.argv.includes('--dev');
+if (development) {
+  await import('./build-symbols.mjs');
+}
 const child = spawn(
   development ? process.execPath : runtime.executable,
   development ? [path.resolve('../shared/scripts/dev.mjs')] : ['.'],

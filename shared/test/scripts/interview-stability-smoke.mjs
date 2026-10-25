@@ -56,7 +56,7 @@ try {
   assert.equal(await main.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(), 0);
   assert.equal(
     await main.evaluate(() => document.documentElement.dataset.frostedTransparency),
-    '60',
+    '100',
   );
   await main.getByRole('button', { name: '关闭设置', exact: true }).click();
   for (let cycle = 0; cycle < 20; cycle++) {
@@ -104,7 +104,7 @@ try {
     }, value);
     assert.equal(
       await floating.evaluate(() => document.documentElement.dataset.frostedTransparency),
-      '60',
+      '100',
     );
     assert.equal(
       await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
@@ -118,9 +118,13 @@ try {
       'none',
     );
     await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-    await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 1);
+    await floating.waitForFunction(
+      () => document.querySelectorAll('.floating-panel:not([hidden])').length === 1,
+    );
     await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-    await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 2);
+    await floating.waitForFunction(
+      () => document.querySelectorAll('.floating-panel:not([hidden])').length === 2,
+    );
     if (cycle % 5 === 0) {
       await floating.reload();
       await floating.locator('.answer-text').first().waitFor();

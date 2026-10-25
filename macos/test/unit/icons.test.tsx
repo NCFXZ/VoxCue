@@ -40,7 +40,7 @@ describe.skipIf(process.platform !== 'darwin')('Mac SF Symbols 的共享界面�
   });
   it('只替换公共图标入口，涵盖相邻组件和基础控件，不误替换其他模块', () => {
     const plugin = vite.plugins.find(
-      (item: { name?: string }) => item.name === 'macos-ui-adapters',
+      (item: { name?: string }) => item.name === 'macos-symbol-icons',
     );
     const root = path.resolve('..');
     const mac = path.join(root, 'macos/src/icons.tsx');

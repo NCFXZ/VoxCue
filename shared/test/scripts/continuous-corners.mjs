@@ -107,7 +107,7 @@ export async function verifyContinuousCorners(page, name) {
           (fallback &&
             !pseudo &&
             element.matches(
-              '.ui-button:not(.button-icon),.choice-trigger,.settings-choice,.speech-select,.dropdown-item,.history-filters input[type="search"]',
+              '.ui-button:not(.button-icon),.confirm-delete,.download-button,.choice-trigger,.settings-choice,.speech-select,.dropdown-item,.history-filters input[type="search"]',
             )) ||
           element.matches(
             '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
@@ -135,12 +135,7 @@ export async function verifyContinuousCorners(page, name) {
             element.matches(
               '.composer,.floating-composer,.follow-latest,.floating-toolbar,.floating-panel,.answer-bubble,.interview-answer-failure',
             ) &&
-            style.boxShadow !==
-              (!fallback &&
-              window.desktop?.presentation?.liquidGlass === true &&
-              element.matches('.macos-native-interview-material,.macos-native-panel-material')
-                ? 'none'
-                : raisedShadowFor(element))
+            style.boxShadow !== raisedShadowFor(element)
           )
             wrongSurfaces.push(label + ': inconsistent raised surface shadow');
           if (element.matches('.interview-answer-failure') && style.borderRadius !== answerRadius)
@@ -211,6 +206,21 @@ export async function verifyContinuousCorners(page, name) {
       for (const control of controls) {
         const style = getComputedStyle(control);
         for (const property of ['width', 'height', 'border-radius', 'corner-shape']) {
+          // 50% and an oversized pixel radius clamp to the same round end cap.
+          // Morphing controls keep pixel radii to avoid an oval mid-transition.
+          if (property === 'border-radius') {
+            const effective = (value) => {
+              const limit = Math.min(parseFloat(value.width), parseFloat(value.height)) / 2;
+              const radius = value.borderTopLeftRadius;
+              return Math.min(
+                limit,
+                parseFloat(radius) * (radius.endsWith('%') ? parseFloat(value.width) / 100 : 1),
+              );
+            };
+            if (effective(style) !== effective(reference))
+              wrong.push(control.className + ': toolbar hover ' + property);
+            continue;
+          }
           if (style.getPropertyValue(property) !== reference.getPropertyValue(property))
             wrong.push(control.className + ': toolbar hover ' + property);
         }

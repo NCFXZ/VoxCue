@@ -175,7 +175,7 @@ try {
   );
   assert.equal(
     await page.evaluate(() => document.documentElement.dataset.interviewTransparency),
-    '60',
+    '100',
   );
   assert.equal(
     await settings
@@ -362,7 +362,7 @@ try {
   );
   assert.equal(
     await restarted.evaluate(() => document.documentElement.dataset.interviewTransparency),
-    '60',
+    '100',
   );
   assert.deepEqual(errors, []);
   console.log(
