@@ -230,12 +230,15 @@ export class CodexUsageRuntime implements CodexUsagePort {
   }
   async limits() {
     await this.start();
-    return this.call('account/rateLimits/read');
+    // VoxCue displays usage windows, not the separate reset-credit inventory.
+    return this.call('account/rateLimits/read', { excludeResetCreditDetails: true });
   }
   async access(): Promise<ManagedAccess> {
     await this.start();
+    // true forces a remote renewal even for a valid token. The official runtime
+    // already renews credentials when needed with refreshToken: false.
     return managedAccess(
-      await this.call('getAuthStatus', { includeToken: true, refreshToken: true }),
+      await this.call('getAuthStatus', { includeToken: true, refreshToken: false }),
     );
   }
   async login(open: (url: string) => Promise<void>, signal: AbortSignal) {

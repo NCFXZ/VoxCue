@@ -78,13 +78,15 @@ it('只有官方账户RPC、独立home和keyring，无环境令牌或任意服�
             account: { type: 'chatgpt', email: 'synthetic@example.test', planType: 'pro' },
           };
         if (request.method === 'getAuthStatus') {
-          expect(request.params).toEqual({ includeToken: true, refreshToken: true });
+          expect(request.params).toEqual({ includeToken: true, refreshToken: false });
           result = { authMethod: 'chatgpt', authToken: token };
         }
         if (request.method === 'account/login/start')
           result = { type: 'chatgpt', loginId: 'owned', authUrl: url };
-        if (request.method === 'account/rateLimits/read')
+        if (request.method === 'account/rateLimits/read') {
+          expect(request.params).toEqual({ excludeResetCreditDetails: true });
           result = { rateLimits: { secondary: { usedPercent: 20, windowDurationMins: 10080 } } };
+        }
         if (request.id) reply({ id: request.id, result });
       } else expect(request).toMatchObject({ id: 'server', error: { code: -32601 } });
       done();

@@ -1,5 +1,7 @@
 # 当前测试入口（2026-10-25）
 
+0.5.11 的 `chatgpt-usage-runtime` 在 Windows 使用仅接收不应答的本机代理和有效期内的合成令牌，要求五秒内完成官方令牌交接，防止立即拒绝代理掩盖重复强制续期。最终 Windows ASAR 的 `package-runtimes-check` 也执行相同回归，固定 Copilot/Codex 实际解包路径和系统凭据隔离继续检查。Mac smoke 仍严格禁止子进程网络，其结果明确不作为停滞代理时延负对照；本机审查方案见 [Mac 0.5.11 交接](../docs/MACOS_0.5.11_HANDOFF.md)。本轮完整结果见 [Windows 0.5.11 验收](../docs/WINDOWS_0.5.11_VERIFICATION.md)。
+
 Windows `test:ui:dpi` 当前逐档执行14组，包含新增 `interview-chrome` 和 `interview-motion`；100/125/150/175/200% 共70组，仍沿用同一隔离模型生命周期并串行。共享45组功能矩阵的外层 watchdog 调整为四小时，子项原有超时保持，避免十分钟耐久段挤占整组预算。分数DPI下工具栏边距按一物理像素量化检查、44px控件按 Chromium 1/64 布局像素核对；位置恢复仍用实际窗口严格复测，不以放宽位置断言掩盖累积漂移。
 
 `interview-motion` 增加主进程拒绝/迟到 IPC、忙碌锁和重试协调；`continuous-corners` 对删除、更新及结束确认的实际中间帧计算 CSS 有效四角半径，拒绝宽按钮使用50%产生椭圆的情况。输入专项逐行核对聊天2–11行、面试1–6行和组合输入事件；截图专项补齐修饰键/组合/重复/已处理/收起/主窗/五图保护，真实触控板及系统输入法硬件结果仍单独登记。技能提示专项检查资料完整/缺失路径在正常和窄窗下的居中、动作与 Tab 顺序。详见 [Windows 本机验收账本](../docs/WINDOWS_0.5.10_VERIFICATION.md)。

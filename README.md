@@ -1,10 +1,10 @@
 # VoxCue
 
-当前共享版本源为 **0.5.10**。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+当前共享版本源为 **0.5.11**。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 
-Windows / Mac **0.5.10** 已正式发布并设为 **Latest**：[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.10/VoxCue-Setup-0.5.10-x64.exe)、[Mac 安装 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.10/VoxCue-0.5.10-arm64.dmg)、[Mac 签名更新 ZIP](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.10/VoxCue-0.5.10-arm64.zip)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.10)。Windows 三项更新资产已补齐，原 Mac 资产及旧发行保持原样。Windows 本机配置、依赖、功能、原生窗口、五档 DPI、截图和最终包隔离验收已完成；真实账户、物理音频、系统输入法、触控板和多显示器仍须人工确认。应用继续按本平台完整资产的最高版本检查更新。
+Windows **0.5.11** 已发布并设为 **Latest**：[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-Setup-0.5.11-x64.exe)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.11)。本版修复 ChatGPT 启动及登录恢复耗时过长的问题，减少聊天、面试回答和账户额度刷新时的不必要等待。0.5.10 保持撤回、非公开状态；Mac 0.5.11 待其本机[审查与验包](shared/docs/MACOS_0.5.11_HANDOFF.md)。应用按本平台完整资产的最高版本检查更新；Windows 本轮证据与未覆盖范围见 [0.5.11 验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)。
 
 当前源码支持 ChatGPT 和 GitHub Copilot 登录。ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权。凭据由现有系统保护接口保存；Local RAG 固定为 local-v7-current-source-first，模型、索引和依赖保持。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；安装包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
 
@@ -55,7 +55,7 @@ corepack pnpm start
 
 Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。运行需要 Apple Silicon、macOS 14.2+；使用Xcode命令行工具构建必要系统助手，不再依赖macOS 26的界面SDK；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 的 [v0.5.10 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.10/VoxCue-Setup-0.5.10-x64.exe) 自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包沿用既有未配置 Authenticode 签名的发行方式；旧发行及资产保留。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项保留于 windows/release/0.5.10，不进入源码提交。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 安装包从[正式发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/latest)下载，自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包沿用既有未配置 Authenticode 签名的发行方式；历史发行资产保持，已撤回版本不提供公开下载。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项按版本保留于 windows/release/，不进入源码提交。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 Mac 开发宿主、启动器与正式应用复用固定本地自签名证书。0.5.5 起凭据加解密由独立固定签名助手处理，构建保留其原字节，避免应用每次升级改变助手的钥匙串身份；仅固定应用证书不足以解决历史授权。首次导入旧密码仍可能需要一次系统授权，拒绝/锁定后保留原登录文件并允许重试。现有 Sparkle 更新密钥保持。签名材料及助手规范副本必须安全备份并在清理时保留，缺失/错配即停止构建。详见[凭据与版本升级](macos/docs/CREDENTIALS.md)。
 

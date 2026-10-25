@@ -3,10 +3,22 @@ import workspace from '../../scripts/workspace.mjs';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
+import { createServer } from 'node:net';
 const { CodexUsageRuntime } = workspace.platformRequire(
   path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/chat/codexUsage.js'),
 );
 
+// A dead port makes forced refresh fail immediately and hides the latency bug.
+// Accept connections without answering instead; this proxy never forwards data.
+const sockets = new Set();
+const proxy = createServer((socket) => {
+  sockets.add(socket);
+  socket.on('error', () => {});
+  socket.once('close', () => sockets.delete(socket));
+  socket.resume();
+});
+await new Promise((resolve) => proxy.listen(0, '127.0.0.1', resolve));
+const proxyUrl = `http://127.0.0.1:${proxy.address().port}`;
 const runtime = new CodexUsageRuntime(path.join(testRoot, 'usage'), (binary, args, options) => {
   // Only this synthetic test uses a private file store containing fabricated
   // tokens. Production uses keyring only, never a plaintext fallback.
@@ -15,9 +27,9 @@ const runtime = new CodexUsageRuntime(path.join(testRoot, 'usage'), (binary, arg
   );
   const env = {
     ...options.env,
-    HTTP_PROXY: 'http://127.0.0.1:1',
-    HTTPS_PROXY: 'http://127.0.0.1:1',
-    ALL_PROXY: 'http://127.0.0.1:1',
+    HTTP_PROXY: proxyUrl,
+    HTTPS_PROXY: proxyUrl,
+    ALL_PROXY: proxyUrl,
     NO_PROXY: '',
     CFFIXED_USER_HOME: testRoot,
   };
@@ -61,10 +73,24 @@ try {
   );
   // account/read performs workspace discovery for managed accounts and requires
   // the remote service. This offline check covers the public token handoff only.
-  assert.equal((await runtime.access()).token, token);
+  const started = performance.now();
+  let timer;
+  try {
+    const access = await Promise.race([
+      runtime.access(),
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(Error('Valid session waited for remote renewal')), 5000);
+      }),
+    ]);
+    assert.equal(access.token, token);
+  } finally {
+    clearTimeout(timer);
+  }
   console.log(
-    'PASS: pinned official OAuth RPC, empty account and fabricated managed-session token handoff; no network, real OAuth or system credential access.',
+    `PASS: pinned official OAuth RPC, empty account and valid fabricated session restored in ${Math.round(performance.now() - started)}ms with ${process.platform === 'darwin' ? 'network denied (not a stalled-proxy latency check)' : 'remote traffic stalled'}; no real OAuth or system credential access.`,
   );
 } finally {
   await runtime.stop();
+  for (const socket of sockets) socket.destroy();
+  await new Promise((resolve) => proxy.close(resolve));
 }

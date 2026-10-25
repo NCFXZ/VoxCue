@@ -36,7 +36,11 @@ app.whenReady().then(async()=>{
  }finally{clearTimeout(timer);assert.equal((await client.stop()).length,0);}
  const {CodexUsageRuntime,codexUsageExecutable}=load('./dist-electron/shared/electron/backend/chat/codexUsage.js');
  assert.ok(codexUsageExecutable().startsWith(${JSON.stringify(path.join(packageRoot, 'resources/app.asar.unpacked'))}+path.sep));
- const launch=(binary,args,options)=>require('node:child_process').spawn(binary,args.map(v=>v==='cli_auth_credentials_store="keyring"'?'cli_auth_credentials_store="file"':v),{...options,env:{...options.env,...env}});
+ const sockets=new Set();
+ const proxy=require('node:net').createServer(socket=>{sockets.add(socket);socket.on('error',()=>{});socket.once('close',()=>sockets.delete(socket));socket.resume();});
+ await new Promise(resolve=>proxy.listen(0,'127.0.0.1',resolve));
+ const proxyUrl='http://127.0.0.1:'+proxy.address().port;
+ const launch=(binary,args,options)=>require('node:child_process').spawn(binary,args.map(v=>v==='cli_auth_credentials_store="keyring"'?'cli_auth_credentials_store="file"':v),{...options,env:{...options.env,...env,HTTP_PROXY:proxyUrl,HTTPS_PROXY:proxyUrl,ALL_PROXY:proxyUrl}});
  const home=path.join(directory,'codex');
  const runtime=new CodexUsageRuntime(home,launch);
  try{
@@ -44,9 +48,14 @@ app.whenReady().then(async()=>{
   const part=v=>Buffer.from(JSON.stringify(v)).toString('base64url');
   const token=part({alg:'none'})+'.'+part({sub:'synthetic',email:'synthetic@example.test',exp:Math.floor(Date.now()/1000)+3600,'https://api.openai.com/auth':{chatgpt_account_id:'synthetic-workspace',chatgpt_plan_type:'plus'}})+'.synthetic';
   await fs.writeFile(path.join(home,'auth.json'),JSON.stringify({auth_mode:'chatgpt',tokens:{id_token:token,access_token:token,refresh_token:'synthetic-refresh',account_id:'synthetic-workspace'},last_refresh:new Date().toISOString()}));
-  assert.equal((await runtime.access()).token,token);
-  console.log('PASS: final Windows ASAR Codex empty account and fabricated token RPC; isolated file store, blocked proxy, no real OAuth');
- }finally{await runtime.stop();}
+  const started=performance.now();
+  let accessTimer;
+  try{
+   const access=await Promise.race([runtime.access(),new Promise((_,reject)=>{accessTimer=setTimeout(()=>reject(Error('Packaged valid session waited for remote renewal')),5000);})]);
+   assert.equal(access.token,token);
+  }finally{clearTimeout(accessTimer);}
+  console.log('PASS: final Windows ASAR Codex valid fabricated token returned in '+Math.round(performance.now()-started)+'ms with remote traffic stalled; isolated file store, no real OAuth');
+ }finally{await runtime.stop();for(const socket of sockets)socket.destroy();await new Promise(resolve=>proxy.close(resolve));}
  app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1);});
 `,
