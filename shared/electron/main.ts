@@ -229,8 +229,19 @@ function createLoginWindow() {
   });
   loadWindowPage(win, 'login', indexFile, process.env.VITE_DEV_SERVER_URL);
 }
-function sizeInterview(scale: number, anchor = interviewWindow!.getBounds()) {
+function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
   const win = interviewWindow!;
+  const previous = win.getBounds();
+  const same = (a: Electron.Rectangle, b: Electron.Rectangle) =>
+    a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
+  // Reuse the logical request while the HWND still matches its rounded result.
+  // Feeding that result back into another resize accumulates fractional-DPI
+  // position/size rounding on every collapse or transcript toggle. Explicit
+  // gesture anchors and external moves must continue to use their actual bounds.
+  anchor ??=
+    lastInterviewBounds && same(previous, lastInterviewBounds.actual)
+      ? lastInterviewBounds.requested
+      : previous;
   const area = screen.getDisplayMatching(anchor).workArea;
   const bounds = fitInterviewBounds(
     anchor,
@@ -241,9 +252,6 @@ function sizeInterview(scale: number, anchor = interviewWindow!.getBounds()) {
   );
   if (!interviewCollapsed)
     interviewScale = interviewPanelScale(bounds.width, interviewTranscriptVisible);
-  const previous = win.getBounds();
-  const same = (a: Electron.Rectangle, b: Electron.Rectangle) =>
-    a.x === b.x && a.y === b.y && a.width === b.width && a.height === b.height;
   // Windows fractional DPI can round a requested DIP to a different DIP when
   // read back. Compare the last request as well, without ignoring user moves.
   if (

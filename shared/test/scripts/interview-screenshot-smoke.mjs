@@ -287,6 +287,47 @@ try {
   };
   const collapsedWidth = (await camera.boundingBox()).width;
   assert.equal(collapsedWidth, (macShortcut ? 72 : 92) + labelWidth);
+  await floating.evaluate(() => {
+    for (const extra of [
+      { shiftKey: true },
+      { altKey: true },
+      { metaKey: true },
+      { repeat: true },
+      { isComposing: true },
+      { handled: true },
+    ]) {
+      const event = new KeyboardEvent('keydown', {
+        key: 's',
+        ctrlKey: true,
+        bubbles: true,
+        cancelable: true,
+        ...extra,
+      });
+      if (extra.handled) event.preventDefault();
+      document.activeElement.dispatchEvent(event);
+    }
+  });
+  assert.equal(
+    await captured(),
+    0,
+    'Modified, repeated, composing and handled shortcuts do not capture',
+  );
+  await main.keyboard.press('Control+s');
+  assert.equal(await captured(), 0, 'The main renderer does not own the interview shortcut');
+  await floating.locator('.floating-brand').evaluate((button) => button.click());
+  await floating.waitForFunction(
+    () =>
+      document.querySelector('.floating-shell').classList.contains('is-collapsed') &&
+      !document.querySelector('.floating-shell').dataset.panelMotion,
+  );
+  await floating.keyboard.press('Control+s');
+  assert.equal(await captured(), 0, 'Collapsed interview windows do not capture');
+  await floating.locator('.floating-brand').evaluate((button) => button.click());
+  await floating.waitForFunction(
+    () =>
+      !document.querySelector('.floating-shell').classList.contains('is-collapsed') &&
+      !document.querySelector('.floating-shell').dataset.panelMotion,
+  );
   await input.fill('解释这些截图，先保留我的草稿');
   await app.evaluate(() => {
     globalThis.screenshotFixture.mode = 'hold';
@@ -358,6 +399,8 @@ try {
   assert.equal(removeStyle.color, 'rgb(255, 255, 255)');
   assert.notEqual(removeStyle.shadow, 'none');
   assert.equal(await captured(), 5);
+  await input.press('Control+s');
+  assert.equal(await captured(), 5, 'The five-image limit also rejects the keyboard shortcut');
   await capture('five-staged-images');
   assert.equal((await requests()).length, 0);
   await floating.getByRole('button', { name: '移除截图 2', exact: true }).click();

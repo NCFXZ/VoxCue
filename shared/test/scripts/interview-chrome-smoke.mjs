@@ -4,6 +4,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { verifyRoundCapFrames } from './continuous-corners.mjs';
 
 const app = await electron.launch({
   args: [await offlineElectronEntry()],
@@ -156,14 +157,22 @@ try {
     );
     const toolbarMaterial = await material(floating.locator('.floating-toolbar'));
     const bubbleMaterial = await material(floating.locator('.answer-bubble'));
-    const toolbarLayers = await floating.locator('.floating-toolbar').evaluate((node) => ({
-      image: getComputedStyle(node).backgroundImage,
-      panel: getComputedStyle(document.querySelector('.floating-answer')).backgroundColor,
-    }));
+    const toolbarLayers = await floating.locator('.floating-toolbar').evaluate((node) => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = 'var(--web-material-fill)';
+      node.append(probe);
+      const fill = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return {
+        image: getComputedStyle(node).backgroundImage,
+        panel: getComputedStyle(document.querySelector('.floating-answer')).backgroundColor,
+        fill,
+      };
+    });
     assert.equal(toolbarMaterial.fill, toolbarLayers.panel);
     assert.equal(
       toolbarLayers.image,
-      `linear-gradient(${bubbleMaterial.fill}, ${bubbleMaterial.fill}), none`,
+      `linear-gradient(${toolbarLayers.fill}, ${toolbarLayers.fill}), none`,
     );
     assert.equal(toolbarMaterial.filter, chatComposer.filter);
     const notice = floating.locator('.floating-capture-notice');
@@ -178,7 +187,23 @@ try {
     );
     const composerMaterial = await material(floating.locator('.floating-composer'));
     assert.equal(composerMaterial.filter, chatComposer.filter);
-    if (dark) assert.notEqual(composerMaterial.fill, bubbleMaterial.fill);
+    const windows = await floating.evaluate(() => window.desktop.platform === 'windows');
+    if (windows) {
+      const expected = await floating.locator('.answer-bubble').evaluate((node, dark) => {
+        const probe = document.createElement('span');
+        probe.style.backgroundColor = `color-mix(in srgb, var(--surface) ${dark ? 92.8 : 89.92}%, transparent)`;
+        node.append(probe);
+        const color = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return color;
+      }, dark);
+      assert.equal(
+        bubbleMaterial.fill,
+        expected,
+        'Only the Windows text bubble opacity uses its 0.5.9 curve',
+      );
+    }
+    if (dark || windows) assert.notEqual(composerMaterial.fill, bubbleMaterial.fill);
     else assert.equal(composerMaterial.fill, bubbleMaterial.fill);
   }
   await floating.evaluate(
@@ -314,6 +339,19 @@ try {
     .evaluateAll((nodes) => nodes.forEach((node) => node.remove()));
   // A composer resize must update bottom clearance without moving a reader who scrolled up.
   const before = await answerScroll.evaluate((e) => e.scrollTop);
+  for (const rows of [1, 2, 3, 4, 5, 6, 5, 2, 1]) {
+    await editor.fill(Array.from({ length: rows }, () => '逐行面试输入').join('\n'));
+    const size = await editor.evaluate((node) => ({
+      height: node.getBoundingClientRect().height,
+      line: parseFloat(getComputedStyle(node).lineHeight),
+    }));
+    assert.ok(Math.abs(size.height - rows * size.line) <= 1, JSON.stringify({ rows, ...size }));
+  }
+  await editor.fill('中文组合中的面试草稿');
+  await editor.dispatchEvent('compositionstart', { data: '中' });
+  await editor.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true });
+  assert.equal(await editor.inputValue(), '中文组合中的面试草稿');
+  await editor.dispatchEvent('compositionend', { data: '中文' });
   await editor.fill(Array.from({ length: 12 }, (_, i) => '第' + i + '行合成输入').join('\n'));
   await floating.waitForFunction((initial) => {
     const panel = document.querySelector('.floating-answer');
@@ -352,30 +390,46 @@ try {
   const cdp = await floating.context().newCDPSession(floating);
   await cdp.send('DOM.enable');
   await cdp.send('CSS.enable');
-  await cdp.send('Emulation.setEmulatedMedia', {
-    features: [{ name: 'prefers-reduced-transparency', value: 'reduce' }],
-  });
-  for (const selector of [
-    '.floating-toolbar',
-    '.floating-composer',
-    '.floating-capture-notice',
-    '.answer-bubble',
+  const assertSolidControls = async () => {
+    for (const selector of [
+      '.floating-toolbar',
+      '.floating-composer',
+      '.floating-capture-notice',
+      '.answer-bubble',
+    ]) {
+      const reduced = await material(floating.locator(selector));
+      assert.equal(reduced.filter, 'none');
+      assert.equal(
+        reduced.fill,
+        await floating.locator(selector).evaluate((e) => {
+          const probe = document.createElement('span');
+          probe.style.backgroundColor = 'var(--surface)';
+          e.append(probe);
+          const color = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return color;
+        }),
+      );
+    }
+  };
+  for (const [name, value] of [
+    ['prefers-reduced-transparency', 'reduce'],
+    ['prefers-contrast', 'more'],
+    ['forced-colors', 'active'],
   ]) {
-    const reduced = await material(floating.locator(selector));
-    assert.equal(reduced.filter, 'none');
-    assert.equal(
-      reduced.fill,
-      await floating.locator(selector).evaluate((e) => {
-        const probe = document.createElement('span');
-        probe.style.color = 'var(--surface)';
-        e.append(probe);
-        const color = getComputedStyle(probe).color;
-        probe.remove();
-        return color;
-      }),
-    );
+    await cdp.send('Emulation.setEmulatedMedia', { features: [{ name, value }] });
+    await assertSolidControls();
+    await captureRequested(floating, 'interview-accessibility-' + name);
   }
   await cdp.send('Emulation.setEmulatedMedia', { features: [] });
+  await floating.evaluate(() => {
+    document.documentElement.dataset.frostedTransparency = '0';
+  });
+  await assertSolidControls();
+  await captureRequested(floating, 'interview-accessibility-zero-transparency');
+  await floating.evaluate(() => {
+    document.documentElement.dataset.frostedTransparency = '100';
+  });
   assert.deepEqual(await material(heading, '::before'), panelChrome);
   await settle(floating);
   assert.equal(
@@ -410,19 +464,30 @@ try {
       selector: '.floating-brand',
     });
     await cdp.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['hover'] });
-    const gaps = await floating.locator('.floating-toolbar').evaluate((e) => {
-      const toolbar = e.getBoundingClientRect(),
-        brand = e.querySelector('.floating-brand').getBoundingClientRect(),
-        last = e.querySelector('.floating-drag-handle').getBoundingClientRect();
-      return {
-        top: brand.top - toolbar.top,
-        bottom: toolbar.bottom - brand.bottom,
-        left: brand.left - toolbar.left,
-        right: toolbar.right - last.right,
-      };
-    });
+    const { gaps, padding, deviceScale } = await floating
+      .locator('.floating-toolbar')
+      .evaluate((e) => {
+        const toolbar = e.getBoundingClientRect(),
+          brand = e.querySelector('.floating-brand').getBoundingClientRect(),
+          last = e.querySelector('.floating-drag-handle').getBoundingClientRect();
+        return {
+          gaps: {
+            top: brand.top - toolbar.top,
+            bottom: toolbar.bottom - brand.bottom,
+            left: brand.left - toolbar.left,
+            right: toolbar.right - last.right,
+          },
+          padding: getComputedStyle(e).padding,
+          deviceScale: devicePixelRatio,
+        };
+      });
+    assert.equal(padding, '7px');
+    assert.ok(Math.abs(gaps.top - gaps.bottom) < 1 / 64, JSON.stringify(gaps));
+    assert.ok(Math.abs(gaps.left - gaps.right) < 1 / 64, JSON.stringify(gaps));
+    // Windows quantizes a frameless HWND to physical pixels at fractional DPI.
+    const tolerance = process.platform === 'win32' ? Math.max(0.1, 1 / deviceScale) : 0.1;
     assert.ok(
-      Math.max(...Object.values(gaps)) - Math.min(...Object.values(gaps)) < 0.1,
+      Math.max(...Object.values(gaps)) - Math.min(...Object.values(gaps)) <= tolerance,
       JSON.stringify(gaps),
     );
     await captureRequested(
@@ -445,6 +510,9 @@ try {
           width: box.width,
           height: box.height,
           radius: getComputedStyle(button).borderTopLeftRadius,
+          radii: ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map(
+            (corner) => getComputedStyle(button)['border' + corner + 'Radius'],
+          ),
           border: getComputedStyle(button).borderTopColor,
           idle: Number(getComputedStyle(button.querySelector('.button-morph-idle')).opacity),
           expanded: Number(
@@ -458,6 +526,7 @@ try {
     });
     return frames;
   });
+  verifyRoundCapFrames(endFrames);
   assert.ok(endFrames.every((frame) => frame.radius === '999px'));
   assert.ok(endFrames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
   const crossfading = (frame) =>

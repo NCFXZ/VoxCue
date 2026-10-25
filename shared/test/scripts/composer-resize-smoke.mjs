@@ -67,6 +67,24 @@ try {
         'Native foreground follows the anchored composer',
       );
   }
+  for (const rows of [...Array.from({ length: 10 }, (_, i) => i + 2), 10, 6, 2]) {
+    await input.fill(Array.from({ length: rows }, () => '逐行输入').join('\n'));
+    const size = await input.evaluate((node) => ({
+      height: node.getBoundingClientRect().height,
+      line: parseFloat(getComputedStyle(node).lineHeight),
+    }));
+    assert.ok(Math.abs(size.height - rows * size.line) <= 1, JSON.stringify({ rows, ...size }));
+  }
+  await input.fill('中文组合输入草稿');
+  await input.dispatchEvent('compositionstart', { data: '中' });
+  await input.dispatchEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true });
+  assert.equal(await input.inputValue(), '中文组合输入草稿');
+  assert.equal(await page.locator('.chat-message.user').count(), 0);
+  await input.dispatchEvent('compositionend', { data: '中文' });
+  await input.fill('');
+  console.log(
+    'Chat rows 2–11 and deletion resize immediately; composition Enter preserves the draft.',
+  );
   console.log('Composer wrap/newline/delete geometry passed; isolated synthetic input.');
 } finally {
   await closeUiApp(app);

@@ -6188,14 +6188,14 @@ small {
 /* The slider changes web surfaces only; native window materials stay unchanged. */
 :root.frosted-ui {
   --frosted-tint: 228 234 234;
-  --frosted-opacity: var(--frosted-opacity-light, 0.5);
+  --frosted-opacity: var(--windows-sidebar-opacity-light, var(--frosted-opacity-light, 0.5));
   --frosted-panel-tint: 250 250 252;
   --frosted-panel-opacity: var(--frosted-panel-light, 0.76);
   --sidebar: rgb(var(--frosted-tint) / var(--frosted-opacity));
 }
 :root.frosted-ui.dark {
   --frosted-tint: 26 35 39;
-  --frosted-opacity: var(--frosted-opacity-dark, 0.64);
+  --frosted-opacity: var(--windows-sidebar-opacity-dark, var(--frosted-opacity-dark, 0.64));
   --frosted-panel-tint: 29 35 39;
   --frosted-panel-opacity: var(--frosted-panel-dark, 0.82);
 }

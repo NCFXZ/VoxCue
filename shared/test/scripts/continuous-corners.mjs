@@ -1,5 +1,36 @@
 import assert from 'node:assert/strict';
 
+// Apply CSS radius normalization to measured animation frames. A 50% radius on
+// a wide button is an ellipse; checking only the final circle misses that bug.
+export function verifyRoundCapFrames(frames) {
+  assert.ok(frames.length >= 3, 'Round caps require intermediate animation frames');
+  for (const frame of frames) {
+    const { width, height, radii } = frame;
+    assert.ok(width >= height - 1 / 64 && height > 0, JSON.stringify(frame));
+    const corners = radii.map((radius) => {
+      const parts = radius.split(/\s+/);
+      return [parts[0], parts[1] ?? parts[0]].map((value, axis) =>
+        value.endsWith('%')
+          ? (parseFloat(value) * (axis ? height : width)) / 100
+          : parseFloat(value),
+      );
+    });
+    const factor = Math.min(
+      1,
+      width / (corners[0][0] + corners[1][0]),
+      width / (corners[3][0] + corners[2][0]),
+      height / (corners[0][1] + corners[3][1]),
+      height / (corners[1][1] + corners[2][1]),
+    );
+    assert.ok(
+      corners.every((corner) =>
+        corner.every((radius) => Math.abs(radius * factor - height / 2) < 1 / 64),
+      ),
+      'Effective end caps must stay semicircular: ' + JSON.stringify(frame),
+    );
+  }
+}
+
 // Inspect actual pages, including portal menus and generated selection marks.
 // Switching only the curve back to round must not change radii or box geometry.
 export async function verifyContinuousCorners(page, name) {

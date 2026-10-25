@@ -6,7 +6,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
-import { verifyContinuousCorners } from './continuous-corners.mjs';
+import { verifyContinuousCorners, verifyRoundCapFrames } from './continuous-corners.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -82,6 +82,9 @@ async function observeRoundCapMorph(control, trigger) {
           right: box.right,
           height: box.height,
           radius: getComputedStyle(button).borderTopLeftRadius,
+          radii: ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map(
+            (corner) => getComputedStyle(button)['border' + corner + 'Radius'],
+          ),
         });
         if (performance.now() - start < 450) requestAnimationFrame(sample);
         else resolve(frames);
@@ -91,6 +94,7 @@ async function observeRoundCapMorph(control, trigger) {
   });
   await trigger();
   const frames = await control.page().evaluate(() => globalThis.roundCapFrames);
+  verifyRoundCapFrames(frames);
   assert.ok(frames.length > 5);
   assert.ok(
     frames.every((frame) => frame.radius === '999px'),

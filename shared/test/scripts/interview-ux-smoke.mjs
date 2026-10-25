@@ -397,9 +397,17 @@ try {
   );
   assert.notEqual(layers['.floating-panel'].fill, layers['.answer-bubble'].fill);
   assert.equal(layers['.floating-toolbar'].fill, layers['.floating-panel'].fill);
+  const commonFill = await preview.locator('.floating-toolbar').evaluate((node) => {
+    const probe = document.createElement('span');
+    probe.style.backgroundColor = 'var(--web-material-fill)';
+    node.append(probe);
+    const fill = getComputedStyle(probe).backgroundColor;
+    probe.remove();
+    return fill;
+  });
   assert.equal(
     layers['.floating-toolbar'].image,
-    `linear-gradient(${layers['.answer-bubble'].fill}, ${layers['.answer-bubble'].fill}), none`,
+    `linear-gradient(${commonFill}, ${commonFill}), none`,
   );
   assert.notEqual(layers['.answer-bubble'].fill, layers['.floating-composer'].fill);
   assert.equal(layers['.answer-bubble'].fill, layers['.transcript-item p'].fill);

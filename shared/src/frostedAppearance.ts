@@ -1,6 +1,10 @@
 import { useEffect } from 'react';
 import { applyInterviewAppearance } from './interviewAppearance';
-import { frostedProfileAt, readMaterialTransparency } from './frostedProfiles';
+import {
+  frostedProfileAt,
+  readMaterialTransparency,
+  windowsMaterialTransparency,
+} from './frostedProfiles';
 
 // Shared preset only; do not read or rewrite old preferences.
 export function readFrostedTransparency(): number {
@@ -17,6 +21,14 @@ export function applyFrostedAppearance() {
     '--frosted-main-filter': active ? `blur(${blend('blur')}px) saturate(130%)` : 'none',
   };
   const root = document.documentElement;
+  if (window.desktop?.platform === 'windows') {
+    const sidebar = frostedProfileAt(windowsMaterialTransparency.sidebar);
+    root.style.setProperty('--windows-sidebar-opacity-light', String(sidebar('light')));
+    root.style.setProperty('--windows-sidebar-opacity-dark', String(sidebar('dark')));
+  } else {
+    root.style.removeProperty('--windows-sidebar-opacity-light');
+    root.style.removeProperty('--windows-sidebar-opacity-dark');
+  }
   root.style.removeProperty('--frosted-reading-opacity');
   root.style.removeProperty('--web-material-min-opacity');
   for (const [name, setting] of Object.entries(properties))

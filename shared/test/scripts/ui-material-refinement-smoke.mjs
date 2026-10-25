@@ -35,6 +35,7 @@ const modalStyle = async (dialog, backdrop = 'rgba(0, 0, 0, 0.4)') => {
   assert.deepEqual(style, { shadow: 'none', backdrop, filter: 'none' });
 };
 const hoverOnly = async (page, button) => {
+  await page.bringToFront();
   await page.mouse.move(1, 1);
   await button.evaluate((e) => e.blur());
   await settle(page);
@@ -43,8 +44,19 @@ const hoverOnly = async (page, button) => {
     'rgba(0, 0, 0, 0)',
   );
   assert.equal(await button.evaluate((e) => getComputedStyle(e).boxShadow), 'none');
+  await button.scrollIntoViewIfNeeded();
+  await settle(page);
   const before = await button.boundingBox();
   await button.hover();
+  await settle(page);
+  // Auto-scroll and the completed response can move a proposal after hover's
+  // first pointer dispatch. Hit its current center after that layout settles.
+  const target = await button.boundingBox();
+  await page.mouse.move(target.x + target.width / 2 - 1, target.y + target.height / 2, {
+    steps: 2,
+  });
+  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 2 });
+  await page.waitForFunction((node) => node.matches(':hover'), await button.elementHandle());
   await settle(page);
   assert.equal(
     await button.evaluate((e) => e.matches(':hover')),
@@ -142,6 +154,7 @@ try {
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('合成控件检查');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.proposal-view').first().waitFor();
+  await page.getByRole('button', { name: '停止回复', exact: true }).waitFor({ state: 'hidden' });
   for (const dark of [false, true]) {
     await theme(page, dark);
     for (const button of await page.locator('.proposal-view').all()) await hoverOnly(page, button);

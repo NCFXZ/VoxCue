@@ -222,12 +222,30 @@ try {
       await scroll.evaluate((node) => {
         node.scrollTop = 0;
       });
-      await page.waitForFunction(
-        (selector) =>
-          getComputedStyle(document.querySelector(selector + ' > header'), '::before').opacity ===
-          '0',
-        selector,
-      );
+      await page
+        .waitForFunction(
+          (selector) =>
+            Number(
+              getComputedStyle(document.querySelector(selector + ' > header'), '::before').opacity,
+            ) <=
+            1 / 64 / 24,
+          selector,
+        )
+        .catch(async (error) => {
+          const geometry = await panel.evaluate((node) => {
+            const heading = node.querySelector(':scope > header');
+            const scroll = node.querySelector('.personal-panel-scroll, .record-answer-scroll');
+            return {
+              opacity: getComputedStyle(heading, '::before').opacity,
+              heading: heading.getBoundingClientRect().toJSON(),
+              scrollTop: scroll.scrollTop,
+              first: scroll.firstElementChild.getBoundingClientRect().toJSON(),
+            };
+          });
+          throw Error(
+            error.message + ' Header reset geometry: ' + JSON.stringify({ selector, geometry }),
+          );
+        });
       const initial = await header.boundingBox();
       const first = await scroll.locator(':scope > :visible').first().boundingBox();
       assert.ok(

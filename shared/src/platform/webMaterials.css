@@ -178,6 +178,24 @@
 .web-materials.dark .interview-preview-shell {
   --interview-chrome-surface: color-mix(in srgb, var(--surface) 90%, white);
 }
+:root.web-materials[data-material-platform='windows']
+  :is(.floating-shell, .interview-preview-shell) {
+  --interview-bubble-opacity: var(--windows-interview-bubble-light);
+}
+:root.web-materials[data-material-platform='windows']
+  :is(.floating-shell, .interview-preview-shell)
+  :is(.transcript-item > p, .floating-question, .answer-bubble) {
+  --web-material-fill: color-mix(
+    in srgb,
+    var(--surface) calc(var(--interview-bubble-opacity) * 100%),
+    transparent
+  );
+}
+:root.web-materials[data-material-platform='windows'] .dark .interview-preview-shell,
+:root.web-materials.dark[data-material-platform='windows']
+  :is(.floating-shell, .interview-preview-shell) {
+  --interview-bubble-opacity: var(--windows-interview-bubble-dark);
+}
 :root.web-materials
   :is(.floating-shell, .interview-preview-shell)
   :is(.transcript-item > p, .floating-question, .answer-bubble, .interview-answer-failure) {
@@ -378,7 +396,10 @@
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   :root.web-materials,
-  :root.web-materials .interview-preview-shell {
+  :root.web-materials .interview-preview-shell,
+  :root.web-materials[data-material-platform='windows']
+    :is(.floating-shell, .interview-preview-shell)
+    :is(.transcript-item > p, .floating-question, .answer-bubble) {
     --web-material-fill: var(--surface);
     --web-material-filter: none;
     --interview-chrome-surface: var(--surface);
@@ -394,7 +415,10 @@
   background: var(--surface);
 }
 :root.web-materials[data-frosted-transparency='0'],
-:root.web-materials[data-frosted-transparency='0'] .interview-preview-shell {
+:root.web-materials[data-frosted-transparency='0'] .interview-preview-shell,
+:root.web-materials[data-frosted-transparency='0'][data-material-platform='windows']
+  :is(.floating-shell, .interview-preview-shell)
+  :is(.transcript-item > p, .floating-question, .answer-bubble) {
   --web-material-fill: var(--surface);
   --web-material-filter: none;
   --interview-chrome-surface: var(--surface);

@@ -122,22 +122,28 @@ async function seed(page) {
   }, bases);
 }
 async function size(page, width, height) {
-  // Playwright otherwise keeps its default 1280x720 emulation even when the
-  // native BrowserWindow changes size; set both surfaces and verify CSS size.
-  await page.setViewportSize({ width, height });
-  await app.evaluate(
+  // Observe the production resize after motion completes. Forcing setSize or
+  // viewport emulation here can resize the HWND before its exit animation ends.
+  await page.waitForFunction(() => !document.querySelector('.floating-shell').dataset.panelMotion);
+  await page.waitForFunction(
+    (expected) =>
+      Math.abs(innerWidth - expected.width) <= 1 && Math.abs(innerHeight - expected.height) <= 1,
+    { width, height },
+  );
+  const native = await app.evaluate(
     ({ BrowserWindow }, value) => {
       const window = BrowserWindow.getAllWindows().find(
         (w) => w.webContents.getURL() === value.url,
       );
       if (!window) throw Error('Fixture window disappeared');
-      window.setSize(value.width, value.height);
+      return window.getContentSize();
     },
     { url: page.url(), width, height },
   );
-  await page.waitForFunction(
-    (expected) => window.innerWidth === expected.width && window.innerHeight === expected.height,
-    { width, height },
+  const viewport = await page.evaluate(() => [innerWidth, innerHeight]);
+  assert.ok(
+    viewport.every((value, i) => Math.abs(value - native[i]) <= 1),
+    JSON.stringify({ native, viewport }),
   );
 }
 async function end(page) {
@@ -311,10 +317,25 @@ try {
   const toolbarWidth = (await floating.locator('.floating-toolbar').boundingBox()).width;
   assert.ok(toolbarWidth < 350, 'Toolbar should fit contents without empty space');
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-  await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 1);
-  assert.equal(await floating.locator('.floating-panel').count(), 1);
+  await floating.waitForFunction(
+    () =>
+      !document.querySelector('.floating-shell').dataset.panelMotion &&
+      [...document.querySelectorAll('.floating-panel')].filter((node) => node.checkVisibility())
+        .length === 1,
+  );
+  assert.equal(await floating.locator('.floating-panel:visible').count(), 1);
+  assert.equal(
+    await floating.locator('.floating-panel').count(),
+    2,
+    'Hidden transcript DOM is retained',
+  );
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-  await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 2);
+  await floating.waitForFunction(
+    () =>
+      !document.querySelector('.floating-shell').dataset.panelMotion &&
+      [...document.querySelectorAll('.floating-panel')].filter((node) => node.checkVisibility())
+        .length === 2,
+  );
   check('配置锁定、浮窗实时开关与固定置顶、底部说明删除');
   const sendSegment = async (id, text, final, source = 'system') =>
     app.evaluate(

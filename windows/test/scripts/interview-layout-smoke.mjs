@@ -274,12 +274,17 @@ try {
   );
   const panelBoxes = () =>
     floating.evaluate(() =>
-      [...document.querySelectorAll('.floating-panel')].map((node) => {
-        const b = node.getBoundingClientRect();
-        return { x: b.x, y: b.y, width: b.width, height: b.height };
-      }),
+      [...document.querySelectorAll('.floating-panel')]
+        .filter((node) => node.checkVisibility())
+        .map((node) => {
+          const b = node.getBoundingClientRect();
+          return { x: b.x, y: b.y, width: b.width, height: b.height };
+        }),
     );
   const assertRatios = async () => {
+    await floating.waitForFunction(
+      () => !document.querySelector('.floating-shell').dataset.panelMotion,
+    );
     // Await native viewport layout and its paint, rather than measuring the
     // previous frame immediately after an IPC reply.
     await floating.evaluate(
@@ -327,8 +332,14 @@ try {
   );
   const bothBounds = await nativeBounds();
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-  await floating.locator('.floating-panel').waitFor();
-  assert.equal(await floating.locator('.floating-panel').count(), 1);
+  await floating.locator('.floating-transcript').waitFor({ state: 'hidden' });
+  await assertRatios();
+  assert.equal(await floating.locator('.floating-panel:visible').count(), 1);
+  assert.equal(
+    await floating.locator('.floating-panel').count(),
+    2,
+    'Hidden transcript DOM is retained',
+  );
   const answerOnly = (await assertRatios())[0];
   assert.ok(Math.abs(answerOnly.width - initial[1].width) < 1);
   assert.ok(Math.abs(answerOnly.height - initial[1].height) < 1);
@@ -345,7 +356,7 @@ try {
     false,
   );
   assert.equal(
-    await floating.locator('.floating-panel').count(),
+    await floating.locator('.floating-panel:visible').count(),
     1,
     'Reload preserves hidden transcript geometry',
   );
@@ -700,7 +711,12 @@ try {
   );
   const visibleAnswer = (await panelBoxes()).at(-1);
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
-  await floating.waitForFunction(() => document.querySelectorAll('.floating-panel').length === 1);
+  await floating.waitForFunction(
+    () =>
+      !document.querySelector('.floating-shell').dataset.panelMotion &&
+      [...document.querySelectorAll('.floating-panel')].filter((node) => node.checkVisibility())
+        .length === 1,
+  );
   await floating.waitForFunction(
     (width) =>
       Math.abs(document.querySelector('.floating-answer').getBoundingClientRect().width - width) <=
@@ -717,6 +733,11 @@ try {
   const hiddenSmall = (await assertRatios())[0];
   const hiddenBounds = await nativeBounds();
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
+  await floating.waitForFunction(
+    () =>
+      document.querySelector('.floating-shell').classList.contains('is-collapsed') &&
+      !document.querySelector('.floating-shell').dataset.panelMotion,
+  );
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
   await assertRatios();
   const expandedBounds = await nativeBounds();

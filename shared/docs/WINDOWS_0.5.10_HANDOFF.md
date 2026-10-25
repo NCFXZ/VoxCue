@@ -1,5 +1,7 @@
 # Windows 0.5.9 → 0.5.10 完整交接与逐项验收
 
+2026-10-25 Windows已按下列60项完成本机检查和修复后复测，生成配置已同步0.5.10。用户随后明确授权源码与Windows安装包上传，并将v0.5.10设为Latest；Windows三项已补入，Mac原三项保持。最新Windows专属三项透明度、结果/修复清单、正式包与线上认证及人工边界见[本机验收账本](WINDOWS_0.5.10_VERIFICATION.md)。下文保留Mac交出时的基线和逐项验收要求；其中Windows待执行/未发行/保留Latest的阶段描述已由本说明取代，不授权未来自动发布。
+
 ## 交接基线与使用方法
 
 - 源码仓库：私有 `NCFXZ/VoxCue`，分支 `main`。比较基线是 `48c44aad80563dcb274a24e66b8c8a0245fa1661`（`Complete Windows 0.5.9 packaging and record scrolling`）；本报告随本次 0.5.10 源码提交交付。用 `git diff 48c44aa..HEAD` 核对整个版本差异，不只看最后一次文档编辑。

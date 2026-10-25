@@ -21,6 +21,8 @@ if (suites[0] === '--dpi') {
     'profile-selection',
     'typography',
     'interview-typography',
+    'interview-chrome',
+    'interview-motion',
     'interview-screenshot',
     'interview-retry',
     'interview-ux',
@@ -109,40 +111,48 @@ const commands = windowsOnly
   : [['../shared/test/scripts/functional-suite.mjs', ...suites]];
 const models = windowsOnly ? await prepareModelFixtures() : null;
 let failed = false;
-for (const args of commands) {
-  requireDesktop();
-  const child = spawnTestProcess(process.execPath, args, {
-    env: {
-      ...process.env,
-      ...(models
-        ? {
-            VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
-            VOXCUE_TEST_RAG_MODEL: models.ragModel,
-            VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
-          }
-        : {}),
-    },
-    stdio: ['ignore', 'pipe', 'pipe'],
-    windowsHide: true,
-  });
-  let output = '';
-  child.stdout.on('data', (data) => {
-    output += data;
-    if (!windowsOnly) process.stdout.write(data);
-  });
-  child.stderr.on('data', (data) => {
-    output += data;
-    if (!windowsOnly) process.stderr.write(data);
-  });
-  const timer = setTimeout(() => child.kill(), windowsOnly ? 180000 : 900000);
-  const code = await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', resolve);
-  }).finally(() => clearTimeout(timer));
-  if (windowsOnly) {
-    console.log((code === 0 ? 'PASS ' : 'FAIL ') + args[0]);
-    if (code !== 0) console.error(output);
+const nativeCursor = windowsOnly ? probe('cursor') : undefined;
+try {
+  for (const args of commands) {
+    requireDesktop();
+    if (nativeCursor) probe('move', 0, 0);
+    const child = spawnTestProcess(process.execPath, args, {
+      env: {
+        ...process.env,
+        ...(models
+          ? {
+              VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+              VOXCUE_TEST_RAG_MODEL: models.ragModel,
+              VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+            }
+          : {}),
+      },
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+    });
+    let output = '';
+    child.stdout.on('data', (data) => {
+      output += data;
+      if (!windowsOnly) process.stdout.write(data);
+    });
+    child.stderr.on('data', (data) => {
+      output += data;
+      if (!windowsOnly) process.stderr.write(data);
+    });
+    // The shared runner bounds each of its 45 suites, including a 10-minute soak.
+    // Its outer watchdog must allow the complete serial matrix to finish.
+    const timer = setTimeout(() => child.kill(), windowsOnly ? 180000 : 4 * 60 * 60 * 1000);
+    const code = await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', resolve);
+    }).finally(() => clearTimeout(timer));
+    if (windowsOnly) {
+      console.log((code === 0 ? 'PASS ' : 'FAIL ') + args[0]);
+      if (code !== 0) console.error(output);
+    }
+    if (code !== 0) failed = true;
   }
-  if (code !== 0) failed = true;
+} finally {
+  if (nativeCursor) probe('move', nativeCursor.x, nativeCursor.y);
 }
 if (failed) process.exitCode = 1;

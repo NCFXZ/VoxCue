@@ -388,11 +388,11 @@ try {
     }, value);
     assert.equal(
       await main.evaluate(() => document.documentElement.dataset.frostedTransparency),
-      '60',
+      '100',
     );
     assert.equal(
       await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
-      '60',
+      '100',
     );
     assert.equal(
       await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
@@ -402,13 +402,18 @@ try {
       const style = getComputedStyle(document.documentElement);
       return {
         panel: Number(style.getPropertyValue('--frosted-panel-light')),
-        reading: Number(style.getPropertyValue('--frosted-reading-light')),
+        panelDark: Number(style.getPropertyValue('--frosted-panel-dark')),
+        retiredReading: style.getPropertyValue('--frosted-reading-light'),
+        filter: getComputedStyle(document.querySelector('.floating-composer')).backdropFilter,
+        panelFilter: getComputedStyle(document.querySelector('.floating-panel')).backdropFilter,
         shadow: getComputedStyle(document.querySelector('.floating-composer textarea')).textShadow,
       };
     });
-    assert.ok(surface.reading >= surface.panel);
+    assert.equal(surface.retiredReading, '');
     assert.ok(Math.abs(surface.panel - 0.8496) < 0.000001);
-    assert.ok(Math.abs(surface.reading - 0.8992) < 0.000001);
+    assert.ok(Math.abs(surface.panelDark - 0.8872) < 0.000001);
+    assert.equal(surface.filter, 'blur(24px) saturate(1.25)');
+    assert.equal(surface.panelFilter, 'none');
     assert.equal(surface.shadow, 'none');
     assert.equal(
       await app.evaluate(({ BrowserWindow }) =>

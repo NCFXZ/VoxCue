@@ -8,6 +8,8 @@ const profiles = [
     blur: 0,
     panelLight: 1,
     panelDark: 1,
+    readingLight: 1,
+    readingDark: 1,
   },
   {
     value: 25,
@@ -16,6 +18,8 @@ const profiles = [
     blur: 20,
     panelLight: 0.92,
     panelDark: 0.94,
+    readingLight: 0.86,
+    readingDark: 0.9,
   },
   {
     value: 50,
@@ -24,6 +28,8 @@ const profiles = [
     blur: 36,
     panelLight: 0.76,
     panelDark: 0.82,
+    readingLight: 0.62,
+    readingDark: 0.68,
   },
   {
     value: 100,
@@ -32,9 +38,18 @@ const profiles = [
     blur: 0,
     panelLight: 0.12,
     panelDark: 0.18,
+    readingLight: 0.16,
+    readingDark: 0.24,
   },
 ] as const;
 type ProfileKey = Exclude<keyof (typeof profiles)[number], 'value'>;
+
+// Windows-only settings from 0.5.9. Other glass retains the shared preset below.
+export const windowsMaterialTransparency = {
+  sidebar: 60,
+  interviewBackground: 60,
+  interviewBubbles: 60,
+} as const;
 
 // Shared preview preset, explicitly enabled for both desktop platforms.
 export function readMaterialTransparency(): number {

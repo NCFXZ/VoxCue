@@ -119,9 +119,13 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
       if (iconOnly) assert.equal(await button.innerText(), '');
       else assert.match(await button.locator('.download-button-progress').innerText(), /\d+%/);
       assert.equal(await page.locator('progress').count(), 0);
+      await button.scrollIntoViewIfNeeded();
       await settle(button);
       const before = await button.boundingBox();
       await button.hover();
+      await settle(button);
+      const target = await button.boundingBox();
+      await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
       await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
       await settle(button);
       assert.equal(await button.locator('.download-button-progress').isVisible(), false);

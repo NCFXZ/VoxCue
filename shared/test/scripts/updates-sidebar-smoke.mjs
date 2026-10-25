@@ -3,6 +3,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { verifyRoundCapFrames } from './continuous-corners.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -127,16 +128,28 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
       globalThis.updateMorphFrames = new Promise((resolve) => {
         const frames = [];
         const start = performance.now();
+        let triggered;
+        globalThis.updateMorphTriggered = () => {
+          triggered = performance.now();
+        };
         const sample = () => {
           const style = getComputedStyle(element);
           frames.push({
             width: element.getBoundingClientRect().width,
+            height: element.getBoundingClientRect().height,
             radius: style.borderTopLeftRadius,
+            radii: ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map(
+              (corner) => style['border' + corner + 'Radius'],
+            ),
             border: style.borderTopColor,
             idle: Number(getComputedStyle(element.querySelector(selectors[0])).opacity),
             expanded: Number(getComputedStyle(element.querySelector(selectors[1])).opacity),
           });
-          if (performance.now() - start < 450) requestAnimationFrame(sample);
+          if (
+            performance.now() - start < 3000 &&
+            (triggered === undefined || performance.now() - triggered < 450)
+          )
+            requestAnimationFrame(sample);
           else resolve(frames);
         };
         sample();
@@ -145,14 +158,20 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
     [idleSelector, expandedSelector],
   );
   await trigger();
+  await button.page().evaluate(() => globalThis.updateMorphTriggered());
   const frames = await button.page().evaluate(() => globalThis.updateMorphFrames);
+  verifyRoundCapFrames(frames);
   assert.ok(frames.every((frame) => frame.radius === '999px'));
   assert.ok(frames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
   assert.ok(
     frames.some(
       (frame) => frame.idle > 0 && frame.idle < 1 && frame.expanded > 0 && frame.expanded < 1,
     ),
-    'Icon and full label crossfade together',
+    'Icon and full label crossfade together: ' +
+      JSON.stringify({
+        expanded,
+        frames: frames.map(({ width, idle, expanded }) => ({ width, idle, expanded })),
+      }),
   );
   assert.equal(frames.at(-1).idle, expanded ? 0 : 1);
   assert.equal(frames.at(-1).expanded, expanded ? 1 : 0);
@@ -173,8 +192,8 @@ const collapsedAction = async (page, button) => {
       await control.hover();
       const box = await control.boundingBox();
       const sidebarBox = await page.locator('.sidebar').boundingBox();
-      assert.equal(box.width, 44);
-      assert.equal(box.height, 44);
+      assert.equal(Math.round(box.width * 64), 44 * 64);
+      assert.equal(Math.round(box.height * 64), 44 * 64);
       assert.ok(Math.abs(box.x + box.width / 2 - sidebarBox.x - sidebarBox.width / 2) < 1);
     }
     await page.getByRole('button', { name: '面试记录', exact: true }).hover();

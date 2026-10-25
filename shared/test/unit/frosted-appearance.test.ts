@@ -37,7 +37,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it('主窗口和面试使用最高透明档，忽略全部旧值且不读写偏好', () => {
+it('共用材质预设保持100，Windows三层独立固定60%且不读写旧偏好', () => {
   for (const value of ['0', '20', '60', '100', 'off', 'strong', 'broken']) {
     for (const key of keys) values.set(key, value);
     expect(readFrostedTransparency()).toBe(100);
@@ -45,12 +45,15 @@ it('主窗口和面试使用最高透明档，忽略全部旧值且不读写偏�
     applyFrostedAppearance();
     expect(document.documentElement.dataset.frostedTransparency).toBe('100');
     expect(document.documentElement.dataset.interviewTransparency).toBe('100');
+    expect(Number(properties.get('--windows-sidebar-opacity-light'))).toBeCloseTo(0.4);
+    expect(Number(properties.get('--windows-sidebar-opacity-dark'))).toBeCloseTo(0.512);
     for (const key of keys) expect(values.get(key)).toBe(value);
   }
   expect(storage.getItem).not.toHaveBeenCalled();
   expect(storage.setItem).not.toHaveBeenCalled();
 });
-it('Mac和Windows共用旧曲线最高档，不读写旧偏好', () => {
+it('Mac参数保持原值，Windows专用参数不会遗留到Mac', () => {
+  applyFrostedAppearance();
   vi.stubGlobal('window', { desktop: { platform: 'macos' } });
   applyFrostedAppearance();
   expect(readFrostedTransparency()).toBe(100);
@@ -61,6 +64,13 @@ it('Mac和Windows共用旧曲线最高档，不读写旧偏好', () => {
   expect(properties.has('--web-material-min-opacity')).toBe(false);
   expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.632);
   expect(Number(properties.get('--frosted-panel-dark'))).toBeCloseTo(0.692);
+  for (const key of [
+    '--windows-sidebar-opacity-light',
+    '--windows-sidebar-opacity-dark',
+    '--windows-interview-bubble-light',
+    '--windows-interview-bubble-dark',
+  ])
+    expect(properties.has(key)).toBe(false);
   expect(storage.getItem).not.toHaveBeenCalled();
   expect(storage.setItem).not.toHaveBeenCalled();
   vi.stubGlobal('window', { desktop: { platform: 'windows' } });
@@ -74,13 +84,15 @@ it('主窗口最高档不叠加网页滤镜，交给系统材质', () => {
   expect(Number(properties.get('--frosted-opacity-dark'))).toBeCloseTo(0, 10);
   expect(properties.get('--frosted-main-filter')).toBe('none');
 });
-it('面试大背景保留60曲线，内部玻璃不再设置独立底色', () => {
+it('Windows仅背景和文字气泡恢复0.5.9的60%映射，保留其他玻璃参数', () => {
   applyInterviewAppearance();
   expect(properties.has('--frosted-reading-dark')).toBe(false);
   expect(properties.has('--frosted-chrome-dark')).toBe(false);
   for (const [key, value] of Object.entries({
-    '--frosted-panel-light': 0.632,
-    '--frosted-panel-dark': 0.692,
+    '--frosted-panel-light': 0.8496,
+    '--frosted-panel-dark': 0.8872,
+    '--windows-interview-bubble-light': 0.8992,
+    '--windows-interview-bubble-dark': 0.928,
   }))
     expect(Number(properties.get(key))).toBeCloseTo(value, 10);
 });

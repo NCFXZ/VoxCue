@@ -32,7 +32,7 @@ export async function checkImageSaveHit(app, page, viewer) {
       const icon = await save.locator('svg').boundingBox();
       assert.equal(Math.round(icon.width * 64), 17 * 64);
       assert.equal(Math.round(icon.height * 64), 17 * 64);
-      const point = async (dx, dy) =>
+      const point = async (dx, dy, area = box) =>
         app.evaluate(
           ({ BrowserWindow, screen }, value) => {
             const win = BrowserWindow.fromId(value.id),
@@ -44,8 +44,8 @@ export async function checkImageSaveHit(app, page, viewer) {
           },
           {
             id: await window.evaluate((win) => win.id),
-            x: box.x + box.width / 2 + dx,
-            y: box.y + box.height / 2 + dy,
+            x: area.x + area.width / 2 + dx,
+            y: area.y + area.height / 2 + dy,
           },
         );
       for (const [dx, dy] of [
@@ -94,9 +94,30 @@ export async function checkImageSaveHit(app, page, viewer) {
           'Outside points do not hover save',
         );
       }
+      for (const [dx, dy] of [
+        [0, 0],
+        [-16, 0],
+        [16, 0],
+        [0, -16],
+        [0, 16],
+      ]) {
+        const closeBox = await close.boundingBox();
+        assert.equal(Math.round(closeBox.width * 64), 36 * 64);
+        assert.equal(Math.round(closeBox.height * 64), 36 * 64);
+        const closeIcon = await close.locator('svg').boundingBox();
+        assert.equal(Math.round(closeIcon.width * 64), 17 * 64);
+        assert.equal(Math.round(closeIcon.height * 64), 17 * 64);
+        const location = await point(dx, dy, closeBox);
+        assert.equal(probe('hit', before.handle, location.x, location.y).expected, true);
+        assert.equal(probe('hittest', before.handle, location.x, location.y).result, 1);
+        probe('click', before.handle, location.x, location.y);
+        await viewer.waitFor({ state: 'hidden' });
+        await page.locator('.interview-image-thumbnail').first().click();
+        await viewer.locator('.interview-image-canvas img').waitFor();
+      }
     }
     console.log(
-      'PASS: Windows native screenshot save center/four edges in light/dark, 36px hit area, 17px stable icon, no-drag HTCLIENT and outside hover exclusion',
+      'PASS: Windows native screenshot save/close center/four edges in light/dark, 36px hit areas, 17px stable icons, no-drag HTCLIENT and outside save hover exclusion',
     );
     const framework = path.join(process.env.WINDIR, 'Microsoft.NET/Framework64/v4.0.30319');
     const executable = path.join(testRoot, 'ImageSaveDialog.exe');

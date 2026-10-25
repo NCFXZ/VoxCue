@@ -5,6 +5,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/personal-info-')));
 const app = await electron.launch({
@@ -13,6 +14,60 @@ const app = await electron.launch({
 });
 const checks = [],
   errors = [];
+async function verifySkillPromptLayout(page, action) {
+  const window = await app.browserWindow(page);
+  const original = await window.evaluate((win) => win.getBounds());
+  const prompt = page.locator('.skill-update-prompt');
+  await prompt.getByRole('button', { name: action, exact: true }).waitFor();
+  try {
+    for (const width of [1280, 960]) {
+      await window.evaluate((win, bounds) => win.setBounds(bounds), { ...original, width });
+      await page.waitForFunction(() =>
+        document
+          .getAnimations()
+          .every((a) => a.effect?.getTiming().iterations === Infinity || a.playState !== 'running'),
+      );
+      const layout = await prompt.locator(':scope > div').evaluate((footer) => {
+        const outer = footer.getBoundingClientRect();
+        const buttons = [...footer.querySelectorAll(':scope > button')];
+        const rows = [];
+        for (const button of buttons) {
+          const box = button.getBoundingClientRect();
+          let row = rows.find((value) => Math.abs(value.top - box.top) < 1);
+          if (!row) rows.push((row = { top: box.top, left: box.left, right: box.right }));
+          row.left = Math.min(row.left, box.left);
+          row.right = Math.max(row.right, box.right);
+        }
+        return {
+          labels: buttons.map((button) => button.textContent.trim()),
+          offsets: rows.map((row) => (row.left + row.right - outer.left - outer.right) / 2),
+          overflow: footer.scrollWidth > footer.clientWidth + 1,
+        };
+      });
+      assert.deepEqual(layout.labels, [action, '暂不更新']);
+      assert.ok(
+        layout.offsets.every((offset) => Math.abs(offset) < 1),
+        JSON.stringify(layout),
+      );
+      assert.equal(layout.overflow, false);
+      await prompt.getByRole('button', { name: action, exact: true }).focus();
+      await page.keyboard.press('Tab');
+      assert.equal(
+        await prompt
+          .getByRole('button', { name: '暂不更新', exact: true })
+          .evaluate((e) => e === document.activeElement),
+        true,
+      );
+      console.log(JSON.stringify({ skillPrompt: action, width, ...layout }));
+      await captureRequested(
+        page,
+        `skill-prompt-${action === '联网更新技能' ? 'complete' : 'missing'}-${width}`,
+      );
+    }
+  } finally {
+    await window.evaluate((win, bounds) => win.setBounds(bounds), original);
+  }
+}
 try {
   await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
@@ -311,6 +366,7 @@ try {
     .locator('.skill-update-prompt')
     .getByText('简历或职位描述已更新，是否联网更新面试技能？', { exact: true })
     .waitFor();
+  await verifySkillPromptLayout(page, '联网更新技能');
   await page
     .locator('.skill-update-prompt')
     .getByRole('button', { name: '暂不更新', exact: true })
@@ -637,6 +693,7 @@ try {
     buffer: Buffer.from('Synthetic job requirements.'),
   });
   const beforeMissing = await app.evaluate(() => globalThis.profileRequests.length);
+  await verifySkillPromptLayout(page, '补充职位描述');
   await page.getByRole('button', { name: '补充职位描述', exact: true }).click();
   assert.equal(await page.locator('.skill-update-prompt').count(), 0);
   const missingDraft = await message.inputValue();

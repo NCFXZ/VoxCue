@@ -1,11 +1,38 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { writeFile } from 'node:fs/promises';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+const fixture = path.join(testRoot, 'motion-entry.cjs');
+await writeFile(
+  fixture,
+  `
+const {ipcMain}=require('electron');
+const handle=ipcMain.handle.bind(ipcMain);
+globalThis.motionIpcCalls=0;
+globalThis.motionIpcTrace=[];
+ipcMain.handle=(channel,handler)=>handle(channel,async(...args)=>{
+  if(channel!=='interview:transcript') return handler(...args);
+  globalThis.motionIpcCalls++;
+  const failure=globalThis.motionIpcFailure;
+  globalThis.motionIpcTrace.push({failure,visible:args[1]});
+  globalThis.motionIpcFailure=null;
+  if(failure==='before') throw Error('Synthetic motion IPC rejection');
+  const result=await handler(...args);
+  if(failure==='late') {
+    await new Promise(resolve=>{globalThis.motionIpcRelease=resolve;});
+    globalThis.motionIpcRelease=null;
+    throw Error('Synthetic late motion IPC rejection');
+  }
+  return result;
+});
+require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});
+`,
+);
 const app = await electron.launch({
-  args: [await offlineElectronEntry()],
+  args: [await offlineElectronEntry(fixture)],
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: path.join(testRoot, 'interview-motion'),
@@ -43,6 +70,12 @@ try {
   await page.locator('.floating-brand').waitFor();
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await click(page.getByRole('button', { name: '静音后自动提交完整问题', exact: true }));
+  // Drain the port fixture's delayed opening segment before Playwright's
+  // select-all/insert-text sequence establishes the manual draft.
+  await page
+    .locator('.transcript-item p')
+    .filter({ hasText: /^Synthetic interviewer question$/ })
+    .waitFor();
   await page.getByRole('textbox', { name: '面试提问', exact: true }).fill('动画期间保留的草稿');
   const seed = async (start, count) =>
     app.evaluate(
@@ -225,6 +258,65 @@ try {
   );
   assert.equal(await scroller.evaluate((e) => e.scrollTop), 140);
   assert.deepEqual(await contours(), originalContours);
+  await app.evaluate(() => {
+    globalThis.motionIpcFailure = 'before';
+  });
+  await click(toggle);
+  await page.getByText('窗口切换失败，请重试。', { exact: true }).waitFor();
+  await idle();
+  assert.equal((await nativeState()).transcriptVisible, true);
+  assert.equal(await page.locator('.floating-transcript').isVisible(), true);
+  assert.deepEqual(await bounds(), panelBounds, 'Rejected IPC preserves the confirmed canvas');
+  await app.evaluate(() => {
+    globalThis.motionIpcFailure = 'late';
+  });
+  await click(toggle);
+  await page.waitForFunction(
+    async () => !(await window.desktop.interviewState()).transcriptVisible,
+  );
+  await app.evaluate(async () => {
+    const deadline = Date.now() + 5000;
+    while (typeof globalThis.motionIpcRelease !== 'function' && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    if (typeof globalThis.motionIpcRelease !== 'function')
+      throw Error(
+        'Late IPC fixture did not become pending: ' + JSON.stringify(globalThis.motionIpcTrace),
+      );
+  });
+  const calls = await app.evaluate(() => globalThis.motionIpcCalls);
+  await click(toggle);
+  assert.equal(
+    await app.evaluate(() => globalThis.motionIpcCalls),
+    calls,
+    'Pending IPC retains the motion lock',
+  );
+  await app.evaluate(() => {
+    if (typeof globalThis.motionIpcRelease !== 'function') throw Error('Late IPC was not pending');
+    globalThis.motionIpcRelease();
+  });
+  await idle();
+  assert.equal(await page.locator('.floating-transcript').isHidden(), true);
+  await click(toggle);
+  await idle();
+  assert.equal((await nativeState()).transcriptVisible, true);
+  assert.deepEqual(await bounds(), panelBounds, 'Retry restores the canvas after a late failure');
+  assert.equal(await scroller.evaluate((e) => e.scrollTop), 140);
+  await scroller.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await page.waitForFunction(
+    () => !document.querySelector('.floating-transcript > .follow-latest'),
+  );
+  await click(toggle);
+  await idle();
+  await seed(21, 2);
+  await page.locator('.transcript-item').nth(21).waitFor({ state: 'attached' });
+  await click(toggle);
+  await idle();
+  assert.ok(
+    await scroller.evaluate((node) => node.scrollHeight - node.scrollTop - node.clientHeight <= 1),
+    'A bottom-following transcript resumes at the bottom after hidden live updates',
+  );
   await captureRequested(page, 'motion-restored');
   assert.deepEqual(errors, []);
   // Closing our isolated window while its animation is pending must release it.
@@ -241,7 +333,7 @@ try {
       .destroy(),
   );
   console.log(
-    'PASS: continuous corner/shadow preservation, timed vertical and horizontal panel motion, native resize ordering, rapid-click serialization, draft/scroll persistence through hidden live updates, reduced-motion cancellation, repeated toggles and closing during motion.',
+    'PASS: continuous corner/shadow preservation, timed panel motion, native resize ordering, rapid-click serialization, draft/scroll persistence, reduced-motion cancellation, IPC rejection/late-result reconciliation and retry, repeated toggles and closing during motion.',
   );
 } finally {
   await closeUiApp(app);
