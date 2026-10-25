@@ -4,7 +4,7 @@
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 
-Windows **0.5.11** 已发布并设为 **Latest**：[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-Setup-0.5.11-x64.exe)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.11)。本版修复 ChatGPT 启动及登录恢复耗时过长的问题，减少聊天、面试回答和账户额度刷新时的不必要等待。0.5.10 保持撤回、非公开状态；Mac 0.5.11 待其本机[审查与验包](shared/docs/MACOS_0.5.11_HANDOFF.md)。应用按本平台完整资产的最高版本检查更新；Windows 本轮证据与未覆盖范围见 [0.5.11 验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)。
+Mac 与 Windows **0.5.11** 已发布并设为 **Latest**：[Mac arm64 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-0.5.11-arm64.dmg)、[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-Setup-0.5.11-x64.exe)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.11)。本版修复 ChatGPT 启动及登录恢复耗时过长的问题，减少聊天、面试回答和账户额度刷新时的不必要等待，并修复 Mac 更新准备与组件校验的加载动画。0.5.10 保持撤回、非公开状态；分平台完整资产选版保持。独立本机证据与待人工范围见 [Mac M01–M12 验收](shared/docs/MACOS_0.5.11_VERIFICATION.md) 和 [Windows 验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)。
 
 当前源码支持 ChatGPT 和 GitHub Copilot 登录。ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权。凭据由现有系统保护接口保存；Local RAG 固定为 local-v7-current-source-first，模型、索引和依赖保持。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；安装包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
 

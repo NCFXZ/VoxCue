@@ -5,6 +5,7 @@ import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import { verifyRoundCapFrames } from './continuous-corners.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
+import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -31,8 +32,11 @@ driver.downloadUpdate=signal=>new Promise((resolve,reject)=>{
  signal.addEventListener('abort',()=>reject(Error('cancelled')),{once:true});
 });
 driver.quitAndInstall=()=>{
+ globalThis.finishInstall=()=>{
  require('node:fs').writeFileSync(require('node:path').join(app.getPath('userData'),'installed.json'),JSON.stringify({explicit:true}));
  app.quit();
+ };
+ if(!globalThis.holdInstall)globalThis.finishInstall();
 };
 globalThis.updateDriver=driver;
 globalThis.updateConfirmation=0;
@@ -394,7 +398,21 @@ try {
   assert.equal(page.isClosed(), false, 'Default save confirmation cancels installation');
   await page.evaluate(() => window.desktop.updateSessionState(false));
   const exited = app.waitForEvent('close');
+  await app.evaluate(() => {
+    globalThis.holdInstall = true;
+  });
   await install.click();
+  const preparing = sidebar.getByRole('button', { name: '正在准备更新', exact: true });
+  await preparing.waitFor();
+  assert.equal(await preparing.isDisabled(), true);
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    await assertLoadingIcon(page, preparing.locator('.update-spinner'));
+    await captureRequested(preparing, 'restart-preparing-' + (dark ? 'dark' : 'light'), {
+      animations: 'allow',
+    });
+  }
+  await app.evaluate(() => globalThis.finishInstall());
   await exited;
   app = undefined;
   assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'installed.json'), 'utf8')), {

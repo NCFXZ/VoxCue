@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Button } from './ui/button';
-import { X } from './icons';
+import { Loader, X } from './icons';
 
 export function DownloadButton({
   label,
@@ -52,18 +52,22 @@ export function DownloadButton({
           aria-valuenow={value}
           aria-valuetext={status}
         >
-          <svg viewBox="0 0 24 24" aria-hidden="true">
-            <circle className="download-ring-track" cx="12" cy="12" r="9" />
-            <circle
-              className="download-ring-value"
-              cx="12"
-              cy="12"
-              r="9"
-              pathLength="100"
-              strokeDasharray={value === undefined ? '25 75' : '100 100'}
-              strokeDashoffset={value === undefined ? 0 : 100 - value}
-            />
-          </svg>
+          {value === undefined && window.desktop?.platform === 'macos' ? (
+            <Loader size={20} />
+          ) : (
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <circle className="download-ring-track" cx="12" cy="12" r="9" />
+              <circle
+                className="download-ring-value"
+                cx="12"
+                cy="12"
+                r="9"
+                pathLength="100"
+                strokeDasharray={value === undefined ? '25 75' : '100 100'}
+                strokeDashoffset={value === undefined ? 0 : 100 - value}
+              />
+            </svg>
+          )}
         </span>
         {!iconOnly && (
           <span aria-hidden="true">

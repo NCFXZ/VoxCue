@@ -6,6 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { captureRequested } from './capture-requested.mjs';
+import { assertLoadingIcon } from './assert-loading-icon.mjs';
 
 for (const name of ['profile', 'tmp', 'home'])
   await mkdir(path.join(testRoot, name), { recursive: true });
@@ -291,6 +292,22 @@ try {
         await other.getByRole('button', { name: '下载', exact: true }).isEnabled(),
         true,
       );
+    }
+    if (process.platform === 'darwin') {
+      await app.evaluate(() => {
+        const service = globalThis.uiComponents;
+        service.value.items[0].phase = 'verifying';
+        service.publish('verifying');
+      });
+      const verifying = rows.first().locator('.download-ring');
+      await verifying.waitFor();
+      assert.equal(await verifying.getAttribute('aria-valuenow'), null);
+      assert.equal(await verifying.getAttribute('aria-valuetext'), '校验中');
+      await page.mouse.move(1, 1);
+      await assertLoadingIcon(page, verifying);
+      await captureRequested(rows.first().locator('.download-button'), 'component-verifying', {
+        animations: 'allow',
+      });
     }
     await app.evaluate(() => {
       const service = globalThis.uiComponents;

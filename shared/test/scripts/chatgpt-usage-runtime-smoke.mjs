@@ -31,12 +31,21 @@ const runtime = new CodexUsageRuntime(path.join(testRoot, 'usage'), (binary, arg
     HTTPS_PROXY: proxyUrl,
     ALL_PROXY: proxyUrl,
     NO_PROXY: '',
+    http_proxy: proxyUrl,
+    https_proxy: proxyUrl,
+    all_proxy: proxyUrl,
+    no_proxy: '',
     CFFIXED_USER_HOME: testRoot,
   };
   return process.platform === 'darwin'
     ? spawnTestProcess(
         '/usr/bin/sandbox-exec',
-        ['-p', '(version 1)(allow default)(deny network*)', binary, ...argv],
+        [
+          '-p',
+          `(version 1)(allow default)(deny network*)(allow network-outbound (remote tcp "localhost:${proxy.address().port}"))`,
+          binary,
+          ...argv,
+        ],
         { ...options, env },
       )
     : spawnTestProcess(binary, argv, { ...options, env });
@@ -87,7 +96,7 @@ try {
     clearTimeout(timer);
   }
   console.log(
-    `PASS: pinned official OAuth RPC, empty account and valid fabricated session restored in ${Math.round(performance.now() - started)}ms with ${process.platform === 'darwin' ? 'network denied (not a stalled-proxy latency check)' : 'remote traffic stalled'}; no real OAuth or system credential access.`,
+    `PASS: pinned official OAuth RPC, empty account and valid fabricated session restored in ${Math.round(performance.now() - started)}ms with remote traffic stalled (Mac permits only this owned loopback port); no real OAuth or system credential access.`,
   );
 } finally {
   await runtime.stop();

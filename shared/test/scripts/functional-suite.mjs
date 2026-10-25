@@ -53,6 +53,7 @@ const shared = [
   'speech-soak',
 ];
 const mac = [
+  'chatgpt-renewal',
   'icons',
   'window-native',
   'screen-permission',

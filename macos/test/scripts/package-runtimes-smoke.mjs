@@ -48,6 +48,8 @@ app.whenReady().then(async()=>{
  const launch=(binary,args,options)=>require('node:child_process').spawn('/usr/bin/sandbox-exec',['-p','(version 1)(allow default)(deny network*)',binary,...args.map(v=>v==='cli_auth_credentials_store="keyring"'?'cli_auth_credentials_store="file"':v)],{...options,env:{...options.env,...env}});
  const runtime=new CodexUsageRuntime(path.join(directory,'codex'),launch,${JSON.stringify(version)});
  try{assert.equal(await runtime.account(),null);console.log('PASS: final ASAR fixed Codex subprocess account RPC, isolated empty file fixture and denied network');}finally{await runtime.stop();}
+ const {verifyCodexRenewal}=await import(${JSON.stringify(new URL('./codex-renewal-fixture.mjs', import.meta.url).href)});
+ await verifyCodexRenewal({Runtime:CodexUsageRuntime,spawn:require('node:child_process').spawn,root:path.join(directory,'renewal')});
  app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1);});
 `,

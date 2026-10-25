@@ -37,7 +37,23 @@ function icon(name: keyof typeof symbols) {
             <image href={source} width="24" height="24" />
           </mask>
         </defs>
-        <rect width="24" height="24" fill="currentColor" mask={`url(#${id})`} />
+        {name === 'Loader' ? (
+          <g mask={`url(#${id})`}>
+            <g className="macos-loading-sweep">
+              {Array.from({ length: 12 }, (_, index) => (
+                <path
+                  key={index}
+                  d="M12 12 L12 -12 A24 24 0 0 1 24 -8.785 Z"
+                  transform={`rotate(${index * 30} 12 12)`}
+                  fill="currentColor"
+                  opacity={0.15 + (index / 11) * 0.85}
+                />
+              ))}
+            </g>
+          </g>
+        ) : (
+          <rect width="24" height="24" fill="currentColor" mask={`url(#${id})`} />
+        )}
       </svg>
     );
   };

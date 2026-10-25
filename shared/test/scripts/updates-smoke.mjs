@@ -6,6 +6,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
 import { assertDownloadButton, assertInitialDownloadProgress } from './assert-download-button.mjs';
+import { assertLoadingIcon } from './assert-loading-icon.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/updates-')));
@@ -104,6 +105,10 @@ const waitPhase = (page, phase) =>
 const assertLoadingMotion = async (page, button) => {
   assert.equal(await button.isDisabled(), true);
   const spinner = button.locator('span:has(> svg)');
+  if (process.platform === 'darwin') {
+    await assertLoadingIcon(page, spinner);
+    return 1;
+  }
   const initial = await spinner.evaluate((element) => {
     const style = getComputedStyle(element);
     return {

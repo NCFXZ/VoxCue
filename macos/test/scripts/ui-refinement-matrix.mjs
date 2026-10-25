@@ -14,7 +14,14 @@ const requestedScale = process.argv.find((arg) => arg.startsWith('--scale='))?.s
 const scales = requestedScale ? [requestedScale] : ['1', '1.25', '1.5', '1.75', '2'];
 assert.ok(scales.every((scale) => ['1', '1.25', '1.5', '1.75', '2'].includes(scale)));
 for (const scale of scales) {
-  for (const name of ['ui-alignment', 'ui-refinement', 'interview-screenshot']) {
+  for (const name of [
+    'ui-alignment',
+    'ui-refinement',
+    'interview-screenshot',
+    'typography',
+    'updates-sidebar',
+    'components-ui',
+  ]) {
     const child = spawnTestProcess(
       process.execPath,
       [path.join(workspace.sharedRoot, 'test/scripts', name + '-smoke.mjs')],

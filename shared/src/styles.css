@@ -6076,9 +6076,26 @@ small {
 .download-ring.is-indeterminate {
   animation: update-spin 1s linear infinite;
 }
+/* Keep the Mac SF Symbol stationary while its spokes brighten in sequence. */
+:root svg[data-sf-symbol='progress.indicator'] {
+  animation: none;
+}
+:is(.update-spinner, .conversation-spinner, .download-ring.is-indeterminate):has(
+  > svg[data-sf-symbol='progress.indicator']
+) {
+  animation: none;
+}
+.download-ring > svg[data-sf-symbol='progress.indicator'] {
+  transform: none;
+}
+.macos-loading-sweep {
+  transform-origin: 12px 12px;
+  animation: update-spin 1s steps(12) infinite;
+}
 @media (prefers-reduced-motion: reduce) {
   .download-ring.is-indeterminate,
-  .update-spinner {
+  .update-spinner,
+  .macos-loading-sweep {
     animation: none;
   }
 }
