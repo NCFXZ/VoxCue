@@ -2,7 +2,10 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  connectUiAccount,
+  installUiAccount,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 import { execFileSync } from 'node:child_process';
 
@@ -38,7 +41,7 @@ const checks = [],
   errors = [];
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(await login.locator('.window-controls').count(), 0);
   assert.deepEqual(
     await app.evaluate(({ BrowserWindow }) =>
@@ -50,10 +53,7 @@ try {
   await captureRequested(login, 'mac-login-native-chrome');
   checks.push('登录窗口使用系统左上角控件，HTML 中没有 Windows 窗口按钮');
   await installUiAccount(app);
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.on('pageerror', (error) => errors.push(error.message));
   const surface = page;
   const input = () => surface.getByRole('textbox', { name: '聊天消息', exact: true });

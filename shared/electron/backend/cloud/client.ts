@@ -45,6 +45,7 @@ const messages: Record<string, string> = {
   busy: '服务繁忙，请稍后重试。',
   mail_unavailable: '验证码服务尚未配置，请稍后重试。',
   unauthorized: '登录已过期，请重新登录。',
+  account_disabled: '该账号已被停用，请联系支持。',
   knowledge_capacity: '云端剩余空间不足，请清理不需要的云端数据后重试。',
   storage_capacity: '云端剩余空间不足，请清理不需要的云端数据后重试。',
   revision_conflict: '两端数据都有更新，请选择要保留的版本。',
@@ -53,6 +54,8 @@ const messages: Record<string, string> = {
   session_active: '其他设备已有面试正在计时，请先结束该场面试。',
   invalid_activation: '激活码无效或已失效。',
 };
+const safeMessage = (code: unknown, fallback: string) =>
+  typeof code === 'string' && Object.hasOwn(messages, code) ? messages[code] : fallback;
 const record = (value: unknown): Record<string, unknown> => {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw new Failure('服务器响应无效。');
@@ -189,6 +192,7 @@ export class CloudAccountClient {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    if (response.status === 401) await this.clear();
     const reader = response.body?.getReader();
     if (!reader) throw new Failure('服务器响应无效。');
     let size = 0;
@@ -210,9 +214,10 @@ export class CloudAccountClient {
     const result = record(JSON.parse(Buffer.concat(parts).toString('utf8')));
     if (!response.ok) {
       const code = record(result.error).code;
+      if (response.status === 403 && code === 'account_disabled') await this.clear();
       const retry = Number(response.headers.get('retry-after'));
       throw new Failure(
-        messages[String(code)] ?? '服务暂不可用，请稍后重试。',
+        safeMessage(code, '服务暂不可用，请稍后重试。'),
         response.status,
         Number.isFinite(retry) && retry > 0 ? Math.min(retry, 3600) : undefined,
       );
@@ -287,6 +292,8 @@ export class CloudAccountClient {
         },
         ...(body instanceof Uint8Array ? { body: Buffer.from(body) } : {}),
       });
+      if (response.status === 401) await this.clear();
+      const binaryResponse = binary && response.ok;
       const reader = response.body?.getReader();
       if (!reader) throw new Failure('云端响应无效。');
       const chunks: Uint8Array[] = [];
@@ -296,7 +303,8 @@ export class CloudAccountClient {
           const chunk = await reader.read();
           if (chunk.done) break;
           bytes += chunk.value.byteLength;
-          if (bytes > 1048576) throw new Failure('云端分块过大。');
+          if (bytes > (binaryResponse ? 1048576 : 32768))
+            throw new Failure(binaryResponse ? '云端分块过大。' : '服务器响应过大。');
           chunks.push(chunk.value);
         }
       } catch (error) {
@@ -312,8 +320,9 @@ export class CloudAccountClient {
         try {
           code = JSON.parse(result.toString()).error?.code;
         } catch {}
+        if (response.status === 403 && code === 'account_disabled') await this.clear();
         throw new Failure(
-          messages[code] ?? '云同步请求失败，请稍后重试。',
+          safeMessage(code, '云同步请求失败，请稍后重试。'),
           response.status,
           Math.min(3600, Math.max(1, Number(response.headers.get('retry-after')) || 1)),
         );
@@ -387,7 +396,10 @@ export class CloudAccountClient {
           },
         };
       } else if (action === 'login' || action === 'register' || action === 'reset') {
-        const password = action === 'login' ? call.password : normalizeCloudPassword(call.password);
+        const normalized = normalizeCloudPassword(call.password);
+        // Legacy login keeps the original bytes, but never sends malformed UTF-16.
+        const password =
+          action === 'login' && normalized !== undefined ? call.password : normalized;
         if (!validCloudEmail(call.email)) throw new Failure('请输入有效的邮箱地址。');
         if (!text(password, 1024)) throw new Failure('请输入密码。');
         if (

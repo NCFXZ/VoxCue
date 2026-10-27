@@ -1,7 +1,11 @@
 import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
-import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  connectUiAccount,
+  installUiAccount,
+  closeUiApp,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { readFile, mkdir, lstat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
@@ -14,11 +18,13 @@ import { signMacApp } from '../../scripts/sign-app.mjs';
 import { localSigningCertificate, verifyLocalApp } from '../../scripts/development-signing.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
+import { holdDesktopAwake } from './desktop-session.mjs';
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
 ).version;
-const release = path.join(workspace.platformRoot, 'release', version);
+const release =
+  process.env.VOXCUE_TEST_RELEASE_DIR || path.join(workspace.platformRoot, 'release', version);
 const zip = path.join(release, `VoxCue-${version}-arm64.zip`);
 const root = path.join(testRoot, 'installed');
 await mkdir(root);
@@ -91,6 +97,16 @@ assert.equal(
 const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
 assert.equal(
+  JSON.parse(
+    asar.extractFile(path.join(resources, 'app.asar'), 'node_modules/zod/package.json').toString(),
+  ).version,
+  '4.6.6',
+);
+assert.ok(
+  !entries.some((file) => /\/node_modules\/zod\/.* \d+\./.test(file)),
+  'File Provider numbered replicas must not enter the runtime archive',
+);
+assert.equal(
   JSON.parse(asar.extractFile(path.join(resources, 'app.asar'), 'package.json').toString()).version,
   version,
 );
@@ -116,7 +132,7 @@ assert.deepEqual(
   await readFile(path.join(workspace.platformRoot, 'public/voxcue.icns')),
   'The final application must carry the current branded ICNS artwork',
 );
-assert.ok(!entries.some((file) => /^\/(?:\.tools|\.git|test|windows)\//.test(file)));
+assert.ok(!entries.some((file) => /^\/(?:\.tools|\.git|test|server|admin|windows)\//.test(file)));
 assert.ok(!entries.some((file) => file.includes('ed25519.key')));
 assert.ok(
   !entries.some((file) =>
@@ -185,6 +201,34 @@ await withMountedDmg(
 console.log(
   'PASS: final DMG preserves the signed ZIP app, installation layout and Retina background.',
 );
+assert.equal(
+  run('/usr/libexec/PlistBuddy', [
+    '-c',
+    'Print :LSMinimumSystemVersion',
+    path.join(bundle, 'Contents/Info.plist'),
+  ]).trim(),
+  '14.2',
+);
+const runtime = spawnSync(
+  path.join(bundle, 'Contents/MacOS/VoxCue'),
+  [
+    '-e',
+    'console.log(JSON.stringify({electron:process.versions.electron,arch:process.arch,abi:process.versions.modules}))',
+  ],
+  { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } },
+);
+assert.equal(runtime.status, 0, runtime.stderr);
+assert.deepEqual(JSON.parse(runtime.stdout), { electron: '44.10.0', arch: 'arm64', abi: '149' });
+console.log(
+  'PASS: actual final executable is Electron44.10.0/arm64/ABI149; bundle minimum is macOS14.2.',
+);
+if (process.argv.includes('--static-only')) {
+  console.log(
+    'PENDING: packaged window/Worker/component/update staging acceptance requires unlocked desktop; static artifact checks passed.',
+  );
+  process.exit(2);
+}
+const releaseDesktop = holdDesktopAwake();
 const installArchive = process.argv.includes('--install-archive');
 if (installArchive) {
   run('/usr/libexec/PlistBuddy', [
@@ -232,7 +276,21 @@ const app = await electron.launch({
 });
 try {
   const page = await app.firstWindow();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  assert.equal(
+    await app.evaluate(() => process.versions.electron),
+    workspace.platformRequire('electron/package.json').version,
+  );
+  assert.equal(
+    await page.evaluate(() =>
+      window.desktop.enterDemo().then(
+        () => false,
+        () => true,
+      ),
+    ),
+    true,
+    'Packaged demo entry must be rejected before fixture injection',
+  );
   const fixtures = require(path.join(workspace.sharedRoot, 'test/scripts/rag-fixtures.cjs'));
   const checks = await app.evaluate(
     async ({ app, utilityProcess, net }, fixture) => {
@@ -436,10 +494,7 @@ try {
     'Removed presentation binding must not ship',
   );
   await installUiAccount(app, { components: true, speech: true });
-  const [mainPage] = await Promise.all([
-    app.waitForEvent('window'),
-    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const mainPage = await connectUiAccount(app, page);
   {
     await mainPage.waitForFunction(() =>
       document.documentElement.classList.contains('web-materials'),
@@ -554,6 +609,7 @@ try {
     );
   }
 } finally {
+  releaseDesktop();
   await closeUiApp(app);
 }
 

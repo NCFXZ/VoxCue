@@ -27,6 +27,9 @@ function visit(directory) {
   for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
     if (entry.name.startsWith('.') || skipped.has(entry.name)) continue;
     const file = path.join(directory, entry.name);
+    // Independent read-only API fixture; never treat its deployment files as
+    // desktop sources or traverse its private state and generated resources.
+    if (file === path.join(workspace.sharedRoot, 'server')) continue;
     // The private CPython stdlib/vendor tree contains upstream cross-platform
     // support files. build:qwen authenticates every byte and checks all Mach-O
     // deployment targets; it is not project-owned Windows/Mac source.

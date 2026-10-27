@@ -4,11 +4,11 @@
 
 客户端默认连接 https://accounts.voxcue.com.cn，配套[独立服务端 0.5.1](https://github.com/NCFXZ/VoxCue-server)部署在腾讯云首尔，邮件使用腾讯云 SES。本轮服务端源码、配置和部署只读；同步在客户端默认关闭，本地资料始终保留。
 
-**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；先逐条验证，再做全量、对抗、安全及UI视觉验收。
+**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本次Mac任务仅上传源码，不公开发行安装包。
 
 **当前公开发行是Windows 0.6.0**：[下载安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.0/VoxCue-Setup-0.6.0-x64.exe)、[发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.0)、[本机验包与发行记录](shared/docs/WINDOWS_0.6.0_RELEASE.md)。用户后续授权发行并隐藏旧版；17个旧Windows/Mac发行已转为可恢复草稿，84个资产保留。Mac0.6.0待本机适配验收，目前没有公开Mac安装包；模型下载资源保持公开。
 
-当前工作区共享版本源为 **0.6.0**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。本轮 Windows 生成配置已同步，Mac 生成配置、依赖锁及新运行时原生验收需在 Mac 本机接续。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+当前工作区共享版本源为 **0.6.0**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。Mac本轮已同步自己的生成配置和依赖锁，实际构建运行Electron44.10.0；Windows目录及锁保持只读。Mac原生、视觉与人工边界见本机验证记录。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 

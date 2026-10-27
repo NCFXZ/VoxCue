@@ -9,6 +9,7 @@ export function CloudStorageSummary() {
   const storage = useCloudSync((s) => s.storage);
   const used = storage ? kinds.reduce((sum, [kind]) => sum + storage.storedBytes[kind], 0) : 0;
   const capacity = storage?.capacityBytes || 0;
+  const scale = Math.max(capacity, used);
   return (
     <section className="cloud-storage-summary" aria-label="云端容量">
       <div className="cloud-storage-heading">
@@ -24,7 +25,7 @@ export function CloudStorageSummary() {
             key={kind}
             className={`storage-${kind}`}
             style={{
-              width: `${capacity ? Math.min(100, (storage!.storedBytes[kind] / capacity) * 100) : 0}%`,
+              width: `${scale ? Math.min(100, (storage!.storedBytes[kind] / scale) * 100) : 0}%`,
             }}
             title={`${label}：${storage?.storedBytes[kind] || 0} 字节`}
           />

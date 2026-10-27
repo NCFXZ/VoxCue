@@ -1,6 +1,10 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { closeUiApp, installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  closeUiApp,
+  connectUiAccount,
+  installUiAccount,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 import { mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -178,17 +182,14 @@ try {
   }
   app = await launch(next);
   page = await app.firstWindow();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(
     await page.evaluate(() => window.desktop.authSession()),
     null,
     'Legacy SIWC credentials require the current managed login',
   );
   await installUiAccount(app);
-  [page] = await Promise.all([
-    app.waitForEvent('window'),
-    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  page = await connectUiAccount(app, page);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -257,10 +258,7 @@ try {
   app = await launch(next);
   page = await app.firstWindow();
   await installUiAccount(app);
-  [page] = await Promise.all([
-    app.waitForEvent('window'),
-    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  page = await connectUiAccount(app, page);
   const reopenedSurface = page;
   await reopenedSurface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await reopenedSurface.waitForFunction(

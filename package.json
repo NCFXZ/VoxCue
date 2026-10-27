@@ -23,6 +23,7 @@
     "format": "node shared/scripts/run.mjs format",
     "package:installer": "node shared/scripts/run.mjs package:installer",
     "package:portable": "node shared/scripts/run.mjs package:portable",
+    "postinstall": "node shared/scripts/run.mjs postinstall",
     "start": "node shared/scripts/run.mjs start",
     "test": "node shared/scripts/run.mjs test",
     "test:adversarial": "node shared/scripts/run.mjs test:adversarial",

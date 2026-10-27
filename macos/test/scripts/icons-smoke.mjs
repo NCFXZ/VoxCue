@@ -3,7 +3,11 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  installUiAccount,
+  connectUiAccount,
+  closeUiApp,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/icons-native-')));
@@ -81,7 +85,7 @@ const verifyIcons = async (page, minimum) => {
 };
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await verifyIcons(login, 4);
   await login.screenshot({ animations: 'disabled' });
   const assets = await app.evaluate(({ nativeImage, app }, symbols) => {
@@ -182,9 +186,7 @@ try {
       ...(call.op === 'devices' ? { devices } : {}),
     });
   });
-  const mainOpened = app.waitForEvent('window');
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
-  const page = await mainOpened;
+  const page = await connectUiAccount(app, login);
   page.on('pageerror', (error) => errors.push(error.message));
   const surface = page;
   await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
@@ -203,13 +205,13 @@ try {
   const dark = await verifyIcons(page, 20);
   assert.ok(dark.some((item) => item.color !== 'rgb(0, 0, 0)'));
   await settings.screenshot({ animations: 'disabled' });
-  await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
+  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const officialUsage = settings.getByRole('link', { name: '查看官方用量', exact: true });
   assert.equal(await officialUsage.getAttribute('href'), 'https://chatgpt.com/settings/usage');
   assert.equal(await officialUsage.locator('svg').count(), 0);
   assert.equal(await settings.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
   assert.equal(new Set([symbols.Refresh, symbols.Reset, symbols.Update]).size, 3);
-  await settings.getByRole('button', { name: '更新', exact: true }).click();
+  await settings.getByRole('button', { name: '关于与更新', exact: true }).click();
   await settings.getByRole('button', { name: '检查更新', exact: true }).waitFor();
   assert.equal(
     await settings

@@ -5,6 +5,7 @@ import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { holdDesktopAwake } from './desktop-session.mjs';
 
 // One authenticated temporary model set, serial native/Worker/switch checks,
 // then actual release of handles and managed deletion. No user model cache.
@@ -19,6 +20,7 @@ const packages = packagesFor('darwin', 'arm64');
 const cacheSource = process.env.VOXCUE_TEST_COMPONENT_CACHE;
 const cachedPackages = packages.filter((pkg) => ['speech', 'qwen'].includes(pkg.id));
 let previous;
+const pending = [];
 const service = new ComponentService({
   root: models,
   packages,
@@ -60,10 +62,22 @@ try {
   await run('qwen-native-smoke', [paths.qwenModels]);
   await run('qwen-worker-smoke', [paths.qwenModels]);
   await run('speech-switch-smoke', ['--fixture=' + fixture]);
-  await run('components-smoke', [], {
-    ...process.env,
-    VOXCUE_TEST_QWEN_MODELS: paths.qwenModels,
-  });
+  let releaseDesktop;
+  try {
+    releaseDesktop = holdDesktopAwake();
+  } catch (error) {
+    pending.push('components-smoke: ' + error.message);
+    console.log('PENDING: ' + pending.at(-1));
+  }
+  if (releaseDesktop)
+    try {
+      await run('components-smoke', [], {
+        ...process.env,
+        VOXCUE_TEST_QWEN_MODELS: paths.qwenModels,
+      });
+    } finally {
+      releaseDesktop();
+    }
   const removal = path.join(testRoot, 'removal-fixture.json');
   await writeFile(removal, JSON.stringify({ testRoot, root: models, component: paths.qwenModels }));
   await run('qwen-removal-smoke', [removal]);
@@ -73,3 +87,5 @@ try {
     for (const pkg of cachedPackages)
       await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);
 }
+console.log(JSON.stringify({ passed: 5 - pending.length, total: 5, pending }));
+if (pending.length) process.exitCode = 2;

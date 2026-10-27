@@ -1,6 +1,7 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -52,10 +53,21 @@ const fixture = path.join(directory, 'entry.cjs');
 await writeFile(
   fixture,
   `
-const {app}=require('electron');
+const {app,safeStorage}=require('electron');
+app.commandLine.appendSwitch('use-mock-keychain');
 const path=require('node:path');
 const root=${JSON.stringify(workspace.platformRoot)};app.setAppPath(root);
 const base=path.join(root,'dist-electron/shared/electron');
+if(process.platform==='darwin'){
+  const cryptoPort=require(path.join(root,'dist-electron/macos/electron/credentials.js'));
+  cryptoPort.createCredentialEncryption=()=>({encrypt:value=>safeStorage.encryptString(value),decrypt:value=>safeStorage.decryptString(value)});
+  const childProcess=require('node:child_process');
+  const spawn=childProcess.spawn;
+  childProcess.spawn=function(executable,...args){
+    if(String(executable).endsWith('/VoxCue.Credentials'))throw new Error('Cloud fixture must never launch the production credential helper');
+    return spawn.call(this,executable,...args);
+  };
+}
 const {ComponentService}=require(path.join(base,'backend/components/service.js'));
 const componentState=ComponentService.prototype.state;
 ComponentService.prototype.state=function(){const state=componentState.call(this);return {...state,phase:'ready',error:null,items:state.items.map(item=>({...item,phase:'ready',received:item.bytes}))};};
@@ -128,6 +140,49 @@ try {
   );
   const panel = page.getByRole('region', { name: 'VoxCue 账号' });
   await panel.locator('form').waitFor();
+  assert.deepEqual(
+    await app.evaluate(async ({ ipcMain, BrowserWindow }) => {
+      // Invoke the actual registered guards with foreign frame identities.
+      // This is a deterministic main-process guard probe, not an iframe UI test.
+      const sender = BrowserWindow.getAllWindows()[0].webContents;
+      const results = [];
+      for (const [channel, call] of [
+        ['cloud:account', { action: 'status' }],
+        ['cloud:usage', { action: 'status' }],
+        ['cloud:sync', { action: 'list', userId: 'a0000000-0000-4000-8000-000000000001' }],
+      ])
+        for (const senderFrame of [null, {}]) {
+          try {
+            await ipcMain._invokeHandlers.get(channel)({ sender, senderFrame }, call);
+            results.push(false);
+          } catch (error) {
+            results.push(/Unauthorized/.test(String(error)));
+          }
+        }
+      return results;
+    }),
+    Array(6).fill(true),
+  );
+  assert.deepEqual(
+    await page.evaluate(async () => {
+      const denied = (work) =>
+        work.then(
+          () => false,
+          () => true,
+        );
+      return Promise.all([
+        denied(
+          window.desktop.cloudSync({
+            action: 'list',
+            userId: 'a0000000-0000-4000-8000-000000000001',
+          }),
+        ),
+        denied(window.desktop.cloudUsage({ action: 'status' })),
+      ]);
+    }),
+    [true, true],
+    'The login window cannot access sync or quota IPC',
+  );
   if (loginCheck)
     console.log(
       'LOGIN_GEOMETRY=' +
@@ -205,6 +260,13 @@ try {
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(15));
     await panel.getByRole('button', { name: '获取验证码', exact: true }).click();
     await panel.getByRole('status').filter({ hasText: '垃圾邮件' }).waitFor();
+    const resend = Number(
+      (await panel.getByRole('button', { name: /秒后重发/ }).innerText()).match(/\d+/)[0],
+    );
+    assert.ok(
+      resend > 0 && resend <= 60,
+      'A new 60-second resend deadline must never display 61 seconds',
+    );
     await outbox.runOnce();
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages.at(-1).code);
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(14));
@@ -425,6 +487,26 @@ try {
       assert.equal(await main.evaluate(() => window.desktop.authSession()), null);
       assert.equal(await settings.getByText('synthetic@example.test', { exact: true }).count(), 0);
       await settings.getByRole('button', { name: '云同步', exact: true }).click();
+      const foreignOwner = 'a0000000-0000-4000-8000-000000000002';
+      await main.evaluate(
+        (owner) => localStorage.setItem('voxcue-sync-owner', owner),
+        foreignOwner,
+      );
+      await settings.getByRole('switch', { name: '同步个人信息', exact: true }).click();
+      await settings
+        .getByText('本机资料已绑定其他 VoxCue 账号，请切回原账号后同步。', { exact: true })
+        .waitFor();
+      assert.equal(
+        await settings
+          .getByRole('switch', { name: '同步个人信息', exact: true })
+          .getAttribute('aria-checked'),
+        'false',
+      );
+      assert.equal(
+        await main.evaluate(() => localStorage.getItem('voxcue-sync-owner')),
+        foreignOwner,
+      );
+      await main.evaluate(() => localStorage.removeItem('voxcue-sync-owner'));
       for (const label of ['个人信息', '面试记录', '知识库'])
         await settings.getByRole('switch', { name: '同步' + label, exact: true }).click();
       await main.waitForFunction(
@@ -796,19 +878,29 @@ try {
       }, components);
       const loader = settings.locator('svg.ui-loader').first();
       await loader.waitFor();
-      const firstRotation = await loader.evaluate((element) => getComputedStyle(element).transform);
-      await main.waitForTimeout(140);
-      assert.notEqual(
-        await loader.evaluate((element) => getComputedStyle(element).transform),
-        firstRotation,
-        'Loader artwork must rotate on Windows.',
-      );
-      await main.emulateMedia({ reducedMotion: 'reduce' });
-      assert.equal(
-        await loader.evaluate((element) => getComputedStyle(element).animationName),
-        'none',
-      );
-      await main.emulateMedia({ reducedMotion: 'no-preference' });
+      if (process.platform === 'darwin') {
+        assert.equal(
+          await loader.evaluate((element) => getComputedStyle(element).transform),
+          'none',
+        );
+        await assertLoadingIcon(main, loader.locator('..'));
+      } else {
+        const firstRotation = await loader.evaluate(
+          (element) => getComputedStyle(element).transform,
+        );
+        await main.waitForTimeout(140);
+        assert.notEqual(
+          await loader.evaluate((element) => getComputedStyle(element).transform),
+          firstRotation,
+          'Loader artwork must rotate on Windows.',
+        );
+        await main.emulateMedia({ reducedMotion: 'reduce' });
+        assert.equal(
+          await loader.evaluate((element) => getComputedStyle(element).animationName),
+          'none',
+        );
+        await main.emulateMedia({ reducedMotion: 'no-preference' });
+      }
       await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
       const prompt = main.locator('.skill-update-prompt');
       if (await prompt.count()) {
@@ -1059,7 +1151,7 @@ try {
         await new Promise((resolve) => setTimeout(resolve, 45000));
       }
       console.log(
-        'Cloud client Windows smoke: primary registration, encrypted credentials, independent AI settings, three sync categories, exact counts, 100 MB shared quota with profile priority, matched cloud icons, light/dark geometry and cloud-only file deletion passed.',
+        `Cloud client ${process.platform} smoke: primary registration, encrypted credentials, independent AI settings, three sync categories, exact counts, 100 MB shared quota with profile priority, matched cloud icons, light/dark geometry and cloud-only file deletion passed.`,
       );
     }
   }

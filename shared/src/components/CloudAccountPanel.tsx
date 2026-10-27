@@ -48,17 +48,19 @@ export function CloudAccountPanel({
     try {
       const result = await useCloudAccount.getState().call(call);
       if (!alive.current) return;
+      const receivedAt = Date.now();
+      setNow(receivedAt);
       if (!result.ok) {
         setError(result.error);
-        if (result.retryAfterSeconds) setBlockedUntil(Date.now() + result.retryAfterSeconds * 1000);
+        if (result.retryAfterSeconds) setBlockedUntil(receivedAt + result.retryAfterSeconds * 1000);
         return;
       }
       if (result.challenge) {
         setChallenge({
           id: result.challenge.id,
-          expiresAt: Date.now() + result.challenge.expiresInSeconds * 1000,
+          expiresAt: receivedAt + result.challenge.expiresInSeconds * 1000,
         });
-        setResendAt(Date.now() + result.challenge.retryAfterSeconds * 1000);
+        setResendAt(receivedAt + result.challenge.retryAfterSeconds * 1000);
         setMessage('验证码将发送至邮箱，请检查收件箱和垃圾邮件。');
       }
       if (result.message) setMessage(result.message);
@@ -109,6 +111,10 @@ export function CloudAccountPanel({
     }
     if (!password) {
       setError('请输入密码。');
+      return;
+    }
+    if (normalizeCloudPassword(password) === undefined) {
+      setError('密码包含无效字符或过长，请重新输入。');
       return;
     }
     if (mode !== 'login') {

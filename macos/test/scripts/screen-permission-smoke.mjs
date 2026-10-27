@@ -2,7 +2,11 @@ import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  connectUiAccount,
+  installUiAccount,
+  closeUiApp,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/screen-permission-')));
@@ -14,7 +18,7 @@ const checks = [],
   errors = [];
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   const unauthorized = await login.evaluate(async () => {
     try {
       await window.desktop.screenCapturePermission('request');
@@ -115,9 +119,7 @@ try {
       throw Error('Permission flows must not capture images');
     };
   });
-  const next = app.waitForEvent('window');
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
-  const page = await next;
+  const page = await connectUiAccount(app, login);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   const start = () => page.getByRole('button', { name: '开始面试', exact: true }).click();

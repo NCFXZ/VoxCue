@@ -1,5 +1,6 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { assertLoadingIcon } from './assert-loading-icon.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -81,12 +82,7 @@ try {
   const slot = await row.locator('.conversation-indicator').boundingBox();
   assert.ok(Math.abs(slot.width - 14) < 0.01, 'Status slot width remains 14 CSS pixels');
   assert.ok(Math.abs(slot.height - 14) < 0.01, 'Status slot height remains 14 CSS pixels');
-  assert.notEqual(
-    await row
-      .locator('.conversation-spinner')
-      .evaluate((node) => getComputedStyle(node).animationName),
-    'none',
-  );
+  await assertLoadingIcon(page, row.locator('.conversation-spinner'));
   await page.screenshot({});
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await finish();

@@ -3,6 +3,49 @@ import { InterviewLease, readEntitlements } from '../../electron/backend/cloud/l
 import { CloudFailure } from '../../electron/backend/cloud/client';
 
 describe('interview time lease', () => {
+  it.each([401, 402, 403, 404, 409, 410, 'wrong-id', 'wrong-sequence'])(
+    'invalidates a live lease after a rejected or mismatched heartbeat: %s',
+    async (failure) => {
+      let clock = 0;
+      const notices: string[] = [];
+      const reply = {
+        id: '22222222-2222-4222-8222-222222222222',
+        sequence: 0,
+        state: 'active',
+        canContinue: true,
+        leaseRemainingMs: 60000,
+        permanent: false,
+        remainingSeconds: 600,
+      };
+      const lease = new InterviewLease(
+        {
+          async api(route) {
+            if (!route.endsWith('/heartbeat')) return reply;
+            if (typeof failure === 'number') throw new CloudFailure('Synthetic rejection', failure);
+            return {
+              ...reply,
+              id: failure === 'wrong-id' ? '33333333-3333-4333-8333-333333333333' : reply.id,
+              sequence: failure === 'wrong-sequence' ? 2 : 1,
+            };
+          },
+        },
+        (message) => notices.push(message),
+        () => clock,
+      );
+      try {
+        await lease.start();
+        clock = 15000;
+        await lease.tick();
+        expect(lease.active()).toBe(false);
+        expect(() => lease.assertActive()).toThrow();
+        await lease.tick();
+        expect(notices).toHaveLength(1);
+        expect(lease.snapshot()?.reason).toBe('connection');
+      } finally {
+        await lease.stop();
+      }
+    },
+  );
   it('uses a monotonic deadline, rejects expired usage and does not extend an offline lease', async () => {
     let clock = 0,
       offline = false;

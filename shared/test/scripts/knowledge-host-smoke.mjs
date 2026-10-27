@@ -197,7 +197,10 @@ async function runInElectron() {
       const child = host.child;
       const exited = exit(child);
       if (operation === 'stop') host.stop();
-      else child.kill();
+      // Electron 44's graceful kill can deliver the utility's cancellation
+      // reply before exit. This case models a crash, so terminate only this
+      // owned child abruptly and retain the strict unavailable assertion.
+      else process.kill(child.pid, 'SIGKILL');
       await rejected;
       await exited;
       assert.equal(host.pending.size, 0);

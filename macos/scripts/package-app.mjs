@@ -1,5 +1,5 @@
 import workspace from '../../shared/scripts/workspace.mjs';
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { sparkleTools } from './sparkle-tools.mjs';
@@ -10,6 +10,7 @@ import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
 import { buildQwen } from './build-qwen.mjs';
 import { buildCredentials } from './build-credentials.mjs';
+import { stageRuntimeDependencies } from './runtime-dependencies.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -25,6 +26,7 @@ export async function buildMacApp(output, publicKey) {
   await buildQwen();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
+  const dependencyRoot = await stageRuntimeDependencies(output);
   const paths = await packager({
     dir: root,
     tmpdir: path.join(output, 'packager-temp'),
@@ -32,7 +34,7 @@ export async function buildMacApp(output, publicKey) {
     name: 'VoxCue',
     platform: 'darwin',
     arch: 'arm64',
-    electronVersion: '38.8.6',
+    electronVersion: require('electron/package.json').version,
     download: { cacheRoot: path.join(root, '.cache/electron') },
     appBundleId: 'com.voxcue.app',
     appVersion: version,
@@ -79,7 +81,7 @@ export async function buildMacApp(output, publicKey) {
           }),
         );
         const copied = new Set();
-        async function copyPackage(name, from = root) {
+        async function copyPackage(name, from = dependencyRoot) {
           // Installed vendor packages stay intact; only the application copy is made lean.
           if (name === 'onnxruntime-web') return;
           let resolved;
@@ -109,7 +111,7 @@ export async function buildMacApp(output, publicKey) {
           if (!matches(pkg.os, 'darwin') || !matches(pkg.cpu, 'arm64')) return;
           // Mirror the configured hoisted layout, including nested version conflicts.
           // A package is copied once; flattening different ONNX versions would be incorrect.
-          const relative = path.relative(path.join(root, 'node_modules'), source);
+          const relative = path.relative(path.join(dependencyRoot, 'node_modules'), source);
           if (relative.startsWith('..') || path.isAbsolute(relative))
             throw Error('Dependency escapes local hoisted node_modules: ' + name);
           const destination = path.join(buildPath, 'node_modules', relative);
@@ -171,7 +173,7 @@ export async function buildMacApp(output, publicKey) {
           await copyPackage(name);
       },
     ],
-  });
+  }).finally(() => rm(dependencyRoot, { recursive: true, force: true }));
   if (paths.length !== 1) throw Error('Expected one arm64 application');
   const app = path.join(paths[0], 'VoxCue.app');
   const contents = path.join(app, 'Contents');

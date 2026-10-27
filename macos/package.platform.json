@@ -1,5 +1,6 @@
 {
   "scripts": {
+    "postinstall": "install-electron",
     "build": "pnpm build:audio && pnpm build:permissions && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
     "build:audio": "node scripts/build-audio.mjs",
     "start": "node scripts/launch.mjs",
@@ -30,6 +31,6 @@
     "@openai/codex-darwin-arm64": "npm:@openai/codex@0.164.0-darwin-arm64"
   },
   "devDependencies": {
-    "@electron/packager": "19.0.1"
+    "@electron/packager": "20.3.0"
   }
 }

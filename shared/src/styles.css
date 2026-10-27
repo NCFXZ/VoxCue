@@ -7385,6 +7385,32 @@ svg.ui-loader {
 .cloud-storage-bar > span {
   flex: none;
 }
+@media (forced-colors: active) {
+  .settings-switch > span {
+    forced-color-adjust: none;
+    background: ButtonText;
+  }
+  .cloud-storage-summary {
+    forced-color-adjust: none;
+    color: CanvasText;
+  }
+  .cloud-storage-summary .cloud-storage-details {
+    color: CanvasText;
+  }
+  .cloud-storage-bar {
+    background: Canvas;
+    outline: 1px solid CanvasText;
+  }
+  .cloud-storage-summary .storage-profile {
+    background: Highlight;
+  }
+  .cloud-storage-summary .storage-history {
+    background: CanvasText;
+  }
+  .cloud-storage-summary .storage-knowledgebase {
+    background: GrayText;
+  }
+}
 .storage-profile {
   background: #6496ce;
 }

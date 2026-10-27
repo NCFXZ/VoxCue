@@ -16,7 +16,10 @@ const extracted = spawnSync(
   [
     '-x',
     '-k',
-    path.join(workspace.platformRoot, 'release', version, `VoxCue-${version}-arm64.zip`),
+    path.join(
+      process.env.VOXCUE_TEST_RELEASE_DIR || path.join(workspace.platformRoot, 'release', version),
+      `VoxCue-${version}-arm64.zip`,
+    ),
     directory,
   ],
   { encoding: 'utf8' },

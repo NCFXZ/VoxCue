@@ -1,7 +1,11 @@
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { buildMacApp } from '../../scripts/package-app.mjs';
-import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  connectUiAccount,
+  installUiAccount,
+  closeUiApp,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
 import { assertDownloadButton } from '../../../shared/test/scripts/assert-download-button.mjs';
@@ -103,17 +107,11 @@ try {
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
-  assert.equal(await page.locator('.service-login').count(), 2);
-  const loginButton = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
-  assert.equal(await loginButton.count(), 1);
-  const loginBrand = loginButton.locator('img.service-brand-icon');
-  assert.equal(await loginBrand.count(), 1);
-  await loginBrand.evaluate((image) => image.decode());
-  assert.ok(await loginBrand.evaluate((image) => image.complete && image.naturalWidth > 0));
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  assert.equal(await page.getByLabel('邮箱', { exact: true }).count(), 1);
   assert.equal(
-    await page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true }).count(),
-    1,
+    await page.getByRole('button', { name: /使用 ChatGPT|使用 GitHub Copilot/ }).count(),
+    0,
   );
   assert.equal(await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')), true);
   await installUiAccount(application);
@@ -153,11 +151,19 @@ try {
       );
     };
   });
-  const [main] = await Promise.all([
-    application.waitForEvent('window'),
-    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(application, page);
   page = main;
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const aiSettings = page.getByRole('dialog', { name: '设置', exact: true });
+  await aiSettings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  assert.equal(await aiSettings.locator('.ai-service-label img.service-brand-icon').count(), 2);
+  for (const image of await aiSettings.locator('.ai-service-label img.service-brand-icon').all()) {
+    await image.evaluate((image) => image.decode());
+    assert.ok(await image.evaluate((image) => image.complete && image.naturalWidth > 0));
+  }
+  await aiSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
+
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   const start = page.getByRole('button', { name: '开始面试', exact: true });
@@ -246,7 +252,7 @@ try {
       await personal.getByRole('button', { name: '面试知识库', exact: true }).isEnabled(),
       true,
     );
-    await page.getByRole('button', { name: '个人信息' }).click();
+    await page.getByRole('button', { name: '个人信息', exact: true }).click();
     await notice.getByRole('button', { name: '前往设置' }).click();
     const speech = settings.locator('.component-row[data-component-id="speech"]');
     await speech.getByRole('button', { name: '下载', exact: true }).click();

@@ -49,6 +49,7 @@ const shared = [
   'components-ui',
   'adversarial',
   'cloud-account',
+  'cloud-protocol',
   'cloud-quota',
   'management-scrollbars',
   'server-connection',
@@ -84,6 +85,28 @@ for (const name of names)
 console.log(
   'Testing the production shared renderer and this platform’s system integration; GUI runs serially.',
 );
+const headless = new Set([
+  'speech-soak',
+  'audio-pipeline',
+  'cloud-protocol',
+  'server-connection',
+  'copilot-runtime',
+  'chatgpt-usage-runtime',
+  'chatgpt-renewal',
+  'native-build',
+  'audio-synthetic',
+  'echo-cancellation',
+  'credential-upgrade',
+  'development-signing',
+  'app-icon',
+]);
+const desktop =
+  process.platform === 'darwin' && !names.every((name) => headless.has(name))
+    ? await import(
+        pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/desktop-session.mjs')).href
+      )
+    : undefined;
+const releaseDesktop = desktop?.holdDesktopAwake();
 const outcomes = [];
 const models = await prepareModelFixtures();
 const desktopProbe =
@@ -102,6 +125,7 @@ const modelEnvironment = {
 const cursor = desktopProbe?.('cursor');
 try {
   for (const name of names) {
+    desktop?.requireUnlockedDesktop();
     if (desktopProbe)
       assert.equal(
         desktopProbe('desktop').interactive,
@@ -164,6 +188,7 @@ try {
     else if (name === 'speech-soak') console.log(output.slice(output.lastIndexOf('\n{')).trim());
   }
 } finally {
+  releaseDesktop?.();
   if (desktopProbe && cursor) desktopProbe('move', cursor.x, cursor.y);
 }
 console.log(

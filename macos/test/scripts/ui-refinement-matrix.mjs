@@ -2,6 +2,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { requireUnlockedDesktop, holdDesktopAwake } from './desktop-session.mjs';
 
 // UI fixtures install synthetic accounts, components, audio and captures. They
 // need no model weights. Uses the production shared UI; GUI stays serial.
@@ -13,6 +14,7 @@ assert.ok(
 const requestedScale = process.argv.find((arg) => arg.startsWith('--scale='))?.slice(8);
 const scales = requestedScale ? [requestedScale] : ['1', '1.25', '1.5', '1.75', '2'];
 assert.ok(scales.every((scale) => ['1', '1.25', '1.5', '1.75', '2'].includes(scale)));
+const releaseDesktop = holdDesktopAwake();
 for (const scale of scales) {
   for (const name of [
     'ui-alignment',
@@ -21,10 +23,28 @@ for (const scale of scales) {
     'typography',
     'updates-sidebar',
     'components-ui',
+    'cloud-login',
+    'cloud-account',
+    'cloud-quota',
+    'management-scrollbars',
   ]) {
+    requireUnlockedDesktop();
+    const accountArguments = {
+      'cloud-login': ['--login-check'],
+      'cloud-account': [],
+      'cloud-quota': ['--interview-quota'],
+      'management-scrollbars': ['--scrollbars'],
+    }[name];
     const child = spawnTestProcess(
       process.execPath,
-      [path.join(workspace.sharedRoot, 'test/scripts', name + '-smoke.mjs')],
+      [
+        path.join(
+          workspace.sharedRoot,
+          'test/scripts',
+          (accountArguments ? 'cloud-account' : name) + '-smoke.mjs',
+        ),
+        ...(accountArguments ?? []),
+      ],
       {
         cwd: workspace.platformRoot,
         env: {
@@ -48,6 +68,7 @@ for (const scale of scales) {
     if (!outcome.passed) console.error(output);
   }
 }
+releaseDesktop();
 console.log(
   JSON.stringify({ passed: outcomes.filter((item) => item.passed).length, total: outcomes.length }),
 );

@@ -26,7 +26,7 @@ const app = await electron.launch({ executablePath: executable, args: [], env })
 const testProcess = app.process();
 try {
   const page = await app.firstWindow();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   const application = await app.evaluate(({ app }) => ({
     path: app.getAppPath(),
     packaged: app.isPackaged,

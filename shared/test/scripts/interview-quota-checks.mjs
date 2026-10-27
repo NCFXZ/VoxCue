@@ -52,6 +52,22 @@ export async function checkInterviewQuota({
     floating.setDefaultTimeout(20000);
     floating.on('pageerror', (error) => errors.push(error.message));
     await floating.locator('.floating-toolbar').waitFor();
+    assert.deepEqual(
+      await floating.evaluate(async (userId) => {
+        const denied = (request) =>
+          request.then(
+            () => false,
+            () => true,
+          );
+        return Promise.all([
+          denied(window.desktop.cloudAccount({ action: 'status' })),
+          denied(window.desktop.cloudUsage({ action: 'status' })),
+          denied(window.desktop.cloudSync({ action: 'list', userId })),
+        ]);
+      }, userId),
+      [true, true, true],
+      'The actual interview window cannot invoke account, quota or sync routes',
+    );
     await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
     if (!silent)
       await floating
