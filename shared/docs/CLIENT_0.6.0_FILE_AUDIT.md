@@ -2,6 +2,8 @@
 
 日期：2026-10-27。配套[140项客户端行为与Mac验收](MACOS_0.6.0_HANDOFF.md)、[独立服务端只读说明](SERVER_0.5.1_REFERENCE.md)、[Mac Codex提示词](MACOS_0.6.0_CODEX_PROMPT.md)。此表逐文件覆盖本轮提交白名单；它是源代码定位清单，行为与验收标准以C001–C140为准，不能把自动提取的代码片段当作已通过测试。
 
+**固定快照**：本表155项文件、blob及763个改动块对应已上传的客户端代码提交`d35c06ed2c668b2ae2a956b47cb64880baa689a1`。用户随后新增的Windows发行授权、旧版隐藏和发行文档维护单列于[发行记录](WINDOWS_0.6.0_RELEASE.md)，不追改这份代码交接快照的文件blob或测试结论。
+
 ## 基线和用法
 
 - 主审计基线是已保留的Mac0.5.11提交 `2af9c78c3e05b3daf303130c3e6dace61ab5734f`；Windows原0.5.11基线 `0c86881c732e87f80bade27e055da950b672914b` 到该提交的远端补丁另列B表，不遗漏这段整合。
@@ -11,8 +13,8 @@
 - Mac逐项读取全部F表，Windows专属仅核对边界并写“不适用/只读”；shared和Mac适用项实际修复/复测。服务端115项只读树在另一文档，绝不混入本表。
 
 ```sh
-git diff --stat 2af9c78c3e05b3daf303130c3e6dace61ab5734f HEAD
-git diff --unified=0 2af9c78c3e05b3daf303130c3e6dace61ab5734f HEAD -- shared/electron/main.ts
+git diff --stat 2af9c78c3e05b3daf303130c3e6dace61ab5734f d35c06ed2c668b2ae2a956b47cb64880baa689a1
+git diff --unified=0 2af9c78c3e05b3daf303130c3e6dace61ab5734f d35c06ed2c668b2ae2a956b47cb64880baa689a1 -- shared/electron/main.ts
 # 替换为F表中的任一文件；不要修改服务端来消除差异。
 ```
 
@@ -3010,4 +3012,4 @@ Windows本机 windows-suite.mjs：迁移主账号隔离入口、平台原生/打
 - 发布前对比实际Git差异路径集合和全部hunk数量；任何未列出或被误加入的文件均应停止提交并先审计。
 - 服务端只读树、既有模型/索引、node_modules、缓存、安装器/归档、测试截图/报告、临时数据库、真实资料、凭据、密钥和本地恢复副本均不在上传白名单。
 - Windows清理353文件/714748808逻辑字节的临时/缓存内容不属于Git受控源码删除，不能据此要求Mac删同名目录；具体边界见主交接C136–C138。
-- 最终提交SHA以GitHub实际推送结果为准；本文件不把待推送状态写成已上传。
+- 客户端代码快照已推送并核对为d35c06ed2c668b2ae2a956b47cb64880baa689a1；其后的发行文档不改变该已验证代码快照。

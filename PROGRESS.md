@@ -1,3 +1,13 @@
+## 2026-10-27 Windows 0.6.0 正式发行、隐藏全部旧安装包
+
+用户在源码交接后授权打包发布0.6.0并隐藏全部旧安装包，覆盖此前仅源码限制。基于已推送的 `d35c06ed2c668b2ae2a956b47cb64880baa689a1` 重新构建Windows x64，release ID 426003941已发布并设Latest；安装器405175747字节，SHA256 `bf336fb1e368e22992fefc8c627c137f79e503cff63ec46acbcd06250f506abb`，仅上传EXE、blockmap、latest.yml，正式三项保留windows/release/0.6.0。
+
+解锁桌面后，合并远端后的updates、updates-sidebar、components-ui、chatgpt-usage-runtime、cloud-account、cloud-quota、ui-material-refinement共7组全部通过。最终NSIS/SHA512/blockmap/载荷与stage一致，实际ASAR固定SDK/Codex握手（149ms停滞代理）、语音Worker、RAG、组件释放/删除/重装及真实Windows窗口检查通过。匿名完整下载三项与服务端摘要一致；最终ASAR的实际NsisUpdater选中0.6.0并下载405175747字节、SHA512通过，未安装。此前完整49组/950单测等仍是既有分阶段证据，本次不重复认领为重跑。
+
+17个旧Windows/Mac应用发行转为草稿，84项资产ID/大小/摘要及正文保持，逐项匿名发行API和安装链接404；公开列表只剩v0.6.0与models-v1.0.0，模型16项资产保持公开且未改变。0.5.10先前撤回状态不重建，未删除旧资产/标签或改变仓库权限。Mac0.6.0尚无本机验收包，Mac当前不会选到公开安装包；服务端0.5.1及123文件指纹仍未变，支付继续关闭。完整资产与恢复边界见 [发行记录](shared/docs/WINDOWS_0.6.0_RELEASE.md)。
+
+正式三个文件保留于版本目录。按精确绝对路径、祖先/后代无重定向、进程及逐文件独占访问核对后，删除本轮生成stage和重复installer输出8064文件、2018058075逻辑字节，正式三项摘要再核对一致；历史正式发行和受保护目录不动。纯元数据清理审计在本轮recovery，不上传包/凭据/测试产物。公开发行仓库README同步主账号/云同步及当前Windows下载，Mac入口标为待本机验收。
+
 ## 2026-10-27 0.6.0 源码上传与分仓完整交接
 
 用户新增授权：将审计后的源码、测试、配置和交接推送既有私有 `NCFXZ/VoxCue/main`。客户端更新详见 [C001–C140](shared/docs/MACOS_0.6.0_HANDOFF.md)，完整文件及每个差异块见[文件审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)；服务端功能及115项受控文件另见[只读参考](shared/docs/SERVER_0.5.1_REFERENCE.md)。[Mac Codex提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)明确先逐项验证、只修客户端，再做全量/对抗/安全/稳定性/UI与最终包验证，禁止修改或部署服务端，支付继续关闭。

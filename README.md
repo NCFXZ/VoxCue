@@ -4,13 +4,15 @@
 
 客户端默认连接 https://accounts.voxcue.com.cn，配套[独立服务端 0.5.1](https://github.com/NCFXZ/VoxCue-server)部署在腾讯云首尔，邮件使用腾讯云 SES。本轮服务端源码、配置和部署只读；同步在客户端默认关闭，本地资料始终保留。
 
-**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；先逐条验证，再做全量、对抗、安全及UI视觉验收。0.6.0本次仅上传源码，不发布安装包。
+**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；先逐条验证，再做全量、对抗、安全及UI视觉验收。
+
+**当前公开发行是Windows 0.6.0**：[下载安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.0/VoxCue-Setup-0.6.0-x64.exe)、[发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.0)、[本机验包与发行记录](shared/docs/WINDOWS_0.6.0_RELEASE.md)。用户后续授权发行并隐藏旧版；17个旧Windows/Mac发行已转为可恢复草稿，84个资产保留。Mac0.6.0待本机适配验收，目前没有公开Mac安装包；模型下载资源保持公开。
 
 当前工作区共享版本源为 **0.6.0**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。本轮 Windows 生成配置已同步，Mac 生成配置、依赖锁及新运行时原生验收需在 Mac 本机接续。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 
-Mac 与 Windows **0.5.11** 已发布并设为 **Latest**：[Mac arm64 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-0.5.11-arm64.dmg)、[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-Setup-0.5.11-x64.exe)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.11)。本版修复 ChatGPT 启动及登录恢复耗时过长的问题，减少聊天、面试回答和账户额度刷新时的不必要等待，并修复 Mac 更新准备与组件校验的加载动画。0.5.10 保持撤回、非公开状态；分平台完整资产选版保持。独立本机证据与待人工范围见 [Mac M01–M12 验收](shared/docs/MACOS_0.5.11_VERIFICATION.md) 和 [Windows 验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)。
+历史0.5.11曾作为两平台Latest发布，现按本轮授权隐藏。它修复ChatGPT启动/登录恢复耗时及Mac加载动画，相关改动已保留在0.6.0源码。历史独立证据见 [Mac M01–M12验收](shared/docs/MACOS_0.5.11_VERIFICATION.md) 和 [Windows验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)，其中当时的Latest/下载状态按历史理解。0.5.10继续保持撤回、非公开状态；当前按平台筛选完整公开发行的机制不变。
 
 ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权。凭据由现有系统保护接口保存；Local RAG 固定为 local-v7-current-source-first，模型与索引保持。客户端依赖安全版本见 shared/package.json。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；安装包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
 
