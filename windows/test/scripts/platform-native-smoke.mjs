@@ -14,7 +14,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
 try {
   const page = await app.firstWindow();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   const report = await app.evaluate(async ({ app }) => {
     const require = process
       .getBuiltinModule('module')

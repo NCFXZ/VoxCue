@@ -64,7 +64,7 @@ export async function assertInitialDownloadProgress(button, start) {
     await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
     assert.equal(await button.getAttribute('aria-disabled'), 'false');
     const hoverLabel = await button.getAttribute('data-hover-label');
-    if (hoverLabel) {
+    {
       // The fake clock verifies the cancellation guard, while CSS transitions
       // use Chromium's compositor timeline. Inspect their settled endpoint.
       await button.evaluate((element) => {
@@ -79,7 +79,16 @@ export async function assertInitialDownloadProgress(button, start) {
         finalBounds.width > initialBounds.width,
         JSON.stringify({ initialBounds, finalBounds }),
       );
-    else assert.equal(finalBounds.width, initialBounds.width);
+    else {
+      const cancelWidth = await button.evaluate((element) =>
+        parseFloat(element.style.getPropertyValue('--download-cancel-width')),
+      );
+      assert.ok(
+        Math.abs(
+          finalBounds.width - (Number.isFinite(cancelWidth) ? cancelWidth : initialBounds.width),
+        ) < 1,
+      );
+    }
     assert.equal(finalBounds.height, initialBounds.height);
     return result;
   } finally {
@@ -159,7 +168,15 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
       assert.equal(cancel.color, cancel.danger);
       const after = await button.boundingBox();
       if (hoverLabel) assert.ok(after.width > before.width);
-      else assert.equal(after.width, before.width);
+      else if (!iconOnly) {
+        const cancelWidth = await button.evaluate((element) =>
+          parseFloat(element.style.getPropertyValue('--download-cancel-width')),
+        );
+        assert.ok(
+          Math.abs(after.width - cancelWidth) < 1,
+          'Cancel uses its measured content width',
+        );
+      } else assert.equal(after.width, before.width);
       assert.equal(after.height, before.height);
       if (iconOnly) {
         const size = await button.evaluate((element) => {

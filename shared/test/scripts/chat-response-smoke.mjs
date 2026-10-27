@@ -1,3 +1,4 @@
+import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -21,12 +22,9 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
-  ]);
+  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
   page.setDefaultTimeout(15000);
   // Only the test profile's transport is replaced. Renderer and IPC remain real.
   await app.evaluate(async ({ ipcMain }, profile) => {
@@ -194,7 +192,11 @@ try {
   assert.equal(await page.evaluate(() => window.testCopiedCode), 'print("Hello")');
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  await page.getByRole('button', { name: '账户与用量', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
+  await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const usage = page.getByRole('region', { name: '账户额度', exact: true });
   await usage
     .getByText('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。', { exact: true })
@@ -239,9 +241,13 @@ try {
   await page.screenshot({});
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
-  await page.getByRole('button', { name: '账户与用量', exact: true }).click();
+  await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
   assert.equal(
     await usage

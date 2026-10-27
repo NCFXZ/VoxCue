@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -59,12 +60,8 @@ let app;
 const launch = async () => {
   app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
   await installUiAccount(app);
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(20000);
   await page.getByRole('button', { name: '聊天模型', exact: true }).waitFor();
   assert.equal(await page.locator('.sidebar-service-status').count(), 0);
@@ -79,10 +76,14 @@ const phase = (page, expected) =>
 const openUpdates = async (page) => {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '更新', exact: true })
+    .getByRole('button', { name: '关于与更新', exact: true })
     .click();
   return settings;
 };

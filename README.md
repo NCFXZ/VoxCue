@@ -1,12 +1,18 @@
 # VoxCue
 
-当前共享版本源为 **0.5.11**。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+桌面主账号使用邮箱注册、登录和重置密码，ChatGPT 与 GitHub Copilot 在“设置 → AI 服务”中独立连接。个人信息、面试记录和知识库分别控制云同步，支持逐项暂停、恢复及只删除云端副本。三类数据合计标准配额100 MB；个人资料可超额同步，超出部分仍计入用量。面试时长通过兑换码增加，额度耗尽先保存本场记录再退出，支付保持关闭。
+
+客户端默认连接 https://accounts.voxcue.com.cn，配套[独立服务端 0.5.1](https://github.com/NCFXZ/VoxCue-server)部署在腾讯云首尔，邮件使用腾讯云 SES。本轮服务端源码、配置和部署只读；同步在客户端默认关闭，本地资料始终保留。
+
+**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；先逐条验证，再做全量、对抗、安全及UI视觉验收。0.6.0本次仅上传源码，不发布安装包。
+
+当前工作区共享版本源为 **0.6.0**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。本轮 Windows 生成配置已同步，Mac 生成配置、依赖锁及新运行时原生验收需在 Mac 本机接续。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 
 Mac 与 Windows **0.5.11** 已发布并设为 **Latest**：[Mac arm64 安装包](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-0.5.11-arm64.dmg)、[Windows x64 安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.5.11/VoxCue-Setup-0.5.11-x64.exe)、[发行说明](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.11)。本版修复 ChatGPT 启动及登录恢复耗时过长的问题，减少聊天、面试回答和账户额度刷新时的不必要等待，并修复 Mac 更新准备与组件校验的加载动画。0.5.10 保持撤回、非公开状态；分平台完整资产选版保持。独立本机证据与待人工范围见 [Mac M01–M12 验收](shared/docs/MACOS_0.5.11_VERIFICATION.md) 和 [Windows 验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)。
 
-当前源码支持 ChatGPT 和 GitHub Copilot 登录。ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权。凭据由现有系统保护接口保存；Local RAG 固定为 local-v7-current-source-first，模型、索引和依赖保持。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；安装包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
+ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官方 SDK/平台运行时 1.0.21，通过系统浏览器授权。凭据由现有系统保护接口保存；Local RAG 固定为 local-v7-current-source-first，模型与索引保持。客户端依赖安全版本见 shared/package.json。[本地模型](shared/docs/COMPONENTS.md)集中在“设置 → 本地组件”首次下载，升级复用同版本缓存；安装包排除模型与 ONNX Web，保留 Node CPU 推理依赖。
 
 0.5.10 收拢共用界面的毛玻璃、固定标题、滚动渐出和紧凑面试输入区，统一圆形/胶囊切换动画并修复收起时的椭圆；收起侧栏使用正方形底板。面试截图按钮显示文字与平台快捷键，有图片时改为数量。截图归档、原图查看/保存及资料确认流程保持，完整差异和60项验收见[0.5.10 Windows 交接](shared/docs/WINDOWS_0.5.10_HANDOFF.md)，可直接使用[Windows逐条查验提示词](shared/docs/WINDOWS_0.5.10_CODEX_PROMPT.md)；历史80项清单仍见[0.5.9交接](shared/docs/WINDOWS_0.5.9_HANDOFF.md)。
 
@@ -99,6 +105,7 @@ Windows 清单 1–10 已接入当前共享界面及本机展示适配器，下�
 
 - 系统浏览器 ChatGPT 授权、账户模型与思考强度、Responses 流式回答、可选网络搜索、Markdown/GFM 和代码复制。准备聊天用时置顶并带分隔线，按实际顺序逐行显示状态、公开思考标题及搜索/读页活动。标题默认折叠，右侧细箭头悬停或键盘聚焦出现；正在处理的标题有滑过高亮，遵循系统减少动画偏好。公开摘要不设置语言要求，直接展示服务原文。结束、失败或停止后用时和活动随聊天保存；不显示空入口或私有推理，失败不切换模拟服务，正式界面无 Mock/测试入口。
 - 思考档位按账户目录和 Responses 模型能力筛选；GPT-6.1-Sol 官方最高为 max（最高），不提供无效 Ultra。保存的旧 Ultra 设置读取为自动，未知能力不发送 effort。
+- 主账号独立于AI服务授权，个人信息、面试记录和知识库可分别开启同步。按知识库和面试记录分组备份，个人信息优先；删除云端副本及取消备份优先于后台上传，保留本地数据并持续暂停该项，点击“自动同步”才恢复。取消保留已完成云端副本并释放未完成上传预留。三类合计标准容量100 MB，个人资料可超额且仍计入用量；知识库和面试记录不得使总用量超过配额。支付保持关闭。
 - 准备聊天、草稿及附件自动保存在本机，关闭或退出登录后仍可恢复，仅明确删除才移除。输入框按换行及自动折行在2–11行间增高或缩回，超过十一行内部滚动，窄窗与恢复草稿同步调整。支持文件夹/拖放、语音输入、停止、对话切换与失败重试；新建空白、切回恢复，后台完成显示未读点，上翻可返回最新。语音只填写草稿，不自动发送。
 - 发送采用主题色圆形按钮与白色上箭头，和麦克风保持统一尺寸/对齐；聊天与面试停止生成复用同款实心圆形，显示白色停止图标。通用提示按当前模型提供商显示资料接收方，每条回复和历史保留实际来源；缺失来源不猜测为ChatGPT。登录与推理按所选 ChatGPT/GitHub Copilot 服务路由，模型与能力来自对应账户目录。
 - 个人信息本机保存：姓名/语言、简历摘要、JD 摘要、单份自定义指令、技能及一个用户自选知识库。共享 0.3.1的五类资料默认折叠并有展开/收起动画，简历/JD/指令/技能在弹窗中编辑，保存后更新；姓名/语言仍在侧栏保存。AI 提案与技能更新提示只在聊天显示，确认后才更新资料。按钮或对最近有效提案输入“确认”均可保存，不重复要求文字确认；缺少 JD/简历时仍可继续聊天，补齐后才询问是否联网更新技能，技能保留本次真实搜索来源。没有独立目标岗位或官方题库。聊天附件、旧简历原件与知识库相互独立。

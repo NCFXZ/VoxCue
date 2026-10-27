@@ -83,10 +83,10 @@ describe('桌面平台边界', () => {
     if (role !== 'main') expect(options).not.toHaveProperty('backgroundMaterial');
     if (role === 'login')
       expect(options).toMatchObject({
-        width: 960,
-        height: 580,
+        width: 1000,
+        height: 660,
         minWidth: 860,
-        minHeight: 520,
+        minHeight: 580,
         transparent: true,
         maximizable: false,
       });
@@ -125,9 +125,9 @@ describe('桌面平台边界', () => {
       titleBarOverlay: false,
       trafficLightPosition: { x: 16, y: 18 },
       transparent: false,
-      width: 960,
-      height: 580,
-      minHeight: 520,
+      width: 1000,
+      height: 660,
+      minHeight: 580,
     });
     expect(windowOptions('interview', mac, paths)).toMatchObject({
       frame: false,

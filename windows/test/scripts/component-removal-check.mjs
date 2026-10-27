@@ -1,3 +1,4 @@
+import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import assert from 'node:assert/strict';
 import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
@@ -20,10 +21,7 @@ export async function checkComponentRemoval(application, page, restoreCached) {
   assert.equal(probe('exclusive', handleFixture).exclusiveFiles, 1);
   fs.unlinkSync(handleFixture);
   await installUiAccount(application);
-  [page] = await Promise.all([
-    application.waitForEvent('window'),
-    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  page = await connectUiAccount(application, page);
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await application.evaluate(({ app }) => {
     const require = process

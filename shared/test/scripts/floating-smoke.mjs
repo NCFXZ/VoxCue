@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -42,10 +43,7 @@ try {
     });
   });
   const login = await app.firstWindow();
-  const [main] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(app, login);
   main.setDefaultTimeout(15000);
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);

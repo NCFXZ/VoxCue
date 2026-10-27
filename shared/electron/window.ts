@@ -6,10 +6,10 @@ import { pendingPresentation } from './contracts/presentation';
 export type WindowRole = 'login' | 'main' | 'interview';
 const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
   login: {
-    width: 960,
-    height: 580,
+    width: 1000,
+    height: 660,
     minWidth: 860,
-    minHeight: 520,
+    minHeight: 580,
     transparent: true,
     maximizable: false,
     title: 'VoxCue · 登录',

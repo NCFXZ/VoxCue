@@ -54,6 +54,11 @@ import {
   Eye24Regular,
   FontIncreaseRegular,
   FontDecreaseRegular,
+  Cloud24Regular,
+  CloudCheckmark24Regular,
+  CloudSync24Regular,
+  CloudOff24Regular,
+  CloudError24Regular,
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
@@ -62,12 +67,15 @@ function icon(
     style?: CSSProperties;
     'aria-hidden'?: boolean;
     'data-ui-icon'?: boolean;
+    className?: string;
   }>,
+  loading = false,
 ) {
   return ({ size = 20 }: { size?: number; strokeWidth?: number }) => (
     <Component
       aria-hidden={true}
       data-ui-icon={true}
+      className={loading ? 'ui-loader' : undefined}
       style={
         { width: size, height: size, flexShrink: 0, '--icon-size': `${size}px` } as CSSProperties
       }
@@ -82,7 +90,7 @@ export const Link = icon(Link24Regular);
 export const Edit = icon(Edit24Regular);
 export const Download = icon(ArrowDownload24Regular);
 export const PanelRight = icon(PanelRightExpandRegular);
-export const Loader = icon(SpinnerIos20Regular);
+export const Loader = icon(SpinnerIos20Regular, true);
 export const Appearance = icon(Color24Regular);
 export const Minus = icon(Subtract24Regular);
 export const Square = icon(Square24Regular);
@@ -90,6 +98,11 @@ export const X = icon(Dismiss24Regular);
 export const MessageCirclePlus = icon(ChatAdd24Regular);
 export const History = icon(History24Regular);
 export const Database = icon(Database24Regular);
+export const Cloud = icon(Cloud24Regular);
+export const CloudDone = icon(CloudCheckmark24Regular);
+export const CloudSync = icon(CloudSync24Regular);
+export const CloudOff = icon(CloudOff24Regular);
+export const CloudError = icon(CloudError24Regular);
 
 export const ChevronsUpDown = icon(ChevronDown24Regular);
 export const Settings = icon(Settings24Regular);

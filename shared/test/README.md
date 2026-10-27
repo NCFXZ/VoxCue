@@ -1,10 +1,20 @@
-# 当前测试入口（2026-10-25）
+# 当前测试入口（2026-10-27）
+
+客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含49组：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.1连接、云同步及配额到期保存、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
+
+`cloud-account-smoke.mjs` 使用当前服务端源码只读启动独立临时数据库与合成邮件端口，不编辑服务端源码或访问真实资料。`server-connection-smoke.mjs` 只读验证线上HTTPS契约、未认证保护、支付关闭及客户端清理合成无效令牌，不发邮件。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
+
+列表/侧栏布局与额度摘要专项：在平台目录执行 `node ../shared/test/scripts/cloud-account-smoke.mjs --scrollbars`，覆盖面试记录与知识库列表的浅深色、1280/960窗口、滚动首尾/滚轮、详情转写/回答侧栏、知识库文档、最小窗口侧栏及开合宽度，以及确认页14/15分钟/永久额度的实际颜色与首行对齐。使用本轮隔离合成数据与音频端口，不访问真实资料或硬件。
+
+面试额度预警与保存专项：`node shared/test/scripts/cloud-account-smoke.mjs --interview-quota`（仓库根目录、Node 24）。运行真实本机账号/扣时服务与隔离Windows窗口，用合成时钟、语音和图片覆盖5分钟提示、60/59/1秒切换、收起窗口提示、耗尽时尾段保存、空记录、写盘失败保留及重试、到期IPC拒绝，以及Alt+S截图。`--preview`仅额外生成本轮临时合成画面；退出清理，不连接真实账号、不采样硬件。
+
+邮箱账号专项：shared/server/test 使用 Node 内置测试运行器，覆盖验证码、会话轮换、重置、持久化邮件、真实 HTTP 背压、取消竞争、部署初始化和一致备份。桌面入口包括cloud-account、cloud-sync、cloud-data、cloud-usage-store和cloud-lease单元测试。实际界面为shared/test/scripts/cloud-account-smoke.mjs（Node 24）；--login-check只检查登录表单，默认检查三类同步、知识库满额时JD删改及保留本地文件的云端删除，--preview额外检查浅深主题、窄窗口、设置顺序和图标几何。使用隔离本机服务、内存邮件与合成AI/组件状态；不连接真实账户、不使用真实资料或采样硬件，也不将模型可用性替身作为推理验收。退出清理临时输出。部署入口见[账号服务](../server/README.md)。
 
 0.5.11 的 `chatgpt-usage-runtime` 使用仅接收不应答的本机代理和有效期内的合成令牌，要求五秒内完成官方令牌交接，防止立即拒绝代理掩盖重复强制续期。Mac 子进程的 sandbox 只允许该次自有 loopback 端口，外网继续禁止；`macos/test/scripts/chatgpt-renewal-smoke.mjs` 另做旧强制续期对照、临近过期/过期的官方续期、续期失败、重复读取、退出与迟到结果，并检查其他端口/外网被拒绝。最终 Mac ASAR 的 `package-runtimes-smoke` 复用该夹具；Windows ASAR 保留 `package-runtimes-check`。全部仅合成凭据，固定 Copilot/Codex 实际解包路径和系统凭据隔离保持。方案见 [Mac 0.5.11 交接](../docs/MACOS_0.5.11_HANDOFF.md)，Windows 本轮结果见 [验收](../docs/WINDOWS_0.5.11_VERIFICATION.md)。
 
 Mac 0.5.11 的 Loader 保留 AppKit 生成的 SF Symbols 形状，使用逐段亮度动画；本地组件校验同步使用同一加载样式，Windows 圆环不变。侧栏更新专项会停留在合成安装准备态，检查浅深色、可见像素变化与减少动态效果，不执行真实更新。Mac 五档缩放矩阵每档执行布局、细节、截图、字体、侧栏更新和组件六组（共30组），GUI/原生串行，临时截图只用于本次目视检查后清理。
 
-Windows `test:ui:dpi` 当前逐档执行14组，包含新增 `interview-chrome` 和 `interview-motion`；100/125/150/175/200% 共70组，仍沿用同一隔离模型生命周期并串行。共享45组功能矩阵的外层 watchdog 调整为四小时，子项原有超时保持，避免十分钟耐久段挤占整组预算。分数DPI下工具栏边距按一物理像素量化检查、44px控件按 Chromium 1/64 布局像素核对；位置恢复仍用实际窗口严格复测，不以放宽位置断言掩盖累积漂移。
+Windows `test:ui:dpi` 当前逐档执行14组，包含新增 `interview-chrome` 和 `interview-motion`；100/125/150/175/200% 共70组，仍沿用同一隔离模型生命周期并串行。共享49组功能矩阵的外层 watchdog 调整为四小时，子项原有超时保持，避免十分钟耐久段挤占整组预算。分数DPI下工具栏边距按一物理像素量化检查、44px控件按 Chromium 1/64 布局像素核对；位置恢复仍用实际窗口严格复测，不以放宽位置断言掩盖累积漂移。
 
 `interview-motion` 增加主进程拒绝/迟到 IPC、忙碌锁和重试协调；`continuous-corners` 对删除、更新及结束确认的实际中间帧计算 CSS 有效四角半径，拒绝宽按钮使用50%产生椭圆的情况。输入专项逐行核对聊天2–11行、面试1–6行和组合输入事件；截图专项补齐修饰键/组合/重复/已处理/收起/主窗/五图保护，真实触控板及系统输入法硬件结果仍单独登记。技能提示专项检查资料完整/缺失路径在正常和窄窗下的居中、动作与 Tab 顺序。详见 [Windows 本机验收账本](../docs/WINDOWS_0.5.10_VERIFICATION.md)。
 

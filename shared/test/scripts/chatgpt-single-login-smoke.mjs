@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -53,7 +54,7 @@ try {
   app = await electron.launch({ args: [entry], env });
   let page = await app.firstWindow();
   const opened = app.waitForEvent('window');
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
+  await connectUiAccount(app, page);
   page = await opened;
   await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
   await app.evaluate(async () => {
@@ -69,8 +70,12 @@ try {
   assert.ok(!JSON.stringify(session).includes('synthetic-private'));
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
-  await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
+  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   await settings.getByText('5小时额度', { exact: true }).waitFor();
   await settings.getByText('每周额度', { exact: true }).waitFor();
   assert.equal(
@@ -99,10 +104,12 @@ try {
   await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).user.id, session.user.id);
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
-  const loginOpened = app.waitForEvent('window');
   await page.evaluate(() => window.desktop.signOut());
+  assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
+  const loginOpened = app.waitForEvent('window');
+  await page.evaluate(() => window.desktop.cloudAccount({ action: 'logout' }));
   page = await loginOpened;
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   console.log(
     'PASS: one shared ChatGPT login, immediate five-hour/weekly usage, chat with the same session, refresh without OAuth, restart restore and logout (offline synthetic account).',

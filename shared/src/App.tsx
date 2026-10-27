@@ -6,13 +6,18 @@ import { PreparationPage } from './components/PreparationPage';
 import { HistoryPage } from './components/HistoryPage';
 import { KnowledgePage } from './components/KnowledgePage';
 import { usePreparation } from './stores/preparation';
+import { useCloudSync } from './stores/cloudSync';
+import { useKnowledge } from './stores/knowledge';
+import { useCloudAccount } from './stores/cloudAccount';
 import { useAuth } from './stores/auth';
 import { useComponents } from './stores/components';
 import { useUpdates } from './stores/updates';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
 import { useHistory } from './stores/history';
-import { providerInfo } from './services/providers';
+import { useCloudUsage } from './stores/cloudUsage';
+import { Button } from './components/ui/button';
+import { X } from './components/icons';
 import { SettingsDialog, type Theme, type SettingsCategory } from './components/SettingsDialog';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
@@ -27,7 +32,7 @@ export function App() {
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [collapsed, setCollapsed] = useState(false);
   const [settings, setSettings] = useState(false);
-  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('general');
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('account');
   const openComponentSettings = () => {
     setSettingsCategory('components');
     setSettings(true);
@@ -35,7 +40,51 @@ export function App() {
   const [personalDraft, setPersonalDraft] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string | null>(null);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
+  const [interviewNotice, setInterviewNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (isLoginWindow) return;
+    return window.desktop?.onCloudUsageExpired?.((message) => {
+      useHistory.getState().load();
+      setInterviewNotice(message);
+      void useCloudUsage.getState().run({ action: 'status' });
+    });
+  }, [isLoginWindow]);
   const auth = useAuth();
+  const account = useCloudAccount();
+  const signedIn = !!account.state.user || auth.session?.mode === 'demo';
+  const showLogin = isLoginWindow || (account.loaded && !signedIn);
+  useEffect(() => {
+    if (account.loaded && !signedIn) setSettings(false);
+  }, [account.loaded, signedIn]);
+  useEffect(() => {
+    const expired = () => {
+      void useCloudAccount.getState().load();
+    };
+    window.addEventListener('voxcue-cloud-expired', expired);
+    return () => window.removeEventListener('voxcue-cloud-expired', expired);
+  }, []);
+  useEffect(() => {
+    if (isLoginWindow || !account.state.user) return;
+    return useCloudSync.getState().connect(account.state.user.id);
+  }, [isLoginWindow, account.state.user?.id, account.revision]);
+  useEffect(() => {
+    if (isLoginWindow) return;
+    const applied = (event: Event) => {
+      const type = (event as CustomEvent).detail;
+      if (type === 'profile' || type === 'resume') void usePreparation.getState().load();
+      if (type === 'record' || type === 'image') useHistory.getState().load();
+      if (type === 'base' || type === 'file')
+        void useKnowledge
+          .getState()
+          .load()
+          .then(() => {
+            const state = useKnowledge.getState();
+            if (state.selectedId) return state.open(state.selectedId);
+          });
+    };
+    window.addEventListener('voxcue-sync-applied', applied);
+    return () => window.removeEventListener('voxcue-sync-applied', applied);
+  }, [isLoginWindow]);
   const transientChat = usePreparation((state) => state.streaming || !!state.chatStorageError);
   useEffect(() => {
     if (isLoginWindow) return;
@@ -50,7 +99,7 @@ export function App() {
     });
   }, [isLoginWindow]);
   useEffect(() => {
-    if (isLoginWindow || !auth.session) return;
+    if (isLoginWindow || !signedIn) return;
     let active = true;
     void window.desktop
       ?.updateSessionState(personalDraft || transientChat)
@@ -78,7 +127,7 @@ export function App() {
         .getState()
         .setViewing(
           page === 'preparation' &&
-            !!auth.session &&
+            !!signedIn &&
             !settings &&
             document.visibilityState === 'visible' &&
             document.hasFocus(),
@@ -95,11 +144,14 @@ export function App() {
   }, [page, settings, auth.session?.mode]);
   useEffect(() => {
     void auth.load();
+    void useCloudAccount.getState().load();
   }, []);
   useEffect(() => {
-    if (!isLoginWindow && auth.session)
-      void useChatConnection.getState().load(auth.session.mode !== 'demo');
-  }, [auth.session?.mode, auth.session?.user.id, isLoginWindow]);
+    if (!isLoginWindow && signedIn)
+      void useChatConnection
+        .getState()
+        .load(!!auth.session && auth.session.mode !== 'demo', false, auth.session?.mode === 'demo');
+  }, [auth.session?.mode, auth.session?.user.id, signedIn, isLoginWindow]);
   useEffect(() => {
     let active = true;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
@@ -128,22 +180,18 @@ export function App() {
   }, [theme]);
   return (
     <div
-      className={`app-shell ${isLoginWindow ? 'login-shell' : ''} ${window.desktop?.platform === 'macos' ? 'native-window-controls' : 'custom-window-controls'}`}
+      className={`app-shell ${showLogin ? 'login-shell' : ''} ${window.desktop?.platform === 'macos' ? 'native-window-controls' : 'custom-window-controls'}`}
     >
       <div className="app-body">
-        {auth.loading ? (
+        {!account.loaded ? (
           <StartupScreen />
-        ) : isLoginWindow || !auth.session ? (
+        ) : isLoginWindow || !signedIn ? (
           <LoginPage />
         ) : (
           <>
             <Sidebar
-              userName={auth.session.user.name}
-              accountLabel={
-                auth.session.mode !== 'demo'
-                  ? auth.session.user.email || `${providerInfo(auth.session.mode).name} 已连接`
-                  : '未连接模型服务'
-              }
+              userName={account.state.user?.email.split('@')[0] || '本地用户'}
+              accountLabel={account.state.user?.email || '隔离测试'}
               page={page}
               onNavigate={setPage}
               collapsed={collapsed}
@@ -153,15 +201,20 @@ export function App() {
                 setPage('preparation');
               }}
               onSettings={() => {
-                setSettingsCategory('general');
+                setSettingsCategory('account');
                 setSettings(true);
               }}
               onLogout={async () => {
                 usePreparation.getState().stop();
                 if (!(await usePreparation.getState().flushChats())) return;
-                if (await auth.signOut()) {
-                  setSettings(false);
-                  setPage('preparation');
+                try {
+                  const result = await useCloudAccount.getState().call({ action: 'logout' });
+                  if (result.ok) {
+                    setSettings(false);
+                    setPage('preparation');
+                  } else setSessionStateError(result.error);
+                } catch {
+                  setSessionStateError('退出账号失败，窗口和本地资料已保留，请重试。');
                 }
               }}
             />
@@ -180,13 +233,26 @@ export function App() {
           </>
         )}
       </div>
-      {!isLoginWindow && <TitleBar />}
-      {(appearanceError || (auth.session && (auth.error || sessionStateError))) && (
-        <div className="auth-error" role="alert">
-          {appearanceError || auth.error || sessionStateError}
+      {!showLogin && <TitleBar />}
+      {!showLogin && interviewNotice && (
+        <div className="interview-end-notice" role="status">
+          <span>{interviewNotice}</span>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="关闭面试结束提示"
+            onClick={() => setInterviewNotice(null)}
+          >
+            <X size={16} />
+          </Button>
         </div>
       )}
-      {settings && (
+      {(appearanceError || (signedIn && (sessionStateError || (!settings && auth.error)))) && (
+        <div className="auth-error" role="alert">
+          {appearanceError || sessionStateError || auth.error}
+        </div>
+      )}
+      {settings && signedIn && (
         <SettingsDialog
           initialCategory={settingsCategory}
           theme={theme}

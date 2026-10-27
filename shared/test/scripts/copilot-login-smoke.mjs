@@ -1,3 +1,4 @@
+import { enterPrimaryUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
@@ -56,22 +57,30 @@ const entry = await offlineElectronEntry(fixture);
 let app;
 try {
   app = await electron.launch({ args: [entry], env });
-  let page = await app.firstWindow();
-  const copilot = page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true });
-  const chatGPT = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+  let page = await enterPrimaryUiAccount(app, await app.firstWindow());
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  const copilot = page
+    .locator('.ai-service-row')
+    .filter({ hasText: 'GitHub Copilot' })
+    .getByRole('button', { name: '连接', exact: true });
+  const chatGPT = page
+    .locator('.ai-service-row')
+    .filter({ hasText: 'ChatGPT' })
+    .getByRole('button', { name: '连接', exact: true });
   await copilot.waitFor();
-  assert.equal(await page.locator('.service-login').count(), 2);
+  assert.equal(await page.locator('.ai-service-row').count(), 2);
   await copilot.click();
   await page.getByRole('button', { name: '等待浏览器授权…', exact: true }).waitFor();
   assert.equal(await chatGPT.isDisabled(), true);
-  await page.getByRole('button', { name: '取消登录', exact: true }).click();
+  await page.getByRole('button', { name: '取消授权', exact: true }).click();
   await page.getByRole('alert').getByText('登录已取消', { exact: false }).waitFor();
   assert.equal(await copilot.isEnabled(), true);
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   assert.ok(await app.evaluate(() => globalThis.copilotLoginFixture.cancelled > 0));
   await copilot.click();
-  await page.waitForFunction(() => document.querySelector('.login-actions button')?.disabled);
-  const mainOpened = app.waitForEvent('window');
+  await page.getByRole('button', { name: '取消授权', exact: true }).waitFor();
   await app.evaluate(async () => {
     const deadline = Date.now() + 5000;
     while (globalThis.copilotLoginFixture.begun !== 2 || !globalThis.copilotLoginFixture.complete) {
@@ -80,7 +89,13 @@ try {
     }
     globalThis.copilotLoginFixture.complete();
   });
-  const main = await mainOpened;
+  await page
+    .locator('.ai-service-row')
+    .filter({ hasText: 'GitHub Copilot' })
+    .getByRole('button', { name: '断开连接', exact: true })
+    .waitFor();
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  const main = page;
   await main.getByRole('button', { name: '开始面试', exact: true }).waitFor();
   assert.equal((await main.evaluate(() => window.desktop.authSession())).mode, 'copilot');
   const models = await main.evaluate(() => window.desktop.chatModels(true));
@@ -96,7 +111,7 @@ try {
   await app.evaluate(() => {
     globalThis.copilotLoginFixture.holdQuota = true;
   });
-  await settings.getByRole('button', { name: '账户与用量', exact: true }).click();
+  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const account = settings.getByRole('region', { name: '账户额度', exact: true });
   const loading = account.getByRole('status', { name: '正在读取账户额度', exact: true });
   const releaseQuota = () =>
@@ -300,16 +315,13 @@ try {
   page = await app.firstWindow();
   await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'copilot');
-  const loginOpened = app.waitForEvent('window');
   await page.evaluate(() => window.desktop.signOut());
-  page = await loginOpened;
-  await page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true }).waitFor();
+  assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
   assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.logout), 1);
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   await installUiAccount(app);
-  const chatGPTOpened = app.waitForEvent('window');
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
-  page = await chatGPTOpened;
+  await page.evaluate(() => window.desktop.signInWithChatGPT());
+  await page.reload();
   await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'chatgpt');
   const switched = await page.evaluate(() => window.desktop.chatModels(true));
@@ -317,8 +329,12 @@ try {
   assert.equal(switched.models[0].provider.id, 'chatgpt');
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const chatGPTSettings = page.getByRole('dialog', { name: '设置', exact: true });
-  await chatGPTSettings.getByRole('button', { name: '账户与用量', exact: true }).click();
+  await chatGPTSettings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')

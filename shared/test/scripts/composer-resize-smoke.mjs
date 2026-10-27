@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
@@ -14,11 +15,8 @@ const app = await electron.launch({
 try {
   await installUiAccount(app);
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(10000);
   const surface = page;
   const input = surface.getByRole('textbox', { name: '聊天消息', exact: true });

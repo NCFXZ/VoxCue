@@ -1,3 +1,4 @@
+import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 
@@ -15,12 +16,9 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
-  ]);
+  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));

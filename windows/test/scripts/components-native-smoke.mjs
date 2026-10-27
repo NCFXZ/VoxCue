@@ -83,7 +83,13 @@ try {
   await closeUiApp(app);
   app = await launch();
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.waitForLoadState('domcontentloaded');
+  await login
+    .getByRole(login.url().endsWith('#login') ? 'heading' : 'button', {
+      name: login.url().endsWith('#login') ? '登录 VoxCue' : '用户菜单',
+      exact: true,
+    })
+    .waitFor();
   await app.evaluate(({ session }) => {
     globalThis.componentReuseRequests = [];
     session.fromPartition('voxcue-components').webRequest.onBeforeRequest((details, callback) => {

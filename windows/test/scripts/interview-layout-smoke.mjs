@@ -1,3 +1,4 @@
+import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -163,10 +164,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const [main] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(app, login);
   main.setDefaultTimeout(20000);
   main.on('pageerror', (error) => errors.push(error.message));
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).fill('普通问题');
@@ -235,6 +233,7 @@ try {
     rows.map((row) => row.title),
     [
       '面试知识库',
+      '剩余面试时长',
       '面试官 · 系统音频',
       '面试者 · 麦克风',
       '语音模型',
@@ -243,16 +242,16 @@ try {
       '思考强度',
     ],
   );
-  assert.ok(rows[0].width > rows[1].width * 2);
-  assert.equal(rows[1].y, rows[2].y);
-  assert.equal(rows[3].y, rows[4].y);
-  assert.equal(rows[5].y, rows[6].y);
-  assert.equal(rows[3].value, 'Paraformer 中英 INT8');
-  assert.equal(rows[4].value, 'CPU');
-  assert.ok(rows[0].y < rows[1].y && rows[1].y < rows[3].y && rows[3].y < rows[5].y);
+  for (let i = 0; i < rows.length; i += 2) {
+    assert.equal(rows[i].y, rows[i + 1].y);
+    assert.ok(Math.abs(rows[i].width - rows[i + 1].width) <= 1);
+  }
+  assert.equal(rows[4].value, 'Paraformer 中英 INT8');
+  assert.equal(rows[5].value, 'CPU');
+  assert.ok(rows[0].y < rows[2].y && rows[2].y < rows[4].y && rows[4].y < rows[6].y);
   await confirmation.screenshot({});
   checks.push(
-    'start dialog: full-width knowledge, paired audio, actual speech/device and answer model/effort rows',
+    'start dialog: paired knowledge/quota, audio, actual speech/device and answer model/effort rows',
   );
   const [floating] = await Promise.all([
     app.waitForEvent('window'),

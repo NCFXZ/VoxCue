@@ -1,5 +1,8 @@
 import * as DropdownMenu from './ui/dropdown-menu';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useCloudUsage } from '../stores/cloudUsage';
+import { isLowInterviewCredit } from '../../electron/contracts/cloudUsage';
+import { useCloudAccount } from '../stores/cloudAccount';
 import { usePreparation } from '../stores/preparation';
 import { Modal } from './ui/modal';
 import {
@@ -44,6 +47,29 @@ export function Sidebar({
 }: Props) {
   const connection = useChatConnection();
   const preparation = usePreparation();
+  const quota = useCloudUsage();
+  const userId = useCloudAccount((s) => s.state.user?.id);
+  useEffect(() => {
+    useCloudUsage.getState().bind(userId);
+    if (!userId) return;
+    const refresh = () => {
+      void useCloudUsage.getState().run({ action: 'status' });
+    };
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [userId]);
+  const remaining = quota.value?.permanent
+    ? '永久额度'
+    : quota.value
+      ? `剩余 ${Math.floor(Number(quota.value.remainingSeconds) / 3600)}小时 ${Math.floor((Number(quota.value.remainingSeconds) % 3600) / 60)}分钟`
+      : quota.error
+        ? '面试额度暂不可用'
+        : '正在读取面试额度…';
   const [loggingOut, setLoggingOut] = useState(false);
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -168,8 +194,12 @@ export function Sidebar({
             <button className="user-button" aria-label="用户菜单">
               <span className="avatar">{userName.slice(0, 1).toUpperCase()}</span>
               <span className="user-info">
-                <strong>{userName}</strong>
-                <small>{accountLabel}</small>
+                <strong title={accountLabel}>{accountLabel}</strong>
+                <small
+                  className={isLowInterviewCredit(quota.value) ? 'interview-quota-low' : undefined}
+                >
+                  {remaining}
+                </small>
               </span>
               <ChevronsUpDown size={15} />
             </button>

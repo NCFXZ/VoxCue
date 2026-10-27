@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
@@ -222,10 +223,17 @@ const inspect = async (page, name) => {
         const s = getComputedStyle(e);
         return {
           tag: e.tagName,
+          designedSize: e.matches('.login-auth-content h1')
+            ? 26
+            : e.matches('.cloud-account-form label')
+              ? 13
+              : e.matches('.login-footer small')
+                ? 11
+                : null,
           expectedControlSize: e.matches('.login-interview-preview textarea')
             ? 11
             : e.matches(
-                  '.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.markdown-code-block > header .ui-button',
+                  '.login-form-links .ui-button,.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.markdown-code-block > header .ui-button',
                 )
               ? 12
               : 14,
@@ -239,7 +247,9 @@ const inspect = async (page, name) => {
   );
   const invalid = rows.filter(
     (row) =>
-      ![12, 14, 15, 18].includes(row.size) && !(row.expectedControlSize === 11 && row.size === 11),
+      row.size !== row.designedSize &&
+      ![12, 14, 15, 18].includes(row.size) &&
+      !(row.expectedControlSize === 11 && row.size === 11),
   );
   assert.deepEqual(invalid, [], `${name}: unexpected type sizes`);
   const wrongControls = rows.filter(
@@ -276,14 +286,11 @@ try {
   });
   const login = await app.firstWindow();
   login.setDefaultTimeout(15000);
-  await login.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await inspect(login, 'login-light');
   await login.evaluate(() => document.documentElement.classList.add('dark'));
   await inspect(login, 'login-dark');
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
@@ -390,9 +397,21 @@ try {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await inspect(page, `user-menu-${theme}`);
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
     assert.equal(await settings.getByRole('button', { name: '知识库', exact: true }).count(), 0);
-    for (const category of ['个性化', '本地组件', '账户与用量', '面试设置', '更新', '关于']) {
+    for (const category of [
+      'VoxCue 账号',
+      '云同步',
+      'AI 服务',
+      '本地组件',
+      '面试设置',
+      '个性化',
+      '关于与更新',
+    ]) {
       await settings.getByRole('button', { name: category, exact: true }).click();
       await inspect(page, `settings-${category}-${theme}`);
       if (category === '个性化') {
@@ -402,7 +421,7 @@ try {
           await page.keyboard.press('Escape');
         }
       }
-      if (category === '账户与用量') {
+      if (category === 'AI 服务') {
         assert.equal(
           await settings.getByRole('button', { name: '重置用量', exact: true }).count(),
           0,
@@ -418,7 +437,11 @@ try {
     assert.equal(await page.getByRole('button', { name: '清除筛选', exact: true }).count(), 0);
     await page.getByRole('searchbox').fill('');
     await inspect(page, `history-${theme}`);
-    await page.locator('.history-row').first().click();
+    await page
+      .locator('.history-row')
+      .first()
+      .locator('.history-row-open')
+      .click({ position: { x: 16, y: 16 } });
     await page.getByRole('heading', { name: '接口设计与输入校验', exact: true }).waitFor();
     await inspect(page, `record-${theme}`);
     await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
@@ -487,7 +510,11 @@ try {
     .click();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page.locator('.history-row').first().click();
+  await page
+    .locator('.history-row')
+    .first()
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
   await inspect(page, 'record-answers-narrow-dark');
   await page.getByRole('button', { name: '知识库', exact: true }).click();
@@ -497,7 +524,19 @@ try {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await inspect(page, 'user-menu-narrow-dark');
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  for (const category of ['个性化', '本地组件', '账户与用量', '面试设置', '更新', '关于']) {
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
+  for (const category of [
+    'VoxCue 账号',
+    '云同步',
+    'AI 服务',
+    '本地组件',
+    '面试设置',
+    '个性化',
+    '关于与更新',
+  ]) {
     await page
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: category, exact: true })

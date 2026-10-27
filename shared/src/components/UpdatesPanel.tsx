@@ -4,7 +4,7 @@ import { Download, Loader, Update } from './icons';
 import { DownloadButton } from './DownloadButton';
 import { ActionTransition } from './ActionTransition';
 
-export function UpdatesPanel() {
+export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } = {}) {
   const updates = useUpdates();
   const state = updates.state;
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.phase);
@@ -32,10 +32,12 @@ export function UpdatesPanel() {
                     : '启动后自动检查新版本，由你选择下载。';
   return (
     <>
-      <div className="settings-entry">
-        <strong>当前版本</strong>
-        <span className="settings-value">{state?.currentVersion ?? '—'}</span>
-      </div>
+      {showVersion && (
+        <div className="settings-entry">
+          <strong>当前版本</strong>
+          <span className="settings-value">{state?.currentVersion ?? '—'}</span>
+        </div>
+      )}
       <div className="settings-entry">
         <div>
           <strong id="auto-download-label">自动下载更新</strong>

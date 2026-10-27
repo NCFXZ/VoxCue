@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -41,22 +42,22 @@ try {
     };
   });
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
-    const { ChatGPTAuthService } = require(
-      app.getAppPath() + '/dist-electron/shared/electron/backend/auth/service.js',
+    const { CloudAccountClient } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/cloud/client.js',
     );
-    const session = ChatGPTAuthService.prototype.session;
+    const call = CloudAccountClient.prototype.call;
     globalThis.delayStartup = true;
-    ChatGPTAuthService.prototype.session = async function () {
+    CloudAccountClient.prototype.call = async function (input) {
       if (globalThis.delayStartup)
         await new Promise((resolve) => {
           globalThis.releaseStartup = resolve;
         });
-      return session.call(this);
+      return call.call(this, input);
     };
   });
   await login.reload();
@@ -82,14 +83,11 @@ try {
     globalThis.delayStartup = false;
     globalThis.releaseStartup();
   });
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   checks.push('startup screen shows supplied Logo while session loads');
   assert.equal(await login.locator('.login-brand .app-logo').count(), 1);
   await login.screenshot({});
-  const [main] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(app, login);
   main.setDefaultTimeout(15000);
   main.on('pageerror', (e) => errors.push(e.message));
   await main.getByRole('button', { name: '面试记录', exact: true }).click();
@@ -148,7 +146,10 @@ try {
     window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
   });
   assert.equal(await main.locator('.history-row').count(), 1);
-  await main.locator('.history-row').click();
+  await main
+    .locator('.history-row')
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await main.locator('.record-transcript-row').nth(119).waitFor();
   assert.equal(await main.getByRole('complementary', { name: 'AI 回答', exact: true }).count(), 0);
   assert.equal(await main.locator('.record-transcript-row time').nth(80).innerText(), '1:20');
@@ -318,7 +319,10 @@ try {
     'end interview closes promptly; native title survives window close and off-page completion',
   );
   await main.getByRole('button', { name: '面试记录', exact: true }).click();
-  await main.locator('.history-row').filter({ hasText: '机器人控制与工业自动化岗位面试' }).click();
+  await main
+    .locator('.history-row')
+    .filter({ hasText: '机器人控制与工业自动化岗位面试' })
+    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
   await main.locator('.record-session-heading h1').waitFor();
   const refs = await main.evaluate(
     () =>
@@ -344,7 +348,10 @@ try {
     localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
     window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
   });
-  await main.locator('.history-row').filter({ hasText: '待生成标题' }).click();
+  await main
+    .locator('.history-row')
+    .filter({ hasText: '待生成标题' })
+    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
   await main.getByRole('button', { name: '重试生成标题', exact: true }).waitFor();
   await main.getByRole('button', { name: '重试生成标题', exact: true }).click();
   await app.evaluate(async () => {

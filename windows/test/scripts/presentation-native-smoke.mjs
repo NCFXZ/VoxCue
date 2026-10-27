@@ -1,3 +1,4 @@
+import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { probe } from './window-probe.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -59,7 +60,7 @@ let floating,
 try {
   await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
-  await login.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   const loginGeometry = await app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows()[0];
     win.show();
@@ -117,8 +118,8 @@ try {
       () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
     );
     const locator = draggable
-      ? login.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true })
-      : login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+      ? login.getByRole('heading', { name: '登录 VoxCue', exact: true })
+      : login.getByRole('button', { name: '登录', exact: true });
     const box = await locator.boundingBox();
     assert.ok(box);
     const points = await app.evaluate(
@@ -171,10 +172,7 @@ try {
       );
     loginGeometry.bounds = await readBounds();
   }
-  const [main] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(app, login);
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   const title = 'VoxCueNative' + process.pid;
   const mainHandle = await app.evaluate(({ BrowserWindow }, title) => {

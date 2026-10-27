@@ -63,6 +63,10 @@ export function Modal({
     const update = () => {
       frame = 0;
       const rect = heading.getBoundingClientRect();
+      dialog.style.setProperty(
+        '--dialog-scrollbar-width',
+        `${Math.max(0, scroll.offsetWidth - scroll.clientWidth)}px`,
+      );
       const opacity = headerCoverage(dialog, rect, '.dialog-scroll > *');
       for (const [name, value] of [
         ['--dialog-header-height', rect.height + 'px'],

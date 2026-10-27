@@ -1,36 +1,91 @@
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { testRoot } from './test-workspace.mjs';
+export async function enterDemoUiAccount(app, login) {
+  await app.evaluate(() => globalThis.primaryAccountFixture.login());
+  return login.evaluate(() => window.desktop.enterDemo());
+}
+export async function enterPrimaryUiAccount(app, login) {
+  await app.evaluate(
+    ({ app }, fixture) => {
+      if (!globalThis.primaryAccountFixture) {
+        const require = process
+          .getBuiltinModule('module')
+          .createRequire(app.getAppPath() + '/package.json');
+        require(fixture)(app.getAppPath());
+      }
+    },
+    fileURLToPath(new URL('../fixtures/install-primary-account.cjs', import.meta.url)),
+  );
+  const opened = app.waitForEvent('window');
+  await login.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
+  await login.getByLabel('密码', { exact: true }).fill('Synthetic UI passphrase 2026!');
+  await login.getByRole('button', { name: '登录', exact: true }).click();
+  const main = await opened;
+  await main.waitForLoadState('domcontentloaded');
+  await main.getByRole('button', { name: '用户菜单', exact: true }).waitFor();
+  return main;
+}
+export async function connectUiAccount(app, login, service = 'chatgpt') {
+  await login.waitForLoadState('domcontentloaded');
+  const main = login.url().endsWith('#login') ? await enterPrimaryUiAccount(app, login) : login;
+  // Domain-specific tests supply their own AI service port. Account entry is
+  // always the production email form; AI is a separate connection after entry.
+  await main.evaluate(
+    (provider) =>
+      provider === 'copilot'
+        ? window.desktop.signInWithCopilot()
+        : window.desktop.signInWithChatGPT(),
+    service,
+  );
+  await main.reload();
+  await main.getByRole('button', { name: '用户菜单', exact: true }).waitFor();
+  return main;
+}
 // Called only by Playwright in an isolated test process. No real OAuth/AI/audio.
 export async function closeUiApp(app) {
-  await app.evaluate(
-    ({ app, dialog }, owner) => {
-      const path = process.getBuiltinModule('path');
-      const fs = process.getBuiltinModule('fs');
-      // A child can have an isolated TMPDIR below the owning run. Verify the run
-      // marker and exact owner instead of treating the child's TMPDIR as its parent.
-      const root = fs.realpathSync(owner.root);
-      const marker = JSON.parse(
-        fs.readFileSync(path.join(root, '.voxcue-test-owner.json'), 'utf8'),
-      );
-      const profile = path.resolve(app.getPath('userData'));
-      const relative = path.relative(root, profile);
-      if (
-        !path.basename(root).startsWith('voxcue-test-run-') ||
-        marker.kind !== 'voxcue-test-run-' ||
-        marker.pid !== owner.pid ||
-        !relative ||
-        relative.startsWith('..') ||
-        path.isAbsolute(relative)
-      )
-        throw Error('UI teardown requires isolated temporary userData');
-      const original = dialog.showMessageBox.bind(dialog);
-      dialog.showMessageBox = (...args) =>
-        args.at(-1)?.title === '关闭 VoxCue'
-          ? Promise.resolve({ response: 1, checkboxChecked: false })
-          : original(...args);
-    },
-    { root: testRoot, pid: process.pid },
-  );
+  try {
+    if (app.process().exitCode !== null || app.process().signalCode !== null) return;
+  } catch {
+    // Playwright releases its process dispatcher after an expected native close.
+    return;
+  }
+  let closed = false;
+  await app
+    .evaluate(
+      ({ app, dialog }, owner) => {
+        const path = process.getBuiltinModule('path');
+        const fs = process.getBuiltinModule('fs');
+        // A child can have an isolated TMPDIR below the owning run. Verify the run
+        // marker and exact owner instead of treating the child's TMPDIR as its parent.
+        const root = fs.realpathSync(owner.root);
+        const marker = JSON.parse(
+          fs.readFileSync(path.join(root, '.voxcue-test-owner.json'), 'utf8'),
+        );
+        const profile = path.resolve(app.getPath('userData'));
+        const relative = path.relative(root, profile);
+        if (
+          !path.basename(root).startsWith('voxcue-test-run-') ||
+          marker.kind !== 'voxcue-test-run-' ||
+          marker.pid !== owner.pid ||
+          !relative ||
+          relative.startsWith('..') ||
+          path.isAbsolute(relative)
+        )
+          throw Error('UI teardown requires isolated temporary userData');
+        const original = dialog.showMessageBox.bind(dialog);
+        dialog.showMessageBox = (...args) =>
+          args.at(-1)?.title === '关闭 VoxCue'
+            ? Promise.resolve({ response: 1, checkboxChecked: false })
+            : original(...args);
+      },
+      { root: testRoot, pid: process.pid },
+    )
+    .catch((error) => {
+      if (/Target page, context or browser has been closed/.test(error.message)) closed = true;
+      else throw error;
+    });
+  if (closed) return;
   if (process.platform === 'darwin') {
     // macOS intentionally remains in the Dock after its last window closes.
     // Finish the normal save/close handshake before asking Playwright to quit.

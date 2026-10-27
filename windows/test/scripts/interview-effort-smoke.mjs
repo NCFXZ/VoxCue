@@ -52,6 +52,10 @@ try {
   const openSettings = async () => {
     await main.getByRole('button', { name: '用户菜单', exact: true }).click();
     await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await main
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
     await main.getByRole('button', { name: '面试设置', exact: true }).click();
   };
   await openSettings();

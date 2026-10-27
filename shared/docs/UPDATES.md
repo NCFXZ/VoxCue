@@ -94,7 +94,7 @@ Mac DMG可供首次手动安装，但自动更新必须有arm64 ZIP；Mac清单�
 - `pnpm test:updates`：实际主进程/IPC/preload/React/IndexedDB，外部 updater 端口为隔离夹具。覆盖检查/下载/进度/重试、非法调用者、面试阻止、取消、保存失败与成功重启后的草稿及附件恢复。
 - `node test/windows/scripts/installer-ui-smoke.mjs updates`：在上述回归后用同一合成 profile 启动实际 NSIS staging，验证安装路径变化仍保留聊天草稿、附件原始字节及正确的应用版本。账户/updater 为夹具，不访问线上服务。
 - `pnpm test:updates:native`：真实 NsisUpdater，经本机测试 HTTP 下载实际生成的 NSIS 安装包、拒绝损坏 SHA512、核对完整文件哈希，不安装或发布。
-- `pnpm test:installer:upgrade`：独立应用 ID、无快捷方式的合成 NSIS 应用，安装到 test/results，在两个版本间验证 localStorage、IndexedDB 原件字节及设置文件保留，随后只卸载该测试安装；不访问真实 VoxCue 用户资料。
+- `pnpm test:installer:upgrade`：独立应用 ID、无快捷方式的合成 NSIS 应用，在有所有权标记的系统临时目录中验证两个版本间的 localStorage、IndexedDB 原件字节及设置文件保留，随后只卸载该测试安装并清理临时内容；不访问真实 VoxCue 用户资料，结果仅输出终端。
 - `node test/windows/scripts/packaged-smoke.mjs --installer-stage`：验证实际安装包所用完整目录的真实 Paraformer Worker、utilityProcess、原生组件与既有资料功能。默认命令仍验证原便携包。
 - `node test/windows/scripts/installer-ui-smoke.mjs chat-progress`：用实际打包应用及隔离合成账户/HTTP/SSE 验证公开活动、处理用时、资料确认、重试和持久恢复；不访问真实账户或用户资料。copilot和adversarial两组使用同一Windows runner传入对应名称。
 

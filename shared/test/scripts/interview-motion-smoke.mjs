@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { writeFile } from 'node:fs/promises';
@@ -58,7 +59,7 @@ try {
   });
   const login = await app.firstWindow();
   const next = app.waitForEvent('window');
-  await click(login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }));
+  await connectUiAccount(app, login);
   const main = await next;
   await main.getByRole('button', { name: '开始面试', exact: true }).waitFor();
   await click(main.getByRole('button', { name: '开始面试', exact: true }));

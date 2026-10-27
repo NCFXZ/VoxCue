@@ -1,3 +1,4 @@
+import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -27,10 +28,7 @@ for (const scale of scales) {
     await installUiAccount(app, { components: true });
     const login = await app.firstWindow();
     if (preview) await login.evaluate(() => localStorage.setItem('copilot-theme', 'dark'));
-    const [page] = await Promise.all([
-      app.waitForEvent('window'),
-      login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-    ]);
+    const page = await connectUiAccount(app, login);
     await page.getByRole('button', { name: '面试记录', exact: true }).click();
     await page.evaluate(() => {
       const record = {
@@ -63,7 +61,10 @@ for (const scale of scales) {
       localStorage.setItem('copilot-interview-history-v1', JSON.stringify([record]));
       window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
     });
-    await page.locator('.history-row').click();
+    await page
+      .locator('.history-row')
+      .locator('.history-row-open')
+      .click({ position: { x: 16, y: 16 } });
     if (preview) {
       await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
       await page.waitForFunction(() =>

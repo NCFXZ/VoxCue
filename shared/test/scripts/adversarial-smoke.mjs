@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
@@ -43,10 +44,7 @@ try {
       return { answerText: 'Synthetic successful answer', sources: [], usage: null };
     };
   });
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   const ready = async () => {

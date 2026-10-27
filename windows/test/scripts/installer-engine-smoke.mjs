@@ -13,6 +13,7 @@ import {
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
 import config from '../../electron-builder.config.cjs';
@@ -316,7 +317,7 @@ try {
         appId: 'com.voxcue.install-test.' + guid,
         productName: name,
         directories: { output: path.join(testRoot, 'artifacts-' + version) },
-        electronVersion: '38.8.6',
+        electronVersion: createRequire(import.meta.url)('electron/package.json').version,
         compression: 'store',
         publish: null,
         win: {

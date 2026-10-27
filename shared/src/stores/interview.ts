@@ -56,10 +56,10 @@ interface InterviewState {
   sessionId: string | null;
   startedAt: number | null;
   endedAt: number | null;
-  archive(status: 'ended' | 'interrupted'): void;
+  archive(status: 'ended' | 'interrupted', preserveEmpty?: boolean): void;
   start(): void;
   pause(): void;
-  end(): Promise<void>;
+  end(options?: { preserveEmpty?: boolean; generateTitle?: boolean }): Promise<void>;
   reset(): void;
   setAutoAnswer(enabled: boolean): void;
   ask(question: string, sourceTranscriptIds?: string[], screenshotIds?: string[]): Promise<void>;
@@ -69,6 +69,13 @@ let answerController: AbortController | undefined;
 let sequence = 0;
 let startAttempt = 0;
 let finishingSession: string | null = null;
+let endingOperation:
+  | {
+      sessionId: string | null;
+      promise: Promise<void>;
+      options: { preserveEmpty?: boolean; generateTitle?: boolean };
+    }
+  | undefined;
 let unsubscribeSpeech: (() => void) | undefined;
 const automaticQuestion = new AutomaticQuestionGate();
 let automaticQuestionReady = false;
@@ -315,12 +322,12 @@ export const useInterview = create<InterviewState>((set, get) => ({
     automaticQuestionReady = false;
     set({ autoAnswer: enabled });
   },
-  archive(status) {
+  archive(status, preserveEmpty = false) {
     const state = get();
     if (
       !state.sessionId ||
       state.startedAt === null ||
-      (!state.transcripts.length && !state.answers.length)
+      (!preserveEmpty && !state.transcripts.length && !state.answers.length)
     )
       return;
     useHistory.getState().save({
@@ -619,43 +626,55 @@ export const useInterview = create<InterviewState>((set, get) => ({
       speechSwitchError: null,
     });
   },
-  async end() {
-    get().clearScreenshots();
-    ++startAttempt;
+  end(options) {
     const sessionId = get().sessionId;
-    stop();
-    get().stopAnswer();
-    if (get().mode === 'local') {
-      finishingSession = sessionId;
-      set({
-        status: 'paused',
-        generating: false,
-
-        audioLevels: {},
-        reconnecting: false,
-        switchingSpeech: false,
-        speechSwitchError: null,
-      });
-      try {
-        await window.desktop?.speech({ op: 'stop' });
-      } catch (error) {
-        set({ error: (error as Error).message });
-      }
-      unsubscribeSpeech?.();
-      unsubscribeSpeech = undefined;
-      if (finishingSession === sessionId) finishingSession = null;
-      if (get().sessionId !== sessionId) return;
+    if (endingOperation?.sessionId === sessionId) {
+      if (options?.preserveEmpty) endingOperation.options.preserveEmpty = true;
+      if (options?.generateTitle === false) endingOperation.options.generateTitle = false;
+      return endingOperation.promise;
     }
-    set({ status: 'ended', generating: false, endedAt: get().endedAt ?? Date.now() });
-    get().archive('ended');
-    const current = get();
-    if (
-      current.mode === 'local' &&
-      current.aiEnabled &&
-      current.sessionId &&
-      !useHistory.getState().error
-    )
-      await useHistory.getState().generateTitle(current.sessionId, current.modelId);
+    const policy = { ...options };
+    const promise = (async () => {
+      get().clearScreenshots();
+      ++startAttempt;
+      stop();
+      get().stopAnswer();
+      if (get().mode === 'local') {
+        finishingSession = sessionId;
+        set({
+          status: 'paused',
+          generating: false,
+          audioLevels: {},
+          reconnecting: false,
+          switchingSpeech: false,
+          speechSwitchError: null,
+        });
+        try {
+          await window.desktop?.speech({ op: 'stop' });
+        } catch (error) {
+          set({ error: (error as Error).message });
+        }
+        unsubscribeSpeech?.();
+        unsubscribeSpeech = undefined;
+        if (finishingSession === sessionId) finishingSession = null;
+        if (get().sessionId !== sessionId) return;
+      }
+      set({ status: 'ended', generating: false, endedAt: get().endedAt ?? Date.now() });
+      get().archive('ended', policy.preserveEmpty);
+      const current = get();
+      if (
+        policy.generateTitle !== false &&
+        current.mode === 'local' &&
+        current.aiEnabled &&
+        current.sessionId &&
+        !useHistory.getState().error
+      )
+        await useHistory.getState().generateTitle(current.sessionId, current.modelId);
+    })();
+    endingOperation = { sessionId, promise, options: policy };
+    return promise.finally(() => {
+      if (endingOperation?.promise === promise) endingOperation = undefined;
+    });
   },
   reset() {
     get().clearScreenshots();

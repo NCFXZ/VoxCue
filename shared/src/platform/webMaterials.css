@@ -16,12 +16,23 @@
   --web-material-opacity: calc((0.6 + var(--frosted-opacity-dark, 0.64) * 0.4) * 100%);
   --interview-chrome-surface: color-mix(in srgb, var(--surface) 90%, white);
 }
+/* Both management lists scroll behind their fixed toolbar. Keep its material
+   out of the scrollbar gutter and start the thumb below the measured header. */
+.web-materials .management-page > .page-toolbar {
+  max-width: calc(100% - var(--page-scrollbar-width, 0px));
+}
+.web-materials .management-page > .management-scroll {
+  scroll-padding-top: var(--page-toolbar-height, 52px);
+}
+.web-materials .management-page > .management-scroll::-webkit-scrollbar-track {
+  margin-top: var(--page-toolbar-height, 52px);
+}
 /* The transcript still scrolls behind the fixed header material, while its
    scrollbar starts below that header instead of painting over its actions. */
 .web-materials
   .record-detail-toolbar
   + .record-detail-body
-  .record-transcript-scroll::-webkit-scrollbar-track:vertical {
+  .record-transcript-scroll::-webkit-scrollbar-track {
   margin-top: var(--record-toolbar-height, 64px);
 }
 .web-materials .dropdown-content .dropdown-item[data-highlighted]:not([data-disabled]) {
@@ -233,6 +244,7 @@
   isolation: isolate;
   background: transparent;
   border-bottom-color: transparent;
+  max-width: calc(100% - var(--panel-scrollbar-width, 0px));
 }
 .web-materials :is(.personal-panel, .record-answer-panel) > header::before {
   opacity: var(--panel-header-opacity, 0);
@@ -250,6 +262,44 @@
   background: var(--web-material-fill);
   -webkit-backdrop-filter: var(--web-material-filter);
   backdrop-filter: var(--web-material-filter);
+}
+.web-materials .settings-content-heading::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  opacity: var(--panel-header-opacity, 0);
+  background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-material-filter);
+  backdrop-filter: var(--web-material-filter);
+  border-bottom: 1px solid var(--border);
+}
+.web-materials :is(.personal-panel-scroll, .record-answer-scroll)::-webkit-scrollbar-track {
+  margin-top: var(--panel-header-height, 0px);
+}
+.web-materials .app-dialog[data-overlay-header] > .dialog-scroll::-webkit-scrollbar-track {
+  margin-top: var(--dialog-header-height, 72px);
+}
+.web-materials .settings-content-body::-webkit-scrollbar-track {
+  margin-top: var(--panel-header-height, 72px);
+}
+.record-transcript-scroll {
+  scrollbar-width: auto;
+}
+.record-transcript-scroll::-webkit-scrollbar {
+  width: 6px;
+}
+.history-detail:has(.record-answer-panel[data-open='true'])
+  .record-transcript-scroll::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  background: color-mix(in srgb, var(--foreground) 17%, transparent);
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+.history-detail:has(.record-answer-panel[data-open='true'])
+  .record-transcript-scroll::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in srgb, var(--foreground) 34%, transparent);
 }
 .web-materials .floating-panel > header {
   position: relative;
@@ -350,7 +400,7 @@
      No top or circular cutouts: the fixed sibling surfaces blur actual content. */
   mask-image: linear-gradient(to bottom, black calc(100% - 36px), transparent);
 }
-.web-materials .floating-panels .floating-scroll::-webkit-scrollbar-track:vertical {
+.web-materials .floating-panels .floating-scroll::-webkit-scrollbar-track {
   margin-top: calc(var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px));
 }
 .web-materials .floating-panels .floating-composer {

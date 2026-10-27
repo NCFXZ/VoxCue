@@ -1,3 +1,5 @@
+import { enterPrimaryUiAccount, installUiAccount } from './install-ui-account.mjs';
+import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -66,7 +68,7 @@ try {
     });
   };
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(await page.locator('.sidebar').count(), 0);
   const assertNoOuterMargin = async () => {
     const body = await page.locator('.app-body').boundingBox();
@@ -75,25 +77,24 @@ try {
       assert.ok(Math.abs(body[key] - card[key]) < 1, `Login card fills body: ${key}`);
   };
   await assertNoOuterMargin();
-  await assertWindowSize([960, 580]);
+  await assertWindowSize([1000, 660]);
   assert.equal(await page.locator('.titlebar').count(), 0);
-  assert.equal(
-    await page
-      .getByRole('button', { name: '使用 ChatGPT 继续', exact: true })
-      .locator('img.service-brand-icon')
-      .evaluate((icon) => icon.complete && icon.naturalWidth > 0),
-    true,
-  );
+  assert.equal(await page.locator('.login-brand').innerText(), 'VoxCue');
   const loginId = await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].id);
   assert.equal(
     await page
-      .locator('.login-shell')
+      .locator('.login-card')
       .evaluate((element) => getComputedStyle(element).backdropFilter),
     'none',
   );
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   await page.screenshot({});
+  page = await enterPrimaryUiAccount(app, page);
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  const ai = page.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
   // Intercept only the operating-system browser launch in this isolated process.
   // No production OAuth endpoint, real account or credentials are used by this UI test.
   await app.evaluate(({ shell }) => {
@@ -102,8 +103,8 @@ try {
       globalThis.__loginURL = url;
     };
   });
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
-  await page.getByRole('button', { name: '取消登录', exact: true }).waitFor();
+  await ai.getByRole('button', { name: '连接', exact: true }).click();
+  await page.getByRole('button', { name: '取消授权', exact: true }).waitFor();
   let address;
   for (let attempt = 0; attempt < 100; attempt++) {
     address = await app.evaluate(() => globalThis.__loginURL);
@@ -116,13 +117,13 @@ try {
   assert.equal(authorization.searchParams.get('client_id'), 'synthetic-managed-client');
   const callback = new URL(authorization.searchParams.get('redirect_uri'));
   assert.equal(callback.hostname, '127.0.0.1');
-  await page.getByRole('button', { name: '取消登录', exact: true }).click();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('button', { name: '取消授权', exact: true }).click();
+  await ai.getByRole('button', { name: '连接', exact: true }).waitFor();
   await page.getByRole('alert').getByText('登录已取消', { exact: false }).waitFor();
   await app.evaluate(() => {
     globalThis.__loginURL = '';
   });
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
+  await ai.getByRole('button', { name: '连接', exact: true }).click();
   for (let attempt = 0; attempt < 100; attempt++) {
     address = await app.evaluate(() => globalThis.__loginURL);
     if (address) break;
@@ -178,11 +179,10 @@ try {
     roundTrip: true,
     sameHost: true,
   });
-  const oldLogin = page;
-  [page] = await Promise.all([
-    app.waitForEvent('window'),
-    oldLogin.evaluate(() => window.desktop.enterDemo()),
-  ]);
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await installUiAccount(app);
+  await page.evaluate(() => window.desktop.signInWithChatGPT());
+  await page.reload();
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？' }).waitFor();
   assert.notEqual(
@@ -196,15 +196,19 @@ try {
   await assertWindowSize([1280, 800]);
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.screenshot({});
-  await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).click();
+  await page.getByRole('menuitemradio', { name: /Test Model/ }).click();
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   assert.equal(
-    await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).getAttribute('aria-checked'),
+    await page.getByRole('menuitemradio', { name: /Test Model/ }).getAttribute('aria-checked'),
     'true',
   );
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '用户菜单' }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置' }).click();
@@ -221,13 +225,16 @@ try {
     })(),
   ]);
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await assertNoOuterMargin();
-  await assertWindowSize([960, 580]);
+  await assertWindowSize([1000, 660]);
   assert.equal(await page.locator('.titlebar').count(), 0);
   await page.screenshot({});
   assert.equal(await page.locator('.sidebar').count(), 0);
-  assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
+  assert.equal(
+    (await page.evaluate(() => window.desktop.cloudAccount({ action: 'status' }))).state.user,
+    null,
+  );
   assert.deepEqual(errors, []);
   console.log(
     'PASS: login gate, browser OAuth initiation, cancel/decline, native encrypted storage, internal fixture session, logout and custom model menu.',

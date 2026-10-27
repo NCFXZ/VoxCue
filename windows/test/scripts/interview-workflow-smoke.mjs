@@ -165,6 +165,10 @@ try {
   await seed(main);
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await main
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await main.getByRole('button', { name: '面试设置', exact: true }).click();
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
   assert.equal(await settings.getByRole('button', { name: '转写模式', exact: true }).count(), 0);
@@ -232,6 +236,10 @@ try {
   await audioCheck.getByRole('button', { name: '取消', exact: true }).click();
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await main
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await app.evaluate(() => {
     globalThis.microphoneDenied = false;
@@ -263,6 +271,10 @@ try {
   });
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await main
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('button', { name: '面试回答思考强度', exact: true }).click();
   await main.getByRole('menuitemradio', { name: '轻度', exact: true }).waitFor();
@@ -425,7 +437,7 @@ try {
     const bounds = await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((w) => w.webContents.getURL().endsWith('#interview'))
-        .getBounds(),
+        .getContentBounds(),
     );
     const rect = await floating.locator('.floating-toolbar').boundingBox();
     return { center: bounds.x + rect.x + rect.width / 2, top: bounds.y + rect.y, bounds };
@@ -543,11 +555,13 @@ try {
   const resized = await app.evaluate(({ BrowserWindow }) =>
     BrowserWindow.getAllWindows()
       .find((w) => w.webContents.getURL().endsWith('#interview'))
-      .getBounds(),
+      .getContentBounds(),
   );
   assert.ok(resized.width < original.bounds.width && resized.height < original.bounds.height);
-  assert.ok(Math.abs(resized.x + resized.width / 2 - original.center) <= 1);
-  assert.ok(Math.abs(resized.y - original.bounds.y) <= 1);
+  const resizedToolbar = await toolbarPosition();
+  const anchorDiagnostic = JSON.stringify({ original, resized, resizedToolbar });
+  assert.ok(Math.abs(resizedToolbar.center - original.center) <= 1, anchorDiagnostic);
+  assert.ok(Math.abs(resizedToolbar.top - original.top) <= 1, anchorDiagnostic);
   await app.evaluate(({ screen }) => {
     screen.getCursorScreenPoint = globalThis.originalCursor;
   });

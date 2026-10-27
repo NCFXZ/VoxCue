@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -34,10 +35,7 @@ const settle = (page) =>
 try {
   await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(20000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -228,6 +226,10 @@ try {
   }
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
   const alignment = await dialog.evaluate((element) => {
@@ -278,6 +280,10 @@ try {
   await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
   await page.getByRole('button', { name: '麦克风设备', exact: true }).waitFor();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();

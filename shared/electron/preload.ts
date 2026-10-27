@@ -48,6 +48,11 @@ function subscribe<K extends keyof DesktopEventMap>(
   return () => ipcRenderer.removeListener(channel, listener);
 }
 const desktop: DesktopAPI = {
+  cloudAccount: (call) => invoke('cloud:account', call),
+  cloudSync: (call) => invoke('cloud:sync', call),
+  cloudUsage: (call) => invoke('cloud:usage', call),
+  onCloudUsageExpired: (callback) => subscribe('cloud:usage-expired', callback),
+  onInterviewUsage: (callback) => subscribe('interview:usage', callback),
   platform:
     process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'unknown',
   presentation,

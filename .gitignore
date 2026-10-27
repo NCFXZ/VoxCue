@@ -31,3 +31,6 @@ shared/test/fixtures/speech-audio/
 
 /macos/VoxCue.app/
 /macos/public/
+
+# Independent NCFXZ/VoxCue-server checkout used read-only by client integration tests.
+/shared/server/

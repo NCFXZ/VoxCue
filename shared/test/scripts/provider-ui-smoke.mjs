@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -45,10 +46,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   const input = page.getByRole('textbox', { name: '聊天消息', exact: true });
@@ -58,6 +56,10 @@ try {
   const openSettings = async () => {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
   };
   const chooseModel = async (label) => {
     await page.getByRole('button', { name: '聊天模型', exact: true }).click();
@@ -158,7 +160,7 @@ try {
   assert.equal(await settings.getByText(/按需查找需要账户模型支持/).count(), 0);
   assert.equal(await settings.getByText('高级诊断', { exact: true }).count(), 0);
   assert.equal(await settings.getByText(/必要片段会发送至/).count(), 0);
-  await category('关于').click();
+  await category('关于与更新').click();
   assert.equal(await settings.getByText(/通过聊天准备面试/).count(), 0);
   await category('面试设置').click();
   assert.equal(await settings.getByText('设置用于下一场面试。', { exact: true }).count(), 0);
@@ -202,7 +204,11 @@ try {
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
   ]);
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page.locator('.history-row').first().click();
+  await page
+    .locator('.history-row')
+    .first()
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
   await page
     .locator('.record-answer-content strong')

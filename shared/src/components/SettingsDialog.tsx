@@ -1,10 +1,15 @@
 import { useState } from 'react';
+import { CloudAccountPanel } from './CloudAccountPanel';
+import { SyncSettingsPanel } from './SyncSettingsPanel';
+import { CloudUsagePanel } from './CloudUsagePanel';
+import { AIServicePanel } from './AIServicePanel';
 import * as DropdownMenu from './ui/dropdown-menu';
 import {
   Appearance,
   Settings,
   CircleHelp,
-  Database,
+  Cloud,
+  Sparkles,
   SystemTheme,
   Moon,
   Sun,
@@ -12,34 +17,30 @@ import {
   Check,
   ChevronsUpDown,
   Person,
-  Update,
   Download,
 } from './icons';
 import { Modal } from './ui/modal';
 import { Button } from './ui/button';
-import { UsagePanel } from './UsagePanel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ComponentsPanel } from './ComponentsPanel';
-import { providerInfo } from '../services/providers';
 import { SpeechControls } from './SpeechControls';
 import { InterviewFontSettings } from './InterviewFontSettings';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useChatConnection } from '../stores/chatConnection';
-import { useAuth } from '../stores/auth';
 import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
 
 export type Theme = 'light' | 'dark' | 'system';
-const platformLabels = { macos: 'macOS', windows: 'Windows', unknown: '未知平台' };
 const categories = [
-  { id: 'general', label: '个性化', Icon: Appearance },
+  { id: 'account', label: 'VoxCue 账号', Icon: Person },
+  { id: 'sync', label: '云同步', Icon: Cloud },
+  { id: 'ai', label: 'AI 服务', Icon: Sparkles },
   { id: 'components', label: '本地组件', Icon: Download },
-  { id: 'account', label: '账户与用量', Icon: Person },
   { id: 'interview', label: '面试设置', Icon: Settings },
-  { id: 'updates', label: '更新', Icon: Update },
-  { id: 'about', label: '关于', Icon: CircleHelp },
+  { id: 'general', label: '个性化', Icon: Appearance },
+  { id: 'about', label: '关于与更新', Icon: CircleHelp },
 ] as const;
-export type SettingsCategory = (typeof categories)[number]['id'];
+export type SettingsCategory = (typeof categories)[number]['id'] | 'updates';
 const themes = [
   { value: 'light', label: '浅色', Icon: Sun },
   { value: 'dark', label: '深色', Icon: Moon },
@@ -50,19 +51,19 @@ export function SettingsDialog({
   theme,
   onThemeChange,
   onClose,
-  initialCategory = 'general',
+  initialCategory = 'account',
 }: {
   theme: Theme;
   onThemeChange(theme: Theme): void;
   onClose(): void;
   initialCategory?: SettingsCategory;
 }) {
-  const [category, setCategory] = useState<SettingsCategory>(initialCategory);
+  const [category, setCategory] = useState<Exclude<SettingsCategory, 'updates'>>(
+    initialCategory === 'updates' ? 'about' : initialCategory,
+  );
   const presentation = window.desktop?.presentation ?? pendingPresentation;
-  const session = useAuth((state) => state.session);
   const interview = useInterviewSettings();
   const connection = useChatConnection();
-  const accountProvider = providerInfo(session?.mode);
   const selectedTheme = themes.find((item) => item.value === theme)!;
   return (
     <Modal title="设置" className="settings-dialog" hideHeader onClose={onClose}>
@@ -103,7 +104,6 @@ export function SettingsDialog({
             </h2>
           </header>
           <div className="settings-content-body">
-            {category === 'updates' && <UpdatesPanel />}
             {category === 'components' && <ComponentsPanel />}
             {category === 'general' && (
               <>
@@ -154,22 +154,12 @@ export function SettingsDialog({
             )}
             {category === 'account' && (
               <>
-                <div className="settings-entry settings-account">
-                  <div>
-                    <strong>{session?.user.name || '本机用户'}</strong>
-                    <p>
-                      {session && session.mode !== 'demo'
-                        ? session.user.email || `${accountProvider.name} 已连接`
-                        : '未连接模型服务'}
-                    </p>
-                  </div>
-                  <span className="settings-value">
-                    {session && session.mode !== 'demo' ? accountProvider.name : '未连接'}
-                  </span>
-                </div>
-                <UsagePanel />
+                <CloudAccountPanel showTitle={false} />
+                <CloudUsagePanel />
               </>
             )}
+            {category === 'ai' && <AIServicePanel />}
+            {category === 'sync' && <SyncSettingsPanel />}
             {category === 'interview' && (
               <>
                 <SpeechControls
@@ -193,19 +183,9 @@ export function SettingsDialog({
                   <strong>VoxCue</strong>
                   <span className="settings-value">{version}</span>
                 </div>
-                <div className="settings-entry">
-                  <strong>平台</strong>
-                  <span className="settings-value">
-                    {platformLabels[window.desktop?.platform ?? 'unknown']}
-                  </span>
-                </div>
-                <div className="settings-entry">
-                  <strong>知识库</strong>
-                  <span className="settings-value">
-                    <Database size={16} />
-                    本地文件存储
-                  </span>
-                </div>
+                <section className="settings-about-updates" aria-label="软件更新">
+                  <UpdatesPanel showVersion={false} />
+                </section>
               </>
             )}
           </div>

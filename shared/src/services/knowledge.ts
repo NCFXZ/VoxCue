@@ -1,4 +1,5 @@
 import { deactivateOriginal } from './knowledgeIndex';
+import { localChanged } from './localChanges';
 import type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
 export type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
 const supported = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md']);
@@ -38,6 +39,7 @@ async function transaction<T>(
     let value: T;
     tx.oncomplete = () => {
       db.close();
+      if (mode === 'readwrite') localChanged('knowledgebase');
       resolve(value);
     };
     tx.onerror = tx.onabort = () => {
@@ -68,7 +70,11 @@ export const localKnowledge: KnowledgeManagementService = {
     transaction(['bases'], 'readwrite', (tx) => {
       if (!base.name.trim() || base.name.trim().length > 60)
         throw new Error('名称需要 1–60 个字符。');
-      tx.objectStore('bases').put({ ...base, name: base.name.trim() });
+      tx.objectStore('bases').put({
+        ...base,
+        name: base.name.trim(),
+        localRevision: crypto.randomUUID(),
+      });
     }),
   async deleteBase(id) {
     for (const doc of await localKnowledge.listDocuments(id))
@@ -122,6 +128,7 @@ export const localKnowledge: KnowledgeManagementService = {
               type: file.type,
               createdAt: Date.now(),
               blob: file,
+              localRevision: crypto.randomUUID(),
             });
           }
         };
@@ -143,6 +150,86 @@ export const localKnowledge: KnowledgeManagementService = {
     });
   },
 };
+/** Originals only. Local parser/vector/model caches are never part of cloud sync. */
+export async function syncKnowledgeSnapshot() {
+  return transaction<{ bases: KnowledgeBase[]; documents: LocalDocument[] }>(
+    ['bases', 'documents'],
+    'readonly',
+    (tx, result) => {
+      let bases: KnowledgeBase[] = [],
+        documents: LocalDocument[] = [];
+      const b = tx.objectStore('bases').getAll(),
+        d = tx.objectStore('documents').getAll();
+      b.onsuccess = () => {
+        bases = b.result;
+        result({ bases, documents });
+      };
+      d.onsuccess = () => {
+        documents = d.result;
+        result({ bases, documents });
+      };
+    },
+  );
+}
+export function documentRevision(value: KnowledgeBase | LocalDocument | undefined): string | null {
+  if (!value) return null;
+  return (
+    value.localRevision ??
+    JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'blob')))
+  );
+}
+export async function restoreSyncedBase(
+  base: KnowledgeBase,
+  expectedRevision: string | null,
+  guard = () => {},
+) {
+  return transaction(['bases'], 'readwrite', (tx) => {
+    const store = tx.objectStore('bases'),
+      current = store.get(base.id);
+    current.onsuccess = () => {
+      try {
+        guard();
+      } catch {
+        tx.abort();
+        return;
+      }
+      if (documentRevision(current.result) !== expectedRevision) tx.abort();
+      else store.put({ ...base, localRevision: crypto.randomUUID() });
+    };
+  });
+}
+export async function restoreSyncedDocument(
+  doc: LocalDocument,
+  expectedRevision: string | null,
+  guard = () => {},
+) {
+  const old = await localKnowledge.listDocuments(doc.baseId);
+  const replaced = old.filter((item) => item.id === doc.id || doc.baseId === 'personal-resume');
+  await backupOriginals(replaced);
+  for (const item of replaced) await deactivateOriginal(item.id);
+  return transaction(['documents'], 'readwrite', (tx) => {
+    const store = tx.objectStore('documents');
+    const current =
+      doc.baseId === 'personal-resume'
+        ? store.index('baseId').getAll(doc.baseId)
+        : store.get(doc.id);
+    current.onsuccess = () => {
+      try {
+        guard();
+      } catch {
+        tx.abort();
+        return;
+      }
+      const actual = Array.isArray(current.result) ? current.result[0] : current.result;
+      if (documentRevision(actual) !== expectedRevision) {
+        tx.abort();
+        return;
+      }
+      for (const item of replaced) store.delete(item.id);
+      store.put({ ...doc, localRevision: crypto.randomUUID() });
+    };
+  });
+}
 export async function previewDocument(doc: LocalDocument): Promise<string> {
   if (!/\.(txt|md)$/i.test(doc.name))
     return '原件已保存在本地。当前仅支持 TXT 和 Markdown 文本预览。';

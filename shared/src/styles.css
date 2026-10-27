@@ -1,4 +1,83 @@
 @import 'tailwindcss';
+.cloud-account-panel {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+.cloud-account-panel h3 {
+  margin: 0;
+  font-size: var(--type-section);
+}
+.cloud-account-form {
+  display: grid;
+  gap: 12px;
+}
+.cloud-verification {
+  display: grid;
+  gap: 6px;
+}
+.cloud-account-form label {
+  display: grid;
+  gap: 6px;
+  font-size: var(--type-body);
+}
+.cloud-account-form input {
+  width: 100%;
+  min-width: 0;
+  height: var(--control-height);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--soft);
+  color: var(--foreground);
+  padding: 0 12px;
+  font: inherit;
+}
+.cloud-account-panel .settings-hint {
+  margin: 0;
+}
+.cloud-account-modes,
+.cloud-account-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.cloud-account-modes button[aria-pressed='true'] {
+  background: color-mix(in srgb, var(--foreground) 12%, var(--surface));
+  font-weight: 600;
+}
+.cloud-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+.cloud-session-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.cloud-session-list li {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: center;
+}
+.cloud-session-list li > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.cloud-session-list small {
+  display: block;
+  color: var(--muted);
+}
+.cloud-account-panel .settings-entry strong {
+  overflow-wrap: anywhere;
+}
+.cloud-account-dialog {
+  width: min(460px, calc(100vw - 32px));
+}
 @custom-variant dark (&:is(.dark *));
 :root {
   font-family: 'Segoe UI Variable', 'Segoe UI', 'Microsoft YaHei', sans-serif;
@@ -215,13 +294,20 @@ p {
   display: flex;
 }
 .sidebar {
-  width: 230px;
+  --sidebar-expanded-width: 230px;
+  width: var(--sidebar-expanded-width);
   flex-shrink: 0;
   padding: 16px 10px 12px;
   display: flex;
   flex-direction: column;
   background: transparent;
   transition: width 0.2s;
+  overflow: clip;
+}
+.sidebar:not(.collapsed) > :is(.sidebar-heading, nav, .sidebar-conversations, .sidebar-bottom) {
+  width: calc(var(--sidebar-expanded-width) - 20px);
+  min-width: calc(var(--sidebar-expanded-width) - 20px);
+  flex-shrink: 0;
 }
 .sidebar-heading {
   display: flex;
@@ -967,7 +1053,7 @@ p {
     --page-gutter: 24px;
   }
   .sidebar {
-    width: 200px;
+    --sidebar-expanded-width: 200px;
   }
   .collapsed {
     width: 68px;
@@ -1239,7 +1325,7 @@ p {
 }
 .app-dialog[data-overlay-header] > .dialog-heading {
   position: absolute;
-  inset: 0 0 auto;
+  inset: 0 var(--dialog-scrollbar-width, 0px) auto 0;
   z-index: 2;
   isolation: isolate;
   border-color: transparent;
@@ -2308,7 +2394,7 @@ p {
   display: grid;
   place-items: center;
   padding: 0;
-  overflow: auto;
+  overflow: hidden;
   -webkit-app-region: drag;
 }
 .login-page :is(button, a, input, select, textarea, [contenteditable='true']) {
@@ -2338,64 +2424,15 @@ p {
   font-weight: 600;
   letter-spacing: -0.6px;
 }
-.login-copy p {
-  color: var(--muted);
-  font-size: var(--type-body);
-  margin-top: 10px;
-}
-.login-actions {
-  margin-top: 24px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-.login-actions .service-login.ui-button {
-  width: 100%;
-  border-radius: var(--radius-card);
-  height: 46px;
-  min-height: 46px;
-  font-size: var(--type-body);
-  gap: 12px;
-  padding: 0 16px;
-  justify-content: center;
-  color: #000;
-  background: var(--soft);
-  border: 1px solid var(--border);
-}
-.dark .login-actions .service-login.ui-button {
-  color: #fff;
-}
-.login-actions .service-login:hover {
-  background: var(--hover);
-  border-color: var(--border-hover);
-}
 .service-brand-icon {
   filter: none;
-}
-.login-actions .service-brand-icon {
-  width: 22px;
-  height: 22px;
-  flex-shrink: 0;
 }
 .dark .service-brand-icon {
   filter: brightness(0) invert(1);
 }
-.login-status {
-  font-size: var(--type-body);
-  color: var(--danger);
-  line-height: 1.7;
-  margin-top: 14px;
-  overflow-wrap: anywhere;
-}
 .login-footer {
   margin-top: auto;
   padding-top: 28px;
-}
-.login-footer p {
-  font-size: var(--type-secondary);
-  color: var(--muted);
-  line-height: 1.8;
-  margin-top: 0;
 }
 .login-footer small {
   display: block;
@@ -2459,6 +2496,22 @@ p {
   color: #b04b3b;
   font-size: var(--type-body);
   border-radius: 20px;
+}
+.interview-end-notice {
+  position: fixed;
+  z-index: 30;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 32px);
+  padding: 8px 12px 8px 18px;
+  border-radius: 20px;
+  background: var(--surface);
+  box-shadow: 0 4px 16px #0003;
+  font-size: var(--type-body);
 }
 @media (max-width: 1050px) {
   .login-page {
@@ -3134,14 +3187,32 @@ p {
   font-weight: 600;
 }
 .settings-content {
+  position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
-  overflow-y: auto;
-  padding: 24px;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
   overscroll-behavior: contain;
 }
 .settings-content-heading {
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--border);
+  position: relative;
+  flex-shrink: 0;
+  max-width: calc(100% - var(--panel-scrollbar-width, 0px));
+  margin: 0;
+  padding: 24px 24px 18px;
+  z-index: 2;
+  isolation: isolate;
+}
+.settings-content-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  margin-top: calc(-1 * var(--panel-header-height, 72px));
+  padding: calc(var(--panel-header-height, 72px) + 8px) 24px 24px;
+  scroll-padding-top: var(--panel-header-height, 72px);
 }
 .settings-content-heading h2 {
   font-size: var(--type-title);
@@ -3695,9 +3766,6 @@ p {
 .interview-start-summary > div {
   min-width: 0;
 }
-.interview-start-summary > .interview-start-knowledge {
-  grid-column: 1 / -1;
-}
 .interview-start-dialog .interview-start-summary {
   padding: 12px;
   gap: 12px 24px;
@@ -3712,6 +3780,10 @@ p {
   font-size: var(--type-body);
   color: var(--foreground);
   overflow-wrap: anywhere;
+}
+.interview-start-summary .interview-quota-low,
+.user-info .interview-quota-low {
+  color: var(--danger);
 }
 .interview-start-dialog .interview-start-description {
   font-size: var(--type-body);
@@ -4083,6 +4155,14 @@ details[open] > summary > .disclosure-chevron {
 }
 .floating-error {
   color: var(--danger);
+}
+.floating-usage-notice {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.interview-remaining-time {
+  font-variant-numeric: tabular-nums;
 }
 .floating-warning {
   color: #91620d;
@@ -4897,6 +4977,14 @@ details[open] > summary > .disclosure-chevron {
   overflow: auto;
   overscroll-behavior: contain;
 }
+.personal-panel > :is(header, .personal-panel-scroll, .personal-save-bar) {
+  width: calc(var(--personal-panel-width, 380px) - 2px);
+  min-width: calc(var(--personal-panel-width, 380px) - 2px);
+}
+.personal-panel > header {
+  width: calc(var(--personal-panel-width, 380px) - 2px - var(--panel-scrollbar-width, 0px));
+  min-width: calc(var(--personal-panel-width, 380px) - 2px - var(--panel-scrollbar-width, 0px));
+}
 .personal-panel .field-label input,
 .personal-panel .field-label textarea {
   font-size: var(--type-body);
@@ -5538,19 +5626,22 @@ details[open] > summary > .disclosure-chevron {
   line-height: 1.5;
 }
 .skill-update-prompt {
+  width: fit-content;
+  max-width: min(100%, 620px);
   border: 1px solid var(--border-hover);
   border-radius: var(--radius-card);
-  padding: 12px;
-  margin: 12px 0;
+  padding: 8px 12px;
+  margin: 10px auto;
   background: var(--selected);
   font-size: var(--type-body);
+  line-height: 1.5;
 }
 .skill-update-prompt > div {
   display: flex;
   flex-wrap: wrap;
   justify-content: center;
   gap: 6px;
-  margin-top: 10px;
+  margin-top: 8px;
 }
 .skill-update-prompt .ui-button {
   border-radius: 999px;
@@ -5625,8 +5716,6 @@ h4,
 .dialog-subtitle,
 .settings-entry p,
 .settings-hint,
-.login-copy > p,
-.login-footer p,
 .login-footer small,
 .record-answer-panel > header p {
   font-size: var(--type-secondary);
@@ -6051,6 +6140,57 @@ small {
 }
 .download-button.is-cancellable:is(:hover, :focus-visible) .download-button-cancel {
   visibility: visible;
+}
+.download-button:not(.is-icon-only) {
+  width: var(--download-idle-width, 96px);
+  min-width: 0;
+  padding-inline: 16px;
+  border: 0;
+  border-radius: 999px;
+  overflow: hidden;
+  justify-items: center;
+  transition:
+    width var(--button-morph-duration) var(--button-morph-easing),
+    background-color var(--button-morph-duration) var(--button-morph-easing),
+    color var(--button-morph-duration) var(--button-morph-easing);
+}
+.download-button:not(.is-icon-only) :is(.download-button-progress, .download-button-cancel) {
+  width: max-content;
+  pointer-events: none;
+  white-space: nowrap;
+  transition:
+    opacity var(--button-morph-duration) var(--button-morph-easing),
+    transform var(--button-morph-duration) var(--button-morph-easing),
+    visibility 0s linear var(--button-morph-duration);
+}
+.download-button:not(.is-icon-only) .download-button-progress {
+  opacity: 1;
+  transform: translateY(0);
+}
+.download-button:not(.is-icon-only) .download-button-cancel {
+  opacity: 0;
+  transform: translateY(var(--button-morph-shift));
+}
+.download-button:not(.is-icon-only).is-cancellable:is(:hover, :focus-visible) {
+  width: var(--download-cancel-width, 88px);
+}
+.download-button:not(.is-icon-only).is-cancellable:is(:hover, :focus-visible)
+  .download-button-progress {
+  opacity: 0;
+  transform: translateY(calc(-1 * var(--button-morph-shift)));
+  transition-delay: 0s, 0s, var(--button-morph-duration);
+}
+.download-button:not(.is-icon-only).is-cancellable:is(:hover, :focus-visible)
+  .download-button-cancel {
+  opacity: 1;
+  transform: translateY(0);
+  transition-delay: 0s;
+}
+@media (prefers-reduced-motion: reduce) {
+  .download-button:not(.is-icon-only),
+  .download-button:not(.is-icon-only) :is(.download-button-progress, .download-button-cancel) {
+    transition: none;
+  }
 }
 .download-ring {
   display: inline-flex;
@@ -6846,4 +6986,471 @@ svg[data-ui-icon] {
 .composer-tools .ui-button.button-icon {
   border-radius: 50%;
   corner-shape: round;
+}
+
+/* Cloud controls reuse the existing neutral, rounded desktop controls. */
+.ai-service-label,
+.sync-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.ai-service-label .service-brand-icon {
+  width: 24px;
+  height: 24px;
+}
+.sync-indicator {
+  display: inline-flex;
+  align-items: center;
+  position: relative;
+  flex: none;
+  vertical-align: middle;
+  line-height: 1;
+}
+.sync-indicator-button.ui-button {
+  display: grid;
+  place-items: center;
+  width: var(--icon-button-size);
+  min-width: var(--icon-button-size);
+  height: var(--icon-button-size);
+  min-height: var(--icon-button-size);
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  color: var(--muted);
+  background: transparent;
+  cursor: pointer;
+}
+.sync-indicator-button:hover,
+.sync-indicator-button:focus-visible {
+  background: var(--hover);
+  color: var(--foreground);
+}
+.sync-indicator-button:focus-visible {
+  outline: 2px solid var(--foreground);
+  outline-offset: 2px;
+}
+.sync-synced .sync-indicator-button {
+  color: var(--foreground);
+}
+.sync-syncing .sync-indicator-button svg {
+  animation: sync-pulse 1.2s ease-in-out infinite alternate;
+}
+.sync-error .sync-indicator-button,
+.sync-conflict .sync-indicator-button {
+  color: var(--destructive, #cc6d6d);
+}
+.sync-popover {
+  -webkit-app-region: no-drag;
+  position: fixed;
+  z-index: 1000;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 16px));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-control);
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-raised);
+  font-size: var(--type-secondary);
+  font-weight: 400;
+  line-height: 1.5;
+  text-align: left;
+  white-space: normal;
+}
+.sync-popover strong {
+  font-size: var(--type-secondary);
+}
+.knowledge-card-wrap,
+.history-row-wrap {
+  position: relative;
+  min-width: 0;
+}
+.knowledge-card-wrap > .knowledge-card {
+  width: 100%;
+  height: 100%;
+}
+.knowledge-card-wrap > .sync-indicator {
+  position: absolute;
+  top: calc(23px + (42px - var(--icon-button-size)) / 2);
+  right: 20px;
+}
+@keyframes sync-pulse {
+  from {
+    opacity: 0.45;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sync-syncing .sync-indicator-button svg {
+    animation: none;
+  }
+}
+
+/* Dedicated account entry: compact form, one primary action, quiet secondary links. */
+.login-shell .login-card {
+  grid-template-columns: minmax(340px, 0.94fr) minmax(0, 1fr);
+  padding: 12px;
+}
+.login-shell .login-form {
+  position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  justify-content: stretch;
+  justify-items: stretch;
+  padding: 20px 34px 48px;
+  padding-top: max(20px, var(--login-controls-gap, 0px));
+  min-height: 0;
+}
+.login-shell .login-brand {
+  gap: 9px;
+  margin: 0;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.3px;
+}
+.login-auth-content {
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  justify-self: stretch;
+  align-self: start;
+  padding-block: 26px 0;
+}
+.login-shell .login-auth-content .login-copy {
+  margin: 0 0 26px;
+}
+.login-auth-content .login-copy h1 {
+  font-size: 26px;
+  font-weight: 600;
+  letter-spacing: -0.65px;
+  line-height: 1.35;
+}
+.login-auth-content .cloud-account-panel {
+  gap: 16px;
+}
+.login-auth-content .cloud-account-form {
+  gap: 18px;
+}
+.login-auth-content .cloud-account-feedback {
+  display: grid;
+  gap: 4px;
+  overflow-wrap: anywhere;
+}
+.login-auth-content .cloud-account-feedback > p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 18px;
+}
+.login-auth-content .cloud-account-form label {
+  gap: 7px;
+  font-size: 13px;
+  font-weight: 500;
+}
+.login-auth-content .cloud-account-form input {
+  height: 42px;
+  border-radius: 12px;
+  padding-inline: 13px;
+  font-size: 14px;
+  font-weight: 400;
+  background: color-mix(in srgb, var(--foreground) 2%, var(--surface));
+  border-color: color-mix(in srgb, var(--foreground) 11%, var(--surface));
+}
+.login-auth-content input::placeholder {
+  color: var(--muted);
+  opacity: 0.72;
+}
+.login-shell .login-auth-content input:is(:focus, :focus-visible) {
+  outline: none;
+  border-color: color-mix(in srgb, var(--foreground) 11%, var(--surface));
+  box-shadow: 0 2px 3px -2px rgb(0 0 0 / 16%);
+}
+.login-auth-content .cloud-account-form > .button-primary {
+  height: 42px;
+  margin-top: 4px;
+  border-radius: 12px;
+  background: var(--foreground);
+  border-color: transparent;
+  color: var(--surface);
+  font-size: 14px;
+  font-weight: 600;
+}
+.login-auth-content .cloud-account-form > .button-primary:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--foreground) 86%, var(--surface));
+}
+.login-form-links {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.login-form-links > span {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.login-form-links .auth-text-link.ui-button {
+  min-height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  font-size: 12px;
+  color: var(--foreground);
+  background: transparent;
+}
+.login-form-links .auth-text-link:hover:not(:disabled) {
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+.login-auth-content .ui-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+.login-shell .login-footer {
+  position: absolute;
+  left: 34px;
+  right: 34px;
+  bottom: 16px;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+}
+.login-shell .login-footer small {
+  font-size: 11px;
+  line-height: 1.5;
+  opacity: 0.75;
+  margin: 0;
+}
+.login-shell .login-preview {
+  margin-block: -12px;
+  margin-right: -12px;
+  border: 0;
+  border-radius: 0;
+  background: linear-gradient(145deg, #e6ecf4 0%, #e6e5ed 52%, #e4d8cc 100%);
+  padding: 20px;
+}
+.dark .login-shell .login-preview {
+  background: linear-gradient(145deg, #252e3e 0%, #30313a 52%, #443c36 100%);
+}
+.login-shell .login-preview::before,
+.login-shell .login-preview::after {
+  opacity: 0.25;
+}
+.login-shell .login-preview-content {
+  max-width: 420px;
+}
+.login-auth-content .cloud-code-row > button {
+  border-radius: 12px;
+  height: 42px;
+  font-size: 12px;
+}
+@media (max-width: 900px) {
+  .login-shell .login-form {
+    padding-inline: 24px;
+  }
+  .login-shell .login-footer {
+    left: 24px;
+    right: 24px;
+  }
+  .login-shell .login-card {
+    grid-template-columns: minmax(330px, 1fr) minmax(0, 1fr);
+  }
+}
+@media (max-height: 620px) {
+  .login-auth-content {
+    padding-block: 18px 0;
+  }
+  .login-shell .login-auth-content .login-copy {
+    margin-bottom: 18px;
+  }
+  .login-auth-content .cloud-account-panel,
+  .login-auth-content .cloud-account-form {
+    gap: 12px;
+  }
+  .login-auth-content .cloud-account-form label {
+    gap: 6px;
+  }
+  .login-auth-content .cloud-account-form input,
+  .login-auth-content .cloud-code-row > button,
+  .login-auth-content .cloud-account-form > .button-primary {
+    height: 40px;
+  }
+}
+
+.web-materials .login-form-links .auth-text-link.ui-button {
+  background: transparent;
+  box-shadow: none;
+}
+.web-materials
+  .login-form-links
+  .auth-text-link.ui-button:is(:hover, :focus, :focus-visible, :active):not(:disabled) {
+  background: transparent;
+  box-shadow: none;
+  outline: none;
+  text-decoration: underline;
+  text-underline-offset: 4px;
+}
+
+.ai-services-panel {
+  display: grid;
+}
+.cloud-sync-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.settings-about-updates {
+  display: grid;
+}
+.ai-services-panel > .settings-hint {
+  margin-block: 16px 8px;
+}
+.ai-service-label > img {
+  flex: none;
+}
+.ai-service-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.ai-service-actions > button {
+  min-width: 76px;
+}
+.settings-content-body > .cloud-account-panel + .account-quota-section {
+  margin-top: 20px;
+  padding-top: 0;
+}
+.account-quota-section .settings-entry {
+  padding-top: 8px;
+}
+.account-quota-section .cloud-account-form {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+.account-quota-section .cloud-account-form > button {
+  height: var(--control-height);
+  min-width: 90px;
+}
+svg.ui-loader {
+  animation: conversation-spin 1s linear infinite;
+  transform-origin: center;
+  transform-box: fill-box;
+}
+:is(.update-spinner, .conversation-spinner) > svg.ui-loader {
+  animation: none;
+}
+.cloud-storage-summary {
+  display: grid;
+  gap: 12px;
+  padding: 20px 0;
+}
+.cloud-storage-heading,
+.cloud-storage-details {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  font-size: var(--type-secondary);
+}
+.cloud-storage-heading > strong {
+  font-size: var(--type-body);
+  font-weight: 500;
+}
+.cloud-storage-heading > span,
+.cloud-storage-details {
+  color: var(--muted);
+}
+.cloud-storage-bar {
+  height: 20px;
+  display: flex;
+  overflow: hidden;
+  border-radius: 6px;
+  background: var(--hover);
+}
+.cloud-storage-bar > span {
+  flex: none;
+}
+.storage-profile {
+  background: #6496ce;
+}
+.storage-history {
+  background: #8c7bcb;
+}
+.storage-knowledgebase {
+  background: #d8a24c;
+}
+.cloud-storage-legend {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.cloud-storage-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.cloud-storage-legend i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  corner-shape: round;
+  flex: none;
+}
+.history-row-open {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  padding: 0;
+}
+.history-row > :not(.history-row-open) {
+  pointer-events: none;
+}
+.history-row .sync-indicator {
+  pointer-events: auto;
+  z-index: 2;
+}
+.history-row:has(> .history-row-open:focus-visible) {
+  box-shadow: inset 0 0 0 2px var(--foreground);
+}
+.history-summary h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  overflow: visible;
+}
+.history-title-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.history-summary .neutral-badge {
+  flex: none;
+}
+@media (max-width: 640px) {
+  .ai-service-row {
+    align-items: flex-start;
+  }
+  .account-quota-section .cloud-account-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }

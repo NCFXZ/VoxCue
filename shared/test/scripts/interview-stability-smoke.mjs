@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -45,14 +46,15 @@ try {
   });
   await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
-  const [main] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(app, login);
   main.on('pageerror', (error) => errors.push(error.message));
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await main
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   assert.equal(await main.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(), 0);
   assert.equal(
     await main.evaluate(() => document.documentElement.dataset.frostedTransparency),

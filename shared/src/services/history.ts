@@ -1,4 +1,5 @@
 import type { Answer, Transcript } from './contracts';
+import { localChanged } from './localChanges';
 import { validInterviewImages } from '../../electron/contracts/interviewImages';
 import {
   storedObject,
@@ -146,7 +147,16 @@ export function createHistoryService(
 // Resolve storage lazily so tests and the service interface remain browser independent.
 export const localHistory: HistoryService = {
   list: () => createHistoryService(localStorage).list(),
-  save: (record) => createHistoryService(localStorage).save(record),
-  remove: (id) => createHistoryService(localStorage).remove(id),
-  rename: (id, title) => createHistoryService(localStorage).rename(id, title),
+  save: (record) => {
+    createHistoryService(localStorage).save(record);
+    localChanged('history');
+  },
+  remove: (id) => {
+    createHistoryService(localStorage).remove(id);
+    localChanged('history');
+  },
+  rename: (id, title) => {
+    createHistoryService(localStorage).rename(id, title);
+    localChanged('history');
+  },
 };

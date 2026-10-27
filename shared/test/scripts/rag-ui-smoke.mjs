@@ -1,3 +1,4 @@
+import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -13,11 +14,8 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
-  ]);
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
   page.setDefaultTimeout(30000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -100,7 +98,7 @@ try {
   await page.screenshot({ animations: 'disabled' });
   await page.reload();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
-  await page.getByRole('button', { name: /RAG 本地集成/ }).click();
+  await page.locator('.knowledge-card').filter({ hasText: 'RAG 本地集成' }).click();
   await page
     .getByRole('dialog', { name: 'RAG 本地集成', exact: true })
     .getByText(/索引完成/)
@@ -112,6 +110,10 @@ try {
     .click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   assert.equal(
     await settings

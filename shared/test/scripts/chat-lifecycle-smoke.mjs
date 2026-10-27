@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -68,10 +69,7 @@ async function launch() {
     };
   });
   const login = await app.firstWindow();
-  [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
@@ -231,6 +229,10 @@ try {
       (win) => !win.webContents.getURL().includes('#login'),
     ).webContents;
     const send = contents.send.bind(contents);
+    globalThis.restoreLogoutSend = () => {
+      contents.send = send;
+      globalThis.releaseLogoutSave?.();
+    };
     contents.send = (channel, ...args) => {
       if (channel === 'session:request-close') {
         globalThis.releaseLogoutSave = () => send(channel, ...args);
@@ -241,33 +243,30 @@ try {
   });
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
-  const [login] = await Promise.all([
-    app.waitForEvent('window'),
-    page.getByRole('button', { name: '退出登录', exact: true }).click(),
-  ]);
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
-  await login.getByRole('button', { name: '取消登录', exact: true }).waitFor();
-  assert.equal(page.isClosed(), false);
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);
-  await login.getByRole('button', { name: '取消登录', exact: true }).click();
-  await login.getByText('登录已取消。', { exact: true }).waitFor();
-  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 2);
-  const nextMain = app.waitForEvent('window');
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click();
-  await login.getByRole('button', { name: '取消登录', exact: true }).waitFor();
-  await app.evaluate(() => {
-    if (!globalThis.releaseLogoutSave) throw Error('Logout save handshake was not requested');
-    globalThis.releaseLogoutSave();
+  const loginOpened = app.waitForEvent('window');
+  await page.getByRole('button', { name: '退出登录', exact: true }).click();
+  await app.evaluate(async () => {
+    const deadline = Date.now() + 5000;
+    while (!globalThis.releaseLogoutSave) {
+      if (Date.now() > deadline) throw Error('Logout save handshake was not requested');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
   });
-  page = await nextMain;
+  assert.equal(page.isClosed(), false, 'Outgoing data stays available until save finishes');
+  assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
+  await app.evaluate(() => globalThis.releaseLogoutSave());
+  const login = await loginOpened;
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  page = await connectUiAccount(app, login);
   await page.locator('.conversation-row').filter({ hasText: '更新简历' }).waitFor();
   checks.push(
-    'explicit deletion survives restart; fast reauthentication waits for outgoing save, supports cancellation and preserves remaining chat',
+    'explicit deletion survives restart; primary logout waits for outgoing save before reopening the account gate, then preserves remaining chat',
   );
   assert.deepEqual(errors, []);
   await console.log(JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ directory, checks, errors }));
 } catch (error) {
+  console.error(error);
   if (app) console.error('Synthetic requests:', await app.evaluate(() => globalThis.requests));
   if (page && !page.isClosed()) {
     await page.screenshot({});
@@ -275,5 +274,8 @@ try {
   }
   throw error;
 } finally {
-  if (app) await closeUiApp(app);
+  if (app) {
+    await app.evaluate(() => globalThis.restoreLogoutSend?.()).catch(() => {});
+    await closeUiApp(app);
+  }
 }

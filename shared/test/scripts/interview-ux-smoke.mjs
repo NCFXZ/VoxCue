@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
@@ -34,6 +35,11 @@ const app = await electron.launch({
 });
 const checks = [];
 async function capture(page, name) {
+  // Media emulation acknowledges before Chromium necessarily paints the new
+  // palette. Flush its style/frame update before waiting for finite transitions.
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
   await page.waitForFunction(() =>
     document
       .getAnimations()
@@ -291,10 +297,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
   await page.getByLabel('本地组件提示', { exact: true }).waitFor();
@@ -351,6 +354,10 @@ try {
 
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).fill('16');

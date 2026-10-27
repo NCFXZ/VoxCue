@@ -61,7 +61,7 @@ const paths = await packager({
   name: 'VoxCue',
   platform: 'win32',
   arch: 'x64',
-  electronVersion: '38.8.6',
+  electronVersion: require('electron/package.json').version,
   electronZipDir: existsSync(path.resolve('.cache/electron'))
     ? path.resolve('.cache/electron')
     : undefined,

@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
@@ -66,20 +67,18 @@ const errors = [];
 const launch = async () => {
   app = await electron.launch({ args: [fixture], env });
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
-  assert.equal(
-    await login.evaluate(() =>
-      window.desktop.updates({ op: 'install' }).then(
-        () => false,
-        () => true,
+  if (login.url().endsWith('#login'))
+    assert.equal(
+      await login.evaluate(() =>
+        window.desktop.updates({ op: 'install' }).then(
+          () => false,
+          () => true,
+        ),
       ),
-    ),
-    true,
-  );
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
-  ]);
+      true,
+    );
+  await installUiAccount(app, { speech: true, components: true });
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(30000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
@@ -89,10 +88,14 @@ const launch = async () => {
 const openUpdates = async (page) => {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '更新', exact: true })
+    .getByRole('button', { name: '关于与更新', exact: true })
     .click();
   return settings;
 };
@@ -229,10 +232,10 @@ try {
   });
   await settings.getByRole('button', { name: '重启并更新', exact: true }).waitFor();
   const configuration = {
-    mode: 'mock',
+    mode: 'local',
     options: { sources: ['system'] },
-    aiEnabled: false,
-    modelId: '',
+    aiEnabled: true,
+    modelId: 'test-model',
     effort: 'auto',
     autoAnswer: true,
   };
@@ -337,10 +340,7 @@ try {
       };
     });
     const login = await app.firstWindow();
-    [page] = await Promise.all([
-      app.waitForEvent('window'),
-      login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-    ]);
+    page = await connectUiAccount(app, login);
     page.on('pageerror', (error) => errors.push(error.message));
     await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
     await page.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);

@@ -3,6 +3,7 @@ export interface KnowledgeBase {
   id: string;
   name: string;
   createdAt: number;
+  localRevision?: string;
 }
 export interface LocalDocument {
   id: string;
@@ -12,6 +13,7 @@ export interface LocalDocument {
   type: string;
   createdAt: number;
   blob: Blob;
+  localRevision?: string;
 }
 export interface KnowledgeManagementService {
   listBases(): Promise<KnowledgeBase[]>;

@@ -1,3 +1,4 @@
+import { SyncBadge } from './SyncBadge';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
@@ -239,7 +240,10 @@ export function PersonalInfoPanel({
         {resizeHandle}
         <header>
           <div>
-            <h2>个人信息</h2>
+            <h2 className="sync-title">
+              个人信息
+              <SyncBadge itemKey="profile:main" label="个人信息" />
+            </h2>
             <small>{completed}/5 已添加</small>
           </div>
         </header>

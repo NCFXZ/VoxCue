@@ -269,12 +269,16 @@ try {
   // controls still have no hover tips; readiness reasons use their own tooltip.
   assert.equal(
     await main
-      .locator('[title]:not(.choice-trigger > span):not(.speech-select > span), [data-focus-tip]')
+      .locator(
+        '[title]:not(.choice-trigger > span):not(.speech-select > span):not(.user-info > strong), [data-focus-tip]',
+      )
       .count(),
     0,
   );
   for (const label of await main
-    .locator('.choice-trigger > span[title], .speech-select > span[title]')
+    .locator(
+      '.choice-trigger > span[title], .speech-select > span[title], .user-info > strong[title]',
+    )
     .all())
     assert.equal(await label.getAttribute('title'), (await label.textContent()).trim());
   await lastAnswer.locator('.floating-question').scrollIntoViewIfNeeded();

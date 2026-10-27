@@ -1,3 +1,4 @@
+import { SyncBadge } from './SyncBadge';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { useEffect, useRef, useState } from 'react';
 import {
@@ -91,23 +92,25 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           ) : (
             <div className="knowledge-grid">
               {state.bases.map((item) => (
-                <button
-                  key={item.id}
-                  className="knowledge-card"
-                  onClick={() => {
-                    void state.open(item.id);
-                  }}
-                >
-                  <span className="knowledge-icon">
-                    <Database size={22} />
-                  </span>
-                  <h2>{item.name}</h2>
-                  <p>创建于 {new Date(item.createdAt).toLocaleDateString('zh-CN')}</p>
-                  <span className="card-footer">
-                    本地资料
-                    <ChevronRight size={14} />
-                  </span>
-                </button>
+                <div className="knowledge-card-wrap" key={item.id}>
+                  <button
+                    className="knowledge-card"
+                    onClick={() => {
+                      void state.open(item.id);
+                    }}
+                  >
+                    <span className="knowledge-icon">
+                      <Database size={22} />
+                    </span>
+                    <h2>{item.name}</h2>
+                    <p>创建于 {new Date(item.createdAt).toLocaleDateString('zh-CN')}</p>
+                    <span className="card-footer">
+                      本地资料
+                      <ChevronRight size={14} />
+                    </span>
+                  </button>
+                  <SyncBadge itemKey={'base:' + item.id} label={item.name} />
+                </div>
               ))}
             </div>
           )}
@@ -117,6 +120,8 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
         <Modal
           wide
           className="knowledge-detail-dialog"
+          fixedHeader
+          overlayHeader
           title={base.name}
           onClose={() => {
             if (!state.busy) {
@@ -124,23 +129,26 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             }
           }}
           titleAction={
-            <Button
-              disabled={state.busy}
-              variant="ghost"
-              size="icon"
-              className="action-icon-button"
-              data-reveal-on-hover
-              aria-label="重命名"
-              onClick={() => {
-                setName(base.name);
-                setEditing('rename');
-              }}
-            >
-              <Edit size={17} />
-            </Button>
+            <>
+              <Button
+                disabled={state.busy}
+                variant="ghost"
+                size="icon"
+                className="action-icon-button"
+                data-reveal-on-hover
+                aria-label="重命名"
+                onClick={() => {
+                  setName(base.name);
+                  setEditing('rename');
+                }}
+              >
+                <Edit size={17} />
+              </Button>
+            </>
           }
           action={
             <>
+              <SyncBadge itemKey={'base:' + base.id} label={base.name} />
               <ConfirmDeleteButton
                 key={base.id}
                 label="删除知识库"
@@ -237,6 +245,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                     )}
                   </div>
                   <div className="document-actions">
+                    <SyncBadge itemKey={'file:' + doc.id} label={doc.name} />
                     <ConfirmDeleteButton
                       iconOnly
                       disabled={state.busy}

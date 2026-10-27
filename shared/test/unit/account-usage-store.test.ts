@@ -5,6 +5,12 @@ afterEach(async () => {
   await useChatConnection.getState().load(false);
   vi.unstubAllGlobals();
 });
+it('主账号登录但未连接AI时不提供预设模拟模型，显式测试演示才可用', async () => {
+  await useChatConnection.getState().load(false);
+  expect(useChatConnection.getState().models).toEqual([]);
+  await useChatConnection.getState().load(false, false, true);
+  expect(useChatConnection.getState().models.length).toBeGreaterThan(0);
+});
 it('切换/断开账户后丢弃迟到额度，不能回填上个账户数据', async () => {
   let finish!: (value: any) => void;
   vi.stubGlobal('window', {

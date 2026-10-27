@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -28,11 +29,8 @@ try {
     KnowledgeHost.prototype.removeDocument = async () => null;
   });
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -79,7 +77,7 @@ try {
     await base.getByRole('button', { name: /^(预览|取消准备|重新准备|准备用于回答)$/ }).count(),
     0,
   );
-  assert.equal(await note().locator('.document-actions button').count(), 1);
+  assert.equal(await note().locator('.document-actions button').count(), 2);
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   await page.screenshot({ animations: 'disabled' });
   await base.getByRole('button', { name: '重命名', exact: true }).click();
@@ -88,7 +86,7 @@ try {
   await page.getByRole('dialog', { name: '保留的知识库', exact: true }).waitFor();
   await page.reload();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
-  await page.getByRole('button', { name: /保留的知识库/ }).click();
+  await page.locator('.knowledge-card').filter({ hasText: '保留的知识库' }).click();
   base = page.getByRole('dialog', { name: '保留的知识库', exact: true });
   await base.locator('.document-row').filter({ hasText: 'document.pdf' }).waitFor();
   const bytes = await page.evaluate(async () => {

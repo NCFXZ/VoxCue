@@ -9,7 +9,7 @@ const masks = import.meta.glob('../public/sf-symbols/*.png', {
 
 // Match the shared icon API and SVG layout so buttons, rotation, mirroring,
 // currentColor and accessible names keep their existing behavior.
-function icon(name: keyof typeof symbols) {
+function icon(name: keyof typeof symbols, loading = false) {
   const source = masks[`../public/sf-symbols/${name}.png`];
   if (!source) throw Error(`Missing Mac system icon: ${name}. Run build:symbols.`);
   return function SystemIcon({ size = 20 }: { size?: number; strokeWidth?: number }) {
@@ -18,6 +18,7 @@ function icon(name: keyof typeof symbols) {
       <svg
         aria-hidden={true}
         data-ui-icon={true}
+        className={loading ? 'ui-loader' : undefined}
         data-sf-symbol={symbols[name]}
         viewBox="0 0 24 24"
         style={
@@ -67,7 +68,7 @@ export const Link = icon('Link');
 export const Edit = icon('Edit');
 export const Download = icon('Download');
 export const PanelRight = icon('PanelRight');
-export const Loader = icon('Loader');
+export const Loader = icon('Loader', true);
 export const Appearance = icon('Appearance');
 export const Minus = icon('Minus');
 export const Square = icon('Square');
@@ -75,6 +76,11 @@ export const X = icon('X');
 export const MessageCirclePlus = icon('MessageCirclePlus');
 export const History = icon('History');
 export const Database = icon('Database');
+export const Cloud = icon('Cloud');
+export const CloudDone = icon('CloudDone');
+export const CloudSync = icon('CloudSync');
+export const CloudOff = icon('CloudOff');
+export const CloudError = icon('CloudError');
 export const ChevronsUpDown = icon('ChevronsUpDown');
 export const Settings = icon('Settings');
 export const LogOut = icon('LogOut');

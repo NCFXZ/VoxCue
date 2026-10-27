@@ -21,12 +21,35 @@ export function installWebMaterials() {
     if (root.style.getPropertyValue('--web-header-opacity') !== value)
       root.style.setProperty('--web-header-opacity', value);
     const current = new Set<Element>();
+    if (
+      workspace instanceof HTMLElement &&
+      toolbar instanceof HTMLElement &&
+      workspace.matches('.management-page')
+    ) {
+      const scroll = workspace.querySelector<HTMLElement>(':scope > .management-scroll');
+      if (scroll) {
+        for (const node of [workspace, toolbar, scroll]) {
+          current.add(node);
+          if (!measured.has(node)) resize.observe(node);
+        }
+        setProperty(
+          workspace,
+          '--page-toolbar-height',
+          toolbar.getBoundingClientRect().height + 'px',
+        );
+        setProperty(
+          workspace,
+          '--page-scrollbar-width',
+          Math.max(0, scroll.offsetWidth - scroll.clientWidth) + 'px',
+        );
+      }
+    }
     for (const panel of document.querySelectorAll<HTMLElement>(
-      '.personal-panel, .record-answer-panel',
+      '.personal-panel, .record-answer-panel, .settings-content',
     )) {
       const header = panel.querySelector<HTMLElement>(':scope > header')!;
       const scroll = panel.querySelector<HTMLElement>(
-        ':scope > .personal-panel-scroll, :scope > .record-answer-scroll',
+        ':scope > .personal-panel-scroll, :scope > .record-answer-scroll, :scope > .settings-content-body',
       )!;
       for (const node of [panel, header, scroll]) {
         current.add(node);
@@ -34,6 +57,11 @@ export function installWebMaterials() {
       }
       if (!panel.clientHeight || !header.clientHeight) continue;
       setProperty(panel, '--panel-header-height', header.getBoundingClientRect().height + 'px');
+      setProperty(
+        panel,
+        '--panel-scrollbar-width',
+        Math.max(0, scroll.offsetWidth - scroll.clientWidth) + 'px',
+      );
       setProperty(
         panel,
         '--panel-header-opacity',

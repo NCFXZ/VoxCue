@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
@@ -92,15 +93,16 @@ try {
     );
   };
   await checkBrandImage(login, '.service-brand-icon');
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   const openSettings = async (target = page) => {
     await target.getByRole('button', { name: '用户菜单', exact: true }).click();
     await target.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await target
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
     await target
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: '面试设置', exact: true })
@@ -351,10 +353,7 @@ try {
   app = await electron.launch({ args: [await offlineElectronEntry()], env });
   await installUiAccount(app, { speech: true, components: true });
   const restartedLogin = await app.firstWindow();
-  const [restarted] = await Promise.all([
-    app.waitForEvent('window'),
-    restartedLogin.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const restarted = await connectUiAccount(app, restartedLogin);
   await openSettings(restarted);
   assert.equal(
     await restarted.getByRole('slider', { name: '面试字体大小', exact: true }).inputValue(),

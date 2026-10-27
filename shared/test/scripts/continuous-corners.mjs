@@ -1,5 +1,14 @@
 import assert from 'node:assert/strict';
 
+// Chromium may serialize these equivalent CSS curves as keywords or functions.
+export function cornerShapeNames(value) {
+  const name = (shape) =>
+    ({ 'superellipse(1)': 'round', 'superellipse(2)': 'squircle' })[shape] ?? shape;
+  return typeof value === 'string'
+    ? name(value)
+    : Object.fromEntries(Object.entries(value).map(([key, item]) => [key, name(item)]));
+}
+
 // Apply CSS radius normalization to measured animation frames. A 50% radius on
 // a wide button is an ellipse; checking only the final circle misses that bug.
 export function verifyRoundCapFrames(frames) {

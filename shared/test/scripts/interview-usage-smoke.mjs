@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -86,10 +87,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),

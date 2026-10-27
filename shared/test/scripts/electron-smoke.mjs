@@ -1,3 +1,4 @@
+import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -25,12 +26,9 @@ const app = await electron.launch({
 });
 try {
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.evaluate(() => window.desktop.enterDemo()),
-  ]);
+  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => {
@@ -48,6 +46,10 @@ try {
   await page.getByRole('button', { name: '用户菜单' }).click();
   assert.equal(await page.getByRole('menuitem').count(), 2);
   await page.getByRole('menuitem', { name: '设置' }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   assert.equal(
@@ -96,7 +98,7 @@ try {
   await resumeSection.locator('summary').click();
   await page.getByText('已保留原件：resume.txt', { exact: true }).waitFor();
   await page.screenshot({});
-  await page.getByRole('button', { name: '个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
   await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '查看示例记录', exact: true }).count(), 0);
@@ -136,7 +138,11 @@ try {
   await page.locator('.history-row').nth(1).waitFor();
   assert.equal(await page.locator('.history-row').count(), 2);
   await page.screenshot({});
-  await page.locator('.history-row').first().click();
+  await page
+    .locator('.history-row')
+    .first()
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByText('回归测试问题 2', { exact: false }).first().waitFor();
   await page.screenshot({});
   await page.getByRole('button', { name: '知识库', exact: true }).click();
@@ -191,9 +197,9 @@ try {
   assert.equal(await resumeSection.getAttribute('open'), null);
   await resumeSection.locator('summary').click();
   await page.getByText('已保留原件：resume.txt', { exact: true }).waitFor();
-  await page.getByRole('button', { name: '个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
-  await page.getByRole('button', { name: 'React 面试资料', exact: false }).click();
+  await page.locator('.knowledge-card').filter({ hasText: 'React 面试资料' }).click();
   const savedDialog = page.getByRole('dialog', { name: 'React 面试资料', exact: true });
   await savedDialog.getByText('project.md', { exact: true }).waitFor();
   assert.equal(await savedDialog.locator('.document-row').count(), 2);
@@ -214,7 +220,7 @@ try {
   await page.waitForFunction(() => document.querySelectorAll('.document-row').length === 1);
   await savedDialog.getByRole('button', { name: '关闭对话框' }).click();
   await page.screenshot({});
-  await page.getByRole('button', { name: 'React 面试资料', exact: false }).click();
+  await page.locator('.knowledge-card').filter({ hasText: 'React 面试资料' }).click();
   await savedDialog.getByRole('button', { name: '删除知识库', exact: true }).click();
   await savedDialog
     .getByRole('button', { name: '确认删除：知识库：React 面试资料', exact: true })
@@ -239,7 +245,11 @@ try {
   );
   await page.reload();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page.locator('.history-row').filter({ hasText: '测试记录' }).click();
+  await page
+    .locator('.history-row')
+    .filter({ hasText: '测试记录' })
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: '删除记录' }).click();
   await page.getByRole('button', { name: '确认删除：面试记录：测试记录', exact: true }).click();
   await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
@@ -252,7 +262,7 @@ try {
       await page.getByRole('button', { name: '退出登录', exact: true }).click();
     })(),
   ]);
-  await returnedLogin.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
+  await returnedLogin.getByRole('heading', { name: '登录 VoxCue' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(
     'PASS: Electron startup, unified shell, internal synthetic preparation reply, profile/resume persistence, independent history, knowledge CRUD/import/preview/persistence and user menu.',

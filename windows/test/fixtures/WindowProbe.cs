@@ -12,12 +12,12 @@ using System.Windows.Automation;
 class WindowProbe {
   [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] static extern IntPtr OpenInputDesktop(uint flags,bool inherit,uint access);
   [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr handle);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetUserObjectInformationW(IntPtr handle,int index,StringBuilder name,int bytes,out int needed);
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
-  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
   [DllImport("user32.dll")] static extern IntPtr GetWindowLongPtrW(IntPtr window,int index);
   [DllImport("user32.dll")] static extern IntPtr GetClassLongPtrW(IntPtr window,int index);
@@ -45,6 +45,7 @@ class WindowProbe {
   [STAThread] static int Main(string[] args) {
     try {
       SetProcessDPIAware();
+      SetThreadDpiAwarenessContext(new IntPtr(-4));
       if(args[0]=="exclusive") {
         for(int i=1;i<args.Length;i++)using(var file=CreateFileW(@"\\?\"+args[i],0x80000000,0,IntPtr.Zero,3,0x80,IntPtr.Zero)) {
           if(file.IsInvalid)throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"Model handle is not released: "+args[i]);
@@ -57,7 +58,19 @@ class WindowProbe {
         finally{CloseDesktop(handle);}return 0;
       }
       if(args[0]=="cursor") {Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Print(new{x=p.X,y=p.Y});return 0;}
-      if(args[0]=="move") {int x=int.Parse(args[1]),y=int.Parse(args[2]);mouse_event(0xC001,(uint)((x-GetSystemMetrics(76)+0.5)*65536/GetSystemMetrics(78)),(uint)((y-GetSystemMetrics(77)+0.5)*65536/GetSystemMetrics(79)),0,UIntPtr.Zero);Thread.Sleep(90);Print(new{});return 0;}
+      if(args[0]=="move") {
+        // Callers already supply physical screen pixels. Normalizing them again
+        // through virtual-desktop mouse_event coordinates can move to another point.
+        int x=int.Parse(args[1]),y=int.Parse(args[2]);
+        if(!SetCursorPos(x-1,y))throw new Exception("Native cursor unavailable on the input desktop");
+        // The Electron click-through forwarder observes injected movement,
+        // including when SetCursorPos itself produced no new mouse message.
+        mouse_event(1,1,0,0,UIntPtr.Zero);
+        if(!SetCursorPos(x,y))throw new Exception("Native cursor unavailable on the input desktop");
+        Thread.Sleep(90);Point actual;if(!GetCursorPos(out actual))throw new Exception("Native cursor unavailable after movement");
+        if(actual.X!=x||actual.Y!=y)throw new Exception("Native pointer position changed during the isolated check: expected "+x+","+y+"; actual "+actual.X+","+actual.Y);
+        Print(new{});return 0;
+      }
       if(args[0]=="up") {mouse_event(4,0,0,0,UIntPtr.Zero);Print(new{});return 0;}
       if(args[0]=="hit") {var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};Print(new{expected=GetAncestor(WindowFromPoint(point),2)==new IntPtr(long.Parse(args[1]))});return 0;}
       if(args[0]=="hittest") {int x=int.Parse(args[2]),y=int.Parse(args[3]);Print(new{result=SendMessageW(new IntPtr(long.Parse(args[1])),0x84,IntPtr.Zero,new IntPtr((y<<16)|(x&0xffff))).ToInt64()});return 0;}

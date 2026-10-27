@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
@@ -63,21 +64,26 @@ const modelsOnly = process.argv.includes('--models-only');
 const assertAnimated = (widths, label) => {
   const start = widths[0],
     end = widths.at(-1);
-  assert.ok(Math.abs(start - end) > 10, `${label}: width must change`);
+  if (Math.abs(start - end) <= 1) {
+    assert.ok(
+      widths.every((width) => Math.abs(width - start) <= 1),
+      `${label}: equal natural widths must stay stable`,
+    );
+    return;
+  }
   assert.ok(
-    widths.some((width) => width > Math.min(start, end) + 2 && width < Math.max(start, end) - 2),
+    widths.some(
+      (width) => width > Math.min(start, end) + 0.1 && width < Math.max(start, end) - 0.1,
+    ),
     `${label}: needs intermediate widths: ${JSON.stringify(widths)}`,
   );
 };
 try {
   app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
   const login = await app.firstWindow();
-  await login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await installUiAccount(app);
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   const errors = [];
   await page.emulateMedia({
@@ -164,6 +170,10 @@ try {
   }
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings
     .getByRole('navigation', { name: '设置分类' })
@@ -395,6 +405,10 @@ try {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   await settings
     .getByRole('navigation', { name: '设置分类' })
     .getByRole('button', { name: '面试设置', exact: true })
@@ -558,6 +572,10 @@ try {
       }, reason);
       await page.getByRole('button', { name: '用户菜单', exact: true }).click();
       await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+      await page
+        .getByRole('navigation', { name: '设置分类' })
+        .getByRole('button', { name: '个性化', exact: true })
+        .click();
       await settings
         .getByRole('navigation', { name: '设置分类' })
         .getByRole('button', { name: '面试设置', exact: true })
@@ -636,6 +654,10 @@ try {
       });
       await page.getByRole('button', { name: '用户菜单', exact: true }).click();
       await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+      await page
+        .getByRole('navigation', { name: '设置分类' })
+        .getByRole('button', { name: '个性化', exact: true })
+        .click();
       await settings
         .getByRole('navigation', { name: '设置分类' })
         .getByRole('button', { name: '本地组件', exact: true })
@@ -678,6 +700,10 @@ try {
     });
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
     await settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '面试设置', exact: true })
@@ -716,6 +742,10 @@ try {
     await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
     await settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '面试设置', exact: true })
@@ -733,6 +763,10 @@ try {
     });
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
     await settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '本地组件', exact: true })

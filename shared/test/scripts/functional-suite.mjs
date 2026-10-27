@@ -48,6 +48,10 @@ const shared = [
   'updates-sidebar',
   'components-ui',
   'adversarial',
+  'cloud-account',
+  'cloud-quota',
+  'management-scrollbars',
+  'server-connection',
   'interview-stability',
   'audio-pipeline',
   'speech-soak',
@@ -120,7 +124,12 @@ try {
             path.join(directory, 'speech-soak.mjs'),
             '--seconds=600',
           ]
-        : [path.join(directory, name + '-smoke.mjs')],
+        : name === 'cloud-quota' || name === 'management-scrollbars'
+          ? [
+              path.join(directory, 'cloud-account-smoke.mjs'),
+              name === 'cloud-quota' ? '--interview-quota' : '--scrollbars',
+            ]
+          : [path.join(directory, name + '-smoke.mjs')],
       {
         cwd: workspace.platformRoot,
         env: {

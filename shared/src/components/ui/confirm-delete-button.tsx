@@ -154,7 +154,9 @@ function ConfirmActionButton({
 }
 
 export function ConfirmDeleteButton(props: Props) {
-  return <ConfirmActionButton {...props} iconOnly action="删除" icon={Trash} />;
+  return (
+    <ConfirmActionButton {...props} iconOnly={props.iconOnly ?? true} action="删除" icon={Trash} />
+  );
 }
 
 /** UsagePanel displays the reset service's error next to its usage statistics. */

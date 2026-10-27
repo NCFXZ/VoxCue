@@ -1,67 +1,27 @@
-import { X } from './icons';
 import { InterviewPreview } from './InterviewPreview';
-import { Button } from './ui/button';
-import { useAuth } from '../stores/auth';
-import chatGPTIcon from '../assets/chatgpt.svg?inline';
-import copilotIcon from '../assets/copilot.svg?inline';
 import { AppLogo } from './AppLogo';
+import { CloudAccountPanel } from './CloudAccountPanel';
+import { useState } from 'react';
 export function LoginPage() {
-  const auth = useAuth();
+  const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
   return (
     <main className="login-page">
       <div className="login-card">
         <section className="login-form">
-          <div className="login-copy">
-            <div className="login-brand">
-              <AppLogo size={42} />
-              <span>VoxCue</span>
-            </div>
-            <h1>欢迎使用 VoxCue</h1>
-            <p>登录以开始使用。</p>
+          <div className="login-brand">
+            <AppLogo size={28} />
+            <span>VoxCue</span>
           </div>
-          <div className="login-actions">
-            {(
-              [
-                ['chatgpt', 'ChatGPT', chatGPTIcon],
-                ['copilot', 'GitHub Copilot', copilotIcon],
-              ] as const
-            ).map(([service, name, icon]) => (
-              <Button
-                key={service}
-                variant="outline"
-                className="service-login"
-                data-login-service={service}
-
-                disabled={auth.waiting || !window.desktop}
-                onClick={() => {
-                  void auth.signIn(service);
-                }}
-              >
-                <img className="service-brand-icon" src={icon} alt="" aria-hidden="true" />
-                {auth.signingIn === service ? '等待浏览器授权…' : `使用 ${name} 继续`}
-              </Button>
-            ))}
-            {auth.waiting && (
-              <Button
-                variant="ghost"
-                onClick={() => {
-                  void auth.cancel();
-                }}
-              >
-                <X size={16} />
-                取消登录
-              </Button>
-            )}
-            {(auth.error || auth.notice) && (
-              <p className="login-status" role="alert">
-                {auth.error || auth.notice}
-              </p>
-            )}
-            {!window.desktop && <p className="login-status">账户登录需要在桌面应用中使用。</p>}
+          <div className="login-auth-content">
+            <div className="login-copy">
+              <h1>
+                {mode === 'login' ? '登录 VoxCue' : mode === 'register' ? '创建账号' : '重置密码'}
+              </h1>
+            </div>
+            <CloudAccountPanel showTitle={false} entry onModeChange={setMode} />
           </div>
           <div className="login-footer">
-            <p>登录后即可准备聊天与面试回答，语音在本机转写。</p>
-            <small>凭据由本机系统加密保护，密码仅在所选服务的官方页面输入。</small>
+            <small>登录凭据由本机系统加密保护。</small>
           </div>
         </section>
         <aside className="login-preview" aria-label="应用界面预览">

@@ -139,7 +139,7 @@ try {
       output += data;
       if (!windowsOnly) process.stderr.write(data);
     });
-    // The shared runner bounds each of its 45 suites, including a 10-minute soak.
+    // The shared runner bounds each of its 49 suites, including a 10-minute soak.
     // Its outer watchdog must allow the complete serial matrix to finish.
     const timer = setTimeout(() => child.kill(), windowsOnly ? 180000 : 4 * 60 * 60 * 1000);
     const code = await new Promise((resolve, reject) => {

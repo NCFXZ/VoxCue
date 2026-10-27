@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
@@ -129,10 +130,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(20000);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
@@ -149,6 +147,10 @@ try {
   const settings = async () => {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+    await page
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button', { name: '个性化', exact: true })
+      .click();
   };
   await settings();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
@@ -444,7 +446,10 @@ try {
   await page.getByLabel('搜索标题', { exact: true }).fill('');
   assert.equal(await page.locator('.history-row').count(), 2);
   assert.equal(await page.getByText('中文（简体）', { exact: false }).count(), 0);
-  await page.locator('.history-row').filter({ hasText: '项目面试' }).click();
+  await page
+    .locator('.history-row')
+    .filter({ hasText: '项目面试' })
+    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: '重命名标题', exact: true }).click();
   const rename = page.getByRole('dialog', { name: '重命名标题', exact: true });
   await rename.getByLabel('记录标题', { exact: true }).fill('');
@@ -506,7 +511,7 @@ try {
     await base
       .locator('.document-actions button')
       .evaluateAll((buttons) => buttons.map((button) => button.getAttribute('aria-label'))),
-    ['删除文档 notes.md'],
+    ['notes.md：未同步', '删除文档 notes.md'],
   );
   await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
   checks.push(
@@ -522,6 +527,10 @@ try {
   await startDialog.getByRole('button', { name: '取消', exact: true }).click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
   await dialog.getByRole('button', { name: '面试设置', exact: true }).click();
   assert.equal(
@@ -634,11 +643,16 @@ try {
     .click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '退出登录', exact: true }).click();
+  await app.evaluate(({ dialog }) => {
+    dialog.showMessageBox = async (_win, options) => ({
+      response: options.title === '退出 VoxCue 账号' ? 1 : 0,
+    });
+  });
   const [returnedLogin] = await Promise.all([
     app.waitForEvent('window'),
     page.getByRole('button', { name: '退出登录', exact: true }).click(),
   ]);
-  await returnedLogin.getByRole('heading', { name: '欢迎使用 VoxCue', exact: true }).waitFor();
+  await returnedLogin.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await returnedLogin.waitForFunction(
     () => document.documentElement.style.getPropertyValue('--system-accent') === '#008c95',
   );

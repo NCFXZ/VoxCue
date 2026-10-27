@@ -11,7 +11,7 @@ interface State {
   error: string | null;
   usageError: string | null;
   loadingUsage: boolean;
-  load(live: boolean, force?: boolean): Promise<void>;
+  load(live: boolean, force?: boolean, demo?: boolean): Promise<void>;
   refreshUsage(): Promise<void>;
 }
 let generation = 0;
@@ -24,14 +24,14 @@ export const useChatConnection = create<State>((set, get) => ({
   error: null,
   usageError: null,
   loadingUsage: false,
-  async load(live, force = false) {
+  async load(live, force = false, demo = false) {
     const current = ++generation;
     ++usageRevision;
     set({ loadingUsage: false });
     if (!live) {
       set({
         live: false,
-        models: [...chatModels],
+        models: demo ? [...chatModels] : [],
         usage: null,
         loading: false,
         error: null,

@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Button } from './ui/button';
 import { Loader, X } from './icons';
 
@@ -20,6 +20,24 @@ export function DownloadButton({
   onCancel(): void;
 }) {
   const [cancelReady, setCancelReady] = useState(false);
+  const idle = useRef<HTMLSpanElement>(null),
+    cancel = useRef<HTMLSpanElement>(null);
+  const [widths, setWidths] = useState({ idle: 96, cancel: 88 });
+  useLayoutEffect(() => {
+    if (iconOnly) return;
+    const measure = () => {
+      const next = {
+        idle: Math.max(80, Math.ceil((idle.current?.getBoundingClientRect().width ?? 56) + 32)),
+        cancel: Math.max(80, Math.ceil((cancel.current?.getBoundingClientRect().width ?? 48) + 32)),
+      };
+      setWidths((old) => (old.idle === next.idle && old.cancel === next.cancel ? old : next));
+    };
+    const observer = new ResizeObserver(measure);
+    if (idle.current) observer.observe(idle.current);
+    if (cancel.current) observer.observe(cancel.current);
+    measure();
+    return () => observer.disconnect();
+  }, [iconOnly]);
   useEffect(() => {
     // The pointer can still be over the original download button when it changes.
     const timer = setTimeout(() => setCancelReady(true), 1000);
@@ -35,6 +53,14 @@ export function DownloadButton({
       size={iconOnly ? 'icon' : undefined}
       className={`download-button${iconOnly ? ' is-icon-only' : ''}${cancelReady ? ' is-cancellable' : ''} ${className}`}
       data-hover-label={hoverLabel}
+      style={
+        !iconOnly
+          ? ({
+              '--download-idle-width': `${widths.idle}px`,
+              '--download-cancel-width': `${widths.cancel}px`,
+            } as CSSProperties)
+          : undefined
+      }
 
       aria-label={cancelReady ? `${label}，取消下载` : `${label}下载中`}
       aria-disabled={!cancelReady}
@@ -42,7 +68,7 @@ export function DownloadButton({
         if (cancelReady) onCancel();
       }}
     >
-      <span className="download-button-progress">
+      <span ref={idle} className="download-button-progress">
         <span
           className={`download-ring${value === undefined ? ' is-indeterminate' : ''}`}
           role="progressbar"
@@ -75,7 +101,7 @@ export function DownloadButton({
           </span>
         )}
       </span>
-      <span className="download-button-cancel" aria-hidden="true">
+      <span ref={cancel} className="download-button-cancel" aria-hidden="true">
         <X size={iconOnly ? 17 : 16} />
         {hoverLabel ? (
           <span className="download-button-cancel-label">{hoverLabel}</span>

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { localChanged } from '../services/localChanges';
 import { componentReady } from './components';
 import { mergeActivityLog } from '../../electron/contracts/activity';
 import {
@@ -361,6 +362,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       const merged = { ...get().info, ...info };
       if (!validProfile(merged)) throw new Error('个人信息格式无效或内容过长。');
       localStorage.setItem('copilot-personal-info-v1', JSON.stringify(merged));
+      localChanged('profile');
       set((state) => ({
         info: merged,
         skillsNeedUpdate:

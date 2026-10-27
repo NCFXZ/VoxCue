@@ -4,6 +4,7 @@ import type { SpeechEvent } from '../../../shared/electron/contracts/speech';
 import type { ChatEvent } from '../../../shared/electron/contracts/chat';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
 let emit: (e: SpeechEvent) => void;
+const realAsk = useInterview.getState().ask;
 async function advanceAudio(ms: number) {
   await vi.advanceTimersByTimeAsync(ms);
   emit({
@@ -44,6 +45,8 @@ afterEach(() => {
   useInterview.getState().reset();
   useInterview.setState({ configurationLocked: false });
   useInterview.getState().configure({ mode: 'mock' });
+  vi.restoreAllMocks();
+  useInterview.setState({ ask: realAsk });
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });

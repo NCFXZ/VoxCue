@@ -3,9 +3,17 @@ packages:
 storeDir: .pnpm-store
 nodeLinker: hoisted
 verifyDepsBeforeRun: false
+# Official stable release verified against electron/electron; includes #52633.
+minimumReleaseAgeExclude:
+  - electron@44.10.0
 # VoxCue uses its own pinned text embedder, not LanceDB's optional providers.
 # Mammoth's argparse dependency belongs only to its unused standalone CLI.
 overrides:
+  # GHSA-mrhx-c7xc-m3w5: reject oversized collections before walking elements.
+  '@github/copilot-sdk>zod': '4.6.6'
+  # Security fixes for the build tools; runtime/provider versions stay pinned.
+  'undici@6': '6.29.1'
+  'fast-uri': '3.1.9'
   '@lancedb/lancedb>@huggingface/transformers': '-'
   '@lancedb/lancedb>openai': '-'
   'mammoth>argparse': '-'

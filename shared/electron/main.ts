@@ -26,6 +26,11 @@ import { randomUUID } from 'node:crypto';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { ManagedChatGPTAuth } from './backend/auth/managed';
 import { createAuthStorage } from './backend/auth/storage';
+import { CloudAccountClient, cloudOrigin } from './backend/cloud/client';
+import { createCloudVault } from './backend/cloud/vault';
+import { InterviewLease } from './backend/cloud/lease';
+import { hasInterviewUsageNotice } from './contracts/cloudUsage';
+import { CloudSyncClient } from './backend/cloud/sync';
 import { ChatGPTService } from './backend/chat/service';
 import { CodexUsageRuntime } from './backend/chat/codexUsage';
 import { ChatGPTAccountUsage } from './backend/chat/accountUsage';
@@ -95,6 +100,9 @@ let speech: SpeechHost | undefined;
 let speechSessions: SpeechCoordinator | undefined;
 const interviewContext = new InterviewContext();
 let demoSession = false;
+let accountLease: InterviewLease | undefined;
+let quotaEndMessage: string | null = null;
+let interviewUsageNotice = false;
 
 let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
@@ -169,7 +177,7 @@ if (desktopPlatform.appUserModelId) app.setAppUserModelId(desktopPlatform.appUse
 function interviewActive() {
   return interviewOpening || !!interviewWindow || !!speechSessions?.configuration;
 }
-async function prepareUpdateInstall() {
+async function prepareUpdateInstall(accountLogout = false) {
   const win = mainWindow;
   if (!win || win.isDestroyed() || pendingMainClose || mainCloseChecking)
     throw Error('Window is not ready');
@@ -178,11 +186,11 @@ async function prepareUpdateInstall() {
     try {
       const { response } = await dialog.showMessageBox(win, {
         type: 'warning',
-        title: '重启并更新 VoxCue',
-        message: '重启并安装更新？',
+        title: accountLogout ? '退出 VoxCue 账号' : '重启并更新 VoxCue',
+        message: accountLogout ? '退出主账号？未保存的编辑会丢失。' : '重启并安装更新？',
         detail:
           '正在生成的回复会停止，未保存的个人信息编辑会丢失。已保存资料、普通聊天和附件草稿会保留。',
-        buttons: ['取消', '重启并更新'],
+        buttons: ['取消', accountLogout ? '退出账号' : '重启并更新'],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
@@ -249,6 +257,7 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
     scale,
     interviewTranscriptVisible,
     interviewCollapsed,
+    interviewUsageNotice,
   );
   if (!interviewCollapsed)
     interviewScale = interviewPanelScale(bounds.width, interviewTranscriptVisible);
@@ -377,6 +386,7 @@ function openInterview() {
     interviewMove = undefined;
     interviewWindow = null;
     interviewMousePassthrough = false;
+    void accountLease?.stop();
     speechSessions?.releaseInterview(true);
     updates?.refresh();
     interviewIpc?.cancel();
@@ -603,22 +613,111 @@ app.whenReady().then(() => {
     undefined,
     app.getVersion(),
   );
+  const credentialEncryption = desktopPlatform.credentialEncryptionFile
+    ? require(
+        path.join(app.getAppPath(), 'dist-electron', desktopPlatform.credentialEncryptionFile),
+      ).createCredentialEncryption(
+        path.join(
+          app.isPackaged ? process.resourcesPath : app.getAppPath(),
+          app.isPackaged ? 'native' : 'native/bin',
+          'VoxCue.Credentials',
+        ),
+      )
+    : undefined;
+  const cloudAccount = new CloudAccountClient({
+    origin: cloudOrigin(
+      process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
+      !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
+    ),
+    vault: createCloudVault(credentialEncryption),
+    deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
+  });
+  handleDesktop('cloud:account', async (event, call) => {
+    if (
+      ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
+      event.senderFrame !== event.sender.mainFrame
+    )
+      throw Error('Unauthorized window');
+    const leaving =
+      call?.action === 'logout' ||
+      (call?.action === 'revoke' && cloudAccount.isCurrentSession(call.sessionId));
+    if (leaving && mainWindow) {
+      if (interviewActive())
+        return { ok: false as const, state: cloudAccount.snapshot(), error: '请先结束面试。' };
+      if (!(await prepareUpdateInstall(true)))
+        return { ok: false as const, state: cloudAccount.snapshot(), error: '已取消退出。' };
+    }
+    const result = await cloudAccount.call(call);
+    if (leaving && !result.ok) {
+      mainCloseApproved = false;
+      mainCloseFlushed = false;
+    }
+    if (result.ok && result.state.user && ['login', 'register'].includes(call.action))
+      createMainWindow();
+    if (
+      result.ok &&
+      !result.state.user &&
+      mainWindow &&
+      ['logout', 'revoke'].includes(call.action)
+    ) {
+      knowledgeCoordinator?.cancelAll();
+      historyJobs?.cancelAll();
+      chatIpc?.cancelActive();
+      createLoginWindow();
+    }
+    return result;
+  });
+  accountLease = new InterviewLease(
+    cloudAccount,
+    (message) => {
+      interviewIpc?.cancel();
+      quotaEndMessage =
+        accountLease?.snapshot()?.reason === 'exhausted'
+          ? '面试额度已用完，本次面试记录已保存在本机。'
+          : '计时连接已失效，面试已结束，本次面试记录已保存在本机。';
+      // Stop collection immediately, but retain the confirmed configuration and
+      // forward the final decoded tail before the renderer archives and closes.
+      void speechSessions
+        ?.interview({ op: 'stop' })
+        .catch(() => speechSessions?.releaseInterview());
+      if (interviewWindow && !interviewWindow.isDestroyed())
+        sendDesktop(interviewWindow.webContents, 'cloud:usage-expired', message);
+    },
+    undefined,
+    (state) => {
+      const notice = hasInterviewUsageNotice(state);
+      if (notice !== interviewUsageNotice) {
+        interviewUsageNotice = notice;
+        if (interviewCollapsed && interviewWindow && !interviewWindow.isDestroyed())
+          sizeInterview(interviewScale);
+      }
+      if (interviewWindow && !interviewWindow.isDestroyed())
+        sendDesktop(interviewWindow.webContents, 'interview:usage', state);
+    },
+  );
+  handleDesktop('cloud:usage', (event, call) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
+      throw Error('Unauthorized window');
+    return accountLease!.call(call);
+  });
+  const cloudSync = new CloudSyncClient(cloudAccount, async (id, bytes, preview) => {
+    await interviewImages.save([{ id, preview, file: { bytes, name: 'screenshot.png' } }]);
+  });
+  handleDesktop('cloud:sync', (event, call) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
+      throw Error('Unauthorized window');
+    if (interviewActive())
+      return {
+        ok: false as const,
+        error: '面试期间暂停同步。',
+        status: 503,
+        retryAfterSeconds: 10,
+      };
+    return cloudSync.call(call);
+  });
   auth = new ChatGPTAuthService({
     managed: new ManagedChatGPTAuth(codexUsageRuntime, (url) => shell.openExternal(url)),
-    storage: createAuthStorage(
-      desktopPlatform.credentialEncryptionLabel,
-      desktopPlatform.credentialEncryptionFile
-        ? require(
-            path.join(app.getAppPath(), 'dist-electron', desktopPlatform.credentialEncryptionFile),
-          ).createCredentialEncryption(
-            path.join(
-              app.isPackaged ? process.resourcesPath : app.getAppPath(),
-              app.isPackaged ? 'native' : 'native/bin',
-              'VoxCue.Credentials',
-            ),
-          )
-        : undefined,
-    ),
+    storage: createAuthStorage(desktopPlatform.credentialEncryptionLabel, credentialEncryption),
     openBrowser: (url) => shell.openExternal(url),
     callbackLogo: () => readFile(resources.brandLogo),
   });
@@ -740,6 +839,14 @@ app.whenReady().then(() => {
     try {
       demoSession = false;
       const session = await (service === 'copilot' ? copilotAuth : auth).signIn();
+      if (mainWindow && !mainCloseApproved) {
+        await selection.write(service);
+        selectedService = service;
+        selectionReady = Promise.resolve();
+        chatIpc?.cancelActive();
+        historyJobs?.cancelAll();
+        return session;
+      }
       if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
       // Fast reauthentication can finish while the signed-out main window is
       // still flushing its chat store. Wait for its normal saved close before
@@ -774,18 +881,28 @@ app.whenReady().then(() => {
       signingIn = false;
     }
   };
-  handleDesktop('auth:sign-in', async (event, ...args) => {
+  const requireAIWindow = (event: Electron.IpcMainInvokeEvent) => {
+    if (event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame) {
+      if (interviewActive()) throw Error('请先结束面试再切换 AI 服务。');
+      if (!cloudAccount.snapshot().user && !demoSession) throw Error('请先登录 VoxCue 账号。');
+      return;
+    }
     requireLogin(event);
+    if (app.isPackaged || !process.env.COPILOT_TEST_USER_DATA)
+      throw Error('请在设置中连接 AI 服务。');
+  };
+  handleDesktop('auth:sign-in', async (event, ...args) => {
+    requireAIWindow(event);
     if (args.length) throw Error('Invalid request');
     return signIn('chatgpt');
   });
   handleDesktop('auth:copilot-sign-in', async (event, ...args) => {
-    requireLogin(event);
+    requireAIWindow(event);
     if (args.length) throw Error('Invalid request');
     return signIn('copilot');
   });
   handleDesktop('auth:cancel', (event) => {
-    requireLogin(event);
+    requireAIWindow(event);
     cancelLoginWait?.();
     auth.cancel();
     copilotAuth.cancel();
@@ -805,6 +922,7 @@ app.whenReady().then(() => {
   handleDesktop('auth:sign-out', async (event) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    if (interviewActive()) throw Error('请先结束面试再断开 AI 服务。');
     knowledgeCoordinator?.cancelAll();
     historyJobs?.cancelAll();
     chatIpc?.cancelActive();
@@ -826,8 +944,6 @@ app.whenReady().then(() => {
         message: result.warning,
         buttons: ['确定'],
       });
-    mainCloseApproved = true;
-    createLoginWindow();
     return result;
   });
   const ragModelPath = resources.ragModel;
@@ -890,7 +1006,10 @@ app.whenReady().then(() => {
   });
   interviewIpc = registerInterviewIpc({
     chat: ragChat,
-    requireInterview,
+    requireInterview(event) {
+      requireInterview(event);
+      if (!demoSession) accountLease!.assertActive();
+    },
     isDemo: () => demoSession,
     configuration: () => speechSessions?.configuration,
     updateModel: (value, models) => speechSessions!.updateModel(value, models),
@@ -1047,6 +1166,7 @@ app.whenReady().then(() => {
     )
       return speech!.call(call);
     requireInterview(event);
+    if (call.op === 'start' && !demoSession) accountLease!.assertActive();
     return speechSessions!.interview(call);
   });
   handleDesktop('dictation:call', (event, value: unknown) => {
@@ -1062,6 +1182,7 @@ app.whenReady().then(() => {
   });
   handleDesktop('interview:reconnect-audio', async (event, options) => {
     requireInterview(event);
+    if (!demoSession) accountLease!.assertActive();
     const validated = validateSpeech({
       op: 'start',
       options: options ?? speechSessions?.configuration?.options,
@@ -1131,7 +1252,15 @@ app.whenReady().then(() => {
           );
       }
       await speechSessions!.confirm(configuration);
-      openInterview();
+      try {
+        quotaEndMessage = null;
+        if (!demoSession) await accountLease!.start();
+        openInterview();
+      } catch (error) {
+        speechSessions!.releaseInterview(true);
+        await accountLease?.stop();
+        throw error;
+      }
     } finally {
       interviewOpening = false;
       updates?.refresh();
@@ -1146,6 +1275,7 @@ app.whenReady().then(() => {
       collapsed: interviewCollapsed,
       transcriptVisible: interviewTranscriptVisible,
       configuration: speechSessions!.configuration!,
+      usage: accountLease?.snapshot(),
     };
   });
   handleDesktop('interview:capture', (event, allowed: unknown) => {
@@ -1289,6 +1419,10 @@ app.whenReady().then(() => {
       return;
     interviewCloseApproved = true;
     interviewWindow.close();
+    if (quotaEndMessage && mainWindow && !mainWindow.isDestroyed()) {
+      sendDesktop(mainWindow.webContents, 'cloud:usage-expired', quotaEndMessage);
+      quotaEndMessage = null;
+    }
   });
   onDesktop('interview:mouse-passthrough', (event, ...args: unknown[]) => {
     if (
@@ -1317,7 +1451,15 @@ app.whenReady().then(() => {
     if (action === 'close') win.close();
   });
   void selectionReady
-    .then(() => activeAuth().session())
+    .then(async () => {
+      const result = await cloudAccount.call({ action: 'status' });
+      return (
+        result.state.user ||
+        (!app.isPackaged && process.env.COPILOT_TEST_USER_DATA
+          ? await activeAuth().session()
+          : null)
+      );
+    })
     .then((session) => {
       if (session) createMainWindow();
       else createLoginWindow();
@@ -1327,7 +1469,10 @@ app.whenReady().then(() => {
     if (BrowserWindow.getAllWindows().length !== 0) return;
     if (desktopPlatform.id !== 'darwin') return createLoginWindow();
     void selectionReady
-      .then(() => activeAuth().session())
+      .then(async () => {
+        const result = await cloudAccount.call({ action: 'status' });
+        return result.state.user;
+      })
       .then((session) => {
         if (BrowserWindow.getAllWindows().length) return;
         if (session) createMainWindow();

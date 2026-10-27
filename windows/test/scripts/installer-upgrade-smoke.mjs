@@ -1,23 +1,19 @@
 import { build, Platform, Arch } from 'electron-builder';
 import electronExecutable from 'electron';
-import { _electron as electron } from 'playwright';
+import { createRequire } from 'node:module';
 import {
-  mkdir,
-  mkdtemp,
-  writeFile,
-  readFile,
-  readdir,
-  realpath,
-  cp,
-  rename,
-} from 'node:fs/promises';
-import { spawn } from 'node:child_process';
+  electron,
+  testRoot,
+  spawnTestProcess,
+} from '../../../shared/test/scripts/test-workspace.mjs';
+import { mkdir, writeFile, readFile, readdir, realpath, cp, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import config from '../../../windows/electron-builder.config.cjs';
+import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
 
-await mkdir('test/results', { recursive: true });
-const directory = await mkdtemp(path.resolve('test/results/nsis-upgrade-'));
+const directory = path.join(testRoot, 'nsis-upgrade');
+await mkdir(directory);
 const project = path.join(directory, 'fixture');
 const target = path.join(directory, 'installed');
 const profile = path.join(directory, 'profile');
@@ -41,12 +37,21 @@ await writeFile(
 // Prepackaged fixture avoids collecting the parent workspace's native dependencies.
 await cp(path.dirname(electronExecutable), stage, { recursive: true });
 await rename(path.join(stage, 'electron.exe'), path.join(stage, name + '.exe'));
+const artwork = await prepareInstallerUi(path.join(directory, 'installer-ui'));
+const include = path.join(directory, 'isolated-installer.nsh');
+await writeFile(
+  include,
+  `!define VOXCUE_INSTALLER_DATA_DIRECTORY "${profile}"
+!define VOXCUE_INSTALLER_LEGACY_DATA_DIRECTORY "${path.join(directory, 'legacy-profile')}"
+!include "${artwork.include}"
+`,
+);
 const testConfig = {
   ...config,
   appId: 'com.voxcue.updates-test.' + name,
   productName: name,
   directories: { output: path.join(directory, 'artifacts') },
-  electronVersion: '38.8.6',
+  electronVersion: createRequire(import.meta.url)('electron/package.json').version,
   compression: 'store',
   publish: null,
   win: {
@@ -57,6 +62,7 @@ const testConfig = {
   },
   nsis: {
     ...config.nsis,
+    include,
     createDesktopShortcut: false,
     createStartMenuShortcut: false,
     runAfterFinish: false,
@@ -66,11 +72,16 @@ const env = { ...process.env, COPILOT_TEST_USER_DATA: profile };
 delete env.ELECTRON_RUN_AS_NODE;
 const run = (executable, args) =>
   new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { env, windowsHide: true, stdio: 'ignore' });
-    child.once('error', reject);
-    child.once('exit', (code) =>
-      code === 0 ? resolve() : reject(Error('NSIS fixture failed: ' + code)),
-    );
+    const child = spawnTestProcess(executable, args, { env, windowsHide: true, stdio: 'ignore' });
+    const timer = setTimeout(() => child.kill(), 120000);
+    child.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+    child.once('exit', (code) => {
+      clearTimeout(timer);
+      code === 0 ? resolve() : reject(Error('NSIS fixture failed: ' + code));
+    });
   });
 let application;
 let installed = false;
@@ -154,23 +165,17 @@ try {
     await application.close();
     application = undefined;
   }
-  await writeFile(
-    path.join(directory, 'report.json'),
-    JSON.stringify(
-      {
-        passed: true,
-        realNsisInstall: true,
-        upgrade: '0.1.0 -> 0.2.0',
-        localStoragePreserved: true,
-        indexedDbOriginalBytesPreserved: true,
-        filesPreserved: true,
-        syntheticFixture: true,
-      },
-      null,
-      2,
-    ),
+  console.log(
+    JSON.stringify({
+      passed: true,
+      realNsisInstall: true,
+      upgrade: '0.1.0 -> 0.2.0',
+      localStoragePreserved: true,
+      indexedDbOriginalBytesPreserved: true,
+      filesPreserved: true,
+      syntheticFixture: true,
+    }),
   );
-  console.log(JSON.stringify({ passed: true, directory }));
 } finally {
   if (application) await application.close();
   if (installed) {
@@ -179,6 +184,8 @@ try {
     const uninstaller = (await readdir(target)).find(
       (file) => file.startsWith('Uninstall ') && file.endsWith('.exe'),
     );
-    if (uninstaller) await run(path.join(target, uninstaller), ['/S']);
+    // Run in place so NSIS does not fork a temporary uninstaller and return
+    // before its files are released; the owned test root removes the stub.
+    if (uninstaller) await run(path.join(target, uninstaller), ['/S', '_?=' + target]);
   }
 }

@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -127,10 +128,7 @@ try {
     KnowledgeHost.prototype.removeDocument = async () => null;
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
@@ -473,7 +471,10 @@ try {
     'document deletion executes once; knowledge deletion stays in its original header and cannot delete another base',
   );
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page.locator('.history-row').filter({ hasText: '合成面试记录' }).click();
+  await page
+    .locator('.history-row')
+    .filter({ hasText: '合成面试记录' })
+    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: '删除记录', exact: true }).click();
   assert.equal(await page.getByRole('dialog').count(), 0);
   await captureRequested(page, 'history-delete-confirm');

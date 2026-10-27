@@ -1,3 +1,5 @@
+import { connectUiAccount } from './install-ui-account.mjs';
+import { cornerShapeNames } from './continuous-corners.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
@@ -152,10 +154,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(20000);
   const mainWindow = await app.browserWindow(page);
   await mainWindow.evaluate((window) => window.setSize(1280, 1000));
@@ -230,9 +229,9 @@ try {
       operationShape: operation.cornerShape,
     };
   });
-  assert.deepEqual(contours, {
+  assert.deepEqual(cornerShapeNames(contours), {
     radius: '20px',
-    shape: 'squircle', // Chromium's canonical spelling of superellipse(2).
+    shape: 'squircle',
     operationRadius: '999px',
     operationShape: 'round',
   });

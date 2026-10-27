@@ -71,7 +71,9 @@ for (const dependency of [
     dependency,
   );
 assert.ok(
-  !entries.some((file) => /^(?:test|scripts|src|electron|local-models|\.git|\.tools)\//.test(file)),
+  !entries.some((file) =>
+    /^(?:test|scripts|src|electron|server|local-models|\.git|\.tools)\//.test(file),
+  ),
 );
 assert.ok(
   !entries.some((file) =>
@@ -90,6 +92,7 @@ for (const [name, version] of [
   ['@github/copilot-sdk-win32-x64', '1.0.21'],
   ['@openai/codex', '0.164.0'],
   ['@openai/codex-win32-x64', '0.164.0-win32-x64'],
+  ['zod', '4.6.6'],
 ])
   assert.equal(
     JSON.parse(asar.extractFile(archive, path.normalize('node_modules/' + name + '/package.json')))
@@ -160,12 +163,24 @@ let app = await electron.launch({
   env,
 });
 try {
+  assert.equal(
+    await app.evaluate(() => process.versions.electron),
+    createRequire(import.meta.url)('electron/package.json').version,
+    'The packaged app must use the security-patched desktop runtime',
+  );
   let { page, errors } = await checkComponents(app);
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
-  await settings.getByRole('button', { name: '面试设置', exact: true }).click();
-  await settings.locator('.provider-avatar img').evaluate(async (image) => image.decode());
+  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  assert.equal(await settings.locator('.ai-service-label img').count(), 2);
+  await settings
+    .locator('.ai-service-label img')
+    .evaluateAll(async (images) => Promise.all(images.map((image) => image.decode())));
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   assert.deepEqual(errors, []);

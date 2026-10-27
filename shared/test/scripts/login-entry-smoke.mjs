@@ -29,7 +29,7 @@ delete env.COPILOT_TEST_USER_DATA;
 const app = await electron.launch({ args: [fixture], env });
 try {
   const page = await app.firstWindow();
-  await page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).waitFor();
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(/mock|模拟/i.test(await page.locator('body').innerText()), false);
   assert.equal(await page.getByRole('button', { name: /体验|测试|Mock/ }).count(), 0);
   assert.equal(

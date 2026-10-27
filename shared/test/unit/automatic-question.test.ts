@@ -80,6 +80,7 @@ it('重置不复用上一场的处理进度，麦克风终稿不能提供自动�
 
 let receive: (event: SpeechEvent) => void;
 let ask: ReturnType<typeof vi.spyOn>;
+const realAsk = useInterview.getState().ask;
 beforeEach(async () => {
   vi.useFakeTimers();
   vi.stubGlobal('localStorage', { getItem: () => null, setItem: () => {} });
@@ -109,6 +110,8 @@ afterEach(() => {
   useInterview.getState().reset();
   useInterview.setState({ configurationLocked: false });
   vi.restoreAllMocks();
+  // Zustand copies actions into new state objects; restore the current copy too.
+  useInterview.setState({ ask: realAsk });
   vi.useRealTimers();
   vi.unstubAllGlobals();
 });

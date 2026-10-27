@@ -1,6 +1,7 @@
 import { useTextareaSize } from './useTextareaSize';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
+import { userError } from '../services/errors';
 import {
   speechComponent,
   speechModelLabels,
@@ -48,6 +49,8 @@ import { ChatSources } from './ChatSources';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { useModelProvider } from './useModelProvider';
+import { useCloudUsage } from '../stores/cloudUsage';
+import { isLowInterviewCredit } from '../../electron/contracts/cloudUsage';
 const audioAccessLabels = {
   granted: '可用',
   denied: '未授权',
@@ -76,6 +79,7 @@ export function PreparationPage({
   const state = usePreparation();
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
+  const quota = useCloudUsage();
   const interviewSettings = useInterviewSettings();
   const selectedSpeechComponent = speechComponent(interviewSettings.configuration.options);
   const speechReady = useComponentReady(selectedSpeechComponent);
@@ -155,6 +159,19 @@ export function PreparationPage({
   const [panelWidth, setPanelWidth] = useState(380);
   const [resizingInfo, setResizingInfo] = useState(false);
   const layoutRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const layout = layoutRef.current;
+    if (!layout) return;
+    const measure = () =>
+      layout.style.setProperty(
+        '--personal-panel-width',
+        `${Math.min(panelWidth, Math.max(0, layout.clientWidth - 260))}px`,
+      );
+    const resize = new ResizeObserver(measure);
+    resize.observe(layout);
+    measure();
+    return () => resize.disconnect();
+  }, [panelWidth]);
   const resizeInfo = useRef<{ x: number; width: number } | null>(null);
   const resizePanel = (width: number) => {
     const maximum = Math.min(640, Math.max(300, (layoutRef.current?.clientWidth ?? 960) - 280));
@@ -247,6 +264,7 @@ export function PreparationPage({
     setInterviewDevices([]);
     setInterviewConfiguration(configuration);
     setConfirmInterview(true);
+    void useCloudUsage.getState().run({ action: 'status' });
     void checkAccess(configuration);
   };
   const audioName = (source: 'system' | 'microphone') => {
@@ -405,9 +423,7 @@ export function PreparationPage({
                       setConfirmInterview(false);
                     } catch (error) {
                       setAccessReport(null);
-                      setInterviewError(
-                        error instanceof Error ? error.message : '面试窗口打开失败，请重试。',
-                      );
+                      setInterviewError(userError(error, '面试窗口打开失败，请重试。'));
                     } finally {
                       setOpeningInterview(false);
                     }
@@ -430,6 +446,18 @@ export function PreparationPage({
             <div className="interview-start-knowledge">
               <dt>面试知识库</dt>
               <dd>{interviewKnowledgeName}</dd>
+            </div>
+            <div className="interview-start-quota">
+              <dt>剩余面试时长</dt>
+              <dd className={isLowInterviewCredit(quota.value) ? 'interview-quota-low' : undefined}>
+                {quota.value
+                  ? quota.value.permanent
+                    ? '永久额度'
+                    : `${Math.floor(quota.value.remainingSeconds! / 3600)} 小时 ${Math.floor((quota.value.remainingSeconds! % 3600) / 60)} 分钟`
+                  : quota.error
+                    ? '面试额度暂不可用'
+                    : '正在读取…'}
+              </dd>
             </div>
             <div>
               <dt>面试官 · 系统音频</dt>
@@ -572,9 +600,6 @@ export function PreparationPage({
       <div
         ref={layoutRef}
         className={`preparation-layout${infoOpen ? ' has-personal-info' : ''}${resizingInfo ? ' is-resizing-info' : ''}`}
-        style={
-          { '--personal-panel-width': `min(${panelWidth}px, calc(100% - 260px))` } as CSSProperties
-        }
       >
         <div
           className="chat-column"

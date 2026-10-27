@@ -1,3 +1,5 @@
+import { connectUiAccount } from './install-ui-account.mjs';
+import { cornerShapeNames } from './continuous-corners.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -130,10 +132,7 @@ try {
     });
   });
   const login = await app.firstWindow();
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.evaluate(() => {
@@ -161,6 +160,10 @@ try {
   }
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   for (const dark of [false, true]) {
     await theme(page, dark);
@@ -237,7 +240,10 @@ try {
   const clearBox = await page.getByRole('button', { name: '清除搜索', exact: true }).boundingBox();
   await page.mouse.click(clearBox.x + clearBox.width / 2, clearBox.y + clearBox.height / 2);
   assert.equal(await search.inputValue(), '');
-  await page.locator('.history-row').click();
+  await page
+    .locator('.history-row')
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.locator('.record-transcript-scroll').evaluate((e) => (e.scrollTop = 320));
   await page.waitForFunction(
     () => Number(document.documentElement.style.getPropertyValue('--web-header-opacity')) === 1,
@@ -334,7 +340,7 @@ try {
   assert.equal(Math.round(endStyle.height * 100) / 100, Math.round(beforeEnd.height * 100) / 100);
   assert.equal(endStyle.overflow, false);
   assert.equal(endStyle.radius, '999px');
-  assert.equal(endStyle.corner, 'round');
+  assert.equal(cornerShapeNames(endStyle.corner), 'round');
   assert.equal(endStyle.iconOnly, false);
   await captureRequested(floating, 'end-confirm-capsule');
   assert.deepEqual(

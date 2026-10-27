@@ -8,6 +8,7 @@ import {
   visibleAnswers,
 } from '../services/historyPresentation';
 import { useHistory } from '../stores/history';
+import { SyncBadge } from './SyncBadge';
 import { useChatConnection } from '../stores/chatConnection';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
@@ -219,6 +220,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                   >
                     <Edit size={17} />
                   </Button>
+                  <SyncBadge itemKey={'record:' + record.id} label={record.title} />
                 </div>
                 <p>
                   {date(record.startedAt)} — {time(record.endedAt)}

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import workspace from '../../scripts/workspace.mjs';
 
 const temporary = fs.realpathSync(os.tmpdir());
@@ -53,6 +53,24 @@ const recordOwner = () => {
 };
 recordOwner();
 export function trackTestProcess(child) {
+  if (process.platform === 'win32') {
+    const kill = child.kill.bind(child);
+    // Windows kills only the direct process for SIGTERM/SIGKILL. A timed-out
+    // fixture must also release its own Electron renderer/utility children.
+    child.kill = (signal) => {
+      if (child.exitCode !== null || child.signalCode !== null) return false;
+      try {
+        execFileSync('taskkill.exe', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+          timeout: 10000,
+        });
+        return true;
+      } catch {
+        return kill(signal);
+      }
+    };
+  }
   children.add(child);
   recordOwner();
   child.once('exit', () => {

@@ -1,3 +1,4 @@
+import { SyncBadge } from './SyncBadge';
 import { useEffect, useRef, useState } from 'react';
 import { History, ChevronDown, X } from './icons';
 import { Button } from './ui/button';
@@ -105,39 +106,43 @@ export function HistoryPage() {
                 <div className="history-timeline">
                   {!filtered.length && <p className="empty-inline">没有符合条件的面试记录。</p>}
                   {filtered.map((record) => (
-                    <button
-                      key={record.id}
-                      className="history-row"
-                      onClick={() => select(record.id)}
-                    >
-                      <div className="history-date">
-                        <strong>{date(record.startedAt)}</strong>
-                        <span>
-                          {new Date(record.startedAt).toLocaleTimeString('zh-CN', {
-                            hour: '2-digit',
-                            minute: '2-digit',
-                            hour12: false,
-                          })}
-                        </span>
-                      </div>
-                      <span className="timeline-dot" />
-                      <div className="history-summary">
-                        <h2>
-                          {record.title}
-                          <span className="neutral-badge">
-                            {record.status === 'ended' ? '已结束' : '已保存'}
+                    <div className="history-row-wrap" key={record.id}>
+                      <div className="history-row">
+                        <button
+                          className="history-row-open"
+                          aria-label={`查看面试记录：${record.title}`}
+                          onClick={() => select(record.id)}
+                        />
+                        <div className="history-date">
+                          <strong>{date(record.startedAt)}</strong>
+                          <span>
+                            {new Date(record.startedAt).toLocaleTimeString('zh-CN', {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                              hour12: false,
+                            })}
                           </span>
-                        </h2>
-                        <p>
-                          {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 60000)} 分{' '}
-                          {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 1000) % 60}{' '}
-                          秒 ·{' '}
-                          {record.answers.filter((answer) => answer.provider !== 'mock').length}{' '}
-                          个回答
-                        </p>
+                        </div>
+                        <span className="timeline-dot" />
+                        <div className="history-summary">
+                          <h2>
+                            <span className="history-title-text">{record.title}</span>
+                            <span className="neutral-badge">
+                              {record.status === 'ended' ? '已结束' : '已保存'}
+                            </span>
+                            <SyncBadge itemKey={'record:' + record.id} label={record.title} />
+                          </h2>
+                          <p>
+                            {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 60000)} 分{' '}
+                            {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 1000) % 60}{' '}
+                            秒 ·{' '}
+                            {record.answers.filter((answer) => answer.provider !== 'mock').length}{' '}
+                            个回答
+                          </p>
+                        </div>
+                        <ChevronDown size={15} />
                       </div>
-                      <ChevronDown size={15} />
-                    </button>
+                    </div>
                   ))}
                 </div>
               )}

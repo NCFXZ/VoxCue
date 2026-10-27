@@ -100,6 +100,17 @@ export async function offlineElectronEntry(
       "CodexUsageRuntime.prototype.access = async () => { throw Error('Synthetic account is not signed in'); };",
       "CodexUsageRuntime.prototype.login = async () => { throw Error('GUI test requires an explicit synthetic login fixture'); };",
       'CodexUsageRuntime.prototype.limits = async () => ({});',
+      ...(!loopbackPort
+        ? [
+            'require(' +
+              JSON.stringify(
+                path.join(workspace.sharedRoot, 'test/fixtures/install-primary-account.cjs'),
+              ) +
+              ')(' +
+              JSON.stringify(workspace.platformRoot) +
+              ');',
+          ]
+        : []),
       'require(' +
         JSON.stringify(
           fixture ?? path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js'),

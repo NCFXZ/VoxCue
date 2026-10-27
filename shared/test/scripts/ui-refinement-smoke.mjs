@@ -1,3 +1,4 @@
+import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -97,10 +98,7 @@ try {
   });
   const login = await app.firstWindow();
   await fixedZoom(login);
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息' }).waitFor();
@@ -316,7 +314,7 @@ try {
     while (await panel.locator('.profile-disclosure[open]').count())
       await panel.locator('.profile-disclosure[open]').first().locator(':scope > summary').click();
     await settle(page);
-    await page.getByRole('button', { name: '个人信息' }).click();
+    await page.getByRole('button', { name: '个人信息', exact: true }).click();
     console.log(`Profile refinement ${theme} passed`);
   }
   await app.evaluate(
@@ -338,7 +336,7 @@ try {
   );
   await page.keyboard.press('Home');
   await settle(page);
-  await page.getByRole('button', { name: '个人信息' }).click();
+  await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await app.evaluate(
     ({ BrowserWindow }, url) =>
       BrowserWindow.getAllWindows()

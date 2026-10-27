@@ -1,3 +1,4 @@
+import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import assert from 'node:assert/strict';
 import { installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
@@ -11,16 +12,13 @@ export async function checkComponents(application) {
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('heading', { name: '欢迎使用 VoxCue' }).waitFor();
-  const loginButton = page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
-  assert.equal(await loginButton.count(), 1);
-  const loginBrand = loginButton.locator('.service-brand-icon');
-  assert.equal(await loginBrand.count(), 1);
-  await loginBrand.evaluate(async (image) => image.decode());
-  assert.equal(await page.locator('.service-login').count(), 2);
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  assert.equal(await page.getByLabel('邮箱', { exact: true }).count(), 1);
+  assert.equal(await page.getByLabel('密码', { exact: true }).count(), 1);
+  await page.locator('.login-brand .app-logo').evaluate(async (image) => image.decode());
   assert.equal(
-    await page.getByRole('button', { name: '使用 GitHub Copilot 继续', exact: true }).count(),
-    1,
+    await page.getByRole('button', { name: /使用 ChatGPT|使用 GitHub Copilot/ }).count(),
+    0,
   );
   assert.equal(await page.evaluate(() => Object.hasOwn(window.desktop, 'signInWithCopilot')), true);
   await installUiAccount(application);
@@ -93,10 +91,7 @@ export async function checkComponents(application) {
       );
     };
   });
-  const [main] = await Promise.all([
-    application.waitForEvent('window'),
-    page.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const main = await connectUiAccount(application, page);
   page = main;
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
@@ -170,7 +165,7 @@ export async function checkComponents(application) {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
-  const personal = page.getByRole('complementary', { name: '个人信息' });
+  const personal = page.getByRole('complementary', { name: '个人信息', exact: true });
   const knowledgeSection = personal.locator('details[aria-label="面试知识库"]');
   assert.equal(await knowledgeSection.getAttribute('open'), null);
   await knowledgeSection.locator('summary').click();

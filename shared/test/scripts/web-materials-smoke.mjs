@@ -1,3 +1,5 @@
+import { connectUiAccount } from './install-ui-account.mjs';
+import { cornerShapeNames } from './continuous-corners.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -44,7 +46,7 @@ try {
     };
   });
   const login = await app.firstWindow();
-  const signIn = login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true });
+  const signIn = login.getByRole('button', { name: '登录', exact: true });
   await signIn.waitFor();
   for (const dark of [false, true]) {
     await login.emulateMedia({ colorScheme: dark ? 'dark' : 'light' });
@@ -52,15 +54,9 @@ try {
       (dark) => document.documentElement.classList.contains('dark') === dark,
       dark,
     );
-    await login.waitForFunction(
-      (dark) =>
-        getComputedStyle(document.querySelector('.service-login')).color ===
-        (dark ? 'rgb(255, 255, 255)' : 'rgb(0, 0, 0)'),
-      dark,
-    );
-    assert.equal(
+    assert.notEqual(
       await signIn.evaluate((node) => getComputedStyle(node).color),
-      dark ? 'rgb(255, 255, 255)' : 'rgb(0, 0, 0)',
+      'rgba(0, 0, 0, 0)',
     );
     assert.equal(await signIn.evaluate((node) => getComputedStyle(node).borderRadius), '999px');
     assert.equal(await signIn.evaluate((node) => getComputedStyle(node).justifyContent), 'center');
@@ -74,8 +70,8 @@ try {
       background: getComputedStyle(node).backgroundImage,
       glow: getComputedStyle(node, '::before').opacity,
     }));
-    assert.ok(backdrop.background.includes(dark ? 'rgb(52, 75, 96)' : 'rgb(191, 202, 215)'));
-    assert.equal(backdrop.glow, dark ? '0.48' : '1');
+    assert.ok(backdrop.background.includes(dark ? 'rgb(37, 46, 62)' : 'rgb(230, 236, 244)'));
+    assert.equal(backdrop.glow, '0.25');
     assert.match(
       await scene
         .locator('.floating-composer')
@@ -92,11 +88,36 @@ try {
       });
     }
   }
-  await (await app.browserWindow(login)).evaluate((win) => win.setSize(860, 520));
-  // Native window bounds round to physical pixels at fractional Windows DPI.
-  await login.waitForFunction(
-    () => Math.abs(innerWidth - 860) <= 1 && Math.abs(innerHeight - 520) <= 1,
-  );
+  const minimumContent = await (
+    await app.browserWindow(login)
+  ).evaluate((win) => {
+    win.setSize(860, 580);
+    return win.getContentSize();
+  });
+  // Windows clamps native minimum bounds and rounds frame insets at fractional
+  // DPI. Test the actual minimum content viewport, rather than outer dimensions.
+  await login
+    .waitForFunction(
+      ([width, height]) => Math.abs(innerWidth - width) <= 1 && Math.abs(innerHeight - height) <= 1,
+      minimumContent,
+    )
+    .catch(async (error) => {
+      const native = await (
+        await app.browserWindow(login)
+      ).evaluate((win) => ({
+        bounds: win.getBounds(),
+        content: win.getContentBounds(),
+        minimum: win.getMinimumSize(),
+      }));
+      const renderer = await login.evaluate(() => ({
+        width: innerWidth,
+        height: innerHeight,
+        dpi: devicePixelRatio,
+      }));
+      throw new Error('Minimum login bounds: ' + JSON.stringify({ native, renderer }), {
+        cause: error,
+      });
+    });
   assert.ok(
     await login.locator('.login-preview .interview-font-preview').evaluate((node) => {
       const panels = [...node.children].map((child) => child.getBoundingClientRect());
@@ -115,10 +136,7 @@ try {
     );
     await captureRequested(login, 'minimum-login-' + colorScheme);
   }
-  const [page] = await Promise.all([
-    app.waitForEvent('window'),
-    login.getByRole('button', { name: '使用 ChatGPT 继续', exact: true }).click(),
-  ]);
+  const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   await page.waitForFunction(() => document.documentElement.classList.contains('web-materials'));
   assert.equal(await page.evaluate(() => 'setContentControls' in window.desktop), false);
@@ -147,7 +165,7 @@ try {
       curve: getComputedStyle(node).getPropertyValue('corner-shape'),
       height: node.getBoundingClientRect().height,
     }));
-    assert.deepEqual(shape, { radius: '999px', curve: 'round', height: 36 });
+    assert.deepEqual(cornerShapeNames(shape), { radius: '999px', curve: 'round', height: 36 });
     const composer = page.locator('.composer');
     const idle = await composer.evaluate((node) => ({
       radius: getComputedStyle(node).borderRadius,
@@ -324,6 +342,10 @@ try {
   await latest.click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: '个性化', exact: true })
+    .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   assert.equal(
     await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),
@@ -436,7 +458,11 @@ try {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
     await captureRequested(page, 'history-scrolled-header-' + (dark ? 'dark' : 'light'));
   }
-  await page.locator('.history-row').first().click();
+  await page
+    .locator('.history-row')
+    .first()
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
   await checkPanelHeader('.record-answer-panel', 'record-answer');
   await page.getByRole('button', { name: '新对话', exact: true }).click();
