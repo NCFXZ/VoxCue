@@ -1,18 +1,20 @@
 # VoxCue 0.6.1 → 0.6.2：客户端更新与 Mac 接续
 
+> 2026-10-28 最新范围：用户重新要求客户端/服务端完整功能、安全、对抗、背压及视觉复验，完成后正常推送两仓、部署现有腾讯云服务端0.5.2、发行Windows x64 0.6.2并恢复现存全部draft。此授权覆盖本文较早的“定向测试、不部署、不发行”限制；Mac目录及原生验收仍交Mac，不能把Windows成绩计为Mac通过。Latest、固定身份、锁、模型和RAG v7保持，不替换真实安装或历史资产；Mac接续不重复操作生产和发行。
+
 本交接描述客户端0.6.2，并分开列出独立服务端0.5.2的接续边界。0.6.1 产品基线为 `88875908574d445d43a40f3eeb63013dcb31fb4b`；私有仓库后续交接基线为 `f05c8ea3ecc4e7836a92b9a2f0973ebae188f271`，其中只增加文档和 Mac 发行说明。获取包含本文的后续提交即可获得本次 0.6.2 源码，不能回退后续远端提交或已有本机工作。
 
 顶部拖动区域与登录按钮修复属于 **0.6.2**。云端逐库恢复、落盘即索引、单任务按库优先、启动/开库补索引及容量条无 title 属于 **0.6.1 既有行为**；本次只为其中一些边界补充测试，不把它们重新列为 0.6.2 新功能。旧交接保留在 [Windows 0.6.1 逐项交接](WINDOWS_0.6.1_HANDOFF.md)及[客户端 0.6.1 白名单](CLIENT_0.6.1_HANDOFF.md)。
 
-用户后续授权免费化和账号注销/可选资料导出，Mac/Windows同步；最新明确只做受影响定向测试，不做全量。下文C001–C027保留原细分归属，涉及执行完整矩阵的旧文字以本段覆盖。服务端允许源码0.5.2修改及推送，仍不允许生产操作。注销保留用户最新允许的最少邮箱/ID/时间记录。
+用户授权免费化和账号注销/可选资料导出，Mac/Windows同步，并重新要求完整复验。服务端0.5.2在本轮Windows维护中更新既有部署；Mac接续不重复部署。注销保留用户允许的最少邮箱/ID/时间记录。
 
 ## 1. 授权和保护范围
 
 - 唯一版本源为 `shared/package.json`，本次更新为 `0.6.2`。Windows 只生成根与 `windows/` 配置；`macos/package.json` 留在 0.6.1 是平台只读规则的预期结果，Mac 须自己同步生成配置。
-- 本次只推送逐文件核对的源码、测试、配置和交接到既有私有 `NCFXZ/VoxCue/main`。不发布 Windows/Mac 0.6.2，不修改 Latest、旧发行、旧草稿、模型资产或用户真实安装。上传安装包需要新的明确授权。
+- 本次推送逐文件核对的源码、测试、配置和交接到既有私有 `NCFXZ/VoxCue/main`；Windows本机完成验收后发行0.6.2并恢复现存草稿，Latest及历史资产保持。Mac安装包仍须Mac本机验收及对应发行授权。
 - Mac 上 `windows/` 全树只读，包括锁、原生产物、配置、测试和缓存。不要复制 Windows 锁或二进制，不从 Mac 运行 Windows C# 鼠标探针。
 - 固定 SDK/平台运行时 1.0.21、Codex 0.164.0、依赖/锁、模型、索引格式和 RAG v7 保持；Mac 原生红绿灯、SF Symbols、macOS 14.2/arm64，以及代码签名、凭据助手和 Ed25519 更新身份保持。
-- 用户另行授权独立服务端0.5.2的普通密码8–128、每用户备份空间设置、隔离定向测试及源码上传；其基线仍为43b6a973849bdc3c204d8434a21857b943048758，详见[独立接续](SERVER_0.5.2_HANDOFF.md)。不部署、不重启、不写生产、不操作真实管理员/邮件/DNS/云权限/支付；依赖与锁保持。`shared/server/`仅是忽略测试参考，不进入客户端Git或安装包。Mac先获取已交付的服务端0.5.2源码，不自行部署。
+- 独立服务端0.5.2的普通密码8–128、每用户备份空间、免费化和注销已获授权；基线仍为43b6a973849bdc3c204d8434a21857b943048758，详见[独立接续](SERVER_0.5.2_HANDOFF.md)。Windows本轮已在备份及恢复检查后更新既有部署，不操作真实用户或管理员/邮件/DNS/云权限；依赖与固定身份保持。`shared/server/`仅是忽略测试参考，不进入客户端Git或安装包。Mac先获取已交付的服务端0.5.2源码，不重复部署或写生产。
 - GUI/原生串行，须当前用户已登录且解锁的控制台。仅 owner 临时目录内的合成账号/资料/图片/捕获和固定公开临时模型/音频，不读真实凭据/原件、不采样物理音频；普通 UI 夹具禁止正式凭据助手。缺机器、真实账号、硬件或授权的项明确待验。
 - 结果仅终端/对话，不把测试报告、截图、日志、模型、profile、数据库、安装包或凭据保存进工作区。临时资源退出清理；清理先核对消费者、精确真实路径和占用，保护发行、恢复基线及历史跳过目录。
 
@@ -55,7 +57,7 @@ Windows 面试窗口在分数 DPI 下，`setBounds` 的物理像素包围取整�
 | C019 | 0.6.1云恢复/单任务索引保留。                   | 原逐库下载、a2屏障及索引顺序是0.6.1兼容边界；本轮只跑受影响共用定向，完整桌面夹具延期并如实待验。                                                         |
 | C020 | Windows 面试缩放预补偿及可选系统端口。         | 静态核对共用层可选端口和 Windows 实现；Mac 继续原 setBounds 分支。实际测试两角缩放、固定工具栏中心/顶部、转写隐藏/恢复和折叠，不能扩大原容差。                          |
 | C021 | 不透明设置弹层比较固定动画相位。               | `interview-ux-smoke.mjs`只在两张材质比较截图使用animations disabled，避免调色板恢复后的标题边线过渡混入比较；采样位置和零差异断言保持，实际产品动画及其他动画断言不改。 |
-| C022 | 原完整矩阵/临时包要求本轮延期。 | 用户最新取消全量，仅执行受影响定向、类型/架构及构建；完整矩阵、600秒音频、1800秒服务端长稳和临时包需新授权后再做，不拿旧成绩替代。 |
+| C022 | 完整复验及最后纯文案调整的边界。 | 本轮恢复了完整矩阵、600秒音频、1800秒服务端长稳及临时包验证；最后组件页仅改名，用户明确无需重复全量，单列文案核对和重新构建。Mac补齐原有未完成项，不将Windows成绩外推。 |
 | C023 | 普通账号密码校验Mac/Windows同步8–128。 | 注册及重置8–14与128成功；7/129拒绝，Unicode/NFC计数正确；旧短密码登录兼容，常见密码/原始1024限额不变。管理员仍15–128。 |
 | C024 | 注册密码/重置新密码提示均为“不少于8个字符”。 | 浅深色、五档缩放、正常/最小窗口实际目视文字完整、对齐；HTML minlength8，maxlength1024保留，不能截断128个emoji。 |
 | C025 | cloud-account单测及表单夹具更新边界。 | 新8–14/128接受、7/129拒绝及既有异常/取消/忙碌全部保持；原生按钮仍能点击，验证码限制不改。 |
@@ -79,13 +81,14 @@ Windows 面试窗口在分数 DPI 下，`setBounds` 的物理像素包围取整�
 | C039 | 本机清理及中断重试。 | 先停聊天/标题/索引/同步写入和AI授权消费者，再清浏览器存储及已知个人目录；保留公开模型、host-id/更新身份；确认后的中断重启继续清理。 |
 | C040 | 服务端全部付费与零时长清理移除。 | 旧路由404、旧数据库零时长字段不再触发删除；容量及全局资源限制、管理员安全保护继续有效。 |
 | C041 | v5最少注销记录及快照。 | 从v1–v4顺序迁移，新增closed_accounts；快照恢复含容量和注销记录，未来v6拒绝；只合成库，不迁移生产。 |
-| C042 | 定向测试、清理及源码分开交付。 | 仅本次受影响检查；Mac真实窗口/凭据/另存为/视觉独立补验，不把Windows成绩外推。不发行，不改Latest；测试产物不入Git。 |
+| C042 | 完整测试、清理及两仓分开交付。 | 全部本机功能、安全、对抗、背压、视觉和临时包；Mac真实窗口/凭据/另存为/视觉独立验证，不把Windows成绩外推。发行与生产状态分别核对，产物不入源码Git。 |
+| C043 | 本地组件页显示名称及说明调整。 | 三项为“轻量语音识别”“多语言语音识别”“知识库检索”；配套说明分别为“支持中文和英文，资源占用较低。”“支持多种语言和标点，适合配置较高的电脑。”“从导入的资料中查找与问题相关的内容。”。分组为“语音识别组件”“知识库检索组件”，无障碍及删除目标同源。仅显示文案，模型ID、资源、设置中的模型选择及业务保持；用户明确无需为此次改名重跑全量。 |
 
 ## 4. 本次客户端文件白名单
 
 以下仅源码、测试、配置与交接。产品比较从8887590（0.6.1实现）开始，交付增量从f05c8ea开始；0.6.1云恢复/索引本身不得记作新增。macos/和全部依赖锁无Windows改动；shared/server/为忽略参考，不入此清单。
 
-本次白名单共68项（含明确删除）。
+本次白名单共75项（含明确删除）。
 
 | 路径 | 状态/用途 |
 | --- | --- |
@@ -115,6 +118,7 @@ Windows 面试窗口在分数 DPI 下，`setBounds` 的物理像素包围取整�
 | `shared/src/components/AccountDeletionPanel.tsx` | 当前产品源码或生成版本配置 |
 | `shared/src/components/CloudAccountPanel.tsx` | 当前产品源码或生成版本配置 |
 | `shared/src/components/CloudUsagePanel.tsx` | 删除：已移除功能的专用实现或测试 |
+| `shared/src/components/ComponentsPanel.tsx` | 本地组件页显示名称及分组标题 |
 | `shared/src/components/FloatingInterview.tsx` | 当前产品源码或生成版本配置 |
 | `shared/src/components/InterviewUsageNotice.tsx` | 删除：已移除功能的专用实现或测试 |
 | `shared/src/components/LoginPage.tsx` | 当前产品源码或生成版本配置 |
@@ -131,12 +135,16 @@ Windows 面试窗口在分数 DPI 下，`setBounds` 的物理像素包围取整�
 | `shared/test/fixtures/install-primary-account.cjs` | 受影响行为/边界夹具 |
 | `shared/test/scripts/account-erasure-smoke.mjs` | 受影响行为/边界夹具 |
 | `shared/test/scripts/cloud-account-smoke.mjs` | 受影响行为/边界夹具 |
+| `shared/test/scripts/components-ui-smoke.mjs` | 同步本地组件页名称定位，断言及模型选择保留；最后改名后未重跑。 |
 | `shared/test/scripts/cloud-protocol-smoke.mjs` | 受影响行为/边界夹具 |
 | `shared/test/scripts/free-service-smoke.mjs` | 受影响行为/边界夹具 |
 | `shared/test/scripts/functional-suite.mjs` | 受影响行为/边界夹具 |
 | `shared/test/scripts/interview-quota-checks.mjs` | 删除：已移除功能的专用实现或测试 |
 | `shared/test/scripts/interview-ux-smoke.mjs` | 受影响行为/边界夹具 |
 | `shared/test/scripts/management-scrollbar-checks.mjs` | 受影响行为/边界夹具 |
+| `shared/test/scripts/settings-smoke.mjs` | 核对合并后的六类导航和账号内云备份，不降低几何与交互断言。 |
+| `shared/test/scripts/typography-smoke.mjs` | 浅深/窄窗口检查当前六类导航，账号页包含云备份。 |
+| `windows/test/scripts/interview-access-smoke.mjs` | 实际权限和内容检查同步当前六类导航，原有七项行为断言保持。 |
 | `shared/test/scripts/server-connection-smoke.mjs` | 只读核对线上旧0.5.1或隔离免费0.5.2的准确接口契约，保留严格认证及无写入边界。 |
 | `shared/test/scripts/password-policy-smoke.mjs` | 受影响行为/边界夹具 |
 | `shared/test/unit/account-archive.test.ts` | 受影响行为/边界夹具 |
@@ -154,16 +162,18 @@ Windows 面试窗口在分数 DPI 下，`setBounds` 的物理像素包围取整�
 | `windows/electron/presentation.ts` | 当前产品源码或生成版本配置 |
 | `windows/package.json` | 当前产品源码或生成版本配置 |
 | `windows/test/fixtures/WindowProbe.cs` | 受影响行为/边界夹具 |
+| `windows/test/scripts/interview-layout-smoke.mjs` | 核对开场AI余量标签，保留两列尺寸、顺序及原生窗口几何断言。 |
+| `windows/test/scripts/components-check.mjs` | 同步组件分组与删除目标名称，原有断言保留；最后改名后未重跑。 |
 | `windows/test/scripts/login-actions-native-smoke.mjs` | 受影响行为/边界夹具 |
 | `windows/test/scripts/presentation-native-smoke.mjs` | 受影响行为/边界夹具 |
 | `windows/test/scripts/windows-suite.mjs` | 受影响行为/边界夹具 |
 
 ## 5. Mac接续命令与边界
 
-先保留远端与未提交工作，阅读AGENTS、本文全部C001–C042及BACKPRESSURE。从仓库根运行node shared/scripts/sync-platform-manifests.mjs，只生成根/Mac，Windows只读。使用原锁frozen安装，运行pnpm run typecheck、pnpm run check:architecture、pnpm run build:shared及本文有关的单测/专项。系统ZIP用Mac自带ditto，须实际核对三目录及中文文件名；不得复制Windows压缩/原生UI探针。
+先保留远端与未提交工作，阅读AGENTS、本文全部C001–C043及BACKPRESSURE。从仓库根运行node shared/scripts/sync-platform-manifests.mjs，只生成根/Mac，Windows只读。使用原锁frozen安装，运行pnpm run typecheck、pnpm run check:architecture、pnpm run build:shared及本文有关的单测/专项。系统ZIP用Mac自带ditto，须实际核对三目录及中文文件名；不得复制Windows压缩/原生UI探针。
 
-服务端需从独立私有仓库获取0.5.2，再同步受控测试参考，不复制依赖、锁、产物或真实配置。线上0.5.1仍未部署新规则；真实注销、管理员容量与8–14密码上线属于另行授权边界。
+服务端需从独立私有仓库获取0.5.2，再同步受控测试参考，不复制依赖、锁、产物或真实配置。本轮Windows维护获准更新既有腾讯云0.5.1至0.5.2；Mac仅只读核对实际线上能力，不重复迁移或执行真实账号测试。
 
-本轮不执行默认全量、600秒/1800秒长稳或临时包。真实AI账号、系统授权撤销、物理音频和Mac本机视觉/原生无法由Windows代验。逐项在终端/对话记录ID、状态、实际步骤、断言、首次失败、修复复测。结果不写工作区报告；临时ZIP/模型/截图/profile退出清理。源码上传不授权发行、Latest、生产或真实安装操作。
+本轮完整执行当前平台的功能、安全、对抗、背压、600秒音频、五档DPI及临时包检查；服务端原1800秒长稳独立执行。真实AI账号、系统授权撤销、物理音频和Mac本机视觉/原生无法由Windows代验。逐项在终端/对话记录ID、状态、实际步骤、断言、首次失败、修复复测。结果不写工作区报告；临时ZIP/模型/截图/profile退出清理。本轮Windows发行/服务端部署按最新授权独立核对；Mac接续不重复发行或部署，不改Latest或真实安装。
 
-独立服务端已交付源码提交：`859eee114e9dcf7b20ac45cc476cff89e203fdb4`（0.5.2）；只接续源码，不执行生产部署。
+独立服务端已交付源码提交：`859eee114e9dcf7b20ac45cc476cff89e203fdb4`（0.5.2产品源码）；Mac接续不重复执行生产部署。

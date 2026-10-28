@@ -1,6 +1,6 @@
-# 当前0.6.2定向入口（最新用户范围）
+# 当前0.6.2验证入口（最新用户范围）
 
-用户已明确不做全量测试。以下脚本在当前平台目录单独运行，GUI/原生串行；不因此启动完整矩阵、600秒音频、1800秒服务端长稳或临时安装包。
+用户最新重新要求完整功能、安全、对抗、背压和UI验收。以下定向脚本之后执行当前平台完整矩阵、600秒音频、原生/五档DPI、依赖审计及临时安装包；服务端原1800秒长稳独立执行。GUI/原生串行且须解锁输入桌面，保留原断言/时长/限额。
 
 - node ../shared/test/scripts/password-policy-smoke.mjs：真实隔离API/密码哈希，注册8、重置8/14/128、拒绝7/129/NFC7，容量250→1→默认100 MB及无title保持。
 - node ../shared/test/scripts/free-service-smoke.mjs：官方AI5小时优先/0%/周额度回退，浅深色中性显示，真实面试开始/结束没有付费请求。
@@ -12,16 +12,16 @@
 
 # 当前测试入口（2026-10-28）
 
-密码与动态容量专项：在本平台目录运行 node ../shared/test/scripts/password-policy-smoke.mjs（已纳入共享51组）。使用真实隔离0.5.2 API和生产客户端窗口，注册8、重置8/14/128、拒绝7/129/NFC7，校验真实哈希及旧密码失效；两处提示准确为“不少于8个字符”。保持原始maxlength1024，支持128个非BMP字符。容量250→1→默认100 MB通过现有刷新按钮、容量条无障碍标签和IPC读取验证，不固定100 MB，不加title。仅合成账号/内存邮件，不发真实邮件或访问真实凭据。线上连接专项继续只读核对尚未更新的0.5.1契约。
+密码与动态容量专项：在本平台目录运行 node ../shared/test/scripts/password-policy-smoke.mjs（已纳入共享52组）。使用真实隔离0.5.2 API和生产客户端窗口，注册8、重置8/14/128、拒绝7/129/NFC7，校验真实哈希及旧密码失效；两处提示准确为“不少于8个字符”。保持原始maxlength1024，支持128个非BMP字符。容量250→1→默认100 MB通过现有刷新按钮、容量条无障碍标签和IPC读取验证，不固定100 MB，不加title。仅合成账号/内存邮件，不发真实邮件或访问真实凭据。线上连接专项继续只读核对已部署0.5.2的免费能力与认证契约。
 
 
-0.6.2的Windows登录原生命中入口为 `node test/scripts/login-actions-native-smoke.mjs`（在windows目录）：五档DPI×浅深色×正常/最小窗口，使用真实WM_NCHITTEST和自有窗口鼠标事件，核对顶部72px全宽条带可拖动、标题/表单/预览不拖动，以及找回密码、注册/重置发码、返回登录、输入校验和60秒重发保护。账号端口完全合成离线，不读真实凭据、不发邮件。该项已加入Windows完整原生矩阵，当前16组；共享功能51组、原DPI矩阵70组保持。Mac条带默认隐藏，原生红绿灯和拖动行为不变，须Mac本机验收，见[0.6.2交接](../docs/MACOS_0.6.2_HANDOFF.md)。
+0.6.2的Windows登录原生命中入口为 `node test/scripts/login-actions-native-smoke.mjs`（在windows目录）：五档DPI×浅深色×正常/最小窗口，使用真实WM_NCHITTEST和自有窗口鼠标事件，核对顶部72px全宽条带可拖动、标题/表单/预览不拖动，以及找回密码、注册/重置发码、返回登录、输入校验和60秒重发保护。账号端口完全合成离线，不读真实凭据、不发邮件。该项已加入Windows完整原生矩阵，当前16组；共享功能52组、原DPI矩阵70组保持。Mac条带默认隐藏，原生红绿灯和拖动行为不变，须Mac本机验收，见[0.6.2交接](../docs/MACOS_0.6.2_HANDOFF.md)。
 
 本轮云数据/同步/索引新增用例验证0.6.1已有语义的安全边界、4MiB缓存及释放、重启后父级关系、60秒冷却/256项上限、懒读/替换、状态事件和交叠扫描；test-workspace强杀恢复对象在活跃owner下隔离，保留原回收断言。执行结果仅终端，临时资源退出清理。
 
 0.6.1追加云恢复与索引背压：`knowledge-smoke.mjs`用两库四文件的交错云端条目验证逐库下载、单文件落盘即索引及启动/开库补索引；`knowledge-reconcile.test.ts`覆盖80份原件的重复请求、交错多库队列、100次合并状态读取、删除/替换及退出取消。始终单任务索引，不等待尚未下载的同库文件；已排队文件按当前知识库优先。云容量条与图例不再有原生title悬停提示。Mac悬停夹具先聚焦精确的自有窗口，动画采样等待实际有限过渡完成，原颜色/圆角/透明度断言保持。以上仅说明入口与覆盖范围，执行结果不写入工作区。
 
-客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含51个shared组（Mac默认再加15组，合计66组；package另验）：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.1连接、云同步及配额到期保存、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
+客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含52个shared组（Mac默认再加15组，合计67组；package另验）：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.2连接、云同步、免费服务及账号注销/资料导出、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
 
 cloud-account-smoke.mjs从忽略的shared/server参考启动独立临时数据库及合成邮件端口；本次参考接续用户另行授权的服务端0.5.2，不再套用0.5.1指纹。服务端源码、测试和上传单独管理，见[0.5.2接续](../docs/SERVER_0.5.2_HANDOFF.md)，不进入客户端Git或包，不操作生产。`server-connection-smoke.mjs` 只读验证线上HTTPS契约、未认证保护、支付关闭及客户端清理合成无效令牌，不发邮件。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
 
@@ -33,11 +33,10 @@ Mac `node test/scripts/cloud-native-vault-smoke.mjs`使用两个固定签名Elec
 
 Mac `node test/scripts/cloud-form-lifecycle-smoke.mjs`另外验证真实React表单的busy锁/重复提交、模式清理及卸载后挑战/错误迟到隔离。只替换异步store端口和装饰图标；不导入生产main、不访问凭据或网络，也不当作原生图标/视觉验收。它是独立行为专项，未计入默认66组。
 
-列表/侧栏布局与额度摘要专项：在平台目录执行 `node ../shared/test/scripts/cloud-account-smoke.mjs --scrollbars`，覆盖面试记录与知识库列表的浅深色、1280/960窗口、滚动首尾/滚轮、详情转写/回答侧栏、知识库文档、最小窗口侧栏及开合宽度，以及确认页14/15分钟/永久额度的实际颜色与首行对齐。使用本轮隔离合成数据与音频端口，不访问真实资料或硬件。
+列表/侧栏布局与额度摘要专项：在平台目录执行 `node ../shared/test/scripts/cloud-account-smoke.mjs --scrollbars`，覆盖面试记录与知识库列表的浅深色、1280/960窗口、滚动首尾/滚轮、详情转写/回答侧栏、知识库文档、最小窗口侧栏及开合宽度，以及确认页AI工具剩余用量的实际颜色与首行对齐。使用本轮隔离合成数据与音频端口，不访问真实资料或硬件。
 
-面试额度预警与保存专项：`node ../shared/test/scripts/cloud-account-smoke.mjs --interview-quota`（本平台目录、Node 24）。运行真实本机账号/扣时服务与隔离产品窗口，用合成时钟、语音和图片覆盖5分钟提示、60/59/1秒切换、收起窗口提示、耗尽时尾段保存、空记录、写盘失败保留及重试、到期IPC拒绝，以及Mac Control+S（⌃S）/Windows Alt+S截图。`--preview`仅额外生成本轮临时合成画面；退出清理，不连接真实账号、不采样硬件。
 
-邮箱账号专项：客户端从忽略参考导入src，以新临时SQLite和内存邮件验证；用户追加授权的独立服务端源码及完整测试范围见0.5.2接续，不部署或写生产。`cloud-protocol-smoke.mjs`验证register/reset挑战隔离、真实429、旧非NFC短密码、单次refresh轮换及100→101→100MB后的分类限制。桌面入口包括cloud-account、cloud-sync、cloud-data、cloud-usage-store和cloud-lease单元测试。实际界面为shared/test/scripts/cloud-account-smoke.mjs（Node 24）；--login-check只检查登录表单，默认检查三类同步、知识库满额时JD删改及保留本地文件的云端删除，--preview额外检查浅深主题、窄窗口、设置顺序和图标几何。使用隔离本机服务、内存邮件与合成AI/组件状态；不连接真实账户、不使用真实资料或采样硬件，也不将模型可用性替身作为推理验收。退出清理临时输出。服务端边界见[只读参考](../docs/SERVER_0.5.1_REFERENCE.md)。
+邮箱账号专项：客户端从忽略参考导入src，以新临时SQLite和内存邮件验证；用户追加授权的独立服务端源码及完整测试范围见0.5.2接续，本轮已部署既有腾讯云0.5.2；合成测试不操作真实账号。`cloud-protocol-smoke.mjs`验证register/reset挑战隔离、真实429、旧非NFC短密码、单次refresh轮换及100→101→100MB后的分类限制。桌面入口包括cloud-account、cloud-sync、cloud-data、account-archive和account-usage-summary单元测试。实际界面为shared/test/scripts/cloud-account-smoke.mjs（Node 24）；--login-check只检查登录表单，默认检查三类同步、知识库满额时JD删改及保留本地文件的云端删除，--preview额外检查浅深主题、窄窗口、设置顺序和图标几何。使用隔离本机服务、内存邮件与合成AI/组件状态；不连接真实账户、不使用真实资料或采样硬件，也不将模型可用性替身作为推理验收。退出清理临时输出。服务端边界见[只读参考](../docs/SERVER_0.5.1_REFERENCE.md)。
 
 0.5.11 的 `chatgpt-usage-runtime` 使用仅接收不应答的本机代理和有效期内的合成令牌，要求五秒内完成官方令牌交接，防止立即拒绝代理掩盖重复强制续期。Mac 子进程的 sandbox 只允许该次自有 loopback 端口，外网继续禁止；`macos/test/scripts/chatgpt-renewal-smoke.mjs` 另做旧强制续期对照、临近过期/过期的官方续期、续期失败、重复读取、退出与迟到结果，并检查其他端口/外网被拒绝。最终 Mac ASAR 的 `package-runtimes-smoke` 复用该夹具；Windows ASAR 保留 `package-runtimes-check`。全部仅合成凭据，固定 Copilot/Codex 实际解包路径和系统凭据隔离保持。方案见 [Mac 0.5.11 交接](../docs/MACOS_0.5.11_HANDOFF.md)，Windows 本轮结果见 [验收](../docs/WINDOWS_0.5.11_VERIFICATION.md)。
 

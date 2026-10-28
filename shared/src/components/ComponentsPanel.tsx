@@ -6,19 +6,18 @@ import { ActionTransition } from './ActionTransition';
 import { Download, Refresh, Loader } from './icons';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import type { ComponentState } from '../../electron/contracts/components';
-import { speechModelLabels } from '../../electron/contracts/speechSettings';
 
 const size = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
 const modelInfo = {
   speech: {
-    label: speechModelLabels.paraformer,
-    description: '轻量中英流式识别，使用 CPU，资源占用较低。',
+    label: '轻量语音识别',
+    description: '支持中文和英文，资源占用较低。',
   },
   qwen: {
-    label: speechModelLabels.qwen,
-    description: '多语言流式识别，支持标点，硬件要求较高。',
+    label: '多语言语音识别',
+    description: '支持多种语言和标点，适合配置较高的电脑。',
   },
-  rag: { label: 'multilingual-e5-small', description: '将资料转换为向量，用于知识库检索。' },
+  rag: { label: '知识库检索', description: '从导入的资料中查找与问题相关的内容。' },
 } as const;
 export function ComponentsPanel() {
   const { state, error, run } = useComponents();
@@ -102,14 +101,14 @@ export function ComponentsPanel() {
         </p>
       )}
       {speechModels.length > 0 && (
-        <section className="component-group" aria-label="本地语音模型">
-          <h3>本地语音模型</h3>
+        <section className="component-group" aria-label="语音识别组件">
+          <h3>语音识别组件</h3>
           {speechModels.map((item) => renderItem(item))}
         </section>
       )}
       {knowledgeModels.length > 0 && (
-        <section className="component-group" aria-label="知识库模型">
-          <h3>知识库模型</h3>
+        <section className="component-group" aria-label="知识库检索组件">
+          <h3>知识库检索组件</h3>
           {knowledgeModels.map((item) => renderItem(item))}
         </section>
       )}

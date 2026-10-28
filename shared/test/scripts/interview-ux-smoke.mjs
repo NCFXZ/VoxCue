@@ -986,9 +986,12 @@ try {
   // Palette restoration can start a header-border transition after the first
   // style flush. Compare the same animation phase in both shots; the unchanged
   // background must not differ merely because that border advances a frame.
+  // Compare native pixels: CSS-size screenshots resample fractional DPI and
+  // can round channels differently after recompositing an unrelated layer.
+  // The same CSS rectangle and zero-difference assertion remain unchanged.
   const covered = await floating.screenshot({
     clip: opaqueSample,
-    scale: 'css',
+    scale: 'device',
     animations: 'disabled',
   });
   await floating.locator('.floating-panels').evaluate((e) => {
@@ -996,7 +999,7 @@ try {
   });
   const changedBackground = await floating.screenshot({
     clip: opaqueSample,
-    scale: 'css',
+    scale: 'device',
     animations: 'disabled',
   });
   await floating.locator('.floating-panels').evaluate((e) => {

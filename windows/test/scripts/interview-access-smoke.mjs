@@ -212,15 +212,7 @@ try {
     .getByRole('navigation', { name: '设置分类' })
     .getByRole('button', { name: '个性化', exact: true })
     .click();
-  for (const name of [
-    'VoxCue 账号',
-    '云同步',
-    'AI 服务',
-    '本地组件',
-    '面试设置',
-    '个性化',
-    '关于与更新',
-  ]) {
+  for (const name of ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新']) {
     await settings.getByRole('button', { name, exact: true }).click();
     assert.equal(/mock|模拟/i.test(await settings.innerText()), false);
   }

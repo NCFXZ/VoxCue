@@ -69,7 +69,20 @@ try {
   };
   await open();
   await category('个性化').click();
-  assert.equal(await settings.getByRole('navigation').getByRole('button').count(), 7);
+  assert.deepEqual(
+    await settings
+      .getByRole('navigation', { name: '设置分类' })
+      .getByRole('button')
+      .allTextContents(),
+    ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新'],
+  );
+  await category('VoxCue 账号').click();
+  await settings.getByRole('region', { name: '云同步', exact: true }).waitFor();
+  await settings.getByRole('button', { name: '立即同步', exact: true }).waitFor();
+  await settings.getByRole('button', { name: '刷新容量', exact: true }).waitFor();
+  await settings.getByRole('button', { name: '删除账号', exact: true }).waitFor();
+  await geometry();
+  await category('个性化').click();
   assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
   const themeMenu = settings.getByRole('button', { name: '外观主题', exact: true });
   for (let attempt = 0; attempt < 3; attempt++) {

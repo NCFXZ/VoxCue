@@ -405,7 +405,6 @@ try {
     assert.equal(await settings.getByRole('button', { name: '知识库', exact: true }).count(), 0);
     for (const category of [
       'VoxCue 账号',
-      '云同步',
       'AI 服务',
       '本地组件',
       '面试设置',
@@ -530,7 +529,6 @@ try {
     .click();
   for (const category of [
     'VoxCue 账号',
-    '云同步',
     'AI 服务',
     '本地组件',
     '面试设置',

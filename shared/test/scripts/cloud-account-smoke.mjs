@@ -106,6 +106,11 @@ try {
   );
   const panel = page.getByRole('region', { name: 'VoxCue 账号' });
   await panel.locator('form').waitFor();
+  assert.equal(
+    await app.evaluate(({ ipcMain }) => ipcMain._invokeHandlers.has('cloud:usage')),
+    false,
+    'Retired interview licensing IPC must not be registered',
+  );
   assert.deepEqual(
     await app.evaluate(async ({ ipcMain, BrowserWindow }) => {
       // Invoke the actual registered guards with foreign frame identities.
@@ -126,7 +131,7 @@ try {
         }
       return results;
     }),
-    Array(6).fill(true),
+    Array(4).fill(true),
   );
   assert.deepEqual(
     await page.evaluate(async () => {
@@ -144,8 +149,8 @@ try {
         ),
       ]);
     }),
-    [true, true],
-    'The login window cannot access sync or quota IPC',
+    [true],
+    'The login window cannot access sync IPC',
   );
   if (loginCheck)
     console.log(
@@ -411,7 +416,7 @@ try {
           .getByRole('navigation', { name: '设置分类' })
           .locator('button')
           .allTextContents(),
-        ['VoxCue 账号', '云同步', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新'],
+        ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新'],
       );
       await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
       assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);
@@ -1001,7 +1006,7 @@ try {
             await settings
               .getByRole('menuitemradio', { name: dark ? '深色' : '浅色', exact: true })
               .click();
-            for (const category of ['VoxCue 账号', '云同步', 'AI 服务', '面试设置', '关于与更新']) {
+            for (const category of ['VoxCue 账号', 'AI 服务', '面试设置', '关于与更新']) {
               await settings.getByRole('button', { name: category, exact: true }).click();
               await settings.getByRole('heading', { name: category, exact: true }).hover();
               await main.waitForTimeout(300);

@@ -233,7 +233,7 @@ try {
     rows.map((row) => row.title),
     [
       '面试知识库',
-      '剩余面试时长',
+      'AI 工具剩余用量',
       '面试官 · 系统音频',
       '面试者 · 麦克风',
       '语音模型',
@@ -251,7 +251,7 @@ try {
   assert.ok(rows[0].y < rows[2].y && rows[2].y < rows[4].y && rows[4].y < rows[6].y);
   await confirmation.screenshot({});
   checks.push(
-    'start dialog: paired knowledge/quota, audio, actual speech/device and answer model/effort rows',
+    'start dialog: paired knowledge/AI usage, audio, actual speech/device and answer model/effort rows',
   );
   const [floating] = await Promise.all([
     app.waitForEvent('window'),

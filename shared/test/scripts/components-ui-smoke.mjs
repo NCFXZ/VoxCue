@@ -180,14 +180,14 @@ try {
     .getByRole('button', { name: '本地组件', exact: true })
     .click();
   const rows = settings.locator('.component-row');
-  const speechGroup = settings.getByRole('region', { name: '本地语音模型', exact: true });
-  const knowledgeGroup = settings.getByRole('region', { name: '知识库模型', exact: true });
+  const speechGroup = settings.getByRole('region', { name: '语音识别组件', exact: true });
+  const knowledgeGroup = settings.getByRole('region', { name: '知识库检索组件', exact: true });
   assert.equal(await knowledgeGroup.locator('.component-row').count(), 1);
-  await knowledgeGroup.getByText('multilingual-e5-small', { exact: true }).waitFor();
-  await speechGroup.getByText('Paraformer 中英 INT8', { exact: true }).waitFor();
-  assert.equal(await speechGroup.getByText('知识库模型', { exact: true }).count(), 0);
+  await knowledgeGroup.getByText('知识库检索', { exact: true }).waitFor();
+  await speechGroup.getByText('轻量语音识别', { exact: true }).waitFor();
+  assert.equal(await speechGroup.getByText('知识库检索组件', { exact: true }).count(), 0);
   if (['win32', 'darwin'].includes(process.platform))
-    await speechGroup.getByText('Qwen3-ASR 0.6B', { exact: true }).waitFor();
+    await speechGroup.getByText('多语言语音识别', { exact: true }).waitFor();
   for (const name of await rows.locator('.component-model-name').all())
     assert.equal(await name.evaluate((element) => getComputedStyle(element).fontWeight), '400');
   if (!modelsOnly) {
@@ -663,7 +663,7 @@ try {
         .getByRole('button', { name: '本地组件', exact: true })
         .click();
       const download = rows
-        .filter({ hasText: 'Qwen3-ASR 0.6B' })
+        .filter({ hasText: '多语言语音识别' })
         .getByRole('button', { name: '下载', exact: true });
       assert.equal(await download.isEnabled(), true);
       assert.equal(await settings.getByRole('button', { name: '不支持', exact: true }).count(), 0);
@@ -720,8 +720,8 @@ try {
       .getByRole('button', { name: '本地组件', exact: true })
       .click();
     const qwenRow = settings.locator('.component-row[data-component-id="qwen"]');
-    await qwenRow.getByRole('button', { name: '删除：Qwen3-ASR 0.6B', exact: true }).click();
-    await qwenRow.getByRole('button', { name: '确认删除：Qwen3-ASR 0.6B', exact: true }).click();
+    await qwenRow.getByRole('button', { name: '删除：多语言语音识别', exact: true }).click();
+    await qwenRow.getByRole('button', { name: '确认删除：多语言语音识别', exact: true }).click();
     await qwenRow.getByRole('button', { name: '下载', exact: true }).waitFor();
     await page.waitForFunction(() => {
       const value = JSON.parse(localStorage.getItem('copilot-interview-settings-v1'));
@@ -773,10 +773,10 @@ try {
       .click();
     const paraformerRow = settings.locator('.component-row[data-component-id="speech"]');
     await paraformerRow
-      .getByRole('button', { name: '删除：Paraformer 中英 INT8', exact: true })
+      .getByRole('button', { name: '删除：轻量语音识别', exact: true })
       .click();
     await paraformerRow
-      .getByRole('button', { name: '确认删除：Paraformer 中英 INT8', exact: true })
+      .getByRole('button', { name: '确认删除：轻量语音识别', exact: true })
       .click();
     await paraformerRow.getByRole('button', { name: '下载', exact: true }).waitFor();
     await page.waitForFunction(() => {

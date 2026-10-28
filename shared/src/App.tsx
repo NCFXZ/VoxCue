@@ -16,8 +16,6 @@ import { useUpdates } from './stores/updates';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
 import { useHistory } from './stores/history';
-import { Button } from './components/ui/button';
-import { X } from './components/icons';
 import { SettingsDialog, type Theme, type SettingsCategory } from './components/SettingsDialog';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');

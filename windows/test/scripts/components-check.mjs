@@ -125,7 +125,7 @@ export async function checkComponents(application) {
   let settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
   assert.equal(await settings.locator('.component-row').count(), 3);
-  const speechGroup = settings.getByRole('region', { name: '本地语音模型', exact: true });
+  const speechGroup = settings.getByRole('region', { name: '语音识别组件', exact: true });
   assert.equal(await speechGroup.locator('.component-row').count(), 2);
   for (const dark of [false, true]) {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
@@ -233,7 +233,7 @@ export async function checkComponents(application) {
     undefined,
     { timeout: 180000 },
   );
-  await rag.getByRole('button', { name: '删除：multilingual-e5-small', exact: true }).waitFor();
+  await rag.getByRole('button', { name: '删除：知识库检索', exact: true }).waitFor();
   assert.equal(await rag.getByText('已就绪', { exact: true }).count(), 0);
   assert.match(await rag.innerText(), /85\.0 MB/);
   assert.doesNotMatch(await settings.innerText(), /MiB/);
@@ -255,7 +255,7 @@ export async function checkComponents(application) {
     undefined,
     { timeout: 180000 },
   );
-  await speech.getByRole('button', { name: '删除：Paraformer 中英 INT8', exact: true }).waitFor();
+  await speech.getByRole('button', { name: '删除：轻量语音识别', exact: true }).waitFor();
   assert.equal(await speech.getByText('已就绪', { exact: true }).count(), 0);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await start.isEnabled(), true);
