@@ -118,7 +118,7 @@ try {
       () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
     );
     const locator = draggable
-      ? login.getByRole('heading', { name: '登录 VoxCue', exact: true })
+      ? login.locator('.login-drag-region')
       : login.getByRole('button', { name: '登录', exact: true });
     const box = await locator.boundingBox();
     assert.ok(box);

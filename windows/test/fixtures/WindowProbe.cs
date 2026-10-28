@@ -11,6 +11,11 @@ using System.Windows.Automation;
 // This probe is compiled only into an owned temporary test directory.
 class WindowProbe {
   [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int x,y;public uint data,flags,time;public UIntPtr extra; }
+  [StructLayout(LayoutKind.Sequential)] struct KeyboardInput { public ushort key,scan;public uint flags,time;public UIntPtr extra; }
+  [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)]public MouseInput mouse;[FieldOffset(0)]public KeyboardInput keyboard; }
+  [StructLayout(LayoutKind.Sequential)] struct Input { public uint type;public InputUnion value; }
+  [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,Input[] inputs,int size);
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] static extern IntPtr OpenInputDesktop(uint flags,bool inherit,uint access);
@@ -26,12 +31,33 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
+  delegate bool EnumWindowProc(IntPtr window,IntPtr data);
+  [DllImport("user32.dll")] static extern bool EnumWindows(EnumWindowProc callback,IntPtr data);
+  [DllImport("user32.dll")] static extern uint GetWindowThreadProcessId(IntPtr window,out uint process);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetClassNameW(IntPtr window,StringBuilder name,int count);
+  [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern int GetWindowTextW(IntPtr window,StringBuilder name,int count);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr FindWindowW(string cls,string title);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern IntPtr LoadImageW(IntPtr instance,string name,uint type,int cx,int cy,uint flags);
   [DllImport("user32.dll")] static extern bool DestroyIcon(IntPtr icon);
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string file,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window,int attribute,out int value,int bytes);
   static void Print(object value) { Console.WriteLine(new JavaScriptSerializer().Serialize(value)); }
+  static Input Key(ushort key,ushort scan,uint flags) {return new Input{type=1,value=new InputUnion{keyboard=new KeyboardInput{key=key,scan=scan,flags=flags}}};}
+  static void TypeSavePath(IntPtr dialog,string path) {
+    if(GetAncestor(GetForegroundWindow(),2)!=dialog)throw new Exception("Refusing keyboard input outside owned save dialog");
+    var input=new List<Input>{Key(17,0,0),Key(65,0,0),Key(65,0,2),Key(17,0,2)};
+    foreach(char c in path){input.Add(Key(0,c,4));input.Add(Key(0,c,6));}
+    input.Add(Key(13,0,0));input.Add(Key(13,0,2));
+    var all=input.ToArray();if(SendInput((uint)all.Length,all,Marshal.SizeOf(typeof(Input)))!=(uint)all.Length)
+      throw new Exception("Owned save dialog keyboard input was not accepted");
+  }
+  static void CaptureDialog(AutomationElement dialog,string file) {
+    var rect=dialog.Current.BoundingRectangle;
+    using(var bitmap=new Bitmap((int)rect.Width,(int)rect.Height))using(var graphics=Graphics.FromImage(bitmap)) {
+      graphics.CopyFromScreen((int)rect.X,(int)rect.Y,0,0,bitmap.Size);
+      bitmap.Save(file,System.Drawing.Imaging.ImageFormat.Png);
+    }
+  }
   static string HashIcon(Icon icon) {
     using(var bitmap=icon.ToBitmap()) using(var sha=SHA256.Create()) {
       var bytes=new byte[bitmap.Width*bitmap.Height*4];int i=0;
@@ -44,6 +70,7 @@ class WindowProbe {
   }
   [STAThread] static int Main(string[] args) {
     try {
+      Console.OutputEncoding=new UTF8Encoding(false);
       SetProcessDPIAware();
       SetThreadDpiAwarenessContext(new IntPtr(-4));
       if(args[0]=="exclusive") {
@@ -56,6 +83,49 @@ class WindowProbe {
         var handle=OpenInputDesktop(0,false,1);if(handle==IntPtr.Zero)throw new Exception("Input desktop unavailable");
         try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Point cursor;bool readable=GetCursorPos(out cursor);Print(new{interactive=name.ToString()=="Default"&&readable,inputDesktop=name.ToString(),cursorReadable=readable});}
         finally{CloseDesktop(handle);}return 0;
+      }
+      if(args[0]=="save-dialog") {
+        int processId=int.Parse(args[1]);
+        var ownerWindow=args.Length>3?new IntPtr(long.Parse(args[3])):IntPtr.Zero;
+        var condition=new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty,processId),
+          new PropertyCondition(AutomationElement.NameProperty,"\u4fdd\u5b58\u8d26\u53f7\u8d44\u6599"));
+        AutomationElement dialog=null;var deadline=DateTime.UtcNow.AddSeconds(12);
+        do {
+          IntPtr native=IntPtr.Zero;
+          EnumWindows((handle,data)=>{uint pid;GetWindowThreadProcessId(handle,out pid);if(pid==(uint)processId||(ownerWindow!=IntPtr.Zero&&GetAncestor(handle,3)==ownerWindow)){
+            var name=new StringBuilder(256);GetClassNameW(handle,name,name.Capacity);
+            if(name.ToString()=="#32770"&&IsWindowVisible(handle)){native=handle;return false;}}
+            return true;},IntPtr.Zero);
+          if(native!=IntPtr.Zero){dialog=AutomationElement.FromHandle(native);break;}
+          Thread.Sleep(100);
+        }while(DateTime.UtcNow<deadline);
+        if(dialog==null){
+          var owned=AutomationElement.RootElement.FindAll(TreeScope.Children,new PropertyCondition(AutomationElement.ProcessIdProperty,processId));
+          var names=new List<string>();foreach(AutomationElement candidate in owned)names.Add(candidate.Current.Name+" ["+candidate.Current.ClassName+"]");
+          throw new Exception("Owned native save dialog not found: "+String.Join(" | ",names));
+        }
+        bool cancel=args[2]=="cancel";
+        if(!cancel) {
+          if(!System.IO.Path.IsPathRooted(args[2]))throw new Exception("Absolute synthetic save path required");
+          var edit=dialog.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,"1001"));
+          if(edit==null)throw new Exception("Native filename edit not found");
+          edit.SetFocus();
+          var value=(ValuePattern)edit.GetCurrentPattern(ValuePattern.Pattern);value.SetValue(args[2]);
+          if(value.Current.Value!=args[2])throw new Exception("Native filename did not accept the selected path");
+        }
+        var button=dialog.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,cancel?"2":"1"));
+        if(button==null)throw new Exception("Native save/cancel button not found");
+        if(args.Length>4)CaptureDialog(dialog,args[4]);
+        string title=dialog.Current.Name;var dialogHandle=new IntPtr(dialog.Current.NativeWindowHandle);
+        if(cancel)((InvokePattern)button.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
+        else TypeSavePath(dialogHandle,args[2]);
+        var closeDeadline=DateTime.UtcNow.AddSeconds(5);
+        while(IsWindowVisible(dialogHandle)&&DateTime.UtcNow<closeDeadline)Thread.Sleep(50);
+        if(IsWindowVisible(dialogHandle)){
+          if(args.Length>4)CaptureDialog(dialog,args[4]+".after.png");
+          throw new Exception("Owned save dialog did not close after action");
+        }
+        Print(new{nativeSaveDialog=true,canceled=cancel,title});return 0;
       }
       if(args[0]=="cursor") {Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Print(new{x=p.X,y=p.Y});return 0;}
       if(args[0]=="move") {

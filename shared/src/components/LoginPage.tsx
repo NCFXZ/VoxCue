@@ -6,6 +6,7 @@ export function LoginPage() {
   const [mode, setMode] = useState<'login' | 'register' | 'reset'>('login');
   return (
     <main className="login-page">
+      <div className="login-drag-region" aria-hidden="true" />
       <div className="login-card">
         <section className="login-form">
           <div className="login-brand">

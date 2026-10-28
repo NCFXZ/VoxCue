@@ -3,14 +3,21 @@ import { IDBFactory } from 'fake-indexeddb';
 import { localKnowledge } from '../../src/services/knowledge';
 import { useKnowledgeIndex } from '../../src/stores/knowledgeIndex';
 import { useKnowledge } from '../../src/stores/knowledge';
-import type { KnowledgeCall, KnowledgeDocument } from '../../electron/contracts/knowledge';
+import type {
+  KnowledgeCall,
+  KnowledgeDocument,
+  KnowledgeStatus,
+} from '../../electron/contracts/knowledge';
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.stubGlobal('window', { dispatchEvent: () => true });
   useKnowledgeIndex.setState({ state: null, tasks: {}, requests: {}, error: null });
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+});
 
 async function originals(baseId: string, count: number) {
   await localKnowledge.saveBase({ id: baseId, name: baseId, createdAt: 1 });
@@ -30,6 +37,7 @@ function engine() {
   let active = 0,
     maximum = 0;
   let beforeImport: (() => Promise<void>) | undefined;
+  let listener: ((status: KnowledgeStatus) => void) | undefined;
   const knowledge = vi.fn(async (call: KnowledgeCall) => {
     if (call.op === 'status')
       return { ok: true, value: { documents: [...indexed.values()], tasks: [], modelReady: true } };
@@ -52,12 +60,23 @@ function engine() {
   });
   vi.stubGlobal('window', {
     dispatchEvent: () => true,
-    desktop: { knowledge, onKnowledgeEvent: () => () => {} },
+    desktop: {
+      knowledge,
+      onKnowledgeEvent: (callback: typeof listener) => {
+        listener = callback;
+        return () => {
+          listener = undefined;
+        };
+      },
+    },
   });
   return {
     indexed,
     imported,
     knowledge,
+    emit(status: KnowledgeStatus) {
+      listener?.(status);
+    },
     get maximum() {
       return maximum;
     },
@@ -142,6 +161,7 @@ it('startup repairs missing/unavailable indexes; opening a library checks only t
 it('queued deletions are skipped and replacements use their latest committed bytes', async () => {
   const docs = await originals('edits', 3);
   const f = engine();
+  const readBytes = vi.spyOn(Blob.prototype, 'arrayBuffer');
   let release!: () => void;
   const held = new Promise<void>((r) => {
     release = r;
@@ -153,6 +173,7 @@ it('queued deletions are skipped and replacements use their latest committed byt
   });
   const work = docs.map((doc) => useKnowledgeIndex.getState().index(doc));
   await vi.waitFor(() => expect(entered).toBe(true));
+  expect(readBytes).toHaveBeenCalledTimes(1);
   await localKnowledge.deleteDocument(docs[1].id);
   await localKnowledge.importDocuments('edits', [new File(['replacement'], docs[2].name)]);
   release();
@@ -161,6 +182,48 @@ it('queued deletions are skipped and replacements use their latest committed byt
     { id: docs[0].id, text: await docs[0].blob.text() },
     { id: docs[2].id, text: 'replacement' },
   ]);
+});
+
+it('failed revisions respect the exact cooldown boundary, explicit force and committed replacements', async () => {
+  const [original] = await originals('cooldown', 1);
+  const f = engine();
+  f.before(async () => {
+    throw Error('synthetic failure');
+  });
+  let now = 100_000;
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const imports = () =>
+    f.knowledge.mock.calls.map(([call]) => call).filter((call) => call.op === 'import');
+  await useKnowledgeIndex.getState().index(original);
+  now += 59_999;
+  await useKnowledgeIndex.getState().reconcile('cooldown');
+  expect(imports()).toHaveLength(1);
+  now++;
+  await useKnowledgeIndex.getState().reconcile('cooldown');
+  expect(imports()).toHaveLength(2);
+  await useKnowledgeIndex.getState().index(original, true);
+  expect(imports()).toHaveLength(3);
+  await localKnowledge.importDocuments('cooldown', [new File(['updated'], original.name)]);
+  await useKnowledgeIndex.getState().reconcile('cooldown');
+  expect(imports()).toHaveLength(4);
+  expect(new TextDecoder().decode(imports().at(-1)!.bytes)).toBe('updated');
+});
+
+it('failed-attempt retention is bounded to 256 revisions without blocking newer files', async () => {
+  const docs = await originals('bounded-failures', 257);
+  const f = engine();
+  f.before(async () => {
+    throw Error('synthetic failure');
+  });
+  const imports = () => f.knowledge.mock.calls.filter(([call]) => call.op === 'import');
+  await Promise.all(docs.map((doc) => useKnowledgeIndex.getState().index(doc)));
+  expect(imports()).toHaveLength(257);
+  expect(f.maximum).toBe(1);
+  await useKnowledgeIndex.getState().index(docs.at(-1)!);
+  expect(imports()).toHaveLength(257);
+  await useKnowledgeIndex.getState().index(docs[0]);
+  expect(imports()).toHaveLength(258);
+  expect((await localKnowledge.listDocuments('bounded-failures')).length).toBe(257);
 });
 
 it('status refreshes share one request and repeated scans back off after an index failure', async () => {
@@ -193,6 +256,73 @@ it('status refreshes share one request and repeated scans back off after an inde
   await useKnowledgeIndex.getState().reconcile();
   expect(imports).toBe(1);
   expect((await localKnowledge.listDocuments('failure')).length).toBe(1);
+});
+
+it('status reads retain queued replacements and old request events cannot overwrite them', async () => {
+  const [original] = await originals('events', 1);
+  const f = engine();
+  let release!: () => void,
+    entered = false;
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  f.before(async () => {
+    entered = true;
+    await held;
+  });
+  const disconnect = useKnowledgeIndex.getState().connect();
+  try {
+    const first = useKnowledgeIndex.getState().index(original);
+    await vi.waitFor(() => expect(entered).toBe(true));
+    const oldRequest = useKnowledgeIndex.getState().requests[original.id];
+    await localKnowledge.importDocuments('events', [new File(['replacement'], original.name)]);
+    const [replacement] = await localKnowledge.listDocuments('events');
+    const next = useKnowledgeIndex.getState().index(replacement);
+    const currentRequest = useKnowledgeIndex.getState().requests[original.id];
+    expect(currentRequest).not.toBe(oldRequest);
+    const queued = useKnowledgeIndex.getState().tasks[original.id];
+    f.emit({
+      documentId: original.id,
+      requestId: oldRequest,
+      phase: 'embedding',
+      completed: 1,
+      total: 2,
+    });
+    await useKnowledgeIndex.getState().refresh();
+    expect(useKnowledgeIndex.getState().tasks[original.id]).toEqual(queued);
+    expect(useKnowledgeIndex.getState().requests[original.id]).toBe(currentRequest);
+    release();
+    await Promise.all([first, next]);
+    expect(f.imported.map((doc) => doc.text)).toEqual(['original 0', 'replacement']);
+    expect(useKnowledgeIndex.getState().requests).toEqual({});
+    expect(f.maximum).toBe(1);
+  } finally {
+    release();
+    disconnect();
+  }
+});
+
+it('an open-library check after a running global scan also repairs originals received during that scan', async () => {
+  await originals('scan-a', 1);
+  const f = engine();
+  let release!: () => void,
+    entered = false;
+  const held = new Promise<void>((r) => {
+    release = r;
+  });
+  f.before(async () => {
+    entered = true;
+    await held;
+  });
+  const global = useKnowledgeIndex.getState().reconcile();
+  await vi.waitFor(() => expect(entered).toBe(true));
+  await localKnowledge.importDocuments('scan-a', [new File(['arrived during scan'], 'late.txt')]);
+  const narrow = useKnowledgeIndex.getState().reconcile('scan-a');
+  expect(useKnowledgeIndex.getState().reconcile('scan-a')).toBe(narrow);
+  release();
+  await Promise.all([global, narrow]);
+  expect(f.imported.map((doc) => doc.text)).toEqual(['original 0', 'arrived during scan']);
+  expect(f.maximum).toBe(1);
 });
 
 it('a replacement during an active import gets one subsequent job with current bytes', async () => {

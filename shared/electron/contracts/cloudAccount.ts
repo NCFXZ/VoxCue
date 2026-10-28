@@ -1,4 +1,4 @@
-export const CLOUD_PASSWORD_MIN = 15;
+export const CLOUD_PASSWORD_MIN = 8;
 export const CLOUD_PASSWORD_MAX = 128;
 /** Preserve spaces and symbols; reject malformed UTF-16 rather than silently replacing bytes. */
 export function normalizeCloudPassword(value: unknown): string | undefined {
@@ -50,6 +50,7 @@ export interface CloudSession {
 }
 export type CloudAccountCall =
   | { action: 'status' | 'logout' | 'sessions' }
+  | { action: 'delete'; password: string; confirm: 'DELETE' }
   | { action: 'code'; email: string; purpose: 'register' | 'reset' }
   | { action: 'login'; email: string; password: string }
   | {

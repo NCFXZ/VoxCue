@@ -9,6 +9,8 @@ const shared = [
   'web-materials',
   'ui-material-refinement',
   'login',
+  'password-policy',
+  'account-erasure',
   'copilot-login',
   'copilot-runtime',
   'chatgpt-single-login',
@@ -50,7 +52,7 @@ const shared = [
   'adversarial',
   'cloud-account',
   'cloud-protocol',
-  'cloud-quota',
+  'free-service',
   'management-scrollbars',
   'server-connection',
   'interview-stability',
@@ -148,11 +150,8 @@ try {
             path.join(directory, 'speech-soak.mjs'),
             '--seconds=600',
           ]
-        : name === 'cloud-quota' || name === 'management-scrollbars'
-          ? [
-              path.join(directory, 'cloud-account-smoke.mjs'),
-              name === 'cloud-quota' ? '--interview-quota' : '--scrollbars',
-            ]
+        : name === 'management-scrollbars'
+          ? [path.join(directory, 'cloud-account-smoke.mjs'), '--scrollbars']
           : [path.join(directory, name + '-smoke.mjs')],
       {
         cwd: workspace.platformRoot,

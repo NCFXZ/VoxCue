@@ -10,7 +10,6 @@ export const interviewLayout = {
   minimumScale: 0.75,
   collapsedWidth: 420,
   collapsedHeight: 72,
-  collapsedNoticeHeight: 64,
 } as const;
 
 export function interviewPanelWidth(transcriptVisible = true) {
@@ -22,18 +21,11 @@ export function interviewPanelScale(width: number, transcriptVisible = true) {
   return Math.max(0, (width - fixedWidth) / interviewPanelWidth(transcriptVisible));
 }
 
-export function interviewCanvas(
-  transcriptVisible = true,
-  collapsed = false,
-  scale = 1,
-  usageNotice = false,
-) {
+export function interviewCanvas(transcriptVisible = true, collapsed = false, scale = 1) {
   return collapsed
     ? {
         width: interviewLayout.collapsedWidth,
-        height:
-          interviewLayout.collapsedHeight +
-          (usageNotice ? interviewLayout.collapsedNoticeHeight : 0),
+        height: interviewLayout.collapsedHeight,
       }
     : {
         width:
@@ -56,7 +48,6 @@ export function fitInterviewBounds(
   desiredScale: number,
   transcriptVisible = true,
   collapsed = false,
-  usageNotice = false,
 ) {
   const fixed = interviewCanvas(transcriptVisible, false, 0);
   const originalCenter = anchor.x + anchor.width / 2;
@@ -73,9 +64,7 @@ export function fitInterviewBounds(
       anchor.y,
       area.y +
         area.height -
-        (collapsed
-          ? interviewCanvas(transcriptVisible, true, 1, usageNotice).height
-          : fixed.height),
+        (collapsed ? interviewCanvas(transcriptVisible, true, 1).height : fixed.height),
     ),
   );
   const maximum = Math.max(
@@ -89,7 +78,7 @@ export function fitInterviewBounds(
     Math.min(interviewLayout.minimumScale, maximum),
     Math.min(desiredScale, maximum),
   );
-  const canvas = interviewCanvas(transcriptVisible, collapsed, scale, usageNotice);
+  const canvas = interviewCanvas(transcriptVisible, collapsed, scale);
   const width = Math.min(Math.floor(availableWidth), Math.round(canvas.width)),
     height = Math.min(area.height, Math.round(canvas.height));
   // Symmetric integer deltas avoid accumulating a pixel on hide/show cycles.

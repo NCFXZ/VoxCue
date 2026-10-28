@@ -31,11 +31,6 @@ import { FollowLatestButton } from './FollowLatestButton';
 import { MarkdownContent } from './MarkdownContent';
 import { ResponseProgress } from './ResponseProgress';
 import { InterviewAudioRecovery } from './InterviewAudioRecovery';
-import { InterviewUsageNotice } from './InterviewUsageNotice';
-import {
-  hasInterviewUsageNotice,
-  type InterviewUsageState,
-} from '../../electron/contracts/cloudUsage';
 import { InterviewSettingsPanel } from './InterviewSettingsPanel';
 import { InterviewReadiness } from './InterviewReadiness';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
@@ -88,8 +83,6 @@ export function FloatingInterview() {
   }, [collapsed, macScreenshotShortcut]);
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [ending, setEnding] = useState(false);
-  const [usage, setUsage] = useState<InterviewUsageState | null>();
-  const quotaEnding = useRef(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
   const [resizing, setResizing] = useState(false);
@@ -256,30 +249,7 @@ export function FloatingInterview() {
     [],
   );
   useEffect(() => {
-    let active = true,
-      ready = false,
-      pendingExpiry: string | undefined;
-    const endForUsage = (message: string) => {
-      pendingExpiry = message;
-      if (!ready || quotaEnding.current) return;
-      quotaEnding.current = true;
-      setError(message);
-      setEnding(true);
-      void useInterview
-        .getState()
-        .end({ preserveEmpty: true, generateTitle: false })
-        .then(() => {
-          const saveError = useHistory.getState().error;
-          if (saveError) setError(saveError);
-          else window.desktop?.confirmInterviewEnd();
-        })
-        .catch(() => setError('本场面试已停止，记录尚未保存，请保留窗口后重试。'))
-        .finally(() => {
-          if (active) setEnding(false);
-        });
-    };
-    const unsubscribeQuota = window.desktop?.onCloudUsageExpired?.(endForUsage);
-    const unsubscribeUsage = window.desktop?.onInterviewUsage?.(setUsage);
+    let active = true;
     void window.desktop
       ?.interviewState()
       .then((value) => {
@@ -287,11 +257,7 @@ export function FloatingInterview() {
         setProtected(value.protected);
         setCollapsed(value.collapsed);
         setShowTranscript(value.transcriptVisible);
-        setUsage(value.usage);
         useInterview.getState().initialize(value.configuration);
-        ready = true;
-        if (pendingExpiry || value.usage?.state === 'expired')
-          endForUsage(pendingExpiry || '面试计时已结束，正在保存本次面试记录。');
       })
       .catch(() => setError('无法读取已确认的面试设置，请结束面试后重试。'));
     const media = matchMedia('(prefers-color-scheme: dark)');
@@ -322,8 +288,6 @@ export function FloatingInterview() {
       window.removeEventListener('storage', theme);
       window.removeEventListener('beforeunload', archive);
       unsubscribeEnd?.();
-      unsubscribeQuota?.();
-      unsubscribeUsage?.();
     };
   }, []);
   async function toggleCapture() {
@@ -341,9 +305,7 @@ export function FloatingInterview() {
     if (ending) return;
     setEnding(true);
     try {
-      await state.end(
-        quotaEnding.current ? { preserveEmpty: true, generateTitle: false } : undefined,
-      );
+      await state.end();
       if (!useHistory.getState().error) window.desktop?.confirmInterviewEnd();
     } finally {
       setEnding(false);
@@ -866,9 +828,8 @@ export function FloatingInterview() {
             {resizeHandle('right')}
           </>
         )}
-        {(!collapsed || hasInterviewUsageNotice(usage)) && (
+        {!collapsed && (
           <footer className="floating-notices" aria-label="面试状态提示">
-            <InterviewUsageNotice usage={usage} saved={state.status === 'ended'} />
             {!collapsed && !protectedWindow && (
               <div className="floating-warning floating-capture-notice" role="status">
                 此窗口未隐藏

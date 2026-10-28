@@ -46,6 +46,9 @@ async function syncDatabase<T>(userId: string, value?: SyncSaved): Promise<T> {
     };
   });
 }
+export async function readAccountSyncSaved(userId: string) {
+  return readSyncSaved(await syncDatabase(userId));
+}
 let engine: CloudSyncEngine | undefined;
 let generation = 0;
 let activeUserId: string | undefined;

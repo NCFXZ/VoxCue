@@ -48,9 +48,8 @@ import { ResponseProgress } from './ResponseProgress';
 import { ChatSources } from './ChatSources';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
+import { accountUsageSummary } from '../services/accountUsageSummary';
 import { useModelProvider } from './useModelProvider';
-import { useCloudUsage } from '../stores/cloudUsage';
-import { isLowInterviewCredit } from '../../electron/contracts/cloudUsage';
 const audioAccessLabels = {
   granted: '可用',
   denied: '未授权',
@@ -79,7 +78,6 @@ export function PreparationPage({
   const state = usePreparation();
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
-  const quota = useCloudUsage();
   const interviewSettings = useInterviewSettings();
   const selectedSpeechComponent = speechComponent(interviewSettings.configuration.options);
   const speechReady = useComponentReady(selectedSpeechComponent);
@@ -264,7 +262,6 @@ export function PreparationPage({
     setInterviewDevices([]);
     setInterviewConfiguration(configuration);
     setConfirmInterview(true);
-    void useCloudUsage.getState().run({ action: 'status' });
     void checkAccess(configuration);
   };
   const audioName = (source: 'system' | 'microphone') => {
@@ -447,16 +444,14 @@ export function PreparationPage({
               <dt>面试知识库</dt>
               <dd>{interviewKnowledgeName}</dd>
             </div>
-            <div className="interview-start-quota">
-              <dt>剩余面试时长</dt>
-              <dd className={isLowInterviewCredit(quota.value) ? 'interview-quota-low' : undefined}>
-                {quota.value
-                  ? quota.value.permanent
-                    ? '永久额度'
-                    : `${Math.floor(quota.value.remainingSeconds! / 3600)} 小时 ${Math.floor((quota.value.remainingSeconds! % 3600) / 60)} 分钟`
-                  : quota.error
-                    ? '面试额度暂不可用'
-                    : '正在读取…'}
+            <div>
+              <dt>AI 工具剩余用量</dt>
+              <dd>
+                {!connection.live
+                  ? '未连接 AI 工具'
+                  : connection.loadingUsage
+                    ? '正在读取…'
+                    : accountUsageSummary(connection.usage)}
               </dd>
             </div>
             <div>

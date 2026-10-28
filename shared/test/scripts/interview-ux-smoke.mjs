@@ -983,11 +983,22 @@ try {
   // Sample only the panel's inner padding: text antialiasing may differ by one
   // channel value when Chromium recomposites an unrelated filtered layer.
   const opaqueSample = { x: settingsBox.x + 8, y: settingsBox.y + 60, width: 8, height: 120 };
-  const covered = await floating.screenshot({ clip: opaqueSample, scale: 'css' });
+  // Palette restoration can start a header-border transition after the first
+  // style flush. Compare the same animation phase in both shots; the unchanged
+  // background must not differ merely because that border advances a frame.
+  const covered = await floating.screenshot({
+    clip: opaqueSample,
+    scale: 'css',
+    animations: 'disabled',
+  });
   await floating.locator('.floating-panels').evaluate((e) => {
     e.style.filter = 'invert(1)';
   });
-  const changedBackground = await floating.screenshot({ clip: opaqueSample, scale: 'css' });
+  const changedBackground = await floating.screenshot({
+    clip: opaqueSample,
+    scale: 'css',
+    animations: 'disabled',
+  });
   await floating.locator('.floating-panels').evaluate((e) => {
     e.style.removeProperty('filter');
   });

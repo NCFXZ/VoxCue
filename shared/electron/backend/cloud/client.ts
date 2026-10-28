@@ -31,6 +31,7 @@ export class CloudFailure extends Error {
     message: string,
     readonly status = 0,
     readonly retryAfterSeconds?: number,
+    readonly code?: unknown,
   ) {
     super(message);
   }
@@ -49,10 +50,6 @@ const messages: Record<string, string> = {
   knowledge_capacity: '云端剩余空间不足，请清理不需要的云端数据后重试。',
   storage_capacity: '云端剩余空间不足，请清理不需要的云端数据后重试。',
   revision_conflict: '两端数据都有更新，请选择要保留的版本。',
-  retention_expired: '面试额度连续为零已满30天，云端数据已停止保留。',
-  insufficient_credit: '面试额度已用完，请先在 VoxCue 账号设置中兑换面试额度。',
-  session_active: '其他设备已有面试正在计时，请先结束该场面试。',
-  invalid_activation: '激活码无效或已失效。',
 };
 const safeMessage = (code: unknown, fallback: string) =>
   typeof code === 'string' && Object.hasOwn(messages, code) ? messages[code] : fallback;
@@ -192,9 +189,12 @@ export class CloudAccountClient {
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
-    if (response.status === 401) await this.clear();
+    if (response.status === 401 && route !== '/v1/account/delete') await this.clear();
     const reader = response.body?.getReader();
-    if (!reader) throw new Failure('服务器响应无效。');
+    if (!reader) {
+      if (response.status === 401) await this.clear();
+      throw new Failure('服务器响应无效。');
+    }
     let size = 0;
     const parts: Uint8Array[] = [];
     try {
@@ -206,20 +206,35 @@ export class CloudAccountClient {
         parts.push(chunk.value);
       }
     } catch (error) {
+      if (response.status === 401) await this.clear();
       await reader.cancel().catch(() => {});
       throw error;
     } finally {
       reader.releaseLock();
     }
-    const result = record(JSON.parse(Buffer.concat(parts).toString('utf8')));
+    let result: Record<string, unknown>;
+    try {
+      result = record(JSON.parse(Buffer.concat(parts).toString('utf8')));
+    } catch (error) {
+      if (response.status === 401) await this.clear();
+      throw error;
+    }
     if (!response.ok) {
-      const code = record(result.error).code;
+      let code: unknown;
+      try {
+        code = record(result.error).code;
+      } catch (error) {
+        if (response.status === 401) await this.clear();
+        throw error;
+      }
+      if (response.status === 401 && code !== 'invalid_credentials') await this.clear();
       if (response.status === 403 && code === 'account_disabled') await this.clear();
       const retry = Number(response.headers.get('retry-after'));
       throw new Failure(
         safeMessage(code, '服务暂不可用，请稍后重试。'),
         response.status,
         Number.isFinite(retry) && retry > 0 ? Math.min(retry, 3600) : undefined,
+        code,
       );
     }
     return result;
@@ -261,7 +276,12 @@ export class CloudAccountClient {
     try {
       return await this.request(route, method, body, token);
     } catch (error) {
-      if (error instanceof Failure && error.status === 401) await this.clear();
+      if (
+        error instanceof Failure &&
+        error.status === 401 &&
+        !(route === '/v1/account/delete' && error.code === 'invalid_credentials')
+      )
+        await this.clear();
       throw error;
     }
   }
@@ -428,6 +448,25 @@ export class CloudAccountClient {
           return { ok: true, state: this.state(), message: '密码已重置，请重新登录。' };
         }
         await this.save(result);
+      } else if (action === 'delete') {
+        if (
+          call.confirm !== 'DELETE' ||
+          !text(call.password, 1024) ||
+          normalizeCloudPassword(call.password) === undefined
+        )
+          throw new Failure('请输入当前密码并确认删除。');
+        const caps = await this.request('/v1/capabilities');
+        if (caps.accountDeletion !== 'account-erasure-v1')
+          throw new Failure('服务器尚未支持永久删除账号，请更新服务端后重试。');
+        const response = await this.authorized('/v1/account/delete', 'POST', {
+          password: call.password,
+          confirm: 'DELETE',
+        });
+        if (response.deleted !== true) throw new Failure('服务器未确认账号删除，请联系支持。');
+        // A local vault I/O failure must not hide an irreversible server confirmation.
+        // Main retires all writers and retries the complete local erasure using its persisted marker.
+        await this.clear().catch(() => {});
+        return { ok: true, state: this.state(), message: '账号已删除。' };
       } else if (action === 'sessions') {
         const result = await this.authorized('/v1/account/sessions');
         if (!Array.isArray(result.sessions) || result.sessions.length > 8)

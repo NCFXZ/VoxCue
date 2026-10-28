@@ -1,4 +1,4 @@
-import { nativeTheme } from 'electron';
+import { nativeTheme, screen } from 'electron';
 import type { BrowserWindow } from 'electron';
 import type { NativePresentation } from '../../shared/electron/presentation';
 
@@ -20,6 +20,21 @@ export function createPresentation(options: {
     initialize() {},
     setTheme: (theme) => {
       nativeTheme.themeSource = theme;
+    },
+    resizeInterview(win, bounds) {
+      // Predict the HWND's enclosing-pixel round trip before changing it. A
+      // second corrective resize would still expose a frame with a shifted
+      // toolbar at fractional DPI.
+      const rounded = screen.screenToDipRect(win, screen.dipToScreenRect(win, bounds));
+      win.setBounds(
+        {
+          x: 2 * bounds.x - rounded.x,
+          y: 2 * bounds.y - rounded.y,
+          width: 2 * bounds.width - rounded.width,
+          height: 2 * bounds.height - rounded.height,
+        },
+        false,
+      );
     },
     moveInterview(win, bounds) {
       // setPosition reads rounded DIP dimensions back into setBounds. At

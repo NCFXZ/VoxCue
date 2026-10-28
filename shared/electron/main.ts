@@ -28,9 +28,9 @@ import { ManagedChatGPTAuth } from './backend/auth/managed';
 import { createAuthStorage } from './backend/auth/storage';
 import { CloudAccountClient, cloudOrigin } from './backend/cloud/client';
 import { createCloudVault } from './backend/cloud/vault';
-import { InterviewLease } from './backend/cloud/lease';
-import { hasInterviewUsageNotice } from './contracts/cloudUsage';
 import { CloudSyncClient } from './backend/cloud/sync';
+import { AccountArchive } from './backend/accountArchive';
+import { accountErasureMarker, eraseLocalAccount } from './backend/accountErasure';
 import { ChatGPTService } from './backend/chat/service';
 import { CodexUsageRuntime } from './backend/chat/codexUsage';
 import { ChatGPTAccountUsage } from './backend/chat/accountUsage';
@@ -100,9 +100,7 @@ let speech: SpeechHost | undefined;
 let speechSessions: SpeechCoordinator | undefined;
 const interviewContext = new InterviewContext();
 let demoSession = false;
-let accountLease: InterviewLease | undefined;
-let quotaEndMessage: string | null = null;
-let interviewUsageNotice = false;
+let erasingAccount = false;
 
 let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
@@ -177,11 +175,11 @@ if (desktopPlatform.appUserModelId) app.setAppUserModelId(desktopPlatform.appUse
 function interviewActive() {
   return interviewOpening || !!interviewWindow || !!speechSessions?.configuration;
 }
-async function prepareUpdateInstall(accountLogout = false) {
+async function prepareUpdateInstall(accountLogout = false, deletingAccount = false) {
   const win = mainWindow;
   if (!win || win.isDestroyed() || pendingMainClose || mainCloseChecking)
     throw Error('Window is not ready');
-  if (sessionHasContent) {
+  if (sessionHasContent && !deletingAccount) {
     mainCloseChecking = true;
     try {
       const { response } = await dialog.showMessageBox(win, {
@@ -257,7 +255,6 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
     scale,
     interviewTranscriptVisible,
     interviewCollapsed,
-    interviewUsageNotice,
   );
   if (!interviewCollapsed)
     interviewScale = interviewPanelScale(bounds.width, interviewTranscriptVisible);
@@ -270,7 +267,8 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
       same(previous, lastInterviewBounds.actual))
   )
     return;
-  win.setBounds(bounds, false);
+  if (nativePresentation?.resizeInterview) nativePresentation.resizeInterview(win, bounds);
+  else win.setBounds(bounds, false);
   lastInterviewBounds = { requested: bounds, actual: win.getBounds() };
 }
 const pinningInterviews = new WeakSet<BrowserWindow>();
@@ -386,7 +384,6 @@ function openInterview() {
     interviewMove = undefined;
     interviewWindow = null;
     interviewMousePassthrough = false;
-    void accountLease?.stop();
     speechSessions?.releaseInterview(true);
     updates?.refresh();
     interviewIpc?.cancel();
@@ -523,7 +520,27 @@ function createMainWindow() {
     interviewWindow?.close();
   });
 }
-app.whenReady().then(() => {
+app.whenReady().then(async () => {
+  const eraseBrowser = async () => {
+    await session.defaultSession.clearStorageData();
+    await session.defaultSession.clearCache();
+    await session.defaultSession.clearAuthCache();
+  };
+  const erasureFile = path.join(app.getPath('userData'), accountErasureMarker);
+  if (existsSync(erasureFile)) {
+    try {
+      const pending = JSON.parse(await readFile(erasureFile, 'utf8'));
+      if (pending.committed === true)
+        await eraseLocalAccount(app.getPath('userData'), eraseBrowser);
+    } catch {
+      dialog.showErrorBox(
+        '本机账号资料尚未清理完成',
+        '请关闭占用资料的程序后重新打开 VoxCue。应用会继续清理，暂不载入资料。',
+      );
+      app.exit(1);
+      return;
+    }
+  }
   const speechHardware = new SpeechHardwareProbe(
     resources.audioHelper,
     desktopPlatform.id,
@@ -632,28 +649,73 @@ app.whenReady().then(() => {
     vault: createCloudVault(credentialEncryption),
     deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
   });
+  let accountArchive: AccountArchive;
   handleDesktop('cloud:account', async (event, call) => {
     if (
       ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
       event.senderFrame !== event.sender.mainFrame
     )
       throw Error('Unauthorized window');
+    if (erasingAccount) throw Error('账号资料正在清理。');
+    if (call?.action === 'delete' && event.sender !== mainWindow?.webContents)
+      throw Error('Unauthorized window');
     const leaving =
       call?.action === 'logout' ||
+      call?.action === 'delete' ||
       (call?.action === 'revoke' && cloudAccount.isCurrentSession(call.sessionId));
     if (leaving && mainWindow) {
       if (interviewActive())
         return { ok: false as const, state: cloudAccount.snapshot(), error: '请先结束面试。' };
-      if (!(await prepareUpdateInstall(true)))
+      if (!(await prepareUpdateInstall(true, call.action === 'delete')))
         return { ok: false as const, state: cloudAccount.snapshot(), error: '已取消退出。' };
     }
+    if (call?.action === 'delete') {
+      // Prove persistence is writable before the irreversible server operation.
+      await writeFile(erasureFile, JSON.stringify({ committed: false }), { mode: 0o600 });
+      await accountArchive.cancel();
+      knowledgeCoordinator?.cancelAll();
+      historyJobs?.cancelAll();
+      chatIpc?.cancelActive();
+      await knowledge.close();
+    }
     const result = await cloudAccount.call(call);
+    if (call?.action === 'delete' && !result.ok)
+      await import('node:fs/promises').then((fs) => fs.rm(erasureFile, { force: true }));
     if (leaving && !result.ok) {
       mainCloseApproved = false;
       mainCloseFlushed = false;
     }
     if (result.ok && result.state.user && ['login', 'register'].includes(call.action))
       createMainWindow();
+    if (result.ok && call.action === 'delete') {
+      erasingAccount = true;
+      await writeFile(erasureFile, JSON.stringify({ committed: true }), { mode: 0o600 });
+      // Retire all writers before clearing browser databases. A persisted marker retries interrupted cleanup at startup.
+      setTimeout(() => {
+        void (async () => {
+          mainCloseApproved = mainCloseFlushed = true;
+          mainWindow?.destroy();
+          loginWindow?.destroy();
+          interviewWindow?.destroy();
+          auth.cancel();
+          copilotAuth.cancel();
+          interviewIpc?.cancel();
+          await auth.signOut();
+          if (await copilotAuth.session()) await copilotAuth.signOut();
+          await codexUsageRuntime.stop();
+          await copilotRuntime.stop();
+          await eraseLocalAccount(app.getPath('userData'), eraseBrowser);
+          app.relaunch();
+          app.exit(0);
+        })().catch(() => {
+          dialog.showErrorBox(
+            '账号已删除，本机清理尚未完成',
+            '请关闭占用资料的程序后重新打开 VoxCue。应用会继续清理，暂不载入资料。',
+          );
+          app.exit(1);
+        });
+      }, 0);
+    }
     if (
       result.ok &&
       !result.state.user &&
@@ -666,39 +728,6 @@ app.whenReady().then(() => {
       createLoginWindow();
     }
     return result;
-  });
-  accountLease = new InterviewLease(
-    cloudAccount,
-    (message) => {
-      interviewIpc?.cancel();
-      quotaEndMessage =
-        accountLease?.snapshot()?.reason === 'exhausted'
-          ? '面试额度已用完，本次面试记录已保存在本机。'
-          : '计时连接已失效，面试已结束，本次面试记录已保存在本机。';
-      // Stop collection immediately, but retain the confirmed configuration and
-      // forward the final decoded tail before the renderer archives and closes.
-      void speechSessions
-        ?.interview({ op: 'stop' })
-        .catch(() => speechSessions?.releaseInterview());
-      if (interviewWindow && !interviewWindow.isDestroyed())
-        sendDesktop(interviewWindow.webContents, 'cloud:usage-expired', message);
-    },
-    undefined,
-    (state) => {
-      const notice = hasInterviewUsageNotice(state);
-      if (notice !== interviewUsageNotice) {
-        interviewUsageNotice = notice;
-        if (interviewCollapsed && interviewWindow && !interviewWindow.isDestroyed())
-          sizeInterview(interviewScale);
-      }
-      if (interviewWindow && !interviewWindow.isDestroyed())
-        sendDesktop(interviewWindow.webContents, 'interview:usage', state);
-    },
-  );
-  handleDesktop('cloud:usage', (event, call) => {
-    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
-      throw Error('Unauthorized window');
-    return accountLease!.call(call);
   });
   const cloudSync = new CloudSyncClient(cloudAccount, async (id, bytes, preview) => {
     await interviewImages.save([{ id, preview, file: { bytes, name: 'screenshot.png' } }]);
@@ -979,6 +1008,33 @@ app.whenReady().then(() => {
   const interviewImages = new InterviewImageStore(
     path.join(app.getPath('userData'), 'interview-images-v1'),
   );
+  accountArchive = new AccountArchive({
+    userData: app.getPath('userData'),
+    image: (id) => interviewImages.original(id),
+    async choose() {
+      if (!mainWindow || mainWindow.isDestroyed()) throw Error('账号窗口已关闭。');
+      const result = await dialog.showSaveDialog(mainWindow, {
+        title: '保存账号资料',
+        defaultPath: path.join(app.getPath('documents'), 'VoxCue资料.zip'),
+        filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+      });
+      return result.canceled ? undefined : result.filePath;
+    },
+  });
+  app.once('will-quit', (event) => {
+    if (!accountArchive.hasWork()) return;
+    event.preventDefault();
+    void accountArchive.dispose().finally(() => app.quit());
+  });
+  handleDesktop('account:data', (event, call) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame || erasingAccount)
+      throw Error('Unauthorized window');
+    if (interviewActive()) return { ok: false as const, error: '请先结束面试再保存资料。' };
+    const user = cloudAccount.snapshot().user;
+    if (!user) return { ok: false as const, error: '请先登录 VoxCue 账号。' };
+    return accountArchive.call(event.sender.id + ':' + user.id, call);
+  });
   registerInterviewImageIpc({
     store: interviewImages,
     requireMain,
@@ -1008,7 +1064,6 @@ app.whenReady().then(() => {
     chat: ragChat,
     requireInterview(event) {
       requireInterview(event);
-      if (!demoSession) accountLease!.assertActive();
     },
     isDemo: () => demoSession,
     configuration: () => speechSessions?.configuration,
@@ -1166,7 +1221,6 @@ app.whenReady().then(() => {
     )
       return speech!.call(call);
     requireInterview(event);
-    if (call.op === 'start' && !demoSession) accountLease!.assertActive();
     return speechSessions!.interview(call);
   });
   handleDesktop('dictation:call', (event, value: unknown) => {
@@ -1182,7 +1236,6 @@ app.whenReady().then(() => {
   });
   handleDesktop('interview:reconnect-audio', async (event, options) => {
     requireInterview(event);
-    if (!demoSession) accountLease!.assertActive();
     const validated = validateSpeech({
       op: 'start',
       options: options ?? speechSessions?.configuration?.options,
@@ -1253,12 +1306,9 @@ app.whenReady().then(() => {
       }
       await speechSessions!.confirm(configuration);
       try {
-        quotaEndMessage = null;
-        if (!demoSession) await accountLease!.start();
         openInterview();
       } catch (error) {
         speechSessions!.releaseInterview(true);
-        await accountLease?.stop();
         throw error;
       }
     } finally {
@@ -1275,7 +1325,6 @@ app.whenReady().then(() => {
       collapsed: interviewCollapsed,
       transcriptVisible: interviewTranscriptVisible,
       configuration: speechSessions!.configuration!,
-      usage: accountLease?.snapshot(),
     };
   });
   handleDesktop('interview:capture', (event, allowed: unknown) => {
@@ -1419,10 +1468,6 @@ app.whenReady().then(() => {
       return;
     interviewCloseApproved = true;
     interviewWindow.close();
-    if (quotaEndMessage && mainWindow && !mainWindow.isDestroyed()) {
-      sendDesktop(mainWindow.webContents, 'cloud:usage-expired', quotaEndMessage);
-      quotaEndMessage = null;
-    }
   });
   onDesktop('interview:mouse-passthrough', (event, ...args: unknown[]) => {
     if (
@@ -1482,6 +1527,7 @@ app.whenReady().then(() => {
   });
 });
 app.on('window-all-closed', () => {
+  if (erasingAccount) return;
   if (desktopPlatform.quitOnAllWindowsClosed) app.quit();
 });
 app.on('before-quit', (event) => {

@@ -2497,22 +2497,6 @@ p {
   font-size: var(--type-body);
   border-radius: 20px;
 }
-.interview-end-notice {
-  position: fixed;
-  z-index: 30;
-  bottom: 20px;
-  left: 50%;
-  transform: translateX(-50%);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  max-width: calc(100% - 32px);
-  padding: 8px 12px 8px 18px;
-  border-radius: 20px;
-  background: var(--surface);
-  box-shadow: 0 4px 16px #0003;
-  font-size: var(--type-body);
-}
 @media (max-width: 1050px) {
   .login-page {
     padding: 0;
@@ -3781,10 +3765,6 @@ p {
   color: var(--foreground);
   overflow-wrap: anywhere;
 }
-.interview-start-summary .interview-quota-low,
-.user-info .interview-quota-low {
-  color: var(--danger);
-}
 .interview-start-dialog .interview-start-description {
   font-size: var(--type-body);
   margin-top: 16px;
@@ -4155,14 +4135,6 @@ details[open] > summary > .disclosure-chevron {
 }
 .floating-error {
   color: var(--danger);
-}
-.floating-usage-notice {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.interview-remaining-time {
-  font-variant-numeric: tabular-nums;
 }
 .floating-warning {
   color: #91620d;
@@ -7098,6 +7070,25 @@ svg[data-ui-icon] {
   grid-template-columns: minmax(340px, 0.94fr) minmax(0, 1fr);
   padding: 12px;
 }
+.login-drag-region {
+  display: none;
+}
+.custom-window-controls.login-shell .login-page {
+  position: relative;
+  /* A page-wide no-drag rectangle would also subtract the top strip. */
+  -webkit-app-region: initial;
+}
+.custom-window-controls.login-shell .login-page :is(.login-copy, .login-preview *) {
+  -webkit-app-region: no-drag;
+}
+.custom-window-controls.login-shell .login-drag-region {
+  display: block;
+  position: absolute;
+  inset: 0 0 auto;
+  height: 72px;
+  z-index: 2;
+  -webkit-app-region: drag;
+}
 .login-shell .login-form {
   position: relative;
   display: grid;
@@ -7329,22 +7320,6 @@ svg[data-ui-icon] {
 .ai-service-actions > button {
   min-width: 76px;
 }
-.settings-content-body > .cloud-account-panel + .account-quota-section {
-  margin-top: 20px;
-  padding-top: 0;
-}
-.account-quota-section .settings-entry {
-  padding-top: 8px;
-}
-.account-quota-section .cloud-account-form {
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 12px;
-}
-.account-quota-section .cloud-account-form > button {
-  height: var(--control-height);
-  min-width: 90px;
-}
 svg.ui-loader {
   animation: conversation-spin 1s linear infinite;
   transform-origin: center;
@@ -7476,7 +7451,44 @@ svg.ui-loader {
   .ai-service-row {
     align-items: flex-start;
   }
-  .account-quota-section .cloud-account-form {
-    grid-template-columns: minmax(0, 1fr);
-  }
+}
+.account-delete-ack {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 20px;
+}
+.account-delete-ack input {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+.cloud-sync-actions {
+  justify-content: flex-end;
+}
+.account-deletion-panel {
+  border-top: 1px solid var(--border);
+  margin-top: 24px;
+}
+.account-delete-dialog {
+  width: min(560px, calc(100vw - 32px));
+}
+.account-delete-dialog .modal-footer {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+.account-delete-dialog .account-delete-warning {
+  margin: 0 0 12px;
+  font-weight: 600;
+}
+.account-delete-dialog .account-delete-export {
+  margin-top: 20px;
+  gap: 16px;
+}
+.account-delete-dialog .cloud-account-form {
+  gap: 10px;
+  margin-top: 20px;
 }

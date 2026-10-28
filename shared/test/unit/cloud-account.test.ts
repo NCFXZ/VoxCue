@@ -36,6 +36,89 @@ function vault(initial: unknown = null) {
 const json = (value: unknown, status = 200, headers = {}) =>
   new Response(JSON.stringify(value), { status, headers });
 describe('independent cloud account client', () => {
+  it('keeps irreversible server confirmation visible when the local vault needs erasure retry', async () => {
+    const client = new CloudAccountClient({
+      origin,
+      deviceLabel: 'Synthetic',
+      vault: {
+        read: async () => ({ origin, credentials: result() }),
+        write: async () => {},
+        clear: async () => {
+          throw Error('synthetic locked vault');
+        },
+      },
+      fetcher: (async (url) =>
+        json(
+          String(url).endsWith('/capabilities')
+            ? { accountDeletion: 'account-erasure-v1' }
+            : { deleted: true },
+        )) as typeof fetch,
+    });
+    const response = await client.call({
+      action: 'delete',
+      password: 'Synthetic password',
+      confirm: 'DELETE',
+    });
+    expect(response.ok).toBe(true);
+    expect(response.state.user).toBeNull();
+  });
+  it.each([null, 'invalid-json', { error: null }])(
+    'account deletion clears malformed HTTP 401: %j',
+    async (body) => {
+      const saved = vault({ origin, credentials: result() });
+      const client = new CloudAccountClient({
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: saved.port,
+        fetcher: (async (url) =>
+          String(url).endsWith('/capabilities')
+            ? json({ accountDeletion: 'account-erasure-v1' })
+            : new Response(
+                body === null ? null : typeof body === 'string' ? body : JSON.stringify(body),
+                { status: 401 },
+              )) as typeof fetch,
+      });
+      expect(
+        (await client.call({ action: 'delete', password: 'Synthetic password', confirm: 'DELETE' }))
+          .ok,
+      ).toBe(false);
+      expect(saved.read()).toBeNull();
+      expect(client.snapshot().user).toBeNull();
+    },
+  );
+  it.each(['legacy', 'wrong-password', 'expired', 'success'])(
+    'account erasure capability and reauthentication: %s',
+    async (mode) => {
+      const saved = vault({ origin, credentials: result() });
+      const calls: string[] = [];
+      const client = new CloudAccountClient({
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: saved.port,
+        fetcher: (async (url) => {
+          const route = new URL(String(url)).pathname;
+          calls.push(route);
+          if (route === '/v1/capabilities')
+            return json({ accountDeletion: mode === 'legacy' ? undefined : 'account-erasure-v1' });
+          return mode === 'wrong-password'
+            ? json({ error: { code: 'invalid_credentials' } }, 401)
+            : mode === 'expired'
+              ? json({ error: { code: 'unauthorized' } }, 401)
+              : json({ deleted: true });
+        }) as typeof fetch,
+      });
+      const response = await client.call({
+        action: 'delete',
+        password: 'Synthetic current password',
+        confirm: 'DELETE',
+      });
+      if (mode === 'legacy') expect(calls).toEqual(['/v1/capabilities']);
+      else expect(calls).toEqual(['/v1/capabilities', '/v1/account/delete']);
+      expect(response.ok).toBe(mode === 'success');
+      expect(saved.read() === null).toBe(mode === 'expired' || mode === 'success');
+      expect(response.state.user === null).toBe(mode === 'expired' || mode === 'success');
+    },
+  );
   it('revokes a newly issued session if encrypted persistence fails without exposing its token', async () => {
     const calls: { route: string; authorization: string | null }[] = [];
     const client = new CloudAccountClient({
@@ -206,7 +289,7 @@ describe('independent cloud account client', () => {
     await Promise.all([first, second, third]);
     expect(count).toBe(4);
   });
-  it('enforces 15–128 Unicode password characters before registration/reset requests', async () => {
+  it('enforces 8–128 Unicode password characters before registration/reset requests', async () => {
     let requests = 0;
     const client = new CloudAccountClient({
       origin,
@@ -218,7 +301,7 @@ describe('independent cloud account client', () => {
       }) as typeof fetch,
     });
     for (const action of ['register', 'reset'] as const)
-      for (const n of [14, 129]) {
+      for (const n of [7, 129]) {
         const value = await client.call({
           action,
           email: 'synthetic@example.test',
@@ -229,6 +312,20 @@ describe('independent cloud account client', () => {
         expect(value.ok).toBe(false);
       }
     expect(requests).toBe(0);
+    for (const action of ['register', 'reset'] as const)
+      for (const n of [8, 9, 10, 11, 12, 13, 14, 128])
+        expect(
+          (
+            await client.call({
+              action,
+              email: 'synthetic@example.test',
+              password: 'K7!vQ#pR' + 'x'.repeat(n - 8),
+              code: '123456',
+              challengeId: '33333333-3333-4333-8333-333333333333',
+            })
+          ).ok,
+        ).toBe(true);
+    expect(requests).toBe(16);
     expect(
       (
         await client.call({
@@ -240,7 +337,7 @@ describe('independent cloud account client', () => {
         })
       ).ok,
     ).toBe(true);
-    expect(requests).toBe(1);
+    expect(requests).toBe(17);
   });
   it('rejects malformed login strings but preserves legacy short and non-NFC password bytes', async () => {
     const sent: string[] = [];

@@ -19,21 +19,16 @@ import { routes } from '../../server/src/routes.ts';
 const directory = path.join(testRoot, 'cloud-account');
 const loginCheck =
   process.argv.includes('--login-preview') || process.argv.includes('--login-check');
-const quotaCheck = process.argv.includes('--interview-quota');
 const scrollbarCheck = process.argv.includes('--scrollbars');
-const quotaEpoch = Date.now();
-let quotaOffset = 0;
 await mkdir(directory, { recursive: true });
 if (process.argv.includes('--preview')) console.log('VISUAL_DIRECTORY=' + directory);
 const config = loadConfig({
   AUTH_KEY: 'cd'.repeat(32),
   FEATURE_BACKUPS: '1',
-  FEATURE_ACTIVATION: '1',
-  FEATURE_USAGE: '1',
   DATABASE_FILE: path.join(directory, 'test.sqlite'),
 });
 const store = new Store(config.database);
-const auth = new Auth(store, config, true, quotaCheck ? () => quotaEpoch + quotaOffset : Date.now);
+const auth = new Auth(store, config, true);
 const messages = [];
 const outbox = new Outbox(auth, {
   enabled: true,
@@ -84,35 +79,6 @@ for(const [module,name] of [['backend/chat/service.js','ChatGPTService'],['backe
   Service.prototype.models=async()=>[{id:'synthetic-model',label:'Synthetic model',description:''}];
   Service.prototype.accountUsage=async()=>null;
 }
-${
-  quotaCheck || scrollbarCheck
-    ? `
-require(path.join(base,'backend/speech/models.js')).speechModelInstalled=()=>true;
-require(path.join(base,'backend/speech/hardware.js')).SpeechHardwareProbe.prototype.read=async()=>({cuda:false,metal:false});
-require(path.join(root,'test/fixtures/install-speech-port.cjs'))(root);
-const {SpeechHost}=require(path.join(base,'backend/speech/host.js'));
-globalThis.quotaSilent=false;
-SpeechHost.prototype.call=async function(call){
-  globalThis.quotaHost=this;
-  if(call.op==='start'&&!globalThis.quotaSilent) setTimeout(()=>this.emit({type:'segment',segment:{id:'quota-body',source:'system',text:'Synthetic quota interview',final:true,startMs:Date.now(),endMs:Date.now()+1,reason:'silence'}}),30);
-  if(call.op==='stop'){
-    if(globalThis.quotaHoldStop) await new Promise(resolve=>{globalThis.quotaReleaseStop=()=>{globalThis.quotaHoldStop=false;resolve();};});
-    if(!globalThis.quotaSilent)this.emit({type:'segment',segment:{id:'quota-tail',source:'system',text:'Final quota tail',final:true,startMs:Date.now(),endMs:Date.now()+1,reason:'stop'}});
-  }
-  return {state:call.op==='start'?'running':'idle',model:'Synthetic quota speech',devices:[]};
-};
-SpeechHost.prototype.stop=()=>{};
-const {ChatGPTService}=require(path.join(base,'backend/chat/service.js'));
-ChatGPTService.prototype.stream=async(request,emit)=>{emit({id:request.id,type:'delta',text:'Synthetic quota answer'});return {answerText:'Synthetic quota answer',usage:null,sources:[]};};
-const {InterviewLease}=require(path.join(base,'backend/cloud/lease.js'));
-const startLease=InterviewLease.prototype.start;
-globalThis.quotaClock=0;
-InterviewLease.prototype.start=async function(){this.now=()=>globalThis.quotaClock;await startLease.call(this);clearInterval(this.timer);this.timer=undefined;globalThis.quotaLease=this;};
-const png=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=','base64');
-require(path.join(base,'screenshot.js')).captureInterviewScreenshot=async()=>({file:{name:'synthetic.png',mimeType:'image/png',bytes:new Uint8Array(png)},preview:'data:image/png;base64,'+png.toString('base64')});
-`
-    : ''
-}
 require(path.join(base,'main.js'));
 `,
 );
@@ -148,7 +114,6 @@ try {
       const results = [];
       for (const [channel, call] of [
         ['cloud:account', { action: 'status' }],
-        ['cloud:usage', { action: 'status' }],
         ['cloud:sync', { action: 'list', userId: 'a0000000-0000-4000-8000-000000000001' }],
       ])
         for (const senderFrame of [null, {}]) {
@@ -177,7 +142,6 @@ try {
             userId: 'a0000000-0000-4000-8000-000000000001',
           }),
         ),
-        denied(window.desktop.cloudUsage({ action: 'status' })),
       ]);
     }),
     [true, true],
@@ -245,9 +209,9 @@ try {
     rects.push(await geometry());
     assert.equal(
       await panel.getByLabel('密码', { exact: true }).getAttribute('placeholder'),
-      '15–128 个字符',
+      '不少于8个字符',
     );
-    assert.equal(await panel.getByLabel('密码', { exact: true }).getAttribute('minlength'), '15');
+    assert.equal(await panel.getByLabel('密码', { exact: true }).getAttribute('minlength'), '8');
     assert.equal(await panel.getByLabel('密码', { exact: true }).getAttribute('maxlength'), '1024');
     for (const value of ['1', 'a@b', 'a..b@example.test', 'a@-bad.test']) {
       await panel.getByLabel('邮箱', { exact: true }).fill(value);
@@ -269,9 +233,9 @@ try {
     );
     await outbox.runOnce();
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages.at(-1).code);
-    await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(14));
+    await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(7));
     await panel.getByRole('button', { name: '创建账号', exact: true }).click();
-    await panel.getByRole('alert').filter({ hasText: '15至128' }).waitFor();
+    await panel.getByRole('alert').filter({ hasText: '8至128' }).waitFor();
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(15));
     await panel.getByLabel('邮箱验证码', { exact: true }).fill('123');
     await panel.getByRole('button', { name: '创建账号', exact: true }).click();
@@ -352,7 +316,7 @@ try {
       0,
     );
     console.log(
-      'Login geometry: invalid emails disabled; inline feedback clears the fixed footer; top alignment, full-width fields, 15–128 policy and focus shadow verified.',
+      'Login geometry: invalid emails disabled; inline feedback clears the fixed footer; top alignment, full-width fields, 8–128 policy and focus shadow verified.',
     );
     if (process.argv.includes('--login-preview'))
       await new Promise((resolve) => setTimeout(resolve, 45000));
@@ -382,21 +346,6 @@ try {
         app,
         main,
         directory,
-        services,
-        userId: exposed.state.user.id,
-      });
-      assert.deepEqual(errors, []);
-    } else if (quotaCheck) {
-      const { checkInterviewQuota } = await import('./interview-quota-checks.mjs');
-      await checkInterviewQuota({
-        app,
-        main,
-        services,
-        userId: exposed.state.user.id,
-        directory,
-        advanceServer: (ms) => {
-          quotaOffset += ms;
-        },
       });
       assert.deepEqual(errors, []);
     } else {
@@ -457,12 +406,6 @@ try {
       await main.getByRole('menuitem', { name: '设置', exact: true }).click();
       const settings = main.getByRole('dialog', { name: '设置', exact: true });
       await settings.getByRole('heading', { name: 'VoxCue 账号', exact: true }).waitFor();
-      const activation = services.rights.issue({ minutes: 1 });
-      await settings.getByLabel('面试额度激活码', { exact: true }).fill(`  ${activation.code}  `);
-      await settings.getByRole('button', { name: '兑换额度', exact: true }).click();
-      await settings.getByText('0 小时 1 分', { exact: true }).waitFor();
-      assert.equal(services.rights.current(exposed.state.user.id).remainingSeconds, 60);
-      assert.equal(await settings.getByLabel('面试额度激活码', { exact: true }).inputValue(), '');
       assert.deepEqual(
         await settings
           .getByRole('navigation', { name: '设置分类' })
@@ -486,7 +429,7 @@ try {
       await main.getByRole('navigation', { name: '主导航' }).waitFor();
       assert.equal(await main.evaluate(() => window.desktop.authSession()), null);
       assert.equal(await settings.getByText('synthetic@example.test', { exact: true }).count(), 0);
-      await settings.getByRole('button', { name: '云同步', exact: true }).click();
+      await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
       const foreignOwner = 'a0000000-0000-4000-8000-000000000002';
       await main.evaluate(
         (owner) => localStorage.setItem('voxcue-sync-owner', owner),
@@ -640,7 +583,7 @@ try {
       );
       await main.getByRole('button', { name: '用户菜单', exact: true }).click();
       await main.getByRole('menuitem', { name: '设置', exact: true }).click();
-      await settings.getByRole('button', { name: '云同步', exact: true }).click();
+      await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
       await settings.getByRole('button', { name: '刷新容量', exact: true }).click();
       const usageLabel = await settings
         .getByRole('img', { name: /总容量 100000000 字节/ })

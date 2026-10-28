@@ -1,8 +1,10 @@
 # VoxCue
 
-桌面主账号使用邮箱注册、登录和重置密码，ChatGPT 与 GitHub Copilot 在“设置 → AI 服务”中独立连接。个人信息、面试记录和知识库分别控制云同步，支持逐项暂停、恢复及只删除云端副本。三类数据合计标准配额100 MB；个人资料可超额同步，超出部分仍计入用量。面试时长通过兑换码增加，额度耗尽先保存本场记录再退出，支付保持关闭。
+VoxCue 免费提供，主账号使用邮箱注册、登录和重置密码；ChatGPT 与 GitHub Copilot 在“设置 → AI 服务”中独立连接。客户端0.6.2和服务端0.5.2源码已移除支付、订单、兑换码、面试时长计费及零时长30天删云；外部AI用量由对应服务返回，优先显示5小时窗口。个人信息、面试记录和知识库分别控制云备份，默认100 MB，所有者可按用户调整容量。
 
-客户端默认连接 https://accounts.voxcue.com.cn，配套[独立服务端 0.5.1](https://github.com/NCFXZ/VoxCue-server)部署在腾讯云首尔，邮件使用腾讯云 SES。本轮服务端源码、配置和部署只读；同步在客户端默认关闭，本地资料始终保留。
+云备份位于“设置 → VoxCue 账号”，底部提供删除账号。确认窗口可选保存资料，系统原生另存为选择ZIP位置；包内包含个人信息TXT、每场面试TXT/截图ZIP和各知识库原件。注销删除云端及本机资料，后台仅保留明确告知的邮箱/ID/注册与注销时间；其他设备副本和用户另存文件不受影响。退出账号仍保留本机资料。
+
+客户端默认连接 accounts.voxcue.com.cn。[服务端0.5.2源码说明](shared/docs/SERVER_0.5.2_HANDOFF.md)包含密码8–128、独立容量和注销规则；源码上传不等于生产部署，现有线上0.5.1不因本地修改自动变化。本次按用户最新要求只做受影响功能的定向验证，不执行全量或发行。
 
 **0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本轮清理、完整复验及Mac包补充见[Mac0.6.0发行记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
 
@@ -10,7 +12,11 @@
 
 **0.6.0 → 0.6.1交接**：[Windows40条改动与12条完整回归要求](shared/docs/WINDOWS_0.6.1_HANDOFF.md)、[Windows Codex逐条测试提示词](shared/docs/WINDOWS_0.6.1_CODEX_PROMPT.md)、[客户端29文件清单](shared/docs/CLIENT_0.6.1_HANDOFF.md)。Mac成绩不能替代Windows本机验收。
 
-当前工作区共享版本源为 **0.6.1**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。Mac本轮仅生成自己的0.6.1配置，固定依赖/锁及Electron44.10.0保持；Windows目录及锁只读，须在Windows本机同步生成配置并验收。Mac原生、视觉与人工边界见本机验证记录。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+**0.6.1 → 0.6.2交接**：[Mac逐项更新与验收](shared/docs/MACOS_0.6.2_HANDOFF.md)、[Mac Codex提示词](shared/docs/MACOS_0.6.2_CODEX_PROMPT.md)。Windows登录页顶部全宽72px条带可拖动，标题、表单及右侧预览不再拖动，修复找回密码/验证码按钮被原生拖动区覆盖的问题；另修复分数DPI下面试缩放的工具栏中心漂移。Mac拖动规则、原生红绿灯和窗口缩放路径保持，本机须按交接验证。
+
+0.6.2普通账号注册/重置密码在Mac与Windows同步接受8–128个Unicode码点，两处提示均为“不少于8个字符”。实际8–14字符注册/重置依赖服务端0.5.2部署；旧密码登录保持兼容。服务端管理员仍要求15–128字符；备份默认100 MB，0.5.2允许所有者按用户调整，资料豁免及全局空间保护保持。
+
+当前工作区共享版本源为 **0.6.2**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。Windows本轮仅生成根及自己的0.6.2配置，固定依赖/锁及Electron44.10.0保持；Mac目录和锁只读，须在Mac本机同步生成配置并验收。Mac原生、视觉与人工边界见本机验证记录。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 

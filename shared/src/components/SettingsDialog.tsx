@@ -1,14 +1,13 @@
 import { useState } from 'react';
 import { CloudAccountPanel } from './CloudAccountPanel';
+import { AccountDeletionPanel } from './AccountDeletionPanel';
 import { SyncSettingsPanel } from './SyncSettingsPanel';
-import { CloudUsagePanel } from './CloudUsagePanel';
 import { AIServicePanel } from './AIServicePanel';
 import * as DropdownMenu from './ui/dropdown-menu';
 import {
   Appearance,
   Settings,
   CircleHelp,
-  Cloud,
   Sparkles,
   SystemTheme,
   Moon,
@@ -33,7 +32,6 @@ import { pendingPresentation } from '../../electron/contracts/presentation';
 export type Theme = 'light' | 'dark' | 'system';
 const categories = [
   { id: 'account', label: 'VoxCue 账号', Icon: Person },
-  { id: 'sync', label: '云同步', Icon: Cloud },
   { id: 'ai', label: 'AI 服务', Icon: Sparkles },
   { id: 'components', label: '本地组件', Icon: Download },
   { id: 'interview', label: '面试设置', Icon: Settings },
@@ -155,11 +153,13 @@ export function SettingsDialog({
             {category === 'account' && (
               <>
                 <CloudAccountPanel showTitle={false} />
-                <CloudUsagePanel />
+                <section aria-label="云同步">
+                  <SyncSettingsPanel />
+                </section>
+                <AccountDeletionPanel />
               </>
             )}
             {category === 'ai' && <AIServicePanel />}
-            {category === 'sync' && <SyncSettingsPanel />}
             {category === 'interview' && (
               <>
                 <SpeechControls

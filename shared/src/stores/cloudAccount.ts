@@ -19,14 +19,15 @@ export const useCloudAccount = create<AccountStore>((set, get) => ({
   loaded: false,
   revision: 0,
   async call(call) {
-    if (call.action === 'logout') await stopCloudWork();
+    const leaving = call.action === 'logout' || call.action === 'delete';
+    if (leaving) await stopCloudWork();
     const result = window.desktop?.cloudAccount
       ? await window.desktop.cloudAccount(call)
       : { ok: false as const, state: get().state, error: '请在桌面应用中使用账号服务。' };
     set({
       state: result.state,
       loaded: true,
-      revision: get().revision + (call.action === 'logout' ? 1 : 0),
+      revision: get().revision + (leaving ? 1 : 0),
     });
     return result;
   },

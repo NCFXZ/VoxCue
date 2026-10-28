@@ -1,4 +1,4 @@
-// Offline UI fixture only. Real account/storage/lease boundaries are exercised
+// Offline UI fixture only. Real account/storage boundaries are exercised
 // by cloud-account-smoke and the cloud unit suites with their actual transports.
 module.exports = (root) => {
   const path = require('node:path');
@@ -55,25 +55,7 @@ module.exports = (root) => {
       throw Error('Unexpected synthetic account operation: ' + input.action);
     return { ok: true, state: state() };
   };
-  CloudAccountClient.prototype.api = async function (route, method, body) {
-    if (route === '/v1/entitlements')
-      return {
-        permanent: true,
-        remainingSeconds: null,
-        zeroSince: null,
-        cloudDeleteAfter: null,
-        cloudPurgePending: false,
-      };
-    if (route.startsWith('/v1/usage/sessions'))
-      return {
-        id: 'b0000000-0000-4000-8000-000000000001',
-        sequence: body?.sequence ?? 0,
-        state: route.endsWith('/stop') ? 'stopped' : 'active',
-        leaseRemainingMs: 120000,
-        canContinue: !route.endsWith('/stop'),
-        permanent: true,
-        remainingSeconds: null,
-      };
+  CloudAccountClient.prototype.api = async function (route) {
     throw Error('Unexpected synthetic account route: ' + route);
   };
 };

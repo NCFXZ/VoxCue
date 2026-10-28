@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
 import {
   applyCloudItem,
+  cloudFileParent,
   digestCloudBlob,
   localCloudItems,
   packCloudItem,
@@ -109,5 +110,68 @@ describe('cloud data restoration boundary', () => {
     expect(events).toEqual(['voxcue-sync-applied', 'voxcue-sync-applied']);
     await localKnowledge.saveBase({ id: 'base', name: 'Local edit', createdAt: 1 });
     expect(events.at(-1)).toBe('voxcue-local-change');
+  });
+  it('cold file ownership rejects mismatched identities, invalid parents and resume ownership', async () => {
+    expect(
+      await cloudFileParent(
+        'file:doc',
+        packCloudItem('file:doc', 'x', {
+          id: 'doc',
+          baseId: 'base',
+        }),
+      ),
+    ).toBe('base:base');
+    for (const metadata of [
+      { id: 'other', baseId: 'base' },
+      { id: 'doc', baseId: '../base' },
+      { id: 'doc', baseId: 'personal-resume' },
+      { id: 'doc', baseId: '' },
+    ])
+      await expect(
+        cloudFileParent('file:doc', packCloudItem('file:doc', 'x', metadata)),
+      ).rejects.toThrow();
+    await expect(
+      cloudFileParent(
+        'file:doc',
+        packCloudItem('file:other', 'x', {
+          id: 'doc',
+          baseId: 'base',
+        }),
+      ),
+    ).rejects.toThrow('归属');
+  });
+
+  it('a cancelled file restore returns no document or applied event and preserves committed bytes', async () => {
+    await localKnowledge.saveBase({ id: 'base', name: 'Synthetic', createdAt: 1 });
+    await localKnowledge.importDocuments('base', [new File(['original'], 'original.txt')]);
+    const [original] = await localKnowledge.listDocuments('base');
+    const item = (await localCloudItems('knowledgebase')).find(
+      (i) => i.key === 'file:' + original.id,
+    )!;
+    const hash = await digestCloudBlob(await item.blob());
+    const events = vi.fn();
+    vi.stubGlobal('window', { dispatchEvent: events });
+    await expect(
+      applyCloudItem(
+        item.key,
+        packCloudItem(item.key, 'remote', {
+          id: original.id,
+          baseId: 'base',
+          name: original.name,
+          size: 6,
+          type: 'text/plain',
+          createdAt: 1,
+        }),
+        hash,
+        undefined,
+        () => {
+          throw Error('synthetic account switch');
+        },
+      ),
+    ).rejects.toThrow('synthetic account switch');
+    expect(events).not.toHaveBeenCalled();
+    const [saved] = await localKnowledge.listDocuments('base');
+    expect(saved.localRevision).toBe(original.localRevision);
+    expect(await saved.blob.text()).toBe('original');
   });
 });

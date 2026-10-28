@@ -757,6 +757,7 @@ describe('受控 preload 契约', () => {
   it('只暴露类型化桌面白名单，确认参数与语音输入频道一致', async () => {
     const api = bridge.api!;
     const calls: Array<[keyof DesktopAPI, string, unknown[]]> = [
+      ['accountData', 'account:data', [{ action: 'begin', files: 1 }]],
       ['updates', 'updates:call', [{ op: 'check' }]],
       ['components', 'components:call', [{ op: 'download', id: 'rag' }]],
       ['updateSessionState', 'session:state', [true]],
@@ -786,7 +787,6 @@ describe('受控 preload 契约', () => {
         'cloud:sync',
         [{ action: 'list', userId: '11111111-1111-4111-8111-111111111111' }],
       ],
-      ['cloudUsage', 'cloud:usage', [{ action: 'status' }]],
       ['signInWithChatGPT', 'auth:sign-in', []],
       ['signInWithCopilot', 'auth:copilot-sign-in', []],
       ['cancelSignIn', 'auth:cancel', []],
@@ -832,8 +832,6 @@ describe('受控 preload 契约', () => {
         'onDictationEvent',
         'onSystemAccent',
         'onInterviewEndRequested',
-        'onCloudUsageExpired',
-        'onInterviewUsage',
         'onSessionCloseRequested',
         'onUpdateEvent',
         'onComponentEvent',

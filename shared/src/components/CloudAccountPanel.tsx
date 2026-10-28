@@ -238,11 +238,7 @@ export function CloudAccountPanel({
                 name="password"
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                placeholder={
-                  mode === 'login'
-                    ? '输入密码'
-                    : `${CLOUD_PASSWORD_MIN}–${CLOUD_PASSWORD_MAX} 个字符`
-                }
+                placeholder={mode === 'login' ? '输入密码' : `不少于${CLOUD_PASSWORD_MIN}个字符`}
                 minLength={mode === 'login' ? 1 : CLOUD_PASSWORD_MIN}
                 maxLength={1024}
                 required

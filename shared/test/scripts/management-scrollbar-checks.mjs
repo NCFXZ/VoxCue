@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 
 // Own synthetic IndexedDB/history only; no real documents, indexing or hardware.
-export async function checkManagementScrollbars({ app, main, directory, services, userId }) {
+export async function checkManagementScrollbars({ app, main, directory }) {
   await main.evaluate(async () => {
     localStorage.setItem(
       'copilot-interview-history-v1',
@@ -271,58 +271,11 @@ export async function checkManagementScrollbars({ app, main, directory, services
     .waitFor();
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('button', { name: '新对话', exact: true }).click();
-  for (const [grant, text, low] of [
-    [{ minutes: 14 }, '0 小时 14 分钟', true],
-    [{ minutes: 1 }, '0 小时 15 分钟', false],
-    [{ permanent: true }, '永久额度', false],
-  ]) {
-    services.rights.redeem(userId, { code: services.rights.issue(grant).code }, '127.0.0.1');
-    await main.getByRole('button', { name: '开始面试', exact: true }).click();
-    const dialog = main.getByRole('dialog', { name: '开始面试', exact: true });
-    await dialog.locator('.interview-start-quota dd').getByText(text, { exact: true }).waitFor();
-    assert.equal(
-      await dialog
-        .locator('.interview-start-quota dd')
-        .evaluate((node) => node.classList.contains('interview-quota-low')),
-      low,
-    );
-    assert.equal(
-      await main
-        .locator('.user-info small')
-        .evaluate((node) => node.classList.contains('interview-quota-low')),
-      low,
-    );
-    const colors = await main.evaluate(() => {
-      const probe = document.createElement('span');
-      probe.style.color = 'var(--danger)';
-      document.body.append(probe);
-      const danger = getComputedStyle(probe).color;
-      probe.remove();
-      return ['.interview-start-quota dd', '.user-info small'].map(
-        (selector) => getComputedStyle(document.querySelector(selector)).color === danger,
-      );
-    });
-    assert.deepEqual(colors, [low, low]);
-    const alignment = await dialog.locator('.interview-start-summary').evaluate((node) => {
-      const a = node.querySelector('.interview-start-knowledge').getBoundingClientRect(),
-        b = node.querySelector('.interview-start-quota').getBoundingClientRect();
-      return { top: a.top - b.top, left: b.left, right: a.right };
-    });
-    assert.ok(Math.abs(alignment.top) < 1 && alignment.left > alignment.right);
-    if (process.argv.includes('--preview'))
-      await main.screenshot({
-        path: path.join(
-          directory,
-          `preflight-${low ? 'low' : text.includes('永久') ? 'permanent' : 'fifteen'}.png`,
-        ),
-      });
-    await dialog.getByRole('button', { name: '取消', exact: true }).click();
-  }
   if (process.argv.includes('--preview')) {
     console.log('SCROLLBAR_VISUAL_DIRECTORY=' + directory);
     await new Promise((resolve) => setTimeout(resolve, 60000));
   }
   console.log(
-    'Management scrollbar UI: history/knowledge lists in light/dark at 1280/960, fixed headers, clear gutters, top/bottom/wheel scrolling, history transcript/answer rail, knowledge documents and 14/15-minute/permanent preflight colors passed.',
+    'Management scrollbar UI: history/knowledge lists in light/dark at 1280/960, fixed headers, clear gutters, top/bottom/wheel scrolling, history transcript/answer rail, knowledge documents and free-mode preflight passed.',
   );
 }

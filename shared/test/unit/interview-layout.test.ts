@@ -8,14 +8,10 @@ import {
 
 const area = { x: -1920, y: 0, width: 1920, height: 1080 };
 const original = { x: -1500, y: 60, ...interviewCanvas() };
-it('reserves a bottom notice below the collapsed toolbar without moving its top or center', () => {
+it('免费模式收起仅保留工具栏且不移动顶部或中心', () => {
   const folded = fitInterviewBounds(original, area, 1, true, true);
-  const warned = fitInterviewBounds(folded, area, 1, true, true, true);
-  expect(warned.width).toBe(folded.width);
-  expect(warned.y).toBe(folded.y);
-  expect(warned.height).toBe(folded.height + 64);
-  expect(warned.x).toBe(folded.x);
-  expect(fitInterviewBounds(warned, area, 1, true, true)).toEqual(folded);
+  expect(folded.height).toBe(72);
+  expect(fitInterviewBounds(folded, area, 1, true, true)).toEqual(folded);
 });
 it('调整面板与隐藏转写保留固定控件空间，恢复工具栏中心和顶部位置', () => {
   for (const scale of [0.75, 0.9, 1, 1.3]) {

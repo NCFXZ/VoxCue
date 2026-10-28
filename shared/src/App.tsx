@@ -16,7 +16,6 @@ import { useUpdates } from './stores/updates';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
 import { useHistory } from './stores/history';
-import { useCloudUsage } from './stores/cloudUsage';
 import { Button } from './components/ui/button';
 import { X } from './components/icons';
 import { SettingsDialog, type Theme, type SettingsCategory } from './components/SettingsDialog';
@@ -41,15 +40,6 @@ export function App() {
   const [personalDraft, setPersonalDraft] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string | null>(null);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
-  const [interviewNotice, setInterviewNotice] = useState<string | null>(null);
-  useEffect(() => {
-    if (isLoginWindow) return;
-    return window.desktop?.onCloudUsageExpired?.((message) => {
-      useHistory.getState().load();
-      setInterviewNotice(message);
-      void useCloudUsage.getState().run({ action: 'status' });
-    });
-  }, [isLoginWindow]);
   const auth = useAuth();
   const account = useCloudAccount();
   const signedIn = !!account.state.user || auth.session?.mode === 'demo';
@@ -260,19 +250,6 @@ export function App() {
         )}
       </div>
       {!showLogin && <TitleBar />}
-      {!showLogin && interviewNotice && (
-        <div className="interview-end-notice" role="status">
-          <span>{interviewNotice}</span>
-          <Button
-            variant="ghost"
-            size="icon"
-            aria-label="关闭面试结束提示"
-            onClick={() => setInterviewNotice(null)}
-          >
-            <X size={16} />
-          </Button>
-        </div>
-      )}
       {(appearanceError || (signedIn && (sessionStateError || (!settings && auth.error)))) && (
         <div className="auth-error" role="alert">
           {appearanceError || sessionStateError || auth.error}

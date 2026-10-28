@@ -8,7 +8,7 @@ import type { AuthSession, SignOutResult } from './auth';
 import type { AccountUsage } from './accountUsage';
 import type { CloudAccountCall, CloudAccountResult } from './cloudAccount';
 import type { CloudSyncCall, CloudSyncResult } from './cloudSync';
-import type { CloudUsageCall, CloudUsageResult, InterviewUsageState } from './cloudUsage';
+import type { AccountDataCall, AccountDataResult } from './accountData';
 import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResult } from './chat';
 import type { InterviewTitleRequest, InterviewTitleEvent, HistoryExportRequest } from './history';
 import type {
@@ -34,16 +34,13 @@ export interface InterviewWindowState {
   collapsed: boolean;
   transcriptVisible: boolean;
   configuration: InterviewConfiguration;
-  usage?: InterviewUsageState | null;
 }
 export type WindowAction = 'minimize' | 'maximize' | 'close';
 // The complete renderer allowlist. No credentials, paths or arbitrary IPC access.
 export interface DesktopAPI {
+  accountData(call: AccountDataCall): Promise<AccountDataResult>;
   cloudAccount(call: CloudAccountCall): Promise<CloudAccountResult>;
   cloudSync(call: CloudSyncCall): Promise<CloudSyncResult>;
-  cloudUsage(call: CloudUsageCall): Promise<CloudUsageResult>;
-  onCloudUsageExpired(callback: (message: string) => void): () => void;
-  onInterviewUsage(callback: (state: InterviewUsageState) => void): () => void;
   readonly platform: 'macos' | 'windows' | 'unknown';
   readonly presentation: PresentationCapabilities;
   readonly screenCapturePermissionSupported: boolean;
@@ -120,9 +117,9 @@ type Invocation<F extends (...args: never[]) => unknown> = {
 // Channel types stay erased in the sandboxed, unbundled CommonJS preload.
 // Importing runtime constants there would require a forbidden local require().
 export interface DesktopInvokeMap {
+  'account:data': Invocation<DesktopAPI['accountData']>;
   'cloud:account': Invocation<DesktopAPI['cloudAccount']>;
   'cloud:sync': Invocation<DesktopAPI['cloudSync']>;
-  'cloud:usage': Invocation<DesktopAPI['cloudUsage']>;
   'updates:call': Invocation<DesktopAPI['updates']>;
   'components:call': Invocation<DesktopAPI['components']>;
   'session:state': Invocation<DesktopAPI['updateSessionState']>;
@@ -173,8 +170,6 @@ export interface DesktopSendMap {
   'window:action': [action: WindowAction];
 }
 export interface DesktopEventMap {
-  'cloud:usage-expired': [message: string];
-  'interview:usage': [state: InterviewUsageState];
   'updates:event': [state: UpdateState];
   'components:event': [state: ComponentState];
   'session:request-close': [id: string];

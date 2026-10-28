@@ -268,6 +268,133 @@ function fixture(saved?: SyncSaved) {
   };
 }
 describe('cloud sync consistency and backpressure', () => {
+  it.each([
+    'manifest-bytes',
+    'manifest-digest',
+    'part-count',
+    'part-index',
+    'part-length',
+    'part-digest',
+  ])('cold restore rejects corrupt %s without committing a file or baseline', async (damage) => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    const blob = packCloudItem('file:a', 'payload', { id: 'a', baseId: 'a' });
+    f.local.set('file:a', { kind: 'knowledgebase', parent: 'base:a', blob });
+    await f.enable('knowledgebase');
+    f.local.clear();
+    f.restart(true);
+    const file = [...f.remote.values()].find((r) => r.name === 'file:a')!;
+    const manifest = {
+      bytes: file.bytes,
+      sha256: file.sha256,
+      chunkBytes: 1048576,
+      parts: [{ index: 0, bytes: file.bytes, sha256: file.sha256 }],
+    };
+    if (damage === 'manifest-bytes') manifest.bytes++;
+    if (damage === 'manifest-digest') manifest.sha256 = '0'.repeat(64);
+    if (damage === 'part-count') manifest.parts = [];
+    if (damage === 'part-index') manifest.parts[0].index = 1;
+    if (damage === 'part-digest') manifest.parts[0].sha256 = '0'.repeat(64);
+    f.setHook(async (call) => {
+      if (!('id' in call) || call.id !== file.id) return undefined;
+      if (call.action === 'manifest') return { ok: true, value: manifest };
+      if (call.action === 'read' && damage === 'part-length')
+        return { ok: true, value: new Uint8Array(await blob.slice(0, -1).arrayBuffer()) };
+      return undefined;
+    });
+    await f.engine.request();
+    expect(f.local.has('file:a')).toBe(false);
+    expect(f.saved.baselines['file:a']).toBeUndefined();
+    expect(f.view.marks['file:a'].status).toBe('error');
+    expect(f.applied).toEqual(['base:a']);
+    expect(await file.blob.text()).toBe(await blob.text());
+    expect(f.remote.size).toBe(2);
+    expect(f.calls.some((c) => c.action === 'remove')).toBe(false);
+  });
+  it.each(['complete', 'stop', 'network-failure'])(
+    'cold first-chunk retention is bounded to four MiB and released on %s',
+    async (ending) => {
+      const f = fixture();
+      f.put('base:a', 'knowledgebase', 'A');
+      for (let i = 0; i < 6; i++)
+        f.local.set('file:d' + i, {
+          kind: 'knowledgebase',
+          parent: 'base:a',
+          blob: packCloudItem('file:d' + i, new Uint8Array(1048576 + 2), {
+            id: 'd' + i,
+            baseId: 'a',
+          }),
+        });
+      await f.enable('knowledgebase');
+      f.local.clear();
+      f.restart(true);
+      f.calls.length = 0;
+      let observed = false;
+      f.setHook(async (call) => {
+        if (call.action === 'read' && f.remote.get(call.id)?.name === 'base:a') {
+          observed = true;
+          const cache = Reflect.get(f.engine, 'prepared') as Map<string, { first: Uint8Array }>;
+          expect(cache.size).toBe(4);
+          expect([...cache.values()].reduce((sum, item) => sum + item.first.byteLength, 0)).toBe(
+            4 * 1048576,
+          );
+          if (ending === 'stop') f.engine.stop();
+          if (ending === 'network-failure') throw Error('synthetic disconnect');
+        }
+        return undefined;
+      });
+      await f.engine.request();
+      expect(observed).toBe(true);
+      expect(Reflect.get(f.engine, 'prepared').size).toBe(0);
+      if (ending === 'complete') {
+        expect(f.applied).toHaveLength(7);
+        for (let i = 0; i < 6; i++) {
+          const resource = [...f.remote.values()].find((r) => r.name === 'file:d' + i)!;
+          expect(
+            f.calls.filter((c) => c.action === 'read' && c.id === resource.id && c.index === 0),
+          ).toHaveLength(i < 4 ? 1 : 2);
+        }
+      }
+      expect(f.calls.filter((c) => c.action === 'remove')).toHaveLength(0);
+    },
+  );
+
+  it('a cached first chunk from a different remote version is reread before applying bytes', async () => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    const blob = packCloudItem('file:a', 'old', { id: 'a', baseId: 'a' });
+    f.local.set('file:a', { kind: 'knowledgebase', parent: 'base:a', blob });
+    await f.enable('knowledgebase');
+    f.local.clear();
+    f.restart(true);
+    f.calls.length = 0;
+    const file = [...f.remote.values()].find((r) => r.name === 'file:a')!;
+    let version = '';
+    f.setHook(async (call) => {
+      if (call.action === 'read' && f.remote.get(call.id)?.name === 'base:a') {
+        const newer = packCloudItem('file:a', 'new', { id: 'a', baseId: 'a' });
+        version = crypto.randomUUID();
+        Object.assign(file, {
+          blob: newer,
+          bytes: newer.size,
+          headVersion: version,
+          sha256: await digestCloudBlob(newer),
+          revision: 2,
+        });
+        // Simulate metadata advancing after discovery but before this file runs.
+        Object.assign(Reflect.get(f.engine, 'remote').get('file:a'), file);
+      }
+      return undefined;
+    });
+    await f.engine.request();
+    const reads = f.calls.filter((c) => c.action === 'read' && c.id === file.id);
+    expect(reads).toHaveLength(2);
+    expect(reads.at(-1)).toMatchObject({ version, index: 0 });
+    expect(
+      await (await unpackCloudItem('file:a', f.local.get('file:a')!.blob)).payload.text(),
+    ).toBe('new');
+    expect(f.saved.baselines['file:a'].revision).toBe(2);
+  });
   it('resumes after restart without retransmitting server-verified chunks whose acknowledgement was lost', async () => {
     const f = fixture();
     f.put('file:doc', 'knowledgebase', new Uint8Array(3 * 1048576));
@@ -460,6 +587,9 @@ describe('cloud sync consistency and backpressure', () => {
     expect(f.saved.baselines['file:b'].parent).toBe('base:b');
     expect(f.view.marks['base:a'].status).toBe('synced');
     expect(f.view.marks['base:b'].status).toBe('synced');
+    f.restart();
+    await f.engine.request();
+    expect(f.applied).toEqual(['base:a', 'file:a', 'base:b', 'file:b']);
     await f.engine.pause('base:a');
     expect(f.view.marks['file:a'].status).toBe('paused');
     expect(f.view.marks['file:b'].status).toBe('synced');

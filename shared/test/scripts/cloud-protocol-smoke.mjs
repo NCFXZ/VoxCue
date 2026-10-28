@@ -20,8 +20,6 @@ const { CloudAccountClient } = workspace.platformRequire(
 const config = loadConfig({
   AUTH_KEY: 'ef'.repeat(32),
   FEATURE_BACKUPS: '1',
-  FEATURE_ACTIVATION: '1',
-  FEATURE_USAGE: '1',
   DATABASE_FILE: path.join(testRoot, 'protocol.sqlite'),
 });
 const store = new Store(config.database),
