@@ -10,7 +10,7 @@ export async function knowledgeCall(call: KnowledgeCall): Promise<KnowledgeValue
 }
 export async function indexOriginal(
   doc: LocalDocument,
-  requestId = crypto.randomUUID(),
+  requestId: string = crypto.randomUUID(),
   force = false,
 ) {
   return knowledgeCall({

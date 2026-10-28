@@ -42,7 +42,10 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     if (!id) return;
     try {
       const documents = await localKnowledge.listDocuments(id);
-      if (request === documentRequest) set({ documents, loading: false });
+      if (request === documentRequest) {
+        set({ documents, loading: false });
+        void useKnowledgeIndex.getState().reconcile(id);
+      }
     } catch (error) {
       if (request === documentRequest) set({ error: message(error), loading: false });
     }

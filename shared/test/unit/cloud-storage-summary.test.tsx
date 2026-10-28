@@ -35,6 +35,7 @@ it('fits all three metered categories at 101 MB without hiding profile excess', 
     expect(widths[index]).toBeCloseTo((value / 101) * 100, 10);
   expect(html).toContain('已用 101000000 字节，总容量 100000000 字节');
   expect(html).toContain('可用 0.00 MB · 已用 101.00 MB');
+  expect(html).not.toContain(' title=');
 });
 it('retains capacity-based widths below the limit', () => {
   setStorage(1000000, 2000000, 3000000);

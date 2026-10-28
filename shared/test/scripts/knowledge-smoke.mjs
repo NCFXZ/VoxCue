@@ -114,6 +114,206 @@ try {
   await base.getByRole('button', { name: '删除知识库', exact: true }).click();
   await confirm.click();
   await base.waitFor({ state: 'detached' });
+  // Exercise the real renderer stores/IPC with offline cloud bytes and synthetic
+  // indexing. A held second chunk makes the intermediate library state observable.
+  await app.evaluate(({ app }) => {
+    const require = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const path = require('node:path'),
+      crypto = require('node:crypto');
+    const root = path.join(app.getAppPath(), 'dist-electron/shared/electron');
+    const { CloudSyncClient } = require(path.join(root, 'backend/cloud/sync.js'));
+    const { KnowledgeHost } = require(path.join(root, 'backend/knowledge/host.js'));
+    const { KnowledgeCoordinator } = require(path.join(root, 'application/knowledge.js'));
+    const indexed = new Map(),
+      imports = [];
+    let release;
+    const held = new Promise((resolve) => {
+      release = resolve;
+    });
+    globalThis.cloudRestoreUi = { imports, release, forget: (id) => indexed.delete(id) };
+    KnowledgeHost.prototype.listDocuments = async () => [...indexed.values()];
+    KnowledgeHost.prototype.indexDocument = async function (input) {
+      imports.push(input.documentId);
+      const document = {
+        documentId: input.documentId,
+        baseId: input.baseId,
+        name: input.name,
+        available: true,
+      };
+      indexed.set(input.documentId, document);
+      this.progress({ documentId: input.documentId, phase: 'ready', completed: 1, total: 1 });
+      return document;
+    };
+    const call = KnowledgeCoordinator.prototype.call;
+    KnowledgeCoordinator.prototype.call = async function (input) {
+      const result = await call.call(this, input);
+      return input.op === 'status' ? { ...result, modelReady: true } : result;
+    };
+    const pack = (key, bytes, metadata) => {
+      const header = Buffer.from(JSON.stringify({ v: 1, key, ...(metadata ? { metadata } : {}) }));
+      const prefix = Buffer.alloc(8);
+      prefix.write('VCS1');
+      prefix.writeUInt32BE(header.length, 4);
+      return Buffer.concat([prefix, header, bytes]);
+    };
+    const blobs = new Map();
+    for (const id of ['a', 'b'])
+      blobs.set(
+        'base:' + id,
+        pack(
+          'base:' + id,
+          Buffer.from(JSON.stringify({ id, name: '云端资料' + id.toUpperCase(), createdAt: 1 })),
+        ),
+      );
+    for (const id of ['b-2', 'a-1', 'b-1', 'a-2']) {
+      const bytes = Buffer.alloc(1048580, 65);
+      blobs.set(
+        'file:' + id,
+        pack('file:' + id, bytes, {
+          id,
+          baseId: id[0],
+          name: id + '.txt',
+          size: bytes.length,
+          type: 'text/plain',
+          createdAt: 1,
+        }),
+      );
+    }
+    const sha = (bytes) => crypto.createHash('sha256').update(bytes).digest('hex');
+    const resources = [...blobs].map(([name, bytes]) => ({
+      id: crypto.randomUUID(),
+      kind: 'knowledgebase',
+      name,
+      revision: 1,
+      headVersion: crypto.randomUUID(),
+      bytes: bytes.length,
+      sha256: sha(bytes),
+      createdAt: 1,
+    }));
+    CloudSyncClient.prototype.call = async (input) => {
+      if (input.action === 'list') {
+        const counts = { profile: 0, history: 0, knowledgebase: 4195000 };
+        return {
+          ok: true,
+          value: {
+            items: resources,
+            nextCursor: null,
+            storage: {
+              currentBytes: counts,
+              reservedBytes: { profile: 0, history: 0, knowledgebase: 0 },
+              storedBytes: counts,
+              capacityBytes: 100000000,
+              knowledgeCapacityBytes: 100000000,
+            },
+          },
+        };
+      }
+      const resource = resources.find((item) => item.id === input.id),
+        bytes = blobs.get(resource?.name);
+      if (input.action === 'manifest') {
+        const parts = [];
+        for (let start = 0; start < bytes.length; start += 1048576) {
+          const part = bytes.subarray(start, start + 1048576);
+          parts.push({ index: parts.length, bytes: part.length, sha256: sha(part) });
+        }
+        return {
+          ok: true,
+          value: { bytes: bytes.length, sha256: sha(bytes), chunkBytes: 1048576, parts },
+        };
+      }
+      if (input.action === 'read') {
+        if (resource.name === 'file:a-2' && input.index === 1) await held;
+        return {
+          ok: true,
+          value: new Uint8Array(bytes.subarray(input.index * 1048576, (input.index + 1) * 1048576)),
+        };
+      }
+      throw Error('Unexpected cloud mutation: ' + input.action);
+    };
+  });
+  await page.evaluate(async () => {
+    const userId = 'a0000000-0000-4000-8000-000000000001';
+    localStorage.setItem('voxcue-sync-owner', userId);
+    const db = await new Promise((resolve, reject) => {
+      const open = indexedDB.open('voxcue-cloud-sync', 1);
+      open.onupgradeneeded = () => open.result.createObjectStore('accounts');
+      open.onsuccess = () => resolve(open.result);
+      open.onerror = () => reject(open.error);
+    });
+    await new Promise((resolve, reject) => {
+      const tx = db.transaction('accounts', 'readwrite');
+      tx.objectStore('accounts').put(
+        {
+          preferences: {
+            enabled: { profile: false, history: false, knowledgebase: true },
+            knowledgeLimitBytes: 100000000,
+          },
+          baselines: {},
+        },
+        userId,
+      );
+      tx.oncomplete = resolve;
+      tx.onerror = () => reject(tx.error);
+    });
+    db.close();
+  });
+  await page.reload();
+  await page.getByRole('button', { name: '知识库', exact: true }).click();
+  await page.getByRole('button', { name: '云端资料A：正在同步', exact: true }).waitFor();
+  assert.equal(await page.locator('.knowledge-card').filter({ hasText: '云端资料B' }).count(), 0);
+  await waitForAsync(page, async () => {
+    const result = await window.desktop.knowledge({ op: 'status' });
+    return result.ok && result.value.documents.some((doc) => doc.documentId === 'a-1');
+  });
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), ['a-1']);
+  await app.evaluate(() => globalThis.cloudRestoreUi.release());
+  await page.getByRole('button', { name: '云端资料A：已同步', exact: true }).waitFor();
+  await page.getByRole('button', { name: '云端资料B：已同步', exact: true }).waitFor();
+  await waitForAsync(page, async () => {
+    const result = await window.desktop.knowledge({ op: 'status' });
+    return result.ok && result.value.documents.length === 4;
+  });
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [
+    'a-1',
+    'a-2',
+    'b-2',
+    'b-1',
+  ]);
+  await app.evaluate(() => globalThis.cloudRestoreUi.forget('a-1'));
+  await page.locator('.knowledge-card').filter({ hasText: '云端资料A' }).click();
+  await page
+    .getByRole('dialog', { name: '云端资料A', exact: true })
+    .locator('.document-row')
+    .filter({ hasText: 'a-1.txt' })
+    .getByText('索引完成', { exact: false })
+    .waitFor();
+  await waitForAsync(page, async () => {
+    const result = await window.desktop.knowledge({ op: 'status' });
+    return result.ok && result.value.documents.some((doc) => doc.documentId === 'a-1');
+  });
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [
+    'a-1',
+    'a-2',
+    'b-2',
+    'b-1',
+    'a-1',
+  ]);
+  await app.evaluate(() => globalThis.cloudRestoreUi.forget('a-1'));
+  await page.reload();
+  await waitForAsync(page, async () => {
+    const result = await window.desktop.knowledge({ op: 'status' });
+    return result.ok && result.value.documents.length === 4;
+  });
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [
+    'a-1',
+    'a-2',
+    'b-2',
+    'b-1',
+    'a-1',
+    'a-1',
+  ]);
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
@@ -128,6 +328,10 @@ try {
         'document removal',
         'base deletion confirmation',
         'removed IPC',
+        'cloud library order and syncing badge',
+        'cloud automatic indexing',
+        'open-library index repair',
+        'startup index repair',
       ],
     }),
   );

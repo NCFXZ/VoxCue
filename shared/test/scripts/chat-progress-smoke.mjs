@@ -4,7 +4,12 @@ import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { connectUiAccount, installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import {
+  connectUiAccount,
+  installUiAccount,
+  closeUiApp,
+  focusUiWindow,
+} from './install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/chat-progress-')));
@@ -590,13 +595,8 @@ try {
       .evaluate((node) => getComputedStyle(node).opacity),
     '0',
   );
-  if (process.platform === 'darwin')
-    await app.evaluate(({ app, BrowserWindow }) => {
-      app.focus({ steal: true });
-      BrowserWindow.getAllWindows()
-        .find((window) => window.isVisible())
-        ?.focus();
-    });
+  await focusUiWindow(app, page);
+  await page.mouse.move(0, 0);
   await currentTitle.hover();
   await page.waitForFunction(
     () =>

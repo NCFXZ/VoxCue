@@ -1,4 +1,6 @@
-# 当前测试入口（2026-10-27）
+# 当前测试入口（2026-10-28）
+
+0.6.1追加云恢复与索引背压：`knowledge-smoke.mjs`用两库四文件的交错云端条目验证逐库下载、单文件落盘即索引及启动/开库补索引；`knowledge-reconcile.test.ts`覆盖80份原件的重复请求、交错多库队列、100次合并状态读取、删除/替换及退出取消。始终单任务索引，不等待尚未下载的同库文件；已排队文件按当前知识库优先。云容量条与图例不再有原生title悬停提示。Mac悬停夹具先聚焦精确的自有窗口，动画采样等待实际有限过渡完成，原颜色/圆角/透明度断言保持。以上仅说明入口与覆盖范围，执行结果不写入工作区。
 
 客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含50个shared组（Mac默认再加15组，合计65组；package另验）：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.1连接、云同步及配额到期保存、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
 

@@ -20,21 +20,20 @@ export function CloudStorageSummary() {
         role="img"
         aria-label={storage ? `已用 ${used} 字节，总容量 ${capacity} 字节` : '正在读取云端容量'}
       >
-        {kinds.map(([kind, label]) => (
+        {kinds.map(([kind]) => (
           <span
             key={kind}
             className={`storage-${kind}`}
             style={{
               width: `${scale ? Math.min(100, (storage!.storedBytes[kind] / scale) * 100) : 0}%`,
             }}
-            title={`${label}：${storage?.storedBytes[kind] || 0} 字节`}
           />
         ))}
       </div>
       <div className="cloud-storage-details">
         <div className="cloud-storage-legend">
           {kinds.map(([kind, label]) => (
-            <span key={kind} title={storage ? `${storage.storedBytes[kind]} 字节` : undefined}>
+            <span key={kind}>
               <i className={`storage-${kind}`} />
               {label}
               {storage ? ` ${bytes(storage.storedBytes[kind])}` : ''}

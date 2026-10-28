@@ -51,6 +51,19 @@ export async function unpackCloudItem(
   if (header.v !== 1 || header.key !== key) throw Error('云端数据归属不符。');
   return { payload: blob.slice(8 + size), metadata: header.metadata };
 }
+/** A verified first transport chunk contains the complete bounded envelope header. */
+export async function cloudFileParent(key: string, firstChunk: Blob): Promise<string> {
+  const { metadata } = await unpackCloudItem(key, firstChunk);
+  if (
+    !key.startsWith('file:') ||
+    !metadata ||
+    metadata.id !== key.slice(5) ||
+    !id(metadata.baseId) ||
+    metadata.baseId === 'personal-resume'
+  )
+    throw Error('云端文件所属知识库无效。');
+  return 'base:' + metadata.baseId;
+}
 export async function digestCloudBlob(blob: Blob): Promise<string> {
   if (blob.size > 64 * 1024 ** 2) throw Error('单项同步数据超过64 MiB。');
   const hash = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
@@ -137,6 +150,7 @@ export async function applyCloudItem(
   userId?: string,
   guard = () => {},
 ) {
+  let restoredDocument: LocalDocument | undefined;
   const { payload, metadata } = await unpackCloudItem(key, blob);
   const [type, itemId] = key.split(':');
   if (!id(itemId)) throw Error('同步条目标识无效。');
@@ -170,19 +184,17 @@ export async function applyCloudItem(
       throw Error('云端文件元数据无效。');
     validateFiles([{ name: m.name, size: payload.size }]);
     const current = await assertCurrent();
-    await restoreSyncedDocument(
-      {
-        id: m.id,
-        baseId: m.baseId,
-        name: m.name,
-        size: m.size,
-        type: m.type,
-        createdAt: m.createdAt,
-        blob: payload,
-      },
-      current?.localRevision ?? null,
-      guard,
-    );
+    const document: LocalDocument = {
+      id: m.id,
+      baseId: m.baseId,
+      name: m.name,
+      size: m.size,
+      type: m.type,
+      createdAt: m.createdAt,
+      blob: payload,
+    };
+    await restoreSyncedDocument(document, current?.localRevision ?? null, guard);
+    restoredDocument = document;
   } else if (type === 'image') {
     if (
       !metadata ||
@@ -249,4 +261,5 @@ export async function applyCloudItem(
     } else throw Error('不支持的云端数据类型。');
   }
   window.dispatchEvent(new CustomEvent('voxcue-sync-applied', { detail: type }));
+  return restoredDocument;
 }

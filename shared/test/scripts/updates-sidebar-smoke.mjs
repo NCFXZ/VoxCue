@@ -2,7 +2,7 @@ import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import { verifyRoundCapFrames } from './continuous-corners.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
@@ -128,6 +128,7 @@ const aligned = async (page) => {
   assert.equal(geometry.height, 36);
 };
 const morph = async (button, idleSelector, expandedSelector, trigger, expanded) => {
+  await focusUiWindow(app, button.page());
   await button.evaluate(
     (element, selectors) => {
       globalThis.updateMorphFrames = new Promise((resolve) => {
@@ -152,7 +153,15 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
           });
           if (
             performance.now() - start < 3000 &&
-            (triggered === undefined || performance.now() - triggered < 450)
+            (triggered === undefined ||
+              performance.now() - triggered < 450 ||
+              element
+                .getAnimations({ subtree: true })
+                .some(
+                  (animation) =>
+                    animation.playState === 'running' &&
+                    animation.effect.getComputedTiming().iterations !== Infinity,
+                ))
           )
             requestAnimationFrame(sample);
           else resolve(frames);

@@ -10,6 +10,7 @@ import {
 } from '../services/cloudSync';
 import { applyCloudItem, localCloudItems } from '../services/cloudData';
 import { registerCloudShutdown } from '../services/cloudLifecycle';
+import { useKnowledgeIndex } from './knowledgeIndex';
 
 interface SyncStore extends SyncView {
   ready: boolean;
@@ -115,7 +116,11 @@ export const useCloudSync = create<SyncStore>((set, get) => {
                 throw Error('本机资料绑定的账号与当前账号不同，请切回原账号。');
               return localCloudItems(kind);
             },
-            apply: (key, blob, hash, guard) => applyCloudItem(key, blob, hash, userId, guard),
+            apply: async (key, blob, hash, guard) => {
+              const document = await applyCloudItem(key, blob, hash, userId, guard);
+              guard();
+              if (document) void useKnowledgeIndex.getState().index(document);
+            },
             persist: (value) => syncDatabase<void>(userId, value),
             emit: (view) => {
               if (epoch === generation) set({ ...view, ready: true });

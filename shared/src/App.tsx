@@ -8,9 +8,10 @@ import { KnowledgePage } from './components/KnowledgePage';
 import { usePreparation } from './stores/preparation';
 import { useCloudSync } from './stores/cloudSync';
 import { useKnowledge } from './stores/knowledge';
+import { useKnowledgeIndex } from './stores/knowledgeIndex';
 import { useCloudAccount } from './stores/cloudAccount';
 import { useAuth } from './stores/auth';
-import { useComponents } from './stores/components';
+import { useComponents, useComponentReady } from './stores/components';
 import { useUpdates } from './stores/updates';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
@@ -52,6 +53,14 @@ export function App() {
   const auth = useAuth();
   const account = useCloudAccount();
   const signedIn = !!account.state.user || auth.session?.mode === 'demo';
+  const ragReady = useComponentReady('rag');
+  useEffect(() => {
+    if (isLoginWindow || !signedIn) return;
+    return useKnowledgeIndex.getState().connect();
+  }, [isLoginWindow, signedIn]);
+  useEffect(() => {
+    if (!isLoginWindow && signedIn && ragReady) void useKnowledgeIndex.getState().reconcile();
+  }, [isLoginWindow, signedIn, ragReady]);
   const showLogin = isLoginWindow || (account.loaded && !signedIn);
   useEffect(() => {
     if (account.loaded && !signedIn) setSettings(false);
@@ -69,21 +78,38 @@ export function App() {
   }, [isLoginWindow, account.state.user?.id, account.revision]);
   useEffect(() => {
     if (isLoginWindow) return;
+    let refreshingKnowledge = false;
+    let knowledgePending = false;
+    let closed = false;
+    const refreshKnowledge = async () => {
+      if (refreshingKnowledge) return;
+      refreshingKnowledge = true;
+      try {
+        do {
+          knowledgePending = false;
+          await useKnowledge.getState().load();
+          if (closed) return;
+          const state = useKnowledge.getState();
+          if (state.selectedId) await state.open(state.selectedId);
+        } while (knowledgePending && !closed);
+      } finally {
+        refreshingKnowledge = false;
+      }
+    };
     const applied = (event: Event) => {
       const type = (event as CustomEvent).detail;
       if (type === 'profile' || type === 'resume') void usePreparation.getState().load();
       if (type === 'record' || type === 'image') useHistory.getState().load();
-      if (type === 'base' || type === 'file')
-        void useKnowledge
-          .getState()
-          .load()
-          .then(() => {
-            const state = useKnowledge.getState();
-            if (state.selectedId) return state.open(state.selectedId);
-          });
+      if (type === 'base' || type === 'file') {
+        knowledgePending = true;
+        void refreshKnowledge();
+      }
     };
     window.addEventListener('voxcue-sync-applied', applied);
-    return () => window.removeEventListener('voxcue-sync-applied', applied);
+    return () => {
+      closed = true;
+      window.removeEventListener('voxcue-sync-applied', applied);
+    };
   }, [isLoginWindow]);
   const transientChat = usePreparation((state) => state.streaming || !!state.chatStorageError);
   useEffect(() => {

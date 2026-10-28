@@ -79,4 +79,35 @@ describe('cloud data restoration boundary', () => {
     ).rejects.toThrow('个人信息');
     expect(values.get(profileKey)).toBeUndefined();
   });
+  it('restored originals are returned for indexing without emitting a local edit', async () => {
+    const events: string[] = [];
+    vi.stubGlobal('window', {
+      dispatchEvent: (event: Event) => {
+        events.push(event.type);
+        return true;
+      },
+    });
+    await applyCloudItem(
+      'base:base',
+      packCloudItem('base:base', JSON.stringify({ id: 'base', name: 'Synthetic', createdAt: 1 })),
+    );
+    const metadata = {
+      id: 'doc',
+      baseId: 'base',
+      name: 'remote.txt',
+      size: 7,
+      type: 'text/plain',
+      createdAt: 1,
+    };
+    const document = await applyCloudItem(
+      'file:doc',
+      packCloudItem('file:doc', 'content', metadata),
+    );
+    expect(document).toMatchObject(metadata);
+    expect(await document!.blob.text()).toBe('content');
+    expect(await (await localKnowledge.listDocuments('base'))[0].blob.text()).toBe('content');
+    expect(events).toEqual(['voxcue-sync-applied', 'voxcue-sync-applied']);
+    await localKnowledge.saveBase({ id: 'base', name: 'Local edit', createdAt: 1 });
+    expect(events.at(-1)).toBe('voxcue-local-change');
+  });
 });

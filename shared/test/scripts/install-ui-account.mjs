@@ -1,6 +1,12 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { testRoot } from './test-workspace.mjs';
+export async function focusUiWindow(app, page) {
+  if (process.platform !== 'darwin') return;
+  await app.evaluate(({ app }) => app.focus({ steal: true }));
+  await (await app.browserWindow(page)).evaluate((window) => window.focus());
+  await page.waitForFunction(() => document.hasFocus());
+}
 export async function enterDemoUiAccount(app, login) {
   await app.evaluate(() => globalThis.primaryAccountFixture.login());
   return login.evaluate(() => window.desktop.enterDemo());

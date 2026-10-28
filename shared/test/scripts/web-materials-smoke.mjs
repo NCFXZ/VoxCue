@@ -6,7 +6,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
 const entry = path.join(testRoot, 'web-materials.cjs');
@@ -195,6 +195,8 @@ try {
         for (const window of BrowserWindow.getAllWindows())
           window.webContents.send('appearance:accent-changed', color);
       }, accent);
+      await focusUiWindow(app, page);
+      await page.mouse.move(0, 0);
       await item.hover();
       await page
         .waitForFunction((accent) => {

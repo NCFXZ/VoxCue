@@ -226,9 +226,12 @@ function fixture(saved?: SyncSaved) {
     get engine() {
       return engine;
     },
-    restart() {
+    restart(cold = false) {
       engine.stop();
-      engine = new CloudSyncEngine({ ...ports, saved: stored });
+      engine = new CloudSyncEngine({
+        ...ports,
+        saved: cold ? { preferences: stored!.preferences, baselines: {} } : stored,
+      });
     },
     local,
     remote,
@@ -423,6 +426,112 @@ describe('cloud sync consistency and backpressure', () => {
       .filter((call) => call.action === 'begin')
       .map((call) => (call.action === 'begin' ? f.remote.get(call.id)!.name : ''));
     expect(started).toEqual(['base:a', 'file:a', 'base:b', 'file:b']);
+  });
+  it('cold restores whole libraries in order and keeps the active library syncing through its files', async () => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    f.put('base:b', 'knowledgebase', 'B');
+    for (const base of ['b', 'a']) {
+      f.local.set('file:' + base, {
+        kind: 'knowledgebase',
+        parent: 'base:' + base,
+        blob: packCloudItem('file:' + base, new Uint8Array(1048576 + 2), {
+          id: base,
+          baseId: base,
+        }),
+      });
+    }
+    await f.enable('knowledgebase');
+    f.local.clear();
+    f.restart(true);
+    const observed: string[] = [];
+    f.setHook(async (call) => {
+      if (call.action === 'read' && f.local.has('base:a')) {
+        expect(f.view.marks['base:a'].status).toBe(f.local.has('file:a') ? 'synced' : 'syncing');
+        if (!f.local.has('file:a')) observed.push('syncing');
+        if (f.local.has('base:b')) expect(f.view.marks['base:b'].status).toBe('syncing');
+      }
+      return undefined;
+    });
+    await f.engine.request();
+    expect(observed.length).toBeGreaterThan(0);
+    expect(f.applied).toEqual(['base:a', 'file:a', 'base:b', 'file:b']);
+    expect(f.saved.baselines['file:a'].parent).toBe('base:a');
+    expect(f.saved.baselines['file:b'].parent).toBe('base:b');
+    expect(f.view.marks['base:a'].status).toBe('synced');
+    expect(f.view.marks['base:b'].status).toBe('synced');
+    await f.engine.pause('base:a');
+    expect(f.view.marks['file:a'].status).toBe('paused');
+    expect(f.view.marks['file:b'].status).toBe('synced');
+  });
+  it('a corrupted cold-restore header never restores its file or trusts its parent', async () => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    f.local.set('file:a', {
+      kind: 'knowledgebase',
+      parent: 'base:a',
+      blob: packCloudItem('file:a', 'payload', { id: 'a', baseId: 'a' }),
+    });
+    await f.enable('knowledgebase');
+    f.local.clear();
+    f.restart(true);
+    const file = [...f.remote.values()].find((r) => r.name === 'file:a')!;
+    f.setHook(async (call) =>
+      call.action === 'read' && call.id === file.id
+        ? { ok: true, value: new Uint8Array(file.bytes) }
+        : undefined,
+    );
+    await f.engine.request();
+    expect(f.applied).toEqual(['base:a']);
+    expect(f.view.marks['file:a'].status).toBe('error');
+    expect(f.saved.baselines['file:a']).toBeUndefined();
+  });
+  it('cancelling a cold library download pauses its remaining files; resume downloads instead of deleting them', async () => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    f.local.set('file:a', {
+      kind: 'knowledgebase',
+      parent: 'base:a',
+      blob: packCloudItem('file:a', new Uint8Array(1048576 + 2), { id: 'a', baseId: 'a' }),
+    });
+    await f.enable('knowledgebase');
+    f.local.clear();
+    f.restart(true);
+    let release!: () => void, entered!: () => void;
+    const blocked = new Promise<void>((r) => {
+      release = r;
+    });
+    const started = new Promise<void>((r) => {
+      entered = r;
+    });
+    f.setHook(async (call) => {
+      if (call.action === 'read' && call.index === 1) {
+        entered();
+        await blocked;
+      }
+      return undefined;
+    });
+    const downloading = f.engine.request();
+    await started;
+    const cancel = f.engine.pause('base:a');
+    release();
+    await Promise.all([downloading, cancel]);
+    await f.engine.idle();
+    expect(f.applied).toEqual(['base:a']);
+    expect(f.view.marks['base:a'].status).toBe('paused');
+    expect(f.saved.baselines['file:a']).toMatchObject({
+      parent: 'base:a',
+      suppressed: true,
+      unrestored: true,
+    });
+    f.restart();
+    await f.engine.request();
+    expect(f.applied).toEqual(['base:a']);
+    await f.engine.resume('base:a');
+    expect(f.applied).toEqual(['base:a', 'file:a']);
+    expect(f.remote.size).toBe(2);
+    expect(f.view.marks['base:a'].status).toBe('synced');
+    expect(f.calls.filter((call) => call.action === 'remove')).toEqual([]);
   });
   for (const [key, kind] of [
     ['profile:main', 'profile'],

@@ -32,6 +32,7 @@ async function transaction<T>(
   stores: string[],
   mode: IDBTransactionMode,
   operation: (tx: IDBTransaction, result: (value: T) => void) => void,
+  notify = true,
 ): Promise<T> {
   const db = await openDatabase();
   return new Promise((resolve, reject) => {
@@ -39,7 +40,7 @@ async function transaction<T>(
     let value: T;
     tx.oncomplete = () => {
       db.close();
-      if (mode === 'readwrite') localChanged('knowledgebase');
+      if (mode === 'readwrite' && notify) localChanged('knowledgebase');
       resolve(value);
     };
     tx.onerror = tx.onabort = () => {
@@ -183,20 +184,25 @@ export async function restoreSyncedBase(
   expectedRevision: string | null,
   guard = () => {},
 ) {
-  return transaction(['bases'], 'readwrite', (tx) => {
-    const store = tx.objectStore('bases'),
-      current = store.get(base.id);
-    current.onsuccess = () => {
-      try {
-        guard();
-      } catch {
-        tx.abort();
-        return;
-      }
-      if (documentRevision(current.result) !== expectedRevision) tx.abort();
-      else store.put({ ...base, localRevision: crypto.randomUUID() });
-    };
-  });
+  return transaction(
+    ['bases'],
+    'readwrite',
+    (tx) => {
+      const store = tx.objectStore('bases'),
+        current = store.get(base.id);
+      current.onsuccess = () => {
+        try {
+          guard();
+        } catch {
+          tx.abort();
+          return;
+        }
+        if (documentRevision(current.result) !== expectedRevision) tx.abort();
+        else store.put({ ...base, localRevision: crypto.randomUUID() });
+      };
+    },
+    false,
+  );
 }
 export async function restoreSyncedDocument(
   doc: LocalDocument,
@@ -207,28 +213,33 @@ export async function restoreSyncedDocument(
   const replaced = old.filter((item) => item.id === doc.id || doc.baseId === 'personal-resume');
   await backupOriginals(replaced);
   for (const item of replaced) await deactivateOriginal(item.id);
-  return transaction(['documents'], 'readwrite', (tx) => {
-    const store = tx.objectStore('documents');
-    const current =
-      doc.baseId === 'personal-resume'
-        ? store.index('baseId').getAll(doc.baseId)
-        : store.get(doc.id);
-    current.onsuccess = () => {
-      try {
-        guard();
-      } catch {
-        tx.abort();
-        return;
-      }
-      const actual = Array.isArray(current.result) ? current.result[0] : current.result;
-      if (documentRevision(actual) !== expectedRevision) {
-        tx.abort();
-        return;
-      }
-      for (const item of replaced) store.delete(item.id);
-      store.put({ ...doc, localRevision: crypto.randomUUID() });
-    };
-  });
+  return transaction(
+    ['documents'],
+    'readwrite',
+    (tx) => {
+      const store = tx.objectStore('documents');
+      const current =
+        doc.baseId === 'personal-resume'
+          ? store.index('baseId').getAll(doc.baseId)
+          : store.get(doc.id);
+      current.onsuccess = () => {
+        try {
+          guard();
+        } catch {
+          tx.abort();
+          return;
+        }
+        const actual = Array.isArray(current.result) ? current.result[0] : current.result;
+        if (documentRevision(actual) !== expectedRevision) {
+          tx.abort();
+          return;
+        }
+        for (const item of replaced) store.delete(item.id);
+        store.put({ ...doc, localRevision: crypto.randomUUID() });
+      };
+    },
+    false,
+  );
 }
 export async function previewDocument(doc: LocalDocument): Promise<string> {
   if (!/\.(txt|md)$/i.test(doc.name))

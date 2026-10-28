@@ -10,7 +10,12 @@ import {
   type CloudSyncResult,
   type SyncKind,
 } from '../../electron/contracts/cloudSync';
-import { CloudDataConflict, digestCloudBlob, type LocalSyncItem } from './cloudData';
+import {
+  CloudDataConflict,
+  cloudFileParent,
+  digestCloudBlob,
+  type LocalSyncItem,
+} from './cloudData';
 
 export type SyncStatus =
   'unsynced' | 'synced' | 'syncing' | 'deleting' | 'pausing' | 'conflict' | 'paused' | 'error';
@@ -25,6 +30,7 @@ export interface SyncBaseline {
   hash: string;
   suppressed?: boolean;
   parent?: string;
+  unrestored?: boolean;
 }
 export interface SyncPreferences {
   enabled: Record<SyncKind, boolean>;
@@ -92,6 +98,7 @@ export function readSyncSaved(value: unknown): SyncSaved {
         number(b.revision) &&
         shaValid(b.hash) &&
         (b.suppressed === undefined || typeof b.suppressed === 'boolean') &&
+        (b.unrestored === undefined || typeof b.unrestored === 'boolean') &&
         (!b.parent || keyValid(b.parent)),
     )
   )
@@ -134,6 +141,12 @@ export class CloudSyncEngine {
   private marks: Record<string, SyncMark> = {};
   private remote = new Map<string, CloudResource>();
   private sources = new Map<string, LocalSyncItem>();
+  private parents = new Map<string, string>();
+  private activeBase?: string;
+  private prepared = new Map<
+    string,
+    { version: string; manifest: CloudManifest; first: Uint8Array<ArrayBuffer> }
+  >();
   private storage?: CloudStorage;
   private stopped = false;
   private running?: Promise<void>;
@@ -190,37 +203,33 @@ export class CloudSyncEngine {
       'paused',
       'synced',
     ];
-    for (const item of this.sources.values()) {
-      if (this.saved.baselines[item.key]?.suppressed) {
-        marks[item.key] = {
-          ...marks[item.key],
-          status: this.deleting.has(item.key)
+    const keys = this.allKeys();
+    for (const key of keys) {
+      if (this.saved.baselines[key]?.suppressed) {
+        marks[key] = {
+          ...marks[key],
+          status: this.deleting.has(key)
             ? 'deleting'
-            : this.pausing.has(item.key)
+            : this.pausing.has(key)
               ? 'pausing'
               : 'paused',
         };
         continue;
       }
-      if (
-        !item.key.startsWith('base:') &&
-        item.key !== 'profile:main' &&
-        !item.key.startsWith('record:')
-      )
+      if (!key.startsWith('base:') && key !== 'profile:main' && !key.startsWith('record:'))
         continue;
-      const children = [...this.sources.values()]
-        .filter((i) => i.parent === item.key)
-        .map((i) => i.key);
-      children.push(...(item.dependencies ?? []));
+      const children = [...keys].filter((child) => this.parentKey(child) === key);
+      children.push(...(this.sources.get(key)?.dependencies ?? []));
       const states = [
-        this.marks[item.key]?.status || 'unsynced',
+        this.marks[key]?.status || 'unsynced',
         ...children.map((k) => this.marks[k]?.status || 'unsynced'),
+        ...(this.activeBase === key ? ['syncing' as const] : []),
       ];
       const status = severity.find((s) => states.includes(s))!;
-      marks[item.key] = {
-        ...marks[item.key],
+      marks[key] = {
+        ...marks[key],
         status,
-        cloudPresent: this.remote.has(item.key) || children.some((key) => this.remote.has(key)),
+        cloudPresent: this.remote.has(key) || children.some((key) => this.remote.has(key)),
       };
     }
     this.options.emit({
@@ -394,15 +403,109 @@ export class CloudSyncEngine {
         ...[...this.remote].filter(([, r]) => r.kind === kind).map(([key]) => key),
         ...Object.keys(this.saved.baselines).filter((key) => this.keyKind(key) === kind),
       ]);
-      const ordered = this.orderedKeys(kind, keys);
-      for (const key of ordered) {
-        if (Date.now() < this.blockedUntil) return;
-        if (!this.saved.preferences.enabled[kind]) break;
-        if (kind !== 'profile') await this.profileFirst();
-        await this.one(key);
+      try {
+        if (kind === 'knowledgebase') await this.discoverParents(keys);
+        const ordered = this.orderedKeys(kind, keys);
+        for (const key of ordered) {
+          if (Date.now() < this.blockedUntil) return;
+          if (!this.saved.preferences.enabled[kind]) break;
+          this.activeBase = key.startsWith('base:') ? key : this.parentKey(key);
+          this.emit();
+          if (kind !== 'profile') await this.profileFirst();
+          await this.one(key);
+        }
+      } finally {
+        this.activeBase = undefined;
+        this.prepared.clear();
+        this.emit();
       }
     }
     await this.refresh();
+  }
+  private allKeys() {
+    return new Set([
+      ...this.sources.keys(),
+      ...this.remote.keys(),
+      ...Object.keys(this.saved.baselines),
+    ]);
+  }
+  private parentKey(key: string) {
+    return (
+      this.sources.get(key)?.parent || this.saved.baselines[key]?.parent || this.parents.get(key)
+    );
+  }
+  private async downloadManifest(remote: CloudResource): Promise<CloudManifest> {
+    const manifest = (await this.call({
+      action: 'manifest',
+      id: remote.id,
+      version: remote.headVersion!,
+    })) as CloudManifest;
+    if (
+      !manifest ||
+      manifest.bytes !== remote.bytes ||
+      manifest.sha256 !== remote.sha256 ||
+      manifest.chunkBytes !== CLOUD_CHUNK_BYTES ||
+      !number(manifest.bytes) ||
+      !manifest.bytes ||
+      manifest.bytes > 64 * 1024 ** 2 ||
+      !Array.isArray(manifest.parts) ||
+      manifest.parts.length !== Math.ceil(manifest.bytes / CLOUD_CHUNK_BYTES)
+    )
+      throw Error('云端清单无效。');
+    return manifest;
+  }
+  private async downloadPart(remote: CloudResource, manifest: CloudManifest, index: number) {
+    if (remote.kind !== 'profile') await this.profileFirst();
+    const bytes = await this.call({
+      action: 'read',
+      id: remote.id,
+      version: remote.headVersion!,
+      index,
+    });
+    if (
+      !(bytes instanceof Uint8Array) ||
+      bytes.byteLength !==
+        Math.min(CLOUD_CHUNK_BYTES, manifest.bytes - index * CLOUD_CHUNK_BYTES) ||
+      manifest.parts[index]?.index !== index ||
+      (await digestCloudBlob(new Blob([new Uint8Array(bytes)]))) !== manifest.parts[index].sha256
+    )
+      throw Error('云端分块校验失败，本地数据已保留。');
+    return new Uint8Array(bytes);
+  }
+  private async discoverParents(keys: Set<string>) {
+    // Older cloud lists have no parent field. Read only verified envelope headers
+    // before ordering a cold restore; retain at most four MiB of first chunks.
+    let retained = 0;
+    for (const key of keys) {
+      const remote = this.remote.get(key);
+      if (
+        !key.startsWith('file:') ||
+        this.sources.has(key) ||
+        this.parentKey(key) ||
+        !remote?.headVersion ||
+        this.saved.baselines[key]?.suppressed
+      )
+        continue;
+      const failed = this.failed.get(key);
+      if (failed && failed.until > Date.now()) continue;
+      this.guard();
+      try {
+        const manifest = await this.downloadManifest(remote);
+        const first = await this.downloadPart(remote, manifest, 0);
+        const parent = await cloudFileParent(key, new Blob([first]));
+        this.parents.set(key, parent);
+        if (retained + first.byteLength <= 4 * CLOUD_CHUNK_BYTES) {
+          this.prepared.set(key, { version: remote.headVersion, manifest, first });
+          retained += first.byteLength;
+        }
+      } catch (error) {
+        if (this.stopped || error instanceof SyncYield) throw error;
+        this.failed.set(key, { until: Date.now() + 60_000 });
+        this.mark(key, 'error', error instanceof Error ? error.message : '云端文件归属读取失败。');
+        if (Date.now() < this.blockedUntil) break;
+      }
+    }
+    this.emit();
   }
   private orderedKeys(kind: SyncKind, keys: Set<string>) {
     const ordered = new Set<string>();
@@ -412,7 +515,7 @@ export class CloudSyncEngine {
     if (kind === 'knowledgebase') {
       const children = new Map<string, string[]>();
       for (const key of keys) {
-        const parent = this.sources.get(key)?.parent || this.saved.baselines[key]?.parent;
+        const parent = this.parentKey(key);
         if (parent) {
           const siblings = children.get(parent) ?? [];
           siblings.push(key);
@@ -438,9 +541,7 @@ export class CloudSyncEngine {
   }
   private groupKeys(key: string) {
     const keys = new Set([key]);
-    for (const [child, source] of this.sources) if (source.parent === key) keys.add(child);
-    for (const [child, baseline] of Object.entries(this.saved.baselines))
-      if (!this.sources.has(child) && baseline.parent === key) keys.add(child);
+    for (const child of this.allKeys()) if (this.parentKey(child) === key) keys.add(child);
     for (const dependency of this.sources.get(key)?.dependencies ?? [])
       if (
         ![...this.sources.values()].some(
@@ -483,7 +584,7 @@ export class CloudSyncEngine {
     const source = this.sources.get(key),
       remote = this.remote.get(key);
     let baseline = this.saved.baselines[key];
-    const parent = source?.parent || baseline?.parent;
+    const parent = this.parentKey(key);
     if ((baseline?.suppressed || (parent && this.saved.baselines[parent]?.suppressed)) && !choice) {
       this.mark(key, 'paused', this.marks[key]?.error);
       return;
@@ -496,7 +597,7 @@ export class CloudSyncEngine {
           id: remote.id,
           revision: remote.revision,
           hash: committed.hash,
-          ...(source?.parent ? { parent: source.parent } : {}),
+          ...(parent ? { parent } : {}),
         };
         delete this.saved.uploads![key];
         await this.persist();
@@ -528,7 +629,7 @@ export class CloudSyncEngine {
             id: remote.id,
             revision: remote.revision,
             hash,
-            ...(source?.parent ? { parent: source.parent } : {}),
+            ...(parent ? { parent } : {}),
           };
           await this.persist();
           if (epoch !== this.dataEpoch[this.keyKind(key)]) {
@@ -645,7 +746,7 @@ export class CloudSyncEngine {
             id,
             revision: done.revision,
             hash,
-            ...(source?.parent ? { parent: source.parent } : {}),
+            ...(parent ? { parent } : {}),
           };
           await this.persist();
           delete this.saved.uploads[key];
@@ -673,40 +774,15 @@ export class CloudSyncEngine {
           throw error;
         }
       } else if (action === 'pull' && remote?.headVersion) {
-        const manifest = (await this.call({
-          action: 'manifest',
-          id: remote.id,
-          version: remote.headVersion,
-        })) as CloudManifest;
-        if (
-          manifest.bytes !== remote.bytes ||
-          manifest.sha256 !== remote.sha256 ||
-          manifest.chunkBytes !== CLOUD_CHUNK_BYTES ||
-          !number(manifest.bytes) ||
-          manifest.bytes > 64 * 1024 ** 2 ||
-          !Array.isArray(manifest.parts) ||
-          manifest.parts.length !== Math.ceil(manifest.bytes / CLOUD_CHUNK_BYTES)
-        )
-          throw Error('云端清单无效。');
+        const prepared = this.prepared.get(key);
+        this.prepared.delete(key);
+        const cached = prepared?.version === remote.headVersion ? prepared : undefined;
+        const manifest = cached?.manifest ?? (await this.downloadManifest(remote));
         const chunks: BlobPart[] = [];
         for (let index = 0; index < manifest.parts.length; index++) {
-          if (this.keyKind(key) !== 'profile') await this.profileFirst();
-          const bytes = await this.call({
-            action: 'read',
-            id: remote.id,
-            version: remote.headVersion,
-            index,
-          });
-          if (
-            !(bytes instanceof Uint8Array) ||
-            bytes.byteLength !==
-              Math.min(CLOUD_CHUNK_BYTES, manifest.bytes - index * CLOUD_CHUNK_BYTES) ||
-            manifest.parts[index].index !== index ||
-            (await digestCloudBlob(new Blob([new Uint8Array(bytes)]))) !==
-              manifest.parts[index].sha256
-          )
-            throw Error('云端分块校验失败，本地数据已保留。');
-          chunks.push(new Uint8Array(bytes));
+          chunks.push(
+            index === 0 && cached ? cached.first : await this.downloadPart(remote, manifest, index),
+          );
         }
         const download = new Blob(chunks);
         if ((await digestCloudBlob(download)) !== manifest.sha256)
@@ -719,10 +795,13 @@ export class CloudSyncEngine {
         this.guard();
         await this.options.apply(key, download, hash, () => this.guard());
         this.guard();
+        await this.loadSources(this.keyKind(key));
+        const restoredParent = this.parentKey(key);
         this.saved.baselines[key] = {
           id: remote.id,
           revision: remote.revision,
           hash: manifest.sha256,
+          ...(restoredParent ? { parent: restoredParent } : {}),
         };
         await this.persist();
       }
@@ -793,11 +872,15 @@ export class CloudSyncEngine {
       const keys = this.groupKeys(key);
       for (const target of keys) {
         const remote = this.remote.get(target);
+        const unrestored =
+          this.saved.baselines[target]?.unrestored ||
+          (!this.sources.has(target) && !this.saved.baselines[target]);
         this.saved.baselines[target] = {
           id: remote?.id || (await this.id(target)),
           revision: remote?.revision || 0,
           hash: remote?.sha256 || '0'.repeat(64),
           suppressed: true,
+          ...(unrestored ? { unrestored: true } : {}),
           ...(target !== key ? { parent: key } : {}),
         };
       }
@@ -872,7 +955,11 @@ export class CloudSyncEngine {
           `请先恢复所属${parent.startsWith('base:') ? '知识库' : '个人信息'}的自动同步。`,
         );
       for (const target of this.groupKeys(key)) {
-        if (this.remote.get(target)?.headVersion && this.saved.baselines[target])
+        if (this.saved.baselines[target]?.unrestored) {
+          const parent = this.parentKey(target);
+          if (parent) this.parents.set(target, parent);
+          delete this.saved.baselines[target];
+        } else if (this.remote.get(target)?.headVersion && this.saved.baselines[target])
           this.saved.baselines[target].suppressed = false;
         else delete this.saved.baselines[target];
       }
