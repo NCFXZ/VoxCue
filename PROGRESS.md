@@ -1,3 +1,7 @@
+## 2026-10-28 Mac0.6.1发行与Windows详细交接
+
+产品源码沿用8887590，用户随后授权Mac0.6.1正式三项上传并标记Latest；Windows0.6.0和全部旧草稿/模型资产保持。Windows专属及锁本机只读，配置生成、原生、DPI、语音及安装器由Windows本机逐项执行。详见[40条改动与12条回归要求](shared/docs/WINDOWS_0.6.1_HANDOFF.md)和[可直接发送的Codex提示词](shared/docs/WINDOWS_0.6.1_CODEX_PROMPT.md)。本段仅记录交付范围和入口，测试结果仅终端/对话；正式Mac三项不进入源码Git。
+
 ## 2026-10-28 客户端 0.6.1 清理与源码同步
 
 本轮版本源更新为0.6.1，只生成根与Mac配置；Windows专属及锁只读，Windows本机须运行 `node shared/scripts/sync-platform-manifests.mjs` 并自行验收。保留固定SDK/Codex、依赖、模型/索引/RAG v7、代码与更新身份、服务端0.5.1固定提交和既有公开0.6.0发行。
