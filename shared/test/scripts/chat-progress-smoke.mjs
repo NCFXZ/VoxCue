@@ -1,11 +1,10 @@
-import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { connectUiAccount, installUiAccount, closeUiApp } from './install-ui-account.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/chat-progress-')));
@@ -476,6 +475,36 @@ try {
     ),
   );
   assert.equal(await review.locator('.proposal-warning').count(), 0);
+  // Profile localStorage is synchronous; the conversation is a separate async
+  // IndexedDB transaction. Verify its committed proposal before a hard reload
+  // bypasses the application's normal close/save handshake.
+  await page.waitForFunction(
+    async (contents) => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('voxcue-preparation-chats', 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(request.error);
+      });
+      try {
+        const saved = await new Promise((resolve, reject) => {
+          const tx = db.transaction('state', 'readonly');
+          const request = tx.objectStore('state').get('current');
+          tx.oncomplete = () => resolve(request.result);
+          tx.onerror = tx.onabort = () => reject(tx.error);
+        });
+        const conversation = saved?.conversations.find((c) => c.id === saved.activeConversation);
+        const message = conversation?.messages.filter((m) => m.role === 'assistant').at(-1);
+        return (
+          message?.applied === true &&
+          JSON.stringify(message.changes?.skills?.map((skill) => skill.content)) ===
+            JSON.stringify(contents)
+        );
+      } finally {
+        db.close();
+      }
+    },
+    unverifiedSaved.skills.map((skill) => skill.content),
+  );
   await page.reload();
   await latest().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.equal(await latest().locator('.proposal-warning').count(), 0);

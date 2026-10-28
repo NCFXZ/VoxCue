@@ -439,3 +439,5 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 speech-switch/speech-progress/speech-host/speech-session/speech-store覆盖后台加载期间持续处理、双路空闲交接、300ms PCM及时间戳边界、候选预热事件隔离、失败/超时保留旧配置、暂停/结束取消、迟到保护、原问题和1800ms截止点、回答模型独立更新。desktop-ipc限定浮窗组件status只读。interview-ux覆盖切换中回答设置仍可编辑、失败回退、原回答快照，以及960/620/440宽度的浅深色横向标签/控件和窄屏单列；截图可仅内存预览，结果不落盘。
 
 Mac `node test/scripts/speech-switch-smoke.mjs --download`在自有临时目录通过生产ComponentService下载/认证固定公开Paraformer、原始Qwen ASR与当前Q8_0 Aligner，使用44.1kHz合成音频、实际AEC/utilityProcess/两层Worker/原生识别器验证模型与Metal/CPU交接和释放。不是硬件采集或真人质量测试，不读真实账户/模型缓存；临时文件退出清理。Windows专属夹具及本机原生验收仍留待Windows接续。
+
+2026-10-28 Mac复验：`node test/scripts/desktop-session-smoke.mjs`覆盖9个锁屏/控制台夹具与实际当前会话。守卫要求当前UID唯一已登录且位于控制台；解锁时缺少锁屏字段不再误拒，任何锁定或未知状态仍拒绝。管理滚动末端使用浏览器真实限位与末内容框的<1px几何断言，避免整数scrollHeight/clientHeight在125%缩放下产生假残差；不扩大阈值。聊天硬刷新前另读已提交的IndexedDB提案，不代替原刷新恢复断言。最新本轮完整结果见[Mac0.6.0发行复验](../docs/MACOS_0.6.0_RELEASE.md)。

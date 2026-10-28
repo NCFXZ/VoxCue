@@ -4,9 +4,9 @@
 
 客户端默认连接 https://accounts.voxcue.com.cn，配套[独立服务端 0.5.1](https://github.com/NCFXZ/VoxCue-server)部署在腾讯云首尔，邮件使用腾讯云 SES。本轮服务端源码、配置和部署只读；同步在客户端默认关闭，本地资料始终保留。
 
-**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本次Mac任务仅上传源码，不公开发行安装包。
+**0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本轮清理、完整复验及Mac包补充见[Mac0.6.0发行记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
 
-**当前公开发行是Windows 0.6.0**：[下载安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.0/VoxCue-Setup-0.6.0-x64.exe)、[发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.0)、[本机验包与发行记录](shared/docs/WINDOWS_0.6.0_RELEASE.md)。用户后续授权发行并隐藏旧版；17个旧Windows/Mac发行已转为可恢复草稿，84个资产保留。Mac0.6.0待本机适配验收，目前没有公开Mac安装包；模型下载资源保持公开。
+**当前公开发行是0.6.0（Windows/Mac）**：[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.0/VoxCue-Setup-0.6.0-x64.exe)、[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.0/VoxCue-0.6.0-arm64.dmg)、[发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.0)、[Windows发行记录](shared/docs/WINDOWS_0.6.0_RELEASE.md)、[Mac发行复验](shared/docs/MACOS_0.6.0_RELEASE.md)。用户后续授权发行并隐藏旧版；17个旧Windows/Mac发行已转为可恢复草稿，84个资产保留。Mac0.6.0已完成本机验包、原生更新暂存取消及完整线上下载验证，支持Apple Silicon/macOS14.2及以上；模型下载资源保持公开。
 
 当前工作区共享版本源为 **0.6.0**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。Mac本轮已同步自己的生成配置和依赖锁，实际构建运行Electron44.10.0；Windows目录及锁保持只读。Mac原生、视觉与人工边界见本机验证记录。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
@@ -28,7 +28,7 @@ ChatGPT 聊天与额度复用一次官方托管登录；Copilot 使用固定官�
 
 ## 开发与启动
 
-2026-10-22 本地 Mac 适配为侧栏和输入框接入原生 Regular Liquid Glass；顶部同用 Regular，按背后内容渐显虚化，下拉菜单使用 NSMenu 系统材质并保留原图标。原生圆形/胶囊按钮无着色，开始面试文字与图标使用主题色。材质全部位于 `macos/`，布局与业务继续共用 `shared/`，输入框保留原连续圆角。0.5.7 按当前生产原生界面与共享毛玻璃回退分别进行完整本机回归，不改变已发布 v0.5.6。实现与边界见 [Mac 说明](macos/docs/MACOS_PORT.md)。
+当前Mac与Windows共用页面和内部控件；Mac保留原生红绿灯、侧栏系统材质、SF Symbols、音频/权限/凭据及更新集成，最低macOS14.2/arm64。原Liquid Glass/AppKit内容控件已移除；历史发行的系统要求只按历史理解。详见[Mac说明](macos/docs/MACOS_PORT.md)。
 
 0.5.6 为面试回答增加与聊天一致的底部渐隐；字号仅调整对话气泡，输入框及状态文字固定。生成失败最多追加3次自动重试，手动停止/结束/关闭可取消；重试次数显示在服务名称旁，紧凑错误卡随对应回答滚动，与回答气泡共用32px连续角。技能提案的来源未核验整块提示和警告标签移除，后台来源核验/保存兼容保持；提示词未改。回归可在明确授权后校验并复制已有正式模型至临时目录，测试结束删除副本，保留原模型。完整行为、逐文件清单、Windows验证及Mac接续结果见[0.5.6交接](shared/docs/MACOS_0.5.6_HANDOFF.md)。
 

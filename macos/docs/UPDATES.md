@@ -1,12 +1,18 @@
 # Mac 安装与免费自动更新
 
-当前源码面向 Apple Silicon arm64、macOS 26+，仅支持 Liquid Glass。[Mac 0.5.9 已正式发布](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.9)，提供 DMG、签名更新 ZIP 和 latest-mac.yml；沿用固定本地代码签名/凭据助手和 Ed25519 公钥，保留现有 v0.5.8 Latest、Windows/模型/旧版本资产与真实安装。0.5.9 的 ChatGPT 统一登录/额度使用固定官方 Codex 0.164.0，Copilot 恢复固定官方 SDK/运行时 1.0.21；两套平台运行时进入薄包，模型和 ONNX Web 仍不内嵌。用户无需另装 Node/Python。首次下载 DMG 将 VoxCue 拖入 Applications；应用按本平台最高完整正式资产选择更新，不依赖统一 Latest。面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。
+当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。0.6.0本轮Mac验收及资产状态见[Mac验证记录](../../shared/docs/MACOS_0.6.0_VERIFICATION.md)。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
-当前源码共用“设置 → 更新 → 自动下载更新”，默认开启并本机保存；关闭后仅检查和提醒。有更新时，侧栏底部显示36px圆形下载操作、主题色进度圆环或重启操作。侧栏展开时，悬停/键盘聚焦展开中性胶囊，显示“下载更新”“取消下载”或“重启以更新”，高度保持36px；侧栏收起时保持图标，不展开文字。取消保留首秒保护和红色图标/文字。Mac使用标准AppKit Push over-glass，Windows使用共用中性底板，不使用亮面Glass bezel。设置内保留完整文字与百分比，点击使用现有更新流程。关闭设置后进度继续刷新，关闭自动下载不取消已开始的下载；只有明确点击安装且保存成功、无面试时才进入 Sparkle。原生签名与安装边界不变；这些改动纳入0.5.8源码，未重写已发布0.5.7安装包；本轮未创建0.5.8发行。
+更新选项位于“设置 → 关于与更新”，自动下载默认开启并保存在本机；关闭后仅检查和提醒。侧栏使用共用36px圆形操作，展开时悬停/键盘聚焦以中性胶囊显示下载、取消或重启，收起侧栏保持图标。首秒取消保护、主题色进度环、保存确认和面试禁装保持；Mac加载使用SF Symbols静态遮罩与12段扫亮。关闭设置不停止进度刷新，关闭自动下载不取消已开始的下载；只有明确安装且保存成功后才进入Sparkle。
 
-## 0.5.9 最终产物检查
+## 历史发行
+
+0.5.9、0.5.10和0.5.11的当时验包与发行证据分别保存在对应交接/验证记录中，不作为当前下载或系统要求。2026-10-27 Windows任务已将旧应用发行转为可恢复草稿，模型资源保持公开；不得为恢复Mac下载而自行公开旧版。当前0.6.0沿用原代码签名、凭据助手与Ed25519身份。
+
+### 0.5.9历史验包（当时macOS26.0）
+
+以下为2026-10-24的当时记录；其中公开下载、Latest与AppKit表述只按历史理解，不是当前状态。
 
 正式三项保留在 `macos/release/0.5.9`，使用既有固定签名与Ed25519。最终ZIP的ASAR运行时新增实测：`node test/scripts/package-runtimes-smoke.mjs`以无登录Copilot ping、断网Codex空账户RPC确认两个固定进程均可启动；曾复现并修复Copilot SDK对虚拟ASAR路径chmod失败，现通过官方stdio连接指定真实unpacked路径。没有修改供应商SDK、版本、模型或账户边界。
 
@@ -48,7 +54,7 @@ corepack pnpm test:package
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
 - `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
 
-按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。Latest 按当次授权处理；Mac 0.5.7新建正式v0.5.7，保留已有v0.5.6 Latest。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
+按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。Latest 按当次授权处理；本轮补齐既有v0.6.0，沿用现有Latest状态。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 
@@ -56,4 +62,4 @@ corepack pnpm test:package
 
 `test:updates:native` 使用独立临时密钥和旧/新应用，包含签名拒绝、取消与真实替换/重启，不使用真实资料或发行私钥。但 CFFIXED_USER_HOME 不能保证 Sparkle/Launch Services/cfprefsd 的全部偏好写入都留在临时目录；入口会清理专用测试域，严格“必要文件仅系统临时目录”的任务仍须排除它。共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手；其外部更新器是夹具，不能单独作为原生安装证明。
 
-`test:package` 使用现有固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据与 SHA512，核对应用内公钥、版本及凭据助手的固定签名和原始字节。从最终 ZIP 解压实际应用，核对最终 DMG 的相同签名副本、安装布局和 Retina 背景，确认不嵌入模型或 ONNX Web，并包含固定 Copilot/Codex 及其本平台可执行文件。明确设置 `VOXCUE_TEST_COMPONENT_CACHE` 时只读校验正式模型后复制到临时profile，再断网复用，验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX与离线RAG；结束删除副本并复核源模型。未设置时保留原固定公开下载分支，正式目录不得直接作为隔离Electron的组件根。0.5.7追加从最终包启动合成账户主窗口，核对实际Liquid Glass绑定、三枚原生按钮居中、投影输入样式/40px连续轮廓、合成发送与共用胶囊标记；当前Mac必须具备Liquid Glass，不再接受旧系统shared回退；Windows共用实现另行检查。`--install-archive` 将临时副本的宿主版本降为 0.2.0，让 Sparkle 准备生产 ZIP 后取消，不替换真实安装；仍可能涉及临时目录外的原生偏好，严格限定全部原生写入仅临时目录的任务须排除该选项。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不触发原生安装或发布测试版本。
+`test:package` 使用现有固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据与 SHA512，核对应用内公钥、版本及凭据助手的固定签名和原始字节。从最终 ZIP 解压实际应用，核对最终 DMG 的相同签名副本、安装布局和 Retina 背景，确认不嵌入模型或 ONNX Web，并包含固定 Copilot/Codex 及其本平台可执行文件。明确设置 `VOXCUE_TEST_COMPONENT_CACHE` 时只读校验正式模型后复制到临时profile，再断网复用，验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX与离线RAG；结束删除副本并复核源模型。未设置时保留原固定公开下载分支，正式目录不得直接作为隔离Electron的组件根。最终包另启动合成主账号窗口，核对原生红绿灯、系统侧栏、共用控件、40px输入框、合成发送与胶囊标记；不恢复Liquid Glass/AppKit内容控件，Windows本机另验。`--install-archive` 将临时副本的宿主版本降为 0.2.0，让 Sparkle 准备生产 ZIP 后取消，不替换真实安装；仍可能涉及临时目录外的原生偏好，严格限定全部原生写入仅临时目录的任务须排除该选项。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不触发原生安装或发布测试版本。

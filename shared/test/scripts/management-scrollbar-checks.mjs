@@ -94,7 +94,10 @@ export async function checkManagementScrollbars({ app, main, directory, services
             gutterLeft: a.left + node.clientWidth,
             headerRight: b.right,
             filter: getComputedStyle(header, '::before').backdropFilter,
-            atEnd: Math.abs(node.scrollHeight - node.scrollTop - node.clientHeight) < 1,
+            contentHeight: node.scrollHeight,
+            viewportHeight: node.clientHeight,
+            contentTop: node.scrollTop,
+            roundedEndResidual: node.scrollHeight - node.scrollTop - node.clientHeight,
           };
         },
         await header.evaluate((node) => {
@@ -110,7 +113,26 @@ export async function checkManagementScrollbars({ app, main, directory, services
       if (gutter)
         assert.ok(geometry.headerRight <= geometry.gutterLeft + 1, JSON.stringify(geometry));
       if (material) assert.ok(geometry.filter.includes('24px'), JSON.stringify(geometry));
-      if (position === Number.MAX_SAFE_INTEGER) assert.equal(geometry.atEnd, true);
+      if (position === Number.MAX_SAFE_INTEGER) {
+        // Under fractional application zoom, the two integer height properties
+        // round independently from the fractional scroll position (125% gave
+        // 1882 - 1304.8 - 576 = 1.2). Check the actual browser clamp and the
+        // final content box instead, keeping the original <1 CSS px precision.
+        const end = await scroll.evaluate((node) => {
+          const before = node.scrollTop;
+          node.scrollTop += 4096;
+          const viewport = node.getBoundingClientRect();
+          return {
+            remainingMovement: node.scrollTop - before,
+            lastBottom: node.lastElementChild.getBoundingClientRect().bottom,
+            viewportBottom: viewport.bottom - parseFloat(getComputedStyle(node).borderBottomWidth),
+          };
+        });
+        assert.equal(end.remainingMovement, 0, JSON.stringify({ geometry, end }));
+        assert.ok(end.lastBottom - end.viewportBottom < 1, JSON.stringify({ geometry, end }));
+        if (Math.abs(geometry.roundedEndResidual) >= 1)
+          console.log('Fractional scroll-end geometry: ' + JSON.stringify({ geometry, end }));
+      }
       await header.evaluate((node) => delete node.dataset.scrollbarCheckHeader);
     }
     await scroll.evaluate((node) => {
