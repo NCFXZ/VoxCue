@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { localChanged } from '../services/localChanges';
+import { recordFeature } from '../services/telemetry';
 import { componentReady } from './components';
 import { mergeActivityLog } from '../../electron/contracts/activity';
 import {
@@ -218,6 +219,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   addAttachments(files) {
     try {
       set({ attachments: stageAttachments(get().attachments, files), error: null });
+      if (files.length) recordFeature('file_import');
     } catch (error) {
       set({ error: error instanceof Error ? error.message : '添加文件失败。' });
     }
@@ -362,6 +364,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       const merged = { ...get().info, ...info };
       if (!validProfile(merged)) throw new Error('个人信息格式无效或内容过长。');
       localStorage.setItem('copilot-personal-info-v1', JSON.stringify(merged));
+      recordFeature('profile_edit');
       localChanged('profile');
       set((state) => ({
         info: merged,

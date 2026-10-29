@@ -40,6 +40,8 @@ export interface CloudAccountState {
   configured: boolean;
   user: CloudUser | null;
   verified: boolean;
+  /** Desktop-only preference; a local session is never an authenticated cloud user. */
+  localMode?: boolean;
 }
 export interface CloudSession {
   id: string;

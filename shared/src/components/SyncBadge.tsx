@@ -1,6 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useCloudSync } from '../stores/cloudSync';
+import { useCloudAccount } from '../stores/cloudAccount';
 import { Cloud, CloudDone, CloudSync, CloudOff, CloudError, X } from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
@@ -18,6 +19,7 @@ const labels: Record<SyncStatus, string> = {
 };
 export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; label?: string }) {
   const mark = useCloudSync((s) => s.marks[itemKey]);
+  const localMode = useCloudAccount((s) => s.state.localMode);
   const [acting, setActing] = useState(false);
   const status = mark?.status || 'unsynced';
   const [open, setOpen] = useState(false);
@@ -97,6 +99,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
           : status === 'error' || status === 'conflict'
             ? CloudError
             : Cloud;
+  if (localMode) return null;
   return (
     <span
       className={`sync-indicator sync-${status}`}

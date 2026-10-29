@@ -35,48 +35,14 @@
 .cloud-account-panel .settings-hint {
   margin: 0;
 }
-.cloud-account-modes,
-.cloud-account-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-.cloud-account-modes button[aria-pressed='true'] {
-  background: color-mix(in srgb, var(--foreground) 12%, var(--surface));
-  font-weight: 600;
-}
 .cloud-code-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
 }
-.cloud-session-list {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.cloud-session-list li {
-  display: flex;
-  gap: 12px;
-  justify-content: space-between;
-  align-items: center;
-}
-.cloud-session-list li > div {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-.cloud-session-list small {
-  display: block;
-  color: var(--muted);
-}
 .cloud-account-panel .settings-entry strong {
   overflow-wrap: anywhere;
-}
-.cloud-account-dialog {
-  width: min(460px, calc(100vw - 32px));
 }
 @custom-variant dark (&:is(.dark *));
 :root {
@@ -92,6 +58,8 @@
   --line-body: 1.75;
   --line-control: 1.4;
   --line-secondary: 1.6;
+  --panel-motion-duration: 240ms;
+  --panel-motion-easing: cubic-bezier(0.2, 0, 0, 1);
   --button-morph-duration: 220ms;
   --button-morph-easing: ease;
   --button-morph-shift: 3px;
@@ -301,7 +269,7 @@ p {
   display: flex;
   flex-direction: column;
   background: transparent;
-  transition: width 0.2s;
+  transition: width var(--panel-motion-duration) var(--panel-motion-easing);
   overflow: clip;
 }
 .sidebar:not(.collapsed) > :is(.sidebar-heading, nav, .sidebar-conversations, .sidebar-bottom) {
@@ -1537,7 +1505,7 @@ p {
   display: flex;
   flex-direction: column;
   margin-right: 0;
-  transition: margin-right 220ms ease-out;
+  transition: margin-right var(--panel-motion-duration) var(--panel-motion-easing);
 }
 .chat-scroll {
   flex: 1;
@@ -2100,6 +2068,9 @@ p {
     margin 180ms ease,
     opacity 180ms ease;
 }
+.floating-screenshot-button[data-shortcut-platform='macos'] .floating-screenshot-shortcut {
+  font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+}
 .floating-screenshot-button[data-expanded='true'] .floating-screenshot-count {
   width: 34px;
   margin-left: 6px;
@@ -2321,25 +2292,81 @@ p {
 }
 .chat-drop-hint {
   position: absolute;
-  inset: 8px;
+  inset: 16px;
   z-index: 3;
   display: grid;
   place-items: center;
   padding: 20px;
-  border: 2px dashed var(--accent);
-  border-radius: var(--radius-card);
+  border: 1.5px dashed color-mix(in srgb, var(--accent) 45%, var(--border));
+  border-radius: 24px;
   color: var(--foreground);
-  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+  backdrop-filter: blur(8px);
   font-size: var(--type-body);
   text-align: center;
   pointer-events: none;
 }
-.chat-drop-hint > span {
-  padding: 12px 16px;
+.chat-drop-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 340px);
+  padding: 32px 24px 24px;
   border: 1px solid var(--border);
-  border-radius: var(--radius-control);
+  border-radius: 24px;
   background: var(--surface);
-  box-shadow: var(--shadow-raised);
+  box-shadow: var(--shadow-popup);
+  animation: chat-drop-enter var(--panel-motion-duration) var(--panel-motion-easing);
+}
+.chat-drop-icon {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  margin-bottom: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 14%, var(--border));
+  border-radius: 20px;
+  background: color-mix(in srgb, var(--accent) 7%, var(--surface));
+  color: var(--accent);
+}
+.chat-drop-card strong {
+  font-size: var(--type-title);
+  font-weight: 600;
+}
+.chat-drop-card p {
+  color: var(--muted);
+}
+.chat-drop-limits {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+}
+.chat-drop-limits span {
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--soft);
+}
+@keyframes chat-drop-enter {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  .chat-drop-hint {
+    background: var(--surface);
+    backdrop-filter: none;
+    border-color: var(--accent);
+  }
 }
 .chat-attachments {
   display: flex;
@@ -2642,7 +2669,8 @@ p {
   font-size: var(--type-secondary);
   line-height: 1.7;
 }
-.usage-panel .account-usage-link {
+.usage-panel .account-usage-link,
+.updates-feedback {
   color: var(--accent);
   font-size: var(--type-secondary);
   line-height: 1.7;
@@ -2650,7 +2678,8 @@ p {
   text-underline-offset: 3px;
   white-space: nowrap;
 }
-.usage-panel .account-usage-link:hover {
+.usage-panel .account-usage-link:hover,
+.updates-feedback:hover {
   text-decoration-thickness: 2px;
 }
 .usage-panel .usage-footer {
@@ -3441,6 +3470,9 @@ p {
   align-items: center;
   justify-content: flex-end;
   gap: 8px;
+}
+.settings-usage > header .account-quota-heading > strong {
+  font-size: var(--type-body);
 }
 .settings-usage .ui-button {
   padding: 6px 10px;
@@ -4469,7 +4501,7 @@ details[open] > summary > .disclosure-chevron {
   opacity: 1;
   visibility: visible;
   transition:
-    margin-right 240ms cubic-bezier(0.2, 0, 0, 1),
+    margin-right var(--panel-motion-duration) var(--panel-motion-easing),
     opacity 180ms ease-out,
     visibility 0s;
 }
@@ -4478,7 +4510,7 @@ details[open] > summary > .disclosure-chevron {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition-delay: 0s, 0s, 240ms;
+  transition-delay: 0s, 0s, var(--panel-motion-duration);
 }
 .record-answer-panel > header {
   padding: 24px 22px 20px;
@@ -4924,9 +4956,9 @@ details[open] > summary > .disclosure-chevron {
   opacity: 1;
   visibility: visible;
   transition:
-    width 220ms ease-out,
+    width var(--panel-motion-duration) var(--panel-motion-easing),
     opacity 180ms ease-out,
-    border-left-width 220ms ease-out,
+    border-left-width var(--panel-motion-duration) var(--panel-motion-easing),
     visibility 0s;
 }
 .personal-panel[data-open='false'] {
@@ -4935,7 +4967,7 @@ details[open] > summary > .disclosure-chevron {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
-  transition-delay: 0s, 0s, 0s, 220ms;
+  transition-delay: 0s, 0s, 0s, var(--panel-motion-duration);
 }
 .personal-panel > header {
   flex-shrink: 0;
@@ -6447,8 +6479,8 @@ small {
   corner-shape: round;
   z-index: 1;
   transition:
-    top 220ms ease,
-    right 220ms ease;
+    top var(--panel-motion-duration) var(--panel-motion-easing),
+    right var(--panel-motion-duration) var(--panel-motion-easing);
 }
 .native-window-controls .sidebar.collapsed .sidebar-toggle-button {
   top: 54px;
@@ -6811,15 +6843,15 @@ svg[data-ui-icon] {
 .personal-panel {
   margin: 12px 12px 12px 0;
   transition:
-    width 220ms ease-out,
-    margin-right 220ms ease-out,
+    width var(--panel-motion-duration) var(--panel-motion-easing),
+    margin-right var(--panel-motion-duration) var(--panel-motion-easing),
     opacity 180ms ease-out,
     visibility 0s;
 }
 .personal-panel[data-open='false'] {
   margin-right: 0;
   border-width: 0;
-  transition-delay: 0s, 0s, 0s, 220ms;
+  transition-delay: 0s, 0s, 0s, var(--panel-motion-duration);
 }
 .preparation-workspace .personal-panel {
   margin-top: 64px;
@@ -7165,7 +7197,7 @@ svg[data-ui-icon] {
   border-color: color-mix(in srgb, var(--foreground) 11%, var(--surface));
   box-shadow: 0 2px 3px -2px rgb(0 0 0 / 16%);
 }
-.login-auth-content .cloud-account-form > .button-primary {
+.login-auth-content .cloud-account-form > :is(.button-primary, .login-skip-button) {
   height: 42px;
   margin-top: 4px;
   border-radius: 12px;
@@ -7174,6 +7206,15 @@ svg[data-ui-icon] {
   color: var(--surface);
   font-size: 14px;
   font-weight: 600;
+}
+.login-auth-content .cloud-account-form > .login-skip-button {
+  margin-top: 0;
+  background: var(--surface);
+  color: var(--foreground);
+  border-color: var(--border);
+}
+.login-auth-content .cloud-account-form > .login-skip-button:hover:not(:disabled) {
+  background: var(--soft);
 }
 .login-auth-content .cloud-account-form > .button-primary:hover:not(:disabled) {
   background: color-mix(in srgb, var(--foreground) 86%, var(--surface));
@@ -7274,7 +7315,7 @@ svg[data-ui-icon] {
   }
   .login-auth-content .cloud-account-form input,
   .login-auth-content .cloud-code-row > button,
-  .login-auth-content .cloud-account-form > .button-primary {
+  .login-auth-content .cloud-account-form > :is(.button-primary, .login-skip-button) {
     height: 40px;
   }
 }
@@ -7347,6 +7388,10 @@ svg.ui-loader {
 .cloud-storage-heading > strong {
   font-size: var(--type-body);
   font-weight: 500;
+}
+.cloud-storage-details > span {
+  margin-inline-start: auto;
+  text-align: right;
 }
 .cloud-storage-heading > span,
 .cloud-storage-details {
@@ -7469,9 +7514,33 @@ svg.ui-loader {
 .cloud-sync-actions {
   justify-content: flex-end;
 }
-.account-deletion-panel {
+.account-export-panel {
   border-top: 1px solid var(--border);
   margin-top: 24px;
+}
+.updates-footer {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+}
+.updates-feedback {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-inline-start: auto;
+  white-space: nowrap;
+}
+.updates-feedback img {
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  /* Align the visible mark with the Chinese glyphs, rather than their line box. */
+  transform: translateY(-0.25px);
+}
+.cloud-account-panel + .account-export-panel {
+  border-top: 0;
+  margin-top: 0;
 }
 .account-delete-dialog {
   width: min(560px, calc(100vw - 32px));
@@ -7485,10 +7554,6 @@ svg.ui-loader {
 .account-delete-dialog .account-delete-warning {
   margin: 0 0 12px;
   font-weight: 600;
-}
-.account-delete-dialog .account-delete-export {
-  margin-top: 20px;
-  gap: 16px;
 }
 .account-delete-dialog .cloud-account-form {
   gap: 10px;

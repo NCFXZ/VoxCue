@@ -42,7 +42,7 @@ await fs.writeFile(
   `
 const {app,safeStorage,dialog}=require('electron'),path=require('node:path'),fs=require('node:fs');const root=${JSON.stringify(workspace.platformRoot)};app.setAppPath(root);app.commandLine.appendSwitch('use-mock-keychain');app.setPath('documents',${JSON.stringify(dir)});
 if(${syntheticDialog})app.on('browser-window-created',(_event,window)=>{window.webContents.setBackgroundThrottling(false);window.once('ready-to-show',()=>setImmediate(()=>window.hide()));});
-const save=dialog.showSaveDialog.bind(dialog);let saveCount=0;dialog.showSaveDialog=(...args)=>{if(args.at(-1)?.title==='保存账号资料'){if(${macNativeDialog}&&args.at(-1).defaultPath!==${JSON.stringify(zip)})throw Error('Native fixture requires its owned default ZIP path');fs.writeFileSync(path.join(app.getPath('userData'),'native-save-count'),String(++saveCount));}return save(...args).then(result=>{if(${macNativeDialog}&&!result.canceled&&path.join(fs.realpathSync(path.dirname(result.filePath)),path.basename(result.filePath))!==${JSON.stringify(zip)})throw Error('Native fixture only accepts its owned synthetic ZIP target');fs.writeFileSync(path.join(app.getPath('userData'),'native-save-result'),String(result.canceled));return result;});};
+const save=dialog.showSaveDialog.bind(dialog);let saveCount=0;dialog.showSaveDialog=(...args)=>{if(args.at(-1)?.title==='导出资料'){if(${macNativeDialog}&&args.at(-1).defaultPath!==${JSON.stringify(zip)})throw Error('Native fixture requires its owned default ZIP path');fs.writeFileSync(path.join(app.getPath('userData'),'native-save-count'),String(++saveCount));}return save(...args).then(result=>{if(${macNativeDialog}&&!result.canceled&&path.join(fs.realpathSync(path.dirname(result.filePath)),path.basename(result.filePath))!==${JSON.stringify(zip)})throw Error('Native fixture only accepts its owned synthetic ZIP target');fs.writeFileSync(path.join(app.getPath('userData'),'native-save-result'),String(result.canceled));return result;});};
 const base=path.join(root,'dist-electron/shared/electron');
 for(const [module,name]of [['backend/auth/service.js','ChatGPTAuthService'],['backend/copilot/auth.js','CopilotAuthService']]){const C=require(path.join(base,module))[name];C.prototype.session=async()=>null;C.prototype.signOut=async()=>({warning:null});}
 if(process.platform==='darwin'){const c=require(path.join(root,'dist-electron/macos/electron/credentials.js'));c.createCredentialEncryption=()=>({encrypt:v=>safeStorage.encryptString(v),decrypt:v=>safeStorage.decryptString(v)});}
@@ -130,7 +130,7 @@ async function nativeDialog(cancel) {
     ...(pictures ? [path.join(pictures, cancel ? 'native-cancel.png' : 'native-save.png')] : []),
   );
   assert.equal(outcome.nativeSaveDialog, true);
-  assert.equal(outcome.title, '保存账号资料');
+  assert.equal(outcome.title, '导出资料');
   console.log(
     'PASS owned Windows native save dialog: ' + (cancel ? 'cancel' : 'selected ZIP path'),
   );
@@ -216,9 +216,17 @@ try {
   await settings.getByRole('switch', { name: '同步知识库', exact: true }).waitFor();
   const order = await settings.evaluate((node) => ({
     sync: node.querySelector('.cloud-sync-actions').getBoundingClientRect().bottom,
+    export: node.querySelector('[aria-label="导出资料"]').getBoundingClientRect().top,
+    exportBottom: node.querySelector('[aria-label="导出资料"]').getBoundingClientRect().bottom,
     remove: node.querySelector('.account-deletion-panel').getBoundingClientRect().top,
   }));
-  assert.ok(order.remove >= order.sync, 'Deletion follows cloud backup controls');
+  // Fractional display scales expose float32 rect noise at a shared edge.
+  const layoutUnit = (value) => Math.round(value * 64);
+  assert.ok(
+    layoutUnit(order.export) >= layoutUnit(order.sync) &&
+      layoutUnit(order.remove) >= layoutUnit(order.exportBottom),
+    'Export follows cloud backup and precedes deletion: ' + JSON.stringify(order),
+  );
   assert.equal(
     await settings
       .locator('.cloud-sync-actions')
@@ -235,13 +243,14 @@ try {
   const modal = main.getByRole('dialog', { name: '删除 VoxCue 账号', exact: true }),
     confirm = modal.getByRole('button', { name: '永久删除账号', exact: true });
   assert.equal(await confirm.isDisabled(), true);
-  assert.ok(await modal.getByText(/后台仅保留邮箱/).count());
+  assert.equal(await modal.getByText(/后台仅保留邮箱|其他设备副本/).count(), 0);
+  assert.equal(await modal.getByRole('button', { name: '导出资料', exact: true }).count(), 0);
   assert.equal(
     await modal
       .getByRole('button')
       .filter({ has: main.locator('svg') })
       .count(),
-    4,
+    3,
   );
   const alignment = await modal
     .locator('.modal-footer')
@@ -254,23 +263,31 @@ try {
   });
   assert.ok(checkAlignment <= 1, 'Checkbox and label share their center line');
   await captureAccount(main, 'account-delete-confirm');
+  await uiClick(modal.getByRole('button', { name: '取消', exact: true }));
+  const exportPanel = settings.getByRole('region', { name: '导出资料', exact: true });
   if (macNativeDialog) {
     const { nativeSaveDialog } = await import('../../../macos/test/scripts/save-dialog.mjs');
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
     await nativeSaveDialog(app, { cancel: true, target: zip });
-    await modal.getByRole('status').filter({ hasText: '已取消保存' }).waitFor();
+    await main.waitForFunction(
+      () => !document.querySelector('.account-export-panel button')?.disabled,
+    );
+    assert.equal(await exportPanel.getByRole('status').count(), 0);
     assert.ok(store.user(user.email));
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
     await nativeSaveDialog(app, { cancel: false, target: zip });
-    await modal.getByRole('status').filter({ hasText: '资料已保存' }).waitFor();
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await exportPanel.getByRole('status').filter({ hasText: '资料已导出' }).waitFor();
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
     await nativeSaveDialog(app, { cancel: false, target: zip, overwrite: true });
   } else if (process.platform === 'win32' && !syntheticDialog) {
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
     await nativeDialog(true);
-    await modal.getByRole('status').filter({ hasText: '已取消保存' }).waitFor();
+    await main.waitForFunction(
+      () => !document.querySelector('.account-export-panel button')?.disabled,
+    );
+    assert.equal(await exportPanel.getByRole('status').count(), 0);
     assert.ok(store.user(user.email));
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
     await nativeDialog(false);
   } else {
     await app.evaluate(({ dialog }, zip) => {
@@ -278,12 +295,15 @@ try {
       dialog.showSaveDialog = async () =>
         ++n === 1 ? { canceled: true } : { canceled: false, filePath: zip };
     }, zip);
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
-    await modal.getByRole('status').filter({ hasText: '已取消保存' }).waitFor();
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
+    await main.waitForFunction(
+      () => !document.querySelector('.account-export-panel button')?.disabled,
+    );
+    assert.equal(await exportPanel.getByRole('status').count(), 0);
     assert.ok(store.user(user.email));
-    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
   }
-  await modal.getByRole('status').filter({ hasText: '资料已保存' }).waitFor();
+  await exportPanel.getByRole('status').filter({ hasText: '资料已导出' }).waitFor();
   assert.ok((await fs.stat(zip)).size > 100);
   const AdmZip = workspace.platformRequire('adm-zip');
   const z = new AdmZip(zip);
@@ -304,6 +324,7 @@ try {
       .getEntries()
       .some((e) => e.entryName.endsWith('.txt') && e.getData().toString().includes('合成转录')),
   );
+  await uiClick(settings.getByRole('button', { name: '删除账号', exact: true }));
   await modal.getByLabel('删除账号密码', { exact: true }).fill('wrong');
   await uiClick(modal.getByRole('checkbox'));
   await uiClick(confirm);

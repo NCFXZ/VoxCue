@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   Database,
   ArrowUp,
-  MessageSquare,
+  FileText,
   ChevronRight,
   Plus,
   Edit,
@@ -230,7 +230,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             ) : (
               state.documents.map((doc) => (
                 <div className="document-row" key={doc.id}>
-                  <MessageSquare size={18} />
+                  <FileText size={18} />
                   <div className="document-details">
                     <strong>{doc.name}</strong>
                     <p>

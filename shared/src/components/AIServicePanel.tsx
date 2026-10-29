@@ -1,4 +1,5 @@
 import { useAuth } from '../stores/auth';
+import { useCloudAccount } from '../stores/cloudAccount';
 import { Button } from './ui/button';
 import { UsagePanel } from './UsagePanel';
 import { providerInfo } from '../services/providers';
@@ -8,11 +9,14 @@ import { Link, LogOut, X, Loader } from './icons';
 
 export function AIServicePanel() {
   const auth = useAuth();
+  const localMode = useCloudAccount((s) => s.state.localMode);
   const connected = auth.session?.mode !== 'demo' && auth.session?.mode;
   return (
     <div className="ai-services-panel">
       <p className="settings-hint">
-        AI 服务独立授权，用于聊天与面试回答，不影响 VoxCue 主账号和云同步。
+        {localMode
+          ? '使用本地账户时可独立连接 AI 服务，用于聊天与面试回答；云备份需另行登录 VoxCue。'
+          : 'AI 服务独立授权，用于聊天与面试回答，不影响 VoxCue 主账号和云同步。'}
       </p>
       {(
         [

@@ -5,6 +5,7 @@ import { Button } from './ui/button';
 import { HistoryDetail } from './HistoryDetail';
 import { useHistory } from '../stores/history';
 import { historyStorageKey } from '../services/history';
+import { recordFeature } from '../services/telemetry';
 export function HistoryPage() {
   const { records: allRecords, error, load } = useHistory();
   const records = allRecords.filter((record) => !record.mock);
@@ -15,6 +16,7 @@ export function HistoryPage() {
   useEffect(() => () => window.clearTimeout(transition.current), []);
   const select = (id: string | null) => {
     if (changing) return;
+    if (id) recordFeature('history_view');
     if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
       setSelectedId(id);
       return;

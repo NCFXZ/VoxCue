@@ -53,7 +53,7 @@ try {
         rows.map((row) => row.title),
         [
           '面试知识库',
-          'AI 工具剩余用量',
+          'AI 服务剩余用量',
           '面试官 · 系统音频',
           '面试者 · 麦克风',
           '语音模型',
@@ -67,7 +67,7 @@ try {
         assert.ok(Math.abs(rows[index].width - rows[index + 1].width) <= 1);
       }
       assert.ok(rows[0].y < rows[2].y && rows[2].y < rows[4].y && rows[4].y < rows[6].y);
-      assert.equal(rows[4].value, 'Paraformer 中英 INT8');
+      assert.equal(rows[4].value, '轻量语音识别');
       assert.equal(rows[5].value, 'CPU');
       const opened = app.waitForEvent('window');
       await dialog.getByRole('button', { name: '确认开始', exact: true }).click();

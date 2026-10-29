@@ -3,7 +3,11 @@ import type {
   SpeechModelId,
   SpeechInferenceDevice,
 } from '../../electron/contracts/speech';
-import { speechModelLabels, speechSelection } from '../../electron/contracts/speechSettings';
+import {
+  speechModelLabels,
+  speechSelection,
+  speechCpuWarning,
+} from '../../electron/contracts/speechSettings';
 import { ChoiceMenu } from './ui/choice-menu';
 import { useComponentReady } from '../stores/components';
 import { useEffect, useRef, type ReactNode } from 'react';
@@ -110,9 +114,12 @@ export function SpeechModelSettings({
         {selected.speechModel === 'qwen' && selected.inferenceDevice === 'cpu' && (
           <div className="speech-model-notices">
             <p className="danger-text" role="alert">
-              Qwen 使用 CPU 推理时性能可能不足，语音识别和对齐可能出现明显延迟。
+              {speechCpuWarning}
               {hardware?.cuda ? '建议使用 CUDA。' : ''}
               {hardware?.metal ? '建议使用 Metal。' : ''}
+              {!hardware?.cuda && !hardware?.metal
+                ? `建议选择${speechModelLabels.paraformer}。`
+                : ''}
             </p>
           </div>
         )}

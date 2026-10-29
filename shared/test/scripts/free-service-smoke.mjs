@@ -29,7 +29,13 @@ try {
         secondary: { usedPercent: 78, windowDurationMins: 300 },
       },
     };
-    CodexUsageRuntime.prototype.limits = async () => globalThis.freeUsage;
+    CodexUsageRuntime.prototype.limits = async () => {
+      if (globalThis.holdFreeUsage)
+        await new Promise((resolve) => {
+          globalThis.finishFreeUsage = resolve;
+        });
+      return globalThis.freeUsage;
+    };
     const { CloudAccountClient } = require(base + 'backend/cloud/client.js');
     const original = CloudAccountClient.prototype.api;
     globalThis.paidCalls = [];
@@ -49,6 +55,32 @@ try {
   await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
   assert.equal(await settings.getByText(/面试额度|激活码|兑换|云端数据保留至/).count(), 0);
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  const headingSize = await settings
+    .locator('.settings-usage > header strong')
+    .evaluate((e) => getComputedStyle(e).fontSize);
+  const serviceSize = await settings
+    .locator('.ai-service-label strong')
+    .first()
+    .evaluate((e) => getComputedStyle(e).fontSize);
+  assert.equal(
+    headingSize,
+    serviceSize,
+    'Account quota and provider headings share the same font size',
+  );
+  await app.evaluate(() => {
+    globalThis.holdFreeUsage = true;
+  });
+  await settings.getByRole('button', { name: '刷新账户额度', exact: true }).click();
+  await main
+    .locator('.user-info small')
+    .getByText('正在读取 AI 服务用量…', { exact: true })
+    .waitFor();
+  await app.evaluate(() => {
+    globalThis.holdFreeUsage = false;
+    globalThis.finishFreeUsage();
+  });
+  await main.locator('.user-info small').getByText('ChatGPT 剩余 22%', { exact: true }).waitFor();
+
   for (const [weekly, five, expected] of [
     [29, 100, '0%'],
     [29, null, '71%'],
@@ -93,6 +125,7 @@ try {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const start = main.getByRole('dialog', { name: '开始面试', exact: true });
+  await start.getByText('AI 服务剩余用量', { exact: true }).waitFor();
   assert.equal(await start.getByText(/剩余面试时长|面试额度|兑换/).count(), 0);
   await captureRequested(main, 'free-interview-start');
   const opened = app.waitForEvent('window');
@@ -111,9 +144,12 @@ try {
     globalThis.freeUsage = {};
   });
   await settings.getByRole('button', { name: '刷新账户额度', exact: true }).click();
-  await main.locator('.user-info small').getByText('AI 用量暂不可用', { exact: true }).waitFor();
+  await main
+    .locator('.user-info small')
+    .getByText('AI 服务用量暂不可用', { exact: true })
+    .waitFor();
   await settings.getByRole('button', { name: '断开连接', exact: true }).click();
-  await main.locator('.user-info small').getByText('未连接 AI 工具', { exact: true }).waitFor();
+  await main.locator('.user-info small').getByText('未连接 AI 服务', { exact: true }).waitFor();
   assert.deepEqual(await app.evaluate(() => globalThis.paidCalls), []);
   assert.deepEqual(errors, []);
   console.log(

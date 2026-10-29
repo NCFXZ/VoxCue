@@ -131,7 +131,7 @@ export class AccountArchive {
     )
       return { ok: false, error: '无效的导出请求。' };
     if (this.closed) return { ok: false, error: '资料导出已关闭。' };
-    if (this.busy || this.cancelling) return { ok: false, error: '资料正在保存，请稍候。' };
+    if (this.busy || this.cancelling) return { ok: false, error: '资料正在导出，请稍候。' };
     this.busy = true;
     const generation = this.generation;
     try {
@@ -139,7 +139,7 @@ export class AccountArchive {
       if (call.action === 'begin') {
         if (!Number.isSafeInteger(call.files) || call.files < 1 || call.files > 100000)
           throw Error('导出文件数量无效。');
-        if (this.active) throw Error('已有资料正在保存。');
+        if (this.active) throw Error('已有资料正在导出。');
         const destination = await this.ports.choose();
         if (generation !== this.generation || this.closed) throw Error('导出已取消或账号已变化。');
         if (!destination) return { ok: true, canceled: true };
@@ -315,7 +315,7 @@ export class AccountArchive {
         (call.action === 'begin' || this.active.token === call.token)
       )
         await this.cancelCurrent().catch(() => {});
-      return { ok: false, error: error instanceof Error ? error.message : '资料保存失败。' };
+      return { ok: false, error: error instanceof Error ? error.message : '资料导出失败。' };
     } finally {
       this.busy = false;
       for (const resolve of this.idleWaiters.splice(0)) resolve();

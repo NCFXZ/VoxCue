@@ -67,6 +67,7 @@ export const ChevronRight = icon('ChevronRight');
 export const Link = icon('Link');
 export const Edit = icon('Edit');
 export const Download = icon('Download');
+export const Export = icon('Export');
 export const PanelRight = icon('PanelRight');
 export const Loader = icon('Loader', true);
 export const Appearance = icon('Appearance');

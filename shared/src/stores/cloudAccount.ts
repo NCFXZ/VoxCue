@@ -11,6 +11,7 @@ interface AccountStore {
   loaded: boolean;
   revision: number;
   call(call: CloudAccountCall): Promise<CloudAccountResult>;
+  setLocalMode(enabled: boolean): Promise<CloudAccountResult>;
   load(): Promise<void>;
 }
 let loading: Promise<void> | undefined;
@@ -40,5 +41,12 @@ export const useCloudAccount = create<AccountStore>((set, get) => ({
         loading = undefined;
       });
     await loading;
+  },
+  async setLocalMode(enabled) {
+    if (!enabled) await stopCloudWork();
+    if (!window.desktop?.setLocalMode) throw Error('请在桌面应用中切换使用模式。');
+    const result = await window.desktop.setLocalMode(enabled);
+    set({ state: result.state, loaded: true, revision: get().revision + (result.ok ? 1 : 0) });
+    return result;
   },
 }));

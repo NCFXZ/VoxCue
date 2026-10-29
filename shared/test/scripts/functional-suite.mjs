@@ -16,6 +16,8 @@ const shared = [
   'chatgpt-single-login',
   'chatgpt-usage-runtime',
   'login-entry',
+  'local-mode',
+  'telemetry',
   'electron',
   'settings',
   'composer',

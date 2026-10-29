@@ -50,6 +50,60 @@ import {
   validateInterviewModel,
 } from '../../../shared/electron/application/speech';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
+import { registerTelemetryIpc } from '../../../shared/electron/ipc/telemetry';
+import type { Telemetry } from '../../../shared/electron/backend/telemetry/service';
+
+describe('statistics IPC boundary', () => {
+  it('accepts only fixed signals from the owning main frame and never accepts caller identity/content', () => {
+    const login = { mainFrame: {} },
+      main = { mainFrame: {} },
+      interview = { mainFrame: {} };
+    const telemetry = {
+      usable: vi.fn(),
+      activity: vi.fn(),
+      manualQuestion: vi.fn(),
+      saved: vi.fn(),
+    };
+    registerTelemetryIpc({
+      telemetry: telemetry as unknown as Telemetry,
+      requireEntry(e) {
+        if (![login, main].includes(e.sender as any)) throw Error('Entry only');
+      },
+      requireMain(e) {
+        if (e.sender !== main) throw Error('Main only');
+      },
+      requireInterview(e) {
+        if (e.sender !== interview) throw Error('Interview only');
+      },
+    });
+    const route = bridge.handlers.get('telemetry:signal')!;
+    const event = (sender: any) => ({ sender, senderFrame: sender.mainFrame });
+    route(event(login), { type: 'ready' });
+    route(event(main), { type: 'feature', feature: 'history_view' });
+    route(event(interview), { type: 'manual_question' });
+    route(event(interview), { type: 'interview_saved', saved: true });
+    expect(telemetry.usable).toHaveBeenCalledOnce();
+    expect(telemetry.activity).toHaveBeenCalledWith('history_view');
+    expect(telemetry.manualQuestion).toHaveBeenCalledOnce();
+    expect(telemetry.saved).toHaveBeenCalledWith(true);
+    expect(() => route({ sender: main, senderFrame: {} }, { type: 'ready' })).toThrow(
+      'Unauthorized',
+    );
+    expect(() => route(event(login), { type: 'feature', feature: 'history_view' })).toThrow(
+      'Main only',
+    );
+    expect(() => route(event(main), { type: 'interview_saved', saved: true })).toThrow(
+      'Interview only',
+    );
+    for (const signal of [
+      { type: 'feature', feature: 'history_view', userId: 'spoofed' },
+      { type: 'ready', text: 'private' },
+      { type: 'feature', feature: 'private' },
+    ])
+      expect(() => route(event(main), signal)).toThrow('Invalid telemetry');
+    expect(() => route(event(main), { type: 'ready' }, {})).toThrow('Invalid telemetry');
+  });
+});
 
 describe('归档截图 IPC', () => {
   it('仅授权主frame可读取有界ID，只有主窗口可保存/删除；不泄露本地路径', async () => {
@@ -782,6 +836,8 @@ describe('受控 preload 契约', () => {
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],
       ['cloudAccount', 'cloud:account', [{ action: 'status' }]],
+      ['setLocalMode', 'session:local-mode', [true]],
+      ['telemetrySignal', 'telemetry:signal', [{ type: 'ready' }]],
       [
         'cloudSync',
         'cloud:sync',

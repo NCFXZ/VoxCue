@@ -25,8 +25,8 @@ it('uses the returned weekly quota when no five-hour quota exists', () => {
 });
 
 it('does not invent usage when the provider snapshot is unavailable', () => {
-  expect(accountUsageSummary(null)).toBe('AI 用量暂不可用');
-  expect(accountUsageSummary(chatGPTAccountUsage({}))).toBe('AI 用量暂不可用');
+  expect(accountUsageSummary(null)).toBe('AI 服务用量暂不可用');
+  expect(accountUsageSummary(chatGPTAccountUsage({}))).toBe('AI 服务用量暂不可用');
 });
 
 it('displays the bound Copilot quantity without a five-hour claim', () => {

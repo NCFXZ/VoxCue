@@ -1,4 +1,9 @@
 export type ComponentId = 'speech' | 'qwen' | 'rag';
+export const componentPresentation = {
+  speech: { label: '轻量语音识别', description: '支持中文和英文，资源占用较低。' },
+  qwen: { label: '多语言语音识别', description: '支持多种语言和标点，适合配置较高的电脑。' },
+  rag: { label: '知识库检索', description: '从导入的资料中查找与问题相关的内容。' },
+} as const;
 export interface ComponentState {
   revision: number;
   phase:

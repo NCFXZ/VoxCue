@@ -1,4 +1,5 @@
 import type { SpeechOptions, SpeechHardware } from './speech';
+import { componentPresentation } from './components';
 
 export function cudaUnavailableMessage(hardware: SpeechHardware) {
   switch (hardware.reason) {
@@ -16,9 +17,10 @@ export function cudaUnavailableMessage(hardware: SpeechHardware) {
 }
 
 export const speechModelLabels = {
-  paraformer: 'Paraformer 中英 INT8',
-  qwen: 'Qwen3-ASR 0.6B',
+  paraformer: componentPresentation.speech.label,
+  qwen: componentPresentation.qwen.label,
 } as const;
+export const speechCpuWarning = `${componentPresentation.qwen.label}使用 CPU 时，转写可能出现明显延迟。`;
 
 export function speechSelection(options: SpeechOptions) {
   const speechModel = options.speechModel ?? 'paraformer';

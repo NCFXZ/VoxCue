@@ -1,6 +1,8 @@
 import { useState } from 'react';
 import { CloudAccountPanel } from './CloudAccountPanel';
+import { useCloudAccount } from '../stores/cloudAccount';
 import { AccountDeletionPanel } from './AccountDeletionPanel';
+import { AccountExportPanel } from './AccountExportPanel';
 import { SyncSettingsPanel } from './SyncSettingsPanel';
 import { AIServicePanel } from './AIServicePanel';
 import * as DropdownMenu from './ui/dropdown-menu';
@@ -62,6 +64,7 @@ export function SettingsDialog({
   const presentation = window.desktop?.presentation ?? pendingPresentation;
   const interview = useInterviewSettings();
   const connection = useChatConnection();
+  const cloudUser = useCloudAccount((state) => state.state.user);
   const selectedTheme = themes.find((item) => item.value === theme)!;
   return (
     <Modal title="设置" className="settings-dialog" hideHeader onClose={onClose}>
@@ -153,9 +156,12 @@ export function SettingsDialog({
             {category === 'account' && (
               <>
                 <CloudAccountPanel showTitle={false} />
-                <section aria-label="云同步">
-                  <SyncSettingsPanel />
-                </section>
+                {cloudUser && (
+                  <section aria-label="云同步">
+                    <SyncSettingsPanel />
+                  </section>
+                )}
+                <AccountExportPanel />
                 <AccountDeletionPanel />
               </>
             )}

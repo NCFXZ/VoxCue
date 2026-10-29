@@ -17,6 +17,7 @@ import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
 import { useHistory } from './stores/history';
 import { SettingsDialog, type Theme, type SettingsCategory } from './components/SettingsDialog';
+import { signalTelemetry, recordFeature } from './services/telemetry';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
   return value === 'light' || value === 'dark' ? value : 'system';
@@ -40,7 +41,8 @@ export function App() {
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const auth = useAuth();
   const account = useCloudAccount();
-  const signedIn = !!account.state.user || auth.session?.mode === 'demo';
+  const signedIn =
+    !!account.state.user || !!account.state.localMode || auth.session?.mode === 'demo';
   const ragReady = useComponentReady('rag');
   useEffect(() => {
     if (isLoginWindow || !signedIn) return;
@@ -50,6 +52,9 @@ export function App() {
     if (!isLoginWindow && signedIn && ragReady) void useKnowledgeIndex.getState().reconcile();
   }, [isLoginWindow, signedIn, ragReady]);
   const showLogin = isLoginWindow || (account.loaded && !signedIn);
+  useEffect(() => {
+    if (account.loaded) signalTelemetry({ type: 'ready' });
+  }, [account.loaded]);
   useEffect(() => {
     if (account.loaded && !signedIn) setSettings(false);
   }, [account.loaded, signedIn]);
@@ -205,9 +210,16 @@ export function App() {
           <>
             <Sidebar
               userName={account.state.user?.email.split('@')[0] || '本地用户'}
-              accountLabel={account.state.user?.email || '隔离测试'}
+              accountLabel={
+                account.state.user?.email || (account.state.localMode ? '本地账户' : '隔离测试')
+              }
+              localMode={account.state.localMode}
               page={page}
-              onNavigate={setPage}
+              onNavigate={(next) => {
+                if (next === 'history') recordFeature('history_view');
+                if (next === 'knowledge') recordFeature('knowledge_view');
+                setPage(next);
+              }}
               collapsed={collapsed}
               onCollapse={() => setCollapsed(!collapsed)}
               onNew={() => {
@@ -222,7 +234,10 @@ export function App() {
                 usePreparation.getState().stop();
                 if (!(await usePreparation.getState().flushChats())) return;
                 try {
-                  const result = await useCloudAccount.getState().call({ action: 'logout' });
+                  const account = useCloudAccount.getState();
+                  const result = account.state.localMode
+                    ? await account.setLocalMode(false)
+                    : await account.call({ action: 'logout' });
                   if (result.ok) {
                     setSettings(false);
                     setPage('preparation');

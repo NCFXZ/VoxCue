@@ -9,6 +9,7 @@ export const personalDataPaths = [
   'interview-images-v1',
   'chat-usage',
   'chatgpt-usage',
+  'telemetry-queue.json',
   'copilot-runtime',
   'auth-data/credentials.bin',
   'auth-data/copilot-session.json',

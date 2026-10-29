@@ -5,20 +5,12 @@ import { DownloadButton } from './DownloadButton';
 import { ActionTransition } from './ActionTransition';
 import { Download, Refresh, Loader } from './icons';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
-import type { ComponentState } from '../../electron/contracts/components';
+import {
+  componentPresentation as modelInfo,
+  type ComponentState,
+} from '../../electron/contracts/components';
 
 const size = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
-const modelInfo = {
-  speech: {
-    label: '轻量语音识别',
-    description: '支持中文和英文，资源占用较低。',
-  },
-  qwen: {
-    label: '多语言语音识别',
-    description: '支持多种语言和标点，适合配置较高的电脑。',
-  },
-  rag: { label: '知识库检索', description: '从导入的资料中查找与问题相关的内容。' },
-} as const;
 export function ComponentsPanel() {
   const { state, error, run } = useComponents();
   const settled = useRef(new Map<string, 'ready' | 'pending'>());

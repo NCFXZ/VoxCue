@@ -9,12 +9,14 @@ import {
 } from '../contracts/chat';
 import { mergeActivityLog } from '../contracts/activity';
 import { handleDesktop, sendDesktop } from './handle';
+import type { Telemetry } from '../backend/telemetry/service';
 
 interface Dependencies {
   chat: AIChatService;
   requireMain(event: Electron.IpcMainInvokeEvent): void;
   isDemo(): boolean;
   openLink(url: string): Promise<void>;
+  telemetry?: Pick<Telemetry, 'activity' | 'answer'>;
 }
 // IPC owns sender checks and the single active native chat request. Business
 // orchestration has no Electron dependency and can be tested independently.
@@ -81,12 +83,17 @@ export function registerChatIpc(dependencies: Dependencies) {
     activeChat = active;
     pendingChats++;
     const partial: ChatPartialResponse = {};
+    let metric: ReturnType<Telemetry['answer']> | undefined;
     try {
       controller.signal.throwIfAborted();
+      const validated = validateRequest(request);
+      dependencies.telemetry?.activity('chat_send');
+      metric = dependencies.telemetry?.answer('chat');
       const result = await chat.stream(
-        validateRequest(request),
+        validated,
         (value) => {
           if (activeChat === active && !controller.signal.aborted && !event.sender.isDestroyed()) {
+            if (value.type === 'delta' && value.text.trim()) metric?.first();
             if (value.type === 'delta')
               partial.answerText = ((partial.answerText ?? '') + value.text).slice(0, 1000000);
             if (value.type === 'reasoning-summary')
@@ -104,8 +111,15 @@ export function registerChatIpc(dependencies: Dependencies) {
       );
       controller.signal.throwIfAborted();
       if (event.sender.isDestroyed()) throw new DOMException('Aborted', 'AbortError');
+      if (result.answerText?.trim()) metric?.first();
+      metric?.finish(
+        !result.warning && (result.answerText ?? partial.answerText)?.trim()
+          ? 'success'
+          : 'failure',
+      );
       return { ok: true, ...result };
     } catch (error) {
+      metric?.finish(controller.signal.aborted ? 'cancelled' : 'failure');
       return {
         ok: false,
         error: publicFailure(error),

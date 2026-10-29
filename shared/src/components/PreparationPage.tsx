@@ -22,6 +22,7 @@ import {
   Settings,
   Refresh,
   Save,
+  FileText,
 } from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
@@ -445,10 +446,10 @@ export function PreparationPage({
               <dd>{interviewKnowledgeName}</dd>
             </div>
             <div>
-              <dt>AI 工具剩余用量</dt>
+              <dt>AI 服务剩余用量</dt>
               <dd>
                 {!connection.live
-                  ? '未连接 AI 工具'
+                  ? '未连接 AI 服务'
                   : connection.loadingUsage
                     ? '正在读取…'
                     : accountUsageSummary(connection.usage)}
@@ -640,7 +641,17 @@ export function PreparationPage({
         >
           {dragging && (
             <div className="chat-drop-hint" role="status">
-              <span>松开以添加文件到当前对话 · 最多 20 个，每个 20 MB</span>
+              <div className="chat-drop-card">
+                <span className="chat-drop-icon" aria-hidden="true">
+                  <FileText size={32} />
+                </span>
+                <strong>添加到当前对话</strong>
+                <p>将文件或文件夹拖到这里，松开即可添加</p>
+                <div className="chat-drop-limits">
+                  <span>最多 20 个文件</span>
+                  <span>单个不超过 20 MB</span>
+                </div>
+              </div>
             </div>
           )}
           <ComponentsNotice

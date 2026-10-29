@@ -82,6 +82,25 @@ export function CloudAccountPanel({
       if (alive.current) setBusy(false);
     }
   }
+  async function changeLocalMode(enabled: boolean) {
+    if (locked.current) return;
+    locked.current = true;
+    setBusy(true);
+    setError('');
+    setMessage('');
+    try {
+      const result = await useCloudAccount.getState().setLocalMode(enabled);
+      if (alive.current && !result.ok) setError(result.error);
+    } catch {
+      if (alive.current)
+        setError(
+          enabled ? '无法进入本地账户，请检查本地存储后重试。' : '无法打开登录界面，请重试。',
+        );
+    } finally {
+      locked.current = false;
+      if (alive.current) setBusy(false);
+    }
+  }
   useEffect(() => {
     alive.current = true;
     if (!useCloudAccount.getState().loaded) void useCloudAccount.getState().load();
@@ -167,7 +186,7 @@ export function CloudAccountPanel({
         <p role="status" className="settings-hint">
           正在读取账号状态…
         </p>
-      ) : !state.configured && !entry ? (
+      ) : !state.configured && !entry && !state.localMode ? (
         <p className="settings-hint">无法连接账号服务，请检查配置后重新打开应用。</p>
       ) : state.user ? (
         <>
@@ -187,30 +206,25 @@ export function CloudAccountPanel({
             </Button>
           </div>
         </>
+      ) : !entry ? (
+        <div className="settings-entry">
+          <div>
+            <strong>本地账户</strong>
+            <p className="settings-hint">
+              尚未登录 VoxCue，资料保存在当前电脑。登录后可启用云备份。
+            </p>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            disabled={busy}
+            onClick={() => void changeLocalMode(false)}
+          >
+            登录
+          </Button>
+        </div>
       ) : (
         <>
-          {!entry && (
-            <div className="cloud-account-modes" aria-label="账号操作">
-              {(
-                [
-                  ['login', '登录'],
-                  ['register', '注册'],
-                  ['reset', '找回密码'],
-                ] as const
-              ).map(([value, label]) => (
-                <Button
-                  key={value}
-                  type="button"
-                  variant={mode === value ? 'outline' : 'ghost'}
-                  aria-pressed={mode === value}
-                  disabled={busy}
-                  onClick={() => changeMode(value)}
-                >
-                  {label}
-                </Button>
-              ))}
-            </div>
-          )}
           <form className="cloud-account-form" noValidate={entry} onSubmit={submit}>
             <label>
               邮箱
@@ -300,6 +314,17 @@ export function CloudAccountPanel({
                     ? '创建账号'
                     : '重置密码'}
             </Button>
+            {entry && mode === 'login' && (
+              <Button
+                type="button"
+                variant="outline"
+                className="login-skip-button"
+                disabled={busy}
+                onClick={() => void changeLocalMode(true)}
+              >
+                跳过登录
+              </Button>
+            )}
           </form>
           {entry && (
             <div className="login-form-links">

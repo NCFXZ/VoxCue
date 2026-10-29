@@ -293,6 +293,9 @@ const app = await electron.launch({
     XDG_DATA_HOME: path.join(testRoot, 'data'),
     XDG_STATE_HOME: path.join(testRoot, 'state'),
     VITE_DEV_SERVER_URL: '',
+    // This is a real packaged host, so telemetry is enabled. Keep all synthetic
+    // package activity local; model/update fixtures use their own transports.
+    VOXCUE_ACCOUNT_API: '',
   },
 });
 try {
@@ -562,6 +565,9 @@ try {
     'Removed presentation binding must not ship',
   );
   await installUiAccount(app, { components: true, speech: true });
+  // The real host starts with no account origin to keep telemetry offline.
+  // Refresh the renderer after installing the synthetic account service.
+  await page.reload();
   const mainPage = await connectUiAccount(app, page);
   {
     await mainPage.waitForFunction(() =>

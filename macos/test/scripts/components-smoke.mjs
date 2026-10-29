@@ -172,7 +172,7 @@ try {
     assert.equal(await start.isDisabled(), true);
     assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
     const notice = page.locator('.chat-column > .components-notice');
-    await notice.getByText(/本地语音模型、知识库模型/).waitFor();
+    await notice.getByText(/轻量语音识别、知识库检索/).waitFor();
     assert.equal(await page.getByRole('button', { name: '下载', exact: true }).count(), 0);
     await notice.getByRole('button', { name: '前往设置' }).click();
     let settings = page.getByRole('dialog', { name: '设置', exact: true });

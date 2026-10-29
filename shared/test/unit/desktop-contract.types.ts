@@ -27,6 +27,12 @@ const providerReply: ChatResult = { ok: true, provider: modelProvider, usage: nu
 void [providerModel, providerReply];
 
 declare const desktop: DesktopAPI;
+void desktop.setLocalMode(true);
+void desktop.telemetrySignal({ type: 'feature', feature: 'history_view' });
+// @ts-expect-error Statistics accept fixed categories, never arbitrary content or identity.
+void desktop.telemetrySignal({ type: 'feature', feature: 'private text', userId: 'u' });
+// @ts-expect-error Local entry does not accept identities or tokens from Renderer.
+void desktop.setLocalMode({ user: 'synthetic' });
 // @ts-expect-error Removed native UI projection is not a renderer capability.
 desktop.setContentControls([]);
 // @ts-expect-error Native menus are retired; menus render in shared React.

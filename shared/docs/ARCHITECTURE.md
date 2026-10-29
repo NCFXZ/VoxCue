@@ -1,5 +1,9 @@
 # VoxCue 架构
 
+## 0.6.3 客户端统计
+
+`backend/telemetry`独立管理随机安装身份、有界原子队列、面试单调时钟及匿名补传；main负责账户/窗口/语音/休眠装配，IPC仅接受固定操作信号，Renderer不得提供身份、正文或传输地址。两端共用，开发运行不采集。统计失败不进入账号/云同步错误链，旧服务端不支持时24小时退避。服务端聚合与后台未实施；完整26项口径、回执及保留边界见[统计协议](CLIENT_TELEMETRY.md)。
+
 ## 邮箱账号服务
 
 客户端本轮兼容服务端0.5.1，服务端实现、配置与部署保持只读。实际HTTP链路在临时数据库和合成账号上验收；线上连接检查不修改真实账号或资料。主账号与AI授权的产品入口分离，通用桌面测试通过独立测试端口驱动，不在正式包恢复旧AI登录入口。
@@ -200,7 +204,7 @@ backend/copilot/quota只投影账户快照，忽略准入状态与其他提供�
 
 ChatGPTAuthService的本地HTTP回调页由backend/auth/callbackPage纯静态模板生成，main注入共用PNG品牌资源；开发从shared/public读取，安装版从dist读取，不依赖平台原生ICO或外网。页面适配浅深色/窄屏，固定文案区分收到/无效/已使用/不存在，收到授权仅提示返回应用继续验证。请求参数与账户、授权码、令牌不进入HTML；无脚本、表单或外部字体/资源，CSP仅放行样式SHA-256及data图片，响应no-store/no-referrer/nosniff。Host/方法/路径/state/PKCE、回调一次消费与后续身份验证/凭据写入保持原流程。
 
-2026-10-24 恢复 GitHub Copilot，与 ChatGPT 共用登录页面和 AIChatService/RAG/标题队列。main 装配两套授权/模型适配器，通过 SelectedChatService 按成功登录后保存的服务选择路由，不能通过模型 ID 切换账户。service.json 缺失时沿用 ChatGPT；失败登录不覆盖选择。Copilot 公开身份保存在 copilot-session.json，OAuth 令牌仅由固定官方 SDK/原生运行时 1.0.21 的系统凭据库管理，禁止明文同意、环境令牌、gh 认证及任意命令/文件工具。运行时使用独立工作目录，禁用配置发现、技能、文件钩子和会话遥测；只开放已授权网络搜索及有界本地知识工具。SDK 仅允许 backend/copilot 适配器导入。auth:copilot-sign-in 仅接受登录窗口主 frame 的零参数调用；取消/退出释放对应流程。两端品牌按钮均由shared绘制，复用唯一布局和点击逻辑。既有凭据和用户历史保留。
+2026-10-24 恢复 GitHub Copilot，与 ChatGPT 共用登录页面和 AIChatService/RAG/标题队列。main 装配两套授权/模型适配器，通过 SelectedChatService 按成功登录后保存的服务选择路由，不能通过模型 ID 切换账户。service.json 缺失时沿用 ChatGPT；失败登录不覆盖选择。Copilot 公开身份保存在 copilot-session.json，OAuth 令牌仅由固定官方 SDK/原生运行时 1.0.21 的系统凭据库管理，禁止明文同意、环境令牌、gh 认证及任意命令/文件工具。运行时使用独立工作目录，禁用配置发现、技能、文件钩子和会话遥测；只开放已授权网络搜索及有界本地知识工具。SDK 仅允许 backend/copilot 适配器导入。auth:copilot-sign-in 仅接受已登记主窗口或受控测试登录窗口主 frame 的零参数调用；取消/退出释放对应流程。两端品牌按钮均由shared绘制，复用唯一布局和点击逻辑。既有凭据和用户历史保留。
 
 展示与语音恢复：ResponseProgress 在正文首次出现时折叠到“用时”，之后用户可自行展开，不随每个 chunk 重复关闭。系统问题 debounce 就绪状态在生成期间保留，回答完成后按本场状态补交；系统间断清除不完整问题，麦克风间断不影响系统缓冲。浮窗手动清空输入只覆盖当前转写版本，新系统稿到达恢复跟随；非空手动编辑保留。未引入 AEC 或修改原生采样路径。
 
@@ -353,3 +357,9 @@ systemAccent hook 复用既有受控系统强调色 IPC，新增 copilot-accent-
 ## 0.5.9 固定子进程的打包执行路径
 
 Copilot主进程适配器通过`copilotRuntimeConnection()`核对固定1.0.21平台包，并以官方`RuntimeConnection.forStdio`选择`app.asar.unpacked`下真实可执行文件；不让SDK自动对ASAR虚拟路径chmod，也不使用环境指定的其他CLI。邻接runtime.node和资源随本平台包保留。Codex仍由既有`unpackedUsagePath()`处理固定0.164.0别名路径。两者不扩展到Renderer、不改SDK或凭据模式。最终包新增隔离ASAR握手探针，Windows依赖复制/包级断言和实际启动须其本机完成。
+
+## 本地账户与独立资料导出
+
+登录、主窗口和设置通过`session:local-mode`受控IPC切换本地账户，公开状态只增加`localMode`标志，云用户仍为null。`backend/localMode.ts`只保存非凭据偏好，原子提交后才生效，重启/重新激活直接进入本地账户，不请求账号服务器；它与测试demo、AI授权及云端身份分离。正常账号登录后撤销本地账户，云同步仍须真实账号及既有资料归属校验。切换只允许指定窗口主frame，串行处理，返回登录先确认/保存，跨模式撤销正在导出的归档。
+
+`AccountExportPanel`与`AccountDeletionPanel`独立，设置中位于云同步之后、注销之前；本地账户隐藏云端操作和注销，仅保留信息行右侧登录按钮与导出入口；登录按钮复用已有保存/退出保护后打开初始登录窗口，设置内不再包含登录表单。取消导出不产生状态提示。`accountExport`使用原受控`account:data`分块归档，本地账户以窗口加local为任务归属、不请求云端，并检查已知尚未恢复资料；账号模式继续校验云端完整性与归属。账号注销实际保留规则不变，仅移除用户指定的两句弹窗说明。

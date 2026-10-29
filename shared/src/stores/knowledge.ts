@@ -1,4 +1,5 @@
 import { useKnowledgeIndex } from './knowledgeIndex';
+import { recordFeature } from '../services/telemetry';
 import { create } from 'zustand';
 import { componentReady } from './components';
 import { localKnowledge, type KnowledgeBase, type LocalDocument } from '../services/knowledge';
@@ -110,6 +111,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     set({ busy: true, error: null });
     try {
       await localKnowledge.importDocuments(id, files);
+      if (files.length) recordFeature('file_import');
       if (get().selectedId === id) await get().open(id);
       const imported = await localKnowledge.listDocuments(id);
       for (const doc of imported.filter((doc) => files.some((file) => file.name === doc.name)))

@@ -9,6 +9,7 @@ import type { AccountUsage } from './accountUsage';
 import type { CloudAccountCall, CloudAccountResult } from './cloudAccount';
 import type { CloudSyncCall, CloudSyncResult } from './cloudSync';
 import type { AccountDataCall, AccountDataResult } from './accountData';
+import type { TelemetrySignal } from './telemetry';
 import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResult } from './chat';
 import type { InterviewTitleRequest, InterviewTitleEvent, HistoryExportRequest } from './history';
 import type {
@@ -38,8 +39,10 @@ export interface InterviewWindowState {
 export type WindowAction = 'minimize' | 'maximize' | 'close';
 // The complete renderer allowlist. No credentials, paths or arbitrary IPC access.
 export interface DesktopAPI {
+  telemetrySignal(signal: TelemetrySignal): Promise<void>;
   accountData(call: AccountDataCall): Promise<AccountDataResult>;
   cloudAccount(call: CloudAccountCall): Promise<CloudAccountResult>;
+  setLocalMode(enabled: boolean): Promise<CloudAccountResult>;
   cloudSync(call: CloudSyncCall): Promise<CloudSyncResult>;
   readonly platform: 'macos' | 'windows' | 'unknown';
   readonly presentation: PresentationCapabilities;
@@ -117,8 +120,10 @@ type Invocation<F extends (...args: never[]) => unknown> = {
 // Channel types stay erased in the sandboxed, unbundled CommonJS preload.
 // Importing runtime constants there would require a forbidden local require().
 export interface DesktopInvokeMap {
+  'telemetry:signal': Invocation<DesktopAPI['telemetrySignal']>;
   'account:data': Invocation<DesktopAPI['accountData']>;
   'cloud:account': Invocation<DesktopAPI['cloudAccount']>;
+  'session:local-mode': Invocation<DesktopAPI['setLocalMode']>;
   'cloud:sync': Invocation<DesktopAPI['cloudSync']>;
   'updates:call': Invocation<DesktopAPI['updates']>;
   'components:call': Invocation<DesktopAPI['components']>;

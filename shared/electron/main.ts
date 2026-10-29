@@ -15,6 +15,7 @@ import {
   systemPreferences,
   Menu,
   session,
+  powerMonitor,
 } from 'electron';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { migrateUserData } from './userData';
@@ -27,6 +28,11 @@ import { ChatGPTAuthService } from './backend/auth/service';
 import { ManagedChatGPTAuth } from './backend/auth/managed';
 import { createAuthStorage } from './backend/auth/storage';
 import { CloudAccountClient, cloudOrigin } from './backend/cloud/client';
+import { LocalMode } from './backend/localMode';
+import { Telemetry } from './backend/telemetry/service';
+import { registerTelemetryIpc } from './ipc/telemetry';
+import type { TelemetryStage } from './contracts/telemetry';
+import type { CloudAccountState } from './contracts/cloudAccount';
 import { createCloudVault } from './backend/cloud/vault';
 import { CloudSyncClient } from './backend/cloud/sync';
 import { AccountArchive } from './backend/accountArchive';
@@ -86,6 +92,8 @@ let copilotRuntime: CopilotRuntime;
 let codexUsageRuntime: CodexUsageRuntime;
 let chatGPTUsage: ChatGPTAccountUsage;
 let chat: AIChatService;
+let telemetry: Telemetry | undefined;
+let telemetryClosed = false;
 let signingIn = false;
 let cancelLoginWait: (() => void) | undefined;
 let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
@@ -383,6 +391,7 @@ function openInterview() {
   });
   loadWindowPage(win, 'interview', indexFile, process.env.VITE_DEV_SERVER_URL);
   win.on('closed', () => {
+    telemetry?.finishInterview(false, 'window');
     interviewMove = undefined;
     interviewWindow = null;
     interviewMousePassthrough = false;
@@ -394,6 +403,7 @@ function openInterview() {
     restoreAfterInterview();
   });
   win.webContents.on('did-start-loading', () => {
+    telemetry?.speechState('paused');
     interviewMove = undefined;
     setInterviewMousePassthrough(true);
     speechSessions?.releaseInterview();
@@ -645,6 +655,10 @@ app.whenReady().then(async () => {
         ),
       )
     : undefined;
+  const localMode = new LocalMode(path.join(app.getPath('userData'), 'local-mode.json'));
+  // An unreadable preference returns to explicit entry; it never grants access.
+  const localModeReady = localMode.load().catch(() => {});
+  let entryBusy = false;
   const cloudAccount = new CloudAccountClient({
     origin: cloudOrigin(
       process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
@@ -653,17 +667,53 @@ app.whenReady().then(async () => {
     vault: createCloudVault(credentialEncryption),
     deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
   });
+  telemetry = new Telemetry({
+    root: app.getPath('userData'),
+    version: app.getVersion(),
+    platform: desktopPlatform.id === 'darwin' ? 'macos' : 'windows',
+    origin: cloudOrigin(
+      process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
+      !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
+    ),
+    enabled: app.isPackaged,
+  });
+  powerMonitor.on('suspend', () => telemetry?.suspend(true));
+  powerMonitor.on('resume', () => telemetry?.suspend(false));
+  const accountState = (): CloudAccountState => {
+    const state = localMode.active
+      ? { ...cloudAccount.snapshot(), user: null, verified: false, localMode: true }
+      : cloudAccount.snapshot();
+    telemetry?.setIdentity(
+      state.user
+        ? { accountMode: 'account', userId: state.user.id }
+        : { accountMode: state.localMode ? 'local' : 'signed_out' },
+    );
+    return state;
+  };
   handleDesktop('cloud:account', async (event, call) => {
     if (
       ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
       event.senderFrame !== event.sender.mainFrame
     )
       throw Error('Unauthorized window');
+    await localModeReady;
     if (erasingAccount) throw Error('账号资料正在清理。');
+    if (localMode.active) {
+      if (call?.action === 'status') return { ok: true as const, state: accountState() };
+      if (!['login', 'register', 'reset', 'code'].includes(call?.action))
+        return {
+          ok: false as const,
+          state: accountState(),
+          error: '登录 VoxCue 后可使用账号与云服务。',
+        };
+    }
+    const authenticating = ['login', 'register', 'reset'].includes(call?.action);
+    if (entryBusy && authenticating)
+      return { ok: false as const, state: accountState(), error: '使用模式正在切换，请稍候。' };
     if (leavingAccount)
       return {
         ok: false as const,
-        state: cloudAccount.snapshot(),
+        state: accountState(),
         error: '账号操作正在进行，请稍候。',
       };
     if (call?.action === 'delete' && event.sender !== mainWindow?.webContents)
@@ -674,10 +724,11 @@ app.whenReady().then(async () => {
       (call?.action === 'revoke' && cloudAccount.isCurrentSession(call.sessionId));
     if (leaving && mainWindow) {
       if (interviewActive())
-        return { ok: false as const, state: cloudAccount.snapshot(), error: '请先结束面试。' };
+        return { ok: false as const, state: accountState(), error: '请先结束面试。' };
       if (!(await prepareUpdateInstall(true, call.action === 'delete')))
-        return { ok: false as const, state: cloudAccount.snapshot(), error: '已取消退出。' };
+        return { ok: false as const, state: accountState(), error: '已取消退出。' };
     }
+    if (authenticating) entryBusy = true;
     const result = await (async () => {
       if (leaving) leavingAccount = true;
       try {
@@ -690,9 +741,19 @@ app.whenReady().then(async () => {
           chatIpc?.cancelActive();
           await knowledge.close();
         }
-        return await cloudAccount.call(call);
+        const response = await cloudAccount.call(call);
+        if (response.ok && response.state.user && ['login', 'register'].includes(call.action)) {
+          if (localMode.active) {
+            await accountArchive?.cancel();
+            await localMode.set(false);
+          }
+          accountState();
+          telemetry?.entry(call.action as 'login' | 'register', response.state.user.createdAt);
+        }
+        return response;
       } finally {
         if (leaving) leavingAccount = false;
+        if (authenticating) entryBusy = false;
       }
     })();
     if (call?.action === 'delete' && !result.ok)
@@ -705,6 +766,7 @@ app.whenReady().then(async () => {
       createMainWindow();
     if (result.ok && call.action === 'delete') {
       erasingAccount = true;
+      await telemetry?.close();
       await writeFile(erasureFile, JSON.stringify({ committed: true }), { mode: 0o600 });
       // Retire all writers before clearing browser databases. A persisted marker retries interrupted cleanup at startup.
       setTimeout(() => {
@@ -743,7 +805,7 @@ app.whenReady().then(async () => {
       chatIpc?.cancelActive();
       createLoginWindow();
     }
-    return result;
+    return { ...result, state: accountState() };
   });
   const cloudSync = new CloudSyncClient(cloudAccount, async (id, bytes, preview) => {
     await interviewImages.save([{ id, preview, file: { bytes, name: 'screenshot.png' } }]);
@@ -751,6 +813,8 @@ app.whenReady().then(async () => {
   handleDesktop('cloud:sync', (event, call) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
       throw Error('Unauthorized window');
+    if (localMode.active)
+      return { ok: false as const, error: '登录 VoxCue 后可使用云备份。', status: 401 };
     if (interviewActive())
       return {
         ok: false as const,
@@ -864,6 +928,48 @@ app.whenReady().then(async () => {
     if (event.sender !== loginWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Unauthorized window');
   };
+  handleDesktop('session:local-mode', async (event, enabled, ...extra) => {
+    if (typeof enabled !== 'boolean' || extra.length) throw Error('Invalid local mode');
+    if (enabled) requireLogin(event);
+    else {
+      requireMain(event);
+      if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    }
+    await localModeReady;
+    if (entryBusy || leavingAccount || erasingAccount)
+      return { ok: false as const, state: accountState(), error: '账号操作正在进行，请稍候。' };
+    entryBusy = true;
+    try {
+      if (enabled) {
+        if (cloudAccount.snapshot().user) throw Error('请先退出 VoxCue 账号。');
+        if (auth.isPending() || copilotAuth.isPending()) throw Error('请先取消正在进行的授权。');
+        await finishSignedOutMain();
+        await localMode.set(true);
+        accountState();
+        telemetry?.entry('local');
+        createMainWindow();
+      } else {
+        if (!localMode.active) throw Error('当前不是本地账户模式。');
+        if (interviewActive()) throw Error('请先结束面试。');
+        if (!(await prepareUpdateInstall(true)))
+          return { ok: false as const, state: accountState(), error: '已取消返回登录。' };
+        await accountArchive?.cancel();
+        await localMode.set(false);
+        auth.cancel();
+        copilotAuth.cancel();
+        knowledgeCoordinator?.cancelAll();
+        historyJobs?.cancelAll();
+        chatIpc?.cancelActive();
+        createLoginWindow();
+      }
+      return { ok: true as const, state: accountState() };
+    } catch (error) {
+      if (!enabled) mainCloseApproved = mainCloseFlushed = false;
+      throw error;
+    } finally {
+      entryBusy = false;
+    }
+  });
   handleDesktop('auth:session', async (event) => {
     if (event.sender !== loginWindow?.webContents) requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
@@ -877,6 +983,30 @@ app.whenReady().then(async () => {
       : await activeAuth().session();
     return session;
   });
+  // Entry can finish while the previous main window is still flushing its chat store.
+  const finishSignedOutMain = async () => {
+    if (mainWindow) {
+      const outgoing = mainWindow;
+      if (!mainCloseApproved) throw Error('主窗口尚未完成退出，请稍后重试。');
+      await new Promise<void>((resolve, reject) => {
+        const finish = (error?: Error) => {
+          clearTimeout(timer);
+          outgoing.removeListener('closed', closed);
+          cancelLoginWait = undefined;
+          if (error) reject(error);
+          else resolve();
+        };
+        const closed = () => finish();
+        const timer = setTimeout(() => {
+          finish(Error('聊天尚未保存，请完成保存后重试登录。'));
+        }, 15000);
+        cancelLoginWait = () => finish(Error('登录已取消。'));
+        outgoing.once('closed', closed);
+        outgoing.close();
+      });
+      if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
+    }
+  };
   const signIn = async (service: AIService) => {
     if (signingIn || auth.isPending() || copilotAuth.isPending())
       throw Error('已有登录操作正在进行。');
@@ -893,30 +1023,7 @@ app.whenReady().then(async () => {
         return session;
       }
       if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
-      // Fast reauthentication can finish while the signed-out main window is
-      // still flushing its chat store. Wait for its normal saved close before
-      // creating the next window; createMainWindow deliberately reuses no window.
-      if (mainWindow) {
-        const outgoing = mainWindow;
-        if (!mainCloseApproved) throw Error('主窗口尚未完成退出，请稍后重试。');
-        await new Promise<void>((resolve, reject) => {
-          const finish = (error?: Error) => {
-            clearTimeout(timer);
-            outgoing.removeListener('closed', closed);
-            cancelLoginWait = undefined;
-            if (error) reject(error);
-            else resolve();
-          };
-          const closed = () => finish();
-          const timer = setTimeout(() => {
-            finish(Error('聊天尚未保存，请完成保存后重试登录。'));
-          }, 15000);
-          cancelLoginWait = () => finish(Error('登录已取消。'));
-          outgoing.once('closed', closed);
-          outgoing.close();
-        });
-        if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
-      }
+      await finishSignedOutMain();
       await selection.write(service);
       selectedService = service;
       selectionReady = Promise.resolve();
@@ -929,7 +1036,8 @@ app.whenReady().then(async () => {
   const requireAIWindow = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame) {
       if (interviewActive()) throw Error('请先结束面试再切换 AI 服务。');
-      if (!cloudAccount.snapshot().user && !demoSession) throw Error('请先登录 VoxCue 账号。');
+      if (!cloudAccount.snapshot().user && !localMode.active && !demoSession)
+        throw Error('请先登录 VoxCue 账号或选择本地账户。');
       return;
     }
     requireLogin(event);
@@ -1013,6 +1121,7 @@ app.whenReady().then(async () => {
     requireMain,
     isDemo: () => demoSession,
     openLink: (url) => shell.openExternal(url),
+    telemetry,
   });
   const requireInterview = (event: Electron.IpcMainInvokeEvent) => {
     if (
@@ -1021,6 +1130,16 @@ app.whenReady().then(async () => {
     )
       throw Error('Unauthorized window');
   };
+  registerTelemetryIpc({
+    telemetry,
+    requireMain,
+    requireInterview,
+    requireEntry(event) {
+      if (![loginWindow?.webContents, mainWindow?.webContents].includes(event.sender))
+        throw Error('Unauthorized window');
+      accountState();
+    },
+  });
   const interviewImages = new InterviewImageStore(
     path.join(app.getPath('userData'), 'interview-images-v1'),
   );
@@ -1030,7 +1149,7 @@ app.whenReady().then(async () => {
     async choose() {
       if (!mainWindow || mainWindow.isDestroyed()) throw Error('账号窗口已关闭。');
       const result = await dialog.showSaveDialog(mainWindow, {
-        title: '保存账号资料',
+        title: '导出资料',
         defaultPath: path.join(app.getPath('documents'), 'VoxCue资料.zip'),
         filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
       });
@@ -1047,10 +1166,14 @@ app.whenReady().then(async () => {
     if (event.senderFrame !== event.sender.mainFrame || erasingAccount)
       throw Error('Unauthorized window');
     if (leavingAccount) return { ok: false as const, error: '账号正在退出，请稍候。' };
-    if (interviewActive()) return { ok: false as const, error: '请先结束面试再保存资料。' };
+    if (interviewActive()) return { ok: false as const, error: '请先结束面试再导出资料。' };
     const user = cloudAccount.snapshot().user;
-    if (!user) return { ok: false as const, error: '请先登录 VoxCue 账号。' };
-    return accountArchive!.call(event.sender.id + ':' + user.id, call);
+    if (!user && !localMode.active)
+      return { ok: false as const, error: '请先登录 VoxCue 账号或选择本地账户。' };
+    return accountArchive!.call(
+      event.sender.id + ':' + (localMode.active ? 'local' : user!.id),
+      call,
+    );
   });
   registerInterviewImageIpc({
     store: interviewImages,
@@ -1079,6 +1202,7 @@ app.whenReady().then(async () => {
   });
   interviewIpc = registerInterviewIpc({
     chat: ragChat,
+    telemetry,
     requireInterview(event) {
       requireInterview(event);
     },
@@ -1123,6 +1247,7 @@ app.whenReady().then(async () => {
       });
       if (result.canceled || !result.filePath) return false;
       await writeFile(result.filePath, '\uFEFF' + request.text, 'utf8');
+      telemetry?.activity('history_export');
       return true;
     },
   });
@@ -1213,6 +1338,14 @@ app.whenReady().then(async () => {
         interviewWindow &&
         !interviewWindow.isDestroyed()
       ) {
+        if (event.type === 'status') telemetry?.speechState(event.status.state);
+        if (
+          event.type === 'segment' &&
+          event.segment.final &&
+          event.segment.text.trim() &&
+          event.segment.reason !== 'discontinuity'
+        )
+          telemetry?.transcript(event.segment.id);
         interviewContext.event(event);
         sendDesktop(interviewWindow.webContents, 'speech:event', event);
       }
@@ -1229,7 +1362,7 @@ app.whenReady().then(async () => {
     } else requireInterview(event);
     return speechHardware.read();
   });
-  handleDesktop('speech:call', (event, value: unknown) => {
+  handleDesktop('speech:call', async (event, value: unknown) => {
     const call = validateSpeech(value);
     if (
       event.sender === mainWindow?.webContents &&
@@ -1238,7 +1371,17 @@ app.whenReady().then(async () => {
     )
       return speech!.call(call);
     requireInterview(event);
-    return speechSessions!.interview(call);
+    if (call.op === 'start' && !demoSession) telemetry?.beginInterview();
+    if (call.op === 'pause' || call.op === 'stop') telemetry?.speechState('paused');
+    try {
+      const status = await speechSessions!.interview(call);
+      telemetry?.speechState(status.state);
+      if (status.state === 'error' && call.op === 'start') telemetry?.audioFailed();
+      return status;
+    } catch (error) {
+      if (call.op === 'start') telemetry?.audioFailed();
+      throw error;
+    }
   });
   handleDesktop('dictation:call', (event, value: unknown) => {
     requireMain(event);
@@ -1262,7 +1405,14 @@ app.whenReady().then(async () => {
       throw Error('当前平台尚未接入 Qwen 原生推理。');
     await speechHardware.require(validated.options);
     components.require(speechComponent(validated.options));
-    return speechSessions!.reconnect(options);
+    try {
+      const status = await speechSessions!.reconnect(options);
+      telemetry?.speechState(status.state);
+      return status;
+    } catch (error) {
+      telemetry?.speechState('error');
+      throw error;
+    }
   });
   handleDesktop('interview:check-access', async (event, value: unknown) => {
     requireMain(event);
@@ -1292,11 +1442,18 @@ app.whenReady().then(async () => {
     if (updates?.state().phase === 'installing')
       throw Error('正在准备更新，请完成或取消更新后再开始面试。');
     if (interviewOpening) throw Error('正在检查面试设备，请稍候。');
+    const configuration = validateInterviewConfiguration(value);
+    if (interviewWindow) {
+      openInterview();
+      return;
+    }
+    if (!demoSession) telemetry?.beginInterview();
+    let stage: TelemetryStage = 'preflight';
     interviewOpening = true;
     updates?.refresh();
     try {
       if (!demoSession && !(await activeAuth().session())) throw new Error('Please sign in first');
-      const configuration = validateInterviewConfiguration(value);
+      stage = 'model';
       if (configuration.options.speechModel === 'qwen' && !resources.qwenModels)
         throw Error('当前平台尚未接入 Qwen 原生推理。');
       await speechHardware.require(configuration.options);
@@ -1312,6 +1469,7 @@ app.whenReady().then(async () => {
       if (configuration.mode === 'local') {
         if (configuration.options.speechModel !== 'qwen' && !speechModelInstalled(speechModelRoot))
           throw Error('本地语音模型未安装，请先下载模型后再开始面试。');
+        stage = 'permission';
         const access = await checkInterviewAccess(configuration.options);
         if (!access.ready)
           throw Error(
@@ -1321,13 +1479,18 @@ app.whenReady().then(async () => {
               .join('\n'),
           );
       }
+      stage = 'audio';
       await speechSessions!.confirm(configuration);
       try {
+        stage = 'window';
         openInterview();
       } catch (error) {
         speechSessions!.releaseInterview(true);
         throw error;
       }
+    } catch (error) {
+      telemetry?.finishInterview(false, stage);
+      throw error;
     } finally {
       interviewOpening = false;
       updates?.refresh();
@@ -1483,6 +1646,7 @@ app.whenReady().then(async () => {
       args.length
     )
       return;
+    telemetry?.finishInterview(true);
     interviewCloseApproved = true;
     interviewWindow.close();
   });
@@ -1514,7 +1678,16 @@ app.whenReady().then(async () => {
   });
   void selectionReady
     .then(async () => {
+      await localModeReady;
+      if (localMode.active) {
+        accountState();
+        telemetry?.entry('local');
+        return true;
+      }
       const result = await cloudAccount.call({ action: 'status' });
+      accountState();
+      if (result.ok && result.state.user && result.state.verified)
+        telemetry?.entry('restore', result.state.user.createdAt);
       return (
         result.state.user ||
         (!app.isPackaged && process.env.COPILOT_TEST_USER_DATA
@@ -1532,7 +1705,16 @@ app.whenReady().then(async () => {
     if (desktopPlatform.id !== 'darwin') return createLoginWindow();
     void selectionReady
       .then(async () => {
+        await localModeReady;
+        if (localMode.active) {
+          accountState();
+          telemetry?.entry('local');
+          return true;
+        }
         const result = await cloudAccount.call({ action: 'status' });
+        accountState();
+        if (result.ok && result.state.user && result.state.verified)
+          telemetry?.entry('restore', result.state.user.createdAt);
         return result.state.user;
       })
       .then((session) => {
@@ -1552,6 +1734,12 @@ app.on('before-quit', (event) => {
   if (mainWindow && !mainWindow.isDestroyed() && !mainCloseFlushed) {
     event.preventDefault();
     mainWindow.close();
+    return;
+  }
+  if (telemetry && !telemetryClosed) {
+    event.preventDefault();
+    telemetryClosed = true;
+    void telemetry.close().finally(() => app.quit());
     return;
   }
   updates?.dispose();

@@ -24,6 +24,7 @@ import { SidebarUpdate } from './SidebarUpdate';
 interface Props {
   userName: string;
   accountLabel: string;
+  localMode?: boolean;
   page: 'preparation' | 'history' | 'knowledge';
   onNavigate(page: 'preparation' | 'history' | 'knowledge'): void;
   collapsed: boolean;
@@ -35,6 +36,7 @@ interface Props {
 export function Sidebar({
   userName,
   accountLabel,
+  localMode = false,
   page,
   onNavigate,
   collapsed,
@@ -58,9 +60,9 @@ export function Sidebar({
     };
   }, [connection.live]);
   const remaining = !connection.live
-    ? '未连接 AI 工具'
+    ? '未连接 AI 服务'
     : connection.loadingUsage
-      ? '正在读取 AI 用量…'
+      ? '正在读取 AI 服务用量…'
       : accountUsageSummary(connection.usage);
   const [loggingOut, setLoggingOut] = useState(false);
   return (
@@ -206,16 +208,17 @@ export function Sidebar({
               <DropdownMenu.Separator className="dropdown-separator" />
               <DropdownMenu.Item className="dropdown-item" onSelect={() => setLoggingOut(true)}>
                 <LogOut size={16} />
-                退出登录
+                {localMode ? '返回登录' : '退出登录'}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </div>
       {loggingOut && (
-        <Modal title="退出登录" onClose={() => setLoggingOut(false)}>
+        <Modal title={localMode ? '返回登录' : '退出登录'} onClose={() => setLoggingOut(false)}>
           <p>
-            退出后，正在生成的回复会停止，未保存的个人信息编辑会丢失。普通聊天、附件草稿和已保存资料会保留。
+            {localMode ? '返回登录后' : '退出后'}
+            ，正在生成的回复会停止，未保存的个人信息编辑会丢失。普通聊天、附件草稿和已保存资料会保留。
           </p>
           <div className="dialog-footer">
             <Button variant="outline" data-autofocus onClick={() => setLoggingOut(false)}>
@@ -230,7 +233,7 @@ export function Sidebar({
               }}
             >
               <LogOut size={16} />
-              退出登录
+              {localMode ? '返回登录' : '退出登录'}
             </Button>
           </div>
         </Modal>

@@ -7,8 +7,10 @@ import { InterviewContext, interviewInstructions } from '../application/intervie
 import { handleDesktop, sendDesktop } from './handle';
 import { randomUUID } from 'node:crypto';
 import type { InterviewImage } from '../contracts/interviewImages';
+import type { Telemetry } from '../backend/telemetry/service';
 export function registerInterviewIpc(d: {
   chat: AIChatService;
+  telemetry?: Pick<Telemetry, 'answer'>;
   requireInterview: (e: Electron.IpcMainInvokeEvent) => void;
   isDemo: () => boolean;
   configuration: () => InterviewConfiguration | undefined;
@@ -164,6 +166,7 @@ export function registerInterviewIpc(d: {
       retrievalQuery: snapshot.retrievalQuery,
     });
     const dispose = () => scope?.dispose();
+    const metric = d.telemetry?.answer('interview');
     current.controller.signal.addEventListener('abort', dispose, { once: true });
     try {
       if (ids.length) snapshot.turns.at(-1)!.files = ids.map((id) => screenshots.get(id)!.file);
@@ -205,6 +208,7 @@ export function registerInterviewIpc(d: {
                 !e.sender.isDestroyed()
               ) {
                 if (event.type === 'delta') answerText = (answerText + event.text).slice(0, 6000);
+                if (event.type === 'delta' && event.text.trim()) metric?.first();
                 sendDesktop(e.sender, 'chat:event', event);
               }
             },
@@ -257,8 +261,11 @@ export function registerInterviewIpc(d: {
         throw new ChatServiceError({ code: 'empty_response', message: '未收到有效回答，请重试。' });
       if (!result.warning) d.context.answer(snapshot, result.answerText ?? answerText);
       for (const id of ids) screenshots.delete(id);
+      metric?.first();
+      metric?.finish(result.warning ? 'failure' : 'success');
       return { ok: true, ...result };
     } catch (error) {
+      metric?.finish(current.controller.signal.aborted ? 'cancelled' : 'failure');
       return { ok: false, error: publicFailure(error) };
     } finally {
       scope?.dispose();

@@ -1,4 +1,7 @@
 import { useUpdates } from '../stores/updates';
+import { useState } from 'react';
+import githubLogo from '../assets/github.svg?inline';
+import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
 import { Download, Loader, Update } from './icons';
 import { DownloadButton } from './DownloadButton';
@@ -6,6 +9,8 @@ import { ActionTransition } from './ActionTransition';
 
 export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } = {}) {
   const updates = useUpdates();
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const feedbackUrl = 'https://github.com/NCFXZ/VoxCue-releases/issues/new';
   const state = updates.state;
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.phase);
   const downloaded = state?.phase === 'downloaded';
@@ -14,7 +19,9 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
   const label = !state
     ? '正在读取更新状态…'
     : state.phase === 'unavailable'
-      ? state.message
+      ? state.message === '开发版本不检查线上更新，请使用 VoxCue 安装版。'
+        ? null
+        : state.message
       : state.phase === 'checking'
         ? '正在检查更新…'
         : state.phase === 'downloading'
@@ -98,10 +105,33 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
           )}
         </ActionTransition>
       </div>
-      <p className="settings-hint" role="status" aria-live="polite">
-        {label}
-      </p>
-      <p className="settings-hint">更新会保留本机聊天、附件、个人资料和面试记录。</p>
+      {label && (
+        <p className="settings-hint" role="status" aria-live="polite">
+          {label}
+        </p>
+      )}
+      <div className="updates-footer settings-hint">
+        <p>更新会保留本机聊天、附件、个人资料和面试记录。</p>
+        <a
+          className="updates-feedback"
+          href={feedbackUrl}
+          onClick={(event) => {
+            event.preventDefault();
+            setFeedbackError(null);
+            void openChatLink(feedbackUrl).catch(() =>
+              setFeedbackError('无法打开反馈页面，请稍后重试。'),
+            );
+          }}
+        >
+          <img className="service-brand-icon" src={githubLogo} alt="" aria-hidden="true" />
+          问题反馈
+        </a>
+      </div>
+      {feedbackError && (
+        <p className="inline-error" role="alert">
+          {feedbackError}
+        </p>
+      )}
       {(updates.error || state?.error) && (
         <p className="inline-error" role="alert">
           {updates.error || state?.error}

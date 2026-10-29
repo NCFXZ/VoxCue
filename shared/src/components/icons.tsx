@@ -46,6 +46,7 @@ import {
   Link24Regular,
   Edit24Regular,
   ArrowDownload24Regular,
+  ArrowExportLtr24Regular,
   PanelRightExpandRegular,
   Screenshot24Regular,
   Save24Regular,
@@ -89,6 +90,7 @@ export const ChevronRight = icon(ChevronRight24Regular);
 export const Link = icon(Link24Regular);
 export const Edit = icon(Edit24Regular);
 export const Download = icon(ArrowDownload24Regular);
+export const Export = icon(ArrowExportLtr24Regular);
 export const PanelRight = icon(PanelRightExpandRegular);
 export const Loader = icon(SpinnerIos20Regular, true);
 export const Appearance = icon(Color24Regular);

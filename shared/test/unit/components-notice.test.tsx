@@ -41,7 +41,7 @@ it.each([
 });
 it('都未下载时显示缺失语音模型，Qwen/CPU已就绪时只显示性能提示', () => {
   current.state = state(false, false);
-  expect(renderToStaticMarkup(<ComponentsNotice />)).toContain('本地语音模型');
+  expect(renderToStaticMarkup(<ComponentsNotice />)).toContain('轻量语音识别');
   current.state = state(false, true);
   const html = renderToStaticMarkup(
     <ComponentsNotice
@@ -49,7 +49,7 @@ it('都未下载时显示缺失语音模型，Qwen/CPU已就绪时只显示性�
     />,
   );
   expect(html).toContain('语音推理性能提示');
-  expect(html).toContain('稍有延迟');
+  expect(html).toContain('明显延迟');
   expect(html).not.toContain('尚未就绪');
 });
 it('Paraformer/CPU与Qwen/Metal不显示CPU性能提示，知识库缺失单独保留', () => {
@@ -69,6 +69,6 @@ it('Paraformer/CPU与Qwen/Metal不显示CPU性能提示，知识库缺失单独�
     expect(renderToStaticMarkup(<ComponentsNotice speechOptions={options} />)).toBe('');
   current.state = state(false, true, false);
   const html = renderToStaticMarkup(<ComponentsNotice />);
-  expect(html).toContain('知识库模型');
-  expect(html).not.toContain('本地语音模型');
+  expect(html).toContain('知识库检索');
+  expect(html).not.toContain('轻量语音识别');
 });

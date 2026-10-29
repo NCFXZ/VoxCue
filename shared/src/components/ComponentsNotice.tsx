@@ -1,6 +1,10 @@
-import { hasReadySpeechModel, type ComponentId } from '../../electron/contracts/components';
+import {
+  componentPresentation,
+  hasReadySpeechModel,
+  type ComponentId,
+} from '../../electron/contracts/components';
 import type { SpeechOptions } from '../../electron/contracts/speech';
-import { speechSelection } from '../../electron/contracts/speechSettings';
+import { speechSelection, speechCpuWarning } from '../../electron/contracts/speechSettings';
 import { useComponents } from '../stores/components';
 import { ArrowUpRight } from './icons';
 import { Button } from './ui/button';
@@ -40,17 +44,18 @@ export function ComponentsNotice({
       <div>
         <strong>
           {cpuWarning
-            ? '语音识别模块性能受限'
+            ? `${componentPresentation.qwen.label}性能受限`
             : only
-              ? `${missing[0].label}尚未就绪`
+              ? `${componentPresentation[missing[0].id].label}尚未就绪`
               : '本地组件尚未就绪'}
         </strong>
         <p>
           {cpuWarning ? (
-            '当前使用 CPU 运行 Qwen，转写更新可能稍有延迟。可在设置中调整推理设备。'
+            `${speechCpuWarning}可在设置中调整识别方式或推理设备。`
           ) : (
             <>
-              {!only && `${missing.map((item) => item.label).join('、')}。`}
+              {!only &&
+                `${missing.map((item) => componentPresentation[item.id].label).join('、')}。`}
               请在设置中下载或查看进度。
             </>
           )}

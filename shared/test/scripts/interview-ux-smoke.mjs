@@ -813,7 +813,7 @@ try {
     globalThis.uxHoldSpeech = true;
   });
   await devices.getByRole('button', { name: '语音识别模型', exact: true }).click();
-  await floating.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: '多语言语音识别', exact: true }).click();
   await devices.getByRole('status').filter({ hasText: '原配置继续转写' }).waitFor();
   assert.equal(
     await devices.getByRole('button', { name: '语音识别模型', exact: true }).isDisabled(),
@@ -880,7 +880,7 @@ try {
     globalThis.uxFailSpeech = false;
   });
   await devices.getByRole('button', { name: '语音识别模型', exact: true }).click();
-  await floating.getByRole('menuitemradio', { name: 'Paraformer 中英 INT8', exact: true }).click();
+  await floating.getByRole('menuitemradio', { name: '轻量语音识别', exact: true }).click();
   await waitForAsync(
     floating,
     async () =>

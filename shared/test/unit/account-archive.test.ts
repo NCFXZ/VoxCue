@@ -236,6 +236,10 @@ it('clears only personal stores after browser shutdown, preserves model binaries
     await fs.mkdir(path.join(root, 'component-cache'));
     await fs.writeFile(path.join(root, 'component-cache', 'public-model'), 'keep');
     await fs.writeFile(path.join(root, 'auth-data', 'host-id'), 'fixed');
+    await fs.writeFile(
+      path.join(root, 'telemetry-installation.json'),
+      '{"installationId":"public-random-id"}',
+    );
     await fs.writeFile(path.join(root, accountErasureMarker), '{}');
     let cleared = false;
     await eraseLocalAccount(root, async () => {
@@ -249,6 +253,9 @@ it('clears only personal stores after browser shutdown, preserves model binaries
       'keep',
     );
     expect(await fs.readFile(path.join(root, 'auth-data', 'host-id'), 'utf8')).toBe('fixed');
+    expect(await fs.readFile(path.join(root, 'telemetry-installation.json'), 'utf8')).toContain(
+      'public-random-id',
+    );
     for (const relative of personalDataPaths)
       await expect(fs.stat(path.join(root, relative))).rejects.toMatchObject({ code: 'ENOENT' });
     await eraseLocalAccount(root, async () => {});

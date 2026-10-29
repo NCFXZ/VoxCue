@@ -2,9 +2,9 @@ import type { AccountQuota, AccountUsage } from '../../electron/contracts/accoun
 
 /** Use the same bound provider snapshot as AI settings; never invent a five-hour window. */
 export function accountUsageSummary(usage: AccountUsage | null) {
-  if (usage?.status !== 'available') return 'AI 用量暂不可用';
+  if (usage?.status !== 'available') return 'AI 服务用量暂不可用';
   const quota = usage.quotas.find((q) => /(?:^| · )5小时额度$/.test(q.label)) ?? usage.quotas[0];
-  if (!quota) return 'AI 用量暂不可用';
+  if (!quota) return 'AI 服务用量暂不可用';
   const provider = usage.provider === 'chatgpt' ? 'ChatGPT' : 'Copilot';
   const value = remaining(quota);
   return `${provider} ${value}`;

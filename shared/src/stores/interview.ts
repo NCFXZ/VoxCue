@@ -14,6 +14,7 @@ import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
 import { sameAudioCapture, speechSelection } from '../../electron/contracts/speechSettings';
 import { validInterviewImages } from '../../electron/contracts/interviewImages';
+import { signalTelemetry } from '../services/telemetry';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
   mode: 'local' | 'mock';
@@ -30,7 +31,11 @@ interface InterviewState {
   configure(
     value: Partial<Pick<InterviewState, 'mode' | 'options' | 'aiEnabled' | 'modelId' | 'effort'>>,
   ): void;
-  submitTranscript(editedQuestion?: string, includeScreenshots?: boolean): Promise<void>;
+  submitTranscript(
+    editedQuestion?: string,
+    includeScreenshots?: boolean,
+    automatic?: boolean,
+  ): Promise<void>;
   status: Status;
   autoAnswer: boolean;
   updatingModel: boolean;
@@ -129,7 +134,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
       set({ pendingQuestion: '', draftQuestion: '' });
     }
   },
-  async submitTranscript(editedQuestion, includeScreenshots = false) {
+  async submitTranscript(editedQuestion, includeScreenshots = false, automatic = false) {
     try {
       const screenshotIds = includeScreenshots ? get().screenshots.map((shot) => shot.id) : [];
       const question =
@@ -142,6 +147,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
         (includeScreenshots && get().capturingScreenshot)
       )
         return;
+      if (!automatic && get().mode === 'local') signalTelemetry({ type: 'manual_question' });
       if (!question.trim()) {
         await get().ask('', undefined, screenshotIds);
         return;
@@ -193,7 +199,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
           get().status === 'running' &&
           !get().generating
         )
-          void get().submitTranscript();
+          void get().submitTranscript(undefined, false, true);
       }
     }
   },
@@ -408,7 +414,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
             !get().generating &&
             !get().updatingModel
           )
-            void get().submitTranscript();
+            void get().submitTranscript(undefined, false, true);
           return;
         }
         if (event.type === 'activity')
@@ -517,7 +523,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
                   !get().generating &&
                   !get().updatingModel
                 )
-                  void get().submitTranscript();
+                  void get().submitTranscript(undefined, false, true);
               }
             }
             const interim = get()
@@ -661,6 +667,10 @@ export const useInterview = create<InterviewState>((set, get) => ({
       }
       set({ status: 'ended', generating: false, endedAt: get().endedAt ?? Date.now() });
       get().archive('ended', policy.preserveEmpty);
+      if (get().mode === 'local')
+        await window.desktop
+          ?.telemetrySignal?.({ type: 'interview_saved', saved: !useHistory.getState().error })
+          .catch(() => {});
       const current = get();
       if (
         policy.generateTitle !== false &&
@@ -898,7 +908,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
               automaticQuestionReady &&
               !get().generating
             )
-              void get().submitTranscript();
+              void get().submitTranscript(undefined, false, true);
           });
         }
       }

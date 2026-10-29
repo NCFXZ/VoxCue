@@ -440,7 +440,7 @@ try {
         .screenshot({ path: previewPath, scale: 'css' });
     }
     const missing = settings.getByRole('menuitemradio', {
-      name: 'Qwen3-ASR 0.6B（未下载）',
+      name: '多语言语音识别（未下载）',
       exact: true,
     });
     assert.equal(await missing.getAttribute('aria-disabled'), 'true');
@@ -451,7 +451,7 @@ try {
       missingBounds.y + missingBounds.height / 2,
     );
     await page.keyboard.press('Escape');
-    assert.match(await speechModel.innerText(), /Paraformer/);
+    assert.match(await speechModel.innerText(), /轻量语音识别/);
     assert.equal(await modelSettings.getByText(/请先在.*本地组件.*下载/).count(), 0);
     assert.equal(await modelSettings.getByText(/已检测到兼容显卡和驱动/).count(), 0);
     await app.evaluate(() => {
@@ -462,7 +462,7 @@ try {
       service.publish('ready');
     });
     await modelSettings.getByRole('button', { name: '语音识别模型', exact: true }).click();
-    await settings.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
+    await settings.getByRole('menuitemradio', { name: '多语言语音识别', exact: true }).click();
     assert.equal(await device.isEnabled(), true);
     await device.evaluate((element) =>
       Promise.all(element.getAnimations().map((animation) => animation.finished)),
@@ -479,7 +479,7 @@ try {
       1,
     );
     await settings.getByRole('menuitemradio', { name: 'CPU', exact: true }).click();
-    await modelSettings.getByRole('alert').filter({ hasText: '性能可能不足' }).waitFor();
+    await modelSettings.getByRole('alert').filter({ hasText: '转写可能出现明显延迟' }).waitFor();
     if (process.argv.includes('--memory-preview')) {
       for (const colorScheme of ['light', 'dark']) {
         await page.emulateMedia({ colorScheme });
@@ -581,9 +581,9 @@ try {
         .getByRole('button', { name: '面试设置', exact: true })
         .click();
       await modelSettings.getByRole('button', { name: '语音识别模型', exact: true }).click();
-      await settings.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
+      await settings.getByRole('menuitemradio', { name: '多语言语音识别', exact: true }).click();
       await device.getByText('CPU', { exact: true }).waitFor();
-      await modelSettings.getByRole('alert').filter({ hasText: '性能可能不足' }).waitFor();
+      await modelSettings.getByRole('alert').filter({ hasText: '转写可能出现明显延迟' }).waitFor();
       assert.equal(await modelSettings.getByText(/当前显卡|NVIDIA 驱动/).count(), 0);
       await page.waitForFunction(
         () =>
@@ -596,7 +596,7 @@ try {
         exact: true,
       });
       assert.equal(await selectedModel.isEnabled(), true);
-      assert.match(await selectedModel.innerText(), /Qwen3-ASR/);
+      assert.match(await selectedModel.innerText(), /多语言语音识别/);
       await selectedModel.evaluate((element) => element.scrollIntoView({ block: 'end' }));
       await selectedModel.click();
       const popup = settings.getByRole('menu');
@@ -709,9 +709,9 @@ try {
       .getByRole('button', { name: '面试设置', exact: true })
       .click();
     const selectedSpeech = modelSettings.getByRole('button', { name: '语音识别模型', exact: true });
-    assert.match(await selectedSpeech.innerText(), /Paraformer/);
+    assert.match(await selectedSpeech.innerText(), /轻量语音识别/);
     await selectedSpeech.click();
-    await settings.getByRole('menuitemradio', { name: 'Qwen3-ASR 0.6B', exact: true }).click();
+    await settings.getByRole('menuitemradio', { name: '多语言语音识别', exact: true }).click();
     const beforeRemoval = await page.evaluate(() =>
       JSON.parse(localStorage.getItem('copilot-interview-settings-v1')),
     );
@@ -735,7 +735,7 @@ try {
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '面试设置', exact: true })
       .click();
-    await selectedSpeech.getByText('Paraformer 中英 INT8', { exact: true }).waitFor();
+    await selectedSpeech.getByText('轻量语音识别', { exact: true }).waitFor();
     await assertDisabledMenu();
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
     await page.reload();
@@ -750,7 +750,7 @@ try {
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '面试设置', exact: true })
       .click();
-    await selectedSpeech.getByText('Paraformer 中英 INT8', { exact: true }).waitFor();
+    await selectedSpeech.getByText('轻量语音识别', { exact: true }).waitFor();
     assert.equal(await device.isDisabled(), true);
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
     await app.evaluate(() => {
@@ -787,7 +787,7 @@ try {
     assert.equal(await page.getByLabel('本地组件提示', { exact: true }).count(), 0);
     await page
       .getByLabel('语音推理性能提示', { exact: true })
-      .getByText('语音识别模块性能受限', { exact: true })
+      .getByText('多语言语音识别性能受限', { exact: true })
       .waitFor();
     assert.equal(
       await page.getByRole('button', { name: '开始面试', exact: true }).isEnabled(),

@@ -48,8 +48,10 @@ function subscribe<K extends keyof DesktopEventMap>(
   return () => ipcRenderer.removeListener(channel, listener);
 }
 const desktop: DesktopAPI = {
+  telemetrySignal: (signal) => invoke('telemetry:signal', signal),
   accountData: (call) => invoke('account:data', call),
   cloudAccount: (call) => invoke('cloud:account', call),
+  setLocalMode: (enabled) => invoke('session:local-mode', enabled),
   cloudSync: (call) => invoke('cloud:sync', call),
   platform:
     process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'unknown',
