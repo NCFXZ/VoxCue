@@ -33,7 +33,8 @@ module.exports = (root) => {
     fs.mkdirSync(path.dirname(marker()), { recursive: true });
     fs.writeFileSync(marker(), '{}');
   };
-  globalThis.primaryAccountFixture = { login };
+  const logout = () => fs.rmSync(marker(), { force: true });
+  globalThis.primaryAccountFixture = { login, logout };
   const state = () => ({
     configured: true,
     user: fs.existsSync(marker()) ? user : null,
@@ -50,7 +51,7 @@ module.exports = (root) => {
       login();
     if (input.action === 'login') {
       login();
-    } else if (input.action === 'logout') fs.rmSync(marker(), { force: true });
+    } else if (input.action === 'logout') logout();
     else if (input.action !== 'status')
       throw Error('Unexpected synthetic account operation: ' + input.action);
     return { ok: true, state: state() };

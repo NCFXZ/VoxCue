@@ -1,3 +1,4 @@
+import { captureRequested } from './capture-requested.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
@@ -87,6 +88,7 @@ try {
         };
       });
       assert.deepEqual(geometry, { width: 0, height: 0, radius: true, below: true, visible: true });
+      await captureRequested(login, `login-${dark ? 'dark' : 'light'}-${size.width}`);
     }
   }
   // Skipping does not submit or validate the email/password form.
@@ -141,6 +143,7 @@ try {
   await returnedLogin.getByRole('button', { name: '跳过登录', exact: true }).click();
   main = await reentered;
   await main.getByRole('textbox', { name: '聊天消息' }).waitFor();
+  await main.waitForFunction(()=>!document.querySelector('[aria-label="聊天消息"]')?.disabled);
   assert.equal(
     await main.getByRole('textbox', { name: '聊天消息' }).inputValue(),
     '合成草稿，重启后保留',
@@ -155,6 +158,7 @@ try {
   main.on('pageerror', (e) => errors.push(e.message));
   await main.getByRole('textbox', { name: '聊天消息' }).waitFor();
   assert.deepEqual(await app.evaluate(() => globalThis.localCloudCalls), []);
+  await main.waitForFunction(()=>!document.querySelector('[aria-label="聊天消息"]')?.disabled);
   assert.equal(
     await main.getByRole('textbox', { name: '聊天消息' }).inputValue(),
     '合成草稿，重启后保留',
@@ -173,17 +177,18 @@ try {
       app.getAppPath() + '/dist-electron/shared/electron/backend/cloud/sync.js',
     );
     const totals = { profile: 30000, history: 820000, knowledgebase: 9330000 };
+    globalThis.syntheticStorage = { totals, capacity: 200000000 };
     CloudSyncClient.prototype.call = async () => ({
       ok: true,
       value: {
         items: [],
         nextCursor: null,
         storage: {
-          currentBytes: totals,
+          currentBytes: globalThis.syntheticStorage.totals,
           reservedBytes: { profile: 0, history: 0, knowledgebase: 0 },
-          storedBytes: totals,
-          capacityBytes: 200000000,
-          knowledgeCapacityBytes: 200000000,
+          storedBytes: globalThis.syntheticStorage.totals,
+          capacityBytes: globalThis.syntheticStorage.capacity,
+          knowledgeCapacityBytes: globalThis.syntheticStorage.capacity,
         },
       },
     });
@@ -319,13 +324,37 @@ try {
       const details = e.querySelector('.cloud-storage-details').getBoundingClientRect();
       const total = e.querySelector('.cloud-storage-details > span').getBoundingClientRect();
       return {
-        exportOrder: exported.top >= sync.bottom && remove.top >= exported.bottom,
+        exportOrder: Math.round(exported.top*64) >= Math.round(sync.bottom*64) && Math.round(remove.top*64) >= Math.round(exported.bottom*64),
+        edges: { exportTop: exported.top, exportBottom: exported.bottom, syncBottom: sync.bottom, deleteTop: remove.top },
         right: Math.abs(details.right - total.right),
       };
     });
-    assert.equal(order.exportOrder, true);
+    assert.equal(order.exportOrder, true, JSON.stringify(order));
     assert.ok(order.right < 1, JSON.stringify(order));
+    await captureRequested(main, `cloud-capacity-${width}`);
   }
+  await app.evaluate(() => {
+    globalThis.syntheticStorage = {
+      totals: { profile: 1000000000000000, history: 1000000000000000, knowledgebase: 2000000000000000 },
+      capacity: 8000000000000000,
+    };
+  });
+  await settings.getByRole('button', { name: '刷新容量', exact: true }).click();
+  await main.waitForFunction(() => document.querySelector('.cloud-storage-details > span')?.textContent.includes('4000000000.00'));
+  for (const width of [1280, 880]) {
+    await win.evaluate((window, width) => window.setSize(width, 800), width);
+    await settle(main);
+    const geometry = await settings.locator('.cloud-storage-details').evaluate(node => {
+      const details = node.getBoundingClientRect(), legend = node.firstElementChild.getBoundingClientRect(), summary = node.lastElementChild.getBoundingClientRect();
+      return { wrapped: summary.top >= legend.bottom, right: Math.abs(summary.right - details.right), overflow: node.scrollWidth > node.clientWidth };
+    });
+    assert.equal(geometry.overflow, false, JSON.stringify(geometry));
+    assert.ok(geometry.right < 1, JSON.stringify(geometry));
+    if (width === 880) assert.equal(geometry.wrapped, true, JSON.stringify(geometry));
+    await captureRequested(main, 'cloud-capacity-long-' + width);
+  }
+  await app.evaluate(() => { globalThis.syntheticStorage = { totals: { profile: 30000, history: 820000, knowledgebase: 9330000 }, capacity: 200000000 }; });
+  await settings.getByRole('button', { name: '刷新容量', exact: true }).click();
   await settings.getByRole('button', { name: '删除账号', exact: true }).click();
   const modal = main.getByRole('dialog', { name: '删除 VoxCue 账号', exact: true });
   assert.equal(await modal.getByRole('button', { name: '导出资料', exact: true }).count(), 0);

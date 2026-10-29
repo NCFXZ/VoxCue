@@ -197,7 +197,12 @@ try {
   await main.waitForFunction(() => {
     const answer = document.querySelector('.record-answer.is-located');
     const header = document.querySelector('.record-answer-panel > header');
-    return answer.getBoundingClientRect().top >= header.getBoundingClientRect().bottom;
+    const answerTop=answer.getBoundingClientRect().top, headerBottom=header.getBoundingClientRect().bottom;
+    globalThis.answerLocationGeometry={answerTop,headerBottom};
+    return Math.round(answerTop*64)>=Math.round(headerBottom*64);
+  }).catch(async error => {
+    console.error('Answer location geometry', await main.evaluate(() => globalThis.answerLocationGeometry));
+    throw error;
   });
   await main
     .locator('.record-answer-content .provider-avatar img')

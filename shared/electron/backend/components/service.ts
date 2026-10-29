@@ -4,6 +4,7 @@ import { mkdir, lstat, open, readFile, readdir, rename, rm, writeFile } from 'no
 import { createHash, randomUUID } from 'node:crypto';
 import {
   hasReadySpeechModel,
+  componentPresentation,
   type ComponentId,
   type ComponentState,
 } from '../../contracts/components';
@@ -79,7 +80,7 @@ export class ComponentService {
   require(id: ComponentId) {
     if (!this.ready(id))
       throw Error(
-        `${this.value.items.find((item) => item.id === id)?.label ?? '本地组件'}尚未就绪，请先下载并完成校验。`,
+        `${componentPresentation[id].label}尚未就绪，请先下载并完成校验。`,
       );
   }
   private publish(phase: ComponentState['phase'], error: string | null = null) {

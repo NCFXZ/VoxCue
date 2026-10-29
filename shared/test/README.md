@@ -1,3 +1,5 @@
+当前Windows 0.6.3范围以`PROGRESS.md`和`shared/docs/WINDOWS_0.6.3_HANDOFF.md`为准；下方0.6.2及更早章节中的“当前/本轮”均属历史。本轮新增`client-update-ui-smoke.mjs`覆盖动画、拖入卡片与反馈，`windows/test/scripts/telemetry-queue-native-smoke.mjs`覆盖真实排他文件占用；普通UI/正式包启动前隔离统计，独立服务端联调显式指定自有loopback。服务端验证在独立仓库执行，不改已发布客户端对接规则。
+
 # 0.6.3本地账户、独立导出与统计
 
 0.6.3客户端统计专项：`telemetry.test.ts`和`desktop-ipc.test.ts`验证身份时点、时钟/有效场次、崩溃恢复、有界队列、回执/退避及IPC隐私边界；本平台执行`node ../shared/test/scripts/telemetry-smoke.mjs`，以主进程内存404端口、合成账号及音频验证本地→登录、聊天/文件操作、面试保存和重启。普通夹具/开发运行关闭统计，专项在隔离入口注入真实统计类的合成传输，禁止访问线上统计接口。协议见[客户端统计](../docs/CLIENT_TELEMETRY.md)。

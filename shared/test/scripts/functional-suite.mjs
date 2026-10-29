@@ -17,6 +17,7 @@ const shared = [
   'chatgpt-usage-runtime',
   'login-entry',
   'local-mode',
+  'client-update-ui',
   'telemetry',
   'electron',
   'settings',

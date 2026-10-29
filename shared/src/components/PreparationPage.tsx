@@ -1,3 +1,4 @@
+import { componentPresentation } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
@@ -249,7 +250,7 @@ export function PreparationPage({
   const beginInterview = () => {
     if (!componentReady(selectedSpeechComponent)) return;
     if (state.selectedKnowledgeBaseId && !componentReady('rag')) {
-      setInterviewError('请先下载并准备已选择的知识库模型，再开始面试。');
+      setInterviewError(`请先下载并准备已选择的${componentPresentation.rag.label}，再开始面试。`);
       return;
     }
     setInterviewError(null);

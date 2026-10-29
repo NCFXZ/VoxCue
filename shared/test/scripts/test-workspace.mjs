@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { pathToFileURL } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import workspace from '../../scripts/workspace.mjs';
 
@@ -113,6 +114,10 @@ process.once('SIGTERM', () => {
 
 export const electron = {
   async launch(options) {
+    // Fixtures declare their owned HTTP origin explicitly; ordinary UI and packages stay offline.
+    options={...options,env:{...(options.env??process.env),VOXCUE_ACCOUNT_API:options.env?.VOXCUE_ACCOUNT_API??''}};
+    const probe=process.platform==='win32' ? (await import(pathToFileURL(path.join(workspace.platformRoot,'test/scripts/window-probe.mjs')).href)).probe : undefined;
+    if(probe && !probe('desktop').interactive) throw Error('GUI verification requires an unlocked input desktop');
     const profile = options.env?.COPILOT_TEST_USER_DATA;
     const isolatedArgument = options.args?.some((value) =>
       path.resolve(value).startsWith(testRoot + path.sep),
@@ -187,13 +192,40 @@ require(${JSON.stringify(entry)});
         args: [...(options.args ?? []), '--force-device-scale-factor=' + scale],
       };
     }
-    const app = await workspace.platformRequire('playwright')._electron.launch({
+    // Packaged UI must never launch an account-owning runtime before synthetic ports install.
+    // Exclusive read handles block process creation without changing any release/SDK bytes.
+    let releaseCredentials=async()=>{};
+    if(process.platform==='win32' && options.executablePath && path.basename(options.executablePath).toLowerCase()==='voxcue.exe') {
+      const unpacked=path.join(path.dirname(options.executablePath),'resources/app.asar.unpacked/node_modules');
+      const files=[path.join(unpacked,'@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'),path.join(unpacked,'@github/copilot-sdk-win32-x64/prebuilds/win32-x64/copilot-runtime.exe')];
+      if(files.some(file=>!fs.existsSync(file))) throw Error('Packaged credential runtime guard cannot resolve the pinned SDK executables');
+      if(files.length) {
+        const {holdExclusiveFiles}=await import(pathToFileURL(path.join(workspace.platformRoot,'test/scripts/window-probe.mjs')).href);
+        releaseCredentials=await holdExclusiveFiles(files);
+      }
+    }
+    let app;
+    try {app = await workspace.platformRequire('playwright')._electron.launch({
       ...(process.platform === 'darwin' && fs.existsSync(executable)
         ? { executablePath: executable }
         : {}),
       ...options,
-    });
+    });} catch(error) {await releaseCredentials();throw error;}
+    app.process().once('exit',()=>{void releaseCredentials().catch(error=>console.error(error.message));});
+    const close = app.close.bind(app);
+    app.close = async (...args) => {
+      try { return await close(...args); }
+      finally { await releaseCredentials(); }
+    };
     trackTestProcess(app.process());
+    if(probe) {
+      const guard=setInterval(()=>{
+        try {if(!probe('desktop').interactive) throw Error('Desktop locked; GUI verification stopped');}
+        catch(error){console.error(error.message);app.process().kill('SIGTERM');}
+      },2000);
+      guard.unref();
+      app.process().once('exit',()=>clearInterval(guard));
+    }
     return app;
   },
 };

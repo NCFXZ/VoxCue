@@ -1,3 +1,4 @@
+import { componentPresentation } from '../../electron/contracts/components';
 import { create } from 'zustand';
 import { localChanged } from '../services/localChanges';
 import { recordFeature } from '../services/telemetry';
@@ -191,7 +192,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   },
   async selectKnowledgeBase(id) {
     if (id !== null && !componentReady('rag')) {
-      set({ error: '请先下载并准备知识库模型，再选择知识库。' });
+      set({ error: `请先下载并准备${componentPresentation.rag.label}，再选择知识库。` });
       return false;
     }
     try {

@@ -1,3 +1,4 @@
+import { captureRequested } from './capture-requested.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -73,6 +74,21 @@ try {
   await upload('第一版');
   await upload('第二版');
   const note = () => base.locator('.document-row').filter({ hasText: 'note.md' });
+  if (process.argv.some(argument => argument.startsWith('--screenshots='))) {
+    const win = await app.browserWindow(page);
+    const original = await win.evaluate(window => window.getBounds());
+    const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
+    try {
+      for (const dark of [false, true]) for (const width of [1280, 880]) {
+        await page.evaluate(dark => document.documentElement.classList.toggle('dark', dark), dark);
+        await win.evaluate((window, width) => window.setSize(width, 800), width);
+        await captureRequested(page, `knowledge-files-${dark ? 'dark' : 'light'}-${width}`);
+      }
+    } finally {
+      await page.evaluate(dark => document.documentElement.classList.toggle('dark', dark), wasDark);
+      await win.evaluate((window, bounds) => window.setBounds(bounds), original);
+    }
+  }
   assert.equal(
     await base.getByRole('button', { name: /^(预览|取消准备|重新准备|准备用于回答)$/ }).count(),
     0,

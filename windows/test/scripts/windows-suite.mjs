@@ -28,6 +28,16 @@ if (suites[0] === '--dpi') {
     'interview-ux',
     'components-ui',
     'updates-sidebar',
+    'client-update-ui',
+    'knowledge',
+    'local-mode',
+    'telemetry',
+    'settings',
+    'profile-ui',
+    'history-branding',
+    'free-service',
+    'account-erasure',
+    'login',
   ];
   const scales = ['1', '1.25', '1.5', '1.75', '2'];
   const scaleOptions = suites.slice(1).filter((arg) => arg.startsWith('--scale='));
@@ -91,6 +101,7 @@ const nativeNames = [
   'interview-context',
   'updates-native',
   'user-data',
+  'telemetry-queue-native',
   'speech-adversarial',
   'echo-cancellation',
   'wasapi-packets',
@@ -140,9 +151,13 @@ try {
       output += data;
       if (!windowsOnly) process.stderr.write(data);
     });
-    // The shared runner bounds each of its 51 suites, including a 10-minute soak.
+    // The shared runner bounds each suite, including a 10-minute soak.
     // Its outer watchdog must allow the complete serial matrix to finish.
-    const timer = setTimeout(() => child.kill(), windowsOnly ? 180000 : 4 * 60 * 60 * 1000);
+    const nativeLimit = args[0].endsWith('/login-actions-native-smoke.mjs') ? 360000 : 180000;
+    const timer = setTimeout(() => {
+      console.error('Suite watchdog expired: '+args[0]+' ('+(windowsOnly?nativeLimit:4*60*60*1000)+'ms)');
+      child.kill();
+    }, windowsOnly ? nativeLimit : 4 * 60 * 60 * 1000);
     const code = await new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('exit', resolve);

@@ -100,7 +100,7 @@ export async function checkComponents(application) {
   assert.equal(await start.isDisabled(), true);
   assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
   const notice = page.locator('.chat-column > .components-notice');
-  await notice.getByText(/本地语音模型、知识库模型/).waitFor();
+  await notice.getByText(/轻量语音识别、知识库检索/).waitFor();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('模型尚未下载时准备聊天');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page
@@ -119,7 +119,7 @@ export async function checkComponents(application) {
     }),
   );
   assert.equal(blockedImport.ok, false);
-  assert.match(blockedImport.error, /知识库模型/);
+  assert.match(blockedImport.error, /知识库检索/);
   assert.equal(await page.getByRole('button', { name: '下载', exact: true }).count(), 0);
   await notice.getByRole('button', { name: '前往设置' }).click();
   let settings = page.getByRole('dialog', { name: '设置', exact: true });
@@ -150,7 +150,7 @@ export async function checkComponents(application) {
       });
       return false;
     } catch (error) {
-      return String(error).includes('本地语音模型');
+      return String(error).includes('轻量语音识别尚未就绪');
     }
   });
   assert.equal(blocked, true);

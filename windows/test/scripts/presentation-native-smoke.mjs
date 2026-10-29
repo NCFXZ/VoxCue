@@ -1,5 +1,5 @@
 import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { probe } from './window-probe.mjs';
+import { probe, stableTarget } from './window-probe.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -51,7 +51,7 @@ await mkdir(profile);
 const app = await electron.launch({
   ...(executablePath ? { executablePath } : {}),
   args: executablePath ? [] : [await offlineElectronEntry()],
-  env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' },
+  env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '', ...(executablePath?{VOXCUE_ACCOUNT_API:''}:{}) },
 });
 const cursor = probe('cursor');
 const icon = path.resolve('public/voxcue.ico');
@@ -225,20 +225,11 @@ try {
         'Synthetic main window did not activate',
       );
     }
-    const box = await main.getByRole('button', { name: label, exact: true }).boundingBox();
-    assert.ok(box);
-    const point = await app.evaluate(
+    const point = await stableTarget(main.getByRole('button',{name:label,exact:true}),box=>app.evaluate(
       ({ BrowserWindow, screen }, box) => {
-        const bounds = BrowserWindow.getAllWindows()
-          .find((w) => w.getTitle() === box.title)
-          .getContentBounds();
-        return screen.dipToScreenPoint({
-          x: Math.round(bounds.x + box.x + box.width / 2),
-          y: Math.round(bounds.y + box.y + box.height / 2),
-        });
-      },
-      { ...box, title },
-    );
+        const bounds=BrowserWindow.getAllWindows().find(w=>w.getTitle()===box.title).getContentBounds();
+        return screen.dipToScreenPoint({x:Math.round(bounds.x+box.x+box.width/2),y:Math.round(bounds.y+box.y+box.height/2)});
+      },{...box,title}));
     // Windows can refuse programmatic foreground activation. A real click
     // activates the intended test window; require native hit ownership first.
     await until(

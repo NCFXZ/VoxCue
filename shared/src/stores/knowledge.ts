@@ -1,3 +1,4 @@
+import { componentPresentation } from '../../electron/contracts/components';
 import { useKnowledgeIndex } from './knowledgeIndex';
 import { recordFeature } from '../services/telemetry';
 import { create } from 'zustand';
@@ -53,7 +54,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   },
   async create(name) {
     if (!componentReady('rag')) {
-      set({ error: '请先下载并准备知识库模型，再创建知识库。' });
+      set({ error: `请先下载并准备${componentPresentation.rag.label}，再创建知识库。` });
       return false;
     }
     if (get().busy) return false;

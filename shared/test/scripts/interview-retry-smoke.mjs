@@ -18,6 +18,12 @@ const app = await electron.launch({
   },
 });
 const errors = [];
+const retryClock = (action, milliseconds=0) => app.evaluate((_, {action,milliseconds}) => {
+  const timers=process.getBuiltinModule('node:test').mock.timers;
+  if(action==='enable') timers.enable({apis:['setTimeout']});
+  else if(action==='tick') timers.tick(milliseconds);
+  else timers.reset();
+},{action,milliseconds});
 try {
   await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
@@ -185,21 +191,27 @@ try {
   assert.equal(await calls('全部失败'), 5);
   assert.equal(await page.locator('.interview-answer-failure').getAttribute('role'), 'note');
 
+  await retryClock('enable');
   await send('等待停止');
   await latest().locator('.interview-answer-status').filter({ hasText: '正在重试 1/3' }).waitFor();
   await stop();
   await latest().locator('.interview-answer-status').getByText('已停止', { exact: true }).waitFor();
+  await retryClock('tick',4000);
+  await retryClock('reset');
   assert.equal(await calls('等待停止'), 1);
   assert.equal(await latest().locator('.interview-answer-failure').count(), 0);
   await capture('retry-wait-stopped');
   for (const attempt of [2, 3]) {
     const question = '等待停止-' + attempt;
+    await retryClock('enable');
     await send(question);
-    await latest()
-      .locator('.interview-answer-status')
-      .filter({ hasText: `正在重试 ${attempt}/3` })
-      .waitFor();
+    for(let step=1;step<=attempt;step++) {
+      await latest().locator('.interview-answer-status').filter({hasText:`正在重试 ${step}/3`}).waitFor();
+      if(step<attempt) await retryClock('tick',500*2**(step-1));
+    }
     await stop();
+    await retryClock('tick',4000);
+    await retryClock('reset');
     assert.equal(await calls(question), attempt);
     assert.equal(await latest().locator('.interview-answer-failure').count(), 0);
   }
@@ -378,6 +390,7 @@ try {
         .getByText('Synthetic interviewer question', { exact: true })
         .waitFor();
       const question = '生命周期' + phase + '-' + action;
+      if(phase==='等待') await retryClock('enable');
       await target.getByRole('textbox', { name: '面试提问', exact: true }).fill(question);
       await target.getByRole('button', { name: '发送面试问题', exact: true }).click();
       assert.equal(await target.locator('.floating-question').last().innerText(), question);
@@ -419,6 +432,7 @@ try {
         ]);
       } else await endInterview(target);
       if (phase === '活动') await app.evaluate(() => globalThis.retryFixture.late());
+      else {await retryClock('tick',4000);await retryClock('reset');}
     }
   }
   // A cancelled first wait must remain quiet after its original 500ms deadline.
@@ -435,6 +449,7 @@ try {
     'PASS: automatic recovery/exhaustion (4 requests), partial replacement, manual retry, fixed status typography, continuous corners, cancel all three retry waits/active request, late events/next question, empty/long errors, reading pause, fade/last line, latest dots/arrow/reduced motion, minimum window and six waiting/active end/close/destroy cases; synthetic account/audio only.',
   );
 } finally {
+  await retryClock('reset').catch(()=>{});
   await app
     .evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows().forEach((window) => window.destroy()),

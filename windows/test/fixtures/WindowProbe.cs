@@ -18,6 +18,7 @@ class WindowProbe {
   [DllImport("user32.dll",SetLastError=true)] static extern uint SendInput(uint count,Input[] inputs,int size);
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+  [DllImport("kernel32.dll")] static extern uint WTSGetActiveConsoleSessionId();
   [DllImport("user32.dll")] static extern IntPtr OpenInputDesktop(uint flags,bool inherit,uint access);
   [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr handle);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetUserObjectInformationW(IntPtr handle,int index,StringBuilder name,int bytes,out int needed);
@@ -73,6 +74,18 @@ class WindowProbe {
       Console.OutputEncoding=new UTF8Encoding(false);
       SetProcessDPIAware();
       SetThreadDpiAwarenessContext(new IntPtr(-4));
+      if(args[0]=="hold-file") {
+        var held=new List<Microsoft.Win32.SafeHandles.SafeFileHandle>();
+        try {
+          for(int i=1;i<args.Length;i++) {
+            var file=CreateFileW(@"\\?\"+args[i],0x80000000,0,IntPtr.Zero,3,0x80,IntPtr.Zero);
+            if(file.IsInvalid){file.Dispose();throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());}
+            held.Add(file);
+          }
+          Print(new{holding=true});Console.ReadLine();
+        } finally {foreach(var file in held)file.Dispose();}
+        return 0;
+      }
       if(args[0]=="exclusive") {
         for(int i=1;i<args.Length;i++)using(var file=CreateFileW(@"\\?\"+args[i],0x80000000,0,IntPtr.Zero,3,0x80,IntPtr.Zero)) {
           if(file.IsInvalid)throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error(),"Model handle is not released: "+args[i]);
@@ -81,14 +94,12 @@ class WindowProbe {
       }
       if(args[0]=="desktop") {
         var handle=OpenInputDesktop(0,false,1);if(handle==IntPtr.Zero)throw new Exception("Input desktop unavailable");
-        try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Point cursor;bool readable=GetCursorPos(out cursor);Print(new{interactive=name.ToString()=="Default"&&readable,inputDesktop=name.ToString(),cursorReadable=readable});}
+        try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Point cursor;bool readable=GetCursorPos(out cursor);int session=System.Diagnostics.Process.GetCurrentProcess().SessionId;uint console=WTSGetActiveConsoleSessionId();bool ownerConsole=console!=0xFFFFFFFF&&console==(uint)session;Print(new{interactive=name.ToString()=="Default"&&readable&&ownerConsole,inputDesktop=name.ToString(),cursorReadable=readable,processSession=session,consoleSession=console,ownerConsole});}
         finally{CloseDesktop(handle);}return 0;
       }
       if(args[0]=="save-dialog") {
         int processId=int.Parse(args[1]);
         var ownerWindow=args.Length>3?new IntPtr(long.Parse(args[3])):IntPtr.Zero;
-        var condition=new AndCondition(new PropertyCondition(AutomationElement.ProcessIdProperty,processId),
-          new PropertyCondition(AutomationElement.NameProperty,"\u4fdd\u5b58\u8d26\u53f7\u8d44\u6599"));
         AutomationElement dialog=null;var deadline=DateTime.UtcNow.AddSeconds(12);
         do {
           IntPtr native=IntPtr.Zero;

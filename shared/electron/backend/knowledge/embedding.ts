@@ -1,3 +1,4 @@
+import { componentPresentation } from '../../contracts/components';
 import path from 'node:path';
 import { access } from 'node:fs/promises';
 import { pipeline, env, type FeatureExtractionPipeline } from '@huggingface/transformers';
@@ -19,7 +20,7 @@ export class LocalEmbedder implements Embedder {
     } catch {
       throw new KnowledgeError(
         'not_ready',
-        '本地知识库模型未安装，请先在本地组件中下载并完成校验。原件已保留。',
+        `${componentPresentation.rag.label}未安装，请先在本地组件中下载并完成校验。原件已保留。`,
       );
     }
     env.allowRemoteModels = false;
@@ -36,7 +37,7 @@ export class LocalEmbedder implements Embedder {
         },
       });
     } catch {
-      throw new KnowledgeError('not_ready', '本地知识库模型加载失败，请检查本地组件。原件已保留。');
+      throw new KnowledgeError('not_ready', `${componentPresentation.rag.label}加载失败，请检查本地组件。原件已保留。`);
     }
   }
   count(text: string, kind: 'query' | 'passage') {

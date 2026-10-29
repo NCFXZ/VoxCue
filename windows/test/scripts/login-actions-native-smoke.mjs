@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
-import { probe } from './window-probe.mjs';
+import { probe, stableTarget } from './window-probe.mjs';
 
 assert.equal(process.platform, 'win32');
 assert.equal(probe('desktop').interactive, true, 'Native login checks require an unlocked desktop');
@@ -83,9 +83,7 @@ try {
           { id: info.id, box, x, y },
         );
       const hit = async (locator, expected, x = 0.5) => {
-        const box = await locator.boundingBox();
-        assert.ok(box);
-        const point = await pointAt(box, x);
+        const point = await stableTarget(locator,box=>pointAt(box,x));
         await until(
           () => probe('hittest', info.handle, point.x, point.y).result,
           (value) => value === expected,

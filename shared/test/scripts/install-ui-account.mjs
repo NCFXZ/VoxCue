@@ -20,9 +20,17 @@ export async function enterPrimaryUiAccount(app, login) {
           .createRequire(app.getAppPath() + '/package.json');
         require(fixture)(app.getAppPath());
       }
+      // This explicit login path starts with only the owned synthetic marker cleared.
+      globalThis.primaryAccountFixture.logout();
     },
     fileURLToPath(new URL('../fixtures/install-primary-account.cjs', import.meta.url)),
   );
+  // The offline account port must be installed before refreshing configured state.
+  await login.reload();
+  await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  await login.waitForFunction(() => [...document.querySelectorAll('button')].some(button =>
+    button.type === 'submit' && button.textContent === '登录' && !button.disabled,
+  ));
   const opened = app.waitForEvent('window');
   await login.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
   await login.getByLabel('密码', { exact: true }).fill('Synthetic UI passphrase 2026!');

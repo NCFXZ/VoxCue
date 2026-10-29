@@ -209,7 +209,7 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
       }),
     );
     assert.equal(blocked.ok, false);
-    assert.match(blocked.error, /知识库模型.*尚未就绪/);
+    assert.match(blocked.error, /知识库检索.*尚未就绪/);
     await application.evaluate(() => globalThis.releaseRagRemoval());
     await waitForAsync(application, async () => globalThis.removalCheck.ragUnloaded);
     const ragFiles = await application.evaluate(() => globalThis.removalFiles.rag);

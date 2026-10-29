@@ -1,3 +1,4 @@
+import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -233,7 +234,7 @@ try {
     rows.map((row) => row.title),
     [
       '面试知识库',
-      'AI 工具剩余用量',
+      'AI 服务剩余用量',
       '面试官 · 系统音频',
       '面试者 · 麦克风',
       '语音模型',
@@ -246,7 +247,7 @@ try {
     assert.equal(rows[i].y, rows[i + 1].y);
     assert.ok(Math.abs(rows[i].width - rows[i + 1].width) <= 1);
   }
-  assert.equal(rows[4].value, 'Paraformer 中英 INT8');
+  assert.equal(rows[4].value, '轻量语音识别');
   assert.equal(rows[5].value, 'CPU');
   assert.ok(rows[0].y < rows[2].y && rows[2].y < rows[4].y && rows[4].y < rows[6].y);
   await confirmation.screenshot({});
@@ -634,6 +635,8 @@ try {
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
+      await captureRequested(target, 'resize-' + edge);
+      if (edge === 'left') await captureRequested(floating, 'interview-resize-corners');
       const mouseRun = await runMouse(
         nativeMouse,
         [

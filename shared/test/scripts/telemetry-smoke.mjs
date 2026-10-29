@@ -40,7 +40,7 @@ const modulePath = path.join(root, 'dist-electron/shared/electron/backend/teleme
 const original = require(modulePath).Telemetry;
 require(modulePath).Telemetry = class extends original {
  constructor(options) {
-  super({...options, enabled:true, now:()=>Date.UTC(2026,9,29)+globalThis.telemetryTime,
+  super({...options, origin:'https://synthetic.invalid', enabled:true, now:()=>Date.UTC(2026,9,29)+globalThis.telemetryTime,
    monotonic:()=>globalThis.telemetryTime,
    fetcher:async (url, init)=>{ globalThis.telemetryPosts.push({url, body:JSON.parse(init.body)}); return new Response('',{status:404}); }});
   globalThis.clientTelemetry = this;

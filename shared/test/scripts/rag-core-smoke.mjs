@@ -65,7 +65,7 @@ app.whenReady().then(async()=>{
   assert.equal((await host.search('sensor',5,'hybrid',signal())).length,0);
   await host.close();
   const missing=new KnowledgeHost(path.join(config.output,'missing-db'),path.join(config.output,'missing-model'));
-  try{await assert.rejects(missing.indexDocument(input('x','## Q001. Sensor?\\n\\nA complete local answer.'),signal()),e=>e instanceof KnowledgeError&&e.code==='not_ready'&&/模型未安装/.test(e.message));}finally{await missing.close();}
+  try{await assert.rejects(missing.indexDocument(input('x','## Q001. Sensor?\\n\\nA complete local answer.'),signal()),e=>e instanceof KnowledgeError&&e.code==='not_ready'&&/知识库检索未安装/.test(e.message));}finally{await missing.close();}
   const damagedRoot=path.join(config.output,'damaged-catalog');await fs.mkdir(damagedRoot);await fs.writeFile(path.join(damagedRoot,'catalog.json'),'null');
   const damaged=new KnowledgeHost(damagedRoot,config.model);try{await assert.rejects(damaged.initialize(),e=>e instanceof KnowledgeError&&e.code==='configuration');assert.equal(await fs.readFile(path.join(damagedRoot,'catalog.json'),'utf8'),'null');}finally{await damaged.close();}
   console.log(JSON.stringify({status:'passed',node:process.version,electron:process.versions.electron,results,events:events.map(e=>({phase:e.phase,completed:e.completed,total:e.total})),longAnswerChunks:first.chunkCount},null,2));app.exit(0);
