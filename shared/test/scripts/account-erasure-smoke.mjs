@@ -3,22 +3,19 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
-import { testRoot, electron, spawnTestProcess } from './test-workspace.mjs';
+import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import workspace from '../../scripts/workspace.mjs';
-import { Store } from '../../server/src/store.ts';
-import { Auth } from '../../server/src/auth.ts';
-import { Services } from '../../server/src/services.ts';
-import { loadConfig } from '../../server/src/config.ts';
-import { createApi } from '../../server/src/http.ts';
-import { routes } from '../../server/src/routes.ts';
+import { Store, Auth, Services, loadConfig, createApi, routes } from './server-reference.mjs';
 const dir = path.join(testRoot, 'account-erasure');
 await fs.mkdir(dir);
 const syntheticDialog = process.argv.includes('--synthetic-dialog');
+const macNativeDialog = process.platform === 'darwin' && process.argv.includes('--native-dialog');
+assert.ok(!macNativeDialog || !syntheticDialog, 'Native and synthetic dialog modes are exclusive');
 const profile = path.join(dir, 'profile'),
-  zip = path.join(dir, '用户选择的资料.zip');
+  zip = path.join(dir, macNativeDialog ? 'VoxCue资料.zip' : '用户选择的资料.zip');
 const config = loadConfig({
   AUTH_KEY: 'cd'.repeat(32),
   DATABASE_FILE: path.join(dir, 'accounts.sqlite'),
@@ -45,7 +42,7 @@ await fs.writeFile(
   `
 const {app,safeStorage,dialog}=require('electron'),path=require('node:path'),fs=require('node:fs');const root=${JSON.stringify(workspace.platformRoot)};app.setAppPath(root);app.commandLine.appendSwitch('use-mock-keychain');app.setPath('documents',${JSON.stringify(dir)});
 if(${syntheticDialog})app.on('browser-window-created',(_event,window)=>{window.webContents.setBackgroundThrottling(false);window.once('ready-to-show',()=>setImmediate(()=>window.hide()));});
-const save=dialog.showSaveDialog.bind(dialog);let saveCount=0;dialog.showSaveDialog=(...args)=>{if(args.at(-1)?.title==='保存账号资料')fs.writeFileSync(path.join(app.getPath('userData'),'native-save-count'),String(++saveCount));return save(...args).then(result=>{fs.writeFileSync(path.join(app.getPath('userData'),'native-save-result'),String(result.canceled));return result;});};
+const save=dialog.showSaveDialog.bind(dialog);let saveCount=0;dialog.showSaveDialog=(...args)=>{if(args.at(-1)?.title==='保存账号资料'){if(${macNativeDialog}&&args.at(-1).defaultPath!==${JSON.stringify(zip)})throw Error('Native fixture requires its owned default ZIP path');fs.writeFileSync(path.join(app.getPath('userData'),'native-save-count'),String(++saveCount));}return save(...args).then(result=>{if(${macNativeDialog}&&!result.canceled&&path.join(fs.realpathSync(path.dirname(result.filePath)),path.basename(result.filePath))!==${JSON.stringify(zip)})throw Error('Native fixture only accepts its owned synthetic ZIP target');fs.writeFileSync(path.join(app.getPath('userData'),'native-save-result'),String(result.canceled));return result;});};
 const base=path.join(root,'dist-electron/shared/electron');
 for(const [module,name]of [['backend/auth/service.js','ChatGPTAuthService'],['backend/copilot/auth.js','CopilotAuthService']]){const C=require(path.join(base,module))[name];C.prototype.session=async()=>null;C.prototype.signOut=async()=>({warning:null});}
 if(process.platform==='darwin'){const c=require(path.join(root,'dist-electron/macos/electron/credentials.js'));c.createCredentialEncryption=()=>({encrypt:v=>safeStorage.encryptString(v),decrypt:v=>safeStorage.decryptString(v)});}
@@ -57,27 +54,46 @@ let app;
 const errors = [];
 let expectedSave = 0;
 async function uiClick(locator) {
-  if(syntheticDialog) await locator.evaluate(node=>{
-    if(node.getAttribute('aria-haspopup')==='menu'){
-      node.dispatchEvent(new PointerEvent('pointerdown',{button:0,buttons:1,pointerType:'mouse',bubbles:true}));
-      node.dispatchEvent(new PointerEvent('pointerup',{button:0,buttons:0,pointerType:'mouse',bubbles:true}));
-    }else node.click();
-  });
+  if (syntheticDialog)
+    await locator.evaluate((node) => {
+      if (node.getAttribute('aria-haspopup') === 'menu') {
+        node.dispatchEvent(
+          new PointerEvent('pointerdown', {
+            button: 0,
+            buttons: 1,
+            pointerType: 'mouse',
+            bubbles: true,
+          }),
+        );
+        node.dispatchEvent(
+          new PointerEvent('pointerup', {
+            button: 0,
+            buttons: 0,
+            pointerType: 'mouse',
+            bubbles: true,
+          }),
+        );
+      } else node.click();
+    });
   else await locator.click();
 }
-async function captureAccount(page,name){
-  if(!syntheticDialog)return captureRequested(page,name);
-  if(!process.argv.some(arg=>arg.startsWith('--screenshots=')))return;
-  if(process.platform==='win32'){
-    const {probe}=await import('../../../windows/test/scripts/window-probe.mjs');
-    assert.equal(probe('desktop').interactive,true);
+async function captureAccount(page, name) {
+  if (!syntheticDialog) return captureRequested(page, name);
+  if (!process.argv.some((arg) => arg.startsWith('--screenshots='))) return;
+  if (process.platform === 'win32') {
+    const { probe } = await import('../../../windows/test/scripts/window-probe.mjs');
+    assert.equal(probe('desktop').interactive, true);
   }
-  const window=await app.browserWindow(page);
-  await window.evaluate(window=>window.showInactive());
-  try{
-    await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve))));
-    await captureRequested(page,name,{animations:'allow'});
-  }finally{await window.evaluate(window=>window.hide());}
+  const window = await app.browserWindow(page);
+  await window.evaluate((window) => window.showInactive());
+  try {
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    await captureRequested(page, name, { animations: 'allow' });
+  } finally {
+    await window.evaluate((window) => window.hide());
+  }
 }
 async function nativeDialog(cancel) {
   const expected = String(++expectedSave),
@@ -135,7 +151,7 @@ try {
   await login.getByLabel('邮箱', { exact: true }).fill(user.email);
   await login.getByLabel('密码', { exact: true }).fill('Synthetic erase pass8!');
   const opened = app.waitForEvent('window');
-  void opened.catch(()=>{});
+  void opened.catch(() => {});
   await uiClick(login.getByRole('button', { name: '登录', exact: true }));
   const main = await opened;
   main.on('pageerror', (e) => errors.push(e.message));
@@ -214,7 +230,7 @@ try {
     await captureAccount(main, 'account-sync-' + (dark ? 'dark' : 'light'));
   }
   await settings.getByRole('button', { name: '删除账号', exact: true }).scrollIntoViewIfNeeded();
-  await captureAccount(main,'account-delete-section');
+  await captureAccount(main, 'account-delete-section');
   await uiClick(settings.getByRole('button', { name: '删除账号', exact: true }));
   const modal = main.getByRole('dialog', { name: '删除 VoxCue 账号', exact: true }),
     confirm = modal.getByRole('button', { name: '永久删除账号', exact: true });
@@ -238,7 +254,18 @@ try {
   });
   assert.ok(checkAlignment <= 1, 'Checkbox and label share their center line');
   await captureAccount(main, 'account-delete-confirm');
-  if (process.platform === 'win32' && !syntheticDialog) {
+  if (macNativeDialog) {
+    const { nativeSaveDialog } = await import('../../../macos/test/scripts/save-dialog.mjs');
+    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await nativeSaveDialog(app, { cancel: true, target: zip });
+    await modal.getByRole('status').filter({ hasText: '已取消保存' }).waitFor();
+    assert.ok(store.user(user.email));
+    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await nativeSaveDialog(app, { cancel: false, target: zip });
+    await modal.getByRole('status').filter({ hasText: '资料已保存' }).waitFor();
+    await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
+    await nativeSaveDialog(app, { cancel: false, target: zip, overwrite: true });
+  } else if (process.platform === 'win32' && !syntheticDialog) {
     await uiClick(modal.getByRole('button', { name: '保存资料', exact: true }));
     await nativeDialog(true);
     await modal.getByRole('status').filter({ hasText: '已取消保存' }).waitFor();
@@ -260,6 +287,12 @@ try {
   assert.ok((await fs.stat(zip)).size > 100);
   const AdmZip = workspace.platformRequire('adm-zip');
   const z = new AdmZip(zip);
+  if (macNativeDialog)
+    assert.deepEqual(
+      [...new Set(z.getEntries().map((entry) => entry.entryName.split('/')[0]))].sort(),
+      ['个人信息', '面试记录', '知识库'].sort(),
+      'The native saved ditto ZIP must contain exactly the three requested roots',
+    );
   assert.ok(z.readAsText('个人信息/个人信息.txt').includes('合成用户'));
   assert.ok(
     z
@@ -342,7 +375,7 @@ try {
   assert.deepEqual(errors, []);
   console.log(
     'PASS account renderer/API: account + sync layout, disclosed closure record, ' +
-      (syntheticDialog || process.platform !== 'win32'
+      (syntheticDialog || (process.platform !== 'win32' && !macNativeDialog)
         ? 'synthetic save-dialog port (native remains pending)'
         : 'native save cancel and selected path') +
       ', exact archive contents, wrong-password protection, confirmed local/cloud erasure, browser data absent after restart and public model preservation.',

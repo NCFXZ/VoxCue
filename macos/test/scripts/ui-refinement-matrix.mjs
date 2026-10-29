@@ -8,10 +8,17 @@ import { requireUnlockedDesktop, holdDesktopAwake } from './desktop-session.mjs'
 // need no model weights. Uses the production shared UI; GUI stays serial.
 const outcomes = [];
 assert.ok(
-  process.argv.slice(2).every((argument) => /^--scale=(1|1\.25|1\.5|1\.75|2)$/.test(argument)),
-  'Only --scale is supported by the Mac UI matrix',
+  process.argv
+    .slice(2)
+    .every(
+      (argument) =>
+        /^--scale=(1|1\.25|1\.5|1\.75|2)$/.test(argument) || argument.startsWith('--screenshots='),
+    ),
+  'Only --scale and --screenshots are supported by the Mac UI matrix',
 );
 const requestedScale = process.argv.find((arg) => arg.startsWith('--scale='))?.slice(8);
+const screenshots = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+if (screenshots) assert.ok(path.isAbsolute(screenshots), 'Screenshot directory must be absolute');
 const scales = requestedScale ? [requestedScale] : ['1', '1.25', '1.5', '1.75', '2'];
 assert.ok(scales.every((scale) => ['1', '1.25', '1.5', '1.75', '2'].includes(scale)));
 const releaseDesktop = holdDesktopAwake();
@@ -25,14 +32,15 @@ for (const scale of scales) {
     'components-ui',
     'cloud-login',
     'cloud-account',
-    'cloud-quota',
+    'password-policy',
+    'free-service',
+    'account-erasure',
     'management-scrollbars',
   ]) {
     requireUnlockedDesktop();
     const accountArguments = {
       'cloud-login': ['--login-check'],
       'cloud-account': [],
-      'cloud-quota': ['--interview-quota'],
       'management-scrollbars': ['--scrollbars'],
     }[name];
     const child = spawnTestProcess(
@@ -44,6 +52,7 @@ for (const scale of scales) {
           (accountArguments ? 'cloud-account' : name) + '-smoke.mjs',
         ),
         ...(accountArguments ?? []),
+        ...(screenshots ? ['--screenshots=' + path.join(screenshots, scale, name)] : []),
       ],
       {
         cwd: workspace.platformRoot,

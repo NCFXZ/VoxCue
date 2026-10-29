@@ -1,12 +1,14 @@
 import { testRoot } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
-import { Store } from '../../server/src/store.ts';
-import { Auth } from '../../server/src/auth.ts';
-import { loadConfig } from '../../server/src/config.ts';
-import { createApi } from '../../server/src/http.ts';
-import { Outbox } from '../../server/src/outbox.ts';
-import { Services } from '../../server/src/services.ts';
-import { routes } from '../../server/src/routes.ts';
+import {
+  Store,
+  Auth,
+  loadConfig,
+  createApi,
+  Outbox,
+  Services,
+  routes,
+} from './server-reference.mjs';
 import { once } from 'node:events';
 import { createHash, randomUUID, scryptSync } from 'node:crypto';
 import path from 'node:path';

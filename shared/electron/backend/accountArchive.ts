@@ -38,7 +38,7 @@ export async function zipDirectory(source: string, destination: string) {
             '-EncodedCommand',
             Buffer.from(script, 'utf16le').toString('base64'),
           ]
-        : ['-c', '-k', source, destination],
+        : ['-c', '-k', '--norsrc', '--noextattr', source, destination],
       {
         windowsHide: true,
         stdio: 'ignore',
@@ -66,32 +66,62 @@ export class AccountArchive {
   };
   private busy = false;
   private closed = false;
+  private generation = 0;
+  private cancelling = 0;
+  private cleanupWork: Promise<void> = Promise.resolve();
   private idleWaiters: (() => void)[] = [];
   constructor(
     private ports: {
       userData: string;
       choose(): Promise<string | undefined>;
       image(id: string): Promise<{ bytes: Buffer; extension: string }>;
+      zip?: typeof zipDirectory;
     },
   ) {}
   hasWork() {
-    return this.busy || !!this.active;
+    return this.busy || !!this.active || this.cancelling > 0;
   }
   async dispose() {
     this.closed = true;
-    if (this.busy) await new Promise<void>((resolve) => this.idleWaiters.push(resolve));
     await this.cancel();
   }
-  async cancel() {
+  private detach() {
+    this.generation++;
     const active = this.active;
-    if (!active) return;
     this.active = undefined;
-    clearTimeout(active.timer);
+    if (active) clearTimeout(active.timer);
+    return active;
+  }
+  private async remove(active: NonNullable<AccountArchive['active']> | undefined) {
+    if (!active) return;
     await active.file?.handle.close();
     const real = await fs.realpath(active.root);
     if (real !== active.root || !path.basename(real).startsWith('voxcue-account-export-'))
       throw Error('临时导出路径已变化。');
     await fs.rm(real, { recursive: true, force: true });
+  }
+  async cancel() {
+    // Invalidate before waiting: a dialog, file write or ZIP operation already
+    // in flight must never revive the task or commit after its owner leaves.
+    const active = this.detach();
+    if (!active && !this.busy && !this.cancelling) return;
+    this.cancelling++;
+    const idle = this.busy
+      ? new Promise<void>((resolve) => this.idleWaiters.push(resolve))
+      : Promise.resolve();
+    const work = this.cleanupWork.then(async () => {
+      await idle;
+      await this.remove(active);
+    });
+    this.cleanupWork = work.catch(() => {});
+    try {
+      await work;
+    } finally {
+      this.cancelling--;
+    }
+  }
+  private async cancelCurrent() {
+    await this.remove(this.detach());
   }
   async call(owner: string, call: AccountDataCall): Promise<AccountDataResult> {
     if (
@@ -101,8 +131,9 @@ export class AccountArchive {
     )
       return { ok: false, error: '无效的导出请求。' };
     if (this.closed) return { ok: false, error: '资料导出已关闭。' };
-    if (this.busy) return { ok: false, error: '资料正在保存，请稍候。' };
+    if (this.busy || this.cancelling) return { ok: false, error: '资料正在保存，请稍候。' };
     this.busy = true;
+    const generation = this.generation;
     try {
       if (!owner) throw Error('请先登录 VoxCue 账号。');
       if (call.action === 'begin') {
@@ -110,6 +141,7 @@ export class AccountArchive {
           throw Error('导出文件数量无效。');
         if (this.active) throw Error('已有资料正在保存。');
         const destination = await this.ports.choose();
+        if (generation !== this.generation || this.closed) throw Error('导出已取消或账号已变化。');
         if (!destination) return { ok: true, canceled: true };
         const parent = await fs.realpath(path.dirname(destination));
         const data = await fs.realpath(this.ports.userData);
@@ -122,6 +154,10 @@ export class AccountArchive {
         const root = await fs.realpath(
           await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-account-export-')),
         );
+        if (generation !== this.generation || this.closed) {
+          await fs.rm(root, { recursive: true, force: true });
+          throw Error('导出已取消或账号已变化。');
+        }
         const timer = setTimeout(() => {
           if (!this.busy) void this.cancel().catch(() => {});
         }, 15 * 60000).unref();
@@ -139,6 +175,7 @@ export class AccountArchive {
         await fs.writeFile(path.join(root, '.owner'), String(process.pid), { mode: 0o600 });
         for (const folder of ['个人信息', '面试记录', '知识库'])
           await fs.mkdir(path.join(root, 'data', folder), { recursive: true, mode: 0o700 });
+        if (generation !== this.generation || this.closed) throw Error('导出已取消或账号已变化。');
         return { ok: true, token: this.active.token };
       }
       const a = this.active;
@@ -146,7 +183,7 @@ export class AccountArchive {
         throw Error('导出已取消或账号已变化。');
       a.timer.refresh();
       if (call.action === 'cancel') {
-        await this.cancel();
+        await this.cancelCurrent();
         return { ok: true, canceled: true };
       }
       if (call.action === 'base') {
@@ -226,7 +263,7 @@ export class AccountArchive {
                 mode: 0o600,
               });
             }
-            await zipDirectory(images, file.slice(0, -4) + '-截图.zip');
+            await (this.ports.zip ?? zipDirectory)(images, file.slice(0, -4) + '-截图.zip');
             await fs.rm(images, { recursive: true });
           }
         }
@@ -256,25 +293,28 @@ export class AccountArchive {
       } else if (call.action === 'finish') {
         if (a.file || a.remaining || !a.personal) throw Error('资料尚未完整导出。');
         const zip = path.join(a.root, '资料.zip');
-        await zipDirectory(path.join(a.root, 'data'), zip);
+        await (this.ports.zip ?? zipDirectory)(path.join(a.root, 'data'), zip);
+        if (this.active !== a) throw Error('导出已取消或账号已变化。');
         // Existing user files are only replaced after the complete ZIP is ready.
         const temporary = a.destination + '.' + randomUUID() + '.tmp';
         try {
           await fs.copyFile(zip, temporary, 1);
+          if (this.active !== a) throw Error('导出已取消或账号已变化。');
           await fs.rename(temporary, a.destination);
         } finally {
           await fs.rm(temporary, { force: true });
         }
-        await this.cancel();
+        await this.cancelCurrent();
         return { ok: true, saved: true };
       } else throw Error('无效的导出请求。');
+      if (this.active !== a) throw Error('导出已取消或账号已变化。');
       return { ok: true };
     } catch (error) {
       if (
         this.active?.owner === owner &&
         (call.action === 'begin' || this.active.token === call.token)
       )
-        await this.cancel().catch(() => {});
+        await this.cancelCurrent().catch(() => {});
       return { ok: false, error: error instanceof Error ? error.message : '资料保存失败。' };
     } finally {
       this.busy = false;

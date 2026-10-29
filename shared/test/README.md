@@ -1,10 +1,10 @@
 # 当前0.6.2验证入口（最新用户范围）
 
-用户最新重新要求完整功能、安全、对抗、背压和UI验收。以下定向脚本之后执行当前平台完整矩阵、600秒音频、原生/五档DPI、依赖审计及临时安装包；服务端原1800秒长稳独立执行。GUI/原生串行且须解锁输入桌面，保留原断言/时长/限额。
+用户最新重新要求完整功能、安全、对抗、背压和UI验收。以下定向脚本之后执行当前平台完整矩阵、600秒音频、原生/五档DPI、依赖审计及临时安装包；服务端0.5.2固定472541c只读；本轮不运行后端测试、1800秒长稳、迁移、构建或部署。GUI/原生串行且须解锁输入桌面，保留原断言/时长/限额。
 
 - node ../shared/test/scripts/password-policy-smoke.mjs：真实隔离API/密码哈希，注册8、重置8/14/128、拒绝7/129/NFC7，容量250→1→默认100 MB及无title保持。
 - node ../shared/test/scripts/free-service-smoke.mjs：官方AI5小时优先/0%/周额度回退，浅深色中性显示，真实面试开始/结束没有付费请求。
-- node ../shared/test/scripts/account-erasure-smoke.mjs：账号页备份及删除顺序、图标/按钮对齐、系统另存为取消/选址、三目录ZIP字节、错误密码保护、注销与本机清理。Windows原生探针按真实PID和HWND所有权定位辅助进程弹窗，只访问合成默认目录；Mac须本机验其原生另存为。
+- node ../shared/test/scripts/account-erasure-smoke.mjs：账号页备份及删除顺序、图标/按钮对齐、系统另存为取消/选址、三目录ZIP字节、错误密码保护、注销与本机清理。Windows原生探针按真实PID和HWND所有权定位辅助进程弹窗，只访问合成默认目录；Mac追加 `node ../shared/test/scripts/account-erasure-smoke.mjs --native-dialog`，使用本进程NSSavePanel核对取消、中文路径和已有目标覆盖确认；取消由原生面板执行，保存与替换由用户在系统弹窗内点击，每步保留120秒操作窗口。默认分支仍只模拟保存端口，不能混记原生结果。
 - account-archive/cloud-account/account-usage-summary及受影响cloud/index/interview-layout/IPC单测：导出分块、完整性、旧服务端拒绝、注销密码失败保留会话、公用模型与固定身份保护。
 - 独立服务端入口、v5迁移/快照与后台已注销状态见SERVER_0.5.2_HANDOFF。
 
@@ -15,23 +15,25 @@
 密码与动态容量专项：在本平台目录运行 node ../shared/test/scripts/password-policy-smoke.mjs（已纳入共享52组）。使用真实隔离0.5.2 API和生产客户端窗口，注册8、重置8/14/128、拒绝7/129/NFC7，校验真实哈希及旧密码失效；两处提示准确为“不少于8个字符”。保持原始maxlength1024，支持128个非BMP字符。容量250→1→默认100 MB通过现有刷新按钮、容量条无障碍标签和IPC读取验证，不固定100 MB，不加title。仅合成账号/内存邮件，不发真实邮件或访问真实凭据。线上连接专项继续只读核对已部署0.5.2的免费能力与认证契约。
 
 
-0.6.2的Windows登录原生命中入口为 `node test/scripts/login-actions-native-smoke.mjs`（在windows目录）：五档DPI×浅深色×正常/最小窗口，使用真实WM_NCHITTEST和自有窗口鼠标事件，核对顶部72px全宽条带可拖动、标题/表单/预览不拖动，以及找回密码、注册/重置发码、返回登录、输入校验和60秒重发保护。账号端口完全合成离线，不读真实凭据、不发邮件。该项已加入Windows完整原生矩阵，当前16组；共享功能52组、原DPI矩阵70组保持。Mac条带默认隐藏，原生红绿灯和拖动行为不变，须Mac本机验收，见[0.6.2交接](../docs/MACOS_0.6.2_HANDOFF.md)。
+0.6.2的Windows登录原生命中入口为 `node test/scripts/login-actions-native-smoke.mjs`（在windows目录）：五档DPI×浅深色×正常/最小窗口，使用真实WM_NCHITTEST和自有窗口鼠标事件，核对顶部72px全宽条带可拖动、标题/表单/预览不拖动，以及找回密码、注册/重置发码、返回登录、输入校验和60秒重发保护。账号端口完全合成离线，不读真实凭据、不发邮件。该项已加入Windows完整原生矩阵，当前16组；共享功能52组、原DPI矩阵70组保持。用户追加要求后Mac也启用相同顶部条带，原生红绿灯保持；Mac入口 `node test/scripts/login-actions-native-smoke.mjs` 用AppKit只读内容命中及合成账号动作覆盖同样20种配置，不投递全局输入；追加 `--preview` 可保留最后一个合成登录窗口至多120秒，供用户真实鼠标复核，关闭窗口或终端Enter结束。`node test/scripts/interview-layout-smoke.mjs` 覆盖五档真实Mac两角bounds、每帧中心≤1 DIP/固定顶部、静止不漂移、转写开合及折叠。见[0.6.2交接](../docs/MACOS_0.6.2_HANDOFF.md)。
 
 本轮云数据/同步/索引新增用例验证0.6.1已有语义的安全边界、4MiB缓存及释放、重启后父级关系、60秒冷却/256项上限、懒读/替换、状态事件和交叠扫描；test-workspace强杀恢复对象在活跃owner下隔离，保留原回收断言。执行结果仅终端，临时资源退出清理。
 
 0.6.1追加云恢复与索引背压：`knowledge-smoke.mjs`用两库四文件的交错云端条目验证逐库下载、单文件落盘即索引及启动/开库补索引；`knowledge-reconcile.test.ts`覆盖80份原件的重复请求、交错多库队列、100次合并状态读取、删除/替换及退出取消。始终单任务索引，不等待尚未下载的同库文件；已排队文件按当前知识库优先。云容量条与图例不再有原生title悬停提示。Mac悬停夹具先聚焦精确的自有窗口，动画采样等待实际有限过渡完成，原颜色/圆角/透明度断言保持。以上仅说明入口与覆盖范围，执行结果不写入工作区。
 
-客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含52个shared组（Mac默认再加15组，合计67组；package另验）：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.2连接、云同步、免费服务及账号注销/资料导出、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
+客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含52个shared组（Mac默认再加18组，合计70组；package另验）：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.2连接、云同步、免费服务及账号注销/资料导出、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
 
-cloud-account-smoke.mjs从忽略的shared/server参考启动独立临时数据库及合成邮件端口；本次参考接续用户另行授权的服务端0.5.2，不再套用0.5.1指纹。服务端源码、测试和上传单独管理，见[0.5.2接续](../docs/SERVER_0.5.2_HANDOFF.md)，不进入客户端Git或包，不操作生产。`server-connection-smoke.mjs` 只读验证线上HTTPS契约、未认证保护、支付关闭及客户端清理合成无效令牌，不发邮件。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
+cloud-account、cloud-protocol、password-policy和account-erasure通过客户端 `server-reference.mjs` 读取固定472541cc80c77439f02c45d0bf0aed913b036134参考。默认读取忽略的shared/server；若本机旧参考需保留，可设置 `VOXCUE_TEST_SERVER_ROOT` 指向另一个原样固定checkout。入口只读核对Git提交和受控文件无修改，不替换原工作区；仅由客户端夹具创建owner临时数据库、内存邮件和自有loopback，不执行后端套件。服务端范围见[0.5.2只读说明](../docs/SERVER_0.5.2_HANDOFF.md)，参考不进入客户端Git或包，不操作生产。`server-connection-smoke.mjs` 只读验证线上HTTPS契约、未认证保护、支付关闭及客户端清理合成无效令牌，不发邮件。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
 
 0.6.0的云GUI在main导入前启用Chromium mock Keychain，并注入safeStorage端口、拒绝启动正式VoxCue.Credentials；不能仅凭隔离userData声称隔离了Keychain。原生助手另由credential-upgrade使用专属临时Keychain验证，不读取真实账号加密项。
 
-Mac `node test/scripts/cloud-accessibility-smoke.mjs --preview`覆盖浅深色、960/1280/1600、减少动态/减少透明/高对比/forced-colors四种Chromium媒体条件和四类设置（96项），面试字号最大24px；不是系统辅助功能/物理Retina/多屏验收。可选预览还用自建图文背景完全覆盖后仅截取自有Mac窗口，补核原生红绿灯/侧栏；WebContents透明像素不代表原生材质实际画面。可选预览只保存本轮临时截图，45秒后清理。最终逐项记录见[Mac0.6.0验证](../docs/MACOS_0.6.0_VERIFICATION.md)。
+Mac `node test/scripts/cloud-accessibility-smoke.mjs --preview`覆盖浅深色、960/1280/1600、减少动态/减少透明/高对比/forced-colors四种Chromium媒体条件和当前六类设置（144项），面试字号最大24px；不是系统辅助功能/物理Retina/多屏验收。可选预览还用自建图文背景完全覆盖后仅截取自有Mac窗口，补核原生红绿灯/侧栏；WebContents透明像素不代表原生材质实际画面。可选预览只保存本轮临时截图，45秒后清理。最终逐项记录见[Mac0.6.0验证](../docs/MACOS_0.6.0_VERIFICATION.md)。
+
+Mac `node test/scripts/account-archive-lifecycle-smoke.mjs` 使用实际Main与合成主账号，核对刷新的旧令牌、关闭主窗口、退出账号时临时归档清理，并阻塞退出端口核对离开期间拒绝创建新导出。系统ZIP单测另阻塞压缩完成后的提交，验证取消不覆盖已有目标；默认70组包含本Mac专项。
 
 Mac `node test/scripts/cloud-native-vault-smoke.mjs`使用两个固定签名Electron44进程、原JS加密端口和CloudVault，以及由同源Credentials.mm构建的显式临时Keychain fixture，验证v10/0600、重启解密、锁定失败保旧密文及只撤销新会话。禁止启动正式助手，禁止网络，清除临时Keychain并核对用户搜索列表和正式助手字节未变；不接触真实登录Keychain。
 
-Mac `node test/scripts/cloud-form-lifecycle-smoke.mjs`另外验证真实React表单的busy锁/重复提交、模式清理及卸载后挑战/错误迟到隔离。只替换异步store端口和装饰图标；不导入生产main、不访问凭据或网络，也不当作原生图标/视觉验收。它是独立行为专项，未计入默认66组。
+Mac `node test/scripts/cloud-form-lifecycle-smoke.mjs`另外验证真实React表单的busy锁/重复提交、模式清理及卸载后挑战/错误迟到隔离。只替换异步store端口和装饰图标；不导入生产main、不访问凭据或网络，也不当作原生图标/视觉验收。它是独立行为专项，未计入默认70组。
 
 列表/侧栏布局与额度摘要专项：在平台目录执行 `node ../shared/test/scripts/cloud-account-smoke.mjs --scrollbars`，覆盖面试记录与知识库列表的浅深色、1280/960窗口、滚动首尾/滚轮、详情转写/回答侧栏、知识库文档、最小窗口侧栏及开合宽度，以及确认页AI工具剩余用量的实际颜色与首行对齐。使用本轮隔离合成数据与音频端口，不访问真实资料或硬件。
 
@@ -40,7 +42,7 @@ Mac `node test/scripts/cloud-form-lifecycle-smoke.mjs`另外验证真实React表
 
 0.5.11 的 `chatgpt-usage-runtime` 使用仅接收不应答的本机代理和有效期内的合成令牌，要求五秒内完成官方令牌交接，防止立即拒绝代理掩盖重复强制续期。Mac 子进程的 sandbox 只允许该次自有 loopback 端口，外网继续禁止；`macos/test/scripts/chatgpt-renewal-smoke.mjs` 另做旧强制续期对照、临近过期/过期的官方续期、续期失败、重复读取、退出与迟到结果，并检查其他端口/外网被拒绝。最终 Mac ASAR 的 `package-runtimes-smoke` 复用该夹具；Windows ASAR 保留 `package-runtimes-check`。全部仅合成凭据，固定 Copilot/Codex 实际解包路径和系统凭据隔离保持。方案见 [Mac 0.5.11 交接](../docs/MACOS_0.5.11_HANDOFF.md)，Windows 本轮结果见 [验收](../docs/WINDOWS_0.5.11_VERIFICATION.md)。
 
-Mac 0.5.11 的 Loader 保留 AppKit 生成的 SF Symbols 形状，使用逐段亮度动画；本地组件校验同步使用同一加载样式，Windows 圆环不变。侧栏更新专项会停留在合成安装准备态，检查浅深色、可见像素变化与减少动态效果，不执行真实更新。Mac 0.5.11五档矩阵为六组/共30项；0.6.0每档再加主账号、云同步、面试额度和固定标题/滚动条四组（共50项），GUI/原生串行，临时截图只用于本次目视检查后清理。
+Mac 0.5.11 的 Loader 保留 AppKit 生成的 SF Symbols 形状，使用逐段亮度动画；本地组件校验同步使用同一加载样式，Windows 圆环不变。侧栏更新专项会停留在合成安装准备态，检查浅深色、可见像素变化与减少动态效果，不执行真实更新。历史Mac 0.5.11五档矩阵为六组/共30项，0.6.0为每档十组。当前0.6.2移除已撤计费入口，并补密码、免费服务和账号注销，每档十二组、五档共60组；interview-usage继续保留在完整功能矩阵。`--screenshots=<owner临时绝对目录>`按缩放和场景分目录收集自有窗口图片，目视后由调用者核对占用并清理，默认不保存图片。GUI/原生串行，原180秒单项时限及五档缩放保持。
 
 Windows `test:ui:dpi` 当前逐档执行14组，包含新增 `interview-chrome` 和 `interview-motion`；100/125/150/175/200% 共70组，仍沿用同一隔离模型生命周期并串行。共享49组功能矩阵的外层 watchdog 调整为四小时，子项原有超时保持，避免十分钟耐久段挤占整组预算。分数DPI下工具栏边距按一物理像素量化检查、44px控件按 Chromium 1/64 布局像素核对；位置恢复仍用实际窗口严格复测，不以放宽位置断言掩盖累积漂移。
 
@@ -154,9 +156,9 @@ account-quota.test.ts覆盖官方单位、小数、重置、缺失/失败、参�
 
 `pnpm test:copilot` 用断网合成账户端口验证授权适配器、IPC 和页面的取消重试、服务路由、重启恢复及切回 ChatGPT；`pnpm test:copilot:runtime` 在禁用登录、凭据访问和遥测的 empty 模式启动固定官方原生进程并做 JSON-RPC ping，不创建账户或推理会话。Mac 原生登录由 `node test/scripts/sidebar-glass-smoke.mjs --login-only` 串行验证，两种品牌均为 Glass 胶囊。相关单测为 copilot/auth/auth-storage/desktop-ipc/providers/architecture。临时资料退出清理，不读取真实凭据；Windows 原生打包需本机接续。`--login-preview` 保持隔离登录窗口，关闭或终端 Enter 后清理；仅用户要求保存时指定 `--screenshots=<绝对目录>`。
 
-## 0.5.8 最新界面定向入口
+## 0.5.8 原生界面入口（历史，已撤回）
 
-Mac当前仅支持macOS 26+ Liquid Glass，不再构建或测试旧Mac网页回退。`macos/test/scripts/ui-refinement-matrix.mjs`串行运行100/125/150/175/200%五档Electron缩放，每档一组实际Liquid Glass截图流程，共5组，包含捕获中的76×32px胶囊、1/5至5/5、移除/发送归零与失败重试。该入口不读取或下载模型，全部账户/语音/捕获均为合成，退出清理；不能代替物理多显示器DPI。
+以下是已撤回0.5.8试验的历史说明，引用的原生展示脚本已经删除，不是当前可执行入口。当前Mac为共用网页界面、系统侧栏和macOS14.2/arm64，测试使用上方0.6.2入口。历史试验曾仅支持macOS26+ Liquid Glass。`macos/test/scripts/ui-refinement-matrix.mjs`串行运行100/125/150/175/200%五档Electron缩放，每档一组实际Liquid Glass截图流程，共5组，包含捕获中的76×32px胶囊、1/5至5/5、移除/发送归零与失败重试。该入口不读取或下载模型，全部账户/语音/捕获均为合成，退出清理；不能代替物理多显示器DPI。
 
 Mac在`macos/`运行`node test/scripts/sidebar-glass-smoke.mjs --content-only`，包含`handoff-content-check.mjs`的实际原生窗口像素检查；`--handoff-only`可独立复测新增的输入投影40%压暗/恢复、悬停/键盘、未保存/已保存提案及长记录顶部后方渲染/正文不被遮挡。明暗主题和窄窗均使用自有合成背景与窗口，解码像素只保留内存；用户明确要求截图时，可传`--screenshots=<绝对目录>`保存裁切到自有窗口的原生截图，省略参数仍不交付图片。`interview-glass-smoke.mjs`同时比较面试设置开关前后四个空白角落像素，不能用原生属性代替实际外观。`login-controls`的材质拒绝检查使用结构有效的越权modal-exclusion请求。
 

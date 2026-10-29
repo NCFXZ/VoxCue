@@ -3,7 +3,7 @@ import * as fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import AdmZip from 'adm-zip';
-import { AccountArchive } from '../../electron/backend/accountArchive';
+import { AccountArchive, zipDirectory } from '../../electron/backend/accountArchive';
 import {
   eraseLocalAccount,
   accountErasureMarker,
@@ -110,6 +110,112 @@ it('rejects overflow, unfinished exports, foreign tokens and internal save paths
     expect(await fs.readFile(zip, 'utf8')).toBe('preserve');
   } finally {
     await a.cancel();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it('cancels an in-flight screenshot export before cleanup and rejects late dialog results', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-account-test-'));
+  await fs.mkdir(path.join(root, 'profile'));
+  const zip = path.join(root, 'existing.zip');
+  await fs.writeFile(zip, 'preserve');
+  let choose!: (value: string) => void;
+  let image!: () => void;
+  let entered!: () => void;
+  const reading = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const a = new AccountArchive({
+    userData: path.join(root, 'profile'),
+    choose: () =>
+      new Promise((resolve) => {
+        choose = resolve;
+      }),
+    image: async () => {
+      entered();
+      await new Promise<void>((resolve) => {
+        image = resolve;
+      });
+      return { bytes: Buffer.from('synthetic'), extension: 'png' };
+    },
+  });
+  try {
+    const begin = a.call('owner', { action: 'begin', files: 1 });
+    const cancelled = a.cancel();
+    choose(zip);
+    expect((await begin).ok).toBe(false);
+    await cancelled;
+    expect(a.hasWork()).toBe(false);
+    const next = a.call('owner', { action: 'begin', files: 1 });
+    choose(zip);
+    const token = ((await next) as { token: string }).token;
+    const file = a.call('owner', {
+      action: 'file',
+      token,
+      kind: 'record',
+      name: 'record.txt',
+      size: 1,
+      images: ['11111111-1111-4111-8111-111111111111'],
+    });
+    await reading;
+    const stopped = a.cancel();
+    expect(a.hasWork()).toBe(true);
+    expect((await a.call('owner', { action: 'begin', files: 1 })).ok).toBe(false);
+    image();
+    expect((await file).ok).toBe(false);
+    await stopped;
+    expect(a.hasWork()).toBe(false);
+    expect((await a.call('owner', { action: 'finish', token })).ok).toBe(false);
+    expect(await fs.readFile(zip, 'utf8')).toBe('preserve');
+  } finally {
+    await a.dispose();
+    await fs.rm(root, { recursive: true, force: true });
+  }
+});
+
+it('never replaces an existing destination when cancellation arrives during ZIP creation', async () => {
+  const root = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-account-test-'));
+  await fs.mkdir(path.join(root, 'profile'));
+  const destination = path.join(root, 'existing.zip');
+  await fs.writeFile(destination, 'preserve');
+  let release!: () => void;
+  let entered!: () => void;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const compressed = new Promise<void>((resolve) => {
+    entered = resolve;
+  });
+  const a = new AccountArchive({
+    userData: path.join(root, 'profile'),
+    choose: async () => destination,
+    image: async () => {
+      throw Error('Unexpected screenshot');
+    },
+    zip: async (source, output) => {
+      await zipDirectory(source, output);
+      entered();
+      await held;
+    },
+  });
+  try {
+    const { token } = (await a.call('owner', { action: 'begin', files: 1 })) as { token: string };
+    expect(
+      await a.call('owner', { action: 'file', token, kind: 'personal', name: 'x', size: 0 }),
+    ).toEqual({ ok: true });
+    expect(await a.call('owner', { action: 'end', token })).toEqual({ ok: true });
+    const finish = a.call('owner', { action: 'finish', token });
+    await compressed;
+    const cancelled = a.cancel();
+    expect(await fs.readFile(destination, 'utf8')).toBe('preserve');
+    release();
+    expect((await finish).ok).toBe(false);
+    await cancelled;
+    expect(a.hasWork()).toBe(false);
+    expect(await fs.readFile(destination, 'utf8')).toBe('preserve');
+  } finally {
+    release();
+    await a.dispose();
     await fs.rm(root, { recursive: true, force: true });
   }
 });

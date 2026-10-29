@@ -2,6 +2,8 @@
 
 以下内容可整段复制到Mac本机Codex。
 
+> 当前用户追加范围：从8887590基线逐项核对Windows已经修改的行为在Mac实际落地；Mac登录也只允许顶部72 CSS px条带拖动，覆盖旧“Mac条带隐藏/原拖动保持”约定。本轮已授权完成测试后推送客户端源码并向既有v0.6.2补Mac三项，保留操作前线上Latest和所有既有资产。服务端及Windows专属全树仍只读。下文历史发行状态以执行前只读核对的现状为准。
+
 ---
 
 请在Mac本机接续VoxCue客户端0.6.2，按最小修改、模块解耦、保持正常功能与既定UI的原则逐项检查、修复并复测。**当前只接续客户端。不要动服务端代码。服务端0.5.2已经交付并部署，固定472541cc80c77439f02c45d0bf0aed913b036134，只读；独立仓库和shared/server/参考都不能改。禁止修改服务端源码、测试、配置、依赖、锁、数据库、部署、管理员、邮件/DNS/云权限/支付和身份；禁止迁移、部署、重启或写生产，也不要在Mac重新执行后端全量、后台构建或1800秒长稳。历史授权与历史部署记录不等于当前授权。接口不兼容只修客户端，后端问题保留证据待新授权。**
@@ -22,7 +24,7 @@
 
 逐条保持以下变化与边界：
 
-1. 登录顶部72 CSS px拖动条与找回密码/验证码原生点击修复属于0.6.2，**只在Windows.custom-window-controls启用**。Mac条带隐藏，保留原生红绿灯、原拖动和setBounds路径；不要复制Windows C#探针或分数DPI预补偿。Mac实际验登录/注册/找回/发码/冷却与原窗口拖动。
+1. 登录顶部72 CSS px拖动条与找回密码/验证码原生点击修复属于0.6.2，两平台登录范围都启用。Mac使用native-window-controls，不启用Windows类名，保留原生红绿灯及setBounds路径；不要复制Windows C#探针或分数DPI预补偿。Mac通过login-actions-native-smoke的AppKit只读命中检查，核对顶部交给原生拖动、标题/表单/预览及按钮进入内容视图，并实际验登录/注册/找回/发码/冷却。interview-layout-smoke核对五档真实Mac两角缩放及相同中心/顶部上限。
 2. 0.6.1云恢复/索引是既有功能：先校验归属、逐库下载，父库下载中显示正在同步；完整原件一落盘即排索引且不阻塞下载。始终单索引任务，优先当前库已收到待办，无待办可转其他库，不等尚未收到文件。启动/RAG就绪检查全部，开库仅当前库，补缺失/停用，正常索引不重建。去重、刷新/扫描合并、执行时读新bytes、删除跳过、落盘revision冷却、暂停首次恢复/重启不删云全部保持。
 3. 普通密码NFC后8–128码点，两处提示准确“不少于8个字符”；minlength8，原始maxlength1024，128 emoji不能被截断。旧短密码登录、弱密码/验证码/限流/冷却保护保持；管理员仍15–128。
 4. 软件免费：支付、订单、退款、兑换码、赠时、永久时长、面试计费会话/租约及零时长30天删云已从客户端和服务端移除，包括关闭开关和未来收费代码。不要恢复任何付费UI/实现，不删除免费业务仍需要的认证/备份/限频/容量保护。
@@ -63,6 +65,8 @@ node ../shared/test/scripts/knowledge-smoke.mjs
 node ../shared/test/scripts/cloud-account-smoke.mjs --scrollbars
 node ../shared/test/scripts/functional-suite.mjs
 node test/scripts/ui-refinement-matrix.mjs
+node test/scripts/login-actions-native-smoke.mjs
+node test/scripts/interview-layout-smoke.mjs
 node test/scripts/cloud-form-lifecycle-smoke.mjs
 node test/scripts/cloud-native-vault-smoke.mjs
 node test/scripts/cloud-accessibility-smoke.mjs --preview
@@ -83,6 +87,6 @@ GUI/原生仅当前用户已登录解锁控制台串行，锁屏/外部输入/�
 
 每条C001–C050输出ID、通过/修后通过/待验/不适用、实际Mac命令或步骤、主要行为断言、首次失败、修复/复测；S001–S024只读理解并映射客户端联调，不写成后端重测通过。静态、共用逻辑、Mac原生、UI目视和人工边界分开，Windows/Linux成绩不能算Mac通过。结果仅终端/对话，不新增工作区测试报告；模型/profile/数据库/ZIP/截图/临时包退出清理，清理先验证消费者、真实路径/占用，保留历史跳过目录、发行和恢复基线。
 
-完成后列版本、固定比较基线、逐项完成/待验ID、实际客户端测试、修复文件、Mac生成配置/锁是否变化和人工事项。上传限已审计客户端源码/测试/配置/交接到既有私有main，保留远端且不强推，包/模型/产物/凭据不进源码。Mac安装包公开上传/Latest/其他发行操作需新授权。
+完成后列版本、固定比较基线、逐项完成/待验ID、实际客户端测试、修复文件、Mac生成配置/锁是否变化和人工事项。源码上传限已审计客户端源码/测试/配置/交接到既有私有main，保留远端且不强推，包/模型/产物/凭据不进源码。本轮已授权仅向既有v0.6.2补Mac arm64 DMG、固定签名ZIP、latest-mac.yml；Latest及其他发行操作需另行授权。
 
 **最后再次确认：服务端0.5.2已完成，固定472541c始终只读。本次不要改服务端代码，不推服务端，不迁移、不部署、不重启、不写生产。**

@@ -192,7 +192,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                 自动同步
               </Button>
             )}
-            {status === 'unsynced' && <span>在「设置 → 云同步」中开启对应同步。</span>}
+            {status === 'unsynced' && <span>在「设置 → VoxCue 账号」中开启对应同步。</span>}
             {status === 'conflict' && (
               <>
                 <Button

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { captureRequested } from './capture-requested.mjs';
 
 // Own synthetic IndexedDB/history only; no real documents, indexing or hardware.
 export async function checkManagementScrollbars({ app, main, directory }) {
@@ -207,6 +208,7 @@ export async function checkManagementScrollbars({ app, main, directory }) {
           page.locator(':scope > .management-scroll'),
           page.locator(':scope > .page-toolbar'),
         );
+        await captureRequested(main, `scrollbar-${width}-${dark ? 'dark' : 'light'}-${label}`);
         if (process.argv.includes('--preview'))
           await main.screenshot({
             path: path.join(

@@ -945,7 +945,7 @@ export class CloudSyncEngine {
     if (!keyValid(key)) throw Error('同步条目无效。');
     await this.exclusive(async () => {
       if (!this.saved.preferences.enabled[this.keyKind(key)])
-        throw Error('请先在「设置 → 云同步」中开启对应同步。');
+        throw Error('请先在「设置 → VoxCue 账号」中开启对应同步。');
       await this.refresh();
       const sources = await this.loadSources(this.keyKind(key));
       const parent =

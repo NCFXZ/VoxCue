@@ -3,6 +3,7 @@ import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { installUiAccount } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
@@ -181,6 +182,8 @@ try {
             Math.abs(result.rects.at(-1).y - result.rects.at(-2).y) < 1,
           result,
         );
+        if (panelWidth === 300 || panelWidth === 640)
+          await captureRequested(page, `composer-${width}-${panelWidth}-${theme}`);
         if (
           process.argv.includes('--preview-composer') &&
           panelWidth === 640 &&
@@ -221,6 +224,7 @@ try {
       result,
     );
     await page.screenshot({ animations: 'disabled' });
+    await captureRequested(page, `composer-${width}`);
     await page.getByRole('button', { name: '个人信息', exact: true }).click();
     await settle(page);
   }
@@ -258,9 +262,12 @@ try {
     Math.abs(alignment.textLeft - alignment.effortLeft) <= 1,
     alignment,
   );
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
   await dialog.screenshot({ animations: 'disabled' });
+  await captureRequested(dialog, 'interview-settings-light');
   await page.evaluate(() => document.documentElement.classList.add('dark'));
   await dialog.screenshot({ animations: 'disabled' });
+  await captureRequested(dialog, 'interview-settings-dark');
   await dialog.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page
@@ -277,6 +284,7 @@ try {
     .evaluate((element) => element.scrollWidth <= element.clientWidth + 1);
   check('long-dialog-title', headerFits);
   await base.screenshot({ animations: 'disabled' });
+  await captureRequested(base, 'long-knowledge-title');
   await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();

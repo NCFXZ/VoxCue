@@ -4,19 +4,19 @@ VoxCue 免费提供，主账号使用邮箱注册、登录和重置密码；Chat
 
 云备份位于“设置 → VoxCue 账号”，底部提供删除账号。确认窗口可选保存资料，系统原生另存为选择ZIP位置；包内包含个人信息TXT、每场面试TXT/截图ZIP和各知识库原件。注销删除云端及本机资料，后台仅保留明确告知的邮箱/ID/注册与注销时间；其他设备副本和用户另存文件不受影响。退出账号仍保留本机资料。
 
-客户端默认连接 accounts.voxcue.com.cn。[服务端0.5.2源码说明](shared/docs/SERVER_0.5.2_HANDOFF.md)包含密码8–128、独立容量和注销规则；服务端0.5.2已更新既有腾讯云部署，真实HTTPS能力和客户端连接已核对；源码提交和实际部署分别验证。用户最新要求完整功能、安全、对抗、背压和UI复验，完成后部署服务端0.5.2、发行Windows0.6.2并恢复历史草稿；在完成上线前，源码与生产状态仍分别核对。
+客户端默认连接 accounts.voxcue.com.cn。[服务端0.5.2源码说明](shared/docs/SERVER_0.5.2_HANDOFF.md)包含密码8–128、独立容量和注销规则；服务端0.5.2已更新既有腾讯云部署，真实HTTPS能力和客户端连接已核对；源码提交和实际部署分别验证。当前Mac接续仅修改客户端，服务端固定472541c只读，不重复部署或后端测试。
 
 **0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本轮清理、完整复验及Mac包补充见[Mac0.6.0发行记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
 
-**当前公开发行：Windows 0.6.2、Mac 0.6.1（Latest）**：[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.2/VoxCue-Setup-0.6.2-x64.exe)、[Windows0.6.2发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.2)、[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.1/VoxCue-0.6.1-arm64.dmg)。Mac支持Apple Silicon/macOS14.2及以上。Windows0.6.1未单独发行；既有17个旧发行已按用户要求恢复公开，全部历史及模型资产ID、大小和摘要保持。历史Mac0.6.0验包和发行事实见[原记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
+**当前公开发行：Windows / Mac 0.6.2**：[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.2/VoxCue-Setup-0.6.2-x64.exe)、[0.6.2发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.2)、[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.2/VoxCue-0.6.2-arm64.dmg)。Mac支持Apple Silicon/macOS14.2及以上。Windows0.6.1未单独发行；既有17个旧发行已按用户要求恢复公开，全部历史及模型资产ID、大小和摘要保持。历史Mac0.6.0验包和发行事实见[原记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
 
 **0.6.0 → 0.6.1交接**：[Windows40条改动与12条完整回归要求](shared/docs/WINDOWS_0.6.1_HANDOFF.md)、[Windows Codex逐条测试提示词](shared/docs/WINDOWS_0.6.1_CODEX_PROMPT.md)、[客户端29文件清单](shared/docs/CLIENT_0.6.1_HANDOFF.md)。Mac成绩不能替代Windows本机验收。
 
-**0.6.1 → 0.6.2交接**：[Mac逐项更新与验收](shared/docs/MACOS_0.6.2_HANDOFF.md)、[Mac Codex提示词](shared/docs/MACOS_0.6.2_CODEX_PROMPT.md)。Windows登录页顶部全宽72px条带可拖动，标题、表单及右侧预览不再拖动，修复找回密码/验证码按钮被原生拖动区覆盖的问题；另修复分数DPI下面试缩放的工具栏中心漂移。Mac拖动规则、原生红绿灯和窗口缩放路径保持，本机须按交接验证。
+**0.6.1 → 0.6.2交接**：[Mac逐项更新与验收](shared/docs/MACOS_0.6.2_HANDOFF.md)、[Mac Codex提示词](shared/docs/MACOS_0.6.2_CODEX_PROMPT.md)。两平台登录页均仅顶部全宽72px条带可拖动，标题、表单及右侧预览不再拖动，修复找回密码/验证码按钮被原生拖动区覆盖的问题。Mac保留原生红绿灯，使用AppKit命中检查；Windows另有分数DPI下面试缩放预补偿，Mac沿原setBounds并独立检查相同的工具栏中心/顶部稳定性。
 
 0.6.2普通账号注册/重置密码在Mac与Windows同步接受8–128个Unicode码点，两处提示均为“不少于8个字符”。服务端0.5.2已支持8–14字符注册/重置；旧密码登录保持兼容。服务端管理员仍要求15–128字符；备份默认100 MB，0.5.2允许所有者按用户调整，资料豁免及全局空间保护保持。
 
-当前工作区共享版本源为 **0.6.2**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。Windows本轮仅生成根及自己的0.6.2配置，固定依赖/锁及Electron44.10.0保持；Mac目录和锁只读，须在Mac本机同步生成配置并验收。Mac原生、视觉与人工边界见本机验证记录。当前实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+当前工作区共享版本源为 **0.6.2**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。两平台均已在各自本机生成0.6.2配置，固定依赖/锁及Electron44.10.0保持；每次同步仅生成根及当前平台配置，另一平台全树只读。当前验证入口与人工边界见[测试说明](shared/test/README.md)，实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 
@@ -71,7 +71,7 @@ corepack pnpm start
 
 Windows 也可双击 `windows/Start-VoxCue.cmd` 使用现有构建，启动器不自动编译。`dev` 启动开发模式，`dev:web` 仅预览网页。开发入口优先使用完整的 `shared/local-models`；模型缺失时在“设置 → 本地组件”下载并复用应用数据目录的缓存，也可运行 `download:speech`、`download:rag` 准备开发模型。Mac 的 `build` 构建 Core Audio 助手、共用 Electron/Renderer 和双击入口 `macos/VoxCue.app`；`build:shared` 仍只共享编译。双击入口直接打开已有构建，不弹终端或自动编译，可固定到 Dock，须保留在 macos 文件夹内。运行需要 Apple Silicon、macOS 14.2+；使用Xcode命令行工具构建必要系统助手，不再依赖macOS 26的界面SDK；真实账户服务与真人语音质量仍需使用者验证。详见 [Mac 原生适配与启动说明](macos/docs/MACOS_PORT.md)。
 
-Windows x64 安装包从[Windows0.6.0发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.0)下载，自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包沿用既有未配置 Authenticode 签名的发行方式；历史发行资产保持，已撤回版本不提供公开下载。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项按版本保留于 windows/release/，不进入源码提交。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
+Windows x64 安装包从[Windows0.6.2发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.2)下载，自带运行库，普通用户无需开发工具；语音和知识库模型在设置中首次下载并校验，后续升级复用同版本缓存。Windows 安装包沿用既有未配置 Authenticode 签名的发行方式；历史发行资产保持，已撤回版本不提供公开下载。正式构建入口为 windows/ 下的 package:installer，仅安装包、blockmap 和 latest.yml 用于分发，正式三项按版本保留于 windows/release/，不进入源码提交。Mac 的 DMG 首次安装与免费自动更新见 [Mac 更新说明](macos/docs/UPDATES.md)，共享流程详见[更新说明](shared/docs/UPDATES.md)。
 
 Mac 开发宿主、启动器与正式应用复用固定本地自签名证书。0.5.5 起凭据加解密由独立固定签名助手处理，构建保留其原字节，避免应用每次升级改变助手的钥匙串身份；仅固定应用证书不足以解决历史授权。首次导入旧密码仍可能需要一次系统授权，拒绝/锁定后保留原登录文件并允许重试。现有 Sparkle 更新密钥保持。签名材料及助手规范副本必须安全备份并在清理时保留，缺失/错配即停止构建。详见[凭据与版本升级](macos/docs/CREDENTIALS.md)。
 

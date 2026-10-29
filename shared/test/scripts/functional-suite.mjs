@@ -60,6 +60,9 @@ const shared = [
   'speech-soak',
 ];
 const mac = [
+  'account-archive-lifecycle',
+  'login-actions-native',
+  'interview-layout',
   'chatgpt-renewal',
   'icons',
   'window-native',
@@ -169,7 +172,11 @@ try {
       const lines = (progress + data).split('\n');
       progress = lines.pop();
       for (const line of lines)
-        if (/^Interview cycle \d+\/20 passed$/.test(line)) console.log('  ' + line);
+        if (
+          /^Interview cycle \d+\/20 passed$/.test(line) ||
+          line.startsWith('Speech soak progress ')
+        )
+          console.log('  ' + line);
     });
     child.stderr.on('data', (data) => (output += data));
     const timer = setTimeout(

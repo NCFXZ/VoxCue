@@ -54,7 +54,7 @@ corepack pnpm test:package
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
 - `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
 
-按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。Latest 按当次授权处理；本轮补齐既有v0.6.0，沿用现有Latest状态。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
+按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。本轮用户已授权补齐既有v0.6.2的Mac三项及推送审计后的客户端源码，沿用操作前核对的Latest状态。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 

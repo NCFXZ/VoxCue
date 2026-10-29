@@ -2,18 +2,21 @@ import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
+import { captureRequested } from './capture-requested.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { Store } from '../../server/src/store.ts';
-import { Auth } from '../../server/src/auth.ts';
-import { loadConfig } from '../../server/src/config.ts';
-import { createApi } from '../../server/src/http.ts';
-import { Outbox } from '../../server/src/outbox.ts';
-import { Services } from '../../server/src/services.ts';
-import { routes } from '../../server/src/routes.ts';
+import {
+  Store,
+  Auth,
+  loadConfig,
+  createApi,
+  Outbox,
+  Services,
+  routes,
+} from './server-reference.mjs';
 
 // Only this synthetic mailbox transport sees verification codes; production has no such route.
 const directory = path.join(testRoot, 'cloud-account');
@@ -182,8 +185,10 @@ try {
     );
   if (process.argv.includes('--preview') || loginCheck) {
     await page.screenshot({ path: path.join(directory, 'login-light.png') });
+    await captureRequested(page, 'login-light');
     await page.evaluate(() => document.documentElement.classList.add('dark'));
     await page.screenshot({ path: path.join(directory, 'login-dark.png') });
+    await captureRequested(page, 'login-dark');
     await page.evaluate(() => document.documentElement.classList.remove('dark'));
   }
   if (loginCheck) {
@@ -273,13 +278,27 @@ try {
       );
       assert.equal(box.scrollable, false, 'Account pages must never add scrollbars');
     }
+    async function captureRegister(size) {
+      if (!process.argv.some((arg) => arg.startsWith('--screenshots='))) return;
+      for (const dark of [false, true]) {
+        await page.evaluate(
+          (dark) => document.documentElement.classList.toggle('dark', dark),
+          dark,
+        );
+        await assertFeedbackBounds();
+        await captureRequested(page, 'register-' + size + '-' + (dark ? 'dark' : 'light'));
+      }
+      await page.evaluate(() => document.documentElement.classList.remove('dark'));
+    }
     await assertFeedbackBounds();
+    await captureRegister('normal');
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((w) => w.isVisible())
         .setSize(860, 580),
     );
     await assertFeedbackBounds();
+    await captureRegister('minimum');
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((w) => w.isVisible())
@@ -299,10 +318,12 @@ try {
       'none',
     );
     await page.screenshot({ path: path.join(directory, 'register-light.png') });
+    await captureRequested(page, 'register-light');
     await panel.getByRole('button', { name: '返回登录', exact: true }).click();
     await panel.getByRole('button', { name: '找回密码', exact: true }).click();
     rects.push(await geometry());
     await page.screenshot({ path: path.join(directory, 'reset-light.png') });
+    await captureRequested(page, 'reset-light');
     console.log('VISUAL_DIRECTORY=' + directory);
     for (const r of rects) {
       for (const key of ['heading', 'email', 'password', 'footer']) {
@@ -519,6 +540,7 @@ try {
           await main.screenshot({
             path: path.join(directory, dark ? 'account-dark.png' : 'account-light.png'),
           });
+        await captureRequested(main, dark ? 'account-dark' : 'account-light');
       }
       await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
       // Fill the total quota, then exercise exempt profile updates through the actual UI.

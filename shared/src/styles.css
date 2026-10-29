@@ -7073,15 +7073,17 @@ svg[data-ui-icon] {
 .login-drag-region {
   display: none;
 }
-.custom-window-controls.login-shell .login-page {
+:is(.custom-window-controls, .native-window-controls).login-shell .login-page {
   position: relative;
   /* A page-wide no-drag rectangle would also subtract the top strip. */
   -webkit-app-region: initial;
 }
-.custom-window-controls.login-shell .login-page :is(.login-copy, .login-preview *) {
+:is(.custom-window-controls, .native-window-controls).login-shell
+  .login-page
+  :is(.login-copy, .login-preview *) {
   -webkit-app-region: no-drag;
 }
-.custom-window-controls.login-shell .login-drag-region {
+:is(.custom-window-controls, .native-window-controls).login-shell .login-drag-region {
   display: block;
   position: absolute;
   inset: 0 0 auto;

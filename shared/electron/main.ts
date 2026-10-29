@@ -101,6 +101,8 @@ let speechSessions: SpeechCoordinator | undefined;
 const interviewContext = new InterviewContext();
 let demoSession = false;
 let erasingAccount = false;
+let leavingAccount = false;
+let accountArchive: AccountArchive | undefined;
 
 let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
@@ -457,11 +459,13 @@ function createMainWindow() {
   });
   loadWindowPage(mainWindow, 'main', indexFile, process.env.VITE_DEV_SERVER_URL);
   mainWindow.on('closed', () => {
+    void accountArchive?.cancel().catch(() => {});
     speechSessions?.releaseDictation();
     mainWindow = null;
     if (macQuitRequested) app.quit();
   });
   mainWindow.webContents.on('did-start-loading', () => {
+    void accountArchive?.cancel().catch(() => {});
     speechSessions?.releaseDictation();
     chatIpc?.cancelActive();
   });
@@ -649,7 +653,6 @@ app.whenReady().then(async () => {
     vault: createCloudVault(credentialEncryption),
     deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
   });
-  let accountArchive: AccountArchive;
   handleDesktop('cloud:account', async (event, call) => {
     if (
       ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
@@ -657,6 +660,12 @@ app.whenReady().then(async () => {
     )
       throw Error('Unauthorized window');
     if (erasingAccount) throw Error('账号资料正在清理。');
+    if (leavingAccount)
+      return {
+        ok: false as const,
+        state: cloudAccount.snapshot(),
+        error: '账号操作正在进行，请稍候。',
+      };
     if (call?.action === 'delete' && event.sender !== mainWindow?.webContents)
       throw Error('Unauthorized window');
     const leaving =
@@ -669,16 +678,23 @@ app.whenReady().then(async () => {
       if (!(await prepareUpdateInstall(true, call.action === 'delete')))
         return { ok: false as const, state: cloudAccount.snapshot(), error: '已取消退出。' };
     }
-    if (call?.action === 'delete') {
-      // Prove persistence is writable before the irreversible server operation.
-      await writeFile(erasureFile, JSON.stringify({ committed: false }), { mode: 0o600 });
-      await accountArchive.cancel();
-      knowledgeCoordinator?.cancelAll();
-      historyJobs?.cancelAll();
-      chatIpc?.cancelActive();
-      await knowledge.close();
-    }
-    const result = await cloudAccount.call(call);
+    const result = await (async () => {
+      if (leaving) leavingAccount = true;
+      try {
+        if (leaving) await accountArchive?.cancel();
+        if (call?.action === 'delete') {
+          // Prove persistence is writable before the irreversible server operation.
+          await writeFile(erasureFile, JSON.stringify({ committed: false }), { mode: 0o600 });
+          knowledgeCoordinator?.cancelAll();
+          historyJobs?.cancelAll();
+          chatIpc?.cancelActive();
+          await knowledge.close();
+        }
+        return await cloudAccount.call(call);
+      } finally {
+        if (leaving) leavingAccount = false;
+      }
+    })();
     if (call?.action === 'delete' && !result.ok)
       await import('node:fs/promises').then((fs) => fs.rm(erasureFile, { force: true }));
     if (leaving && !result.ok) {
@@ -1022,7 +1038,7 @@ app.whenReady().then(async () => {
     },
   });
   app.once('will-quit', (event) => {
-    if (!accountArchive.hasWork()) return;
+    if (!accountArchive?.hasWork()) return;
     event.preventDefault();
     void accountArchive.dispose().finally(() => app.quit());
   });
@@ -1030,10 +1046,11 @@ app.whenReady().then(async () => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame || erasingAccount)
       throw Error('Unauthorized window');
+    if (leavingAccount) return { ok: false as const, error: '账号正在退出，请稍候。' };
     if (interviewActive()) return { ok: false as const, error: '请先结束面试再保存资料。' };
     const user = cloudAccount.snapshot().user;
     if (!user) return { ok: false as const, error: '请先登录 VoxCue 账号。' };
-    return accountArchive.call(event.sender.id + ':' + user.id, call);
+    return accountArchive!.call(event.sender.id + ':' + user.id, call);
   });
   registerInterviewImageIpc({
     store: interviewImages,

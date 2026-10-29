@@ -2,6 +2,7 @@ import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { captureRequested } from './capture-requested.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -429,6 +430,7 @@ try {
         e.scrollTop = bottom ? e.scrollHeight : 0;
       }, bottom);
       assert.equal(await scroll.evaluate((e) => e.scrollTop > 0), bottom);
+      await captureRequested(page, `dialog-${theme}-${bottom ? 'bottom' : 'top'}`);
       if (process.argv.includes('--preview-dialog')) {
         const box = await base.boundingBox();
         console.log(

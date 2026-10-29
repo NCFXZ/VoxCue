@@ -42,6 +42,29 @@ const checks = [],
 try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  assert.deepEqual(
+    await login.locator('.login-drag-region').evaluate((node) => ({
+      display: getComputedStyle(node).display,
+      width: node.getBoundingClientRect().width,
+      height: node.getBoundingClientRect().height,
+      top: node.getBoundingClientRect().top,
+      viewport: innerWidth,
+      region: getComputedStyle(node).webkitAppRegion,
+      hidden: node.getAttribute('aria-hidden'),
+      tabIndex: node.tabIndex,
+    })),
+    {
+      display: 'block',
+      width: await login.evaluate(() => innerWidth),
+      height: 72,
+      top: 0,
+      viewport: await login.evaluate(() => innerWidth),
+      region: 'drag',
+      hidden: 'true',
+      tabIndex: -1,
+    },
+    'Mac login uses only the full-width top drag strip without a focus or accessibility item',
+  );
   assert.equal(await login.locator('.window-controls').count(), 0);
   assert.deepEqual(
     await app.evaluate(({ BrowserWindow }) =>

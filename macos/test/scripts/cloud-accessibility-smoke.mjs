@@ -76,7 +76,14 @@ try {
           ),
           true,
         );
-        for (const category of ['VoxCue 账号', '云同步', 'AI 服务', '面试设置']) {
+        for (const category of [
+          'VoxCue 账号',
+          'AI 服务',
+          '本地组件',
+          '面试设置',
+          '个性化',
+          '关于与更新',
+        ]) {
           await settings
             .getByRole('navigation', { name: '设置分类' })
             .getByRole('button', { name: category, exact: true })
@@ -113,7 +120,7 @@ try {
           );
           assert.equal(geometry.gutter, true);
           if (name !== 'prefers-reduced-motion') assert.equal(geometry.material, 'none');
-          if (category === '云同步') {
+          if (category === 'VoxCue 账号') {
             await settings.getByRole('button', { name: '刷新容量', exact: true }).click();
             await settings.getByText('可用 0.00 MB · 已用 101.00 MB', { exact: true }).waitFor();
             assert.ok(
@@ -137,7 +144,7 @@ try {
               assert.equal(new Set(colors.segments).size, 3);
             }
           }
-          if (process.argv.includes('--preview') && width === 960 && category === '云同步') {
+          if (process.argv.includes('--preview') && width === 960 && category === 'VoxCue 账号') {
             const file = path.join(testRoot, `${scheme}-${name}.png`);
             await main.screenshot({ path: file });
           }
@@ -194,7 +201,7 @@ try {
     });
     await settings
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '云同步', exact: true })
+      .getByRole('button', { name: 'VoxCue 账号', exact: true })
       .click();
     for (const scheme of ['light', 'dark']) {
       await app.evaluate(({ nativeTheme }, scheme) => {

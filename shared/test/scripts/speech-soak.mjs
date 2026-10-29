@@ -17,6 +17,7 @@ let queued = 0,
   inferenceMs = 0,
   audioMs = 0,
   acknowledgements = 0;
+let nextProgress = 60000;
 function reply(request, predicate, label) {
   return new Promise((resolve, reject) => {
     const cleanup = () => {
@@ -77,6 +78,12 @@ try {
   );
   while (performance.now() - origin < seconds * 1000) {
     const elapsed = performance.now() - origin;
+    if (elapsed >= nextProgress) {
+      console.log(
+        `Speech soak progress ${Math.floor(elapsed / 1000)}/${seconds}s queue=${queued}ms maxQueue=${maxQueued}ms errors=${errors.length}`,
+      );
+      nextProgress += 60000;
+    }
     for (let i = 0; i < 2; i++) {
       const wave = waves[i],
         samples = new Float32Array(512),

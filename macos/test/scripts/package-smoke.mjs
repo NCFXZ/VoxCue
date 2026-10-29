@@ -18,7 +18,7 @@ import { signMacApp } from '../../scripts/sign-app.mjs';
 import { localSigningCertificate, verifyLocalApp } from '../../scripts/development-signing.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
-import { holdDesktopAwake } from './desktop-session.mjs';
+import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
@@ -229,6 +229,27 @@ if (process.argv.includes('--static-only')) {
   process.exit(2);
 }
 const releaseDesktop = holdDesktopAwake();
+const loginHitProbe = path.join(testRoot, 'login-hit-probe.node');
+run('/usr/bin/xcrun', [
+  'clang++',
+  '-std=c++17',
+  '-fobjc-arc',
+  '-DNAPI_VERSION=8',
+  '-bundle',
+  '-undefined',
+  'dynamic_lookup',
+  '-arch',
+  'arm64',
+  '-mmacosx-version-min=14.2',
+  '-I',
+  path.join(workspace.platformRoot, '.cache/node-api-headers'),
+  path.join(workspace.platformRoot, 'test/fixtures/login-hit-probe.mm'),
+  '-framework',
+  'AppKit',
+  '-o',
+  loginHitProbe,
+]);
+run('/usr/bin/codesign', ['--force', '--sign', '-', loginHitProbe]);
 const installArchive = process.argv.includes('--install-archive');
 if (installArchive) {
   run('/usr/libexec/PlistBuddy', [
@@ -277,6 +298,53 @@ const app = await electron.launch({
 try {
   const page = await app.firstWindow();
   await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  const loginWindowId = await (await app.browserWindow(page)).evaluate((window) => window.id);
+  const assertNativeLoginHit = async (point, expected, label) => {
+    const deadline = Date.now() + 5000;
+    let actual;
+    do {
+      requireUnlockedDesktop();
+      actual = await app.evaluate(
+        ({ app, BrowserWindow }, { probe, point, id, owner }) => {
+          if (!app.getPath('userData').startsWith(owner + '/'))
+            throw Error('Synthetic package profile required');
+          const load = process
+            .getBuiltinModule('module')
+            .createRequire(app.getAppPath() + '/package.json');
+          return JSON.parse(
+            load(probe).probe(BrowserWindow.fromId(id).getNativeWindowHandle(), point.x, point.y),
+          );
+        },
+        { probe: loginHitProbe, point, id: loginWindowId, owner: testRoot },
+      );
+      if (actual.nativeHit && actual.contentReceivesMouse === expected) return;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    } while (Date.now() < deadline);
+    assert.fail(label + ': ' + JSON.stringify(actual));
+  };
+  const assertNativeButton = async (name) => {
+    const point = await page.getByRole('button', { name, exact: true }).evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      return {
+        x: (box.left + box.width / 2) / innerWidth,
+        y: (box.top + box.height / 2) / innerHeight,
+      };
+    });
+    await assertNativeLoginHit(point, true, name + ' must receive native mouse input');
+  };
+  await assertNativeLoginHit(
+    { x: 0.5, y: 36 / (await page.evaluate(() => innerHeight)) },
+    false,
+    'Packaged top drag strip',
+  );
+  await assertNativeButton('找回密码');
+  await page.getByRole('button', { name: '找回密码', exact: true }).click();
+  await assertNativeButton('获取验证码');
+  // Do not request a real code; this checks native routing of the final ASAR.
+  await page.getByRole('button', { name: '返回登录', exact: true }).click();
+  console.log(
+    'PASS: final packaged Mac login top-only native drag and reset/code content hit routing; no real code requested.',
+  );
   assert.equal(
     await app.evaluate(() => process.versions.electron),
     workspace.platformRequire('electron/package.json').version,
