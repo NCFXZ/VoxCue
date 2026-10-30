@@ -20,7 +20,7 @@ const file = path.join(testRoot, 'telemetry-queue.json'),
 const installationId = randomUUID(),
   runId = randomUUID();
 const event = () => ({
-  schemaVersion: 1,
+  schemaVersion: 2,
   id: randomUUID(),
   installationId,
   runId,

@@ -29,6 +29,7 @@ if (suites[0] === '--dpi') {
     'components-ui',
     'updates-sidebar',
     'client-update-ui',
+    'shimmer',
     'knowledge',
     'local-mode',
     'telemetry',

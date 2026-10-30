@@ -27,7 +27,6 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
   const trigger = useRef<HTMLButtonElement>(null),
     popup = useRef<HTMLDivElement>(null);
   const timeout = useRef<ReturnType<typeof setTimeout>>(undefined);
-  const skipFocus = useRef(false);
   const id = useId();
   const enter = () => {
     clearTimeout(timeout.current);
@@ -36,11 +35,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
   const leave = () => {
     clearTimeout(timeout.current);
     timeout.current = setTimeout(() => {
-      if (
-        !popup.current?.contains(document.activeElement) &&
-        document.activeElement !== trigger.current
-      )
-        setOpen(false);
+      if (!popup.current?.contains(document.activeElement)) setOpen(false);
     }, 150);
   };
   useEffect(() => () => clearTimeout(timeout.current), []);
@@ -121,10 +116,6 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
         aria-controls={id}
         aria-label={`${label}：${labels[status]}`}
         aria-expanded={open}
-        onFocus={() => {
-          if (skipFocus.current) skipFocus.current = false;
-          else setOpen(true);
-        }}
         onClick={() => setOpen(true)}
         onKeyDown={(e) => {
           if (e.key === 'Escape') {
@@ -151,7 +142,6 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
               if (e.key === 'Escape') {
                 e.preventDefault();
                 setOpen(false);
-                skipFocus.current = true;
                 trigger.current?.focus();
                 e.stopPropagation();
               }

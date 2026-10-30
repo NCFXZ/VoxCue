@@ -1,5 +1,9 @@
 # 为客户端0.6.3适配服务端：逐项更新与实现交接
 
+> 历史0.6.3交接：本文记录已发布客户端的固定v1行为。用户已确认独立服务端统一schema 2，不兼容旧统计客户端；Windows/Mac下一版另行适配，当前服务端契约见独立VoxCue-server/CLIENT_TELEMETRY.md。独立服务端0.5.3/schema9现已按后续授权部署，完整接口及适配见[服务端统计契约](https://github.com/NCFXZ/VoxCue-server/blob/main/CLIENT_TELEMETRY.md)和[部署文档](https://github.com/NCFXZ/VoxCue-server/blob/main/OPERATIONS.md)。下文保留历史0.6.3行为/交接，不作为当前兼容范围或部署授权，也不表示0.6.3已经适配。
+
+2026-10-30追加：当前客户端工作区已按后续授权适配v2，详见[当前客户端协议](CLIENT_TELEMETRY.md)；目标版本已按后续授权更新为0.6.5，验收和发行状态见PROGRESS。此历史S/M清单不作为本轮修改服务端的授权，独立服务端保持只读。
+
 此文描述**待实现的服务端更新**。本轮Mac只改客户端及交接，没有修改/部署服务端，没有执行其迁移或后端套件。固定参考为独立`NCFXZ/VoxCue-server`的0.5.2提交`472541cc80c77439f02c45d0bf0aed913b036134`。客户端版本0.6.3与服务端版本独立，不能把服务端默认改成0.6.3。
 
 当前客户端所需能力已列于[统计协议v1](CLIENT_TELEMETRY.md)，包含完整类型、传输与26项口径；对应[Windows客户端C001–C082](WINDOWS_0.6.3_HANDOFF.md)。后续Windows Codex需在独立服务端仓库实现本页S/M清单；忽略的shared/server仅作原样客户端联调参考，不作为提交目标。保留远端后续提交/本机工作，不reset、强推或覆盖固定身份。

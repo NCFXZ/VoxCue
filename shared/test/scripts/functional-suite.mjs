@@ -19,6 +19,7 @@ const shared = [
   'local-mode',
   'client-update-ui',
   'telemetry',
+  'telemetry-v2-http',
   'electron',
   'settings',
   'composer',
@@ -27,6 +28,7 @@ const shared = [
   'conversation-status',
   'chat-response',
   'chat-progress',
+  'shimmer',
   'chat-lifecycle',
   'profile-ui',
   'profile-selection',
@@ -94,6 +96,7 @@ console.log(
   'Testing the production shared renderer and this platform’s system integration; GUI runs serially.',
 );
 const headless = new Set([
+  'telemetry-v2-http',
   'speech-soak',
   'audio-pipeline',
   'cloud-protocol',

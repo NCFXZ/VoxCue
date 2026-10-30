@@ -1,8 +1,10 @@
-当前Windows 0.6.3范围以`PROGRESS.md`和`shared/docs/WINDOWS_0.6.3_HANDOFF.md`为准；下方0.6.2及更早章节中的“当前/本轮”均属历史。本轮新增`client-update-ui-smoke.mjs`覆盖动画、拖入卡片与反馈，`windows/test/scripts/telemetry-queue-native-smoke.mjs`覆盖真实排他文件占用；普通UI/正式包启动前隔离统计，独立服务端联调显式指定自有loopback。服务端验证在独立仓库执行，不改已发布客户端对接规则。
+当前Windows 0.6.5范围以`PROGRESS.md`和`shared/docs/MACOS_0.6.5_HANDOFF.md`为准（Mac0.6.3为比较基线）；下方0.6.2及更早章节中的“当前/本轮”均属历史。本轮新增`client-update-ui-smoke.mjs`覆盖动画、拖入卡片与反馈，`windows/test/scripts/telemetry-queue-native-smoke.mjs`覆盖真实排他文件占用；普通UI/正式包启动前隔离统计，独立服务端联调显式指定自有loopback。当前追加客户端适配独立服务端0.5.3/schema 2，禁止修改服务端；客户端目标0.6.5，当前完整矩阵/长稳/发行授权见PROGRESS；独立服务端0.5.3仅作只读合成HTTP参考。历史已发布安装包不因源码更新自动适配。
 
 # 0.6.3本地账户、独立导出与统计
 
-0.6.3客户端统计专项：`telemetry.test.ts`和`desktop-ipc.test.ts`验证身份时点、时钟/有效场次、崩溃恢复、有界队列、回执/退避及IPC隐私边界；本平台执行`node ../shared/test/scripts/telemetry-smoke.mjs`，以主进程内存404端口、合成账号及音频验证本地→登录、聊天/文件操作、面试保存和重启。普通夹具/开发运行关闭统计，专项在隔离入口注入真实统计类的合成传输，禁止访问线上统计接口。协议见[客户端统计](../docs/CLIENT_TELEMETRY.md)。
+0.6.3客户端统计专项：`telemetry.test.ts`和`desktop-ipc.test.ts`验证身份时点、时钟/有效场次、崩溃恢复、有界队列、回执/退避及IPC隐私边界；本平台执行`node ../shared/test/scripts/telemetry-smoke.mjs`，以主进程合成v2能力/归属/503背压端口、系统加密存储、合成账号及音频验证本地→登录、聊天/文件操作、面试保存和重启。普通夹具/开发运行关闭统计，专项在隔离入口注入真实统计类的合成传输，禁止访问线上统计接口。协议见[客户端统计](../docs/CLIENT_TELEMETRY.md)。
+
+本轮真实HTTP专项：设置VOXCUE_TEST_SERVER_ROOT指向只读独立0.5.3仓库，本平台运行node ../shared/test/scripts/telemetry-v2-http-smoke.mjs；仅临时合成数据库和loopback，真实登录、领取凭据、双身份、退出后补传、部分回执/幂等重传、空健康及管理查询。界面专项为chat-response-smoke.mjs、chat-progress-smoke.mjs、shimmer-smoke.mjs、knowledge-smoke.mjs；不同长度扫光用真实CSS帧验证1秒扫描、2.5秒停顿及最小窗口截断，并纳入五档DPI；不连接生产。
 
 本平台目录运行`node ../shared/test/scripts/local-mode-smoke.mjs`：隔离合成账户/AI/存储端口，验证登录/跳过同尺寸、未登录云权限隔离、本机选择与草稿重启保留、返回登录、独立AI、真实临时三目录ZIP及取消、设置内精简本地账户信息/登录按钮、打开初始登录窗口再完成账号登录、取消导出无提示、同步/导出/注销顺序和容量摘要右对齐。Mac入口自行检查解锁控制台，GUI串行，临时产物退出清理；不以合成端口宣称真实账号或硬件验收。`local-mode.test.ts`验证原子持久化、损坏/失败和并发切换，desktop-ipc/contract验证新公开通道。
 

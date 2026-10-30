@@ -635,8 +635,9 @@ try {
         }
         await new Promise((resolve) => setTimeout(resolve, 25));
       }
-      await captureRequested(target, 'resize-' + edge);
-      if (edge === 'left') await captureRequested(floating, 'interview-resize-corners');
+      await captureRequested(target, 'resize-' + edge, { animations: 'allow' });
+      if (edge === 'left')
+        await captureRequested(floating, 'interview-resize-corners', { animations: 'allow' });
       const mouseRun = await runMouse(
         nativeMouse,
         [

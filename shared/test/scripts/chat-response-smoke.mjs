@@ -2,6 +2,7 @@ import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -82,7 +83,7 @@ try {
           });
         if (request.reasoning?.effort !== 'low') throw new Error('Effort not transmitted');
         const markdown =
-          '**JSON 回答已显示**\n\n```python\nprint("Hello")\n```\n\n|字段|内容|\n|---|---|\n|姓名|示例|';
+          '**JSON 回答已显示**\n\n**已核实的 JD。**下面说明\n\n- **岗位名称： **产品测试工程师。\n- **岗位类别： **开发类。\n\n```python\nprint("Hello")\n```\n\n|字段|内容|\n|---|---|\n|姓名|示例|';
         const text =
           request.text?.format?.type === 'json_schema'
             ? JSON.stringify({
@@ -179,7 +180,16 @@ try {
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('你好');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.chat-answer').getByText('JSON 回答已显示', { exact: true }).waitFor();
-  assert.equal(await page.locator('.chat-answer strong').count(), 1);
+  assert.equal(await page.locator('.chat-answer strong').count(), 4);
+  assert.equal((await page.locator('.chat-answer').innerText()).includes('**'), false);
+  if (process.argv.some((arg) => arg.startsWith('--screenshots='))) {
+    const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
+    for (const dark of [false, true]) {
+      await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+      await captureRequested(page, 'chat-markdown-cjk-' + (dark ? 'dark' : 'light'));
+    }
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), wasDark);
+  }
   assert.equal(await page.locator('.chat-answer pre code.language-python').count(), 1);
   assert.equal(await page.locator('.chat-answer table').count(), 1);
   await page.screenshot({});

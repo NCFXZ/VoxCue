@@ -36,6 +36,44 @@ function vault(initial: unknown = null) {
 const json = (value: unknown, status = 200, headers = {}) =>
   new Response(JSON.stringify(value), { status, headers });
 describe('independent cloud account client', () => {
+  it.each([401, 403, 503])(
+    'statistics HTTP %i never clears the cloud session or exposes access tokens',
+    async (status) => {
+      let telemetry = false;
+      const saved = vault();
+      const client = new CloudAccountClient({
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: saved.port,
+        fetcher: async (url, init) => {
+          if (!telemetry) return json(result());
+          expect(String(url)).toBe(origin + '/v2/telemetry/identity');
+          expect(JSON.parse(init!.body as string)).toEqual({
+            installationId: '33333333-3333-4333-8333-333333333333',
+          });
+          expect(new Headers(init!.headers).get('authorization')).toBe(
+            'Bearer ' + result().accessToken,
+          );
+          return json({ error: { code: 'account_disabled' } }, status);
+        },
+      });
+      expect(
+        (await client.call({ action: 'login', email: result().user.email, password: 'legacy' })).ok,
+      ).toBe(true);
+      const before = saved.read();
+      telemetry = true;
+      await expect(
+        client.telemetryIdentity(
+          '33333333-3333-4333-8333-333333333333',
+          result().user.id,
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow();
+      expect(saved.read()).toEqual(before);
+      expect(client.snapshot().verified).toBe(true);
+      expect(JSON.stringify(client.snapshot())).not.toContain(result().accessToken);
+    },
+  );
   it('keeps irreversible server confirmation visible when the local vault needs erasure retry', async () => {
     const client = new CloudAccountClient({
       origin,

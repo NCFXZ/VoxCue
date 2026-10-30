@@ -33,7 +33,8 @@ import { Telemetry } from './backend/telemetry/service';
 import { registerTelemetryIpc } from './ipc/telemetry';
 import type { TelemetryStage } from './contracts/telemetry';
 import type { CloudAccountState } from './contracts/cloudAccount';
-import { createCloudVault } from './backend/cloud/vault';
+import { createCloudVault, createCredentialVault } from './backend/cloud/vault';
+import type { TelemetryProofState } from './backend/telemetry/identity';
 import { CloudSyncClient } from './backend/cloud/sync';
 import { AccountArchive } from './backend/accountArchive';
 import { accountErasureMarker, eraseLocalAccount } from './backend/accountErasure';
@@ -676,10 +677,17 @@ app.whenReady().then(async () => {
       !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
     ),
     enabled: app.isPackaged,
+    proofVault: createCredentialVault<TelemetryProofState>(
+      path.join(app.getPath('userData'), 'cloud-account', 'telemetry.bin'),
+      credentialEncryption,
+      262144,
+    ),
+    identityProvider: (installationId, userId, signal) =>
+      cloudAccount.telemetryIdentity(installationId, userId, signal),
   });
   powerMonitor.on('suspend', () => telemetry?.suspend(true));
   powerMonitor.on('resume', () => telemetry?.suspend(false));
-  const accountState = (): CloudAccountState => {
+  const accountState = (freshIdentity = false): CloudAccountState => {
     const state = localMode.active
       ? { ...cloudAccount.snapshot(), user: null, verified: false, localMode: true }
       : cloudAccount.snapshot();
@@ -687,6 +695,7 @@ app.whenReady().then(async () => {
       state.user
         ? { accountMode: 'account', userId: state.user.id }
         : { accountMode: state.localMode ? 'local' : 'signed_out' },
+      freshIdentity,
     );
     return state;
   };
@@ -747,7 +756,7 @@ app.whenReady().then(async () => {
             await accountArchive?.cancel();
             await localMode.set(false);
           }
-          accountState();
+          accountState(true);
           telemetry?.entry(call.action as 'login' | 'register', response.state.user.createdAt);
         }
         return response;

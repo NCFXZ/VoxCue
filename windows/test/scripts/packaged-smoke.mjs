@@ -576,4 +576,6 @@ assert.deepEqual(finalInstallation, installation);
 assert.equal(finalQueue.attempts, 0);
 assert.ok(finalQueue.events.length > 0);
 assert.ok(finalQueue.events.every(event => event.installationId === installation.installationId && event.version === expectedVersion && event.platform === 'windows'));
-console.log('Formal package: stable installation ID, 0.6.3 Windows events persisted, zero transport attempts');
+console.log(
+  `Formal package: stable installation ID, ${expectedVersion} Windows events persisted, zero transport attempts`,
+);

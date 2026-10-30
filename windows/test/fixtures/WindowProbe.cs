@@ -19,6 +19,8 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("kernel32.dll")] static extern uint WTSGetActiveConsoleSessionId();
+  [DllImport("wtsapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool WTSQuerySessionInformationW(IntPtr server,int session,int information,out IntPtr buffer,out int bytes);
+  [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr buffer);
   [DllImport("user32.dll")] static extern IntPtr OpenInputDesktop(uint flags,bool inherit,uint access);
   [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr handle);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetUserObjectInformationW(IntPtr handle,int index,StringBuilder name,int bytes,out int needed);
@@ -43,8 +45,51 @@ class WindowProbe {
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string file,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window,int attribute,out int value,int bytes);
   static void Print(object value) { Console.WriteLine(new JavaScriptSerializer().Serialize(value)); }
+  class DesktopStatus {
+    public bool interactive,cursorReadable,ownerConsole,lockWindow;
+    public string inputDesktop;
+    public int processSession,sessionFlags=-1;
+    public uint consoleSession;
+  }
+  static DesktopStatus ReadDesktop() {
+    var state=new DesktopStatus();
+    state.processSession=System.Diagnostics.Process.GetCurrentProcess().SessionId;
+    state.consoleSession=WTSGetActiveConsoleSessionId();
+    state.ownerConsole=state.consoleSession!=0xFFFFFFFF&&state.consoleSession==(uint)state.processSession;
+    var handle=OpenInputDesktop(0,false,1);if(handle==IntPtr.Zero)throw new Exception("Input desktop unavailable");
+    try {
+      var name=new StringBuilder(256);int needed;
+      if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");
+      state.inputDesktop=name.ToString();Point cursor;state.cursorReadable=GetCursorPos(out cursor);
+    } finally {CloseDesktop(handle);}
+    IntPtr buffer;int bytes;bool sessionActive=false;
+    if(WTSQuerySessionInformationW(IntPtr.Zero,state.processSession,25,out buffer,out bytes)) {
+      try {
+        // x64 WTSINFOEXW prefix: Level, 8-byte-aligned union, session/state/flags.
+        // Read only this prefix, never username/domain or other user information.
+        if(bytes>=20&&Marshal.ReadInt32(buffer,0)==1&&Marshal.ReadInt32(buffer,8)==state.processSession) {
+          sessionActive=Marshal.ReadInt32(buffer,12)==0;
+          state.sessionFlags=Marshal.ReadInt32(buffer,16);
+        }
+      } finally {WTSFreeMemory(buffer);}
+    }
+    bool foregroundKnown=false;uint foregroundPid;
+    if(GetWindowThreadProcessId(GetForegroundWindow(),out foregroundPid)!=0) {
+      try {
+        string process=System.Diagnostics.Process.GetProcessById((int)foregroundPid).ProcessName;
+        state.lockWindow=process.Equals("LockApp",StringComparison.OrdinalIgnoreCase)||process.Equals("LogonUI",StringComparison.OrdinalIgnoreCase);
+        foregroundKnown=true;
+      } catch { /* Unknown foreground ownership fails closed. */ }
+    }
+    state.interactive=state.inputDesktop=="Default"&&state.cursorReadable&&state.ownerConsole&&sessionActive&&state.sessionFlags==1&&foregroundKnown&&!state.lockWindow;
+    return state;
+  }
+  static void RequireDesktop() {
+    if(!ReadDesktop().interactive)throw new Exception("GUI/native input requires the owner's unlocked console; locked or unknown state refused");
+  }
   static Input Key(ushort key,ushort scan,uint flags) {return new Input{type=1,value=new InputUnion{keyboard=new KeyboardInput{key=key,scan=scan,flags=flags}}};}
   static void TypeSavePath(IntPtr dialog,string path) {
+    RequireDesktop();
     if(GetAncestor(GetForegroundWindow(),2)!=dialog)throw new Exception("Refusing keyboard input outside owned save dialog");
     var input=new List<Input>{Key(17,0,0),Key(65,0,0),Key(65,0,2),Key(17,0,2)};
     foreach(char c in path){input.Add(Key(0,c,4));input.Add(Key(0,c,6));}
@@ -53,6 +98,8 @@ class WindowProbe {
       throw new Exception("Owned save dialog keyboard input was not accepted");
   }
   static void CaptureDialog(AutomationElement dialog,string file) {
+    RequireDesktop();
+    if(GetAncestor(GetForegroundWindow(),2)!=new IntPtr(dialog.Current.NativeWindowHandle))throw new Exception("Refusing screen capture outside the owned foreground dialog");
     var rect=dialog.Current.BoundingRectangle;
     using(var bitmap=new Bitmap((int)rect.Width,(int)rect.Height))using(var graphics=Graphics.FromImage(bitmap)) {
       graphics.CopyFromScreen((int)rect.X,(int)rect.Y,0,0,bitmap.Size);
@@ -92,16 +139,14 @@ class WindowProbe {
         }
         Print(new{exclusiveFiles=args.Length-1});return 0;
       }
-      if(args[0]=="desktop") {
-        var handle=OpenInputDesktop(0,false,1);if(handle==IntPtr.Zero)throw new Exception("Input desktop unavailable");
-        try {var name=new StringBuilder(256);int needed;if(!GetUserObjectInformationW(handle,2,name,512,out needed))throw new Exception("Input desktop query failed");Point cursor;bool readable=GetCursorPos(out cursor);int session=System.Diagnostics.Process.GetCurrentProcess().SessionId;uint console=WTSGetActiveConsoleSessionId();bool ownerConsole=console!=0xFFFFFFFF&&console==(uint)session;Print(new{interactive=name.ToString()=="Default"&&readable&&ownerConsole,inputDesktop=name.ToString(),cursorReadable=readable,processSession=session,consoleSession=console,ownerConsole});}
-        finally{CloseDesktop(handle);}return 0;
-      }
+      if(args[0]=="desktop") {Print(ReadDesktop());return 0;}
+      RequireDesktop();
       if(args[0]=="save-dialog") {
         int processId=int.Parse(args[1]);
         var ownerWindow=args.Length>3?new IntPtr(long.Parse(args[3])):IntPtr.Zero;
         AutomationElement dialog=null;var deadline=DateTime.UtcNow.AddSeconds(12);
         do {
+          RequireDesktop();
           IntPtr native=IntPtr.Zero;
           EnumWindows((handle,data)=>{uint pid;GetWindowThreadProcessId(handle,out pid);if(pid==(uint)processId||(ownerWindow!=IntPtr.Zero&&GetAncestor(handle,3)==ownerWindow)){
             var name=new StringBuilder(256);GetClassNameW(handle,name,name.Capacity);
@@ -128,6 +173,7 @@ class WindowProbe {
         if(button==null)throw new Exception("Native save/cancel button not found");
         if(args.Length>4)CaptureDialog(dialog,args[4]);
         string title=dialog.Current.Name;var dialogHandle=new IntPtr(dialog.Current.NativeWindowHandle);
+        RequireDesktop();
         if(cancel)((InvokePattern)button.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
         else TypeSavePath(dialogHandle,args[2]);
         var closeDeadline=DateTime.UtcNow.AddSeconds(5);

@@ -56,8 +56,11 @@ export type TelemetryData =
       elapsedMs: number;
       firstAnswerMs?: number;
     };
-export interface TelemetryEvent extends TelemetryIdentity {
-  schemaVersion: 1;
+/** Disk event: only an opaque reference to main-process encrypted attribution storage. */
+export interface TelemetryEvent {
+  accountMode: TelemetryIdentity['accountMode'];
+  identityRef?: string;
+  schemaVersion: 2;
   id: string;
   installationId: string;
   firstSeenAt: number;
@@ -67,14 +70,19 @@ export interface TelemetryEvent extends TelemetryIdentity {
   platform: 'macos' | 'windows';
   data: TelemetryData;
 }
+/** HTTP representation; the opaque disk reference never crosses the network. */
+export type TelemetryWireEvent = Omit<TelemetryEvent, 'identityRef'> & { identityProof?: string };
 export const telemetryUuid = (v: unknown): v is string =>
-  typeof v === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(v);
+  typeof v === 'string' && /^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/.test(v);
 const object = (v: unknown): v is Record<string, unknown> =>
   !!v && typeof v === 'object' && !Array.isArray(v);
 const keys = (v: Record<string, unknown>, names: string[]) =>
   Object.keys(v).every((k) => names.includes(k));
 const number = (v: unknown) =>
   typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= Number.MAX_SAFE_INTEGER;
+export const telemetryTimestamp = (v: unknown): v is number =>
+  number(v) && (v as number) <= 8640000000000000;
+const category = (v: unknown): string => (typeof v === 'string' ? v : '');
 export function validTelemetrySignal(v: unknown): v is TelemetrySignal {
   if (!object(v)) return false;
   if (v.type === 'ready' || v.type === 'manual_question') return keys(v, ['type']);
@@ -97,23 +105,32 @@ export function validTelemetryEvent(v: unknown): v is TelemetryEvent {
       'version',
       'platform',
       'accountMode',
-      'userId',
+      'identityRef',
       'data',
     ]) ||
-    v.schemaVersion !== 1 ||
+    v.schemaVersion !== 2 ||
     ![v.id, v.installationId, v.runId].every(telemetryUuid) ||
-    !number(v.occurredAt) ||
-    !number(v.firstSeenAt) ||
+    !telemetryTimestamp(v.occurredAt) ||
+    !telemetryTimestamp(v.firstSeenAt) ||
     typeof v.version !== 'string' ||
     v.version.length > 64 ||
     !/^\d+\.\d+\.\d+(?:-[\w.-]+)?$/.test(v.version) ||
-    !['macos', 'windows'].includes(String(v.platform)) ||
-    !['signed_out', 'local', 'account'].includes(String(v.accountMode)) ||
-    (v.accountMode === 'account' ? !telemetryUuid(v.userId) : v.userId !== undefined) ||
+    !['macos', 'windows'].includes(category(v.platform)) ||
+    !['signed_out', 'local', 'account'].includes(category(v.accountMode)) ||
+    (v.accountMode === 'account' ? !telemetryUuid(v.identityRef) : v.identityRef !== undefined) ||
     !object(v.data)
   )
     return false;
+  if ((v.firstSeenAt as number) > (v.occurredAt as number) + 300000) return false;
   const d = v.data;
+  if (
+    'startedAt' in d &&
+    d.startedAt !== null &&
+    (!telemetryTimestamp(d.startedAt) ||
+      d.startedAt > (v.occurredAt as number) + 300000 ||
+      d.startedAt < (v.firstSeenAt as number) - 300000)
+  )
+    return false;
   if (d.type === 'app_ready') return keys(d, ['type']);
   if (d.type === 'feature')
     return (
@@ -122,8 +139,11 @@ export function validTelemetryEvent(v: unknown): v is TelemetryEvent {
   if (d.type === 'account_entry')
     return (
       keys(d, ['type', 'method', 'userCreatedAt']) &&
-      ['login', 'register', 'restore', 'local'].includes(String(d.method)) &&
-      (d.userCreatedAt === undefined || number(d.userCreatedAt))
+      (d.method === 'local'
+        ? v.accountMode === 'local' && d.userCreatedAt === undefined
+        : v.accountMode === 'account') &&
+      ['login', 'register', 'restore', 'local'].includes(category(d.method)) &&
+      (d.userCreatedAt === undefined || telemetryTimestamp(d.userCreatedAt))
     );
   if (d.type === 'interview_attempt')
     return keys(d, ['type', 'interviewId']) && telemetryUuid(d.interviewId);
@@ -131,7 +151,7 @@ export function validTelemetryEvent(v: unknown): v is TelemetryEvent {
     return (
       keys(d, ['type', 'interviewId', 'startedAt']) &&
       telemetryUuid(d.interviewId) &&
-      number(d.startedAt)
+      telemetryTimestamp(d.startedAt)
     );
   if (d.type === 'ai_request')
     return (
@@ -145,15 +165,15 @@ export function validTelemetryEvent(v: unknown): v is TelemetryEvent {
         'firstAnswerMs',
       ]) &&
       telemetryUuid(d.requestId) &&
-      ['chat', 'interview'].includes(String(d.context)) &&
+      ['chat', 'interview'].includes(category(d.context)) &&
       (d.interviewId === undefined || telemetryUuid(d.interviewId)) &&
-      ['success', 'failure', 'cancelled'].includes(String(d.outcome)) &&
+      ['success', 'failure', 'cancelled'].includes(category(d.outcome)) &&
       number(d.elapsedMs) &&
       (d.firstAnswerMs === undefined ||
         (number(d.firstAnswerMs) && (d.firstAnswerMs as number) <= (d.elapsedMs as number)))
     );
   return (
-    ['interview_progress', 'interview_ended'].includes(String(d.type)) &&
+    ['interview_progress', 'interview_ended'].includes(category(d.type)) &&
     keys(d, [
       'type',
       'interviewId',
@@ -167,16 +187,23 @@ export function validTelemetryEvent(v: unknown): v is TelemetryEvent {
       ...(d.type === 'interview_ended' ? ['outcome', 'stage'] : []),
     ]) &&
     telemetryUuid(d.interviewId) &&
-    (d.startedAt === null || number(d.startedAt)) &&
+    (d.startedAt === null || telemetryTimestamp(d.startedAt)) &&
     [d.activeMs, d.transcriptCount, d.manualQuestionCount, d.answerCount, d.sequence].every(
       number,
     ) &&
     typeof d.effective === 'boolean' &&
+    d.effective ===
+      ((d.activeMs as number) >= 120000 &&
+        ((d.transcriptCount as number) >= 3 ||
+          (d.manualQuestionCount as number) >= 1 ||
+          (d.answerCount as number) >= 1)) &&
+    (d.startedAt !== null || d.activeMs === 0) &&
+    (d.type !== 'interview_ended' || d.outcome !== 'completed' || d.startedAt !== null) &&
     (d.type !== 'interview_ended' ||
-      (['completed', 'failed', 'interrupted'].includes(String(d.outcome)) &&
+      (['completed', 'failed', 'interrupted'].includes(category(d.outcome)) &&
         (d.stage === undefined ||
           ['preflight', 'model', 'permission', 'audio', 'window', 'storage', 'process'].includes(
-            String(d.stage),
+            category(d.stage),
           ))))
   );
 }

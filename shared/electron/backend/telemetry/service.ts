@@ -3,9 +3,11 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
   telemetryUuid,
+  telemetryTimestamp,
   validTelemetryEvent,
   type TelemetryData,
   type TelemetryEvent,
+  type TelemetryWireEvent,
   type TelemetryIdentity,
   type TelemetryFeature,
   type TelemetryStage,
@@ -13,7 +15,14 @@ import {
 } from '../../contracts/telemetry';
 import { atomicJson, TelemetryQueue, telemetryQueueFile } from './queue';
 
-export const telemetryRoute = '/v1/telemetry/events';
+import { boundedJson } from '../boundedJson';
+import {
+  TelemetryProofs,
+  type TelemetryProofVault,
+  type TelemetryIdentityProvider,
+} from './identity';
+import { receiptIds, retryAfter, telemetryRoute, validCapabilities } from './protocol';
+export { telemetryRoute } from './protocol';
 type AnswerOutcome = 'success' | 'failure' | 'cancelled';
 type AnswerMetric = { first(): void; finish(outcome: AnswerOutcome): void };
 type Interview = {
@@ -27,7 +36,7 @@ type Interview = {
 };
 export class Telemetry {
   private queue: TelemetryQueue;
-  private installation = { installationId: randomUUID() as string, firstSeenAt: 0 };
+  private installation = { installationId: randomUUID() as string, firstSeenAt: 0, sequence: 0 };
   private identity: TelemetryIdentity = { accountMode: 'signed_out' };
   private readonly runId = randomUUID();
   private ready: Promise<void>;
@@ -41,8 +50,15 @@ export class Telemetry {
   private saving?: ReturnType<typeof setTimeout>;
   private upload?: Promise<void>;
   private controller?: AbortController;
-  private healthPending = false;
-  private pendingAnswers = new Set<AnswerMetric>();
+  private proofs?: TelemetryProofs;
+  private pendingRecords = new Set<Promise<void>>();
+  private stopping = false;
+  private capabilities = false;
+  private negotiation?: Promise<void>;
+  private transmissionSave?: Promise<void>;
+  private negotiationController?: AbortController;
+  private negotiateAt = 0;
+  private pendingAnswers = new Map<AnswerMetric, string | undefined>();
   private closed = false;
   constructor(
     private options: {
@@ -52,6 +68,8 @@ export class Telemetry {
       origin?: string;
       enabled?: boolean;
       fetcher?: typeof fetch;
+      proofVault?: TelemetryProofVault;
+      identityProvider?: TelemetryIdentityProvider;
       now?: () => number;
       monotonic?: () => number;
     },
@@ -77,35 +95,66 @@ export class Telemetry {
       const saved = JSON.parse(await readFile(file, 'utf8'));
       if (
         !telemetryUuid(saved.installationId) ||
-        !Number.isSafeInteger(saved.firstSeenAt) ||
-        saved.firstSeenAt < 0
+        !telemetryTimestamp(saved.firstSeenAt) ||
+        (saved.sequence !== undefined &&
+          (!Number.isSafeInteger(saved.sequence) || saved.sequence < 0))
       )
         throw Error('Invalid installation');
-      this.installation = { installationId: saved.installationId, firstSeenAt: saved.firstSeenAt };
+      this.installation = {
+        installationId: saved.installationId,
+        firstSeenAt: saved.firstSeenAt,
+        sequence: saved.sequence ?? 0,
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       await atomicJson(file, this.installation);
     }
     await this.queue.load(this.now());
+    this.installation.sequence = Math.max(this.installation.sequence, this.queue.sequence);
+    this.proofs = new TelemetryProofs({
+      installationId: this.installation.installationId,
+      origin: this.options.origin ?? '',
+      vault: this.options.proofVault,
+      now: () => this.now(),
+      provider: this.options.identityProvider
+        ? async (installationId, userId, signal) => {
+            await this.negotiate();
+            if (signal.aborted) throw Error('Closed');
+            return this.options.identityProvider!(installationId, userId, signal);
+          }
+        : undefined,
+    });
+    await this.proofs.load();
+    const before = this.queue.events.length;
     this.queue.events = this.queue.events.filter(
       (e) => e.installationId === this.installation.installationId,
     );
+    this.queue.drop(before - this.queue.events.length);
     if (this.queue.active?.installationId !== this.installation.installationId)
       this.queue.active = undefined;
     // A checkpoint never includes time while the application was not running.
     const previous = this.queue.active;
     if (previous?.data.type === 'interview_progress') {
-      this.queue.add({
-        ...previous,
-        id: randomUUID(),
-        data: {
-          ...previous.data,
-          type: 'interview_ended',
-          sequence: previous.data.sequence + 1,
-          outcome: previous.data.startedAt === null ? 'failed' : 'interrupted',
-          stage: 'process',
-        },
-      });
+      if (
+        previous.data.sequence < Number.MAX_SAFE_INTEGER &&
+        (previous.accountMode !== 'account' ||
+          this.proofs.proof(previous.identityRef!, previous.occurredAt))
+      )
+        this.queue.add({
+          ...previous,
+          id: randomUUID(),
+          data: {
+            ...previous.data,
+            type: 'interview_ended',
+            sequence: previous.data.sequence + 1,
+            outcome: previous.data.startedAt === null ? 'failed' : 'interrupted',
+            stage: 'process',
+          },
+        });
+      else {
+        this.queue.drop();
+        this.queue.lastFailure = 'checkpoint_unverifiable';
+      }
       this.queue.active = undefined;
       await this.queue.save();
     }
@@ -115,38 +164,71 @@ export class Telemetry {
     }, 30000);
     this.timer.unref();
   }
-  setIdentity(identity: TelemetryIdentity) {
+  setIdentity(identity: TelemetryIdentity, fresh = false) {
     this.identity =
       identity.accountMode === 'account' && telemetryUuid(identity.userId)
         ? { accountMode: 'account', userId: identity.userId }
         : { accountMode: identity.accountMode === 'local' ? 'local' : 'signed_out' };
+    const userId = this.identity.userId;
+    if (userId && this.enabled && !this.closed && !this.stopping)
+      void this.ready.then(() => this.proofs?.warm(userId, fresh)).catch(() => {});
   }
-  private event(data: TelemetryData, identity = this.identity): TelemetryEvent {
-    return {
-      schemaVersion: 1,
-      id: randomUUID(),
-      ...this.installation,
-      runId: this.runId,
-      occurredAt: this.now(),
-      version: this.options.version,
-      platform: this.options.platform,
-      ...identity,
-      data,
-    };
-  }
-  private record(data: TelemetryData, identity = this.identity) {
-    if (!this.enabled || this.closed) return;
+  private record(data: TelemetryData, identity = this.identity, checkpoint?: Interview) {
+    if (!this.enabled || this.closed || this.stopping) return;
+    if (this.pendingRecords.size >= 2000) {
+      this.queue.drop();
+      return;
+    }
     const subject = { ...identity };
     const occurredAt = this.now();
-    void this.ready
-      .then(() => {
+    const work = this.ready
+      .then(async () => {
         if (!this.enabled || this.closed) return;
-        const event = { ...this.event(data, subject), occurredAt };
-        if (!validTelemetryEvent(event)) return;
-        this.queue.add(event);
+        const identityRef =
+          subject.accountMode === 'account'
+            ? await this.proofs?.reference(subject.userId!, occurredAt, this.identity.userId)
+            : undefined;
+        if (subject.accountMode === 'account' && !identityRef) {
+          this.queue.lastFailure = 'identity_unverifiable';
+          this.queue.drop();
+          this.persistSoon();
+          return;
+        }
+        const event: TelemetryEvent = {
+          schemaVersion: 2,
+          id: randomUUID(),
+          installationId: this.installation.installationId,
+          firstSeenAt: this.installation.firstSeenAt,
+          runId: this.runId,
+          occurredAt,
+          version: this.options.version,
+          platform: this.options.platform,
+          accountMode: subject.accountMode,
+          ...(identityRef ? { identityRef } : {}),
+          data,
+        };
+        if (!validTelemetryEvent(event)) {
+          this.queue.drop();
+          this.queue.lastFailure = 'invalid_local_event';
+        } else {
+          this.queue.add(event);
+          if (
+            checkpoint &&
+            this.interview === checkpoint &&
+            event.data.type === 'interview_progress' &&
+            (this.queue.active?.data.type !== 'interview_progress' ||
+              this.queue.active.data.sequence < event.data.sequence)
+          )
+            this.queue.active = event;
+        }
         this.persistSoon();
       })
-      .catch(() => {});
+      .catch(() => {
+        this.queue.drop();
+        this.queue.lastFailure = 'storage_unavailable';
+      })
+      .finally(() => this.pendingRecords.delete(work));
+    this.pendingRecords.add(work);
   }
   private persistSoon() {
     if (this.saving) return;
@@ -279,15 +361,7 @@ export class Telemetry {
       ...i.metrics,
       sequence: ++i.metrics.sequence,
     };
-    this.record(data, i.identity);
-    void this.ready
-      .then(() => {
-        if (this.enabled && !this.closed && this.interview === i) {
-          this.queue.active = this.event(data, i.identity);
-          this.persistSoon();
-        }
-      })
-      .catch(() => {});
+    this.record(data, i.identity, i);
   }
   finishInterview(normal: boolean, stage?: TelemetryStage) {
     this.accrue();
@@ -357,14 +431,16 @@ export class Telemetry {
         );
       },
     };
-    this.pendingAnswers.add(metric);
+    this.pendingAnswers.set(metric, identity.userId);
     return metric;
   }
   async flush() {
     await this.ready;
+    await Promise.all([...this.pendingRecords]);
     if (
       !this.enabled ||
       this.closed ||
+      this.stopping ||
       !this.options.origin ||
       this.upload ||
       this.now() < this.queue.nextAttemptAt
@@ -377,18 +453,119 @@ export class Telemetry {
       });
     return this.upload;
   }
+  private async negotiate() {
+    if (this.capabilities) return;
+    if (this.closed || this.now() < this.negotiateAt) throw Error('Protocol unavailable');
+    if (this.negotiation) return this.negotiation;
+    const controller = new AbortController();
+    this.negotiationController = controller;
+    const timeout = setTimeout(() => controller.abort(), 8000);
+    timeout.unref();
+    this.negotiation = (async () => {
+      const response = await (this.options.fetcher ?? fetch)(
+        this.options.origin + '/v2/telemetry/capabilities',
+        {
+          method: 'GET',
+          credentials: 'omit',
+          cache: 'no-store',
+          redirect: 'error',
+          signal: controller.signal,
+        },
+      );
+      if (!response.ok) {
+        await response.body?.cancel();
+        const delay = [404, 405, 501].includes(response.status)
+          ? 86400000
+          : Math.max(60000, retryAfter(response, this.now()));
+        this.negotiateAt = this.now() + delay;
+        throw Error('Protocol unavailable');
+      }
+      if (!validCapabilities(await boundedJson(response))) {
+        this.negotiateAt = this.now() + 86400000;
+        throw Error('Unsupported protocol');
+      }
+      if (controller.signal.aborted || this.closed) throw Error('Closed');
+      this.capabilities = true;
+    })().finally(() => {
+      clearTimeout(timeout);
+      this.negotiation = undefined;
+      if (this.negotiationController === controller) this.negotiationController = undefined;
+    });
+    return this.negotiation;
+  }
   private async send() {
     this.queue.prune(this.now());
-    const events = this.queue.events.slice(0, 50);
-    if (!events.length && !this.healthPending) return;
-    this.queue.attempts++;
+    const wire: TelemetryWireEvent[] = [];
+    const events: TelemetryEvent[] = [];
+    const unusable = new Set<string>();
+    let bytes = 2048; // Bound the full envelope, including a maximum-size health snapshot.
+    for (const event of this.queue.events) {
+      const { identityRef, ...publicEvent } = event;
+      const proof = identityRef && this.proofs?.proof(identityRef, event.occurredAt);
+      if (event.accountMode === 'account' && !proof) {
+        unusable.add(event.id);
+        continue;
+      }
+      const item = { ...publicEvent, ...(proof ? { identityProof: proof } : {}) };
+      const size = Buffer.byteLength(JSON.stringify(item)) + 1;
+      if (events.length >= 50 || bytes + size > 131072) break;
+      bytes += size;
+      wire.push(item);
+      events.push(event);
+    }
+    if (unusable.size) {
+      this.queue.events = this.queue.events.filter((e) => !unusable.has(e.id));
+      this.queue.drop(unusable.size);
+      this.queue.lastFailure = 'identity_unverifiable';
+    }
+    if (!events.length && !this.queue.healthPending) return;
     const controller = new AbortController();
     this.controller = controller;
     const timeout = setTimeout(() => controller.abort(), 8000);
     timeout.unref();
     let retryMs = 60000;
     try {
-      await this.queue.save();
+      await this.negotiate();
+      if (this.closed || this.stopping || controller.signal.aborted) return;
+      if (
+        this.installation.sequence >= Number.MAX_SAFE_INTEGER ||
+        this.queue.attempts >= Number.MAX_SAFE_INTEGER
+      ) {
+        this.enabled = false;
+        this.queue.lastFailure = 'counter_exhausted';
+        return;
+      }
+      this.queue.sequence = ++this.installation.sequence;
+      this.queue.attempts++;
+      this.queue.healthPending = true;
+      this.transmissionSave = (async () => {
+        await atomicJson(
+          path.join(this.options.root, 'telemetry-installation.json'),
+          this.installation,
+        );
+        await this.queue.save(); // Both identities and health sequence are durable before transmission.
+      })();
+      await this.transmissionSave;
+      if (this.closed || this.stopping || controller.signal.aborted) return;
+      const body = JSON.stringify({
+        schemaVersion: 2,
+        installationId: this.installation.installationId,
+        runId: this.runId,
+        sentAt: this.now(),
+        events: wire,
+        health: {
+          counterId: this.queue.counterId,
+          sequence: this.queue.sequence,
+          attempts: this.queue.attempts,
+          failures: this.queue.failures,
+          pendingEvents: this.queue.events.length,
+          oldestPendingAt: this.queue.events.length
+            ? Math.min(...this.queue.events.map((e) => e.occurredAt))
+            : null,
+          droppedEvents: this.queue.dropped,
+        },
+      });
+      if (Buffer.byteLength(body) > 131072) throw Error('Body limit');
       const response = await (this.options.fetcher ?? fetch)(this.options.origin + telemetryRoute, {
         method: 'POST',
         redirect: 'error',
@@ -396,70 +573,44 @@ export class Telemetry {
         cache: 'no-store',
         signal: controller.signal,
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          schemaVersion: 1,
-          installationId: this.installation.installationId,
-          runId: this.runId,
-          sentAt: this.now(),
-          events,
-          health: {
-            counterId: this.queue.counterId,
-            attempts: this.queue.attempts,
-            failures: this.queue.failures,
-            pendingEvents: this.queue.events.length,
-            oldestPendingAt: this.queue.events.length
-              ? Math.min(...this.queue.events.map((e) => e.occurredAt))
-              : null,
-            droppedEvents: this.queue.dropped,
-          },
-        }),
+        body,
       });
-      if ([404, 405, 501].includes(response.status)) retryMs = 86400000;
-      const retry = Number(response.headers.get('retry-after'));
-      if (Number.isFinite(retry) && retry > 0)
-        retryMs = Math.max(retryMs, Math.min(retry * 1000, 86400000));
+      retryMs = Math.max(retryMs, retryAfter(response, this.now()));
+      if ([400, 404, 405, 413, 415, 422, 501].includes(response.status)) retryMs = 86400000;
       if (!response.ok) {
+        this.queue.lastFailure = 'http_' + response.status;
         await response.body?.cancel();
         throw Error('Unavailable');
       }
-      const reader = response.body?.getReader();
-      if (!reader) throw Error('Missing acknowledgement');
-      const chunks: Uint8Array[] = [];
-      let size = 0;
-      try {
-        for (;;) {
-          const chunk = await reader.read();
-          if (chunk.done) break;
-          size += chunk.value.byteLength;
-          if (size > 16384) throw Error('Oversized acknowledgement');
-          chunks.push(chunk.value);
-        }
-      } finally {
-        await reader.cancel().catch(() => {});
-        reader.releaseLock();
-      }
-      const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-      const sent = new Set(events.map((e) => e.id));
-      if (
-        result?.schemaVersion !== 1 ||
-        !Array.isArray(result.acceptedIds) ||
-        (events.length > 0 && !result.acceptedIds.length) ||
-        result.acceptedIds.length > events.length ||
-        new Set(result.acceptedIds).size !== result.acceptedIds.length ||
-        !result.acceptedIds.every((id: unknown) => typeof id === 'string' && sent.has(id))
-      )
-        throw Error('Invalid acknowledgement');
-      const accepted = new Set(result.acceptedIds);
-      this.queue.events = this.queue.events.filter((e) => !accepted.has(e.id));
-      this.healthPending = events.length > 0;
+      const { accepted, rejected } = receiptIds(await boundedJson(response), events);
+      if (this.closed || this.stopping) return;
+      const present = new Set(this.queue.events.map((e) => e.id));
+      this.queue.events = this.queue.events.filter(
+        (e) => !accepted.has(e.id) && !rejected.has(e.id),
+      );
+      this.queue.drop([...rejected].filter((id) => present.has(id)).length);
+      this.queue.healthPending = events.length > 0;
+      this.queue.lastFailure = rejected.size ? 'event_rejected' : undefined;
       this.queue.retryFailures = 0;
       this.queue.nextAttemptAt = this.now() + 30000;
+      const references = new Set(
+        this.queue.events.flatMap((e) => (e.identityRef ? [e.identityRef] : [])),
+      );
+      if (this.queue.active?.identityRef) references.add(this.queue.active.identityRef);
+      const users = new Set([...this.pendingAnswers.values()].filter((id): id is string => !!id));
+      if (this.identity.userId) users.add(this.identity.userId);
+      if (this.interview?.identity.userId) users.add(this.interview.identity.userId);
+      if (!this.pendingRecords.size) await this.proofs?.prune(references, users);
     } catch {
-      if (!this.closed) {
-        this.queue.failures++;
-        const failures = Math.min(++this.queue.retryFailures, 6);
-        this.queue.nextAttemptAt =
-          this.now() + Math.max(retryMs, Math.min(3600000, 60000 * 2 ** failures));
+      if (!this.closed && !this.stopping) {
+        this.queue.failures = Math.min(this.queue.attempts, this.queue.failures + 1);
+        const failures = (this.queue.retryFailures = Math.min(this.queue.retryFailures + 1, 6));
+        const backoff = Math.min(3600000, 60000 * 2 ** failures) * (0.8 + Math.random() * 0.4);
+        this.queue.nextAttemptAt = Math.max(
+          this.negotiateAt,
+          this.now() + Math.max(retryMs, Math.floor(backoff)),
+        );
+        this.queue.lastFailure ??= 'transport_unavailable';
       }
     } finally {
       clearTimeout(timeout);
@@ -471,16 +622,22 @@ export class Telemetry {
   async settle() {
     await this.ready;
     if (!this.enabled || this.closed) return;
+    await Promise.all([...this.pendingRecords]);
     clearTimeout(this.saving);
     this.saving = undefined;
     await this.queue.save();
   }
   async close() {
     if (this.closed) return;
-    for (const metric of [...this.pendingAnswers]) metric.finish('cancelled');
+    for (const metric of this.pendingAnswers.keys()) metric.finish('cancelled');
     this.finishInterview(false);
+    this.stopping = true;
+    this.negotiationController?.abort();
+    this.controller?.abort();
     await this.ready;
-    await Promise.resolve();
+    await this.proofs?.close();
+    await Promise.all([...this.pendingRecords]);
+    await this.transmissionSave?.catch(() => {});
     this.closed = true;
     clearInterval(this.timer);
     clearTimeout(this.saving);

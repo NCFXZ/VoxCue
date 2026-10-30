@@ -1,6 +1,7 @@
 import { useState, useEffect, type ReactNode, type ReactElement } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import { readableStrong } from '../services/markdown';
 import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
 import { Copy, Check } from './icons';
@@ -47,7 +48,7 @@ export function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="markdown-content">
       <Markdown
-        remarkPlugins={[remarkGfm]}
+        remarkPlugins={[remarkGfm, readableStrong]}
         skipHtml
         components={{
           pre: CodeBlock,

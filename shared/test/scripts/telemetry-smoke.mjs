@@ -33,16 +33,25 @@ await writeFile(
 const path = require('node:path');
 const {app} = require('electron');
 const root = ${JSON.stringify(workspace.platformRoot)};
-app.getVersion = () => '0.6.3';
+app.getVersion = () => require(path.join(root, 'package.json')).version;
 globalThis.telemetryTime = 0;
 globalThis.telemetryPosts = [];
+const ttl = 30*86400000;
+const grant = (installationId, userId) => {
+ const issuedAt = Date.UTC(2026,9,29) + globalThis.telemetryTime, eventUntil=issuedAt+ttl, deliverUntil=eventUntil+ttl;
+ const part = v => Buffer.from(JSON.stringify(v)).toString('base64url');
+ return {schemaVersion:2,issuedAt,eventUntil,deliverUntil,identityProof:part({alg:'HS256',typ:'voxcue-telemetry+jwt'})+'.'+part({iss:'voxcue-account-server',aud:'voxcue:telemetry-attribution:v2',sub:userId,installationId,iat:issuedAt/1000,nbf:issuedAt/1000-300,exp:deliverUntil/1000,eventUntil})+'.'+'a'.repeat(43)};
+};
 const modulePath = path.join(root, 'dist-electron/shared/electron/backend/telemetry/service.js');
 const original = require(modulePath).Telemetry;
 require(modulePath).Telemetry = class extends original {
  constructor(options) {
   super({...options, origin:'https://synthetic.invalid', enabled:true, now:()=>Date.UTC(2026,9,29)+globalThis.telemetryTime,
    monotonic:()=>globalThis.telemetryTime,
-   fetcher:async (url, init)=>{ globalThis.telemetryPosts.push({url, body:JSON.parse(init.body)}); return new Response('',{status:404}); }});
+   identityProvider:async (installationId,userId)=>grant(installationId,userId),
+   fetcher:async (url, init)=>{
+    if(url.endsWith('/capabilities'))return Response.json({schemaVersion:2,serverTime:Date.UTC(2026,9,29)+globalThis.telemetryTime,versions:[2],anonymous:true,accountAttribution:'event-time-ticket',receipt:'per-event-terminal-rejections',limits:{batchEvents:50,bodyBytes:131072,pendingEvents:2000,eventProofTtlMs:ttl,deliveryTtlMs:ttl}});
+    globalThis.telemetryPosts.push({url, body:JSON.parse(init.body)}); return new Response('',{status:503,headers:{'retry-after':'86400'}}); }});
   globalThis.clientTelemetry = this;
  }
 };
@@ -164,7 +173,11 @@ try {
   assert.ok(localEvent && accountEvent);
   assert.equal(localEvent.installationId, accountEvent.installationId);
   assert.equal(localEvent.userId, undefined);
-  assert.equal(accountEvent.userId, 'a0000000-0000-4000-8000-000000000001');
+  assert.equal(typeof accountEvent.identityRef, 'string');
+  assert.equal(accountEvent.userId, undefined);
+  const encrypted = await readFile(path.join(profile, 'cloud-account', 'telemetry.bin'));
+  assert.equal(encrypted.includes(Buffer.from('identityProof')), false);
+  assert.equal(encrypted.includes(Buffer.from('voxcue-account-server')), false);
   assert.ok(mixed.events.some((e) => e.data.type === 'account_entry' && e.data.method === 'login'));
   const serialized = JSON.stringify(mixed);
   assert.doesNotMatch(
@@ -187,7 +200,7 @@ try {
   assert.equal((await app.evaluate(() => globalThis.telemetryPosts)).length, 0);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS client telemetry: real local/login IPC, chat/import activity, synthetic interview completion, no content leakage, stable installation, restore and persistent old-server backoff',
+    'PASS client telemetry: real local/login IPC, chat/import activity, synthetic interview completion, no content leakage, stable installation, restore and encrypted v2 attribution and persistent transport backoff',
   );
 } finally {
   if (app) await closeUiApp(app);

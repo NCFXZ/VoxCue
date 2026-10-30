@@ -1,5 +1,7 @@
 # VoxCue 0.6.2 → 0.6.3：Windows客户端逐项交接
 
+> 历史0.6.3交接。当前0.6.5已按后续授权适配服务端0.5.3/schema 2，见MACOS_0.6.5_HANDOFF.md和CLIENT_TELEMETRY.md；下面的旧协议/发行/授权文字不作为当前范围。
+
 当前接续边界（2026-10-29）：客户端不涉及服务端的展示、交互、文案及Windows夹具可直接最小修复；上报、认证、同步和回执以已发布Mac 0.6.3为准。协议兼容与匿名输入校验只修独立服务端，不要求已发布客户端改规则，不部署生产。
 
 客户端基线：`8eb42a79fe804531f010749ff46635bf320f5308`（Mac 0.6.2最后修复）。本版本产品源码快照和Mac资产见[发行记录](MACOS_0.6.3_RELEASE.md)，文件级范围见[逐文件审计](CLIENT_0.6.3_FILE_AUDIT.md)。配套[Windows Codex提示词](WINDOWS_0.6.3_CODEX_PROMPT.md)及[服务端接续](SERVER_FOR_CLIENT_0.6.3_HANDOFF.md)。旧版交接只作历史，不恢复已撤回功能。

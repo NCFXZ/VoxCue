@@ -6,6 +6,7 @@ import type {
   CloudUser,
 } from '../../contracts/cloudAccount';
 import { createHash } from 'node:crypto';
+import { boundedJson } from '../boundedJson';
 import {
   validCloudEmail,
   normalizeCloudPassword,
@@ -160,6 +161,37 @@ export class CloudAccountClient {
   }
   snapshot(): CloudAccountState {
     return this.state();
+  }
+  /** Main-process statistics only. Failures must not revoke or refresh a cloud session. */
+  async telemetryIdentity(installationId: string, expectedUserId: string, signal: AbortSignal) {
+    const current = this.current;
+    if (
+      !this.options.origin ||
+      !current ||
+      current.user.id !== expectedUserId ||
+      current.expiresAt <= Date.now()
+    )
+      throw Error('Attribution unavailable');
+    const response = await (this.options.fetcher ?? fetch)(
+      this.options.origin + '/v2/telemetry/identity',
+      {
+        method: 'POST',
+        credentials: 'omit',
+        cache: 'no-store',
+        redirect: 'error',
+        signal: AbortSignal.any([signal, AbortSignal.timeout(8000)]),
+        headers: {
+          'content-type': 'application/json',
+          authorization: 'Bearer ' + current.accessToken,
+        },
+        body: JSON.stringify({ installationId }),
+      },
+    );
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw Error('Attribution unavailable');
+    }
+    return boundedJson(response, 8192);
   }
   isCurrentSession(id: unknown) {
     return !!this.current && this.current.sessionId === id;

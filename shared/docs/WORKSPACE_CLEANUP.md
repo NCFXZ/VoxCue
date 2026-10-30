@@ -1,3 +1,9 @@
+## 2026-10-30 客户端0.6.5清理边界
+
+本轮以已发布Mac0.6.3产品快照c37fa181为交接基线，独立服务端0.5.3和macos树只读。源码引用图逐项核对无静态入边的入口：Renderer main、主进程/preload、knowledge/speech Worker与平台动态适配器都有运行/打包/测试消费者，继续保留；严格未使用声明检查不代替动态入口审计，不按数量删除业务或兼容代码。
+
+清理windows/.cache/installer-ui中的brand.png、frontend.manifest、installer.nsh、VoxCue.Setup.UI.exe四项可重建中间文件；package-installer在使用前通过prepareInstallerUi完整重建。安装/更新三项逐项摘要一致归档至windows/release/0.6.5后，删除release/installer中重复三项及builder-debug.yml。删除前核对精确绝对路径、祖先/后代无重定向和文件占用；逐文件持有允许删除但不允许其他读写的独占句柄后删除，不递归清除未知目录。正式归档、当前构建/验证基线、依赖/锁、模型/索引、固定运行时、签名/凭据/host-id/更新身份、恢复基线和历史跳过目录保护；owner临时捕获在复核后清理，不留工作区图片或报告。
+
 ## 2026-10-29 客户端0.6.3清理边界
 
 逐项核对静态/动态平台、Worker、preload、打包和测试消费者后，删除styles.css中已退役账号布局的cloud-account-actions、cloud-session-list及其子选择器、cloud-account-dialog。组件展示文案集中到公共契约，移除ComponentsPanel重复映射；本地账号设置旧表单切换样式随功能拆分撤除。无静态入边的实际文件均为页面、Worker或平台动态入口，继续保留，不为数量删除业务模块或兼容读取。

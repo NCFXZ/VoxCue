@@ -3899,18 +3899,27 @@ details[open] > summary > .disclosure-chevron {
 }
 .reasoning-heading.is-active,
 .progress-state-label.is-active {
-  background: linear-gradient(110deg, var(--muted) 25%, var(--foreground) 45%, var(--muted) 65%);
-  background-size: 240% 100%;
+  background-color: var(--muted);
+  background-image: linear-gradient(
+    110deg,
+    transparent 40%,
+    var(--foreground) 50%,
+    transparent 60%
+  );
+  background-size: 200% 100%;
+  background-repeat: no-repeat;
   background-clip: text;
   color: transparent;
-  animation: reasoning-title-shine 2.8s linear infinite;
+  /* One 1 second sweep, then a 2.5 second pause; no repeated gradient tiles. */
+  animation: reasoning-title-shine 3.5s linear infinite;
 }
 @keyframes reasoning-title-shine {
-  from {
-    background-position: 160% 0;
+  0% {
+    background-position: 120% 0;
   }
-  to {
-    background-position: -140% 0;
+  28.5714285714%,
+  100% {
+    background-position: -20% 0;
   }
 }
 .reasoning-chevron {
@@ -3939,6 +3948,7 @@ details[open] > summary > .disclosure-chevron {
   padding: 0;
   margin: 12px 0 0;
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
 }
 .response-steps li {

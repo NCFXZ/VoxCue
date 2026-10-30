@@ -555,6 +555,52 @@ try {
     'reasoning-title-shine',
   );
   assert.equal(await latest().locator('.progress-state-label.is-active').count(), 1);
+  await focusUiWindow(app, page);
+  const shine = await latest()
+    .locator('.progress-state-label.is-active')
+    .evaluate(async (node) => {
+      const animation = node
+        .getAnimations()
+        .find((a) => a.animationName === 'reasoning-title-shine');
+      const timing = animation.effect.getTiming(),
+        frames = animation.effect.getKeyframes();
+      const samples = [],
+        began = performance.now();
+      while (performance.now() - began < 8000) {
+        await new Promise(requestAnimationFrame);
+        samples.push({
+          time: Number(animation.currentTime),
+          position: parseFloat(getComputedStyle(node).backgroundPositionX),
+          width: node.getBoundingClientRect().width,
+        });
+      }
+      return {
+        duration: timing.duration,
+        frames,
+        samples,
+        repeat: getComputedStyle(node).backgroundRepeat,
+      };
+    });
+  assert.equal(shine.duration, 3500);
+  assert.equal(shine.repeat, 'no-repeat');
+  assert.ok(Math.abs(shine.frames[1].offset * 3500 - 1000) < 0.01);
+  assert.ok(Math.abs((1 - shine.frames[1].offset) * 3500 - 2500) < 0.01);
+  assert.ok(
+    new Set(shine.samples.map((s) => Math.floor(s.time / 3500))).size >= 3,
+    'Observe two complete loop boundaries',
+  );
+  for (const sample of shine.samples) {
+    const phase = sample.time % 3500;
+    const expected = phase < 1000 ? 120 - (140 * phase) / 1000 : -20;
+    assert.ok(
+      Math.abs(sample.position - expected) < 1.5,
+      'Sweep must progress continuously and hold during the pause',
+    );
+    assert.ok(
+      Math.abs(sample.width - shine.samples[0].width) < 0.1,
+      'Animation cannot change text geometry',
+    );
+  }
   assert.equal(
     await latest()
       .locator('.progress-state-label.is-active')

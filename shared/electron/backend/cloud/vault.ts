@@ -1,12 +1,22 @@
 import { app, safeStorage } from 'electron';
-import { mkdir, readFile, rename, rm, writeFile, stat } from 'node:fs/promises';
+import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { atomicFile } from '../atomicFile';
 import type { CredentialEncryption } from '../auth/storage';
 import type { CloudVault } from './client';
 
 export function createCloudVault(encryption?: CredentialEncryption): CloudVault {
-  const file = path.join(app.getPath('userData'), 'cloud-account', 'session.bin');
+  return createCredentialVault(
+    path.join(app.getPath('userData'), 'cloud-account', 'session.bin'),
+    encryption,
+  );
+}
+
+export function createCredentialVault<T>(
+  file: string,
+  encryption?: CredentialEncryption,
+  limit = 16384,
+) {
   const crypto = encryption ?? {
     async encrypt(value: string) {
       if (!safeStorage.isEncryptionAvailable())
@@ -22,25 +32,18 @@ export function createCloudVault(encryption?: CredentialEncryption): CloudVault 
   return {
     async read() {
       try {
-        if ((await stat(file)).size > 16384) throw Error('Invalid credentials');
+        if ((await stat(file)).size > limit) throw Error('Invalid credentials');
         return JSON.parse(await crypto.decrypt(await readFile(file))) as unknown;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
         throw error;
       }
     },
-    async write(value) {
+    async write(value: T) {
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-      const temporary = file + '.' + randomUUID() + '.tmp';
-      try {
-        await writeFile(temporary, await crypto.encrypt(JSON.stringify(value)), {
-          mode: 0o600,
-          flag: 'wx',
-        });
-        await rename(temporary, file);
-      } finally {
-        await rm(temporary, { force: true });
-      }
+      const encrypted = await crypto.encrypt(JSON.stringify(value));
+      if (encrypted.byteLength > limit) throw Error('Invalid credentials');
+      await atomicFile(file, encrypted);
     },
     async clear() {
       await rm(file, { force: true });
