@@ -6,6 +6,7 @@
 
 - Mac基线为已发布0.6.3产品源码快照`c37fa181156617c58bc3eb4a509334057d4a38f3`，来源见[Mac 0.6.3发行索引](MACOS_0.6.3_RELEASE.md)。不要使用0.6.2的8eb42a7作为此次变化基线。
 - 接续前Windows客户端HEAD为`11e5f089cba0fe2c3eda351c329ad4d03c266864`；后续0.6.5提交需核对真实远端，保留Mac本机及远端后续工作，禁止reset、clean、强推。
+- 0.6.5产品源码为[`71948317e625c3e464413c7ff424de800c75853a`](https://github.com/NCFXZ/VoxCue/commit/71948317e625c3e464413c7ff424de800c75853a)，已正常推送私有main。main可能另有后续交付文档提交，核对包含该产品提交并保留后续工作，不回退或覆盖它们。Windows公开发行状态仍以PROGRESS为准。
 - 客户端版本唯一来源为`shared/package.json=0.6.5`。Mac本机运行同步脚本只生成根/Mac，Windows全树只读；Windows不会代写macos树或复制锁文件。
 - 独立服务端固定0.5.3、`3bceb615dbba900f669322c301fc4b5b473dfb15`，统计schema 2；其源码、配置、依赖、数据库及生产运行均禁止修改。`shared/server`旧参考继续只读，不纳入客户端提交。
 - 完整阅读独立服务端`API.md`、`CLIENT_TELEMETRY.md`、本仓库[客户端统计](CLIENT_TELEMETRY.md)及本页；不得仅依赖摘要。服务端0.5.3的账户/备份仍为v1，统计只支持v2。
@@ -92,7 +93,7 @@ Mac打包/提交/发行须以该环境用户当前明确授权为准；本交接
 
 ## 逐文件审计入口
 
-以真实0.6.5源码提交对基线执行`git diff --name-status c37fa181156617c58bc3eb4a509334057d4a38f3 <0.6.5提交>`，再逐文件读diff；新增文件也必须审计。协议实现涉及contracts/telemetry.ts、backend/telemetry四模块、cloud/client与vault、atomicFile、boundedJson及main装配；界面涉及MarkdownContent、markdown服务、SyncBadge及styles。下面清单包含相对Mac基线的已提交后续变化及当前新增文件；发行提交前再次核对。每个文件均须读真实diff。
+以真实0.6.5源码提交对基线执行`git diff --name-status c37fa181156617c58bc3eb4a509334057d4a38f3 71948317e625c3e464413c7ff424de800c75853a`，再逐文件读diff；新增文件也必须审计。协议实现涉及contracts/telemetry.ts、backend/telemetry四模块、cloud/client与vault、atomicFile、boundedJson及main装配；界面涉及MarkdownContent、markdown服务、SyncBadge及styles。下面清单包含相对Mac基线的已提交后续变化及当前新增文件；发行提交前再次核对。每个文件均须读真实diff。
 
 <!-- file-audit:start -->
 

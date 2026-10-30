@@ -5,7 +5,7 @@
 ```text
 接续VoxCue客户端0.6.5。先完整读取AGENTS.md、PROGRESS.md、shared/docs/MACOS_0.6.5_HANDOFF.md、CLIENT_TELEMETRY.md、MACOS_0.6.3_RELEASE.md，以及独立VoxCue-server 0.5.3的API.md、CLIENT_TELEMETRY.md；不得只读摘要。只修改客户端，不得修改服务端源码、测试、配置、依赖、数据库、部署或生产状态。
 
-Mac比较基线是已发布0.6.3产品快照c37fa181156617c58bc3eb4a509334057d4a38f3；不要误用0.6.2基线8eb42a7。先核对本机HEAD/远端/未提交工作，保留全部Mac用户和后续远端工作，禁止reset/clean/强推。获取0.6.5代码后，先逐文件读取真实diff，再逐条处理交接U001–U058；不能因Windows通过而跳过Mac。
+Mac比较基线是已发布0.6.3产品快照c37fa181156617c58bc3eb4a509334057d4a38f3；不要误用0.6.2基线8eb42a7。0.6.5产品源码提交为71948317e625c3e464413c7ff424de800c75853a；核对main包含该提交并保留后续交付文档提交，不回退覆盖。先核对本机HEAD/远端/未提交工作，保留全部Mac用户和后续远端工作，禁止reset/clean/强推。获取0.6.5代码后，先逐文件读取真实diff，再逐条处理交接U001–U058；不能因Windows通过而跳过Mac。
 
 shared/package.json=0.6.5是唯一版本源；Mac同步只生成根/Mac，windows全树只读。共享页面/状态/协议保持一份，平台差异通过既有适配器。沿用SDK1.0.21、Codex0.164.0、模型文件/hash/推理逻辑、索引/RAG v7、全部代码签名、凭据助手、host-id和Ed25519身份。用户已明确批准Vite6.4.4→6.4.5；Mac本机仅同步该补丁并核对其他锁定依赖版本不变，其他升级/轮换发现实质原因先报告，不能自行替换。
 
