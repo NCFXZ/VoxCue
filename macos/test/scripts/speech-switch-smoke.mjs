@@ -4,6 +4,8 @@ import { mkdir, writeFile, readFile, realpath, access } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { prepareSpeechFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
+import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 
 const input = process.argv.slice(2);
 const fixtureOption = input.find((value) => value.startsWith('--fixture='));
@@ -17,6 +19,15 @@ const { packagesFor } = workspace.platformRequire(
   path.join(root, 'dist-electron/shared/electron/backend/components/catalog.js'),
 );
 const packages = packagesFor('darwin', 'arm64');
+const releaseDesktop = holdDesktopAwake();
+const desktopGuard = setInterval(() => {
+  try { requireUnlockedDesktop(); }
+  catch (error) {
+    console.error(error.message);
+    process.kill(process.pid, 'SIGTERM');
+  }
+}, 2000);
+desktopGuard.unref();
 let models = path.join(testRoot, 'models');
 if (fixtureOption) {
   const fixture = JSON.parse(await readFile(fixtureOption.slice('--fixture='.length), 'utf8'));
@@ -69,13 +80,7 @@ try {
   }
   const paths = componentPaths(models, packages);
   console.log('Verified fixed public Paraformer and original Qwen/Aligner models.');
-  await run('/usr/bin/say', [
-    '-r',
-    '165',
-    '-o',
-    path.join(testRoot, 'voice.aiff'),
-    'The team improved the project and reviewed the results.',
-  ]);
+  const audio = await prepareSpeechFixtures();
   await run('/usr/bin/afconvert', [
     '-f',
     'WAVE',
@@ -83,7 +88,7 @@ try {
     'LEI16@44100',
     '-c',
     '1',
-    path.join(testRoot, 'voice.aiff'),
+    path.join(audio, 'english.wav'),
     path.join(testRoot, 'voice.wav'),
   ]);
   const processFile = path.join(testRoot, 'process.cjs');
@@ -173,7 +178,7 @@ app.whenReady().then(async()=>{
 });
 `,
   );
-  await run(workspace.platformRequire('electron'), [testRoot, '--no-sandbox']);
+  await run(workspace.platformRequire('electron'), [testRoot, '--use-mock-keychain']);
   const releasedFiles = [
     path.join(paths.qwenModels, 'asr/model.safetensors'),
     path.join(paths.qwenModels, 'aligner/model.gguf'),
@@ -194,4 +199,6 @@ app.whenReady().then(async()=>{
   console.log('PASS: original model files have no remaining process handles.');
 } finally {
   service.dispose();
+  clearInterval(desktopGuard);
+  releaseDesktop();
 }

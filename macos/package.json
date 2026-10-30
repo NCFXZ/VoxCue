@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.6.3",
+  "version": "0.6.5",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -101,7 +101,7 @@
     "prettier": "^3.6.0",
     "tailwindcss": "^4.0.0",
     "typescript": "^5.9.0",
-    "vite": "^6.3.0",
+    "vite": "6.4.5",
     "vitest": "4.1.12",
     "@electron/packager": "20.3.0"
   },

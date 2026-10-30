@@ -41,16 +41,23 @@ try {
     .first()
     .click();
   await page.getByLabel('知识库名称', { exact: true }).fill('原件管理回归');
-  await page.getByRole('button', { name: '保存', exact: true }).click();
+  await page.mouse.move(0, 0);
+  await page.getByRole('button', { name: '保存', exact: true }).press('Enter');
   let base = page.getByRole('dialog', { name: '原件管理回归', exact: true });
   await base.waitFor();
   await page.mouse.move(0, 0);
   const cloud = base.locator('.sync-indicator-button').first();
+  assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
+  assert.equal(await base.locator('.sync-popover').count(), 0);
   await cloud.focus(); // Dialog autofocus/programmatic focus must not disclose the popover.
   await page.waitForTimeout(200);
   assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
   assert.equal(await base.locator('.sync-popover').count(), 0);
   await cloud.press('Enter');
+  await base.locator('.sync-popover').waitFor();
+  await cloud.press('Escape');
+  assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
+  await cloud.press('Space');
   await base.locator('.sync-popover').waitFor();
   await cloud.press('Escape');
   assert.equal(await cloud.getAttribute('aria-expanded'), 'false');

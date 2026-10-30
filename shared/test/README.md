@@ -1,4 +1,8 @@
-当前Windows 0.6.5范围以`PROGRESS.md`和`shared/docs/MACOS_0.6.5_HANDOFF.md`为准（Mac0.6.3为比较基线）；下方0.6.2及更早章节中的“当前/本轮”均属历史。本轮新增`client-update-ui-smoke.mjs`覆盖动画、拖入卡片与反馈，`windows/test/scripts/telemetry-queue-native-smoke.mjs`覆盖真实排他文件占用；普通UI/正式包启动前隔离统计，独立服务端联调显式指定自有loopback。当前追加客户端适配独立服务端0.5.3/schema 2，禁止修改服务端；客户端目标0.6.5，当前完整矩阵/长稳/发行授权见PROGRESS；独立服务端0.5.3仅作只读合成HTTP参考。历史已发布安装包不因源码更新自动适配。
+当前客户端0.6.5接续范围以`PROGRESS.md`和`shared/docs/MACOS_0.6.5_HANDOFF.md`为准（Mac0.6.3为比较基线）；下方0.6.2及更早章节中的“当前/本轮”均属历史。本轮新增`client-update-ui-smoke.mjs`覆盖动画、拖入卡片与反馈，`windows/test/scripts/telemetry-queue-native-smoke.mjs`覆盖真实排他文件占用；普通UI/正式包启动前隔离统计，独立服务端联调显式指定自有loopback。当前追加客户端适配独立服务端0.5.3/schema 2，禁止修改服务端；客户端目标0.6.5，当前完整矩阵/长稳/发行授权见PROGRESS；独立服务端0.5.3仅作只读合成HTTP参考。历史已发布安装包不因源码更新自动适配。
+
+Mac接续另运行`macos/test/scripts/telemetry-queue-native-smoke.mjs`验证POSIX原子替换、真实写入拒绝与并发合并；`cloud-native-vault-smoke.mjs`使用显式临时Keychain核对账户和统计凭据的原生加密/重启/容量边界。`ui-refinement-matrix.mjs`纳入0.6.5扫光、知识库焦点、本地账户与共享界面五档缩放；普通Mac入口导入main前使用mock Keychain并拒绝正式助手，正式包启动前只移除owner临时私有副本中凭据/AI运行时的可执行权限，关闭后恢复，签名字节与Chromium沙箱保持。真实助手只用于明确隔离的原生专项，不将普通UI替身算作原生加密成绩。
+
+`macos/test/scripts/speech-switch-smoke.mjs --download`只下载现有目录/hash指定的Paraformer、Qwen和Aligner，在owner临时目录使用固定公开音频验证真实识别器切换；采集端口为合成输入，保留沙箱，不采样物理设备。`shimmer-smoke.mjs`对浅深色正常/最小窗口的真实截断标题连续观察至少两轮1秒扫过及2.5秒停顿，其他长度分别逐帧观察完整扫过。
 
 # 0.6.3本地账户、独立导出与统计
 

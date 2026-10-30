@@ -6,11 +6,13 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 
 // Exercise the unchanged JS encryption port + cloud vault in signed Electron,
 // using the existing test-only native source's explicit temporary Keychain.
 // The canonical production helper is never launched or modified.
 assert.equal(process.platform, 'darwin');
+const releaseDesktop = holdDesktopAwake();
 const signing = await loadDevelopmentSigning();
 const canonical = path.join(
   workspace.platformRoot,
@@ -70,9 +72,20 @@ compile(managerSource, manager);
 compile(path.join(workspace.platformRoot, 'test/fixtures/credential-probe.mm'), helper);
 const profile = path.join(testRoot, 'profile');
 await mkdir(profile);
+let ownsKeychain = false;
+const cleanupKeychain = () => {
+  if (!ownsKeychain) return;
+  run(manager, ['delete', keychain]);
+  ownsKeychain = false;
+};
+for (const signal of ['SIGINT', 'SIGTERM'])
+  process.prependOnceListener(signal, cleanupKeychain);
+requireUnlockedDesktop();
 run(manager, ['create', keychain]);
+ownsKeychain = true;
 try {
   for (const phase of ['write', 'read']) {
+    requireUnlockedDesktop();
     const entry = path.join(testRoot, phase + '.cjs');
     await writeFile(
       entry,
@@ -90,7 +103,7 @@ cp.spawn=function(executable,args,options){
 app.whenReady().then(async()=>{
  assert.equal(process.versions.electron,'44.10.0');
  const {createCredentialEncryption}=require(root+'/dist-electron/macos/electron/credentials.js');
- const {createCloudVault}=require(root+'/dist-electron/shared/electron/backend/cloud/vault.js');
+ const {createCloudVault,createCredentialVault}=require(root+'/dist-electron/shared/electron/backend/cloud/vault.js');
  const {CloudAccountClient}=require(root+'/dist-electron/shared/electron/backend/cloud/client.js');
  const vault=createCloudVault(createCredentialEncryption(helper)),file=path.join(app.getPath('userData'),'cloud-account/session.bin');
  const user={id:'11111111-1111-4111-8111-111111111111',email:'native@example.test',createdAt:1};
@@ -102,6 +115,27 @@ app.whenReady().then(async()=>{
  assert.equal(result.ok,true,result.error);assert.deepEqual(result.state.user,user);
  const original=await fs.readFile(file);assert.equal(original.subarray(0,3).toString(),'v10');assert.ok(!original.includes(Buffer.from(user.email)));assert.ok(!original.includes(Buffer.from(credentials.accessToken)));assert.equal((await fs.stat(file)).mode&0o777,0o600);
  assert.deepEqual((await vault.read()).credentials.user,user);assert.ok(nativeCalls>=2);
+ const {Telemetry}=require(root+'/dist-electron/shared/electron/backend/telemetry/service.js');
+ const telemetryFile=path.join(app.getPath('userData'),'cloud-account/telemetry.bin');
+ const proofVault=createCredentialVault(telemetryFile,createCredentialEncryption(helper),262144);
+ const ttl=30*86400000,issuedAt=Math.floor(Date.now()/1000)*1000,eventUntil=issuedAt+ttl,deliverUntil=eventUntil+ttl;
+ const part=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
+ const telemetry=new Telemetry({root:app.getPath('userData'),version:require(root+'/package.json').version,platform:'macos',enabled:true,origin:'https://native.example.test',proofVault,
+  identityProvider:async(installationId,userId)=>({schemaVersion:2,issuedAt,eventUntil,deliverUntil,identityProof:part({alg:'HS256',typ:'voxcue-telemetry+jwt'})+'.'+part({iss:'voxcue-account-server',aud:'voxcue:telemetry-attribution:v2',sub:userId,installationId,iat:issuedAt/1000,nbf:issuedAt/1000-300,exp:deliverUntil/1000,eventUntil})+'.'+'a'.repeat(43)}),
+  fetcher:async()=>Response.json({schemaVersion:2,serverTime:Date.now(),versions:[2],anonymous:true,accountAttribution:'event-time-ticket',receipt:'per-event-terminal-rejections',limits:{batchEvents:50,bodyBytes:131072,pendingEvents:2000,eventProofTtlMs:ttl,deliveryTtlMs:ttl}})});
+ await telemetry.settle();
+ if(phase==='write'){telemetry.setIdentity({accountMode:'account',userId:user.id});telemetry.activity('history_view');}
+ else{telemetry.setIdentity({accountMode:'local'});telemetry.activity('knowledge_view');}
+ await telemetry.settle();await telemetry.close();
+ const queue=JSON.parse(await fs.readFile(path.join(app.getPath('userData'),'telemetry-queue.json'),'utf8'));
+ assert.ok(queue.events.some(event=>event.accountMode==='account'&&event.identityRef));
+ assert.ok(!/identityProof|userId|accessToken/.test(JSON.stringify(queue)));
+ const proofBytes=await fs.readFile(telemetryFile),proofs=await proofVault.read();
+ assert.equal(proofBytes.subarray(0,3).toString(),'v10');assert.equal((await fs.stat(telemetryFile)).mode&0o777,0o600);
+ assert.ok(!proofBytes.includes(Buffer.from('identityProof')));assert.equal(proofs.tickets.length,1);
+ assert.equal(proofs.tickets[0].userId,user.id);assert.equal(proofs.tickets[0].id,queue.events.find(event=>event.accountMode==='account').identityRef);
+ await assert.rejects(proofVault.write({padding:'x'.repeat(262144)}));assert.deepEqual(await fs.readFile(telemetryFile),proofBytes);
+ console.log('PASS: native telemetry proof '+phase+', encrypted opaque reference, 256KiB rejection preserves bytes'+(phase==='read'?', restart decrypts old account attribution after local-mode switch':''));
  if(phase==='read'){
   const operate=mode=>{const r=cp.spawnSync(manager,[mode,keychain],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);};
   operate('lock');try{
@@ -119,14 +153,28 @@ app.whenReady().then(async()=>{
       stdio: 'inherit',
     });
     const timer = setTimeout(() => child.kill('SIGTERM'), 60000);
+    const desktopGuard = setInterval(() => {
+      try { requireUnlockedDesktop(); }
+      catch (error) {
+        console.error(error.message);
+        child.kill('SIGTERM');
+      }
+    }, 2000);
+    desktopGuard.unref();
     const code = await new Promise((resolve, reject) => {
       child.once('exit', resolve);
       child.once('error', reject);
-    }).finally(() => clearTimeout(timer));
+    }).finally(() => {
+      clearTimeout(timer);
+      clearInterval(desktopGuard);
+    });
     assert.equal(code, 0, phase);
   }
 } finally {
-  run(manager, ['delete', keychain]);
+  cleanupKeychain();
+  for (const signal of ['SIGINT', 'SIGTERM'])
+    process.removeListener(signal, cleanupKeychain);
+  releaseDesktop();
 }
 assert.equal(keychainList(), previousList);
 assert.equal(

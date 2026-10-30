@@ -57,7 +57,7 @@ try {
   client = new Telemetry({
     root,
     version: require('./package.json').version,
-    platform: 'windows',
+    platform: workspace.platformName === 'macos' ? 'macos' : 'windows',
     enabled: true,
     origin: f.origin,
     now: () => f.now(),

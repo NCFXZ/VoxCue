@@ -102,6 +102,7 @@ if (cacheSource)
     componentLocation,
   );
 let application = await launch();
+let installation;
 try {
   let page = await application.firstWindow();
   page.setDefaultTimeout(15000);
@@ -201,7 +202,7 @@ try {
         });
         return false;
       } catch (error) {
-        return String(error).includes('本地语音模型');
+        return String(error).includes('轻量语音识别尚未就绪');
       }
     });
     assert.equal(blocked, true);
@@ -230,6 +231,16 @@ try {
     await rag.getByRole('button', { name: '下载', exact: true }).click();
     try {
       await assertDownloadButton(page, rag.locator('.download-button'));
+    } catch (error) {
+      console.error('Download control at failure', await rag.locator('.download-button').evaluate(node => ({
+        className: node.className,
+        hovered: node.matches(':hover'),
+        focused: document.hasFocus(),
+        active: document.activeElement?.outerHTML,
+        bounds: node.getBoundingClientRect().toJSON(),
+        cancel: getComputedStyle(node.querySelector('.download-button-cancel')).visibility,
+      })));
+      throw error;
     } finally {
       await application.evaluate(() => globalThis.releaseComponentDownload());
     }
@@ -455,6 +466,10 @@ try {
     'PASS: downloaded cache drives real offline E5/LanceDB searches and Paraformer Worker synthetic silence.',
   );
   await closeUiApp(application);
+  installation = JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'));
+  const initialQueue = JSON.parse(await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'));
+  assert.equal(initialQueue.attempts, 0, 'Ordinary packaged fixtures must never upload synthetic statistics');
+  assert.ok(initialQueue.events.some(event => event.data.type === 'app_ready'));
   await mkdir(path.join(testRoot, 'upgraded'));
   activeBundle = path.join(testRoot, 'upgraded/VoxCue.app');
   await rename(bundle, activeBundle);
@@ -480,6 +495,14 @@ try {
 } finally {
   await closeUiApp(application).catch(() => application.close());
 }
+assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8')), installation);
+const finalQueue = JSON.parse(await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'));
+assert.equal(finalQueue.attempts, 0);
+assert.ok(finalQueue.events.every(event => event.platform === 'macos' &&
+  event.version === require('./package.json').version && event.installationId === installation.installationId));
+assert.ok(new Set(finalQueue.events.filter(event => event.data.type === 'app_ready').map(event => event.runId)).size >= 2);
+assert.doesNotMatch(JSON.stringify(finalQueue), /identityProof|userId|accessToken/);
+console.log('PASS: formal Mac package persists private v2 events, retains installation across relocation/restart and makes zero upload attempts');
 if (cacheSource)
   for (const pkg of cachedPackages)
     await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);

@@ -26,7 +26,7 @@ VoxCue 免费提供，主账号使用邮箱注册、登录和重置密码；Chat
 
 0.6.2普通账号注册/重置密码在Mac与Windows同步接受8–128个Unicode码点，两处提示均为“不少于8个字符”。服务端0.5.2已支持8–14字符注册/重置；旧密码登录保持兼容。服务端管理员仍要求15–128字符；备份默认100 MB，0.5.2允许所有者按用户调整，资料豁免及全局空间保护保持。
 
-当前工作区共享版本源为 **0.6.5**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。根/Windows配置已生成0.6.5，Mac配置留待本机同步；固定依赖/锁及Electron44.10.0保持；每次同步仅生成根及当前平台配置，另一平台全树只读。当前验证入口与人工边界见[测试说明](shared/test/README.md)，实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+当前工作区共享版本源为 **0.6.5**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。根及两平台配置现为0.6.5；固定依赖/锁及Electron44.10.0保持；每次同步仅生成根及当前平台配置，另一平台全树只读。当前验证入口与人工边界见[测试说明](shared/test/README.md)，实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
 Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 

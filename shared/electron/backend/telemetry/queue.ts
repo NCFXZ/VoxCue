@@ -52,8 +52,12 @@ export class TelemetryQueue {
         'dropped',
         'nextAttemptAt',
         'retryFailures',
-      ] as const)
-        if (Number.isSafeInteger(saved[key]) && saved[key] >= 0) this[key] = saved[key];
+      ] as const) {
+        if (saved[key] === undefined) continue;
+        if (!Number.isSafeInteger(saved[key]) || saved[key] < 0)
+          throw Error('Invalid telemetry counter');
+        this[key] = saved[key];
+      }
       this.dropped = Math.min(Number.MAX_SAFE_INTEGER, this.dropped + discarded);
       this.failures = Math.min(this.failures, this.attempts);
       this.healthPending = saved.healthPending === true || discarded > 0;
@@ -62,6 +66,10 @@ export class TelemetryQueue {
           saved.schemaVersion === 1 ? 'legacy_unverifiable' : 'invalid_queue_event';
       const active = convert(saved.active);
       if (active?.data.type === 'interview_progress') this.active = active;
+      else if (saved.active !== undefined) {
+        this.drop();
+        this.lastFailure = saved.schemaVersion === 1 ? 'legacy_unverifiable' : 'invalid_queue_event';
+      }
       this.nextAttemptAt = Math.min(this.nextAttemptAt, now + 86400000);
       this.prune(now);
     } catch (error) {

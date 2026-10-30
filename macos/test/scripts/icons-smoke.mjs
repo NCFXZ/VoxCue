@@ -284,7 +284,7 @@ try {
   }, galleryFile);
   const gallery = await galleryOpened;
   await gallery.screenshot({ fullPage: true });
-  await captureRequested(gallery, 'mac-sf-gallery');
+  await captureRequested(gallery, 'mac-sf-gallery', { fullPage: true });
   await gallery.close();
   assert.deepEqual(errors, []);
   await console.log(JSON.stringify({ status: 'passed', checks, assets, errors }, null, 2));

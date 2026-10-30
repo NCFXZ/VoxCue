@@ -2,7 +2,7 @@
 
 当前工作区已适配独立服务端0.5.3的schema 2协议；客户端版本唯一来源为shared/package.json=0.6.5，Windows0.6.5已[公开发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.5)。已发布Mac0.6.3安装包仍是旧v1实现，不因源码变更自动获得适配；历史实现与交接查Git。本轮禁止修改服务端。
 
-Windows/Mac共用backend/telemetry、契约、主进程装配和界面。安全存储复用既有平台加密适配器；Windows使用Electron safeStorage，Mac使用既有凭据助手，不改助手/host-id/签名身份。本机macos树只读，共用源码变更需要Mac本机专项验证。正式安装版启用；开发运行与普通GUI夹具停用，显式统计夹具仅使用自有loopback或离线合成传输。
+Windows/Mac共用backend/telemetry、契约、主进程装配和界面。安全存储复用既有平台加密适配器；Windows使用Electron safeStorage，Mac使用既有凭据助手，不改助手/host-id/签名身份；共用源码变更需分别在两平台本机验证。正式安装版启用；开发运行与普通GUI夹具停用，显式统计夹具仅使用自有loopback或离线合成传输。
 
 权威契约：[服务端统计接口](https://github.com/NCFXZ/VoxCue-server/blob/main/CLIENT_TELEMETRY.md)、[全部服务端接口](https://github.com/NCFXZ/VoxCue-server/blob/main/API.md)。账户/同步沿用现有v1业务API；统计仅用v2，不回退旧上报协议。
 

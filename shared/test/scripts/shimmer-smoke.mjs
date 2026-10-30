@@ -92,38 +92,41 @@ try {
       for (const [index, title] of titles.entries()) {
         await app.evaluate((_, title) => globalThis.shimmerFixture.update(title), title);
         await heading.filter({ hasText: title }).waitFor();
-        const measured = await heading.evaluate(async (node) => {
-          await new Promise(requestAnimationFrame);
-          const animation = node
-            .getAnimations()
-            .find((a) => a.animationName === 'reasoning-title-shine');
-          if (!animation) throw Error('Missing real title animation');
-          const timing = animation.effect.getTiming(),
-            keyframes = animation.effect.getKeyframes();
-          // Restart the real CSS animation; observe real frames without advancing a mock clock.
-          animation.currentTime = 0;
-          await animation.ready;
-          const samples = [],
-            start = performance.now();
-          while (performance.now() - start < 1150) {
+        const measured = await heading.evaluate(
+          async (node, fullCycles) => {
             await new Promise(requestAnimationFrame);
-            samples.push({
-              time: Number(animation.currentTime),
-              position: parseFloat(getComputedStyle(node).backgroundPositionX),
+            const animation = node
+              .getAnimations()
+              .find((a) => a.animationName === 'reasoning-title-shine');
+            if (!animation) throw Error('Missing real title animation');
+            const timing = animation.effect.getTiming(),
+              keyframes = animation.effect.getKeyframes();
+            // Restart the real CSS animation; observe real frames without advancing a mock clock.
+            animation.currentTime = 0;
+            await animation.ready;
+            const samples = [],
+              start = performance.now();
+            while (performance.now() - start < (fullCycles ? 7100 : 1150)) {
+              await new Promise(requestAnimationFrame);
+              samples.push({
+                time: Number(animation.currentTime),
+                position: parseFloat(getComputedStyle(node).backgroundPositionX),
+                width: node.getBoundingClientRect().width,
+              });
+            }
+            return {
+              cycle: timing.duration,
+              sweep: timing.duration * keyframes[1].offset,
+              repeat: getComputedStyle(node).backgroundRepeat,
+              samples,
               width: node.getBoundingClientRect().width,
-            });
-          }
-          return {
-            cycle: timing.duration,
-            sweep: timing.duration * keyframes[1].offset,
-            repeat: getComputedStyle(node).backgroundRepeat,
-            samples,
-            width: node.getBoundingClientRect().width,
-            container: node.closest('.response-progress').getBoundingClientRect().width,
-            scroll: node.scrollWidth,
-            client: node.clientWidth,
-          };
-        });
+              container: node.closest('.response-progress').getBoundingClientRect().width,
+              scroll: node.scrollWidth,
+              client: node.clientWidth,
+            };
+          },
+          index === titles.length - 1,
+        );
         assert.equal(measured.cycle, 3500);
         assert.ok(
           Math.abs(measured.sweep - 1000) < 0.01,
@@ -139,7 +142,8 @@ try {
           'Observe the real sweep finish',
         );
         for (const sample of measured.samples) {
-          const expected = sample.time < 1000 ? 120 - (140 * sample.time) / 1000 : -20;
+          const phase = sample.time % measured.cycle;
+          const expected = phase < 1000 ? 120 - (140 * phase) / 1000 : -20;
           assert.ok(
             Math.abs(sample.position - expected) < 1.5,
             'No stall or reverse motion before the tail',
@@ -148,6 +152,19 @@ try {
             Math.abs(sample.width - measured.width) < 0.1,
             'Sweep cannot change text geometry',
           );
+        }
+        if (index === titles.length - 1) {
+          assert.ok(measured.samples.at(-1).time >= 7000, 'Observe two complete real cycles');
+          for (const cycle of [0, 1]) {
+            const pause = measured.samples.filter(
+              (sample) => sample.time >= cycle * 3500 + 1000 && sample.time < (cycle + 1) * 3500,
+            );
+            assert.ok(
+              pause.at(-1).time - pause[0].time >= 2400,
+              'Observe the full 2.5-second pause in each real cycle',
+            );
+            assert.ok(pause.every((sample) => Math.abs(sample.position + 20) < 1.5));
+          }
         }
         results.push({
           width,
@@ -159,6 +176,7 @@ try {
           container: measured.container,
           clipped: measured.scroll > measured.client,
           sweepMs: Math.round(measured.sweep),
+          observedCycles: Math.floor(measured.samples.at(-1).time / measured.cycle),
         });
         if (index === 0 || index === titles.length - 1)
           await captureRequested(page, `shimmer-${width}-${dark ? 'dark' : 'light'}-${index}`);

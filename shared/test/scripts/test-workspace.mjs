@@ -118,6 +118,10 @@ export const electron = {
     options={...options,env:{...(options.env??process.env),VOXCUE_ACCOUNT_API:options.env?.VOXCUE_ACCOUNT_API??''}};
     const probe=process.platform==='win32' ? (await import(pathToFileURL(path.join(workspace.platformRoot,'test/scripts/window-probe.mjs')).href)).probe : undefined;
     if(probe && !probe('desktop').interactive) throw Error('GUI verification requires an unlocked input desktop');
+    const desktop = process.platform === 'darwin'
+      ? await import(pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/desktop-session.mjs')).href)
+      : undefined;
+    desktop?.requireUnlockedDesktop();
     const profile = options.env?.COPILOT_TEST_USER_DATA;
     const isolatedArgument = options.args?.some((value) =>
       path.resolve(value).startsWith(testRoot + path.sep),
@@ -204,6 +208,85 @@ require(${JSON.stringify(entry)});
         releaseCredentials=await holdExclusiveFiles(files);
       }
     }
+    if (desktop && options.executablePath?.endsWith("/Contents/MacOS/VoxCue")) {
+      const developmentLauncher =
+        options.executablePath ===
+        path.join(workspace.platformRoot, "VoxCue.app/Contents/MacOS/VoxCue");
+      if (developmentLauncher) {
+        const { offlineElectronEntry } =
+          await import("./offline-electron-entry.mjs");
+        options = {
+          ...options,
+          args: [
+            await offlineElectronEntry(undefined, { deferToReady: true }),
+            ...(options.args ?? []),
+            "--use-mock-keychain",
+          ],
+        };
+      } else {
+        const resources = path.resolve(
+          path.dirname(options.executablePath),
+          "../Resources",
+        );
+        const unpacked = path.join(resources, "app.asar.unpacked/node_modules");
+        const files = [
+          path.join(resources, "native/VoxCue.Credentials"),
+          path.join(
+            unpacked,
+            "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+          ),
+          path.join(
+            unpacked,
+            "@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime",
+          ),
+        ].map((file) => {
+          const actual = fs.realpathSync(file),
+            stat = fs.statSync(actual);
+          if (
+            !actual.startsWith(testRoot + path.sep) ||
+            !stat.isFile() ||
+            stat.uid !== process.getuid() ||
+            stat.nlink !== 1
+          )
+            throw Error(
+              "Mac execution guard requires private copies in this owned temporary run",
+            );
+          return { file: actual, mode: stat.mode & 0o777 };
+        });
+        let restored = false;
+        releaseCredentials = async () => {
+          if (restored) return;
+          restored = true;
+          for (const { file, mode } of files) {
+            try {
+              fs.chmodSync(file, mode);
+            } catch (error) {
+              if (error.code !== "ENOENT") throw error;
+            }
+          }
+        };
+        try {
+          for (const { file, mode } of files) {
+            fs.chmodSync(file, mode & ~0o111);
+            try {
+              fs.accessSync(file, fs.constants.X_OK);
+            } catch (error) {
+              if (error.code === "EACCES") continue;
+              throw error;
+            }
+            throw Error("Mac packaged credential executable remains runnable");
+          }
+        } catch (error) {
+          await releaseCredentials();
+          throw error;
+        }
+        // Only executable modes of owned copies change; signed bytes and Chromium sandbox stay intact.
+        options = {
+          ...options,
+          args: [...(options.args ?? []), "--use-mock-keychain"],
+        };
+      }
+    }
     let app;
     try {app = await workspace.platformRequire('playwright')._electron.launch({
       ...(process.platform === 'darwin' && fs.existsSync(executable)
@@ -218,9 +301,12 @@ require(${JSON.stringify(entry)});
       finally { await releaseCredentials(); }
     };
     trackTestProcess(app.process());
-    if(probe) {
+    if(probe || desktop) {
       const guard=setInterval(()=>{
-        try {if(!probe('desktop').interactive) throw Error('Desktop locked; GUI verification stopped');}
+        try {
+          desktop?.requireUnlockedDesktop();
+          if(probe && !probe('desktop').interactive) throw Error('Desktop locked; GUI verification stopped');
+        }
         catch(error){console.error(error.message);app.process().kill('SIGTERM');}
       },2000);
       guard.unref();

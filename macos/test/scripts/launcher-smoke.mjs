@@ -8,6 +8,7 @@ import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/launcher-native-')));
@@ -45,7 +46,11 @@ try {
     });
     BrowserWindow.getAllWindows()[0].minimize();
   });
-  const second = spawnTestProcess(executable, [], { env, stdio: 'ignore' });
+  const second = spawnTestProcess(
+    executable,
+    [await offlineElectronEntry(undefined, { deferToReady: true }), '--use-mock-keychain'],
+    { env, stdio: 'ignore' },
+  );
   const code = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       second.kill();

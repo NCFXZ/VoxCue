@@ -669,6 +669,16 @@ try {
       const remove = popup.getByRole('button', { name: /从云端删除/ });
       assert.ok((await popup.boundingBox()).width < 225, 'The sync popup should fit its contents.');
       assert.ok((await remove.locator('.confirm-delete-idle').innerText()).includes('从云端删除'));
+      await remove.focus();
+      await main.mouse.move(0, 0);
+      await main.waitForTimeout(200);
+      assert.equal(await popup.isVisible(), true, 'Internal keyboard focus keeps the popup open');
+      await remove.press('Escape');
+      await popup.waitFor({ state: 'detached' });
+      assert.equal(await badge.evaluate(node => node === document.activeElement), true);
+      assert.equal(await badge.getAttribute('aria-expanded'), 'false');
+      await badge.press('Space');
+      await popup.waitFor();
       await remove.click();
       await popup.getByRole('button', { name: /确认删除/ }).click();
       await detail

@@ -75,6 +75,7 @@ const mac = [
   'launcher',
   'native-build',
   'user-data',
+  'telemetry-queue-native',
   'updates-native',
   'components',
   'dmg',
@@ -189,10 +190,21 @@ try {
       () => child.kill('SIGTERM'),
       name === 'speech-soak' ? 900000 : name === 'components' ? 600000 : 240000,
     );
+    const desktopGuard = desktop && setInterval(() => {
+      try { desktop.requireUnlockedDesktop(); }
+      catch (error) {
+        console.error(error.message);
+        child.kill('SIGTERM');
+      }
+    }, 2000);
+    desktopGuard?.unref();
     const code = await new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('exit', resolve);
-    }).finally(() => clearTimeout(timer));
+    }).finally(() => {
+      clearTimeout(timer);
+      clearInterval(desktopGuard);
+    });
     const outcome = { name, passed: code === 0, ms: Math.round(performance.now() - started) };
     outcomes.push(outcome);
     console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${name} (${outcome.ms}ms)`);

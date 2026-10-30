@@ -2,10 +2,11 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { requireUnlockedDesktop, holdDesktopAwake } from './desktop-session.mjs';
 
-// UI fixtures install synthetic accounts, components, audio and captures. They
-// need no model weights. Uses the production shared UI; GUI stays serial.
+// Synthetic accounts/audio/captures and fixed public models stay in this owned run.
+// Uses the production shared UI; GUI stays serial.
 const outcomes = [];
 assert.ok(
   process.argv
@@ -22,6 +23,7 @@ if (screenshots) assert.ok(path.isAbsolute(screenshots), 'Screenshot directory m
 const scales = requestedScale ? [requestedScale] : ['1', '1.25', '1.5', '1.75', '2'];
 assert.ok(scales.every((scale) => ['1', '1.25', '1.5', '1.75', '2'].includes(scale)));
 const releaseDesktop = holdDesktopAwake();
+const models = await prepareModelFixtures();
 for (const scale of scales) {
   for (const name of [
     'ui-alignment',
@@ -36,6 +38,17 @@ for (const scale of scales) {
     'free-service',
     'account-erasure',
     'management-scrollbars',
+    'client-update-ui',
+    'shimmer',
+    'knowledge',
+    'local-mode',
+    'telemetry',
+    'settings',
+    'profile-ui',
+    'history-branding',
+    'login',
+    'chat-response',
+    'chat-progress',
   ]) {
     requireUnlockedDesktop();
     const accountArguments = {
@@ -59,6 +72,9 @@ for (const scale of scales) {
         env: {
           ...process.env,
           VOXCUE_TEST_SCALE_FACTOR: scale,
+          VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+          VOXCUE_TEST_RAG_MODEL: models.ragModel,
+          VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
         },
         stdio: ['ignore', 'pipe', 'pipe'],
       },

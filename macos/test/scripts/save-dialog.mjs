@@ -58,7 +58,7 @@ export async function nativeSaveDialog(app, { cancel, target, overwrite = false 
     throw Error('Native save sheet did not reach ' + key + ': ' + JSON.stringify(state));
   };
   const state = await until('nativeSaveDialog');
-  assert.equal(state.title, '保存账号资料');
+  assert.equal(state.title, '导出资料');
   if (cancel) {
     await call('cancel');
     console.log('PASS owned Mac NSSavePanel cancel');
