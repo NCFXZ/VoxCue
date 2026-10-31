@@ -6,7 +6,7 @@
 
 - 已发布Mac 0.6.5产品源码为`2607b5a837b1d8eaa97768f5514cd24ff91e4184`，来源见[0.6.5发行索引](MACOS_0.6.5_RELEASE.md)。本轮工作起点为`6657cd2fb59e6c0e16463050bbbc550808ca0c16`，其后的差异才是本次0.6.6范围；此前Mac 0.6.5的队列持久化和凭据隔离修复不重复算作新功能。
 - 唯一版本源为`shared/package.json=0.6.6`。Windows只同步根和Windows清单；`macos/`没有由Windows代写。Mac拉取后运行`pnpm sync:workspace`，只同步根/Mac，核对Windows全树字节不变，不复制Windows锁文件。
-- Windows 0.6.6已单独发布并设为Latest，正式三项及源码来源见[Windows发行索引](WINDOWS_0.6.6_RELEASE.md)。Mac客户端仍按完整平台资产选择既有0.6.5，Mac0.6.6须本机验收后另行发行。
+- Windows 0.6.6已发布并设为Latest，见[Windows发行索引](WINDOWS_0.6.6_RELEASE.md)；Mac本机接续后已将0.6.6正式三项补入同一发行，来源见[Mac发行索引](MACOS_0.6.6_RELEASE.md)。本页保留逐项接续要求，测试结果仅输出终端/对话。
 - 运行时依赖、SDK、模型、RAG索引格式和用户数据兼容保持原样；构建工具仅作C052–C055的定向安全修复与无用依赖裁剪。不迁移真实资料，不轮换代码签名、凭据助手、host-id或Ed25519更新身份。
 - 独立账号服务固定0.5.3 / `3bceb615dbba900f669322c301fc4b5b473dfb15`，只读引用；旧`shared/server`参考不修改、不提交。客户端源码上传不等同安装包发行或服务部署。
 - Mac必须使用本机登录且解锁的控制台串行验证。只使用owner合成账户、临时资料和固定公开音频/模型；不访问真实账户/Keychain内容，不采样物理麦克风或系统音频，不改变系统辅助功能、锁屏或隐私设置。

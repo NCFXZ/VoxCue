@@ -20,7 +20,7 @@ VoxCue 免费提供，主账号使用邮箱注册、登录和重置密码；Chat
 
 **0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本轮清理、完整复验及Mac包补充见[Mac0.6.0发行记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
 
-**当前公开发行：Windows 0.6.6 / Mac 0.6.5**：[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.6/VoxCue-Setup-0.6.6-x64.exe)、[0.6.6发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.6)、[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.5/VoxCue-0.6.5-arm64.dmg)。来源及正式资产元数据见[Windows索引](shared/docs/WINDOWS_0.6.6_RELEASE.md)和[Mac索引](shared/docs/MACOS_0.6.5_RELEASE.md)。Latest为0.6.6，客户端仍按本平台完整稳定资产选择；Mac支持Apple Silicon/macOS14.2及以上，继续选择0.6.5。旧Windows/Mac发行及模型资产保持。
+**当前公开发行：Mac / Windows 0.6.6**：[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.6/VoxCue-0.6.6-arm64.dmg)、[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.6/VoxCue-Setup-0.6.6-x64.exe)、[0.6.6发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.6)。来源及正式资产元数据见[Mac索引](shared/docs/MACOS_0.6.6_RELEASE.md)和[Windows索引](shared/docs/WINDOWS_0.6.6_RELEASE.md)。Latest为0.6.6，客户端仍按本平台完整稳定资产选择；Mac支持Apple Silicon/macOS14.2及以上。旧发行和模型资产保持，共享胶囊自然高度修复留Windows后续本机复核。
 
 **0.6.0 → 0.6.1交接**：[Windows40条改动与12条完整回归要求](shared/docs/WINDOWS_0.6.1_HANDOFF.md)、[Windows Codex逐条测试提示词](shared/docs/WINDOWS_0.6.1_CODEX_PROMPT.md)、[客户端29文件清单](shared/docs/CLIENT_0.6.1_HANDOFF.md)。Mac成绩不能替代Windows本机验收。
 
