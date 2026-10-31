@@ -20,7 +20,7 @@ VoxCue 免费提供，主账号使用邮箱注册、登录和重置密码；Chat
 
 **0.5.11 → 0.6.0 交接**：[客户端140项详细更新与Mac逐条验收](shared/docs/MACOS_0.6.0_HANDOFF.md)、[全部文件及差异块审计](shared/docs/CLIENT_0.6.0_FILE_AUDIT.md)、[服务端0.5.1独立只读说明](shared/docs/SERVER_0.5.1_REFERENCE.md)、[可直接交给Mac Codex的提示词](shared/docs/MACOS_0.6.0_CODEX_PROMPT.md)。Mac只适配和修复客户端，不能修改服务端；本机逐项证据见[Mac0.6.0验证记录](shared/docs/MACOS_0.6.0_VERIFICATION.md)和[文件/差异块复核](shared/docs/MACOS_0.6.0_FILE_REVIEW.md)。本轮清理、完整复验及Mac包补充见[Mac0.6.0发行记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
 
-**当前公开发行：Mac / Windows 0.6.5**：[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.5/VoxCue-0.6.5-arm64.dmg)、[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.5/VoxCue-Setup-0.6.5-x64.exe)、[0.6.5发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.5)。Mac支持Apple Silicon/macOS14.2及以上，发行来源及三项摘要见[Mac索引](shared/docs/MACOS_0.6.5_RELEASE.md)。Latest为0.6.5，平台更新按完整稳定资产选择；既有Windows三项、历史Mac和模型资产保持。本轮共享队列修复仍需Windows本机接续，未替换既有Windows包。Windows0.6.1未单独发行；历史17个旧发行曾按用户要求恢复公开。历史Mac0.6.0发行事实见[原记录](shared/docs/MACOS_0.6.0_RELEASE.md)。
+**当前公开发行：Windows 0.6.6 / Mac 0.6.5**：[Windows安装器](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.6/VoxCue-Setup-0.6.6-x64.exe)、[0.6.6发行页面](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.6)、[Mac arm64 DMG](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.5/VoxCue-0.6.5-arm64.dmg)。来源及正式资产元数据见[Windows索引](shared/docs/WINDOWS_0.6.6_RELEASE.md)和[Mac索引](shared/docs/MACOS_0.6.5_RELEASE.md)。Latest为0.6.6，客户端仍按本平台完整稳定资产选择；Mac支持Apple Silicon/macOS14.2及以上，继续选择0.6.5。旧Windows/Mac发行及模型资产保持。
 
 **0.6.0 → 0.6.1交接**：[Windows40条改动与12条完整回归要求](shared/docs/WINDOWS_0.6.1_HANDOFF.md)、[Windows Codex逐条测试提示词](shared/docs/WINDOWS_0.6.1_CODEX_PROMPT.md)、[客户端29文件清单](shared/docs/CLIENT_0.6.1_HANDOFF.md)。Mac成绩不能替代Windows本机验收。
 
@@ -28,9 +28,9 @@ VoxCue 免费提供，主账号使用邮箱注册、登录和重置密码；Chat
 
 0.6.2普通账号注册/重置密码在Mac与Windows同步接受8–128个Unicode码点，两处提示均为“不少于8个字符”。服务端0.5.2已支持8–14字符注册/重置；旧密码登录保持兼容。服务端管理员仍要求15–128字符；备份默认100 MB，0.5.2允许所有者按用户调整，资料豁免及全局空间保护保持。
 
-当前工作区共享版本源为 **0.6.5**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。根及两平台配置现为0.6.5；固定依赖/锁及Electron44.10.0保持；每次同步仅生成根及当前平台配置，另一平台全树只读。当前验证入口与人工边界见[测试说明](shared/test/README.md)，实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
+当前工作区共享版本源为 **0.6.6**，本轮客户端整理与验收见[进度](PROGRESS.md)。Mac 与 Windows 共用 React 界面、布局和业务；Mac 使用 SF Symbols 图标及系统侧栏毛玻璃，其他内部材质统一为聊天输入框的网页模糊。Mac 支持 Apple Silicon/macOS 14.2 及以上，不再包含 Liquid Glass 或 AppKit 内容控件。根及Windows配置为0.6.6，Mac生成配置与构建锁由Mac本机接续；运行时依赖及Electron44.10.0保持，构建链定向安全修复见0.6.6交接C052–C056。每次同步仅生成根及当前平台配置，另一平台全树只读。当前验证入口与人工边界见[测试说明](shared/test/README.md)，实现见[共用桌面界面](shared/docs/PLATFORM_UI.md)。
 
-Windows侧栏、面试背景和文字气泡三项透明度按最新要求沿用0.5.9的60%档映射；Mac及其余新增玻璃效果保持。Windows本机逐项检查和剩余人工范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
+Windows侧栏保持原有固定材质档位；面试背景和文字气泡共用百分比设置，材质曲线上限分别为70和35，顶部胶囊与对话气泡一致。预览与实窗的材质及字号共用，Mac原生快速截图和本机验收按0.6.6交接接续；历史Windows本机范围见[0.5.10验收账本](shared/docs/WINDOWS_0.5.10_VERIFICATION.md)。
 
 历史0.5.11曾作为两平台Latest发布，随后隐藏，本轮已按用户要求恢复公开。它修复ChatGPT启动/登录恢复耗时及Mac加载动画，相关改动已保留在0.6.0源码。历史独立证据见 [Mac M01–M12验收](shared/docs/MACOS_0.5.11_VERIFICATION.md) 和 [Windows验收](shared/docs/WINDOWS_0.5.11_VERIFICATION.md)，其中当时的Latest/下载状态按历史理解。0.5.10继续保持撤回、非公开状态；当前按平台筛选完整公开发行的机制不变。
 
