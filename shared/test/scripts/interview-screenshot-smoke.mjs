@@ -1,21 +1,46 @@
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { verifyContinuousCorners, cornerShapeNames } from './continuous-corners.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import workspace from '../../scripts/workspace.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(
   path.resolve(path.join(testRoot, 'test/results/interview-screenshot-ui-')),
 );
 const screenshotDirectory = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+assert.ok(
+  process.argv.slice(2).every((arg) => arg.startsWith('--screenshots=')),
+  'Native capture uses screenshot-performance.mjs with owned full-screen covers',
+);
 if (screenshotDirectory) await mkdir(path.resolve(screenshotDirectory), { recursive: true });
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: ['.'], env });
+let entry = '.';
+if (process.platform === 'win32') {
+  const fixture = path.join(testRoot, 'screenshot-platform-fixture.cjs');
+  await writeFile(
+    fixture,
+    `
+const {desktopCapturer} = require('electron');
+const platform = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/windows/electron/platform.js'))}).windows;
+platform.captureScreen = async (_window, signal) => {
+  signal.throwIfAborted();
+  const sources = await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:3840,height:2160},fetchWindowIcons:false});
+  signal.throwIfAborted();
+  return sources[0].thumbnail;
+};
+require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js'))});
+`,
+  );
+  entry = await offlineElectronEntry(fixture);
+}
+const app = await electron.launch({ args: [entry], env });
 const errors = [],
   checks = [];
 try {
@@ -99,6 +124,17 @@ try {
   assert.equal(brandBounds.width, 24);
   assert.equal(brandBounds.height, 24);
   const logoSource = await sidebarLogo.getAttribute('src');
+  await app.evaluate(({ desktopCapturer }) => {
+    const original = desktopCapturer.getSources.bind(desktopCapturer);
+    globalThis.screenshotPreparation = 0;
+    desktopCapturer.getSources = (options) => {
+      if (options.thumbnailSize?.width === 0 && options.thumbnailSize?.height === 0) {
+        globalThis.screenshotPreparation++;
+        return Promise.resolve([]);
+      }
+      return original(options);
+    };
+  });
   await main.getByRole('button', { name: '开始面试', exact: true }).click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -109,6 +145,11 @@ try {
   ]);
   floating.setDefaultTimeout(20000);
   assert.equal(
+    await app.evaluate(() => globalThis.screenshotPreparation),
+    process.platform === 'win32' ? 0 : 1,
+    'Only the Electron fallback prepares screen metadata; native capture needs no warmup',
+  );
+  assert.equal(
     await floating.locator('.floating-toolbar .app-logo').getAttribute('src'),
     logoSource,
   );
@@ -118,63 +159,6 @@ try {
     document.documentElement.classList.contains('web-materials'),
   );
   await floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true }).click();
-  let nativeCapture;
-  if (process.argv.includes('--native-capture')) {
-    nativeCapture = await app.evaluate(
-      async ({ app, BrowserWindow, nativeImage, screen, desktopCapturer, systemPreferences }) => {
-        const require = process
-          .getBuiltinModule('module')
-          .createRequire(app.getAppPath() + '/package.json');
-        const { captureInterviewScreen } = require(
-          app.getAppPath() + '/dist-electron/shared/electron/screenshot.js',
-        );
-        const window = BrowserWindow.getAllWindows().find((win) =>
-          win.webContents.getURL().endsWith('#interview'),
-        );
-        let file;
-        try {
-          file = await captureInterviewScreen(
-            window,
-            process.platform,
-            new AbortController().signal,
-          );
-        } catch (error) {
-          const sources = await desktopCapturer.getSources({
-            types: ['screen'],
-            thumbnailSize: { width: 160, height: 100 },
-          });
-          return {
-            error: String(error),
-            permission: systemPreferences.getMediaAccessStatus('screen'),
-            displays: screen
-              .getAllDisplays()
-              .map((d) => ({ id: d.id, size: d.size, scale: d.scaleFactor })),
-            sources: sources.map((s) => ({
-              id: s.id,
-              displayId: s.display_id,
-              empty: s.thumbnail.isEmpty(),
-              size: s.thumbnail.getSize(),
-            })),
-          };
-        }
-        const image = nativeImage.createFromBuffer(Buffer.from(file.bytes));
-        // Return metadata only: actual desktop pixels are never saved or sent to a provider.
-        return {
-          name: file.name,
-          bytes: file.bytes.byteLength,
-          size: image.getSize(),
-          empty: image.isEmpty(),
-        };
-      },
-    );
-    assert.equal(nativeCapture.error, undefined, JSON.stringify(nativeCapture));
-    assert.equal(nativeCapture.empty, false);
-    assert.ok(nativeCapture.bytes > 0 && nativeCapture.bytes <= 8 * 1024 * 1024);
-    assert.ok(nativeCapture.size.width > 100 && nativeCapture.size.height > 100);
-    checks.push(
-      'actual native display capture returned a bounded image; pixels stayed local and were discarded',
-    );
-  }
   await app.evaluate(
     ({ desktopCapturer, screen, nativeImage, BrowserWindow, systemPreferences }) => {
       const mediaStatus = systemPreferences.getMediaAccessStatus.bind(systemPreferences);
@@ -900,8 +884,7 @@ try {
         captures: await captured(),
         liveAccount: false,
         nativeAudio: false,
-        realScreenCapture: !!nativeCapture,
-        nativeCapture,
+        realScreenCapture: false,
         screenshotPixelsSaved: true,
         archivedImages: originals.length,
       },

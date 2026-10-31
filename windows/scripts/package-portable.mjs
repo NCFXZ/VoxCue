@@ -192,6 +192,10 @@ const paths = await packager({
         path.resolve('native/bin/VoxCue.Audio.exe'),
         path.join(buildPath, 'resources/native/VoxCue.Audio.exe'),
       );
+      await cp(
+        path.resolve('native/bin/VoxCue.Screenshot.exe'),
+        path.join(buildPath, 'resources/native/VoxCue.Screenshot.exe'),
+      );
     },
   ],
 });

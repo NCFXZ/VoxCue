@@ -110,17 +110,22 @@ const nativeNames = [
   'components-native',
   'presentation-native',
   'rag-core',
+  'screenshot-performance',
 ];
 const selectedNative = windowsOnly && suites.length > 1 ? suites.slice(1) : nativeNames;
 if (windowsOnly)
   for (const name of selectedNative)
     assert.ok(nativeNames.includes(name), 'Unknown native suite: ' + name);
 const commands = windowsOnly
-  ? selectedNative.map((name) => [
-      name === 'rag-core'
-        ? '../shared/test/scripts/rag-core-smoke.mjs'
-        : 'test/scripts/' + name + '-smoke.mjs',
-    ])
+  ? selectedNative.map((name) =>
+      name === 'screenshot-performance'
+        ? ['../shared/test/scripts/screenshot-performance.mjs', '--native', '--platform']
+        : [
+            name === 'rag-core'
+              ? '../shared/test/scripts/rag-core-smoke.mjs'
+              : 'test/scripts/' + name + '-smoke.mjs',
+          ],
+    )
   : [['../shared/test/scripts/functional-suite.mjs', ...suites]];
 const models = windowsOnly ? await prepareModelFixtures() : null;
 let failed = false;
@@ -155,10 +160,19 @@ try {
     // The shared runner bounds each suite, including a 10-minute soak.
     // Its outer watchdog must allow the complete serial matrix to finish.
     const nativeLimit = args[0].endsWith('/login-actions-native-smoke.mjs') ? 360000 : 180000;
-    const timer = setTimeout(() => {
-      console.error('Suite watchdog expired: '+args[0]+' ('+(windowsOnly?nativeLimit:4*60*60*1000)+'ms)');
-      child.kill();
-    }, windowsOnly ? nativeLimit : 4 * 60 * 60 * 1000);
+    const timer = setTimeout(
+      () => {
+        console.error(
+          'Suite watchdog expired: ' +
+            args[0] +
+            ' (' +
+            (windowsOnly ? nativeLimit : 4 * 60 * 60 * 1000) +
+            'ms)',
+        );
+        child.kill();
+      },
+      windowsOnly ? nativeLimit : 4 * 60 * 60 * 1000,
+    );
     const code = await new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('exit', resolve);

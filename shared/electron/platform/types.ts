@@ -1,4 +1,4 @@
-import type { BrowserWindowConstructorOptions } from 'electron';
+import type { BrowserWindow, BrowserWindowConstructorOptions, NativeImage } from 'electron';
 import type { PresentationCapabilities } from '../contracts/presentation';
 
 /** Native policy only. Business state, IPC and renderer code stay outside this layer. */
@@ -16,6 +16,7 @@ export interface DesktopPlatform {
   readonly systemAudioSettingsUrl?: string;
   readonly screenCaptureSettingsUrl?: string;
   readonly screenPermissionFile?: string;
+  readonly captureScreen?: (window: BrowserWindow, signal: AbortSignal) => Promise<NativeImage>;
   readonly appUserModelId?: string;
   readonly quitOnAllWindowsClosed: boolean;
   readonly captureProtectionSupported: boolean;

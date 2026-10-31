@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { applyInterviewAppearance } from './interviewAppearance';
+import { applyInterviewAppearance, subscribeInterviewTransparency } from './interviewAppearance';
 import {
   frostedProfileAt,
   readMaterialTransparency,
@@ -40,6 +40,8 @@ export function applyFrostedAppearance() {
 
 export function useFrostedAppearance() {
   useEffect(() => {
+    const unsubscribe = subscribeInterviewTransparency(applyInterviewAppearance);
     applyFrostedAppearance();
+    return unsubscribe;
   }, []);
 }

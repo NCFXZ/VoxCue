@@ -5,6 +5,11 @@ import {
   useInterviewFontSize,
 } from '../interviewTypography';
 import { FontDecrease, FontIncrease } from './icons';
+import {
+  interviewTransparency,
+  saveInterviewTransparency,
+  useInterviewTransparency,
+} from '../interviewAppearance';
 
 function DisplaySlider({
   title,
@@ -73,6 +78,7 @@ function DisplaySlider({
 }
 export function InterviewDisplayControls() {
   const size = useInterviewFontSize();
+  const transparency = useInterviewTransparency();
   const [error, setError] = useState('');
   const save = (operation: () => void) => {
     try {
@@ -83,7 +89,7 @@ export function InterviewDisplayControls() {
     }
   };
   return (
-    <div className="interview-display-controls single-setting">
+    <div className="interview-display-controls">
       <DisplaySlider
         title="字体大小"
         name="面试字体大小"
@@ -94,6 +100,17 @@ export function InterviewDisplayControls() {
         startIcon={<FontDecrease size={22} />}
         endIcon={<FontIncrease size={22} />}
         onChange={(value) => save(() => saveInterviewFontSize(value))}
+      />
+      <DisplaySlider
+        title="背景透明度"
+        name="面试背景透明度"
+        value={transparency}
+        minimum={interviewTransparency.minimum}
+        maximum={interviewTransparency.maximum}
+        unit="%"
+        startIcon={<span className="display-opacity-icon is-opaque" />}
+        endIcon={<span className="display-opacity-icon" />}
+        onChange={(value) => save(() => saveInterviewTransparency(value))}
       />
       {error && (
         <p className="danger-text" role="alert">

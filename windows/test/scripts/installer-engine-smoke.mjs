@@ -17,6 +17,7 @@ import { createRequire } from 'node:module';
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
 import config from '../../electron-builder.config.cjs';
+import { probe as desktopProbe } from './window-probe.mjs';
 
 assert.equal(process.platform, 'win32');
 const previousVersion = '0.5.1';
@@ -111,6 +112,11 @@ process.prependListener('SIGINT', cleanupOnExit);
 process.prependListener('SIGTERM', cleanupOnExit);
 process.prependListener('exit', cleanupOnExit);
 function inspect(pid, operation = 'inspect', argument = '') {
+  assert.equal(
+    desktopProbe('desktop').interactive,
+    true,
+    'Installer UI requires an unlocked owner console',
+  );
   const result = spawnSync(probe, [String(pid), operation, argument], {
     encoding: 'utf8',
     windowsHide: true,

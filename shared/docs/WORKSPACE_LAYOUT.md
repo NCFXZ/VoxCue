@@ -29,7 +29,7 @@ VoxCue/
     tsconfig*.json / vite.config.mjs / vitest.config.mjs / components.json
   windows/
     electron/                平台策略、WASAPI、原生展示与屏幕能力
-    native/                  C# 源码与 bin/VoxCue.Audio.exe
+    native/                  C# 源码与 bin/VoxCue.Audio.exe、VoxCue.Screenshot.exe
     public/voxcue.ico         Windows 专属图标
     scripts/                 原生构建、便携与 NSIS 打包
     test/                    Windows 专属测试/固定夹具；旧结果只读暂留，不新增

@@ -118,10 +118,10 @@ try {
   await captureRequested(floating, 'interview-compact-composer');
   const panelChrome = await material(floating.locator('.floating-composer'));
   for (const heading of await floating.locator('.floating-panel > header').all())
-    assert.deepEqual(await material(heading, '::before'), panelChrome);
+    assert.deepEqual(await material(heading), { fill: 'rgba(0, 0, 0, 0)', filter: 'none' });
   assert.equal(panelChrome.filter, chatComposer.filter);
   for (const heading of await floating.locator('.floating-panel > header').all())
-    assert.equal(await heading.evaluate((e) => getComputedStyle(e, '::before').opacity), '0');
+    assert.equal(await heading.evaluate((e) => getComputedStyle(e, '::before').content), 'none');
 
   assert.deepEqual(
     await floating.locator('.floating-composer').evaluate((e) => ({
@@ -141,9 +141,9 @@ try {
   );
   await click(floating.getByRole('button', { name: '关闭截图保护', exact: true }));
   await floating.locator('.floating-capture-notice').waitFor();
-  assert.deepEqual(
-    await material(floating.locator('.floating-capture-notice')),
-    await material(floating.locator('.floating-toolbar')),
+  assert.equal(
+    (await material(floating.locator('.floating-capture-notice'))).filter,
+    chatComposer.filter,
   );
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('合成滚动验证');
   await click(floating.getByRole('button', { name: '发送面试问题', exact: true }));
@@ -158,29 +158,34 @@ try {
     );
     const toolbarMaterial = await material(floating.locator('.floating-toolbar'));
     const bubbleMaterial = await material(floating.locator('.answer-bubble'));
-    const toolbarLayers = await floating.locator('.floating-toolbar').evaluate((node) => {
-      const probe = document.createElement('span');
-      probe.style.backgroundColor = 'var(--web-material-fill)';
-      node.append(probe);
-      const fill = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return {
-        image: getComputedStyle(node).backgroundImage,
-        panel: getComputedStyle(document.querySelector('.floating-answer')).backgroundColor,
-        fill,
-      };
-    });
-    assert.equal(toolbarMaterial.fill, toolbarLayers.panel);
+    assert.deepEqual(toolbarMaterial, bubbleMaterial, 'Capsule and bubbles share one material');
     assert.equal(
-      toolbarLayers.image,
-      `linear-gradient(${toolbarLayers.fill}, ${toolbarLayers.fill}), none`,
+      await floating
+        .locator('.floating-toolbar')
+        .evaluate((node) => getComputedStyle(node).backgroundImage),
+      'none',
     );
     assert.equal(toolbarMaterial.filter, chatComposer.filter);
     const notice = floating.locator('.floating-capture-notice');
-    assert.deepEqual(await material(notice), toolbarMaterial);
+    const noticeLayers = await notice.evaluate((node) => {
+      const resolve = (value) => {
+        const probe = document.createElement('span');
+        probe.style.backgroundColor = value;
+        node.append(probe);
+        const color = getComputedStyle(probe).backgroundColor;
+        probe.remove();
+        return color;
+      };
+      return {
+        fill: resolve('rgb(var(--frosted-panel-tint) / var(--interview-chrome-panel-opacity))'),
+        overlay: resolve('var(--web-material-fill)'),
+        image: getComputedStyle(node).backgroundImage,
+      };
+    });
+    assert.equal((await material(notice)).fill, noticeLayers.fill);
     assert.equal(
-      await notice.evaluate((node) => getComputedStyle(node).backgroundImage),
-      toolbarLayers.image,
+      noticeLayers.image,
+      `linear-gradient(${noticeLayers.overlay}, ${noticeLayers.overlay}), none`,
     );
     assert.equal(
       await notice.evaluate((node) => getComputedStyle(node).borderTopColor),
@@ -188,24 +193,16 @@ try {
     );
     const composerMaterial = await material(floating.locator('.floating-composer'));
     assert.equal(composerMaterial.filter, chatComposer.filter);
-    const windows = await floating.evaluate(() => window.desktop.platform === 'windows');
-    if (windows) {
-      const expected = await floating.locator('.answer-bubble').evaluate((node, dark) => {
-        const probe = document.createElement('span');
-        probe.style.backgroundColor = `color-mix(in srgb, var(--surface) ${dark ? 92.8 : 89.92}%, transparent)`;
-        node.append(probe);
-        const color = getComputedStyle(probe).backgroundColor;
-        probe.remove();
-        return color;
-      }, dark);
-      assert.equal(
-        bubbleMaterial.fill,
-        expected,
-        'Only the Windows text bubble opacity uses its 0.5.9 curve',
-      );
-    }
-    if (dark || windows) assert.notEqual(composerMaterial.fill, bubbleMaterial.fill);
-    else assert.equal(composerMaterial.fill, bubbleMaterial.fill);
+    const expected = await floating.locator('.answer-bubble').evaluate((node, dark) => {
+      const probe = document.createElement('span');
+      probe.style.backgroundColor = `color-mix(in srgb, var(--surface) ${dark ? 81.2 : 76.4}%, transparent)`;
+      node.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return color;
+    }, dark);
+    assert.equal(bubbleMaterial.fill, expected, 'Both platforms use the shared 35% bubble curve');
+    assert.notEqual(composerMaterial.fill, bubbleMaterial.fill);
   }
   await floating.evaluate(
     (value) => document.documentElement.classList.toggle('dark', value),
@@ -235,7 +232,7 @@ try {
   assert.ok(Math.abs(geometry.panelBottom - geometry.scrollBottom) <= 1);
   assert.ok(
     geometry.mask.includes('linear-gradient'),
-    'Scroll content fades only at the bottom edge',
+    'Scroll content fades at the top and bottom edges',
   );
 
   await answerScroll.evaluate((scroll) => {
@@ -244,22 +241,18 @@ try {
     const header = scroll.parentElement.querySelector(':scope > header').getBoundingClientRect();
     scroll.scrollTop = first.top - header.bottom + 12;
   });
-  await floating.waitForFunction(() => {
-    const opacity = Number(
-      getComputedStyle(document.querySelector('.floating-answer > header'), '::before').opacity,
-    );
-    return opacity > 0.4 && opacity < 0.6;
+  assert.deepEqual(await material(floating.locator('.floating-answer > header')), {
+    fill: 'rgba(0, 0, 0, 0)',
+    filter: 'none',
   });
   await captureRequested(floating, 'interview-header-partial-overlap');
   await answerScroll.evaluate((e) => {
     e.scrollTop = 100;
   });
-  await floating.waitForFunction(
-    () =>
-      document
-        .querySelector('.floating-answer')
-        .style.getPropertyValue('--floating-header-opacity') === '1',
-  );
+  assert.deepEqual(await material(floating.locator('.floating-answer > header')), {
+    fill: 'rgba(0, 0, 0, 0)',
+    filter: 'none',
+  });
   assert.deepEqual(
     await material(floating.locator('.floating-answer > .follow-latest')),
     chatComposer,
@@ -286,17 +279,18 @@ try {
       const rect = control.getBoundingClientRect(),
         marker = document.createElement('span');
       marker.dataset.chromeSentinel = 'true';
-      marker.style.cssText = `position:absolute;left:${rect.x + rect.width / 2 - origin.x - 30}px;top:${rect.y + rect.height / 2 - origin.y + scroll.scrollTop - 30}px;width:60px;height:60px;background:repeating-conic-gradient(white 0% 25%,black 0% 50%) 0 0/8px 8px;`;
+      const height = control.matches('header') ? 160 : 60;
+      marker.style.cssText = `position:absolute;left:${rect.x + rect.width / 2 - origin.x - 30}px;top:${rect.y + rect.height / 2 - origin.y + scroll.scrollTop - height / 2}px;width:60px;height:${height}px;background:repeating-conic-gradient(white 0% 25%,black 0% 50%) 0 0/8px 8px;`;
       scroll.append(marker);
     }
   });
-  const captureControl = async (index) => {
+  const captureControl = async (index, offsetY = 0) => {
     const box = await controls[index].boundingBox();
     return floating.screenshot({
       animations: 'disabled',
       clip: {
         x: box.x + box.width / 2 - 12,
-        y: box.y + box.height / 2 - 12,
+        y: box.y + box.height / 2 - 12 + offsetY,
         width: 24,
         height: 24,
       },
@@ -319,12 +313,17 @@ try {
       return sum / ((width - 1) * (height - 1) * 6);
     }, buffer.toString('base64'));
   const blurred = [];
+  const solidBackdrop = await floating.addStyleTag({
+    content: '.floating-answer { background: #30434a !important; }',
+  });
   for (let i = 0; i < controls.length; i++) blurred.push(await captureControl(i));
+  const rampOffset = (await controls[0].boundingBox()).height / 2 + 18;
+  const fadedRamp = await captureControl(0, rampOffset);
   const noWebBlur = await floating.addStyleTag({
     content:
-      '.floating-composer, .floating-answer > .follow-latest, .floating-panel > header::before { backdrop-filter: none !important; }',
+      '.floating-composer, .floating-answer > .follow-latest { backdrop-filter: none !important; }',
   });
-  for (let i = 0; i < controls.length; i++) {
+  for (let i = 1; i < controls.length; i++) {
     const sharp = await captureControl(i);
     const before = await edgeEnergy(sharp),
       after = await edgeEnergy(blurred[i]);
@@ -334,6 +333,23 @@ try {
     );
   }
   await noWebBlur.evaluate((e) => e.remove());
+  const noMask = await floating.addStyleTag({
+    content: '.floating-answer > .floating-scroll { mask-image: none !important; }',
+  });
+  const unmaskedEnergy = await edgeEnergy(await captureControl(0));
+  const fadedEnergy = await edgeEnergy(blurred[0]);
+  assert.ok(
+    unmaskedEnergy > 2 && fadedEnergy < unmaskedEnergy * 0.15,
+    `Header content must fade out without a backplate: ${fadedEnergy}/${unmaskedEnergy}`,
+  );
+  const fullRampEnergy = await edgeEnergy(await captureControl(0, rampOffset));
+  const rampEnergy = await edgeEnergy(fadedRamp);
+  assert.ok(
+    fullRampEnergy > 2 && rampEnergy > fullRampEnergy * 0.2 && rampEnergy < fullRampEnergy * 0.8,
+    `Content 18px below header must be midway through the 36px fade: ${rampEnergy}/${fullRampEnergy}`,
+  );
+  await noMask.evaluate((e) => e.remove());
+  await solidBackdrop.evaluate((e) => e.remove());
   await captureRequested(floating, 'interview-chrome-checkerboard');
   await floating
     .locator('[data-chrome-sentinel]')
@@ -431,7 +447,7 @@ try {
   await floating.evaluate(() => {
     document.documentElement.dataset.frostedTransparency = '100';
   });
-  assert.deepEqual(await material(heading, '::before'), panelChrome);
+  assert.deepEqual(await material(heading), { fill: 'rgba(0, 0, 0, 0)', filter: 'none' });
   await settle(floating);
   assert.equal(
     await floating.evaluate(
@@ -546,7 +562,7 @@ try {
   assert.equal(endFrames.at(-1).width, endFrames.at(-1).height);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: shared chat/interview materials, overlay headers, composer/arrow styles, full-height scrolling and final-line clearance, resize preserves reading position, equal toolbar insets in both states.',
+    'PASS: capsule/bubble material parity, unchanged notices, transparent panel headers, rendered 36px top fade, composer blur, full-height scrolling, final-line clearance, reading position and toolbar insets.',
   );
 } finally {
   await closeUiApp(app);

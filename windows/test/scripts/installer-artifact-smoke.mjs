@@ -104,6 +104,7 @@ for (const file of [
   'resources/app-update.yml',
   'resources/voxcue-components.json',
   'resources/native/VoxCue.Audio.exe',
+  'resources/native/VoxCue.Screenshot.exe',
 ]) {
   const hash = createHash('sha256');
   let bytes = 0;

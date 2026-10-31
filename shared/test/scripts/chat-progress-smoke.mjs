@@ -282,11 +282,11 @@ try {
     await page.getByRole('button', { name: '发送消息', exact: true }).click();
   };
   const completed = () => page.getByRole('button', { name: '发送消息', exact: true }).waitFor();
-  const capture = async (name, target = page) => {
+  const capture = async (name, target = page, animations = 'disabled') => {
     if (screenshotDirectory)
       await target.screenshot({
         path: path.join(path.resolve(screenshotDirectory), name + '.png'),
-        animations: 'disabled',
+        animations,
       });
   };
   await input().waitFor();
@@ -555,6 +555,56 @@ try {
     'reasoning-title-shine',
   );
   assert.equal(await latest().locator('.progress-state-label.is-active').count(), 1);
+  const activeLabel = latest().locator('.progress-state-label.is-active');
+  for (const theme of ['light', 'dark']) {
+    await page.evaluate(
+      (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
+      theme,
+    );
+    const style = await activeLabel.evaluate((node) => {
+      const style = getComputedStyle(node);
+      const canvas = new OffscreenCanvas(1, 1),
+        context = canvas.getContext('2d');
+      const brightness = (color) => {
+        context.clearRect(0, 0, 1, 1);
+        context.fillStyle = color;
+        context.fillRect(0, 0, 1, 1);
+        return (
+          [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).reduce((sum, c) => sum + c, 0) / 3
+        );
+      };
+      const probe = document.createElement('span');
+      node.append(probe);
+      probe.style.color = 'var(--progress-label-highlight)';
+      const highlight = brightness(getComputedStyle(probe).color);
+      probe.style.color = 'var(--muted)';
+      const muted = brightness(getComputedStyle(probe).color);
+      probe.remove();
+      const animation = node
+        .getAnimations()
+        .find((a) => a.animationName === 'reasoning-title-shine');
+      animation.pause();
+      animation.currentTime = 500;
+      return {
+        gradient: style.backgroundImage,
+        base: brightness(style.backgroundColor),
+        highlight,
+        muted,
+      };
+    });
+    assert.match(style.gradient, /^linear-gradient\(90deg,/);
+    assert.ok(style.highlight > style.base, 'Sweep gently brightens the text');
+    if (theme === 'light') assert.ok(style.base > style.muted, 'Light theme uses a softer gray');
+    await capture('thinking-label-' + theme, activeLabel, 'allow');
+    await activeLabel.evaluate((node) => {
+      const animation = node
+        .getAnimations()
+        .find((a) => a.animationName === 'reasoning-title-shine');
+      animation.currentTime = 0;
+      animation.play();
+    });
+  }
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
   await focusUiWindow(app, page);
   const shine = await latest()
     .locator('.progress-state-label.is-active')
@@ -659,6 +709,13 @@ try {
     'none',
   );
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.emulateMedia({ contrast: 'more' });
+  assert.equal(await activeLabel.evaluate((node) => getComputedStyle(node).animationName), 'none');
+  assert.equal(
+    await activeLabel.evaluate((node) => getComputedStyle(node).backgroundImage),
+    'none',
+  );
+  await page.emulateMedia({ contrast: 'no-preference' });
   await latest().locator('.response-progress').screenshot({ animations: 'allow' });
   await page.evaluate(() => {
     Date.now = () => window.progressEpoch + 333000;

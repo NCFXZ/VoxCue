@@ -1,3 +1,13 @@
+## 2026-10-31 0.6.6接续清理
+
+本轮Windows仅写客户端根/shared/windows，Mac和独立账号服务只读。按静态入边、动态平台/Worker/preload、构建/打包、测试矩阵和人工专项入口核对；前后端未使用声明检查不能取代入口审查，现用业务与兼容读取不为删除数量而移除。
+
+删除退役的`shared/test/scripts/speech-model-check.mjs`及Windows的`speech-device-check.mjs`、`speech-reliability.mjs`、`speech-restart-native.mjs`，同步删除对应命令。它们依赖退役本地语料路径、旧控制器内部结构、硬件采样或工作区结果写入；现行公开音频/真实Worker、合成故障与长稳矩阵继续维护。有效的显式硬件专项及其播放夹具仍有消费者，保留。删除旧`--native-capture`桌面诊断分支和无生产消费者的captureInterviewScreen薄导出，改用严格owner遮罩的原生探针和实际截图入口。删除预览的停顿/回滚代码、参数及旧断言，现用提示为可见1秒后单次向下滚动。
+
+按新AGENTS规则，固定公开测试模型/音频保留在本平台`.cache/test-components`与`.cache/test-public-audio`，按固定摘要验证、独立复制后使用，不提交Git；profile、数据库、截图、运行包和结果仍在owner系统临时目录并退出清理。除下述定向构建安全调整外，现用依赖/锁、构建、固定工具、全部正式发行/恢复基线、真实资料与凭据、历史明确跳过目录保持。
+
+构建依赖审计中确认glob/minimatch通告后，统一到已使用的现代ASAR/Universal链，移除未使用的Squirrel安装器和EJS CLI jake链；由pnpm冻结安装管理依赖删除，不手工拆删厂商包。只定向更新Windows构建锁与共享策略，运行时依赖图不变，Mac锁仍由Mac本机生成。具体版本和逐项核对见0.6.6交接C052–C056。
+
 ## 2026-10-30 Mac客户端0.6.5接续清理边界
 
 当前Mac接续只写客户端根/shared/macos，windows全树与两份服务端参考只读。逐项审查静态/动态平台、Worker/preload、构建打包和测试消费者；无静态入边的现用入口继续保留，没有为删除数量移除业务、兼容读取或有效夹具。

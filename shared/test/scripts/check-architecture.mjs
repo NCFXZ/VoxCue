@@ -107,7 +107,7 @@ export function sourceGraph(root) {
                 resolved && !resolved.isExternalLibraryImport
                   ? slash(path.relative(root, resolved.resolvedFileName))
                   : edge.target.startsWith('.') &&
-                      /\.(?:png|svg|css)$/.test(assetTarget) &&
+                      /\.(?:png|jpg|svg|css)$/.test(assetTarget) &&
                       fs.existsSync(asset)
                     ? slash(path.relative(root, asset))
                     : edge.target,

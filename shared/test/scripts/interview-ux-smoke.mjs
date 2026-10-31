@@ -363,7 +363,13 @@ try {
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).fill('16');
   assert.equal(
     await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
-    0,
+    1,
+  );
+  assert.equal(
+    await settings
+      .getByRole('slider', { name: '面试背景透明度', exact: true })
+      .getAttribute('aria-valuetext'),
+    '100%',
   );
   await settings.getByRole('heading', { name: '模型设置', exact: true }).waitFor();
   assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
@@ -403,19 +409,8 @@ try {
     ),
   );
   assert.notEqual(layers['.floating-panel'].fill, layers['.answer-bubble'].fill);
-  assert.equal(layers['.floating-toolbar'].fill, layers['.floating-panel'].fill);
-  const commonFill = await preview.locator('.floating-toolbar').evaluate((node) => {
-    const probe = document.createElement('span');
-    probe.style.backgroundColor = 'var(--web-material-fill)';
-    node.append(probe);
-    const fill = getComputedStyle(probe).backgroundColor;
-    probe.remove();
-    return fill;
-  });
-  assert.equal(
-    layers['.floating-toolbar'].image,
-    `linear-gradient(${commonFill}, ${commonFill}), none`,
-  );
+  assert.notEqual(layers['.floating-toolbar'].fill, layers['.floating-panel'].fill);
+  assert.deepEqual(layers['.floating-toolbar'], layers['.answer-bubble']);
   assert.notEqual(layers['.answer-bubble'].fill, layers['.floating-composer'].fill);
   assert.equal(layers['.answer-bubble'].fill, layers['.transcript-item p'].fill);
   const misSizedIcons = await settings
@@ -894,7 +889,7 @@ try {
   await slider.fill('18');
   assert.equal(
     await devices.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
-    0,
+    1,
   );
   const actualLayers = await floating.evaluate(() =>
     Object.fromEntries(
@@ -921,7 +916,7 @@ try {
   );
   assert.equal(await devices.getByRole('button', { name: /应用.*设置/ }).count(), 0);
   assert.equal(await devices.getByRole('button', { name: '完成', exact: true }).count(), 0);
-  assert.equal(await devices.locator('.display-slider-icon').count(), 2);
+  assert.equal(await devices.locator('.display-slider-icon').count(), 4);
   assert.equal(await devices.getByText('当前回答结束后可修改', { exact: true }).count(), 0);
   await geometry(floating);
   const backdrop = await devices.evaluate((e) => {
@@ -947,6 +942,9 @@ try {
       localStorage.setItem('voxcue-frosted-transparency-v2', String(value));
       localStorage.setItem('voxcue-interview-background-transparency-v1', String(value));
       window.dispatchEvent(new StorageEvent('storage', { key: 'voxcue-frosted-transparency-v2' }));
+      window.dispatchEvent(
+        new StorageEvent('storage', { key: 'voxcue-interview-background-transparency-v1' }),
+      );
     }, value);
     assert.equal(
       await page.evaluate(() => document.documentElement.dataset.frostedTransparency),
@@ -956,9 +954,13 @@ try {
       await floating.evaluate(() => document.documentElement.dataset.frostedTransparency),
       '100',
     );
+    await floating.waitForFunction(
+      (value) => document.documentElement.dataset.interviewTransparency === String(value),
+      value,
+    );
     assert.equal(
       await floating.evaluate(() => document.documentElement.dataset.interviewTransparency),
-      '100',
+      String(value),
     );
     for (const theme of ['light', 'dark']) {
       await floating.emulateMedia({ colorScheme: theme });

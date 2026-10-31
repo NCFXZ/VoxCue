@@ -102,7 +102,7 @@ main 在面试浮窗 ready-to-show 中先准备/显示浮窗，再经 NativePres
 
 共享 SpeechController 继续串行执行；初始化前的 Worker exit 立即拒绝加载并清除超时。失败清理先退休 epoch/回调，使用 allSettled 清理所有采集端并退休 Worker，保留首个启动故障。尾段请求可 resolve/reject，Worker 退出立即拒绝等待，超时/停止失败都标记 error 并清除旧实例；启动每次异步边界后重新检查状态，不让同步原生故障后误报 running。正常 Mac 尾包排空及 Windows 原退休顺序保持。
 
-captureInterviewScreen 对原生 getSources 增加十秒期限及 AbortSignal 竞争，完成/失败/取消都移除监听与计时器；挂起或迟到的原生结果不阻挡请求退休，也不编码/发送已取消图片。仍只从受控面试请求按次捕获，权限、显示器匹配、大小限制和内存隔离保持，不增加原生截图回退或权限绕过。
+captureInterviewScreenshot 对原生 getSources 增加十秒期限及 AbortSignal 竞争，完成/失败/取消都移除监听与计时器；挂起或迟到的原生结果不阻挡请求退休，也不编码/发送已取消图片。仍只从受控面试请求按次捕获，权限、显示器匹配、大小限制和内存隔离保持，不增加原生截图回退或权限绕过。
 
 Dock 恢复前及 show Promise 完成后均显式 setIcon(resources.icon)，避免只在启动时指定的图标被宿主默认图标覆盖。Mac 开发宿主生成器复制现有 ICNS 到包内并设置 CFBundleIconFile；缓存指纹包含图标 SHA256，图标变化时生成新宿主，保留旧运行副本。应用标识、权限说明和本地开发签名方式不变，不修改厂商 Electron、系统 Dock 或真实用户资料。
 
@@ -294,7 +294,9 @@ floating-notices位于面板下方独立预留区域，显示“此窗口未隐�
 
 面试输入区仅保留显式截图按钮，interview:screenshot受控IPC提供capture/remove/clear/archive四种操作，校验面试主frame及字段白名单。主进程暂存最多五张原图，捕获串行并可取消；捕获时Renderer只获取不透明ID和长边最多240px的JPEG缩略图，输入框展示可移除缩略图及数量/5。InterviewAnswerRequest只接收question及screenshotIds，不接受Renderer图片、路径、命令或屏幕源ID；ID须唯一、属于本场暂存且最多五个。显式发送先归档本次图片，保存失败保留草稿并阻止模型请求，成功后在对应问题下显示缩略图。发送不再次捕获，自动回答仅文字且不消费待发送图片。无文字的图片请求只使用固定解题指令与原图，不附转写、对话历史、个人资料或RAG。
 
-main注入screenshot.ts原生捕获适配器，按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应内存草稿，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空内存暂存并取消在途捕获，迟到图像丢弃。沿用既有截图保护，不临时改变保护或隐藏窗口。
+main向screenshot.ts注入平台可选的captureScreen端口。Windows适配器仅传自有窗口HWND给独立VoxCue.Screenshot.exe，用MonitorFromWindow/GetMonitorInfo及GDI单次取屏，通过有界BGRA stdout返回NativeImage；不依赖显示器顺序，不写图片文件或持续录屏。助手在独立进程采集，执行限时十秒，AbortSignal终止子进程；dev/build和portable复制路径包含该助手。没有原生端口的平台按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应内存草稿，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空内存暂存并取消在途捕获，迟到图像丢弃。沿用既有截图保护，不临时改变保护或隐藏窗口。
+
+使用Electron捕获的AI面试建窗时异步调用screenshot.ts的准备接口，仅枚举零缩略图屏幕源，不取得或保留截图；未获Mac屏幕权限时跳过，窗口关闭或十秒期限结束后释放监听。Windows原生端口无需准备枚举。实际点击仍重新捕获当前屏幕；原图编码和240px预览复用同一个NativeImage，避免为生成预览再次解码PNG。权限、图像质量与内存草稿的职责保持在原模块内。
 
 0.5.9的backend/interview/images.ts独立管理已发送图片，捕获适配器本身仍不访问磁盘。原始发送字节及缩略图分别保存在userData/interview-images-v1的UUID.image与UUID.preview，串行、临时文件原子写入及失败批次回收；重试按相同ID/字节幂等保存，不重新编码原图。记录仅存Answer.images的ID数组，不存base64或路径；缩略图在记录打开后按ID读取，原图只在点击时通过interview:image读取。该IPC仅接受主窗/面试主frame、有界ID和read/preview/save/remove，save与remove仅主窗可用，面试只读；save经系统保存对话框导出原始字节，Renderer不能指定写入路径或内容，拒绝路径、文件内容及符号链接。删除记录先保存元数据，再清理没有其他记录引用的原图与缩略图；文件读取失败显示明确状态，旧无图记录不迁移。共享InterviewImages将缩略图置于提问气泡内，纯图提问隐藏占位文字，标识在图片下方。查看器标题为“截图”，独立渲染在body弹层，左上标题、右上保存和关闭、图片两侧翻页；初始适应窗口显示，支持左右键翻页、滚轮/触控板锚点缩放与有界拖拽，双击复位；保存仅记录主窗的图标按钮，面试中隐藏并使用透明backdrop。Mac原生材质和控件观察body以覆盖Portal打开/关闭，不遗留遮罩及裁切。缩略图与工具栏都使用shared控件，不进行原生投影。图片不进入后续问题、RAG或TXT导出，TXT仅说明图片数量与应用内查看方式。
 

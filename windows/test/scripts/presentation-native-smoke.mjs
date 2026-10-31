@@ -51,7 +51,12 @@ await mkdir(profile);
 const app = await electron.launch({
   ...(executablePath ? { executablePath } : {}),
   args: executablePath ? [] : [await offlineElectronEntry()],
-  env: { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '', ...(executablePath?{VOXCUE_ACCOUNT_API:''}:{}) },
+  env: {
+    ...process.env,
+    COPILOT_TEST_USER_DATA: profile,
+    VITE_DEV_SERVER_URL: '',
+    ...(executablePath ? { VOXCUE_ACCOUNT_API: '' } : {}),
+  },
 });
 const cursor = probe('cursor');
 const icon = path.resolve('public/voxcue.ico');
@@ -225,11 +230,22 @@ try {
         'Synthetic main window did not activate',
       );
     }
-    const point = await stableTarget(main.getByRole('button',{name:label,exact:true}),box=>app.evaluate(
-      ({ BrowserWindow, screen }, box) => {
-        const bounds=BrowserWindow.getAllWindows().find(w=>w.getTitle()===box.title).getContentBounds();
-        return screen.dipToScreenPoint({x:Math.round(bounds.x+box.x+box.width/2),y:Math.round(bounds.y+box.y+box.height/2)});
-      },{...box,title}));
+    const point = await stableTarget(
+      main.getByRole('button', { name: label, exact: true }),
+      (box) =>
+        app.evaluate(
+          ({ BrowserWindow, screen }, box) => {
+            const bounds = BrowserWindow.getAllWindows()
+              .find((w) => w.getTitle() === box.title)
+              .getContentBounds();
+            return screen.dipToScreenPoint({
+              x: Math.round(bounds.x + box.x + box.width / 2),
+              y: Math.round(bounds.y + box.y + box.height / 2),
+            });
+          },
+          { ...box, title },
+        ),
+    );
     // Windows can refuse programmatic foreground activation. A real click
     // activates the intended test window; require native hit ownership first.
     await until(
@@ -399,8 +415,8 @@ try {
       };
     });
     assert.equal(surface.retiredReading, '');
-    assert.ok(Math.abs(surface.panel - 0.8496) < 0.000001);
-    assert.ok(Math.abs(surface.panelDark - 0.8872) < 0.000001);
+    assert.ok(Math.abs(surface.panel - 0.504) < 0.000001);
+    assert.ok(Math.abs(surface.panelDark - 0.564) < 0.000001);
     assert.equal(surface.filter, 'blur(24px) saturate(1.25)');
     assert.equal(surface.panelFilter, 'none');
     assert.equal(surface.shadow, 'none');

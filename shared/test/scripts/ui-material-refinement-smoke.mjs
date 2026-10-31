@@ -97,7 +97,7 @@ const hoverOnly = async (page, button) => {
   assert.deepEqual(await button.boundingBox(), before);
 };
 const centeredFont = async (scope) => {
-  assert.equal(await scope.getByRole('slider', { name: '面试背景透明度', exact: true }).count(), 0);
+  assert.equal(await scope.getByRole('slider', { name: '面试背景透明度', exact: true }).count(), 1);
   assert.equal(await scope.getByRole('slider', { name: '面试字体大小', exact: true }).count(), 1);
   const bounds = await scope.locator('.interview-display-controls').evaluate((e) => {
     const a = e.getBoundingClientRect(),

@@ -1,6 +1,6 @@
 import path from 'node:path';
-import { copyFile, mkdir, writeFile } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { copyFile, mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
 import assert from 'node:assert/strict';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot } from './test-workspace.mjs';
@@ -30,8 +30,8 @@ export async function stageModelFixtures(cache, staged, packages, componentLocat
   }
 }
 
-// Models come from fixed public downloads or an explicitly authorized read-only
-// cache. Test processes still receive independent files in their owned run.
+// Only verified public assets persist in the platform cache. Test processes
+// receive independent files; profiles, databases and results remain temporary.
 export async function prepareModelFixtures() {
   const { ComponentService, componentPaths, componentLocation } = workspace.platformRequire(
     path.join(
@@ -55,7 +55,7 @@ export async function prepareModelFixtures() {
     );
     return { ...componentPaths(staged, packages), speechFixtures: await prepareSpeechFixtures() };
   }
-  const root = path.join(testRoot, 'models');
+  const root = path.join(workspace.platformRoot, '.cache/test-components');
   let previous;
   const service = new ComponentService({
     root,
@@ -67,14 +67,16 @@ export async function prepareModelFixtures() {
       const progress = active
         ? `${active.id} ${Math.floor((active.received / active.bytes) * 10) * 10}%`
         : state.phase;
-      if (progress !== previous) console.log('Temporary models: ' + (previous = progress));
+      if (progress !== previous) console.log('Public model cache: ' + (previous = progress));
     },
   });
   try {
     const state = await service.download();
     if (state.phase !== 'ready') throw Error(state.error ?? 'Temporary models are not ready');
+    const staged = path.join(testRoot, 'cached-models');
+    await stageModelFixtures(root, staged, packages, componentLocation);
     const speechFixtures = await prepareSpeechFixtures();
-    return { ...componentPaths(root, packages), speechFixtures };
+    return { ...componentPaths(staged, packages), speechFixtures };
   } finally {
     service.dispose();
   }
@@ -84,22 +86,40 @@ export async function prepareSpeechFixtures() {
   const speechFixtures = path.join(testRoot, 'speech-audio');
   await mkdir(speechFixtures, { recursive: true });
   const revision = '8e40c43232a1c5c66c82111efc5820d3accca11b';
+  const cache = path.join(workspace.platformRoot, '.cache/test-public-audio', revision);
+  await mkdir(cache, { recursive: true });
   // Legacy fixture names identify the two input channels; these are official
   // public examples, not a labelled accuracy corpus or recorded user audio.
   for (const [index, name, sha256] of [
     [0, 'chinese.wav', '7d93384ca14702cc584a7a33fe2fed92e89e708549161cb12ea38c916882103b'],
     [1, 'english.wav', '8bfb42c963e623ebab31b81ff4404867d07d3102507c87ac14577c4c61663b8c'],
   ]) {
-    const response = await fetch(
-      `https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/${revision}/test_wavs/${index}.wav`,
-      { signal: AbortSignal.timeout(30000) },
-    );
-    if (!response.ok) throw Error('Public audio fixture HTTP ' + response.status);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (createHash('sha256').update(bytes).digest('hex') !== sha256)
-      throw Error('Public audio fixture checksum mismatch');
+    const cached = path.join(cache, name);
+    let bytes = await readFile(cached).catch((error) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (bytes && createHash('sha256').update(bytes).digest('hex') !== sha256)
+      throw Error('Cached public audio fixture checksum mismatch');
+    if (!bytes) {
+      const response = await fetch(
+        `https://huggingface.co/csukuangfj/sherpa-onnx-streaming-paraformer-bilingual-zh-en/resolve/${revision}/test_wavs/${index}.wav`,
+        { signal: AbortSignal.timeout(30000) },
+      );
+      if (!response.ok) throw Error('Public audio fixture HTTP ' + response.status);
+      bytes = Buffer.from(await response.arrayBuffer());
+      if (createHash('sha256').update(bytes).digest('hex') !== sha256)
+        throw Error('Public audio fixture checksum mismatch');
+      const partial = cached + '.' + randomUUID() + '.tmp';
+      try {
+        await writeFile(partial, bytes);
+        await rename(partial, cached);
+      } finally {
+        await rm(partial, { force: true });
+      }
+    }
     await writeFile(path.join(speechFixtures, name), bytes);
   }
-  console.log('Temporary public audio: fixed revisions and checksums verified');
+  console.log('Public audio cache: fixed revisions/checksums verified; isolated copies staged');
   return speechFixtures;
 }

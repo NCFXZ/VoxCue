@@ -33,6 +33,7 @@ import { ResponseProgress } from './ResponseProgress';
 import { InterviewAudioRecovery } from './InterviewAudioRecovery';
 import { InterviewSettingsPanel } from './InterviewSettingsPanel';
 import { InterviewReadiness } from './InterviewReadiness';
+import { InterviewChromeBase } from './InterviewChromeBase';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
 import { ProviderIdentity } from './ProviderIdentity';
 import { InterviewAnswerFailure, InterviewAnswerStatus } from './InterviewAnswerStatus';
@@ -849,16 +850,6 @@ export function FloatingInterview() {
         )}
       </div>
       {settingsOpen && <InterviewSettingsPanel onClose={() => setSettingsOpen(false)} />}
-    </div>
-  );
-}
-
-// Chat has an opaque page behind its blurred controls. Provide that same base
-// locally, below the scrolling content, without hiding the interview backdrop.
-function InterviewChromeBase() {
-  return (
-    <div className="floating-chrome-base" aria-hidden="true">
-      <span className="floating-follow-base" />
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import type { DesktopPlatform } from '../../shared/electron/platform/types';
+import { captureScreen } from './screenshot';
 
 export const windows: DesktopPlatform = {
   id: 'win32',
@@ -15,6 +16,7 @@ export const windows: DesktopPlatform = {
   appUserModelId: 'com.voxcue.desktop',
   quitOnAllWindowsClosed: true,
   captureProtectionSupported: true,
+  captureScreen,
   credentialEncryptionLabel: 'Windows 凭据加密',
   microphoneSettingsUrl: 'ms-settings:privacy-microphone',
   wasapiHelper: 'VoxCue.Audio.exe',

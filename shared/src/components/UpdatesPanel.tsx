@@ -105,13 +105,15 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
           )}
         </ActionTransition>
       </div>
-      {label && (
-        <p className="settings-hint" role="status" aria-live="polite">
-          {label}
-        </p>
-      )}
       <div className="updates-footer settings-hint">
-        <p>更新会保留本机聊天、附件、个人资料和面试记录。</p>
+        <div className="updates-notes">
+          {label && (
+            <p role="status" aria-live="polite">
+              {label}
+            </p>
+          )}
+          <p>更新会保留本机聊天、附件、个人资料和面试记录。</p>
+        </div>
         <a
           className="updates-feedback"
           href={feedbackUrl}

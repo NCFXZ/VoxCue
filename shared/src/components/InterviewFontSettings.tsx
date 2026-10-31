@@ -14,10 +14,13 @@ export function InterviewFontSettings() {
       <header className="interview-font-heading">
         <div>
           <h3>面试界面</h3>
-          <p className="section-help">仅调整转写、问题和回答气泡中的文字大小。</p>
+          <p className="section-help">调整转写与回答的背景透明度，以及对话气泡中的文字大小。</p>
         </div>
       </header>
       <InterviewDisplayControls />
+      <p className="interview-preview-help section-help">
+        上下滚动预览背景，查看面试窗口在不同背景上的显示效果。
+      </p>
       <InterviewPreview />
     </section>
   );

@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
+import { probe as desktopProbe } from './window-probe.mjs';
 
 assert.equal(process.platform, 'win32');
 const preview = process.argv.includes('--preview');
@@ -38,6 +39,11 @@ const compileProbe = spawnSync(
 assert.equal(compileProbe.status, 0, compileProbe.stdout + compileProbe.stderr);
 
 function inspect(pid, operation = 'inspect', argument = '') {
+  assert.equal(
+    desktopProbe('desktop').interactive,
+    true,
+    'Installer UI requires an unlocked owner console',
+  );
   const result = spawnSync(probe, [String(pid), operation, argument], {
     encoding: 'utf8',
     windowsHide: true,

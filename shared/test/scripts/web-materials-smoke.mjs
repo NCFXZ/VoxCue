@@ -360,7 +360,11 @@ try {
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   assert.equal(
     await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
-    0,
+    1,
+  );
+  assert.equal(
+    await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).getAttribute('max'),
+    '100',
   );
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
   await captureRequested(page, 'settings-interview-preview');

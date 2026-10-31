@@ -199,7 +199,9 @@ it('Qwen切回Paraformer不把继承积压误判为新模型超载，排空后�
   captures.get('microphone')!(packet());
   expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
   ack(inherited[0]);
-  for (let i = 0; i < 8; i++) captures.get('system')!(packet());
+  for (const message of runtime.messages.filter((m) => m.op === 'audio').slice(inherited.length))
+    ack(message);
+  for (let i = 0; i < 10; i++) captures.get('system')!(packet());
   expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
   captures.get('system')!(packet());
   expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);
@@ -213,12 +215,17 @@ it('新旧音频一同追平后才恢复Paraformer预算，不在旧队列排空
   expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
   for (const message of inherited) ack(message);
   // Merely processing the pre-handoff packets is insufficient: live input
-  // accepted while draining still needs to catch up within the same 30s cap.
+  // accepted while draining must all be acknowledged within the same 30s cap.
   captures.get('microphone')!(packet());
   expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
   const accepted = runtime.messages.filter((m) => m.op === 'audio').slice(inherited.length);
   for (const message of accepted.slice(0, 11)) ack(message);
   for (let i = 0; i < 5; i++) captures.get('system')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  captures.get('microphone')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  for (const message of runtime.messages.filter((m) => m.op === 'audio')) ack(message);
+  for (let i = 0; i < 10; i++) captures.get('system')!(packet());
   expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
   captures.get('microphone')!(packet());
   expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);
@@ -228,6 +235,22 @@ it('交接继承和新增音频合计仍受原30秒绝对上限保护', async ()
   for (let i = 0; i < 149; i++) captures.get('system')!(packet());
   await selectModel('paraformer');
   captures.get('microphone')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  captures.get('microphone')!(packet());
+  expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);
+});
+
+it.each([10, 15])('交接%s包在2秒边界的下一批双路音频不误停，全部ACK后仍限制2秒', async (count) => {
+  await selectModel('qwen');
+  for (let i = 0; i < count; i++) captures.get('system')!(packet());
+  const inherited = runtime.messages.filter((m) => m.op === 'audio');
+  await selectModel('paraformer');
+  for (const message of inherited.slice(0, count - 10)) ack(message);
+  captures.get('system')!(packet());
+  captures.get('microphone')!(packet());
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
+  for (const message of runtime.messages.filter((m) => m.op === 'audio')) ack(message);
+  for (let i = 0; i < 10; i++) captures.get('system')!(packet());
   expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'running' });
   captures.get('microphone')!(packet());
   expect(events.some((e) => e.type === 'status' && e.status.error?.includes('积压'))).toBe(true);

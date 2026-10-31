@@ -6,25 +6,25 @@ import {
 import {
   applyInterviewAppearance,
   readInterviewTransparency,
+  saveInterviewTransparency,
+  subscribeInterviewTransparency,
 } from '../../../shared/src/interviewAppearance';
 
 const values = new Map<string, string>();
 const properties = new Map<string, string>();
-const keys = [
-  'voxcue-frosted-transparency-v2',
-  'voxcue-frosted-strength-v1',
-  'voxcue-interview-background-transparency-v1',
-];
+const key = 'voxcue-interview-background-transparency-v1';
+let events: EventTarget;
 let storage: { getItem: ReturnType<typeof vi.fn>; setItem: ReturnType<typeof vi.fn> };
 beforeEach(() => {
   values.clear();
   properties.clear();
+  events = new EventTarget();
   storage = {
     getItem: vi.fn((key: string) => values.get(key) ?? null),
     setItem: vi.fn((key: string, value: string) => values.set(key, value)),
   };
   vi.stubGlobal('localStorage', storage);
-  vi.stubGlobal('window', { desktop: { platform: 'windows' } });
+  vi.stubGlobal('window', Object.assign(events, { desktop: { platform: 'windows' } }));
   vi.stubGlobal('document', {
     documentElement: {
       dataset: {},
@@ -37,77 +37,101 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
-it('共用材质预设保持100，Windows三层独立固定60%且不读写旧偏好', () => {
-  for (const value of ['0', '20', '60', '100', 'off', 'strong', 'broken']) {
-    for (const key of keys) values.set(key, value);
-    expect(readFrostedTransparency()).toBe(100);
-    expect(readInterviewTransparency()).toBe(100);
-    applyFrostedAppearance();
-    expect(document.documentElement.dataset.frostedTransparency).toBe('100');
-    expect(document.documentElement.dataset.interviewTransparency).toBe('100');
-    expect(Number(properties.get('--windows-sidebar-opacity-light'))).toBeCloseTo(0.4);
-    expect(Number(properties.get('--windows-sidebar-opacity-dark'))).toBeCloseTo(0.512);
-    for (const key of keys) expect(values.get(key)).toBe(value);
-  }
-  expect(storage.getItem).not.toHaveBeenCalled();
-  expect(storage.setItem).not.toHaveBeenCalled();
-});
-it('Mac参数保持原值，Windows专用参数不会遗留到Mac', () => {
-  applyFrostedAppearance();
-  vi.stubGlobal('window', { desktop: { platform: 'macos' } });
-  applyFrostedAppearance();
-  expect(readFrostedTransparency()).toBe(100);
+it('恢复合法面试偏好，损坏或越界值回退100且不改写原件', () => {
   expect(readInterviewTransparency()).toBe(100);
-  expect(document.documentElement.dataset.frostedTransparency).toBe('100');
-  expect(document.documentElement.dataset.interviewTransparency).toBe('100');
-  expect(properties.get('--frosted-main-filter')).toBe('none');
-  expect(properties.has('--web-material-min-opacity')).toBe(false);
-  expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.632);
-  expect(Number(properties.get('--frosted-panel-dark'))).toBeCloseTo(0.692);
-  for (const key of [
-    '--windows-sidebar-opacity-light',
-    '--windows-sidebar-opacity-dark',
-    '--windows-interview-bubble-light',
-    '--windows-interview-bubble-dark',
-  ])
-    expect(properties.has(key)).toBe(false);
-  expect(storage.getItem).not.toHaveBeenCalled();
+  for (const value of [0, 37, 100]) {
+    values.set(key, String(value));
+    expect(readInterviewTransparency()).toBe(value);
+  }
+  for (const value of ['null', '"20"', '{}', '[]', '-1', '101', '14.5', 'broken']) {
+    values.set(key, value);
+    expect(readInterviewTransparency()).toBe(100);
+    expect(values.get(key)).toBe(value);
+  }
   expect(storage.setItem).not.toHaveBeenCalled();
-  vi.stubGlobal('window', { desktop: { platform: 'windows' } });
-  applyFrostedAppearance();
-  expect(document.documentElement.dataset.frostedTransparency).toBe('100');
-  expect(properties.has('--web-material-min-opacity')).toBe(false);
 });
-it('主窗口最高档不叠加网页滤镜，交给系统材质', () => {
-  applyFrostedAppearance();
-  expect(Number(properties.get('--frosted-opacity-light'))).toBeCloseTo(0, 10);
-  expect(Number(properties.get('--frosted-opacity-dark'))).toBeCloseTo(0, 10);
-  expect(properties.get('--frosted-main-filter')).toBe('none');
+
+it('两端共用70/35上限，不改变主窗材质、Windows侧栏或独立通知', () => {
+  for (const platform of ['windows', 'macos']) {
+    window.desktop!.platform = platform as 'windows' | 'macos';
+    const notices = new Map<string, string>();
+    for (const value of [0, 50, 100]) {
+      values.set(key, String(value));
+      applyFrostedAppearance();
+      expect(document.documentElement.dataset.interviewTransparency).toBe(String(value));
+      expect(document.documentElement.dataset.frostedTransparency).toBe('100');
+      expect(readFrostedTransparency()).toBe(100);
+      expect(properties.get('--frosted-main-filter')).toBe('none');
+      expect(Number(properties.get('--frosted-opacity-dark'))).toBeCloseTo(0);
+      for (const name of ['--interview-chrome-panel-light', '--interview-chrome-panel-dark']) {
+        if (value === 0) notices.set(name, properties.get(name)!);
+        expect(properties.get(name)).toBe(notices.get(name));
+      }
+      if (platform === 'windows') {
+        expect(Number(properties.get('--windows-sidebar-opacity-light'))).toBeCloseTo(0.4);
+        expect(Number(properties.get('--windows-sidebar-opacity-dark'))).toBeCloseTo(0.512);
+        expect(Number(properties.get('--interview-chrome-panel-dark'))).toBeCloseTo(0.8872);
+      } else {
+        expect(properties.has('--windows-sidebar-opacity-light')).toBe(false);
+        expect(properties.has('--windows-sidebar-opacity-dark')).toBe(false);
+        expect(Number(properties.get('--interview-chrome-panel-dark'))).toBeCloseTo(0.692);
+      }
+      if (value === 0)
+        for (const name of [
+          '--frosted-panel-light',
+          '--frosted-panel-dark',
+          '--interview-bubble-light',
+          '--interview-bubble-dark',
+        ])
+          expect(Number(properties.get(name))).toBe(1);
+      if (value === 100) {
+        expect(Number(properties.get('--frosted-panel-light'))).toBeCloseTo(0.504);
+        expect(Number(properties.get('--frosted-panel-dark'))).toBeCloseTo(0.564);
+        expect(Number(properties.get('--interview-bubble-light'))).toBeCloseTo(0.764);
+        expect(Number(properties.get('--interview-bubble-dark'))).toBeCloseTo(0.812);
+      }
+    }
+  }
+  expect(storage.setItem).not.toHaveBeenCalled();
 });
-it('Windows仅背景和文字气泡恢复0.5.9的60%映射，保留其他玻璃参数', () => {
-  applyInterviewAppearance();
-  expect(properties.has('--frosted-reading-dark')).toBe(false);
-  expect(properties.has('--frosted-chrome-dark')).toBe(false);
-  for (const [key, value] of Object.entries({
-    '--frosted-panel-light': 0.8496,
-    '--frosted-panel-dark': 0.8872,
-    '--windows-interview-bubble-light': 0.8992,
-    '--windows-interview-bubble-dark': 0.928,
-  }))
-    expect(Number(properties.get(key))).toBeCloseTo(value, 10);
+
+it('本窗口与跨窗口实时更新，忽略其他设置，取消订阅后停止更新', () => {
+  const changed = vi.fn(() => applyInterviewAppearance());
+  const unsubscribe = subscribeInterviewTransparency(changed);
+  saveInterviewTransparency(35);
+  expect(values.get(key)).toBe('35');
+  expect(changed).toHaveBeenLastCalledWith(35);
+  expect(document.documentElement.dataset.interviewTransparency).toBe('35');
+  values.set(key, '70');
+  events.dispatchEvent(Object.assign(new Event('storage'), { key: 'unrelated' }));
+  expect(changed).toHaveBeenCalledTimes(1);
+  events.dispatchEvent(Object.assign(new Event('storage'), { key }));
+  expect(changed).toHaveBeenLastCalledWith(70);
+  expect(document.documentElement.dataset.interviewTransparency).toBe('70');
+  values.clear();
+  events.dispatchEvent(Object.assign(new Event('storage'), { key: null }));
+  expect(changed).toHaveBeenLastCalledWith(100);
+  unsubscribe();
+  saveInterviewTransparency(0);
+  expect(changed).toHaveBeenCalledTimes(3);
 });
-it('存储不可用时仍有相同固定材质；重新应用不接受迟到的旧值', () => {
-  storage.getItem.mockImplementation(() => {
-    throw Error('denied');
-  });
+
+it('非法值或保存失败不会通知虚假的成功，读取失败仍提供默认材质', () => {
+  const changed = vi.fn();
+  subscribeInterviewTransparency(changed);
+  for (const invalid of [NaN, Infinity, -Infinity, -1, 101, 14.5])
+    expect(() => saveInterviewTransparency(invalid)).toThrow();
+  saveInterviewTransparency(37);
+  changed.mockClear();
   storage.setItem.mockImplementation(() => {
     throw Error('denied');
   });
-  applyFrostedAppearance();
-  const baseline = [...properties];
-  for (const key of keys) values.set(key, '100');
-  applyFrostedAppearance();
-  expect([...properties]).toEqual(baseline);
-  expect(storage.getItem).not.toHaveBeenCalled();
-  expect(storage.setItem).not.toHaveBeenCalled();
+  expect(() => saveInterviewTransparency(50)).toThrow('denied');
+  expect(readInterviewTransparency()).toBe(37);
+  expect(changed).not.toHaveBeenCalled();
+  storage.getItem.mockImplementation(() => {
+    throw Error('denied');
+  });
+  expect(readInterviewTransparency()).toBe(100);
+  expect(() => applyInterviewAppearance()).not.toThrow();
 });

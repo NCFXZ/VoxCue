@@ -1,4 +1,14 @@
-# 登录按钮图标
+# 界面素材
+
+`interview-story-path.jpg`与`interview-story-notebook.jpg`：2026-10-31使用内置imagegen生成，1024×1536，JPEG质量85；分别用于深色书屋段落的左侧插画与彩色手帐段落的右侧插画，随应用离线打包。生成提示词：
+
+> Create one full-bleed portrait editorial illustration, aspect ratio 2:3, no text. A quiet path beside an alpine lake in the late afternoon, pine trees opening toward a small warm wooden bookshop cabin, a single traveler seen from behind walking along the path with a small notebook. The lake and pale distant mountains subtly connect this scene with a tranquil mountain-lake photograph. Warm hand-painted gouache on softly textured paper, clean elegant shapes, rich deep pine green, warm ochre sunlight, cream highlights, muted blue water. Atmospheric but detailed enough to see leaves, wooden planks and a small window glowing in the cabin. Composition fills the whole image; no border, no lettering, no logo, no captions, no UI. Intended as a vertical illustration on the left half of a story section behind translucent desktop panels.
+
+> Create one full-bleed portrait editorial illustration, aspect ratio 2:3, no text. A quiet wooden cabin reading corner at blue hour beside an alpine lake: an open blank sketchbook with a small loose landscape sketch, a ceramic tea cup and a softly glowing amber desk lamp on a wooden desk, a broad window overlooking dark pine trees, calm blue water, distant pale mountains and the first stars. No visible person. Warm hand-painted gouache on softly textured paper, clean elegant shapes, rich deep pine green, warm ochre lamplight, cream highlights, muted blue water and deep blue evening. Atmospheric and coherent as the next chapter of a traveler finding a lakeside cabin after an afternoon walk. Composition fills the whole image; no border, no lettering, no logos, no captions, no UI. Intended as a vertical illustration on the right half of a story section behind translucent desktop panels.
+
+`interview-landscape.jpg`：2026-10-31使用内置imagegen生成的山林湖泊背景，1536×1024，JPEG质量85；随应用离线打包，仅用于设置中的透明度预览。生成提示词：
+
+> Generate a photorealistic natural landscape photograph used as a local desktop wallpaper underneath a translucent interview preview in a desktop app. A wide alpine lake with clear teal water, dark green conifer forests along both shores, sunlit pale granite mountains, soft blue sky with a few natural clouds, realistic daylight and fine natural textures. Balanced tonal variety from bright sky to dark forest and water reflections, so transparency can be evaluated across both light and dark areas. Full bleed edge to edge landscape composition, 3:2 aspect ratio. No words, letters, logos, UI, borders, people, buildings or watermarks. This is only the scenic background asset, do not draw an application window.
 
 `copilot.svg`：恢复自本项目历史，使用 GitHub 官方 Primer Octicons 的 [copilot-24](https://github.com/primer/octicons/blob/main/icons/copilot-24.svg)，遵循其 [MIT 许可](https://github.com/primer/octicons/blob/main/LICENSE)，用于 Copilot 登录与回复来源标识。
 

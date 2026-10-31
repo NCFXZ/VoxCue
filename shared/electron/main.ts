@@ -52,7 +52,7 @@ import { UsageLedger } from './backend/chat/usage';
 import { registerChatIpc } from './ipc/chat';
 import { registerInterviewIpc } from './ipc/interview';
 import { InterviewContext } from './application/interviewContext';
-import { captureInterviewScreenshot } from './screenshot';
+import { captureInterviewScreenshot, prepareInterviewScreenshot } from './screenshot';
 import { InterviewImageStore } from './backend/interview/images';
 import { registerInterviewImageIpc } from './ipc/interviewImages';
 import { registerScreenCaptureIpc } from './ipc/screenCapture';
@@ -353,6 +353,8 @@ function openInterview() {
   interviewCloseApproved = false;
   interviewMove = undefined;
   const win = new BrowserWindow(windowOptions('interview', desktopPlatform, windowPaths));
+  if (!desktopPlatform.captureScreen && !demoSession && speechSessions?.configuration?.aiEnabled)
+    void prepareInterviewScreenshot(win, desktopPlatform.id);
   interviewWindow = win;
   interviewMousePassthrough = false;
   setInterviewMousePassthrough(true);
@@ -1220,7 +1222,12 @@ app.whenReady().then(async () => {
     updateModel: (value, models) => speechSessions!.updateModel(value, models),
     context: interviewContext,
     captureScreen: (signal) =>
-      captureInterviewScreenshot(interviewWindow!, desktopPlatform.id, signal),
+      captureInterviewScreenshot(
+        interviewWindow!,
+        desktopPlatform.id,
+        signal,
+        desktopPlatform.captureScreen,
+      ),
     archiveImages: (images) => interviewImages.save(images),
   });
   historyJobs = registerHistoryIpc({

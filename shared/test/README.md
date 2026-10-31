@@ -1,6 +1,10 @@
-当前客户端0.6.5接续范围以`PROGRESS.md`和`shared/docs/MACOS_0.6.5_HANDOFF.md`为准（Mac0.6.3为比较基线）；下方0.6.2及更早章节中的“当前/本轮”均属历史。本轮新增`client-update-ui-smoke.mjs`覆盖动画、拖入卡片与反馈，`windows/test/scripts/telemetry-queue-native-smoke.mjs`覆盖真实排他文件占用；普通UI/正式包启动前隔离统计，独立服务端联调显式指定自有loopback。当前追加客户端适配独立服务端0.5.3/schema 2，禁止修改服务端；客户端目标0.6.5，当前完整矩阵/长稳/发行授权见PROGRESS；独立服务端0.5.3仅作只读合成HTTP参考。历史已发布安装包不因源码更新自动适配。
+当前客户端0.6.6范围以`PROGRESS.md`和[Mac 0.6.5→0.6.6逐项交接](../docs/MACOS_0.6.6_HANDOFF.md)为准；下文旧版本章节中的“当前/本轮”均属历史。本轮执行全部单测、共享功能与600秒ASR长稳、Windows原生/五档DPI、安全对抗、生产依赖审计及owner临时验包。服务端固定0.5.3/schema 2只读，普通UI/包在导入main前隔离账号、统计与凭据助手，不采样物理音频。公开模型/音频现可在本平台`.cache`校验后复用，执行副本、profile、数据库、截图和结果仍退出清理，不提交缓存或测试成绩。弃用的speech-model-check、speech-device-check、speech-reliability、speech-restart-native源码及命令已删除；有效硬件专项保留但不自动运行。
 
 Mac接续另运行`macos/test/scripts/telemetry-queue-native-smoke.mjs`验证POSIX原子替换、真实写入拒绝与并发合并；`cloud-native-vault-smoke.mjs`使用显式临时Keychain核对账户和统计凭据的原生加密/重启/容量边界。`ui-refinement-matrix.mjs`纳入0.6.5扫光、知识库焦点、本地账户与共享界面五档缩放；普通Mac入口导入main前使用mock Keychain并拒绝正式助手，正式包启动前只移除owner临时私有副本中凭据/AI运行时的可执行权限，关闭后恢复，签名字节与Chromium沙箱保持。真实助手只用于明确隔离的原生专项，不将普通UI替身算作原生加密成绩。
+
+0.6.6构建依赖安全入口为`build-globs.test.ts`、`pnpm audit`及owner临时NSIS/便携验包；验证对抗模式有界、正常中文/花括号匹配、glob取消后停止I/O和打包资产完整。共享策略只定向修复构建链，运行时SDK/模型保持；Mac在本机生成对应锁，不复制Windows锁，见交接C052–C056。
+
+0.6.6的Qwen→Paraformer交接以全部已接收包ACK为追平条件，交接总量仍受30秒绝对上限保护，随后恢复严格2秒预算；不沿用下文历史章节中“刚降至2秒便结束交接”的旧断言。`speech-progress.test.ts`覆盖双路边界、乱序ACK及追平后限额；真实模型入口使用已校验缓存独立复制，Windows为`qwen-installed-smoke.mjs`，显式指定`VOXCUE_TEST_COMPONENT_CACHE`与现有`VOXCUE_PYTHON`。Windows包内UI守卫取得独占锁后才启动；installer-branding/engine每次读取或操作前核对解锁的owner控制台。
 
 `macos/test/scripts/speech-switch-smoke.mjs --download`只下载现有目录/hash指定的Paraformer、Qwen和Aligner，在owner临时目录使用固定公开音频验证真实识别器切换；采集端口为合成输入，保留沙箱，不采样物理设备。`shimmer-smoke.mjs`对浅深色正常/最小窗口的真实截断标题连续观察至少两轮1秒扫过及2.5秒停顿，其他长度分别逐帧观察完整扫过。
 
@@ -228,7 +232,7 @@ Qwen专项串行执行CPU/Metal原生流、实际裁剪、44.1kHz生产Worker/AE
 
 新增 `interview-retry-smoke.mjs`，覆盖首次请求加三次重试、第四次恢复、耗尽/手动重试、部分正文替换、等待/活动请求停止、迟到输出与下一题；同时检查服务名旁固定字号状态和连续圆角。入口纳入共享功能矩阵（35项）及 Windows 五档DPI（每档9项）。`interview-screenshot-smoke.mjs` 检查警告随对应回答等量滚动、输入位置固定、与回答气泡共用32px连续角及原截图复用。
 
-已有模型经明确授权可通过 `VOXCUE_TEST_COMPONENT_CACHE` 指定正式组件缓存根目录。`model-fixtures.mjs` 只读按固定清单核对标记、全部文件、大小和SHA256，然后复制至自有系统临时目录，并再次校验副本；不对原目录调用组件下载/修复/删除。每次创建独立副本，测试结束清理全部测试内容，保留正式原模型；不保留模型测试缓存。未提供此变量的其他开发环境仍可使用原固定公开下载夹具。`verify-model-cache.test.ts` 覆盖只读成功、损坏、缺失、额外文件、错误标记、链接拒绝、副本独立性和临时目标边界。
+默认将固定公开模型保留在本平台`.cache/test-components`，固定revision与SHA256的公开音频保留在`.cache/test-public-audio`；运行前校验并复制至自有系统临时目录，测试不能修改缓存原件。也可通过`VOXCUE_TEST_COMPONENT_CACHE`显式指定已授权的只读组件缓存；该目录不调用下载/修复/删除。测试结束清理副本、账号、数据库和结果，公共缓存不提交Git。`verify-model-cache.test.ts`覆盖只读成功、损坏、缺失、额外文件、错误标记、链接拒绝、副本独立性和临时目标边界。
 
 Windows 示例（PowerShell，源码根目录）：
 
@@ -422,7 +426,7 @@ Windows 自绘安装窗入口为 `node test/scripts/installer-branding-smoke.mjs
 
 `node test/scripts/installer-engine-smoke.mjs` 使用正式 electron-builder 配置及 NSIS 模板，安装一个不访问用户数据的微型程序。独立应用 GUID、无快捷方式，安装、合成新旧数据根与包均在本次系统临时目录，结束/失败/取消清理自有注册项和文件。覆盖原生文件夹选择、中文/空格路径、既有安装按钮置灰与后台目录锁定、手动安装、非静默应用内更新、静默更新、仅当前用户限制、卸载默认保留、取消勾选直接删除、缺少旧数据根以及重定向保护；断言真实负载和引擎完成，补足空负载预览没有包含的用户范围页。界面样例另检查复选框没有被说明文字遮挡。不能与其他桌面测试并行，不运行生产 VoxCue 安装器或创建真实模型缓存。
 
-functional 使用共享矩阵；regression 顺序运行平台、面试权限/思考/布局/工作流/上下文、更新传输、合成资料迁移、语音故障和原生展示回归。矩阵模型使用固定资产/摘要下载到临时根，开发宿主注入临时路径，不填充真实缓存。presentation 使用真实 HWND、任务栏 UIAutomation 和鼠标检查 Acrylic、ICO、窗口按钮、置顶及留白穿透，只向自有测试窗口发送点击，并恢复鼠标位置。所有桌面/鼠标测试必须串行，不能与另一个 GUI 测试同时运行；窗口遮挡时拒绝向其他应用发送输入。speech:adversarial 使用合成 WASAPI 端口驱动真实 Windows 控制器/Worker，不采样硬件。
+functional 使用共享矩阵；regression 顺序运行平台、面试权限/思考/布局/工作流/上下文、更新传输、合成资料迁移、语音故障和原生展示回归。矩阵模型优先复用本平台固定公开缓存，校验后复制至临时根；开发宿主注入副本路径，不填充真实userData缓存。presentation 使用真实 HWND、任务栏 UIAutomation 和鼠标检查 Acrylic、ICO、窗口按钮、置顶及留白穿透，只向自有测试窗口发送点击，并恢复鼠标位置。所有桌面/鼠标测试必须串行，不能与另一个 GUI 测试同时运行；窗口遮挡时拒绝向其他应用发送输入。speech:adversarial 使用合成 WASAPI 端口驱动真实 Windows 控制器/Worker，不采样硬件。
 
 原生鼠标检查要求 Windows 保持解锁，输入桌面为 Default 且光标可读取；缩放/工作流在原生操作前复核，缩放在拖动后再次检查。屏保或锁屏导致环境失败，不能把读取失败返回的零坐标当作有效位置，也不能跳过原生尺寸/命中断言、自动解锁或更改系统屏保设置。
 
@@ -442,8 +446,8 @@ node ../shared/test/scripts/updates-sidebar-smoke.mjs
 node ../shared/test/scripts/components-ui-smoke.mjs
 node ../shared/test/scripts/ui-alignment-smoke.mjs
 node ../shared/test/scripts/typography-smoke.mjs
-node ../shared/test/scripts/run-electron-node.mjs ../shared/test/scripts/speech-model-check.mjs
-node ../shared/test/scripts/run-electron-node.mjs ../shared/test/scripts/speech-soak.mjs --seconds=300
+node ../shared/test/scripts/audio-pipeline-smoke.mjs
+node ../shared/test/scripts/run-electron-node.mjs ../shared/test/scripts/speech-soak.mjs --seconds=600
 ```
 
 functional-suite 顺序覆盖共用界面与本机原生窗口/权限/图标/启动器、用户数据迁移、更新和模型缓存；Mac 矩阵同时包含 dmg，核对临时压缩镜像的 Finder 布局、Retina 素材、拖拽目标、签名及取消卸载清理。运行前使用正式固定资源目录/摘要在本次临时根准备模型，并下载固定 revision/摘要的官方公开音频。开发态测试通过独立宿主注入临时模型路径，安装态回归仍使用真实组件缓存；不补回工作区或真实 userData 的模型。interview-stability 为重复面试、重载、Dock/置顶与透明度联动；audio-pipeline 使用合成采集端口驱动真实 utilityProcess、控制器、ASR Worker，并验证进程强制退出后的恢复。Mac native-build 只在临时目录编译/签名验证原生音频、权限绑定和启动器，不覆盖现用组件。
@@ -460,7 +464,7 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 
 上述默认功能矩阵不启动物理麦克风采样；audio-native 是独立硬件入口，涉及真实设备，须先确认当次采样范围且环境中没有真人音频，不作为合成音频矩阵的一部分自动执行。
 
-截图发送、取消、失败、重试和内存隔离默认使用合成图像。真实屏幕捕获是独立严格入口 `node ../shared/test/scripts/interview-screenshot-smoke.mjs --native-capture`，需要本机权限实际生效，失败不降级为成功或自动绕过系统控制；仅返回图像尺寸等元数据，桌面像素不保存或发给 Provider。合成账户/HTTP/SSE、合成设备和公开样本均不证明真实订阅、真人语音质量或另一平台硬件已验收。本轮执行结果只在终端/对话中报告，不写报告文件、验收数表或截图。
+截图发送、取消、失败、重试和内存隔离使用合成图像。Windows原生入口为`node ../shared/test/scripts/screenshot-performance.mjs --native --platform`，已纳入Windows原生矩阵；只允许自有不透明窗口完整覆盖所有显示器后取屏，核对新帧颜色、取消和窗口防捕获。Electron对照使用`--native --prewarm`；旧`--native-capture`分支已删除。仅返回计时/尺寸等元数据，像素不保存或发给Provider。Mac须本机实现相同owner遮罩边界再验证原生采集。合成账户/HTTP/SSE、合成设备和公开样本均不证明真实订阅、真人语音质量或另一平台硬件已验收。结果只在终端/对话中报告，不写报告文件、验收数表或截图。
 
 本次删除 Mac 101 项旧测试产物、4,420 文件；117 个旧目录仍被 fileproviderd 占用，暂留待释放后处理。Windows 349 个云占位目录按用户先前要求不重试，本机对 Windows 保持只读。旧报告链接仅为历史记录，不作为现存交付物。测试源码、固定输入夹具、现用模型/依赖/构建、真实原件及源码恢复基线保留。
 

@@ -180,11 +180,12 @@ export class SpeechController {
           this.switching = undefined;
           // Qwen can have a valid backlog larger than Paraformer's 2s budget.
           // Keep its existing 30s cap while the new recognizer catches up;
-          // ACKs restore 2s as soon as the entire accepted backlog fits again.
+          // Restore 2s only after all accepted packets are acknowledged. At
+          // exactly 2s, the next live burst can arrive before the next ACK.
           this.drainingQwenQueue =
             this.selection.speechModel === 'qwen' &&
             change.selection.speechModel === 'paraformer' &&
-            this.queued > 2000;
+            this.pendingAudio.size > 0;
           this.selection = change.selection;
           this.options = change.options;
           this.chunkMs = m.chunkMs;
@@ -200,8 +201,8 @@ export class SpeechController {
           const packet = this.pendingAudio.get(m.ack);
           if (!packet) return;
           this.pendingAudio.delete(m.ack);
-          this.queued = Math.max(0, this.queued - packet.ms);
-          if (this.queued <= 2000) this.drainingQwenQueue = false;
+          this.queued = this.pendingAudio.size ? Math.max(0, this.queued - packet.ms) : 0;
+          if (!this.pendingAudio.size) this.drainingQwenQueue = false;
           for (const source of ['microphone', 'system'] as const) {
             const through = m.progress?.[source];
             if (typeof through === 'number' && Number.isFinite(through))

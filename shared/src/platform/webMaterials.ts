@@ -69,7 +69,7 @@ export function installWebMaterials() {
       );
     }
     for (const panel of document.querySelectorAll<HTMLElement>(
-      '.floating-panels .floating-panel',
+      '.floating-panels .floating-panel, .interview-preview-scene:not(.login-interview-preview) .floating-panel',
     )) {
       const header = panel.querySelector<HTMLElement>(':scope > header')!;
       const recovery = panel.querySelector<HTMLElement>(':scope > .floating-audio-recovery');
@@ -81,7 +81,9 @@ export function installWebMaterials() {
       }
       if (!panel.clientHeight) continue;
       const scroll = panel.querySelector<HTMLElement>(':scope > .floating-scroll')!;
-      const following = scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 1;
+      const following =
+        !!panel.closest('.floating-panels') &&
+        scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 1;
       setProperty(panel, '--floating-header-height', header.getBoundingClientRect().height + 'px');
       setProperty(
         panel,
@@ -94,11 +96,6 @@ export function installWebMaterials() {
         (composer?.getBoundingClientRect().height ?? 0) + 'px',
       );
       if (following) scroll.scrollTop = scroll.scrollHeight;
-      setProperty(
-        panel,
-        '--floating-header-opacity',
-        String(headerCoverage(panel, header.getBoundingClientRect(), '.floating-scroll > *')),
-      );
     }
     for (const node of measured) if (!current.has(node)) resize.unobserve(node);
     measured.clear();

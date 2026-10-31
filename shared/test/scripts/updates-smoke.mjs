@@ -105,6 +105,27 @@ const waitPhase = (page, phase) =>
     async (phase) => (await window.desktop.updates({ op: 'status' })).phase === phase,
     phase,
   );
+const assertFeedbackAlignment = async (settings) => {
+  const metrics = await settings.locator('.updates-footer').evaluate((footer) => {
+    const first = footer.querySelector('.updates-notes > p');
+    const link = footer.querySelector('.updates-feedback');
+    const textBox = (element) => {
+      const node = [...element.childNodes].find(
+        (node) => node.nodeType === Node.TEXT_NODE && node.textContent.trim(),
+      );
+      const range = document.createRange();
+      range.selectNodeContents(node);
+      return range.getClientRects()[0];
+    };
+    return {
+      textTop: textBox(first).top,
+      linkTop: textBox(link).top,
+      overflow: footer.scrollWidth > footer.clientWidth + 1,
+    };
+  });
+  assert.ok(Math.abs(metrics.textTop - metrics.linkTop) < 1, JSON.stringify(metrics));
+  assert.equal(metrics.overflow, false);
+};
 const assertLoadingMotion = async (page, button) => {
   assert.equal(await button.isDisabled(), true);
   const spinner = button.locator('span:has(> svg)');
@@ -150,12 +171,20 @@ try {
     });
   let settings = await openUpdates(page);
   await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
+  await assertFeedbackAlignment(settings);
+  for (const width of [860, 1280]) {
+    await (
+      await app.browserWindow(page)
+    ).evaluate((win, width) => win.setContentSize(width, 800), width);
+    await assertFeedbackAlignment(settings);
+  }
   await app.evaluate(() => {
     globalThis.updateDriver.behavior = 'pending';
   });
   await settings.getByRole('button', { name: '检查更新', exact: true }).click();
   const checking = settings.getByRole('button', { name: '检查中…', exact: true });
   await checking.waitFor();
+  await assertFeedbackAlignment(settings);
   for (const theme of ['light', 'dark']) {
     await page.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
@@ -202,12 +231,14 @@ try {
   });
   await settings.getByRole('button', { name: '检查更新', exact: true }).click();
   await settings.getByText('发现新版本 0.2.0', { exact: true }).waitFor();
+  await assertFeedbackAlignment(settings);
   await assertInitialDownloadProgress(settings.locator('.download-button'), async () => {
     await settings.getByRole('button', { name: '下载更新', exact: true }).click();
     await waitPhase(page, 'downloading');
   });
   await app.evaluate(() => globalThis.updateDriver.emit('download-progress', { percent: 37.8 }));
   await settings.getByText('正在下载更新 37%', { exact: true }).waitFor();
+  await assertFeedbackAlignment(settings);
   await assertDownloadButton(
     page,
     settings.getByRole('button', { name: '更新，取消下载', exact: true }),
@@ -231,6 +262,7 @@ try {
     globalThis.updateDriver.finishDownload();
   });
   await settings.getByRole('button', { name: '重启并更新', exact: true }).waitFor();
+  await assertFeedbackAlignment(settings);
   const configuration = {
     mode: 'local',
     options: { sources: ['system'] },

@@ -1,5 +1,4 @@
-// Original material curve, shared by the main window and the independent
-// interview background. Internal glass surfaces use the shared chat material.
+// Original material curve, shared by the main window and interview surfaces.
 const profiles = [
   {
     value: 0,
@@ -44,11 +43,9 @@ const profiles = [
 ] as const;
 type ProfileKey = Exclude<keyof (typeof profiles)[number], 'value'>;
 
-// Windows-only settings from 0.5.9. Other glass retains the shared preset below.
+// Windows sidebar preset. Interview materials have their own shared setting.
 export const windowsMaterialTransparency = {
   sidebar: 60,
-  interviewBackground: 60,
-  interviewBubbles: 60,
 } as const;
 
 // Shared preview preset, explicitly enabled for both desktop platforms.

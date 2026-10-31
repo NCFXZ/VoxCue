@@ -157,13 +157,18 @@
   border-color: color-mix(in srgb, var(--foreground) 12%, transparent);
   box-shadow: var(--shadow-raised);
 }
-:root.web-materials .floating-toolbar,
 :root.web-materials .floating-notices > div {
-  /* Match the combined bubble/panel opacity for standalone chrome, including
-     the toolbar when collapsed and notices displayed below the panels. */
+  /* Standalone notices keep their original combined material. */
   background:
     linear-gradient(var(--web-material-fill), var(--web-material-fill)),
-    rgb(var(--frosted-panel-tint) / var(--frosted-panel-opacity));
+    rgb(var(--frosted-panel-tint) / var(--interview-chrome-panel-opacity));
+}
+:root.web-materials {
+  --interview-chrome-panel-opacity: var(--interview-chrome-panel-light);
+}
+:root.web-materials.dark,
+.web-materials .interview-preview-scene.dark {
+  --interview-chrome-panel-opacity: var(--interview-chrome-panel-dark);
 }
 .web-materials :is(.chat-composer .composer, .floating-composer) {
   border-radius: 40px;
@@ -189,33 +194,38 @@
 .web-materials.dark .interview-preview-shell {
   --interview-chrome-surface: color-mix(in srgb, var(--surface) 90%, white);
 }
-:root.web-materials[data-material-platform='windows']
-  :is(.floating-shell, .interview-preview-shell) {
-  --interview-bubble-opacity: var(--windows-interview-bubble-light);
+:root.web-materials :is(.floating-shell, .interview-preview-shell) {
+  --interview-bubble-opacity: var(--interview-bubble-light);
 }
-:root.web-materials[data-material-platform='windows']
+:root.web-materials
   :is(.floating-shell, .interview-preview-shell)
-  :is(.transcript-item > p, .floating-question, .answer-bubble) {
+  :is(.floating-toolbar, .transcript-item > p, .floating-question, .answer-bubble) {
   --web-material-fill: color-mix(
     in srgb,
     var(--surface) calc(var(--interview-bubble-opacity) * 100%),
     transparent
   );
 }
-:root.web-materials[data-material-platform='windows'] .dark .interview-preview-shell,
-:root.web-materials.dark[data-material-platform='windows']
-  :is(.floating-shell, .interview-preview-shell) {
-  --interview-bubble-opacity: var(--windows-interview-bubble-dark);
+:root.web-materials .dark .interview-preview-shell,
+:root.web-materials.dark :is(.floating-shell, .interview-preview-shell) {
+  --interview-bubble-opacity: var(--interview-bubble-dark);
 }
 :root.web-materials
   :is(.floating-shell, .interview-preview-shell)
-  :is(.transcript-item > p, .floating-question, .answer-bubble, .interview-answer-failure) {
+  :is(
+    .floating-toolbar,
+    .transcript-item > p,
+    .floating-question,
+    .answer-bubble,
+    .interview-answer-failure
+  ) {
   background: var(--web-material-fill);
   -webkit-backdrop-filter: var(--web-material-filter);
   backdrop-filter: var(--web-material-filter);
 }
 :root.web-materials[data-interview-transparency='0']
-  :is(.floating-shell, .interview-preview-shell) {
+  :is(.floating-shell, .interview-preview-shell)
+  :is(.floating-panel, .floating-toolbar) {
   --web-material-filter: none;
 }
 .web-materials
@@ -284,39 +294,30 @@
 .web-materials .settings-content-body::-webkit-scrollbar-track {
   margin-top: var(--panel-header-height, 72px);
 }
-.record-transcript-scroll {
+:is(.record-transcript-scroll, .interview-preview-background) {
   scrollbar-width: auto;
 }
-.record-transcript-scroll::-webkit-scrollbar {
+:is(.record-transcript-scroll, .interview-preview-background)::-webkit-scrollbar {
   width: 6px;
 }
 .history-detail:has(.record-answer-panel[data-open='true'])
-  .record-transcript-scroll::-webkit-scrollbar-thumb {
+  .record-transcript-scroll::-webkit-scrollbar-thumb,
+.interview-preview-background::-webkit-scrollbar-thumb {
   border: 2px solid transparent;
   background: color-mix(in srgb, var(--foreground) 17%, transparent);
   background-clip: padding-box;
   border-radius: 999px;
 }
 .history-detail:has(.record-answer-panel[data-open='true'])
-  .record-transcript-scroll::-webkit-scrollbar-thumb:hover {
+  .record-transcript-scroll::-webkit-scrollbar-thumb:hover,
+.interview-preview-background::-webkit-scrollbar-thumb:hover {
   background-color: color-mix(in srgb, var(--foreground) 34%, transparent);
 }
 .web-materials .floating-panel > header {
   position: relative;
   isolation: isolate;
   border-bottom: 0;
-}
-.web-materials .floating-panel > header::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: -1;
-  pointer-events: none;
-  opacity: var(--floating-header-opacity, 0);
-  background: var(--web-material-fill);
-  -webkit-backdrop-filter: var(--web-material-filter);
-  backdrop-filter: var(--web-material-filter);
-  border-bottom: 1px solid var(--border);
+  background: transparent;
 }
 .web-materials .floating-notices > div {
   -webkit-backdrop-filter: var(--web-material-filter);
@@ -325,10 +326,10 @@
 }
 /* Like chat, the scroller fills the panel behind fixed chrome and the composer.
    Measured padding leaves the first/last content reachable above those controls. */
-.web-materials .floating-panels .floating-panel {
+.web-materials .floating-panels .floating-panel,
+.web-materials .interview-preview-scene:not(.login-interview-preview) .floating-panel {
   position: relative;
 }
-.web-materials :is(.floating-panels, .interview-preview-shell) .floating-panel > header::before,
 .web-materials :is(.floating-panels, .interview-preview-shell) .floating-composer {
   background: var(--interview-chrome-fill);
 }
@@ -336,14 +337,6 @@
   position: absolute;
   inset: 0;
   pointer-events: none;
-}
-.web-materials .floating-chrome-base::before {
-  content: '';
-  position: absolute;
-  inset: 0 0 auto;
-  height: var(--floating-header-height, 56px);
-  background: var(--interview-chrome-surface);
-  opacity: var(--floating-header-opacity, 0);
 }
 .web-materials .floating-answer > .floating-chrome-base::after {
   content: '';
@@ -386,19 +379,27 @@
   display: flow-root;
 }
 .web-materials .floating-panels .floating-scroll {
+  --floating-top-fade: 36px;
   position: absolute;
   inset: 0;
   padding-top: calc(
-    var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px) + 18px
+    var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px) +
+      var(--floating-top-fade)
   );
   padding-bottom: calc(var(--floating-composer-height, 0px) + 42px);
   scroll-padding-top: calc(
-    var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px) + 18px
+    var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px) +
+      var(--floating-top-fade)
   );
   scroll-padding-bottom: calc(var(--floating-composer-height, 0px) + 34px);
-  /* Match chat's last 36px fade, but preserve the transparent interview backdrop.
-     No top or circular cutouts: the fixed sibling surfaces blur actual content. */
-  mask-image: linear-gradient(to bottom, black calc(100% - 36px), transparent);
+  /* Fade content below the transparent header; the backdrop itself stays visible. */
+  mask-image: linear-gradient(
+    to bottom,
+    transparent var(--floating-header-height, 56px),
+    black calc(var(--floating-header-height, 56px) + var(--floating-top-fade)),
+    black calc(100% - 36px),
+    transparent
+  );
 }
 .web-materials .floating-panels .floating-scroll::-webkit-scrollbar-track {
   margin-top: calc(var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px));
@@ -446,10 +447,11 @@
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   :root.web-materials,
+  :root.web-materials.dark,
   :root.web-materials .interview-preview-shell,
-  :root.web-materials[data-material-platform='windows']
+  :root.web-materials
     :is(.floating-shell, .interview-preview-shell)
-    :is(.transcript-item > p, .floating-question, .answer-bubble) {
+    :is(.floating-toolbar, .transcript-item > p, .floating-question, .answer-bubble) {
     --web-material-fill: var(--surface);
     --web-material-filter: none;
     --interview-chrome-surface: var(--surface);
@@ -466,9 +468,9 @@
 }
 :root.web-materials[data-frosted-transparency='0'],
 :root.web-materials[data-frosted-transparency='0'] .interview-preview-shell,
-:root.web-materials[data-frosted-transparency='0'][data-material-platform='windows']
+:root.web-materials[data-frosted-transparency='0']
   :is(.floating-shell, .interview-preview-shell)
-  :is(.transcript-item > p, .floating-question, .answer-bubble) {
+  :is(.floating-toolbar, .transcript-item > p, .floating-question, .answer-bubble) {
   --web-material-fill: var(--surface);
   --web-material-filter: none;
   --interview-chrome-surface: var(--surface);

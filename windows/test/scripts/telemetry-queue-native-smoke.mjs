@@ -79,6 +79,38 @@ const releaseExecutable=await holdExclusiveFiles([isolatedExecutable]);
 try {
   await assert.rejects(async()=>{const child=spawnTestProcess(isolatedExecutable,['desktop'],{stdio:'ignore',windowsHide:true});return new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',resolve);});},error=>['EACCES','EBUSY','EPERM'].includes(error.code),'Exclusive guard must prevent native process creation before credentials could be read');
 } finally {await releaseExecutable();}
+const releaseBusy = await holdExclusiveFiles([isolatedExecutable]);
+try {
+  await assert.rejects(
+    holdExclusiveFiles([isolatedExecutable]),
+    /Exclusive guard cannot lock/,
+    'A persistently busy executable must still block UI launch',
+  );
+  const waiting = holdExclusiveFiles([isolatedExecutable]);
+  await new Promise((resolve) => setTimeout(resolve, 100));
+  await releaseBusy();
+  const releaseAcquired = await waiting;
+  try {
+    await assert.rejects(
+      async () => {
+        const child = spawnTestProcess(isolatedExecutable, ['desktop'], {
+          stdio: 'ignore',
+          windowsHide: true,
+        });
+        return new Promise((resolve, reject) => {
+          child.once('error', reject);
+          child.once('exit', resolve);
+        });
+      },
+      (error) => ['EACCES', 'EBUSY', 'EPERM'].includes(error.code),
+      'A lock acquired after waiting must still prevent process creation',
+    );
+  } finally {
+    await releaseAcquired();
+  }
+} finally {
+  await releaseBusy();
+}
 const unlocked=spawnSync(isolatedExecutable,['desktop'],{encoding:'utf8',windowsHide:true});
 assert.equal(unlocked.status,0,unlocked.stderr);
 assert.equal(JSON.parse(unlocked.stdout).ownerConsole,true);

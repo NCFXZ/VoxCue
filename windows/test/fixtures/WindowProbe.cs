@@ -125,9 +125,17 @@ class WindowProbe {
         var held=new List<Microsoft.Win32.SafeHandles.SafeFileHandle>();
         try {
           for(int i=1;i<args.Length;i++) {
-            var file=CreateFileW(@"\\?\"+args[i],0x80000000,0,IntPtr.Zero,3,0x80,IntPtr.Zero);
-            if(file.IsInvalid){file.Dispose();throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());}
-            held.Add(file);
+            // Process exit can precede the kernel releasing its executable section.
+            // Wait only for sharing/lock conflicts; never launch without this lock.
+            var deadline=DateTime.UtcNow.AddSeconds(2);
+            while(true) {
+              var file=CreateFileW(@"\\?\"+args[i],0x80000000,0,IntPtr.Zero,3,0x80,IntPtr.Zero);
+              if(!file.IsInvalid){held.Add(file);break;}
+              int error=Marshal.GetLastWin32Error();file.Dispose();
+              if((error!=32&&error!=33)||DateTime.UtcNow>=deadline)
+                throw new System.ComponentModel.Win32Exception(error,"Exclusive guard cannot lock: "+args[i]);
+              Thread.Sleep(25);
+            }
           }
           Print(new{holding=true});Console.ReadLine();
         } finally {foreach(var file in held)file.Dispose();}
