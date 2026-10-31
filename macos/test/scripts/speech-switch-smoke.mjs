@@ -141,7 +141,7 @@ app.whenReady().then(async()=>{
  try{
   assert.equal((await host.call({op:'start',options})).state,'running');
   await host.send({test:'voice',enabled:true});
-  for(const [model,device] of [['qwen','metal'],['qwen','cpu'],['qwen','metal'],['paraformer','cpu'],['qwen','metal']]){
+  for(const [model,device] of [['qwen','metal'],['paraformer','cpu'],['qwen','cpu'],['qwen','metal'],['paraformer','cpu'],['qwen','metal']]){
    const onset=events.length;
    await wait(()=>events.slice(onset).some(e=>e.type==='speech-start'));
    const before=await host.send({test:'stats'}),mark=events.length;

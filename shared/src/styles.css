@@ -4011,7 +4011,7 @@ details[open] > summary > .disclosure-chevron {
 }
 .floating-toolbar {
   width: max-content;
-  height: 48px;
+  height: auto;
   max-width: 100%;
   padding: 7px;
   gap: 8px;
@@ -6051,6 +6051,7 @@ h4,
   gap: 10px;
 }
 .login-interview-preview .floating-toolbar {
+  height: 48px;
   gap: 8px;
   padding: 6px 10px;
 }

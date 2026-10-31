@@ -48,7 +48,7 @@ try {
   if (native.granted) assert.equal(native.requestResult, true);
   checks.push('实际 arm64 Node-API 在 Electron 主进程读取屏幕授权；未授权时不自动请求');
   await installUiAccount(app, { speech: true, components: true });
-  await app.evaluate(({ app, desktopCapturer }) => {
+  await app.evaluate(({ app, desktopCapturer, systemPreferences }) => {
     if (!app.getPath('userData').includes('/test/results/screen-permission-'))
       throw Error('Non-test profile');
     const require = process
@@ -66,7 +66,15 @@ try {
       requests: 0,
       settings: 0,
       captures: 0,
+      preparations: 0,
     };
+    const mediaStatus = systemPreferences.getMediaAccessStatus.bind(systemPreferences);
+    systemPreferences.getMediaAccessStatus = (kind) =>
+      kind === 'screen'
+        ? globalThis.screenFixture.granted
+          ? 'granted'
+          : 'denied'
+        : mediaStatus(kind);
     const { ScreenPermission } = require(root + 'macos/electron/screenPermission.js');
     const original = ScreenPermission.prototype.call;
     ScreenPermission.prototype.call = function (action) {
@@ -114,7 +122,18 @@ try {
       model: 'Synthetic',
       ...(call.op === 'devices' ? { devices: inventory } : {}),
     });
-    desktopCapturer.getSources = async () => {
+    desktopCapturer.getSources = async (options) => {
+      if (options.thumbnailSize.width === 0 && options.thumbnailSize.height === 0) {
+        require('node:assert/strict').deepEqual(options, {
+          types: ['screen'],
+          thumbnailSize: { width: 0, height: 0 },
+          fetchWindowIcons: false,
+        });
+        if (!globalThis.screenFixture.granted)
+          throw Error('Denied permission must skip preparation');
+        globalThis.screenFixture.preparations++;
+        return [];
+      }
       globalThis.screenFixture.captures++;
       throw Error('Permission flows must not capture images');
     };
@@ -144,6 +163,7 @@ try {
   const closed = interview.waitForEvent('close');
   await interview.evaluate(() => window.desktop.confirmInterviewEnd());
   await closed;
+  assert.equal(await app.evaluate(() => globalThis.screenFixture.preparations), 0);
   checks.push('屏幕权限单独显示；未授权仍可通过真实主进程打开纯语音浮窗，不截图');
   await start();
   assert.equal(await dialog.getByRole('button', { name: '前往面试设置', exact: true }).count(), 0);
@@ -173,6 +193,26 @@ try {
   await page.waitForFunction(() => document.documentElement.classList.contains('dark'));
   await panel.screenshot({ animations: 'disabled' });
   checks.push('面试设置只有点击申请才发起请求；查询结果驱动状态，浅深主题可见（合成状态）');
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await start();
+  const grantedOpened = app.waitForEvent('window');
+  await dialog.getByRole('button', { name: '确认开始', exact: true }).click();
+  const grantedInterview = await grantedOpened;
+  await grantedInterview.locator('.floating-brand').waitFor();
+  await app.evaluate(async () => {
+    const deadline = Date.now() + 5000;
+    while (!globalThis.screenFixture.preparations && Date.now() < deadline)
+      await new Promise((resolve) => setTimeout(resolve, 20));
+  });
+  assert.equal(await app.evaluate(() => globalThis.screenFixture.preparations), 1);
+  assert.equal(await app.evaluate(() => globalThis.screenFixture.captures), 0);
+  const grantedClosed = grantedInterview.waitForEvent('close');
+  await grantedInterview.evaluate(() => window.desktop.confirmInterviewEnd());
+  await grantedClosed;
+  checks.push('未授权跳过准备；已授权建窗仅枚举零缩略图元数据，不读取图片');
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '面试设置', exact: true }).click();
   await app.evaluate(() => {
     globalThis.screenFixture.granted = false;
     globalThis.screenFixture.grantOnRequest = false;
@@ -201,6 +241,7 @@ try {
   const fixture = await app.evaluate(() => globalThis.screenFixture);
   assert.equal(fixture.requests, 2);
   assert.equal(fixture.captures, 0);
+  assert.equal(fixture.preparations, 1);
   await app.evaluate(() => {
     globalThis.screenFixture.notRequired = true;
   });

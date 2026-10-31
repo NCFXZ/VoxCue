@@ -1,7 +1,7 @@
 import { connectUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -424,6 +424,7 @@ try {
     await page.locator('.settings-content-body').evaluate((e) => e.scrollTop),
     outerScroll,
   );
+  await focusUiWindow(app, page);
   await background.focus();
   await page.keyboard.press('End');
   await page.waitForFunction(() => {
@@ -431,17 +432,20 @@ try {
     return node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
   });
   await capture(settings.locator('.interview-preview-scene'), 'preview-color-background');
-  await page.keyboard.press('Home');
+  await focusUiWindow(app, page);
+  await background.focus();
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowUp' : 'Home');
   await page
     .waitForFunction(() => document.querySelector('.interview-preview-background').scrollTop === 0)
     .catch(async (error) => {
       console.error(
-        'Preview Home diagnostic',
+        'Preview keyboard diagnostic',
         await background.evaluate((node) => ({
           top: node.scrollTop,
           height: node.clientHeight,
           scrollHeight: node.scrollHeight,
           active: document.activeElement?.className,
+          focused: document.hasFocus(),
           scale: devicePixelRatio,
         })),
       );

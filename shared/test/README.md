@@ -1,12 +1,14 @@
 当前客户端0.6.6范围以`PROGRESS.md`和[Mac 0.6.5→0.6.6逐项交接](../docs/MACOS_0.6.6_HANDOFF.md)为准；下文旧版本章节中的“当前/本轮”均属历史。本轮执行全部单测、共享功能与600秒ASR长稳、Windows原生/五档DPI、安全对抗、生产依赖审计及owner临时验包。服务端固定0.5.3/schema 2只读，普通UI/包在导入main前隔离账号、统计与凭据助手，不采样物理音频。公开模型/音频现可在本平台`.cache`校验后复用，执行副本、profile、数据库、截图和结果仍退出清理，不提交缓存或测试成绩。弃用的speech-model-check、speech-device-check、speech-reliability、speech-restart-native源码及命令已删除；有效硬件专项保留但不自动运行。
 
-Mac接续另运行`macos/test/scripts/telemetry-queue-native-smoke.mjs`验证POSIX原子替换、真实写入拒绝与并发合并；`cloud-native-vault-smoke.mjs`使用显式临时Keychain核对账户和统计凭据的原生加密/重启/容量边界。`ui-refinement-matrix.mjs`纳入0.6.5扫光、知识库焦点、本地账户与共享界面五档缩放；普通Mac入口导入main前使用mock Keychain并拒绝正式助手，正式包启动前只移除owner临时私有副本中凭据/AI运行时的可执行权限，关闭后恢复，签名字节与Chromium沙箱保持。真实助手只用于明确隔离的原生专项，不将普通UI替身算作原生加密成绩。
+Mac 0.6.6的`screenshot-performance.mjs --native --prewarm`使用自有不透明简易全屏窗口覆盖所有显示器，每次取源前重新核对覆盖/位置/透明度，要求已有屏幕授权，按显示器颜色空间直接绘制合成色块，保留严格通道误差，验证当前帧与取消；取消后等待系统读取结束再撤去遮罩，超时终止自有宿主，不保存或外发像素。`--platform`仍仅支持Windows原生端口及其防捕获断言。Mac此项不宣称相同防捕获保证。屏幕权限夹具分别统计零缩略图元数据准备和真实采图，未授权必须跳过准备；面试字号夹具的Mac键盘回顶使用⌘↑。
+
+Mac接续另运行`macos/test/scripts/telemetry-queue-native-smoke.mjs`验证POSIX原子替换、真实写入拒绝与并发合并；`cloud-native-vault-smoke.mjs`使用显式临时Keychain核对账户和统计凭据的原生加密/重启/容量边界。`ui-refinement-matrix.mjs`纳入0.6.6面试字号/实际像素材质/胶囊/设置排版/反馈基线，以及扫光、知识库焦点、本地账户与共享界面五档缩放；普通Mac入口导入main前使用mock Keychain并拒绝正式助手，正式包启动前只移除owner临时私有副本中凭据/AI运行时的可执行权限，关闭后恢复，签名字节与Chromium沙箱保持。真实助手只用于明确隔离的原生专项，不将普通UI替身算作原生加密成绩。
 
 0.6.6构建依赖安全入口为`build-globs.test.ts`、`pnpm audit`及owner临时NSIS/便携验包；验证对抗模式有界、正常中文/花括号匹配、glob取消后停止I/O和打包资产完整。共享策略只定向修复构建链，运行时SDK/模型保持；Mac在本机生成对应锁，不复制Windows锁，见交接C052–C056。
 
 0.6.6的Qwen→Paraformer交接以全部已接收包ACK为追平条件，交接总量仍受30秒绝对上限保护，随后恢复严格2秒预算；不沿用下文历史章节中“刚降至2秒便结束交接”的旧断言。`speech-progress.test.ts`覆盖双路边界、乱序ACK及追平后限额；真实模型入口使用已校验缓存独立复制，Windows为`qwen-installed-smoke.mjs`，显式指定`VOXCUE_TEST_COMPONENT_CACHE`与现有`VOXCUE_PYTHON`。Windows包内UI守卫取得独占锁后才启动；installer-branding/engine每次读取或操作前核对解锁的owner控制台。
 
-`macos/test/scripts/speech-switch-smoke.mjs --download`只下载现有目录/hash指定的Paraformer、Qwen和Aligner，在owner临时目录使用固定公开音频验证真实识别器切换；采集端口为合成输入，保留沙箱，不采样物理设备。`shimmer-smoke.mjs`对浅深色正常/最小窗口的真实截断标题连续观察至少两轮1秒扫过及2.5秒停顿，其他长度分别逐帧观察完整扫过。
+`macos/test/scripts/speech-switch-smoke.mjs --download`只下载现有目录/hash指定的Paraformer、Qwen和Aligner，在owner临时目录使用固定公开音频验证六次真实识别器切换（包含两次Qwen→Paraformer）；采集端口为合成输入，保留沙箱，不采样物理设备。`shimmer-smoke.mjs`对浅深色正常/最小窗口的真实截断标题连续观察至少两轮1秒扫过及2.5秒停顿，其他长度分别逐帧观察完整扫过。
 
 # 0.6.3本地账户、独立导出与统计
 

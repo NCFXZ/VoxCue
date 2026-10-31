@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
 import { assertDownloadButton, assertInitialDownloadProgress } from './assert-download-button.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
+import { captureRequested } from './capture-requested.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/updates-')));
@@ -105,6 +106,7 @@ const waitPhase = (page, phase) =>
     async (phase) => (await window.desktop.updates({ op: 'status' })).phase === phase,
     phase,
   );
+let feedbackCapture = 0;
 const assertFeedbackAlignment = async (settings) => {
   const metrics = await settings.locator('.updates-footer').evaluate((footer) => {
     const first = footer.querySelector('.updates-notes > p');
@@ -125,6 +127,7 @@ const assertFeedbackAlignment = async (settings) => {
   });
   assert.ok(Math.abs(metrics.textTop - metrics.linkTop) < 1, JSON.stringify(metrics));
   assert.equal(metrics.overflow, false);
+  await captureRequested(settings, 'updates-feedback-' + ++feedbackCapture);
 };
 const assertLoadingMotion = async (page, button) => {
   assert.equal(await button.isDisabled(), true);

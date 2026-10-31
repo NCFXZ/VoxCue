@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "0.6.5",
+  "version": "0.6.6",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -32,7 +32,6 @@
     "check:architecture": "node ../shared/test/scripts/check-architecture.mjs",
     "download:speech": "node ../shared/scripts/download-speech-models.mjs",
     "download:rag": "node ../shared/scripts/download-rag-models.mjs",
-    "test:speech:model": "node ../shared/test/scripts/run-electron-node.mjs ../shared/test/scripts/speech-model-check.mjs",
     "test:speech:soak": "node ../shared/test/scripts/run-electron-node.mjs ../shared/test/scripts/speech-soak.mjs --seconds=600",
     "test:conversations:status": "node ../shared/test/scripts/conversation-status-smoke.mjs",
     "test:login:entry": "node ../shared/test/scripts/login-entry-smoke.mjs",

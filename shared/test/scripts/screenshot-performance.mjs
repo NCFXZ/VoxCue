@@ -8,8 +8,9 @@ const native = process.argv.includes('--native');
 const prewarm = process.argv.includes('--prewarm');
 const platformCapture = process.argv.includes('--platform');
 assert.ok(!platformCapture || native, 'Platform capture requires the owned native desktop');
-if (native)
-  assert.equal(process.platform, 'win32', 'Native probe requires verified Windows screen covers');
+if (native) assert.ok(['win32', 'darwin'].includes(process.platform));
+if (platformCapture)
+  assert.equal(process.platform, 'win32', 'Native platform port is Windows-only');
 const entry = path.join(testRoot, 'screenshot-performance.cjs');
 await writeFile(
   entry,
@@ -19,7 +20,10 @@ app.whenReady().then(async () => {
   globalThis.captureCovers = [];
   for (const display of screen.getAllDisplays()) {
     const win = new BrowserWindow({
-      ...display.bounds, show:false, frame:false, fullscreen:${native},
+      ...display.bounds, show:false, frame:false,
+      fullscreen:${native && process.platform === 'win32'},
+      simpleFullscreen:${native && process.platform === 'darwin'},
+      enableLargerThanScreen:true,
       backgroundColor:'#345c6b',
       webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false}
     });
@@ -30,6 +34,7 @@ app.whenReady().then(async () => {
     ));
     win.setAlwaysOnTop(true, 'screen-saver');
     win.show();
+    if (${native && process.platform === 'darwin'}) win.setSimpleFullScreen(true);
   }
   globalThis.captureCoversReady = true;
 });
@@ -43,11 +48,12 @@ const app = await electron.launch({
     VITE_DEV_SERVER_URL: '',
   },
 });
+const deadline = setTimeout(() => app.process().kill('SIGTERM'), 60000);
 try {
   await app.firstWindow();
   const result = await app.evaluate(
     async (
-      { app, BrowserWindow, screen, desktopCapturer, nativeImage },
+      { app, BrowserWindow, screen, desktopCapturer, nativeImage, systemPreferences },
       { native, prewarm, platformCapture },
     ) => {
       const until = performance.now() + 5000;
@@ -55,29 +61,43 @@ try {
         await new Promise((resolve) => setTimeout(resolve, 20));
       const covers = globalThis.captureCovers;
       const displays = screen.getAllDisplays();
+      const verifyCovers = () => {
+        if (
+          native &&
+          (covers.length !== displays.length ||
+            covers.some((win, i) => {
+              const bounds = win.getBounds(),
+                expected = displays[i].bounds;
+              return (
+                !win.isVisible() ||
+                !(process.platform === 'darwin' ? win.isSimpleFullScreen() : win.isFullScreen()) ||
+                win.getOpacity() !== 1 ||
+                ['x', 'y', 'width', 'height'].some((key) => bounds[key] !== expected[key])
+              );
+            }))
+        )
+          throw Error(
+            'Every display must be fully covered by an owned opaque synthetic window: ' +
+              JSON.stringify({
+                displays: displays.map((d) => d.bounds),
+                covers: covers.map((win) => ({
+                  visible: win.isVisible(),
+                  fullscreen: win.isFullScreen(),
+                  simpleFullscreen: win.isSimpleFullScreen(),
+                  opacity: win.getOpacity(),
+                  bounds: win.getBounds(),
+                })),
+              }),
+          );
+      };
+      verifyCovers();
       if (
         native &&
-        (covers.length !== displays.length ||
-          covers.some((win, i) => {
-            const bounds = win.getBounds(),
-              expected = displays[i].bounds;
-            return (
-              !win.isVisible() ||
-              !win.isFullScreen() ||
-              ['x', 'y', 'width', 'height'].some((key) => bounds[key] !== expected[key])
-            );
-          }))
+        process.platform === 'darwin' &&
+        systemPreferences.getMediaAccessStatus('screen') !== 'granted'
       )
         throw Error(
-          'Every display must be fully covered by an owned opaque synthetic window: ' +
-            JSON.stringify({
-              displays: displays.map((d) => d.bounds),
-              covers: covers.map((win) => ({
-                visible: win.isVisible(),
-                fullscreen: win.isFullScreen(),
-                bounds: win.getBounds(),
-              })),
-            }),
+          'Native probe requires existing screen authorization; it never requests permission',
         );
       for (const win of covers)
         await win.webContents.executeJavaScript(
@@ -101,6 +121,7 @@ try {
         matching: screen.getDisplayMatching,
       };
       let events = [];
+      const nativeReads = new Set();
       const wrap = (image) => ({
         isEmpty: () => image.isEmpty(),
         getSize: () => image.getSize(),
@@ -147,14 +168,22 @@ try {
           bitmap[i + 2] = (seed >>> 16) & 255;
           bitmap[i + 3] = 255;
         }
-        synthetic = nativeImage.createFromBitmap(bitmap, { width, height });
+        synthetic = originals.fromBitmap(bitmap, { width, height });
         screen.getDisplayMatching = () => ({ id: 1, size: { width, height }, scaleFactor: 1 });
       }
       desktopCapturer.getSources = async (options) => {
+        if (native) verifyCovers();
         const start = performance.now();
-        const sources = native
-          ? await originals.sources.call(desktopCapturer, options)
-          : [{ display_id: '1', thumbnail: synthetic }];
+        const pending = native
+          ? originals.sources.call(desktopCapturer, options)
+          : Promise.resolve([{ display_id: '1', thumbnail: synthetic }]);
+        if (native) nativeReads.add(pending);
+        let sources;
+        try {
+          sources = await pending;
+        } finally {
+          nativeReads.delete(pending);
+        }
         events.push({
           stage: 'capture',
           ms: performance.now() - start,
@@ -174,8 +203,17 @@ try {
         }
         for (let run = 0; run < 3; run++) {
           const color = ['#345c6b', '#6b4034', '#3f6b34'][run];
+          const colorSpace = screen.getDisplayMatching(covers[0].getBounds()).colorSpace;
+          // Compare raw channel values in the display's space. ColorSync maps
+          // sRGB into Display P3 before macOS captures the window.
+          const paintedColor =
+            native && process.platform === 'darwin' && /P3/i.test(colorSpace)
+              ? 'color(display-p3 ' +
+                [1, 3, 5].map((at) => parseInt(color.slice(at, at + 2), 16) / 255).join(' ') +
+                ')'
+              : color;
           await covers[0].webContents.executeJavaScript(
-            `document.documentElement.style.backgroundColor = '${color}'`,
+            `document.documentElement.style.backgroundColor = '${paintedColor}'`,
           );
           await new Promise((resolve) => setTimeout(resolve, 150));
           events = [];
@@ -191,13 +229,25 @@ try {
             const image = originals.fromBuffer(Buffer.from(result.file.bytes));
             const size = image.getSize();
             const bitmap = image.toBitmap();
-            const offset = (20 * size.width + 20) * 4;
+            const bounds = covers[0].getBounds();
+            const x = Math.floor((20 * size.width) / bounds.width);
+            const y = Math.floor(size.height / 2);
+            const offset = (y * size.width + x) * 4;
             const expected = [color.slice(5, 7), color.slice(3, 5), color.slice(1, 3)].map(
               (value) => parseInt(value, 16),
             );
             if (expected.some((value, index) => Math.abs(bitmap[offset + index] - value) > 1))
               throw Error(
-                'Capture must contain the current synthetic frame, with correct BGRA channels',
+                'Capture must contain the current synthetic frame, with correct BGRA channels: ' +
+                  JSON.stringify({
+                    expected,
+                    actual: [...bitmap.subarray(offset, offset + 3)],
+                    colorSpace,
+                    paintedColor,
+                    size,
+                    x,
+                    y,
+                  }),
               );
           }
           runs.push({
@@ -207,7 +257,7 @@ try {
             events: [...events],
           });
         }
-        if (platformCapture) {
+        if (native) {
           const controller = new AbortController();
           const pending = captureInterviewScreenshot(
             covers[0],
@@ -224,6 +274,8 @@ try {
               if (error.name !== 'AbortError') throw error;
             },
           );
+        }
+        if (platformCapture) {
           const bounds = covers[0].getBounds();
           const overlay = new BrowserWindow({
             x: bounds.x + bounds.width - 300,
@@ -271,6 +323,9 @@ try {
           }
         }
       } finally {
+        // Electron cannot cancel its OS read. Keep every owned cover in place
+        // until a cancelled read settles, then discard its late result.
+        await Promise.allSettled([...nativeReads]);
         desktopCapturer.getSources = originals.sources;
         nativeImage.createFromBuffer = originals.fromBuffer;
         nativeImage.createFromBitmap = originals.fromBitmap;
@@ -280,7 +335,8 @@ try {
         kind: native ? 'native-owned-synthetic-desktop' : 'synthetic-4k-pixels',
         platformCapture,
         currentFramesVerified: native,
-        cancellationAndProtectionVerified: platformCapture,
+        cancellationVerified: native,
+        protectionVerified: platformCapture,
         runtime: process.versions.electron,
         prewarmMs,
         runs,
@@ -294,4 +350,5 @@ try {
     .evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().forEach((win) => win.destroy()))
     .catch(() => {});
   await app.close().catch(() => {});
+  clearTimeout(deadline);
 }
