@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import {
   boundImage,
@@ -97,7 +98,7 @@ export function InterviewImageCanvas({
       ref={canvas}
       className="interview-image-canvas"
       tabIndex={0}
-      aria-label="截图，两指滑动平移，捏合或 Ctrl 加滚轮缩放，鼠标拖拽，双击复位"
+      aria-label={t('截图，两指滑动平移，捏合或 Ctrl 加滚轮缩放，鼠标拖拽，双击复位')}
       data-zoomed={view.scale > 1 ? '' : undefined}
       data-dragging={dragging ? '' : undefined}
       onDoubleClick={() => apply(initialImageTransform)}

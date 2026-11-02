@@ -129,7 +129,7 @@ try {
         e.data.type === 'ai_request' && e.data.context === 'chat' && e.data.outcome === 'success',
     ),
   );
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const start = main.getByRole('dialog', { name: '开始面试', exact: true });
   const interviewOpened = app.waitForEvent('window');
   await start.getByRole('button', { name: '确认开始', exact: true }).click();

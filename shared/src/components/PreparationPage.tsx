@@ -1,3 +1,4 @@
+import { t, uiLocale } from '../i18n';
 import { componentPresentation } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
@@ -38,10 +39,10 @@ import type {
 } from '../../electron/contracts/speech';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { Modal } from './ui/modal';
-import { ProfileProposal, SkillUpdatePrompt } from './ProfileProposal';
+import { ProfileProposal } from './ProfileProposal';
+import { PreparationGuide } from './PreparationGuide';
+import { preparationActions, preparationStep } from '../services/preparationGuide';
 import { MarkdownContent } from './MarkdownContent';
-import { PlainTextContent } from './PlainTextContent';
-import { isSkillReply } from '../services/preparation';
 import { PersonalInfoPanel } from './PersonalInfoPanel';
 import { FollowLatestButton } from './FollowLatestButton';
 import { localKnowledge } from '../services/knowledge';
@@ -71,10 +72,12 @@ const screenAccessLabels = {
 export function PreparationPage({
   onComponentSettings,
   onSpeechSettings,
+  onAISettings,
   onDraftChange,
 }: {
   onComponentSettings?(): void;
   onSpeechSettings?(): void;
+  onAISettings?(): void;
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
@@ -230,16 +233,16 @@ export function PreparationPage({
   const closeInfo = () => {
     setInfoOpen(false);
     requestAnimationFrame(() =>
-      document.querySelector<HTMLButtonElement>('[aria-label="个人信息"]')?.focus(),
+      document.querySelector<HTMLButtonElement>(`[aria-label="${t('个人信息')}"]`)?.focus(),
     );
   };
   const askProfile = (prompt: string, uploadResume = false) => {
     state.setDraft([state.draft.trim(), prompt].filter(Boolean).join('\n\n'));
     setInfoOpen(false);
     requestAnimationFrame(() => {
-      document.querySelector<HTMLTextAreaElement>('[aria-label="聊天消息"]')?.focus();
+      document.querySelector<HTMLTextAreaElement>(`[aria-label="${t('聊天消息')}"]`)?.focus();
       if (uploadResume)
-        document.querySelector<HTMLInputElement>('[aria-label="添加聊天文件"]')?.click();
+        document.querySelector<HTMLInputElement>(`[aria-label="${t('添加聊天文件')}"]`)?.click();
     });
   };
   const submit = () => {
@@ -267,20 +270,61 @@ export function PreparationPage({
     void checkAccess(configuration);
   };
   const audioName = (source: 'system' | 'microphone') => {
-    if (!interviewConfiguration.options.sources.includes(source)) return '不使用麦克风';
+    if (!interviewConfiguration.options.sources.includes(source)) return t('不使用麦克风');
     const id = interviewConfiguration.options[source];
     if (
       accessReport?.checks.some(
         (check) => check.source === source && check.status === 'unavailable',
       )
     )
-      return `${id ? '所选' : '默认'}${source === 'system' ? '播放设备' : '麦克风'}不可用`;
+      return t(`${id ? '所选' : '默认'}${source === 'system' ? '播放设备' : '麦克风'}不可用`);
     return (
       interviewDevices.find(
         (device) => device.source === source && (id ? device.id === id : device.default),
-      )?.name ?? (source === 'system' ? '默认播放设备' : '默认麦克风')
+      )?.name ?? t(source === 'system' ? '默认播放设备' : '默认麦克风')
     );
   };
+  const guide = () => (
+    <PreparationGuide
+      actions={preparationActions(state.info, state.skillsNeedUpdate)}
+      step={preparationStep(state.info, state.skillsNeedUpdate)}
+      disabled={!state.chatsReady || state.streaming || connection.loading}
+      onAction={(action) => {
+        if (action === 'profile') {
+          state.dismissSkillUpdate();
+          openInfo();
+          return;
+        }
+        if (action === 'interview') {
+          state.dismissSkillUpdate();
+          if (!speechReady || (!!state.selectedKnowledgeBaseId && !ragReady))
+            onComponentSettings?.();
+          else beginInterview();
+          return;
+        }
+        if (action === 'skills') {
+          if (!connection.live) onAISettings?.();
+          else void state.generateSkills();
+          return;
+        }
+        state.dismissSkillUpdate();
+        if (action === 'upload')
+          askProfile(
+            t(
+              '请根据本次上传的简历整理摘要，保留教育与工作背景、职责、项目、关键技术和已有成果，准确区分个人贡献、团队成果及进行中事项。合并重复表述，不补造事实。仅提出简历摘要的待确认更新，不修改其他资料。如果本次摘要有变化，且提案与已保存资料合并后简历和JD摘要都非空，请在回复末尾问一句：确认保存后是否需要生成相关面试技能；已有技能时改为询问是否更新。本次不生成技能。',
+            ),
+            true,
+          );
+        else
+          askProfile(
+            t(
+              '请根据以下内容整理{0}摘要。简历保留个人经历、职责、项目、技术和成果；职位描述保留岗位定位、职责、任职要求及明确的优先条件。合并重复表述，保留事实和条件边界，不把岗位要求写成个人经历。仅提出该摘要的待确认更新，不修改其他资料。如果本次摘要有变化，且提案与已保存资料合并后简历和JD摘要都非空，请在回复末尾问一句：确认保存后是否需要生成相关面试技能；已有技能时改为询问是否更新。本次不生成技能。\n\n以下是{0}内容：\n',
+              [t(action === 'resume' ? '简历' : '职位描述')],
+            ),
+          );
+      }}
+    />
+  );
   const checkAccess = async (configuration: InterviewConfiguration) => {
     const attempt = ++accessAttempt.current;
     setCheckingAccess(true);
@@ -343,18 +387,18 @@ export function PreparationPage({
     <main ref={workspace} className="workspace preparation-workspace">
       <header className="page-toolbar">
         <div className="breadcrumb">
-          <strong>面试准备</strong>
+          <strong>{t('面试准备')}</strong>
         </div>
         <div className="toolbar-actions">
           <Button
             variant="ghost"
-            aria-label="个人信息"
+            aria-label={t('个人信息')}
             aria-expanded={infoOpen}
             aria-controls="personal-info-panel"
             onClick={() => (infoOpen ? closeInfo() : openInfo())}
           >
             <Person size={15} />
-            个人信息
+            {t('个人信息')}
           </Button>
           <Button
             className="interview-start-trigger"
@@ -370,25 +414,26 @@ export function PreparationPage({
             onClick={beginInterview}
           >
             <Play size={15} />
-            开始面试
+            {t('开始面试')}
           </Button>
         </div>
       </header>
       {confirmInterview && (
         <Modal
-          title="开始面试"
+          title={t('开始面试')}
           className="interview-start-dialog"
-          subtitle="音频、模型和显示设置可在面试中调整。"
+          subtitle={t('音频、模型和显示设置可在面试中调整。')}
           footer={
             <>
               <p className="interview-start-description">
-                音频仅在本机处理，不保存。
+                {t('音频仅在本机处理，不保存。')}
                 {interviewConfiguration.mode === 'local' &&
                   interviewConfiguration.aiEnabled &&
-                  ` 回答所需文字与资料会发送至 ${interviewProvider.dataRecipient}。`}
+                  t(' 回答所需文字与资料会发送至 {0}。', [interviewProvider.dataRecipient])}
               </p>
               <div className="interview-start-actions">
                 <Button
+                  style={uiLocale() === 'en' ? { width: startActionWidth } : undefined}
                   variant="outline"
                   data-autofocus
                   disabled={openingInterview}
@@ -398,7 +443,7 @@ export function PreparationPage({
                   }}
                 >
                   <X size={16} />
-                  取消
+                  {t('取消')}
                 </Button>
                 <Button
                   style={{ width: startActionWidth, paddingInline: 8 }}
@@ -429,7 +474,7 @@ export function PreparationPage({
                   }}
                 >
                   <Play size={15} />
-                  {openingInterview ? '正在打开…' : '确认开始'}
+                  {openingInterview ? t('正在打开…') : t('确认开始')}
                 </Button>
               </div>
             </>
@@ -441,60 +486,60 @@ export function PreparationPage({
             }
           }}
         >
-          <dl className="interview-start-summary" aria-label="当前面试设置">
+          <dl className="interview-start-summary" aria-label={t('当前面试设置')}>
             <div className="interview-start-knowledge">
-              <dt>面试知识库</dt>
-              <dd>{interviewKnowledgeName}</dd>
+              <dt>{t('面试知识库')}</dt>
+              <dd>{state.selectedKnowledgeBaseId ? interviewKnowledgeName : t('不使用知识库')}</dd>
             </div>
             <div>
-              <dt>AI 服务剩余用量</dt>
+              <dt>{t('AI 服务剩余用量')}</dt>
               <dd>
                 {!connection.live
-                  ? '未连接 AI 服务'
+                  ? t('未连接 AI 服务')
                   : connection.loadingUsage
-                    ? '正在读取…'
+                    ? t('正在读取…')
                     : accountUsageSummary(connection.usage)}
               </dd>
             </div>
             <div>
-              <dt>面试官 · 系统音频</dt>
+              <dt>{t('面试官 · 系统音频')}</dt>
               <dd>{audioName('system')}</dd>
             </div>
             <div>
-              <dt>面试者 · 麦克风</dt>
+              <dt>{t('面试者 · 麦克风')}</dt>
               <dd>{audioName('microphone')}</dd>
             </div>
             <div>
-              <dt>语音模型</dt>
-              <dd>{speechModelLabels[interviewSpeech.speechModel]}</dd>
+              <dt>{t('语音模型')}</dt>
+              <dd>{t(speechModelLabels[interviewSpeech.speechModel])}</dd>
             </div>
             <div>
-              <dt>推理设备</dt>
-              <dd>{inferenceDeviceLabels[interviewSpeech.inferenceDevice]}</dd>
+              <dt>{t('推理设备')}</dt>
+              <dd>{t(inferenceDeviceLabels[interviewSpeech.inferenceDevice])}</dd>
             </div>
             <div>
-              <dt>回答模型</dt>
+              <dt>{t('回答模型')}</dt>
               <dd>
                 {interviewConfiguration.aiEnabled
                   ? (connection.models.find((model) => model.id === interviewConfiguration.modelId)
                       ?.label ?? interviewConfiguration.modelId)
-                  : '未选择模型'}
+                  : t('未选择模型')}
               </dd>
             </div>
             <div>
-              <dt>思考强度</dt>
-              <dd>{effortLabels[interviewConfiguration.effort]}</dd>
+              <dt>{t('思考强度')}</dt>
+              <dd>{t(effortLabels[interviewConfiguration.effort])}</dd>
             </div>
           </dl>
           <section
             className="interview-access"
-            aria-label="权限与设备检查"
+            aria-label={t('权限与设备检查')}
             aria-busy={checkingAccess}
           >
-            <h3>设备与权限</h3>
+            <h3>{t('设备与权限')}</h3>
             {checkingAccess ? (
               <p className="interview-access-detail" role="status">
-                正在检查权限与音频设备…
+                {t('正在检查权限与音频设备…')}
               </p>
             ) : (
               <AudioCheck
@@ -507,37 +552,37 @@ export function PreparationPage({
                     {accessReport?.checks.map((check) => (
                       <li key={check.source}>
                         <div className="interview-access-row">
-                          <span>{check.source === 'microphone' ? '麦克风' : '系统音频'}</span>
+                          <span>{check.source === 'microphone' ? t('麦克风') : t('系统音频')}</span>
                           <div className="interview-access-controls">
                             <span
                               className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
                             >
                               {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
-                              {audioAccessLabels[check.status]}
+                              {t(audioAccessLabels[check.status])}
                             </span>
                             {button(check.source, check.status === 'granted')}
                           </div>
                         </div>
                         {result(check.source)}
                         {check.status !== 'granted' && (
-                          <p className="interview-access-detail danger-text">{check.message}</p>
+                          <p className="interview-access-detail danger-text">{t(check.message)}</p>
                         )}
                       </li>
                     ))}
                     {screenAccess && (
-                      <li aria-label="屏幕捕获权限检查">
+                      <li aria-label={t('屏幕捕获权限检查')}>
                         <div className="interview-access-row">
-                          <span>屏幕截图</span>
+                          <span>{t('屏幕截图')}</span>
                           <span className="interview-access-status">
                             {screenReady ? <Check size={14} /> : <Monitor size={14} />}
-                            {screenAccessLabels[screenAccess.status]}
+                            {t(screenAccessLabels[screenAccess.status])}
                           </span>
                         </div>
                         {!screenReady && (
                           <p className="interview-access-detail">
                             {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
-                              `${screenAccess.message} `}
-                            可继续纯语音面试，截图需授权。
+                              `${t(screenAccess.message)} `}
+                            {t('可继续纯语音面试，截图需授权。')}
                           </p>
                         )}
                       </li>
@@ -554,7 +599,7 @@ export function PreparationPage({
                 onClick={() => void checkAccess(interviewConfiguration)}
               >
                 <Refresh size={16} />
-                重新检查
+                {t('重新检查')}
               </Button>
               {!checkingAccess &&
                 accessReport?.checks.some(
@@ -581,15 +626,15 @@ export function PreparationPage({
                   >
                     <Settings size={16} />
                     {window.desktop?.platform === 'macos'
-                      ? '打开音频权限设置'
-                      : '打开麦克风权限设置'}
+                      ? t('打开音频权限设置')
+                      : t('打开麦克风权限设置')}
                   </Button>
                 )}
             </div>
           </section>
           {interviewError && (
             <p role="alert" className="danger-text">
-              {interviewError}
+              {t(interviewError)}
             </p>
           )}
         </Modal>
@@ -646,11 +691,11 @@ export function PreparationPage({
                 <span className="chat-drop-icon" aria-hidden="true">
                   <FileText size={32} />
                 </span>
-                <strong>添加到当前对话</strong>
-                <p>将文件或文件夹拖到这里，松开即可添加</p>
+                <strong>{t('添加到当前对话')}</strong>
+                <p>{t('将文件或文件夹拖到这里，松开即可添加')}</p>
                 <div className="chat-drop-limits">
-                  <span>最多 20 个文件</span>
-                  <span>单个不超过 20 MB</span>
+                  <span>{t('最多 20 个文件')}</span>
+                  <span>{t('单个不超过 20 MB')}</span>
                 </div>
               </div>
             </div>
@@ -665,10 +710,10 @@ export function PreparationPage({
               className="chat-scroll"
               {...chatScroll.scrollProps}
               tabIndex={0}
-              aria-label="聊天内容"
+              aria-label={t('聊天内容')}
             >
               <div className="chat-thread">
-                {state.messages.map((message, index) => (
+                {state.messages.map((message) => (
                   <article key={message.id} className={`chat-message ${message.role}`}>
                     {message.role === 'user' ? (
                       <div className="user-bubble">
@@ -678,17 +723,14 @@ export function PreparationPage({
                             <span>
                               {message.options.modelLabel || message.options.modelId}
                               {message.options.effort
-                                ? ` · 思考：${effortLabels[message.options.effort]}`
-                                : ''}
-
-                              {message.options.webSearch
-                                ? message.options.live
-                                  ? ' · 网络搜索'
-                                  : ''
+                                ? t(' · 思考：{0}', [t(effortLabels[message.options.effort])])
                                 : ''}
                             </span>
                             {message.options.attachments.map((item) => (
-                              <span key={item.id}>附件：{item.name}</span>
+                              <span key={item.id}>
+                                {t('附件：')}
+                                {item.name}
+                              </span>
                             ))}
                           </div>
                         )}
@@ -703,127 +745,78 @@ export function PreparationPage({
                             detail={
                               message.status === 'failed'
                                 ? message.errorCode?.startsWith('skill_')
-                                  ? '提案校验失败'
-                                  : '回答未完成'
+                                  ? t('提案校验失败')
+                                  : t('回答未完成')
                                 : message.status === 'stopped'
-                                  ? '已停止'
+                                  ? t('已停止')
                                   : undefined
                             }
                           />
                         </div>
                         <ResponseProgress message={message} />
-                        {!isSkillReply(message, state.messages[index - 1]) && (
-                          <ChatSources sources={message.sources ?? []} />
-                        )}
-                        {message.usage && (
-                          <small className="answer-usage">
-                            输入 {message.usage.inputTokens.toLocaleString()} · 输出{' '}
-                            {message.usage.outputTokens.toLocaleString()} token
-                          </small>
-                        )}
+                        <ChatSources sources={message.sources ?? []} />
                         <div className="chat-answer">
                           {message.content ? (
-                            isSkillReply(message, state.messages[index - 1]) ? (
-                              <PlainTextContent content={message.content} />
-                            ) : (
-                              <MarkdownContent content={message.content} />
-                            )
+                            <MarkdownContent content={message.content} />
                           ) : message.status === 'failed' ? (
-                            '请求失败，未收到回答。'
+                            t('请求失败，未收到回答。')
                           ) : message.status === 'stopped' ? (
-                            '已停止回复。'
+                            t('已停止回复。')
                           ) : message.status === 'completed' ? (
-                            '服务未返回文本内容。'
+                            t('服务未返回文本内容。')
                           ) : null}
                         </div>
                         <ProfileProposal message={message} />
                         {message.error && (
                           <p className="message-error" role="alert">
-                            {message.error}
+                            {t(message.error)}
                           </p>
                         )}
-                        {['failed', 'stopped'].includes(message.status ?? '') &&
-                          message.id === state.messages.at(-1)?.id && (
-                            <Button
-                              variant="outline"
-                              className="chat-retry"
+                        <div className="chat-message-actions">
+                          {['failed', 'stopped'].includes(message.status ?? '') &&
+                            message.id === state.messages.at(-1)?.id && (
+                              <Button
+                                variant="outline"
+                                className="chat-retry"
 
-                              disabled={state.streaming || !connection.models.length}
-                              onClick={() => void state.retry(message.id)}
+                                disabled={state.streaming || !connection.models.length}
+                                onClick={() => void state.retry(message.id)}
+                              >
+                                <Refresh size={16} />
+                                {t('重试回答')}
+                              </Button>
+                            )}
+                          {message.content && (
+                            <Button
+                              variant="ghost"
+                              className="chat-copy"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(message.content);
+                                  setCopied(message.id);
+                                } catch {
+                                  setCopied(null);
+                                }
+                              }}
                             >
-                              <Refresh size={16} />
-                              重试回答
+                              {copied === message.id ? <Check size={13} /> : <Copy size={13} />}
+                              {copied === message.id ? t('已复制') : t('复制')}
                             </Button>
                           )}
-                        {message.content && (
-                          <Button
-                            variant="ghost"
-                            className="chat-copy"
-                            onClick={async (event) => {
-                              try {
-                                const text = isSkillReply(message, state.messages[index - 1])
-                                  ? (event.currentTarget
-                                      .closest('article')
-                                      ?.querySelector<HTMLElement>('.chat-answer')?.innerText ?? '')
-                                  : message.content;
-                                await navigator.clipboard.writeText(text);
-                                setCopied(message.id);
-                              } catch {
-                                setCopied(null);
-                              }
-                            }}
-                          >
-                            {copied === message.id ? <Check size={13} /> : <Copy size={13} />}
-                            {copied === message.id ? '已复制' : '复制'}
-                          </Button>
-                        )}
+                        </div>
                       </>
                     )}
                   </article>
                 ))}
-                <SkillUpdatePrompt />
               </div>
             </div>
-          ) : (
-            <section className="welcome">
-              <h1>今天想准备哪一部分面试？</h1>
-              <SkillUpdatePrompt />
-              <div className="suggestions">
-                {[
-                  {
-                    label: '帮我准备自我介绍',
-                    prompt:
-                      '请根据已确认的简历，结合已有职位描述，写一份可直接口述的面试自我介绍。简要交代背景，重点突出与岗位相关的经历、个人贡献和能力，前后衔接自然，避免逐项复述简历。缺少职位描述时按现有简历完成；缺少的个人事实使用明确占位，不编造。',
-                  },
-                  {
-                    label: '帮我梳理项目经历',
-                    prompt:
-                      '请根据已确认的简历，结合已有职位描述，梳理与岗位最相关的项目经历。按背景与目标、我的职责、关键方案及选择理由、难点处理、结果的顺序，整理成面试时便于讲述的内容。突出个人贡献，区分个人职责与团队成果；未提供的事实标注待补充，不虚构决策过程或量化数据。',
-                  },
-                  {
-                    label: '上传我的简历',
-                    prompt:
-                      '请根据本次上传的简历整理摘要，保留教育与工作背景、职责、项目、关键技术和已有成果，准确区分个人贡献、团队成果及进行中事项。合并重复表述，不补造事实。仅提出简历摘要的待确认更新，不修改其他资料。',
-                  },
-                ].map(({ label, prompt }, index) => (
-                  <button
-                    key={label}
-                    disabled={!state.chatsReady || state.streaming || !connection.models.length}
-                    onClick={() =>
-                      index === 2 ? askProfile(prompt, true) : void state.send(prompt)
-                    }
-                  >
-                    {label}
-                    <ArrowUp size={14} />
-                  </button>
-                ))}
-              </div>
-            </section>
-          )}
+          ) : state.chatsReady ? (
+            <section className="welcome">{guide()}</section>
+          ) : null}
           <div ref={composerArea} className="composer-area chat-composer">
             <FollowLatestButton
               visible={(state.streaming || !chatScroll.following) && state.messages.length > 0}
-              label={chatScroll.hasNew ? '有新回复 · 返回最新' : '返回最新回复'}
+              label={chatScroll.hasNew ? t('有新回复 · 返回最新') : t('返回最新回复')}
               busy={state.streaming}
               onClick={chatScroll.scrollToLatest}
             />
@@ -831,14 +824,14 @@ export function PreparationPage({
               <div className="resume-chip">
                 <MessageSquare size={14} />
                 <span>{state.resume.name}</span>
-                <small>个人简历 · 保存在本机</small>
+                <small>{t('个人简历 · 保存在本机')}</small>
                 <ConfirmDeleteButton
                   iconOnly
-                  label="移除"
-                  target={'简历原件：' + state.resume.name}
+                  label={t('移除')}
+                  target={t('简历原件：') + state.resume.name}
                   revision={state.resume.id}
-                  aria-label="移除简历"
-                  warning="将删除保存的简历原件，摘要会保留"
+                  aria-label={t('移除简历')}
+                  warning={t('将删除保存的简历原件，摘要会保留')}
                   onConfirm={state.removeResume}
                 />
               </div>
@@ -855,8 +848,8 @@ export function PreparationPage({
                 <textarea
                   ref={inputRef}
                   disabled={!state.chatsReady}
-                  aria-label="聊天消息"
-                  placeholder="询问面试准备问题，或告诉我你的目标岗位…"
+                  aria-label={t('聊天消息')}
+                  placeholder={t('询问面试准备问题，或告诉我你的目标岗位…')}
                   value={input}
                   onChange={(event) => setInput(event.target.value)}
                   onKeyDown={(event) => {
@@ -881,7 +874,7 @@ export function PreparationPage({
                               className="send-button"
                               type="button"
                               size="icon"
-                              aria-label="停止回复"
+                              aria-label={t('停止回复')}
                               onClick={state.stop}
                             >
                               <Square size={18} />
@@ -896,7 +889,7 @@ export function PreparationPage({
                                 (!input.trim() && !state.attachments.length) ||
                                 !connection.models.length
                               }
-                              aria-label="发送消息"
+                              aria-label={t('发送消息')}
                             >
                               <ArrowUp size={20} />
                             </Button>
@@ -913,7 +906,7 @@ export function PreparationPage({
                 role={visibleError ? 'alert' : undefined}
                 className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
               >
-                {visibleError || '请先连接模型服务。'}
+                {t(visibleError || '请先连接模型服务。')}
               </p>
             )}
             {connection.error && (
@@ -923,7 +916,7 @@ export function PreparationPage({
                 onClick={() => void connection.load(true, true)}
               >
                 <Refresh size={16} />
-                重新加载模型
+                {t('重新加载模型')}
               </Button>
             )}
             {state.chatStorageError && (
@@ -935,7 +928,7 @@ export function PreparationPage({
                 }}
               >
                 {state.chatsReady ? <Save size={16} /> : <Refresh size={16} />}
-                {state.chatsReady ? '重试保存聊天' : '重新读取聊天'}
+                {state.chatsReady ? t('重试保存聊天') : t('重新读取聊天')}
               </Button>
             )}
           </div>
@@ -946,7 +939,7 @@ export function PreparationPage({
               <div
                 className="personal-resize-handle"
                 role="separator"
-                aria-label="调整个人信息宽度"
+                aria-label={t('调整个人信息宽度')}
                 aria-orientation="vertical"
                 tabIndex={0}
                 aria-valuenow={panelWidth}

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { ChatActivity as Activity } from '../../electron/contracts/chat';
 const labels: Record<Activity['phase'], string> = {
   waiting: '正在思考',
@@ -10,14 +11,21 @@ const labels: Record<Activity['phase'], string> = {
 };
 export const describeActivity = (activity?: Activity) => {
   const label = labels[activity?.phase ?? 'waiting'];
-  return activity?.status === 'completed' ? label.replace(/^正在/, '已') : label;
+  return t(activity?.status === 'completed' ? label.replace(/^正在/, '已') : label);
 };
 export function ChatActivity({ activity, mock }: { activity?: Activity; mock: boolean }) {
   return (
     <div className="chat-activity" role="status" aria-live="polite">
       <span className="progress-state-label is-active">
-        {mock ? '正在思考' : labels[activity?.phase ?? 'thinking']}
-        {!mock && activity?.detail && <span className="activity-detail"> · {activity.detail}</span>}
+        {t(mock ? '正在思考' : labels[activity?.phase ?? 'thinking'])}
+        {!mock && activity?.detail && (
+          <span className="activity-detail">
+            {' · '}
+            {activity.kind === 'status' || activity.kind === 'knowledge'
+              ? t(activity.detail)
+              : activity.detail}
+          </span>
+        )}
       </span>
     </div>
   );

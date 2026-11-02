@@ -180,6 +180,7 @@ try {
   const main = await connectUiAccount(app, login);
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   const title = 'VoxCueNative' + process.pid;
+  const mainId = await (await app.browserWindow(main)).evaluate((window) => window.id);
   const mainHandle = await app.evaluate(({ BrowserWindow }, title) => {
     const win = BrowserWindow.getAllWindows()[0];
     win.setTitle(title);
@@ -197,12 +198,12 @@ try {
     'Main taskbar entry missing',
   );
   const clickControl = async (label) => {
-    await app.evaluate(({ BrowserWindow }, title) => {
-      const win = BrowserWindow.getAllWindows().find((w) => w.getTitle() === title);
+    await app.evaluate(({ BrowserWindow }, id) => {
+      const win = BrowserWindow.fromId(id);
       win.show();
       win.moveTop();
       win.focus();
-    }, title);
+    }, mainId);
     await main.evaluate(
       () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
     );
@@ -213,15 +214,13 @@ try {
       assert.ok(input);
       const activate = await app.evaluate(
         ({ BrowserWindow, screen }, box) => {
-          const bounds = BrowserWindow.getAllWindows()
-            .find((w) => w.getTitle() === box.title)
-            .getContentBounds();
+          const bounds = BrowserWindow.fromId(box.id).getContentBounds();
           return screen.dipToScreenPoint({
             x: Math.round(bounds.x + box.x + box.width / 2),
             y: Math.round(bounds.y + box.y + box.height / 2),
           });
         },
-        { ...input, title },
+        { ...input, id: mainId },
       );
       probe('click', mainHandle, activate.x, activate.y);
       await until(
@@ -235,15 +234,13 @@ try {
       (box) =>
         app.evaluate(
           ({ BrowserWindow, screen }, box) => {
-            const bounds = BrowserWindow.getAllWindows()
-              .find((w) => w.getTitle() === box.title)
-              .getContentBounds();
+            const bounds = BrowserWindow.fromId(box.id).getContentBounds();
             return screen.dipToScreenPoint({
               x: Math.round(bounds.x + box.x + box.width / 2),
               y: Math.round(bounds.y + box.y + box.height / 2),
             });
           },
-          { ...box, title },
+          { ...box, id: mainId },
         ),
     );
     // Windows can refuse programmatic foreground activation. A real click
@@ -363,7 +360,7 @@ try {
       if (!denied) throw Error('Subframe accepted');
     }
   });
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   [floating] = await Promise.all([
     app.waitForEvent('window'),
     main
@@ -601,7 +598,7 @@ try {
     'Taskbar entry failed to restore',
   );
   assert.equal(probe('window', mainHandle, icon).iconHash, initial.iconHash);
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   [floating] = await Promise.all([
     app.waitForEvent('window'),
     main

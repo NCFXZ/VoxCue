@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useCloudSync } from '../stores/cloudSync';
@@ -114,7 +115,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
         data-reveal-on-hover
         ref={trigger}
         aria-controls={id}
-        aria-label={`${label}：${labels[status]}`}
+        aria-label={t('{0}：{1}', [t(label), t(labels[status])])}
         aria-expanded={open}
         onClick={() => setOpen(true)}
         onKeyDown={(e) => {
@@ -146,22 +147,22 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                 e.stopPropagation();
               }
             }}
-            aria-label={`${label}同步状态`}
+            aria-label={t('{0}同步状态', [t(label)])}
           >
-            <strong>{labels[status]}</strong>
-            {mark?.error && <span>{mark.error}</span>}
+            <strong>{t(labels[status])}</strong>
+            {mark?.error && <span>{t(mark.error)}</span>}
             {(mark?.cloudPresent || status === 'synced') &&
               status !== 'syncing' &&
               status !== 'deleting' &&
               status !== 'pausing' && (
                 <ConfirmDeleteButton
-                  target={`${label}的云端副本`}
-                  label="从云端删除"
+                  target={t('{0}的云端副本', [t(label)])}
+                  label={t('从云端删除')}
                   iconOnly={false}
                   warning={
                     itemKey.startsWith('base:')
-                      ? '同时删除库内云端文件；本地数据不会被删除'
-                      : '本地数据保留，该项将暂停自动上传'
+                      ? t('同时删除库内云端文件；本地数据不会被删除')
+                      : t('本地数据保留，该项将暂停自动上传')
                   }
                   onConfirm={() => useCloudSync.getState().remove(itemKey)}
                 />
@@ -172,7 +173,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                 onClick={() => void perform(() => useCloudSync.getState().pause(itemKey))}
               >
                 <X size={17} />
-                取消同步
+                {t('取消同步')}
               </Button>
             )}
             {status === 'paused' && (
@@ -182,10 +183,10 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                 onClick={() => void perform(() => useCloudSync.getState().resume(itemKey))}
               >
                 <CloudSync size={17} />
-                自动同步
+                {t('自动同步')}
               </Button>
             )}
-            {status === 'unsynced' && <span>在「设置 → VoxCue 账号」中开启对应同步。</span>}
+            {status === 'unsynced' && <span>{t('在「设置 → VoxCue 账号」中开启对应同步。')}</span>}
             {status === 'conflict' && (
               <>
                 <Button
@@ -195,7 +196,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                     void perform(() => useCloudSync.getState().resolve(itemKey, 'local'))
                   }
                 >
-                  保留本地版本
+                  {t('保留本地版本')}
                 </Button>
                 <Button
                   variant="outline"
@@ -204,7 +205,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                     void perform(() => useCloudSync.getState().resolve(itemKey, 'cloud'))
                   }
                 >
-                  使用云端版本
+                  {t('使用云端版本')}
                 </Button>
               </>
             )}
@@ -214,7 +215,7 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
                 disabled={acting}
                 onClick={() => void perform(() => useCloudSync.getState().refresh())}
               >
-                重试同步
+                {t('重试同步')}
               </Button>
             )}
           </div>,

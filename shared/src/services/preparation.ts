@@ -2,7 +2,6 @@ import { wait } from './mock';
 import type { ChatRequestOptions } from './chatOptions';
 import type { ChatSource, TokenUsage } from '../../electron/contracts/chat';
 import type { PersonalInfo } from '../../electron/contracts/profile';
-import { skillResearchScope } from '../../electron/contracts/profile';
 export type { PersonalInfo } from '../../electron/contracts/profile';
 export interface ChatMessage {
   id: string;
@@ -42,15 +41,6 @@ export interface PreparationChatService {
     options?: ChatRequestOptions,
   ): Promise<void>;
 }
-export function isSkillReply(message: ChatMessage, previous?: ChatMessage): boolean {
-  return (
-    message.role === 'assistant' &&
-    (!!message.changes?.skills ||
-      !!message.profilePreview?.skills ||
-      !!message.errorCode?.startsWith('skill_') ||
-      (previous?.role === 'user' && previous.options?.profileTask === 'skills'))
-  );
-}
 export function extractProfileChanges(prompt: string): Partial<PersonalInfo> {
   const changes: Partial<PersonalInfo> = {};
   const name = prompt.match(/(?:^|\n)姓名[：:]\s*([^\n]+)/)?.[1]?.trim();
@@ -58,17 +48,6 @@ export function extractProfileChanges(prompt: string): Partial<PersonalInfo> {
   if (name) changes.name = name.slice(0, 60);
   if (jd) changes.jobDescription = jd.slice(0, 10000);
   return changes;
-}
-export function needsProfileReview(prompt: string, attachmentCount: number) {
-  return (
-    attachmentCount > 0 ||
-    /个人信息|个人资料|简历|履历|JD|职位描述|岗位描述|自定义指令|提示词|技能|面试语言|我叫|我的名字|以后.{0,20}(回答|请|用)|(?:更新|修改|添加|删除|补充|清空).{0,20}(?:指令|偏好|要求|风格|岗位|姓名|背景)|(?:姓名|目标岗位|岗位|职位)[：:]/i.test(
-      prompt,
-    )
-  );
-}
-export function needsSkillResearch(prompt: string) {
-  return skillResearchScope(prompt) !== undefined;
 }
 export const mockPreparation: PreparationChatService = {
   async streamReply(prompt, info, onChunk, signal, options) {

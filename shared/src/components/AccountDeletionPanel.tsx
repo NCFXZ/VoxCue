@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { Button } from './ui/button';
@@ -39,11 +40,11 @@ export function AccountDeletionPanel() {
   const blocked = busy || !state.configured;
   if (!state.user) return null;
   return (
-    <section className="account-deletion-panel" aria-label="删除账号">
+    <section className="account-deletion-panel" aria-label={t('删除账号')}>
       <div className="settings-entry">
         <div>
-          <strong>删除账号</strong>
-          <p className="settings-hint">永久删除账号、云端及本机资料。</p>
+          <strong>{t('删除账号')}</strong>
+          <p className="settings-hint">{t('永久删除账号、云端及本机资料。')}</p>
         </div>
         <Button
           variant="dangerGhost"
@@ -56,12 +57,12 @@ export function AccountDeletionPanel() {
           }}
         >
           <Trash size={16} />
-          删除账号
+          {t('删除账号')}
         </Button>
       </div>
       {deleting && (
         <Modal
-          title="删除 VoxCue 账号"
+          title={t('删除 VoxCue 账号')}
           className="account-delete-dialog"
           destructive
           initialFocus="close"
@@ -82,7 +83,7 @@ export function AccountDeletionPanel() {
                 }}
               >
                 <X size={16} />
-                取消
+                {t('取消')}
               </Button>
               <Button
                 variant="destructive"
@@ -90,16 +91,16 @@ export function AccountDeletionPanel() {
                 onClick={() => void deleteAccount()}
               >
                 <Trash size={16} />
-                {busy ? '正在删除…' : '永久删除账号'}
+                {busy ? t('正在删除…') : t('永久删除账号')}
               </Button>
             </>
           }
         >
-          <p className="account-delete-warning">云端及本机资料将永久删除，无法恢复。</p>
+          <p className="account-delete-warning">{t('云端及本机资料将永久删除，无法恢复。')}</p>
           <label className="cloud-account-form">
-            当前密码
+            {t('当前密码')}
             <input
-              aria-label="删除账号密码"
+              aria-label={t('删除账号密码')}
               type="password"
               autoComplete="current-password"
               maxLength={1024}
@@ -115,11 +116,11 @@ export function AccountDeletionPanel() {
               disabled={busy}
               onChange={(e) => setAcknowledged(e.target.checked)}
             />
-            <span>我已了解，确认删除账号和资料</span>
+            <span>{t('我已了解，确认删除账号和资料')}</span>
           </label>
           {deleteError && (
             <p role="alert" className="danger-text">
-              {deleteError}
+              {t(deleteError)}
             </p>
           )}
         </Modal>

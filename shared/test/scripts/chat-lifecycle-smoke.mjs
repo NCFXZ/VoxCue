@@ -124,23 +124,26 @@ try {
   await page.screenshot({});
   await app.evaluate(() => globalThis.finishPreview());
   await proposals().last().getByRole('button', { name: '保存所选', exact: true }).click();
-  await page
-    .locator('.skill-update-prompt')
-    .getByText('还缺少职位描述摘要，请先提供并确认后再生成技能。', { exact: true })
-    .waitFor();
+  await proposals().last().getByText('已保存所选资料', { exact: true }).waitFor();
+  assert.equal(await page.locator('.preparation-guide').count(), 0);
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  await page.locator('.preparation-guide').getByText('接下来想做什么？', { exact: true }).waitFor();
   const count = await app.evaluate(() => globalThis.requests.length);
   await page
-    .locator('.skill-update-prompt')
-    .getByRole('button', { name: '补充职位描述', exact: true })
+    .locator('.preparation-guide')
+    .getByRole('button', { name: '添加职位描述', exact: true })
     .click();
   assert.match(await input().inputValue(), /职位描述/);
   assert.equal(await app.evaluate(() => globalThis.requests.length), count);
   await input().fill('更新JD：岗位需要软件开发和专业沟通');
   await send().click();
   await proposals().last().getByRole('button', { name: '保存所选', exact: true }).click();
+  await proposals().last().getByText('已保存所选资料', { exact: true }).waitFor();
+  assert.equal(await page.locator('.preparation-guide').count(), 0);
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
   const updateSkills = page
-    .locator('.skill-update-prompt')
-    .getByRole('button', { name: '联网更新技能', exact: true });
+    .locator('.preparation-guide')
+    .getByRole('button', { name: '生成技能', exact: true });
   assert.equal(await updateSkills.isEnabled(), true);
   await updateSkills.click();
   await send().waitFor();
@@ -154,6 +157,10 @@ try {
   checks.push(
     'live proposal grows before completion, confirmation locked; missing JD has an actionable explanation and skills enable after confirmation',
   );
+  const draftTitle = await page
+    .locator('.conversation-row.active .conversation > span')
+    .last()
+    .innerText();
 
   await input().fill('重启之后保留这个草稿');
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({
@@ -200,7 +207,7 @@ try {
   await page.locator('.chat-answer').getByText('合成回复已完成。', { exact: true }).waitFor();
   await page
     .locator('.conversation-row')
-    .filter({ hasText: '更新简历' })
+    .filter({ hasText: draftTitle })
     .locator('.conversation')
     .click();
   assert.equal(await input().inputValue(), '保存失败也不能丢掉的草稿');
@@ -223,7 +230,7 @@ try {
     await page.locator('.conversation-row').filter({ hasText: '普通聊天需要保留' }).count(),
     0,
   );
-  assert.equal(await page.locator('.conversation-row').count(), 1);
+  assert.equal(await page.locator('.conversation-row').count(), 3);
   await app.evaluate(({ BrowserWindow }) => {
     const contents = BrowserWindow.getAllWindows().find(
       (win) => !win.webContents.getURL().includes('#login'),

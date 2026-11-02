@@ -88,8 +88,12 @@ try {
         },
         {
           id: 'rust',
-          title: 'Rust 与系统编程',
-          content: '新增 Rust 面试资料。理解所有权、借用与错误处理。',
+          title: 'Rust 与系统编程：所有权、借用、异步任务与错误边界',
+          content: Array(12)
+            .fill(
+              '### 所有权与错误处理\n新增 Rust 面试资料。理解所有权、借用与错误处理，结合合成案例检查接口约束。',
+            )
+            .join('\n\n'),
           sources: [],
         },
         {
@@ -198,6 +202,152 @@ try {
       });
   };
   const box = (name) => proposal().getByRole('checkbox', { name, exact: true });
+  const checkReaderHeader = async (reader) => {
+    const heading = reader.locator(':scope > .dialog-heading');
+    const scroll = reader.locator('.dialog-scroll');
+    const before = await heading.boundingBox();
+    await scroll.evaluate(async (node) => {
+      node.scrollTop = node.scrollHeight;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    const layout = await reader.evaluate((node) => {
+      const heading = node.querySelector('.dialog-heading');
+      const scroll = node.querySelector('.dialog-scroll');
+      const close = heading.querySelector('.dialog-close-button');
+      const choice = heading.querySelector('.profile-field-choice');
+      const material = getComputedStyle(heading, '::before');
+      const chatMaterial = getComputedStyle(document.querySelector('.page-toolbar'), '::before');
+      const rect = heading.getBoundingClientRect();
+      const area = scroll.getBoundingClientRect();
+      const gutter = scroll.offsetWidth - scroll.clientWidth;
+      const materialRight = rect.left + parseFloat(material.left) + parseFloat(material.width);
+      const materialBottom = rect.top + parseFloat(material.top) + parseFloat(material.height);
+      const trackStart = parseFloat(
+        getComputedStyle(scroll, '::-webkit-scrollbar-track').marginTop,
+      );
+      return {
+        top: rect.top,
+        scrolled: scroll.scrollTop > 0,
+        opacity: Number(material.opacity),
+        material: [material.backgroundColor, material.backdropFilter],
+        chatMaterial: [chatMaterial.backgroundColor, chatMaterial.backdropFilter],
+        gutter,
+        gutterClear: area.right - rect.right >= gutter - 1,
+        materialCoversWidth: Math.abs(materialRight - area.right) < 1,
+        materialClearsTrack: materialBottom <= area.top + trackStart + 1,
+        trackStart,
+        height: rect.height,
+        gap: close.getBoundingClientRect().left - choice.getBoundingClientRect().right,
+        overflow:
+          node.scrollWidth > node.clientWidth ||
+          [...heading.children].some((child) => {
+            const bounds = child.getBoundingClientRect();
+            return bounds.left < rect.left - 1 || bounds.right > rect.right + 1;
+          }),
+      };
+    });
+    assert.equal(layout.top, before.y, 'reader heading stays fixed while scrolling');
+    assert.equal(layout.scrolled, true);
+    assert.equal(layout.opacity, 1);
+    assert.deepEqual(
+      layout.material,
+      layout.chatMaterial,
+      'reader shares the chat header material',
+    );
+    assert(
+      layout.gutterClear && layout.trackStart >= layout.height - 1,
+      'scrollbar avoids the header',
+    );
+    assert(
+      layout.materialCoversWidth,
+      'header material covers the full width, including the top gutter',
+    );
+    assert(layout.materialClearsTrack, 'header material ends before the visible scrollbar track');
+    assert(layout.gap >= 19.9, 'save selection and close have enough separation');
+    assert.equal(layout.overflow, false);
+    if (process.argv.includes('--preview-reader')) {
+      const bounds = await reader.boundingBox();
+      console.log(
+        'IMAGE:' +
+          (
+            await page.screenshot({
+              type: 'jpeg',
+              quality: 70,
+              scale: 'css',
+              clip: { ...bounds, height: Math.min(bounds.height, layout.height + 180) },
+            })
+          ).toString('base64'),
+      );
+    }
+  };
+  const checkSkillMotion = async (region) => {
+    const toggle = region.locator('.proposal-skills button[aria-controls]');
+    const list = region.locator('.proposal-skill-rows');
+    const settle = () =>
+      list.evaluate(async (node) => {
+        await Promise.all(
+          node.getAnimations().map((animation) => animation.finished.catch(() => {})),
+        );
+      });
+    await settle();
+    const full = (await list.boundingBox()).height;
+    const selection = await list
+      .locator('input')
+      .evaluateAll((nodes) => nodes.map((node) => node.checked));
+    assert(full > 0);
+    for (const expanded of [false, true]) {
+      await toggle.focus();
+      await toggle.press('Space');
+      await page.waitForFunction(
+        ({ id, expanded }) => document.getElementById(id)?.dataset.expanded === String(expanded),
+        { id: await toggle.getAttribute('aria-controls'), expanded },
+      );
+      const middle = await list.evaluate((node) => {
+        const animations = node.getAnimations();
+        for (const animation of animations) {
+          animation.pause();
+          animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+        }
+        return {
+          height: node.getBoundingClientRect().height,
+          opacity: Number(getComputedStyle(node).opacity),
+          inert: node.inert,
+          hidden: node.getAttribute('aria-hidden'),
+          properties: animations.map((animation) => animation.transitionProperty),
+        };
+      });
+      assert(
+        middle.properties.some((property) => property === 'block-size' || property === 'height'),
+        'skill list has a height transition: ' + JSON.stringify(middle),
+      );
+      assert(middle.height > 0 && middle.height < full, 'skill list has intermediate height');
+      assert(middle.opacity > 0 && middle.opacity < 1, 'skill list fades during transition');
+      assert.equal(middle.inert, !expanded);
+      assert.equal(middle.hidden, String(!expanded));
+      if (process.argv.includes('--preview-motion'))
+        console.log(
+          'IMAGE:' +
+            (await region.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString(
+              'base64',
+            ),
+        );
+      await list.evaluate((node) => {
+        for (const animation of node.getAnimations()) animation.finish();
+      });
+      assert.equal(Math.round((await list.boundingBox()).height), expanded ? Math.round(full) : 0);
+    }
+    assert.deepEqual(
+      await list.locator('input').evaluateAll((nodes) => nodes.map((node) => node.checked)),
+      selection,
+    );
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await toggle.click();
+    assert.equal((await list.boundingBox()).height, 0);
+    assert.equal(await list.evaluate((node) => node.getAnimations().length), 0);
+    await toggle.press('Space');
+    assert.equal(Math.round((await list.boundingBox()).height), Math.round(full));
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+  };
   const save = () => proposal().getByRole('button', { name: '保存所选', exact: true });
   const languageRow = () =>
     proposal().locator(':scope > .proposal-rows > .proposal-row').filter({ hasText: '面试语言' });
@@ -205,7 +355,7 @@ try {
   await save().waitFor();
   await capture('proposal-overview', page);
   assert.equal(await proposal().locator(':scope > .proposal-rows > *').count(), 6);
-  assert.equal(await proposal().locator('.proposal-skill-row').count(), 0);
+  assert.equal(await proposal().locator('.proposal-skill-row:visible').count(), 0);
   // Retain the original five-row budget while also covering the added language row.
   assert.ok(
     (await proposal().boundingBox()).height - (await languageRow().boundingBox()).height < 650,
@@ -354,7 +504,13 @@ try {
   assert.deepEqual((await saved()).skills, base.skills);
   assert.ok((await saved()).background.endsWith('简历全文末尾标记。'));
   assert.equal(await proposal().getByText('已保存', { exact: true }).count(), 1);
-  assert.equal(await proposal().getByText('未采用', { exact: true }).count(), 4);
+  assert.equal(
+    await proposal()
+      .locator('.proposal-status:visible')
+      .filter({ hasText: /^未采用$/ })
+      .count(),
+    4,
+  );
   assert.equal(await proposal().locator('.proposal-row-main > div.proposal-excerpt').count(), 0);
   assert.ok(
     (await proposal().boundingBox()).height - (await languageRow().boundingBox()).height < 400,
@@ -377,14 +533,50 @@ try {
   checks.push('chat save phrases follow ordinary chat and cannot execute a save');
 
   await send('技能逐项');
-  await box('保存技能：Rust 与系统编程').uncheck();
+  await box('保存技能：Rust 与系统编程：所有权、借用、异步任务与错误边界').uncheck();
   await box('删除技能：Qt 桌面开发').uncheck();
   await box('保存技能：Python 自动化测试').uncheck();
   assert.equal(await box('保存技能').evaluate((node) => node.indeterminate), true);
-  await box('保存技能：Rust 与系统编程').check();
-  await proposal().getByRole('button', { name: '查看技能：Rust 与系统编程', exact: true }).click();
-  const skillReader = page.getByRole('dialog', { name: 'Rust 与系统编程', exact: true });
+  await box('保存技能：Rust 与系统编程：所有权、借用、异步任务与错误边界').check();
+  await checkSkillMotion(proposal());
+  checks.push(
+    'skill list height/fade transitions in both directions, keyboard, reduced motion and retained selection',
+  );
+  await proposal()
+    .getByRole('button', {
+      name: '查看技能：Rust 与系统编程：所有权、借用、异步任务与错误边界',
+      exact: true,
+    })
+    .click();
+  const skillReader = page.getByRole('dialog', {
+    name: 'Rust 与系统编程：所有权、借用、异步任务与错误边界',
+    exact: true,
+  });
   assert.equal(await skillReader.getByRole('note').count(), 0);
+  for (const [language, dark, width] of [
+    ['zh-CN', false, 1280],
+    ['en', true, 800],
+  ]) {
+    await page.evaluate(
+      ({ language, dark }) => {
+        localStorage.setItem('voxcue-language-v1', language);
+        dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+        document.documentElement.classList.toggle('dark', dark);
+      },
+      { language, dark },
+    );
+    await mainWindow.evaluate((window, width) => window.setSize(width, 900), width);
+    await checkReaderHeader(skillReader);
+  }
+  await mainWindow.evaluate((window) => window.setSize(1280, 1000));
+  await page.evaluate(() => {
+    localStorage.setItem('voxcue-language-v1', 'zh-CN');
+    dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+    document.documentElement.classList.remove('dark');
+  });
+  checks.push(
+    'skill reader fixed chat material header, clear scrollbar and separated controls in Chinese/light and English/dark/narrow',
+  );
   await capture('skill-source-review', skillReader);
   assert.doesNotMatch(
     await skillReader.innerText(),
@@ -410,7 +602,12 @@ try {
   await page.reload();
   await proposal().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.deepEqual((await saved()).skills[1], base.skills[1]);
-  await proposal().getByRole('button', { name: '查看技能：Rust 与系统编程', exact: true }).click();
+  await proposal()
+    .getByRole('button', {
+      name: '查看技能：Rust 与系统编程：所有权、借用、异步任务与错误边界',
+      exact: true,
+    })
+    .click();
   assert.equal(await page.getByRole('dialog').getByRole('note').count(), 0);
   assert.doesNotMatch(
     await page.getByRole('dialog').innerText(),
@@ -445,6 +642,7 @@ try {
   await app.evaluate(() => globalThis.advanceSelectionPreview());
   await streaming.getByRole('button', { name: '展开技能清单', exact: true }).click();
   await streaming.getByRole('status', { name: '技能二正在生成', exact: true }).waitFor();
+  await checkSkillMotion(streaming);
   assert.equal(
     await streaming.getByRole('status', { name: '姓名正在生成', exact: true }).count(),
     0,

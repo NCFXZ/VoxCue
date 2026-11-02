@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, type ButtonProps } from './button';
 import { Trash, Reset, Loader } from '../icons';
@@ -93,9 +94,13 @@ function ConfirmActionButton({
         size={iconOnly && !armed ? 'icon' : 'default'}
         disabled={disabled || busy || !active}
         aria-busy={busy}
-        aria-label={armed ? `确认${action}：${target}` : ariaLabel || `${label}：${target}`}
+        aria-label={
+          armed
+            ? t('确认{0}：{1}', [t(action), target])
+            : ariaLabel || t('{0}：{1}', [t(label), target])
+        }
         aria-description={
-          armed ? `${target}，${warning}。再次点击确认；Esc 或三秒后取消。` : undefined
+          armed ? t('{0}，{1}。再次点击确认；Esc 或三秒后取消。', [target, t(warning)]) : undefined
         }
         onBlur={() => {
           if (!inFlight.current) setArmed(false);
@@ -137,16 +142,16 @@ function ConfirmActionButton({
       >
         <span ref={idleContent} className="confirm-delete-idle" aria-hidden="true">
           <Icon size={iconOnly && !compact ? 17 : 14} />
-          {!iconOnly && <span>{label}</span>}
+          {!iconOnly && <span>{t(label)}</span>}
         </span>
         <span ref={confirmContent} className="confirm-delete-confirm" aria-hidden="true">
           {busy ? <Loader size={14} /> : <Icon size={14} />}
-          <span>{busy ? `${action}中…` : `确认${action}`}</span>
+          <span>{t(busy ? `${action}中…` : `确认${action}`)}</span>
         </span>
       </Button>
       {error && reportError && (
         <span role="alert" className="confirm-delete-error">
-          {action}失败，请重试。
+          {t('{0}失败，请重试。', [t(action)])}
         </span>
       )}
     </span>

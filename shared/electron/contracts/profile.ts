@@ -50,65 +50,6 @@ export const profileFields = [
   'skills',
 ] as const;
 
-/** Interpret only the current user's explicit request, never profile or attachment data. */
-export function skillResearchScope(prompt: string): 'all' | 'topic' | undefined {
-  if (typeof prompt !== 'string') return;
-  let scope: 'all' | undefined;
-  for (const clause of prompt.split(/[，,。；;！!？?\n]|但是|但|改为/)) {
-    if (
-      /(?:不要|不需要|无需|禁止|不)(?:再|立即|自动|主动)?(?:联网)?(?:生成|更新|重做|补充|添加|新增|整理|完善|修改|改写|重写|加)/.test(
-        clause,
-      ) ||
-      /(?:供|用于|以便)(?:确认后|之后|后续)?(?:联网)?(?:更新|生成)/.test(clause) ||
-      /^\s*(?:之后|后续|稍后|以后|确认后)/.test(clause)
-    )
-      continue;
-    const action = /生成|更新|重做|补充|添加|新增|整理|完善|修改|改写|重写|做一套|加/.exec(clause);
-    if (!action || /解释|如何|怎么|是否|示例|提示词/.test(clause.slice(0, action.index))) continue;
-    const noun = /面试技能|技能|面试知识|知识点/.exec(clause);
-    const single = /(?:新增|添加|补充|加)(?:一|1)(?:条|项)\s*(.+)/.exec(clause);
-    if (!noun && !single) continue;
-    if (!noun && /简历|JD|职位描述|自定义指令|草稿/i.test(clause)) continue;
-    let topic =
-      single?.[1] ??
-      (noun && action.index < noun.index
-        ? clause.slice(action.index + action[0].length, noun.index)
-        : noun
-          ? clause.slice(0, noun.index)
-          : '');
-    if (noun) {
-      topic = topic.replace(/(?:面试技能|技能|面试知识|知识点).*$/, '');
-      if (!topic.trim())
-        topic =
-          clause
-            .slice(noun.index + noun[0].length)
-            .match(/^(?:\s*[：:]\s*|\s*(?:关于|主题为|围绕)\s*|\s+)(.+)$/)?.[1] ?? '';
-    }
-    topic = topic
-      .trim()
-      .replace(/^(?:\d+|[一二三四五六七八九十几]+)(?:条|项|套|个)\s*/, '')
-      .replace(
-        /^(?:(?:请|帮我|为我|给我|把|将|作为|一条|1条|一项|1项|一整套|一套|关于|有关|针对|围绕|主题为|名为|完整的|完整|全部|所有|整套|一些|几条|若干|我的|已有|现有|这些|这条|该条|面试|的)\s*)+/,
-        '',
-      )
-      .replace(/(?:相关的|相关|的|[「」“”"'])+$/g, '')
-      .replace(/^[「“"']+/, '')
-      .trim();
-    if (
-      topic &&
-      /[a-z\u4e00-\u9fff]/i.test(topic) &&
-      !/^(?:相关|岗位|面试|准备|资料|内容|知识|能力|列表|提案|个人|技术|专业|完整|全部|所有|整套|这|那)+$/.test(
-        topic,
-      ) &&
-      !/简历|摘要|职位描述|\bJD\b|个人背景|我的背景|岗位要求|项目经历|工作经历|自定义指令|提示词|技能/.test(
-        topic,
-      )
-    )
-      return 'topic';
-    if (noun) scope = 'all';
-  }
-  return scope;
-}
 export type ProfileField = (typeof profileFields)[number];
 export type ProfileChanges = Partial<Pick<PersonalInfo, ProfileField>>;
 /** Read-only streaming content; never accepted as a saved proposal. */

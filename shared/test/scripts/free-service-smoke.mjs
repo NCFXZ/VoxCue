@@ -123,7 +123,7 @@ try {
     }
   }
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const start = main.getByRole('dialog', { name: '开始面试', exact: true });
   await start.getByText('AI 服务剩余用量', { exact: true }).waitFor();
   assert.equal(await start.getByText(/剩余面试时长|面试额度|兑换/).count(), 0);

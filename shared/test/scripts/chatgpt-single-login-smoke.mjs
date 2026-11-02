@@ -56,7 +56,7 @@ try {
   const opened = app.waitForEvent('window');
   await connectUiAccount(app, page);
   page = await opened;
-  await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
+  await page.locator('.interview-start-trigger').waitFor();
   await app.evaluate(async () => {
     const deadline = Date.now() + 5000;
     while (!globalThis.singleLoginFixture.quotaReads) {
@@ -72,7 +72,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
@@ -101,7 +101,7 @@ try {
   app = undefined;
   app = await electron.launch({ args: [entry], env });
   page = await app.firstWindow();
-  await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
+  await page.locator('.interview-start-trigger').waitFor();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).user.id, session.user.id);
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
   await page.evaluate(() => window.desktop.signOut());

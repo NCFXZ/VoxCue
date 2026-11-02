@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useId, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   interviewFontSize,
@@ -91,8 +92,8 @@ export function InterviewDisplayControls() {
   return (
     <div className="interview-display-controls">
       <DisplaySlider
-        title="字体大小"
-        name="面试字体大小"
+        title={t('字体大小')}
+        name={t('面试字体大小')}
         value={size}
         minimum={interviewFontSize.minimum}
         maximum={interviewFontSize.maximum}
@@ -102,8 +103,8 @@ export function InterviewDisplayControls() {
         onChange={(value) => save(() => saveInterviewFontSize(value))}
       />
       <DisplaySlider
-        title="背景透明度"
-        name="面试背景透明度"
+        title={t('背景透明度')}
+        name={t('面试背景透明度')}
         value={transparency}
         minimum={interviewTransparency.minimum}
         maximum={interviewTransparency.maximum}
@@ -114,7 +115,7 @@ export function InterviewDisplayControls() {
       />
       {error && (
         <p className="danger-text" role="alert">
-          {error}
+          {t(error)}
         </p>
       )}
     </div>

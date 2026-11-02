@@ -67,7 +67,7 @@ try {
     .waitFor();
   const dialog = page.getByRole('dialog', { name: '开始面试', exact: true });
   const count = () => app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length);
-  const start = () => page.getByRole('button', { name: '开始面试', exact: true }).click();
+  const start = () => page.locator('.interview-start-trigger').click();
   const blocked = async () =>
     assert.equal(
       await dialog.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
@@ -147,7 +147,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
@@ -210,9 +210,9 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
-  for (const name of ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新']) {
+  for (const name of ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '关于与更新']) {
     await settings.getByRole('button', { name, exact: true }).click();
     assert.equal(/mock|模拟/i.test(await settings.innerText()), false);
   }

@@ -30,13 +30,8 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('button', { name: '添加附件', exact: true }).click();
   await page.getByRole('menuitem', { name: '添加文件夹' }).waitFor();
-  await page.getByRole('menuitemcheckbox', { name: '网络搜索' }).click();
-  assert.equal(await page.getByRole('button', { name: /网络搜索/ }).count(), 0);
-  await page.getByRole('button', { name: '添加附件', exact: true }).click();
-  assert.equal(
-    await page.getByRole('menuitemcheckbox', { name: '网络搜索' }).getAttribute('aria-checked'),
-    'true',
-  );
+  assert.equal(await page.getByRole('menuitemcheckbox', { name: '网络搜索' }).count(), 0);
+  await page.getByRole('menuitem', { name: '添加文件', exact: true }).waitFor();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '聊天模型', exact: true }).click();
   await page.getByRole('menuitemradio', { name: /GPT · 推理/ }).click();
@@ -114,7 +109,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();

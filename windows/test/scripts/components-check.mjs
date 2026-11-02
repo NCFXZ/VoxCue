@@ -95,7 +95,7 @@ export async function checkComponents(application) {
   page = main;
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
-  const start = page.getByRole('button', { name: '开始面试', exact: true });
+  const start = page.locator('.interview-start-trigger');
   await start.waitFor();
   assert.equal(await start.isDisabled(), true);
   assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);

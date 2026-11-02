@@ -78,7 +78,7 @@ const openUpdates = async (page) => {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings

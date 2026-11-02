@@ -1,3 +1,4 @@
+import { t } from './i18n';
 import { useEffect, useState } from 'react';
 import { StartupScreen } from './components/StartupScreen';
 import { TitleBar } from './components/TitleBar';
@@ -209,9 +210,10 @@ export function App() {
         ) : (
           <>
             <Sidebar
-              userName={account.state.user?.email.split('@')[0] || '本地用户'}
+              userName={account.state.user?.email.split('@')[0] || t('本地用户')}
               accountLabel={
-                account.state.user?.email || (account.state.localMode ? '本地账户' : '隔离测试')
+                account.state.user?.email ||
+                (account.state.localMode ? t('本地账户') : t('隔离测试'))
               }
               localMode={account.state.localMode}
               page={page}
@@ -251,6 +253,10 @@ export function App() {
               <PreparationPage
                 onDraftChange={setPersonalDraft}
                 onComponentSettings={openComponentSettings}
+                onAISettings={() => {
+                  setSettingsCategory('ai');
+                  setSettings(true);
+                }}
                 onSpeechSettings={() => {
                   setSettingsCategory('interview');
                   setSettings(true);
@@ -265,7 +271,7 @@ export function App() {
       {!showLogin && <TitleBar />}
       {(appearanceError || (signedIn && (sessionStateError || (!settings && auth.error)))) && (
         <div className="auth-error" role="alert">
-          {appearanceError || sessionStateError || auth.error}
+          {t(appearanceError || sessionStateError || auth.error)}
         </div>
       )}
       {settings && signedIn && (

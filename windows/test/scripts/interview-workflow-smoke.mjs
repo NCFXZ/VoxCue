@@ -167,7 +167,7 @@ try {
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
   await main
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await main.getByRole('button', { name: '面试设置', exact: true }).click();
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
@@ -192,7 +192,7 @@ try {
   assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
   await chooseMic('测试麦克风设备');
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const audioCheck = main.getByRole('dialog', { name: '开始面试', exact: true });
   const testStarted = Date.now();
   await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).click();
@@ -226,7 +226,7 @@ try {
   await app.evaluate(() => {
     globalThis.microphoneDenied = true;
   });
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   await audioCheck.getByText(/麦克风权限未开启/).waitFor();
   assert.equal(
     await audioCheck.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
@@ -238,7 +238,7 @@ try {
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
   await main
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await app.evaluate(() => {
@@ -253,7 +253,7 @@ try {
     .waitFor();
   assert.equal(await settings.getByRole('button', { name: '测试麦克风', exact: true }).count(), 0);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const noMicConfirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
   await noMicConfirmation.getByText('设备不可用', { exact: true }).waitFor();
   await noMicConfirmation
@@ -273,7 +273,7 @@ try {
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
   await main
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('button', { name: '面试回答思考强度', exact: true }).click();
@@ -282,7 +282,7 @@ try {
   await main.screenshot({});
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   check('音频禁用、所选设备自检及释放、设备自动刷新、模型与思考强度设置');
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
   assert.equal(await confirmation.locator('.speech-controls').count(), 0);
   const summary = confirmation.locator('.interview-start-summary');

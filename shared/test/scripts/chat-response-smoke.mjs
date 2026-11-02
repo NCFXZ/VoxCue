@@ -180,6 +180,11 @@ try {
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('你好');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.chat-answer').getByText('JSON 回答已显示', { exact: true }).waitFor();
+  assert.equal(
+    await page.locator('.answer-usage').count(),
+    0,
+    'Per-answer token counts are hidden',
+  );
   assert.equal(await page.locator('.chat-answer strong').count(), 4);
   assert.equal((await page.locator('.chat-answer').innerText()).includes('**'), false);
   if (process.argv.some((arg) => arg.startsWith('--screenshots='))) {
@@ -204,7 +209,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const usage = page.getByRole('region', { name: '账户额度', exact: true });
@@ -253,7 +258,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();

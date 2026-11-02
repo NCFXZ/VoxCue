@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import * as DropdownMenu from './ui/dropdown-menu';
 import { useEffect, useState } from 'react';
 import { usePreparation } from '../stores/preparation';
@@ -76,46 +77,46 @@ export function Sidebar({
           variant="ghost"
           size="icon"
           onClick={onCollapse}
-          aria-label={collapsed ? '展开侧栏' : '收起侧栏'}
+          aria-label={collapsed ? t('展开侧栏') : t('收起侧栏')}
         >
           {collapsed ? <PanelLeftOpen size={17} /> : <PanelLeftClose size={17} />}
         </Button>
       </div>
-      <nav aria-label="主导航">
+      <nav aria-label={t('主导航')}>
         <button
           className="nav-item"
-          aria-label="新对话"
+          aria-label={t('新对话')}
           onClick={onNew}
           disabled={!preparation.chatsReady}
         >
           <MessageCirclePlus size={18} />
-          <span>新对话</span>
+          <span>{t('新对话')}</span>
           <span className="nav-create-symbol" aria-hidden="true">
             ＋
           </span>
         </button>
         <button
           className={`nav-item ${page === 'history' ? 'active' : ''}`}
-          aria-label="面试记录"
+          aria-label={t('面试记录')}
           aria-current={page === 'history' ? 'page' : undefined}
           onClick={() => onNavigate('history')}
         >
           <History size={18} />
-          <span>面试记录</span>
+          <span>{t('面试记录')}</span>
         </button>
         <button
           className={`nav-item ${page === 'knowledge' ? 'active' : ''}`}
-          aria-label="知识库"
+          aria-label={t('知识库')}
           aria-current={page === 'knowledge' ? 'page' : undefined}
           onClick={() => onNavigate('knowledge')}
         >
           <Database size={18} />
-          <span>知识库</span>
+          <span>{t('知识库')}</span>
         </button>
       </nav>
       {!collapsed && (
         <div className="sidebar-conversations">
-          <p className="section-caption">聊天记录</p>
+          <p className="section-caption">{t('聊天记录')}</p>
           {preparation.conversations
             .slice()
             .reverse()
@@ -131,7 +132,7 @@ export function Sidebar({
                       ? 'page'
                       : undefined
                   }
-                  aria-label={`${conversation.title}${conversation.messages.some((m) => m.status === 'streaming') ? '，正在回复' : conversation.unread ? '，回复完成，尚未查看' : ''}${!conversation.messages.length ? '，未发送草稿' : ''}`}
+                  aria-label={`${conversation.title}${conversation.messages.some((m) => m.status === 'streaming') ? t('，正在回复') : conversation.unread ? t('，回复完成，尚未查看') : ''}${!conversation.messages.length ? t('，未发送草稿') : ''}`}
                   onClick={() => {
                     preparation.selectConversation(conversation.id);
                     onNavigate('preparation');
@@ -150,17 +151,17 @@ export function Sidebar({
                   </span>
                   <span>
                     {conversation.title}
-                    {!conversation.messages.length && <small> · 草稿</small>}
+                    {!conversation.messages.length && <small>{t(' · 草稿')}</small>}
                   </span>
                 </button>
                 <ConfirmDeleteButton
                   iconOnly
                   compact
                   className="conversation-delete"
-                  target={'对话：' + conversation.title}
+                  target={t('对话：') + conversation.title}
                   revision={conversation.id + ':' + conversation.title}
                   active={!collapsed}
-                  aria-label={'删除对话：' + conversation.title}
+                  aria-label={t('删除对话：') + conversation.title}
                   onConfirm={() => {
                     const active = preparation.activeConversation === conversation.id;
                     preparation.deleteConversation(conversation.id);
@@ -179,17 +180,17 @@ export function Sidebar({
           {!collapsed && connection.error && (
             <button className="status-retry" onClick={() => void connection.load(true, true)}>
               <Refresh size={14} />
-              重新加载模型
+              {t('重新加载模型')}
             </button>
           )}
         </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
-            <button className="user-button" aria-label="用户菜单">
+            <button className="user-button" aria-label={t('用户菜单')}>
               <span className="avatar">{userName.slice(0, 1).toUpperCase()}</span>
               <span className="user-info">
                 <strong title={accountLabel}>{accountLabel}</strong>
-                <small>{remaining}</small>
+                <small>{t(remaining)}</small>
               </span>
               <ChevronsUpDown size={15} />
             </button>
@@ -203,27 +204,32 @@ export function Sidebar({
             >
               <DropdownMenu.Item className="dropdown-item" onSelect={onSettings}>
                 <Settings size={16} />
-                设置
+                {t('设置')}
               </DropdownMenu.Item>
               <DropdownMenu.Separator className="dropdown-separator" />
               <DropdownMenu.Item className="dropdown-item" onSelect={() => setLoggingOut(true)}>
                 <LogOut size={16} />
-                {localMode ? '返回登录' : '退出登录'}
+                {localMode ? t('返回登录') : t('退出登录')}
               </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Portal>
         </DropdownMenu.Root>
       </div>
       {loggingOut && (
-        <Modal title={localMode ? '返回登录' : '退出登录'} onClose={() => setLoggingOut(false)}>
+        <Modal
+          title={localMode ? t('返回登录') : t('退出登录')}
+          onClose={() => setLoggingOut(false)}
+        >
           <p>
-            {localMode ? '返回登录后' : '退出后'}
-            ，正在生成的回复会停止，未保存的个人信息编辑会丢失。普通聊天、附件草稿和已保存资料会保留。
+            {localMode ? t('返回登录后') : t('退出后')}
+            {t(
+              '，正在生成的回复会停止，未保存的个人信息编辑会丢失。普通聊天、附件草稿和已保存资料会保留。',
+            )}
           </p>
           <div className="dialog-footer">
             <Button variant="outline" data-autofocus onClick={() => setLoggingOut(false)}>
               <X size={16} />
-              取消
+              {t('取消')}
             </Button>
             <Button
               variant="dangerGhost"
@@ -233,7 +239,7 @@ export function Sidebar({
               }}
             >
               <LogOut size={16} />
-              {localMode ? '返回登录' : '退出登录'}
+              {localMode ? t('返回登录') : t('退出登录')}
             </Button>
           </div>
         </Modal>

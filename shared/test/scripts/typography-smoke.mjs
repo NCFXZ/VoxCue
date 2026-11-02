@@ -28,7 +28,7 @@ app.process().stderr.on('data', (data) => {
 const previewStates = new Set([
   'login-light',
   'personal-dark',
-  'settings-个性化-dark',
+  'settings-通用-dark',
   'settings-面试设置-dark',
   'record-answers-narrow-dark',
   'knowledge-documents-narrow-dark',
@@ -40,6 +40,50 @@ const requestedPreviews = new Set(
     ?.slice(10)
     .split(',') ?? [],
 );
+const mathAnswer = [
+  String.raw`Inline: \(E = mc^2\).`,
+  String.raw`\[\begin{bmatrix}1&2\\3&4\end{bmatrix}\begin{bmatrix}5&6\\7&8\end{bmatrix}=\begin{bmatrix}19&22\\43&50\end{bmatrix}\]`,
+  '$$' + Array.from({ length: 80 }, (_, i) => `x_{${i}}`).join(' + ') + '$$',
+  '```tex\n' + String.raw`\(literal\)` + '\n```',
+].join('\n\n');
+const inspectMath = async (page, selector, name) => {
+  const content = page.locator(selector).last();
+  await content.locator('.katex-html').nth(2).waitFor();
+  await page.evaluate(() => document.fonts.ready);
+  assert.equal(await content.locator('.katex').count(), 3, name + ': all formulas rendered');
+  assert.equal(await content.locator('.katex-error').count(), 0, name + ': no formula errors');
+  assert.equal(await content.locator('pre code').innerText(), String.raw`\(literal\)` + '\n');
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    const geometry = await content.evaluate((root) => {
+      const formulas = [...root.querySelectorAll('.katex-display')];
+      const long = formulas.at(-1);
+      long.scrollLeft = 100;
+      return {
+        overflow: root.scrollWidth > root.clientWidth + 1,
+        scrollable: long.scrollWidth > long.clientWidth && long.scrollLeft > 0,
+        matrix: root.querySelectorAll('.mtable').length,
+        fontLoaded: [...document.fonts].some(
+          (font) => font.family.includes('KaTeX_Main') && font.status === 'loaded',
+        ),
+      };
+    });
+    assert.equal(geometry.overflow, false, name + ': math must not widen the answer');
+    assert.equal(geometry.scrollable, true, name + ': long math scrolls inside its own block');
+    assert.equal(geometry.matrix, 3, name + ': matrix rows and columns rendered');
+    assert.equal(geometry.fontLoaded, true, name + ': bundled math font loaded');
+  }
+  if (requestedPreviews.has(name))
+    console.log(
+      JSON.stringify({
+        preview: name,
+        jpeg: (await page.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString(
+          'base64',
+        ),
+      }),
+    );
+  console.log('Inspect math: ' + name);
+};
 const inspect = async (page, name) => {
   await page.waitForFunction(() =>
     document
@@ -233,7 +277,7 @@ const inspect = async (page, name) => {
           expectedControlSize: e.matches('.login-interview-preview textarea')
             ? 11
             : e.matches(
-                  '.login-form-links .ui-button,.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.markdown-code-block > header .ui-button',
+                  '.login-form-links .ui-button,.profile-edit-dialog textarea.profile-editor-input,.chat-copy',
                 )
               ? 12
               : 14,
@@ -279,6 +323,7 @@ try {
     KnowledgeHost.prototype.search = async () => [];
     ChatGPTService.prototype.stream = async function (request, emit) {
       const answerText =
+        globalThis.typographyAnswerText ??
         '我会先确认问题和边界，再结合已知事实说明实现方法。\n\n### 实现要点\n\n使用明确的接口校验，说明选择理由。';
       emit({ id: request.id, type: 'delta', text: answerText });
       return { answerText, usage: null, sources: [] };
@@ -293,7 +338,7 @@ try {
   const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
+  await page.locator('.welcome h1').waitFor();
   await page.evaluate(() => {
     localStorage.setItem(
       'copilot-personal-info-v1',
@@ -399,7 +444,7 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
     assert.equal(await settings.getByRole('button', { name: '知识库', exact: true }).count(), 0);
@@ -408,12 +453,12 @@ try {
       'AI 服务',
       '本地组件',
       '面试设置',
-      '个性化',
+      '通用',
       '关于与更新',
     ]) {
       await settings.getByRole('button', { name: category, exact: true }).click();
       await inspect(page, `settings-${category}-${theme}`);
-      if (category === '个性化') {
+      if (category === '通用') {
         for (const menu of ['外观主题']) {
           await settings.getByRole('button', { name: menu, exact: true }).click();
           await inspect(page, `settings-menu-${menu}-${theme}`);
@@ -525,16 +570,9 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
-  for (const category of [
-    'VoxCue 账号',
-    'AI 服务',
-    '本地组件',
-    '面试设置',
-    '个性化',
-    '关于与更新',
-  ]) {
+  for (const category of ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '关于与更新']) {
     await page
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: category, exact: true })
@@ -543,7 +581,13 @@ try {
   }
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await app.evaluate((_, text) => {
+    globalThis.typographyAnswerText = text;
+  }, mathAnswer);
+  await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('Formula layout');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  await inspectMath(page, '.chat-message.assistant .markdown-content', 'chat-math');
+  await page.locator('.interview-start-trigger').click();
   const start = page.getByRole('dialog', { name: '开始面试', exact: true });
   await start.getByRole('button', { name: '确认开始', exact: true }).waitFor();
   await inspect(page, 'interview-confirm-dark');
@@ -556,6 +600,9 @@ try {
   await inspect(floating, 'floating-light');
   await floating.evaluate(() => document.documentElement.classList.add('dark'));
   await inspect(floating, 'floating-dark');
+  await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('Formula layout');
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
+  await inspectMath(floating, '.answer-bubble .markdown-content', 'interview-math');
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
   await inspect(floating, 'floating-collapsed-dark');
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();

@@ -184,7 +184,7 @@ try {
   await page.evaluate(() => window.desktop.signInWithChatGPT());
   await page.reload();
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.getByRole('heading', { name: '今天想准备哪一部分面试？' }).waitFor();
+  await page.locator('.welcome h1').waitFor();
   assert.notEqual(
     await app.evaluate(
       ({ BrowserWindow }) =>
@@ -207,7 +207,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();

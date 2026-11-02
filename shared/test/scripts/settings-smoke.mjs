@@ -33,7 +33,7 @@ try {
     );
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
   };
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
@@ -68,13 +68,13 @@ try {
     await geometry();
   };
   await open();
-  await category('个性化').click();
+  await category('通用').click();
   assert.deepEqual(
     await settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button')
       .allTextContents(),
-    ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新'],
+    ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '关于与更新'],
   );
   await category('VoxCue 账号').click();
   await settings.getByRole('region', { name: '云同步', exact: true }).waitFor();
@@ -82,8 +82,45 @@ try {
   await settings.getByRole('button', { name: '刷新容量', exact: true }).waitFor();
   await settings.getByRole('button', { name: '删除账号', exact: true }).waitFor();
   await geometry();
-  await category('个性化').click();
+  await category('通用').click();
   assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
+  const languageMenu = settings.getByRole('button', { name: '语言', exact: true });
+  const personalInfoBefore = await page.evaluate(() =>
+    localStorage.getItem('copilot-personal-info-v1'),
+  );
+  assert.equal(await languageMenu.innerText(), '简体中文');
+  await languageMenu.focus();
+  await page.keyboard.press('Enter');
+  assert.deepEqual(await settings.getByRole('menuitemradio').allTextContents(), [
+    '简体中文',
+    'English',
+  ]);
+  assert.equal(
+    await settings
+      .getByRole('menuitemradio', { name: '简体中文', exact: true })
+      .getAttribute('aria-checked'),
+    'true',
+  );
+  await page.keyboard.press('Escape');
+  assert.equal(await languageMenu.evaluate((node) => node === document.activeElement), true);
+  await languageMenu.click();
+  await settings.getByRole('menuitemradio', { name: 'English', exact: true }).click();
+  const englishSettings = page.getByRole('dialog', { name: 'Settings', exact: true });
+  const englishLanguage = englishSettings.getByRole('button', { name: 'Language', exact: true });
+  assert.equal(await englishLanguage.innerText(), 'English');
+  assert.equal(await page.evaluate(() => localStorage.getItem('voxcue-language-v1')), 'en');
+  await englishSettings.getByRole('heading', { name: 'General', exact: true }).waitFor();
+  assert.equal(await page.evaluate(() => document.documentElement.lang), 'en');
+  await englishLanguage.click();
+  await englishSettings.getByRole('menuitemradio', { name: '简体中文', exact: true }).click();
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('copilot-personal-info-v1')),
+    personalInfoBefore,
+    'UI language preference must not change interview language or personal information',
+  );
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await open();
+  assert.equal(await languageMenu.innerText(), '简体中文');
   const themeMenu = settings.getByRole('button', { name: '外观主题', exact: true });
   for (let attempt = 0; attempt < 3; attempt++) {
     await themeMenu.dispatchEvent('keydown', { key: 'Enter', code: 'Enter' });
@@ -128,7 +165,7 @@ try {
   await page.getByRole('menuitemradio', { name: '浅色', exact: true }).click();
   await geometry();
   await noKnowledgeSettings();
-  await category('个性化').click();
+  await category('通用').click();
   await page.screenshot({ animations: 'disabled' });
   await category('AI 服务').click();
   await settings.getByRole('region', { name: '账户额度' }).waitFor();
@@ -136,7 +173,7 @@ try {
   await page.screenshot({ animations: 'disabled' });
   await category('关于与更新').click();
   await settings.getByText('VoxCue', { exact: true }).waitFor();
-  await category('个性化').click();
+  await category('通用').click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await noKnowledgeSettings();
@@ -154,6 +191,17 @@ try {
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.reload();
   await open();
+  assert.equal(await languageMenu.innerText(), '简体中文');
+  await languageMenu.click();
+  assert.equal(
+    await settings
+      .getByRole('menuitemradio', { name: '简体中文', exact: true })
+      .getAttribute('aria-checked'),
+    'true',
+  );
+  await settings.getByRole('menuitemradio', { name: '简体中文', exact: true }).click();
+  assert.equal(await languageMenu.innerText(), '简体中文');
+  assert.equal(await page.evaluate(() => localStorage.getItem('voxcue-language-v1')), 'zh-CN');
   assert.equal(
     await page.locator('html').evaluate((element) => element.classList.contains('dark')),
     true,
@@ -177,7 +225,9 @@ try {
   await settings.waitFor({ state: 'detached' });
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));
   assert.deepEqual(errors, []);
-  console.log('Settings categories, themes, persistence and responsive layout passed');
+  console.log(
+    'Settings categories, language switching, keyboard, themes, persistence and responsive layout passed',
+  );
 } finally {
   await closeUiApp(app);
 }

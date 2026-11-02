@@ -109,7 +109,7 @@ try {
   });
   const login = await app.firstWindow();
   const main = await connectUiAccount(app, login);
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const [page] = await Promise.all([
     app.waitForEvent('window'),
     main.getByRole('button', { name: '确认开始', exact: true }).click(),
@@ -405,7 +405,7 @@ try {
   const lifecycleCalls = [];
   for (const phase of ['等待', '活动']) {
     for (const action of ['结束', '关闭', '销毁']) {
-      await main.getByRole('button', { name: '开始面试', exact: true }).click();
+      await main.locator('.interview-start-trigger').click();
       const [target] = await Promise.all([
         app.waitForEvent('window'),
         main.getByRole('button', { name: '确认开始', exact: true }).click(),

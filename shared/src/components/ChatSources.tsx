@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useState } from 'react';
 import type { ChatSource } from '../../electron/contracts/chat';
 import { openChatLink } from '../services/chat';
@@ -22,15 +23,15 @@ export function ChatSources({ sources }: { sources: ChatSource[] }) {
       </button>
     ));
   return (
-    <div className="chat-source-group" aria-label="搜索来源">
+    <div className="chat-source-group" aria-label={t('搜索来源')}>
       <div className="chat-sources">
-        <span>来源</span>
+        <span>{t('来源')}</span>
         {links(sources.slice(0, 3))}
       </div>
       {sources.length > 3 && (
         <details className="chat-source-more">
           <summary>
-            更多来源（{sources.length - 3}）
+            {t('更多来源（{0}）', [sources.length - 3])}
             <span className="disclosure-chevron">
               <ChevronRight size={14} />
             </span>
@@ -40,7 +41,7 @@ export function ChatSources({ sources }: { sources: ChatSource[] }) {
       )}
       {error && (
         <small className="inline-error" role="alert">
-          无法打开来源链接。
+          {t('无法打开来源链接。')}
         </small>
       )}
     </div>

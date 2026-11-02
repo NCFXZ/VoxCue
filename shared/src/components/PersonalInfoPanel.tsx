@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { SyncBadge } from './SyncBadge';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useComponentReady } from '../stores/components';
@@ -144,7 +145,7 @@ export function PersonalInfoPanel({
   const renderEditor = () =>
     open && editor ? (
       <Modal
-        title={'编辑' + profileLabels[editor.field]}
+        title={t('编辑{0}', [t(profileLabels[editor.field])])}
         className="profile-edit-dialog"
         onClose={() => {
           setEditor(null);
@@ -159,9 +160,9 @@ export function PersonalInfoPanel({
         >
           {editor!.field === 'skills' && (
             <label className="field-label">
-              技能名称
+              {t('技能名称')}
               <input
-                aria-label="技能名称"
+                aria-label={t('技能名称')}
                 value={editor.title || ''}
                 maxLength={80}
                 onChange={(event) => setEditor({ ...editor, title: event.target.value })}
@@ -170,18 +171,18 @@ export function PersonalInfoPanel({
           )}
           <label className="field-label">
             {editor!.field === 'skills'
-              ? '技能内容'
+              ? t('技能内容')
               : editor!.field === 'customInstructions'
-                ? '自定义指令内容'
-                : '内容'}
+                ? t('自定义指令内容')
+                : t('内容')}
             <textarea
               data-autofocus
               aria-label={
                 editor!.field === 'skills'
-                  ? '技能内容'
+                  ? t('技能内容')
                   : editor!.field === 'customInstructions'
-                    ? '自定义指令内容'
-                    : '内容'
+                    ? t('自定义指令内容')
+                    : t('内容')
               }
               className="profile-editor-input"
               rows={6}
@@ -198,7 +199,7 @@ export function PersonalInfoPanel({
           </label>
           {error && (
             <p role="alert" className="danger-text">
-              {error}
+              {t(error)}
             </p>
           )}
           <div className="dialog-footer">
@@ -211,7 +212,7 @@ export function PersonalInfoPanel({
               }}
             >
               <X size={16} />
-              取消
+              {t('取消')}
             </Button>
             <Button
               type="submit"
@@ -220,7 +221,7 @@ export function PersonalInfoPanel({
               }
             >
               <Save size={16} />
-              保存
+              {t('保存')}
             </Button>
           </div>
         </form>
@@ -235,49 +236,52 @@ export function PersonalInfoPanel({
         data-open={open}
         inert={!open}
         aria-hidden={!open}
-        aria-label="个人信息"
+        aria-label={t('个人信息')}
       >
         {resizeHandle}
         <header>
           <div>
             <h2 className="sync-title">
-              个人信息
-              <SyncBadge itemKey="profile:main" label="个人信息" />
+              {t('个人信息')}
+              <SyncBadge itemKey="profile:main" label={t('个人信息')} />
             </h2>
-            <small>{completed}/5 已添加</small>
+            <small>
+              {completed}
+              {t('/5 已添加')}
+            </small>
           </div>
         </header>
         <div className="personal-panel-scroll">
-          <div className="profile-overview" aria-label="资料概览">
+          <div className="profile-overview" aria-label={t('资料概览')}>
             {[
-              { label: '简历', ready: !!state.info.background },
-              { label: '职位描述', ready: !!state.info.jobDescription },
+              { label: t('简历'), ready: !!state.info.background },
+              { label: t('职位描述'), ready: !!state.info.jobDescription },
               {
-                label: '自定义指令',
+                label: t('自定义指令'),
                 ready: !!state.info.customInstructions?.length,
               },
               {
-                label: '面试知识库',
+                label: t('面试知识库'),
                 ready: !!state.selectedKnowledgeBaseId && !selectedMissing,
               },
-              { label: '技能', ready: !!state.info.skills?.length },
+              { label: t('技能'), ready: !!state.info.skills?.length },
             ].map((item) => (
               <span
                 key={item.label}
                 className={item.ready ? 'is-ready' : ''}
-                aria-label={`${item.label}：${item.ready ? '已添加' : '未添加'}`}
+                aria-label={t('{0}：{1}', [t(item.label), t(item.ready ? '已添加' : '未添加')])}
               >
                 {item.ready ? (
                   <Check size={13} />
                 ) : (
                   <span className="profile-empty-circle" aria-hidden="true" />
                 )}
-                {item.label}
+                {t(item.label)}
               </span>
             ))}
           </div>
-          <section className="profile-section" aria-label="基本信息">
-            <h3>姓名与面试语言</h3>
+          <section className="profile-section" aria-label={t('基本信息')}>
+            <h3>{t('姓名与面试语言')}</h3>
             <form
               id="personal-info-form"
               onSubmit={(event) => {
@@ -295,20 +299,20 @@ export function PersonalInfoPanel({
               }}
             >
               <label className="field-label">
-                姓名
+                {t('姓名')}
                 <input
                   value={basic.name}
                   maxLength={60}
-                  placeholder="你的名字"
+                  placeholder={t('你的名字')}
                   onChange={(event) => setBasic({ ...basic, name: event.target.value })}
                 />
               </label>
               <div className="field-label">
-                面试语言
+                {t('面试语言')}
                 <ChoiceMenu
-                  label="面试语言"
+                  label={t('面试语言')}
                   value={basic.language}
-                  options={languages.map((value) => ({ value, label: value }))}
+                  options={languages.map((value) => ({ value, label: t(value) }))}
                   onChange={(language) => setBasic({ ...basic, language })}
                 />
               </div>
@@ -318,14 +322,16 @@ export function PersonalInfoPanel({
             <details
               className="profile-section profile-disclosure"
               key={field}
-              aria-label={profileLabels[field]}
+              aria-label={t(profileLabels[field])}
             >
               <summary className="profile-section-heading">
-                <h3>{profileLabels[field]}</h3>
+                <h3>{t(profileLabels[field])}</h3>
                 <span className="disclosure-chevron">
                   <ChevronRight size={16} />
                 </span>
-                {field !== 'customInstructions' && <span className="neutral-badge">AI 摘要</span>}
+                {field !== 'customInstructions' && (
+                  <span className="neutral-badge">{t('AI 摘要')}</span>
+                )}
               </summary>
               <div className="profile-summary">
                 {state.info[field] ? (
@@ -333,10 +339,10 @@ export function PersonalInfoPanel({
                 ) : (
                   <p className="empty-inline">
                     {field === 'background'
-                      ? '尚未添加简历摘要'
+                      ? t('尚未添加简历摘要')
                       : field === 'jobDescription'
-                        ? '尚未添加职位描述摘要'
-                        : '尚未添加自定义指令'}
+                        ? t('尚未添加职位描述摘要')
+                        : t('尚未添加自定义指令')}
                   </p>
                 )}
               </div>
@@ -345,14 +351,14 @@ export function PersonalInfoPanel({
                   variant="ghost"
                   size="icon"
                   className="action-icon-button"
-                  aria-label="编辑"
+                  aria-label={t('编辑')}
                   disabled={state.streaming}
                   onClick={() => edit(field)}
                 >
                   <Edit size={14} />
                 </Button>
                 <ConfirmDeleteButton
-                  target={profileLabels[field]}
+                  target={t(profileLabels[field])}
                   active={open && !editor}
                   revision={state.info[field]}
                   disabled={!state.info[field]}
@@ -360,25 +366,28 @@ export function PersonalInfoPanel({
                 />
               </div>
               {field === 'background' && state.resume && (
-                <small className="legacy-resume">已保留原件：{state.resume.name}</small>
+                <small className="legacy-resume">
+                  {t('已保留原件：')}
+                  {state.resume.name}
+                </small>
               )}
             </details>
           ))}
-          <details className="profile-section profile-disclosure" aria-label="面试知识库">
+          <details className="profile-section profile-disclosure" aria-label={t('面试知识库')}>
             <summary className="profile-section-heading">
-              <h3>面试知识库</h3>
+              <h3>{t('面试知识库')}</h3>
               <span className="disclosure-chevron">
                 <ChevronRight size={16} />
               </span>
             </summary>
             <ChoiceMenu
-              label="面试知识库"
+              label={t('面试知识库')}
               disabled={!ragReady}
               value={state.selectedKnowledgeBaseId ?? ''}
               options={[
-                { value: '', label: '不使用知识库' },
+                { value: '', label: t('不使用知识库') },
                 ...(selectedMissing
-                  ? [{ value: state.selectedKnowledgeBaseId!, label: '所选知识库已不可用' }]
+                  ? [{ value: state.selectedKnowledgeBaseId!, label: t('所选知识库已不可用') }]
                   : []),
                 ...bases.map((item) => ({ value: item.id, label: item.name })),
               ]}
@@ -391,13 +400,13 @@ export function PersonalInfoPanel({
             {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
             {(basesError || selectedMissing) && (
               <p role="alert" className="danger-text">
-                {basesError || '所选知识库已删除，请重新选择或选择不使用。'}
+                {t(basesError || '所选知识库已删除，请重新选择或选择不使用。')}
               </p>
             )}
           </details>
-          <details className="profile-section profile-disclosure" aria-label="面试技能">
+          <details className="profile-section profile-disclosure" aria-label={t('面试技能')}>
             <summary className="profile-section-heading">
-              <h3>技能</h3>
+              <h3>{t('技能')}</h3>
               <span className="disclosure-chevron">
                 <ChevronRight size={16} />
               </span>
@@ -418,16 +427,16 @@ export function PersonalInfoPanel({
                       variant="ghost"
                       size="icon"
                       className="action-icon-button"
-                      aria-label="编辑"
+                      aria-label={t('编辑')}
                       onClick={() => edit('skills', item.id)}
                     >
                       <Edit size={14} />
                     </Button>
                     <ConfirmDeleteButton
-                      target={'技能：' + item.title}
+                      target={t('技能：') + item.title}
                       active={open && !editor}
                       revision={JSON.stringify(item)}
-                      aria-label={'删除技能：' + item.title}
+                      aria-label={t('删除技能：') + item.title}
                       onConfirm={() =>
                         state.updateInfo({
                           skills: (usePreparation.getState().info.skills ?? []).filter(
@@ -440,21 +449,21 @@ export function PersonalInfoPanel({
                 </div>
               </details>
             ))}
-            {!state.info.skills?.length && <p className="empty-inline">尚未添加技能</p>}
+            {!state.info.skills?.length && <p className="empty-inline">{t('尚未添加技能')}</p>}
           </details>
         </div>
         {(dirty || conflict || (error && !editor)) && (
           <footer className="personal-save-bar">
             <span role="status">
               {conflict
-                ? '基本信息已有更新'
+                ? t('基本信息已有更新')
                 : dirty
-                  ? '基本信息有未保存修改'
-                  : 'AI 更新需在提案中确认'}
+                  ? t('基本信息有未保存修改')
+                  : t('AI 更新需在提案中确认')}
             </span>
             {error && (
               <p role="alert" className="danger-text">
-                {error}
+                {t(error)}
               </p>
             )}
             <div>
@@ -469,12 +478,12 @@ export function PersonalInfoPanel({
                   }}
                 >
                   {conflict ? <Refresh size={16} /> : <X size={16} />}
-                  {conflict ? '载入最新资料' : '取消'}
+                  {conflict ? t('载入最新资料') : t('取消')}
                 </Button>
               )}
               <Button form="personal-info-form" type="submit" disabled={!dirty || conflict}>
                 <Save size={16} />
-                保存
+                {t('保存')}
               </Button>
             </div>
           </footer>

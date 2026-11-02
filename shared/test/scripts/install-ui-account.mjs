@@ -28,9 +28,11 @@ export async function enterPrimaryUiAccount(app, login) {
   // The offline account port must be installed before refreshing configured state.
   await login.reload();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
-  await login.waitForFunction(() => [...document.querySelectorAll('button')].some(button =>
-    button.type === 'submit' && button.textContent === '登录' && !button.disabled,
-  ));
+  await login.waitForFunction(() =>
+    [...document.querySelectorAll('button')].some(
+      (button) => button.type === 'submit' && button.textContent === '登录' && !button.disabled,
+    ),
+  );
   const opened = app.waitForEvent('window');
   await login.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
   await login.getByLabel('密码', { exact: true }).fill('Synthetic UI passphrase 2026!');
@@ -89,7 +91,7 @@ export async function closeUiApp(app) {
           throw Error('UI teardown requires isolated temporary userData');
         const original = dialog.showMessageBox.bind(dialog);
         dialog.showMessageBox = (...args) =>
-          args.at(-1)?.title === '关闭 VoxCue'
+          ['关闭 VoxCue', 'Close VoxCue'].includes(args.at(-1)?.title)
             ? Promise.resolve({ response: 1, checkboxChecked: false })
             : original(...args);
       },

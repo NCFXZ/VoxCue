@@ -58,7 +58,7 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
   };
   const chooseModel = async (label) => {
@@ -127,7 +127,10 @@ try {
   assert.equal(await page.locator('.attachment-menu-hint').count(), 0);
   await page.getByRole('menuitem', { name: '添加文件', exact: true }).waitFor();
   await page.getByRole('menuitem', { name: '添加文件夹', exact: true }).waitFor();
-  await page.getByRole('menuitemcheckbox', { name: '网络搜索', exact: true }).waitFor();
+  assert.equal(
+    await page.getByRole('menuitemcheckbox', { name: '网络搜索', exact: true }).count(),
+    0,
+  );
   await page.keyboard.press('Escape');
   await input.fill('第二条合成提问');
   await send.click();
@@ -166,7 +169,7 @@ try {
   assert.equal(await settings.getByText('设置用于下一场面试。', { exact: true }).count(), 0);
   await settings.getByRole('button', { name: '面试回答模型', exact: true }).click();
   await settings.getByRole('menuitemradio', { name: '其他测试模型', exact: true }).click();
-  await category('个性化').click();
+  await category('通用').click();
   await settings.getByRole('button', { name: '外观主题', exact: true }).click();
   await settings.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
@@ -182,7 +185,7 @@ try {
     'requested settings explanations removed; circular send with 20px arrow, no chat dictation button, and unchanged enabled/disabled behavior in light/dark',
   );
 
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   await page
     .getByRole('dialog', { name: '开始面试', exact: true })
     .getByText(/发送至 合成服务公司/)

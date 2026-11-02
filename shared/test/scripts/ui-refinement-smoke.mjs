@@ -170,7 +170,7 @@ try {
       );
       await page.emulateMedia({ reducedMotion: 'no-preference' });
     }
-    assert.equal(await panel.locator('.profile-proposal,.skill-update-prompt').count(), 0);
+    assert.equal(await panel.locator('.profile-proposal,.preparation-guide').count(), 0);
     for (const label of ['简历摘要', '职位描述摘要', '自定义指令', '面试技能']) {
       const section = panel.locator(`details[aria-label="${label}"]`);
       if (!(await section.evaluate((e) => e.open)))

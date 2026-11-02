@@ -4,7 +4,7 @@ import {
   type ChatRequest,
   type ChatSource,
 } from '../../contracts/chat';
-import { skillResearchScope, validProfile } from '../../contracts/profile';
+import { validProfile } from '../../contracts/profile';
 export function validSource(value: any): ChatSource | null {
   if (typeof value?.url !== 'string' || value.url.length > 4096) return null;
   try {
@@ -64,11 +64,8 @@ export function validateRequest(value: unknown): ChatRequest {
     (request.profileTask !== undefined &&
       (request.profileTask !== 'skills' ||
         !request.profile ||
-        !request.webSearch ||
-        ((!request.profile.background.trim() || !request.profile.jobDescription.trim()) &&
-          skillResearchScope(
-            Array.isArray(request.turns) ? (request.turns.at(-1)?.content ?? '') : '',
-          ) !== 'topic'))) ||
+        !request.profile.background.trim() ||
+        !request.profile.jobDescription.trim())) ||
     (request.knowledgeBaseId !== undefined &&
       request.knowledgeBaseId !== null &&
       (typeof request.knowledgeBaseId !== 'string' ||

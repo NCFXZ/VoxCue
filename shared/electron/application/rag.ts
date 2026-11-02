@@ -10,6 +10,7 @@ import type { KnowledgeHit, KnowledgeItem } from '../contracts/knowledge';
 import { validateRequest } from '../backend/chat/validation';
 import { buildRagContext, ragInstructions } from './ragContext';
 import { knowledgeUnavailable } from '../backend/knowledge/errors';
+import { requestedKnowledgeQuery } from './knowledgeIntent';
 
 // Bound even an unresponsive port without consuming a late result. The port still
 // receives the signal and owns cancellation/retirement of its native work.
@@ -102,9 +103,21 @@ export class RagChatService implements AIChatService {
   ) {
     const request = validateRequest(value);
     signal.throwIfAborted();
-    if (request.knowledgeBaseId == null) {
+    const preparationQuery =
+      request.profile && request.knowledgeBaseId != null
+        ? await requestedKnowledgeQuery(this.provider, request, signal)
+        : null;
+    if ((request.profile && !preparationQuery) || request.knowledgeBaseId == null) {
       const result = await this.provider.stream(
-        request,
+        request.profile
+          ? {
+              ...request,
+              knowledgeBaseId: null,
+              instructions:
+                request.instructions +
+                '\n本次未检索知识库，不使用历史回复转述的知识库内容作为依据。若用户要求使用但尚未选择知识库，提示先在个人信息中选择；不得声称已检索。',
+            }
+          : request,
         (event) => {
           if (!signal.aborted) emit(event);
         },
@@ -116,7 +129,7 @@ export class RagChatService implements AIChatService {
     const baseId = request.knowledgeBaseId;
     this.requireModel();
     const started = performance.now();
-    let query = options.retrievalQuery ?? request.turns.at(-1)!.content;
+    let query = preparationQuery ?? options.retrievalQuery ?? request.turns.at(-1)!.content;
     // Parameter/configuration errors are not retrieval availability failures.
     if (query.length > 6000) throw Error('无效的知识检索参数。');
     const thread = options.retrievalQuery

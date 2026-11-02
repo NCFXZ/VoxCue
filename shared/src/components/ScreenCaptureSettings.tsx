@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type {
   ScreenCapturePermission,
@@ -49,31 +50,39 @@ export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
   const granted = permission?.status === 'granted';
   const notRequired = permission?.status === 'not-required';
   return (
-    <section className="speech-settings-section screen-capture-settings" aria-label="屏幕捕获权限">
+    <section
+      className="speech-settings-section screen-capture-settings"
+      aria-label={t('屏幕捕获权限')}
+    >
       <div className="screen-capture-row">
         <div className="screen-capture-summary">
           <div className="screen-capture-heading">
-            <h3>{notRequired ? '屏幕捕获' : '允许捕获屏幕'}</h3>
-            <span className="screen-capture-status" role="status" aria-label="屏幕捕获权限状态">
+            <h3>{notRequired ? t('屏幕捕获') : t('允许捕获屏幕')}</h3>
+            <span
+              className="screen-capture-status"
+              role="status"
+              aria-label={t('屏幕捕获权限状态')}
+            >
               {!supported
-                ? '待适配'
+                ? t('待适配')
                 : pending === 'request'
-                  ? '正在申请…'
+                  ? t('正在申请…')
                   : pending === 'check'
-                    ? '正在检查…'
+                    ? t('正在检查…')
                     : notRequired
-                      ? '无需单独授权'
+                      ? t('无需单独授权')
                       : granted
-                        ? '已允许'
+                        ? t('已允许')
                         : permission?.status === 'restricted'
-                          ? '受系统限制'
+                          ? t('受系统限制')
                           : permission?.status === 'error' || permission?.status === 'unknown'
-                            ? '无法确认'
-                            : '未允许'}
+                            ? t('无法确认')
+                            : t('未允许')}
             </span>
           </div>
           <p className="screen-capture-description">
-            {notRequired ? permission.message + ' ' : ''}仅在截图时使用，不持续录屏。
+            {notRequired ? t(permission.message) + ' ' : ''}
+            {t('仅在截图时使用，不持续录屏。')}
           </p>
         </div>
         {!notRequired && (
@@ -92,19 +101,19 @@ export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
                 <Monitor size={16} />
               )}
               {!supported
-                ? '待适配'
+                ? t('待适配')
                 : granted
-                  ? '已允许'
+                  ? t('已允许')
                   : pending === 'request'
-                    ? '正在申请…'
-                    : '申请权限'}
+                    ? t('正在申请…')
+                    : t('申请权限')}
             </Button>
           </div>
         )}
       </div>
       {(error || permission?.status === 'error' || permission?.status === 'unknown') && (
         <p role="alert" className="danger-text">
-          {error || permission?.message}
+          {t(error || permission?.message)}
         </p>
       )}
     </section>

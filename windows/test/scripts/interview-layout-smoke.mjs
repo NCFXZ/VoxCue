@@ -1,4 +1,5 @@
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
+import { checkProgressMotion } from '../../../shared/test/scripts/check-progress-motion.mjs';
 import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -108,7 +109,7 @@ const errors = [],
   checks = [];
 try {
   assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), profile);
-  await installUiAccount(app, { speech: true });
+  await installUiAccount(app, { speech: true, components: true });
   await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
@@ -196,6 +197,7 @@ try {
   await main.getByText('合成回答正文。', { exact: true }).waitFor();
   const checkCompactDuration = async (page) => {
     await page.locator('.response-progress.is-collapsed').last().waitFor();
+    await page.locator('.response-progress-content').last().waitFor({ state: 'hidden' });
     const gap = await page
       .locator('.response-progress.is-collapsed')
       .last()
@@ -215,7 +217,7 @@ try {
     'chat initial thinking without old dot; public thought above separator before and after answer',
   );
 
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
   await confirmation.locator('.interview-start-summary > div').first().waitFor();
   const rows = await confirmation.locator('.interview-start-summary > div').evaluateAll((nodes) =>
@@ -770,11 +772,15 @@ try {
   await app.evaluate(() => globalThis.layoutFinish());
   await floating.getByText('合成回答正文。', { exact: true }).waitFor();
   await checkCompactDuration(floating);
+  await checkProgressMotion(floating, floating.locator('.response-progress'));
   await floating.locator('.response-progress').screenshot({});
   await floating.locator('.duration-toggle').click();
   await checkDivider(floating);
   await floating.screenshot({ animations: 'disabled' });
   checks.push('interview shares modern progress component and public-summary disclosure');
+  checks.push(
+    'interview progress and nested reasoning animate, reverse smoothly and respect reduced motion',
+  );
   assert.deepEqual(errors, []);
   const result = {
     passed: true,

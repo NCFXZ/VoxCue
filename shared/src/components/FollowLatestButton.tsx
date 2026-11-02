@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { ArrowUp } from './icons';
 import { Button } from './ui/button';
 
@@ -19,7 +20,7 @@ export function FollowLatestButton({
         type="button"
         variant="outline"
         size="icon"
-        aria-label={label}
+        aria-label={t(label)}
         aria-busy={busy}
         aria-hidden={!visible}
         onClick={onClick}

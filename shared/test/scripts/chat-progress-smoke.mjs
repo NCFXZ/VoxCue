@@ -1,5 +1,6 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { checkProgressMotion } from './check-progress-motion.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -65,11 +66,17 @@ try {
           prompt,
           input: body.input,
           instructions: body.instructions,
+          tool_choice: body.tool_choice,
         });
         const changes = Object.fromEntries(profileFields.map((field) => [field, null]));
         if (prompt === '更新简历') changes.background = '已核对的合成简历摘要';
         if (prompt === '更新 JD') changes.jobDescription = 'TypeScript、接口边界与桌面应用。';
-        if (body.instructions.includes('本次任务：按技能规则生成技能更新提案。')) {
+        // Typed requests are interpreted by the provider, not a client-side
+        // Chinese keyword classifier. Model that decision in this fixture.
+        if (
+          body.instructions.includes('本次任务：按技能规则生成技能更新提案。') ||
+          prompt === '请联网更新面试技能'
+        ) {
           globalThis.skillResponseCount = (globalThis.skillResponseCount ?? 0) + 1;
           const retrieved = Array.from({ length: 7 }, (_, index) => ({
             title: `真实资料${index + 1}`,
@@ -106,6 +113,7 @@ try {
                     text: JSON.stringify({
                       answer: '已整理3项核心技能，请确认下方提案。',
                       changes,
+                      skillScope: 'all',
                     }),
                   },
                 ],
@@ -142,7 +150,7 @@ try {
             : prompt === '失败后重试'
               ? '重试完成'
               : '普通问题已回答';
-        const text = JSON.stringify({ answer, changes });
+        const text = JSON.stringify({ answer, changes, skillScope: null });
         const terminal = {
           id: 'synthetic-' + globalThis.progressRequests.length,
           object: 'response',
@@ -359,25 +367,11 @@ try {
   await send('更新简历');
   const proposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
   await proposal.getByRole('button', { name: '保存所选', exact: true }).click();
-  await page
-    .locator('.skill-update-prompt')
-    .getByText('资料已保存，补齐摘要后可联网更新面试技能。', { exact: true })
-    .waitFor();
-  await capture('prompt-before', page.locator('.skill-update-prompt'));
-  await page
-    .locator('.skill-update-prompt')
-    .getByRole('button', { name: '补充职位描述', exact: true })
-    .click();
-  await page.locator('.skill-update-prompt').waitFor({ state: 'hidden' });
-  assert.ok((await input().inputValue()).includes('仅补充缺少的摘要并展示待确认提案'));
-  assert.ok((await input().inputValue()).includes('以下是职位描述内容：'));
-  assert.ok((await input().inputValue()).includes('也不生成技能'));
-  assert.equal((await input().inputValue()).includes('联网更新面试技能'), false);
-  await capture('prompt-after');
+  await proposal.getByText('已保存所选资料', { exact: true }).waitFor();
+  assert.equal(await page.locator('.preparation-guide').count(), 0);
   await page.reload();
   await input().waitFor();
-  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
-  assert.ok((await input().inputValue()).includes('以下是职位描述内容：'));
+  assert.equal(await page.locator('.preparation-guide').count(), 0);
   await send('普通问题');
   await completed();
   const next = await app.evaluate(() => globalThis.progressRequests.at(-1));
@@ -389,15 +383,18 @@ try {
   await send('确认');
   await latest().getByText('普通问题已回答', { exact: true }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.progressRequests.length), requests + 1);
-  assert.equal(await page.locator('.skill-update-prompt').count(), 0);
+  assert.equal(await page.locator('.preparation-guide').count(), 0);
   await send('继续提问');
   await completed();
   await send('更新 JD');
   const jdProposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
   await jdProposal.getByRole('button', { name: '保存所选', exact: true }).click();
+  await jdProposal.getByText('已保存所选资料', { exact: true }).waitFor();
+  assert.equal(await page.locator('.preparation-guide').count(), 0);
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
   await page
-    .locator('.skill-update-prompt')
-    .getByRole('button', { name: '联网更新技能', exact: true })
+    .locator('.preparation-guide')
+    .getByRole('button', { name: '生成技能', exact: true })
     .click();
   const skillsProposal = latest().getByRole('region', { name: '待确认的资料更新', exact: true });
   await skillsProposal.getByRole('button', { name: '保存所选', exact: true }).waitFor();
@@ -406,10 +403,12 @@ try {
     await latest().locator('.chat-answer').innerText(),
     '已整理3项核心技能，请确认下方提案。',
   );
-  assert.equal(await latest().locator('.chat-source-group').count(), 0);
+  assert.equal(await latest().locator('.chat-source-group').count(), 1);
+  assert.equal(await latest().locator('.chat-source-group button').count(), 7);
   assert.equal(await skillsProposal.locator('a').count(), 0);
   const skillRequest = await app.evaluate(() => globalThis.progressRequests.at(-1));
-  assert.ok(skillRequest.prompt.includes('根据已确认的简历和职位描述联网搜索'));
+  assert.ok(skillRequest.prompt.includes('根据已确认的简历和职位描述'));
+  assert.equal(skillRequest.tool_choice, 'auto');
   assert.ok(skillRequest.instructions.includes('不凑数量，不设固定字数'));
   assert.ok(skillRequest.instructions.includes('标题和正文只写文字'));
   assert.ok(skillRequest.instructions.includes('完整内容只放在 changes'));
@@ -684,7 +683,11 @@ try {
     ),
     false,
   );
+  await focusUiWindow(app, page);
   await page.mouse.move(0, 0);
+  await currentTitle.locator('.reasoning-chevron').evaluate(async (node) => {
+    await Promise.all(node.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
   assert.equal(
     await currentTitle
       .locator('.reasoning-chevron')
@@ -723,7 +726,8 @@ try {
   await app.evaluate(() => globalThis.finishProgress());
   await latest().getByText('用时 5 分钟 33 秒', { exact: true }).waitFor();
   assert.equal(await latest().locator('.duration-toggle').getAttribute('aria-expanded'), 'false');
-  assert.equal(await latest().locator('.response-progress-content').isVisible(), false);
+  await latest().locator('.response-progress-content').waitFor({ state: 'hidden' });
+  await checkProgressMotion(page, latest().locator('.response-progress'));
   await latest().locator('.duration-toggle').click();
   await page.evaluate(() => {
     Date.now = window.restoreProgressClock;
@@ -759,16 +763,68 @@ try {
   });
   await send('失败后重试');
   await latest().locator('.response-progress').waitFor();
+  await app.evaluate(() => {
+    const encode = (event) => new TextEncoder().encode('data: ' + JSON.stringify(event) + '\n\n');
+    globalThis.progressController.enqueue(
+      encode({
+        type: 'response.output_item.added',
+        output_index: 4,
+        item: { id: 'partial', type: 'message', phase: 'final_answer', content: [] },
+      }),
+    );
+    globalThis.progressController.enqueue(
+      encode({
+        type: 'response.output_text.delta',
+        output_index: 4,
+        delta: '{"answer":"中断前的部分回答',
+      }),
+    );
+  });
+  await latest().locator('.chat-answer').getByText('中断前的部分回答', { exact: true }).waitFor();
   await page.evaluate(() => {
     Date.now = () => window.progressEpoch + 66000;
   });
   await app.evaluate(() =>
     globalThis.progressController.error(Error('synthetic interrupted transport')),
   );
-  await latest().getByText('已处理 1 分钟 6 秒', { exact: true }).waitFor();
+  await latest().getByRole('button', { name: '重试回答', exact: true }).waitFor();
+  await latest().getByText('用时 1 分钟 6 秒', { exact: true }).waitFor();
   await page.evaluate(() => {
     Date.now = window.restoreProgressClock;
   });
+  const actions = latest().locator('.chat-message-actions');
+  for (const language of ['en', 'zh-CN']) {
+    await page.evaluate((language) => {
+      localStorage.setItem('voxcue-language-v1', language);
+      dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+    }, language);
+    for (const dark of [false, true]) {
+      await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+      await actions.locator('.chat-copy').hover();
+      const geometry = await actions.evaluate((element) => {
+        const buttons = [...element.querySelectorAll('button')];
+        const [retry, copy] = buttons.map((button) => button.getBoundingClientRect());
+        return {
+          retryHeight: Math.round(retry.height),
+          retryFont: getComputedStyle(buttons[0]).fontSize,
+          copyHeight: Math.round(copy.height),
+          aligned: Math.abs(retry.top + retry.height / 2 - copy.top - copy.height / 2) < 1,
+          separated: copy.left - retry.right >= 7.9,
+        };
+      });
+      assert.deepEqual(geometry, {
+        retryHeight: 36,
+        retryFont: '14px',
+        copyHeight: 28,
+        aligned: true,
+        separated: true,
+      });
+      if (process.argv.includes('--preview-actions'))
+        console.log(
+          'IMAGE:' + (await actions.screenshot({ type: 'jpeg', quality: 80 })).toString('base64'),
+        );
+    }
+  }
   await latest().getByRole('button', { name: '重试回答', exact: true }).click();
   await latest().getByText('重试完成', { exact: true }).waitFor();
   assert.equal(
@@ -803,18 +859,19 @@ try {
         passed: true,
         checks: [
           'button consent without JD does not gate chat',
-          'plain consent after dismissing the prompt does not revive it',
-          'JD draft is not skills research',
+          'saved summaries and plain consent do not insert onboarding into chat',
           'saved resolution enters history',
           'real Responses SSE public commentary/search/read/find',
           'live and completed duration',
           'failure/stop/retry duration',
           'duration and activities survive reload',
+          'progress and nested reasoning animate both ways, reverse smoothly and respect reduced motion',
           'time above separator, real title disclosures and chronological status changes',
           'trailing chevron only on hover/focus, active title shimmer and reduced motion',
           'composer grows from 2 to 11 lines, shrinks, reflows and restores drafts',
           'source notes hidden in proposals and detail dialogs; button save, mixed/all-unverified source metadata and reload persistence',
-          'both skill prompt actions dismiss immediately and remain dismissed on reload',
+          'skill generation is available from the new-chat home',
+          'retry and copy are aligned and separated in both languages and themes',
           'empty statuses replaced, current status shimmer and no summary language preference',
         ],
         rendererErrors: errors.length,

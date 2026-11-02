@@ -133,7 +133,7 @@ try {
   const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(20000);
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
+  await page.locator('.welcome h1').waitFor();
   const message = page.getByRole('textbox', { name: '聊天消息', exact: true });
   const info = page.getByRole('button', { name: '个人信息', exact: true });
   assert.equal(
@@ -149,7 +149,7 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
   };
   await settings();
@@ -449,7 +449,8 @@ try {
   await page
     .locator('.history-row')
     .filter({ hasText: '项目面试' })
-    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: '重命名标题', exact: true }).click();
   const rename = page.getByRole('dialog', { name: '重命名标题', exact: true });
   await rename.getByLabel('记录标题', { exact: true }).fill('');
@@ -518,7 +519,7 @@ try {
     'title-only history search, rename persistence and save failure recovery, no invented language label, full-size document import and delete-only document actions',
   );
   await page.getByRole('button', { name: '新对话', exact: true }).click();
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   const startDialog = page.getByRole('dialog', { name: '开始面试', exact: true });
   assert.equal(
     await startDialog.getByRole('button', { name: '前往面试设置', exact: true }).count(),
@@ -529,7 +530,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
   await dialog.getByRole('button', { name: '面试设置', exact: true }).click();
@@ -542,7 +543,7 @@ try {
   await page.getByRole('button', { name: '麦克风设备', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '不使用麦克风', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   await page.getByRole('dialog', { name: '开始面试', exact: true }).waitFor();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),

@@ -53,7 +53,7 @@ try {
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
   await main
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   assert.equal(await main.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(), 0);
   assert.equal(
@@ -62,7 +62,7 @@ try {
   );
   await main.getByRole('button', { name: '关闭设置', exact: true }).click();
   for (let cycle = 0; cycle < 20; cycle++) {
-    await main.getByRole('button', { name: '开始面试', exact: true }).click();
+    await main.locator('.interview-start-trigger').click();
     const [floating] = await Promise.all([
       app.waitForEvent('window'),
       main

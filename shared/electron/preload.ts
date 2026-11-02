@@ -56,6 +56,7 @@ const desktop: DesktopAPI = {
   platform:
     process.platform === 'darwin' ? 'macos' : process.platform === 'win32' ? 'windows' : 'unknown',
   presentation,
+  systemLanguage: process.argv.includes('--voxcue-system-language=zh-CN') ? 'zh-CN' : 'en',
   screenCapturePermissionSupported: presentation.screenCapturePermission,
   screenCapturePermission: (action) => invoke('interview:screen-permission', action),
   updates: (call) => invoke('updates:call', call),
@@ -83,6 +84,7 @@ const desktop: DesktopAPI = {
   interviewImage: (call) => invoke('interview:image', call),
   interviewCancel: (id) => invoke('interview:cancel', id),
   setNativeTheme: (theme) => invoke('appearance:theme', theme),
+  setUILanguage: (language) => invoke('appearance:language', language),
   systemAccent: () => invoke('appearance:accent'),
   onSystemAccent: (callback) => subscribe('appearance:accent-changed', callback),
   authSession: () => invoke('auth:session'),

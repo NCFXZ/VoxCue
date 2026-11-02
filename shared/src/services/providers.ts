@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import {
   chatGPTProvider,
   copilotProvider,
@@ -14,7 +15,8 @@ const unknownProvider: ModelProvider = {
 export function providerInfo(value?: ModelProvider | string): ModelProvider {
   if (value === 'chatgpt') return chatGPTProvider;
   if (value === 'copilot') return copilotProvider;
-  if (value === 'mock') return { id: 'mock', name: '未连接服务', dataRecipient: '模型服务提供商' };
+  if (value === 'mock')
+    return { id: 'mock', name: t('未连接服务'), dataRecipient: t('模型服务提供商') };
   if (typeof value === 'string' && value !== 'unknown' && value.trim() && value.length <= 120)
     return { id: value, name: value, dataRecipient: value };
   if (
@@ -35,5 +37,9 @@ export function providerInfo(value?: ModelProvider | string): ModelProvider {
         ? { modelVendor: value.modelVendor }
         : {}),
     };
-  return unknownProvider;
+  return {
+    ...unknownProvider,
+    name: t(unknownProvider.name),
+    dataRecipient: t(unknownProvider.dataRecipient),
+  };
 }

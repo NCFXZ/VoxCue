@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type {
   SpeechOptions,
   SpeechModelId,
@@ -57,32 +58,34 @@ export function SpeechModelSettings({
   ]);
   return (
     <div className="speech-model-settings">
-      <div className="speech-model-group" role="group" aria-label="回答生成">
-        <h4>回答生成</h4>
+      <div className="speech-model-group" role="group" aria-label={t('回答生成')}>
+        <h4>{t('回答生成')}</h4>
         {children}
       </div>
-      <div className="speech-model-group" role="group" aria-label="语音识别">
-        <h4>语音识别</h4>
+      <div className="speech-model-group" role="group" aria-label={t('语音识别')}>
+        <h4>{t('语音识别')}</h4>
         {switching && (
           <p className="speech-model-notices" role="status">
-            {switching === 'loading' ? '正在加载，原配置继续转写…' : '已就绪，等待语音停顿后切换…'}
+            {switching === 'loading'
+              ? t('正在加载，原配置继续转写…')
+              : t('已就绪，等待语音停顿后切换…')}
           </p>
         )}
         <div className="speech-setting-row">
-          <span className="speech-setting-label">语音模型</span>
+          <span className="speech-setting-label">{t('语音模型')}</span>
           <ChoiceMenu<SpeechModelId>
-            label="语音识别模型"
+            label={t('语音识别模型')}
             value={selected.speechModel}
             disabled={disabled || !hardware}
             options={[
               {
                 value: 'paraformer',
-                label: speechModelLabels.paraformer + (paraformerReady ? '' : '（未下载）'),
+                label: t(speechModelLabels.paraformer) + (paraformerReady ? '' : t('（未下载）')),
                 disabled: !paraformerReady,
               },
               {
                 value: 'qwen',
-                label: speechModelLabels.qwen + (qwenReady ? '' : '（未下载）'),
+                label: t(speechModelLabels.qwen) + (qwenReady ? '' : t('（未下载）')),
                 disabled: !qwenReady,
               },
             ]}
@@ -96,16 +99,16 @@ export function SpeechModelSettings({
           />
         </div>
         <div className="speech-setting-row">
-          <span className="speech-setting-label">推理设备</span>
+          <span className="speech-setting-label">{t('推理设备')}</span>
           <ChoiceMenu<SpeechInferenceDevice>
-            label="语音推理设备"
+            label={t('语音推理设备')}
             value={deviceAvailable ? selected.inferenceDevice : 'cpu'}
             disabled={
               disabled || !qwenReady || !acceleration || selected.speechModel === 'paraformer'
             }
             options={[
-              ...(hardware?.cuda ? [{ value: 'cuda' as const, label: 'CUDA（推荐）' }] : []),
-              ...(hardware?.metal ? [{ value: 'metal' as const, label: 'Metal（推荐）' }] : []),
+              ...(hardware?.cuda ? [{ value: 'cuda' as const, label: t('CUDA（推荐）') }] : []),
+              ...(hardware?.metal ? [{ value: 'metal' as const, label: t('Metal（推荐）') }] : []),
               { value: 'cpu', label: 'CPU' },
             ]}
             onChange={(inferenceDevice) => onChange({ ...options, inferenceDevice })}
@@ -114,11 +117,11 @@ export function SpeechModelSettings({
         {selected.speechModel === 'qwen' && selected.inferenceDevice === 'cpu' && (
           <div className="speech-model-notices">
             <p className="danger-text" role="alert">
-              {speechCpuWarning}
-              {hardware?.cuda ? '建议使用 CUDA。' : ''}
-              {hardware?.metal ? '建议使用 Metal。' : ''}
+              {t(speechCpuWarning)}
+              {hardware?.cuda ? t('建议使用 CUDA。') : ''}
+              {hardware?.metal ? t('建议使用 Metal。') : ''}
               {!hardware?.cuda && !hardware?.metal
-                ? `建议选择${speechModelLabels.paraformer}。`
+                ? t('建议选择{0}。', [t(speechModelLabels.paraformer)])
                 : ''}
             </p>
           </div>

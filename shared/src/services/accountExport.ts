@@ -1,3 +1,4 @@
+import { t, uiLocale } from '../i18n';
 import { localHistory } from './history';
 import { localKnowledge } from './knowledge';
 import { usePreparation } from '../stores/preparation';
@@ -62,7 +63,7 @@ async function exportSavedData(): Promise<boolean> {
   const bases = await localKnowledge.listBases();
   // A resume can exist without a visible knowledge library.
   if (!bases.some((b) => b.id === 'personal-resume'))
-    bases.push({ id: 'personal-resume', name: '个人简历', createdAt: 0 });
+    bases.push({ id: 'personal-resume', name: t('个人简历'), createdAt: 0 });
   const libraries = [];
   for (const base of bases)
     libraries.push({ base, documents: await localKnowledge.listDocuments(base.id) });
@@ -78,7 +79,7 @@ async function exportSavedData(): Promise<boolean> {
             )
             .join('\n\n')
         : (value ?? '');
-      return `${label}\n${text}`;
+      return `${t(label)}\n${text}`;
     })
     .join('\n\n');
   const start = await api({
@@ -106,19 +107,20 @@ async function exportSavedData(): Promise<boolean> {
   try {
     const text = new Blob([personal], { type: 'text/plain;charset=utf-8' });
     await file(
-      { action: 'file', token, kind: 'personal', name: '个人信息.txt', size: text.size },
+      { action: 'file', token, kind: 'personal', name: t('个人信息.txt'), size: text.size },
       text,
     );
     for (const [index, record] of histories.entries()) {
       const transcript = [
         record.title,
-        `开始：${new Date(record.startedAt).toLocaleString()}`,
-        `结束：${new Date(record.endedAt).toLocaleString()}`,
-        '\n转录',
+        t('开始：{0}', [new Date(record.startedAt).toLocaleString(uiLocale())]),
+        t('结束：{0}', [new Date(record.endedAt).toLocaleString(uiLocale())]),
+        '\n' + t('转录'),
         ...record.transcripts.map(
-          (t) => `${t.time} ${t.source === 'microphone' ? '面试者' : '面试官'}：${t.text}`,
+          (row) =>
+            `${row.time} ${t('{0}：{1}', [t(row.source === 'microphone' ? '面试者' : '面试官'), row.text])}`,
         ),
-        '\n问答',
+        '\n' + t('问答'),
         ...record.answers.map((a) => `${a.question}\n${a.content}`),
       ].join('\n');
       const data = new Blob([transcript], { type: 'text/plain;charset=utf-8' });

@@ -47,14 +47,14 @@ try {
   const composer = main.getByRole('textbox', { name: '聊天消息', exact: true });
   assert.equal(await main.getByRole('button', { name: '语音输入', exact: true }).count(), 0);
   assert.equal(await composer.getAttribute('readonly'), null);
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   assert.equal(await main.getByRole('button', { name: '问题来源', exact: true }).count(), 0);
   await main
     .getByRole('dialog', { name: '开始面试', exact: true })
     .getByRole('button', { name: '取消', exact: true })
     .click();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   await main.screenshot();
   const [page] = await Promise.all([
     app.waitForEvent('window'),

@@ -1,3 +1,4 @@
+import { t, uiLocale } from '../i18n';
 import { SyncBadge } from './SyncBadge';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { useEffect, useRef, useState } from 'react';
@@ -51,10 +52,10 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
     <main className="workspace management-page knowledge-page">
       <header className="page-toolbar">
         <div className="breadcrumb">
-          <strong>知识库</strong>
+          <strong>{t('知识库')}</strong>
         </div>
         <Button
-          aria-label="创建知识库"
+          aria-label={t('创建知识库')}
           size="icon"
           disabled={!ragReady}
           onClick={() => {
@@ -70,13 +71,13 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
           {state.error && !base && !editing && (
             <p role="alert" className="inline-error">
-              {state.error}
+              {t(state.error)}
             </p>
           )}
           {!state.bases.length ? (
             <div className="management-empty">
               <Database size={36} />
-              <h2>创建你的第一个知识库</h2>
+              <h2>{t('创建你的第一个知识库')}</h2>
               <Button
                 variant="outline"
                 disabled={!ragReady}
@@ -86,7 +87,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 }}
               >
                 <Plus size={16} />
-                创建知识库
+                {t('创建知识库')}
               </Button>
             </div>
           ) : (
@@ -103,9 +104,12 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                       <Database size={22} />
                     </span>
                     <h2>{item.name}</h2>
-                    <p>创建于 {new Date(item.createdAt).toLocaleDateString('zh-CN')}</p>
+                    <p>
+                      {t('创建于 ')}
+                      {new Date(item.createdAt).toLocaleDateString(uiLocale())}
+                    </p>
                     <span className="card-footer">
-                      本地资料
+                      {t('本地资料')}
                       <ChevronRight size={14} />
                     </span>
                   </button>
@@ -136,7 +140,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 size="icon"
                 className="action-icon-button"
                 data-reveal-on-hover
-                aria-label="重命名"
+                aria-label={t('重命名')}
                 onClick={() => {
                   setName(base.name);
                   setEditing('rename');
@@ -151,10 +155,10 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
               <SyncBadge itemKey={'base:' + base.id} label={base.name} />
               <ConfirmDeleteButton
                 key={base.id}
-                label="删除知识库"
-                aria-label="删除知识库"
-                target={'知识库：' + base.name}
-                warning="将删除这个知识库及全部本地文档，无法恢复"
+                label={t('删除知识库')}
+                aria-label={t('删除知识库')}
+                target={t('知识库：') + base.name}
+                warning={t('将删除这个知识库及全部本地文档，无法恢复')}
                 revision={base.name}
                 active={!editing}
                 disabled={state.busy}
@@ -167,17 +171,18 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
         >
           {state.error && (
             <p role="alert" className="inline-error">
-              {state.error}
+              {t(state.error)}
             </p>
           )}
           {index.error && (
             <p role="alert" className="inline-error">
-              {index.error}
+              {t(index.error)}
             </p>
           )}
           {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
           <h3 className="dialog-section-title">
-            文档列表 <span>{state.documents.length}</span>
+            {t('文档列表 ')}
+            <span>{state.documents.length}</span>
           </h3>
           <div
             className={`upload-dropzone ${dragging ? 'dragging' : ''}`}
@@ -195,11 +200,11 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             <span className="knowledge-icon">
               <ArrowUp size={22} />
             </span>
-            <h3>{state.busy ? '正在保存到本地…' : '将文件拖放到此处'}</h3>
+            <h3>{state.busy ? t('正在保存到本地…') : t('将文件拖放到此处')}</h3>
             <p>
-              PDF、Word、PowerPoint、Excel、TXT、Markdown
+              {t('PDF、Word、PowerPoint、Excel、TXT、Markdown')}
               <br />
-              单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件。
+              {t('单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件。')}
             </p>
             <Button
               disabled={state.busy}
@@ -207,14 +212,14 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
               onClick={() => fileInput.current?.click()}
             >
               <Folder size={16} />
-              选择文件
+              {t('选择文件')}
             </Button>
             <input
               ref={fileInput}
               type="file"
               multiple
               accept={documentAccept}
-              aria-label="导入知识库文档"
+              aria-label={t('导入知识库文档')}
               className="sr-only"
               onChange={(event) => {
                 void state.importFiles(Array.from(event.target.files ?? []));
@@ -224,9 +229,9 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           </div>
           <div className="document-list">
             {state.loading ? (
-              <p className="empty-inline">正在读取文档…</p>
+              <p className="empty-inline">{t('正在读取文档…')}</p>
             ) : !state.documents.length ? (
-              <p className="empty-inline document-empty">当前知识库还没有文档</p>
+              <p className="empty-inline document-empty">{t('当前知识库还没有文档')}</p>
             ) : (
               state.documents.map((doc) => (
                 <div className="document-row" key={doc.id}>
@@ -236,11 +241,11 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                     <p>
                       {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`}
                       {' · '}
-                      {phase(doc.id)}
+                      {t(phase(doc.id))}
                     </p>
                     {index.tasks[doc.id]?.error && (
                       <p role="alert" className="document-error">
-                        {index.tasks[doc.id].error}
+                        {t(index.tasks[doc.id].error)}
                       </p>
                     )}
                   </div>
@@ -250,10 +255,10 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                       iconOnly
                       disabled={state.busy}
                       active={!editing}
-                      target={'文档：' + doc.name}
+                      target={t('文档：') + doc.name}
                       revision={doc.createdAt}
-                      warning="将删除原件及当前索引，无法恢复"
-                      aria-label={'删除文档 ' + doc.name}
+                      warning={t('将删除原件及当前索引，无法恢复')}
+                      aria-label={t('删除文档 ') + doc.name}
                       onConfirm={async () => {
                         const ok = await state.removeDocument(doc.id);
                         if (ok) await index.refresh();
@@ -269,7 +274,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
       )}
       {editing && (
         <Modal
-          title={editing === 'create' ? '创建知识库' : '重命名知识库'}
+          title={editing === 'create' ? t('创建知识库') : t('重命名知识库')}
           className="knowledge-editor-dialog"
           onClose={() => {
             if (!state.busy) setEditing(null);
@@ -283,19 +288,19 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             }}
           >
             <label className="field-label">
-              知识库名称
+              {t('知识库名称')}
               <input
                 autoFocus
                 maxLength={60}
                 required
                 value={name}
-                placeholder="例如：前端工程师 · 项目资料"
+                placeholder={t('例如：前端工程师 · 项目资料')}
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
             {state.error && (
               <p role="alert" className="inline-error">
-                {state.error}
+                {t(state.error)}
               </p>
             )}
             <div className="dialog-footer">
@@ -306,11 +311,11 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 onClick={() => setEditing(null)}
               >
                 <X size={16} />
-                取消
+                {t('取消')}
               </Button>
               <Button type="submit" disabled={state.busy || !name.trim()}>
                 {state.busy ? <Loader size={16} /> : <Save size={16} />}
-                {state.busy ? '保存中' : '保存'}
+                {state.busy ? t('保存中') : t('保存')}
               </Button>
             </div>
           </form>

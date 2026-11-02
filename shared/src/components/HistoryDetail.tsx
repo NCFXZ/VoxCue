@@ -1,3 +1,4 @@
+import { t, uiLocale } from '../i18n';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InterviewRecord } from '../services/history';
 import {
@@ -68,7 +69,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
     return { byAnswer, byTranscript };
   }, [record, answers]);
   const date = (time: number) =>
-    new Date(time).toLocaleString('zh-CN', {
+    new Date(time).toLocaleString(uiLocale(), {
       year: 'numeric',
       month: 'numeric',
       day: 'numeric',
@@ -78,7 +79,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
     });
   const time = (timestamp?: number) =>
     Number.isFinite(timestamp)
-      ? new Date(timestamp!).toLocaleTimeString('zh-CN', {
+      ? new Date(timestamp!).toLocaleTimeString(uiLocale(), {
           hour: '2-digit',
           minute: '2-digit',
           hour12: false,
@@ -133,7 +134,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             className="record-back"
 
             onClick={onBack}
-            aria-label="返回面试记录"
+            aria-label={t('返回面试记录')}
           >
             <ChevronLeft size={16} />
           </Button>
@@ -159,26 +160,29 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             }}
           >
             <Download size={16} />
-            {exporting ? '正在导出…' : '导出 TXT'}
+            {exporting ? t('正在导出…') : t('导出 TXT')}
           </Button>
           <Button
             variant="outline"
 
             className={showAnswers ? 'record-panel-toggle is-active' : 'record-panel-toggle'}
-            aria-label="AI 回答面板"
+            aria-label={t('AI 回答面板')}
             aria-expanded={showAnswers}
             aria-controls="record-answer-panel"
             onClick={() => setShowAnswers((open) => !open)}
           >
             <PanelRight size={16} />
-            <span>{answers.length} 条 AI 回答</span>
+            <span>
+              {answers.length}
+              {t(' 条 AI 回答')}
+            </span>
           </Button>
           <ConfirmDeleteButton
             key={record.id}
 
             iconOnly
-            target={'面试记录：' + record.title}
-            aria-label="删除记录"
+            target={t('面试记录：') + record.title}
+            aria-label={t('删除记录')}
             revision={record.title}
             active={!renaming}
             onConfirm={async () => {
@@ -191,12 +195,12 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
       </header>
       {exportError && (
         <p className="record-export-error danger-text" role="alert">
-          {exportError}
+          {t(exportError)}
         </p>
       )}
       {history.error && !(renaming && renameError === history.error) && (
         <p role="alert" className="record-export-error danger-text">
-          {history.error}
+          {t(history.error)}
         </p>
       )}
       <div className={`record-detail-body ${showAnswers ? 'with-answers' : ''}`}>
@@ -211,7 +215,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     size="icon"
                     className="action-icon-button"
                     data-reveal-on-hover
-                    aria-label="重命名标题"
+                    aria-label={t('重命名标题')}
                     onClick={() => {
                       setTitleDraft(record.title);
                       setRenameError(null);
@@ -227,30 +231,33 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                 </p>
               </div>
               <span className="neutral-badge">
-                {record.status === 'ended' ? '已结束' : '已保存'}
+                {record.status === 'ended' ? t('已结束') : t('已保存')}
               </span>
             </div>
             {record.titleStatus === 'pending' && (
               <p className="record-title-status" role="status">
                 <Loader size={13} />
-                <span>正在生成标题…</span>
+                <span>{t('正在生成标题…')}</span>
               </p>
             )}
             {record.titleStatus === 'failed' && (
               <p className="record-title-status">
-                <span>{record.titleError || '标题生成失败。'}</span>
+                <span>{t(record.titleError || '标题生成失败。')}</span>
                 <Button variant="ghost" onClick={() => void history.generateTitle(record.id)}>
                   <Refresh size={16} />
-                  重试生成标题
+                  {t('重试生成标题')}
                 </Button>
               </p>
             )}
             <p className="record-facts">
-              {duration(record)} · 本地语音转录 · {answers.length} 条 AI 回答
+              {duration(record)}
+              {t(' · 本地语音转录 · ')}
+              {answers.length}
+              {t(' 条 AI 回答')}
             </p>
             {answers.some((answer) => answer.images?.length) && (
-              <section className="record-images-section" aria-label="面试截图">
-                <h2 className="record-transcript-heading">已发送截图</h2>
+              <section className="record-images-section" aria-label={t('面试截图')}>
+                <h2 className="record-transcript-heading">{t('已发送截图')}</h2>
                 {answers
                   .filter((answer) => answer.images?.length)
                   .map((answer) => (
@@ -262,10 +269,11 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
               </section>
             )}
             <h2 className="record-transcript-heading">
-              面试转录 <span>{record.transcripts.length}</span>
+              {t('面试转录 ')}
+              <span>{record.transcripts.length}</span>
             </h2>
             {!record.transcripts.length && (
-              <p className="empty-inline record-empty">本场面试没有保存语音转录。</p>
+              <p className="empty-inline record-empty">{t('本场面试没有保存语音转录。')}</p>
             )}
             {record.transcripts.map((row) => {
               const linked = associations.byTranscript.get(row.id) ?? [];
@@ -277,27 +285,28 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     else rows.current.delete(row.id);
                   }}
                   className={`record-transcript-row ${focusedTranscript === row.id ? 'is-located' : ''}`}
-                  aria-label={`转录：${row.text}`}
+                  aria-label={t(`转录：${row.text}`)}
                   tabIndex={-1}
                 >
                   <time>{relativeTime(record, row)}</time>
                   <div>
                     <span className="record-speaker">
-                      {row.source === 'microphone' ? '我' : '面试官'}
-                      {!row.final && ' · 未完成'}
+                      {row.source === 'microphone' ? t('我') : t('面试官')}
+                      {!row.final && t(' · 未完成')}
                     </span>
                     <p className="record-transcript-text">{row.text}</p>
                     {linked.map((answer) => (
                       <button
                         key={answer.id}
                         className="record-answer-link"
-                        aria-label={`查看回答：${answer.question}`}
+                        aria-label={t(`查看回答：${answer.question}`)}
                         onClick={() => {
                           openAnswer(answer.id);
                         }}
                       >
                         <Sparkles size={13} />
-                        AI 回答{linked.length > 1 ? ` ${linked.indexOf(answer) + 1}` : ''}
+                        {t('AI 回答')}
+                        {linked.length > 1 ? ` ${linked.indexOf(answer) + 1}` : ''}
                       </button>
                     ))}
                   </div>
@@ -309,20 +318,20 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
         <aside
           id="record-answer-panel"
           className="record-answer-panel"
-          aria-label="AI 回答"
+          aria-label={t('AI 回答')}
           data-open={showAnswers}
           inert={!showAnswers}
           aria-hidden={!showAnswers}
         >
           <header>
             <div>
-              <h2>AI 回答</h2>
-              <p>本场面试中提问并保存的 AI 回答。</p>
+              <h2>{t('AI 回答')}</h2>
+              <p>{t('本场面试中提问并保存的 AI 回答。')}</p>
             </div>
           </header>
           <div className="record-answer-scroll">
             {!answers.length && (
-              <p className="empty-inline record-empty">本场面试尚未保存 AI 回答。</p>
+              <p className="empty-inline record-empty">{t('本场面试尚未保存 AI 回答。')}</p>
             )}
             {answers.map((answer) => {
               const ids = associations.byAnswer.get(answer.id) ?? [];
@@ -334,11 +343,11 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     if (node) answerRows.current.set(answer.id, node);
                     else answerRows.current.delete(answer.id);
                   }}
-                  aria-label={`回答：${answer.question}`}
+                  aria-label={t(`回答：${answer.question}`)}
                   tabIndex={-1}
                 >
                   <div className="record-answer-meta">
-                    <span>{ids.length ? '转录提问' : '手动提问'}</span>
+                    <span>{ids.length ? t('转录提问') : t('手动提问')}</span>
                     <time>{time(answer.createdAt)}</time>
                   </div>
                   <p className="record-answer-question">{answer.question}</p>
@@ -346,7 +355,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                   {ids.length > 0 && (
                     <button className="record-answer-link" onClick={() => locate(ids[0])}>
                       <ArrowUpRight size={13} />
-                      定位到原问题
+                      {t('定位到原问题')}
                     </button>
                   )}
                   <div className="record-answer-content">
@@ -355,9 +364,9 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                         provider={answer.provider ?? 'unknown'}
                         detail={
                           answer.status === 'stopped'
-                            ? '已停止'
+                            ? t('已停止')
                             : answer.status === 'failed'
-                              ? '回答未完成'
+                              ? t('回答未完成')
                               : undefined
                         }
                       />
@@ -365,7 +374,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     {answer.reasoningSummary && (
                       <details className="reasoning-summary">
                         <summary>
-                          推理摘要
+                          {t('推理摘要')}
                           <span className="disclosure-chevron">
                             <ChevronRight size={14} />
                           </span>
@@ -376,7 +385,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
                     {answer.content ? (
                       <MarkdownContent content={answer.content} />
                     ) : (
-                      <p className="empty-inline">这条回答没有保存内容。</p>
+                      <p className="empty-inline">{t('这条回答没有保存内容。')}</p>
                     )}
                   </div>
                 </article>
@@ -386,7 +395,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
         </aside>
       </div>
       {renaming && (
-        <Modal title="重命名标题" onClose={() => setRenaming(false)}>
+        <Modal title={t('重命名标题')} onClose={() => setRenaming(false)}>
           <form
             onSubmit={(event) => {
               event.preventDefault();
@@ -395,7 +404,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             }}
           >
             <label className="field-label">
-              记录标题
+              {t('记录标题')}
               <input
                 value={titleDraft}
                 maxLength={80}
@@ -409,20 +418,20 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             </label>
             {renameError && (
               <p role="alert" className="danger-text">
-                {renameError}
+                {t(renameError)}
               </p>
             )}
             <div className="interview-start-actions">
               <Button type="button" variant="outline" onClick={() => setRenaming(false)}>
                 <X size={16} />
-                取消
+                {t('取消')}
               </Button>
               <Button
                 type="submit"
                 disabled={!titleDraft.trim() || titleDraft.trim() === record.title}
               >
                 <Save size={16} />
-                保存标题
+                {t('保存标题')}
               </Button>
             </div>
           </form>

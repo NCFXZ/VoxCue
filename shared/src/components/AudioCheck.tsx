@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AudioSource, SpeechOptions } from '../../electron/contracts/speech';
 import { AudioInputMeters, type AudioLevels } from './AudioInputMeters';
@@ -124,7 +125,7 @@ export function AudioCheck({
       return (
         <Button
           variant="outline"
-          aria-label={selectedActive ? `停止${label}测试` : `测试${label}`}
+          aria-label={selectedActive ? t('停止{0}测试', [t(label)]) : t('测试{0}', [t(label)])}
           disabled={
             disabled ||
             !allowed ||
@@ -134,7 +135,7 @@ export function AudioCheck({
           onClick={() => void start(selected)}
         >
           {selectedActive ? <Square size={14} /> : <AudioLines size={15} />}
-          {selectedActive ? (phase === 'loading' ? '正在准备…' : '停止') : '测试'}
+          {selectedActive ? (phase === 'loading' ? t('正在准备…') : t('停止')) : t('测试')}
         </Button>
       );
     },
@@ -151,7 +152,7 @@ export function AudioCheck({
           )}
           {error && (
             <p role="alert" className="danger-text">
-              {error}
+              {t(error)}
             </p>
           )}
         </div>

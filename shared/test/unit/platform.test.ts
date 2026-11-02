@@ -77,7 +77,10 @@ describe('桌面平台边界', () => {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
-      additionalArguments: ['--voxcue-presentation=' + JSON.stringify(windowsPolicy.presentation)],
+      additionalArguments: [
+        '--voxcue-presentation=' + JSON.stringify(windowsPolicy.presentation),
+        '--voxcue-system-language=zh-CN',
+      ],
     });
     expect(options.icon).toBe(paths.icon);
     if (role !== 'main') expect(options).not.toHaveProperty('backgroundMaterial');

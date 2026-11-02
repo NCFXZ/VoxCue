@@ -1,8 +1,9 @@
+import { t } from '../i18n';
 import { useRef, type ReactNode } from 'react';
 import * as DropdownMenu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
-import { Check, Globe, Folder, Paperclip, Plus, ChevronDown, Refresh, Sparkles } from './icons';
+import { Check, Folder, Paperclip, Plus, ChevronDown, Refresh, Sparkles } from './icons';
 import { usePreparation } from '../stores/preparation';
 import { chatFileAccept, effortLabels } from '../services/chatOptions';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
@@ -25,7 +26,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
             type="button"
             variant="ghost"
             size="icon"
-            aria-label="添加附件"
+            aria-label={t('添加附件')}
             data-reveal-on-hover
             disabled={!state.chatsReady}
           >
@@ -41,24 +42,12 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
           >
             <DropdownMenu.Item className="dropdown-item" onSelect={() => files.current?.click()}>
               <Paperclip size={16} />
-              添加文件
+              {t('添加文件')}
             </DropdownMenu.Item>
             <DropdownMenu.Item className="dropdown-item" onSelect={() => folder.current?.click()}>
               <Folder size={16} />
-              添加文件夹
+              {t('添加文件夹')}
             </DropdownMenu.Item>
-            <DropdownMenu.Separator className="dropdown-separator" />
-            <DropdownMenu.CheckboxItem
-              className="dropdown-item search-menu-item"
-              checked={state.webSearch}
-              onCheckedChange={state.setWebSearch}
-            >
-              <Globe size={16} />
-              网络搜索
-              <span className="tool-menu-check dropdown-check">
-                {state.webSearch && <Check size={14} />}
-              </span>
-            </DropdownMenu.CheckboxItem>
           </DropdownMenu.Content>
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
@@ -69,10 +58,12 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
               type="button"
               variant="ghost"
               className="composer-tool model-trigger"
-              aria-label="聊天模型"
+              aria-label={t('聊天模型')}
               data-reveal-on-hover
             >
-              <span>{selected?.label ?? (connection.loading ? '加载模型…' : '模型不可用')}</span>
+              <span>
+                {selected?.label ?? (connection.loading ? t('加载模型…') : t('模型不可用'))}
+              </span>
               <ChevronDown size={12} />
             </Button>
           </DropdownMenu.Trigger>
@@ -90,7 +81,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
                     value={model.id}
                     key={model.id}
                   >
-                    <span className="model-name">{model.label}</span>
+                    <span className="model-name">{t(model.label)}</span>
                     <DropdownMenu.ItemIndicator className="model-check dropdown-check">
                       <Check size={15} />
                     </DropdownMenu.ItemIndicator>
@@ -101,7 +92,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
                 <>
                   {connection.error && (
                     <p className="model-error" role="alert">
-                      {connection.error}
+                      {t(connection.error)}
                     </p>
                   )}
                   <DropdownMenu.Separator className="dropdown-separator" />
@@ -113,7 +104,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
                     }}
                   >
                     <Refresh size={16} />
-                    {connection.loading ? '正在读取…' : '刷新模型列表'}
+                    {connection.loading ? t('正在读取…') : t('刷新模型列表')}
                   </DropdownMenu.Item>
                 </>
               )}
@@ -126,7 +117,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
               type="button"
               variant="ghost"
               className="composer-tool effort-trigger"
-              aria-label="思考强度"
+              aria-label={t('思考强度')}
               data-reveal-on-hover
               disabled={!efforts.length}
             >
@@ -134,8 +125,8 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
                 <Sparkles size={14} />
               </span>
               <span>
-                <span className="effort-tool-label">思考强度 · </span>
-                {effortLabels[effort]}
+                <span className="effort-tool-label">{t('思考强度 · ')}</span>
+                {t(effortLabels[effort])}
               </span>
               <ChevronDown size={12} />
             </Button>
@@ -147,14 +138,14 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
               align="start"
               sideOffset={10}
             >
-              <DropdownMenu.Label className="model-menu-label">思考强度</DropdownMenu.Label>
+              <DropdownMenu.Label className="model-menu-label">{t('思考强度')}</DropdownMenu.Label>
               <DropdownMenu.RadioGroup
                 value={effort}
                 onValueChange={(value) => state.setEffort(value as ReasoningEffort | 'auto')}
               >
                 {['auto' as const, ...efforts].map((value) => (
                   <DropdownMenu.RadioItem className="dropdown-item" key={value} value={value}>
-                    {effortLabels[value]}
+                    {t(effortLabels[value])}
                     <DropdownMenu.ItemIndicator className="tool-menu-check dropdown-check">
                       <Check size={14} />
                     </DropdownMenu.ItemIndicator>
@@ -172,7 +163,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
         type="file"
         multiple
         accept={chatFileAccept}
-        aria-label="添加聊天文件"
+        aria-label={t('添加聊天文件')}
         disabled={!state.chatsReady}
         onChange={(event) => {
           state.addAttachments(Array.from(event.target.files || []));
@@ -185,7 +176,7 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
         type="file"
         multiple
         {...{ webkitdirectory: '' }}
-        aria-label="添加聊天文件夹"
+        aria-label={t('添加聊天文件夹')}
         disabled={!state.chatsReady}
         onChange={(event) => {
           state.addAttachments(Array.from(event.target.files || []));
@@ -206,16 +197,18 @@ export function ChatAttachments() {
           <span>
             {item.name}
             <small>
-              {Math.ceil(item.size / 1024)} KB · 本次附件 · 待发送至 {provider.dataRecipient}
+              {Math.ceil(item.size / 1024)}
+              {t(' KB · 本次附件 · 待发送至 ')}
+              {provider.dataRecipient}
             </small>
           </span>
           <ConfirmDeleteButton
             iconOnly
-            label="移除"
-            target={'附件：' + item.name}
+            label={t('移除')}
+            target={t('附件：') + item.name}
             revision={item.id}
-            aria-label={'移除附件 ' + item.name}
-            warning="将移除本次待发送附件，原文件会保留"
+            aria-label={t('移除附件 ') + item.name}
+            warning={t('将移除本次待发送附件，原文件会保留')}
             onConfirm={() => state.removeAttachment(item.id)}
           />
         </div>

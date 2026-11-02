@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { exportAccountData } from '../services/accountExport';
 import { Button } from './ui/button';
@@ -33,25 +34,25 @@ export function AccountExportPanel() {
     }
   }
   return (
-    <section className="account-export-panel" aria-label="导出资料">
+    <section className="account-export-panel" aria-label={t('导出资料')}>
       <div className="settings-entry">
         <div>
-          <strong>导出资料</strong>
-          <p className="settings-hint">导出个人信息、面试记录和知识库。</p>
+          <strong>{t('导出资料')}</strong>
+          <p className="settings-hint">{t('导出个人信息、面试记录和知识库。')}</p>
         </div>
         <Button variant="outline" disabled={busy} onClick={() => void exportData()}>
           <Export size={16} />
-          {busy ? '正在导出…' : '导出资料'}
+          {busy ? t('正在导出…') : t('导出资料')}
         </Button>
       </div>
       {message && (
         <p role="status" className="settings-hint">
-          {message}
+          {t(message)}
         </p>
       )}
       {error && (
         <p role="alert" className="danger-text">
-          {error}
+          {t(error)}
         </p>
       )}
     </section>

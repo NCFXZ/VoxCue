@@ -1,3 +1,9 @@
+## 2026-11-02 Windows 0.6.7 清理边界
+
+本轮合并远端 Mac 0.6.6 收尾，保留当前 Windows UI/功能；Windows 不编写 macos 树。确认新故事素材有实际消费者后，删除不再引用的 interview-landscape.jpg、interview-story-notebook.jpg、interview-story-path.jpg；清除已撤回的手动联网/旧引导卡、技能范围中文识别与 token 展示实现，保留兼容历史数据的字段和有效测试。前后端未使用声明检查与静态/动态入口审查配合，不按删除数量裁剪业务。
+
+核对精确绝对路径、祖先/文件无重定向及逐文件独占访问后，清理 windows/.cache/installer-ui 的 brand.png、frontend.manifest、installer.nsh、VoxCue.Setup.UI.exe 四个可重建中间文件；prepareInstallerUi 在正式构建使用前完整生成，临时验包使用 owner 系统临时目录独立重建。现用依赖、公开模型/音频、原始素材、固定工具、全部发行/恢复基线、真实资料/凭据及历史明确跳过目录继续保护，不记录测试成绩或保存运行产物。
+
 ## 2026-10-31 Mac 0.6.6接续清理
 
 当前Mac仅写客户端根/shared/macos，Windows全树和服务端参考只读。源码静态入边与平台动态装配、Worker/preload、构建/打包及测试入口逐项核对；无静态入边文件均为现用入口，保留业务与兼容读取。同步Mac清单时删除已退役speech-model-check对应命令，不恢复已删除测试源码。

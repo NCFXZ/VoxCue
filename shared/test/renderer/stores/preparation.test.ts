@@ -50,13 +50,11 @@ describe('准备聊天与个人信息', () => {
   it('附件独立于简历，发送时保留模型与搜索快照并清空待发送附件', async () => {
     const state = usePreparation.getState();
     state.setModel('mock-reasoning');
-    state.setWebSearch(true);
     state.addAttachments([new File(['项目经历'], 'project.txt')]);
     expect(usePreparation.getState().attachments).toHaveLength(1);
     const resume = usePreparation.getState().resume;
     const result = state.send('');
     state.setModel('mock-general');
-    state.setWebSearch(false);
     await vi.advanceTimersByTimeAsync(10000);
     await result;
     const messages = usePreparation.getState().messages;

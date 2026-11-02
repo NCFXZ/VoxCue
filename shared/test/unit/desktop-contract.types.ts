@@ -56,6 +56,10 @@ desktop.platform = 'windows';
 desktop.setNativeTheme('dark');
 desktop.setNativeTheme('light');
 desktop.setNativeTheme('system');
+desktop.setUILanguage('zh-CN');
+desktop.setUILanguage('en');
+// @ts-expect-error Only the two supported UI languages are accepted.
+desktop.setUILanguage('fr');
 // @ts-expect-error Only fixed theme preferences are accepted, never native commands or paths.
 desktop.setNativeTheme({ appearance: 'dark', path: '/private' });
 // @ts-expect-error Native appearance does not expose arbitrary material names.

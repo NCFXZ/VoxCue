@@ -2,6 +2,7 @@ import type { BrowserWindow, BrowserWindowConstructorOptions } from 'electron';
 import type { DesktopPlatform } from './platform/types';
 import { interviewCanvas, interviewLayout } from './contracts/interviewLayout';
 import { pendingPresentation } from './contracts/presentation';
+import { translateUI, type UILanguage } from './contracts/uiLanguage';
 
 export type WindowRole = 'login' | 'main' | 'interview';
 const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
@@ -31,9 +32,12 @@ export function windowOptions(
   role: WindowRole,
   platform: DesktopPlatform,
   paths: { icon: string; preload: string },
+  language: UILanguage = 'zh-CN',
+  systemLanguage: UILanguage = language,
 ): BrowserWindowConstructorOptions {
   return {
     ...roleOptions[role],
+    title: translateUI(roleOptions[role].title ?? 'VoxCue', language),
     ...(role === 'main' ? platform.mainWindowOptions : {}),
     ...(role === 'interview' &&
     platform.id === 'win32' &&
@@ -62,6 +66,7 @@ export function windowOptions(
       zoomFactor: 1,
       additionalArguments: [
         '--voxcue-presentation=' + JSON.stringify(platform.presentation ?? pendingPresentation),
+        '--voxcue-system-language=' + systemLanguage,
       ],
     },
   };

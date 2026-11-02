@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import chatGPTLogo from '../assets/chatgpt.svg?inline';
 import copilotLogo from '../assets/copilot.svg?inline';
 import { MessageSquare } from './icons';
@@ -12,7 +13,7 @@ export function ProviderIdentity({
   detail?: string;
 }) {
   const info = providerInfo(provider);
-  const name = info.id === 'unknown' ? '服务来源未记录' : info.name;
+  const name = info.id === 'unknown' ? t('服务来源未记录') : info.name;
   const logo =
     info.id === 'chatgpt' ? chatGPTLogo : info.id === 'copilot' ? copilotLogo : undefined;
   return (

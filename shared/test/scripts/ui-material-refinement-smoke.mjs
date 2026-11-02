@@ -154,6 +154,8 @@ try {
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page.locator('.proposal-view').first().waitFor();
   await page.getByRole('button', { name: '停止回复', exact: true }).waitFor({ state: 'hidden' });
+  await page.getByRole('button', { name: '展开技能清单', exact: true }).click();
+  await settle(page);
   for (const dark of [false, true]) {
     await theme(page, dark);
     for (const button of await page.locator('.proposal-view').all()) await hoverOnly(page, button);
@@ -162,7 +164,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   for (const dark of [false, true]) {
@@ -293,7 +295,7 @@ try {
   await page.getByRole('heading', { name: '合成搜索记录', exact: true }).waitFor();
 
   await page.getByRole('button', { name: '新对话', exact: true }).click();
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     page.getByRole('button', { name: '确认开始', exact: true }).click(),

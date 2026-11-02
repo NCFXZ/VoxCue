@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import {
   componentPresentation,
   hasReadySpeechModel,
@@ -39,24 +40,24 @@ export function ComponentsNotice({
   return (
     <aside
       className="components-notice"
-      aria-label={cpuWarning ? '语音推理性能提示' : '本地组件提示'}
+      aria-label={cpuWarning ? t('语音推理性能提示') : t('本地组件提示')}
     >
       <div>
         <strong>
           {cpuWarning
-            ? `${componentPresentation.qwen.label}性能受限`
+            ? t('{0}性能受限', [t(componentPresentation.qwen.label)])
             : only
-              ? `${componentPresentation[missing[0].id].label}尚未就绪`
-              : '本地组件尚未就绪'}
+              ? t('{0}尚未就绪', [t(componentPresentation[missing[0].id].label)])
+              : t('本地组件尚未就绪')}
         </strong>
         <p>
           {cpuWarning ? (
-            `${speechCpuWarning}可在设置中调整识别方式或推理设备。`
+            t(speechCpuWarning) + t('可在设置中调整识别方式或推理设备。')
           ) : (
             <>
               {!only &&
-                `${missing.map((item) => componentPresentation[item.id].label).join('、')}。`}
-              请在设置中下载或查看进度。
+                `${missing.map((item) => t(componentPresentation[item.id].label)).join(t('、'))}。`}
+              {t('请在设置中下载或查看进度。')}
             </>
           )}
         </p>
@@ -65,7 +66,8 @@ export function ComponentsNotice({
         variant="ghost"
         onClick={cpuWarning ? (onPerformanceSettings ?? onSettings) : onSettings}
       >
-        前往设置 <ArrowUpRight size={14} />
+        {t('前往设置 ')}
+        <ArrowUpRight size={14} />
       </Button>
     </aside>
   );

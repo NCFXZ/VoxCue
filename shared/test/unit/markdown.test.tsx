@@ -1,7 +1,95 @@
 import { describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownContent } from '../../../shared/src/components/MarkdownContent';
+import { normalizeMath } from '../../../shared/src/services/math';
 describe('Markdown 回答', () => {
+  it('不接受原型继承的信任或宏，恶意公式不创建链接或远程资源', () => {
+    const keys = ['trust', 'voxcueInjected'];
+    const originals = keys.map((key) => Object.getOwnPropertyDescriptor(Object.prototype, key));
+    try {
+      Object.defineProperty(Object.prototype, 'trust', { value: true, configurable: true });
+      Object.defineProperty(Object.prototype, 'voxcueInjected', {
+        value: '\\href{https://example.org/tracker}{inherited}',
+        configurable: true,
+      });
+      const html = renderToStaticMarkup(
+        <MarkdownContent
+          content={String.raw`$\voxcueInjected$ $\href{javascript:alert(1)}{click}$ $\includegraphics{https://example.org/tracker.png}$`}
+        />,
+      );
+      expect(html).not.toMatch(/<(?:a|img|iframe|script)[ >]/);
+      expect(html).not.toContain('href=');
+      expect(html).not.toContain('src=');
+    } finally {
+      keys.forEach((key, index) => {
+        if (originals[index]) Object.defineProperty(Object.prototype, key, originals[index]!);
+        else Reflect.deleteProperty(Object.prototype, key);
+      });
+    }
+  });
+  it('大段未闭合公式保持原文并在有界时间内处理', () => {
+    const content = String.raw`\(\[`.repeat(15000);
+    const started = performance.now();
+    expect(normalizeMath(content)).toBe(content);
+    expect(performance.now() - started).toBeLessThan(1000);
+  });
+  it('渲染两种行内公式及包含矩阵的独立公式，不把等号变成标题', () => {
+    const html = renderToStaticMarkup(
+      <MarkdownContent
+        content={String.raw`结果：\(m\times n\)，以及 $x^2$。
+
+\[
+\begin{bmatrix}1&2\\3&4\end{bmatrix}
+=
+\begin{bmatrix}19&22\\43&50\end{bmatrix}
+\]
+
+$$\frac{a}{b}$$`}
+      />,
+    );
+    expect(html.match(/class="katex"/g)).toHaveLength(4);
+    expect(html.match(/class="katex-display"/g)).toHaveLength(2);
+    expect(html).toContain('<mtable');
+    expect(html).toContain('<mfrac>');
+    expect(html).not.toContain('<h2');
+    expect(html).not.toContain('katex-error');
+  });
+  it('代码和转义分隔符保持原样，公式不启用 HTML、外链或远程图片', () => {
+    const html = renderToStaticMarkup(
+      <MarkdownContent
+        content={[
+          '`\\(x\\)`',
+          '```tex\n\\[x^2\\]\n$$a$$\n```',
+          '    \\(y\\)',
+          String.raw`\\(z\\)`,
+          String.raw`$\href{javascript:alert(1)}{click}$`,
+          String.raw`$\includegraphics{https://example.org/tracker.png}$`,
+          String.raw`$\htmlClass{injected}{x}$`,
+        ].join('\n\n')}
+      />,
+    );
+    expect(html).toContain('<code>\\(x\\)</code>');
+    expect(html).toContain('\\[x^2\\]\n$$a$$');
+    expect(html).toContain('\\(y\\)');
+    expect(html).not.toMatch(/<a[ >]/);
+    expect(html).not.toContain('<img');
+    expect(html).not.toContain('class="injected"');
+  });
+  it('流式残缺或无效公式不崩溃、不出现错误悬浮提示，完成后正常渲染', () => {
+    for (const content of [
+      String.raw`\[\frac{1}{`,
+      '$$\n\\badcommand{',
+      String.raw`\(x`,
+      '```tex\n\\(x\\)',
+    ]) {
+      const html = renderToStaticMarkup(<MarkdownContent content={content} />);
+      expect(html).not.toContain('title=');
+      expect(html).toContain('markdown-content');
+    }
+    const html = renderToStaticMarkup(<MarkdownContent content={String.raw`\[\frac{1}{2}\]`} />);
+    expect(html).toContain('<mfrac>');
+    expect(html).not.toContain('katex-error');
+  });
   it('支持中文标点紧邻后文及模型在粗体末尾留下的空格，原正文不改写', () => {
     const html = renderToStaticMarkup(
       <MarkdownContent

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useCloudSync } from '../stores/cloudSync';
 const kinds = [
   ['profile', '个人信息'],
@@ -11,14 +12,16 @@ export function CloudStorageSummary() {
   const capacity = storage?.capacityBytes || 0;
   const scale = Math.max(capacity, used);
   return (
-    <section className="cloud-storage-summary" aria-label="云端容量">
+    <section className="cloud-storage-summary" aria-label={t('云端容量')}>
       <div className="cloud-storage-heading">
-        <strong>云端存储</strong>
+        <strong>{t('云端存储')}</strong>
       </div>
       <div
         className="cloud-storage-bar"
         role="img"
-        aria-label={storage ? `已用 ${used} 字节，总容量 ${capacity} 字节` : '正在读取云端容量'}
+        aria-label={
+          storage ? t('已用 {0} 字节，总容量 {1} 字节', [used, capacity]) : t('正在读取云端容量')
+        }
       >
         {kinds.map(([kind]) => (
           <span
@@ -35,7 +38,7 @@ export function CloudStorageSummary() {
           {kinds.map(([kind, label]) => (
             <span key={kind}>
               <i className={`storage-${kind}`} />
-              {label}
+              {t(label)}
               {storage ? ` ${bytes(storage.storedBytes[kind])}` : ''}
             </span>
           ))}
@@ -43,10 +46,13 @@ export function CloudStorageSummary() {
         <span>
           {storage ? (
             <>
-              可用 {bytes(Math.max(0, capacity - used))} · 已用 {bytes(used)}
+              {t('可用 ')}
+              {bytes(Math.max(0, capacity - used))}
+              {t(' · 已用 ')}
+              {bytes(used)}
             </>
           ) : (
-            '容量尚未读取'
+            t('容量尚未读取')
           )}
         </span>
       </div>

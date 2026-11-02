@@ -22,6 +22,8 @@ const shared = [
   'telemetry-v2-http',
   'electron',
   'settings',
+  'language',
+  'preparation-guide',
   'composer',
   'composer-resize',
   'conversations',
@@ -190,13 +192,16 @@ try {
       () => child.kill('SIGTERM'),
       name === 'speech-soak' ? 900000 : name === 'components' ? 600000 : 240000,
     );
-    const desktopGuard = desktop && setInterval(() => {
-      try { desktop.requireUnlockedDesktop(); }
-      catch (error) {
-        console.error(error.message);
-        child.kill('SIGTERM');
-      }
-    }, 2000);
+    const desktopGuard =
+      desktop &&
+      setInterval(() => {
+        try {
+          desktop.requireUnlockedDesktop();
+        } catch (error) {
+          console.error(error.message);
+          child.kill('SIGTERM');
+        }
+      }, 2000);
     desktopGuard?.unref();
     const code = await new Promise((resolve, reject) => {
       child.once('error', reject);

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { flushSync } from 'react-dom';
+import { interviewPanelAnimation, playInterviewTranscript } from './ui/interview-panel-animation';
 
 type Motion = 'collapse' | 'expand' | 'hide-transcript' | 'show-transcript';
 
@@ -48,7 +49,7 @@ export function useInterviewPanelMotion({
       return Promise.resolve();
     const player = node.animate(frames, {
       duration,
-      easing: 'cubic-bezier(0.22, 1, 0.36, 1)',
+      easing: interviewPanelAnimation.easing,
       fill: 'both',
     });
     players.current.add(player);
@@ -85,13 +86,9 @@ export function useInterviewPanelMotion({
       if (!disposed.current) setMotion(null);
     }
   };
-  const fold = {
-    opacity: 0,
-    transform: 'translateY(-14px)',
-  };
+  const { open, fold, collapseDuration, expandDuration } = interviewPanelAnimation;
   // Preserve the panels' continuous corners and shadows throughout the motion.
   // An inset(... round ...) animation adds a different, circular clipping contour.
-  const open = { opacity: 1, transform: 'translateY(0)' };
   return {
     motion,
     busy,
@@ -99,7 +96,7 @@ export function useInterviewPanelMotion({
       run(collapsed ? 'expand' : 'collapse', async () => {
         if (!collapsed) {
           await Promise.all([
-            play(shell.current?.querySelector('.floating-panels'), [open, fold], 220),
+            play(shell.current?.querySelector('.floating-panels'), [open, fold], collapseDuration),
             play(
               shell.current?.querySelector('.floating-notices'),
               [{ opacity: 1 }, { opacity: 0 }],
@@ -117,7 +114,7 @@ export function useInterviewPanelMotion({
           flushSync(() => setCollapsed(actual));
           if (!actual)
             await Promise.all([
-              play(shell.current?.querySelector('.floating-panels'), [fold, open], 280),
+              play(shell.current?.querySelector('.floating-panels'), [fold, open], expandDuration),
               play(
                 shell.current?.querySelector('.floating-notices'),
                 [{ opacity: 0 }, { opacity: 1 }],
@@ -128,28 +125,12 @@ export function useInterviewPanelMotion({
       }),
     toggleTranscript: () =>
       run(transcriptVisible ? 'hide-transcript' : 'show-transcript', async () => {
-        const hidden = {
-          opacity: 0,
-          transform: 'translateX(-18px)',
-        };
-        const visible = {
-          opacity: 1,
-          transform: 'translateX(0)',
-        };
-        const offset = () => {
-          const panel = shell.current!.querySelector('.floating-answer')!.getBoundingClientRect();
-          const frame = shell.current!.querySelector('.floating-panels')!.getBoundingClientRect();
-          return frame.x + frame.width / 2 - panel.x - panel.width / 2;
-        };
         if (transcriptVisible) {
-          await Promise.all([
-            play(shell.current?.querySelector('.floating-transcript'), [visible, hidden], 200),
-            play(
-              shell.current?.querySelector('.floating-answer'),
-              [{ transform: 'translateX(0)' }, { transform: `translateX(${offset()}px)` }],
-              240,
-            ),
-          ]);
+          await playInterviewTranscript(
+            shell.current?.querySelector('.floating-panels'),
+            false,
+            play,
+          );
           if (disposed.current) return;
           flushSync(() => setTranscriptVisible(false));
           clear();
@@ -160,14 +141,11 @@ export function useInterviewPanelMotion({
           if (disposed.current) return;
           flushSync(() => setTranscriptVisible(actual));
           if (!actual) return;
-          await Promise.all([
-            play(shell.current?.querySelector('.floating-transcript'), [hidden, visible], 240),
-            play(
-              shell.current?.querySelector('.floating-answer'),
-              [{ transform: `translateX(${offset()}px)` }, { transform: 'translateX(0)' }],
-              240,
-            ),
-          ]);
+          await playInterviewTranscript(
+            shell.current?.querySelector('.floating-panels'),
+            true,
+            play,
+          );
         }
       }),
   };

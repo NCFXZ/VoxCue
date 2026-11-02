@@ -172,7 +172,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings
@@ -407,7 +407,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await settings
     .getByRole('navigation', { name: '设置分类' })
@@ -574,7 +574,7 @@ try {
       await page.getByRole('menuitem', { name: '设置', exact: true }).click();
       await page
         .getByRole('navigation', { name: '设置分类' })
-        .getByRole('button', { name: '个性化', exact: true })
+        .getByRole('button', { name: '通用', exact: true })
         .click();
       await settings
         .getByRole('navigation', { name: '设置分类' })
@@ -656,7 +656,7 @@ try {
       await page.getByRole('menuitem', { name: '设置', exact: true }).click();
       await page
         .getByRole('navigation', { name: '设置分类' })
-        .getByRole('button', { name: '个性化', exact: true })
+        .getByRole('button', { name: '通用', exact: true })
         .click();
       await settings
         .getByRole('navigation', { name: '设置分类' })
@@ -702,7 +702,7 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
     await settings
       .getByRole('navigation', { name: '设置分类' })
@@ -744,7 +744,7 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
     await settings
       .getByRole('navigation', { name: '设置分类' })
@@ -765,16 +765,14 @@ try {
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
     await page
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
     await settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '本地组件', exact: true })
       .click();
     const paraformerRow = settings.locator('.component-row[data-component-id="speech"]');
-    await paraformerRow
-      .getByRole('button', { name: '删除：轻量语音识别', exact: true })
-      .click();
+    await paraformerRow.getByRole('button', { name: '删除：轻量语音识别', exact: true }).click();
     await paraformerRow
       .getByRole('button', { name: '确认删除：轻量语音识别', exact: true })
       .click();
@@ -789,10 +787,7 @@ try {
       .getByLabel('语音推理性能提示', { exact: true })
       .getByText('多语言语音识别性能受限', { exact: true })
       .waitFor();
-    assert.equal(
-      await page.getByRole('button', { name: '开始面试', exact: true }).isEnabled(),
-      true,
-    );
+    assert.equal(await page.locator('.interview-start-trigger').isEnabled(), true);
     if (process.argv.includes('--readiness-preview'))
       console.log(
         'VOXCUE_READINESS_PREVIEW:' +

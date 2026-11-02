@@ -131,7 +131,7 @@ try {
   const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
-  await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
+  await page.locator('.welcome h1').waitFor();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await waitForAsync(page, async () =>
     (await indexedDB.databases()).some(({ name }) => name === 'copilot-local-documents'),
@@ -474,7 +474,8 @@ try {
   await page
     .locator('.history-row')
     .filter({ hasText: '合成面试记录' })
-    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: '删除记录', exact: true }).click();
   assert.equal(await page.getByRole('dialog').count(), 0);
   await captureRequested(page, 'history-delete-confirm');

@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { CloudAccountCall } from '../../electron/contracts/cloudAccount';
 import { Button } from './ui/button';
@@ -163,37 +164,39 @@ export function CloudAccountPanel({
     <>
       {displayError && (
         <p className="danger-text" role="alert">
-          {displayError}
-          {retryHint && ` ${retryHint}`}
+          {t(displayError)}
+          {retryHint && ` ${t(retryHint)}`}
         </p>
       )}
       {message && (
         <p className="settings-hint" role="status">
-          {message}
+          {t(message)}
         </p>
       )}
       {!displayError && retryHint && (
         <p className="settings-hint" role="status">
-          {retryHint}
+          {t(retryHint)}
         </p>
       )}
     </>
   );
   return (
-    <section className="cloud-account-panel" aria-label="VoxCue 账号" aria-busy={busy}>
-      {showTitle && <h3>VoxCue 账号</h3>}
+    <section className="cloud-account-panel" aria-label={t('VoxCue 账号')} aria-busy={busy}>
+      {showTitle && <h3>{t('VoxCue 账号')}</h3>}
       {!loaded ? (
         <p role="status" className="settings-hint">
-          正在读取账号状态…
+          {t('正在读取账号状态…')}
         </p>
       ) : !state.configured && !entry && !state.localMode ? (
-        <p className="settings-hint">无法连接账号服务，请检查配置后重新打开应用。</p>
+        <p className="settings-hint">{t('无法连接账号服务，请检查配置后重新打开应用。')}</p>
       ) : state.user ? (
         <>
           <div className="settings-entry">
             <div>
               <strong>{state.user.email}</strong>
-              <p className="settings-hint">{state.verified ? '已登录' : '暂未验证连接状态'}</p>
+              <p className="settings-hint">
+                {state.verified ? t('已登录') : t('暂未验证连接状态')}
+              </p>
             </div>
             <Button
               type="button"
@@ -202,16 +205,16 @@ export function CloudAccountPanel({
               onClick={() => void run({ action: 'logout' })}
             >
               <LogOut size={16} />
-              退出账号
+              {t('退出账号')}
             </Button>
           </div>
         </>
       ) : !entry ? (
         <div className="settings-entry">
           <div>
-            <strong>本地账户</strong>
+            <strong>{t('本地账户')}</strong>
             <p className="settings-hint">
-              尚未登录 VoxCue，资料保存在当前电脑。登录后可启用云备份。
+              {t('尚未登录 VoxCue，资料保存在当前电脑。登录后可启用云备份。')}
             </p>
           </div>
           <Button
@@ -220,14 +223,14 @@ export function CloudAccountPanel({
             disabled={busy}
             onClick={() => void changeLocalMode(false)}
           >
-            登录
+            {t('登录')}
           </Button>
         </div>
       ) : (
         <>
           <form className="cloud-account-form" noValidate={entry} onSubmit={submit}>
             <label>
-              邮箱
+              {t('邮箱')}
               <input
                 name="email"
                 type="email"
@@ -247,12 +250,14 @@ export function CloudAccountPanel({
               />
             </label>
             <label>
-              {mode === 'reset' ? '新密码' : '密码'}
+              {mode === 'reset' ? t('新密码') : t('密码')}
               <input
                 name="password"
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                placeholder={mode === 'login' ? '输入密码' : `不少于${CLOUD_PASSWORD_MIN}个字符`}
+                placeholder={
+                  mode === 'login' ? t('输入密码') : t('不少于{0}个字符', [CLOUD_PASSWORD_MIN])
+                }
                 minLength={mode === 'login' ? 1 : CLOUD_PASSWORD_MIN}
                 maxLength={1024}
                 required
@@ -267,7 +272,7 @@ export function CloudAccountPanel({
             {mode !== 'login' && (
               <>
                 <div className="cloud-verification">
-                  <label htmlFor={codeId}>邮箱验证码</label>
+                  <label htmlFor={codeId}>{t('邮箱验证码')}</label>
                   <span className="cloud-code-row">
                     <input
                       id={codeId}
@@ -296,7 +301,7 @@ export function CloudAccountPanel({
                         })
                       }
                     >
-                      {resendSeconds > 0 ? resendSeconds + '秒后重发' : '获取验证码'}
+                      {resendSeconds > 0 ? t('{0}秒后重发', [resendSeconds]) : t('获取验证码')}
                     </Button>
                   </span>
                 </div>
@@ -307,12 +312,12 @@ export function CloudAccountPanel({
             )}
             <Button type="submit" disabled={blocked || (mode !== 'login' && !challenge)}>
               {busy
-                ? '处理中…'
+                ? t('处理中…')
                 : mode === 'login'
-                  ? '登录'
+                  ? t('登录')
                   : mode === 'register'
-                    ? '创建账号'
-                    : '重置密码'}
+                    ? t('创建账号')
+                    : t('重置密码')}
             </Button>
             {entry && mode === 'login' && (
               <Button
@@ -322,7 +327,7 @@ export function CloudAccountPanel({
                 disabled={busy}
                 onClick={() => void changeLocalMode(true)}
               >
-                跳过登录
+                {t('跳过登录')}
               </Button>
             )}
           </form>
@@ -331,7 +336,7 @@ export function CloudAccountPanel({
               {mode === 'login' ? (
                 <>
                   <span>
-                    还没有账号？
+                    {t('还没有账号？')}
                     <Button
                       type="button"
                       variant="ghost"
@@ -339,7 +344,7 @@ export function CloudAccountPanel({
                       disabled={busy}
                       onClick={() => changeMode('register')}
                     >
-                      注册
+                      {t('注册')}
                     </Button>
                   </span>
                   <Button
@@ -349,7 +354,7 @@ export function CloudAccountPanel({
                     disabled={busy}
                     onClick={() => changeMode('reset')}
                   >
-                    找回密码
+                    {t('找回密码')}
                   </Button>
                 </>
               ) : (
@@ -360,7 +365,7 @@ export function CloudAccountPanel({
                   disabled={busy}
                   onClick={() => changeMode('login')}
                 >
-                  返回登录
+                  {t('返回登录')}
                 </Button>
               )}
             </div>

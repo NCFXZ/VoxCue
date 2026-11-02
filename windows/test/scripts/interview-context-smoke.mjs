@@ -80,7 +80,7 @@ try {
     .getByText('Test Model', { exact: true })
     .waitFor();
   const open = async () => {
-    await main.getByRole('button', { name: '开始面试', exact: true }).click();
+    await main.locator('.interview-start-trigger').click();
     const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
     const [floating] = await Promise.all([
       app.waitForEvent('window'),

@@ -1,6 +1,11 @@
+import { t } from '../i18n';
 import { useState, useEffect, type ReactNode, type ReactElement } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
+import { normalizeMath, mathPresentation } from '../services/math';
+import 'katex/dist/katex.min.css';
 import { readableStrong } from '../services/markdown';
 import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
@@ -24,7 +29,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
         <Button
           type="button"
           variant="ghost"
-          aria-label="复制代码"
+          aria-label={t('复制代码')}
           onClick={async () => {
             try {
               await navigator.clipboard.writeText(text);
@@ -36,7 +41,7 @@ function CodeBlock({ children }: { children?: ReactNode }) {
           }}
         >
           {copied ? <Check size={13} /> : <Copy size={13} />}
-          {error ? '复制失败' : copied ? '已复制' : '复制代码'}
+          {error ? t('复制失败') : copied ? t('已复制') : t('复制代码')}
         </Button>
       </header>
       <pre>{children}</pre>
@@ -48,7 +53,11 @@ export function MarkdownContent({ content }: { content: string }) {
   return (
     <div className="markdown-content">
       <Markdown
-        remarkPlugins={[remarkGfm, readableStrong]}
+        remarkPlugins={[remarkGfm, remarkMath, readableStrong]}
+        rehypePlugins={[
+          [rehypeKatex, { trust: false, strict: 'ignore', maxExpand: 1000, maxSize: 20 }],
+          mathPresentation,
+        ]}
         skipHtml
         components={{
           pre: CodeBlock,
@@ -67,7 +76,7 @@ export function MarkdownContent({ content }: { content: string }) {
               </a>
             );
           },
-          img: ({ alt }) => <span>{alt ? `[图片：${alt}]` : '[图片]'}</span>,
+          img: ({ alt }) => <span>{alt ? t('[图片：{0}]', [alt]) : t('[图片]')}</span>,
           table: ({ children }) => (
             <div className="markdown-table">
               <table>{children}</table>
@@ -75,9 +84,9 @@ export function MarkdownContent({ content }: { content: string }) {
           ),
         }}
       >
-        {content}
+        {normalizeMath(content)}
       </Markdown>
-      {linkError && <small role="status">无法打开链接。</small>}
+      {linkError && <small role="status">{t('无法打开链接。')}</small>}
     </div>
   );
 }

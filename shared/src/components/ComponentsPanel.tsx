@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useRef } from 'react';
 import { useComponents } from '../stores/components';
 import { Button } from './ui/button';
@@ -31,20 +32,20 @@ export function ComponentsPanel() {
     return (
       <div className="component-row" key={item.id} data-component-id={item.id}>
         <div className="component-copy">
-          <span className="component-model-name">{label}</span>
-          <span>{modelInfo[item.id].description}</span>
+          <span className="component-model-name">{t(label)}</span>
+          <span>{t(modelInfo[item.id].description)}</span>
           <span role="status">
             {item.phase === 'ready'
               ? size(item.bytes)
               : item.phase === 'checking'
-                ? '正在校验本地文件…'
+                ? t('正在校验本地文件…')
                 : item.phase === 'verifying'
-                  ? '正在校验并准备…'
+                  ? t('正在校验并准备…')
                   : item.phase === 'removing'
-                    ? '正在删除本机模型…'
+                    ? t('正在删除本机模型…')
                     : item.phase === 'downloading'
                       ? `${size(item.received)} / ${size(item.bytes)}`
-                      : `${size(item.bytes)} · 尚未下载`}
+                      : t('{0} · 尚未下载', [size(item.bytes)])}
           </span>
         </div>
         <ActionTransition>
@@ -52,9 +53,9 @@ export function ComponentsPanel() {
             <span className="component-ready-actions">
               {(item.removable ?? state?.removable) && (
                 <ConfirmDeleteButton
-                  target={label}
+                  target={t(label)}
                   disabled={blocked}
-                  warning="仅删除本机模型，可重新下载；知识库、资料和记录保留"
+                  warning={t('仅删除本机模型，可重新下载；知识库、资料和记录保留')}
                   onConfirm={() => run({ op: 'remove', id: item.id })}
                 />
               )}
@@ -62,13 +63,13 @@ export function ComponentsPanel() {
           ) : item.phase === 'removing' ? (
             <Button variant="ghost" disabled>
               <Loader size={16} />
-              删除中…
+              {t('删除中…')}
             </Button>
           ) : item.phase === 'downloading' || item.phase === 'verifying' ? (
             <DownloadButton
-              label={label}
+              label={t(label)}
               progress={item.phase === 'downloading' ? (item.received / item.bytes) * 100 : null}
-              status={item.phase === 'verifying' ? '校验中' : undefined}
+              status={item.phase === 'verifying' ? t('校验中') : undefined}
               onCancel={() => void run({ op: 'cancel' })}
             />
           ) : (
@@ -78,7 +79,7 @@ export function ComponentsPanel() {
               onClick={() => void run({ op: 'download', id: item.id })}
             >
               <Download size={16} />
-              下载
+              {t('下载')}
             </Button>
           )}
         </ActionTransition>
@@ -86,33 +87,33 @@ export function ComponentsPanel() {
     );
   };
   return (
-    <section className="components-panel" aria-label="本地组件">
+    <section className="components-panel" aria-label={t('本地组件')}>
       {!state && (
         <p className="section-help" role="status">
-          正在检查本地组件…
+          {t('正在检查本地组件…')}
         </p>
       )}
       {speechModels.length > 0 && (
-        <section className="component-group" aria-label="语音识别组件">
-          <h3>语音识别组件</h3>
+        <section className="component-group" aria-label={t('语音识别组件')}>
+          <h3>{t('语音识别组件')}</h3>
           {speechModels.map((item) => renderItem(item))}
         </section>
       )}
       {knowledgeModels.length > 0 && (
-        <section className="component-group" aria-label="知识库检索组件">
-          <h3>知识库检索组件</h3>
+        <section className="component-group" aria-label={t('知识库检索组件')}>
+          <h3>{t('知识库检索组件')}</h3>
           {knowledgeModels.map((item) => renderItem(item))}
         </section>
       )}
       {(error || state?.error) && (
         <p className="inline-error" role="alert">
-          {error || state?.error}
+          {t(error || state?.error)}
         </p>
       )}
       {error && (
         <Button variant="ghost" onClick={() => void run({ op: 'status' })}>
           <Refresh size={16} />
-          重新检查
+          {t('重新检查')}
         </Button>
       )}
     </section>

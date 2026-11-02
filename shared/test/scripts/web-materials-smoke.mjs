@@ -159,7 +159,7 @@ try {
 
   for (const dark of [false, true]) {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
-    const start = page.getByRole('button', { name: '开始面试', exact: true });
+    const start = page.locator('.interview-start-trigger');
     const shape = await start.evaluate((node) => ({
       radius: getComputedStyle(node).borderRadius,
       curve: getComputedStyle(node).getPropertyValue('corner-shape'),
@@ -346,7 +346,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   assert.equal(

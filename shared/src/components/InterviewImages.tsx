@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { validImagePreview, type InterviewImage } from '../../electron/contracts/interviewImages';
@@ -39,18 +40,18 @@ function Thumbnail({
     <button
       type="button"
       className="interview-image-thumbnail"
-      aria-label={`查看截图 ${index + 1} 原图`}
+      aria-label={t(`查看截图 ${index + 1} 原图`)}
       onClick={onOpen}
     >
       {preview && !failed ? (
         <img
           src={preview}
-          alt={`已发送截图 ${index + 1}`}
+          alt={t(`已发送截图 ${index + 1}`)}
           loading="lazy"
           onError={() => setFailed(true)}
         />
       ) : (
-        <span>{failed ? '缩略图不可用' : '正在读取…'}</span>
+        <span>{failed ? t('缩略图不可用') : t('正在读取…')}</span>
       )}
     </button>
   );
@@ -112,7 +113,7 @@ export function InterviewImages({
   if (!images?.length) return null;
   return (
     <>
-      <div className="interview-images" role="group" aria-label="已发送截图">
+      <div className="interview-images" role="group" aria-label={t('已发送截图')}>
         {images.map((image, index) => (
           <Thumbnail key={image.id} image={image} index={index} onOpen={() => setSelected(index)} />
         ))}
@@ -120,8 +121,8 @@ export function InterviewImages({
       {image &&
         createPortal(
           <Modal
-            title="截图"
-            closeLabel="关闭截图"
+            title={t('截图')}
+            closeLabel={t('关闭截图')}
             initialFocus="close"
             className="interview-image-viewer"
             backdrop={inInterview ? 'transparent' : 'viewport'}
@@ -131,7 +132,7 @@ export function InterviewImages({
                   variant="ghost"
                   size="icon"
                   className="interview-image-save"
-                  aria-label={savingId ? '正在保存图片' : '保存图片'}
+                  aria-label={savingId ? t('正在保存图片') : t('保存图片')}
                   aria-busy={!!savingId}
                   disabled={!original || !!savingId}
                   onClick={saveImage}
@@ -165,7 +166,7 @@ export function InterviewImages({
                   variant="outline"
                   size="icon"
                   className="interview-image-navigation is-previous"
-                  aria-label="上一张截图"
+                  aria-label={t('上一张截图')}
                   disabled={selected === 0}
                   onClick={() => setSelected((index) => index! - 1)}
                 >
@@ -176,7 +177,7 @@ export function InterviewImages({
                 <InterviewImageCanvas
                   key={image.id}
                   src={original}
-                  alt={`截图 ${selected! + 1} 原图`}
+                  alt={t(`截图 ${selected! + 1} 原图`)}
                   onError={() => {
                     setLoaded(null);
                     setError('原图无法显示，文件可能已损坏。');
@@ -184,7 +185,11 @@ export function InterviewImages({
                 />
               ) : (
                 <div className="interview-image-canvas" aria-busy={!error}>
-                  {error ? <p role="alert">{error}</p> : <p role="status">正在读取原图…</p>}
+                  {error ? (
+                    <p role="alert">{t(error)}</p>
+                  ) : (
+                    <p role="status">{t('正在读取原图…')}</p>
+                  )}
                 </div>
               )}
               {images.length > 1 && (
@@ -192,7 +197,7 @@ export function InterviewImages({
                   variant="outline"
                   size="icon"
                   className="interview-image-navigation is-next"
-                  aria-label="下一张截图"
+                  aria-label={t('下一张截图')}
                   disabled={selected === images.length - 1}
                   onClick={() => setSelected((index) => index! + 1)}
                 >
@@ -207,7 +212,7 @@ export function InterviewImages({
             </div>
             {saveError?.id === image.id && (
               <p role="alert" className="danger-text">
-                {saveError.message}
+                {t(saveError.message)}
               </p>
             )}
           </Modal>,

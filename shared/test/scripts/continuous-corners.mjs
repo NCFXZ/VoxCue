@@ -155,7 +155,7 @@ export async function verifyContinuousCorners(page, name) {
               '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
               '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
               '.screen-capture-status,.record-transcript-heading span,' +
-              '.interview-answer-status,.suggestions button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
+              '.interview-answer-status,.preparation-guide-actions .ui-button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
           );
         const roundMenu = !fallback && element.matches('.composer-menu');
         const label = element.tagName + '.' + element.getAttribute('class') + (pseudo ?? '');

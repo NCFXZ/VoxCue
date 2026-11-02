@@ -34,6 +34,8 @@ if (suites[0] === '--dpi') {
     'local-mode',
     'telemetry',
     'settings',
+    'language',
+    'preparation-guide',
     'profile-ui',
     'history-branding',
     'free-service',

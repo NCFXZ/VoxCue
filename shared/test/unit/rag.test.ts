@@ -49,7 +49,14 @@ function setup(hits = [hit]) {
     close: vi.fn(),
   };
   const provider: AIChatService = {
-    models: vi.fn(),
+    models: vi.fn(async () => [
+      {
+        id: request.modelId,
+        label: 'Test',
+        description: '',
+        reasoningEfforts: ['low' as const, 'high' as const],
+      },
+    ]),
     usage: vi.fn(),
     resetUsage: vi.fn(),
     stream: vi.fn(async (req, emit) => {
@@ -60,6 +67,126 @@ function setup(hits = [hit]) {
   return { knowledge, provider, rag: new RagChatService(provider, knowledge) };
 }
 afterEach(() => vi.restoreAllMocks());
+describe('准备聊天知识库显式使用边界', () => {
+  const profile = { name: '', background: '已确认简历', jobDescription: '当前 JD' };
+  it.each(['需要生成两条', '更新技能', 'Explain matrix multiplication', 'sí', '不要使用知识库'])(
+    '未明确授权不读取知识库：%s',
+    async (content) => {
+      const { provider, knowledge, rag } = setup();
+      vi.mocked(provider.stream).mockResolvedValueOnce({
+        usage: null,
+        sources: [],
+        answerText: '{"useKnowledge":false}',
+      });
+      await rag.stream(
+        { ...request, profile, turns: [{ role: 'user', content }] },
+        vi.fn(),
+        new AbortController().signal,
+      );
+      expect(knowledge.search).not.toHaveBeenCalled();
+      expect(knowledge.getItem).not.toHaveBeenCalled();
+      expect(vi.mocked(provider.stream).mock.calls[1][0].knowledgeBaseId).toBeNull();
+    },
+  );
+  it.each([
+    '请使用知识库整理 PID 技能',
+    'Use my knowledge base for PID',
+    'Consulta mi base de conocimientos sobre PID',
+  ])('明确请求经模型判断后检索，原请求及附件保留：%s', async (content) => {
+    const { provider, knowledge, rag } = setup();
+    const emit = vi.fn();
+    vi.mocked(provider.stream).mockImplementationOnce(async (req, delta) => {
+      delta({ id: req.id, type: 'delta', text: 'private routing result' });
+      return {
+        usage: null,
+        sources: [],
+        answerText: JSON.stringify({
+          useKnowledge: true,
+          userQuote: content,
+          query: 'PID sensor 控制',
+        }),
+      };
+    });
+    const files = [{ name: 'resume.txt', bytes: new Uint8Array([1]) }];
+    await rag.stream(
+      { ...request, effort: 'high', profile, turns: [{ role: 'user', content, files }] },
+      emit,
+      new AbortController().signal,
+    );
+    const [decision, answer] = vi.mocked(provider.stream).mock.calls.map(([req]) => req);
+    expect(decision).toMatchObject({
+      modelId: request.modelId,
+      effort: 'low',
+      knowledgeBaseId: null,
+      webSearch: false,
+    });
+    expect(decision.profile).toBeUndefined();
+    expect(decision.turns[0].files).toBeUndefined();
+    expect(answer.effort).toBe('high');
+    expect(answer.turns[0].files).toEqual(files);
+    expect(answer.turns[0].content).toContain('本地检索参考数据');
+    expect(knowledge.search).toHaveBeenCalledOnce();
+    expect(emit.mock.calls.flat().some((event) => event.text === 'private routing result')).toBe(
+      false,
+    );
+  });
+  it('短确认由模型结合上下文理解，不依赖当前消息的中文关键词', async () => {
+    const { provider, knowledge, rag } = setup();
+    vi.mocked(provider.stream).mockResolvedValueOnce({
+      usage: null,
+      sources: [],
+      answerText: '{"useKnowledge":true,"userQuote":"Yes","query":"PID sensor"}',
+    });
+    await rag.stream(
+      {
+        ...request,
+        profile,
+        turns: [
+          { role: 'user', content: 'How can I review my PID notes?' },
+          { role: 'assistant', content: 'Should I consult your selected knowledge base?' },
+          { role: 'user', content: 'Yes' },
+        ],
+      },
+      vi.fn(),
+      new AbortController().signal,
+    );
+    expect(knowledge.search).toHaveBeenCalledOnce();
+    expect(vi.mocked(provider.stream).mock.calls[0][0].turns[0].content).toContain(
+      'Should I consult',
+    );
+  });
+  it.each([
+    'not JSON',
+    '{"useKnowledge":true}',
+    '{"useKnowledge":true,"userQuote":"invented permission","query":"PID"}',
+  ])('无效判断不能授权检索：%s', async (answerText) => {
+    const { provider, knowledge, rag } = setup();
+    vi.mocked(provider.stream).mockResolvedValueOnce({ usage: null, sources: [], answerText });
+    await rag.stream({ ...request, profile }, vi.fn(), new AbortController().signal);
+    expect(knowledge.search).not.toHaveBeenCalled();
+  });
+  it('没有所选库时不增加意图请求，判断被取消后不检索也不生成答案', async () => {
+    const { provider, knowledge, rag } = setup();
+    await rag.stream(
+      { ...request, profile, knowledgeBaseId: null },
+      vi.fn(),
+      new AbortController().signal,
+    );
+    expect(provider.stream).toHaveBeenCalledOnce();
+    const controller = new AbortController();
+    vi.mocked(provider.stream).mockImplementationOnce(async () => {
+      controller.abort();
+      return {
+        usage: null,
+        sources: [],
+        answerText: '{"useKnowledge":true,"userQuote":"PID","query":"PID"}',
+      };
+    });
+    await expect(rag.stream({ ...request, profile }, vi.fn(), controller.signal)).rejects.toThrow();
+    expect(knowledge.search).not.toHaveBeenCalled();
+    expect(provider.stream).toHaveBeenCalledTimes(2);
+  });
+});
 describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
   it.each(['search', 'getItem'] as const)(
     '%s 只回退明确的可用性故障，保留跨进程错误分类',

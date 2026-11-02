@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useState } from 'react';
 import type { SpeechOptions } from '../../electron/contracts/speech';
 import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
@@ -67,7 +68,7 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
   const selectedModel = models.find((model) => model.id === modelId);
   return (
     <Modal
-      title="面试设置"
+      title={t('面试设置')}
       fixedHeader
       overlayHeader
       backdrop="transparent"
@@ -75,13 +76,13 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
       onClose={onClose}
     >
       <section className="interview-settings-section">
-        <h3>音频设置</h3>
+        <h3>{t('音频设置')}</h3>
         <div className="audio-device-editor">
           {(['system', 'microphone'] as const).map((source) => (
             <label key={source}>
-              {source === 'system' ? '系统声音 · 播放设备' : '麦克风'}
+              {source === 'system' ? t('系统声音 · 播放设备') : t('麦克风')}
               <ChoiceMenu
-                label={source === 'system' ? '选择播放设备' : '选择麦克风'}
+                label={source === 'system' ? t('选择播放设备') : t('选择麦克风')}
                 disabled={loading || audioBusy || state.speech.state === 'loading'}
                 value={
                   source === 'microphone' && !options.sources.includes(source)
@@ -89,11 +90,13 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
                     : (options[source] ?? '')
                 }
                 options={[
-                  ...(source === 'microphone' ? [{ value: '__off__', label: '不使用麦克风' }] : []),
-                  { value: '', label: source === 'system' ? '默认播放设备' : '默认麦克风' },
+                  ...(source === 'microphone'
+                    ? [{ value: '__off__', label: t('不使用麦克风') }]
+                    : []),
+                  { value: '', label: source === 'system' ? t('默认播放设备') : t('默认麦克风') },
                   ...(options[source] &&
                   !devices.some((d) => d.source === source && d.id === options[source])
-                    ? [{ value: options[source]!, label: '所选设备已不可用' }]
+                    ? [{ value: options[source]!, label: t('所选设备已不可用') }]
                     : []),
                   ...devices
                     .filter((d) => d.source === source)
@@ -117,7 +120,7 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         </div>
       </section>
       <section className="interview-settings-section">
-        <h3>模型设置</h3>
+        <h3>{t('模型设置')}</h3>
         <SpeechModelSettings
           options={options}
           disabled={audioBusy || state.speech.state === 'loading'}
@@ -125,30 +128,30 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
           onChange={(next) => void changeAudio(next)}
         >
           <div className="speech-setting-row">
-            <span className="speech-setting-label">回答模型</span>
+            <span className="speech-setting-label">{t('回答模型')}</span>
             <ChoiceMenu
-              label="面试回答模型"
+              label={t('面试回答模型')}
               value={modelId}
               disabled={modelLoading || busy}
               options={
                 models.length
                   ? models.map((m) => ({ value: m.id, label: m.label }))
-                  : [{ value: modelId, label: modelId || '暂无可用模型' }]
+                  : [{ value: modelId, label: modelId || t('暂无可用模型') }]
               }
               onChange={(id) => void changeModel(id, 'auto')}
             />
           </div>
           <div className="speech-setting-row">
-            <span className="speech-setting-label">思考强度</span>
+            <span className="speech-setting-label">{t('思考强度')}</span>
             <ChoiceMenu
-              label="面试思考强度"
+              label={t('面试思考强度')}
               value={effort}
               disabled={modelLoading || busy}
               options={[
-                { value: 'auto', label: effortLabels.auto },
+                { value: 'auto', label: t(effortLabels.auto) },
                 ...(selectedModel?.reasoningEfforts ?? []).map((e) => ({
                   value: e,
-                  label: effortLabels[e],
+                  label: t(effortLabels[e]),
                 })),
               ]}
               onChange={(value) => void changeModel(modelId, value as ReasoningEffort | 'auto')}
@@ -157,12 +160,12 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         </SpeechModelSettings>
       </section>
       <section className="interview-settings-section interview-display-settings">
-        <h3>显示设置</h3>
+        <h3>{t('显示设置')}</h3>
         <InterviewDisplayControls />
       </section>
       {(error || state.speechSwitchError || devicesError) && (
         <p className="danger-text" role="alert">
-          {error || state.speechSwitchError || devicesError}
+          {t(error || state.speechSwitchError || devicesError)}
         </p>
       )}
     </Modal>

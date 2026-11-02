@@ -1,3 +1,4 @@
+import { translateUI, type UILanguage } from '../../contracts/uiLanguage';
 import { createHash } from 'node:crypto';
 
 type CallbackPageState = 'received' | 'invalid' | 'used' | 'not-found';
@@ -127,7 +128,7 @@ const svg = (content: string) =>
 
 // These pages contain only fixed copy and a local PNG. OAuth codes, state,
 // account details and error messages are never interpolated into the document.
-export function createAuthCallbackPage(logo?: Buffer) {
+export function createAuthCallbackPage(logo?: Buffer, language: UILanguage = 'zh-CN') {
   const image = logo ? `data:image/png;base64,${logo.toString('base64')}` : undefined;
   return {
     headers: {
@@ -138,14 +139,15 @@ export function createAuthCallbackPage(logo?: Buffer) {
       'Content-Security-Policy': `default-src 'none'; style-src 'sha256-${createHash('sha256').update(styles).digest('base64')}'; img-src data:; base-uri 'none'; form-action 'none'; frame-ancestors 'none'`,
     },
     render(state: CallbackPageState) {
+      const t = (source: string) => translateUI(source, language);
       const message = messages[state];
       const received = state === 'received';
       return `<!doctype html>
-<html lang="zh-CN">
+<html lang="${language}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>${message.title} · VoxCue</title>
+  <title>${t(message.title)} · VoxCue</title>
   <link rel="icon" href="${image ?? 'data:,'}">
   <style>${styles}</style>
 </head>
@@ -154,18 +156,18 @@ export function createAuthCallbackPage(logo?: Buffer) {
     <article class="card${received ? '' : ' notice'}" aria-labelledby="page-title">
       <header>
         <div class="brand">${image ? `<img src="${image}" width="40" height="40" alt="" aria-hidden="true">` : ''}<span class="brand-name">VoxCue</span></div>
-        <p class="connection">ChatGPT 账户授权</p>
+        <p class="connection">${t('ChatGPT 账户授权')}</p>
       </header>
       <div class="status-mark">${svg(received ? '<path d="m6.5 12 3.5 3.5 7.5-7.5"/>' : '<path d="M12 7v6m0 4h.01"/>')}</div>
-      <h1 id="page-title">${message.title}</h1>
-      <p class="description">${message.description}</p>
+      <h1 id="page-title">${t(message.title)}</h1>
+      <p class="description">${t(message.description)}</p>
       <div class="next-step">
         ${svg('<rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8m-4-4v4"/>')}
-        <div><strong>${message.next}</strong><p>${message.detail}</p></div>
+        <div><strong>${t(message.next)}</strong><p>${t(message.detail)}</p></div>
       </div>
-      <p class="close-hint">你现在可以关闭此页面</p>
+      <p class="close-hint">${t('你现在可以关闭此页面')}</p>
     </article>
-    <p class="page-footer">从准备到表达，保持从容。</p>
+    <p class="page-footer">${t('从准备到表达，保持从容。')}</p>
   </main>
 </body>
 </html>`;

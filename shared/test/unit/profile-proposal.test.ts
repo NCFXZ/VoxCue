@@ -21,40 +21,20 @@ describe('资料提案协议', () => {
     { background: '', jobDescription: '' },
     { background: '已确认简历', jobDescription: '' },
     { background: '', jobDescription: '已确认JD' },
-  ])('后台仅对当前明确主题放行缺摘要请求，不能借历史或附件放行：%j', (summaries) => {
+  ])('自然语言请求交给模型判断，显式整套入口仍要求完整摘要：%j', (summaries) => {
     const request = {
       id: 'topic',
       modelId: 'synthetic',
       webSearch: true,
       instructions: '',
       profile: { ...base, ...summaries },
-      profileTask: 'skills' as const,
       turns: [{ role: 'user' as const, content: '请新增Kafka技能' }],
     };
     expect(validateRequest(request)).toEqual(request);
-    for (const prompt of [
-      '请生成技能',
-      '请生成一套完整的面试技能',
-      '不要生成Kafka技能',
-      '请解释Kafka',
-    ]) {
-      expect(() =>
-        validateRequest({
-          ...request,
-          turns: [
-            request.turns[0],
-            {
-              role: 'user',
-              content: prompt,
-              files: [{ name: 'topic.txt', bytes: new TextEncoder().encode('请新增Kafka技能') }],
-            },
-          ],
-        }),
-      ).toThrow('请求无效');
-    }
-    expect(() => validateRequest({ ...request, webSearch: false })).toThrow('请求无效');
+    expect(() => validateRequest({ ...request, profileTask: 'skills' })).toThrow('请求无效');
+    expect(validateRequest({ ...request, webSearch: false })).toMatchObject({ webSearch: false });
     expect(() => validateRequest({ ...request, turns: [{ role: 'user', content: 123 }] })).toThrow(
-      '请求无效',
+      '对话内容无效。',
     );
   });
   it('来源问题逐项返回，保留内容供确认；整套条件与仅删除规则保留', () => {
@@ -70,16 +50,16 @@ describe('资料提案协议', () => {
     };
     const next = () => ({ skills: [{ ...skill, content: '本次检索后的内容' }] });
     const sources = new Map([[source.url, source]]);
-    expect(verifySkillProposal(request, next(), sources, true)).toBeUndefined();
+    expect(verifySkillProposal(request, next(), sources, true, 'topic')).toBeUndefined();
     for (const [webSearch, completed, actual, reason] of [
       [false, true, sources, 'search_disabled'],
       [true, false, sources, 'search_incomplete'],
       [true, true, new Map(), 'search_sources_missing'],
     ] as const) {
       const changes = next();
-      expect(verifySkillProposal({ ...request, webSearch }, changes, actual, completed)).toEqual([
-        { skillId: skill.id, reason, sources: [source] },
-      ]);
+      expect(
+        verifySkillProposal({ ...request, webSearch }, changes, actual, completed, 'topic'),
+      ).toEqual([{ skillId: skill.id, reason, sources: [source] }]);
       expect(changes.skills[0]).toEqual({ ...skill, content: '本次检索后的内容', sources: [] });
     }
     expect(
@@ -95,6 +75,7 @@ describe('资料提案协议', () => {
         },
         sources,
         true,
+        'topic',
       ),
     ).toEqual([
       {
@@ -143,7 +124,6 @@ describe('资料提案协议', () => {
     expect(verifySkillProposal(request, changes, new Map([[source.url, source]]), true)).toEqual([
       { skillId: 'partial', reason: 'source_unmatched', sources: [unverified] },
       { skillId: 'none', reason: 'source_unmatched', sources: [unverified] },
-      { skillId: 'missing', reason: 'skill_sources_missing', sources: [] },
     ]);
     expect(changes.skills.map(({ sources: _sources, ...entry }) => entry)).toEqual(
       skills.map(({ sources: _sources, ...entry }) => entry),
@@ -327,7 +307,7 @@ describe('附件聊天提案原生链路', () => {
     transport.close();
     expect((await result).profileChanges).toEqual({ background: '第一段与第二段' });
   });
-  function service(value: unknown) {
+  function service(value: unknown, inspect?: (body: any) => void) {
     return new ChatGPTService({
       access: async () => ({ token: 'private', account: 'account' }),
       ledger: { add: async () => {} } as unknown as UsageLedger,
@@ -341,11 +321,21 @@ describe('附件聊天提案原生链路', () => {
         expect(body.instructions).toContain(profileInstructions);
         expect(body.instructions).toContain('上传附件本身不代表要求修改资料');
         expect(body.instructions).toContain('不写联网状态、检索过程或来源核验说明');
+        expect(body.instructions).toContain('本次确实新增或修改了简历或JD摘要');
+        expect(body.instructions).toContain('把本次提案与已保存资料合并后两份摘要都非空');
+        expect(body.instructions).toContain('待确认摘要也参与此次询问条件判断');
+        expect(body.text.format.schema.properties.answer.description).toContain(
+          '询问不代表本次生成技能',
+        );
+        expect(body.instructions).toContain('不使用待确认摘要生成技能');
+        expect(body.instructions).not.toContain('也不在 answer 中询问是否更新技能');
         expect(body.instructions).toContain('优先采用官方文档、标准和可靠的一手资料');
         expect(body.instructions).toContain('资料有分歧时说明条件');
         expect(body.instructions).not.toMatch(/120–220|约80字|主动询问是否需要联网/);
         expect(body.input[0].content[1].text).toContain('用户附件内容');
         expect(body.tools).toEqual([{ type: 'web_search' }]);
+        expect(body.tool_choice).toBe('auto');
+        inspect?.(body);
         return Response.json(value);
       },
     });
@@ -364,6 +354,95 @@ describe('附件聊天提案原生链路', () => {
       },
     ],
   };
+  it.each([
+    ['需要', '是否需要更新技能？'],
+    ['yes', 'Would you like to update your skills?'],
+    ['sí', '¿Quieres actualizar tus habilidades?'],
+  ])('完整上下文交给模型，简短同意可返回未搜索的有效技能提案：%s', async (consent, question) => {
+    const skills = [{ id: 'topic', title: '主题', content: '基于通用知识的参考内容', sources: [] }];
+    const result = await service(
+      {
+        object: 'response',
+        id: 'knowledge-only',
+        status: 'completed',
+        output: [
+          {
+            content: [
+              {
+                type: 'output_text',
+                text: JSON.stringify({
+                  answer: '请审阅技能提案。',
+                  changes: { skills },
+                  skillScope: 'all',
+                }),
+              },
+            ],
+          },
+        ],
+      },
+      (body) => {
+        expect(JSON.stringify(body.input)).toContain(question);
+        expect(JSON.stringify(body.input)).toContain(consent);
+      },
+    ).stream(
+      {
+        ...request,
+        turns: [
+          ...request.turns,
+          { role: 'assistant', content: question },
+          { role: 'user', content: consent },
+        ],
+      },
+      () => {},
+      new AbortController().signal,
+    );
+    expect(result.profileChanges?.skills).toEqual(skills);
+    expect(result.skillSourceIssues).toBeUndefined();
+    expect(result.sources).toEqual([]);
+    expect(base).not.toHaveProperty('skills');
+  });
+  it('模型范围元数据不进入资料或预览，主题例外不绕过整套入口与摘要确认', () => {
+    const profile = { ...base, background: '', jobDescription: '' };
+    const skills = [{ id: 'topic', title: '主题', content: '通用知识', sources: [] }];
+    const stream = new ProfileAnswerStream();
+    expect(
+      stream.append(JSON.stringify({ answer: '请审阅', changes: { skills }, skillScope: 'topic' })),
+    ).toBe('请审阅');
+    expect(stream.preview()?.skills).toHaveLength(1);
+    const proposal = stream.finish(profile);
+    expect(proposal.changes).toEqual({ skills });
+    expect(proposal.skillScope).toBe('topic');
+    const input = { ...request, profile };
+    expect(
+      verifySkillProposal(input, proposal.changes, new Map(), false, proposal.skillScope),
+    ).toBeUndefined();
+    expect(() => verifySkillProposal(input, proposal.changes, new Map(), false, 'all')).toThrow(
+      '先确认',
+    );
+    expect(() =>
+      verifySkillProposal(
+        { ...input, profileTask: 'skills' },
+        proposal.changes,
+        new Map(),
+        false,
+        'topic',
+      ),
+    ).toThrow('先确认');
+    expect(() =>
+      verifySkillProposal(
+        input,
+        { ...proposal.changes, background: '尚未保存' },
+        new Map(),
+        false,
+        'topic',
+      ),
+    ).toThrow('先确认');
+    for (const invalid of ['anything', 1, {}, []]) {
+      const malformed = new ProfileAnswerStream();
+      malformed.append(JSON.stringify({ answer: '无效', changes: {}, skillScope: invalid }));
+      expect(() => malformed.finish(base)).toThrow('格式无效');
+    }
+  });
   it('同一次请求保留附件与搜索，返回模型生成的提案而不修改现有资料', async () => {
     const received: string[] = [];
     const result = await service({

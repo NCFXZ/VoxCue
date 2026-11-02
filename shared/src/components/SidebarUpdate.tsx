@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useUpdates } from '../stores/updates';
 import { Button } from './ui/button';
 import { DownloadButton } from './DownloadButton';
@@ -14,8 +15,8 @@ export function SidebarUpdate() {
     <DownloadButton
       className="sidebar-update"
       iconOnly
-      label="更新"
-      hoverLabel="取消下载"
+      label={t('更新')}
+      hoverLabel={t('取消下载')}
       progress={state.progress}
       onCancel={() => void run('cancel')}
     />
@@ -24,7 +25,7 @@ export function SidebarUpdate() {
       variant="ghost"
       size="icon"
       className={`sidebar-update${installing ? '' : ' sidebar-update-expandable'}`}
-      aria-label={installing ? '正在准备更新' : downloaded ? '重启以更新' : '下载更新'}
+      aria-label={installing ? t('正在准备更新') : downloaded ? t('重启以更新') : t('下载更新')}
       disabled={installing || (downloaded && state.interviewActive)}
       onClick={() => void run(downloaded ? 'install' : 'download')}
     >
@@ -41,7 +42,7 @@ export function SidebarUpdate() {
       </span>
       <span className="sidebar-update-expanded" aria-hidden="true">
         {downloaded ? <Update size={17} /> : <Download size={17} />}
-        <span className="sidebar-update-label">{downloaded ? '重启以更新' : '下载更新'}</span>
+        <span className="sidebar-update-label">{downloaded ? t('重启以更新') : t('下载更新')}</span>
       </span>
     </Button>
   );

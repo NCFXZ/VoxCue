@@ -86,7 +86,7 @@ describe('原生 ChatGPT 请求与用量', () => {
         stream: true,
         input: request.turns,
         tools: [{ type: 'web_search' }],
-        tool_choice: 'required',
+        tool_choice: 'auto',
       });
       expect(body).not.toHaveProperty('previous_response_id');
       return sse([

@@ -88,7 +88,7 @@ try {
   });
   const login = await app.firstWindow();
   const page = await connectUiAccount(app, login);
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     page

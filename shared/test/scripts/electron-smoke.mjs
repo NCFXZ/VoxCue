@@ -35,20 +35,17 @@ try {
     errors.push(error.message);
     console.error(error.message);
   });
-  await page.getByRole('heading', { name: '今天想准备哪一部分面试？' }).waitFor();
+  await page.locator('.welcome h1').waitFor();
   assert.equal(await page.evaluate(() => typeof window.desktop?.windowAction), 'function');
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
-  assert.equal(
-    await page.getByRole('button', { name: '开始面试', exact: true }).isDisabled(),
-    true,
-  );
+  assert.equal(await page.locator('.interview-start-trigger').isDisabled(), true);
   await page.screenshot({});
   await page.getByRole('button', { name: '用户菜单' }).click();
   assert.equal(await page.getByRole('menuitem').count(), 2);
   await page.getByRole('menuitem', { name: '设置' }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();

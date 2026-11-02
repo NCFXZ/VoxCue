@@ -249,6 +249,41 @@ function answer(emit: (type: string, data: any) => void, content = '合成回答
   emit('session.idle', {});
 }
 describe('Copilot 服务适配与本机资料边界', () => {
+  it.each([true, false])(
+    '基于模型知识的技能无需搜索来源；工具能力缺失仍可回答：%s',
+    async (toolsAvailable) => {
+      const skills = [{ id: 'topic', title: 'Topic', content: 'Model knowledge', sources: [] }];
+      const content = JSON.stringify({
+        answer: 'Review this proposal.',
+        changes: { skills },
+        skillScope: 'topic',
+      });
+      const fixture = chat((emit) => answer(emit, content));
+      if (!toolsAvailable) fixture.client.rpc.tools.list.mockResolvedValue({ tools: [] });
+      const result = await fixture.service.stream(
+        {
+          ...request,
+          webSearch: true,
+          profile: { name: '', background: '', jobDescription: '' },
+          turns: [
+            { role: 'assistant', content: 'Add a Kafka skill?' },
+            { role: 'user', content: 'yes' },
+          ],
+        },
+        () => {},
+        new AbortController().signal,
+      );
+      expect(result.profileChanges?.skills).toEqual(skills);
+      expect(result.skillSourceIssues).toBeUndefined();
+      const config = fixture.client.createSession.mock.calls[0][0];
+      expect(config.systemMessage.content).toContain('根据任务判断是否需要使用');
+      expect(config.systemMessage.content).not.toContain('否则不要新增或改写技能');
+      expect(config.availableTools).toEqual(toolsAvailable ? ['web_search', 'web_fetch'] : []);
+      expect(config.onPermissionRequest({ kind: 'read', path: 'C:/private' })).toEqual({
+        kind: 'reject',
+      });
+    },
+  );
   it('使用账户真实目录及其供应商；无搜索时没有网页或本机工具，私有推理不出 IPC', async () => {
     const { service, client, ledger } = chat((emit) => {
       emit('assistant.reasoning_delta', {

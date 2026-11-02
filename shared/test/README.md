@@ -1,4 +1,12 @@
-当前客户端0.6.6范围以`PROGRESS.md`和[Mac 0.6.5→0.6.6逐项交接](../docs/MACOS_0.6.6_HANDOFF.md)为准；下文旧版本章节中的“当前/本轮”均属历史。本轮执行全部单测、共享功能与600秒ASR长稳、Windows原生/五档DPI、安全对抗、生产依赖审计及owner临时验包。服务端固定0.5.3/schema 2只读，普通UI/包在导入main前隔离账号、统计与凭据助手，不采样物理音频。公开模型/音频现可在本平台`.cache`校验后复用，执行副本、profile、数据库、截图和结果仍退出清理，不提交缓存或测试成绩。弃用的speech-model-check、speech-device-check、speech-reliability、speech-restart-native源码及命令已删除；有效硬件专项保留但不自动运行。
+## 0.6.7 验证入口
+
+当前共享功能矩阵包含59组，Windows原生18组、五档DPI各27组；`language`与`preparation-guide`已纳入默认矩阵。临时验包使用`portable-native-smoke.mjs --with-installer`，不发布安装包。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
+
+准备引导定向入口：平台目录执行`node ../shared/test/scripts/preparation-guide-smoke.mjs`，检查固定标题、按已保存资料生成的三个选项、悬停/键盘焦点说明淡入淡出及稳定高度、减少动态效果、中英文浅深色/窄窗对齐、聊天中及确认保存后不插入引导、新对话按已保存资料显示、草稿保护、重载与使用指南外链。`--preview`只将内存图片输出到终端供查看；合成资料与临时profile退出清理。资料确认/失败恢复继续使用`profile-ui-smoke.mjs`与对应单测；`chat-progress-smoke.mjs`覆盖部分回答失败后的重试/复制并排对齐，`--preview-actions`仅输出内存图片。
+
+知识库显式使用与公式：`rag.test.ts`覆盖准备聊天的默认不检索、模型肯定决定/短确认、无效决定和取消边界，保留实时面试单库RAG回归。`markdown.test.tsx`覆盖两套数学分隔符、矩阵、流式残缺、代码与不可信命令。`profile-ui-smoke.mjs`经真实UI/IPC验证准备默认无检索、显式检索及聊天/面试公式、离线字体、长公式内滚动和复制原文；`typography-smoke.mjs`补充浅深色公式、字体实际加载、横向滚动位置和代码围栏检查，可用`--preview=chat-math,interview-math`查看内存截图。意图判断使用合成Provider，不代表真实模型多语言语义已验收。
+
+当前客户端0.6.7范围以`PROGRESS.md`和[Mac 0.6.7逐项交接](../docs/MACOS_0.6.7_HANDOFF.md)为准；下文旧版本章节中的“当前/本轮”均属历史。本轮执行全部单测、共享功能与600秒ASR长稳、Windows原生/五档DPI、安全对抗、生产依赖审计及owner临时验包。服务端固定0.5.3/schema 2只读，普通UI/包在导入main前隔离账号、统计与凭据助手，不采样物理音频。公开模型/音频现可在本平台`.cache`校验后复用，执行副本、profile、数据库、截图和结果仍退出清理，不提交缓存或测试成绩。弃用的speech-model-check、speech-device-check、speech-reliability、speech-restart-native源码及命令已删除；有效硬件专项保留但不自动运行。
 
 Mac 0.6.6的`screenshot-performance.mjs --native --prewarm`使用自有不透明简易全屏窗口覆盖所有显示器，每次取源前重新核对覆盖/位置/透明度，要求已有屏幕授权，按显示器颜色空间直接绘制合成色块，保留严格通道误差，验证当前帧与取消；取消后等待系统读取结束再撤去遮罩，超时终止自有宿主，不保存或外发像素。`--platform`仍仅支持Windows原生端口及其防捕获断言。Mac此项不宣称相同防捕获保证。屏幕权限夹具分别统计零缩略图元数据准备和真实采图，未授权必须跳过准备；面试字号夹具的Mac键盘回顶使用⌘↑。
 
@@ -255,7 +263,9 @@ pnpm test:ui:dpi
 
 ## Windows 0.5.5 回归入口
 
-资料提案专项 `profile-selection-smoke.mjs` 已纳入共享完整矩阵及 Windows 五档 DPI。入口覆盖多长字段紧凑排版、单滚动区详情、连续圆角及胶囊标签、勾选双向动画/键盘/减少动态效果、逐字段和逐技能保存/删除、保留未选已有内容及来源、重载持久化、文字确认不落盘，以及真实流式解析下姓名/技能分别完成后隐藏 loading。总标题不显示 loading，部分提案和停止不能保存。默认不保存图片，仅用户指定 `--screenshots` 时交付合成界面。
+资料提案专项 `profile-selection-smoke.mjs` 已纳入共享完整矩阵及 Windows 五档 DPI。入口覆盖多长字段紧凑排版、单滚动区详情、固定材质顶部全宽覆盖与滚动条避让、保存/关闭间距、连续圆角及胶囊标签、勾选和技能清单双向动画/键盘/减少动态效果、清单收起后的焦点隔离和勾选保留、逐字段和逐技能保存/删除、保留未选已有内容及来源、重载持久化、文字确认不落盘，以及真实流式解析下姓名/技能分别完成后隐藏 loading。总标题不显示 loading，部分提案和停止不能保存。默认不保存图片，仅用户指定 `--screenshots` 时交付合成界面。
+
+思考过程动画由`chat-progress-smoke.mjs`与Windows的`interview-layout-smoke.mjs`覆盖准备聊天和面试浮窗，复用`check-progress-motion.mjs`检查外层过程与嵌套公开摘要的实际中间高度/透明度、快速反向和减少动态效果。保留现有键盘、流式自动收起及重载检查。
 
 版本由共享源生成 Windows 0.5.5；共享矩阵 34 项，原生矩阵 15 项，五档 DPI 每档 8 项。依赖与锁保持现有版本，macos/ 只读；下列安装包、更新、公开模型和隔离安装引擎入口继续用于本版。
 
@@ -301,7 +311,7 @@ Mac的`qwen-native-smoke.mjs <临时已认证组件>`使用原BF16 ASR、Q8_0或
 
 语音包边界单测增加 NaN/正负无穷采样拒绝，阻止损坏数据进入重采样与识别。浮窗专项检查实际置顶状态及原生同步事件不会递归调用置顶；Windows 展示端口另覆盖丢失层级后的缓存重置和正常置顶时不做多余重置。20 轮面试及四次重载仍检查窗口退出、主窗口恢复和预热后的内存增长。
 
-界面矩阵沿用“个性化”名称、统一 8px 控件圆角及按音频静音累计1800ms、800ms分段计入其中的提交规则。ui-alignment 同时检查个人信息标签距标题分割线至少 16px、模型/思考强度同组，以及长名称、窄聊天列下发送按钮对齐；五档 DPI 复用相同检查。ChoiceMenu 按最近的原生 dialog 计算避让边界，组件界面专项将带 CPU 提示的模型控件滚到弹窗底边，检查菜单翻转后四边仍保留 8px 间距。组件原生专项使用完整有效的面试配置验证缺模型阻止开场，并以组件 ID 定位分组后的下载项，保留实际下载认证、取消、进程退出和独占句柄检查。
+界面矩阵沿用“通用”名称、统一 8px 控件圆角及按音频静音累计1800ms、800ms分段计入其中的提交规则。ui-alignment 同时检查个人信息标签距标题分割线至少 16px、模型/思考强度同组，以及长名称、窄聊天列下发送按钮对齐；五档 DPI 复用相同检查。ChoiceMenu 按最近的原生 dialog 计算避让边界，组件界面专项将带 CPU 提示的模型控件滚到弹窗底边，检查菜单翻转后四边仍保留 8px 间距。组件原生专项使用完整有效的面试配置验证缺模型阻止开场，并以组件 ID 定位分组后的下载项，保留实际下载认证、取消、进程退出和独占句柄检查。
 
 `windows/test/scripts/qwen-native-smoke.py <component> --device cpu --wave <固定合成 WAV>` 也执行真实 CPU 识别，检查中间稿、静音终稿和退出；省略 WAV 的 CPU 模式只覆盖加载及静音。CUDA 模式可用 `--require-crop` 检查四句裁剪，终端仅输出处理音频时长、最大窗口、裁剪次数等摘要。输入及 CUDA 缓存只放自有系统临时目录，结束清理，不采样物理设备。
 
@@ -377,9 +387,9 @@ Windows 0.3.1 沿用完整离线单测、typecheck/build/check:architecture/chec
 
 第2/4/5组最新补充由 desktop-ipc、profile-store、profile-proposal 检查资料用途、准备聊天不拼接执行面试自定义指令、外部内容边界及技能来源质量规则。rag 单测检查 Local RAG 搜索失败、完整条目部分失败/移除、原15秒预算、挂起端口超时与迟到结果、超时/取消竞争、身份/配置/参数错误不回退及 Provider 只调用一次；Function Calling 已退役，知识核心保护保留。profile-ui 使用离线合成端口检查普通准备聊天与面试失败后继续回答、模型/effort保持，回退答案仍进入后续追问上下文；chat-progress 保留实际 Responses/SSE 的提案确认、来源核验和取消保护，并按第7组确认稿检查补充摘要入口。结果仅终端，临时资料退出清理，GUI 串行。
 
-第5组资料/技能提示词由 profile-store、profile-proposal、personal-info 单测及 profile-ui、chat-progress 桌面入口覆盖。技能按需联网、无固定写作字数，按钮继续直接发起任务；新增 plain-text 单测检查 Markdown/网址/引用的纯文字展示。桌面断言覆盖流式、完成、失败、保存及重载后的链接隐藏、显示内容复制、原文/来源元数据保留，以及普通聊天仍展示来源；确认/拒绝、实际搜索/来源匹配、取消/迟到和存储上限保护保持。截图仅内存、工作文件仅系统临时目录，结果不落盘。
+第5组资料/技能提示词由 profile-store、profile-proposal、personal-info 单测及 profile-ui、chat-progress 桌面入口覆盖。技能按需联网、无固定写作字数，按钮继续直接发起任务；新增 plain-text 单测检查 Markdown/网址/引用的纯文字展示。桌面断言覆盖技能条目流式、完成、失败、保存及重载后的链接隐藏、原文/来源元数据保留，聊天说明继续展示引用并复制原文；确认/拒绝、实际搜索/来源匹配、取消/迟到和存储上限保护保持。截图仅内存、工作文件仅系统临时目录，结果不落盘。
 
-第6组弃用风格清理由 profile-store 覆盖：有效/损坏旧键均不再读取、不进入请求，不影响个人资料与知识库选择加载，原键和已确认自定义指令保留。第7组由 profile-ui 检查确认稿的四个真实快捷入口、完整请求、草稿/附件保留、直接发送与等待手动发送/确认的时序；profile-store 检查三种缺失摘要的新完整模板正常发送、附件保留及确认前不落盘，并保留旧提示兼容。renderer/services/preparation 检查“不生成技能”等明确否定不触发研究，独立肯定请求仍生效。第8组 history-title 单测检查新提示词传递、短标题与原输出上限、队列及取消信号/迟到保护；history-branding 使用 offline-electron-entry、合成账户/组件/语音端口及响应，检查结束面试后的标题请求、关闭后完成和失败重试，同时保留记录浏览/导出断言。代码长度上限保持，提示词另要求通常10–20字、最多30字，简单主题可更短；专项只验证协议与合成生命周期，不代表真实标题质量。
+第6组弃用风格清理由 profile-store 覆盖：有效/损坏旧键均不再读取、不进入请求，不影响个人资料与知识库选择加载，原键和已确认自定义指令保留。第7组由 profile-ui 检查确认稿的四个真实快捷入口、完整请求、草稿/附件保留、直接发送与等待手动发送/确认的时序；profile-store 检查三种缺失摘要的新完整模板正常发送、附件保留及确认前不落盘，并保留旧提示兼容。profile-store/profile-proposal 检查多语言请求和短回复上下文传递、整套/主题校验；实际意图理解质量须真实模型另验。第8组 history-title 单测检查新提示词传递、短标题与原输出上限、队列及取消信号/迟到保护；history-branding 使用 offline-electron-entry、合成账户/组件/语音端口及响应，检查结束面试后的标题请求、关闭后完成和失败重试，同时保留记录浏览/导出断言。代码长度上限保持，提示词另要求通常10–20字、最多30字，简单主题可更短；专项只验证协议与合成生命周期，不代表真实标题质量。
 
 本轮共用界面专项 `node ../shared/test/scripts/ui-refinement-smoke.mjs` 使用离线临时宿主，检查登录/主窗口100%缩放、五类资料默认折叠、展开/收起中间动画帧与减少动态效果、弹窗编辑、按钮文字完整、分隔栏拖动/双击复位、完整上传区在导入前后不变、索引百分比/完成状态和思考耗时字号。`typography-smoke.mjs` 与 `ui-alignment-smoke.mjs` 保留全部界面的浅深主题、最小窗口、控件/图标/长标题/溢出检查；个人信息编辑断言改为弹窗与背景操作禁用。profile-ui、components-ui、composer 和 interview-typography 保留资料确认/保存/冲突、下载/删除确认、附件与字号同步保护；它们的宿主同样在应用导入前阻断网络。GUI 串行运行，截图只在内存，全部临时资料退出清理，不用真实账户或硬件。
 
@@ -485,3 +495,7 @@ speech-switch/speech-progress/speech-host/speech-session/speech-store覆盖后�
 Mac `node test/scripts/speech-switch-smoke.mjs --download`在自有临时目录通过生产ComponentService下载/认证固定公开Paraformer、原始Qwen ASR与当前Q8_0 Aligner，使用44.1kHz合成音频、实际AEC/utilityProcess/两层Worker/原生识别器验证模型与Metal/CPU交接和释放。不是硬件采集或真人质量测试，不读真实账户/模型缓存；临时文件退出清理。Windows专属夹具及本机原生验收仍留待Windows接续。
 
 2026-10-28 Mac复验：`node test/scripts/desktop-session-smoke.mjs`覆盖9个锁屏/控制台夹具与实际当前会话。守卫要求当前UID唯一已登录且位于控制台；解锁时缺少锁屏字段不再误拒，任何锁定或未知状态仍拒绝。管理滚动末端使用浏览器真实限位与末内容框的<1px几何断言，避免整数scrollHeight/clientHeight在125%缩放下产生假残差；不扩大阈值。聊天硬刷新前另读已提交的IndexedDB提案，不代替原刷新恢复断言。最新本轮完整结果见[Mac0.6.0发行复验](../docs/MACOS_0.6.0_RELEASE.md)。
+
+语言适配定向入口：本平台运行 `node ../shared/test/scripts/language-smoke.mjs` 和 `settings-smoke.mjs`，覆盖首选系统语言、手动偏好、跨窗口、英文设置/面试/窄窗及中文键盘/主题回归。`ui-language.test.ts`检查简繁体判断、持久化失败、动态参数保留、词表键与占位符；`desktop-ipc.test.ts`验证公开语言接口。普通离线UI入口显式使用合成简体中文系统语言，语言专项可指定其他首选语言；不修改本机系统语言。`language-smoke.mjs --preview`仅向调用工具输出内存图像，不保存截图或报告。
+
+准备聊天默认搜索专项：profile-proposal、profile-store、copilot、chat 覆盖 tool_choice auto、共享提示词、多语言短回复上下文、模型知识技能无来源、实际引用校验、缺摘要的整套/主题范围及无搜索工具的如实降级。composer/profile-ui/preparation-guide检查联网开关移除、附件入口、提案与聊天引用。仅合成服务协议测试，不代表真实模型意图准确率。

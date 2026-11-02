@@ -199,7 +199,7 @@ describe('技能来源核验与可审阅提案', () => {
           });
         const body = JSON.parse(String(options?.body));
         expect(body.tools).toEqual([{ type: 'web_search' }]);
-        expect(body.tool_choice).toBe('required');
+        expect(body.tool_choice).toBe('auto');
         const terminal = {
           object: 'response',
           status: 'completed',

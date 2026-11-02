@@ -9,6 +9,8 @@ minimumReleaseAgeExclude:
 # VoxCue uses its own pinned text embedder, not LanceDB's optional providers.
 # Mammoth's argparse dependency belongs only to its unused standalone CLI.
 overrides:
+  # GHSA-238p-pmpm-9mq7: reject inherited renderer settings/macros in every math path.
+  'katex': '0.18.2'
   # GHSA-mrhx-c7xc-m3w5: reject oversized collections before walking elements.
   '@github/copilot-sdk>zod': '4.6.6'
   # Security fixes for the build tools; runtime/provider versions stay pinned.

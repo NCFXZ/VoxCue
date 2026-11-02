@@ -89,8 +89,8 @@ try {
       fill: getComputedStyle(e).backgroundColor,
       opacity: getComputedStyle(e).opacity,
     }));
-  await main.getByRole('button', { name: '开始面试', exact: true }).waitFor();
-  await click(main.getByRole('button', { name: '开始面试', exact: true }));
+  await main.locator('.interview-start-trigger').waitFor();
+  await click(main.locator('.interview-start-trigger'));
   const opening = app.waitForEvent('window');
   await click(main.getByRole('button', { name: '确认开始', exact: true }));
   const floating = await opening;

@@ -194,16 +194,22 @@ try {
     node.scrollTop = node.scrollHeight;
   });
   await main.getByRole('button', { name: '查看回答：请介绍机器人控制项目', exact: true }).click();
-  await main.waitForFunction(() => {
-    const answer = document.querySelector('.record-answer.is-located');
-    const header = document.querySelector('.record-answer-panel > header');
-    const answerTop=answer.getBoundingClientRect().top, headerBottom=header.getBoundingClientRect().bottom;
-    globalThis.answerLocationGeometry={answerTop,headerBottom};
-    return Math.round(answerTop*64)>=Math.round(headerBottom*64);
-  }).catch(async error => {
-    console.error('Answer location geometry', await main.evaluate(() => globalThis.answerLocationGeometry));
-    throw error;
-  });
+  await main
+    .waitForFunction(() => {
+      const answer = document.querySelector('.record-answer.is-located');
+      const header = document.querySelector('.record-answer-panel > header');
+      const answerTop = answer.getBoundingClientRect().top,
+        headerBottom = header.getBoundingClientRect().bottom;
+      globalThis.answerLocationGeometry = { answerTop, headerBottom };
+      return Math.round(answerTop * 64) >= Math.round(headerBottom * 64);
+    })
+    .catch(async (error) => {
+      console.error(
+        'Answer location geometry',
+        await main.evaluate(() => globalThis.answerLocationGeometry),
+      );
+      throw error;
+    });
   await main
     .locator('.record-answer-content .provider-avatar img')
     .first()
@@ -279,7 +285,7 @@ try {
   );
   await main.evaluate(() => document.documentElement.classList.remove('dark'));
   await main.getByRole('button', { name: '新对话', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     main.getByRole('button', { name: '确认开始', exact: true }).click(),
@@ -327,7 +333,8 @@ try {
   await main
     .locator('.history-row')
     .filter({ hasText: '机器人控制与工业自动化岗位面试' })
-    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await main.locator('.record-session-heading h1').waitFor();
   const refs = await main.evaluate(
     () =>
@@ -356,7 +363,8 @@ try {
   await main
     .locator('.history-row')
     .filter({ hasText: '待生成标题' })
-    .locator('.history-row-open').click({ position: { x: 16, y: 16 } });
+    .locator('.history-row-open')
+    .click({ position: { x: 16, y: 16 } });
   await main.getByRole('button', { name: '重试生成标题', exact: true }).waitFor();
   await main.getByRole('button', { name: '重试生成标题', exact: true }).click();
   await app.evaluate(async () => {

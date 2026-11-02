@@ -80,11 +80,20 @@ import { selectDesktopPlatform, desktopResources } from './platform';
 import { windowOptions, whenWindowReady, restrictWindowNavigation, loadWindowPage } from './window';
 import type { NativePresentation } from './presentation';
 import {
+  isUILanguage,
+  systemUILanguage,
+  translateUI,
+  type UILanguage,
+} from './contracts/uiLanguage';
+import {
   interviewPanelScale,
   fitInterviewBounds,
   draggedInterviewScale,
   interviewLayout,
 } from './contracts/interviewLayout';
+const systemLanguage = systemUILanguage(app.getPreferredSystemLanguages()[0]);
+let uiLanguage: UILanguage = systemLanguage;
+const nativeText = (source: string) => translateUI(source, uiLanguage);
 let knowledge: KnowledgeHost;
 let knowledgeCoordinator: KnowledgeCoordinator;
 let auth: ChatGPTAuthService;
@@ -177,8 +186,8 @@ try {
   app.setPath('sessionData', directory);
 } catch (error) {
   dialog.showErrorBox(
-    '应用数据迁移未完成',
-    error instanceof Error ? error.message : '请检查数据目录后重试。',
+    nativeText('应用数据迁移未完成'),
+    nativeText(error instanceof Error ? error.message : '请检查数据目录后重试。'),
   );
   app.exit(1);
 }
@@ -195,11 +204,14 @@ async function prepareUpdateInstall(accountLogout = false, deletingAccount = fal
     try {
       const { response } = await dialog.showMessageBox(win, {
         type: 'warning',
-        title: accountLogout ? '退出 VoxCue 账号' : '重启并更新 VoxCue',
-        message: accountLogout ? '退出主账号？未保存的编辑会丢失。' : '重启并安装更新？',
-        detail:
+        title: nativeText(accountLogout ? '退出 VoxCue 账号' : '重启并更新 VoxCue'),
+        message: nativeText(
+          accountLogout ? '退出主账号？未保存的编辑会丢失。' : '重启并安装更新？',
+        ),
+        detail: nativeText(
           '正在生成的回复会停止，未保存的个人信息编辑会丢失。已保存资料、普通聊天和附件草稿会保留。',
-        buttons: ['取消', accountLogout ? '退出账号' : '重启并更新'],
+        ),
+        buttons: [nativeText('取消'), nativeText(accountLogout ? '退出账号' : '重启并更新')],
         defaultId: 0,
         cancelId: 0,
         noLink: true,
@@ -229,7 +241,9 @@ function createLoginWindow() {
     loginWindow.focus();
     return;
   }
-  const win = new BrowserWindow(windowOptions('login', desktopPlatform, windowPaths));
+  const win = new BrowserWindow(
+    windowOptions('login', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
+  );
   loginWindow = win;
   restrictWindowNavigation(win);
   whenWindowReady(win, desktopPlatform, () => {
@@ -330,7 +344,10 @@ function restoreAfterInterview() {
     })
     .catch(() => {
       restoreMain();
-      dialog.showErrorBox('应用图标恢复失败', '面试已结束，请重新打开 VoxCue。');
+      dialog.showErrorBox(
+        nativeText('应用图标恢复失败'),
+        nativeText('面试已结束，请重新打开 VoxCue。'),
+      );
     });
 }
 function openInterview() {
@@ -352,7 +369,9 @@ function openInterview() {
   interviewResize = undefined;
   interviewCloseApproved = false;
   interviewMove = undefined;
-  const win = new BrowserWindow(windowOptions('interview', desktopPlatform, windowPaths));
+  const win = new BrowserWindow(
+    windowOptions('interview', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
+  );
   if (!desktopPlatform.captureScreen && !demoSession && speechSessions?.configuration?.aiEnabled)
     void prepareInterviewScreenshot(win, desktopPlatform.id);
   interviewWindow = win;
@@ -417,7 +436,10 @@ function openInterview() {
     interviewCloseApproved = true;
     win.destroy();
     if (!closingMain)
-      dialog.showErrorBox('面试窗口已关闭', '面试窗口发生异常，已停止本场采集并恢复主窗口。');
+      dialog.showErrorBox(
+        nativeText('面试窗口已关闭'),
+        nativeText('面试窗口发生异常，已停止本场采集并恢复主窗口。'),
+      );
   });
 }
 const componentRoot = path.join(app.getPath('userData'), 'component-cache');
@@ -463,7 +485,9 @@ function createMainWindow() {
   mainCloseApproved = false;
   mainCloseFlushed = false;
   pendingMainClose = null;
-  mainWindow = new BrowserWindow(windowOptions('main', desktopPlatform, windowPaths));
+  mainWindow = new BrowserWindow(
+    windowOptions('main', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
+  );
   restrictWindowNavigation(mainWindow);
   whenWindowReady(mainWindow, desktopPlatform, () => {
     mainWindow?.show();
@@ -494,11 +518,12 @@ function createMainWindow() {
       void dialog
         .showMessageBox(mainWindow!, {
           type: 'warning',
-          title: '关闭 VoxCue',
-          message: '关闭应用？',
-          detail:
+          title: nativeText('关闭 VoxCue'),
+          message: nativeText('关闭应用？'),
+          detail: nativeText(
             '正在生成的回复会停止，未保存的个人信息编辑会丢失。普通聊天、附件草稿和已保存资料会保留。',
-          buttons: ['取消', '关闭应用'],
+          ),
+          buttons: [nativeText('取消'), nativeText('关闭应用')],
           defaultId: 0,
           cancelId: 0,
           noLink: true,
@@ -510,7 +535,9 @@ function createMainWindow() {
             mainWindow.close();
           }
         })
-        .catch(() => dialog.showErrorBox('关闭确认失败', '窗口已保留，请重试关闭。'))
+        .catch(() =>
+          dialog.showErrorBox(nativeText('关闭确认失败'), nativeText('窗口已保留，请重试关闭。')),
+        )
         .finally(() => {
           mainCloseChecking = false;
         });
@@ -525,7 +552,10 @@ function createMainWindow() {
         pendingMainClose = null;
         mainCloseApproved = false;
         if (desktopPlatform.id === 'darwin') macQuitRequested = false;
-        dialog.showErrorBox('聊天尚未保存', '窗口已保留，请等待聊天保存完成后重试关闭。');
+        dialog.showErrorBox(
+          nativeText('聊天尚未保存'),
+          nativeText('窗口已保留，请等待聊天保存完成后重试关闭。'),
+        );
       }, 15000);
       return;
     }
@@ -551,8 +581,8 @@ app.whenReady().then(async () => {
         await eraseLocalAccount(app.getPath('userData'), eraseBrowser);
     } catch {
       dialog.showErrorBox(
-        '本机账号资料尚未清理完成',
-        '请关闭占用资料的程序后重新打开 VoxCue。应用会继续清理，暂不载入资料。',
+        nativeText('本机账号资料尚未清理完成'),
+        nativeText('请关闭占用资料的程序后重新打开 VoxCue。应用会继续清理，暂不载入资料。'),
       );
       app.exit(1);
       return;
@@ -620,6 +650,20 @@ app.whenReady().then(async () => {
       return null;
     }
   };
+  handleDesktop('appearance:language', (event, ...args) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    if (!win || ![loginWindow, mainWindow, interviewWindow].includes(win))
+      throw Error('Unauthorized window');
+    if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    if (args.length !== 1 || !isUILanguage(args[0])) throw Error('Invalid UI language');
+    uiLanguage = args[0];
+    for (const [window, title] of [
+      [loginWindow, 'VoxCue · 登录'],
+      [mainWindow, 'VoxCue'],
+      [interviewWindow, 'VoxCue · 面试'],
+    ] as const)
+      if (window && !window.isDestroyed()) window.setTitle(nativeText(title));
+  });
   handleDesktop('appearance:theme', (event, ...args) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || ![loginWindow, mainWindow].includes(win)) throw new Error('Unauthorized window');
@@ -798,8 +842,8 @@ app.whenReady().then(async () => {
           app.exit(0);
         })().catch(() => {
           dialog.showErrorBox(
-            '账号已删除，本机清理尚未完成',
-            '请关闭占用资料的程序后重新打开 VoxCue。应用会继续清理，暂不载入资料。',
+            nativeText('账号已删除，本机清理尚未完成'),
+            nativeText('请关闭占用资料的程序后重新打开 VoxCue。应用会继续清理，暂不载入资料。'),
           );
           app.exit(1);
         });
@@ -840,6 +884,7 @@ app.whenReady().then(async () => {
     storage: createAuthStorage(desktopPlatform.credentialEncryptionLabel, credentialEncryption),
     openBrowser: (url) => shell.openExternal(url),
     callbackLogo: () => readFile(resources.brandLogo),
+    uiLanguage: () => uiLanguage,
   });
   const ledger = new UsageLedger(path.join(app.getPath('userData'), 'chat-usage'));
   chatGPTUsage = new ChatGPTAccountUsage({
@@ -1104,9 +1149,9 @@ app.whenReady().then(async () => {
     if (result.warning && mainWindow)
       await dialog.showMessageBox(mainWindow, {
         type: 'warning',
-        title: '退出登录',
-        message: result.warning,
-        buttons: ['确定'],
+        title: nativeText('退出登录'),
+        message: nativeText(result.warning),
+        buttons: [nativeText('确定')],
       });
     return result;
   });
@@ -1160,9 +1205,9 @@ app.whenReady().then(async () => {
     async choose() {
       if (!mainWindow || mainWindow.isDestroyed()) throw Error('账号窗口已关闭。');
       const result = await dialog.showSaveDialog(mainWindow, {
-        title: '导出资料',
-        defaultPath: path.join(app.getPath('documents'), 'VoxCue资料.zip'),
-        filters: [{ name: 'ZIP 压缩包', extensions: ['zip'] }],
+        title: nativeText('导出资料'),
+        defaultPath: path.join(app.getPath('documents'), nativeText('VoxCue资料.zip')),
+        filters: [{ name: nativeText('ZIP 压缩包'), extensions: ['zip'] }],
       });
       return result.canceled ? undefined : result.filePath;
     },
@@ -1197,11 +1242,14 @@ app.whenReady().then(async () => {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win || win.isDestroyed()) throw Error('截图窗口已关闭。');
       const result = await dialog.showSaveDialog(win, {
-        title: '保存截屏',
-        defaultPath: path.join(app.getPath('pictures'), 'VoxCue截屏.' + image.extension),
+        title: nativeText('保存截屏'),
+        defaultPath: path.join(
+          app.getPath('pictures'),
+          nativeText('VoxCue截屏') + '.' + image.extension,
+        ),
         filters: [
           {
-            name: image.extension === 'png' ? 'PNG图片' : 'JPEG图片',
+            name: nativeText(image.extension === 'png' ? 'PNG图片' : 'JPEG图片'),
             extensions: [image.extension],
           },
         ],
@@ -1255,11 +1303,11 @@ app.whenReady().then(async () => {
         request.title
           .replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_')
           .replace(/[. ]+$/g, '')
-          .slice(0, 100) || '面试记录';
+          .slice(0, 100) || nativeText('面试记录');
       const result = await dialog.showSaveDialog(win, {
-        title: '导出面试记录',
+        title: nativeText('导出面试记录'),
         defaultPath: path.join(app.getPath('downloads'), name + '.txt'),
-        filters: [{ name: '文本文件', extensions: ['txt'] }],
+        filters: [{ name: nativeText('文本文件'), extensions: ['txt'] }],
       });
       if (result.canceled || !result.filePath) return false;
       await writeFile(result.filePath, '\uFEFF' + request.text, 'utf8');

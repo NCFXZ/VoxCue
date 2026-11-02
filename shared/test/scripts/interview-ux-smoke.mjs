@@ -299,9 +299,9 @@ try {
   const login = await app.firstWindow();
   const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
-  await page.getByRole('heading', { name: '今天想准备哪一部分面试？', exact: true }).waitFor();
+  await page.locator('.welcome h1').waitFor();
   await page.getByLabel('本地组件提示', { exact: true }).waitFor();
-  assert.ok(await page.getByRole('button', { name: '开始面试', exact: true }).isDisabled());
+  assert.ok(await page.locator('.interview-start-trigger').isDisabled());
   await geometry(page);
   await capture(page, '01-readiness');
   await page
@@ -356,7 +356,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
@@ -432,7 +432,7 @@ try {
         .map((e) => e.outerHTML),
     );
   assert.deepEqual(misSizedIcons, []);
-  await settings.getByRole('button', { name: '个性化', exact: true }).click();
+  await settings.getByRole('button', { name: '通用', exact: true }).click();
   assert.equal(
     await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),
     0,
@@ -442,7 +442,7 @@ try {
     '100',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   const start = page.getByRole('dialog', { name: '开始面试', exact: true });
   await page.evaluate(() => {
     globalThis.uxTestEvents = [];

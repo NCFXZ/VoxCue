@@ -1,3 +1,4 @@
+import { t, uiLocale } from '../i18n';
 import { SyncBadge } from './SyncBadge';
 import { useEffect, useRef, useState } from 'react';
 import { History, ChevronDown, X } from './icons';
@@ -45,7 +46,7 @@ export function HistoryPage() {
     };
   }, [load]);
   const date = (timestamp: number) =>
-    new Date(timestamp).toLocaleDateString('zh-CN', {
+    new Date(timestamp).toLocaleDateString(uiLocale(), {
       year: 'numeric',
       month: 'long',
       day: 'numeric',
@@ -58,21 +59,21 @@ export function HistoryPage() {
         <main className="workspace management-page history-page">
           <header className="page-toolbar">
             <div className="breadcrumb history-heading-transition">
-              <strong>面试记录</strong>
+              <strong>{t('面试记录')}</strong>
             </div>
           </header>
           <div className="management-scroll">
             <div className="management-container">
               {records.length > 0 && (
-                <div className="history-filters" role="search" aria-label="筛选面试记录">
+                <div className="history-filters" role="search" aria-label={t('筛选面试记录')}>
                   <div className="history-search-label">
                     <input
                       ref={searchInput}
                       type="search"
-                      aria-label="搜索标题"
+                      aria-label={t('搜索标题')}
                       value={query}
                       onChange={(e) => setQuery(e.target.value)}
-                      placeholder="搜索面试记录"
+                      placeholder={t('搜索面试记录')}
                     />
                     {query && (
                       <Button
@@ -80,7 +81,7 @@ export function HistoryPage() {
                         variant="ghost"
                         size="icon"
                         className="history-search-clear"
-                        aria-label="清除搜索"
+                        aria-label={t('清除搜索')}
                         data-reveal-on-hover
                         onClick={() => {
                           setQuery('');
@@ -91,34 +92,39 @@ export function HistoryPage() {
                       </Button>
                     )}
                   </div>
-                  <span role="status">{filtered.length} 条结果</span>
+                  <span role="status">
+                    {filtered.length}
+                    {t(' 条结果')}
+                  </span>
                 </div>
               )}
               {error && (
                 <p role="alert" className="inline-error">
-                  {error}
+                  {t(error)}
                 </p>
               )}
               {records.length === 0 ? (
                 <div className="management-empty">
                   <History size={36} />
-                  <h2>还没有面试记录</h2>
+                  <h2>{t('还没有面试记录')}</h2>
                 </div>
               ) : (
                 <div className="history-timeline">
-                  {!filtered.length && <p className="empty-inline">没有符合条件的面试记录。</p>}
+                  {!filtered.length && (
+                    <p className="empty-inline">{t('没有符合条件的面试记录。')}</p>
+                  )}
                   {filtered.map((record) => (
                     <div className="history-row-wrap" key={record.id}>
                       <div className="history-row">
                         <button
                           className="history-row-open"
-                          aria-label={`查看面试记录：${record.title}`}
+                          aria-label={t(`查看面试记录：${record.title}`)}
                           onClick={() => select(record.id)}
                         />
                         <div className="history-date">
                           <strong>{date(record.startedAt)}</strong>
                           <span>
-                            {new Date(record.startedAt).toLocaleTimeString('zh-CN', {
+                            {new Date(record.startedAt).toLocaleTimeString(uiLocale(), {
                               hour: '2-digit',
                               minute: '2-digit',
                               hour12: false,
@@ -130,16 +136,17 @@ export function HistoryPage() {
                           <h2>
                             <span className="history-title-text">{record.title}</span>
                             <span className="neutral-badge">
-                              {record.status === 'ended' ? '已结束' : '已保存'}
+                              {record.status === 'ended' ? t('已结束') : t('已保存')}
                             </span>
                             <SyncBadge itemKey={'record:' + record.id} label={record.title} />
                           </h2>
                           <p>
-                            {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 60000)} 分{' '}
+                            {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 60000)}
+                            {t(' 分')}{' '}
                             {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 1000) % 60}{' '}
-                            秒 ·{' '}
+                            {t('秒 ·')}{' '}
                             {record.answers.filter((answer) => answer.provider !== 'mock').length}{' '}
-                            个回答
+                            {t('个回答')}
                           </p>
                         </div>
                         <ChevronDown size={15} />

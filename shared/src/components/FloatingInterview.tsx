@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { interviewAlwaysDark } from './ui/appearance-control';
 import { InterviewImages } from './InterviewImages';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
@@ -207,9 +208,9 @@ export function FloatingInterview() {
     [...state.transcripts]
       .reverse()
       .find(
-        (t) =>
-          t.reason !== 'discontinuity' &&
-          (t.source === 'system' || (!t.source && state.mode === 'mock')),
+        (transcript) =>
+          transcript.reason !== 'discontinuity' &&
+          (transcript.source === 'system' || (!transcript.source && state.mode === 'mock')),
       )?.text ||
     '';
   useEffect(() => {
@@ -370,7 +371,7 @@ export function FloatingInterview() {
     <button
       type="button"
       className={`floating-resize resize-${edge}`}
-      aria-label={edge === 'left' ? '拖动左下角调整尺寸' : '拖动右下角调整尺寸'}
+      aria-label={edge === 'left' ? t('拖动左下角调整尺寸') : t('拖动右下角调整尺寸')}
       aria-describedby="resize-keyboard-hint"
       onKeyDown={(event) => {
         if (panelMotion.busy.current) return;
@@ -423,7 +424,7 @@ export function FloatingInterview() {
           <button
             type="button"
             className="floating-brand floating-collapse"
-            aria-label={collapsed ? '展开面试窗口' : '收起面试窗口'}
+            aria-label={collapsed ? t('展开面试窗口') : t('收起面试窗口')}
             aria-expanded={!collapsed}
             aria-disabled={!!panelMotion.motion}
             onClick={() => void panelMotion.toggleCollapsed()}
@@ -438,7 +439,7 @@ export function FloatingInterview() {
             <Button
               variant="ghost"
               size="icon"
-              aria-label="面试设置"
+              aria-label={t('面试设置')}
               onClick={() => setSettingsOpen(true)}
             >
               <Settings size={19} />
@@ -448,7 +449,7 @@ export function FloatingInterview() {
               size="icon"
               disabled={busy}
               aria-pressed={protectedWindow}
-              aria-label={protectedWindow ? '关闭截图保护' : '开启截图保护'}
+              aria-label={protectedWindow ? t('关闭截图保护') : t('开启截图保护')}
               onClick={() => {
                 void toggleCapture();
               }}
@@ -460,7 +461,7 @@ export function FloatingInterview() {
               disabled={ending}
               variant={confirmEnd ? 'destructive' : 'dangerGhost'}
               size={confirmEnd ? 'default' : 'icon'}
-              aria-label={confirmEnd ? '确认结束面试' : '结束面试'}
+              aria-label={confirmEnd ? t('确认结束面试') : t('结束面试')}
               onClick={confirmEnd ? close : () => setConfirmEnd(true)}
             >
               <span className="button-morph-idle" aria-hidden="true">
@@ -468,12 +469,12 @@ export function FloatingInterview() {
               </span>
               <span className="button-morph-expanded" aria-hidden="true">
                 <Square size={16} />
-                <span>确认结束</span>
+                <span>{t('确认结束')}</span>
               </span>
             </Button>
             <div
               className="floating-drag-handle"
-              aria-label="拖动面试窗口"
+              aria-label={t('拖动面试窗口')}
               onPointerDown={(event) => {
                 if (!panelMotion.busy.current) windowDrag.onPointerDown(event);
               }}
@@ -491,7 +492,7 @@ export function FloatingInterview() {
             <header>
               <h2>
                 <Volume2 size={16} />
-                转写
+                {t('转写')}
               </h2>
               <InterviewReadiness />
             </header>
@@ -502,39 +503,45 @@ export function FloatingInterview() {
               className="floating-scroll"
               {...transcriptScroll.scrollProps}
               tabIndex={0}
-              aria-label="面试转写"
+              aria-label={t('面试转写')}
             >
               {!state.transcripts.length && (
                 <div className="floating-empty">
                   <Volume2 size={26} />
-                  <p>等待面试官或面试者讲话…</p>
-                  <span>面试官在左侧，面试者在右侧</span>
+                  <p>{t('等待面试官或面试者讲话…')}</p>
+                  <span>{t('面试官在左侧，面试者在右侧')}</span>
                 </div>
               )}
-              {state.transcripts.map((t) => (
+              {state.transcripts.map((transcript) => (
                 <article
-                  className={`transcript-item ${t.source === 'microphone' ? 'interviewee' : 'interviewer'}`}
-                  key={t.id}
+                  className={`transcript-item ${transcript.source === 'microphone' ? 'interviewee' : 'interviewer'}`}
+                  key={transcript.id}
                 >
                   <div className="transcript-meta">
                     <strong>
-                      {t.source ? (t.source === 'system' ? '面试官' : '面试者') : '面试官'}
+                      {transcript.source
+                        ? transcript.source === 'system'
+                          ? t('面试官')
+                          : t('面试者')
+                        : t('面试官')}
                     </strong>
-                    <time>{t.time}</time>
+                    <time>{transcript.time}</time>
                   </div>
                   <p>
-                    {t.text}
-                    {!t.final && state.status === 'running' && <span className="typing-caret" />}
+                    {transcript.text}
+                    {!transcript.final && state.status === 'running' && (
+                      <span className="typing-caret" />
+                    )}
                   </p>
-                  {t.reason === 'discontinuity' && (
-                    <small className="transcript-gap">音频间断，片段可能不完整</small>
+                  {transcript.reason === 'discontinuity' && (
+                    <small className="transcript-gap">{t('音频间断，片段可能不完整')}</small>
                   )}
                 </article>
               ))}
             </div>
             {!transcriptScroll.following && (
               <FollowLatestButton
-                label={transcriptScroll.hasNew ? '有新转写 · 返回最新' : '返回最新转写'}
+                label={transcriptScroll.hasNew ? t('有新转写 · 返回最新') : t('返回最新转写')}
                 onClick={transcriptScroll.scrollToLatest}
               />
             )}
@@ -544,19 +551,19 @@ export function FloatingInterview() {
             <header>
               <h2>
                 <MessageSquare size={17} />
-                回答
+                {t('回答')}
               </h2>
               <Button
                 variant="ghost"
                 className="floating-toggle"
-                aria-label="转写面板"
+                aria-label={t('转写面板')}
                 aria-pressed={showTranscript}
                 aria-disabled={!!panelMotion.motion}
                 onClick={() => void panelMotion.toggleTranscript()}
               >
                 <span className="toggle-dot" />
                 <AudioLines size={14} />
-                转写
+                {t('转写')}
               </Button>
             </header>
             <div className="floating-audio-recovery">
@@ -568,17 +575,21 @@ export function FloatingInterview() {
               className="floating-scroll"
               {...answerScroll.scrollProps}
               tabIndex={0}
-              aria-label="面试回答"
+              aria-label={t('面试回答')}
             >
               {!state.answers.length && (
                 <div className="floating-empty answer-empty">
-                  <p>{state.aiEnabled ? `${provider.name}回答已启用。` : '请先连接模型服务。'}</p>
+                  <p>
+                    {state.aiEnabled
+                      ? t('{0}回答已启用。', [provider.name])
+                      : t('请先连接模型服务。')}
+                  </p>
                   <span>
-                    直接发送下方实时转写，或输入新的问题。
+                    {t('直接发送下方实时转写，或输入新的问题。')}
                     <br />
                     {state.aiEnabled
-                      ? '回答会结合本场问题、追问和你的实际回答。仅发送必要文字与相关资料片段。'
-                      : '请连接模型服务并选择回答模型。'}
+                      ? t('回答会结合本场问题、追问和你的实际回答。仅发送必要文字与相关资料片段。')
+                      : t('请连接模型服务并选择回答模型。')}
                   </span>
                 </div>
               )}
@@ -586,18 +597,18 @@ export function FloatingInterview() {
                 <article
                   key={a.id}
                   className="floating-answer-item"
-                  aria-label={`回答：${a.question}`}
+                  aria-label={t(`回答：${a.question}`)}
                 >
                   <div
                     className={`floating-question${a.images?.length ? ' has-images' : ''}`}
-                    aria-label="面试问题"
+                    aria-label={t('面试问题')}
                   >
                     {a.screenshot !== 'only' && <span>{a.question}</span>}
                     <InterviewImages images={a.images} inInterview />
                     {a.screenshot && (
                       <span className="floating-screenshot-label">
                         <Screenshot size={14} />
-                        {a.screenshot === 'only' ? '截图提问' : '附截图'}
+                        {a.screenshot === 'only' ? t('截图提问') : t('附截图')}
                       </span>
                     )}
                   </div>
@@ -612,7 +623,7 @@ export function FloatingInterview() {
                       <Button
                         variant="ghost"
                         size="icon"
-                        aria-label="复制面试回答"
+                        aria-label={t('复制面试回答')}
                         onClick={async () => {
                           try {
                             await navigator.clipboard.writeText(a.content);
@@ -642,9 +653,9 @@ export function FloatingInterview() {
                       {a.content ? (
                         <MarkdownContent content={a.content} />
                       ) : state.generating && a.id === state.answers.at(-1)?.id ? (
-                        <span className="answer-pending">正在生成回答…</span>
+                        <span className="answer-pending">{t('正在生成回答…')}</span>
                       ) : (
-                        '未收到回答。'
+                        t('未收到回答。')
                       )}
                       {state.generating && a.id === state.answers.at(-1)?.id && (
                         <span className="typing-caret" />
@@ -668,20 +679,20 @@ export function FloatingInterview() {
                         onClick={() => void state.retryAnswer(a.id)}
                       >
                         <Refresh size={16} />
-                        重试面试回答
+                        {t('重试面试回答')}
                       </Button>
                     </div>
                   )}
                   {(copied === a.id || copyError === a.id) && (
                     <small role="status">
-                      {copyError === a.id ? '复制失败，请选择文字后复制。' : '已复制回答'}
+                      {copyError === a.id ? t('复制失败，请选择文字后复制。') : t('已复制回答')}
                     </small>
                   )}
                 </article>
               ))}
             </div>
             <FollowLatestButton
-              label={answerScroll.hasNew ? '有新回答 · 返回最新' : '返回最新回答'}
+              label={answerScroll.hasNew ? t('有新回答 · 返回最新') : t('返回最新回答')}
               busy={state.generating}
               visible={state.generating || !answerScroll.following}
               onClick={answerScroll.scrollToLatest}
@@ -694,15 +705,19 @@ export function FloatingInterview() {
               }}
             >
               {state.screenshots.length > 0 && (
-                <div className="floating-screenshot-previews" role="group" aria-label="待发送截图">
+                <div
+                  className="floating-screenshot-previews"
+                  role="group"
+                  aria-label={t('待发送截图')}
+                >
                   {state.screenshots.map((shot, index) => (
                     <div className="floating-screenshot-preview" key={shot.id}>
-                      <img src={shot.preview} alt={`截图 ${index + 1}`} />
+                      <img src={shot.preview} alt={t(`截图 ${index + 1}`)} />
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        aria-label={`移除截图 ${index + 1}`}
+                        aria-label={t(`移除截图 ${index + 1}`)}
                         disabled={state.generating}
                         onClick={() => void state.removeScreenshot(shot.id)}
                       >
@@ -714,8 +729,8 @@ export function FloatingInterview() {
               )}
               <textarea
                 ref={inputRef}
-                aria-label="面试提问"
-                placeholder="输入问题，或按 Enter 发送最新面试官问题…"
+                aria-label={t('面试提问')}
+                placeholder={t('输入问题，或按 Enter 发送最新面试官问题…')}
                 rows={1}
                 value={currentInput}
                 onChange={(event) => {
@@ -735,13 +750,14 @@ export function FloatingInterview() {
                     type="button"
                     variant="ghost"
                     className="floating-toggle"
-                    aria-label="静音后自动提交完整问题"
+                    aria-label={t('静音后自动提交完整问题')}
                     aria-pressed={state.autoAnswer}
                     onClick={() => state.setAutoAnswer(!state.autoAnswer)}
                   >
                     <span className="toggle-dot" />
                     <Sparkles size={14} />
-                    自动回答：{state.autoAnswer ? '开' : '关'}
+                    {t('自动回答：')}
+                    {state.autoAnswer ? t('开') : t('关')}
                   </Button>
                 </div>
                 <div className="floating-composer-actions">
@@ -750,7 +766,7 @@ export function FloatingInterview() {
                     type="button"
                     variant="ghost"
                     className="floating-screenshot-button"
-                    aria-label="截取图像"
+                    aria-label={t('截取图像')}
                     aria-keyshortcuts={macScreenshotShortcut ? 'Control+s' : 'Alt+s'}
                     aria-busy={state.capturingScreenshot}
                     data-expanded={screenshotExpanded}
@@ -770,7 +786,7 @@ export function FloatingInterview() {
                     ) : (
                       <Screenshot size={18} />
                     )}
-                    <span className="floating-screenshot-text">截图</span>
+                    <span className="floating-screenshot-text">{t('截图')}</span>
                     <kbd
                       className="floating-screenshot-shortcut"
                       aria-hidden="true"
@@ -787,7 +803,7 @@ export function FloatingInterview() {
                       className="send-button"
                       type="button"
                       size="icon"
-                      aria-label="停止当前回答"
+                      aria-label={t('停止当前回答')}
                       onClick={(event) => {
                         // Stopping immediately replaces this control with Submit.
                         // Cancel the click's default action before React updates it.
@@ -810,7 +826,7 @@ export function FloatingInterview() {
                           !latestQuestion.trim() &&
                           !state.screenshots.length)
                       }
-                      aria-label="发送面试问题"
+                      aria-label={t('发送面试问题')}
                     >
                       <ArrowUp size={20} />
                     </Button>
@@ -823,27 +839,27 @@ export function FloatingInterview() {
         {!collapsed && (
           <>
             <span id="resize-keyboard-hint" className="sr-only">
-              方向键或加减键调整窗口大小；向上或向右放大，向下或向左缩小。
+              {t('方向键或加减键调整窗口大小；向上或向右放大，向下或向左缩小。')}
             </span>
             {resizeHandle('left')}
             {resizeHandle('right')}
           </>
         )}
         {!collapsed && (
-          <footer className="floating-notices" aria-label="面试状态提示">
+          <footer className="floating-notices" aria-label={t('面试状态提示')}>
             {!collapsed && !protectedWindow && (
               <div className="floating-warning floating-capture-notice" role="status">
-                此窗口未隐藏
+                {t('此窗口未隐藏')}
               </div>
             )}
             {noticeError && (
               <div className="floating-error" role="alert">
-                {noticeError}
+                {t(noticeError)}
               </div>
             )}
             {Object.entries(state.speechWarnings).map(([source, message]) => (
               <div key={source} className="floating-warning" role="status">
-                {message}
+                {t(message)}
               </div>
             ))}
           </footer>

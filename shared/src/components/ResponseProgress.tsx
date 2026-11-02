@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { t } from '../i18n';
+import { useEffect, useId, useState } from 'react';
 import type { ChatMessage } from '../services/preparation';
 import type { ChatActivity as Activity } from '../../electron/contracts/chat';
 import { MarkdownContent } from './MarkdownContent';
@@ -11,7 +12,11 @@ export function formatDuration(milliseconds: number) {
   const seconds = Math.max(0, Math.floor(milliseconds / 1000));
   const hours = Math.floor(seconds / 3600),
     minutes = Math.floor(seconds / 60) % 60;
-  return [hours ? `${hours} 小时` : '', minutes ? `${minutes} 分钟` : '', `${seconds % 60} 秒`]
+  return [
+    hours ? t('{0} 小时', [hours]) : '',
+    minutes ? t('{0} 分钟', [minutes]) : '',
+    t('{0} 秒', [seconds % 60]),
+  ]
     .filter(Boolean)
     .join(' ');
 }
@@ -27,7 +32,7 @@ function actionLabel(activity: Activity, active: boolean) {
         : activity.kind === 'find_in_page'
           ? '查找网页内容'
           : '查询本地资料';
-  return stopped ? `${noun} · ${stopped}` : `${done ? '已' : '正在'}${noun}`;
+  return stopped ? `${t(noun)} · ${t(stopped)}` : t(`${done ? '已' : '正在'}${noun}`);
 }
 
 function ReasoningBlocks({ text, active }: { text: string; active: boolean }) {
@@ -70,6 +75,7 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
   const [expanded, setExpanded] = useState(!answering);
   const [now, setNow] = useState(Date.now);
   const [linkError, setLinkError] = useState<string | null>(null);
+  const contentId = useId();
   useEffect(() => {
     if (answering) setExpanded(false);
   }, [answering]);
@@ -85,7 +91,7 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
       : message.durationMs;
   const elapsed =
     duration !== undefined && Number.isFinite(duration)
-      ? `${answering ? '用时' : active ? '正在思考' : '已处理'} ${formatDuration(duration)}`
+      ? `${t(answering ? '用时' : active ? '正在思考' : '已处理')} ${formatDuration(duration)}`
       : message.reasoningSummary?.trim()
         ? '推理摘要'
         : null;
@@ -95,6 +101,7 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
   const lastReasoning = entries.map((entry) => entry.kind).lastIndexOf('reasoning');
   const thinking = (entries[lastState] ?? message.activity)?.phase === 'thinking';
   const collapsible = answering && (!!entries.length || !!message.reasoningSummary?.trim());
+  const visible = !collapsible || expanded;
   if (!elapsed && !active && !entries.length && !message.reasoningSummary?.trim()) return null;
   return (
     <div className={`response-progress${collapsible && !expanded ? ' is-collapsed' : ''}`}>
@@ -104,17 +111,24 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
             className="response-duration duration-toggle"
             type="button"
             aria-expanded={expanded}
+            aria-controls={contentId}
             onClick={() => setExpanded(!expanded)}
           >
-            <span>{elapsed}</span>
+            <span>{t(elapsed)}</span>
             <span className={`duration-chevron${expanded ? ' expanded' : ''}`}>
               <ChevronRight size={14} />
             </span>
           </button>
         ) : (
-          <div className="response-duration">{elapsed}</div>
+          <div className="response-duration">{t(elapsed)}</div>
         ))}
-      <div className="response-progress-content" hidden={collapsible && !expanded}>
+      <div
+        className="response-progress-content collapse-content"
+        id={contentId}
+        data-expanded={visible}
+        aria-hidden={!visible}
+        inert={!visible}
+      >
         {!timeline && active && (
           <ChatActivity activity={message.activity} mock={message.mode !== 'live'} />
         )}
@@ -123,7 +137,7 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
             <ReasoningBlocks text={message.reasoningSummary} active={active && thinking} />
           )}
         {!!entries.length && (
-          <ol className="response-steps" aria-label="实际活动记录">
+          <ol className="response-steps" aria-label={t('实际活动记录')}>
             {entries.map((activity, index) => {
               if (activity.kind === 'status')
                 return (
@@ -183,7 +197,9 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
                               <span>{activity.detail}</span>
                             </button>
                           ) : (
-                            <span className="progress-detail">{activity.detail}</span>
+                            <span className="progress-detail">
+                              {activity.kind === 'knowledge' ? t(activity.detail) : activity.detail}
+                            </span>
                           ))}
                       </>
                     )}
@@ -195,7 +211,7 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
         )}
         {linkError && (
           <p className="inline-error" role="alert">
-            {linkError}
+            {t(linkError)}
           </p>
         )}
       </div>

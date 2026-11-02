@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import * as DropdownMenu from './dropdown-menu';
 import { useEffect, useRef, useState } from 'react';
 import { Check, ChevronDown } from '../icons';
@@ -37,7 +38,7 @@ export function ChoiceMenu<T extends string>({
           ref={trigger}
           type="button"
           className={`choice-trigger ${className}`}
-          aria-label={label}
+          aria-label={t(label)}
           disabled={disabled}
         >
           <span title={selectedLabel}>{selectedLabel}</span>

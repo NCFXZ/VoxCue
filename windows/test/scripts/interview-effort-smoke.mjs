@@ -54,7 +54,7 @@ try {
     await main.getByRole('menuitem', { name: '设置', exact: true }).click();
     await main
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
     await main.getByRole('button', { name: '面试设置', exact: true }).click();
   };
@@ -115,7 +115,7 @@ try {
   await main.evaluate(() => document.documentElement.classList.add('dark'));
   await dialog.screenshot({ animations: 'disabled' });
   await dialog.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -167,7 +167,7 @@ try {
   await openSettings();
   await selectEffort('自动');
   await dialog.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const [automatic] = await Promise.all([
     app.waitForEvent('window'),
     confirmation.getByRole('button', { name: '确认开始', exact: true }).click(),

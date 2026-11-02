@@ -155,7 +155,12 @@ const sharpPackages = entries
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const profile = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/portable-current-')));
 const speechFixtures = process.env.VOXCUE_SPEECH_FIXTURE_DIR ?? (await prepareSpeechFixtures());
-const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '', VOXCUE_ACCOUNT_API:'' };
+const env = {
+  ...process.env,
+  COPILOT_TEST_USER_DATA: profile,
+  VITE_DEV_SERVER_URL: '',
+  VOXCUE_ACCOUNT_API: '',
+};
 delete env.ELECTRON_RUN_AS_NODE;
 let installation;
 let app = await electron.launch({
@@ -174,7 +179,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
@@ -186,11 +191,18 @@ try {
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   assert.deepEqual(errors, []);
   await closeUiApp(app);
-  installation = JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'));
-  const initialQueue = JSON.parse(await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'));
+  installation = JSON.parse(
+    await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'),
+  );
+  const initialQueue = JSON.parse(
+    await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'),
+  );
   assert.match(installation.installationId, /^[0-9a-f-]{36}$/i);
   assert.equal(initialQueue.attempts, 0, 'The formal package fixture must not transmit statistics');
-  assert.ok(initialQueue.events.length > 0, 'Packaged statistics must still persist before transport');
+  assert.ok(
+    initialQueue.events.length > 0,
+    'Packaged statistics must still persist before transport',
+  );
   // Replace the application in a new location while retaining only this run's cache.
   // The source package stays available to the caller's subsequent native checks.
   const replacement = path.join(testRoot, 'replacement/VoxCue-win32-x64');
@@ -570,12 +582,21 @@ try {
   await closeUiApp(app);
 }
 
-const finalInstallation = JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'));
+const finalInstallation = JSON.parse(
+  await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'),
+);
 const finalQueue = JSON.parse(await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'));
 assert.deepEqual(finalInstallation, installation);
 assert.equal(finalQueue.attempts, 0);
 assert.ok(finalQueue.events.length > 0);
-assert.ok(finalQueue.events.every(event => event.installationId === installation.installationId && event.version === expectedVersion && event.platform === 'windows'));
+assert.ok(
+  finalQueue.events.every(
+    (event) =>
+      event.installationId === installation.installationId &&
+      event.version === expectedVersion &&
+      event.platform === 'windows',
+  ),
+);
 console.log(
   `Formal package: stable installation ID, ${expectedVersion} Windows events persisted, zero transport attempts`,
 );

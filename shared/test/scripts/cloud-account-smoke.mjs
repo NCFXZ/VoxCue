@@ -437,7 +437,7 @@ try {
           .getByRole('navigation', { name: '设置分类' })
           .locator('button')
           .allTextContents(),
-        ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '个性化', '关于与更新'],
+        ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '关于与更新'],
       );
       await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
       assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);
@@ -519,7 +519,7 @@ try {
         0,
       );
       for (const dark of [false, true]) {
-        await settings.getByRole('button', { name: '个性化', exact: true }).click();
+        await settings.getByRole('button', { name: '通用', exact: true }).click();
         await settings.getByRole('button', { name: '外观主题', exact: true }).click();
         await settings
           .getByRole('menuitemradio', { name: dark ? '深色' : '浅色', exact: true })
@@ -675,7 +675,7 @@ try {
       assert.equal(await popup.isVisible(), true, 'Internal keyboard focus keeps the popup open');
       await remove.press('Escape');
       await popup.waitFor({ state: 'detached' });
-      assert.equal(await badge.evaluate(node => node === document.activeElement), true);
+      assert.equal(await badge.evaluate((node) => node === document.activeElement), true);
       assert.equal(await badge.getAttribute('aria-expanded'), 'false');
       await badge.press('Space');
       await popup.waitFor();
@@ -882,7 +882,7 @@ try {
         await main.emulateMedia({ reducedMotion: 'no-preference' });
       }
       await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-      const prompt = main.locator('.skill-update-prompt');
+      const prompt = main.locator('.preparation-guide');
       if (await prompt.count()) {
         const position = await prompt.evaluate((element) => {
           const box = element.getBoundingClientRect(),
@@ -1033,7 +1033,7 @@ try {
             width,
           );
           for (const dark of [false, true]) {
-            await settings.getByRole('button', { name: '个性化', exact: true }).click();
+            await settings.getByRole('button', { name: '通用', exact: true }).click();
             await settings.getByRole('button', { name: '外观主题', exact: true }).click();
             await settings
               .getByRole('menuitemradio', { name: dark ? '深色' : '浅色', exact: true })

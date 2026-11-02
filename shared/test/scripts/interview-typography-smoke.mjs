@@ -24,6 +24,41 @@ let app = await electron.launch({ args: [await offlineElectronEntry()], env });
 const key = 'voxcue-interview-font-size-v1';
 const transparencyKey = 'voxcue-interview-background-transparency-v1';
 const errors = [];
+const transcriptTracks = async (page, selector) => {
+  await page.waitForFunction(
+    (selector) =>
+      document.querySelector(selector)?.querySelector('.floating-transcript')?.getAnimations()
+        .length > 0,
+    selector,
+  );
+  return page.locator(selector).evaluate((frame) =>
+    ['.floating-transcript', '.floating-answer'].map((selector) => {
+      const animation = frame.querySelector(selector).getAnimations()[0];
+      const timing = animation.effect.getTiming();
+      return {
+        duration: timing.duration,
+        easing: timing.easing,
+        frames: animation.effect.getKeyframes().map((keyframe) => ({
+          opacity: keyframe.opacity ?? null,
+          direction: Math.sign(Number(keyframe.transform?.match(/-?[\d.]+/)?.[0] ?? 0)),
+        })),
+      };
+    }),
+  );
+};
+const waitTranscript = (page, selector, visible) =>
+  page.waitForFunction(
+    ({ selector, visible }) => {
+      const frame = document.querySelector(selector);
+      const button = frame.querySelector('[aria-label="转写面板"]');
+      return (
+        button.getAttribute('aria-disabled') === 'false' &&
+        button.getAttribute('aria-pressed') === String(visible) &&
+        frame.querySelector('.floating-transcript').hidden === !visible
+      );
+    },
+    { selector, visible },
+  );
 const materialStyles = (scope) =>
   scope.evaluate((root) =>
     [
@@ -182,7 +217,7 @@ try {
     await target.getByRole('menuitem', { name: '设置', exact: true }).click();
     await target
       .getByRole('navigation', { name: '设置分类' })
-      .getByRole('button', { name: '个性化', exact: true })
+      .getByRole('button', { name: '通用', exact: true })
       .click();
     await target
       .getByRole('dialog', { name: '设置', exact: true })
@@ -214,6 +249,12 @@ try {
     hint.samples.find((sample) => sample.top > 0).time >= 850,
     'Scroll starts after the one-second viewing delay',
   );
+  assert.ok(
+    hint.samples
+      .filter((sample) => sample.time < 1150)
+      .every((sample) => sample.top < hint.target * 0.22),
+    'The hint eases into its first movement instead of jumping to full speed',
+  );
   const peak = Math.max(...hint.samples.map((sample) => sample.top));
   assert.ok(Math.abs(peak - hint.target) < 1, 'Downward scroll reaches half photo and half text');
   assert.ok(
@@ -242,20 +283,106 @@ try {
         photo.naturalWidth > 0 &&
         photo.clientHeight >= node.clientHeight &&
         getComputedStyle(photo).objectFit === 'cover',
-      onlyText: !text.querySelector('img,svg,canvas') && text.textContent.includes('清澈的湖泊'),
+      onlyText:
+        !text.querySelector('img,svg,canvas') && text.textContent.includes('那天谁也没有买喝的'),
     };
   });
   assert.deepEqual(sceneMetrics, { image: true, onlyText: true });
+  const brand = settings.locator('button.floating-brand');
+  const transcriptButton = settings.getByRole('button', { name: '转写面板', exact: true });
+  const previewFrame = '.interview-font-preview';
+  const answerBefore = await settings.locator('.floating-answer').boundingBox();
+  const sceneBefore = await settings.locator('.interview-preview-scene').boundingBox();
+  const storyBefore = await background.evaluate((node) => node.scrollTop);
+  await transcriptButton.click();
+  const previewHideTracks = await transcriptTracks(page, previewFrame);
+  await waitTranscript(page, previewFrame, false);
+  const answerOnly = await settings.locator('.floating-answer').boundingBox();
+  const frameBox = await settings.locator(previewFrame).boundingBox();
+  assert.ok(
+    Math.abs(answerOnly.width - answerBefore.width) < 1,
+    'Hiding the transcript preserves answer width',
+  );
+  assert.ok(
+    Math.abs(answerOnly.x + answerOnly.width / 2 - frameBox.x - frameBox.width / 2) < 1,
+    'The answer moves into the middle',
+  );
+  assert.deepEqual(await settings.locator('.interview-preview-scene').boundingBox(), sceneBefore);
+  assert.equal(await background.evaluate((node) => node.scrollTop), storyBefore);
+  await capture(settings.locator('.interview-preview-scene'), 'preview-transcript-hidden');
+  await brand.click();
+  await brand.press('Enter');
+  assert.equal(
+    await transcriptButton.getAttribute('aria-pressed'),
+    'false',
+    'Whole-window folding preserves the transcript choice',
+  );
+  await transcriptButton.press('Enter');
+  const previewShowTracks = await transcriptTracks(page, previewFrame);
+  await waitTranscript(page, previewFrame, true);
+  const restoredAnswer = await settings.locator('.floating-answer').boundingBox();
+  assert.ok(
+    Math.abs(restoredAnswer.x - answerBefore.x) < 1 &&
+      Math.abs(restoredAnswer.width - answerBefore.width) < 1,
+  );
+  const hoverSession = await page.context().newCDPSession(page);
+  await hoverSession.send('DOM.enable');
+  await hoverSession.send('CSS.enable');
+  let previewHoverFill;
+  const waitPreviewOpacity = (expected) =>
+    page.waitForFunction(
+      (expected) =>
+        getComputedStyle(document.querySelector('.interview-font-preview')).opacity === expected,
+      expected,
+    );
+  const beforeToggle = await background.evaluate((node) => node.scrollTop);
+  await brand.click();
+  await waitPreviewOpacity('0');
+  assert.equal(await brand.getAttribute('aria-expanded'), 'false');
+  await background.hover();
+  await page.mouse.wheel(0, 90);
+  await page.waitForFunction(
+    (before) => document.querySelector('.interview-preview-background').scrollTop > before,
+    beforeToggle,
+  );
+  assert.equal(
+    await settings
+      .locator('.interview-font-preview')
+      .evaluate((node) => getComputedStyle(node).opacity),
+    '0',
+    'Scrolling must preserve a manual collapse',
+  );
+  const manuallyScrolled = await background.evaluate((node) => node.scrollTop);
+  await brand.press('Enter');
+  await waitPreviewOpacity('1');
+  assert.equal(await brand.getAttribute('aria-expanded'), 'true');
+  assert.equal(await background.evaluate((node) => node.scrollTop), manuallyScrolled);
   const categories = page.getByRole('navigation', { name: '设置分类' });
   const revisit = async () => {
     await categories.getByRole('button', { name: '关于与更新', exact: true }).click();
     await categories.getByRole('button', { name: '面试设置', exact: true }).click();
     await background.scrollIntoViewIfNeeded();
   };
+  const disposedTracks = await settings.locator(previewFrame).evaluate(async (frame) => {
+    frame.querySelector('[aria-label="转写面板"]').click();
+    const started = frame.querySelector('.floating-transcript').getAnimations().length > 0;
+    [...document.querySelectorAll('[aria-label="设置分类"] button')]
+      .find((button) => button.textContent.trim() === '关于与更新')
+      .click();
+    await new Promise((resolve) => setTimeout(resolve, 300));
+    return {
+      started,
+      detached: !frame.isConnected,
+      remaining: frame.getAnimations({ subtree: true }).length,
+    };
+  });
+  assert.deepEqual(disposedTracks, { started: true, detached: true, remaining: 0 });
+  await categories.getByRole('button', { name: '面试设置', exact: true }).click();
+  assert.equal(await transcriptButton.getAttribute('aria-pressed'), 'true');
   for (const [when, interaction] of [
     [400, 'wheel'],
     [1200, 'wheel'],
-    [1450, 'scrollbar'],
+    [1450, 'external'],
   ]) {
     await revisit();
     await page.waitForTimeout(when);
@@ -264,7 +391,7 @@ try {
       await background.hover();
       await page.mouse.wheel(0, 90);
     } else {
-      // Native scrollbar changes can arrive without a DOM pointer event.
+      // External scrolling can arrive without a DOM pointer event.
       await background.evaluate((node) => {
         node.scrollTop += 90;
       });
@@ -283,6 +410,30 @@ try {
   await revisit();
   await page.waitForTimeout(2700);
   assert.equal(await background.evaluate((node) => node.scrollTop), 0, 'Reduced motion skips hint');
+  await transcriptButton.click();
+  await waitTranscript(page, previewFrame, false);
+  assert.equal(
+    await settings
+      .locator(previewFrame)
+      .evaluate((frame) => frame.getAnimations({ subtree: true }).length),
+    0,
+  );
+  await transcriptButton.press('Enter');
+  await waitTranscript(page, previewFrame, true);
+  await brand.click();
+  assert.equal(
+    await settings
+      .locator('.interview-font-preview')
+      .evaluate((node) => getComputedStyle(node).visibility),
+    'hidden',
+  );
+  await brand.press('Space');
+  assert.equal(
+    await settings
+      .locator('.interview-font-preview')
+      .evaluate((node) => getComputedStyle(node).visibility),
+    'visible',
+  );
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await checkBrandImage(settings, '.provider-avatar img');
   const slider = settings.getByRole('slider', { name: '面试字体大小', exact: true });
@@ -308,18 +459,145 @@ try {
       return {
         left: text.left - bounds.left,
         right: bounds.right - text.right,
-        textLength: copy.textContent.length,
+        completeCopy: [
+          '约好见面的地方',
+          '那天谁也没有买喝的',
+          '毕业的时候，我们去了不同的城市。',
+        ].every((part) => copy.textContent.includes(part)),
+        paperExtra: copy.parentElement.clientHeight - copy.clientHeight,
         darkImageLeft: placement('.preview-backdrop-night'),
         colorImageLeft: placement('.preview-backdrop-color'),
       };
     });
     assert.ok(Math.abs(storyLayout.left - storyLayout.right) < 0.5, JSON.stringify(storyLayout));
-    assert.ok(storyLayout.textLength > 350);
+    assert.equal(storyLayout.completeCopy, true);
+    assert.ok(
+      storyLayout.paperExtra < 1,
+      'The short text chapter has no forced full-page blank area',
+    );
     assert.equal(storyLayout.darkImageLeft, true);
     assert.equal(storyLayout.colorImageLeft, false);
+    for (const selector of ['.preview-backdrop-night', '.preview-backdrop-color']) {
+      const coverage = await background.evaluate(async (node, selector) => {
+        const story = node.querySelector(selector);
+        const art = story.querySelector('.preview-story-art img');
+        const copy = story.querySelector('.preview-backdrop-copy');
+        node.scrollTop = story.offsetTop;
+        await new Promise(requestAnimationFrame);
+        const beforeImage = art.getBoundingClientRect().top;
+        const beforeText = copy.getBoundingClientRect().top;
+        node.scrollTop += 80;
+        await new Promise(requestAnimationFrame);
+        const imageShift = art.getBoundingClientRect().top - beforeImage;
+        const textShift = copy.getBoundingClientRect().top - beforeText;
+        node.scrollTop = story.offsetTop + story.clientHeight - node.clientHeight;
+        await new Promise(requestAnimationFrame);
+        const image = story.querySelector('.preview-story-art img').getBoundingClientRect();
+        const viewport = node.getBoundingClientRect();
+        return {
+          top: image.top - viewport.top,
+          bottom: viewport.bottom - image.bottom,
+          columnHeight: story.querySelector('.preview-story-art').clientHeight,
+          storyHeight: story.clientHeight,
+          imageHeight: image.height,
+          imageShift,
+          textShift,
+        };
+      }, selector);
+      assert.ok(
+        Math.abs(coverage.columnHeight - coverage.storyHeight) < 1,
+        JSON.stringify(coverage),
+      );
+      assert.ok(
+        coverage.top <= 1 && coverage.bottom <= 1,
+        'Illustration still fills the viewport at the end of the text: ' + JSON.stringify(coverage),
+      );
+      assert.ok(
+        Math.abs(coverage.imageHeight - coverage.storyHeight) < 1,
+        'Image fills the entire text chapter',
+      );
+      assert.ok(
+        coverage.imageShift < -10 && Math.abs(coverage.imageShift - coverage.textShift) < 1,
+        'Image and text scroll together: ' + JSON.stringify(coverage),
+      );
+      await capture(
+        settings.locator('.interview-preview-scene'),
+        `preview-layout-${width}-${selector.slice(1)}`,
+      );
+    }
+    await background.evaluate((node) => {
+      node.scrollTop = 0;
+    });
     for (const theme of ['light', 'dark']) {
       await page.emulateMedia({ colorScheme: theme });
       await checkBrandImage(settings, '.provider-avatar img');
+      if (width === 1280) {
+        const { root } = await hoverSession.send('DOM.getDocument');
+        const { nodeId } = await hoverSession.send('DOM.querySelector', {
+          nodeId: root.nodeId,
+          selector: 'button.floating-brand',
+        });
+        await brand.scrollIntoViewIfNeeded();
+        await brand.evaluate((node) => node.blur());
+        await page.mouse.move(0, 0);
+        await page.waitForFunction(() => {
+          const button = document.querySelector('button.floating-brand');
+          return (
+            !button.matches(':hover,:focus-visible') &&
+            button.getAnimations().every((animation) => animation.playState !== 'running')
+          );
+        });
+        const idle = await brand.screenshot({ animations: 'disabled', scale: 'css' });
+        const idleFill = await brand.evaluate((node) => getComputedStyle(node).backgroundColor);
+        await capture(brand, 'preview-brand-idle-' + theme);
+        await brand.hover();
+        // Locator screenshots can reposition a nested scroller. Keep the hover
+        // under capture stable, as in the real-window chrome fixture.
+        await hoverSession.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: ['hover'] });
+        await page.waitForFunction(() => {
+          const button = document.querySelector('button.floating-brand');
+          return (
+            button.matches(':hover') &&
+            button.getAnimations().every((animation) => animation.playState !== 'running')
+          );
+        });
+        const hovered = await brand.screenshot({ animations: 'disabled', scale: 'css' });
+        await capture(brand, 'preview-brand-hover-' + theme);
+        const hoverFill = await brand.evaluate((node) => getComputedStyle(node).backgroundColor);
+        if (previewHoverFill)
+          assert.equal(
+            hoverFill,
+            previewHoverFill,
+            'Preview hover is independent of the settings theme',
+          );
+        previewHoverFill = hoverFill;
+        const contrast = await app.evaluate(
+          ({ nativeImage }, images) => {
+            const colors = images.map((data) => {
+              const image = nativeImage.createFromBuffer(Buffer.from(data, 'base64'));
+              const { width, height } = image.getSize();
+              const offset = (Math.floor(height / 2) * width + width - 8) * 4;
+              return [...image.toBitmap().subarray(offset, offset + 3)];
+            });
+            return {
+              colors,
+              delta:
+                colors[1].reduce((sum, channel, index) => sum + channel - colors[0][index], 0) / 3,
+            };
+          },
+          [idle.toString('base64'), hovered.toString('base64')],
+        );
+        assert.ok(
+          contrast.delta >= 15,
+          `The dark capsule hover stays visible under ${theme} settings: ${JSON.stringify({ ...contrast, idleFill, hoverFill })}`,
+        );
+        await capture(
+          settings.locator('.interview-preview-shell .floating-toolbar'),
+          'preview-hover-' + theme,
+        );
+        await hoverSession.send('CSS.forcePseudoState', { nodeId, forcedPseudoClasses: [] });
+        await page.mouse.move(0, 0);
+      }
       const fixedPreview = await fixedTextStyles(settings);
       for (const size of [24, 12, 14]) {
         await slider.fill(String(size));
@@ -385,20 +663,13 @@ try {
   assert.equal(await settings.locator('.display-slider-icon').count(), 4);
   const transparency = settings.getByRole('slider', { name: '面试背景透明度', exact: true });
   const scrollbar = await background.evaluate((node) => ({
-    width: getComputedStyle(node, '::-webkit-scrollbar').width,
-    // Chromium snaps borders to whole device pixels at fractional display scaling.
-    thumbBorderPixels: Math.round(
-      parseFloat(getComputedStyle(node, '::-webkit-scrollbar-thumb').borderLeftWidth) *
-        devicePixelRatio,
-    ),
-    expectedBorderPixels: Math.floor(2 * devicePixelRatio),
-    button: getComputedStyle(node, '::-webkit-scrollbar-button').display,
+    width: getComputedStyle(node).scrollbarWidth,
+    display: getComputedStyle(node, '::-webkit-scrollbar').display,
     gutter: node.offsetWidth - node.clientWidth,
   }));
-  assert.equal(scrollbar.width, '6px');
-  assert.equal(scrollbar.thumbBorderPixels, scrollbar.expectedBorderPixels);
-  assert.equal(scrollbar.button, 'none');
-  assert.ok(scrollbar.gutter <= 7, JSON.stringify(scrollbar));
+  assert.equal(scrollbar.width, 'none');
+  assert.equal(scrollbar.display, 'none');
+  assert.equal(scrollbar.gutter, 0, JSON.stringify(scrollbar));
   for (const value of [0, 50, 100]) {
     await transparency.fill(String(value));
     assert.equal(await transparency.getAttribute('aria-valuetext'), value + '%');
@@ -432,6 +703,173 @@ try {
     return node.scrollTop + node.clientHeight >= node.scrollHeight - 1;
   });
   await capture(settings.locator('.interview-preview-scene'), 'preview-color-background');
+  const egg = background.locator('.preview-backdrop-easter-egg');
+  assert.equal(await egg.evaluate((node) => node.hidden), true);
+  const storyBottom = await background.evaluate((node) => node.scrollHeight - node.clientHeight);
+  await background.hover();
+  await page.mouse.wheel(0, 50);
+  await page.waitForFunction(() => {
+    const node = document.querySelector('.interview-preview-background');
+    return parseFloat(node.style.getPropertyValue('--preview-overscroll')) < 0;
+  });
+  assert.equal(
+    await egg.evaluate((node) => node.hidden),
+    true,
+    'A partial pull never exposes the picture',
+  );
+  await page.waitForFunction(
+    () =>
+      !document
+        .querySelector('.interview-preview-background')
+        .style.getPropertyValue('--preview-overscroll'),
+  );
+  assert.equal(
+    await settings
+      .locator('.interview-font-preview')
+      .evaluate((node) => getComputedStyle(node).opacity),
+    '1',
+  );
+  await page.mouse.wheel(0, 500);
+  await page.waitForTimeout(40);
+  assert.equal(
+    await egg.evaluate((node) => node.hidden),
+    true,
+    'A single large wheel impulse cannot unlock the picture',
+  );
+  for (let step = 0; step < 32 && (await egg.evaluate((node) => node.hidden)); step++) {
+    await page.mouse.wheel(0, 160);
+    await page.waitForTimeout(32);
+  }
+  const revealStart = await background.evaluate((node) => ({
+    top: node.scrollTop,
+    bottom: node.scrollHeight - node.clientHeight,
+  }));
+  assert.ok(revealStart.top > storyBottom, 'The reveal continues from the resisted story position');
+  assert.ok(
+    revealStart.top < revealStart.bottom - 1,
+    'The first reveal visibly slides instead of jumping to the bottom',
+  );
+  await page.mouse.wheel(0, -100);
+  await page.keyboard.press('Home');
+  assert.ok(
+    await background.evaluate((node, start) => node.scrollTop >= start, revealStart.top),
+    'Wheel and keyboard input cannot interrupt the first reveal',
+  );
+  await page.waitForFunction(() => {
+    const node = document.querySelector('.interview-preview-background');
+    const photo = node.querySelector('.preview-backdrop-easter-egg');
+    if (photo.hidden || Math.abs(node.scrollTop + node.clientHeight - node.scrollHeight) >= 1)
+      return false;
+    // The easing can be within a pixel of the bottom before playback finishes.
+    // Require the actual input lock to have been released as well.
+    const input = new WheelEvent('wheel', { cancelable: true });
+    node.dispatchEvent(input);
+    return !input.defaultPrevented;
+  });
+  await egg.locator('img').evaluate((image) => image.decode());
+  const unlocked = await background.evaluate((node) => {
+    const photo = node.querySelector('.preview-backdrop-easter-egg');
+    return {
+      pageHeight: photo.clientHeight,
+      viewportHeight: node.clientHeight,
+      cropped: getComputedStyle(photo.querySelector('img')).objectFit,
+      folded: getComputedStyle(node.parentElement.querySelector('.interview-font-preview')).opacity,
+    };
+  });
+  assert.equal(unlocked.pageHeight, unlocked.viewportHeight);
+  assert.equal(unlocked.cropped, 'cover');
+  assert.equal(unlocked.folded, '0');
+  await capture(settings.locator('.interview-preview-scene'), 'preview-easter-egg');
+  for (const [fraction, expected] of [
+    [0.5, 'partial'],
+    [0, 'open'],
+    [0.5, 'partial'],
+    [1, 'closed'],
+  ]) {
+    await background.evaluate((node, fraction) => {
+      const photo = node.querySelector('.preview-backdrop-easter-egg');
+      node.scrollTop = photo.offsetTop - node.clientHeight * (1 - fraction);
+    }, fraction);
+    await page.waitForFunction((expected) => {
+      const opacity = Number(
+        getComputedStyle(document.querySelector('.interview-font-preview')).opacity,
+      );
+      return expected === 'open'
+        ? opacity === 1
+        : expected === 'closed'
+          ? opacity === 0
+          : opacity > 0 && opacity < 1;
+    }, expected);
+    assert.equal(
+      await egg.evaluate((node) => node.hidden),
+      false,
+      'Automatic scrolling keeps the page unlocked',
+    );
+  }
+  const eggTop = await background.evaluate((node) => node.scrollTop);
+  await brand.click();
+  await waitPreviewOpacity('1');
+  assert.equal(await brand.getAttribute('aria-expanded'), 'true');
+  assert.equal(await background.evaluate((node) => node.scrollTop), eggTop);
+  await background.hover();
+  await page.mouse.wheel(0, -90);
+  await page.waitForFunction(
+    (top) => document.querySelector('.interview-preview-background').scrollTop < top,
+    eggTop,
+  );
+  await page.waitForTimeout(300);
+  assert.equal(
+    await brand.getAttribute('aria-expanded'),
+    'true',
+    'Scrolling upward does not override a manual expansion',
+  );
+  await waitPreviewOpacity('1');
+  for (const fraction of [0.5, 0, 0.5, 1]) {
+    await background.evaluate(async (node, fraction) => {
+      const photo = node.querySelector('.preview-backdrop-easter-egg');
+      node.scrollTop = photo.offsetTop - node.clientHeight * (1 - fraction);
+      await new Promise(requestAnimationFrame);
+      await new Promise(requestAnimationFrame);
+    }, fraction);
+    assert.equal(await brand.getAttribute('aria-expanded'), 'true');
+    assert.equal(
+      await settings.locator(previewFrame).evaluate((node) => getComputedStyle(node).opacity),
+      '1',
+      'Manual expansion persists across the story/picture boundary in both directions',
+    );
+  }
+  await brand.press('Enter');
+  await waitPreviewOpacity('0');
+  await background.evaluate((node) => {
+    node.scrollTop -= node.clientHeight;
+  });
+  await page.waitForTimeout(300);
+  assert.equal(await brand.getAttribute('aria-expanded'), 'false');
+  await waitPreviewOpacity('0');
+  await brand.click();
+  await waitPreviewOpacity('1');
+  await background.hover();
+  await background.evaluate((node) => {
+    node.scrollTop = node.scrollHeight;
+  });
+  await waitPreviewOpacity('1');
+  await page.mouse.wheel(0, 360);
+  assert.equal(
+    await background.evaluate((node) => node.style.getPropertyValue('--preview-overscroll')),
+    '',
+  );
+  await revisit();
+  assert.equal(
+    await egg.evaluate((node) => node.hidden),
+    true,
+    'Leaving interview settings locks the picture again',
+  );
+  assert.equal(
+    await settings
+      .locator('.interview-font-preview')
+      .evaluate((node) => getComputedStyle(node).opacity),
+    '1',
+  );
   await focusUiWindow(app, page);
   await background.focus();
   await page.keyboard.press(process.platform === 'darwin' ? 'Meta+ArrowUp' : 'Home');
@@ -463,6 +901,7 @@ try {
     await background.evaluate((node, selector) => {
       node.scrollTop = node.querySelector(selector).offsetTop;
     }, selector);
+    await background.locator(selector + ' img').evaluate((image) => image.decode());
     await capture(settings.locator('.interview-preview-scene'), name);
   }
   const thumb = await slider.evaluate((e) => ({
@@ -510,7 +949,7 @@ try {
   assert.equal(await slider.inputValue(), '17');
   assert.equal(await settings.getByRole('alert').count(), 0);
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
-  await page.getByRole('button', { name: '开始面试', exact: true }).click();
+  await page.locator('.interview-start-trigger').click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     page
@@ -540,6 +979,34 @@ try {
           animation.playState !== 'running',
       ),
   );
+  await floating.locator('.floating-brand').hover();
+  await floating.waitForFunction(
+    (fill) => getComputedStyle(document.querySelector('.floating-brand')).backgroundColor === fill,
+    previewHoverFill,
+  );
+  assert.equal(
+    await floating
+      .locator('.floating-brand')
+      .evaluate((node) => getComputedStyle(node).backgroundColor),
+    previewHoverFill,
+    'Preview and real interview share the same dark hover material',
+  );
+  await floating.mouse.move(0, 0);
+  const actualTranscript = floating.getByRole('button', { name: '转写面板', exact: true });
+  await actualTranscript.click();
+  assert.deepEqual(
+    await transcriptTracks(floating, '.floating-panels'),
+    previewHideTracks,
+    'Preview and real transcript hiding use identical keyframes, timing and easing',
+  );
+  await waitTranscript(floating, '.floating-panels', false);
+  await actualTranscript.click();
+  assert.deepEqual(
+    await transcriptTracks(floating, '.floating-panels'),
+    previewShowTracks,
+    'Preview and real transcript expansion use identical keyframes, timing and easing',
+  );
+  await waitTranscript(floating, '.floating-panels', true);
   const toolbar = await floating.locator('.floating-toolbar').boundingBox();
   const fixedInterview = await fixedTextStyles(floating.locator('body'));
   for (const size of [18, 24, 12, 14]) {
@@ -742,7 +1209,7 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: one-second scroll delay, downward-only hint, user cancellation before and during animation, reduced motion, one-time hint, font/paint parity, percentage controls, fine scrollbar, keyboard, contrast fallback, persistence and cross-window sync; synthetic account/audio only.',
+    'PASS: clickable transcript with real-window animation parity, centered answer with stable width, keyboard/reduced motion/disposal, persistent manual expansion and collapse, clickable capsule, dark hover contrast in both themes, compact text and equal-height illustrations scrolling together, soft hint endpoints, input cancellation, bottom fold/rebound, continuous animated first reveal, automatic fold/expand before manual control, threshold/reset, font/paint parity, scrollbar and persistence; synthetic account/audio only.',
   );
 } finally {
   await closeUiApp(app);

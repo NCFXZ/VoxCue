@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useState } from 'react';
 import { CloudAccountPanel } from './CloudAccountPanel';
 import { useCloudAccount } from '../stores/cloudAccount';
@@ -27,6 +28,7 @@ import { ComponentsPanel } from './ComponentsPanel';
 import { SpeechControls } from './SpeechControls';
 import { InterviewFontSettings } from './InterviewFontSettings';
 import { useInterviewSettings } from '../stores/interviewSettings';
+import { useGeneralSettings } from '../stores/generalSettings';
 import { useChatConnection } from '../stores/chatConnection';
 import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
@@ -37,7 +39,7 @@ const categories = [
   { id: 'ai', label: 'AI 服务', Icon: Sparkles },
   { id: 'components', label: '本地组件', Icon: Download },
   { id: 'interview', label: '面试设置', Icon: Settings },
-  { id: 'general', label: '个性化', Icon: Appearance },
+  { id: 'general', label: '通用', Icon: Appearance },
   { id: 'about', label: '关于与更新', Icon: CircleHelp },
 ] as const;
 export type SettingsCategory = (typeof categories)[number]['id'] | 'updates';
@@ -45,6 +47,10 @@ const themes = [
   { value: 'light', label: '浅色', Icon: Sun },
   { value: 'dark', label: '深色', Icon: Moon },
   { value: 'system', label: '跟随系统', Icon: SystemTheme },
+] as const;
+const languages = [
+  { value: 'zh-CN', label: '简体中文' },
+  { value: 'en', label: 'English' },
 ] as const;
 
 export function SettingsDialog({
@@ -63,23 +69,24 @@ export function SettingsDialog({
   );
   const presentation = window.desktop?.presentation ?? pendingPresentation;
   const interview = useInterviewSettings();
+  const general = useGeneralSettings();
   const connection = useChatConnection();
   const cloudUser = useCloudAccount((state) => state.state.user);
   const selectedTheme = themes.find((item) => item.value === theme)!;
   return (
-    <Modal title="设置" className="settings-dialog" hideHeader onClose={onClose}>
+    <Modal title={t('设置')} className="settings-dialog" hideHeader onClose={onClose}>
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <Button
             variant="ghost"
             size="icon"
             className="dialog-close-button"
-            aria-label="关闭设置"
+            aria-label={t('关闭设置')}
             onClick={onClose}
           >
             <X size={18} />
           </Button>
-          <nav aria-label="设置分类">
+          <nav aria-label={t('设置分类')}>
             {categories.map(({ id, label, Icon }) => (
               <button
                 key={id}
@@ -88,7 +95,7 @@ export function SettingsDialog({
                 onClick={() => setCategory(id)}
               >
                 <Icon size={18} />
-                <span>{label}</span>
+                <span>{t(label)}</span>
               </button>
             ))}
           </nav>
@@ -101,7 +108,7 @@ export function SettingsDialog({
         >
           <header className="settings-content-heading">
             <h2 id="settings-category-title">
-              {categories.find((item) => item.id === category)!.label}
+              {t(categories.find((item) => item.id === category)!.label)}
             </h2>
           </header>
           <div className="settings-content-body">
@@ -109,15 +116,15 @@ export function SettingsDialog({
             {category === 'general' && (
               <>
                 <div className="settings-entry">
-                  <strong>主题</strong>
+                  <strong>{t('主题')}</strong>
                   <DropdownMenu.Root>
                     <DropdownMenu.Trigger asChild>
                       <button
                         className="settings-choice settings-appearance-choice"
-                        aria-label="外观主题"
+                        aria-label={t('外观主题')}
                       >
                         <selectedTheme.Icon size={18} />
-                        <span className="settings-choice-label">{selectedTheme.label}</span>
+                        <span className="settings-choice-label">{t(selectedTheme.label)}</span>
                         <ChevronsUpDown size={14} />
                       </button>
                     </DropdownMenu.Trigger>
@@ -138,7 +145,7 @@ export function SettingsDialog({
                             value={value}
                           >
                             <Icon size={16} />
-                            <span>{label}</span>
+                            <span>{t(label)}</span>
                             <DropdownMenu.ItemIndicator className="settings-theme-check dropdown-check">
                               <Check size={15} />
                             </DropdownMenu.ItemIndicator>
@@ -149,7 +156,54 @@ export function SettingsDialog({
                   </DropdownMenu.Root>
                 </div>
                 {!presentation.nativeTheme && (
-                  <p className="settings-hint">原生外观待适配，界面主题正常生效。</p>
+                  <p className="settings-hint">{t('原生外观待适配，界面主题正常生效。')}</p>
+                )}
+                <div className="settings-entry">
+                  <strong>{t('语言')}</strong>
+                  <DropdownMenu.Root>
+                    <DropdownMenu.Trigger asChild>
+                      <button
+                        className="settings-choice settings-appearance-choice"
+                        aria-label={t('语言')}
+                      >
+                        <span className="settings-choice-label">
+                          {languages.find((item) => item.value === general.language)!.label}
+                        </span>
+                        <ChevronsUpDown size={14} />
+                      </button>
+                    </DropdownMenu.Trigger>
+                    <DropdownMenu.Content
+                      className="dropdown-content settings-theme-menu"
+                      align="end"
+                      sideOffset={6}
+                    >
+                      <DropdownMenu.RadioGroup
+                        value={general.language}
+                        onValueChange={(value) => {
+                          const language = languages.find((item) => item.value === value);
+                          if (language) general.setLanguage(language.value);
+                        }}
+                      >
+                        {languages.map(({ value, label }) => (
+                          <DropdownMenu.RadioItem
+                            className="dropdown-item"
+                            key={value}
+                            value={value}
+                          >
+                            <span>{t(label)}</span>
+                            <DropdownMenu.ItemIndicator className="settings-theme-check dropdown-check">
+                              <Check size={15} />
+                            </DropdownMenu.ItemIndicator>
+                          </DropdownMenu.RadioItem>
+                        ))}
+                      </DropdownMenu.RadioGroup>
+                    </DropdownMenu.Content>
+                  </DropdownMenu.Root>
+                </div>
+                {general.error && (
+                  <p role="alert" className="danger-text">
+                    {t(general.error)}
+                  </p>
                 )}
               </>
             )}
@@ -157,7 +211,7 @@ export function SettingsDialog({
               <>
                 <CloudAccountPanel showTitle={false} />
                 {cloudUser && (
-                  <section aria-label="云同步">
+                  <section aria-label={t('云同步')}>
                     <SyncSettingsPanel />
                   </section>
                 )}
@@ -177,7 +231,7 @@ export function SettingsDialog({
                 />
                 {interview.error && (
                   <p role="alert" className="danger-text">
-                    {interview.error}
+                    {t(interview.error)}
                   </p>
                 )}
                 <InterviewFontSettings />
@@ -189,7 +243,7 @@ export function SettingsDialog({
                   <strong>VoxCue</strong>
                   <span className="settings-value">{version}</span>
                 </div>
-                <section className="settings-about-updates" aria-label="软件更新">
+                <section className="settings-about-updates" aria-label={t('软件更新')}>
                   <UpdatesPanel showVersion={false} />
                 </section>
               </>

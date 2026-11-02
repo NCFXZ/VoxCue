@@ -1,3 +1,4 @@
+import { t, uiLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import type { AccountQuota, AccountUsage } from '../../electron/contracts/accountUsage';
 import { useChatConnection } from '../stores/chatConnection';
@@ -27,23 +28,23 @@ const chatGPTPlans: Partial<Record<AccountUsage['plan'], string>> = {
   unknown: 'ChatGPT',
 };
 const quantity = (value: number | null, unit: AccountQuota['unit']) => {
-  if (value === null || unit === 'unknown') return '暂不可用';
+  if (value === null || unit === 'unknown') return t('暂不可用');
   const number =
     value !== 0 && Math.abs(value) < 0.000001
       ? value.toExponential(2)
-      : value.toLocaleString('zh-CN', { maximumFractionDigits: 6 });
+      : value.toLocaleString(uiLocale(), { maximumFractionDigits: 6 });
   return unit === 'percent'
     ? `${number}%`
-    : `${number} ${unit === 'ai_credits' ? 'AI Credits' : unit === 'tokens' ? 'token' : '次'}`;
+    : `${number} ${unit === 'ai_credits' ? 'AI Credits' : unit === 'tokens' ? 'token' : t('次')}`;
 };
 function resetCountdown(resetAt: number, now: number) {
   const remaining = resetAt - now;
-  if (remaining <= 0) return '重置时间待更新';
+  if (remaining <= 0) return t('重置时间待更新');
   const hours = Math.floor(remaining / 3_600_000);
-  if (hours >= 24) return `${Math.floor(hours / 24)}天${hours % 24}小时后重置`;
+  if (hours >= 24) return t(`${Math.floor(hours / 24)}天${hours % 24}小时后重置`);
   const minutes = Math.ceil(remaining / 60_000);
-  if (hours === 0) return `${minutes}分钟后重置`;
-  return `${Math.floor(minutes / 60)}小时${minutes % 60}分钟后重置`;
+  if (hours === 0) return t(`${minutes}分钟后重置`);
+  return t(`${Math.floor(minutes / 60)}小时${minutes % 60}分钟后重置`);
 }
 function SkeletonLine({ className = '' }: { className?: string }) {
   return <span className={`quota-skeleton-line ${className}`} />;
@@ -90,12 +91,12 @@ function Quota({
   return (
     <article
       className={`account-quota${loading ? ' account-quota-skeleton' : ''}`}
-      aria-label={loading ? undefined : value?.label}
+      aria-label={loading ? undefined : t(value?.label)}
     >
       <header>
         <div className="account-quota-heading">
           <strong>
-            {loading ? <SkeletonLine className="quota-skeleton-label" /> : value?.label}
+            {loading ? <SkeletonLine className="quota-skeleton-label" /> : t(value?.label)}
           </strong>
         </div>
       </header>
@@ -105,7 +106,7 @@ function Quota({
             {loading ? (
               <SkeletonLine className="quota-skeleton-reset" />
             ) : (
-              `${value?.resetEstimated ? '预计' : ''}${resetCountdown(value!.resetAt!, now)}`
+              `${value?.resetEstimated ? t('预计') : ''}${resetCountdown(value!.resetAt!, now)}`
             )}
           </p>
         )}
@@ -114,7 +115,7 @@ function Quota({
             {metrics.map((metric) => (
               <div key={metric.label}>
                 <dt>
-                  {loading ? <SkeletonLine className="quota-skeleton-label" /> : metric.label}
+                  {loading ? <SkeletonLine className="quota-skeleton-label" /> : t(metric.label)}
                 </dt>
                 <dd>
                   {loading ? (
@@ -131,11 +132,13 @@ function Quota({
           {loading ? (
             <SkeletonLine />
           ) : value?.unlimited ? (
-            '不限量'
+            t('不限量')
           ) : value?.remainingPercent !== null && value?.remainingPercent !== undefined ? (
-            `剩余 ${value.remainingPercent.toLocaleString('zh-CN', { maximumFractionDigits: 2 })}%`
+            t('剩余 {0}%', [
+              value.remainingPercent.toLocaleString(uiLocale(), { maximumFractionDigits: 2 }),
+            ])
           ) : value ? (
-            `${value.advisory ? '参考可用' : '剩余'} ${quantity(value.remaining, value.unit)}`
+            `${value.advisory ? t('参考可用') : t('剩余')} ${quantity(value.remaining, value.unit)}`
           ) : null}
         </span>
       </div>
@@ -147,11 +150,13 @@ function Quota({
               : ''
           }`}
         >
-          {loading ? <SkeletonLine className="quota-skeleton-hint" /> : state}
+          {loading ? <SkeletonLine className="quota-skeleton-hint" /> : t(state)}
         </span>
       )}
       {value?.unit === 'unknown' && (
-        <p>{loading ? <SkeletonLine /> : '官方未提供明确的计量单位，具体用量请查看官方页面。'}</p>
+        <p>
+          {loading ? <SkeletonLine /> : t('官方未提供明确的计量单位，具体用量请查看官方页面。')}
+        </p>
       )}
       {progress &&
         (loading ? (
@@ -160,7 +165,7 @@ function Quota({
           <div
             className="account-quota-progress"
             role="progressbar"
-            aria-label={`${value?.label}剩余比例`}
+            aria-label={t('{0}剩余比例', [t(value?.label)])}
             aria-valuemin={0}
             aria-valuemax={100}
             aria-valuenow={value?.remainingPercent ?? undefined}
@@ -182,8 +187,8 @@ function QuotaSkeleton({
 }) {
   const quotas = usage?.status === 'available' && usage.quotas.length ? usage.quotas : [undefined];
   return (
-    <div role="status" aria-label="正在读取账户额度">
-      <span className="sr-only">正在读取账户额度…</span>
+    <div role="status" aria-label={t('正在读取账户额度')}>
+      <span className="sr-only">{t('正在读取账户额度…')}</span>
       <div className="account-quota-list" aria-hidden="true">
         {quotas.map((value, index) => (
           <Quota key={index} value={value} loading percentage={percentage} now={now} />
@@ -214,20 +219,22 @@ export function UsagePanel() {
   return (
     <section
       className="usage-panel settings-usage"
-      aria-label="账户额度"
+      aria-label={t('账户额度')}
       aria-busy={live && state.loadingUsage}
     >
       <header>
         <div className="account-quota-heading">
-          <strong>账户额度</strong>
+          <strong>{t('账户额度')}</strong>
           {live &&
             (state.loadingUsage ? (
               <span className="quota-skeleton-line quota-skeleton-plan" aria-hidden="true" />
             ) : (
               usage && (
                 <span className="account-quota-plan">
-                  {(copilot ? planNames : chatGPTPlans)[usage.plan] ??
-                    (copilot ? 'GitHub Copilot' : 'ChatGPT')}
+                  {t(
+                    (copilot ? planNames : chatGPTPlans)[usage.plan] ??
+                      (copilot ? 'GitHub Copilot' : 'ChatGPT'),
+                  )}
                 </span>
               )
             ))}
@@ -237,15 +244,15 @@ export function UsagePanel() {
             variant="ghost"
             disabled={state.loadingUsage}
             onClick={() => void state.refreshUsage()}
-            aria-label="刷新账户额度"
+            aria-label={t('刷新账户额度')}
           >
             <Refresh size={16} />
-            {state.loadingUsage ? '刷新中…' : '刷新'}
+            {state.loadingUsage ? t('刷新中…') : t('刷新')}
           </Button>
         )}
       </header>
       {!live ? (
-        <p>连接模型服务后可查看账户用量。</p>
+        <p>{t('连接模型服务后可查看账户用量。')}</p>
       ) : state.loadingUsage ? (
         <QuotaSkeleton usage={usage} percentage={!copilot} now={now} />
       ) : usage?.status === 'available' && usage.quotas.length ? (
@@ -257,8 +264,8 @@ export function UsagePanel() {
       ) : (
         <p>
           {copilot
-            ? '账户额度暂不可用，请刷新或查看 GitHub 官方用量。'
-            : 'ChatGPT 账户额度暂不可用，请刷新或查看官方用量。'}
+            ? t('账户额度暂不可用，请刷新或查看 GitHub 官方用量。')
+            : t('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。')}
         </p>
       )}
       {live && (
@@ -266,8 +273,8 @@ export function UsagePanel() {
           <div className="account-usage-note">
             <small>
               {copilot
-                ? '由 GitHub 返回账户额度，更新可能延迟；以官方页面为准。'
-                : '由当前 ChatGPT 登录账户返回额度；以官方页面为准。'}
+                ? t('由 GitHub 返回账户额度，更新可能延迟；以官方页面为准。')
+                : t('由当前 ChatGPT 登录账户返回额度；以官方页面为准。')}
             </small>
           </div>
           <a
@@ -278,13 +285,13 @@ export function UsagePanel() {
               void openChatLink(usageUrl).catch(() => {});
             }}
           >
-            查看官方用量
+            {t('查看官方用量')}
           </a>
         </footer>
       )}
       {live && state.usageError && (
         <p className="usage-error" role="alert">
-          {state.usageError}
+          {t(state.usageError)}
         </p>
       )}
     </section>

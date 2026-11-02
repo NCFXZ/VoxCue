@@ -205,13 +205,9 @@ try {
     await page.getByRole('menuitemradio', { name: '高', exact: true }).click();
     assert.equal(await page.getByRole('button', { name: '网络搜索', exact: true }).count(), 0);
     await page.getByRole('button', { name: '添加附件', exact: true }).click();
-    const search = page.getByRole('menuitemcheckbox', { name: '网络搜索', exact: true });
-    const wasSearching = await search.getAttribute('aria-checked');
-    await search.click();
-    await page.getByRole('button', { name: '添加附件', exact: true }).click();
     assert.equal(
-      await search.getAttribute('aria-checked'),
-      wasSearching === 'true' ? 'false' : 'true',
+      await page.getByRole('menuitemcheckbox', { name: '网络搜索', exact: true }).count(),
+      0,
     );
     await page.getByRole('menuitem', { name: '添加文件', exact: true }).waitFor();
     await page.keyboard.press('Escape');
@@ -232,7 +228,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
@@ -290,7 +286,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
   await page.getByRole('button', { name: '麦克风设备', exact: true }).waitFor();

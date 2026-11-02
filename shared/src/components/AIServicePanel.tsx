@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useAuth } from '../stores/auth';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { Button } from './ui/button';
@@ -15,8 +16,8 @@ export function AIServicePanel() {
     <div className="ai-services-panel">
       <p className="settings-hint">
         {localMode
-          ? '使用本地账户时可独立连接 AI 服务，用于聊天与面试回答；云备份需另行登录 VoxCue。'
-          : 'AI 服务独立授权，用于聊天与面试回答，不影响 VoxCue 主账号和云同步。'}
+          ? t('使用本地账户时可独立连接 AI 服务，用于聊天与面试回答；云备份需另行登录 VoxCue。')
+          : t('AI 服务独立授权，用于聊天与面试回答，不影响 VoxCue 主账号和云同步。')}
       </p>
       {(
         [
@@ -30,7 +31,7 @@ export function AIServicePanel() {
             <div>
               <strong>{providerInfo(service).name}</strong>
               <p className="settings-hint">
-                {connected === service ? auth.session?.user.email || '已连接' : '未连接'}
+                {connected === service ? auth.session?.user.email || t('已连接') : t('未连接')}
               </p>
             </div>
           </div>
@@ -50,15 +51,15 @@ export function AIServicePanel() {
                 <Link size={16} />
               )}
               {auth.signingIn === service
-                ? '等待浏览器授权…'
+                ? t('等待浏览器授权…')
                 : connected === service
-                  ? '断开连接'
-                  : '连接'}
+                  ? t('断开连接')
+                  : t('连接')}
             </Button>
             {auth.signingIn === service && (
               <Button variant="ghost" onClick={() => void auth.cancel()}>
                 <X size={16} />
-                取消授权
+                {t('取消授权')}
               </Button>
             )}
           </div>
@@ -66,7 +67,7 @@ export function AIServicePanel() {
       ))}
       {(auth.error || auth.notice) && (
         <p className="settings-error" role="alert">
-          {auth.error || auth.notice}
+          {t(auth.error || auth.notice)}
         </p>
       )}
       {connected && <UsagePanel />}

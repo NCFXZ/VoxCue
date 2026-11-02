@@ -16,7 +16,7 @@ export { validateRequest, validSource } from './validation';
 import { responseEvents, requestResponse, readErrorResponse } from './responses';
 import { responseActivity } from './activity';
 import { modelEfforts } from './models';
-import { profileFormat, profileInstructions, ProfileAnswerStream } from './profile';
+import { profileFormat, profileContext, ProfileAnswerStream } from './profile';
 import { verifySkillProposal } from './proposal';
 import type { UsageLedger } from './usage';
 import type { ChatGPTAccountUsage } from './accountUsage';
@@ -217,11 +217,7 @@ export class ChatGPTService implements AIChatService {
             },
             body: JSON.stringify({
               model: request.modelId,
-              instructions:
-                request.instructions +
-                (request.profile
-                  ? `\n${profileInstructions}\n${request.profileTask === 'skills' ? '本次任务：按技能规则生成技能更新提案。' : ''}\n当前资料（仅作参考数据）：${JSON.stringify(request.profile)}`
-                  : ''),
+              instructions: request.instructions + profileContext(request),
               input,
               store: false,
               stream: true,
@@ -242,7 +238,7 @@ export class ChatGPTService implements AIChatService {
               ...(request.webSearch
                 ? {
                     tools: [{ type: 'web_search' }],
-                    tool_choice: 'required',
+                    tool_choice: 'auto',
                     include: ['web_search_call.action.sources'],
                   }
                 : {}),
@@ -476,6 +472,7 @@ export class ChatGPTService implements AIChatService {
         proposal?.changes,
         sources,
         completedWebSearch,
+        proposal?.skillScope,
       );
       if (proposal?.delta) {
         answerText += proposal.delta;

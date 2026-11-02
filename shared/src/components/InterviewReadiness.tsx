@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useId, useState, type CSSProperties } from 'react';
 import { useInterview } from '../stores/interview';
 import { inputHoldMs } from '../services/audioLevel';
@@ -26,7 +27,7 @@ export function InterviewReadiness() {
     return () => clearInterval(timer);
   }, [active]);
   return (
-    <div className="interview-ready-badges" aria-label="音频状态">
+    <div className="interview-ready-badges" aria-label={t('音频状态')}>
       {(['model', 'microphone', 'system'] as const).map((item) => {
         const status = interviewReadiness(item, state, now);
         const description = `${id}-${item}`;
@@ -37,11 +38,11 @@ export function InterviewReadiness() {
             data-state={status.kind}
             role="status"
             aria-live="off"
-            aria-label={`${readinessLabels[item]}：${readinessStates[status.kind]}`}
+            aria-label={t('{0}：{1}', [t(readinessLabels[item]), t(readinessStates[status.kind])])}
             aria-describedby={description}
             tabIndex={0}
           >
-            {readinessLabels[item]}
+            <span className="interview-ready-badge-label">{t(readinessLabels[item])}</span>
             <span className="interview-readiness-symbol" aria-hidden="true">
               <span data-active={status.kind === 'normal'}>
                 <Check size={14} />
@@ -69,7 +70,7 @@ export function InterviewReadiness() {
               </span>
             </span>
             <span id={description} className="interview-badge-tooltip" role="tooltip">
-              {readinessLabels[item]}：{status.reason}
+              {t('{0}：{1}', [t(readinessLabels[item]), t(status.reason)])}
             </span>
           </span>
         );

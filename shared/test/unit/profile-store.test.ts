@@ -3,7 +3,6 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { usePreparation } from '../../../shared/src/stores/preparation';
 import { useChatConnection } from '../../../shared/src/stores/chatConnection';
 import { streamChat, ChatRequestError } from '../../../shared/src/services/chat';
-import { needsSkillResearch } from '../../../shared/src/services/preparation';
 import { chatGPTProvider } from '../../../shared/electron/contracts/chat';
 vi.mock('../../../shared/src/services/chat', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../shared/src/services/chat')>()),
@@ -321,15 +320,6 @@ describe('资料提案保存与后续聊天', () => {
       expect(unchanged.selectedProfileFields).toEqual(proposal.selectedProfileFields);
     },
   );
-  it.each([
-    '请帮我补充并整理职位描述摘要，供确认后联网更新面试技能。以下是职位描述内容：',
-    '请根据以下内容整理简历摘要，保留关键事实和要求，先展示待确认内容：',
-    '请根据以下内容整理职位描述摘要，保留关键事实和要求，先展示待确认内容：',
-    '请根据以下内容整理简历和职位描述摘要，保留关键事实和要求，先展示待确认内容：',
-  ])('补充摘要提示不能被误判为立即生成技能：%s', (prompt) => {
-    expect(needsSkillResearch(prompt)).toBe(false);
-    expect(needsSkillResearch('请联网更新面试技能')).toBe(true);
-  });
   it.each(['简历', '职位描述', '简历和职位描述'])(
     '补充%s使用正常资料请求并保留附件，不因“不生成技能”被阻止',
     async (missing) => {
@@ -341,12 +331,11 @@ describe('资料提案保存与后续聊天', () => {
       usePreparation.setState({ info });
       usePreparation.getState().addAttachments([new File(['Synthetic facts'], 'context.txt')]);
       const prompt = `请根据以下内容整理${missing}摘要。简历保留个人经历、职责、项目、技术和成果；职位描述保留岗位定位、职责、任职要求及明确的优先条件。合并重复表述，保留事实和条件边界，不把岗位要求写成个人经历。仅补充缺少的摘要并展示待确认提案，不修改其他资料，也不生成技能。\n\n以下是${missing}内容：\n合成资料。`;
-      expect(needsSkillResearch(prompt)).toBe(false);
       await usePreparation.getState().send(prompt);
       expect(streamChat).toHaveBeenCalledTimes(1);
       const request = vi.mocked(streamChat).mock.calls[0][0];
       expect(request.profileTask).toBeUndefined();
-      expect(request.webSearch).toBe(false);
+      expect(request.webSearch).toBe(true);
       expect(request.turns.at(-1)?.content).toBe(prompt);
       expect(request.turns.at(-1)?.files?.[0].name).toBe('context.txt');
       expect(usePreparation.getState().info).toEqual(info);
@@ -619,6 +608,64 @@ describe('逐条技能选择保存', () => {
 });
 
 describe('摘要、指令与技能需要逐次确认', () => {
+  it('旧主题任务重试不被整套摘要门槛拦截，旧关闭搜索快照不关闭新请求', async () => {
+    usePreparation.setState({
+      info: { ...base, jobDescription: '' },
+      messages: [
+        {
+          id: 'legacy-user',
+          role: 'user',
+          content: 'Add a Kafka skill',
+          options: {
+            modelId: 'test',
+            modelLabel: 'Test',
+            live: true,
+            webSearch: false,
+            profileTask: 'skills',
+            attachments: [],
+          },
+        },
+        { id: 'legacy-answer', role: 'assistant', content: '', status: 'failed' },
+      ],
+    });
+    vi.mocked(streamChat).mockResolvedValueOnce({
+      ok: true,
+      answerText: '请审阅',
+      usage: null,
+      sources: [],
+    });
+    await usePreparation.getState().retry('legacy-answer');
+    const request = vi.mocked(streamChat).mock.calls[0][0];
+    expect(request.profileTask).toBeUndefined();
+    expect(request.webSearch).toBe(true);
+    expect(request.turns.at(-1)?.content).toBe('Add a Kafka skill');
+    expect(usePreparation.getState().info).toEqual({ ...base, jobDescription: '' });
+  });
+  it.each(['需要', '可以', 'yes', 'sí', 'Generate skills', '更新技能', '不要联网，只整理简历'])(
+    '当前文本和上下文原样传递，不用语言关键词清除附件或强加任务：%s',
+    async (prompt) => {
+      usePreparation.setState({
+        messages: [
+          { id: 'user', role: 'user', content: '更新资料' },
+          {
+            id: 'assistant',
+            role: 'assistant',
+            content: '是否需要更新技能？',
+            status: 'completed',
+          },
+        ],
+      });
+      usePreparation.getState().addAttachments([new File(['context'], 'context.txt')]);
+      await usePreparation.getState().send(prompt);
+      const request = vi.mocked(streamChat).mock.calls.at(-1)![0];
+      expect(request.webSearch).toBe(true);
+      expect(request.profileTask).toBeUndefined();
+      expect(request.turns.at(-1)?.content).toBe(prompt);
+      expect(request.turns.at(-1)?.files?.[0].name).toBe('context.txt');
+      expect(request.turns.some((turn) => turn.content === '是否需要更新技能？')).toBe(true);
+      expect(usePreparation.getState().info).toEqual(base);
+    },
+  );
   it.each([
     { background: '', jobDescription: '' },
     { background: '已确认简历', jobDescription: '' },
@@ -637,7 +684,6 @@ describe('摘要、指令与技能需要逐次确认', () => {
     await usePreparation.getState().send('帮我加一条Kafka');
     const request = vi.mocked(streamChat).mock.calls[0][0];
     expect(request).toMatchObject({
-      profileTask: 'skills',
       webSearch: true,
       knowledgeBaseId: null,
       profile: summaries,
@@ -657,7 +703,6 @@ describe('摘要、指令与技能需要逐次确认', () => {
     expect(failed.changes).toBeUndefined();
     await usePreparation.getState().retry(failed.id);
     expect(vi.mocked(streamChat).mock.calls.at(-1)![0]).toMatchObject({
-      profileTask: 'skills',
       webSearch: true,
     });
     for (const prompt of ['不要生成Kafka技能', '解释Kafka消费顺序']) {
@@ -675,7 +720,7 @@ describe('摘要、指令与技能需要逐次确认', () => {
     usePreparation.getState().dismissSkillUpdate();
     expect(usePreparation.getState().skillsNeedUpdate).toBe(false);
   });
-  it('技能生成强制联网，使用已确认摘要，保留未发送草稿和附件，摘要变动使结果过期', async () => {
+  it('技能入口提供可选搜索，使用已确认摘要，保留未发送草稿和附件，摘要变动使结果过期', async () => {
     const skill = {
       id: 'skill',
       title: '技能',
@@ -704,6 +749,10 @@ describe('摘要、指令与技能需要逐次确认', () => {
     });
     expect(request.turns.flatMap((turn) => turn.files ?? [])).toEqual([]);
     expect(request.turns.at(-1)?.content).toContain('作为技能更新提案');
+    expect(request.turns.at(-1)?.content).toContain('按当前目标岗位重新评估整套面试技能');
+    expect(request.turns.at(-1)?.content).toContain('删除与当前岗位无关的');
+    expect(request.turns.at(-1)?.content).toContain('确认保存后生效');
+    expect(request.turns.at(-1)?.content).not.toContain('保留未要求变更的已有条目');
     expect(request.turns.at(-1)?.content).toContain('不要把参考资料写成我已掌握的技能或经历');
     expect(request.turns.at(-1)?.content).not.toMatch(/120|220|3–5|附1–2/);
     expect(usePreparation.getState().messages.at(-1)?.changes?.skills?.[0].sources).toEqual(

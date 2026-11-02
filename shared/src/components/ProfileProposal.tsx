@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { t } from '../i18n';
+import { useId, useState } from 'react';
 import { Button } from './ui/button';
 import { Modal } from './ui/modal';
 import type { ChatMessage } from '../services/preparation';
@@ -15,11 +16,11 @@ import {
 } from '../../electron/contracts/profile';
 import { MarkdownContent } from './MarkdownContent';
 import { PlainTextContent } from './PlainTextContent';
-import { X, Edit, Globe, Check, History, ChevronDown, Loader } from './icons';
+import { Check, History, ChevronDown, Loader } from './icons';
 function ProposalLoading({ active, label }: { active: boolean; label: string }) {
   if (!active) return null;
   return (
-    <span className="proposal-field-loading" role="status" aria-label={`${label}正在生成`}>
+    <span className="proposal-field-loading" role="status" aria-label={t(`${label}正在生成`)}>
       <Loader size={14} />
     </span>
   );
@@ -32,7 +33,7 @@ export function ProfileValue({
   hideTitle?: boolean;
 }) {
   if (!value || (Array.isArray(value) && !value.length))
-    return <p className="empty-inline">未填写 / 清空</p>;
+    return <p className="empty-inline">{t('未填写 / 清空')}</p>;
   if (typeof value === 'string') return <MarkdownContent content={value} />;
   return (
     <div className="profile-value-list">
@@ -49,67 +50,11 @@ export function ProfileValue({
     </div>
   );
 }
-export function SkillUpdatePrompt() {
-  const state = usePreparation();
-  if (!state.skillsNeedUpdate) return null;
-  const missing = [
-    !state.info.background.trim() && '简历',
-    !state.info.jobDescription.trim() && '职位描述',
-  ]
-    .filter(Boolean)
-    .join('和');
-  return (
-    <div className="skill-update-prompt" role="status">
-      <p>
-        {missing
-          ? '资料已保存，补齐摘要后可联网更新面试技能。'
-          : '简历或职位描述已更新，是否联网更新面试技能？'}
-      </p>
-      {(missing || state.streaming) && (
-        <p className="profile-consent-note">
-          {state.streaming
-            ? '正在完成当前回复，完成后即可继续。'
-            : `还缺少${missing}摘要，请先提供并确认后再生成技能。`}
-        </p>
-      )}
-      <div>
-        <Button
-          variant="outline"
-          disabled={state.streaming}
-          onClick={() => {
-            state.dismissSkillUpdate();
-            if (!missing) {
-              void state.generateSkills();
-              return;
-            }
-            state.setDraft(
-              [
-                state.draft,
-                `请根据以下内容整理${missing}摘要。简历保留个人经历、职责、项目、技术和成果；职位描述保留岗位定位、职责、任职要求及明确的优先条件。合并重复表述，保留事实和条件边界，不把岗位要求写成个人经历。仅补充缺少的摘要并展示待确认提案，不修改其他资料，也不生成技能。\n\n以下是${missing}内容：\n`,
-              ]
-                .filter(Boolean)
-                .join('\n\n'),
-            );
-            requestAnimationFrame(() =>
-              document.querySelector<HTMLTextAreaElement>('[aria-label="聊天消息"]')?.focus(),
-            );
-          }}
-        >
-          {missing ? <Edit size={16} /> : <Globe size={16} />}
-          {missing ? `补充${missing}` : '联网更新技能'}
-        </Button>
-        <Button variant="ghost" onClick={state.dismissSkillUpdate}>
-          <X size={16} />
-          暂不更新
-        </Button>
-      </div>
-    </div>
-  );
-}
 export function ProfileProposal({ message }: { message: ChatMessage }) {
   const state = usePreparation();
   const [reading, setReading] = useState<{ field: ProfileField; skillId?: string } | null>(null);
   const [skillsExpanded, setSkillsExpanded] = useState<boolean>();
+  const skillsId = useId();
   const generating = message.status === 'streaming';
   const complete = message.status === 'completed' && !!message.changes;
   const values = complete ? message.changes : message.profilePreview;
@@ -148,7 +93,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
   const operation = (kind: 'add' | 'update' | 'remove' | 'keep') =>
     !resolved && (
       <span className={`proposal-operation ${kind === 'remove' ? 'is-removal' : ''}`}>
-        {{ add: '待新增', update: '待修改', remove: '待删除', keep: '保持原内容' }[kind]}
+        {t({ add: '待新增', update: '待修改', remove: '待删除', keep: '保持原内容' }[kind])}
       </span>
     );
   const fieldOperation = (field: ProfileField): 'add' | 'update' | 'remove' | 'keep' => {
@@ -183,8 +128,15 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
         type="checkbox"
         aria-label={
           id
-            ? `${skillEntries.find((entry) => entry.skill.id === id)?.kind === 'remove' ? '删除' : '保存'}技能：${title}`
-            : `保存${profileLabels[field]}`
+            ? t('{0}技能：{1}', [
+                t(
+                  skillEntries.find((entry) => entry.skill.id === id)?.kind === 'remove'
+                    ? '删除'
+                    : '保存',
+                ),
+                title,
+              ])
+            : t('保存{0}', [t(profileLabels[field])])
         }
         checked={
           id
@@ -200,7 +152,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
           id ? toggleSkill(id, event.target.checked) : toggleField(field, event.target.checked)
         }
       />
-      <PlainTextContent content={compact ? '保存此项' : title} inline />
+      <PlainTextContent content={compact ? t('保存此项') : title} inline />
     </label>
   );
   const status = (field: ProfileField, id?: string) => {
@@ -212,18 +164,19 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
       <span className={`proposal-status ${saved ? 'is-saved' : ''}`}>
         {saved
           ? kind
-            ? { add: '已新增', update: '已修改', remove: '已删除', keep: '已保留' }[kind]
-            : '已保存'
+            ? t({ add: '已新增', update: '已修改', remove: '已删除', keep: '已保留' }[kind])
+            : t('已保存')
           : kind === 'add'
-            ? '未添加'
-            : '未采用'}
+            ? t('未添加')
+            : t('未采用')}
       </span>
     );
   };
   const readingSkill = reading?.skillId
     ? skillEntries.find((entry) => entry.skill.id === reading.skillId)
     : undefined;
-  const readingTitle = readingSkill?.skill.title ?? (reading ? profileLabels[reading.field] : '');
+  const readingTitle =
+    readingSkill?.skill.title ?? (reading ? t(profileLabels[reading.field]) : '');
   const heading = message.applied
     ? '已保存所选资料'
     : message.dismissed
@@ -237,17 +190,17 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
     <section
       className="profile-proposal"
       data-resolved={resolved || undefined}
-      aria-label={complete ? '待确认的资料更新' : '正在生成的资料提案'}
+      aria-label={complete ? t('待确认的资料更新') : t('正在生成的资料提案')}
       aria-busy={generating}
     >
       <header className="proposal-heading">
-        <strong>{heading}</strong>
+        <strong>{t(heading)}</strong>
         <span>
           {message.applied
-            ? `已保存 ${savedCount} 项`
+            ? t('已保存 {0} 项', [savedCount])
             : pending
-              ? `已选 ${chosen} / ${units} 项`
-              : `共 ${units} 项`}
+              ? t('已选 {0} / {1} 项', [chosen, units])
+              : t('共 {0} 项', [units])}
         </span>
       </header>
       <div className="proposal-rows">
@@ -257,17 +210,27 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
               <div className="proposal-row">
                 <div className="proposal-row-main">
                   <div className="proposal-row-title">
-                    {pending ? choice(field, '技能') : <strong>技能</strong>}
+                    {pending ? choice(field, t('技能')) : <strong>{t('技能')}</strong>}
                     <ProposalLoading
                       active={generating && !!message.profileGeneration?.fields.includes('skills')}
-                      label="技能"
+                      label={t('技能')}
                     />
                     {operation(fieldOperation(field))}
                   </div>
                   <span className="proposal-excerpt">
                     {pending
-                      ? `已选 ${skillIds.length} / ${skillEntries.length} 条，未选中的已有技能保持不变`
-                      : `本次 ${skillEntries.length} 条技能${message.applied ? `，已应用 ${savedFields.includes('skills') ? savedSkillIds.length : 0} 条` : ''}`}
+                      ? t('已选 {0} / {1} 条，未选中的已有技能保持不变', [
+                          skillIds.length,
+                          skillEntries.length,
+                        ])
+                      : t('本次 {0} 条技能{1}', [
+                          skillEntries.length,
+                          message.applied
+                            ? t('，已应用 {0} 条', [
+                                savedFields.includes('skills') ? savedSkillIds.length : 0,
+                              ])
+                            : '',
+                        ])}
                   </span>
                 </div>
                 <Button
@@ -275,72 +238,78 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                   className="proposal-view"
                   data-reveal-on-hover
                   aria-expanded={expanded}
-                  aria-label={expanded ? '收起技能清单' : '展开技能清单'}
+                  aria-controls={skillsId}
+                  aria-label={expanded ? t('收起技能清单') : t('展开技能清单')}
                   onClick={() => setSkillsExpanded(!expanded)}
                 >
-                  {expanded ? '收起' : '展开'}
+                  {expanded ? t('收起') : t('展开')}
                   <span className={expanded ? 'is-expanded' : ''}>
                     <ChevronDown size={14} />
                   </span>
                 </Button>
               </div>
-              {expanded && (
-                <div className="proposal-skill-rows">
-                  {skillEntries.map(({ skill, kind }, index) => (
-                    <div className="proposal-row proposal-skill-row" key={skill.id}>
-                      <div className="proposal-row-main">
-                        <div className="proposal-row-title">
-                          {pending ? (
-                            choice('skills', skill.title, skill.id)
-                          ) : (
-                            <strong>
-                              <PlainTextContent content={skill.title} inline />
-                            </strong>
-                          )}
-                          <ProposalLoading
-                            active={
-                              generating &&
-                              !!message.profileGeneration?.skillIndexes.includes(index)
-                            }
-                            label={skill.title || '技能'}
-                          />
-                          {(complete || message.profilePreview?.skills?.[index]?.id) &&
-                            operation(kind)}
-                          {status('skills', skill.id)}
-                        </div>
-                        {!resolved && (
-                          <div className="proposal-excerpt">
-                            <PlainTextContent content={skill.content || '清空内容'} inline />
-                          </div>
+              <div
+                className="proposal-skill-rows collapse-content"
+                id={skillsId}
+                data-expanded={expanded}
+                aria-hidden={!expanded}
+                inert={!expanded}
+              >
+                {skillEntries.map(({ skill, kind }, index) => (
+                  <div className="proposal-row proposal-skill-row" key={skill.id}>
+                    <div className="proposal-row-main">
+                      <div className="proposal-row-title">
+                        {pending ? (
+                          choice('skills', skill.title, skill.id)
+                        ) : (
+                          <strong>
+                            <PlainTextContent content={skill.title} inline />
+                          </strong>
                         )}
+                        <ProposalLoading
+                          active={
+                            generating && !!message.profileGeneration?.skillIndexes.includes(index)
+                          }
+                          label={skill.title || t('技能')}
+                        />
+                        {(complete || message.profilePreview?.skills?.[index]?.id) &&
+                          operation(kind)}
+                        {status('skills', skill.id)}
                       </div>
-                      <Button
-                        variant="ghost"
-                        className="proposal-view"
-                        data-reveal-on-hover
-                        aria-label={`查看技能：${skill.title}`}
-                        onClick={() => setReading({ field: 'skills', skillId: skill.id })}
-                      >
-                        查看
-                      </Button>
+                      {!resolved && (
+                        <div className="proposal-excerpt">
+                          <PlainTextContent content={skill.content || t('清空内容')} inline />
+                        </div>
+                      )}
                     </div>
-                  ))}
-                  {!skillEntries.length && <span className="proposal-excerpt">没有技能条目</span>}
-                </div>
-              )}
+                    <Button
+                      variant="ghost"
+                      className="proposal-view"
+                      data-reveal-on-hover
+                      aria-label={t(`查看技能：${skill.title}`)}
+                      onClick={() => setReading({ field: 'skills', skillId: skill.id })}
+                    >
+                      {t('查看')}
+                    </Button>
+                  </div>
+                ))}
+                {!skillEntries.length && (
+                  <span className="proposal-excerpt">{t('没有技能条目')}</span>
+                )}
+              </div>
             </div>
           ) : (
             <div className="proposal-row" key={field}>
               <div className="proposal-row-main">
                 <div className="proposal-row-title">
                   {pending ? (
-                    choice(field, profileLabels[field])
+                    choice(field, t(profileLabels[field]))
                   ) : (
-                    <strong>{profileLabels[field]}</strong>
+                    <strong>{t(profileLabels[field])}</strong>
                   )}
                   <ProposalLoading
                     active={generating && !!message.profileGeneration?.fields.includes(field)}
-                    label={profileLabels[field]}
+                    label={t(profileLabels[field])}
                   />
                   {operation(fieldOperation(field))}
                   {status(field)}
@@ -349,7 +318,7 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                   <div
                     className={`proposal-excerpt ${field === 'name' || field === 'language' ? 'is-short' : ''}`}
                   >
-                    <PlainTextContent content={values[field] || '清空内容'} inline />
+                    <PlainTextContent content={values[field] || t('清空内容')} inline />
                   </div>
                 )}
               </div>
@@ -358,10 +327,10 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                   variant="ghost"
                   className="proposal-view"
                   data-reveal-on-hover
-                  aria-label={`查看${profileLabels[field]}`}
+                  aria-label={t(`查看${t(profileLabels[field])}`)}
                   onClick={() => setReading({ field })}
                 >
-                  {resolved ? '查看提案' : '查看全文'}
+                  {resolved ? t('查看提案') : t('查看全文')}
                 </Button>
               )}
             </div>
@@ -373,16 +342,16 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
           <div className="proposal-footer-note">
             <span>
               {stale
-                ? '资料已变化，请重新生成提案后保存。'
+                ? t('资料已变化，请重新生成提案后保存。')
                 : !chosen
-                  ? '请选择要保存的内容'
-                  : '未选中的内容保持不变'}
+                  ? t('请选择要保存的内容')
+                  : t('未选中的内容保持不变')}
             </span>
           </div>
           <div className="profile-proposal-actions">
             <Button variant="ghost" onClick={() => state.dismissProfile(message.id)}>
               <History size={16} />
-              保留原资料
+              {t('保留原资料')}
             </Button>
             <Button
               variant="outline"
@@ -390,26 +359,26 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
               onClick={() => state.updateInfo(message.changes!, message.id)}
             >
               <Check size={16} />
-              保存所选
+              {t('保存所选')}
             </Button>
           </div>
           {message.error && (
             <div className="danger-text" role="alert">
-              {message.error}
+              {t(message.error)}
             </div>
           )}
         </footer>
       ) : (
         <div className="proposal-footer-note proposal-result">
           {resolved
-            ? '未保存的内容保持原值，可随时查看本次提案。'
+            ? t('未保存的内容保持原值，可随时查看本次提案。')
             : message.status === 'streaming'
-              ? '完整生成后即可勾选保存。'
-              : '生成已中断，收到的内容保留供查看。请重试生成完整提案。'}
+              ? t('完整生成后即可勾选保存。')
+              : t('生成已中断，收到的内容保留供查看。请重试生成完整提案。')}
           {!complete && (
             <Button variant="outline" disabled>
               <Check size={16} />
-              保存所选
+              {t('保存所选')}
             </Button>
           )}
         </div>
@@ -418,6 +387,8 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
         <Modal
           title={readingTitle}
           wide
+          fixedHeader
+          overlayHeader
           className="proposal-reader"
           subtitle={
             resolved
@@ -425,12 +396,12 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
                 savedFields.includes(reading.field) &&
                 (!reading.skillId || savedSkillIds.includes(reading.skillId))
                 ? readingSkill?.kind === 'remove'
-                  ? '本次已删除的技能'
-                  : '本次已保存的提案内容'
-                : '未采用的提案内容，原资料保持不变。'
+                  ? t('本次已删除的技能')
+                  : t('本次已保存的提案内容')
+                : t('未采用的提案内容，原资料保持不变。')
               : readingSkill?.kind === 'remove'
-                ? '勾选此项将删除这条已有技能。'
-                : '本次提案内容'
+                ? t('勾选此项将删除这条已有技能。')
+                : t('本次提案内容')
           }
           onClose={() => setReading(null)}
           action={

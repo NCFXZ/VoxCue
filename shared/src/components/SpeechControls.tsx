@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect } from 'react';
 import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
@@ -73,7 +74,7 @@ export function SpeechControls({
             variant="outline"
             className="speech-select"
             disabled={busy || disabled}
-            aria-label={label}
+            aria-label={t(label)}
           >
             <span title={selectedLabel}>{selectedLabel}</span>
             <ChevronDown size={12} />
@@ -125,9 +126,9 @@ export function SpeechControls({
   return (
     <div className="speech-controls">
       {
-        <section className="speech-settings-section" aria-label="音频设备">
+        <section className="speech-settings-section" aria-label={t('音频设备')}>
           <div className="speech-section-heading">
-            <h3>音频设备</h3>
+            <h3>{t('音频设备')}</h3>
           </div>
           <div className="speech-device-grid">
             {(['system', 'microphone'] as AudioSource[]).map((source) => {
@@ -137,17 +138,17 @@ export function SpeechControls({
                 <div className={`speech-device ${enabled ? '' : 'is-disabled'}`} key={source}>
                   <div className="speech-device-heading">
                     {microphone ? <AudioLines size={17} /> : <Volume2 size={17} />}
-                    <strong>{microphone ? '面试者' : '面试官'}</strong>
-                    <span>{microphone ? '麦克风' : '系统音频'}</span>
+                    <strong>{microphone ? t('面试者') : t('面试官')}</strong>
+                    <span>{microphone ? t('麦克风') : t('系统音频')}</span>
                   </div>
                   {choose(
-                    microphone ? '麦克风设备' : '播放设备',
+                    microphone ? t('麦克风设备') : t('播放设备'),
                     microphone && !enabled ? '__disabled__' : (value.options[source] ?? ''),
                     [
-                      ...(microphone ? [{ id: '__disabled__', label: '不使用麦克风' }] : []),
+                      ...(microphone ? [{ id: '__disabled__', label: t('不使用麦克风') }] : []),
                       {
                         id: '',
-                        label: microphone ? '默认麦克风' : '默认播放设备',
+                        label: microphone ? t('默认麦克风') : t('默认播放设备'),
                         disabled:
                           microphone &&
                           devicesLoaded &&
@@ -172,22 +173,22 @@ export function SpeechControls({
                       });
                     },
                     devicesLoading,
-                    microphone ? '默认麦克风' : '默认播放设备',
+                    microphone ? t('默认麦克风') : t('默认播放设备'),
                     devicesLoading
-                      ? '正在读取设备…'
+                      ? t('正在读取设备…')
                       : microphone && enabled
                         ? error
-                          ? '设备读取失败'
+                          ? t('设备读取失败')
                           : devicesLoaded && !microphoneAvailable
                             ? value.options.microphone
-                              ? '所选麦克风已不可用'
-                              : '未检测到麦克风'
+                              ? t('所选麦克风已不可用')
+                              : t('未检测到麦克风')
                             : undefined
                         : undefined,
                   )}
                   {microphone && enabled && (error || (devicesLoaded && !microphoneAvailable)) && (
                     <small className="speech-device-error" role="alert">
-                      {error || '请连接麦克风，或选择“不使用麦克风”。'}
+                      {t(error || '请连接麦克风，或选择“不使用麦克风”。')}
                     </small>
                   )}
                 </div>
@@ -197,9 +198,12 @@ export function SpeechControls({
         </section>
       }
       <ScreenCaptureSettings disabled={busy} />
-      <section className="speech-settings-section speech-answer-settings" aria-label="模型设置">
+      <section
+        className="speech-settings-section speech-answer-settings"
+        aria-label={t('模型设置')}
+      >
         <div className="speech-section-heading">
-          <h3>模型设置</h3>
+          <h3>{t('模型设置')}</h3>
         </div>
         <SpeechModelSettings
           options={value.options}
@@ -207,26 +211,26 @@ export function SpeechControls({
           onChange={(options) => change({ options })}
         >
           <div className="speech-setting-row">
-            <span className="speech-setting-label">回答模型</span>
+            <span className="speech-setting-label">{t('回答模型')}</span>
             {live ? (
               choose(
-                '面试回答模型',
+                t('面试回答模型'),
                 value.modelId,
                 models,
                 selectModel,
                 !models.length,
-                '正在读取模型…',
+                t('正在读取模型…'),
               )
             ) : (
-              <span className="speech-current-answer">请先连接模型服务</span>
+              <span className="speech-current-answer">{t('请先连接模型服务')}</span>
             )}
           </div>
           <div className="speech-setting-row speech-effort-row">
-            <span className="speech-setting-label">思考强度</span>
+            <span className="speech-setting-label">{t('思考强度')}</span>
             {choose(
-              '面试回答思考强度',
+              t('面试回答思考强度'),
               value.effort,
-              ['auto' as const, ...efforts].map((id) => ({ id, label: effortLabels[id] })),
+              ['auto' as const, ...efforts].map((id) => ({ id, label: t(effortLabels[id]) })),
               (effort) => change({ effort: effort as ReasoningEffort | 'auto' }),
               !live || !efforts.length,
             )}
@@ -235,7 +239,7 @@ export function SpeechControls({
       </section>
       {error && (
         <small role="alert" className="danger-text">
-          {error}
+          {t(error)}
         </small>
       )}
     </div>

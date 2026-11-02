@@ -1,3 +1,4 @@
+import { t } from '../../i18n';
 import { useEffect, useRef, type ReactNode, type KeyboardEventHandler } from 'react';
 import { headerCoverage } from '../../platform/chromeGeometry';
 import { X, Trash } from '../icons';
@@ -102,7 +103,7 @@ export function Modal({
             <h2>{title}</h2>
             {titleAction}
           </div>
-          {subtitle && <p className="dialog-subtitle">{subtitle}</p>}
+          {subtitle && <p className="dialog-subtitle">{t(subtitle)}</p>}
         </div>
       </div>
       <div>
@@ -113,7 +114,7 @@ export function Modal({
           className="dialog-close-button"
           data-autofocus={initialFocus === 'close' ? '' : undefined}
 
-          aria-label={closeLabel}
+          aria-label={t(closeLabel)}
           onClick={onClose}
         >
           <X size={17} />

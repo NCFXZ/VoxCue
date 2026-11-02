@@ -96,7 +96,7 @@ try {
     .waitFor();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   const main = page;
-  await main.getByRole('button', { name: '开始面试', exact: true }).waitFor();
+  await main.locator('.interview-start-trigger').waitFor();
   assert.equal((await main.evaluate(() => window.desktop.authSession())).mode, 'copilot');
   const models = await main.evaluate(() => window.desktop.chatModels(true));
   assert.ok(models.ok);
@@ -313,7 +313,7 @@ try {
   app = undefined;
   app = await electron.launch({ args: [entry], env });
   page = await app.firstWindow();
-  await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
+  await page.locator('.interview-start-trigger').waitFor();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'copilot');
   await page.evaluate(() => window.desktop.signOut());
   assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
@@ -322,7 +322,7 @@ try {
   await installUiAccount(app);
   await page.evaluate(() => window.desktop.signInWithChatGPT());
   await page.reload();
-  await page.getByRole('button', { name: '开始面试', exact: true }).waitFor();
+  await page.locator('.interview-start-trigger').waitFor();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'chatgpt');
   const switched = await page.evaluate(() => window.desktop.chatModels(true));
   assert.ok(switched.ok);
@@ -331,7 +331,7 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   await page
     .getByRole('navigation', { name: '设置分类' })
-    .getByRole('button', { name: '个性化', exact: true })
+    .getByRole('button', { name: '通用', exact: true })
     .click();
   const chatGPTSettings = page.getByRole('dialog', { name: '设置', exact: true });
   await chatGPTSettings.getByRole('button', { name: 'AI 服务', exact: true }).click();

@@ -5,17 +5,9 @@ import path from 'node:path';
 import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
+import { serverRoot } from './server-reference.mjs';
 
 // Explicit, read-only checkout; every service/store below uses its own temporary database.
-const serverRoot = process.env.VOXCUE_TEST_SERVER_ROOT;
-assert.ok(
-  serverRoot && path.isAbsolute(serverRoot),
-  'Set VOXCUE_TEST_SERVER_ROOT to the independent 0.5.3 checkout',
-);
-assert.equal(
-  JSON.parse(await readFile(path.join(serverRoot, 'package.json'), 'utf8')).version,
-  '0.5.3',
-);
 const { adminFixture } = await import(
   pathToFileURL(path.join(serverRoot, 'test/admin-fixture.ts')).href
 );

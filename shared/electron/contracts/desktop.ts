@@ -2,6 +2,7 @@ import type { KnowledgeCall, KnowledgeResult, KnowledgeStatus } from './knowledg
 import type { InterviewImage, InterviewImageCall } from './interviewImages';
 import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
 import type { PresentationCapabilities } from './presentation';
+import type { UILanguage } from './uiLanguage';
 import type { UpdateCall, UpdateState } from './updates';
 import type { ComponentCall, ComponentState } from './components';
 import type { AuthSession, SignOutResult } from './auth';
@@ -46,6 +47,7 @@ export interface DesktopAPI {
   cloudSync(call: CloudSyncCall): Promise<CloudSyncResult>;
   readonly platform: 'macos' | 'windows' | 'unknown';
   readonly presentation: PresentationCapabilities;
+  readonly systemLanguage: UILanguage;
   readonly screenCapturePermissionSupported: boolean;
   screenCapturePermission(action: ScreenCapturePermissionAction): Promise<ScreenCapturePermission>;
   updates(call: UpdateCall): Promise<UpdateState>;
@@ -73,6 +75,7 @@ export interface DesktopAPI {
   ): Promise<ServiceResult<{ dataUrl?: string; canceled?: boolean }>>;
   interviewCancel(id: string): Promise<void>;
   setNativeTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
+  setUILanguage(language: UILanguage): Promise<void>;
   systemAccent(): Promise<string | null>;
   onSystemAccent(callback: (color: string | null) => void): () => void;
   authSession(): Promise<AuthSession | null>;
@@ -143,6 +146,7 @@ export interface DesktopInvokeMap {
   'interview:image': Invocation<DesktopAPI['interviewImage']>;
   'interview:cancel': Invocation<DesktopAPI['interviewCancel']>;
   'appearance:theme': Invocation<DesktopAPI['setNativeTheme']>;
+  'appearance:language': Invocation<DesktopAPI['setUILanguage']>;
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
   'auth:sign-in': Invocation<DesktopAPI['signInWithChatGPT']>;

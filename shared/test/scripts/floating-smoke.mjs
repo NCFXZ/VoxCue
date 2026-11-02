@@ -45,14 +45,14 @@ try {
   const login = await app.firstWindow();
   const main = await connectUiAccount(app, login);
   main.setDefaultTimeout(15000);
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   await main
     .getByRole('dialog', { name: '开始面试', exact: true })
     .getByRole('button', { name: '取消', exact: true })
     .click();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   await main.screenshot({});
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -186,7 +186,7 @@ try {
   await main.locator('.history-row').first().waitFor();
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   await main.getByRole('button', { name: '新对话', exact: true }).click();
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const [reopened] = await Promise.all([
     app.waitForEvent('window'),
     main.getByRole('button', { name: '确认开始', exact: true }).click(),

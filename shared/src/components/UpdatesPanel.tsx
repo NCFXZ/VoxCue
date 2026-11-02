@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useUpdates } from '../stores/updates';
 import { useState } from 'react';
 import githubLogo from '../assets/github.svg?inline';
@@ -41,13 +42,13 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
     <>
       {showVersion && (
         <div className="settings-entry">
-          <strong>当前版本</strong>
+          <strong>{t('当前版本')}</strong>
           <span className="settings-value">{state?.currentVersion ?? '—'}</span>
         </div>
       )}
       <div className="settings-entry">
         <div>
-          <strong id="auto-download-label">自动下载更新</strong>
+          <strong id="auto-download-label">{t('自动下载更新')}</strong>
         </div>
         <button
           type="button"
@@ -65,11 +66,11 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
         </button>
       </div>
       <div className="settings-entry">
-        <strong>软件更新</strong>
+        <strong>{t('软件更新')}</strong>
         <ActionTransition>
           {state?.phase === 'downloading' ? (
             <DownloadButton
-              label="更新"
+              label={t('更新')}
               progress={state.progress}
               onCancel={() => void updates.run('cancel')}
             />
@@ -93,14 +94,14 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
                 <Update size={16} />
               )}
               {state?.phase === 'checking'
-                ? '检查中…'
+                ? t('检查中…')
                 : state?.phase === 'installing'
-                  ? '准备更新…'
+                  ? t('准备更新…')
                   : downloaded
-                    ? '重启并更新'
+                    ? t('重启并更新')
                     : available
-                      ? '下载更新'
-                      : '检查更新'}
+                      ? t('下载更新')
+                      : t('检查更新')}
             </Button>
           )}
         </ActionTransition>
@@ -109,10 +110,10 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
         <div className="updates-notes">
           {label && (
             <p role="status" aria-live="polite">
-              {label}
+              {t(label)}
             </p>
           )}
-          <p>更新会保留本机聊天、附件、个人资料和面试记录。</p>
+          <p>{t('更新会保留本机聊天、附件、个人资料和面试记录。')}</p>
         </div>
         <a
           className="updates-feedback"
@@ -126,21 +127,21 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
           }}
         >
           <img className="service-brand-icon" src={githubLogo} alt="" aria-hidden="true" />
-          问题反馈
+          {t('问题反馈')}
         </a>
       </div>
       {feedbackError && (
         <p className="inline-error" role="alert">
-          {feedbackError}
+          {t(feedbackError)}
         </p>
       )}
       {(updates.error || state?.error) && (
         <p className="inline-error" role="alert">
-          {updates.error || state?.error}
+          {t(updates.error || state?.error)}
         </p>
       )}
       {state?.interviewActive && (
-        <p className="settings-hint">面试进行中，可以检查和下载更新，请结束面试后再安装。</p>
+        <p className="settings-hint">{t('面试进行中，可以检查和下载更新，请结束面试后再安装。')}</p>
       )}
     </>
   );

@@ -135,7 +135,7 @@ try {
       return original(options);
     };
   });
-  await main.getByRole('button', { name: '开始面试', exact: true }).click();
+  await main.locator('.interview-start-trigger').click();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
     main

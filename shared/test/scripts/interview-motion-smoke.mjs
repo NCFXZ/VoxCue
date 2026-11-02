@@ -61,8 +61,8 @@ try {
   const next = app.waitForEvent('window');
   await connectUiAccount(app, login);
   const main = await next;
-  await main.getByRole('button', { name: '开始面试', exact: true }).waitFor();
-  await click(main.getByRole('button', { name: '开始面试', exact: true }));
+  await main.locator('.interview-start-trigger').waitFor();
+  await click(main.locator('.interview-start-trigger'));
   const opened = app.waitForEvent('window');
   await click(main.getByRole('button', { name: '确认开始', exact: true }));
   const page = await opened;

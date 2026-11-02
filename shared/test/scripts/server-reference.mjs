@@ -9,6 +9,7 @@ import workspace from '../../scripts/workspace.mjs';
 const root = process.env.VOXCUE_TEST_SERVER_ROOT
   ? path.resolve(process.env.VOXCUE_TEST_SERVER_ROOT)
   : path.join(workspace.repositoryRoot, '..', 'VoxCue-server');
+export const serverRoot = root;
 const revision = '3bceb615dbba900f669322c301fc4b5b473dfb15';
 const git = (...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
 if (

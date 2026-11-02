@@ -1,6 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import { decodeJwt } from 'jose';
 import type { AuthSession, SignOutResult } from '../../contracts/auth';
+import type { UILanguage } from '../../contracts/uiLanguage';
 import { createAuthCallbackPage } from './callbackPage';
 import type { ManagedChatGPTAuth } from './managed';
 import {
@@ -36,6 +37,7 @@ interface Dependencies {
   storage: AuthStorage;
   openBrowser(url: string): Promise<void>;
   callbackLogo?: () => Promise<Buffer>;
+  uiLanguage?: () => UILanguage;
   fetch?: typeof fetch;
   verify?: typeof verifyIdentity;
   timeoutMs?: number;
@@ -202,7 +204,7 @@ export class ChatGPTAuthService {
       const hostId = await this.dependencies.storage.hostId();
       // A missing branding asset must not prevent an otherwise valid login.
       const logo = await this.dependencies.callbackLogo?.().catch(() => undefined);
-      const page = createAuthCallbackPage(logo);
+      const page = createAuthCallbackPage(logo, this.dependencies.uiLanguage?.());
       if (controller.signal.aborted) throw new Error('登录已取消或超时，请重试。');
       let consumed = false;
       let resolveCallback!: (value: { code: string; clientId: string }) => void;

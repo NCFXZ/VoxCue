@@ -1,5 +1,6 @@
 import type { Answer, Transcript } from './contracts';
 import type { InterviewRecord } from './history';
+import { t, uiLocale } from '../i18n';
 const normalized = (value: string) =>
   value
     .normalize('NFKC')
@@ -51,26 +52,30 @@ export function titleQuestions(record: InterviewRecord): string[] {
   return Array.from({ length: 24 }, (_, i) => unique[Math.round((i * (unique.length - 1)) / 23)]);
 }
 export function exportRecord(record: InterviewRecord): string {
-  const date = (time: number) => new Date(time).toLocaleString('zh-CN', { hour12: false });
+  const date = (time: number) => new Date(time).toLocaleString(uiLocale(), { hour12: false });
   const lines = [
     record.title,
     `${date(record.startedAt)} — ${date(record.endedAt)}`,
-    `${duration(record)} · ${visibleAnswers(record).length} 条 AI 回答`,
+    t('{0} · {1} 条 AI 回答', [duration(record), visibleAnswers(record).length]),
     '',
-    '面试转录',
+    t('面试转录'),
   ];
   for (const row of record.transcripts)
     lines.push(
-      `[${relativeTime(record, row)}] ${row.source === 'microphone' ? '我' : '面试官'}${row.reason === 'discontinuity' ? '（音频间断，可能不完整）' : row.final ? '' : '（未完成）'}`,
+      `[${relativeTime(record, row)}] ${t(row.source === 'microphone' ? '我' : '面试官')}${t(row.reason === 'discontinuity' ? '（音频间断，可能不完整）' : row.final ? '' : '（未完成）')}`,
       row.text,
       '',
     );
-  lines.push('AI 回答', '');
+  lines.push(t('AI 回答'), '');
   for (const answer of visibleAnswers(record)) {
-    lines.push(`问题：${answer.question}`, answer.content || '这条回答没有保存内容。', '');
+    lines.push(
+      t('问题：{0}', [answer.question]),
+      answer.content || t('这条回答没有保存内容。'),
+      '',
+    );
     if (answer.images?.length)
-      lines.push(`已保存截图：${answer.images.length}张（原图在应用面试记录中查看）`, '');
-    if (answer.reasoningSummary) lines.push('公开推理摘要：', answer.reasoningSummary, '');
+      lines.push(t('已保存截图：{0}张（原图在应用面试记录中查看）', [answer.images.length]), '');
+    if (answer.reasoningSummary) lines.push(t('公开推理摘要：'), answer.reasoningSummary, '');
   }
   return lines.join('\r\n');
 }

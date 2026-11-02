@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { Answer } from '../services/contracts';
 import { Loader, Refresh, Warning } from './icons';
 import { Button } from './ui/button';
@@ -18,10 +19,10 @@ export function InterviewAnswerStatus({ answer }: { answer: Answer }) {
         <Warning size={13} />
       ) : null}
       {retrying
-        ? `正在重试 ${answer.retry!.attempt}/${answer.retry!.limit}`
+        ? t('正在重试 {0}/{1}', [answer.retry!.attempt, answer.retry!.limit])
         : answer.status === 'failed'
-          ? '生成失败'
-          : '已停止'}
+          ? t('生成失败')
+          : t('已停止')}
     </span>
   );
 }
@@ -41,28 +42,28 @@ export function InterviewAnswerFailure({
     <div
       className="interview-answer-failure"
       role={live ? 'alert' : 'note'}
-      aria-label="回答生成失败"
+      aria-label={t('回答生成失败')}
     >
       <div className="interview-answer-failure-heading">
         <span className="interview-answer-failure-icon">
           <Warning size={20} />
         </span>
         <div>
-          <strong>回答生成失败</strong>
+          <strong>{t('回答生成失败')}</strong>
           <p>
             {answer.retry
-              ? `已自动重试 ${answer.retry.attempt} 次，仍未完成。`
-              : '本次回答未完成。'}
+              ? t('已自动重试 {0} 次，仍未完成。', [answer.retry.attempt])
+              : t('本次回答未完成。')}
           </p>
         </div>
       </div>
       <p className="interview-answer-failure-reason">
-        {answer.error || '未收到有效回答，请重新生成。'}
+        {t(answer.error || '未收到有效回答，请重新生成。')}
       </p>
       <div className="interview-answer-failure-actions">
         <Button className="interview-answer-retry" disabled={disabled} onClick={onRetry}>
           <Refresh size={15} />
-          重试面试回答
+          {t('重试面试回答')}
         </Button>
       </div>
     </div>

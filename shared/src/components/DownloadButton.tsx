@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { Button } from './ui/button';
 import { Loader, X } from './icons';
@@ -62,7 +63,7 @@ export function DownloadButton({
           : undefined
       }
 
-      aria-label={cancelReady ? `${label}，取消下载` : `${label}下载中`}
+      aria-label={cancelReady ? t('{0}，取消下载', [t(label)]) : t('{0}下载中', [t(label)])}
       aria-disabled={!cancelReady}
       onClick={() => {
         if (cancelReady) onCancel();
@@ -72,7 +73,7 @@ export function DownloadButton({
         <span
           className={`download-ring${value === undefined ? ' is-indeterminate' : ''}`}
           role="progressbar"
-          aria-label={`${label}下载进度`}
+          aria-label={t(`${label}下载进度`)}
           aria-valuemin={0}
           aria-valuemax={100}
           aria-valuenow={value}
@@ -97,16 +98,16 @@ export function DownloadButton({
         </span>
         {!iconOnly && (
           <span aria-hidden="true">
-            {status ?? (value === undefined ? '下载中' : `${Math.floor(value)}%`)}
+            {t(status) || (value === undefined ? t('下载中') : `${Math.floor(value)}%`)}
           </span>
         )}
       </span>
       <span ref={cancel} className="download-button-cancel" aria-hidden="true">
         <X size={iconOnly ? 17 : 16} />
         {hoverLabel ? (
-          <span className="download-button-cancel-label">{hoverLabel}</span>
+          <span className="download-button-cancel-label">{t(hoverLabel)}</span>
         ) : (
-          !iconOnly && '取消'
+          !iconOnly && t('取消')
         )}
       </span>
     </Button>
