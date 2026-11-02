@@ -123,6 +123,7 @@ if (process.argv.includes('--check')) {
     'AGENTS.md',
     'PROGRESS.md',
     'README.md',
+    'README.en.md',
     'package.json',
     'pnpm-workspace.yaml',
   ]);
