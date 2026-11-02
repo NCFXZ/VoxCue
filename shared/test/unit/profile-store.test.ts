@@ -2,6 +2,7 @@ import 'fake-indexeddb/auto';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { usePreparation } from '../../../shared/src/stores/preparation';
 import { useChatConnection } from '../../../shared/src/stores/chatConnection';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
 import { streamChat, ChatRequestError } from '../../../shared/src/services/chat';
 import { chatGPTProvider } from '../../../shared/electron/contracts/chat';
 vi.mock('../../../shared/src/services/chat', async (importOriginal) => ({
@@ -34,6 +35,7 @@ it('失败结果补齐先于IPC事件返回的正文和只读预览，不成为�
   expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
 });
 beforeEach(() => {
+  useGeneralSettings.setState({ language: 'zh-CN' });
   vi.stubGlobal('window', {});
   const values = new Map();
   vi.stubGlobal('localStorage', {

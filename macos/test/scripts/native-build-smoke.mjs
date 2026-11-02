@@ -1,13 +1,29 @@
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
+import { mkdir, copyFile, readdir } from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
+import { localizeUsageDescriptions } from '../../scripts/localize-usage-descriptions.mjs';
+import { assertLocalizedPermissions } from './assert-localized-permissions.mjs';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required');
 const root = workspace.platformRoot;
+const localizedBundle = path.join(testRoot, 'PermissionLocalization.app');
+await mkdir(path.join(localizedBundle, 'Contents/Resources'), { recursive: true });
+const runtimeContents = path.join(root, '.tools/electron-dev/Electron.app/Contents');
+await copyFile(
+  path.join(runtimeContents, 'Info.plist'),
+  path.join(localizedBundle, 'Contents/Info.plist'),
+);
+for (const locale of await readdir(path.join(runtimeContents, 'Resources'))) {
+  if (locale.endsWith('.lproj'))
+    await mkdir(path.join(localizedBundle, 'Contents/Resources', locale));
+}
+await localizeUsageDescriptions(localizedBundle);
+await assertLocalizedPermissions(localizedBundle);
 const qwen = path.join(root, 'native/bin/qwen');
 const qwenFiles = JSON.parse(readFileSync(path.join(qwen, 'build.json'), 'utf8')).files;
 const run = (command, args, env = process.env) => {

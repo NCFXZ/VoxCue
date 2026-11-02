@@ -102,6 +102,7 @@ try {
     'true',
   );
   await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '语言');
   assert.equal(await languageMenu.evaluate((node) => node === document.activeElement), true);
   await languageMenu.click();
   await settings.getByRole('menuitemradio', { name: 'English', exact: true }).click();

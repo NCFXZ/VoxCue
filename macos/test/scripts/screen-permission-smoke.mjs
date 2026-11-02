@@ -141,7 +141,7 @@ try {
   const page = await connectUiAccount(app, login);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
-  const start = () => page.getByRole('button', { name: '开始面试', exact: true }).click();
+  const start = () => page.locator('.interview-start-trigger').click();
   await start();
   const dialog = page.getByRole('dialog', { name: '开始面试' });
   await dialog
@@ -159,10 +159,11 @@ try {
   const interviewOpened = app.waitForEvent('window');
   await dialog.getByRole('button', { name: '确认开始', exact: true }).click();
   const interview = await interviewOpened;
-  await interview.waitForFunction(() => !!window.desktop);
+  await interview.locator('.floating-brand').waitFor();
   const closed = interview.waitForEvent('close');
   await interview.evaluate(() => window.desktop.confirmInterviewEnd());
   await closed;
+  await page.waitForFunction(() => document.visibilityState === 'visible');
   assert.equal(await app.evaluate(() => globalThis.screenFixture.preparations), 0);
   checks.push('屏幕权限单独显示；未授权仍可通过真实主进程打开纯语音浮窗，不截图');
   await start();
@@ -209,6 +210,7 @@ try {
   const grantedClosed = grantedInterview.waitForEvent('close');
   await grantedInterview.evaluate(() => window.desktop.confirmInterviewEnd());
   await grantedClosed;
+  await page.waitForFunction(() => document.visibilityState === 'visible');
   checks.push('未授权跳过准备；已授权建窗仅枚举零缩略图元数据，不读取图片');
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();

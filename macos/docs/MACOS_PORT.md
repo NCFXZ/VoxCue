@@ -60,6 +60,8 @@ Apple 没有公开的系统音频授权状态查询。按照[官方 Core Audio t
 
 macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Electron 宿主副本；厂商 node_modules 不修改。开发宿主、启动器与后续正式应用共用固定本地自签名证书，不等同 Developer ID 分发签名或公证。正常系统权限由用户决定，应用不修改 TCC 数据库或自动开启权限。
 
+0.6.7 的开发宿主与正式应用在签名前共用 `localize-usage-descriptions.mjs` 生成权限用途的 `InfoPlist.strings`；简体中文取自原 Info.plist，英文作为其他系统语言的回退。系统权限面板按 macOS 语言选择，不受应用内手动界面语言影响；启动器只负责 exec 到开发宿主。
+
 ## 固定本地签名与登录保留
 
 2026-10-19起，源码的开发和正式打包入口复用同一证书；已发布的旧安装包仍保留原ad-hoc签名。公开指纹在`macos/local-signing-public.json`，身份与口令仅保存在被Git忽略的`macos/.tools/development-signing/`专用钥匙串目录，目录0700、文件0600，私钥不可导出。构建只解锁此专用钥匙串，按证书指纹与原bundle ID签名并核对资源，不修改登录钥匙串的现有项或ACL，也不将自签名证书加入系统信任。Sparkle既有Ed25519密钥及公钥不变。

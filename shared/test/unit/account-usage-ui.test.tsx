@@ -1,7 +1,9 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { copilotAccountUsage } from '../../electron/backend/copilot/quota';
 import { chatGPTAccountUsage } from '../../electron/backend/chat/quota';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
+beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 const fixture = vi.hoisted(() => ({
   mode: 'copilot',
   usage: null as any,

@@ -56,7 +56,8 @@ export function ComponentsNotice({
           ) : (
             <>
               {!only &&
-                `${missing.map((item) => t(componentPresentation[item.id].label)).join(t('、'))}。`}
+                missing.map((item) => t(componentPresentation[item.id].label)).join(t('、')) +
+                  t('。')}
               {t('请在设置中下载或查看进度。')}
             </>
           )}

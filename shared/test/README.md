@@ -1,6 +1,8 @@
 ## 0.6.7 验证入口
 
-当前共享功能矩阵包含59组，Windows原生18组、五档DPI各27组；`language`与`preparation-guide`已纳入默认矩阵。临时验包使用`portable-native-smoke.mjs --with-installer`，不发布安装包。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
+当前共享功能矩阵包含59组，Windows原生18组、五档DPI各27组；Mac默认原生19组，`ui-refinement-matrix.mjs`五档缩放各29组，均纳入`language`与`preparation-guide`。Windows临时验包使用`portable-native-smoke.mjs --with-installer`；Mac使用`package-runtimes-smoke.mjs`与`package-smoke.mjs --install-archive`验证指定`VOXCUE_TEST_RELEASE_DIR`的最终资产。发行范围以当前`PROGRESS.md`为准。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
+
+Mac 0.6.7 语言专项补充默认浮窗截图按钮/状态标签、窄窗口音频设备卡片边界；`language-smoke.mjs --screenshots=<owner系统临时绝对目录>`可供英文目视检查，调用者结束后清理。中文文案与默认尺寸保持。依赖中文预期的夹具显式设定合成语言，系统默认语言和持久化单测继续独立验证；原生辅助功能入口为`cloud-accessibility-smoke.mjs`，不修改系统辅助功能设置。`native-build-smoke.mjs`和正式验包通过Foundation检查五种系统语言的权限说明，简体中文与原Info.plist逐字核对，其他语言选取英文；不触发权限申请。
 
 准备引导定向入口：平台目录执行`node ../shared/test/scripts/preparation-guide-smoke.mjs`，检查固定标题、按已保存资料生成的三个选项、悬停/键盘焦点说明淡入淡出及稳定高度、减少动态效果、中英文浅深色/窄窗对齐、聊天中及确认保存后不插入引导、新对话按已保存资料显示、草稿保护、重载与使用指南外链。`--preview`只将内存图片输出到终端供查看；合成资料与临时profile退出清理。资料确认/失败恢复继续使用`profile-ui-smoke.mjs`与对应单测；`chat-progress-smoke.mjs`覆盖部分回答失败后的重试/复制并排对齐，`--preview-actions`仅输出内存图片。
 

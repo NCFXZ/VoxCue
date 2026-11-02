@@ -979,6 +979,7 @@ try {
           animation.playState !== 'running',
       ),
   );
+  await focusUiWindow(app, floating);
   await floating.locator('.floating-brand').hover();
   await floating.waitForFunction(
     (fill) => getComputedStyle(document.querySelector('.floating-brand')).backgroundColor === fill,

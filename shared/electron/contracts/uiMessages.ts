@@ -155,6 +155,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   已查询本地资料: 'Searched local documents',
   正在查询本地资料: 'Searching local documents',
   '、': ', ',
+  '。': '. ',
   '{0}：{1}': '{0}: {1}',
   确认删除: 'Confirm delete',
   确认重置: 'Confirm reset',

@@ -1,7 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownContent } from '../../../shared/src/components/MarkdownContent';
 import { normalizeMath } from '../../../shared/src/services/math';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
+beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 describe('Markdown 回答', () => {
   it('不接受原型继承的信任或宏，恶意公式不创建链接或远程资源', () => {
     const keys = ['trust', 'voxcueInjected'];

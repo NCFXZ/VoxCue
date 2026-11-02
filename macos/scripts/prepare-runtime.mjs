@@ -9,6 +9,10 @@ import { buildMacIcons } from './build-icons.mjs';
 import { loadDevelopmentSigning, verifyLocalApp } from './development-signing.mjs';
 import { signMacApp } from './sign-app.mjs';
 import { buildCredentials } from './build-credentials.mjs';
+import {
+  englishUsageDescriptions,
+  localizeUsageDescriptions,
+} from './localize-usage-descriptions.mjs';
 
 // A local development host gives TCC a named app with explicit usage strings.
 // Vendor node_modules and the user's installed applications are never modified.
@@ -27,7 +31,8 @@ export async function prepareRuntime() {
   const expected = JSON.stringify({
     electron: version,
     identity: 'com.voxcue.development',
-    revision: 4,
+    revision: 5,
+    usageDescriptions: englishUsageDescriptions,
     signingCertificate: signing.sha256,
     icon: createHash('sha256')
       .update(await readFile(icns))
@@ -65,6 +70,7 @@ export async function prepareRuntime() {
         if (result.status || result.error)
           throw Error('Unable to prepare development audio usage descriptions.');
       }
+      await localizeUsageDescriptions(stagedApp);
       for (let attempt = 0; ; attempt++) {
         // File Provider can attach Finder metadata to this fresh staging bundle
         // during the copy, including nested frameworks. Remove only this fresh

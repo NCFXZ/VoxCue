@@ -82,15 +82,19 @@ try {
   const input = () => surface.getByRole('textbox', { name: '聊天消息', exact: true });
   await input().waitFor();
   await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
-  const material = await app.evaluate(({ app, BrowserWindow }, probePath) => {
-    if (!app.getPath('userData').includes('/test/results/window-native-'))
-      throw Error('Non-test profile');
-    const require = process
-      .getBuiltinModule('module')
-      .createRequire(app.getAppPath() + '/package.json');
-    const win = BrowserWindow.getAllWindows().find((win) => win.getTitle() === 'VoxCue');
-    return require(probePath).probe(win.getNativeWindowHandle());
-  }, materialProbe);
+  const mainWindowId = await (await app.browserWindow(page)).evaluate((win) => win.id);
+  const material = await app.evaluate(
+    ({ app, BrowserWindow }, { probePath, mainWindowId }) => {
+      if (!app.getPath('userData').includes('/test/results/window-native-'))
+        throw Error('Non-test profile');
+      const require = process
+        .getBuiltinModule('module')
+        .createRequire(app.getAppPath() + '/package.json');
+      const win = BrowserWindow.fromId(mainWindowId);
+      return require(probePath).probe(win.getNativeWindowHandle());
+    },
+    { probePath: materialProbe, mainWindowId },
+  );
   assert.ok(material.sidebars > 0 && material.visible > 0, JSON.stringify(material));
   assert.equal(
     await page.locator('body').evaluate((node) => getComputedStyle(node).backgroundColor),
@@ -117,10 +121,9 @@ try {
   assert.equal(metrics.collapseCenter, 25);
   assert.ok(metrics.brandTop >= 44);
   assert.deepEqual(
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()
-        .find((w) => w.getTitle() === 'VoxCue')
-        .getWindowButtonPosition(),
+    await app.evaluate(
+      ({ BrowserWindow }, id) => BrowserWindow.fromId(id).getWindowButtonPosition(),
+      mainWindowId,
     ),
     { x: 16, y: 18 },
   );
@@ -181,11 +184,7 @@ try {
   await page.evaluate(() => window.desktop.updateSessionState(false));
   await input().fill('Mac 窗口恢复测试草稿');
   const closed = page.waitForEvent('close');
-  await app.evaluate(({ BrowserWindow }) =>
-    BrowserWindow.getAllWindows()
-      .find((w) => w.getTitle() === 'VoxCue')
-      .close(),
-  );
+  await app.evaluate(({ BrowserWindow }, id) => BrowserWindow.fromId(id).close(), mainWindowId);
   await closed;
   assert.equal(testProcess.exitCode, null);
   assert.equal(app.windows().length, 0);

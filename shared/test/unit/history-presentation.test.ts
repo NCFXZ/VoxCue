@@ -8,6 +8,7 @@ import {
   relativeTime,
 } from '../../../shared/src/services/historyPresentation';
 import { useHistory } from '../../../shared/src/stores/history';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
 const record = (): InterviewRecord => ({
   id: 'history-r',
   title: '面试记录',
@@ -29,6 +30,7 @@ const storage = {
   },
 };
 beforeEach(() => {
+  useGeneralSettings.setState({ language: 'zh-CN' });
   values = new Map();
   vi.stubGlobal('localStorage', storage);
   vi.stubGlobal('window', { desktop: { generateInterviewTitle: vi.fn(async () => {}) } });

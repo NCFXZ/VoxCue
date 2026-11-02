@@ -48,6 +48,8 @@ for (const scale of scales) {
     'local-mode',
     'telemetry',
     'settings',
+    'language',
+    'preparation-guide',
     'profile-ui',
     'history-branding',
     'login',

@@ -1,4 +1,6 @@
-import { expect, it } from 'vitest';
+import { beforeEach, expect, it } from 'vitest';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
+beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 import { accountUsageSummary } from '../../src/services/accountUsageSummary';
 import { chatGPTAccountUsage } from '../../electron/backend/chat/quota';
 

@@ -17,6 +17,8 @@ import React from 'react';
 import {createRoot} from 'react-dom/client';
 import {CloudAccountPanel} from ${JSON.stringify(path.join(workspace.sharedRoot, 'src/components/CloudAccountPanel.tsx'))};
 import {useCloudAccount} from ${JSON.stringify(path.join(workspace.sharedRoot, 'src/stores/cloudAccount.ts'))};
+import {useGeneralSettings} from ${JSON.stringify(path.join(workspace.sharedRoot, 'src/stores/generalSettings.ts'))};
+useGeneralSettings.setState({language:'zh-CN'});
 const pending=[],calls=[];
 window.desktop={cloudAccount:()=>{throw Error('Unexpected IPC')}};
 const state={configured:true,verified:false,user:null};

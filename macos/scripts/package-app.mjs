@@ -11,6 +11,7 @@ import { loadDevelopmentSigning } from './development-signing.mjs';
 import { buildQwen } from './build-qwen.mjs';
 import { buildCredentials } from './build-credentials.mjs';
 import { stageRuntimeDependencies } from './runtime-dependencies.mjs';
+import { localizeUsageDescriptions } from './localize-usage-descriptions.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -178,6 +179,7 @@ export async function buildMacApp(output, publicKey) {
   const app = path.join(paths[0], 'VoxCue.app');
   const contents = path.join(app, 'Contents');
   const resources = path.join(contents, 'Resources');
+  await localizeUsageDescriptions(app);
   await cp(
     path.join(tools, 'Sparkle.framework'),
     path.join(contents, 'Frameworks/Sparkle.framework'),

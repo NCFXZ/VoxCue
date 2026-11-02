@@ -2,12 +2,14 @@ import { beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { CloudStorageSummary } from '../../src/components/CloudStorageSummary';
 import type { CloudStorage } from '../../electron/contracts/cloudSync';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
 
 const fixture = vi.hoisted(() => ({ storage: undefined as CloudStorage | undefined }));
 vi.mock('../../src/stores/cloudSync', () => ({
   useCloudSync: (selector: (state: typeof fixture) => unknown) => selector(fixture),
 }));
 beforeEach(() => {
+  useGeneralSettings.setState({ language: 'zh-CN' });
   fixture.storage = undefined;
 });
 function setStorage(profile: number, history: number, knowledgebase: number) {

@@ -1,6 +1,7 @@
 import { connectUiAccount, installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { captureRequested } from './capture-requested.mjs';
 import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -53,11 +54,23 @@ try {
             el.scrollWidth > el.clientWidth + 2,
         )
         .map((el) => [el.className, el.textContent.trim(), el.clientWidth, el.scrollWidth]);
-      return { leaks: [...new Set(leaks)], clipped };
+      const escapedDevices = [...root.querySelectorAll('.speech-device')]
+        .filter(visible)
+        .filter((device) => {
+          const bounds = device.getBoundingClientRect();
+          return [...device.children].some((child) => {
+            const rect = child.getBoundingClientRect();
+            return rect.left < bounds.left || rect.right > bounds.right;
+          });
+        })
+        .map((device) => device.textContent.trim());
+      return { leaks: [...new Set(leaks)], clipped, escapedDevices };
     });
     console.log(name, JSON.stringify(result));
     assert.deepEqual(result.leaks, [], name + ' must be localized');
     assert.deepEqual(result.clipped, [], name + ' controls must fit');
+    assert.deepEqual(result.escapedDevices, [], name + ' device controls stay inside their cards');
+    await captureRequested(target, name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
     return result;
   };
   for (const name of [

@@ -1,6 +1,8 @@
-import { afterEach, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ComponentState } from '../../electron/contracts/components';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
+beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 const current = vi.hoisted(() => ({ state: null as ComponentState | null }));
 vi.mock('../../src/stores/components', () => ({ useComponents: (select: any) => select(current) }));
 import { ComponentsNotice } from '../../src/components/ComponentsNotice';
@@ -31,6 +33,16 @@ function state(speech: boolean, qwen: boolean, rag = true): ComponentState {
     ],
   };
 }
+it('英文缺失组件列表使用英文标点，中文提示保持原样', () => {
+  current.state = state(false, false, false);
+  expect(renderToStaticMarkup(<ComponentsNotice />)).toContain(
+    '轻量语音识别、知识库检索。请在设置中下载或查看进度。',
+  );
+  useGeneralSettings.setState({ language: 'en' });
+  expect(renderToStaticMarkup(<ComponentsNotice />)).toContain(
+    'Lightweight speech recognition, Knowledge retrieval. Download components or check progress in Settings.',
+  );
+});
 it.each([
   [true, false],
   [false, true],

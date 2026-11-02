@@ -19,6 +19,7 @@ import { localSigningCertificate, verifyLocalApp } from '../../scripts/developme
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
+import { assertLocalizedPermissions } from './assert-localized-permissions.mjs';
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
@@ -37,6 +38,7 @@ run('/usr/bin/ditto', ['-x', '-k', zip, root]);
 const bundle = path.join(root, 'VoxCue.app');
 const signing = await localSigningCertificate();
 verifyLocalApp(bundle, signing, 'com.voxcue.app');
+await assertLocalizedPermissions(bundle);
 assert.equal(
   run('/usr/bin/lipo', ['-archs', path.join(bundle, 'Contents/MacOS/VoxCue')]).trim(),
   'arm64',
