@@ -1,6 +1,8 @@
 ## 0.6.8 验证入口
 
-当前共享功能矩阵包含60组（新增完整用量组合），Windows原生18组、五档DPI各27组；Mac默认原生19组，`ui-refinement-matrix.mjs`五档缩放各29组，均纳入`language`与`preparation-guide`。Windows临时验包使用`portable-native-smoke.mjs --with-installer`；Mac使用`package-runtimes-smoke.mjs`与`package-smoke.mjs --install-archive`验证指定`VOXCUE_TEST_RELEASE_DIR`的最终资产。发行范围以当前`PROGRESS.md`为准。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
+当前共享功能矩阵包含60组（新增完整用量组合），Windows原生18组、五档DPI各27组；Mac默认原生19组，`ui-refinement-matrix.mjs`保留五档缩放原有各29组并追加`account-usage-overview`，共150项，均纳入`language`与`preparation-guide`。Windows临时验包使用`portable-native-smoke.mjs --with-installer`；Mac使用`package-runtimes-smoke.mjs`与`package-smoke.mjs --install-archive`验证指定`VOXCUE_TEST_RELEASE_DIR`的最终资产。发行范围以当前`PROGRESS.md`为准。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
+
+Mac 五档矩阵的 `--list` 只列缩放、完整功能清单及资源需求，不启动 GUI 或准备模型；`--suite=<name,...>` 配合 `--scale=<固定五档之一>` 用于修复后的定向复测，未指定时仍运行全部150项。单独选择已审计的合成专项时沿用共享 `needsModels` 策略，默认完整矩阵及未知/真实推理专项仍校验固定模型。矩阵全程检查解锁的 owner 控制台，锁定/未知立即终止当前子进程并停止后续 GUI；原180秒超时和断言不变，普通失败或启动错误继续其余所选项并最终返回非零。
 
 0.6.8 测试调度：平台目录执行 `node ../shared/test/scripts/functional-suite.mjs --list` 可只列完整排程、不准备模型或启动窗口。默认仅将 `cloud-protocol`、`server-connection`、`telemetry-v2-http` 三个独立临时数据库/随机 loopback 端口的纯 Node 协议检查以最多两个进程分批执行；完成后再串行执行全部 GUI、原生、推理、性能与长稳。`--jobs=1` 恢复原有串行顺序，`--jobs=3` 仅影响上述三个已审计组。单组失败仍执行其余组并保留非零结果。已审计的合成界面/协议专项无需提前准备真实模型；完整矩阵及未知专项保持原有模型校验/隔离副本。Windows DPI 选择这些合成专项时同样按需准备；原有全部原生与五档 DPI 组合保持。
 

@@ -680,6 +680,22 @@ p {
   color: var(--muted);
   display: block;
 }
+.sidebar:not(.collapsed) .user-button:has(.account-usage-low) {
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr) 15px;
+  row-gap: 2px;
+}
+.sidebar:not(.collapsed) .user-button:has(.account-usage-low) .user-info {
+  display: contents;
+}
+.sidebar:not(.collapsed) .user-button:has(.account-usage-low) .user-info small {
+  grid-column: 1 / -1;
+  grid-row: 2;
+}
+.sidebar:not(.collapsed) .user-button:has(.account-usage-low) > svg {
+  grid-column: 3;
+  grid-row: 1;
+}
 .collapsed {
   width: 68px;
   padding-left: 10px;

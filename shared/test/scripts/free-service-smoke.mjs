@@ -33,6 +33,8 @@ async function assertSidebarLayout(main) {
     const rect = range.getBoundingClientRect();
     return {
       right: rect.right,
+      left: rect.left,
+      start: node.getBoundingClientRect().left,
       bound: node.getBoundingClientRect().right,
       rows: new Set([...range.getClientRects()].map((row) => Math.round(row.top))).size,
       valueTop: rect.top,
@@ -40,11 +42,55 @@ async function assertSidebarLayout(main) {
     };
   });
   assert.ok(
+    layout.left >= layout.start - 1,
+    'Compact quotas stay inside the sidebar start: ' + JSON.stringify(layout),
+  );
+  assert.ok(
     layout.right <= layout.bound + 1,
     'Compact quotas fit without sidebar truncation: ' + JSON.stringify(layout),
   );
   assert.equal(layout.rows, 1, 'Sidebar quotas share one line');
   assert.ok(layout.valueTop >= layout.headingBottom, 'Provider title is above the quota row');
+}
+async function assertNarrowSidebar(main, language) {
+  const window = await app.browserWindow(main);
+  const size = await window.evaluate((window) => {
+    const size = window.getSize();
+    window.setSize(...window.getMinimumSize());
+    return size;
+  });
+  try {
+    await main.waitForFunction(
+      () => Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width - 200) < 1,
+    );
+    for (const dark of [false, true]) {
+      await main.evaluate(
+        (value) => document.documentElement.classList.toggle('dark', value),
+        dark,
+      );
+      await assertSidebarLayout(main);
+    }
+    if (process.argv.some((argument) => argument.startsWith('--screenshots='))) {
+      const english = language === 'en';
+      await main
+        .getByRole('button', { name: english ? 'Close settings' : '关闭设置', exact: true })
+        .click();
+      await main.getByRole('dialog').waitFor({ state: 'detached' });
+      await captureRequested(main.locator('.user-button'), 'usage-sidebar-' + language + '-narrow');
+      await main
+        .getByRole('button', { name: english ? 'User menu' : '用户菜单', exact: true })
+        .click();
+      await main
+        .getByRole('menuitem', { name: english ? 'Settings' : '设置', exact: true })
+        .click();
+      await main.getByRole('button', { name: english ? 'General' : '通用', exact: true }).click();
+    }
+  } finally {
+    await window.evaluate((window, size) => window.setSize(...size), size);
+    await main.waitForFunction(
+      () => Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width - 230) < 1,
+    );
+  }
 }
 try {
   await installUiAccount(app, { speech: true, components: true });
@@ -168,6 +214,7 @@ try {
       }
     }
     if (weekly === 80.01 && five === 0) {
+      await assertNarrowSidebar(main, 'zh');
       await settings.getByRole('button', { name: '通用', exact: true }).click();
       await settings.getByRole('button', { name: '语言', exact: true }).click();
       await main.getByRole('menuitemradio', { name: 'English', exact: true }).click();
@@ -185,6 +232,7 @@ try {
         await assertWarningColor(values.nth(1), true);
         await assertSidebarLayout(main);
       }
+      await assertNarrowSidebar(main, 'en');
       const english = main.getByRole('dialog', { name: 'Settings', exact: true });
       await english.getByRole('button', { name: 'Language', exact: true }).click();
       await main.getByRole('menuitemradio', { name: '简体中文', exact: true }).click();

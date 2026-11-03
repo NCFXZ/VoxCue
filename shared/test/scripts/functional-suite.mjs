@@ -214,8 +214,11 @@ if (options.includes('--list')) {
           }
         }, 2000);
       desktopGuard?.unref();
-      const code = await new Promise((resolve, reject) => {
-        child.once('error', reject);
+      const code = await new Promise((resolve) => {
+        child.once('error', (error) => {
+          output += error.stack + '\n';
+          resolve(null);
+        });
         child.once('exit', resolve);
       }).finally(() => {
         clearTimeout(timer);
