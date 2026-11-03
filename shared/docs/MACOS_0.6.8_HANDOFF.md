@@ -82,7 +82,7 @@
 
 | ID | 变化 | Mac 操作与预期 |
 | --- | --- | --- |
-| M033 | 清理只删除经确认的可重建/重复产物。 | Windows 删除四个 installer-ui 中间文件及与 0.6.6/0.6.7 正式归档 SHA256 相同的重复安装输出；没有删除现用业务或有效测试。Mac 不重试这些 Windows 路径。 |
+| M033 | 清理只删除经确认的可重建/重复产物。 | Windows 删除四个 installer-ui 中间文件及与 0.6.6/0.6.7 正式归档 SHA256 相同的重复安装输出；0.6.8 发布归档后再清理本轮重建的同类中间文件、重复三项和 builder-debug.yml，保留正式归档与最终 ASAR 基线。没有删除现用业务或有效测试，临时脚本/资料/截图不入仓库。Mac 不重试这些 Windows 路径。 |
 | M034 | 0.6.8 源码与安装包分离发布。 | 私有源码仓库只接收审核后的源码/文档；公开 VoxCue-releases 仅安装 EXE、blockmap、latest.yml。Mac 0.6.8 包尚需本机按现有签名和验包流程单独生成。 |
 | M035 | 更新选版仍按本平台完整稳定资产处理。 | Windows-only 0.6.8 发布后，Mac 必须继续选择完整的 Mac 0.6.7 资产，直到本平台 0.6.8 完整发布；不因 Latest 标签而误取 EXE、空更新或错误架构。 |
 | M036 | 既有功能继续全量回归。 | 原登录/账号、独立 AI、资料/技能、聊天与流式生命周期、知识库/RAG、云同步/导出/删除、历史、截图、权限、音频/AEC/模型切换、组件、更新、20 轮面试、600 秒双路音频、安全/对抗、翻译与五档视觉检查全部保留。 |
@@ -95,6 +95,7 @@
 | M043 | Windows DPI 入口在恢复鼠标前保留中断原因。 | 桌面/鼠标守卫失败仍立即停止；即使后续恢复指针也失败，终端仍能看到导致矩阵中断的原始异常。Mac 保持本机守卫，不放宽权限、鼠标归属或几何断言。 |
 | M044 | Windows 拖动夹具以真实物理尺寸验证不缩放。 | `WindowProbe` 只读核对目标 HWND 属于本测试 PID，读取外框/客户区；拖动前后物理宽高和 Renderer 视口逐值精确相等，原生位置及 DIP 投影也精确核对。避免把位置变化引起的 DIP 包围取整误认成窗口缩放，不增加容差；Mac 保持原有原生矩形精确断言。 |
 | M045 | Windows 历史页滚动条夹具适配原有 CSP 与绘制缓存。 | 像素色标通过本测试页面已加载样式表的 CSSOM 设置并恢复；以可逆的 overflow 切换刷新滚动条绘制后还原原内联值/优先级及滚动位置，精确断言视口不变。先确认色标生效，再执行原来的像素、表头、覆盖和导出命中检查；不放宽应用 CSP，不改变正式页面样式与滚动条几何。Mac 保持本机现有入口。 |
+| M046 | 0.6.7 包输入之后的中英文 README 文档调整一并保留。 | README 聚焦软件用途、主要功能与注意事项，移除版本日志、安装步骤和开发细节；补充浮窗本机可见而共享画面隐藏的能力与系统/共享软件兼容条件。这些提交只改文档，没有增加新的屏幕共享或 RAG 实现；Mac 沿用现有原生隐藏/截屏保护并按本机兼容条件验收。源码仓库链接发行仓库，发行仓库保留不绑定版本号的安装包入口。 |
 
 主要变更文件：`shared/src/components/{AccountUsageSummary,Sidebar,PreparationPage,FloatingInterview}.tsx`、`shared/src/services/accountUsageSummary.ts`、`shared/src/stores/chatConnection.ts`、`shared/src/styles.css`、`shared/src/platform/webMaterials.css`、`shared/electron/contracts/{desktop,interviewLayout,uiMessages}.ts`、`shared/electron/{main.ts,preload.ts,ipc/interview.ts}`、`shared/test/scripts/{free-service-smoke,account-usage-overview-smoke,functional-suite,suite-policy,language-smoke,interview-window-drag}.mjs`、对应额度/IPC/布局/平台/调度单测、`windows/electron/presentation.ts`、`windows/test/unit/presentation.test.ts`、`windows/test/scripts/{windows-suite,interview-layout-smoke,interview-workflow-smoke,history-scrollbar-smoke}.mjs`、`windows/test/fixtures/WindowProbe.cs`、共享版本与本平台生成清单，以及进度/测试/清理/发行文档。Windows 专属脚本只用于理解接续，不从 Mac 编辑。
 
