@@ -125,11 +125,36 @@ async function size(page, width, height) {
   // Observe the production resize after motion completes. Forcing setSize or
   // viewport emulation here can resize the HWND before its exit animation ends.
   await page.waitForFunction(() => !document.querySelector('.floating-shell').dataset.panelMotion);
-  await page.waitForFunction(
-    (expected) =>
-      Math.abs(innerWidth - expected.width) <= 1 && Math.abs(innerHeight - expected.height) <= 1,
-    { width, height },
-  );
+  await page
+    .waitForFunction(
+      (expected) =>
+        Math.abs(innerWidth - expected.width) <= 1 && Math.abs(innerHeight - expected.height) <= 1,
+      { width, height },
+    )
+    .catch(async (error) => {
+      const viewport = await page.evaluate(() => ({
+        width: innerWidth,
+        height: innerHeight,
+        ratio: devicePixelRatio,
+      }));
+      const native = await app.evaluate(({ BrowserWindow, screen }, url) => {
+        const win = BrowserWindow.getAllWindows().find(
+          (window) => window.webContents.getURL() === url,
+        );
+        return win
+          ? {
+              bounds: win.getBounds(),
+              content: win.getContentSize(),
+              workArea: screen.getDisplayMatching(win.getBounds()).workArea,
+            }
+          : null;
+      }, page.url());
+      console.error(
+        'Interview size mismatch',
+        JSON.stringify({ expected: { width, height }, viewport, native }),
+      );
+      throw error;
+    });
   const native = await app.evaluate(
     ({ BrowserWindow }, value) => {
       const window = BrowserWindow.getAllWindows().find(
@@ -304,7 +329,7 @@ try {
   floating.setDefaultTimeout(15000);
   floating.on('pageerror', (e) => errors.push(e.message));
   await floating.getByRole('button', { name: '结束面试', exact: true }).waitFor();
-  await size(floating, 1060, 664);
+  await size(floating, 1060, 682);
   const config = await floating.evaluate(() => window.desktop.interviewState());
   assert.equal(config.configuration.effort, 'high');
   assert.equal(config.configuration.options.microphone, 'fixture-mic');
@@ -450,7 +475,7 @@ try {
   assert.ok(Math.abs(original.top - collapsed.top) <= 1);
   await floating.screenshot({});
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
-  await size(floating, 1060, 664);
+  await size(floating, 1060, 682);
   const restored = await toolbarPosition();
   assert.ok(Math.abs(original.center - restored.center) <= 1);
   assert.ok(Math.abs(original.top - restored.top) <= 1);

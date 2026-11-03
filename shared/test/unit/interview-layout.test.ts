@@ -3,7 +3,6 @@ import {
   interviewCanvas,
   fitInterviewBounds,
   draggedInterviewScale,
-  interviewPanelScale,
 } from '../../../shared/electron/contracts/interviewLayout';
 
 const area = { x: -1920, y: 0, width: 1920, height: 1080 };
@@ -18,10 +17,7 @@ it('调整面板与隐藏转写保留固定控件空间，恢复工具栏中心�
     const both = fitInterviewBounds(original, area, scale);
     const hidden = fitInterviewBounds(both, area, scale, false);
     expect(hidden.height).toBe(both.height);
-    expect(interviewPanelScale(hidden.width, false)).toBeCloseTo(
-      interviewPanelScale(both.width),
-      2,
-    );
+    expect((hidden.width - 24) / 600).toBeCloseTo((both.width - 40) / 1020, 2);
     expect(Math.abs(hidden.x + hidden.width / 2 - both.x - both.width / 2)).toBeLessThanOrEqual(
       0.5,
     );
@@ -38,8 +34,8 @@ it('小屏幕保留面板比例和固定控件空间，不能超出工作区', (
       expect(bounds.y).toBeGreaterThanOrEqual(0);
       expect(bounds.x + bounds.width).toBeLessThanOrEqual(small.width);
       expect(bounds.y + bounds.height).toBeLessThanOrEqual(small.height);
-      expect((bounds.height - 164) / 500).toBeCloseTo(
-        interviewPanelScale(bounds.width, visible),
+      expect((bounds.height - 182) / 500).toBeCloseTo(
+        (bounds.width - (visible ? 40 : 24)) / (visible ? 1020 : 600),
         2,
       );
     }

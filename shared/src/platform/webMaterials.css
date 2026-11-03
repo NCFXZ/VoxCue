@@ -317,9 +317,9 @@
   background: transparent;
 }
 .web-materials .floating-notices > div {
+  border-color: transparent;
   -webkit-backdrop-filter: var(--web-material-filter);
   backdrop-filter: var(--web-material-filter);
-  border: 1px solid transparent;
 }
 /* Like chat, the scroller fills the panel behind fixed chrome and the composer.
    Measured padding leaves the first/last content reachable above those controls. */

@@ -20,7 +20,8 @@ import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
-import { accountUsageSummary } from '../services/accountUsageSummary';
+import { isAccountUsageLow } from '../services/accountUsageSummary';
+import { AccountUsageSummary } from './AccountUsageSummary';
 import { SidebarUpdate } from './SidebarUpdate';
 interface Props {
   userName: string;
@@ -50,21 +51,17 @@ export function Sidebar({
   const preparation = usePreparation();
   useEffect(() => {
     if (!connection.live) return;
-    const refresh = () => {
-      void useChatConnection.getState().refreshUsage();
-    };
-    const timer = window.setInterval(refresh, 60_000);
-    window.addEventListener('focus', refresh);
-    return () => {
-      clearInterval(timer);
-      window.removeEventListener('focus', refresh);
-    };
+    return useChatConnection.getState().watchUsage();
   }, [connection.live]);
-  const remaining = !connection.live
-    ? '未连接 AI 服务'
-    : connection.loadingUsage
-      ? '正在读取 AI 服务用量…'
-      : accountUsageSummary(connection.usage);
+  const lowUsage =
+    connection.live && !connection.loadingUsage && isAccountUsageLow(connection.usage);
+  const remaining = !connection.live ? (
+    t('未连接 AI 服务')
+  ) : connection.loadingUsage ? (
+    t('正在读取 AI 服务用量…')
+  ) : (
+    <AccountUsageSummary usage={connection.usage} mode="sidebar" />
+  );
   const [loggingOut, setLoggingOut] = useState(false);
   return (
     <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
@@ -190,7 +187,7 @@ export function Sidebar({
               <span className="avatar">{userName.slice(0, 1).toUpperCase()}</span>
               <span className="user-info">
                 <strong title={accountLabel}>{accountLabel}</strong>
-                <small>{t(remaining)}</small>
+                <small className={lowUsage ? 'account-usage-low' : undefined}>{remaining}</small>
               </span>
               <ChevronsUpDown size={15} />
             </button>

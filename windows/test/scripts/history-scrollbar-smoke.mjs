@@ -4,6 +4,7 @@ import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 
 const selected = process.argv.find((arg) => arg.startsWith('--scale='))?.slice(8);
 const scales = selected ? [selected] : ['1', '1.25', '1.5', '1.75', '2'];
@@ -117,10 +118,47 @@ for (const scale of scales) {
               .evaluate((node) => getComputedStyle(node).position === 'absolute'));
           // Give only the thumb a sentinel color, preserving its real native
           // geometry, viewport, track margins and the toolbar composition.
-          const sentinel = await page.addStyleTag({
-            content:
+          const sentinel = await page.evaluateHandle(() => {
+            const sheet = [...document.styleSheets].find((value) =>
+              value.href?.startsWith(new URL('.', location.href).href),
+            );
+            if (!sheet) throw Error('The application stylesheet is unavailable');
+            const index = sheet.cssRules.length;
+            // Application CSP rejects inline style tags. Instrument only this
+            // owned document's existing CSSOM; do not relax its security policy.
+            sheet.insertRule(
               '.record-transcript-scroll::-webkit-scrollbar-thumb{background:rgb(255,0,255)!important;border:0!important}',
+              index,
+            );
+            return { sheet, index };
           });
+          assert.equal(
+            await scroll.evaluate(
+              (node) => getComputedStyle(node, '::-webkit-scrollbar-thumb').backgroundColor,
+            ),
+            'rgb(255, 0, 255)',
+            'The pixel sentinel must be applied before inspecting native scrollbar geometry',
+          );
+          await scroll.evaluate(async (node) => {
+            // Recreate only the scrollbar's cached paint after the CSSOM
+            // instrumentation. Restore the exact inline style and geometry.
+            const top = node.scrollTop;
+            const value = node.style.getPropertyValue('overflow');
+            const priority = node.style.getPropertyPriority('overflow');
+            node.style.setProperty('overflow', 'hidden');
+            node.getBoundingClientRect();
+            if (value) node.style.setProperty('overflow', value, priority);
+            else node.style.removeProperty('overflow');
+            node.scrollTop = top;
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+            );
+          });
+          assert.deepEqual(
+            await scroll.boundingBox(),
+            viewport,
+            'Color instrumentation preserves the exact viewport',
+          );
           const clip = {
             x: Math.max(0, Math.floor(viewport.x + viewport.width - 12)),
             y: Math.max(0, Math.floor(toolbar.y)),
@@ -146,9 +184,35 @@ for (const scale of scales) {
               }
             return { first: ys.length ? Math.min(...ys) : null, count: ys.length };
           }, png.toString('base64'));
-          await sentinel.evaluate((node) => node.remove());
           if (thumb.first === null)
-            assert.equal(covered, true, 'Only the narrow answer overlay may occlude the thumb');
+            await captureRequested(page, `history-thumb-${scale}-${size[0]}-${dark}-${expanded}`);
+          await sentinel.evaluate(({ sheet, index }) => sheet.deleteRule(index));
+          await sentinel.dispose();
+          if (thumb.first === null)
+            assert.equal(
+              covered,
+              true,
+              'Only the narrow answer overlay may occlude the thumb: ' +
+                JSON.stringify({
+                  scale,
+                  size,
+                  dark,
+                  expanded,
+                  toolbar,
+                  viewport,
+                  thumb,
+                  metrics: await scroll.evaluate((node) => ({
+                    scrollHeight: node.scrollHeight,
+                    clientHeight: node.clientHeight,
+                    scrollWidth: node.scrollWidth,
+                    clientWidth: node.clientWidth,
+                    scrollbarWidth: getComputedStyle(node).scrollbarWidth,
+                    track: getComputedStyle(node, '::-webkit-scrollbar-track').marginTop,
+                    position: getComputedStyle(node).position,
+                    thumb: getComputedStyle(node, '::-webkit-scrollbar-thumb').backgroundColor,
+                  })),
+                }),
+            );
           else {
             assert.ok(
               clip.y + thumb.first >= toolbar.y + toolbar.height - 1,

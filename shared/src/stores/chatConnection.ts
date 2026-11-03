@@ -12,7 +12,8 @@ interface State {
   usageError: string | null;
   loadingUsage: boolean;
   load(live: boolean, force?: boolean, demo?: boolean): Promise<void>;
-  refreshUsage(): Promise<void>;
+  refreshUsage(scope?: 'chat' | 'interview'): Promise<void>;
+  watchUsage(scope?: 'chat' | 'interview'): () => void;
 }
 let generation = 0;
 let usageRevision = 0;
@@ -56,14 +57,28 @@ export const useChatConnection = create<State>((set, get) => ({
       }
     }
   },
-  async refreshUsage() {
-    if (!get().live || !window.desktop || get().loadingUsage) return;
+  watchUsage(scope = 'chat') {
+    const refresh = () => void get().refreshUsage(scope);
+    refresh();
+    const timer = window.setInterval(refresh, 60_000);
+    window.addEventListener('focus', refresh);
+    return () => {
+      clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      ++usageRevision;
+      set({ usage: null, loadingUsage: false, usageError: null });
+    };
+  },
+  async refreshUsage(scope = 'chat') {
+    if ((scope === 'chat' && !get().live) || !window.desktop || get().loadingUsage) return;
     const current = generation;
     const revision = ++usageRevision;
     // Keep only the previous layout available to the loading renderer; it hides all values.
     set({ loadingUsage: true, usageError: null });
     try {
-      const result = await window.desktop.chatAccountUsage();
+      const result = await (scope === 'interview'
+        ? window.desktop.interviewAccountUsage()
+        : window.desktop.chatAccountUsage());
       if (current !== generation || revision !== usageRevision) return;
       if (!result.ok) throw new Error(failureText(result.error));
       set({ usage: result.usage, usageError: null });

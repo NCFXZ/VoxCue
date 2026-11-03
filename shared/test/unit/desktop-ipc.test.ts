@@ -377,6 +377,38 @@ describe('完整面试问题通过既有 AI 接口', () => {
     question: 'Explain ROS2 scheduling?',
     modelId: 'test',
   };
+  it('面试额度仅允许已确认 AI 面试的本窗口主 frame 零参数读取', async () => {
+    const { call, chat, sender } = interviewSetup();
+    expect(await call('interview:account-usage')).toEqual({ ok: true, usage: null });
+    chat.accountUsage.mockClear();
+    await expect(call('interview:account-usage', { token: 'private' })).rejects.toThrow('Invalid');
+    const read = bridge.handlers.get('interview:account-usage')!;
+    for (const senderFrame of [undefined, {}])
+      await expect(read({ sender, senderFrame })).rejects.toThrow('Unauthorized frame');
+    await expect(read({ sender: {}, senderFrame: {} })).rejects.toThrow('Unauthorized window');
+    expect(chat.accountUsage).not.toHaveBeenCalled();
+    chat.accountUsage.mockRejectedValueOnce(Error('synthetic quota unavailable'));
+    expect(await call('interview:account-usage')).toMatchObject({ ok: false });
+    for (const demo of [false, true]) {
+      const disabled = interviewSetup(demo, {
+        ...defaultInterviewConfiguration(),
+        aiEnabled: false,
+        modelId: 'test',
+      });
+      expect(await disabled.call('interview:account-usage')).toEqual({ ok: true, usage: null });
+      expect(disabled.chat.accountUsage).not.toHaveBeenCalled();
+    }
+  });
+  it('面试退出或关闭 AI 后不交付迟到额度', async () => {
+    const configuration = { ...defaultInterviewConfiguration(), aiEnabled: true, modelId: 'test' };
+    const { call, chat } = interviewSetup(false, configuration);
+    let finish!: (value: any) => void;
+    chat.accountUsage.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const pending = call('interview:account-usage');
+    configuration.aiEnabled = false;
+    finish({ provider: 'chatgpt', status: 'available', quotas: [], queriedAt: 0 });
+    expect(await pending).toEqual({ ok: true, usage: null });
+  });
   it('失败后最多自动重试三次，复用问题快照并丢弃旧尝试的迟到事件', async () => {
     vi.useFakeTimers();
     try {
@@ -827,6 +859,7 @@ describe('受控 preload 契约', () => {
       ],
       ['exportHistory', 'history:export', [{ title: 'title', text: 'text' }]],
       ['interviewModels', 'interview:models', []],
+      ['interviewAccountUsage', 'interview:account-usage', []],
       ['updateInterviewModel', 'interview:update-model', [{ modelId: 'test', effort: 'auto' }]],
       ['interviewAnswer', 'interview:answer', [{ id: 'q', question: 'why', modelId: 'model' }]],
       ['interviewCancel', 'interview:cancel', ['q']],

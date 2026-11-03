@@ -1,7 +1,12 @@
 import { afterAll, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
 const native = vi.hoisted(() => ({ themeSource: 'system' }));
-vi.mock('electron', () => ({ nativeTheme: native }));
+const nativeScreen = vi.hoisted(() => ({
+  getDisplayMatching: vi.fn(),
+  dipToScreenRect: vi.fn((_win, bounds) => bounds),
+  screenToDipRect: vi.fn(),
+}));
+vi.mock('electron', () => ({ nativeTheme: native, screen: nativeScreen }));
 import { createPresentation } from '../../electron/presentation';
 import { ScreenPermission } from '../../electron/screenPermission';
 const original = Object.getOwnPropertyDescriptor(process, 'getSystemVersion');
@@ -21,6 +26,27 @@ const windowPort = () => ({
   hide: vi.fn(),
   on: vi.fn(),
 });
+it.each([0, -1646])(
+  'fractional-DPI resize separates position and extent at display x=%s',
+  (originX) => {
+    const bounds = { x: originX + 293, y: 149, width: 1060, height: 682 };
+    nativeScreen.getDisplayMatching.mockReturnValue({ bounds: { x: originX, y: 0 } });
+    nativeScreen.screenToDipRect.mockImplementation((_win, rect) =>
+      rect.y === 149
+        ? { ...rect, width: 1061, height: 684 }
+        : { ...rect, width: 1060, height: 683 },
+    );
+    const win = { setBounds: vi.fn() };
+    createPresentation({ icon: 'VoxCue.ico', interviewOpen: () => true }).resizeInterview?.(
+      win as unknown as BrowserWindow,
+      bounds,
+    );
+    expect(win.setBounds).toHaveBeenCalledExactlyOnceWith(
+      { ...bounds, width: 1060, height: 681 },
+      false,
+    );
+  },
+);
 it('Acrylic 能力遵循 Windows 11 22H2 的实际支持边界', () => {
   version = '10.0.19045';
   expect(

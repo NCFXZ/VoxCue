@@ -86,7 +86,6 @@ import {
   type UILanguage,
 } from './contracts/uiLanguage';
 import {
-  interviewPanelScale,
   fitInterviewBounds,
   draggedInterviewScale,
   interviewLayout,
@@ -281,8 +280,13 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
     interviewTranscriptVisible,
     interviewCollapsed,
   );
+  // Panels are laid out from height. Deriving the next scale from the rounded
+  // width can change height on a transcript toggle after a fractional-DPI drag.
   if (!interviewCollapsed)
-    interviewScale = interviewPanelScale(bounds.width, interviewTranscriptVisible);
+    interviewScale = Math.max(
+      0,
+      (bounds.height - interviewLayout.chromeHeight) / interviewLayout.panelHeight,
+    );
   // Windows fractional DPI can round a requested DIP to a different DIP when
   // read back. Compare the last request as well, without ignoring user moves.
   if (

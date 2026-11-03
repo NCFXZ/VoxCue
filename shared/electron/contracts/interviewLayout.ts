@@ -6,7 +6,8 @@ export const interviewLayout = {
   panelHeight: 500,
   gap: 16,
   padding: 12,
-  chromeHeight: 164,
+  // Reserve the toolbar and about 2.5 single-line status notices.
+  chromeHeight: 182,
   minimumScale: 0.75,
   collapsedWidth: 420,
   collapsedHeight: 72,
@@ -14,11 +15,6 @@ export const interviewLayout = {
 
 export function interviewPanelWidth(transcriptVisible = true) {
   return interviewLayout.answerWidth + (transcriptVisible ? interviewLayout.transcriptWidth : 0);
-}
-
-export function interviewPanelScale(width: number, transcriptVisible = true) {
-  const fixedWidth = interviewLayout.padding * 2 + (transcriptVisible ? interviewLayout.gap : 0);
-  return Math.max(0, (width - fixedWidth) / interviewPanelWidth(transcriptVisible));
 }
 
 export function interviewCanvas(transcriptVisible = true, collapsed = false, scale = 1) {

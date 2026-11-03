@@ -101,3 +101,43 @@ it('刷新仅保留旧快照供骨架沿用结构，失败仍清空；账户切�
   await refresh;
   expect(useChatConnection.getState().usage).toBeNull();
 });
+
+it('面试额度用受控面试接口读取，聚焦/定时刷新，退出清除定时器及迟到快照', async () => {
+  vi.useFakeTimers();
+  const events = new EventTarget();
+  const quota = copilotAccountUsage({
+    snapshots: { chat: { entitlementRequests: 50, usedRequests: 45 } },
+  });
+  const mainRead = vi.fn();
+  const interviewRead = vi.fn().mockResolvedValue({ ok: true, usage: quota });
+  vi.stubGlobal('window', {
+    desktop: { chatAccountUsage: mainRead, interviewAccountUsage: interviewRead },
+    setInterval,
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+  });
+  const stop = useChatConnection.getState().watchUsage('interview');
+  try {
+    await vi.advanceTimersByTimeAsync(0);
+    expect(useChatConnection.getState().usage).toEqual(quota);
+    events.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(interviewRead).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(interviewRead).toHaveBeenCalledTimes(3);
+    expect(mainRead).not.toHaveBeenCalled();
+    let finish!: (value: any) => void;
+    interviewRead.mockImplementationOnce(() => new Promise((resolve) => (finish = resolve)));
+    const pending = useChatConnection.getState().refreshUsage('interview');
+    stop();
+    finish({ ok: true, usage: quota });
+    await pending;
+    events.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(120_000);
+    expect(interviewRead).toHaveBeenCalledTimes(4);
+    expect(useChatConnection.getState()).toMatchObject({ usage: null, loadingUsage: false });
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
+});

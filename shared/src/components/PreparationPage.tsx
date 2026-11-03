@@ -51,7 +51,8 @@ import { ResponseProgress } from './ResponseProgress';
 import { ChatSources } from './ChatSources';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
-import { accountUsageSummary } from '../services/accountUsageSummary';
+import { accountUsageSummaryParts } from '../services/accountUsageSummary';
+import { AccountUsageSummary } from './AccountUsageSummary';
 import { useModelProvider } from './useModelProvider';
 const audioAccessLabels = {
   granted: '可用',
@@ -83,6 +84,8 @@ export function PreparationPage({
   const state = usePreparation();
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
+  const usageSummary = accountUsageSummaryParts(connection.usage, 'all');
+  const lowUsage = connection.live && !connection.loadingUsage && usageSummary?.low;
   const interviewSettings = useInterviewSettings();
   const selectedSpeechComponent = speechComponent(interviewSettings.configuration.options);
   const speechReady = useComponentReady(selectedSpeechComponent);
@@ -492,13 +495,15 @@ export function PreparationPage({
               <dd>{state.selectedKnowledgeBaseId ? interviewKnowledgeName : t('不使用知识库')}</dd>
             </div>
             <div>
-              <dt>{t('AI 服务剩余用量')}</dt>
-              <dd>
-                {!connection.live
-                  ? t('未连接 AI 服务')
-                  : connection.loadingUsage
-                    ? t('正在读取…')
-                    : accountUsageSummary(connection.usage)}
+              <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
+              <dd className={lowUsage ? 'account-usage-low' : undefined}>
+                {!connection.live ? (
+                  t('未连接 AI 服务')
+                ) : connection.loadingUsage ? (
+                  t('正在读取…')
+                ) : (
+                  <AccountUsageSummary usage={connection.usage} showHeading={false} mode="all" />
+                )}
               </dd>
             </div>
             <div>

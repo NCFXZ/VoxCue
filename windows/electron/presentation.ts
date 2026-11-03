@@ -26,12 +26,20 @@ export function createPresentation(options: {
       // second corrective resize would still expose a frame with a shifted
       // toolbar at fractional DPI.
       const rounded = screen.screenToDipRect(win, screen.dipToScreenRect(win, bounds));
+      // Round the extent at the display origin. Enclosing a fractional top/left
+      // twice also expands its extent; compensating that positional error as a
+      // size error can remove two DIPs from the actual client area.
+      const origin = screen.getDisplayMatching(bounds).bounds;
+      const extent = screen.screenToDipRect(
+        win,
+        screen.dipToScreenRect(win, { ...bounds, x: origin.x, y: origin.y }),
+      );
       win.setBounds(
         {
           x: 2 * bounds.x - rounded.x,
           y: 2 * bounds.y - rounded.y,
-          width: 2 * bounds.width - rounded.width,
-          height: 2 * bounds.height - rounded.height,
+          width: 2 * bounds.width - extent.width,
+          height: 2 * bounds.height - extent.height,
         },
         false,
       );

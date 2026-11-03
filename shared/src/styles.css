@@ -87,6 +87,7 @@
   --border-hover: color-mix(in srgb, var(--system-accent) 45%, var(--border));
   --focus: var(--accent);
   --danger: #c52b32;
+  --warning: #91620d;
   --danger-fill: #c52b32;
   --danger-fill-hover: #a91f27;
   --danger-soft: rgba(197, 43, 50, 0.08);
@@ -126,6 +127,7 @@
   --border-hover: color-mix(in srgb, var(--system-accent) 45%, var(--border));
   --focus: var(--accent);
   --danger: #ff858b;
+  --warning: #e9bf65;
   --danger-fill: #cc3640;
   --danger-fill-hover: #e0434e;
   --danger-soft: rgba(255, 133, 139, 0.1);
@@ -4271,11 +4273,48 @@ details[open] > summary > .disclosure-chevron {
 .floating-error {
   color: var(--danger);
 }
-.floating-warning {
-  color: #91620d;
+.floating-warning,
+.user-info small.account-usage-low,
+.interview-start-summary dd.account-usage-low {
+  color: var(--warning);
+  white-space: pre-line;
+  overflow-wrap: anywhere;
 }
-.dark .floating-warning {
-  color: #e9bf65;
+.account-usage-summary {
+  display: inline-flex;
+  align-items: flex-start;
+  gap: 2px;
+  max-width: 100%;
+  white-space: normal;
+}
+.account-usage-heading {
+  flex-shrink: 0;
+}
+.account-usage-summary.is-low {
+  flex-direction: column;
+  gap: 4px;
+}
+.account-usage-summary.is-low .account-usage-heading {
+  color: var(--muted);
+  font-size: var(--type-secondary);
+}
+.account-usage-values {
+  min-width: 0;
+  font-variant-numeric: tabular-nums;
+}
+.account-usage-values,
+.floating-usage-notice {
+  white-space: nowrap;
+}
+.account-usage-summary.is-all,
+.account-usage-summary.is-sidebar.is-low {
+  color: var(--foreground);
+}
+.account-usage-summary.is-all .account-usage-values {
+  white-space: normal;
+}
+.account-usage-value.is-low {
+  color: var(--warning);
 }
 .floating-shell.is-resizing .floating-panel {
   backdrop-filter: none;

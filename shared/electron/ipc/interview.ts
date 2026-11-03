@@ -103,6 +103,19 @@ export function registerInterviewIpc(d: {
       return { ok: false, error: publicFailure(error) };
     }
   });
+  handleDesktop('interview:account-usage', async (e, ...args) => {
+    d.requireInterview(e);
+    if (!e.senderFrame || e.senderFrame !== e.sender.mainFrame) throw Error('Unauthorized frame');
+    if (args.length) throw Error('Invalid request');
+    if (d.isDemo() || !d.configuration()?.aiEnabled) return { ok: true, usage: null };
+    try {
+      const usage = (await d.chat.accountUsage?.()) ?? null;
+      d.requireInterview(e);
+      return { ok: true, usage: d.configuration()?.aiEnabled ? usage : null };
+    } catch (error) {
+      return { ok: false, error: publicFailure(error) };
+    }
+  });
   handleDesktop('interview:update-model', async (e, value) => {
     d.requireInterview(e);
     const configuration = d.configuration();

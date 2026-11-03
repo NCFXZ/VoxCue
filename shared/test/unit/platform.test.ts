@@ -96,9 +96,9 @@ describe('桌面平台边界', () => {
     if (role === 'interview')
       expect(options).toMatchObject({
         width: 1060,
-        height: 664,
+        height: 682,
         minWidth: 805,
-        minHeight: 539,
+        minHeight: 557,
         hasShadow: false,
         transparent: true,
         alwaysOnTop: true,

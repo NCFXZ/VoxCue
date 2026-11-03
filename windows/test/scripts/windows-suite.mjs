@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { probe } from './window-probe.mjs';
+import { needsModels } from '../../../shared/test/scripts/suite-policy.mjs';
 
 assert.equal(process.platform, 'win32');
 const requireDesktop = () =>
@@ -50,7 +51,7 @@ if (suites[0] === '--dpi') {
   const names = suites.slice(1).filter((arg) => !arg.startsWith('--scale='));
   const selected = names.length ? names : allowed;
   for (const name of selected) assert.ok(allowed.includes(name), 'Unknown DPI suite: ' + name);
-  const models = await prepareModelFixtures();
+  const models = needsModels(selected) ? await prepareModelFixtures() : null;
   const failures = [];
   const cursor = probe('cursor');
   try {
@@ -67,9 +68,13 @@ if (suites[0] === '--dpi') {
             env: {
               ...process.env,
               VOXCUE_TEST_SCALE_FACTOR: scale,
-              VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
-              VOXCUE_TEST_RAG_MODEL: models.ragModel,
-              VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+              ...(models
+                ? {
+                    VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
+                    VOXCUE_TEST_RAG_MODEL: models.ragModel,
+                    VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
+                  }
+                : {}),
             },
             stdio: ['ignore', 'pipe', 'pipe'],
             windowsHide: true,
@@ -88,6 +93,11 @@ if (suites[0] === '--dpi') {
         console.log((code === 0 ? 'PASS DPI ' : 'FAIL DPI ') + scale + ' ' + name);
       }
     }
+  } catch (error) {
+    // Cursor restoration can also fail if the desktop changed. Keep the cause
+    // that stopped the matrix visible before attempting that cleanup.
+    console.error('Windows DPI matrix interrupted:', error);
+    throw error;
   } finally {
     probe('move', cursor.x, cursor.y);
   }

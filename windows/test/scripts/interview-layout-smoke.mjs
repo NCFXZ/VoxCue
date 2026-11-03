@@ -236,7 +236,7 @@ try {
     rows.map((row) => row.title),
     [
       '面试知识库',
-      'AI 服务剩余用量',
+      'AI 服务用量',
       '面试官 · 系统音频',
       '面试者 · 麦克风',
       '语音模型',
@@ -722,12 +722,27 @@ try {
       [...document.querySelectorAll('.floating-panel')].filter((node) => node.checkVisibility())
         .length === 1,
   );
-  await floating.waitForFunction(
-    (width) =>
-      Math.abs(document.querySelector('.floating-answer').getBoundingClientRect().width - width) <=
-      1,
-    visibleAnswer.width,
-  );
+  await floating
+    .waitForFunction(
+      (width) =>
+        Math.abs(
+          document.querySelector('.floating-answer').getBoundingClientRect().width - width,
+        ) <= 1,
+      visibleAnswer.width,
+    )
+    .catch(async (error) => {
+      console.error(
+        'Transcript toggle size mismatch',
+        JSON.stringify({
+          before: visibleAnswer,
+          panels: await panelBoxes(),
+          native: await nativeBounds(),
+          viewport: await floating.evaluate(() => ({ width: innerWidth, height: innerHeight })),
+          frames: await app.evaluate(() => globalThis.layoutBoundsTrace.slice(-6)),
+        }),
+      );
+      throw error;
+    });
   const hiddenStart = await assertRatios();
   assert.ok(Math.abs(hiddenStart[0].width - visibleAnswer.width) <= 1);
   await handle.press('ArrowDown');

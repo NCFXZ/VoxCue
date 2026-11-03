@@ -11,6 +11,7 @@ using System.Windows.Automation;
 // This probe is compiled only into an owned temporary test directory.
 class WindowProbe {
   [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] struct NativeRect { public int Left,Top,Right,Bottom; }
   [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int x,y;public uint data,flags,time;public UIntPtr extra; }
   [StructLayout(LayoutKind.Sequential)] struct KeyboardInput { public ushort key,scan;public uint flags,time;public UIntPtr extra; }
   [StructLayout(LayoutKind.Explicit)] struct InputUnion { [FieldOffset(0)]public MouseInput mouse;[FieldOffset(0)]public KeyboardInput keyboard; }
@@ -25,6 +26,8 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr handle);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetUserObjectInformationW(IntPtr handle,int index,StringBuilder name,int bytes,out int needed);
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out NativeRect rect);
+  [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out NativeRect rect);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
   [DllImport("user32.dll")] static extern IntPtr GetWindowLongPtrW(IntPtr window,int index);
@@ -193,6 +196,13 @@ class WindowProbe {
         Print(new{nativeSaveDialog=true,canceled=cancel,title});return 0;
       }
       if(args[0]=="cursor") {Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Print(new{x=p.X,y=p.Y});return 0;}
+      if(args[0]=="geometry") {
+        var owned=new IntPtr(long.Parse(args[1]));uint pid;
+        if(GetWindowThreadProcessId(owned,out pid)==0||pid!=uint.Parse(args[2]))throw new Exception("Geometry target does not belong to the expected test process");
+        NativeRect outer,client;
+        if(!GetWindowRect(owned,out outer)||!GetClientRect(owned,out client))throw new Exception("Owned window geometry unavailable");
+        Print(new{x=outer.Left,y=outer.Top,width=outer.Right-outer.Left,height=outer.Bottom-outer.Top,clientWidth=client.Right-client.Left,clientHeight=client.Bottom-client.Top});return 0;
+      }
       if(args[0]=="move") {
         // Callers already supply physical screen pixels. Normalizing them again
         // through virtual-desktop mouse_event coordinates can move to another point.

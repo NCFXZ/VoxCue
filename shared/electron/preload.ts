@@ -78,6 +78,7 @@ const desktop: DesktopAPI = {
   reconnectInterviewAudio: (options) => invoke('interview:reconnect-audio', options),
   onDictationEvent: (callback) => subscribe('dictation:event', callback),
   interviewModels: () => invoke('interview:models'),
+  interviewAccountUsage: () => invoke('interview:account-usage'),
   updateInterviewModel: (value) => invoke('interview:update-model', value),
   interviewAnswer: (request) => invoke('interview:answer', request),
   interviewScreenshot: (call) => invoke('interview:screenshot', call),

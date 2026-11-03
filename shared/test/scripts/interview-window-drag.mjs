@@ -22,6 +22,26 @@ export async function exerciseInterviewWindowDrag(app, page) {
         .getBounds(),
     );
   const before = await native();
+  const ownedWindow =
+    nativeProbe &&
+    (await app.evaluate(({ BrowserWindow }) => {
+      const bytes = BrowserWindow.getAllWindows()
+        .find((w) => w.webContents.getURL().endsWith('#interview'))
+        .getNativeWindowHandle();
+      return {
+        handle:
+          bytes.length === 8 ? bytes.readBigUInt64LE().toString() : String(bytes.readUInt32LE()),
+        pid: process.pid,
+      };
+    }));
+  const physical = () =>
+    ownedWindow && nativeProbe('geometry', ownedWindow.handle, ownedWindow.pid);
+  const beforePhysical = physical();
+  const beforeViewport = await page.evaluate(() => ({
+    width: innerWidth,
+    height: innerHeight,
+    dpr: devicePixelRatio,
+  }));
   const originalCursor = nativeProbe?.('cursor');
   await app.evaluate(({ screen, ipcMain, BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows().find((w) =>
@@ -161,11 +181,47 @@ export async function exerciseInterviewWindowDrag(app, page) {
       },
       { x: before.x + 48, y: before.y + 35 },
     );
-    assert.deepEqual(
-      await native(),
-      { ...before, ...expectedPosition },
-      'Dragging must move the real native window without resizing the panels',
-    );
+    if (beforePhysical) {
+      const afterPhysical = physical();
+      for (const key of ['width', 'height', 'clientWidth', 'clientHeight'])
+        assert.equal(afterPhysical[key], beforePhysical[key], 'Dragging preserves physical ' + key);
+      assert.deepEqual(
+        await page.evaluate(() => ({
+          width: innerWidth,
+          height: innerHeight,
+          dpr: devicePixelRatio,
+        })),
+        beforeViewport,
+        'Dragging must preserve the renderer viewport exactly',
+      );
+      const projected = await app.evaluate(({ screen, BrowserWindow }, rect) => {
+        const win = BrowserWindow.getAllWindows().find((w) =>
+          w.webContents.getURL().endsWith('#interview'),
+        );
+        return screen.screenToDipRect(win, {
+          x: rect.x,
+          y: rect.y,
+          width: rect.width,
+          height: rect.height,
+        });
+      }, afterPhysical);
+      assert.deepEqual(
+        await native(),
+        projected,
+        'Native DIP bounds match the independently measured physical rectangle',
+      );
+      assert.deepEqual(
+        { x: projected.x, y: projected.y },
+        expectedPosition,
+        'Dragging reaches the exact projected position',
+      );
+    } else {
+      assert.deepEqual(
+        await native(),
+        { ...before, ...expectedPosition },
+        'Dragging must move the real native window without resizing the panels',
+      );
+    }
     const previousMoves = await app.evaluate(() => globalThis.gripTest.moves);
     await page.mouse.move(x + 20, y + 15);
     await until(
@@ -272,6 +328,14 @@ export async function exerciseInterviewWindowDrag(app, page) {
       'Drag diagnostic (synthetic input only):',
       JSON.stringify({
         native: await app.evaluate(() => globalThis.gripTest),
+        beforePhysical,
+        afterPhysical: physical(),
+        beforeViewport,
+        afterViewport: await page.evaluate(() => ({
+          width: innerWidth,
+          height: innerHeight,
+          dpr: devicePixelRatio,
+        })),
         events: await page.evaluate(() => window.dragEvents),
       }),
     );

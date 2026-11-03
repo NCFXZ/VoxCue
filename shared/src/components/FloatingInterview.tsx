@@ -43,10 +43,22 @@ import { useInterviewWindowDrag } from './useInterviewWindowDrag';
 import { useInterviewPanelMotion } from './useInterviewPanelMotion';
 import { useInterviewFontSize } from '../interviewTypography';
 import { useTextareaSize } from './useTextareaSize';
+import { useChatConnection } from '../stores/chatConnection';
+import { accountUsageSummary, isAccountUsageLow } from '../services/accountUsageSummary';
 export function FloatingInterview() {
   useEffect(() => useComponents.getState().connect(), []);
   const fontSize = useInterviewFontSize();
   const state = useInterview();
+  const connection = useChatConnection();
+  const usageEnabled = state.aiEnabled && state.status !== 'ended';
+  const lowUsage = usageEnabled && !connection.loadingUsage && isAccountUsageLow(connection.usage);
+  useEffect(() => {
+    if (usageEnabled) return useChatConnection.getState().watchUsage('interview');
+  }, [usageEnabled]);
+  useEffect(() => {
+    if (usageEnabled && !state.generating && state.answers.length)
+      void useChatConnection.getState().refreshUsage('interview');
+  }, [usageEnabled, state.generating, state.answers.length]);
   const screenshotExpanded = state.capturingScreenshot || state.screenshots.length > 0;
   const macScreenshotShortcut = window.desktop?.platform === 'macos';
   const screenshotButton = useRef<HTMLButtonElement>(null);
@@ -847,6 +859,11 @@ export function FloatingInterview() {
         )}
         {!collapsed && (
           <footer className="floating-notices" aria-label={t('面试状态提示')}>
+            {lowUsage && (
+              <div className="floating-warning floating-usage-notice" role="status">
+                {accountUsageSummary(connection.usage)}
+              </div>
+            )}
             {!collapsed && !protectedWindow && (
               <div className="floating-warning floating-capture-notice" role="status">
                 {t('此窗口未隐藏')}

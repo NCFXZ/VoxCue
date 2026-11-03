@@ -230,8 +230,10 @@ try {
       'IMAGE:' +
         (await floating.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString('base64'),
     );
-  await floating.getByRole('button', { name: 'Confirm end interview', exact: true }).click();
-  await floating.waitForEvent('close');
+  await Promise.all([
+    floating.waitForEvent('close'),
+    floating.getByRole('button', { name: 'Confirm end interview', exact: true }).click(),
+  ]);
   await page.getByRole('button', { name: 'Interview history', exact: true }).click();
   await audit('History');
   await page.getByRole('button', { name: 'Knowledge bases', exact: true }).click();

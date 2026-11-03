@@ -63,6 +63,7 @@ export interface DesktopAPI {
   dictation(call: DictationCall): Promise<SpeechStatus>;
   onDictationEvent(callback: (event: SpeechEvent) => void): () => void;
   interviewModels(): Promise<ServiceResult<{ models: ChatModel[] }>>;
+  interviewAccountUsage(): Promise<ServiceResult<{ usage: AccountUsage | null }>>;
   updateInterviewModel(
     value: Pick<InterviewConfiguration, 'modelId' | 'effort'>,
   ): Promise<ServiceResult<{ modelId: string; effort: InterviewConfiguration['effort'] }>>;
@@ -140,6 +141,7 @@ export interface DesktopInvokeMap {
   'interview:reconnect-audio': Invocation<DesktopAPI['reconnectInterviewAudio']>;
   'dictation:call': Invocation<DesktopAPI['dictation']>;
   'interview:models': Invocation<DesktopAPI['interviewModels']>;
+  'interview:account-usage': Invocation<DesktopAPI['interviewAccountUsage']>;
   'interview:update-model': Invocation<DesktopAPI['updateInterviewModel']>;
   'interview:answer': Invocation<DesktopAPI['interviewAnswer']>;
   'interview:screenshot': Invocation<DesktopAPI['interviewScreenshot']>;
