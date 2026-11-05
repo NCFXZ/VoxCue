@@ -594,12 +594,35 @@ try {
     );
     await composer.getByRole('button', { name: '发送消息', exact: true }).click();
     await mainPage.locator('.chat-message.assistant').waitFor();
-    assert.equal(
-      await mainPage
-        .locator('.conversation-row.active')
-        .evaluate((node) => getComputedStyle(node, '::before').borderRadius),
-      '999px',
-    );
+    const marker = mainPage.locator('.sidebar-selection-indicator');
+    await marker.and(mainPage.locator('[data-visible="true"]')).waitFor();
+    assert.equal(await marker.count(), 1);
+    const selection = await marker.evaluate(async (node) => {
+      await Promise.allSettled(node.getAnimations().map((animation) => animation.finished));
+      const row = document.querySelector('.conversation-row.active').getBoundingClientRect();
+      const bounds = node.getBoundingClientRect();
+      const style = getComputedStyle(node);
+      return {
+        radius: style.borderRadius,
+        round: /^(round|superellipse\(1\))$/.test(style.getPropertyValue('corner-shape')),
+        width: bounds.width,
+        height: bounds.height,
+        offset: bounds.left - row.left,
+        centered: Math.abs(bounds.top + bounds.height / 2 - row.top - row.height / 2) <= 1 / 64,
+        opacity: style.opacity,
+        ariaHidden: node.getAttribute('aria-hidden'),
+      };
+    });
+    assert.deepEqual(selection, {
+      radius: '999px',
+      round: true,
+      width: 3,
+      height: 18,
+      offset: 3,
+      centered: true,
+      opacity: '1',
+      ariaHidden: 'true',
+    });
     console.log(
       'PASS: final package uses shared controls, aligned toolbar, 40px composer, synthetic chat and capsule marker.',
     );
