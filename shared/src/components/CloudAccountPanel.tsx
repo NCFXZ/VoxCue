@@ -4,6 +4,8 @@ import type { CloudAccountCall } from '../../electron/contracts/cloudAccount';
 import { Button } from './ui/button';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { LogOut } from './icons';
+import { VerificationCodeInput } from './VerificationCodeInput';
+import './cloudAccountPanel.css';
 import {
   validCloudEmail,
   normalizeCloudPassword,
@@ -12,6 +14,7 @@ import {
 } from '../../electron/contracts/cloudAccount';
 
 type Mode = 'login' | 'register' | 'reset';
+type Field = 'email' | 'password' | 'code';
 export function CloudAccountPanel({
   showTitle = true,
   entry = false,
@@ -22,6 +25,8 @@ export function CloudAccountPanel({
   onModeChange?(mode: Mode): void;
 }) {
   const codeId = useId();
+  const emailId = useId(),
+    passwordId = useId();
   const { state, loaded } = useCloudAccount();
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<Mode>('login');
@@ -31,6 +36,9 @@ export function CloudAccountPanel({
   const [challenge, setChallenge] = useState<{ id: string; expiresAt: number }>();
   const [message, setMessage] = useState(''),
     [error, setError] = useState('');
+  const [feedbackField, setFeedbackField] = useState<Field>('email');
+  const emailInput = useRef<HTMLInputElement>(null),
+    passwordInput = useRef<HTMLInputElement>(null);
   const [resendAt, setResendAt] = useState(0),
     [blockedUntil, setBlockedUntil] = useState(0);
   const [now, setNow] = useState(Date.now());
@@ -46,13 +54,23 @@ export function CloudAccountPanel({
     setBusy(true);
     setError('');
     setMessage('');
+    setFeedbackField(call.action === 'code' ? 'code' : 'password');
     try {
       const result = await useCloudAccount.getState().call(call);
       if (!alive.current) return;
       const receivedAt = Date.now();
       setNow(receivedAt);
       if (!result.ok) {
-        setError(result.error);
+        if (result.error === '邮箱或密码不正确。') {
+          setFeedbackField('password');
+          setError('密码不正确。');
+        } else if (result.error === '验证码无效或已过期。') {
+          setFeedbackField('code');
+          setError('验证码不正确。');
+        } else {
+          if (/密码/.test(result.error)) setFeedbackField('password');
+          setError(result.error);
+        }
         if (result.retryAfterSeconds) setBlockedUntil(receivedAt + result.retryAfterSeconds * 1000);
         return;
       }
@@ -62,7 +80,6 @@ export function CloudAccountPanel({
           expiresAt: receivedAt + result.challenge.expiresInSeconds * 1000,
         });
         setResendAt(receivedAt + result.challenge.retryAfterSeconds * 1000);
-        setMessage('验证码将发送至邮箱，请检查收件箱和垃圾邮件。');
       }
       if (result.message) setMessage(result.message);
       if (call.action === 'login' || call.action === 'register' || call.action === 'reset') {
@@ -89,6 +106,7 @@ export function CloudAccountPanel({
     setBusy(true);
     setError('');
     setMessage('');
+    setFeedbackField('email');
     try {
       const result = await useCloudAccount.getState().setLocalMode(enabled);
       if (alive.current && !result.ok) setError(result.error);
@@ -125,34 +143,47 @@ export function CloudAccountPanel({
     event.preventDefault();
     if (busy || locked.current || Date.now() < blockedUntil) return;
     setMessage('');
+    setError('');
     if (!validCloudEmail(email)) {
-      setError('请输入有效的邮箱地址。');
+      setFeedbackField('email');
+      setError('邮箱格式不正确。');
+      emailInput.current?.focus();
       return;
     }
     if (!password) {
-      setError('请输入密码。');
+      setFeedbackField('password');
+      if (mode === 'login') setError('密码不正确。');
+      passwordInput.current?.focus();
       return;
     }
     if (normalizeCloudPassword(password) === undefined) {
-      setError('密码包含无效字符或过长，请重新输入。');
+      setFeedbackField('password');
+      setError('密码不正确。');
+      passwordInput.current?.focus();
       return;
     }
     if (mode !== 'login') {
       const normalized = normalizeCloudPassword(password),
         size = normalized ? Array.from(normalized).length : 0;
       if (size < CLOUD_PASSWORD_MIN || size > CLOUD_PASSWORD_MAX) {
-        setError(`密码需要${CLOUD_PASSWORD_MIN}至${CLOUD_PASSWORD_MAX}个字符。`);
+        setFeedbackField('password');
+        if (size > CLOUD_PASSWORD_MAX) setError('密码不正确。');
+        passwordInput.current?.focus();
         return;
       }
       if (!/^\d{6}$/.test(code)) {
-        setError('请输入六位邮箱验证码。');
+        setFeedbackField('code');
+        setError('验证码不正确。');
         return;
       }
     }
     if (mode === 'login') void run({ action: 'login', email, password });
     else if (challenge && challenge.expiresAt > Date.now())
       void run({ action: mode, email, password, code, challengeId: challenge.id });
-    else setError('请先获取新的验证码。');
+    else {
+      setFeedbackField('code');
+      setError('验证码不正确。');
+    }
   }
   const blocked = busy || now < blockedUntil || !state.configured;
   const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
@@ -180,6 +211,30 @@ export function CloudAccountPanel({
       )}
     </>
   );
+  function fieldFeedback(field: Field) {
+    const fieldError = feedbackField === field ? error : '';
+    const configurationError = field === 'email' && !error ? displayError : '';
+    const fieldMessage = feedbackField === field ? message : '';
+    const hint =
+      field === 'password' && mode !== 'login' ? t('不少于{0}个字符', [CLOUD_PASSWORD_MIN]) : '';
+    const retry = feedbackField === field ? retryHint : '';
+    if (!fieldError && !configurationError && !fieldMessage && !hint && !retry) return null;
+    return (
+      <p
+        id={`${field === 'email' ? emailId : field === 'password' ? passwordId : codeId}-feedback`}
+        className={`cloud-field-feedback ${fieldError || configurationError ? 'danger-text' : 'settings-hint'}`}
+        role={
+          fieldError || configurationError ? 'alert' : fieldMessage || retry ? 'status' : undefined
+        }
+      >
+        {t(fieldError || configurationError || fieldMessage) || hint}
+        {retry && ` ${t(retry)}`}
+      </p>
+    );
+  }
+  const emailFeedback = fieldFeedback('email'),
+    passwordFeedback = fieldFeedback('password'),
+    codeFeedback = fieldFeedback('code');
   return (
     <section className="cloud-account-panel" aria-label={t('VoxCue 账号')} aria-busy={busy}>
       {showTitle && <h3>{t('VoxCue 账号')}</h3>}
@@ -229,9 +284,11 @@ export function CloudAccountPanel({
       ) : (
         <>
           <form className="cloud-account-form" noValidate={entry} onSubmit={submit}>
-            <label>
-              {t('邮箱')}
+            <div className="cloud-account-field">
+              <label htmlFor={emailId}>{t('邮箱')}</label>
               <input
+                ref={emailInput}
+                id={emailId}
                 name="email"
                 type="email"
                 autoComplete="username"
@@ -240,6 +297,26 @@ export function CloudAccountPanel({
                 required
                 value={email}
                 disabled={busy}
+                aria-invalid={(feedbackField === 'email' && !!error) || undefined}
+                aria-describedby={emailFeedback ? `${emailId}-feedback` : undefined}
+                onBlur={(event) => {
+                  // Leaving the form must not insert validation and move the
+                  // navigation button between the pointer press and release.
+                  const next = event.relatedTarget;
+                  const form = event.currentTarget.form;
+                  if (
+                    form &&
+                    next instanceof Element &&
+                    form.parentElement?.contains(next) &&
+                    (next.closest('.login-skip-button') ||
+                      (!form.contains(next) && next.closest('.login-form-links')))
+                  )
+                    return;
+                  if (email && !validCloudEmail(email)) {
+                    setFeedbackField('email');
+                    setError('邮箱格式不正确。');
+                  }
+                }}
                 onChange={(event) => {
                   setEmail(event.target.value);
                   setChallenge(undefined);
@@ -248,44 +325,44 @@ export function CloudAccountPanel({
                   setMessage('');
                 }}
               />
-            </label>
-            <label>
-              {mode === 'reset' ? t('新密码') : t('密码')}
+              {emailFeedback}
+            </div>
+            <div className="cloud-account-field">
+              <label htmlFor={passwordId}>{mode === 'reset' ? t('新密码') : t('密码')}</label>
               <input
+                ref={passwordInput}
+                id={passwordId}
                 name="password"
                 type="password"
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
-                placeholder={
-                  mode === 'login' ? t('输入密码') : t('不少于{0}个字符', [CLOUD_PASSWORD_MIN])
-                }
+                placeholder={t('输入密码')}
                 minLength={mode === 'login' ? 1 : CLOUD_PASSWORD_MIN}
                 maxLength={1024}
                 required
                 value={password}
                 disabled={busy}
+                aria-invalid={(feedbackField === 'password' && !!error) || undefined}
+                aria-describedby={passwordFeedback ? `${passwordId}-feedback` : undefined}
                 onChange={(event) => {
                   setPassword(event.target.value);
                   setError('');
                 }}
               />
-            </label>
+              {passwordFeedback}
+            </div>
             {mode !== 'login' && (
               <>
                 <div className="cloud-verification">
                   <label htmlFor={codeId}>{t('邮箱验证码')}</label>
-                  <span className="cloud-code-row">
-                    <input
+                  <div className="cloud-code-row">
+                    <VerificationCodeInput
                       id={codeId}
-                      name="code"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      pattern="[0-9]{6}"
-                      maxLength={6}
-                      required
                       value={code}
                       disabled={busy}
-                      onChange={(event) => {
-                        setCode(event.target.value.replace(/\D/g, ''));
+                      invalid={feedbackField === 'code' && !!error}
+                      describedBy={codeFeedback ? `${codeId}-feedback` : undefined}
+                      onChange={(value) => {
+                        setCode(value);
                         setError('');
                       }}
                     />
@@ -303,12 +380,10 @@ export function CloudAccountPanel({
                     >
                       {resendSeconds > 0 ? t('{0}秒后重发', [resendSeconds]) : t('获取验证码')}
                     </Button>
-                  </span>
+                  </div>
+                  {codeFeedback}
                 </div>
               </>
-            )}
-            {entry && (displayError || message || now < blockedUntil) && (
-              <div className="cloud-account-feedback">{feedback}</div>
             )}
             <Button type="submit" disabled={blocked || (mode !== 'login' && !challenge)}>
               {busy

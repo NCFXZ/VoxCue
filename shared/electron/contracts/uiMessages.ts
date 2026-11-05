@@ -1,5 +1,8 @@
 // UI copy only. User documents, chat responses and system prompts are not translated.
 export const uiMessages: Readonly<Record<string, string>> = {
+  昨天: 'Yesterday',
+  前天: 'The day before yesterday',
+  显示更多: 'Show more',
   '接下来想做什么？': 'What would you like to do next?',
   '添加简历，让面试准备更贴合你的经历。':
     'Add your resume to tailor your interview preparation to your experience.',
@@ -927,6 +930,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   网络搜索: 'Web search',
   聊天模型: 'Chat model',
   '加载模型…': 'Loading models…',
+  '选择模型': 'Choose model',
   模型不可用: 'Model unavailable',
   '正在读取…': 'Loading…',
   刷新模型列表: 'Refresh models',
@@ -941,13 +945,24 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '将移除本次待发送附件，原文件会保留':
     'Remove this pending attachment. The original file will be kept.',
   '请在桌面应用中使用账号服务。': 'Use account services in the desktop app.',
-  '验证码将发送至邮箱，请检查收件箱和垃圾邮件。':
-    'A verification code will be emailed to you. Check your inbox and spam folder.',
   '账号服务暂不可用，请稍后重试。': 'Account services are unavailable. Please try again later.',
   '无法进入本地账户，请检查本地存储后重试。':
     'Could not open the local account. Check local storage and try again.',
   '无法打开登录界面，请重试。': 'Could not open the sign-in screen. Please try again.',
   '请输入有效的邮箱地址。': 'Enter a valid email address.',
+  '邮箱格式不正确。': 'Invalid email address.',
+  '密码不正确。': 'Incorrect password.',
+  '验证码不正确。': 'Incorrect verification code.',
+  '验证码第{0}位': 'Verification code digit {0}',
+  '模型服务回答已启用。': 'AI answers are enabled.',
+  '在 Qt 实时数据监控项目中，你是如何保证界面流畅的？':
+    'In your Qt real-time monitoring project, how did you keep the interface responsive?',
+  '我把采集和解析放在工作线程，界面线程只负责显示。数据通过有界队列传递，避免采集速度超过显示速度时不断堆积。':
+    'I moved acquisition and parsing to a worker thread, leaving the UI thread to display data. A bounded queue prevents data from piling up when acquisition outpaces rendering.',
+  '曲线按固定节奏批量刷新，而不是每来一条数据就重绘。遇到短时突发数据时，我会合并界面更新，同时保留必要的原始数据。':
+    'I refresh plots in batches at a fixed cadence. During short bursts, I coalesce UI updates while retaining the raw data we need.',
+  '最后用实际负载观察队列长度和界面响应，定位阻塞点，再调整刷新频率和批量大小。':
+    'Finally, I measure queue length and UI responsiveness under a realistic load, find the bottlenecks, and tune the refresh rate and batch size.',
   '请输入密码。': 'Enter your password.',
   '密码包含无效字符或过长，请重新输入。':
     'The password contains invalid characters or is too long. Enter it again.',
@@ -1244,6 +1259,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   显示设置: 'Display settings',
   索引完成: 'Indexed',
   索引失败: 'Indexing failed',
+  '正在写入索引…': 'Writing index…',
   已取消: 'Canceled',
   '索引中 {0}%': 'Indexing {0}%',
   索引已停用: 'Indexing disabled',

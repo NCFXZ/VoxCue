@@ -193,8 +193,172 @@ try {
   }
   if (loginCheck) {
     const rects = [];
-    const geometry = async () =>
-      page.evaluate(() => {
+    async function resizeLogin(size) {
+      const content = await app.evaluate(({ BrowserWindow }, size) => {
+        const window = BrowserWindow.getAllWindows().find((window) => window.isVisible());
+        window.setSize(...size);
+        return {
+          size: window.getContentSize(),
+          zoom: window.webContents.getZoomFactor(),
+        };
+      }, size);
+      await page.waitForFunction(
+        ({ size, zoom }) =>
+          Math.abs(innerWidth - size[0] / zoom) <= 1 && Math.abs(innerHeight - size[1] / zoom) <= 1,
+        content,
+      );
+    }
+    async function assertCodeLayoutMatrix(state) {
+      const original = await page.evaluate(() => ({
+        language: document.documentElement.lang,
+        dark: document.documentElement.classList.contains('dark'),
+      }));
+      const size = await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((window) => window.isVisible())
+          .getSize(),
+      );
+      const language = async (value) => {
+        await page.evaluate((value) => {
+          localStorage.setItem('voxcue-language-v1', value);
+          window.dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+        }, value);
+        await page.waitForFunction((value) => document.documentElement.lang === value, value);
+      };
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('.cloud-code-inputs input')].every(
+          (node) => getComputedStyle(node).transform === 'none',
+        ),
+      );
+      try {
+        for (const locale of ['zh-CN', 'en']) {
+          await language(locale);
+          let wide;
+          for (const dimensions of [
+            [1000, 660],
+            [860, 580],
+          ]) {
+            await resizeLogin(dimensions);
+            for (const dark of [false, true]) {
+              await page.evaluate(
+                (value) => document.documentElement.classList.toggle('dark', value),
+                dark,
+              );
+              const layout = await page.locator('.cloud-code-row').evaluate((row) => {
+                const grid = row.querySelector('.cloud-code-inputs');
+                const button = row.querySelector(':scope > button');
+                const rowBox = row.getBoundingClientRect();
+                const gridBox = grid.getBoundingClientRect();
+                const buttonBox = button.getBoundingClientRect();
+                const cells = [...grid.querySelectorAll('input')].map((node) =>
+                  node.getBoundingClientRect().toJSON(),
+                );
+                const feedback = row.parentElement.querySelector('.cloud-field-feedback');
+                const range = document.createRange();
+                range.selectNodeContents(button);
+                const style = getComputedStyle(button);
+                return {
+                  cells,
+                  grid: gridBox.toJSON(),
+                  button: buttonBox.toJSON(),
+                  leftGap: gridBox.left - rowBox.left,
+                  rightGap: rowBox.right - buttonBox.right,
+                  gap: buttonBox.left - gridBox.right,
+                  expectedGap: parseFloat(getComputedStyle(row).columnGap),
+                  naturalButtonWidth:
+                    range.getBoundingClientRect().width +
+                    parseFloat(style.paddingLeft) +
+                    parseFloat(style.paddingRight) +
+                    parseFloat(style.borderLeftWidth) +
+                    parseFloat(style.borderRightWidth),
+                  nowrap: style.whiteSpace === 'nowrap',
+                  feedbackBelow: !feedback || feedback.getBoundingClientRect().top >= rowBox.bottom,
+                };
+              });
+              const unit = (value) => Math.round(value * 64);
+              const description = `${state}/${locale}/${dimensions.join('x')}/${dark ? 'dark' : 'light'} ${JSON.stringify(layout)}`;
+              assert.equal(layout.cells.length, 6, description);
+              assert.ok(
+                unit(layout.leftGap) === 0 &&
+                  unit(layout.rightGap) === 0 &&
+                  unit(layout.gap) === unit(layout.expectedGap) &&
+                  unit(layout.cells[0].left) === unit(layout.grid.left) &&
+                  unit(layout.cells.at(-1).right) === unit(layout.grid.right) &&
+                  layout.cells.every(
+                    (cell) =>
+                      cell.width > 0 &&
+                      unit(cell.top + cell.height / 2) ===
+                        unit(layout.button.top + layout.button.height / 2),
+                  ) &&
+                  layout.nowrap &&
+                  layout.feedbackBelow &&
+                  unit(layout.button.width) >= unit(layout.naturalButtonWidth),
+                `All six OTP cells and the natural-width action stay on one row: ${description}`,
+              );
+              if (dimensions[0] === 1000) wide = layout;
+              else
+                assert.ok(
+                  layout.grid.width < wide.grid.width &&
+                    layout.cells.every((cell, index) => cell.width < wide.cells[index].width),
+                  `Narrow space must shrink the six cells before moving the action: ${description}`,
+                );
+            }
+          }
+        }
+      } finally {
+        await language(original.language);
+        await page.evaluate(
+          (value) => document.documentElement.classList.toggle('dark', value),
+          original.dark,
+        );
+        await resizeLogin(size);
+      }
+    }
+    async function assertInlineFeedback(input, text, danger) {
+      const actual = await input.evaluate((node, danger) => {
+        const feedback = document.getElementById(node.getAttribute('aria-describedby'));
+        const field = node.closest('.cloud-account-field,.cloud-verification');
+        const reference = document.createElement('span');
+        reference.style.color = danger ? 'var(--danger)' : 'var(--muted)';
+        field.append(reference);
+        const expectedColor = getComputedStyle(reference).color;
+        reference.remove();
+        const range = document.createRange();
+        range.selectNodeContents(feedback);
+        const inputStyle = getComputedStyle(node);
+        return {
+          text: feedback.textContent,
+          beneath: feedback.getBoundingClientRect().top >= node.getBoundingClientRect().bottom,
+          belongs: field.contains(feedback),
+          color: getComputedStyle(feedback).color,
+          expectedColor,
+          textLeft: range.getClientRects()[0].left,
+          inputTextLeft:
+            node.getBoundingClientRect().left +
+            parseFloat(inputStyle.borderLeftWidth) +
+            parseFloat(inputStyle.paddingLeft),
+          textField: field.classList.contains('cloud-account-field'),
+        };
+      }, danger);
+      assert.ok(actual.text.includes(text));
+      assert.equal(actual.beneath, true, 'Feedback must sit beneath its input');
+      assert.equal(actual.belongs, true, 'Feedback must belong to its input field');
+      assert.equal(actual.color, actual.expectedColor, 'Validation color follows severity');
+      if (actual.textField)
+        assert.ok(
+          Math.abs(actual.textLeft - actual.inputTextLeft) < 1,
+          'Feedback text must align with the text inside its input',
+        );
+    }
+    const geometry = async () => {
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.waitForFunction(() =>
+        [...document.querySelectorAll('.cloud-account-form input')].every(
+          (node) => getComputedStyle(node).transform === 'none',
+        ),
+      );
+      return page.evaluate(() => {
         const box = (s) => {
           const r = document.querySelector(s).getBoundingClientRect();
           return { x: r.x, y: r.y, width: r.width };
@@ -208,19 +372,63 @@ try {
           submit: box('button[type="submit"]'),
         };
       });
+    };
+    async function clickNavigationOnce(label, heading) {
+      const email = panel.getByLabel('邮箱', { exact: true });
+      await email.fill('invalid');
+      assert.equal(await email.evaluate((node) => node === document.activeElement), true);
+      assert.equal(await panel.getByRole('alert').count(), 0, 'Begin without existing feedback');
+      const navigation = panel.getByRole('button', { name: label, exact: true });
+      const point = await navigation.evaluate((button) => {
+        const rect = button.getBoundingClientRect();
+        const x = rect.x + rect.width / 2,
+          y = rect.y + rect.height / 2;
+        return { x, y, hits: button.contains(document.elementFromPoint(x, y)) };
+      });
+      assert.equal(point.hits, true, `${label}: the original center must hit the navigation`);
+      // Fix the coordinates before blur. One real press/release must activate
+      // navigation even when the invalid email would otherwise add feedback.
+      await page.mouse.click(point.x, point.y);
+      await page.getByRole('heading', { name: heading, exact: true }).waitFor();
+      assert.equal(await panel.getByRole('alert').count(), 0);
+    }
+    for (const [label, heading] of [
+      ['注册', '创建账号'],
+      ['找回密码', '重置密码'],
+    ]) {
+      await clickNavigationOnce(label, heading);
+      await clickNavigationOnce('返回登录', '登录 VoxCue');
+    }
+    const email = panel.getByLabel('邮箱', { exact: true });
+    await email.fill('invalid');
+    await email.press('Tab');
+    assert.equal(
+      await panel
+        .getByLabel('密码', { exact: true })
+        .evaluate((node) => node === document.activeElement),
+      true,
+    );
+    await panel.getByRole('alert').filter({ hasText: '邮箱格式不正确' }).waitFor();
+    await assertInlineFeedback(email, '邮箱格式不正确', true);
+    await email.fill('');
     rects.push(await geometry());
     assert.equal(await panel.locator('form').getAttribute('novalidate'), '');
     await panel.getByRole('button', { name: '登录', exact: true }).click();
-    await panel.getByRole('alert').filter({ hasText: '有效的邮箱地址' }).waitFor();
+    await panel.getByRole('alert').filter({ hasText: '邮箱格式不正确' }).waitFor();
+    await assertInlineFeedback(panel.getByLabel('邮箱', { exact: true }), '邮箱格式不正确', true);
+    await captureRequested(page, 'login-email-error');
     await panel.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
     await panel.getByRole('button', { name: '登录', exact: true }).click();
-    await panel.getByRole('alert').filter({ hasText: '请输入密码' }).waitFor();
+    await panel.getByRole('alert').filter({ hasText: '密码不正确' }).waitFor();
+    await assertInlineFeedback(panel.getByLabel('密码', { exact: true }), '密码不正确', true);
     await panel.getByRole('button', { name: '注册', exact: true }).click();
     rects.push(await geometry());
     assert.equal(
       await panel.getByLabel('密码', { exact: true }).getAttribute('placeholder'),
-      '不少于8个字符',
+      '输入密码',
     );
+    await panel.getByText('不少于8个字符', { exact: true }).waitFor();
+    await assertInlineFeedback(panel.getByLabel('密码', { exact: true }), '不少于8个字符', false);
     assert.equal(await panel.getByLabel('密码', { exact: true }).getAttribute('minlength'), '8');
     assert.equal(await panel.getByLabel('密码', { exact: true }).getAttribute('maxlength'), '1024');
     for (const value of ['1', 'a@b', 'a..b@example.test', 'a@-bad.test']) {
@@ -232,8 +440,9 @@ try {
     }
     await panel.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(15));
+    await assertCodeLayoutMatrix('register-send');
     await panel.getByRole('button', { name: '获取验证码', exact: true }).click();
-    await panel.getByRole('status').filter({ hasText: '垃圾邮件' }).waitFor();
+    await panel.getByRole('button', { name: /秒后重发/ }).waitFor();
     const resend = Number(
       (await panel.getByRole('button', { name: /秒后重发/ }).innerText()).match(/\d+/)[0],
     );
@@ -241,15 +450,65 @@ try {
       resend > 0 && resend <= 60,
       'A new 60-second resend deadline must never display 61 seconds',
     );
+    await assertCodeLayoutMatrix('register-resend');
     await outbox.runOnce();
+    const codeCells = panel.locator('.cloud-code-inputs input');
+    assert.equal(await codeCells.count(), 6);
+    await codeCells.first().pressSequentially('123456');
+    assert.deepEqual(await codeCells.evaluateAll((nodes) => nodes.map((node) => node.value)), [
+      '1',
+      '2',
+      '3',
+      '4',
+      '5',
+      '6',
+    ]);
+    assert.equal(await codeCells.last().evaluate((node) => node === document.activeElement), true);
+    await codeCells.last().press('Backspace');
+    assert.equal(await codeCells.last().inputValue(), '');
+    await codeCells.last().press('Backspace');
+    assert.equal(await codeCells.nth(4).inputValue(), '');
+    await codeCells.first().evaluate((node) => {
+      const clipboardData = new DataTransfer();
+      clipboardData.setData('text/plain', '98 76 54');
+      node.dispatchEvent(new ClipboardEvent('paste', { clipboardData, bubbles: true }));
+    });
+    assert.deepEqual(await codeCells.evaluateAll((nodes) => nodes.map((node) => node.value)), [
+      '9',
+      '8',
+      '7',
+      '6',
+      '5',
+      '4',
+    ]);
+    await codeCells.last().press('Home');
+    assert.equal(await codeCells.first().evaluate((node) => node === document.activeElement), true);
+    await codeCells.first().press('ArrowRight');
+    assert.equal(await codeCells.nth(1).evaluate((node) => node === document.activeElement), true);
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages.at(-1).code);
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(7));
     await panel.getByRole('button', { name: '创建账号', exact: true }).click();
-    await panel.getByRole('alert').filter({ hasText: '8至128' }).waitFor();
+    assert.equal(
+      await panel
+        .getByLabel('密码', { exact: true })
+        .evaluate((node) => node === document.activeElement),
+      true,
+    );
+    assert.equal(await panel.getByRole('alert').count(), 0);
+    await panel.getByText('不少于8个字符', { exact: true }).waitFor();
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(15));
     await panel.getByLabel('邮箱验证码', { exact: true }).fill('123');
     await panel.getByRole('button', { name: '创建账号', exact: true }).click();
-    await panel.getByRole('alert').filter({ hasText: '六位邮箱验证码' }).waitFor();
+    await panel.getByRole('alert').filter({ hasText: '验证码不正确' }).waitFor();
+    assert.deepEqual(await codeCells.evaluateAll((nodes) => nodes.map((node) => node.value)), [
+      '1',
+      '2',
+      '3',
+      '',
+      '',
+      '',
+    ]);
+    await assertInlineFeedback(codeCells.first(), '验证码不正确', true);
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages.at(-1).code);
     await panel.getByRole('button', { name: '创建账号', exact: true }).click();
     await panel.getByRole('alert').filter({ hasText: '过于常见' }).waitFor();
@@ -292,19 +551,16 @@ try {
     }
     await assertFeedbackBounds();
     await captureRegister('normal');
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()
-        .find((w) => w.isVisible())
-        .setSize(860, 580),
-    );
+    await resizeLogin([860, 580]);
     await assertFeedbackBounds();
     await captureRegister('minimum');
-    await app.evaluate(({ BrowserWindow }) =>
-      BrowserWindow.getAllWindows()
-        .find((w) => w.isVisible())
-        .setSize(1000, 660),
-    );
+    await resizeLogin([1000, 660]);
     await panel.getByLabel('密码', { exact: true }).focus();
+    await page.waitForFunction(
+      () =>
+        new DOMMatrix(getComputedStyle(document.querySelector('input[name="password"]')).transform)
+          .m42 < -1.9,
+    );
     assert.equal(
       await panel
         .getByLabel('密码', { exact: true })
@@ -322,6 +578,7 @@ try {
     await panel.getByRole('button', { name: '返回登录', exact: true }).click();
     await panel.getByRole('button', { name: '找回密码', exact: true }).click();
     rects.push(await geometry());
+    await assertCodeLayoutMatrix('reset-send');
     await page.screenshot({ path: path.join(directory, 'reset-light.png') });
     await captureRequested(page, 'reset-light');
     console.log('VISUAL_DIRECTORY=' + directory);
@@ -351,7 +608,7 @@ try {
     await panel.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
     await panel.getByLabel('密码', { exact: true }).fill('synthetic password 123');
     await panel.getByRole('button', { name: '获取验证码', exact: true }).click();
-    await panel.getByRole('status').filter({ hasText: '垃圾邮件' }).waitFor();
+    await panel.getByRole('button', { name: /秒后重发/ }).waitFor();
     await outbox.runOnce();
     assert.equal(messages.length, 1);
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages[0].code);
@@ -465,6 +722,43 @@ try {
       await settings
         .getByText('本机资料已绑定其他 VoxCue 账号，请切回原账号后同步。', { exact: true })
         .waitFor();
+      const warningLayout = await settings
+        .getByRole('alert')
+        .filter({
+          hasText: '本机资料已绑定其他 VoxCue 账号，请切回原账号后同步。',
+        })
+        .evaluate((message) => {
+          const actions = message.closest('.cloud-sync-actions');
+          if (!actions) return null;
+          const text = message.getBoundingClientRect(),
+            row = actions.getBoundingClientRect();
+          const buttons = [...actions.querySelectorAll(':scope > button')].map((button) =>
+            button.getBoundingClientRect(),
+          );
+          return {
+            buttons: buttons.length,
+            textBefore: text.right <= buttons[0].left - 7,
+            left: text.left - row.left,
+            right: row.right - buttons.at(-1).right,
+            centers: buttons.map(
+              (button) => button.top + button.height / 2 - text.top - text.height / 2,
+            ),
+            overflow: actions.scrollWidth > actions.clientWidth + 1,
+          };
+        });
+      assert.ok(warningLayout, 'Cloud backup warning belongs to the existing action row');
+      assert.equal(warningLayout.buttons, 2);
+      assert.equal(warningLayout.textBefore, true, JSON.stringify(warningLayout));
+      assert.ok(
+        Math.abs(warningLayout.left) < 1 && Math.abs(warningLayout.right) < 1,
+        JSON.stringify(warningLayout),
+      );
+      assert.ok(
+        warningLayout.centers.every((offset) => Math.abs(offset) < 1),
+        'Backup warning and both action buttons stay vertically centered: ' +
+          JSON.stringify(warningLayout),
+      );
+      assert.equal(warningLayout.overflow, false);
       assert.equal(
         await settings
           .getByRole('switch', { name: '同步个人信息', exact: true })
@@ -487,7 +781,7 @@ try {
       await main.waitForFunction(
         () =>
           document.querySelector('[aria-label="同步知识库"]')?.getAttribute('aria-checked') ===
-            'true' && !document.querySelector('.cloud-sync-actions button')?.disabled,
+            'true' && !document.querySelector('.cloud-sync-actions > button')?.disabled,
       );
       await new Promise((resolve, reject) => {
         const timer = setTimeout(
@@ -510,6 +804,7 @@ try {
       await settings.getByRole('img', { name: /总容量 100000000 字节/ }).waitFor();
       assert.ok(counts.profile > 0 && counts.history > 0 && counts.knowledgebase > 0);
       await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
+      await settings.getByRole('heading', { name: 'VoxCue 账号', exact: true }).waitFor();
       assert.equal(
         await settings.getByRole('button', { name: '登录设备', exact: true }).count(),
         0,

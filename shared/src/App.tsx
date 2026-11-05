@@ -1,5 +1,5 @@
 import { t } from './i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { StartupScreen } from './components/StartupScreen';
 import { TitleBar } from './components/TitleBar';
 import { Sidebar } from './components/Sidebar';
@@ -19,6 +19,7 @@ import { useChatConnection } from './stores/chatConnection';
 import { useHistory } from './stores/history';
 import { SettingsDialog, type Theme, type SettingsCategory } from './components/SettingsDialog';
 import { signalTelemetry, recordFeature } from './services/telemetry';
+import { switchView } from './components/ui/switchView';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
   return value === 'light' || value === 'dark' ? value : 'system';
@@ -134,6 +135,17 @@ export function App() {
     };
   }, [isLoginWindow, auth.session, personalDraft, transientChat]);
   const [page, setPage] = useState<'preparation' | 'history' | 'knowledge'>('preparation');
+  const stage = useRef<HTMLDivElement>(null);
+  const requestedPage = useRef(page);
+  useEffect(() => {
+    requestedPage.current = page;
+  }, [page]);
+  const navigate = (next: typeof page) => {
+    if (next !== requestedPage.current) {
+      requestedPage.current = next;
+      switchView(stage.current, () => setPage(next));
+    }
+  };
   useEffect(() => {
     if (isLoginWindow) return;
     return window.desktop?.onInterviewTitle((event) => {
@@ -220,13 +232,13 @@ export function App() {
               onNavigate={(next) => {
                 if (next === 'history') recordFeature('history_view');
                 if (next === 'knowledge') recordFeature('knowledge_view');
-                setPage(next);
+                navigate(next);
               }}
               collapsed={collapsed}
               onCollapse={() => setCollapsed(!collapsed)}
               onNew={() => {
                 usePreparation.getState().reset(true);
-                setPage('preparation');
+                navigate('preparation');
               }}
               onSettings={() => {
                 setSettingsCategory('account');
@@ -249,22 +261,26 @@ export function App() {
                 }
               }}
             />
-            <div className="preparation-route" hidden={page !== 'preparation'}>
-              <PreparationPage
-                onDraftChange={setPersonalDraft}
-                onComponentSettings={openComponentSettings}
-                onAISettings={() => {
-                  setSettingsCategory('ai');
-                  setSettings(true);
-                }}
-                onSpeechSettings={() => {
-                  setSettingsCategory('interview');
-                  setSettings(true);
-                }}
-              />
+            <div className="page-stage" ref={stage}>
+              <div className="preparation-route" hidden={page !== 'preparation'}>
+                <PreparationPage
+                  onDraftChange={setPersonalDraft}
+                  onComponentSettings={openComponentSettings}
+                  onAISettings={() => {
+                    setSettingsCategory('ai');
+                    setSettings(true);
+                  }}
+                  onSpeechSettings={() => {
+                    setSettingsCategory('interview');
+                    setSettings(true);
+                  }}
+                />
+              </div>
+              {page === 'history' && <HistoryPage />}
+              {page === 'knowledge' && (
+                <KnowledgePage onComponentSettings={openComponentSettings} />
+              )}
             </div>
-            {page === 'history' && <HistoryPage />}
-            {page === 'knowledge' && <KnowledgePage onComponentSettings={openComponentSettings} />}
           </>
         )}
       </div>

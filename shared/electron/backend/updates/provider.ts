@@ -1,9 +1,4 @@
-import {
-  Provider,
-  type AppUpdater,
-  type UpdateInfo,
-  type ResolvedUpdateFileInfo,
-} from 'electron-updater';
+import { Provider, type AppUpdater, type ResolvedUpdateFileInfo } from 'electron-updater';
 import {
   parseUpdateInfo,
   type ProviderRuntimeOptions,
@@ -15,9 +10,9 @@ import {
   releaseAssetUrl,
   releasePageSize,
   releaseRepository,
-  type ReleaseCandidate,
   type ReleaseTarget,
 } from './releases';
+import { platformUpdateInfo, type PlatformUpdateInfo } from './cache';
 
 export type ReleaseFetch = typeof fetch;
 
@@ -86,34 +81,21 @@ export async function fetchPlatformUpdate(
   return { candidate, selected, metadata };
 }
 
-interface PlatformUpdateInfo extends UpdateInfo {
-  selectedRelease: ReleaseCandidate;
-}
-
 /** Fixed public repository, native transport, stock downloader/hash/install behavior. */
 export function platformReleaseProvider(
   target: ReleaseTarget,
   lifetime: AbortSignal,
   fetcher: ReleaseFetch,
+  lookup?: () => Promise<PlatformUpdateInfo>,
 ) {
   return class PlatformReleaseProvider extends Provider<PlatformUpdateInfo> {
     constructor(_options: unknown, _updater: AppUpdater, runtime: ProviderRuntimeOptions) {
       super({ ...runtime, isUseMultipleRangeRequest: false });
     }
     async getLatestVersion(): Promise<PlatformUpdateInfo> {
-      const { candidate, selected } = await fetchPlatformUpdate(target, lifetime, fetcher);
-      return {
-        version: candidate.version,
-        files: [{ url: selected.url, sha512: selected.sha512, size: selected.size }],
-        path: selected.url,
-        sha512: selected.sha512,
-        releaseDate: new Date(candidate.publishedAt).toISOString(),
-        releaseName: candidate.tag,
-        ...(selected.minimumSystemVersion
-          ? { minimumSystemVersion: selected.minimumSystemVersion }
-          : {}),
-        selectedRelease: candidate,
-      };
+      if (lookup) return lookup();
+      const { candidate, metadata } = await fetchPlatformUpdate(target, lifetime, fetcher);
+      return platformUpdateInfo(candidate, metadata);
     }
     resolveFiles(info: PlatformUpdateInfo): ResolvedUpdateFileInfo[] {
       const file = manifestFile(info, info.selectedRelease);

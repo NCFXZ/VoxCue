@@ -288,6 +288,7 @@ try {
     null,
   );
   await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
+  await settings.getByRole('heading', { name: 'VoxCue 账号', exact: true }).waitFor();
   assert.equal(await settings.locator('.cloud-account-form, .cloud-account-modes').count(), 0);
   const loginOpened = app.waitForEvent('window');
   await settings

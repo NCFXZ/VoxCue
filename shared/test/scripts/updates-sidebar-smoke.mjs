@@ -30,7 +30,7 @@ driver.checkForUpdates=async()=>{driver.emit('update-available',{version:'9.9.9'
 driver.downloadUpdate=signal=>new Promise((resolve,reject)=>{
  driver.downloads++;
  driver.finishDownload=()=>{driver.emit('update-downloaded');resolve();};
- signal.addEventListener('abort',()=>reject(Error('cancelled')),{once:true});
+ signal.addEventListener('abort',()=>reject(Object.assign(Error('cancelled'),{name:'AbortError'})),{once:true});
 });
 driver.quitAndInstall=()=>{
  globalThis.finishInstall=()=>{

@@ -1,4 +1,4 @@
-import { enterDemoUiAccount } from './install-ui-account.mjs';
+import { enterDemoUiAccount, openModelMenu } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -13,9 +13,54 @@ const profile = path.resolve(
 );
 await mkdir(profile, { recursive: true });
 const fixture = path.join(profile, 'main.cjs');
+const syntheticIcon = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="7" fill="#547c69"/></svg>').toString('base64');
+const faviconImages = ['docs', 'research', 'reference', 'extra'].map((host) => [
+  `https://a.favicon.im/${host}.example.org?throw-error-on-404=true`,
+  {
+    statusCode: host === 'research' ? 404 : 200,
+    mimeType: ['research', 'reference'].includes(host) ? 'image/png' : 'image/svg+xml',
+    data: host === 'research' ? '' : host === 'reference' ? 'AAAA' : syntheticIcon,
+  },
+]);
 await writeFile(
   fixture,
-  `const {app} = require('electron'); app.setAppPath(${JSON.stringify(process.cwd())}); globalThis.chatTestModules = { ...require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))}), ...require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/usage.js'))}) }; require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});`,
+  `const {app,shell} = require('electron');
+globalThis.sourceLinkOpened=[];
+globalThis.faviconRequests=[];
+globalThis.faviconResponses=[];
+globalThis.blockedFaviconProbe=0;
+const faviconImages=new Map(${JSON.stringify(faviconImages)});
+// This owned fixture remains fully offline: HTTPS is handled locally, with
+// fixed image bytes/statuses only. No unknown request can fall back to network.
+// The launcher's independent Node/net/socket guards remain untouched.
+app.on('session-created', session => {
+  const installed=session.protocol.interceptBufferProtocol('https', (request, callback) => {
+    const image=request.method==='GET' && faviconImages.get(request.url);
+    if(!image) return callback({error:-2});
+    globalThis.faviconResponses.push({url:request.url,status:image.statusCode});
+    callback({statusCode:image.statusCode,mimeType:image.mimeType,data:Buffer.from(image.data,'base64')});
+  });
+  if(!installed || !session.protocol.isProtocolIntercepted('https'))
+    throw Error('Failed to install the owned offline image protocol');
+  session.webRequest.onBeforeRequest(
+    {urls:['http://*/*','https://*/*','ws://*/*','wss://*/*']},
+    (details, callback) => {
+      const image=details.method==='GET' && details.resourceType==='image' && faviconImages.has(details.url);
+      if(image) {
+        globalThis.faviconRequests.push({url:details.url,referrer:details.referrer});
+        callback({});
+      } else {
+        if(details.url==='https://a.favicon.im/unlisted.example.org?throw-error-on-404=true')
+          globalThis.blockedFaviconProbe++;
+        callback({cancel:true});
+      }
+    },
+  );
+});
+shell.openExternal=async(url)=>{globalThis.sourceLinkOpened.push(url);};
+app.setAppPath(${JSON.stringify(process.cwd())});
+globalThis.chatTestModules = { ...require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))}), ...require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/usage.js'))}) };
+require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});`,
 );
 const app = await electron.launch({
   args: [await offlineElectronEntry(fixture)],
@@ -27,6 +72,27 @@ try {
   await login.waitForFunction(() => document.visibilityState === 'visible');
   const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
   page.setDefaultTimeout(15000);
+  assert.equal(
+    await page.evaluate(() => new Promise((resolve) => {
+      const image = new Image();
+      const finish = (blocked) => { image.remove(); resolve(blocked); };
+      image.onload = () => finish(false);
+      image.onerror = () => finish(true);
+      image.src = 'https://a.favicon.im/unlisted.example.org?throw-error-on-404=true';
+      document.body.append(image);
+    })),
+    true,
+    'An image outside the exact synthetic allowlist remains blocked',
+  );
+  assert.equal(await app.evaluate(() => globalThis.blockedFaviconProbe), 1);
+  assert.equal(await app.evaluate(async () => {
+    try {
+      await fetch('https://a.favicon.im/docs.example.org?throw-error-on-404=true');
+      return false;
+    } catch (error) {
+      return error.message.includes('Offline desktop regression forbids network access');
+    }
+  }), true, 'The independent main-process network guard remains enabled');
   // Only the test profile's transport is replaced. Renderer and IPC remain real.
   await app.evaluate(async ({ ipcMain }, profile) => {
     const { ChatGPTService, publicFailure, UsageLedger } = globalThis.chatTestModules;
@@ -89,7 +155,8 @@ try {
             ? JSON.stringify({
                 answer:
                   request.input.at(-1).content === '你好'
-                    ? markdown
+                    ? markdown +
+                      '\n\n引用说明。 ([docs.example.org](https://docs.example.org/guide)) 普通链接：[阅读说明](https://docs.example.org/guide)。'
                     : '**已整理资料**，请检查待保存内容并确认。',
                 changes:
                   request.input.at(-1).content === '你好'
@@ -100,12 +167,47 @@ try {
                         background: null,
                       },
               })
-            : markdown;
+            : markdown +
+              '\n\n引用说明。 ([docs.example.org](https://docs.example.org/guide)) 普通链接：[阅读说明](https://docs.example.org/guide)。';
         return Response.json({
           object: 'response',
           id: `test-response-${++responseCount}`,
           status: 'completed',
-          output: [{ content: [{ type: 'output_text', text }] }],
+          output: [
+            {
+              content: [
+                {
+                  type: 'output_text',
+                  text,
+                  annotations:
+                    request.input.at(-1).content === '你好'
+                      ? [
+                          {
+                            type: 'url_citation',
+                            url: 'https://docs.example.org/guide',
+                            title: '示例文档',
+                          },
+                          {
+                            type: 'url_citation',
+                            url: 'https://research.example.org/paper',
+                            title: '研究资料',
+                          },
+                          {
+                            type: 'url_citation',
+                            url: 'https://reference.example.org/api',
+                            title: '接口参考',
+                          },
+                          {
+                            type: 'url_citation',
+                            url: 'https://extra.example.org/detail',
+                            title: '补充来源',
+                          },
+                        ]
+                      : [],
+                },
+              ],
+            },
+          ],
           usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 },
         });
       },
@@ -164,11 +266,11 @@ try {
     await page
       .locator('.composer-tool')
       .evaluateAll((elements) => elements.map((element) => element.getAttribute('aria-label'))),
-    ['聊天模型', '思考强度'],
+    ['聊天模型'],
   );
   assert.equal(await page.getByRole('button', { name: '网络搜索', exact: true }).count(), 0);
-  assert.deepEqual(controls, Array(2).fill({ height: 32, shadow: 'none', radius: '999px' }));
-  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  assert.deepEqual(controls, [{ height: 32, shadow: 'none', radius: '999px' }]);
+  await openModelMenu(page);
   assert.equal(await page.locator('.model-option-icon').count(), 0);
   assert.ok(
     await page
@@ -187,6 +289,145 @@ try {
   );
   assert.equal(await page.locator('.chat-answer strong').count(), 4);
   assert.equal((await page.locator('.chat-answer').innerText()).includes('**'), false);
+  const sourceGroup = page.locator('.chat-source-group').first();
+  assert.equal(await sourceGroup.locator('.chat-source-link:visible').count(), 3);
+  const inlineCitation = page.locator('.chat-answer a.chat-source-link');
+  await inlineCitation.waitFor();
+  assert.equal(await inlineCitation.count(), 1);
+  assert.equal(await inlineCitation.innerText(), 'docs.example.org');
+  assert.equal(await page.locator('.chat-answer a:not(.chat-source-link)').innerText(), '阅读说明');
+  assert.equal(
+    await inlineCitation.evaluate((node) =>
+      node.parentElement.textContent.includes('(docs.example.org)'),
+    ),
+    false,
+  );
+  assert.equal(await page.locator('.chat-source-link[title]').count(), 0);
+  const inlineIcon = inlineCitation.locator('.chat-source-icon[data-ready="true"] img');
+  await inlineIcon.waitFor();
+  const icon = await inlineIcon.evaluate((image) => ({
+    src: image.src,
+    referrer: image.referrerPolicy,
+    loading: image.loading,
+    decoding: image.decoding,
+    crossOrigin: image.crossOrigin,
+    alt: image.alt,
+    width: Math.round(image.getBoundingClientRect().width * 64) / 64,
+    height: Math.round(image.getBoundingClientRect().height * 64) / 64,
+    decoded: image.naturalWidth > 0,
+  }));
+  assert.deepEqual(icon, {
+    src: 'https://a.favicon.im/docs.example.org?throw-error-on-404=true',
+    referrer: 'no-referrer', loading: 'lazy', decoding: 'async', crossOrigin: null,
+    alt: '', width: 11, height: 11, decoded: true,
+  });
+  assert.equal(
+    await sourceGroup.locator('.chat-source-link').filter({ hasText: 'docs.example.org' }).locator('img').getAttribute('src'),
+    icon.src,
+    'Inline and source-list citations share the same hostname-only image URL',
+  );
+  const failedIcon = sourceGroup.locator('.chat-source-link').filter({ hasText: 'research.example.org' });
+  await failedIcon.locator('img').waitFor({ state: 'detached' });
+  assert.equal(await failedIcon.locator('svg').evaluate((node) => getComputedStyle(node).visibility), 'visible');
+  const undecodableIcon = sourceGroup.locator('.chat-source-link').filter({ hasText: 'reference.example.org' });
+  await undecodableIcon.locator('img').waitFor({ state: 'detached' });
+  assert.equal(await undecodableIcon.locator('svg').evaluate((node) => getComputedStyle(node).visibility), 'visible');
+  assert.equal(await sourceGroup.locator('[role="alert"]').count(), 0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const moreSources = sourceGroup.locator('details');
+  const disclosureFrames = async () =>
+    moreSources.evaluate(async (node) => {
+      const frames = [
+        {
+          height: node.getBoundingClientRect().height,
+          opacity: Number(getComputedStyle(node, '::details-content').opacity),
+        },
+      ];
+      node.querySelector('summary').click();
+      const start = performance.now();
+      do {
+        await new Promise(requestAnimationFrame);
+        frames.push({
+          height: node.getBoundingClientRect().height,
+          opacity: Number(getComputedStyle(node, '::details-content').opacity),
+        });
+      } while (performance.now() - start < 400);
+      return frames;
+    });
+  for (const phase of ['expand', 'collapse']) {
+    const frames = await disclosureFrames();
+    const minimum = Math.min(frames[0].height, frames.at(-1).height);
+    const maximum = Math.max(frames[0].height, frames.at(-1).height);
+    assert.ok(
+      frames.some((frame) => frame.height > minimum + 0.5 && frame.height < maximum - 0.5),
+      phase + ': source list height interpolates',
+    );
+    assert.ok(
+      frames.some((frame) => frame.opacity > 0 && frame.opacity < 1),
+      phase + ': source list opacity interpolates',
+    );
+  }
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await sourceGroup.locator('summary').press('Enter');
+  assert.equal(
+    await moreSources.evaluate(
+      (node) => getComputedStyle(node, '::details-content').transitionDuration,
+    ),
+    '0s',
+  );
+  assert.equal(await sourceGroup.locator('.chat-source-link:visible').count(), 4);
+  const extraIcon = sourceGroup.locator('details .chat-source-link img');
+  await extraIcon.scrollIntoViewIfNeeded();
+  await sourceGroup.locator('details .chat-source-icon[data-ready="true"] img').waitFor();
+  assert.equal(await extraIcon.getAttribute('src'), 'https://a.favicon.im/extra.example.org?throw-error-on-404=true');
+  const faviconRequests = await app.evaluate(() => globalThis.faviconRequests);
+  const faviconResponses = await app.evaluate(() => globalThis.faviconResponses);
+  assert.ok(faviconResponses.some(({ url, status }) => url.includes('/research.example.org?') && status === 404));
+  assert.ok(faviconResponses.some(({ url, status }) => url.includes('/reference.example.org?') && status === 200));
+  assert.ok(faviconRequests.length > 0);
+  assert.ok(faviconRequests.every(({ url, referrer }) =>
+    /^https:\/\/a\.favicon\.im\/[a-z0-9.-]+\?throw-error-on-404=true$/.test(url) && referrer === '',
+  ));
+  for (const host of ['research', 'reference'])
+    assert.equal(faviconRequests.filter(({ url }) => url.includes(`/${host}.example.org?`)).length, 1, 'Failed images are not retried while the source list is toggled');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await inlineCitation.focus();
+  await page.keyboard.press('Enter');
+  assert.deepEqual(
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 3000;
+      while (!globalThis.sourceLinkOpened.length && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      return globalThis.sourceLinkOpened;
+    }),
+    ['https://docs.example.org/guide'],
+  );
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    const badges = await page.locator('.chat-source-link:visible').evaluateAll((nodes) =>
+      nodes.map((node) => {
+        const style = getComputedStyle(node);
+        return {
+          height: node.getBoundingClientRect().height,
+          fontSize: parseFloat(style.fontSize),
+          radius: parseFloat(style.borderTopLeftRadius),
+          decoration: style.textDecorationLine,
+          corner: style.cornerShape,
+        };
+      }),
+    );
+    assert.ok(
+      badges.every(
+        (badge) =>
+          badge.height <= 22 &&
+          badge.fontSize === 12 &&
+          badge.radius >= badge.height / 2 &&
+          badge.decoration === 'none' &&
+          ['round', 'superellipse(1)'].includes(badge.corner),
+      ),
+    );
+    await captureRequested(page, 'chat-source-capsules-' + (dark ? 'dark' : 'light'));
+  }
   if (process.argv.some((arg) => arg.startsWith('--screenshots='))) {
     const wasDark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
     for (const dark of [false, true]) {
@@ -347,6 +588,11 @@ try {
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   for (const label of ['正在思考', '正在联网搜索', '正在查询网页', '正在生成回答']) {
     await page.locator('.progress-state-label.is-active').filter({ hasText: label }).waitFor();
+    const pendingAnswer = page.locator('.chat-message.assistant').last();
+    assert.equal((await pendingAnswer.locator('.chat-answer').textContent()).trim(), '');
+    assert.equal(await pendingAnswer.locator('.chat-message-time').count(), 0, label + ': no assistant clock before answer text');
+    assert.equal(await pendingAnswer.locator('.chat-message-actions').count(), 0, label + ': no empty answer footer');
+    assert.equal(await page.locator('.chat-message.user').last().locator('.chat-message-time').count(), 1, 'The sent user message still shows its actual time');
     if (label === '正在查询网页') {
       await page
         .locator('.chat-message.assistant')
@@ -358,8 +604,9 @@ try {
     }
   }
   assert.equal(await page.getByText('正在等待服务响应', { exact: true }).count(), 0);
-  await page.locator('.progress-state-label.is-active').waitFor({ state: 'detached' });
   await page.getByText('状态演示已完成', { exact: true }).waitFor();
+  assert.equal(await page.locator('.chat-message.assistant').last().locator('.chat-message-time').count(), 1, 'The assistant clock appears with nonempty answer text');
+  await page.locator('.progress-state-label.is-active').waitFor({ state: 'detached' });
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');
@@ -367,7 +614,8 @@ try {
   await jd.locator(':scope > summary').click();
   await jd.getByText('新的 JD', { exact: true }).waitFor();
   assert.equal(await page.locator('.composer-caption').count(), 0);
-  assert.ok((await page.locator('.effort-trigger').textContent()).includes('思考强度'));
+  assert.equal(await page.locator('.effort-model-trigger').count(), 1);
+  assert.equal(await page.getByRole('button', { name: '思考强度', exact: true }).count(), 0);
 
   console.log(
     'PASS: compact tools, Markdown/code copy, effort, official account usage entry, preserved local ledger and light/dark typography, failure state, attachment proposal, reject/confirm. Test transport only; no production account used.',

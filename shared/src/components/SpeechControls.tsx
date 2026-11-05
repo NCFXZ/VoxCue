@@ -4,8 +4,9 @@ import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { Check, ChevronDown, AudioLines, Volume2 } from './icons';
 import type { AudioSource, InterviewConfiguration } from '../../electron/contracts/speech';
-import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
-import { effortLabels } from '../services/chatOptions';
+import type { ChatModel } from '../../electron/contracts/chat';
+import { resolveReasoningEffort } from '../services/chatOptions';
+import { ModelReasoningControl } from './ReasoningEffortControl';
 import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 import { useAudioDevices } from './useAudioDevices';
 import { SpeechModelSettings } from './SpeechModelSettings';
@@ -29,30 +30,19 @@ export function SpeechControls({
       d.source === 'microphone' && (!value.options.microphone || d.id === value.options.microphone),
   );
   const model = models.find((m) => m.id === value.modelId);
-  const efforts = model?.reasoningEfforts ?? [];
   useEffect(() => {
-    if (
-      value.aiEnabled &&
-      model &&
-      value.effort !== 'auto' &&
-      !model?.reasoningEfforts?.includes(value.effort)
-    )
-      onChange({ ...value, effort: model?.reasoningEfforts?.includes('low') ? 'low' : 'auto' });
+    const effort = resolveReasoningEffort(model, value.effort);
+    if (value.aiEnabled && model && effort !== value.effort) onChange({ ...value, effort });
   }, [value, model, onChange]);
   const change = (patch: Partial<InterviewConfiguration>) => {
     const next = { ...value, ...patch };
     onChange(next);
   };
   const selectModel = (modelId: string) => {
-    const available = models.find((m) => m.id === modelId)?.reasoningEfforts ?? [];
+    const nextModel = models.find((m) => m.id === modelId);
     change({
       modelId,
-      effort:
-        value.effort === 'auto' || available.includes(value.effort as ReasoningEffort)
-          ? value.effort
-          : available.includes('low')
-            ? 'low'
-            : 'auto',
+      effort: resolveReasoningEffort(nextModel, value.effort),
     });
   };
   const choose = (
@@ -114,13 +104,7 @@ export function SpeechControls({
         mode: 'local',
         aiEnabled: true,
         modelId: selected.id,
-        effort:
-          selected.id === value.modelId &&
-          (value.effort === 'auto' || selected.reasoningEfforts?.includes(value.effort))
-            ? value.effort
-            : selected.reasoningEfforts?.includes('low')
-              ? 'low'
-              : 'auto',
+        effort: resolveReasoningEffort(selected, value.effort),
       });
   }, [live, models, value, onChange]);
   return (
@@ -135,8 +119,8 @@ export function SpeechControls({
               const microphone = source === 'microphone';
               const enabled = value.options.sources.includes(source);
               return (
-                <div className={`speech-device ${enabled ? '' : 'is-disabled'}`} key={source}>
-                  <div className="speech-device-heading">
+                <div className={`speech-device speech-setting-row ${enabled ? '' : 'is-disabled'}`} key={source}>
+                  <div className="speech-device-heading speech-setting-label">
                     {microphone ? <AudioLines size={17} /> : <Volume2 size={17} />}
                     <strong>{microphone ? t('面试者') : t('面试官')}</strong>
                     <span>{microphone ? t('麦克风') : t('系统音频')}</span>
@@ -213,26 +197,19 @@ export function SpeechControls({
           <div className="speech-setting-row">
             <span className="speech-setting-label">{t('回答模型')}</span>
             {live ? (
-              choose(
-                t('面试回答模型'),
-                value.modelId,
-                models,
-                selectModel,
-                !models.length,
-                t('正在读取模型…'),
-              )
+              <ModelReasoningControl
+                label={t('面试回答模型')}
+                effortLabel={t('面试回答思考强度')}
+                className="speech-select effort-model-trigger"
+                models={models}
+                modelId={value.modelId}
+                onModelChange={selectModel}
+                effort={value.effort}
+                onEffortChange={(effort) => change({ effort })}
+                disabled={busy}
+              />
             ) : (
               <span className="speech-current-answer">{t('请先连接模型服务')}</span>
-            )}
-          </div>
-          <div className="speech-setting-row speech-effort-row">
-            <span className="speech-setting-label">{t('思考强度')}</span>
-            {choose(
-              t('面试回答思考强度'),
-              value.effort,
-              ['auto' as const, ...efforts].map((id) => ({ id, label: t(effortLabels[id]) })),
-              (effort) => change({ effort: effort as ReasoningEffort | 'auto' }),
-              !live || !efforts.length,
             )}
           </div>
         </SpeechModelSettings>

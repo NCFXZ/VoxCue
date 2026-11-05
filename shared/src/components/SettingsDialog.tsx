@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { CloudAccountPanel } from './CloudAccountPanel';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { AccountDeletionPanel } from './AccountDeletionPanel';
@@ -23,6 +23,8 @@ import {
 } from './icons';
 import { Modal } from './ui/modal';
 import { Button } from './ui/button';
+import { switchView } from './ui/switchView';
+import { SelectionLabel } from './SelectionLabel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ComponentsPanel } from './ComponentsPanel';
 import { SpeechControls } from './SpeechControls';
@@ -73,8 +75,15 @@ export function SettingsDialog({
   const connection = useChatConnection();
   const cloudUser = useCloudAccount((state) => state.state.user);
   const selectedTheme = themes.find((item) => item.value === theme)!;
+  const content = useRef<HTMLElement>(null);
   return (
-    <Modal title={t('设置')} className="settings-dialog" hideHeader onClose={onClose}>
+    <Modal
+      title={t('设置')}
+      className="settings-dialog"
+      hideHeader
+      fixedHeader={false}
+      onClose={onClose}
+    >
       <div className="settings-layout">
         <aside className="settings-sidebar">
           <Button
@@ -92,26 +101,28 @@ export function SettingsDialog({
                 key={id}
                 aria-current={category === id ? 'page' : undefined}
                 aria-controls="settings-content"
-                onClick={() => setCategory(id)}
+                onClick={() => {
+                  if (category !== id) switchView(content.current, () => setCategory(id));
+                }}
               >
                 <Icon size={18} />
-                <span>{t(label)}</span>
+                <SelectionLabel>{t(label)}</SelectionLabel>
               </button>
             ))}
           </nav>
         </aside>
         <section
+          ref={content}
           className="settings-content"
           id="settings-content"
           aria-labelledby="settings-category-title"
-          key={category}
         >
-          <header className="settings-content-heading">
+          <header key={`${category}-heading`} className="settings-content-heading">
             <h2 id="settings-category-title">
               {t(categories.find((item) => item.id === category)!.label)}
             </h2>
           </header>
-          <div className="settings-content-body">
+          <div key={category} className="settings-content-body">
             {category === 'components' && <ComponentsPanel />}
             {category === 'general' && (
               <>

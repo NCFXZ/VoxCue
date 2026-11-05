@@ -3,19 +3,16 @@ import { useRef, type ReactNode } from 'react';
 import * as DropdownMenu from './ui/dropdown-menu';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
-import { Check, Folder, Paperclip, Plus, ChevronDown, Refresh, Sparkles } from './icons';
+import { Folder, Paperclip, Plus } from './icons';
 import { usePreparation } from '../stores/preparation';
-import { chatFileAccept, effortLabels } from '../services/chatOptions';
-import type { ReasoningEffort } from '../../electron/contracts/chat';
+import { chatFileAccept } from '../services/chatOptions';
+import { ModelReasoningControl } from './ReasoningEffortControl';
 import { useChatConnection } from '../stores/chatConnection';
 import { useModelProvider } from './useModelProvider';
 export function ChatTools({ actions }: { actions: ReactNode }) {
   const state = usePreparation();
   const connection = useChatConnection();
   const models = connection.models;
-  const selected = models.find((model) => model.id === state.modelId) ?? models[0];
-  const efforts = selected?.reasoningEfforts ?? [];
-  const effort = efforts.includes(state.effort as ReasoningEffort) ? state.effort : 'auto';
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
   return (
@@ -52,109 +49,24 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
         </DropdownMenu.Portal>
       </DropdownMenu.Root>
       <div className="composer-model-tools">
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              className="composer-tool model-trigger"
-              aria-label={t('聊天模型')}
-              data-reveal-on-hover
-            >
-              <span>
-                {selected?.label ?? (connection.loading ? t('加载模型…') : t('模型不可用'))}
-              </span>
-              <ChevronDown size={12} />
-            </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              className="dropdown-content compact-tool-menu composer-menu model-menu"
-              side="top"
-              align="start"
-              sideOffset={10}
-            >
-              <DropdownMenu.RadioGroup value={selected?.id} onValueChange={state.setModel}>
-                {models.map((model) => (
-                  <DropdownMenu.RadioItem
-                    className="dropdown-item model-option"
-                    value={model.id}
-                    key={model.id}
-                  >
-                    <span className="model-name">{t(model.label)}</span>
-                    <DropdownMenu.ItemIndicator className="model-check dropdown-check">
-                      <Check size={15} />
-                    </DropdownMenu.ItemIndicator>
-                  </DropdownMenu.RadioItem>
-                ))}
-              </DropdownMenu.RadioGroup>
-              {connection.live && (
-                <>
-                  {connection.error && (
-                    <p className="model-error" role="alert">
-                      {t(connection.error)}
-                    </p>
-                  )}
-                  <DropdownMenu.Separator className="dropdown-separator" />
-                  <DropdownMenu.Item
-                    className="dropdown-item"
-                    disabled={connection.loading}
-                    onSelect={() => {
-                      void connection.load(true, true);
-                    }}
-                  >
-                    <Refresh size={16} />
-                    {connection.loading ? t('正在读取…') : t('刷新模型列表')}
-                  </DropdownMenu.Item>
-                </>
-              )}
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger asChild>
-            <Button
-              type="button"
-              variant="ghost"
-              className="composer-tool effort-trigger"
-              aria-label={t('思考强度')}
-              data-reveal-on-hover
-              disabled={!efforts.length}
-            >
-              <span className="effort-compact-icon">
-                <Sparkles size={14} />
-              </span>
-              <span>
-                <span className="effort-tool-label">{t('思考强度 · ')}</span>
-                {t(effortLabels[effort])}
-              </span>
-              <ChevronDown size={12} />
-            </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Portal>
-            <DropdownMenu.Content
-              className="dropdown-content compact-tool-menu composer-menu effort-menu"
-              side="top"
-              align="start"
-              sideOffset={10}
-            >
-              <DropdownMenu.Label className="model-menu-label">{t('思考强度')}</DropdownMenu.Label>
-              <DropdownMenu.RadioGroup
-                value={effort}
-                onValueChange={(value) => state.setEffort(value as ReasoningEffort | 'auto')}
-              >
-                {['auto' as const, ...efforts].map((value) => (
-                  <DropdownMenu.RadioItem className="dropdown-item" key={value} value={value}>
-                    {t(effortLabels[value])}
-                    <DropdownMenu.ItemIndicator className="tool-menu-check dropdown-check">
-                      <Check size={14} />
-                    </DropdownMenu.ItemIndicator>
-                  </DropdownMenu.RadioItem>
-                ))}
-              </DropdownMenu.RadioGroup>
-            </DropdownMenu.Content>
-          </DropdownMenu.Portal>
-        </DropdownMenu.Root>
+        <ModelReasoningControl
+          revealOnHover
+          models={models}
+          modelId={state.modelId}
+          onModelChange={state.setModel}
+          effort={state.effort}
+          onEffortChange={state.setEffort}
+          loading={connection.loading}
+          error={connection.error}
+          onRefresh={
+            connection.live
+              ? () => {
+                  void connection.load(true, true);
+                }
+              : undefined
+          }
+          className="composer-tool model-trigger effort-model-trigger"
+        />
       </div>
       {actions}
       <input

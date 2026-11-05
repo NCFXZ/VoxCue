@@ -840,7 +840,7 @@ export function FloatingInterview() {
                       }
                       aria-label={t('发送面试问题')}
                     >
-                      <ArrowUp size={20} />
+                      <ArrowUp size={18} />
                     </Button>
                   )}
                 </div>

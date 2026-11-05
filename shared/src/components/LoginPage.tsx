@@ -31,7 +31,7 @@ export function LoginPage() {
           </div>
         </section>
         <aside className="login-preview" aria-label={t('应用界面预览')}>
-          <div className="login-preview-content" aria-hidden="true">
+          <div className="login-preview-content" aria-hidden="true" inert>
             <InterviewPreview compact label={t('面试界面预览')} />
           </div>
         </aside>

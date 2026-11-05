@@ -1,4 +1,4 @@
-import { connectUiAccount } from './install-ui-account.mjs';
+import { connectUiAccount, openModelMenu } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
@@ -71,14 +71,14 @@ async function settingsLayout(dialog) {
     const rect = (node) => node.getBoundingClientRect().toJSON();
     const rows = [...element.querySelectorAll('.speech-setting-row')].map((row) => {
       const label = row.querySelector('.speech-setting-label');
-      const range = document.createRange();
-      range.selectNodeContents(label);
+      const text = label.querySelector('label') ?? label;
       return {
-        text: label.textContent,
-        lines: range.getClientRects().length,
+        text: text.textContent,
+        writingMode: getComputedStyle(text).writingMode,
         label: rect(label),
-        control: rect(row.querySelector('.choice-trigger')),
+        control: rect(row.querySelector(':scope > button, :scope > .frosted-slider')),
         row: rect(row),
+        overflow: row.scrollWidth > row.clientWidth,
       };
     });
     return {
@@ -93,20 +93,392 @@ async function settingsLayout(dialog) {
     };
   });
   assert.equal(result.overflow, false);
-  assert.equal(result.rows.length, 4);
+  assert.equal(
+    result.rows.length,
+    7,
+    'Two audio, three model and two display rows share one layout',
+  );
+  assert.equal(result.rows.filter((row) => row.text === '回答模型').length, 1);
+  assert.equal(result.rows.filter((row) => row.text === '思考强度').length, 0);
   for (const row of result.rows) {
-    assert.equal(row.lines, 1, `${row.text}: label must remain horizontal`);
+    assert.equal(row.writingMode, 'horizontal-tb', `${row.text}: label must remain horizontal`);
+    assert.equal(row.overflow, false, `${row.text}: row must not overflow`);
     assert.ok(
-      row.control.top >= row.label.bottom + 5,
-      `${row.text}: control belongs below its label`,
+      row.control.left > row.label.right,
+      `${row.text}: control belongs to the right of its label`,
     );
-    assert.ok(Math.abs(row.row.width - row.control.width) < 1);
+    assert.ok(Math.abs(row.label.left - result.rows[0].label.left) <= 1 / 64);
+    assert.ok(Math.abs(row.control.left - result.rows[0].control.left) <= 1 / 64);
+    assert.ok(Math.abs(row.row.right - row.control.right) <= 1 / 64);
+    assert.ok(
+      Math.abs(row.label.top + row.label.height / 2 - row.control.top - row.control.height / 2) <=
+        1 / 64,
+      `${row.text}: label and control centers must align`,
+    );
     assert.ok(row.control.width >= 150);
+    assert.ok(
+      Math.abs(row.control.width - result.audio[0].width) <= 1 / 64,
+      `${row.text}: control width matches audio dropdowns`,
+    );
   }
+  for (let i = 1; i < result.rows.length; i++)
+    assert.ok(result.rows[i].row.top >= result.rows[i - 1].row.bottom);
   for (let i = 1; i < result.sections.length; i++)
     assert.ok(result.sections[i].top >= result.sections[i - 1].bottom);
   for (const group of result.groups) assert.ok(group.scrollWidth <= group.width + 1);
   return result;
+}
+async function readinessLayout(dialog, untilReady = false) {
+  return dialog.evaluate(async (element, untilReady) => {
+    const rect = (node) => {
+      const { left, top, width, height } = node.getBoundingClientRect();
+      return { left, top, width, height };
+    };
+    const snapshot = () => ({
+      dialog: rect(element),
+      summary: rect(element.querySelector('.interview-start-summary')),
+      access: rect(element.querySelector('.interview-access')),
+      list: rect(element.querySelector('.interview-access-list')),
+      footer: rect(element.querySelector('.modal-footer')),
+      rows: [...element.querySelectorAll('.interview-access-row')].map(rect),
+      statuses: [...element.querySelectorAll('.interview-access-row')].map((row) =>
+        rect(row.querySelector('.interview-access-status-slot, .interview-access-status')),
+      ),
+      tests: [...element.querySelectorAll('.interview-access-row')]
+        .map((row) => row.querySelector('.interview-access-test-slot, button'))
+        .filter(Boolean)
+        .map(rect),
+      devices: [...element.querySelectorAll('.interview-start-summary > div')]
+        .filter((row) =>
+          ['面试官 · 系统音频', '面试者 · 麦克风'].includes(row.querySelector('dt').textContent),
+        )
+        .map((row) => rect(row.querySelector('dd'))),
+    });
+    if (!untilReady) return snapshot();
+    const frames = [];
+    let readyFrames = 0;
+    for (let frame = 0; frame < 180; frame++) {
+      frames.push(snapshot());
+      readyFrames =
+        element.querySelector('.interview-access').getAttribute('aria-busy') === 'true'
+          ? 0
+          : readyFrames + 1;
+      if (readyFrames === 3) return frames;
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    throw Error('The held readiness check did not finish');
+  }, untilReady);
+}
+function assertReadinessGeometry(before, after) {
+  const same = (first, last, label) => {
+    for (const key of ['left', 'top', 'width', 'height'])
+      assert.ok(
+        Math.abs(first[key] - last[key]) <= 1 / 64,
+        `${label}.${key} changed during readiness: ${first[key]} → ${last[key]}`,
+      );
+  };
+  for (const key of ['dialog', 'summary', 'access', 'list', 'footer'])
+    same(before[key], after[key], key);
+  for (const key of ['rows', 'devices', 'statuses', 'tests']) {
+    assert.equal(after[key].length, before[key].length);
+    after[key].forEach((rect, index) => same(before[key][index], rect, `${key}[${index}]`));
+  }
+}
+async function assertSkeletonClip(page, target) {
+  await target.scrollIntoViewIfNeeded();
+  await page.waitForFunction(
+    () =>
+      !document.documentElement.dataset.viewDirection &&
+      document
+        .getAnimations()
+        .every(
+          (animation) =>
+            animation.effect?.getTiming().iterations === Infinity ||
+            animation.playState !== 'running',
+        ),
+  );
+  const saved = await target.evaluate(async (line) => {
+    await Promise.all(
+      line
+        .closest('dialog')
+        .getAnimations({ subtree: true })
+        .filter((animation) => animation.effect.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+    const animation = line
+      .getAnimations({ subtree: true })
+      .find((item) => item.animationName === 'quota-skeleton-sweep');
+    if (!animation) throw Error('Expected the real skeleton sweep animation');
+    const saved = {
+      time: Number(animation.currentTime),
+      running: animation.playState === 'running',
+    };
+    animation.pause();
+    await animation.ready;
+    const rect = line.getBoundingClientRect();
+    const before = getComputedStyle(line, '::before');
+    return {
+      ...saved,
+      duration: Number(animation.effect.getTiming().duration),
+      devicePixelRatio,
+      bounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      clip: {
+        x: Math.floor(rect.left),
+        y: Math.floor(rect.top),
+        width: Math.ceil(rect.right) - Math.floor(rect.left),
+        height: Math.ceil(rect.bottom) - Math.floor(rect.top),
+      },
+      bar: {
+        left: rect.left + parseFloat(before.left),
+        top: rect.top + parseFloat(before.top),
+        width: parseFloat(before.width),
+        height: parseFloat(before.height),
+      },
+    };
+  });
+  const windowId = await (await app.browserWindow(page)).evaluate((window) => window.id);
+  // Native capture keeps the actual display raster instead of changing its
+  // viewport/emulation scale as CDP's clip.scale does.
+  const nativeFrame = () =>
+    app.evaluate(
+      async ({ BrowserWindow }, { windowId, clip, dpi }) => {
+        const image = await BrowserWindow.fromId(windowId).webContents.capturePage(clip);
+        const size = image.getSize();
+        const bitmapBytes = image.toBitmap().length;
+        const expected = {
+          width: Math.ceil(clip.width * dpi),
+          height: Math.ceil(clip.height * dpi),
+        };
+        if (
+          size.width !== expected.width ||
+          size.height !== expected.height ||
+          bitmapBytes !== size.width * size.height * 4
+        )
+          throw Error(
+            'Native sweep bitmap does not match its integer DIP clip: ' +
+              JSON.stringify({
+                clip,
+                dpi,
+                size,
+                expected,
+                bitmapBytes,
+                scaleFactors: image.getScaleFactors(),
+              }),
+          );
+        return { data: image.toPNG().toString('base64'), size, bitmapBytes };
+      },
+      { windowId, clip: saved.clip, dpi: saved.devicePixelRatio },
+    );
+  try {
+    const images = [];
+    const nativeFrames = [];
+    const maskImages = [];
+    const maskId = 'skeleton-clip-mask-' + Date.now();
+    try {
+      const rect = await page.evaluate(
+        ({ id, bar }) => {
+          const style = document.createElement('style');
+          style.id = id + '-style';
+          style.textContent =
+            '#' +
+            CSS.escape(id) +
+            '::backdrop{background:transparent!important;pointer-events:none!important}';
+          document.head.append(style);
+          const mask = document.createElement('div');
+          mask.id = id;
+          mask.popover = 'manual';
+          mask.inert = true;
+          mask.setAttribute('aria-hidden', 'true');
+          mask.style.cssText =
+            'position:fixed!important;inset:auto!important;margin:0!important;' +
+            'border:0!important;padding:0!important;box-sizing:border-box!important;' +
+            `left:${bar.left}px!important;top:${bar.top}px!important;` +
+            `width:${bar.width}px!important;height:${bar.height}px!important;` +
+            'border-radius:999px!important;corner-shape:round!important;' +
+            'background:black!important;opacity:1!important;outline:0!important;' +
+            'box-shadow:none!important;filter:none!important;backdrop-filter:none!important;' +
+            'clip-path:none!important;overflow:visible!important;transform:none!important;' +
+            'animation:none!important;transition:none!important;pointer-events:none!important;';
+          document.body.append(mask);
+          mask.showPopover();
+          const box = mask.getBoundingClientRect();
+          return { left: box.left, top: box.top, width: box.width, height: box.height };
+        },
+        { id: maskId, bar: saved.bar },
+      );
+      for (const key of ['left', 'top', 'width', 'height'])
+        assert.ok(
+          Math.abs(rect[key] - saved.bar[key]) <= 1 / 64,
+          `Round mask must keep the skeleton's native pixel phase: ${JSON.stringify({ rect, bar: saved.bar })}`,
+        );
+      for (const color of ['black', 'white']) {
+        await page.evaluate(
+          async ({ id, color }) => {
+            document.getElementById(id).style.setProperty('background', color, 'important');
+            await new Promise((resolve) =>
+              requestAnimationFrame(() => requestAnimationFrame(resolve)),
+            );
+          },
+          { id: maskId, color },
+        );
+        maskImages.push((await nativeFrame()).data);
+      }
+    } finally {
+      await page.evaluate((id) => {
+        document.getElementById(id)?.remove();
+        document.getElementById(id + '-style')?.remove();
+      }, maskId);
+    }
+    for (const progress of [0, 0.35, 0.65]) {
+      const geometry = await target.evaluate(async (line, time) => {
+        line
+          .getAnimations({ subtree: true })
+          .find((item) => item.animationName === 'quota-skeleton-sweep').currentTime = time;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        const rect = line.getBoundingClientRect();
+        return {
+          bounds: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+          opacity: getComputedStyle(line.closest('dialog')).opacity,
+        };
+      }, saved.duration * progress);
+      assert.equal(geometry.opacity, '1', 'Sweep pixels must be sampled after the modal fade');
+      for (const key of ['left', 'top', 'width', 'height'])
+        assert.ok(
+          Math.abs(geometry.bounds[key] - saved.bounds[key]) <= 1 / 64,
+          `Sweep sampling must keep one fixed clip: ${JSON.stringify({ saved: saved.bounds, geometry })}`,
+        );
+      const frame = await nativeFrame();
+      images.push(frame.data);
+      nativeFrames.push({ size: frame.size, bitmapBytes: frame.bitmapBytes });
+    }
+    const pixels = await app.evaluate(
+      ({ nativeImage }, { images, maskImages, clip, bar }) => {
+        const frames = images.map((image) =>
+          nativeImage.createFromBuffer(Buffer.from(image, 'base64')),
+        );
+        const { width, height } = frames[0].getSize();
+        const buffers = frames.map((frame) => frame.toBitmap());
+        const masks = maskImages.map((image) =>
+          nativeImage.createFromBuffer(Buffer.from(image, 'base64')),
+        );
+        if (
+          [...frames, ...masks].some(
+            (frame) =>
+              frame.getSize().width !== width ||
+              frame.getSize().height !== height ||
+              frame.toBitmap().length !== width * height * 4,
+          )
+        )
+          throw Error('Sweep frames must preserve one native pixel grid');
+        const maskBuffers = masks.map((frame) => frame.toBitmap());
+        const sx = width / clip.width,
+          sy = height / clip.height;
+        const radius = Math.min(bar.width, bar.height) / 2;
+        const outside = [0, 0],
+          inside = [0, 0];
+        let outsideDelta = 0,
+          outsideSample = null,
+          maskInside = 0;
+        for (let y = 0; y < height; y++)
+          for (let x = 0; x < width; x++) {
+            const left = clip.x + x / sx - bar.left,
+              right = left + 1 / sx;
+            const top = clip.y + y / sy - bar.top,
+              bottom = top + 1 / sy;
+            // A corner pixel may straddle the rectangular bar bounds at low
+            // DPR. Keep it if it intersects that rectangle: an incorrectly
+            // rectangular sweep would visibly paint its intersecting area.
+            if (right <= 0 || left >= bar.width || bottom <= 0 || top >= bar.height) continue;
+            const dy = bottom < radius ? radius - bottom : top > radius ? top - radius : 0;
+            const side = right < radius ? 0 : left > bar.width - radius ? 1 : -1;
+            const dx = side === 0 ? radius - right : left - (bar.width - radius);
+            const pixelOffset = (y * width + x) * 4;
+            let maskDelta = 0;
+            for (let channel = 0; channel < 4; channel++)
+              maskDelta = Math.max(
+                maskDelta,
+                Math.abs(
+                  maskBuffers[0][pixelOffset + channel] - maskBuffers[1][pixelOffset + channel],
+                ),
+              );
+            // Keep the original half-CSS-pixel separation as well as the
+            // independent mask: border-radius and clip-path can rasterize
+            // their near-edge coverage differently at fractional DPR.
+            const fullyOutside = side >= 0 && Math.hypot(dx, dy) > radius + 0.5 && maskDelta === 0;
+            const cx = (left + right) / 2,
+              cy = (top + bottom) / 2;
+            const center = Math.max(radius, Math.min(bar.width - radius, cx));
+            const fullyInside =
+              left >= 0 &&
+              right <= bar.width &&
+              top >= 0 &&
+              bottom <= bar.height &&
+              Math.hypot(cx - center, cy - radius) < radius - 0.5;
+            if (fullyInside && maskDelta >= 240) maskInside++;
+            if (fullyOutside) outside[side]++;
+            for (let index = 1; index < buffers.length; index++) {
+              let delta = 0;
+              for (let channel = 0; channel < 4; channel++) {
+                const offset = (y * width + x) * 4 + channel;
+                delta = Math.max(delta, Math.abs(buffers[index][offset] - buffers[0][offset]));
+              }
+              if (fullyOutside && delta > outsideDelta) {
+                outsideDelta = delta;
+                const offset = (y * width + x) * 4;
+                outsideSample = {
+                  outputPoint: [x, y],
+                  cssPoint: [clip.x + x / sx, clip.y + y / sy],
+                  cornerDistance: Math.hypot(dx, dy),
+                  radius,
+                  roundMask: maskBuffers.map((buffer) => [...buffer.subarray(offset, offset + 4)]),
+                  bgra: buffers.map((buffer) => [...buffer.subarray(offset, offset + 4)]),
+                };
+              }
+              if (fullyInside && delta > 1) inside[index - 1]++;
+            }
+          }
+        return {
+          outside,
+          outsideDelta,
+          outsideSample,
+          inside,
+          maskInside,
+          size: { width, height },
+        };
+      },
+      { images, maskImages, clip: saved.clip, bar: saved.bar },
+    );
+    assert.ok(
+      pixels.maskInside > 0,
+      `The independent round mask must really paint opaque black/white interior pixels: ${JSON.stringify(pixels)}`,
+    );
+    assert.ok(
+      pixels.outside.every((count) => count > 0),
+      JSON.stringify(pixels),
+    );
+    assert.ok(
+      pixels.outsideDelta <= 2,
+      `Sweep escaped its capsule corners: ${JSON.stringify({
+        ...pixels,
+        devicePixelRatio: saved.devicePixelRatio,
+        nativeFrames,
+        clip: saved.clip,
+        bar: saved.bar,
+      })}`,
+    );
+    assert.ok(
+      pixels.inside.every((count) => count > 0),
+      `The sampled sweep must actually be visible: ${JSON.stringify(pixels)}`,
+    );
+  } finally {
+    await target.evaluate((line, saved) => {
+      const animation = line
+        .getAnimations({ subtree: true })
+        .find((item) => item.animationName === 'quota-skeleton-sweep');
+      animation.currentTime = saved.time;
+      if (saved.running) animation.play();
+    }, saved);
+  }
 }
 async function geometry(page) {
   const result = await page.evaluate(() => {
@@ -153,18 +525,42 @@ try {
     const { InterviewAccess } = require(
       app.getAppPath() + '/dist-electron/' + platform + '/electron/speech/access.js',
     );
-    InterviewAccess.prototype.check = async (options) => ({
-      ready: true,
-      checks: options.sources.map((source) => ({
-        source,
-        status: 'granted',
-        message: 'Synthetic',
-      })),
-      devices: [
-        { id: 'output', source: 'system', name: '合成播放设备', default: true },
-        { id: 'input', source: 'microphone', name: '合成麦克风', default: true },
-      ],
-    });
+    const { ScreenPermission } = require(
+      app.getAppPath() + '/dist-electron/' + platform + '/electron/screenPermission.js',
+    );
+    const screenPermission = ScreenPermission.prototype.call;
+    ScreenPermission.prototype.call = function (action) {
+      return action === 'check'
+        ? Promise.resolve({
+            status: platform === 'windows' ? 'not-required' : 'granted',
+            message: 'Synthetic',
+          })
+        : screenPermission.call(this, action);
+    };
+    globalThis.uxAccessChecks = 0;
+    InterviewAccess.prototype.check = async (options) => {
+      globalThis.uxAccessChecks++;
+      if (globalThis.uxHoldAccess)
+        await new Promise((resolve) => {
+          globalThis.uxReleaseAccess = () => {
+            globalThis.uxHoldAccess = false;
+            globalThis.uxReleaseAccess = undefined;
+            resolve();
+          };
+        });
+      return {
+        ready: true,
+        checks: options.sources.map((source) => ({
+          source,
+          status: 'granted',
+          message: 'Synthetic',
+        })),
+        devices: [
+          { id: 'output', source: 'system', name: '合成播放设备', default: true },
+          { id: 'input', source: 'microphone', name: '合成麦克风', default: true },
+        ],
+      };
+    };
     globalThis.uxNeedSpeech = true;
     globalThis.uxComponentRevision = 0;
     globalThis.uxDownloads = [];
@@ -433,6 +829,7 @@ try {
     );
   assert.deepEqual(misSizedIcons, []);
   await settings.getByRole('button', { name: '通用', exact: true }).click();
+  await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
   assert.equal(
     await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),
     0,
@@ -442,6 +839,171 @@ try {
     '100',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  const originalDark = await page
+    .locator('html')
+    .evaluate((element) => element.classList.contains('dark'));
+  const skeletonColors = [];
+  try {
+    for (const dark of [false, true]) {
+      await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+      for (const reducedMotion of ['no-preference', 'reduce']) {
+        await page.emulateMedia({ reducedMotion });
+        const beforeChecks = await app.evaluate(() => {
+          globalThis.uxHoldAccess = true;
+          return globalThis.uxAccessChecks;
+        });
+        await page.locator('.interview-start-trigger').click();
+        const pending = page.getByRole('dialog', { name: '开始面试', exact: true });
+        await pending.locator('.interview-access[aria-busy="true"]').waitFor();
+        await pending.getByRole('status').filter({ hasText: '正在检查权限与音频设备…' }).waitFor();
+        await waitForAsync(app, () => typeof globalThis.uxReleaseAccess === 'function');
+        await page.evaluate(
+          () =>
+            new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+        );
+        const loading = await pending.evaluate((dialog) => ({
+          rows: [...dialog.querySelectorAll('.interview-access-row')].map((row) => {
+            const status = row.querySelector('.interview-access-status');
+            return {
+              label: row.querySelector(':scope > span').textContent,
+              skeletons: row.querySelectorAll('.interview-access-skeleton.quota-skeleton-line')
+                .length,
+              status:
+                status && getComputedStyle(status).visibility === 'visible'
+                  ? status.textContent.trim()
+                  : '',
+            };
+          }),
+          devices: [...dialog.querySelectorAll('.interview-start-summary > div')]
+            .filter((row) =>
+              ['面试官 · 系统音频', '面试者 · 麦克风'].includes(
+                row.querySelector('dt').textContent,
+              ),
+            )
+            .map((row) => {
+              const slot = row.querySelector('.interview-access-device-slot');
+              const content = slot.querySelector('.interview-access-skeleton-content');
+              return {
+                text: row.querySelector('dd').innerText.trim(),
+                skeletons: row.querySelectorAll('dd .interview-access-skeleton.quota-skeleton-line')
+                  .length,
+                slotWidth: slot.getBoundingClientRect().width,
+                contentWidth: content.getBoundingClientRect().width,
+                hidden: getComputedStyle(content).visibility === 'hidden',
+              };
+            }),
+          skeletons: [
+            ...dialog.querySelectorAll('.interview-access-skeleton.quota-skeleton-line'),
+          ].map((line) => ({
+            hidden: !!line.closest('[aria-hidden="true"]'),
+            width: line.getBoundingClientRect().width,
+            height: line.getBoundingClientRect().height,
+            color: getComputedStyle(line, '::before').backgroundColor,
+            animation: getComputedStyle(line, '::after').animationName,
+            display: getComputedStyle(line, '::after').display,
+            transform: getComputedStyle(line, '::after').transform,
+            clip: getComputedStyle(line).clipPath,
+          })),
+        }));
+        assert.deepEqual(
+          loading.rows.map((row) => row.label).sort(),
+          ['麦克风', '系统音频', '屏幕截图'].sort(),
+        );
+        assert.ok(
+          loading.rows.every((row) => row.skeletons > 0 && row.status === ''),
+          JSON.stringify(loading.rows),
+        );
+        assert.equal(loading.devices.length, 2);
+        assert.ok(
+          loading.devices.every(
+            (device) =>
+              device.text === '' &&
+              device.skeletons > 0 &&
+              device.hidden &&
+              device.slotWidth > 0 &&
+              Math.abs(device.slotWidth - device.contentWidth) <= 1 / 64,
+          ),
+          'Pending device placeholders use hidden natural text width, without displaying unconfirmed names',
+        );
+        assert.ok(loading.skeletons.length >= 5);
+        assert.ok(
+          loading.skeletons.every((line) => line.hidden && line.width > 0 && line.height > 0),
+        );
+        assert.ok(
+          loading.skeletons.every((line) => /^inset\(.+round /u.test(line.clip)),
+          'Every skeleton clips its sweep to the fixed rounded bar',
+        );
+        assert.equal(await pending.locator('li[aria-label="屏幕捕获权限检查"]').count(), 1);
+        assert.equal(
+          await pending.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
+          true,
+        );
+        assert.equal(
+          await pending.getByRole('button', { name: '测试麦克风', exact: true }).count(),
+          0,
+        );
+        assert.equal(
+          await pending.getByRole('button', { name: '测试系统声音', exact: true }).count(),
+          0,
+        );
+        if (reducedMotion === 'reduce') {
+          assert.ok(
+            loading.skeletons.every((line) => line.animation === 'none' && line.display === 'none'),
+          );
+        } else {
+          assert.ok(loading.skeletons.every((line) => line.animation === 'quota-skeleton-sweep'));
+          const first = loading.skeletons[0];
+          await page.waitForFunction((previous) => {
+            const line = document.querySelector(
+              '.interview-start-dialog .interview-access-skeleton',
+            );
+            return line && getComputedStyle(line, '::after').transform !== previous;
+          }, first.transform);
+          skeletonColors.push(first.color);
+          await assertSkeletonClip(
+            page,
+            pending.locator('.interview-access-status-slot > .quota-skeleton-line').first(),
+          );
+          await assertSkeletonClip(
+            page,
+            pending.locator('.interview-access-test-slot > .quota-skeleton-line').first(),
+          );
+        }
+        const before = await readinessLayout(pending);
+        const settling = readinessLayout(pending, true);
+        await app.evaluate(() => globalThis.uxReleaseAccess());
+        const frames = await settling;
+        await pending.locator('.interview-access[aria-busy="false"]').waitFor();
+        for (const frame of frames) assertReadinessGeometry(before, frame);
+        assertReadinessGeometry(before, await readinessLayout(pending));
+        assert.equal(await pending.locator('.interview-access-skeleton').count(), 0);
+        await pending.getByText('合成播放设备', { exact: true }).waitFor();
+        await pending.getByText('合成麦克风', { exact: true }).waitFor();
+        assert.equal(
+          await pending.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
+          true,
+        );
+        assert.equal(await app.evaluate(() => globalThis.uxAccessChecks), beforeChecks + 1);
+        await pending.getByRole('button', { name: '取消', exact: true }).click();
+        await pending.waitFor({ state: 'hidden' });
+      }
+    }
+    assert.notEqual(
+      skeletonColors[0],
+      skeletonColors[1],
+      'Readiness skeleton colors follow the palette',
+    );
+  } finally {
+    await app.evaluate(() => globalThis.uxReleaseAccess?.());
+    await page.evaluate(
+      (dark) => document.documentElement.classList.toggle('dark', dark),
+      originalDark,
+    );
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+  }
+  checks.push(
+    'held readiness IPC keeps three rows and measured status/button placeholders stable, hides unconfirmed device names, and clips real sweep pixels to capsule corners in both palettes and motion preferences',
+  );
   await page.locator('.interview-start-trigger').click();
   const start = page.getByRole('dialog', { name: '开始面试', exact: true });
   await page.evaluate(() => {
@@ -513,6 +1075,43 @@ try {
   });
   assert.ok(testEvents.includes('activity'));
   assert.ok(!testEvents.includes('segment'));
+  await start.getByRole('button', { name: '测试麦克风', exact: true }).click();
+  await start.getByRole('meter', { name: '麦克风电平', exact: true }).waitFor();
+  await app.evaluate(() =>
+    globalThis.uxHost.emit({
+      type: 'status',
+      status: { state: 'error', model: 'Synthetic', error: '合成音频检查失败' },
+    }),
+  );
+  await start.getByRole('alert').filter({ hasText: '合成音频检查失败' }).waitFor();
+  await start.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
+  await waitForAsync(app, () => globalThis.uxHost.uxStatus.state === 'idle');
+  await app.evaluate(() => {
+    globalThis.uxHoldAccess = true;
+  });
+  try {
+    await start.getByRole('button', { name: '重新检查', exact: true }).click();
+    await waitForAsync(app, () => typeof globalThis.uxReleaseAccess === 'function');
+    await start.locator('.interview-access[aria-busy="true"]').waitFor();
+    assert.equal(
+      await start.getByText('合成音频检查失败', { exact: true }).count(),
+      0,
+      'A new readiness attempt clears the previous audio-test error while loading',
+    );
+  } finally {
+    await app.evaluate(() => globalThis.uxReleaseAccess?.());
+  }
+  await start.locator('.interview-access[aria-busy="false"]').waitFor();
+  await start.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
+  assert.equal(
+    await start.getByText('合成音频检查失败', { exact: true }).count(),
+    0,
+    'The previous audio-test error must not return after a fresh readiness check',
+  );
+  assert.equal(
+    await start.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
+    true,
+  );
   checks.push('10-second dual-source test, activity-only routing, release before interview');
 
   // Observe from creation: production deduplicates unchanged native states.
@@ -810,6 +1409,25 @@ try {
   await devices.getByRole('button', { name: '语音识别模型', exact: true }).click();
   await floating.getByRole('menuitemradio', { name: '多语言语音识别', exact: true }).click();
   await devices.getByRole('status').filter({ hasText: '原配置继续转写' }).waitFor();
+  const checkSpeechStatusHeading = async () => {
+    const layout = await devices.locator('.speech-model-status').evaluate((status) => {
+      const heading = status.closest('.speech-model-heading');
+      const title = heading.querySelector('h4').getBoundingClientRect();
+      const text = status.getBoundingClientRect();
+      return {
+        role: status.getAttribute('role'),
+        beside: text.left > title.right,
+        centerOffset: title.top + title.height / 2 - text.top - text.height / 2,
+        overflow: heading.scrollWidth > heading.clientWidth,
+      };
+    });
+    assert.equal(layout.role, 'status');
+    assert.ok(
+      layout.beside && Math.abs(layout.centerOffset) <= 1 / 64 && !layout.overflow,
+      JSON.stringify(layout),
+    );
+  };
+  await checkSpeechStatusHeading();
   assert.equal(
     await devices.getByRole('button', { name: '语音识别模型', exact: true }).isDisabled(),
     true,
@@ -825,14 +1443,18 @@ try {
   await waitForAsync(app, () => typeof globalThis.uxSpeechWait === 'function');
   await app.evaluate(() => globalThis.uxSpeechWait());
   await devices.getByRole('status').filter({ hasText: '等待语音停顿' }).waitFor();
-  await devices.getByRole('button', { name: '面试回答模型', exact: true }).click();
+  await checkSpeechStatusHeading();
+  await openModelMenu(floating, '面试回答模型', '面试思考强度');
   await floating.getByRole('menuitemradio', { name: '验证模型', exact: true }).click();
   await waitForAsync(
     floating,
     async () => (await window.desktop.interviewState()).configuration.modelId === 'next-model',
   );
-  await devices.getByRole('button', { name: '面试思考强度', exact: true }).click();
-  await floating.getByRole('menuitemradio', { name: '高', exact: true }).click();
+  const effortSlider = devices.getByRole('slider', { name: '面试思考强度', exact: true });
+  await effortSlider.waitFor();
+  assert.equal(await effortSlider.getAttribute('aria-valuetext'), '高');
+  assert.equal(await effortSlider.isDisabled(), true);
+  await floating.keyboard.press('Escape');
   await waitForAsync(
     floating,
     async () => (await window.desktop.interviewState()).configuration.effort === 'high',
@@ -1082,11 +1704,7 @@ try {
     );
     return { size: window.getContentSize(), minimum: window.getMinimumSize() };
   }, floating.url());
-  for (const [width, columns] of [
-    [960, 2],
-    [620, 2],
-    [440, 1],
-  ]) {
+  for (const width of [960, 620, 440]) {
     await app.evaluate(
       ({ BrowserWindow }, { url, width }) => {
         const window = BrowserWindow.getAllWindows().find(
@@ -1105,13 +1723,12 @@ try {
       );
       await floating.getByRole('button', { name: '面试设置', exact: true }).click();
       const layout = await settingsLayout(devices);
-      if (columns === 2) {
-        assert.ok(Math.abs(layout.audio[0].top - layout.audio[1].top) < 1);
-        assert.ok(Math.abs(layout.rows[0].control.top - layout.rows[1].control.top) < 1);
-      } else {
-        assert.ok(layout.audio[1].top > layout.audio[0].bottom);
-        assert.ok(layout.rows[1].label.top > layout.rows[0].control.bottom);
-      }
+      const recognition = layout.rows.filter((row) => ['语音模型', '推理设备'].includes(row.text));
+      assert.equal(recognition.length, 2);
+      const answer = layout.rows.find((row) => row.text === '回答模型');
+      assert.ok(layout.audio[1].top > layout.audio[0].bottom);
+      assert.ok(recognition[1].row.top > recognition[0].row.bottom);
+      assert.ok(recognition[0].row.top > answer.row.bottom);
       if (width === 960 || width === 440) {
         await devices.locator('.dialog-scroll').evaluate((element) => {
           element.scrollTop = 0;
@@ -1135,7 +1752,7 @@ try {
     { url: floating.url(), originalWindow },
   );
   checks.push(
-    'settings sections stack vertically; paired fields have horizontal labels above full-width controls; 960/620/440 widths in both themes fit without overflow',
+    'settings sections and all seven rows stack vertically with labels left and equal-width centered controls right; 960/620/440 widths in both themes fit without overflow',
   );
   checks.push(
     'fixed dark interview and smaller native interview bounds, automatic device refresh in both settings, font slider and fixed opacity scene, footer privacy and meters without trailing status',

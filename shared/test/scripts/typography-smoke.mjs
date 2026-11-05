@@ -1,3 +1,4 @@
+import { openModelMenu, openReasoningControl } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -46,6 +47,86 @@ const mathAnswer = [
   '$$' + Array.from({ length: 80 }, (_, i) => `x_{${i}}`).join(' + ') + '$$',
   '```tex\n' + String.raw`\(literal\)` + '\n```',
 ].join('\n\n');
+const verifyNeutralSelection = async (page, name) => {
+  const samples = await page.evaluate(() => {
+    const selection = getSelection();
+    const saved = Array.from({ length: selection.rangeCount }, (_, index) =>
+      selection.getRangeAt(index).cloneRange(),
+    );
+    const targets = [
+      document.body,
+      ...document.querySelectorAll(
+        '.cloud-account-form input[type="email"],.chat-composer textarea,' +
+          '.floating-composer textarea,.user-bubble > p,' +
+          '.chat-message.assistant .markdown-content p,.answer-bubble .markdown-content p',
+      ),
+    ].filter((node) => node.checkVisibility());
+    try {
+      return targets.map((node) => {
+        const ordinary = getComputedStyle(node),
+          highlight = getComputedStyle(node, '::selection');
+        const selectionAllowed =
+          !node.closest('[inert], .login-preview') &&
+          !node.matches('.login-page :is(input, textarea):placeholder-shown');
+        let selectedText = null,
+          expectedText = null;
+        if (selectionAllowed && node instanceof HTMLTextAreaElement) {
+          const start = node.selectionStart,
+            end = node.selectionEnd,
+            direction = node.selectionDirection;
+          node.setSelectionRange(0, node.value.length);
+          selectedText = node.value.slice(node.selectionStart, node.selectionEnd);
+          expectedText = node.value;
+          node.setSelectionRange(start, end, direction);
+        } else if (selectionAllowed && node.matches('p')) {
+          const text = document
+            .createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+              acceptNode: (child) =>
+                child.textContent.trim() && !child.parentElement.closest('.katex')
+                  ? NodeFilter.FILTER_ACCEPT
+                  : NodeFilter.FILTER_REJECT,
+            })
+            .nextNode();
+          if (text) {
+            const range = document.createRange();
+            range.selectNodeContents(text);
+            selection.removeAllRanges();
+            selection.addRange(range);
+            selectedText = selection.toString();
+            expectedText = text.textContent;
+          }
+        }
+        return {
+          type: node.className || node.tagName,
+          background: highlight.backgroundColor,
+          color: highlight.color,
+          foreground: ordinary.color,
+          shadow: highlight.textShadow,
+          expectedText,
+          selectedText,
+        };
+      });
+    } finally {
+      selection.removeAllRanges();
+      for (const range of saved) selection.addRange(range);
+    }
+  });
+  const forcedColors = await page.evaluate(() => matchMedia('(forced-colors: active)').matches);
+  assert.ok(samples.length > 0, name + ': selection samples are present');
+  for (const sample of samples) {
+    const [red, green, blue, alpha = 1] = sample.background.match(/[\d.]+/g).map(Number);
+    if (!forcedColors) {
+      assert.ok(
+        red === green && green === blue && alpha > 0 && alpha < 1,
+        name + ': text selection uses translucent neutral grey: ' + JSON.stringify(sample),
+      );
+      assert.equal(sample.color, sample.foreground, name + ': selection preserves text colour');
+    }
+    assert.equal(sample.shadow, 'none');
+    if (sample.selectedText !== null)
+      assert.equal(sample.selectedText, sample.expectedText, name + ': text remains selectable');
+  }
+};
 const inspectMath = async (page, selector, name) => {
   const content = page.locator(selector).last();
   await content.locator('.katex-html').nth(2).waitFor();
@@ -72,6 +153,7 @@ const inspectMath = async (page, selector, name) => {
     assert.equal(geometry.scrollable, true, name + ': long math scrolls inside its own block');
     assert.equal(geometry.matrix, 3, name + ': matrix rows and columns rendered');
     assert.equal(geometry.fontLoaded, true, name + ': bundled math font loaded');
+    await verifyNeutralSelection(page, name + (dark ? '-dark' : '-light'));
   }
   if (requestedPreviews.has(name))
     console.log(
@@ -85,14 +167,16 @@ const inspectMath = async (page, selector, name) => {
   console.log('Inspect math: ' + name);
 };
 const inspect = async (page, name) => {
-  await page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every(
-        (animation) =>
-          animation.effect?.getTiming().iterations === Infinity ||
-          animation.playState !== 'running',
-      ),
+  await page.waitForFunction(
+    () =>
+      !document.documentElement.dataset.viewDirection &&
+      document
+        .getAnimations()
+        .every(
+          (animation) =>
+            animation.effect?.getTiming().iterations === Infinity ||
+            animation.playState !== 'running',
+        ),
   );
   const corners = await verifyContinuousCorners(page, name);
   if (name === 'login-light')
@@ -111,7 +195,14 @@ const inspect = async (page, name) => {
       .map((e) => e.className);
     const selects = [...document.querySelectorAll('.speech-device .speech-select')]
       .filter(visible)
-      .map((e) => e.getBoundingClientRect().top);
+      .map((e) => {
+        const control = e.getBoundingClientRect();
+        const label = e.closest('.speech-device').querySelector('.speech-device-heading').getBoundingClientRect();
+        return {
+          left: control.left, top: control.top, width: control.width,
+          centerOffset: label.top + label.height / 2 - control.top - control.height / 2,
+        };
+      });
     const fields = [
       ...document.querySelectorAll(
         '.personal-info-v2 .field-label input,.personal-info-v2 .field-label .choice-trigger',
@@ -188,6 +279,47 @@ const inspect = async (page, name) => {
       const front = luminance(foreground);
       activeAnswerContrast = (Math.max(front, back) + 0.05) / (Math.min(front, back) + 0.05);
     }
+    let dialogHeader = null;
+    if (active !== document.body) {
+      const settings = active.matches('.settings-dialog');
+      const heading = active.querySelector(':scope > .dialog-heading');
+      const title = heading?.querySelector('.dialog-title h2');
+      const close = settings
+        ? active.querySelector('.settings-sidebar > .dialog-close-button')
+        : heading?.querySelector('.dialog-close-button');
+      if (!close || (settings ? !!heading : !title))
+        throw Error(
+          settings
+            ? 'Settings must keep its sidebar close button without a global title header'
+            : 'Open modal must use the shared title and upper-right close header',
+        );
+      const style = getComputedStyle(active),
+        t = title?.getBoundingClientRect(),
+        c = close.getBoundingClientRect();
+      const firstField = active.querySelector(
+        ':scope > .dialog-scroll > .field-label:first-child,' +
+          ':scope > .dialog-scroll > form:first-child > .field-label:first-child',
+      );
+      const compactField =
+        firstField &&
+        heading &&
+        !active.hasAttribute('data-overlay-header') &&
+        !active.hasAttribute('data-scrollable');
+      dialogHeader = {
+        settings,
+        titleLeft: t ? t.left - bounds.left - parseFloat(style.borderLeftWidth) : null,
+        closeLeft: c.left - bounds.left - parseFloat(style.borderLeftWidth),
+        closeRight: bounds.right - parseFloat(style.borderRightWidth) - c.right,
+        closeTop: c.top - bounds.top - parseFloat(style.borderTopWidth),
+        centerOffset: t ? t.top + t.height / 2 - c.top - c.height / 2 : null,
+        closeWidth: c.width,
+        closeHeight: c.height,
+        firstFieldGap: compactField
+          ? firstField.getBoundingClientRect().top -
+            Math.max(...[...heading.children].map((child) => child.getBoundingClientRect().bottom))
+          : null,
+      };
+    }
     return {
       overflow,
       selects,
@@ -196,6 +328,7 @@ const inspect = async (page, name) => {
       misalignedIcons,
       misalignedFooters,
       activeAnswerContrast,
+      dialogHeader,
       dialogContained:
         active === document.body ||
         (bounds.left >= 0 &&
@@ -220,6 +353,31 @@ const inspect = async (page, name) => {
   await captureRequested(page, name);
   assert.deepEqual(geometry.overflow, [], `${name}: horizontal overflow`);
   assert(geometry.dialogContained, `${name}: dialog outside viewport`);
+  if (geometry.dialogHeader) {
+    const header = geometry.dialogHeader;
+    assert(
+      (header.settings
+        ? [header.closeLeft, header.closeTop]
+        : [header.titleLeft, header.closeRight, header.closeTop]
+      ).every((inset) => Math.abs(inset - 24) <= 1 / 64),
+      `${name}: modal header (or Settings sidebar close) must retain fixed 24px insets: ${JSON.stringify(header)}`,
+    );
+    assert(
+      header.settings || Math.abs(header.centerOffset) <= 1 / 64,
+      `${name}: title and close control must share a vertical center`,
+    );
+    assert(
+      Math.abs(header.closeWidth - 36) <= 1 / 64 && Math.abs(header.closeHeight - 36) <= 1 / 64,
+      `${name}: modal close hit target stays 36px`,
+    );
+    if (/^(personal-editor|record-rename|knowledge-(create|rename))/.test(name))
+      assert.notEqual(header.firstFieldGap, null, `${name}: the editor form fits on one page`);
+    if (header.firstFieldGap !== null)
+      assert(
+        Math.abs(header.firstFieldGap - 16) <= 1 / 64,
+        `${name}: the first label starts 16px below the header content: ${JSON.stringify(header)}`,
+      );
+  }
   assert.deepEqual(geometry.misalignedIcons, [], `${name}: icon not centered in its button`);
   assert.deepEqual(geometry.misalignedFooters, [], `${name}: dialog actions not centered`);
   assert.deepEqual(
@@ -236,8 +394,11 @@ const inspect = async (page, name) => {
     );
   if (geometry.selects.length === 2)
     assert(
-      Math.abs(geometry.selects[0] - geometry.selects[1]) < 1,
-      `${name}: device selectors shifted by an error`,
+      Math.abs(geometry.selects[0].left - geometry.selects[1].left) <= 1 / 64 &&
+        Math.abs(geometry.selects[0].width - geometry.selects[1].width) <= 1 / 64 &&
+        geometry.selects[1].top > geometry.selects[0].top &&
+        geometry.selects.every((control) => Math.abs(control.centerOffset) <= 1 / 64),
+      `${name}: device rows keep their labels centered beside one aligned control column`,
     );
   if (geometry.fields.length > 1)
     assert(
@@ -277,7 +438,8 @@ const inspect = async (page, name) => {
           expectedControlSize: e.matches('.login-interview-preview textarea')
             ? 11
             : e.matches(
-                  '.login-form-links .ui-button,.profile-edit-dialog textarea.profile-editor-input,.chat-copy',
+                  '.login-form-links .ui-button,.profile-edit-dialog textarea.profile-editor-input,.chat-copy,.user-message-toggle,' +
+                    '.chat-source-link,.reasoning-model-selector,.floating-composer .floating-composer-toolbar .ui-button',
                 )
               ? 12
               : 14,
@@ -333,8 +495,10 @@ try {
   login.setDefaultTimeout(15000);
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await inspect(login, 'login-light');
+  await verifyNeutralSelection(login, 'login-light');
   await login.evaluate(() => document.documentElement.classList.add('dark'));
   await inspect(login, 'login-dark');
+  await verifyNeutralSelection(login, 'login-dark');
   const page = await connectUiAccount(app, login);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
@@ -398,7 +562,9 @@ try {
       ['聊天模型', 'model'],
       ['思考强度', 'effort'],
     ]) {
-      await page.getByRole('button', { name: label, exact: true }).click();
+      if (menu === 'model') await openModelMenu(page);
+      else if (menu === 'effort') await openReasoningControl(page);
+      else await page.getByRole('button', { name: label, exact: true }).click();
       await page.mouse.move(0, 0);
       await inspect(page, `chat-menu-${menu}-${theme}`);
       await page.keyboard.press('Escape');
@@ -447,6 +613,7 @@ try {
       .getByRole('button', { name: '通用', exact: true })
       .click();
     const settings = page.getByRole('dialog', { name: '设置', exact: true });
+    await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
     assert.equal(await settings.getByRole('button', { name: '知识库', exact: true }).count(), 0);
     for (const category of [
       'VoxCue 账号',
@@ -457,6 +624,7 @@ try {
       '关于与更新',
     ]) {
       await settings.getByRole('button', { name: category, exact: true }).click();
+      await settings.getByRole('heading', { name: category, exact: true }).waitFor();
       await inspect(page, `settings-${category}-${theme}`);
       if (category === '通用') {
         for (const menu of ['外观主题']) {
@@ -577,6 +745,7 @@ try {
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: category, exact: true })
       .click();
+    await page.getByRole('heading', { name: category, exact: true }).waitFor();
     await inspect(page, `settings-${category}-narrow-dark`);
   }
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();

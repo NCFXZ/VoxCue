@@ -12,7 +12,11 @@ import {
   type PersonalInfo,
 } from '../services/preparation';
 import { localKnowledge, type LocalDocument } from '../services/knowledge';
-import { stageAttachments, type ChatAttachment } from '../services/chatOptions';
+import {
+  resolveReasoningEffort,
+  stageAttachments,
+  type ChatAttachment,
+} from '../services/chatOptions';
 import { useChatConnection } from './chatConnection';
 import { streamChat, ChatRequestError } from '../services/chat';
 import { localChats, type ChatSnapshot, type PreparationConversation } from '../services/chats';
@@ -85,12 +89,14 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       try {
         const saved = await localChats.read();
         const active = saved?.conversations.find((c) => c.id === saved.activeConversation);
+        const models = useChatConnection.getState().models;
+        const model = saved && (models.find((entry) => entry.id === saved.modelId) ?? models[0]);
         set({
           ...(saved
             ? {
                 conversations: saved.conversations,
-                modelId: saved.modelId,
-                effort: saved.effort,
+                modelId: model?.id ?? saved.modelId,
+                effort: model ? resolveReasoningEffort(model, saved.effort) : saved.effort,
                 skillsNeedUpdate: saved.skillsNeedUpdate ?? false,
                 activeConversation: active?.id ?? null,
                 messages: active?.messages ?? [],
@@ -211,7 +217,9 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   modelId: 'mock-general',
   effort: 'low',
   setEffort(effort) {
-    set({ effort });
+    const models = useChatConnection.getState().models;
+    const model = models.find((entry) => entry.id === get().modelId) ?? models[0];
+    set({ effort: resolveReasoningEffort(model, effort) });
   },
   addAttachments(files) {
     try {
@@ -225,7 +233,8 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     set((state) => ({ attachments: state.attachments.filter((item) => item.id !== id) }));
   },
   setModel(id) {
-    if (useChatConnection.getState().models.some((model) => model.id === id)) set({ modelId: id });
+    const model = useChatConnection.getState().models.find((entry) => entry.id === id);
+    if (model) set({ modelId: id, effort: resolveReasoningEffort(model, get().effort) });
   },
   async load() {
     await get().restoreChats();
@@ -451,13 +460,14 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       set({ error: connection.error || '正在加载模型，请稍候。' });
       return;
     }
+    const effort = resolveReasoningEffort(selected, get().effort);
+    if (get().modelId !== selected.id || get().effort !== effort)
+      set({ modelId: selected.id, effort });
     const options = {
       modelId: selected.id,
       modelLabel: selected.label,
       live: connection.live,
-      effort: selected.reasoningEfforts?.includes(get().effort as ReasoningEffort)
-        ? (get().effort as ReasoningEffort)
-        : undefined,
+      effort: effort === 'auto' ? undefined : effort,
       webSearch: true,
       ...(skillTask ? { profileTask: 'skills' as const } : {}),
       attachments: skillTask ? [] : [...(retryUser?.options?.attachments ?? get().attachments)],
@@ -539,7 +549,15 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           ? state.messages.slice(0, -1).map((m) => (m.id === retryUser?.id ? { ...m, options } : m))
           : state.messages),
         ...(!retryId
-          ? [{ id: crypto.randomUUID(), role: 'user' as const, content: text, options }]
+          ? [
+              {
+                id: crypto.randomUUID(),
+                role: 'user' as const,
+                content: text,
+                options,
+                startedAt: Date.now(),
+              },
+            ]
           : []),
         {
           id,
@@ -827,6 +845,15 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     }
   },
 }));
+useChatConnection.subscribe((connection, previous) => {
+  if (connection.models === previous.models || !connection.models.length) return;
+  const state = usePreparation.getState();
+  const model =
+    connection.models.find((entry) => entry.id === state.modelId) ?? connection.models[0];
+  const effort = resolveReasoningEffort(model, state.effort);
+  if (state.modelId !== model.id || state.effort !== effort)
+    usePreparation.setState({ modelId: model.id, effort });
+});
 // Keep the active conversation snapshot in sync without duplicating File objects.
 usePreparation.subscribe((state, previous) => {
   if (

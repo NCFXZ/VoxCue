@@ -115,6 +115,7 @@ try {
     .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
   assert.equal(
     await settings
       .getByRole('navigation')

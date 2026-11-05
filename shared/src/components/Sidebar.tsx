@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import * as DropdownMenu from './ui/dropdown-menu';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { usePreparation } from '../stores/preparation';
 import { Modal } from './ui/modal';
 import {
@@ -23,6 +23,8 @@ import { useChatConnection } from '../stores/chatConnection';
 import { isAccountUsageLow } from '../services/accountUsageSummary';
 import { AccountUsageSummary } from './AccountUsageSummary';
 import { SidebarUpdate } from './SidebarUpdate';
+import { SelectionLabel } from './SelectionLabel';
+import { SidebarSelectionIndicator } from './SidebarSelectionIndicator';
 interface Props {
   userName: string;
   accountLabel: string;
@@ -49,6 +51,7 @@ export function Sidebar({
 }: Props) {
   const connection = useChatConnection();
   const preparation = usePreparation();
+  const sidebar = useRef<HTMLElement>(null);
   useEffect(() => {
     if (!connection.live) return;
     return useChatConnection.getState().watchUsage();
@@ -64,7 +67,11 @@ export function Sidebar({
   );
   const [loggingOut, setLoggingOut] = useState(false);
   return (
-    <aside className={`sidebar ${collapsed ? 'collapsed' : ''}`}>
+    <aside
+      ref={sidebar}
+      className={`sidebar sidebar-selection-host ${collapsed ? 'collapsed' : ''}`}
+    >
+      <SidebarSelectionIndicator container={sidebar} />
       <div className="sidebar-heading">
         <span className="sidebar-wordmark">
           <AppLogo size={24} /> <strong>VoxCue</strong>
@@ -99,7 +106,7 @@ export function Sidebar({
           onClick={() => onNavigate('history')}
         >
           <History size={18} />
-          <span>{t('面试记录')}</span>
+          <SelectionLabel>{t('面试记录')}</SelectionLabel>
         </button>
         <button
           className={`nav-item ${page === 'knowledge' ? 'active' : ''}`}
@@ -108,7 +115,7 @@ export function Sidebar({
           onClick={() => onNavigate('knowledge')}
         >
           <Database size={18} />
-          <span>{t('知识库')}</span>
+          <SelectionLabel>{t('知识库')}</SelectionLabel>
         </button>
       </nav>
       {!collapsed && (

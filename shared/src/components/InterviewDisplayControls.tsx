@@ -35,8 +35,8 @@ function DisplaySlider({
 }) {
   const id = useId();
   return (
-    <div className="interview-display-setting">
-      <div className="interview-display-label">
+    <div className="interview-display-setting speech-setting-row">
+      <div className="interview-display-label speech-setting-label">
         <label htmlFor={id}>{title}</label>
         <output htmlFor={id}>
           {value}

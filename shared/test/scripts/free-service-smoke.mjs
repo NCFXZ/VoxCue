@@ -57,11 +57,23 @@ async function assertNarrowSidebar(main, language) {
   const size = await window.evaluate((window) => {
     const size = window.getSize();
     window.setSize(...window.getMinimumSize());
-    return size;
+    return {
+      previous: size,
+      content: window.getContentSize(),
+      zoom: window.webContents.getZoomFactor(),
+    };
   });
   try {
     await main.waitForFunction(
-      () => Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width - 200) < 1,
+      ({ content, zoom }) => Math.abs(innerWidth - content[0] / zoom) <= 1,
+      size,
+    );
+    assert.equal(
+      await main
+        .locator('.sidebar')
+        .evaluate((node) => Math.round(node.getBoundingClientRect().width * 64) / 64),
+      230,
+      'The expanded sidebar retains its fixed width at the minimum window size',
     );
     for (const dark of [false, true]) {
       await main.evaluate(
@@ -86,9 +98,13 @@ async function assertNarrowSidebar(main, language) {
       await main.getByRole('button', { name: english ? 'General' : '通用', exact: true }).click();
     }
   } finally {
-    await window.evaluate((window, size) => window.setSize(...size), size);
+    const restored = await window.evaluate((window, size) => {
+      window.setSize(...size.previous);
+      return { content: window.getContentSize(), zoom: window.webContents.getZoomFactor() };
+    }, size);
     await main.waitForFunction(
-      () => Math.abs(document.querySelector('.sidebar').getBoundingClientRect().width - 230) < 1,
+      ({ content, zoom }) => Math.abs(innerWidth - content[0] / zoom) <= 1,
+      restored,
     );
   }
 }
@@ -144,6 +160,7 @@ try {
   await main.getByRole('menuitem', { name: '设置', exact: true }).click();
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
+  await settings.getByRole('heading', { name: 'VoxCue 账号', exact: true }).waitFor();
   assert.equal(await settings.getByText(/面试额度|激活码|兑换|云端数据保留至/).count(), 0);
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
   const headingSize = await settings

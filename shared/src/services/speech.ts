@@ -6,6 +6,7 @@ import type {
 } from '../../electron/contracts/speech';
 import { automaticAnswerSilenceMs } from '../../electron/contracts/speechSettings';
 import type { ChatActivity, ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
+import { resolveReasoningEffort } from './chatOptions';
 
 export const defaultInterviewConfiguration = (): InterviewConfiguration => ({
   mode: 'local',
@@ -21,14 +22,7 @@ export function resolveInterviewConfiguration(
   live: boolean,
 ): InterviewConfiguration {
   const model = models.find((m) => m.id === saved.modelId) ?? models[0];
-  const effort =
-    model?.id === saved.modelId && saved.effort === 'auto'
-      ? 'auto'
-      : saved.effort !== 'auto' && model?.reasoningEfforts?.includes(saved.effort)
-        ? saved.effort
-        : model?.reasoningEfforts?.includes('low')
-          ? 'low'
-          : 'auto';
+  const effort = resolveReasoningEffort(model, saved.effort);
   return {
     ...structuredClone(saved),
     mode: live ? 'local' : 'mock',

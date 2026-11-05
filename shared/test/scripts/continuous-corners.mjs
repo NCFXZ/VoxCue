@@ -9,6 +9,23 @@ export function cornerShapeNames(value) {
     : Object.fromEntries(Object.entries(value).map(([key, item]) => [key, name(item)]));
 }
 
+// The real rounded surface changes height inside an unchanged Popper box.
+// Measuring both catches scale/clip substitutes and a moving trigger anchor.
+export function dropdownRevealGeometry({
+  height,
+  top,
+  bottom,
+  frameHeight,
+  frameTop,
+  frameBottom,
+  side,
+}) {
+  return {
+    revealed: height / frameHeight,
+    anchorGap: side === 'top' ? frameBottom - bottom : top - frameTop,
+  };
+}
+
 // Apply CSS radius normalization to measured animation frames. A 50% radius on
 // a wide button is an ellipse; checking only the final circle misses that bug.
 export function verifyRoundCapFrames(frames) {
@@ -40,9 +57,152 @@ export function verifyRoundCapFrames(frames) {
   }
 }
 
+export async function verifyComposerControlAlignment(composer, name) {
+  const geometry = await composer.evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const controls = [
+      node.querySelector('.floating-composer-toolbar .floating-toggle'),
+      node.querySelector('.floating-composer-actions > :first-child'),
+      node.querySelector('.send-button'),
+    ].map((control) => control.getBoundingClientRect());
+    return {
+      tops: controls.map((control) => control.top),
+      bottoms: controls.map((control) => control.bottom),
+      gaps: [
+        controls[0].left - box.left,
+        box.right - controls[2].right,
+        ...controls.map((control) => box.bottom - control.bottom),
+      ],
+      bottomPadding:
+        box.bottom - controls[1].bottom - parseFloat(getComputedStyle(node).borderBottomWidth),
+    };
+  });
+  for (const [edge, values] of Object.entries({
+    top: geometry.tops,
+    bottom: geometry.bottoms,
+    sideAndBottomGap: geometry.gaps,
+  }))
+    assert.ok(
+      Math.max(...values) - Math.min(...values) <= 1 / 64,
+      name + ': composer controls must align at ' + edge + ': ' + JSON.stringify(geometry),
+    );
+  assert.ok(
+    Math.abs(geometry.bottomPadding - 8) <= 1 / 64,
+    name +
+      ': screenshot bottom spacing stays at its existing baseline: ' +
+      JSON.stringify(geometry),
+  );
+  return geometry;
+}
+
+// Compare the painted corner centers in viewport coordinates, so preview scaling
+// and platform borders cannot hide a mismatch between the nested surfaces.
+export async function verifyConcentricComposers(page, name) {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  const samples = await page.locator('.floating-answer:visible').evaluateAll((panels) =>
+    panels.flatMap((panel) => {
+      const composer = panel.querySelector('.floating-composer');
+      if (!composer || !composer.checkVisibility()) return [];
+      const outer = panel.getBoundingClientRect(),
+        inner = composer.getBoundingClientRect(),
+        outerStyle = getComputedStyle(panel),
+        innerStyle = getComputedStyle(composer);
+      const outerScale = outer.width / parseFloat(outerStyle.width),
+        innerScale = inner.width / parseFloat(innerStyle.width);
+      const corners = ['Left', 'Right'].map((side) => {
+        const outerRadius = parseFloat(outerStyle['borderBottom' + side + 'Radius']) * outerScale,
+          innerRadius = parseFloat(innerStyle['borderBottom' + side + 'Radius']) * innerScale,
+          direction = side === 'Left' ? 1 : -1,
+          edge = side.toLowerCase();
+        return {
+          side,
+          horizontal:
+            outer[edge] + direction * outerRadius - (inner[edge] + direction * innerRadius),
+          vertical: outer.bottom - outerRadius - (inner.bottom - innerRadius),
+          inset: side === 'Left' ? inner.left - outer.left : outer.right - inner.right,
+        };
+      });
+      const base = panel.querySelector(':scope > .floating-chrome-base');
+      const group = panel.closest('.floating-panels, .interview-font-preview') ?? panel;
+      const bubbles = [
+        ...group.querySelectorAll(
+          '.transcript-item > p,.floating-question,.answer-bubble,.interview-answer-failure',
+        ),
+      ]
+        .filter((node) => node.checkVisibility())
+        .map((node) => ({
+          type: node.className,
+          radius: getComputedStyle(node).borderRadius,
+        }));
+      return [
+        {
+          geometry: {
+            outer: outer.toJSON(),
+            inner: inner.toJSON(),
+            outerWidth: outerStyle.width,
+            innerWidth: innerStyle.width,
+            border: outerStyle.borderWidth,
+            outerRadius: outerStyle.borderRadius,
+            outerScale,
+            innerScale,
+            zoom: outerStyle.zoom,
+          },
+          corners,
+          corner: innerStyle.cornerShape,
+          outerCorner: outerStyle.cornerShape,
+          radius: innerStyle.borderRadius,
+          bubbles,
+          backingRadius: base ? getComputedStyle(base, '::after').borderRadius : null,
+        },
+      ];
+    }),
+  );
+  assert.ok(samples.length > 0, name + ': a visible interview composer is required');
+  for (const sample of samples) {
+    for (const corner of sample.corners) {
+      assert.ok(corner.inset > 0, name + ': composer must stay inside its panel');
+      assert.ok(
+        Math.abs(corner.horizontal) <= 1 / 32 && Math.abs(corner.vertical) <= 1 / 32,
+        name + ': nested bottom corners must share a center: ' + JSON.stringify(sample),
+      );
+    }
+    assert.equal(sample.corner, sample.outerCorner, name + ': nested corner curves');
+    if (sample.backingRadius !== null)
+      assert.equal(sample.backingRadius, sample.radius, name + ': opaque backing follows composer');
+    for (const bubble of sample.bubbles)
+      assert.equal(
+        bubble.radius,
+        sample.radius,
+        name + ': dialogue bubbles share composer corners: ' + bubble.type,
+      );
+  }
+  return samples;
+}
+
 // Inspect actual pages, including portal menus and generated selection marks.
 // Switching only the curve back to round must not change radii or box geometry.
 export async function verifyContinuousCorners(page, name) {
+  // Compare the settled surfaces; popup scale and view-height animations are
+  // verified separately and must not distort the measured nested insets.
+  await page.evaluate(async () => {
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    const animations = new Set(
+      [...document.querySelectorAll('.dropdown-content')]
+        .filter((menu) => menu.checkVisibility({ opacityProperty: true, visibilityProperty: true }))
+        .flatMap((menu) => menu.getAnimations({ subtree: true })),
+    );
+    await Promise.all(
+      [...animations]
+        .filter(
+          (animation) =>
+            animation.playState !== 'finished' &&
+            Number.isFinite(animation.effect?.getComputedTiming().endTime),
+        )
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+  });
   const result = await page.evaluate(() => {
     if (!CSS.supports('corner-shape', 'superellipse(2)'))
       throw Error('The desktop renderer does not support continuous corners');
@@ -61,6 +221,8 @@ export async function verifyContinuousCorners(page, name) {
     const accountHoverColor = getComputedStyle(probe).backgroundColor;
     const popupShadow = getComputedStyle(probe).boxShadow;
     const controlRadius = getComputedStyle(probe).borderRadius;
+    probe.style.borderRadius = 'var(--radius-composer)';
+    const composerRadius = getComputedStyle(probe).borderRadius;
     probe.style.borderRadius = 'var(--radius-interview-answer)';
     const answerRadius = getComputedStyle(probe).borderRadius;
     probe.style.boxShadow = 'var(--shadow-raised)';
@@ -108,8 +270,10 @@ export async function verifyContinuousCorners(page, name) {
         const style = getComputedStyle(element, pseudo);
         if (pseudo && ['none', 'normal'].includes(style.content)) continue;
         cursors++;
+        const inertPreview = Boolean(element.closest('[inert], .login-preview'));
         const textField =
           !pseudo &&
+          !inertPreview &&
           (element.matches('textarea:enabled') ||
             (element.matches('input:enabled') &&
               ![
@@ -124,10 +288,21 @@ export async function verifyContinuousCorners(page, name) {
                 'image',
               ].includes(element.type)) ||
             Boolean(element.closest('[contenteditable="true"]')));
+        const copyableText =
+          !pseudo &&
+          !inertPreview &&
+          !element.closest('a,button,[role="button"]') &&
+          Boolean(
+            element.closest(
+              '.markdown-content,.user-bubble > p,.answer-text,.transcript-item > p,' +
+                '.floating-question,.record-transcript-text,.record-answer-question,' +
+                '.record-answer-content,.interview-answer-failure-reason',
+            ),
+          );
         const expectedCursor =
           !pseudo && element.matches('.personal-resize-handle')
             ? 'col-resize'
-            : textField
+            : textField || copyableText
               ? 'text'
               : 'default';
         if (style.cursor !== expectedCursor)
@@ -142,22 +317,27 @@ export async function verifyContinuousCorners(page, name) {
         const radii = sides.map((side) => style.getPropertyValue('border-' + side + '-radius'));
         if (!radii.some((radius) => parseFloat(radius) > 0)) continue;
         const circle = radii.every((radius) => radius === '50%');
+        const menuSurface = !pseudo && element.matches('.dropdown-content,.dropdown-item');
         const capsule =
-          (pseudo === '::before' && element.matches('.nav-item.active,.conversation-row.active')) ||
-          (fallback &&
-            !pseudo &&
-            element.matches(
-              '.ui-button:not(.button-icon),.confirm-delete,.download-button,.choice-trigger,.settings-choice,.speech-select,.dropdown-item,.history-filters input[type="search"]',
-            )) ||
-          element.matches(
-            '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
-              '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,.interview-preview-capsule,' +
-              '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
-              '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,' +
-              '.screen-capture-status,.record-transcript-heading span,' +
-              '.interview-answer-status,.preparation-guide-actions .ui-button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
-          );
-        const roundMenu = !fallback && element.matches('.composer-menu');
+          (!pseudo && element.matches('.dropdown-item')) ||
+          (!menuSurface &&
+            ((!pseudo && element.matches('.sidebar-selection-indicator')) ||
+              (fallback &&
+                !pseudo &&
+                element.matches(
+                  '.ui-button:not(.button-icon),.confirm-delete,.download-button,.choice-trigger,.settings-choice,.speech-select,.history-filters input[type="search"]',
+                )) ||
+              element.matches(
+                '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
+                  '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,.interview-preview-capsule,' +
+                  '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
+                  '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,.chat-source-link,.reasoning-slider-track,' +
+                  '.screen-capture-status,.record-transcript-heading span,' +
+                  '.interview-answer-status,.preparation-guide-actions .ui-button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
+              )));
+        const roundMenu = element.matches('.reasoning-slider-fill');
+        if (element.matches('.reasoning-slider-fill') && (radii[1] !== '0px' || radii[2] !== '0px'))
+          wrong.push('reasoning slider fill must join beneath the thumb with a flat edge');
         const label = element.tagName + '.' + element.getAttribute('class') + (pseudo ?? '');
         if (!pseudo) {
           if (
@@ -178,8 +358,14 @@ export async function verifyContinuousCorners(page, name) {
             style.boxShadow !== raisedShadowFor(element)
           )
             wrongSurfaces.push(label + ': inconsistent raised surface shadow');
-          if (element.matches('.interview-answer-failure') && style.borderRadius !== answerRadius)
-            wrongSurfaces.push(label + ': failure alert differs from answer bubble corners');
+          if (element.matches('.interview-answer-failure')) {
+            const family = element.closest('.floating-panel')?.querySelector('.floating-composer');
+            const scopedAnswerRadius = family
+              ? getComputedStyle(family).borderRadius
+              : answerRadius;
+            if (style.borderRadius !== scopedAnswerRadius)
+              wrongSurfaces.push(label + ': failure alert differs from answer bubble corners');
+          }
           if (element.matches('.dropdown-item') && style.boxShadow !== 'none')
             wrongSurfaces.push(label + ': menu item adds an elevation shadow');
           if (
@@ -212,9 +398,13 @@ export async function verifyContinuousCorners(page, name) {
         });
       }
     }
-    for (const menu of document.querySelectorAll('[role="menu"]')) {
+    for (const menu of document.querySelectorAll('.dropdown-content')) {
       if (!menu.checkVisibility({ opacityProperty: true, visibilityProperty: true })) continue;
-      const trigger = document.getElementById(menu.getAttribute('aria-labelledby'));
+      const trigger = menu.matches('.reasoning-effort-popup')
+        ? [...document.querySelectorAll('[aria-controls]')].find(
+            (element) => element.getAttribute('aria-controls') === menu.id,
+          )
+        : document.getElementById(menu.getAttribute('aria-labelledby'));
       if (!trigger) throw Error('Open menu has no associated trigger');
       const menuStyle = getComputedStyle(menu),
         triggerStyle = getComputedStyle(trigger);
@@ -225,18 +415,136 @@ export async function verifyContinuousCorners(page, name) {
         (trigger.matches('.user-button') ? accountHoverColor : hoverColor)
       )
         wrongSurfaces.push(trigger.className + ': open dropdown loses its hover feedback');
-      if (fallback) {
-        if (
-          menuStyle.borderRadius !== '20px' ||
-          menuStyle.getPropertyValue('corner-top-left-shape') !== continuous
-        )
-          wrongMenus.push(menu.className + ': fallback popup contour');
-        continue;
-      }
+      const menuBox = menu.getBoundingClientRect();
+      const scale = menuBox.width / parseFloat(menuStyle.width);
+      const items = [...menu.querySelectorAll('.dropdown-item')].filter(
+        (item) =>
+          item.closest('.dropdown-content') === menu &&
+          item.checkVisibility() &&
+          item.getBoundingClientRect().width > 0 &&
+          item.getBoundingClientRect().height > 0,
+      );
       for (const side of sides) {
-        for (const property of ['border-' + side + '-radius', 'corner-' + side + '-shape']) {
-          if (menuStyle.getPropertyValue(property) !== triggerStyle.getPropertyValue(property))
-            wrongMenus.push(menu.className + ': ' + property);
+        const expectedRadius = parseFloat(composerRadius);
+        const radii = menuStyle
+          .getPropertyValue('border-' + side + '-radius')
+          .split(/\s+/)
+          .map(parseFloat);
+        if (
+          radii.some((radius) => Math.abs(radius - expectedRadius) > 0.6) ||
+          menuStyle.getPropertyValue('corner-' + side + '-shape') !== continuous
+        )
+          wrongMenus.push(
+            menu.className + ': popup does not share the continuous composer corner at ' + side,
+          );
+      }
+      if (
+        ['paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft'].some(
+          (property) => Math.abs(parseFloat(menuStyle[property]) - 6) > 1 / 64,
+        )
+      )
+        wrongMenus.push(menu.className + ': popup content inset differs from 6px');
+      if (menuStyle.overflowX !== 'hidden' || menuStyle.overflowY !== 'hidden')
+        wrongMenus.push(menu.className + ': outer popup must clip its inner scrolling surface');
+      const scroll = menu.querySelector(':scope > .dropdown-scroll');
+      if (!scroll) wrongMenus.push(menu.className + ': popup has no owned inner scrolling surface');
+      else {
+        const scrollBox = scroll.getBoundingClientRect(),
+          scrollStyle = getComputedStyle(scroll);
+        const insets = {
+          left: (scrollBox.left - menuBox.left) / scale,
+          right: (menuBox.right - scrollBox.right) / scale,
+          top: (scrollBox.top - menuBox.top) / scale,
+          bottom: (menuBox.bottom - scrollBox.bottom) / scale,
+        };
+        for (const edge of ['left', 'right', 'top', 'bottom']) {
+          const expectedInset =
+            parseFloat(menuStyle.getPropertyValue('padding-' + edge)) +
+            parseFloat(menuStyle.getPropertyValue('border-' + edge + '-width'));
+          if (Math.abs(insets[edge] - expectedInset) > 0.6)
+            wrongMenus.push(menu.className + ': inner scroll surface is not contained at ' + edge);
+        }
+        for (const side of sides) {
+          const values = scrollStyle
+            .getPropertyValue('border-' + side + '-radius')
+            .split(/\s+/)
+            .map(parseFloat);
+          if (values.some((radius) => radius !== 0))
+            wrongMenus.push(
+              menu.className + ': inner scroll viewport must keep rectangular corners at ' + side,
+            );
+        }
+      }
+      for (const list of menu.querySelectorAll('.reasoning-model-list')) {
+        if (
+          sides.some((side) =>
+            getComputedStyle(list)
+              .getPropertyValue('border-' + side + '-radius')
+              .split(/\s+/)
+              .some((radius) => parseFloat(radius) !== 0),
+          )
+        )
+          wrongMenus.push(list.className + ': nested model scroll viewport clips capsule end caps');
+      }
+      for (const item of items) {
+        const itemBox = item.getBoundingClientRect(),
+          itemStyle = getComputedStyle(item);
+        const width = itemBox.width / scale,
+          height = itemBox.height / scale;
+        const radii = sides.map((side) => {
+          const values = itemStyle.getPropertyValue('border-' + side + '-radius').split(/\s+/);
+          return [values[0], values[1] ?? values[0]].map(
+            (value, axis) =>
+              parseFloat(value) * (value.endsWith('%') ? (axis ? height : width) / 100 : 1),
+          );
+        });
+        const factor = Math.min(
+          1,
+          width / (radii[0][0] + radii[1][0]),
+          width / (radii[3][0] + radii[2][0]),
+          height / (radii[0][1] + radii[3][1]),
+          height / (radii[1][1] + radii[2][1]),
+        );
+        if (
+          width < height - 0.6 ||
+          radii.some((corner) =>
+            corner.some((radius) => Math.abs(radius * factor - height / 2) > 0.6),
+          ) ||
+          sides.some((side) => itemStyle.getPropertyValue('corner-' + side + '-shape') !== round)
+        )
+          wrongMenus.push(item.className + ': menu highlight must have circular capsule end caps');
+        // A scrollbar occupies inline-end space, not additional menu padding.
+        let gutter = 0;
+        for (let host = item.parentElement; host; host = host.parentElement) {
+          const hostStyle = getComputedStyle(host);
+          if (
+            ['auto', 'scroll'].includes(hostStyle.overflowY) &&
+            host.scrollHeight > host.clientHeight
+          ) {
+            gutter += Math.max(
+              0,
+              host.getBoundingClientRect().width / scale -
+                host.clientWidth -
+                parseFloat(hostStyle.borderLeftWidth) -
+                parseFloat(hostStyle.borderRightWidth),
+            );
+          }
+          if (host === menu) break;
+        }
+        const insets = {
+          left: (itemBox.left - menuBox.left) / scale,
+          right: (menuBox.right - itemBox.right) / scale - gutter,
+        };
+        for (const edge of ['left', 'right']) {
+          const border = parseFloat(menuStyle.getPropertyValue('border-' + edge + '-width'));
+          if (
+            Math.abs(
+              insets[edge] - border - parseFloat(menuStyle.getPropertyValue('padding-' + edge)),
+            ) > 0.6
+          )
+            wrongMenus.push(
+              item.className + ': measured ' + edge + ' inset excludes the popup border/padding',
+            );
         }
       }
     }
@@ -300,11 +608,373 @@ export async function verifyContinuousCorners(page, name) {
     };
   });
   assert.deepEqual(result.wrongCursors, [], `${name}: inconsistent cursor for control type`);
-  assert.deepEqual(result.wrongMenus, [], `${name}: menu corners differ from trigger`);
+  assert.deepEqual(
+    result.wrongMenus,
+    [],
+    `${name}: inconsistent popup clipping or capsule highlight corners`,
+  );
   assert.deepEqual(result.wrongSurfaces, [], `${name}: inconsistent component family surfaces`);
   assert.deepEqual(result.wrong, [], `${name}: rounded surfaces use inconsistent curves`);
   assert.deepEqual(result.changed, [], `${name}: curve changed radii, box sizes or shadow values`);
   return result;
+}
+
+// Read native pixels along the expected circular caps, where a second large
+// scrolling-surface clip used to remove the first/last row's hover background.
+export async function verifyMenuCapsulePixels(page, app, menu, name) {
+  const markerId = 'menu-capsule-pixels-' + Date.now();
+  await menu.evaluate((node, markerId) => {
+    const style = document.createElement('style');
+    style.id = markerId;
+    style.textContent =
+      '#' +
+      CSS.escape(node.id) +
+      ' .dropdown-item[data-highlighted]:not([data-disabled]) { background: rgb(217, 32, 217) !important; }' +
+      '#' +
+      CSS.escape(markerId + '-reference') +
+      '::backdrop { background: transparent !important; pointer-events: none !important; }';
+    document.head.append(style);
+  }, markerId);
+  const windowId = await (await app.browserWindow(page)).evaluate((win) => win.id);
+  const sample = async (clip, points) => {
+    return app.evaluate(
+      async ({ BrowserWindow }, { windowId, clip, points }) => {
+        // Capture the native surface without CDP's temporary DPI emulation,
+        // which can move the pointer and clear Radix hover at fractional scale.
+        const image = await BrowserWindow.fromId(windowId).webContents.capturePage(clip);
+        const size = image.getSize(),
+          bytes = image.toBitmap();
+        const scaleFactors = image.getScaleFactors();
+        if (!size.width || !size.height || bytes.length !== size.width * size.height * 4)
+          throw Error(
+            'Native capsule bitmap dimensions disagree: ' +
+              JSON.stringify({ clip, size, bitmapBytes: bytes.length, scaleFactors }),
+          );
+        const mapped = points.map(({ x, y }) => {
+          const px = Math.min(
+            size.width - 1,
+            Math.max(0, Math.floor(((x + 0.5) * size.width) / clip.width)),
+          );
+          const py = Math.min(
+            size.height - 1,
+            Math.max(0, Math.floor(((y + 0.5) * size.height) / clip.height)),
+          );
+          return {
+            px,
+            py,
+            x: ((px + 0.5) * clip.width) / size.width,
+            y: ((py + 0.5) * clip.height) / size.height,
+          };
+        });
+        const colors = mapped.map(({ px, py }) => [
+          ...bytes.subarray((py * size.width + px) * 4, (py * size.width + px) * 4 + 3),
+        ]);
+        return { colors, mapped, size, bitmapBytes: bytes.length, scaleFactors };
+      },
+      { windowId, clip, points },
+    );
+  };
+  const difference = (a, b) => Math.max(...a.map((channel, index) => Math.abs(channel - b[index])));
+  const paintState = (item) =>
+    item.evaluate((node) => ({
+      background: getComputedStyle(node).backgroundColor,
+      highlighted: node.hasAttribute('data-highlighted'),
+      rect: node.getBoundingClientRect().toJSON(),
+      menuId: node.closest('.dropdown-content').id,
+      menuRect: node.closest('.dropdown-content').getBoundingClientRect().toJSON(),
+      menuStyle: Object.fromEntries(
+        [
+          'corner-shape',
+          'border-top-left-radius',
+          'overflow-x',
+          'overflow-y',
+          'padding-top',
+          'padding-left',
+          'border-left-width',
+          'opacity',
+          'transform',
+        ].map((property) => [
+          property,
+          getComputedStyle(node.closest('.dropdown-content')).getPropertyValue(property),
+        ]),
+      ),
+      visibility: document.visibilityState,
+      focus: document.hasFocus(),
+      dpi: devicePixelRatio,
+      ancestors: [
+        ...node
+          .closest('.dropdown-content')
+          .querySelectorAll(
+            '.dropdown-scroll,.reasoning-popup-body,.reasoning-popup-view,.reasoning-model-list',
+          ),
+      ]
+        .filter((ancestor) => ancestor.contains(node))
+        .map((ancestor) => {
+          const style = getComputedStyle(ancestor);
+          return {
+            className: ancestor.className,
+            rect: ancestor.getBoundingClientRect().toJSON(),
+            overflow: [style.overflowX, style.overflowY],
+            curve: style.cornerShape,
+            radius: style.borderTopLeftRadius,
+            opacity: style.opacity,
+            transform: style.transform,
+            scrollTop: ancestor.scrollTop,
+          };
+        }),
+      animations: node
+        .closest('.dropdown-content')
+        .getAnimations({ subtree: true })
+        .map((animation) => ({
+          state: animation.playState,
+          currentTime: animation.currentTime,
+          endTime: animation.effect?.getComputedTiming().endTime,
+        })),
+    }));
+  const paintedFrames = async () => {
+    await page.waitForFunction(
+      (menuId) => {
+        const menu = document.getElementById(menuId);
+        return (
+          menu &&
+          !menu.hasAttribute('data-menu-height-motion') &&
+          menu
+            .getAnimations({ subtree: true })
+            .every(
+              (animation) =>
+                animation.effect?.getComputedTiming().endTime === Infinity ||
+                (!animation.pending && animation.playState !== 'running'),
+            )
+        );
+      },
+      await menu.getAttribute('id'),
+    );
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+  };
+  try {
+    const items = menu.locator('.dropdown-item');
+    for (const [item, edge] of [
+      [items.first(), 'top'],
+      [items.last(), 'bottom'],
+    ]) {
+      await item.scrollIntoViewIfNeeded();
+      await page.mouse.move(0, 0);
+      await menu.focus();
+      assert.equal(
+        await item.evaluate((node) => node.hasAttribute('data-highlighted')),
+        false,
+        name + ': raster baseline must not highlight the sampled item',
+      );
+      await paintedFrames();
+      const box = await item.boundingBox();
+      const clip = {
+        x: Math.floor(box.x),
+        y: Math.floor(box.y),
+        width: Math.ceil(box.x + box.width) - Math.floor(box.x),
+        height: Math.ceil(box.y + box.height) - Math.floor(box.y),
+      };
+      const offsetX = box.x - clip.x,
+        offsetY = box.y - clip.y,
+        radius = box.height / 2;
+      const points = [
+        {
+          x: Math.floor(offsetX + box.width / 2),
+          y: Math.round(offsetY + (edge === 'top' ? 4 : box.height - 5)),
+          corner: 'reference',
+        },
+      ];
+      // Choose pixel centers fully inside the mathematical circle, close enough
+      // to its edge to detect the old 35px continuous inner clipping curve.
+      for (let y = 0; y < clip.height; y++)
+        for (let x = 0; x < clip.width; x++) {
+          const localX = x + 0.5 - offsetX,
+            localY = y + 0.5 - offsetY;
+          const dy = edge === 'top' ? localY : box.height - localY;
+          for (const [corner, dx] of [
+            ['left', localX],
+            ['right', box.width - localX],
+          ]) {
+            if (dx <= 0 || dx >= radius || dy <= 0 || dy >= radius) continue;
+            const inset = radius - Math.hypot(radius - dx, radius - dy);
+            if (inset >= 0.85 && inset <= 2.5) points.push({ x, y, corner, inset });
+          }
+        }
+      for (const corner of ['left', 'right'])
+        assert.ok(
+          points.filter((point) => point.corner === corner).length >= 3,
+          name + ': capsule corner raster samples are required',
+        );
+      const outside = [
+        {
+          x: Math.round(offsetX + 1),
+          y: Math.round(offsetY + (edge === 'top' ? 1 : box.height - 2)),
+        },
+        {
+          x: Math.round(offsetX + box.width - 2),
+          y: Math.round(offsetY + (edge === 'top' ? 1 : box.height - 2)),
+        },
+      ];
+      await paintedFrames();
+      const before = await paintState(item);
+      const baselineRaster = await sample(clip, points);
+      const baseline = baselineRaster.colors;
+      const referenceId = markerId + '-reference';
+      let circularRaster, circularRect;
+      try {
+        circularRect = await page.evaluate(
+          ({ referenceId, box }) => {
+            const reference = document.createElement('div');
+            reference.id = referenceId;
+            reference.popover = 'manual';
+            reference.inert = true;
+            reference.setAttribute('aria-hidden', 'true');
+            reference.style.cssText =
+              'position:fixed!important;inset:auto!important;margin:0!important;' +
+              'border:0!important;padding:0!important;box-sizing:border-box!important;' +
+              `left:${box.x}px!important;top:${box.y}px!important;` +
+              `width:${box.width}px!important;height:${box.height}px!important;` +
+              'border-radius:999px!important;corner-shape:round!important;' +
+              'background:rgb(217,32,217)!important;opacity:1!important;' +
+              'box-shadow:none!important;filter:none!important;backdrop-filter:none!important;' +
+              'transform:none!important;animation:none!important;transition:none!important;' +
+              'pointer-events:none!important;';
+            document.body.append(reference);
+            // An inert manual popover shares the native pixel phase but escapes
+            // every actual menu ancestor's overflow/corner clipping.
+            reference.showPopover();
+            return reference.getBoundingClientRect().toJSON();
+          },
+          { referenceId, box },
+        );
+        for (const key of ['x', 'y', 'width', 'height'])
+          assert.ok(
+            Math.abs(circularRect[key] - box[key]) <= 1 / 64,
+            name +
+              ': independent round reference must keep the exact item rect: ' +
+              JSON.stringify({ box, circularRect }),
+          );
+        await paintedFrames();
+        circularRaster = await sample(clip, [...points, ...outside]);
+      } finally {
+        await page.evaluate((id) => document.getElementById(id)?.remove(), referenceId);
+      }
+      assert.deepEqual(
+        baselineRaster.size,
+        circularRaster.size,
+        name + ': baseline and round reference must share one native pixel grid',
+      );
+      for (const corner of ['left', 'right'])
+        assert.ok(
+          points.filter(
+            (point, index) =>
+              point.corner === corner &&
+              difference(circularRaster.colors[index], baseline[index]) > 80,
+          ).length >= 3,
+          name + ': round reference must paint contrasting ' + corner + ' cap samples',
+        );
+      await item.hover();
+      assert.equal(await item.evaluate((node) => node.hasAttribute('data-highlighted')), true);
+      await paintedFrames();
+      const after = await paintState(item);
+      for (const key of ['x', 'y', 'width', 'height'])
+        assert.ok(
+          Math.abs(after.rect[key] - circularRect[key]) <= 1 / 64,
+          name +
+            ': hover must preserve the reference raster phase: ' +
+            JSON.stringify({ actual: after.rect, circularRect }),
+        );
+      const highlightedRaster = await sample(clip, [...points, ...outside]);
+      const highlighted = highlightedRaster.colors;
+      assert.deepEqual(
+        highlightedRaster.size,
+        circularRaster.size,
+        name + ': actual and round reference must share one native pixel grid',
+      );
+      const reference = highlighted[0];
+      assert.ok(
+        difference(reference, baseline[0]) > 80,
+        name +
+          ': hover must paint a real contrasting background: ' +
+          JSON.stringify({
+            edge,
+            reference,
+            baseline: baseline[0],
+            referencePoint: points[0],
+            clip,
+            before,
+            after,
+            baselineImage: { size: baselineRaster.size, bitmapBytes: baselineRaster.bitmapBytes },
+            highlightedImage: {
+              size: highlightedRaster.size,
+              bitmapBytes: highlightedRaster.bitmapBytes,
+            },
+            marker: await page.evaluate((id) => document.getElementById(id)?.textContent, markerId),
+          }),
+      );
+      // Near-edge antialiasing depends on the native pixel phase. Compare each
+      // cap with the independently round reference at that exact output pixel,
+      // rather than requiring its coverage to match a solid center pixel.
+      for (let index = 1; index < points.length; index++)
+        assert.ok(
+          difference(highlighted[index], circularRaster.colors[index]) <= 28,
+          name +
+            ': ' +
+            edge +
+            ' ' +
+            points[index].corner +
+            ' capsule cap was clipped at ' +
+            JSON.stringify({
+              point: points[index],
+              pixel: highlighted[index],
+              reference: circularRaster.colors[index],
+              solidReference: reference,
+              mapped: highlightedRaster.mapped[index],
+              mappedInset:
+                radius -
+                Math.hypot(
+                  radius -
+                    (points[index].corner === 'left'
+                      ? highlightedRaster.mapped[index].x - offsetX
+                      : box.width - (highlightedRaster.mapped[index].x - offsetX)),
+                  radius -
+                    (edge === 'top'
+                      ? highlightedRaster.mapped[index].y - offsetY
+                      : box.height - (highlightedRaster.mapped[index].y - offsetY)),
+                ),
+              clip,
+              offset: { x: offsetX, y: offsetY },
+              before,
+              after,
+              referenceRect: circularRect,
+              image: {
+                size: highlightedRaster.size,
+                bitmapBytes: highlightedRaster.bitmapBytes,
+                scaleFactors: highlightedRaster.scaleFactors,
+              },
+              referenceImage: {
+                size: circularRaster.size,
+                bitmapBytes: circularRaster.bitmapBytes,
+                scaleFactors: circularRaster.scaleFactors,
+                mapped: circularRaster.mapped[index],
+              },
+            }),
+        );
+      for (const pixel of circularRaster.colors.slice(points.length))
+        assert.ok(
+          difference(pixel, circularRaster.colors[0]) > 80,
+          name + ': round reference exterior must remain unpainted',
+        );
+      for (const pixel of highlighted.slice(points.length))
+        assert.ok(
+          difference(pixel, reference) > 80,
+          name + ': capsule exterior must remain unpainted',
+        );
+    }
+  } finally {
+    await page.evaluate((id) => document.getElementById(id)?.remove(), markerId);
+  }
 }
 
 // Compare native raster output with a circular baseline at the same radii.

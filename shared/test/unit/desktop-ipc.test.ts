@@ -274,6 +274,9 @@ describe('更新 IPC 白名单', () => {
       { op: 'set-auto-download', enabled: 'true' },
       { op: 'set-auto-download', enabled: true, path: '/private' },
       { op: 'check', enabled: true },
+      { op: 'check', force: 'true' },
+      { op: 'check', force: undefined },
+      { op: 'download', force: true },
     ])
       expect(() => handle(event, value)).toThrow();
     expect(() => handle({ sender, senderFrame: {} }, { op: 'install' })).toThrow(
@@ -283,6 +286,13 @@ describe('更新 IPC 白名单', () => {
       'Unauthorized window',
     );
     expect(service.install).not.toHaveBeenCalled();
+    await handle(event, { op: 'check' });
+    expect(service.check).toHaveBeenLastCalledWith(false);
+    await handle(event, { op: 'check', force: true });
+    expect(service.check).toHaveBeenLastCalledWith(true);
+    expect(() => handle({ sender, senderFrame: {} }, { op: 'check', force: true })).toThrow(
+      'Unauthorized frame',
+    );
     await handle(event, { op: 'cancel' });
     expect(service.cancel).toHaveBeenCalledOnce();
     await handle(event, { op: 'set-auto-download', enabled: false });
@@ -293,6 +303,8 @@ describe('更新 IPC 白名单', () => {
     expect(handle(event, { op: 'status' })).toEqual({ phase: 'idle' });
     await bridge.api!.updates({ op: 'check' });
     expect(bridge.invoke).toHaveBeenLastCalledWith('updates:call', { op: 'check' });
+    await bridge.api!.updates({ op: 'check', force: true });
+    expect(bridge.invoke).toHaveBeenLastCalledWith('updates:call', { op: 'check', force: true });
     const listener = vi.fn();
     const remove = bridge.api!.onUpdateEvent(listener);
     bridge.listeners.get('updates:event')!({}, { phase: 'idle' });

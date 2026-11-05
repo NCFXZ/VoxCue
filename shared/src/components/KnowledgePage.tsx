@@ -19,6 +19,7 @@ import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
 import { useKnowledge } from '../stores/knowledge';
 import { documentAccept } from '../services/knowledge';
+import { knowledgeStatusLabel } from '../services/knowledgeIndex';
 import { useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
 export function KnowledgePage({ onComponentSettings }: { onComponentSettings?(): void }) {
@@ -28,15 +29,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
   useEffect(() => index.connect(), []);
   const phase = (id: string) => {
     const status = index.tasks[id];
-    if (status) {
-      if (status.phase === 'ready') return '索引完成';
-      if (status.phase === 'failed') return '索引失败';
-      if (status.phase === 'cancelled') return '已取消';
-      const percent = status.total
-        ? Math.min(99, Math.max(0, Math.floor((status.completed / status.total) * 100)))
-        : 0;
-      return `索引中 ${percent}%`;
-    }
+    if (status) return knowledgeStatusLabel(status);
     const doc = index.state?.documents.find((doc) => doc.documentId === id);
     return doc ? (doc.available === false ? '索引已停用' : '索引完成') : '尚未索引';
   };

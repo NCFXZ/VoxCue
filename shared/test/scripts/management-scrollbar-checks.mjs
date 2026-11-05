@@ -74,6 +74,21 @@ export async function checkManagementScrollbars({ app, main, directory }) {
       () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
     );
   const verify = async (scroll, header, { gutter = true, material = true } = {}) => {
+    await scroll.waitFor();
+    await header.waitFor();
+    // New page contents mount before their browser snapshot stops intercepting
+    // input. Wheel coverage must exercise the live scroll viewport.
+    await main.waitForFunction(
+      () =>
+        !document.documentElement.dataset.viewDirection &&
+        document
+          .getAnimations()
+          .every(
+            (animation) =>
+              animation.effect?.getTiming().iterations === Infinity ||
+              animation.playState !== 'running',
+          ),
+    );
     const top = await header.evaluate((node) => node.getBoundingClientRect().top);
     assert.ok(await scroll.evaluate((node) => node.scrollHeight > node.clientHeight));
     for (const position of [0, 240, Number.MAX_SAFE_INTEGER]) {
@@ -85,7 +100,9 @@ export async function checkManagementScrollbars({ app, main, directory }) {
         (node, headerSelector) => {
           const header = document.querySelector(headerSelector),
             a = node.getBoundingClientRect(),
-            b = header.getBoundingClientRect();
+            b = header.getBoundingClientRect(),
+            scrollbar = getComputedStyle(node, '::-webkit-scrollbar'),
+            thumb = getComputedStyle(node, '::-webkit-scrollbar-thumb');
           return {
             top: b.top,
             height: b.height,
@@ -99,6 +116,12 @@ export async function checkManagementScrollbars({ app, main, directory }) {
             viewportHeight: node.clientHeight,
             contentTop: node.scrollTop,
             roundedEndResidual: node.scrollHeight - node.scrollTop - node.clientHeight,
+            scrollbar: {
+              width: parseFloat(scrollbar.width),
+              height: parseFloat(scrollbar.height),
+              radius: parseFloat(thumb.borderTopLeftRadius),
+              corner: thumb.cornerShape,
+            },
           };
         },
         await header.evaluate((node) => {
@@ -107,6 +130,13 @@ export async function checkManagementScrollbars({ app, main, directory }) {
         }),
       );
       assert.ok(Math.abs(top - geometry.top) < 1, JSON.stringify(geometry));
+      assert.equal(geometry.scrollbar.width, 6, 'The existing scrollbar width stays unchanged');
+      assert.equal(geometry.scrollbar.height, 6, 'Horizontal scrollbar thickness stays unchanged');
+      assert.ok(['round', 'superellipse(1)'].includes(geometry.scrollbar.corner));
+      assert.ok(
+        geometry.scrollbar.radius >= geometry.scrollbar.width / 2,
+        'The thumb end caps must normalize to semicircles: ' + JSON.stringify(geometry.scrollbar),
+      );
       assert.ok(
         geometry.scrollTop + geometry.track >= geometry.headerBottom - 1,
         JSON.stringify(geometry),
@@ -162,7 +192,7 @@ export async function checkManagementScrollbars({ app, main, directory }) {
     );
     await main.waitForTimeout(240);
     const sidebar = main.locator('.sidebar');
-    const contentWidth = width > 1100 ? 210 : 180;
+    const contentWidth = 210;
     await main.getByRole('button', { name: '收起侧栏', exact: true }).click();
     await main.waitForTimeout(230);
     await main.getByRole('button', { name: '展开侧栏', exact: true }).click();

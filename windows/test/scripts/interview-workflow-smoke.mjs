@@ -196,6 +196,7 @@ try {
     .click();
   await main.getByRole('button', { name: '面试设置', exact: true }).click();
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
   assert.equal(await settings.getByRole('button', { name: '转写模式', exact: true }).count(), 0);
   assert.equal(
     await settings.getByRole('checkbox', { name: '使用 ChatGPT 回答', exact: true }).count(),
@@ -266,6 +267,7 @@ try {
     .getByRole('button', { name: '通用', exact: true })
     .click();
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  await settings.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
   await app.evaluate(() => {
     globalThis.microphoneDenied = false;
     globalThis.microphoneMissing = true;
@@ -301,9 +303,11 @@ try {
     .getByRole('button', { name: '通用', exact: true })
     .click();
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
-  await settings.getByRole('button', { name: '面试回答思考强度', exact: true }).click();
-  await main.getByRole('menuitemradio', { name: '轻度', exact: true }).waitFor();
-  await main.getByRole('menuitemradio', { name: '高', exact: true }).click();
+  await settings.getByRole('button', { name: '面试回答模型', exact: true }).click();
+  const effortSlider = settings.getByRole('slider', { name: '面试回答思考强度', exact: true });
+  await effortSlider.press('End');
+  assert.equal(await effortSlider.getAttribute('aria-valuetext'), '高');
+  await effortSlider.press('Escape');
   await main.screenshot({});
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   check('音频禁用、所选设备自检及释放、设备自动刷新、模型与思考强度设置');

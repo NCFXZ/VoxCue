@@ -1,3 +1,19 @@
+## 2026-11-05 Windows 检查缓存与安装包恢复
+
+Windows 安装版的共享更新适配器在 `%APPDATA%/VoxCue/updates/release-cache.json` 保存公开发行元数据、检查尝试/成功时刻及下载恢复日志。普通启动和手动检查共用一小时窗口，窗口内不再请求发行 API 或清单；检查失败同样保留尝试屏障并重放失败，系统时间回拨也不会立即重查。发请求前先原子记录尝试，缓存读写失败则报错并停止联网，不用内存结果假装已经持久化。
+
+“检查更新”按钮连续按住 5 秒会立即强制重查；鼠标、触摸和键盘 Space/Enter 共用受控 `check` 操作的可选 `force` 布尔参数。普通点击读取缓存，提前松开、移出按钮、失焦或隐藏页面会取消长按计时，长按释放不追加一次普通检查。界面不增加限频、倒计时或手势说明。IPC 仍仅允许主窗口主 frame，其他操作不接受 `force` 或额外字段。
+
+完整安装包继续存放在 electron-updater 原有缓存中，普通退出不清除。下次启动若缓存版本高于当前版本且文件名、大小、SHA512 和现有签名策略全部通过，优先以本地元数据恢复 stock NSIS 待安装状态，无需联网或重复下载；关闭自动下载也可恢复已有完整包。已安装同版本或更旧的包不阻止正常查新版本。恢复过程禁止 stock downloader 意外回退到网络，签名校验不能因缓存命中跳过。
+
+下载开始前持久记录所属发行；下载中退出会取消传输、清除该发行的已知半成品并记录一小时自动下载冷却。进程意外中断后，下次启动先核对恢复日志，完整包保留，未完成包清除并保守重计冷却。手动下载可绕过自动下载冷却，强制检查会清除冷却；两者都继续执行原有平台、摘要和签名验证。重复退出在清理完成前一律等待，清理失败保留日志供下次恢复。安装仍只由用户明确选择触发，面试及本地保存握手规则保持。
+
+缓存逻辑位于 `shared/electron/backend/updates/cache.ts`，Windows stock updater 执行与本地包恢复封装在 `driver.ts`，业务阶段由 `UpdateService` 协调。生产调用仅由 main 提供应用数据目录，Renderer 不获得缓存或安装包路径。缓存只保留经现行发行选择器重新验证的本平台完整稳定发行，不改 GitHub 固定公开源、匿名访问、包命名或可信安装策略。
+
+Mac 原生 Sparkle 适配器仍在 `macos/`，本轮 Windows 工作区不修改该树。共享契约及按钮已兼容，Mac 的同等持久缓存、完整包保留和中断冷却须由 Mac 本机接续，不能将 Windows 验证代作 Mac 验收。
+
+定向入口：`update-cache.test.ts`、`updates.test.ts`、`desktop-ipc.test.ts`、`updates-smoke.mjs` 及 Windows `updates-native-smoke.mjs`。前者使用隔离临时目录/合成公开元数据，后者用真实 NsisUpdater 和 owner loopback 服务核对缓存重启、完整包恢复、取消/清理及摘要拒绝；不执行安装器，不读取真实用户资料，结果仅输出终端。
+
 > 2026-10-20 Windows 0.5.5：[Windows x64 发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.5.5) 提供 EXE、blockmap 和 latest.yml，正式三项保留于 windows/release/0.5.5。资料提案支持逐字段/逐技能勾选、紧凑长内容、待保存标签与独立生成状态；来源问题逐项保留供审阅，仅卡片按钮保存。沿用现有组件和安装/更新信任配置，Mac 0.5.3、全部旧资产及既有 Latest 保留。发行完成后用户另行授权本次私有源码同步，详见 [Mac 逐项检查清单](MACOS_0.5.5_HANDOFF.md)，不再次改写公开资产。下文较早版本的当前状态均按历史理解。
 
 > 2026-10-17：Mac 已新增免费 Sparkle/Ed25519 更新适配与独立 DMG/ZIP 构建。以下 Windows 发行记录与旧“Mac 待实现”描述为历史；Mac 当前流程见 [macos/docs/UPDATES.md](../../macos/docs/UPDATES.md)。测试结果零保留，历史结果路径不作为可用交付物。

@@ -82,19 +82,54 @@ try {
           },
           { id: info.id, box, x, y },
         );
-      const hit = async (locator, expected, x = 0.5) => {
-        const point = await stableTarget(locator,box=>pointAt(box,x));
+      const ownedWindowState = () =>
+        probe('window', info.handle, path.resolve('public/voxcue.ico'));
+      const focusOwnedWindow = async () => {
+        assert.equal(probe('desktop').interactive, true);
+        await app.evaluate(({ app, BrowserWindow }, info) => {
+          const window = BrowserWindow.fromId(info.id);
+          if (
+            !window ||
+            window.isDestroyed() ||
+            window.getNativeWindowHandle().readBigUInt64LE().toString() !== info.handle
+          )
+            throw Error('The synthetic login window identity changed');
+          if (window.isAlwaysOnTop()) throw Error('The synthetic login must retain normal z-order');
+          app.focus({ steal: true });
+          window.show();
+          window.moveTop();
+          window.focus();
+        }, info);
         await until(
-          () => probe('hittest', info.handle, point.x, point.y).result,
-          (value) => value === expected,
+          ownedWindowState,
+          (value) => value.visible && value.foreground && !(value.extendedStyle & 8),
+          'The isolated login must be foreground with normal z-order before native input',
+        );
+      };
+      const hit = async (locator, expected, x = 0.5) => {
+        const point = await stableTarget(locator, (box) => pointAt(box, x));
+        await until(
+          () => ({
+            result: probe('hittest', info.handle, point.x, point.y).result,
+            owned: probe('hit', info.handle, point.x, point.y).expected,
+          }),
+          (value) => value.result === expected && value.owned,
           'Native hit test for ' + (await locator.innerText()),
         );
         return point;
       };
       const click = async (locator) => {
-        assert.equal(probe('desktop').interactive, true);
+        await focusOwnedWindow();
         assert.equal(await locator.isDisabled(), false);
         const point = await hit(locator, 1);
+        const state = ownedWindowState();
+        assert.ok(
+          state.foreground && !(state.extendedStyle & 8),
+          'The synthetic login must keep foreground ownership until native input: ' +
+            JSON.stringify(state),
+        );
+        // The probe rechecks the input desktop and WindowFromPoint immediately
+        // before its real mouse press; do not retry a rejected press.
         probe('click', info.handle, point.x, point.y);
       };
       const button = (name) => page.getByRole('button', { name, exact: true });
@@ -104,20 +139,9 @@ try {
       const activation = await hit(band, 2, 0.05);
       probe('click', info.handle, activation.x, activation.y);
       await win.evaluate((window) => window.setAlwaysOnTop(false));
-      await app.evaluate(({ app, BrowserWindow }, id) => {
-        const window = BrowserWindow.fromId(id);
-        app.focus({ steal: true });
-        window.show();
-        window.moveTop();
-        window.focus();
-      }, info.id);
+      await focusOwnedWindow();
       await page.evaluate(
         () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-      );
-      await until(
-        () => probe('window', info.handle, path.resolve('public/voxcue.ico')),
-        (value) => value.foreground && !(value.extendedStyle & 8),
-        'The isolated login must be foreground with normal z-order',
       );
       const initial = await win.evaluate((window) => window.getBounds());
       const dragStart = await hit(band, 2);
@@ -153,8 +177,9 @@ try {
           await page.getByRole('heading', { name: '重置密码', exact: true }).waitFor();
           assert.equal(
             await page.getByLabel('新密码', { exact: true }).getAttribute('placeholder'),
-            '不少于8个字符',
+            '输入密码',
           );
+          await page.getByText('不少于8个字符', { exact: true }).waitFor();
           assert.equal(
             await page.getByLabel('新密码', { exact: true }).getAttribute('minlength'),
             '8',
@@ -179,8 +204,9 @@ try {
           await page.getByRole('heading', { name: '创建账号', exact: true }).waitFor();
           assert.equal(
             await page.getByLabel('密码', { exact: true }).getAttribute('placeholder'),
-            '不少于8个字符',
+            '输入密码',
           );
+          await page.getByText('不少于8个字符', { exact: true }).waitFor();
           assert.equal(
             await page.getByLabel('密码', { exact: true }).getAttribute('minlength'),
             '8',
@@ -194,7 +220,7 @@ try {
           });
           await click(button('返回登录'));
           await click(button('登录'));
-          await page.getByRole('alert').filter({ hasText: '请输入密码' }).waitFor();
+          await page.getByRole('alert').filter({ hasText: '密码不正确' }).waitFor();
           console.log(
             `PASS native login ${scale} ${dark ? 'dark' : 'light'} ${size.join('x')}: top-only drag, reset/register/code/return/login, cooldown`,
           );

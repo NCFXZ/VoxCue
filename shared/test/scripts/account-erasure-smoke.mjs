@@ -227,11 +227,36 @@ try {
       layoutUnit(order.remove) >= layoutUnit(order.exportBottom),
     'Export follows cloud backup and precedes deletion: ' + JSON.stringify(order),
   );
-  assert.equal(
-    await settings
-      .locator('.cloud-sync-actions')
-      .evaluate((node) => getComputedStyle(node).justifyContent),
-    'flex-end',
+  const syncAlignment = await settings.locator('.cloud-sync-actions').evaluate((node) => {
+    const box = node.getBoundingClientRect();
+    const buttons = [...node.querySelectorAll(':scope > button')].map((button) =>
+      button.getBoundingClientRect(),
+    );
+    const first = buttons[0],
+      last = buttons.at(-1);
+    const body = node.closest('.settings-content-body');
+    const switches = [...body.querySelectorAll('.settings-switch')];
+    const edge = switches.at(-1).getBoundingClientRect().right;
+    return {
+      buttons: buttons.length,
+      rightGap: box.right - last.right,
+      commonRight: last.right - edge,
+      buttonGap: last.left - first.right,
+      centers: Math.abs(first.top + first.height / 2 - last.top - last.height / 2),
+      paddingLeft: parseFloat(getComputedStyle(body).paddingLeft),
+      paddingRight: parseFloat(getComputedStyle(body).paddingRight),
+    };
+  });
+  assert.equal(syncAlignment.buttons, 2);
+  assert.ok(
+    layoutUnit(syncAlignment.rightGap) === 0 &&
+      layoutUnit(syncAlignment.commonRight) === 0 &&
+      layoutUnit(syncAlignment.buttonGap) === layoutUnit(8) &&
+      layoutUnit(syncAlignment.centers) === 0 &&
+      layoutUnit(syncAlignment.paddingLeft) === layoutUnit(24) &&
+      layoutUnit(syncAlignment.paddingRight) === layoutUnit(24),
+    'Sync actions share the settings right edge and 24px content insets, with one aligned row and an 8px gap: ' +
+      JSON.stringify(syncAlignment),
   );
   for (const dark of [false, true]) {
     await main.evaluate((v) => document.documentElement.classList.toggle('dark', v), dark);
@@ -256,6 +281,33 @@ try {
     .locator('.modal-footer')
     .evaluate((e) => getComputedStyle(e).justifyContent);
   assert.equal(alignment, 'flex-end');
+  const footerGeometry = await modal.locator('.modal-footer').evaluate((node) => {
+    const dialog = node.closest('dialog');
+    const box = dialog.getBoundingClientRect();
+    const style = getComputedStyle(dialog),
+      footer = getComputedStyle(node);
+    const buttons = [...node.querySelectorAll(':scope > button')].map((button) =>
+      button.getBoundingClientRect(),
+    );
+    const first = buttons[0],
+      last = buttons.at(-1);
+    return {
+      rightInset: box.right - parseFloat(style.borderRightWidth) - last.right,
+      paddingLeft: parseFloat(footer.paddingLeft),
+      paddingRight: parseFloat(footer.paddingRight),
+      buttonGap: last.left - first.right,
+      centers: Math.abs(first.top + first.height / 2 - last.top - last.height / 2),
+    };
+  });
+  assert.ok(
+    layoutUnit(footerGeometry.rightInset) === layoutUnit(24) &&
+      layoutUnit(footerGeometry.paddingLeft) === layoutUnit(24) &&
+      layoutUnit(footerGeometry.paddingRight) === layoutUnit(24) &&
+      layoutUnit(footerGeometry.buttonGap) === layoutUnit(12) &&
+      layoutUnit(footerGeometry.centers) === 0,
+    'Delete actions remain right-aligned at the shared 24px insets and retain their 12px gap: ' +
+      JSON.stringify(footerGeometry),
+  );
   const checkAlignment = await modal.locator('.account-delete-ack').evaluate((node) => {
     const a = node.querySelector('input').getBoundingClientRect(),
       b = node.querySelector('span').getBoundingClientRect();

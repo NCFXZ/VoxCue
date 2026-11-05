@@ -90,7 +90,87 @@ try {
   const main = await connectUiAccount(app, login);
   main.setDefaultTimeout(15000);
   main.on('pageerror', (e) => errors.push(e.message));
+  const startViewFrames = () =>
+    main.evaluate(() => {
+      const frames = [];
+      let frame;
+      const sample = () => {
+        const root = document.documentElement;
+        if (root.dataset.viewDirection) {
+          const read = (pseudo) => {
+            const style = getComputedStyle(root, pseudo);
+            const matrix =
+              style.transform === 'none' ? new DOMMatrix() : new DOMMatrix(style.transform);
+            return { opacity: Number(style.opacity), x: matrix.m41, y: matrix.m42 };
+          };
+          frames.push({
+            direction: root.dataset.viewDirection,
+            old: read('::view-transition-old(screen)'),
+            next: read('::view-transition-new(screen)'),
+            chrome: read('::view-transition-new(window-chrome)'),
+            sidebarX: getComputedStyle(document.querySelector('.sidebar')).transform,
+          });
+        }
+        frame = requestAnimationFrame(sample);
+      };
+      frame = requestAnimationFrame(sample);
+      window.historyViewFrames = { frames, stop: () => cancelAnimationFrame(frame) };
+    });
+  const finishViewFrames = async (direction) => {
+    await main.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+    const frames = await main.evaluate(() => {
+      const probe = window.historyViewFrames;
+      probe.stop();
+      delete window.historyViewFrames;
+      return probe.frames;
+    });
+    const intermediate = frames.filter(
+      (frame) =>
+        frame.direction === direction &&
+        frame.old.opacity > 0.03 &&
+        frame.old.opacity < 0.97 &&
+        frame.next.opacity > 0.03 &&
+        frame.next.opacity < 0.97,
+    );
+    assert.ok(
+      intermediate.length > 1,
+      direction + ': both complete pages must have intermediate opacity frames',
+    );
+    const axis = direction === 'page' ? 'y' : 'x';
+    const sign = direction === 'back' ? 1 : -1;
+    assert.ok(
+      intermediate.some((frame) => frame.old[axis] * sign > 1 && frame.next[axis] * sign < -1),
+      direction + ': old and new pages must slide in the requested direction',
+    );
+    assert.ok(
+      frames.every((frame) => frame.sidebarX === 'none'),
+      'Sidebar must remain stationary',
+    );
+    assert.ok(
+      intermediate.every(
+        (frame) => frame.chrome.opacity === 1 && frame.chrome.x === 0 && frame.chrome.y === 0,
+      ),
+      'Window controls must remain visible and stationary throughout the page motion',
+    );
+  };
+  await main.emulateMedia({ reducedMotion: 'no-preference' });
+  await startViewFrames();
   await main.getByRole('button', { name: '面试记录', exact: true }).click();
+  await main.locator('.history-page').waitFor();
+  await finishViewFrames('page');
+  await main.emulateMedia({ reducedMotion: 'reduce' });
+  await main.getByRole('button', { name: '知识库', exact: true }).click();
+  await main.locator('.knowledge-page').waitFor();
+  assert.equal(
+    await main.evaluate(() => document.documentElement.dataset.viewDirection),
+    undefined,
+  );
+  await main.getByRole('button', { name: '面试记录', exact: true }).click();
+  await main.locator('.history-page').waitFor();
+  await main.emulateMedia({ reducedMotion: 'no-preference' });
+  checks.push(
+    'whole workspace navigation slides and fades with a stationary sidebar, reduced motion switches directly',
+  );
   await main.evaluate(() => {
     const startedAt = Date.now() - 3600000;
     const transcripts = Array.from({ length: 120 }, (_, i) => ({
@@ -146,11 +226,89 @@ try {
     window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
   });
   assert.equal(await main.locator('.history-row').count(), 1);
+  // The old history row can still receive a queued click before the outer
+  // navigation captures its frame; it must not cancel the outer page update.
+  await main.evaluate(() => {
+    const oldRow = document.querySelector('.history-row-open');
+    document.querySelector('.sidebar [aria-label="新对话"]').click();
+    oldRow.click();
+  });
+  await main.locator('.preparation-route:not([hidden])').waitFor();
+  await main.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+  assert.equal(await main.locator('.history-view').count(), 0);
+  await main.getByRole('button', { name: '面试记录', exact: true }).click();
+  await main.locator('.history-row').waitFor();
+  await main.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+  checks.push('rapid nested history clicks cannot cancel an outer page navigation');
+  const sidebar = await main.locator('.sidebar').boundingBox();
+  const boundaryClip = {
+    x: Math.floor(sidebar.x + sidebar.width) - 6,
+    y: Math.floor(sidebar.height * 0.7),
+    width: 12,
+    height: 6,
+  };
+  const windowId = await (await app.browserWindow(main)).evaluate((win) => win.id);
+  const titlebar = await main.locator('.titlebar').boundingBox();
+  const chromeClip = {
+    x: Math.floor(titlebar.x),
+    y: Math.floor(titlebar.y),
+    width: Math.floor(titlebar.width),
+    height: Math.floor(titlebar.height),
+  };
+  const captureBoundary = () =>
+    app.evaluate(
+      async ({ BrowserWindow }, { windowId, clip }) => {
+        const image = await BrowserWindow.fromId(windowId).webContents.capturePage(clip);
+        return [...image.toBitmap()];
+      },
+      { windowId, clip: boundaryClip },
+    );
+  const beforeBoundary = await captureBoundary();
+  const captureChrome = () =>
+    app.evaluate(
+      async ({ BrowserWindow }, { windowId, clip }) => {
+        const image = await BrowserWindow.fromId(windowId).webContents.capturePage(clip);
+        return [...image.toBitmap()];
+      },
+      { windowId, clip: chromeClip },
+    );
+  const beforeChrome = await captureChrome();
+  await startViewFrames();
   await main
     .locator('.history-row')
     .locator('.history-row-open')
     .click({ position: { x: 16, y: 16 } });
   await main.locator('.record-transcript-row').nth(119).waitFor();
+  await main.waitForFunction(() =>
+    document.getAnimations().some((animation) => animation.animationName === 'screen-enter'),
+  );
+  await main.evaluate(() => {
+    for (const animation of document.getAnimations())
+      if (['screen-enter', 'screen-exit'].includes(animation.animationName)) {
+        animation.pause();
+        animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+      }
+  });
+  try {
+    const movingBoundary = await captureBoundary();
+    assert.equal(movingBoundary.length, beforeBoundary.length);
+    assert.ok(
+      movingBoundary.every((value, index) => Math.abs(value - beforeBoundary[index]) <= 4),
+      'Sliding page snapshots must neither paint over the sidebar nor expose a strip at the content edge',
+    );
+    const movingChrome = await captureChrome();
+    assert.equal(movingChrome.length, beforeChrome.length);
+    assert.ok(
+      movingChrome.every((value, index) => Math.abs(value - beforeChrome[index]) <= 4),
+      'Minimize, maximize and close pixels must remain present while page snapshots move',
+    );
+  } finally {
+    await main.evaluate(() => {
+      for (const animation of document.getAnimations())
+        if (['screen-enter', 'screen-exit'].includes(animation.animationName)) animation.play();
+    });
+  }
+  await finishViewFrames('forward');
   assert.equal(await main.getByRole('complementary', { name: 'AI 回答', exact: true }).count(), 0);
   assert.equal(await main.locator('.record-transcript-row time').nth(80).innerText(), '1:20');
   const centered = await main.locator('.record-reading-column').evaluate((el) => {
@@ -344,7 +502,13 @@ try {
   );
   assert.deepEqual(refs, ['synthetic-system']);
   checks.push('new saved answer references original system transcript');
+  await startViewFrames();
   await main.getByRole('button', { name: '返回面试记录', exact: true }).click();
+  await main.locator('.history-page').waitFor();
+  await finishViewFrames('back');
+  checks.push(
+    'record entry slides both pages left and return slides both right, with fade in and out',
+  );
   await app.evaluate(() => {
     globalThis.titleFail = true;
     globalThis.finishTitle = undefined;
@@ -376,6 +540,46 @@ try {
     .getByRole('heading', { name: '机器人控制与工业自动化岗位面试', exact: true })
     .waitFor();
   checks.push('failed automatic title visible and retry succeeds');
+  await main.evaluate(() => {
+    const original = document.startViewTransition.bind(document);
+    window.deletedHistoryTransitions = [];
+    window.restoreHistoryTransition = () => {
+      document.startViewTransition = original;
+    };
+    document.startViewTransition = (update) => {
+      window.deletedHistoryTransitions.push({
+        direction: document.documentElement.dataset.viewDirection,
+        detail: Boolean(document.querySelector('.history-detail')),
+        list: Boolean(document.querySelector('.history-page')),
+      });
+      return original(update);
+    };
+  });
+  await main.getByRole('button', { name: '删除记录', exact: true }).click();
+  await startViewFrames();
+  await main.getByRole('button', { name: /^确认删除：面试记录：/ }).click();
+  await main.locator('.history-page').waitFor();
+  await finishViewFrames('back');
+  const deletedHistoryTransitions = await main.evaluate(() => {
+    window.restoreHistoryTransition();
+    return window.deletedHistoryTransitions;
+  });
+  assert.deepEqual(
+    deletedHistoryTransitions,
+    [{ direction: 'back', detail: true, list: false }],
+    'Deleting a detail captures the detail once, without jumping to the list before the back transition',
+  );
+  assert.equal(
+    await main.evaluate(() =>
+      JSON.parse(localStorage.getItem('copilot-interview-history-v1')).some(
+        (record) => record.id === 'retry-title',
+      ),
+    ),
+    false,
+  );
+  checks.push(
+    'detail deletion returns through one complete back transition with no premature list frame',
+  );
   const assets = await Promise.all(
     [
       '../shared/public/voxcue-source.png',

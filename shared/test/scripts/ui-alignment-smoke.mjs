@@ -1,3 +1,4 @@
+import { openModelMenu, openReasoningControl } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -33,6 +34,249 @@ const settle = (page) =>
           animation.playState !== 'running',
       ),
   );
+const startNavigationStyles = (page, selector) =>
+  page.evaluate((selector) => {
+    const frames = [];
+    let frame;
+    const sample = () => {
+      frames.push(
+        [...document.querySelectorAll(selector)].map((button) => {
+          const style = getComputedStyle(button);
+          const normal = button.querySelector('.selection-label-normal');
+          const bold = button.querySelector('.selection-label-bold');
+          return {
+            label:
+              button.getAttribute('aria-label') ??
+              button.querySelector('.conversation')?.textContent.trim() ??
+              button.textContent.trim(),
+            weight: Number(style.fontWeight),
+            color: style.color,
+            background: style.backgroundColor,
+            normalOpacity: normal ? Number(getComputedStyle(normal).opacity) : null,
+            boldOpacity: bold ? Number(getComputedStyle(bold).opacity) : null,
+            normalWeight: normal ? getComputedStyle(normal).fontWeight : null,
+            boldWeight: bold ? getComputedStyle(bold).fontWeight : null,
+            singleText:
+              !bold ||
+              (!bold.textContent &&
+                bold.getAttribute('aria-hidden') === 'true' &&
+                bold.dataset.label === normal.textContent),
+            running: button
+              .getAnimations({ subtree: true })
+              .some((animation) => animation.playState === 'running'),
+          };
+        }),
+      );
+    };
+    const tick = () => {
+      sample();
+      frame = requestAnimationFrame(tick);
+    };
+    tick();
+    window.navigationStyleFrames = {
+      frames,
+      stop: () => {
+        sample();
+        cancelAnimationFrame(frame);
+      },
+    };
+  }, selector);
+const finishNavigationStyles = (page) =>
+  page.evaluate(() => {
+    const probe = window.navigationStyleFrames;
+    probe.stop();
+    delete window.navigationStyleFrames;
+    return probe.frames;
+  });
+const assertNavigationStyles = (frames, label, changingColor) => {
+  const samples = frames.map((frame) => frame.find((button) => button.label === label));
+  const first = samples[0],
+    last = samples.at(-1);
+  assert(
+    samples.some((sample) => sample.weight > 400 && sample.weight < 600),
+    `${label}: weight must interpolate between real computed values`,
+  );
+  assert(
+    samples.every(
+      (sample) => sample.normalWeight === '400' && sample.boldWeight === '600' && sample.singleText,
+    ),
+    `${label}: real text remains once, with two fixed glyph weights`,
+  );
+  assert(
+    samples.some(
+      (sample) =>
+        sample.normalOpacity > 0.02 &&
+        sample.normalOpacity < 0.98 &&
+        sample.boldOpacity > 0.02 &&
+        sample.boldOpacity < 0.98 &&
+        Math.abs(sample.normalOpacity + sample.boldOpacity - 1) < 0.02,
+    ),
+    `${label}: CJK selection must crossfade through actual intermediate text-layer opacities`,
+  );
+  assert(
+    samples.some(
+      (sample) => sample.background !== first.background && sample.background !== last.background,
+    ),
+    `${label}: background must have actual intermediate colors`,
+  );
+  if (changingColor)
+    assert(
+      samples.some((sample) => sample.color !== first.color && sample.color !== last.color),
+      `${label}: text color must have actual intermediate colors`,
+    );
+  else
+    assert.equal(
+      last.color,
+      first.color,
+      `${label}: retain the existing neutral Settings text color`,
+    );
+};
+const summarizeFrames = (frames) => ({
+  count: frames.length,
+  first: frames[0],
+  last: frames.at(-1),
+});
+const startSelectionFrames = (page) =>
+  page.evaluate(() => {
+    const frames = [];
+    let frame;
+    const sample = () => {
+      const sidebar = document.querySelector('.sidebar');
+      const markers = sidebar.querySelectorAll('.sidebar-selection-indicator');
+      const marker = markers[0];
+      if (!marker) return;
+      const rect = marker.getBoundingClientRect();
+      const style = getComputedStyle(marker);
+      const active = sidebar.querySelector('.nav-item.active, .conversation-row.active');
+      const target = active?.getBoundingClientRect();
+      const motion = marker
+        .getAnimations()
+        .find(
+          (animation) =>
+            animation.transitionProperty === 'transform' && animation.playState === 'running',
+        );
+      frames.push({
+        count: markers.length,
+        hidden: marker.getAttribute('aria-hidden'),
+        visible: marker.dataset.visible,
+        opacity: Number(style.opacity),
+        left: rect.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        linear: motion
+          ? Number(motion.currentTime) / Number(motion.effect.getTiming().duration)
+          : null,
+        target: target
+          ? {
+              left: target.left + 3,
+              top: target.top + (target.height - 18) / 2,
+              label:
+                active.getAttribute('aria-label') ??
+                active.querySelector('.conversation')?.textContent.trim(),
+            }
+          : null,
+      });
+    };
+    const tick = () => {
+      sample();
+      frame = requestAnimationFrame(tick);
+    };
+    tick();
+    window.sidebarSelectionFrames = {
+      frames,
+      stop: () => {
+        sample();
+        cancelAnimationFrame(frame);
+      },
+    };
+  });
+const finishSelectionFrames = async (page) => {
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  await settle(page);
+  return page.evaluate(() => {
+    const probe = window.sidebarSelectionFrames;
+    probe.stop();
+    delete window.sidebarSelectionFrames;
+    return probe.frames;
+  });
+};
+const assertSelectionGeometry = (frames, name) => {
+  assert.ok(frames.length > 1, name + ': selection requires actual frame samples');
+  for (const frame of frames) {
+    assert.equal(frame.count, 1, name + ': exactly one shared indicator');
+    assert.equal(
+      frame.hidden,
+      'true',
+      name + ': decorative indicator is hidden from accessibility',
+    );
+    assert.equal(Math.round(frame.width * 64) / 64, 3);
+    assert.equal(Math.round(frame.height * 64) / 64, 18);
+  }
+  const last = frames.at(-1);
+  if (last.visible === 'true') {
+    assert.ok(last.target, name + ': visible indicator has a real active row');
+    assert.ok(Math.abs(last.left - last.target.left) < 0.5, name + ': left aligns with active row');
+    assert.ok(
+      Math.abs(last.top - last.target.top) < 0.5,
+      name + ': vertically centers on active row',
+    );
+  }
+};
+const assertSelectionFade = (frames, from, to, name) => {
+  assertSelectionGeometry(frames, name);
+  assert.equal(frames[0].opacity, from, name + ': initial opacity');
+  assert.equal(frames.at(-1).opacity, to, name + ': final opacity');
+  assert.equal(frames.at(-1).visible, to ? 'true' : 'false', name + ': final visibility');
+  assert.ok(
+    frames.filter((frame) => frame.opacity > 0.02 && frame.opacity < 0.98).length > 1,
+    name + ': real intermediate fade frames',
+  );
+  const painted = frames.filter((frame) => frame.opacity > 0.02);
+  for (const frame of painted) {
+    assert.ok(Math.abs(frame.left - painted[0].left) < 0.5, name + ': fade stays at its target x');
+    assert.ok(Math.abs(frame.top - painted[0].top) < 0.5, name + ': fade stays at its target y');
+  }
+};
+const assertSelectionSlide = (frames, name) => {
+  assertSelectionGeometry(frames, name);
+  assert.ok(
+    frames.every((frame) => frame.opacity === 1),
+    name + ': visible-to-visible movement stays opaque',
+  );
+  const first = frames[0],
+    last = frames.at(-1);
+  const dx = last.left - first.left,
+    dy = last.top - first.top;
+  const distance = dx * dx + dy * dy;
+  assert.ok(distance > 1, name + ': distinct source and destination');
+  const progress = frames.map(
+    (frame) => ((frame.left - first.left) * dx + (frame.top - first.top) * dy) / distance,
+  );
+  assert.ok(
+    progress.filter((value) => value > 0.02 && value < 0.98).length > 1,
+    name + ': real intermediate sliding positions',
+  );
+  assert.ok(
+    frames.some(
+      (frame, index) =>
+        frame.linear !== null &&
+        progress[index] > 0.02 &&
+        progress[index] < 0.98 &&
+        Math.abs(progress[index] - frame.linear) > 0.05,
+    ),
+    name + ': measured path uses nonlinear easing',
+  );
+  for (let index = 1; index < progress.length; index++)
+    assert.ok(
+      progress[index] + 0.02 >= progress[index - 1] &&
+        progress[index] >= -0.02 &&
+        progress[index] <= 1.02,
+      name + ': movement progresses smoothly toward its actual row',
+    );
+};
 try {
   await installUiAccount(app, { speech: true, components: true });
   const login = await app.firstWindow();
@@ -67,13 +311,328 @@ try {
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('GPT test', { exact: true })
     .waitFor();
+  const navigation = page.getByRole('navigation', { name: '主导航', exact: true });
+  const historyNavigation = navigation.getByRole('button', { name: '面试记录', exact: true });
+  const knowledgeNavigation = navigation.getByRole('button', { name: '知识库', exact: true });
+  const indicator = page.locator('.sidebar-selection-indicator');
+  const markerGeometry = (button) =>
+    button.evaluate((button) => {
+      const marker = document.querySelector('.sidebar-selection-indicator');
+      const style = getComputedStyle(marker);
+      const box = button.getBoundingClientRect(),
+        rect = marker.getBoundingClientRect();
+      return {
+        opacity: Number(style.opacity),
+        visible: marker.dataset.visible,
+        left: rect.left - box.left,
+        top: rect.top,
+        width: rect.width,
+        height: rect.height,
+        centerOffset: rect.top + rect.height / 2 - box.top - box.height / 2,
+        duration: style.transitionDuration.split(',')[0].trim(),
+        easing: style.transitionTimingFunction.match(/cubic-bezier\([^)]*\)/)?.[0],
+        sharedEasing: getComputedStyle(document.documentElement)
+          .getPropertyValue('--panel-motion-easing')
+          .trim(),
+      };
+    });
+  assert.equal(await indicator.count(), 1);
+  assert.equal(await indicator.getAttribute('aria-hidden'), 'true');
+  assert.equal(await indicator.getAttribute('data-visible'), 'false');
+  assert.equal(
+    await indicator.evaluate((node) => Number(getComputedStyle(node).opacity)),
+    0,
+    'New conversation has no selected marker',
+  );
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await startSelectionFrames(page);
+  await historyNavigation.click();
+  await page.locator('.history-page').waitFor();
+  const historyEntry = await finishSelectionFrames(page);
+  assertSelectionFade(historyEntry, 0, 1, 'None to history');
+  const historyMarker = await markerGeometry(historyNavigation);
+  await startNavigationStyles(page, '.sidebar > nav > .nav-item');
+  await startSelectionFrames(page);
+  await knowledgeNavigation.click();
+  await page.locator('.knowledge-page').waitFor();
+  const navigationMotionFrames = await finishSelectionFrames(page);
+  const knowledgeMarker = await markerGeometry(knowledgeNavigation);
+  const navigationStyleFrames = await finishNavigationStyles(page);
+  assertNavigationStyles(navigationStyleFrames, '面试记录', true);
+  assertNavigationStyles(navigationStyleFrames, '知识库', true);
+  assertSelectionSlide(navigationMotionFrames, 'History to knowledge');
+  const bezierPoints = (value) => value.match(/-?\d*\.?\d+/g).map(Number);
+  assert.match(knowledgeMarker.easing, /^cubic-bezier\(/);
+  assert.deepEqual(
+    bezierPoints(knowledgeMarker.easing),
+    bezierPoints(knowledgeMarker.sharedEasing),
+  );
+  assert.equal(knowledgeMarker.duration, '0.24s');
+  for (const marker of [historyMarker, knowledgeMarker]) {
+    assert.equal(Math.round(marker.width * 64) / 64, 3);
+    assert.equal(Math.round(marker.height * 64) / 64, 18);
+    assert(Math.abs(marker.left - 3) < 0.5);
+    assert(Math.abs(marker.centerOffset) < 0.5);
+  }
+  await startSelectionFrames(page);
+  await historyNavigation.click();
+  await page.waitForFunction(
+    ({ from, to }) => {
+      const top = document
+        .querySelector('.sidebar-selection-indicator')
+        .getBoundingClientRect().top;
+      const progress = (top - from) / (to - from);
+      return progress > 0.15 && progress < 0.85;
+    },
+    { from: knowledgeMarker.top, to: historyMarker.top },
+  );
+  await knowledgeNavigation.click();
+  await page.locator('.knowledge-page').waitFor();
+  const reversalFrames = await finishSelectionFrames(page);
+  assertSelectionGeometry(reversalFrames, 'Rapid navigation reversal');
+  assert.ok(
+    reversalFrames.every((frame) => frame.opacity === 1),
+    'Rapid reversal keeps the same opaque marker',
+  );
+  const leftKnowledge = reversalFrames.findIndex((frame) => frame.target?.label === '面试记录');
+  const returned = reversalFrames.findIndex(
+    (frame, index) => index > leftKnowledge && frame.target?.label === '知识库',
+  );
+  assert.ok(
+    leftKnowledge >= 0 && returned > leftKnowledge,
+    'Rapid reversal visits both actual targets',
+  );
+  const reversing = reversalFrames[returned],
+    prior = reversalFrames[returned - 1];
+  assert.ok(
+    Math.abs(reversing.top - prior.top) < Math.abs(knowledgeMarker.top - historyMarker.top) * 0.45,
+    'Rapid reversal continues from the current interpolated position without jumping to a row',
+  );
+  assert.ok(
+    Math.abs(reversing.top - historyMarker.top) > 1 &&
+      Math.abs(reversing.top - knowledgeMarker.top) > 1,
+    'The reversed animation remains between its targets before settling',
+  );
+  await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
+  await settle(page);
+  const collapsedMarker = await markerGeometry(knowledgeNavigation);
+  assert.equal(
+    await page
+      .locator('.sidebar')
+      .evaluate((node) => Math.round(node.getBoundingClientRect().width * 64) / 64),
+    68,
+    'Collapsed sidebar keeps its original width',
+  );
+  assert.equal(collapsedMarker.opacity, 1);
+  assert(Math.abs(collapsedMarker.left - 3) < 0.5);
+  assert(Math.abs(collapsedMarker.centerOffset) < 0.5);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await historyNavigation.click();
+  await page.locator('.history-page').waitFor();
+  const reducedMarker = await markerGeometry(historyNavigation);
+  assert.equal(reducedMarker.opacity, 1);
+  assert.equal(reducedMarker.visible, 'true');
+  assert(Math.abs(reducedMarker.left - 3) < 0.5);
+  assert(Math.abs(reducedMarker.centerOffset) < 0.5);
+  assert.equal(
+    await historyNavigation.evaluate((button) => Number(getComputedStyle(button).fontWeight)),
+    600,
+  );
+  assert.equal(
+    await page.locator('.sidebar').evaluate((node) => node.getAnimations({ subtree: true }).length),
+    0,
+  );
+  assert.deepEqual(
+    await historyNavigation.evaluate((button) =>
+      [...button.querySelectorAll('.selection-label > span')].map((label) =>
+        Number(getComputedStyle(label).opacity),
+      ),
+    ),
+    [0, 1],
+  );
+  assert.equal(await historyNavigation.textContent(), '面试记录');
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+  await navigation.getByRole('button', { name: '新对话', exact: true }).click();
+  await page.locator('.preparation-route:not([hidden])').waitFor();
+  assert.equal(await indicator.getAttribute('data-visible'), 'false');
+  assert.equal(await indicator.evaluate((node) => Number(getComputedStyle(node).opacity)), 0);
+  assert.equal(await navigation.locator('.nav-item.active').count(), 0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const appWindow = await app.browserWindow(page);
+  const initialSize = await appWindow.evaluate((win) => ({
+    content: win.getContentSize(),
+    minimum: win.getMinimumSize(),
+  }));
+  const waitContentWidth = (size) =>
+    page.waitForFunction(
+      ({ content, zoom }) => Math.abs(innerWidth - content[0] / zoom) <= 1,
+      size,
+    );
+  const viewportWidths = [];
+  try {
+    // Only this owned test window visits 800 CSS px, below the product's native
+    // minimum. Restore its original content size and minimum in all outcomes.
+    await appWindow.evaluate((win) => win.setMinimumSize(1, 1));
+    for (const width of [1280, 1000, 800]) {
+      const actual = await appWindow.evaluate(
+        (win, { width, height }) => {
+          win.setContentSize(Math.round(width * win.webContents.getZoomFactor()), height);
+          return { content: win.getContentSize(), zoom: win.webContents.getZoomFactor() };
+        },
+        { width, height: initialSize.content[1] },
+      );
+      assert(
+        Math.abs(actual.content[0] / actual.zoom - width) <= 1,
+        'The native content viewport must reach the requested CSS width: ' +
+          JSON.stringify({ width, actual }),
+      );
+      await waitContentWidth(actual);
+      await settle(page);
+      const viewport = await page.evaluate(() => innerWidth);
+      assert.equal(
+        viewport > 1100,
+        width > 1100,
+        'The fixed-width regression must cross the former 1100px breakpoint',
+      );
+      viewportWidths.push(viewport);
+      const sidebarWidth = await page
+        .locator('.sidebar')
+        .evaluate((node) => node.getBoundingClientRect().width);
+      assert.equal(
+        Math.round(sidebarWidth * 64) / 64,
+        230,
+        'Expanded sidebar uses one fixed width across viewport breakpoints',
+      );
+    }
+  } finally {
+    const restored = await appWindow.evaluate((win, size) => {
+      win.setContentSize(...size.content);
+      win.setMinimumSize(...size.minimum);
+      return { content: win.getContentSize(), zoom: win.webContents.getZoomFactor() };
+    }, initialSize);
+    await waitContentWidth(restored);
+    await settle(page);
+  }
+  check('sidebar-selection-sliding-fading-and-fixed-width', true, {
+    historyMarker,
+    knowledgeMarker,
+    collapsedMarker,
+    reducedMarker,
+    textStyles: summarizeFrames(navigationStyleFrames),
+    entry: summarizeFrames(historyEntry),
+    navigation: summarizeFrames(navigationMotionFrames),
+    reversal: summarizeFrames(reversalFrames),
+    viewportWidths,
+  });
+  const titles = ['侧栏合成对话甲', '侧栏合成对话乙'];
+  const conversation = (title) => page.locator('.conversation-row').filter({ hasText: title });
+  const mountedConversations = [];
+  let newConversationFrames;
+  for (const title of titles) {
+    await startSelectionFrames(page);
+    await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill(title);
+    await page.getByRole('button', { name: '发送消息', exact: true }).click();
+    await page
+      .locator('.chat-message.assistant')
+      .getByText('Synthetic interview answer', { exact: true })
+      .waitFor();
+    await page.waitForFunction(() => !document.querySelector('.conversation-spinner'));
+    const frames = await finishSelectionFrames(page);
+    mountedConversations.push(frames);
+    assertSelectionFade(frames, 0, 1, title + ': new row appears');
+    const marker = await markerGeometry(conversation(title));
+    assert.equal(Math.round(marker.width * 64) / 64, 3);
+    assert.equal(Math.round(marker.height * 64) / 64, 18);
+    assert(Math.abs(marker.left - 3) < 0.5);
+    assert(Math.abs(marker.centerOffset) < 0.5);
+    if (title === titles[0]) {
+      await startSelectionFrames(page);
+      await navigation.getByRole('button', { name: '新对话', exact: true }).click();
+      newConversationFrames = await finishSelectionFrames(page);
+      assertSelectionFade(newConversationFrames, 1, 0, 'Conversation to new unsent draft');
+    }
+  }
+  await startSelectionFrames(page);
+  await historyNavigation.click();
+  await page.locator('.history-page').waitFor();
+  const conversationToNavigation = await finishSelectionFrames(page);
+  assertSelectionSlide(conversationToNavigation, 'Conversation to history navigation');
+  await startSelectionFrames(page);
+  await conversation(titles[0]).locator('.conversation').click();
+  await page.locator('.chat-message.user').getByText(titles[0], { exact: true }).waitFor();
+  const activateConversation = await finishSelectionFrames(page);
+  assertSelectionSlide(activateConversation, 'History navigation to conversation');
+  await startSelectionFrames(page);
+  await historyNavigation.click();
+  await page.locator('.history-page').waitFor();
+  const leaveConversation = await finishSelectionFrames(page);
+  assertSelectionSlide(leaveConversation, 'Conversation back to history');
+  await conversation(titles[0]).locator('.conversation').click();
+  await page.locator('.chat-message.user').getByText(titles[0], { exact: true }).waitFor();
+  await settle(page);
+  await startSelectionFrames(page);
+  await conversation(titles[1]).locator('.conversation').click();
+  await page.locator('.chat-message.user').getByText(titles[1], { exact: true }).waitFor();
+  const switchConversations = await finishSelectionFrames(page);
+  assertSelectionSlide(switchConversations, 'Between two conversations');
+  const selectedConversation = await markerGeometry(conversation(titles[1]));
+  assert.equal(selectedConversation.opacity, 1);
+  assert(Math.abs(selectedConversation.left - 3) < 0.5);
+  assert(Math.abs(selectedConversation.centerOffset) < 0.5);
+  await startSelectionFrames(page);
+  await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
+  const collapseConversation = await finishSelectionFrames(page);
+  assertSelectionFade(collapseConversation, 1, 0, 'Collapsing hides selected conversation');
+  await startSelectionFrames(page);
+  await page.getByRole('button', { name: '展开侧栏', exact: true }).click();
+  const expandConversation = await finishSelectionFrames(page);
+  assertSelectionFade(expandConversation, 0, 1, 'Expanding restores selected conversation');
+  await startSelectionFrames(page);
+  await navigation.getByRole('button', { name: '新对话', exact: true }).click();
+  const deselectConversation = await finishSelectionFrames(page);
+  assertSelectionFade(deselectConversation, 1, 0, 'Conversation to no selection');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await conversation(titles[0]).locator('.conversation').click();
+  const reducedConversation = await markerGeometry(conversation(titles[0]));
+  assert.equal(reducedConversation.opacity, 1);
+  assert.equal(reducedConversation.visible, 'true');
+  assert(Math.abs(reducedConversation.left - 3) < 0.5);
+  assert(Math.abs(reducedConversation.centerOffset) < 0.5);
+  assert.equal(
+    await page.locator('.sidebar').evaluate((node) => node.getAnimations({ subtree: true }).length),
+    0,
+  );
+  for (const title of titles) {
+    const row = conversation(title);
+    await row.hover();
+    await row.getByRole('button', { name: '删除对话：' + title, exact: true }).click();
+    await row.getByRole('button', { name: '确认删除：对话：' + title, exact: true }).click();
+    await row.waitFor({ state: 'detached' });
+  }
+  assert.equal(await page.locator('.conversation-row').count(), 0);
+  assert.equal(await page.locator('.chat-message').count(), 0);
+  assert.equal(await indicator.getAttribute('data-visible'), 'false');
+  assert.equal(await indicator.evaluate((node) => Number(getComputedStyle(node).opacity)), 0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  check('shared-selection-conversations-and-reduced-motion', true, {
+    entries: mountedConversations.map(summarizeFrames),
+    newConversation: summarizeFrames(newConversationFrames),
+    toNavigation: summarizeFrames(conversationToNavigation),
+    activation: summarizeFrames(activateConversation),
+    leaving: summarizeFrames(leaveConversation),
+    switching: summarizeFrames(switchConversations),
+    collapse: summarizeFrames(collapseConversation),
+    expand: summarizeFrames(expandConversation),
+    deselect: summarizeFrames(deselectConversation),
+    reducedConversation,
+  });
   for (const theme of ['light', 'dark']) {
     await page.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
       theme,
     );
     const surfaces = [];
-    for (const label of ['添加附件', '聊天模型', '思考强度']) {
+    for (const label of ['添加附件', '聊天模型']) {
       const trigger = page.getByRole('button', { name: label, exact: true });
       await trigger.hover();
       await settle(page);
@@ -94,10 +653,11 @@ try {
         }),
       );
     }
-    assert.equal(surfaces[0].height, 36);
+    assert.equal(surfaces[0].height, 32);
     assert.equal(surfaces[0].radius, '50%');
     assert.equal(surfaces[1].height, 32);
-    assert.equal(surfaces[2].height, 32);
+    assert.equal(surfaces.length, 2);
+    assert.equal(await page.getByRole('button', { name: '思考强度', exact: true }).count(), 0);
     for (const surface of surfaces.slice(1)) {
       assert.ok(Math.abs(surface.centerY - surfaces[0].centerY) < 1);
       assert.equal(surface.curve, surfaces[0].curve);
@@ -107,8 +667,9 @@ try {
     check(`composer-hover-family-${theme}`, true, surfaces);
     await page.mouse.move(0, 0);
   }
-  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  await openModelMenu(page);
   await page.getByRole('menuitemradio', { name: longName, exact: true }).click();
+  await page.keyboard.press('Escape');
   const composerGeometry = () =>
     page.locator('.composer').evaluate((element) => {
       const box = element.getBoundingClientRect();
@@ -170,16 +731,14 @@ try {
           !result.overflow &&
             result.contained &&
             lines.length <= 2 &&
-            result.rects.every(
-              ({ label, height }) =>
-                Math.abs(height - (['聊天模型', '思考强度'].includes(label) ? 32 : 36)) < 0.5,
-            ),
+            result.rects.every(({ height }) => Math.abs(height - 32) < 0.5),
           result,
         );
         check(
           `composer-model-group-${width}-${panelWidth}-${theme}`,
-          Math.abs(result.rects[1].y - result.rects[2].y) < 1 &&
-            Math.abs(result.rects.at(-1).y - result.rects.at(-2).y) < 1,
+          result.rects.filter((item) => item.label === '聊天模型').length === 1 &&
+            !result.rects.some((item) => item.label === '思考强度') &&
+            Math.abs(result.rects[1].y - result.rects[2].y) < 1,
           result,
         );
         if (panelWidth === 300 || panelWidth === 640)
@@ -201,8 +760,12 @@ try {
           );
       }
     }
-    await page.getByRole('button', { name: '思考强度', exact: true }).click();
-    await page.getByRole('menuitemradio', { name: '高', exact: true }).click();
+    const reasoning = await openReasoningControl(page);
+    const effort = reasoning.getByRole('slider', { name: '思考强度', exact: true });
+    await effort.focus();
+    await effort.press('End');
+    assert.equal(await effort.getAttribute('aria-valuetext'), '高');
+    await page.keyboard.press('Escape');
     assert.equal(await page.getByRole('button', { name: '网络搜索', exact: true }).count(), 0);
     await page.getByRole('button', { name: '添加附件', exact: true }).click();
     assert.equal(
@@ -230,8 +793,35 @@ try {
     .getByRole('navigation', { name: '设置分类' })
     .getByRole('button', { name: '通用', exact: true })
     .click();
+  await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
+  await settle(page);
+  await startNavigationStyles(page, '.settings-sidebar nav > button');
   await page.getByRole('button', { name: '面试设置', exact: true }).click();
+  await page.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
+  await settle(page);
+  const settingsStyleFrames = await finishNavigationStyles(page);
+  assertNavigationStyles(settingsStyleFrames, '通用', false);
+  assertNavigationStyles(settingsStyleFrames, '面试设置', false);
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  const settingsNavigation = dialog.getByRole('navigation', { name: '设置分类', exact: true });
+  await settingsNavigation.getByRole('button', { name: '通用', exact: true }).click();
+  const reducedSettings = await settingsNavigation
+    .getByRole('button', { name: '通用', exact: true })
+    .evaluate((button) => ({
+      weight: Number(getComputedStyle(button).fontWeight),
+      running: button.getAnimations({ subtree: true }).length,
+      layers: [...button.querySelectorAll('.selection-label > span')].map((label) =>
+        Number(getComputedStyle(label).opacity),
+      ),
+    }));
+  assert.deepEqual(reducedSettings, { weight: 600, running: 0, layers: [0, 1] });
+  await settingsNavigation.getByRole('button', { name: '面试设置', exact: true }).click();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  check('settings-navigation-weight-and-background-motion', true, {
+    textStyles: summarizeFrames(settingsStyleFrames),
+    reducedSettings,
+  });
   const alignment = await dialog.evaluate((element) => {
     const rect = (e) => {
       const r = e.getBoundingClientRect();
@@ -240,9 +830,16 @@ try {
     const rows = [...element.querySelectorAll('.speech-setting-row')];
     return {
       devices: [...element.querySelectorAll('.speech-device')].map(rect),
-      selects: rows.map((r) => rect(r.querySelector('button[aria-haspopup="menu"]'))),
+      selects: rows.map((r) => rect(r.querySelector(
+        ':scope > button[aria-haspopup="menu"],:scope > button[aria-haspopup="dialog"],:scope > .frosted-slider',
+      ))),
       textLeft: rect(element.querySelector('.speech-answer-settings .speech-setting-label')).left,
-      effortLeft: rect(element.querySelector('.speech-effort-row .speech-setting-label')).left,
+      labelLeft: rows.map((row) => rect(row.querySelector('.speech-setting-label')).left),
+      centerOffsets: rows.map((row) => {
+        const label = row.querySelector('.speech-setting-label').getBoundingClientRect();
+        const control = row.querySelector(':scope > button,:scope > .frosted-slider').getBoundingClientRect();
+        return label.top + label.height / 2 - control.top - control.height / 2;
+      }),
       overflow: element.scrollWidth > element.clientWidth + 1,
     };
   });
@@ -250,12 +847,15 @@ try {
     'interview-device-and-select-alignment',
     alignment.devices[0].width === alignment.devices[1].width &&
       alignment.selects.every((r) => Math.abs(r.left - alignment.selects[0].left) < 1) &&
+      alignment.selects.every((r) => Math.abs(r.width - alignment.selects[0].width) < 1) &&
+      alignment.centerOffsets.every((offset) => Math.abs(offset) <= 1 / 64) &&
+      alignment.selects.length === 7 &&
       !alignment.overflow,
     alignment,
   );
   check(
     'interview-label-alignment',
-    Math.abs(alignment.textLeft - alignment.effortLeft) <= 1,
+    alignment.labelLeft.every((left) => Math.abs(alignment.textLeft - left) <= 1),
     alignment,
   );
   await page.evaluate(() => document.documentElement.classList.remove('dark'));

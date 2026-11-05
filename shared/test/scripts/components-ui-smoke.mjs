@@ -515,17 +515,17 @@ try {
       row: row.getBoundingClientRect().toJSON(),
     })),
   );
-  assert.equal(formRows.length, 4);
+  assert.equal(formRows.length, 3);
   assert.deepEqual(
     formRows.map((row) => row.text),
-    ['回答模型', '思考强度', '语音模型', '推理设备'],
+    ['回答模型', '语音模型', '推理设备'],
   );
   assert.equal(
     await modelSettings
       .getByRole('group', { name: '回答生成', exact: true })
       .locator('.speech-setting-row')
       .count(),
-    2,
+    1,
   );
   assert.equal(
     await modelSettings
@@ -601,6 +601,17 @@ try {
       await selectedModel.click();
       const popup = settings.getByRole('menu');
       await popup.waitFor();
+      await popup.evaluate(async (element) => {
+        // Visible starts at the first reveal frame, before Popper has settled
+        // and the menu has reached its real rounded bounds.
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        await Promise.all(
+          element
+            .getAnimations({ subtree: true })
+            .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+            .map((animation) => animation.finished.catch(() => {})),
+        );
+      });
       const menuBounds = await popup.evaluate((element) => {
         const menu = element.getBoundingClientRect();
         const dialog = element.closest('dialog').getBoundingClientRect();

@@ -1,15 +1,24 @@
 import { t } from '../i18n';
-import { useState, useEffect, type ReactNode, type ReactElement } from 'react';
+import { useState, useEffect, useMemo, type ReactNode, type ReactElement } from 'react';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
 import { normalizeMath, mathPresentation } from '../services/math';
 import 'katex/dist/katex.min.css';
-import { readableStrong } from '../services/markdown';
+import {
+  readableStrong,
+  compactCitations,
+  citationSource,
+  indexChatSources,
+} from '../services/markdown';
+import type { ChatSource } from '../../electron/contracts/chat';
+import { SourceLink } from './SourceLink';
 import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
 import { Copy, Check } from './icons';
+
+const emptySources: readonly ChatSource[] = [];
 
 function CodeBlock({ children }: { children?: ReactNode }) {
   const [copied, setCopied] = useState(false);
@@ -48,12 +57,19 @@ function CodeBlock({ children }: { children?: ReactNode }) {
     </div>
   );
 }
-export function MarkdownContent({ content }: { content: string }) {
+export function MarkdownContent({
+  content,
+  sources = emptySources,
+}: {
+  content: string;
+  sources?: readonly ChatSource[];
+}) {
   const [linkError, setLinkError] = useState(false);
+  const sourceIndex = useMemo(() => indexChatSources(sources), [sources]);
   return (
     <div className="markdown-content">
       <Markdown
-        remarkPlugins={[remarkGfm, remarkMath, readableStrong]}
+        remarkPlugins={[remarkGfm, remarkMath, readableStrong, [compactCitations, sourceIndex]]}
         rehypePlugins={[
           [rehypeKatex, { trust: false, strict: 'ignore', maxExpand: 1000, maxSize: 20 }],
           mathPresentation,
@@ -64,6 +80,22 @@ export function MarkdownContent({ content }: { content: string }) {
           a: ({ href, children }) => {
             if (href?.startsWith('#')) return <a href={href}>{children}</a>;
             if (!href || !/^https?:\/\//i.test(href)) return <span>{children}</span>;
+            const label =
+              typeof children === 'string'
+                ? children
+                : Array.isArray(children) && children.every((child) => typeof child === 'string')
+                  ? children.join('')
+                  : '';
+            const source = citationSource(href, label, sourceIndex);
+            if (source)
+              return (
+                <SourceLink
+                  url={href}
+                  title={source.title}
+                  inline
+                  onError={() => setLinkError(true)}
+                />
+              );
             return (
               <a
                 href={href}

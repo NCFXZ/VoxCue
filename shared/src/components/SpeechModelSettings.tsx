@@ -59,18 +59,22 @@ export function SpeechModelSettings({
   return (
     <div className="speech-model-settings">
       <div className="speech-model-group" role="group" aria-label={t('回答生成')}>
-        <h4>{t('回答生成')}</h4>
+        <div className="speech-model-heading">
+          <h4>{t('回答生成')}</h4>
+        </div>
         {children}
       </div>
       <div className="speech-model-group" role="group" aria-label={t('语音识别')}>
-        <h4>{t('语音识别')}</h4>
-        {switching && (
-          <p className="speech-model-notices" role="status">
-            {switching === 'loading'
-              ? t('正在加载，原配置继续转写…')
-              : t('已就绪，等待语音停顿后切换…')}
-          </p>
-        )}
+        <div className="speech-model-heading">
+          <h4>{t('语音识别')}</h4>
+          {switching && (
+            <p className="speech-model-status" role="status">
+              {switching === 'loading'
+                ? t('正在加载，原配置继续转写…')
+                : t('已就绪，等待语音停顿后切换…')}
+            </p>
+          )}
+        </div>
         <div className="speech-setting-row">
           <span className="speech-setting-label">{t('语音模型')}</span>
           <ChoiceMenu<SpeechModelId>

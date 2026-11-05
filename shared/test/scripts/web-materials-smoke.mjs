@@ -1,5 +1,11 @@
+import { openModelMenu } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
-import { cornerShapeNames } from './continuous-corners.mjs';
+import {
+  cornerShapeNames,
+  verifyComposerControlAlignment,
+  verifyConcentricComposers,
+  verifyMenuCapsulePixels,
+} from './continuous-corners.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -8,6 +14,31 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+
+const verifyPreviewSend = async (scope, size) => {
+  const geometry = await scope.locator('.floating-composer .send-button').evaluate((node) => {
+    const box = node.getBoundingClientRect(),
+      style = getComputedStyle(node);
+    return {
+      width: box.width,
+      height: box.height,
+      radius: style.borderTopLeftRadius,
+      corner: style.cornerShape,
+      icon: node.querySelector('svg').getBoundingClientRect().width,
+    };
+  });
+  // DOMRect arithmetic can add floating-point noise below Chromium's 1/64px layout unit.
+  const layoutUnit = (value) => Math.round(value * 64) / 64;
+  assert.equal(layoutUnit(geometry.width), size);
+  assert.equal(layoutUnit(geometry.height), size);
+  assert.equal(cornerShapeNames(geometry.corner), 'round');
+  assert.ok(
+    parseFloat(geometry.radius) * (geometry.radius.endsWith('%') ? size / 100 : 1) >= size / 2,
+    'Preview send controls must retain circular edges: ' + JSON.stringify(geometry),
+  );
+  assert.equal(layoutUnit(geometry.icon), 18);
+  await verifyComposerControlAlignment(scope.locator('.floating-composer'), 'preview ' + size);
+};
 
 const entry = path.join(testRoot, 'web-materials.cjs');
 await writeFile(
@@ -48,6 +79,7 @@ try {
   const login = await app.firstWindow();
   const signIn = login.getByRole('button', { name: '登录', exact: true });
   await signIn.waitFor();
+  await login.emulateMedia({ reducedMotion: 'reduce' });
   for (const dark of [false, true]) {
     await login.emulateMedia({ colorScheme: dark ? 'dark' : 'light' });
     await login.waitForFunction(
@@ -63,6 +95,8 @@ try {
     assert.equal(await login.locator('.login-explanation').count(), 0);
     const scene = login.locator('.login-preview .interview-preview-scene');
     assert.equal(await scene.locator('.floating-panel').count(), 2);
+    await verifyConcentricComposers(login, 'login preview ' + (dark ? 'dark' : 'light'));
+    await verifyPreviewSend(scene, 26);
     assert.equal(await scene.locator('.provider-identity').innerText(), 'ChatGPT');
     assert.equal(await scene.locator('.macos-native-panel-material').count(), 0);
     assert.equal(await scene.evaluate((node) => getComputedStyle(node).backgroundImage), 'none');
@@ -176,19 +210,43 @@ try {
     assert.match(idle.curve, /superellipse|squircle/);
     assert.match(idle.filter, /blur\(24px\)/);
     await captureRequested(page, 'preparation-' + (dark ? 'dark' : 'light'));
-    await page.getByRole('button', { name: '聊天模型', exact: true }).click();
-    const menu = page.getByRole('menu');
+    const menu = await openModelMenu(page);
+    await page.waitForFunction(() => {
+      const popup = document.querySelector('.reasoning-effort-popup');
+      return (
+        popup &&
+        popup
+          .getAnimations({ subtree: true })
+          .every((animation) => animation.playState !== 'running')
+      );
+    });
     assert.match(
       await menu.evaluate((node) => getComputedStyle(node).backdropFilter),
       /blur\(24px\)/,
     );
-    assert.equal(
-      await menu
-        .locator('[role="menuitemradio"]')
-        .first()
-        .evaluate((node) => getComputedStyle(node).borderRadius),
-      '999px',
+    const menuCorners = await menu
+      .locator('[role="menuitemradio"]')
+      .first()
+      .evaluate((node) => {
+        const outer = getComputedStyle(node.closest('.dropdown-content'));
+        const inner = getComputedStyle(node);
+        return {
+          radius: Math.min(parseFloat(inner.borderTopLeftRadius), parseFloat(inner.height) / 2),
+          expected: parseFloat(inner.height) / 2,
+          outerRadius: outer.borderTopLeftRadius,
+          curve: inner.cornerShape,
+          outerCurve: outer.cornerShape,
+          padding: outer.paddingLeft,
+        };
+      });
+    assert.ok(
+      Math.abs(menuCorners.radius - menuCorners.expected) < 1 / 32,
+      JSON.stringify(menuCorners),
     );
+    assert.equal(cornerShapeNames(menuCorners.curve), 'round');
+    assert.equal(cornerShapeNames(menuCorners.outerCurve), 'squircle');
+    assert.equal(menuCorners.outerRadius, idle.radius);
+    assert.equal(menuCorners.padding, '6px');
     const item = menu.locator('[role="menuitemradio"]').first();
     for (const accent of ['#16835d', '#8764b8']) {
       await app.evaluate(({ BrowserWindow }, color) => {
@@ -222,6 +280,7 @@ try {
         dark ? 'rgb(231, 235, 237)' : 'rgb(37, 41, 43)',
       );
     }
+    await verifyMenuCapsulePixels(page, app, menu, 'model menu ' + (dark ? 'dark' : 'light'));
     await captureRequested(page, 'model-menu-' + (dark ? 'dark' : 'light'));
     await page.keyboard.press('Escape');
   }
@@ -322,12 +381,13 @@ try {
   await infoToggle.click();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('共享回退材质检查');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await page.locator('.chat-copy').waitFor();
+  await page.locator('.chat-message.assistant .chat-copy').waitFor();
+  await page.locator('.chat-message.assistant .chat-copy').hover();
   const copyAlignment = await page.locator('.chat-message.assistant').evaluate((node) => ({
     text: node.querySelector('.chat-answer').getBoundingClientRect().left,
-    icon: node.querySelector('.chat-copy svg').getBoundingClientRect().left,
+    button: node.querySelector('.chat-copy').getBoundingClientRect().left,
   }));
-  assert.ok(Math.abs(copyAlignment.text - copyAlignment.icon) < 1, JSON.stringify(copyAlignment));
+  assert.ok(Math.abs(copyAlignment.text - copyAlignment.button) < 1, JSON.stringify(copyAlignment));
   await page.locator('.chat-scroll').evaluate((node) => {
     node.scrollTop = 400;
   });
@@ -349,6 +409,7 @@ try {
     .getByRole('button', { name: '通用', exact: true })
     .click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
   assert.equal(
     await settings.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(),
     0,
@@ -358,6 +419,7 @@ try {
     '100',
   );
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
+  await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).waitFor();
   assert.equal(
     await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
     1,
@@ -367,6 +429,9 @@ try {
     '100',
   );
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
+  await settings.locator('.interview-preview-scene').scrollIntoViewIfNeeded();
+  await verifyConcentricComposers(page, 'settings preview');
+  await verifyPreviewSend(settings, 32);
   await captureRequested(page, 'settings-interview-preview');
   assert.equal(
     await settings.evaluate((node) => getComputedStyle(node, '::backdrop').backgroundColor),
@@ -499,7 +564,7 @@ try {
     }
   }
   console.log(
-    'PASS: shared fallback capsules/circles, 40px composer, frosted menus/header/follow, hover, settings and narrow layout.',
+    'PASS: shared capsules/circles, concentric interview composers, frosted menus/header/follow, hover, settings and narrow layout.',
   );
 } finally {
   await closeUiApp(app);

@@ -13,9 +13,10 @@ const require = createRequire(import.meta.url);
 const yaml = createRequire(require.resolve('electron-updater/package.json'))('js-yaml');
 const output = path.join(profile, 'download-fixture');
 await mkdir(output);
-const fixtureBytes = Buffer.from(
-  'Synthetic update transport fixture; this file is never executed.',
-);
+const fixtureBytes = Buffer.concat([
+  Buffer.from('Synthetic update transport fixture; this file is never executed.'),
+  Buffer.alloc(128 * 1024, 0x5a),
+]);
 const digest = createHash('sha512').update(fixtureBytes).digest('base64');
 const info = {
   version: '99.0.1',
@@ -30,10 +31,15 @@ assert.equal(path.dirname(installer), output);
 const installerSize = (await stat(installer)).size;
 const bad = Buffer.from('synthetic corrupted update');
 let corrupt = true;
+let holdInstaller = false;
+let heldInstaller;
+let installerHeld;
+const transportCounts = { releases: 0, manifests: 0, installers: 0 };
 const platformRequests = [];
 const server = createServer((request, response) => {
   const name = new URL(request.url, 'http://127.0.0.1').pathname;
   if (name === '/platform-releases') {
+    transportCounts.releases++;
     const asset = (name, size) => ({ name, size, state: 'uploaded' });
     response.writeHead(200, { 'Content-Type': 'application/json' }).end(
       JSON.stringify([
@@ -59,9 +65,18 @@ const server = createServer((request, response) => {
       ]),
     );
   } else if (name === '/platform-manifest') {
+    transportCounts.manifests++;
     response.writeHead(200, { 'Content-Type': 'text/yaml' }).end(metadata);
   } else if (name === '/platform-installer') {
+    transportCounts.installers++;
     if (corrupt) response.writeHead(200, { 'Content-Length': bad.length }).end(bad);
+    else if (holdInstaller) {
+      heldInstaller = response;
+      response.writeHead(200, { 'Content-Length': installerSize });
+      response.write(fixtureBytes.subarray(0, 32 * 1024));
+      response.once('close', () => { if (heldInstaller === response) heldInstaller = undefined; });
+      installerHeld?.();
+    }
     else {
       response.writeHead(200, { 'Content-Length': installerSize });
       createReadStream(installer).pipe(response);
@@ -206,16 +221,21 @@ try {
       const { UpdateService } = require(
         root + '/dist-electron/shared/electron/backend/updates/service.js',
       );
+      const fetchers = new WeakMap();
+      const downloaders = new WeakMap();
+      globalThis.platformRequests = [];
+      globalThis.platformSignatureChecks = [];
+      globalThis.createPlatformUpdates = (autoDownload = true, cacheName = 'platform') => {
       const updater = new NsisUpdater();
       Object.defineProperty(updater.app, 'baseCachePath', { value: profile });
-      const config = path.join(profile, 'platform-app-update.yml');
-      fs.writeFileSync(config, JSON.stringify({ updaterCacheDirName: 'platform-cache' }));
+      const config = path.join(profile, cacheName + '-app-update.yml');
+      fs.writeFileSync(config, JSON.stringify({ updaterCacheDirName: cacheName + '-cache' }));
       updater.updateConfigPath = config;
       updater.forceDevUpdateConfig = true;
       updater.disableDifferentialDownload = true;
-      globalThis.platformRequests = [];
       const updateSession = updater.netSession;
-      const originalFetch = updateSession.fetch.bind(updateSession);
+      if (!fetchers.has(updateSession)) fetchers.set(updateSession, updateSession.fetch.bind(updateSession));
+      const originalFetch = fetchers.get(updateSession);
       updateSession.fetch = (input, init) => {
         const url = new URL(String(input));
         globalThis.platformRequests.push(url.href);
@@ -228,7 +248,9 @@ try {
           return originalFetch('http://127.0.0.1:' + port + '/platform-manifest', init);
         throw Error('Unexpected provider request');
       };
-      const originalDownload = updater.httpExecutor.download.bind(updater.httpExecutor);
+      if (!downloaders.has(updater.httpExecutor))
+        downloaders.set(updater.httpExecutor, updater.httpExecutor.download.bind(updater.httpExecutor));
+      const originalDownload = downloaders.get(updater.httpExecutor);
       updater.httpExecutor.download = (url, destination, options) => {
         if (
           url.origin !== 'https://github.com' ||
@@ -242,10 +264,25 @@ try {
           options,
         );
       };
-      const driver = configurePlatformUpdates(updater, 'windows-x64');
+      // This unsigned, inert fake EXE is never installed. Override only this
+      // instance's signature port so recovery must demonstrably invoke it.
+      updater.verifySignature = async (file) => {
+        assertSafeFile(file);
+        globalThis.platformSignatureChecks.push({ cacheName, file });
+        return null;
+      };
+      function assertSafeFile(file) {
+        if (!path.resolve(file).startsWith(path.resolve(profile) + path.sep))
+          throw Error('Synthetic signature fixture received an unowned path');
+      }
+      const cacheDirectory = path.join(profile, cacheName + '-release-state');
+      const driver = configurePlatformUpdates(updater, 'windows-x64', undefined, { cacheDirectory });
       globalThis.platformUpdater = updater;
+      globalThis.platformDriver = driver;
+      globalThis.platformCacheDirectory = cacheDirectory;
       globalThis.platformUpdates = new UpdateService({
         currentVersion: '0.0.0',
+        autoDownload,
         driver,
         isInterviewActive: () => false,
         prepareInstall: async () => {
@@ -253,6 +290,8 @@ try {
         },
         emit: () => {},
       });
+      };
+      globalThis.createPlatformUpdates();
     },
     { root: process.cwd(), profile, port: server.address().port },
   );
@@ -262,6 +301,25 @@ try {
   assert.equal(platformFailed.availableVersion, info.version);
   assert.equal(platformFailed.phase, 'error');
   assert.match(platformFailed.error, /校验失败/);
+  assert.deepEqual(transportCounts, { releases: 1, manifests: 1, installers: 1 });
+  const afterFailure = { ...transportCounts };
+  const cachedAvailable = await app.evaluate(async () => {
+    await globalThis.platformUpdates.dispose();
+    globalThis.createPlatformUpdates(false);
+    await globalThis.platformUpdates.start();
+    return globalThis.platformUpdates.state();
+  });
+  assert.equal(cachedAvailable.phase, 'available');
+  assert.equal(cachedAvailable.availableVersion, platformFailed.availableVersion);
+  assert.equal(cachedAvailable.lastCheckedAt, platformFailed.lastCheckedAt);
+  assert.equal(cachedAvailable.autoDownload, false);
+  assert.equal(typeof cachedAvailable.lastCheckedAt, 'number');
+  assert.deepEqual(transportCounts, afterFailure, 'A fresh updater reuses the hourly release cache without API, manifest or package requests');
+  const checkedAgain = await app.evaluate(() => globalThis.platformUpdates.check());
+  const { revision: _cachedRevision, ...cachedResult } = cachedAvailable;
+  const { revision: _checkedRevision, ...checkedResult } = checkedAgain;
+  assert.deepEqual(checkedResult, cachedResult, 'A normal repeated check returns the same cached result');
+  assert.deepEqual(transportCounts, afterFailure);
   corrupt = false;
   const platformReady = await app.evaluate(async () => {
     await globalThis.platformUpdates.check();
@@ -277,6 +335,121 @@ try {
     return hash.digest('base64');
   });
   assert.equal(platformHash, info.sha512);
+  const completeFile = await app.evaluate(() => globalThis.platformUpdater.installerPath);
+  const beforeRestore = { ...transportCounts };
+  const restore = await app.evaluate(async () => {
+    const fs = process.getBuiltinModule('fs');
+    const completeFile = globalThis.platformUpdater.installerPath;
+    await globalThis.platformUpdates.dispose();
+    if (!fs.existsSync(completeFile)) throw Error('Dispose removed the complete installer');
+    const previous = globalThis.platformUpdater;
+    const signatureCount = globalThis.platformSignatureChecks.length;
+    const originalNow = Date.now;
+    try {
+      // A complete installer remains usable after the hourly metadata TTL.
+      Date.now = () => originalNow() + 60 * 60 * 1000 + 1;
+      globalThis.createPlatformUpdates(false);
+      await globalThis.platformUpdates.start();
+    } finally {
+      Date.now = originalNow;
+    }
+    return {
+      state: globalThis.platformUpdates.state(),
+      newInstance: previous !== globalThis.platformUpdater,
+      file: globalThis.platformUpdater.installerPath,
+      signatures: globalThis.platformSignatureChecks.slice(signatureCount),
+      autoInstall: globalThis.platformUpdater.autoInstallOnAppQuit,
+    };
+  });
+  assert.equal(restore.newInstance, true);
+  assert.equal(restore.state.phase, 'downloaded');
+  assert.equal(restore.state.autoDownload, false);
+  assert.equal(restore.state.progress, 100);
+  assert.equal(restore.state.availableVersion, info.version);
+  assert.equal(restore.state.lastCheckedAt, cachedAvailable.lastCheckedAt);
+  assert.equal(restore.file, completeFile);
+  assert.ok(restore.signatures.some(({ file }) => file === completeFile), 'Complete-file restoration invokes this instance\'s synthetic signature verifier');
+  assert.equal(restore.autoInstall, false);
+  assert.deepEqual(transportCounts, beforeRestore, 'A complete package restores downloaded with auto-download disabled and no network requests');
+  const beforeForced = { ...transportCounts };
+  const forced = await app.evaluate(async () => {
+    await globalThis.platformUpdates.dispose();
+    globalThis.createPlatformUpdates(false);
+    return globalThis.platformUpdates.check(true);
+  });
+  assert.equal(forced.phase, 'downloaded');
+  assert.equal(forced.availableVersion, info.version);
+  assert.deepEqual(transportCounts, {
+    releases: beforeForced.releases + 1,
+    manifests: beforeForced.manifests + 1,
+    installers: beforeForced.installers,
+  }, 'One forced check makes exactly one fresh release/manifest lookup and reuses the complete installer');
+  await app.evaluate(() => globalThis.platformUpdates.dispose());
+  holdInstaller = true;
+  let heldTimer;
+  const heldRequest = new Promise((resolve, reject) => {
+    installerHeld = () => { clearTimeout(heldTimer); resolve(); };
+    heldTimer = setTimeout(() => reject(Error('The owned slow installer request did not start')), 10000);
+  });
+  try {
+    await app.evaluate(() => {
+      globalThis.createPlatformUpdates(true, 'interrupted');
+      globalThis.interruptedUpdateStart = globalThis.platformUpdates.start();
+    });
+    await heldRequest;
+  } finally {
+    clearTimeout(heldTimer);
+    installerHeld = undefined;
+  }
+  const partial = await app.evaluate(async () => {
+    const fs = process.getBuiltinModule('fs');
+    const path = process.getBuiltinModule('path');
+    const helper = await globalThis.platformUpdater.getOrCreateDownloadHelper();
+    const pending = helper.cacheDirForPendingUpdate;
+    const deadline = Date.now() + 3000;
+    for (;;) {
+      const names = fs.existsSync(pending) ? fs.readdirSync(pending) : [];
+      for (const name of names) {
+        const file = path.join(pending, name);
+        const stat = fs.statSync(file);
+        if (name.includes('temp-') && stat.size > 0) return { pending, name, bytes: stat.size };
+      }
+      if (Date.now() >= deadline) throw Error('No partial installer bytes reached the stock downloader');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  });
+  assert.ok(partial.bytes > 0 && partial.bytes < installerSize);
+  const cancelStarted = Date.now();
+  const interrupted = await app.evaluate(async (_, pending) => {
+    const fs = process.getBuiltinModule('fs');
+    const path = process.getBuiltinModule('path');
+    await globalThis.platformUpdates.dispose();
+    await globalThis.interruptedUpdateStart;
+    const cache = JSON.parse(fs.readFileSync(path.join(globalThis.platformCacheDirectory, 'release-cache.json'), 'utf8'));
+    return { cache, remaining: fs.existsSync(pending) ? fs.readdirSync(pending) : [] };
+  }, partial.pending);
+  assert.ok(!interrupted.remaining.includes(partial.name), 'Dispose removes the actual interrupted installer');
+  for (const name of [info.path, `temp-${info.path}`, `0-temp-${info.path}`, `1-temp-${info.path}`, `2-temp-${info.path}`])
+    assert.ok(!interrupted.remaining.includes(name), 'No known partial installer survives disposal');
+  assert.equal(interrupted.cache.download, undefined);
+  assert.ok(interrupted.cache.notBefore >= cancelStarted + 60 * 60 * 1000, 'Interrupted automatic downloads persist an hourly cooldown');
+  const beforeInterruptedRestart = { ...transportCounts };
+  const interruptedRestart = await app.evaluate(async () => {
+    globalThis.createPlatformUpdates(true, 'interrupted');
+    await globalThis.platformUpdates.start();
+    return { state: globalThis.platformUpdates.state(), allowed: globalThis.platformDriver.isAutomaticDownloadAllowed() };
+  });
+  assert.equal(interruptedRestart.state.phase, 'available');
+  assert.equal(interruptedRestart.state.autoDownload, true);
+  assert.equal(interruptedRestart.allowed, false);
+  assert.deepEqual(transportCounts, beforeInterruptedRestart, 'Restart reuses cached metadata and does not restart an interrupted automatic download');
+  holdInstaller = false;
+  const manualAfterInterruption = await app.evaluate(() => globalThis.platformUpdates.download());
+  assert.equal(manualAfterInterruption.phase, 'downloaded');
+  assert.deepEqual(transportCounts, {
+    ...beforeInterruptedRestart,
+    installers: beforeInterruptedRestart.installers + 1,
+  }, 'Manual download bypasses the automatic cooldown without another release lookup');
   platformRequests.push(...(await app.evaluate(() => globalThis.platformRequests)));
   assert.equal(
     platformRequests.some((url) => url.endsWith('/latest') || url.includes('.atom')),
@@ -300,6 +473,14 @@ try {
         macOnlyLatestIgnored: true,
         platformRejectsCorruption: true,
         platformInstallerHashVerified: true,
+        releaseCacheAcrossRestart: true,
+        completeInstallerRestoredAfterHourlyTtl: true,
+        syntheticSignatureRestoreVerified: true,
+        forcedCheckMadeFreshLookup: true,
+        interruptedPartialRemoved: true,
+        interruptedAutoDownloadDeferred: true,
+        manualDownloadAfterInterruption: true,
+        transportCounts,
         platformRequests,
       },
       null,
@@ -308,6 +489,7 @@ try {
   );
   console.log(JSON.stringify({ passed: true, profile }));
 } finally {
+  heldInstaller?.destroy();
   if (app) await app.close();
   await new Promise((resolve) => server.close(resolve));
 }

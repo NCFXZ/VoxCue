@@ -55,6 +55,7 @@ try {
     .getByRole('navigation', { name: '设置分类' })
     .getByRole('button', { name: '通用', exact: true })
     .click();
+  await main.getByRole('heading', { name: '通用', exact: true }).waitFor();
   assert.equal(await main.getByRole('slider', { name: '毛玻璃透明度', exact: true }).count(), 0);
   assert.equal(
     await main.evaluate(() => document.documentElement.dataset.frostedTransparency),

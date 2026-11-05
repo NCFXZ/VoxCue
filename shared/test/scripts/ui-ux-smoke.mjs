@@ -1,3 +1,4 @@
+import { openModelMenu } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -258,7 +259,7 @@ try {
   await app.evaluate(() => {
     globalThis.failModels = true;
   });
-  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  await openModelMenu(page);
   await page.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
   await page
     .locator('.preparation-workspace')
@@ -395,24 +396,53 @@ try {
     'new-content navigation and native close cancellation, typed session state validation',
   );
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
+  await page.waitForFunction(() => {
+    const marker = document.querySelector('.sidebar-selection-indicator');
+    return (
+      !document.documentElement.dataset.viewDirection &&
+      marker?.getAttribute('data-visible') === 'true' &&
+      getComputedStyle(marker).opacity === '1' &&
+      marker.getAnimations().every((animation) => animation.playState !== 'running')
+    );
+  });
   const marker = await page.locator('.nav-item.active').evaluate((element) => {
-    const style = getComputedStyle(element, '::before');
+    const indicators = document.querySelectorAll('.sidebar-selection-indicator');
+    const indicator = indicators[0],
+      style = getComputedStyle(indicator);
+    const bounds = indicator.getBoundingClientRect(),
+      row = element.getBoundingClientRect();
     return {
-      height: parseFloat(style.height),
-      width: parseFloat(style.width),
-      left: parseFloat(style.left),
+      count: indicators.length,
+      hidden: indicator.getAttribute('aria-hidden'),
+      height: Math.round(bounds.height * 64) / 64,
+      width: Math.round(bounds.width * 64) / 64,
+      left: bounds.left - row.left,
+      centerOffset: bounds.top + bounds.height / 2 - row.top - row.height / 2,
+      contained:
+        bounds.left >= row.left - 1 / 64 &&
+        bounds.right <= row.right + 1 / 64 &&
+        bounds.top >= row.top - 1 / 64 &&
+        bounds.bottom <= row.bottom + 1 / 64,
       radius: parseFloat(style.borderRadius),
-      row: element.clientHeight,
-      shadow: getComputedStyle(element).boxShadow,
+      curve: style.cornerShape,
+      row: row.height,
+      shadow: style.boxShadow,
+      rowShadow: getComputedStyle(element).boxShadow,
     };
   });
   assert(
-    marker.height < marker.row &&
+    marker.count === 1 &&
+      marker.hidden === 'true' &&
+      marker.height < marker.row &&
       marker.height === 18 &&
       marker.width === 3 &&
-      marker.left > 0 &&
+      Math.abs(marker.left - 3) <= 1 / 64 &&
+      Math.abs(marker.centerOffset) <= 1 / 64 &&
+      marker.contained &&
       marker.radius === 999 &&
-      marker.shadow === 'none',
+      /^(round|superellipse\(1\))$/.test(marker.curve) &&
+      marker.shadow === 'none' &&
+      marker.rowShadow === 'none',
     JSON.stringify(marker),
   );
   await page.screenshot({ animations: 'disabled' });
@@ -534,6 +564,7 @@ try {
     .click();
   const dialog = page.getByRole('dialog', { name: '设置', exact: true });
   await dialog.getByRole('button', { name: '面试设置', exact: true }).click();
+  await dialog.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
   assert.equal(
     await dialog
       .getByRole('button', { name: '面试设置', exact: true })

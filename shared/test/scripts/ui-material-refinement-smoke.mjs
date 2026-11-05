@@ -19,10 +19,12 @@ const app = await electron.launch({
 });
 const errors = [];
 const settle = (page) =>
-  page.waitForFunction(() =>
-    document
-      .getAnimations()
-      .every((a) => a.effect?.getTiming().iterations === Infinity || a.playState !== 'running'),
+  page.waitForFunction(
+    () =>
+      !document.documentElement.dataset.viewDirection &&
+      document
+        .getAnimations()
+        .every((a) => a.effect?.getTiming().iterations === Infinity || a.playState !== 'running'),
   );
 const theme = async (page, dark) => {
   await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
@@ -147,8 +149,9 @@ try {
     .waitFor();
   for (const dark of [false, true]) {
     await theme(page, dark);
-    for (const name of ['添加附件', '聊天模型', '思考强度'])
+    for (const name of ['添加附件', '聊天模型'])
       await hoverOnly(page, page.getByRole('button', { name, exact: true }));
+    assert.equal(await page.getByRole('button', { name: '思考强度', exact: true }).count(), 0);
   }
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('合成控件检查');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
@@ -232,6 +235,10 @@ try {
     window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
   });
   await page.locator('.history-row').waitFor();
+  // The page's live controls mount before its view-transition snapshot retires.
+  // A coordinate click must target the live surface after that motion settles.
+  await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+  await settle(page);
   const search = page.getByRole('searchbox', { name: '搜索标题' });
   const searchStyle = await search.evaluate((e) => ({
     left: getComputedStyle(e).paddingLeft,
@@ -239,17 +246,31 @@ try {
   }));
   assert.deepEqual(searchStyle, { left: '20px', height: 44 });
   await search.fill('合成');
-  const clearBox = await page.getByRole('button', { name: '清除搜索', exact: true }).boundingBox();
+  const clear = page.getByRole('button', { name: '清除搜索', exact: true });
+  const clearBox = await clear.boundingBox();
+  assert.equal(
+    await clear.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      return button.contains(
+        document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2),
+      );
+    }),
+    true,
+    'The center click must hit the live clear-search button',
+  );
   await page.mouse.click(clearBox.x + clearBox.width / 2, clearBox.y + clearBox.height / 2);
   assert.equal(await search.inputValue(), '');
   await page
     .locator('.history-row')
     .locator('.history-row-open')
     .click({ position: { x: 16, y: 16 } });
+  await page.locator('.record-transcript-scroll').waitFor();
+  await settle(page);
   await page.locator('.record-transcript-scroll').evaluate((e) => (e.scrollTop = 320));
   await page.waitForFunction(
     () => Number(document.documentElement.style.getPropertyValue('--web-header-opacity')) === 1,
   );
+  await settle(page);
   const header = await page.locator('.record-detail-toolbar').evaluate((e) => ({
     filter: getComputedStyle(e, '::before').backdropFilter,
     opacity: getComputedStyle(e, '::before').opacity,
@@ -271,14 +292,17 @@ try {
   const materialOff = await page.addStyleTag({
     content: '.record-detail-toolbar::before { content: none !important; }',
   });
+  await settle(page);
   assert.equal(
     visibleBody.equals(await page.screenshot({ clip: bodyClip, scale: 'css' })),
     true,
     'Header material must not cover or blur transcript pixels below the toolbar',
   );
   await materialOff.evaluate((e) => e.remove());
+  await settle(page);
   const coveredHeader = await page.locator('.record-detail-toolbar').screenshot({ scale: 'css' });
   await page.locator('.record-transcript-scroll').evaluate((e) => (e.style.visibility = 'hidden'));
+  await settle(page);
   assert.equal(
     coveredHeader.equals(await page.locator('.record-detail-toolbar').screenshot({ scale: 'css' })),
     false,

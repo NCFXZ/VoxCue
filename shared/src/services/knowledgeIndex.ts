@@ -1,5 +1,23 @@
-import type { KnowledgeCall, KnowledgeValue } from '../../electron/contracts/knowledge';
+import type {
+  KnowledgeCall,
+  KnowledgeStatus,
+  KnowledgeValue,
+} from '../../electron/contracts/knowledge';
 import type { LocalDocument } from './knowledgeTypes';
+
+export function knowledgeStatusLabel(status: KnowledgeStatus): string {
+  if (status.phase === 'ready') return '索引完成';
+  if (status.phase === 'failed') return '索引失败';
+  if (status.phase === 'cancelled') return '已取消';
+  // The embedding counter finishes before the separate index commit starts.
+  // That commit has no incremental counter, so its zero is not a task restart.
+  if (status.phase === 'indexing') return '正在写入索引…';
+  const percent = status.total
+    ? Math.min(100, Math.max(0, Math.floor((status.completed / status.total) * 100)))
+    : 0;
+  return `索引中 ${percent}%`;
+}
+
 export const hasKnowledgeEngine = () =>
   typeof window !== 'undefined' && typeof window.desktop?.knowledge === 'function';
 export async function knowledgeCall(call: KnowledgeCall): Promise<KnowledgeValue> {

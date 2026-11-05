@@ -1,5 +1,8 @@
 export type UpdateAction = 'status' | 'check' | 'download' | 'cancel' | 'install';
-export type UpdateCall = { op: UpdateAction } | { op: 'set-auto-download'; enabled: boolean };
+export type UpdateCall =
+  | { op: Exclude<UpdateAction, 'check'> }
+  | { op: 'check'; force?: boolean }
+  | { op: 'set-auto-download'; enabled: boolean };
 
 export interface UpdateState {
   revision: number;

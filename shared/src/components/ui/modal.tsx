@@ -1,8 +1,11 @@
 import { t } from '../../i18n';
-import { useEffect, useRef, type ReactNode, type KeyboardEventHandler } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type KeyboardEventHandler } from 'react';
 import { headerCoverage } from '../../platform/chromeGeometry';
 import { X, Trash } from '../icons';
 import { Button } from './button';
+import { captureModalExit, clearModalExit } from './modal-motion';
+import { cancelViewSwitch } from './switchView';
+import './modal-motion.css';
 export function Modal({
   title,
   onClose,
@@ -17,7 +20,7 @@ export function Modal({
   closeLabel = '关闭对话框',
   initialFocus,
   hideHeader = false,
-  fixedHeader = false,
+  fixedHeader = true,
   overlayHeader = false,
   onKeyDown,
   footer,
@@ -43,26 +46,45 @@ export function Modal({
   backdrop?: 'viewport' | 'transparent';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     const dialog = ref.current!;
     const previousFocus = document.activeElement as HTMLElement | null;
+    cancelViewSwitch();
+    clearModalExit();
     dialog.showModal();
     dialog.querySelector<HTMLElement>('[data-autofocus]')?.focus();
     return () => {
+      cancelViewSwitch(dialog);
+      const exit = captureModalExit(dialog);
       dialog.close();
+      exit?.();
       requestAnimationFrame(() => {
-        if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
+        const active = document.activeElement;
+        const nextModal = [...document.querySelectorAll('dialog[open]')].find((node) =>
+          node.matches(':modal'),
+        );
+        if (
+          previousFocus?.isConnected &&
+          (!nextModal || nextModal.contains(previousFocus)) &&
+          (!active || active === document.body || active === dialog || !active.isConnected)
+        )
+          previousFocus.focus({ preventScroll: true });
       });
     };
   }, []);
-  useEffect(() => {
-    if (!overlayHeader) return;
+  useLayoutEffect(() => {
     const dialog = ref.current!;
-    const heading = dialog.querySelector<HTMLElement>(':scope > .dialog-heading')!;
+    const heading = dialog.querySelector<HTMLElement>(':scope > .dialog-heading');
     const scroll = dialog.querySelector<HTMLElement>(':scope > .dialog-scroll')!;
     let frame = 0;
     const update = () => {
       frame = 0;
+      const overflow = getComputedStyle(scroll).overflowY;
+      dialog.toggleAttribute(
+        'data-scrollable',
+        /^(auto|scroll)$/.test(overflow) && scroll.scrollHeight > scroll.clientHeight,
+      );
+      if (!overlayHeader || !heading) return;
       const rect = heading.getBoundingClientRect();
       dialog.style.setProperty(
         '--dialog-scrollbar-width',
@@ -79,25 +101,30 @@ export function Modal({
       if (!frame) frame = requestAnimationFrame(update);
     };
     const resize = new ResizeObserver(schedule);
-    resize.observe(heading);
-    resize.observe(scroll);
+    const observe = () => {
+      resize.disconnect();
+      if (heading) resize.observe(heading);
+      resize.observe(scroll);
+      for (const child of scroll.children) resize.observe(child);
+    };
+    const changes = new MutationObserver(() => {
+      observe();
+      schedule();
+    });
+    changes.observe(scroll, { childList: true, characterData: true, subtree: true });
+    observe();
     scroll.addEventListener('scroll', schedule, { passive: true });
     update();
     return () => {
       cancelAnimationFrame(frame);
       resize.disconnect();
+      changes.disconnect();
       scroll.removeEventListener('scroll', schedule);
     };
-  }, [overlayHeader]);
+  }, [overlayHeader, hideHeader]);
   const heading = !hideHeader && (
     <header className="dialog-heading">
       <div className="dialog-title">
-        {destructive && (
-          <span className="danger-icon">
-            <Trash size={20} />
-          </span>
-        )}
-        {icon && !destructive && <span className="dialog-icon">{icon}</span>}
         <div>
           <div className="dialog-title-line">
             <h2>{title}</h2>
@@ -105,15 +132,20 @@ export function Modal({
           </div>
           {subtitle && <p className="dialog-subtitle">{t(subtitle)}</p>}
         </div>
+        {destructive && (
+          <span className="danger-icon">
+            <Trash size={20} />
+          </span>
+        )}
+        {icon && !destructive && <span className="dialog-icon">{icon}</span>}
       </div>
-      <div>
+      <div className="dialog-actions">
         {action}
         <Button
           variant="ghost"
           size="icon"
           className="dialog-close-button"
           data-autofocus={initialFocus === 'close' ? '' : undefined}
-
           aria-label={t(closeLabel)}
           onClick={onClose}
         >

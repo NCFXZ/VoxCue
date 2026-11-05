@@ -31,7 +31,15 @@ import {
   Save,
 } from './icons';
 
-export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onBack(): void }) {
+export function HistoryDetail({
+  record,
+  onBack,
+  onDelete,
+}: {
+  record: InterviewRecord;
+  onBack(): void;
+  onDelete(): Promise<boolean>;
+}) {
   const history = useHistory();
   const models = useChatConnection((s) => s.models);
   const [showAnswers, setShowAnswers] = useState(false);
@@ -185,11 +193,7 @@ export function HistoryDetail({ record, onBack }: { record: InterviewRecord; onB
             aria-label={t('删除记录')}
             revision={record.title}
             active={!renaming}
-            onConfirm={async () => {
-              const saved = await history.remove(record.id);
-              if (saved) onBack();
-              return saved;
-            }}
+            onConfirm={onDelete}
           />
         </div>
       </header>

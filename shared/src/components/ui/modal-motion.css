@@ -1,0 +1,57 @@
+.app-dialog[open],
+.app-dialog[open]:not([data-backdrop='transparent'])::backdrop {
+  animation: modal-fade-in var(--panel-motion-duration, 240ms)
+    var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+
+.app-dialog[data-modal-exit],
+.app-dialog[data-modal-exit]:not([data-backdrop='transparent'])::backdrop {
+  pointer-events: none;
+  animation: modal-fade-out var(--panel-motion-duration, 240ms)
+    var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) both;
+}
+
+.app-dialog[data-modal-exit]:not([data-backdrop='transparent'])::backdrop {
+  animation-name: modal-backdrop-fade-out;
+}
+
+.app-dialog[data-modal-exit][data-backdrop]::backdrop {
+  pointer-events: none;
+}
+
+@keyframes modal-fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes modal-fade-out {
+  from {
+    opacity: var(--modal-exit-opacity, 1);
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-backdrop-fade-out {
+  from {
+    opacity: var(--modal-backdrop-exit-opacity, 1);
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-dialog[open],
+  .app-dialog[open]:not([data-backdrop='transparent'])::backdrop,
+  .app-dialog[data-modal-exit],
+  .app-dialog[data-modal-exit]::backdrop,
+  .app-dialog[data-modal-exit]:not([data-backdrop='transparent'])::backdrop {
+    animation: none;
+  }
+}

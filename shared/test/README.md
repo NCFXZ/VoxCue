@@ -1,4 +1,46 @@
-## 0.6.8 验证入口
+## 0.6.9 验证入口
+
+本轮完整验证与发行范围见 `PROGRESS.md`，逐项双端行为及测试修复见 [0.6.8→0.6.9 Mac 接续清单](../docs/MACOS_0.6.9_HANDOFF.md)。共享完整矩阵、Windows 原生、五档 DPI、20 轮面试及 600 秒音频长稳继续完整执行；下文旧版本段落保留其历史上下文，不构成另一平台已验声明。测试结果仅终端/对话，归档与公开资产记录独立维护。
+
+更新缓存定向入口：`update-cache.test.ts` 覆盖跨实例一小时缓存、失败重放、时钟回拨、强制检查、缓存损坏/写入失败及 stock 下载缓存恢复；`updates.test.ts` 保留检查、恢复、自动下载冷却、取消与安装保存约束，`desktop-ipc.test.ts` 核对主窗口主 frame 及可选 `force` 参数。共享 `updates-smoke.mjs` 使用隔离驱动验证真实按钮长按 5 秒、短按键盘、释放不重复检查及既有下载/保存退出流程。Windows `updates-native-smoke.mjs` 使用真实 NsisUpdater 与 owner loopback 服务验证重启不重复请求、完整包恢复和半成品退出清理；不执行安装器或访问线上发行源。Mac 原生缓存接续由 Mac 本机执行。
+
+共享界面细调定向入口（本平台目录串行执行）：`cloud-account-smoke.mjs --login-check` 检查字段下方提示/错误及文字起点、焦点阴影和六格验证码的输入/粘贴/导航；`password-policy-smoke.mjs` 保留注册/重置密码范围与真实隔离 API 检查。`login-entry-smoke.mjs` 检查自动转写、思考、回答仅播放一次、完成后静止、切换注册/找回密码不重播、离屏暂停和减少动态效果；不将自动化宿主未能触发的原生隐藏可见性事件算作已验。
+
+`web-materials-smoke.mjs` 与 `interview-chrome-smoke.mjs` 按实际布局核对登录/设置/面试输入框的同心圆角、气泡圆角及按钮尺寸和留白；面试输入区三个按钮同为 32px，左右及底部内间距同为 8px，登录紧凑预览按比例显示。`cloud-account-smoke.mjs --scrollbars` 保留 6px 滚动条宽度并检查圆形端帽；`typography-smoke.mjs` 复核可选正文的文本光标及控件光标。截图仍仅可按需输出到 owner 系统临时目录，查看后清理。
+
+所有下拉菜单内边距统一为 6px，外框半径共用输入框的 `--radius-composer`（40px），保持 `superellipse(2)` 连续圆角和 `overflow: hidden`，菜单项高亮保留 `round` 圆头胶囊。公共 `.dropdown-scroll` 和 `.reasoning-model-list` 使用矩形滚动视口，最终轮廓由外框统一裁切；内层角半径及相应测量变量移除，核对首末高亮不被重复裁切。滚动条宽度保持 6px，轨道上下留白跟随 `--dropdown-inset`，同为 6px，以保留圆形端帽。`continuous-corners.mjs` 复用于浅深主题的账号、设置、附件、模型与设备菜单回归，保留独立圆形/胶囊控件的轮廓检查。思考弹层内的顶部按钮默认透明无阴影、悬浮显示反馈，档位与模型均用 12px。
+
+所有下拉菜单以真实圆角外框高度展开/收拢，文字不缩放，沿用 240ms 共享时长。开始展开与收拢末尾有短渐入/渐出，主体不透明；阴影由外框自然绘制而不被裁切。关闭时先卸载实时 Radix 菜单，释放焦点、滚动、可访问性及 Escape 锁，仅在原 Portal/原生弹窗位置保留去除角色与标识的视觉快照；快照通过 `aria-hidden` 和 `inert` 隔离鼠标与键盘操作，并在动画结束、原菜单重开或归属组件卸载时移除并释放引用。减少动态效果时跳过动画，播放中启用则立即取消，同一 Renderer 保留唯一菜单归属。`settings-smoke.mjs` 与 `continuous-corners.mjs` 定向复核开合中间帧、快速替换、退出后的键盘/滚动可用性、快照清理及减少动态效果。模型列表刷新项使用前置 14px 共享 `Refresh` 图标。
+
+模态弹窗采用共享渐入/渐出效果，普通遮罩同步渐暗/恢复；透明遮罩弹窗保持透明。所有关闭来源立即结束业务及原生模态锁，仅以 `aria-hidden`、`inert` 的手动 popover 视觉快照完成退出，不延迟焦点恢复或背景解锁；新弹窗、动画结束及播放中启用减少动态效果均清理快照。减少动态效果时直接开合。`profile-selection-smoke.mjs` 沿真实关闭路径核对中间帧、即时解锁、焦点、外部点击和快照清理。
+
+一屏容纳的短弹窗不显示标题栏分隔线，长内容保留滚动标题材质；共用标题与右侧关闭按钮距外框为 24px，关闭命中区为 36px。设置保留原分类布局，不额外显示全局“设置”标题栏，关闭按钮固定在左侧栏，左距和上距均为 24px。`typography-smoke.mjs` 核对设置特例及其他弹窗的几何，`profile-selection-smoke.mjs` 核对短内容与滚动阅读弹层。
+
+技能选择保留原生复选框语义、键盘操作、原尺寸和圆角，框内勾选与取消均有绘入/退回过渡，半选横线沿用相同双向反馈。`profile-selection-smoke.mjs` 检查选中、取消和半选的真实中间帧及减少动态效果，不以最终静态样式代替动画检查。
+
+主页面、设置分类及面试记录列表/详情共用 `ui/switchView.ts` 和 `page-motion.css`。浏览器 View Transition 快照承载淡出/淡入，记录详情前进向左、返回向右；不挂载旧页面的交互副本，准备页继续保留挂载，侧栏保持静止。过渡舞台与快照组保留页面底色和边界，快速切换及减少动态效果沿统一入口处理。`history-branding-smoke.mjs` 检查页面与记录前进/返回的中间帧、侧栏边界及减少动态效果；设置分类行为与布局由 `settings-smoke.mjs` 和 `typography-smoke.mjs` 复核。
+
+主侧栏的主导航与聊天记录共用同一根选中竖条：有条标签之间以共享非线性缓动滑动，进入无条状态时淡出，从无条状态进入有条标签时淡入。主导航与设置分类标签在普通/粗体视觉层间交叉淡化，保留一份真实标签及原有键盘语义，视觉层不参与可访问性。展开侧栏统一为 230px，跨 1100px 窗口宽度时保持不变，收起保持 68px。`ui-alignment-smoke.mjs`、`settings-smoke.mjs` 和 `typography-smoke.mjs` 定向复核侧栏宽度、标签、选中状态及减少动态效果。
+
+准备聊天底排的附件、模型与发送控件同为 32px；模型胶囊按实际字高采用上下 6px、左右 10px 内距以保持视觉等距，整排左右及底部内距仍为 8px，由 `composer-smoke.mjs` 和 `ui-alignment-smoke.mjs` 核对。`chat-response-smoke.mjs` 保留引用胶囊与普通链接的区别、受控链接打开，以及更多来源展开/收起的真实中间帧与减少动态效果检查。
+
+正文、来源列表及更多来源的引用胶囊共用 `SourceLink` 图标。仅从固定 `https://a.favicon.im` 按规范 DNS hostname 获取 11px favicon，不传原页面路径或查询；CSP 只在 `img-src` 增加该精确 origin，不扩大网络连接权限。图片使用 `no-referrer`、惰性加载及浏览器缓存；失败回退 Globe，并使用有界内存冷却避免反复重试，原链接打开与全文复制保持。`source-favicon.test.tsx`、`markdown.test.tsx` 及 `chat-response-smoke.mjs` 覆盖输入拒绝、共享图标 URL、固定尺寸、加载失败和来源交互；该 `chat-response` 专属离线夹具完全接管 HTTPS 协议，仅为精确图标 URL 的 image 请求提供合成 200 SVG、404 及坏图片字节，其余请求取消或报错，不存在外网回退。
+
+准备聊天用户气泡移除模型/档位提示，保留附件及实际请求快照，四角复用输入框连续圆角。超过 20 个视觉行默认折叠，展开/收起支持共享动画及减少动态效果，复制始终保留全文。用户消息右对齐显示时间、复制按钮；回答显示复制按钮、时间，复制按钮悬浮轮廓与正文区域左缘对齐，不使用负左边距。回答在空正文阶段不显示时钟或空操作栏，出现正文后再显示时间，用户发送时间保持。当天采用 24 小时 `hh:mm`，昨天/前天使用对应标签，其他按系统日期格式；旧用户消息仅可展示紧邻回答的同轮开始时间，缺失不编造或回写。`composer-smoke.mjs` 核对视觉行边界、自动换行、折叠/复制、附件保留、时间顺序及旧消息兼容，`chat-response-smoke.mjs` 核对回答前后的时间显示，`message-time.test.ts` 和 `renderer/stores/preparation.test.ts` 复核时间格式与发送/重试快照。
+
+准备聊天原输入框下方的页面级提示、错误、连接重载和存储重试统一置于输入框上方，保留原文案、颜色、角色及显示条件。`provider-ui-smoke.mjs` 通过合成模型列表读取失败核对错误与重载按钮的位置，并沿真实 UI 恢复连接。消息正文错误保留在消息内，登录字段提示继续位于对应输入框下方。
+
+提案阅读弹层 `proposal-reader` 核对顶部关闭按钮与左侧标题距外框均为 24px。关闭按钮右侧内距按 24px 减去实测滚动条槽宽补偿，保留顶部材质对滚动条的避让。
+
+活动面试与设置分类共用横向设置行，音频、回答模型/档位、语音模型/设备及显示滑块均为左名称、右控件，控件列同宽，窄窗允许标签自然换行。语音切换的加载/等待状态与“语音识别”分组标题并排，保留原文及 `role=status`，长英文可换行；CPU 警告保留原有 alert。`ui-alignment-smoke.mjs`、`typography-smoke.mjs`、Windows `interview-effort-smoke.mjs` 和 `interview-ux-smoke.mjs` 复核七行列宽/中心、长模型名、列表滚动、状态位置及保存交互。
+
+活动面试保存模型/档位时保留组合弹层与滑块焦点，以独立保存状态阻止重复提交，失败回滚；不会因短暂保存而关闭。Windows `interview-effort-smoke.mjs` 覆盖延迟保存、保存中键盘/指针操作、失败、Escape 和外部点击。云备份全局同步状态及警告与“立即同步”“刷新容量”同一行垂直居中，文字左侧自然折行；条目冲突保留各自操作。`cloud-account-smoke.mjs` 在固定服务端参考与合成账户下核对警告同行的实际几何，不访问真实账户。
+
+开始面试的权限预检加载复用余额的骨架扫光，按实际音频来源及屏幕权限能力预留结果行，摘要中待解析的设备名也使用占位；保留加载播报及确认禁用。状态/测试占位复用隐藏的真实文字和按钮尺寸，设备名采用当前已知文字测宽，扫光固定裁切在底条胶囊轮廓内。`interview-ux-smoke.mjs` 在真实 IPC 的合成预检边界暂停结果，核对浅深主题、扫光与减少动态效果、隐藏估算值不可访问，以及加载完成前后弹窗/列表/行/状态/按钮/页脚的逐帧几何稳定。内存截图逐像素检查扫光确实照亮内部且不越出两端圆角；重查须清除旧音频测试错误。不执行实际硬件采样或系统权限操作，双端均沿用该共享入口。
+
+思考滑块最低档的已填充轨道端帽保持透明，滑块头去掉硬描边并保留阴影。Windows `interview-effort-smoke.mjs` 沿实际控件复核端点、拖动和键盘切换；减少动态效果沿既有直接切换规则处理。
+
+准备聊天、面试前设置及活动面试设置均将模型与思考档位合并为一个入口。设置入口默认采用与其他下拉框一致的灰底和既有材质，模型名与档位相邻、箭头靠右；准备聊天入口继续仅悬浮显示反馈。保存忙碌状态结束后，焦点仍为空时才恢复组合入口；模型 ID 缺失时显示不可用状态并保留真实选择。定向入口为 `composer-smoke.mjs`、`ui-alignment-smoke.mjs`、`web-materials-smoke.mjs`、`ui-material-refinement-smoke.mjs`、`provider-ui-smoke.mjs` 和 `typography-smoke.mjs`；从本平台目录串行执行，核对显式支持的滑块档位、模型选择与刷新、键盘与焦点、浅深色及窄布局。本轮弹层复核范围包含 6px 公共内边距、40px 连续圆角外框、内层菜单滚动、滑块上方合并显示档位和模型的按钮，以及弹出、思考面板与模型列表切换和减少动态效果；深色模式另核对浅灰滑块头及较低亮度的填充轨道。拖动连续跟手、松手吸附和点击/键盘切换的过渡由真实鼠标/键盘及中间帧验证。Windows 的 `interview-effort-smoke.mjs` 还核对活动面试设置拖动结束后才提交档位。共享测试辅助 `openReasoningControl` 打开思考面板，`openModelMenu` 经同一按钮进入模型列表；不再查找独立的模型和思考强度按钮。能力归一化与历史自动值兼容入口为 `interview-settings.test.ts` 和 `renderer/stores/preparation.test.ts`，不修改存储格式。
 
 当前共享功能矩阵包含60组（新增完整用量组合），Windows原生18组、五档DPI各27组；Mac默认原生19组，`ui-refinement-matrix.mjs`保留五档缩放原有各29组并追加`account-usage-overview`，共150项，均纳入`language`与`preparation-guide`。Windows临时验包使用`portable-native-smoke.mjs --with-installer`；Mac使用`package-runtimes-smoke.mjs`与`package-smoke.mjs --install-archive`验证指定`VOXCUE_TEST_RELEASE_DIR`的最终资产。发行范围以当前`PROGRESS.md`为准。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
 

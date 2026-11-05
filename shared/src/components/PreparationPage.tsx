@@ -1,7 +1,7 @@
 import { t, uiLocale } from '../i18n';
 import { componentPresentation } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
 import { userError } from '../services/errors';
 import {
@@ -14,7 +14,6 @@ import { AudioCheck } from './AudioCheck';
 import {
   ArrowUp,
   Check,
-  Copy,
   MessageSquare,
   Square,
   X,
@@ -49,11 +48,15 @@ import { localKnowledge } from '../services/knowledge';
 import { ProviderIdentity } from './ProviderIdentity';
 import { ResponseProgress } from './ResponseProgress';
 import { ChatSources } from './ChatSources';
+import { UserMessage } from './UserMessage';
+import { ChatMessageActions } from './ChatMessageActions';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { accountUsageSummaryParts } from '../services/accountUsageSummary';
 import { AccountUsageSummary } from './AccountUsageSummary';
 import { useModelProvider } from './useModelProvider';
+import './preparation-notices.css';
+import './chatMessages.css';
 const audioAccessLabels = {
   granted: '可用',
   denied: '未授权',
@@ -70,6 +73,14 @@ const screenAccessLabels = {
   unknown: '待确认',
   error: '检查失败',
 };
+function AccessSkeleton({ children, className }: { children: ReactNode; className: string }) {
+  return (
+    <span className={`interview-access-skeleton-slot ${className}`} aria-hidden="true">
+      <span className="interview-access-skeleton-content">{children}</span>
+      <span className="quota-skeleton-line interview-access-skeleton" />
+    </span>
+  );
+}
 export function PreparationPage({
   onComponentSettings,
   onSpeechSettings,
@@ -508,11 +519,27 @@ export function PreparationPage({
             </div>
             <div>
               <dt>{t('面试官 · 系统音频')}</dt>
-              <dd>{audioName('system')}</dd>
+              <dd>
+                {checkingAccess ? (
+                  <AccessSkeleton className="interview-access-device-slot">
+                    {audioName('system')}
+                  </AccessSkeleton>
+                ) : (
+                  audioName('system')
+                )}
+              </dd>
             </div>
             <div>
               <dt>{t('面试者 · 麦克风')}</dt>
-              <dd>{audioName('microphone')}</dd>
+              <dd>
+                {checkingAccess && interviewConfiguration.options.sources.includes('microphone') ? (
+                  <AccessSkeleton className="interview-access-device-slot">
+                    {audioName('microphone')}
+                  </AccessSkeleton>
+                ) : (
+                  audioName('microphone')
+                )}
+              </dd>
             </div>
             <div>
               <dt>{t('语音模型')}</dt>
@@ -542,17 +569,59 @@ export function PreparationPage({
             aria-busy={checkingAccess}
           >
             <h3>{t('设备与权限')}</h3>
-            {checkingAccess ? (
-              <p className="interview-access-detail" role="status">
-                {t('正在检查权限与音频设备…')}
-              </p>
-            ) : (
-              <AudioCheck
-                options={interviewConfiguration.options}
-                disabled={openingInterview || checkingAccess}
-                onBusyChange={setTestingAudio}
-              >
-                {({ button, result }) => (
+            <AudioCheck
+              key={accessAttempt.current}
+              options={interviewConfiguration.options}
+              disabled={openingInterview || checkingAccess}
+              onBusyChange={setTestingAudio}
+            >
+              {({ button, result }) =>
+                checkingAccess ? (
+                  <>
+                    <p className="sr-only" role="status">
+                      {t('正在检查权限与音频设备…')}
+                    </p>
+                    <ul className="interview-access-list" aria-hidden="true">
+                      {interviewConfiguration.options.sources.map((source) => (
+                        <li key={source}>
+                          <div className="interview-access-row">
+                            <span>{source === 'microphone' ? t('麦克风') : t('系统音频')}</span>
+                            <div className="interview-access-controls">
+                              <AccessSkeleton className="interview-access-status-slot">
+                                <span className="interview-access-status">
+                                  <Check size={14} />
+                                  {t(audioAccessLabels.granted)}
+                                </span>
+                              </AccessSkeleton>
+                              <AccessSkeleton className="interview-access-test-slot">
+                                {button(source, false)}
+                              </AccessSkeleton>
+                            </div>
+                          </div>
+                        </li>
+                      ))}
+                      {window.desktop?.screenCapturePermissionSupported && (
+                        <li aria-label={t('屏幕捕获权限检查')}>
+                          <div className="interview-access-row">
+                            <span>{t('屏幕截图')}</span>
+                            <AccessSkeleton className="interview-access-status-slot">
+                              <span className="interview-access-status">
+                                <Check size={14} />
+                                {t(
+                                  screenAccessLabels[
+                                    window.desktop.platform === 'windows'
+                                      ? 'not-required'
+                                      : 'granted'
+                                  ],
+                                )}
+                              </span>
+                            </AccessSkeleton>
+                          </div>
+                        </li>
+                      )}
+                    </ul>
+                  </>
+                ) : (
                   <ul className="interview-access-list">
                     {accessReport?.checks.map((check) => (
                       <li key={check.source}>
@@ -593,9 +662,9 @@ export function PreparationPage({
                       </li>
                     )}
                   </ul>
-                )}
-              </AudioCheck>
-            )}
+                )
+              }
+            </AudioCheck>
             <div className="interview-access-actions">
               <Button
                 variant="ghost"
@@ -718,28 +787,23 @@ export function PreparationPage({
               aria-label={t('聊天内容')}
             >
               <div className="chat-thread">
-                {state.messages.map((message) => (
+                {state.messages.map((message, index) => (
                   <article key={message.id} className={`chat-message ${message.role}`}>
                     {message.role === 'user' ? (
-                      <div className="user-bubble">
-                        <p>{message.content}</p>
-                        {message.options && (
-                          <div className="message-options">
-                            <span>
-                              {message.options.modelLabel || message.options.modelId}
-                              {message.options.effort
-                                ? t(' · 思考：{0}', [t(effortLabels[message.options.effort])])
-                                : ''}
-                            </span>
-                            {message.options.attachments.map((item) => (
-                              <span key={item.id}>
-                                {t('附件：')}
-                                {item.name}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
+                      <>
+                        <UserMessage message={message} />
+                        <ChatMessageActions
+                          message={message}
+                          timestamp={
+                            message.startedAt ??
+                            (state.messages[index + 1]?.role === 'assistant'
+                              ? state.messages[index + 1].startedAt
+                              : undefined)
+                          }
+                          copied={copied}
+                          onCopied={setCopied}
+                        />
+                      </>
                     ) : (
                       <>
                         <div className="answer-label">
@@ -762,7 +826,7 @@ export function PreparationPage({
                         <ChatSources sources={message.sources ?? []} />
                         <div className="chat-answer">
                           {message.content ? (
-                            <MarkdownContent content={message.content} />
+                            <MarkdownContent content={message.content} sources={message.sources} />
                           ) : message.status === 'failed' ? (
                             t('请求失败，未收到回答。')
                           ) : message.status === 'stopped' ? (
@@ -777,7 +841,12 @@ export function PreparationPage({
                             {t(message.error)}
                           </p>
                         )}
-                        <div className="chat-message-actions">
+                        <ChatMessageActions
+                          message={message}
+                          timestamp={message.startedAt}
+                          copied={copied}
+                          onCopied={setCopied}
+                        >
                           {['failed', 'stopped'].includes(message.status ?? '') &&
                             message.id === state.messages.at(-1)?.id && (
                               <Button
@@ -791,24 +860,7 @@ export function PreparationPage({
                                 {t('重试回答')}
                               </Button>
                             )}
-                          {message.content && (
-                            <Button
-                              variant="ghost"
-                              className="chat-copy"
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(message.content);
-                                  setCopied(message.id);
-                                } catch {
-                                  setCopied(null);
-                                }
-                              }}
-                            >
-                              {copied === message.id ? <Check size={13} /> : <Copy size={13} />}
-                              {copied === message.id ? t('已复制') : t('复制')}
-                            </Button>
-                          )}
-                        </div>
+                        </ChatMessageActions>
                       </>
                     )}
                   </article>
@@ -841,6 +893,38 @@ export function PreparationPage({
                 />
               </div>
             )}
+            <div className="preparation-notices">
+              {(visibleError || !connection.live) && (
+                <p
+                  role={visibleError ? 'alert' : undefined}
+                  className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
+                >
+                  {t(visibleError || '请先连接模型服务。')}
+                </p>
+              )}
+              {connection.error && (
+                <Button
+                  variant="outline"
+                  disabled={connection.loading}
+                  onClick={() => void connection.load(true, true)}
+                >
+                  <Refresh size={16} />
+                  {t('重新加载模型')}
+                </Button>
+              )}
+              {state.chatStorageError && (
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    if (state.chatsReady) void state.flushChats();
+                    else void state.restoreChats();
+                  }}
+                >
+                  {state.chatsReady ? <Save size={16} /> : <Refresh size={16} />}
+                  {state.chatsReady ? t('重试保存聊天') : t('重新读取聊天')}
+                </Button>
+              )}
+            </div>
             <>
               <form
                 className="composer"
@@ -906,36 +990,6 @@ export function PreparationPage({
                 </div>
               </form>
             </>
-            {(visibleError || !connection.live) && (
-              <p
-                role={visibleError ? 'alert' : undefined}
-                className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
-              >
-                {t(visibleError || '请先连接模型服务。')}
-              </p>
-            )}
-            {connection.error && (
-              <Button
-                variant="outline"
-                disabled={connection.loading}
-                onClick={() => void connection.load(true, true)}
-              >
-                <Refresh size={16} />
-                {t('重新加载模型')}
-              </Button>
-            )}
-            {state.chatStorageError && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  if (state.chatsReady) void state.flushChats();
-                  else void state.restoreChats();
-                }}
-              >
-                {state.chatsReady ? <Save size={16} /> : <Refresh size={16} />}
-                {state.chatsReady ? t('重试保存聊天') : t('重新读取聊天')}
-              </Button>
-            )}
           </div>
         </div>
         <PersonalInfoPanel

@@ -1,26 +1,21 @@
 import { t } from '../i18n';
 import { useState } from 'react';
 import type { ChatSource } from '../../electron/contracts/chat';
-import { openChatLink } from '../services/chat';
-import { ChevronRight, Link } from './icons';
+import { ChevronRight } from './icons';
+import { SourceLink } from './SourceLink';
 
 export function ChatSources({ sources }: { sources: ChatSource[] }) {
   const [error, setError] = useState(false);
   if (!sources.length) return null;
-  const links = (items: ChatSource[], offset = 0) =>
-    items.map((source, index) => (
-      <button
+  const links = (items: ChatSource[]) =>
+    items.map((source) => (
+      <SourceLink
         key={source.url}
-        onClick={() => {
-          setError(false);
-          void openChatLink(source.url).catch(() => setError(true));
-        }}
-      >
-        <Link size={13} />
-        <span>
-          {offset + index + 1}. {source.title}
-        </span>
-      </button>
+        url={source.url}
+        title={source.title}
+        onOpen={() => setError(false)}
+        onError={() => setError(true)}
+      />
     ));
   return (
     <div className="chat-source-group" aria-label={t('搜索来源')}>
@@ -36,7 +31,7 @@ export function ChatSources({ sources }: { sources: ChatSource[] }) {
               <ChevronRight size={14} />
             </span>
           </summary>
-          <div className="chat-sources">{links(sources.slice(3), 3)}</div>
+          <div className="chat-sources">{links(sources.slice(3))}</div>
         </details>
       )}
       {error && (

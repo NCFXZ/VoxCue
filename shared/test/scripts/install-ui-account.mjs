@@ -7,6 +7,26 @@ export async function focusUiWindow(app, page) {
   await (await app.browserWindow(page)).evaluate((window) => window.focus());
   await page.waitForFunction(() => document.hasFocus());
 }
+export async function openReasoningControl(
+  page,
+  triggerLabel = '聊天模型',
+  effortLabel = '思考强度',
+) {
+  const popup = page.getByRole('dialog', { name: effortLabel, exact: true });
+  if (await popup.isVisible()) {
+    await page.keyboard.press('Escape');
+    await popup.waitFor({ state: 'hidden' });
+  }
+  await page.getByRole('button', { name: triggerLabel, exact: true }).click();
+  await popup.waitFor();
+  return popup;
+}
+export async function openModelMenu(page, triggerLabel = '聊天模型', effortLabel = '思考强度') {
+  const popup = await openReasoningControl(page, triggerLabel, effortLabel);
+  await popup.getByRole('button', { name: '选择模型', exact: true }).click();
+  await popup.getByRole('menuitemradio').first().waitFor();
+  return popup;
+}
 export async function enterDemoUiAccount(app, login) {
   await app.evaluate(() => globalThis.primaryAccountFixture.login());
   return login.evaluate(() => window.desktop.enterDemo());

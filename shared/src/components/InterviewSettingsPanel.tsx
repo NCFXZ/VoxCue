@@ -4,7 +4,8 @@ import type { SpeechOptions } from '../../electron/contracts/speech';
 import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
 import { useInterview } from '../stores/interview';
 import { InterviewDisplayControls } from './InterviewDisplayControls';
-import { effortLabels } from '../services/chatOptions';
+import { resolveReasoningEffort } from '../services/chatOptions';
+import { ModelReasoningControl } from './ReasoningEffortControl';
 import { ChoiceMenu } from './ui/choice-menu';
 import { Modal } from './ui/modal';
 import { useAudioDevices } from './useAudioDevices';
@@ -53,6 +54,8 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
     }
   };
   const changeModel = async (id: string, nextEffort: ReasoningEffort | 'auto') => {
+    const current = useInterview.getState();
+    if (current.updatingModel || current.reconnecting || current.status === 'ended') return;
     setError('');
     setModelId(id);
     setEffort(nextEffort);
@@ -65,7 +68,6 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
       setError(e instanceof Error ? e.message : '模型设置失败。');
     }
   };
-  const selectedModel = models.find((model) => model.id === modelId);
   return (
     <Modal
       title={t('面试设置')}
@@ -79,8 +81,10 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         <h3>{t('音频设置')}</h3>
         <div className="audio-device-editor">
           {(['system', 'microphone'] as const).map((source) => (
-            <label key={source}>
-              {source === 'system' ? t('系统声音 · 播放设备') : t('麦克风')}
+            <label className="speech-setting-row" key={source}>
+              <span className="speech-setting-label">
+                {source === 'system' ? t('系统声音 · 播放设备') : t('麦克风')}
+              </span>
               <ChoiceMenu
                 label={source === 'system' ? t('选择播放设备') : t('选择麦克风')}
                 disabled={loading || audioBusy || state.speech.state === 'loading'}
@@ -129,32 +133,26 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         >
           <div className="speech-setting-row">
             <span className="speech-setting-label">{t('回答模型')}</span>
-            <ChoiceMenu
+            <ModelReasoningControl
               label={t('面试回答模型')}
-              value={modelId}
-              disabled={modelLoading || busy}
-              options={
-                models.length
-                  ? models.map((m) => ({ value: m.id, label: m.label }))
-                  : [{ value: modelId, label: modelId || t('暂无可用模型') }]
+              effortLabel={t('面试思考强度')}
+              className="choice-trigger effort-model-trigger"
+              modelId={modelId}
+              models={models}
+              effort={effort}
+              disabled={modelLoading || state.reconnecting}
+              busy={state.updatingModel}
+              loading={modelLoading}
+              onModelChange={(id) =>
+                void changeModel(
+                  id,
+                  resolveReasoningEffort(
+                    models.find((model) => model.id === id),
+                    effort,
+                  ),
+                )
               }
-              onChange={(id) => void changeModel(id, 'auto')}
-            />
-          </div>
-          <div className="speech-setting-row">
-            <span className="speech-setting-label">{t('思考强度')}</span>
-            <ChoiceMenu
-              label={t('面试思考强度')}
-              value={effort}
-              disabled={modelLoading || busy}
-              options={[
-                { value: 'auto', label: t(effortLabels.auto) },
-                ...(selectedModel?.reasoningEfforts ?? []).map((e) => ({
-                  value: e,
-                  label: t(effortLabels[e]),
-                })),
-              ]}
-              onChange={(value) => void changeModel(modelId, value as ReasoningEffort | 'auto')}
+              onEffortChange={(value) => void changeModel(modelId, value)}
             />
           </div>
         </SpeechModelSettings>

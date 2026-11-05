@@ -1,0 +1,64 @@
+.cloud-account-form .cloud-account-field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.cloud-account-form .cloud-field-feedback {
+  margin: 0;
+  font-size: var(--type-secondary);
+  font-weight: 400;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.cloud-account-form .cloud-code-inputs {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 7px;
+  min-width: 0;
+}
+.cloud-account-form .cloud-code-row {
+  grid-template-columns: minmax(0, 1fr) max-content;
+}
+.cloud-account-form .cloud-code-row > button {
+  justify-self: end;
+  white-space: nowrap;
+}
+.cloud-account-panel .cloud-account-form .cloud-code-inputs input {
+  padding-inline: 0;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+  font-size: 18px;
+}
+.login-auth-content .cloud-account-form .cloud-account-field {
+  gap: 7px;
+}
+.login-auth-content .cloud-account-form .cloud-field-feedback {
+  padding-inline: 14px;
+}
+.login-shell .login-auth-content .cloud-account-form input {
+  transition:
+    box-shadow 180ms ease,
+    transform 180ms ease,
+    background-color 180ms ease;
+}
+.login-shell .login-auth-content .cloud-account-form input:is(:focus, :focus-visible) {
+  outline: none;
+  background: var(--surface);
+  border-color: color-mix(in srgb, var(--foreground) 16%, var(--surface));
+  box-shadow:
+    0 6px 16px -5px color-mix(in srgb, var(--foreground) 21%, transparent),
+    0 2px 5px -2px color-mix(in srgb, var(--foreground) 14%, transparent);
+  transform: translateY(-2px);
+}
+.login-auth-content .cloud-account-form .cloud-code-row {
+  gap: 12px;
+  align-items: stretch;
+}
+.login-auth-content .cloud-account-form .cloud-code-row > button {
+  padding-inline: 12px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-shell .login-auth-content .cloud-account-form input {
+    transition: none;
+  }
+}

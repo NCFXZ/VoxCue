@@ -223,6 +223,7 @@ try {
       .getByRole('dialog', { name: '设置', exact: true })
       .getByRole('button', { name: '面试设置', exact: true })
       .click();
+    await target.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
   };
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await openSettings();
@@ -360,7 +361,9 @@ try {
   const categories = page.getByRole('navigation', { name: '设置分类' });
   const revisit = async () => {
     await categories.getByRole('button', { name: '关于与更新', exact: true }).click();
+    await page.getByRole('heading', { name: '关于与更新', exact: true }).waitFor();
     await categories.getByRole('button', { name: '面试设置', exact: true }).click();
+    await page.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
     await background.scrollIntoViewIfNeeded();
   };
   const disposedTracks = await settings.locator(previewFrame).evaluate(async (frame) => {

@@ -1,3 +1,4 @@
+import { openModelMenu } from './install-ui-account.mjs';
 import { enterPrimaryUiAccount, installUiAccount } from './install-ui-account.mjs';
 import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -194,10 +195,10 @@ try {
     loginId,
   );
   await assertWindowSize([1280, 800]);
-  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  await openModelMenu(page);
   await page.screenshot({});
   await page.getByRole('menuitemradio', { name: /Test Model/ }).click();
-  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  await openModelMenu(page);
   assert.equal(
     await page.getByRole('menuitemradio', { name: /Test Model/ }).getAttribute('aria-checked'),
     'true',
@@ -212,7 +213,7 @@ try {
   await page.getByRole('button', { name: '外观主题', exact: true }).click();
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置' }).click();
-  await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+  await openModelMenu(page);
   await page.screenshot({});
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: '用户菜单' }).click();

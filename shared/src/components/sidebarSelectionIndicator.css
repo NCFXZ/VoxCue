@@ -1,0 +1,36 @@
+.sidebar-selection-host {
+  position: relative;
+}
+.sidebar-selection-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: clip;
+  pointer-events: none;
+}
+.sidebar-selection-indicator {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 3px;
+  height: 18px;
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--accent);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-duration) var(--panel-motion-easing);
+}
+.sidebar-selection-indicator[data-snap] {
+  transition-property: opacity;
+}
+.sidebar-selection-indicator[data-visible='true'] {
+  opacity: 1;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidebar-selection-indicator {
+    transition: none;
+  }
+}

@@ -10,11 +10,17 @@ export interface UpdateDriver {
   allowPrerelease: boolean;
   on(event: UpdateDriverEvent, listener: (...args: any[]) => void): unknown;
   removeListener(event: UpdateDriverEvent, listener: (...args: any[]) => void): unknown;
-  checkForUpdates(): Promise<{ cancellationToken?: { cancel(): void } } | null>;
+  checkForUpdates(force?: boolean): Promise<{ cancellationToken?: { cancel(): void } } | null>;
+  restoreDownloadedUpdate?(signal?: AbortSignal): Promise<boolean>;
+  isAutomaticDownloadAllowed?(): boolean;
+  lastCheckedAt?(): number | null;
   downloadUpdate(signal?: AbortSignal): Promise<unknown>;
   quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
-  dispose?(): void;
+  dispose?(): void | Promise<void>;
 }
+
+const isCancellation = (error: unknown) =>
+  error instanceof Error && ['AbortError', 'CancellationError'].includes(error.name);
 
 export class UpdateService {
   private value: UpdateState;
@@ -22,8 +28,12 @@ export class UpdateService {
   private started = false;
   private listeners: Array<[UpdateDriverEvent, (...args: any[]) => void]> = [];
   private cancellation: { cancel(): void } | undefined;
+  private checkController?: AbortController;
+  private checkJob?: Promise<UpdateState>;
   private downloadController?: AbortController;
   private downloadJob?: Promise<UpdateState>;
+  private disposeJob?: Promise<void>;
+  private cleanupFailed = false;
 
   constructor(
     private readonly options: {
@@ -71,12 +81,16 @@ export class UpdateService {
       this.change({
         phase: 'available',
         availableVersion: info.version,
-        lastCheckedAt: Date.now(),
+        lastCheckedAt: driver.lastCheckedAt ? driver.lastCheckedAt() : Date.now(),
       });
     });
     this.listen('update-not-available', () => {
       if (this.value.phase === 'checking')
-        this.change({ phase: 'idle', availableVersion: null, lastCheckedAt: Date.now() });
+        this.change({
+          phase: 'idle',
+          availableVersion: null,
+          lastCheckedAt: driver.lastCheckedAt ? driver.lastCheckedAt() : Date.now(),
+        });
     });
     this.listen('download-progress', (progress: { percent?: unknown }) => {
       if (
@@ -120,8 +134,18 @@ export class UpdateService {
   }
 
   private maybeDownload() {
-    if (!this.disposed && this.value.autoDownload && this.value.phase === 'available')
-      void this.download();
+    if (
+      this.disposed ||
+      this.checkController ||
+      !this.value.autoDownload ||
+      this.value.phase !== 'available'
+    )
+      return;
+    try {
+      if (this.options.driver?.isAutomaticDownloadAllowed?.() !== false) void this.download();
+    } catch {
+      this.fail('downloading');
+    }
   }
 
   private listen(event: UpdateDriverEvent, listener: (...args: any[]) => void) {
@@ -157,29 +181,72 @@ export class UpdateService {
     if (this.downloadJob) await this.downloadJob;
   }
 
-  async check() {
+  check(force = false) {
     if (
       this.disposed ||
+      this.checkController ||
       this.downloadJob ||
       !this.options.driver ||
       !['idle', 'available', 'error'].includes(this.value.phase)
     )
-      return this.state();
+      return Promise.resolve(this.state());
+    const controller = new AbortController();
+    this.checkController = controller;
     this.change({ phase: 'checking', error: null, progress: null });
-    try {
-      const result = await this.options.driver.checkForUpdates();
-      if (this.disposed) result?.cancellationToken?.cancel();
-      else this.cancellation = result?.cancellationToken;
-      if (!this.disposed && this.value.phase === 'checking') this.fail('checking');
-    } catch {
-      if (this.value.phase === 'checking') this.fail('checking');
-    }
-    this.maybeDownload();
-    return this.state();
+    this.checkJob = (async () => {
+      let restoring = false;
+      try {
+        const result = await this.options.driver!.checkForUpdates(force);
+        if (this.disposed) {
+          try {
+            result?.cancellationToken?.cancel();
+          } catch {
+            this.cleanupFailed = true;
+          }
+        } else this.cancellation = result?.cancellationToken;
+        if (!this.disposed && this.value.phase === 'checking') this.fail('checking');
+        if (
+          !this.disposed &&
+          this.value.phase === 'available' &&
+          this.options.driver!.restoreDownloadedUpdate
+        ) {
+          restoring = true;
+          const restored = await this.options.driver!.restoreDownloadedUpdate(controller.signal);
+          if (!this.disposed && !controller.signal.aborted && restored)
+            this.change({ phase: 'downloaded', progress: 100, error: null });
+        }
+      } catch (error) {
+        if (this.disposed) {
+          if (restoring && !isCancellation(error)) this.cleanupFailed = true;
+        } else if (
+          (!controller.signal.aborted || !isCancellation(error)) &&
+          this.value.phase === (restoring ? 'available' : 'checking')
+        ) {
+          this.fail(restoring ? 'downloading' : 'checking');
+        }
+      }
+    })()
+      .finally(() => {
+        this.checkController = undefined;
+        this.checkJob = undefined;
+      })
+      .then(() => {
+        this.maybeDownload();
+        return this.state();
+      });
+    return this.checkJob;
   }
 
-  download() {
+  download(): Promise<UpdateState> {
     if (this.downloadJob) return this.downloadJob;
+    // A manual click during local cache verification waits for that result.
+    // A reusable installer must never race a new HTTP download.
+    if (this.checkController)
+      return (
+        this.checkJob?.then((state) =>
+          ['available', 'downloading'].includes(state.phase) ? this.download() : state,
+        ) ?? Promise.resolve(this.state())
+      );
     if (
       this.disposed ||
       !this.options.driver ||
@@ -195,8 +262,13 @@ export class UpdateService {
         await this.options.driver!.downloadUpdate(controller.signal);
         if (!this.disposed && !controller.signal.aborted && this.value.phase === 'downloading')
           this.fail('downloading');
-      } catch {
-        if (!controller.signal.aborted && this.value.phase === 'downloading')
+      } catch (error) {
+        if (this.disposed && controller.signal.aborted && !isCancellation(error))
+          this.cleanupFailed = true;
+        if (
+          (!controller.signal.aborted || !isCancellation(error)) &&
+          this.value.phase === 'downloading'
+        )
           this.fail('downloading');
       }
       if (controller.signal.aborted && this.value.phase === 'downloading')
@@ -238,13 +310,31 @@ export class UpdateService {
     return this.state();
   }
 
-  dispose() {
+  dispose(): Promise<void> {
+    if (this.disposeJob) return this.disposeJob;
     this.disposed = true;
+    this.checkController?.abort();
     this.downloadController?.abort();
-    this.cancellation?.cancel();
-    this.options.driver?.dispose?.();
+    try {
+      this.cancellation?.cancel();
+    } catch {
+      this.cleanupFailed = true;
+    }
     for (const [event, listener] of this.listeners)
       this.options.driver?.removeListener(event, listener);
     this.listeners = [];
+    let cleanup: Promise<void>;
+    try {
+      cleanup = Promise.resolve(this.options.driver?.dispose?.());
+    } catch {
+      cleanup = Promise.reject(new Error('更新清理失败，请重试退出。'));
+    }
+    this.disposeJob = Promise.allSettled([this.checkJob, this.downloadJob, cleanup]).then(
+      (results) => {
+        if (this.cleanupFailed || results.some((result) => result.status === 'rejected'))
+          throw new Error('更新清理失败，请重试退出。');
+      },
+    );
+    return this.disposeJob;
   }
 }

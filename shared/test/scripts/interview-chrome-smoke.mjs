@@ -5,7 +5,11 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
-import { verifyRoundCapFrames } from './continuous-corners.mjs';
+import {
+  verifyComposerControlAlignment,
+  verifyConcentricComposers,
+  verifyRoundCapFrames,
+} from './continuous-corners.mjs';
 
 const app = await electron.launch({
   args: [await offlineElectronEntry()],
@@ -54,6 +58,8 @@ try {
     };
   });
   const login = await app.firstWindow();
+  await login.locator('.login-interview-preview .floating-composer').waitFor();
+  await verifyConcentricComposers(login, 'login preview');
   const next = app.waitForEvent('window');
   await connectUiAccount(app, login);
   const main = await next;
@@ -84,9 +90,9 @@ try {
   const chatSend = await main
     .getByRole('button', { name: '发送消息', exact: true })
     .evaluate((e) => ({
-      width: e.getBoundingClientRect().width,
-      height: e.getBoundingClientRect().height,
       fill: getComputedStyle(e).backgroundColor,
+      color: getComputedStyle(e).color,
+      corner: getComputedStyle(e).cornerShape,
       opacity: getComputedStyle(e).opacity,
     }));
   await main.locator('.interview-start-trigger').waitFor();
@@ -123,22 +129,51 @@ try {
   for (const heading of await floating.locator('.floating-panel > header').all())
     assert.equal(await heading.evaluate((e) => getComputedStyle(e, '::before').content), 'none');
 
-  assert.deepEqual(
-    await floating.locator('.floating-composer').evaluate((e) => ({
-      radius: getComputedStyle(e).borderRadius,
-      corner: getComputedStyle(e).cornerShape,
-    })),
-    chatShape,
+  await verifyConcentricComposers(floating, 'interview');
+  assert.equal(
+    await floating.locator('.floating-composer').evaluate((e) => getComputedStyle(e).cornerShape),
+    chatShape.corner,
   );
-  assert.deepEqual(
-    await floating.getByRole('button', { name: '发送面试问题', exact: true }).evaluate((e) => ({
-      width: e.getBoundingClientRect().width,
-      height: e.getBoundingClientRect().height,
-      fill: getComputedStyle(e).backgroundColor,
-      opacity: getComputedStyle(e).opacity,
-    })),
-    chatSend,
+  const { width, height, radius, iconWidth, ...interviewSendStyle } = await floating
+    .getByRole('button', { name: '发送面试问题', exact: true })
+    .evaluate((e) => {
+      const box = e.getBoundingClientRect(),
+        style = getComputedStyle(e);
+      return {
+        width: box.width,
+        height: box.height,
+        radius: style.borderTopLeftRadius,
+        iconWidth: e.querySelector('svg').getBoundingClientRect().width,
+        fill: style.backgroundColor,
+        color: style.color,
+        corner: style.cornerShape,
+        opacity: style.opacity,
+      };
+    });
+  const screenshotHeight = await floating
+    .locator('.floating-screenshot-button')
+    .evaluate((e) => e.getBoundingClientRect().height);
+  assert.equal(screenshotHeight, 32);
+  assert.equal(height, screenshotHeight, 'Send and screenshot controls align at the same height');
+  assert.equal(width, height, 'The interview send control remains circular');
+  assert.ok(
+    parseFloat(radius) * (radius.endsWith('%') ? width / 100 : 1) >= height / 2,
+    'The send control retains circular end caps',
   );
+  assert.equal(iconWidth, 18);
+  assert.deepEqual(interviewSendStyle, chatSend);
+  await verifyComposerControlAlignment(floating.locator('.floating-composer'), 'interview');
+  const composerType = await floating.locator('.floating-composer').evaluate((node) => ({
+    input: parseFloat(getComputedStyle(node.querySelector('textarea')).fontSize),
+    controls: [
+      '.floating-toggle',
+      '.floating-screenshot-text',
+      '.floating-screenshot-shortcut',
+    ].map((selector) => parseFloat(getComputedStyle(node.querySelector(selector)).fontSize)),
+  }));
+  assert.equal(composerType.input, 14);
+  assert.deepEqual(composerType.controls, [12, 12, 12]);
+  assert.ok(composerType.controls.every((size) => size <= composerType.input));
   await click(floating.getByRole('button', { name: '关闭截图保护', exact: true }));
   await floating.locator('.floating-capture-notice').waitFor();
   assert.equal(
@@ -148,6 +183,7 @@ try {
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('合成滚动验证');
   await click(floating.getByRole('button', { name: '发送面试问题', exact: true }));
   await floating.locator('.answer-bubble').getByText('结尾标记', { exact: true }).waitFor();
+  await verifyConcentricComposers(floating, 'interview with dialogue');
   const wasDark = await floating.evaluate(() =>
     document.documentElement.classList.contains('dark'),
   );
@@ -392,6 +428,11 @@ try {
   assert.equal(await answerScroll.evaluate((e) => e.scrollTop), before);
   await click(floating.getByRole('button', { name: '面试设置', exact: true }));
   const settings = floating.getByRole('dialog', { name: '面试设置', exact: true });
+  const settingsBackdrop = await settings.evaluate((dialog) => {
+    const backdrop = getComputedStyle(dialog, '::backdrop');
+    return { background: backdrop.backgroundColor, animation: backdrop.animationName };
+  });
+  assert.deepEqual(settingsBackdrop, { background: 'rgba(0, 0, 0, 0)', animation: 'none' });
   await settings.locator('.dialog-scroll').evaluate((e) => {
     e.scrollTop = 200;
   });
@@ -403,7 +444,36 @@ try {
   );
   assert.deepEqual(await material(settings.locator('.dialog-heading'), '::before'), chatHeader);
   await captureRequested(floating, 'interview-settings-shared-header');
-  await click(settings.getByRole('button', { name: '关闭对话框', exact: true }));
+  const transparentExit = await floating.evaluate(async () => {
+    document.querySelector('.interview-settings-dialog .dialog-close-button').click();
+    const frames = [];
+    const start = performance.now();
+    while (performance.now() - start < 500) {
+      await new Promise(requestAnimationFrame);
+      const snapshot = document.querySelector('[data-modal-exit]');
+      if (!snapshot) {
+        if (frames.length) break;
+        continue;
+      }
+      const backdrop = getComputedStyle(snapshot, '::backdrop');
+      frames.push({
+        opacity: Number(getComputedStyle(snapshot).opacity),
+        background: backdrop.backgroundColor,
+        animation: backdrop.animationName,
+      });
+    }
+    return frames;
+  });
+  assert.ok(
+    transparentExit.some((frame) => frame.opacity > 0.03 && frame.opacity < 0.97),
+    'Transparent-backdrop modal must fade out through real intermediate frames',
+  );
+  assert.ok(
+    transparentExit.every(
+      (frame) => frame.background === 'rgba(0, 0, 0, 0)' && frame.animation === 'none',
+    ),
+    'Transparent-backdrop modal must not add a dimming layer during exit',
+  );
   const cdp = await floating.context().newCDPSession(floating);
   await cdp.send('DOM.enable');
   await cdp.send('CSS.enable');

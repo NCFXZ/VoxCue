@@ -1,5 +1,6 @@
 /* Shared desktop materials and capsule/circular controls. */
 :root.web-materials {
+  --radius-composer: 40px;
   --web-material-opacity: calc((0.6 + var(--frosted-opacity-light, 0.5) * 0.4) * 100%);
   --web-material-fill: color-mix(in srgb, var(--surface) var(--web-material-opacity), transparent);
   --web-material-filter: blur(24px) saturate(125%);
@@ -42,8 +43,7 @@
 .web-materials :is(.account-quota-progress, .audio-meter-track) > span {
   background: var(--system-accent);
 }
-:root.web-materials
-  :is(.ui-button, .choice-trigger, .settings-choice, .speech-select, .dropdown-item) {
+:root.web-materials :is(.ui-button, .choice-trigger, .settings-choice, .speech-select) {
   border-radius: 999px;
   corner-shape: round;
 }
@@ -129,10 +129,6 @@
 .web-materials .history-search-clear.ui-button:is(:hover, :focus-visible) {
   color: var(--foreground);
 }
-.web-materials .chat-copy.ui-button:only-child {
-  /* Align the leading artwork with the answer, including its 1px border. */
-  margin-left: -13px;
-}
 .web-materials :is(.chat-copy, [data-reveal-on-hover]).ui-button:hover:not(:disabled),
 .web-materials :is(.chat-copy, [data-reveal-on-hover]).ui-button:focus-visible {
   background: var(--web-control-hover);
@@ -145,8 +141,6 @@
   background: var(--web-material-fill);
   -webkit-backdrop-filter: var(--web-material-filter);
   backdrop-filter: var(--web-material-filter);
-  border-radius: 20px;
-  corner-shape: superellipse(2);
 }
 .web-materials :is(.chat-composer .composer, .floating-composer, .follow-latest.ui-button),
 :root.web-materials .floating-toolbar {
@@ -169,8 +163,8 @@
 .web-materials .interview-preview-scene.dark {
   --interview-chrome-panel-opacity: var(--interview-chrome-panel-dark);
 }
-.web-materials :is(.chat-composer .composer, .floating-composer) {
-  border-radius: 40px;
+.web-materials .chat-composer .composer {
+  border-radius: var(--radius-composer);
   corner-shape: superellipse(2);
 }
 .web-materials .follow-latest.ui-button:hover:not(:disabled),
@@ -338,9 +332,9 @@
 .web-materials .floating-answer > .floating-chrome-base::after {
   content: '';
   position: absolute;
-  inset: auto 8px 8px;
+  inset: auto var(--floating-composer-inset) var(--floating-composer-inset);
   height: var(--floating-composer-height, 0px);
-  border-radius: 40px;
+  border-radius: var(--floating-composer-radius);
   corner-shape: superellipse(2);
   background: var(--interview-chrome-surface);
 }
@@ -403,7 +397,7 @@
 }
 .web-materials .floating-panels .floating-composer {
   position: absolute;
-  inset: auto 8px 8px;
+  inset: auto var(--floating-composer-inset) var(--floating-composer-inset);
   z-index: 2;
   margin: 0;
 }

@@ -5,34 +5,48 @@ import { History, ChevronDown, X } from './icons';
 import { Button } from './ui/button';
 import { HistoryDetail } from './HistoryDetail';
 import { useHistory } from '../stores/history';
-import { historyStorageKey } from '../services/history';
+import { historyStorageKey, type InterviewRecord } from '../services/history';
 import { recordFeature } from '../services/telemetry';
+import { switchView } from './ui/switchView';
 export function HistoryPage() {
-  const { records: allRecords, error, load } = useHistory();
+  const { records: allRecords, error, load, remove } = useHistory();
   const records = allRecords.filter((record) => !record.mock);
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [changing, setChanging] = useState(false);
+  const requestedSelection = useRef<string | null>(null);
+  const deletingRecord = useRef<InterviewRecord | null>(null);
+  const view = useRef<HTMLDivElement>(null);
   const searchInput = useRef<HTMLInputElement>(null);
-  const transition = useRef(0);
-  useEffect(() => () => window.clearTimeout(transition.current), []);
   const select = (id: string | null) => {
-    if (changing) return;
+    if (requestedSelection.current === id) return;
+    requestedSelection.current = id;
     if (id) recordFeature('history_view');
-    if (matchMedia('(prefers-reduced-motion: reduce)').matches) {
-      setSelectedId(id);
-      return;
-    }
-    setChanging(true);
-    transition.current = window.setTimeout(() => {
-      setSelectedId(id);
-      requestAnimationFrame(() => requestAnimationFrame(() => setChanging(false)));
-    }, 150);
+    switchView(
+      view.current,
+      () => {
+        deletingRecord.current = null;
+        setSelectedId(id);
+      },
+      id ? 'forward' : 'back',
+    );
   };
   const [query, setQuery] = useState('');
   const filtered = records.filter((record) =>
     record.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
-  const selected = records.find((record) => record.id === selectedId);
+  const selected =
+    records.find((record) => record.id === selectedId) ??
+    (deletingRecord.current?.id === selectedId ? deletingRecord.current : undefined);
+  const removeSelected = async () => {
+    if (!selected) return false;
+    const record = selected;
+    // Keep the outgoing detail stable while local deletion/screenshot cleanup
+    // publishes its store changes; the view transition captures it only once.
+    deletingRecord.current = record;
+    const saved = await remove(record.id);
+    if (saved && view.current && requestedSelection.current === record.id) select(null);
+    else if (deletingRecord.current?.id === record.id) deletingRecord.current = null;
+    return saved;
+  };
   useEffect(() => {
     load();
     const changed = (event: StorageEvent) => {
@@ -52,13 +66,18 @@ export function HistoryPage() {
       day: 'numeric',
     });
   return (
-    <div className={`history-view${changing ? ' is-changing' : ''}`}>
+    <div className="history-view" ref={view}>
       {selected ? (
-        <HistoryDetail key={selected.id} record={selected} onBack={() => select(null)} />
+        <HistoryDetail
+          key={selected.id}
+          record={selected}
+          onBack={() => select(null)}
+          onDelete={removeSelected}
+        />
       ) : (
         <main className="workspace management-page history-page">
           <header className="page-toolbar">
-            <div className="breadcrumb history-heading-transition">
+            <div className="breadcrumb">
               <strong>{t('面试记录')}</strong>
             </div>
           </header>

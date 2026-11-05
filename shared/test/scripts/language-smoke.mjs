@@ -25,6 +25,17 @@ try {
   await page.getByRole('menuitemradio', { name: 'English', exact: true }).click();
   await page.getByRole('heading', { name: 'General', exact: true }).waitFor();
   const audit = async (name, target = page) => {
+    await target.waitForFunction(
+      () =>
+        !document.documentElement.dataset.viewDirection &&
+        document
+          .getAnimations()
+          .every(
+            (animation) =>
+              animation.effect?.getTiming().iterations === Infinity ||
+              animation.playState !== 'running',
+          ),
+    );
     const result = await target.evaluate(() => {
       const root = document.querySelector('dialog[open]') ?? document.body;
       const visible = (el) =>
@@ -56,20 +67,59 @@ try {
         .map((el) => [el.className, el.textContent.trim(), el.clientWidth, el.scrollWidth]);
       const escapedDevices = [...root.querySelectorAll('.speech-device')]
         .filter(visible)
-        .filter((device) => {
+        .flatMap((device) => {
           const bounds = device.getBoundingClientRect();
-          return [...device.children].some((child) => {
+          const panel = root.getBoundingClientRect();
+          // These are shared horizontal grid rows, not the former standalone
+          // cards. Compare Chromium's 1/64px layout units, not float noise.
+          const unit = (value) => Math.round(value * 64) / 64;
+          const outside = (rect, container, vertical = true) =>
+            unit(rect.left) < unit(container.left) ||
+            unit(rect.right) > unit(container.right) ||
+            (vertical &&
+              (unit(rect.top) < unit(container.top) || unit(rect.bottom) > unit(container.bottom)));
+          const escaped = [...device.children].filter(visible).filter((child) => {
             const rect = child.getBoundingClientRect();
-            return rect.left < bounds.left || rect.right > bounds.right;
+            return outside(rect, bounds);
           });
-        })
-        .map((device) => device.textContent.trim());
+          const label = device.querySelector(':scope > .speech-setting-label');
+          const control = device.querySelector(':scope > button');
+          const labelBox = label?.getBoundingClientRect();
+          const controlBox = control?.getBoundingClientRect();
+          const misplaced =
+            !device.classList.contains('speech-setting-row') ||
+            !labelBox ||
+            !controlBox ||
+            device.querySelectorAll(':scope > button').length !== 1 ||
+            unit(controlBox.left) <= unit(labelBox.right) ||
+            unit(controlBox.top + controlBox.height / 2) !==
+              unit(labelBox.top + labelBox.height / 2);
+          if (!escaped.length && !misplaced && !outside(bounds, panel, false)) return [];
+          return [
+            {
+              text: device.textContent.trim(),
+              row: bounds.toJSON(),
+              panel: { left: panel.left, right: panel.right },
+              label: labelBox?.toJSON(),
+              control: controlBox?.toJSON(),
+              misplaced,
+              escaped: escaped.map((child) => ({
+                class: child.className,
+                rect: child.getBoundingClientRect().toJSON(),
+              })),
+            },
+          ];
+        });
       return { leaks: [...new Set(leaks)], clipped, escapedDevices };
     });
     console.log(name, JSON.stringify(result));
     assert.deepEqual(result.leaks, [], name + ' must be localized');
     assert.deepEqual(result.clipped, [], name + ' controls must fit');
-    assert.deepEqual(result.escapedDevices, [], name + ' device controls stay inside their cards');
+    assert.deepEqual(
+      result.escapedDevices,
+      [],
+      name + ' device controls stay in their own rows and panel',
+    );
     await captureRequested(target, name.toLowerCase().replace(/[^a-z0-9]+/g, '-'));
     return result;
   };
@@ -85,6 +135,7 @@ try {
       .getByRole('navigation', { name: 'Settings categories' })
       .getByRole('button', { name, exact: true })
       .click();
+    await page.getByRole('heading', { name, exact: true }).waitFor();
     await audit(name);
     if (process.argv.includes('--preview') && name === 'Interview settings') {
       await page.locator('.interview-preview-scene').scrollIntoViewIfNeeded();
@@ -108,6 +159,7 @@ try {
       .getByRole('navigation', { name: 'Settings categories' })
       .getByRole('button', { name, exact: true })
       .click();
+    await page.getByRole('heading', { name, exact: true }).waitFor();
     await audit('Narrow ' + name);
   }
   await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].setSize(1280, 800));

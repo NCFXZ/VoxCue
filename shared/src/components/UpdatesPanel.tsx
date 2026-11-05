@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { useUpdates } from '../stores/updates';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import githubLogo from '../assets/github.svg?inline';
 import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
@@ -17,6 +17,45 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
   const downloaded = state?.phase === 'downloaded';
   const available =
     state?.phase === 'available' || (state?.phase === 'error' && !!state.availableVersion);
+  const canCheck = !busy && state?.phase !== 'unavailable' && !downloaded && !available;
+  const canCheckNow = useRef(canCheck);
+  canCheckNow.current = canCheck;
+  const hold = useRef<{ timer?: number; keyboard: boolean; forced: boolean }>({
+    keyboard: false,
+    forced: false,
+  });
+  function cancelHold() {
+    window.clearTimeout(hold.current.timer);
+    hold.current.timer = undefined;
+    hold.current.keyboard = false;
+  }
+  function startHold(keyboard: boolean) {
+    cancelHold();
+    hold.current.keyboard = keyboard;
+    hold.current.forced = false;
+    hold.current.timer = window.setTimeout(() => {
+      hold.current.timer = undefined;
+      if (canCheckNow.current) {
+        hold.current.forced = true;
+        void updates.run({ op: 'check', force: true });
+      }
+    }, 5000);
+  }
+  useEffect(() => {
+    if (!canCheck) cancelHold();
+  }, [canCheck]);
+  useEffect(() => {
+    const visibility = () => {
+      if (document.hidden) cancelHold();
+    };
+    window.addEventListener('blur', cancelHold);
+    document.addEventListener('visibilitychange', visibility);
+    return () => {
+      cancelHold();
+      window.removeEventListener('blur', cancelHold);
+      document.removeEventListener('visibilitychange', visibility);
+    };
+  }, []);
   const label = !state
     ? '正在读取更新状态…'
     : state.phase === 'unavailable'
@@ -80,9 +119,35 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
               disabled={
                 busy || state?.phase === 'unavailable' || (downloaded && state.interviewActive)
               }
-              onClick={() =>
-                void updates.run(downloaded ? 'install' : available ? 'download' : 'check')
-              }
+              onPointerDown={(event) => {
+                if (event.button === 0 && canCheck) startHold(false);
+              }}
+              onPointerUp={cancelHold}
+              onPointerLeave={cancelHold}
+              onPointerCancel={cancelHold}
+              onBlur={cancelHold}
+              onKeyDown={(event) => {
+                if (canCheck && (event.key === ' ' || event.key === 'Enter')) {
+                  event.preventDefault();
+                  if (!event.repeat) startHold(true);
+                }
+              }}
+              onKeyUp={(event) => {
+                if (event.key !== ' ' && event.key !== 'Enter') return;
+                const { keyboard, forced } = hold.current;
+                if (keyboard || forced) event.preventDefault();
+                cancelHold();
+                if (forced) hold.current.forced = false;
+                else if (keyboard && canCheck) void updates.run('check');
+              }}
+              onClick={(event) => {
+                if (hold.current.forced) {
+                  event.preventDefault();
+                  hold.current.forced = false;
+                  return;
+                }
+                void updates.run(downloaded ? 'install' : available ? 'download' : 'check');
+              }}
             >
               {busy ? (
                 <span className="update-spinner" aria-hidden="true">

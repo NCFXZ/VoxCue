@@ -1,4 +1,8 @@
-import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
+import {
+  reasoningEfforts,
+  type ChatModel,
+  type ReasoningEffort,
+} from '../../electron/contracts/chat';
 export const chatModels: ChatModel[] = [
   {
     id: 'mock-general',
@@ -23,6 +27,17 @@ export const effortLabels: Record<ReasoningEffort | 'auto', string> = {
   xhigh: '极高',
   max: '最高',
 };
+export function supportedReasoningEfforts(model?: ChatModel): ReasoningEffort[] {
+  return reasoningEfforts.filter((effort) => model?.reasoningEfforts?.includes(effort));
+}
+export function resolveReasoningEffort(
+  model?: ChatModel,
+  effort?: ReasoningEffort | 'auto',
+): ReasoningEffort | 'auto' {
+  const supported = supportedReasoningEfforts(model);
+  if (effort && effort !== 'auto' && supported.includes(effort)) return effort;
+  return supported.includes('low') ? 'low' : (supported[0] ?? 'auto');
+}
 export interface ChatAttachment {
   id: string;
   name: string;

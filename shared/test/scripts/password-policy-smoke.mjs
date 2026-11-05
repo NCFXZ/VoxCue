@@ -90,7 +90,8 @@ try {
     await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
     await page.getByRole('button', { name: register ? '注册' : '找回密码', exact: true }).click();
     const input = page.getByLabel(register ? '密码' : '新密码', { exact: true });
-    assert.equal(await input.getAttribute('placeholder'), '不少于8个字符');
+    assert.equal(await input.getAttribute('placeholder'), '输入密码');
+    await page.getByText('不少于8个字符', { exact: true }).waitFor();
     assert.equal(await input.getAttribute('minlength'), '8');
     assert.equal(await input.getAttribute('maxlength'), '1024');
     for (const dark of [false, true]) {
@@ -105,7 +106,7 @@ try {
     }
     await page.getByLabel('邮箱', { exact: true }).fill(email);
     await page.getByRole('button', { name: '获取验证码', exact: true }).click();
-    await page.getByRole('status').filter({ hasText: '垃圾邮件' }).waitFor();
+    await page.getByRole('button', { name: /秒后重发/ }).waitFor();
     await outbox.runOnce();
     await page.getByLabel('邮箱验证码', { exact: true }).fill(messages.at(-1).code);
     const beforeHash = store.user(email)?.password_hash;
@@ -116,7 +117,13 @@ try {
     for (const invalid of ['K7!vQ#p', 'e\u0301'.repeat(7), '😀'.repeat(129)]) {
       await input.fill(invalid);
       await submit.click();
-      await page.getByRole('alert').filter({ hasText: '8至128' }).waitFor();
+      if (Array.from(invalid.normalize('NFC')).length > 128)
+        await page.getByRole('alert').filter({ hasText: '密码不正确' }).waitFor();
+      else {
+        assert.equal(await input.evaluate((node) => node === document.activeElement), true);
+        assert.equal(await page.getByRole('alert').count(), 0);
+        await page.getByText('不少于8个字符', { exact: true }).waitFor();
+      }
       assert.equal(store.user(email)?.password_hash, beforeHash);
     }
     await input.fill(value);
@@ -181,7 +188,7 @@ try {
     JSON.stringify({
       passed: true,
       passwordRange: [8, 128],
-      placeholders: '不少于8个字符',
+      passwordHint: '不少于8个字符',
       physicalCapture: false,
       realAccounts: false,
       realMail: false,

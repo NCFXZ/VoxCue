@@ -20,9 +20,18 @@ export function registerUpdateIpc(
         throw Error('Invalid update preference');
       return service.setAutoDownload((call as { enabled: boolean }).enabled);
     }
+    if (op === 'check') {
+      if (
+        Object.keys(call).some((key) => key !== 'op' && key !== 'force') ||
+        (Object.hasOwn(call, 'force') && typeof (call as { force?: unknown }).force !== 'boolean')
+      )
+        throw Error('Invalid update request');
+      return service.check(
+        Object.hasOwn(call, 'force') && (call as { force?: boolean }).force === true,
+      );
+    }
     if (Object.keys(call).length !== 1) throw Error('Invalid update request');
     if (op === 'status') return service.state();
-    if (op === 'check') return service.check();
     if (op === 'download') return service.download();
     if (op === 'cancel') return service.cancel();
     if (op === 'install') return service.install();

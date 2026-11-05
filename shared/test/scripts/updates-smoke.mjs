@@ -29,7 +29,9 @@ app.setAppPath(${JSON.stringify(process.cwd())});
 app.getVersion = () => require(${JSON.stringify(path.resolve('package.json'))}).version;
 const driver = new EventEmitter();
 driver.behavior = 'latest';
-driver.checkForUpdates = async () => {
+driver.checks = [];
+driver.checkForUpdates = async force => {
+  driver.checks.push(force === true);
   if (driver.behavior === 'pending') await new Promise(resolve => { driver.finishCheck = resolve; });
   if (driver.behavior === 'error') throw Error('synthetic network failure');
   driver.emit(driver.behavior === 'latest' ? 'update-not-available' : 'update-available', {version:'0.2.0'});
@@ -37,11 +39,17 @@ driver.checkForUpdates = async () => {
 };
 driver.downloadUpdate = signal => new Promise((resolve, reject) => {
   driver.finishDownload = resolve; driver.failDownload = reject;
-  signal?.addEventListener('abort', () => reject(Error('cancelled')), {once:true});
+  signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), {once:true});
 });
 driver.quitAndInstall = () => {
   require('node:fs').writeFileSync(require('node:path').join(app.getPath('userData'), 'installed.json'), JSON.stringify({saved:true}));
   app.quit();
+};
+driver.dispose = async () => {
+  // A second quit while cleanup is pending must not bypass the awaited barrier.
+  setTimeout(() => app.quit(), 0);
+  await new Promise(resolve => setTimeout(resolve, 150));
+  require('node:fs').writeFileSync(require('node:path').join(app.getPath('userData'), 'update-cleanup.json'), JSON.stringify({completed:true}));
 };
 globalThis.updateDriver = driver;
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/updates/driver.js'))}).createUpdateDriver = () => driver;
@@ -174,6 +182,43 @@ try {
     });
   let settings = await openUpdates(page);
   await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
+  const checkButton = settings.getByRole('button', { name: '检查更新', exact: true });
+  // Wait for the settings view snapshot to stop intercepting pointer input.
+  await checkButton.hover();
+  const beforeHold = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  const holdBox = await checkButton.boundingBox();
+  await page.mouse.move(holdBox.x + holdBox.width / 2, holdBox.y + holdBox.height / 2);
+  await page.mouse.down();
+  try {
+    await page.waitForTimeout(4700);
+    assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeHold);
+    await app.evaluate(async (_electron, before) => {
+      const deadline = Date.now() + 4000;
+      while (globalThis.updateDriver.checks.length === before && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      if (globalThis.updateDriver.checks.length !== before + 1)
+        throw Error('The five-second hold did not trigger exactly one update check');
+    }, beforeHold);
+  } finally {
+    await page.mouse.up();
+  }
+  await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.deepEqual(
+    await app.evaluate((_electron, before) => globalThis.updateDriver.checks.slice(before), beforeHold),
+    [true],
+    'A completed long hold bypasses the cache once; release must not issue a normal check',
+  );
+  const beforeKeyboard = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  await checkButton.press('Enter');
+  await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
+  assert.deepEqual(
+    await app.evaluate((_electron, before) => globalThis.updateDriver.checks.slice(before), beforeKeyboard),
+    [false],
+    'An ordinary keyboard press keeps the normal cached-check operation',
+  );
   await assertFeedbackAlignment(settings);
   for (const width of [860, 1280]) {
     await (
@@ -350,6 +395,9 @@ try {
   assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'installed.json'), 'utf8')), {
     saved: true,
   });
+  assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'update-cleanup.json'), 'utf8')), {
+    completed: true,
+  }, 'Repeated quit requests wait for update cleanup to finish');
   page = await launch();
   assert.equal(
     await page.getByRole('textbox', { name: '聊天消息', exact: true }).inputValue(),
@@ -411,6 +459,7 @@ try {
       {
         passed: true,
         checks: [
+          'five-second hold forces one check, release adds no check, short Enter remains normal',
           'checking/download animation advances in light/dark themes, reduced motion respected, completion removes spinner',
           'settings check/download/progress/retry',
           'main-frame authorization',
@@ -418,6 +467,7 @@ try {
           'cancel preserves window',
           'save failure blocks install',
           'successful save before restart',
+          'repeated quit waits for asynchronous update cleanup',
           'draft and attachment survive restart',
         ],
         rendererErrors: errors.length,

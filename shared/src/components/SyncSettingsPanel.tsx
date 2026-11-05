@@ -34,6 +34,18 @@ export function SyncSettingsPanel() {
         </div>
       ))}
       <div className="cloud-sync-actions">
+        <div className="cloud-sync-messages">
+          {state.busy && (
+            <p className="settings-hint" role="status">
+              {t('正在同步…')}
+            </p>
+          )}
+          {state.error && (
+            <p className="danger-text" role="alert">
+              {t(state.error)}
+            </p>
+          )}
+        </div>
         <Button
           variant="outline"
           disabled={!state.ready || state.busy}
@@ -51,20 +63,10 @@ export function SyncSettingsPanel() {
           {t('刷新容量')}
         </Button>
       </div>
-      {state.busy && (
-        <p className="settings-hint" role="status">
-          {t('正在同步…')}
-        </p>
-      )}
-      {state.error && (
-        <p className="danger-text" role="alert">
-          {t(state.error)}
-        </p>
-      )}
       {Object.entries(state.marks)
         .filter(([, m]) => m.status === 'conflict' || m.status === 'error')
         .map(([key, mark]) => (
-          <div className="settings-entry" key={key}>
+          <div className="settings-entry cloud-sync-item" key={key}>
             <div>
               <strong>{key.startsWith('profile:') ? t('个人信息') : t('同步条目')}</strong>
               <p className="settings-hint">

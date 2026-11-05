@@ -3,8 +3,75 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { MarkdownContent } from '../../../shared/src/components/MarkdownContent';
 import { normalizeMath } from '../../../shared/src/services/math';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
+import { ChatSources } from '../../src/components/ChatSources';
 beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 describe('Markdown 回答', () => {
+  it('只把已知来源的同域标签渲染为紧凑来源胶囊，去掉相邻显示括号', () => {
+    const source = { title: 'CUDA Programming Guide', url: 'https://docs.nvidia.com/cuda/' };
+    const content = '说明（[docs.nvidia.com](https://docs.nvidia.com/cuda/)）。';
+    const html = renderToStaticMarkup(<MarkdownContent content={content} sources={[source]} />);
+    expect(html).toContain('class="chat-source-link"');
+    expect(html).toContain('href="https://docs.nvidia.com/cuda/"');
+    expect(html).toContain('aria-label="CUDA Programming Guide · docs.nvidia.com"');
+    expect(html).toContain('说明<a');
+    expect(html).toContain('</a>。');
+    expect(html).not.toContain('title=');
+    expect(html).toContain('src="https://a.favicon.im/docs.nvidia.com?throw-error-on-404=true"');
+    const ascii = renderToStaticMarkup(
+      <MarkdownContent
+        content="说明([docs.nvidia.com](https://docs.nvidia.com/cuda/))。"
+        sources={[source]}
+      />,
+    );
+    expect(ascii).toContain('说明<a');
+    expect(ascii).toContain('</a>。');
+  });
+  it('普通链接、未核对来源、伪装域名、完整URL和代码保留原有显示', () => {
+    const sources = [
+      { title: 'CUDA Guide', url: 'https://docs.nvidia.com/cuda/' },
+      { title: 'Example', url: 'https://example.org/cuda/' },
+      { title: 'Rejected credentials', url: 'https://user:password@docs.nvidia.com/cuda/' },
+    ];
+    for (const content of [
+      '[阅读CUDA文档](https://docs.nvidia.com/cuda/)',
+      '[1](https://docs.nvidia.com/cuda/)',
+      '([docs.nvidia.com](https://docs.nvidia.com/other/))',
+      '([docs.nvidia.com](https://example.org/cuda/))',
+      '<https://docs.nvidia.com/cuda/>',
+      '`([docs.nvidia.com](https://docs.nvidia.com/cuda/))`',
+      '[docs.nvidia.com](https://user:password@docs.nvidia.com/cuda/)',
+    ]) {
+      const html = renderToStaticMarkup(<MarkdownContent content={content} sources={sources} />);
+      expect(html).not.toContain('chat-source-link');
+    }
+    const unknown = renderToStaticMarkup(
+      <MarkdownContent content="([docs.nvidia.com](https://docs.nvidia.com/cuda/))" />,
+    );
+    expect(unknown).not.toContain('chat-source-link');
+    expect(unknown).toContain('<p>(<a');
+    expect(unknown).toContain('</a>)</p>');
+  });
+  it('来源列表保持顺序与更多入口，胶囊显示站点并保留完整无障碍标题', () => {
+    const sources = Array.from({ length: 4 }, (_, index) => ({
+      title: `Source ${index + 1}`,
+      url: `https://docs${index + 1}.example.org/article`,
+    }));
+    const html = renderToStaticMarkup(<ChatSources sources={sources} />);
+    expect(html.match(/class="chat-source-link"/g)).toHaveLength(4);
+    expect(html).toContain('更多来源（1）');
+    expect(html).toContain('aria-label="Source 1 · docs1.example.org"');
+    expect(html).not.toMatch(/>\d+\. /);
+    expect(html).not.toContain('title=');
+    expect([...html.matchAll(/<img src="([^"]+)"/g)].map((match) => match[1])).toEqual(
+      [1, 2, 3, 4].map((index) =>
+        `https://a.favicon.im/docs${index}.example.org?throw-error-on-404=true`,
+      ),
+    );
+    for (let index = 1; index < 4; index++)
+      expect(html.indexOf(`docs${index}.example.org`)).toBeLessThan(
+        html.indexOf(`docs${index + 1}.example.org`),
+      );
+  });
   it('不接受原型继承的信任或宏，恶意公式不创建链接或远程资源', () => {
     const keys = ['trust', 'voxcueInjected'];
     const originals = keys.map((key) => Object.getOwnPropertyDescriptor(Object.prototype, key));

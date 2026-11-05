@@ -69,7 +69,7 @@ export function installWebMaterials() {
       );
     }
     for (const panel of document.querySelectorAll<HTMLElement>(
-      '.floating-panels .floating-panel, .interview-preview-scene:not(.login-interview-preview) .floating-panel',
+      '.floating-panels .floating-panel, .interview-preview-scene .floating-panel',
     )) {
       const header = panel.querySelector<HTMLElement>(':scope > header')!;
       const recovery = panel.querySelector<HTMLElement>(':scope > .floating-audio-recovery');
@@ -80,6 +80,8 @@ export function installWebMaterials() {
         if (!measured.has(node)) resize.observe(node);
       }
       if (!panel.clientHeight) continue;
+      // Chromium snaps borders to device pixels at fractional display scales.
+      setProperty(panel, '--floating-panel-border-width', getComputedStyle(panel).borderLeftWidth);
       const scroll = panel.querySelector<HTMLElement>(':scope > .floating-scroll')!;
       const following =
         !!panel.closest('.floating-panels') &&
@@ -112,7 +114,8 @@ export function installWebMaterials() {
   const scope = new MutationObserver(schedule);
   scope.observe(root, { attributes: true, attributeFilter: ['class'] });
   const content = new MutationObserver(schedule);
-  content.observe(document.getElementById('root')!, { childList: true, subtree: true });
+  // Menus portaled beside #root need the same material geometry as inline menus.
+  content.observe(document.body, { childList: true, subtree: true });
   window.addEventListener('resize', schedule);
   document.addEventListener('scroll', schedule, true);
   refresh();

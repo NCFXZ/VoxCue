@@ -12,6 +12,8 @@ import { InterviewChromeBase } from './InterviewChromeBase';
 import { installPreviewScroll } from './ui/preview-scroll';
 import { installPreviewTranscript } from './ui/preview-transcript';
 import { interviewPanelAnimation } from './ui/interview-panel-animation';
+import { useLoginPreviewPlayback } from './ui/useLoginPreviewPlayback';
+import './login-preview.css';
 import {
   ArrowUp,
   AudioLines,
@@ -37,7 +39,39 @@ export function InterviewPreview({
 }) {
   const background = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
+  const scene = useRef<HTMLDivElement>(null);
+  const answerScroll = useRef<HTMLDivElement>(null);
+  const { elapsed, phase } = useLoginPreviewPlayback(compact, scene);
+  const question = compact
+    ? t('在 Qt 实时数据监控项目中，你是如何保证界面流畅的？')
+    : t('请介绍一个你负责过的项目。');
+  const paragraphs = compact
+    ? [
+        t(
+          '我把采集和解析放在工作线程，界面线程只负责显示。数据通过有界队列传递，避免采集速度超过显示速度时不断堆积。',
+        ),
+        t(
+          '曲线按固定节奏批量刷新，而不是每来一条数据就重绘。遇到短时突发数据时，我会合并界面更新，同时保留必要的原始数据。',
+        ),
+        t('最后用实际负载观察队列长度和界面响应，定位阻塞点，再调整刷新频率和批量大小。'),
+      ]
+    : [];
+  let remaining = Math.floor(((elapsed - 1400) / 2100) * paragraphs.join('').length);
+  const revealed = paragraphs.map((paragraph) => {
+    const text = phase === 'complete' ? paragraph : paragraph.slice(0, Math.max(0, remaining));
+    remaining -= paragraph.length;
+    return text;
+  });
+  const activeParagraph = revealed.reduce((active, text, index) => (text ? index : active), 0);
   const TranscriptControl = compact ? 'span' : 'button';
+  useEffect(() => {
+    if (!compact || !answerScroll.current) return;
+    const node = answerScroll.current;
+    // Keep the final lines visible after the one-shot answer finishes.
+    node.scrollTop = phase === 'answering' || phase === 'complete' ? node.scrollHeight : 0;
+    node.dataset.overflow = String(node.scrollHeight > node.clientHeight);
+    node.dataset.scrolled = String(node.scrollTop > 0);
+  }, [compact, elapsed, phase]);
   useEffect(() => {
     const node = background.current;
     if (!node || compact) return;
@@ -148,7 +182,9 @@ export function InterviewPreview({
   }, [compact]);
   return (
     <div
+      ref={scene}
       className={`interview-preview-scene${interviewAlwaysDark ? ' dark' : ''}${compact ? ' login-interview-preview' : ''}`}
+      data-preview-phase={compact ? phase : undefined}
       role="region"
       aria-label={t(label)}
     >
@@ -311,20 +347,38 @@ export function InterviewPreview({
               </h2>
             </header>
             <div className="floating-scroll">
-              <article className="transcript-item interviewer">
-                <div className="transcript-meta">
-                  <strong>{t('面试官')}</strong>
-                  <time>14:18</time>
+              {compact && phase === 'ready' ? (
+                <div className="floating-empty">
+                  <Volume2 size={26} />
+                  <p>{t('等待面试官或面试者讲话…')}</p>
+                  <span>{t('面试官在左侧，面试者在右侧')}</span>
                 </div>
-                <p className="interview-font-sample">{t('请介绍一个你负责过的项目。')}</p>
-              </article>
-              <article className="transcript-item interviewee">
-                <div className="transcript-meta">
-                  <strong>{t('面试者')}</strong>
-                  <time>14:19</time>
-                </div>
-                <p className="interview-font-sample">{t('我负责了项目的设计与交付。')}</p>
-              </article>
+              ) : (
+                <article className="transcript-item interviewer">
+                  <div className="transcript-meta">
+                    <strong>{t('面试官')}</strong>
+                    <time>{compact ? '00:03' : '14:18'}</time>
+                  </div>
+                  <p className="interview-font-sample">
+                    {compact && phase === 'question'
+                      ? question.slice(
+                          0,
+                          Math.max(1, Math.floor(((elapsed - 100) / 900) * question.length)),
+                        )
+                      : question}
+                    {compact && phase === 'question' && <span className="typing-caret" />}
+                  </p>
+                </article>
+              )}
+              {!compact && (
+                <article className="transcript-item interviewee">
+                  <div className="transcript-meta">
+                    <strong>{t('面试者')}</strong>
+                    <time>14:19</time>
+                  </div>
+                  <p className="interview-font-sample">{t('我负责了项目的设计与交付。')}</p>
+                </article>
+              )}
             </div>
           </section>
           <section className="floating-panel floating-answer">
@@ -348,19 +402,49 @@ export function InterviewPreview({
                 {t('转写')}
               </TranscriptControl>
             </header>
-            <div className="floating-scroll">
-              <div className="floating-question interview-font-sample">
-                {t('请介绍一个你负责过的项目。')}
-              </div>
-              <div className="floating-answer-meta">
-                <span className="provider-identity">
-                  <ProviderIdentity provider="chatgpt" />
-                </span>
-                <Copy size={14} />
-              </div>
-              <div className="answer-text answer-bubble interview-font-sample">
-                <MarkdownContent content={t('先说明**项目目标**，再介绍你的工作和结果。')} />
-              </div>
+            <div className="floating-scroll" ref={answerScroll}>
+              {compact && (phase === 'ready' || phase === 'question') ? (
+                <div className="floating-empty answer-empty">
+                  <p>{t('模型服务回答已启用。')}</p>
+                  <span>{t('直接发送下方实时转写，或输入新的问题。')}</span>
+                </div>
+              ) : (
+                <>
+                  <div className="floating-question interview-font-sample">{question}</div>
+                  <div className="floating-answer-meta">
+                    <span className="provider-identity">
+                      <ProviderIdentity provider="chatgpt" />
+                    </span>
+                    {(!compact || phase === 'complete') && <Copy size={14} />}
+                  </div>
+                  {compact && phase === 'thinking' && (
+                    <p className="login-preview-thinking">{t('正在思考')}</p>
+                  )}
+                  <div className="answer-text answer-bubble interview-font-sample">
+                    {compact ? (
+                      phase === 'thinking' ? (
+                        <>
+                          <span className="answer-pending">{t('正在生成回答…')}</span>
+                          <span className="typing-caret" />
+                        </>
+                      ) : (
+                        <div className="markdown-content">
+                          {revealed.map((paragraph, index) => (
+                            <p key={index} hidden={!paragraph && index !== activeParagraph}>
+                              {paragraph}
+                              {phase === 'answering' && index === activeParagraph && (
+                                <span className="typing-caret" />
+                              )}
+                            </p>
+                          ))}
+                        </div>
+                      )
+                    ) : (
+                      <MarkdownContent content={t('先说明**项目目标**，再介绍你的工作和结果。')} />
+                    )}
+                  </div>
+                </>
+              )}
             </div>
             <div className="floating-composer">
               <textarea
@@ -380,7 +464,9 @@ export function InterviewPreview({
                   {t('自动回答：开')}
                 </span>
                 <span className="floating-composer-actions">
-                  <Screenshot size={18} />
+                  <span className="interview-preview-icon">
+                    <Screenshot size={18} />
+                  </span>
                   <span className="send-button ui-button button-icon">
                     <ArrowUp size={18} />
                   </span>

@@ -1,0 +1,58 @@
+.login-shell .login-preview .login-preview-content {
+  max-width: 480px;
+}
+.login-preview .login-preview-content,
+.login-preview .login-preview-content * {
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default !important;
+}
+.login-preview .login-interview-preview .interview-font-preview {
+  grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+}
+.login-preview .login-interview-preview .floating-panel {
+  height: clamp(320px, 57vh, 390px);
+}
+.login-preview .login-interview-preview .floating-scroll {
+  overflow: hidden;
+  scroll-behavior: auto;
+}
+.login-preview .login-interview-preview .floating-answer .floating-scroll[data-overflow='true'] {
+  --preview-top-fade: 0px;
+  --preview-bottom-fade: 18px;
+  mask-image: linear-gradient(
+    to bottom,
+    transparent,
+    black var(--preview-top-fade),
+    black calc(100% - var(--preview-bottom-fade)),
+    transparent
+  );
+}
+.login-preview .login-interview-preview .floating-answer .floating-scroll[data-scrolled='true'] {
+  --preview-top-fade: 18px;
+  --preview-bottom-fade: 0px;
+}
+.login-preview .login-interview-preview .floating-empty {
+  padding: 42px 4px 12px;
+  gap: 10px;
+}
+.login-preview .login-interview-preview .floating-empty p,
+.login-preview .login-interview-preview .floating-empty span {
+  font-size: 11px;
+}
+.login-preview .login-interview-preview .answer-empty {
+  padding-top: 20px;
+}
+.login-preview .login-interview-preview .login-preview-thinking {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.login-interview-preview[data-playing='false'] .typing-caret {
+  animation-play-state: paused;
+}
+@media (prefers-reduced-motion: reduce) {
+  .login-interview-preview .typing-caret {
+    display: none;
+  }
+}

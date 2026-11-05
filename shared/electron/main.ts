@@ -109,6 +109,8 @@ let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
 let interviewIpc: ReturnType<typeof registerInterviewIpc> | undefined;
 let historyJobs: ReturnType<typeof registerHistoryIpc> | undefined;
 let updates: UpdateService | undefined;
+let updatesClosed = false;
+let updatesClosing = false;
 let components: ComponentService;
 let updateWasInstalling = false;
 let interviewOpening = false;
@@ -934,7 +936,9 @@ app.whenReady().then(async () => {
         ? require(
             path.join(app.getAppPath(), 'dist-electron', desktopPlatform.updateDriverFile),
           ).createMacUpdateDriver()
-        : createUpdateDriver(app.isPackaged),
+        : createUpdateDriver(app.isPackaged, {
+            cacheDirectory: path.join(app.getPath('userData'), 'updates'),
+          }),
     unavailableReason: updateUnavailableReason(app.isPackaged),
     isInterviewActive: interviewActive,
     prepareInstall: prepareUpdateInstall,
@@ -1804,13 +1808,25 @@ app.on('before-quit', (event) => {
     mainWindow.close();
     return;
   }
+  if (updates && !updatesClosed) {
+    event.preventDefault();
+    if (updatesClosing) return;
+    updatesClosing = true;
+    void updates
+      .dispose()
+      .catch(() => console.error('Unfinished update cleanup will retry on the next launch.'))
+      .finally(() => {
+        updatesClosed = true;
+        app.quit();
+      });
+    return;
+  }
   if (telemetry && !telemetryClosed) {
     event.preventDefault();
     telemetryClosed = true;
     void telemetry.close().finally(() => app.quit());
     return;
   }
-  updates?.dispose();
   components?.dispose();
   nativePresentation?.dispose();
   knowledgeCoordinator?.cancelAll();

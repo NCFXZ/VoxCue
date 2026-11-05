@@ -1,3 +1,4 @@
+import { openModelMenu } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
@@ -29,14 +30,16 @@ try {
       { id: 'chatgpt', name: 'ChatGPT', dataRecipient: 'OpenAI' },
       { id: 'synthetic-other', name: '合成提供商', dataRecipient: '合成服务公司' },
     ];
-    ChatGPTService.prototype.models = async () =>
-      providers.map((provider, i) => ({
+    ChatGPTService.prototype.models = async () => {
+      if (globalThis.providerModelFailure) throw Error('合成模型连接失败');
+      return providers.map((provider, i) => ({
         id: 'provider-model-' + i,
         label: i ? '其他测试模型' : '账户测试模型',
         description: '',
         reasoningEfforts: ['low'],
         provider,
       }));
+    };
     ChatGPTService.prototype.stream = async (request, emit, signal) => {
       signal.throwIfAborted();
       const provider = providers[request.modelId.endsWith('1') ? 1 : 0];
@@ -62,10 +65,11 @@ try {
       .click();
   };
   const chooseModel = async (label) => {
-    await page.getByRole('button', { name: '聊天模型', exact: true }).click();
+    await openModelMenu(page);
     await page.getByRole('menuitemradio', { name: label, exact: true }).click();
+    await page.keyboard.press('Escape');
   };
-  const sendAppearance = async (window, name, size = 36) => {
+  const sendAppearance = async (window, name, size = 36, iconSize = 20) => {
     await window.mouse.move(0, 0);
     const button = window.getByRole('button', { name, exact: true });
     await button.waitFor();
@@ -91,8 +95,8 @@ try {
       height: size,
       radius: '50%',
       color: 'rgb(255, 255, 255)',
-      iconWidth: 20,
-      iconHeight: 20,
+      iconWidth: iconSize,
+      iconHeight: iconSize,
     });
     if (name === '发送消息') {
       assert.equal(await window.getByRole('button', { name: '语音输入', exact: true }).count(), 0);
@@ -112,7 +116,7 @@ try {
   });
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await input.fill('第一条合成提问');
-  await sendAppearance(page, '发送消息');
+  await sendAppearance(page, '发送消息', 32);
   await page.locator('.composer').screenshot({});
   await send.click();
   await page.locator('.chat-answer').getByText('ChatGPT的合成回答', { exact: true }).waitFor();
@@ -150,6 +154,45 @@ try {
     'provider metadata controls status, data recipient, and per-reply identity; changing model preserves old replies',
   );
 
+  await app.evaluate(() => {
+    globalThis.providerModelFailure = true;
+  });
+  await openModelMenu(page);
+  await page.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+  const notices = page.locator('.chat-composer > .preparation-notices');
+  const reconnect = notices.getByRole('button', { name: '重新加载模型', exact: true });
+  await reconnect.waitFor();
+  assert.equal(await notices.getByRole('alert').count(), 1);
+  assert.equal(await notices.locator('.simulation-disclaimer.danger-text').count(), 1);
+  const noticeLayout = await notices.evaluate((node) => {
+    const form = node.parentElement.querySelector(':scope > form.composer');
+    const formTop = form.getBoundingClientRect().top;
+    return {
+      beforeForm: !!(node.compareDocumentPosition(form) & Node.DOCUMENT_POSITION_FOLLOWING),
+      childrenAbove: [...node.children].every(
+        (child) => child.getBoundingClientRect().bottom <= formTop,
+      ),
+      noNoticesBelow: ![...node.parentElement.children].some(
+        (child) =>
+          child !== form &&
+          !!(form.compareDocumentPosition(child) & Node.DOCUMENT_POSITION_FOLLOWING),
+      ),
+    };
+  });
+  assert.deepEqual(noticeLayout, { beforeForm: true, childrenAbove: true, noNoticesBelow: true });
+  await app.evaluate(() => {
+    globalThis.providerModelFailure = false;
+  });
+  await reconnect.click();
+  await reconnect.waitFor({ state: 'detached' });
+  await page
+    .getByRole('button', { name: '聊天模型', exact: true })
+    .getByText('其他测试模型', { exact: true })
+    .waitFor();
+  checks.push(
+    'preparation connection error and retry stay above the composer and recover through the real UI',
+  );
+
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.getByRole('button', { name: '创建知识库', exact: true }).first().waitFor();
   assert.equal(await page.locator('.local-storage-note').count(), 0);
@@ -167,18 +210,19 @@ try {
   assert.equal(await settings.getByText(/通过聊天准备面试/).count(), 0);
   await category('面试设置').click();
   assert.equal(await settings.getByText('设置用于下一场面试。', { exact: true }).count(), 0);
-  await settings.getByRole('button', { name: '面试回答模型', exact: true }).click();
+  await openModelMenu(page, '面试回答模型', '面试回答思考强度');
   await settings.getByRole('menuitemradio', { name: '其他测试模型', exact: true }).click();
+  await page.keyboard.press('Escape');
   await category('通用').click();
   await settings.getByRole('button', { name: '外观主题', exact: true }).click();
   await settings.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '新对话', exact: true }).click();
-  await sendAppearance(page, '发送消息');
+  await sendAppearance(page, '发送消息', 32);
   assert.equal(await send.isDisabled(), true);
   await input.fill('仅用于视觉检查');
   assert.equal(await send.isEnabled(), true);
-  await sendAppearance(page, '发送消息');
+  await sendAppearance(page, '发送消息', 32);
   await page.locator('.composer').screenshot({});
   await input.fill('');
   checks.push(
@@ -199,7 +243,7 @@ try {
     .locator('.floating-answer-meta strong')
     .getByText('合成提供商', { exact: true })
     .waitFor();
-  await sendAppearance(floating, '发送面试问题', 36);
+  await sendAppearance(floating, '发送面试问题', 32, 18);
   await floating.locator('.floating-composer').screenshot({});
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([

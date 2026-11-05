@@ -4,6 +4,7 @@ import { usePreparation } from '../../../../shared/src/stores/preparation';
 import { useHistory } from '../../../../shared/src/stores/history';
 import { useChatConnection } from '../../../../shared/src/stores/chatConnection';
 import { chatModels } from '../../../../shared/src/services/chatOptions';
+import { localChats } from '../../../../shared/src/services/chats';
 describe('准备聊天与个人信息', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -23,6 +24,42 @@ describe('准备聊天与个人信息', () => {
     usePreparation.getState().reset();
     vi.useRealTimers();
     vi.unstubAllGlobals();
+  });
+  it('reconciles restored automatic effort once model capabilities arrive and preserves valid choices', async () => {
+    useChatConnection.setState({ models: [] });
+    usePreparation.setState({ chatsReady: false });
+    const read = vi.spyOn(localChats, 'read').mockResolvedValue({
+      conversations: [], activeConversation: null, draft: '', attachments: [],
+      modelId: 'reasoning', effort: 'auto', webSearch: true,
+    });
+    try {
+      await usePreparation.getState().restoreChats();
+      expect(usePreparation.getState().effort).toBe('auto');
+      useChatConnection.setState({ models: [
+        { id: 'reasoning', label: 'Reasoning', description: '', reasoningEfforts: ['medium', 'high'] },
+        { id: 'plain', label: 'Plain', description: '' },
+      ] });
+      expect(usePreparation.getState().effort).toBe('medium');
+      usePreparation.getState().setEffort('high');
+      useChatConnection.setState({ models: [...useChatConnection.getState().models] });
+      expect(usePreparation.getState().effort).toBe('high');
+      usePreparation.getState().setModel('plain');
+      expect(usePreparation.getState().effort).toBe('auto');
+      usePreparation.getState().setModel('reasoning');
+      expect(usePreparation.getState().effort).toBe('medium');
+      usePreparation.getState().setEffort('max');
+      expect(usePreparation.getState().effort).toBe('medium');
+    } finally {
+      read.mockRestore();
+    }
+  });
+  it('normalizes legacy automatic effort at submission instead of omitting a supported explicit choice', async () => {
+    usePreparation.setState({ modelId: chatModels[0].id, effort: 'auto' });
+    const response = usePreparation.getState().send('合成档位兼容检查');
+    await vi.advanceTimersByTimeAsync(10000);
+    await response;
+    expect(usePreparation.getState().messages[0].options?.effort).toBe('low');
+    expect(usePreparation.getState().effort).toBe('low');
   });
   it('流式聊天不写入面试记录，资料更新需确认后保存', async () => {
     const result = usePreparation.getState().send('姓名：小林\n岗位：前端工程师');
@@ -129,10 +166,12 @@ describe('准备聊天与个人信息', () => {
   });
   it('停止后重试仅替换对应回答，保留待发送草稿与附件', async () => {
     const state = usePreparation.getState();
+    const sentAt = Date.now();
     const first = state.send('原始问题');
     await vi.advanceTimersByTimeAsync(100);
     state.stop();
     await first;
+    expect(usePreparation.getState().messages[0].startedAt).toBe(sentAt);
     const stopped = usePreparation.getState().messages.at(-1)!;
     state.setDraft('下一条问题');
     state.addAttachments([new File(['later'], 'later.txt')]);
@@ -141,6 +180,8 @@ describe('准备聊天与个人信息', () => {
     await retry;
     expect(usePreparation.getState().messages).toHaveLength(2);
     expect(usePreparation.getState().messages[0].content).toBe('原始问题');
+    expect(usePreparation.getState().messages[0].startedAt).toBe(sentAt);
+    expect(usePreparation.getState().messages[1].startedAt).toBeGreaterThan(sentAt);
     expect(usePreparation.getState().messages[1].status).toBe('completed');
     expect(usePreparation.getState().draft).toBe('下一条问题');
     expect(usePreparation.getState().attachments[0].name).toBe('later.txt');

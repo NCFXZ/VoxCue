@@ -2,6 +2,7 @@ import { connectUiAccount, installUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { dropdownRevealGeometry } from './continuous-corners.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -21,6 +22,74 @@ try {
   page.setDefaultTimeout(30000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  const startMenuFrames = async (triggerId) =>
+    page.evaluate((triggerId) => {
+      const frames = [];
+      let frame;
+      const sample = () => {
+        const menu = [...document.querySelectorAll('.dropdown-content')].find(
+          (node) => node.getAttribute('aria-labelledby') === triggerId,
+        );
+        if (menu) {
+          const style = getComputedStyle(menu);
+          const transform =
+            style.transform === 'none' ? new DOMMatrix() : new DOMMatrix(style.transform);
+          const box = menu.getBoundingClientRect();
+          const wrapper = menu.parentElement.getBoundingClientRect();
+          frames.push({
+            state: menu.getAttribute('data-state'),
+            opacity: Number(style.opacity),
+            unscaled: Math.abs(transform.m11 - 1) < 0.001 && Math.abs(transform.m22 - 1) < 0.001,
+            width: box.width,
+            height: box.height,
+            top: box.top,
+            bottom: box.bottom,
+            frameHeight: wrapper.height,
+            frameTop: wrapper.top,
+            frameBottom: wrapper.bottom,
+            side: menu.getAttribute('data-side'),
+            clip: style.clipPath,
+            radius: parseFloat(style.borderTopLeftRadius),
+            overflow: style.overflow,
+            shadow: style.boxShadow,
+            frameOverflow: getComputedStyle(menu.parentElement).overflow,
+            inert: menu.inert,
+            ariaHidden: menu.getAttribute('aria-hidden'),
+            snapshot: menu.hasAttribute('data-menu-outro'),
+            roles: menu.querySelectorAll('[role]').length + Number(menu.hasAttribute('role')),
+            animating: menu
+              .getAnimations({ subtree: true })
+              .some((animation) => animation.playState === 'running'),
+          });
+        }
+        frame = requestAnimationFrame(sample);
+      };
+      frame = requestAnimationFrame(sample);
+      window.settingsMenuFrames = { frames, stop: () => cancelAnimationFrame(frame) };
+    }, triggerId);
+  const finishMenuFrames = async (triggerId) => {
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    await page.waitForFunction((triggerId) => {
+      const menu = [...document.querySelectorAll('.dropdown-content')].find(
+        (node) => node.getAttribute('aria-labelledby') === triggerId,
+      );
+      return (
+        !menu ||
+        menu
+          .getAnimations({ subtree: true })
+          .every((animation) => animation.playState !== 'running')
+      );
+    }, triggerId);
+    const frames = await page.evaluate(() => {
+      const probe = window.settingsMenuFrames;
+      probe.stop();
+      delete window.settingsMenuFrames;
+      return probe.frames;
+    });
+    return frames.map((frame) => ({ ...frame, ...dropdownRevealGeometry(frame) }));
+  };
   const open = async () => {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
     await page.getByRole('menuitem', { name: '设置', exact: true }).click();
@@ -35,12 +104,125 @@ try {
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: '通用', exact: true })
       .click();
+    await page.getByRole('heading', { name: '通用', exact: true }).waitFor();
   };
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   const category = (name) =>
     settings
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name, exact: true });
+  const verifyCategoryCorners = async () => {
+    await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    await page.waitForFunction(
+      () =>
+        !document.documentElement.dataset.viewDirection &&
+        !document.querySelector('[data-menu-outro]'),
+    );
+    const clips = await settings.evaluate((dialog) => {
+      const box = dialog.querySelector('.settings-content').getBoundingClientRect();
+      return [
+        { x: Math.floor(box.right) - 8, y: Math.ceil(box.top), width: 8, height: 8 },
+        { x: Math.floor(box.right) - 8, y: Math.floor(box.bottom) - 8, width: 8, height: 8 },
+      ];
+    });
+    const windowId = await (await app.browserWindow(page)).evaluate((win) => win.id);
+    const captureCorners = () =>
+      app.evaluate(
+        async ({ BrowserWindow }, { windowId, clips }) => {
+          const colors = [];
+          for (const [corner, clip] of clips.entries()) {
+            const image = await BrowserWindow.fromId(windowId).webContents.capturePage(clip);
+            const size = image.getSize(),
+              bytes = image.toBitmap();
+            // Sample a 2x2 patch inside the rectangular content bounds but safely
+            // outside the dialog's rounded paint. Map native pixels at every DPI.
+            const points = [];
+            for (const x of [5, 6])
+              for (const y of corner === 0 ? [1, 2] : [5, 6]) {
+                const px = Math.min(
+                  size.width - 1,
+                  Math.floor(((x + 0.5) * size.width) / clip.width),
+                );
+                const py = Math.min(
+                  size.height - 1,
+                  Math.floor(((y + 0.5) * size.height) / clip.height),
+                );
+                const offset = (py * size.width + px) * 4;
+                points.push([...bytes.subarray(offset, offset + 3)]);
+              }
+            colors.push(points);
+          }
+          return colors;
+        },
+        { windowId, clips },
+      );
+    const painted = () =>
+      page.evaluate(
+        () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+      );
+    const before = await captureCorners();
+    await page.evaluate(() => {
+      const probe = { frame: 0, animations: [], ready: false };
+      const sample = () => {
+        const animations = document
+          .getAnimations()
+          .filter((animation) => ['screen-enter', 'screen-exit'].includes(animation.animationName));
+        if (animations.length === 2) {
+          for (const animation of animations) {
+            animation.pause();
+            animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
+          }
+          probe.animations = animations;
+          probe.ready = true;
+        } else probe.frame = requestAnimationFrame(sample);
+      };
+      probe.frame = requestAnimationFrame(sample);
+      window.settingsCornerProbe = probe;
+    });
+    try {
+      await category('AI 服务').click();
+      await page.waitForFunction(() => window.settingsCornerProbe.ready);
+      await painted();
+      const during = await captureCorners();
+      const difference = (a, b) => Math.max(...a.map((value, index) => Math.abs(value - b[index])));
+      for (const [corner, points] of during.entries())
+        assert.ok(
+          points.every((point, index) => difference(point, before[corner][index]) <= 6),
+          'Settings transition must retain its static right ' +
+            (corner ? 'bottom' : 'top') +
+            ' rounded pixels: ' +
+            JSON.stringify({ before: before[corner], during: points, clip: clips[corner] }),
+        );
+      // A square-corner negative control proves these native pixels detect the
+      // regression instead of sampling an unchanged portion of the background.
+      await page.evaluate(() => {
+        const marker = document.createElement('style');
+        marker.id = 'settings-corner-square-control';
+        marker.textContent = '::view-transition-group(screen) { border-radius: 0 !important; }';
+        document.head.append(marker);
+      });
+      await painted();
+      const square = await captureCorners();
+      for (const [corner, points] of square.entries())
+        assert.ok(
+          points.some((point, index) => difference(point, before[corner][index]) >= 24),
+          'Native corner probe must detect an unrounded transition: ' +
+            JSON.stringify({ before: before[corner], square: points }),
+        );
+    } finally {
+      await page.evaluate(() => {
+        document.getElementById('settings-corner-square-control')?.remove();
+        const probe = window.settingsCornerProbe;
+        cancelAnimationFrame(probe.frame);
+        for (const animation of probe.animations) animation.play();
+        delete window.settingsCornerProbe;
+      });
+    }
+    await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+    await category('通用').click();
+    await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
+    await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+  };
   const geometry = async () => {
     assert.equal(
       await settings.evaluate((dialog) => {
@@ -67,6 +249,54 @@ try {
     );
     await geometry();
   };
+  const userMenu = page.getByRole('button', { name: '用户菜单', exact: true });
+  const userTriggerId = await userMenu.getAttribute('id');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await startMenuFrames(userTriggerId);
+  await userMenu.click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor();
+  await finishMenuFrames(userTriggerId);
+  await startMenuFrames(userTriggerId);
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(
+    () => document.activeElement?.getAttribute('aria-label') === '用户菜单',
+  );
+  assert.equal(
+    await userMenu.evaluate((node) => Boolean(node.closest('[aria-hidden="true"]'))),
+    false,
+    'Closing a portaled menu releases accessibility before the visual snapshot finishes',
+  );
+  const portalFrames = await finishMenuFrames(userTriggerId);
+  const portalExit = portalFrames.filter((frame) => frame.state === 'closed');
+  assert.ok(
+    portalExit.some((frame) => frame.revealed > 0.03 && frame.revealed < 0.97),
+    'Portaled dropdown must visibly fold back toward its trigger after Radix unmounts',
+  );
+  assert.ok(
+    portalExit.length > 0 &&
+      portalExit.every(
+        (frame) =>
+          frame.snapshot &&
+          frame.inert &&
+          frame.ariaHidden === 'true' &&
+          frame.roles === 0 &&
+          frame.opacity >= 0 &&
+          frame.opacity <= 1 &&
+          (frame.revealed <= 0.12 || frame.opacity === 1) &&
+          frame.unscaled &&
+          frame.clip === 'none' &&
+          frame.radius > 0 &&
+          frame.overflow === 'hidden' &&
+          frame.frameOverflow === 'visible' &&
+          frame.shadow !== 'none' &&
+          (frame.revealed <= 0.03 || Math.abs(frame.anchorGap) < 0.6),
+      ),
+    'Portaled exit snapshot must have no menu roles or interactive accessibility',
+  );
+  assert.ok(
+    portalExit.some((frame) => frame.opacity > 0 && frame.opacity < 1 && frame.revealed < 0.12),
+    'Portaled exit fades only near its collapsed rounded edge',
+  );
   await open();
   await category('通用').click();
   assert.deepEqual(
@@ -83,27 +313,172 @@ try {
   await settings.getByRole('button', { name: '删除账号', exact: true }).waitFor();
   await geometry();
   await category('通用').click();
+  await settings.getByRole('heading', { name: '通用', exact: true }).waitFor();
   assert.equal(await settings.getByRole('button', { name: '主题色', exact: true }).count(), 0);
   const languageMenu = settings.getByRole('button', { name: '语言', exact: true });
   const personalInfoBefore = await page.evaluate(() =>
     localStorage.getItem('copilot-personal-info-v1'),
   );
   assert.equal(await languageMenu.innerText(), '简体中文');
+  const languageTriggerId = await languageMenu.getAttribute('id');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await startMenuFrames(languageTriggerId);
   await languageMenu.focus();
   await page.keyboard.press('Enter');
   assert.deepEqual(await settings.getByRole('menuitemradio').allTextContents(), [
     '简体中文',
     'English',
   ]);
+  const openingFrames = await finishMenuFrames(languageTriggerId);
+  assert.ok(
+    openingFrames.some(
+      (frame) => frame.state === 'open' && frame.revealed > 0.03 && frame.revealed < 0.97,
+    ),
+    'Dropdown opening must grow its actual rounded surface through intermediate heights',
+  );
+  assert.ok(
+    openingFrames
+      .filter((frame) => frame.state === 'open')
+      .every(
+        (frame) =>
+          !frame.inert &&
+          frame.ariaHidden !== 'true' &&
+          frame.opacity >= 0 &&
+          frame.opacity <= 1 &&
+          (frame.revealed <= 0.65 || frame.opacity === 1) &&
+          frame.unscaled &&
+          frame.clip === 'none' &&
+          frame.radius > 0 &&
+          frame.overflow === 'hidden' &&
+          frame.frameOverflow === 'visible' &&
+          frame.shadow !== 'none' &&
+          (frame.revealed <= 0.03 || Math.abs(frame.anchorGap) < 0.6),
+      ),
+    'Open dropdown keeps its main height range opaque, unscaled and anchored with options accessible',
+  );
+  assert.ok(
+    openingFrames.some((frame) => frame.opacity > 0 && frame.opacity < 1 && frame.revealed < 0.65),
+    'Opening fades only at the start of its height expansion',
+  );
   assert.equal(
     await settings
       .getByRole('menuitemradio', { name: '简体中文', exact: true })
       .getAttribute('aria-checked'),
     'true',
   );
+  await startMenuFrames(languageTriggerId);
   await page.keyboard.press('Escape');
   await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '语言');
   assert.equal(await languageMenu.evaluate((node) => node === document.activeElement), true);
+  const releasedDuringExit = await settings.evaluate((dialog) => {
+    const close = dialog.querySelector('[aria-label="关闭设置"]');
+    return {
+      accessible: !close.closest('[aria-hidden="true"]'),
+      liveMenus: dialog.querySelectorAll('.dropdown-content:not([data-menu-outro])').length,
+      animatingSnapshot: [...dialog.querySelectorAll('[data-menu-outro]')].some((node) =>
+        node.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    };
+  });
+  assert.deepEqual(
+    releasedDuringExit,
+    { accessible: true, liveMenus: 0, animatingSnapshot: true },
+    'Parent dialog must regain accessibility and release the live menu before its visual exit finishes',
+  );
+  const closingFrames = await finishMenuFrames(languageTriggerId);
+  const exiting = closingFrames.filter((frame) => frame.state === 'closed');
+  assert.ok(
+    exiting.some((frame) => frame.revealed > 0.03 && frame.revealed < 0.97),
+    'Dropdown closing must shrink its actual rounded surface through intermediate heights',
+  );
+  assert.ok(
+    exiting.length > 0 &&
+      exiting.every(
+        (frame) =>
+          frame.snapshot &&
+          frame.inert &&
+          frame.ariaHidden === 'true' &&
+          frame.roles === 0 &&
+          frame.opacity >= 0 &&
+          frame.opacity <= 1 &&
+          (frame.revealed <= 0.12 || frame.opacity === 1) &&
+          frame.unscaled &&
+          frame.clip === 'none' &&
+          frame.radius > 0 &&
+          frame.overflow === 'hidden' &&
+          frame.frameOverflow === 'visible' &&
+          frame.shadow !== 'none' &&
+          (frame.revealed <= 0.03 || Math.abs(frame.anchorGap) < 0.6),
+      ),
+    'Only an inert accessibility-hidden snapshot remains throughout the visual exit',
+  );
+  assert.ok(
+    exiting.some((frame) => frame.opacity > 0 && frame.opacity < 1 && frame.revealed < 0.12),
+    'Closing fades only near its collapsed rounded edge',
+  );
+  await languageMenu.click();
+  await settings.getByRole('menuitemradio', { name: '简体中文', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  assert.equal(await settings.locator('[data-menu-outro]').count(), 1);
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForFunction(() => !document.querySelector('[data-menu-outro]'));
+  try {
+    await startMenuFrames(languageTriggerId);
+    await languageMenu.click();
+    await settings.getByRole('menuitemradio', { name: '简体中文', exact: true }).waitFor();
+    const reducedOpen = await finishMenuFrames(languageTriggerId);
+    assert.ok(
+      reducedOpen.length > 0 &&
+        reducedOpen.every(
+          (frame) =>
+            frame.opacity === 1 && frame.unscaled && frame.revealed === 1 && !frame.animating,
+        ),
+      'Reduced motion opens the dropdown directly without animation',
+    );
+    await startMenuFrames(languageTriggerId);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '语言');
+    const reducedClose = await finishMenuFrames(languageTriggerId);
+    assert.ok(
+      reducedClose.every(
+        (frame) => !frame.animating && frame.opacity === 1 && frame.revealed === 1,
+      ),
+      'Reduced motion closes the dropdown without intermediate animation',
+    );
+    assert.equal(
+      await page.evaluate(
+        (triggerId) =>
+          [...document.querySelectorAll('.dropdown-content')].some(
+            (node) => node.getAttribute('aria-labelledby') === triggerId,
+          ),
+        languageTriggerId,
+      ),
+      false,
+      'Reduced motion removes the closed dropdown directly',
+    );
+    assert.equal(await languageMenu.evaluate((node) => node === document.activeElement), true);
+  } finally {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+  }
+  // Selecting an unchanged option closes only the live menu. A second real
+  // Escape must reach the parent dialog while the inert snapshot still folds away.
+  await languageMenu.click();
+  await settings.getByRole('menuitemradio', { name: '简体中文', exact: true }).click();
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).waitFor();
+  assert.ok(
+    await settings.evaluate((dialog) =>
+      [...dialog.querySelectorAll('[data-menu-outro]')].some(
+        (node) =>
+          node.inert &&
+          node.getAttribute('aria-hidden') === 'true' &&
+          node.getAnimations().some((animation) => animation.playState === 'running'),
+      ),
+    ),
+    'Option selection must release accessibility while its snapshot is still animating',
+  );
+  await page.keyboard.press('Escape');
+  await settings.waitFor({ state: 'detached' });
+  await open();
   await languageMenu.click();
   await settings.getByRole('menuitemradio', { name: 'English', exact: true }).click();
   const englishSettings = page.getByRole('dialog', { name: 'Settings', exact: true });
@@ -166,9 +541,11 @@ try {
   await page.getByRole('menuitemradio', { name: '浅色', exact: true }).click();
   await geometry();
   await noKnowledgeSettings();
+  await verifyCategoryCorners();
   await category('通用').click();
   await page.screenshot({ animations: 'disabled' });
   await category('AI 服务').click();
+  await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
   await settings.getByRole('region', { name: '账户额度' }).waitFor();
   assert.equal(await settings.getByRole('button', { name: '重置用量', exact: true }).count(), 0);
   await page.screenshot({ animations: 'disabled' });
@@ -179,6 +556,7 @@ try {
   await page.getByRole('menuitemradio', { name: '深色', exact: true }).click();
   await noKnowledgeSettings();
   await category('面试设置').click();
+  await settings.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
   await page.screenshot({ animations: 'disabled' });
   await app.evaluate(({ BrowserWindow }) => {
     const window = BrowserWindow.getAllWindows().find((window) => !window.isDestroyed());

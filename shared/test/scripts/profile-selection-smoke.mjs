@@ -83,7 +83,11 @@ try {
         {
           id: 'cpp',
           title: 'C++ 并发与内存管理',
-          content: '更新后的 C++ 面试资料。关注线程同步、对象生命周期和性能分析。',
+          content: Array(20)
+            .fill(
+              '### C++ 并发与内存管理\n更新后的 C++ 面试资料。关注线程同步、对象生命周期和性能分析。',
+            )
+            .join('\n\n'),
           sources: [],
         },
         {
@@ -202,6 +206,147 @@ try {
       });
   };
   const box = (name) => proposal().getByRole('checkbox', { name, exact: true });
+  const checkCheckboxMotion = async (target, pseudo, toggle = target) => {
+    const trigger = await toggle.elementHandle();
+    try {
+      const motion = await target.evaluate(
+        async (node, { trigger, pseudo }) => {
+          await Promise.all(
+            node.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})),
+          );
+          const read = () => {
+            const style = getComputedStyle(node, pseudo);
+            return { opacity: Number(style.opacity), clip: style.clipPath };
+          };
+          const directions = [];
+          for (let count = 0; count < 2; ++count) {
+            const from = read();
+            trigger.click();
+            getComputedStyle(node).backgroundColor;
+            await new Promise(requestAnimationFrame);
+            const animations = node.getAnimations({ subtree: true });
+            for (const animation of animations) {
+              animation.pause();
+              const timing = animation.effect.getTiming();
+              animation.currentTime = timing.delay + Number(timing.duration) / 2;
+            }
+            const middle = read();
+            for (const animation of animations) animation.finish();
+            const to = read();
+            directions.push({ from, middle, to });
+          }
+          return { radius: getComputedStyle(node).borderTopLeftRadius, directions };
+        },
+        { trigger, pseudo },
+      );
+      assert.equal(motion.radius, '6px');
+      for (const { from, middle, to } of motion.directions) {
+        assert.deepEqual(
+          [from.opacity, to.opacity].sort(),
+          [0, 1],
+          'The glyph changes between hidden and visible in both directions',
+        );
+        assert(middle.opacity > 0 && middle.opacity < 1, 'The glyph fades through an intermediate frame');
+        assert.match(middle.clip, /^inset\(/);
+        assert.notEqual(middle.clip, from.clip, 'The glyph drawing advances beyond its initial clipping');
+        assert.notEqual(middle.clip, to.clip, 'The glyph drawing has not reached its final clipping');
+      }
+    } finally {
+      await trigger.dispose();
+    }
+  };
+  const startReaderEntrance = () =>
+    page.evaluate(() => {
+      const frames = [];
+      let frame;
+      const sample = () => {
+        const dialog = document.querySelector('dialog.proposal-reader[open]');
+        if (dialog)
+          frames.push({
+            opacity: Number(getComputedStyle(dialog).opacity),
+            backdrop: Number(getComputedStyle(dialog, '::backdrop').opacity),
+            transform: getComputedStyle(dialog).transform,
+            running: dialog.getAnimations().some((animation) => animation.playState === 'running'),
+          });
+        frame = requestAnimationFrame(sample);
+      };
+      frame = requestAnimationFrame(sample);
+      window.readerEntranceFrames = { frames, stop: () => cancelAnimationFrame(frame) };
+    });
+  const finishReaderEntrance = async (reader) => {
+    await reader.waitFor();
+    await reader.evaluate(async (node) => {
+      await Promise.all(
+        node.getAnimations().map((animation) => animation.finished.catch(() => {})),
+      );
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+    });
+    return page.evaluate(() => {
+      const probe = window.readerEntranceFrames;
+      probe.stop();
+      delete window.readerEntranceFrames;
+      return probe.frames;
+    });
+  };
+  const startReaderExit = () =>
+    page.evaluate(() => {
+      const frames = [];
+      let frame;
+      const sample = () => {
+        const snapshot = document.querySelector('[data-modal-exit]');
+        if (snapshot) {
+          const style = getComputedStyle(snapshot);
+          frames.push({
+            opacity: Number(style.opacity),
+            backdrop: Number(getComputedStyle(snapshot, '::backdrop').opacity),
+            transform: style.transform,
+            inert: snapshot.inert,
+            hidden: snapshot.getAttribute('aria-hidden'),
+            topLayer: snapshot.matches(':popover-open'),
+            pointerEvents: style.pointerEvents,
+            backdropPointerEvents: getComputedStyle(snapshot, '::backdrop').pointerEvents,
+            semanticDescendants: snapshot.querySelectorAll('[id], [role], [name], [autofocus]')
+              .length,
+            nativeModals: document.querySelectorAll('dialog:modal').length,
+          });
+        }
+        frame = requestAnimationFrame(sample);
+      };
+      frame = requestAnimationFrame(sample);
+      window.readerExitFrames = { frames, stop: () => cancelAnimationFrame(frame) };
+    });
+  const finishReaderExit = async () => {
+    await page.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
+    const frames = await page.evaluate(() => {
+      const probe = window.readerExitFrames;
+      probe.stop();
+      delete window.readerExitFrames;
+      return probe.frames;
+    });
+    assert(
+      frames.some((frame) => frame.opacity > 0.03 && frame.opacity < 0.97),
+      'Dialog visual exit has intermediate opacity frames',
+    );
+    assert(
+      frames.some((frame) => frame.backdrop > 0.03 && frame.backdrop < 0.97),
+      'The normal backdrop brightens through intermediate opacity frames',
+    );
+    assert(
+      frames.every(
+        (frame) =>
+          frame.transform === 'none' &&
+          frame.inert &&
+          frame.hidden === 'true' &&
+          frame.topLayer &&
+          frame.pointerEvents === 'none' &&
+          frame.backdropPointerEvents === 'none' &&
+          frame.semanticDescendants === 0 &&
+          frame.nativeModals === 0,
+      ),
+      'Only a noninteractive, inaccessible visual remains after native modal close: ' +
+        JSON.stringify(frames),
+    );
+  };
   const checkReaderHeader = async (reader) => {
     const heading = reader.locator(':scope > .dialog-heading');
     const scroll = reader.locator('.dialog-scroll');
@@ -214,11 +359,16 @@ try {
       const heading = node.querySelector('.dialog-heading');
       const scroll = node.querySelector('.dialog-scroll');
       const close = heading.querySelector('.dialog-close-button');
-      const choice = heading.querySelector('.profile-field-choice');
+      const choice =
+        heading.querySelector('.profile-field-choice') ?? heading.querySelector('.proposal-status');
       const material = getComputedStyle(heading, '::before');
       const chatMaterial = getComputedStyle(document.querySelector('.page-toolbar'), '::before');
       const rect = heading.getBoundingClientRect();
       const area = scroll.getBoundingClientRect();
+      const frame = node.getBoundingClientRect(),
+        frameStyle = getComputedStyle(node);
+      const title = heading.querySelector('.dialog-title h2').getBoundingClientRect();
+      const closeBounds = close.getBoundingClientRect();
       const gutter = scroll.offsetWidth - scroll.clientWidth;
       const materialRight = rect.left + parseFloat(material.left) + parseFloat(material.width);
       const materialBottom = rect.top + parseFloat(material.top) + parseFloat(material.height);
@@ -229,6 +379,8 @@ try {
         top: rect.top,
         scrolled: scroll.scrollTop > 0,
         opacity: Number(material.opacity),
+        scrollable: node.hasAttribute('data-scrollable'),
+        divider: material.borderBottomColor,
         material: [material.backgroundColor, material.backdropFilter],
         chatMaterial: [chatMaterial.backgroundColor, chatMaterial.backdropFilter],
         gutter,
@@ -238,6 +390,11 @@ try {
         trackStart,
         height: rect.height,
         gap: close.getBoundingClientRect().left - choice.getBoundingClientRect().right,
+        titleInset: title.left - frame.left - parseFloat(frameStyle.borderLeftWidth),
+        closeInset: frame.right - parseFloat(frameStyle.borderRightWidth) - closeBounds.right,
+        closeTopInset: closeBounds.top - frame.top - parseFloat(frameStyle.borderTopWidth),
+        titleCloseCenterOffset:
+          title.top + title.height / 2 - closeBounds.top - closeBounds.height / 2,
         overflow:
           node.scrollWidth > node.clientWidth ||
           [...heading.children].some((child) => {
@@ -248,6 +405,8 @@ try {
     });
     assert.equal(layout.top, before.y, 'reader heading stays fixed while scrolling');
     assert.equal(layout.scrolled, true);
+    assert.equal(layout.scrollable, true, 'A long reader retains its scrolling header treatment');
+    assert.notEqual(layout.divider, 'rgba(0, 0, 0, 0)');
     assert.equal(layout.opacity, 1);
     assert.deepEqual(
       layout.material,
@@ -264,6 +423,22 @@ try {
     );
     assert(layout.materialClearsTrack, 'header material ends before the visible scrollbar track');
     assert(layout.gap >= 19.9, 'save selection and close have enough separation');
+    assert(
+      Math.abs(layout.titleInset - layout.closeInset) <= 1 / 64,
+      'Reader title and close button have symmetric insets from the inner dialog edges: ' +
+        JSON.stringify(layout),
+    );
+    assert(
+      [layout.titleInset, layout.closeInset, layout.closeTopInset].every(
+        (inset) => Math.abs(inset - 24) <= 1 / 64,
+      ),
+      'Reader title left and close button top/right insets share the fixed 24px spacing: ' +
+        JSON.stringify(layout),
+    );
+    assert(
+      Math.abs(layout.titleCloseCenterOffset) <= 1 / 64,
+      'Reader title and close button are vertically centered on the same header line',
+    );
     assert.equal(layout.overflow, false);
     if (process.argv.includes('--preview-reader')) {
       const bounds = await reader.boundingBox();
@@ -279,6 +454,21 @@ try {
           ).toString('base64'),
       );
     }
+  };
+  const readerVariants = [
+    ['zh-CN', false, 1280],
+    ['en', true, 800],
+  ];
+  const setReaderVariant = async (language, dark, width, height = 900) => {
+    await page.evaluate(
+      ({ language, dark }) => {
+        localStorage.setItem('voxcue-language-v1', language);
+        dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+        document.documentElement.classList.toggle('dark', dark);
+      },
+      { language, dark },
+    );
+    await mainWindow.evaluate((window, size) => window.setSize(...size), [width, height]);
   };
   const checkSkillMotion = async (region) => {
     const toggle = region.locator('.proposal-skills button[aria-controls]');
@@ -388,36 +578,13 @@ try {
   checks.push('multiple long fields stay compact with clamped previews and no nested scroll areas');
 
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  const motion = await box('保存姓名').evaluate(async (node) => {
-    const radius = getComputedStyle(node).borderTopLeftRadius;
-    getComputedStyle(node, '::before').opacity;
-    node.click();
-    getComputedStyle(node).backgroundColor;
-    await new Promise(requestAnimationFrame);
-    const removing = node.getAnimations({ subtree: true });
-    await Promise.all(removing.map((a) => a.finished.catch(() => {})));
-    const unchecked = getComputedStyle(node, '::before').opacity;
-    node.click();
-    getComputedStyle(node).backgroundColor;
-    await new Promise(requestAnimationFrame);
-    const checking = node.getAnimations({ subtree: true });
-    await Promise.all(checking.map((a) => a.finished.catch(() => {})));
-    return {
-      radius,
-      removing: removing.length,
-      checking: checking.length,
-      unchecked,
-      checked: getComputedStyle(node, '::before').opacity,
-    };
-  });
-  assert.equal(motion.radius, '6px');
-  assert.ok(motion.removing > 0 && motion.checking > 0);
-  assert.equal(motion.unchecked, '0');
-  assert.equal(motion.checked, '1');
+  await checkCheckboxMotion(box('保存姓名'), '::before');
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  assert.equal(
-    await box('保存姓名').evaluate((node) => getComputedStyle(node).transitionDuration),
-    '0s',
+  assert.deepEqual(
+    await box('保存姓名').evaluate((node) =>
+      [null, '::before', '::after'].map((pseudo) => getComputedStyle(node, pseudo).transitionDuration),
+    ),
+    ['0s', '0s', '0s'],
   );
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await box('保存姓名').focus();
@@ -433,7 +600,9 @@ try {
   assert.equal(await reader.locator('.dialog-scroll').count(), 1);
   assert.equal(await reader.getByRole('button', { name: '保存所选' }).count(), 0);
   await reader.getByRole('checkbox', { name: '保存简历摘要', exact: true }).uncheck();
+  await startReaderExit();
   await reader.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await finishReaderExit();
   assert.equal(await box('保存简历摘要').isChecked(), false);
   await view.focus();
   await view.press('Enter');
@@ -447,6 +616,7 @@ try {
   const scrollArea = await reader.locator('.dialog-scroll').boundingBox();
   assert.ok(tail.y >= scrollArea.y && tail.y + tail.height <= scrollArea.y + scrollArea.height + 1);
   await capture('full-text-reader-end', reader);
+  await startReaderExit();
   await reader.press('Escape');
   await view
     .evaluate(
@@ -456,6 +626,7 @@ try {
         ),
     )
     .then((focused) => assert.equal(focused, true));
+  await finishReaderExit();
   assert.equal(await box('保存简历摘要').isChecked(), true);
   assert.deepEqual(await saved(), base);
   checks.push(
@@ -534,6 +705,11 @@ try {
 
   await send('技能逐项');
   await box('保存技能：Rust 与系统编程：所有权、借用、异步任务与错误边界').uncheck();
+  await checkCheckboxMotion(
+    box('保存技能'),
+    '::after',
+    box('保存技能：Rust 与系统编程：所有权、借用、异步任务与错误边界'),
+  );
   await box('删除技能：Qt 桌面开发').uncheck();
   await box('保存技能：Python 自动化测试').uncheck();
   assert.equal(await box('保存技能').evaluate((node) => node.indeterminate), true);
@@ -542,6 +718,7 @@ try {
   checks.push(
     'skill list height/fade transitions in both directions, keyboard, reduced motion and retained selection',
   );
+  await startReaderEntrance();
   await proposal()
     .getByRole('button', {
       name: '查看技能：Rust 与系统编程：所有权、借用、异步任务与错误边界',
@@ -552,28 +729,25 @@ try {
     name: 'Rust 与系统编程：所有权、借用、异步任务与错误边界',
     exact: true,
   });
+  const entering = await finishReaderEntrance(skillReader);
+  assert(
+    entering.some((frame) => frame.opacity > 0.03 && frame.opacity < 0.97),
+    'Shared dialogs must fade through intermediate opacity frames',
+  );
+  assert(
+    entering.some((frame) => frame.backdrop > 0.03 && frame.backdrop < 0.97),
+    'The normal modal backdrop must darken through intermediate opacity frames',
+  );
+  assert(
+    entering.every((frame) => frame.transform === 'none'),
+    'Dialog entry must not scale or translate its measured geometry',
+  );
   assert.equal(await skillReader.getByRole('note').count(), 0);
-  for (const [language, dark, width] of [
-    ['zh-CN', false, 1280],
-    ['en', true, 800],
-  ]) {
-    await page.evaluate(
-      ({ language, dark }) => {
-        localStorage.setItem('voxcue-language-v1', language);
-        dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
-        document.documentElement.classList.toggle('dark', dark);
-      },
-      { language, dark },
-    );
-    await mainWindow.evaluate((window, width) => window.setSize(width, 900), width);
+  for (const [language, dark, width] of readerVariants) {
+    await setReaderVariant(language, dark, width);
     await checkReaderHeader(skillReader);
   }
-  await mainWindow.evaluate((window) => window.setSize(1280, 1000));
-  await page.evaluate(() => {
-    localStorage.setItem('voxcue-language-v1', 'zh-CN');
-    dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
-    document.documentElement.classList.remove('dark');
-  });
+  await setReaderVariant('zh-CN', false, 1280, 1000);
   checks.push(
     'skill reader fixed chat material header, clear scrollbar and separated controls in Chinese/light and English/dark/narrow',
   );
@@ -583,6 +757,52 @@ try {
     /来源未核验|来源待核验|example\.com\/unverified/,
   );
   await skillReader.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await page.locator('[data-modal-exit]').waitFor({ state: 'attached' });
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
+  await startReaderEntrance();
+  await proposal()
+    .getByRole('button', {
+      name: '查看技能：Rust 与系统编程：所有权、借用、异步任务与错误边界',
+      exact: true,
+    })
+    .click();
+  const reducedEntrance = await finishReaderEntrance(skillReader);
+  assert(reducedEntrance.length > 0);
+  assert(
+    reducedEntrance.every((frame) => frame.opacity === 1 && frame.backdrop === 1 && !frame.running),
+    'Reduced motion shows the dialog and normal backdrop immediately',
+  );
+  await skillReader.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  assert.equal(await page.locator('[data-modal-exit]').count(), 0);
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await proposal()
+    .getByRole('button', { name: '查看技能：Python 自动化测试', exact: true })
+    .click();
+  const shortReader = page.getByRole('dialog', { name: 'Python 自动化测试', exact: true });
+  await shortReader.waitFor();
+  const shortHeader = await shortReader.evaluate((node) => {
+    const scroll = node.querySelector('.dialog-scroll');
+    const heading = node.querySelector('.dialog-heading');
+    return {
+      scrollable: node.hasAttribute('data-scrollable'),
+      overflow: scroll.scrollHeight > scroll.clientHeight,
+      divider: getComputedStyle(heading, '::before').borderBottomColor,
+    };
+  });
+  assert.equal(shortHeader.overflow, false, 'The short reader fits on one page');
+  assert.equal(shortHeader.scrollable, false);
+  assert.equal(shortHeader.divider, 'rgba(0, 0, 0, 0)', 'A one-page dialog has no header divider');
+  await shortReader.evaluate(async (node) => {
+    await Promise.all(node.getAnimations().map((animation) => animation.finished.catch(() => {})));
+  });
+  await startReaderExit();
+  await page.mouse.click(2, 2);
+  await shortReader.waitFor({ state: 'detached' });
+  await finishReaderExit();
+  checks.push(
+    'shared modal entry/exit, immediate native unlock and focus restoration, outside dismissal, one-page header and reduced motion including a running exit',
+  );
   for (const theme of ['light', 'dark']) {
     await page.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
@@ -632,6 +852,25 @@ try {
   );
   assert.deepEqual((await saved()).skills[0], base.skills[1]);
   await capture('skill-deleted');
+  await proposal()
+    .getByRole('button', { name: '查看技能：C++ 并发与内存管理', exact: true })
+    .click();
+  const deletedReader = page.getByRole('dialog', { name: 'C++ 并发与内存管理', exact: true });
+  await deletedReader.getByText('本次已删除的技能', { exact: true }).waitFor();
+  assert.equal(
+    await deletedReader.locator('.dialog-heading .proposal-status').innerText(),
+    '已删除',
+  );
+  for (const [language, dark, width] of readerVariants) {
+    await setReaderVariant(language, dark, width);
+    await checkReaderHeader(deletedReader);
+  }
+  await setReaderVariant('zh-CN', false, 1280, 1000);
+  await capture('skill-deleted-reader', deletedReader);
+  await deletedReader.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  checks.push(
+    'deleted skill reader preserves symmetric title/close insets with a scrollbar across the reader variants',
+  );
   checks.push('only explicitly selected deletion executes; empty selection disables save');
   const beforeStreaming = await saved();
   await send('流式逐项');
