@@ -1,10 +1,14 @@
 # VoxCue 0.6.9 · Windows
 
-发布状态：待发行 / Status: pending release。
+发布状态：Windows 已发行 / Status: Windows released。
+
+发布时间 / Published: `2026-11-05T18:00:29Z` · [v0.6.9](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.9)
+
+[下载 Windows x64 安装包 / Download Windows x64 installer](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/VoxCue-Setup-0.6.9-x64.exe)
 
 ## 简体中文
 
-本次更新面向 Windows x64，改进登录、面试准备、模型选择和界面操作体验。macOS 0.6.9 将另行提供。
+本次更新面向 Windows x64，改进登录、面试准备、模型选择和界面操作体验。macOS 0.6.9 尚未发行。
 
 - **界面更统一。** 滚动条采用圆头胶囊并保持原宽；面试输入框、气泡和预览的圆角协调一致。菜单的圆角、内距和选中高亮统一，弹窗标题、关闭按钮和内容间距更整齐。
 - **登录反馈更清楚。** 输入框聚焦时呈现轻微浮起效果；密码长度提示使用灰色，邮箱、密码和验证码错误使用红色，并紧跟对应输入框。邮箱验证码改为六个数字格，支持自动前进、粘贴与键盘操作；发送及重发按钮始终位于六格右侧，窄窗口也保持同一行。
@@ -20,7 +24,7 @@
 
 ## English
 
-This update is for Windows x64 and improves sign-in, interview preparation, model selection and everyday navigation. macOS 0.6.9 will be available separately.
+This update is for Windows x64 and improves sign-in, interview preparation, model selection and everyday navigation. macOS 0.6.9 has not been released.
 
 - **More consistent visuals.** Scrollbars have rounded capsule ends while retaining their width. Interview inputs, message bubbles and previews use coordinated corners. Menus share consistent corners, spacing and selection highlights, while dialog headings, close buttons and content are better aligned.
 - **Clearer sign-in feedback.** Focused inputs have a subtle raised appearance. Password-length guidance appears in gray, while email, password and verification-code errors appear in red directly below the relevant field. Email codes use six digit boxes with automatic advance, paste and keyboard support. The send and resend button stays to their right on the same row, even in narrow windows.

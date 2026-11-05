@@ -2,50 +2,53 @@
 
 更新日期 / Updated: 2026-11-05。
 
-**当前状态：待发行。本文预留发行记录，不表示源码已推送、安装包已生成或 GitHub 资产已上传。**
+**当前状态：Windows 0.6.9 已公开发行，三项资产已上传并经匿名完整下载核对；GitHub Latest 端点指向本次发行。**
 
-**Status: pending release. This record does not establish that source has been pushed, an installer has been built, or release assets have been uploaded.**
+**Status: Windows 0.6.9 is publicly released. All three assets have been verified through complete anonymous downloads, and the GitHub Latest endpoint identifies this release.**
 
 ## 来源与发布记录 / Source and publication record
 
 | 项目 / Item | 真实值 / Recorded value |
 | --- | --- |
 | 版本唯一来源 / Sole version source | `shared/package.json = 0.6.9` |
-| 安装包源码输入 SHA / Installer source commit | 待最终源码提交后填写 / Pending final source commit |
-| 源码推送状态 / Source push status | 待确认 / Pending confirmation |
+| 安装包源码输入 SHA / Installer source commit | `7e3cacba27ac7191ed0d5ccce6767ad57e8bdbde` |
+| 源码推送状态 / Source push status | 已推送私有 `NCFXZ/VoxCue` 的 `main` / Pushed to private `NCFXZ/VoxCue`, branch `main` |
 | 发行仓库 / Distribution repository | `NCFXZ/VoxCue-releases` |
-| 计划 tag / Intended tag | `v0.6.9`，尚未声明已创建 / Not yet recorded as created |
-| GitHub release ID | 待发布时填写 / Pending publication |
-| 公开发行地址 / Published release URL | 待公开后填写 / Pending publication |
-| 发布时间、Latest 与预发行状态 / Published time, Latest and prerelease status | 待公开后核对填写 / Pending verification after publication |
+| Tag | `v0.6.9` |
+| GitHub release ID | `435539098` |
+| 公开发行地址 / Published release URL | [v0.6.9](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.9) |
+| 发布时间 / Published time | `2026-11-05T18:00:29Z` |
+| 草稿及预发行状态 / Draft and prerelease status | `draft=false`，`prerelease=false` |
+| Latest 状态 / Latest status | `/releases/latest` 返回 release ID `435539098`、tag `v0.6.9`、`draft=false`、`prerelease=false` / Confirmed by the Latest endpoint |
 | 公开发行说明 / Public release notes | [简体中文 / English](RELEASE_0.6.9.md) |
 
-本轮任务拉取基线为 `e98242a`，不是最终安装包输入。最终源码 SHA 必须记录实际构建所用提交，不能以目标版本、工作区 HEAD 或后续文档提交代替。后续若仅补充发行事实，应明确这些文档提交不改变已构建安装包的内容。
+本轮任务拉取基线为 `e98242a`。最终安装包使用源码提交 `7e3cacba27ac7191ed0d5ccce6767ad57e8bdbde`，该提交已推送私有源码仓库。后续仅补充发行事实的文档提交不改变安装包内容。
 
-The task started from `e98242a`; that is not the final installer source commit. Record the commit actually used to build the installer. Later documentation-only updates must not be presented as changing the installer contents.
+The task started from `e98242a`. The final installer was built from `7e3cacba27ac7191ed0d5ccce6767ad57e8bdbde`, which has been pushed to the private source repository. Later documentation-only commits do not change the installer contents.
 
 ## Windows 正式资产 / Windows release assets
 
-下表是计划的三项 Windows x64 资产，大小、摘要和资产 ID 均须取自最终文件及 GitHub 实际记录。拟归档目录为 `windows/release/0.6.9`；在文件生成及归档核对前，不宣称该目录已含正式资产。二进制只作为发行资产，不进入源码 Git。
+下表三项 Windows x64 资产均为 GitHub `uploaded` 状态，记录的 digest 与本地文件 SHA256 一致。三项公开地址均经匿名 HTTP 200 完整下载，大小与 SHA256 均与本地一致；EXE 的 SHA512 也与清单一致，公开 `latest.yml` 内容与归档逐字节一致。正式三项已复制归档至 `windows/release/0.6.9`，复制后 SHA256 一致；旧版本保留。二进制作为发行资产，不进入源码 Git。
 
-These are the three intended Windows x64 assets. Fill in sizes and hashes from the final files, and asset IDs from GitHub. The intended local archive is `windows/release/0.6.9`; its contents remain unconfirmed here. Binaries are release assets, not source-repository commits.
+All three Windows x64 assets are uploaded. Complete anonymous HTTP 200 downloads match the recorded sizes and local SHA256 values. The EXE also matches the manifest SHA512, and the public `latest.yml` is byte-identical to the archive. Identical copies are archived in `windows/release/0.6.9`; older releases are preserved. Binaries are release assets, not source-repository commits.
 
 | 文件 / File | GitHub asset ID | Bytes | SHA256 |
 | --- | --- | ---: | --- |
-| `VoxCue-Setup-0.6.9-x64.exe` | 待上传 / Pending | 待生成 / Pending | 待计算 / Pending |
-| `VoxCue-Setup-0.6.9-x64.exe.blockmap` | 待上传 / Pending | 待生成 / Pending | 待计算 / Pending |
-| `latest.yml` | 待上传 / Pending | 待生成 / Pending | 待计算 / Pending |
+| [VoxCue-Setup-0.6.9-x64.exe](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/VoxCue-Setup-0.6.9-x64.exe) | `714296871` | 407593984 | `48e4ab508c49d06ca3dbb003ff0489d8f952be0bbc39d1f5d5a2ada592a6fb0f` |
+| [VoxCue-Setup-0.6.9-x64.exe.blockmap](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/VoxCue-Setup-0.6.9-x64.exe.blockmap) | `714296867` | 422263 | `037a8eafaceb72045fda6992c887bd7aeacf154831087183d0f4325f77ea5e27` |
+| [latest.yml](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/latest.yml) | `714296868` | 349 | `5ca0b4fad77c9b6fa3ddb8f712da820c8a16bd3b89be22121b557464fba82a06` |
 
 | 核对项 / Verification item | 真实值 / Recorded value |
 | --- | --- |
-| 清单 version、安装包文件名及内置版本 / Manifest version, installer name and embedded version | 待核对 / Pending |
-| 清单安装包 size 与 SHA512 / Installer size and SHA512 in manifest | 待核对填写 / Pending |
-| EXE Authenticode 状态 / EXE Authenticode status | 待检查最终 EXE 后填写 / Pending inspection of the final EXE |
-| 三项公开资产下载地址与大小、摘要 / Public asset URLs, sizes and hashes | 待上传后核对 / Pending verification after upload |
+| 清单 version、安装包文件名及内置版本 / Manifest version, installer name and embedded version | `0.6.9`；`VoxCue-Setup-0.6.9-x64.exe`；内置版本 `0.6.9` |
+| 清单安装包 size 与 SHA512 / Installer size and SHA512 in manifest | `407593984`；`OsRmeKM+lLpWANDw96AyDmSfUrZAPhupdLGC/gZb9/mHJixmuLiseUM8bH7CcYkR451OTgtTP4+sdWCn3anbsA==` |
+| EXE Authenticode 状态 / EXE Authenticode status | `NotSigned`；本轮未新增或轮换身份 / No new or rotated signing identity |
+| 三项匿名下载及清单回读 / Anonymous downloads and manifest readback | 三项 HTTP 200 完整下载，bytes/SHA256一致；EXE SHA512匹配清单，latest.yml与归档逐字节一致 / All three complete downloads and manifest contents verified |
+| 匿名分平台选版 / Anonymous platform selection | `fetchPlatformUpdate`：`windows-x64` 选择 `0.6.9`；`macos-arm64` 正确回退完整 `0.6.8` / Windows selects 0.6.9; Mac retains its complete 0.6.8 release |
 
-EXE 用于安装或手动升级；blockmap 和 `latest.yml` 用于应用内更新。保留既有固定公开源、本平台完整稳定发行选择及摘要/签名策略，不借本轮发行新增或轮换身份。构建脚本只生成文件，不自动上传；全部三项上传完整并核对后，才能将记录改为已发行。
+EXE 用于安装或手动升级；blockmap 和 `latest.yml` 用于应用内更新。本次保留既有固定公开源、本平台完整稳定发行选择及摘要/签名策略，未新增或轮换身份。
 
-Use the EXE for installation or manual upgrades. The blockmap and `latest.yml` support in-app updates. Existing platform selection and integrity/signing policies remain in effect. Building does not publish files; record publication only after all three assets are uploaded and verified.
+Use the EXE for installation or manual upgrades. The blockmap and `latest.yml` support in-app updates. Existing platform selection and integrity/signing policies remain in effect, with no new or rotated identity.
 
 ## 0.6.8 → 0.6.9 范围 / Scope
 
@@ -79,9 +82,3 @@ The sign-in fix covers the first click on “Continue locally”, “Sign up”,
 - RAG 算法、模型、阈值、检索策略与数据兼容保持既有基线；知识库变动限于进度呈现。现用依赖、模型、身份、用户数据及历史发行/恢复资产保留，官网和独立服务端不随本次桌面发行部署。
 
 Shared UI and interaction changes apply to both platforms, but this index covers Windows only. Mac native update persistence, recovery and interruption handling still require implementation and validation on a Mac, as detailed in the numbered handoff. No Mac release or native acceptance is implied. Existing retrieval behavior, data compatibility, models, identities and recovery releases are preserved; website and server deployment are outside this desktop release.
-
-## 发行记录收尾 / Completing this record
-
-发行负责人在最终源码、安装包及公开资产确定后，填写上方真实 SHA、签名状态、大小、摘要、release/asset IDs 和公开链接；确认三项资产完整及匿名更新清单一致后，再将本文和公开说明的待发行状态改为实际状态。源码与资产分仓，后续说明文档不改变安装包输入。没有实际完成的步骤继续保留待办，不填写推断值或测试成绩。
-
-Once source and assets are final, fill in the actual source SHA, signing status, sizes, hashes, release/asset IDs and public links. Change the pending status only after publication and public manifest verification. Keep unfinished items pending; do not substitute inferred values or test scores.
