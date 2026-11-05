@@ -1,14 +1,14 @@
-# VoxCue 0.6.9 · Windows
+# VoxCue 0.6.9 · Windows / macOS
 
-发布状态：Windows 已发行 / Status: Windows released。
+发布状态：Windows 与 macOS 已发行 / Status: Windows and macOS released.
 
-发布时间 / Published: `2026-11-05T18:00:29Z` · [v0.6.9](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.9)
+Windows 发布时间 / Windows published: `2026-11-05T18:00:29Z` · [v0.6.9](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v0.6.9)
 
-[下载 Windows x64 安装包 / Download Windows x64 installer](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/VoxCue-Setup-0.6.9-x64.exe)
+[下载 Windows x64 安装包 / Download Windows x64 installer](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/VoxCue-Setup-0.6.9-x64.exe) · [下载 macOS 安装包 / Download macOS installer](https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.6.9/VoxCue-0.6.9-arm64.dmg)
 
 ## 简体中文
 
-本次更新面向 Windows x64，改进登录、面试准备、模型选择和界面操作体验。macOS 0.6.9 尚未发行。
+本次更新面向 Windows x64 与 macOS 14.2 或更高版本（Apple 芯片），改进登录、面试准备、模型选择和界面操作体验。
 
 - **界面更统一。** 滚动条采用圆头胶囊并保持原宽；面试输入框、气泡和预览的圆角协调一致。菜单的圆角、内距和选中高亮统一，弹窗标题、关闭按钮和内容间距更整齐。
 - **登录反馈更清楚。** 输入框聚焦时呈现轻微浮起效果；密码长度提示使用灰色，邮箱、密码和验证码错误使用红色，并紧跟对应输入框。邮箱验证码改为六个数字格，支持自动前进、粘贴与键盘操作；发送及重发按钮始终位于六格右侧，窄窗口也保持同一行。
@@ -19,12 +19,12 @@
 - **引用来源更紧凑。** 域名引用与来源列表使用带网站图标的胶囊，更多来源展开和收起更平滑；普通链接和复制的原文保持。
 - **设置与状态信息更整齐。** 面试设置采用对齐的标签和控件列，同步状态、提示及按钮位置更紧凑。开始面试的权限检查在等待时保留布局空间，重新检查不再残留上一次音频测试的错误。
 - **知识库进度更准确。** 向量处理显示实际进度，随后明确提示“正在写入索引…”，避免接近完成时看起来又回到零。
-- **Windows 更新更连贯。** 启动和普通检查在一小时内复用上次检查结果，检查失败也不会反复联网。已下载完整的更新包在重启后重新验证并保留待安装状态，无需重复下载；退出中断下载后清理未完成内容，并暂停自动下载一小时，期间仍可手动下载。安装仍需明确确认。
-- **修复操作细节。** 修复邮箱格式未正确时首次点击“跳过登录”“注册”“找回密码”或“返回登录”可能无响应；字段间的正常校验保持。修复截图缩略图光标显示不正确，以及菜单边缘裁切、快速切换焦点、侧栏首次选中定位和删除面试记录时的页面闪动等问题。
+- **更新更连贯。** 启动和普通检查在一小时内复用上次检查结果，检查失败也不会反复联网。已下载完整的更新包在重启后重新验证并保留待安装状态，无需重复下载；退出中断下载后清理未完成内容，并暂停自动下载一小时，期间仍可手动下载。安装仍需明确确认。
+- **修复操作细节。** 修复邮箱格式未正确时首次点击“跳过登录”“注册”“找回密码”或“返回登录”可能无响应；字段间的正常校验保持。修复截图缩略图光标显示不正确，以及菜单边缘裁切、快速切换焦点、侧栏首次选中定位和删除面试记录时的页面闪动等问题。macOS 同时修复了菜单和弹窗收起时图标变成实心方块的问题。
 
 ## English
 
-This update is for Windows x64 and improves sign-in, interview preparation, model selection and everyday navigation. macOS 0.6.9 has not been released.
+This update supports Windows x64 and macOS 14.2 or later on Apple silicon. It improves sign-in, interview preparation, model selection and everyday navigation.
 
 - **More consistent visuals.** Scrollbars have rounded capsule ends while retaining their width. Interview inputs, message bubbles and previews use coordinated corners. Menus share consistent corners, spacing and selection highlights, while dialog headings, close buttons and content are better aligned.
 - **Clearer sign-in feedback.** Focused inputs have a subtle raised appearance. Password-length guidance appears in gray, while email, password and verification-code errors appear in red directly below the relevant field. Email codes use six digit boxes with automatic advance, paste and keyboard support. The send and resend button stays to their right on the same row, even in narrow windows.
@@ -35,5 +35,5 @@ This update is for Windows x64 and improves sign-in, interview preparation, mode
 - **More compact sources.** Domain citations and source lists use capsules with website icons. Additional sources expand and collapse smoothly, while ordinary links and copied text retain their content.
 - **Better-aligned settings and status information.** Interview labels and controls share consistent columns, and sync messages sit neatly beside their actions. Interview permission checks reserve space while loading, and rechecking clears errors from the previous audio test.
 - **Clearer knowledge-base progress.** Embedding shows its actual progress, followed by a distinct “Writing index…” stage, avoiding the appearance of progress restarting near completion.
-- **A more reliable Windows update flow.** Startup and ordinary checks reuse the previous result for one hour, including failed checks, to avoid repeated network requests. Fully downloaded updates are verified again and remain ready to install after restarting, without another download. Exiting during a download clears unfinished content and pauses automatic downloading for one hour; manual downloading remains available. Installation still requires confirmation.
-- **Interaction fixes.** Fixed an unresponsive first click on “Continue locally”, “Sign up”, “Forgot password” or “Back to sign in” after an invalid email, while preserving normal field validation. Also fixed incorrect screenshot-thumbnail cursors, clipped menu edges, focus issues during rapid switching, initial sidebar marker placement and a page flash when deleting an interview record.
+- **More reliable updates.** Startup and ordinary checks reuse the previous result for one hour, including failed checks, to avoid repeated network requests. Fully downloaded updates are verified again and remain ready to install after restarting, without another download. Exiting during a download clears unfinished content and pauses automatic downloading for one hour; manual downloading remains available. Installation still requires confirmation.
+- **Interaction fixes.** Fixed an unresponsive first click on “Continue locally”, “Sign up”, “Forgot password” or “Back to sign in” after an invalid email, while preserving normal field validation. Also fixed incorrect screenshot-thumbnail cursors, clipped menu edges, focus issues during rapid switching, initial sidebar marker placement and a page flash when deleting an interview record. On macOS, icons retain their shapes as menus and dialogs close.

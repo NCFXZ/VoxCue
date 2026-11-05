@@ -76,6 +76,8 @@ The sign-in fix covers the first click on “Continue locally”, “Sign up”,
 
 ## 双端同步与 Mac 接续 / Cross-platform follow-up
 
+以下为 Windows 发行当时的接续边界。Mac 后续已完成本机接续并追加资产，见 [Mac 0.6.9 发行索引](MACOS_0.6.9_RELEASE.md)。The notes below describe the original Windows handoff; the later Mac publication is recorded separately.
+
 - 共享页面、业务、样式和交互均属于双端需求；本次发行索引仅记录 Windows x64，不能据此宣称 Mac 0.6.9 已发行或完成原生验证。
 - Mac 逐项接续见 [M001 起的 0.6.8 → 0.6.9 交接清单](MACOS_0.6.9_HANDOFF.md)。其中 M099–M107、M111–M120 明确要求 Mac 原生适配器补齐检查缓存、完整包持久恢复、中断清理/冷却及本机签名/安装验证；共享契约已接通不能替代这些工作。
 - 当前 Windows 工作区不修改 `macos/` 全树。Mac 必须在本机同步生成配置、实现原生缺口、验证全部共享改动并完成签名打包，再按当时授权发行本平台资产。

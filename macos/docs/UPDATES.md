@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。当前0.6.6发行来源与三项资产见[Mac发行索引](../../shared/docs/MACOS_0.6.6_RELEASE.md)，执行范围见[进度](../../PROGRESS.md)；历史验包按对应版本文档理解。
+当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。当前0.6.9发行来源与三项资产见[Mac发行索引](../../shared/docs/MACOS_0.6.9_RELEASE.md)，执行范围见[进度](../../PROGRESS.md)；历史验包按对应版本文档理解。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 

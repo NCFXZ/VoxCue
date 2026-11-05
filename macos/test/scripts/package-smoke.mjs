@@ -675,16 +675,30 @@ try {
     }
   }
   if (process.argv.includes('--online')) {
-    const result = await app.evaluate(async ({ app }) => {
+    const result = await app.evaluate(async ({ app }, owner) => {
       const require = process
         .getBuiltinModule('module')
         .createRequire(app.getAppPath() + '/package.json');
+      const path = require('node:path');
+      const profile = app.getPath('userData');
+      if (!profile.startsWith(owner + path.sep)) throw Error('Synthetic package profile required');
       const originalVersion = app.getVersion.bind(app);
       const installedVersion = originalVersion();
-      app.getVersion = () => '0.2.0';
-      const driver = require(
+      const { createMacUpdateDriver } = require(
         app.getAppPath() + '/dist-electron/macos/electron/updates/driver.js',
-      ).createMacUpdateDriver();
+      );
+      // The ordinary startup already owns its update cache. The anonymous
+      // read-back must make a fresh check and cannot race or reuse that state.
+      const verification = path.join(profile, 'online-verification');
+      require('node:fs').mkdirSync(verification, { mode: 0o700 });
+      app.setPath('userData', verification);
+      let driver;
+      try {
+        driver = createMacUpdateDriver();
+      } finally {
+        app.setPath('userData', profile);
+      }
+      app.getVersion = () => '0.2.0';
       const events = [];
       let downloaded = false;
       driver.on('update-available', (event) => events.push(event));
@@ -699,7 +713,7 @@ try {
         await driver.dispose();
         app.getVersion = originalVersion;
       }
-    });
+    }, testRoot);
     assert.equal(result.events[0]?.version, version);
     assert.equal(result.installedVersion, version);
     assert.equal(result.downloaded, true);
