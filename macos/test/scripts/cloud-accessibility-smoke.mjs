@@ -88,16 +88,22 @@ try {
             .getByRole('navigation', { name: '设置分类' })
             .getByRole('button', { name: category, exact: true })
             .click();
+          await settings.getByRole('heading', { name: category, exact: true }).waitFor();
           if (category === '面试设置') {
             const font = settings.getByRole('slider', { name: '面试字体大小', exact: true });
             await font.focus();
             await font.press('End');
             assert.equal(await font.inputValue(), '24');
           }
-          await main.evaluate(
-            () =>
-              new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-          );
+          await main.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+          await settings.evaluate(async (dialog) => {
+            await Promise.allSettled(
+              dialog.getAnimations({ subtree: true }).filter((animation) =>
+                animation.effect?.getComputedTiming().iterations !== Infinity,
+              ).map((animation) => animation.finished),
+            );
+            await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+          });
           const geometry = await settings.evaluate((dialog) => {
             const heading = dialog.querySelector('.settings-content-heading'),
               content = dialog.querySelector('.settings-content-body');
@@ -203,6 +209,7 @@ try {
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button', { name: 'VoxCue 账号', exact: true })
       .click();
+    await settings.getByRole('heading', { name: 'VoxCue 账号', exact: true }).waitFor();
     for (const scheme of ['light', 'dark']) {
       await app.evaluate(({ nativeTheme }, scheme) => {
         nativeTheme.themeSource = scheme;

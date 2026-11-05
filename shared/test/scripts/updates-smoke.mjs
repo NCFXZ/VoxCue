@@ -5,7 +5,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
+import { closeUiApp, installUiAccount, focusUiWindow } from './install-ui-account.mjs';
 import { assertDownloadButton, assertInitialDownloadProgress } from './assert-download-button.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { captureRequested } from './capture-requested.mjs';
@@ -106,6 +106,14 @@ const openUpdates = async (page) => {
     .getByRole('navigation', { name: '设置分类' })
     .getByRole('button', { name: '关于与更新', exact: true })
     .click();
+  await settings.getByRole('heading', { name: '关于与更新', exact: true }).waitFor();
+  await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+  await settings.evaluate(async (dialog) => {
+    await Promise.allSettled(dialog.getAnimations({ subtree: true }).filter((animation) =>
+      animation.effect?.getComputedTiming().iterations !== Infinity,
+    ).map((animation) => animation.finished));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   return settings;
 };
 const waitPhase = (page, phase) =>
@@ -114,6 +122,13 @@ const waitPhase = (page, phase) =>
     async (phase) => (await window.desktop.updates({ op: 'status' })).phase === phase,
     phase,
   );
+const waitForHeldCheck = (before) => app.evaluate(async (_electron, before) => {
+  const deadline = Date.now() + 4000;
+  while (globalThis.updateDriver.checks.length === before && Date.now() < deadline)
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  if (globalThis.updateDriver.checks.length !== before + 1)
+    throw Error('The five-second hold did not trigger exactly one update check');
+}, before);
 let feedbackCapture = 0;
 const assertFeedbackAlignment = async (settings) => {
   const metrics = await settings.locator('.updates-footer').evaluate((footer) => {
@@ -183,22 +198,46 @@ try {
   let settings = await openUpdates(page);
   await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
   const checkButton = settings.getByRole('button', { name: '检查更新', exact: true });
+  // Losing native focus/visibility correctly cancels a product hold. Establish
+  // this owned Mac window as AppKit's active app/key window before pointerdown.
+  await focusUiWindow(app, page);
+  await page.waitForFunction(() => document.visibilityState === 'visible' && document.hasFocus());
+  const windowId = await (await app.browserWindow(page)).evaluate((window) => window.id);
+  const assertFocusedWindow = async () => {
+    if (process.platform !== 'darwin') return;
+    const state = await app.evaluate(({ app, BrowserWindow }, id) => ({
+      active: app.isActive(),
+      focused: BrowserWindow.getFocusedWindow()?.id === id,
+      visible: BrowserWindow.fromId(id)?.isVisible(),
+    }), windowId);
+    assert.deepEqual(state, { active: true, focused: true, visible: true });
+  };
+  await assertFocusedWindow();
   // Wait for the settings view snapshot to stop intercepting pointer input.
   await checkButton.hover();
+  await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+  const holdBox = await checkButton.evaluate(async (button) => {
+    const rect = () => {
+      const box = button.getBoundingClientRect();
+      return { x: box.x, y: box.y, width: box.width, height: box.height };
+    };
+    await new Promise(requestAnimationFrame);
+    const before = rect();
+    await new Promise(requestAnimationFrame);
+    const box = rect();
+    if (Object.keys(box).some((key) => Math.abs(box[key] - before[key]) > 1 / 64) ||
+        !button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)))
+      throw Error('The update hold requires a stable, directly hittable button');
+    return box;
+  });
   const beforeHold = await app.evaluate(() => globalThis.updateDriver.checks.length);
-  const holdBox = await checkButton.boundingBox();
   await page.mouse.move(holdBox.x + holdBox.width / 2, holdBox.y + holdBox.height / 2);
+  await assertFocusedWindow();
   await page.mouse.down();
   try {
     await page.waitForTimeout(4700);
     assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeHold);
-    await app.evaluate(async (_electron, before) => {
-      const deadline = Date.now() + 4000;
-      while (globalThis.updateDriver.checks.length === before && Date.now() < deadline)
-        await new Promise((resolve) => setTimeout(resolve, 20));
-      if (globalThis.updateDriver.checks.length !== before + 1)
-        throw Error('The five-second hold did not trigger exactly one update check');
-    }, beforeHold);
+    await waitForHeldCheck(beforeHold);
   } finally {
     await page.mouse.up();
   }
@@ -218,6 +257,56 @@ try {
     await app.evaluate((_electron, before) => globalThis.updateDriver.checks.slice(before), beforeKeyboard),
     [false],
     'An ordinary keyboard press keeps the normal cached-check operation',
+  );
+  await focusUiWindow(app, page);
+  await checkButton.focus();
+  await assertFocusedWindow();
+  const beforeSpace = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  await page.keyboard.down('Space');
+  try {
+    await page.waitForTimeout(4700);
+    assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeSpace);
+    assert.equal(await checkButton.evaluate((button) => document.activeElement === button), true);
+    // A second down while held is a real repeated keydown. It must neither
+    // restart the original deadline nor submit another check after it fires.
+    await page.keyboard.down('Space');
+    await waitForHeldCheck(beforeSpace);
+    await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
+    await page.keyboard.down('Space');
+  } finally {
+    await page.keyboard.up('Space');
+  }
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.deepEqual(
+    await app.evaluate((_electron, before) => globalThis.updateDriver.checks.slice(before), beforeSpace),
+    [true],
+    'Repeated Space keydowns retain the original hold and release adds no check',
+  );
+  await checkButton.focus();
+  await assertFocusedWindow();
+  const beforeBlur = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  await page.keyboard.down('Space');
+  try {
+    await page.keyboard.press('Tab');
+    assert.equal(await checkButton.evaluate((button) => document.activeElement === button), false);
+    await page.waitForTimeout(5100);
+    assert.equal(
+      await app.evaluate(() => globalThis.updateDriver.checks.length),
+      beforeBlur,
+      'Moving keyboard focus cancels the held check for the full five-second interval',
+    );
+  } finally {
+    await page.keyboard.up('Space');
+  }
+  await page.evaluate(
+    () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+  );
+  assert.equal(
+    await app.evaluate(() => globalThis.updateDriver.checks.length),
+    beforeBlur,
+    'Releasing Space after focus leaves the button must not activate an update check',
   );
   await assertFeedbackAlignment(settings);
   for (const width of [860, 1280]) {
@@ -459,7 +548,7 @@ try {
       {
         passed: true,
         checks: [
-          'five-second hold forces one check, release adds no check, short Enter remains normal',
+          'mouse/Space five-second holds force once, repeated keydown keeps the deadline, release adds no check, short Enter stays normal and Tab cancels the held timer',
           'checking/download animation advances in light/dark themes, reduced motion respected, completion removes spinner',
           'settings check/download/progress/retry',
           'main-frame authorization',

@@ -10,7 +10,7 @@ Windows 安装版的共享更新适配器在 `%APPDATA%/VoxCue/updates/release-c
 
 缓存逻辑位于 `shared/electron/backend/updates/cache.ts`，Windows stock updater 执行与本地包恢复封装在 `driver.ts`，业务阶段由 `UpdateService` 协调。生产调用仅由 main 提供应用数据目录，Renderer 不获得缓存或安装包路径。缓存只保留经现行发行选择器重新验证的本平台完整稳定发行，不改 GitHub 固定公开源、匿名访问、包命名或可信安装策略。
 
-Mac 原生 Sparkle 适配器仍在 `macos/`，本轮 Windows 工作区不修改该树。共享契约及按钮已兼容，Mac 的同等持久缓存、完整包保留和中断冷却须由 Mac 本机接续，不能将 Windows 验证代作 Mac 验收。
+Mac 原生 Sparkle 适配器的本机接续见 [Mac 更新设计](../../macos/docs/UPDATES.md#持久检查与完整包恢复)。两端共用一小时限频、journal 与冷却实现；Mac 额外保留并重新认证签名 envelope，不用 Windows 验证代作 Mac 验收。
 
 定向入口：`update-cache.test.ts`、`updates.test.ts`、`desktop-ipc.test.ts`、`updates-smoke.mjs` 及 Windows `updates-native-smoke.mjs`。前者使用隔离临时目录/合成公开元数据，后者用真实 NsisUpdater 和 owner loopback 服务核对缓存重启、完整包恢复、取消/清理及摘要拒绝；不执行安装器，不读取真实用户资料，结果仅输出终端。
 

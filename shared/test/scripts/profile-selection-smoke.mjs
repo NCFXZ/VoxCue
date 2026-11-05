@@ -305,8 +305,23 @@ try {
             topLayer: snapshot.matches(':popover-open'),
             pointerEvents: style.pointerEvents,
             backdropPointerEvents: getComputedStyle(snapshot, '::backdrop').pointerEvents,
-            semanticDescendants: snapshot.querySelectorAll('[id], [role], [name], [autofocus]')
-              .length,
+            semanticDescendants: [
+              ...snapshot.querySelectorAll('[id], [role], [name], [autofocus]'),
+            ].filter(
+              (node) =>
+                node.hasAttribute('role') ||
+                node.hasAttribute('name') ||
+                node.hasAttribute('autofocus') ||
+                (node.hasAttribute('id') && node.namespaceURI !== 'http://www.w3.org/2000/svg'),
+            ).length,
+            brokenMasks: [...snapshot.querySelectorAll('[mask]')].filter((node) => {
+              const id = node.getAttribute('mask')?.match(/^url\(#(.+)\)$/)?.[1];
+              const resource = id && document.getElementById(id);
+              return !resource || !node.closest('svg')?.contains(resource);
+            }).length,
+            duplicateIds:
+              new Set([...document.querySelectorAll('[id]')].map((node) => node.id)).size !==
+              document.querySelectorAll('[id]').length,
             nativeModals: document.querySelectorAll('dialog:modal').length,
           });
         }
@@ -341,6 +356,8 @@ try {
           frame.pointerEvents === 'none' &&
           frame.backdropPointerEvents === 'none' &&
           frame.semanticDescendants === 0 &&
+          frame.brokenMasks === 0 &&
+          !frame.duplicateIds &&
           frame.nativeModals === 0,
       ),
       'Only a noninteractive, inaccessible visual remains after native modal close: ' +

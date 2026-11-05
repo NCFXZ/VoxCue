@@ -14,6 +14,7 @@ const modelFree = new Set([
   'interview-ux',
   'interview-screenshot',
   'interview-retry',
+  'interview-effort',
   'copilot-runtime',
   'chatgpt-usage-runtime',
 ]);

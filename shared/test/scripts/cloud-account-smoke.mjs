@@ -258,9 +258,13 @@ try {
                 const range = document.createRange();
                 range.selectNodeContents(button);
                 const style = getComputedStyle(button);
+                const gridStyle = getComputedStyle(grid);
                 return {
                   cells,
                   grid: gridBox.toJSON(),
+                  tracks: gridStyle.gridTemplateColumns.split(/\s+/).map(parseFloat),
+                  cellGap: parseFloat(gridStyle.columnGap),
+                  scale: devicePixelRatio,
                   button: buttonBox.toJSON(),
                   leftGap: gridBox.left - rowBox.left,
                   rightGap: rowBox.right - buttonBox.right,
@@ -276,15 +280,26 @@ try {
                   feedbackBelow: !feedback || feedback.getBoundingClientRect().top >= rowBox.bottom,
                 };
               });
-              const unit = (value) => Math.round(value * 64);
+              const unit = (value) => Math.round(value * 64 * layout.scale);
               const description = `${state}/${locale}/${dimensions.join('x')}/${dark ? 'dark' : 'light'} ${JSON.stringify(layout)}`;
               assert.equal(layout.cells.length, 6, description);
+              assert.equal(layout.tracks.length, 6, description);
+              // Fractional fr tracks are individually quantized by Chromium.
+              // Compare against their resolved boundaries, including the small
+              // remainder the browser may leave at the end of the grid box.
+              let trackStart = layout.grid.left;
+              for (const [index, cell] of layout.cells.entries()) {
+                const trackEnd = trackStart + layout.tracks[index];
+                assert.equal(unit(cell.left), unit(trackStart), description);
+                assert.equal(unit(cell.right), unit(trackEnd), description);
+                trackStart = trackEnd + layout.cellGap;
+              }
+              const trailing = unit(layout.grid.right) - unit(layout.cells.at(-1).right);
+              assert.ok(trailing >= 0 && trailing < layout.tracks.length, description);
               assert.ok(
                 unit(layout.leftGap) === 0 &&
                   unit(layout.rightGap) === 0 &&
                   unit(layout.gap) === unit(layout.expectedGap) &&
-                  unit(layout.cells[0].left) === unit(layout.grid.left) &&
-                  unit(layout.cells.at(-1).right) === unit(layout.grid.right) &&
                   layout.cells.every(
                     (cell) =>
                       cell.width > 0 &&

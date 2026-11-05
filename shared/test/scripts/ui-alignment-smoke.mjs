@@ -420,8 +420,10 @@ try {
     await page
       .locator('.sidebar')
       .evaluate((node) => Math.round(node.getBoundingClientRect().width * 64) / 64),
-    68,
-    'Collapsed sidebar keeps its original width',
+    await page.locator('.app-shell').evaluate((node) =>
+      node.classList.contains('native-window-controls') ? 84 : 68,
+    ),
+    'Collapsed sidebar keeps the platform window-control width',
   );
   assert.equal(collapsedMarker.opacity, 1);
   assert(Math.abs(collapsedMarker.left - 3) < 0.5);

@@ -267,6 +267,28 @@ describe('persistent release check policy', () => {
       vi.mocked(atomicFile).mockReset().mockImplementation(fs.atomicFile);
     }
   });
+  it('revalidates platform envelopes and preserves completed metadata across restart', async () => {
+    const signed = { ...info, envelope: 'authenticated fixture' };
+    const validate = vi.fn((value: unknown) => {
+      if ((value as typeof signed).envelope !== signed.envelope)
+        throw Error('Untrusted platform envelope');
+      return { ...info, envelope: signed.envelope };
+    });
+    const cache = new UpdateCache(cacheDirectory(), 'windows-x64', validate);
+    await cache.latest(false, async () => signed);
+    await cache.beginDownload(signed);
+    await cache.completeDownload(signed);
+    expect((await state()).download).toBeUndefined();
+    expect(new UpdateCache(cacheDirectory(), 'windows-x64', validate).completed()).toEqual(signed);
+    const value = await state();
+    value.completed.envelope = 'tampered';
+    await writeFile(cache.file, JSON.stringify(value));
+    const load = vi.fn(async () => signed);
+    await expect(
+      new UpdateCache(cacheDirectory(), 'windows-x64', validate).latest(true, load),
+    ).rejects.toThrow('cache');
+    expect(load).not.toHaveBeenCalled();
+  });
   it('fails safely without remote I/O on damaged/wrong-platform state or a failed attempt write', async () => {
     await mkdir(cacheDirectory(), { recursive: true });
     const load = vi.fn(async () => info);

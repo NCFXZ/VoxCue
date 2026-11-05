@@ -248,7 +248,11 @@ try {
     height: 6,
   };
   const windowId = await (await app.browserWindow(main)).evaluate((win) => win.id);
-  const titlebar = await main.locator('.titlebar').boundingBox();
+  // Mac traffic lights are native; capture its fixed web sidebar control.
+  // Native window chrome itself remains covered by the Mac window suite.
+  const titlebar = await main
+    .locator(process.platform === 'darwin' ? '.sidebar-toggle-button' : '.titlebar')
+    .boundingBox();
   const chromeClip = {
     x: Math.floor(titlebar.x),
     y: Math.floor(titlebar.y),
@@ -300,7 +304,7 @@ try {
     assert.equal(movingChrome.length, beforeChrome.length);
     assert.ok(
       movingChrome.every((value, index) => Math.abs(value - beforeChrome[index]) <= 4),
-      'Minimize, maximize and close pixels must remain present while page snapshots move',
+      'Fixed window controls must remain present while page snapshots move',
     );
   } finally {
     await main.evaluate(() => {

@@ -157,8 +157,22 @@ try {
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const aiSettings = page.getByRole('dialog', { name: '设置', exact: true });
-  await aiSettings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  await aiSettings
+    .getByRole('navigation', { name: '设置分类' })
+    .getByRole('button', { name: 'AI 服务', exact: true })
+    .click();
+  await aiSettings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
+  await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
   assert.equal(await aiSettings.locator('.ai-service-label img.service-brand-icon').count(), 2);
+  for (const [provider, action] of [
+    ['ChatGPT', '断开连接'],
+    ['GitHub Copilot', '连接'],
+  ]) {
+    const row = aiSettings.locator('.ai-service-row').filter({
+      has: page.getByText(provider, { exact: true }),
+    });
+    await row.getByRole('button', { name: action, exact: true }).waitFor();
+  }
   for (const image of await aiSettings.locator('.ai-service-label img.service-brand-icon').all()) {
     await image.evaluate((image) => image.decode());
     assert.ok(await image.evaluate((image) => image.complete && image.naturalWidth > 0));
@@ -207,7 +221,11 @@ try {
     });
     assert.equal(blocked, true);
     await page.getByRole('button', { name: '知识库', exact: true }).click();
-    for (const button of await page.getByRole('button', { name: '创建知识库', exact: false }).all())
+    const createKnowledge = page
+      .locator('.knowledge-page')
+      .getByRole('button', { name: '创建知识库', exact: true });
+    await createKnowledge.first().waitFor();
+    for (const button of await createKnowledge.all())
       assert.equal(await button.isDisabled(), true);
     await page
       .locator('.management-container > .components-notice')
@@ -278,10 +296,7 @@ try {
     assert.equal(await start.isEnabled(), true);
     assert.equal(await notice.count(), 0);
     await page.getByRole('button', { name: '知识库', exact: true }).click();
-    assert.equal(
-      await page.getByRole('button', { name: '创建知识库', exact: false }).first().isEnabled(),
-      true,
-    );
+    assert.equal(await createKnowledge.first().isEnabled(), true);
     const state = await page.evaluate(() => window.desktop.components({ op: 'status' }));
     assert.equal(state.phase, 'ready');
     assert.deepEqual(Object.fromEntries(state.items.map((item) => [item.id, item.phase])), {

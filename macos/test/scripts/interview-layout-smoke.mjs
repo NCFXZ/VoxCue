@@ -41,6 +41,7 @@ try {
       const main = await connectUiAccount(app, await app.firstWindow());
       await main.getByRole('button', { name: '开始面试', exact: true }).click();
       const dialog = main.getByRole('dialog', { name: '开始面试', exact: true });
+      await dialog.getByRole('heading', { name: '开始面试', exact: true }).waitFor();
       const rows = await dialog.locator('.interview-start-summary > div').evaluateAll((nodes) =>
         nodes.map((node) => ({
           title: node.querySelector('dt').textContent,

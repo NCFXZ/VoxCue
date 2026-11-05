@@ -4,12 +4,15 @@ import { open, lstat } from 'node:fs/promises';
 import type { SignedMacUpdate } from './manifest';
 import type { ReleaseFetch } from '../../../shared/electron/backend/updates/provider';
 
-export async function verifyDownload(file: string, update: SignedMacUpdate) {
+export async function verifyDownload(file: string, update: SignedMacUpdate, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  if (update.size > 2 * 1024 ** 3) throw Error('Update archive too large');
   const stat = await lstat(file);
   if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== update.size)
     throw Error('Invalid update archive');
   const hash = createHash('sha512');
-  for await (const chunk of createReadStream(file)) hash.update(chunk);
+  for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
+  signal?.throwIfAborted();
   if (!timingSafeEqual(hash.digest(), Buffer.from(update.sha512, 'base64')))
     throw Error('Update archive checksum mismatch');
 }
@@ -29,7 +32,10 @@ export async function downloadArchive(
     await response.body?.cancel().catch(() => {});
     throw Error('Update download failed');
   }
-  const output = await open(file, 'wx', 0o600);
+  const output = await open(file, 'wx', 0o600).catch(async (error) => {
+    await response.body?.cancel().catch(() => {});
+    throw error;
+  });
   const reader = response.body.getReader();
   const abort = () => {
     void reader.cancel().catch(() => {});
@@ -61,5 +67,5 @@ export async function downloadArchive(
     reader.releaseLock();
     await output.close();
   }
-  await verifyDownload(file, update);
+  await verifyDownload(file, update, signal);
 }

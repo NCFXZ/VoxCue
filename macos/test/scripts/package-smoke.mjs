@@ -532,7 +532,7 @@ try {
         app.getAppPath() + '/dist-electron/macos/electron/updates/driver.js',
       );
       const driver = createMacUpdateDriver();
-      driver.dispose();
+      await driver.dispose();
       assert.equal(app.isPackaged, true);
       assert.ok(fs.existsSync(path.join(app.getAppPath(), 'public/voxcue.png')));
       return [
@@ -673,7 +673,7 @@ try {
         await driver.downloadUpdate();
         return { events, downloaded, installedVersion };
       } finally {
-        driver.dispose();
+        await driver.dispose();
         app.getVersion = originalVersion;
       }
     });

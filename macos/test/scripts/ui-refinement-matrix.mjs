@@ -10,6 +10,8 @@ import { requireUnlockedDesktop, holdDesktopAwake } from './desktop-session.mjs'
 // Uses the production shared UI; GUI stays serial.
 const outcomes = [];
 const suites = [
+  'web-materials',
+  'ui-material-refinement',
   'ui-alignment',
   'ui-refinement',
   'interview-screenshot',
@@ -35,8 +37,12 @@ const suites = [
   'language',
   'preparation-guide',
   'profile-ui',
+  'profile-selection',
   'history-branding',
   'login',
+  'login-entry',
+  'composer',
+  'provider-ui',
   'chat-response',
   'chat-progress',
   'account-usage-overview',

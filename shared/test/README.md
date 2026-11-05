@@ -2,7 +2,9 @@
 
 本轮完整验证与发行范围见 `PROGRESS.md`，逐项双端行为及测试修复见 [0.6.8→0.6.9 Mac 接续清单](../docs/MACOS_0.6.9_HANDOFF.md)。共享完整矩阵、Windows 原生、五档 DPI、20 轮面试及 600 秒音频长稳继续完整执行；下文旧版本段落保留其历史上下文，不构成另一平台已验声明。测试结果仅终端/对话，归档与公开资产记录独立维护。
 
-更新缓存定向入口：`update-cache.test.ts` 覆盖跨实例一小时缓存、失败重放、时钟回拨、强制检查、缓存损坏/写入失败及 stock 下载缓存恢复；`updates.test.ts` 保留检查、恢复、自动下载冷却、取消与安装保存约束，`desktop-ipc.test.ts` 核对主窗口主 frame 及可选 `force` 参数。共享 `updates-smoke.mjs` 使用隔离驱动验证真实按钮长按 5 秒、短按键盘、释放不重复检查及既有下载/保存退出流程。Windows `updates-native-smoke.mjs` 使用真实 NsisUpdater 与 owner loopback 服务验证重启不重复请求、完整包恢复和半成品退出清理；不执行安装器或访问线上发行源。Mac 原生缓存接续由 Mac 本机执行。
+更新缓存定向入口：`update-cache.test.ts` 覆盖跨实例一小时缓存、失败重放、时钟回拨、强制检查、缓存损坏/写入失败及 stock 下载缓存恢复；`updates.test.ts` 保留检查、恢复、自动下载冷却、取消与安装保存约束，`desktop-ipc.test.ts` 核对主窗口主 frame 及可选 `force` 参数。共享 `updates-smoke.mjs` 使用隔离驱动验证真实按钮长按 5 秒、短按键盘、释放不重复检查及既有下载/保存退出流程。Windows `updates-native-smoke.mjs` 使用真实 NsisUpdater 与 owner loopback 服务验证重启不重复请求、完整包恢复和半成品退出清理；不执行安装器或访问线上发行源。Mac 同名本机入口先执行生产 adapter + Electron loopback 的缓存/签名恢复/慢流中断矩阵，再保留原 Sparkle 坏归档签名、取消与隔离安装场景；单测补在 Mac `update-driver.test.ts`、`updates.test.ts`。
+
+Mac 五档入口 `test/scripts/ui-refinement-matrix.mjs` 保留原30项并追加6个缩放敏感场景，共36项；`--list` 可预览完整排程。`interview-effort-smoke.mjs` 纳入 Mac 功能矩阵，核对活动保存期间的 DOM/焦点、忙锁与失败回滚。菜单/弹窗退出快照使用独立 SVG 资源标识，`settings-smoke.mjs` 在浅深中间帧核对图标像素、mask 引用和身份隔离，`profile-selection-smoke.mjs` 保留即时解锁及快照清理。
 
 共享界面细调定向入口（本平台目录串行执行）：`cloud-account-smoke.mjs --login-check` 检查字段下方提示/错误及文字起点、焦点阴影和六格验证码的输入/粘贴/导航；`password-policy-smoke.mjs` 保留注册/重置密码范围与真实隔离 API 检查。`login-entry-smoke.mjs` 检查自动转写、思考、回答仅播放一次、完成后静止、切换注册/找回密码不重播、离屏暂停和减少动态效果；不将自动化宿主未能触发的原生隐藏可见性事件算作已验。
 

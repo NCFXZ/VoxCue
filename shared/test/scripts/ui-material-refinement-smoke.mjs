@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
 // Real renderer and pointer events; synthetic account, speech and content only.
@@ -40,6 +40,17 @@ const modalStyle = async (dialog, backdrop = 'rgba(0, 0, 0, 0.4)') => {
 };
 const hoverOnly = async (page, button) => {
   await page.bringToFront();
+  await focusUiWindow(app, page);
+  await page.waitForFunction(() => !document.hidden && document.hasFocus());
+  if (process.platform === 'darwin') {
+    const id = await (await app.browserWindow(page)).evaluate((window) => window.id);
+    const native = await app.evaluate(({ app, BrowserWindow }, id) => ({
+      active: app.isActive(),
+      focused: BrowserWindow.getFocusedWindow()?.id === id,
+      visible: BrowserWindow.fromId(id)?.isVisible(),
+    }), id);
+    assert.deepEqual(native, { active: true, focused: true, visible: true });
+  }
   await page.mouse.move(1, 1);
   await button.evaluate((e) => e.blur());
   await settle(page);
@@ -51,26 +62,52 @@ const hoverOnly = async (page, button) => {
   await button.scrollIntoViewIfNeeded();
   await settle(page);
   const before = await button.boundingBox();
-  await button.hover();
-  await settle(page);
-  // Auto-scroll and the completed response can move a proposal after hover's
-  // first pointer dispatch. Hit its current center after that layout settles.
-  const target = await button.boundingBox();
-  await page.mouse.move(target.x + target.width / 2 - 1, target.y + target.height / 2, {
-    steps: 2,
+  const pointer = await page.evaluateHandle(() => {
+    const events = [];
+    const record = (event) => {
+      events.push({
+        type: event.type,
+        trusted: event.isTrusted,
+        x: event.clientX,
+        y: event.clientY,
+        target: event.target?.outerHTML?.slice(0, 160),
+      });
+      if (events.length > 8) events.shift();
+    };
+    const types = ['pointermove', 'pointerover', 'pointerout'];
+    for (const type of types) window.addEventListener(type, record, true);
+    return {
+      events,
+      stop: () => {
+        for (const type of types) window.removeEventListener(type, record, true);
+      },
+    };
   });
-  await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2, { steps: 2 });
-  await page.waitForFunction((node) => node.matches(':hover'), await button.elementHandle());
-  await settle(page);
-  assert.equal(
-    await button.evaluate((e) => e.matches(':hover')),
-    true,
-    JSON.stringify(
-      await button.evaluate((e) => {
+  try {
+    await button.hover();
+    await settle(page);
+    // Auto-scroll and the completed response can move a proposal after hover's
+    // first pointer dispatch. Hit its current center after that layout settles.
+    const target = await button.evaluate((node) => {
+      const box = node.getBoundingClientRect();
+      const x = box.x + box.width / 2, y = box.y + box.height / 2;
+      return { x, y, hitsButton: node.contains(document.elementFromPoint(x, y)) };
+    });
+    assert.equal(target.hitsButton, true, 'The settled center must hit the hover control');
+    await page.mouse.move(target.x - 1, target.y, { steps: 2 });
+    await page.mouse.move(target.x, target.y, { steps: 2 });
+    await page.waitForFunction((node) => node.matches(':hover'), await button.elementHandle());
+    await settle(page);
+    assert.equal(await button.evaluate((e) => e.matches(':hover')), true);
+  } catch (error) {
+    const diagnostics = await button
+      .evaluate((e) => {
         const box = e.getBoundingClientRect();
         return {
           label: e.getAttribute('aria-label'),
           box: box.toJSON(),
+          viewport: { width: innerWidth, height: innerHeight, dpr: devicePixelRatio },
+          visibility: document.visibilityState,
           hovered: [...document.querySelectorAll(':hover')].map(
             (node) => node.tagName + '.' + node.className,
           ),
@@ -79,9 +116,18 @@ const hoverOnly = async (page, button) => {
             ?.outerHTML.slice(0, 300),
           focused: document.hasFocus(),
         };
-      }),
-    ),
-  );
+      })
+      .catch((error) => ({ error: error.message }));
+    const events = await pointer.evaluate((pointer) => pointer.events).catch(() => []);
+    console.error(
+      'Hover input failure',
+      JSON.stringify({ scale: process.env.VOXCUE_TEST_SCALE_FACTOR, ...diagnostics, events }),
+    );
+    throw error;
+  } finally {
+    await pointer.evaluate((pointer) => pointer.stop()).catch(() => {});
+    await pointer.dispose();
+  }
   assert.notEqual(
     await button.evaluate((e) => getComputedStyle(e).backgroundColor),
     'rgba(0, 0, 0, 0)',

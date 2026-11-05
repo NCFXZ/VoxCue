@@ -4,6 +4,11 @@ import { mkdtemp, rm, readFile, writeFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import { get } from 'node:http';
+import { createReadStream } from 'node:fs';
+vi.mock('node:fs', async (original) => {
+  const fs = await original<typeof import('node:fs')>();
+  return { ...fs, createReadStream: vi.fn(fs.createReadStream) };
+});
 import { signedMacUpdate, macUpdatePayload } from '../../electron/updates/manifest';
 import { downloadArchive, verifyDownload } from '../../electron/updates/download';
 import { installFeed } from '../../electron/updates/install-feed';
@@ -143,4 +148,51 @@ it('loopback installer serves only its token feed and verified archive; rejects 
   } finally {
     feed.close();
   }
+});
+
+it('cancels during final streamed checksum verification instead of publishing a downloaded archive', async () => {
+  const f = fixture();
+  const file = path.join(await temp(), 'update.zip');
+  const bytes = Buffer.alloc(2 * 1024 * 1024, 0x5a);
+  const update = {
+    ...f.update,
+    size: bytes.length,
+    sha512: createHash('sha512').update(bytes).digest('base64'),
+  };
+  const controller = new AbortController();
+  const fs = await vi.importActual<typeof import('node:fs')>('node:fs');
+  vi.mocked(createReadStream).mockImplementationOnce((file, options) => {
+    const stream = fs.createReadStream(file, options);
+    stream.once('data', () => controller.abort());
+    return stream;
+  });
+  await expect(
+    downloadArchive(
+      new URL('https://github.com/fixture'),
+      file,
+      update,
+      controller.signal,
+      async () => new Response(bytes),
+      () => {},
+    ),
+  ).rejects.toMatchObject({ name: 'AbortError' });
+});
+
+it('cancels the response stream when exclusive archive creation fails and preserves the existing file', async () => {
+  const f = fixture();
+  const file = path.join(await temp(), 'update.zip');
+  await writeFile(file, 'existing owner file');
+  const cancel = vi.fn();
+  await expect(
+    downloadArchive(
+      new URL('https://github.com/fixture'),
+      file,
+      f.update,
+      new AbortController().signal,
+      async () => new Response(new ReadableStream({ cancel })),
+      () => {},
+    ),
+  ).rejects.toMatchObject({ code: 'EEXIST' });
+  expect(cancel).toHaveBeenCalledOnce();
+  expect(await readFile(file, 'utf8')).toBe('existing owner file');
 });

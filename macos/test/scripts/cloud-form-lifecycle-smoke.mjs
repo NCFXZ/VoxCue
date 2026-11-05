@@ -38,6 +38,9 @@ window.cloudFormTest.mount();`,
   format: 'iife',
   platform: 'browser',
   jsx: 'automatic',
+  // This fixture accepts component lifecycle only; production CSS is checked
+  // by the real Mac UI matrix rather than emitted as an unlinked second output.
+  loader: { '.css': 'empty' },
   plugins: [
     {
       name: 'logic-only-icon',

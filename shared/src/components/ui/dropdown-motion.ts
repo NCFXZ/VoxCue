@@ -1,3 +1,5 @@
+import { prepareVisualSnapshot } from './visual-snapshot';
+
 function playMotion(content: HTMLElement, frames: Keyframe[], onRemove?: () => void) {
   const preference = matchMedia('(prefers-reduced-motion: reduce)');
   const style = getComputedStyle(content);
@@ -182,10 +184,8 @@ export function animateDropdownExit(
       copy.style.setProperty(property, computed.getPropertyValue(property));
     }
   }
+  prepareVisualSnapshot(copies);
   copies.forEach((node) => {
-    node.removeAttribute('id');
-    node.removeAttribute('role');
-    node.removeAttribute('name');
     node.style.animation = 'none';
     node.style.transition = 'none';
   });

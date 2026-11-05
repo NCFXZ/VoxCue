@@ -1,3 +1,5 @@
+import { prepareVisualSnapshot } from './visual-snapshot';
+
 let removeExit: (() => void) | undefined;
 
 export function clearModalExit() {
@@ -37,8 +39,8 @@ export function captureModalExit(dialog: HTMLDialogElement) {
       copy.style.setProperty(property, computed.getPropertyValue(property));
     }
   }
+  prepareVisualSnapshot(copies);
   copies.forEach((node) => {
-    for (const name of ['id', 'role', 'name', 'autofocus']) node.removeAttribute(name);
     node.style.transition = 'none';
     node.style.viewTransitionName = 'none';
     if (node !== snapshot) node.style.animation = 'none';

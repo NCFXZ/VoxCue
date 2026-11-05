@@ -74,6 +74,7 @@ interface CacheState {
   notBefore: number;
   info?: PlatformUpdateInfo;
   download?: PlatformUpdateInfo;
+  completed?: PlatformUpdateInfo;
 }
 const validTime = (value: unknown): value is number =>
   typeof value === 'number' &&
@@ -92,6 +93,7 @@ export class UpdateCache {
   constructor(
     directory: string,
     readonly target: ReleaseTarget,
+    private readonly validate: typeof validatePlatformUpdate = validatePlatformUpdate,
   ) {
     this.directory = path.resolve(directory);
     this.file = path.join(this.directory, 'release-cache.json');
@@ -131,8 +133,9 @@ export class UpdateCache {
         attemptSucceeded: value.attemptSucceeded,
         checkedAt: value.checkedAt,
         notBefore: value.notBefore,
-        ...(value.info ? { info: validatePlatformUpdate(value.info, target) } : {}),
-        ...(value.download ? { download: validatePlatformUpdate(value.download, target) } : {}),
+        ...(value.info ? { info: this.validate(value.info, target) } : {}),
+        ...(value.download ? { download: this.validate(value.download, target) } : {}),
+        ...(value.completed ? { completed: this.validate(value.completed, target) } : {}),
       };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
@@ -166,14 +169,14 @@ export class UpdateCache {
         (now < attemptedAt || now - attemptedAt < updateInterval)
       ) {
         if (this.state.attemptSucceeded && this.state.info)
-          return validatePlatformUpdate(this.state.info, this.target);
+          return this.validate(this.state.info, this.target);
         throw Error('The previous update check failed; retry after the hourly interval');
       }
       this.state.attemptedAt = now;
       this.state.attemptSucceeded = false;
       if (force) this.state.notBefore = 0;
       await this.save();
-      const info = validatePlatformUpdate(await load(), this.target);
+      const info = this.validate(await load(), this.target);
       const result = { ...this.state, info, checkedAt: Date.now(), attemptSucceeded: true };
       await this.save(result);
       this.state = result;
@@ -187,16 +190,25 @@ export class UpdateCache {
     return this.state.checkedAt;
   }
   info() {
-    return this.state.info && validatePlatformUpdate(this.state.info, this.target);
+    return this.state.info && this.validate(this.state.info, this.target);
   }
   journal() {
-    return this.state.download && validatePlatformUpdate(this.state.download, this.target);
+    return this.state.download && this.validate(this.state.download, this.target);
+  }
+  completed() {
+    return this.state.completed && this.validate(this.state.completed, this.target);
+  }
+  async completeDownload(info: PlatformUpdateInfo) {
+    const state = { ...this.state, completed: this.validate(info, this.target) };
+    delete state.download;
+    await this.save(state);
+    this.state = state;
   }
   automaticAllowed() {
     return !this.fault && !this.state.download && Date.now() >= this.state.notBefore;
   }
   async beginDownload(info: PlatformUpdateInfo) {
-    this.state.download = validatePlatformUpdate(info, this.target);
+    this.state.download = this.validate(info, this.target);
     await this.save();
   }
   async deferAutomaticDownload() {

@@ -36,6 +36,7 @@ try {
             style.transform === 'none' ? new DOMMatrix() : new DOMMatrix(style.transform);
           const box = menu.getBoundingClientRect();
           const wrapper = menu.parentElement.getBoundingClientRect();
+          const masks = [...menu.querySelectorAll('[mask]')];
           frames.push({
             state: menu.getAttribute('data-state'),
             opacity: Number(style.opacity),
@@ -57,6 +58,21 @@ try {
             ariaHidden: menu.getAttribute('aria-hidden'),
             snapshot: menu.hasAttribute('data-menu-outro'),
             roles: menu.querySelectorAll('[role]').length + Number(menu.hasAttribute('role')),
+            identities: [...menu.querySelectorAll('[id], [name], [autofocus]')].filter(
+              (node) =>
+                node.namespaceURI !== 'http://www.w3.org/2000/svg' ||
+                node.hasAttribute('name') ||
+                node.hasAttribute('autofocus'),
+            ).length,
+            masks: masks.length,
+            brokenMasks: masks.filter((node) => {
+              const id = node.getAttribute('mask')?.match(/^url\(#(.+)\)$/)?.[1];
+              const resource = id && document.getElementById(id);
+              return !resource || !node.closest('svg')?.contains(resource);
+            }).length,
+            duplicateIds:
+              new Set([...document.querySelectorAll('[id]')].map((node) => node.id)).size !==
+              document.querySelectorAll('[id]').length,
             animating: menu
               .getAnimations({ subtree: true })
               .some((animation) => animation.playState === 'running'),
@@ -89,6 +105,83 @@ try {
       return probe.frames;
     });
     return frames.map((frame) => ({ ...frame, ...dropdownRevealGeometry(frame) }));
+  };
+  const captureUserMenuIcon = async (phase) => {
+    const geometry = await page.evaluate(async (phase) => {
+      const menu = document.querySelector(
+        phase === 'open' ? '.user-menu:not([data-menu-outro])' : '.user-menu[data-menu-outro]',
+      );
+      let icon = [...menu.querySelectorAll('[data-ui-icon]')].at(-1);
+      if (phase === 'open') {
+        window.settingsMenuIconReference = icon.cloneNode(true);
+      } else if (phase === 'exit') {
+        window.settingsIconExitAnimations = menu.getAnimations();
+        for (const animation of window.settingsIconExitAnimations) {
+          animation.pause();
+          animation.currentTime = Number(animation.effect.getTiming().duration) * 0.1;
+        }
+      } else {
+        // Render the independently saved live SVG in the same slot and at the
+        // same native pixel phase as the already captured exit icon.
+        const reference = window.settingsMenuIconReference;
+        const snapshotIcon = icon;
+        window.settingsRestoreMenuIcon = () => reference.replaceWith(snapshotIcon);
+        icon.replaceWith(reference);
+        icon = reference;
+        await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      }
+      const box = icon.getBoundingClientRect(),
+        surface = menu.getBoundingClientRect();
+      const layout = (node) => {
+        const { x, y, width, height } = node.getBoundingClientRect();
+        const style = getComputedStyle(node);
+        return {
+          rect: { x, y, width, height },
+          position: style.position,
+          top: style.top,
+          bottom: style.bottom,
+          width: style.width,
+          height: style.height,
+          border: style.borderWidth,
+          padding: style.padding,
+          transform: style.transform,
+        };
+      };
+      return {
+        rect: { x: box.x, y: box.y, width: box.width, height: box.height },
+        dpr: devicePixelRatio,
+        side: menu.dataset.side,
+        pinned: menu.hasAttribute('data-menu-height-motion'),
+        layout: {
+          row: layout(icon.closest('.dropdown-item')),
+          scroll: layout(menu.querySelector('.dropdown-scroll')),
+          surface: layout(menu),
+          wrapper: layout(menu.parentElement),
+        },
+        contained: box.top >= surface.top && box.bottom <= surface.bottom,
+        opacity: Number(getComputedStyle(menu).opacity),
+        clip: {
+          x: Math.floor(box.left),
+          y: Math.floor(box.top),
+          width: Math.ceil(box.right) - Math.floor(box.left),
+          height: Math.ceil(box.bottom) - Math.floor(box.top),
+        },
+      };
+    }, phase);
+    if (phase === 'open') return geometry;
+    const windowId = await (await app.browserWindow(page)).evaluate((win) => win.id);
+    const bitmap = await app.evaluate(
+      async ({ BrowserWindow }, { windowId, clip }) => {
+        const image = await BrowserWindow.fromId(windowId).webContents.capturePage(clip);
+        return {
+          size: image.getSize(),
+          scaleFactors: image.getScaleFactors(),
+          bytes: [...image.toBitmap()],
+        };
+      },
+      { windowId, clip: geometry.clip },
+    );
+    return { ...geometry, ...bitmap };
   };
   const open = async () => {
     await page.getByRole('button', { name: '用户菜单', exact: true }).click();
@@ -252,50 +345,122 @@ try {
   const userMenu = page.getByRole('button', { name: '用户菜单', exact: true });
   const userTriggerId = await userMenu.getAttribute('id');
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await startMenuFrames(userTriggerId);
-  await userMenu.click();
-  await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor();
-  await finishMenuFrames(userTriggerId);
-  await startMenuFrames(userTriggerId);
-  await page.keyboard.press('Escape');
-  await page.waitForFunction(
-    () => document.activeElement?.getAttribute('aria-label') === '用户菜单',
+  const originalDark = await page.evaluate(() =>
+    document.documentElement.classList.contains('dark'),
   );
-  assert.equal(
-    await userMenu.evaluate((node) => Boolean(node.closest('[aria-hidden="true"]'))),
-    false,
-    'Closing a portaled menu releases accessibility before the visual snapshot finishes',
-  );
-  const portalFrames = await finishMenuFrames(userTriggerId);
-  const portalExit = portalFrames.filter((frame) => frame.state === 'closed');
-  assert.ok(
-    portalExit.some((frame) => frame.revealed > 0.03 && frame.revealed < 0.97),
-    'Portaled dropdown must visibly fold back toward its trigger after Radix unmounts',
-  );
-  assert.ok(
-    portalExit.length > 0 &&
-      portalExit.every(
-        (frame) =>
-          frame.snapshot &&
-          frame.inert &&
-          frame.ariaHidden === 'true' &&
-          frame.roles === 0 &&
-          frame.opacity >= 0 &&
-          frame.opacity <= 1 &&
-          (frame.revealed <= 0.12 || frame.opacity === 1) &&
-          frame.unscaled &&
-          frame.clip === 'none' &&
-          frame.radius > 0 &&
-          frame.overflow === 'hidden' &&
-          frame.frameOverflow === 'visible' &&
-          frame.shadow !== 'none' &&
-          (frame.revealed <= 0.03 || Math.abs(frame.anchorGap) < 0.6),
-      ),
-    'Portaled exit snapshot must have no menu roles or interactive accessibility',
-  );
-  assert.ok(
-    portalExit.some((frame) => frame.opacity > 0 && frame.opacity < 1 && frame.revealed < 0.12),
-    'Portaled exit fades only near its collapsed rounded edge',
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    await startMenuFrames(userTriggerId);
+    await userMenu.click();
+    await page.getByRole('menuitem', { name: '设置', exact: true }).waitFor();
+    await finishMenuFrames(userTriggerId);
+    const iconBefore = await captureUserMenuIcon('open');
+    await startMenuFrames(userTriggerId);
+    await page.keyboard.press('Escape');
+    try {
+      const iconDuring = await captureUserMenuIcon('exit');
+      const reference = await captureUserMenuIcon('reference');
+      const describe = ({ bytes, ...geometry }) => ({ ...geometry, bitmapBytes: bytes.length });
+      const diagnostic = JSON.stringify({
+        theme: dark ? 'dark' : 'light',
+        before: iconBefore,
+        during: describe(iconDuring),
+        reference: describe(reference),
+      });
+      assert.ok(iconDuring.contained && iconDuring.opacity === 1, diagnostic);
+      for (const key of ['width', 'height'])
+        assert.ok(
+          Math.abs(iconBefore.rect[key] - iconDuring.rect[key]) <= 1 / 64,
+          `Menu exit icon ${key} changed by ${iconDuring.rect[key] - iconBefore.rect[key]} CSS px: ${diagnostic}`,
+        );
+      for (const key of Object.keys(iconDuring.rect))
+        assert.ok(
+          Math.abs(reference.rect[key] - iconDuring.rect[key]) <= 1 / 64,
+          `The reference must share the exit icon's ${key}: ${diagnostic}`,
+        );
+      assert.equal(iconDuring.dpr, reference.dpr, diagnostic);
+      assert.deepEqual(iconDuring.clip, reference.clip, diagnostic);
+      assert.deepEqual(iconDuring.size, reference.size, diagnostic);
+      assert.deepEqual(iconDuring.scaleFactors, reference.scaleFactors, diagnostic);
+      assert.equal(
+        iconDuring.bytes.length,
+        iconDuring.size.width * iconDuring.size.height * 4,
+        diagnostic,
+      );
+      assert.equal(reference.bytes.length, iconDuring.bytes.length, diagnostic);
+      const contrast = Math.max(
+        ...[0, 1, 2].map((channel) => {
+          const values = reference.bytes.filter((_, index) => index % 4 === channel);
+          return Math.max(...values) - Math.min(...values);
+        }),
+      );
+      assert.ok(
+        contrast > 20,
+        'The live SVG supplies a visible reference silhouette: ' + diagnostic,
+      );
+      const difference = Math.max(
+        ...iconDuring.bytes.map((value, index) => Math.abs(value - reference.bytes[index])),
+      );
+      assert.ok(
+        difference <= 2,
+        `Menu exit preserves its icon silhouette (${dark ? 'dark' : 'light'}): ${difference}. ${diagnostic}`,
+      );
+    } finally {
+      await page.evaluate(() => {
+        window.settingsRestoreMenuIcon?.();
+        for (const animation of window.settingsIconExitAnimations ?? []) animation.play();
+        delete window.settingsMenuIconReference;
+        delete window.settingsRestoreMenuIcon;
+        delete window.settingsIconExitAnimations;
+      });
+    }
+    await page.waitForFunction(
+      () => document.activeElement?.getAttribute('aria-label') === '用户菜单',
+    );
+    assert.equal(
+      await userMenu.evaluate((node) => Boolean(node.closest('[aria-hidden="true"]'))),
+      false,
+      'Closing a portaled menu releases accessibility before the visual snapshot finishes',
+    );
+    const portalFrames = await finishMenuFrames(userTriggerId);
+    const portalExit = portalFrames.filter((frame) => frame.state === 'closed');
+    assert.ok(
+      portalExit.some((frame) => frame.revealed > 0.03 && frame.revealed < 0.97),
+      'Portaled dropdown must visibly fold back toward its trigger after Radix unmounts',
+    );
+    assert.ok(
+      portalExit.length > 0 &&
+        portalExit.every(
+          (frame) =>
+            frame.snapshot &&
+            frame.inert &&
+            frame.ariaHidden === 'true' &&
+            frame.roles === 0 &&
+            frame.identities === 0 &&
+            frame.brokenMasks === 0 &&
+            !frame.duplicateIds &&
+            (process.platform !== 'darwin' || frame.masks > 0) &&
+            frame.opacity >= 0 &&
+            frame.opacity <= 1 &&
+            (frame.revealed <= 0.12 || frame.opacity === 1) &&
+            frame.unscaled &&
+            frame.clip === 'none' &&
+            frame.radius > 0 &&
+            frame.overflow === 'hidden' &&
+            frame.frameOverflow === 'visible' &&
+            frame.shadow !== 'none' &&
+            (frame.revealed <= 0.03 || Math.abs(frame.anchorGap) < 0.6),
+        ),
+      'Portaled exit snapshot must have no menu roles or interactive accessibility',
+    );
+    assert.ok(
+      portalExit.some((frame) => frame.opacity > 0 && frame.opacity < 1 && frame.revealed < 0.12),
+      'Portaled exit fades only near its collapsed rounded edge',
+    );
+  }
+  await page.evaluate(
+    (dark) => document.documentElement.classList.toggle('dark', dark),
+    originalDark,
   );
   await open();
   await category('通用').click();

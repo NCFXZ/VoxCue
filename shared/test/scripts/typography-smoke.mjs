@@ -434,7 +434,12 @@ const inspect = async (page, name) => {
               ? 13
               : e.matches('.login-footer small')
                 ? 11
-                : null,
+                : e.matches(
+                      '.login-preview .login-interview-preview .floating-empty p,' +
+                        '.login-preview .login-interview-preview .login-preview-thinking',
+                    )
+                  ? 11
+                  : null,
           expectedControlSize: e.matches('.login-interview-preview textarea')
             ? 11
             : e.matches(

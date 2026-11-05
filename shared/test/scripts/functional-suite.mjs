@@ -72,6 +72,7 @@ const mac = [
   'account-archive-lifecycle',
   'login-actions-native',
   'interview-layout',
+  'interview-effort',
   'chatgpt-renewal',
   'icons',
   'window-native',

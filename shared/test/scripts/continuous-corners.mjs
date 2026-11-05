@@ -679,6 +679,8 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
     item.evaluate((node) => ({
       background: getComputedStyle(node).backgroundColor,
       highlighted: node.hasAttribute('data-highlighted'),
+      hovered: node.matches(':hover'),
+      focused: document.activeElement === node,
       rect: node.getBoundingClientRect().toJSON(),
       menuId: node.closest('.dropdown-content').id,
       menuRect: node.closest('.dropdown-content').getBoundingClientRect().toJSON(),
@@ -731,6 +733,59 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
           endTime: animation.effect?.getComputedTiming().endTime,
         })),
     }));
+  const hoverTarget = (item) =>
+    item.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const center = { x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 };
+      const hit = document.elementFromPoint(center.x, center.y);
+      return {
+        center,
+        centerHitsItem: node.contains(hit),
+        hit: hit && { tag: hit.localName, id: hit.id, class: hit.getAttribute('class') },
+      };
+    });
+  const observeHover = (item) =>
+    item.evaluate((node, markerId) => {
+      const marker = document.getElementById(markerId);
+      marker.hoverProbe?.controller.abort();
+      const controller = new AbortController();
+      const events = [];
+      marker.hoverProbe = { controller, events };
+      const describe = (target) =>
+        target instanceof Element
+          ? { tag: target.localName, id: target.id, class: target.getAttribute('class') }
+          : null;
+      for (const type of ['pointermove', 'pointerleave', 'focus', 'blur'])
+        node.addEventListener(
+          type,
+          (event) => {
+            events.push({
+              type,
+              trusted: event.isTrusted,
+              x: event.clientX,
+              y: event.clientY,
+              pointerType: event.pointerType,
+              target: describe(event.target),
+              related: describe(event.relatedTarget),
+            });
+            if (events.length > 12) events.shift();
+          },
+          { capture: true, signal: controller.signal },
+        );
+    }, markerId);
+  const hoverDiagnostics = async () => ({
+    events: await page.evaluate((id) => document.getElementById(id)?.hoverProbe?.events, markerId),
+    native: await app.evaluate(({ BrowserWindow }, windowId) => {
+      const window = BrowserWindow.fromId(windowId);
+      return {
+        focusedWindow: BrowserWindow.getFocusedWindow()?.id,
+        windowId,
+        focused: window.isFocused(),
+        visible: window.isVisible(),
+        content: window.getContentBounds(),
+      };
+    }, windowId),
+  });
   const paintedFrames = async () => {
     await page.waitForFunction(
       (menuId) => {
@@ -874,10 +929,36 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
           ).length >= 3,
           name + ': round reference must paint contrasting ' + corner + ' cap samples',
         );
-      await item.hover();
-      assert.equal(await item.evaluate((node) => node.hasAttribute('data-highlighted')), true);
+      // Removing the reference changes Chromium's top-layer hit-test state.
+      // Wait for that frame to settle, then move the pointer without another
+      // locator scroll or focus operation between hit testing and capture.
+      await paintedFrames();
+      await observeHover(item);
+      const ready = await hoverTarget(item);
+      if (!ready.centerHitsItem)
+        assert.fail(
+          name +
+            ': capsule hover target is occluded: ' +
+            JSON.stringify({
+              edge,
+              ready,
+              ...(await hoverDiagnostics()),
+            }),
+        );
+      await page.mouse.move(ready.center.x, ready.center.y);
       await paintedFrames();
       const after = await paintState(item);
+      if (!after.highlighted || !after.hovered || !after.focused)
+        assert.fail(
+          name +
+            ': pointer highlight did not survive to the painted frame: ' +
+            JSON.stringify({
+              edge,
+              ready,
+              after,
+              ...(await hoverDiagnostics()),
+            }),
+        );
       for (const key of ['x', 'y', 'width', 'height'])
         assert.ok(
           Math.abs(after.rect[key] - circularRect[key]) <= 1 / 64,
@@ -893,26 +974,30 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
         name + ': actual and round reference must share one native pixel grid',
       );
       const reference = highlighted[0];
-      assert.ok(
-        difference(reference, baseline[0]) > 80,
-        name +
-          ': hover must paint a real contrasting background: ' +
-          JSON.stringify({
-            edge,
-            reference,
-            baseline: baseline[0],
-            referencePoint: points[0],
-            clip,
-            before,
-            after,
-            baselineImage: { size: baselineRaster.size, bitmapBytes: baselineRaster.bitmapBytes },
-            highlightedImage: {
-              size: highlightedRaster.size,
-              bitmapBytes: highlightedRaster.bitmapBytes,
-            },
-            marker: await page.evaluate((id) => document.getElementById(id)?.textContent, markerId),
-          }),
-      );
+      if (!(difference(reference, baseline[0]) > 80))
+        assert.fail(
+          name +
+            ': hover must paint a real contrasting background: ' +
+            JSON.stringify({
+              edge,
+              reference,
+              baseline: baseline[0],
+              referencePoint: points[0],
+              clip,
+              before,
+              after,
+              baselineImage: { size: baselineRaster.size, bitmapBytes: baselineRaster.bitmapBytes },
+              highlightedImage: {
+                size: highlightedRaster.size,
+                bitmapBytes: highlightedRaster.bitmapBytes,
+              },
+              hover: await hoverDiagnostics(),
+              marker: await page.evaluate(
+                (id) => document.getElementById(id)?.textContent,
+                markerId,
+              ),
+            }),
+        );
       // Near-edge antialiasing depends on the native pixel phase. Compare each
       // cap with the independently round reference at that exact output pixel,
       // rather than requiring its coverage to match a solid center pixel.
@@ -973,7 +1058,11 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
         );
     }
   } finally {
-    await page.evaluate((id) => document.getElementById(id)?.remove(), markerId);
+    await page.evaluate((id) => {
+      const marker = document.getElementById(id);
+      marker?.hoverProbe?.controller.abort();
+      marker?.remove();
+    }, markerId);
   }
 }
 

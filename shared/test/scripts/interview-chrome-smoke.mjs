@@ -1,9 +1,13 @@
-import { connectUiAccount } from './install-ui-account.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import {
+  closeUiApp,
+  connectUiAccount,
+  focusUiWindow,
+  installUiAccount,
+} from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import {
   verifyComposerControlAlignment,
@@ -426,7 +430,10 @@ try {
     compact.height,
   );
   assert.equal(await answerScroll.evaluate((e) => e.scrollTop), before);
-  await click(floating.getByRole('button', { name: '面试设置', exact: true }));
+  const settingsTrigger = floating.getByRole('button', { name: '面试设置', exact: true });
+  await focusUiWindow(app, floating);
+  await settingsTrigger.focus();
+  await settingsTrigger.click();
   const settings = floating.getByRole('dialog', { name: '面试设置', exact: true });
   const settingsBackdrop = await settings.evaluate((dialog) => {
     const backdrop = getComputedStyle(dialog, '::backdrop');
@@ -443,37 +450,75 @@ try {
         .style.getPropertyValue('--dialog-header-opacity') === '1',
   );
   assert.deepEqual(await material(settings.locator('.dialog-heading'), '::before'), chatHeader);
+  // Header coverage can reach 1 while the modal is still fading in. The
+  // exit intentionally starts at the current opacity, so let entry finish.
+  await settings.evaluate(async (dialog) => {
+    await Promise.all(dialog.getAnimations().map((animation) => animation.finished));
+  });
+  assert.equal(await settings.evaluate((dialog) => getComputedStyle(dialog).opacity), '1');
   await captureRequested(floating, 'interview-settings-shared-header');
-  const transparentExit = await floating.evaluate(async () => {
-    document.querySelector('.interview-settings-dialog .dialog-close-button').click();
+  await floating.evaluate(() => {
     const frames = [];
-    const start = performance.now();
-    while (performance.now() - start < 500) {
-      await new Promise(requestAnimationFrame);
-      const snapshot = document.querySelector('[data-modal-exit]');
-      if (!snapshot) {
-        if (frames.length) break;
-        continue;
+    let frame;
+    const sample = (time) => {
+      const snapshot = document.querySelector('.interview-settings-dialog[data-modal-exit]');
+      if (snapshot) {
+        const style = getComputedStyle(snapshot);
+        const backdrop = getComputedStyle(snapshot, '::backdrop');
+        frames.push({
+          time,
+          opacity: Number(style.opacity),
+          background: backdrop.backgroundColor,
+          animation: backdrop.animationName,
+          inert: snapshot.inert,
+          hidden: snapshot.getAttribute('aria-hidden'),
+          topLayer: snapshot.matches(':popover-open'),
+          pointerEvents: style.pointerEvents,
+          backdropPointerEvents: backdrop.pointerEvents,
+          nativeModals: document.querySelectorAll('dialog:modal').length,
+        });
       }
-      const backdrop = getComputedStyle(snapshot, '::backdrop');
-      frames.push({
-        opacity: Number(getComputedStyle(snapshot).opacity),
-        background: backdrop.backgroundColor,
-        animation: backdrop.animationName,
-      });
-    }
-    return frames;
+      frame = requestAnimationFrame(sample);
+    };
+    frame = requestAnimationFrame(sample);
+    window.interviewSettingsExitProbe = { frames, stop: () => cancelAnimationFrame(frame) };
+  });
+  await settings.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await settings.waitFor({ state: 'hidden' });
+  await floating.waitForFunction(
+    () => !document.querySelector('.interview-settings-dialog[data-modal-exit]'),
+  );
+  const transparentExit = await floating.evaluate(() => {
+    const probe = window.interviewSettingsExitProbe;
+    probe.stop();
+    delete window.interviewSettingsExitProbe;
+    return { frames: probe.frames, devicePixelRatio, visibility: document.visibilityState };
   });
   assert.ok(
-    transparentExit.some((frame) => frame.opacity > 0.03 && frame.opacity < 0.97),
-    'Transparent-backdrop modal must fade out through real intermediate frames',
+    transparentExit.frames.some((frame) => frame.opacity > 0.03 && frame.opacity < 0.97),
+    'Transparent-backdrop modal must fade out through real intermediate frames: ' +
+      JSON.stringify(transparentExit),
   );
   assert.ok(
-    transparentExit.every(
+    transparentExit.frames.every(
       (frame) => frame.background === 'rgba(0, 0, 0, 0)' && frame.animation === 'none',
     ),
     'Transparent-backdrop modal must not add a dimming layer during exit',
   );
+  assert.ok(
+    transparentExit.frames.every(
+      (frame) =>
+        frame.inert &&
+        frame.hidden === 'true' &&
+        frame.topLayer &&
+        frame.pointerEvents === 'none' &&
+        frame.backdropPointerEvents === 'none' &&
+        frame.nativeModals === 0,
+    ),
+    'The exit visual must release the modal lock without exposing interactive content: ' +
+      JSON.stringify(transparentExit),
+  );
+  assert.ok(await settingsTrigger.evaluate((node) => document.activeElement === node));
   const cdp = await floating.context().newCDPSession(floating);
   await cdp.send('DOM.enable');
   await cdp.send('CSS.enable');

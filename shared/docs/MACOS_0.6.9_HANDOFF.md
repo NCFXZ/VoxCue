@@ -2,6 +2,8 @@
 
 更新日期：2026-11-05。本文是需求、代码位置和待执行步骤清单，不是测试报告。编号稳定；后续验证中发现的修复追加新编号，不重排已有编号。
 
+Mac 本机接续的实现和夹具修正在 M155 起；前文“Mac 待实现”保留原交接起点，当前任务状态见 [PROGRESS.md](../../PROGRESS.md)。
+
 ## 基线、状态与执行边界
 
 - 本轮桌面任务开始先拉取至 `e98242a`；本文按该工作基线与当前实际差异、最终用户要求整理。`e98242a` 不等同于声明某个 0.6.8 安装包的构建输入。0.6.8 的正式恢复来源分别见 [Mac 发行索引](MACOS_0.6.8_RELEASE.md) 与 [Windows 发行索引](WINDOWS_0.6.8_RELEASE.md)。
@@ -252,4 +254,21 @@
 | M153 | 生产：`shared/src/components/CloudAccountPanel.tsx` 将M133的skip失焦豁免扩到同一panel、form外的注册/找回密码/返回登录导航，避免无效邮箱反馈插入导致导航按钮在按下与松开之间移位、首次click丢失。 | 只有form存在、relatedTarget属于该form父panel，且为 `.login-skip-button` 或form外 `.login-form-links` 后代才豁免；普通字段间blur、提交及验证码发送逻辑不变。`shared/test/scripts/cloud-account-smoke.mjs --login-check` 保留invalid邮箱且无既有alert、预先测按钮中心、每路线一次page.mouse.click、等待目标heading的四路线（登录→注册/找回、注册/重置→返回登录），不用DOMclick/重试/有效邮箱绕过；另用真实Tab到密码确认邮箱错误仍出现。Mac在对应共享及原生登录入口复核；中英按钮为跳过登录/Continue locally、注册/Sign up、找回密码/Forgot password、返回登录/Back to sign in。关联M017–M019、M133、M141、M148–M149。 |
 | M154 | 共享测试测量修复：`shared/test/scripts/interview-ux-smoke.mjs` 的assertSkeletonClip使用自然DPR的webContents.capturePage整数DIP clip，移除会改变emulation的CDP clip.scale=3；严格校验输出尺寸ceil(clip×DPR)、bytes=w×h×4及三帧同网格。 | 在同坐标/尺寸四项≤1/64px、脱离祖先clip的inert/aria-hidden/manual-popover上建立独立round/999px黑白参考。outside候选native pixel须与底条矩形有正面积交叠、整个pixel最近圆距离>r+0.5 CSS，且黑白参考该点四通道完全相同（独立参考该点无可见覆盖）；允许圆帽角pixel跨矩形边界以保留低DPR薄条样本，但原0.5 CSS安全距离不撤回。不能只凭不同绘制primitive的reference零覆盖断言实际clip的全部抗锯齿行为已排除。参考内部必须有真实黑白强对比maskInside>0防空参考，左右outside样本仍各>0，outsideDelta≤2及扫光两张差分帧inside真变化全部保留。finally移除参考并恢复原动画；Mac须完整五档、浅深及reduce复核，实际失败保留DPR/网格/rect/BGRA诊断，不以放宽delta或更改产品CSS处理。这是M090/M151的最终测试测量方案，不是产品圆角/扫光样式修改。 |
 
-后续全量测试若发现需要修改的产品/测试行为，在本文件追加M155起的新条目并标明影响旧编号、真实修改文件及Mac复核步骤；不得覆盖既有编号或只写“已修复/已通过”。最终发布输入与资产信息另由发行索引承接，不在此保存测试分数、报告、截图、trace或缓存产物。
+### Mac 本机接续
+
+| ID | 修改及原因 | 本机复核步骤与影响范围 |
+| --- | --- | --- |
+| M155 | 生产：`macos/electron/updates/driver.ts` 接入共享 `UpdateCache` 的一小时检查、失败重放、时间回拨、强查与冷却，固定使用 main 所属 `userData/updates`。共享 `cache.ts` 增加可选认证 validator 与独立 completed 元数据，默认 Windows 行为保持。Mac 每次读取重新认证完整签名 envelope，不能从裸 hash 重建可信状态。 | 承接 M099–M105、M111–M114；`update-driver.test.ts`、`update-cache.test.ts` 及本机 `updates-native-smoke.mjs` 的 `update-cache-checks.mjs` 核对新实例缓存、强查、坏缓存/签名、公钥与平台，固定 owner loopback；Windows 默认缓存兼容由共享单测核对，本轮不写 Windows 树。 |
+| M156 | 生产：Mac 完整归档持久保留在固定 archives 子目录，恢复先认证签名清单再流式核对大小/SHA512；显式安装继续交给 Sparkle 验归档 Ed25519 签名。下载以 journal、独占 partial、校验及原子 rename 发布，失败清所属普通半成品，退出/取消/超时中断另记冷却；未知路径/链接拒绝删除。dispose 等待任务，已 committed 安装不取消、不删完整包。 | 承接 M102–M108、M115–M120；本机缓存专项覆盖 offline/autoDownload=false 恢复、慢流取消/退出、journal 与冷却，既有 Sparkle 专项保留坏归档签名、取消和安装。`download.ts` 的哈希接受取消信号，创建文件失败取消响应流；`package-smoke.mjs` 等待异步 dispose。恢复阶段不宣称替代 Sparkle 安装验签。Windows 主动取消冷却边界留其本机审查，本轮不写另一平台。 |
+| M157 | 生产：`ui/visual-snapshot.ts` 为菜单和弹窗退出快照共用身份清理。原先全删 id 会破坏 Mac SF Symbols 的 mask 引用，收起时图标露出实心矩形；现在仅把 SVG 资源 id 重映射成快照独立值并同步本地 url/href，HTML id/role/name/autofocus 仍移除。 | 影响 M043、M048；`dropdown-motion.ts`、`modal-motion.ts` 复用该 helper。`settings-smoke.mjs` 在浅深主题真实退出中间帧对比图标像素，核对 SVG 引用可解析、无重复 id；`profile-selection-smoke.mjs` 保留即时解锁、inert/aria-hidden 与快照清理，单独允许非交互 SVG 资源 id。五档复核不能用取消动画或保留原 id 绕过。 |
+| M158 | Mac 测试适配：`login-actions-native-smoke.mjs` 更新密码旧预期，补 minlength/灰提示、六格同排几何和原窗口/前台/真实命中/稳定坐标守卫；`interview-layout-smoke.mjs` 与 `cloud-accessibility-smoke.mjs` 等真实目标 heading/转场；`cloud-form-lifecycle-smoke.mjs` 的逻辑夹具隔离新增 CSS。 | 承接 M141–M149；单次真实点击不重试，原 AppKit hit 与几何断言保持。生产 CSS 由真实界面矩阵覆盖，不把逻辑夹具的 CSS loader 当视觉验证。 |
+| M159 | 共享测试平台适配：`history-branding-smoke.mjs` 在 Mac 捕获固定侧栏按钮的像素而非不存在的自绘 titlebar，原生交通灯继续由 window-native 验；`ui-alignment-smoke.mjs` 严格区分原生收起84px/自绘68px；`typography-smoke.mjs` 精确分类紧凑登录预览空态/思考正文11px。 | 补充 M080：展开仍固定230px，Mac 收起84px保留原生交通灯右侧内距，不恢复旧200px断点。页面边界与中间帧像素容差、其余全局字号均不放宽；五档/浅深/中英复核。 |
+| M160 | 共享测试时序：`updates-smoke.mjs` 在真实关于与更新 heading、转场和有限动画完成后，确认窗口可见/聚焦，Mac AppKit 前台归属以及双 RAF 稳定命中，再执行真实长按。补 Space 长按/重复 keydown、释放不追加和实际 Tab 移焦取消。 | 承接 M097、M126；产品5000ms、提前4700ms零请求、触发恰一次强查和释放不追加检查全部保持；短 Enter 仍普通检查，移焦后等待足五秒无强查，不能用 fixture 绕过产品取消语义。 |
+| M161 | 测试覆盖：Mac 五档矩阵追加 web-materials、ui-material-refinement、provider-ui、composer、profile-selection、login-entry，保留原30项；`interview-effort-smoke.mjs` 复用既有隔离平台端口移植活动保存专项并纳入 Mac 功能矩阵。 | 保留七行几何、支持档位、拖动释放一次 IPC、保存期间原 DOM/焦点、忙锁、失败回滚与取消；仅平台权限/设备端口合成，不采样硬件。矩阵按实际名称和五档完整执行，不减少原轮次、时长或已有场景。 |
+| M162 | Mac 打包夹具：`components-smoke.mjs` 等 AI 服务真实 heading 和转场后再数两个品牌图标，验证图像解码及 ChatGPT/Copilot 的独立连接操作；知识库分支等创建按钮后再查禁用，避免空集合误过。 | 承接 M073–M076、M121、M127；仍使用临时签名应用、真实包内运行时/组件、合成账号与固定公开模型，不依靠旧界面立即挂载，也不放宽原图标数量和未安装功能限制。 |
+| M163 | 五档指针夹具：`continuous-corners.mjs` 等独立参考层移除后完成画面提交，先确认中心命中，再实际移动鼠标并检查到采样帧仍为 hover/focus/highlight；`ui-material-refinement-smoke.mjs` 取得原生前台并复测滚动后的真实中心。 | 承接 M038–M045、M123、M150；保留圆头参考、首末两端、实际网格、像素阈值、键盘 focus-visible 与几何。失败输出真实指针事件、命中及焦点，不合成 CSS 高亮。 |
+| M164 | `interview-chrome-smoke.mjs` 等透明弹窗入场自然到不透明再触发关闭并采样。原先可能在入场首帧就关闭，正确的退出起点已低于可见中间帧阈值。 | 承接 M046–M049；保留真实中间帧及透明遮罩阈值，并查 inert/aria-hidden、无指针、原生模态解锁与触发按钮焦点恢复。 |
+| M165 | `cloud-account-smoke.mjs` 六格验证码按浏览器已解析的分数 grid track 边界逐格验证。外框和每个 fr 轨道可独立量化；按当前有效缩放把 CSS 坐标换算到 1/64 内部布局单位，检查末端余量仅来自轨道舍入。 | 承接 M148；保留所有格与按钮同排同中心、按钮自然宽且贴右、网格与按钮间距、反馈在下及窄窗收缩，不用视觉容差掩盖重叠或错行。 |
+| M166 | `settings-smoke.mjs` 先采实际退出帧，再把打开时独立保存的 SVG 放入同一退出图标槽位作为参考；真实图标和参考共用同一原生像素网格，避免跨开合亚像素相位差影响形状判定。 | 补充 M157；图标尺寸、菜单锚点/时序、同 rect/clip/DPR、可见对比和逐通道差≤2 均保留。finally 恢复原快照；不使用产品重映射 helper 制作参考，不把布局测量当图标像素结果。 |
+
+后续修复从 M167 起追加；最终发布输入与资产信息由发行索引承接，不在此保存测试分数、报告、截图、trace或缓存产物。

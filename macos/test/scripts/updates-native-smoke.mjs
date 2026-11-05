@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import { checkMacUpdateCache } from './update-cache-checks.mjs';
 import os from 'node:os';
 const require = createRequire(import.meta.url);
 const { installFeed } = require(
@@ -15,6 +16,10 @@ const { installFeed } = require(
 const { privateKey, publicKey } = generateKeyPairSync('ed25519');
 const publicText = publicKey.export({ format: 'jwk' }).x;
 const publicBase64 = Buffer.from(publicText, 'base64url').toString('base64');
+const { macUpdatePayload } = require(
+  path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/manifest.js'),
+);
+await checkMacUpdateCache(publicBase64, privateKey, macUpdatePayload);
 const privateFile = path.join(testRoot, 'fixture-key');
 await writeFile(
   privateFile,

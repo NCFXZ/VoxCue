@@ -73,6 +73,40 @@ try {
       const win = await app.browserWindow(page);
       const windowId = await win.evaluate((window) => window.id);
       const button = (name) => page.getByRole('button', { name, exact: true });
+      const ownedWindow = () => app.evaluate(({ app, BrowserWindow }, { windowId, owner }) => {
+        const window = BrowserWindow.fromId(windowId);
+        if (!app.getPath('userData').startsWith(owner + '/') || !window || window.isDestroyed())
+          throw Error('Expected the original owned synthetic login window');
+        return {
+          id: window.id,
+          visible: window.isVisible(),
+          focused: window.isFocused() && BrowserWindow.getFocusedWindow()?.id === windowId,
+          alwaysOnTop: window.isAlwaysOnTop(),
+        };
+      }, { windowId, owner: testRoot });
+      const stableTarget = async (locator) => {
+        await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+        await locator.waitFor({ state: 'visible' });
+        return locator.evaluate(async (node) => {
+          await Promise.allSettled(document.getAnimations().filter((animation) =>
+            animation.effect?.getComputedTiming().iterations !== Infinity,
+          ).map((animation) => animation.finished));
+          const rect = () => {
+            const box = node.getBoundingClientRect();
+            return { left: box.left, top: box.top, width: box.width, height: box.height };
+          };
+          await new Promise(requestAnimationFrame);
+          const before = rect();
+          await new Promise(requestAnimationFrame);
+          const box = rect();
+          if (Object.keys(box).some((key) => Math.abs(box[key] - before[key]) > 1 / 64))
+            throw Error('Login target moved before input: ' + JSON.stringify({ before, box }));
+          const x = box.left + box.width / 2, y = box.top + box.height / 2;
+          if (!node.contains(document.elementFromPoint(x, y)))
+            throw Error('The owned login target must receive its center point');
+          return { x, y, normalized: { x: x / innerWidth, y: y / innerHeight }, box };
+        });
+      };
       const hitPoint = async (point, expected, label) => {
         const deadline = Date.now() + 5000;
         let state;
@@ -111,9 +145,61 @@ try {
         await hitPoint(point, true, label);
       };
       const click = async (name) => {
+        requireUnlockedDesktop();
+        await app.evaluate(({ app, BrowserWindow }, id) => {
+          const window = BrowserWindow.fromId(id);
+          if (!window || window.isDestroyed() || window.isAlwaysOnTop())
+            throw Error('Expected the original normal-level synthetic login window');
+          app.focus({ steal: true });
+          window.show();
+          window.moveTop();
+          window.focus();
+        }, windowId);
+        await page.waitForFunction(() => document.hasFocus());
         assert.equal(await button(name).isDisabled(), false);
-        await hit(button(name), name);
-        await button(name).click();
+        const point = await stableTarget(button(name));
+        await hitPoint(point.normalized, true, name);
+        assert.deepEqual(await ownedWindow(), {
+          id: windowId, visible: true, focused: true, alwaysOnTop: false,
+        });
+        await button(name).evaluate((node, point) => {
+          const box = node.getBoundingClientRect();
+          if (Object.keys(point.box).some((key) => Math.abs(box[key] - point.box[key]) > 1 / 64) ||
+              !node.contains(document.elementFromPoint(point.x, point.y)))
+            throw Error('Login target changed after native hit testing');
+        }, point);
+        requireUnlockedDesktop();
+        // One renderer pointer press at the AppKit-checked point; never retry it.
+        await page.mouse.click(point.x, point.y);
+      };
+      const passwordHint = async (label) => {
+        const input = page.getByLabel(label, { exact: true });
+        assert.equal(await input.getAttribute('placeholder'), '输入密码');
+        assert.equal(await input.getAttribute('minlength'), '8');
+        const hint = page.getByText('不少于8个字符', { exact: true });
+        await hint.waitFor();
+        assert.equal(await hint.getAttribute('role'), null);
+        assert.equal(await hint.evaluate((node) => node.classList.contains('danger-text')), false);
+      };
+      const assertCodeRow = async () => {
+        const row = await page.locator('.cloud-code-row').evaluate((node) => {
+          const box = (element) => {
+            const value = element.getBoundingClientRect();
+            return { left: value.left, right: value.right, top: value.top,
+              bottom: value.bottom, width: value.width, height: value.height };
+          };
+          return { row: box(node), inputs: [...node.querySelectorAll('input')].map(box),
+            button: box(node.querySelector(':scope > button')),
+            columns: getComputedStyle(node.querySelector('.cloud-code-inputs')).gridTemplateColumns };
+        });
+        assert.equal(row.inputs.length, 6);
+        const center = (box) => box.top + box.height / 2;
+        assert.ok(row.inputs.every((box) =>
+          Math.abs(center(box) - center(row.button)) <= 1 / 64 &&
+          Math.abs(box.width - row.inputs[0].width) <= 1 / 64 && box.width > 0,
+        ), JSON.stringify(row));
+        assert.ok(row.inputs[5].right < row.button.left, JSON.stringify(row));
+        assert.ok(Math.abs(row.button.right - row.row.right) <= 1 / 64, JSON.stringify(row));
       };
       for (const dark of [false, true]) {
         await page.evaluate(
@@ -166,12 +252,15 @@ try {
             await hit(page.locator(selector).first(), selector);
           await click('找回密码');
           await page.getByRole('heading', { name: '重置密码', exact: true }).waitFor();
+          await passwordHint('新密码');
+          await assertCodeRow();
           await page.getByLabel('邮箱', { exact: true }).fill('invalid');
           assert.equal(await button('获取验证码').isDisabled(), true);
           await page.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
           await click('获取验证码');
           const cooldown = page.getByRole('button', { name: /秒后重发/ });
           await cooldown.waitFor();
+          await assertCodeRow();
           assert.equal(await cooldown.isDisabled(), true);
           const seconds = Number((await cooldown.innerText()).match(/\d+/)[0]);
           assert.ok(seconds > 0 && seconds <= 60);
@@ -181,8 +270,11 @@ try {
             purpose: 'reset',
           });
           await click('返回登录');
+          await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
           await click('注册');
           await page.getByRole('heading', { name: '创建账号', exact: true }).waitFor();
+          await passwordHint('密码');
+          await assertCodeRow();
           await click('获取验证码');
           await page.getByRole('button', { name: /秒后重发/ }).waitFor();
           assert.deepEqual(await app.evaluate(() => globalThis.accountCalls.at(-1)), {
@@ -191,8 +283,9 @@ try {
             purpose: 'register',
           });
           await click('返回登录');
+          await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
           await click('登录');
-          await page.getByRole('alert').filter({ hasText: '请输入密码' }).waitFor();
+          await page.getByRole('alert').filter({ hasText: '密码不正确' }).waitFor();
           console.log(
             `PASS Mac native login hit routing ${scale} ${dark ? 'dark' : 'light'} ${size.join('x')}: top-only drag, reset/register/code/return/login and cooldown`,
           );

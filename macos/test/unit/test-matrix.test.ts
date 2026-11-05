@@ -16,10 +16,45 @@ it('lists the complete five-scale Mac matrix without starting GUI or preparing m
   expect(result.status).toBe(0);
   const plan = JSON.parse(result.stdout);
   expect(plan.scales).toEqual(['1', '1.25', '1.5', '1.75', '2']);
-  expect(new Set(plan.names).size).toBe(30);
-  expect(plan.names).toEqual(
-    expect.arrayContaining(['language', 'profile-ui', 'account-erasure', 'account-usage-overview']),
-  );
+  expect(new Set(plan.names).size).toBe(36);
+  expect(plan.names).toEqual([
+    'web-materials',
+    'ui-material-refinement',
+    'ui-alignment',
+    'ui-refinement',
+    'interview-screenshot',
+    'interview-typography',
+    'interview-chrome',
+    'interview-ux',
+    'typography',
+    'updates',
+    'updates-sidebar',
+    'components-ui',
+    'cloud-login',
+    'cloud-account',
+    'password-policy',
+    'free-service',
+    'account-erasure',
+    'management-scrollbars',
+    'client-update-ui',
+    'shimmer',
+    'knowledge',
+    'local-mode',
+    'telemetry',
+    'settings',
+    'language',
+    'preparation-guide',
+    'profile-ui',
+    'profile-selection',
+    'history-branding',
+    'login',
+    'login-entry',
+    'composer',
+    'provider-ui',
+    'chat-response',
+    'chat-progress',
+    'account-usage-overview',
+  ]);
   expect(plan.models).toBe(true);
 });
 
