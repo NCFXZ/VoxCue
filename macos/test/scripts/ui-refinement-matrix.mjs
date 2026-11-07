@@ -4,6 +4,7 @@ import workspace from '../../../shared/scripts/workspace.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { needsModels } from '../../../shared/test/scripts/suite-policy.mjs';
+import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 import { requireUnlockedDesktop, holdDesktopAwake } from './desktop-session.mjs';
 
 // Synthetic accounts/audio/captures and fixed public models stay in this owned run.
@@ -125,16 +126,11 @@ try {
       let output = '';
       child.stdout.on('data', (data) => (output += data));
       child.stderr.on('data', (data) => (output += data));
-      const timer = setTimeout(() => child.kill('SIGTERM'), 180000);
-      const desktopGuard = setInterval(() => {
-        try {
-          requireUnlockedDesktop();
-        } catch (error) {
-          output += error.stack + '\n';
-          child.kill('SIGTERM');
-        }
-      }, 2000);
-      desktopGuard.unref();
+      const desktopGuard = watchTestDesktop(child, requireUnlockedDesktop);
+      const timer = setTimeout(() => {
+        desktopGuard.release();
+        child.kill('SIGTERM');
+      }, 180000);
       const code = await new Promise((resolve) => {
         child.once('exit', resolve);
         child.once('error', (error) => {
@@ -143,8 +139,9 @@ try {
         });
       }).finally(() => {
         clearTimeout(timer);
-        clearInterval(desktopGuard);
+        desktopGuard.release();
       });
+      if (desktopGuard.failure) throw desktopGuard.failure;
       const outcome = { scope: 'shared-macos', scale, name, passed: code === 0 };
       outcomes.push(outcome);
       console.log((outcome.passed ? 'PASS ' : 'FAIL ') + JSON.stringify(outcome));

@@ -789,23 +789,28 @@ p {
   color: var(--muted);
   display: block;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) {
+.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) {
   display: grid;
   grid-template-columns: 31px minmax(0, 1fr) 15px;
   row-gap: 2px;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) .user-info {
+.sidebar:not(.collapsed)
+  .user-button:has(.account-usage-summary:is(.is-low, .is-inline))
+  .user-info {
   display: contents;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) .avatar {
+.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) .avatar {
   grid-column: 1;
   grid-row: 1 / 3;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) .user-info small {
+.sidebar:not(.collapsed)
+  .user-button:has(.account-usage-summary:is(.is-low, .is-inline))
+  .user-info
+  small {
   grid-column: 2 / -1;
   grid-row: 2;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) > svg {
+.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) > svg {
   grid-column: 3;
   grid-row: 1;
 }

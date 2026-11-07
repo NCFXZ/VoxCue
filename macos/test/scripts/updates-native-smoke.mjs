@@ -1,4 +1,4 @@
-import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { cp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -20,50 +20,103 @@ const { macUpdatePayload } = require(
   path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/manifest.js'),
 );
 await checkMacUpdateCache(publicBase64, privateKey, macUpdatePayload);
-const privateFile = path.join(testRoot, 'fixture-key');
-await writeFile(
-  privateFile,
-  Buffer.from(privateKey.export({ format: 'jwk' }).d, 'base64url').toString('base64'),
-  { mode: 0o600 },
+// Sparkle may outlive its original Electron parent. Keep its resources outside
+// the generic test-root reaper until every associated process is confirmed gone.
+const nativeRoot = fs.realpathSync(
+  fs.mkdtempSync(path.join(os.tmpdir(), 'voxcue-updater-native-')),
 );
+const privateFile = path.join(nativeRoot, 'fixture-key');
 const run = (command, args, options = {}) => {
   const result = spawnSync(command, args, { encoding: 'utf8', env: process.env, ...options });
   if (result.error || result.status)
     throw result.error ?? Error(`${command}: ${result.stderr || result.stdout}`);
   return result.stdout;
 };
-// Sparkle/Launch Services may create a preferences domain outside the child's
-// Foundation home. Use a unique test-only domain and remove it even on signals.
-const domainPattern = /^com\.voxcue\.updater-fixture\.p(\d+)\.[a-f0-9]{16}$/;
-function clearNativeDomain(domain) {
-  if (!domainPattern.test(domain) && domain !== 'com.voxcue.updater-fixture')
-    throw Error('Invalid fixture domain');
-  spawnSync('/usr/bin/defaults', ['delete', domain], { stdio: 'ignore' });
-  for (const relative of ['Library/Caches/' + domain, 'Library/Preferences/' + domain + '.plist']) {
-    const file = path.join(os.homedir(), relative);
-    if (!fs.existsSync(file)) continue;
-    if (fs.lstatSync(file).isSymbolicLink()) throw Error('Redirected fixture domain');
-    fs.rmSync(file, { recursive: true, force: true });
-  }
-}
-for (const relative of ['Library/Caches', 'Library/Preferences']) {
-  const parent = path.join(os.homedir(), relative);
-  for (const name of fs.readdirSync(parent)) {
-    const domain = name.replace(/\.plist$/, '');
-    const match = domainPattern.exec(domain);
-    if (!match) continue;
-    try {
-      process.kill(Number(match[1]), 0);
-    } catch (error) {
-      if (error.code === 'ESRCH') clearNativeDomain(domain);
-    }
-  }
-}
+// Sparkle/Launch Services may write outside the child's Foundation home. Only
+// this run's unpredictable bundle identity grants cleanup authority; old domains
+// and dead parent PIDs do not prove ownership or that their helpers have exited.
 const bundleId = `com.voxcue.updater-fixture.p${process.pid}.${randomBytes(8).toString('hex')}`;
+const nativePaths = [
+  path.join(os.homedir(), 'Library/Caches', bundleId),
+  path.join(os.homedir(), 'Library/Preferences', bundleId + '.plist'),
+];
+fs.writeFileSync(
+  path.join(nativeRoot, '.owner.json'),
+  JSON.stringify({ kind: 'voxcue-updater-native', pid: process.pid, bundleId }),
+  { mode: 0o600 },
+);
+function waitForNativeProcesses() {
+  const deadline = Date.now() + 15000;
+  let empty = false;
+  for (;;) {
+    const output = run('/bin/ps', ['-ww', '-U', String(process.getuid()), '-o', 'pid=,comm='], {
+      timeout: 5000,
+      maxBuffer: 8 * 1024 * 1024,
+    });
+    const active = output.split('\n').some((line) => {
+      const executable = line.match(/^\s*\d+\s+(.+?)\s*$/)?.[1];
+      if (!executable) return false;
+      // ps may use /var while Foundation returns its canonical /private/var path.
+      const normalized = executable.replace(/^\/var\//, '/private/var/');
+      return [nativeRoot, nativePaths[0]].some(
+        (root) => normalized === root || normalized.startsWith(root + path.sep),
+      );
+    });
+    if (!active && empty) return;
+    empty = !active;
+    if (Date.now() >= deadline)
+      throw Error(
+        'Native update processes still active; retaining owned resources at ' + nativeRoot,
+      );
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 100);
+  }
+}
+function clearNativeDomain() {
+  // Validate every path before defaults or filesystem mutations. Never follow
+  // redirected parents, links or objects owned by another UID.
+  for (const file of nativePaths) {
+    const parent = path.dirname(file);
+    if (fs.realpathSync(parent) !== parent) throw Error('Redirected fixture domain parent');
+    let stat;
+    try {
+      stat = fs.lstatSync(file);
+    } catch (error) {
+      if (error.code === 'ENOENT') continue;
+      throw error;
+    }
+    if (stat.isSymbolicLink() || stat.uid !== process.getuid())
+      throw Error('Redirected or unowned fixture domain');
+  }
+  const deleted = spawnSync('/usr/bin/defaults', ['delete', bundleId], { stdio: 'ignore' });
+  if (deleted.error) throw deleted.error;
+  for (const file of nativePaths) fs.rmSync(file, { recursive: true, force: true });
+}
 process.once('exit', () => {
-  clearNativeDomain(bundleId);
-  clearNativeDomain('com.voxcue.updater-fixture');
+  try {
+    waitForNativeProcesses();
+    const owner = JSON.parse(fs.readFileSync(path.join(nativeRoot, '.owner.json'), 'utf8'));
+    const stat = fs.lstatSync(nativeRoot);
+    if (
+      fs.realpathSync(nativeRoot) !== nativeRoot ||
+      stat.isSymbolicLink() ||
+      stat.uid !== process.getuid() ||
+      owner.kind !== 'voxcue-updater-native' ||
+      owner.pid !== process.pid ||
+      owner.bundleId !== bundleId
+    )
+      throw Error('Native update resource ownership changed');
+    clearNativeDomain();
+    fs.rmSync(nativeRoot, { recursive: true, force: true });
+  } catch (error) {
+    console.error('Native update cleanup stopped:', error.message);
+    process.exitCode = 1;
+  }
 });
+await writeFile(
+  privateFile,
+  Buffer.from(privateKey.export({ format: 'jwk' }).d, 'base64url').toString('base64'),
+  { mode: 0o600 },
+);
 const tools = path.join(workspace.platformRoot, '.tools/sparkle/2.10.0');
 async function bundle(destination, version, main) {
   await cp(
@@ -100,19 +153,19 @@ async function bundle(destination, version, main) {
   ]);
   run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', destination]);
 }
-const marker = path.join(testRoot, 'relaunched.json');
-const profile = path.join(testRoot, 'profile');
-const home = path.join(testRoot, 'foundation-home');
+const marker = path.join(nativeRoot, 'relaunched.json');
+const profile = path.join(nativeRoot, 'profile');
+const home = path.join(nativeRoot, 'foundation-home');
 await mkdir(home);
 const bootstrap = `const {app}=require('electron');app.setPath('userData',${JSON.stringify(profile)});app.setPath('sessionData',${JSON.stringify(profile)});`;
-const target = path.join(testRoot, 'new/VoxCue.app');
+const target = path.join(nativeRoot, 'new/VoxCue.app');
 await bundle(
   target,
   '0.2.2',
   bootstrap +
     `app.whenReady().then(()=>{require('fs').writeFileSync(${JSON.stringify(marker)},JSON.stringify({version:app.getVersion(),path:app.getAppPath(),pid:process.pid}));app.quit();});`,
 );
-const zip = path.join(testRoot, 'update.zip');
+const zip = path.join(nativeRoot, 'update.zip');
 run('/usr/bin/ditto', ['-c', '-k', '--sequesterRsrc', '--keepParent', target, zip]);
 const signature = run(path.join(tools, 'bin/sign_update'), [
   '--ed-key-file',
@@ -137,7 +190,7 @@ for (const mode of ['invalid-signature', 'cancel', 'install']) {
       ? { ...update, edSignature: Buffer.alloc(64).toString('base64') }
       : update;
   const feed = await installFeed(zip, offered);
-  const old = path.join(testRoot, mode, 'VoxCue.app');
+  const old = path.join(nativeRoot, mode, 'VoxCue.app');
   await bundle(
     old,
     '0.2.1',
@@ -210,5 +263,6 @@ for (const mode of ['invalid-signature', 'cancel', 'install']) {
   } finally {
     feed.close();
     if (child.exitCode === null) child.kill();
+    waitForNativeProcesses();
   }
 }

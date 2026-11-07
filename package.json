@@ -1,6 +1,6 @@
 {
   "name": "voxcue-workspace",
-  "version": "1.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Command dispatcher; dependencies are installed separately inside windows/ and macos/.",
   "packageManager": "pnpm@11.25.0",

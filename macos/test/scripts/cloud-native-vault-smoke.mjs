@@ -1,6 +1,7 @@
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { loadDevelopmentSigning, signLocalCode } from '../../scripts/development-signing.mjs';
+import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -78,8 +79,7 @@ const cleanupKeychain = () => {
   run(manager, ['delete', keychain]);
   ownsKeychain = false;
 };
-for (const signal of ['SIGINT', 'SIGTERM'])
-  process.prependOnceListener(signal, cleanupKeychain);
+for (const signal of ['SIGINT', 'SIGTERM']) process.prependOnceListener(signal, cleanupKeychain);
 requireUnlockedDesktop();
 run(manager, ['create', keychain]);
 ownsKeychain = true;
@@ -152,29 +152,28 @@ app.whenReady().then(async()=>{
       env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
       stdio: 'inherit',
     });
-    const timer = setTimeout(() => child.kill('SIGTERM'), 60000);
-    const desktopGuard = setInterval(() => {
-      try { requireUnlockedDesktop(); }
-      catch (error) {
-        console.error(error.message);
-        child.kill('SIGTERM');
-      }
-    }, 2000);
-    desktopGuard.unref();
+    const desktopGuard = watchTestDesktop(child, requireUnlockedDesktop);
+    const timer = setTimeout(() => {
+      desktopGuard.release();
+      child.kill('SIGTERM');
+    }, 60000);
     const code = await new Promise((resolve, reject) => {
       child.once('exit', resolve);
       child.once('error', reject);
     }).finally(() => {
       clearTimeout(timer);
-      clearInterval(desktopGuard);
+      desktopGuard.release();
     });
+    if (desktopGuard.failure) throw desktopGuard.failure;
     assert.equal(code, 0, phase);
   }
 } finally {
-  cleanupKeychain();
-  for (const signal of ['SIGINT', 'SIGTERM'])
-    process.removeListener(signal, cleanupKeychain);
-  releaseDesktop();
+  try {
+    cleanupKeychain();
+  } finally {
+    for (const signal of ['SIGINT', 'SIGTERM']) process.removeListener(signal, cleanupKeychain);
+    releaseDesktop();
+  }
 }
 assert.equal(keychainList(), previousList);
 assert.equal(
