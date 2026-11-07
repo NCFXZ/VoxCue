@@ -5,7 +5,7 @@
 ## 当前任务：Windows 1.0.0 验证与发行
 
 - 当前授权：清理确认无用的文件/代码；Windows 全量安全、稳定性、对抗、英文及视觉/DPI/原生/安装验证，问题修复后重测；推送源码并公开发布 1.0.0 安装包，更新 Microsoft Store；编写 0.6.9→1.0.0 Mac 逐条接续文档。保留现有未提交工作、签名身份、模型/依赖、用户数据及发行恢复基线；Mac 全树只读，不操作独立官网或服务端。
-- `shared/package.json = 1.0.0` 为当前待发行的正式版本；GitHub 和 Store 发布状态待完成。共享改动及本轮测试修复统一汇总至 `shared/docs/MACOS_1.0.0_HANDOFF.md`，Windows 验证不能代替 Mac 本机验收。
+- `shared/package.json = 1.0.0` 为当前待发行版本；GitHub 和 Store 发布状态待完成。共享改动及本轮测试修复统一汇总至 `shared/docs/MACOS_1.0.0_HANDOFF.md`，Windows 验证不能代替 Mac 本机验收。
 
 ## 已发行基线：Windows 与 Mac 0.6.9
 

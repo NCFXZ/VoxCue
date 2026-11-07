@@ -1,4 +1,4 @@
-# VoxCue 1.0.0 正式版 · Windows
+# VoxCue 1.0.0 · Windows
 
 发布状态：准备发行 / Status: preparing for release.
 

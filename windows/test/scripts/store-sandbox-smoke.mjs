@@ -19,6 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 // Certificates and package installation exist only in the disposable guest.
 // https://learn.microsoft.com/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file
+// https://learn.microsoft.com/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli
 // https://learn.microsoft.com/powershell/module/appx/invoke-commandindesktoppackage
 assert.equal(process.platform, 'win32');
 assert.equal(process.argv.length, 2, 'This check accepts only the current Store release');
@@ -56,14 +57,25 @@ let startedAt = 0;
 let originalHash;
 let failure;
 let lastStage;
+let sandboxCli;
+let ownVmId;
+let ownRemote;
 
 const psLiteral = (value) => "'" + String(value).replaceAll("'", "''") + "'";
 function ps(script, timeout = 30000) {
-  const encoded = Buffer.from("$ErrorActionPreference='Stop';\n" + script, 'utf16le').toString(
-    'base64',
-  );
+  // WinPS 5 must not auto-load incompatible PowerShell 7 modules inherited
+  // from the caller. This changes only this child process's module lookup.
+  const env = { ...process.env };
+  for (const key of Object.keys(env)) if (key.toLowerCase() === 'psmodulepath') delete env[key];
+  env.PSModulePath = path.join(path.dirname(powershell), 'Modules');
+  const encoded = Buffer.from(
+    "$ErrorActionPreference='Stop'; $ProgressPreference='SilentlyContinue'; [Console]::OutputEncoding=New-Object Text.UTF8Encoding $false;\n" +
+      script,
+    'utf16le',
+  ).toString('base64');
   return execFileSync(powershell, ['-NoProfile', '-NonInteractive', '-EncodedCommand', encoded], {
     encoding: 'utf8',
+    env,
     windowsHide: true,
     timeout,
     maxBuffer: 1024 * 1024,
@@ -75,36 +87,153 @@ const sandboxProcesses = () =>
   JSON.parse(
     ps(`
   $items = @(Get-CimInstance Win32_Process -Filter "Name LIKE 'WindowsSandbox%.exe'" | ForEach-Object {
-    @{ pid=[int]$_.ProcessId; parent=[int]$_.ParentProcessId; command=$_.CommandLine;
+    @{ pid=[int]$_.ProcessId; parent=[int]$_.ParentProcessId; name=$_.Name;
        created=$_.CreationDate.ToUniversalTime().ToString('o'); path=$_.ExecutablePath }
   });
   ConvertTo-Json -InputObject $items -Compress
 `),
   );
-function adopt(rows) {
+const isServer = (row) => row.name.toLowerCase() === 'windowssandboxserver.exe';
+const isRemote = (row) => row.name.toLowerCase() === 'windowssandboxremotesession.exe';
+const remoteIdentity = (row) => ({
+  pid: row.pid,
+  parent: row.parent,
+  created: row.created,
+  path: row.path,
+});
+function sandboxIds() {
+  const output = ps(
+    `& ${psLiteral(sandboxCli)} list; if ($LASTEXITCODE -ne 0) { throw 'Windows Sandbox list failed' }`,
+  );
+  // The current official CLI emits one ID per line, or no text for no VMs.
+  // Diagnostics, table headers or malformed/duplicate IDs must never mean empty.
+  const ids = output ? output.split(/\r?\n/) : [];
+  for (const id of ids)
+    assert.match(
+      id,
+      /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i,
+      'Unexpected Sandbox list output',
+    );
+  const normalized = ids.map((id) => id.toLowerCase());
+  assert.equal(new Set(normalized).size, normalized.length, 'Duplicate Sandbox VM IDs');
+  return normalized;
+}
+function adopt(rows, allowUnknown = false) {
   let added;
   do {
     added = false;
     for (const row of rows) {
+      // list itself may create this long-lived daemon without creating a VM.
+      // It is never an owned viewer, never a shutdown target, and may remain.
+      if (isServer(row)) continue;
       if (owned.has(row.pid)) {
         const known = owned.get(row.pid);
         if (known) assert.equal(row.created, known, 'Sandbox PID was reused');
         else owned.set(row.pid, row.created);
-      } else if (
-        Date.parse(row.created) >= startedAt - 1000 &&
-        (owned.has(row.parent) || row.command?.toLowerCase().includes(configuration.toLowerCase()))
-      ) {
+      } else if (Date.parse(row.created) >= startedAt - 1000 && owned.has(row.parent)) {
         owned.set(row.pid, row.created);
         added = true;
       }
     }
   } while (added);
-  const unknown = rows.filter((row) => !owned.has(row.pid));
-  assert.equal(
-    unknown.length,
-    0,
-    'An active Sandbox has unknown ownership; it will not be stopped',
+  if (!allowUnknown)
+    assert.equal(
+      rows.filter((row) => !isServer(row) && !owned.has(row.pid)).length,
+      0,
+      'An active Sandbox has unknown ownership; it will not be stopped',
+    );
+}
+function observeSandbox() {
+  const ids = sandboxIds();
+  const rows = sandboxProcesses();
+  adopt(rows);
+  assert.ok(ids.length <= 1, 'An unrelated Sandbox VM started during this check');
+  const remotes = rows.filter((row) => isRemote(row) && owned.has(row.pid));
+  assert.ok(remotes.length <= 1, 'Ambiguous owned Sandbox viewer');
+  if (ownVmId) {
+    if (ids.length) assert.equal(ids[0], ownVmId, 'Sandbox VM identity changed');
+    if (remotes.length)
+      assert.deepEqual(remoteIdentity(remotes[0]), ownRemote, 'Sandbox viewer identity changed');
+  } else if (ids.length === 1 && remotes.length === 1) {
+    // Both preflights had zero VMs and zero viewers. Only the unique new ID
+    // together with the spawned launcher's verified process chain proves ours.
+    assert.ok(path.isAbsolute(remotes[0].path), 'Sandbox viewer path is unavailable');
+    assert.equal(path.basename(remotes[0].path).toLowerCase(), 'windowssandboxremotesession.exe');
+    ownVmId = ids[0];
+    ownRemote = remoteIdentity(remotes[0]);
+  }
+}
+async function stopOwnedSandbox() {
+  // Never kill the daemon or an arbitrary process tree. Stop only the VM
+  // bound to our unique launch/viewer above, after rechecking its identity.
+  let ids = sandboxIds();
+  let rows = sandboxProcesses();
+  adopt(rows, true);
+  if (ownVmId && ids.includes(ownVmId)) {
+    assert.ok(
+      ownRemote && owned.get(ownRemote.pid) === ownRemote.created,
+      'Sandbox VM ownership was not established',
+    );
+    ps(
+      `& ${psLiteral(sandboxCli)} stop --id ${psLiteral(ownVmId)}; if ($LASTEXITCODE -ne 0) { throw 'Stopping owned Sandbox VM failed' }`,
+    );
+  }
+  const deadline = Date.now() + 30000;
+  do {
+    ids = sandboxIds();
+    rows = sandboxProcesses();
+    adopt(rows, true);
+    const vmGone = ownVmId ? !ids.includes(ownVmId) : ids.length === 0;
+    const remote = ownRemote && rows.find((row) => row.pid === ownRemote.pid);
+    if (vmGone && remote) {
+      assert.ok(ownVmId, 'Cannot close a viewer without verified VM ownership');
+      assert.deepEqual(
+        remoteIdentity(remote),
+        ownRemote,
+        'Sandbox viewer identity changed before cleanup',
+      );
+      // The official stop command can leave its viewer alive. After the VM is
+      // gone, close only this exact owned viewer. Holding its process handle
+      // while rechecking CIM identity prevents a recycled PID becoming a target.
+      ps(`
+        $process = Get-Process -Id ${ownRemote.pid} -ErrorAction SilentlyContinue
+        if ($null -ne $process) {
+          try {
+            $null = $process.Handle
+            $current = Get-CimInstance Win32_Process -Filter "ProcessId=${ownRemote.pid}"
+            if ($null -eq $current -or $current.Name -ine 'WindowsSandboxRemoteSession.exe' -or
+                $current.ParentProcessId -ne ${ownRemote.parent} -or
+                $current.CreationDate.ToUniversalTime().ToString('o') -cne ${psLiteral(ownRemote.created)} -or
+                $current.ExecutablePath -ine ${psLiteral(ownRemote.path)}) { throw 'Owned Sandbox viewer identity changed' }
+            $process.Kill()
+            if (-not $process.WaitForExit(10000)) { throw 'Owned Sandbox viewer did not exit' }
+          } finally { $process.Dispose() }
+        }
+      `);
+      rows = sandboxProcesses();
+      adopt(rows, true);
+    }
+    if (vmGone && !rows.some((row) => !isServer(row) && owned.has(row.pid))) break;
+    await delay(1000);
+  } while (Date.now() < deadline);
+  assert.ok(
+    ownVmId ? !ids.includes(ownVmId) : ids.length === 0,
+    'Sandbox VM did not shut down or ownership is unknown; temporary mapping retained',
   );
+  assert.equal(
+    rows.filter((row) => !isServer(row) && owned.has(row.pid)).length,
+    0,
+    'Owned Sandbox viewer did not exit; temporary mapping retained',
+  );
+}
+async function requireNoStopRequest() {
+  const info = await lstat(control).catch((error) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  if (!info) return;
+  assert.ok(info.isFile() && !info.isSymbolicLink() && info.size <= 64, 'Unsafe stop request');
+  assert.equal(await readFile(control, 'utf8'), nonce, 'Unexpected stop request owner');
+  throw Error('Store Sandbox verification cancelled by its owner');
 }
 async function ordinary(file) {
   const info = await lstat(file);
@@ -137,6 +266,7 @@ const [configFile, work, outputFile] = process.argv.slice(2);
 const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
 let socket;
 let sequence = 0;
+let initiallyPaused = false;
 const pending = new Map();
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 const deadline = Date.now() + 120000;
@@ -159,30 +289,48 @@ try {
   });
   socket.addEventListener('message',message => {
     const value = JSON.parse(message.data);
+    if(value.method==='Debugger.paused') initiallyPaused=true;
     if (!value.id) return;
     const request = pending.get(value.id);
     if (!request) return;
     pending.delete(value.id);clearTimeout(request.timer);
-    if (value.error) request.reject(Error(JSON.stringify(value.error)));
+    if (value.error) request.reject(Error('Inspector command failed ['+request.label+']: '+JSON.stringify(value.error)));
     else request.resolve(value.result);
   });
-  const send = (method,params={}) => new Promise((resolve,reject) => {
+  const send = (method,params={},label=method) => new Promise((resolve,reject) => {
+    const timeout = Math.min(30000,deadline-Date.now());
+    if(timeout<=0){reject(Error('Inspector deadline exceeded ['+label+']: '+method));return;}
     const id = ++sequence;
-    const timer = setTimeout(() => {pending.delete(id);reject(Error('Inspector command timeout: '+method));},30000);
-    pending.set(id,{resolve,reject,timer});socket.send(JSON.stringify({id,method,params}));
+    const timer = setTimeout(() => {pending.delete(id);reject(Error('Inspector command timeout ['+label+']: '+method));},timeout);
+    pending.set(id,{resolve,reject,timer,label});socket.send(JSON.stringify({id,method,params}));
   });
-  const evaluate = async expression => {
-    const value = await send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});
-    if (value.exceptionDetails) throw Error(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text);
+  const evaluate = async (expression,label,awaitPromise=true) => {
+    const value = await send('Runtime.evaluate',{expression,awaitPromise,returnByValue:true},label);
+    if (value.exceptionDetails) throw Error('Inspector evaluation failed ['+label+']: '+(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text));
     return value.result.value;
   };
   await send('Runtime.enable');
+  await send('Debugger.enable');
   await send('Runtime.runIfWaitingForDebugger');
+  while(!initiallyPaused){
+    if(Date.now()>deadline)throw Error('Installed Store inspector did not reach its initial pause');
+    await delay(25);
+  }
+  // DesktopPackage activation does not inherit the launching PowerShell env.
+  // Set only owned fixture inputs before the real main module can consume them.
+  const isolatedEnvironment = {COPILOT_TEST_USER_DATA:work+'\\profile',VOXCUE_ACCOUNT_API:'',VITE_DEV_SERVER_URL:''};
+  const actualEnvironment = await evaluate('(()=>{const values='+JSON.stringify(isolatedEnvironment)+';for(const [key,value] of Object.entries(values))process.env[key]=value;delete process.env.ELECTRON_RUN_AS_NODE;return {COPILOT_TEST_USER_DATA:process.env.COPILOT_TEST_USER_DATA,VOXCUE_ACCOUNT_API:process.env.VOXCUE_ACCOUNT_API,VITE_DEV_SERVER_URL:process.env.VITE_DEV_SERVER_URL,runAsNodePresent:Object.prototype.hasOwnProperty.call(process.env,"ELECTRON_RUN_AS_NODE")}})()','initial-env',false);
+  assert.deepEqual(actualEnvironment,{...isolatedEnvironment,runAsNodePresent:false});
+  await send('Debugger.resume');
+  while(!await evaluate('typeof process === "object" && process !== null && typeof process.resourcesPath === "string" && process.resourcesPath.length > 0 && typeof process.getBuiltinModule === "function"','bootstrap')){
+    if(Date.now()>deadline)throw Error('Installed Store Electron bootstrap did not become ready');
+    await delay(250);
+  }
   const prelude = "const req=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app.asar/package.json');const electron=req('electron');";
   let runtime;
   while (!runtime) {
     if (Date.now() > deadline) throw Error('Installed Store application did not become ready');
-    const state = await evaluate('(async()=>{'+prelude+'return electron.app.isReady()?{pid:process.pid,windowsStore:process.windowsStore,packaged:electron.app.isPackaged,version:electron.app.getVersion(),userData:electron.app.getPath(\'userData\')}:null})()');
+    const state = await evaluate('(async()=>{'+prelude+'return electron.app.isReady()?{pid:process.pid,windowsStore:process.windowsStore,packaged:electron.app.isPackaged,version:electron.app.getVersion(),userData:electron.app.getPath(\'userData\')}:null})()','app-ready');
     if (state) runtime = state;else await delay(250);
   }
   assert.equal(runtime.windowsStore,true,'Actual packaged process.windowsStore must be true');
@@ -192,30 +340,30 @@ try {
   let login;
   while (!login) {
     if (Date.now() > deadline) throw Error('Installed Store login renderer did not load');
-    login = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().endsWith(\'#login\'));return win?await win.webContents.executeJavaScript(\'typeof window.desktop?.setLocalMode === "function"\'):false})()');
+    login = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().endsWith(\'#login\'));return win?await win.webContents.executeJavaScript(\'typeof window.desktop?.setLocalMode === "function"\'):false})()','login-ready');
     if (!login) await delay(250);
   }
   // This is the shipped local-account entry, in a fresh guest, through its real
   // renderer/preload/IPC authorization. No synthetic authentication helper runs.
-  const entered = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().endsWith(\'#login\'));return win.webContents.executeJavaScript(\'window.desktop.setLocalMode(true)\')})()');
+  const entered = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().endsWith(\'#login\'));return win.webContents.executeJavaScript(\'window.desktop.setLocalMode(true)\')})()','enter-local');
   assert.equal(entered.ok,true);
   assert.equal(entered.state.localMode,true);
   let update;
   while (!update) {
     if (Date.now() > deadline) throw Error('Installed Store main renderer did not load');
-    update = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().startsWith(\'file:\')&&!win.webContents.getURL().endsWith(\'#login\'));if(!win)return null;return win.webContents.executeJavaScript(\'typeof window.desktop?.updates === "function" ? window.desktop.updates({op:"status"}) : null\')})()');
+    update = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().startsWith(\'file:\')&&!win.webContents.getURL().endsWith(\'#login\'));if(!win)return null;return win.webContents.executeJavaScript(\'typeof window.desktop?.updates === "function" ? window.desktop.updates({op:"status"}) : null\')})()','update-status');
     if (!update) await delay(250);
   }
   assert.equal(update.phase,'unavailable');
   assert.equal(update.currentVersion,config.version);
   assert.equal(update.message,config.storeUpdateMessage);
-  const states = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().startsWith(\'file:\')&&!win.webContents.getURL().endsWith(\'#login\'));return win.webContents.executeJavaScript(\'Promise.all([{op:"check",force:true},{op:"download"},{op:"install"}].map(call=>window.desktop.updates(call)))\')})()');
+  const states = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().startsWith(\'file:\')&&!win.webContents.getURL().endsWith(\'#login\'));return win.webContents.executeJavaScript(\'Promise.all([{op:"check",force:true},{op:"download"},{op:"install"}].map(call=>window.desktop.updates(call)))\')})()','update-actions');
   assert.equal(states.length,3);
   for(const state of states){assert.equal(state.phase,'unavailable');assert.equal(state.currentVersion,config.version);assert.equal(state.message,config.storeUpdateMessage);}
-  const driverDisabled = await evaluate('(async()=>{'+prelude+'const driver=req(electron.app.getAppPath()+\'/dist-electron/shared/electron/backend/updates/driver.js\');return driver.createUpdateDriver(electron.app.isPackaged)===undefined&&driver.updateUnavailableReason(electron.app.isPackaged)==='+JSON.stringify(config.storeUpdateMessage)+'})()');
+  const driverDisabled = await evaluate('(async()=>{'+prelude+'const driver=req(electron.app.getAppPath()+\'/dist-electron/shared/electron/backend/updates/driver.js\');return driver.createUpdateDriver(electron.app.isPackaged)===undefined&&driver.updateUnavailableReason(electron.app.isPackaged)==='+JSON.stringify(config.storeUpdateMessage)+'})()','driver');
   assert.equal(driverDisabled,true);
   await fs.writeFile(outputFile,JSON.stringify({nonce:config.nonce,...runtime,driverDisabled,updatePhases:[update,...states].map(state=>state.phase)}));
-  await evaluate('(()=>{'+prelude+'setTimeout(()=>electron.app.quit(),50);return true})()');
+  await evaluate('(()=>{'+prelude+'setTimeout(()=>electron.app.quit(),50);return true})()','quit');
 } finally {
   for(const request of pending.values()){clearTimeout(request.timer);request.reject(Error('Inspector client closed'));}
   socket?.close();
@@ -224,7 +372,7 @@ try {
 
 const guestScript = String.raw`
 $ErrorActionPreference = 'Stop'
-$config = Get-Content -LiteralPath 'C:\VoxCueStoreInput\config.json' -Raw | ConvertFrom-Json
+$config = Get-Content -LiteralPath 'C:\VoxCueStoreInput\config.json' -Encoding UTF8 -Raw | ConvertFrom-Json
 $output = 'C:\VoxCueStoreOutput'
 $work = Join-Path $env:TEMP ('voxcue-store-' + $config.nonce)
 $result = @{ nonce=$config.nonce; ok=$false; stage='starting' }
@@ -281,16 +429,47 @@ try {
   if (-not $exe.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($exe) -ne 'VoxCue.exe') { throw 'Unexpected installed executable' }
   Stage 'launching-package-identity'
   Get-Command Invoke-CommandInDesktopPackage -ErrorAction Stop | Out-Null
-  $env:COPILOT_TEST_USER_DATA = Join-Path $work 'profile'
-  $env:VOXCUE_ACCOUNT_API = ''
-  $env:VITE_DEV_SERVER_URL = ''
-  Remove-Item Env:ELECTRON_RUN_AS_NODE -ErrorAction SilentlyContinue
   Invoke-CommandInDesktopPackage -PackageFamilyName $package.PackageFamilyName -AppId $applications[0].Id -Command $exe -Args '--inspect-brk=127.0.0.1:9229' -PreventBreakaway
   Stage 'checking-real-store-runtime'
   $runtimeFile = Join-Path $work 'runtime.json'
-  & 'C:\VoxCueStoreInput\tools\node.exe' 'C:\VoxCueStoreInput\inspect.mjs' 'C:\VoxCueStoreInput\config.json' $work $runtimeFile 2> (Join-Path $work 'inspect-error.txt')
-  if ($LASTEXITCODE -ne 0) { throw ('Installed runtime verification failed: ' + (Get-Content -LiteralPath (Join-Path $work 'inspect-error.txt') -Raw)) }
-  $runtime = Get-Content -LiteralPath $runtimeFile -Raw | ConvertFrom-Json
+  # WinPS 5 converts native stderr into ErrorRecords; with Stop this can discard
+  # everything after the first stack line. Drain both native pipes concurrently.
+  $inspection = New-Object Diagnostics.Process
+  $inspectionStarted = $false
+  try {
+    $inspection.StartInfo.FileName = 'C:\VoxCueStoreInput\tools\node.exe'
+    $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\inspect.mjs" "C:\VoxCueStoreInput\config.json" "' + $work + '" "' + $runtimeFile + '"'
+    $inspection.StartInfo.WorkingDirectory = $work
+    $inspection.StartInfo.UseShellExecute = $false
+    $inspection.StartInfo.CreateNoWindow = $true
+    $inspection.StartInfo.RedirectStandardOutput = $true
+    $inspection.StartInfo.RedirectStandardError = $true
+    $inspection.StartInfo.StandardOutputEncoding = New-Object Text.UTF8Encoding $false
+    $inspection.StartInfo.StandardErrorEncoding = New-Object Text.UTF8Encoding $false
+    $inspectionStarted = $inspection.Start()
+    if (-not $inspectionStarted) { throw 'Starting Store inspector failed' }
+    $stdoutTask = $inspection.StandardOutput.ReadToEndAsync()
+    $stderrTask = $inspection.StandardError.ReadToEndAsync()
+    $timedOut = -not $inspection.WaitForExit(180000)
+    if ($timedOut) {
+      $inspection.Kill()
+      if (-not $inspection.WaitForExit(10000)) { throw 'Timed-out Store inspector did not exit' }
+    }
+    if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 10000)) { throw 'Store inspector diagnostic capture timed out' }
+    $stdout = $stdoutTask.GetAwaiter().GetResult()
+    $stderr = $stderrTask.GetAwaiter().GetResult()
+    $diagnostic = ('exitCode=' + $inspection.ExitCode + [Environment]::NewLine + 'stdout:' + [Environment]::NewLine + $stdout + [Environment]::NewLine + 'stderr:' + [Environment]::NewLine + $stderr)
+    if ($timedOut) { throw ('Installed runtime verification timed out: ' + $diagnostic) }
+    if ($inspection.ExitCode -ne 0) { throw ('Installed runtime verification failed: ' + $diagnostic) }
+  } finally {
+    try {
+      if ($inspectionStarted -and -not $inspection.HasExited) {
+        $inspection.Kill()
+        if (-not $inspection.WaitForExit(10000)) { throw 'Store inspector cleanup timed out' }
+      }
+    } finally { $inspection.Dispose() }
+  }
+  $runtime = Get-Content -LiteralPath $runtimeFile -Encoding UTF8 -Raw | ConvertFrom-Json
   if ($runtime.nonce -ne $config.nonce -or -not $runtime.windowsStore -or -not $runtime.driverDisabled -or $runtime.version -ne $config.version) { throw 'Invalid installed Store runtime result' }
   if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.sha256) { throw 'Read-only source APPX changed' }
   $result.ok = $true
@@ -320,6 +499,18 @@ try {
   );
   await ordinary(artifact);
   await ordinary(sandboxExe);
+  const cli = JSON.parse(
+    ps(`
+      @{source=(Get-Command wsb.exe -CommandType Application -ErrorAction Stop).Source;
+        expected=(Join-Path ([Environment]::GetFolderPath('LocalApplicationData')) 'Microsoft\\WindowsApps\\wsb.exe')} | ConvertTo-Json -Compress
+    `),
+  );
+  assert.equal(
+    path.resolve(cli.source).toLowerCase(),
+    path.resolve(cli.expected).toLowerCase(),
+    'Expected the official Windows Sandbox CLI alias',
+  );
+  sandboxCli = cli.source;
   const feature = JSON.parse(
     ps(
       `$feature = Get-CimInstance Win32_OptionalFeature -Filter "Name='Containers-DisposableClientVM'"
@@ -328,7 +519,12 @@ try {
   );
   assert.equal(feature.present, true, 'Windows Sandbox optional feature is unavailable');
   assert.equal(feature.installState, 1, 'Windows Sandbox must already be enabled');
-  assert.deepEqual(sandboxProcesses(), [], 'Close existing or unknown Sandbox sessions first');
+  assert.deepEqual(sandboxIds(), [], 'Close existing Sandbox VMs first');
+  assert.equal(
+    sandboxProcesses().filter(isRemote).length,
+    0,
+    'Close existing Sandbox viewers first',
+  );
   const framework = path.join(process.env.WINDIR, 'Microsoft.NET/Framework64/v4.0.30319');
   const probe = path.join(root, 'WindowProbe.exe');
   execFileSync(
@@ -430,9 +626,14 @@ try {
   </Configuration>`,
   );
   assert.deepEqual(
-    sandboxProcesses(),
+    sandboxIds(),
     [],
-    'A Sandbox started during preparation; refusing to reuse it',
+    'A Sandbox VM started during preparation; refusing to reuse it',
+  );
+  assert.equal(
+    sandboxProcesses().filter(isRemote).length,
+    0,
+    'A Sandbox viewer started during preparation; refusing to reuse it',
   );
   requireDesktop();
   startedAt = Date.now();
@@ -447,14 +648,16 @@ try {
   while (true) {
     interrupted.signal.throwIfAborted();
     requireDesktop();
+    await requireNoStopRequest();
     if (childError) throw childError;
-    adopt(sandboxProcesses());
+    observeSandbox();
     const status = await readResult(statusFile);
     if (status && status.stage !== lastStage) {
       console.log('Store Sandbox: ' + (lastStage = status.stage));
     }
     const result = await readResult(resultFile);
     if (result) {
+      assert.ok(ownVmId && ownRemote, 'Guest result has no verified VM and viewer ownership');
       assert.equal(result.ok, true, JSON.stringify(result));
       assert.equal(result.packageVersion, packageVersion);
       assert.equal(result.appVersion, version);
@@ -467,6 +670,8 @@ try {
         'unavailable',
         'unavailable',
       ]);
+      interrupted.signal.throwIfAborted();
+      await requireNoStopRequest();
       console.log(JSON.stringify(result));
       break;
     }
@@ -482,35 +687,7 @@ try {
       if (error.code !== 'ENOENT') throw error;
     });
     if (child) {
-      let rows = [];
-      const deadline = Date.now() + 30000;
-      do {
-        rows = sandboxProcesses();
-        adopt(rows);
-        if (!rows.length) break;
-        await delay(1000);
-      } while (Date.now() < deadline);
-      for (const row of rows) {
-        assert.equal(
-          owned.get(row.pid),
-          row.created,
-          'Refusing to stop an unowned Sandbox process',
-        );
-        const current = sandboxProcesses().find((item) => item.pid === row.pid);
-        if (current) {
-          assert.equal(current.created, row.created, 'Sandbox PID was reused');
-          execFileSync('taskkill.exe', ['/PID', String(row.pid), '/T', '/F'], {
-            windowsHide: true,
-            stdio: 'pipe',
-            timeout: 10000,
-          });
-        }
-      }
-      assert.deepEqual(
-        sandboxProcesses(),
-        [],
-        'Sandbox did not shut down; temporary mapping retained',
-      );
+      await stopOwnedSandbox();
     }
     if (originalHash)
       assert.equal(await hash(artifact), originalHash, 'Original Store APPX changed');
