@@ -1,6 +1,6 @@
 # VoxCue 1.0.0 · Windows / macOS
 
-发布状态：Windows 已在 GitHub 发布；Microsoft Store 提交 3 已上架。Mac 1.0.0 正在本机验证，当前公开 Mac 版本仍为 0.6.9。 / Status: Windows released on GitHub; Microsoft Store submission 3 is live. Mac 1.0.0 is undergoing local validation; the current public Mac release remains 0.6.9.
+发布状态：Windows 与 Mac 1.0.0 已在 GitHub 发布并保持 Latest；Microsoft Store 提交 3 已上架。 / Status: Windows and Mac 1.0.0 are released on GitHub and remain Latest; Microsoft Store submission 3 is live.
 
 ## 简体中文
 
@@ -11,7 +11,7 @@
 - **链接反馈更明确。** 可用超链接和来源胶囊显示手形光标，悬停与键盘聚焦时提供清晰的文字、背景或焦点轮廓反馈，兼顾浅深主题。
 - **适配 Microsoft Store 更新。** 商店安装版由 Microsoft Store 更新，并在更新页明确说明；独立 Windows 安装版继续使用原有应用内更新渠道。商店任务栏使用适配不同尺寸及浅深主题的透明图标。
 
-Windows 首次安装或手动升级使用 `VoxCue-Setup-1.0.0-x64.exe`；`.blockmap` 和 `latest.yml` 用于应用内更新。Mac 1.0.0 完成本机验收和发布后，首次安装或手动升级使用 `VoxCue-1.0.0-arm64.dmg`；`VoxCue-1.0.0-arm64.zip` 和 `latest-mac.yml` 用于应用内更新。
+Windows 首次安装或手动升级使用 `VoxCue-Setup-1.0.0-x64.exe`；`.blockmap` 和 `latest.yml` 用于应用内更新。Mac 首次安装或手动升级使用 `VoxCue-1.0.0-arm64.dmg`；`VoxCue-1.0.0-arm64.zip` 和 `latest-mac.yml` 用于应用内更新。适用于 Apple Silicon arm64、macOS 14.2 及以上。
 
 ## English
 
@@ -22,4 +22,4 @@ Windows 首次安装或手动升级使用 `VoxCue-Setup-1.0.0-x64.exe`；`.block
 - **Clearer link feedback.** Available hyperlinks and source pills use a hand pointer, with visible text, background or focus-outline feedback on hover and keyboard focus in light and dark themes.
 - **Microsoft Store update support.** Store installations receive updates through Microsoft Store, with a clear explanation on the updates page. Standalone Windows installations retain their existing in-app update channel. Store taskbar icons use transparent artwork for different sizes and light or dark themes.
 
-For a first Windows installation or a manual upgrade, use `VoxCue-Setup-1.0.0-x64.exe`. The `.blockmap` and `latest.yml` files support in-app updates. Once Mac 1.0.0 completes local validation and is published, use `VoxCue-1.0.0-arm64.dmg` for installation or manual upgrades. `VoxCue-1.0.0-arm64.zip` and `latest-mac.yml` support in-app updates.
+For a first Windows installation or a manual upgrade, use `VoxCue-Setup-1.0.0-x64.exe`. The `.blockmap` and `latest.yml` files support in-app updates. For a first Mac installation or a manual upgrade, use `VoxCue-1.0.0-arm64.dmg`. `VoxCue-1.0.0-arm64.zip` and `latest-mac.yml` support in-app updates. Requires Apple Silicon arm64 and macOS 14.2 or later.
