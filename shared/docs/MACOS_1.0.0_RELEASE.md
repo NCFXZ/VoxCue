@@ -2,9 +2,9 @@
 
 Mac 资产追加日期 / Mac assets added: 2026-11-07；最后一项创建于 `2026-11-07T20:25:48Z`。三项已追加到既有 [v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0)，发行 ID `437694751`，保持 Latest。匿名生产更新器已完成本平台完整包回读与签名/摘要认证；Windows 三项资产的 ID、大小与摘要保持，见 [Windows 发行索引](WINDOWS_1.0.0_RELEASE.md)。
 
-Mac 安装包源码输入为 [`f6e06e3f62395c0d6b78bafdfceabb347c91ac27`](https://github.com/NCFXZ/VoxCue/commit/f6e06e3f62395c0d6b78bafdfceabb347c91ac27)，已推送私有源码主分支。唯一版本源为 `shared/package.json = 1.0.0`。后续发行文档提交不改变安装包内容。
+Mac 安装包源码输入为 [`f6e06e3f62395c0d6b78bafdfceabb347c91ac27`](https://github.com/NCFXZ/VoxCue/commit/f6e06e3f62395c0d6b78bafdfceabb347c91ac27)，已推送私有源码主分支。唯一版本源为 `shared/package.json = 1.0.0`。后续测试工具及发行文档提交不改变安装包内容。
 
-The installer was built from the source commit above. Later release documentation does not change its contents.
+The installer was built from the source commit above. Later test tooling and release documentation do not change its contents.
 
 ## 正式资产 / Release assets
 
@@ -22,8 +22,8 @@ Use the DMG for installation or manual upgrades. The signed ZIP and manifest sup
 
 ## 接续与边界 / Follow-up and scope
 
-- 同步 0.6.9 后的额度对齐、单周期呈现、网页活动来源胶囊与链接反馈，并修复 Mac 单周期英文的边缘裁切；详见 [逐项交接 M001–M066](MACOS_1.0.0_HANDOFF.md) 和 [中英发行说明](RELEASE_1.0.0.md)。
-- 本机五档、Qwen 及临时凭据测试器使用持续桌面守卫；原生更新测试只认领本轮偏好域，确认关联进程退出后清理独占临时根。测试结果只在终端/对话，不进入本索引。
+- 同步 0.6.9 后的额度对齐、单周期呈现、网页活动来源胶囊与链接反馈，并修复 Mac 单周期英文的边缘裁切；详见 [逐项交接 M001–M067](MACOS_1.0.0_HANDOFF.md) 和 [中英发行说明](RELEASE_1.0.0.md)。
+- 本机五档、Qwen 及临时凭据测试器使用持续桌面守卫；原生更新测试只认领本轮偏好域，确认本轮文件/映射无占用后清理独占临时根，不依赖截断的进程名或读取用户 argv。测试结果只在终端/对话，不进入本索引。
 - Windows 树保持只读，已有 Windows 1.0.0 三项资产与 Store 1.0.1 维护基线保留，见 [Windows 发行索引](WINDOWS_1.0.0_RELEASE.md)。共享布局新增规则和生成版本漂移留其本机复核，不能将 Mac 结果代验 Windows。
 - 依赖、模型、RAG 策略及数据兼容保持。测试仅使用合成账户/资料和固定公开资源，不证明真实订阅、物理音频或自动化宿主无法触发的隐藏恢复；Sparkle 最终归档在临时合成旧版本上认证暂存后取消，不替换真实安装。
 - 历史正式及恢复基线、原件和现用缓存保留。临时账户、数据库、图像、模型运行副本及只读服务端参考按生命周期清理；独立官网与服务端不部署。

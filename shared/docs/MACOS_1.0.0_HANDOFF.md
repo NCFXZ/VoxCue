@@ -113,8 +113,9 @@
 | --- | --- | --- |
 | M063 | `macos/test/scripts/ui-refinement-matrix.mjs`：复用共享 `watchTestDesktop`，保留锁屏或未知会话错误；子进程退出后先检查守卫失败，再处理测试结果。原守卫仅发送 SIGTERM，短暂锁屏后可能继续下一组，子进程零退出时还可能丢失会话错误。 | 执行 `desktop-guard` 单测，核对失去桌面后仅终止本轮子进程、即使零退出也保留失败，并释放轮询。五档矩阵发生会话异常时必须终止整轮、释放亮屏断言，不能自动解锁、修改系统策略或在解锁后继续；原五档、串行顺序、180 秒单组时限及视觉断言不变。 |
 | M064 | `shared/src/styles.css`：展开账号卡片的既有网格同时匹配 `.account-usage-summary.is-low` 和 `.is-inline`，单周期额度行从邮箱列起跨至卡片右侧，利用箭头下方空位。修正 M002/M012 最初要求单周期保留 flex 的说明，以容纳 Mac 字体下完整的英文 `ChatGPT N% remaining`。 | 本机重建后重跑 `free-service`，再覆盖五档、中英浅深、默认/最小窗口及 0/19/20/71% 两种单周期。预期全文不裁切、单周期仍一行且只有低百分比标黄，头像与邮箱/额度整体居中；折叠、长邮箱、双周期正常摘要和预警布局继续回归。保持 230px 侧栏、原字号、视觉阈值及业务额度规则，不添加提示文字。 |
-| M065 | `macos/test/scripts/updates-native-smoke.mjs`：偏好清理只使用本轮 PID 与随机 nonce 生成的唯一 bundle ID，删除旧固定域清理和历史域扫描；所有链接/父路径/UID 检查前置于 `defaults delete`。真实 Sparkle 包使用专用 owner 临时根，按该根和唯一域缓存路径确认 Electron、Sparkle 及重启应用退出后才清理。 | 本机串行运行 `updates-native`，保留真实签名拒绝、取消、安装/重启及旧包保护断言。每个场景和退出清理均等待本轮相关进程退出；状态查询失败、进程仍活跃或归属/路径变化须明确失败并保留该轮资源，不按进程名杀进程、不删除历史或未知域，也不让通用临时回收器删除仍被 Sparkle 占用的目录。生产更新器、真实偏好、签名身份及系统策略保持。 |
+| M065 | `macos/test/scripts/updates-native-smoke.mjs`：偏好清理只使用本轮 PID 与随机 nonce 生成的唯一 bundle ID，删除旧固定域清理和历史域扫描；所有链接/父路径/UID 检查前置于 `defaults delete`。真实 Sparkle 包使用专用 owner 临时根，按 M067 确认本轮临时根、唯一缓存域及偏好文件的打开文件/映射释放后才清理。 | 本机串行运行 `updates-native`，保留真实签名拒绝、取消、安装/重启及旧包保护断言。每个场景和退出清理均等待本轮资源释放；占用查询失败、资源仍活跃或归属/路径变化须明确失败并保留该轮资源，不按进程名杀进程、不删除历史或未知域，也不让通用临时回收器删除仍被 Sparkle 占用的目录。生产更新器、真实偏好、签名身份及系统策略保持。 |
 | M066 | `macos/test/scripts/qwen-regression.mjs` 与 `cloud-native-vault-smoke.mjs`：独立入口复用 `watchTestDesktop`，保留会话异常并在子进程退出后优先抛出。Qwen 从准备阶段持有亮屏断言，各原生/推理/界面子项启动前检查解锁控制台，移除锁屏时标记组件 pending 却继续运行后续删除项的路径；原生凭据专项清理失败也释放亮屏断言。 | 运行 `desktop-guard` 单测，核对未知/锁屏、子进程零退出、终止失败和轮询释放；本机另串行执行两独立入口，保持固定公开模型认证/临时复制、实际 CPU/Metal/Worker 及组件释放五项和隔离 Keychain/重启/失败回滚断言。任一会话异常必须停止整轮并失败，不能跳过后继续或自动解锁；不接触正式助手、真实账户或系统辅助功能设置。 |
+| M067 | `macos/test/scripts/updates-native-smoke.mjs`：M065 的 `ps comm` 路径判定替换为仅查询本轮临时根、唯一缓存域及偏好文件的 `lsof` 占用检查。macOS 的 `comm` 即使指定 `-ww` 仍可能截断，不能据此证明 Sparkle 已释放资源；目录递归查询同时覆盖打开文件及可执行文件/库映射，不读取任何用户 argv。 | 先以本轮临时文件实际持有/关闭核对本机 `lsof` 的 PID/文件字段及空占用语义，再串行重跑真实 `updates-native`。`+D` 即使返回 1，只要含占用记录仍须保留；仅连续两轮全部路径返回明确空占用才允许清理。超时、错误、警告、未知输出或路径/归属变化必须失败并保留资源，不能按进程名终止未知进程。此项仅修测试清理边界，正式安装包无须重建。 |
 
 ## 本机执行顺序与入口
 
@@ -131,4 +132,4 @@
 9. 执行 `pnpm package:installer`。对本次准确 release 目录使用 `VOXCUE_TEST_RELEASE_DIR` 指向最终资产后，串行执行 `node test/scripts/package-runtimes-smoke.mjs`、`node test/scripts/package-smoke.mjs --install-archive`；核对固定签名、公钥、arm64、正式打包内容、安装归档与摘要，而非另建测试包代替最终包。
 10. Mac 资产公开完成后，在同一准确版本范围运行 `node test/scripts/package-smoke.mjs --install-archive --online`，匿名回读本平台完整资产并验证签名/摘要。更新最终发行索引与 `PROGRESS.md` 的真实状态，本文只保留需求、步骤和未完成待办。
 
-后续新增项目从 **M067** 起追加，不重排上述编号。最终 SHA、Windows/Mac 发布状态和资产定位由发行索引承接，不在本清单记录测试分数或临时产物。
+后续新增项目从 **M068** 起追加，不重排上述编号。最终 SHA、Windows/Mac 发布状态和资产定位由发行索引承接，不在本清单记录测试分数或临时产物。

@@ -21,7 +21,7 @@ const { macUpdatePayload } = require(
 );
 await checkMacUpdateCache(publicBase64, privateKey, macUpdatePayload);
 // Sparkle may outlive its original Electron parent. Keep its resources outside
-// the generic test-root reaper until every associated process is confirmed gone.
+// the generic test-root reaper until their open files and mappings are released.
 const nativeRoot = fs.realpathSync(
   fs.mkdtempSync(path.join(os.tmpdir(), 'voxcue-updater-native-')),
 );
@@ -45,23 +45,61 @@ fs.writeFileSync(
   JSON.stringify({ kind: 'voxcue-updater-native', pid: process.pid, bundleId }),
   { mode: 0o600 },
 );
+function nativeResourceStat(file) {
+  if (fs.realpathSync(path.dirname(file)) !== path.dirname(file))
+    throw Error('Redirected fixture resource parent');
+  let stat;
+  try {
+    stat = fs.lstatSync(file);
+  } catch (error) {
+    if (error.code === 'ENOENT' && file !== nativeRoot) return;
+    throw error;
+  }
+  if (stat.isSymbolicLink() || stat.uid !== process.getuid())
+    throw Error('Redirected or unowned fixture resource');
+  if (!stat.isDirectory() && !stat.isFile()) throw Error('Unknown fixture resource type');
+  return stat;
+}
 function waitForNativeProcesses() {
   const deadline = Date.now() + 15000;
   let empty = false;
   for (;;) {
-    const output = run('/bin/ps', ['-ww', '-U', String(process.getuid()), '-o', 'pid=,comm='], {
-      timeout: 5000,
-      maxBuffer: 8 * 1024 * 1024,
-    });
-    const active = output.split('\n').some((line) => {
-      const executable = line.match(/^\s*\d+\s+(.+?)\s*$/)?.[1];
-      if (!executable) return false;
-      // ps may use /var while Foundation returns its canonical /private/var path.
-      const normalized = executable.replace(/^\/var\//, '/private/var/');
-      return [nativeRoot, nativePaths[0]].some(
-        (root) => normalized === root || normalized.startsWith(root + path.sep),
+    let active = false;
+    for (const file of [nativeRoot, ...nativePaths]) {
+      const stat = nativeResourceStat(file);
+      if (!stat) continue;
+      const remaining = deadline - Date.now();
+      if (remaining <= 0) throw Error('Native update resource query timed out');
+      // Query only owned paths, including mapped executables/libraries. macOS
+      // ps comm can truncate paths even with -ww; never inspect user argv.
+      const occupied = spawnSync(
+        '/usr/sbin/lsof',
+        ['-Fpn', ...(stat.isDirectory() ? ['+D', file] : ['--', file])],
+        { encoding: 'utf8', timeout: Math.min(5000, remaining), maxBuffer: 8 * 1024 * 1024 },
       );
-    });
+      if (occupied.error || occupied.signal || ![0, 1].includes(occupied.status) || occupied.stderr)
+        throw Error('Cannot verify native update resource occupancy');
+      if (occupied.stdout) {
+        const fields = occupied.stdout.trimEnd().split('\n');
+        if (
+          !fields.some((field) => /^p[1-9]\d*$/.test(field)) ||
+          !fields.some((field) => field.startsWith('n')) ||
+          fields.some(
+            (field) =>
+              !/^(?:p[1-9]\d*|f.+|n.+)$/.test(field) ||
+              (field.startsWith('n') &&
+                field.slice(1) !== file &&
+                !(stat.isDirectory() && field.slice(1).startsWith(file + path.sep))),
+          )
+        )
+          throw Error('Unknown native update resource query output');
+        // +D may exit 1 while still reporting occupied entries. Any PID/file
+        // records therefore retain the resources regardless of that status.
+        active = true;
+        break;
+      }
+      if (occupied.status !== 1) throw Error('Unknown empty native update resource query');
+    }
     if (!active && empty) return;
     empty = !active;
     if (Date.now() >= deadline)
@@ -74,19 +112,7 @@ function waitForNativeProcesses() {
 function clearNativeDomain() {
   // Validate every path before defaults or filesystem mutations. Never follow
   // redirected parents, links or objects owned by another UID.
-  for (const file of nativePaths) {
-    const parent = path.dirname(file);
-    if (fs.realpathSync(parent) !== parent) throw Error('Redirected fixture domain parent');
-    let stat;
-    try {
-      stat = fs.lstatSync(file);
-    } catch (error) {
-      if (error.code === 'ENOENT') continue;
-      throw error;
-    }
-    if (stat.isSymbolicLink() || stat.uid !== process.getuid())
-      throw Error('Redirected or unowned fixture domain');
-  }
+  for (const file of nativePaths) nativeResourceStat(file);
   const deleted = spawnSync('/usr/bin/defaults', ['delete', bundleId], { stdio: 'ignore' });
   if (deleted.error) throw deleted.error;
   for (const file of nativePaths) fs.rmSync(file, { recursive: true, force: true });
