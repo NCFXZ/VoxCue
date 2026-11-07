@@ -101,6 +101,12 @@
 | M060 | `windows/test/scripts/store-sandbox-smoke.mjs`：Invoke-CommandInDesktopPackage 不继承启动 PowerShell 的环境，原来宾 `$env` 赋值无法隔离正式应用 profile；现移除该无效入口，在已捕获的最初 Debugger.paused 且 resume 之前，仅通过 Runtime.evaluate 设置本轮 `COPILOT_TEST_USER_DATA=$work\profile`、空 `VOXCUE_ACCOUNT_API`/`VITE_DEV_SERVER_URL` 并删除 `ELECTRON_RUN_AS_NODE`，精确核对四项状态后继续实际 bootstrap，由原 main 逻辑读取输入并选择临时目录。 | Windows 专属测试输入隔离修复；Mac 不照搬 DesktopPackage 或修改真实账户环境。这里仅设置合成夹具环境输入，不直接调用 app.setPath，也不改 resourcesPath、windowsStore、packaged、版本或任何业务结果；保留实际 userData 必须等于 owner 临时 profile 的严格断言，正式 auth:demo 拒绝守卫也不变。实际应用必须按自己的启动逻辑消费输入，不能靠暂停后改路径、伪造 API 或放宽断言通过。 |
 | M061 | `windows/test/scripts/store-sandbox-smoke.mjs`：初始暂停中的环境表达式本为同步操作，现明确以 `awaitPromise:false` 求值，精确核对隔离输入后才 resume；后续实际业务求值仍等待 Promise。所有求值按 initial-env、bootstrap、app-ready、login-ready、enter-local、update-status、update-actions、driver、quit 标记阶段，CDP 错误、超时及表达式异常包含阶段标签。 | Windows 专属 CDP 验证时序及诊断修复；Mac 同类夹具须区分暂停中的同步表达式与继续执行后的异步业务，不能让 paused runtime 等待无法推进的 Promise。标签仅指明固定阶段，不读取额外环境或敏感值；原 deadline、退出码、profile、实际身份/版本、preload/IPC 和驱动拒绝断言保持，不伪造运行时状态或跳过失败。 |
 
+## 后续 Store 维护版
+
+| 编号 | Windows / 共用变更 | Mac 接续要求 |
+| --- | --- | --- |
+| M062 | 发布者名称维护将共享应用版本升为 `1.0.1`，Windows Store 身份映射为 `2.0.1.0`；仅 `windows/scripts/package-store.mjs` 的 PublisherDisplayName 同步为 Partner Center 指定值，固定 Name / Publisher 不变。实际状态见 [1.0.1 发行索引](WINDOWS_1.0.1_RELEASE.md)。 | 本机同步共享 `1.0.1` 版本及生成配置，按原 M001–M061 范围继续验收；不复制 Windows Store 发布者或包身份，不改 Mac 固定签名身份。Windows 未生成或验证 Mac 1.0.1 包。 |
+
 ## 本机执行顺序与入口
 
 以下命令均为待执行步骤，不是已运行记录。除注明仓库根外，工作目录为 `macos/`；GUI、原生、推理和长稳之间保持串行。共享调度器只允许其已审计的隔离 Node 协议组并行，若需全串行可显式使用 `--jobs=1`。
@@ -116,4 +122,4 @@
 9. 执行 `pnpm package:installer`。对本次准确 release 目录使用 `VOXCUE_TEST_RELEASE_DIR` 指向最终资产后，串行执行 `node test/scripts/package-runtimes-smoke.mjs`、`node test/scripts/package-smoke.mjs --install-archive`；核对固定签名、公钥、arm64、正式打包内容、安装归档与摘要，而非另建测试包代替最终包。
 10. Mac 资产公开完成后，在同一准确版本范围运行 `node test/scripts/package-smoke.mjs --install-archive --online`，匿名回读本平台完整资产并验证签名/摘要。更新最终发行索引与 `PROGRESS.md` 的真实状态，本文只保留需求、步骤和未完成待办。
 
-后续新增项目从 **M062** 起追加，不重排上述编号。最终 SHA、Windows/Mac 发布状态和资产定位由发行索引承接，不在本清单记录测试分数或临时产物。
+后续新增项目从 **M063** 起追加，不重排上述编号。最终 SHA、Windows/Mac 发布状态和资产定位由发行索引承接，不在本清单记录测试分数或临时产物。

@@ -1,3 +1,7 @@
+## 2026-11-07 Windows Store 1.0.1 重包清理
+
+本轮构建及安装消费者结束后，复核真实绝对路径、全部祖先/内部无链接及文件排他访问，删除 `windows/release/store-stage`、`windows/release/store/resources` 和 `windows/release/store/builder-debug.yml`。共移除 8,047 个生成文件，逻辑大小 1,617,879,213 字节；四个现存 APPX 清理前后长度及修改时间一致。正式 1.0.1 APPX、全部旧发行/恢复包、NSIS 资产、模型依赖、凭据、固定缓存及 Mac 全树继续保留。
+
 ## 2026-11-07 Windows 1.0.0 清理边界
 
 复核根、共享和 Windows 源码、静态/动态入口、Worker/preload、构建打包及测试调度消费者，未确认可独立删除的闲置业务代码。不为清理数量移除有效入口；现用依赖、固定公开测试缓存和工具保留，Mac 全树及历史明确跳过目录不清理。

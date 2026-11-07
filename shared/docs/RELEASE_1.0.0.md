@@ -1,6 +1,6 @@
 # VoxCue 1.0.0 · Windows
 
-发布状态：Windows 已在 GitHub 发布；Microsoft Store 更新已提交认证，当前预处理。 / Status: Windows released on GitHub; the Microsoft Store update is submitted and in preprocessing.
+发布状态：Windows 已在 GitHub 发布；Microsoft Store 提交 3 已上架。 / Status: Windows released on GitHub; Microsoft Store submission 3 is live.
 
 ## 简体中文
 

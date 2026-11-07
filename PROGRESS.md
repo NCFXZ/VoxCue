@@ -2,11 +2,16 @@
 
 更新日期：2026-11-07。仅保存当前基线、任务与接续入口；长期规则见 AGENTS.md，详细变更及发行事实见 shared/docs，验证结果仅终端/对话。
 
-## 当前基线：Windows 1.0.0，Mac 0.6.9
+## 当前状态：Windows Store 1.0.1 已提交认证
+
+- 用户将发布者名称变更后，Partner Center 账户核验为 Authorized，产品标识的 PublisherDisplayName 已同步。仅更新 Windows Store 包内显示名称，保持商店 Name、Publisher 和包家族身份；当前唯一版本源 `shared/package.json = 1.0.1`，沿用商店版本映射为 2.0.1.0。
+- 当前平台配置、构建和本机安装验证已完成；Partner Center 提交 4（`1152921505702342674`）已成功提交认证，当前预处理，通过后自动发布，实际可获取状态仍待微软处理。源码输入及资产见 [1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。本轮重包暂存已清理，正式及恢复 APPX 保留。Mac 全树只读；GitHub 独立安装版当前已发行版本为 1.0.0。
+
+## 已发行基线：Windows 1.0.0，Mac 0.6.9
 
 - 当前授权：清理确认无用的文件/代码；Windows 全量安全、稳定性、对抗、英文及视觉/DPI/原生/安装验证，问题修复后重测；推送源码并公开发布 1.0.0 安装包，更新 Microsoft Store；编写 0.6.9→1.0.0 Mac 逐条接续文档。保留现有未提交工作、签名身份、模型/依赖、用户数据及发行恢复基线；Mac 全树只读，不操作独立官网或服务端。
-- `shared/package.json = 1.0.0`。Windows [v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0) 已公开，匿名完整回读和分平台选版已完成；包输入为 `a47f7435ef7c233eee9da87a18261162dfaee65f`，源码及后续测试工具/文档已推送私有仓库。真实资产和提交状态见 [Windows 发行索引](shared/docs/WINDOWS_1.0.0_RELEASE.md)。
-- Microsoft Store 提交 3（`1152921505702342173`）已提交认证，当前预处理，通过后自动发布；微软认证及实际可获取状态仍待外部处理。Mac 按 [0.6.9→1.0.0 的 M001–M061 接续清单](shared/docs/MACOS_1.0.0_HANDOFF.md)逐项本机验收、同步本机生成配置并独立打包；当前 Mac 完整公开资产仍为 0.6.9，Windows 不代验 Mac。
+- 1.0.0 发行输入版本为 `1.0.0`。Windows [v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0) 已公开，匿名完整回读和分平台选版已完成；包输入为 `a47f7435ef7c233eee9da87a18261162dfaee65f`，源码及后续测试工具/文档已推送私有仓库。真实资产和提交状态见 [Windows 发行索引](shared/docs/WINDOWS_1.0.0_RELEASE.md)。
+- Microsoft Store 提交 3（`1152921505702342173`）在 2026-11-07 的 Partner Center 概览已显示“你的最新产品现已在 Microsoft Store 上架”。Mac 按 [0.6.9→1.0.0 的 M001–M061 接续清单](shared/docs/MACOS_1.0.0_HANDOFF.md)逐项本机验收、同步本机生成配置并独立打包；当前 Mac 完整公开资产仍为 0.6.9，Windows 不代验 Mac。
 - 本轮生成暂存及固定服务端临时副本已清理，正式资产、恢复基线、依赖/模型及用户要求交付的临时截图保留，边界见 [工作区清理](shared/docs/WORKSPACE_CLEANUP.md)。
 
 ## 上一个双端基线：0.6.9
@@ -24,7 +29,7 @@
 ## Windows Microsoft Store
 
 - Partner Center 已保留 VoxCue 产品，Store ID `9PBBVWZXMBPW`。Windows 本机 `pnpm package:store` 使用商店标识构建 x64 APPX，应用版本仍来自 `shared/package.json`，商店包身份版本使用主版本加一及末位零。商店版通过 Microsoft Store 更新，独立 NSIS 发行版沿用原更新渠道。
-- 已上架的提交 2 保持可获取；1.0.0 的提交 3 已上传 `VoxCue-Store-1.0.0-x64.appx`（商店身份版本 `2.0.0.0`）并提交认证。沿用免费定价、生产率分类、隐私链接、生成式 AI 披露、runFullTrust 用途、3+ 分级及四张中英文商品截图；仅更新中英版本说明和本次所需能力用途说明，认证通过后立即发布。
+- 1.0.0 的提交 3 已上架，APPX 商店身份版本为 `2.0.0.0`。当前维护提交沿用免费定价、生产率分类、隐私链接、生成式 AI 披露、runFullTrust 用途、3+ 分级及四张中英文商品截图；更名维护版的实际状态见 [1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。
 - 本机 Windows Sandbox 已启用。离线验证从解锁控制台启动，签名和信任仅在临时来宾内。商店任务栏使用各目标尺寸及浅深主题的透明图标资源。
 
 ## 验证与接续入口

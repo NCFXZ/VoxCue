@@ -2,9 +2,9 @@
 
 更新日期 / Updated: 2026-11-07。
 
-**当前状态：Windows 1.0.0 已在 GitHub 公开，三项 NSIS 资产已完成匿名完整回读；源码已推送并与远端一致。Microsoft Store“提交 3”已成功提交认证，当前处于预处理阶段，通过后自动发布；尚未宣称商店新版本已经可获取。Mac 1.0.0 仍待本机接续与发行，当前完整 Mac 资产继续为 0.6.9。**
+**当前状态：Windows 1.0.0 已在 GitHub 公开，三项 NSIS 资产已完成匿名完整回读；源码已推送。2026-11-07 Partner Center 确认 Microsoft Store“提交 3”已上架。后续发布者名称维护见 [1.0.1 发行索引](WINDOWS_1.0.1_RELEASE.md)。Mac 仍待本机接续与发行，当前完整 Mac 资产继续为 0.6.9。**
 
-**Status: Windows 1.0.0 is public on GitHub, all three NSIS assets have been read back anonymously, and the source commit is pushed. Microsoft Store submission 3 has been submitted for certification and is in preprocessing, with automatic publication after approval; the Store update is not yet claimed live. Mac 1.0.0 still requires local work and release; the complete Mac release remains 0.6.9.**
+**Status: Windows 1.0.0 is public on GitHub, all three NSIS assets have been read back anonymously, and the source is pushed. Partner Center confirmed Microsoft Store submission 3 is live on 2026-11-07. See the [1.0.1 index](WINDOWS_1.0.1_RELEASE.md) for the subsequent publisher-name maintenance update. Mac still requires local work and release; the complete Mac release remains 0.6.9.**
 
 本索引不保存测试成绩、运行报告或截图。公开产品说明见 [1.0.0 简体中文 / English](RELEASE_1.0.0.md)；Mac 按 [0.6.9 → 1.0.0 逐项接续清单](MACOS_1.0.0_HANDOFF.md)独立执行，不能以 Windows 结果替代本机验收。
 
@@ -68,7 +68,7 @@ EXE 用于首次安装或手动升级，blockmap 和 `latest.yml` 用于独立�
 | 本地 APPX 签名状态 | 无签名的 Store-only 包；正式商店签名由微软处理 |
 | Partner Center 提交号 | “提交 3”，submission ID `1152921505702342173`；本次 APPX 已上传并验证，已成功提交认证 |
 | 中英发行说明与发布选项 | 中英 release notes 均为 `1.0.0`；现有 runFullTrust 用途说明在 500 字符限制内；认证通过后立即发布 |
-| 认证、发布及可获取状态 | 2026-11-07 观察：总体“正在认证”，当前步骤“预处理”；通过后自动发布。此前提交 2 的已上架状态不代表提交 3 已完成发布 |
+| 认证、发布及可获取状态 | 2026-11-07 Partner Center 概览显示提交 3“你的最新产品现已在 Microsoft Store 上架” |
 
 Store APPX 只上传 Partner Center，不作为上述 GitHub NSIS 三项资产的一部分。商店版由 Microsoft Store 更新，包内不得携带独立安装版的 `app-update.yml`。构建入口不导入本地签名凭据；最终商店签名与分发以微软实际处理状态为准。
 
