@@ -120,7 +120,7 @@ try {
           animation.pause();
           animation.currentTime = Number(animation.effect.getTiming().duration) * 0.1;
         }
-      } else {
+      } else if (phase === 'reference') {
         // Render the independently saved live SVG in the same slot and at the
         // same native pixel phase as the already captured exit icon.
         const reference = window.settingsMenuIconReference;
@@ -128,6 +128,10 @@ try {
         window.settingsRestoreMenuIcon = () => reference.replaceWith(snapshotIcon);
         icon.replaceWith(reference);
         icon = reference;
+      }
+      if (phase !== 'open') {
+        // Geometry reads flush layout, not the native compositor. Give both the
+        // frozen exit and its live reference the same submitted-paint barrier.
         await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
       }
       const box = icon.getBoundingClientRect(),
@@ -359,12 +363,14 @@ try {
     await page.keyboard.press('Escape');
     try {
       const iconDuring = await captureUserMenuIcon('exit');
+      const iconRepeated = await captureUserMenuIcon('repeat');
       const reference = await captureUserMenuIcon('reference');
       const describe = ({ bytes, ...geometry }) => ({ ...geometry, bitmapBytes: bytes.length });
       const diagnostic = JSON.stringify({
         theme: dark ? 'dark' : 'light',
         before: iconBefore,
         during: describe(iconDuring),
+        repeated: describe(iconRepeated),
         reference: describe(reference),
       });
       assert.ok(iconDuring.contained && iconDuring.opacity === 1, diagnostic);
@@ -388,6 +394,19 @@ try {
         diagnostic,
       );
       assert.equal(reference.bytes.length, iconDuring.bytes.length, diagnostic);
+      assert.deepEqual(iconRepeated.rect, iconDuring.rect, diagnostic);
+      assert.equal(iconRepeated.dpr, iconDuring.dpr, diagnostic);
+      assert.deepEqual(iconRepeated.clip, iconDuring.clip, diagnostic);
+      assert.deepEqual(iconRepeated.size, iconDuring.size, diagnostic);
+      assert.deepEqual(iconRepeated.scaleFactors, iconDuring.scaleFactors, diagnostic);
+      assert.equal(iconRepeated.bytes.length, iconDuring.bytes.length, diagnostic);
+      const repeatedDifference = Math.max(
+        ...iconDuring.bytes.map((value, index) => Math.abs(value - iconRepeated.bytes[index])),
+      );
+      assert.ok(
+        repeatedDifference <= 2,
+        `The frozen exit icon must have stable native pixels: ${repeatedDifference}. ${diagnostic}`,
+      );
       const contrast = Math.max(
         ...[0, 1, 2].map((channel) => {
           const values = reference.bytes.filter((_, index) => index % 4 === channel);

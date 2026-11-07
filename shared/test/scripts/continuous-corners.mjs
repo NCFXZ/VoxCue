@@ -299,12 +299,20 @@ export async function verifyContinuousCorners(page, name) {
                 '.record-answer-content,.interview-answer-failure-reason',
             ),
           );
+        const link = element.closest('a[href],button.chat-source-link');
+        const clickableLink =
+          !pseudo &&
+          !inertPreview &&
+          link &&
+          !link.matches(':disabled,[disabled],[aria-disabled="true"]');
         const expectedCursor =
           !pseudo && element.matches('.personal-resize-handle')
             ? 'col-resize'
-            : textField || copyableText
-              ? 'text'
-              : 'default';
+            : clickableLink
+              ? 'pointer'
+              : textField || copyableText
+                ? 'text'
+                : 'default';
         if (style.cursor !== expectedCursor)
           wrongCursors.push(
             element.tagName +

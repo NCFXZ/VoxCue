@@ -750,12 +750,116 @@ try {
   assert.equal((await latest().innerText()).includes('secret'), false);
   assert.equal((await latest().innerText()).includes('推理摘要'), false);
   assert.equal(await latest().locator('.progress-link').first().getAttribute('title'), null);
+  const pagePills = latest().locator('.progress-link .chat-source-link');
+  assert.equal(await pagePills.count(), 2, 'Read/find activities reuse source pills');
+  for (const pill of await pagePills.all()) {
+    assert.equal(await pill.getAttribute('href'), 'https://example.com/docs');
+    assert.equal(await pill.locator('.chat-source-label').innerText(), 'example.com');
+    assert.equal(await pill.getAttribute('title'), null);
+  }
+  await app.evaluate(({ shell }) => {
+    globalThis.pagePillOpenExternal = shell.openExternal;
+    globalThis.pagePillOpened = [];
+    shell.openExternal = async (url) => {
+      globalThis.pagePillOpened.push(url);
+    };
+  });
+  let linkFailure;
+  try {
+    for (const pill of await pagePills.all()) await pill.click();
+    assert.deepEqual(
+      await app.evaluate(async () => {
+        const end = Date.now() + 5000;
+        while (globalThis.pagePillOpened.length < 2) {
+          if (Date.now() > end) throw Error('Activity source links did not reach the controlled opener');
+          await new Promise((resolve) => setTimeout(resolve, 20));
+        }
+        return globalThis.pagePillOpened;
+      }),
+      ['https://example.com/docs', 'https://example.com/docs'],
+    );
+    for (const url of [
+      'javascript:alert(1)', 'file:///private/guide', 'https://user:password@example.com/',
+    ])
+      assert.equal(
+        await page.evaluate(async (url) => {
+          try {
+            await window.desktop.chatOpenLink(url);
+            return false;
+          } catch {
+            return true;
+          }
+        }, url),
+        true,
+        'The production link IPC rejects an unsafe URL',
+      );
+    assert.equal(await app.evaluate(() => globalThis.pagePillOpened.length), 2);
+  } catch (error) {
+    linkFailure = error;
+    throw error;
+  } finally {
+    try {
+      await app.evaluate(({ shell }) => {
+        shell.openExternal = globalThis.pagePillOpenExternal;
+        delete globalThis.pagePillOpenExternal;
+        delete globalThis.pagePillOpened;
+      });
+    } catch (error) {
+      if (!linkFailure) throw error;
+      console.error('Activity link fixture restoration failed:', error);
+    }
+  }
   for (const theme of ['light', 'dark']) {
     await page.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
       theme,
     );
+    const pills = await pagePills.evaluateAll((nodes) => nodes.map((node) => {
+        const row = node.closest('li').querySelector(':scope > div');
+        const label = row.firstElementChild;
+        const icon = node.querySelector('.chat-source-icon');
+        const iconGlyph = icon.querySelector('svg');
+        const domain = node.querySelector('.chat-source-label');
+        const range = document.createRange();
+        range.selectNodeContents(domain);
+        const text = range.getBoundingClientRect();
+        const pill = node.getBoundingClientRect();
+        const image = icon.getBoundingClientRect();
+        const glyph = iconGlyph.getBoundingClientRect();
+        const bound = row.getBoundingClientRect();
+        return {
+          font: parseFloat(getComputedStyle(node).fontSize),
+          rowFont: parseFloat(getComputedStyle(row).fontSize),
+          labelFont: parseFloat(getComputedStyle(label).fontSize),
+          height: pill.height,
+          icon: [image.width, image.height, glyph.width, glyph.height],
+          fits:
+            image.left >= pill.left && image.right <= pill.right &&
+            image.top >= pill.top && image.bottom <= pill.bottom &&
+            text.left >= pill.left && text.right <= pill.right &&
+            text.top >= pill.top && text.bottom <= pill.bottom &&
+            pill.left >= bound.left && pill.right <= bound.right,
+        };
+    }));
+    for (const pill of pills) {
+      assert.equal(pill.font, pill.rowFont, 'Activity pill inherits the row font');
+      assert.equal(pill.font, pill.labelFont, 'Activity pill matches its status label font');
+      assert.ok(Math.abs(pill.height - (pill.font * 20) / 12) <= 1 / 64, 'Pill scales with its text');
+      assert.ok(pill.icon.every((size) => Math.abs(size - (pill.font * 11) / 12) <= 1 / 64), 'Pill icon scales with its text');
+      assert.equal(pill.fits, true, 'Activity pill and its complete label stay inside the row');
+    }
+    await page.evaluate(() => document.activeElement?.blur());
+    await page.mouse.move(0, 0);
+    const normalPillColor = await pagePills.first().evaluate((node) => getComputedStyle(node).color);
+    await pagePills.first().hover();
+    const hoveredPill = await pagePills.first().evaluate((node) => ({
+      color: getComputedStyle(node).color,
+      cursors: [node, ...node.querySelectorAll('*')].map((child) => getComputedStyle(child).cursor),
+    }));
+    assert.notEqual(hoveredPill.color, normalPillColor, 'Activity source pill changes text color on hover');
+    assert.ok(hoveredPill.cursors.every((cursor) => cursor === 'pointer'), 'Activity source pill and its children use the hand cursor');
     await latest().locator('.response-progress').screenshot({ animations: 'disabled' });
+    await capture('progress-page-pill-' + theme, latest().locator('.response-steps'));
   }
   await page.evaluate(() => {
     window.progressEpoch = Date.now();

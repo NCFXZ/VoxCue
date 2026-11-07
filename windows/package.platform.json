@@ -2,6 +2,8 @@
   "scripts": {
     "test:speech:aec": "node test/scripts/echo-cancellation-smoke.mjs",
     "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
+    "test:store:artifact": "node test/scripts/store-artifact-smoke.mjs",
+    "test:store:sandbox": "node test/scripts/store-sandbox-smoke.mjs",
     "test:installer:isolated": "node test/scripts/portable-native-smoke.mjs --with-installer",
     "test:windows:functional": "node test/scripts/windows-suite.mjs",
     "test:windows:regression": "node test/scripts/windows-suite.mjs --windows",
@@ -23,6 +25,7 @@
     "test:interview:access:native": "node test/scripts/interview-access-native.mjs",
     "package:portable": "node scripts/package-portable.mjs",
     "package:installer": "pnpm build && node scripts/package-installer.mjs",
+    "package:store": "pnpm build && node scripts/package-store.mjs",
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
     "test:installer:upgrade": "node test/scripts/installer-upgrade-smoke.mjs",
     "test:package": "node test/scripts/packaged-smoke.mjs"

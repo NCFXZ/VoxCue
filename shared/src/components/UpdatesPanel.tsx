@@ -7,12 +7,14 @@ import { Button } from './ui/button';
 import { Download, Loader, Update } from './icons';
 import { DownloadButton } from './DownloadButton';
 import { ActionTransition } from './ActionTransition';
+import { storeUpdateMessage } from '../../electron/contracts/updates';
 
 export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } = {}) {
   const updates = useUpdates();
   const [feedbackError, setFeedbackError] = useState<string | null>(null);
   const feedbackUrl = 'https://github.com/NCFXZ/VoxCue-releases/issues/new';
   const state = updates.state;
+  const storeManaged = state?.phase === 'unavailable' && state.message === storeUpdateMessage;
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.phase);
   const downloaded = state?.phase === 'downloaded';
   const available =
@@ -96,7 +98,7 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
 
           aria-labelledby="auto-download-label"
           aria-checked={state?.autoDownload ?? false}
-          disabled={!state || state.phase === 'installing'}
+          disabled={!state || state.phase === 'installing' || storeManaged}
           onClick={() =>
             state && void updates.run({ op: 'set-auto-download', enabled: !state.autoDownload })
           }

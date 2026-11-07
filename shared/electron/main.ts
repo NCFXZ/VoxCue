@@ -192,7 +192,8 @@ try {
   );
   app.exit(1);
 }
-if (desktopPlatform.appUserModelId) app.setAppUserModelId(desktopPlatform.appUserModelId);
+if (desktopPlatform.appUserModelId && !process.windowsStore)
+  app.setAppUserModelId(desktopPlatform.appUserModelId);
 function interviewActive() {
   return interviewOpening || !!interviewWindow || !!speechSessions?.configuration;
 }

@@ -7,6 +7,58 @@ import { captureRequested } from './capture-requested.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+
+async function stableLinkAppearance(link, expected) {
+  return link.evaluate(async (node, expected) => {
+    const end = performance.now() + 5000;
+    let state;
+    do {
+      await new Promise(requestAnimationFrame);
+      const style = getComputedStyle(node);
+      const box = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      const animations = node
+        .getAnimations()
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity);
+      state = {
+        theme: expected.theme,
+        kind: expected.kind,
+        tag: node.tagName,
+        href: node.getAttribute('href'),
+        text: node.textContent.trim(),
+        hovered: node.matches(':hover'),
+        focusVisible: node.matches(':focus-visible'),
+        hit: hit === node || node.contains(hit),
+        windowFocused: document.hasFocus(),
+        color: style.color,
+        background: style.backgroundColor,
+        foreground: style.getPropertyValue('--foreground').trim(),
+        muted: style.getPropertyValue('--muted').trim(),
+        animations: animations.map((animation) => ({
+          state: animation.playState,
+          pending: animation.pending,
+        })),
+        cursors: [node, ...node.querySelectorAll('*')].map(
+          (child) => getComputedStyle(child).cursor,
+        ),
+      };
+      const settled = animations.every(
+        (animation) => !animation.pending && animation.playState !== 'running',
+      );
+      if (
+        node.isConnected &&
+        settled &&
+        state.hovered === expected.hovered &&
+        (expected.hovered ? state.hit && state.color !== expected.normalColor : !state.focusVisible)
+      )
+        return state;
+    } while (performance.now() < end);
+    throw Error(
+      'Link hover feedback did not settle: ' + JSON.stringify({ expected, actual: state }),
+    );
+  }, expected);
+}
+
 const profile = path.resolve(
   path.join(testRoot, 'test/results'),
   `chat-response-profile-${Date.now()}`,
@@ -156,7 +208,7 @@ try {
                 answer:
                   request.input.at(-1).content === '你好'
                     ? markdown +
-                      '\n\n引用说明。 ([docs.example.org](https://docs.example.org/guide)) 普通链接：[阅读说明](https://docs.example.org/guide)。'
+                      '\n\n引用说明。 ([docs.example.org](https://docs.example.org/guide)) 普通链接：[**阅读说明**](https://docs.example.org/guide)。'
                     : '**已整理资料**，请检查待保存内容并确认。',
                 changes:
                   request.input.at(-1).content === '你好'
@@ -168,7 +220,7 @@ try {
                       },
               })
             : markdown +
-              '\n\n引用说明。 ([docs.example.org](https://docs.example.org/guide)) 普通链接：[阅读说明](https://docs.example.org/guide)。';
+              '\n\n引用说明。 ([docs.example.org](https://docs.example.org/guide)) 普通链接：[**阅读说明**](https://docs.example.org/guide)。';
         return Response.json({
           object: 'response',
           id: `test-response-${++responseCount}`,
@@ -287,7 +339,7 @@ try {
     0,
     'Per-answer token counts are hidden',
   );
-  assert.equal(await page.locator('.chat-answer strong').count(), 4);
+  assert.equal(await page.locator('.chat-answer strong').count(), 5);
   assert.equal((await page.locator('.chat-answer').innerText()).includes('**'), false);
   const sourceGroup = page.locator('.chat-source-group').first();
   assert.equal(await sourceGroup.locator('.chat-source-link:visible').count(), 3);
@@ -295,7 +347,9 @@ try {
   await inlineCitation.waitFor();
   assert.equal(await inlineCitation.count(), 1);
   assert.equal(await inlineCitation.innerText(), 'docs.example.org');
-  assert.equal(await page.locator('.chat-answer a:not(.chat-source-link)').innerText(), '阅读说明');
+  const ordinaryLink = page.locator('.chat-answer a:not(.chat-source-link)');
+  assert.equal(await ordinaryLink.innerText(), '阅读说明');
+  assert.equal(await ordinaryLink.locator('strong').count(), 1);
   assert.equal(
     await inlineCitation.evaluate((node) =>
       node.parentElement.textContent.includes('(docs.example.org)'),
@@ -425,6 +479,78 @@ try {
           badge.decoration === 'none' &&
           ['round', 'superellipse(1)'].includes(badge.corner),
       ),
+    );
+    for (const [kind, link] of [
+      ['ordinary', ordinaryLink],
+      ['inline-source', inlineCitation],
+      [
+        'source-button',
+        sourceGroup.locator('.chat-source-link').filter({ hasText: 'docs.example.org' }),
+      ],
+    ]) {
+      await page.evaluate(() => document.activeElement?.blur());
+      await page.mouse.move(0, 0);
+      const theme = dark ? 'dark' : 'light';
+      const normal = await stableLinkAppearance(link, { theme, kind, hovered: false });
+      if (kind === 'ordinary')
+        await captureRequested(link, 'chat-link-normal-' + theme);
+      await link.hover();
+      const hovered = await stableLinkAppearance(link, {
+        theme,
+        kind,
+        hovered: true,
+        normalColor: normal.color,
+      });
+      assert.notEqual(
+        hovered.color,
+        normal.color,
+        theme + '/' + kind + ': enabled links visibly change text color on hover',
+      );
+      assert.ok(
+        hovered.cursors.every((cursor) => cursor === 'pointer'),
+        'Links and nested text use the hand cursor',
+      );
+      assert.equal(await link.getAttribute('title'), null);
+      if (link === ordinaryLink)
+        await captureRequested(link, 'chat-link-hover-' + (dark ? 'dark' : 'light'));
+      await page.mouse.move(0, 0);
+      await link.focus();
+      await page.keyboard.press('Tab');
+      await page.keyboard.press('Shift+Tab');
+      assert.equal(
+        await link.evaluate(
+          (node) => document.activeElement === node && node.matches(':focus-visible'),
+        ),
+        true,
+      );
+      assert.ok(
+        await link.evaluate((node) => parseFloat(getComputedStyle(node).outlineWidth) > 0),
+        'Keyboard link focus remains visible',
+      );
+    }
+    const nonLinkCursors = await page
+      .locator('.chat-answer .markdown-content')
+      .first()
+      .evaluate((root) => {
+        const probe = document.createElement('p');
+        probe.inert = true;
+        probe.setAttribute('aria-hidden', 'true');
+        probe.innerHTML =
+          '<a href="https://example.org/" aria-disabled="true"><strong>disabled</strong></a><a><span>no href</span></a><button class="chat-source-link" disabled><span>disabled source</span></button>';
+        root.append(probe);
+        try {
+          return {
+            ordinary: getComputedStyle(root.querySelector('p > strong')).cursor,
+            inactive: [...probe.querySelectorAll('*')].map((node) => getComputedStyle(node).cursor),
+          };
+        } finally {
+          probe.remove();
+        }
+      });
+    assert.equal(nonLinkCursors.ordinary, 'text', 'Ordinary answer text remains selectable');
+    assert.ok(
+      nonLinkCursors.inactive.every((cursor) => cursor === 'default'),
+      'Disabled controls and anchors without href stay noninteractive',
     );
     await captureRequested(page, 'chat-source-capsules-' + (dark ? 'dark' : 'light'));
   }
@@ -594,12 +720,9 @@ try {
     assert.equal(await pendingAnswer.locator('.chat-message-actions').count(), 0, label + ': no empty answer footer');
     assert.equal(await page.locator('.chat-message.user').last().locator('.chat-message-time').count(), 1, 'The sent user message still shows its actual time');
     if (label === '正在查询网页') {
-      await page
-        .locator('.chat-message.assistant')
-        .last()
-        .locator('.response-steps')
-        .getByText('example.com/docs', { exact: false })
-        .waitFor();
+      const pagePill = pendingAnswer.locator('.response-steps li[data-kind="open_page"] .chat-source-link');
+      await pagePill.getByText('example.com', { exact: true }).waitFor();
+      assert.equal(await pagePill.getAttribute('href'), 'https://example.com/docs');
       await page.screenshot({});
     }
   }

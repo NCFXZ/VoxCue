@@ -1,4 +1,5 @@
 .chat-source-group .chat-source-link,
+.response-steps .chat-source-link,
 .markdown-content a.chat-source-link,
 .dark .markdown-content a.chat-source-link {
   display: inline-flex;
@@ -21,6 +22,13 @@
   vertical-align: baseline;
   white-space: nowrap;
 }
+.response-steps .chat-source-link {
+  gap: calc(4em / 12);
+  min-height: calc(20em / 12);
+  padding: calc(1em / 12) calc(7em / 12);
+  font-size: inherit;
+  line-height: calc(16 / 12);
+}
 .chat-source-icon {
   display: inline-grid;
   position: relative;
@@ -31,6 +39,15 @@
 }
 .chat-source-icon > svg {
   display: block;
+}
+.response-steps .chat-source-icon {
+  width: calc(11em / 12);
+  height: calc(11em / 12);
+}
+.response-steps .chat-source-icon > svg {
+  /* Both platform icon adapters set a fixed inline size; this row scales with its text. */
+  width: 100% !important;
+  height: 100% !important;
 }
 .chat-source-icon > img {
   position: absolute;
@@ -50,8 +67,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
 }
-.chat-source-group .chat-source-link:hover,
-.markdown-content a.chat-source-link:hover {
+.chat-source-group
+  .chat-source-link:where(:not([disabled], [aria-disabled='true'])):is(:hover, :focus-visible),
+.response-steps
+  .chat-source-link:where(:not([disabled], [aria-disabled='true'])):is(:hover, :focus-visible),
+.markdown-content
+  a.chat-source-link:where(:not([disabled], [aria-disabled='true'])):is(:hover, :focus-visible) {
   background: color-mix(in srgb, var(--foreground) 12%, var(--surface));
   color: var(--foreground);
 }

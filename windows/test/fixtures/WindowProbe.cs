@@ -208,9 +208,20 @@ class WindowProbe {
         // through virtual-desktop mouse_event coordinates can move to another point.
         int x=int.Parse(args[1]),y=int.Parse(args[2]);
         if(!SetCursorPos(x-1,y))throw new Exception("Native cursor unavailable on the input desktop");
+        Point anchor;if(!GetCursorPos(out anchor))throw new Exception("Native cursor unavailable before injected movement");
         // The Electron click-through forwarder observes injected movement,
         // including when SetCursorPos itself produced no new mouse message.
-        mouse_event(1,1,0,0,UIntPtr.Zero);
+        mouse_event(1,32,0,0,UIntPtr.Zero);
+        // Observe consumption before final positioning; a queued relative move
+        // must not arrive after SetCursorPos and shift the final physical point.
+        var moveDeadline=DateTime.UtcNow.AddSeconds(1);
+        while(true) {
+          Point moved;if(!GetCursorPos(out moved))throw new Exception("Native cursor unavailable while waiting for injected movement");
+          if(moved.X!=anchor.X||moved.Y!=anchor.Y)break;
+          if(DateTime.UtcNow>=moveDeadline)throw new Exception("Injected native cursor movement was not observed before the deadline");
+          Thread.Sleep(5);
+        }
+        RequireDesktop();
         if(!SetCursorPos(x,y))throw new Exception("Native cursor unavailable on the input desktop");
         Thread.Sleep(90);Point actual;if(!GetCursorPos(out actual))throw new Exception("Native cursor unavailable after movement");
         if(actual.X!=x||actual.Y!=y)throw new Exception("Native pointer position changed during the isolated check: expected "+x+","+y+"; actual "+actual.X+","+actual.Y);

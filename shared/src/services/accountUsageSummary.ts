@@ -17,7 +17,8 @@ export function accountUsageSummaryParts(
   provider: string;
   title: string;
   low: boolean;
-  values: { text: string; low: boolean }[];
+  inline: boolean;
+  values: { text: string; low: boolean; percent?: string }[];
 } | null {
   if (usage?.status !== 'available') return null;
   const provider = usage.provider === 'chatgpt' ? 'ChatGPT' : 'Copilot';
@@ -26,6 +27,7 @@ export function accountUsageSummaryParts(
     .sort((a, b) => Number(isFiveHourQuota(b)) - Number(isFiveHourQuota(a)));
   const fiveHour = usage.quotas.find(isFiveHourQuota);
   const quota = fiveHour ?? usage.quotas[0];
+  const inline = mode === 'sidebar' && usage.provider === 'chatgpt' && usage.quotas.length === 1;
   const showAll = mode === 'all' || (mode === 'sidebar' && low.length > 0 && !!fiveHour);
   const selected = showAll
     ? fiveHour
@@ -36,14 +38,18 @@ export function accountUsageSummaryParts(
       : [quota];
   const quotas = selected.filter((value): value is AccountQuota => !!value);
   if (!quotas.length) return null;
-  const showLabels = showAll ? !!fiveHour : low.length > 0;
+  const showLabels = !inline && (showAll ? !!fiveHour : low.length > 0);
   return {
     provider,
     title: t('{0} 用量', [provider]),
     low: low.length > 0,
+    inline,
     values: quotas.map((value) => ({
       text: showLabels ? compactQuota(value) : remaining(value),
       low: isQuotaLow(value),
+      ...(inline && isQuotaLow(value)
+        ? { percent: `${percentage(value.remainingPercent!)}%` }
+        : {}),
     })),
   };
 }

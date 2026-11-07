@@ -22,6 +22,7 @@ vi.mock('../../src/stores/auth', () => ({
   useAuth: (select: any) => select({ session: { mode: fixture.mode, user: { id: 'synthetic' } } }),
 }));
 import { UsagePanel } from '../../src/components/UsagePanel';
+import { AccountUsageSummary } from '../../src/components/AccountUsageSummary';
 afterEach(() => {
   fixture.mode = 'copilot';
   fixture.usage = null;
@@ -186,4 +187,54 @@ it('Pro官方变体显示Pro，未知套餐仅显示ChatGPT，预览不作为真
   const html = renderToStaticMarkup(<UsagePanel />);
   expect(html).toContain('class="account-quota-plan">ChatGPT</span>');
   expect(html).not.toMatch(/ChatGPT Pro|ChatGPT Plus|ChatGPT Free/);
+});
+
+it.each(
+  (['zh-CN', 'en'] as const).flatMap((language) =>
+    [300, 10080].flatMap((minutes) =>
+      [0, 19, 20, 71].map((remaining) => ({ language, minutes, remaining })),
+    ),
+  ),
+)(
+  'single-period sidebar keeps provider and remaining inline, highlighting only a low percent: $language, $minutes min, $remaining%',
+  ({ language, minutes, remaining }) => {
+    useGeneralSettings.setState({ language });
+    const usage = chatGPTAccountUsage({
+      rateLimits: { primary: { usedPercent: 100 - remaining, windowDurationMins: minutes } },
+    });
+    const html = renderToStaticMarkup(<AccountUsageSummary usage={usage} mode="sidebar" />);
+    const classes = html.match(/^<span class="([^"]+)"/)?.[1].split(' ');
+    expect(classes).toEqual(
+      expect.arrayContaining(['account-usage-summary', 'is-sidebar', 'is-inline']),
+    );
+    expect(classes).not.toContain('is-low');
+    expect(html.replace(/<[^>]+>/g, '')).toBe(
+      language === 'en' ? `ChatGPT ${remaining}% remaining` : `ChatGPT 剩余 ${remaining}%`,
+    );
+    expect(html).toContain('class="account-usage-heading">ChatGPT</span>');
+    expect(html).toContain('class="account-usage-value"');
+    expect(html).not.toContain('class="account-usage-value is-low"');
+    expect(html.match(/class="[^"]*\bis-low\b[^"]*"/g) ?? []).toHaveLength(remaining < 20 ? 1 : 0);
+    if (remaining < 20)
+      expect(html).toContain(`class="account-usage-percent is-low">${remaining}%</span>`);
+  },
+);
+
+it('a low weekly period preserves the expanded two-period sidebar and healthy five-hour value', () => {
+  const usage = chatGPTAccountUsage({
+    rateLimits: {
+      primary: { usedPercent: 29, windowDurationMins: 300 },
+      secondary: { usedPercent: 81, windowDurationMins: 10080 },
+    },
+  });
+  const html = renderToStaticMarkup(<AccountUsageSummary usage={usage} mode="sidebar" />);
+  const classes = html.match(/^<span class="([^"]+)"/)?.[1].split(' ');
+  expect(classes).toEqual(
+    expect.arrayContaining(['account-usage-summary', 'is-sidebar', 'is-low']),
+  );
+  expect(classes).not.toContain('is-inline');
+  expect(html).toContain('class="account-usage-heading">ChatGPT 用量</span>');
+  expect(html).toContain('class="account-usage-value">5小时 71%</span>');
+  expect(html).toContain('class="account-usage-value is-low">每周 19%</span>');
+  expect(html).not.toContain('account-usage-percent');
 });

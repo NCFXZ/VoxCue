@@ -321,6 +321,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Automatic updates are not supported on this system or processor. macOS requires Apple Silicon.',
   '便携版不支持自动安装更新，请使用 VoxCue 安装版。':
     'Portable builds cannot install updates automatically. Use the VoxCue installer.',
+  '此版本由 Microsoft Store 提供更新。': 'This version is updated through Microsoft Store.',
   '请使用安装版 VoxCue 获取更新。': 'Use the installed version of VoxCue to receive updates.',
   '更新版本信息无效，请稍后重试。': 'Invalid update version information. Please try again later.',
   '自动下载设置未能保存，请重试。':

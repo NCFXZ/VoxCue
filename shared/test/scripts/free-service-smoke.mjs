@@ -26,11 +26,18 @@ async function assertWarningColor(locator, expected) {
   });
   assert.equal(result, expected, 'Low quota uses the shared yellow warning color');
 }
-async function assertSidebarLayout(main) {
+async function assertSidebarLayout(main, inline = false) {
   const layout = await main.locator('.user-info small').evaluate((node) => {
     const range = document.createRange();
     range.selectNodeContents(node.querySelector('.account-usage-values'));
     const rect = range.getBoundingClientRect();
+    const email = node
+      .closest('.user-button')
+      .querySelector('.user-info strong')
+      .getBoundingClientRect();
+    const avatar = node.closest('.user-button').querySelector('.avatar').getBoundingClientRect();
+    const note = node.getBoundingClientRect();
+    const heading = node.querySelector('.account-usage-heading').getBoundingClientRect();
     return {
       right: rect.right,
       left: rect.left,
@@ -38,7 +45,12 @@ async function assertSidebarLayout(main) {
       bound: node.getBoundingClientRect().right,
       rows: new Set([...range.getClientRects()].map((row) => Math.round(row.top))).size,
       valueTop: rect.top,
-      headingBottom: node.querySelector('.account-usage-heading').getBoundingClientRect().bottom,
+      headingTop: heading.top,
+      headingBottom: heading.bottom,
+      headingLeft: heading.left,
+      emailLeft: email.left,
+      avatarCenter: (avatar.top + avatar.bottom) / 2,
+      textCenter: (Math.min(email.top, note.top) + Math.max(email.bottom, note.bottom)) / 2,
     };
   });
   assert.ok(
@@ -50,9 +62,19 @@ async function assertSidebarLayout(main) {
     'Compact quotas fit without sidebar truncation: ' + JSON.stringify(layout),
   );
   assert.equal(layout.rows, 1, 'Sidebar quotas share one line');
-  assert.ok(layout.valueTop >= layout.headingBottom, 'Provider title is above the quota row');
+  assert.ok(Math.abs(layout.headingLeft - layout.emailLeft) <= 1, 'Usage aligns with email');
+  assert.ok(Math.abs(layout.avatarCenter - layout.textCenter) <= 1, 'Avatar centers with the text');
+  if (inline)
+    assert.ok(
+      Math.abs(layout.valueTop - layout.headingTop) <= 1,
+      'Single period stays on one line',
+    );
+  else {
+    assert.ok(layout.valueTop >= layout.headingBottom, 'Provider title is above the quota row');
+    assert.ok(Math.abs(layout.left - layout.emailLeft) <= 1, 'Quota row aligns with email');
+  }
 }
-async function assertNarrowSidebar(main, language) {
+async function assertNarrowSidebar(main, language, inline = false) {
   const window = await app.browserWindow(main);
   const size = await window.evaluate((window) => {
     const size = window.getSize();
@@ -80,7 +102,7 @@ async function assertNarrowSidebar(main, language) {
         (value) => document.documentElement.classList.toggle('dark', value),
         dark,
       );
-      await assertSidebarLayout(main);
+      await assertSidebarLayout(main, inline);
     }
     if (process.argv.some((argument) => argument.startsWith('--screenshots='))) {
       const english = language === 'en';
@@ -88,7 +110,10 @@ async function assertNarrowSidebar(main, language) {
         .getByRole('button', { name: english ? 'Close settings' : '关闭设置', exact: true })
         .click();
       await main.getByRole('dialog').waitFor({ state: 'detached' });
-      await captureRequested(main.locator('.user-button'), 'usage-sidebar-' + language + '-narrow');
+      await captureRequested(
+        main.locator('.user-button'),
+        'usage-sidebar-' + language + (inline ? '-single' : '') + '-narrow',
+      );
       await main
         .getByRole('button', { name: english ? 'User menu' : '用户菜单', exact: true })
         .click();
@@ -195,7 +220,7 @@ try {
     [29, 80.01, 'ChatGPT 用量 5小时 19% · 每周 71%', true],
     [29, 81, 'ChatGPT 用量 5小时 19% · 每周 71%', true],
     [29, null, 'ChatGPT 剩余 71%', false],
-    [85, null, 'ChatGPT 用量 每周 15%', true],
+    [85, null, 'ChatGPT 剩余 15%', true],
     [80.01, 0, 'ChatGPT 用量 5小时 100% · 每周 19%', true],
     [100, 0, 'ChatGPT 用量 5小时 100% · 每周 0%', true],
     [85, 81, 'ChatGPT 用量 5小时 19% · 每周 15%', true],
@@ -224,10 +249,12 @@ try {
       const used = low && five !== null ? [five, weekly] : [five ?? weekly];
       assert.equal(await sidebarValues.count(), used.length);
       for (let index = 0; index < used.length; index++)
-        await assertWarningColor(sidebarValues.nth(index), used[index] > 80);
+        await assertWarningColor(sidebarValues.nth(index), five !== null && used[index] > 80);
+      if (low && five === null)
+        await assertWarningColor(main.locator('.user-info .account-usage-percent'), true);
       if (low) {
         await assertWarningColor(main.locator('.user-info small .account-usage-heading'), false);
-        await assertSidebarLayout(main);
+        await assertSidebarLayout(main, five === null);
       }
     }
     if (weekly === 80.01 && five === 0) {
@@ -251,6 +278,46 @@ try {
       }
       await assertNarrowSidebar(main, 'en');
       const english = main.getByRole('dialog', { name: 'Settings', exact: true });
+      await english.getByRole('button', { name: 'AI services', exact: true }).click();
+      for (const windowDurationMins of [300, 10080]) {
+        for (const remaining of [0, 19, 20, 71]) {
+          await app.evaluate(
+            (_, values) => {
+              globalThis.freeUsage = {
+                rateLimits: {
+                  primary: {
+                    usedPercent: 100 - values.remaining,
+                    windowDurationMins: values.windowDurationMins,
+                  },
+                },
+              };
+            },
+            { remaining, windowDurationMins },
+          );
+          await english.getByRole('button', { name: 'Refresh usage', exact: true }).click();
+          await main
+            .locator('.user-info small')
+            .getByText(`ChatGPT ${remaining}% remaining`, { exact: true })
+            .waitFor();
+          for (const dark of [false, true]) {
+            await main.evaluate(
+              (value) => document.documentElement.classList.toggle('dark', value),
+              dark,
+            );
+            await assertSidebarLayout(main, true);
+            await assertWarningColor(main.locator('.user-info .account-usage-heading'), false);
+            await assertWarningColor(main.locator('.user-info .account-usage-value'), false);
+            const percent = main.locator('.user-info .account-usage-percent');
+            assert.equal(await percent.count(), remaining < 20 ? 1 : 0);
+            if (remaining < 20) await assertWarningColor(percent, true);
+          }
+          if (remaining === 19) {
+            await assertNarrowSidebar(main, 'en', true);
+            await english.getByRole('button', { name: 'AI services', exact: true }).click();
+          }
+        }
+      }
+      await english.getByRole('button', { name: 'General', exact: true }).click();
       await english.getByRole('button', { name: 'Language', exact: true }).click();
       await main.getByRole('menuitemradio', { name: '简体中文', exact: true }).click();
       await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();

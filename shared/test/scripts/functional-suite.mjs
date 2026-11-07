@@ -5,6 +5,7 @@ import { spawnTestProcess } from './test-workspace.mjs';
 import { prepareModelFixtures } from './model-fixtures.mjs';
 import assert from 'node:assert/strict';
 import { executionBatches, needsModels, parallelSuites } from './suite-policy.mjs';
+import { watchTestDesktop } from './desktop-guard.mjs';
 
 const shared = [
   'web-materials',
@@ -141,6 +142,22 @@ if (options.includes('--list')) {
           )
         ).probe
       : undefined;
+  let desktopFailure;
+  function requireDesktop() {
+    if (desktopFailure) throw desktopFailure;
+    try {
+      desktop?.requireUnlockedDesktop();
+      if (desktopProbe)
+        assert.equal(
+          desktopProbe('desktop').interactive,
+          true,
+          'Shared GUI/native matrix requires an unlocked input desktop',
+        );
+    } catch (error) {
+      desktopFailure = error;
+      throw error;
+    }
+  }
   const modelEnvironment = models
     ? {
         VOXCUE_TEST_SPEECH_MODELS: models.speechModels,
@@ -149,15 +166,10 @@ if (options.includes('--list')) {
       }
     : {};
   const cursor = desktopProbe?.('cursor');
+  let interruption;
   try {
     const run = async (name) => {
-      if (!parallelSuites.has(name)) desktop?.requireUnlockedDesktop();
-      if (desktopProbe && !parallelSuites.has(name))
-        assert.equal(
-          desktopProbe('desktop').interactive,
-          true,
-          'Shared GUI matrix requires an unlocked input desktop',
-        );
+      if (!parallelSuites.has(name)) requireDesktop();
       if (!parallelSuites.has(name)) desktopProbe?.('move', 0, 0);
       const directory = shared.includes(name)
         ? path.join(workspace.sharedRoot, 'test/scripts')
@@ -200,21 +212,17 @@ if (options.includes('--list')) {
             console.log('  ' + line);
       });
       child.stderr.on('data', (data) => (output += data));
+      const desktopGuard =
+        !parallelSuites.has(name) && (desktop || desktopProbe)
+          ? watchTestDesktop(child, requireDesktop)
+          : undefined;
       const timer = setTimeout(
-        () => child.kill('SIGTERM'),
+        () => {
+          desktopGuard?.release();
+          child.kill('SIGTERM');
+        },
         name === 'speech-soak' ? 900000 : name === 'components' ? 600000 : 240000,
       );
-      const desktopGuard =
-        desktop &&
-        setInterval(() => {
-          try {
-            desktop.requireUnlockedDesktop();
-          } catch (error) {
-            console.error(error.message);
-            child.kill('SIGTERM');
-          }
-        }, 2000);
-      desktopGuard?.unref();
       const code = await new Promise((resolve) => {
         child.once('error', (error) => {
           output += error.stack + '\n';
@@ -223,8 +231,9 @@ if (options.includes('--list')) {
         child.once('exit', resolve);
       }).finally(() => {
         clearTimeout(timer);
-        clearInterval(desktopGuard);
+        desktopGuard?.release();
       });
+      if (desktopGuard?.failure) throw desktopGuard.failure;
       const outcome = { name, passed: code === 0, ms: Math.round(performance.now() - started) };
       outcomes.push(outcome);
       console.log(`${outcome.passed ? 'PASS' : 'FAIL'} ${name} (${outcome.ms}ms)`);
@@ -237,9 +246,21 @@ if (options.includes('--list')) {
       const failed = settled.find((value) => value.status === 'rejected');
       if (failed) throw failed.reason;
     }
+  } catch (error) {
+    interruption = error;
+    console.error('Shared matrix interrupted:', error);
+    throw error;
   } finally {
     releaseDesktop?.();
-    if (desktopProbe && cursor) desktopProbe('move', cursor.x, cursor.y);
+    if (desktopProbe && cursor && !desktopFailure) {
+      try {
+        requireDesktop();
+        desktopProbe('move', cursor.x, cursor.y);
+      } catch (error) {
+        console.error('Shared matrix cursor restoration stopped:', error);
+        if (!interruption) throw error;
+      }
+    }
   }
   console.log(
     JSON.stringify({

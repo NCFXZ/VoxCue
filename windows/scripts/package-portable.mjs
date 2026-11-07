@@ -11,16 +11,22 @@ const overrides =
   yaml.load(await readFile(path.join(root, 'pnpm-workspace.yaml'), 'utf8')).overrides ?? {};
 const includedDependency = (owner, dependency) => overrides[`${owner}>${dependency}`] !== '-';
 const installer = process.argv.includes('--installer');
+const store = process.argv.includes('--store');
+if (installer && store) throw Error('Choose one Windows packaging channel');
 const testOutput = process.argv
   .find((argument) => argument.startsWith('--test-output='))
   ?.slice('--test-output='.length);
-const output = path.resolve(
-  testOutput ?? (installer ? 'release/installer-stage' : 'release-smoke'),
-);
+const outputName = store
+  ? 'release/store-stage'
+  : installer
+    ? 'release/installer-stage'
+    : 'release-smoke';
+const output = path.resolve(testOutput ?? outputName);
 if (testOutput) {
   const parent = path.dirname(output);
   if (
     installer ||
+    store ||
     path.dirname(parent) !== fsRealPath(os.tmpdir()) ||
     !path.basename(parent).startsWith('voxcue-test-run-') ||
     !path.basename(output).startsWith('platform-layout-') ||
@@ -34,25 +40,27 @@ if (testOutput) {
   process.kill(owner.pid, 0);
 }
 // Packager may replace only this generated output, never a user profile or arbitrary path.
-if (
-  !testOutput &&
-  output !== path.join(root, installer ? 'release/installer-stage' : 'release-smoke')
-)
-  throw Error('Unsafe portable output');
-if (installer && existsSync(path.dirname(output))) {
+if (!testOutput && output !== path.join(root, outputName)) throw Error('Unsafe portable output');
+if ((installer || store) && existsSync(path.dirname(output))) {
   const parent = fsRealPath(path.dirname(output));
   if (path.relative(root, parent).startsWith('..') || path.isAbsolute(path.relative(root, parent)))
-    throw Error('Installer parent escapes workspace');
+    throw Error('Release staging parent escapes workspace');
 }
 if (existsSync(output)) {
   const real = fsRealPath(output);
   const allowedRoot = testOutput ? path.dirname(output) : root;
   if (
+    (store && path.relative(output, real) !== '') ||
     path.relative(allowedRoot, real).startsWith('..') ||
     path.isAbsolute(path.relative(allowedRoot, real))
   )
     throw Error('Portable output escapes workspace');
 }
+const storeStage = path.join(output, 'VoxCue-win32-x64');
+if (store && existsSync(storeStage) && path.relative(storeStage, fsRealPath(storeStage)) !== '')
+  throw Error('Unexpected Store staging path');
+const electronVersion = require('electron/package.json').version;
+const electronZipDir = path.resolve('.cache/electron');
 const paths = await packager({
   icon: path.resolve('public/voxcue.ico'),
   dir: root,
@@ -61,9 +69,11 @@ const paths = await packager({
   name: 'VoxCue',
   platform: 'win32',
   arch: 'x64',
-  electronVersion: require('electron/package.json').version,
-  electronZipDir: existsSync(path.resolve('.cache/electron'))
-    ? path.resolve('.cache/electron')
+  electronVersion,
+  electronZipDir: existsSync(
+    path.join(electronZipDir, `electron-v${electronVersion}-win32-x64.zip`),
+  )
+    ? electronZipDir
     : undefined,
   overwrite: true,
   prune: false,
@@ -126,6 +136,8 @@ const paths = await packager({
             const relative = path.relative(source, p).replaceAll('\\', '/');
             return (
               !relative.startsWith('node_modules') &&
+              // APPX reserves the Open Packaging Convention paths in these Word fixtures.
+              !(store && name === 'mammoth' && /^test(?:\/|$)/.test(relative)) &&
               !/^bin\/napi-v6\/(?:darwin|linux)/.test(relative) &&
               !/^bin\/napi-v6\/win32\/(?:arm64|ia32)/.test(relative)
             );

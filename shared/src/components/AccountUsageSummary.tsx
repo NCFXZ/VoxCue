@@ -16,12 +16,12 @@ export function AccountUsageSummary({
   if (!summary) return t('AI 服务用量暂不可用');
   return (
     <span
-      className={`account-usage-summary${summary.low ? ' is-low' : ''}${mode === 'all' ? ' is-all' : ''}${mode === 'sidebar' ? ' is-sidebar' : ''}`}
+      className={`account-usage-summary${summary.low && !summary.inline ? ' is-low' : ''}${summary.inline ? ' is-inline' : ''}${mode === 'all' ? ' is-all' : ''}${mode === 'sidebar' ? ' is-sidebar' : ''}`}
     >
       {showHeading && (
         <>
           <span className="account-usage-heading">
-            {summary.low ? summary.title : summary.provider}
+            {summary.low && !summary.inline ? summary.title : summary.provider}
           </span>{' '}
         </>
       )}
@@ -29,7 +29,17 @@ export function AccountUsageSummary({
         {summary.values.map((value, index) => (
           <Fragment key={index}>
             {index > 0 ? ' · ' : null}
-            <span className={`account-usage-value${value.low ? ' is-low' : ''}`}>{value.text}</span>
+            <span className={`account-usage-value${value.low && !value.percent ? ' is-low' : ''}`}>
+              {value.percent ? (
+                <>
+                  {value.text.slice(0, value.text.indexOf(value.percent))}
+                  <span className="account-usage-percent is-low">{value.percent}</span>
+                  {value.text.slice(value.text.indexOf(value.percent) + value.percent.length)}
+                </>
+              ) : (
+                value.text
+              )}
+            </span>
           </Fragment>
         ))}
       </span>

@@ -3,14 +3,33 @@ import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixture
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { probe } from './window-probe.mjs';
 import { needsModels } from '../../../shared/test/scripts/suite-policy.mjs';
+import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 
 assert.equal(process.platform, 'win32');
-const requireDesktop = () =>
-  assert.equal(
-    probe('desktop').interactive,
-    true,
-    'Windows GUI matrix requires an unlocked input desktop',
-  );
+let desktopFailure;
+function requireDesktop() {
+  if (desktopFailure) throw desktopFailure;
+  try {
+    assert.equal(
+      probe('desktop').interactive,
+      true,
+      'Windows GUI/native matrix requires an unlocked input desktop',
+    );
+  } catch (error) {
+    desktopFailure = error;
+    throw error;
+  }
+}
+function restoreCursor(cursor, interruption) {
+  if (!cursor || desktopFailure) return;
+  try {
+    requireDesktop();
+    probe('move', cursor.x, cursor.y);
+  } catch (error) {
+    console.error('Windows matrix cursor restoration stopped:', error);
+    if (!interruption) throw error;
+  }
+}
 const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
 if (suites[0] === '--dpi') {
@@ -42,6 +61,8 @@ if (suites[0] === '--dpi') {
     'free-service',
     'account-erasure',
     'login',
+    'chat-progress',
+    'chat-response',
   ];
   const scales = ['1', '1.25', '1.5', '1.75', '2'];
   const scaleOptions = suites.slice(1).filter((arg) => arg.startsWith('--scale='));
@@ -54,6 +75,7 @@ if (suites[0] === '--dpi') {
   const models = needsModels(selected) ? await prepareModelFixtures() : null;
   const failures = [];
   const cursor = probe('cursor');
+  let interruption;
   try {
     for (const scale of requestedScale ? [requestedScale] : scales) {
       for (const name of selected) {
@@ -83,23 +105,36 @@ if (suites[0] === '--dpi') {
         let output = '';
         child.stdout.on('data', (data) => (output += data));
         child.stderr.on('data', (data) => (output += data));
-        const timer = setTimeout(() => child.kill(), 180000);
+        const desktopGuard = watchTestDesktop(child, requireDesktop);
+        const timer = setTimeout(() => {
+          desktopGuard.release();
+          child.kill();
+        }, 180000);
         const code = await new Promise((resolve, reject) => {
           child.once('error', reject);
           child.once('exit', resolve);
-        }).finally(() => clearTimeout(timer));
+        })
+          .catch((error) => {
+            throw desktopGuard.failure ?? error;
+          })
+          .finally(() => {
+            clearTimeout(timer);
+            desktopGuard.release();
+          });
+        if (desktopGuard.failure) throw desktopGuard.failure;
         if (code !== 0) console.error(output);
         if (code !== 0) failures.push({ scale, name });
         console.log((code === 0 ? 'PASS DPI ' : 'FAIL DPI ') + scale + ' ' + name);
       }
     }
   } catch (error) {
+    interruption = error;
     // Cursor restoration can also fail if the desktop changed. Keep the cause
     // that stopped the matrix visible before attempting that cleanup.
     console.error('Windows DPI matrix interrupted:', error);
     throw error;
   } finally {
-    probe('move', cursor.x, cursor.y);
+    restoreCursor(cursor, interruption);
   }
   assert.deepEqual(failures, [], 'Windows DPI matrix failures');
   process.exit(0);
@@ -142,6 +177,7 @@ const commands = windowsOnly
 const models = windowsOnly ? await prepareModelFixtures() : null;
 let failed = false;
 const nativeCursor = windowsOnly ? probe('cursor') : undefined;
+let interruption;
 try {
   for (const args of commands) {
     requireDesktop();
@@ -172,8 +208,10 @@ try {
     // The shared runner bounds each suite, including a 10-minute soak.
     // Its outer watchdog must allow the complete serial matrix to finish.
     const nativeLimit = args[0].endsWith('/login-actions-native-smoke.mjs') ? 360000 : 180000;
+    const desktopGuard = watchTestDesktop(child, requireDesktop);
     const timer = setTimeout(
       () => {
+        desktopGuard.release();
         console.error(
           'Suite watchdog expired: ' +
             args[0] +
@@ -188,14 +226,26 @@ try {
     const code = await new Promise((resolve, reject) => {
       child.once('error', reject);
       child.once('exit', resolve);
-    }).finally(() => clearTimeout(timer));
+    })
+      .catch((error) => {
+        throw desktopGuard.failure ?? error;
+      })
+      .finally(() => {
+        clearTimeout(timer);
+        desktopGuard.release();
+      });
+    if (desktopGuard.failure) throw desktopGuard.failure;
     if (windowsOnly) {
       console.log((code === 0 ? 'PASS ' : 'FAIL ') + args[0]);
       if (code !== 0) console.error(output);
     }
     if (code !== 0) failed = true;
   }
+} catch (error) {
+  interruption = error;
+  console.error('Windows matrix interrupted:', error);
+  throw error;
 } finally {
-  if (nativeCursor) probe('move', nativeCursor.x, nativeCursor.y);
+  restoreCursor(nativeCursor, interruption);
 }
 if (failed) process.exitCode = 1;

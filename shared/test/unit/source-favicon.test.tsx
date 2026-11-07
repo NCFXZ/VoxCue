@@ -1,9 +1,14 @@
 import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { sourceFaviconURL } from '../../src/services/sourceFavicon';
 import { sourceHost } from '../../src/services/markdown';
 import { SourceLink } from '../../src/components/SourceLink';
+import { ResponseProgress } from '../../src/components/ResponseProgress';
+import { MarkdownContent } from '../../src/components/MarkdownContent';
+import { useGeneralSettings } from '../../src/stores/generalSettings';
+
+afterEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 
 describe('引用图标的固定图片来源', () => {
   it('只向固定服务发送规范hostname，不携带页面、查询、片段或端口', () => {
@@ -59,4 +64,66 @@ describe('引用图标的固定图片来源', () => {
       "'self' ws://127.0.0.1:* http://127.0.0.1:*",
     );
   });
+});
+
+describe('网页活动复用来源胶囊', () => {
+  it.each(
+    (['zh-CN', 'en'] as const).flatMap((language) =>
+      (['open_page', 'find_in_page'] as const).map((kind) => ({ language, kind })),
+    ),
+  )('仅把实际网页活动的URL显示为域名：$language / $kind', ({ language, kind }) => {
+    useGeneralSettings.setState({ language });
+    const url = 'https://www.docs.example.org/private/guide?keep=yes#target';
+    const message = {
+      status: 'completed' as const,
+      content: '',
+      activities: [
+        {
+          id: 'read-page',
+          kind,
+          phase: 'reading' as const,
+          status: 'completed' as const,
+          detail: 'www.docs.example.org/private/guide',
+          url,
+        },
+      ],
+    };
+    const original = JSON.stringify(message);
+    const html = renderToStaticMarkup(<ResponseProgress message={message} />);
+    expect(html).toContain('class="progress-link"><a class="chat-source-link"');
+    expect(html).toContain(`href="${url}"`);
+    expect(html).toContain('class="chat-source-label">docs.example.org</span>');
+    expect(html).toContain(
+      'src="https://a.favicon.im/www.docs.example.org?throw-error-on-404=true"',
+    );
+    expect(html).toContain('referrerPolicy="no-referrer"');
+    expect(html).not.toContain('title=');
+    expect(html.replace(/<[^>]+>/g, '')).not.toContain('/private/guide');
+    expect(JSON.stringify(message)).toBe(original);
+
+    const content = `保留原文 [完整网址](${url})`;
+    const body = renderToStaticMarkup(<MarkdownContent content={content} />);
+    expect(body).toContain(`href="${url}"`);
+    expect(body).toContain('完整网址</a>');
+    expect(body).not.toContain('chat-source-link');
+  });
+
+  it.each(['javascript:alert(1)', 'file:///private/guide', 'https://user:password@example.org/'])(
+    '活动中的无效来源不产生可点击胶囊或图标请求：%s',
+    (url) => {
+      const html = renderToStaticMarkup(
+        <ResponseProgress
+          message={{
+            content: '',
+            status: 'completed',
+            activities: [
+              { id: 'invalid', kind: 'open_page', phase: 'reading', detail: '原活动文字', url },
+            ],
+          }}
+        />,
+      );
+      expect(html).toContain('原活动文字');
+      expect(html).not.toMatch(/<a[ >]|<button[ >]|<img[ >]/);
+    },
+  );
 });

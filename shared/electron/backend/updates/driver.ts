@@ -3,6 +3,7 @@ import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { storeUpdateMessage } from '../../contracts/updates';
 import type { UpdateDriver } from './service';
 import { compareVersions, releaseTarget } from './releases';
 import type { AppUpdater } from 'electron-updater';
@@ -323,7 +324,12 @@ export function createUpdateDriver(
   options: DriverOptions = {},
 ): UpdateDriver | undefined {
   const target = releaseTarget(process.platform, process.arch);
-  if (!packaged || !target || !existsSync(path.join(process.resourcesPath, 'app-update.yml')))
+  if (
+    !packaged ||
+    process.windowsStore ||
+    !target ||
+    !existsSync(path.join(process.resourcesPath, 'app-update.yml'))
+  )
     return undefined;
   // app-update.yml retains its original stock cache and signature settings.
   const { autoUpdater } = require('electron-updater') as typeof import('electron-updater');
@@ -332,6 +338,7 @@ export function createUpdateDriver(
 
 export function updateUnavailableReason(packaged: boolean) {
   if (!packaged) return '开发版本不检查线上更新，请使用 VoxCue 安装版。';
+  if (process.windowsStore) return storeUpdateMessage;
   if (!releaseTarget(process.platform, process.arch))
     return '当前系统或处理器架构不支持自动更新；macOS 仅支持 Apple Silicon。';
   return '便携版不支持自动安装更新，请使用 VoxCue 安装版。';

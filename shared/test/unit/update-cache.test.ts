@@ -1,8 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
-import { lstatSync } from 'node:fs';
+import { lstatSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createRequire } from 'node:module';
+import { runInNewContext } from 'node:vm';
+import ts from 'typescript';
 import { EventEmitter } from 'node:events';
 import { createHash } from 'node:crypto';
 import { AppUpdater } from 'electron-updater';
@@ -16,6 +19,11 @@ import {
 } from '../../../shared/electron/backend/updates/cache';
 import type { ReleaseFetch } from '../../../shared/electron/backend/updates/provider';
 import { atomicFile } from '../../../shared/electron/backend/atomicFile';
+import { UpdateService } from '../../../shared/electron/backend/updates/service';
+import * as releaseModule from '../../../shared/electron/backend/updates/releases';
+import * as providerModule from '../../../shared/electron/backend/updates/provider';
+import * as cacheModule from '../../../shared/electron/backend/updates/cache';
+import * as updateContracts from '../../../shared/electron/contracts/updates';
 
 vi.mock('node:fs', async (original) => {
   const fs = await original<typeof import('node:fs')>();
@@ -332,6 +340,97 @@ describe('persistent release check policy', () => {
     } finally {
       vi.mocked(lstatSync).mockImplementation(fs.lstatSync);
     }
+  });
+});
+
+function channelDriver(windowsStore: boolean, updater: NativeFixture) {
+  // Execute the actual adapter with an isolated process identity and loader. In
+  // particular, the Store case must not even request electron-updater's singleton.
+  const localRequire = createRequire(import.meta.url);
+  const modules: Record<string, unknown> = {
+    './releases': releaseModule,
+    './provider': providerModule,
+    './cache': cacheModule,
+    '../../contracts/updates': updateContracts,
+  };
+  const load = vi.fn((name: string) =>
+    name === 'electron-updater' ? { autoUpdater: updater } : (modules[name] ?? localRequire(name)),
+  );
+  const module = { exports: {} };
+  const source = readFileSync(
+    new URL('../../electron/backend/updates/driver.ts', import.meta.url),
+    'utf8',
+  );
+  const compiled = ts.transpileModule(source, {
+    compilerOptions: {
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+      esModuleInterop: true,
+    },
+  }).outputText;
+  runInNewContext(compiled, {
+    module,
+    exports: module.exports,
+    require: Object.assign(load, { resolve: localRequire.resolve }),
+    process: { platform: 'win32', arch: 'x64', windowsStore, resourcesPath: root },
+    AbortController,
+    AbortSignal,
+    Buffer,
+    URL,
+  });
+  return {
+    adapter: module.exports as typeof import('../../../shared/electron/backend/updates/driver'),
+    load,
+  };
+}
+
+describe('Windows update distribution channels', () => {
+  it('Store refuses the NSIS updater and keeps check/download/install explicitly unavailable', async () => {
+    await writeFile(path.join(root, 'app-update.yml'), 'synthetic installer feed');
+    const updater = new NativeFixture();
+    const { adapter, load } = channelDriver(true, updater);
+    const driver = adapter.createUpdateDriver(true);
+    expect(driver).toBeUndefined();
+    expect(adapter.updateUnavailableReason(true)).toBe(updateContracts.storeUpdateMessage);
+    const prepareInstall = vi.fn(async () => true);
+    const emit = vi.fn();
+    const service = new UpdateService({
+      currentVersion: '1.0.0',
+      driver,
+      unavailableReason: adapter.updateUnavailableReason(true),
+      prepareInstall,
+      emit,
+      isInterviewActive: () => false,
+    });
+    await service.start();
+    for (const state of [
+      await service.check(true),
+      await service.download(),
+      await service.install(),
+    ])
+      expect(state).toMatchObject({
+        phase: 'unavailable',
+        availableVersion: null,
+        message: updateContracts.storeUpdateMessage,
+      });
+    expect(load.mock.calls.filter(([name]) => name === 'electron-updater')).toEqual([]);
+    expect(prepareInstall).not.toHaveBeenCalled();
+    expect(emit).not.toHaveBeenCalled();
+    await service.dispose();
+  });
+
+  it('the installed NSIS channel still assembles its fixed-feed updater', async () => {
+    await writeFile(path.join(root, 'app-update.yml'), 'synthetic installer feed');
+    const updater = new NativeFixture();
+    const { adapter, load } = channelDriver(false, updater);
+    const driver = adapter.createUpdateDriver(true);
+    expect(driver).toBeDefined();
+    expect(load.mock.calls.filter(([name]) => name === 'electron-updater')).toEqual([
+      ['electron-updater'],
+    ]);
+    expect(updater.provider).toBeDefined();
+    expect(adapter.updateUnavailableReason(true)).not.toBe(updateContracts.storeUpdateMessage);
+    await driver!.dispose?.();
   });
 });
 

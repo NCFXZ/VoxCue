@@ -1,4 +1,5 @@
 export type UpdateAction = 'status' | 'check' | 'download' | 'cancel' | 'install';
+export const storeUpdateMessage = '此版本由 Microsoft Store 提供更新。';
 export type UpdateCall =
   | { op: Exclude<UpdateAction, 'check'> }
   | { op: 'check'; force?: boolean }

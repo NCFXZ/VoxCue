@@ -208,21 +208,52 @@ it.each([
     expect(sidebar?.values.map((value) => value.text)).toEqual(texts);
     expect(sidebar?.values.map((value) => value.low)).toEqual(warnings);
     expect(sidebar?.low).toBe(warnings.some(Boolean));
+    expect(sidebar?.inline).toBe(false);
   },
 );
 
-it('sidebar keeps actual single-period and Copilot summaries without inventing a weekly period', () => {
-  const weekly = chatGPTAccountUsage({
-    rateLimits: { primary: { usedPercent: 85, windowDurationMins: 10080 } },
-  });
-  const fiveHour = chatGPTAccountUsage({
-    rateLimits: { primary: { usedPercent: 81, windowDurationMins: 300 } },
-  });
+it.each(
+  (['zh-CN', 'en'] as const).flatMap((language) =>
+    [300, 10080].flatMap((minutes) =>
+      [0, 19, 20, 71].map((remaining) => ({ language, minutes, remaining })),
+    ),
+  ),
+)(
+  'sidebar keeps one actual ChatGPT period inline: $language, $minutes min, $remaining%',
+  ({ language, minutes, remaining }) => {
+    useGeneralSettings.setState({ language });
+    const usage = chatGPTAccountUsage({
+      rateLimits: { primary: { usedPercent: 100 - remaining, windowDurationMins: minutes } },
+    });
+    const low = remaining < 20;
+    expect(accountUsageSummaryParts(usage, 'sidebar')).toMatchObject({
+      provider: 'ChatGPT',
+      inline: true,
+      low,
+      values: [
+        {
+          text: language === 'en' ? `${remaining}% remaining` : `剩余 ${remaining}%`,
+          low,
+          ...(low ? { percent: `${remaining}%` } : {}),
+        },
+      ],
+    });
+    const value = accountUsageSummaryParts(usage, 'sidebar')?.values[0];
+    if (!low) expect(value).not.toHaveProperty('percent');
+    for (const mode of ['summary', 'all'] as const) {
+      const summary = accountUsageSummaryParts(usage, mode);
+      expect(summary?.inline).toBe(false);
+      expect(summary?.values[0]).not.toHaveProperty('percent');
+    }
+  },
+);
+
+it('sidebar preserves the Copilot summary without applying the ChatGPT single-period layout', () => {
   const copilot = copilotAccountUsage({
     snapshots: { chat: { entitlementRequests: 50, usedRequests: 45, remainingPercentage: 10 } },
   });
-  for (const usage of [weekly, fiveHour, copilot])
-    expect(accountUsageSummaryParts(usage, 'sidebar')).toEqual(accountUsageSummaryParts(usage));
+  expect(accountUsageSummaryParts(copilot, 'sidebar')).toEqual(accountUsageSummaryParts(copilot));
+  expect(accountUsageSummaryParts(copilot, 'sidebar')?.inline).toBe(false);
 });
 
 it.each([71, 20, 19, 0].flatMap((five) => [71, 20, 19, 0].map((week) => [five, week])))(

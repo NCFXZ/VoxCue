@@ -4,8 +4,8 @@ import type { ChatMessage } from '../services/preparation';
 import type { ChatActivity as Activity } from '../../electron/contracts/chat';
 import { MarkdownContent } from './MarkdownContent';
 import { ChatActivity, describeActivity } from './ChatActivity';
-import { Globe, Database, MessageSquare, ChevronRight, Link } from './icons';
-import { openChatLink } from '../services/chat';
+import { Globe, Database, MessageSquare, ChevronRight } from './icons';
+import { SourceLink } from './SourceLink';
 import { reasoningSections } from '../services/responseProgress';
 
 export function formatDuration(milliseconds: number) {
@@ -185,17 +185,14 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
                         <span>{actionLabel(activity, active)}</span>
                         {activity.detail &&
                           (activity.url ? (
-                            <button
-                              className="progress-link"
-                              onClick={() => {
-                                void openChatLink(activity.url!).catch(() =>
-                                  setLinkError('无法打开活动中的网页。'),
-                                );
-                              }}
-                            >
-                              <Link size={13} />
-                              <span>{activity.detail}</span>
-                            </button>
+                            <span className="progress-link">
+                              <SourceLink
+                                url={activity.url}
+                                title={activity.detail}
+                                inline
+                                onError={() => setLinkError('无法打开活动中的网页。')}
+                              />
+                            </span>
                           ) : (
                             <span className="progress-detail">
                               {activity.kind === 'knowledge' ? t(activity.detail) : activity.detail}

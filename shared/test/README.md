@@ -1,6 +1,6 @@
 ## 0.6.9 验证入口
 
-本轮完整验证与发行范围见 `PROGRESS.md`，逐项双端行为及测试修复见 [0.6.8→0.6.9 Mac 接续清单](../docs/MACOS_0.6.9_HANDOFF.md)。共享完整矩阵、Windows 原生、五档 DPI、20 轮面试及 600 秒音频长稳继续完整执行；下文旧版本段落保留其历史上下文，不构成另一平台已验声明。测试结果仅终端/对话，归档与公开资产记录独立维护。
+本轮完整验证与发行范围见 `PROGRESS.md`，逐项双端行为及测试修复见 [0.6.9→1.0.0 Mac 接续清单](../docs/MACOS_1.0.0_HANDOFF.md)。共享完整矩阵、Windows 原生、五档 DPI、20 轮面试及 600 秒音频长稳继续完整执行；下文旧版本段落保留其历史上下文，不构成另一平台已验声明。测试结果仅终端/对话，归档与公开资产记录独立维护。
 
 更新缓存定向入口：`update-cache.test.ts` 覆盖跨实例一小时缓存、失败重放、时钟回拨、强制检查、缓存损坏/写入失败及 stock 下载缓存恢复；`updates.test.ts` 保留检查、恢复、自动下载冷却、取消与安装保存约束，`desktop-ipc.test.ts` 核对主窗口主 frame 及可选 `force` 参数。共享 `updates-smoke.mjs` 使用隔离驱动验证真实按钮长按 5 秒、短按键盘、释放不重复检查及既有下载/保存退出流程。Windows `updates-native-smoke.mjs` 使用真实 NsisUpdater 与 owner loopback 服务验证重启不重复请求、完整包恢复和半成品退出清理；不执行安装器或访问线上发行源。Mac 同名本机入口先执行生产 adapter + Electron loopback 的缓存/签名恢复/慢流中断矩阵，再保留原 Sparkle 坏归档签名、取消与隔离安装场景；单测补在 Mac `update-driver.test.ts`、`updates.test.ts`。
 
@@ -101,9 +101,11 @@ Mac接续另运行`macos/test/scripts/telemetry-queue-native-smoke.mjs`验证POS
 
 0.6.1追加云恢复与索引背压：`knowledge-smoke.mjs`用两库四文件的交错云端条目验证逐库下载、单文件落盘即索引及启动/开库补索引；`knowledge-reconcile.test.ts`覆盖80份原件的重复请求、交错多库队列、100次合并状态读取、删除/替换及退出取消。始终单任务索引，不等待尚未下载的同库文件；已排队文件按当前知识库优先。云容量条与图例不再有原生title悬停提示。Mac悬停夹具先聚焦精确的自有窗口，动画采样等待实际有限过渡完成，原颜色/圆角/透明度断言保持。以上仅说明入口与覆盖范围，执行结果不写入工作区。
 
-客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，包含52个shared组（Mac默认再加18组，合计70组；package另验）：邮箱主账号、独立ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、服务端0.5.2连接、云同步、免费服务及账号注销/资料导出、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
+客户端完整矩阵在本平台目录执行 `node ../shared/test/scripts/functional-suite.mjs`，以 `--list` 输出的当前平台组为准（package另验）：邮箱主账号、ChatGPT/Copilot授权、聊天/资料/知识库/RAG/记录/更新/组件、功能与对抗、固定服务端0.5.3连接、云同步、免费服务及账号注销/资料导出、浅深色与窄窗口、20轮面试及10分钟双通道真实ASR。另在Windows执行 `node test/scripts/windows-suite.mjs --windows` 和 `node test/scripts/windows-suite.mjs --dpi`；后者覆盖100/125/150/175/200%缩放。可选Qwen公开组件的真实CPU/CUDA推理及下载/切换/释放另用 `node test/scripts/qwen-component-smoke.mjs`，需要设置 `VOXCUE_PYTHON` 为可用的Python完整路径。
 
-cloud-account、cloud-protocol、password-policy和account-erasure通过客户端 `server-reference.mjs` 读取固定472541cc80c77439f02c45d0bf0aed913b036134参考。默认读取忽略的shared/server；若本机旧参考需保留，可设置 `VOXCUE_TEST_SERVER_ROOT` 指向另一个原样固定checkout。入口只读核对Git提交和受控文件无修改，不替换原工作区；仅由客户端夹具创建owner临时数据库、内存邮件和自有loopback，不执行后端套件。服务端范围见[0.5.2只读说明](../docs/SERVER_0.5.2_HANDOFF.md)，参考不进入客户端Git或包，不操作生产。`server-connection-smoke.mjs` 只读验证线上HTTPS契约、未认证保护、支付关闭及客户端清理合成无效令牌，不发邮件。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
+Windows 正式商店包由 `pnpm package:store` 构建后执行 `pnpm test:store:artifact` 和 `pnpm test:store:sandbox`。前者校验实际 APPX、图标和 ASAR 安全边界；后者要求已启用 Windows Sandbox、无其他活跃 Sandbox 及解锁控制台，在断网来宾中临时签名副本、安装并通过真实包身份检查应用版本和更新 IPC。测试证书及信任仅在可丢弃来宾内，宿主原包保持不变；缺少条件或无法建立真实 Store 上下文必须明确失败，不能改用普通 EXE 冒充。临时映射及结果退出清理；商店认证与分发仍以 Partner Center 状态为准。
+
+cloud-account、cloud-protocol、password-policy、account-erasure、telemetry-v2-http和server-connection通过客户端 `server-reference.mjs` 只读使用版本0.5.3、提交`3bceb615dbba900f669322c301fc4b5b473dfb15`的固定参考。默认检查相邻的`VoxCue-server`；它如已升级或含后续工作，设置`VOXCUE_TEST_SERVER_ROOT`指向另一个原样固定checkout，不能回退或覆盖现有仓库，旧`shared/server`也保持原样。入口核对版本、Git提交和受控文件无修改，仅由客户端夹具创建owner临时数据库、内存邮件和自有loopback，不执行后端套件，不操作生产。`server-connection-smoke.mjs`验证临时HTTP契约、未认证保护和客户端清理合成无效令牌，不发真实邮件。参考不进入客户端Git或包。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
 
 0.6.0的云GUI在main导入前启用Chromium mock Keychain，并注入safeStorage端口、拒绝启动正式VoxCue.Credentials；不能仅凭隔离userData声称隔离了Keychain。原生助手另由credential-upgrade使用专属临时Keychain验证，不读取真实账号加密项。
 
