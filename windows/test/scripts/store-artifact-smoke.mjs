@@ -74,6 +74,7 @@ assert.equal(attribute(identity, 'Name'), 'NCFX.VoxCue');
 assert.equal(attribute(identity, 'Publisher'), 'CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A');
 assert.equal(attribute(identity, 'Version'), packageVersion);
 assert.equal(attribute(identity, 'ProcessorArchitecture'), 'x64');
+assert.match(manifest, /<PublisherDisplayName>F\. Zhu<\/PublisherDisplayName>/);
 const application = element('Application');
 assert.equal(attribute(application, 'Executable').replaceAll('\\', '/'), 'app/VoxCue.exe');
 assert.equal(attribute(application, 'EntryPoint'), 'Windows.FullTrustApplication');

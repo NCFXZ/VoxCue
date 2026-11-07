@@ -67,7 +67,7 @@ const artifacts = await build({
       artifactName: file,
       identityName: 'NCFX.VoxCue',
       publisher: 'CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A',
-      publisherDisplayName: 'NCFX',
+      publisherDisplayName: 'F. Zhu',
       languages: ['en-US', 'zh-CN'],
       backgroundColor: 'transparent',
     },
