@@ -1,10 +1,10 @@
-# Windows 1.0.0 发行准备 / Windows 1.0.0 release preparation
+# Windows 1.0.0 发行索引 / Windows 1.0.0 release index
 
 更新日期 / Updated: 2026-11-07。
 
-**当前状态：准备发行。本地 NSIS 与 Store APPX 已构建，NSIS 三项已归档；源码已在本地提交、尚未推送。GitHub 已创建草稿但尚未上传资产或发布，Microsoft Store 已创建“提交 3”草稿但尚未上传新 APPX 或提交认证。最终验收、上传、匿名回读及发布仍待完成，不能据本地产物或草稿宣称已发行。**
+**当前状态：Windows 1.0.0 已在 GitHub 公开，三项 NSIS 资产已完成匿名完整回读；源码已推送并与远端一致。Microsoft Store“提交 3”已成功提交认证，当前处于预处理阶段，通过后自动发布；尚未宣称商店新版本已经可获取。Mac 1.0.0 仍待本机接续与发行，当前完整 Mac 资产继续为 0.6.9。**
 
-**Status: preparing for release. Local NSIS and Store APPX builds exist, and the three NSIS assets are archived. The source commit has not been pushed. GitHub and Microsoft Store submission drafts exist, but the new assets have not been uploaded or published. Final acceptance and publication remain pending.**
+**Status: Windows 1.0.0 is public on GitHub, all three NSIS assets have been read back anonymously, and the source commit is pushed. Microsoft Store submission 3 has been submitted for certification and is in preprocessing, with automatic publication after approval; the Store update is not yet claimed live. Mac 1.0.0 still requires local work and release; the complete Mac release remains 0.6.9.**
 
 本索引不保存测试成绩、运行报告或截图。公开产品说明见 [1.0.0 简体中文 / English](RELEASE_1.0.0.md)；Mac 按 [0.6.9 → 1.0.0 逐项接续清单](MACOS_1.0.0_HANDOFF.md)独立执行，不能以 Windows 结果替代本机验收。
 
@@ -16,37 +16,37 @@
 | 对照源码基线 | 0.6.9，`be6784d047b4f5f3ca0bb62d8f5f6f374ba03985` |
 | 本次安装包源码输入 SHA | `a47f7435ef7c233eee9da87a18261162dfaee65f` |
 | 私有源码仓库及目标分支 | `NCFXZ/VoxCue`，`main` |
-| 源码提交及推送状态 | 已在本地提交 `a47f7435ef7c233eee9da87a18261162dfaee65f`；尚未推送，远端回读待完成 |
+| 源码提交及推送状态 | `b8a8b0dd8b3474f3c8341947fe7ff77b0f49334f` 已推送，`ls-remote` 与本地一致；该提交包含后续测试工具及文档，不改变上述安装包输入 |
 | 公开二进制发行仓库 | `NCFXZ/VoxCue-releases`；不向此仓库上传私有源码 |
-| 目标 tag | `v1.0.0`，对应发行草稿；不表示已经公开发布 |
-| GitHub 草稿标题 | `VoxCue1.0.0`，不带“正式版” |
-| GitHub release ID、URL、发布时间 | 草稿已创建；ID 与 URL 待补充真实元数据，尚未发布，无发布时间 |
-| 草稿、预发行及 Latest 状态 | 当前为未上传资产、未发布的草稿；预发行与 Latest 状态待实际 API 回读，不沿用 0.6.9 记录 |
+| 发行 tag | `v1.0.0` |
+| GitHub 发行标题 | `VoxCue 1.0.0` |
+| GitHub release ID、URL、发布时间 | `437694751`；[v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0)；`2026-11-07T17:35:20Z` |
+| 草稿、预发行及 Latest 状态 | `draft=false`、`prerelease=false`；Latest release ID 同为 `437694751` |
 | 本轮发行说明 | [RELEASE_1.0.0.md](RELEASE_1.0.0.md) |
 
-正式打包输入必须对应最终审核的源码提交。若后续仅补充真实发行元数据，可以另作文档提交；必须明确哪一个 SHA 产生了安装包，不能把文档提交冒充打包输入。版本配置只从共享版本同步到根及 Windows；`macos/` 全树保持只读，生成漂移留 Mac 本机同步。
+本次安装包输入固定为 `a47f7435ef7c233eee9da87a18261162dfaee65f`。其后的测试工具修复及文档提交不改变生产负载和已公开安装包，不能把后续提交冒充打包输入；真实发行元数据继续单独记录。版本配置只从共享版本同步到根及 Windows；`macos/` 全树保持只读，生成漂移留 Mac 本机同步。
 
 ## Windows 独立安装版资产
 
-目标公开资产仅为以下三项 Windows x64 文件。下表记录本次本地构建的字节数与摘要；三项尚未上传 GitHub，asset ID 及公开回读状态须在实际上传后补充。
+本次公开资产仅为以下三项 Windows x64 文件。三项均已上传 GitHub，匿名完整下载的字节数与摘要和本地归档一致。
 
 | 文件 | GitHub asset ID / 上传状态 | Bytes | SHA256 |
 | --- | --- | ---: | --- |
-| `VoxCue-Setup-1.0.0-x64.exe` | 未上传，ID 待记录 | 407594704 | `b4f350fbc4309176f1f946e39ba4342f5a8cf58500c4f0d842fa7a1ae70ce7be` |
-| `VoxCue-Setup-1.0.0-x64.exe.blockmap` | 未上传，ID 待记录 | 422371 | `f2d85d4417932678b54679a33e507591460617ff4546560c86082aa9ba7f2722` |
-| `latest.yml` | 未上传，ID 待记录 | 349 | `74aa127feee572801a69e6229b4956e2033af86c7a8941affafaa762f5027f6f` |
+| `VoxCue-Setup-1.0.0-x64.exe` | `721409623`，已公开 | 407594704 | `b4f350fbc4309176f1f946e39ba4342f5a8cf58500c4f0d842fa7a1ae70ce7be` |
+| `VoxCue-Setup-1.0.0-x64.exe.blockmap` | `721413458`，已公开 | 422371 | `f2d85d4417932678b54679a33e507591460617ff4546560c86082aa9ba7f2722` |
+| `latest.yml` | `721413485`，已公开 | 349 | `74aa127feee572801a69e6229b4956e2033af86c7a8941affafaa762f5027f6f` |
 
 | 核对项 | 当前记录及后续待办 |
 | --- | --- |
-| 正式构建输出 | `windows/release/installer`，由 `pnpm package:installer` 生成 |
-| 正式安装暂存 | `windows/release/installer-stage/VoxCue-win32-x64` |
+| 正式构建入口 | `pnpm package:installer`；当前保留正式资产与归档，构建暂存已清理 |
+| 构建暂存清理 | stage、resources、cacheInstallerUI、build-debug 已清理；正式 NSIS 三项、Store APPX 及旧发行/恢复归档保留 |
 | 正式三项归档位置 | 已复制至 `windows/release/1.0.0`，复制后三项 SHA256 与上表一致；旧发行与恢复基线保留 |
-| 应用、清单及文件名版本 | 均应为 `1.0.0`；待从最终 ASAR、EXE 和 `latest.yml` 核对 |
-| 本地安装包 size 与 SHA512 | `407594704`；`LRV5lO6uOh6f17QhC08uk7QHbN7elUfThcAS5sxSlt4U103fnl64V3jzJrRQ0jtssSMy0nzSIbcVdWzqYOqz9w==`；公开清单回读仍待上传后进行 |
+| 应用、清单及文件名版本 | `1.0.0`；安装包输入以上述固定 SHA 为准 |
+| 安装包 size 与 SHA512 | `407594704`；`LRV5lO6uOh6f17QhC08uk7QHbN7elUfThcAS5sxSlt4U103fnl64V3jzJrRQ0jtssSMy0nzSIbcVdWzqYOqz9w==`；匿名 EXE 回读与公开清单一致 |
 | EXE Authenticode 状态 | `NotSigned`；未新增或轮换身份 |
-| 正式安装负载与暂存一致性 | 待核对 EXE、ASAR、更新 feed、组件标记及原生助手字节 |
-| 三项匿名完整下载 | 待记录 HTTP 状态、字节数与 SHA256；EXE 的 SHA512 应与清单一致，清单应与归档逐字节一致 |
-| 匿名分平台选版 | Windows 正式资产齐全后应选择 `windows-x64=1.0.0`；Mac 1.0.0 未齐全时应仍选完整 `macos-arm64=0.6.9` |
+| 正式负载来源 | 已公开文件保持本次正式构建原字节；后续测试工具/文档提交不替换或改写该负载，原构建暂存不再作为现存文件引用 |
+| 三项匿名完整下载 | 三项均为 HTTP `200`，完整字节数与 SHA256 和上表一致；EXE SHA512 与清单一致，公开 `latest.yml` 与本地归档逐字节一致 |
+| 匿名分平台选版 | 生产选版实际返回 `windows-x64=1.0.0`、`macos-arm64=0.6.9`；Mac 1.0.0 未齐全时保持完整 0.6.9 回退 |
 
 EXE 用于首次安装或手动升级，blockmap 和 `latest.yml` 用于独立安装版的应用内更新。继续使用固定匿名公开发行源、本平台完整稳定资产选择及现有摘要/签名校验；不以全局 Latest 标记替代平台完整性检查。
 
@@ -66,8 +66,9 @@ EXE 用于首次安装或手动升级，blockmap 和 `latest.yml` 用于独立�
 | 语言与能力 | `en-US`、`zh-CN`；保留 `runFullTrust` 用途与既有商品配置 |
 | 本地 APPX Bytes / SHA256 | `600079408`；`f314b7c77691175561bd4ef4fce52b9c4df8003c4a52525ac1c2dbba9dd6323e` |
 | 本地 APPX 签名状态 | 无签名的 Store-only 包；正式商店签名由微软处理 |
-| Partner Center 草稿及提交号 | 已创建“提交 3”草稿，submission ID `1152921505702342173`；尚未上传本次新 APPX |
-| 认证、发布及可获取状态 | 本版本尚未提交认证或发布；后续以 Partner Center 实际状态记录，不能以本地 APPX 或 Sandbox 安装推断 |
+| Partner Center 提交号 | “提交 3”，submission ID `1152921505702342173`；本次 APPX 已上传并验证，已成功提交认证 |
+| 中英发行说明与发布选项 | 中英 release notes 均为 `1.0.0`；现有 runFullTrust 用途说明在 500 字符限制内；认证通过后立即发布 |
+| 认证、发布及可获取状态 | 2026-11-07 观察：总体“正在认证”，当前步骤“预处理”；通过后自动发布。此前提交 2 的已上架状态不代表提交 3 已完成发布 |
 
 Store APPX 只上传 Partner Center，不作为上述 GitHub NSIS 三项资产的一部分。商店版由 Microsoft Store 更新，包内不得携带独立安装版的 `app-update.yml`。构建入口不导入本地签名凭据；最终商店签名与分发以微软实际处理状态为准。
 
@@ -92,7 +93,7 @@ RAG 算法、阈值、检索策略、索引兼容、生产模型和依赖版本�
 
 ## 验证期间的夹具、守卫及说明修正
 
-以下记录已纳入源码的验证行为，不能写成新增产品功能，也不代表这些入口已完成最终验收；逐项 Mac 对应动作见交接清单 M016–M021、M036–M054。
+以下记录已纳入源码的验证行为，不能写成新增产品功能，也不代表 Mac 已完成本机验收；逐项 Mac 对应动作见交接清单 M016–M021、M036 起的追加项目。
 
 | 修正 | owning source 与保持项 |
 | --- | --- |
@@ -108,11 +109,11 @@ RAG 算法、阈值、检索策略、索引兼容、生产模型和依赖版本�
 | 固定 Qwen 公开资源 | `windows/test/scripts/qwen-fixtures.mjs` 复用本平台缓存前重验 WAV/TXT 固定摘要；缺失资源的 fetch 有期限和明确 HTTP 错误，认证后以所属随机 partial/rename 发布缓存并在 finally 清 partial。固定上游 revision、音频内容、生产 Qwen/ASR、模型及推理行为保持。 |
 | 当前执行入口与服务参考 | `shared/test/README.md` 改用当前 `--list` 而非历史固定组数；联调参考明确为只读 `VoxCue-server` 0.5.3、提交 `3bceb615dbba900f669322c301fc4b5b473dfb15`。不回退或改写相邻后续工作，显式引用原样固定参考副本，客户端仅使用临时合成资料与自有 loopback。 |
 
-清理范围见 [工作区清理约定](WORKSPACE_CLEANUP.md)。本轮未确认可以独立删除的闲置业务代码，不为数量移除有效动态入口。现用依赖、固定公开缓存、工具、原件、凭据助手和历史正式发行/恢复基线保留；测试资料和参考副本按 owner 生命周期在系统临时目录清理。
+清理范围见 [工作区清理约定](WORKSPACE_CLEANUP.md)。本轮未确认可以独立删除的闲置业务代码，不为数量移除有效动态入口。现用依赖、固定公开缓存、工具、原件、凭据助手和历史正式发行/恢复基线保留；本轮固定服务端临时参考副本及已确认无用的构建暂存已清理，不将其列为现存运行资料。后续重跑仍按 owner 生命周期创建并清理临时资料。
 
-## 最终验收与发行入口（待执行或最终复核）
+## 验证与后续复核入口
 
-除同步入口在仓库根执行外，下列命令的工作目录均为 `windows/`。当前只列入口和边界，不记录成绩；最终 Windows 原生、Qwen、UI 矩阵及正式资产仍须逐项完成。GUI、原生、推理和长稳仅在当前 UID 已登录且解锁的控制台串行执行，锁定或未知状态立即停止。
+除同步入口在仓库根执行外，下列命令的工作目录均为 `windows/`。此处保留验证入口和边界，不记录成绩；后续改动仍按对应风险复核。正式构建暂存已清理，重跑依赖暂存的入口时须明确重新构建范围，不能把新建临时包冒充已公开文件。GUI、原生、推理和长稳仅在当前 UID 已登录且解锁的控制台串行执行，锁定或未知状态立即停止。
 
 | 范围 | 入口及必须保持的边界 |
 | --- | --- |
@@ -125,7 +126,7 @@ RAG 算法、阈值、检索策略、索引兼容、生产模型和依赖版本�
 | 安装器流程与升级 | 沿用 `installer-branding-smoke.mjs`、`installer-engine-smoke.mjs` 和 `pnpm test:installer:isolated`；engine 的旧版夹具是 0.5.1，不代表真实 0.6.9 → 1.0.0 升级已验收，该路径仍须另行核对。 |
 | 正式 NSIS 与正式负载 | `pnpm package:installer` 后运行 `pnpm test:installer:artifact`，再 `node test/scripts/portable-native-smoke.mjs --installer-stage` 复核本次正式暂存。`--with-installer` 的 owner 临时包不能冒充本次正式产物。 |
 | 正式 Store 包 | `pnpm package:store` 后运行 `pnpm test:store:artifact`、`pnpm test:store:sandbox`；来宾仅使用当前正式 APPX 的临时副本，缺少身份、环境或调试能力必须失败。Sandbox 验证不能替代 Partner Center 认证和分发。 |
-| GitHub 与 Store 实际发布 | 仅最终修复和验收完成后，提交/推送私有源码，上传 GitHub NSIS 三项并完整匿名回读，另向 Partner Center 上传 APPX、记录实际提交号及认证状态。所有占位字段由真实元数据补齐。 |
+| GitHub 与 Store 实际发布 | GitHub 已公开，源码推送、三项完整匿名回读及生产分平台选版记录见上；Partner Center APPX 已 Validated，后续须提交认证并按实际状态记录 Store 发布，不把包校验状态当作认证完成。 |
 
 ## Mac 接续与发行保持项
 
