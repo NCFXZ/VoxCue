@@ -19,10 +19,9 @@ let controller,
 const failures = [];
 const adapter = {
   drainBeforeRetire: true,
-  preprocessorFile: path.join(
-    config.root,
-    'dist-electron/windows/electron/speech/echoCancellation.js',
-  ),
+  preprocessorFile:
+    config.preprocessorFile ||
+    path.join(config.root, 'dist-electron/windows/electron/speech/echoCancellation.js'),
   qwenRuntime: config.qwenRuntime,
   devices: async () => [
     { id: 'fixture-system', name: 'Owned WAV PCM input', source: 'system', default: true },

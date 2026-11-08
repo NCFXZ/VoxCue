@@ -170,6 +170,8 @@ export async function buildMacApp(output, publicKey) {
           'onnxruntime-common',
           'pdf-parse',
           'mammoth',
+          'word-extractor',
+          'chardet',
         ])
           await copyPackage(name);
       },

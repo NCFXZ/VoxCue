@@ -8,7 +8,7 @@
 - Windows 1.0.2 已在 [GitHub v1.0.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) 发布。Microsoft Store第5次提交已受理、通过后自动发布，最后观察为预处理/认证中，尚未确认1.0.2上架。准确源码/包输入、资产及渠道状态见 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)。
 - 1.0.1 是 Windows Store 发布者显示名及版本元数据维护，包输入为 `20ada2f0d3ec6ea3909ae8a05c64642c21ad6416`，没有独立新增的 Mac 产品行为。记录见 [Windows 1.0.1](WINDOWS_1.0.1_RELEASE.md)。1.0.0 与 1.0.1 的历史状态保留，不在此推断本轮商店认证或可获取状态。
 - Mac 1.0.0 已公开完整 DMG/ZIP/清单，准确资产与原签名/摘要认证记录见 [Mac 1.0.0 发行索引](MACOS_1.0.0_RELEASE.md)。[0.6.9 → 1.0.0 清单 M001–M067](MACOS_1.0.0_HANDOFF.md)是已发行基线的行为及回归参考，不再标为未完成升级。本文件从 **M068** 接续，所有新增项目仍需 Mac 本机验证；旧表 M011 的后台刷新期间隐藏旧值要求由本文 M108–M110 的新需求替代，其余未被明确替代的基线保持。
-- 本表 **M068–M134共67项全部待Mac本机执行**，后续编号为M135。Windows源码、单测、GUI或真实模型运行不能代替Mac原生、签名、安装或界面验证；Mac当前完整公开版仍为1.0.0，1.0.2本机接续与发行尚待完成。`shared/package.json`是唯一版本源；Windows上`macos/`全树只读，Mac上`windows/`全树只读。
+- 原交接 **M068–M134共67项**构成本轮 Mac 接续范围，本机补充从 M135 续列，当前工作状态见 `PROGRESS.md`。Windows源码、单测、GUI或真实模型运行不能代替Mac原生、签名、安装或界面验证；Mac当前完整公开版仍为1.0.0，1.0.2本机接续与发行尚待完成。`shared/package.json`是唯一版本源；Windows上`macos/`全树只读，Mac上`windows/`全树只读。
 - 仅使用 owner 临时合成账户/资料和固定来源、摘要认证的公开模型/音频；不访问真实账户或 Keychain 材料，不采样物理硬件。GUI、原生与推理仅在当前 UID 已登录且解锁的控制台串行执行；锁定或未知即停止。
 - 依赖仅在 `macos/` 安装。不得借同步升级既有依赖/模型、改变数据库或索引兼容、恢复旧两阶段用量优化、轮换签名身份。固定私钥、现用模型/依赖、原件、正式资产与恢复基线受保护。
 - profile、数据库、音频及必要暂存仅用归属明确的系统临时目录，结束清理；可复用公开缓存允许保留，但不提交缓存、依赖、凭据、用户资料、截图、报告、trace 或 coverage。结果只在终端/对话说明。独立官网和服务端不属于本交接的修改范围。
@@ -129,6 +129,18 @@
 | M133 | `shared/src/services/knowledge.ts`：不支持文件批次名单改用逗号加空格连接，不拆分或替换文件名字符；保留原先去重、顺序、截断及先整批校验逻辑。`shared/electron/contracts/uiMessages.ts` 的共享模板改为`Unsupported files: {0}`，知识库批次与composer单文件均适用，不引入service→UI/store依赖。 | 本机执行renderer `knowledge.test.ts`及`ui-language.test.ts`，再以英文选择多个不支持文件，确认应用连接符为逗号空格、原名中的中文顿号/逗号原样保留；composer单文件也使用自然模板。保留整批拒绝前不读字节/不备份/不写索引、20个及长名有界断言，不通过替换整条错误中的字符改写用户文件名。 |
 | M134 | `shared/test/scripts/components-ui-smoke.mjs`：仅修模型设置几何夹具，测量前等待有限动画结束及两帧布局，再直接选择行内真实控件，不再使用可能命中菜单退出快照的`lastElementChild`。覆盖回答模型在线按钮、离线提示及两个语音选择按钮；产品代码不变。 | Mac本机执行`components-ui`及五档对应组，关闭CPU菜单后核对真实控件，不把正在退出的`aria-hidden`/`inert`快照当作表单控件。保留三行/分组、左边缘差值小于1 CSS px、同宽、标签不重叠及失败geometry诊断，不能放宽阈值或关闭动画代过；此项不表示Mac已验。 |
 
+## Mac 本机接续补充
+
+| ID | owning file 与行为 | Mac 动作与验收预期 |
+| --- | --- | --- |
+| M135 | `macos/scripts/package-app.mjs`、`macos/test/scripts/package-smoke.mjs`：显式收集 `word-extractor`、`chardet`，最终 ASAR 增加 DOC、GB18030 TXT、UTF-16LE Markdown 真实导入、精确文档检索、正文与重开持久化；先创建实际 DOC Worker 再取消并等待终止，随后正常导入。 | 使用本轮正式签名归档运行包专项，保留 PDF/DOCX/UTF-8、签名及运行时原断言；Worker 创建后取消不等同于已进入解析中，不以目录存在代替实际导入。 |
+| M136 | `macos/test/scripts/{interview-real-audio-smoke,filler-audio-fixtures}.mjs`、共享 `interview-real-audio-process.cjs`：复用生产 Controller/Worker，测试夹具仅参数化本机预处理器路径。已安装 macOS 中文 voice 文件 TTS 生成非零 16 kHz PCM16 WAV，模型按 catalog 全摘要认证并复制到 owner 临时目录。 | 串行执行 Paraformer/CPU 与 Qwen/Metal，按需补 Qwen/CPU；默认“好的。”和正常问题，`--all`追加其他纯词、混合正文、短追问。必须非空 silence 终稿、真实 ACK 跨越 1800 ms、Renderer 收到实际事件后再判断自动 0/1 和手动 1；词表外识别如实报告，不改词表代过，不采样硬件。 |
+| M137 | `shared/test/scripts/conversations-smoke.mjs`、`macos/test/scripts/ui-refinement-matrix.mjs` 与名单单测：五档纳入现有聊天回归，并补真实 DOM 从 snapshot 1100 移至 1250、延迟 scroll 通知期间由合成 provider 送实际 delta 的竞态。 | 不改内部 hook 缓存，不停止流式；delta 后保持 1250，恢复通知、切换回来仍为 1250。原删除、动画、welcome/hidden、后台增长和减少动态效果断言保持。 |
+| M138 | `macos/test/scripts/package-upgrade-data.mjs` 由 `package-smoke.mjs --install-archive` 串行调用：真实已发行 1.0.0 临时副本以旧 UI 写合成资料、设置和原件，旧包建立实际索引；关闭且确认无占用后同路径展开最终新 ZIP，保持原 owner profile。 | 核对个人资料、主题/语言、原件字节/元数据、旧索引与实际 UI；此项为正式归档覆盖升级的数据兼容验收。原 Sparkle 认证/暂存/取消与独立原生 commit/relaunch 回归保持，不把归档覆盖称为真实自动更新提交。 |
+| M139 | `macos/test/scripts/components-smoke.mjs`：安装态顶部组件提示的旧“轻量语音识别”断言改为 M112 已确认的完整“语音识别、知识库检索组件未下载，请在设置中下载或查看进度”，按精确全文匹配。 | 重跑原真实打包组件入口；模型设置行仍使用具体模型名称，后台缺失模型错误分类保持。不改产品文案，不扩大等待期限或放宽布局/下载断言。 |
+| M140 | `macos/test/scripts/filler-audio-fixtures.mjs`：本机 voice 列表使用本地化全名时，短名只能唯一匹配已列出的完整名字；相同全名去重，歧义或缺失仍拒绝，允许名字中的全角括号。 | 只使用本机已安装 voice，不安装/下载或播放；不因短名与本地化名字不同而误拒。不改变 WAV、真实非空终稿及过滤断言，短音节无法识别仍明确报告未覆盖。 |
+| M141 | `shared/test/scripts/updates-smoke.mjs`：鼠标长按失败时输出有界指针事件、焦点/可见性、实际几何与命中、更新状态及原生窗口状态，仅记录当前合成窗口，结束移除监听。 | 通过真实输入区分未命中、移出/失焦取消和状态变化；保留 4700 ms 零次、生产 5000 ms、原等待期限、恰好一次及释放不重复的断言。不以重试或伪造事件替代失败，不据无 DPI 分支推断根因。 |
+
 ## Mac 本机执行顺序
 
 以下均为待执行操作，不是已运行记录。除仓库根同步外，工作目录为 `macos/`；不通过修改系统辅助功能、锁屏权限或签名身份取得测试条件。
@@ -142,4 +154,4 @@
 7. 按本机原入口构建准确1.0.2正式包，运行 `package-runtimes-smoke.mjs`、`package-smoke.mjs --install-archive` 及固定签名检查；对最终包重新验证DOC Worker/编码依赖，不用临时测试包代替正式资产。
 8. 在当前用户授权允许发布后才上传Mac完整资产，并用相同准确版本目录执行 `--online` 匿名完整回读及签名/摘要验证；更新发行索引和PROGRESS真实状态。交接文档不记录分数、临时路径或假定完成状态。
 
-后续新增修复从 **M135** 追加。Windows已公开版本、准确源码/包输入及Microsoft Store实际状态以 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)为准；本表67项Mac接续、签名与发行仍须在Mac本机完成后据实更新。
+后续新增修复从 **M142** 追加。Windows已公开版本、准确源码/包输入及Microsoft Store实际状态以 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)为准；本轮Mac接续、签名与发行须在Mac本机完成后据实更新。

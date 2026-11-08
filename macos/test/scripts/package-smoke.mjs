@@ -20,6 +20,7 @@ import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import { assertLocalizedPermissions } from './assert-localized-permissions.mjs';
+import { verifyPreviousVersionData } from './package-upgrade-data.mjs';
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
@@ -165,6 +166,9 @@ assert.ok(
   ),
 );
 assert.ok(entries.some((file) => file.includes('/onnxruntime-node/')));
+assert.ok(entries.includes('/dist-electron/shared/electron/backend/knowledge/legacyDocWorker.js'));
+for (const name of ['word-extractor', 'chardet'])
+  assert.ok(entries.includes('/node_modules/' + name + '/package.json'));
 assert.equal(await lstat(path.join(resources, 'models')).catch(() => null), null);
 const tools = await dmgTools();
 const layout = JSON.parse(await readFile(tools.layout, 'utf8'));
@@ -483,10 +487,17 @@ try {
       const { KnowledgeHost } = require(
         app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
       );
-      const knowledge = new KnowledgeHost(
-        path.join(app.getPath('userData'), 'rag'),
-        models.ragModel,
+      const { extractLegacyDoc } = require(
+        path.join(unpacked, 'dist-electron/shared/electron/backend/knowledge/legacyDoc.js'),
       );
+      // Start a real packaged Worker before cancelling; a pre-aborted signal
+      // would skip its creation and would not exercise retirement in this ASAR.
+      const cancellation = new AbortController();
+      const cancelledDoc = extractLegacyDoc(new Uint8Array(fixture.legacyDoc), cancellation.signal);
+      cancellation.abort(new Error('Synthetic packaged DOC cancellation'));
+      await assert.rejects(cancelledDoc, (error) => error === cancellation.signal.reason);
+      const directory = path.join(app.getPath('userData'), 'rag');
+      let knowledge = new KnowledgeHost(directory, models.ragModel);
       try {
         await knowledge.initialize();
         const signal = new AbortController().signal;
@@ -519,8 +530,65 @@ try {
           },
           signal,
         );
+        const encoded = [
+          {
+            documentId: 'legacy-doc',
+            name: 'legacy.doc',
+            bytes: fixture.legacyDoc,
+            query: 'pkglegacydocmarker',
+            expected: ['生产 Worker 保留中文', '尾部参数 43'],
+          },
+          {
+            documentId: 'gb18030-text',
+            name: 'encoded.txt',
+            bytes: fixture.gb18030,
+            query: '机械臂',
+            expected: ['传感器反馈控制机械臂', '这个系统支持中文和英文资料'],
+          },
+          {
+            documentId: 'utf16-markdown',
+            name: 'encoded.md',
+            bytes: fixture.utf16Markdown,
+            query: 'pkgutf16marker',
+            expected: ['pkgutf16marker', '尾部参数为 52'],
+          },
+        ];
+        for (const item of encoded)
+          await knowledge.indexDocument(
+            {
+              documentId: item.documentId,
+              baseId: 'fixture',
+              name: item.name,
+              bytes: new Uint8Array(item.bytes),
+            },
+            signal,
+          );
+        const checkEncodedRetrieval = async () => {
+          for (const item of encoded) {
+            const hits = await knowledge.search(item.query, 5, 'keyword', signal, 'fixture');
+            const hit = hits.find((hit) => hit.documentId === item.documentId);
+            assert.ok(hit, 'Packaged encoded document was not retrieved: ' + item.name);
+            const content = await knowledge.getItem(hit.itemId);
+            assert.ok(content, 'Packaged encoded document content is missing: ' + item.name);
+            assert.equal(content.documentId, item.documentId);
+            for (const expected of item.expected)
+              assert.ok(
+                content.content.includes(expected),
+                'Packaged text was changed: ' + item.name,
+              );
+          }
+        };
+        await checkEncodedRetrieval();
         for (const mode of ['keyword', 'vector', 'hybrid'])
           assert.ok((await knowledge.search('PID sensor control', 3, mode, signal)).length);
+        await knowledge.close();
+        knowledge = new KnowledgeHost(directory, models.ragModel);
+        assert.deepEqual(
+          (await knowledge.listDocuments()).map((document) => document.documentId).sort(),
+          ['fixture', 'pdf', 'docx', ...encoded.map((item) => item.documentId)].sort(),
+          'Packaged restart must preserve every indexed format',
+        );
+        await checkEncodedRetrieval();
       } finally {
         await knowledge.close();
       }
@@ -542,7 +610,8 @@ try {
           : 'thin package downloads and offline model cache reuse',
         'unknown component-root originals protected during deletion',
         'arm64 native bindings',
-        'PDF/DOCX parsing',
+        'PDF/DOCX/DOC parsing and real DOC Worker cancellation/recovery',
+        'GB18030 TXT and UTF-16LE Markdown exact text/retrieval across restart',
         'Paraformer Worker with packaged local AEC WASM',
         'speech utilityProcess',
         'offline E5/LanceDB keyword/vector/hybrid',
@@ -552,6 +621,27 @@ try {
     {
       pdf: Array.from(fixtures.pdf()),
       docx: Array.from(await fixtures.docx()),
+      legacyDoc: Array.from(
+        fixtures.doc(
+          '封装旧版 DOC pkglegacydocmarker。\r生产 Worker 保留中文、English 及尾部参数 43。\r',
+        ),
+      ),
+      // Fixed GB18030 text also covered by the shared text-encoding unit tests.
+      gb18030: Array.from(
+        Buffer.from(
+          'd6aacab6bfe2cec4b5b5b1a3b4e6cfeec4bfbeadc0faa3acb4abb8d0c6f7b7b4c0a1bfd8d6c6bbfad0b5b1dba3accafdbeddb4a6c0edbde1b9fbd3c3d3dac3e6cad4d7bcb1b8a1a3d5e2b8f6cfb5cdb3d6a7b3d6d6d0cec4bacdd3a2cec4d7cac1cfa1a3',
+          'hex',
+        ),
+      ),
+      utf16Markdown: Array.from(
+        Buffer.concat([
+          Buffer.from([0xff, 0xfe]),
+          Buffer.from(
+            '## 编码回归\n\npkgutf16marker 保留 Markdown 中文正文，尾部参数为 52。',
+            'utf16le',
+          ),
+        ]),
+      ),
       reuse: !!cacheSource,
     },
   );
@@ -724,6 +814,19 @@ try {
 } finally {
   releaseDesktop();
   await closeUiApp(app);
+}
+
+if (installArchive) {
+  const { componentPaths } = require(
+    path.join(
+      workspace.platformRoot,
+      'dist-electron/shared/electron/backend/components/service.js',
+    ),
+  );
+  await verifyPreviousVersionData({
+    zip,
+    model: componentPaths(path.join(profile, 'artifact-components'), cachedPackages).ragModel,
+  });
 }
 
 if (cacheSource)

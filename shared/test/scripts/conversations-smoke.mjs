@@ -219,6 +219,51 @@ try {
   await page.getByText('后台新增片段。', { exact: true }).waitFor();
   await expectPosition(900);
   await page.getByRole('button', { name: '有新回复 · 返回最新', exact: true }).waitFor();
+
+  // A native scroll can precede its notification. Keep the hook's last real
+  // snapshot at 1100 while moving the actual DOM to 1250, then deliver a real
+  // provider delta before allowing React to receive the delayed scroll.
+  await scrollTo(1100);
+  await chat.evaluate((node) => {
+    let blocked = 0;
+    const delay = (event) => {
+      if (event.target !== node) return;
+      blocked++;
+      event.stopImmediatePropagation();
+    };
+    window.addEventListener('scroll', delay, true);
+    window.conversationDelayedScroll = {
+      blocked: () => blocked,
+      release: () => {
+        window.removeEventListener('scroll', delay, true);
+        node.dispatchEvent(new Event('scroll', { bubbles: true }));
+      },
+    };
+    node.scrollTop = 1250;
+  });
+  try {
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expectPosition(1250);
+    assert.ok(
+      await page.evaluate(() => window.conversationDelayedScroll.blocked() > 0),
+      'The native scroll notification must actually be delayed before the provider delta',
+    );
+    await app.evaluate(() => globalThis.conversationReplies.get('流式追加').append('\n\n延迟滚动通知期间的真实追加片段。'));
+    await page.getByText('延迟滚动通知期间的真实追加片段。', { exact: true }).waitFor();
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    await expectPosition(1250);
+  } finally {
+    await page.evaluate(() => {
+      window.conversationDelayedScroll.release();
+      delete window.conversationDelayedScroll;
+    });
+  }
+  await select('滚动对话 B');
+  await expectPosition(450);
+  await select('滚动对话 A');
+  await expectPosition(1250);
+  await scrollTo(900);
+
   await page.waitForFunction(() => !document.querySelector('.chat-thread').getAnimations().length);
   await startFrames();
   await app.evaluate(() => globalThis.conversationReplies.get('流式追加').append('\n\n前台新增片段。'));
@@ -253,7 +298,7 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: switching/deletion, per-chat reading positions across short/welcome/hidden views, background streams/latest, chat-only motion, fixed chrome, rapid switching and reduced motion.',
+    'PASS: switching/deletion, per-chat reading positions across short/welcome/hidden views, delayed scroll notification with real provider delta, background streams/latest, chat-only motion, fixed chrome, rapid switching and reduced motion.',
   );
 } finally {
   await closeUiApp(app);

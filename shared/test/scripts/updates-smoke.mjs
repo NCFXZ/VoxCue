@@ -231,6 +231,58 @@ try {
     return box;
   });
   const beforeHold = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  await checkButton.evaluate((button) => {
+    const events = [];
+    const name = (node) => node instanceof Element
+      ? `${node.tagName}.${node.className.baseVal ?? node.className} ${node.getAttribute('aria-label') ?? node.textContent?.trim() ?? ''}`.slice(0, 160)
+      : node === window ? 'window' : node === document ? 'document' : null;
+    const read = () => {
+      const rect = button.getBoundingClientRect();
+      return {
+        at: performance.now(),
+        focused: document.hasFocus(),
+        visibility: document.visibilityState,
+        activeElement: name(document.activeElement),
+        connected: button.isConnected,
+        disabled: button.disabled,
+        hovered: button.matches(':hover'),
+        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+        centerHit: name(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2)),
+        animations: button.getAnimations({ subtree: true }).map((animation) => animation.playState),
+      };
+    };
+    const push = (value) => {
+      if (events.length === 96) events.shift();
+      events.push(value);
+    };
+    const listener = (event) => {
+      if (!['focus', 'blur', 'visibilitychange'].includes(event.type) &&
+          !(event.target instanceof Node && button.contains(event.target)) &&
+          !(event.relatedTarget instanceof Node && button.contains(event.relatedTarget))) return;
+      push({
+        ...read(), type: event.type, trusted: event.isTrusted,
+        target: name(event.target), relatedTarget: name(event.relatedTarget),
+        x: event.clientX, y: event.clientY, button: event.button, buttons: event.buttons,
+      });
+    };
+    const types = ['pointerdown', 'pointerup', 'pointerleave', 'pointercancel', 'pointerover', 'pointerout', 'focus', 'blur', 'visibilitychange'];
+    for (const type of types) window.addEventListener(type, listener, true);
+    const unsubscribe = window.desktop.onUpdateEvent((state) => push({
+      ...read(), type: 'update-state', phase: state.phase, revision: state.revision,
+    }));
+    window.updateHoldAudit = {
+      sample: (type) => push({ ...read(), type }),
+      read: () => ({
+        events, current: read(), devicePixelRatio,
+        viewport: { width: innerWidth, height: innerHeight },
+      }),
+      release: () => {
+        for (const type of types) window.removeEventListener(type, listener, true);
+        unsubscribe();
+      },
+    };
+    window.updateHoldAudit.sample('before-pointer-move');
+  });
   await page.mouse.move(holdBox.x + holdBox.width / 2, holdBox.y + holdBox.height / 2);
   await assertFocusedWindow();
   await page.mouse.down();
@@ -238,8 +290,22 @@ try {
     await page.waitForTimeout(4700);
     assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeHold);
     await waitForHeldCheck(beforeHold);
+  } catch (error) {
+    const renderer = await page.evaluate(() => window.updateHoldAudit.read()).catch((failure) => ({ unavailable: failure.message }));
+    const native = await app.evaluate(({ app, BrowserWindow }, id) => ({
+      active: app.isActive(), focusedWindow: BrowserWindow.getFocusedWindow()?.id,
+      expectedWindow: id, visible: BrowserWindow.fromId(id)?.isVisible(),
+      bounds: BrowserWindow.fromId(id)?.getContentBounds(),
+      checks: globalThis.updateDriver.checks,
+    }), windowId).catch((failure) => ({ unavailable: failure.message }));
+    console.error('Update mouse hold diagnostics: ' + JSON.stringify({ scale: process.env.VOXCUE_TEST_SCALE_FACTOR ?? '1', beforeHold, renderer, native }));
+    throw error;
   } finally {
     await page.mouse.up();
+    await page.evaluate(() => {
+      window.updateHoldAudit.release();
+      delete window.updateHoldAudit;
+    });
   }
   await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
   await page.evaluate(

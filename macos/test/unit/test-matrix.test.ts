@@ -16,7 +16,7 @@ it('lists the complete five-scale Mac matrix without starting GUI or preparing m
   expect(result.status).toBe(0);
   const plan = JSON.parse(result.stdout);
   expect(plan.scales).toEqual(['1', '1.25', '1.5', '1.75', '2']);
-  expect(new Set(plan.names).size).toBe(36);
+  expect(new Set(plan.names).size).toBe(37);
   expect(plan.names).toEqual([
     'web-materials',
     'ui-material-refinement',
@@ -50,6 +50,7 @@ it('lists the complete five-scale Mac matrix without starting GUI or preparing m
     'login',
     'login-entry',
     'composer',
+    'conversations',
     'provider-ui',
     'chat-response',
     'chat-progress',

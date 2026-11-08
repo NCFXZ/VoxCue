@@ -43,6 +43,7 @@ const suites = [
   'login',
   'login-entry',
   'composer',
+  'conversations',
   'provider-ui',
   'chat-response',
   'chat-progress',

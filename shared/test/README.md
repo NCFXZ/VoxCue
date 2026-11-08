@@ -6,6 +6,8 @@
 
 Windows 额外真实识别入口为 `node test/scripts/interview-real-audio-smoke.mjs --model=paraformer --cache=<认证公共缓存> --cases=ack,question,mixed,followup`；再以 `--model=qwen` 串行运行。WAV 为本机 SAPI 合成，实际模型、Controller/Worker、IPC、Renderer 与发送入口保持；账户/回答端隔离。空转写不计为过滤成功，`--all` 的更短语气音也必须有非空终稿才能作为过滤证据；不能将模拟事件或无输出当成真实识别成功。
 
+Mac 在 `macos/` 串行运行 `node test/scripts/interview-real-audio-smoke.mjs --model=paraformer --cache=.cache/test-components --all`，再以 `--model=qwen --device=metal` 运行，可另验 `--device=cpu`。使用已安装中文 voice 的文件 TTS，不播放、不下载 voice；默认 `Tingting`，可传 `--voice=`。模型全摘要校验后复制到 owner 临时目录，实际 Controller/Worker、silence 终稿、真实 ACK、Renderer 自动/手动发送及记录关联均保留。五档矩阵包含 `conversations` 的延迟 scroll 通知与真实 provider delta 回归。最终 `package-smoke.mjs --install-archive` 另验 DOC/编码/Worker 取消与重开，以及真实 1.0.0 临时副本到最终新 ZIP 覆盖升级后的资料、设置、原件和旧索引；归档覆盖不等同于 Sparkle 提交重启。
+
 本轮不采样宿主物理音频/屏幕。Windows 原生矩阵中的 `screenshot-performance --native --platform` 不在此边界下运行，单独执行无参数的 `shared/test/scripts/screenshot-performance.mjs` 验证合成 4K 图像处理，其余原生组显式选择后串行执行。独立 `speech-desktop --hardware-audio` 不纳入；不得把合成覆盖当作真实设备验收。安装与 Store Sandbox 使用隔离身份/来宾，证书只在可丢弃来宾内。
 
 ## 1.0.0 验证入口
