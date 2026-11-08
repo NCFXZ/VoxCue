@@ -78,7 +78,14 @@ describe('本地知识库', () => {
         { name: 'slides.pptx', size: 2 },
         { name: 'archive.zip', size: 1 },
       ]),
-    ).toThrow('不支持的文件格式：slides.pptx、sheet.xlsx、archive.zip');
+    ).toThrow('不支持的文件格式：slides.pptx, sheet.xlsx, archive.zip');
+    expect(() =>
+      validateFiles([
+        { name: '保留、原名.pptx', size: 1 },
+        { name: 'keep, original.xlsx', size: 1 },
+        { name: '保留、原名.pptx', size: 2 },
+      ]),
+    ).toThrow('不支持的文件格式：保留、原名.pptx, keep, original.xlsx');
     const names = Array.from({ length: 20 }, (_, index) => 'long'.repeat(100) + index + '.bin');
     let message = '';
     try {
@@ -86,7 +93,7 @@ describe('本地知识库', () => {
     } catch (error) {
       message = (error as Error).message;
     }
-    const displayed = message.slice('不支持的文件格式：'.length).split('、');
+    const displayed = message.slice('不支持的文件格式：'.length).split(', ');
     expect(displayed).toHaveLength(20);
     expect(displayed.every((name) => name.length <= 240)).toBe(true);
     expect(displayed[0]).toContain('…');
@@ -106,7 +113,7 @@ describe('本地知识库', () => {
           new File(['sheet'], 'sheet.xlsx'),
           new File(['duplicate'], 'slides.pptx'),
         ]),
-      ).rejects.toThrow('不支持的文件格式：slides.pptx、sheet.xlsx');
+      ).rejects.toThrow('不支持的文件格式：slides.pptx, sheet.xlsx');
       expect(list).not.toHaveBeenCalled();
       expect(bytes).not.toHaveBeenCalled();
       expect(desktop).not.toHaveBeenCalled();

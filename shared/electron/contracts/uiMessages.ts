@@ -1718,7 +1718,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   极高: 'Extra high',
   最高: 'Maximum',
   '没有找到可添加的文件。': 'No files found to add.',
-  '不支持的文件格式：{0}': 'Unsupported file format: {0}',
+  '不支持的文件格式：{0}': 'Unsupported files: {0}',
   '文件需为 1 字节至 20 MB：{0}': 'File must be between 1 byte and 20 MB: {0}',
   '每条消息最多添加 20 个文件。': 'You can attach up to 20 files per message.',
   '文件夹内容过多，请选择具体文件。':

@@ -13,7 +13,7 @@ export function validateFiles(files: Pick<File, 'name' | 'size'>[]) {
   ];
   if (unsupported.length)
     throw new Error(
-      `不支持的文件格式：${unsupported.map((name) => (name.length > 240 ? name.slice(0, 120) + '…' + name.slice(-119) : name)).join('、')}`,
+      `不支持的文件格式：${unsupported.map((name) => (name.length > 240 ? name.slice(0, 120) + '…' + name.slice(-119) : name)).join(', ')}`,
     );
   for (const file of files) {
     if (!file.size) throw new Error(`文件为空：${file.name}`);
