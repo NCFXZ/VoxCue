@@ -126,12 +126,13 @@
 | M131 | `windows/test/scripts/installer-engine-smoke.mjs`：新增测试专用`--previous-version=1.0.0`核对1.0.0→当前；默认0.5.1→当前不变，只接受一个已知0.5.1/1.0.0参数。 | Windows专属，不运行/移植EXE、注册表或GUID夹具。Mac按本机最终包安装入口覆盖自身已发行1.0.0→1.0.2升级、原件/设置保留、取消及恢复；原Windows测试的独立GUID、inert EXE和owner临时安装/资料/注册项保护继续保持，参数不进入产品。 |
 | M132 | `windows/test/fixtures/WindowProbe.cs`：只修改move分支及GetSystemMetrics声明。原相对32移动受系统加速可产生约65 DIP绕行，随后SetCursorPos也可能留下晚到转发；改为PMv2下按物理虚拟桌面像素中心映射的绝对SendInput，支持负origin、不合并及±1px anchor→target。仅修Windows测试夹具，产品代码不变。 | Windows专属，不复制C#或探针到Mac。Mac沿用固定宿主自己的原生输入、位置与命中校验；本机如发现旧合成移动问题，仅修对应夹具。保留owner解锁、1秒到达、90ms稳定及精确坐标要求，原native hit/hover/drag断言均须保留，不放宽容差或为夹具问题误改产品；本项仍需各自本机验证，不表示复测已完成。 |
 | M133 | `shared/src/services/knowledge.ts`：不支持文件批次名单改用逗号加空格连接，不拆分或替换文件名字符；保留原先去重、顺序、截断及先整批校验逻辑。`shared/electron/contracts/uiMessages.ts` 的共享模板改为`Unsupported files: {0}`，知识库批次与composer单文件均适用，不引入service→UI/store依赖。 | 本机执行renderer `knowledge.test.ts`及`ui-language.test.ts`，再以英文选择多个不支持文件，确认应用连接符为逗号空格、原名中的中文顿号/逗号原样保留；composer单文件也使用自然模板。保留整批拒绝前不读字节/不备份/不写索引、20个及长名有界断言，不通过替换整条错误中的字符改写用户文件名。 |
+| M134 | `shared/test/scripts/components-ui-smoke.mjs`：仅修模型设置几何夹具，测量前等待有限动画结束及两帧布局，再直接选择行内真实控件，不再使用可能命中菜单退出快照的`lastElementChild`。覆盖回答模型在线按钮、离线提示及两个语音选择按钮；产品代码不变。 | Mac本机执行`components-ui`及五档对应组，关闭CPU菜单后核对真实控件，不把正在退出的`aria-hidden`/`inert`快照当作表单控件。保留三行/分组、左边缘差值小于1 CSS px、同宽、标签不重叠及失败geometry诊断，不能放宽阈值或关闭动画代过；此项不表示Mac已验。 |
 
 ## Mac 本机执行顺序
 
 以下均为待执行操作，不是已运行记录。除仓库根同步外，工作目录为 `macos/`；不通过修改系统辅助功能、锁屏权限或签名身份取得测试条件。
 
-1. 读取 AGENTS/PROGRESS、检查 status/diff 和最终源码 SHA；以已公开 Mac1.0.0 的 M001–M067 为保持基线，再按 M068–M133 核对本轮新增范围。只在本机同步生成配置/锁及必要打包依赖，不写 Windows 树；保留其后原生夹具维护。
+1. 读取 AGENTS/PROGRESS、检查 status/diff 和最终源码 SHA；以已公开 Mac1.0.0 的 M001–M067 为保持基线，再按 M068–M134 核对本轮新增范围。只在本机同步生成配置/锁及必要打包依赖，不写 Windows 树；保留其后原生夹具维护。
 2. 在本机执行 `pnpm typecheck`、`pnpm check:architecture`、`pnpm check:workspace`、`pnpm test`、`pnpm audit`、`pnpm build`；优先定位本表列出的纯单测与 Renderer 单测。保留当前所有必需检查，不把 Windows 条件跳过作为完成。
 3. 按本机 desktop-session 守卫确认控制台，再串行运行当前 `functional-suite.mjs --list` 列出的完整功能入口。固定服务端参考仍按 `server-reference.mjs` 的 owning source 校验，只用临时合成客户端联调，不改服务端。
 4. 增补并运行 Mac 专属真实 WAV→ASR→gate→renderer/store→provider 用例，满足 M105–M107 的非空终稿、实际音频ACK及请求计数前置条件；Windows主脚本不可直接执行。对不可稳定识别的短音节如实列明未覆盖，不放宽词表或用空文本代过。
@@ -140,4 +141,4 @@
 7. 按本机原入口构建准确1.0.2正式包，运行 `package-runtimes-smoke.mjs`、`package-smoke.mjs --install-archive` 及固定签名检查；对最终包重新验证DOC Worker/编码依赖，不用临时测试包代替正式资产。
 8. 在当前用户授权允许发布后才上传Mac完整资产，并用相同准确版本目录执行 `--online` 匿名完整回读及签名/摘要验证；更新发行索引和PROGRESS真实状态。交接文档不记录分数、临时路径或假定完成状态。
 
-后续新增修复从 **M134** 追加。最终源码 SHA、Windows发行状态和Mac接续状态仍待根任务据实际证据填写。
+后续新增修复从 **M135** 追加。最终源码 SHA、Windows发行状态和Mac接续状态仍待根任务据实际证据填写。

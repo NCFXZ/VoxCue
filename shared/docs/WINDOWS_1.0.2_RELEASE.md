@@ -14,7 +14,7 @@
 | Windows 公开升级基线 / Public Windows baseline | `1.0.0`，包输入 `a47f7435ef7c233eee9da87a18261162dfaee65f` |
 | Mac 公开完整基线 / Complete Mac baseline | `1.0.0`，包输入 `f6e06e3f62395c0d6b78bafdfceabb347c91ac27`；本轮不生成 Mac 包 |
 | 远端后续工作 / Remote follow-up | `d131fa5540121fc89c1fe1429da0e7ee95e54ba4`；保留 Mac 发行与原生夹具提交，共用英文单周期额度网格并入 Windows 验证 |
-| 源码与包输入 / Source and package input | 待最终冻结 / pending final freeze |
+| 源码与包输入 / Source and package input | Windows 包输入 `8104284781007b7b658482c11e71d90f0b548117`；源码合入与发布状态待后续准确记录 |
 | 源码仓库 / Source repository | 私有 `NCFXZ/VoxCue`；不向公开发行仓库上传客户端源码或用户资料 |
 | 公开发行仓库 / Public release repository | `NCFXZ/VoxCue-releases`；目标标签 `v1.0.2` |
 | Store 基线 / Store baseline | 提交 4（`1152921505702342674`）的 1.0.1 发布者名称维护版；2026-11-08 Partner Center 概览确认最新产品已上架 |
@@ -25,9 +25,9 @@ Windows 上 `macos/` 全树保持原字节；Git 合入保留远端 Mac 提交�
 
 | 文件 / File | Bytes | SHA256 | 发布状态 / Status |
 | --- | --- | --- | --- |
-| `VoxCue-Setup-1.0.2-x64.exe` | 407654519 | `0f71b41bb402b1aeeb2e93d1a5216c64911eeda3eef202f158854472a52f9b32` | 已构建，未上传 |
-| `VoxCue-Setup-1.0.2-x64.exe.blockmap` | 422092 | `82a287d298fd76fc3affa69584e2cb9488d24b3862455f0b559ab1acd3cefea3` | 已构建，未上传 |
-| `latest.yml` | 349 | `2a3cd9b22f30224b6439ad1c5f989ac72c46e8776dc80a263981fec82c6a502a` | 已构建，未上传 |
+| `VoxCue-Setup-1.0.2-x64.exe` | 407654422 | `481c96e465e1cb7444c62946c397d3ed0971543f64e12bc90414a35ef21da893` | 已构建，未上传 |
+| `VoxCue-Setup-1.0.2-x64.exe.blockmap` | 422296 | `235ea6b45c870a7c7408077266bce020fc0cc399b0fa94b70705dc21e85e4ee2` | 已构建，未上传 |
+| `latest.yml` | 349 | `c6f59000086ddb34296b21cda4d0863e80c9e20c18123c8f90724d6f503b6f1f` | 已构建，未上传 |
 
 目标归档为 `windows/release/1.0.2/`；临时打包输出为 `windows/release/installer/`。正式公开后再记录准确 URL、release/asset ID、发布时间和匿名完整下载核对状态。Mac 完整 1.0.2 资产尚未由本机生成前，Mac 更新应继续选择已完整发布的 1.0.0，不能取用 Windows EXE/APPX 或把全局 Latest 当作 Mac 完整版本。
 
@@ -41,7 +41,7 @@ Windows 上 `macos/` 全树保持原字节；Git 合入保留远端 Mac 提交�
 | PublisherDisplayName | `F. Zhu`，保持 1.0.1 维护后的值 |
 | 包身份版本 / Package version | `2.0.2.0`；沿用共享主版本加一与末位零映射 |
 | APPX | `windows/release/store/VoxCue-Store-1.0.2-x64.appx` |
-| Bytes / SHA256 | 待构建 / pending build |
+| Bytes / SHA256 | 600157014 / `752bb48d17a3fd4972fe47f0e773dcc5de7e0a12d7c995175e91cdb90ad044e3` |
 | 提交 / Submission | 尚未创建 1.0.2 提交 / not yet created |
 | 认证与实际上架 / Certification and availability | 未提交 / not submitted |
 
@@ -57,6 +57,7 @@ Windows 上 `macos/` 全树保持原字节；Git 合入保留远端 Mac 提交�
 - 真实 utility 进程边界夹具改为断言超时后的迟到回复不能提前结算、实际退出后才创建替代进程；保留取消分类、零 provider 和原 15 秒 RAG 期限检查。
 - 云菜单夹具按点击展开检查；预览经真实 UI 追加合成文档，等待实际溢出和稳定入场后校验标题遮罩，不将短列表的正确透明行为误报为产品问题。包级组件提示严格匹配新的通用语音识别文案。
 - Windows 原生鼠标探针改用虚拟桌面物理像素的绝对输入，移除相对加速绕行及覆盖最终事件的定位；保留精确坐标、原生命中、悬停和拖动断言，不改浮窗产品逻辑。
+- 模型设置几何夹具明确选择行内真实控件，并等待有限动画与两帧布局，避免把关闭菜单的退出快照当成控件；保留原左边缘、同宽和不重叠断言，不修改产品布局。
 - 聊天专项保留原删除流程并补位置/动画回归；安装引擎保持旧 0.5.1 夹具，新增显式 1.0.0→1.0.2 参数。解析错误文案回归严格匹配新的完整提示，不放宽断言。
 - 对应 Mac 操作与验收预期逐条进入独立接续清单，不以 Windows 结果标为 Mac 已完成。
 
