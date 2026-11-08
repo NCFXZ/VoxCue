@@ -7,6 +7,7 @@ import type {
   KnowledgeStatus,
   KnowledgeValue,
 } from '../contracts/knowledge';
+import { isKnowledgeFileName } from '../contracts/knowledge';
 
 const id = (v: unknown): v is string =>
   typeof v === 'string' &&
@@ -52,6 +53,8 @@ export function validateKnowledge(value: unknown): KnowledgeCall {
       v.bytes.length > 20 * 1024 * 1024)
   )
     throw Error('无效文件或文件超过 20 MB。');
+  if (v.op === 'import' && !isKnowledgeFileName(v.name))
+    throw Error('仅支持 PDF、Word、TXT 和 Markdown。');
   if (
     v.op === 'search' &&
     (typeof v.query !== 'string' ||
@@ -87,6 +90,7 @@ export class KnowledgeCoordinator {
   private snapshot?: Promise<KnowledgeState>;
   private changeVersion = 0;
   private pending = 0;
+  private importBytes = 0;
   constructor(
     readonly core: KnowledgePort,
     private modelPath: string,
@@ -112,7 +116,7 @@ export class KnowledgeCoordinator {
   }
   assertInterviewReady(baseId?: string | null) {
     if (baseId && this.indexing)
-      throw Error('知识库资料仍在索引，请等待完成或不使用知识库开始面试。');
+      throw Error('资料仍在索引，请稍后开始面试。');
   }
   call(call: KnowledgeCall): Promise<KnowledgeValue> {
     this.pending++;
@@ -120,7 +124,7 @@ export class KnowledgeCoordinator {
   }
   private async run(call: KnowledgeCall): Promise<KnowledgeValue> {
     if (call.op === 'import' && this.isInterviewActive())
-      throw Error('面试期间暂不启动资料索引，请结束面试后重试。');
+      throw Error('面试中无法索引，请结束后重试。');
     if (call.op === 'cancel') {
       this.active.get(call.requestId)?.controller.abort();
       return null;
@@ -149,16 +153,26 @@ export class KnowledgeCoordinator {
       call.op === 'import' &&
       [...this.active.values()].some((a) => a.documentId === call.documentId)
     )
-      throw Error('该文档正在处理，请先取消或等待完成。');
+      throw Error('文档处理中，请稍后重试。');
+    if (
+      call.op === 'import' &&
+      (this.importBytes + call.bytes.byteLength > 40 * 1024 * 1024 ||
+        [...this.active.values()].filter((a) => a.documentId !== undefined).length >= 2)
+    )
+      throw Error('资料处理中，请稍后重试。');
     const controller = new AbortController(),
       documentId = call.op === 'import' ? call.documentId : undefined;
     this.active.set(call.requestId, { controller, documentId });
+    if (call.op === 'import') this.importBytes += call.bytes.byteLength;
     const signal = controller.signal;
     try {
       switch (call.op) {
-        case 'import':
+        case 'import': {
           this.progress({ documentId: call.documentId, phase: 'queued', completed: 0, total: 0 });
-          return await this.core.indexDocument(call, signal);
+          const document = await this.core.indexDocument(call, signal);
+          signal.throwIfAborted();
+          return document;
+        }
         case 'invalidate':
         case 'remove':
           for (const a of this.active.values())
@@ -178,6 +192,8 @@ export class KnowledgeCoordinator {
           );
         case 'item':
           return await this.core.getItem(call.itemId, signal, call.expected);
+        default:
+          throw Error('未知知识库操作。');
       }
     } catch (error) {
       if (documentId)
@@ -190,6 +206,7 @@ export class KnowledgeCoordinator {
         });
       throw error;
     } finally {
+      if (call.op === 'import') this.importBytes -= call.bytes.byteLength;
       this.active.delete(call.requestId);
     }
   }
@@ -203,5 +220,5 @@ export function safeKnowledgeError(error: unknown) {
     error.message.length < 500 &&
     !/[A-Z]:[\\/]|Bearer|token=/i.test(error.message)
     ? error.message
-    : '本地知识库操作失败，原件与备份已保留。';
+    : '知识库操作失败，请重试。';
 }

@@ -55,15 +55,43 @@ try {
   assert.equal(await base.locator('.sync-popover').count(), 0);
   await cloud.press('Enter');
   await base.locator('.sync-popover').waitFor();
-  await cloud.press('Escape');
-  assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
+  await cloud.press('Enter');
+  await base.locator('.sync-popover').waitFor({ state: 'detached' });
   await cloud.press('Space');
   await base.locator('.sync-popover').waitFor();
+  await cloud.press('Space');
+  await base.locator('.sync-popover').waitFor({ state: 'detached' });
+  await cloud.click();
+  await base.locator('.sync-popover').waitFor();
   await cloud.press('Escape');
   assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
+  assert.equal(await cloud.evaluate((button) => button === document.activeElement), true);
   await cloud.hover();
-  await base.locator('.sync-popover').waitFor();
+  await page.waitForTimeout(200);
+  assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
+  assert.equal(await base.locator('.sync-popover').count(), 0);
+  await cloud.click();
+  const popover = base.locator('.sync-popover');
+  await popover.waitFor();
+  await popover.locator('strong').click();
+  assert.equal(await cloud.getAttribute('aria-expanded'), 'true');
   await page.mouse.move(0, 0);
+  await page.waitForTimeout(200);
+  assert.equal(await cloud.getAttribute('aria-expanded'), 'true');
+  await page.keyboard.press('Escape');
+  await popover.waitFor({ state: 'detached' });
+  assert.equal(await cloud.evaluate((button) => button === document.activeElement), true);
+  await cloud.press('Enter');
+  await popover.waitFor();
+  await cloud.press('Tab');
+  await popover.waitFor({ state: 'detached' });
+  await cloud.click();
+  await popover.waitFor();
+  await cloud.click();
+  await popover.waitFor({ state: 'detached' });
+  await cloud.click();
+  await popover.waitFor();
+  await base.locator('.upload-dropzone').click();
   await base.locator('.sync-popover').waitFor({ state: 'detached' });
   await captureRequested(base, 'knowledge-new-base-no-cloud-popover');
   const upload = async (text) => {
@@ -119,10 +147,33 @@ try {
   assert.equal(await note().locator('.document-actions button').count(), 2);
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   await page.screenshot({ animations: 'disabled' });
+  await base
+    .getByLabel('导入知识库文档')
+    .setInputFiles([
+      {
+        name: 'archive.zip',
+        mimeType: 'application/zip',
+        buffer: Buffer.from('synthetic unsupported'),
+      },
+    ]);
+  const importError = base.locator('.knowledge-inline-error');
+  await importError.waitFor();
+  const importMessage = await importError.innerText();
+  assert.ok(importMessage.includes('archive.zip'));
+  await base.getByRole('button', { name: '重命名', exact: true }).click();
+  const editor = page.getByRole('dialog', { name: '重命名知识库', exact: true });
+  await editor.waitFor();
+  assert.equal(await importError.isVisible(), true);
+  assert.equal(await importError.innerText(), importMessage);
+  assert.equal(await editor.getByRole('alert').count(), 0);
+  await editor.getByRole('button', { name: '取消', exact: true }).click();
+  assert.equal(await importError.innerText(), importMessage);
   await base.getByRole('button', { name: '重命名', exact: true }).click();
   await page.getByLabel('知识库名称', { exact: true }).fill('保留的知识库');
   await page.getByRole('button', { name: '保存', exact: true }).click();
+  base = page.getByRole('dialog', { name: '保留的知识库', exact: true });
   await page.getByRole('dialog', { name: '保留的知识库', exact: true }).waitFor();
+  assert.equal(await base.locator('.knowledge-inline-error').innerText(), importMessage);
   await page.reload();
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.locator('.knowledge-card').filter({ hasText: '保留的知识库' }).click();
@@ -364,6 +415,8 @@ try {
         'Office/PDF original preservation',
         'reload',
         'rename',
+        'rename retains import error',
+        'click-only sync menu and keyboard dismissal',
         'document removal',
         'base deletion confirmation',
         'removed IPC',

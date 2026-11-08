@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button } from './ui/button';
 import { Loader, X } from './icons';
 
@@ -21,17 +21,35 @@ export function DownloadButton({
   onCancel(): void;
 }) {
   const [cancelReady, setCancelReady] = useState(false);
+  const control = useRef<HTMLButtonElement>(null);
   const idle = useRef<HTMLSpanElement>(null),
     cancel = useRef<HTMLSpanElement>(null);
-  const [widths, setWidths] = useState({ idle: 96, cancel: 88 });
   useLayoutEffect(() => {
     if (iconOnly) return;
+    let initial = true;
     const measure = () => {
+      const element = control.current;
+      if (!element) return;
       const next = {
         idle: Math.max(80, Math.ceil((idle.current?.getBoundingClientRect().width ?? 56) + 32)),
         cancel: Math.max(80, Math.ceil((cancel.current?.getBoundingClientRect().width ?? 48) + 32)),
       };
-      setWidths((old) => (old.idle === next.idle && old.cancel === next.cancel ? old : next));
+      if (
+        element.style.getPropertyValue('--download-idle-width') === `${next.idle}px` &&
+        element.style.getPropertyValue('--download-cancel-width') === `${next.cancel}px`
+      )
+        return;
+      // The parent ActionTransition must measure the final width on this commit.
+      // A deferred state update would animate the fallback width and then retarget it.
+      const transition = element.style.transition;
+      if (initial) element.style.transition = 'none';
+      element.style.setProperty('--download-idle-width', `${next.idle}px`);
+      element.style.setProperty('--download-cancel-width', `${next.cancel}px`);
+      if (initial) {
+        element.getBoundingClientRect();
+        element.style.transition = transition;
+        initial = false;
+      }
     };
     const observer = new ResizeObserver(measure);
     if (idle.current) observer.observe(idle.current);
@@ -50,19 +68,11 @@ export function DownloadButton({
       : undefined;
   return (
     <Button
+      ref={control}
       variant="outline"
       size={iconOnly ? 'icon' : undefined}
       className={`download-button${iconOnly ? ' is-icon-only' : ''}${cancelReady ? ' is-cancellable' : ''} ${className}`}
       data-hover-label={hoverLabel}
-      style={
-        !iconOnly
-          ? ({
-              '--download-idle-width': `${widths.idle}px`,
-              '--download-cancel-width': `${widths.cancel}px`,
-            } as CSSProperties)
-          : undefined
-      }
-
       aria-label={cancelReady ? t('{0}，取消下载', [t(label)]) : t('{0}下载中', [t(label)])}
       aria-disabled={!cancelReady}
       onClick={() => {

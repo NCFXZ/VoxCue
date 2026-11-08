@@ -21,7 +21,7 @@ export function knowledgeStatusLabel(status: KnowledgeStatus): string {
 export const hasKnowledgeEngine = () =>
   typeof window !== 'undefined' && typeof window.desktop?.knowledge === 'function';
 export async function knowledgeCall(call: KnowledgeCall): Promise<KnowledgeValue> {
-  if (!hasKnowledgeEngine()) throw Error('本地知识库引擎不可用，请在 VoxCue 桌面应用中重试。');
+  if (!hasKnowledgeEngine()) throw Error('知识库引擎不可用，请在桌面应用中重试。');
   const result = await window.desktop!.knowledge(call);
   if (!result.ok) throw Error(result.error);
   return result.value;

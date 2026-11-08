@@ -1,3 +1,13 @@
+## 1.0.2 验证入口
+
+当前范围见 `PROGRESS.md`，新增行为及测试发现修复逐项见 [1.0.0→1.0.2 Mac 接续清单](../docs/MACOS_1.0.2_HANDOFF.md)。以实际调度源码和 `functional-suite.mjs --list` 为准；下面的旧版本段落保留历史语境，不表示另一平台已验证。类型/架构/工作区、完整单测、冻结依赖审计、共享功能、原时长长稳、五档缩放和最终包/安装均需按当前平台执行。
+
+新增定向入口：`legacy-doc.test.ts` 覆盖有效 OLE DOC、恶意目录图/名称及索引；`text-encoding.test.ts` 覆盖传统编码与歧义拒绝；`knowledge-host.test.ts`、`knowledge-coordinator.test.ts` 核对取消后真实任务退休与入站预算、进程退出确认、超时和模型卸载边界。`conversations-smoke.mjs` 保留删除流程并覆盖聊天阅读位置、流式回复、固定上下栏、快速切换和减少动态效果。
+
+Windows 额外真实识别入口为 `node test/scripts/interview-real-audio-smoke.mjs --model=paraformer --cache=<认证公共缓存> --cases=ack,question,mixed,followup`；再以 `--model=qwen` 串行运行。WAV 为本机 SAPI 合成，实际模型、Controller/Worker、IPC、Renderer 与发送入口保持；账户/回答端隔离。空转写不计为过滤成功，`--all` 的更短语气音也必须有非空终稿才能作为过滤证据；不能将模拟事件或无输出当成真实识别成功。
+
+本轮不采样宿主物理音频/屏幕。Windows 原生矩阵中的 `screenshot-performance --native --platform` 不在此边界下运行，单独执行无参数的 `shared/test/scripts/screenshot-performance.mjs` 验证合成 4K 图像处理，其余原生组显式选择后串行执行。独立 `speech-desktop --hardware-audio` 不纳入；不得把合成覆盖当作真实设备验收。安装与 Store Sandbox 使用隔离身份/来宾，证书只在可丢弃来宾内。
+
 ## 1.0.0 验证入口
 
 本轮完整验证与发行范围见 `PROGRESS.md`，逐项双端行为及测试修复见 [0.6.9→1.0.0 Mac 接续清单](../docs/MACOS_1.0.0_HANDOFF.md)。共享完整矩阵、本平台原生、五档 DPI、20 轮面试及 600 秒音频长稳继续完整执行；共享和 Mac 五档排程以当前 `--list` 输出为准。下文旧版本段落保留其历史上下文，不构成另一平台已验声明。测试结果仅终端/对话，归档与公开资产记录独立维护。

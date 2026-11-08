@@ -33,15 +33,32 @@ function state(speech: boolean, qwen: boolean, rag = true): ComponentState {
     ],
   };
 }
-it('英文缺失组件列表使用英文标点，中文提示保持原样', () => {
+it('缺失组件副标题包含组件名和下载入口，中英文标点正确', () => {
   current.state = state(false, false, false);
+  current.state.items[1].optional = false;
   expect(renderToStaticMarkup(<ComponentsNotice />)).toContain(
-    '轻量语音识别、知识库检索。请在设置中下载或查看进度。',
+    '语音识别、知识库检索组件未下载，请在设置中下载或查看进度',
   );
+  for (const only of ['speech', 'qwen'] as const) {
+    const html = renderToStaticMarkup(<ComponentsNotice only={only} />);
+    expect(html).toContain('语音识别尚未就绪');
+    expect(html).toContain('语音识别组件未下载，请在设置中下载或查看进度');
+    expect(html).not.toContain('轻量语音识别');
+    expect(html).not.toContain('多语言语音识别');
+  }
   useGeneralSettings.setState({ language: 'en' });
   expect(renderToStaticMarkup(<ComponentsNotice />)).toContain(
-    'Lightweight speech recognition, Knowledge retrieval. Download components or check progress in Settings.',
+    'Not downloaded: Speech recognition, Knowledge retrieval. Download components or check progress in Settings.',
   );
+  for (const only of ['speech', 'qwen'] as const) {
+    const html = renderToStaticMarkup(<ComponentsNotice only={only} />);
+    expect(html).toContain('Speech recognition is not ready');
+    expect(html).toContain(
+      'Not downloaded: Speech recognition. Download components or check progress in Settings.',
+    );
+    expect(html).not.toContain('Lightweight speech recognition');
+    expect(html).not.toContain('Multilingual speech recognition');
+  }
 });
 it.each([
   [true, false],
@@ -53,7 +70,7 @@ it.each([
 });
 it('都未下载时显示缺失语音模型，Qwen/CPU已就绪时只显示性能提示', () => {
   current.state = state(false, false);
-  expect(renderToStaticMarkup(<ComponentsNotice />)).toContain('轻量语音识别');
+  expect(renderToStaticMarkup(<ComponentsNotice />)).toContain('语音识别组件未下载');
   current.state = state(false, true);
   const html = renderToStaticMarkup(
     <ComponentsNotice
@@ -61,8 +78,10 @@ it('都未下载时显示缺失语音模型，Qwen/CPU已就绪时只显示性�
     />,
   );
   expect(html).toContain('语音推理性能提示');
+  expect(html).toContain('多语言语音识别性能受限');
   expect(html).toContain('明显延迟');
   expect(html).not.toContain('尚未就绪');
+  expect(html).not.toContain('组件未下载');
 });
 it('Paraformer/CPU与Qwen/Metal不显示CPU性能提示，知识库缺失单独保留', () => {
   current.state = state(true, true);
@@ -82,5 +101,12 @@ it('Paraformer/CPU与Qwen/Metal不显示CPU性能提示，知识库缺失单独�
   current.state = state(false, true, false);
   const html = renderToStaticMarkup(<ComponentsNotice />);
   expect(html).toContain('知识库检索');
-  expect(html).not.toContain('轻量语音识别');
+  expect(html).not.toContain('语音识别');
+  expect(renderToStaticMarkup(<ComponentsNotice only="rag" />)).toContain(
+    '知识库检索组件未下载，请在设置中下载或查看进度',
+  );
+  useGeneralSettings.setState({ language: 'en' });
+  expect(renderToStaticMarkup(<ComponentsNotice only="rag" />)).toContain(
+    'Not downloaded: Knowledge retrieval. Download components or check progress in Settings.',
+  );
 });

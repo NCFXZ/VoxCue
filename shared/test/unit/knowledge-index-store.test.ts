@@ -9,6 +9,45 @@ const state: KnowledgeState = {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe('索引状态生命周期', () => {
+  it('关闭提示或切换资料视图后，旧刷新失败不重现，新刷新仍可报错', async () => {
+    let fail!: (error: Error) => void;
+    const knowledge = vi.fn().mockReturnValueOnce(
+      new Promise((_, reject) => {
+        fail = reject;
+      }),
+    );
+    vi.stubGlobal('window', { desktop: { knowledge } });
+    useKnowledgeIndex.setState({ error: null });
+    const old = useKnowledgeIndex.getState().refresh();
+    useKnowledgeIndex.getState().dismissError();
+    fail(Error('old snapshot failure'));
+    await old;
+    expect(useKnowledgeIndex.getState().error).toBeNull();
+    knowledge.mockResolvedValueOnce({ ok: false, error: '当前刷新失败' });
+    await useKnowledgeIndex.getState().refresh();
+    expect(useKnowledgeIndex.getState().error).toBe('当前刷新失败');
+    useKnowledgeIndex.getState().dismissError();
+  });
+  it('既有不支持格式的原件不再排入解析，也不产生格式错误提示', async () => {
+    const knowledge = vi.fn();
+    vi.stubGlobal('window', { desktop: { knowledge } });
+    const before = useKnowledgeIndex.getState();
+    await useKnowledgeIndex.getState().index({
+      id: 'old-ppt',
+      baseId: 'base',
+      name: 'old.ppt',
+      size: 8,
+      type: 'application/vnd.ms-powerpoint',
+      createdAt: 1,
+      blob: {
+        arrayBuffer: () => {
+          throw Error('Original bytes must not be read');
+        },
+      } as Blob,
+    });
+    expect(knowledge).not.toHaveBeenCalled();
+    expect(useKnowledgeIndex.getState()).toBe(before);
+  });
   it('完成向量计数后显示独立写入阶段，迟到快照不回退完成状态，新任务仍从零开始', async () => {
     let listener!: (status: KnowledgeStatus) => void;
     let snapshot = state;

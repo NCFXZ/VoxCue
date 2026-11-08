@@ -82,6 +82,7 @@ port.on('message', ({ data: m }) => {
               : 'unavailable',
         });
       } finally {
+        m.input = undefined;
         controllers.delete(m.id);
         active = undefined;
       }
@@ -95,7 +96,7 @@ function publicError(error: unknown) {
     !/[A-Z]:[\\/]|Bearer|token=/i.test(error.message)
   )
     return error.message;
-  return '本地知识库处理失败，原件和已提交索引已保留；请重试或重新索引。';
+  return '知识库处理失败，请重试或重新索引。';
 }
 process.on('SIGTERM', () => {
   for (const c of controllers.values()) c.abort();

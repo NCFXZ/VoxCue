@@ -100,7 +100,9 @@ export async function checkComponents(application) {
   assert.equal(await start.isDisabled(), true);
   assert.deepEqual(await application.evaluate(() => globalThis.componentRequests), []);
   const notice = page.locator('.chat-column > .components-notice');
-  await notice.getByText(/轻量语音识别、知识库检索/).waitFor();
+  await notice
+    .getByText('语音识别、知识库检索组件未下载，请在设置中下载或查看进度', { exact: true })
+    .waitFor();
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill('模型尚未下载时准备聊天');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
   await page

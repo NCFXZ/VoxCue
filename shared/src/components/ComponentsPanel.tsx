@@ -12,10 +12,15 @@ import {
 } from '../../electron/contracts/components';
 
 const size = (bytes: number) => `${(bytes / 1_000_000).toFixed(1)} MB`;
+const skeletonGroups = [
+  ['语音识别组件', ['speech', 'qwen']],
+  ['知识库检索组件', ['rag']],
+] as const;
 export function ComponentsPanel() {
   const { state, error, run } = useComponents();
   const settled = useRef(new Map<string, 'ready' | 'pending'>());
   if (!window.desktop?.components) return null;
+  const loading = !state && !error;
   const busy = ['downloading', 'verifying', 'removing'].includes(state?.phase ?? '');
   const items = state?.items ?? [];
   for (const item of items)
@@ -87,11 +92,30 @@ export function ComponentsPanel() {
     );
   };
   return (
-    <section className="components-panel" aria-label={t('本地组件')}>
-      {!state && (
-        <p className="section-help" role="status">
-          {t('正在检查本地组件…')}
-        </p>
+    <section className="components-panel" aria-label={t('本地组件')} aria-busy={loading}>
+      {loading && (
+        <>
+          <p className="sr-only" role="status">
+            {t('正在检查本地组件…')}
+          </p>
+          <div aria-hidden="true">
+            {skeletonGroups.map(([label, models]) => (
+              <section className="component-group" key={label}>
+                <h3>{t(label)}</h3>
+                {models.map((model) => (
+                  <div className="component-row" key={model}>
+                    <div className="component-copy">
+                      <span className="component-model-name quota-skeleton-line quota-skeleton-reset" />
+                      <span className="quota-skeleton-line component-skeleton-description" />
+                      <span className="quota-skeleton-line quota-skeleton-number" />
+                    </div>
+                    <span className="quota-skeleton-line component-skeleton-action" />
+                  </div>
+                ))}
+              </section>
+            ))}
+          </div>
+        </>
       )}
       {speechModels.length > 0 && (
         <section className="component-group" aria-label={t('语音识别组件')}>

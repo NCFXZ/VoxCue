@@ -10,7 +10,7 @@ const input = (name: string, bytes: Uint8Array) => ({
   bytes,
 });
 describe('本地解析与入口校验', () => {
-  it('真实 Node PDF 解析保留页码及每页内容；损坏文件和 Office 明确失败', async () => {
+  it('真实 Node PDF 解析保留页码及每页内容；损坏文件和未支持的 Office 明确失败', async () => {
     const parsed = await parseDocument(input('a.pdf', fixtures.pdf()));
     expect(parsed.items.map((item) => item.page)).toEqual([1, 2]);
     expect(parsed.text).toContain('37');
@@ -29,15 +29,15 @@ describe('本地解析与入口校验', () => {
     await expect(parseDocument(input('broken.pdf', Buffer.from('bad bytes')))).rejects.toThrow(
       'PDF 解析失败',
     );
-    await expect(parseDocument(input('a.doc', Buffer.from('original')))).rejects.toThrow(
-      '仅保留原件',
+    await expect(parseDocument(input('a.ppt', Buffer.from('original')))).rejects.toThrow(
+      '仅支持 PDF、Word、TXT 和 Markdown。',
     );
   });
   it('DOCX 保留段落；非 UTF-8 文本不会静默乱码', async () => {
     expect((await parseDocument(input('a.docx', await fixtures.docx()))).text).toContain(
       '中文 DOCX sensor feedback.\n\nSecond paragraph',
     );
-    await expect(parseDocument(input('a.txt', new Uint8Array([255, 254])))).rejects.toThrow(
+    await expect(parseDocument(input('a.txt', new Uint8Array([255, 254, 65])))).rejects.toThrow(
       'UTF-8',
     );
   });

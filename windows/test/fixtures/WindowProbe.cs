@@ -28,6 +28,7 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out NativeRect rect);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out NativeRect rect);
+  [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
   [DllImport("user32.dll")] static extern IntPtr GetWindowLongPtrW(IntPtr window,int index);
@@ -204,25 +205,33 @@ class WindowProbe {
         Print(new{x=outer.Left,y=outer.Top,width=outer.Right-outer.Left,height=outer.Bottom-outer.Top,clientWidth=client.Right-client.Left,clientHeight=client.Bottom-client.Top});return 0;
       }
       if(args[0]=="move") {
-        // Callers already supply physical screen pixels. Normalizing them again
-        // through virtual-desktop mouse_event coordinates can move to another point.
+        RequireDesktop();
+        // Absolute SendInput uses the physical virtual desktop, including a
+        // negative monitor origin. Pixel centers avoid normalization rounding.
         int x=int.Parse(args[1]),y=int.Parse(args[2]);
-        if(!SetCursorPos(x-1,y))throw new Exception("Native cursor unavailable on the input desktop");
-        Point anchor;if(!GetCursorPos(out anchor))throw new Exception("Native cursor unavailable before injected movement");
-        // The Electron click-through forwarder observes injected movement,
-        // including when SetCursorPos itself produced no new mouse message.
-        mouse_event(1,32,0,0,UIntPtr.Zero);
-        // Observe consumption before final positioning; a queued relative move
-        // must not arrive after SetCursorPos and shift the final physical point.
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        if(width<2||height<1||x<left||x>=left+width||y<top||y>=top+height)throw new Exception("Native pointer target is outside the virtual desktop");
+        int[] points={x==left?x+1:x-1,x};
+        var moves=new Input[2];
+        for(int i=0;i<moves.Length;i++) {
+          moves[i]=new Input{type=0,value=new InputUnion{mouse=new MouseInput{
+            x=(int)(((2L*(points[i]-left)+1)*65536)/(2L*width)),
+            y=(int)(((2L*(y-top)+1)*65536)/(2L*height)),
+            // MOVE | ABSOLUTE | VIRTUALDESK | MOVE_NOCOALESCE. Do not inject an
+            // accelerated relative detour or overwrite its queued final event.
+            flags=0xE001
+          }}};
+        }
+        if(SendInput((uint)moves.Length,moves,Marshal.SizeOf(typeof(Input)))!=(uint)moves.Length)
+          throw new Exception("Native pointer input was not accepted");
         var moveDeadline=DateTime.UtcNow.AddSeconds(1);
         while(true) {
           Point moved;if(!GetCursorPos(out moved))throw new Exception("Native cursor unavailable while waiting for injected movement");
-          if(moved.X!=anchor.X||moved.Y!=anchor.Y)break;
+          if(moved.X==x&&moved.Y==y)break;
           if(DateTime.UtcNow>=moveDeadline)throw new Exception("Injected native cursor movement was not observed before the deadline");
           Thread.Sleep(5);
         }
         RequireDesktop();
-        if(!SetCursorPos(x,y))throw new Exception("Native cursor unavailable on the input desktop");
         Thread.Sleep(90);Point actual;if(!GetCursorPos(out actual))throw new Exception("Native cursor unavailable after movement");
         if(actual.X!=x||actual.Y!=y)throw new Exception("Native pointer position changed during the isolated check: expected "+x+","+y+"; actual "+actual.X+","+actual.Y);
         Print(new{});return 0;

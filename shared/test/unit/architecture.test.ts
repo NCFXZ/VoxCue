@@ -121,6 +121,8 @@ describe('长期模块边界', () => {
     ['shared/electron/preload.ts', 'shared/electron/contracts/desktop.ts'],
     ['shared/src/services/knowledge.ts', '@lancedb/lancedb'],
     ['shared/src/services/knowledge.ts', '@huggingface/transformers'],
+    ['shared/src/services/knowledge.ts', 'word-extractor/lib/word-ole-extractor'],
+    ['shared/electron/main.ts', 'word-extractor/lib/word-ole-extractor'],
     ['shared/electron/backend/chat/bad.ts', '@lancedb/lancedb'],
     ['shared/electron/backend/knowledge/bad.ts', 'shared/electron/backend/auth/service.ts'],
     ['shared/electron/backend/knowledge/host.ts', 'shared/electron/backend/knowledge/service.ts'],
@@ -186,7 +188,13 @@ describe('长期模块边界', () => {
     ).toEqual([]);
   });
   it('新知识后台可使用已授权 LanceDB/本地推理，旧 SQLite 方案仍拒绝', () => {
-    for (const target of ['@lancedb/lancedb', '@huggingface/transformers', 'pdf-parse', 'mammoth'])
+    for (const target of [
+      '@lancedb/lancedb',
+      '@huggingface/transformers',
+      'pdf-parse',
+      'mammoth',
+      'word-extractor/lib/word-ole-extractor',
+    ])
       expect(
         boundaryViolations(
           new Map([

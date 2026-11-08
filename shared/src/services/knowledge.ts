@@ -1,15 +1,21 @@
 import { deactivateOriginal } from './knowledgeIndex';
 import { localChanged } from './localChanges';
+import { isKnowledgeFileName, knowledgeDocumentAccept } from '../../electron/contracts/knowledge';
 import type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
 export type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
-const supported = new Set(['pdf', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'txt', 'md']);
-export const documentAccept = '.pdf,.doc,.docx,.ppt,.pptx,.xls,.xlsx,.txt,.md';
+export const documentAccept = knowledgeDocumentAccept;
+let importing = false;
 export function validateFiles(files: Pick<File, 'name' | 'size'>[]) {
   if (!files.length) throw new Error('请选择文件。');
   if (files.length > 20) throw new Error('每次最多导入 20 个文件。');
+  const unsupported = [
+    ...new Set(files.filter((file) => !isKnowledgeFileName(file.name)).map((file) => file.name)),
+  ];
+  if (unsupported.length)
+    throw new Error(
+      `不支持的文件格式：${unsupported.map((name) => (name.length > 240 ? name.slice(0, 120) + '…' + name.slice(-119) : name)).join(', ')}`,
+    );
   for (const file of files) {
-    if (!supported.has(file.name.split('.').pop()?.toLowerCase() ?? ''))
-      throw new Error(`不支持的文件格式：${file.name}`);
     if (!file.size) throw new Error(`文件为空：${file.name}`);
     if (file.size > 20 * 1024 * 1024) throw new Error(`文件超过 20 MB：${file.name}`);
   }
@@ -25,7 +31,7 @@ function openDatabase(): Promise<IDBDatabase> {
     };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => reject(new Error('无法打开本地文档存储。'));
-    request.onblocked = () => reject(new Error('本地文档存储被占用，请关闭其他应用窗口后重试。'));
+    request.onblocked = () => reject(new Error('文档存储被占用，请关闭其他窗口后重试。'));
   });
 }
 async function transaction<T>(
@@ -102,47 +108,54 @@ export const localKnowledge: KnowledgeManagementService = {
         );
     }),
   async importDocuments(baseId, files) {
+    if (!files.length) return;
     validateFiles(files);
-    const old = await localKnowledge.listDocuments(baseId);
-    const replaced =
-      baseId === 'personal-resume'
-        ? old
-        : old.filter((doc) => files.some((file) => file.name === doc.name));
-    await backupOriginals(replaced);
-    for (const doc of replaced) await deactivateOriginal(doc.id);
-    await transaction<void>(['documents', 'bases'], 'readwrite', (tx) => {
-      const write = () => {
-        const docs = tx.objectStore('documents');
-        // Re-importing a file with the same name replaces that file, rather than duplicating it.
-        const request = docs.index('baseId').getAll(baseId);
-        request.onsuccess = () => {
-          const existing: LocalDocument[] = request.result;
-          const names = new Map(existing.map((doc) => [doc.name, doc.id]));
-          for (const file of files) {
-            const id = names.get(file.name) ?? crypto.randomUUID();
-            names.set(file.name, id);
-            docs.put({
-              id,
-              baseId,
-              name: file.name,
-              size: file.size,
-              type: file.type,
-              createdAt: Date.now(),
-              blob: file,
-              localRevision: crypto.randomUUID(),
-            });
-          }
+    if (importing) throw new Error('资料处理中，请稍后重试。');
+    importing = true;
+    try {
+      const old = await localKnowledge.listDocuments(baseId);
+      const replaced =
+        baseId === 'personal-resume'
+          ? old
+          : old.filter((doc) => files.some((file) => file.name === doc.name));
+      await backupOriginals(replaced);
+      for (const doc of replaced) await deactivateOriginal(doc.id);
+      await transaction<void>(['documents', 'bases'], 'readwrite', (tx) => {
+        const write = () => {
+          const docs = tx.objectStore('documents');
+          // Re-importing a file with the same name replaces that file, rather than duplicating it.
+          const request = docs.index('baseId').getAll(baseId);
+          request.onsuccess = () => {
+            const existing: LocalDocument[] = request.result;
+            const names = new Map(existing.map((doc) => [doc.name, doc.id]));
+            for (const file of files) {
+              const id = names.get(file.name) ?? crypto.randomUUID();
+              names.set(file.name, id);
+              docs.put({
+                id,
+                baseId,
+                name: file.name,
+                size: file.size,
+                type: file.type,
+                createdAt: Date.now(),
+                blob: file,
+                localRevision: crypto.randomUUID(),
+              });
+            }
+          };
         };
-      };
-      if (baseId === 'personal-resume') write();
-      else {
-        const base = tx.objectStore('bases').get(baseId);
-        base.onsuccess = () => {
-          if (!base.result) tx.abort();
-          else write();
-        };
-      }
-    });
+        if (baseId === 'personal-resume') write();
+        else {
+          const base = tx.objectStore('bases').get(baseId);
+          base.onsuccess = () => {
+            if (!base.result) tx.abort();
+            else write();
+          };
+        }
+      });
+    } finally {
+      importing = false;
+    }
   },
   async deleteDocument(id) {
     await deactivateOriginal(id, true);
@@ -257,7 +270,7 @@ async function backupOriginals(documents: LocalDocument[]) {
     request.onupgradeneeded = () =>
       request.result.createObjectStore('versions', { keyPath: 'backupId' });
     request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(Error('原件备份失败，未替换已有文档。'));
+    request.onerror = () => reject(Error('原件备份失败，未替换文档。'));
   });
   await new Promise<void>((resolve, reject) => {
     const tx = db.transaction('versions', 'readwrite');
@@ -273,7 +286,7 @@ async function backupOriginals(documents: LocalDocument[]) {
     };
     tx.onerror = tx.onabort = () => {
       db.close();
-      reject(Error('原件备份失败，未替换已有文档。'));
+      reject(Error('原件备份失败，未替换文档。'));
     };
   });
 }

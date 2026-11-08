@@ -80,6 +80,12 @@ describe('interface language', () => {
     expect(translateUI('面试设置', 'zh-CN')).toBe('面试设置');
     expect(translateUI('问题：{0}', 'en', ['保存 <b>{1}</b>'])).toBe('Question: 保存 <b>{1}</b>');
     expect(translateUI('查看面试记录：保存', 'en')).toBe('View interview: 保存');
+    expect(translateUI('不支持的文件格式：slides.pptx, sheet.xlsx', 'en')).toBe(
+      'Unsupported files: slides.pptx, sheet.xlsx',
+    );
+    expect(translateUI('不支持的文件格式：保留、原名, original.zip', 'en')).toBe(
+      'Unsupported files: 保留、原名, original.zip',
+    );
     expect(translateUI('服务原始异常: 保存', 'en')).toBe('服务原始异常: 保存');
     expect(translateUI('  语言\n', 'en')).toBe('  Language\n');
   });

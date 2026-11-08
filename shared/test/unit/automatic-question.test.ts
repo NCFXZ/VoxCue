@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { AutomaticQuestionGate } from '../../src/services/speech';
+import { AutomaticQuestionGate, isAutomaticQuestionFiller } from '../../src/services/speech';
 import { useInterview } from '../../src/stores/interview';
 import type { SpeechEvent, SpeechSegment, SpeechModelId } from '../../electron/contracts/speech';
 
@@ -22,6 +22,64 @@ const progress = (
   source: 'system',
   pending,
   processedThroughMs,
+});
+
+it.each([
+  '嗯',
+  '呃',
+  '额',
+  '唔',
+  '啊',
+  '哦',
+  '噢',
+  '喔',
+  '诶',
+  '欸',
+  '哎',
+  '唉',
+  '好',
+  '好的',
+  '对',
+  '对的',
+  '是的',
+  '行',
+  '明白',
+  '了解',
+  '嗯好的',
+  '哦好的',
+  '嗯嗯，呃呃，额……',
+  '哦 噢 喔\n诶欸哎唉',
+  '好好的对对的是的行明白了解',
+  '嗯？',
+  '啊？',
+  '好的？',
+])('纯白名单回应仅从自动回答中排除：%s', (text) => {
+  expect(isAutomaticQuestionFiller(text)).toBe(true);
+});
+it.each([
+  '',
+  '那个',
+  '这个',
+  '就是',
+  '然后',
+  '怎么说呢',
+  '然后呢？',
+  '为什么呢？',
+  '行吗？',
+  '好在哪里',
+  '嗯，为什么用SQLite',
+  '哦，我说的是异步',
+  '好的，继续',
+  '了解需求后怎么实现',
+  '明白了吗',
+  '谢谢',
+  '谢谢您',
+  'OK',
+  'why',
+  '的',
+  '白明',
+])('未知词、口头衔接和实际内容保守保留：%s', (text) => {
+  expect(isAutomaticQuestionFiller(text)).toBe(false);
 });
 
 it('800ms分段计入1800ms，音频进度不足时不因墙钟等待而就绪', () => {
@@ -139,6 +197,13 @@ it('积压中的迟到终稿等后续音频检查完毕才立即提交，不再�
   expect(ask).not.toHaveBeenCalled();
   receive(progress(2100));
   expect(ask).toHaveBeenCalledTimes(1);
+});
+it('迟到有效终稿使用最终缓冲，不能被旧语气词临时稿误过滤', () => {
+  receive({ type: 'segment', segment: final({ final: false, text: '嗯' }) });
+  receive(progress(10000));
+  receive({ type: 'segment', segment: final({ text: '请解释并发控制' }) });
+  expect(ask).toHaveBeenCalledOnce();
+  expect(ask).toHaveBeenCalledWith('请解释并发控制', ['question'], []);
 });
 it('排队音频内重新开口取消旧截止点，并从新一轮静音重新计算', () => {
   receive({ type: 'segment', segment: final() });

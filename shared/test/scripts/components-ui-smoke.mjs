@@ -235,6 +235,26 @@ try {
         return samples;
       });
       assertAnimated(widths, 'download action');
+      const startWidth = widths[0],
+        endWidth = widths.at(-1),
+        direction = Math.sign(endWidth - startWidth);
+      assert.equal(await progress.locator('.download-button-progress').innerText(), '5%');
+      assert.ok(
+        Math.abs(endWidth - 80) < 0.5,
+        `Low-progress action must settle at its 80px content width, not the 96px fallback: ${endWidth}`,
+      );
+      assert.ok(
+        widths.every(
+          (width) =>
+            width >= Math.min(startWidth, endWidth) - 0.5 &&
+            width <= Math.max(startWidth, endWidth) + 0.5,
+        ),
+        `Download transition must stay between its measured endpoints: ${JSON.stringify(widths)}`,
+      );
+      assert.ok(
+        widths.slice(1).every((width, index) => direction * (width - widths[index]) >= -0.5),
+        `Download transition must not reverse while progress continues: ${JSON.stringify(widths)}`,
+      );
       assert.ok(
         Math.abs(widths.at(-1) - widths.at(-2)) < 0.1,
         'frequent progress events must not restart the width transition',
@@ -507,13 +527,31 @@ try {
       }
     }
   }
+  await modelSettings.evaluate(async (element) => {
+    await Promise.all(
+      element
+        .getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => {})),
+    );
+    await new Promise((resolve) =>
+      requestAnimationFrame(() => requestAnimationFrame(resolve)),
+    );
+  });
   const formRows = await modelSettings.locator('.speech-setting-row').evaluateAll((rows) =>
-    rows.map((row) => ({
-      text: row.querySelector('.speech-setting-label').textContent,
-      label: row.querySelector('.speech-setting-label').getBoundingClientRect().toJSON(),
-      control: row.lastElementChild.getBoundingClientRect().toJSON(),
-      row: row.getBoundingClientRect().toJSON(),
-    })),
+    rows.map((row) => {
+      // A closing menu leaves an inert visual snapshot after its real trigger.
+      const control = row.querySelector(
+        ':scope > button.choice-trigger, :scope > button.speech-select, :scope > .speech-current-answer',
+      );
+      if (!control) throw Error('Model-setting row has no real control');
+      return {
+        text: row.querySelector('.speech-setting-label').textContent,
+        label: row.querySelector('.speech-setting-label').getBoundingClientRect().toJSON(),
+        control: control.getBoundingClientRect().toJSON(),
+        row: row.getBoundingClientRect().toJSON(),
+      };
+    }),
   );
   assert.equal(formRows.length, 3);
   assert.deepEqual(
@@ -536,7 +574,10 @@ try {
   );
   for (const row of formRows) {
     assert.ok(Math.abs(row.label.left - formRows[0].label.left) < 1);
-    assert.ok(Math.abs(row.control.left - formRows[0].control.left) < 1);
+    assert.ok(
+      Math.abs(row.control.left - formRows[0].control.left) < 1,
+      'Model-setting control edges must align: ' + JSON.stringify(formRows),
+    );
     assert.ok(Math.abs(row.control.width - formRows[0].control.width) < 1);
     assert.ok(row.label.right <= row.control.left);
   }

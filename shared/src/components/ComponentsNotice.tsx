@@ -37,6 +37,13 @@ export function ComponentsNotice({
     selected.inferenceDevice === 'cpu' &&
     state.items.some((item) => item.id === 'qwen' && item.phase === 'ready');
   if (!missing.length && !cpuWarning) return null;
+  const missingNames = [
+    ...new Set(
+      missing.map((item) =>
+        item.id === 'rag' ? t(componentPresentation.rag.label) : t('语音识别'),
+      ),
+    ),
+  ];
   return (
     <aside
       className="components-notice"
@@ -47,20 +54,13 @@ export function ComponentsNotice({
           {cpuWarning
             ? t('{0}性能受限', [t(componentPresentation.qwen.label)])
             : only
-              ? t('{0}尚未就绪', [t(componentPresentation[missing[0].id].label)])
+              ? t('{0}尚未就绪', [missingNames[0]])
               : t('本地组件尚未就绪')}
         </strong>
         <p>
-          {cpuWarning ? (
-            t(speechCpuWarning) + t('可在设置中调整识别方式或推理设备。')
-          ) : (
-            <>
-              {!only &&
-                missing.map((item) => t(componentPresentation[item.id].label)).join(t('、')) +
-                  t('。')}
-              {t('请在设置中下载或查看进度。')}
-            </>
-          )}
+          {cpuWarning
+            ? t(speechCpuWarning) + t('可在设置中调整识别方式或推理设备。')
+            : t('{0}组件未下载，请在设置中下载或查看进度', [missingNames.join(t('、'))])}
         </p>
       </div>
       <Button

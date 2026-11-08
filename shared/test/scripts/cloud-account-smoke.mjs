@@ -971,8 +971,16 @@ try {
           `Edit/sync ${field} must match`,
         );
       const badge = detail.getByRole('button', { name: 'reference.txt：已同步', exact: true });
+      const openSync = async (trigger) => {
+        if ((await trigger.getAttribute('aria-expanded')) !== 'true') await trigger.click();
+        assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+      };
       await badge.hover();
       const popup = detail.getByRole('group', { name: 'reference.txt同步状态', exact: true });
+      await main.waitForTimeout(200);
+      assert.equal(await badge.getAttribute('aria-expanded'), 'false', 'Hover must not open sync actions');
+      assert.equal(await popup.count(), 0);
+      await openSync(badge);
       await popup.waitFor();
       if (process.argv.includes('--preview'))
         await main.screenshot({ path: path.join(directory, 'synced-file.png') });
@@ -1000,11 +1008,11 @@ try {
           .length,
         0,
       );
-      await detail.getByRole('button', { name: 'reference.txt：已暂停同步', exact: true }).hover();
+      await openSync(detail.getByRole('button', { name: 'reference.txt：已暂停同步', exact: true }));
       await popup.getByRole('button', { name: '自动同步', exact: true }).click();
       await detail.getByRole('button', { name: 'reference.txt：已同步', exact: true }).waitFor();
       const libraryBadge = detail.getByRole('button', { name: '合成知识库：已同步', exact: true });
-      await libraryBadge.hover();
+      await openSync(libraryBadge);
       const libraryPopup = detail.getByRole('group', { name: '合成知识库同步状态', exact: true });
       await libraryPopup.getByRole('button', { name: /从云端删除/ }).click();
       await libraryPopup.getByRole('button', { name: /确认删除/ }).click();
@@ -1017,7 +1025,7 @@ try {
         'Deleting a library must also remove every file from its cloud copy.',
       );
       assert.equal(await detail.getByText('reference.txt', { exact: true }).count(), 1);
-      await detail.getByRole('button', { name: '合成知识库：已暂停同步', exact: true }).hover();
+      await openSync(detail.getByRole('button', { name: '合成知识库：已暂停同步', exact: true }));
       await libraryPopup.getByRole('button', { name: '自动同步', exact: true }).click();
       await detail.getByRole('button', { name: '合成知识库：已同步', exact: true }).waitFor();
       const originalPut = services.backups.put.bind(services.backups);
@@ -1063,7 +1071,7 @@ try {
         const personal = main.locator('#personal-info-panel');
         if ((await personal.getAttribute('data-open')) !== 'true')
           await main.getByRole('button', { name: '个人信息', exact: true }).click();
-        await personal.getByRole('button', { name: '个人信息：已同步', exact: true }).hover();
+        await openSync(personal.getByRole('button', { name: '个人信息：已同步', exact: true }));
         const personalPopup = main.getByRole('group', { name: '个人信息同步状态', exact: true });
         const deleting = personalPopup.getByRole('button', { name: /从云端删除/ });
         assert.equal(
@@ -1079,7 +1087,7 @@ try {
         await secondEntered;
         await main.getByRole('button', { name: '知识库', exact: true }).click();
         await main.locator('.knowledge-card').filter({ hasText: '合成知识库' }).click();
-        await detail.getByRole('button', { name: '合成知识库：正在同步', exact: true }).hover();
+        await openSync(detail.getByRole('button', { name: '合成知识库：正在同步', exact: true }));
         assert.equal(
           await libraryPopup.getByRole('button').count(),
           1,
@@ -1095,7 +1103,7 @@ try {
         await main.getByRole('button', { name: '新对话', exact: true }).click();
         if ((await personal.getAttribute('data-open')) !== 'true')
           await main.getByRole('button', { name: '个人信息', exact: true }).click();
-        await personal.getByRole('button', { name: '个人信息：已暂停同步', exact: true }).hover();
+        await openSync(personal.getByRole('button', { name: '个人信息：已暂停同步', exact: true }));
         await personalPopup.getByRole('button', { name: '自动同步', exact: true }).click();
         await personal.getByRole('button', { name: '个人信息：已同步', exact: true }).waitFor();
         assert.equal((await readProfile()).jobDescription, 'JD after full knowledge quota');
@@ -1104,7 +1112,7 @@ try {
         await main.getByRole('button', { name: '个人信息', exact: true }).click();
         await main.getByRole('button', { name: '知识库', exact: true }).click();
         await main.locator('.knowledge-card').filter({ hasText: '合成知识库' }).click();
-        await detail.getByRole('button', { name: '合成知识库：已暂停同步', exact: true }).hover();
+        await openSync(detail.getByRole('button', { name: '合成知识库：已暂停同步', exact: true }));
         await libraryPopup.getByRole('button', { name: '自动同步', exact: true }).click();
         await detail.getByRole('button', { name: '合成知识库：已同步', exact: true }).waitFor();
         await detail.getByRole('button', { name: '关闭对话框', exact: true }).click();
@@ -1407,18 +1415,41 @@ try {
         );
         await main.getByRole('button', { name: '知识库', exact: true }).click();
         await main.locator('.knowledge-card').filter({ hasText: '合成知识库' }).click();
+        await detail.getByText('reference.txt', { exact: true }).waitFor();
+        await detail.getByText('large.txt', { exact: true }).waitFor();
+        // Two rows fit this viewport. Import actual synthetic originals so this
+        // preview exercises text beneath the fixed header, rather than empty space.
+        await detail.getByLabel('导入知识库文档').setInputFiles(
+          Array.from({ length: 6 }, (_, index) => ({
+            name: `preview-scroll-${index + 1}.txt`,
+            mimeType: 'text/plain',
+            buffer: Buffer.from('Synthetic document for the scrolling knowledge header.'),
+          })),
+        );
+        await detail.getByText('preview-scroll-6.txt', { exact: true }).waitFor();
+        assert.equal(await detail.locator('.document-row').count(), 8);
+        await detail.evaluate(async (dialog) => {
+          await Promise.allSettled(dialog.getAnimations().map((animation) => animation.finished));
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+        });
         const knowledgeTop = await detail
           .locator(':scope > .dialog-heading')
           .evaluate((element) => element.getBoundingClientRect().top);
-        await detail.locator(':scope > .dialog-scroll').evaluate((element) => {
+        await detail.locator(':scope > .dialog-scroll').evaluate(async (element) => {
+          if (element.scrollHeight <= element.clientHeight)
+            throw Error('Knowledge header preview requires real overflowing documents');
           element.scrollTop = element.scrollHeight;
+          await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
         });
-        await main.waitForTimeout(150);
         const knowledgeChrome = await detail.evaluate((dialog) => {
           const heading = dialog.querySelector(':scope > .dialog-heading'),
             scroll = dialog.querySelector(':scope > .dialog-scroll');
           return {
             top: heading.getBoundingClientRect().top,
+            scrollTop: scroll.scrollTop,
+            scrollHeight: scroll.scrollHeight,
+            clientHeight: scroll.clientHeight,
+            documents: scroll.querySelectorAll('.document-row').length,
             opacity: Number(getComputedStyle(heading, '::before').opacity),
             filter: getComputedStyle(heading, '::before').backdropFilter,
             track: parseFloat(getComputedStyle(scroll, '::-webkit-scrollbar-track').marginTop),
@@ -1434,8 +1465,9 @@ try {
             knowledgeChrome.filter.includes('24px') &&
             knowledgeChrome.track >= knowledgeChrome.height - 1 &&
             knowledgeChrome.clear,
-          JSON.stringify(knowledgeChrome),
+          JSON.stringify({ knowledgeTop, ...knowledgeChrome }),
         );
+        console.log('PREVIEW_KNOWLEDGE_CHROME=' + JSON.stringify({ knowledgeTop, ...knowledgeChrome }));
         await main.screenshot({ path: path.join(directory, 'knowledge-header-scroll.png') });
         console.log('VISUAL_DIRECTORY=' + directory);
         await new Promise((resolve) => setTimeout(resolve, 45000));

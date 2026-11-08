@@ -1,3 +1,8 @@
+export const knowledgeDocumentAccept = '.pdf,.doc,.docx,.txt,.md';
+const knowledgeExtensions = new Set(knowledgeDocumentAccept.split(',').map((ext) => ext.slice(1)));
+export const isKnowledgeFileName = (name: string) =>
+  knowledgeExtensions.has(name.split('.').pop()?.toLowerCase() ?? '');
+
 export type KnowledgeMode = 'keyword' | 'vector' | 'hybrid';
 export type KnowledgePhase =
   'queued' | 'parsing' | 'embedding' | 'indexing' | 'ready' | 'failed' | 'cancelled';

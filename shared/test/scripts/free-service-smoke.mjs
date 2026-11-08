@@ -202,12 +202,25 @@ try {
   );
   await app.evaluate(() => {
     globalThis.holdFreeUsage = true;
+    globalThis.finishFreeUsage = undefined;
   });
   await settings.getByRole('button', { name: '刷新账户额度', exact: true }).click();
-  await main
-    .locator('.user-info small')
-    .getByText('正在读取 AI 服务用量…', { exact: true })
-    .waitFor();
+  await settings.locator('.settings-usage[aria-busy="true"]').waitFor();
+  await app.evaluate(async () => {
+    const start = Date.now();
+    while (typeof globalThis.finishFreeUsage !== 'function') {
+      if (Date.now() - start > 5000) throw Error('Synthetic quota refresh did not start');
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+  });
+  await main.locator('.user-info small').getByText('ChatGPT 剩余 22%', { exact: true }).waitFor();
+  assert.equal(
+    await main
+      .locator('.user-info small')
+      .getByText('正在读取 AI 服务用量…', { exact: true })
+      .count(),
+    0,
+  );
   await app.evaluate(() => {
     globalThis.holdFreeUsage = false;
     globalThis.finishFreeUsage();

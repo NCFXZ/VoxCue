@@ -32,6 +32,7 @@ it('切换/断开账户后丢弃迟到额度，不能回填上个账户数据', 
     usage: null,
     usageError: null,
     loadingUsage: false,
+    usageLoaded: false,
   });
 });
 it('刷新失败清除旧数字，官方错误不伪造为0；并发刷新只发一次请求', async () => {
@@ -75,7 +76,55 @@ it('登录后自动读取额度，模型目录失败也不要求第二次连接'
   expect(useChatConnection.getState().usage).toEqual(quota);
   expect(useChatConnection.getState().loadingUsage).toBe(false);
 });
-it('刷新仅保留旧快照供骨架沿用结构，失败仍清空；账户切换清除结构', async () => {
+it('退出用量监听后，迟到的模型目录不能重新发起额度读取；新连接仍正常读取', async () => {
+  const events = new EventTarget();
+  let finishModels!: (value: any) => void;
+  const quota = copilotAccountUsage({ planTier: 'free' });
+  const read = vi.fn(async () => ({ ok: true, usage: quota }));
+  const models = vi
+    .fn()
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finishModels = resolve;
+        }),
+    )
+    .mockResolvedValue({ ok: true, models: [] });
+  vi.stubGlobal('window', {
+    desktop: { chatModels: models, chatAccountUsage: read },
+    setInterval,
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+  });
+  const loading = useChatConnection.getState().load(true);
+  const stop = useChatConnection.getState().watchUsage();
+  try {
+    await vi.waitFor(() => expect(useChatConnection.getState().usageLoaded).toBe(true));
+    expect(read).toHaveBeenCalledOnce();
+    stop();
+    finishModels({ ok: true, models: [] });
+    await loading;
+    expect(read).toHaveBeenCalledOnce();
+    expect(useChatConnection.getState()).toMatchObject({
+      usage: null,
+      usageLoaded: false,
+      loadingUsage: false,
+      loading: false,
+    });
+    events.dispatchEvent(new Event('focus'));
+    expect(read).toHaveBeenCalledOnce();
+    await useChatConnection.getState().load(true);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(useChatConnection.getState()).toMatchObject({
+      usage: quota,
+      usageLoaded: true,
+      loadingUsage: false,
+    });
+  } finally {
+    stop();
+  }
+});
+it('后台刷新保留旧快照，账户切换清除快照和首次读取状态', async () => {
   const quota = copilotAccountUsage({
     snapshots: { chat: { entitlementRequests: 50, usedRequests: 10 } },
   });
@@ -94,12 +143,125 @@ it('刷新仅保留旧快照供骨架沿用结构，失败仍清空；账户切�
   });
   await useChatConnection.getState().load(true);
   const refresh = useChatConnection.getState().refreshUsage();
-  expect(useChatConnection.getState()).toMatchObject({ loadingUsage: true, usage: quota });
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: true,
+    usage: quota,
+    usageLoaded: true,
+  });
   await useChatConnection.getState().load(false);
   expect(useChatConnection.getState().usage).toBeNull();
   finish({ ok: true, usage: quota });
   await refresh;
   expect(useChatConnection.getState().usage).toBeNull();
+  expect(useChatConnection.getState().usageLoaded).toBe(false);
+});
+
+it('首次读取消除提示状态，后台保留旧值直到新值成功替换，失败与重试正常展示', async () => {
+  const previous = copilotAccountUsage({
+    snapshots: { chat: { entitlementRequests: 100, usedRequests: 10 } },
+  });
+  const updated = copilotAccountUsage({
+    snapshots: { chat: { entitlementRequests: 100, usedRequests: 35 } },
+  });
+  let finish!: (value: any) => void;
+  const read = vi.fn(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  vi.stubGlobal('window', {
+    desktop: { chatModels: async () => ({ ok: true, models: [] }), chatAccountUsage: read },
+  });
+  const first = useChatConnection.getState().load(true);
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: true,
+    usageLoaded: false,
+    usage: null,
+  });
+  finish({ ok: true, usage: previous });
+  await first;
+  const refresh = useChatConnection.getState().refreshUsage();
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: true,
+    usageLoaded: true,
+    usage: previous,
+  });
+  finish({ ok: true, usage: updated });
+  await refresh;
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: false,
+    usageLoaded: true,
+    usage: updated,
+  });
+  const failing = useChatConnection.getState().refreshUsage();
+  expect(useChatConnection.getState().usage).toEqual(updated);
+  finish({ ok: false, error: { message: '合成额度读取失败' } });
+  await failing;
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: false,
+    usageLoaded: true,
+    usage: null,
+    usageError: '合成额度读取失败',
+  });
+  const retry = useChatConnection.getState().refreshUsage();
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: true,
+    usageLoaded: true,
+    usageError: '合成额度读取失败',
+  });
+  finish({ ok: true, usage: null });
+  await retry;
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: false,
+    usageLoaded: true,
+    usage: null,
+    usageError: null,
+  });
+  const later = useChatConnection.getState().refreshUsage();
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: true,
+    usageLoaded: true,
+    usage: null,
+  });
+  finish({ ok: true, usage: updated });
+  await later;
+});
+
+it('首次读取失败也完成初始提示，后续重试保留错误而不重置首次状态', async () => {
+  let finish!: (value: any) => void;
+  const read = vi
+    .fn()
+    .mockResolvedValueOnce({ ok: false, error: { message: '首次合成失败' } })
+    .mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+  vi.stubGlobal('window', {
+    desktop: { chatModels: async () => ({ ok: true, models: [] }), chatAccountUsage: read },
+  });
+  await useChatConnection.getState().load(true);
+  expect(useChatConnection.getState()).toMatchObject({
+    usageLoaded: true,
+    usageError: '首次合成失败',
+    usage: null,
+  });
+  const retry = useChatConnection.getState().refreshUsage();
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: true,
+    usageLoaded: true,
+    usageError: '首次合成失败',
+  });
+  finish({ ok: true, usage: null });
+  await retry;
+  expect(useChatConnection.getState()).toMatchObject({
+    loadingUsage: false,
+    usageLoaded: true,
+    usageError: null,
+  });
 });
 
 it('面试额度用受控面试接口读取，聚焦/定时刷新，退出清除定时器及迟到快照', async () => {
@@ -135,7 +297,11 @@ it('面试额度用受控面试接口读取，聚焦/定时刷新，退出清除
     events.dispatchEvent(new Event('focus'));
     await vi.advanceTimersByTimeAsync(120_000);
     expect(interviewRead).toHaveBeenCalledTimes(4);
-    expect(useChatConnection.getState()).toMatchObject({ usage: null, loadingUsage: false });
+    expect(useChatConnection.getState()).toMatchObject({
+      usage: null,
+      loadingUsage: false,
+      usageLoaded: false,
+    });
   } finally {
     stop();
     vi.useRealTimers();

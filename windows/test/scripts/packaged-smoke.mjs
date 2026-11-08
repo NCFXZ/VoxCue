@@ -65,6 +65,8 @@ for (const dependency of [
   '@github/copilot-sdk-win32-x64',
   '@openai/codex',
   '@openai/codex-win32-x64',
+  'word-extractor',
+  'chardet',
 ])
   assert.ok(
     entries.some((file) => file.includes('node_modules/' + dependency + '/')),
@@ -93,6 +95,8 @@ for (const [name, version] of [
   ['@openai/codex', '0.164.0'],
   ['@openai/codex-win32-x64', '0.164.0-win32-x64'],
   ['zod', '4.6.6'],
+  ['word-extractor', '1.0.4'],
+  ['chardet', '2.1.1'],
 ])
   assert.equal(
     JSON.parse(asar.extractFile(archive, path.normalize('node_modules/' + name + '/package.json')))
@@ -234,6 +238,7 @@ try {
         .createRequire(app.getAppPath() + '/package.json');
       const fs = require('node:fs');
       const path = require('node:path');
+      const assert = require('node:assert/strict');
       const { Worker } = require('node:worker_threads');
       const unpacked = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked');
       const speech = path.join(unpacked, 'dist-electron/shared/electron/backend/speech');
@@ -447,6 +452,41 @@ try {
           },
           signal(),
         );
+        const encoded = [
+          {
+            documentId: 'legacy-doc', name: 'legacy.doc', bytes: fixture.legacyDoc,
+            query: 'pkglegacydocmarker', expected: ['生产 Worker 保留中文', '尾部参数 43'],
+          },
+          {
+            documentId: 'gb18030-text', name: 'encoded.txt', bytes: fixture.gb18030,
+            query: '机械臂', expected: ['传感器反馈控制机械臂', '这个系统支持中文和英文资料'],
+          },
+          {
+            documentId: 'utf16-markdown', name: 'encoded.md', bytes: fixture.utf16Markdown,
+            query: 'pkgutf16marker', expected: ['pkgutf16marker', '尾部参数为 52'],
+          },
+        ];
+        for (const item of encoded)
+          await knowledge.indexDocument(
+            {
+              documentId: item.documentId, baseId: 'packaged', name: item.name,
+              bytes: new Uint8Array(item.bytes),
+            },
+            signal(),
+          );
+        const checkEncodedRetrieval = async () => {
+          for (const item of encoded) {
+            const hits = await knowledge.search(item.query, 5, 'keyword', signal(), 'packaged');
+            const hit = hits.find((hit) => hit.documentId === item.documentId);
+            assert.ok(hit, 'Packaged encoded document was not retrieved: ' + item.name);
+            const content = await knowledge.getItem(hit.itemId);
+            assert.ok(content, 'Packaged encoded document content is missing: ' + item.name);
+            assert.equal(content.documentId, item.documentId);
+            for (const expected of item.expected)
+              assert.ok(content.content.includes(expected), 'Packaged text was changed: ' + item.name);
+          }
+        };
+        await checkEncodedRetrieval();
         const modes = [];
         for (const mode of ['keyword', 'vector', 'hybrid']) {
           const hits = await knowledge.search('PID sensor 提离 control', 5, mode, signal());
@@ -459,7 +499,12 @@ try {
         if (pdfHits[0].page !== 2) throw Error('Packaged PDF page metadata failed');
         await knowledge.close();
         knowledge = new KnowledgeHost(directory, ragModel);
-        if ((await knowledge.listDocuments()).length !== 3) throw Error('Packaged restart failed');
+        assert.deepEqual(
+          (await knowledge.listDocuments()).map((document) => document.documentId).sort(),
+          ['sensor', 'pdf', 'docx', ...encoded.map((item) => item.documentId)].sort(),
+          'Packaged restart must preserve every indexed format',
+        );
+        await checkEncodedRetrieval();
         await knowledge.removeDocument('sensor', signal());
         if ((await knowledge.search('tailxyz', 5, 'keyword', signal())).length)
           throw Error('Packaged delete failed');
@@ -468,6 +513,8 @@ try {
           modes,
           pdf: true,
           docx: true,
+          legacyDoc: true,
+          textEncodings: ['GB18030 TXT', 'UTF-16LE Markdown'],
           offlineModel: true,
           restart: true,
           delete: true,
@@ -529,6 +576,18 @@ try {
     {
       pdf: Array.from(fixtures.pdf()),
       docx: Array.from(await fixtures.docx()),
+      legacyDoc: Array.from(fixtures.doc(
+        '封装旧版 DOC pkglegacydocmarker。\r生产 Worker 保留中文、English 及尾部参数 43。\r',
+      )),
+      // The fixed GB18030 sentence is also covered by text-encoding.test.ts.
+      gb18030: Array.from(Buffer.from(
+        'd6aacab6bfe2cec4b5b5b1a3b4e6cfeec4bfbeadc0faa3acb4abb8d0c6f7b7b4c0a1bfd8d6c6bbfad0b5b1dba3accafdbeddb4a6c0edbde1b9fbd3c3d3dac3e6cad4d7bcb1b8a1a3d5e2b8f6cfb5cdb3d6a7b3d6d6d0cec4bacdd3a2cec4d7cac1cfa1a3',
+        'hex',
+      )),
+      utf16Markdown: Array.from(Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.from('## 编码回归\n\npkgutf16marker 保留 Markdown 中文正文，尾部参数为 52。', 'utf16le'),
+      ])),
       english: Array.from(await readFile(path.join(speechFixtures, 'english.wav'))),
     },
   );
@@ -572,6 +631,8 @@ try {
   assert.ok(report.models.every((name) => /^(speech|rag)-1\.0\.0-[a-f0-9]{64}$/.test(name)));
   assert.deepEqual(await app.evaluate(() => globalThis.componentRequests), []);
   assert.equal(report.rag.status, 'passed');
+  assert.equal(report.rag.legacyDoc, true);
+  assert.deepEqual(report.rag.textEncodings, ['GB18030 TXT', 'UTF-16LE Markdown']);
   assert.deepEqual(report.statuses, ['idle']);
   await page.screenshot({ animations: 'disabled' });
   report.dependencyAudit = { sprintfJsAbsent: true, sharpPackages };

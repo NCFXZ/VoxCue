@@ -1,36 +1,64 @@
 # VoxCue 当前进度
 
-更新日期：2026-11-07。仅保存当前基线、任务与接续入口；长期规则见 AGENTS.md，详细变更及发行事实见 shared/docs，验证结果仅终端/对话。
+更新日期：2026-11-08。仅保存当前基线、任务与接续入口；长期规则见 AGENTS.md，详细变更及发行事实见 shared/docs，验证结果仅终端/对话。
 
-## 当前状态：Mac 1.0.0 已发行
+## 本轮发行：1.0.2
 
-- Mac 1.0.0 三项资产已追加到 [GitHub v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0)，保持 Latest，完成匿名完整包回读及签名/摘要认证。安装包输入为 `f6e06e3f62395c0d6b78bafdfceabb347c91ac27`，已推送私有源码主分支；准确资产与范围见 [Mac 1.0.0 发行索引](shared/docs/MACOS_1.0.0_RELEASE.md)。
-- 用户明确目标为 1.0.0，唯一版本源为 `shared/package.json = 1.0.0`，只同步根和 Mac 生成配置；Windows Store 1.0.1 发布者维护及其树保持只读，既有公开 Windows 1.0.0 和 Store 维护资产保留。Windows 生成版本漂移及新增共享布局须留其本机复核；后续需依据已发行 Store 版本明确下一版本再同步，不能直接用漂移配置重包。
-- 已接续原生导出保存、覆盖和取消，以及离线导出与归档取消生命周期；清理确认可重建的根 Finder 元数据，保留现用代码、依赖、缓存及发行恢复基线。固定 0.5.3 服务端仅作为系统临时目录内的原样只读客户端参考，不操作独立官网、服务端或真实账户/资料。
-- 单周期英文额度复用账号卡片网格，利用箭头下方空位避免 Mac 字宽裁切，保持一行、230px 侧栏及原字号/颜色。五档、Qwen 和临时凭据专项复用持续桌面守卫；原生更新专项只清理本轮唯一偏好域，用本轮路径的真实占用检查确认文件/映射释放后回收专用临时根。细节见交接 M063–M067。
-- 本轮资料导出、完整共享功能、Mac 默认原生、原时长长稳、全部五档、独立表单/原生凭据/Qwen/无障碍、临时目视复核及最终包验收已完成。临时图像、固定服务端参考和本轮运行工具已清理。真实账号、物理采样和自动化宿主无法触发的隐藏恢复不以合成测试代验，Windows 本机复核及独立官网链接更新不在本轮执行范围。
+- 当前授权：先清理确认无用的工作区文件/代码，完整执行安全、稳定、对抗、英文、视觉/对齐、五档缩放、原生与安装/更新验证，问题修复后定向复测；通过后提交推送源码，发布 GitHub 1.0.2 Windows 安装/更新资产并更新 Microsoft Store。
+- 版本唯一来源更新为共享 `1.0.2`，只同步根与 Windows 配置；Mac 全树只读。保留真实用户资料、凭据、签名/更新身份、现用依赖/模型/固定公共缓存和所有正式/恢复基线；本轮仅用隔离合成资料与已验证公共资源，不采样物理硬件。
+- 发布前补齐 [1.0.0→1.0.2 Mac 接续清单](shared/docs/MACOS_1.0.2_HANDOFF.md)，逐条包含本轮及测试发现修复；Windows 验证不代替 Mac 本机验收。当前源码已本地冻结、NSIS/APPX 候选已生成，剩余五档缩放、最终包运行和隔离安装验证后才上传及提交商店；1.0.2 尚未发布。
+- 清理审查与严格未使用声明检查未确认可删业务/测试；现用构建、公共缓存及可运行预览保持。完整功能与原时长长稳阶段结束，当前转最终隔离包、Windows 原生、五档缩放与安装验证。Windows 原生鼠标探针移除相对加速绕行，改绝对虚拟桌面输入，保留原生命中/悬停/拖动原断言；修复专项后继续完整原生矩阵。新增 DOC 目录图、DOCX 实际解压、取消实际退休及云控制旧账号归属修复已纳入源码/回归，细节见 [1.0.2 发行索引](shared/docs/WINDOWS_1.0.2_RELEASE.md)。旧夹具按点击菜单/真实退出更新，预览用真实长列表覆盖标题遮罩。打包/验证暂存在最后消费者结束后清理。
+
+## 本轮：文档格式与文本编码
+
+- 知识库新导入仅保留 PDF、Word（DOC/DOCX）、TXT 和 Markdown，白名单为公开纯契约的单一来源；白名单外文件在导入前整批拒绝并提示“不支持的文件格式：文件名”，既有原件保留且不再自动索引。上传文案为“支持 PDF、Word、TXT 和 Markdown 文件”，下方限制说明末尾不带句号。
+- 共用解析新增 Word 97–2003 二进制 DOC；TXT/MD 支持 UTF-8、UTF-16LE/BE、GB18030/GBK、Big5 及可靠识别的 Windows-1252，不确定编码明确提示转 UTF-8。PDF 不接 OCR。原件、索引版本与检索策略保持；导入互斥、字节限额和解析隔离见 [本机文档存储](shared/docs/ARCHITECTURE.md#本机文档存储)。
+- 文件错误并入大小后的状态行，显示“索引失败: 错误提示”，正文换行后与冒号后的正文开头对齐；PDF/DOC/DOCX 通用解析失败提示统一为“格式名 解析失败。”，PDF 无文字提示为“PDF 未提取到文字。”，TXT/MD 编码提示保持。其余较长的知识库错误文案已精简，中英同步，错误分类与处理逻辑保持。
+- 导入错误归属当前知识库，关闭/切换即清除，迟到的旧请求不能重新写回；本批所有不支持文件合并提示，下一批替换上一批。详情顶部提示与上传区共用卡片圆角，可用右侧 X 关闭，复用面试记录搜索清除按钮，按整块多行文字垂直居中；文件行的真实索引状态保持。
+- 创建/重命名使用独立编辑错误，打开、取消或保存重命名保留详情原有导入提示；同步状态菜单仅点击展开，再点、点击外部或按 Escape 收起。批量同步优先展示正在执行的同步/取消/删除，结束后汇总错误/冲突；本地快照绑定变更代次，过期快照不再回写“已同步”或推断删除，运行中编辑合并重跑，失败冷却期间保留错误状态。
+- 同步菜单复用下拉菜单的圆角、表面和纵向展开/收起动画；首屏测量期间抑制内部确认按钮的初始宽度过渡，固定外框宽度并校准位置，保留确认时的按钮动画与减少动态效果支持。
+- 同步菜单状态与说明统一左对齐，底部操作铺满内容宽度；两个按钮的半宽都足够容纳各自完整内容时等宽并排，否则各占一行，由实际内容尺寸自动换行。删除胶囊保留普通/确认状态较宽的下限，切换不伸缩；重试和冲突处理补齐图标。
+- 面试自动发送拦截整段仅含已确认中文语气词/简短确认的终稿，允许重复、空白及标点；保留原始转写、缓冲、草稿和手动发送，混合正文与有效追问照常。自动入口读取最终缓冲，避免迟到终稿误用旧临时稿。
+- Paraformer/Qwen 的 WAV 真实识别全链路入口为 `windows/test/scripts/interview-real-audio-smoke.mjs`（`--model`、`--cache`、`--cases`）：复用固定目录认证后的公共模型，独立复制到本轮系统临时目录；SAPI 合成 WAV 通过合成采集端口进入生产 Controller/Worker、Renderer 与发送入口，等待真实识别终稿及 Renderer 音频进度，账户及回答服务仅用隔离合成数据，不采样物理音频。空转写不计为过滤通过；结果仅终端/对话，临时音频与模型副本结束清理。
+- 新对话与历史聊天切换仅对中间消息/欢迎内容使用共享时长的淡入上移动画；顶部工具栏与底部输入区保持，首次载入/流式更新不重播，快速切换取消旧动画并支持减少动态效果。
+- 聊天在本次窗口运行内按会话 ID 记忆阅读位置、跟随状态及新回复标记；切换聊天/页面后恢复，原在底部仍跟随。隐藏零高度不覆盖缓存，同一可见聊天的增量回复不回写旧位置；删除聊天清理相应缓存，面试悬浮窗滚动行为保持。
+- 下载控件首次布局同步写入实际内容宽度，避免父级过渡先读取默认宽度再叠加子级宽度过渡造成回跳；保留后续进度、取消变换及一秒取消保护。
+- 本地组件首次检查改为按两组/三行列表占位的骨架扫光，复用额度骨架的明暗主题和减少动态效果规则；真实状态返回后展示列表，读取失败停止占位并保留错误/重试。
+- 准备页顶部组件提示沿聊天内容宽度居中并限制最大740px；副标题为“{组件名}组件未下载，请在设置中下载或查看进度”，语音缺失统一使用“语音识别”类别，不假设轻量模型；其他窄容器的提示沿原有布局。
+- 侧栏 AI 用量仅在当前连接首次读取显示加载提示；后台刷新保留上次结果和低额度样式，成功替换、失败显示错误，重试中保留错误。首次空结果/失败也结束初读，断开或切换仍清空并丢弃迟到回填；设置用量骨架保持。
+- Windows 同步依赖和打包入口；旧可运行预览 `windows/release-smoke/VoxCue-win32-x64/VoxCue.exe` 保留，本轮交付使用准确 1.0.2 安装资产，不将旧预览当作新包。Mac 全树只读，待本机同步 manifest/锁、补入 `word-extractor`/`chardet` 打包依赖并验证 Worker 与最终包。本轮源码已本地提交，尚未上传、发行或替换真实安装；接续入口见当前发行索引与 Mac 清单。
 
 ## 已发行与恢复基线
 
-- Windows [v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0) 已公开，安装包输入为 `a47f7435ef7c233eee9da87a18261162dfaee65f`；资产、源码及 Microsoft Store 1.0.0 提交 3 上架记录见 [Windows 1.0.0 发行索引](shared/docs/WINDOWS_1.0.0_RELEASE.md)。本轮追加 Mac 资产时保留 Windows 资产 ID、大小及摘要。
-- Windows Store 1.0.1 是发布者显示名称维护，保持商店 Name、Publisher 与包家族身份，包身份版本为 `2.0.1.0`。提交 4（`1152921505702342674`）记录为已提交认证，后续可获取状态由微软处理；来源和资产见 [Windows 1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。本轮不操作 Partner Center。
-- Mac 当前公开完整资产为 [1.0.0](shared/docs/MACOS_1.0.0_RELEASE.md)。两端 [0.6.9](shared/docs/MACOS_0.6.9_RELEASE.md) 及更早正式/恢复包保留；历史来源查对应发行索引与 Git，不重复累积验证记录。
-- 固定签名、凭据助手、SDK、现用模型/依赖、原件及恢复基线继续保护；清理边界见 [工作区清理](shared/docs/WORKSPACE_CLEANUP.md)。RAG 模型、阈值、检索策略和索引兼容不变。
+- Windows 与 Mac 的完整公开基线均为 GitHub [v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0)。Windows 输入为 a47f743，Mac 输入为 f6e06e3；范围与资产见 [Windows 1.0.0](shared/docs/WINDOWS_1.0.0_RELEASE.md) 和 [Mac 1.0.0](shared/docs/MACOS_1.0.0_RELEASE.md)。
+- 2026-11-08 Partner Center 当前概览确认提交 4（1152921505702342674）最新产品已在商店上架。该 Windows 1.0.1 仅维护 PublisherDisplayName 为 F. Zhu，Name/Publisher/包家族身份保持；包身份 2.0.1.0，来源见 [1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。
+- 远端 main=d131fa5 的 Mac 1.0.0 后续提交已只读核对，共用单周期英文额度网格和文档接入本轮；macos 全树保持本机原字节，发行合入时保留远端 Mac 提交，不覆盖另一端工作。
+- 两端全部旧正式包、恢复包、签名/凭据/更新身份、现用依赖和固定公共资源保留；清理边界见 [工作区清理](shared/docs/WORKSPACE_CLEANUP.md)。
 
-## 当前共享界面
+## 当前界面调整
 
-- 额度与邮箱左对齐、头像与整块文字居中。ChatGPT 实际只返回一个周期时始终一行“ChatGPT 剩余 N%”，低于 20% 仅百分比标黄；双周期任一个低于 20% 时显示标题和两个周期，各自标黄。Mac 单周期卡片也使用既有网格，避免英文边缘裁切。
-- 网页读取/查找活动复用域名来源胶囊，字号、内距与图标随活动行缩放。真实可用超链接及其子文本显示手形，提供浅深主题悬停与键盘焦点反馈；原始 URL、受控打开及复制原文保持。
-- Mac 保留本机原生控件、固定签名与原更新驱动；Windows Store 安装版由 Microsoft Store 更新，独立安装版沿用原渠道。
+- 共用侧栏的额度提示与邮箱文字左对齐，头像与右侧整块文字垂直居中。ChatGPT 仅返回一个周期时始终一行“ChatGPT 剩余 N%”，低于 20% 仅百分比标黄；同时返回五小时和周额度时，沿用任一低于 20% 后两行显示标题及双周期、各自标黄的逻辑。共享组件、摘要与样式供两端共用；Mac 本机界面复核待接续。
+- 网页读取/查找活动复用现有域名来源胶囊，字号、内距与图标随活动行缩放；真正可点击的超链接及其子文本显示手形，并提供浅深主题的悬停与键盘焦点反馈。原始 URL、受控打开及复制原文保持；普通正文、禁用及无 href 元素保持原有光标。
 
-## 验证与发行入口
+## Windows Microsoft Store
 
-- 从 `macos/` 执行 `pnpm typecheck`、`pnpm check:architecture`、`pnpm check:workspace`、`pnpm test`、`pnpm audit`、`pnpm build`。另一平台生成配置只读报告；依赖仅使用本机现有锁。
-- 完整功能使用 `shared/test/scripts/functional-suite.mjs --jobs=1`，五档使用 `macos/test/scripts/ui-refinement-matrix.mjs`，以当前 `--list` 为准；保留 20 轮面试、600 秒固定公开音频及全部五档。独立云凭据、表单、无障碍与 Qwen 入口见 [测试说明](shared/test/README.md)。GUI、原生、推理和长稳串行。
-- 客户端联调显式设置 `VOXCUE_TEST_SERVER_ROOT` 到原样 0.5.3、`3bceb615dbba900f669322c301fc4b5b473dfb15` 的 owner 临时 checkout；不执行后端套件。公开缓存按固定来源/摘要验证后复制到临时根，结束清理临时账户、数据库、归档及截图。
-- Mac 发行先验证固定签名，再执行 `pnpm package:installer`；以 `VOXCUE_TEST_RELEASE_DIR` 指向准确最终资产，串行执行 `package-runtimes-smoke.mjs` 与 `package-smoke.mjs --install-archive`。公开后用 `--install-archive --online` 匿名下载完整包、验签和摘要；源码和正式三项资产分别上传私有源码仓库及公开发行仓库。
+- Partner Center 已保留 VoxCue 产品，Store ID `9PBBVWZXMBPW`。Windows 本机 `pnpm package:store` 使用商店标识构建 x64 APPX，应用版本仍来自 `shared/package.json`，商店包身份版本使用主版本加一及末位零。商店版通过 Microsoft Store 更新，独立 NSIS 发行版沿用原更新渠道。
+- 1.0.0 的提交 3 已上架，APPX 商店身份版本为 `2.0.0.0`。当前维护提交沿用免费定价、生产率分类、隐私链接、生成式 AI 披露、runFullTrust 用途、3+ 分级及四张中英文商品截图；更名维护版的实际状态见 [1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。
+- 本机 Windows Sandbox 已启用。离线验证从解锁控制台启动，签名和信任仅在临时来宾内。商店任务栏使用各目标尺寸及浅深主题的透明图标资源。
 
-## 独立官网与公开介绍
+## 验证与接续入口
 
-- 官网 `https://voxcue.com.cn/` 当前记录部署为 EdgeOne `dp5dhu06kprd`，中英文 Windows 入口共用 Microsoft Store 商品页 `9PBBVWZXMBPW`，Mac 入口保持 0.6.9 DMG。本轮不部署独立官网；后续升级链接须另行授权。
-- 官网工作副本为 `C:/Users/fengk/.codex/visualizations/2026/11/06/01a1b1ae-1ea0-7541-8fbe-26c00390ca8c/voxcue-website`，使用其 README 的验证和打包入口。两仓库中英 README 只说明用途、功能与注意事项，不放版本日志、安装或开发步骤；隐藏功能和触发方式不进入公开介绍。
+- 当前平台目录执行 `pnpm typecheck`、`pnpm check:architecture`、`pnpm check:workspace`、`pnpm test`、`pnpm audit` 和 `pnpm build`。另一平台生成配置只读报告，由其本机同步。
+- Mac 使用 `shared/test/scripts/functional-suite.mjs`、`macos/test/scripts/ui-refinement-matrix.mjs` 与 [专项入口](shared/test/README.md)，保留 20 轮面试、600 秒音频与五档。GUI/原生/推理/长稳串行，仅使用 owner 临时合成资料和固定公开资源；联调只读使用固定 0.5.3 服务端参考，结束清理本轮临时副本。
+- Mac 发行使用 `pnpm package:installer`、`package-runtimes-smoke.mjs` 与 `package-smoke.mjs --install-archive`，正式公开后用 `--online` 回读。真实账户、硬件与自动化宿主不能触发的原生隐藏恢复仍按本机条件验收，Windows 成绩不能代验 Mac。
+
+## 已发行恢复基线
+
+- 两端 0.6.8 已发行并归档；来源、资产与摘要分别见 [Windows 0.6.8](shared/docs/WINDOWS_0.6.8_RELEASE.md)、[Mac 0.6.8](shared/docs/MACOS_0.6.8_RELEASE.md)。既有用量预警及生命周期继续回归，详见 [0.6.8 Mac 交接](shared/docs/MACOS_0.6.8_HANDOFF.md)。
+- 历史两端 0.6.7 资产及恢复基线保留，来源见 [Windows 0.6.7](shared/docs/WINDOWS_0.6.7_RELEASE.md)、[Mac 0.6.7](shared/docs/MACOS_0.6.7_RELEASE.md)。旧测试细节查文档及 Git，不在此重复累积。
+
+## 独立官网与介绍文档
+
+- 正式官网 `https://voxcue.com.cn/` 已按用户确认的版本发布到既有 EdgeOne 项目 `makers-vmb1klm3vlre`，当前生产部署为 `dpepxrh9jafl`（2026-11-07）。中英文首页按 Mac、Windows、Microsoft Store 三个胶囊按钮排序，前两项分别直链 GitHub 1.0.0 DMG/EXE；商店保留商品 ID `9PBBVWZXMBPW`，末尾无下载图标，英文为“Get from Microsoft Store”。下载卡片内商店与 Windows 下载按钮共用背景、文字和边框颜色；安装指南同步三种入口。所有宽度均直接打开下载或商店地址，宽度仅控制排版，复制拦截、提示和弹窗已删除。
+- 官网工作副本位于 `C:/Users/fengk/.codex/visualizations/2026/11/07/01a1b7c5-614f-7d82-826a-b64c3c40ea3c/voxcue-website`，接续使用 README 的验证和打包入口；当前部署包为该副本的 `migration/voxcue-independent-20261107T211159Z.zip`。原生产部署 `dp5dhu06kprd` 及 2026-11-06 工作副本保留作回退；本次沿用现有托管、域名和 DNS。中英文隐私页的客户端使用统计说明及演示素材保持。
+- 两仓库中英文 README 保持用途、功能与注意事项，不放版本日志、安装步骤或开发说明；隐藏功能及触发方式不进入公开介绍。发行细节使用专门发行文档。
