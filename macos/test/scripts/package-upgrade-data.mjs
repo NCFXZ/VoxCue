@@ -5,6 +5,7 @@ import {
   closeUiApp,
 } from '../../../shared/test/scripts/install-ui-account.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
+import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { localSigningCertificate, verifyLocalApp } from '../../scripts/development-signing.mjs';
 import { holdDesktopAwake } from './desktop-session.mjs';
 import { mkdir, lstat, realpath, rm } from 'node:fs/promises';
@@ -129,12 +130,30 @@ async function replaceOwnedBundle(bundle, zip) {
 // Covers data compatibility during an archive replacement. The independent
 // native updater suite exercises Sparkle commit/relaunch; package-smoke keeps
 // its real production archive authentication/staging/cancellation acceptance.
-export async function verifyPreviousVersionData({ zip, model }) {
+export async function verifyPreviousVersionData({ zip, cache }) {
   const directory = path.join(testRoot, 'upgrade-from-1.0.0');
   const install = path.join(directory, 'installed');
   const profile = path.join(directory, 'profile');
   await mkdir(install, { recursive: true });
   await mkdir(path.join(directory, 'tmp'));
+  const { packagesFor } = workspace.platformRequire(
+    path.join(
+      workspace.platformRoot,
+      'dist-electron/shared/electron/backend/components/catalog.js',
+    ),
+  );
+  const { componentLocation, componentPaths } = workspace.platformRequire(
+    path.join(
+      workspace.platformRoot,
+      'dist-electron/shared/electron/backend/components/service.js',
+    ),
+  );
+  const catalog = packagesFor(process.platform, process.arch);
+  const packages = catalog.filter((pkg) => pkg.id === 'rag');
+  assert.equal(packages.length, 1);
+  const components = path.join(profile, 'component-cache');
+  await stageModelFixtures(path.resolve(cache), components, packages, componentLocation);
+  const model = componentPaths(components, catalog).ragModel;
   run('/usr/bin/ditto', [
     '-x',
     '-k',
@@ -197,7 +216,11 @@ export async function verifyPreviousVersionData({ zip, model }) {
       mimeType: 'text/markdown',
       buffer: Buffer.from(original),
     });
-    await base.locator('.document-row').filter({ hasText: 'preserved-1.0.0.md' }).waitFor();
+    await base
+      .locator('.document-row')
+      .filter({ hasText: 'preserved-1.0.0.md' })
+      .getByText(/索引完成$/)
+      .waitFor();
     await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
     await old.getByRole('button', { name: '用户菜单', exact: true }).click();
     await old.getByRole('menuitem', { name: '设置', exact: true }).click();

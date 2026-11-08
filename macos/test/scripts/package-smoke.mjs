@@ -817,15 +817,9 @@ try {
 }
 
 if (installArchive) {
-  const { componentPaths } = require(
-    path.join(
-      workspace.platformRoot,
-      'dist-electron/shared/electron/backend/components/service.js',
-    ),
-  );
   await verifyPreviousVersionData({
     zip,
-    model: componentPaths(path.join(profile, 'artifact-components'), cachedPackages).ragModel,
+    cache: path.join(profile, 'artifact-components'),
   });
 }
 
