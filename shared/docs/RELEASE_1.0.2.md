@@ -2,9 +2,9 @@
 
 更新日期 / Updated: 2026-11-08。
 
-发布状态：Windows 1.0.2已在 [GitHub](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) 发布。Microsoft Store第5次提交已受理，最后观察为预处理/认证中，通过后自动发布，尚未确认1.0.2上架。准确资产及渠道状态见 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)。Mac 1.0.2仍待本机接续与发行。
+发布状态：Windows 和 Mac 1.0.2已在 [GitHub](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) 发布，保持 Latest。Microsoft Store第5次提交已受理，最后观察为预处理/认证中，通过后自动发布，尚未确认1.0.2上架。准确资产及渠道状态见 [Windows 发行索引](WINDOWS_1.0.2_RELEASE.md)和 [Mac 发行索引](MACOS_1.0.2_RELEASE.md)。
 
-Status: Windows 1.0.2 is available on [GitHub](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2). Store submission 5 is accepted, last observed in preprocessing/certification, with automatic publication after approval; Store 1.0.2 availability has not been confirmed. See the [Windows 1.0.2 release index](WINDOWS_1.0.2_RELEASE.md) for exact assets and channel status. Mac 1.0.2 still requires local follow-up and release.
+Status: Windows and Mac 1.0.2 are available on [GitHub](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) as Latest. Store submission 5 is accepted, last observed in preprocessing/certification, with automatic publication after approval; Store 1.0.2 availability has not been confirmed. See the [Windows release index](WINDOWS_1.0.2_RELEASE.md) and [Mac release index](MACOS_1.0.2_RELEASE.md) for exact assets and channel status.
 
 ## 简体中文
 
@@ -18,7 +18,7 @@ Status: Windows 1.0.2 is available on [GitHub](https://github.com/NCFXZ/VoxCue-r
 - 新对话与历史聊天切换增加仅作用于中间内容的过渡；各聊天在本次窗口运行内记住阅读位置，原在底部时继续跟随新回复。
 - 本地组件初次检查使用骨架占位，改进组件提示的居中和下载按钮首次出现时的宽度稳定性。
 
-本版承接 1.0.0 的界面改进；1.0.1 仅为 Windows Microsoft Store 发布者显示名和版本元数据维护。Mac当前完整公开版仍为 [1.0.0](MACOS_1.0.0_RELEASE.md)，1.0.2本机接续、签名和发行须独立完成，详见 [Mac 1.0.2接续清单](MACOS_1.0.2_HANDOFF.md)。
+本版承接 1.0.0 的界面改进；1.0.1 仅为 Windows Microsoft Store 发布者显示名和版本元数据维护。Mac 1.0.2 的准确源码输入、正式资产和签名边界见 [Mac 发行索引](MACOS_1.0.2_RELEASE.md)，逐项行为见 [Mac 接续清单](MACOS_1.0.2_HANDOFF.md)。
 
 ## English
 
@@ -32,4 +32,4 @@ Status: Windows 1.0.2 is available on [GitHub](https://github.com/NCFXZ/VoxCue-r
 - Switching between new and saved chats adds a transition within the conversation area. Each chat remembers its reading position for the current window session and continues following replies when it was already at the bottom.
 - Local component checks use an initial skeleton view, with better-aligned component notices and steadier initial download-button sizing.
 
-This release builds on the interface changes in 1.0.0. Version 1.0.1 covered only Windows Microsoft Store publisher display-name and version metadata maintenance. The current complete Mac release remains [1.0.0](MACOS_1.0.0_RELEASE.md). Mac 1.0.2 validation, signing and release remain separate local steps; see the [Mac 1.0.2 handoff](MACOS_1.0.2_HANDOFF.md).
+This release builds on the interface changes in 1.0.0. Version 1.0.1 covered only Windows Microsoft Store publisher display-name and version metadata maintenance. See the [Mac release index](MACOS_1.0.2_RELEASE.md) for the exact source input, assets and signing scope, and the [Mac handoff](MACOS_1.0.2_HANDOFF.md) for individual changes.

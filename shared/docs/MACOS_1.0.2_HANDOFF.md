@@ -7,8 +7,8 @@
 - 1.0.0 的实际 Windows 包源码输入为 `a47f7435ef7c233eee9da87a18261162dfaee65f`，Mac 包输入为 `f6e06e3f62395c0d6b78bafdfceabb347c91ac27`。本表对照两平台准确输入、随后提交至 `d131fa5` 的发行/夹具维护及1.0.2最终源码差异，不能只以单个提交的差异代替完整发行范围。
 - Windows 1.0.2 已在 [GitHub v1.0.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) 发布。Microsoft Store第5次提交已受理、通过后自动发布，最后观察为预处理/认证中，尚未确认1.0.2上架。准确源码/包输入、资产及渠道状态见 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)。
 - 1.0.1 是 Windows Store 发布者显示名及版本元数据维护，包输入为 `20ada2f0d3ec6ea3909ae8a05c64642c21ad6416`，没有独立新增的 Mac 产品行为。记录见 [Windows 1.0.1](WINDOWS_1.0.1_RELEASE.md)。1.0.0 与 1.0.1 的历史状态保留，不在此推断本轮商店认证或可获取状态。
-- Mac 1.0.0 已公开完整 DMG/ZIP/清单，准确资产与原签名/摘要认证记录见 [Mac 1.0.0 发行索引](MACOS_1.0.0_RELEASE.md)。[0.6.9 → 1.0.0 清单 M001–M067](MACOS_1.0.0_HANDOFF.md)是已发行基线的行为及回归参考，不再标为未完成升级。本文件从 **M068** 接续，所有新增项目仍需 Mac 本机验证；旧表 M011 的后台刷新期间隐藏旧值要求由本文 M108–M110 的新需求替代，其余未被明确替代的基线保持。
-- 原交接 **M068–M134共67项**构成本轮 Mac 接续范围，本机补充从 M135 续列，当前工作状态见 `PROGRESS.md`。Windows源码、单测、GUI或真实模型运行不能代替Mac原生、签名、安装或界面验证；Mac当前完整公开版仍为1.0.0，1.0.2本机接续与发行尚待完成。`shared/package.json`是唯一版本源；Windows上`macos/`全树只读，Mac上`windows/`全树只读。
+- Mac 1.0.0 已公开完整 DMG/ZIP/清单，准确资产与原签名/摘要认证记录见 [Mac 1.0.0 发行索引](MACOS_1.0.0_RELEASE.md)。[0.6.9 → 1.0.0 清单 M001–M067](MACOS_1.0.0_HANDOFF.md)是已发行基线的行为及回归参考，不再标为未完成升级。本文件从 **M068** 接续，各项保留 Mac 本机验收要求；旧表 M011 的后台刷新期间隐藏旧值要求由本文 M108–M110 的新需求替代，其余未被明确替代的基线保持。
+- 原交接 **M068–M134共67项**构成本轮 Mac 接续范围，本机补充从 M135 续列，当前接续见 `PROGRESS.md`。Mac 1.0.2完整资产已追加到既有 Latest，准确输入、摘要与边界见 [Mac 发行索引](MACOS_1.0.2_RELEASE.md)，原1.0.0完整资产保留为恢复基线。Windows源码、单测、GUI或真实模型运行不能代替Mac原生、签名、安装或界面验证。`shared/package.json`是唯一版本源；Windows上`macos/`全树只读，Mac上`windows/`全树只读。
 - 仅使用 owner 临时合成账户/资料和固定来源、摘要认证的公开模型/音频；不访问真实账户或 Keychain 材料，不采样物理硬件。GUI、原生与推理仅在当前 UID 已登录且解锁的控制台串行执行；锁定或未知即停止。
 - 依赖仅在 `macos/` 安装。不得借同步升级既有依赖/模型、改变数据库或索引兼容、恢复旧两阶段用量优化、轮换签名身份。固定私钥、现用模型/依赖、原件、正式资产与恢复基线受保护。
 - profile、数据库、音频及必要暂存仅用归属明确的系统临时目录，结束清理；可复用公开缓存允许保留，但不提交缓存、依赖、凭据、用户资料、截图、报告、trace 或 coverage。结果只在终端/对话说明。独立官网和服务端不属于本交接的修改范围。
@@ -144,7 +144,7 @@
 
 ## Mac 本机执行顺序
 
-以下均为待执行操作，不是已运行记录。除仓库根同步外，工作目录为 `macos/`；不通过修改系统辅助功能、锁屏权限或签名身份取得测试条件。
+以下为可复用的本机执行顺序，不保存验证成绩；本轮发行事实见 [Mac 发行索引](MACOS_1.0.2_RELEASE.md)。除仓库根同步外，工作目录为 `macos/`；不通过修改系统辅助功能、锁屏权限或签名身份取得测试条件。
 
 1. 读取 AGENTS/PROGRESS、检查 status/diff 和最终源码 SHA；以已公开 Mac1.0.0 的 M001–M067 为保持基线，再按 M068–M134 核对本轮新增范围。只在本机同步生成配置/锁及必要打包依赖，不写 Windows 树；保留其后原生夹具维护。
 2. 在本机执行 `pnpm typecheck`、`pnpm check:architecture`、`pnpm check:workspace`、`pnpm test`、`pnpm audit`、`pnpm build`；优先定位本表列出的纯单测与 Renderer 单测。保留当前所有必需检查，不把 Windows 条件跳过作为完成。
@@ -155,4 +155,4 @@
 7. 按本机原入口构建准确1.0.2正式包，运行 `package-runtimes-smoke.mjs`、`package-smoke.mjs --install-archive` 及固定签名检查；对最终包重新验证DOC Worker/编码依赖，不用临时测试包代替正式资产。
 8. 在当前用户授权允许发布后才上传Mac完整资产，并用相同准确版本目录执行 `--online` 匿名完整回读及签名/摘要验证；更新发行索引和PROGRESS真实状态。交接文档不记录分数、临时路径或假定完成状态。
 
-后续新增修复从 **M143** 追加。Windows已公开版本、准确源码/包输入及Microsoft Store实际状态以 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)为准；本轮Mac接续、签名与发行须在Mac本机完成后据实更新。
+后续新增修复从 **M143** 追加。Windows已公开版本、准确源码/包输入及Microsoft Store实际状态以 [Windows 发行索引](WINDOWS_1.0.2_RELEASE.md)为准；Mac 发行事实及边界以 [Mac 发行索引](MACOS_1.0.2_RELEASE.md)为准，当前接续由 `PROGRESS.md` 维护。
