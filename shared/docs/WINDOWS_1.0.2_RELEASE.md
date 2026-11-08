@@ -2,7 +2,7 @@
 
 更新日期 / Updated: 2026-11-08。
 
-当前状态：准备发行，尚未上传 1.0.2 安装包或提交商店更新。 / Status: release preparation; the 1.0.2 installer and Store update have not yet been published or submitted.
+当前状态：Windows GitHub 1.0.2 已公开发布；Microsoft Store 第 5 次提交已受理，当前处于预处理/认证中，通过后自动发布，尚未观察到 1.0.2 实际上架。 / Status: Windows GitHub 1.0.2 is public. Store submission 5 is accepted and in preprocessing/certification, with automatic publication after approval; availability of Store 1.0.2 has not been observed.
 
 产品变化见 [简体中文 / English](RELEASE_1.0.2.md)，Mac 本机逐项接续见 [1.0.0 → 1.0.2](MACOS_1.0.2_HANDOFF.md)。本文仅记录发行输入、资产、实际发布状态及修复范围，不保存测试成绩、截图或运行报告。
 
@@ -14,9 +14,9 @@
 | Windows 公开升级基线 / Public Windows baseline | `1.0.0`，包输入 `a47f7435ef7c233eee9da87a18261162dfaee65f` |
 | Mac 公开完整基线 / Complete Mac baseline | `1.0.0`，包输入 `f6e06e3f62395c0d6b78bafdfceabb347c91ac27`；本轮不生成 Mac 包 |
 | 远端后续工作 / Remote follow-up | `d131fa5540121fc89c1fe1429da0e7ee95e54ba4`；保留 Mac 发行与原生夹具提交，共用英文单周期额度网格并入 Windows 验证 |
-| 源码与包输入 / Source and package input | Windows 包输入 `8104284781007b7b658482c11e71d90f0b548117`；源码合入与发布状态待后续准确记录 |
+| 源码与包输入 / Source and package input | Windows 包输入 `8104284781007b7b658482c11e71d90f0b548117`；源码输入 `f2dec1af80ddd556422a01802f83f01df32637fa`，已通过非强制合入 `2dd269aa55b2f98c3ee835f9d5bf294380267ff0` 推送 main；包输入之后仅追加测试夹具和发行文档 |
 | 源码仓库 / Source repository | 私有 `NCFXZ/VoxCue`；不向公开发行仓库上传客户端源码或用户资料 |
-| 公开发行仓库 / Public release repository | `NCFXZ/VoxCue-releases`；目标标签 `v1.0.2` |
+| 公开发行仓库 / Public release repository | `NCFXZ/VoxCue-releases`；已发布标签 [v1.0.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) |
 | Store 基线 / Store baseline | 提交 4（`1152921505702342674`）的 1.0.1 发布者名称维护版；2026-11-08 Partner Center 概览确认最新产品已上架 |
 
 Windows 上 `macos/` 全树保持原字节；Git 合入保留远端 Mac 提交，不通过覆盖另一平台工作树同步版本。旧版本正式资产、签名/更新身份、现用模型/依赖及恢复基线保持。
@@ -25,11 +25,11 @@ Windows 上 `macos/` 全树保持原字节；Git 合入保留远端 Mac 提交�
 
 | 文件 / File | Bytes | SHA256 | 发布状态 / Status |
 | --- | --- | --- | --- |
-| `VoxCue-Setup-1.0.2-x64.exe` | 407654422 | `481c96e465e1cb7444c62946c397d3ed0971543f64e12bc90414a35ef21da893` | 已构建，未上传 |
-| `VoxCue-Setup-1.0.2-x64.exe.blockmap` | 422296 | `235ea6b45c870a7c7408077266bce020fc0cc399b0fa94b70705dc21e85e4ee2` | 已构建，未上传 |
-| `latest.yml` | 349 | `c6f59000086ddb34296b21cda4d0863e80c9e20c18123c8f90724d6f503b6f1f` | 已构建，未上传 |
+| [VoxCue-Setup-1.0.2-x64.exe](https://github.com/NCFXZ/VoxCue-releases/releases/download/v1.0.2/VoxCue-Setup-1.0.2-x64.exe) | 407654422 | `481c96e465e1cb7444c62946c397d3ed0971543f64e12bc90414a35ef21da893` | 已公开；asset `724312474` |
+| [VoxCue-Setup-1.0.2-x64.exe.blockmap](https://github.com/NCFXZ/VoxCue-releases/releases/download/v1.0.2/VoxCue-Setup-1.0.2-x64.exe.blockmap) | 422296 | `235ea6b45c870a7c7408077266bce020fc0cc399b0fa94b70705dc21e85e4ee2` | 已公开；asset `724314823` |
+| [latest.yml](https://github.com/NCFXZ/VoxCue-releases/releases/download/v1.0.2/latest.yml) | 349 | `c6f59000086ddb34296b21cda4d0863e80c9e20c18123c8f90724d6f503b6f1f` | 已公开；asset `724314850` |
 
-目标归档为 `windows/release/1.0.2/`；临时打包输出为 `windows/release/installer/`。正式公开后再记录准确 URL、release/asset ID、发布时间和匿名完整下载核对状态。Mac 完整 1.0.2 资产尚未由本机生成前，Mac 更新应继续选择已完整发布的 1.0.0，不能取用 Windows EXE/APPX 或把全局 Latest 当作 Mac 完整版本。
+准确归档为 `windows/release/1.0.2/`。公开 release ID 为 `438326701`，发布时间为 `2026-11-08T15:18:15Z`。三个公开文件已通过无令牌完整下载回读，长度及 SHA256 与归档一致，安装程序 SHA512 与 `latest.yml` 一致；生产平台选择确认 Windows 为 1.0.2、Mac 仍为完整 1.0.0。Mac 完整 1.0.2 资产尚未由本机生成前，不能取用 Windows EXE/APPX 或把全局 Latest 当作 Mac 完整版本。
 
 ## Microsoft Store
 
@@ -39,13 +39,14 @@ Windows 上 `macos/` 全树保持原字节；Git 合入保留远端 Mac 提交�
 | Identity Name | `NCFX.VoxCue` |
 | Publisher | `CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A` |
 | PublisherDisplayName | `F. Zhu`，保持 1.0.1 维护后的值 |
+| Package Family Name | `NCFX.VoxCue_1syhqk59eh0f0` |
 | 包身份版本 / Package version | `2.0.2.0`；沿用共享主版本加一与末位零映射 |
 | APPX | `windows/release/store/VoxCue-Store-1.0.2-x64.appx` |
 | Bytes / SHA256 | 600157014 / `752bb48d17a3fd4972fe47f0e773dcc5de7e0a12d7c995175e91cdb90ad044e3` |
-| 提交 / Submission | 尚未创建 1.0.2 提交 / not yet created |
-| 认证与实际上架 / Certification and availability | 未提交 / not submitted |
+| 提交 / Submission | 第 5 次提交，`1152921505702346699`；新版包已 Validated，中英文新增功能均已保存 |
+| 认证与实际上架 / Certification and availability | 2026-11-08 已受理，当前预处理/认证中；通过认证后立即发布。未观察到 1.0.2 实际上架，原提交 4 仍为当前商店可用基线 |
 
-商店版由 Microsoft Store 更新，不包含独立安装版的 `app-update.yml`。Sandbox 仅在可丢弃来宾内对临时 APPX 副本签名、安装和验证；不在宿主安装测试证书，不改变固定 Publisher。包内校验、Sandbox 运行、Partner Center Validated、提交认证和实际上架分别记录，不相互替代。
+商店版由 Microsoft Store 更新，不包含独立安装版的 `app-update.yml`。Sandbox 仅在可丢弃来宾内对临时 APPX 副本签名、安装和验证；来宾已停止，原 APPX 摘要保持，不在宿主安装测试证书，不改变固定 Publisher。新包覆盖相同 Desktop 客户，门户保存时自动从本次提交移除旧 1.0.1 包；旧正式/恢复文件仍保留。沿用已有 runFullTrust 用途说明、定价、分级和截图，包内校验、Sandbox 运行、Partner Center Validated、提交认证和实际上架不相互替代。
 
 ## 本轮发现与修复范围
 
