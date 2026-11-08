@@ -2,12 +2,13 @@
 
 更新日期：2026-11-08。仅保存当前基线、任务与接续入口；长期规则见 AGENTS.md，详细变更及发行事实见 shared/docs，验证结果仅终端/对话。
 
-## 本轮发行：1.0.2
+## 当前发行与接续：1.0.2
 
-- 当前授权：先清理确认无用的工作区文件/代码，完整执行安全、稳定、对抗、英文、视觉/对齐、五档缩放、原生与安装/更新验证，问题修复后定向复测；通过后提交推送源码，发布 GitHub 1.0.2 Windows 安装/更新资产并更新 Microsoft Store。
+- 本轮范围：工作区清理、安全/稳定/对抗、英文、视觉/对齐、五档缩放、原生及安装/更新验证，发现问题修复后复验；验证阶段已结束，Windows [GitHub 1.0.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) 和源码已发布/推送。准确输入、摘要、渠道状态及修复范围见 [发行索引](shared/docs/WINDOWS_1.0.2_RELEASE.md)。
 - 版本唯一来源更新为共享 `1.0.2`，只同步根与 Windows 配置；Mac 全树只读。保留真实用户资料、凭据、签名/更新身份、现用依赖/模型/固定公共缓存和所有正式/恢复基线；本轮仅用隔离合成资料与已验证公共资源，不采样物理硬件。
-- 发布前补齐 [1.0.0→1.0.2 Mac 接续清单](shared/docs/MACOS_1.0.2_HANDOFF.md)，逐条包含本轮及测试发现修复；Windows 验证不代替 Mac 本机验收。当前源码已本地冻结、NSIS/APPX 候选已生成，剩余五档缩放、最终包运行和隔离安装验证后才上传及提交商店；1.0.2 尚未发布。
-- 清理审查与严格未使用声明检查未确认可删业务/测试；现用构建、公共缓存及可运行预览保持。完整功能与原时长长稳阶段结束，当前转最终隔离包、Windows 原生、五档缩放与安装验证。Windows 原生鼠标探针移除相对加速绕行，改绝对虚拟桌面输入，保留原生命中/悬停/拖动原断言；修复专项后继续完整原生矩阵。新增 DOC 目录图、DOCX 实际解压、取消实际退休及云控制旧账号归属修复已纳入源码/回归，细节见 [1.0.2 发行索引](shared/docs/WINDOWS_1.0.2_RELEASE.md)。旧夹具按点击菜单/真实退出更新，预览用真实长列表覆盖标题遮罩。打包/验证暂存在最后消费者结束后清理。
+- Microsoft Store 第 5 次提交（`1152921505702346699`）已受理，包身份 `2.0.2.0`，当前预处理/认证中，通过后自动发布；尚未观察到 1.0.2 实际上架，提交 4 的 1.0.1 仍为现有商店基线。
+- [1.0.0→1.0.2 Mac 接续清单](shared/docs/MACOS_1.0.2_HANDOFF.md)按 M068–M134 逐条保存变化、修复及本机动作，全部待 Mac 执行。Windows 验证不代替 Mac 原生、依赖/Worker、签名或最终包验收。
+- 清理审查未确认可删业务/测试；现用构建、依赖、固定公共缓存、旧预览及全部正式/恢复基线保持。仅清理最后消费者结束后的可重建暂存和与归档完整摘要一致的重复文件，边界见 [工作区清理](shared/docs/WORKSPACE_CLEANUP.md)；不为清理数量删除功能。
 
 ## 本轮：文档格式与文本编码
 
@@ -26,13 +27,13 @@
 - 本地组件首次检查改为按两组/三行列表占位的骨架扫光，复用额度骨架的明暗主题和减少动态效果规则；真实状态返回后展示列表，读取失败停止占位并保留错误/重试。
 - 准备页顶部组件提示沿聊天内容宽度居中并限制最大740px；副标题为“{组件名}组件未下载，请在设置中下载或查看进度”，语音缺失统一使用“语音识别”类别，不假设轻量模型；其他窄容器的提示沿原有布局。
 - 侧栏 AI 用量仅在当前连接首次读取显示加载提示；后台刷新保留上次结果和低额度样式，成功替换、失败显示错误，重试中保留错误。首次空结果/失败也结束初读，断开或切换仍清空并丢弃迟到回填；设置用量骨架保持。
-- Windows 同步依赖和打包入口；旧可运行预览 `windows/release-smoke/VoxCue-win32-x64/VoxCue.exe` 保留，本轮交付使用准确 1.0.2 安装资产，不将旧预览当作新包。Mac 全树只读，待本机同步 manifest/锁、补入 `word-extractor`/`chardet` 打包依赖并验证 Worker 与最终包。本轮源码已本地提交，尚未上传、发行或替换真实安装；接续入口见当前发行索引与 Mac 清单。
+- Windows 正式交付使用 `windows/release/1.0.2/` 安装/更新资产及 `windows/release/store/VoxCue-Store-1.0.2-x64.appx`。旧可运行预览 `windows/release-smoke/VoxCue-win32-x64/VoxCue.exe` 保留，本轮未替换真实安装。Mac 全树只读，待本机同步 manifest/锁、补入 `word-extractor`/`chardet` 打包依赖并验证 Worker 与最终包。
 
 ## 已发行与恢复基线
 
-- Windows 与 Mac 的完整公开基线均为 GitHub [v1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0)。Windows 输入为 a47f743，Mac 输入为 f6e06e3；范围与资产见 [Windows 1.0.0](shared/docs/WINDOWS_1.0.0_RELEASE.md) 和 [Mac 1.0.0](shared/docs/MACOS_1.0.0_RELEASE.md)。
+- Windows 当前公开完整版本为 GitHub 1.0.2，Mac 当前完整公开版本仍为 [1.0.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.0)。Windows 1.0.0 输入 a47f743 是本轮升级/恢复基线，Mac 1.0.0 输入为 f6e06e3；范围与资产见对应发行索引。
 - 2026-11-08 Partner Center 当前概览确认提交 4（1152921505702342674）最新产品已在商店上架。该 Windows 1.0.1 仅维护 PublisherDisplayName 为 F. Zhu，Name/Publisher/包家族身份保持；包身份 2.0.1.0，来源见 [1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。
-- 远端 main=d131fa5 的 Mac 1.0.0 后续提交已只读核对，共用单周期英文额度网格和文档接入本轮；macos 全树保持本机原字节，发行合入时保留远端 Mac 提交，不覆盖另一端工作。
+- 远端 d131fa5 的 Mac 1.0.0 后续提交已只读核对，共用单周期英文额度网格和文档接入本轮；源码通过临时 Git 索引合入并非强制推送，保留远端 Mac 子树，macos 物理文件保持原字节。
 - 两端全部旧正式包、恢复包、签名/凭据/更新身份、现用依赖和固定公共资源保留；清理边界见 [工作区清理](shared/docs/WORKSPACE_CLEANUP.md)。
 
 ## 当前界面调整
@@ -43,7 +44,7 @@
 ## Windows Microsoft Store
 
 - Partner Center 已保留 VoxCue 产品，Store ID `9PBBVWZXMBPW`。Windows 本机 `pnpm package:store` 使用商店标识构建 x64 APPX，应用版本仍来自 `shared/package.json`，商店包身份版本使用主版本加一及末位零。商店版通过 Microsoft Store 更新，独立 NSIS 发行版沿用原更新渠道。
-- 1.0.0 的提交 3 已上架，APPX 商店身份版本为 `2.0.0.0`。当前维护提交沿用免费定价、生产率分类、隐私链接、生成式 AI 披露、runFullTrust 用途、3+ 分级及四张中英文商品截图；更名维护版的实际状态见 [1.0.1 发行索引](shared/docs/WINDOWS_1.0.1_RELEASE.md)。
+- 1.0.0 的提交 3 已上架，1.0.1 的提交 4 为当前可用基线。1.0.2 提交 5 沿用免费定价、生产率分类、隐私链接、生成式 AI 披露、runFullTrust 用途、3+ 分级及四张中英文商品截图；本轮更新中英文新增功能，保持通过认证后自动发布，实际状态见 [1.0.2 发行索引](shared/docs/WINDOWS_1.0.2_RELEASE.md)。
 - 本机 Windows Sandbox 已启用。离线验证从解锁控制台启动，签名和信任仅在临时来宾内。商店任务栏使用各目标尺寸及浅深主题的透明图标资源。
 
 ## 验证与接续入口

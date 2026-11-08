@@ -1,13 +1,14 @@
 # VoxCue 1.0.0 → 1.0.2：macOS 逐项接续与验收清单
 
-更新日期：2026-11-08。本文为接续草案，只保存行为、Mac 本机操作、预期及待办；后续测试发现的修复追加稳定编号，不保存测试成绩或运行产物。
+更新日期：2026-11-08。本文保存1.0.2行为、Mac本机操作、预期及待办；后续修复追加稳定编号，不保存测试成绩或运行产物。
 
 ## 基线与边界
 
-- 1.0.0 的实际 Windows 包源码输入为 `a47f7435ef7c233eee9da87a18261162dfaee65f`，Mac 包输入为 `f6e06e3f62395c0d6b78bafdfceabb347c91ac27`。对照两平台准确输入、随后提交至 `d131fa5` 的发行/夹具维护及本轮最终源码差异，不把仅比较当前 HEAD 的未提交差异当作完整发行范围。最终 1.0.2 源码 SHA、资产及发布状态由对应发行索引记录；本文不表示已经发布。
+- 1.0.0 的实际 Windows 包源码输入为 `a47f7435ef7c233eee9da87a18261162dfaee65f`，Mac 包输入为 `f6e06e3f62395c0d6b78bafdfceabb347c91ac27`。本表对照两平台准确输入、随后提交至 `d131fa5` 的发行/夹具维护及1.0.2最终源码差异，不能只以单个提交的差异代替完整发行范围。
+- Windows 1.0.2 已在 [GitHub v1.0.2](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.0.2) 发布。Microsoft Store第5次提交已受理、通过后自动发布，最后观察为预处理/认证中，尚未确认1.0.2上架。准确源码/包输入、资产及渠道状态见 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)。
 - 1.0.1 是 Windows Store 发布者显示名及版本元数据维护，包输入为 `20ada2f0d3ec6ea3909ae8a05c64642c21ad6416`，没有独立新增的 Mac 产品行为。记录见 [Windows 1.0.1](WINDOWS_1.0.1_RELEASE.md)。1.0.0 与 1.0.1 的历史状态保留，不在此推断本轮商店认证或可获取状态。
 - Mac 1.0.0 已公开完整 DMG/ZIP/清单，准确资产与原签名/摘要认证记录见 [Mac 1.0.0 发行索引](MACOS_1.0.0_RELEASE.md)。[0.6.9 → 1.0.0 清单 M001–M067](MACOS_1.0.0_HANDOFF.md)是已发行基线的行为及回归参考，不再标为未完成升级。本文件从 **M068** 接续，所有新增项目仍需 Mac 本机验证；旧表 M011 的后台刷新期间隐藏旧值要求由本文 M108–M110 的新需求替代，其余未被明确替代的基线保持。
-- 所有项目均待 Mac 本机执行。Windows 源码、单测、GUI 或真实模型运行不能代替 Mac 原生、签名、安装或界面验证。`shared/package.json` 是唯一版本源；Windows 上 `macos/` 全树只读，Mac 上 `windows/` 全树只读。
+- 本表 **M068–M134共67项全部待Mac本机执行**，后续编号为M135。Windows源码、单测、GUI或真实模型运行不能代替Mac原生、签名、安装或界面验证；Mac当前完整公开版仍为1.0.0，1.0.2本机接续与发行尚待完成。`shared/package.json`是唯一版本源；Windows上`macos/`全树只读，Mac上`windows/`全树只读。
 - 仅使用 owner 临时合成账户/资料和固定来源、摘要认证的公开模型/音频；不访问真实账户或 Keychain 材料，不采样物理硬件。GUI、原生与推理仅在当前 UID 已登录且解锁的控制台串行执行；锁定或未知即停止。
 - 依赖仅在 `macos/` 安装。不得借同步升级既有依赖/模型、改变数据库或索引兼容、恢复旧两阶段用量优化、轮换签名身份。固定私钥、现用模型/依赖、原件、正式资产与恢复基线受保护。
 - profile、数据库、音频及必要暂存仅用归属明确的系统临时目录，结束清理；可复用公开缓存允许保留，但不提交缓存、依赖、凭据、用户资料、截图、报告、trace 或 coverage。结果只在终端/对话说明。独立官网和服务端不属于本交接的修改范围。
@@ -18,7 +19,7 @@
 
 | ID | owning file 与行为 | Mac 动作与验收预期 |
 | --- | --- | --- |
-| M068 | `shared/package.json`；`shared/docs/RELEASE_1.0.1.md`；`windows/scripts/package-store.mjs`：1.0.1 仅把 Store PublisherDisplayName 从 `NCFX` 改为 `F. Zhu`，固定 Identity Name/Publisher 不变；本轮目标为 1.0.2。 | 本机直接同步最终共享 1.0.2 版本，不发布一个无额外 Mac 行为的中间包。不要把 Windows Store 的 `2.0.x.0` 身份映射、发布者或 AppUserModelID 移植到 Mac bundle/签名。 |
+| M068 | `shared/package.json`；`shared/docs/RELEASE_1.0.1.md`；`windows/scripts/package-store.mjs`：1.0.1 仅把 Store PublisherDisplayName 从 `NCFX` 改为 `F. Zhu`，固定 Identity Name/Publisher 不变；共享版本为1.0.2。 | 本机直接同步最终共享 1.0.2 版本，不发布一个无额外 Mac 行为的中间包。不要把 Windows Store 的 `2.0.x.0` 身份映射、发布者或 AppUserModelID 移植到 Mac bundle/签名。 |
 | M069 | `shared/package.json`、`shared/pnpm-workspace.yaml`：新增固定 `word-extractor@1.0.4`、`chardet@2.1.1`；旧依赖版本不借此升级。 | 在仓库根执行 `pnpm sync:workspace`，只生成根和 Mac 配置，再在 `macos/` 更新本机锁并安装。核对生成的 package/tsconfig/workspace 配置与新增依赖；不写 `windows/`，不在根或 shared 安装 node_modules。 |
 | M070 | `shared/pnpm-workspace.yaml`、`shared/electron/backend/knowledge/legacyDocWorker.ts`：DOC 只用固定 OLE 内部入口，排除其未使用的 `saxes`/`yauzl`；DOCX 继续 Mammoth。 | 本机确认覆盖规则生效且所用内部 OLE 模块及其运行依赖完整。不删除 Mammoth 运行资源，不重新接入 word-extractor 的 OOXML 路径；依赖审计失败应在 owning source 定位，不能升级或放宽绕过。 |
 | M071 | `windows/scripts/package-portable.mjs` 显式复制 `word-extractor`/`chardet`，此修改没有自动落入 Mac 打包器。`shared/electron/backend/knowledge/legacyDoc.ts` 通过相邻 `legacyDocWorker.js` 启动 Worker。`windows/test/scripts/packaged-smoke.mjs` 增加最终 ASAR 内真实 DOC、GB18030 TXT、UTF-16LE Markdown 的导入/精确文档检索/正文/重开持久化，保留原 PDF/DOCX/UTF-8 Markdown 验证。 | 检查本机打包器的实际依赖收集和编译输出，按必要最小修改纳入两依赖与 Worker。在本机包专项加入等价新样本，必须实际运行最终签名 ASAR/解包目录的 DOC Worker 和传统编码解析、检索及重开，不以依赖目录存在或开发环境通过代替。不能从 Windows 包复制原生依赖、EXE 夹具或整套 node_modules。 |
@@ -109,7 +110,7 @@
 | M121 | `shared/test/scripts/check-architecture.mjs`、`shared/test/unit/architecture.test.ts`、`shared/docs/ARCHITECTURE.md`：新增契约纯函数与解析 Worker 边界，文档同步当前格式/编码、背压、同步快照及字面过滤。 | 核对本机生成配置包含新增源文件；执行架构/契约检查。旧“两阶段优化/2200ms/不分类”历史文字不能覆盖当前仅字面白名单和既有1800ms规则；不为测试增加正式入口或网络回退。 |
 | M122 | 1.0.0 包后追加的 Store 隔离夹具修复，owning source 为 `windows/test/scripts/store-sandbox-smoke.mjs`、`store-artifact-smoke.mjs`，明细见旧表 M043–M061；1.0.1 继续沿用。 | Windows 专属，不运行/移植 Sandbox、WinPS、APPX/CDP身份注入或证书操作。旧表关于 UTF-8、完整诊断、真正运行时就绪、精确 owner 清理的原则仍用于 Mac 自身夹具；这些是测试修复，不能写成 Mac 产品行为或已验收状态。 |
 | M123 | `macos` 本机签名、安装、原生音频/权限/更新 owning source 沿用 [旧清单](MACOS_1.0.0_HANDOFF.md)与 [Mac1.0.0基线](MACOS_1.0.0_RELEASE.md)。旧表M063/M065–M067的持续桌面守卫、原生测试唯一偏好域及真实lsof占用清理已纳入后续提交。 | 共享验证后补本轮本机原生、五档视觉、20轮面试与600秒音频长稳、固定签名和最终包验收；保留已发行/后续夹具修复，不能用旧Windows快照覆盖Mac树。未覆盖真实账户、硬件或原生隐藏恢复须明确说明，Windows0/1次请求或CPU运行不代验Mac。 |
-| M124 | 最终源码/资产与渠道状态由新版本发行索引及 `PROGRESS.md` 承接，公开产品说明见 [RELEASE_1.0.2](RELEASE_1.0.2.md)。 | 核对最终版本、commit、完整 Mac arm64 DMG/ZIP/签名清单及摘要，按匿名本平台完整稳定资产选择验证。Mac 1.0.2未完整发布前继续保留完整旧Mac资产；不因Windows新标签而选错平台，不把“打包/上传/提交认证”写成“已发布”。 |
+| M124 | Windows GitHub 1.0.2已发布，最终源码/包输入、资产及各渠道状态由 [Windows发行索引](WINDOWS_1.0.2_RELEASE.md)及`PROGRESS.md`承接，公开产品说明见 [RELEASE_1.0.2](RELEASE_1.0.2.md)。 | 核对最终版本、commit、完整 Mac arm64 DMG/ZIP/签名清单及摘要，按匿名本平台完整稳定资产选择验证。Mac 1.0.2未完整发布前继续保留完整旧Mac资产；不因Windows新标签而选错平台，不把“打包/上传/提交认证”写成“已发布”。 |
 
 ## 发行检查追加：资源限制与异步归属
 
@@ -141,4 +142,4 @@
 7. 按本机原入口构建准确1.0.2正式包，运行 `package-runtimes-smoke.mjs`、`package-smoke.mjs --install-archive` 及固定签名检查；对最终包重新验证DOC Worker/编码依赖，不用临时测试包代替正式资产。
 8. 在当前用户授权允许发布后才上传Mac完整资产，并用相同准确版本目录执行 `--online` 匿名完整回读及签名/摘要验证；更新发行索引和PROGRESS真实状态。交接文档不记录分数、临时路径或假定完成状态。
 
-后续新增修复从 **M135** 追加。最终源码 SHA、Windows发行状态和Mac接续状态仍待根任务据实际证据填写。
+后续新增修复从 **M135** 追加。Windows已公开版本、准确源码/包输入及Microsoft Store实际状态以 [Windows 1.0.2发行索引](WINDOWS_1.0.2_RELEASE.md)为准；本表67项Mac接续、签名与发行仍须在Mac本机完成后据实更新。
