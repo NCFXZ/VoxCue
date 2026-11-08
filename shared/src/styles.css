@@ -789,23 +789,28 @@ p {
   color: var(--muted);
   display: block;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) {
+.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) {
   display: grid;
   grid-template-columns: 31px minmax(0, 1fr) 15px;
   row-gap: 2px;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) .user-info {
+.sidebar:not(.collapsed)
+  .user-button:has(.account-usage-summary:is(.is-low, .is-inline))
+  .user-info {
   display: contents;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) .avatar {
+.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) .avatar {
   grid-column: 1;
   grid-row: 1 / 3;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) .user-info small {
+.sidebar:not(.collapsed)
+  .user-button:has(.account-usage-summary:is(.is-low, .is-inline))
+  .user-info
+  small {
   grid-column: 2 / -1;
   grid-row: 2;
 }
-.sidebar:not(.collapsed) .user-button:has(.account-usage-summary.is-low) > svg {
+.sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) > svg {
   grid-column: 3;
   grid-row: 1;
 }
@@ -1351,6 +1356,22 @@ p {
   margin-bottom: 18px;
   line-height: 1.8;
 }
+.knowledge-inline-error {
+  border-radius: var(--radius-card);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.knowledge-inline-error > span {
+  flex: 1;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.knowledge-inline-error .history-search-clear.ui-button {
+  position: static;
+  transform: none;
+  flex-shrink: 0;
+}
 @media (max-width: 1100px) {
   .management-container {
     width: min(950px, calc(100% - 2 * var(--page-gutter)));
@@ -1631,9 +1652,6 @@ p {
   margin-left: auto;
   flex-shrink: 0;
 }
-.document-error {
-  color: var(--danger);
-}
 .document-row strong {
   display: block;
   font-size: var(--type-body);
@@ -1647,6 +1665,19 @@ p {
   font-size: var(--type-secondary);
   color: var(--muted);
   margin-top: 6px;
+}
+.document-status {
+  display: flex;
+  align-items: baseline;
+  column-gap: 0.25em;
+}
+.document-status > .document-status-prefix {
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.document-status > .document-status-message {
+  flex: 1;
+  min-width: 0;
 }
 .field-label {
   display: block;
@@ -6749,6 +6780,14 @@ small {
   flex-wrap: wrap;
   gap: 8px;
 }
+.component-skeleton-description {
+  width: 280px;
+}
+.component-skeleton-action {
+  width: 80px;
+  height: var(--control-height);
+  --skeleton-inset: 0;
+}
 .components-notice {
   display: flex;
   align-items: center;
@@ -6778,13 +6817,11 @@ small {
   corner-shape: round;
 }
 .chat-column > .components-notice {
-  margin: 8px 20px 0;
-  flex-shrink: 0;
-}
-.chat-column > .components-notice {
   position: absolute;
-  inset: 72px 20px auto;
-  margin: 0;
+  inset: 72px 0 auto;
+  width: min(740px, calc(100% - 2 * var(--page-gutter)));
+  margin: 0 auto;
+  flex-shrink: 0;
   z-index: 2;
   box-shadow: var(--shadow-popup);
 }
@@ -7487,26 +7524,48 @@ svg[data-ui-icon] {
 .sync-conflict .sync-indicator-button {
   color: var(--destructive, #cc6d6d);
 }
-.sync-popover {
+.sync-popover-positioner {
   -webkit-app-region: no-drag;
   position: fixed;
   z-index: 1000;
   width: max-content;
-  max-width: min(280px, calc(100vw - 16px));
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
+  max-width: min(320px, calc(100vw - 16px));
+}
+.sync-popover {
+  min-width: 0;
+  width: max-content;
+  max-width: min(320px, calc(100vw - 16px));
   padding: 12px;
-  border-radius: var(--radius-control);
-  background: var(--surface);
-  color: var(--foreground);
-  box-shadow: var(--shadow-raised);
   font-size: var(--type-secondary);
   font-weight: 400;
   line-height: 1.5;
   text-align: left;
   white-space: normal;
+}
+.sync-popover-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+}
+.sync-popover-actions {
+  --sync-action-gap: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  width: 100%;
+  gap: var(--sync-action-gap);
+}
+.sync-popover-actions:empty {
+  display: none;
+}
+.sync-popover-actions > * {
+  flex: 1 1 calc((100% - var(--sync-action-gap)) / 2);
+}
+.sync-popover-actions > .ui-button {
+  min-width: max-content;
+}
+.sync-popover[data-menu-height-motion] .confirm-delete {
+  transition: none;
 }
 .sync-popover strong {
   font-size: var(--type-secondary);

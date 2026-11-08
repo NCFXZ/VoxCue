@@ -1,9 +1,20 @@
 import type { KnowledgeItem } from '../../contracts/knowledge';
+import { isKnowledgeFileName } from '../../contracts/knowledge';
 import { parseText, sha } from './chunks';
 import type { DocumentInput, ParsedDocument } from './types';
+import { extractLegacyDoc } from './legacyDoc';
+import { decodeKnowledgeText } from './textEncoding';
+import { validateDocxArchive } from './docxArchive';
+
+const pdfNoText = 'PDF 未提取到文字。';
 
 // This module runs only in the knowledge utility process. Never accept a URL or path.
-export async function parseDocument(input: DocumentInput): Promise<ParsedDocument> {
+export async function parseDocument(
+  input: DocumentInput,
+  signal?: AbortSignal,
+): Promise<ParsedDocument> {
+  signal?.throwIfAborted();
+  if (!isKnowledgeFileName(input.name)) throw Error('仅支持 PDF、Word、TXT 和 Markdown。');
   const extension = input.name.split('.').pop()?.toLowerCase();
   if (extension === 'pdf') {
     // Official worker supplies the DOM geometry types absent in Electron utilityProcess.
@@ -14,7 +25,7 @@ export async function parseDocument(input: DocumentInput): Promise<ParsedDocumen
     try {
       const result = await parser.getText({ pageJoiner: '' });
       const pages = result.pages.filter((page) => page.text.trim().length >= 8);
-      if (!pages.length) throw Error('PDF 没有可提取文字，可能是扫描件；请先进行 OCR 后重新导入。');
+      if (!pages.length) throw Error(pdfNoText);
       let offset = 0;
       const spans = pages.map((page) => {
         const text = page.text.replace(/\r\n/g, '\n').trimEnd(),
@@ -56,28 +67,30 @@ export async function parseDocument(input: DocumentInput): Promise<ParsedDocumen
       });
       return { title: input.name, text, items };
     } catch (error) {
-      if (error instanceof Error && error.message.includes('OCR')) throw error;
-      throw Error('PDF 解析失败，可能已加密、损坏或格式不受支持；原件已保留。');
+      if (error instanceof Error && error.message === pdfNoText) throw error;
+      throw Error('PDF 解析失败。');
     } finally {
       await parser.destroy();
+    }
+  }
+  if (extension === 'doc') {
+    try {
+      return parseText(await extractLegacyDoc(input.bytes, signal), input.documentId, input.name);
+    } catch {
+      signal?.throwIfAborted();
+      throw Error('DOC 解析失败。');
     }
   }
   if (extension === 'docx') {
     try {
       const { extractRawText } = await import('mammoth');
-      const result = await extractRawText({ buffer: Buffer.from(input.bytes) });
+      const bytes = Buffer.from(input.bytes);
+      validateDocxArchive(bytes);
+      const result = await extractRawText({ buffer: bytes });
       return parseText(result.value, input.documentId, input.name);
     } catch {
-      throw Error('DOCX 解析失败，原件已保留；请另存为 PDF、Markdown 或 TXT 后重试。');
+      throw Error('DOCX 解析失败。');
     }
   }
-  if (extension !== 'md' && extension !== 'txt')
-    throw Error('此格式仅保留原件，暂不支持索引；请转换为 PDF、DOCX、Markdown 或 TXT。');
-  let text: string;
-  try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(input.bytes);
-  } catch {
-    throw Error('文本不是有效的 UTF-8 编码，请以 UTF-8 另存后重试。');
-  }
-  return parseText(text, input.documentId, input.name);
+  return parseText(decodeKnowledgeText(input.bytes), input.documentId, input.name);
 }

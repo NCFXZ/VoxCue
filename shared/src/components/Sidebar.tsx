@@ -56,12 +56,13 @@ export function Sidebar({
     if (!connection.live) return;
     return useChatConnection.getState().watchUsage();
   }, [connection.live]);
-  const lowUsage =
-    connection.live && !connection.loadingUsage && isAccountUsageLow(connection.usage);
+  const lowUsage = connection.live && isAccountUsageLow(connection.usage);
   const remaining = !connection.live ? (
     t('未连接 AI 服务')
-  ) : connection.loadingUsage ? (
+  ) : connection.loadingUsage && !connection.usageLoaded ? (
     t('正在读取 AI 服务用量…')
+  ) : connection.usageError ? (
+    t(connection.usageError)
   ) : (
     <AccountUsageSummary usage={connection.usage} mode="sidebar" />
   );

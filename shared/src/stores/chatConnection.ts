@@ -11,6 +11,7 @@ interface State {
   error: string | null;
   usageError: string | null;
   loadingUsage: boolean;
+  usageLoaded: boolean;
   load(live: boolean, force?: boolean, demo?: boolean): Promise<void>;
   refreshUsage(scope?: 'chat' | 'interview'): Promise<void>;
   watchUsage(scope?: 'chat' | 'interview'): () => void;
@@ -25,10 +26,11 @@ export const useChatConnection = create<State>((set, get) => ({
   error: null,
   usageError: null,
   loadingUsage: false,
+  usageLoaded: false,
   async load(live, force = false, demo = false) {
     const current = ++generation;
-    ++usageRevision;
-    set({ loadingUsage: false });
+    const revision = ++usageRevision;
+    set({ loadingUsage: false, usageLoaded: false });
     if (!live) {
       set({
         live: false,
@@ -53,7 +55,7 @@ export const useChatConnection = create<State>((set, get) => ({
     } finally {
       if (current === generation) {
         set({ loading: false });
-        await get().refreshUsage();
+        if (revision === usageRevision) await get().refreshUsage();
       }
     }
   },
@@ -66,15 +68,15 @@ export const useChatConnection = create<State>((set, get) => ({
       clearInterval(timer);
       window.removeEventListener('focus', refresh);
       ++usageRevision;
-      set({ usage: null, loadingUsage: false, usageError: null });
+      set({ usage: null, loadingUsage: false, usageLoaded: false, usageError: null });
     };
   },
   async refreshUsage(scope = 'chat') {
     if ((scope === 'chat' && !get().live) || !window.desktop || get().loadingUsage) return;
     const current = generation;
     const revision = ++usageRevision;
-    // Keep only the previous layout available to the loading renderer; it hides all values.
-    set({ loadingUsage: true, usageError: null });
+    // Background reads keep the last result until success or failure replaces it.
+    set({ loadingUsage: true });
     try {
       const result = await (scope === 'interview'
         ? window.desktop.interviewAccountUsage()
@@ -86,7 +88,8 @@ export const useChatConnection = create<State>((set, get) => ({
       if (current === generation && revision === usageRevision)
         set({ usage: null, usageError: error instanceof Error ? error.message : '用量暂不可用。' });
     } finally {
-      if (current === generation && revision === usageRevision) set({ loadingUsage: false });
+      if (current === generation && revision === usageRevision)
+        set({ loadingUsage: false, usageLoaded: true });
     }
   },
 }));

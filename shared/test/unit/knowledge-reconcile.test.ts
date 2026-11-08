@@ -325,6 +325,32 @@ it('an open-library check after a running global scan also repairs originals rec
   expect(f.maximum).toBe(1);
 });
 
+it('a queued old-library check keeps its error scope after the library is closed', async () => {
+  await originals('old-library', 1);
+  const f = engine();
+  let release!: () => void,
+    entered = false;
+  const held = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  f.before(async () => {
+    entered = true;
+    await held;
+  });
+  const global = useKnowledgeIndex.getState().reconcile();
+  await vi.waitFor(() => expect(entered).toBe(true));
+  const queued = useKnowledgeIndex.getState().reconcile('old-library');
+  useKnowledgeIndex.getState().dismissError();
+  const read = vi
+    .spyOn(localKnowledge, 'listDocuments')
+    .mockRejectedValue(Error('旧知识库读取失败'));
+  release();
+  await Promise.all([global, queued]);
+  expect(read).toHaveBeenCalledWith('old-library');
+  expect(f.imported).toHaveLength(1);
+  expect(useKnowledgeIndex.getState().error).toBeNull();
+});
+
 it('a replacement during an active import gets one subsequent job with current bytes', async () => {
   const [original] = await originals('active-edit', 1);
   const f = engine();

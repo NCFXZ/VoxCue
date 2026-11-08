@@ -35,7 +35,11 @@ function playMotion(content: HTMLElement, frames: Keyframe[], onRemove?: () => v
 function pinReveal(content: HTMLElement) {
   const positioner = content.parentElement;
   const scroll = content.querySelector<HTMLElement>(':scope > .dropdown-scroll');
-  if (!positioner?.hasAttribute('data-radix-popper-content-wrapper') || !scroll) return;
+  if (
+    !positioner?.matches('[data-radix-popper-content-wrapper], [data-popup-positioner]') ||
+    !scroll
+  )
+    return;
   if (content.dataset.side && !['top', 'bottom'].includes(content.dataset.side)) return;
   const style = getComputedStyle(content);
   const scrollStyle = getComputedStyle(scroll);
@@ -149,7 +153,7 @@ export function animateDropdownExit(
   const preference = matchMedia('(prefers-reduced-motion: reduce)');
   if (preference.matches) return;
   const positioner = content.parentElement;
-  if (!positioner?.hasAttribute('data-radix-popper-content-wrapper')) return;
+  if (!positioner?.matches('[data-radix-popper-content-wrapper], [data-popup-positioner]')) return;
   const host = positioner.parentElement;
   if (!host) return;
   const style = getComputedStyle(content);

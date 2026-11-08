@@ -126,7 +126,7 @@ export function parseText(
     } else if (h && h.level <= minimum) parent = undefined;
     items.push(item);
   }
-  if (!items.length) throw Error('文档没有可索引的文字。扫描版 PDF 暂不支持 OCR。');
+  if (!items.length) throw Error('文档没有可索引的文字。');
   return { title, items, text };
 }
 export interface SearchUnit {
@@ -153,7 +153,7 @@ export function searchUnits(
         : `${item.title}\n`;
     const body = item.kind === 'qa' ? item.answer! : item.content;
     if (embedder.count(prefix, 'passage') > 480)
-      throw Error('问题标题超过模型限制，请缩短该标题后重试。');
+      throw Error('问题标题过长，请缩短后重试。');
     let offset = 0,
       index = 0;
     while (offset < body.length || (!body.length && index === 0)) {

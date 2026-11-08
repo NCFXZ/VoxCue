@@ -54,10 +54,12 @@ let generation = 0;
 let activeUserId: string | undefined;
 export const useCloudSync = create<SyncStore>((set, get) => {
   async function perform(work: () => Promise<void>) {
+    const epoch = generation;
     try {
       await work();
     } catch (error) {
-      set({ error: error instanceof Error ? error.message : '同步操作失败。' });
+      if (epoch === generation)
+        set({ error: error instanceof Error ? error.message : '同步操作失败。' });
     }
   }
   return {
@@ -110,7 +112,7 @@ export const useCloudSync = create<SyncStore>((set, get) => {
             saved: normalized,
             request: async (call) => {
               const result = await window.desktop!.cloudSync(call);
-              if (!result.ok && result.status === 401)
+              if (epoch === generation && !result.ok && result.status === 401)
                 window.dispatchEvent(new Event('voxcue-cloud-expired'));
               return result;
             },
@@ -179,12 +181,14 @@ export const useCloudSync = create<SyncStore>((set, get) => {
       });
     },
     async remove(key) {
+      const epoch = generation;
       try {
         if (!engine) throw Error('同步服务尚未准备好。');
         await engine.removeCloud(key);
         return true;
       } catch (error) {
-        set({ error: error instanceof Error ? error.message : '删除云端数据失败。' });
+        if (epoch === generation)
+          set({ error: error instanceof Error ? error.message : '删除云端数据失败。' });
         return false;
       }
     },

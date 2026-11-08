@@ -235,6 +235,26 @@ try {
         return samples;
       });
       assertAnimated(widths, 'download action');
+      const startWidth = widths[0],
+        endWidth = widths.at(-1),
+        direction = Math.sign(endWidth - startWidth);
+      assert.equal(await progress.locator('.download-button-progress').innerText(), '5%');
+      assert.ok(
+        Math.abs(endWidth - 80) < 0.5,
+        `Low-progress action must settle at its 80px content width, not the 96px fallback: ${endWidth}`,
+      );
+      assert.ok(
+        widths.every(
+          (width) =>
+            width >= Math.min(startWidth, endWidth) - 0.5 &&
+            width <= Math.max(startWidth, endWidth) + 0.5,
+        ),
+        `Download transition must stay between its measured endpoints: ${JSON.stringify(widths)}`,
+      );
+      assert.ok(
+        widths.slice(1).every((width, index) => direction * (width - widths[index]) >= -0.5),
+        `Download transition must not reverse while progress continues: ${JSON.stringify(widths)}`,
+      );
       assert.ok(
         Math.abs(widths.at(-1) - widths.at(-2)) < 0.1,
         'frequent progress events must not restart the width transition',

@@ -1,7 +1,7 @@
 import { t, uiLocale } from '../i18n';
 import { componentPresentation } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { componentReady, useComponentReady } from '../stores/components';
 import { userError } from '../services/errors';
 import {
@@ -100,12 +100,55 @@ export function PreparationPage({
   const interviewSettings = useInterviewSettings();
   const selectedSpeechComponent = speechComponent(interviewSettings.configuration.options);
   const speechReady = useComponentReady(selectedSpeechComponent);
-  const chatScroll = useFollowScroll(state.messages, state.activeConversation);
+  const conversationIds = useMemo(
+    () => state.conversations.map((conversation) => conversation.id),
+    [state.conversations],
+  );
+  const chatScroll = useFollowScroll(state.messages, state.activeConversation, {
+    rememberPosition: true,
+    identities: conversationIds,
+  });
   const input = state.draft;
   const setInput = state.setDraft;
   const inputRef = useTextareaSize(input);
   const composerArea = useRef<HTMLDivElement>(null);
   const workspace = useRef<HTMLElement>(null);
+  const previousConversation = useRef(state.activeConversation);
+  const conversationMotionReady = useRef(state.chatsReady);
+  useLayoutEffect(() => {
+    const changed = previousConversation.current !== state.activeConversation;
+    previousConversation.current = state.activeConversation;
+    if (!conversationMotionReady.current) {
+      conversationMotionReady.current = state.chatsReady;
+      return;
+    }
+    if (!changed || !state.chatsReady) return;
+    const content = workspace.current?.querySelector<HTMLElement>('.chat-thread, .welcome');
+    const preference = matchMedia('(prefers-reduced-motion: reduce)');
+    if (!content?.getClientRects().length || preference.matches) return;
+    const style = getComputedStyle(content);
+    const value = style.getPropertyValue('--panel-motion-duration').trim();
+    const duration = parseFloat(value) * (value.endsWith('ms') ? 1 : 1000);
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    // Animate only the conversation, leaving the toolbar, notice and composer fixed.
+    const animation = content.animate(
+      [
+        { opacity: 0, transform: 'translateY(8px)' },
+        { opacity: 1, transform: 'translateY(0)' },
+      ],
+      { duration, easing: style.getPropertyValue('--panel-motion-easing').trim(), fill: 'both' },
+    );
+    const clear = () => {
+      preference.removeEventListener('change', reduce);
+      animation.cancel();
+    };
+    const reduce = () => {
+      if (preference.matches) clear();
+    };
+    preference.addEventListener('change', reduce);
+    void animation.finished.then(clear, () => {});
+    return clear;
+  }, [state.activeConversation, state.chatsReady]);
   const [startActionWidth, setStartActionWidth] = useState<number>();
   useLayoutEffect(() => {
     const button = workspace.current?.querySelector<HTMLButtonElement>('.interview-start-trigger');

@@ -77,8 +77,11 @@ async function runInElectron() {
   const { KnowledgeError, knowledgeErrorCodes } = require(config.errors);
   const { RagChatService } = require(config.rag);
   const originalFork = utilityProcess.fork;
-  utilityProcess.fork = (file, args, options) =>
-    originalFork(file === config.processFile ? config.fixture : file, args, options);
+  let forks = 0;
+  utilityProcess.fork = (file, args, options) => {
+    forks++;
+    return originalFork(file === config.processFile ? config.fixture : file, args, options);
+  };
   const hosts = [];
   const createHost = () => {
     const host = new KnowledgeHost(
@@ -89,12 +92,12 @@ async function runInElectron() {
     return host;
   };
   const signal = () => new AbortController().signal;
-  function message(child, predicate) {
+  function message(child, predicate, timeout = 5000) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         child.removeListener('message', received);
         reject(Error('Synthetic utility message timeout'));
-      }, 5000);
+      }, timeout);
       function received(value) {
         if (!predicate(value)) return;
         clearTimeout(timer);
@@ -168,23 +171,56 @@ async function runInElectron() {
     assert.equal(providerCalls, 0);
     assert.equal(host.pending.size, 0);
 
-    // Shorten only Host's test deadline; real production process emits its late
-    // cancellation after finishing the deliberately uncooperative work.
+    // Shorten only Host's test deadline. Hold its kill request long enough to
+    // prove that neither a late reply nor kill's return retires the operation.
     const send = host.send.bind(host);
     host.send = (call, parent, timeout) => send(call, parent, call.query === 'late' ? 20 : timeout);
-    const late = message(host.child, (value) => value.errorCode === 'cancelled');
-    await assert.rejects(host.search('late', 5, 'hybrid', signal()), { code: 'unavailable' });
-    await late;
+    const oldChild = host.child;
+    const nativeKill = oldChild.kill.bind(oldChild);
+    let requestedKill;
+    const killRequested = new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(Error('Host did not request utility retirement')), 5000);
+      requestedKill = () => { clearTimeout(timer); resolve(); };
+    });
+    oldChild.kill = () => { requestedKill(); return true; };
+    const lateReply = message(oldChild, (value) => Array.isArray(value.value));
+    let exited = false;
+    oldChild.once('exit', () => { exited = true; });
+    const retired = exit(oldChild);
+    const late = host.search('late', 5, 'hybrid', signal());
+    const unavailable = assert.rejects(late, { code: 'unavailable' });
+    let settled = false;
+    void late.then(() => { settled = true; }, () => { settled = true; });
+    let next;
+    try {
+      await killRequested;
+      const previousForks = forks;
+      next = host.search('next', 5, 'hybrid', signal());
+      await Promise.resolve();
+      assert.equal(forks, previousForks);
+      await lateReply;
+      assert.equal(settled, false, 'A timeout must retain pending work until actual utility exit');
+      nativeKill();
+      await retired;
+      await unavailable;
+      assert.deepEqual(await next, []);
+      assert.equal(forks, previousForks + 1);
+      assert.notEqual(host.child, oldChild);
+    } finally {
+      oldChild.kill = nativeKill;
+      if (!exited) nativeKill();
+    }
     assert.equal(host.pending.size, 0);
-    assert.deepEqual(await host.search('next', 5, 'hybrid', signal()), []);
 
     // Exercise the actual 15-second Local RAG deadline, without changing it.
     providerCalls = 0;
     const timeoutCancellation = message(host.child, (value) => value.fixtureStarted === 'hang');
+    const timeoutRetired = message(host.child, (value) => value.errorCode === 'cancelled', 20000);
     const timed = rag.stream(request('hang'), () => {}, signal());
     await timeoutCancellation;
     await timed;
     assert.equal(providerCalls, 1);
+    await timeoutRetired;
     assert.equal(host.pending.size, 0);
 
     for (const operation of ['stop', 'exit']) {

@@ -8,7 +8,7 @@ const ts = workspace.platformRequire('typescript');
 const slash = (value) => value.replaceAll('\\', '/');
 const nativeModules = new Set([...builtinModules, ...builtinModules.map((name) => 'node:' + name)]);
 const inferenceModules =
-  /^(?:onnxruntime-node|sherpa-onnx-node|sherpa-onnx-win-x64|sqlite-vec|pdfjs-dist|pdf-parse|mammoth|@lancedb\/lancedb|@huggingface\/(?:tokenizers|transformers))(?:\/|$)/;
+  /^(?:onnxruntime-node|sherpa-onnx-node|sherpa-onnx-win-x64|sqlite-vec|pdfjs-dist|pdf-parse|mammoth|word-extractor|chardet|@lancedb\/lancedb|@huggingface\/(?:tokenizers|transformers))(?:\/|$)/;
 
 export function dependencies(file, text) {
   const source = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
@@ -289,7 +289,7 @@ export function boundaryViolations(graph) {
         !(/^sherpa-onnx-/.test(target)
           ? file.startsWith('electron/backend/speech/')
           : file.startsWith('electron/backend/knowledge/') &&
-            /^(?:@lancedb\/lancedb|@huggingface\/transformers|pdf-parse|mammoth)(?:\/|$)/.test(
+            /^(?:@lancedb\/lancedb|@huggingface\/transformers|pdf-parse|mammoth|word-extractor|chardet)(?:\/|$)/.test(
               target,
             ))
       )

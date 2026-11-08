@@ -20,7 +20,12 @@ import config from '../../electron-builder.config.cjs';
 import { probe as desktopProbe } from './window-probe.mjs';
 
 assert.equal(process.platform, 'win32');
-const previousVersion = '0.5.1';
+const options = process.argv.slice(2);
+assert.ok(
+  options.length <= 1 && options.every((option) => /^--previous-version=(?:0\.5\.1|1\.0\.0)$/.test(option)),
+  'Use no option or --previous-version=0.5.1|1.0.0 for the isolated upgrade fixture',
+);
+const previousVersion = options[0]?.slice('--previous-version='.length) ?? '0.5.1';
 const currentVersion = JSON.parse(await readFile(path.resolve('package.json'), 'utf8')).version;
 assert.notEqual(
   currentVersion,

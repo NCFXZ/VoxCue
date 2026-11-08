@@ -692,7 +692,7 @@ try {
       mimeType: 'text/markdown',
       buffer: Buffer.from('这是用于视觉检查的合成文档。'),
     });
-    await library.locator('.document-error').waitFor();
+    await library.locator('.document-row').getByRole('alert').waitFor();
     await inspect(page, `knowledge-documents-error-${theme}`);
     assert.equal(await library.getByRole('button', { name: '预览', exact: true }).count(), 0);
     await library.getByRole('button', { name: '重命名', exact: true }).click();

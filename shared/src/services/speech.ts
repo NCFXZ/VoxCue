@@ -32,6 +32,13 @@ export function resolveInterviewConfiguration(
     autoAnswer: true,
   };
 }
+export function isAutomaticQuestionFiller(text: string) {
+  const words = text.normalize('NFKC').replace(/[\s\p{P}]/gu, '');
+  // Match complete approved words, never their individual characters inside a question.
+  return /^(?:嗯|呃|额|唔|啊|哦|噢|喔|诶|欸|哎|唉|好的|对的|是的|明白|了解|好|对|行)+$/u.test(
+    words,
+  );
+}
 // Aggregate final segments for automatic submission. Interim text is available
 // separately as a draft and enters AI only on explicit manual submission.
 export class QuestionBuffer {

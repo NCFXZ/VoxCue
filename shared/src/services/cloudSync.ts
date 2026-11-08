@@ -161,6 +161,7 @@ export class CloudSyncEngine {
   private error?: string;
   private blockedUntil = 0;
   private dataEpoch: Record<SyncKind, number> = { profile: 0, history: 0, knowledgebase: 0 };
+  private sourceEpoch: Record<SyncKind, number> = { profile: 0, history: 0, knowledgebase: 0 };
   constructor(
     private options: {
       userId: string;
@@ -193,12 +194,13 @@ export class CloudSyncEngine {
         { ...mark, cloudPresent: this.remote.has(key) },
       ]),
     );
+    // Keep active group controls available; reveal terminal failures when work ends.
     const severity: SyncStatus[] = [
-      'conflict',
-      'error',
       'deleting',
       'pausing',
       'syncing',
+      'conflict',
+      'error',
       'unsynced',
       'paused',
       'synced',
@@ -268,8 +270,9 @@ export class CloudSyncEngine {
   }
   dirty(kind: SyncKind) {
     this.dataEpoch[kind]++;
+    if (this.running && this.saved.preferences.enabled[kind]) this.pending = true;
     for (const [key, mark] of Object.entries(this.marks))
-      if (this.keyKind(key) === kind && mark.status !== 'paused')
+      if (this.keyKind(key) === kind && !['paused', 'error', 'conflict'].includes(mark.status))
         this.marks[key] = { status: 'unsynced' };
     this.emit();
   }
@@ -384,12 +387,14 @@ export class CloudSyncEngine {
     this.emit();
   }
   private async loadSources(kind: SyncKind) {
+    const epoch = this.dataEpoch[kind];
     const items = await this.options.list(kind);
     this.guard();
     if (items.length > 4096 || items.some((i) => !keyValid(i.key) || i.kind !== kind))
       throw Error('本地同步条目超过保护上限。');
     for (const [key, source] of this.sources) if (source.kind === kind) this.sources.delete(key);
     for (const item of items) this.sources.set(item.key, item);
+    this.sourceEpoch[kind] = epoch;
     return items;
   }
   private async cycle() {
@@ -561,10 +566,8 @@ export class CloudSyncEngine {
   }
   private async profileFirst() {
     if (!this.saved.preferences.enabled.profile) return;
-    const item = (await this.options.list('profile')).find((i) => i.key === 'profile:main');
-    this.guard();
+    const item = (await this.loadSources('profile')).find((i) => i.key === 'profile:main');
     if (item) {
-      this.sources.set(item.key, item);
       await this.one(item.key);
     }
   }
@@ -580,7 +583,13 @@ export class CloudSyncEngine {
   }
   private async one(key: string, choice?: 'local' | 'cloud') {
     this.guard();
-    const epoch = this.dataEpoch[this.keyKind(key)];
+    const epoch = this.sourceEpoch[this.keyKind(key)];
+    // A later item must not label an earlier snapshot as current, or infer a
+    // deletion from an absence that was invalidated while it waited in the batch.
+    if (epoch !== this.dataEpoch[this.keyKind(key)]) {
+      this.pending = true;
+      return;
+    }
     const source = this.sources.get(key),
       remote = this.remote.get(key);
     let baseline = this.saved.baselines[key];
@@ -606,6 +615,10 @@ export class CloudSyncEngine {
       this.guard();
       hash = blob ? await digestCloudBlob(blob) : undefined;
       this.guard();
+      if (epoch !== this.dataEpoch[this.keyKind(key)]) {
+        this.pending = true;
+        return;
+      }
       const failed = this.failed.get(key);
       if (!choice && failed && failed.hash === hash && failed.until > Date.now()) return;
       let action = decideSync(hash, remote?.headVersion ? remote.sha256! : undefined, baseline);

@@ -52,6 +52,8 @@ function fixture(saved?: SyncSaved) {
   let stored: SyncSaved | undefined = saved;
   let view: SyncView = { preferences: defaultSyncPreferences(), marks: {}, busy: false };
   let hook: ((c: CloudSyncCall) => Promise<CloudSyncResult | undefined>) | undefined;
+  let listHook: ((kind: SyncKind) => void) | undefined;
+  let viewHook: ((view: SyncView) => void) | undefined;
   const ok = (value: unknown): CloudSyncResult => ({ ok: true, value });
   const manifest = async (id: string) => {
     const u = uploads.get(id)!;
@@ -78,15 +80,18 @@ function fixture(saved?: SyncSaved) {
   const ports: ConstructorParameters<typeof CloudSyncEngine>[0] = {
     userId,
     saved,
-    list: async (kind) =>
-      [...local]
+    list: async (kind) => {
+      const items = [...local]
         .filter(([, i]) => i.kind === kind)
         .map(([key, i]): LocalSyncItem => ({
           key,
           kind,
           parent: i.parent,
           blob: async () => i.blob,
-        })),
+        }));
+      listHook?.(kind);
+      return items;
+    },
     apply: async (key, blob) => {
       applied.push(key);
       local.set(key, {
@@ -103,6 +108,7 @@ function fixture(saved?: SyncSaved) {
     },
     emit: (value) => {
       view = value;
+      viewHook?.(value);
     },
     request: async (c) => {
       calls.push(c);
@@ -246,6 +252,12 @@ function fixture(saved?: SyncSaved) {
     },
     setHook(value: typeof hook) {
       hook = value;
+    },
+    setListHook(value: typeof listHook) {
+      listHook = value;
+    },
+    setViewHook(value: typeof viewHook) {
+      viewHook = value;
     },
     async enable(...kinds: SyncKind[]) {
       await engine.configure({
@@ -553,6 +565,124 @@ describe('cloud sync consistency and backpressure', () => {
       .filter((call) => call.action === 'begin')
       .map((call) => (call.action === 'begin' ? f.remote.get(call.id)!.name : ''));
     expect(started).toEqual(['base:a', 'file:a', 'base:b', 'file:b']);
+  });
+  it.each([
+    [507, 'error'],
+    [409, 'conflict'],
+  ] as const)(
+    'keeps an active multi-file library syncing after a %s failure, then exposes %s',
+    async (status, state) => {
+      const f = fixture();
+      f.put('base:a', 'knowledgebase', 'A');
+      await f.enable('knowledgebase');
+      expect(f.view.marks['base:a'].status).toBe('synced');
+      f.put('file:first', 'knowledgebase', 'first file', 'base:a');
+      f.put('file:second', 'knowledgebase', new Uint8Array(2 * 1048576), 'base:a');
+      const activeStates: string[] = [];
+      f.setHook(async (call) => {
+        if (call.action === 'begin' && f.remote.get(call.id)?.name === 'file:first')
+          return { ok: false, status, error: 'synthetic first-file failure' };
+        if (call.action === 'put' && f.uploads.get(call.id)?.resource.name === 'file:second')
+          activeStates.push(f.view.marks['base:a'].status);
+        return undefined;
+      });
+      f.engine.dirty('knowledgebase');
+      await f.engine.request();
+      expect(activeStates).toEqual(['syncing', 'syncing']);
+      expect(f.view.marks['file:first'].status).toBe(state);
+      expect(f.view.marks['file:second'].status).toBe('synced');
+      expect(f.view.marks['base:a'].status).toBe(state);
+      expect(f.view.busy).toBe(false);
+      f.put('file:third', 'knowledgebase', 'a later batch', 'base:a');
+      f.engine.dirty('knowledgebase');
+      await f.engine.request();
+      expect(f.view.marks['file:first'].status).toBe(state);
+      expect(f.view.marks['file:third'].status).toBe('synced');
+      expect(f.view.marks['base:a'].status).toBe(state);
+      expect(
+        f.calls.filter(
+          (call) => call.action === 'begin' && f.remote.get(call.id)?.name === 'file:first',
+        ),
+      ).toHaveLength(1);
+    },
+  );
+  it('retires a stale local snapshot after an edit and never reports its old bytes as synced', async () => {
+    const f = fixture();
+    for (const base of ['a', 'b']) {
+      f.put('base:' + base, 'knowledgebase', base);
+      f.put('file:' + base, 'knowledgebase', 'old ' + base, 'base:' + base);
+    }
+    await f.enable('knowledgebase');
+    const updatedHash = await digestCloudBlob(new Blob(['new a']));
+    let edited = false;
+    const premature: string[] = [];
+    f.setViewHook((view) => {
+      const remote = [...f.remote.values()].find((item) => item.name === 'file:a');
+      if (edited && remote?.sha256 !== updatedHash && view.marks['file:a']?.status === 'synced')
+        premature.push(view.marks['file:a'].status);
+    });
+    f.setListHook((kind) => {
+      if (kind !== 'knowledgebase' || edited) return;
+      queueMicrotask(() => {
+        edited = true;
+        f.put('file:a', 'knowledgebase', 'new a', 'base:a');
+        f.engine.dirty('knowledgebase');
+      });
+    });
+    await f.engine.request();
+    expect(edited).toBe(true);
+    expect(premature).toEqual([]);
+    expect([...f.remote.values()].find((item) => item.name === 'file:a')?.sha256).toBe(updatedHash);
+    expect(f.view.marks['base:a'].status).toBe('synced');
+    expect(f.view.marks['base:b'].status).toBe('synced');
+    expect(f.view.busy).toBe(false);
+  });
+  it('does not delete a cloud file when it was recreated after the local snapshot', async () => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    f.put('file:a', 'knowledgebase', 'old a', 'base:a');
+    await f.enable('knowledgebase');
+    f.local.delete('file:a');
+    let recreated = false;
+    f.calls.length = 0;
+    f.setListHook((kind) => {
+      if (kind !== 'knowledgebase' || recreated) return;
+      queueMicrotask(() => {
+        recreated = true;
+        f.put('file:a', 'knowledgebase', 'recreated a', 'base:a');
+        f.engine.dirty('knowledgebase');
+      });
+    });
+    await f.engine.request();
+    expect(recreated).toBe(true);
+    expect(f.calls.filter((call) => call.action === 'remove')).toEqual([]);
+    const remote = [...f.remote.values()].find((item) => item.name === 'file:a')!;
+    expect(await remote.blob.text()).toBe('recreated a');
+    expect(f.view.marks['file:a'].status).toBe('synced');
+  });
+  it('shows an active child deletion before an earlier sibling failure, without hiding the final error', async () => {
+    const f = fixture();
+    f.put('base:a', 'knowledgebase', 'A');
+    f.put('file:first', 'knowledgebase', 'first', 'base:a');
+    f.put('file:second', 'knowledgebase', 'second', 'base:a');
+    f.setHook(async (call) =>
+      call.action === 'begin' && f.remote.get(call.id)?.name === 'file:first'
+        ? { ok: false, status: 507, error: 'synthetic first-file failure' }
+        : undefined,
+    );
+    await f.enable('knowledgebase');
+    expect(f.view.marks['base:a'].status).toBe('error');
+    const activeStates: string[] = [];
+    f.setHook(async (call) => {
+      if (call.action === 'remove' && f.remote.get(call.id)?.name === 'file:second')
+        activeStates.push(f.view.marks['base:a'].status);
+      return undefined;
+    });
+    await f.engine.removeCloud('file:second');
+    expect(activeStates).toEqual(['deleting']);
+    expect(f.view.marks['base:a'].status).toBe('error');
+    expect(f.view.marks['file:first'].status).toBe('error');
+    expect(f.view.marks['file:second'].status).toBe('paused');
   });
   it('cold restores whole libraries in order and keeps the active library syncing through its files', async () => {
     const f = fixture();

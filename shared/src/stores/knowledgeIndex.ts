@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { KnowledgeState, KnowledgeStatus } from '../../electron/contracts/knowledge';
+import { isKnowledgeFileName } from '../../electron/contracts/knowledge';
 import type { LocalDocument } from '../services/knowledgeTypes';
 import { knowledgeCall, indexOriginal, hasKnowledgeEngine } from '../services/knowledgeIndex';
 import { localKnowledge, syncKnowledgeSnapshot, documentRevision } from '../services/knowledge';
@@ -9,10 +10,11 @@ interface IndexState {
   tasks: Record<string, KnowledgeStatus>;
   requests: Record<string, string>;
   error: string | null;
+  dismissError(): void;
   refresh(): Promise<void>;
   connect(): () => void;
   index(doc: LocalDocument, force?: boolean): Promise<void>;
-  reconcile(baseId?: string): Promise<void>;
+  reconcile(baseId?: string, errorEpoch?: number): Promise<void>;
 }
 const message = (e: unknown) => (e instanceof Error ? e.message : '知识库操作失败。');
 const processing = (status?: KnowledgeStatus) =>
@@ -41,6 +43,7 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
   let active: IndexJob | undefined;
   let lifetime = 0;
   let refreshing: Promise<void> | undefined;
+  let errorVersion = 0;
   const queued = (job: IndexJob): KnowledgeStatus => ({
     documentId: job.id,
     requestId: job.requestId,
@@ -75,11 +78,16 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
     tasks: {},
     requests: {},
     error: null,
+    dismissError() {
+      errorVersion++;
+      set({ error: null });
+    },
     refresh() {
       if (!hasKnowledgeEngine()) return Promise.resolve();
       if (refreshing) return refreshing;
       const version = ++refreshVersion,
-        events = eventVersion;
+        events = eventVersion,
+        errorEpoch = errorVersion;
       refreshing = (async () => {
         try {
           const state = (await knowledgeCall({ op: 'status' })) as KnowledgeState;
@@ -103,10 +111,10 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
                   requests,
                 }
               : {}),
-            error: null,
+            ...(errorEpoch === errorVersion ? { error: null } : {}),
           });
         } catch (e) {
-          if (version === refreshVersion) set({ error: message(e) });
+          if (version === refreshVersion && errorEpoch === errorVersion) set({ error: message(e) });
         }
       })().finally(() => {
         refreshing = undefined;
@@ -151,6 +159,7 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
       };
     },
     index(doc, force = false) {
+      if (!isKnowledgeFileName(doc.name)) return Promise.resolve();
       if (!hasKnowledgeEngine() || !componentReady('rag')) return Promise.resolve();
       const revision = documentRevision(doc);
       const existing = jobs.get(doc.id);
@@ -226,14 +235,14 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
       pump();
       return job.done;
     },
-    reconcile(baseId) {
+    reconcile(baseId, errorEpoch = errorVersion) {
       if (!hasKnowledgeEngine() || !componentReady('rag')) return Promise.resolve();
       const key = baseId ?? '*';
       if (scans.has(key)) return scans.get(key)!;
       if (baseId && scans.has('*')) {
         const follow = scans.get('*')!.then(() => {
           if (scans.get(key) === follow) scans.delete(key);
-          return get().reconcile(baseId);
+          return get().reconcile(baseId, errorEpoch);
         });
         scans.set(key, follow);
         return follow;
@@ -253,6 +262,7 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         );
         const groups = new Map<string, LocalDocument[]>();
         for (const doc of documents) {
+          if (!isKnowledgeFileName(doc.name)) continue;
           const group = groups.get(doc.baseId) ?? [];
           group.push(doc);
           groups.set(doc.baseId, group);
@@ -272,7 +282,7 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         }
       })()
         .catch((e) => {
-          if (epoch === lifetime) set({ error: message(e) });
+          if (epoch === lifetime && errorEpoch === errorVersion) set({ error: message(e) });
         })
         .finally(() => {
           if (scans.get(key) === scan) scans.delete(key);

@@ -109,31 +109,31 @@ it.each([
   }
 });
 
-it('连续明确回应逐次自动提交，手动发送及随后的实质问题完整保留', async () => {
+it('连续纯回应不发起 AI 请求，原文与关联保留且手动仍可发送', async () => {
   const { answer, emit } = await liveFixture();
-  const phrases = [
-    '嗯',
-    '好的',
-    '谢谢',
-    '嗯嗯嗯',
-    '呃呃',
-    '哦哦好的明白了',
-    '嗯好的谢谢',
-    'OK, thank you!',
-  ];
+  const phrases = ['嗯', '好的', '嗯嗯嗯', '呃呃', '哦哦好的明白', '嗯好的'];
   for (const [index, phrase] of phrases.entries()) {
     emit(phrase);
     await advanceAudio(999);
-    expect(answer).toHaveBeenCalledTimes(index);
+    expect(answer).not.toHaveBeenCalled();
     await advanceAudio(1);
-    expect(answer).toHaveBeenCalledTimes(index + 1);
-    expect(answer.mock.calls.at(-1)?.[0].question).toBe(phrase);
-    expect(useInterview.getState().draftQuestion).toBe('');
+    expect(answer).not.toHaveBeenCalled();
+    expect(useInterview.getState().draftQuestion).toBe(phrases.slice(0, index + 1).join(' '));
   }
+  expect(useInterview.getState().answers).toEqual([]);
+  await advanceAudio(6000);
+  expect(answer).not.toHaveBeenCalled();
+  await useInterview.getState().submitTranscript();
+  expect(answer).toHaveBeenCalledOnce();
+  expect(answer.mock.calls[0][0].question).toBe(phrases.join(' '));
+  expect(useInterview.getState().answers[0].sourceTranscriptIds).toHaveLength(phrases.length);
+  await advanceAudio(6000);
+  expect(answer).toHaveBeenCalledOnce();
+  expect(useInterview.getState().draftQuestion).toBe('');
   useInterview.getState().setAutoAnswer(false);
   emit('谢谢您');
   await advanceAudio(3000);
-  expect(answer).toHaveBeenCalledTimes(phrases.length);
+  expect(answer).toHaveBeenCalledOnce();
   await useInterview.getState().submitTranscript();
   expect(answer.mock.calls.at(-1)?.[0].question).toBe('谢谢您');
   useInterview.getState().setAutoAnswer(true);
@@ -145,6 +145,96 @@ it('连续明确回应逐次自动提交，手动发送及随后的实质问题�
     '谢谢您',
     '嗯那为啥不用Redis',
   ]);
+});
+
+it.each([
+  '那个',
+  '这个',
+  '就是',
+  '然后',
+  '怎么说呢',
+  '然后呢？',
+  '为什么呢？',
+  '行吗？',
+  '谢谢',
+  '谢谢您',
+  'OK, thank you!',
+])('未批准过滤的口头衔接或有效短问继续原样自动发送：%s', async (text) => {
+  const { answer, emit } = await liveFixture();
+  emit(text);
+  await advanceAudio(1000);
+  expect(answer).toHaveBeenCalledOnce();
+  expect(answer.mock.calls[0][0].question).toBe(text);
+});
+
+it('纯回应被忽略后保留原文与 Qwen continuation，后续有效追问仍只发送一次', async () => {
+  const { answer, emit } = await liveFixture();
+  const original = emit('嗯？', { speechModel: 'qwen' });
+  await advanceAudio(1000);
+  expect(answer).not.toHaveBeenCalled();
+  emit('嗯？', { ...original });
+  const continuation = emit('为什么呢？', {
+    id: 'continued',
+    continuationOf: original.id,
+    speechModel: 'qwen',
+  });
+  await advanceAudio(1000);
+  expect(answer).toHaveBeenCalledOnce();
+  expect(answer.mock.calls[0][0].question).toBe('嗯？ 为什么呢？');
+  expect(useInterview.getState().answers[0].sourceTranscriptIds).toEqual([
+    original.id,
+    continuation.id,
+  ]);
+  await advanceAudio(6000);
+  expect(answer).toHaveBeenCalledOnce();
+});
+
+it('生成期间排队的纯回应在旧回答完成后仍不产生追加请求或回答', async () => {
+  const { answer, emit } = await liveFixture();
+  let finish!: (value: Awaited<ReturnType<typeof answer>>) => void;
+  answer.mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve;
+      }),
+  );
+  const first = useInterview.getState().ask('介绍项目');
+  emit('呃，嗯，好的？');
+  await advanceAudio(2000);
+  finish({ ok: true, answerText: '旧回答', usage: null, sources: [] });
+  await first;
+  await advanceAudio(6000);
+  expect(answer).toHaveBeenCalledOnce();
+  expect(useInterview.getState().answers).toHaveLength(1);
+  expect(useInterview.getState().draftQuestion).toBe('呃，嗯，好的？');
+  await useInterview.getState().submitTranscript();
+  expect(answer).toHaveBeenCalledTimes(2);
+  expect(answer.mock.calls[1][0].question).toBe('呃，嗯，好的？');
+});
+
+it('换模型期间就绪的纯回应不在模型切换完成后误发，手动使用新模型正常发送', async () => {
+  const { answer, emit } = await liveFixture();
+  let finish!: (value: any) => void;
+  Object.assign(window.desktop!, {
+    updateInterviewModel: vi.fn(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    ),
+  });
+  const changing = useInterview.getState().updateModel('new-model', 'high');
+  emit('哦好的');
+  await advanceAudio(2000);
+  expect(answer).not.toHaveBeenCalled();
+  finish({ ok: true, modelId: 'new-model', effort: 'high' });
+  await changing;
+  await advanceAudio(6000);
+  expect(answer).not.toHaveBeenCalled();
+  expect(useInterview.getState().draftQuestion).toBe('哦好的');
+  await useInterview.getState().submitTranscript();
+  expect(answer).toHaveBeenCalledOnce();
+  expect(answer.mock.calls[0][0]).toMatchObject({ question: '哦好的', modelId: 'new-model' });
 });
 
 it('临时语气词不会提前回答，终稿修订、重复终稿和迟到临时结果不引发重复调用', async () => {
@@ -239,7 +329,7 @@ it.each(['off', 'pause', 'reset'] as const)('待发口语问题在%s后不产生
   expect(answer).not.toHaveBeenCalled();
 });
 
-it('手动与1800ms音频静音自动规则离线回放，请求和原文一致', async () => {
+it('离线回放减少纯回应独立请求，完整原文和有效问题关联保持', async () => {
   const phrases = [
     '介绍项目A',
     '好的',
@@ -328,11 +418,14 @@ it('手动与1800ms音频静音自动规则离线回放，请求和原文一致'
   const before = await replay(false);
   const after = await replay(true);
   expect(before.requests).toHaveLength(10);
-  expect(after.requests).toHaveLength(phrases.length);
-  expect(after.requests.map((request) => request.question)).toEqual(phrases);
-  expect(after.requests.map((request) => request.question)).toEqual(
-    before.requests.map((request) => request.question),
-  );
+  expect(before.requests.map((request) => request.question)).toEqual(phrases);
+  expect(after.requests.map((request) => request.question)).toEqual([
+    '介绍项目A',
+    '好的 为什么选PostgreSQL',
+    '嗯 继续',
+    ...phrases.slice(5),
+  ]);
+  expect(after.requests).toHaveLength(8);
   expect(after.transcripts).toEqual(phrases);
   expect(after.transcripts).toEqual(before.transcripts);
   for (const phrase of phrases)
@@ -344,8 +437,8 @@ it('手动与1800ms音频静音自动规则离线回放，请求和原文一致'
   console.log(
     'OFFLINE_REQUESTS ' +
       JSON.stringify({
-        oldRule: before.requests.length,
-        restored: after.requests.length,
+        manualRequests: before.requests.length,
+        automaticRequests: after.requests.length,
         retainedTranscripts: after.transcripts.length,
         silenceBeforeFinalMs: 800,
         totalSilenceMs: 1800,

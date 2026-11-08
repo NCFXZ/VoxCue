@@ -29,9 +29,9 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
   useEffect(() => index.connect(), []);
   const phase = (id: string) => {
     const status = index.tasks[id];
-    if (status) return knowledgeStatusLabel(status);
+    if (status) return t(knowledgeStatusLabel(status));
     const doc = index.state?.documents.find((doc) => doc.documentId === id);
-    return doc ? (doc.available === false ? '索引已停用' : '索引完成') : '尚未索引';
+    return t(doc ? (doc.available === false ? '索引已停用' : '索引完成') : '尚未索引');
   };
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
@@ -52,6 +52,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           size="icon"
           disabled={!ragReady}
           onClick={() => {
+            state.dismissEditorError();
             setName('');
             setEditing('create');
           }}
@@ -62,7 +63,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
       <div className="management-scroll">
         <div className="management-container">
           {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
-          {state.error && !base && !editing && (
+          {state.error && state.errorBaseId === null && !base && !editing && (
             <p role="alert" className="inline-error">
               {t(state.error)}
             </p>
@@ -75,6 +76,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 variant="outline"
                 disabled={!ragReady}
                 onClick={() => {
+                  state.dismissEditorError();
                   setName('');
                   setEditing('create');
                 }}
@@ -135,6 +137,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 data-reveal-on-hover
                 aria-label={t('重命名')}
                 onClick={() => {
+                  state.dismissEditorError();
                   setName(base.name);
                   setEditing('rename');
                 }}
@@ -162,15 +165,37 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             </>
           }
         >
-          {state.error && (
-            <p role="alert" className="inline-error">
-              {t(state.error)}
-            </p>
+          {state.error && state.errorBaseId === base.id && (
+            <div role="alert" className="inline-error knowledge-inline-error">
+              <span>{t(state.error)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="history-search-clear"
+                aria-label={t('关闭错误提示')}
+                data-reveal-on-hover
+                onClick={state.dismissError}
+              >
+                <X size={14} />
+              </Button>
+            </div>
           )}
           {index.error && (
-            <p role="alert" className="inline-error">
-              {t(index.error)}
-            </p>
+            <div role="alert" className="inline-error knowledge-inline-error">
+              <span>{t(index.error)}</span>
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="history-search-clear"
+                aria-label={t('关闭错误提示')}
+                data-reveal-on-hover
+                onClick={index.dismissError}
+              >
+                <X size={14} />
+              </Button>
+            </div>
           )}
           {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
           <h3 className="dialog-section-title">
@@ -179,6 +204,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           </h3>
           <div
             className={`upload-dropzone ${dragging ? 'dragging' : ''}`}
+            aria-busy={state.busy}
             onDragOver={(event) => {
               event.preventDefault();
               setDragging(true);
@@ -195,9 +221,9 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             </span>
             <h3>{state.busy ? t('正在保存到本地…') : t('将文件拖放到此处')}</h3>
             <p>
-              {t('PDF、Word、PowerPoint、Excel、TXT、Markdown')}
+              {t('支持 PDF、Word、TXT 和 Markdown 文件')}
               <br />
-              {t('单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件。')}
+              {t('单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件')}
             </p>
             <Button
               disabled={state.busy}
@@ -211,6 +237,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
               ref={fileInput}
               type="file"
               multiple
+              disabled={state.busy}
               accept={documentAccept}
               aria-label={t('导入知识库文档')}
               className="sr-only"
@@ -226,41 +253,47 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             ) : !state.documents.length ? (
               <p className="empty-inline document-empty">{t('当前知识库还没有文档')}</p>
             ) : (
-              state.documents.map((doc) => (
-                <div className="document-row" key={doc.id}>
-                  <FileText size={18} />
-                  <div className="document-details">
-                    <strong>{doc.name}</strong>
-                    <p>
-                      {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`}
-                      {' · '}
-                      {t(phase(doc.id))}
-                    </p>
-                    {index.tasks[doc.id]?.error && (
-                      <p role="alert" className="document-error">
-                        {t(index.tasks[doc.id].error)}
+              state.documents.map((doc) => {
+                const task = index.tasks[doc.id];
+                const error = task?.phase === 'failed' ? task.error : undefined;
+                return (
+                  <div className="document-row" key={doc.id}>
+                    <FileText size={18} />
+                    <div className="document-details">
+                      <strong>{doc.name}</strong>
+                      <p
+                        className={error ? 'document-status' : undefined}
+                        role={error ? 'alert' : undefined}
+                      >
+                        <span className="document-status-prefix">
+                          {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`}
+                          {' · '}
+                          {phase(doc.id)}
+                          {error ? ': ' : ''}
+                        </span>
+                        {error && <span className="document-status-message">{t(error)}</span>}
                       </p>
-                    )}
+                    </div>
+                    <div className="document-actions">
+                      <SyncBadge itemKey={'file:' + doc.id} label={doc.name} />
+                      <ConfirmDeleteButton
+                        iconOnly
+                        disabled={state.busy}
+                        active={!editing}
+                        target={t('文档：') + doc.name}
+                        revision={doc.createdAt}
+                        warning={t('将删除原件及当前索引，无法恢复')}
+                        aria-label={t('删除文档 ') + doc.name}
+                        onConfirm={async () => {
+                          const ok = await state.removeDocument(doc.id);
+                          if (ok) await index.refresh();
+                          return ok;
+                        }}
+                      />
+                    </div>
                   </div>
-                  <div className="document-actions">
-                    <SyncBadge itemKey={'file:' + doc.id} label={doc.name} />
-                    <ConfirmDeleteButton
-                      iconOnly
-                      disabled={state.busy}
-                      active={!editing}
-                      target={t('文档：') + doc.name}
-                      revision={doc.createdAt}
-                      warning={t('将删除原件及当前索引，无法恢复')}
-                      aria-label={t('删除文档 ') + doc.name}
-                      onConfirm={async () => {
-                        const ok = await state.removeDocument(doc.id);
-                        if (ok) await index.refresh();
-                        return ok;
-                      }}
-                    />
-                  </div>
-                </div>
-              ))
+                );
+              })
             )}
           </div>
         </Modal>
@@ -270,7 +303,10 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
           title={editing === 'create' ? t('创建知识库') : t('重命名知识库')}
           className="knowledge-editor-dialog"
           onClose={() => {
-            if (!state.busy) setEditing(null);
+            if (!state.busy) {
+              state.dismissEditorError();
+              setEditing(null);
+            }
           }}
         >
           <form
@@ -291,9 +327,9 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
-            {state.error && (
+            {state.editorError && (
               <p role="alert" className="inline-error">
-                {t(state.error)}
+                {t(state.editorError)}
               </p>
             )}
             <div className="dialog-footer">
@@ -301,7 +337,10 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 type="button"
                 variant="ghost"
                 disabled={state.busy}
-                onClick={() => setEditing(null)}
+                onClick={() => {
+                  state.dismissEditorError();
+                  setEditing(null);
+                }}
               >
                 <X size={16} />
                 {t('取消')}

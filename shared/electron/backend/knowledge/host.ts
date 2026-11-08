@@ -14,9 +14,15 @@ import { KnowledgeError, knowledgeErrorFromWire } from './errors';
 export class KnowledgeHost implements KnowledgePort {
   private child?: UtilityProcess;
   private ready?: Promise<void>;
+  private retiring?: Promise<void>;
   private pending = new Map<
     string,
-    { resolve: (value: any) => void; reject: (error: Error) => void; cleanup: () => void }
+    {
+      resolve: (value: any) => void;
+      reject: (error: Error) => void;
+      cleanup: () => void;
+      signal: AbortSignal;
+    }
   >();
   constructor(
     private directory: string,
@@ -31,38 +37,38 @@ export class KnowledgeHost implements KnowledgePort {
     signal.throwIfAborted();
     return new Promise((resolve, reject) => {
       const id = randomUUID();
-      const finish = (error: Error) => {
-        const p = this.pending.get(id);
-        if (!p) return;
-        this.pending.delete(id);
-        p.cleanup();
+      const cancelled = () => new KnowledgeError('cancelled', '知识库操作已取消。');
+      const abort = () => {
+        if (!this.pending.has(id)) return;
         try {
           this.child?.postMessage({ cancel: id });
         } catch {
-          // The port may already be gone. Preserve the original cancellation,
-          // timeout or availability error after retiring this pending request.
+          this.stop('本地知识库进程不可用。', 'unavailable');
         }
-        reject(error);
+        // Keep the caller's task/byte reservation until the utility acknowledges
+        // retirement. Rejecting now would let repeated cancellation bypass it.
       };
-      const abort = () => finish(new KnowledgeError('cancelled', '知识库操作已取消。'));
-      const timer = setTimeout(
-        () => finish(new KnowledgeError('unavailable', '本地知识库服务超时，请稍后重试。')),
-        timeout,
-      );
+      const timer = setTimeout(() => this.stop('知识库响应超时，请重试。', 'unavailable'), timeout);
       const cleanup = () => {
         clearTimeout(timer);
         signal.removeEventListener('abort', abort);
       };
-      this.pending.set(id, { resolve, reject, cleanup });
+      this.pending.set(id, {
+        resolve: (value) => (signal.aborted ? reject(cancelled()) : resolve(value)),
+        reject: (error) => reject(signal.aborted ? cancelled() : error),
+        cleanup,
+        signal,
+      });
       signal.addEventListener('abort', abort, { once: true });
       try {
         this.child!.postMessage({ id, ...call });
-      } catch (error) {
-        finish(new KnowledgeError('unavailable', '本地知识库进程不可用。'));
+      } catch {
+        this.stop('本地知识库进程不可用。', 'unavailable');
       }
     });
   }
-  initialize() {
+  initialize(): Promise<void> {
+    if (this.retiring) return this.waitForRetirement().then(() => this.initialize());
     if (this.ready) return this.ready;
     const child = utilityProcess.fork(
       path.join(__dirname, 'process.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
@@ -76,7 +82,8 @@ export class KnowledgeHost implements KnowledgePort {
     child.on('message', (m) => {
       if (this.child !== child) return;
       if (m.event) {
-        if (this.pending.has(m.id)) this.progress(m.event);
+        if (this.pending.has(m.id) && !this.pending.get(m.id)!.signal.aborted)
+          this.progress(m.event);
         return;
       }
       const p = this.pending.get(m.id);
@@ -86,14 +93,21 @@ export class KnowledgeHost implements KnowledgePort {
       m.error ? p.reject(knowledgeErrorFromWire(m.error, m.errorCode)) : p.resolve(m.value);
     });
     child.on('exit', () => {
-      if (this.child === child) this.stop('本地知识库进程已退出，请重试。', 'unavailable');
+      if (this.child !== child) return;
+      this.child = undefined;
+      this.ready = undefined;
+      for (const p of this.pending.values()) {
+        p.cleanup();
+        p.reject(new KnowledgeError('unavailable', '本地知识库进程已退出，请重试。'));
+      }
+      this.pending.clear();
     });
     this.ready = this.send<void>(
       { init: { directory: this.directory, modelPath: this.modelPath } },
       undefined,
       30000,
     ).catch((error) => {
-      this.stop();
+      if (this.child === child) this.stop();
       throw error;
     });
     return this.ready;
@@ -137,53 +151,73 @@ export class KnowledgeHost implements KnowledgePort {
   getItem(itemId: string, signal?: AbortSignal, expected?: KnowledgeItemExpectation) {
     return this.call<KnowledgeItem | null>('item', { itemId, expected }, signal);
   }
-  async close() {
-    const child = this.child;
-    if (!child) return;
-    let onExit = () => {};
-    const exited = new Promise<void>((resolve) => {
-      onExit = () => resolve();
-      child.once('exit', onExit);
-    });
+  private async waitForRetirement(work = this.retiring, timeout = 10000) {
+    if (!work) return;
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      await this.send({ op: 'close' }, undefined, 10000);
+      await Promise.race([
+        work,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(new KnowledgeError('unavailable', '知识库未能退出，暂时无法删除模型。')),
+            timeout,
+          );
+        }),
+      ]);
     } finally {
-      this.stop();
-      try {
-        await Promise.race([
-          exited,
-          new Promise<never>((_resolve, reject) => {
-            timer = setTimeout(
-              () =>
-                reject(new KnowledgeError('unavailable', '知识库进程未能及时退出，模型尚未删除。')),
-              10000,
-            );
-          }),
-        ]);
-      } finally {
-        clearTimeout(timer);
-        child.removeListener('exit', onExit);
-      }
+      clearTimeout(timer);
     }
   }
-  async unloadModel() {
-    if (!this.child) return;
-    await this.send({ op: 'unload-model' }, undefined, 30000);
-    // ONNX can retain mapped model handles until the utility process exits.
-    // Retire the idle consumer before component deletion; the next operation
-    // reopens the same catalog/index without changing its persisted data.
-    await this.close();
+  close() {
+    return this.waitForRetirement(
+      (async () => {
+        try {
+          if (this.child) await this.send({ op: 'close' }, undefined, 10000);
+        } finally {
+          this.stop();
+          await this.retiring;
+        }
+      })(),
+      20000,
+    );
+  }
+  unloadModel() {
+    return this.waitForRetirement(
+      (async () => {
+        try {
+          if (this.child) await this.send({ op: 'unload-model' }, undefined, 30000);
+        } finally {
+          // ONNX can retain mapped model handles until the utility exits.
+          await this.close();
+        }
+      })(),
+      50000,
+    );
   }
   stop(message = '知识库服务已关闭。', code: 'closed' | 'unavailable' = 'closed') {
     const child = this.child;
+    if (!child) return;
     this.child = undefined;
     this.ready = undefined;
-    child?.kill();
-    for (const p of this.pending.values()) {
-      p.cleanup();
-      p.reject(new KnowledgeError(code, message));
+    const pending = this.pending;
+    this.pending = new Map();
+    for (const p of pending.values()) p.cleanup();
+    const retired = new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        for (const p of pending.values()) p.reject(new KnowledgeError(code, message));
+        pending.clear();
+        resolve();
+      });
+    });
+    this.retiring = retired;
+    void retired.then(() => {
+      if (this.retiring === retired) this.retiring = undefined;
+    });
+    try {
+      child.kill();
+    } catch {
+      // Exit remains unconfirmed: keep reservations and block replacement.
+      // Explicit close/initialize deadlines report failure without freeing it.
     }
-    this.pending.clear();
   }
 }

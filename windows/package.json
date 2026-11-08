@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -88,6 +88,8 @@
     "jose": "^5.10.0",
     "katex": "0.18.2",
     "mammoth": "1.13.0",
+    "chardet": "2.1.1",
+    "word-extractor": "1.0.4",
     "pdf-parse": "2.4.5",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

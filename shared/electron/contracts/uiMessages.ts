@@ -47,10 +47,10 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Download and prepare Knowledge retrieval before creating a knowledge base.',
   '请先下载并准备已选择的知识库检索，再开始面试。':
     'Download and prepare the selected Knowledge retrieval before starting the interview.',
-  '知识库检索未安装，请先在本地组件中下载并完成校验。原件已保留。':
-    'Knowledge retrieval is not installed. Download and verify it in Local components. The original is kept.',
-  '知识库检索加载失败，请检查本地组件。原件已保留。':
-    'Could not load Knowledge retrieval. Check Local components. The original is kept.',
+  '知识库检索未安装，请在本地组件中下载。':
+    'Knowledge retrieval is not installed. Download it in Local components.',
+  '知识库检索加载失败，请检查本地组件。':
+    'Could not load Knowledge retrieval. Check Local components.',
   '多语言语音识别使用 CPU 时，转写可能出现明显延迟。':
     'Multilingual speech recognition may have noticeable transcription delays on CPU.',
   '麦克风未启用，不采集声音。': 'Microphone is off. No audio is captured.',
@@ -88,7 +88,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '请根据以下内容整理{0}摘要。简历保留个人经历、职责、项目、技术和成果；职位描述保留岗位定位、职责、任职要求及明确的优先条件。合并重复表述，保留事实和条件边界，不把岗位要求写成个人经历。仅提出该摘要的待确认更新，不修改其他资料。如果本次摘要有变化，且提案与已保存资料合并后简历和JD摘要都非空，请在回复末尾问一句：确认保存后是否需要生成相关面试技能；已有技能时改为询问是否更新。本次不生成技能。\n\n以下是{0}内容：\n':
     'Summarize the following {0}. For a resume, preserve experience, responsibilities, projects, technologies and results. For a job description, preserve the role, responsibilities, requirements and explicit preferences. Merge repetition while preserving factual limits and conditions. Do not present job requirements as personal experience. Propose only an update to this summary for confirmation; do not change other profile fields. If the summary changes and both the resume and job-description summaries are nonempty when this proposal is combined with my saved profile, end your reply with one question asking whether to generate relevant interview skills after I confirm and save. If I already have skills, ask whether to update them instead. Do not generate skills in this response.\n\nHere is the {0}:\n',
   '更多来源（{0}）': 'More sources ({0})',
-  'PDF、Word、PowerPoint、Excel、TXT、Markdown': 'PDF, Word, PowerPoint, Excel, TXT, Markdown',
+  '支持 PDF、Word、TXT 和 Markdown 文件': 'Supports PDF, Word, TXT and Markdown files',
   'macOS 钥匙串访问未获允许，登录信息保持原样，请允许后重试。':
     'macOS Keychain access was denied. Sign-in information is unchanged. Allow access and try again.',
   'macOS 凭据加密助手不可用，登录信息保持原样，请重新启动或修复应用。':
@@ -173,54 +173,50 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '截图文件过大或无效。': 'Screenshot file is too large or invalid.',
   '截图缩略图无效。': 'Invalid screenshot thumbnail.',
   '截图引用冲突，原始文件已保留。': 'Screenshot reference conflict. The original file is kept.',
-  '问题标题超过模型限制，请缩短该标题后重试。':
-    'The question title exceeds the model limit. Shorten it and try again.',
+  '问题标题过长，请缩短后重试。': 'The question title is too long. Shorten it and try again.',
   '文档检索片段过多，请拆分文档。':
     'The document contains too many search segments. Split it into smaller documents.',
   '无法切分检索文本。': 'Could not split the search text.',
-  '{0}未安装，请先在本地组件中下载并完成校验。原件已保留。':
-    '{0} is not installed. Download and verify it in Local components. The original is kept.',
-  '{0}加载失败，请检查本地组件。原件已保留。':
-    'Could not load {0}. Check Local components. The original is kept.',
+  '{0}未安装，请在本地组件中下载。': '{0} is not installed. Download it in Local components.',
+  '{0}加载失败，请检查本地组件。': 'Could not load {0}. Check Local components.',
   'Embedding 未初始化。': 'Embedding is not initialized.',
-  '检索文本超过 512 tokens，拒绝静默截断。':
-    'Search text exceeds 512 tokens and will not be silently truncated.',
+  '检索片段过长，请拆分文档。': 'A search segment is too long. Split the document.',
   'Embedding 返回无效向量。': 'Embedding returned an invalid vector.',
   'Embedding 返回零向量。': 'Embedding returned a zero vector.',
   项目: 'Project',
   '知识库操作已取消。': 'Knowledge base operation canceled.',
-  '本地知识库服务超时，请稍后重试。':
-    'The local knowledge service timed out. Please try again later.',
+  '知识库响应超时，请重试。': 'The knowledge service timed out. Try again.',
   '本地知识库进程不可用。': 'Local knowledge process unavailable.',
   'VoxCue 本地知识库': 'VoxCue local knowledge engine',
   '本地知识库进程已退出，请重试。': 'The local knowledge process exited. Please try again.',
-  '知识库进程未能及时退出，模型尚未删除。':
-    'The knowledge process did not exit in time. The model was not deleted.',
+  '知识库未能退出，暂时无法删除模型。':
+    'The knowledge service could not exit. The model cannot be deleted yet.',
   '知识库服务已关闭。': 'Knowledge service closed.',
-  'PDF 没有可提取文字，可能是扫描件；请先进行 OCR 后重新导入。':
-    'No text could be extracted from this PDF. It may be scanned; run OCR and import it again.',
-  'PDF 解析失败，可能已加密、损坏或格式不受支持；原件已保留。':
-    'Could not parse the PDF. It may be encrypted, damaged or unsupported. The original is kept.',
-  'DOCX 解析失败，原件已保留；请另存为 PDF、Markdown 或 TXT 后重试。':
-    'Could not parse the DOCX file. The original is kept. Save it as PDF, Markdown or TXT and try again.',
-  '此格式仅保留原件，暂不支持索引；请转换为 PDF、DOCX、Markdown 或 TXT。':
-    'Only the original is kept for this format; indexing is not supported. Convert it to PDF, DOCX, Markdown or TXT.',
-  '文本不是有效的 UTF-8 编码，请以 UTF-8 另存后重试。':
-    'The text is not valid UTF-8. Save it as UTF-8 and try again.',
+  'PDF 未提取到文字。': 'No text was found in this PDF.',
+  'PDF 解析失败。': 'PDF parsing failed.',
+  'DOCX 解析失败。': 'DOCX parsing failed.',
+  'DOC 解析失败。': 'DOC parsing failed.',
+  '仅支持 PDF、Word、TXT 和 Markdown。': 'Only PDF, Word, TXT and Markdown are supported.',
+  '资料处理中，请稍后重试。': 'Documents are being processed. Please try again shortly.',
+  '无法识别文本编码，请另存为 UTF-8 后重试。':
+    'Could not identify the text encoding. Save as UTF-8 and try again.',
+  '文件不是有效文本，请检查内容后重试。':
+    'The file does not contain valid text. Check its contents and try again.',
+  '文档没有可索引的文字。': 'The document has no indexable text.',
+  '文件超过 20 MB，请拆分文档。': 'The file exceeds 20 MB. Split it into smaller files.',
   '未知知识库操作。': 'Unknown knowledge base operation.',
-  '本地知识库处理失败，原件和已提交索引已保留；请重试或重新索引。':
-    'Local knowledge processing failed. Originals and committed indexes are kept. Retry or reindex.',
-  '知识库目录损坏。原件与备份已保留，请恢复 catalog 备份后重试。':
-    'The knowledge catalog is damaged. Originals and backups are kept. Restore a catalog backup and try again.',
-  '知识库 Schema 或模型版本不兼容，原数据已保留，不能自动覆盖。':
-    'Knowledge schema or model versions are incompatible. Existing data is kept and cannot be overwritten automatically.',
+  '知识库处理失败，请重试或重新索引。': 'Knowledge processing failed. Retry or reindex.',
+  '知识库目录损坏，请恢复备份后重试。':
+    'The knowledge catalog is damaged. Restore a backup and try again.',
+  '知识库版本不兼容，原数据已保留。':
+    'The knowledge version is incompatible. Existing data is kept.',
   '知识库停用状态损坏，数据已保留。': 'Knowledge disable state is damaged. Data is kept.',
   '知识库索引版本无效。': 'Invalid knowledge index version.',
-  '知识库索引无法恢复，原目录与 catalog 备份已保留。':
-    'Could not restore the knowledge index. The original directory and catalog backup are kept.',
+  '索引恢复失败，原数据与备份已保留。':
+    'Index recovery failed. Existing data and backups are kept.',
   '知识库元数据缺少索引。': 'An index is missing from the knowledge metadata.',
-  '知识库完整内容文件缺失或损坏，原件未删除，请重新索引该文档。':
-    'Full document content is missing or damaged. The original is kept. Reindex the document.',
+  '文档内容缺失或损坏，请重新导入。':
+    'Document content is missing or damaged. Import the document again.',
   '知识库内容格式异常。': 'Invalid knowledge content format.',
   '无效的知识文档参数。': 'Invalid knowledge document parameters.',
   '解析后的文字超过 8 MB，请拆分文档。': 'Parsed text exceeds 8 MB. Split the document.',
@@ -698,16 +694,13 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '无效检索参数。': 'Invalid search parameters.',
   '无效知识单元 ID。': 'Invalid knowledge item ID.',
   '无效资料版本。': 'Invalid document version.',
-  '知识库资料仍在索引，请等待完成或不使用知识库开始面试。':
-    'Knowledge documents are still being indexed. Wait for indexing or start without a knowledge base.',
-  '面试期间暂不启动资料索引，请结束面试后重试。':
-    'Indexing cannot start during an interview. End the interview and try again.',
+  '资料仍在索引，请稍后开始面试。': 'Documents are still being indexed. Start the interview later.',
+  '面试中无法索引，请结束后重试。':
+    'Indexing is unavailable during an interview. Try again after it ends.',
   '知识库请求过多或请求 ID 重复。': 'Too many knowledge requests or a duplicate request ID.',
-  '该文档正在处理，请先取消或等待完成。':
-    'This document is being processed. Cancel or wait for it to finish.',
+  '文档处理中，请稍后重试。': 'This document is being processed. Try again shortly.',
   '已取消，可重新索引。': 'Canceled. You can index again.',
-  '本地知识库操作失败，原件与备份已保留。':
-    'The local knowledge operation failed. Originals and backups have been kept.',
+  '知识库操作失败，请重试。': 'The knowledge operation failed. Try again.',
   '无效的知识检索参数。': 'Invalid knowledge search parameters.',
   检索本地资料: 'Searching local documents',
   '知识库检索结果格式无效。': 'Invalid knowledge search results.',
@@ -931,7 +924,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   网络搜索: 'Web search',
   聊天模型: 'Chat model',
   '加载模型…': 'Loading models…',
-  '选择模型': 'Choose model',
+  选择模型: 'Choose model',
   模型不可用: 'Model unavailable',
   '正在读取…': 'Loading…',
   刷新模型列表: 'Refresh models',
@@ -1014,7 +1007,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   本地组件尚未就绪: 'Local components are not ready',
   '{0}可在设置中调整识别方式或推理设备。':
     '{0} You can change the speech model or processing device in Settings.',
-  '请在设置中下载或查看进度。': 'Download components or check progress in Settings.',
+  '{0}组件未下载，请在设置中下载或查看进度':
+    'Not downloaded: {0}. Download components or check progress in Settings.',
   前往设置: 'Open settings',
   '正在校验本地文件…': 'Verifying local files…',
   '正在校验并准备…': 'Verifying and preparing…',
@@ -1138,6 +1132,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   搜索标题: 'Search titles',
   搜索面试记录: 'Search interview history',
   清除搜索: 'Clear search',
+  关闭错误提示: 'Dismiss error',
   条结果: 'results',
   还没有面试记录: 'No interviews yet',
   '没有符合条件的面试记录。': 'No matching interviews.',
@@ -1277,8 +1272,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   文档列表: 'Document list',
   '正在保存到本地…': 'Saving locally…',
   将文件拖放到此处: 'Drop files here',
-  '单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件。':
-    'Up to 20 files at a time, 20 MB each. Existing files are backed up before replacement.',
+  '单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件':
+    'Up to 20 files at a time, 20 MB each. Existing files are backed up before replacement',
   选择文件: 'Choose files',
   导入知识库文档: 'Import knowledge documents',
   '正在读取文档…': 'Loading documents…',
@@ -1825,17 +1820,16 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '文件为空：{0}': 'Empty file: {0}',
   '文件超过 20 MB：{0}': 'File exceeds 20 MB: {0}',
   '无法打开本地文档存储。': 'Could not open local document storage.',
-  '本地文档存储被占用，请关闭其他应用窗口后重试。':
-    'Local document storage is in use. Close other app windows and try again.',
+  '文档存储被占用，请关闭其他窗口后重试。':
+    'Document storage is in use. Close other windows and try again.',
   '本地保存失败，请检查设备存储空间。': 'Could not save locally. Check your device’s storage.',
   '名称需要 1–60 个字符。': 'Names must contain 1–60 characters.',
   '原件已保存在本地。当前仅支持 TXT 和 Markdown 文本预览。':
     'The original is saved locally. Preview is available for TXT and Markdown files only.',
   '…预览仅显示前 100 KB。': '…Preview shows only the first 100 KB.',
-  '原件备份失败，未替换已有文档。':
-    'Could not back up the original. The existing document was not replaced.',
-  '本地知识库引擎不可用，请在 VoxCue 桌面应用中重试。':
-    'The local knowledge engine is unavailable. Try again in the VoxCue desktop app.',
+  '原件备份失败，未替换文档。': 'Backup failed. The existing document was not replaced.',
+  '知识库引擎不可用，请在桌面应用中重试。':
+    'The knowledge engine is unavailable. Try again in the desktop app.',
   模型服务: 'AI service',
   模型服务提供商: 'AI service provider',
   未连接服务: 'No service connected',

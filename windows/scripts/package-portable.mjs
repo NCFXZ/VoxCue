@@ -189,6 +189,8 @@ const paths = await packager({
         'onnxruntime-common',
         'pdf-parse',
         'mammoth',
+        'word-extractor',
+        'chardet',
       ])
         await copyPackage(name);
     },

@@ -28,6 +28,9 @@ overrides:
   '@lancedb/lancedb>@huggingface/transformers': '-'
   '@lancedb/lancedb>openai': '-'
   'mammoth>argparse': '-'
+  # Legacy DOC uses only the fixed OLE reader; DOCX keeps Mammoth.
+  'word-extractor>saxes': '-'
+  'word-extractor>yauzl': '-'
 allowBuilds:
   electron: true
   esbuild: true

@@ -8,6 +8,7 @@ interface Props extends Omit<ButtonProps, 'onClick' | 'children' | 'variant' | '
   label?: string;
   iconOnly?: boolean;
   compact?: boolean;
+  fixedWidth?: boolean;
   active?: boolean;
   revision?: unknown;
   warning?: string;
@@ -23,6 +24,7 @@ function ConfirmActionButton({
   label = action,
   iconOnly = false,
   compact = false,
+  fixedWidth = false,
   active = true,
   revision,
   warning = '删除后无法恢复',
@@ -81,14 +83,17 @@ function ConfirmActionButton({
     };
   }, [armed, busy]);
   return (
-    <span className={`confirm-delete-control ${armed ? 'is-confirming' : ''}`}>
+    <span
+      className={`confirm-delete-control ${armed ? 'is-confirming' : ''}`}
+      style={fixedWidth ? { minWidth: Math.max(widths.idle, widths.confirm) } : undefined}
+    >
       <Button
         {...props}
         type={props.type || 'button'}
         className={`confirm-delete ${className} ${compact ? 'is-compact' : ''} ${armed ? 'is-confirming' : ''}`}
         style={{
           ...props.style,
-          width: armed ? widths.confirm : widths.idle,
+          width: fixedWidth ? '100%' : armed ? widths.confirm : widths.idle,
         }}
         variant={armed ? 'destructive' : 'dangerGhost'}
         size={iconOnly && !armed ? 'icon' : 'default'}

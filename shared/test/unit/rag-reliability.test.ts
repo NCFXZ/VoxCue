@@ -180,7 +180,7 @@ describe('Local RAG reliability', () => {
       name: 'a.md',
       bytes: new Uint8Array([1]),
     };
-    await expect(coordinator.call(call)).rejects.toThrow('面试期间');
+    await expect(coordinator.call(call)).rejects.toThrow('面试中无法索引，请结束后重试。');
     expect(f.knowledge.indexDocument).not.toHaveBeenCalled();
     live = false;
     let finish!: () => void;

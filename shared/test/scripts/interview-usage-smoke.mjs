@@ -116,7 +116,30 @@ try {
   };
   await question.waitFor();
   let count = 0;
-  for (const phrase of ['嗯', '好的', '谢谢', '嗯嗯嗯好的谢谢']) {
+  const ignored = ['嗯', '好的', '呃呃，哦好的？'];
+  for (const [index, phrase] of ignored.entries()) {
+    await transcript('ignored-' + index, phrase);
+    const expected = ignored.slice(0, index + 1).join(' ');
+    await floating.waitForFunction(
+      (expected) => document.querySelector('[aria-label="面试提问"]').value === expected,
+      expected,
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1300));
+    assert.equal(
+      (await requests()).length,
+      0,
+      'pure fillers must not reach the AI/provider boundary',
+    );
+    assert.equal(
+      await question.inputValue(),
+      expected,
+      'recognized original remains available for manual sending',
+    );
+  }
+  await floating.getByRole('button', { name: '发送面试问题', exact: true }).click();
+  await completed(++count);
+  assert.equal((await requests()).at(-1).turns.at(-1).content, ignored.join(' '));
+  for (const phrase of ['然后呢？', '为什么呢？', '那个', '谢谢', '嗯嗯嗯好的谢谢']) {
     const sentAt = await transcript('ack-' + count, phrase);
     await completed(++count);
     const request = (await requests()).at(-1);
@@ -262,7 +285,7 @@ try {
   ]);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: offline desktop IPC, normal automatic acknowledgement submission and manual send, 1800ms audio silence deadline including delayed finals, backlog/resumption guards, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
+    'PASS: offline desktop IPC, pure filler auto-send filtering without provider requests, retained originals and manual send, effective short follow-ups, 1800ms audio silence deadline including delayed finals, backlog/resumption guards, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
   );
 } finally {
   await closeUiApp(app);

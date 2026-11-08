@@ -9,7 +9,12 @@ import type {
   AudioSource,
   InterviewScreenshot,
 } from '../../electron/contracts/speech';
-import { AutomaticQuestionGate, QuestionBuffer, interviewAnswer } from '../services/speech';
+import {
+  AutomaticQuestionGate,
+  QuestionBuffer,
+  interviewAnswer,
+  isAutomaticQuestionFiller,
+} from '../services/speech';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
 import { sameAudioCapture, speechSelection } from '../../electron/contracts/speechSettings';
@@ -137,9 +142,10 @@ export const useInterview = create<InterviewState>((set, get) => ({
   async submitTranscript(editedQuestion, includeScreenshots = false, automatic = false) {
     try {
       const screenshotIds = includeScreenshots ? get().screenshots.map((shot) => shot.id) : [];
-      const question =
-        editedQuestion?.trim() ||
-        (screenshotIds.length ? '' : get().draftQuestion || questions.text('system'));
+      const question = automatic
+        ? questions.text('system')
+        : editedQuestion?.trim() ||
+          (screenshotIds.length ? '' : get().draftQuestion || questions.text('system'));
       if (
         (!question.trim() && !screenshotIds.length) ||
         get().generating ||
@@ -147,6 +153,11 @@ export const useInterview = create<InterviewState>((set, get) => ({
         (includeScreenshots && get().capturingScreenshot)
       )
         return;
+      if (automatic && !screenshotIds.length && isAutomaticQuestionFiller(question)) {
+        automaticQuestion.cancel();
+        automaticQuestionReady = false;
+        return;
+      }
       if (!automatic && get().mode === 'local') signalTelemetry({ type: 'manual_question' });
       if (!question.trim()) {
         await get().ask('', undefined, screenshotIds);

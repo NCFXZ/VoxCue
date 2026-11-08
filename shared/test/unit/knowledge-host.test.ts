@@ -10,16 +10,19 @@ afterEach(() => {
   for (const host of hosts.splice(0)) host.stop();
 });
 
-function setup() {
+function setup(progress = vi.fn()) {
   const child = Object.assign(new EventEmitter(), {
-    kill: vi.fn(),
+    kill: vi.fn(() => {
+      queueMicrotask(() => child.emit('exit', 0));
+      return true;
+    }),
     postMessage: vi.fn((message: any) => {
       if (message.init || message.op === 'close')
         queueMicrotask(() => child.emit('message', { id: message.id, value: null }));
     }),
   });
   native.fork.mockReturnValue(child);
-  const host = new KnowledgeHost('/synthetic/knowledge', '/synthetic/models');
+  const host = new KnowledgeHost('/synthetic/knowledge', '/synthetic/models', progress);
   hosts.push(host);
   return { host, child };
 }
@@ -59,8 +62,8 @@ it('进程退出属于可用性故障，主动关闭和取消不能回退；迟�
   await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(2));
   const id = child.postMessage.mock.calls[1][0].id;
   controller.abort();
-  await rejected;
   child.emit('message', { id, value: ['late'] });
+  await rejected;
   const pending = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
   const exited = expect(pending).rejects.toMatchObject({ code: 'unavailable' });
   await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(4));
@@ -107,7 +110,7 @@ it('取消时端口已退出仍返回 cancelled，迟到响应不能恢复请求
   expect((host as any).pending.size).toBe(0);
 });
 
-it('超时后发送取消失败仍保留 unavailable，并清除定时器和请求', async () => {
+it('超时确认进程退出后保留 unavailable，并清除定时器和请求', async () => {
   const { host, child } = setup();
   await host.initialize();
   child.postMessage.mockImplementation((message: any) => {
@@ -145,6 +148,7 @@ it.each([undefined, 'future-code'])(
 
 it('模型卸载必须等真实 exit 事件，不能在 kill 返回时宣称文件已释放', async () => {
   const { host, child } = setup();
+  child.kill.mockImplementation(() => true);
   await host.initialize();
   child.postMessage.mockImplementation((message: any) => {
     if (['unload-model', 'close'].includes(message.op))
@@ -162,4 +166,92 @@ it('模型卸载必须等真实 exit 事件，不能在 kill 返回时宣称文�
   expect(completed).toBe(true);
   expect(child.listenerCount('exit')).toBe(1);
   expect((host as any).child).toBeUndefined();
+});
+
+it('取消保留在途请求直到 utility 确认退休，丢弃进度和迟到成功', async () => {
+  const progress = vi.fn();
+  const { host, child } = setup(progress);
+  await host.initialize();
+  const controller = new AbortController();
+  const operation = host.indexDocument(
+    { documentId: 'doc', baseId: 'base', name: 'a.doc', bytes: new Uint8Array([1]) },
+    controller.signal,
+  );
+  let settled = false;
+  void operation.then(
+    () => {
+      settled = true;
+    },
+    () => {
+      settled = true;
+    },
+  );
+  const rejected = expect(operation).rejects.toMatchObject({ code: 'cancelled' });
+  await vi.waitFor(() => expect(child.postMessage).toHaveBeenCalledTimes(2));
+  const id = child.postMessage.mock.calls[1][0].id;
+  controller.abort();
+  await Promise.resolve();
+  expect(settled).toBe(false);
+  expect((host as any).pending.size).toBe(1);
+  expect(child.postMessage).toHaveBeenLastCalledWith({ cancel: id });
+  child.emit('message', { id, event: { documentId: 'doc', phase: 'ready' } });
+  expect(progress).not.toHaveBeenCalled();
+  child.emit('message', { id, value: { documentId: 'doc' } });
+  await rejected;
+  expect((host as any).pending.size).toBe(0);
+});
+
+it('kill 未确认退出时不释放任务或启动替代进程，关闭可明确超时报错', async () => {
+  const { host, child } = setup();
+  child.kill.mockImplementation(() => true);
+  await host.initialize();
+  vi.useFakeTimers();
+  try {
+    const operation = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
+    const rejected = expect(operation).rejects.toMatchObject({ code: 'closed' });
+    let settled = false;
+    void operation.then(
+      () => {
+        settled = true;
+      },
+      () => {
+        settled = true;
+      },
+    );
+    await Promise.resolve();
+    host.stop();
+    const forks = native.fork.mock.calls.length;
+    const closing = expect(host.close()).rejects.toMatchObject({ code: 'unavailable' });
+    const replacement = expect(host.initialize()).rejects.toMatchObject({ code: 'unavailable' });
+    await vi.advanceTimersByTimeAsync(20001);
+    await Promise.all([closing, replacement]);
+    expect(settled).toBe(false);
+    expect(native.fork).toHaveBeenCalledTimes(forks);
+    child.emit('exit', 0);
+    await rejected;
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('卸载请求超时且 kill 未退出时明确失败，仍阻止替代进程', async () => {
+  const { host, child } = setup();
+  child.kill.mockImplementation(() => true);
+  await host.initialize();
+  child.postMessage.mockImplementation(() => {});
+  vi.useFakeTimers();
+  try {
+    const unloading = expect(host.unloadModel()).rejects.toMatchObject({ code: 'unavailable' });
+    const forks = native.fork.mock.calls.length;
+    await vi.advanceTimersByTimeAsync(50001);
+    await unloading;
+    expect(child.kill).toHaveBeenCalledOnce();
+    expect(native.fork).toHaveBeenCalledTimes(forks);
+    child.emit('exit', 0);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
 });
