@@ -1,3 +1,7 @@
+## 1.1.1 Windows 接续
+
+用户确认在 Windows 本机接续，逐条变化、预期、平台差异与执行顺序见 [Windows 1.1.0 → 1.1.1 更新与测试交接](../docs/WINDOWS_1.1.1_HANDOFF.md)，编号 W001–W032。先同步本机生成清单，补齐五档调度遗漏的帮助窗／记录滚动／额度／更新专项；真实 1.1.0 profile 升级与合成安装引擎分别验证。Mac 结果不代替 Windows 原生结论。
+
 ## 1.1.1 Mac 验证入口
 
 最终 Mac 版本为 1.1.1，逐项来源见 [Mac 接续清单追加项](../docs/MACOS_1.1.0_HANDOFF.md)。默认仍为 ⌃⇧，Mac 录入另允许 ⌘ 并使用原生符号；Windows 绑定与字符格式保持。`shortcut-settings` 包含仅向自有合成窗口派发的 AppKit Command 路径，`interview-shortcuts` 验证当前动作、按语言预留宽度、主进程状态同步及实际临时 HTTP／WS 配对驱动的展开动画。
