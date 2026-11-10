@@ -1,6 +1,10 @@
 import { t, uiLocale } from '../i18n';
 import type { AccountQuota, AccountUsage } from '../../electron/contracts/accountUsage';
 
+export function orderedAccountQuotas(quotas: readonly AccountQuota[]) {
+  return [...quotas].sort((a, b) => Number(isFiveHourQuota(b)) - Number(isFiveHourQuota(a)));
+}
+
 /** Use the same bound provider snapshot as AI settings; never invent a five-hour window. */
 export function accountUsageSummary(usage: AccountUsage | null) {
   const summary = accountUsageSummaryParts(usage);
@@ -22,16 +26,14 @@ export function accountUsageSummaryParts(
 } | null {
   if (usage?.status !== 'available') return null;
   const provider = usage.provider === 'chatgpt' ? 'ChatGPT' : 'Copilot';
-  const low = usage.quotas
-    .filter(isQuotaLow)
-    .sort((a, b) => Number(isFiveHourQuota(b)) - Number(isFiveHourQuota(a)));
+  const low = orderedAccountQuotas(usage.quotas.filter(isQuotaLow));
   const fiveHour = usage.quotas.find(isFiveHourQuota);
   const quota = fiveHour ?? usage.quotas[0];
   const inline = mode === 'sidebar' && usage.provider === 'chatgpt' && usage.quotas.length === 1;
   const showAll = mode === 'all' || (mode === 'sidebar' && low.length > 0 && !!fiveHour);
   const selected = showAll
     ? fiveHour
-      ? [...usage.quotas].sort((a, b) => Number(isFiveHourQuota(b)) - Number(isFiveHourQuota(a)))
+      ? orderedAccountQuotas(usage.quotas)
       : [low[0] ?? quota]
     : low.length
       ? low

@@ -7,18 +7,21 @@ import {
   shortcutFromEvent,
   shortcutPreview,
   displayShortcut,
+  shortcutModifierHint,
   type ShortcutAction,
 } from '../../electron/contracts/shortcuts';
 import { Button } from './ui/button';
 import { Refresh } from './icons';
 
 export function ShortcutSettings() {
+  const mac = window.desktop?.platform === 'macos';
   const { state, loading, error, call } = useShortcuts();
   const [recording, setRecording] = useState<ShortcutAction | null>(null);
   const [feedback, setFeedback] = useState<{ action: ShortcutAction; text: string } | null>(null);
   const [preview, setPreview] = useState('');
   const pendingKey = useRef<string | null | undefined>(undefined);
   const heldKey = useRef<{ key: string; code?: string } | null>(null);
+  const commandHeld = useRef(false);
   const rejectedAttempt = useRef(false);
   const lastModifiers = useRef({ ctrlKey: false, altKey: false, shiftKey: false, metaKey: false });
   const saving = useRef(false);
@@ -41,6 +44,7 @@ export function ShortcutSettings() {
     setPreview('');
     pendingKey.current = undefined;
     heldKey.current = null;
+    commandHeld.current = false;
     void call({ op: 'capture', active: false });
   };
   useEffect(() => {
@@ -50,11 +54,12 @@ export function ShortcutSettings() {
       event.preventDefault();
       event.stopImmediatePropagation();
       if (!captureRequested.current || event.repeat || event.isComposing || saving.current) return;
+      if (mac && (event.key === 'Meta' || event.metaKey)) commandHeld.current = true;
       lastModifiers.current = {
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
         shiftKey: event.shiftKey,
-        metaKey: event.metaKey,
+        metaKey: event.metaKey || (mac && commandHeld.current),
       };
       rejectedAttempt.current = false;
       if (
@@ -94,13 +99,14 @@ export function ShortcutSettings() {
         setPreview('');
         setFeedback({
           action: recording,
-          text: '快捷键需包含 Ctrl、Shift 或 Alt 中的至少一个',
+          text: shortcutModifierHint(mac),
         });
       }
     };
     const up = (event: KeyboardEvent) => {
       event.preventDefault();
       event.stopImmediatePropagation();
+      if (mac && event.key === 'Meta') commandHeld.current = false;
       if (!captureRequested.current || event.isComposing) return;
       const held = heldKey.current;
       const modifier = ['Control', 'Alt', 'Shift', 'Meta', 'AltGraph'].includes(event.key);
@@ -111,11 +117,20 @@ export function ShortcutSettings() {
           : held.key.toLowerCase() === event.key.toLowerCase());
       if (releasingKey) heldKey.current = null;
       if (rejectedAttempt.current) return;
+      // AppKit can omit the letter's keyup while Command is held. Preserve the
+      // last complete chord and finish on Command release in that case.
+      const commandChord =
+        mac &&
+        typeof pendingKey.current === 'string' &&
+        pendingKey.current.split('+').includes('Command');
+      const commandRelease = commandChord && event.key === 'Meta' && !!held;
+      if (commandRelease) heldKey.current = null;
       const modifiers = {
         ctrlKey: event.ctrlKey,
         altKey: event.altKey,
         shiftKey: event.shiftKey,
-        metaKey: event.metaKey,
+        metaKey:
+          mac && event.key === 'Meta' ? false : event.metaKey || (mac && commandHeld.current),
       };
       const remaining = {
         ...modifiers,
@@ -125,18 +140,21 @@ export function ShortcutSettings() {
       setPreview(shortcutPreview(remaining, window.desktop?.platform === 'macos'));
       if (saving.current) return;
       if (modifier && heldKey.current) {
-        try {
-          pendingKey.current = shortcutFromEvent(remaining, window.desktop?.platform === 'macos');
-        } catch {
-          pendingKey.current = undefined;
+        if (!commandChord) {
+          try {
+            pendingKey.current = shortcutFromEvent(remaining, window.desktop?.platform === 'macos');
+          } catch {
+            pendingKey.current = undefined;
+          }
         }
         return;
       }
       if (!modifier && held && !releasingKey) return;
       let accelerator: string | null | undefined;
       try {
-        accelerator =
-          pendingKey.current === null && ['Backspace', 'Delete'].includes(event.key)
+        accelerator = commandRelease
+          ? pendingKey.current
+          : pendingKey.current === null && ['Backspace', 'Delete'].includes(event.key)
             ? null
             : shortcutFromEvent(
                 { ...(held ? modifiers : lastModifiers.current), key: event.key, code: event.code },
@@ -150,7 +168,7 @@ export function ShortcutSettings() {
       } catch {
         rejectedAttempt.current = true;
         setPreview('');
-        setFeedback({ action: recording, text: '快捷键需包含 Ctrl、Shift 或 Alt 中的至少一个' });
+        setFeedback({ action: recording, text: shortcutModifierHint(mac) });
         return;
       }
       sawKey = true;
@@ -189,9 +207,13 @@ export function ShortcutSettings() {
       window.removeEventListener('keydown', down, true);
       window.removeEventListener('keyup', up, true);
     };
-  }, [recording, call]);
+  }, [recording, call, mac]);
   return (
-    <section className="shortcut-settings" aria-label={t('快捷键')}>
+    <section
+      className="shortcut-settings"
+      aria-label={t('快捷键')}
+      data-shortcut-platform={mac ? 'macos' : undefined}
+    >
       {shortcutActions.map((action) => {
         const conflict = state.conflicts.find((item) => item.action === action);
         const message =
@@ -227,6 +249,7 @@ export function ShortcutSettings() {
                 setPreview('');
                 pendingKey.current = undefined;
                 heldKey.current = null;
+                commandHeld.current = false;
                 rejectedAttempt.current = false;
                 captureRequested.current = true;
                 await call({ op: 'capture', active: true });
@@ -236,7 +259,7 @@ export function ShortcutSettings() {
               <kbd>
                 {recording === action
                   ? t(preview || '请按快捷键…')
-                  : t(displayShortcut(state.bindings[action]))}
+                  : t(displayShortcut(state.bindings[action], mac))}
               </kbd>
             </Button>
           </div>

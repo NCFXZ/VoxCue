@@ -20,6 +20,10 @@ const overrides =
 const includedDependency = (owner, dependency) => overrides[`${owner}>${dependency}`] !== '-';
 
 export async function buildMacApp(output, publicKey) {
+  const { createMobileAssets } = require(
+    path.join(root, 'dist-electron/shared/electron/backend/remoteConnection/assets.js'),
+  );
+  await createMobileAssets(path.join(root, 'dist')).read('/');
   // Fail before packaging if the established identity is unavailable; never rotate
   // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
   const signing = await loadDevelopmentSigning();
@@ -159,6 +163,7 @@ export async function buildMacApp(output, publicKey) {
           '@github/copilot-sdk',
           '@github/copilot-sdk-darwin-arm64',
           'jose',
+          'ws',
           'adm-zip',
           'electron-updater',
           'sherpa-onnx-node',

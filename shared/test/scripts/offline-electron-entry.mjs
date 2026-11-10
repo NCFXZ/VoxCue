@@ -48,6 +48,15 @@ export async function offlineElectronEntry(
   const entry = path.join(testRoot, 'offline-electron-entry.cjs');
   const body = [
     "const { app, net } = require('electron');",
+    'const isolatedProfile = process.env.COPILOT_TEST_USER_DATA;',
+    'if (isolatedProfile) {',
+    '  const path = require("node:path"), fs = require("node:fs");',
+    '  if (!path.resolve(isolatedProfile).startsWith(' +
+      JSON.stringify(testRoot + path.sep) +
+      ')) throw Error("Owned temporary profile required");',
+    '  fs.mkdirSync(isolatedProfile, { recursive: true, mode: 0o700 });',
+    '  app.setPath("userData", isolatedProfile); app.setPath("sessionData", isolatedProfile);',
+    '}',
     'app.getPreferredSystemLanguages = () => ' + JSON.stringify(preferredLanguages) + ';',
     // A direct fixture entry otherwise reports the Electron host's version.
     'app.getVersion = () => require(' +

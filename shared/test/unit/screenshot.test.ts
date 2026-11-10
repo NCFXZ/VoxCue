@@ -4,12 +4,17 @@ import { EventEmitter } from 'node:events';
 const native = vi.hoisted(() => ({
   getSources: vi.fn(),
   getDisplayMatching: vi.fn(),
+  getDisplayNearestPoint: vi.fn(),
   getAllDisplays: vi.fn(),
   getMediaAccessStatus: vi.fn(),
 }));
 vi.mock('electron', () => ({
   desktopCapturer: { getSources: native.getSources },
-  screen: { getDisplayMatching: native.getDisplayMatching, getAllDisplays: native.getAllDisplays },
+  screen: {
+    getDisplayMatching: native.getDisplayMatching,
+    getDisplayNearestPoint: native.getDisplayNearestPoint,
+    getAllDisplays: native.getAllDisplays,
+  },
   systemPreferences: { getMediaAccessStatus: native.getMediaAccessStatus },
 }));
 import {
@@ -91,6 +96,7 @@ beforeEach(() => {
     scaleFactor: 2,
   });
   native.getAllDisplays.mockReturnValue([{}, {}]);
+  native.getDisplayNearestPoint.mockImplementation(() => native.getDisplayMatching());
   native.getMediaAccessStatus.mockReturnValue('granted');
   native.getSources.mockResolvedValue([source()]);
 });
@@ -107,6 +113,30 @@ it('只选择浮窗所在显示器，限制图片尺寸并返回临时附件', a
   expect(result).toEqual({ name: 'screenshot.png', bytes: new Uint8Array([137, 80, 78, 71]) });
   expect(other.thumbnail.toPNG).not.toHaveBeenCalled();
   expect(current.thumbnail.toPNG).toHaveBeenCalledOnce();
+});
+it('Mac uses the toolbar anchor when the reserved transparent width overlaps another display', async () => {
+  const wrong = source('1'),
+    correct = source('2');
+  native.getSources.mockResolvedValue([wrong, correct]);
+  native.getDisplayNearestPoint.mockReturnValue({
+    id: 2,
+    size: { width: 1920, height: 1080 },
+    scaleFactor: 2,
+  });
+  native.getDisplayMatching.mockReturnValue({
+    id: 1,
+    size: { width: 3840, height: 2160 },
+    scaleFactor: 1,
+  });
+  const owner = {
+    isDestroyed: () => false,
+    getBounds: () => ({ x: -640, y: -200, width: 1000, height: 700 }),
+  } as unknown as BrowserWindow;
+  await captureFile(owner, 'darwin', new AbortController().signal, undefined, { x: -140, y: -176 });
+  expect(native.getDisplayNearestPoint).toHaveBeenCalledWith({ x: -140, y: -176 });
+  expect(native.getDisplayMatching).not.toHaveBeenCalled();
+  expect(correct.thumbnail.toPNG).toHaveBeenCalledOnce();
+  expect(wrong.thumbnail.toPNG).not.toHaveBeenCalled();
 });
 it('单屏兼容缺少显示器 ID，多屏不能静默截取其他屏幕', async () => {
   native.getSources.mockResolvedValue([source('')]);

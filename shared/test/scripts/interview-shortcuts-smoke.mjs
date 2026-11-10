@@ -5,15 +5,26 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, connectUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
+import { captureRequested } from './capture-requested.mjs';
+import { once } from 'node:events';
+import workspace from '../../scripts/workspace.mjs';
 
 // Isolated interview UI: synthetic account and speech ports, no
-// hardware capture, real credentials, network, model download or saved images.
+// hardware capture, real credentials, external services, model download or saved images.
+// Device-row motion uses a temporary real private-interface HTTP/WS pairing.
 const fixture = path.join(testRoot, 'interview-shortcuts-entry.cjs');
 await writeFile(
   fixture,
   `
-const {globalShortcut,dialog,systemPreferences,nativeImage}=require('electron');
-const test=globalThis.shortcutUi={shortcuts:new Map(),windowErrors:[],reduced:false};
+const {globalShortcut,dialog,systemPreferences,nativeImage,BrowserWindow}=require('electron');
+const test=globalThis.shortcutUi={shortcuts:new Map(),windowErrors:[],uncaught:[],reduced:false};
+test.passthrough=[];
+process.on('uncaughtExceptionMonitor',error=>test.uncaught.push(error.message));
+const mousePassthrough=BrowserWindow.prototype.setIgnoreMouseEvents;
+BrowserWindow.prototype.setIgnoreMouseEvents=function(ignore,...args){
+ if(this.webContents.getURL().endsWith('#interview-shortcuts'))test.passthrough.push(ignore);
+ return mousePassthrough.call(this,ignore,...args);
+};
 test.keys=['Control+Shift+H','Control+Shift+P','Control+Shift+T','Control+Shift+M',
   'Control+Shift+A','Control+Shift+Enter','Control+Shift+Up','Control+Shift+Down','Control+Shift+S'];
 test.physicalKey=key=>({'Control+Shift+H':'Control+Alt+Shift+F8',
@@ -54,6 +65,7 @@ const app = await electron.launch({
 });
 const errors = [];
 let configuration;
+let phone;
 const invoke = (key) =>
   app.evaluate((_electron, key) => {
     const callback = globalThis.shortcutUi.shortcuts.get(key);
@@ -340,6 +352,189 @@ try {
     throw Error('Default shortcut helper did not appear');
   };
   let help = await findHelp();
+  const helpLabel = async (action, label, width) => {
+    await helpPage.waitForFunction(
+      ({ action, label }) =>
+        document.querySelector(`[data-shortcut-action="${action}"] .floating-shortcut-action-label`)
+          ?.textContent === label,
+      { action, label },
+      { polling: 25 },
+    );
+    if (width !== undefined)
+      assert.ok(
+        Math.abs(
+          (await helpPage
+            .locator('.floating-shortcut-help')
+            .evaluate((node) => node.getBoundingClientRect().width)) - width,
+        ) <=
+          1 / 64,
+        'Action text must not change help width',
+      );
+  };
+  await helpLabel('toggle-window', '隐藏面试窗口');
+  await helpLabel('toggle-panels', '收起面试面板');
+  await helpLabel('toggle-transcript', '收起转写面板');
+  await helpLabel('toggle-microphone', '关闭麦克风');
+  await helpLabel('toggle-system-audio', '关闭系统音频');
+  if (process.platform === 'darwin')
+    assert.equal(
+      await app.evaluate(({ BrowserWindow }) => {
+        const windows = BrowserWindow.getAllWindows();
+        const owner = windows.find((win) => win.webContents.getURL().endsWith('#interview'));
+        const helper = windows.find((win) =>
+          win.webContents.getURL().endsWith('#interview-shortcuts'),
+        );
+        return helper.getParentWindow()?.id === owner.id;
+      }),
+      true,
+      'The Mac help window must stay above its interview parent',
+    );
+  await helpPage.emulateMedia({ reducedMotion: 'no-preference' });
+  const sampleHelp = (start) =>
+    helpPage.evaluate((start) => {
+      if (start) {
+        window.shortcutHelpFrames = [];
+        window.samplingShortcutHelp = true;
+        const sample = () => {
+          if (!window.samplingShortcutHelp) return;
+          const rect = document.querySelector('.floating-shortcut-help').getBoundingClientRect();
+          window.shortcutHelpFrames.push({
+            height: rect.height,
+            width: rect.width,
+            bottom: rect.bottom,
+          });
+          requestAnimationFrame(sample);
+        };
+        sample();
+        return;
+      }
+      window.samplingShortcutHelp = false;
+      return window.shortcutHelpFrames;
+    }, start);
+  const settledHelp = () =>
+    helpPage.locator('.floating-shortcut-remote').evaluate(async (node) => {
+      node.getBoundingClientRect();
+      await Promise.all(
+        node
+          .getAnimations({ subtree: true })
+          .map((animation) => animation.finished.catch(() => {})),
+      );
+    });
+  const assertHelpMotion = (frames, growing) => {
+    const first = frames[0],
+      last = frames.at(-1);
+    assert.ok(
+      growing ? last.height > first.height + 40 : last.height < first.height - 40,
+      JSON.stringify(frames),
+    );
+    assert.ok(
+      frames.some(
+        (frame) =>
+          frame.height > Math.min(first.height, last.height) + 1 &&
+          frame.height < Math.max(first.height, last.height) - 1,
+      ),
+      'Connected rows must change the visible window height smoothly',
+    );
+    frames.forEach((frame, index) => {
+      assert.ok(Math.abs(frame.width - first.width) <= 1 / 64);
+      assert.ok(
+        Math.abs(frame.bottom - first.bottom) <= 1 / 64,
+        'The compact help keeps its bottom anchor',
+      );
+      if (index)
+        assert.ok(
+          growing
+            ? frame.height >= frames[index - 1].height - 1 / 64
+            : frame.height <= frames[index - 1].height + 1 / 64,
+          'Connection motion must not reverse',
+        );
+    });
+  };
+  const pairing = await floating.evaluate(() => window.desktop.remoteConnection({ op: 'start' }));
+  assert.equal(
+    pairing.state.status,
+    'waiting',
+    pairing.state.error ?? 'Private interface required',
+  );
+  const origin = pairing.state.addresses[0];
+  const token = new URLSearchParams(new URL(pairing.pairing.url).hash.slice(1)).get('pair');
+  const response = await fetch(origin + '/pair', {
+    method: 'POST',
+    headers: { Origin: origin, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token, name: 'Owned shortcut phone' }),
+  });
+  assert.equal(response.status, 200);
+  const pending = await response.json();
+  const WebSocket = workspace.platformRequire('ws');
+  phone = new WebSocket(origin.replace('http:', 'ws:') + '/connect', { origin });
+  phone.on('error', () => {});
+  await once(phone, 'open');
+  const notice = once(phone, 'message');
+  phone.send(JSON.stringify({ type: 'authenticate', protocolVersion: 1, pendingId: pending.id }));
+  assert.equal(JSON.parse((await notice)[0].toString()).type, 'pending');
+  await sampleHelp(true);
+  await floating.evaluate(
+    (id) => window.desktop.remoteConnection({ op: 'approve', id }),
+    pending.id,
+  );
+  await helpPage.waitForFunction(
+    () => document.querySelector('.floating-shortcut-remote').dataset.connected === 'true',
+  );
+  await settledHelp();
+  assertHelpMotion(await sampleHelp(false), true);
+  assert.equal(await help.getByText('向上滚动设备内容', { exact: true }).isVisible(), true);
+  assert.equal(await help.getByText('向下滚动设备内容', { exact: true }).isVisible(), true);
+  await captureRequested(helpPage, 'interview-shortcut-device-connected');
+  await sampleHelp(true);
+  await floating.evaluate(() => window.desktop.remoteConnection({ op: 'disconnect' }));
+  await helpPage.waitForFunction(
+    () => document.querySelector('.floating-shortcut-remote').dataset.connected === 'false',
+  );
+  await settledHelp();
+  assertHelpMotion(await sampleHelp(false), false);
+  assert.equal(await help.getByText('向上滚动设备内容', { exact: true }).isVisible(), false);
+  const compact = await help.evaluate((node) => {
+    const last = node
+      .querySelector('.floating-scroll > dl > div:last-child')
+      .getBoundingClientRect();
+    const rect = node.getBoundingClientRect();
+    const send = node.querySelector('[data-shortcut-action="submit-input"]');
+    return {
+      gap: rect.bottom - last.bottom,
+      height: rect.height,
+      width: rect.width,
+      columnGap:
+        send.querySelector('dd').getBoundingClientRect().left -
+        send.querySelector('dt').getBoundingClientRect().right,
+    };
+  });
+  assert.ok(
+    compact.gap <= 14 && compact.height < 320,
+    'Compact help has no unused bottom block: ' + JSON.stringify(compact),
+  );
+  assert.ok(
+    compact.columnGap >= 16 && compact.columnGap <= 24,
+    'Chinese help must fit its actual label/key content: ' + JSON.stringify(compact),
+  );
+  await captureRequested(help, 'interview-shortcut-help-compact');
+  if (process.platform === 'darwin') {
+    await helpPage.mouse.move(299, 1);
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 3000;
+      while (globalThis.shortcutUi.passthrough.at(-1) !== true && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      if (globalThis.shortcutUi.passthrough.at(-1) !== true)
+        throw Error('Transparent help space must pass through');
+    });
+    await help.getByRole('button', { name: '关闭快捷键帮助', exact: true }).hover();
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 3000;
+      while (globalThis.shortcutUi.passthrough.at(-1) !== false && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      if (globalThis.shortcutUi.passthrough.at(-1) !== false)
+        throw Error('The help close button must accept input');
+    });
+  }
   assert.deepEqual(await keyState(), Array(9).fill(true));
   await floating.waitForFunction(
     () =>
@@ -365,15 +560,37 @@ try {
     await shortcutsToggle.evaluate(buttonDesign),
     await transcriptToggle.evaluate(buttonDesign),
   );
-  assert.deepEqual(await help.locator('kbd').allTextContents(), [
-    'Ctrl+Shift+H',
-    'Ctrl+Shift+P',
-    'Ctrl+Shift+T',
-    'Ctrl+Shift+M',
-    'Ctrl+Shift+A',
-    'Ctrl+Shift+Enter',
-    'Ctrl+Shift+S',
-  ]);
+  assert.deepEqual(
+    await help.locator('kbd:visible').allTextContents(),
+    process.platform === 'darwin'
+      ? ['⌃⇧H', '⌃⇧P', '⌃⇧T', '⌃⇧M', '⌃⇧A', '⌃⇧↩', '⌃⇧S']
+      : [
+          'Ctrl+Shift+H',
+          'Ctrl+Shift+P',
+          'Ctrl+Shift+T',
+          'Ctrl+Shift+M',
+          'Ctrl+Shift+A',
+          'Ctrl+Shift+Enter',
+          'Ctrl+Shift+S',
+        ],
+  );
+  await captureRequested(helpPage, 'interview-shortcut-help');
+  if (process.platform === 'darwin')
+    await app.evaluate(async ({ app, screen }) => {
+      // Dock hiding changes the Mac work area; establish the native layout
+      // before asserting that the subsequent opacity-only transition is inert.
+      const deadline = Date.now() + 3000;
+      let previous = '',
+        stableSince = Date.now();
+      while (Date.now() < deadline) {
+        const area = JSON.stringify(screen.getAllDisplays().map((display) => display.workArea));
+        if (app.dock.isVisible() || area !== previous) stableSince = Date.now();
+        else if (Date.now() - stableSince >= 200) return;
+        previous = area;
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      }
+      throw Error('Mac Dock/work area did not settle before the native fade');
+    });
   const bounds = await app.evaluate(({ BrowserWindow, screen }) => {
     const owner = BrowserWindow.getAllWindows().find((win) =>
       win.webContents.getURL().endsWith('#interview'),
@@ -387,6 +604,7 @@ try {
     };
   });
   assert.ok(Math.abs(bounds.help.x - bounds.area.x - 16) <= 1);
+  assert.equal(bounds.help.width, process.platform === 'darwin' ? 300 : 360);
   assert.ok(
     Math.abs(bounds.help.y + bounds.help.height - bounds.area.y - bounds.area.height + 16) <= 1,
   );
@@ -396,9 +614,14 @@ try {
   assert.ok(toolbarTop >= bounds.area.y && toolbarTop <= bounds.area.y + 64);
   const helperState = await helpPage.evaluate(() => window.desktop.interviewShortcutsState());
   assert.deepEqual(Object.keys(helperState).sort(), [
+    'collapsed',
     'deviceConnected',
+    'microphoneMuted',
     'open',
     'rendererRevision',
+    'systemAudioMuted',
+    'transcriptVisible',
+    'visible',
   ]);
   assert.ok(helperState.rendererRevision > 0);
   await helpPage.reload();
@@ -422,6 +645,15 @@ try {
   await assert.rejects(
     () => helpPage.evaluate(() => window.desktop.setInterviewShortcutsOpen(true)),
     /Invalid request/,
+  );
+  await helpPage.evaluate(async () => {
+    window.desktop.confirmInterviewEnd();
+    await window.desktop.interviewShortcutsState();
+  });
+  assert.equal(
+    await floating.locator('.floating-toolbar').isVisible(),
+    true,
+    'Help cannot terminate its interview owner',
   );
 
   await waitVisible(true);
@@ -447,6 +679,7 @@ try {
     };
   });
   await waitVisible(false);
+  await helpLabel('toggle-window', '显示面试窗口');
   await invoke('Control+Shift+S');
   await floating.waitForFunction(
     () => document.querySelectorAll('.floating-screenshot-preview').length === 1,
@@ -479,6 +712,11 @@ try {
         (await window.desktop.interviewState())[field] === expected,
       { field, expected: !hiddenLayout[field] },
     );
+    await helpLabel(
+      field === 'collapsed' ? 'toggle-panels' : 'toggle-transcript',
+      '展开' + (field === 'collapsed' ? '面试面板' : '转写面板'),
+      compact.width,
+    );
     await invoke(key);
     await waitForAsync(
       floating,
@@ -486,6 +724,11 @@ try {
         !document.querySelector('.floating-shell').dataset.panelMotion &&
         (await window.desktop.interviewState())[field] === expected,
       { field, expected: hiddenLayout[field] },
+    );
+    await helpLabel(
+      field === 'collapsed' ? 'toggle-panels' : 'toggle-transcript',
+      '收起' + (field === 'collapsed' ? '面试面板' : '转写面板'),
+      compact.width,
     );
   }
   assert.deepEqual(
@@ -532,6 +775,7 @@ try {
     await app.evaluate(() => globalThis.shortcutUi.releaseInput?.());
   }
   await floating.getByRole('status', { name: '麦克风：未启用', exact: true }).waitFor();
+  await helpLabel('toggle-microphone', '打开麦克风', compact.width);
   assert.deepEqual(
     (await nativeWindows()).map((win) => win.visible),
     [false, false],
@@ -542,10 +786,13 @@ try {
   );
   await invoke('Control+Shift+M');
   await floating.getByRole('status', { name: '麦克风：正常', exact: true }).waitFor();
+  await helpLabel('toggle-microphone', '关闭麦克风', compact.width);
   await invoke('Control+Shift+A');
   await floating.getByRole('status', { name: '系统音频：未启用', exact: true }).waitFor();
+  await helpLabel('toggle-system-audio', '打开系统音频', compact.width);
   await invoke('Control+Shift+A');
   await floating.getByRole('status', { name: '系统音频：正常', exact: true }).waitFor();
+  await helpLabel('toggle-system-audio', '关闭系统音频', compact.width);
   await floating.locator('textarea').evaluate((input) => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(
       input, 'Synthetic question sent while fully hidden',
@@ -575,11 +822,13 @@ try {
         fade.frames.some(
           (frame) => frame[index].visible && frame[index].opacity > 0 && frame[index].opacity < 1,
         ),
+        'Expected native fade: ' + JSON.stringify({ index, fade }),
       );
     assert.ok(
       fade.frames.every(
         (frame) => JSON.stringify(frame[index].bounds) === JSON.stringify(initial[index].bounds),
       ),
+      'Native fade moved bounds: ' + JSON.stringify({ index, initial, fade }),
     );
   }
   await invoke('Control+Shift+H');
@@ -659,7 +908,22 @@ try {
   );
   assert.equal(await floating.locator('.floating-panels.answer-only').count(), 0);
   assert.equal(await help.isVisible(), true);
-  assert.deepEqual((await nativeWindows())[1].bounds, bounds.help);
+  const expectedHelp =
+    process.platform === 'darwin'
+      ? await app.evaluate(({ BrowserWindow, screen }) => {
+          const owner = BrowserWindow.getAllWindows()
+            .find((win) => win.webContents.getURL().endsWith('#interview'))
+            .getBounds();
+          const area = screen.getDisplayNearestPoint({
+            x: Math.round(owner.x + owner.width / 2),
+            y: owner.y + 24,
+          }).workArea;
+          const width = Math.min(300, Math.max(1, area.width - 32));
+          const height = Math.min(380, Math.max(1, area.height - 32));
+          return { x: area.x + 16, y: area.y + area.height - height - 16, width, height };
+        })
+      : bounds.help;
+  assert.deepEqual((await nativeWindows())[1].bounds, expectedHelp);
 
   const material = async () => {
     const style = (node) => ({
@@ -693,6 +957,30 @@ try {
   });
   const english = helpPage.getByRole('region', { name: 'Shortcuts', exact: true });
   await english.waitFor();
+  assert.doesNotMatch(await english.innerText(), /\p{Script=Han}/u);
+  const englishWidth = (await english.boundingBox()).width;
+  for (const [key, action, first, second] of [
+    [
+      'Control+Shift+T',
+      'toggle-transcript',
+      'Expand the transcript panel',
+      'Collapse the transcript panel',
+    ],
+    ['Control+Shift+P', 'toggle-panels', 'Expand interview panels', 'Collapse interview panels'],
+    ['Control+Shift+M', 'toggle-microphone', 'Turn on the microphone', 'Turn off the microphone'],
+    ['Control+Shift+A', 'toggle-system-audio', 'Turn on system audio', 'Turn off system audio'],
+  ]) {
+    await invoke(key);
+    await helpLabel(action, first, englishWidth);
+    await invoke(key);
+    await helpLabel(action, second, englishWidth);
+  }
+  if (process.platform === 'darwin')
+    assert.ok(
+      (await english.boundingBox()).width > compact.width + 16,
+      'English gets only the additional content width it needs',
+    );
+  await captureRequested(english, 'interview-shortcut-help-english');
   assert.ok(
     await english.evaluate((node) => {
       const scroll = node.querySelector('.floating-scroll');
@@ -708,6 +996,10 @@ try {
     dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
   });
   await help.waitFor();
+  assert.ok(
+    Math.abs((await help.boundingBox()).width - compact.width) <= 1 / 64,
+    'Returning to Chinese tightens the help again',
+  );
   const helperClosed = helpPage.waitForEvent('close');
   await helpPage.keyboard.press('Escape').catch((error) => {
     if (!helpPage.isClosed()) throw error;
@@ -884,6 +1176,7 @@ try {
     false,
   );
   assert.equal(await app.evaluate(() => globalThis.shortcutUi.windowErrors.length), 1);
+  assert.deepEqual(await app.evaluate(() => globalThis.shortcutUi.uncaught), []);
   assert.deepEqual(errors, []);
   console.log(
     'PASS: isolated remote/transcription configurable shortcuts, hidden microphone toggle, microphone draft/1800ms answer, disabled system settings, default screen-bottom-left help, matching toggles, native fade/reversal/reduced motion, panel preferences, opacity/language, renderer revisions and owned-window cleanup. No hardware or real credentials.',
@@ -895,5 +1188,6 @@ try {
   );
   throw error;
 } finally {
+  phone?.terminate();
   await closeUiApp(app);
 }

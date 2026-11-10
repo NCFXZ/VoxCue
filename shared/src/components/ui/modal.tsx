@@ -125,6 +125,11 @@ export function Modal({
   const heading = !hideHeader && (
     <header className="dialog-heading">
       <div className="dialog-title">
+        {destructive && (
+          <span className="danger-icon">
+            <Trash size={20} />
+          </span>
+        )}
         <div>
           <div className="dialog-title-line">
             <h2>{title}</h2>
@@ -132,11 +137,6 @@ export function Modal({
           </div>
           {subtitle && <p className="dialog-subtitle">{t(subtitle)}</p>}
         </div>
-        {destructive && (
-          <span className="danger-icon">
-            <Trash size={20} />
-          </span>
-        )}
         {icon && !destructive && <span className="dialog-icon">{icon}</span>}
       </div>
       <div className="dialog-actions">

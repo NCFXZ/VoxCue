@@ -3,6 +3,7 @@ import type { PresentationCapabilities } from './contracts/presentation';
 /** Window lifecycle and bounded system background; controls render in shared React. */
 export interface NativePresentation {
   readonly fixedInterviewCanvas?: boolean;
+  readonly reserveTranscriptCanvas?: boolean;
   moveInterview?(win: BrowserWindow, bounds: Rectangle): void;
   resizeInterview?(win: BrowserWindow, bounds: Rectangle): void;
   readonly capabilities?: PresentationCapabilities;

@@ -1,3 +1,4 @@
+import { orderedAccountQuotas } from '../services/accountUsageSummary';
 import { t, uiLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import type { AccountQuota, AccountUsage } from '../../electron/contracts/accountUsage';
@@ -185,7 +186,10 @@ function QuotaSkeleton({
   percentage: boolean;
   now: number;
 }) {
-  const quotas = usage?.status === 'available' && usage.quotas.length ? usage.quotas : [undefined];
+  const quotas =
+    usage?.status === 'available' && usage.quotas.length
+      ? orderedAccountQuotas(usage.quotas)
+      : [undefined];
   return (
     <div role="status" aria-label={t('正在读取账户额度')}>
       <span className="sr-only">{t('正在读取账户额度…')}</span>
@@ -257,7 +261,7 @@ export function UsagePanel() {
         <QuotaSkeleton usage={usage} percentage={!copilot} now={now} />
       ) : usage?.status === 'available' && usage.quotas.length ? (
         <div className="account-quota-list">
-          {usage.quotas.map((quota, index) => (
+          {orderedAccountQuotas(usage.quotas).map((quota, index) => (
             <Quota key={`${quota.id}-${index}`} value={quota} now={now} />
           ))}
         </div>

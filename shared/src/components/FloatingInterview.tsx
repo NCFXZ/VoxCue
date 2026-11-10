@@ -74,7 +74,23 @@ export function FloatingInterview() {
   const macScreenshotShortcut = window.desktop?.platform === 'macos';
   const shortcutSettings = useShortcuts((state) => state.state);
   const screenshotShortcut = shortcutSettings.bindings.screenshot;
-  const screenshotKeyLabel = screenshotShortcut ? displayShortcut(screenshotShortcut) : '';
+  const screenshotKeyLabel = screenshotShortcut
+    ? displayShortcut(screenshotShortcut, macScreenshotShortcut)
+    : '';
+  const screenshotKey = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    const key = screenshotKey.current;
+    if (!macScreenshotShortcut || !key || screenshotExpanded) return;
+    const measure = () =>
+      key.parentElement?.style.setProperty(
+        '--screenshot-shortcut-width',
+        `${key.getBoundingClientRect().width}px`,
+      );
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(key);
+    return () => observer.disconnect();
+  }, [macScreenshotShortcut, screenshotKeyLabel, screenshotExpanded]);
   const provider = providerInfo(state.answers.at(-1)?.provider);
   const failedAnswer = state.answers.at(-1)?.status === 'failed' ? state.answers.at(-1) : undefined;
   const saveError = useHistory((s) => s.error);
@@ -1021,6 +1037,7 @@ export function FloatingInterview() {
                     )}
                     <span className="floating-screenshot-text">{t('截图')}</span>
                     <kbd
+                      ref={screenshotKey}
                       className="floating-screenshot-shortcut"
                       aria-hidden="true"
                       hidden={screenshotExpanded}

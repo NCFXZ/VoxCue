@@ -1,3 +1,11 @@
+## 1.1.1 Mac 验证入口
+
+最终 Mac 版本为 1.1.1，逐项来源见 [Mac 接续清单追加项](../docs/MACOS_1.1.0_HANDOFF.md)。默认仍为 ⌃⇧，Mac 录入另允许 ⌘ 并使用原生符号；Windows 绑定与字符格式保持。`shortcut-settings` 包含仅向自有合成窗口派发的 AppKit Command 路径，`interview-shortcuts` 验证当前动作、按语言预留宽度、主进程状态同步及实际临时 HTTP／WS 配对驱动的展开动画。
+
+在 `macos/` 使用 `node test/scripts/ui-refinement-matrix.mjs --list` 查看完整五档排程，默认包含追加快捷键、设备徽标、移动页及记录滚动组；GUI 保持串行。最终 `package-smoke.mjs --install-archive` 另核对 ASAR 内 ws、移动资源闭包与私有路径拒绝，并执行旧版合成资料覆盖升级；`package-runtimes-smoke.mjs` 验证隔离的实际 SDK 子进程。账户删除与资料选择动效复用既有专项，结果仍只在终端／对话中报告。
+
+侧栏形变异常会附带逐帧悬停、焦点和位置，`updates-sidebar-smoke.mjs --diagnostics` 可额外打印状态转换；保留原中间帧及最终形态断言。
+
 ## 1.1.0 验证入口
 
 当前范围见 `PROGRESS.md`，完整逐项变化和Mac本机验收见 [1.0.0→1.1.0接续清单](../docs/MACOS_1.1.0_HANDOFF.md)。共享功能矩阵增加 `shortcut-settings`、`interview-badge-layout`、`interview-shortcuts`、`history-scroll`、`mobile-bundle` 和 `mobile-ui`；原生Windows矩阵增加 `speech-input-state`；Windows五档矩阵纳入快捷键设置、设备徽标、实际移动页及聊天阅读位置。按当前 `--list` 与源码调度，不以历史版本段落中的尺寸或快捷键覆盖现行要求。面试输入区当前控件为26px、默认Ctrl+Shift组合；截图为全局Ctrl+Shift+S，面板／转写和截图在整窗隐藏时仍可操作且保持隐藏；录入允许Ctrl/Shift/Alt任一修饰键加主键。

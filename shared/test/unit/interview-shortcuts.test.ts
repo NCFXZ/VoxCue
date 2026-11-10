@@ -18,6 +18,12 @@ it('anchors help to the active screen work area, independently of panel dimensio
     width: 268,
     height: 168,
   });
+  expect(interviewShortcutsBounds(screen, true)).toEqual({
+    x: -1904,
+    y: 764,
+    width: 300,
+    height: 380,
+  });
 });
 
 function setup({ fail = '', throws = false, ready = true } = {}) {

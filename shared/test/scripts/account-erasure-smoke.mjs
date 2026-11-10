@@ -314,6 +314,89 @@ try {
     return Math.abs((a.top + a.bottom) / 2 - (b.top + b.bottom) / 2);
   });
   assert.ok(checkAlignment <= 1, 'Checkbox and label share their center line');
+  const titleLayout = await modal.locator('.dialog-title').evaluate((node) => {
+    const icon = node.querySelector('.danger-icon').getBoundingClientRect();
+    const title = node.querySelector('h2').getBoundingClientRect();
+    return {
+      gap: title.left - icon.right,
+      center: icon.top + icon.height / 2 - title.top - title.height / 2,
+    };
+  });
+  assert.ok(
+    Math.abs(titleLayout.gap - 12) <= 1 / 64 && Math.abs(titleLayout.center) <= 1,
+    'Delete icon precedes and aligns with its title: ' + JSON.stringify(titleLayout),
+  );
+  const acknowledgement = modal.getByRole('checkbox');
+  await main.emulateMedia({ reducedMotion: 'no-preference' });
+  for (const dark of [false, true]) {
+    await main.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    const motion = await acknowledgement.evaluate(async (node) => {
+      const probe = document.createElement('span');
+      probe.style.color = 'var(--danger)';
+      node.parentElement.append(probe);
+      const danger = getComputedStyle(probe).color;
+      probe.remove();
+      const read = () => {
+        const style = getComputedStyle(node, '::before');
+        return {
+          opacity: Number(style.opacity),
+          clip: style.clipPath,
+          color: style.borderBottomColor,
+        };
+      };
+      const directions = [];
+      for (let i = 0; i < 2; i++) {
+        await Promise.all(
+          node
+            .getAnimations({ subtree: true })
+            .map((animation) => animation.finished.catch(() => {})),
+        );
+        const from = read();
+        node.click();
+        getComputedStyle(node).backgroundColor;
+        await new Promise(requestAnimationFrame);
+        const animations = node.getAnimations({ subtree: true });
+        for (const animation of animations) {
+          animation.pause();
+          const timing = animation.effect.getTiming();
+          animation.currentTime = timing.delay + Number(timing.duration) / 2;
+        }
+        const middle = read();
+        for (const animation of animations) animation.finish();
+        directions.push({ from, middle, to: read(), animations: animations.length });
+      }
+      return { danger, directions };
+    });
+    for (const { from, middle, to, animations } of motion.directions) {
+      assert.ok(animations > 0);
+      assert.deepEqual([from.opacity, to.opacity].sort(), [0, 1]);
+      assert.ok(middle.opacity > 0 && middle.opacity < 1);
+      assert.notEqual(middle.clip, from.clip);
+      assert.notEqual(middle.clip, to.clip);
+      assert.equal(to.color, motion.danger, 'The check mark uses the danger red in both themes');
+    }
+    await acknowledgement.focus();
+    await main.keyboard.press('Space');
+    assert.equal(await acknowledgement.isChecked(), true);
+    assert.equal(
+      await confirm.isDisabled(),
+      true,
+      'Acknowledgement without a password cannot delete',
+    );
+    await captureAccount(main, 'account-delete-checked-' + (dark ? 'dark' : 'light'));
+    await main.keyboard.press('Space');
+    assert.equal(await acknowledgement.isChecked(), false);
+  }
+  await main.emulateMedia({ reducedMotion: 'reduce' });
+  await acknowledgement.focus();
+  await main.keyboard.press('Space');
+  const reducedMark = await acknowledgement.evaluate((node) => ({
+    opacity: getComputedStyle(node, '::before').opacity,
+    transition: getComputedStyle(node, '::before').transitionDuration,
+  }));
+  assert.deepEqual(reducedMark, { opacity: '1', transition: '0s' });
+  await main.keyboard.press('Space');
+  await main.emulateMedia({ reducedMotion: 'no-preference' });
   await captureAccount(main, 'account-delete-confirm');
   await uiClick(modal.getByRole('button', { name: '取消', exact: true }));
   const exportPanel = settings.getByRole('region', { name: '导出资料', exact: true });

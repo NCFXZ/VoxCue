@@ -16,7 +16,7 @@ export async function readShortcuts(
     if (source.length > 8192) throw Error('Oversized shortcut settings');
     const value = JSON.parse(source);
     if (value?.version !== 1 && value?.version !== 2) throw Error('Invalid shortcut version');
-    const bindings = validateShortcutBindings(value.bindings);
+    const bindings = validateShortcutBindings(value.bindings, mac);
     if (value.version === 1) {
       const defaults = defaultShortcuts();
       for (const action of shortcutActions) {

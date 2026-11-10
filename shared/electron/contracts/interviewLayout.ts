@@ -38,6 +38,9 @@ interface Bounds {
   width: number;
   height: number;
 }
+export function interviewToolbarPoint(bounds: Pick<Bounds, 'x' | 'y' | 'width'>) {
+  return { x: Math.round(bounds.x + bounds.width / 2), y: bounds.y + 24 };
+}
 export function fitInterviewBounds(
   anchor: Bounds,
   area: Bounds,

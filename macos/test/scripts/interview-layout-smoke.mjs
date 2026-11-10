@@ -39,40 +39,56 @@ try {
         };
       });
       const main = await connectUiAccount(app, await app.firstWindow());
+      main.setDefaultTimeout(15000);
       await main.getByRole('button', { name: '开始面试', exact: true }).click();
       const dialog = main.getByRole('dialog', { name: '开始面试', exact: true });
       await dialog.getByRole('heading', { name: '开始面试', exact: true }).waitFor();
-      const rows = await dialog.locator('.interview-start-summary > div').evaluateAll((nodes) =>
-        nodes.map((node) => ({
-          title: node.querySelector('dt').textContent,
-          value: node.querySelector('dd').textContent,
-          y: node.getBoundingClientRect().y,
-          width: node.getBoundingClientRect().width,
-        })),
-      );
+      await dialog.locator('.interview-start-summary-group').first().waitFor();
+      const rows = await dialog
+        .locator('.interview-start-summary-group > div')
+        .evaluateAll((nodes) =>
+          nodes.map((node) => ({
+            title: node.querySelector('dt').textContent,
+            value: (
+              node.querySelector('.interview-start-summary-value') ?? node.querySelector('dd')
+            ).textContent,
+            parameters: [...node.querySelectorAll('.interview-start-summary-meta')].map((meta) => ({
+              label: meta.getAttribute('aria-label'),
+              value: meta.textContent,
+            })),
+            y: node.getBoundingClientRect().y,
+            width: node.getBoundingClientRect().width,
+            labelRight: node.querySelector('dt').getBoundingClientRect().right,
+            valueLeft: node.querySelector('dd').getBoundingClientRect().left,
+          })),
+        );
       assert.deepEqual(
         rows.map((row) => row.title),
         [
           '面试知识库',
           'AI 服务用量',
-          '面试官 · 系统音频',
-          '面试者 · 麦克风',
-          '语音模型',
-          '推理设备',
+          '系统音频 · 面试官',
+          '麦克风 · 面试者',
           '回答模型',
-          '思考强度',
+          '语音模型',
         ],
       );
-      for (let index = 0; index < rows.length; index += 2) {
-        assert.equal(rows[index].y, rows[index + 1].y);
-        assert.ok(Math.abs(rows[index].width - rows[index + 1].width) <= 1);
+      for (let index = 0; index < rows.length; index++) {
+        assert.ok(Math.abs(rows[index].width - rows[0].width) <= 1 / 64);
+        assert.ok(Math.abs(rows[index].valueLeft - rows[0].valueLeft) <= 1 / 64);
+        assert.ok(Math.abs(rows[index].valueLeft - rows[index].labelRight - 16) <= 1 / 64);
+        if (index) assert.ok(rows[index].y > rows[index - 1].y);
       }
-      assert.ok(rows[0].y < rows[2].y && rows[2].y < rows[4].y && rows[4].y < rows[6].y);
-      assert.equal(rows[4].value, '轻量语音识别');
-      assert.equal(rows[5].value, 'CPU');
+      assert.equal(rows[5].value, '轻量语音识别');
+      assert.deepEqual(rows[5].parameters, [{ label: '推理设备', value: 'CPU' }]);
+      assert.deepEqual(
+        rows[4].parameters.map((item) => item.label),
+        ['思考强度'],
+      );
       const opened = app.waitForEvent('window');
       await dialog.getByRole('button', { name: '确认开始', exact: true }).click();
       const floating = await opened;
+      floating.setDefaultTimeout(15000);
       await floating.getByRole('button', { name: '结束面试', exact: true }).waitFor();
       const nativeBounds = () =>
         app.evaluate(({ BrowserWindow }) =>
@@ -135,6 +151,11 @@ try {
       await floating.getByRole('button', { name: '转写面板', exact: true }).click();
       await floating.locator('.floating-transcript').waitFor({ state: 'hidden' });
       assertAnchor(await nativeBounds(), both, 'Hide transcript');
+      assert.deepEqual(
+        await nativeBounds(),
+        both,
+        'Transcript hiding keeps the bounded native canvas',
+      );
       await floating.getByRole('button', { name: '转写面板', exact: true }).click();
       await floating.locator('.floating-transcript').waitFor({ state: 'visible' });
       const restored = await nativeBounds();
@@ -149,6 +170,21 @@ try {
       assertAnchor(await nativeBounds(), both, 'Expand');
       await floating.getByRole('button', { name: '结束面试', exact: true }).click();
       await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
+    } catch (error) {
+      console.error(
+        'Mac layout failure at scale',
+        scale,
+        await app
+          ?.evaluate(({ BrowserWindow }) =>
+            BrowserWindow.getAllWindows().map((window) => ({
+              url: window.webContents.getURL(),
+              bounds: window.getBounds(),
+              visible: window.isVisible(),
+            })),
+          )
+          .catch(() => []),
+      );
+      throw error;
     } finally {
       if (app) {
         await app

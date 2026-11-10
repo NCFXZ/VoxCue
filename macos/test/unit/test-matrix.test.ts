@@ -16,7 +16,7 @@ it('lists the complete five-scale Mac matrix without starting GUI or preparing m
   expect(result.status).toBe(0);
   const plan = JSON.parse(result.stdout);
   expect(plan.scales).toEqual(['1', '1.25', '1.5', '1.75', '2']);
-  expect(new Set(plan.names).size).toBe(37);
+  expect(new Set(plan.names).size).toBe(42);
   expect(plan.names).toEqual([
     'web-materials',
     'ui-material-refinement',
@@ -42,11 +42,16 @@ it('lists the complete five-scale Mac matrix without starting GUI or preparing m
     'local-mode',
     'telemetry',
     'settings',
+    'shortcut-settings',
+    'interview-badge-layout',
+    'interview-shortcuts',
+    'mobile-ui',
     'language',
     'preparation-guide',
     'profile-ui',
     'profile-selection',
     'history-branding',
+    'history-scroll',
     'login',
     'login-entry',
     'composer',

@@ -138,6 +138,32 @@ try {
       .click();
     await page.getByRole('heading', { name, exact: true }).waitFor();
     await audit(name);
+    if (name === 'Shortcuts' && process.platform === 'darwin') {
+      const binding = page.getByRole('button', {
+        name: 'Change shortcut: Turn on or off the microphone',
+        exact: true,
+      });
+      await binding.click();
+      await page.waitForFunction(() =>
+        document.querySelector('.shortcut-binding[aria-pressed="true"]'),
+      );
+      await page.keyboard.press('x');
+      await page
+        .getByRole('alert')
+        .filter({ hasText: 'Include at least one of ⌃, ⌥, ⇧ or ⌘' })
+        .waitFor();
+      await audit('Mac shortcut modifier error');
+      await page.keyboard.down('Meta');
+      await page.keyboard.down('Shift');
+      await page.keyboard.down('h');
+      assert.equal(await binding.innerText(), '⇧⌘H');
+      await audit('Mac Command shortcut preview');
+      await binding.evaluate((button) => button.click());
+      await page.keyboard.up('h');
+      await page.keyboard.up('Shift');
+      await page.keyboard.up('Meta');
+      assert.equal(await binding.getAttribute('aria-pressed'), 'false');
+    }
     if (process.argv.includes('--preview') && name === 'Interview settings') {
       await page.locator('.interview-preview-scene').scrollIntoViewIfNeeded();
       await page.waitForFunction(

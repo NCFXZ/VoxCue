@@ -83,6 +83,7 @@ import {
 import { handleDesktop, onDesktop, sendDesktop } from './ipc/handle';
 import { InterviewShortcutController, interviewShortcutsBounds } from './interviewShortcuts';
 import { defaultShortcuts } from './contracts/shortcuts';
+import type { InterviewShortcutsState } from './contracts/desktop';
 import { readShortcuts, writeShortcuts } from './backend/shortcutPreferences';
 import { registerInterviewShortcutsIpc, registerShortcutSettingsIpc } from './ipc/interviewShortcuts';
 import { RemoteConnectionService } from './backend/remoteConnection/service';
@@ -105,6 +106,7 @@ import {
   fitInterviewBounds,
   draggedInterviewScale,
   interviewLayout,
+  interviewToolbarPoint,
 } from './contracts/interviewLayout';
 const systemLanguage = systemUILanguage(app.getPreferredSystemLanguages()[0]);
 let uiLanguage: UILanguage = systemLanguage;
@@ -283,9 +285,7 @@ function publishRemoteState(state = remoteConnection?.state()) {
   const value = remoteViewState(state);
   for (const win of [mainWindow, interviewWindow])
     if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'remote:state', value);
-  if (interviewShortcutsWindow && !interviewShortcutsWindow.isDestroyed() &&
-    !interviewShortcutsWindow.webContents.isDestroyed())
-    sendDesktop(interviewShortcutsWindow.webContents, 'interview:device-connected', state.status === 'connected');
+  publishInterviewShortcutsState();
 }
 function clearRemoteInterview() {
   remoteInterview?.reset();
@@ -319,6 +319,19 @@ function createLoginWindow() {
   });
   loadWindowPage(win, 'login', indexFile, process.env.VITE_DEV_SERVER_URL);
 }
+function publishInterviewLayout(win: BrowserWindow, bounds: Electron.Rectangle) {
+  if (
+    interviewCanvasLayout?.width === bounds.width &&
+    interviewCanvasLayout.height === bounds.height
+  )
+    return;
+  interviewCanvasLayout = {
+    revision: (interviewCanvasLayout?.revision ?? 0) + 1,
+    width: bounds.width,
+    height: bounds.height,
+  };
+  sendDesktop(win.webContents, 'interview:layout', interviewCanvasLayout);
+}
 function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
   const win = interviewWindow!;
   const previous = win.getBounds();
@@ -334,13 +347,11 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
     same(previous, lastInterviewBounds.actual)
       ? lastInterviewBounds.requested
       : previous;
-  const area = nativePresentation?.fixedInterviewCanvas
-    ? screen.getDisplayNearestPoint({
-        x: Math.round(anchor.x + anchor.width / 2),
-        y: anchor.y + 24,
-      }).workArea
-    : screen.getDisplayMatching(anchor).workArea;
-  const bounds = fitInterviewBounds(
+  const area =
+    nativePresentation?.fixedInterviewCanvas || nativePresentation?.reserveTranscriptCanvas
+      ? screen.getDisplayNearestPoint(interviewToolbarPoint(anchor)).workArea
+      : screen.getDisplayMatching(anchor).workArea;
+  let bounds = fitInterviewBounds(
     anchor,
     area,
     interviewCollapsed && interviewSettingsOpen ? interviewLayout.minimumScale : scale,
@@ -378,18 +389,18 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
           y: bounds.y,
         });
     }
-    if (
-      interviewCanvasLayout?.width !== bounds.width ||
-      interviewCanvasLayout?.height !== bounds.height
-    ) {
-      interviewCanvasLayout = {
-        revision: (interviewCanvasLayout?.revision ?? 0) + 1,
-        width: bounds.width,
-        height: bounds.height,
-      };
-      sendDesktop(win.webContents, 'interview:layout', interviewCanvasLayout);
-    }
+    publishInterviewLayout(win, bounds);
     return;
+  }
+  if (nativePresentation?.reserveTranscriptCanvas) {
+    publishInterviewLayout(win, bounds);
+    if (!interviewCollapsed) {
+      // Reserve only this scale's two-panel width on Mac, not a display-sized
+      // canvas. Transcript toggles retain the native surface and toolbar anchor.
+      const expanded = fitInterviewBounds(anchor, area, interviewScale, true);
+      if (expanded.width > bounds.width)
+        bounds = { ...bounds, x: expanded.x, width: expanded.width };
+    }
   }
   // Windows fractional DPI can round a requested DIP to a different DIP when
   // read back. Compare the last request as well, without ignoring user moves.
@@ -461,6 +472,27 @@ function restoreAfterInterview() {
 function shortcutsOpen() {
   return interviewShortcutsRequested;
 }
+function interviewShortcutsState(role: 'owner' | 'help'): InterviewShortcutsState {
+  const input = speechSessions?.inputState;
+  return {
+    open: shortcutsOpen(),
+    rendererRevision:
+      surfaceRevisions.get((role === 'owner' ? interviewWindow : interviewShortcutsWindow)!) ?? 0,
+    deviceConnected: remoteConnection?.state().status === 'connected',
+    visible: interviewVisibility?.visible ?? false,
+    collapsed: interviewCollapsed,
+    transcriptVisible: interviewTranscriptVisible,
+    microphoneMuted:
+      input?.microphoneMuted ??
+      !speechSessions?.configuration?.options.sources.includes('microphone'),
+    systemAudioMuted: input?.systemAudioMuted ?? false,
+  };
+}
+function publishInterviewShortcutsState() {
+  const win = interviewShortcutsWindow;
+  if (win && interviewShortcutsReady && !win.isDestroyed() && !win.webContents.isDestroyed())
+    sendDesktop(win.webContents, 'interview:shortcuts-state', interviewShortcutsState('help'));
+}
 function reducedNativeMotion() {
   try {
     const settings = systemPreferences.getAnimationSettings();
@@ -470,18 +502,21 @@ function reducedNativeMotion() {
   }
 }
 function notifyShortcutsOpen() {
-  if (interviewWindow && !interviewWindow.isDestroyed())
+  if (
+    interviewWindow &&
+    !interviewWindow.isDestroyed() &&
+    !interviewWindow.webContents.isDestroyed() &&
+    !interviewCloseApproved &&
+    !closingMain
+  )
     sendDesktop(interviewWindow.webContents, 'interview:shortcuts-open', shortcutsOpen());
 }
 function positionInterviewShortcuts() {
   const win = interviewShortcutsWindow;
   if (!win || win.isDestroyed() || !interviewWindow || interviewWindow.isDestroyed()) return;
   const owner = interviewWindow.getBounds();
-  const area = screen.getDisplayNearestPoint({
-    x: Math.round(owner.x + owner.width / 2),
-    y: owner.y + 24,
-  }).workArea;
-  const bounds = interviewShortcutsBounds(area);
+  const area = screen.getDisplayNearestPoint(interviewToolbarPoint(owner)).workArea;
+  const bounds = interviewShortcutsBounds(area, desktopPlatform.id === 'darwin');
   const current = win.getBounds();
   if (
     bounds.x !== current.x ||
@@ -530,9 +565,16 @@ function setInterviewShortcutsOpen(open: boolean): boolean {
     showInterviewShortcuts();
     return true;
   }
-  const win = new BrowserWindow(
-    windowOptions('interview-shortcuts', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
-  );
+  const win = new BrowserWindow({
+    ...windowOptions(
+      'interview-shortcuts',
+      desktopPlatform,
+      windowPaths,
+      uiLanguage,
+      systemLanguage,
+    ),
+    ...(desktopPlatform.id === 'darwin' ? { parent: interviewWindow } : {}),
+  });
   interviewShortcutsRequested = true;
   interviewShortcutsWindow = win;
   surfaceRevisions.set(win, 1);
@@ -567,6 +609,7 @@ function setInterviewShortcutsOpen(open: boolean): boolean {
         clearTimeout(readyTimer);
         interviewShortcutsReady = true;
         showInterviewShortcuts();
+        publishInterviewShortcutsState();
       } catch {
         failed();
       }
@@ -711,10 +754,12 @@ function openInterview() {
         hide: () => {
           void visibility.set(false);
           void shortcutsVisibility?.set(false);
+          publishInterviewShortcutsState();
         },
         showInactive: () => {
           void visibility.set(true);
           showInterviewShortcuts();
+          publishInterviewShortcutsState();
         },
       },
       ready: () => windowReady,
@@ -1684,12 +1729,16 @@ app.whenReady().then(async () => {
   const endShortcutCapture = () => {
     shortcutCaptureWindow?.removeListener('blur', endShortcutCapture);
     shortcutCaptureWindow?.removeListener('closed', endShortcutCapture);
-    if (shortcutCaptureWindow && !shortcutCaptureWindow.isDestroyed())
+    if (shortcutCaptureWindow && !shortcutCaptureWindow.isDestroyed()) {
       shortcutCaptureWindow.webContents.removeListener('did-start-loading', endShortcutCapture);
+      if (desktopPlatform.id === 'darwin' && !shortcutCaptureWindow.webContents.isDestroyed())
+        shortcutCaptureWindow.webContents.setIgnoreMenuShortcuts(false);
+    }
     shortcutCaptureWindow = null;
     shortcutController.capture(false);
   };
   registerShortcutSettingsIpc({
+    mac: desktopPlatform.id === 'darwin',
     authorize(event, write) {
       const win = BrowserWindow.fromWebContents(event.sender);
       if (!win || ![mainWindow, interviewWindow, interviewShortcutsWindow].includes(win) ||
@@ -1714,6 +1763,7 @@ app.whenReady().then(async () => {
         else {
           if (!shortcutCaptureWindow) {
             shortcutCaptureWindow = win;
+            if (desktopPlatform.id === 'darwin') win.webContents.setIgnoreMenuShortcuts(true);
             win.once('blur', endShortcutCapture);
             win.once('closed', endShortcutCapture);
             win.webContents.once('did-start-loading', endShortcutCapture);
@@ -1738,12 +1788,7 @@ app.whenReady().then(async () => {
       if (event.sender === interviewShortcutsWindow?.webContents) return 'help';
       throw Error('Unauthorized window');
     },
-    state: (role) => ({
-      open: shortcutsOpen(),
-      deviceConnected: remoteConnection?.state().status === 'connected',
-      rendererRevision:
-        surfaceRevisions.get((role === 'owner' ? interviewWindow : interviewShortcutsWindow)!) ?? 0,
-    }),
+    state: interviewShortcutsState,
     setOpen: setInterviewShortcutsOpen,
     ready(role) {
       const win = role === 'owner' ? interviewWindow : interviewShortcutsWindow;
@@ -1841,6 +1886,9 @@ app.whenReady().then(async () => {
         desktopPlatform.id,
         signal,
         desktopPlatform.captureScreen,
+        desktopPlatform.id === 'darwin'
+          ? interviewToolbarPoint(interviewWindow!.getBounds())
+          : undefined,
       ),
     archiveImages: (images) => interviewImages.save(images),
   });
@@ -2022,6 +2070,7 @@ app.whenReady().then(async () => {
       const status = await speechSessions!.interview(call);
       telemetry?.speechState(status.state);
       if (status.state === 'error' && call.op === 'start') telemetry?.audioFailed();
+      publishInterviewShortcutsState();
       return status;
     } catch (error) {
       if (call.op === 'start') telemetry?.audioFailed();
@@ -2140,6 +2189,7 @@ app.whenReady().then(async () => {
       );
       if (next.options.sources.includes('microphone'))
         checkedMicrophone = { owner, device: next.options.microphone };
+      publishInterviewShortcutsState();
       return status;
     } catch (error) {
       if (attempt.current()) telemetry?.speechState('error');
@@ -2280,6 +2330,7 @@ app.whenReady().then(async () => {
     interviewResize = undefined;
     interviewCollapsed = !interviewCollapsed;
     sizeInterview(interviewScale);
+    publishInterviewShortcutsState();
     return interviewCollapsed;
   });
   handleDesktop('interview:settings', (event, ...args: unknown[]) => {
@@ -2303,6 +2354,7 @@ app.whenReady().then(async () => {
     interviewResize = undefined;
     interviewTranscriptVisible = visible;
     if (!interviewCollapsed) sizeInterview(interviewScale);
+    publishInterviewShortcutsState();
     return interviewTranscriptVisible;
   });
   handleDesktop('interview:move', (event, ...args: unknown[]) => {
@@ -2425,14 +2477,18 @@ app.whenReady().then(async () => {
     if (
       !nativePresentation ||
       !desktopPlatform.presentation?.interviewMousePassthrough ||
-      event.sender !== interviewWindow?.webContents ||
+      ![interviewWindow?.webContents, interviewShortcutsWindow?.webContents].includes(
+        event.sender,
+      ) ||
       event.senderFrame !== event.sender.mainFrame ||
       args.length !== 1 ||
       typeof args[0] !== 'boolean'
     )
       return;
-    if (args[0] && interviewMove) return;
-    setInterviewMousePassthrough(args[0]);
+    if (args[0] && event.sender === interviewWindow?.webContents && interviewMove) return;
+    if (event.sender === interviewShortcutsWindow?.webContents)
+      nativePresentation.setMousePassthrough(interviewShortcutsWindow, args[0]);
+    else setInterviewMousePassthrough(args[0]);
   });
   onDesktop('window:action', (event, action: unknown, ...extra: unknown[]) => {
     const win = BrowserWindow.fromWebContents(event.sender);

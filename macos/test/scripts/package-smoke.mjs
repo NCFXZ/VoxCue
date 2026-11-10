@@ -101,6 +101,14 @@ const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
 assert.equal(
   JSON.parse(
+    asar.extractFile(path.join(resources, 'app.asar'), 'node_modules/ws/package.json').toString(),
+  ).version,
+  '8.22.2',
+);
+assert.ok(entries.includes('/dist/mobile.html'));
+assert.ok(entries.includes('/dist/.vite/manifest.json'));
+assert.equal(
+  JSON.parse(
     asar.extractFile(path.join(resources, 'app.asar'), 'node_modules/zod/package.json').toString(),
   ).version,
   '4.6.6',
@@ -661,6 +669,82 @@ try {
   // Refresh the renderer after installing the synthetic account service.
   await page.reload();
   const mainPage = await connectUiAccount(app, page);
+  const mobile = await app.evaluate(async ({ app }) => {
+    const load = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const base = app.getAppPath() + '/dist-electron/shared/electron/backend/remoteConnection';
+    const assets = load(base + '/assets.js').createMobileAssets(app.getAppPath() + '/dist');
+    const { RemoteConnectionService } = load(base + '/service.js');
+    const service = new RemoteConnectionService({
+      mobileAssets: assets,
+      onState() {},
+      onCommand: async () => {
+        throw Error('No business commands in package asset verification');
+      },
+    });
+    try {
+      const state = await service.start();
+      if (state.status !== 'waiting') throw Error(state.error || 'Packaged LAN service failed');
+      const origin = state.addresses[0];
+      const response = await fetch(origin);
+      const html = await response.text();
+      const references = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((match) => match[1]);
+      if (response.status !== 200 || references.length < 2)
+        throw Error('Packaged mobile entry unavailable');
+      for (const reference of references) {
+        const target = new URL(reference, origin);
+        if (
+          target.origin !== origin ||
+          !target.pathname.startsWith('/assets/') ||
+          target.search ||
+          target.hash
+        )
+          throw Error('Unexpected packaged mobile reference');
+        const asset = await fetch(target);
+        if (asset.status !== 200 || !(await asset.arrayBuffer()).byteLength)
+          throw Error('Packaged mobile dependency unavailable');
+      }
+      const manifest = JSON.parse(
+        await load('node:fs/promises').readFile(
+          app.getAppPath() + '/dist/.vite/manifest.json',
+          'utf8',
+        ),
+      );
+      const visited = new Set(),
+        files = new Set();
+      function visit(key) {
+        if (visited.has(key)) return;
+        visited.add(key);
+        const chunk = manifest[key];
+        for (const file of [chunk.file, ...(chunk.css ?? []), ...(chunk.assets ?? [])])
+          files.add(file);
+        for (const dependency of [...(chunk.imports ?? []), ...(chunk.dynamicImports ?? [])])
+          visit(dependency);
+      }
+      visit('mobile.html');
+      for (const file of files)
+        if (!(await assets.read('/' + file))?.body.length)
+          throw Error('Incomplete packaged mobile closure');
+      return {
+        files: files.size,
+        state: service.state().status,
+        denied: await Promise.all(
+          ['/index.html', '/package.json', '/.vite/manifest.json'].map(
+            async (file) => (await fetch(origin + file)).status,
+          ),
+        ),
+      };
+    } finally {
+      await service.disconnect();
+    }
+  });
+  assert.ok(mobile.files >= 2);
+  assert.deepEqual(mobile.denied, [404, 404, 404]);
+  assert.equal(mobile.state, 'waiting', 'Loading assets does not bypass pairing approval');
+  console.log(
+    'PASS: final ASAR ws/LAN service and complete mobile asset closure; private desktop files denied.',
+  );
   {
     await mainPage.waitForFunction(() =>
       document.documentElement.classList.contains('web-materials'),

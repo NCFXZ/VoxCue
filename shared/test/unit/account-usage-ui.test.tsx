@@ -85,7 +85,10 @@ it('ChatGPT返回两窗显示两窗，仅周则不生成五小时卡片', () => 
       secondary: { usedPercent: 40, windowDurationMins: 10080 },
     },
   });
+  fixture.usage.quotas.reverse();
   let html = renderToStaticMarkup(<UsagePanel />);
+  expect(html.indexOf('5小时额度')).toBeLessThan(html.indexOf('每周额度'));
+  expect(fixture.usage.quotas[0].label).toBe('每周额度');
   expect(html).toContain('5小时额度');
   expect(html).toContain('每周额度');
   expect(html).toContain('ChatGPT Plus');

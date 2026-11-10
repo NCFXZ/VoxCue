@@ -23,6 +23,7 @@
   "CloudError": "exclamationmark.icloud",
   "ChevronsUpDown": "chevron.down",
   "Settings": "gearshape",
+  "Keyboard": "keyboard",
   "LogOut": "rectangle.portrait.and.arrow.right",
   "PanelLeftClose": "sidebar.left",
   "PanelLeftOpen": "sidebar.left",
@@ -56,9 +57,7 @@
   "Person": "person",
   "Screenshot": "viewfinder",
   "Save": "square.and.arrow.down",
-  "Search": "magnifyingglass",
   "FileText": "doc.text",
-  "Eye": "eye",
   "FontIncrease": "textformat.size.larger",
   "FontDecrease": "textformat.size.smaller"
 }

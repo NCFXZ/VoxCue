@@ -24,6 +24,10 @@ async function nativeReady(predicate, label) {
 }
 try {
   await app.evaluate(({ app }) => {
+    globalThis.stabilityMainErrors = [];
+    process.on('uncaughtExceptionMonitor', (error) =>
+      globalThis.stabilityMainErrors.push(error.message),
+    );
     globalThis.stabilityDockTrace = [];
     if (!app.dock) return;
     const dock = app.dock,
@@ -172,6 +176,11 @@ try {
       button.click();
     });
     await closed;
+    assert.deepEqual(
+      await app.evaluate(() => globalThis.stabilityMainErrors),
+      [],
+      'Ending an interview must not notify a destroyed page',
+    );
     await main.waitForFunction(() => document.visibilityState === 'visible');
     await nativeReady(
       ({ BrowserWindow, app }) =>

@@ -1,7 +1,7 @@
 export const shortcutLabels = {
-  'toggle-window': '隐藏或显示面试窗口',
-  'toggle-panels': '收起或展开面试面板',
-  'toggle-transcript': '显示或隐藏转写面板',
+  'toggle-window': '显示或隐藏面试窗口',
+  'toggle-panels': '展开或收起面试面板',
+  'toggle-transcript': '展开或收起转写面板',
   'toggle-microphone': '打开或关闭麦克风',
   'toggle-system-audio': '打开或关闭系统音频',
   'submit-input': '发送当前输入内容',
@@ -10,6 +10,38 @@ export const shortcutLabels = {
   screenshot: '截图',
 } as const;
 export type ShortcutAction = keyof typeof shortcutLabels;
+export const interviewToggleLabels: Partial<Record<ShortcutAction, readonly [string, string]>> = {
+  'toggle-window': ['显示面试窗口', '隐藏面试窗口'],
+  'toggle-panels': ['展开面试面板', '收起面试面板'],
+  'toggle-transcript': ['展开转写面板', '收起转写面板'],
+  'toggle-microphone': ['打开麦克风', '关闭麦克风'],
+  'toggle-system-audio': ['打开系统音频', '关闭系统音频'],
+};
+export interface InterviewShortcutStatus {
+  visible: boolean;
+  collapsed: boolean;
+  transcriptVisible: boolean;
+  microphoneMuted: boolean;
+  systemAudioMuted: boolean;
+}
+export function interviewShortcutLabel(action: ShortcutAction, state: InterviewShortcutStatus) {
+  const labels = interviewToggleLabels[action];
+  if (!labels) return shortcutLabels[action];
+  switch (action) {
+    case 'toggle-window':
+      return labels[state.visible ? 1 : 0];
+    case 'toggle-panels':
+      return labels[state.collapsed ? 0 : 1];
+    case 'toggle-transcript':
+      return labels[state.transcriptVisible ? 1 : 0];
+    case 'toggle-microphone':
+      return labels[state.microphoneMuted ? 0 : 1];
+    case 'toggle-system-audio':
+      return labels[state.systemAudioMuted ? 0 : 1];
+    default:
+      return shortcutLabels[action];
+  }
+}
 export const shortcutActions = Object.keys(shortcutLabels) as ShortcutAction[];
 export type ShortcutBindings = Record<ShortcutAction, string | null>;
 export interface ShortcutConflict {
@@ -33,7 +65,7 @@ export interface ShortcutSettingsResult {
   state: ShortcutSettingsState;
   rejected?: ShortcutConflict;
 }
-export function validateShortcutCall(value: unknown): ShortcutSettingsCall {
+export function validateShortcutCall(value: unknown, mac = false): ShortcutSettingsCall {
   if (!value || typeof value !== 'object' || Array.isArray(value))
     throw Error('Invalid shortcut request');
   const call = value as Record<string, unknown>;
@@ -50,7 +82,7 @@ export function validateShortcutCall(value: unknown): ShortcutSettingsCall {
     return {
       op: 'set',
       action: call.action as ShortcutAction,
-      accelerator: normalizeShortcut(call.accelerator),
+      accelerator: normalizeShortcut(call.accelerator, mac),
     };
   throw Error('Invalid shortcut request');
 }
@@ -68,23 +100,30 @@ export function defaultShortcuts(): ShortcutBindings {
   };
 }
 const modifiers = ['Control', 'Alt', 'Shift'];
-export function normalizeShortcut(value: unknown): string | null {
+const macModifiers = [...modifiers, 'Command'];
+export function shortcutModifierHint(mac = false): string {
+  return mac
+    ? '快捷键需包含 ⌃、⌥、⇧ 或 ⌘ 中的至少一个'
+    : '快捷键需包含 Ctrl、Shift 或 Alt 中的至少一个';
+}
+export function normalizeShortcut(value: unknown, mac = false): string | null {
   if (value === null) return null;
   if (typeof value !== 'string' || value.length > 80) throw Error('无效的快捷键。');
   const parts = value.split('+');
   const key = parts.pop()!;
+  const allowedModifiers = mac ? macModifiers : modifiers;
   if (
     !/^(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|Enter|Space|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Escape|Minus|Plus|Comma|Period|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash)$/.test(
       key,
     ) ||
-    parts.some((part) => !modifiers.includes(part)) ||
+    parts.some((part) => !allowedModifiers.includes(part)) ||
     new Set(parts).size !== parts.length ||
     parts.length === 0
   )
-    throw Error('快捷键需包含 Ctrl、Shift 或 Alt 中的至少一个');
-  return [...modifiers.filter((part) => parts.includes(part)), key].join('+');
+    throw Error(shortcutModifierHint(mac));
+  return [...allowedModifiers.filter((part) => parts.includes(part)), key].join('+');
 }
-export function validateShortcutBindings(value: unknown): ShortcutBindings {
+export function validateShortcutBindings(value: unknown, mac = false): ShortcutBindings {
   if (
     !value ||
     typeof value !== 'object' ||
@@ -96,7 +135,7 @@ export function validateShortcutBindings(value: unknown): ShortcutBindings {
   return Object.fromEntries(
     shortcutActions.map((action) => [
       action,
-      normalizeShortcut((value as ShortcutBindings)[action]),
+      normalizeShortcut((value as ShortcutBindings)[action], mac),
     ]),
   ) as ShortcutBindings;
 }
@@ -110,7 +149,42 @@ export function duplicateShortcuts(bindings: ShortcutBindings): ShortcutConflict
       : [];
   });
 }
-export function displayShortcut(value: string | null): string {
+const macShortcutSymbols: Record<string, string> = {
+  Control: '⌃',
+  Alt: '⌥',
+  Shift: '⇧',
+  Command: '⌘',
+  Enter: '↩',
+  Backspace: '⌫',
+  Delete: '⌦',
+  Escape: '⎋',
+  Tab: '⇥',
+  Space: '␣',
+  Up: '↑',
+  Down: '↓',
+  Left: '←',
+  Right: '→',
+  Home: '↖',
+  End: '↘',
+  PageUp: '⇞',
+  PageDown: '⇟',
+  Minus: '-',
+  Plus: '+',
+  Comma: ',',
+  Period: '.',
+  Slash: '/',
+  Semicolon: ';',
+  Quote: "'",
+  BracketLeft: '[',
+  BracketRight: ']',
+  Backslash: '\\',
+};
+export function displayShortcut(value: string | null, mac = false): string {
+  if (mac && value)
+    return value
+      .split('+')
+      .map((key) => macShortcutSymbols[key] ?? key)
+      .join('');
   return (
     value
       ?.replace(/Control/g, 'Ctrl')
@@ -169,12 +243,12 @@ function shortcutAccelerator(
   ].join('+');
 }
 export function shortcutPreview(event: Parameters<typeof shortcutAccelerator>[0], mac = false) {
-  return displayShortcut(shortcutAccelerator(event, mac));
+  return displayShortcut(shortcutAccelerator(event, mac), mac);
 }
 export function shortcutFromEvent(event: Parameters<typeof shortcutAccelerator>[0], mac = false) {
   if (['Control', 'Alt', 'Shift', 'Meta', 'AltGraph', 'Dead', 'Unidentified'].includes(event.key))
     return;
-  return normalizeShortcut(shortcutAccelerator(event, mac))!;
+  return normalizeShortcut(shortcutAccelerator(event, mac), mac)!;
 }
 export function matchesShortcut(
   value: string | null,

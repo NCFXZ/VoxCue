@@ -4,6 +4,7 @@ import {
   systemPreferences,
   type BrowserWindow,
   type NativeImage,
+  type Point,
 } from 'electron';
 import type { ChatFile } from './contracts/chat';
 import type { DesktopPlatform } from './platform/types';
@@ -36,8 +37,9 @@ export async function captureInterviewScreenshot(
   platform: NodeJS.Platform,
   signal: AbortSignal,
   captureScreen?: DesktopPlatform['captureScreen'],
+  displayPoint?: Point,
 ): Promise<{ file: ChatFile; preview: string }> {
-  const image = await captureInterviewImage(window, platform, signal, captureScreen);
+  const image = await captureInterviewImage(window, platform, signal, captureScreen, displayPoint);
   const file = encodeScreenshot(image);
   signal.throwIfAborted();
   const size = image.getSize();
@@ -58,6 +60,7 @@ async function captureInterviewImage(
   platform: NodeJS.Platform,
   signal: AbortSignal,
   captureScreen?: DesktopPlatform['captureScreen'],
+  displayPoint?: Point,
 ): Promise<NativeImage> {
   signal.throwIfAborted();
   if (window.isDestroyed()) throw new DOMException('Aborted', 'AbortError');
@@ -74,7 +77,9 @@ async function captureInterviewImage(
     signal.throwIfAborted();
     if (window.isDestroyed()) throw new DOMException('Aborted', 'AbortError');
   } else {
-    const display = screen.getDisplayMatching(window.getBounds());
+    const display = displayPoint
+      ? screen.getDisplayNearestPoint(displayPoint)
+      : screen.getDisplayMatching(window.getBounds());
     const width = display.size.width * display.scaleFactor;
     const height = display.size.height * display.scaleFactor;
     const ratio = Math.min(1, 3840 / Math.max(width, height));

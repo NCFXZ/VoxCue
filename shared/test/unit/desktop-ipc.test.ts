@@ -179,6 +179,23 @@ beforeEach(() => {
 });
 
 describe('shortcut settings IPC', () => {
+  it.each([false, true])(
+    'accepts Command only for a Mac host (%s), never from a renderer flag',
+    async (mac) => {
+      const call = vi.fn(async () => ({ state: {} as any }));
+      registerShortcutSettingsIpc({ mac, authorize: () => {}, call });
+      const route = bridge.handlers.get('shortcuts:settings')!;
+      const request = { op: 'set', action: 'toggle-window', accelerator: 'Command+Shift+H' };
+      expect(() => route({}, { ...request, mac: true })).toThrow();
+      if (mac) {
+        await route({}, request);
+        expect(call).toHaveBeenCalledWith({ ...request, accelerator: 'Shift+Command+H' }, {});
+      } else {
+        expect(() => route({}, request)).toThrow();
+        expect(call).not.toHaveBeenCalled();
+      }
+    },
+  );
   it('keeps changes main-only and validates actions and combinations before dispatch', async () => {
     const main = { mainFrame: {} }, help = { mainFrame: {} }, other = { mainFrame: {} };
     const state = { revision: 1, bindings: defaultShortcuts(), conflicts: [], capturing: false, error: null };
@@ -222,6 +239,11 @@ describe('interview shortcuts help IPC', () => {
     const state = vi.fn((role: 'owner' | 'help') => ({
       open: true,
       deviceConnected: false,
+      visible: true,
+      collapsed: false,
+      transcriptVisible: true,
+      microphoneMuted: false,
+      systemAudioMuted: false,
       rendererRevision: role === 'owner' ? ownerRevision : 7,
     }));
     const setOpen = vi.fn((open: boolean) => open);
@@ -241,8 +263,8 @@ describe('interview shortcuts help IPC', () => {
     const read = bridge.handlers.get('interview:shortcuts-state')!;
     const toggle = bridge.handlers.get('interview:shortcuts-open')!;
     const rendererReady = bridge.handlers.get('interview:renderer-ready')!;
-    expect(read(event(help))).toEqual({ open: true, deviceConnected: false, rendererRevision: 7 });
-    expect(read(event(owner))).toEqual({ open: true, deviceConnected: false, rendererRevision: 4 });
+    expect(read(event(help))).toEqual(state('help'));
+    expect(read(event(owner))).toEqual(state('owner'));
     expect(toggle(event(owner), true)).toBe(true);
     expect(toggle(event(help), false)).toBe(false);
     const calls = setOpen.mock.calls.length;
@@ -1043,7 +1065,7 @@ describe('受控 preload 契约', () => {
         'onInterviewLayout',
         'onInterviewShortcut',
         'onInterviewShortcutsOpen',
-        'onInterviewDeviceConnection',
+        'onInterviewShortcutsState',
         'onShortcutSettings',
         'knowledge',
         'onKnowledgeEvent',
@@ -1125,10 +1147,19 @@ describe('受控 preload 契约', () => {
     expect(helpOpen).toHaveBeenCalledExactlyOnceWith(false);
     stopHelpOpen();
     const connectionChanged = vi.fn();
-    const stopConnection = bridge.api!.onInterviewDeviceConnection(connectionChanged);
-    for (const connected of [true, false])
-      bridge.listeners.get('interview:device-connected')!({ sender: 'private-event' }, connected);
-    expect(connectionChanged.mock.calls).toEqual([[true], [false]]);
+    const stopConnection = bridge.api!.onInterviewShortcutsState(connectionChanged);
+    const helpState = {
+      open: true,
+      rendererRevision: 1,
+      deviceConnected: true,
+      visible: true,
+      collapsed: false,
+      transcriptVisible: true,
+      microphoneMuted: true,
+      systemAudioMuted: false,
+    };
+    bridge.listeners.get('interview:shortcuts-state')!({ sender: 'private-event' }, helpState);
+    expect(connectionChanged).toHaveBeenCalledExactlyOnceWith(helpState);
     stopConnection();
     const settingsChanged = vi.fn();
     const stopSettings = bridge.api!.onShortcutSettings(settingsChanged);

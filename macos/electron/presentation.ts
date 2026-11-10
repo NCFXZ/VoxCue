@@ -31,6 +31,7 @@ export function createPresentation(options: {
     lastHide = Date.now();
   };
   return {
+    reserveTranscriptCanvas: true,
     capabilities: options.capabilities,
     initialize() {
       if (!observingAppearance) {

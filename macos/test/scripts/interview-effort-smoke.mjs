@@ -11,18 +11,24 @@ import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs'
 const releaseDesktop = holdDesktopAwake();
 
 const assertControlRows = async (scope) => {
-  const rows = await scope.locator('.speech-setting-row').evaluateAll((rows) => rows.map((row) => {
-    const label = row.querySelector('.speech-setting-label').getBoundingClientRect();
-    const control = row.querySelector(':scope > button,:scope > .frosted-slider').getBoundingClientRect();
-    return {
-      labelLeft: label.left,
-      labelRight: label.right,
-      left: control.left,
-      width: control.width,
-      centerOffset: label.top + label.height / 2 - control.top - control.height / 2,
-      overflow: row.scrollWidth > row.clientWidth,
-    };
-  }));
+  const rows = await scope.locator('.speech-setting-row').evaluateAll((rows) =>
+    rows
+      .filter((row) => row.querySelector(':scope > button,:scope > .frosted-slider'))
+      .map((row) => {
+        const label = row.querySelector('.speech-setting-label').getBoundingClientRect();
+        const control = row
+          .querySelector(':scope > button,:scope > .frosted-slider')
+          .getBoundingClientRect();
+        return {
+          labelLeft: label.left,
+          labelRight: label.right,
+          left: control.left,
+          width: control.width,
+          centerOffset: label.top + label.height / 2 - control.top - control.height / 2,
+          overflow: row.scrollWidth > row.clientWidth,
+        };
+      }),
+  );
   assert.equal(rows.length, 7, 'Two audio, three model and two display rows share one layout');
   assert.ok(rows.every((row) =>
     row.labelRight < row.left &&

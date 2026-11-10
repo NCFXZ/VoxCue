@@ -57,7 +57,10 @@ desktop.interviewRendererReady({ window: 'other', width: 100 });
 desktop.onInterviewShortcutsOpen((open: boolean) => {
   void open;
 });
-desktop.onInterviewDeviceConnection((connected: boolean) => { void connected; });
+desktop.onInterviewShortcutsState((state) => {
+  const connected: boolean = state.deviceConnected;
+  void connected;
+});
 // @ts-expect-error Help state exposes only a fixed boolean, not window positions or arbitrary routes.
 desktop.setInterviewShortcutsOpen({ x: 20, y: 20 });
 // @ts-expect-error Shortcut events expose only fixed commands, never arbitrary native actions.

@@ -8,16 +8,18 @@ import {
 } from '../contracts/shortcuts';
 
 export function registerShortcutSettingsIpc({
+  mac = false,
   authorize,
   call,
 }: {
+  mac?: boolean;
   authorize(event: IpcMainInvokeEvent, write: boolean): void;
   call(value: ShortcutSettingsCall, event: IpcMainInvokeEvent): Promise<ShortcutSettingsResult>;
 }) {
   handleDesktop('shortcuts:settings', (event, ...args: unknown[]) => {
     authorize(event, false);
     if (args.length !== 1) throw Error('Invalid shortcut request');
-    const value = validateShortcutCall(args[0]);
+    const value = validateShortcutCall(args[0], mac);
     if (value.op !== 'status') authorize(event, true);
     return call(value, event);
   });

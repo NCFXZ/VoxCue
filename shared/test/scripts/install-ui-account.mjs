@@ -4,7 +4,23 @@ import { testRoot } from './test-workspace.mjs';
 export async function focusUiWindow(app, page) {
   if (process.platform !== 'darwin') return;
   await app.evaluate(({ app }) => app.focus({ steal: true }));
-  await (await app.browserWindow(page)).evaluate((window) => window.focus());
+  const id = await (
+    await app.browserWindow(page)
+  ).evaluate((window) => {
+    window.focus();
+    return window.id;
+  });
+  await app.evaluate(async ({ app, BrowserWindow }, id) => {
+    const deadline = Date.now() + 3000;
+    while (Date.now() < deadline) {
+      const window = BrowserWindow.fromId(id);
+      if (!window || window.isDestroyed()) throw Error('Owned Mac focus window closed');
+      if (app.isActive() && window.isVisible() && BrowserWindow.getFocusedWindow()?.id === id)
+        return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    throw Error('Owned Mac app/key window did not acquire native focus');
+  }, id);
   await page.waitForFunction(() => document.hasFocus());
 }
 export async function openReasoningControl(

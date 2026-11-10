@@ -10,8 +10,8 @@ import {
   type ShortcutSettingsState,
 } from './contracts/shortcuts';
 
-export function interviewShortcutsBounds(area: Rectangle): Rectangle {
-  const width = Math.min(360, Math.max(1, area.width - 32));
+export function interviewShortcutsBounds(area: Rectangle, compact = false): Rectangle {
+  const width = Math.min(compact ? 300 : 360, Math.max(1, area.width - 32));
   const height = Math.min(380, Math.max(1, area.height - 32));
   return { x: area.x + 16, y: area.y + area.height - height - 16, width, height };
 }

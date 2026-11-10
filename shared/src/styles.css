@@ -1576,6 +1576,9 @@ p {
 .destructive-dialog {
   width: 400px;
 }
+.destructive-dialog .dialog-title {
+  align-items: center;
+}
 .danger-icon {
   width: 40px;
   height: 40px;
@@ -2328,7 +2331,9 @@ p {
     margin 180ms ease,
     opacity 180ms ease;
 }
-.floating-screenshot-button[data-shortcut-platform='macos'] .floating-screenshot-shortcut {
+.floating-screenshot-button[data-shortcut-platform='macos'] .floating-screenshot-shortcut,
+.shortcut-settings[data-shortcut-platform='macos'] kbd,
+.floating-shortcut-help[data-shortcut-platform='macos'] kbd {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .floating-screenshot-button[data-expanded='true'] .floating-screenshot-count {
@@ -3132,7 +3137,7 @@ p {
   align-items: center;
   gap: 8px;
 }
-.profile-field-choice input[type='checkbox'] {
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox'] {
   appearance: none;
   position: relative;
   display: inline-block;
@@ -3150,23 +3155,24 @@ p {
     border-color 160ms ease 80ms,
     transform 140ms ease;
 }
-.profile-field-choice:hover input[type='checkbox'] {
-  border-color: var(--accent);
+:is(.profile-field-choice, .account-delete-ack):hover input[type='checkbox'] {
+  border-color: var(--checkbox-accent, var(--accent));
 }
-.profile-field-choice input[type='checkbox']:is(:checked, :indeterminate) {
-  border-color: var(--accent);
-  background: var(--accent);
+:is(.profile-field-choice, .account-delete-ack)
+  input[type='checkbox']:is(:checked, :indeterminate) {
+  border-color: color-mix(in srgb, var(--checkbox-accent, var(--accent)) 65%, transparent);
+  background: var(--checkbox-fill, color-mix(in srgb, var(--accent) 12%, transparent));
   transition-delay: 0ms;
 }
-.profile-field-choice input[type='checkbox']:active {
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']:active {
   transform: scale(0.92);
 }
-.profile-field-choice input[type='checkbox']:focus-visible {
-  outline: 2px solid var(--accent);
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--checkbox-accent, var(--accent)) 40%, transparent);
   outline-offset: 3px;
 }
-.profile-field-choice input[type='checkbox']::before,
-.profile-field-choice input[type='checkbox']::after {
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']::before,
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']::after {
   content: '';
   position: absolute;
   left: 50%;
@@ -3177,36 +3183,47 @@ p {
     opacity var(--panel-motion-duration) var(--panel-motion-easing);
   pointer-events: none;
 }
-.profile-field-choice input[type='checkbox']::before {
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']::before {
   width: 5px;
   height: 8px;
-  border: solid var(--surface);
+  border: solid var(--checkbox-mark, var(--accent));
   border-width: 0 1.8px 1.8px 0;
   border-radius: 0;
   transform: translate(-50%, -60%) rotate(45deg);
   clip-path: inset(100% 0 0 0);
 }
-.profile-field-choice input[type='checkbox']:checked:not(:indeterminate)::before {
+:is(.profile-field-choice, .account-delete-ack)
+  input[type='checkbox']:checked:not(:indeterminate)::before {
   opacity: 1;
   clip-path: inset(0 0 0 0);
 }
-.profile-field-choice input[type='checkbox']::after {
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']::after {
   width: 8px;
   height: 2px;
   border-radius: 1px;
-  background: var(--surface);
+  background: var(--checkbox-mark, var(--accent));
   transform: translate(-50%, -50%);
   clip-path: inset(0 100% 0 0);
 }
-.profile-field-choice input[type='checkbox']:indeterminate::after {
+:is(.profile-field-choice, .account-delete-ack) input[type='checkbox']:indeterminate::after {
   opacity: 1;
   clip-path: inset(0 0 0 0);
 }
 @media (prefers-reduced-motion: reduce) {
-  .profile-field-choice input[type='checkbox'],
-  .profile-field-choice input[type='checkbox']::before,
-  .profile-field-choice input[type='checkbox']::after {
+  :is(.profile-field-choice, .account-delete-ack) input[type='checkbox'],
+  :is(.profile-field-choice, .account-delete-ack) input[type='checkbox']::before,
+  :is(.profile-field-choice, .account-delete-ack) input[type='checkbox']::after {
     transition: none;
+  }
+}
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
+  :is(.profile-field-choice, .account-delete-ack)
+    input[type='checkbox']:is(:checked, :indeterminate) {
+    border-color: var(--checkbox-accent, var(--accent));
+    background: var(--surface);
+  }
+  :is(.profile-field-choice, .account-delete-ack) input[type='checkbox']:focus-visible {
+    outline-color: var(--checkbox-accent, var(--accent));
   }
 }
 .profile-proposal-actions {
@@ -4583,21 +4600,27 @@ details[open] > summary > .disclosure-chevron {
 .floating-shortcuts-viewport {
   width: 100vw;
   height: 100dvh;
+  justify-content: flex-end;
 }
 .floating-shortcut-help {
   position: relative;
-  flex: 1;
+  flex: 0 1 auto;
+  align-self: flex-start;
+  width: max-content;
+  max-width: 100%;
+  max-height: 100%;
 }
 .floating-shortcut-help > header {
   flex-shrink: 0;
-  padding: 10px 14px 4px;
+  padding: 8px 12px 2px;
 }
 .floating-shortcut-help > .floating-scroll {
-  padding: 4px 14px 14px;
+  flex: 0 1 auto;
+  padding: 4px 12px 10px;
 }
 .floating-shortcut-help dl {
   display: grid;
-  gap: 10px;
+  gap: 6px;
   margin: 0;
   font-size: var(--type-body);
   line-height: var(--line-body);
@@ -4613,8 +4636,47 @@ details[open] > summary > .disclosure-chevron {
   margin: 0;
   color: var(--muted);
 }
+.floating-shortcut-help dt {
+  display: grid;
+  min-width: 0;
+}
+.floating-shortcut-help dt > span {
+  grid-area: 1 / 1;
+}
+.floating-shortcut-label-width {
+  visibility: hidden;
+  pointer-events: none;
+}
 .floating-shortcut-help kbd {
   font: inherit;
+}
+.floating-shortcut-remote {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition:
+    grid-template-rows var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-duration) var(--panel-motion-easing),
+    visibility 0s linear var(--panel-motion-duration);
+}
+.floating-shortcut-remote[data-connected='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+  visibility: visible;
+  transition-delay: 0s;
+}
+.floating-shortcut-remote > div {
+  min-height: 0;
+  overflow: hidden;
+}
+.floating-shortcut-remote dl {
+  padding-top: 6px;
+}
+@media (prefers-reduced-motion: reduce) {
+  .floating-shortcut-remote {
+    transition: none;
+  }
 }
 .interview-input-mode {
   display: flex;
@@ -8355,16 +8417,13 @@ svg.ui-loader {
   }
 }
 .account-delete-ack {
+  --checkbox-accent: var(--danger);
+  --checkbox-fill: var(--danger-soft);
+  --checkbox-mark: var(--danger);
   display: flex;
   align-items: center;
   gap: 10px;
   margin-top: 20px;
-}
-.account-delete-ack input {
-  flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin: 0;
 }
 .account-export-panel {
   border-top: 1px solid var(--border);

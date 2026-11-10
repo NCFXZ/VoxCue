@@ -265,6 +265,7 @@ try {
     '动画期间保留的草稿',
   );
   const toggle = page.getByRole('button', { name: '转写面板', exact: true });
+  const nativeBeforeTranscript = await nativeBounds();
   await click(toggle);
   await page.waitForFunction(
     () => document.querySelector('.floating-shell').dataset.panelMotion === 'hide-transcript',
@@ -279,11 +280,76 @@ try {
   );
   assert.deepEqual(await contours(), originalContours);
   await captureRequested(page, 'transcript-closing', { animations: 'allow' });
+  if (process.platform === 'darwin')
+    await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((w) =>
+        w.webContents.getURL().endsWith('#interview'),
+      );
+      globalThis.transcriptResizeFrames = [];
+      globalThis.transcriptFramePhase = 'baseline';
+      win.webContents.beginFrameSubscription((image) => {
+        if (globalThis.transcriptResizeFrames.length >= 60) return;
+        const size = image.getSize(),
+          bytes = image.toBitmap({ scaleFactor: 1 });
+        const scale = Math.sqrt(bytes.length / (size.width * size.height * 4));
+        const width = Math.round(size.width * scale);
+        const nativeScale = width / win.getContentBounds().width;
+        const offset = (Math.round(30 * nativeScale) * width + Math.floor(width / 2)) * 4;
+        globalThis.transcriptResizeFrames.push({
+          phase: globalThis.transcriptFramePhase,
+          image: size,
+          native: win.getBounds(),
+          toolbarAlpha: bytes[offset + 3],
+        });
+      });
+      win.webContents.invalidate();
+      const deadline = Date.now() + 2000;
+      while (!globalThis.transcriptResizeFrames.length && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      if (!globalThis.transcriptResizeFrames.length)
+        throw Error('The compositor subscription did not become ready');
+      globalThis.transcriptFramePhase = 'transition';
+    });
   await finish();
   await idle();
   assert.equal((await nativeState()).transcriptVisible, false);
   assert.equal(await page.locator('.floating-transcript').isHidden(), true);
   const narrow = await bounds();
+  if (process.platform === 'darwin')
+    assert.deepEqual(
+      await nativeBounds(),
+      nativeBeforeTranscript,
+      'Mac transcript hiding must retain the native surface',
+    );
+  if (process.platform === 'darwin') {
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    const frames = await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((w) =>
+        w.webContents.getURL().endsWith('#interview'),
+      );
+      globalThis.transcriptFramePhase = 'settled';
+      win.webContents.invalidate();
+      const deadline = Date.now() + 2000;
+      while (
+        !globalThis.transcriptResizeFrames.some((frame) => frame.phase === 'settled') &&
+        Date.now() < deadline
+      )
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      win.webContents.endFrameSubscription();
+      return globalThis.transcriptResizeFrames;
+    });
+    assert.ok(frames.length > 0, 'The native transcript resize must present a compositor frame');
+    assert.ok(
+      frames.some((frame) => frame.phase === 'settled'),
+      'The logical transcript toggle must present a final compositor frame',
+    );
+    assert.ok(
+      frames.every((frame) => frame.toolbarAlpha > 0),
+      'The toolbar must remain painted: ' + JSON.stringify(frames),
+    );
+  }
   assert.ok(narrow.width < panelBounds.width);
   assert.ok(Math.abs(narrow.x + narrow.width / 2 - panelBounds.x - panelBounds.width / 2) <= 1);
   await seed(19, 2);
@@ -294,6 +360,12 @@ try {
   );
   assert.equal((await nativeState()).transcriptVisible, true);
   assert.deepEqual(await bounds(), panelBounds);
+  if (process.platform === 'darwin')
+    assert.deepEqual(
+      await nativeBounds(),
+      nativeBeforeTranscript,
+      'Mac transcript restoration must retain the native surface',
+    );
   await finish();
   await idle();
   assert.equal(

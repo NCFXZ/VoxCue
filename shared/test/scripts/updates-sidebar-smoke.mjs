@@ -150,6 +150,10 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
             border: style.borderTopColor,
             idle: Number(getComputedStyle(element.querySelector(selectors[0])).opacity),
             expanded: Number(getComputedStyle(element.querySelector(selectors[1])).opacity),
+            hovered: element.matches(':hover'),
+            focused: document.hasFocus(),
+            x: element.getBoundingClientRect().x,
+            y: element.getBoundingClientRect().y,
           });
           if (
             performance.now() - start < 3000 &&
@@ -174,6 +178,20 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
   await trigger();
   await button.page().evaluate(() => globalThis.updateMorphTriggered());
   const frames = await button.page().evaluate(() => globalThis.updateMorphFrames);
+  if (process.argv.includes('--diagnostics'))
+    console.log(
+      JSON.stringify({
+        morph: expanded,
+        scale: process.env.VOXCUE_TEST_SCALE_FACTOR ?? '1',
+        samples: frames.length,
+        states: frames.filter(
+          (frame, index) =>
+            !index ||
+            ['hovered', 'focused', 'x', 'y'].some((key) => frame[key] !== frames[index - 1][key]),
+        ),
+        settled: frames.at(-1),
+      }),
+    );
   verifyRoundCapFrames(frames);
   assert.ok(frames.every((frame) => frame.radius === '999px'));
   assert.ok(frames.every((frame) => frame.border === 'rgba(0, 0, 0, 0)'));
@@ -187,8 +205,10 @@ const morph = async (button, idleSelector, expandedSelector, trigger, expanded) 
         frames: frames.map(({ width, idle, expanded }) => ({ width, idle, expanded })),
       }),
   );
-  assert.equal(frames.at(-1).idle, expanded ? 0 : 1);
-  assert.equal(frames.at(-1).expanded, expanded ? 1 : 0);
+  const settled =
+    'Update morph must settle in its requested state: ' + JSON.stringify({ expanded, frames });
+  assert.equal(frames.at(-1).idle, expanded ? 0 : 1, settled);
+  assert.equal(frames.at(-1).expanded, expanded ? 1 : 0, settled);
   assert.ok(
     expanded ? frames.at(-1).width > frames[0].width : frames.at(-1).width < frames[0].width,
   );

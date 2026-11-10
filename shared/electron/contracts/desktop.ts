@@ -3,7 +3,12 @@ import type { InterviewImage, InterviewImageCall } from './interviewImages';
 import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
 import type { PresentationCapabilities } from './presentation';
 import type { UILanguage } from './uiLanguage';
-import type { ShortcutSettingsCall, ShortcutSettingsResult, ShortcutSettingsState } from './shortcuts';
+import type {
+  InterviewShortcutStatus,
+  ShortcutSettingsCall,
+  ShortcutSettingsResult,
+  ShortcutSettingsState,
+} from './shortcuts';
 import type { UpdateCall, UpdateState } from './updates';
 import type { ComponentCall, ComponentState } from './components';
 import type { AuthSession, SignOutResult } from './auth';
@@ -53,7 +58,7 @@ export type InterviewShortcutCommand =
   | 'scroll-device-up'
   | 'scroll-device-down'
   | 'screenshot';
-export interface InterviewShortcutsState {
+export interface InterviewShortcutsState extends InterviewShortcutStatus {
   open: boolean;
   rendererRevision: number;
   deviceConnected: boolean;
@@ -150,7 +155,7 @@ export interface DesktopAPI {
   interviewShortcutsState(): Promise<InterviewShortcutsState>;
   setInterviewShortcutsOpen(open: boolean): Promise<boolean>;
   onInterviewShortcutsOpen(callback: (open: boolean) => void): () => void;
-  onInterviewDeviceConnection(callback: (connected: boolean) => void): () => void;
+  onInterviewShortcutsState(callback: (state: InterviewShortcutsState) => void): () => void;
   interviewRendererReady(rendererRevision: number): Promise<void>;
   allowCapture(allowed: boolean): Promise<boolean>;
   togglePin(): Promise<boolean>;
@@ -245,7 +250,7 @@ export interface DesktopEventMap {
   'interview:layout': [layout: InterviewCanvasLayout];
   'interview:shortcut': [command: InterviewShortcutCommand];
   'interview:shortcuts-open': [open: boolean];
-  'interview:device-connected': [connected: boolean];
+  'interview:shortcuts-state': [state: InterviewShortcutsState];
   'updates:event': [state: UpdateState];
   'components:event': [state: ComponentState];
   'session:request-close': [id: string];

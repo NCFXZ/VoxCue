@@ -224,12 +224,16 @@ try {
     assert.ok(Math.abs(geometry.left - geometry.right) < 1, 'Screenshot content is centered');
   };
   const shortcut = 'Control+Shift+s';
-  const pressScreenshot = () => app.evaluate(() => {
-    const capture = globalThis.screenshotShortcuts.get('Control+Shift+S');
-    if (!capture) throw Error('Global screenshot registration is missing');
-    capture();
-  });
-  assert.equal(await camera.locator('kbd').innerText(), 'Ctrl+Shift+S');
+  const pressScreenshot = () =>
+    app.evaluate(() => {
+      const capture = globalThis.screenshotShortcuts.get('Control+Shift+S');
+      if (!capture) throw Error('Global screenshot registration is missing');
+      capture();
+    });
+  assert.equal(
+    await camera.locator('kbd').innerText(),
+    process.platform === 'darwin' ? '⌃⇧S' : 'Ctrl+Shift+S',
+  );
   assert.equal(await camera.getAttribute('aria-keyshortcuts'), 'Control+Shift+S');
   const send = floating.getByRole('button', { name: '发送面试问题', exact: true });
   const input = floating.getByRole('textbox', { name: '面试提问', exact: true });

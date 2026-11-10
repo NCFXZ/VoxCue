@@ -5,6 +5,7 @@ import path from 'node:path';
 import { renderToStaticMarkup } from 'react-dom/server';
 import {
   defaultShortcuts,
+  displayShortcut,
   normalizeShortcut,
   validateShortcutCall,
   shortcutFromEvent,
@@ -151,6 +152,10 @@ it('round-trips only bounded typed preferences and handles missing or corrupt fi
   };
   await writeShortcuts(file, bindings);
   expect(await readShortcuts(file, false)).toEqual({ bindings, error: null });
+  const macBindings = { ...bindings, 'submit-input': 'Shift+Command+H' };
+  await writeShortcuts(file, macBindings);
+  expect(await readShortcuts(file, true)).toEqual({ bindings: macBindings, error: null });
+  expect((await readShortcuts(file, false)).error).toContain('读取失败');
   await writeFile(file, 'x'.repeat(9000));
   expect((await readShortcuts(file, true)).error).toContain('读取失败');
   expect((await readShortcuts(file, true)).bindings.screenshot).toBe('Control+Shift+S');
@@ -160,6 +165,21 @@ it('normalizes physical combinations and rejects unbounded or arbitrary operatio
   const held = { ctrlKey: true, altKey: false, shiftKey: true, metaKey: false };
   expect(shortcutPreview({ ...held, key: 'Shift' })).toBe('Ctrl+Shift');
   expect(shortcutPreview({ ...held, key: 'M', code: 'KeyM' })).toBe('Ctrl+Shift+M');
+  expect(shortcutPreview({ ...held, key: 'Shift' }, true)).toBe('⌃⇧');
+  expect(shortcutPreview({ ...held, key: 'M', code: 'KeyM' }, true)).toBe('⌃⇧M');
+  expect(shortcutPreview({ ...held, key: 'Meta', metaKey: true }, true)).toBe('⌃⇧⌘');
+  expect(displayShortcut('Control+Alt+Shift+Enter', true)).toBe('⌃⌥⇧↩');
+  expect(displayShortcut('Shift+Backspace', true)).toBe('⇧⌫');
+  expect(displayShortcut('Control+Shift+Up', true)).toBe('⌃⇧↑');
+  expect(displayShortcut(null, true)).toBe('未设置');
+  expect(normalizeShortcut('Command+Shift+H', true)).toBe('Shift+Command+H');
+  expect(normalizeShortcut('Command+K', true)).toBe('Command+K');
+  expect(displayShortcut('Shift+Command+H', true)).toBe('⇧⌘H');
+  expect(
+    shortcutFromEvent({ ...held, ctrlKey: false, key: 'H', code: 'KeyH', metaKey: true }, true),
+  ).toBe('Shift+Command+H');
+  expect(() => normalizeShortcut('Command+Shift+H')).toThrow();
+  expect(() => normalizeShortcut('Super+H', true)).toThrow();
   expect(normalizeShortcut('Alt+Control+K')).toBe('Control+Alt+K');
   for (const combination of [
     'Control+K',
@@ -246,6 +266,11 @@ it('shows editable bindings and per-key conflicts without blocking the rest of s
   expect(html).toContain('快捷键冲突或不可用');
   expect(html).toContain('修改快捷键：发送当前输入内容');
   expect(html).not.toContain('截图快捷键仅在面试窗口显示时生效。');
+  vi.stubGlobal('window', { desktop: { platform: 'macos' } });
+  const mac = renderToStaticMarkup(<ShortcutSettings />);
+  expect(mac).toContain('⌃⇧P');
+  expect(mac).toContain('⌃⇧↩');
+  expect(mac).not.toContain('Ctrl+');
   f.stop();
 });
 

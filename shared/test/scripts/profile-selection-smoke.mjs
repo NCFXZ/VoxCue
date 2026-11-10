@@ -211,12 +211,17 @@ try {
     try {
       const motion = await target.evaluate(
         async (node, { trigger, pseudo }) => {
+          const probe = document.createElement('span');
+          probe.style.color = 'var(--accent)'; node.parentElement.append(probe);
+          const accent = getComputedStyle(probe).color; probe.remove();
           await Promise.all(
             node.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})),
           );
           const read = () => {
             const style = getComputedStyle(node, pseudo);
-            return { opacity: Number(style.opacity), clip: style.clipPath };
+            return { opacity: Number(style.opacity), clip: style.clipPath,
+              color: pseudo === '::after' ? style.backgroundColor : style.borderBottomColor,
+              checked: node.checked, border: getComputedStyle(node).borderTopColor };
           };
           const directions = [];
           for (let count = 0; count < 2; ++count) {
@@ -235,12 +240,17 @@ try {
             const to = read();
             directions.push({ from, middle, to });
           }
-          return { radius: getComputedStyle(node).borderTopLeftRadius, directions };
+          return { radius: getComputedStyle(node).borderTopLeftRadius, directions, accent };
         },
         { trigger, pseudo },
       );
       assert.equal(motion.radius, '6px');
       for (const { from, middle, to } of motion.directions) {
+        assert.equal(to.color, motion.accent, 'The glyph uses the current theme accent');
+        if (to.checked) {
+          const alpha = Number(to.border.match(/(?:,\s*|\/\s*)([\d.]+)\s*\)$/)?.[1]);
+          assert.ok(alpha > 0 && alpha < 1, 'The selected outline is translucent: ' + to.border);
+        }
         assert.deepEqual(
           [from.opacity, to.opacity].sort(),
           [0, 1],
