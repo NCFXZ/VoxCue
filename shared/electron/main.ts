@@ -523,8 +523,10 @@ function positionInterviewShortcuts() {
     bounds.y !== current.y ||
     bounds.width !== current.width ||
     bounds.height !== current.height
-  )
-    win.setBounds(bounds, false);
+  ) {
+    if (nativePresentation?.resizeInterview) nativePresentation.resizeInterview(win, bounds);
+    else win.setBounds(bounds, false);
+  }
 }
 function showInterviewShortcuts() {
   const win = interviewShortcutsWindow;
