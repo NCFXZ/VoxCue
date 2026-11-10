@@ -5,6 +5,7 @@ import assert from 'node:assert/strict';
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import installerConfig from '../../electron-builder.config.cjs';
 import { prepareInstallerUi } from '../../scripts/build-installer-ui.mjs';
+import { verifyPreviousVersionData } from './package-upgrade-data.mjs';
 
 assert.equal(process.platform, 'win32');
 const installerStage = process.argv.includes('--installer-stage');
@@ -75,6 +76,11 @@ const packageArgs = installerStage
   : ['--test-package=' + path.join(output, 'VoxCue-win32-x64')];
 await run('test/scripts/packaged-smoke.mjs', packageArgs, 180000);
 await run('test/scripts/presentation-native-smoke.mjs', packageArgs, 180000);
+if (installerStage)
+  await verifyPreviousVersionData({
+    currentPackage: path.resolve('release/installer-stage/VoxCue-win32-x64'),
+    cache: process.env.VOXCUE_TEST_COMPONENT_CACHE ?? path.resolve('.cache/test-components'),
+  });
 console.log(
   JSON.stringify({
     status: 'passed',

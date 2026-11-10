@@ -65,7 +65,11 @@ app.whenReady().then(async()=>{
     [await offlineElectronEntry(fixture)],
     {
       cwd: workspace.platformRoot,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: undefined },
+      env: {
+        ...process.env,
+        COPILOT_TEST_USER_DATA: path.join(directory, 'profile'),
+        ELECTRON_RUN_AS_NODE: undefined,
+      },
       stdio: 'inherit',
       windowsHide: true,
     },

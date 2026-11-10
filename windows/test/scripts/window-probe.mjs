@@ -54,13 +54,13 @@ export async function stableTarget(locator, project) {
 
 export const probeExecutable = executable;
 
-export async function holdExclusiveFiles(files) {
-  const child=spawnTestProcess(probeExecutable,['hold-file',...files],{stdio:['pipe','pipe','pipe'],windowsHide:true});
+async function holdProbe(args, expected, label) {
+  const child=spawnTestProcess(probeExecutable,args,{stdio:['pipe','pipe','pipe'],windowsHide:true});
   let failure='';child.stderr.on('data',chunk=>failure+=chunk);
   const timer=setTimeout(()=>child.kill('SIGTERM'),10000);
   try {
-    const data=await Promise.race([once(child.stdout,'data').then(([value])=>value),once(child,'exit').then(()=>{throw Error('Exclusive guard could not start: '+failure);})]);
-    assert.deepEqual(JSON.parse(data),{holding:true});
+    const data=await Promise.race([once(child.stdout,'data').then(([value])=>value),once(child,'exit').then(()=>{throw Error(label+' could not start: '+failure);})]);
+    assert.deepEqual(JSON.parse(data),expected);
   } catch(error) {child.kill('SIGTERM');throw error;}
   finally {clearTimeout(timer);}
   let releasing;
@@ -71,4 +71,9 @@ export async function holdExclusiveFiles(files) {
       await exit;
     }
   })();
+}
+export const holdExclusiveFiles = (files) => holdProbe(['hold-file',...files],{holding:true},'Exclusive guard');
+export async function holdDesktopAwake() {
+  assert.equal(probe('desktop').interactive,true,'A power request requires the unlocked owner console');
+  return holdProbe(['hold-awake'],{awake:true},'Desktop awake guard');
 }

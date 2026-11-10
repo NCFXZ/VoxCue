@@ -20,6 +20,7 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool SetProcessDPIAware();
   [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
   [DllImport("kernel32.dll")] static extern uint WTSGetActiveConsoleSessionId();
+  [DllImport("kernel32.dll",SetLastError=true)] static extern uint SetThreadExecutionState(uint flags);
   [DllImport("wtsapi32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern bool WTSQuerySessionInformationW(IntPtr server,int session,int information,out IntPtr buffer,out int bytes);
   [DllImport("wtsapi32.dll")] static extern void WTSFreeMemory(IntPtr buffer);
   [DllImport("user32.dll")] static extern IntPtr OpenInputDesktop(uint flags,bool inherit,uint access);
@@ -36,6 +37,8 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern IntPtr SendMessageW(IntPtr window,int message,IntPtr w,IntPtr l);
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
+  [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll",SetLastError=true)] static extern bool PostMessageW(IntPtr window,int message,IntPtr w,IntPtr l);
   [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
   delegate bool EnumWindowProc(IntPtr window,IntPtr data);
@@ -92,6 +95,19 @@ class WindowProbe {
     if(!ReadDesktop().interactive)throw new Exception("GUI/native input requires the owner's unlocked console; locked or unknown state refused");
   }
   static Input Key(ushort key,ushort scan,uint flags) {return new Input{type=1,value=new InputUnion{keyboard=new KeyboardInput{key=key,scan=scan,flags=flags}}};}
+  static void ActivateSaveDialog(IntPtr dialog) {
+    RequireDesktop();
+    if(!IsWindowVisible(dialog))throw new Exception("Owned save dialog is no longer visible");
+    SetForegroundWindow(dialog);
+    var deadline=DateTime.UtcNow.AddSeconds(2);
+    do {
+      RequireDesktop();
+      if(GetAncestor(GetForegroundWindow(),2)==dialog)return;
+      Thread.Sleep(25);
+    } while(DateTime.UtcNow<deadline);
+    uint pid;GetWindowThreadProcessId(GetForegroundWindow(),out pid);
+    throw new Exception("Owned save dialog did not acquire foreground; current process="+pid);
+  }
   static void TypeSavePath(IntPtr dialog,string path) {
     RequireDesktop();
     if(GetAncestor(GetForegroundWindow(),2)!=dialog)throw new Exception("Refusing keyboard input outside owned save dialog");
@@ -153,6 +169,13 @@ class WindowProbe {
       }
       if(args[0]=="desktop") {Print(ReadDesktop());return 0;}
       RequireDesktop();
+      if(args[0]=="hold-awake") {
+        // A bounded power request, never a change to lock/screen-saver policy.
+        if(SetThreadExecutionState(0x80000003)==0)throw new System.ComponentModel.Win32Exception(Marshal.GetLastWin32Error());
+        try {Print(new{awake=true});Console.ReadLine();}
+        finally {SetThreadExecutionState(0x80000000);}
+        return 0;
+      }
       if(args[0]=="save-dialog") {
         int processId=int.Parse(args[1]);
         var ownerWindow=args.Length>3?new IntPtr(long.Parse(args[3])):IntPtr.Zero;
@@ -173,10 +196,15 @@ class WindowProbe {
           throw new Exception("Owned native save dialog not found: "+String.Join(" | ",names));
         }
         bool cancel=args[2]=="cancel";
+        var dialogHandle=new IntPtr(dialog.Current.NativeWindowHandle);
+        uint dialogProcess;GetWindowThreadProcessId(dialogHandle,out dialogProcess);
+        try {
+        AutomationElement edit=null;
         if(!cancel) {
           if(!System.IO.Path.IsPathRooted(args[2]))throw new Exception("Absolute synthetic save path required");
-          var edit=dialog.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,"1001"));
+          edit=dialog.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,"1001"));
           if(edit==null)throw new Exception("Native filename edit not found");
+          ActivateSaveDialog(dialogHandle);
           edit.SetFocus();
           var value=(ValuePattern)edit.GetCurrentPattern(ValuePattern.Pattern);value.SetValue(args[2]);
           if(value.Current.Value!=args[2])throw new Exception("Native filename did not accept the selected path");
@@ -184,10 +212,10 @@ class WindowProbe {
         var button=dialog.FindFirst(TreeScope.Descendants,new PropertyCondition(AutomationElement.AutomationIdProperty,cancel?"2":"1"));
         if(button==null)throw new Exception("Native save/cancel button not found");
         if(args.Length>4)CaptureDialog(dialog,args[4]);
-        string title=dialog.Current.Name;var dialogHandle=new IntPtr(dialog.Current.NativeWindowHandle);
+        string title=dialog.Current.Name;
         RequireDesktop();
         if(cancel)((InvokePattern)button.GetCurrentPattern(InvokePattern.Pattern)).Invoke();
-        else TypeSavePath(dialogHandle,args[2]);
+        else {ActivateSaveDialog(dialogHandle);edit.SetFocus();TypeSavePath(dialogHandle,args[2]);}
         var closeDeadline=DateTime.UtcNow.AddSeconds(5);
         while(IsWindowVisible(dialogHandle)&&DateTime.UtcNow<closeDeadline)Thread.Sleep(50);
         if(IsWindowVisible(dialogHandle)){
@@ -195,6 +223,15 @@ class WindowProbe {
           throw new Exception("Owned save dialog did not close after action");
         }
         Print(new{nativeSaveDialog=true,canceled=cancel,title});return 0;
+        } catch {
+          // Cancel only the dialog already attributed to this synthetic owner.
+          // Preserve the original failure and never type into another window.
+          uint currentProcess;
+          if(IsWindowVisible(dialogHandle)&&GetWindowThreadProcessId(dialogHandle,out currentProcess)!=0&&currentProcess==dialogProcess&&
+             (currentProcess==(uint)processId||(ownerWindow!=IntPtr.Zero&&GetAncestor(dialogHandle,3)==ownerWindow)))
+            PostMessageW(dialogHandle,0x10,IntPtr.Zero,IntPtr.Zero);
+          throw;
+        }
       }
       if(args[0]=="cursor") {Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Print(new{x=p.X,y=p.Y});return 0;}
       if(args[0]=="geometry") {
@@ -237,7 +274,20 @@ class WindowProbe {
         Print(new{});return 0;
       }
       if(args[0]=="up") {mouse_event(4,0,0,0,UIntPtr.Zero);Print(new{});return 0;}
-      if(args[0]=="hit") {var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};Print(new{expected=GetAncestor(WindowFromPoint(point),2)==new IntPtr(long.Parse(args[1]))});return 0;}
+      if(args[0]=="foreground") {
+        uint processId;GetWindowThreadProcessId(GetForegroundWindow(),out processId);
+        Print(new{processId,processName=processId==0?"none":System.Diagnostics.Process.GetProcessById((int)processId).ProcessName});return 0;
+      }
+      if(args[0]=="hit") {
+        var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};
+        var target=new IntPtr(long.Parse(args[1]));var actual=GetAncestor(WindowFromPoint(point),2);
+        if(actual==target){Print(new{expected=true});return 0;}
+        uint targetProcess,actualProcess;GetWindowThreadProcessId(target,out targetProcess);GetWindowThreadProcessId(actual,out actualProcess);
+        var name=new StringBuilder(256);GetClassNameW(actual,name,name.Capacity);
+        NativeRect targetBounds,actualBounds;GetWindowRect(target,out targetBounds);GetWindowRect(actual,out actualBounds);
+        Print(new{expected=false,point,targetProcess,actualProcess,actualClass=name.ToString(),targetBounds,actualBounds,
+          actualProcessName=actualProcess==0?"none":System.Diagnostics.Process.GetProcessById((int)actualProcess).ProcessName});return 0;
+      }
       if(args[0]=="hittest") {int x=int.Parse(args[2]),y=int.Parse(args[3]);Print(new{result=SendMessageW(new IntPtr(long.Parse(args[1])),0x84,IntPtr.Zero,new IntPtr((y<<16)|(x&0xffff))).ToInt64()});return 0;}
       if(args[0]=="drag") {
         var dragWindow=new IntPtr(long.Parse(args[1]));int x=int.Parse(args[2]),y=int.Parse(args[3]),endX=int.Parse(args[4]),endY=int.Parse(args[5]);

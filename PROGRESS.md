@@ -4,30 +4,29 @@
 
 ## 当前基线与范围
 
-- Mac 1.1.1 已发布为 [Latest](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.1.1)。完整 DMG／ZIP／latest-mac.yml、本地归档、输入与公开摘要见 shared/docs/MACOS_1.1.1_RELEASE.md；中英文说明见 RELEASE_1.1.1.md。
-- Mac 生产输入 e0a2a874bffbc37d5af57554074ade6fb7a8f446 已推送私有源码 main，固定标签 v1.1.1 指向该输入。后续发行索引／Windows 交接文档不改变 Mac 包；已有 v1.1.0 和 v1.1.1 标签不得移动。
-- Windows 正式仍为 1.1.0，源码标签基线 6b81effabce08df1a3b5836848f2eebddeec9d09，包内产品输入 d9b231a289780f0bc0d8e0b59e38d6a5e4c3c0bc。共享版本唯一来源已为 1.1.1，根／Mac 已同步，windows/package.json 的 1.1.0 漂移留 Windows 本机处理，Mac 未写 windows/。
-- 用户追加要求逐条编写 Windows 1.1.0→1.1.1 更新／测试交接，并明确确认由其在 Windows 端按文档接续。入口为 shared/docs/WINDOWS_1.1.1_HANDOFF.md，共 W001–W032；本轮没有 Windows 原生验收结论。
+- 本轮用户授权 Windows 1.1.1 更新回归、清理、完整安全／稳定／对抗／英文／视觉及安装负载检查，修复复验后推送私有源码并发布公开安装包，保持 v1.1.1 Latest。本轮不操作 Store、官网、域名或现有服务端。
+- 接续输入为 `5f67815ab8b6eb657b189848f732377805f60a43`；Windows 包内产品输入为 `aa1b9dfdde712749413dff376729344bc3af14d5`，后续验证维护和发行元数据不改变包内产品代码。版本唯一来源 shared/package.json、根及 Windows 配置均为 1.1.1。
+- 用户要求只保留 main：本地 main 跟踪 origin/main，已核对提交包含关系并移除额外本地／远端发行分支，后续直接在 main 开发和发行。既有 v1.1.0 与 v1.1.1 标签保持，v1.1.1 继续指向 Mac 输入 `e0a2a874bffbc37d5af57554074ade6fb7a8f446`。
+- 三项 Windows 资产已按摘要归档至 windows/release/1.1.1/，来源和摘要见 shared/docs/WINDOWS_1.1.1_RELEASE.md。尚未推送本轮 main 或上传 Windows 资产；shared/docs/RELEASE_1.1.1.md 的 Windows 内容仍为待发布草稿。
+- [公开 v1.1.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.1.1) 当前仍含原三项 Mac 正式资产并标记 Latest；Windows 更新继续选择完整 1.1.0。Mac 来源见 shared/docs/MACOS_1.1.1_RELEASE.md，Windows 旧基线见 WINDOWS_1.1.0_RELEASE.md。
 
-## 已实现摘要
+## 本轮实现与验证维护
 
-- Mac 默认仍为 ⌃⇧，设置／实时预览／帮助／截图使用原生符号并支持自定义 Command；修复菜单抢键与 Command 字母事件缺失。Windows 保留 Ctrl+Shift 字符和合法组合规则。
-- Mac 转写显隐使用局部双面板画布；帮助按当前语言最长动作预留宽度、显示当前可执行动作，远程两行随连接动画展开／收起。主进程最小只读状态与 rendererRevision 保持同步，退出先检查 owner、webContents 和关闭意图。
-- 账号删除与资料选择共用勾选动画、危险色／主题色及半透明边界，包含减少动态／透明和高对比降级；删除图标前置。账户卡片、骨架与摘要复用五小时优先的非变异排序。
-- Mac 固定补齐 ws@8.22.2、qrcode-generator@2.0.4、@types/ws@8.18.2；既有依赖／SDK／模型保持。最终收集显式包含 ws 和移动资源闭包。闲置图标、撤掉的试验原生绑定及重复样式已按消费者清理。
-- Mac 已按当前入口完成导出优先专项、共享与本机回归、五档界面及最终包／旧资料兼容／发布后匿名更新的执行。具体结果只在终端／对话；侧栏形变夹具保留悬停、焦点和几何诊断，不放宽断言。
+- 共享帮助随已确认的窗口／面板／音频状态显示当前动作，按语言预留紧凑宽度，批准连接后展开远程行；共用勾选动画、危险色和辅助功能降级，额度采用五小时优先的非变异排序。
+- Windows 帮助定位复用既有原生 DPI 校正适配器，保持 360 DIP；默认 Ctrl+Shift、合法自定义组合和既有 Windows 布局策略保持。Mac 全树只读，其配置漂移只报告，不在 Windows 修正。
+- 五档调度补入 interview-shortcuts、history-scroll、account-usage-overview、updates；原生登录按 DPI 子任务调度，保留原组、时限和全部断言。帮助 --native-hit 只向自有底层客户区及关闭按钮发送真实输入。
+- 保存对话框探针增加自有窗口前台确认、失败关闭及命中诊断；矩阵使用进程作用域亮屏请求，仍遇锁屏／未知桌面立即停止。SDK 和语音离线夹具在加载正式模块前设置自有 userData/sessionData。
+- 最终 ASAR、真实 SDK 子进程、LAN／移动资源闭包、私有路径拒绝、原生展示及最终包 UI 均按现行入口执行。package-upgrade-data 对真实 1.1.0 EXE 固定摘要和同路径合成 profile 验证资料兼容，与 NSIS 合成升级及独立 GUID 安装引擎分别执行。
+- 更新专项、完整共享／原生／五档、稳定／安全／对抗、英文及临时视觉状态已执行；验证入口与边界见 shared/test/README.md、WINDOWS_1.1.1_RELEASE.md 和 WINDOWS_1.1.1_HANDOFF.md。固定模型对极短语气词不保证逐字识别，空输出或误识别不视为过滤通过，不为本次发行更换模型。
+- 已核对生产、构建及测试消费者，未确认可独立删除的业务模块或弃用测试。初次安装界面缓存已清理并由打包重建；本轮最终暂存、重复安装输出、可重建缓存及临时视觉资料正在按归属／真实路径／占用收尾清理。
 
 ## 接续待办
 
-- Windows 按交接文档同步本机版本与生成配置，保持 macos/ 全树只读；不升级现有依赖或模型。
-- Windows 五档调度补入 interview-shortcuts、history-scroll、account-usage-overview、updates，保留原有全部组。实际 1.1.0 资料升级另验，不能把合成 NSIS／惰性应用夹具称为正式旧 profile 兼容。
-- Windows 本机执行类型／契约、架构、完整单测、共享／原生／五档、安全／对抗、长稳及最终负载；发布或 Store 提交按 Windows 当前任务授权，不继承本轮 Mac 发布动作。
-- 本轮 Mac 自有临时视觉资料、固定服务端参考及指针已核对真实路径、归属和占用后清理；测试期自有亮屏断言已释放。正式资产与认证公共缓存保留。
+- 提交并推送本轮验证维护和发行索引至私有 main；将 Windows 三项资产加入既有公开 v1.1.1，保留原 Mac 资产及 Latest，更新中英正文。
+- 完整匿名回读 Windows 资产并核对本地摘要，复验两平台生产更新选择器和元数据；更新发行索引及本页的实际渠道状态，再提交／推送元数据。
+- 完成本轮生成暂存和 owner 系统临时资料清理，释放所有自有进程请求。正式归档、旧恢复基线、原件、凭据、签名身份、现用依赖、认证公共缓存及历史明确跳过目录保持。
 
-## 保护与边界
+## 保护边界
 
-- Mac 1.1.1 的全局 Latest 不改变本平台完整稳定资产选择：Windows 继续选择完整 1.1.0。Windows 1.1.0、Mac 1.0.2／1.0.0 及全部旧正式／恢复资产保留。
-- 逐项 Mac 来源见 shared/docs/MACOS_1.1.0_HANDOFF.md；Windows 1.1.0 发行与 Store 上次观察见 WINDOWS_1.1.0_RELEASE.md，本轮不操作门户、官网、域名或服务端。
-- 原件、真实资料／凭据、固定本地签名和 Ed25519 身份、现用依赖及认证公共模型／音频缓存、历史明确跳过目录均保护。联调使用临时只读 0.5.3／3bceb615dbba900f669322c301fc4b5b473dfb15，不修改现有服务端。
-- 仅合成资料、文件 TTS 和认证公共音频；短语气词空输出或误识别不算过滤证据。真实账户、物理音频／屏幕、手机键盘／安全区和真实私人网络权限未覆盖时必须说明。
-- 设备连接使用 HTTP＋WS，仅限可信私人局域网／热点，审批认证后才算连接，不重放离线命令。
+- GUI、原生及推理只在 owner 登录解锁的控制台串行执行。仅合成账户／资料／图片、文件 TTS 和固定公共音频，不访问真实账户或凭据，不采样物理音频或宿主屏幕；Windows 结果不代替 Mac、真人语音或手机硬件验收。
+- 联调只使用 owner 系统临时目录中的固定 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考，现有服务端保持原样。设备连接使用 HTTP＋WS，仅适用于电脑审批认证的可信私人局域网／热点。

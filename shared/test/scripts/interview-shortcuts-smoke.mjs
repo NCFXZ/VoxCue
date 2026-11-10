@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { writeFile } from 'node:fs/promises';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -517,8 +518,24 @@ try {
     'Chinese help must fit its actual label/key content: ' + JSON.stringify(compact),
   );
   await captureRequested(help, 'interview-shortcut-help-compact');
-  if (process.platform === 'darwin') {
-    await helpPage.mouse.move(299, 1);
+  if (await helpPage.evaluate(() => !!window.desktop.presentation?.interviewMousePassthrough)) {
+    let nativePass;
+    if (process.platform === 'win32') {
+      const { probe } = await import(
+        pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+      );
+      const handle = await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((win) => win.webContents.getURL().endsWith('#interview-shortcuts'))
+          .getNativeWindowHandle().readBigUInt64LE().toString(),
+      );
+      nativePass = (ignored) => assert.equal(
+        !!(probe('window', handle, path.resolve('public/voxcue.ico')).extendedStyle & 32),
+        ignored,
+        'The owned Windows help HWND must apply its native click-through state',
+      );
+    }
+    await helpPage.mouse.move(await helpPage.evaluate(() => innerWidth - 1), 1);
     await app.evaluate(async () => {
       const deadline = Date.now() + 3000;
       while (globalThis.shortcutUi.passthrough.at(-1) !== true && Date.now() < deadline)
@@ -526,6 +543,7 @@ try {
       if (globalThis.shortcutUi.passthrough.at(-1) !== true)
         throw Error('Transparent help space must pass through');
     });
+    nativePass?.(true);
     await help.getByRole('button', { name: '关闭快捷键帮助', exact: true }).hover();
     await app.evaluate(async () => {
       const deadline = Date.now() + 3000;
@@ -534,6 +552,84 @@ try {
       if (globalThis.shortcutUi.passthrough.at(-1) !== false)
         throw Error('The help close button must accept input');
     });
+    nativePass?.(false);
+  }
+  if (process.platform === 'win32' && process.argv.includes('--native-hit')) {
+    const { probe, stableTarget } = await import(
+      pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+    );
+    const [behind] = await Promise.all([
+      app.waitForEvent('window'),
+      app.evaluate(async ({ BrowserWindow }) => {
+        const helper = BrowserWindow.getAllWindows().find((win) =>
+          win.webContents.getURL().endsWith('#interview-shortcuts'),
+        );
+        const bounds = helper.getBounds();
+        const surface = new BrowserWindow({
+          x: bounds.x - 16, y: bounds.y - 16,
+          width: bounds.width + 32, height: bounds.height + 32,
+          frame: false, thickFrame: false, resizable: false, show: false, skipTaskbar: true,
+          backgroundColor: '#285064',
+          webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
+        });
+        globalThis.shortcutUi.hitBehind = surface;
+        await surface.loadURL('data:text/html,' + encodeURIComponent(
+          '<body style="margin:0;background:#285064;width:100vw;height:100vh">Owned help hit surface<script>window.clicks=0;document.addEventListener("click",()=>window.clicks++)</script>',
+        ));
+        surface.setAlwaysOnTop(true, 'normal');
+        surface.showInactive();
+        helper.moveTop();
+      }),
+    ]);
+    try {
+      const handles = await app.evaluate(({ BrowserWindow }) => ({
+        helper: BrowserWindow.getAllWindows().find((win) =>
+          win.webContents.getURL().endsWith('#interview-shortcuts'),
+        ).getNativeWindowHandle().readBigUInt64LE().toString(),
+        behind: globalThis.shortcutUi.hitBehind.getNativeWindowHandle().readBigUInt64LE().toString(),
+      }));
+      const project = (point) => app.evaluate(({ BrowserWindow, screen }, point) => {
+        const bounds = BrowserWindow.getAllWindows().find((win) =>
+          win.webContents.getURL().endsWith('#interview-shortcuts'),
+        ).getContentBounds();
+        return screen.dipToScreenPoint({ x: Math.round(bounds.x + point.x), y: Math.round(bounds.y + point.y) });
+      }, point);
+      const waitPass = async (ignored) => {
+        const deadline = performance.now() + 5000;
+        while (!!(probe('window', handles.helper, path.resolve('public/voxcue.ico')).extendedStyle & 32) !== ignored) {
+          if (performance.now() >= deadline) throw Error('Native help hit state did not settle');
+          await new Promise((resolve) => setTimeout(resolve, 25));
+        }
+      };
+      const blank = await project(await helpPage.evaluate(() => ({ x: innerWidth - 2, y: 1 })));
+      probe('move', blank.x, blank.y);
+      await waitPass(true);
+      assert.equal(probe('hit', handles.behind, blank.x, blank.y).expected, true);
+      assert.equal(probe('hittest', handles.behind, blank.x, blank.y).result, 1,
+        'The pass-through target must be the owned client area, outside native resize borders');
+      probe('click', handles.behind, blank.x, blank.y);
+      await behind.waitForFunction(() => window.clicks === 1);
+      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) =>
+        win.webContents.getURL().endsWith('#interview-shortcuts'),
+      ).moveTop());
+      const close = help.getByRole('button', { name: '关闭快捷键帮助', exact: true });
+      const point = await stableTarget(close, (box) => project({ x: box.x + box.width / 2, y: box.y + box.height / 2 }));
+      probe('move', point.x, point.y);
+      await waitPass(false);
+      assert.equal(probe('hit', handles.helper, point.x, point.y).expected, true);
+      const closed = helpPage.waitForEvent('close');
+      probe('click', handles.helper, point.x, point.y);
+      await closed;
+      await floating.evaluate(() => window.desktop.setInterviewShortcutsOpen(true));
+      help = await findHelp();
+      console.log('PASS: Windows help native click-through to an owned surface, native close button and reopen');
+    } finally {
+      await app.evaluate(() => {
+        const surface = globalThis.shortcutUi.hitBehind;
+        if (surface && !surface.isDestroyed()) surface.destroy();
+        delete globalThis.shortcutUi.hitBehind;
+      });
+    }
   }
   assert.deepEqual(await keyState(), Array(9).fill(true));
   await floating.waitForFunction(

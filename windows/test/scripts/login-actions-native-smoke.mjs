@@ -7,6 +7,14 @@ import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs'
 import { probe, stableTarget } from './window-probe.mjs';
 
 assert.equal(process.platform, 'win32');
+const scales = ['1', '1.25', '1.5', '1.75', '2'];
+const options = process.argv.slice(2);
+const requestedScale = options[0]?.slice('--scale='.length);
+assert.ok(
+  options.length <= 1 &&
+    (!options.length || (options[0].startsWith('--scale=') && scales.includes(requestedScale))),
+  'Use no option or --scale=1|1.25|1.5|1.75|2',
+);
 assert.equal(probe('desktop').interactive, true, 'Native login checks require an unlocked desktop');
 const cursor = probe('cursor');
 const fixture = path.join(testRoot, 'login-actions.cjs');
@@ -42,7 +50,7 @@ async function until(read, accept, label) {
   throw Error(label + ': ' + JSON.stringify(value));
 }
 try {
-  for (const scale of ['1', '1.25', '1.5', '1.75', '2']) {
+  for (const scale of requestedScale ? [requestedScale] : scales) {
     let app;
     try {
       app = await electron.launch({
@@ -123,6 +131,7 @@ try {
         assert.equal(await locator.isDisabled(), false);
         const point = await hit(locator, 1);
         const state = ownedWindowState();
+        if (!state.foreground) console.error('Native foreground owner', probe('foreground'));
         assert.ok(
           state.foreground && !(state.extendedStyle & 8),
           'The synthetic login must keep foreground ownership until native input: ' +

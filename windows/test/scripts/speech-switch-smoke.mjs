@@ -75,6 +75,7 @@ await writeFile(
   `
 const {app}=require('electron'),assert=require('node:assert/strict'),fs=require('node:fs/promises');
 app.setPath('userData',${JSON.stringify(path.join(testRoot, 'profile'))});
+app.setPath('sessionData',${JSON.stringify(path.join(testRoot, 'profile'))});
 const {SpeechHost}=require(${JSON.stringify(path.join(root, 'dist-electron/shared/electron/backend/speech/host.js'))});
 globalThis.fetch=()=>{throw Error('No network during recognition');};require('node:net').Socket.prototype.connect=globalThis.fetch;
 app.whenReady().then(async()=>{

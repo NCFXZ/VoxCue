@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
-import { probe } from './window-probe.mjs';
+import { probe, holdDesktopAwake } from './window-probe.mjs';
 import { needsModels } from '../../../shared/test/scripts/suite-policy.mjs';
 import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 
@@ -48,6 +48,7 @@ if (suites[0] === '--dpi') {
     'interview-ux',
     'components-ui',
     'updates-sidebar',
+    'updates',
     'client-update-ui',
     'shimmer',
     'knowledge',
@@ -56,13 +57,16 @@ if (suites[0] === '--dpi') {
     'settings',
     'shortcut-settings',
     'interview-badge-layout',
+    'interview-shortcuts',
     'mobile-ui',
     'conversations',
     'language',
     'preparation-guide',
     'profile-ui',
     'history-branding',
+    'history-scroll',
     'free-service',
+    'account-usage-overview',
     'account-erasure',
     'login',
     'chat-progress',
@@ -79,6 +83,7 @@ if (suites[0] === '--dpi') {
   const models = needsModels(selected) ? await prepareModelFixtures() : null;
   const failures = [];
   const cursor = probe('cursor');
+  const releaseDesktopAwake = await holdDesktopAwake();
   let interruption;
   try {
     for (const scale of requestedScale ? [requestedScale] : scales) {
@@ -138,7 +143,8 @@ if (suites[0] === '--dpi') {
     console.error('Windows DPI matrix interrupted:', error);
     throw error;
   } finally {
-    restoreCursor(cursor, interruption);
+    try { restoreCursor(cursor, interruption); }
+    finally { await releaseDesktopAwake(); }
   }
   assert.deepEqual(failures, [], 'Windows DPI matrix failures');
   process.exit(0);
@@ -170,19 +176,29 @@ if (windowsOnly)
   for (const name of selectedNative)
     assert.ok(nativeNames.includes(name), 'Unknown native suite: ' + name);
 const commands = windowsOnly
-  ? selectedNative.map((name) =>
-      name === 'screenshot-performance'
-        ? ['../shared/test/scripts/screenshot-performance.mjs', '--native', '--platform']
-        : [
-            name === 'rag-core'
-              ? '../shared/test/scripts/rag-core-smoke.mjs'
-              : 'test/scripts/' + name + '-smoke.mjs',
-          ],
-    )
+  ? selectedNative.flatMap((name) => {
+      // Each DPI keeps the original native watchdog and every login assertion;
+      // the five-scale total must not consume one child's time allowance.
+      if (name === 'login-actions-native')
+        return ['1', '1.25', '1.5', '1.75', '2'].map((scale) => [
+          'test/scripts/login-actions-native-smoke.mjs',
+          '--scale=' + scale,
+        ]);
+      return [
+        name === 'screenshot-performance'
+          ? ['../shared/test/scripts/screenshot-performance.mjs', '--native', '--platform']
+          : [
+              name === 'rag-core'
+                ? '../shared/test/scripts/rag-core-smoke.mjs'
+                : 'test/scripts/' + name + '-smoke.mjs',
+            ],
+      ];
+    })
   : [['../shared/test/scripts/functional-suite.mjs', ...suites]];
 const models = windowsOnly ? await prepareModelFixtures() : null;
 let failed = false;
 const nativeCursor = windowsOnly ? probe('cursor') : undefined;
+const releaseDesktopAwake = await holdDesktopAwake();
 let interruption;
 try {
   for (const args of commands) {
@@ -242,7 +258,7 @@ try {
       });
     if (desktopGuard.failure) throw desktopGuard.failure;
     if (windowsOnly) {
-      console.log((code === 0 ? 'PASS ' : 'FAIL ') + args[0]);
+      console.log((code === 0 ? 'PASS ' : 'FAIL ') + args.join(' '));
       if (code !== 0) console.error(output);
     }
     if (code !== 0) failed = true;
@@ -252,6 +268,7 @@ try {
   console.error('Windows matrix interrupted:', error);
   throw error;
 } finally {
-  restoreCursor(nativeCursor, interruption);
+  try { restoreCursor(nativeCursor, interruption); }
+  finally { await releaseDesktopAwake(); }
 }
 if (failed) process.exitCode = 1;

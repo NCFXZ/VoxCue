@@ -984,10 +984,27 @@ try {
   );
   await focusUiWindow(app, floating);
   await floating.locator('.floating-brand').hover();
-  await floating.waitForFunction(
-    (fill) => getComputedStyle(document.querySelector('.floating-brand')).backgroundColor === fill,
-    previewHoverFill,
-  );
+  await floating
+    .waitForFunction(
+      (fill) => getComputedStyle(document.querySelector('.floating-brand')).backgroundColor === fill,
+      previewHoverFill,
+    )
+    .catch(async (error) => {
+      console.error('Interview hover diagnostic', {
+        expected: previewHoverFill,
+        renderer: await floating.locator('.floating-brand').evaluate((node) => ({
+          fill: getComputedStyle(node).backgroundColor,
+          hovered: node.matches(':hover'),
+          focused: document.hasFocus(),
+          bounds: node.getBoundingClientRect().toJSON(),
+        })),
+        native: await app.evaluate(({ BrowserWindow, screen }) => ({
+          focused: BrowserWindow.getFocusedWindow()?.webContents.getURL(),
+          pointer: screen.getCursorScreenPoint(),
+        })),
+      });
+      throw error;
+    });
   assert.equal(
     await floating
       .locator('.floating-brand')

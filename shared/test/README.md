@@ -2,6 +2,10 @@
 
 用户确认在 Windows 本机接续，逐条变化、预期、平台差异与执行顺序见 [Windows 1.1.0 → 1.1.1 更新与测试交接](../docs/WINDOWS_1.1.1_HANDOFF.md)，编号 W001–W032。先同步本机生成清单，补齐五档调度遗漏的帮助窗／记录滚动／额度／更新专项；真实 1.1.0 profile 升级与合成安装引擎分别验证。Mac 结果不代替 Windows 原生结论。
 
+Windows 原生登录默认保留五档 DPI、浅深主题和两种尺寸；`windows-suite --windows` 将其按 DPI 拆成独立子任务，每个仍使用原 360 秒看门狗及完整行为断言。独立入口 `login-actions-native-smoke.mjs --scale=1|1.25|1.5|1.75|2` 可定向复测，无参数仍执行全部五档；通用 `windows-suite --dpi` 保留每项原 180 秒时限与全部既有组。
+
+Windows 另用 `node ../shared/test/scripts/interview-shortcuts-smoke.mjs --native-hit` 检查真实帮助 HWND：透明预留区的原生点击必须落到本轮自建的有色窗口，关闭按钮必须命中帮助窗并完成关闭／重开。只移动／点击已核对句柄的合成窗口，不捕获宿主屏幕；普通帮助专项仍核对原生穿透标志、状态、动画及 IPC 边界。
+
 ## 1.1.1 Mac 验证入口
 
 最终 Mac 版本为 1.1.1，逐项来源见 [Mac 接续清单追加项](../docs/MACOS_1.1.0_HANDOFF.md)。默认仍为 ⌃⇧，Mac 录入另允许 ⌘ 并使用原生符号；Windows 绑定与字符格式保持。`shortcut-settings` 包含仅向自有合成窗口派发的 AppKit Command 路径，`interview-shortcuts` 验证当前动作、按语言预留宽度、主进程状态同步及实际临时 HTTP／WS 配对驱动的展开动画。
@@ -592,3 +596,4 @@ Mac `node test/scripts/speech-switch-smoke.mjs --download`在自有临时目录�
 语言适配定向入口：本平台运行 `node ../shared/test/scripts/language-smoke.mjs` 和 `settings-smoke.mjs`，覆盖首选系统语言、手动偏好、跨窗口、英文设置/面试/窄窗及中文键盘/主题回归。`ui-language.test.ts`检查简繁体判断、持久化失败、动态参数保留、词表键与占位符；`desktop-ipc.test.ts`验证公开语言接口。普通离线UI入口显式使用合成简体中文系统语言，语言专项可指定其他首选语言；不修改本机系统语言。`language-smoke.mjs --preview`仅向调用工具输出内存图像，不保存截图或报告。
 
 准备聊天默认搜索专项：profile-proposal、profile-store、copilot、chat 覆盖 tool_choice auto、共享提示词、多语言短回复上下文、模型知识技能无来源、实际引用校验、缺摘要的整套/主题范围及无搜索工具的如实降级。composer/profile-ui/preparation-guide检查联网开关移除、附件入口、提案与聊天引用。仅合成服务协议测试，不代表真实模型意图准确率。
+Windows `node test/scripts/portable-native-smoke.mjs --installer-stage` 另调用 `package-upgrade-data.mjs`：校验已发布 1.1.0 EXE 的固定 SHA256，提取真实负载至 owner 临时安装路径，创建合成资料后正常退出，再用最终安装暂存负载替换同一路径并重复启动。原件字节／元数据、个人信息、主题／语言、快捷键、记录／截图、列表返回位置及旧可检索索引分别核对；现有 NSIS 合成升级与安装引擎专项仍独立执行，不将其等同于资料兼容。本检查不覆盖真实安装或用户 profile，认证公共 RAG 缓存只读校验并复制到本轮临时目录。
