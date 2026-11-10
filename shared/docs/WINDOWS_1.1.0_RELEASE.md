@@ -5,7 +5,7 @@
 ## 版本与输入
 
 - 版本唯一来源：`shared/package.json`，`1.1.0`。根和 Windows 生成配置同步，macOS 全树保持只读，其生成配置与锁文件由 Mac 本机接续。
-- 开发基线：`a8357b2c92374ef1383c2174538587bc43e01521`；发行分支：`codex/release-1.1.0`。最终源码提交随发布补齐。
+- 开发基线：`a8357b2c92374ef1383c2174538587bc43e01521`；发行分支：`codex/release-1.1.0`。当前包的产品代码输入：`d246cb4b3432e931dd12798ce077badebffe8bd7`；后续元数据／验证维护提交不改变该包内产品代码。
 - Windows 1.0.0 输入：`a47f7435ef7c233eee9da87a18261162dfaee65f`；Mac 1.0.0 输入：`f6e06e3f62395c0d6b78bafdfceabb347c91ac27`。保留正式／恢复基线、当前依赖与认证公共缓存。
 - 私有源码仓库：`NCFXZ/VoxCue`。公开安装资产仓库：`NCFXZ/VoxCue-releases`；源码不上传到公开二进制仓库。
 
@@ -26,11 +26,11 @@
 
 目标为 Windows x64 `v1.1.0`：
 
-| 资产 | 用途 | 当前状态 |
-| --- | --- | --- |
-| `VoxCue-Setup-1.1.0-x64.exe` | 首次安装／手动升级 | 待最终构建、校验和公开回读 |
-| `VoxCue-Setup-1.1.0-x64.exe.blockmap` | 应用内差分更新 | 待最终构建、校验和公开回读 |
-| `latest.yml` | 独立安装版匿名更新清单 | 待最终构建、校验和公开回读 |
+| 资产 | 字节 | SHA256 | 当前状态 |
+| --- | --- | --- | --- |
+| `VoxCue-Setup-1.1.0-x64.exe` | 407719424 | `4ece0dc84d64425ee32eb802ee8f387010e956cf507c46544c809abbe3b5324c` | 已构建；运行验证及公开回读待执行 |
+| `VoxCue-Setup-1.1.0-x64.exe.blockmap` | 422484 | `1a27f264015290fdca635d064d228a7443e3b33544011f6f0b4172561551335f` | 已构建；公开回读待执行 |
+| `latest.yml` | 349 | `17099d50fed3f14ebbbebe7bc8688bb8f2290085776995d26a237e1d9d605bc2` | 已构建；公开回读待执行 |
 
 本次 Windows 新 Latest 必须保持 Mac 选择完整的 1.0.2 资产，不能按全局 Latest 下载错误平台或不完整版本。旧版本文件不覆盖。
 
@@ -39,6 +39,7 @@
 - 产品 ID：`9PBBVWZXMBPW`；Identity Name：`NCFX.VoxCue`。
 - Publisher：`CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A`；PublisherDisplayName：`F. Zhu`；PFN：`NCFX.VoxCue_1syhqk59eh0f0`。
 - 本次应用版本 `1.1.0` 对应 APPX 身份版本 `2.1.0.0`，目标文件 `windows/release/store/VoxCue-Store-1.1.0-x64.appx`。
+- APPX 字节 `600237507`；SHA256 `145c32586f695f40adf463e41fcb119f5173b0cba0be9f4a6a8d17af25c00d5f`。已构建，来宾运行／门户状态待后续确认。
 - 本轮观察到提交 5 的 1.0.2 已上架；1.1.0 新提交尚待最终包、Sandbox、门户校验和提交。认证受理、认证通过及实际上架分别记录，不相互替代。
 - Sandbox 只对可丢弃来宾中的临时 APPX 副本签名和安装；原包摘要保持，不在宿主安装测试证书或修改安全设置。
 

@@ -67,6 +67,7 @@ for (const dependency of [
   '@openai/codex-win32-x64',
   'word-extractor',
   'chardet',
+  'ws',
 ])
   assert.ok(
     entries.some((file) => file.includes('node_modules/' + dependency + '/')),
@@ -97,6 +98,7 @@ for (const [name, version] of [
   ['zod', '4.6.6'],
   ['word-extractor', '1.0.4'],
   ['chardet', '2.1.1'],
+  ['ws', '8.22.2'],
 ])
   assert.equal(
     JSON.parse(asar.extractFile(archive, path.normalize('node_modules/' + name + '/package.json')))
@@ -194,6 +196,53 @@ try {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await page.evaluate(() => 'retrieval' in window.desktop), false);
   assert.deepEqual(errors, []);
+  const mobile = await app.evaluate(async ({ app }) => {
+    const load = process
+      .getBuiltinModule('module')
+      .createRequire(app.getAppPath() + '/package.json');
+    const base = app.getAppPath() + '/dist-electron/shared/electron/backend/remoteConnection';
+    const { createMobileAssets } = load(base + '/assets.js');
+    const { RemoteConnectionService } = load(base + '/service.js');
+    const service = new RemoteConnectionService({
+      mobileAssets: createMobileAssets(app.getAppPath() + '/dist'),
+      onState() {},
+      onCommand: async () => {
+        throw Error('No business command in package asset verification');
+      },
+    });
+    try {
+      const state = await service.start();
+      const origin = state.addresses[0];
+      const response = await fetch(origin);
+      const html = await response.text();
+      const references = [...html.matchAll(/(?:src|href)="([^"]+)"/g)].map((match) => match[1]);
+      if (response.status !== 200 || references.length < 2)
+        throw Error('Packaged mobile entry is unavailable');
+      for (const reference of references) {
+        const target = new URL(reference, origin);
+        if (target.origin !== origin || !target.pathname.startsWith('/assets/') || target.search || target.hash)
+          throw Error('Unexpected mobile asset reference');
+        const asset = await fetch(target);
+        if (asset.status !== 200 || !(await asset.arrayBuffer()).byteLength)
+          throw Error('Packaged mobile dependency is unavailable');
+      }
+      const desktop = await fetch(origin + '/index.html');
+      return {
+        references: references.length,
+        desktopStatus: desktop.status,
+        state: service.state().status,
+      };
+    } finally {
+      await service.disconnect();
+    }
+  });
+  assert.ok(mobile.references >= 2);
+  assert.equal(mobile.desktopStatus, 404);
+  assert.equal(
+    mobile.state,
+    'waiting',
+    'Loading the packaged page does not bypass pairing approval',
+  );
   await closeUiApp(app);
   installation = JSON.parse(
     await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'),

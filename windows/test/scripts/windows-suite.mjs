@@ -163,6 +163,7 @@ const nativeNames = [
   'presentation-native',
   'rag-core',
   'screenshot-performance',
+  'screenshot-monitor',
 ];
 const selectedNative = windowsOnly && suites.length > 1 ? suites.slice(1) : nativeNames;
 if (windowsOnly)

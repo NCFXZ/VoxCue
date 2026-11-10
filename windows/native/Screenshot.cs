@@ -8,12 +8,25 @@ using System.IO;
 using System.Runtime.InteropServices;
 
 class Screenshot {
-  [StructLayout(LayoutKind.Sequential)] struct Rect { public int left, top, right, bottom; }
+  [StructLayout(LayoutKind.Sequential)] internal struct Rect { public int left, top, right, bottom; }
+  [StructLayout(LayoutKind.Sequential)] internal struct Point { public int x, y; }
   [StructLayout(LayoutKind.Sequential)] struct MonitorInfo { public int size; public Rect monitor, work; public uint flags; }
   [DllImport("user32.dll")] static extern bool SetProcessDpiAwarenessContext(IntPtr context);
   [DllImport("user32.dll")] static extern bool IsWindow(IntPtr window);
-  [DllImport("user32.dll")] static extern IntPtr MonitorFromWindow(IntPtr window, uint flags);
+  [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window, out Rect rect);
+  [DllImport("user32.dll")] static extern uint GetDpiForWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern IntPtr MonitorFromPoint(Point point, uint flags);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+
+  // The stable transparent canvas can overlap a larger adjacent monitor. Its
+  // toolbar center stays anchored to the visible content, including while hidden.
+  internal static Point MonitorAnchor(Rect rect, uint dpi) {
+    if (rect.right <= rect.left || rect.bottom <= rect.top || dpi == 0) throw new IOException();
+    return new Point {
+      x = rect.left + (int)(((long)rect.right - rect.left) / 2),
+      y = (int)(rect.top + Math.Min((long)rect.bottom - rect.top - 1, 24L * dpi / 96)),
+    };
+  }
 
   static int Main(string[] args) {
     try {
@@ -22,8 +35,10 @@ class Screenshot {
       if (args.Length != 1 || !ulong.TryParse(args[0], out handle)) throw new ArgumentException();
       var window = new IntPtr(unchecked((long)handle));
       if (!IsWindow(window)) throw new ArgumentException();
+      Rect bounds;
+      if (!GetWindowRect(window, out bounds)) throw new IOException();
       var info = new MonitorInfo { size = Marshal.SizeOf(typeof(MonitorInfo)) };
-      if (!GetMonitorInfo(MonitorFromWindow(window, 2), ref info)) throw new IOException();
+      if (!GetMonitorInfo(MonitorFromPoint(MonitorAnchor(bounds, GetDpiForWindow(window)), 2), ref info)) throw new IOException();
       int width = info.monitor.right - info.monitor.left, height = info.monitor.bottom - info.monitor.top;
       if (width < 1 || height < 1 || width > 16384 || height > 16384 || (long)width * height > 67108864) throw new IOException();
       using (var full = new Bitmap(width, height, PixelFormat.Format32bppArgb)) {
