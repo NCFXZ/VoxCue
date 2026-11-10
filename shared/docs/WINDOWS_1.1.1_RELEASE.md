@@ -1,6 +1,6 @@
 # VoxCue 1.1.1 Windows 发行索引
 
-更新日期：2026-11-10。本文记录产品来源、发行资产与渠道状态，不保存测试成绩。本轮用户授权清理、完整回归、修复、私有源码及公开安装包发布；不包含 Microsoft Store 更新。
+更新日期：2026-11-10。本文记录产品来源、发行资产与渠道状态，不保存测试成绩。本轮用户授权清理、完整回归、修复、私有源码及公开安装包发布，随后追加授权 Microsoft Store 上传与提交。
 
 ## 版本与来源
 
@@ -19,7 +19,9 @@
 
 ## GitHub 资产
 
-Windows 三项资产已在本地 `windows/release/1.1.1/` 按原字节归档，准备加入既有 [v1.1.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.1.1)，保留其 Latest 状态及三项 Mac 资产。尚未上传 Windows 资产。
+Windows 三项资产已在本地 `windows/release/1.1.1/` 按原字节归档，并加入既有 [v1.1.1](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.1.1)，Release ID `440499445`；保留 Latest 状态及三项 Mac 资产，中英文正文与本地发行说明一致。公开三项文件已完整匿名回读并与本地摘要一致，Windows／Mac 生产更新选择器均选择完整 1.1.1，元数据 SHA512、文件名及大小一致；原 Mac 资产 ID、大小与摘要保持。
+
+Windows EXE、blockmap、latest.yml 的公开 Asset ID 分别为 `732537167`、`732540073`、`732540109`。
 
 | 资产 | 字节 | SHA256 |
 | --- | --- | --- |
@@ -28,6 +30,15 @@ Windows 三项资产已在本地 `windows/release/1.1.1/` 按原字节归档，�
 | `latest.yml` | 349 | `446168c8df6cad4fd24758b4c29d480985c7df6aed3715d4750f934819d3c19c` |
 
 更新元数据中 EXE 的 SHA512 为 `lM40DxqWQHO9MQBWFKc8m4z1ZZnKyhStvNjHBQyo3HgtHDwZGfYDPqDsf3Su2DrHRavF7u0F61Jf0JDOAeBH/w==`。Windows 1.1.0、其他历史正式和恢复资产保持。
+
+## Microsoft Store
+
+- 产品 ID `9PBBVWZXMBPW`，Identity Name `NCFX.VoxCue`；沿用 Publisher `CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A`、PublisherDisplayName `F. Zhu` 和 PFN `NCFX.VoxCue_1syhqk59eh0f0`。
+- 应用版本 1.1.1 对应 APPX 身份版本 2.1.1.0，正式文件为 windows/release/store/VoxCue-Store-1.1.1-x64.appx，字节 `600287236`，SHA256 `15d149cdcdb862710182c012661844d40605eb322decd48de4caa588327eb27e`。
+- 第 7 次提交 ID `1152921505702369192` 已受理为 **In certification**。门户显示 Submission complete、Pre-processing in progress，Certification 与 Publishing 尚未开始；这不是认证通过或已上架的确认。前次第 6 次提交已由门户显示在商店可用。
+- 新 APPX 已校验，中英文版本说明、审核操作说明和 runFullTrust 用途说明已保存；声明能力、价格、地区、年龄评级、产品身份及既有商店图片保持。
+- 用户已明确确认采用 APPX 2.1.1.0、应用内显示 1.1.1，并授权认证通过后立即自动发布；门户显示 Your product will start publishing as soon as it passes certification。
+- 不在宿主安装临时证书或修改系统安全设置；Sandbox 仅对可丢弃来宾内的临时副本签名与安装，保留正式包原始摘要。
 
 ## 验证入口与边界
 
