@@ -179,8 +179,10 @@ export async function checkComponents(application) {
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();
   const rag = settings.locator('.component-row[data-component-id="rag"]');
   const speech = settings.locator('.component-row[data-component-id="speech"]');
-  await assertInitialDownloadProgress(rag.locator('.download-button'), () =>
-    rag.getByRole('button', { name: '下载', exact: true }).click(),
+  await assertInitialDownloadProgress(
+    rag.locator('.download-button'),
+    () => rag.getByRole('button', { name: '下载', exact: true }).click(),
+    { delayMs: 500 },
   );
   assert.equal(await speech.getByRole('button', { name: '下载', exact: true }).isDisabled(), true);
   await rag.locator('.download-button').click();

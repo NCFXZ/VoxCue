@@ -5,7 +5,7 @@
 ## 版本与输入
 
 - 版本唯一来源：`shared/package.json`，`1.1.0`。根和 Windows 生成配置同步，macOS 全树保持只读，其生成配置与锁文件由 Mac 本机接续。
-- 开发基线：`a8357b2c92374ef1383c2174538587bc43e01521`；发行分支：`codex/release-1.1.0`。当前包的产品代码输入：`b508c3833198ba497de4c967fef4a1d6492c666f`；后续元数据／验证维护提交不改变该包内产品代码。
+- 开发基线：`a8357b2c92374ef1383c2174538587bc43e01521`；发行分支：`codex/release-1.1.0`。当前包的产品代码输入：`d9b231a289780f0bc0d8e0b59e38d6a5e4c3c0bc`；后续元数据／验证维护提交不改变该包内产品代码。
 - Windows 1.0.0 输入：`a47f7435ef7c233eee9da87a18261162dfaee65f`；Mac 1.0.0 输入：`f6e06e3f62395c0d6b78bafdfceabb347c91ac27`。保留正式／恢复基线、当前依赖与认证公共缓存。
 - 私有源码仓库：`NCFXZ/VoxCue`。公开安装资产仓库：`NCFXZ/VoxCue-releases`；源码不上传到公开二进制仓库。
 
@@ -30,9 +30,9 @@
 
 | 资产 | 字节 | SHA256 | 当前状态 |
 | --- | --- | --- | --- |
-| `VoxCue-Setup-1.1.0-x64.exe` | 407719659 | `12bd075f820d55082f334841f3c64c36a70ef1109564549a3bfde8d137b42a6f` | 已构建；运行验证及公开回读待执行 |
-| `VoxCue-Setup-1.1.0-x64.exe.blockmap` | 422398 | `1a812282e77e77ce3a625e95e652c93d2fc2f0dc46d756381d18db210d6ba100` | 已构建；公开回读待执行 |
-| `latest.yml` | 349 | `308bf8b2ee94f2075835a9f04e164ad443bf1d69f850ff4e5c9c0eb1a4b65631` | 已构建；公开回读待执行 |
+| `VoxCue-Setup-1.1.0-x64.exe` | 407760408 | `de9aa759c94c69d7dc4723c5c65c414c6c9bf4672be246e833c625e75bdd5907` | 本地归档；公开回读待执行 |
+| `VoxCue-Setup-1.1.0-x64.exe.blockmap` | 422631 | `fe593a1c42086763b160bee91d5540247ef02f0b1d513c773b775570d66633db` | 本地归档；公开回读待执行 |
+| `latest.yml` | 349 | `0094d05fbeeba53e028659ed7d4b94df70dfed3254dcb7d5b6eeb9483fc8363d` | 本地归档；公开回读待执行 |
 
 本次 Windows 新 Latest 必须保持 Mac 选择完整的 1.0.2 资产，不能按全局 Latest 下载错误平台或不完整版本。旧版本文件不覆盖。
 
@@ -41,8 +41,8 @@
 - 产品 ID：`9PBBVWZXMBPW`；Identity Name：`NCFX.VoxCue`。
 - Publisher：`CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A`；PublisherDisplayName：`F. Zhu`；PFN：`NCFX.VoxCue_1syhqk59eh0f0`。
 - 本次应用版本 `1.1.0` 对应 APPX 身份版本 `2.1.0.0`，目标文件 `windows/release/store/VoxCue-Store-1.1.0-x64.appx`。
-- APPX 字节 `600237807`；SHA256 `30a6141c95cabb55fd19d9b4d72b9277092a37a24e0a7b5dfcd6386a7d494718`。已构建，来宾运行／门户状态待后续确认。
-- 本轮观察到提交 5 的 1.0.2 已上架；1.1.0 新提交尚待最终包、Sandbox、门户校验和提交。认证受理、认证通过及实际上架分别记录，不相互替代。
+- APPX 字节 `600285496`；SHA256 `ad79598544374193b0bcaa9cf6a8f645cae4802ee92eaf70bcf9478eaac44843`。已归档，门户提交状态待后续确认。
+- 本轮观察到提交 5 的 1.0.2 已上架；1.1.0 新提交待门户校验和提交。认证受理、认证通过及实际上架分别记录，不相互替代。
 - Sandbox 只对可丢弃来宾中的临时 APPX 副本签名和安装；原包摘要保持，不在宿主安装测试证书或修改安全设置。
 
 ## 验证入口与边界
