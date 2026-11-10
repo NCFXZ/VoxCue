@@ -493,3 +493,5 @@ AGENTS.md已将已完成任务的重复“最新授权”整理为当前状态�
 - 核对 shared/src、shared/electron 和 shared/test 消费者后，移除未使用的 ConfirmResetButton 及其专属错误分支、Search／Eye 图标封装和已撤回的整场快捷键注册失败文案。
 - 截图按钮宽度由实际配置的快捷键计算；删除被内联值覆盖的固定宽度及旧 Mac 宽度覆盖，保留仍使用的 Mac 字体样式。
 - RemotePairingCode 为配对对话框实际内部组件，保留；有真实测试消费者的 Mock／temp 接口和历史恢复基线保持。完整矩阵纳入本轮新增的界面与资源验证入口。
+- 最终消费者退出后，删除本轮 installer-stage／store-stage 生成暂存树及两个 builder-debug.yml；正式 1.1.0 安装资产按摘要归档，旧正式／恢复包、当前依赖与认证公开模型／音频缓存保持。
+- 本轮自有临时界面截图、固定服务端参考副本与 Sandbox 来宾在结束后按绝对路径、归属和占用清理；不清理未知目录，历史明确跳过的 OneDrive 占位目录不重试。

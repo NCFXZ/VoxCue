@@ -1,6 +1,6 @@
 # VoxCue 1.1.0 Windows 发行索引
 
-更新日期：2026-11-10。用户已授权本次清理、完整回归、修复、私有源码和公开安装包发布、Microsoft Store 更新及 Mac 逐项交接。实际发布标识和摘要在最终资产确认后补齐；本文件不保存测试成绩。
+更新日期：2026-11-10。用户已授权本次清理、完整回归、修复、私有源码和公开安装包发布、Microsoft Store 更新及 Mac 逐项交接。下列为本轮最终资产及已观察的渠道状态；本文件不保存测试成绩。
 
 ## 版本与输入
 
@@ -8,6 +8,7 @@
 - 开发基线：`a8357b2c92374ef1383c2174538587bc43e01521`；发行分支：`codex/release-1.1.0`。当前包的产品代码输入：`d9b231a289780f0bc0d8e0b59e38d6a5e4c3c0bc`；后续元数据／验证维护提交不改变该包内产品代码。
 - Windows 1.0.0 输入：`a47f7435ef7c233eee9da87a18261162dfaee65f`；Mac 1.0.0 输入：`f6e06e3f62395c0d6b78bafdfceabb347c91ac27`。保留正式／恢复基线、当前依赖与认证公共缓存。
 - 私有源码仓库：`NCFXZ/VoxCue`。公开安装资产仓库：`NCFXZ/VoxCue-releases`；源码不上传到公开二进制仓库。
+- 源码 `main`、`codex/release-1.1.0` 与正式标签 `v1.1.0` 同步本轮最终提交；标签位于私有源码仓库，公开二进制仓库的标签只用于发行资产。
 
 ## 产品变化与修复
 
@@ -26,23 +27,24 @@
 
 ## GitHub 资产
 
-目标为 Windows x64 `v1.1.0`：
+Windows x64 [v1.1.0](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.1.0) 已公开，标记 Latest。Release ID `440249300`，发布时间 `2026-11-10T11:01:54Z`；中英正文与仓库说明一致，本地正式归档在 `windows/release/1.1.0/`。
 
 | 资产 | 字节 | SHA256 | 当前状态 |
 | --- | --- | --- | --- |
-| `VoxCue-Setup-1.1.0-x64.exe` | 407760408 | `de9aa759c94c69d7dc4723c5c65c414c6c9bf4672be246e833c625e75bdd5907` | 本地归档；公开回读待执行 |
-| `VoxCue-Setup-1.1.0-x64.exe.blockmap` | 422631 | `fe593a1c42086763b160bee91d5540247ef02f0b1d513c773b775570d66633db` | 本地归档；公开回读待执行 |
-| `latest.yml` | 349 | `0094d05fbeeba53e028659ed7d4b94df70dfed3254dcb7d5b6eeb9483fc8363d` | 本地归档；公开回读待执行 |
+| `VoxCue-Setup-1.1.0-x64.exe` | 407760408 | `de9aa759c94c69d7dc4723c5c65c414c6c9bf4672be246e833c625e75bdd5907` | 已公开；完整回读与本地一致 |
+| `VoxCue-Setup-1.1.0-x64.exe.blockmap` | 422631 | `fe593a1c42086763b160bee91d5540247ef02f0b1d513c773b775570d66633db` | 已公开；完整回读与本地一致 |
+| `latest.yml` | 349 | `0094d05fbeeba53e028659ed7d4b94df70dfed3254dcb7d5b6eeb9483fc8363d` | 已公开；完整回读与本地一致 |
 
-本次 Windows 新 Latest 必须保持 Mac 选择完整的 1.0.2 资产，不能按全局 Latest 下载错误平台或不完整版本。旧版本文件不覆盖。
+更新元数据 SHA512 与公开安装包一致。产品选择器针对实际公开分页资产，Windows 选择 1.1.0，Mac 继续选择完整 1.0.2，不能按全局 Latest 下载错误平台或不完整版本。旧版本文件未覆盖。
 
 ## Microsoft Store
 
 - 产品 ID：`9PBBVWZXMBPW`；Identity Name：`NCFX.VoxCue`。
 - Publisher：`CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A`；PublisherDisplayName：`F. Zhu`；PFN：`NCFX.VoxCue_1syhqk59eh0f0`。
 - 本次应用版本 `1.1.0` 对应 APPX 身份版本 `2.1.0.0`，目标文件 `windows/release/store/VoxCue-Store-1.1.0-x64.appx`。
-- APPX 字节 `600285496`；SHA256 `ad79598544374193b0bcaa9cf6a8f645cae4802ee92eaf70bcf9478eaac44843`。已归档，门户提交状态待后续确认。
-- 本轮观察到提交 5 的 1.0.2 已上架；1.1.0 新提交待门户校验和提交。认证受理、认证通过及实际上架分别记录，不相互替代。
+- APPX 字节 `600285496`；SHA256 `ad79598544374193b0bcaa9cf6a8f645cae4802ee92eaf70bcf9478eaac44843`。门户已校验并纳入第 6 次提交。
+- 第 6 次提交 ID `1152921505702365453`：新包及简体中文／英文版本说明已保存，认证说明补充用户主动开启的局域网服务与审批边界；声明能力、价格、年龄评级和既有商店图片保持。
+- 本轮最后观察：1.1.0 已受理为 **In certification**，Submission complete，Pre-processing in progress；认证和Publishing尚未开始。沿用 **Publish as soon as it passes certification**。这不是认证通过或已上架的确认；此前第 5 次提交的 1.0.2 已上架。
 - Sandbox 只对可丢弃来宾中的临时 APPX 副本签名和安装；原包摘要保持，不在宿主安装测试证书或修改安全设置。
 
 ## 验证入口与边界
