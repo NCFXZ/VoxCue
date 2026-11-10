@@ -121,14 +121,17 @@ async function seed(page) {
     db.close();
   }, bases);
 }
+const nativeSizes = new WeakMap();
 async function size(page, width, height) {
-  // Observe the production resize after motion completes. Forcing setSize or
-  // viewport emulation here can resize the HWND before its exit animation ends.
+  // The Windows HWND reserves a stable canvas; observe the visible shell after
+  // motion without forcing native dimensions or emulating a different viewport.
   await page.waitForFunction(() => !document.querySelector('.floating-shell').dataset.panelMotion);
   await page
     .waitForFunction(
-      (expected) =>
-        Math.abs(innerWidth - expected.width) <= 1 && Math.abs(innerHeight - expected.height) <= 1,
+      (expected) => {
+        const rect = document.querySelector('.floating-shell').getBoundingClientRect();
+        return Math.abs(rect.width - expected.width) <= 1 && Math.abs(rect.height - expected.height) <= 1;
+      },
       { width, height },
     )
     .catch(async (error) => {
@@ -166,6 +169,8 @@ async function size(page, width, height) {
     { url: page.url(), width, height },
   );
   const viewport = await page.evaluate(() => [innerWidth, innerHeight]);
+  if (nativeSizes.has(page)) assert.deepEqual(native, nativeSizes.get(page), 'Panel changes preserve the Windows native canvas');
+  else nativeSizes.set(page, native);
   assert.ok(
     viewport.every((value, i) => Math.abs(value - native[i]) <= 1),
     JSON.stringify({ native, viewport }),
@@ -320,7 +325,7 @@ try {
   await summary.getByText('Test Model', { exact: true }).waitFor();
   await summary.getByText('高', { exact: true }).waitFor();
   assert.equal(await confirmation.getByText(/确认后自动转写，请先取得参与者同意/).count(), 0);
-  await confirmation.getByText(/音频仅在本机处理，不保存/).waitFor();
+  await confirmation.getByText('音频本机处理，不保存。 回答资料发至 OpenAI。', { exact: true }).waitFor();
   assert.equal(
     await confirmation.getByRole('button', { name: '前往面试设置', exact: true }).count(),
     0,
@@ -469,7 +474,8 @@ try {
         .getContentBounds(),
     );
     const rect = await floating.locator('.floating-toolbar').boundingBox();
-    return { center: bounds.x + rect.x + rect.width / 2, top: bounds.y + rect.y, bounds };
+    const { layout } = await floating.evaluate(() => window.desktop.interviewState());
+    return { center: bounds.x + rect.x + rect.width / 2, top: bounds.y + rect.y, bounds, layout };
   };
   const original = await toolbarPosition();
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
@@ -586,7 +592,9 @@ try {
       .find((w) => w.webContents.getURL().endsWith('#interview'))
       .getContentBounds(),
   );
-  assert.ok(resized.width < original.bounds.width && resized.height < original.bounds.height);
+  const { layout: resizedLayout } = await floating.evaluate(() => window.desktop.interviewState());
+  assert.ok(resizedLayout.width < original.layout.width && resizedLayout.height < original.layout.height);
+  assert.deepEqual(resized, original.bounds, 'Gesture resizing preserves the native canvas');
   const resizedToolbar = await toolbarPosition();
   const anchorDiagnostic = JSON.stringify({ original, resized, resizedToolbar });
   assert.ok(Math.abs(resizedToolbar.center - original.center) <= 1, anchorDiagnostic);
@@ -594,7 +602,7 @@ try {
   await app.evaluate(({ screen }) => {
     screen.getCursorScreenPoint = globalThis.originalCursor;
   });
-  await size(floating, resized.width, resized.height);
+  await size(floating, resizedLayout.width, resizedLayout.height);
   await floating.screenshot({});
   await floating.evaluate(() => {
     localStorage.setItem('copilot-theme', 'dark');

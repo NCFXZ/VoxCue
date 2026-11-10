@@ -6,7 +6,9 @@ import assert from 'node:assert/strict';
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 
 const assertControlRows = async (scope) => {
-  const rows = await scope.locator('.speech-setting-row').evaluateAll((rows) => rows.map((row) => {
+  const rows = await scope.locator('.speech-setting-row').evaluateAll((rows) => rows.filter((row) =>
+    row.querySelector(':scope > button,:scope > .frosted-slider'),
+  ).map((row) => {
     const label = row.querySelector('.speech-setting-label').getBoundingClientRect();
     const control = row.querySelector(':scope > button,:scope > .frosted-slider').getBoundingClientRect();
     return {

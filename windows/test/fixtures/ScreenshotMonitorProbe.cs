@@ -1,5 +1,6 @@
 using System;
 using System.IO;
+using System.Reflection;
 
 class ScreenshotMonitorProbe {
   static Screenshot.Rect Rect(int left, int top, int right, int bottom) {
@@ -13,7 +14,10 @@ class ScreenshotMonitorProbe {
     return point.x >= rect.left && point.x < rect.right && point.y >= rect.top && point.y < rect.bottom;
   }
   static void Require(bool value) { if (!value) throw new Exception("Monitor anchor mismatch"); }
-  static void Main() {
+  static object Native(string name, params object[] values) {
+    return typeof(Screenshot).GetMethod(name, BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, values);
+  }
+  static void Main(string[] args) {
     var small = Rect(0, 0, 1920, 1080);
     var large = Rect(1920, 0, 5760, 2160);
     var canvas = Rect(-960, 24, 2880, 2184);
@@ -30,5 +34,18 @@ class ScreenshotMonitorProbe {
     try { Screenshot.MonitorAnchor(Rect(1, 1, 1, 2), 96); throw new Exception("Invalid bounds accepted"); }
     catch (IOException) {}
     Console.WriteLine("PASS: native screenshot toolbar anchor selects the intended synthetic monitor across unequal, negative and vertical layouts; no screen capture.");
+    if (args.Length == 1) {
+      Native("SetProcessDpiAwarenessContext", new IntPtr(-4));
+      var window = new IntPtr(unchecked((long)ulong.Parse(args[0])));
+      Require((bool)Native("IsWindow", window));
+      object[] values = { window, new Screenshot.Rect() };
+      Require((bool)typeof(Screenshot).GetMethod("GetWindowRect", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, values));
+      var rect = (Screenshot.Rect)values[1];
+      var dpi = (uint)Native("GetDpiForWindow", window);
+      var anchor = Screenshot.MonitorAnchor(rect, dpi);
+      var monitor = (IntPtr)Native("MonitorFromPoint", anchor, 2u);
+      Require(monitor != IntPtr.Zero);
+      Console.WriteLine("WINDOW:" + anchor.x + "," + anchor.y + "," + dpi + "," + monitor.ToInt64());
+    }
   }
 }

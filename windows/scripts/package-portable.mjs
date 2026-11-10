@@ -187,6 +187,7 @@ const paths = await packager({
         '@ennuicastr/webrtcaec3.js',
         'adm-zip',
         'jose',
+        'ws',
         'electron-updater',
         'sherpa-onnx-node',
         'sherpa-onnx-win-x64',
