@@ -23,9 +23,14 @@ export class SpeechHost {
         () => {
           this.pending.delete(id);
           reject(Error('本地语音服务超时。'));
-          if (data.call?.op === 'switch-recognizer') {
+          if (data.call?.op === 'switch-recognizer' || data.call?.op === 'set-input-state') {
             try {
-              this.child?.postMessage({ id: randomUUID(), call: { op: 'cancel-switch' } });
+              this.child?.postMessage({
+                id: randomUUID(),
+                call: {
+                  op: data.call.op === 'set-input-state' ? 'cancel-input-state' : 'cancel-switch',
+                },
+              });
             } catch {
               /* A closed port already rejects its pending calls. */
             }

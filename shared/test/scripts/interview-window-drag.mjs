@@ -126,7 +126,7 @@ export async function exerciseInterviewWindowDrag(app, page) {
       // move and correctly ends the gesture. Keep that unrelated cursor outside
       // the tested window's movement envelope; native input has its own suite.
       const parked = await app.evaluate(({ screen }, bounds) => {
-        const display = screen.getDisplayMatching(bounds).workArea;
+        const display = screen.getDisplayMatching(bounds).bounds;
         const candidates = [
           { x: display.x + 2, y: display.y + 2 },
           { x: display.x + display.width - 2, y: display.y + 2 },
@@ -135,8 +135,8 @@ export async function exerciseInterviewWindowDrag(app, page) {
         ];
         const point = candidates.find(
           ({ x, y }) =>
-            x < bounds.x - 128 ||
-            y < bounds.y - 128 ||
+            x < bounds.x ||
+            y < bounds.y ||
             x > bounds.x + bounds.width + 128 ||
             y > bounds.y + bounds.height + 128,
         );
@@ -171,16 +171,9 @@ export async function exerciseInterviewWindowDrag(app, page) {
       );
       return globalThis.gripTest.completed > 0 && win.getBounds().x !== undefined;
     }, 'Grip did not reach native window movement');
-    const expectedPosition = await app.evaluate(
-      ({ screen }, point) => {
-        if (process.platform !== 'win32') return point;
-        // HWND origins occupy physical pixels. Electron reads their DIP bounds
-        // with a floored origin; e.g. y=191 at 175% maps back to y=190.
-        const resolved = screen.screenToDipPoint(screen.dipToScreenPoint(point));
-        return { x: Math.floor(resolved.x), y: Math.floor(resolved.y) };
-      },
-      { x: before.x + 48, y: before.y + 35 },
-    );
+    // The platform adapter now compensates the enclosing-pixel round trip in
+    // one native update. Expect the requested DIP position without old drift.
+    const expectedPosition = { x: before.x + 48, y: before.y + 35 };
     if (beforePhysical) {
       const afterPhysical = physical();
       for (const key of ['width', 'height', 'clientWidth', 'clientHeight'])

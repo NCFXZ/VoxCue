@@ -165,6 +165,7 @@ export function Modal({
       onKeyDown={onKeyDown}
       onCancel={(event) => {
         event.preventDefault();
+        event.stopPropagation();
         onClose();
       }}
       onClick={(event) => {

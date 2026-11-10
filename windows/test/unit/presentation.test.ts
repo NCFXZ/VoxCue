@@ -26,27 +26,28 @@ const windowPort = () => ({
   hide: vi.fn(),
   on: vi.fn(),
 });
-it.each([0, -1646])(
-  'fractional-DPI resize separates position and extent at display x=%s',
-  (originX) => {
-    const bounds = { x: originX + 293, y: 149, width: 1060, height: 682 };
-    nativeScreen.getDisplayMatching.mockReturnValue({ bounds: { x: originX, y: 0 } });
-    nativeScreen.screenToDipRect.mockImplementation((_win, rect) =>
-      rect.y === 149
-        ? { ...rect, width: 1061, height: 684 }
-        : { ...rect, width: 1060, height: 683 },
-    );
-    const win = { setBounds: vi.fn() };
-    createPresentation({ icon: 'VoxCue.ico', interviewOpen: () => true }).resizeInterview?.(
-      win as unknown as BrowserWindow,
-      bounds,
-    );
-    expect(win.setBounds).toHaveBeenCalledExactlyOnceWith(
-      { ...bounds, width: 1060, height: 681 },
-      false,
-    );
-  },
-);
+it.each(
+  (['resizeInterview', 'moveInterview'] as const).flatMap((method) =>
+    [0, -1646].map((originX) => [method, originX] as const),
+  ),
+)('fractional-DPI %s separates position and extent at display x=%s', (method, originX) => {
+  const bounds = { x: originX + 293, y: 149, width: 1060, height: 682 };
+  nativeScreen.getDisplayMatching.mockReturnValue({ bounds: { x: originX, y: 0 } });
+  nativeScreen.screenToDipRect.mockImplementation((_win, rect) =>
+    rect.y === 149
+      ? { ...rect, x: rect.x + 1, y: rect.y + 1, width: 1061, height: 684 }
+      : { ...rect, width: 1060, height: 683 },
+  );
+  const win = { setBounds: vi.fn() };
+  createPresentation({ icon: 'VoxCue.ico', interviewOpen: () => true })[method]?.(
+    win as unknown as BrowserWindow,
+    bounds,
+  );
+  expect(win.setBounds).toHaveBeenCalledExactlyOnceWith(
+    { ...bounds, x: bounds.x - 1, y: bounds.y - 1, width: 1060, height: 681 },
+    false,
+  );
+});
 it('Acrylic 能力遵循 Windows 11 22H2 的实际支持边界', () => {
   version = '10.0.19045';
   expect(

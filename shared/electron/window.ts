@@ -4,7 +4,7 @@ import { interviewCanvas, interviewLayout } from './contracts/interviewLayout';
 import { pendingPresentation } from './contracts/presentation';
 import { translateUI, type UILanguage } from './contracts/uiLanguage';
 
-export type WindowRole = 'login' | 'main' | 'interview';
+export type WindowRole = 'login' | 'main' | 'interview' | 'interview-shortcuts';
 const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
   login: {
     width: 1000,
@@ -26,6 +26,19 @@ const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
     resizable: false,
     title: 'VoxCue · 面试',
   },
+  'interview-shortcuts': {
+    width: 360,
+    height: 380,
+    hasShadow: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    fullscreenable: false,
+    title: '快捷键',
+  },
 };
 
 export function windowOptions(
@@ -46,7 +59,7 @@ export function windowOptions(
       : {}),
     icon: paths.icon,
     frame: false,
-    ...(platform.id === 'darwin' && role !== 'interview'
+    ...(platform.id === 'darwin' && (role === 'main' || role === 'login')
       ? {
           frame: true,
           titleBarStyle: 'hidden' as const,
@@ -96,9 +109,11 @@ export function restrictWindowNavigation(win: Pick<BrowserWindow, 'webContents'>
 }
 
 export function whenWindowReady(win: BrowserWindow, platform: DesktopPlatform, show: () => void) {
+  // BrowserWindow.webContents cannot be read from the already-closed window.
+  const contents = win.webContents;
   const dispose = () => {
     win.removeListener('ready-to-show', ready);
-    win.webContents.removeListener('did-finish-load', ready);
+    contents.removeListener('did-finish-load', ready);
     win.removeListener('closed', dispose);
   };
   const ready = () => {
@@ -109,7 +124,7 @@ export function whenWindowReady(win: BrowserWindow, platform: DesktopPlatform, s
   win.once('closed', dispose);
   // A hidden Acrylic/transparent HWND can defer its first paint indefinitely.
   // Show the loaded Windows page without waiting for that paint to reveal it.
-  if (platform.id === 'win32') win.webContents.once('did-finish-load', ready);
+  if (platform.id === 'win32') contents.once('did-finish-load', ready);
 }
 
 export function loadWindowPage(

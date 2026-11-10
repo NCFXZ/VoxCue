@@ -1,7 +1,9 @@
 import { t } from '../i18n';
 import { interviewAlwaysDark } from './ui/appearance-control';
 import { InterviewImages } from './InterviewImages';
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
+import { flushSync } from 'react-dom';
+import type { InterviewCanvasLayout } from '../../electron/contracts/desktop';
 import {
   ArrowUp,
   ChevronDown,
@@ -21,6 +23,7 @@ import {
   AudioLines,
   Sparkles,
   Settings,
+  Keyboard,
 } from './icons';
 import { Button } from './ui/button';
 import { useInterview } from '../stores/interview';
@@ -32,6 +35,11 @@ import { FollowLatestButton } from './FollowLatestButton';
 import { MarkdownContent } from './MarkdownContent';
 import { ResponseProgress } from './ResponseProgress';
 import { InterviewAudioRecovery } from './InterviewAudioRecovery';
+import {
+  RemoteConnectionDialogs,
+  RemoteConnectionIndicator,
+  RemoteConnectionRecovery,
+} from './RemoteConnection';
 import { InterviewSettingsPanel } from './InterviewSettingsPanel';
 import { InterviewReadiness } from './InterviewReadiness';
 import { InterviewChromeBase } from './InterviewChromeBase';
@@ -41,8 +49,11 @@ import { InterviewAnswerFailure, InterviewAnswerStatus } from './InterviewAnswer
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
 import { useInterviewPanelMotion } from './useInterviewPanelMotion';
+import { useInterviewRendererReady } from './useInterviewRendererReady';
 import { useInterviewFontSize } from '../interviewTypography';
 import { useTextareaSize } from './useTextareaSize';
+import { useShortcuts } from '../stores/shortcuts';
+import { matchesShortcut, displayShortcut } from '../../electron/contracts/shortcuts';
 import { useChatConnection } from '../stores/chatConnection';
 import { accountUsageSummary, isAccountUsageLow } from '../services/accountUsageSummary';
 export function FloatingInterview() {
@@ -61,40 +72,35 @@ export function FloatingInterview() {
   }, [usageEnabled, state.generating, state.answers.length]);
   const screenshotExpanded = state.capturingScreenshot || state.screenshots.length > 0;
   const macScreenshotShortcut = window.desktop?.platform === 'macos';
-  const screenshotButton = useRef<HTMLButtonElement>(null);
+  const shortcutSettings = useShortcuts((state) => state.state);
+  const screenshotShortcut = shortcutSettings.bindings.screenshot;
+  const screenshotKeyLabel = screenshotShortcut ? displayShortcut(screenshotShortcut) : '';
   const provider = providerInfo(state.answers.at(-1)?.provider);
   const failedAnswer = state.answers.at(-1)?.status === 'failed' ? state.answers.at(-1) : undefined;
   const saveError = useHistory((s) => s.error);
-  const [input, setInput] = useState<string | null>(null);
-  const editedDraft = useRef('');
   const [protectedWindow, setProtected] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const noticeError =
     error || saveError || (state.error !== failedAnswer?.error ? state.error : null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const settingsChanging = useRef(false);
+  const settingsCanvasRequested = useRef(false);
+  const remoteCanvasRequested = useRef(false);
+  const remoteCanvasRevision = useRef(0);
+  const settingsCanvasQueue = useRef<Promise<void>>(Promise.resolve());
   const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => {
-    const capture = (event: KeyboardEvent) => {
-      if (
-        event.defaultPrevented ||
-        event.isComposing ||
-        (macScreenshotShortcut ? !event.ctrlKey || event.altKey : !event.altKey || event.ctrlKey) ||
-        event.metaKey ||
-        event.shiftKey ||
-        event.key.toLowerCase() !== 's' ||
-        collapsed ||
-        document.querySelector('dialog[open]')
-      )
-        return;
-      event.preventDefault();
-      if (!event.repeat) screenshotButton.current?.click();
-    };
-    window.addEventListener('keydown', capture);
-    return () => window.removeEventListener('keydown', capture);
-  }, [collapsed, macScreenshotShortcut]);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [shortcutsBusy, setShortcutsBusy] = useState(false);
+  const shortcutsChanging = useRef(false);
+  const shortcutsEvents = useRef(0);
+  const shortcutsRequest = useRef(0);
+  const [canvasLayout, setCanvasLayout] = useState<InterviewCanvasLayout>();
+  const layoutRevision = useRef(0);
+  const [windowReady, setWindowReady] = useState(false);
+  const [rendererRevision, setRendererRevision] = useState<number>();
   const [confirmEnd, setConfirmEnd] = useState(false);
   const [ending, setEnding] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
@@ -109,18 +115,108 @@ export function FloatingInterview() {
   const resizeDirty = useRef(false);
   const dragging = useRef(false);
   const resizePointer = useRef<{ target: HTMLButtonElement; id: number } | null>(null);
-  const currentInput = input ?? state.draftQuestion;
+  const currentInput = state.inputDraft ?? state.draftQuestion;
   const inputRef = useTextareaSize(currentInput, 1, 6);
   const shell = useRef<HTMLDivElement>(null);
+  useInterviewRendererReady(rendererRevision, shell, setError);
   const panelMotion = useInterviewPanelMotion({
     shell,
     collapsed,
     transcriptVisible: showTranscript,
     setCollapsed,
     setTranscriptVisible: setShowTranscript,
-    canStart: () => !dragging.current && !resizing && !windowDrag.active.current,
+    canStart: () =>
+      !settingsChanging.current && !dragging.current && !resizing && !windowDrag.active.current,
     onError: setError,
   });
+  useEffect(
+    () =>
+      window.desktop?.onInterviewShortcut((command) => {
+        if (command === 'toggle-microphone') {
+          void useInterview.getState().toggleMicrophone();
+          return;
+        }
+        if (command === 'toggle-system-audio') {
+          void useInterview.getState().toggleSystemAudio();
+          return;
+        }
+        if (command === 'submit-input') {
+          if (windowReady && !ending) useInterview.getState().submitInput();
+          return;
+        }
+        if (command === 'screenshot') {
+          const current = useInterview.getState();
+          if (windowReady && !ending && !current.inputDraftComposing && !useShortcuts.getState().state.capturing)
+            void current.captureScreenshot();
+          return;
+        }
+        if (
+          !windowReady ||
+          ending ||
+          settingsChanging.current ||
+          document.querySelector('dialog[open]')
+        )
+          return;
+        if (command === 'toggle-panels') void panelMotion.toggleCollapsed();
+        else if (command === 'toggle-transcript') void panelMotion.toggleTranscript();
+      }),
+    [windowReady, ending, collapsed, showTranscript, resizing],
+  );
+  useEffect(() => {
+    let active = true;
+    const revision = shortcutsEvents.current;
+    const unsubscribe = window.desktop?.onInterviewShortcutsOpen((open) => {
+      if (!active) return;
+      ++shortcutsEvents.current;
+      setShortcutsOpen(open);
+    });
+    void window.desktop
+      ?.interviewShortcutsState()
+      .then((value) => {
+        if (active && revision === shortcutsEvents.current) setShortcutsOpen(value.open);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      ++shortcutsRequest.current;
+      unsubscribe?.();
+    };
+  }, []);
+  useEffect(() => {
+    if (!shortcutsOpen) return;
+    const closeHelp = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.defaultPrevented ||
+        event.isComposing ||
+        document.querySelector('dialog[open]')
+      )
+        return;
+      event.preventDefault();
+      void changeShortcuts(false);
+    };
+    window.addEventListener('keydown', closeHelp);
+    return () => window.removeEventListener('keydown', closeHelp);
+  }, [shortcutsOpen]);
+  async function changeShortcuts(open: boolean) {
+    if (shortcutsChanging.current) return;
+    shortcutsChanging.current = true;
+    setShortcutsBusy(true);
+    const request = ++shortcutsRequest.current,
+      revision = shortcutsEvents.current;
+    try {
+      const actual = await window.desktop!.setInterviewShortcutsOpen(open);
+      if (request === shortcutsRequest.current && revision === shortcutsEvents.current)
+        setShortcutsOpen(actual);
+    } catch {
+      if (request === shortcutsRequest.current) setError('窗口切换失败，请重试。');
+    } finally {
+      if (request === shortcutsRequest.current) {
+        shortcutsChanging.current = false;
+        setShortcutsBusy(false);
+      }
+    }
+  }
   useLayoutEffect(() => {
     transcriptScroll.syncLayout();
     answerScroll.syncLayout();
@@ -139,10 +235,22 @@ export function FloatingInterview() {
       desktop.setInterviewMousePassthrough(ignore);
     };
     const refresh = () => {
-      // A modal's backdrop is a dismiss target across the whole canvas. Native
-      // click-through must stay off even when elementFromPoint reports no panel.
+      // A reserved native canvas includes transparent space beyond the content.
+      // Only the visible canvas owns the modal's outside-click dismiss target.
       if (!disposed && document.querySelector('dialog[open]')) {
-        apply(false);
+        if (pointer?.buttons) {
+          apply(false);
+          return;
+        }
+        const viewport = shell.current?.parentElement;
+        const width =
+          viewport && parseFloat(getComputedStyle(viewport).getPropertyValue('--interview-width'));
+        const left = width ? (innerWidth - width) / 2 : 0;
+        const x = pointer ? pointer.x - window.screenX : left;
+        const y = pointer ? pointer.y - window.screenY : 0;
+        apply(
+          x < left || x > innerWidth - left || y < 0 || y > (viewport?.clientHeight ?? innerHeight),
+        );
         return;
       }
       if (disposed || !pointer || pointer.buttons || dragging.current || windowDrag.active.current)
@@ -210,11 +318,6 @@ export function FloatingInterview() {
       desktop.setInterviewMousePassthrough(true);
     };
   }, []);
-  useEffect(() => {
-    // Clearing an edit pauses autofill for that transcript only. Newly received
-    // interviewer speech resumes autofill; a non-empty manual edit is preserved.
-    if (input === '' && editedDraft.current !== state.draftQuestion) setInput(null);
-  }, [state.draftQuestion, input]);
   const latestQuestion =
     state.draftQuestion ||
     [...state.transcripts]
@@ -222,7 +325,9 @@ export function FloatingInterview() {
       .find(
         (transcript) =>
           transcript.reason !== 'discontinuity' &&
-          (transcript.source === 'system' || (!transcript.source && state.mode === 'mock')),
+          (state.inputMode === 'transcription'
+            ? transcript.source === 'microphone'
+            : transcript.source === 'system' || (!transcript.source && state.mode === 'mock')),
       )?.text ||
     '';
   useEffect(() => {
@@ -264,6 +369,12 @@ export function FloatingInterview() {
   );
   useEffect(() => {
     let active = true;
+    const applyLayout = (layout: InterviewCanvasLayout | undefined) => {
+      if (!active || !layout || layout.revision < layoutRevision.current) return;
+      layoutRevision.current = layout.revision;
+      setCanvasLayout(layout);
+    };
+    const unsubscribeLayout = window.desktop?.onInterviewLayout(applyLayout);
     void window.desktop
       ?.interviewState()
       .then((value) => {
@@ -271,9 +382,15 @@ export function FloatingInterview() {
         setProtected(value.protected);
         setCollapsed(value.collapsed);
         setShowTranscript(value.transcriptVisible);
-        useInterview.getState().initialize(value.configuration);
+        applyLayout(value.layout);
+        setWindowReady(true);
+        setRendererRevision(value.rendererRevision);
+        useInterview.getState().initialize(value.configuration, value.inputState);
       })
-      .catch(() => setError('无法读取已确认的面试设置，请结束面试后重试。'));
+      .catch(() => {
+        setWindowReady(true);
+        setError('无法读取已确认的面试设置，请结束面试后重试。');
+      });
     const media = matchMedia('(prefers-color-scheme: dark)');
     const theme = () => {
       const value = localStorage.getItem('copilot-theme');
@@ -302,6 +419,7 @@ export function FloatingInterview() {
       window.removeEventListener('storage', theme);
       window.removeEventListener('beforeunload', archive);
       unsubscribeEnd?.();
+      unsubscribeLayout?.();
     };
   }, []);
   async function toggleCapture() {
@@ -315,6 +433,60 @@ export function FloatingInterview() {
       setBusy(false);
     }
   }
+  function syncSettingsCanvas() {
+    const next = settingsCanvasQueue.current.catch(() => {}).then(() =>
+      window.desktop!.setInterviewSettingsOpen(
+        settingsCanvasRequested.current || remoteCanvasRequested.current,
+      ),
+    );
+    settingsCanvasQueue.current = next;
+    return next;
+  }
+  const changeRemoteCanvas = useCallback(async (open: boolean) => {
+    const revision = ++remoteCanvasRevision.current;
+    if (!open) {
+      const exit = document.querySelector('.remote-connection-dialog[data-modal-exit]');
+      await Promise.all(exit?.getAnimations().map((animation) => animation.finished.catch(() => {})) ?? []);
+    }
+    if (revision !== remoteCanvasRevision.current) return;
+    if (remoteCanvasRequested.current === open) return settingsCanvasQueue.current;
+    remoteCanvasRequested.current = open;
+    try {
+      await syncSettingsCanvas();
+    } catch (error) {
+      setError('窗口切换失败，请重试。');
+      throw error;
+    }
+  }, []);
+  async function changeSettings(open: boolean) {
+    if (
+      settingsChanging.current ||
+      panelMotion.busy.current ||
+      dragging.current ||
+      resizing ||
+      windowDrag.active.current
+    )
+      return;
+    settingsChanging.current = true;
+    const previous = settingsCanvasRequested.current;
+    try {
+      if (!open) {
+        flushSync(() => setSettingsOpen(false));
+        // Keep the existing exit animation on the temporary expanded canvas.
+        const exit = document.querySelector('.interview-settings-dialog[data-modal-exit]');
+        await Promise.all(exit?.getAnimations().map((a) => a.finished.catch(() => {})) ?? []);
+      }
+      settingsCanvasRequested.current = open;
+      await syncSettingsCanvas();
+      if (open) setSettingsOpen(true);
+    } catch {
+      settingsCanvasRequested.current = previous;
+      if (!open) setSettingsOpen(true);
+      setError('窗口切换失败，请重试。');
+    } finally {
+      settingsChanging.current = false;
+    }
+  }
   const close = async () => {
     if (ending) return;
     setEnding(true);
@@ -326,17 +498,10 @@ export function FloatingInterview() {
     }
   };
   const submit = () => {
-    if (
-      state.generating ||
-      state.updatingModel ||
-      state.capturingScreenshot ||
-      (!currentInput.trim() && !latestQuestion.trim() && !state.screenshots.length)
-    )
-      return;
-    const text = currentInput.trim() || (state.screenshots.length ? '' : latestQuestion);
-    setInput(null);
-    if (state.mode === 'local') void state.submitTranscript(text, true);
-    else void state.ask(text);
+    useInterview.getState().submitInput({
+      expectedRevision: state.inputDraftRevision,
+      fallbackQuestion: latestQuestion,
+    });
   };
   // Keep only the latest pointer intent and one native resize in flight.
   function queueResize() {
@@ -386,7 +551,7 @@ export function FloatingInterview() {
       aria-label={edge === 'left' ? t('拖动左下角调整尺寸') : t('拖动右下角调整尺寸')}
       aria-describedby="resize-keyboard-hint"
       onKeyDown={(event) => {
-        if (panelMotion.busy.current) return;
+        if (panelMotion.busy.current || settingsChanging.current) return;
         if (!['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', '+', '-'].includes(event.key))
           return;
         event.preventDefault();
@@ -395,7 +560,7 @@ export function FloatingInterview() {
           .catch(() => setError('无法调整窗口尺寸。'));
       }}
       onPointerDown={(event) => {
-        if (event.button !== 0 || panelMotion.busy.current) return;
+        if (event.button !== 0 || panelMotion.busy.current || settingsChanging.current) return;
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
         resizePointer.current = { target: event.currentTarget, id: event.pointerId };
@@ -418,13 +583,24 @@ export function FloatingInterview() {
     </button>
   );
   return (
-    <div className="floating-viewport">
+    <div
+      className="floating-viewport"
+      style={
+        {
+          visibility: windowReady ? undefined : 'hidden',
+          ...(canvasLayout && {
+            '--interview-width': `${canvasLayout.width}px`,
+            '--interview-height': `${canvasLayout.height}px`,
+          }),
+        } as CSSProperties
+      }
+    >
       <div
         ref={shell}
         data-panel-motion={panelMotion.motion ?? undefined}
         style={
           {
-            '--panel-height': `max(0px, calc(100dvh - ${interviewLayout.chromeHeight}px))`,
+            '--panel-height': `max(0px, calc(var(--interview-height, 100dvh) - ${interviewLayout.chromeHeight}px))`,
             '--interview-font-size': `${fontSize}px`,
             '--transcript-width': `calc(var(--panel-height) * ${interviewLayout.transcriptWidth / interviewLayout.panelHeight})`,
             '--answer-width': `calc(var(--panel-height) * ${interviewLayout.answerWidth / interviewLayout.panelHeight})`,
@@ -452,7 +628,7 @@ export function FloatingInterview() {
               variant="ghost"
               size="icon"
               aria-label={t('面试设置')}
-              onClick={() => setSettingsOpen(true)}
+              onClick={() => void changeSettings(true)}
             >
               <Settings size={19} />
             </Button>
@@ -488,7 +664,8 @@ export function FloatingInterview() {
               className="floating-drag-handle"
               aria-label={t('拖动面试窗口')}
               onPointerDown={(event) => {
-                if (!panelMotion.busy.current) windowDrag.onPointerDown(event);
+                if (!panelMotion.busy.current && !settingsChanging.current)
+                  windowDrag.onPointerDown(event);
               }}
             >
               <DragGrip size={20} />
@@ -502,14 +679,17 @@ export function FloatingInterview() {
           <section className="floating-panel floating-transcript" hidden={!showTranscript}>
             <InterviewChromeBase />
             <header>
-              <h2>
-                <Volume2 size={16} />
-                {t('转写')}
-              </h2>
-              <InterviewReadiness />
+              <div className="floating-transcript-title">
+                <h2>
+                  <Volume2 size={16} />
+                  {t('转写')}
+                </h2>
+              </div>
+              <InterviewReadiness device={<RemoteConnectionIndicator />} />
             </header>
             <div className="floating-audio-recovery">
-              <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />
+              <InterviewAudioRecovery onSettings={() => void changeSettings(true)} />
+              <RemoteConnectionRecovery onSettings={() => void changeSettings(true)} />
             </div>
             <div
               className="floating-scroll"
@@ -519,14 +699,26 @@ export function FloatingInterview() {
             >
               {!state.transcripts.length && (
                 <div className="floating-empty">
-                  <Volume2 size={26} />
-                  <p>{t('等待面试官或面试者讲话…')}</p>
-                  <span>{t('面试官在左侧，面试者在右侧')}</span>
+                  {state.inputMode === 'transcription' ? (
+                    <AudioLines size={26} />
+                  ) : (
+                    <Volume2 size={26} />
+                  )}
+                  <p>
+                    {t(
+                      state.inputMode === 'transcription'
+                        ? '等待麦克风语音输入…'
+                        : '等待面试官或面试者讲话…',
+                    )}
+                  </p>
+                  {state.inputMode !== 'transcription' && (
+                    <span>{t('面试官在左侧，面试者在右侧')}</span>
+                  )}
                 </div>
               )}
               {state.transcripts.map((transcript) => (
                 <article
-                  className={`transcript-item ${transcript.source === 'microphone' ? 'interviewee' : 'interviewer'}`}
+                  className={`transcript-item ${transcript.source === 'microphone' && state.inputMode !== 'transcription' ? 'interviewee' : 'interviewer'}`}
                   key={transcript.id}
                 >
                   <div className="transcript-meta">
@@ -534,7 +726,7 @@ export function FloatingInterview() {
                       {transcript.source
                         ? transcript.source === 'system'
                           ? t('面试官')
-                          : t('面试者')
+                          : t(state.inputMode === 'transcription' ? '麦克风' : '面试者')
                         : t('面试官')}
                     </strong>
                     <time>{transcript.time}</time>
@@ -565,22 +757,39 @@ export function FloatingInterview() {
                 <MessageSquare size={17} />
                 {t('回答')}
               </h2>
-              <Button
-                variant="ghost"
-                className="floating-toggle"
-                aria-label={t('转写面板')}
-                aria-pressed={showTranscript}
-                aria-disabled={!!panelMotion.motion}
-                onClick={() => void panelMotion.toggleTranscript()}
-              >
-                <span className="toggle-dot" />
-                <AudioLines size={14} />
-                {t('转写')}
-              </Button>
+              <div className="floating-header-actions">
+                <Button
+                  variant="ghost"
+                  className="floating-shortcuts-toggle"
+                  aria-pressed={shortcutsOpen}
+                  aria-expanded={shortcutsOpen}
+                  aria-disabled={shortcutsBusy}
+                  onClick={() => void changeShortcuts(!shortcutsOpen)}
+                >
+                  <span className="toggle-dot" />
+                  <Keyboard size={14} />
+                  {t('快捷键')}
+                </Button>
+                <Button
+                  variant="ghost"
+                  className="floating-toggle"
+                  aria-label={t('转写面板')}
+                  aria-pressed={showTranscript}
+                  aria-disabled={!!panelMotion.motion}
+                  onClick={() => void panelMotion.toggleTranscript()}
+                >
+                  <span className="toggle-dot" />
+                  <AudioLines size={14} />
+                  {t('转写')}
+                </Button>
+              </div>
             </header>
             <div className="floating-audio-recovery">
               {!showTranscript && (
-                <InterviewAudioRecovery onSettings={() => setSettingsOpen(true)} />
+                <>
+                  <InterviewAudioRecovery onSettings={() => void changeSettings(true)} />
+                  <RemoteConnectionRecovery onSettings={() => void changeSettings(true)} />
+                </>
               )}
             </div>
             <div
@@ -742,15 +951,27 @@ export function FloatingInterview() {
               <textarea
                 ref={inputRef}
                 aria-label={t('面试提问')}
-                placeholder={t('输入问题，或按 Enter 发送最新面试官问题…')}
+                placeholder={t(
+                  state.inputMode === 'transcription'
+                    ? '输入问题，或按 Enter 发送最新转写…'
+                    : '输入问题，或按 Enter 发送最新面试官问题…',
+                )}
                 rows={1}
+                maxLength={6000}
                 value={currentInput}
-                onChange={(event) => {
-                  editedDraft.current = state.draftQuestion;
-                  setInput(event.target.value);
-                }}
+                onChange={(event) => state.setInputDraft(event.target.value)}
+                onCompositionStart={() => state.setInputDraftComposing(true)}
+                onCompositionEnd={() => state.setInputDraftComposing(false)}
+                onBlur={() => state.setInputDraftComposing(false)}
                 onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
+                  if (
+                    matchesShortcut(shortcutSettings.bindings['submit-input'], event, macScreenshotShortcut)
+                  ) {
+                    event.preventDefault();
+                    return;
+                  }
+                  if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey &&
+                    !event.metaKey && !event.nativeEvent.isComposing) {
                     event.preventDefault();
                     submit();
                   }
@@ -774,15 +995,15 @@ export function FloatingInterview() {
                 </div>
                 <div className="floating-composer-actions">
                   <Button
-                    ref={screenshotButton}
                     type="button"
                     variant="ghost"
                     className="floating-screenshot-button"
                     aria-label={t('截取图像')}
-                    aria-keyshortcuts={macScreenshotShortcut ? 'Control+s' : 'Alt+s'}
+                    aria-keyshortcuts={screenshotShortcut?.replace('Super', 'Meta').replace('Command', 'Meta') ?? undefined}
                     aria-busy={state.capturingScreenshot}
                     data-expanded={screenshotExpanded}
                     data-shortcut-platform={macScreenshotShortcut ? 'macos' : 'windows'}
+                    style={{ '--screenshot-shortcut-width': `${screenshotKeyLabel.length}ch` } as CSSProperties}
                     disabled={
                       state.generating ||
                       state.capturingScreenshot ||
@@ -804,7 +1025,7 @@ export function FloatingInterview() {
                       aria-hidden="true"
                       hidden={screenshotExpanded}
                     >
-                      {macScreenshotShortcut ? '⌃S' : 'Alt+S'}
+                      {screenshotKeyLabel}
                     </kbd>
                     <span className="floating-screenshot-count" aria-live="polite">
                       {state.screenshots.length}/5
@@ -882,7 +1103,8 @@ export function FloatingInterview() {
           </footer>
         )}
       </div>
-      {settingsOpen && <InterviewSettingsPanel onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && <InterviewSettingsPanel onClose={() => void changeSettings(false)} />}
+      <RemoteConnectionDialogs onVisibilityChange={changeRemoteCanvas} />
     </div>
   );
 }

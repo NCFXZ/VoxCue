@@ -220,10 +220,10 @@ try {
     for (let index = 0; index < rowCount; index++) {
       const row = rows.nth(index),
         other = rows.nth((index + 1) % rowCount);
-      await row.getByRole('button', { name: '下载', exact: true }).hover();
+      await page.mouse.move(1, 1);
       const progress = row.locator('.download-button');
       // CSS transitions use the compositor clock. Inspect them in real time,
-      // then start a separate download under the controlled JS timer below.
+      // then start a separate download under the controlled timer below.
       const widths = await row.evaluate(async (row) => {
         const samples = [row.querySelector('button').getBoundingClientRect().width];
         row.querySelector('button').click();
@@ -290,8 +290,10 @@ try {
       await captureRequested(page, 'component-' + index + '-cancel');
       await progress.click();
       await row.getByRole('button', { name: '下载', exact: true }).waitFor();
-      await assertInitialDownloadProgress(progress, () =>
-        row.getByRole('button', { name: '下载', exact: true }).click(),
+      await assertInitialDownloadProgress(
+        progress,
+        () => row.getByRole('button', { name: '下载', exact: true }).click(),
+        { delayMs: 500 },
       );
       await assertDownloadButton(page, progress);
       if (index === 0 && process.argv.includes('--preview')) {
@@ -534,9 +536,7 @@ try {
         .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
         .map((animation) => animation.finished.catch(() => {})),
     );
-    await new Promise((resolve) =>
-      requestAnimationFrame(() => requestAnimationFrame(resolve)),
-    );
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
   });
   const formRows = await modelSettings.locator('.speech-setting-row').evaluateAll((rows) =>
     rows.map((row) => {

@@ -21,6 +21,13 @@ export default {
   build: {
     outDir: path.join(platformRoot, 'dist'),
     emptyOutDir: true,
+    manifest: true,
+    rollupOptions: {
+      input: {
+        index: path.join(sharedRoot, 'index.html'),
+        mobile: path.join(sharedRoot, 'mobile.html'),
+      },
+    },
   },
   plugins: [
     ...(workspace.platformName === 'macos'

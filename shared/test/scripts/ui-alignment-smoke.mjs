@@ -829,7 +829,9 @@ try {
       const r = e.getBoundingClientRect();
       return { left: r.left, top: r.top, width: r.width, height: r.height };
     };
-    const rows = [...element.querySelectorAll('.speech-setting-row')];
+    const rows = [...element.querySelectorAll('.speech-setting-row')].filter((row) =>
+      row.querySelector(':scope > button[aria-haspopup="menu"],:scope > button[aria-haspopup="dialog"],:scope > .frosted-slider'),
+    );
     return {
       devices: [...element.querySelectorAll('.speech-device')].map(rect),
       selects: rows.map((r) => rect(r.querySelector(

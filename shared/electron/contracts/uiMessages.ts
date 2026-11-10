@@ -1,5 +1,118 @@
 // UI copy only. User documents, chat responses and system prompts are not translated.
 export const uiMessages: Readonly<Record<string, string>> = {
+  未设置: 'Not set',
+  不可用: 'Unavailable',
+  '无效的快捷键。': 'Invalid shortcut.',
+  '无效的快捷键设置。': 'Invalid shortcut settings.',
+  '快捷键需包含 Ctrl、Shift 或 Alt 中的至少一个': 'Include at least one of Ctrl, Shift or Alt',
+  '快捷键设置读取失败，已使用默认设置。': 'Could not read shortcut settings. Defaults are in use.',
+  '快捷键设置保存失败，请重试。': 'Could not save shortcut settings. Try again.',
+  '快捷键设置需要桌面应用。': 'Shortcut settings require the desktop app.',
+  '快捷键操作失败，请重试。': 'The shortcut operation failed. Try again.',
+  '无法读取快捷键设置，请重试。': 'Could not read shortcut settings. Try again.',
+  恢复默认设置: 'Restore defaults',
+  快捷键重复: 'Shortcut already assigned',
+  快捷键冲突或不可用: 'Shortcut conflicts or is unavailable',
+  '未捕获组合键，请重试': 'Shortcut not captured. Try again',
+  '修改快捷键：{0}': 'Change shortcut: {0}',
+  '请按快捷键…': 'Press a shortcut…',
+  '输入已变化，请确认内容后重新发送。': 'The input has changed. Review it before sending again.',
+  打开或关闭系统音频: 'Turn system audio on or off',
+  向上滚动设备内容: 'Scroll device content up',
+  向下滚动设备内容: 'Scroll device content down',
+  远程连接: 'Remote connection',
+  '另一台设备查看实时转录和问答，并控制麦克风与自动回答。':
+    'View live transcripts and Q&A on another device, and control the microphone and automatic answers.',
+  连接设备: 'Connect device',
+  设备: 'Device',
+  设备已连接: 'Device connected',
+  已连接的设备: 'Connected device',
+  设备将停止接收本场内容和控制电脑:
+    'The device will stop receiving this session and controlling the computer',
+  确认断开连接: 'Confirm disconnect',
+  '断开连接中…': 'Disconnecting…',
+  设备连接二维码: 'Device connection QR code',
+  '正在准备连接…': 'Preparing connection…',
+  二维码已过期: 'QR code expired',
+  尚未生成二维码: 'No QR code available',
+  '二维码将在 {0} 秒后过期': 'QR code expires in {0} seconds',
+  连接网址: 'Connection URL',
+  已复制连接网址: 'Connection URL copied',
+  复制连接网址: 'Copy connection URL',
+  '复制失败，请手动选择连接网址。': 'Could not copy. Select the connection URL manually.',
+  刷新二维码: 'Refresh QR code',
+  连接教程: 'Connection guide',
+  '让另一台设备与此电脑连接同一Wi-Fi。':
+    'Connect the other device and this computer to the same Wi-Fi.',
+  '扫描二维码，或在浏览器中打开连接网址。':
+    'Scan the QR code, or open the connection URL in a browser.',
+  '核对两端显示的配对码，再在电脑上允许连接。':
+    'Check that the pairing codes match, then allow the connection on your computer.',
+  '无法访问？请检查设备互访及专用网络防火墙。':
+    'Cannot connect? Check device access and the private network firewall.',
+  '允许设备连接？': 'Allow device connection?',
+  允许连接: 'Allow connection',
+  拒绝: 'Deny',
+  '请确认设备上的配对码与下方一致。': 'Check that the code on your device matches the code below.',
+  '允许后，设备可查看本场转录和回答，并发送问题、控制麦克风与自动回答。':
+    'The device will be able to view this session’s transcript and answers, send questions, and control the microphone and automatic answers.',
+  设备连接已中断: 'Device connection interrupted',
+  '电脑继续转录和回答。设备恢复网络后可重新连接。':
+    'Transcription and answers continue on your computer. Reconnect the device when its network is available.',
+  重新连接设备: 'Reconnect device',
+  '设备连接需要在 VoxCue 桌面应用中使用。': 'Device connections require the VoxCue desktop app.',
+  '设备连接操作失败，请重试。': 'The device connection action failed. Please try again.',
+  '无法读取设备连接状态，请重试。':
+    'Could not read the device connection status. Please try again.',
+  '无法同步设备画面，请重新连接。': 'Could not sync the device display. Please reconnect.',
+  '没有可用的私人局域网 IPv4 地址。': 'No private local network IPv4 address is available.',
+  '局域网连接服务已停止，请重试。': 'The local connection service has stopped. Please try again.',
+  '无法启动局域网连接服务，请检查网络后重试。':
+    'Could not start the local connection service. Check your network and try again.',
+  '请先开启设备连接。': 'Enable the device connection first.',
+  '已有设备连接，请先断开连接。': 'A device is already connected. Disconnect it first.',
+  '配对请求已失效，请重新扫码。': 'The pairing request has expired. Scan the QR code again.',
+  '请等待设备建立配对连接。': 'Wait for the device to establish its pairing connection.',
+  '配对请求已失效。': 'The pairing request has expired.',
+  '设备同步内容超过容量限制。': 'The content for device sync exceeds the size limit.',
+  快捷键: 'Shortcuts',
+  关闭快捷键帮助: 'Close shortcut help',
+  收起或展开面试面板: 'Collapse or expand interview panels',
+  显示或隐藏转写面板: 'Show or hide the transcript panel',
+  隐藏或显示面试窗口: 'Hide or show the interview window',
+  打开或关闭麦克风: 'Turn the microphone on or off',
+  发送当前输入内容: 'Send current input',
+  面试方式: 'Interview mode',
+  远程面试: 'Remote interview',
+  仅转录: 'Transcription only',
+  '设置为“仅转录”时不可用。': 'Unavailable in Transcription only mode.',
+  '麦克风已关闭，不采集声音。': 'The microphone is off. No audio is being captured.',
+  '等待麦克风语音输入…': 'Waiting for microphone speech…',
+  '请连接麦克风，或重新选择麦克风设备。':
+    'Connect a microphone or select another microphone device.',
+  '输入问题，或按 Enter 发送最新转写…':
+    'Enter a question, or press Enter to send the latest transcript…',
+  '麦克风切换失败，请重试。': 'Could not toggle the microphone. Please try again.',
+  '系统音频切换失败，请重试。': 'Could not toggle system audio. Please try again.',
+  '面试方式切换失败，请重试。': 'Could not switch the interview mode. Please try again.',
+  '无效的音频输入设置。': 'Invalid audio input settings.',
+  '音频输入正在切换，请稍候。': 'Audio input is switching. Please wait.',
+  '音频输入切换未能确认，请重新开始。':
+    'The audio input change could not be confirmed. Start again.',
+  '音频输入切换超时，请重新连接音频。': 'The audio input change timed out. Reconnect audio.',
+  '音频输入正在切换或尚未就绪，请稍后重试。':
+    'Audio input is switching or is not ready. Please try again shortly.',
+  '音频输入切换失败。': 'Could not switch the audio input.',
+  '音频输入切换已取消。': 'Audio input switching was cancelled.',
+  '系统音频 · 面试官': 'System audio · Interviewer',
+  '麦克风 · 面试者': 'Microphone · Interviewee',
+  '仅转录需要且只使用麦克风。':
+    'Transcription only mode requires the microphone as its only audio input.',
+  '本场输入方式已锁定，请结束面试后重新设置。':
+    'The input mode is locked for this interview. End the interview to change it.',
+  '麦克风权限未开启，请在 macOS 隐私与安全性设置中允许 VoxCue 访问麦克风后重试。':
+    'Microphone permission is off. Allow VoxCue to access the microphone in macOS Privacy & Security, then try again.',
+  '快捷键窗口未能打开，请重试。': 'The shortcuts window could not be opened. Try again.',
   昨天: 'Yesterday',
   前天: 'The day before yesterday',
   显示更多: 'Show more',
@@ -446,8 +559,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   'Windows 凭据加密': 'Windows credential encryption',
   'Windows 当前捕获方式无需单独申请屏幕权限。':
     'The current Windows capture method does not need separate screen permission.',
-  'Windows 当前捕获方式无需单独申请权限；实际截图仍可能受系统或受保护内容限制。':
-    'The current Windows capture method does not need separate permission. System rules or protected content may still limit screenshots.',
+  'Windows 当前捕获方式无需单独申请权限。':
+    'The current Windows capture method does not need separate permission.',
   '无法截取面试窗口所在屏幕，请检查系统屏幕捕获状态后重试。':
     'Could not capture the screen containing the interview window. Check system capture status and try again.',
   '面试需要系统音频。': 'Interviews require system audio.',
@@ -1360,6 +1473,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '音频、模型和显示设置可在面试中调整。':
     'You can adjust audio, model and display settings during the interview.',
   '音频仅在本机处理，不保存。': 'Audio is processed locally and is not saved.',
+  '音频本机处理，不保存。': 'Audio processed locally, not saved.',
+  ' 回答资料发至 {0}。': ' Answer data goes to {0}.',
   '回答所需文字与资料会发送至 {0}。': 'Text and documents needed for answers will be sent to {0}.',
   '面试窗口打开失败，请重试。': 'Could not open the interview window. Please try again.',
   '正在打开…': 'Opening…',

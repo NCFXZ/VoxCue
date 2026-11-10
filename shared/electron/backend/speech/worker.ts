@@ -2,6 +2,8 @@ import { parentPort } from 'node:worker_threads';
 import { Recognizer } from './recognizer';
 import { RecognitionRouter } from './recognition';
 import type { AudioPreprocessor, ConsumeAudio } from './preprocessor';
+import type { AudioSource, InterviewInputState, SpeechEvent } from '../../contracts/speech';
+import { inputSources, inputSourceEnabled } from '../../contracts/speechSettings';
 let engine: RecognitionRouter;
 let preprocessor: AudioPreprocessor | undefined;
 let preprocessing = false;
@@ -9,6 +11,19 @@ let feeding = Promise.resolve();
 let messages = Promise.resolve();
 let failed = false;
 let qwen = false;
+let inputState: InterviewInputState = { inputMode: 'remote', microphoneMuted: false };
+let pendingInput: object | undefined;
+const blockedInput = new Set<AudioSource>();
+const inputVersions = new Map<AudioSource, number>();
+const enabled = (source: AudioSource) =>
+  !blockedInput.has(source) && inputSourceEnabled(inputState, source);
+const enabledSources = (state: InterviewInputState) =>
+  inputSources(state).filter((source) => inputSourceEnabled(state, source));
+const emit = (event: SpeechEvent) => {
+  const source =
+    event.type === 'segment' ? event.segment.source : 'source' in event ? event.source : undefined;
+  if (!source || enabled(source)) parentPort!.postMessage({ event });
+};
 const fail = (error?: unknown) => {
   if (failed) return;
   failed = true;
@@ -24,10 +39,22 @@ const fail = (error?: unknown) => {
   });
 };
 const consume: ConsumeAudio = (source, samples, rate, timestamp) => {
-  feeding = feeding.then(() => engine.feed(source, samples, rate, timestamp));
+  if (!enabled(source)) return;
+  const version = inputVersions.get(source);
+  feeding = feeding.then(async () => {
+    if (version === inputVersions.get(source) && enabled(source))
+      await engine.feed(source, samples, rate, timestamp);
+  });
   void feeding.catch(fail);
 };
 parentPort!.on('message', (m) => {
+  if (m.op === 'set-input-state') {
+    pendingInput = m;
+    for (const source of m.changed as AudioSource[]) {
+      blockedInput.add(source);
+      inputVersions.set(source, (inputVersions.get(source) ?? 0) + 1);
+    }
+  }
   // Loading a candidate must never occupy the serial capture/AEC queue.
   if (m.op === 'stage-recognizer') {
     if (failed || !engine) {
@@ -67,7 +94,7 @@ parentPort!.on('message', (m) => {
         qwen = m.speechModel === 'qwen';
         engine = new RecognitionRouter(
           (options, emit, signal) => Recognizer.load(options, emit, signal),
-          (event) => parentPort!.postMessage({ event }),
+          emit,
         );
         await engine.initialize(
           {
@@ -94,9 +121,25 @@ parentPort!.on('message', (m) => {
           ...engine.metadata,
         });
       } else if (m.op === 'prepare') {
-        preprocessor?.start(m.sources);
-        engine.prepare(m.sources);
+        inputState = m.inputState ?? { inputMode: 'remote', microphoneMuted: false };
+        blockedInput.clear();
+        preprocessor?.start(enabledSources(inputState));
+        engine.prepare(m.sources.filter((source: AudioSource) => enabled(source)));
         parentPort!.postMessage({ prepared: m.id });
+      } else if (m.op === 'set-input-state') {
+        await feeding;
+        if (pendingInput === m) {
+          // Reset only the affected recognition lanes. AEC starts fresh without
+          // closing either physical capture or reloading an ASR model.
+          preprocessor?.start(enabledSources(m.state));
+          await engine.inputSources(enabledSources(m.state), m.changed);
+          if (pendingInput === m) {
+            inputState = m.state;
+            pendingInput = undefined;
+            blockedInput.clear();
+          }
+        }
+        parentPort!.postMessage({ inputSet: m.id });
       } else if (m.op === 'audio') {
         if (preprocessor)
           preprocessor.feed(m.source, m.samples, m.rate, m.timestamp, m.captureClock);

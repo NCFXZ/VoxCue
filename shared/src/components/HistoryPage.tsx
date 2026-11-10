@@ -1,6 +1,6 @@
 import { t, uiLocale } from '../i18n';
 import { SyncBadge } from './SyncBadge';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { History, ChevronDown, X } from './icons';
 import { Button } from './ui/button';
 import { HistoryDetail } from './HistoryDetail';
@@ -15,9 +15,17 @@ export function HistoryPage() {
   const requestedSelection = useRef<string | null>(null);
   const deletingRecord = useRef<InterviewRecord | null>(null);
   const view = useRef<HTMLDivElement>(null);
+  // The detail replaces this scroll node; restore it before the new view is painted.
+  const listScroll = useRef<HTMLDivElement | null>(null);
+  const listScrollTop = useRef(0);
+  const restoreListScroll = useCallback((node: HTMLDivElement | null) => {
+    listScroll.current = node;
+    if (node) node.scrollTop = listScrollTop.current;
+  }, []);
   const searchInput = useRef<HTMLInputElement>(null);
   const select = (id: string | null) => {
     if (requestedSelection.current === id) return;
+    if (id && listScroll.current) listScrollTop.current = listScroll.current.scrollTop;
     requestedSelection.current = id;
     if (id) recordFeature('history_view');
     switchView(
@@ -81,7 +89,7 @@ export function HistoryPage() {
               <strong>{t('面试记录')}</strong>
             </div>
           </header>
-          <div className="management-scroll">
+          <div className="management-scroll" ref={restoreListScroll}>
             <div className="management-container">
               {records.length > 0 && (
                 <div className="history-filters" role="search" aria-label={t('筛选面试记录')}>

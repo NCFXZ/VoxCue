@@ -1,7 +1,7 @@
 import { t } from '../../i18n';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, type ButtonProps } from './button';
-import { Trash, Reset, Loader } from '../icons';
+import { Trash, Loader, Link } from '../icons';
 
 interface Props extends Omit<ButtonProps, 'onClick' | 'children' | 'variant' | 'size'> {
   target: string;
@@ -20,7 +20,6 @@ function ConfirmActionButton({
   target,
   action,
   icon: Icon,
-  reportError = true,
   label = action,
   iconOnly = false,
   compact = false,
@@ -33,7 +32,7 @@ function ConfirmActionButton({
   className = '',
   'aria-label': ariaLabel,
   ...props
-}: Props & { action: '删除' | '重置'; icon: typeof Trash; reportError?: boolean }) {
+}: Props & { action: '删除' | '断开连接'; icon: typeof Trash }) {
   const [armed, setArmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(false);
@@ -154,7 +153,7 @@ function ConfirmActionButton({
           <span>{t(busy ? `${action}中…` : `确认${action}`)}</span>
         </span>
       </Button>
-      {error && reportError && (
+      {error && (
         <span role="alert" className="confirm-delete-error">
           {t('{0}失败，请重试。', [t(action)])}
         </span>
@@ -169,7 +168,6 @@ export function ConfirmDeleteButton(props: Props) {
   );
 }
 
-/** UsagePanel displays the reset service's error next to its usage statistics. */
-export function ConfirmResetButton(props: Props) {
-  return <ConfirmActionButton {...props} action="重置" icon={Reset} reportError={false} />;
+export function ConfirmDisconnectButton(props: Props) {
+  return <ConfirmActionButton {...props} action="断开连接" icon={Link} />;
 }

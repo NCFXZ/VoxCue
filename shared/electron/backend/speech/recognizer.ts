@@ -13,6 +13,7 @@ export interface RecognizerPort {
   feed(source: AudioSource, samples: Float32Array, rate: number, timestamp: number): Promise<void>;
   flush(reason: 'pause' | 'stop'): Promise<void>;
   discontinuity(source: AudioSource): Promise<void>;
+  discard(source: AudioSource): Promise<void>;
   processedThrough(source: AudioSource): number | undefined;
   canSwitch(source: AudioSource): boolean;
   close(): Promise<void>;
@@ -107,6 +108,9 @@ export class Recognizer implements RecognizerPort {
   }
   async discontinuity(source: AudioSource) {
     await this.send({ op: 'gap', source });
+  }
+  async discard(source: AudioSource) {
+    await this.send({ op: 'discard', source });
   }
   processedThrough(source: AudioSource) {
     return this.progress[source];

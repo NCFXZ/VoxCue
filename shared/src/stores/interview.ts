@@ -6,6 +6,8 @@ import type {
   SpeechOptions,
   SpeechStatus,
   InterviewConfiguration,
+  InterviewInputMode,
+  InterviewInputState,
   AudioSource,
   InterviewScreenshot,
 } from '../../electron/contracts/speech';
@@ -17,24 +19,38 @@ import {
 } from '../services/speech';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
-import { sameAudioCapture, speechSelection } from '../../electron/contracts/speechSettings';
+import {
+  questionSource,
+  inputSources,
+  sameAudioCapture,
+  speechSelection,
+} from '../../electron/contracts/speechSettings';
 import { validInterviewImages } from '../../electron/contracts/interviewImages';
 import { signalTelemetry } from '../services/telemetry';
 type Status = 'idle' | 'running' | 'paused' | 'ended';
 interface InterviewState {
   mode: 'local' | 'mock';
+  inputMode: InterviewInputMode;
   speech: SpeechStatus;
   options: SpeechOptions;
   configurationLocked: boolean;
   knowledgeBaseName?: string;
-  initialize(configuration: InterviewConfiguration): void;
+  initialize(configuration: InterviewConfiguration, inputState?: InterviewInputState): void;
   pendingQuestion: string;
   draftQuestion: string;
+  inputDraft: string | null;
+  inputDraftRevision: number;
+  inputDraftComposing: boolean;
+  setInputDraft(text: string | null, expectedRevision?: number): boolean;
+  setInputDraftComposing(composing: boolean): void;
+  submitInput(options?: { expectedRevision?: number; fallbackQuestion?: string }): boolean;
   aiEnabled: boolean;
   modelId: string;
   effort: ReasoningEffort | 'auto';
   configure(
-    value: Partial<Pick<InterviewState, 'mode' | 'options' | 'aiEnabled' | 'modelId' | 'effort'>>,
+    value: Partial<
+      Pick<InterviewState, 'mode' | 'inputMode' | 'options' | 'aiEnabled' | 'modelId' | 'effort'>
+    >,
   ): void;
   submitTranscript(
     editedQuestion?: string,
@@ -50,6 +66,14 @@ interface InterviewState {
   switchingSpeech: boolean;
   speechSwitchError: string | null;
   reconnectAudio(options?: SpeechOptions): Promise<boolean>;
+  inputChanging: boolean;
+  setInputMode(mode: InterviewInputMode): Promise<boolean>;
+  microphoneMuted: boolean;
+  microphoneToggling: boolean;
+  toggleMicrophone(): Promise<boolean>;
+  systemAudioMuted: boolean;
+  systemAudioToggling: boolean;
+  toggleSystemAudio(): Promise<boolean>;
   screenshots: InterviewScreenshot[];
   capturingScreenshot: boolean;
   captureScreenshot(): Promise<void>;
@@ -93,6 +117,7 @@ const questions = new QuestionBuffer();
 const answerScreenshots = new Map<string, string[]>();
 let screenshotEpoch = 0;
 const submittedInterim = new Set<string>();
+let inputDraftSource = '';
 const id = () => String(++sequence);
 const stop = () => {
   automaticQuestion.reset();
@@ -100,15 +125,120 @@ const stop = () => {
   speechController?.abort();
   answerController?.abort();
 };
+async function changeInput(value: InterviewInputState, action: 'mode' | 'microphone' | 'system') {
+  const state = useInterview.getState();
+  if (
+    state.mode !== 'local' ||
+    !state.sessionId ||
+    state.status === 'ended' ||
+    state.reconnecting ||
+    state.switchingSpeech ||
+    state.microphoneToggling ||
+    state.systemAudioToggling ||
+    state.inputChanging ||
+    !['running', 'paused'].includes(state.speech.state) ||
+    finishingSession
+  )
+    return false;
+  const attempt = startAttempt,
+    session = state.sessionId;
+  const flag =
+    action === 'mode'
+      ? 'inputChanging'
+      : action === 'system'
+        ? 'systemAudioToggling'
+        : 'microphoneToggling';
+  const failure =
+    action === 'mode'
+      ? '面试方式切换失败，请重试。'
+      : action === 'system'
+        ? '系统音频切换失败，请重试。'
+        : '麦克风切换失败，请重试。';
+  if (action === 'system' && value.systemAudioMuted && state.inputMode === 'remote') {
+    automaticQuestion.reset();
+    automaticQuestionReady = false;
+  }
+  useInterview.setState({ [flag]: true, error: null });
+  try {
+    const speech = await window.desktop!.setInterviewInput(value);
+    const current = useInterview.getState();
+    if (attempt !== startAttempt || current.sessionId !== session || current.status === 'ended')
+      return false;
+    if (
+      !['running', 'paused'].includes(speech.state) ||
+      !speech.inputState ||
+      speech.inputState.inputMode !== value.inputMode ||
+      speech.inputState.microphoneMuted !== value.microphoneMuted ||
+      !!speech.inputState.systemAudioMuted !== !!value.systemAudioMuted
+    )
+      throw Error(speech.error ?? failure);
+    const modeChanged = current.inputMode !== value.inputMode;
+    if (
+      modeChanged ||
+      (value.inputMode === 'transcription' ? value.microphoneMuted : value.systemAudioMuted)
+    ) {
+      automaticQuestion.reset();
+      automaticQuestionReady = false;
+    }
+    if (modeChanged) {
+      questions.clear();
+      // Retired interim fragments remain in the record but cannot be reused
+      // when switching back to their previous question source.
+      for (const row of current.transcripts) if (!row.final) submittedInterim.add(row.id);
+    }
+    if (value.microphoneMuted)
+      for (const row of current.transcripts)
+        if (!row.final && row.source === 'microphone') submittedInterim.add(row.id);
+    if (value.systemAudioMuted)
+      for (const row of current.transcripts)
+        if (!row.final && row.source === 'system') submittedInterim.add(row.id);
+    useInterview.setState({
+      inputMode: value.inputMode,
+      microphoneMuted: value.microphoneMuted,
+      systemAudioMuted: !!value.systemAudioMuted,
+      speech,
+      speechError: null,
+      options: { ...current.options, sources: inputSources(value) },
+      audioLevels: {
+        ...current.audioLevels,
+        ...(modeChanged || current.microphoneMuted !== value.microphoneMuted
+          ? { microphone: undefined }
+          : {}),
+        ...(modeChanged || current.systemAudioMuted !== !!value.systemAudioMuted
+          ? { system: undefined }
+          : {}),
+      },
+      ...(modeChanged ? { pendingQuestion: '', draftQuestion: '' } : {}),
+    });
+    return true;
+  } catch (error) {
+    if (attempt === startAttempt && useInterview.getState().sessionId === session)
+      useInterview.setState({
+        error: error instanceof Error ? error.message : failure,
+      });
+    return false;
+  } finally {
+    if (attempt === startAttempt && useInterview.getState().sessionId === session)
+      useInterview.setState({ [flag]: false });
+  }
+}
 export const useInterview = create<InterviewState>((set, get) => ({
   mode: typeof window === 'undefined' ? 'mock' : 'local',
+  inputMode: 'remote',
   speech: { state: 'idle', model: 'Paraformer 中英 INT8 · Silero VAD · 本地' },
   options: { sources: ['microphone', 'system'] },
   configurationLocked: false,
-  initialize(configuration) {
+  initialize(configuration, inputState) {
     if (get().configurationLocked) return;
     set({
       ...structuredClone(configuration),
+      inputMode: inputState?.inputMode ?? configuration.inputMode ?? 'remote',
+      microphoneMuted:
+        inputState?.microphoneMuted ?? !configuration.options.sources.includes('microphone'),
+      microphoneToggling: false,
+      systemAudioMuted: !!inputState?.systemAudioMuted,
+      systemAudioToggling: false,
+      inputChanging: false,
       knowledgeBaseName: configuration.knowledgeBaseName,
       configurationLocked: true,
       screenshots: [],
@@ -118,6 +248,56 @@ export const useInterview = create<InterviewState>((set, get) => ({
   },
   pendingQuestion: '',
   draftQuestion: '',
+  inputDraft: null,
+  inputDraftRevision: 0,
+  inputDraftComposing: false,
+  setInputDraft(text, expectedRevision) {
+    const state = get();
+    if (
+      (text !== null && (typeof text !== 'string' || text.length > 6000)) ||
+      (expectedRevision !== undefined && expectedRevision !== state.inputDraftRevision)
+    )
+      return false;
+    if (text === state.inputDraft) return true;
+    inputDraftSource = state.draftQuestion;
+    set({ inputDraft: text, inputDraftRevision: state.inputDraftRevision + 1 });
+    return true;
+  },
+  setInputDraftComposing(inputDraftComposing) {
+    set({ inputDraftComposing });
+  },
+  submitInput({ expectedRevision, fallbackQuestion = '' } = {}) {
+    const state = get();
+    if (expectedRevision !== undefined && expectedRevision !== state.inputDraftRevision) {
+      set({ error: '输入已变化，请确认内容后重新发送。' });
+      return false;
+    }
+    if (
+      !state.sessionId ||
+      !['running', 'paused'].includes(state.status) ||
+      finishingSession ||
+      state.inputDraftComposing ||
+      state.generating ||
+      state.updatingModel ||
+      state.capturingScreenshot
+    )
+      return false;
+    const input = (state.inputDraft ?? state.draftQuestion).trim();
+    if (!input && !fallbackQuestion.trim() && !state.screenshots.length) return false;
+    const text = input || (state.screenshots.length ? '' : fallbackQuestion.trim());
+    if (text.length > 6000) {
+      set({ error: '待提交问题超过6000字，请在输入框整理后手动发送。' });
+      return false;
+    }
+    const pending = state.mode === 'local' ? state.submitTranscript(text, true) : state.ask(text);
+    const current = get();
+    const accepted =
+      current.sessionId === state.sessionId &&
+      current.answers.some((answer) => !state.answers.some((old) => old.id === answer.id));
+    if (accepted) current.setInputDraft(null, state.inputDraftRevision);
+    void pending;
+    return accepted;
+  },
   aiEnabled: false,
   modelId: '',
   effort: 'auto',
@@ -133,7 +313,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
       set({
         aiEnabled: get().mode === 'mock' ? false : get().aiEnabled,
       });
-    if (value.mode) {
+    if (value.mode || value.inputMode) {
       questions.clear();
       submittedInterim.clear();
       set({ pendingQuestion: '', draftQuestion: '' });
@@ -143,9 +323,11 @@ export const useInterview = create<InterviewState>((set, get) => ({
     try {
       const screenshotIds = includeScreenshots ? get().screenshots.map((shot) => shot.id) : [];
       const question = automatic
-        ? questions.text('system')
+        ? questions.text(questionSource(get().inputMode))
         : editedQuestion?.trim() ||
-          (screenshotIds.length ? '' : get().draftQuestion || questions.text('system'));
+          (screenshotIds.length
+            ? ''
+            : get().draftQuestion || questions.text(questionSource(get().inputMode)));
       if (
         (!question.trim() && !screenshotIds.length) ||
         get().generating ||
@@ -167,17 +349,21 @@ export const useInterview = create<InterviewState>((set, get) => ({
       automaticQuestionReady = false;
       const sourceTranscriptIds = [
         ...new Set([
-          ...questions.ids('system'),
+          ...questions.ids(questionSource(get().inputMode)),
           ...get()
             .transcripts.filter(
-              (row) => row.source === 'system' && !row.final && !submittedInterim.has(row.id),
+              (row) =>
+                row.source === questionSource(get().inputMode) &&
+                !row.final &&
+                !submittedInterim.has(row.id),
             )
             .map((row) => row.id),
         ]),
       ];
       for (const row of get().transcripts)
-        if (row.source === 'system' && !row.final) submittedInterim.add(row.id);
-      questions.consume('system');
+        if (row.source === questionSource(get().inputMode) && !row.final)
+          submittedInterim.add(row.id);
+      questions.consume(questionSource(get().inputMode));
       set({ pendingQuestion: '', draftQuestion: '' });
       await get().ask(question, sourceTranscriptIds, screenshotIds);
     } catch (error) {
@@ -218,6 +404,9 @@ export const useInterview = create<InterviewState>((set, get) => ({
     if (
       get().reconnecting ||
       get().switchingSpeech ||
+      get().microphoneToggling ||
+      get().systemAudioToggling ||
+      get().inputChanging ||
       get().speech.state === 'loading' ||
       get().status === 'ended'
     )
@@ -270,6 +459,10 @@ export const useInterview = create<InterviewState>((set, get) => ({
         status: 'running',
         options: options ?? get().options,
         speechWarnings: {},
+        microphoneMuted:
+          result.inputState?.microphoneMuted ??
+          !(options ?? get().options).sources.includes('microphone'),
+        systemAudioMuted: result.inputState?.systemAudioMuted ?? get().systemAudioMuted,
         pendingQuestion: '',
         draftQuestion: '',
       });
@@ -285,6 +478,43 @@ export const useInterview = create<InterviewState>((set, get) => ({
     } finally {
       if (attempt === startAttempt) set({ reconnecting: false });
     }
+  },
+  microphoneMuted: false,
+  microphoneToggling: false,
+  systemAudioMuted: false,
+  systemAudioToggling: false,
+  inputChanging: false,
+  async setInputMode(inputMode) {
+    if (inputMode === get().inputMode) return true;
+    return changeInput(
+      {
+        inputMode,
+        microphoneMuted: get().microphoneMuted,
+        ...(get().systemAudioMuted ? { systemAudioMuted: true } : {}),
+      },
+      'mode',
+    );
+  },
+  async toggleMicrophone() {
+    return changeInput(
+      {
+        inputMode: get().inputMode,
+        microphoneMuted: !get().microphoneMuted,
+        ...(get().systemAudioMuted ? { systemAudioMuted: true } : {}),
+      },
+      'microphone',
+    );
+  },
+  async toggleSystemAudio() {
+    if (get().inputMode !== 'remote') return false;
+    return changeInput(
+      {
+        inputMode: get().inputMode,
+        microphoneMuted: get().microphoneMuted,
+        systemAudioMuted: !get().systemAudioMuted,
+      },
+      'system',
+    );
   },
   screenshots: [],
   capturingScreenshot: false,
@@ -401,6 +631,20 @@ export const useInterview = create<InterviewState>((set, get) => ({
       const listeningSession = get().sessionId;
       unsubscribeSpeech = desktop.onSpeechEvent((event) => {
         if (get().sessionId !== listeningSession) return;
+        const source =
+          event.type === 'segment'
+            ? event.segment.source
+            : 'source' in event
+              ? event.source
+              : undefined;
+        if (
+          source === 'system' &&
+          (get().inputMode === 'transcription' ||
+            get().systemAudioMuted ||
+            get().systemAudioToggling)
+        )
+          return;
+        if (source === 'microphone' && get().microphoneMuted) return;
         if (
           event.type === 'activity' &&
           (get().speech.state !== 'running' ||
@@ -410,12 +654,15 @@ export const useInterview = create<InterviewState>((set, get) => ({
           return;
         if (event.type === 'audio-progress') {
           if (
-            event.source !== 'system' ||
+            event.source !== questionSource(get().inputMode) ||
             get().reconnecting ||
+            get().inputChanging ||
+            (get().inputMode === 'transcription' && get().microphoneToggling) ||
+            (get().inputMode === 'transcription' && get().microphoneMuted) ||
             finishingSession === get().sessionId
           )
             return;
-          automaticQuestion.progress(event);
+          automaticQuestion.progress(event, questionSource(get().inputMode));
           automaticQuestionReady = automaticQuestion.ready();
           if (
             automaticQuestionReady &&
@@ -445,14 +692,14 @@ export const useInterview = create<InterviewState>((set, get) => ({
             speechWarnings: { ...s.speechWarnings, [event.source]: event.message },
             audioLevels: { ...s.audioLevels, [event.source]: undefined },
           }));
-          if (event.source === 'system') {
+          if (event.source === questionSource(get().inputMode)) {
             automaticQuestion.cancel();
             automaticQuestionReady = false;
             questions.clear();
             set({ pendingQuestion: '', draftQuestion: '' });
           }
         }
-        if (event.type === 'speech-start' && event.source === 'system') {
+        if (event.type === 'speech-start' && event.source === questionSource(get().inputMode)) {
           automaticQuestion.cancel();
           automaticQuestionReady = false;
         }
@@ -502,9 +749,10 @@ export const useInterview = create<InterviewState>((set, get) => ({
               ? s.transcripts.map((t) => (t.id === row.id ? row : t))
               : [...s.transcripts, row],
           }));
-          // Microphone text is always the interviewee, never an AI question.
-          if (segment.source !== 'system') return;
+          // Only the confirmed question input can enter the draft and automatic-answer gate.
+          if (segment.source !== questionSource(get().inputMode)) return;
           if (get().reconnecting) return;
+          if (get().inputChanging) return;
           if (finishingSession === get().sessionId) return;
           if (segment.reason === 'discontinuity') {
             automaticQuestion.cancel();
@@ -519,14 +767,16 @@ export const useInterview = create<InterviewState>((set, get) => ({
 
           try {
             if (questions.add(segment)) {
-              set({ pendingQuestion: questions.text('system') });
+              set({ pendingQuestion: questions.text(questionSource(get().inputMode)) });
               if (
                 get().autoAnswer &&
                 get().status === 'running' &&
                 get().speech.state === 'running' &&
+                !(get().inputMode === 'transcription' && get().microphoneToggling) &&
+                !(get().inputMode === 'transcription' && get().microphoneMuted) &&
                 segment.reason === 'silence'
               ) {
-                automaticQuestion.final(segment);
+                automaticQuestion.final(segment, questionSource(get().inputMode));
                 automaticQuestionReady = automaticQuestion.ready();
                 if (
                   automaticQuestionReady &&
@@ -539,11 +789,18 @@ export const useInterview = create<InterviewState>((set, get) => ({
             }
             const interim = get()
               .transcripts.filter(
-                (t) => t.source === 'system' && !t.final && !submittedInterim.has(t.id),
+                (t) =>
+                  t.source === questionSource(get().inputMode) &&
+                  !t.final &&
+                  !submittedInterim.has(t.id),
               )
               .map((t) => t.text)
               .join(' ');
-            set({ draftQuestion: [questions.text('system'), interim].filter(Boolean).join(' ') });
+            set({
+              draftQuestion: [questions.text(questionSource(get().inputMode)), interim]
+                .filter(Boolean)
+                .join(' '),
+            });
           } catch (error) {
             set({ error: (error as Error).message });
           }
@@ -564,6 +821,14 @@ export const useInterview = create<InterviewState>((set, get) => ({
           set({
             speech,
             status: speech.state === 'running' ? 'running' : get().status,
+            ...(speech.state === 'running'
+              ? {
+                  microphoneMuted:
+                    speech.inputState?.microphoneMuted ??
+                    !get().options.sources.includes('microphone'),
+                  systemAudioMuted: speech.inputState?.systemAudioMuted ?? get().systemAudioMuted,
+                }
+              : {}),
             speechError: speech.error ?? null,
           });
         })
@@ -641,6 +906,9 @@ export const useInterview = create<InterviewState>((set, get) => ({
       reconnecting: false,
       switchingSpeech: false,
       speechSwitchError: null,
+      microphoneToggling: false,
+      inputChanging: false,
+      systemAudioToggling: false,
     });
   },
   end(options) {
@@ -665,6 +933,9 @@ export const useInterview = create<InterviewState>((set, get) => ({
           reconnecting: false,
           switchingSpeech: false,
           speechSwitchError: null,
+          microphoneToggling: false,
+          inputChanging: false,
+          systemAudioToggling: false,
         });
         try {
           await window.desktop?.speech({ op: 'stop' });
@@ -719,7 +990,16 @@ export const useInterview = create<InterviewState>((set, get) => ({
       error: null,
       speechError: null,
       speechWarnings: {},
+      inputMode: 'remote',
+      microphoneMuted: false,
+      systemAudioMuted: false,
+      systemAudioToggling: false,
+      microphoneToggling: false,
+      inputChanging: false,
       sessionId: null,
+      inputDraft: null,
+      inputDraftRevision: 0,
+      inputDraftComposing: false,
       startedAt: null,
       endedAt: null,
       pendingQuestion: '',
@@ -908,7 +1188,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
           automaticQuestionReady &&
           get().autoAnswer &&
           get().status === 'running' &&
-          questions.text('system').trim()
+          questions.text(questionSource(get().inputMode)).trim()
         ) {
           const sessionId = get().sessionId;
           queueMicrotask(() => {
@@ -955,3 +1235,26 @@ export const useInterview = create<InterviewState>((set, get) => ({
     );
   },
 }));
+
+// The shared input follows ASR until somebody edits it. Clearing an edit only
+// suppresses that candidate; new ASR resumes autofill, matching the desktop UI.
+const stopSharedInputDraft = useInterview.subscribe((state, previous) => {
+  if (state.sessionId !== previous.sessionId) {
+    inputDraftSource = state.draftQuestion;
+    if (state.inputDraft !== null || state.inputDraftRevision !== 0 || state.inputDraftComposing)
+      useInterview.setState({
+        inputDraft: null,
+        inputDraftRevision: 0,
+        inputDraftComposing: false,
+      });
+    return;
+  }
+  if (state.draftQuestion === previous.draftQuestion) return;
+  if (state.inputDraft === null) {
+    useInterview.setState({ inputDraftRevision: state.inputDraftRevision + 1 });
+  } else if (state.inputDraft === '' && inputDraftSource !== state.draftQuestion) {
+    inputDraftSource = state.draftQuestion;
+    useInterview.setState({ inputDraft: null, inputDraftRevision: state.inputDraftRevision + 1 });
+  }
+});
+if (import.meta.hot) import.meta.hot.dispose(stopSharedInputDraft);

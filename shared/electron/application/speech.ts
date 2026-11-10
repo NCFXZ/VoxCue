@@ -4,11 +4,49 @@ import type {
   SpeechServiceCall,
   SpeechStatus,
   SpeechOptions,
+  InterviewInputMode,
+  InterviewInputState,
+  AudioSource,
+  SpeechEvent,
 } from '../contracts/speech';
 import { validateSpeech } from '../backend/speech/validation';
 import { reasoningEfforts, type ChatModel } from '../contracts/chat';
 import { validProfile } from '../contracts/profile';
-import { sameAudioCapture, speechSelection } from '../contracts/speechSettings';
+import { sameAudioCapture, speechSelection, inputSources } from '../contracts/speechSettings';
+
+export function validateInterviewInput(value: unknown): InterviewInputState {
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    throw Error('无效的音频输入设置。');
+  const state = value as InterviewInputState;
+  if (
+    Object.keys(state).some(
+      (key) => !['inputMode', 'microphoneMuted', 'systemAudioMuted'].includes(key),
+    ) ||
+    !Object.hasOwn(state, 'inputMode') ||
+    !Object.hasOwn(state, 'microphoneMuted') ||
+    !['remote', 'transcription'].includes(state.inputMode) ||
+    typeof state.microphoneMuted !== 'boolean' ||
+    (state.systemAudioMuted !== undefined && typeof state.systemAudioMuted !== 'boolean')
+  )
+    throw Error('无效的音频输入设置。');
+  return {
+    inputMode: state.inputMode,
+    microphoneMuted: state.microphoneMuted,
+    ...(state.systemAudioMuted !== undefined ? { systemAudioMuted: state.systemAudioMuted } : {}),
+  };
+}
+
+function requireInterviewSources(
+  options: SpeechOptions,
+  inputMode?: InterviewInputMode,
+  reconnect = false,
+) {
+  if (inputMode === 'transcription') {
+    if (options.sources.length !== 1 || options.sources[0] !== 'microphone')
+      throw Error('仅转录需要且只使用麦克风。');
+  } else if (!options.sources.includes('system'))
+    throw Error(reconnect ? '面试需保留系统音频。' : '面试官问题来自系统音频，请启用系统音频。');
+}
 
 export function validateInterviewConfiguration(value: unknown): InterviewConfiguration {
   if (!value || typeof value !== 'object') throw Error('无效的面试设置。');
@@ -18,6 +56,7 @@ export function validateInterviewConfiguration(value: unknown): InterviewConfigu
       (key) =>
         ![
           'mode',
+          'inputMode',
           'options',
           'aiEnabled',
           'autoAnswer',
@@ -29,6 +68,7 @@ export function validateInterviewConfiguration(value: unknown): InterviewConfigu
         ].includes(key),
     ) ||
     !['local', 'mock'].includes(v.mode) ||
+    (v.inputMode !== undefined && !['remote', 'transcription'].includes(v.inputMode)) ||
     typeof v.aiEnabled !== 'boolean' ||
     typeof v.autoAnswer !== 'boolean' ||
     typeof v.modelId !== 'string' ||
@@ -46,10 +86,12 @@ export function validateInterviewConfiguration(value: unknown): InterviewConfigu
   )
     throw Error('无效的面试设置。');
   const audio =
-    v.mode === 'local' ? validateSpeech({ op: 'start', options: v.options }) : undefined;
-  if (audio?.op === 'start' && !audio.options.sources.includes('system'))
-    throw Error('面试官问题来自系统音频，请启用系统音频。');
+    v.mode === 'local' || v.inputMode === 'transcription'
+      ? validateSpeech({ op: 'start', options: v.options })
+      : undefined;
+  if (audio?.op === 'start') requireInterviewSources(audio.options, v.inputMode);
   return {
+    ...(v.inputMode !== undefined ? { inputMode: v.inputMode } : {}),
     mode: v.mode,
     options: audio?.op === 'start' ? structuredClone(audio.options) : { sources: [] },
     aiEnabled: v.aiEnabled,
@@ -83,6 +125,8 @@ const idle = (): SpeechStatus => ({
 // change an interview's devices, and confirming an interview flushes dictation first.
 export class SpeechCoordinator {
   private confirmed?: InterviewConfiguration;
+  private currentInput?: InterviewInputState;
+  private inputOperation?: { sources: AudioSource[]; reject(error: Error): void };
   private tail: Promise<unknown> = Promise.resolve();
   private startingDictation = false;
   private dictationAttempt = 0;
@@ -99,6 +143,76 @@ export class SpeechCoordinator {
   }
   get configuration() {
     return this.confirmed ? structuredClone(this.confirmed) : undefined;
+  }
+  get inputState() {
+    return this.currentInput && { ...this.currentInput };
+  }
+  get inputChanging() {
+    return !!this.inputOperation;
+  }
+  blocksInput(event: SpeechEvent) {
+    const source =
+      event.type === 'segment'
+        ? event.segment.source
+        : 'source' in event
+          ? event.source
+          : undefined;
+    return !!source && !!this.inputOperation?.sources.includes(source);
+  }
+  cancelInput() {
+    const operation = this.inputOperation;
+    if (!operation) return;
+    this.inputOperation = undefined;
+    operation.reject(Error('语音切换已取消，仍使用原配置。'));
+    void this.port.call({ op: 'cancel-input-state' }).catch(() => {});
+  }
+  setInputState(value: unknown): Promise<SpeechStatus> {
+    const state = validateInterviewInput(value);
+    const configuration = this.confirmed;
+    if (!configuration || configuration.mode !== 'local') throw Error('请先开始本地语音面试。');
+    if (this.inputOperation || this.pending) throw Error('音频输入正在切换，请稍候。');
+    let reject!: (error: Error) => void;
+    const cancelled = new Promise<never>((_resolve, fail) => {
+      reject = fail;
+    });
+    const previous = this.currentInput!;
+    const sources: AudioSource[] =
+      previous.inputMode !== state.inputMode
+        ? ['microphone', 'system']
+        : [
+            ...(previous.microphoneMuted !== state.microphoneMuted ? ['microphone' as const] : []),
+            ...(!!previous.systemAudioMuted !== !!state.systemAudioMuted
+              ? ['system' as const]
+              : []),
+          ];
+    const operation = { sources, reject };
+    this.inputOperation = operation;
+    return (async () => {
+      try {
+        const status = await Promise.race([
+          this.port.call({ op: 'set-input-state', state }),
+          cancelled,
+        ]);
+        if (this.inputOperation !== operation || this.confirmed !== configuration)
+          throw Error('语音切换已取消，仍使用原配置。');
+        if (
+          status.inputState?.inputMode !== state.inputMode ||
+          status.inputState?.microphoneMuted !== state.microphoneMuted ||
+          !!status.inputState?.systemAudioMuted !== !!state.systemAudioMuted
+        ) {
+          this.port.stop();
+          this.running = false;
+          throw Error('音频输入切换未能确认，请重新开始。');
+        }
+        configuration.inputMode = state.inputMode;
+        configuration.options = { ...configuration.options, sources: inputSources(state) };
+        this.currentInput = { ...state };
+        this.running = status.state === 'running';
+        return status;
+      } finally {
+        if (this.inputOperation === operation) this.inputOperation = undefined;
+      }
+    })();
   }
   updateModel(value: unknown, models: ChatModel[]) {
     if (!this.confirmed?.aiEnabled) throw Error('请先开始已连接模型的面试。');
@@ -127,23 +241,43 @@ export class SpeechCoordinator {
     this.clearTest();
     this.cancelDictationStart();
     return this.serialize(async () => {
-      if (this.confirmed) return;
+      if (this.confirmed) {
+        if ((this.confirmed.inputMode ?? 'remote') !== (configuration.inputMode ?? 'remote'))
+          throw Error('本场输入方式已锁定，请结束面试后重新设置。');
+        return;
+      }
       if (this.target === 'dictation' || this.target === 'audio-test')
         await this.port.call({ op: 'stop' });
       this.port.stop();
       this.confirmed = configuration;
+      this.currentInput = {
+        inputMode: configuration.inputMode ?? 'remote',
+        microphoneMuted: !configuration.options.sources.includes('microphone'),
+      };
       this.target = 'interview';
     });
   }
   reconnect(value?: SpeechOptions) {
+    if (this.inputChanging) throw Error('音频输入正在切换，请稍候。');
     const call = value === undefined ? undefined : validateSpeech({ op: 'start', options: value });
-    if (call?.op === 'start' && !call.options.sources.includes('system'))
-      throw Error('面试需保留系统音频。');
+    if (call?.op === 'start')
+      requireInterviewSources(call.options, this.confirmed?.inputMode, true);
     const attempt = ++this.reconnectAttempt;
     return this.serialize(async () => {
       if (!this.confirmed || this.confirmed.mode !== 'local') throw Error('请先开始本地语音面试。');
       const configuration = this.confirmed;
       const options = call?.op === 'start' ? structuredClone(call.options) : this.confirmed.options;
+      const inputState = {
+        inputMode: configuration.inputMode ?? ('remote' as const),
+        microphoneMuted:
+          configuration.inputMode === 'transcription'
+            ? !!this.currentInput?.microphoneMuted
+            : !options.sources.includes('microphone'),
+        ...(this.currentInput?.systemAudioMuted !== undefined
+          ? { systemAudioMuted: this.currentInput.systemAudioMuted }
+          : {}),
+      };
+      requireInterviewSources(options, configuration.inputMode, true);
       if (
         value &&
         this.running &&
@@ -167,12 +301,15 @@ export class SpeechCoordinator {
       if (this.confirmed !== configuration || attempt !== this.reconnectAttempt)
         return { status: idle() };
       this.target = 'interview';
-      const status = await this.port.call({ op: 'start', options });
+      const status = await this.port.call({ op: 'start', options, inputState });
       if (this.confirmed !== configuration || attempt !== this.reconnectAttempt) {
         this.port.stop();
         return { status: idle() };
       }
-      if (status.state === 'running') configuration.options = options;
+      if (status.state === 'running') {
+        configuration.options = options;
+        this.currentInput = status.inputState ?? inputState;
+      }
       this.running = status.state === 'running';
       return { status };
     }).then(async (result) => {
@@ -186,6 +323,7 @@ export class SpeechCoordinator {
   }
   interview(value: unknown) {
     const call = validateSpeech(value);
+    if (call.op === 'start' || call.op === 'pause' || call.op === 'stop') this.cancelInput();
     if (call.op === 'pause' || call.op === 'stop') {
       ++this.reconnectAttempt;
       this.running = false;
@@ -205,7 +343,12 @@ export class SpeechCoordinator {
           (call.options.inferenceDevice ?? 'cuda') !== (options.inferenceDevice ?? 'cuda')
         )
           throw Error('本场面试设置已锁定，请结束面试后重新设置。');
-        const status = await this.port.call({ op: 'start', options: structuredClone(options) });
+        const status = await this.port.call({
+          op: 'start',
+          options: structuredClone(options),
+          inputState: this.inputState,
+        });
+        this.currentInput = status.inputState ?? this.currentInput;
         this.running = status.state === 'running';
         return status;
       }
@@ -319,9 +462,13 @@ export class SpeechCoordinator {
     this.testId = undefined;
   }
   releaseInterview(close = false) {
+    this.cancelInput();
     ++this.reconnectAttempt;
     this.running = false;
-    if (close) this.confirmed = undefined;
+    if (close) {
+      this.confirmed = undefined;
+      this.currentInput = undefined;
+    }
     this.target = this.confirmed ? 'interview' : undefined;
     this.port.stop();
   }

@@ -219,8 +219,8 @@ try {
 
   await main.locator('.interview-start-trigger').click();
   const confirmation = main.getByRole('dialog', { name: '开始面试', exact: true });
-  await confirmation.locator('.interview-start-summary > div').first().waitFor();
-  const rows = await confirmation.locator('.interview-start-summary > div').evaluateAll((nodes) =>
+  await confirmation.locator('.interview-start-summary-group > div').first().waitFor();
+  const rows = await confirmation.locator('.interview-start-summary-group > div').evaluateAll((nodes) =>
     nodes.map((node) => {
       const box = node.getBoundingClientRect();
       return {
@@ -239,22 +239,27 @@ try {
       'AI 服务用量',
       '面试官 · 系统音频',
       '面试者 · 麦克风',
-      '语音模型',
-      '推理设备',
       '回答模型',
-      '思考强度',
+      '语音模型',
     ],
   );
-  for (let i = 0; i < rows.length; i += 2) {
-    assert.equal(rows[i].y, rows[i + 1].y);
-    assert.ok(Math.abs(rows[i].width - rows[i + 1].width) <= 1);
+  for (let i = 1; i < rows.length; i++) {
+    assert.ok(rows[i].y > rows[i - 1].y);
+    assert.ok(Math.abs(rows[i].x - rows[0].x) <= 1);
+    assert.ok(Math.abs(rows[i].width - rows[0].width) <= 1);
   }
-  assert.equal(rows[4].value, '轻量语音识别');
-  assert.equal(rows[5].value, 'CPU');
-  assert.ok(rows[0].y < rows[2].y && rows[2].y < rows[4].y && rows[4].y < rows[6].y);
+  assert.ok(rows[5].value.includes('轻量语音识别'));
+  const modelDetails = await confirmation
+    .locator('.interview-start-summary-meta')
+    .evaluateAll((nodes) =>
+      nodes.map((node) => ({ label: node.getAttribute('aria-label'), value: node.textContent })),
+    );
+  assert.equal(modelDetails.length, 2);
+  assert.equal(modelDetails[0].label, '思考强度');
+  assert.deepEqual(modelDetails[1], { label: '推理设备', value: 'CPU' });
   await confirmation.screenshot({});
   checks.push(
-    'start dialog: paired knowledge/AI usage, audio, actual speech/device and answer model/effort rows',
+    'start dialog: aligned summary list with knowledge/usage, audio and paired model details',
   );
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -287,7 +292,7 @@ try {
     await floating.waitForFunction(
       () => !document.querySelector('.floating-shell').dataset.panelMotion,
     );
-    // Await native viewport layout and its paint, rather than measuring the
+    // Await the logical canvas layout and its paint, rather than measuring the
     // previous frame immediately after an IPC reply.
     await floating.evaluate(
       () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -307,7 +312,82 @@ try {
         .find((win) => win.webContents.getURL().endsWith('#interview'))
         .getBounds(),
     );
+  const logicalLayout = async () => {
+    const state = await floating.evaluate(() => window.desktop.interviewState());
+    assert.ok(state.layout, 'Windows exposes its logical interview canvas');
+    for (const key of ['revision', 'width', 'height'])
+      assert.ok(Number.isFinite(state.layout[key]) && state.layout[key] > 0, key);
+    return state.layout;
+  };
+  const visibleBounds = async () => {
+    const [native, layout] = await Promise.all([nativeBounds(), logicalLayout()]);
+    return {
+      x: native.x + (native.width - layout.width) / 2,
+      y: native.y,
+      width: layout.width,
+      height: layout.height,
+    };
+  };
+  const observeLayout = () =>
+    floating.evaluate(async () => {
+      window.layoutEvents = [(await window.desktop.interviewState()).layout];
+      window.desktop.onInterviewLayout((layout) => window.layoutEvents.push(layout));
+      window.layoutToolbarFrames = [];
+      const sample = () => {
+        const rect = document.querySelector('.floating-toolbar').getBoundingClientRect();
+        window.layoutToolbarFrames.push({
+          center: screenX + rect.left + rect.width / 2,
+          top: screenY + rect.top,
+          screenX,
+          screenY,
+        });
+        window.layoutToolbarFrame = requestAnimationFrame(sample);
+      };
+      sample();
+    });
   const initial = await assertRatios();
+  const fixedNative = await nativeBounds();
+  const maximumArea = await app.evaluate(({ screen }) => ({
+    width: Math.max(...screen.getAllDisplays().map((display) => display.workArea.width)),
+    height: Math.max(...screen.getAllDisplays().map((display) => display.workArea.height)),
+  }));
+  for (const key of ['width', 'height'])
+    assert.ok(
+      Math.abs(fixedNative[key] - maximumArea[key]) <= 1,
+      'Windows reserves the largest display work area: ' + key,
+    );
+  await observeLayout();
+  const toolbarAnchor = await floating.evaluate(() => window.layoutToolbarFrames[0]);
+  const toolbarMaximumOffset = { center: 0, top: 0, screenX: 0, screenY: 0 };
+  const assertFixedCanvas = async (label) => {
+    assert.deepEqual(await nativeBounds(), fixedNative, label + ': native HWND remains fixed');
+    const observation = await floating.evaluate(() => ({
+      frames: window.layoutToolbarFrames,
+      layouts: window.layoutEvents,
+    }));
+    assert.ok(observation.frames.length >= 2, label + ': samples include intermediate paints');
+    for (const frame of observation.frames) {
+      for (const key of ['center', 'top', 'screenX', 'screenY']) {
+        toolbarMaximumOffset[key] = Math.max(
+          toolbarMaximumOffset[key],
+          Math.abs(frame[key] - toolbarAnchor[key]),
+        );
+        assert.ok(
+          Math.abs(frame[key] - toolbarAnchor[key]) <=
+            (key === 'screenX' || key === 'screenY' ? 0 : 1 / 64),
+          label +
+            ': toolbar screen anchor remains fixed at every frame: ' +
+            JSON.stringify({ initial: toolbarAnchor, frame }),
+        );
+      }
+    }
+    for (let index = 1; index < observation.layouts.length; index++)
+      assert.ok(
+        observation.layouts[index].revision > observation.layouts[index - 1].revision,
+        label + ': layout events have distinct increasing revisions',
+      );
+    return observation;
+  };
   for (const theme of ['light', 'dark']) {
     await floating.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
@@ -321,7 +401,7 @@ try {
       top: node.getBoundingClientRect().top,
       bottom: node.getBoundingClientRect().bottom,
       panelBottom: document.querySelector('.floating-panels').getBoundingClientRect().bottom,
-      viewport: innerHeight,
+      viewport: document.querySelector('.floating-viewport').getBoundingClientRect().bottom,
     }));
     assert.ok(placement.top > placement.panelBottom && placement.bottom <= placement.viewport);
     await floating.screenshot({ animations: 'disabled' });
@@ -332,7 +412,7 @@ try {
   checks.push(
     'exact capture warning below unchanged panels; symmetric toolbar without native window shadow in both themes',
   );
-  const bothBounds = await nativeBounds();
+  const bothBounds = await visibleBounds();
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
   await floating.locator('.floating-transcript').waitFor({ state: 'hidden' });
   await assertRatios();
@@ -345,7 +425,8 @@ try {
   const answerOnly = (await assertRatios())[0];
   assert.ok(Math.abs(answerOnly.width - initial[1].width) < 1);
   assert.ok(Math.abs(answerOnly.height - initial[1].height) < 1);
-  assert.ok((await nativeBounds()).width < bothBounds.width);
+  assert.ok((await visibleBounds()).width < bothBounds.width);
+  await assertFixedCanvas('Hide transcript');
   await floating.reload();
   await floating.waitForFunction(
     () =>
@@ -362,12 +443,14 @@ try {
     1,
     'Reload preserves hidden transcript geometry',
   );
+  await observeLayout();
   await floating.getByRole('button', { name: '转写面板', exact: true }).click();
   await assertRatios();
-  const restored = await nativeBounds();
+  const restored = await visibleBounds();
   assert.ok(
     Math.abs(restored.width - bothBounds.width) <= 1 && Math.abs(restored.x - bothBounds.x) <= 1,
   );
+  await assertFixedCanvas('Reload and restore transcript');
   await app.evaluate(() =>
     globalThis.layoutSpeech({
       type: 'segment',
@@ -449,7 +532,7 @@ try {
     'fixed fonts and controls; larger panels expose more actual text; fixed panel ratios through hide/reload/restore',
   );
 
-  // Real Electron bounds and renderer pointer capture, with a controlled native
+  // Real Electron canvas and renderer pointer capture, with a controlled native
   // cursor and 30 ms handler latency to expose accidental request accumulation.
   const hb = await handle.boundingBox();
   const icons = await floating.locator('.floating-resize svg').evaluateAll((nodes) =>
@@ -467,6 +550,7 @@ try {
     'Resize handles must remain on the visible panel corners, not below the notices',
   );
   const point = { x: hb.x + hb.width / 2, y: hb.y + hb.height / 2 };
+  const coalescedRevision = (await logicalLayout()).revision;
   await app.evaluate(() => {
     globalThis.layoutCursor = { x: 500, y: 500 };
     globalThis.layoutStats = { moves: 0, inFlight: 0, maximumInFlight: 0, bounds: 0 };
@@ -496,19 +580,22 @@ try {
     stats.moves > 0 && stats.moves < 120,
     'Coalesce pointer moves rather than queue all of them',
   );
-  const stable = stats.bounds;
+  assert.equal(stats.bounds, 0, 'Pointer resize never changes native HWND bounds');
+  const stable = (await logicalLayout()).revision;
+  assert.ok(stable > coalescedRevision, 'Coalesced pointer moves update the logical canvas');
   await floating.evaluate(async () => {
     await window.desktop.resizeInterview({ phase: 'start', edge: 'right' });
     for (let i = 0; i < 10; i++) await window.desktop.resizeInterview({ phase: 'move' });
     await window.desktop.resizeInterview({ phase: 'end' });
   });
   assert.equal(
-    (await app.evaluate(() => globalThis.layoutStats)).bounds,
+    (await logicalLayout()).revision,
     stable,
-    'Identical bounds never cause redundant native resizes',
+    'An unchanged cursor never publishes redundant canvas revisions',
   );
+  await assertFixedCanvas('Keyboard and coalesced pointer resize');
   checks.push(
-    'pointer resize coalescing under 30ms latency; one request in flight; no redundant bounds; blur restored after drag',
+    'pointer resize coalescing under 30ms latency; one request in flight; distinct canvas revisions with no native bounds changes; blur restored after drag',
   );
   await app.evaluate(() => {
     delete globalThis.layoutCursor;
@@ -541,12 +628,13 @@ try {
       exact: true,
     });
     const box = await target.boundingBox();
-    const before = await nativeBounds();
-    const boundsBefore = await app.evaluate(() => globalThis.layoutStats.bounds);
-    const traceStart = await app.evaluate(() => globalThis.layoutBoundsTrace.length);
+    const before = await visibleBounds();
+    const nativeBefore = await nativeBounds();
+    const revisionBefore = (await logicalLayout()).revision;
+    const traceStart = await floating.evaluate(() => window.layoutEvents.length);
     const dipStart = {
-      x: before.x + box.x + box.width / 2,
-      y: before.y + box.y + box.height / 2,
+      x: nativeBefore.x + box.x + box.width / 2,
+      y: nativeBefore.y + box.y + box.height / 2,
     };
     const dipEnd = {
       x: dipStart.x + (edge === 'right' ? 1 : -1) * 510 * change,
@@ -654,27 +742,23 @@ try {
       );
       requireDesktop();
       await floating.locator('.floating-shell.is-resizing').waitFor({ state: 'hidden' });
-      const after = await nativeBounds();
-      const resizeUpdates =
-        (await app.evaluate(() => globalThis.layoutStats.bounds)) - boundsBefore;
-      assert.ok(
-        resizeUpdates >= 3,
-        'Native bounds must update during the gesture, not only on release',
-      );
-      const frames = await app.evaluate(
-        (_electron, start) => globalThis.layoutBoundsTrace.slice(start),
+      const after = await visibleBounds();
+      const nativeAfter = await nativeBounds();
+      const frames = await floating.evaluate(
+        (start) => window.layoutEvents.slice(start),
         traceStart,
       );
-      for (const frame of frames) {
-        assert.ok(
-          Math.abs(frame.x + frame.width / 2 - before.x - before.width / 2) <= 1,
-          'Toolbar center must stay fixed throughout the gesture',
-        );
-        assert.equal(frame.y, before.y, 'Toolbar top must stay fixed throughout the gesture');
-      }
+      const resizeUpdates = frames.length;
+      assert.ok(
+        resizeUpdates >= 3,
+        'Logical canvas revisions must update during the gesture, not only on release',
+      );
+      assert.ok(frames[0].revision > revisionBefore);
+      assert.deepEqual(nativeAfter, nativeBefore, 'Native HWND never resizes during the gesture');
+      await assertFixedCanvas('Actual Windows ' + edge + ' corner drag');
       assert.ok(
         edge === 'right' ? after.width < before.width - 3 : after.width > before.width + 3,
-        'Actual Windows mouse drag must change the native window size',
+        'Actual Windows mouse drag must change the logical canvas size',
       );
       await assertRatios();
       assert.ok(Math.abs(after.y - before.y) <= 1, 'Top stays fixed during a corner drag');
@@ -693,7 +777,10 @@ try {
           physical: screen.dipToScreenPoint(point),
           scale: screen.getDisplayNearestPoint(point).scaleFactor,
         }),
-        { x: after.x + endBox.x + endBox.width / 2, y: after.y + endBox.y + endBox.height / 2 },
+        {
+          x: nativeAfter.x + endBox.x + endBox.width / 2,
+          y: nativeAfter.y + endBox.y + endBox.height / 2,
+        },
       );
       const distance =
         Math.hypot(corner.physical.x - nativeCursor.x, corner.physical.y - nativeCursor.y) /
@@ -751,16 +838,43 @@ try {
     hiddenStart[0].width,
   );
   const hiddenSmall = (await assertRatios())[0];
-  const hiddenBounds = await nativeBounds();
+  const hiddenBounds = await visibleBounds();
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
   await floating.waitForFunction(
     () =>
       document.querySelector('.floating-shell').classList.contains('is-collapsed') &&
       !document.querySelector('.floating-shell').dataset.panelMotion,
   );
+  const collapsedBounds = await visibleBounds();
+  assert.ok(collapsedBounds.height < hiddenBounds.height);
+  await assertFixedCanvas('Collapse answer-only canvas');
+  await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  const settings = floating.getByRole('dialog', { name: '面试设置', exact: true });
+  await settings.waitFor();
+  const settingsBounds = await visibleBounds();
+  assert.ok(settingsBounds.height > collapsedBounds.height);
+  assert.ok(settingsBounds.width > collapsedBounds.width);
+  const settingsBox = await settings.boundingBox();
+  assert.ok(settingsBox.height > 200, 'Collapsed settings expose their scrollable controls');
+  await assertFixedCanvas('Open settings while collapsed');
+  await settings.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await settings.waitFor({ state: 'detached' });
+  await floating.waitForFunction((expected) => {
+    const style = getComputedStyle(document.querySelector('.floating-viewport'));
+    return (
+      parseFloat(style.getPropertyValue('--interview-width')) === expected.width &&
+      parseFloat(style.getPropertyValue('--interview-height')) === expected.height
+    );
+  }, collapsedBounds);
+  assert.deepEqual(
+    await visibleBounds(),
+    collapsedBounds,
+    'Closing settings restores collapsed canvas',
+  );
+  await assertFixedCanvas('Close collapsed settings');
   await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
   await assertRatios();
-  const expandedBounds = await nativeBounds();
+  const expandedBounds = await visibleBounds();
   assert.ok(Math.abs(expandedBounds.width - hiddenBounds.width) <= 1);
   assert.ok(Math.abs(expandedBounds.height - hiddenBounds.height) <= 1);
   assert.ok(
@@ -773,8 +887,14 @@ try {
   const shownAgain = await assertRatios();
   assert.ok(Math.abs(shownAgain.at(-1).width - hiddenSmall.width) <= 1);
   assert.ok(Math.abs(shownAgain.at(-1).height - hiddenSmall.height) <= 1);
+  await assertFixedCanvas('Expand and restore transcript');
+  assert.equal(
+    (await app.evaluate(() => globalThis.layoutStats)).bounds,
+    0,
+    'Resize, transcript, collapse and settings only update the logical canvas',
+  );
   checks.push(
-    'answer-only resize and collapse/expand preserve panel size, aspect ratio and toolbar anchor',
+    'answer-only resize, collapse/settings/expand and transcript preserve panel geometry and every painted toolbar anchor inside the fixed native canvas',
   );
   await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('面试普通问题');
@@ -809,6 +929,7 @@ try {
     nativeAudio: false,
     nativeCursorSimulated: true,
     actualWindowsMouseDrags: 2,
+    toolbarMaximumOffset,
     resizeLatencyInjectedMs: 30,
   };
   await console.log(JSON.stringify(result, null, 2));

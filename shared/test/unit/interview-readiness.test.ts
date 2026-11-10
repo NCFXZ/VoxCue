@@ -4,6 +4,33 @@ import { recordAudioLevel } from '../../../shared/src/services/audioLevel';
 import type { SpeechStatus } from '../../../shared/electron/contracts/speech';
 
 const now = 10000;
+it('reports a runtime-muted system lane as off without hiding the healthy microphone or model', () => {
+  const value = { ...state(), systemAudioMuted: true };
+  expect(interviewReadiness('system', value, now)).toMatchObject({ kind: 'off', level: 0 });
+  expect(interviewReadiness('model', value, now).kind).toBe('normal');
+  expect(interviewReadiness('microphone', value, now).kind).not.toBe('off');
+  expect(interviewReadiness('system', { ...value, systemAudioMuted: false }, now).kind).toBe(
+    'input',
+  );
+});
+it('shows a muted transcription microphone as off even with stale RMS, while remote follows its saved source selection', () => {
+  const value = { ...state(), inputMode: 'transcription' as const, microphoneMuted: true };
+  expect(interviewReadiness('microphone', value, now)).toEqual({
+    kind: 'off',
+    reason: '麦克风已关闭，不采集声音。',
+    level: 0,
+  });
+  expect(interviewReadiness('microphone', { ...value, inputMode: 'remote' }, now).kind).not.toBe(
+    'off',
+  );
+  expect(
+    interviewReadiness(
+      'microphone',
+      { ...value, inputMode: 'remote', options: { sources: ['system'] } },
+      now,
+    ).kind,
+  ).toBe('off');
+});
 function state() {
   return {
     speech: { state: 'running', model: 'synthetic' } as SpeechStatus,

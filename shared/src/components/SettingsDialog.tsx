@@ -20,20 +20,24 @@ import {
   ChevronsUpDown,
   Person,
   Download,
+  Keyboard,
 } from './icons';
 import { Modal } from './ui/modal';
 import { Button } from './ui/button';
 import { switchView } from './ui/switchView';
+import { useHeightTransition } from './ui/useHeightTransition';
 import { SelectionLabel } from './SelectionLabel';
 import { UpdatesPanel } from './UpdatesPanel';
 import { ComponentsPanel } from './ComponentsPanel';
 import { SpeechControls } from './SpeechControls';
+import { InterviewInputModeControl } from './InterviewInputModeControl';
 import { InterviewFontSettings } from './InterviewFontSettings';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useGeneralSettings } from '../stores/generalSettings';
 import { useChatConnection } from '../stores/chatConnection';
 import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
+import { ShortcutSettings } from './ShortcutSettings';
 
 export type Theme = 'light' | 'dark' | 'system';
 const categories = [
@@ -42,6 +46,7 @@ const categories = [
   { id: 'components', label: '本地组件', Icon: Download },
   { id: 'interview', label: '面试设置', Icon: Settings },
   { id: 'general', label: '通用', Icon: Appearance },
+  { id: 'shortcuts', label: '快捷键', Icon: Keyboard },
   { id: 'about', label: '关于与更新', Icon: CircleHelp },
 ] as const;
 export type SettingsCategory = (typeof categories)[number]['id'] | 'updates';
@@ -76,6 +81,12 @@ export function SettingsDialog({
   const cloudUser = useCloudAccount((state) => state.state.user);
   const selectedTheme = themes.find((item) => item.value === theme)!;
   const content = useRef<HTMLElement>(null);
+  const interviewContent = useRef<HTMLDivElement>(null);
+  useHeightTransition(`${category}:${interview.inputMode}`, () => [
+    interviewContent.current?.querySelector<HTMLElement>(
+      '.speech-controls > .speech-settings-section',
+    ),
+  ]);
   return (
     <Modal
       title={t('设置')}
@@ -124,6 +135,7 @@ export function SettingsDialog({
           </header>
           <div key={category} className="settings-content-body">
             {category === 'components' && <ComponentsPanel />}
+            {category === 'shortcuts' && <ShortcutSettings />}
             {category === 'general' && (
               <>
                 <div className="settings-entry">
@@ -233,13 +245,20 @@ export function SettingsDialog({
             {category === 'ai' && <AIServicePanel />}
             {category === 'interview' && (
               <>
-                <SpeechControls
-                  value={interview.configuration}
-                  onChange={interview.update}
-                  busy={false}
-                  models={connection.models}
-                  live={connection.live}
+                <InterviewInputModeControl
+                  value={interview.inputMode}
+                  onChange={interview.setInputMode}
                 />
+                <div ref={interviewContent}>
+                  <SpeechControls
+                    inputMode={interview.inputMode}
+                    value={interview.configuration}
+                    onChange={interview.update}
+                    busy={false}
+                    models={connection.models}
+                    live={connection.live}
+                  />
+                </div>
                 {interview.error && (
                   <p role="alert" className="danger-text">
                     {t(interview.error)}

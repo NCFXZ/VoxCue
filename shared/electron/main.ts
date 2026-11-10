@@ -16,6 +16,7 @@ import {
   Menu,
   session,
   powerMonitor,
+  globalShortcut,
 } from 'electron';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { migrateUserData } from './userData';
@@ -52,6 +53,8 @@ import { UsageLedger } from './backend/chat/usage';
 import { registerChatIpc } from './ipc/chat';
 import { registerInterviewIpc } from './ipc/interview';
 import { InterviewContext } from './application/interviewContext';
+import { checkTranscriptionAccess } from './application/transcriptionAccess';
+import { InterviewAudioIntent } from './application/interviewAudioIntent';
 import { captureInterviewScreenshot, prepareInterviewScreenshot } from './screenshot';
 import { InterviewImageStore } from './backend/interview/images';
 import { registerInterviewImageIpc } from './ipc/interviewImages';
@@ -65,17 +68,30 @@ import type {
   AudioDevice,
   AudioSource,
   InterviewAccessReport,
+  InterviewConfiguration,
   SpeechOptions,
 } from './contracts/speech';
 import { validateSpeech } from './backend/speech/validation';
 import { speechModelInstalled } from './backend/speech/models';
-import { speechComponent } from './contracts/speechSettings';
+import { speechComponent, questionSource, inputSources } from './contracts/speechSettings';
 import {
   SpeechCoordinator,
   validateInterviewConfiguration,
   validateInterviewModel,
+  validateInterviewInput,
 } from './application/speech';
 import { handleDesktop, onDesktop, sendDesktop } from './ipc/handle';
+import { InterviewShortcutController, interviewShortcutsBounds } from './interviewShortcuts';
+import { defaultShortcuts } from './contracts/shortcuts';
+import { readShortcuts, writeShortcuts } from './backend/shortcutPreferences';
+import { registerInterviewShortcutsIpc, registerShortcutSettingsIpc } from './ipc/interviewShortcuts';
+import { RemoteConnectionService } from './backend/remoteConnection/service';
+import { createMobileAssets } from './backend/remoteConnection/assets';
+import { RemoteInterviewCoordinator } from './application/remoteConnection';
+import { registerRemoteConnectionIpc } from './ipc/remoteConnection';
+import type { RemoteConnectionState } from './contracts/remoteConnection';
+import { WindowVisibility } from './windowVisibility';
+import { revealExistingInterview } from './interviewActivation';
 import { selectDesktopPlatform, desktopResources } from './platform';
 import { windowOptions, whenWindowReady, restrictWindowNavigation, loadWindowPage } from './window';
 import type { NativePresentation } from './presentation';
@@ -107,6 +123,9 @@ let signingIn = false;
 let cancelLoginWait: (() => void) | undefined;
 let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
 let interviewIpc: ReturnType<typeof registerInterviewIpc> | undefined;
+let remoteConnection: RemoteConnectionService | undefined;
+let remoteInterview: RemoteInterviewCoordinator | undefined;
+let remotePresentationRevision = 0;
 let historyJobs: ReturnType<typeof registerHistoryIpc> | undefined;
 let updates: UpdateService | undefined;
 let updatesClosed = false;
@@ -117,6 +136,7 @@ let interviewOpening = false;
 let updateFlush: { resolve(saved: boolean): void; reject(error: Error): void } | null = null;
 let speech: SpeechHost | undefined;
 let speechSessions: SpeechCoordinator | undefined;
+const interviewAudioIntent = new InterviewAudioIntent();
 const interviewContext = new InterviewContext();
 let demoSession = false;
 let erasingAccount = false;
@@ -127,6 +147,18 @@ let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
 let interviewWindow: BrowserWindow | null = null;
+let checkedMicrophone: { owner: BrowserWindow; device?: string } | undefined;
+let interviewShortcutsWindow: BrowserWindow | null = null;
+let interviewShortcutsReady = false;
+let interviewShortcutsRequested = false;
+let interviewVisibility: WindowVisibility | undefined;
+let shortcutsVisibility: WindowVisibility | undefined;
+const surfaceReadyCallbacks = new WeakMap<BrowserWindow, () => void>();
+const surfaceRevisions = new WeakMap<BrowserWindow, number>();
+const interviewRevealCallbacks = new WeakMap<BrowserWindow, (focus: boolean) => void>();
+let releaseInterviewShortcuts: (() => void) | undefined;
+let shortcutController: InterviewShortcutController;
+let shortcutSettingsReady: Promise<void>;
 let interviewMousePassthrough = false;
 let closingMain = false;
 let sessionHasContent = false;
@@ -137,8 +169,10 @@ let pendingMainClose: string | null = null;
 let mainCloseTimer: ReturnType<typeof setTimeout> | undefined;
 let captureProtected = true;
 let interviewCollapsed = false;
+let interviewSettingsOpen = false;
 let interviewTranscriptVisible = true;
 let interviewScale = 1;
+let interviewCanvasLayout: import('./contracts/desktop').InterviewCanvasLayout | undefined;
 let lastInterviewBounds: { requested: Electron.Rectangle; actual: Electron.Rectangle } | undefined;
 let interviewCloseApproved = false;
 let interviewMove:
@@ -237,12 +271,35 @@ async function prepareUpdateInstall(accountLogout = false, deletingAccount = fal
     sendDesktop(win.webContents, 'session:request-close', pendingMainClose);
   });
 }
+function remoteViewState(state: RemoteConnectionState): RemoteConnectionState {
+  return {
+    ...state,
+    revision: ++remotePresentationRevision,
+    presentationOwner: interviewWindow && !interviewWindow.isDestroyed() ? 'interview' : 'main',
+  };
+}
+function publishRemoteState(state = remoteConnection?.state()) {
+  if (!state) return;
+  const value = remoteViewState(state);
+  for (const win of [mainWindow, interviewWindow])
+    if (win && !win.isDestroyed()) sendDesktop(win.webContents, 'remote:state', value);
+  if (interviewShortcutsWindow && !interviewShortcutsWindow.isDestroyed() &&
+    !interviewShortcutsWindow.webContents.isDestroyed())
+    sendDesktop(interviewShortcutsWindow.webContents, 'interview:device-connected', state.status === 'connected');
+}
+function clearRemoteInterview() {
+  remoteInterview?.reset();
+  remoteConnection?.updateSnapshot(null);
+  publishRemoteState();
+}
 function createLoginWindow() {
   if (loginWindow) {
     loginWindow.show();
     loginWindow.focus();
     return;
   }
+  clearRemoteInterview();
+  void remoteConnection?.disconnect().catch(() => {});
   const win = new BrowserWindow(
     windowOptions('login', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
   );
@@ -272,16 +329,23 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
   // position/size rounding on every collapse or transcript toggle. Explicit
   // gesture anchors and external moves must continue to use their actual bounds.
   anchor ??=
-    lastInterviewBounds && same(previous, lastInterviewBounds.actual)
+    !nativePresentation?.fixedInterviewCanvas &&
+    lastInterviewBounds &&
+    same(previous, lastInterviewBounds.actual)
       ? lastInterviewBounds.requested
       : previous;
-  const area = screen.getDisplayMatching(anchor).workArea;
+  const area = nativePresentation?.fixedInterviewCanvas
+    ? screen.getDisplayNearestPoint({
+        x: Math.round(anchor.x + anchor.width / 2),
+        y: anchor.y + 24,
+      }).workArea
+    : screen.getDisplayMatching(anchor).workArea;
   const bounds = fitInterviewBounds(
     anchor,
     area,
-    scale,
-    interviewTranscriptVisible,
-    interviewCollapsed,
+    interviewCollapsed && interviewSettingsOpen ? interviewLayout.minimumScale : scale,
+    interviewCollapsed && interviewSettingsOpen ? false : interviewTranscriptVisible,
+    interviewCollapsed && !interviewSettingsOpen,
   );
   // Panels are laid out from height. Deriving the next scale from the rounded
   // width can change height on a transcript toggle after a fractional-DPI drag.
@@ -290,6 +354,43 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
       0,
       (bounds.height - interviewLayout.chromeHeight) / interviewLayout.panelHeight,
     );
+  if (nativePresentation?.fixedInterviewCanvas) {
+    // A layered HWND move/resize and Chromium's new surface are not presented
+    // atomically. Reserve a stable canvas once; resize only the content inside.
+    const areas = screen.getAllDisplays().map((display) => display.workArea);
+    const width = Math.max(...areas.map((area) => area.width));
+    const height = Math.max(...areas.map((area) => area.height));
+    if (!interviewCanvasLayout || width > previous.width + 1 || height > previous.height + 1) {
+      nativePresentation.resizeInterview!(win, {
+        x: Math.round(bounds.x + bounds.width / 2 - width / 2),
+        y: bounds.y,
+        width,
+        height,
+      });
+    } else {
+      const center = previous.x + previous.width / 2;
+      // Recover an off-screen anchor after a display change or an edge drag.
+      // Ordinary panel changes keep both the HWND origin and extent untouched.
+      if (center <= area.x || center >= area.x + area.width || bounds.y !== previous.y)
+        nativePresentation.moveInterview!(win, {
+          ...previous,
+          x: Math.round(bounds.x + bounds.width / 2 - previous.width / 2),
+          y: bounds.y,
+        });
+    }
+    if (
+      interviewCanvasLayout?.width !== bounds.width ||
+      interviewCanvasLayout?.height !== bounds.height
+    ) {
+      interviewCanvasLayout = {
+        revision: (interviewCanvasLayout?.revision ?? 0) + 1,
+        width: bounds.width,
+        height: bounds.height,
+      };
+      sendDesktop(win.webContents, 'interview:layout', interviewCanvasLayout);
+    }
+    return;
+  }
   // Windows fractional DPI can round a requested DIP to a different DIP when
   // read back. Compare the last request as well, without ignoring user moves.
   if (
@@ -357,21 +458,187 @@ function restoreAfterInterview() {
       );
     });
 }
+function shortcutsOpen() {
+  return interviewShortcutsRequested;
+}
+function reducedNativeMotion() {
+  try {
+    const settings = systemPreferences.getAnimationSettings();
+    return settings.prefersReducedMotion === true || settings.shouldRenderRichAnimation === false;
+  } catch {
+    return true;
+  }
+}
+function notifyShortcutsOpen() {
+  if (interviewWindow && !interviewWindow.isDestroyed())
+    sendDesktop(interviewWindow.webContents, 'interview:shortcuts-open', shortcutsOpen());
+}
+function positionInterviewShortcuts() {
+  const win = interviewShortcutsWindow;
+  if (!win || win.isDestroyed() || !interviewWindow || interviewWindow.isDestroyed()) return;
+  const owner = interviewWindow.getBounds();
+  const area = screen.getDisplayNearestPoint({
+    x: Math.round(owner.x + owner.width / 2),
+    y: owner.y + 24,
+  }).workArea;
+  const bounds = interviewShortcutsBounds(area);
+  const current = win.getBounds();
+  if (
+    bounds.x !== current.x ||
+    bounds.y !== current.y ||
+    bounds.width !== current.width ||
+    bounds.height !== current.height
+  )
+    win.setBounds(bounds, false);
+}
+function showInterviewShortcuts() {
+  const win = interviewShortcutsWindow;
+  if (
+    !win ||
+    win.isDestroyed() ||
+    !interviewShortcutsReady ||
+    !interviewShortcutsRequested ||
+    !interviewWindow ||
+    interviewWindow.isDestroyed() ||
+    !interviewVisibility?.visible
+  )
+    return;
+  positionInterviewShortcuts();
+  pinInterview(win);
+  void shortcutsVisibility?.set(true);
+  hideInterviewIcon();
+}
+function closeInterviewShortcuts() {
+  interviewShortcutsWindow?.destroy();
+}
+function setInterviewShortcutsOpen(open: boolean): boolean {
+  if (!open) {
+    interviewShortcutsRequested = false;
+    notifyShortcutsOpen();
+    const win = interviewShortcutsWindow;
+    if (win && shortcutsVisibility)
+      void shortcutsVisibility.set(false).then((completed) => {
+        if (completed && !interviewShortcutsRequested && !win.isDestroyed()) win.destroy();
+      });
+    else closeInterviewShortcuts();
+    return false;
+  }
+  if (!interviewWindow || interviewWindow.isDestroyed()) throw Error('Unauthorized window');
+  if (interviewShortcutsWindow && !interviewShortcutsWindow.isDestroyed()) {
+    interviewShortcutsRequested = true;
+    notifyShortcutsOpen();
+    showInterviewShortcuts();
+    return true;
+  }
+  const win = new BrowserWindow(
+    windowOptions('interview-shortcuts', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
+  );
+  interviewShortcutsRequested = true;
+  interviewShortcutsWindow = win;
+  surfaceRevisions.set(win, 1);
+  interviewShortcutsReady = false;
+  let nativeReady = false,
+    rendererReady = false;
+  let nativeSurfaceReady = false;
+  let readyTimer: ReturnType<typeof setTimeout> | undefined;
+  win.once('closed', () => {
+    clearTimeout(readyTimer);
+    surfaceReadyCallbacks.delete(win);
+    surfaceRevisions.delete(win);
+    if (interviewShortcutsWindow !== win) return;
+    shortcutsVisibility?.dispose();
+    shortcutsVisibility = undefined;
+    interviewShortcutsWindow = null;
+    interviewShortcutsReady = false;
+    interviewShortcutsRequested = false;
+    notifyShortcutsOpen();
+  });
+  const failed = () => {
+    if (win.isDestroyed()) return;
+    win.destroy();
+    if (!closingMain)
+      dialog.showErrorBox(nativeText('快捷键'), nativeText('快捷键窗口未能打开，请重试。'));
+  };
+  try {
+    shortcutsVisibility = new WindowVisibility(win, reducedNativeMotion, failed);
+    const reveal = () => {
+      if (!nativeReady || !rendererReady || win.isDestroyed()) return;
+      try {
+        clearTimeout(readyTimer);
+        interviewShortcutsReady = true;
+        showInterviewShortcuts();
+      } catch {
+        failed();
+      }
+    };
+    surfaceReadyCallbacks.set(win, () => {
+      rendererReady = true;
+      reveal();
+    });
+    readyTimer = setTimeout(failed, 30000);
+    readyTimer.unref();
+    restrictWindowNavigation(win);
+    win.setContentProtection(captureProtected);
+    positionInterviewShortcuts();
+    whenWindowReady(win, desktopPlatform, () => {
+      try {
+        nativeReady = true;
+        nativeSurfaceReady = true;
+        reveal();
+      } catch {
+        failed();
+      }
+    });
+    win.webContents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
+      if (mainFrame && code !== -3) failed();
+    });
+    win.webContents.on('render-process-gone', failed);
+    win.webContents.on('did-start-loading', () => {
+      surfaceRevisions.set(win, (surfaceRevisions.get(win) ?? 0) + 1);
+      nativeReady = false;
+      rendererReady = false;
+      interviewShortcutsReady = false;
+      void shortcutsVisibility?.set(false);
+      clearTimeout(readyTimer);
+      readyTimer = setTimeout(failed, 30000);
+      readyTimer.unref();
+    });
+    win.webContents.on('did-finish-load', () => {
+      if (!nativeSurfaceReady) return;
+      nativeReady = true;
+      reveal();
+    });
+    const loadFailed = (error: unknown) => {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ERR_ABORTED')) failed();
+    };
+    loadWindowPage(
+      {
+        loadURL: (...args) => win.loadURL(...args).catch(loadFailed),
+        loadFile: (...args) => win.loadFile(...args).catch(loadFailed),
+      },
+      'interview-shortcuts',
+      indexFile,
+      process.env.VITE_DEV_SERVER_URL,
+    );
+    notifyShortcutsOpen();
+    return true;
+  } catch (error) {
+    if (!win.isDestroyed()) win.destroy();
+    throw error;
+  }
+}
 function openInterview() {
   if (interviewWindow) {
-    interviewWindow.restore();
-    interviewWindow.focus();
-    if (nativePresentation) {
-      hideInterviewIcon();
-      pinInterview(interviewWindow);
-    }
+    revealExistingInterview(interviewWindow, interviewRevealCallbacks);
     return;
   }
   captureProtected = true;
   interviewContext.clear();
   interviewCollapsed = false;
+  interviewSettingsOpen = false;
   interviewTranscriptVisible = true;
   interviewScale = 1;
+  interviewCanvasLayout = undefined;
   lastInterviewBounds = undefined;
   interviewResize = undefined;
   interviewCloseApproved = false;
@@ -379,50 +646,43 @@ function openInterview() {
   const win = new BrowserWindow(
     windowOptions('interview', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
   );
-  if (!desktopPlatform.captureScreen && !demoSession && speechSessions?.configuration?.aiEnabled)
-    void prepareInterviewScreenshot(win, desktopPlatform.id);
-  interviewWindow = win;
-  interviewMousePassthrough = false;
-  setInterviewMousePassthrough(true);
-  // All expanded sizes use the controlled proportional resize path. Removing
-  // OS minimums also permits the narrower answer-only and collapsed canvases.
-  win.setMinimumSize(1, 1);
-  sizeInterview(1);
-  updates?.refresh();
-  win.on('close', (event) => {
-    if (!closingMain && !interviewCloseApproved) {
-      event.preventDefault();
-      sendDesktop(win.webContents, 'interview:request-end');
-    }
-  });
-  win.setContentProtection(true);
-  restrictWindowNavigation(win);
-  if (nativePresentation) {
-    const keepOnTop = () => pinInterview(win);
-    win.on('show', keepOnTop);
-    win.on('restore', keepOnTop);
-    win.on('always-on-top-changed', (_event, onTop) => {
-      if (!onTop && !closingMain && !interviewCloseApproved) pinInterview(win);
-    });
-  }
-  whenWindowReady(win, desktopPlatform, () => {
-    if (nativePresentation) {
-      nativePresentation.prepareInterview(win);
-    }
-    win.show();
-    pinInterview(win);
-    if (nativePresentation) {
-      if (mainWindow) nativePresentation.hideMain(mainWindow);
-      // Showing a later interview can restore the application's Dock policy.
-      // Apply automatic icon hiding after all native window-show operations.
-      hideInterviewIcon();
-    } else mainWindow?.minimize();
-  });
-  loadWindowPage(win, 'interview', indexFile, process.env.VITE_DEV_SERVER_URL);
+  let windowReady = false;
+  let nativeReady = false,
+    rendererReady = false;
+  let nativeSurfaceReady = false;
+  let focusOnReveal = false;
+  let firstReveal = true;
+  let remoteInitialNavigation = true;
+  let readyTimer: ReturnType<typeof setTimeout> | undefined;
+  let surfaceVisibility: WindowVisibility | undefined;
+  let releaseShortcuts: (() => void) | undefined;
+  surfaceRevisions.set(win, 1);
+  const displayChanged = () => {
+    if (win === interviewWindow && !win.isDestroyed() && nativePresentation?.fixedInterviewCanvas)
+      sizeInterview(interviewScale);
+    positionInterviewShortcuts();
+  };
+  // Attach ownership cleanup before registration or native setup can fail.
   win.on('closed', () => {
+    clearTimeout(readyTimer);
+    surfaceReadyCallbacks.delete(win);
+    surfaceRevisions.delete(win);
+    interviewRevealCallbacks.delete(win);
+    surfaceVisibility?.dispose();
+    if (interviewVisibility === surfaceVisibility) interviewVisibility = undefined;
+    releaseShortcuts?.();
+    if (releaseInterviewShortcuts === releaseShortcuts) releaseInterviewShortcuts = undefined;
+    screen.removeListener('display-added', displayChanged);
+    screen.removeListener('display-removed', displayChanged);
+    screen.removeListener('display-metrics-changed', displayChanged);
+    if (interviewWindow !== win) return;
+    if (checkedMicrophone?.owner === win) checkedMicrophone = undefined;
+    interviewAudioIntent.cancel();
+    closeInterviewShortcuts();
     telemetry?.finishInterview(false, 'window');
     interviewMove = undefined;
     interviewWindow = null;
+    clearRemoteInterview();
     interviewMousePassthrough = false;
     speechSessions?.releaseInterview(true);
     updates?.refresh();
@@ -431,23 +691,202 @@ function openInterview() {
     captureProtected = true;
     restoreAfterInterview();
   });
-  win.webContents.on('did-start-loading', () => {
-    telemetry?.speechState('paused');
-    interviewMove = undefined;
-    setInterviewMousePassthrough(true);
-    speechSessions?.releaseInterview();
-    interviewIpc?.cancel();
-  });
-  win.webContents.on('render-process-gone', () => {
-    if (win.isDestroyed() || win !== interviewWindow) return;
-    interviewCloseApproved = true;
+  const failedWindow = () => {
+    if (win.isDestroyed()) return;
     win.destroy();
     if (!closingMain)
       dialog.showErrorBox(
         nativeText('面试窗口已关闭'),
         nativeText('面试窗口发生异常，已停止本场采集并恢复主窗口。'),
       );
-  });
+  };
+  try {
+    const visibility = new WindowVisibility(win, reducedNativeMotion, failedWindow);
+    surfaceVisibility = visibility;
+    interviewVisibility = visibility;
+    releaseShortcuts = shortcutController.attach({
+      window: {
+        isDestroyed: () => win.isDestroyed(),
+        isVisible: () => visibility.visible,
+        hide: () => {
+          void visibility.set(false);
+          void shortcutsVisibility?.set(false);
+        },
+        showInactive: () => {
+          void visibility.set(true);
+          showInterviewShortcuts();
+        },
+      },
+      ready: () => windowReady,
+      command: (command) => {
+        if (win !== interviewWindow || win.webContents.isDestroyed()) return;
+        if (command === 'scroll-device-up' || command === 'scroll-device-down') {
+          remoteConnection?.scroll(command === 'scroll-device-up' ? 'up' : 'down');
+          return;
+        }
+        sendDesktop(win.webContents, 'interview:shortcut', command);
+      },
+    });
+    releaseInterviewShortcuts = releaseShortcuts;
+    if (!desktopPlatform.captureScreen && !demoSession && speechSessions?.configuration?.aiEnabled)
+      void prepareInterviewScreenshot(win, desktopPlatform.id);
+    interviewWindow = win;
+    clearRemoteInterview();
+    const initialAudio = speechSessions?.configuration;
+    if (initialAudio?.mode === 'local' && initialAudio.options.sources.includes('microphone'))
+      checkedMicrophone = { owner: win, device: initialAudio.options.microphone };
+    interviewMousePassthrough = false;
+    setInterviewMousePassthrough(true);
+    // All expanded sizes use the controlled proportional resize path. Removing
+    // OS minimums also permits the narrower answer-only and collapsed canvases.
+    win.setMinimumSize(1, 1);
+    const area = screen.getDisplayMatching(mainWindow?.getBounds() ?? win.getBounds()).workArea;
+    const initial = win.getBounds();
+    sizeInterview(1, { ...initial, x: area.x + (area.width - initial.width) / 2, y: area.y + 24 });
+    screen.on('display-added', displayChanged);
+    screen.on('display-removed', displayChanged);
+    screen.on('display-metrics-changed', displayChanged);
+    win.on('move', positionInterviewShortcuts);
+    win.on('show', showInterviewShortcuts);
+    updates?.refresh();
+    win.on('close', (event) => {
+      if (!closingMain && !interviewCloseApproved) {
+        event.preventDefault();
+        sendDesktop(win.webContents, 'interview:request-end');
+      }
+    });
+    win.setContentProtection(true);
+    restrictWindowNavigation(win);
+    if (nativePresentation) {
+      const keepOnTop = () => pinInterview(win);
+      win.on('show', keepOnTop);
+      win.on('restore', keepOnTop);
+      win.on('always-on-top-changed', (_event, onTop) => {
+        if (!onTop && !closingMain && !interviewCloseApproved) pinInterview(win);
+      });
+    }
+    const reveal = () => {
+      if (!nativeReady || !rendererReady || windowReady || win.isDestroyed()) return;
+      try {
+        if (nativePresentation) {
+          nativePresentation.prepareInterview(win);
+        }
+        windowReady = true;
+        clearTimeout(readyTimer);
+        void visibility.set(true);
+        pinInterview(win);
+        if (focusOnReveal) {
+          focusOnReveal = false;
+          if (win.isMinimized()) win.restore();
+          win.focus();
+        }
+        if (nativePresentation) {
+          if (mainWindow) nativePresentation.hideMain(mainWindow);
+          // Showing a later interview can restore the application's Dock policy.
+          // Apply automatic icon hiding after all native window-show operations.
+          hideInterviewIcon();
+        } else mainWindow?.minimize();
+        if (firstReveal) {
+          firstReveal = false;
+          try {
+            setInterviewShortcutsOpen(true);
+          } catch {
+            dialog.showErrorBox(nativeText('快捷键'), nativeText('快捷键窗口未能打开，请重试。'));
+          }
+        }
+      } catch {
+        failedWindow();
+      }
+    };
+    surfaceReadyCallbacks.set(win, () => {
+      rendererReady = true;
+      reveal();
+    });
+    interviewRevealCallbacks.set(win, (focus) => {
+      if (win.isDestroyed()) return;
+      if (!windowReady) {
+        focusOnReveal ||= focus;
+        reveal();
+        return;
+      }
+      if (win.isMinimized()) win.restore();
+      void visibility.set(true);
+      showInterviewShortcuts();
+      pinInterview(win);
+      hideInterviewIcon();
+      if (focus) win.focus();
+    });
+    readyTimer = setTimeout(failedWindow, 30000);
+    readyTimer.unref();
+    whenWindowReady(win, desktopPlatform, () => {
+      nativeReady = true;
+      nativeSurfaceReady = true;
+      reveal();
+    });
+    win.webContents.on('did-fail-load', (_event, code, _description, _url, mainFrame) => {
+      if (mainFrame && code !== -3) failedWindow();
+    });
+    const loadFailed = (error: unknown) => {
+      if (!(error instanceof Error && 'code' in error && error.code === 'ERR_ABORTED'))
+        failedWindow();
+    };
+    win.webContents.on('did-start-loading', () => {
+      if (win === interviewWindow) interviewAudioIntent.cancel();
+      if (win === interviewWindow) {
+        clearRemoteInterview();
+        // Starting an interview from the desktop approves sharing that session.
+        // Reloading its renderer must not silently extend the phone's access.
+        if (!remoteInitialNavigation) void remoteConnection?.disconnect().catch(() => {});
+        remoteInitialNavigation = false;
+      }
+      surfaceRevisions.set(win, (surfaceRevisions.get(win) ?? 0) + 1);
+      nativeReady = false;
+      windowReady = false;
+      rendererReady = false;
+      void visibility.set(false);
+      clearTimeout(readyTimer);
+      readyTimer = setTimeout(failedWindow, 30000);
+      readyTimer.unref();
+      closeInterviewShortcuts();
+      telemetry?.speechState('paused');
+      interviewMove = undefined;
+      if (interviewSettingsOpen) {
+        interviewSettingsOpen = false;
+        sizeInterview(interviewScale);
+      }
+      setInterviewMousePassthrough(true);
+      speechSessions?.releaseInterview();
+      interviewIpc?.cancel();
+    });
+    win.webContents.on('did-finish-load', () => {
+      if (!nativeSurfaceReady) return;
+      nativeReady = true;
+      reveal();
+    });
+    win.webContents.on('render-process-gone', () => {
+      if (win.isDestroyed() || win !== interviewWindow) return;
+      interviewCloseApproved = true;
+      win.destroy();
+      if (!closingMain)
+        dialog.showErrorBox(
+          nativeText('面试窗口已关闭'),
+          nativeText('面试窗口发生异常，已停止本场采集并恢复主窗口。'),
+        );
+    });
+    loadWindowPage(
+      {
+        loadURL: (...args) => win.loadURL(...args).catch(loadFailed),
+        loadFile: (...args) => win.loadFile(...args).catch(loadFailed),
+      },
+      'interview',
+      indexFile,
+      process.env.VITE_DEV_SERVER_URL,
+    );
+  } catch (error) {
+    releaseShortcuts?.();
+    if (!win.isDestroyed()) win.destroy();
+    throw error;
+  }
 }
 const componentRoot = path.join(app.getPath('userData'), 'component-cache');
 const componentMarker = path.join(process.resourcesPath, 'voxcue-components.json');
@@ -477,7 +916,11 @@ if (desktopPlatform.id === 'darwin' || desktopPlatform.presentationFile) {
     process.exit(0);
   }
   app.on('second-instance', () => {
-    const win = interviewWindow ?? mainWindow ?? loginWindow;
+    if (interviewWindow && !interviewWindow.isDestroyed()) {
+      openInterview();
+      return;
+    }
+    const win = mainWindow ?? loginWindow;
     if (win && !win.isDestroyed()) {
       if (win.isMinimized()) win.restore();
       win.show();
@@ -503,6 +946,8 @@ function createMainWindow() {
   });
   loadWindowPage(mainWindow, 'main', indexFile, process.env.VITE_DEV_SERVER_URL);
   mainWindow.on('closed', () => {
+    clearRemoteInterview();
+    void remoteConnection?.disconnect().catch(() => {});
     void accountArchive?.cancel().catch(() => {});
     speechSessions?.releaseDictation();
     mainWindow = null;
@@ -595,6 +1040,16 @@ app.whenReady().then(async () => {
       return;
     }
   }
+  const shortcutFile = path.join(app.getPath('userData'), 'shortcut-settings.json');
+  shortcutController = new InterviewShortcutController(globalShortcut, (state) => {
+    for (const win of [mainWindow, interviewWindow, interviewShortcutsWindow])
+      if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
+        sendDesktop(win.webContents, 'shortcuts:settings', state);
+  }, (bindings) => writeShortcuts(shortcutFile, bindings));
+  shortcutSettingsReady = readShortcuts(shortcutFile, desktopPlatform.id === 'darwin').then(({ bindings, error }) => {
+    shortcutController.configure(bindings, error);
+  });
+  await shortcutSettingsReady;
   const speechHardware = new SpeechHardwareProbe(
     resources.audioHelper,
     desktopPlatform.id,
@@ -668,6 +1123,7 @@ app.whenReady().then(async () => {
       [loginWindow, 'VoxCue · 登录'],
       [mainWindow, 'VoxCue'],
       [interviewWindow, 'VoxCue · 面试'],
+      [interviewShortcutsWindow, '快捷键'],
     ] as const)
       if (window && !window.isDestroyed()) window.setTitle(nativeText(title));
   });
@@ -683,13 +1139,15 @@ app.whenReady().then(async () => {
   });
   handleDesktop('appearance:accent', (event) => {
     const win = BrowserWindow.fromWebContents(event.sender);
-    if (!win || ![loginWindow, mainWindow, interviewWindow].includes(win))
+    if (!win || ![loginWindow, mainWindow, interviewWindow, interviewShortcutsWindow].includes(win))
       throw new Error('Unauthorized window');
+    if (win === interviewShortcutsWindow && event.senderFrame !== event.sender.mainFrame)
+      throw Error('Unauthorized frame');
     return systemAccent();
   });
   systemPreferences.on('accent-color-changed', () => {
     const color = systemAccent();
-    for (const win of [loginWindow, mainWindow, interviewWindow])
+    for (const win of [loginWindow, mainWindow, interviewWindow, interviewShortcutsWindow])
       if (win && !win.isDestroyed())
         sendDesktop(win.webContents, 'appearance:accent-changed', color);
   });
@@ -713,11 +1171,12 @@ app.whenReady().then(async () => {
   // An unreadable preference returns to explicit entry; it never grants access.
   const localModeReady = localMode.load().catch(() => {});
   let entryBusy = false;
+  const accountOrigin = cloudOrigin(
+    process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
+    !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
+  );
   const cloudAccount = new CloudAccountClient({
-    origin: cloudOrigin(
-      process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
-      !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
-    ),
+    origin: accountOrigin,
     vault: createCloudVault(credentialEncryption),
     deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
   });
@@ -1195,6 +1654,104 @@ app.whenReady().then(async () => {
     )
       throw Error('Unauthorized window');
   };
+  remoteInterview = new RemoteInterviewCoordinator((command) => {
+    const win = interviewWindow;
+    if (!win || win.isDestroyed() || erasingAccount || closingMain) return false;
+    sendDesktop(win.webContents, 'remote:command', command);
+    return true;
+  });
+  remoteConnection = new RemoteConnectionService({
+    mobileAssets: createMobileAssets(path.join(app.getAppPath(), 'dist')),
+    onState: publishRemoteState,
+    onCommand: (command, signal) => remoteInterview!.dispatch(command, signal),
+  });
+  registerRemoteConnectionIpc({
+    service: remoteConnection,
+    coordinator: remoteInterview,
+    requireOwner(event) {
+      if (erasingAccount || closingMain ||
+        ![mainWindow?.webContents, interviewWindow?.webContents].includes(event.sender) ||
+        event.senderFrame !== event.sender.mainFrame)
+        throw Error('Unauthorized window');
+    },
+    requireInterview(event) {
+      requireInterview(event);
+      if (erasingAccount || closingMain) throw Error('Unauthorized window');
+    },
+    viewState: remoteViewState,
+  });
+  let shortcutCaptureWindow: BrowserWindow | null = null;
+  const endShortcutCapture = () => {
+    shortcutCaptureWindow?.removeListener('blur', endShortcutCapture);
+    shortcutCaptureWindow?.removeListener('closed', endShortcutCapture);
+    if (shortcutCaptureWindow && !shortcutCaptureWindow.isDestroyed())
+      shortcutCaptureWindow.webContents.removeListener('did-start-loading', endShortcutCapture);
+    shortcutCaptureWindow = null;
+    shortcutController.capture(false);
+  };
+  registerShortcutSettingsIpc({
+    authorize(event, write) {
+      const win = BrowserWindow.fromWebContents(event.sender);
+      if (!win || ![mainWindow, interviewWindow, interviewShortcutsWindow].includes(win) ||
+        event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized window');
+      if (write) {
+        requireMain(event);
+        if (erasingAccount || closingMain) throw Error('Unauthorized window');
+      }
+    },
+    async call(call, event) {
+      const win = BrowserWindow.fromWebContents(event.sender)!;
+      await shortcutSettingsReady;
+      if (win.isDestroyed()) throw Error('Unauthorized window');
+      if (call.op !== 'status') {
+        requireMain(event);
+        if (erasingAccount || closingMain) throw Error('Unauthorized window');
+      }
+      if (call.op === 'status') return { state: shortcutController.state() };
+      if (call.op === 'check') return { state: shortcutController.check() };
+      if (call.op === 'capture') {
+        if (!call.active) endShortcutCapture();
+        else {
+          if (!shortcutCaptureWindow) {
+            shortcutCaptureWindow = win;
+            win.once('blur', endShortcutCapture);
+            win.once('closed', endShortcutCapture);
+            win.webContents.once('did-start-loading', endShortcutCapture);
+          }
+          shortcutController.capture(true);
+        }
+        return { state: shortcutController.state() };
+      }
+      return shortcutController.save(call.op === 'set' ? call.action : null,
+        call.op === 'set' ? call.accelerator : null, defaultShortcuts());
+    },
+  });
+  registerInterviewShortcutsIpc({
+    requireWindow(event) {
+      if (
+        !interviewWindow ||
+        interviewWindow.isDestroyed() ||
+        event.senderFrame !== event.sender.mainFrame
+      )
+        throw Error('Unauthorized window');
+      if (event.sender === interviewWindow.webContents) return 'owner';
+      if (event.sender === interviewShortcutsWindow?.webContents) return 'help';
+      throw Error('Unauthorized window');
+    },
+    state: (role) => ({
+      open: shortcutsOpen(),
+      deviceConnected: remoteConnection?.state().status === 'connected',
+      rendererRevision:
+        surfaceRevisions.get((role === 'owner' ? interviewWindow : interviewShortcutsWindow)!) ?? 0,
+    }),
+    setOpen: setInterviewShortcutsOpen,
+    ready(role) {
+      const win = role === 'owner' ? interviewWindow : interviewShortcutsWindow;
+      const callback = win && surfaceReadyCallbacks.get(win);
+      if (!callback) throw Error('Unauthorized window');
+      callback();
+    },
+  });
   registerTelemetryIpc({
     telemetry,
     requireMain,
@@ -1344,18 +1901,19 @@ app.whenReady().then(async () => {
       probe(source: AudioSource, device?: string): Promise<{ ok: boolean; code?: string }>;
     }) => { check(options: SpeechOptions): Promise<InterviewAccessReport> };
   } = require(path.join(speechDirectory, 'access.js'));
-  const interviewAccess = new access.InterviewAccess({
+  const audioAccess = {
     platform: desktopPlatform.id,
     microphonePermission: () => systemPreferences.getMediaAccessStatus('microphone'),
     devices: async () => {
       if (!audioHelper) throw Error('当前系统尚未支持本地音频采集。');
       return capture.devices(audioHelper);
     },
-    probe: async (source, device) => {
+    probe: async (source: AudioSource, device?: string) => {
       if (!audioHelper) return { ok: false };
       return capture.probeDevice(audioHelper, source, device);
     },
-  });
+  };
+  const interviewAccess = new access.InterviewAccess(audioAccess);
   const speechModelRoot = resources.speechModels;
   let screenCaptureAccess: ScreenCaptureAccess | undefined;
   if (desktopPlatform.id === 'darwin') {
@@ -1387,8 +1945,13 @@ app.whenReady().then(async () => {
     screenCaptureAccess = new ScreenPermission();
   }
   registerScreenCaptureIpc(screenCaptureAccess, requireMain);
-  const checkInterviewAccess = async (options: SpeechOptions): Promise<InterviewAccessReport> => {
-    const report = await interviewAccess.check(options);
+  const checkInterviewAccess = async (
+    configuration: InterviewConfiguration,
+  ): Promise<InterviewAccessReport> => {
+    const report =
+      configuration.inputMode === 'transcription'
+        ? await checkTranscriptionAccess(configuration.options, audioAccess)
+        : await interviewAccess.check(configuration.options);
     // Screenshot access is independent and optional for an audio-only interview.
     return screenCaptureAccess
       ? { ...report, screenCapture: await screenCaptureAccess.call('check') }
@@ -1411,6 +1974,11 @@ app.whenReady().then(async () => {
         interviewWindow &&
         !interviewWindow.isDestroyed()
       ) {
+        if (event.type === 'status' && event.status.state === 'error') {
+          interviewAudioIntent.cancel();
+          speechSessions.cancelInput();
+        }
+        if (speechSessions.blocksInput(event)) return;
         if (event.type === 'status') telemetry?.speechState(event.status.state);
         if (
           event.type === 'segment' &&
@@ -1419,7 +1987,7 @@ app.whenReady().then(async () => {
           event.segment.reason !== 'discontinuity'
         )
           telemetry?.transcript(event.segment.id);
-        interviewContext.event(event);
+        interviewContext.event(event, questionSource(speechSessions.configuration?.inputMode));
         sendDesktop(interviewWindow.webContents, 'speech:event', event);
       }
     },
@@ -1444,8 +2012,12 @@ app.whenReady().then(async () => {
     )
       return speech!.call(call);
     requireInterview(event);
+    if (call.op === 'start' || call.op === 'pause' || call.op === 'stop')
+      interviewAudioIntent.cancel();
     if (call.op === 'start' && !demoSession) telemetry?.beginInterview();
-    if (call.op === 'pause' || call.op === 'stop') telemetry?.speechState('paused');
+    if (call.op === 'pause' || call.op === 'stop') {
+      telemetry?.speechState('paused');
+    }
     try {
       const status = await speechSessions!.interview(call);
       telemetry?.speechState(status.state);
@@ -1474,16 +2046,103 @@ app.whenReady().then(async () => {
       options: options ?? speechSessions?.configuration?.options,
     });
     if (validated.op !== 'start') throw Error('Invalid speech options');
+    const confirmed = speechSessions?.configuration;
+    if (!confirmed) throw Error('请先开始本地语音面试。');
+    if (speechSessions!.inputChanging) throw Error('音频输入正在切换，请稍候。');
+    validateInterviewConfiguration({ ...confirmed, options: validated.options });
     if (validated.options.speechModel === 'qwen' && !resources.qwenModels)
       throw Error('当前平台尚未接入 Qwen 原生推理。');
-    await speechHardware.require(validated.options);
-    components.require(speechComponent(validated.options));
+    const owner = interviewWindow!;
+    const rendererRevision = surfaceRevisions.get(owner);
+    const attempt = interviewAudioIntent.begin(() => {
+      if (
+        owner !== interviewWindow ||
+        owner.isDestroyed() ||
+        surfaceRevisions.get(owner) !== rendererRevision
+      )
+        return false;
+      try {
+        requireInterview(event);
+        return true;
+      } catch {
+        return false;
+      }
+    });
     try {
-      const status = await speechSessions!.reconnect(options);
+      const status = await attempt.run(
+        () => speechHardware.require(validated.options),
+        () => {
+          components.require(speechComponent(validated.options));
+          return speechSessions!.reconnect(options);
+        },
+      );
       telemetry?.speechState(status.state);
       return status;
     } catch (error) {
-      telemetry?.speechState('error');
+      if (attempt.current()) telemetry?.speechState('error');
+      throw error;
+    }
+  });
+  handleDesktop('interview:input', async (event, ...args: unknown[]) => {
+    requireInterview(event);
+    if (args.length !== 1) throw Error('Invalid request');
+    const state = validateInterviewInput(args[0]);
+    const confirmed = speechSessions?.configuration;
+    if (!confirmed || confirmed.mode !== 'local') throw Error('请先开始本地语音面试。');
+    if (speechSessions!.inputChanging) throw Error('音频输入正在切换，请稍候。');
+    const next = validateInterviewConfiguration({
+      ...confirmed,
+      inputMode: state.inputMode,
+      options: { ...confirmed.options, sources: inputSources(state) },
+    });
+    const owner = interviewWindow!;
+    const revision = surfaceRevisions.get(owner);
+    const attempt = interviewAudioIntent.begin(() => {
+      if (
+        owner !== interviewWindow ||
+        owner.isDestroyed() ||
+        surfaceRevisions.get(owner) !== revision
+      )
+        return false;
+      try {
+        requireInterview(event);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+    try {
+      const status = await attempt.run(
+        async () => {
+          if (state.inputMode === 'remote' && confirmed.inputMode === 'transcription') {
+            const report = await interviewAccess.check({ ...next.options, sources: ['system'] });
+            if (!report.ready)
+              throw Error(
+                report.checks
+                  .filter((item) => item.status !== 'granted')
+                  .map((item) => item.message)
+                  .join('\n'),
+              );
+          }
+          if (
+            next.options.sources.includes('microphone') &&
+            (checkedMicrophone?.owner !== owner ||
+              checkedMicrophone.device !== next.options.microphone)
+          ) {
+            const report = await checkTranscriptionAccess(
+              { ...next.options, sources: ['microphone'] },
+              audioAccess,
+            );
+            if (!report.ready) throw Error(report.checks.map((item) => item.message).join('\n'));
+          }
+        },
+        () => speechSessions!.setInputState(state),
+      );
+      if (next.options.sources.includes('microphone'))
+        checkedMicrophone = { owner, device: next.options.microphone };
+      return status;
+    } catch (error) {
+      if (attempt.current()) telemetry?.speechState('error');
       throw error;
     }
   });
@@ -1493,7 +2152,7 @@ app.whenReady().then(async () => {
     const configuration = validateInterviewConfiguration(value);
     if (configuration.mode !== 'local') throw Error('请选择本地音频设备。');
     knowledgeCoordinator.assertInterviewReady(configuration.knowledgeBaseId);
-    return checkInterviewAccess(configuration.options);
+    return checkInterviewAccess(configuration);
   });
   handleDesktop('interview:microphone-settings', (event, source: unknown = 'microphone') => {
     requireMain(event);
@@ -1522,6 +2181,19 @@ app.whenReady().then(async () => {
     }
     if (!demoSession) telemetry?.beginInterview();
     let stage: TelemetryStage = 'preflight';
+    const openingAbort = new AbortController();
+    const abortOpening = () => openingAbort.abort();
+    event.sender.once('destroyed', abortOpening);
+    event.sender.once('did-start-loading', abortOpening);
+    const assertOpeningOwner = () => {
+      openingAbort.signal.throwIfAborted();
+      if (
+        event.sender.isDestroyed() ||
+        event.sender !== mainWindow?.webContents ||
+        event.senderFrame !== event.sender.mainFrame
+      )
+        throw Error('面试启动已取消。');
+    };
     interviewOpening = true;
     updates?.refresh();
     try {
@@ -1542,8 +2214,9 @@ app.whenReady().then(async () => {
       if (configuration.mode === 'local') {
         if (configuration.options.speechModel !== 'qwen' && !speechModelInstalled(speechModelRoot))
           throw Error('本地语音模型未安装，请先下载模型后再开始面试。');
+        assertOpeningOwner();
         stage = 'permission';
-        const access = await checkInterviewAccess(configuration.options);
+        const access = await checkInterviewAccess(configuration);
         if (!access.ready)
           throw Error(
             access.checks
@@ -1553,9 +2226,11 @@ app.whenReady().then(async () => {
           );
       }
       stage = 'audio';
+      assertOpeningOwner();
       await speechSessions!.confirm(configuration);
       try {
         stage = 'window';
+        assertOpeningOwner();
         openInterview();
       } catch (error) {
         speechSessions!.releaseInterview(true);
@@ -1565,6 +2240,8 @@ app.whenReady().then(async () => {
       telemetry?.finishInterview(false, stage);
       throw error;
     } finally {
+      event.sender.removeListener('destroyed', abortOpening);
+      event.sender.removeListener('did-start-loading', abortOpening);
       interviewOpening = false;
       updates?.refresh();
     }
@@ -1572,11 +2249,15 @@ app.whenReady().then(async () => {
   handleDesktop('interview:state', (event) => {
     requireInterview(event);
     return {
+      visible: interviewVisibility?.visible ?? interviewWindow!.isVisible(),
+      rendererRevision: surfaceRevisions.get(interviewWindow!) ?? 0,
+      inputState: speechSessions!.inputState,
       protected: captureProtected,
       pinned: interviewWindow!.isAlwaysOnTop(),
       supported: desktopPlatform.captureProtectionSupported,
       collapsed: interviewCollapsed,
       transcriptVisible: interviewTranscriptVisible,
+      layout: interviewCanvasLayout,
       configuration: speechSessions!.configuration!,
     };
   });
@@ -1584,6 +2265,7 @@ app.whenReady().then(async () => {
     requireInterview(event);
     if (typeof allowed !== 'boolean') throw new Error('Invalid request');
     interviewWindow!.setContentProtection(!allowed);
+    interviewShortcutsWindow?.setContentProtection(!allowed);
     captureProtected = !allowed;
     return captureProtected;
   });
@@ -1599,6 +2281,20 @@ app.whenReady().then(async () => {
     interviewCollapsed = !interviewCollapsed;
     sizeInterview(interviewScale);
     return interviewCollapsed;
+  });
+  handleDesktop('interview:settings', (event, ...args: unknown[]) => {
+    requireInterview(event);
+    if (args.length !== 1 || typeof args[0] !== 'boolean') throw Error('Invalid request');
+    interviewMove = undefined;
+    interviewResize = undefined;
+    const previous = interviewSettingsOpen;
+    interviewSettingsOpen = args[0];
+    try {
+      if (interviewCollapsed) sizeInterview(interviewScale);
+    } catch (error) {
+      interviewSettingsOpen = previous;
+      throw error;
+    }
   });
   handleDesktop('interview:transcript', (event, visible: unknown) => {
     requireInterview(event);
@@ -1678,10 +2374,12 @@ app.whenReady().then(async () => {
           // The panels are sized from viewport height. At fractional Windows
           // DPI the last requested scale and actual HWND bounds can differ;
           // anchor this gesture to the visible geometry to avoid an initial jump.
-          scale: Math.max(
-            0,
-            (bounds.height - interviewLayout.chromeHeight) / interviewLayout.panelHeight,
-          ),
+          scale: interviewCanvasLayout
+            ? interviewScale
+            : Math.max(
+                0,
+                (bounds.height - interviewLayout.chromeHeight) / interviewLayout.panelHeight,
+              ),
         };
         return;
       }
@@ -1774,6 +2472,7 @@ app.whenReady().then(async () => {
     })
     .catch(() => createLoginWindow());
   app.on('activate', () => {
+    if (revealExistingInterview(interviewWindow, interviewRevealCallbacks)) return;
     if (BrowserWindow.getAllWindows().length !== 0) return;
     if (desktopPlatform.id !== 'darwin') return createLoginWindow();
     void selectionReady
@@ -1802,6 +2501,7 @@ app.on('window-all-closed', () => {
   if (erasingAccount) return;
   if (desktopPlatform.quitOnAllWindowsClosed) app.quit();
 });
+app.on('will-quit', () => releaseInterviewShortcuts?.());
 app.on('before-quit', (event) => {
   if (desktopPlatform.id === 'darwin') macQuitRequested = true;
   if (mainWindow && !mainWindow.isDestroyed() && !mainCloseFlushed) {
@@ -1828,6 +2528,8 @@ app.on('before-quit', (event) => {
     void telemetry.close().finally(() => app.quit());
     return;
   }
+  remoteInterview?.reset();
+  void remoteConnection?.disconnect().catch(() => {});
   components?.dispose();
   nativePresentation?.dispose();
   knowledgeCoordinator?.cancelAll();

@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DesktopAPI } from '../../../shared/electron/contracts/desktop';
 import type { AIChatService, ChatCompletion } from '../../../shared/electron/backend/chat/ports';
 import { emptyUsage } from '../../../shared/electron/contracts/chat';
+import { defaultShortcuts } from '../../../shared/electron/contracts/shortcuts';
 
 const bridge = vi.hoisted(() => ({
   api: undefined as DesktopAPI | undefined,
@@ -41,6 +42,7 @@ import '../../../shared/electron/preload';
 import { registerHistoryIpc } from '../../../shared/electron/ipc/history';
 import { registerChatIpc } from '../../../shared/electron/ipc/chat';
 import { registerInterviewIpc } from '../../../shared/electron/ipc/interview';
+import { registerInterviewShortcutsIpc, registerShortcutSettingsIpc } from '../../../shared/electron/ipc/interviewShortcuts';
 import { registerInterviewImageIpc } from '../../../shared/electron/ipc/interviewImages';
 import type { InterviewImageStore } from '../../../shared/electron/backend/interview/images';
 import { ChatServiceError } from '../../../shared/electron/backend/chat/errors';
@@ -174,6 +176,103 @@ beforeEach(() => {
   bridge.send.mockClear();
   bridge.listeners.clear();
   bridge.handlers.clear();
+});
+
+describe('shortcut settings IPC', () => {
+  it('keeps changes main-only and validates actions and combinations before dispatch', async () => {
+    const main = { mainFrame: {} }, help = { mainFrame: {} }, other = { mainFrame: {} };
+    const state = { revision: 1, bindings: defaultShortcuts(), conflicts: [], capturing: false, error: null };
+    const call = vi.fn(async () => ({ state }));
+    registerShortcutSettingsIpc({
+      authorize(event, write) {
+        if (event.senderFrame !== event.sender.mainFrame || ![main, help].includes(event.sender as any))
+          throw Error('Unauthorized window');
+        if (write && event.sender !== (main as any)) throw Error('Main only');
+      },
+      call,
+    });
+    const route = bridge.handlers.get('shortcuts:settings')!;
+    const event = (sender: any) => ({ sender, senderFrame: sender.mainFrame });
+    expect(await route(event(help), { op: 'status' })).toEqual({ state });
+    for (const request of [{ op: 'check' }, { op: 'reset' }, { op: 'capture', active: true },
+      { op: 'set', action: 'submit-input', accelerator: 'Control+K' }])
+      expect(() => route(event(help), request)).toThrow('Main only');
+    expect(() => route(event(other), { op: 'status' })).toThrow('Unauthorized');
+    expect(() => route({ sender: main, senderFrame: {} }, { op: 'status' })).toThrow('Unauthorized');
+    for (const request of [
+      { op: 'status', path: '/private' }, { op: 'capture', active: 'yes' },
+      { op: 'set', action: 'execute', accelerator: 'Control+K' },
+      { op: 'set', action: 'submit-input', accelerator: 'K' },
+    ]) expect(() => route(event(main), request)).toThrow();
+    expect(() => route(event(main), { op: 'status' }, {})).toThrow();
+    expect(call).toHaveBeenCalledOnce();
+    await route(event(main), { op: 'set', action: 'submit-input', accelerator: 'Alt+Control+K' });
+    expect(call).toHaveBeenLastCalledWith(
+      { op: 'set', action: 'submit-input', accelerator: 'Control+Alt+K' }, event(main),
+    );
+  });
+});
+
+describe('interview shortcuts help IPC', () => {
+  it('allows only owning main frames; help can read its narrow state and close itself, never reopen', () => {
+    const owner = { mainFrame: {} },
+      help = { mainFrame: {} },
+      other = { mainFrame: {} };
+    let ownerRevision = 4;
+    const state = vi.fn((role: 'owner' | 'help') => ({
+      open: true,
+      deviceConnected: false,
+      rendererRevision: role === 'owner' ? ownerRevision : 7,
+    }));
+    const setOpen = vi.fn((open: boolean) => open);
+    const ready = vi.fn();
+    registerInterviewShortcutsIpc({
+      requireWindow(event) {
+        if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+        if (event.sender === (owner as any)) return 'owner';
+        if (event.sender === (help as any)) return 'help';
+        throw Error('Unauthorized window');
+      },
+      state,
+      setOpen,
+      ready,
+    });
+    const event = (sender: any) => ({ sender, senderFrame: sender.mainFrame });
+    const read = bridge.handlers.get('interview:shortcuts-state')!;
+    const toggle = bridge.handlers.get('interview:shortcuts-open')!;
+    const rendererReady = bridge.handlers.get('interview:renderer-ready')!;
+    expect(read(event(help))).toEqual({ open: true, deviceConnected: false, rendererRevision: 7 });
+    expect(read(event(owner))).toEqual({ open: true, deviceConnected: false, rendererRevision: 4 });
+    expect(toggle(event(owner), true)).toBe(true);
+    expect(toggle(event(help), false)).toBe(false);
+    const calls = setOpen.mock.calls.length;
+    for (const invalid of [true, undefined, 1, {}, 'false'])
+      expect(() => toggle(event(help), invalid)).toThrow('Invalid request');
+    expect(() => toggle(event(owner), false, {})).toThrow('Invalid request');
+    expect(() => toggle({ sender: owner, senderFrame: {} }, false)).toThrow('Unauthorized frame');
+    expect(() => toggle(event(other), false)).toThrow('Unauthorized window');
+    expect(() => read(event(other))).toThrow('Unauthorized window');
+    expect(() => read({ sender: help, senderFrame: {} })).toThrow('Unauthorized frame');
+    expect(() => read(event(help), { configuration: true })).toThrow('Invalid request');
+    expect(setOpen).toHaveBeenCalledTimes(calls);
+    rendererReady(event(owner), 4);
+    rendererReady(event(help), 7);
+    expect(ready.mock.calls).toEqual([['owner'], ['help']]);
+    expect(() => rendererReady(event(other))).toThrow('Unauthorized window');
+    expect(() => rendererReady({ sender: help, senderFrame: {} })).toThrow('Unauthorized frame');
+    expect(() => rendererReady(event(owner), { revision: 1 })).toThrow('Invalid request');
+    expect(ready).toHaveBeenCalledTimes(2);
+    ownerRevision++;
+    expect(() => rendererReady(event(owner), 4)).toThrow('Invalid request');
+    expect(() => rendererReady(event(owner), 7)).toThrow('Invalid request');
+    for (const invalid of [undefined, 0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1, '5'])
+      expect(() => rendererReady(event(owner), invalid)).toThrow('Invalid request');
+    expect(ready).toHaveBeenCalledTimes(2);
+    // A stale acknowledgement does not destroy or otherwise invalidate the new document or other window.
+    rendererReady(event(owner), 5);
+    rendererReady(event(help), 7);
+    expect(ready.mock.calls).toEqual([['owner'], ['help'], ['owner'], ['help']]);
+  });
 });
 
 describe('更新 IPC 白名单', () => {
@@ -855,6 +954,9 @@ describe('受控 preload 契约', () => {
   it('只暴露类型化桌面白名单，确认参数与语音输入频道一致', async () => {
     const api = bridge.api!;
     const calls: Array<[keyof DesktopAPI, string, unknown[]]> = [
+      ['remoteConnection', 'remote:connection', [{ op: 'status' }]],
+      ['publishRemoteInterview', 'remote:publish', [{ sessionId: 'synthetic-session' }]],
+      ['finishRemoteCommand', 'remote:complete', [{ requestId: 'request-id', ok: true }]],
       ['accountData', 'account:data', [{ action: 'begin', files: 1 }]],
       ['updates', 'updates:call', [{ op: 'check' }]],
       ['components', 'components:call', [{ op: 'download', id: 'rag' }]],
@@ -863,6 +965,11 @@ describe('受控 preload 契约', () => {
       ['speech', 'speech:call', [{ op: 'status' }]],
       ['speechHardware', 'speech:hardware', []],
       ['reconnectInterviewAudio', 'interview:reconnect-audio', [{ sources: ['system'] }]],
+      [
+        'setInterviewInput',
+        'interview:input',
+        [{ inputMode: 'transcription', microphoneMuted: true }],
+      ],
       ['dictation', 'dictation:call', [{ op: 'start' }]],
       [
         'generateInterviewTitle',
@@ -906,9 +1013,14 @@ describe('受控 preload 契约', () => {
       ['screenCapturePermission', 'interview:screen-permission', ['check']],
       ['openMicrophoneSettings', 'interview:microphone-settings', []],
       ['interviewState', 'interview:state', []],
+      ['interviewShortcutsState', 'interview:shortcuts-state', []],
+      ['setInterviewShortcutsOpen', 'interview:shortcuts-open', [true]],
+      ['shortcutSettings', 'shortcuts:settings', [{ op: 'status' }]],
+      ['interviewRendererReady', 'interview:renderer-ready', [4]],
       ['allowCapture', 'interview:capture', [false]],
       ['togglePin', 'interview:pin', []],
       ['toggleInterviewCollapse', 'interview:collapse', []],
+      ['setInterviewSettingsOpen', 'interview:settings', [true]],
       ['setInterviewTranscriptVisible', 'interview:transcript', [false]],
       ['moveInterviewWindow', 'interview:move', [{ phase: 'start' }]],
       ['resizeInterview', 'interview:resize', [-1]],
@@ -928,6 +1040,11 @@ describe('受控 preload 契约', () => {
         'confirmInterviewEnd',
         'setInterviewMousePassthrough',
         'onInterviewTitle',
+        'onInterviewLayout',
+        'onInterviewShortcut',
+        'onInterviewShortcutsOpen',
+        'onInterviewDeviceConnection',
+        'onShortcutSettings',
         'knowledge',
         'onKnowledgeEvent',
         'onChatEvent',
@@ -938,6 +1055,8 @@ describe('受控 preload 契约', () => {
         'onSessionCloseRequested',
         'onUpdateEvent',
         'onComponentEvent',
+        'onRemoteConnection',
+        'onRemoteCommand',
       ].sort(),
     );
     await api.chatModels();
@@ -954,6 +1073,17 @@ describe('受控 preload 契约', () => {
     expect(bridge.send).toHaveBeenCalledTimes(3);
   });
   it('事件仅传公开 payload，解除订阅释放对应 listener', () => {
+    for (const [method, channel, payload] of [
+      ['onRemoteConnection', 'remote:state', { status: 'connected', revision: 1 }],
+      ['onRemoteCommand', 'remote:command', { action: 'ask', requestId: 'synthetic-id' }],
+    ] as const) {
+      const callback = vi.fn();
+      const stop = bridge.api![method](callback);
+      bridge.listeners.get(channel)!({ sender: 'private-event' }, payload);
+      expect(callback).toHaveBeenCalledExactlyOnceWith(payload);
+      stop();
+      expect(bridge.listeners.has(channel)).toBe(false);
+    }
     const callback = vi.fn();
     const stop = bridge.api!.onChatEvent(callback);
     const payload = { id: 'q', type: 'delta', text: 'answer' };
@@ -965,6 +1095,47 @@ describe('受控 preload 契约', () => {
     expect(bridge.api).not.toHaveProperty('popUpNativeMenu');
     const accent = vi.fn();
     const end = vi.fn();
+    const layoutChanged = vi.fn();
+    const stopLayout = bridge.api!.onInterviewLayout(layoutChanged);
+    const layout = { revision: 2, width: 805, height: 557 };
+    bridge.listeners.get('interview:layout')!({ sender: 'private-event' }, layout);
+    expect(layoutChanged).toHaveBeenCalledExactlyOnceWith(layout);
+    const shortcut = vi.fn();
+    const stopShortcut = bridge.api!.onInterviewShortcut(shortcut);
+    for (const command of [
+      'toggle-panels', 'toggle-transcript', 'toggle-microphone', 'toggle-system-audio',
+      'submit-input', 'scroll-device-up', 'scroll-device-down', 'screenshot',
+    ])
+      bridge.listeners.get('interview:shortcut')!({ sender: 'private-event' }, command);
+    expect(shortcut.mock.calls).toEqual([
+      ['toggle-panels'],
+      ['toggle-transcript'],
+      ['toggle-microphone'],
+      ['toggle-system-audio'],
+      ['submit-input'],
+      ['scroll-device-up'],
+      ['scroll-device-down'],
+      ['screenshot'],
+    ]);
+    stopShortcut();
+    expect(bridge.listeners.has('interview:shortcut')).toBe(false);
+    const helpOpen = vi.fn();
+    const stopHelpOpen = bridge.api!.onInterviewShortcutsOpen(helpOpen);
+    bridge.listeners.get('interview:shortcuts-open')!({ sender: 'private-event' }, false);
+    expect(helpOpen).toHaveBeenCalledExactlyOnceWith(false);
+    stopHelpOpen();
+    const connectionChanged = vi.fn();
+    const stopConnection = bridge.api!.onInterviewDeviceConnection(connectionChanged);
+    for (const connected of [true, false])
+      bridge.listeners.get('interview:device-connected')!({ sender: 'private-event' }, connected);
+    expect(connectionChanged.mock.calls).toEqual([[true], [false]]);
+    stopConnection();
+    const settingsChanged = vi.fn();
+    const stopSettings = bridge.api!.onShortcutSettings(settingsChanged);
+    const settings = { revision: 1, bindings: defaultShortcuts(), conflicts: [], capturing: false, error: null };
+    bridge.listeners.get('shortcuts:settings')!({ sender: 'private-event' }, settings);
+    expect(settingsChanged).toHaveBeenCalledExactlyOnceWith(settings);
+    stopSettings();
     const stopAccent = bridge.api!.onSystemAccent(accent);
     const stopEnd = bridge.api!.onInterviewEndRequested(end);
     const closing = vi.fn();
@@ -977,6 +1148,7 @@ describe('受控 preload 契约', () => {
     expect(end).toHaveBeenCalledExactlyOnceWith();
     stopAccent();
     stopEnd();
+    stopLayout();
     stopClosing();
     expect(bridge.listeners.size).toBe(0);
   });

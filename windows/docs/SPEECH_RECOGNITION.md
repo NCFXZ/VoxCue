@@ -86,23 +86,22 @@ Ryzen9 8945HS / 16逻辑CPU / 31.29GiB Windows，CPU推理。
 ## 启动、复验、未完成事项
 
 ```powershell
-Set-Location 'C:\Users\fengk\OneDrive\Study\UoM\PhD\GitRepo\VoxCue'
+Set-Location 'C:\Users\fengk\Documents\Repository\VoxCue\windows'
 pnpm install --frozen-lockfile
 pnpm download:speech
 pnpm build
 # Windows双击 Start-VoxCue.cmd；在开始面试弹窗选择设置并确认，浮窗自动转写
-# 开发测试音频用 PowerShell 7 执行；只读已安装中文/英文语音，不改注册表
-./scripts/create-speech-fixtures.ps1
-pnpm test:speech:model
-pnpm test:speech:devices
+# 固定公开音频由隔离验证入口准备，不再向仓库生成旧 SAPI 语料
+node test/scripts/speech-input-state-smoke.mjs
 pnpm test:speech:desktop
-pnpm test:speech:reliability
 pnpm test:speech:soak
 pnpm test:speech:package
 pnpm test
 pnpm typecheck
 pnpm check:architecture
 ```
+
+当前固定模型/公开音频的准备与完整验证入口见 [共享测试说明](../../shared/test/README.md)；上述历史实测不代表当前版本的验证结果。
 
 设备测试会短暂采集并低幅值播放合成语句，不保存环境音频/转写；运行前确保参与者同意。依赖锁文件固定Windows官方包，Mac未实现。build使用Windows自带.NET Framework64 csc，无需全局Visual Studio安装；缺失时明确报错，需另做新机依赖验收。
 

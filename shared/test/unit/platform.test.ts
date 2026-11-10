@@ -19,6 +19,22 @@ const paths = { icon: '/application/icon', preload: '/application/preload.js' };
 const environment = { appPath: '/application', resourcesPath: '/resources', packaged: false };
 
 describe('桌面平台边界', () => {
+  it('gives shortcut help a sandboxed transparent frameless window on either platform', () => {
+    for (const platform of [windowsPolicy, macosPolicy]) {
+      expect(windowOptions('interview-shortcuts', platform, paths)).toMatchObject({
+        width: 360,
+        height: 380,
+        frame: false,
+        transparent: true,
+        alwaysOnTop: true,
+        show: false,
+        skipTaskbar: true,
+        resizable: false,
+        maximizable: false,
+        webPreferences: { contextIsolation: true, sandbox: true, nodeIntegration: false },
+      });
+    }
+  });
   it('Windows 完成加载但没有首帧时仍显示一次；后续首帧和重载不重复显示', () => {
     const win = Object.assign(new EventEmitter(), {
       webContents: new EventEmitter(),
@@ -48,6 +64,27 @@ describe('桌面平台边界', () => {
     win.webContents.emit('did-finish-load');
     win.emit('ready-to-show');
     expect(show).toHaveBeenCalledTimes(1);
+  });
+  it('detaches readiness listeners when a still-loading window is destroyed without reading its dead webContents getter', () => {
+    const contents = new EventEmitter();
+    let destroyed = false;
+    const win = Object.assign(new EventEmitter(), { isDestroyed: () => destroyed });
+    Object.defineProperty(win, 'webContents', {
+      get() {
+        if (destroyed) throw TypeError('Object has been destroyed');
+        return contents;
+      },
+    });
+    const show = vi.fn();
+    whenWindowReady(win as Parameters<typeof whenWindowReady>[0], windowsPolicy, show);
+    expect(contents.listenerCount('did-finish-load')).toBe(1);
+    destroyed = true;
+    expect(() => win.emit('closed')).not.toThrow();
+    expect(contents.listenerCount('did-finish-load')).toBe(0);
+    expect(win.listenerCount('ready-to-show')).toBe(0);
+    contents.emit('did-finish-load');
+    win.emit('ready-to-show');
+    expect(show).not.toHaveBeenCalled();
   });
   it('Windows 保留 Acrylic、系统应用 ID、退出策略和原生能力', () => {
     const windows = windowsPolicy;
@@ -211,7 +248,7 @@ describe('桌面平台边界', () => {
     input(allowed, { key: '+', control: false });
     input(allowed, { key: 'c', control: true });
     expect(allowed.preventDefault).not.toHaveBeenCalled();
-    for (const role of ['login', 'main', 'interview'] as const) {
+    for (const role of ['login', 'main', 'interview', 'interview-shortcuts'] as const) {
       const window = { loadURL: vi.fn(), loadFile: vi.fn() };
       loadWindowPage(window, role, '/index.html', 'http://127.0.0.1:5173');
       expect(window.loadURL).toHaveBeenCalledWith(

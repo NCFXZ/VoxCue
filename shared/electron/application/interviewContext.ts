@@ -1,4 +1,4 @@
-import type { SpeechEvent } from '../contracts/speech';
+import type { SpeechEvent, AudioSource } from '../contracts/speech';
 import type { ChatTurn } from '../contracts/chat';
 import { encodeRetrievalContext } from '../contracts/retrievalContext';
 
@@ -44,13 +44,20 @@ export class InterviewContext {
       ++this.omitted;
     }
   }
-  event(event: SpeechEvent) {
+  event(event: SpeechEvent, questionSource: AudioSource = 'system') {
+    const source =
+      event.type === 'segment'
+        ? event.segment.source
+        : event.type === 'gap'
+          ? event.source
+          : undefined;
+    if (questionSource === 'microphone' && source === 'system') return;
     if (event.type === 'segment') {
       const row = event.segment;
       if (!row.final || !row.text.trim() || row.reason === 'discontinuity') return;
       this.add({
         id: 'transcript:' + row.id,
-        kind: row.source === 'system' ? 'interviewer' : 'interviewee',
+        kind: row.source === questionSource ? 'interviewer' : 'interviewee',
         text: row.text,
         at: row.startMs,
       });

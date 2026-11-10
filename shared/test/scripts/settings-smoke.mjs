@@ -488,7 +488,7 @@ try {
       .getByRole('navigation', { name: '设置分类' })
       .getByRole('button')
       .allTextContents(),
-    ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '关于与更新'],
+    ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '快捷键', '关于与更新'],
   );
   await category('VoxCue 账号').click();
   await settings.getByRole('region', { name: '云同步', exact: true }).waitFor();

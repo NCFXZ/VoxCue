@@ -71,6 +71,17 @@
 ::view-transition {
   pointer-events: none;
 }
+:root[data-view-clip]::view-transition {
+  inset: var(--view-clip-top) auto auto var(--view-clip-left);
+  width: var(--view-clip-width);
+  height: var(--view-clip-height);
+  overflow: clip;
+  border-radius: var(--view-clip-radius);
+  corner-shape: var(--view-curve, round);
+}
+:root[data-view-clip]::view-transition-group(screen) {
+  translate: calc(-1 * var(--view-clip-left)) calc(-1 * var(--view-clip-top));
+}
 ::view-transition-group(screen) {
   pointer-events: auto;
 }

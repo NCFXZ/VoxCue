@@ -3,6 +3,12 @@ import type { PersonalInfo } from './profile';
 import type { ScreenCapturePermission } from './screenCapture';
 
 export type AudioSource = 'microphone' | 'system';
+export type InterviewInputMode = 'remote' | 'transcription';
+export interface InterviewInputState {
+  inputMode: InterviewInputMode;
+  microphoneMuted: boolean;
+  systemAudioMuted?: boolean;
+}
 export type SpeechModelId = 'paraformer' | 'qwen';
 export type SpeechInferenceDevice = 'cpu' | 'cuda' | 'metal';
 export interface SpeechHardware {
@@ -35,9 +41,10 @@ export interface SpeechOptions {
   speechModel?: SpeechModelId;
   inferenceDevice?: SpeechInferenceDevice;
 }
-// Audio/model are confirmed before opening. autoAnswer supplies only
-// the initial value of the floating window's mutable automatic-answer toggle.
+// Devices/model are confirmed before opening. Input state and autoAnswer can
+// change during the session through their controlled runtime operations.
 export interface InterviewConfiguration {
+  inputMode?: InterviewInputMode;
   mode: 'local' | 'mock';
   options: SpeechOptions;
   aiEnabled: boolean;
@@ -71,7 +78,12 @@ export type SpeechCall =
   { op: 'devices' | 'status' | 'pause' | 'stop' } | { op: 'start'; options: SpeechOptions };
 // Only the authenticated main-process interview coordinator can create these.
 export type SpeechServiceCall =
-  SpeechCall | { op: 'switch-recognizer'; options: SpeechOptions } | { op: 'cancel-switch' };
+  | Exclude<SpeechCall, { op: 'start' }>
+  | { op: 'start'; options: SpeechOptions; inputState?: InterviewInputState }
+  | { op: 'set-input-state'; state: InterviewInputState }
+  | { op: 'cancel-input-state' }
+  | { op: 'switch-recognizer'; options: SpeechOptions }
+  | { op: 'cancel-switch' };
 export interface SpeechStatus {
   state: 'idle' | 'loading' | 'running' | 'paused' | 'error';
   model: string;
@@ -82,6 +94,7 @@ export interface SpeechStatus {
   inferenceDevice?: SpeechInferenceDevice;
   chunkMs?: number;
   switching?: 'loading' | 'waiting';
+  inputState?: InterviewInputState;
 }
 export interface SpeechSegment {
   id: string;

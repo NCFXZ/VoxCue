@@ -32,6 +32,7 @@ export function useFollowScroll(
   );
   const [following, setFollowing] = useState(true);
   const [hasNew, setHasNew] = useState(false);
+  const touchY = useRef<number | null>(null);
 
   // Resize observers can retain this callback across conversations. Read only
   // live refs, and leave hidden routes' zero-height/clamped DOM out of memory.
@@ -91,6 +92,13 @@ export function useFollowScroll(
     syncLayout,
     following,
     hasNew,
+    pauseFollowing: () => {
+      restored.current = null;
+      current.current.following = false;
+      const node = ref.current;
+      if (node?.clientHeight) current.current.top = node.scrollTop;
+      setFollowing(false);
+    },
     scrollToLatest: () => {
       current.current.following = true;
       current.current.hasNew = false;
@@ -133,6 +141,22 @@ export function useFollowScroll(
           setFollowing(false);
         }
       },
+      onTouchStart: (event: React.TouchEvent) => {
+        touchY.current = event.touches.length === 1 ? event.touches[0].clientY : null;
+      },
+      onTouchMove: (event: React.TouchEvent) => {
+        if (event.touches.length !== 1) { touchY.current = null; return; }
+        if (touchY.current === null) return;
+        const y = event.touches[0].clientY;
+        if (y - touchY.current > 4) {
+          restored.current = null;
+          current.current.following = false;
+          setFollowing(false);
+        }
+        touchY.current = y;
+      },
+      onTouchEnd: () => { touchY.current = null; },
+      onTouchCancel: () => { touchY.current = null; },
       onKeyDown: (event: React.KeyboardEvent) => {
         restored.current = null;
         if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) {

@@ -10,6 +10,14 @@ import type {
 } from '../../contracts/speech';
 import { speechSegmentationSilenceMs } from '../../contracts/speechSettings';
 const sherpa = require('sherpa-onnx-node');
+// The authenticated, pinned runtime still finalizes its native VAD at 800ms.
+// Shared logical endpoints may wait longer; never move this native onset back.
+const nativeSilenceMs = 800;
+// Native onset needs 100ms of speech. Three frames of grace plus the shared
+// deadline's frame rounding stay within 128ms of extra processed PCM.
+const endpointGraceMs = 96;
+const logicalTurnMs = 120000;
+const logicalTextLimit = 6000;
 
 interface Source {
   id: string;
@@ -23,6 +31,14 @@ interface Source {
     flush(samples: Float32Array): Float32Array;
   };
   reason?: SpeechSegment['reason'];
+  pendingSilence?: SpeechSegment;
+  prefix?: Pick<SpeechSegment, 'text' | 'startMs' | 'endMs'>;
+  soundFrames?: Array<{ start: number; end: number }>;
+  frameSamples?: number;
+  framePower?: number;
+  awaitingSpeech?: number;
+  deferred?: any[];
+  quietBoundary?: { silenceStartMs: number };
 }
 
 /** Trusted fixed component only. PCM/transcripts stay in pipes and memory. */
@@ -132,6 +148,103 @@ export class QwenEngine {
     }
     this.pending.clear();
   }
+  private resumePending(state: Source) {
+    if (!state.pendingSilence) return;
+    state.prefix = {
+      text: state.pendingSilence.text,
+      startMs: state.pendingSilence.startMs,
+      endMs: state.pendingSilence.endMs,
+    };
+    state.pendingSilence = undefined;
+    state.awaitingSpeech = undefined;
+    state.quietBoundary = undefined;
+  }
+  private publishPending(state: Source, reason?: SpeechSegment['reason']) {
+    const row = state.pendingSilence;
+    if (!row) return;
+    const nativeIdle = state.awaitingSpeech === undefined;
+    state.pendingSilence = undefined;
+    state.prefix = undefined;
+    state.awaitingSpeech = undefined;
+    state.quietBoundary =
+      reason === 'limit' && nativeIdle ? { silenceStartMs: row.silenceStartMs! } : undefined;
+    const { silenceStartMs, ...segment } = row;
+    this.emit({
+      type: 'segment',
+      segment: reason ? { ...segment, reason } : { ...segment, silenceStartMs },
+    });
+    state.id = randomUUID();
+    if (!reason || !['sentence', 'limit'].includes(reason)) state.active = false;
+  }
+  private finishPending(source: AudioSource, state: Source, reason?: SpeechSegment['reason']) {
+    const row = state.pendingSilence;
+    const through = this.processedThrough(source) ?? -Infinity;
+    if (!row) {
+      const boundary = state.quietBoundary;
+      if (boundary && !reason) {
+        if (through >= boundary.silenceStartMs + speechSegmentationSilenceMs + endpointGraceMs) {
+          state.active = false;
+          state.quietBoundary = undefined;
+        }
+      }
+      return;
+    }
+    if (!reason && (through - row.startMs >= logicalTurnMs || row.text.length >= logicalTextLimit))
+      reason = 'limit';
+    // Energy alone is not speech and must never restart this bounded deadline.
+    const deadline = row.silenceStartMs! + speechSegmentationSilenceMs + endpointGraceMs;
+    if (!reason && (state.awaitingSpeech || through < deadline)) return;
+    this.publishPending(state, reason);
+  }
+  private observeSound(state: Source, samples: Float32Array) {
+    let count = state.frameSamples ?? 0,
+      power = state.framePower ?? 0;
+    const frames = (state.soundFrames ??= []);
+    for (let at = 0; at < samples.length;) {
+      const length = Math.min(512 - count, samples.length - at);
+      for (let i = 0; i < length; i++) power += samples[at + i] ** 2;
+      at += length;
+      count += length;
+      if (count === 512) {
+        const end = state.origin + (state.samples + at) / 16;
+        // This is the existing activity threshold, not a speech/identity claim.
+        // Sound estimates onset timing only after native VAD confirms a turn.
+        if (Math.sqrt(power / 512) * 4 > 0.015) frames.push({ start: end - 32, end });
+        while (frames.length && frames[0].end < end - 2000) frames.shift();
+        count = power = 0;
+      }
+    }
+    state.frameSamples = count;
+    state.framePower = power;
+  }
+  private drainDeferred(state: Source) {
+    const events = state.deferred ?? [];
+    state.deferred = [];
+    for (const event of events) this.receive(event);
+  }
+  private resolveResume(source: AudioSource, state: Source) {
+    const row = state.pendingSilence,
+      confirmed = state.awaitingSpeech;
+    if (!row || confirmed === undefined || (this.processedThrough(source) ?? -Infinity) < confirmed)
+      return;
+    const deadline = row.silenceStartMs! + speechSegmentationSilenceMs;
+    const onset = state.soundFrames?.find(
+      (frame) => frame.end > row.endMs && frame.end <= confirmed,
+    );
+    const next = state.deferred?.find((event) => Number.isFinite(event.window_start_ms));
+    if (onset) {
+      if (onset.start >= deadline) this.publishPending(state);
+      else this.resumePending(state);
+    } else if (confirmed < deadline) this.resumePending(state);
+    else if (next) {
+      // A quiet/ambiguous native onset may include pre-roll. Only a window
+      // wholly beyond the deadline proves the old logical turn has ended.
+      if (state.origin + Number(next.window_start_ms) >= deadline) this.publishPending(state);
+      else this.resumePending(state);
+    } else return;
+    state.active = true;
+    this.drainDeferred(state);
+  }
   private receive(value: any) {
     if (value.type === 'ack' || value.type === 'error') {
       const pending = this.pending.get(value.seq);
@@ -147,37 +260,81 @@ export class QwenEngine {
     const state = this.sources.get(source);
     if (!state) return;
     if (value.type === 'speech_start') {
+      state.quietBoundary = undefined;
+      if (state.pendingSilence) state.awaitingSpeech = state.origin + Number(value.audio_ms);
       state.active = true;
       this.emit({ type: 'speech-start', source });
+      this.resolveResume(source, state);
+      return;
+    }
+    if (!['partial', 'committed', 'tail_final'].includes(value.type)) return;
+    if (state.pendingSilence && state.awaitingSpeech !== undefined) {
+      const deferred = (state.deferred ??= []);
+      if (deferred.length >= 32) throw Error('Oversized Qwen result');
+      deferred.push(value);
+      this.resolveResume(source, state);
       return;
     }
     this.inferenceMs += Number(value.inference_ms ?? value.alignment_ms ?? 0);
-    if (!['partial', 'committed', 'tail_final'].includes(value.type)) return;
     const final = value.type !== 'partial';
     const reason =
       value.type === 'committed'
         ? 'sentence'
         : (state.reason ?? (value.reason === 'pause' ? 'silence' : 'limit'));
     const end = state.origin + Number(value.type === 'committed' ? value.cut_ms : value.audio_ms);
-    const start = state.origin + Number(value.window_start_ms ?? state.start);
-    this.emit({
-      type: 'segment',
-      segment: {
-        id: state.id,
-        source,
-        text: String(value.text ?? ''),
-        final,
-        startMs: start,
-        endMs: end,
-        speechModel: 'qwen',
-        ...(final ? { reason } : {}),
-        ...(final && reason === 'silence'
-          ? { silenceStartMs: end - speechSegmentationSilenceMs }
-          : {}),
-      },
-    });
+    const nativeStart = state.origin + Number(value.window_start_ms ?? state.start);
+    if (state.pendingSilence) {
+      if (!final || (reason === 'silence' && value.reason === 'pause')) {
+        this.resumePending(state);
+      } else this.finishPending(source, state, reason);
+    }
+    if (
+      state.prefix &&
+      (end - state.prefix.startMs >= logicalTurnMs ||
+        state.prefix.text.length + String(value.text ?? '').length + 1 > logicalTextLimit)
+    ) {
+      this.emit({
+        type: 'segment',
+        segment: {
+          id: state.id,
+          source,
+          ...state.prefix,
+          final: true,
+          reason: 'limit',
+          speechModel: 'qwen',
+        },
+      });
+      state.prefix = undefined;
+      state.id = randomUUID();
+    }
+    const segment: SpeechSegment = {
+      id: state.id,
+      source,
+      text: [state.prefix?.text, String(value.text ?? '')].filter(Boolean).join(' '),
+      final,
+      startMs: state.prefix?.startMs ?? nativeStart,
+      endMs: end,
+      speechModel: 'qwen',
+      ...(final ? { reason } : {}),
+      ...(final && reason === 'silence' && value.reason === 'pause'
+        ? { silenceStartMs: end - nativeSilenceMs }
+        : {}),
+    };
+    if (final && reason === 'silence' && value.reason === 'pause') {
+      state.pendingSilence = segment;
+      state.prefix = undefined;
+      state.start = Number(value.audio_ms);
+      state.active = true;
+      this.emit({
+        type: 'segment',
+        segment: { ...segment, final: false, reason: undefined, silenceStartMs: undefined },
+      });
+      this.finishPending(source, state);
+      return;
+    }
+    this.emit({ type: 'segment', segment });
     if (final) {
-      if (value.type === 'tail_final' && reason === 'silence') state.active = false;
+      state.prefix = undefined;
       const previous = state.id;
       state.id = randomUUID();
       state.start = Number(value.type === 'committed' ? value.cut_ms : value.audio_ms);
@@ -226,6 +383,13 @@ export class QwenEngine {
       for (let i = 0; i < slice.length; i++)
         pcm.writeInt16LE(Math.max(-32768, Math.min(32767, Math.round(slice[i] * 32768))), i * 2);
       await this.send({ op: 'audio', source, audio: pcm.toString('base64') });
+      const state = this.sources.get(source);
+      if (state) {
+        this.observeSound(state, slice);
+        state.samples += slice.length;
+        this.resolveResume(source, state);
+        this.finishPending(source, state);
+      }
     }
   }
   async feed(source: AudioSource, samples: Float32Array, rate: number, timestamp: number) {
@@ -251,7 +415,6 @@ export class QwenEngine {
     this.emit({ type: 'activity', source, speaking: level > 0.015, level });
     const converted = state.resampler ? state.resampler.resample(samples) : samples;
     await this.accept(source, converted);
-    state.samples += converted.length;
   }
   processedThrough(source: AudioSource): number | undefined {
     const state = this.sources.get(source);
@@ -266,12 +429,23 @@ export class QwenEngine {
     const state = this.sources.get(source);
     if (!state) return;
     state.reason = 'discontinuity';
+    this.finishPending(source, state, 'discontinuity');
+    this.drainDeferred(state);
     await this.send({ op: 'finish', source });
     this.sources.delete(source);
+  }
+  async discard(source: AudioSource) {
+    if (!this.sources.has(source)) return;
+    // Ignore native finish results before asking it to retire this session.
+    // The model process stays loaded and the next packet starts a fresh lane.
+    this.sources.delete(source);
+    await this.send({ op: 'finish', source });
   }
   async flush(reason: 'pause' | 'stop') {
     for (const [source, state] of this.sources) {
       state.reason = reason;
+      this.finishPending(source, state, reason);
+      this.drainDeferred(state);
       if (state.resampler) await this.accept(source, state.resampler.flush(new Float32Array()));
       await this.send({ op: 'finish', source });
     }

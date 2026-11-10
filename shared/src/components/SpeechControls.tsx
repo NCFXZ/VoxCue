@@ -2,7 +2,7 @@ import { t } from '../i18n';
 import { useEffect } from 'react';
 import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
-import { Check, ChevronDown, AudioLines, Volume2 } from './icons';
+import { Check, ChevronDown } from './icons';
 import type { AudioSource, InterviewConfiguration } from '../../electron/contracts/speech';
 import type { ChatModel } from '../../electron/contracts/chat';
 import { resolveReasoningEffort } from '../services/chatOptions';
@@ -10,6 +10,8 @@ import { ModelReasoningControl } from './ReasoningEffortControl';
 import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 import { useAudioDevices } from './useAudioDevices';
 import { SpeechModelSettings } from './SpeechModelSettings';
+import { RemoteConnectionSettings } from './RemoteConnection';
+import type { InterviewInputMode } from '../services/interviewInput';
 
 export function SpeechControls({
   value,
@@ -17,12 +19,14 @@ export function SpeechControls({
   busy,
   models,
   live,
+  inputMode = 'remote',
 }: {
   value: InterviewConfiguration;
   onChange(value: InterviewConfiguration): void;
   busy: boolean;
   models: ChatModel[];
   live: boolean;
+  inputMode?: InterviewInputMode;
 }) {
   const { devices, loading: devicesLoading, loaded: devicesLoaded, error } = useAudioDevices();
   const microphoneAvailable = devices.some(
@@ -53,6 +57,7 @@ export function SpeechControls({
     disabled = false,
     placeholder = label,
     displayLabel?: string,
+    unavailable = false,
   ) => {
     const selectedLabel =
       displayLabel ?? choices.find((c) => c.id === selected)?.label ?? placeholder;
@@ -62,7 +67,7 @@ export function SpeechControls({
           <Button
             type="button"
             variant="outline"
-            className="speech-select"
+            className={`speech-select${unavailable ? ' interview-system-unavailable' : ''}`}
             disabled={busy || disabled}
             aria-label={t(label)}
           >
@@ -117,19 +122,24 @@ export function SpeechControls({
           <div className="speech-device-grid">
             {(['system', 'microphone'] as AudioSource[]).map((source) => {
               const microphone = source === 'microphone';
-              const enabled = value.options.sources.includes(source);
+              const transcription = inputMode === 'transcription';
+              const enabled = transcription ? microphone : value.options.sources.includes(source);
               return (
-                <div className={`speech-device speech-setting-row ${enabled ? '' : 'is-disabled'}`} key={source}>
+                <div
+                  className={`speech-device speech-setting-row ${enabled || (!microphone && transcription) ? '' : 'is-disabled'}`}
+                  key={source}
+                >
                   <div className="speech-device-heading speech-setting-label">
-                    {microphone ? <AudioLines size={17} /> : <Volume2 size={17} />}
-                    <strong>{microphone ? t('面试者') : t('面试官')}</strong>
-                    <span>{microphone ? t('麦克风') : t('系统音频')}</span>
+                    <strong>{microphone ? t('麦克风') : t('系统音频')}</strong>
+                    <span>{microphone ? t('面试者') : t('面试官')}</span>
                   </div>
                   {choose(
                     microphone ? t('麦克风设备') : t('播放设备'),
                     microphone && !enabled ? '__disabled__' : (value.options[source] ?? ''),
                     [
-                      ...(microphone ? [{ id: '__disabled__', label: t('不使用麦克风') }] : []),
+                      ...(microphone && !transcription
+                        ? [{ id: '__disabled__', label: t('不使用麦克风') }]
+                        : []),
                       {
                         id: '',
                         label: microphone ? t('默认麦克风') : t('默认播放设备'),
@@ -148,31 +158,40 @@ export function SpeechControls({
                           ...value.options,
                           [source]:
                             device === '__disabled__' ? value.options[source] : device || undefined,
-                          sources: microphone
-                            ? device === '__disabled__'
-                              ? ['system']
-                              : ['microphone', 'system']
-                            : value.options.sources,
+                          sources:
+                            microphone && !transcription
+                              ? device === '__disabled__'
+                                ? ['system']
+                                : ['microphone', 'system']
+                              : value.options.sources,
                         },
                       });
                     },
-                    devicesLoading,
+                    devicesLoading || (!microphone && transcription),
                     microphone ? t('默认麦克风') : t('默认播放设备'),
-                    devicesLoading
-                      ? t('正在读取设备…')
-                      : microphone && enabled
-                        ? error
-                          ? t('设备读取失败')
-                          : devicesLoaded && !microphoneAvailable
-                            ? value.options.microphone
-                              ? t('所选麦克风已不可用')
-                              : t('未检测到麦克风')
-                            : undefined
-                        : undefined,
+                    !microphone && transcription
+                      ? t('设置为“仅转录”时不可用。')
+                      : devicesLoading
+                        ? t('正在读取设备…')
+                        : microphone && enabled
+                          ? error
+                            ? t('设备读取失败')
+                            : devicesLoaded && !microphoneAvailable
+                              ? value.options.microphone
+                                ? t('所选麦克风已不可用')
+                                : t('未检测到麦克风')
+                              : undefined
+                          : undefined,
+                    !microphone && transcription,
                   )}
                   {microphone && enabled && (error || (devicesLoaded && !microphoneAvailable)) && (
                     <small className="speech-device-error" role="alert">
-                      {t(error || '请连接麦克风，或选择“不使用麦克风”。')}
+                      {t(
+                        error ||
+                          (transcription
+                            ? '请连接麦克风，或重新选择麦克风设备。'
+                            : '请连接麦克风，或选择“不使用麦克风”。'),
+                      )}
                     </small>
                   )}
                 </div>
@@ -182,6 +201,7 @@ export function SpeechControls({
         </section>
       }
       <ScreenCaptureSettings disabled={busy} />
+      <RemoteConnectionSettings disabled={busy} />
       <section
         className="speech-settings-section speech-answer-settings"
         aria-label={t('模型设置')}

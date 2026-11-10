@@ -637,10 +637,17 @@ try {
         .getBounds(),
     );
   const before = await bounds();
+  const beforePanel = await floating.locator('.floating-panels').boundingBox();
   await floating.getByRole('button', { name: '拖动右下角调整尺寸', exact: true }).focus();
   await floating.keyboard.press('ArrowRight');
-  await floating.waitForFunction((width) => innerWidth > width + 2, before.width);
-  assert((await bounds()).width > before.width);
+  await floating.waitForFunction(
+    (width) => document.querySelector('.floating-panels').getBoundingClientRect().width > width + 2,
+    beforePanel.width,
+  );
+  const after = await bounds();
+  if (process.platform === 'win32')
+    assert.deepEqual(after, before, 'The preallocated Windows canvas stays fixed while visible panels resize');
+  else assert(after.width > before.width);
   await floating.screenshot({ animations: 'disabled' });
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
   await floating.locator('.floating-panels').waitFor({ state: 'hidden' });

@@ -431,7 +431,7 @@ try {
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
   await settings.locator('.interview-preview-scene').scrollIntoViewIfNeeded();
   await verifyConcentricComposers(page, 'settings preview');
-  await verifyPreviewSend(settings, 32);
+  await verifyPreviewSend(settings, 26);
   await captureRequested(page, 'settings-interview-preview');
   assert.equal(
     await settings.evaluate((node) => getComputedStyle(node, '::backdrop').backgroundColor),

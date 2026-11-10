@@ -22,6 +22,7 @@ class FakeRecognizer implements RecognizerPort {
   );
   flush = vi.fn(async () => {});
   discontinuity = vi.fn(async () => {});
+  discard = vi.fn(async () => {});
   close = vi.fn(async () => {
     this.healthy = false;
   });

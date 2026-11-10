@@ -173,4 +173,8 @@ export class SpeechEngine {
     // A fresh resampler/VAD/ASR stream prevents joining across missing audio.
     this.sources.delete(source);
   }
+  discard(source: AudioSource) {
+    // Soft mute is a privacy boundary, not a request to decode the old tail.
+    this.sources.delete(source);
+  }
 }

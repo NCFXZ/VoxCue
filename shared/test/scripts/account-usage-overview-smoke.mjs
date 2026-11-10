@@ -207,7 +207,7 @@ try {
   await main.evaluate(() => document.fonts.ready.then(() => undefined));
   let activeProvider = 'chatgpt';
   const dialog = () => main.getByRole('dialog', { name: '开始面试', exact: true });
-  const field = () => dialog().locator('.interview-start-summary > div').nth(1);
+  const field = () => dialog().locator('.interview-start-summary-group > div').nth(1);
   await main.locator('.interview-start-trigger').click();
 
   async function release(provider) {

@@ -3,8 +3,17 @@ import { defaultInterviewConfiguration } from '../services/speech';
 import type { InterviewConfiguration } from '../../electron/contracts/speech';
 import { reasoningEfforts } from '../../electron/contracts/chat';
 import type { ComponentState } from '../../electron/contracts/components';
+import type { InterviewInputMode } from '../services/interviewInput';
 
 const settingsKey = 'copilot-interview-settings-v1';
+const inputModeKey = 'copilot-interview-input-mode-v1';
+function readInputMode(): InterviewInputMode {
+  try {
+    return localStorage.getItem(inputModeKey) === 'transcription' ? 'transcription' : 'remote';
+  } catch {
+    return 'remote';
+  }
+}
 function readSettings(): InterviewConfiguration {
   const initial = defaultInterviewConfiguration();
   try {
@@ -32,11 +41,23 @@ function readSettings(): InterviewConfiguration {
   }
 }
 export const useInterviewSettings = create<{
+  inputMode: InterviewInputMode;
+  setInputMode(mode: InterviewInputMode): void;
   configuration: InterviewConfiguration;
   error: string | null;
   update(configuration: InterviewConfiguration): void;
   reconcileSpeechModel(state: ComponentState): void;
 }>((set, get) => ({
+  inputMode: readInputMode(),
+  setInputMode(inputMode) {
+    if (inputMode !== 'remote' && inputMode !== 'transcription') return;
+    try {
+      localStorage.setItem(inputModeKey, inputMode);
+      set({ inputMode, error: null });
+    } catch {
+      set({ error: '面试设置保存失败，请检查本地存储空间。' });
+    }
+  },
   configuration: readSettings(),
   error: null,
   update(configuration) {

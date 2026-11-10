@@ -10,6 +10,7 @@ export function ChoiceMenu<T extends string>({
   onChange,
   className = '',
   disabled = false,
+  displayLabel,
 }: {
   label: string;
   value: T;
@@ -17,6 +18,7 @@ export function ChoiceMenu<T extends string>({
   onChange(value: T): void;
   className?: string;
   disabled?: boolean;
+  displayLabel?: string;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
@@ -24,7 +26,7 @@ export function ChoiceMenu<T extends string>({
   useEffect(() => {
     if (disabled) setOpen(false);
   }, [disabled]);
-  const selectedLabel = options.find((option) => option.value === value)?.label;
+  const selectedLabel = displayLabel ?? options.find((option) => option.value === value)?.label;
   return (
     <DropdownMenu.Root
       open={open && !disabled}

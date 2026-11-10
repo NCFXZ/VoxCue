@@ -10,6 +10,7 @@ import { resolveReasoningEffort } from './chatOptions';
 
 export const defaultInterviewConfiguration = (): InterviewConfiguration => ({
   mode: 'local',
+  inputMode: 'remote',
   options: { sources: ['microphone', 'system'] },
   aiEnabled: false,
   modelId: '',
@@ -79,10 +80,10 @@ export class AutomaticQuestionGate {
   private deadline?: number;
   private through?: number;
   private pending = true;
-  final(segment: SpeechSegment) {
+  final(segment: SpeechSegment, source: AudioSource = 'system') {
     this.cancel();
     if (
-      segment.source === 'system' &&
+      segment.source === source &&
       segment.final &&
       segment.reason === 'silence' &&
       typeof segment.silenceStartMs === 'number' &&
@@ -92,8 +93,11 @@ export class AutomaticQuestionGate {
     )
       this.deadline = segment.silenceStartMs + automaticAnswerSilenceMs;
   }
-  progress(event: Extract<SpeechEvent, { type: 'audio-progress' }>) {
-    if (event.source !== 'system') return;
+  progress(
+    event: Extract<SpeechEvent, { type: 'audio-progress' }>,
+    source: AudioSource = 'system',
+  ) {
+    if (event.source !== source) return;
     this.pending = event.pending;
     if (typeof event.processedThroughMs === 'number' && Number.isFinite(event.processedThroughMs))
       this.through = event.processedThroughMs;

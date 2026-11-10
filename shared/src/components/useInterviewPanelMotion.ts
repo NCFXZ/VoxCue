@@ -26,6 +26,7 @@ export function useInterviewPanelMotion({
   const [motion, setMotion] = useState<Motion | null>(null);
   const busy = useRef(false);
   const disposed = useRef(false);
+  const nativeVisible = useRef(true);
   const players = useRef(new Set<Animation>());
   const clear = () => {
     for (const player of players.current) player.cancel();
@@ -45,7 +46,13 @@ export function useInterviewPanelMotion({
     };
   }, []);
   const play = (node: Element | null | undefined, frames: Keyframe[], duration: number) => {
-    if (!node || disposed.current || matchMedia('(prefers-reduced-motion: reduce)').matches)
+    if (
+      !node ||
+      disposed.current ||
+      !nativeVisible.current ||
+      document.visibilityState === 'hidden' ||
+      matchMedia('(prefers-reduced-motion: reduce)').matches
+    )
       return Promise.resolve();
     const player = node.animate(frames, {
       duration,
@@ -53,16 +60,22 @@ export function useInterviewPanelMotion({
       fill: 'both',
     });
     players.current.add(player);
-    return player.finished.then(
-      () => undefined,
-      () => undefined,
-    );
+    // A native hide can suspend Chromium's compositor after the motion starts.
+    const timer = setTimeout(() => player.cancel(), duration + 100);
+    return player.finished
+      .then(
+        () => undefined,
+        () => undefined,
+      )
+      .finally(() => clearTimeout(timer));
   };
   const run = async (kind: Motion, change: () => Promise<void>) => {
     if (busy.current || disposed.current || !canStart()) return;
     busy.current = true;
     setMotion(kind);
     try {
+      nativeVisible.current = (await window.desktop!.interviewState()).visible;
+      if (disposed.current) return;
       await change();
     } catch {
       // A failed/late IPC may still have changed the native canvas. Reconcile
@@ -125,6 +138,11 @@ export function useInterviewPanelMotion({
       }),
     toggleTranscript: () =>
       run(transcriptVisible ? 'hide-transcript' : 'show-transcript', async () => {
+        if (collapsed) {
+          const actual = await window.desktop!.setInterviewTranscriptVisible(!transcriptVisible);
+          if (!disposed.current) setTranscriptVisible(actual);
+          return;
+        }
         if (transcriptVisible) {
           await playInterviewTranscript(
             shell.current?.querySelector('.floating-panels'),

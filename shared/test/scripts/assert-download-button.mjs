@@ -19,7 +19,7 @@ async function settle(button) {
 }
 
 const clockPages = new WeakSet();
-export async function assertInitialDownloadProgress(button, start) {
+export async function assertInitialDownloadProgress(button, start, { delayMs = 1000 } = {}) {
   const page = button.page();
   await page.bringToFront();
   if (!clockPages.has(page)) {
@@ -27,7 +27,7 @@ export async function assertInitialDownloadProgress(button, start) {
     clockPages.add(page);
   }
   // Freeze before mounting the control. Locator/animation work must not consume
-  // its one-second guard; inspect actual UI at 0, 400, 999 and 1000 ms instead.
+  // its cancellation guard; inspect 0, 400, the last guarded ms and its boundary.
   await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));
   try {
     const started = Promise.resolve().then(start);
@@ -53,13 +53,13 @@ export async function assertInitialDownloadProgress(button, start) {
     const result = await started;
     await button.hover();
     assert.deepEqual(await read(), guarded);
-    await page.clock.runFor(599);
+    await page.clock.runFor(delayMs - 401);
     await page.bringToFront();
     await button.hover();
     assert.deepEqual(await read(), guarded);
     await button.evaluate((element) => element.click());
     await button.hover();
-    assert.deepEqual(await read(), guarded, 'First-second clicks cannot cancel');
+    assert.deepEqual(await read(), guarded, 'Clicks during the guard cannot cancel');
     await page.clock.runFor(1);
     await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
     assert.equal(await button.getAttribute('aria-disabled'), 'false');

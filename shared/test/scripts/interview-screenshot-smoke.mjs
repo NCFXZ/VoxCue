@@ -46,7 +46,13 @@ const errors = [],
 try {
   assert.equal(await app.evaluate(({ app }) => app.getPath('userData')), profile);
   await installUiAccount(app, { speech: true, components: true });
-  await app.evaluate(({ app }) => {
+  await app.evaluate(({ app, globalShortcut }) => {
+    globalThis.screenshotShortcuts = new Map();
+    globalShortcut.register = (key, callback) => {
+      globalThis.screenshotShortcuts.set(key, callback);
+      return true;
+    };
+    globalShortcut.unregister = (key) => globalThis.screenshotShortcuts.delete(key);
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
@@ -201,11 +207,30 @@ try {
   const camera = floating.getByRole('button', { name: '截取图像', exact: true });
   assert.equal(await camera.locator('.floating-screenshot-text').innerText(), '截图');
   assert.equal(await floating.locator('.floating-composer-options').getByRole('status').count(), 0);
-  const labelWidth = (await camera.locator('.floating-screenshot-text').boundingBox()).width + 6;
-  const macShortcut = await floating.evaluate(() => window.desktop.platform === 'macos');
-  const shortcut = macShortcut ? 'Control+s' : 'Alt+s';
-  assert.equal(await camera.locator('kbd').innerText(), macShortcut ? '⌃S' : 'Alt+S');
-  assert.equal(await camera.getAttribute('aria-keyshortcuts'), shortcut);
+  const verifyCameraContent = async () => {
+    const geometry = await camera.evaluate((button) => {
+      const box = button.getBoundingClientRect();
+      const children = [...button.children].filter((child) => {
+        const style = getComputedStyle(child);
+        return !child.hidden && style.display !== 'none' && child.getBoundingClientRect().width > 0;
+      });
+      const first = children[0].getBoundingClientRect();
+      const last = children.at(-1).getBoundingClientRect();
+      return { left: first.left - box.left, right: box.right - last.right, height: box.height };
+    });
+    assert.equal(Math.round(geometry.height * 64) / 64, 26);
+    assert.ok(geometry.left >= 5 && geometry.right >= 5, JSON.stringify(geometry));
+    assert.ok(geometry.left <= 16 && geometry.right <= 16, 'Keep screenshot padding compact: ' + JSON.stringify(geometry));
+    assert.ok(Math.abs(geometry.left - geometry.right) < 1, 'Screenshot content is centered');
+  };
+  const shortcut = 'Control+Shift+s';
+  const pressScreenshot = () => app.evaluate(() => {
+    const capture = globalThis.screenshotShortcuts.get('Control+Shift+S');
+    if (!capture) throw Error('Global screenshot registration is missing');
+    capture();
+  });
+  assert.equal(await camera.locator('kbd').innerText(), 'Ctrl+Shift+S');
+  assert.equal(await camera.getAttribute('aria-keyshortcuts'), 'Control+Shift+S');
   const send = floating.getByRole('button', { name: '发送面试问题', exact: true });
   const input = floating.getByRole('textbox', { name: '面试提问', exact: true });
   const previews = floating.locator('.floating-screenshot-preview');
@@ -257,23 +282,24 @@ try {
       height: Math.round(button.getBoundingClientRect().height * 100) / 100,
       overflow: button.scrollWidth > button.clientWidth + 1,
     }));
-    assert.equal(shape.height, 32);
+    assert.equal(shape.height, 26);
     assert.equal(shape.overflow, false);
     assert.equal(shape.iconOnly, false);
     assert.equal(shape.radius, '999px');
     assert.equal(cornerShapeNames(shape.corner), 'round');
     assert.equal(await camera.locator('kbd').isVisible(), count === 0);
+    await verifyCameraContent();
   };
   const waitAnswer = async (count) => {
     await floating.getByText('截图回归回答 ' + count, { exact: true }).waitFor();
     return (await requests()).at(-1);
   };
-  const collapsedWidth = (await camera.boundingBox()).width;
-  assert.equal(collapsedWidth, (macShortcut ? 72 : 92) + labelWidth);
-  await floating.evaluate((macShortcut) => {
+  await verifyCameraContent();
+  await floating.evaluate(() => {
     for (const extra of [
-      { shiftKey: true },
-      macShortcut ? { altKey: true } : { ctrlKey: true },
+      { shiftKey: false },
+      { ctrlKey: false },
+      { altKey: true },
       { metaKey: true },
       { repeat: true },
       { isComposing: true },
@@ -281,8 +307,8 @@ try {
     ]) {
       const event = new KeyboardEvent('keydown', {
         key: 's',
-        ctrlKey: macShortcut,
-        altKey: !macShortcut,
+        ctrlKey: true,
+        shiftKey: true,
         bubbles: true,
         cancelable: true,
         ...extra,
@@ -290,14 +316,14 @@ try {
       if (extra.handled) event.preventDefault();
       document.activeElement.dispatchEvent(event);
     }
-  }, macShortcut);
+  });
   assert.equal(
     await captured(),
     0,
-    'Modified, repeated, composing and handled shortcuts do not capture',
+    'Renderer-only synthetic key events cannot bypass global shortcut ownership',
   );
   await main.keyboard.press(shortcut);
-  assert.equal(await captured(), 0, 'The main renderer does not own the interview shortcut');
+  assert.equal(await captured(), 0, 'Renderer-only events on the main page do not invoke the global callback');
   await floating.locator('.floating-brand').evaluate((button) => button.click());
   await floating.waitForFunction(
     () =>
@@ -305,7 +331,7 @@ try {
       !document.querySelector('.floating-shell').dataset.panelMotion,
   );
   await floating.keyboard.press(shortcut);
-  assert.equal(await captured(), 0, 'Collapsed interview windows do not capture');
+  assert.equal(await captured(), 0, 'Renderer-only events while collapsed do not invoke the global callback');
   await floating.locator('.floating-brand').evaluate((button) => button.click());
   await floating.waitForFunction(
     () =>
@@ -316,11 +342,11 @@ try {
   await app.evaluate(() => {
     globalThis.screenshotFixture.mode = 'hold';
   });
-  await input.press('Control+Alt+s');
+  await input.press('Control+Alt+Shift+s');
   assert.equal(await captured(), 0, 'Extra modifiers must not trigger the screenshot shortcut');
-  await input.press(macShortcut ? 'Alt+s' : 'Control+s');
-  assert.equal(await captured(), 0, 'The other platform shortcut must not capture');
-  await input.press(shortcut);
+  await input.press('Alt+s');
+  assert.equal(await captured(), 0, 'The old screenshot shortcut must not capture');
+  await pressScreenshot();
   await floating.waitForFunction(
     () =>
       document.querySelector('.floating-screenshot-button').getAttribute('aria-busy') === 'true',
@@ -336,7 +362,6 @@ try {
   assert.deepEqual(
     cornerShapeNames(
       await camera.evaluate((button) => ({
-        width: Math.round(button.getBoundingClientRect().width),
         height: Math.round(button.getBoundingClientRect().height),
         iconOnly: button.classList.contains('button-icon'),
         radius: getComputedStyle(button).borderTopLeftRadius,
@@ -344,15 +369,14 @@ try {
       })),
     ),
     {
-      width: 76 + labelWidth,
-      height: 32,
+      height: 26,
       iconOnly: false,
       radius: '999px',
       corner: 'round',
     },
   );
   const busyCaptures = await captured();
-  await input.press(shortcut);
+  await pressScreenshot();
   assert.equal(await captured(), busyCaptures, 'Shortcut obeys the busy button guard');
   await app.evaluate(() => {
     globalThis.screenshotFixture.mode = 'normal';
@@ -362,7 +386,7 @@ try {
   assert.equal(await input.inputValue(), '解释这些截图，先保留我的草稿');
   assert.equal((await requests()).length, 0);
   assert.equal(await captured(), 1);
-  assert.equal((await camera.boundingBox()).width, 76 + labelWidth);
+  await verifyCameraContent();
   assert.equal(
     await previews
       .locator('img')
@@ -387,7 +411,7 @@ try {
   assert.equal(removeStyle.color, 'rgb(255, 255, 255)');
   assert.notEqual(removeStyle.shadow, 'none');
   assert.equal(await captured(), 5);
-  await input.press(shortcut);
+  await pressScreenshot();
   assert.equal(await captured(), 5, 'The five-image limit also rejects the keyboard shortcut');
   await capture('five-staged-images');
   assert.equal((await requests()).length, 0);

@@ -73,6 +73,7 @@ export function ComponentsPanel() {
           ) : item.phase === 'downloading' || item.phase === 'verifying' ? (
             <DownloadButton
               label={t(label)}
+              cancelDelayMs={500}
               progress={item.phase === 'downloading' ? (item.received / item.bytes) * 100 : null}
               status={item.phase === 'verifying' ? t('校验中') : undefined}
               onCancel={() => void run({ op: 'cancel' })}

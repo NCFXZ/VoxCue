@@ -1,4 +1,10 @@
-import type { SpeechOptions, SpeechHardware } from './speech';
+import type {
+  SpeechOptions,
+  SpeechHardware,
+  InterviewInputMode,
+  InterviewInputState,
+  AudioSource,
+} from './speech';
 import { componentPresentation } from './components';
 
 export function cudaUnavailableMessage(hardware: SpeechHardware) {
@@ -35,8 +41,24 @@ export function speechComponent(options: SpeechOptions) {
   return speechSelection(options).speechModel === 'qwen' ? ('qwen' as const) : ('speech' as const);
 }
 
-export const speechSegmentationSilenceMs = 800;
+export const speechSegmentationSilenceMs = 1000;
 export const automaticAnswerSilenceMs = 1800;
+
+export function questionSource(inputMode: InterviewInputMode = 'remote'): AudioSource {
+  return inputMode === 'transcription' ? 'microphone' : 'system';
+}
+export function inputSources(state: InterviewInputState): AudioSource[] {
+  return state.inputMode === 'transcription'
+    ? ['microphone']
+    : state.microphoneMuted
+      ? ['system']
+      : ['microphone', 'system'];
+}
+export function inputSourceEnabled(state: InterviewInputState, source: AudioSource) {
+  return source === 'microphone'
+    ? !state.microphoneMuted
+    : state.inputMode === 'remote' && !state.systemAudioMuted;
+}
 
 export function sameAudioCapture(a: SpeechOptions, b: SpeechOptions) {
   return (

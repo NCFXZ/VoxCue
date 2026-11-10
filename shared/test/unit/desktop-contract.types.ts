@@ -1,5 +1,9 @@
 // Compile-only assertions; no runtime desktop access or native module loading.
-import type { DesktopAPI, DesktopInvokeMap } from '../../../shared/electron/contracts/desktop';
+import type {
+  DesktopAPI,
+  DesktopInvokeMap,
+  InterviewShortcutCommand,
+} from '../../../shared/electron/contracts/desktop';
 import type { AIChatService } from '../../../shared/electron/backend/chat/ports';
 import type { ChatGPTService } from '../../../shared/electron/backend/chat/service';
 import type { PersonalInfo, ProfileChanges } from '../../../shared/electron/contracts/profile';
@@ -27,6 +31,38 @@ const providerReply: ChatResult = { ok: true, provider: modelProvider, usage: nu
 void [providerModel, providerReply];
 
 declare const desktop: DesktopAPI;
+const stopShortcuts: () => void = desktop.onInterviewShortcut((command) => {
+  const fixed: InterviewShortcutCommand = command;
+  void fixed;
+});
+void stopShortcuts;
+desktop.shortcutSettings({ op: 'set', action: 'submit-input', accelerator: 'Control+Shift+Enter' });
+desktop.onShortcutSettings((state) => { const current: string | null = state.bindings['submit-input']; void current; });
+// @ts-expect-error Shortcut settings accept only fixed actions.
+desktop.shortcutSettings({ op: 'set', action: 'execute', accelerator: 'Control+K' });
+const submitInputShortcut: InterviewShortcutCommand = 'submit-input';
+void submitInputShortcut;
+desktop.interviewShortcutsState().then((state) => {
+  const open: boolean = state.open;
+  const revision: number = state.rendererRevision;
+  const connected: boolean = state.deviceConnected;
+  void [open, revision, connected];
+});
+desktop.setInterviewShortcutsOpen(true);
+desktop.interviewRendererReady(1);
+// @ts-expect-error Readiness must acknowledge its authoritative navigation revision.
+desktop.interviewRendererReady();
+// @ts-expect-error Renderer readiness only acknowledges its own surface, never a target or bounds.
+desktop.interviewRendererReady({ window: 'other', width: 100 });
+desktop.onInterviewShortcutsOpen((open: boolean) => {
+  void open;
+});
+desktop.onInterviewDeviceConnection((connected: boolean) => { void connected; });
+// @ts-expect-error Help state exposes only a fixed boolean, not window positions or arbitrary routes.
+desktop.setInterviewShortcutsOpen({ x: 20, y: 20 });
+// @ts-expect-error Shortcut events expose only fixed commands, never arbitrary native actions.
+const arbitraryShortcut: InterviewShortcutCommand = 'execute';
+void arbitraryShortcut;
 void desktop.setLocalMode(true);
 void desktop.telemetrySignal({ type: 'feature', feature: 'history_view' });
 // @ts-expect-error Statistics accept fixed categories, never arbitrary content or identity.
@@ -87,6 +123,13 @@ desktop.interviewImage({ op: 'read', path: '/private/image.png' });
 // @ts-expect-error Renderer cannot write original image bytes into the archive.
 desktop.interviewScreenshot({ op: 'archive', bytes: new Uint8Array() });
 desktop.reconnectInterviewAudio({ sources: ['system'], system: 'output' });
+desktop.setInterviewInput({ inputMode: 'transcription', microphoneMuted: true });
+// @ts-expect-error Input controls only fixed mode and software gate; never OS mute, devices or volume.
+desktop.setInterviewInput({ inputMode: 'remote', microphoneMuted: false, systemMute: true });
+// @ts-expect-error Software microphone mute is strictly boolean.
+desktop.setInterviewInput({ inputMode: 'remote', microphoneMuted: 1 });
+// @ts-expect-error Runtime input mode is the fixed two-option contract.
+desktop.setInterviewInput({ inputMode: 'other', microphoneMuted: false });
 desktop.dictation({ op: 'test', id: 'audio-test', options: { sources: ['system', 'microphone'] } });
 desktop.dictation({ op: 'test-stop', id: 'audio-test' });
 // @ts-expect-error Audio recovery accepts devices only, never a model change.
@@ -112,6 +155,11 @@ desktop.moveInterviewWindow({ phase: 'move', target: 'main' });
 // @ts-expect-error Only three fixed gesture phases are supported.
 desktop.moveInterviewWindow({ phase: 'execute' });
 desktop.setInterviewTranscriptVisible(false);
+desktop.setInterviewSettingsOpen(true);
+// @ts-expect-error Settings canvas only accepts its open state, never arbitrary dimensions.
+desktop.setInterviewSettingsOpen({ width: 1200, height: 800 });
+// @ts-expect-error Settings canvas cannot target another window.
+desktop.setInterviewSettingsOpen(true, 'main');
 desktop.setInterviewMousePassthrough(true);
 // @ts-expect-error Mouse passthrough only accepts a boolean, never native window options.
 desktop.setInterviewMousePassthrough({ forward: true });

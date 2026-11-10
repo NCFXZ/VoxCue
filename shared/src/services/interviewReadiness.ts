@@ -1,4 +1,9 @@
-import type { AudioSource, SpeechOptions, SpeechStatus } from '../../electron/contracts/speech';
+import type {
+  AudioSource,
+  SpeechOptions,
+  SpeechStatus,
+  InterviewInputMode,
+} from '../../electron/contracts/speech';
 import { inputHoldMs, microphoneLevel, type AudioLevels } from './audioLevel';
 
 export type ReadinessKind = 'normal' | 'input' | 'error' | 'off' | 'loading' | 'paused';
@@ -20,10 +25,17 @@ export function interviewReadiness(
     options: SpeechOptions;
     audioLevels: AudioLevels;
     reconnecting: boolean;
+    inputMode?: InterviewInputMode;
+    microphoneMuted?: boolean;
+    systemAudioMuted?: boolean;
   },
   now: number,
 ): { kind: ReadinessKind; reason: string; level: number } {
   const result = (kind: ReadinessKind, reason: string, level = 0) => ({ kind, reason, level });
+  if (item === 'system' && state.systemAudioMuted)
+    return result('off', '系统音频未启用，不采集声音。');
+  if (item === 'microphone' && state.inputMode === 'transcription' && state.microphoneMuted)
+    return result('off', '麦克风已关闭，不采集声音。');
   if (item !== 'model' && !state.options.sources.includes(item))
     return result('off', `${readinessLabels[item]}未启用，不采集声音。`);
   if (state.reconnecting || state.speech.state === 'loading')

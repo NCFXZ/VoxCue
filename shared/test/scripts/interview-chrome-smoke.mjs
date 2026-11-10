@@ -157,14 +157,15 @@ try {
   const screenshotHeight = await floating
     .locator('.floating-screenshot-button')
     .evaluate((e) => e.getBoundingClientRect().height);
-  assert.equal(screenshotHeight, 32);
+  const layoutUnit = (value) => Math.round(value * 64) / 64;
+  assert.equal(layoutUnit(screenshotHeight), 26);
   assert.equal(height, screenshotHeight, 'Send and screenshot controls align at the same height');
   assert.equal(width, height, 'The interview send control remains circular');
   assert.ok(
     parseFloat(radius) * (radius.endsWith('%') ? width / 100 : 1) >= height / 2,
     'The send control retains circular end caps',
   );
-  assert.equal(iconWidth, 18);
+  assert.equal(layoutUnit(iconWidth), 18);
   assert.deepEqual(interviewSendStyle, chatSend);
   await verifyComposerControlAlignment(floating.locator('.floating-composer'), 'interview');
   const composerType = await floating.locator('.floating-composer').evaluate((node) => ({

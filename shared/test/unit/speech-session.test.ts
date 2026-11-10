@@ -5,7 +5,11 @@ import {
   validateInterviewModel,
 } from '../../../shared/electron/application/speech';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
-import type { SpeechServiceCall } from '../../../shared/electron/contracts/speech';
+import type {
+  SpeechServiceCall,
+  InterviewConfiguration,
+} from '../../../shared/electron/contracts/speech';
+import { questionSource } from '../../../shared/electron/contracts/speechSettings';
 function setup() {
   const port = {
     call: vi.fn(async (call: SpeechServiceCall) => ({
@@ -18,6 +22,145 @@ function setup() {
   };
   return { port, coordinator: new SpeechCoordinator(port) };
 }
+const transcriptionConfiguration = (): InterviewConfiguration => ({
+  ...defaultInterviewConfiguration(),
+  inputMode: 'transcription',
+  options: { sources: ['microphone'], microphone: 'selected-mic' },
+});
+it('输入方式缺省兼容远程，只有仅转录允许单麦且初始不能无麦', () => {
+  const legacy = defaultInterviewConfiguration();
+  delete legacy.inputMode;
+  expect(validateInterviewConfiguration(legacy).inputMode).toBeUndefined();
+  expect(questionSource()).toBe('system');
+  expect(questionSource('remote')).toBe('system');
+  expect(questionSource('transcription')).toBe('microphone');
+  expect(
+    validateInterviewConfiguration({ ...legacy, inputMode: 'remote' }).options.sources,
+  ).toContain('system');
+  expect(validateInterviewConfiguration(transcriptionConfiguration())).toMatchObject({
+    inputMode: 'transcription',
+    mode: 'local',
+    options: { sources: ['microphone'], microphone: 'selected-mic' },
+  });
+  for (const inputMode of [null, 'other', true, [], {}])
+    expect(() => validateInterviewConfiguration({ ...legacy, inputMode })).toThrow('无效');
+  for (const sources of [[], ['system'], ['system', 'microphone'], ['microphone', 'microphone']])
+    for (const mode of ['local', 'mock'])
+      expect(() =>
+        validateInterviewConfiguration({
+          ...transcriptionConfiguration(),
+          mode,
+          options: { sources },
+        }),
+      ).toThrow();
+  expect(
+    validateInterviewConfiguration({ ...transcriptionConfiguration(), mode: 'mock' }),
+  ).toMatchObject({ mode: 'mock', options: { sources: ['microphone'] } });
+  expect(() =>
+    validateInterviewConfiguration({ ...legacy, options: { sources: ['microphone'] } }),
+  ).toThrow('系统音频');
+});
+it('仅转录锁定输入方式且保留独立资料快照，不能借开始或重连打开系统音频', async () => {
+  const { coordinator, port } = setup();
+  const value = {
+    ...transcriptionConfiguration(),
+    profile: {
+      name: 'Synthetic',
+      background: 'Confirmed background',
+      jobDescription: 'Fixture JD',
+    },
+  };
+  await coordinator.confirm(value);
+  value.profile.background = 'Caller changed this';
+  value.options.sources.push('system');
+  const confirmed = coordinator.configuration!;
+  expect(confirmed.options.sources).toEqual(['microphone']);
+  expect(confirmed.profile!.background).toBe('Confirmed background');
+  await coordinator.interview({ op: 'start', options: confirmed.options });
+  expect(port.call).toHaveBeenLastCalledWith({
+    op: 'start',
+    options: confirmed.options,
+    inputState: { inputMode: 'transcription', microphoneMuted: false },
+  });
+  const count = port.call.mock.calls.length;
+  for (const sources of [[], ['system'], ['microphone', 'system']])
+    expect(() => coordinator.reconnect({ sources } as any)).toThrow();
+  expect(() => coordinator.reconnect({ ...confirmed.options, inputMode: 'remote' } as any)).toThrow(
+    'Invalid speech option',
+  );
+  await expect(coordinator.confirm(defaultInterviewConfiguration())).rejects.toThrow(
+    '输入方式已锁定',
+  );
+  await expect(
+    coordinator.interview({ op: 'start', options: { sources: ['system'] } }),
+  ).rejects.toThrow('已锁定');
+  expect(port.call.mock.calls.length).toBe(count);
+  expect(coordinator.configuration).toEqual(confirmed);
+  coordinator.releaseInterview(true);
+  await coordinator.confirm(defaultInterviewConfiguration());
+  expect(questionSource(coordinator.configuration?.inputMode)).toBe('system');
+  coordinator.releaseInterview(true);
+});
+it('同场缺省与显式远程等价，确认排队也不能把远程切成仅转录', async () => {
+  const { coordinator, port } = setup();
+  const first = coordinator.confirm(defaultInterviewConfiguration());
+  const changed = coordinator.confirm(transcriptionConfiguration());
+  await first;
+  await expect(changed).rejects.toThrow('输入方式已锁定');
+  const before = port.stop.mock.calls.length;
+  await coordinator.confirm({ ...defaultInterviewConfiguration(), inputMode: 'remote' });
+  expect(port.stop).toHaveBeenCalledTimes(before);
+  expect(coordinator.configuration?.options.sources).toContain('system');
+  expect(() => coordinator.reconnect({ sources: ['microphone'] })).toThrow('系统音频');
+  coordinator.releaseInterview(true);
+});
+it('仅转录暂停保留已确认单麦，重连不变输入方式，失败和迟到结果不换入新设备', async () => {
+  const { coordinator, port } = setup();
+  await coordinator.confirm(transcriptionConfiguration());
+  const confirmed = coordinator.configuration!;
+  await coordinator.interview({ op: 'start', options: confirmed.options });
+  await coordinator.interview({ op: 'pause' });
+  expect(coordinator.configuration).toEqual(confirmed);
+  await coordinator.reconnect();
+  expect(port.call).toHaveBeenLastCalledWith({
+    op: 'start',
+    options: confirmed.options,
+    inputState: { inputMode: 'transcription', microphoneMuted: false },
+  });
+  const next = { ...confirmed.options, microphone: 'new-mic' };
+  port.call
+    .mockResolvedValueOnce({ state: 'idle', model: 'test' })
+    .mockRejectedValueOnce(Error('synthetic device failure'));
+  await expect(coordinator.reconnect(next)).rejects.toThrow('device failure');
+  expect(coordinator.configuration).toEqual(confirmed);
+  let release!: (status: { state: 'running'; model: string }) => void;
+  port.call.mockResolvedValueOnce({ state: 'idle', model: 'test' }).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        release = resolve;
+      }),
+  );
+  const connecting = coordinator.reconnect(next);
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  const paused = coordinator.interview({ op: 'pause' });
+  release({ state: 'running', model: 'late' });
+  expect(await connecting).toMatchObject({ state: 'idle' });
+  await paused;
+  expect(coordinator.configuration).toEqual(confirmed);
+  await coordinator.reconnect(next);
+  expect(coordinator.configuration).toEqual({ ...confirmed, options: next });
+  expect(
+    port.call.mock.calls
+      .filter(([call]) => call.op === 'start')
+      .every(
+        ([call]) =>
+          call.op === 'start' &&
+          call.options.sources.length === 1 &&
+          call.options.sources[0] === 'microphone',
+      ),
+  ).toBe(true);
+  coordinator.releaseInterview(true);
+});
 it('开场电平自检不会继承面试的 Qwen/CUDA 推理选择', async () => {
   const { coordinator, port } = setup();
   await coordinator.dictation({
@@ -170,7 +313,11 @@ it('音频恢复只改变本场设备，强制退休故障宿主并保留模型�
   const options = { sources: ['system'] as ('system' | 'microphone')[], system: 'new-output' };
   await expect(coordinator.reconnect(options)).resolves.toMatchObject({ state: 'running' });
   expect(coordinator.configuration).toEqual({ ...before, options });
-  expect(port.call).toHaveBeenLastCalledWith({ op: 'start', options });
+  expect(port.call).toHaveBeenLastCalledWith({
+    op: 'start',
+    options,
+    inputState: { inputMode: 'remote', microphoneMuted: true },
+  });
   await expect(coordinator.interview({ op: 'start', options: before.options })).rejects.toThrow(
     '已锁定',
   );

@@ -102,16 +102,23 @@ try {
     false,
   );
   await floating.screenshot({});
-  const bounds = () =>
+  const nativeBounds = () =>
     app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((win) => win.webContents.getURL().endsWith('#interview'))
         .getBounds(),
     );
+  const bounds = async () => {
+    const native = await nativeBounds();
+    const { layout } = await floating.evaluate(() => window.desktop.interviewState());
+    return layout ? { ...native, width: layout.width, height: layout.height } : native;
+  };
   const original = await bounds();
+  const originalNative = await nativeBounds();
   await floating.evaluate(() => window.desktop.resizeInterview(-1));
   const smaller = await bounds();
   assert.ok(smaller.width < original.width && smaller.height < original.height);
+  if (process.platform === 'win32') assert.deepEqual(await nativeBounds(), originalNative);
   await floating.evaluate(() => window.desktop.resizeInterview(1));
   assert.ok(Math.abs((await bounds()).width - original.width) <= 5);
   await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();

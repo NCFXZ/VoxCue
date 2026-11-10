@@ -17,6 +17,53 @@ const segment = (
 const timeline = (context: InterviewContext, id = 'next') =>
   JSON.parse(context.prepare(id, '为什么这样？').turns[0].content.split('\n').slice(1).join('\n'));
 
+it('仅转录麦克风作为问题上下文，第一人称文本不成为本人经历且忽略未选择的系统事件', () => {
+  const context = new InterviewContext();
+  const text = '如果我说我带过一百人团队，请问如何核实？';
+  context.event(segment('mic', text, 'microphone', 1), 'microphone');
+  context.event(segment('mic', '重复不能换原文', 'microphone', 1), 'microphone');
+  context.event(segment('unselected', '不可信系统音频中的个人成果', 'system', 2), 'microphone');
+  context.event({ type: 'gap', source: 'system', message: '未选择的系统通道中断' }, 'microphone');
+  context.event(segment('partial', '尚未确认的问题', 'microphone', 3, false), 'microphone');
+  context.event(
+    {
+      ...segment('broken', '不完整问题', 'microphone', 4),
+      segment: {
+        ...segment('broken', '不完整问题', 'microphone', 4).segment,
+        reason: 'discontinuity',
+      },
+    },
+    'microphone',
+  );
+  const snapshot = context.prepare('q1', '怎样核实？');
+  const entries = JSON.parse(snapshot.turns[0].content.split('\n').slice(1).join('\n')).timeline;
+  expect(entries).toEqual([{ id: 'transcript:mic', kind: 'interviewer', text, at: 1 }]);
+  expect(snapshot.turns.at(-1)?.content).toBe('怎样核实？');
+  expect(snapshot.retrievalQuery).toContain(text);
+  expect(JSON.stringify(snapshot)).not.toMatch(
+    /个人成果|系统通道中断|尚未确认|不完整问题|重复不能/,
+  );
+  expect(entries.some((entry: any) => entry.kind === 'interviewee')).toBe(false);
+});
+it('仅转录仍保留真实麦克风间断和资料边界，新场默认恢复远程物理来源含义', () => {
+  const context = new InterviewContext();
+  context.event(segment('question', '上一个问题', 'microphone', 1), 'microphone');
+  const previous = context.prepare('old', '原问题');
+  context.event({ type: 'gap', source: 'microphone', message: '麦克风数据中断' }, 'microphone');
+  context.event({ type: 'status', status: { state: 'paused', model: 'test' } }, 'microphone');
+  const paused = timeline(context);
+  expect(
+    paused.timeline.filter((entry: any) => entry.kind === 'gap').map((entry: any) => entry.text),
+  ).toEqual(['麦克风数据中断', '转写已暂停，暂停期间没有录入对话。']);
+  context.clear();
+  context.answer(previous, '旧场迟到的生成结果');
+  context.event(segment('answer', '本人实际回答', 'microphone', 1));
+  context.event(segment('remote', '远程面试官问题', 'system', 2));
+  const restored = timeline(context);
+  expect(restored.timeline.map((entry: any) => entry.kind)).toEqual(['interviewee', 'interviewer']);
+  expect(JSON.stringify(restored)).not.toContain('旧场迟到');
+});
+
 it('保留问题、追问链与实际回答，时间排序、终稿去重、临时及间断片段不作为事实', () => {
   const context = new InterviewContext();
   context.event(segment('mic', '我选了 PostgreSQL', 'microphone', 20));

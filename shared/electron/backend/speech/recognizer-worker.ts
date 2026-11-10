@@ -26,6 +26,7 @@ parentPort!.on('message', (m) => {
       } else {
         if (m.op === 'audio') await engine.feed(m.source, m.samples, m.rate, m.timestamp);
         else if (m.op === 'gap') await engine.discontinuity(m.source);
+        else if (m.op === 'discard') await engine.discard(m.source);
         else if (m.op === 'flush') await engine.flush(m.reason);
         else throw Error('Unknown recognizer operation');
         value = {

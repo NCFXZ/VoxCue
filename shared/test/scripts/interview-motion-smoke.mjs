@@ -10,7 +10,13 @@ const fixture = path.join(testRoot, 'motion-entry.cjs');
 await writeFile(
   fixture,
   `
-const {ipcMain}=require('electron');
+const {ipcMain,globalShortcut}=require('electron');
+// Keep the owner's running application shortcuts untouched in this isolated fixture.
+const shortcutKey=key=>({'Control+H':'Control+Alt+Shift+F8','Control+F':'Control+Alt+Shift+F9','Control+T':'Control+Alt+Shift+F10','Control+M':'Control+Alt+Shift+F11'}[key]??key);
+const registerShortcut=globalShortcut.register.bind(globalShortcut);
+const unregisterShortcut=globalShortcut.unregister.bind(globalShortcut);
+globalShortcut.register=(key,callback)=>registerShortcut(shortcutKey(key),callback);
+globalShortcut.unregister=key=>unregisterShortcut(shortcutKey(key));
 const handle=ipcMain.handle.bind(ipcMain);
 globalThis.motionIpcCalls=0;
 globalThis.motionIpcTrace=[];
@@ -121,15 +127,46 @@ try {
       return animation;
     };
   });
-  const bounds = () =>
+  const nativeBounds = () =>
     app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((w) => w.webContents.getURL().endsWith('#interview'))
         .getBounds(),
     );
+  const bounds = async () => {
+    const native = await nativeBounds();
+    const { layout } = await page.evaluate(() => window.desktop.interviewState());
+    return layout
+      ? {
+          x: native.x + (native.width - layout.width) / 2,
+          y: native.y,
+          width: layout.width,
+          height: layout.height,
+        }
+      : native;
+  };
+  const originalNativeBounds = await nativeBounds();
   const idle = () =>
     page.waitForFunction(() => !document.querySelector('.floating-shell').dataset.panelMotion);
   const nativeState = () => page.evaluate(() => window.desktop.interviewState());
+  const minimumSettingsBounds = (anchor, visible) =>
+    app.evaluate(
+      ({ app, screen }, { anchor, visible }) => {
+        const require = process
+          .getBuiltinModule('module')
+          .createRequire(app.getAppPath() + '/package.json');
+        const { fitInterviewBounds, interviewLayout } = require(
+          app.getAppPath() + '/dist-electron/shared/electron/contracts/interviewLayout.js',
+        );
+        return fitInterviewBounds(
+          anchor,
+          screen.getDisplayMatching(anchor).workArea,
+          interviewLayout.minimumScale,
+          visible,
+        );
+      },
+      { anchor, visible },
+    );
   const finish = () =>
     page.evaluate(() => {
       for (const a of window.motionPlayers) if (a.playState !== 'idle') a.finish();
@@ -150,6 +187,11 @@ try {
   const originalContours = await contours();
   for (const contour of originalContours) assert.equal(contour.clip, 'none');
   const panelBounds = await bounds();
+  await assert.rejects(main.evaluate(() => window.desktop.setInterviewSettingsOpen(true)));
+  await assert.rejects(
+    page.evaluate(() => window.desktop.setInterviewSettingsOpen({ width: 900 })),
+  );
+  assert.deepEqual(await bounds(), panelBounds, 'Invalid settings calls cannot resize the canvas');
   // Two rapid requests must produce one transition and one final native toggle.
   await page.locator('.floating-brand').evaluate((e) => {
     e.click();
@@ -173,6 +215,42 @@ try {
   await idle();
   assert.equal((await nativeState()).collapsed, true);
   assert.ok((await bounds()).height < panelBounds.height);
+  const collapsedBounds = await bounds();
+  const minimumBounds = await minimumSettingsBounds(collapsedBounds, false);
+  const settings = page.getByRole('dialog', { name: '面试设置', exact: true });
+  await click(page.getByRole('button', { name: '面试设置', exact: true }));
+  await settings.waitFor();
+  const settingsBounds = await bounds();
+  assert.equal((await nativeState()).collapsed, true, 'Settings preserve the collapsed state');
+  assert.ok(settingsBounds.height > collapsedBounds.height);
+  assert.ok(Math.abs(settingsBounds.height - minimumBounds.height) <= 1);
+  assert.ok(Math.abs(settingsBounds.width - minimumBounds.width) <= 1);
+  assert.equal(settingsBounds.y, collapsedBounds.y);
+  assert.ok(
+    Math.abs(
+      settingsBounds.x + settingsBounds.width / 2 - collapsedBounds.x - collapsedBounds.width / 2,
+    ) <= 1,
+  );
+  const dialogLayout = await settings.evaluate((dialog) => {
+    const rect = dialog.getBoundingClientRect();
+    const scroll = dialog.querySelector('.dialog-scroll');
+    return {
+      top: rect.top,
+      bottom: rect.bottom,
+      viewport: document.querySelector('.floating-viewport').clientHeight,
+      contentHeight: scroll.clientHeight,
+    };
+  });
+  assert.ok(dialogLayout.top >= 0 && dialogLayout.bottom <= dialogLayout.viewport);
+  assert.ok(dialogLayout.contentHeight > 100, 'Collapsed settings expose their editable content');
+  await captureRequested(page, 'collapsed-interview-settings');
+  await settings.getByRole('button', { name: '选择播放设备', exact: true }).click();
+  await page.getByRole('menuitemradio', { name: '默认播放设备', exact: true }).waitFor();
+  await page.keyboard.press('Escape');
+  await settings.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await page.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
+  await page.waitForFunction(() => document.querySelector('.floating-viewport').clientHeight < 100);
+  assert.deepEqual(await bounds(), collapsedBounds, 'Closing settings restores the folded canvas');
   await click(page.locator('.floating-brand'));
   await page.waitForFunction(() =>
     window.motionPlayers.some((a) => a.effect?.target?.matches('.floating-panels')),
@@ -229,6 +307,33 @@ try {
   await page.emulateMedia({ reducedMotion: 'reduce' });
   await idle();
   assert.equal((await nativeState()).transcriptVisible, false);
+  await click(page.locator('.floating-brand'));
+  await idle();
+  const answerOnlyCollapsed = await bounds();
+  const answerOnlyMinimum = await minimumSettingsBounds(answerOnlyCollapsed, false);
+  await click(page.getByRole('button', { name: '面试设置', exact: true }));
+  await settings.waitFor();
+  const answerOnlySettings = await bounds();
+  assert.equal(
+    answerOnlySettings.width,
+    settingsBounds.width,
+    'Collapsed settings use one width regardless of transcript visibility',
+  );
+  assert.equal(
+    answerOnlySettings.height,
+    settingsBounds.height,
+    'Collapsed settings use one height regardless of transcript visibility',
+  );
+  assert.ok(Math.abs(answerOnlySettings.width - answerOnlyMinimum.width) <= 1);
+  assert.ok(Math.abs(answerOnlySettings.height - answerOnlyMinimum.height) <= 1);
+  assert.equal((await nativeState()).transcriptVisible, false);
+  await captureRequested(page, 'collapsed-answer-only-settings');
+  await page.keyboard.press('Escape');
+  await page.waitForFunction(() => document.querySelector('.floating-viewport').clientHeight < 100);
+  assert.deepEqual(await bounds(), answerOnlyCollapsed);
+  await click(page.locator('.floating-brand'));
+  await idle();
+  assert.deepEqual(await bounds(), narrow, 'Settings preserve the prior answer-only panel size');
   await page.evaluate(() => {
     window.motionPlayers = [];
     window.pausePanelMotion = false;
@@ -319,6 +424,12 @@ try {
     'A bottom-following transcript resumes at the bottom after hidden live updates',
   );
   await captureRequested(page, 'motion-restored');
+  if ((await nativeState()).layout)
+    assert.deepEqual(
+      await nativeBounds(),
+      originalNativeBounds,
+      'Panel changes never move or resize the native canvas',
+    );
   assert.deepEqual(errors, []);
   // Closing our isolated window while its animation is pending must release it.
   await page.evaluate(() => {
@@ -334,7 +445,7 @@ try {
       .destroy(),
   );
   console.log(
-    'PASS: continuous corner/shadow preservation, timed panel motion, native resize ordering, rapid-click serialization, draft/scroll persistence, reduced-motion cancellation, IPC rejection/late-result reconciliation and retry, repeated toggles and closing during motion.',
+    'PASS: collapsed settings canvas/content/restore, continuous corner/shadow preservation, timed panel motion, native resize ordering, rapid-click serialization, draft/scroll persistence, reduced-motion cancellation, IPC rejection/late-result reconciliation and retry, repeated toggles and closing during motion.',
   );
 } finally {
   await closeUiApp(app);

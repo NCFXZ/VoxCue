@@ -1,3 +1,13 @@
+## 2026-11-09 Windows Beta 1 功能整理
+
+核对当前生产入口、静态与动态引用、平台装配、构建和测试消费者，撤回的面对面／说话人区分代码不再保留隐藏入口；“仅转录”、快捷键、记录阅读位置及其他现用改动保留。前后端严格未使用声明检查用于辅助审查，不将无静态入边等同于无用。
+
+删除 `windows/.tools/speaker-models-v1/` 中已无代码、构建或测试消费者的旧公开说话人模型及许可证，核对精确工作区路径、父目录无重解析点、当前用户归属及逐文件独占访问；不涉及现用语音、Qwen 或 RAG 组件缓存，也不访问真实用户的声音资料。
+
+删除旧 `windows/test/scripts/create-speech-fixtures.ps1` 及其唯一配套 `shared/test/fixtures/speech-v1.json`，清除 Windows 语音说明中的旧生成／诊断命令。现行隔离验证通过固定来源与摘要的公开音频准备流程供给；仍被消费者使用的 WAV、音频管线、长稳、原生、回声及语音切换专项保留。
+
+删除被同级后续规则覆盖的胶囊对齐声明，将开始弹窗说明的重复样式合并到实际底部区域规则；不改变最终布局和显示参数。共享与 Windows 没有确认可继续独立删除的生产模块。Mac 全树、历史明确跳过目录、原件、凭据、现用依赖／模型、发行与恢复基线保持。
+
 ## 2026-11-08 Mac 1.0.2 清理边界
 
 本轮先核对受控源码、静态/动态入口及构建/测试消费者，未确认可独立删除的业务代码、旧测试或工作区临时文件。`shared/pnpm-lock.yaml` 为保留的历史解析基准，`services/mock.ts`、`shared/test/temp.ts` 均有实际消费者，不能按名称删除。Windows 全树、历史明确跳过目录、正式/恢复资产、现用依赖及认证公共缓存保持。
@@ -477,3 +487,9 @@ AGENTS.md已将已完成任务的重复“最新授权”整理为当前状态�
 结果日志：test-results/cleanup-{architecture,typecheck,test,build,knowledge,speech-model,package,package-test}.log，以及 cleanup-smoke-*.log。新的便携检查报告在 test-results/portable-current-390CO3/report.json。
 
 当前分支 codex/speech-recognition，全部工作未提交/推送。等待用户新方案，保留现有语音、账户、聊天和记录功能。
+
+## 2026-11-10：1.1.0 发行整理
+
+- 核对 shared/src、shared/electron 和 shared/test 消费者后，移除未使用的 ConfirmResetButton 及其专属错误分支、Search／Eye 图标封装和已撤回的整场快捷键注册失败文案。
+- 截图按钮宽度由实际配置的快捷键计算；删除被内联值覆盖的固定宽度及旧 Mac 宽度覆盖，保留仍使用的 Mac 字体样式。
+- RemotePairingCode 为配对对话框实际内部组件，保留；有真实测试消费者的 Mock／temp 接口和历史恢复基线保持。完整矩阵纳入本轮新增的界面与资源验证入口。

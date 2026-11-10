@@ -753,6 +753,11 @@ p {
 .user-button[data-state='closed'] > svg {
   transform: rotate(180deg);
 }
+@media (prefers-reduced-motion: no-preference) {
+  .user-button > svg {
+    transition: transform var(--panel-motion-duration) var(--panel-motion-easing);
+  }
+}
 .avatar {
   height: 31px;
   width: 31px;
@@ -812,7 +817,7 @@ p {
 }
 .sidebar:not(.collapsed) .user-button:has(.account-usage-summary:is(.is-low, .is-inline)) > svg {
   grid-column: 3;
-  grid-row: 1;
+  grid-row: 1 / 3;
 }
 .collapsed {
   width: 68px;
@@ -1928,12 +1933,13 @@ p {
 }
 .floating-viewport {
   width: 100vw;
-  height: 100dvh;
+  height: var(--interview-height, 100dvh);
   overflow: hidden;
 }
 .floating-shell {
-  width: 100vw;
-  height: 100dvh;
+  width: var(--interview-width, 100vw);
+  margin-inline: auto;
+  height: 100%;
   padding: 12px;
   display: flex;
   flex-direction: column;
@@ -2017,6 +2023,7 @@ p {
   background: var(--selected);
 }
 .floating-panels {
+  position: relative;
   align-self: center;
   flex: 0 0 var(--panel-height, 500px);
   min-height: 0;
@@ -2236,7 +2243,7 @@ p {
   line-height: var(--line-control);
 }
 .floating-composer {
-  --icon-button-size: 32px;
+  --icon-button-size: 26px;
   --floating-composer-edge-gap: 8px;
   margin: var(--floating-composer-inset);
   border: 1px solid var(--border);
@@ -2272,11 +2279,10 @@ p {
   gap: 8px;
 }
 .floating-screenshot-button.ui-button {
-  --screenshot-shortcut-width: 44px;
   --screenshot-label-width: 2em;
-  width: calc(54px + var(--screenshot-label-width) + var(--screenshot-shortcut-width));
-  height: 32px;
-  min-height: 32px;
+  width: calc(48px + var(--screenshot-label-width) + var(--screenshot-shortcut-width));
+  height: var(--icon-button-size);
+  min-height: var(--icon-button-size);
   padding: 0;
   gap: 0;
   overflow: hidden;
@@ -2285,14 +2291,11 @@ p {
   border-radius: 999px;
   corner-shape: round;
 }
-.floating-screenshot-button[data-shortcut-platform='macos'] {
-  --screenshot-shortcut-width: 24px;
-}
 :root:lang(en) .floating-screenshot-button {
   --screenshot-label-width: 5.5em;
 }
 .floating-screenshot-button.ui-button[data-expanded='true'] {
-  width: calc(82px + var(--screenshot-label-width));
+  width: calc(72px + var(--screenshot-label-width));
 }
 .floating-screenshot-text {
   flex-shrink: 0;
@@ -2300,7 +2303,8 @@ p {
   white-space: nowrap;
 }
 .floating-screenshot-shortcut {
-  width: var(--screenshot-shortcut-width);
+  width: auto;
+  flex-shrink: 0;
   margin-left: 6px;
   font: inherit;
   font-size: var(--type-secondary);
@@ -2328,7 +2332,7 @@ p {
   font-family: -apple-system, BlinkMacSystemFont, sans-serif;
 }
 .floating-screenshot-button[data-expanded='true'] .floating-screenshot-count {
-  width: 34px;
+  width: 20px;
   margin-left: 6px;
   opacity: 1;
 }
@@ -3518,6 +3522,52 @@ p {
 .settings-hint {
   margin: 16px 0;
 }
+.shortcut-settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
+.shortcut-setting-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--border);
+}
+.shortcut-setting-row strong {
+  font-size: var(--type-body);
+  font-weight: 500;
+}
+.shortcut-setting-row > div {
+  min-width: 0;
+}
+.shortcut-setting-row p {
+  margin: 4px 0 0;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  line-height: var(--line-secondary);
+}
+.shortcut-setting-row p.danger-text {
+  color: var(--danger);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shortcut-binding {
+  min-width: 140px;
+  max-width: 240px;
+}
+.shortcut-binding kbd {
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.shortcut-binding[aria-pressed='true'] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
 .settings-choice {
   display: flex;
   align-items: center;
@@ -3726,16 +3776,19 @@ p {
 .settings-usage .usage-error {
   color: var(--danger);
 }
-.interview-start-description {
-  color: var(--muted);
-  font-size: var(--type-secondary);
-  line-height: 1.7;
-  margin: 16px 0;
-}
 .app-dialog.interview-start-dialog {
   width: 580px;
   max-width: calc(100vw - 48px);
-  max-height: calc(100vh - 48px);
+  height: 760px;
+  max-height: calc(100dvh - 48px);
+}
+.app-dialog.interview-start-dialog > .dialog-scroll {
+  flex: 1;
+}
+.app-dialog.interview-start-dialog[data-fixed-header]:not([data-scrollable]) > .dialog-heading {
+  padding-bottom: 16px;
+  border-bottom-width: 1px;
+  border-bottom-color: var(--border);
 }
 .interview-start-dialog .interview-start-actions {
   padding-top: 16px;
@@ -3815,14 +3868,6 @@ p {
   gap: 4px 12px;
   min-width: 0;
 }
-.speech-model-heading > h4 {
-  flex-shrink: 0;
-  margin: 0;
-  color: var(--muted);
-  font-size: var(--type-secondary);
-  font-weight: 500;
-  line-height: var(--line-secondary);
-}
 .speech-model-status {
   min-width: 0;
   margin: 0;
@@ -3878,7 +3923,8 @@ p {
   font-size: var(--type-secondary);
   white-space: nowrap;
 }
-.screen-capture-description {
+.screen-capture-description,
+.remote-connection-description {
   margin: 4px 0 0;
   color: var(--muted);
   font-size: var(--type-secondary);
@@ -3894,6 +3940,154 @@ p {
   background: var(--soft);
   border-color: var(--border);
   color: var(--muted);
+}
+.remote-connection-settings h3 {
+  margin: 0;
+  font-size: var(--type-body);
+}
+.speech-settings-section.remote-connection-settings .speech-setting-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.remote-connection-summary {
+  min-width: 0;
+}
+.remote-connection-description {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.interview-settings-dialog .remote-connection-settings {
+  border-top: 0;
+  padding-top: 0;
+  padding-bottom: 20px;
+  margin-bottom: 20px;
+  border-bottom: 1px solid var(--border);
+}
+.remote-connection-actions,
+.remote-approval-actions {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.remote-connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--muted);
+  white-space: nowrap;
+  font-size: var(--type-secondary);
+  line-height: var(--line-secondary);
+}
+.remote-connection-dialog {
+  width: 480px;
+}
+.remote-connection-dialog.interview-settings-dialog {
+  width: 480px;
+}
+.remote-pairing-visual {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+.remote-pairing-code,
+.remote-pairing-placeholder {
+  width: min(220px, 100%);
+  aspect-ratio: 1;
+}
+.remote-pairing-placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  color: var(--muted);
+  font-size: var(--type-body);
+}
+.remote-pairing-expiry {
+  margin: 0;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+}
+.remote-pairing-address {
+  display: grid;
+  gap: 8px;
+  font-size: var(--type-body);
+}
+.remote-pairing-address > div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.remote-pairing-address input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-height);
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-control);
+  background: var(--soft);
+  color: var(--foreground);
+  font-size: var(--type-secondary);
+}
+.remote-pairing-refresh {
+  display: flex;
+  justify-content: center;
+  margin-top: 16px;
+}
+.remote-pairing-guide {
+  margin-top: 20px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  font-size: var(--type-body);
+}
+.remote-pairing-guide h3 {
+  margin: 0 0 8px;
+  font-size: var(--type-body);
+  font-weight: 500;
+}
+.remote-pairing-guide ul {
+  margin: 0;
+  padding-left: 20px;
+  list-style: disc;
+  display: grid;
+  gap: 8px;
+}
+.remote-pairing-guide > p {
+  margin: 12px 0 0;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+}
+.remote-pairing-network-hint {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.remote-approval-code {
+  display: block;
+  text-align: center;
+  font-size: 32px;
+  letter-spacing: 0.2em;
+  font-variant-numeric: tabular-nums;
+  margin-block: 20px;
+}
+.floating-transcript > header,
+.floating-transcript-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+.floating-transcript-title {
+  min-width: 0;
+  flex-shrink: 0;
+}
+.floating-transcript > header {
+  flex-wrap: nowrap;
 }
 .speech-section-heading {
   display: flex;
@@ -3922,27 +4116,15 @@ p {
   gap: 8px;
   min-height: 18px;
 }
-.speech-device-heading > svg,
-.speech-device-heading > span {
-  color: var(--muted);
-}
 .speech-device-heading strong {
   font-weight: 500;
 }
 .speech-device-heading > span {
+  color: var(--muted);
   font-size: var(--type-secondary);
-}
-.speech-device-heading > input {
-  margin-left: auto;
 }
 .speech-device.is-disabled .speech-device-heading {
   color: var(--muted);
-}
-.speech-controls input[type='checkbox'] {
-  width: 14px;
-  height: 14px;
-  flex-shrink: 0;
-  accent-color: var(--accent);
 }
 .speech-controls .speech-select {
   width: 100%;
@@ -4009,34 +4191,58 @@ p {
 .interview-start-summary {
   margin: 0;
   display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px 24px;
+  gap: 8px;
   padding: 16px;
   background: var(--soft);
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
 }
-.interview-start-summary > div {
+.interview-start-summary-group {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+}
+.interview-start-summary-group + .interview-start-summary-group {
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+}
+.interview-start-summary-group > div {
+  display: grid;
+  grid-template-columns: minmax(0, min(36%, 140px)) minmax(0, 1fr);
+  align-items: baseline;
+  gap: 16px;
   min-width: 0;
 }
 .interview-start-dialog .interview-start-summary {
   padding: 12px;
-  gap: 12px 24px;
 }
 .interview-start-summary dt {
+  min-width: 0;
   font-size: var(--type-secondary);
   color: var(--muted);
-  margin-bottom: 6px;
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 .interview-start-summary dd {
+  min-width: 0;
   margin: 0;
   font-size: var(--type-body);
   color: var(--foreground);
   overflow-wrap: anywhere;
 }
-.interview-start-dialog .interview-start-description {
-  font-size: var(--type-body);
-  margin-top: 16px;
+.interview-start-summary-models dd {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+}
+.interview-start-summary-value,
+.interview-start-summary-meta {
+  min-width: 0;
+  max-width: 100%;
+}
+.interview-start-summary-meta {
+  color: var(--accent);
 }
 .reasoning-summary {
   margin: 8px 0 16px;
@@ -4352,7 +4558,8 @@ details[open] > summary > .disclosure-chevron {
   height: var(--icon-button-size);
   min-height: var(--icon-button-size);
 }
-.floating-toggle.ui-button {
+.floating-toggle.ui-button,
+.floating-shortcuts-toggle.ui-button {
   border: 1px solid var(--border);
   padding: 3px 10px;
   height: 26px;
@@ -4362,10 +4569,133 @@ details[open] > summary > .disclosure-chevron {
   font-size: var(--type-secondary);
   background: transparent;
 }
-.floating-toggle.ui-button[aria-pressed='true'] {
+.floating-toggle.ui-button[aria-pressed='true'],
+.floating-shortcuts-toggle.ui-button[aria-expanded='true'] {
   background: var(--selected);
   color: var(--foreground);
   border-color: var(--muted);
+}
+.floating-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.floating-shortcuts-viewport {
+  width: 100vw;
+  height: 100dvh;
+}
+.floating-shortcut-help {
+  position: relative;
+  flex: 1;
+}
+.floating-shortcut-help > header {
+  flex-shrink: 0;
+  padding: 10px 14px 4px;
+}
+.floating-shortcut-help > .floating-scroll {
+  padding: 4px 14px 14px;
+}
+.floating-shortcut-help dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  font-size: var(--type-body);
+  line-height: var(--line-body);
+}
+.floating-shortcut-help dl > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.floating-shortcut-help dd {
+  flex-shrink: 0;
+  margin: 0;
+  color: var(--muted);
+}
+.floating-shortcut-help kbd {
+  font: inherit;
+}
+.interview-input-mode {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.interview-input-mode h3 {
+  margin: 0;
+  font-size: var(--type-body);
+  font-weight: 500;
+  white-space: nowrap;
+}
+.interview-input-segmented {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(max-content, 1fr));
+  grid-template-rows: minmax(0, 1fr);
+  flex: 0 0 auto;
+  width: max-content;
+  min-width: min(100%, var(--settings-control-width));
+  max-width: 100%;
+  margin-left: auto;
+  height: var(--control-height);
+  box-sizing: border-box;
+  gap: 6px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  corner-shape: round;
+  background: var(--soft);
+}
+.interview-input-thumb {
+  position: absolute;
+  inset: 4px auto 4px 4px;
+  width: calc((100% - 14px) / 2);
+  border-radius: 999px;
+  corner-shape: round;
+  background: color-mix(in srgb, var(--muted) 28%, var(--soft));
+  transition: transform var(--panel-motion-duration) var(--panel-motion-easing);
+  pointer-events: none;
+}
+.interview-input-segmented[data-selected-index='1'] .interview-input-thumb {
+  transform: translateX(calc(100% + 6px));
+}
+:root.desktop-ui .interview-input-segmented .ui-button {
+  position: relative;
+  z-index: 1;
+  min-width: 0;
+  height: 100%;
+  min-height: 0;
+  padding: 0 10px;
+  line-height: var(--line-control);
+  white-space: nowrap;
+  border: 0;
+  border-radius: 999px;
+  corner-shape: round;
+  background: transparent;
+  box-shadow: none;
+  color: var(--muted);
+  font-size: var(--type-body);
+  font-weight: 500;
+}
+:root.desktop-ui .interview-input-segmented .ui-button[aria-checked='true'] {
+  color: var(--foreground);
+}
+:root.desktop-ui .interview-input-segmented .ui-button:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--focus);
+}
+.interview-input-unavailable {
+  display: block;
+  flex-basis: 100%;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  font-weight: 400;
+  line-height: var(--line-secondary);
+}
+@media (prefers-reduced-motion: reduce) {
+  .interview-input-thumb {
+    transition: none;
+  }
 }
 .toggle-dot {
   width: 12px;
@@ -5577,11 +5907,18 @@ details[open] > summary > .disclosure-chevron {
 .interview-ready-badges {
   position: relative;
   min-width: 0;
+  flex: 1;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 5px;
+}
+.interview-ready-pair {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  gap: inherit;
 }
 .interview-ready-badge {
   display: inline-flex;
@@ -6058,8 +6395,8 @@ h4,
 .floating-composer > div .ui-button,
 .floating-controls .ui-button,
 .floating-toggle.ui-button,
+.floating-shortcuts-toggle.ui-button,
 .settings-usage .ui-button,
-.speech-controls .speech-section-heading .ui-button,
 .markdown-code-block > header .ui-button,
 .dialog-heading .ui-button,
 .profile-section-actions .ui-button,
@@ -7082,7 +7419,16 @@ svg[data-ui-icon] {
 .interview-settings-dialog .dialog-scroll {
   display: block;
 }
+.interview-settings-dialog .speech-setting-row {
+  grid-template-columns: minmax(0, 1fr) minmax(0, min(60%, var(--settings-control-width)));
+}
+.floating-viewport .interview-settings-dialog {
+  max-width: min(90vw, calc(var(--interview-width, 100vw) * 0.9));
+  max-height: min(85dvh, calc(var(--interview-height, 100dvh) * 0.85));
+  bottom: max(0px, calc(100dvh - var(--interview-height, 100dvh)));
+}
 .interview-start-dialog .modal-footer .interview-start-description {
+  color: var(--muted);
   margin: 0 0 12px;
   font-size: 12px;
   line-height: 1.6;

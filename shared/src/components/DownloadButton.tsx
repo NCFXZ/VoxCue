@@ -9,6 +9,7 @@ export function DownloadButton({
   status,
   iconOnly = false,
   hoverLabel,
+  cancelDelayMs = 1000,
   className = '',
   onCancel,
 }: {
@@ -17,6 +18,7 @@ export function DownloadButton({
   status?: string;
   iconOnly?: boolean;
   hoverLabel?: string;
+  cancelDelayMs?: number;
   className?: string;
   onCancel(): void;
 }) {
@@ -59,9 +61,9 @@ export function DownloadButton({
   }, [iconOnly]);
   useEffect(() => {
     // The pointer can still be over the original download button when it changes.
-    const timer = setTimeout(() => setCancelReady(true), 1000);
+    const timer = setTimeout(() => setCancelReady(true), cancelDelayMs);
     return () => clearTimeout(timer);
-  }, []);
+  }, [cancelDelayMs]);
   const value =
     progress !== null && Number.isFinite(progress)
       ? Math.max(0, Math.min(100, progress))

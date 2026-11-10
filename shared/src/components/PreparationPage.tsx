@@ -37,6 +37,10 @@ import type {
   InterviewConfiguration,
 } from '../../electron/contracts/speech';
 import { useInterviewSettings } from '../stores/interviewSettings';
+import { resolveInterviewInput, type InterviewInputMode } from '../services/interviewInput';
+import { InterviewInputModeControl } from './InterviewInputModeControl';
+import { RemoteConnectionStatus } from './RemoteConnection';
+import { useHeightTransition } from './ui/useHeightTransition';
 import { Modal } from './ui/modal';
 import { ProfileProposal } from './ProfileProposal';
 import { PreparationGuide } from './PreparationGuide';
@@ -213,6 +217,12 @@ export function PreparationPage({
   const [interviewConfiguration, setInterviewConfiguration] = useState(
     defaultInterviewConfiguration,
   );
+  const audioSummary = useRef<HTMLDListElement>(null);
+  const accessChecks = useRef<HTMLDivElement>(null);
+  useHeightTransition(
+    `${confirmInterview}:${interviewConfiguration.inputMode ?? 'remote'}:${checkingAccess}`,
+    () => [audioSummary.current, accessChecks.current],
+  );
   const interviewSpeech = speechSelection(interviewConfiguration.options);
   const interviewProvider = useModelProvider(interviewConfiguration.modelId);
   const [infoOpen, setInfoOpen] = useState(false);
@@ -307,6 +317,30 @@ export function PreparationPage({
     const text = input;
     void state.send(text);
   };
+  const startConfiguration = () => {
+    const settings = useInterviewSettings.getState();
+    return resolveInterviewInput(
+      resolveInterviewConfiguration(settings.configuration, connection.models, connection.live),
+      settings.inputMode,
+    );
+  };
+  const changeInputMode = (inputMode: InterviewInputMode) => {
+    if (openingInterview || testingAudio || inputMode === interviewSettings.inputMode) return;
+    const settings = useInterviewSettings.getState();
+    settings.setInputMode(inputMode);
+    if (useInterviewSettings.getState().inputMode !== inputMode) {
+      setInterviewError(useInterviewSettings.getState().error);
+      return;
+    }
+    ++accessAttempt.current;
+    setAccessReport(null);
+    setCheckingAccess(true);
+    setInterviewDevices([]);
+    const configuration = startConfiguration();
+    configuration.profile = interviewConfiguration.profile;
+    configuration.knowledgeBaseId = interviewConfiguration.knowledgeBaseId;
+    setInterviewConfiguration(configuration);
+  };
   const beginInterview = () => {
     if (!componentReady(selectedSpeechComponent)) return;
     if (state.selectedKnowledgeBaseId && !componentReady('rag')) {
@@ -314,20 +348,18 @@ export function PreparationPage({
       return;
     }
     setInterviewError(null);
-    const configuration = resolveInterviewConfiguration(
-      interviewSettings.configuration,
-      connection.models,
-      connection.live,
-    );
+    setAccessReport(null);
+    setCheckingAccess(true);
+    const configuration = startConfiguration();
     configuration.profile = structuredClone(state.info);
     configuration.knowledgeBaseId = state.selectedKnowledgeBaseId;
     setInterviewDevices([]);
     setInterviewConfiguration(configuration);
     setConfirmInterview(true);
-    void checkAccess(configuration);
   };
   const audioName = (source: 'system' | 'microphone') => {
-    if (!interviewConfiguration.options.sources.includes(source)) return t('不使用麦克风');
+    if (source === 'microphone' && !interviewConfiguration.options.sources.includes(source))
+      return t('不使用麦克风');
     const id = interviewConfiguration.options[source];
     if (
       accessReport?.checks.some(
@@ -384,6 +416,7 @@ export function PreparationPage({
   );
   const checkAccess = async (configuration: InterviewConfiguration) => {
     const attempt = ++accessAttempt.current;
+    const current = () => attempt === accessAttempt.current;
     setCheckingAccess(true);
     setAccessReport(null);
     setInterviewError(null);
@@ -392,23 +425,44 @@ export function PreparationPage({
         const selectedBase = (await localKnowledge.listBases()).find(
           (base) => base.id === configuration.knowledgeBaseId,
         );
-        if (attempt !== accessAttempt.current) return;
+        if (!current()) return;
         if (!selectedBase) throw Error('所选面试知识库已删除，请在个人信息中重新选择。');
         setInterviewKnowledgeName(selectedBase.name);
       } else setInterviewKnowledgeName('不使用知识库');
+      if (!current()) return;
       const report = await window.desktop!.checkInterviewAccess(configuration);
-      if (attempt !== accessAttempt.current) return;
+      if (!current()) return;
       setAccessReport(report);
       setInterviewDevices(report.devices);
     } catch (error) {
-      if (attempt === accessAttempt.current)
+      if (current())
         setInterviewError(
           error instanceof Error ? error.message : '无法检查面试权限，请重新检查。',
         );
     } finally {
-      if (attempt === accessAttempt.current) setCheckingAccess(false);
+      queueMicrotask(() => {
+        if (current()) setCheckingAccess(false);
+      });
     }
   };
+  useEffect(() => {
+    if (!confirmInterview) return;
+    ++accessAttempt.current;
+    setAccessReport(null);
+    const configuration = startConfiguration();
+    configuration.profile = interviewConfiguration.profile;
+    configuration.knowledgeBaseId = interviewConfiguration.knowledgeBaseId;
+    setInterviewConfiguration(configuration);
+    if (connection.live && !connection.loading && connection.models.length)
+      void checkAccess(configuration);
+    else setCheckingAccess(false);
+  }, [
+    confirmInterview,
+    interviewSettings.inputMode,
+    connection.live,
+    connection.loading,
+    connection.models,
+  ]);
   useEffect(() => {
     if (!confirmInterview || !window.desktop?.screenCapturePermissionSupported) return;
     let active = true;
@@ -483,10 +537,10 @@ export function PreparationPage({
           footer={
             <>
               <p className="interview-start-description">
-                {t('音频仅在本机处理，不保存。')}
+                {t('音频本机处理，不保存。')}
                 {interviewConfiguration.mode === 'local' &&
                   interviewConfiguration.aiEnabled &&
-                  t(' 回答所需文字与资料会发送至 {0}。', [interviewProvider.dataRecipient])}
+                  t(' 回答资料发至 {0}。', [interviewProvider.dataRecipient])}
               </p>
               <div className="interview-start-actions">
                 <Button
@@ -509,6 +563,9 @@ export function PreparationPage({
                     testingAudio ||
                     checkingAccess ||
                     !accessReport?.ready ||
+                    !speechReady ||
+                    (!!state.selectedKnowledgeBaseId && !ragReady) ||
+                    !connection.live ||
                     !interviewConfiguration.modelId
                   }
                   onClick={async () => {
@@ -543,217 +600,279 @@ export function PreparationPage({
             }
           }}
         >
-          <dl className="interview-start-summary" aria-label={t('当前面试设置')}>
-            <div className="interview-start-knowledge">
-              <dt>{t('面试知识库')}</dt>
-              <dd>{state.selectedKnowledgeBaseId ? interviewKnowledgeName : t('不使用知识库')}</dd>
-            </div>
-            <div>
-              <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
-              <dd className={lowUsage ? 'account-usage-low' : undefined}>
-                {!connection.live ? (
-                  t('未连接 AI 服务')
-                ) : connection.loadingUsage ? (
-                  t('正在读取…')
-                ) : (
-                  <AccountUsageSummary usage={connection.usage} showHeading={false} mode="all" />
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>{t('面试官 · 系统音频')}</dt>
-              <dd>
-                {checkingAccess ? (
-                  <AccessSkeleton className="interview-access-device-slot">
-                    {audioName('system')}
-                  </AccessSkeleton>
-                ) : (
-                  audioName('system')
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>{t('面试者 · 麦克风')}</dt>
-              <dd>
-                {checkingAccess && interviewConfiguration.options.sources.includes('microphone') ? (
-                  <AccessSkeleton className="interview-access-device-slot">
-                    {audioName('microphone')}
-                  </AccessSkeleton>
-                ) : (
-                  audioName('microphone')
-                )}
-              </dd>
-            </div>
-            <div>
-              <dt>{t('语音模型')}</dt>
-              <dd>{t(speechModelLabels[interviewSpeech.speechModel])}</dd>
-            </div>
-            <div>
-              <dt>{t('推理设备')}</dt>
-              <dd>{t(inferenceDeviceLabels[interviewSpeech.inferenceDevice])}</dd>
-            </div>
-            <div>
-              <dt>{t('回答模型')}</dt>
-              <dd>
-                {interviewConfiguration.aiEnabled
-                  ? (connection.models.find((model) => model.id === interviewConfiguration.modelId)
-                      ?.label ?? interviewConfiguration.modelId)
-                  : t('未选择模型')}
-              </dd>
-            </div>
-            <div>
-              <dt>{t('思考强度')}</dt>
-              <dd>{t(effortLabels[interviewConfiguration.effort])}</dd>
-            </div>
-          </dl>
-          <section
-            className="interview-access"
-            aria-label={t('权限与设备检查')}
-            aria-busy={checkingAccess}
-          >
-            <h3>{t('设备与权限')}</h3>
-            <AudioCheck
-              key={accessAttempt.current}
-              options={interviewConfiguration.options}
-              disabled={openingInterview || checkingAccess}
-              onBusyChange={setTestingAudio}
-            >
-              {({ button, result }) =>
-                checkingAccess ? (
-                  <>
-                    <p className="sr-only" role="status">
-                      {t('正在检查权限与音频设备…')}
-                    </p>
-                    <ul className="interview-access-list" aria-hidden="true">
-                      {interviewConfiguration.options.sources.map((source) => (
-                        <li key={source}>
-                          <div className="interview-access-row">
-                            <span>{source === 'microphone' ? t('麦克风') : t('系统音频')}</span>
-                            <div className="interview-access-controls">
-                              <AccessSkeleton className="interview-access-status-slot">
-                                <span className="interview-access-status">
-                                  <Check size={14} />
-                                  {t(audioAccessLabels.granted)}
-                                </span>
-                              </AccessSkeleton>
-                              <AccessSkeleton className="interview-access-test-slot">
-                                {button(source, false)}
-                              </AccessSkeleton>
-                            </div>
-                          </div>
-                        </li>
-                      ))}
-                      {window.desktop?.screenCapturePermissionSupported && (
-                        <li aria-label={t('屏幕捕获权限检查')}>
-                          <div className="interview-access-row">
-                            <span>{t('屏幕截图')}</span>
-                            <AccessSkeleton className="interview-access-status-slot">
-                              <span className="interview-access-status">
-                                <Check size={14} />
-                                {t(
-                                  screenAccessLabels[
-                                    window.desktop.platform === 'windows'
-                                      ? 'not-required'
-                                      : 'granted'
-                                  ],
-                                )}
-                              </span>
-                            </AccessSkeleton>
-                          </div>
-                        </li>
-                      )}
-                    </ul>
-                  </>
-                ) : (
-                  <ul className="interview-access-list">
-                    {accessReport?.checks.map((check) => (
-                      <li key={check.source}>
-                        <div className="interview-access-row">
-                          <span>{check.source === 'microphone' ? t('麦克风') : t('系统音频')}</span>
-                          <div className="interview-access-controls">
-                            <span
-                              className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
-                            >
-                              {check.status === 'granted' ? <Check size={14} /> : <X size={14} />}
-                              {t(audioAccessLabels[check.status])}
-                            </span>
-                            {button(check.source, check.status === 'granted')}
-                          </div>
-                        </div>
-                        {result(check.source)}
-                        {check.status !== 'granted' && (
-                          <p className="interview-access-detail danger-text">{t(check.message)}</p>
-                        )}
-                      </li>
-                    ))}
-                    {screenAccess && (
-                      <li aria-label={t('屏幕捕获权限检查')}>
-                        <div className="interview-access-row">
-                          <span>{t('屏幕截图')}</span>
-                          <span className="interview-access-status">
-                            {screenReady ? <Check size={14} /> : <Monitor size={14} />}
-                            {t(screenAccessLabels[screenAccess.status])}
-                          </span>
-                        </div>
-                        {!screenReady && (
-                          <p className="interview-access-detail">
-                            {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
-                              `${t(screenAccess.message)} `}
-                            {t('可继续纯语音面试，截图需授权。')}
-                          </p>
-                        )}
-                      </li>
+          <InterviewInputModeControl
+            value={interviewSettings.inputMode}
+            onChange={changeInputMode}
+            disabled={openingInterview || testingAudio}
+          />
+          <div className="interview-start-content">
+            <div className="interview-start-summary" role="group" aria-label={t('当前面试设置')}>
+              <dl className="interview-start-summary-group">
+                <div className="interview-start-knowledge">
+                  <dt>{t('面试知识库')}</dt>
+                  <dd>
+                    {state.selectedKnowledgeBaseId ? interviewKnowledgeName : t('不使用知识库')}
+                  </dd>
+                </div>
+                <div>
+                  <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
+                  <dd className={lowUsage ? 'account-usage-low' : undefined}>
+                    {!connection.live ? (
+                      t('未连接 AI 服务')
+                    ) : connection.loadingUsage ? (
+                      t('正在读取…')
+                    ) : (
+                      <AccountUsageSummary
+                        usage={connection.usage}
+                        showHeading={false}
+                        mode="all"
+                      />
                     )}
-                  </ul>
-                )
-              }
-            </AudioCheck>
-            <div className="interview-access-actions">
-              <Button
-                variant="ghost"
-                style={{ width: startActionWidth, paddingInline: 8 }}
-                disabled={openingInterview || checkingAccess || testingAudio}
-                onClick={() => void checkAccess(interviewConfiguration)}
-              >
-                <Refresh size={16} />
-                {t('重新检查')}
-              </Button>
-              {!checkingAccess &&
-                accessReport?.checks.some(
-                  (check) =>
-                    (check.source === 'microphone' && check.status === 'denied') ||
-                    (window.desktop?.platform === 'macos' &&
-                      check.source === 'system' &&
-                      check.status !== 'granted'),
-                ) && (
-                  <Button
-                    variant="outline"
-                    onClick={() =>
-                      void window
-                        .desktop!.openMicrophoneSettings(
-                          window.desktop?.platform === 'macos'
-                            ? accessReport?.checks.find((check) => check.status !== 'granted')
-                                ?.source
-                            : undefined,
-                        )
-                        .catch(() =>
-                          setInterviewError('无法打开系统设置，请手动打开音频隐私设置。'),
-                        )
-                    }
-                  >
-                    <Settings size={16} />
-                    {window.desktop?.platform === 'macos'
-                      ? t('打开音频权限设置')
-                      : t('打开麦克风权限设置')}
-                  </Button>
+                  </dd>
+                </div>
+              </dl>
+              <dl ref={audioSummary} className="interview-start-summary-group">
+                {interviewConfiguration.inputMode !== 'transcription' && (
+                  <div>
+                    <dt>{t('系统音频 · 面试官')}</dt>
+                    <dd>
+                      {checkingAccess ? (
+                        <AccessSkeleton className="interview-access-device-slot">
+                          {audioName('system')}
+                        </AccessSkeleton>
+                      ) : (
+                        audioName('system')
+                      )}
+                    </dd>
+                  </div>
                 )}
+                <div>
+                  <dt>{t('麦克风 · 面试者')}</dt>
+                  <dd>
+                    {checkingAccess &&
+                    interviewConfiguration.options.sources.includes('microphone') ? (
+                      <AccessSkeleton className="interview-access-device-slot">
+                        {audioName('microphone')}
+                      </AccessSkeleton>
+                    ) : (
+                      audioName('microphone')
+                    )}
+                  </dd>
+                </div>
+              </dl>
+              <dl className="interview-start-summary-group interview-start-summary-models">
+                <div>
+                  <dt>{t('回答模型')}</dt>
+                  <dd>
+                    <span className="interview-start-summary-value">
+                      {interviewConfiguration.aiEnabled
+                        ? (connection.models.find(
+                            (model) => model.id === interviewConfiguration.modelId,
+                          )?.label ?? interviewConfiguration.modelId)
+                        : t('未选择模型')}
+                    </span>
+                    <span
+                      className="interview-start-summary-meta"
+                      role="group"
+                      aria-label={t('思考强度')}
+                    >
+                      {t(effortLabels[interviewConfiguration.effort])}
+                    </span>
+                  </dd>
+                </div>
+                <div>
+                  <dt>{t('语音模型')}</dt>
+                  <dd>
+                    <span className="interview-start-summary-value">
+                      {t(speechModelLabels[interviewSpeech.speechModel])}
+                    </span>
+                    <span
+                      className="interview-start-summary-meta"
+                      role="group"
+                      aria-label={t('推理设备')}
+                    >
+                      {t(inferenceDeviceLabels[interviewSpeech.inferenceDevice])}
+                    </span>
+                  </dd>
+                </div>
+              </dl>
             </div>
-          </section>
-          {interviewError && (
-            <p role="alert" className="danger-text">
-              {t(interviewError)}
-            </p>
-          )}
+            <section
+              className="interview-access"
+              aria-label={t('权限与设备检查')}
+              aria-busy={checkingAccess}
+            >
+              <h3>{t('设备与权限')}</h3>
+              <div ref={accessChecks} className="interview-access-checks">
+                <AudioCheck
+                  key={`audio-check-${accessAttempt.current}`}
+                  options={interviewConfiguration.options}
+                  disabled={openingInterview || checkingAccess}
+                  onBusyChange={setTestingAudio}
+                >
+                  {({ button, result }) =>
+                    checkingAccess ? (
+                      <>
+                        <p className="sr-only" role="status">
+                          {t('正在检查权限与音频设备…')}
+                        </p>
+                        <ul className="interview-access-list" aria-hidden="true">
+                          {interviewConfiguration.options.sources.map((source) => (
+                            <li key={source}>
+                              <div className="interview-access-row">
+                                <span>{source === 'microphone' ? t('麦克风') : t('系统音频')}</span>
+                                <div className="interview-access-controls">
+                                  <AccessSkeleton className="interview-access-status-slot">
+                                    <span className="interview-access-status">
+                                      <Check size={14} />
+                                      {t(audioAccessLabels.granted)}
+                                    </span>
+                                  </AccessSkeleton>
+                                  <AccessSkeleton className="interview-access-test-slot">
+                                    {button(source, false)}
+                                  </AccessSkeleton>
+                                </div>
+                              </div>
+                            </li>
+                          ))}
+                          {window.desktop?.screenCapturePermissionSupported && (
+                            <li aria-label={t('屏幕捕获权限检查')}>
+                              <div className="interview-access-row">
+                                <span>{t('屏幕截图')}</span>
+                                <AccessSkeleton className="interview-access-status-slot">
+                                  <span className="interview-access-status">
+                                    <Check size={14} />
+                                    {t(
+                                      screenAccessLabels[
+                                        window.desktop.platform === 'windows'
+                                          ? 'not-required'
+                                          : 'granted'
+                                      ],
+                                    )}
+                                  </span>
+                                </AccessSkeleton>
+                              </div>
+                            </li>
+                          )}
+                          <li>
+                            <div className="interview-access-row">
+                              <span>{t('远程连接')}</span>
+                              <RemoteConnectionStatus />
+                            </div>
+                          </li>
+                        </ul>
+                      </>
+                    ) : (
+                      <ul className="interview-access-list">
+                        {accessReport?.checks.map((check) => (
+                          <li key={check.source}>
+                            <div className="interview-access-row">
+                              <span>
+                                {check.source === 'microphone' ? t('麦克风') : t('系统音频')}
+                              </span>
+                              <div className="interview-access-controls">
+                                <span
+                                  className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
+                                >
+                                  {check.status === 'granted' ? (
+                                    <Check size={14} />
+                                  ) : (
+                                    <X size={14} />
+                                  )}
+                                  {t(audioAccessLabels[check.status])}
+                                </span>
+                                {button(check.source, check.status === 'granted')}
+                              </div>
+                            </div>
+                            {result(check.source)}
+                            {check.status !== 'granted' && (
+                              <p className="interview-access-detail danger-text">
+                                {t(check.message)}
+                              </p>
+                            )}
+                          </li>
+                        ))}
+                        {screenAccess && (
+                          <li aria-label={t('屏幕捕获权限检查')}>
+                            <div className="interview-access-row">
+                              <span>{t('屏幕截图')}</span>
+                              <span className="interview-access-status">
+                                {screenReady ? <Check size={14} /> : <Monitor size={14} />}
+                                {t(screenAccessLabels[screenAccess.status])}
+                              </span>
+                            </div>
+                            {!screenReady && (
+                              <p className="interview-access-detail">
+                                {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
+                                  `${t(screenAccess.message)} `}
+                                {t('可继续纯语音面试，截图需授权。')}
+                              </p>
+                            )}
+                          </li>
+                        )}
+                        <li>
+                          <div className="interview-access-row">
+                            <span>{t('远程连接')}</span>
+                            <RemoteConnectionStatus />
+                          </div>
+                        </li>
+                      </ul>
+                    )
+                  }
+                </AudioCheck>
+              </div>
+              <div className="interview-access-actions">
+                <Button
+                  variant="ghost"
+                  style={{ width: startActionWidth, paddingInline: 8 }}
+                  disabled={openingInterview || checkingAccess || testingAudio}
+                  onClick={() => void checkAccess(interviewConfiguration)}
+                >
+                  <Refresh size={16} />
+                  {t('重新检查')}
+                </Button>
+                {!checkingAccess &&
+                  accessReport?.checks.some(
+                    (check) =>
+                      (check.source === 'microphone' && check.status === 'denied') ||
+                      (window.desktop?.platform === 'macos' &&
+                        check.source === 'system' &&
+                        check.status !== 'granted'),
+                  ) && (
+                    <Button
+                      variant="outline"
+                      onClick={() =>
+                        void window
+                          .desktop!.openMicrophoneSettings(
+                            window.desktop?.platform === 'macos'
+                              ? accessReport?.checks.find((check) => check.status !== 'granted')
+                                  ?.source
+                              : undefined,
+                          )
+                          .catch(() =>
+                            setInterviewError('无法打开系统设置，请手动打开音频隐私设置。'),
+                          )
+                      }
+                    >
+                      <Settings size={16} />
+                      {window.desktop?.platform === 'macos'
+                        ? t('打开音频权限设置')
+                        : t('打开麦克风权限设置')}
+                    </Button>
+                  )}
+              </div>
+            </section>
+            {interviewSettings.error && (
+              <p role="alert" className="danger-text">
+                {t(interviewSettings.error)}
+              </p>
+            )}
+            {interviewError && (
+              <p role="alert" className="danger-text">
+                {t(interviewError)}
+              </p>
+            )}
+          </div>
         </Modal>
       )}
       <div

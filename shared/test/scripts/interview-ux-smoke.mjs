@@ -69,18 +69,20 @@ async function capture(page, name) {
 async function settingsLayout(dialog) {
   const result = await dialog.evaluate((element) => {
     const rect = (node) => node.getBoundingClientRect().toJSON();
-    const rows = [...element.querySelectorAll('.speech-setting-row')].map((row) => {
-      const label = row.querySelector('.speech-setting-label');
-      const text = label.querySelector('label') ?? label;
-      return {
-        text: text.textContent,
-        writingMode: getComputedStyle(text).writingMode,
-        label: rect(label),
-        control: rect(row.querySelector(':scope > button, :scope > .frosted-slider')),
-        row: rect(row),
-        overflow: row.scrollWidth > row.clientWidth,
-      };
-    });
+    const rows = [...element.querySelectorAll('.speech-setting-row')]
+      .filter((row) => row.querySelector(':scope > button, :scope > .frosted-slider'))
+      .map((row) => {
+        const label = row.querySelector('.speech-setting-label');
+        const text = label.querySelector('label') ?? label;
+        return {
+          text: text.textContent,
+          writingMode: getComputedStyle(text).writingMode,
+          label: rect(label),
+          control: rect(row.querySelector(':scope > button, :scope > .frosted-slider')),
+          row: rect(row),
+          overflow: row.scrollWidth > row.clientWidth,
+        };
+      });
     return {
       rows,
       sections: [...element.querySelectorAll('.interview-settings-section')].map(rect),
@@ -142,15 +144,19 @@ async function readinessLayout(dialog, untilReady = false) {
       footer: rect(element.querySelector('.modal-footer')),
       rows: [...element.querySelectorAll('.interview-access-row')].map(rect),
       statuses: [...element.querySelectorAll('.interview-access-row')].map((row) =>
-        rect(row.querySelector('.interview-access-status-slot, .interview-access-status')),
+        rect(
+          row.querySelector(
+            '.interview-access-status-slot, .interview-access-status, .remote-connection-status',
+          ),
+        ),
       ),
       tests: [...element.querySelectorAll('.interview-access-row')]
         .map((row) => row.querySelector('.interview-access-test-slot, button'))
         .filter(Boolean)
         .map(rect),
-      devices: [...element.querySelectorAll('.interview-start-summary > div')]
+      devices: [...element.querySelectorAll('.interview-start-summary-group > div')]
         .filter((row) =>
-          ['面试官 · 系统音频', '面试者 · 麦克风'].includes(row.querySelector('dt').textContent),
+          ['系统音频 · 面试官', '麦克风 · 面试者'].includes(row.querySelector('dt').textContent),
         )
         .map((row) => rect(row.querySelector('dd'))),
     });
@@ -601,6 +607,12 @@ try {
       globalThis.uxHost = this;
       const devices = globalThis.uxDevices;
       if (call.op === 'devices') return { state: 'idle', model: 'Synthetic', devices };
+      if (call.op === 'start') this.uxInput = structuredClone(call.inputState);
+      if (call.op === 'set-input-state') {
+        this.uxInput = structuredClone(call.state);
+        return { ...this.uxStatus, inputState: this.uxInput };
+      }
+      if (call.op === 'cancel-input-state') return { ...this.uxStatus, inputState: this.uxInput };
       if (call.op === 'switch-recognizer') {
         const previous = this.uxStatus;
         this.emit({ type: 'status', status: { ...previous, switching: 'loading' } });
@@ -863,7 +875,7 @@ try {
         );
         const loading = await pending.evaluate((dialog) => ({
           rows: [...dialog.querySelectorAll('.interview-access-row')].map((row) => {
-            const status = row.querySelector('.interview-access-status');
+            const status = row.querySelector('.interview-access-status, .remote-connection-status');
             return {
               label: row.querySelector(':scope > span').textContent,
               skeletons: row.querySelectorAll('.interview-access-skeleton.quota-skeleton-line')
@@ -874,9 +886,9 @@ try {
                   : '',
             };
           }),
-          devices: [...dialog.querySelectorAll('.interview-start-summary > div')]
+          devices: [...dialog.querySelectorAll('.interview-start-summary-group > div')]
             .filter((row) =>
-              ['面试官 · 系统音频', '面试者 · 麦克风'].includes(
+              ['系统音频 · 面试官', '麦克风 · 面试者'].includes(
                 row.querySelector('dt').textContent,
               ),
             )
@@ -907,10 +919,14 @@ try {
         }));
         assert.deepEqual(
           loading.rows.map((row) => row.label).sort(),
-          ['麦克风', '系统音频', '屏幕截图'].sort(),
+          ['麦克风', '系统音频', '屏幕截图', '远程连接'].sort(),
         );
         assert.ok(
-          loading.rows.every((row) => row.skeletons > 0 && row.status === ''),
+          loading.rows.every((row) =>
+            row.label === '远程连接'
+              ? row.skeletons === 0 && row.status === '未连接'
+              : row.skeletons > 0 && row.status === '',
+          ),
           JSON.stringify(loading.rows),
         );
         assert.equal(loading.devices.length, 2);
@@ -1134,7 +1150,7 @@ try {
   await floating.getByRole('status', { name: '语音模型：正常', exact: true }).waitFor();
   await app.evaluate(() => clearInterval(globalThis.uxLevels));
   const badge = (label, status) =>
-    floating.getByRole('status', { name: `${label}：${status}`, exact: true });
+    floating.getByRole('status', { name: `${label}：${status}`, exact: true, includeHidden: true });
   await badge('系统音频', '正常').waitFor();
   await app.evaluate(() => {
     globalThis.uxHost.emit({ type: 'activity', source: 'microphone', speaking: true, level: 0.08 });
@@ -1310,24 +1326,6 @@ try {
     }
     await moveToBlankCorner();
   }
-  await floating.evaluate(() => {
-    window.uxDialogEvents = [];
-    for (const type of ['pointerdown', 'cancel', 'close'])
-      document.addEventListener(
-        type,
-        (event) => {
-          const target = event.target;
-          window.uxDialogEvents.push({
-            type,
-            trusted: event.isTrusted,
-            tag: target.tagName,
-            label: target.getAttribute?.('aria-label'),
-          });
-          window.uxDialogEvents = window.uxDialogEvents.slice(-20);
-        },
-        true,
-      );
-  });
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
   const devices = floating.getByRole('dialog', { name: '面试设置', exact: true });
   await settingsLayout(devices);
@@ -1350,19 +1348,32 @@ try {
   assert.equal(clearPixels.valid, true, JSON.stringify(clearPixels));
   if (passthrough) {
     await waitNativePassthrough(false);
-    await floating.mouse.move(2, 2);
-    await floating.evaluate(() => new Promise((resolve) => requestAnimationFrame(resolve)));
-    assert.equal(await app.evaluate(() => globalThis.uxIgnored), false);
+    const visible = await floating.locator('.floating-viewport').evaluate((viewport) => {
+      const width =
+        parseFloat(getComputedStyle(viewport).getPropertyValue('--interview-width')) || innerWidth;
+      return { x: (innerWidth - width) / 2 + 2, y: 2 };
+    });
+    await floating.mouse.move(visible.x, visible.y);
+    await waitNativePassthrough(false);
+    if (visible.x > 2) {
+      await floating.mouse.move(2, 2);
+      await waitNativePassthrough(true);
+      await floating.mouse.move(visible.x, visible.y);
+      await waitNativePassthrough(false);
+    }
   }
   // Dismissal consumes the first click on both the transcript and toolbar.
-  await floating.mouse.click(45, 190);
+  const transcriptEdge = await floating.locator('.floating-transcript').boundingBox();
+  await floating.mouse.click(transcriptEdge.x + 5, transcriptEdge.y + 100);
   await devices.waitFor({ state: 'hidden' });
   assert.equal(
     unobscured.equals(await floating.screenshot({ clip: clearCorner, scale: 'css' })),
     true,
     'Closing settings preserves the clear background',
   );
+  await floating.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  await devices.waitFor({ state: 'visible' });
   const end = await floating.getByRole('button', { name: '结束面试', exact: true }).boundingBox();
   await floating.mouse.click(end.x + end.width / 2, end.y + end.height / 2);
   await devices.waitFor({ state: 'hidden' });
@@ -1370,7 +1381,9 @@ try {
     await floating.getByRole('button', { name: '确认结束面试', exact: true }).count(),
     0,
   );
+  await floating.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
   await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  await devices.waitFor({ state: 'visible' });
   assert.equal(await devices.getByRole('button', { name: '刷新设备', exact: true }).count(), 0);
   await app.evaluate(() =>
     globalThis.uxDevices.push({ id: 'output-2', source: 'system', name: '合成播放设备2' }),
@@ -1412,18 +1425,20 @@ try {
   const checkSpeechStatusHeading = async () => {
     const layout = await devices.locator('.speech-model-status').evaluate((status) => {
       const heading = status.closest('.speech-model-heading');
-      const title = heading.querySelector('h4').getBoundingClientRect();
+      const frame = heading.getBoundingClientRect();
       const text = status.getBoundingClientRect();
+      const row = heading.nextElementSibling.getBoundingClientRect();
       return {
         role: status.getAttribute('role'),
-        beside: text.left > title.right,
-        centerOffset: title.top + title.height / 2 - text.top - text.height / 2,
+        aligned: Math.abs(text.left - frame.left) <= 1 / 64,
+        above: text.bottom <= row.top,
+        redundantTitle: heading.querySelector('h4') !== null,
         overflow: heading.scrollWidth > heading.clientWidth,
       };
     });
     assert.equal(layout.role, 'status');
     assert.ok(
-      layout.beside && Math.abs(layout.centerOffset) <= 1 / 64 && !layout.overflow,
+      layout.aligned && layout.above && !layout.redundantTitle && !layout.overflow,
       JSON.stringify(layout),
     );
   };
@@ -1721,7 +1736,9 @@ try {
         await floating.locator('html').evaluate((e) => e.classList.contains('dark')),
         true,
       );
+      await floating.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
       await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+      await devices.waitFor({ state: 'visible' });
       const layout = await settingsLayout(devices);
       const recognition = layout.rows.filter((row) => ['语音模型', '推理设备'].includes(row.text));
       assert.equal(recognition.length, 2);
@@ -1768,22 +1785,6 @@ try {
       realAccounts: false,
     }),
   );
-} catch (error) {
-  for (const window of app.windows().filter((window) => window.url().endsWith('#interview')))
-    console.error(
-      'SETTINGS_DIAGNOSTIC',
-      JSON.stringify(
-        await window.evaluate(() => ({
-          events: window.uxDialogEvents,
-          focused: document.hasFocus(),
-          dialogs: [...document.querySelectorAll('dialog')].map((dialog) => ({
-            label: dialog.getAttribute('aria-label'),
-            open: dialog.open,
-          })),
-        })),
-      ),
-    );
-  throw error;
 } finally {
   if (nativeProbe && originalCursor) nativeProbe('move', originalCursor.x, originalCursor.y);
   await closeUiApp(app);

@@ -82,8 +82,8 @@ try {
         style = getComputedStyle(element);
       const icon = element.querySelector('svg').getBoundingClientRect();
       return {
-        width: rect.width,
-        height: rect.height,
+        width: Math.round(rect.width * 64) / 64,
+        height: Math.round(rect.height * 64) / 64,
         radius: style.borderRadius,
         color: style.color,
         iconWidth: Math.round(icon.width * 100) / 100,
@@ -232,7 +232,7 @@ try {
   await page.locator('.interview-start-trigger').click();
   await page
     .getByRole('dialog', { name: '开始面试', exact: true })
-    .getByText(/发送至 合成服务公司/)
+    .getByText(/回答资料发至 合成服务公司/)
     .waitFor();
   const [floating] = await Promise.all([
     app.waitForEvent('window'),
@@ -243,7 +243,7 @@ try {
     .locator('.floating-answer-meta strong')
     .getByText('合成提供商', { exact: true })
     .waitFor();
-  await sendAppearance(floating, '发送面试问题', 32, 18);
+  await sendAppearance(floating, '发送面试问题', 26, 18);
   await floating.locator('.floating-composer').screenshot({});
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([

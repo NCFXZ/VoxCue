@@ -2,15 +2,20 @@ import { Worker } from 'node:worker_threads';
 import path from 'node:path';
 import type {
   AudioSource,
-  SpeechCall,
   SpeechServiceCall,
   SpeechOptions,
   SpeechEvent,
   SpeechStatus,
   AudioDevice,
+  InterviewInputState,
 } from '../../contracts/speech';
 import type { AudioPacket } from './buffer';
-import { sameAudioCapture, speechSelection } from '../../contracts/speechSettings';
+import {
+  inputSources,
+  inputSourceEnabled,
+  sameAudioCapture,
+  speechSelection,
+} from '../../contracts/speechSettings';
 export interface NativeCapture {
   start(): Promise<void>;
   stop(): Promise<void>;
@@ -52,6 +57,17 @@ export class SpeechController {
   private alignmentDevice?: string;
   private options?: SpeechOptions;
   private reloadAfterStop = false;
+  private inputState: InterviewInputState = { inputMode: 'remote', microphoneMuted: false };
+  private managedInput = false;
+  private blockedInput = new Set<AudioSource>();
+  private inputCleanup = Promise.resolve();
+  private changingInput?: {
+    previous: InterviewInputState;
+    epoch: number;
+    worker?: Worker;
+    added: Map<AudioSource, NativeCapture>;
+    reject(error: Error): void;
+  };
   private switching?: {
     id: number;
     selection: ReturnType<typeof speechSelection>;
@@ -68,12 +84,17 @@ export class SpeechController {
     private qwenDirectory?: string,
   ) {}
   call(call: SpeechServiceCall): Promise<SpeechStatus> {
+    if (call.op === 'set-input-state') return this.setInputState(call.state);
+    if (call.op === 'cancel-input-state') return this.cancelInputState();
     if (call.op === 'switch-recognizer') return this.switchRecognizer(call.options);
     if (call.op === 'cancel-switch') {
       this.cancelSwitch();
       return Promise.resolve(this.status);
     }
-    if (call.op === 'stop' || call.op === 'pause') this.cancelSwitch(false);
+    if (call.op === 'stop' || call.op === 'pause') {
+      this.cancelSwitch(false);
+      void this.cancelInputState().catch(() => {});
+    }
     const result = this.serial.then(() => this.execute(call));
     this.serial = result.then(
       () => {},
@@ -97,6 +118,7 @@ export class SpeechController {
       ...(error ? { error } : {}),
       ...(failureSource ? { failureSource } : {}),
       ...(this.switching ? { switching: this.switching.phase } : {}),
+      ...(this.managedInput ? { inputState: { ...this.inputState } } : {}),
     };
     this.emit({ type: 'status', status: this.status });
     return this.status;
@@ -116,6 +138,8 @@ export class SpeechController {
   }
   private switchRecognizer(options: SpeechOptions): Promise<SpeechStatus> {
     if (
+      this.changingInput ||
+      this.blockedInput.size ||
       this.switching ||
       this.status.state !== 'running' ||
       !this.worker ||
@@ -150,6 +174,178 @@ export class SpeechController {
       });
     });
   }
+  private inputEnabled(source: AudioSource) {
+    return !this.blockedInput.has(source) && inputSourceEnabled(this.inputState, source);
+  }
+  private inputBoundary(worker: Worker, state: InterviewInputState, changed: AudioSource[]) {
+    const id = ++this.sequence;
+    return new Promise<void>((resolve, reject) => {
+      const timer = setTimeout(
+        () => {
+          this.flushers.delete(id);
+          reject(Error('音频输入切换超时，请重新连接音频。'));
+        },
+        this.selection.speechModel === 'qwen' ? 120000 : 10000,
+      );
+      this.flushers.set(id, {
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      });
+      try {
+        worker.postMessage({ op: 'set-input-state', id, state, changed });
+      } catch (error) {
+        clearTimeout(timer);
+        this.flushers.delete(id);
+        reject(error);
+      }
+    });
+  }
+  private setInputState(value: InterviewInputState): Promise<SpeechStatus> {
+    if (
+      !value ||
+      typeof value !== 'object' ||
+      Object.keys(value).some(
+        (key) => !['inputMode', 'microphoneMuted', 'systemAudioMuted'].includes(key),
+      ) ||
+      !['remote', 'transcription'].includes(value.inputMode) ||
+      typeof value.microphoneMuted !== 'boolean' ||
+      (value.systemAudioMuted !== undefined && typeof value.systemAudioMuted !== 'boolean')
+    )
+      return Promise.reject(Error('Invalid interview input state'));
+    if (
+      this.changingInput ||
+      this.blockedInput.size ||
+      this.switching ||
+      !['running', 'paused'].includes(this.status.state) ||
+      !this.options
+    )
+      return Promise.reject(Error('音频输入正在切换或尚未就绪，请稍后重试。'));
+    const state = { ...value },
+      previous = { ...this.inputState };
+    const changed: AudioSource[] =
+      state.inputMode !== previous.inputMode
+        ? ['microphone', 'system']
+        : [
+            ...(state.microphoneMuted !== previous.microphoneMuted ? ['microphone' as const] : []),
+            ...(!!state.systemAudioMuted !== !!previous.systemAudioMuted
+              ? ['system' as const]
+              : []),
+          ];
+    if (!changed.length) {
+      this.managedInput = true;
+      return Promise.resolve(this.state(this.status.state));
+    }
+    this.blockedInput = new Set(changed);
+    return new Promise<SpeechStatus>((resolve, reject) => {
+      const change = {
+        previous,
+        epoch: this.epoch,
+        worker: this.worker,
+        added: new Map<AudioSource, NativeCapture>(),
+        reject,
+      };
+      this.changingInput = change;
+      const active = () => this.changingInput === change && this.epoch === change.epoch;
+      void (async () => {
+        if (this.status.state === 'running') {
+          const required = inputSources(state).filter((source) => !this.captures.has(source));
+          const available = required.length ? await this.adapter.devices(this.helper) : [];
+          if (!active()) return;
+          for (const source of inputSources(state)) {
+            if (this.captures.has(source)) continue;
+            if (!active()) return;
+            if (
+              !available.some(
+                (device) =>
+                  device.source === source &&
+                  (!this.options![source] || device.id === this.options![source]),
+              )
+            )
+              throw Error('所选音频设备已不可用，请刷新设备列表。');
+            const capture = this.capture(source, this.options!, change.epoch);
+            this.captures.set(source, capture);
+            change.added.set(source, capture);
+            await capture.start();
+            if (!active()) return;
+          }
+        }
+        if (!active()) return;
+        if (change.worker) {
+          await this.inputBoundary(change.worker, state, changed);
+        }
+        if (!active()) return;
+        this.inputState = state;
+        this.managedInput = true;
+        this.options = { ...this.options!, sources: inputSources(state) };
+        for (const source of changed) this.processedThrough.delete(source);
+        this.changingInput = undefined;
+        this.blockedInput.clear();
+        resolve(this.state(this.status.state));
+      })().catch(async (error) => {
+        if (!active()) return;
+        // Keep the confirmed old state if a newly required device cannot open.
+        const failure = error instanceof Error ? error : Error('音频输入切换失败。');
+        await this.cancelInputState(failure).catch(() => {});
+      });
+    });
+  }
+  private cancelInputState(error = Error('音频输入切换已取消。')): Promise<SpeechStatus> {
+    const change = this.changingInput;
+    if (!change) return this.inputCleanup.then(() => this.status);
+    this.changingInput = undefined;
+    change.reject(error);
+    const changed = [...this.blockedInput];
+    this.inputCleanup = (async () => {
+      for (const [source, capture] of change.added) {
+        if (this.captures.get(source) === capture) this.captures.delete(source);
+        this.anchors.delete(source);
+        await capture.stop();
+      }
+      if (change.worker && change.worker === this.worker)
+        await this.inputBoundary(change.worker!, change.previous, changed);
+      this.blockedInput.clear();
+    })().catch((failure) => {
+      this.reloadAfterStop = true;
+      this.fail(failure instanceof Error ? failure.message : '音频输入切换失败。');
+      throw failure;
+    });
+    return this.inputCleanup.then(() => this.status);
+  }
+  private capture(source: AudioSource, options: SpeechOptions, epoch: number): NativeCapture {
+    const capture = this.adapter.create(
+      this.helper,
+      source,
+      options[source],
+      (p) => {
+        if (epoch !== this.epoch || this.captures.get(source) !== capture) return;
+        const validClock = !(p.flags & 4) && Number.isFinite(p.timestamp);
+        let anchor = this.anchors.get(source);
+        if (!anchor && validClock) {
+          anchor = { native: p.timestamp, wall: Date.now() };
+          this.anchors.set(source, anchor);
+        }
+        this.audio(
+          source,
+          p.samples,
+          p.rate,
+          p.flags,
+          validClock ? anchor!.wall + p.timestamp - anchor!.native : Date.now(),
+          validClock ? p.timestamp : undefined,
+        );
+      },
+      (message) => {
+        if (epoch === this.epoch && this.captures.get(source) === capture)
+          this.fail(message, source);
+      },
+    );
+    return capture;
+  }
   private load() {
     if (this.ready) return this.ready;
     const worker = new Worker(path.join(__dirname, 'worker.js'));
@@ -170,7 +366,10 @@ export class SpeechController {
           this.alignmentDevice = m.alignmentDevice;
           resolve();
         }
-        if (m.event) this.emit(m.event);
+        if (m.event) {
+          const source = m.event.type === 'segment' ? m.event.segment.source : m.event.source;
+          if (!source || this.inputEnabled(source)) this.emit(m.event);
+        }
         const change = this.switching;
         if (change && m.switchPhase === change.id) {
           change.phase = m.phase;
@@ -224,7 +423,7 @@ export class SpeechController {
               inferenceMs: m.inferenceMs,
             });
         }
-        const completed = m.flushed ?? m.prepared ?? m.closed;
+        const completed = m.flushed ?? m.prepared ?? m.closed ?? m.inputSet;
         if (completed) {
           this.flushers.get(completed)?.resolve();
           this.flushers.delete(completed);
@@ -270,6 +469,7 @@ export class SpeechController {
     return this.ready;
   }
   private progress(source: AudioSource) {
+    if (!this.inputEnabled(source)) return;
     this.emit({
       type: 'audio-progress',
       source,
@@ -285,6 +485,7 @@ export class SpeechController {
     timestamp = Date.now(),
     captureClock?: number,
   ) {
+    if (!this.inputEnabled(source)) return;
     if (flags & 1) {
       this.discontinuities++;
       const now = Date.now();
@@ -357,10 +558,11 @@ export class SpeechController {
     if (!this.worker || this.status.state === 'error')
       throw Error(this.status.error || '语音识别进程已退出，请重新开始。');
   }
-  private async execute(call: SpeechCall): Promise<SpeechStatus> {
+  private async execute(call: SpeechServiceCall): Promise<SpeechStatus> {
     if (call.op === 'status') return this.status;
     if (call.op === 'devices')
       return { ...this.status, devices: await this.adapter.devices(this.helper) };
+    await this.inputCleanup.catch(() => {});
     if (call.op === 'pause' || call.op === 'stop') {
       if (!this.adapter.drainBeforeRetire) ++this.epoch;
       const stopped = await Promise.allSettled(
@@ -426,6 +628,14 @@ export class SpeechController {
     }
     if (call.op !== 'start') throw Error('Invalid speech operation');
     if (this.captures.size) return this.status;
+    this.managedInput = !!call.inputState;
+    this.inputState = call.inputState
+      ? { ...call.inputState }
+      : {
+          inputMode: 'remote',
+          microphoneMuted: !call.options.sources.includes('microphone'),
+        };
+    this.blockedInput.clear();
     this.drainingQwenQueue = false;
     const selection = speechSelection(call.options);
     if (selection.speechModel === 'qwen' && !this.qwenDirectory)
@@ -463,38 +673,19 @@ export class SpeechController {
               reject(error);
             },
           });
-          this.worker!.postMessage({ op: 'prepare', id, sources: call.options.sources });
+          this.worker!.postMessage({
+            op: 'prepare',
+            id,
+            sources: call.options.sources,
+            inputState: this.inputState,
+          });
         });
         this.checkStartup();
       }
       const epoch = ++this.epoch;
       for (const source of call.options.sources) {
         startupFailure = source;
-        const capture = this.adapter.create(
-          this.helper,
-          source,
-          call.options[source],
-          (p) => {
-            if (epoch !== this.epoch) return;
-            const validClock = !(p.flags & 4) && Number.isFinite(p.timestamp);
-            let anchor = this.anchors.get(source);
-            if (!anchor && validClock) {
-              anchor = { native: p.timestamp, wall: Date.now() };
-              this.anchors.set(source, anchor);
-            }
-            this.audio(
-              source,
-              p.samples,
-              p.rate,
-              p.flags,
-              validClock ? anchor!.wall + p.timestamp - anchor!.native : Date.now(),
-              validClock ? p.timestamp : undefined,
-            );
-          },
-          (m) => {
-            if (epoch === this.epoch) this.fail(m, source);
-          },
-        );
+        const capture = this.capture(source, call.options, epoch);
         this.captures.set(source, capture);
         await capture.start();
         this.checkStartup();

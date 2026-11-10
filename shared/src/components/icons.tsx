@@ -50,9 +50,7 @@ import {
   PanelRightExpandRegular,
   Screenshot24Regular,
   Save24Regular,
-  Search24Regular,
   DocumentText24Regular,
-  Eye24Regular,
   FontIncreaseRegular,
   FontDecreaseRegular,
   Cloud24Regular,
@@ -60,6 +58,7 @@ import {
   CloudSync24Regular,
   CloudOff24Regular,
   CloudError24Regular,
+  Keyboard24Regular,
 } from '@fluentui/react-icons';
 
 // A consistent app-level API keeps the UI independent of its icon library.
@@ -84,6 +83,7 @@ function icon(
   );
 }
 export const AudioLines = icon(Mic24Regular);
+export const Keyboard = icon(Keyboard24Regular);
 export const DragGrip = icon(ReOrderDotsVertical24Regular);
 export const ChevronLeft = icon(ChevronLeft24Regular);
 export const ChevronRight = icon(ChevronRight24Regular);
@@ -142,8 +142,6 @@ export const Expand = icon(ArrowMaximize24Regular);
 export const Person = icon(Person24Regular);
 export const Screenshot = icon(Screenshot24Regular);
 export const Save = icon(Save24Regular);
-export const Search = icon(Search24Regular);
 export const FileText = icon(DocumentText24Regular);
-export const Eye = icon(Eye24Regular);
 export const FontIncrease = icon(FontIncreaseRegular);
 export const FontDecrease = icon(FontDecreaseRegular);

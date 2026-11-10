@@ -1,3 +1,11 @@
+## 1.1.0 验证入口
+
+当前范围见 `PROGRESS.md`，完整逐项变化和Mac本机验收见 [1.0.0→1.1.0接续清单](../docs/MACOS_1.1.0_HANDOFF.md)。共享功能矩阵增加 `shortcut-settings`、`interview-badge-layout`、`interview-shortcuts`、`history-scroll`、`mobile-bundle` 和 `mobile-ui`；原生Windows矩阵增加 `speech-input-state`；Windows五档矩阵纳入快捷键设置、设备徽标、实际移动页及聊天阅读位置。按当前 `--list` 与源码调度，不以历史版本段落中的尺寸或快捷键覆盖现行要求。面试输入区当前控件为26px、默认Ctrl+Shift组合；截图为全局Ctrl+Shift+S，面板／转写和截图在整窗隐藏时仍可操作且保持隐藏；录入允许Ctrl/Shift/Alt任一修饰键加主键。
+
+`mobile-ui-smoke.mjs` 使用实际构建页、生产LAN服务和明确的合成控制端口；仅访问本轮私网origin，不加载桌面账号／凭据助手，不采样硬件。检查实际审批、MathML／CSP、中英、320/390/768px控件、草稿、发送／停止、麦克风／自动回答及恢复／刷新。`mobile-bundle`另验资源白名单，`mobile-lan-integration.test.ts`保留真实HTTP/WS到coordinator／store的链路与旧回执隔离。桌面自动化不等于iPhone键盘、安全区和真实网络权限验收。
+
+仍要求完整类型／契约／架构、单测、依赖审计、全功能、安全／对抗、20轮面试、600秒认证公共音频、五档DPI及最终安装／升级／Store Sandbox。物理音频／宿主屏幕采集不纳入，原生矩阵显式排除 `screenshot-performance --native --platform`，改用无参数合成4K处理专项。GUI／原生／推理在解锁owner控制台串行执行；不写测试报告／截图到工作区，临时副本退出清理。
+
 ## 1.0.2 验证入口
 
 当前范围见 `PROGRESS.md`，新增行为及测试发现修复逐项见 [1.0.0→1.0.2 Mac 接续清单](../docs/MACOS_1.0.2_HANDOFF.md)。以实际调度源码和 `functional-suite.mjs --list` 为准；下面的旧版本段落保留历史语境，不表示另一平台已验证。类型/架构/工作区、完整单测、冻结依赖审计、共享功能、原时长长稳、五档缩放和最终包/安装均需按当前平台执行。

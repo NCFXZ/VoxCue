@@ -9,7 +9,7 @@ const final = (patch: Partial<SpeechSegment> = {}): SpeechSegment => ({
   text: '请介绍项目',
   final: true,
   startMs: 0,
-  endMs: 800,
+  endMs: 1000,
   silenceStartMs: 0,
   reason: 'silence',
   ...patch,
@@ -82,10 +82,10 @@ it.each([
   expect(isAutomaticQuestionFiller(text)).toBe(false);
 });
 
-it('800ms分段计入1800ms，音频进度不足时不因墙钟等待而就绪', () => {
+it('一秒断句计入1800ms总门槛，音频进度不足时不因墙钟等待而就绪', () => {
   const gate = new AutomaticQuestionGate();
   gate.final(final());
-  gate.progress(progress(800));
+  gate.progress(progress(1000));
   expect(gate.ready()).toBe(false);
   gate.progress(progress(1799));
   expect(gate.ready()).toBe(false);
@@ -119,7 +119,7 @@ it.each(['sentence', 'limit', 'pause', 'stop', 'discontinuity'] as const)(
     expect(gate.ready()).toBe(false);
   },
 );
-it.each([undefined, NaN, Infinity, 801])('缺失或非法静音起点 %s 不自动发送', (silenceStartMs) => {
+it.each([undefined, NaN, Infinity, 1001])('缺失或非法静音起点 %s 不自动发送', (silenceStartMs) => {
   const gate = new AutomaticQuestionGate();
   gate.progress(progress(10000));
   gate.final(final({ silenceStartMs }));

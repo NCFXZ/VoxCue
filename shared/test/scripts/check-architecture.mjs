@@ -214,6 +214,13 @@ export function boundaryViolations(graph) {
           (target.startsWith('electron/') && !target.startsWith('electron/contracts/')))
       )
         fail('Renderer 只能依赖公开契约，不得访问原生业务或基础设施');
+      if (
+        file.startsWith('src/mobile/') &&
+        target.startsWith('src/') &&
+        !target.startsWith('src/mobile/') &&
+        !['src/components/useFollowScroll.ts', 'src/services/math.ts'].includes(target)
+      )
+        fail('手机页面不得依赖桌面状态、服务或界面；只复用纯滚动和公式工具');
       if (/^src\/(?:stores|services)\//.test(file) && /^src\/components\//.test(target))
         fail('状态和服务不得依赖展示组件');
       if (file.startsWith('electron/') && target.startsWith('src/'))

@@ -340,7 +340,7 @@ export async function verifyContinuousCorners(page, name) {
                   '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,.interview-preview-capsule,' +
                   '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
                   '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,.chat-source-link,.reasoning-slider-track,' +
-                  '.screen-capture-status,.record-transcript-heading span,' +
+                  '.screen-capture-status,.record-transcript-heading span,.interview-input-segmented,.interview-input-thumb,' +
                   '.interview-answer-status,.preparation-guide-actions .ui-button,.toolbar-actions > .ui-button,.interview-start-dialog .ui-button',
               )));
         const roundMenu = element.matches('.reasoning-slider-fill');

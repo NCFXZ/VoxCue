@@ -38,7 +38,9 @@ export function AudioCheck({
     try {
       await window.desktop?.dictation({ op: 'test-stop', id });
     } catch {
-      setError('停止音频测试失败，请重试。');
+      if (current === generation.current) {
+        setError('停止音频测试失败，请重试。');
+      }
     } finally {
       if (current === generation.current) {
         setPhase('idle');

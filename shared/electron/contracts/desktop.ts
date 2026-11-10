@@ -3,6 +3,7 @@ import type { InterviewImage, InterviewImageCall } from './interviewImages';
 import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
 import type { PresentationCapabilities } from './presentation';
 import type { UILanguage } from './uiLanguage';
+import type { ShortcutSettingsCall, ShortcutSettingsResult, ShortcutSettingsState } from './shortcuts';
 import type { UpdateCall, UpdateState } from './updates';
 import type { ComponentCall, ComponentState } from './components';
 import type { AuthSession, SignOutResult } from './auth';
@@ -13,6 +14,14 @@ import type { AccountDataCall, AccountDataResult } from './accountData';
 import type { TelemetrySignal } from './telemetry';
 import type { AppUsage, ChatEvent, ChatFailure, ChatModel, ChatRequest, ChatResult } from './chat';
 import type { InterviewTitleRequest, InterviewTitleEvent, HistoryExportRequest } from './history';
+import type {
+  RemoteConnectionCall,
+  RemoteConnectionResult,
+  RemoteConnectionState,
+  RemoteInterviewSnapshot,
+  RemoteCommand,
+  RemoteCommandResult,
+} from './remoteConnection';
 import type {
   SpeechCall,
   SpeechOptions,
@@ -26,20 +35,51 @@ import type {
   DictationCall,
   AudioSource,
   InterviewAccessReport,
+  InterviewInputState,
 } from './speech';
 
 export type ServiceResult<T> = ({ ok: true } & T) | { ok: false; error: ChatFailure };
+export interface InterviewCanvasLayout {
+  revision: number;
+  width: number;
+  height: number;
+}
+export type InterviewShortcutCommand =
+  | 'toggle-panels'
+  | 'toggle-transcript'
+  | 'toggle-microphone'
+  | 'toggle-system-audio'
+  | 'submit-input'
+  | 'scroll-device-up'
+  | 'scroll-device-down'
+  | 'screenshot';
+export interface InterviewShortcutsState {
+  open: boolean;
+  rendererRevision: number;
+  deviceConnected: boolean;
+}
 export interface InterviewWindowState {
+  visible: boolean;
+  inputState?: InterviewInputState;
+  rendererRevision: number;
   protected: boolean;
   pinned: boolean;
   supported: boolean;
   collapsed: boolean;
   transcriptVisible: boolean;
+  layout?: InterviewCanvasLayout;
   configuration: InterviewConfiguration;
 }
 export type WindowAction = 'minimize' | 'maximize' | 'close';
 // The complete renderer allowlist. No credentials, paths or arbitrary IPC access.
 export interface DesktopAPI {
+  shortcutSettings(call: ShortcutSettingsCall): Promise<ShortcutSettingsResult>;
+  onShortcutSettings(callback: (state: ShortcutSettingsState) => void): () => void;
+  remoteConnection(call: RemoteConnectionCall): Promise<RemoteConnectionResult>;
+  onRemoteConnection(callback: (state: RemoteConnectionState) => void): () => void;
+  publishRemoteInterview(snapshot: RemoteInterviewSnapshot): Promise<void>;
+  onRemoteCommand(callback: (command: RemoteCommand) => void): () => void;
+  finishRemoteCommand(result: RemoteCommandResult): Promise<void>;
   telemetrySignal(signal: TelemetrySignal): Promise<void>;
   accountData(call: AccountDataCall): Promise<AccountDataResult>;
   cloudAccount(call: CloudAccountCall): Promise<CloudAccountResult>;
@@ -59,6 +99,7 @@ export interface DesktopAPI {
   speech(call: SpeechCall): Promise<SpeechStatus>;
   speechHardware(): Promise<SpeechHardware>;
   reconnectInterviewAudio(options?: SpeechOptions): Promise<SpeechStatus>;
+  setInterviewInput(state: InterviewInputState): Promise<SpeechStatus>;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   dictation(call: DictationCall): Promise<SpeechStatus>;
   onDictationEvent(callback: (event: SpeechEvent) => void): () => void;
@@ -104,9 +145,17 @@ export interface DesktopAPI {
   checkInterviewAccess(configuration: InterviewConfiguration): Promise<InterviewAccessReport>;
   openMicrophoneSettings(source?: AudioSource): Promise<void>;
   interviewState(): Promise<InterviewWindowState>;
+  onInterviewLayout(callback: (layout: InterviewCanvasLayout) => void): () => void;
+  onInterviewShortcut(callback: (command: InterviewShortcutCommand) => void): () => void;
+  interviewShortcutsState(): Promise<InterviewShortcutsState>;
+  setInterviewShortcutsOpen(open: boolean): Promise<boolean>;
+  onInterviewShortcutsOpen(callback: (open: boolean) => void): () => void;
+  onInterviewDeviceConnection(callback: (connected: boolean) => void): () => void;
+  interviewRendererReady(rendererRevision: number): Promise<void>;
   allowCapture(allowed: boolean): Promise<boolean>;
   togglePin(): Promise<boolean>;
   toggleInterviewCollapse(): Promise<boolean>;
+  setInterviewSettingsOpen(open: boolean): Promise<void>;
   setInterviewTranscriptVisible(visible: boolean): Promise<boolean>;
   setInterviewMousePassthrough(ignore: boolean): void;
   moveInterviewWindow(change: { phase: 'start' | 'move' | 'end' }): Promise<void>;
@@ -124,6 +173,10 @@ type Invocation<F extends (...args: never[]) => unknown> = {
 // Channel types stay erased in the sandboxed, unbundled CommonJS preload.
 // Importing runtime constants there would require a forbidden local require().
 export interface DesktopInvokeMap {
+  'shortcuts:settings': Invocation<DesktopAPI['shortcutSettings']>;
+  'remote:connection': Invocation<DesktopAPI['remoteConnection']>;
+  'remote:publish': Invocation<DesktopAPI['publishRemoteInterview']>;
+  'remote:complete': Invocation<DesktopAPI['finishRemoteCommand']>;
   'telemetry:signal': Invocation<DesktopAPI['telemetrySignal']>;
   'account:data': Invocation<DesktopAPI['accountData']>;
   'cloud:account': Invocation<DesktopAPI['cloudAccount']>;
@@ -139,6 +192,7 @@ export interface DesktopInvokeMap {
   'speech:call': Invocation<DesktopAPI['speech']>;
   'speech:hardware': Invocation<DesktopAPI['speechHardware']>;
   'interview:reconnect-audio': Invocation<DesktopAPI['reconnectInterviewAudio']>;
+  'interview:input': Invocation<DesktopAPI['setInterviewInput']>;
   'dictation:call': Invocation<DesktopAPI['dictation']>;
   'interview:models': Invocation<DesktopAPI['interviewModels']>;
   'interview:account-usage': Invocation<DesktopAPI['interviewAccountUsage']>;
@@ -168,9 +222,13 @@ export interface DesktopInvokeMap {
   'interview:screen-permission': Invocation<DesktopAPI['screenCapturePermission']>;
   'interview:microphone-settings': Invocation<DesktopAPI['openMicrophoneSettings']>;
   'interview:state': Invocation<DesktopAPI['interviewState']>;
+  'interview:shortcuts-state': Invocation<DesktopAPI['interviewShortcutsState']>;
+  'interview:shortcuts-open': Invocation<DesktopAPI['setInterviewShortcutsOpen']>;
+  'interview:renderer-ready': Invocation<DesktopAPI['interviewRendererReady']>;
   'interview:capture': Invocation<DesktopAPI['allowCapture']>;
   'interview:pin': Invocation<DesktopAPI['togglePin']>;
   'interview:collapse': Invocation<DesktopAPI['toggleInterviewCollapse']>;
+  'interview:settings': Invocation<DesktopAPI['setInterviewSettingsOpen']>;
   'interview:transcript': Invocation<DesktopAPI['setInterviewTranscriptVisible']>;
   'interview:resize': Invocation<DesktopAPI['resizeInterview']>;
   'interview:move': Invocation<DesktopAPI['moveInterviewWindow']>;
@@ -181,6 +239,13 @@ export interface DesktopSendMap {
   'window:action': [action: WindowAction];
 }
 export interface DesktopEventMap {
+  'shortcuts:settings': [state: ShortcutSettingsState];
+  'remote:state': [state: RemoteConnectionState];
+  'remote:command': [command: RemoteCommand];
+  'interview:layout': [layout: InterviewCanvasLayout];
+  'interview:shortcut': [command: InterviewShortcutCommand];
+  'interview:shortcuts-open': [open: boolean];
+  'interview:device-connected': [connected: boolean];
   'updates:event': [state: UpdateState];
   'components:event': [state: ComponentState];
   'session:request-close': [id: string];

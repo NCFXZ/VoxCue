@@ -48,6 +48,13 @@ function subscribe<K extends keyof DesktopEventMap>(
   return () => ipcRenderer.removeListener(channel, listener);
 }
 const desktop: DesktopAPI = {
+  shortcutSettings: (call) => invoke('shortcuts:settings', call),
+  onShortcutSettings: (callback) => subscribe('shortcuts:settings', callback),
+  remoteConnection: (call) => invoke('remote:connection', call),
+  onRemoteConnection: (callback) => subscribe('remote:state', callback),
+  publishRemoteInterview: (snapshot) => invoke('remote:publish', snapshot),
+  onRemoteCommand: (callback) => subscribe('remote:command', callback),
+  finishRemoteCommand: (result) => invoke('remote:complete', result),
   telemetrySignal: (signal) => invoke('telemetry:signal', signal),
   accountData: (call) => invoke('account:data', call),
   cloudAccount: (call) => invoke('cloud:account', call),
@@ -76,6 +83,7 @@ const desktop: DesktopAPI = {
   onSpeechEvent: (callback) => subscribe('speech:event', callback),
   dictation: (call) => invoke('dictation:call', call),
   reconnectInterviewAudio: (options) => invoke('interview:reconnect-audio', options),
+  setInterviewInput: (state) => invoke('interview:input', state),
   onDictationEvent: (callback) => subscribe('dictation:event', callback),
   interviewModels: () => invoke('interview:models'),
   interviewAccountUsage: () => invoke('interview:account-usage'),
@@ -109,9 +117,17 @@ const desktop: DesktopAPI = {
       ? invoke('interview:microphone-settings')
       : invoke('interview:microphone-settings', source),
   interviewState: () => invoke('interview:state'),
+  onInterviewLayout: (callback) => subscribe('interview:layout', callback),
+  onInterviewShortcut: (callback) => subscribe('interview:shortcut', callback),
+  interviewShortcutsState: () => invoke('interview:shortcuts-state'),
+  setInterviewShortcutsOpen: (open) => invoke('interview:shortcuts-open', open),
+  onInterviewShortcutsOpen: (callback) => subscribe('interview:shortcuts-open', callback),
+  onInterviewDeviceConnection: (callback) => subscribe('interview:device-connected', callback),
+  interviewRendererReady: (revision) => invoke('interview:renderer-ready', revision),
   allowCapture: (allowed) => invoke('interview:capture', allowed),
   togglePin: () => invoke('interview:pin'),
   toggleInterviewCollapse: () => invoke('interview:collapse'),
+  setInterviewSettingsOpen: (open) => invoke('interview:settings', open),
   setInterviewTranscriptVisible: (visible) => invoke('interview:transcript', visible),
   setInterviewMousePassthrough: (ignore) => {
     if (typeof ignore === 'boolean') send('interview:mouse-passthrough', ignore);

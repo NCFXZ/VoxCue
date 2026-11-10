@@ -107,6 +107,9 @@ describe('长期模块边界', () => {
     expect(runtimeCycles(graph)).toEqual([['a', 'b', 'a']]);
   });
   it.each([
+    ['shared/src/mobile/bad.ts', 'shared/src/stores/interview.ts'],
+    ['shared/src/mobile/bad.ts', 'shared/src/services/desktop.ts'],
+    ['shared/src/mobile/bad.tsx', 'shared/src/components/MarkdownContent.tsx'],
     ['shared/src/services/bad.ts', 'node:fs'],
     ['macos/src/bad.tsx', 'node:fs'],
     ['macos/src/bad.tsx', 'shared/electron/backend/auth/storage.ts'],

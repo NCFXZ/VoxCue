@@ -208,6 +208,15 @@ export class RecognitionRouter {
     this.progress.delete(source);
     await this.current.port!.discontinuity(source);
   }
+  async inputSources(sources: AudioSource[], changed: AudioSource[]) {
+    this.cancel();
+    for (const source of changed) {
+      this.history.delete(source);
+      this.progress.delete(source);
+      await this.current.port!.discard(source);
+    }
+    this.sources = new Set(sources);
+  }
   async flush(reason: 'pause' | 'stop') {
     this.cancel();
     await this.current.port!.flush(reason);

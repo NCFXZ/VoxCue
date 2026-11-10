@@ -61,6 +61,11 @@ if (store && existsSync(storeStage) && path.relative(storeStage, fsRealPath(stor
   throw Error('Unexpected Store staging path');
 const electronVersion = require('electron/package.json').version;
 const electronZipDir = path.resolve('.cache/electron');
+const { createMobileAssets } = require(
+  path.join(root, 'dist-electron/shared/electron/backend/remoteConnection/assets.js'),
+);
+if (!(await createMobileAssets(path.join(root, 'dist')).read('/')))
+  throw Error('Bundled mobile page is missing; run the shared build first.');
 const paths = await packager({
   icon: path.resolve('public/voxcue.ico'),
   dir: root,
@@ -88,6 +93,8 @@ const paths = await packager({
   ],
   afterCopy: [
     async ({ buildPath }) => {
+      if (!(await createMobileAssets(path.join(buildPath, 'dist')).read('/')))
+        throw Error('The packaged application is missing its mobile page assets.');
       await cp(path.resolve('../shared/public'), path.join(buildPath, 'public'), {
         recursive: true,
       });

@@ -709,7 +709,7 @@ try {
           .getByRole('navigation', { name: '设置分类' })
           .locator('button')
           .allTextContents(),
-        ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '关于与更新'],
+        ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '快捷键', '关于与更新'],
       );
       await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
       assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);

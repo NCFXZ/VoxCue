@@ -129,6 +129,7 @@ try {
     'AI services',
     'Local components',
     'Interview settings',
+    'Shortcuts',
     'About & updates',
   ]) {
     await page
@@ -154,7 +155,7 @@ try {
     window.setSize(600, 600);
   });
   await page.waitForFunction(() => innerWidth <= 620);
-  for (const name of ['General', 'AI services', 'Interview settings', 'About & updates']) {
+  for (const name of ['General', 'AI services', 'Interview settings', 'Shortcuts', 'About & updates']) {
     await page
       .getByRole('navigation', { name: 'Settings categories' })
       .getByRole('button', { name, exact: true })
