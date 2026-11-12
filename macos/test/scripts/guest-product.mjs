@@ -11,7 +11,10 @@ import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs'
 let probe;
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 /** Untouched final browser, normal native window and Quit. No inspector/test entry. */
-export async function runGuestProduct(bundle, { env = process.env, args = [], ready } = {}) {
+export async function runGuestProduct(
+  bundle,
+  { env = process.env, args = [], ready, probeSignal } = {},
+) {
   await requireGuestIsolation();
   assert.ok(
     bundle.startsWith(testRoot + path.sep),
@@ -80,25 +83,34 @@ int main(int argc,const char **argv){@autoreleasepool{
     }
     assert.ok(visible, 'The untouched final product must show its native window');
     await ready?.(child.pid);
-    assert.equal(
-      spawnSync(probe, ['quit', String(child.pid)]).status,
-      0,
-      'The product must accept normal native Quit',
-    );
+    if (probeSignal) {
+      assert.equal(probeSignal, 'SIGUSR1');
+      child.kill(probeSignal);
+      await delay(1000);
+    }
+    if (child.exitCode === null && child.signalCode === null) {
+      if (probeSignal) await ready?.(child.pid);
+      assert.equal(
+        spawnSync(probe, ['quit', String(child.pid)]).status,
+        0,
+        'The product must accept normal native Quit',
+      );
+    } else assert.ok(probeSignal, 'Normal product exited before the requested native Quit');
     let timer;
     try {
-      assert.deepEqual(
-        await Promise.race([
-          exited,
-          new Promise((_, reject) => {
-            timer = setTimeout(
-              () => reject(Error('Final product did not drain and quit: ' + output)),
-              30000,
-            );
-          }),
-        ]),
-        { code: 0, signal: null },
-      );
+      const outcome = await Promise.race([
+        exited,
+        new Promise((_, reject) => {
+          timer = setTimeout(
+            () => reject(Error('Final product did not drain and quit: ' + output)),
+            30000,
+          );
+        }),
+      ]);
+      // A disabled Node debug-signal handler may leave POSIX's default signal
+      // termination. The two ordinary launches still require natural Quit=0.
+      if (probeSignal && outcome.signal === probeSignal) assert.equal(outcome.code, null);
+      else assert.deepEqual(outcome, { code: 0, signal: null });
     } finally {
       clearTimeout(timer);
     }

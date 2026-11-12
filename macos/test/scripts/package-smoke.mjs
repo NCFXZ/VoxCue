@@ -117,10 +117,13 @@ await productionFuses(path.join(bundle, 'Contents/Frameworks/Electron Framework.
 for (const file of [
   'dist-electron/shared/electron/backend/screenshot/worker.js',
   'dist-electron/shared/electron/backend/screenshot/host.js',
-  'node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node',
+  'node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.5.node',
+  'node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.7.dylib',
 ]) {
   assert.equal(asar.statFile(archive, file).unpacked, true, 'Actual unpacked screenshot closure: ' + file);
   assert.ok((await lstat(path.join(archive + '.unpacked', file))).isFile());
+  if (/\.(node|dylib)$/.test(file))
+    assert.equal(run('/usr/bin/lipo', ['-archs', path.join(archive + '.unpacked', file)]).trim(), 'arm64');
 }
 assert.equal(
   JSON.parse(
@@ -302,7 +305,6 @@ if (cacheSource)
     componentLocation,
   );
 const app = await launchGuestAsar(bundle, {
-  version: installArchive ? '0.2.0' : undefined,
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: profile,
@@ -396,7 +398,7 @@ try {
         app.getAppPath() + '/dist-electron/shared/electron/backend/screenshot/host.js',
       );
       const sharp = require('sharp');
-      assert.equal(require('sharp/package.json').version, '0.35.5');
+      assert.equal(JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'node_modules/sharp/package.json'), 'utf8')).version, '0.35.5');
       const bitmap = new Uint8Array(64 * 32 * 4);
       for (let i = 0; i < bitmap.length; i += 4) bitmap.set([20, 40, 80, 255], i);
       const encoded = await encodeScreenshotBitmap(
@@ -831,53 +833,6 @@ try {
       'PASS: final package uses shared controls, aligned toolbar, 40px composer, synthetic chat and capsule marker.',
     );
   }
-  if (installArchive) {
-    const { installFeed } = require(
-      path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/install-feed.js'),
-    );
-    const feed = await installFeed(zip, update);
-    try {
-      await app.evaluate(async (_electron, url) => {
-        const require = process
-          .getBuiltinModule('module')
-          .createRequire(_electron.app.getAppPath() + '/package.json');
-        const path = require('node:path');
-        const native = require(path.join(process.resourcesPath, 'native/VoxCue.Updater.node'));
-        await new Promise((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            native.cancel();
-            reject(Error('Production archive validation timed out'));
-          }, 120000);
-          native.begin(url, (event) => {
-            if (event.type === 'error') {
-              clearTimeout(timeout);
-              reject(Error(event.message));
-            } else if (event.type === 'ready') {
-              native.cancel();
-              clearTimeout(timeout);
-              resolve();
-            } else if (event.type === 'quit') {
-              clearTimeout(timeout);
-              reject(Error('Cancelled update unexpectedly requested quit'));
-            }
-          });
-        });
-      }, feed.url);
-      assert.equal(
-        run('/usr/libexec/PlistBuddy', [
-          '-c',
-          'Print :CFBundleVersion',
-          path.join(bundle, 'Contents/Info.plist'),
-        ]).trim(),
-        version,
-      );
-      console.log(
-        'PASS: real Sparkle in the separate lower-version development host authenticated/staged the unchanged final archive; cancellation retained both inputs.',
-      );
-    } finally {
-      feed.close();
-    }
-  }
 } finally {
   releaseDesktop();
   await closeUiApp(app);
@@ -887,6 +842,8 @@ if (installArchive) {
   await verifyPreviousVersionData({
     zip,
     cache: path.join(profile, 'artifact-components'),
+    update,
+    nativeFile: path.join(resources, 'native/VoxCue.Updater.node'),
   });
 }
 

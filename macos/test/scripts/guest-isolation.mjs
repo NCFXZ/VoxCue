@@ -47,5 +47,14 @@ export async function requireGuestIsolation() {
     !/^[A-Fa-f0-9-]{36}$/.test(context.hostMachineUUID ?? '')
   )
     throw Error('Guest identity does not match the disposable VM attestation');
+  const sip = execFileSync('/usr/bin/csrutil', ['status'], {
+    encoding: 'utf8', timeout: 5000,
+  }).trim();
+  const bootArgs = execFileSync('/usr/sbin/sysctl', ['-n', 'kern.bootargs'], {
+    encoding: 'utf8', timeout: 5000,
+  }).trim();
+  if (sip !== 'System Integrity Protection status: enabled.' ||
+      /(?:amfi_get_out_of_my_way|amfi_allow_any_signature|cs_enforcement_disable)/i.test(bootArgs))
+    throw Error('Final-product acceptance requires SIP and code-signing enforcement in the guest');
   return context;
 }

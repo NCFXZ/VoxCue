@@ -84,6 +84,8 @@ export async function signMacApp(
       // DYLD environment injection and unsigned executable memory stay disabled.
       const libraries =
         electronHost ||
+        // The SDK loader dlopens its sealed runtime.node (not shown by otool).
+        relative.endsWith('/copilot-runtime') ||
         relative === 'Contents/Resources/native/qwen/voxcue-qwen' ||
         relative === 'Contents/Resources/native/qwen/python/bin/python3.12';
       signLocalCode(file, signing, file === app ? identifier : undefined, {

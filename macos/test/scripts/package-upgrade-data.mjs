@@ -134,7 +134,7 @@ async function replaceOwnedBundle(bundle, zip) {
 // Covers data compatibility during an archive replacement. The independent
 // native updater suite exercises Sparkle commit/relaunch; package-smoke keeps
 // its real production archive authentication/staging/cancellation acceptance.
-export async function verifyPreviousVersionData({ zip, cache }) {
+export async function verifyPreviousVersionData({ zip, cache, update, nativeFile }) {
   await requireGuestIsolation();
   const directory = path.join(testRoot, 'upgrade-from-1.1.1');
   const install = path.join(directory, 'installed');
@@ -196,6 +196,56 @@ export async function verifyPreviousVersionData({ zip, cache }) {
   };
   try {
     const old = await launch('1.1.1');
+    // A genuine unchanged old bundle supplies Sparkle's actual NSBundle
+    // identity/version. JS version overrides cannot substitute for this.
+    const { installFeed } = workspace.platformRequire(
+      path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/install-feed.js'),
+    );
+    const feed = await installFeed(zip, update);
+    try {
+      await app.evaluate(
+        async ({ app }, { url, nativeFile }) => {
+          const require = process
+            .getBuiltinModule('module')
+            .createRequire(app.getAppPath() + '/package.json');
+          const native = require(nativeFile);
+          await new Promise((resolve, reject) => {
+            const timeout = setTimeout(() => {
+              native.cancel();
+              reject(Error('Production archive validation timed out'));
+            }, 120000);
+            native.begin(url, (event) => {
+              if (event.type === 'error') {
+                clearTimeout(timeout);
+                reject(Error(event.message));
+              } else if (event.type === 'ready') {
+                native.cancel();
+                clearTimeout(timeout);
+                resolve();
+              } else if (event.type === 'quit') {
+                clearTimeout(timeout);
+                reject(Error('Cancelled update unexpectedly requested quit'));
+              }
+            });
+          });
+        },
+        { url: feed.url, nativeFile },
+      );
+      assert.equal(
+        run('/usr/libexec/PlistBuddy', [
+          '-c',
+          'Print :CFBundleVersion',
+          path.join(bundle, 'Contents/Info.plist'),
+        ]).trim(),
+        '1.1.1',
+      );
+      verifyLocalApp(bundle, signing, 'com.voxcue.app');
+      console.log(
+        'PASS: unchanged real 1.1.1 host and final native updater authenticated/staged the final production ZIP; cancellation retained the old signed bundle.',
+      );
+    } finally {
+      feed.close();
+    }
     await old.getByRole('button', { name: '个人信息', exact: true }).click();
     const panel = old.getByRole('complementary', { name: '个人信息', exact: true });
     await panel.getByLabel('姓名', { exact: true }).fill('Synthetic upgrade owner');
@@ -286,16 +336,25 @@ export async function verifyPreviousVersionData({ zip, cache }) {
     assert.equal(await lstat(normalProfile).catch(() => null), null);
     await cp(profile, normalProfile, { recursive: true, verbatimSymlinks: true });
     const normalEnvironment = { ...process.env };
-    for (const key of ['COPILOT_TEST_USER_DATA', 'CFFIXED_USER_HOME', 'ELECTRON_RUN_AS_NODE', 'NODE_OPTIONS'])
+    for (const key of [
+      'COPILOT_TEST_USER_DATA',
+      'CFFIXED_USER_HOME',
+      'ELECTRON_RUN_AS_NODE',
+      'NODE_OPTIONS',
+    ])
       delete normalEnvironment[key];
     await runGuestProduct(bundle, { env: normalEnvironment });
     const preserved = path.join(directory, 'before-normal-start');
     await rename(profile, preserved);
     await rename(normalProfile, profile);
-    const reopened = await launch(workspace.platformRequire(path.join(workspace.platformRoot, 'package.json')).version);
+    const reopened = await launch(
+      workspace.platformRequire(path.join(workspace.platformRoot, 'package.json')).version,
+    );
     assert.deepEqual(await snapshot(reopened), before);
     assert.deepEqual(await archivedIndex(app, model, false), indexBefore);
-    console.log('PASS: untouched final product opened the synthetic 1.1.1 profile at the normal guest OS path and quit naturally without losing settings, original bytes or the searchable index.');
+    console.log(
+      'PASS: untouched final product opened the synthetic 1.1.1 profile at the normal guest OS path and quit naturally without losing settings, original bytes or the searchable index.',
+    );
   } finally {
     try {
       if (app) await closeUiApp(app);

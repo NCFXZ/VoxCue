@@ -5,11 +5,12 @@ import { requireGuestIsolation } from './guest-isolation.mjs';
 import { verifyLocalApp } from '../../scripts/development-signing.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { requireUnlockedDesktop } from './desktop-session.mjs';
+import assert from 'node:assert/strict';
 
 /** The final ASAR/renderer/native closure in a known development host, in the VM only.
  * The untouched product executable is tested separately, without an inspector.
  */
-export async function launchGuestAsar(bundle, { env = process.env, version } = {}) {
+export async function launchGuestAsar(bundle, { env = process.env } = {}) {
   await requireGuestIsolation();
   const pin = workspace.platformRequire(
     path.join(workspace.platformRoot, 'local-signing-public.json'),
@@ -34,7 +35,7 @@ app.setPath('appData',path.dirname(profile)); app.setPath('userData',profile); a
 // Keep the production runtime policy; the appData parent itself is guest-owned.
 Object.defineProperty(app,'isPackaged',{value:true});
 Object.defineProperty(process,'resourcesPath',{value:${JSON.stringify(resources)}});
-app.getVersion=()=>${version ? JSON.stringify(version) : "require(root+'/package.json').version"};
+app.getVersion=()=>require(root+'/package.json').version;
 app.commandLine.appendSwitch('use-mock-keychain');
 const allowed=input=>{try{const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);return url.protocol==='http:'&&url.hostname==='127.0.0.1';}catch{return false;}};
 for(const [owner,key] of [[globalThis,'fetch'],[net,'fetch'],[net,'request']]){
@@ -75,6 +76,16 @@ require(root+'/dist-electron/shared/electron/main.js');
     env: { ...env, ELECTRON_RUN_AS_NODE: undefined, VITE_DEV_SERVER_URL: '' },
   });
   trackTestProcess(app.process());
+  const paths = await app.evaluate(({ app }) => ({
+    userData: app.getPath('userData'),
+    sessionData: app.getPath('sessionData'),
+  }));
+  try {
+    assert.deepEqual(paths, { userData: profile, sessionData: profile });
+  } catch (error) {
+    await app.close();
+    throw error;
+  }
   const timer = setInterval(() => {
     try {
       requireUnlockedDesktop();
@@ -119,5 +130,13 @@ export async function launchLegacyGuestProduct(bundle, env, version = '1.1.1') {
     await app.close();
     throw Error('Historical package did not select the owned synthetic migration profile');
   }
+  await app.evaluate(() => {
+    const cp = process.getBuiltinModule('child_process'), spawn = cp.spawn;
+    cp.spawn = (file, ...args) => {
+      if (/(?:VoxCue\.Credentials|\/codex|\/copilot-runtime)$/.test(String(file)))
+        throw Error('Ordinary migration GUI forbids credential-owning subprocesses');
+      return spawn(file, ...args);
+    };
+  });
   return app;
 }

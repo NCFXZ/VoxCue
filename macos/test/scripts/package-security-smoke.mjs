@@ -94,18 +94,12 @@ async function normal(env = {}, args = []) {
     env: { ...process.env, ...env },
     args,
     ready: async (pid) => {
-      process.kill(pid, 'SIGUSR1');
-      await delay(1000);
       const listeners = spawnSync(
         '/usr/sbin/lsof',
         ['-Pan', '-p', String(pid), '-iTCP', '-sTCP:LISTEN'],
         { encoding: 'utf8' },
       );
-      assert.equal(
-        listeners.status,
-        1,
-        'The browser must expose no inspector/CDP listener, including after SIGUSR1',
-      );
+      assert.equal(listeners.status, 1, 'The browser must expose no inspector/CDP listener');
       assert.equal(await present(marker), false, 'Startup must ignore Node and DYLD injection');
     },
   });
@@ -120,6 +114,18 @@ try {
     },
     ['-e', await readFile(payload, 'utf8')],
   );
+  await runGuestProduct(bundle, {
+    probeSignal: 'SIGUSR1',
+    ready: (pid) => {
+      assert.equal(
+        spawnSync('/usr/sbin/lsof', ['-Pan', '-p', String(pid), '-iTCP', '-sTCP:LISTEN'], {
+          encoding: 'utf8',
+        }).status,
+        1,
+        'SIGUSR1 must not activate an inspector',
+      );
+    },
+  });
   for (const args of [
     ['--remote-debugging-port=0'],
     ['--remote-debugging-port', '9222'],
