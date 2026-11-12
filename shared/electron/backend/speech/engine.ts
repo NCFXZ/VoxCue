@@ -6,6 +6,7 @@ import { verifyModel, paraformerFiles } from './models';
 import { speechSegmentationSilenceMs } from '../../contracts/speechSettings';
 // Official JS package has JSDoc, but no TypeScript declarations. Keep it inside this adapter.
 const sherpa = require('sherpa-onnx-node');
+const preRollSamples = 8000; // 500ms at 16kHz, covering VAD confirmation latency after short sounds.
 export class SpeechEngine {
   private recognizer: any;
   private sources = new Map<AudioSource, any>();
@@ -38,6 +39,7 @@ export class SpeechEngine {
         rate,
         resampler: new sherpa.LinearResampler(rate, 16000),
         buffer: new SampleBuffer(32000),
+        preRoll: new SampleBuffer(preRollSamples),
         vad: new sherpa.Vad(
           {
             sileroVad: {
@@ -54,7 +56,7 @@ export class SpeechEngine {
           },
           30,
         ),
-        stream: this.recognizer.createStream(),
+        stream: undefined,
         id: randomUUID(),
         samples: 0,
         origin: timestamp,
@@ -77,27 +79,38 @@ export class SpeechEngine {
       s.samples += 512;
       const end = s.origin + s.samples / 16;
       s.vad.acceptWaveform(frame);
-      // ASR receives ALL samples, including 250ms before VAD onset and its tail.
-      s.stream.acceptWaveform({ sampleRate: 16000, samples: frame });
-      while (this.recognizer.isReady(s.stream)) this.recognizer.decode(s.stream);
       const detected = s.vad.isDetected();
       if (detected && !s.active) {
+        // Unconfirmed input must not leave lexical state in the next turn.
+        // Retain bounded history plus this onset frame so VAD's confirmation
+        // delay does not cut the opening syllable from the new ASR stream.
+        s.stream = this.recognizer.createStream();
+        const history = s.preRoll.take(s.preRoll.length);
+        if (history.length) s.stream.acceptWaveform({ sampleRate: 16000, samples: history });
         s.active = true;
         this.emit({ type: 'speech-start', source });
-        s.start = Math.max(s.origin, end - 250);
+        s.start = Math.max(s.origin, end - (history.length + frame.length) / 16);
       }
-      const text = String(this.recognizer.getResult(s.stream).text ?? '').trim();
-      if (s.active && text && text !== s.text && end - s.lastEmit >= 150) {
-        s.text = text;
-        s.lastEmit = end;
-        this.emit({
-          type: 'segment',
-          segment: { id: s.id, source, text, final: false, startMs: s.start, endMs: end },
-        });
+      if (s.active) {
+        s.stream.acceptWaveform({ sampleRate: 16000, samples: frame });
+        while (this.recognizer.isReady(s.stream)) this.recognizer.decode(s.stream);
+        const text = String(this.recognizer.getResult(s.stream).text ?? '').trim();
+        if (text && text !== s.text && end - s.lastEmit >= 150) {
+          s.text = text;
+          s.lastEmit = end;
+          this.emit({
+            type: 'segment',
+            segment: { id: s.id, source, text, final: false, startMs: s.start, endMs: end },
+          });
+        }
+      } else {
+        const expired = s.preRoll.length + frame.length - s.preRoll.capacity;
+        if (expired > 0) s.preRoll.take(expired);
+        s.preRoll.push(frame);
       }
       if (s.active && (!detected || end - s.start >= 20000))
         this.finalize(source, s, detected ? 'limit' : 'silence');
-      // Drain the VAD segment queue; ASR has already seen the identical audio.
+      // VAD owns activation; its completed-segment queue is not another ASR feed.
       while (!s.vad.isEmpty()) s.vad.pop();
       if (end - s.lastActivity >= 200 || s.lastActivity === undefined) {
         let power = 0;
@@ -110,12 +123,6 @@ export class SpeechEngine {
         });
         s.lastActivity = end;
       }
-      // Bound silent-stream feature state and discard silence hallucinations.
-      if (!s.active && end - s.silentReset > 10000) {
-        s.stream = this.recognizer.createStream();
-        s.silentReset = end;
-      }
-      if (s.silentReset === undefined) s.silentReset = end;
     }
     this.audioMs += (samples.length / rate) * 1000;
     this.inferenceMs += performance.now() - started;
@@ -129,11 +136,12 @@ export class SpeechEngine {
     return !state || (!state.active && !state.vad.isDetected());
   }
   private finalize(source: AudioSource, s: any, reason: SpeechSegment['reason']) {
+    if (!s.active || !s.stream) return;
     s.stream.acceptWaveform({ sampleRate: 16000, samples: new Float32Array(6400) });
     s.stream.inputFinished();
     while (this.recognizer.isReady(s.stream)) this.recognizer.decode(s.stream);
     const text = String(this.recognizer.getResult(s.stream).text ?? '').trim();
-    if (s.active && text)
+    if (text)
       this.emit({
         type: 'segment',
         segment: {
@@ -149,18 +157,18 @@ export class SpeechEngine {
             : {}),
         },
       });
-    s.stream = this.recognizer.createStream();
+    s.stream = undefined;
+    s.preRoll = new SampleBuffer(preRollSamples);
     s.id = randomUUID();
     s.active = false;
     s.text = '';
     s.lastEmit = 0;
-    s.silentReset = s.origin + s.samples / 16;
   }
   flush(reason: 'stop' | 'pause') {
     for (const [source, s] of this.sources) {
       const tail = s.resampler.flush(new Float32Array());
       s.buffer.push(tail);
-      if (s.buffer.length) {
+      if (s.active && s.buffer.length) {
         s.stream.acceptWaveform({ sampleRate: 16000, samples: s.buffer.take(s.buffer.length) });
       }
       this.finalize(source, s, reason);

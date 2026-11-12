@@ -14,7 +14,7 @@ import { sign } from 'node:crypto';
 import path from 'node:path';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import { updateSigningKey } from '../../scripts/update-signing.mjs';
-import { backupUpdateKey, restoreUpdateKey } from '../../scripts/update-key-backup.mjs';
+import { backupUpdateKey, restoreUpdateKey, verifyUpdateKeyBackup } from '../../scripts/update-key-backup.mjs';
 const roots: string[] = [];
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
@@ -75,6 +75,44 @@ it.each(['password', 'tamper', 'identity'] as const)(
       restoreUpdateKey(f.backup, mode === 'password' ? password + 'wrong' : password, f.options),
     ).rejects.toThrow();
     await expect(lstat(f.key)).rejects.toMatchObject({ code: 'ENOENT' });
+  },
+);
+it('verifies a synthetic backup without changing an existing private key or backup', async () => {
+  const f = await fixture();
+  await backupUpdateKey(f.backup, password, f.options);
+  const key = await readFile(f.key), backup = await readFile(f.backup);
+  const before = await lstat(f.key);
+  await expect(verifyUpdateKeyBackup(f.backup, password, f.options)).resolves.toBe(true);
+  expect(await readFile(f.key)).toEqual(key);
+  expect(await readFile(f.backup)).toEqual(backup);
+  const after = await lstat(f.key);
+  expect([after.ino, after.mtimeMs, after.mode]).toEqual([before.ino, before.mtimeMs, before.mode]);
+});
+it('verifies with the original public identity when the private directory is missing, without recreating it', async () => {
+  const f = await fixture();
+  await backupUpdateKey(f.backup, password, f.options);
+  await rm(f.options.keyDirectory, { recursive: true });
+  await expect(verifyUpdateKeyBackup(f.backup, password, f.options)).resolves.toBe(true);
+  await expect(lstat(f.options.keyDirectory)).rejects.toMatchObject({ code: 'ENOENT' });
+});
+it.each(['password', 'tamper', 'identity'] as const)(
+  'read-only verification rejects %s and preserves the existing private key',
+  async (mode) => {
+    const f = await fixture();
+    await backupUpdateKey(f.backup, password, f.options);
+    const key = await readFile(f.key);
+    if (mode === 'tamper') {
+      const value = JSON.parse(await readFile(f.backup, 'utf8'));
+      const encrypted = Buffer.from(value.ciphertext, 'base64');
+      encrypted[0] ^= 1;
+      value.ciphertext = encrypted.toString('base64');
+      await writeFile(f.backup, JSON.stringify(value));
+    }
+    if (mode === 'identity') f.options.pinFile = (await fixture()).options.pinFile;
+    await expect(
+      verifyUpdateKeyBackup(f.backup, mode === 'password' ? password + 'wrong' : password, f.options),
+    ).rejects.toThrow();
+    expect(await readFile(f.key)).toEqual(key);
   },
 );
 it.each(['directory', 'permissions', 'link', 'hardlink'] as const)(

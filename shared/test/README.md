@@ -1,10 +1,14 @@
-# 当前 macOS 1.2.0 入口
+# 当前 macOS 1.2.1 入口
 
 Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mjs`（`pnpm test:package`），入口和显式输入见 [Mac 发行实现](../docs/MACOS_1.2.0_RELEASE.md)。Owner 仅可运行 `package-smoke.mjs --static-only` 的零产品启动静态检查，退出 2 表示动态覆盖待执行。旧 `package-temporary-smoke.mjs`、AEC `--packaged` 和产品 `--online` 调试探针已退役；下文历史命令不覆盖此边界。功能、五档缩放与 Qwen 开发态入口保持串行 GUI／原生／推理规则，最终 ASAR 覆盖另外在 guest 执行。
 
+当前范围见根 `PROGRESS.md`，Windows 逐项接续见 [1.2.1 交接](https://github.com/NCFXZ/VoxCue/blob/main/shared/docs/WINDOWS_1.2.1_HANDOFF.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考；不修改既有服务端或运行后端测试。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
+
+完整排程以 `functional-suite.mjs --list --jobs=1`、`macos/test/scripts/ui-refinement-matrix.mjs --list` 为准。另需按实际改动补原生专项：`credential-hardening-smoke.mjs`、`cloud-native-vault-smoke.mjs`、`audio-restart-smoke.mjs`、`audio-conversion-smoke.mjs`、`qwen-regression.mjs` 和 `speech-preroll-smoke.mjs --cache=<认证缓存>`。后者仅用文件 PCM 验证原短音未接纳后不串入下一句，不能将其空 ASR 算作正向过滤成功；正向 `interview-real-audio-smoke.mjs --all` 保留非空自然静音终稿与真实 ACK 断言。固定模型的识别原文不构成逐字准确率基准。
+
 ## 当前源码安全修复
 
-当前进入 Windows 1.2.0／Store 2.2.0.0 发行验证，清理、完整回归、修复及发布范围以根 PROGRESS.md 的最新授权为准。共享安全设计见 [安全与任务生命周期加固](../docs/SECURITY_HARDENING.md)，逐项 Mac 回归见 [1.2.0 交接](../docs/MACOS_1.2.0_HANDOFF.md)及[专属待办](../docs/MACOS_1.2.0_TODO.md)。下面历史矩阵不能覆盖现行测试隔离要求；正式包仍须 OS 隔离，不能恢复旧入口或用测试环境变量隔离产品。
+下文 Windows 1.2.0／Store 2.2.0.0 为既有发行基线；1.2.1 的本机接续见上方交接，清理、完整回归、修复及发布范围以根 PROGRESS.md 的最新授权为准。共享安全设计见 [安全与任务生命周期加固](../docs/SECURITY_HARDENING.md)，逐项 Mac 回归见 [1.2.0 交接](../docs/MACOS_1.2.0_HANDOFF.md)及[专属待办](../docs/MACOS_1.2.0_TODO.md)。下面历史矩阵不能覆盖现行测试隔离要求；正式包仍须 OS 隔离，不能恢复旧入口或用测试环境变量隔离产品。
 
 测试 owner 只允许已知开发宿主与 owned entry，或严格校验的 inert 安装夹具；正式包不编入产品测试标志。Windows `pnpm test:package` 先构建当前源码，再由 `store-package-smoke.mjs` 在自有临时目录打包并验收，使用独立 Windows Sandbox 账号、空 guest vault、禁网及无宿主 profile 映射。真实生产 renderer 通过 CDP／公开 preload 验证包身份和合成资料重载；同版本开发宿主另在 guest 加载最终 ASAR 验证实际 SDK、Paraformer／知识库子进程与移动资源闭包，不执行产品 main 或登录真实服务。两个 guest 检查助手均在连接／加载前核对身份和临时归属。普通开发 UI 夹具仍禁止正式凭据助手；旧 owner 正式包夹具及不可用参数已退役，不得恢复 fuses、修改包字节或加入正式包测试环境覆盖。现有格式的持久化／重载不代称历史二进制逐版本升级验收。
 

@@ -15,6 +15,7 @@ import { createRequire } from 'node:module';
 import { createHash, verify } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { verifyLocalApp } from '../../scripts/development-signing.mjs';
+import { verifyHardenedCredentials } from '../../scripts/build-hardened-credentials.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
@@ -53,7 +54,7 @@ assert.equal(
 );
 const resources = path.join(bundle, 'Contents/Resources');
 const credentialHelper = path.join(resources, 'native/VoxCue.Credentials');
-verifyLocalApp(credentialHelper, signing, 'com.voxcue.credentials');
+verifyHardenedCredentials(credentialHelper, signing);
 assert.deepEqual(
   await readFile(credentialHelper),
   await readFile(path.join(workspace.platformRoot, 'native/bin/VoxCue.Credentials')),
@@ -115,16 +116,23 @@ assert.deepEqual(integrity['Resources/app.asar'], {
 });
 await productionFuses(path.join(bundle, 'Contents/Frameworks/Electron Framework.framework/Electron Framework'));
 for (const file of [
+  'dist-electron/shared/electron/backend/speech/controller.js',
+  'dist-electron/shared/electron/backend/cancellable.js',
   'dist-electron/shared/electron/backend/screenshot/worker.js',
   'dist-electron/shared/electron/backend/screenshot/host.js',
   'node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.5.node',
   'node_modules/@img/sharp-libvips-darwin-arm64/lib/libvips-cpp.8.18.7.dylib',
 ]) {
-  assert.equal(asar.statFile(archive, file).unpacked, true, 'Actual unpacked screenshot closure: ' + file);
+  assert.equal(asar.statFile(archive, file).unpacked, true, 'Actual unpacked runtime closure: ' + file);
   assert.ok((await lstat(path.join(archive + '.unpacked', file))).isFile());
   if (/\.(node|dylib)$/.test(file))
     assert.equal(run('/usr/bin/lipo', ['-archs', path.join(archive + '.unpacked', file)]).trim(), 'arm64');
 }
+assert.equal(
+  createRequire(path.join(archive + '.unpacked', 'dist-electron/shared/electron/backend/speech/controller.js')).resolve('../cancellable'),
+  path.join(archive + '.unpacked', 'dist-electron/shared/electron/backend/cancellable.js'),
+  'The physical speech utility controller must resolve its shared cancellation dependency',
+);
 assert.equal(
   JSON.parse(
     asar.extractFile(path.join(resources, 'app.asar'), 'node_modules/ws/package.json').toString(),
@@ -404,31 +412,11 @@ try {
       const assert = require('node:assert/strict');
       const { Worker } = require('node:worker_threads');
       const unpacked = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked');
-      const { encodeScreenshotBitmap } = require(
-        app.getAppPath() + '/dist-electron/shared/electron/backend/screenshot/host.js',
+      const screenshot = await require(fixture.screenshotChecks)({ runtimeRoot: app.getAppPath() });
+      console.log(
+        'PASS: final ASAR screenshot continuous encoding, actual Worker exits/RSS convergence and synthetic error/cancel/load/timeout boundaries; no screen capture.',
+        screenshot,
       );
-      const sharp = require('sharp');
-      assert.equal(JSON.parse(fs.readFileSync(path.join(app.getAppPath(), 'node_modules/sharp/package.json'), 'utf8')).version, '0.35.5');
-      const bitmap = new Uint8Array(64 * 32 * 4);
-      for (let i = 0; i < bitmap.length; i += 4) bitmap.set([20, 40, 80, 255], i);
-      const encoded = await encodeScreenshotBitmap(
-        { width: 64, height: 32, bitmap: bitmap.buffer }, new AbortController().signal,
-      );
-      assert.equal(bitmap.byteLength, 0, 'The actual screenshot Worker receives a transferred bitmap');
-      const image = await sharp(encoded.file.bytes).metadata();
-      assert.equal(image.width, 64); assert.equal(image.height, 32);
-      assert.equal(image.format, 'png');
-      assert.match(encoded.preview, /^data:image\/jpeg;base64,/);
-      const pixel = await sharp(encoded.file.bytes).raw().toBuffer();
-      assert.deepEqual([...pixel.subarray(0, 4)], [80, 40, 20, 255]);
-      const cancelledFrame = new Uint8Array(256 * 256 * 4);
-      const cancelled = new AbortController();
-      const processing = encodeScreenshotBitmap(
-        { width: 256, height: 256, bitmap: cancelledFrame.buffer }, cancelled.signal,
-      );
-      cancelled.abort(new Error('Synthetic screenshot cancellation'));
-      await assert.rejects(processing, error => error === cancelled.signal.reason);
-      console.log('PASS: final ASAR screenshot Worker, sharp/arm64 libvips, exact synthetic pixels and cancellation; no screen capture.');
       const { ComponentService, componentPaths, componentLocation } = require(
         app.getAppPath() + '/dist-electron/shared/electron/backend/components/service.js',
       );
@@ -669,6 +657,10 @@ try {
       ];
     },
     {
+      screenshotChecks: path.join(
+        workspace.sharedRoot,
+        'test/scripts/screenshot-worker-checks.cjs',
+      ),
       pdf: Array.from(fixtures.pdf()),
       docx: Array.from(await fixtures.docx()),
       legacyDoc: Array.from(

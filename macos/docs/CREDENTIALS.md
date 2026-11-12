@@ -10,11 +10,13 @@
 
 ## 固定助手与首次接续
 
-`build-credentials.mjs` 使用现有固定签名身份创建独立 `VoxCue.Credentials`。规范副本及源码/证书/二进制摘要保存在受忽略的 `macos/.tools/credential-helper-v1`，不含任何凭据或加密密码。开发启动与正式装配复用其原字节；整应用签名仅验证该助手，不重新签名。版本号、应用 Info.plist 和资源封印不进入独立助手签名。
+1.2.1 使用 `build-hardened-credentials.mjs` 装配固定 v2 `VoxCue.Credentials`，规范字节及源码／证书／二进制摘要保存在受忽略的 `macos/.tools/credential-helper-v2`，不含凭据或加密密码。构建检查 owned、真实路径与普通单链接文件，读取不跟随链接，输出以同目录临时文件原子替换；整应用签名仅核对冻结字节及 Hardened Runtime，不重新签名该助手。版本号、应用 Info.plist 和资源封印不进入独立助手签名。旧 `Credentials.mm` 和 `credential-helper-v1` 保留为兼容／恢复基线；`build-credentials.mjs` 只返回旧规范副本，不覆盖现用 v2。
 
-助手先校验父进程是由固定证书签名的 `com.voxcue.app` 或 `com.voxcue.development`，然后只接受有大小上限的 stdin/stdout 加解密请求。接口不接受任意路径、钥匙串名、服务名或账户名；密钥不离开助手，不进入参数、环境、日志或临时文件。测试用自定义钥匙串入口仅编译进独立测试探针。
+v2 先核对自身及父进程的固定证书与 Hardened Runtime，只允许正式 `com.voxcue.app` 父进程，拒绝开发身份、危险 entitlement 和非正式父。它只接受有大小上限的 stdin/stdout 加解密请求，不接受任意路径、钥匙串名、服务名或账户名；密钥不离开助手，不进入参数、环境、日志或临时文件。普通 UI 夹具使用合成凭据适配器，不能调用正式助手。原生迁移探针只在临时源码中严格替换一次预期父标识为随机测试身份，绑定本轮 helper 路径／CDHash 和 owned 临时钥匙串，不能转发任意程序。
 
-第一次读取助手自有的 `VoxCue Credential Storage` / `VoxCue Key`。若不存在，按 Electron 既有命名查找 `VoxCue Safe Storage` 的 `VoxCue Key`，再兼容旧 `VoxCue` 账户。取得同一密码后创建助手自有项，不删除/修改原项及其 ACL，也不重写 `credentials.bin`。读取拒绝、钥匙串锁定或解密时找不到密码均直接报错，不生成替代密码。只有首次写入且确无历史项时才创建随机密码。
+v2 有界查询 `VoxCue Credential Storage`／`VoxCue Key` 及 `VoxCue Safe Storage`／`VoxCue Key`、旧 `VoxCue` 账户的全部匹配项，跨钥匙串先比较密码一致性，再收紧全部匹配项的 trusted-app ACL 与 partition 为固定 v2 身份，撤销旧 helper 访问；没有现用别名时以同一历史密码创建。只有首次写入且确无历史项才生成新密码，并立即使用收紧的授权。拒绝、锁定、匹配项不一致或解密时缺密码均失败，不生成替代密码，不重写 `credentials.bin`。
+
+多个钥匙串项的授权修改不是原子事务：中途失败可能已有部分旧访问被撤销，操作会明确失败，不能放回宽授权；同一 v2 可重试完成。迁移完成后旧版本不保证可解密，回退应保留 v2 或由持有人明确恢复授权，不能删除钥匙串项或静默换密码。冻结 v2 源码／字节变化必须另做兼容身份迁移，不能修改摘要白名单后重新生成。
 
 沿用 Electron macOS `v10` 格式：PBKDF2-HMAC-SHA1、1003 轮、原盐/IV 和 AES-128-CBC。此处保持旧格式以兼容现有登录密文，没有降低原保护。读写失败保留原登录文件；非机密设备标识在 Mac 不再为生成 UUID 额外触发 Safe Storage。
 
@@ -24,6 +26,7 @@
 
 ```sh
 node macos/test/scripts/credential-upgrade-smoke.mjs
+node macos/test/scripts/credential-hardening-smoke.mjs
 ```
 
-脚本只创建系统临时根内的自有钥匙串和签名应用，禁用测试进程的用户交互，检查历史 ad-hoc 授权边界、不同应用代码哈希与固定助手、旧密文兼容、非授权父进程拒绝及装配时助手字节保持。不得用真实登录钥匙串验证或自动响应系统密码弹窗。此入口不打安装包，也不替换真实安装；获准发行时另以 `package-smoke.mjs` 核对最终归档内助手的固定签名与原始字节。
+脚本只创建系统临时根内的自有钥匙串和 nonce 测试父，禁用测试进程的用户交互，检查历史授权、全部别名／跨钥匙串迁移、旧密文、部分失败重试、危险签名／父身份／路径拒绝及冻结字节。真实 production canonical 的正式父探针仅发送固定无效请求，不执行凭据访问。不得用宿主真实登录钥匙串验证或自动响应系统密码弹窗。这些入口不打安装包，也不替换真实安装；最终归档需经 `package-guest-smoke.mjs` 的独立 OS 隔离入口验收，不能直接在宿主运行正式包测试。

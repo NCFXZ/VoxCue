@@ -384,6 +384,14 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。':
     'Recognition backlog exceeded the safety limit. Capture stopped. Reduce load or switch processing devices.',
   '语音识别进程已退出，请重新开始。': 'Speech recognition exited. Restart the interview.',
+  '音频已中断，正在自动重新连接…': 'Audio interrupted. Reconnecting automatically…',
+  '所选音频设备的采样格式或首选声道布局暂不受支持，请检查设备设置或选择其他设备。':
+    'The selected audio device format or preferred channel layout is not supported. Check its settings or choose another device.',
+  '音频发生中断，不完整片段不会自动用于回答。':
+    'Audio interrupted. Incomplete segments will not automatically trigger answers.',
+  '音频自动恢复已取消，请手动重新连接。': 'Automatic audio recovery canceled. Reconnect manually.',
+  '音频自动恢复已达到重试上限，请检查设备或模型后重新连接。':
+    'Automatic audio recovery reached its retry limit. Check the device or model and reconnect.',
   '音频采集未能正常停止，请重新开始。':
     'Audio capture did not stop correctly. Restart the interview.',
   '语音尾段处理超时。': 'Final audio processing timed out.',

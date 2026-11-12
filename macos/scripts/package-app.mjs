@@ -9,7 +9,7 @@ const { packager } = await import(require.resolve('@electron/packager'));
 import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
 import { buildQwen } from './build-qwen.mjs';
-import { buildCredentials } from './build-credentials.mjs';
+import { buildHardenedCredentials } from './build-hardened-credentials.mjs';
 import { stageRuntimeDependencies } from './runtime-dependencies.mjs';
 import { localizeUsageDescriptions } from './localize-usage-descriptions.mjs';
 import { prepareProductionRuntime } from './production-runtime.mjs';
@@ -28,7 +28,7 @@ export async function buildMacApp(output, publicKey) {
   // Fail before packaging if the established identity is unavailable; never rotate
   // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
   const signing = await loadDevelopmentSigning();
-  await buildCredentials();
+  await buildHardenedCredentials();
   await buildQwen();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
@@ -61,6 +61,9 @@ export async function buildMacApp(output, publicKey) {
       NSAppTransportSecurity: { NSAllowsLocalNetworking: true },
     },
     asar: {
+      // The utility entry runs from the physical unpacked speech directory.
+      // Its shared cancellation dependency must resolve outside ASAR too.
+      unpack: '**/dist-electron/shared/electron/backend/cancellable.js',
       unpackDir:
         '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/backend/screenshot,dist-electron/shared/electron/contracts,dist-electron/macos/electron/speech}',
     },

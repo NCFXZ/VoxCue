@@ -359,7 +359,8 @@
 .web-materials .floating-panels .floating-panel > header {
   position: absolute;
   inset: 0 0 auto;
-  z-index: 2;
+  /* Badge descriptions also cover the following audio recovery cards. */
+  z-index: 3;
 }
 .web-materials .floating-panels .floating-audio-recovery {
   position: absolute;

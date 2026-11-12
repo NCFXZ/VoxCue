@@ -1,8 +1,16 @@
 // Test-only seed operation, compiled into a disposable executable. Production
 // Credentials.mm has no seed, custom service/account, or custom Keychain input.
+#include "credential-fixture-boundary.h"
+#define SecKeychainOpen openFixtureKeychain
 #define VOXCUE_CREDENTIAL_FIXTURE 1
 #define main credentialMain
+#ifdef VOXCUE_FIXTURE_LEGACY_SOURCE
+#include VOXCUE_FIXTURE_LEGACY_SOURCE
+#else
+// The cloud vault consumer uses its existing signed development host, while
+// native parent-launcher tests supply a nonce-isolated source copy above.
 #include "../../native/Credentials.mm"
+#endif
 #undef main
 
 int main(int argc, const char **argv) {
@@ -23,3 +31,4 @@ int main(int argc, const char **argv) {
     return credentialMain(argc, argv);
   }
 }
+#undef SecKeychainOpen

@@ -9,7 +9,7 @@ import { loadDevelopmentSigning, signLocalCode, verifyLocalApp } from './develop
 export const credentialIdentifier = 'com.voxcue.credentials';
 export const credentialFile = 'VoxCue.Credentials';
 const digest = (value) => createHash('sha256').update(value).digest('hex');
-export async function buildCredentials() {
+export async function buildLegacyCredentials() {
   const signing = await loadDevelopmentSigning();
   const source = path.join(workspace.platformRoot, 'native/Credentials.mm');
   const directory = path.join(workspace.platformRoot, '.tools/credential-helper-v1');
@@ -77,16 +77,12 @@ export async function buildCredentials() {
     }
   }
   verifyLocalApp(canonical, signing, credentialIdentifier);
-  const output = path.join(workspace.platformRoot, 'native/bin', credentialFile);
-  const bytes = await readFile(canonical);
-  if (digest(await readFile(output).catch(() => Buffer.alloc(0))) !== digest(bytes)) {
-    await mkdir(path.dirname(output), { recursive: true });
-    await copyFile(canonical, output);
-  }
-  return output;
+  // This frozen identity remains a recovery/compatibility baseline. It must not
+  // overwrite the production v2 helper in native/bin.
+  return canonical;
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  await buildCredentials();
+  await buildLegacyCredentials();
   console.log(
     'Prepared fixed standalone credential helper; existing Keychain items were not accessed.',
   );

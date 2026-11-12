@@ -6,19 +6,34 @@ import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-wo
 import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 import { requireUnlockedDesktop } from './desktop-session.mjs';
 
-const cases = [
+const question = { id: 'question', text: '请介绍你的项目经历。', kind: 'question' };
+const fillerCases = [
   { id: 'ack', text: '好的。', kind: 'filler' },
-  { id: 'um', text: '嗯。嗯。', kind: 'filler' },
-  { id: 'ah', text: '啊。', kind: 'filler' },
-  { id: 'uh', text: '呃。呃。', kind: 'filler' },
-  { id: 'question', text: '请介绍你的项目经历。', kind: 'question' },
+  // The installed voice must produce sustained filler speech that crosses the
+  // unchanged production VAD gate. The caller still requires actual ASR text.
+  { id: 'um', text: '嗯嗯。', rate: 80, kind: 'filler' },
+  { id: 'ah', text: '啊啊啊啊啊啊啊啊。', rate: 80, kind: 'filler' },
+  { id: 'uh', text: '额，额，额。', rate: 80, kind: 'filler' },
+  question,
   { id: 'mixed', text: '嗯，请介绍你的项目经历。', kind: 'question' },
-  { id: 'followup', text: '然后呢？', kind: 'question' },
+  { id: 'followup', text: '然后呢？', rate: 80, kind: 'question' },
 ];
+const boundaryCases = [
+  { id: 'um-short', text: '嗯。嗯。', kind: 'unaccepted' },
+  { id: 'ah-short', text: '啊。', kind: 'unaccepted' },
+  question,
+];
+
+export function prepareFillerAudio(options) {
+  return prepareAudio(fillerCases, options);
+}
+export function prepareSpeechBoundaryAudio(options) {
+  return prepareAudio(boundaryCases, options);
+}
 
 // File-only synthesis by an already installed Mac voice; no playback, capture,
 // voice download or user audio. Every waveform remains in this owned run.
-export async function prepareFillerAudio({ voice = 'Tingting' } = {}) {
+async function prepareAudio(cases, { voice = 'Tingting' } = {}) {
   assert.equal(process.platform, 'darwin');
   assert.match(voice, /^[\p{L}\p{N} ()（）_-]{1,80}$/u, 'Expected an installed voice name');
   requireUnlockedDesktop();
@@ -62,7 +77,7 @@ export async function prepareFillerAudio({ voice = 'Tingting' } = {}) {
       '-v',
       voice,
       '-r',
-      '160',
+      String(item.rate ?? 160),
       '-o',
       item.wave,
       '--file-format=WAVE',

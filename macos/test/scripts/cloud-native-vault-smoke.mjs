@@ -2,7 +2,7 @@ import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-wo
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { loadDevelopmentSigning, signLocalCode } from '../../scripts/development-signing.mjs';
 import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -15,6 +15,7 @@ import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs'
 assert.equal(process.platform, 'darwin');
 const releaseDesktop = holdDesktopAwake();
 const signing = await loadDevelopmentSigning();
+const fixtureRoot = await realpath(testRoot);
 const canonical = path.join(
   workspace.platformRoot,
   '.tools/credential-helper-v1/VoxCue.Credentials',
@@ -29,14 +30,13 @@ const run = (command, args) => {
 };
 const keychainList = () => run('/usr/bin/security', ['list-keychains', '-d', 'user']);
 const previousList = keychainList();
-const keychain = path.join(testRoot, 'synthetic.keychain-db');
-const managerSource = path.join(testRoot, 'keychain.mm');
+const keychain = path.join(fixtureRoot, 'synthetic.keychain-db');
+const managerSource = path.join(fixtureRoot, 'keychain.mm');
 await writeFile(
   managerSource,
-  `#import <Foundation/Foundation.h>
-#import <Security/Security.h>
+  `#include ${JSON.stringify(path.join(workspace.platformRoot, 'test/fixtures/credential-fixture-boundary.h'))}
 int main(int argc,const char **argv){@autoreleasepool{
- if(argc!=3)return 64;SecKeychainSetUserInteractionAllowed(false);
+ if(argc!=3||![@[@"create",@"lock",@"unlock",@"delete"] containsObject:@(argv[1])]||!ownedFixtureKeychain(argv[2],strcmp(argv[1],"create")==0))return 76;SecKeychainSetUserInteractionAllowed(false);
  const char *password="synthetic-cloud-keychain-password";SecKeychainRef keychain=NULL;
  OSStatus status;
  if(strcmp(argv[1],"create")==0)status=SecKeychainCreate(argv[2],(UInt32)strlen(password),password,false,NULL,&keychain);
@@ -57,6 +57,7 @@ const compile = (source, output) => {
     '-mmacosx-version-min=14.2',
     '-O2',
     '-DVOXCUE_SIGNING_SHA1="' + signing.sha1.toLowerCase() + '"',
+    '-DVOXCUE_FIXTURE_ROOT=' + JSON.stringify(fixtureRoot),
     source,
     '-framework',
     'Foundation',
@@ -67,11 +68,11 @@ const compile = (source, output) => {
   ]);
   signLocalCode(output, signing, 'com.voxcue.credentials', { preserveMetadata: false });
 };
-const manager = path.join(testRoot, 'keychain-manager');
-const helper = path.join(testRoot, 'credential-probe');
+const manager = path.join(fixtureRoot, 'keychain-manager');
+const helper = path.join(fixtureRoot, 'credential-probe');
 compile(managerSource, manager);
 compile(path.join(workspace.platformRoot, 'test/fixtures/credential-probe.mm'), helper);
-const profile = path.join(testRoot, 'profile');
+const profile = path.join(fixtureRoot, 'profile');
 await mkdir(profile);
 let ownsKeychain = false;
 const cleanupKeychain = () => {
@@ -86,7 +87,7 @@ ownsKeychain = true;
 try {
   for (const phase of ['write', 'read']) {
     requireUnlockedDesktop();
-    const entry = path.join(testRoot, phase + '.cjs');
+    const entry = path.join(fixtureRoot, phase + '.cjs');
     await writeFile(
       entry,
       `

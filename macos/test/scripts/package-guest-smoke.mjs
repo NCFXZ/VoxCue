@@ -7,6 +7,10 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 
+const screenshotOnly = process.argv.includes('--screenshot-only');
+const retainVM = process.argv.includes('--retain-vm');
+if (process.argv.slice(2).some(arg => !['--screenshot-only', '--retain-vm'].includes(arg)))
+  throw Error('Use --screenshot-only for the targeted regression; --retain-vm keeps its stopped isolated environment.');
 // The VM is provisioned separately from an authenticated public image. It must
 // be disposable and stopped; this runner never attaches an existing live user VM.
 const tart = process.env.VOXCUE_TEST_TART;
@@ -15,7 +19,7 @@ const vm = process.env.VOXCUE_TEST_VM;
 const release = process.env.VOXCUE_TEST_RELEASE_DIR;
 const cache = process.env.VOXCUE_TEST_COMPONENT_CACHE;
 if (
-  ![tart, home, release, cache].every((value) => value && path.isAbsolute(value)) ||
+  ![tart, home, release, ...(!screenshotOnly ? [cache] : [])].every((value) => value && path.isAbsolute(value)) ||
   !/^voxcue[\w-]+$/.test(vm ?? '')
 )
   throw Error(
@@ -77,6 +81,7 @@ async function copy(source, destination) {
 // These directories contain source/fixtures only. No workspace-wide copy, private
 // .tools directory, environment file, Keychain, user profile or login state enters.
 for (const relative of [
+  'shared/package.json',
   'shared/scripts',
   'shared/test/scripts',
   'shared/test/fixtures',
@@ -124,13 +129,15 @@ await cp(path.join(workspace.platformRoot, 'node_modules'), path.join(repo, 'mac
     return true;
   },
 });
-console.log('Guest dependency staging complete; copying authenticated release and models.');
+console.log('Guest dependency staging complete; copying release' + (screenshotOnly ? ' for screenshot-only acceptance.' : ' and authenticated models.'));
 await copy(release, path.join(inputs, 'release'));
-await copy(
-  path.join(workspace.platformRoot, 'release/1.1.1/VoxCue-1.1.1-arm64.zip'),
-  path.join(repo, 'macos/release/1.1.1/VoxCue-1.1.1-arm64.zip'),
-);
-await copy(cache, path.join(inputs, 'components'));
+if (!screenshotOnly) {
+  await copy(
+    path.join(workspace.platformRoot, 'release/1.1.1/VoxCue-1.1.1-arm64.zip'),
+    path.join(repo, 'macos/release/1.1.1/VoxCue-1.1.1-arm64.zip'),
+  );
+  await copy(cache, path.join(inputs, 'components'));
+}
 // virtiofs can reject framework symlinks while traversing the shared tree.
 // Transfer one regular archive and restore its links on the guest's local disk.
 execFileSync('/usr/bin/ditto', [
@@ -142,7 +149,9 @@ const hostUUID = execFileSync('/usr/sbin/ioreg', ['-rd1', '-c', 'IOPlatformExper
 }).match(/"IOPlatformUUID"\s*=\s*"([A-Fa-f0-9-]+)"/)?.[1];
 assert.ok(hostUUID);
 const nonce = randomBytes(16).toString('hex');
-const guestRoot = '/private/tmp/voxcue-macos-guest-' + nonce;
+// macOS clears /private/tmp on a cold boot. Explicitly retained fixtures need
+// a guest-owned durable directory; no host home or product profile is shared.
+const guestRoot = (retainVM ? '/Users/admin/Library/Application Support/' : '/private/tmp/') + 'voxcue-macos-guest-' + nonce;
 const controller = path.join(testRoot, 'disconnected-vm.py');
 await writeFile(
   controller,
@@ -228,7 +237,7 @@ try {
   await guest(
     `const fs=require('node:fs'),cp=require('node:child_process');
 const root=${JSON.stringify(guestRoot)},mount='/Volumes/My Shared Files/voxcue-inputs';
-fs.mkdirSync(root,{mode:0o700});
+fs.mkdirSync(root,{mode:0o700,recursive:true});
 const uuid=cp.execFileSync('/usr/sbin/ioreg',['-rd1','-c','IOPlatformExpertDevice'],{encoding:'utf8'}).match(/"IOPlatformUUID"\\s*=\\s*"([A-Fa-f0-9-]+)"/)[1];
 fs.writeFileSync(root+'/context.json',JSON.stringify({version:1,root,nonce:${JSON.stringify(nonce)},guestUID:process.getuid(),guestMachineUUID:uuid,hostMachineUUID:${JSON.stringify(hostUUID)},syntheticIPv4:'192.168.248.2'}),{mode:0o600,flag:'wx'});
 cp.execFileSync('/usr/bin/ditto',['-x','-k',mount+'/repo.zip',root]);
@@ -242,7 +251,7 @@ console.log('Guest isolated input staging complete; no routed network, clipboard
 `,
     300000,
   );
-  for (const [name, args] of [
+  for (const [name, args] of screenshotOnly ? [['package-screenshot-smoke.mjs', []]] : [
     ['package-security-smoke.mjs', []],
     ['package-runtimes-smoke.mjs', []],
     ['package-smoke.mjs', ['--install-archive']],
@@ -274,11 +283,15 @@ if(result.error)throw result.error;process.exitCode=result.status??1;
       if (boot.exitCode !== null || boot.signalCode !== null) resolve();
       else boot.once('exit', resolve);
     });
-    execFileSync(tart, ['delete', vm], { env: toolEnvironment, stdio: 'inherit', timeout: 60000 });
+    if (retainVM)
+      console.log('RETAINED_GUEST ' + JSON.stringify({ vm, guestRoot, context: guestRoot + '/context.json' }));
+    else
+      execFileSync(tart, ['delete', vm], { env: toolEnvironment, stdio: 'inherit', timeout: 60000 });
   } finally {
     releaseDesktop();
   }
 }
 console.log(
-  'PASS: disposable guest final-product and final-ASAR acceptance completed; guest inputs and profiles removed.',
+  'PASS: disposable guest ' + (screenshotOnly ? 'final-ASAR screenshot regression' : 'final-product and final-ASAR acceptance') +
+  (retainVM ? ' completed; retained guest is stopped for subsequent isolated checks.' : ' completed; guest inputs and profiles removed.'),
 );

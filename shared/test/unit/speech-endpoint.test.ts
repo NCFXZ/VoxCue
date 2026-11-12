@@ -38,7 +38,6 @@ it('Paraformer以实际VAD结束帧回传静音起点，收尾补零不计入音
           active: true,
           text: '合成问题',
           lastEmit: 0,
-          silentReset: 1000,
         },
       ],
     ]),

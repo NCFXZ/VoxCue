@@ -77,6 +77,41 @@ async function liveFixture() {
   return { answer, emit, receive };
 }
 
+it('resumes the interview after automatic audio recovery without submitting the interrupted question', async () => {
+  const { answer, emit, receive } = await liveFixture();
+  emit('为什么这段输入会中断', { final: false });
+  receive({ type: 'status', status: {
+    state: 'error', model: 'offline-synthetic', error: '音频已中断，正在自动重新连接…',
+  } });
+  receive({ type: 'gap', source: 'system', message: '音频已中断，正在自动重新连接…' });
+  expect(useInterview.getState()).toMatchObject({
+    status: 'paused', speechError: '音频已中断，正在自动重新连接…', draftQuestion: '',
+  });
+  receive({ type: 'status', status: { state: 'loading', model: 'offline-synthetic' } });
+  await advanceAudio(2000);
+  expect(answer).not.toHaveBeenCalled();
+  receive({ type: 'status', status: { state: 'running', model: 'offline-synthetic' } });
+  expect(useInterview.getState()).toMatchObject({ status: 'running', speechError: null });
+  receive({ type: 'activity', source: 'system', level: 0.1, speaking: true });
+  expect(useInterview.getState().speechWarnings.system).toBeUndefined();
+  emit('PostgreSQL 如何保证一致性');
+  await advanceAudio(1000);
+  expect(answer).toHaveBeenCalledOnce();
+  expect(answer.mock.calls[0][0].question).toBe('PostgreSQL 如何保证一致性');
+});
+
+it('ignores a late recovered-running event after the interview session has been reset', async () => {
+  const { answer, receive } = await liveFixture();
+  receive({ type: 'status', status: {
+    state: 'error', model: 'offline-synthetic', error: '音频已中断，正在自动重新连接…',
+  } });
+  useInterview.getState().reset();
+  receive({ type: 'status', status: { state: 'running', model: 'offline-synthetic' } });
+  expect(useInterview.getState().status).toBe('idle');
+  await advanceAudio(2000);
+  expect(answer).not.toHaveBeenCalled();
+});
+
 it.each([
   '那为啥这么选',
   'PostgreSQL咋保证一致性的',

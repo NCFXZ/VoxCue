@@ -8,7 +8,7 @@ import os from 'node:os';
 import { buildMacIcons } from './build-icons.mjs';
 import { loadDevelopmentSigning, verifyLocalApp } from './development-signing.mjs';
 import { signMacApp } from './sign-app.mjs';
-import { buildCredentials } from './build-credentials.mjs';
+import { buildHardenedCredentials } from './build-hardened-credentials.mjs';
 import {
   englishUsageDescriptions,
   localizeUsageDescriptions,
@@ -20,7 +20,7 @@ export async function prepareRuntime() {
   if (process.platform !== 'darwin' || process.arch !== 'arm64')
     throw Error('Apple Silicon required.');
   const signing = await loadDevelopmentSigning();
-  await buildCredentials();
+  await buildHardenedCredentials();
   const { icns } = await buildMacIcons();
   const root = workspace.platformRoot;
   const require = createRequire(path.join(root, 'package.json'));

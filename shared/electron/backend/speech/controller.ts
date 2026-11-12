@@ -1,5 +1,6 @@
 import { Worker } from 'node:worker_threads';
 import path from 'node:path';
+import { abortable } from '../cancellable';
 import type {
   AudioSource,
   SpeechServiceCall,
@@ -22,6 +23,7 @@ export interface NativeCapture {
 }
 export interface CaptureAdapter {
   readonly drainBeforeRetire?: boolean;
+  readonly automaticRestart?: boolean;
   readonly preprocessorFile?: string;
   readonly qwenRuntime?: string;
   devices(helper: string): Promise<AudioDevice[]>;
@@ -30,7 +32,7 @@ export interface CaptureAdapter {
     source: AudioSource,
     device: string | undefined,
     audio: (packet: AudioPacket) => void,
-    failure: (message: string) => void,
+    failure: (message: string, recoverable?: boolean) => void,
   ): NativeCapture;
 }
 export const speechModelName = 'Paraformer 中英 INT8 · Silero VAD · 本地';
@@ -38,6 +40,7 @@ export class SpeechController {
   private worker?: Worker;
   private failedWorker?: Worker;
   private ready?: Promise<void>;
+  private loadingTimer?: ReturnType<typeof setTimeout>;
   private captures = new Map<AudioSource, NativeCapture>();
   private queued = 0;
   private pendingAudio = new Map<number, { source: AudioSource; ms: number }>();
@@ -52,6 +55,14 @@ export class SpeechController {
   private anchors = new Map<AudioSource, { native: number; wall: number }>();
   private status: SpeechStatus = { state: 'idle', model: speechModelName };
   private serial = Promise.resolve();
+  private restartGeneration = 0;
+  private restartTimer?: ReturnType<typeof setTimeout>;
+  private restartStartup?: AbortController;
+  private restartAttempts = 0;
+  private runningSince = 0;
+  private lastProgress = 0;
+  private wanted = false;
+  private closed = false;
   private epoch = 0;
   private selection = speechSelection({ sources: [] });
   private chunkMs?: number;
@@ -85,10 +96,22 @@ export class SpeechController {
     private qwenDirectory?: string,
   ) {}
   call(call: SpeechServiceCall): Promise<SpeechStatus> {
+    if (this.closed && call.op !== 'status') return Promise.reject(Error('语音服务已关闭。'));
+    if (call.op === 'start' || call.op === 'stop' || call.op === 'pause') {
+      this.cancelRestart();
+      if (call.op === 'start') {
+        this.wanted = true;
+        this.restartAttempts = 0;
+      } else if (call.op === 'stop' || call.op === 'pause') this.wanted = false;
+    }
     if (call.op === 'set-input-state') return this.setInputState(call.state);
-    if (call.op === 'cancel-input-state') return this.cancelInputState();
+    if (call.op === 'cancel-input-state') {
+      if (this.changingInput) this.cancelRestart();
+      return this.cancelInputState();
+    }
     if (call.op === 'switch-recognizer') return this.switchRecognizer(call.options);
     if (call.op === 'cancel-switch') {
+      if (this.switching) this.cancelRestart();
       this.cancelSwitch();
       return Promise.resolve(this.status);
     }
@@ -96,12 +119,27 @@ export class SpeechController {
       this.cancelSwitch(false);
       void this.cancelInputState().catch(() => {});
     }
-    const result = this.serial.then(() => this.execute(call));
+    return this.enqueue(() => this.execute(call));
+  }
+  private enqueue(action: () => Promise<SpeechStatus>) {
+    const result = this.serial.then(action);
     this.serial = result.then(
       () => {},
       () => {},
     );
     return result;
+  }
+  private cancelRestart() {
+    const starting = this.restartStartup;
+    ++this.restartGeneration;
+    this.restartStartup?.abort(Error('音频自动恢复已取消。'));
+    clearTimeout(this.restartTimer);
+    this.restartTimer = undefined;
+    if (
+      this.status.error === '音频已中断，正在自动重新连接…' ||
+      (starting && this.status.state === 'loading')
+    )
+      this.state('error', '音频自动恢复已取消，请手动重新连接。', this.status.failureSource);
   }
   private state(
     state: SpeechStatus['state'],
@@ -148,6 +186,7 @@ export class SpeechController {
       !sameAudioCapture(this.options, options)
     )
       return Promise.reject(Error('语音切换需要保持当前采集设备且没有其他切换正在进行。'));
+    this.cancelRestart();
     const selection = speechSelection(options);
     if (selection.speechModel === 'qwen' && !this.qwenDirectory)
       return Promise.reject(Error('当前平台尚未接入 Qwen 原生推理。'));
@@ -227,6 +266,7 @@ export class SpeechController {
       !this.options
     )
       return Promise.reject(Error('音频输入正在切换或尚未就绪，请稍后重试。'));
+    this.cancelRestart();
     const state = { ...value },
       previous = { ...this.inputState };
     const changed: AudioSource[] =
@@ -340,9 +380,9 @@ export class SpeechController {
           validClock ? p.timestamp : undefined,
         );
       },
-      (message) => {
+      (message, recoverable) => {
         if (epoch === this.epoch && this.captures.get(source) === capture)
-          this.fail(message, source);
+          this.fail(message, source, recoverable);
       },
     );
     return capture;
@@ -360,6 +400,7 @@ export class SpeechController {
         },
         this.selection.speechModel === 'qwen' ? 180000 : 60000,
       );
+      this.loadingTimer = timer;
       worker.on('message', (m) => {
         if (this.worker !== worker) return;
         if (m.ready) {
@@ -401,6 +442,7 @@ export class SpeechController {
         if (m.ack) {
           const packet = this.pendingAudio.get(m.ack);
           if (!packet) return;
+          this.lastProgress = performance.now();
           this.pendingAudio.delete(m.ack);
           this.queued = this.pendingAudio.size ? Math.max(0, this.queued - packet.ms) : 0;
           if (!this.pendingAudio.size) this.drainingQwenQueue = false;
@@ -447,11 +489,11 @@ export class SpeechController {
         for (const pending of this.flushers.values())
           pending.reject(Error('语音识别进程异常，尾段无法处理，请重新开始。'));
         this.flushers.clear();
-        this.fail('语音识别进程异常，请重新开始。', 'model');
+        this.fail('语音识别进程异常，请重新开始。', 'model', true);
       });
       worker.on('exit', () => {
-        if (this.worker !== worker) return;
         clearTimeout(timer);
+        if (this.worker !== worker) return;
         reject(Error('语音识别进程在初始化完成前已退出，请重新开始。'));
         this.worker = undefined;
         this.ready = undefined;
@@ -459,7 +501,7 @@ export class SpeechController {
         for (const pending of this.flushers.values())
           pending.reject(Error('语音识别进程在尾段处理完成前退出，请重新开始。'));
         this.flushers.clear();
-        if (this.captures.size) this.fail('语音识别进程已退出，采集已停止。', 'model');
+        if (this.captures.size) this.fail('语音识别进程已退出，采集已停止。', 'model', true);
         else if (flushing)
           this.state('error', '语音识别进程在尾段处理完成前退出，请重新开始。', 'model');
       });
@@ -505,7 +547,11 @@ export class SpeechController {
         message: `${source === 'system' ? '系统音频' : '麦克风'}发生短暂间断，转写已继续；不完整片段不会自动用于回答。`,
       });
       if (gaps.length >= 5) {
-        this.fail('音频在十秒内连续中断五次，采集已停止；请检查设备或降低负载后重新开始。', source);
+        this.fail(
+          '音频在十秒内连续中断五次，采集已停止；请检查设备或降低负载后重新开始。',
+          source,
+          true,
+        );
         return;
       }
     }
@@ -523,7 +569,11 @@ export class SpeechController {
         audioMs: 0,
         inferenceMs: 0,
       });
-      this.fail('识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。');
+      this.fail(
+        '识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。',
+        'service',
+        true,
+      );
       return;
     }
     this.queued += ms;
@@ -547,25 +597,93 @@ export class SpeechController {
       [samples.buffer as ArrayBuffer],
     );
   }
-  private fail(message: string, failureSource: SpeechStatus['failureSource'] = 'service') {
+  private fail(
+    message: string,
+    failureSource: SpeechStatus['failureSource'] = 'service',
+    recoverable = false,
+  ) {
     if (this.status.state === 'error') return;
+    const generation = this.restartGeneration;
+    const current = () => generation === this.restartGeneration && !this.closed && this.wanted;
+    const restart = !!(
+      this.adapter.automaticRestart &&
+      recoverable &&
+      this.status.state === 'running' &&
+      this.options &&
+      !this.switching &&
+      !this.changingInput &&
+      !this.blockedInput.size &&
+      current()
+    );
+    // A brief successful open must not replenish an endlessly failing loop.
+    if (
+      restart &&
+      performance.now() - this.runningSince >= 30000 &&
+      performance.now() - this.lastProgress < 2000
+    )
+      this.restartAttempts = 0;
+    const options = this.options && structuredClone(this.options);
+    const inputState = this.managedInput ? { ...this.inputState } : undefined;
     this.cancelSwitch(false);
     this.state('error', message, failureSource);
-    void this.call({ op: 'stop' })
-      .then(() => this.state('error', message, failureSource))
-      .catch(() => {
-        this.state('error', message, failureSource);
-        const worker = this.worker;
-        this.worker = undefined;
-        this.ready = undefined;
-        void worker?.terminate();
-      });
+    void this.enqueue(async () => {
+      await this.execute({ op: 'stop' });
+      if (!current()) return this.status;
+      this.state('error', message, failureSource);
+      if (!restart) return this.status;
+      // Capture.stop has confirmed native close. Retire the recognizer too,
+      // so the next attempt cannot inherit a partial or unhealthy session.
+      await this.retireWorker();
+      if (!current()) return this.status;
+      if (this.restartAttempts >= 3) {
+        this.state(
+          'error',
+          '音频自动恢复已达到重试上限，请检查设备或模型后重新连接。',
+          failureSource,
+        );
+        return this.status;
+      }
+      const delay = 1000 * 2 ** this.restartAttempts++;
+      for (const source of options!.sources)
+        this.emit({ type: 'gap', source, message: '音频发生中断，不完整片段不会自动用于回答。' });
+      this.state('error', '音频已中断，正在自动重新连接…', failureSource);
+      this.restartTimer = setTimeout(() => {
+        this.restartTimer = undefined;
+        if (!current()) return;
+        void this.enqueue(async () => {
+          if (!current()) return this.status;
+          const startup = new AbortController();
+          this.restartStartup = startup;
+          try {
+            return await this.execute(
+              { op: 'start', options: options!, inputState },
+              current,
+              startup.signal,
+            );
+          } finally {
+            if (this.restartStartup === startup) this.restartStartup = undefined;
+          }
+        }).catch((error) => {
+          // Device enumeration can fail before entering startup. Preserve a
+          // terminal error rather than leaving a reconnection notice forever.
+          if (current()) this.state('error', (error as Error).message, failureSource);
+        });
+      }, delay);
+      return this.status;
+    }).catch(() => {
+      if (generation === this.restartGeneration) this.state('error', message, failureSource);
+    });
   }
   private checkStartup() {
     if (!this.worker || this.status.state === 'error')
       throw Error(this.status.error || '语音识别进程已退出，请重新开始。');
   }
-  private async execute(call: SpeechServiceCall): Promise<SpeechStatus> {
+  private async execute(
+    call: SpeechServiceCall,
+    current = () => true,
+    signal?: AbortSignal,
+  ): Promise<SpeechStatus> {
+    const waiting = <T>(task: Promise<T>) => (signal ? abortable(task, signal) : task);
     if (call.op === 'status') return this.status;
     if (call.op === 'devices')
       return { ...this.status, devices: await this.adapter.devices(this.helper) };
@@ -658,7 +776,8 @@ export class SpeechController {
       throw Error('当前平台尚未接入 Qwen 原生推理。');
     if (JSON.stringify(selection) !== JSON.stringify(this.selection)) await this.retireWorker();
     this.selection = selection;
-    const available = await this.adapter.devices(this.helper);
+    const available = await waiting(this.adapter.devices(this.helper));
+    if (!current()) return this.status;
     for (const source of call.options.sources) {
       const selected = call.options[source];
       if (selected && !available.some((d) => d.source === source && d.id === selected))
@@ -669,46 +788,53 @@ export class SpeechController {
     this.state('loading');
     let startupFailure: SpeechStatus['failureSource'] = 'model';
     try {
-      await this.load();
+      await waiting(this.load());
+      if (!current()) throw Error('音频自动恢复已取消。');
       this.checkStartup();
       {
         startupFailure = 'service';
         const id = ++this.sequence;
-        await new Promise<void>((resolve, reject) => {
-          const timer = setTimeout(() => {
-            this.flushers.delete(id);
-            reject(Error('本地回声消除初始化超时，请重新开始。'));
-          }, 10000);
-          this.flushers.set(id, {
-            resolve: () => {
-              clearTimeout(timer);
-              resolve();
-            },
-            reject: (error) => {
-              clearTimeout(timer);
-              reject(error);
-            },
-          });
-          this.worker!.postMessage({
-            op: 'prepare',
-            id,
-            sources: call.options.sources,
-            inputState: this.inputState,
-          });
-        });
+        await waiting(
+          new Promise<void>((resolve, reject) => {
+            const timer = setTimeout(() => {
+              this.flushers.delete(id);
+              reject(Error('本地回声消除初始化超时，请重新开始。'));
+            }, 10000);
+            this.flushers.set(id, {
+              resolve: () => {
+                clearTimeout(timer);
+                resolve();
+              },
+              reject: (error) => {
+                clearTimeout(timer);
+                reject(error);
+              },
+            });
+            this.worker!.postMessage({
+              op: 'prepare',
+              id,
+              sources: call.options.sources,
+              inputState: this.inputState,
+            });
+          }),
+        );
         this.checkStartup();
+        if (!current()) throw Error('音频自动恢复已取消。');
       }
       const epoch = ++this.epoch;
       for (const source of call.options.sources) {
         startupFailure = source;
         const capture = this.capture(source, call.options, epoch);
         this.captures.set(source, capture);
-        await capture.start();
+        await waiting(capture.start());
+        if (!current()) throw Error('音频自动恢复已取消。');
         this.checkStartup();
       }
       // Native adapters own silence: Windows loopback uses its advancing
       // endpoint clock. Wall time alone cannot establish processed silence.
       this.options = structuredClone(call.options);
+      this.runningSince = performance.now();
+      this.lastProgress = 0;
       return this.state('running');
     } catch (error) {
       // Retire callbacks first. A second cleanup failure must not hide the
@@ -722,10 +848,14 @@ export class SpeechController {
       this.anchors.clear();
       this.recentGaps.clear();
       this.ready = undefined;
+      clearTimeout(this.loadingTimer);
+      for (const pending of this.flushers.values()) pending.reject(error as Error);
+      this.flushers.clear();
       const old = this.worker;
       this.worker = undefined;
       await Promise.allSettled(captures.map(async (capture) => capture.stop()));
       await old?.terminate();
+      if (!current()) return this.status;
       return this.state(
         'error',
         (error as Error).message,
@@ -734,8 +864,11 @@ export class SpeechController {
     }
   }
   async close() {
+    this.cancelRestart();
+    this.wanted = false;
+    this.closed = true;
     try {
-      await this.call({ op: 'stop' });
+      await this.enqueue(() => this.execute({ op: 'stop' }));
     } finally {
       await this.retireWorker();
     }

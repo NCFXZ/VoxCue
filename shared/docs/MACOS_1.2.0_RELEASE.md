@@ -1,8 +1,10 @@
-# macOS 1.2.0 实现与验收入口
+# macOS 1.2.0 基线与 1.2.1 实现
 
 当前范围和待办以根 `PROGRESS.md` 为准；原始逐项要求见 `MACOS_1.2.0_TODO.md`。本文说明实现和复现入口，不保存测试成绩或运行产物。Windows 专属文件及既有 1.1.1／v1.2.0 冻结资产保持。
 
 Mac 正式资产位于[既有 1.2.0 稳定发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0)，本地只保留 macos/release/1.2.0 的 DMG／ZIP／latest-mac.yml，不进入 Git。产品源码标签为 `macos-v1.2.0`（`10ac04b`）；共享／Windows 的原 `v1.2.0` 标签保持在 `0bc1cd4`，后续夹具和文档提交不改变发行字节。
+
+1.2.0 原发行保留；后续凭据加固、自动重启、短音隔离、路由与界面修复作为 1.2.1 交付。当前任务包含完整回归及最终包隔离验收，范围与发行状态以 PROGRESS.md 为准。Windows 专属适配另由其本机接续。
 
 ## 正式运行时
 
@@ -16,11 +18,19 @@ Mac 正式资产位于[既有 1.2.0 稳定发行](https://github.com/NCFXZ/VoxCu
 
 截图的 host／Worker 与 sharp、arm64 sharp binding／libvips 随最终 ASAR 的 unpacked 闭包分发。Mac 直接声明既有 `onnxruntime-common@1.30.0`，满足 Transformers CJS 的实际根引用；固定包、SDK、模型版本不升级。
 
+凭据构建使用独立冻结的 v2 helper。`CredentialsHardened.mm` 复用未修改的 v1 密码／v10 实现，只接受固定证书的正式父进程，并核对双方 runtime 和危险 entitlements。构建记录覆盖两份源码、证书和精确二进制；首次写入拒绝覆盖，后续构建和整包签名只验证、复制同一字节，不重签 helper。v1 源码及规范二进制保留为恢复／兼容基线，不再写入生产 native/bin。
+
+新 helper 精准查找三个既有服务／账号的全部匹配条目，核对原密码一致后，将 trusted-app ACL 与 partition 收紧到新 CDHash；新建条目一开始也采用相同访问限制。旧密码与 v10 密文保持，不删除 Keychain 项。首次操作可能需要持有人通过标准系统界面授权；助手不接收或代输系统口令。跨多个条目的写入不是原子事务：中途失败不返回密文、不生成替代密码、不恢复旧访问，下次同一 helper 可继续迁移。撤权后的旧 helper／旧版应用不能作为自动回滚路径。
+
 ## 生命周期与更新
 
 CoreAudio 以实际 `close` 作为退休证据。正常 EOF 排空尾包；强制停止明确失败；发送信号、kill 返回 true／false 或异常均不能证明释放。未确认退出时 Mac adapter 的退休栅栏阻止替代采集，真实迟到 close 后才可手动重开。
 
-Rust／Python 管道使用非阻塞读写和整次交换期限：ready 180 秒，命令写入与回复合用 120 秒。无回复、半行、超长、错误 JSON／序号等错误使会话退休并 kill／wait，不在同一失效会话自动重试。既有音频、上下文、端点、CPU 算法和手动恢复策略保持。
+系统音频按 HAL 首选立体声声道定位原始输出流索引，再转换为流内声道对，只平均选中的声道。`AudioRoute.h` 与 `AudioSamples.h` 由实际采集和原生专项共用；不根据零值猜活跃通道，不统一放大或混入其他输出流。单流 mono／stereo 缺少首选元数据时兼容，未知多声道、跨流／重叠／越界和实际 tap 格式不匹配明确拒绝；错误文案中英同步。映射所依赖的现存 HAL 属性发生变化时停止，等待手动重新开始。麦克风原转换、PCM 包协议和积压预算保持。
+
+Rust／Python 管道使用非阻塞读写和整次交换期限：ready 180 秒，命令写入与回复合用 120 秒。无回复、半行、超长、错误 JSON／序号等错误使会话退休并 kill／wait，不在同一失效会话自动重试。既有音频、上下文、端点及 CPU 算法保持。
+
+1.2.1 新增 M8：仅 Mac adapter 启用共享 controller 的有界自动重启。已运行会话发生明确可恢复的进程故障时，先停止采集并确认 Worker 实际退休，再按 1／2／4 秒退避，最多连续三次；稳定运行且有近期实际处理 ACK 才恢复预算。手动停止、暂停、切换或关闭取消恢复归属和初始化等待。权限／设备错误、歧义管道错误、模型语义错误及启动失败明确停止；原积压预算保持，恢复过程有既有状态和间断通知。原生 exit 未 close 时保留有界 watchdog 和退休栅栏。
 
 更新使用连接／首字节 30 秒、有效写入进展后 120 秒空闲期限，持续有进展的下载不受旧 30 分钟总期限截断。取消不等待失效 reader.cancel Promise；中间进度按整数百分比合并。`archive-ownership-v1.json` 仅记录本实现完成并认证的下载；只回收已被安装版本追上、没有活动消费者、归属／大小／摘要／签名均有效的普通文件。未知历史包、较新的离线更新、链接、损坏项及活动事务保持。
 
@@ -32,6 +42,8 @@ node scripts/update-key-backup.mjs --backup=/absolute/private/offline/update-key
 ```
 
 备份不轮换更新身份，也不代表已替持有人保存了真实私钥。
+
+持有人可用同一工具的 `--verify=/绝对备份路径` 在本机隐藏输入口令，认证备份并核对派生公钥；该操作不读取现用私钥、不创建或覆盖恢复密钥。当前持有人指定的是 OneDrive 加密副本：结构／权限检查及本机隐藏口令认证、派生公钥核对均已完成；不称为物理离线介质。
 
 ## 测试入口与隔离
 
@@ -53,9 +65,17 @@ Owner 普通开发测试只允许固定签名开发宿主和自有入口／profi
 
 开发态完整功能由 `functional-suite.mjs` 排程，五档缩放由 `ui-refinement-matrix.mjs` 排程；包括真实 utility 高输出／退休、SDK 迟到结果、退出 drain、既定面试轮次与固定公开音频长稳。`qwen-regression.mjs` 使用认证临时模型串行运行原生、Worker、切换、父 EOF 和释放／删除；最终 ASAR 组件覆盖由 guest 单独承担。
 
+本轮专项入口：`package-guest-smoke.mjs --screenshot-only` 只对真实签名包执行连续合成编码、错误／取消／实际期限、Worker 退休与 RSS 收敛；故障注入仅作用于测试宿主中的截图 Worker 构造器，最终 ASAR 不变。`audio-restart-smoke.mjs` 使用真实 Worker 与合成采集子进程；`credential-hardening-smoke.mjs` 仅使用显式临时 Keychain 集合，不修改宿主搜索列表；`audio-conversion-smoke.mjs` 由生产共用 PCM 转换实现承载。设备和权限对照另外走 guest-only `audio-virtual-smoke.mjs`，不能将纯转换／预检结果等同设备通过。
+
+凭据迁移与危险权限夹具使用随机 nonce 父身份，临时源码仅严格替换预期测试父标识，生产冻结源码／字节保持。临时父进程绑定本轮 helper 路径和精确 CDHash，助手与 manager 也独立限制 owned Keychain；不保留可转发任意程序的正式身份 launcher。真实 production canonical 的正式父探针只发送固定无效请求，不进行凭据访问。临时进程、合成 Keychain 与签名父探针结束即清理；本轮按持有人要求连同上一环节 OS 基线及工具环境一并清理。经认证的公开模型／音频遵循平台缓存规则。
+
+音频设备专项的生产 helper 测量走 guest `tart-guest-agent` 责任链，正常系统 UI 分别建立拒权、授权及重新只允许音频的状态；参数和全零样本不作为权限证据。同进程私有 aggregate 的 source-integration 夹具另需该 guest 责任链的 Screen＋Audio 授权，不能将它的权限条件称为正式应用要求。仅使用固定虚拟设备与 nonce-owned aggregate，不采样宿主或物理设备。
+
+
+隔离工具和 VM 由带 owner 标记的自有根管理，本轮结束清理，不将旧缓存路径作为长期复用入口。最终包必须从停止且开启 SIP 的干净基线克隆，音频就绪实例不能称为干净系统；源、发行和模型输入每次重新认证。guest 的 AudioOnly 与 Screen＋Audio 状态通过正常系统 UI 建立和核对，不修改 TCC 数据库；私有 aggregate 夹具的权限条件不能转述为正式应用要求。
+
 ## 保留边界
 
-- 没有受控虚拟音频设备时，M6 拒权／静音和 M15 多流／多声道设备验收继续待验证，不使用物理采集替代，不凭零值修改音量或路由。
-- 固定 `VoxCue.Credentials` 精确字节、CDHash 和已有 ACL 保持。正式入口清理继承环境，凭据 adapter 仅向 helper 提供固定系统 PATH；这能收紧当前产品的调用入口，不能证明旧 helper 自身已具备 runtime 防护或不再信任历史开发父身份。
-- 旧 helper 保留非 runtime 签名及开发父标识接受面，当前入口约束不能关闭直接启动旧二进制的注入路径。兼容迁移方案必须包含新 helper 的 runtime／正式父签名约束、合成 Keychain 中保留原密码与 v10 密文的 ACL／partition 迁移、撤销旧 CDHash 访问及明确回滚边界。仅新增一个加固 helper、只改父程序或保留旧 CDHash 的访问都不能关闭旧路径。真实 ACL／helper 身份迁移需要独立明确授权；本轮不静默改 Keychain 或 hash 白名单。
+- M6 已在 SIP guest 的固定虚拟输出及正常权限 UI 完成对照：拒权仍可启动并持续交付全零 PCM，与授权静音不可区分；只重新允许音频录制后手动启动可恢复固定合成音。不据零值增加拒权警报或自动停止；预检仍不读取样本。覆盖责任链为 tart-guest-agent→实际音频 helper，不代表正式应用父链或所有硬件。M15 已按真实 HAL 首选声道修复稀释／选流，并对签名新 helper 完成受控单设备、多流、运行中变更及权限重测；这些设备专项不扩称所有硬件；完整包验收由独立入口承担。
+- v2 helper 的实现与合成迁移验证不等于本机真实 Keychain 已迁移，也不等于原发行包已更新。旧 helper 基线的非 runtime 属性没有被重签掩盖；新版本实际完成 ACL／partition 迁移后才撤销其对旧条目的访问。
 - 不购买／切换 Developer ID 或公证身份；`captureProtectionSupported:false`、现有算法、外观和数据兼容边界保持。

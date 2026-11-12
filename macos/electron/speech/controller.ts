@@ -17,6 +17,7 @@ export class SpeechController extends SharedSpeechController {
       emit,
       {
         drainBeforeRetire: true,
+        automaticRestart: true,
         qwenRuntime,
         preprocessorFile: path.join(__dirname, 'echoCancellation.js'),
         devices,

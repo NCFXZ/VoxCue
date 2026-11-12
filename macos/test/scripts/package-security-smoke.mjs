@@ -199,20 +199,23 @@ try {
   console.log(
     'PASS: final ASAR, Python, MLX script and redirected-resource tampering fail pinned sealed-resource verification.',
   );
-  // Observe the protected legacy helper with a harmless marker in this guest.
-  // Its exact bytes/CDHash cannot be changed without a separate ACL migration.
-  const legacy = spawnSync(path.join(bundle, 'Contents/Resources/native/VoxCue.Credentials'), [], {
-    env: { ...process.env, DYLD_INSERT_LIBRARIES: library },
-    encoding: 'utf8',
-    timeout: 10000,
-  });
-  assert.ok(!legacy.error);
+  // Direct launch must be protected even outside the sanitized app adapter.
+  const credentials = spawnSync(
+    path.join(bundle, 'Contents/Resources/native/VoxCue.Credentials'),
+    [],
+    {
+      env: { ...process.env, DYLD_INSERT_LIBRARIES: library },
+      encoding: 'utf8',
+      timeout: 10000,
+    },
+  );
+  assert.ok(!credentials.error);
+  assert.equal(credentials.status, 77);
   const injected = await present(marker);
   await rm(marker, { force: true });
+  assert.equal(injected, false, 'Hardened credential helper must reject direct DYLD injection');
   console.log(
-    'LIMITATION: fixed legacy Credentials helper DYLD marker=' +
-      injected +
-      '; identity/ACL migration is outside the authorized fixed-helper boundary. No credential operation was requested.',
+    'PASS: fixed hardened Credentials helper rejects unrelated parent and direct DYLD injection; no credential operation requested.',
   );
   // Dedicated credential ingress fixture, not an ordinary GUI account fixture.
   // Invalid ciphertext is rejected before passwordForOperation/Keychain access.

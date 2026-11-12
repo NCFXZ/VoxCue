@@ -2,6 +2,7 @@ import { connectUiAccount, installUiAccount, closeUiApp } from './install-ui-acc
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
 import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -12,6 +13,16 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [await offlineElectronEntry()], env });
 try {
   await installUiAccount(app, { speech: true, components: true });
+  await app.evaluate(({ app }) => {
+    const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { SpeechHost } = load(app.getAppPath() + '/dist-electron/shared/electron/backend/speech/host.js');
+    const call = SpeechHost.prototype.call;
+    SpeechHost.prototype.call = async function (request) {
+      const status = await call.call(this, request);
+      if (request.op === 'start') globalThis.languageSpeech = { host: this, status };
+      return status;
+    };
+  });
   const page = await connectUiAccount(app, await app.firstWindow());
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -275,6 +286,55 @@ try {
     });
   });
   assert.ok(narrow, 'Readiness can wrap in a smaller window without clipping or overlapping');
+  await waitForAsync(app, () => !!globalThis.languageSpeech);
+  const recovering = 'Audio interrupted. Reconnecting automatically…';
+  const interrupted = 'Audio interrupted. Incomplete segments will not automatically trigger answers.';
+  const exhausted = 'Automatic audio recovery reached its retry limit. Check the device or model and reconnect.';
+  const recoveryBanner = floating.locator('.audio-recovery');
+  const assertRecovery = async (message, label) => {
+    await recoveryBanner.getByText(message, { exact: true }).waitFor();
+    await recoveryBanner.getByRole('button', { name: 'Reconnect audio', exact: true }).waitFor();
+    await audit(label, floating);
+    const geometry = await recoveryBanner.evaluate((node) => {
+      const bounds = node.getBoundingClientRect();
+      const panel = node.closest('.floating-panel').getBoundingClientRect();
+      return {
+        inside: bounds.left >= panel.left && bounds.right <= panel.right,
+        buttons: [...node.querySelectorAll('button')].every((button) => {
+          const box = button.getBoundingClientRect();
+          return box.left >= bounds.left && box.right <= bounds.right &&
+            button.scrollWidth <= button.clientWidth + 1;
+        }),
+        messageFits: node.querySelector('p').scrollWidth <= node.querySelector('p').clientWidth + 1,
+      };
+    });
+    assert.deepEqual(geometry, { inside: true, buttons: true, messageFits: true }, label);
+  };
+  await app.evaluate(() => {
+    const { host, status } = globalThis.languageSpeech;
+    const error = '音频已中断，正在自动重新连接…';
+    host.emit({ type: 'gap', source: 'system', message: '音频发生中断，不完整片段不会自动用于回答。' });
+    host.emit({ type: 'status', status: { ...status, state: 'error', error, failureSource: 'system' } });
+  });
+  await assertRecovery(recovering, 'Narrow English automatic audio recovery');
+  await floating.getByText(interrupted, { exact: true }).waitFor();
+  await app.evaluate(() => {
+    const { host, status } = globalThis.languageSpeech;
+    host.emit({ type: 'status', status });
+    host.emit({ type: 'activity', source: 'system', speaking: false, level: 0 });
+  });
+  await recoveryBanner.waitFor({ state: 'hidden' });
+  await floating.waitForFunction((message) => ![...document.querySelectorAll('.floating-warning')]
+    .some((node) => node.textContent === message), interrupted);
+  await app.evaluate(() => {
+    const { host, status } = globalThis.languageSpeech;
+    host.emit({ type: 'status', status: { ...status, state: 'error',
+      error: '音频自动恢复已达到重试上限，请检查设备或模型后重新连接。', failureSource: 'system' } });
+  });
+  await assertRecovery(exhausted, 'Narrow English automatic recovery retry limit');
+  await recoveryBanner.getByRole('button', { name: 'Reconnect audio', exact: true }).click();
+  await recoveryBanner.waitFor({ state: 'hidden' });
+  await audit('English manual recovery after retry limit', floating);
   await floating.evaluate(async () => {
     for (let step = 0; step < 3; step++) await window.desktop.resizeInterview(1);
   });

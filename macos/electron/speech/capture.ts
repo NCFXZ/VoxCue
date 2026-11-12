@@ -6,6 +6,8 @@ export function captureError(code?: string) {
   if (code === 'permission-denied')
     return '音频权限未开启，请在 macOS 隐私与安全性设置中允许 VoxCue 访问麦克风或录制系统音频后重试。';
   if (code === 'device-unavailable') return '所选音频设备已断开，请刷新并重新选择设备。';
+  if (code === 'unsupported-audio-format-or-layout')
+    return '所选音频设备的采样格式或首选声道布局暂不受支持，请检查设备设置或选择其他设备。';
   if (code === 'device-changed-or-backpressure')
     return '音频设备、采样率或默认设备已变化，或采集积压超限；采集已停止，请检查设备后重新开始。';
   return 'macOS 音频设备无法初始化，请检查设备和隐私权限后重试。';
@@ -79,7 +81,7 @@ export class CoreAudioCapture {
     private source: AudioSource,
     private device: string | undefined,
     private audio: (packet: AudioPacket) => void,
-    private failure: (message: string) => void,
+    private failure: (message: string, recoverable?: boolean) => void,
   ) {}
   start(): Promise<void> {
     if (this.stopTask || (this.child && !this.closed))
@@ -96,11 +98,13 @@ export class CoreAudioCapture {
       let started = false,
         lines = '',
         failed = false;
-      const fail = (message: string) => {
+      let exitTimer: ReturnType<typeof setTimeout> | undefined;
+      const fail = (message: string, recoverable = false) => {
         if (failed || this.stopping || this.child !== child) return;
         failed = true;
         clearTimeout(timer);
-        if (started) this.failure(message);
+        clearTimeout(exitTimer);
+        if (started) this.failure(message, recoverable);
         else reject(Error(message));
         void this.stop().catch(() => {});
       };
@@ -137,14 +141,21 @@ export class CoreAudioCapture {
         }
       });
       child.on('error', () => fail('无法启动 Mac 音频助手，请运行 pnpm build:audio。'));
+      // EPIPE alone can precede a structured permission error on stderr.
       child.stdin.on('error', () => fail('Mac 音频助手管道已关闭，请重新开始。'));
       child.on('close', () => {
         if (this.child === child) this.closed = true;
+        clearTimeout(timer);
+        clearTimeout(exitTimer);
+        if (!started) reject(Error('Mac 音频采集已取消或启动失败。'));
+        else if (!this.stopping) fail('原生音频进程已退出，采集已释放；请重新开始。', true);
       });
       child.on('exit', () => {
-        clearTimeout(timer);
-        if (!started) reject(Error('Mac 音频采集已取消或启动失败。'));
-        else if (!this.stopping) fail('原生音频进程已退出，采集已释放；请重新开始。');
+        // Drain stderr before classifying an unexplained process loss.
+        // An exit with inherited pipes still open must not remove the startup
+        // watchdog or leave an already-running capture silently stuck forever.
+        if (started && !this.stopping)
+          exitTimer = setTimeout(() => fail('Mac 音频采集进程尚未确认退出，请稍后重试。'), 5000);
       });
     });
   }

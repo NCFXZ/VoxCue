@@ -10,7 +10,7 @@ export function createCredentialEncryption(executable: string): CredentialEncryp
         stdio: ['pipe', 'pipe', 'pipe'],
         // Security.framework selects the current OS user's Keychain. No shell,
         // Node, DYLD, profile or authentication environment reaches this fixed
-        // legacy binary; its exact bytes/CDHash and existing ACL stay intact.
+        // hardened binary; its fixed v2 identity performs compatible ACL migration.
         env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
       });
       const output: Buffer[] = [];

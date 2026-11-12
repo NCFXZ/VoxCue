@@ -68,19 +68,10 @@ export async function backupUpdateKey(file, password, options = {}) {
     derived.fill(0);
   }
 }
-export async function restoreUpdateKey(file, password, options = {}) {
+async function decryptUpdateKeyBackup(file, password, options) {
   outsideRepository(file);
   await privatePath(file);
   if ((await lstat(file)).size > 4096) throw Error('Invalid encrypted signing backup');
-  const keyDirectory =
-    options.keyDirectory ?? path.join(workspace.platformRoot, '.tools/update-signing');
-  const destination = path.join(keyDirectory, 'ed25519.key');
-  try {
-    await lstat(destination);
-    throw Error('Refusing to overwrite an existing private key.');
-  } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
   const pin = JSON.parse(await readFile(options.pinFile ?? publicKeyFile, 'utf8'));
   const value = JSON.parse(await readPrivateFile(file));
   if (pin.protocol !== 1 || value.purpose !== purpose || value.publicKey !== pin.publicKey)
@@ -93,8 +84,9 @@ export async function restoreUpdateKey(file, password, options = {}) {
     cipher.setAAD(aad(pin.publicKey));
     cipher.setAuthTag(bytes(value.tag, 16));
     seed = Buffer.concat([cipher.update(bytes(value.ciphertext, 32)), cipher.final()]);
+    encoded = Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]);
     const key = createPrivateKey({
-      key: Buffer.concat([Buffer.from('302e020100300506032b657004220420', 'hex'), seed]),
+      key: encoded,
       format: 'der',
       type: 'pkcs8',
     });
@@ -103,7 +95,37 @@ export async function restoreUpdateKey(file, password, options = {}) {
         'base64',
       ) !== pin.publicKey
     )
-      throw Error('Restored key does not match the established public identity.');
+      throw Error('Decrypted key does not match the established public identity.');
+    return seed;
+  } catch (error) {
+    seed?.fill(0);
+    throw error;
+  } finally {
+    derived.fill(0);
+    encoded?.fill(0);
+  }
+}
+export async function verifyUpdateKeyBackup(file, password, options = {}) {
+  const seed = await decryptUpdateKeyBackup(file, password, options);
+  try {
+    return true;
+  } finally {
+    seed.fill(0);
+  }
+}
+export async function restoreUpdateKey(file, password, options = {}) {
+  const keyDirectory =
+    options.keyDirectory ?? path.join(workspace.platformRoot, '.tools/update-signing');
+  const destination = path.join(keyDirectory, 'ed25519.key');
+  try {
+    await lstat(destination);
+    throw Error('Refusing to overwrite an existing private key.');
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+  }
+  const seed = await decryptUpdateKeyBackup(file, password, options);
+  let encoded;
+  try {
     await mkdir(keyDirectory, { recursive: true, mode: 0o700 });
     await privatePath(keyDirectory, true);
     encoded = Buffer.from(seed.toString('base64') + '\n');
@@ -115,8 +137,7 @@ export async function restoreUpdateKey(file, password, options = {}) {
       await output.close();
     }
   } finally {
-    derived.fill(0);
-    seed?.fill(0);
+    seed.fill(0);
     encoded?.fill(0);
   }
 }
@@ -157,10 +178,10 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   if (
     process.platform !== 'darwin' ||
     process.argv.length !== 3 ||
-    !/^--(?:backup|restore)=\//.test(argument ?? '')
+    !/^--(?:backup|restore|verify)=\//.test(argument ?? '')
   )
     throw Error(
-      'Use --backup=/absolute/offline/path or --restore=/absolute/offline/path on macOS.',
+      'Use --backup=/absolute/offline/path, --restore=/absolute/offline/path or --verify=/absolute/offline/path on macOS.',
     );
   let password = await passphrase('Independent backup passphrase (hidden): ');
   try {
@@ -168,8 +189,12 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
       if (password !== (await passphrase('Repeat passphrase (hidden): ')))
         throw Error('Passphrases differ.');
       await backupUpdateKey(argument.slice(9), password);
+    } else if (argument.startsWith('--verify=')) {
+      await verifyUpdateKeyBackup(argument.slice(9), password);
     } else await restoreUpdateKey(argument.slice(10), password);
-    console.log('Completed using the existing public identity; no private material is displayed.');
+    console.log(argument.startsWith('--verify=')
+      ? 'Backup authentication and public identity verified; no private key was written.'
+      : 'Completed using the existing public identity; no private material is displayed.');
   } finally {
     password = '';
   }

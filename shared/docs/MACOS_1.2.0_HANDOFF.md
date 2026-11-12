@@ -7,7 +7,7 @@ Mac 专属实现、先验证事项和可逐项勾选的通过条件统一见 [MA
 ## 基线、版本和交付边界
 
 - 输入基线：`main` 的 `3160b6868c540ec7cc6d20cdca11bc10b19bdd0c`，应用版本 1.1.1；目标版本唯一来源为 `shared/package.json` 的 1.2.0。Windows Store 映射目标为 2.2.0.0，不把 Windows APPX 版本直接套入 Mac 的打包字段。
-- `shared/` 下列实现已在源码完成，默认同时属于两端；**本文所有 Mac 原生、签名、最终包与真机行为均待 Mac 本机验证**。Windows 执行结果不能替代 Mac 结果。`macos/` 在本轮 Windows 工作中保持全树只读，依赖 importer、锁、unpack、fuses 和签名等 Mac 配置尚需本机接续。
+- `shared/` 下列实现已在源码完成，默认同时属于两端；**原始交接时的 Mac 原生、签名、最终包与真机行为均待本机验证；当前接续状态见文末及 PROGRESS.md**。Windows 执行结果不能替代 Mac 结果。`macos/` 在本轮 Windows 工作中保持全树只读，依赖 importer、锁、unpack、fuses 和签名等 Mac 配置尚需本机接续。
 - 不新增产品测试标志，不重新开放正式包 inspector，不让正式包读取测试环境变量。正式包测试须先完成 M4 的启动隔离收尾，之后再实施 M1。不要先运行旧 `test:package`、`package-smoke --static-only` 或其聚合入口。
 - 保护原始资料、真实 userData／凭据／Keychain、现用模型与依赖、固定签名身份、1.1.1 正式资产和恢复基线。没有自动历史资料迁移、备份库整库删除、未知组件清扫、更新密钥轮换或依赖／模型升级授权。
 - GUI／原生回归只在当前 owner 已登录并解锁的控制台串行运行；只用自有临时合成资料、合成图片和固定来源／摘要的公开模型音频，不采样硬件或宿主屏幕，不读取真实账号或钥匙串。成绩仅终端／对话，必要临时 profile／图片／数据库归属明确并在结束时清理。
@@ -193,22 +193,22 @@ Mac 专属实现、先验证事项和可逐项勾选的通过条件统一见 [MA
 
 | 编号 | 当前处理决定 | Mac 本机工作与验收边界 |
 | --- | --- | --- |
-| M1 | 建议实施；尚未在 Mac 改动／验证 | 最终签名前配置五项 fuses，核对最终 Mach-O、`ElectronAsarIntegrity` 与实际 ASAR header；主程序及相应辅助进程启用 Hardened Runtime，按每个加载职责最小化 entitlements。Node inspector fuse 不关闭 renderer CDP；还须审计正式 `.app`／launcher 启动链，阻止该版本实际支持的 CDP port／pipe 开关，并在自有隔离副本／合成 Keychain 中验证首启／重启不能借合法主 frame 调用受控能力或借用 TCC／Keychain，此项未在 Mac 复现。JIT／库验证例外须与固定自签身份、Sparkle、N-API、MLX 实测，不能全局开启 DYLD／unsigned-memory／disable-library-validation，也不能关 Chromium sandbox。固定 Credentials helper 不纳入通用重签循环；与 M11／M16 一起验证外来代码、ASAR 和资源篡改拒绝。 |
+| M1 | 已实施，已完成本机及已发行包验收 | 最终签名前配置五项 fuses，核对最终 Mach-O、`ElectronAsarIntegrity` 与实际 ASAR header；主程序及相应辅助进程启用 Hardened Runtime，按每个加载职责最小化 entitlements。Node inspector fuse 不关闭 renderer CDP；还须审计正式 `.app`／launcher 启动链，阻止该版本实际支持的 CDP port／pipe 开关，并在自有隔离副本／合成 Keychain 中验证首启／重启不能借合法主 frame 调用受控能力或借用 TCC／Keychain，此处为原始接续要求，当前实现和验收入口见 Mac 发行实现文档。JIT／库验证例外须与固定自签身份、Sparkle、N-API、MLX 实测，不能全局开启 DYLD／unsigned-memory／disable-library-validation，也不能关 Chromium sandbox。固定 Credentials helper 不纳入通用重签循环；与 M11／M16 一起验证外来代码、ASAR 和资源篡改拒绝。 |
 | M2 | 不列为本轮强制修复 | 购买 Developer ID／公证是另一个发行身份方案，不能自动购买／换证／迁移身份。保持现有 Gatekeeper 与未公证限制的真实说明；若以后另获授权再处理身份、首次下载核验和凭据连续性。 |
-| M3 | 建议完善密钥保护与恢复，不拆分／轮换 | 读取 update seed／Keychain 密码材料前校验 owner、0700 父目录、0600 普通文件及 UID／重解析边界；实现离线加密备份、固定公钥同身份恢复和合成负例。真实备份由 owner 本机交互完成。Sparkle ZIP 与用途隔离清单共用现有密钥不等于独立两根信任，本轮不为“双层签名”拆 key；备份解决丢失，不解决构建机失守。 |
-| M4 | 必须先收尾，再启用 M1 | `package-smoke.mjs` 在共享 Playwright 守卫之前仍原始 spawn `ELECTRON_RUN_AS_NODE=1` 探针，`--static-only` 和 `package-temporary-smoke` 也会经过。RunAsNode 关闭后可能进入产品 bootstrap。先盘点 raw spawn／exec／Playwright 与聚合消费者，真正零启动的静态检查独立出来，退役失效入口，必要正式包原生覆盖迁到不共享宿主 userData／login Keychain 的 OS 隔离环境；不加产品测试标志、不恢复 inspector、不以临时 profile／临时 Keychain 文件单独冒充隔离。最终包测试须随 M1 的 CDP 启动链收口迁移并保留公开接口／原生闭包覆盖；生产包仍接受 CDP 连接时不能宣称风险已关闭，隔离 guest 仅避免接触宿主资料。 |
-| M5 | 必须适配共享截图实现 | Mac 本机同步 `sharp@0.35.5` 的直接依赖、Mac importer／锁、arm64／libvips 闭包；unpack 包含 `backend/screenshot`，匹配共享 host 的 `app.asar.unpacked` 路径。对最终签名 `.app` 的实际 Worker 连续合成编码、取消、加载失败和内存做回归，不截图宿主、不把 V8 heap limit 当原生内存限制。 |
-| M6 | 先验证，不直接增加静音警报 | `capture.start(false)` 预检本来不读取样本，`samplesRead=0` 不是拒权证据。只在自有隔离虚拟设备／固定合成音条件下对比授权静音、授权 tone、拒权 tone、重新授权后手动开始，记录内存计数／幅值，不改系统默认／权限、不采样真实混音。严格数字零不能单独辨别拒权；没有可用隔离条件则保持未验证，不新增 UI／自动停止。 |
-| M7 | 共享 S26 已实现；补 Mac 回归 | 验证 utility stdout／stderr 排空、MLX 相关管道、洪水日志与停止退休，不再另写一份 Mac host。不能用 Windows 合成退出行为代验 Mac 原生进程。 |
-| M8 | 保留既定设计 | 32 槽／约 1.5 秒原生采集缓冲、Paraformer 2 秒预算、宁停不丢、错误后暂停并手动重新开始保持；回归错误提示、实际资源释放和手动恢复，不加自动重启或扩大缓冲。设备变化停止也按此边界处理。 |
-| M9 | 建议修复协议失联；排除 CPU 长段性能 | 给 Rust↔Python 的握手／写入／flush／读取建立本地交换期限，与 Node 上层期限协调；保持已有 2MiB 行界限。失败要杀掉并等待 Rust／Python 链真实退出，再允许手动开始。合成覆盖无 ready、无回复、半行、超限、坏 JSON、错序号、写阻塞、父进程退出。Python 推理错误后退出属于未知状态 fail-stop，不盲目继续／自动重启；121 秒上下文及整段重算不改。 |
+| M3 | 工具已完成；持有人已创建加密云备份 | 读取 update seed／Keychain 密码材料前校验 owner、0700 父目录、0600 普通文件及 UID／重解析边界；实现离线加密备份、固定公钥同身份恢复和合成负例。真实备份由 owner 本机交互完成。Sparkle ZIP 与用途隔离清单共用现有密钥不等于独立两根信任，本轮不为“双层签名”拆 key；备份解决丢失，不解决构建机失守。 |
+| M4 | 隔离入口已迁移 | `package-smoke.mjs` 在共享 Playwright 守卫之前仍原始 spawn `ELECTRON_RUN_AS_NODE=1` 探针，`--static-only` 和 `package-temporary-smoke` 也会经过。RunAsNode 关闭后可能进入产品 bootstrap。先盘点 raw spawn／exec／Playwright 与聚合消费者，真正零启动的静态检查独立出来，退役失效入口，必要正式包原生覆盖迁到不共享宿主 userData／login Keychain 的 OS 隔离环境；不加产品测试标志、不恢复 inspector、不以临时 profile／临时 Keychain 文件单独冒充隔离。最终包测试须随 M1 的 CDP 启动链收口迁移并保留公开接口／原生闭包覆盖；生产包仍接受 CDP 连接时不能宣称风险已关闭，隔离 guest 仅避免接触宿主资料。 |
+| M5 | 最终签名包截图专项已补齐 | Mac 本机同步 `sharp@0.35.5` 的直接依赖、Mac importer／锁、arm64／libvips 闭包；unpack 包含 `backend/screenshot`，匹配共享 host 的 `app.asar.unpacked` 路径。对最终签名 `.app` 的实际 Worker 连续合成编码、取消、加载失败和内存做回归，不截图宿主、不把 V8 heap limit 当原生内存限制。 |
+| M6 | 受控设备对照已完成；保留无法区分零值限制 | `capture.start(false)` 预检本来不读取样本，`samplesRead=0` 不是拒权证据。只在自有隔离虚拟设备／固定合成音条件下对比授权静音、授权 tone、拒权 tone、重新授权后手动开始，记录内存计数／幅值，不改系统默认／权限、不采样真实混音。严格数字零不能单独辨别拒权；没有可用隔离条件则保持未验证，不新增 UI／自动停止。 |
+| M7 | Mac utility 本机回归已完成 | 验证 utility stdout／stderr 排空、MLX 相关管道、洪水日志与停止退休，不再另写一份 Mac host。不能用 Windows 合成退出行为代验 Mac 原生进程。 |
+| M8 | 当前新增授权：有界自动重启已实施 | 32 槽／约 1.5 秒原生采集缓冲、Paraformer 2 秒预算、宁停不丢保持；当前任务新增 Mac 有界自动重启，只在旧采集与 Worker 实际退出后按退避恢复。手动操作取消恢复，权限／设备／模型语义错误及启动失败保留手动处理；不扩大缓冲。专项入口见 TODO M8。 |
+| M9 | 协议期限及真实退休已实施 | 给 Rust↔Python 的握手／写入／flush／读取建立本地交换期限，与 Node 上层期限协调；保持已有 2MiB 行界限。失败要杀掉并等待 Rust／Python 链真实退出，再允许手动开始。合成覆盖无 ready、无回复、半行、超限、坏 JSON、错序号、写阻塞、父进程退出。Python 推理错误后退出属于未知状态 fail-stop，不盲目继续／自动重启；121 秒上下文及整段重算不改。 |
 | M10 | 保留旧密文兼容 | 不迁移 v10 AES 兼容格式、派生参数或真实 Keychain 条目；依靠 M1／M11 缩小执行／解密信任边界。若另行规划凭据格式升级，须先有明确兼容与恢复方案。 |
-| M11 | 先验证固定 helper 的真实信任边界 | helper 信任同一固定证书的 app／development 标识，不等于信任任意 unsigned 父进程；开发宿主权限范围和 helper 初始 `--options 0`／DYLD 风险都要查。保护 sourceHash／binaryHash／精确 CDHash 及现有 Keychain ACL 连续性；只用合成 Keychain 验证旧密文。不能为通过检查静默重建／重签 helper、改 hash、删除真实条目或生成新存储 key；若需迁移，先另定兼容方案。 |
-| M12 | 建议修复更新慢网期限 | 把整包固定 30 分钟改为连接／首字节与“长时间无数据”的空闲期限，让持续前进的慢下载可超过 30 分钟。保留大小／摘要／签名、取消、journal 和离线缓存复用。Range 续传不是本轮前提；以后若做须另验实体身份、Content-Range、200 回退与完整重验，不顺带引入增量协议。 |
-| M13 | 建议修复成功旧更新包回收 | 对确认本应用归属／认证的 archive，在已安装版本追上且不被 selected／feed／journal／下载／安装事务引用时回收；保留新版本离线包、活跃 partial、未知／重解析文件和恢复基线。不按文件名／mtime 扫删现有未记账历史文件；必要时为未来下载新增归属描述符，失败清理可下次重试。 |
-| M14 | 建议合并更新下载中间进度 | 按时间或百分比合并中间 download-progress，首段／100%／终态及时，取消／dispose 清 pending，旧任务不迟到覆盖新状态。优先在 Mac driver 边界处理；若公共机制有实际两端消费者则保持单一实现并补两端测试。此项不重开语音 `audio-progress` 的保留决定。 |
-| M15 | 先验证多声道／多流 | 所有声道平均在 16 声道仅一对有效时条件上额外衰减约 18dB；`withStream:0` 不代表所有输出流，尚非真机复现。先以合成 interleaved／noninterleaved 2／8／16 声道与幅值边界验证实际转换，再用明确授权虚拟多流设备注入固定音、显式选 UID；不改默认设备／采样硬件。确认支持范围内复现后按 stream／starting channel／layout 有界映射，不按零值猜活跃声道、无条件放大或扩大采集范围，不加专业声卡 UI。 |
-| M16 | 并入 M1；先验证最终资源封印 | Python／脚本／wheel 在 Resources 不等于未签名覆盖；构建已有哈希且最终 `.app` 资源有签名封印。用自有已签副本不重签地篡改／替换／重定向无敏感合成载荷，确认实际启动时 OS／fuses／签名在哪拒绝；不能依赖 App 管理猜测。若 MLX 路径可绕过，启动前加绑定固定身份的静态代码／资源封印验证或受保护 ASAR 内最终文件清单，不能信任资源旁可同改的 `build.json`。覆盖实际加载闭包、最终签名顺序和启动开销，不逐音频块整包哈希；静态校验仍有并发修改窗口，不声称消除同用户全部篡改。 |
+| M11 | 已实施冻结 v2 与合成迁移专项 | helper 信任同一固定证书的 app／development 标识，不等于信任任意 unsigned 父进程；开发宿主权限范围和 helper 初始 `--options 0`／DYLD 风险都要查。保护 sourceHash／binaryHash／精确 CDHash 及现有 Keychain ACL 连续性；只用合成 Keychain 验证旧密文。不能为通过检查静默重建／重签 helper、改 hash、删除真实条目或生成新存储 key；若需迁移，先另定兼容方案。 |
+| M12 | 已实施空闲期限 | 把整包固定 30 分钟改为连接／首字节与“长时间无数据”的空闲期限，让持续前进的慢下载可超过 30 分钟。保留大小／摘要／签名、取消、journal 和离线缓存复用。Range 续传不是本轮前提；以后若做须另验实体身份、Content-Range、200 回退与完整重验，不顺带引入增量协议。 |
+| M13 | 已实施认证归属回收 | 对确认本应用归属／认证的 archive，在已安装版本追上且不被 selected／feed／journal／下载／安装事务引用时回收；保留新版本离线包、活跃 partial、未知／重解析文件和恢复基线。不按文件名／mtime 扫删现有未记账历史文件；必要时为未来下载新增归属描述符，失败清理可下次重试。 |
+| M14 | 已实施进度合并 | 按时间或百分比合并中间 download-progress，首段／100%／终态及时，取消／dispose 清 pending，旧任务不迟到覆盖新状态。优先在 Mac driver 边界处理；若公共机制有实际两端消费者则保持单一实现并补两端测试。此项不重开语音 `audio-progress` 的保留决定。 |
+| M15 | 已修复首选声道／输出流映射并本机专项验证 | 所有声道平均在 16 声道仅一对有效时条件上额外衰减约 18dB；`withStream:0` 不代表所有输出流，尚非真机复现。先以合成 interleaved／noninterleaved 2／8／16 声道与幅值边界验证实际转换，再用明确授权虚拟多流设备注入固定音、显式选 UID；不改默认设备／采样硬件。确认支持范围内复现后按 stream／starting channel／layout 有界映射，不按零值猜活跃声道、无条件放大或扩大采集范围，不加专业声卡 UI。 |
+| M16 | 已实施固定身份资源验证 | Python／脚本／wheel 在 Resources 不等于未签名覆盖；构建已有哈希且最终 `.app` 资源有签名封印。用自有已签副本不重签地篡改／替换／重定向无敏感合成载荷，确认实际启动时 OS／fuses／签名在哪拒绝；不能依赖 App 管理猜测。若 MLX 路径可绕过，启动前加绑定固定身份的静态代码／资源封印验证或受保护 ASAR 内最终文件清单，不能信任资源旁可同改的 `build.json`。覆盖实际加载闭包、最终签名顺序和启动开销，不逐音频块整包哈希；静态校验仍有并发修改窗口，不声称消除同用户全部篡改。 |
 
 ### Mac 还需特别串联的共享边界
 
@@ -318,5 +318,8 @@ Mac 发布只按本轮明确授权执行；若当前未授权，完成修改及�
 ## 发行与接续记录
 
 - Windows 1.2.0 冻结基线：私有仓库 `v1.2.0`；实际提交号及 GitHub／Store 2.2.0.0 状态见 [Windows 发行索引](WINDOWS_1.2.0_RELEASE.md)。
-- Mac 本机接续提交、已实施 M 项与仍待验证项：待 Mac 执行者更新；本文没有 Mac 完成声明。
+- Mac 已发布产品源码：macos-v1.2.0（10ac04b），公开 1.2.0 安装资产已交付。M1／M4／M7／M9／M12–M14／M16 已实施，适用共享 S 项的本机回归已接续；Windows W 项仍是另一平台的参考记录。
+- M5 已补最终签名包截图专项；M6 已完成受控权限对照并保留零值无法判拒权的限制，M15 已修复并完成设备重测；M11 源码加固／合成迁移和新增 M8 自动重启专项已收拢；当时范围只含专项；当前 1.2.1 的完整回归、最终包和环境清理以 PROGRESS.md 为准，不将未完成条件列为通过。M5 先前勾选过早已纠正，具体状态以 TODO／PROGRESS 为准。
+- M3 持有人已按指定 OneDrive 目录创建加密备份，结构／权限／固定公钥已核对；持有人已在本机完成只读口令认证及派生公钥核对，不把云同步副本称为物理离线介质。
+- M11 旧 helper 基线保持；新 helper 的精确身份、ACL／partition 撤旧和 v10 兼容在合成 Keychain 验证，未操作宿主真实登录项。撤权后的旧版本不能作为自动回滚路径。
 - 详细测试成绩和临时产物不保存在本文或仓库。

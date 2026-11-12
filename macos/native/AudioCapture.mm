@@ -17,6 +17,7 @@
 #include <cmath>
 #include <cstring>
 #include <algorithm>
+#include "AudioSamples.h"
 
 // stdout contains bounded Float32 PCM packets only. Control/error JSON goes to
 // stderr. No files, network, screen capture, output muting or device reconfiguration.
@@ -100,6 +101,7 @@ class Capture {
     AudioObjectID device = 0, tap = 0, aggregate = 0;
     AudioDeviceIOProcID io = nullptr;
     AudioStreamBasicDescription format{};
+    voxcue::audio::OutputRoute outputRoute{};
     dispatch_queue_t queue = dispatch_queue_create("com.voxcue.audio", DISPATCH_QUEUE_SERIAL);
     double previousEnd = -1;
     mach_timebase_info_data_t timebase{};
@@ -113,27 +115,61 @@ class Capture {
         if (!status) listeners.push_back({object, key});
         return status;
     }
-    static float sample(const uint8_t *data, const AudioStreamBasicDescription &f) {
-        if (f.mFormatFlags & kAudioFormatFlagIsFloat) {
-            if (f.mBitsPerChannel == 32) { float value; memcpy(&value, data, 4); return value; }
-            if (f.mBitsPerChannel == 64) { double value; memcpy(&value, data, 8); return float(value); }
-        } else if (f.mFormatFlags & kAudioFormatFlagIsSignedInteger) {
-            if (f.mBitsPerChannel == 16) { int16_t value; memcpy(&value, data, 2); return value / 32768.f; }
-            if (f.mBitsPerChannel == 32) { int32_t value; memcpy(&value, data, 4); return value / 2147483648.f; }
+    OSStatus selectOutput(AudioObjectID physical) {
+        auto key = address(kAudioDevicePropertyStreams, kAudioObjectPropertyScopeOutput);
+        auto preferredKey = address(kAudioDevicePropertyPreferredChannelsForStereo, kAudioObjectPropertyScopeOutput);
+        const auto read = [&](std::vector<AudioObjectID> &streams, std::vector<voxcue::audio::OutputStream> &metadata,
+                              bool &hasPreferred, std::array<UInt32, 2> &preferred) -> OSStatus {
+            UInt32 bytes = 0;
+            if (AudioObjectGetPropertyDataSize(physical, &key, 0, nullptr, &bytes) || !bytes || bytes % sizeof(AudioObjectID) || bytes > 256 * sizeof(AudioObjectID)) return kAudioHardwareUnsupportedOperationError;
+            streams.resize(bytes / sizeof(AudioObjectID));
+            if (AudioObjectGetPropertyData(physical, &key, 0, nullptr, &bytes, streams.data()) || !bytes || bytes % sizeof(AudioObjectID) || bytes > streams.size() * sizeof(AudioObjectID)) return kAudioHardwareUnsupportedOperationError;
+            streams.resize(bytes / sizeof(AudioObjectID));
+            for (auto stream : streams) {
+                AudioStreamBasicDescription streamFormat{}; UInt32 first = 0;
+                if (property(stream, address(kAudioStreamPropertyVirtualFormat), streamFormat) || property(stream, address(kAudioStreamPropertyStartingChannel), first)) return kAudioHardwareUnsupportedOperationError;
+                metadata.push_back({first, streamFormat.mChannelsPerFrame, stream});
+            }
+            hasPreferred = AudioObjectHasProperty(physical, &preferredKey);
+            if (hasPreferred && property(physical, preferredKey, preferred)) return kAudioHardwareUnsupportedOperationError;
+            return noErr;
+        };
+        std::vector<AudioObjectID> streams;
+        std::vector<voxcue::audio::OutputStream> metadata;
+        bool hasPreferred = false;
+        std::array<UInt32, 2> preferred{};
+        OSStatus status = read(streams, metadata, hasPreferred, preferred);
+        if (status) return status;
+        outputRoute = voxcue::audio::outputRoute(metadata.data(), metadata.size(), hasPreferred ? &preferred : nullptr);
+        if (!outputRoute) return kAudioHardwareUnsupportedOperationError;
+        status = listen(physical, key);
+        if (!status && hasPreferred) status = listen(physical, preferredKey);
+        auto configuration = address(kAudioDevicePropertyStreamConfiguration, kAudioObjectPropertyScopeOutput);
+        if (!status && AudioObjectHasProperty(physical, &configuration)) status = listen(physical, configuration);
+        for (auto stream : streams) {
+            if (!status) status = listen(stream, address(kAudioStreamPropertyVirtualFormat));
+            if (!status) status = listen(stream, address(kAudioStreamPropertyStartingChannel));
         }
-        return 0;
+        if (status) return status;
+        std::vector<AudioObjectID> checkedStreams;
+        std::vector<voxcue::audio::OutputStream> checkedMetadata;
+        bool checkedHasPreferred = false;
+        std::array<UInt32, 2> checkedPreferred{};
+        status = read(checkedStreams, checkedMetadata, checkedHasPreferred, checkedPreferred);
+        if (status || !voxcue::audio::sameOutputMetadata(metadata.data(), metadata.size(), hasPreferred ? &preferred : nullptr,
+                checkedMetadata.data(), checkedMetadata.size(), checkedHasPreferred ? &checkedPreferred : nullptr)) {
+            failed = true;
+            return kAudioHardwareIllegalOperationError;
+        }
+        return noErr;
     }
     void receive(const AudioBufferList *input, const AudioTimeStamp *time) {
         if (stopping || failed || !input || !input->mNumberBuffers) return;
-        size_t frames = maxFrames, channels = 0, stride = format.mBitsPerChannel / 8;
-        for (UInt32 i = 0; i < input->mNumberBuffers; ++i) {
-            const auto &buffer = input->mBuffers[i];
-            if (!buffer.mNumberChannels || !buffer.mData) continue;
-            size_t actual = buffer.mDataByteSize / (stride * buffer.mNumberChannels);
-            if (actual > maxFrames) { failed = true; return; }
-            frames = std::min(frames, actual); channels += buffer.mNumberChannels;
-        }
-        if (!channels || !frames) return;
+        if (outputRoute && input->mNumberBuffers > 256) { failed = true; return; }
+        const auto shape = voxcue::audio::inspectBuffers(input, format, maxFrames);
+        if (!shape.valid) { failed = true; return; }
+        const size_t frames = shape.frames;
+        if (!frames) return;
         const size_t writeIndex = tail.load(std::memory_order_relaxed);
         if (writeIndex - head.load(std::memory_order_acquire) == slots || (queuedFrames.load(std::memory_order_relaxed) + frames) / format.mSampleRate > 1.5) { failed = true; return; }
         auto &packet = packets[writeIndex % slots];
@@ -143,18 +179,10 @@ class Capture {
         previousEnd = timestamp + frames * 1000 / format.mSampleRate;
         memcpy(packet.bytes.data(), &length, 4); packet.bytes[4] = 1;
         memcpy(packet.bytes.data()+5, &rate, 4); memcpy(packet.bytes.data()+9, &timestamp, 8); memcpy(packet.bytes.data()+17, &flags, 4);
-        for (size_t frame = 0; frame < frames; ++frame) {
-            double value = 0;
-            for (UInt32 i = 0; i < input->mNumberBuffers; ++i) {
-                const auto &buffer = input->mBuffers[i];
-                if (!buffer.mData) continue;
-                for (UInt32 channel = 0; channel < buffer.mNumberChannels; ++channel)
-                    value += sample(static_cast<const uint8_t *>(buffer.mData) + (frame * buffer.mNumberChannels + channel) * stride, format);
-            }
-            float mono = float(value / channels);
-            if (!std::isfinite(mono)) { failed = true; return; }
-            memcpy(packet.bytes.data()+21+frame*4, &mono, 4);
-        }
+        const bool converted = outputRoute
+            ? voxcue::audio::writeSelectedMono(input, format, shape, outputRoute, packet.bytes.data() + 21)
+            : voxcue::audio::writeMono(input, format, shape, packet.bytes.data() + 21);
+        if (!converted) { failed = true; return; }
         packet.size = 21 + frames * 4; packet.frames = frames;
         queuedFrames.fetch_add(frames, std::memory_order_relaxed);
         tail.store(writeIndex + 1, std::memory_order_release);
@@ -193,7 +221,8 @@ public:
         device = physical;
         OSStatus status;
         if (!microphone) {
-            CATapDescription *description = [[CATapDescription alloc] initExcludingProcesses:@[] andDeviceUID:stringProperty(physical, kAudioDevicePropertyDeviceUID) withStream:0];
+            if ((status = selectOutput(physical))) return status;
+            CATapDescription *description = [[CATapDescription alloc] initExcludingProcesses:@[] andDeviceUID:stringProperty(physical, kAudioDevicePropertyDeviceUID) withStream:outputRoute.stream];
             description.name = @"VoxCue system audio"; description.privateTap = YES; description.muteBehavior = CATapUnmuted;
             status = AudioHardwareCreateProcessTap(description, &tap); if (status) return status;
             NSString *tapUID = stringProperty(tap, kAudioTapPropertyUID);
@@ -211,6 +240,7 @@ public:
             device = aggregate;
         }
         status = property(device, address(kAudioDevicePropertyStreamFormat, kAudioObjectPropertyScopeInput), format); if (status) return status;
+        if (outputRoute && format.mChannelsPerFrame != outputRoute.channels) return kAudioHardwareUnsupportedOperationError;
         bool supported = (format.mFormatFlags & kAudioFormatFlagIsFloat) ? (format.mBitsPerChannel == 32 || format.mBitsPerChannel == 64) : ((format.mFormatFlags & kAudioFormatFlagIsSignedInteger) && (format.mBitsPerChannel == 16 || format.mBitsPerChannel == 32));
         if (format.mBytesPerFrame != (format.mBitsPerChannel / 8) * ((format.mFormatFlags & kAudioFormatFlagIsNonInterleaved) ? 1 : format.mChannelsPerFrame)) return kAudioHardwareUnsupportedOperationError;
         if (!supported || format.mFormatID != kAudioFormatLinearPCM || (format.mFormatFlags & kAudioFormatFlagIsBigEndian) || format.mSampleRate < 8000 || format.mSampleRate > 192000) return kAudioHardwareUnsupportedOperationError;
@@ -268,7 +298,7 @@ int main(int argc, const char *argv[]) {
         if (!uid || [uid rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location != NSNotFound) return failure(@"invalid-request");
         Capture capture;
         OSStatus status = capture.initialize(microphone, uid);
-        if (status) return failure(status == kAudioHardwareBadDeviceError ? @"device-unavailable" : @"initialize-failed", status);
+        if (status || !capture.healthy()) return failure(!capture.healthy() ? @"device-changed-or-backpressure" : status == kAudioHardwareBadDeviceError ? @"device-unavailable" : status == kAudioHardwareUnsupportedOperationError ? @"unsupported-audio-format-or-layout" : @"initialize-failed", status);
         if (microphone && !microphoneAllowed()) return failure(@"permission-denied");
         // Core Audio has no public system-audio permission query. The explicit
         // user preflight starts/stops a no-op IOProc to request authorization;

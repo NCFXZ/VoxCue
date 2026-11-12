@@ -4,6 +4,8 @@
 
 本清单面向 Mac 本机接续 1.2.0，合并 [安全加固交接的 macOS 专属事项](SECURITY_HARDENING.md#macos-专属事项)、Claude M1–M16 及 Windows 复审发现的 Mac 影响。本文最初在 Windows 只读核对 Mac 源码后整理；勾选项仅表示本轮 Mac 对应完整条件已收拢，未覆盖条件继续保留。共享功能的逐条变化另见 [1.2.0 共享交接](MACOS_1.2.0_HANDOFF.md)，此处只规定 Mac 专属修复和本机验收，不复制另一份共享实现。
 
+本文件保留 1.2.0 原始逐项要求及后续实现说明。1.2.1 当前任务已扩大至完整回归、最终包隔离验收及环境清理，当前状态以 PROGRESS.md 为准，原 1.2.0 资产不覆盖。
+
 ## 执行边界与顺序
 
 - [x] **P0：确认工作区、平台和测试边界。** 先读根 `AGENTS.md`、`PROGRESS.md`，检查 status／diff，保留已有工作；仅在 Mac 修改 `macos/`，`windows/` 全树只读。仅用 owner 合成资料、独立临时目录、固定来源和摘要的公开模型／音频。GUI、原生及推理在当前 UID 已登录且解锁的控制台串行执行；锁定或未知立即停止。不采样麦克风、真实系统混音或宿主屏幕，不读取真实登录资料／Keychain 密文，不改系统隐私或辅助功能设置。测试结果仅终端／对话，结束清理自有 profile、图片和产物。
@@ -29,12 +31,14 @@
   - 入口：`macos/scripts/package-app.mjs`、`sign-app.mjs`、`development-signing.mjs`；扩展 `macos/test/scripts/development-signing-smoke.mjs`、`native-build-smoke.mjs` 和迁移后的最终包静态检查。现有脚本通过不自动等于覆盖新增 fuse／entitlement 断言。
 
 - [x] **M5：补截图 Worker 与原生依赖打包（高优先级）。**
+  - 当前接续：原先勾选过早，现已补齐并经 SIP 开启的隔离 guest 对既有签名 ZIP 执行截图专项，消费未修改最终 ASAR／unpacked Worker，覆盖连续编码、真实超时、错误／取消、线程实际退休及 RSS 收敛，并复核签名。入口为 `package-guest-smoke.mjs --screenshot-only`；不将此项扩称当前工作树完整回归。
   - 证据／风险：共享 host 固定从 `app.asar.unpacked` 启动截图 Worker，Mac unpack 列表尚未纳入 `backend/screenshot`；直接 sharp 声明及 Mac importer 尚未同步。
   - 最小执行：保留固定 sharp 0.35.5，补 Mac arm64／libvips 依赖闭包和正确 unpack 目录，不另换截图质量、尺寸或 UI。
   - 通过条件：从最终签名 `.app` 加载真实 arm64 模块，连续处理自有合成位图，覆盖取消、错误、超时和 Worker 实际退出；无活动 Worker 遗留，内存结束后收敛。只有目录存在、类型检查或开发态编码通过不计为包内通过。
   - 入口：`macos/scripts/package-app.mjs`；`shared/test/unit/screenshot-encoding.test.ts`、`screenshot.test.ts` 和 `shared/test/scripts/screenshot-performance.mjs` 的无参数合成路径。最终包编码检查需由 M4 的安全入口承载，不调用真实截图。
 
 - [x] **M3：签名材料保护、离线加密备份及同身份恢复（发行前）。**
+  - 当前接续：持有人已在指定 OneDrive 目录创建加密备份，权限、结构及固定公钥已核对，持有人已在本机用 `update-key-backup.mjs --verify=/绝对路径` 完成隐藏口令只读认证与派生公钥核对，未改写现用私钥；云同步副本不称为物理离线备份。
   - 证据／风险：更新私钥已有 0600 检查，但既有父目录／文件的 owner、权限、类型和重定向边界仍需收紧；同一现用密钥丢失会使既有更新身份无法继续签发。
   - 最小执行：读取前验证 owner、目录 0700／文件 0600 及链接边界，覆盖开发签名钥匙串和口令文件的保管路径。补加密备份／恢复工具，只恢复与已有固定公钥匹配的身份，禁止覆盖已有私钥；口令不进入参数、环境变量、日志或 Git。真实备份由 owner 在本机交互终端选择离线介质执行，介质和口令分开保管。
   - 通过条件：仅用合成身份演练丢失、恢复后旧公钥验签、错口令、篡改、身份错配和禁止覆盖；异常不写入私钥，不改变公开身份。真实备份单独由 owner 确认，不读取或展示现用密钥内容。
@@ -46,11 +50,16 @@
   - 通过条件：合成 Python 覆盖不 ready、不回复、写端阻塞、半行、超长／坏 JSON、错序号、异常退出和父进程消失；错误有界返回，实际子进程不遗留，迟到响应不污染后续任务。再用认证模型及固定公开音频验证正常 MLX 链路与手动重开。
   - 入口：`macos/native/qwen-mlx.rs`、`qwen-mlx.py`；扩展对应协议单测／合成子进程测试，再运行 `macos/test/scripts/qwen-native-smoke.mjs <自有临时已认证组件>`、`qwen-worker-smoke.mjs <自有临时已认证组件>`。不修改 121 秒上下文、分段或长段 CPU 算法。
 
+- [x] **M8：有界自动重启（当前任务新增授权）。**
+  - Mac adapter 显式启用，复用共享语音 controller。只为已运行会话的可恢复故障恢复；先确认采集与 Worker 实际退出，再按 1／2／4 秒退避，连续最多三次，稳定运行及实际处理进展后才恢复重试预算。
+  - 手动停止／暂停／切换／关闭立即废弃恢复归属，初始化等待可取消且保留真实退出栅栏。权限、设备、模型语义错误与启动失败明确报错。原积压预算和不丢帧边界保持。
+  - 专项：`speech-restart.test.ts`、Mac capture 生命周期用例及 `audio-restart-smoke.mjs` 的真实 Worker／合成子进程；1.2.1 完整排程另见 PROGRESS.md。
+
 - [x] **新增：CoreAudioCapture.stop 必须确认 close（中优先级）。**
   - 证据／风险：`macos/electron/speech/capture.ts` 在 2.5 秒 force timer 中调用 SIGKILL 后直接 resolve，尚未确认 `close` 或 kill 成功，可能把未释放的采集助手报告为已退休。
   - 最小执行：以真实 `close` 作为管道及进程退休依据；保留正常尾包排空，强制结束／kill 失败／期限内未退出应明确失败。清理与后续启动门控不能仅因 timer 到期放行。
   - 通过条件：合成助手覆盖正常 EOF、exit 先于尾包、close 延迟、SIGTERM 无效、kill 返回 false／抛错和无 close；停止有界返回，未确认退出不能重开或假称可删除模型，迟到回调不污染新会话。原 20 轮成功停止仍保留。
-  - 入口：扩展 `macos/test/scripts/audio-synthetic-smoke.mjs` 及对应纯协议单测；不用 `audio-native-smoke.mjs` 的物理采集路径替代。此项不改变 M8 的积压预算或手动恢复策略。
+  - 入口：扩展 `macos/test/scripts/audio-synthetic-smoke.mjs` 及对应纯协议单测；不用 `audio-native-smoke.mjs` 的物理采集路径替代。此项不改变积压预算；新增自动恢复必须复用真实 close 栅栏。
 
 - [x] **M12：慢网更新改为空闲期限（中优先级）。**
   - 证据／风险：Mac 驱动将恢复／完整校验／下载放在固定 30 分钟总期限内，全量 GET 失败后删除本次 partial；持续缓慢但有进度的连接也会从头重试。
@@ -72,20 +81,23 @@
 
 ## 必须先验证、再决定实现的事项
 
-- [ ] **M6：拒权时的系统音频无声诊断。**
+- [x] **M6：拒权时的系统音频无声诊断。**
+  - 当前接续：已在 SIP guest 的固定虚拟输出中完成授权静音、授权合成 tone、正常系统 UI 拒权及仅重新开启音频权限后手动启动的真实对照。拒权仍可启动并持续交付全零 PCM，与授权静音不可区分，故不增加零值拒权警报／自动停止。sample-free 预检继续不读取样本。本轮权限责任链为 `tart-guest-agent` 启动实际音频 helper，不扩称正式应用父链或物理设备验收；未修改 TCC 数据库或使用私有权限 API。
   - 当前证据：预检使用 `capture.start(false)`，刻意不读取样本；`samplesRead:0` 不能证明采到全零。API 启动成功也不能证明有声音，正常静音／路由问题同样可能为零。
   - 最小验证：在隔离账号与已有受控虚拟设备中比较授权＋静音、授权＋自有合成输出、拒权＋相同输出及重新授权后手动启动，仅内存统计帧数和幅度；不启动麦克风、不读取真实混音、不改宿主权限。缺条件保持未验证。
   - 决策／通过条件：只有获得可区分拒权的可靠证据后，才沿现有错误路径考虑最小诊断；不能连续零值就判拒权、自动停机或增加新提示 UI。若无法区分，记录该限制而不更改行为。
   - 入口：`macos/native/AudioCapture.mm`、`macos/electron/speech/access.ts`、`macos/test/unit/audio-access.test.ts`；另建受控虚拟音频验证，现有会采集麦克风的 `audio-native-main.cjs` 不直接执行。
 
-- [ ] **M11：正式凭据 helper 的开发父身份及自身注入防护。**
+- [x] **M11：正式凭据 helper 的开发父身份及自身注入防护。**
+  - 当前接续：独立冻结 v2 已接入构建与签名，复用未修改的旧密码／v10 实现，验证正式父及双方 runtime，限制已知三别名全部匹配条目的 ACL／partition 并撤销旧 CDHash；原无 partition 和新建条目同样受限。跨多个临时 Keychain 的拒绝／不一致／中途失败重试和实际 production canonical 的输入／父身份边界已验证，未操作宿主真实凭据。新版本首次使用可要求系统授权；多条目非原子，失败不恢复旧访问，旧版本不作为自动回滚。详情见 RELEASE。
   - 当前证据：`Credentials.mm` 允许同固定证书下 app／development 两个父标识；`build-credentials.mjs` 初次签名也走 `--options 0`。这扩大同证书开发宿主的调用面，不等于任意未签名父程序能直接取凭据。
   - 最小验证：自有签名副本、合成临时 Keychain 测试正式父／开发父／错证书／伪造父，以及 helper 自身 DYLD／runtime 边界；核对旧密文、固定二进制／CDHash、designated requirement 和 ACL 连续性。主程序 M1 通过不等于 helper 风险已关闭。
   - 决策／通过条件：找到同时收口正式调用面、保持既有可解密身份的最小方案才实施；不得改 hash 白名单蒙混过关、静默重建／重签固定 helper、删除真实条目或生成新存储密钥。若必须迁移真实 helper／ACL／身份，先形成兼容方案并取得明确授权。
   - 入口：`macos/test/scripts/credential-upgrade-smoke.mjs`、`development-signing-smoke.mjs` 及合成父进程夹具；先审入口只用临时 Keychain，前后用户 Keychain 列表一致，不访问真实登录项。
 
-- [ ] **M15：多声道下混和多输出流。**
-  - 当前证据：Mac 按所有声道求平均、tap 固定 `withStream:0`；16 声道只有一对同相立体声有音时，相比只下混该声道对会额外衰减约 18 dB。这是条件数学结论，尚未实测设备；Windows WASAPI 也有同类平均逻辑。
+- [x] **M15：多声道下混和多输出流。**
+  - 当前接续：已用 SIP guest 固定虚拟设备复现并修复声道稀释／固定首流。`AudioRoute.h`／`AudioSamples.h` 为生产与原生专项共用实现：按 HAL 首选声道定位原始 stream index 和局部声道，只处理所选对；缺失／异常多声道元数据明确拒绝，保留单流 mono／stereo 兼容。实际签名 helper 已重测首选保幅、非首选不混入；nonce-owned 私有 aggregate 通过真实 HAL setter／readback 验证第二输出流及配置变化退休。新 helper 的 M6 三种权限状态已再测。麦克风、PCM 协议及积压预算保持，不凭零值选通道或统一提高增益。
+  - 原始证据：Mac 按所有声道求平均、tap 固定 `withStream:0`；16 声道只有一对同相立体声有音时，相比只下混该声道对会额外衰减约 18 dB。该原始数学判断现已有受控设备证据；不能据此扩称所有物理硬件均已覆盖。
   - 最小验证：实际转换逻辑的合成 interleaved／noninterleaved buffer 覆盖 2／8／16 声道、不同声道对、全声道信号、静音及幅值边界；再用已有且明确授权的虚拟多声道／多流设备注入不同固定合成音，显式使用虚拟 UID，不改默认设备、不安装驱动或采样物理硬件。缺设备不以双声道通过代验。
   - 决策／通过条件：支持范围内复现后，按 stream／starting channel／首选声道或 layout 做正确映射；不能从零值猜活跃声道、统一乘声道数补增益或改成扩大采集范围的全局 mixdown。未复现或超出支持范围则保留限制，不新增专业设备 UI。
   - 入口：`macos/native/AudioCapture.mm`、对应纯转换测试及受控虚拟设备验证；Windows 包转换测试只能作参考，不能证明 Mac tap 覆盖。
@@ -101,7 +113,7 @@
 这些复选框是平台验收，不要求再改一份 Mac 业务实现。共享功能差异及界面逐项矩阵以 [共享交接](MACOS_1.2.0_HANDOFF.md) 为准。
 
 - [x] **M7／utility 管道与真实退出。** 先运行 `speech-host.test.ts`、`knowledge-host.test.ts`、`knowledge-coordinator.test.ts`，再用真实 Electron utility 和大量合成 stdout／stderr 验证不堵塞、不泄露日志。stop 后旧 IPC 最多再等 10 秒，kill 失败时旧调用要结算，而退休栅栏仍阻止新 fork／post／模型删除；只有真实 exit 才恢复。入口 `shared/test/scripts/knowledge-host-smoke.mjs`，语音高输出临时 utility 采用同一 owner 离线入口；MLX 另按 M9 补链路断开／父退出。不得调用物理采集来代验。
-- [x] **语音切换、尾包及手动恢复。** 运行共享 speech 相关单测，再串行运行 Mac `audio-synthetic-smoke.mjs`、`echo-cancellation-smoke.mjs` 和已审计的 `speech-switch-smoke.mjs`／Qwen Worker 入口；参数使用自有且摘要认证的组件夹具。覆盖切换取消、失败 Worker 退休、EPIPE、软静音、尾稿和真实 ACK，所有旧回调均退休；模型释放后才允许组件删除。保持原积压预算，错误后仅按现有手动操作恢复，不测试或增加自动重启。
+- [x] **语音切换、尾包及手动恢复。** 运行共享 speech 相关单测，再串行运行 Mac `audio-synthetic-smoke.mjs`、`echo-cancellation-smoke.mjs` 和已审计的 `speech-switch-smoke.mjs`／Qwen Worker 入口；参数使用自有且摘要认证的组件夹具。覆盖切换取消、失败 Worker 退休、EPIPE、软静音、尾稿和真实 ACK，所有旧回调均退休；模型释放后才允许组件删除。保持原积压预算；当前任务另按 M8 新增授权补有界自动重启专项，手动恢复仍为明确失败后的退路。
 - [x] **知识库解析与取消。** 运行 `knowledge-core.test.ts`、`knowledge-parsing.test.ts`、`knowledge-process.test.ts`、`legacy-doc.test.ts`、`text-encoding.test.ts` 及真实 `knowledge-host-smoke.mjs`。最终 Mac utility 中用合成 PDF／DOCX／DOC／多编码文本验证索引、三种检索、替换、删除、取消、重开；大题库层级／父项关系保持、旧 revision／grounding 内存不累积，磁盘历史与恢复资料不追扫。
 - [x] **Copilot 关停及本应用退出边界。** 先运行 `copilot-runtime.test.ts`、`copilot.test.ts`、`cancellable.test.ts`，再使用断网、空凭据的隔离 Mac SDK 环境验证握手／控制会话不回复时有界退休，迟到成功或失败不复活旧实例、不清除新实例。本应用退出只清元数据并停自身会话，不删除 CLI 共享凭据；不重写官方登录体系或要求完整独立 vault。正式包 SDK 验收须先满足 M4，`copilot-runtime-smoke.mjs` 的既有参数和身份边界先检查后运行。
 - [x] **聊天预算、取消及远端错误脱敏。** 运行 `chat.test.ts`、`chat-responses.test.ts`、`bounded-json.test.ts`、`cancellable.test.ts` 等定向用例；通过隔离离线 provider 验证读取附件前的上下文预算、串行读取中途取消、模型目录／二次身份／知识库目录等待取消和迟到结果隔离。取消有界结束，超量实际响应被拒，JSON 错误不含远端片段；不恢复已撤销的旧请求或修改回答预算。
@@ -118,4 +130,4 @@
 
 ## 已决定保持的边界
 
-以下不列修复复选框：Qwen CPU 长段性能／重算／分段，M8 的原生与 Paraformer 积压预算、宁停不丢及手动恢复，音频进度频率，可信私人网络／热点边界，单会话命令保护上限，组件完整摘要与受保护历史／原件备份，本地资料加密策略、第三方网站图标服务、单份简历行为及原凭据 v10 兼容。M2 的 Developer ID／公证和 M3 的拆分或轮换现用更新密钥不属于本轮强制实现；不会自动购买、生成或替换身份。Mac 当前 `captureProtectionSupported:false` 继续如实表达，不承诺屏幕共享隐藏窗口。测试只核对这些既定行为未回归，不以新审阅重新立项。
+以下不列修复复选框：Qwen CPU 长段性能／重算／分段，M8 的原生与 Paraformer 积压预算、宁停不丢，音频进度频率，可信私人网络／热点边界，单会话命令保护上限，组件完整摘要与受保护历史／原件备份，本地资料加密策略、第三方网站图标服务、单份简历行为及原凭据 v10 兼容。M2 的 Developer ID／公证和 M3 的拆分或轮换现用更新密钥不属于本轮强制实现；不会自动购买、生成或替换身份。Mac 当前 `captureProtectionSupported:false` 继续如实表达，不承诺屏幕共享隐藏窗口。测试只核对这些既定行为未回归，不以新审阅重新立项。

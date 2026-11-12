@@ -132,3 +132,16 @@ it('does not release a cancelled task before its worker has retired', async () =
     expect(state).toBe('AbortError');
   } finally { release(); spy.mockRestore(); await pending; }
 });
+
+it('bounds native memory across repeated real encodings and retires failures, cancellation and a stalled worker', async () => {
+  const require = createRequire(path.join(process.cwd(), 'package.json'));
+  const check = require(path.resolve('../shared/test/scripts/screenshot-worker-checks.cjs'));
+  const result = await check({
+    hostPath: path.join(directory, 'host.js'),
+    sharpPath: require.resolve('sharp'),
+  });
+  expect(result.encodings).toBe(23);
+  expect(result.created).toBe(27);
+  expect(result.exited).toBe(result.created);
+  expect(require('node:worker_threads').Worker).toBe(Worker);
+}, 45000);

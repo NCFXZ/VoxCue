@@ -1,7 +1,7 @@
 import { connectUiAccount, openModelMenu } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -1217,10 +1217,84 @@ try {
     });
   });
   await badge('麦克风', '有输入').waitFor();
-  await badge('系统音频', '异常').hover();
-  await floating
-    .getByRole('tooltip', { name: '系统音频：合成播放设备连接中断，请检查设备连接。', exact: true })
-    .waitFor();
+  const interruptedBadge = badge('系统音频', '异常');
+  // Interview reveal deliberately uses showInactive. A CDP hover does not
+  // establish the native key window needed for Mac's forwarded pointer state.
+  await focusUiWindow(app, floating);
+  const hoverProbe = await interruptedBadge.evaluateHandle((node) => {
+    const controller = new AbortController();
+    const describe = (target) =>
+      target instanceof Element
+        ? {
+            tag: target.localName,
+            class: target.getAttribute('class'),
+            label: target.closest('[aria-label]')?.getAttribute('aria-label'),
+          }
+        : null;
+    const events = [];
+    for (const type of ['pointermove', 'pointerout', 'pointerleave', 'mousemove', 'blur'])
+      window.addEventListener(
+        type,
+        (event) => {
+          events.push({
+            type,
+            trusted: event.isTrusted,
+            x: event.clientX,
+            y: event.clientY,
+            target: describe(event.target),
+            related: describe(event.relatedTarget),
+            hovered: node.matches(':hover'),
+            rect: node.getBoundingClientRect().toJSON(),
+          });
+          if (events.length > 12) events.shift();
+        },
+        { capture: true, signal: controller.signal },
+      );
+    return { events, stop: () => controller.abort() };
+  });
+  try {
+    await interruptedBadge.hover();
+    await floating
+      .getByRole('tooltip', { name: '系统音频：合成播放设备连接中断，请检查设备连接。', exact: true })
+      .waitFor();
+  } catch (error) {
+    const renderer = await interruptedBadge.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const tooltip = node.querySelector('[role="tooltip"]');
+      const style = getComputedStyle(tooltip);
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return {
+        hovered: node.matches(':hover'),
+        focused: document.hasFocus(),
+        visibility: document.visibilityState,
+        rect: rect.toJSON(),
+        hitOwnsBadge: node.contains(hit),
+        hit: hit && { tag: hit.localName, class: hit.getAttribute('class') },
+        tooltip: { text: tooltip.textContent, visibility: style.visibility, opacity: style.opacity },
+        dpi: devicePixelRatio,
+      };
+    }).catch((error) => ({ unavailable: error.message }));
+    const native = await app.evaluate(({ app, BrowserWindow }, url) => {
+      const window = BrowserWindow.getAllWindows().find((window) => window.webContents.getURL() === url);
+      return {
+        active: app.isActive?.(),
+        focusedId: BrowserWindow.getFocusedWindow()?.id,
+        windowId: window?.id,
+        visible: window?.isVisible(),
+        content: window?.getContentBounds(),
+        ignored: globalThis.uxIgnored,
+      };
+    }, floating.url()).catch((error) => ({ unavailable: error.message }));
+    console.error('Owned audio badge hover failure', JSON.stringify({
+      renderer,
+      native,
+      events: await hoverProbe.evaluate((probe) => probe.events).catch(() => []),
+    }));
+    throw error;
+  } finally {
+    await hoverProbe.evaluate((probe) => probe.stop()).catch(() => {});
+    await hoverProbe.dispose();
+  }
   await capture(floating, '15-compact-status');
   await app.evaluate(() => {
     clearInterval(globalThis.uxBadgeActivity);
@@ -1271,6 +1345,61 @@ try {
   await badge('麦克风', '已暂停').waitFor();
   await badge('语音模型', '已暂停').waitFor();
   await geometry(floating);
+  await badge('系统音频', '异常').hover();
+  const recoveryTooltip = floating.getByRole('tooltip', {
+    name: '系统音频：所选音频设备已断开。',
+    exact: true,
+  });
+  await recoveryTooltip.waitFor();
+  await floating.waitForFunction((tooltip) => {
+    const style = getComputedStyle(tooltip);
+    return style.opacity === '1' && tooltip.getAnimations().every(
+      (animation) => !animation.pending && animation.playState !== 'running',
+    );
+  }, await recoveryTooltip.elementHandle());
+  const tooltipLayer = await recoveryTooltip.evaluate((tooltip) => {
+    const card = document.querySelector('.floating-transcript .audio-recovery');
+    const tooltipRect = tooltip.getBoundingClientRect();
+    const cardRect = card.getBoundingClientRect();
+    const overlap = {
+      left: Math.max(tooltipRect.left, cardRect.left),
+      top: Math.max(tooltipRect.top, cardRect.top),
+      right: Math.min(tooltipRect.right, cardRect.right),
+      bottom: Math.min(tooltipRect.bottom, cardRect.bottom),
+    };
+    if (overlap.right - overlap.left <= 4 || overlap.bottom - overlap.top <= 4)
+      throw Error('The hovered tooltip must actually overlap the audio recovery card');
+    const point = {
+      x: (overlap.left + overlap.right) / 2,
+      y: (overlap.top + overlap.bottom) / 2,
+    };
+    const original = {
+      value: tooltip.style.getPropertyValue('pointer-events'),
+      priority: tooltip.style.getPropertyPriority('pointer-events'),
+    };
+    try {
+      // The production tooltip ignores input. Temporarily hit-test its actual
+      // painted layer without changing either surface's position or stacking.
+      tooltip.style.setProperty('pointer-events', 'auto', 'important');
+      const hit = document.elementFromPoint(point.x, point.y);
+      return {
+        hovered: tooltip.closest('.interview-ready-badge').matches(':hover'),
+        aboveCard: tooltip.contains(hit),
+        overlap,
+        point,
+        hit: hit && { tag: hit.localName, class: hit.getAttribute('class') },
+      };
+    } finally {
+      if (original.value)
+        tooltip.style.setProperty('pointer-events', original.value, original.priority);
+      else tooltip.style.removeProperty('pointer-events');
+    }
+  });
+  assert.equal(tooltipLayer.hovered, true, 'The source badge stays under the real pointer');
+  assert.equal(tooltipLayer.aboveCard, true,
+    'The hovered source tooltip must paint above the overlapping recovery card: ' +
+      JSON.stringify(tooltipLayer));
+  checks.push('the hovered source warning paints above the overlapping audio recovery card');
   await capture(floating, '06-audio-recovery');
   await floating.getByRole('button', { name: '重新连接音频', exact: true }).click();
   await badge('语音模型', '正常').waitFor();

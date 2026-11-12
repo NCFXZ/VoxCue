@@ -4,7 +4,7 @@ import { updateSigningKey } from './update-signing.mjs';
 import { sparkleTools } from './sparkle-tools.mjs';
 import { createMacDmg } from './dmg.mjs';
 import { localSigningCertificate, verifyLocalApp } from './development-signing.mjs';
-import { mkdtemp, mkdir, rm, readFile, writeFile, stat, lstat } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile, writeFile, stat, lstat, realpath } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import { createHash, sign } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -23,7 +23,7 @@ export async function packageInstaller(output = path.join(root, 'release', versi
     throw Error('Release output already exists; do not overwrite an existing release');
   const { key, publicKey, privateKeyFile } = await updateSigningKey();
   const tools = await sparkleTools();
-  const stage = await mkdtemp(path.join(os.tmpdir(), 'voxcue-package-'));
+  const stage = await realpath(await mkdtemp(path.join(os.tmpdir(), 'voxcue-package-')));
   let completed = false;
   let ownsOutput = false;
   async function cleanup() {
