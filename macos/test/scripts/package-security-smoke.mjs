@@ -130,10 +130,13 @@ try {
     ['--inspect-brk=0'],
     ['--auto-open-devtools-for-tabs'],
     ['--type=utility'],
+    ['--no-sandbox'],
+    ['--disable-web-security'],
+    ['--ignore-certificate-errors'],
   ]) {
     const result = spawnSync(executable, args, { encoding: 'utf8', timeout: 15000 });
     assert.equal(result.status, 64, JSON.stringify(args) + result.stderr);
-    assert.match(result.stderr, /production debugging arguments are disabled/);
+    assert.match(result.stderr, /unsafe production arguments are disabled/);
   }
   console.log(
     'PASS: untouched final executable cold start, native Quit/drain, HR, fuses and pre-bootstrap debugging/env rejection.',

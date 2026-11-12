@@ -28,7 +28,9 @@ static bool debugArgument(const char *argument) {
   name = name.substr(0, name.find('='));
   for (char &c : name) if (c >= 'A' && c <= 'Z') c += 'a' - 'A';
   return name.rfind("remote-debugging", 0) == 0 || name.rfind("inspect", 0) == 0 ||
-         name == "auto-open-devtools-for-tabs" || name == "type";
+         name == "auto-open-devtools-for-tabs" || name == "type" ||
+         name == "no-sandbox" || name == "disable-web-security" ||
+         name == "ignore-certificate-errors";
 }
 
 int main(int argc, char *argv[]) {
@@ -43,7 +45,7 @@ int main(int argc, char *argv[]) {
   }
   for (int i = 1; i < argc; ++i) {
     if (debugArgument(argv[i])) {
-      fputs("VoxCue: production debugging arguments are disabled.\n", stderr);
+      fputs("VoxCue: unsafe production arguments are disabled.\n", stderr);
       return 64;
     }
   }
