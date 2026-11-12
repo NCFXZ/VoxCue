@@ -39,7 +39,7 @@ impl DeviceRequest {
     /// Resolve `Auto` to a concrete backend; leave explicit choices unchanged.
     pub(crate) fn resolve(self) -> anyhow::Result<ResolvedBackend> {
         match self {
-            DeviceRequest::Cpu => Ok(ResolvedBackend::Cpu),
+            DeviceRequest::Cpu => cpu_backend(),
             #[cfg(feature = "cuda")]
             DeviceRequest::Cuda(ordinal) => {
                 let state = crate::cudarc_engine::CudaState::new(ordinal)
@@ -69,7 +69,7 @@ impl DeviceRequest {
                 #[cfg(feature = "cpu")]
                 {
                     log::info!("Auto: using CPU backend");
-                    Ok(ResolvedBackend::Cpu)
+                    cpu_backend()
                 }
             }
         }
@@ -84,4 +84,12 @@ impl DeviceRequest {
             DeviceRequest::Cuda(_) => "cuda",
         }
     }
+}
+
+fn cpu_backend() -> anyhow::Result<ResolvedBackend> {
+    anyhow::ensure!(
+        crate::cpu_features::supported(),
+        "Qwen CPU alignment requires AVX2 and FMA on x86_64"
+    );
+    Ok(ResolvedBackend::Cpu)
 }

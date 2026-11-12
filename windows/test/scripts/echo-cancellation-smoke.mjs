@@ -4,14 +4,13 @@ import { readFile, writeFile, access, mkdir, cp } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
-import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 
 if (
-  process.argv.slice(2).some((arg) => !['--packaged', '--runtime-bundle'].includes(arg)) ||
+  process.argv.slice(2).some((arg) => arg !== '--runtime-bundle') ||
   process.argv.length > 3
 )
-  throw Error('Use no option, --runtime-bundle or --packaged');
-let executable = workspace.platformRequire('electron');
+  throw Error('Use no option or --runtime-bundle');
+const executable = workspace.platformRequire('electron');
 let runtime = workspace.platformRoot;
 if (process.argv.includes('--runtime-bundle')) {
   // Focused ASAR layout, without copying unrelated document/RAG/UI dependencies.
@@ -32,6 +31,7 @@ if (process.argv.includes('--runtime-bundle')) {
     'shared/electron/backend/speech/recognizer.js',
     'shared/electron/backend/speech/recognizer-worker.js',
     'shared/electron/contracts/speechSettings.js',
+    'shared/electron/contracts/components.js',
     'windows/electron/speech/echoCancellation.js',
   ]) {
     const destination = path.join(input, 'dist-electron', file);
@@ -53,27 +53,6 @@ if (process.argv.includes('--runtime-bundle')) {
       '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/contracts,dist-electron/windows/electron/speech}',
   });
   runtime = archive + '.unpacked';
-}
-if (process.argv.includes('--packaged')) {
-  // Production portable layout in the owned temporary root. No installer or release.
-  const output = path.join(testRoot, 'platform-layout-aec');
-  const child = spawnTestProcess(
-    process.execPath,
-    ['scripts/package-portable.mjs', '--test-output=' + output],
-    { stdio: 'inherit' },
-  );
-  assert.equal(
-    await new Promise((resolve, reject) => {
-      child.once('error', reject);
-      child.once('exit', resolve);
-    }),
-    0,
-  );
-  const app = path.join(output, 'VoxCue-win32-x64');
-  executable = path.join(app, 'VoxCue.exe');
-  runtime = path.join(app, 'resources/app.asar.unpacked');
-  if (!process.env.VOXCUE_TEST_SPEECH_MODELS)
-    process.env.VOXCUE_TEST_SPEECH_MODELS = (await prepareModelFixtures()).speechModels;
 }
 if (process.argv.length > 2) {
   const pkg = path.join(runtime, 'node_modules/@ennuicastr/webrtcaec3.js');

@@ -10,23 +10,18 @@ import {
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-const packaged = process.argv.includes('--packaged');
+if (process.argv.includes('--packaged'))
+  throw Error(
+    'Production package tests require Windows Sandbox; this script uses development hardware audio only.',
+  );
 if (!process.argv.includes('--hardware-audio'))
   throw Error('Physical audio is opt-in: confirm the current scope, then pass --hardware-audio.');
-if (packaged)
-  throw Error('Use test:speech:package for isolated cached-model package verification.');
-const profile = path.resolve(
-  testRoot,
-  'test/results',
-  `speech-${packaged ? 'packaged' : 'desktop'}-${Date.now()}`,
-);
+const profile = path.resolve(testRoot, 'test/results', `speech-desktop-${Date.now()}`);
 await mkdir(profile, { recursive: true });
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({
-  ...(packaged
-    ? { executablePath: path.resolve('release-smoke/VoxCue-win32-x64/VoxCue.exe'), args: [] }
-    : { args: ['.'] }),
+  args: ['.'],
   env,
 });
 let player;
@@ -214,7 +209,6 @@ try {
   console.log(
     JSON.stringify(
       {
-        packaged,
         unauthorized,
         localModelAndDll: true,
         actualLoopbackToUi: true,

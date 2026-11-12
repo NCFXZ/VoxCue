@@ -51,7 +51,8 @@ async function until(read, accept, label) {
 }
 try {
   for (const scale of requestedScale ? [requestedScale] : scales) {
-    let app;
+    let app, page, win, info;
+    const scene = { scale, phase: 'launch', target: null, theme: null, requestedSize: null };
     try {
       app = await electron.launch({
         args: [await offlineElectronEntry(fixture)],
@@ -63,36 +64,42 @@ try {
           ELECTRON_RUN_AS_NODE: undefined,
         },
       });
-      const page = await app.firstWindow();
+      page = await app.firstWindow();
       page.setDefaultTimeout(5000);
       const errors = [];
       page.on('pageerror', (error) => errors.push(error.message));
       await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
-      const win = await app.browserWindow(page);
-      const info = await win.evaluate((window) => {
+      win = await app.browserWindow(page);
+      info = await win.evaluate((window) => {
         window.show();
         window.setAlwaysOnTop(true, 'normal');
         window.moveTop();
         window.focus();
         return {
           id: window.id,
+          pid: process.pid,
           handle: window.getNativeWindowHandle().readBigUInt64LE().toString(),
         };
       });
-      const pointAt = async (box, x = 0.5, y = 0.5) =>
-        app.evaluate(
+      const pointAt = async (box, x = 0.5, y = 0.5) => {
+        const projection = await app.evaluate(
           ({ BrowserWindow, screen }, { id, box, x, y }) => {
             const bounds = BrowserWindow.fromId(id).getContentBounds();
-            return screen.dipToScreenPoint({
+            const dip = {
               x: Math.round(bounds.x + box.x + box.width * x),
               y: Math.round(bounds.y + box.y + box.height * y),
-            });
+            };
+            return { point: screen.dipToScreenPoint(dip), dip, contentBounds: bounds };
           },
           { id: info.id, box, x, y },
         );
+        scene.target = { box, x, y, ...projection };
+        return projection.point;
+      };
       const ownedWindowState = () =>
         probe('window', info.handle, path.resolve('public/voxcue.ico'));
       const focusOwnedWindow = async () => {
+        scene.phase = 'focus-owned-window';
         assert.equal(probe('desktop').interactive, true);
         await app.evaluate(({ app, BrowserWindow }, info) => {
           const window = BrowserWindow.fromId(info.id);
@@ -115,12 +122,14 @@ try {
         );
       };
       const hit = async (locator, expected, x = 0.5) => {
+        scene.phase = 'native-hit-' + expected;
         const point = await stableTarget(locator, (box) => pointAt(box, x));
         await until(
-          () => ({
-            result: probe('hittest', info.handle, point.x, point.y).result,
-            owned: probe('hit', info.handle, point.x, point.y).expected,
-          }),
+          () => {
+            const result = probe('hittest', info.handle, point.x, point.y).result;
+            const ownership = probe('hit', info.handle, point.x, point.y);
+            return { result, owned: ownership.expected, ownership };
+          },
           (value) => value.result === expected && value.owned,
           'Native hit test for ' + (await locator.innerText()),
         );
@@ -139,6 +148,7 @@ try {
         );
         // The probe rechecks the input desktop and WindowFromPoint immediately
         // before its real mouse press; do not retry a rejected press.
+        scene.phase = 'native-click';
         probe('click', info.handle, point.x, point.y);
       };
       const button = (name) => page.getByRole('button', { name, exact: true });
@@ -146,6 +156,7 @@ try {
       // Activate away from the later drag origin so Windows cannot interpret
       // its button-down as a caption double-click instead of starting a move.
       const activation = await hit(band, 2, 0.05);
+      scene.phase = 'activation-click';
       probe('click', info.handle, activation.x, activation.y);
       await win.evaluate((window) => window.setAlwaysOnTop(false));
       await focusOwnedWindow();
@@ -154,7 +165,9 @@ try {
       );
       const initial = await win.evaluate((window) => window.getBounds());
       const dragStart = await hit(band, 2);
+      scene.phase = 'caption-drag';
       probe('drag', info.handle, dragStart.x, dragStart.y, dragStart.x + 32, dragStart.y + 20);
+      scene.phase = 'caption-drag-movement';
       await until(
         () => win.evaluate((window) => window.getBounds()),
         (bounds) => Math.abs(bounds.x - initial.x) > 10 || Math.abs(bounds.y - initial.y) > 10,
@@ -162,6 +175,7 @@ try {
       );
       await win.evaluate((window, bounds) => window.setBounds(bounds), initial);
       for (const dark of [false, true]) {
+        scene.theme = dark ? 'dark' : 'light';
         await page.evaluate(
           (value) => document.documentElement.classList.toggle('dark', value),
           dark,
@@ -170,6 +184,8 @@ try {
           [1000, 660],
           [860, 580],
         ]) {
+          scene.requestedSize = size;
+          scene.phase = 'resize-and-band-hit';
           await win.evaluate((window, [width, height]) => window.setSize(width, height), size);
           const bandBox = await band.boundingBox();
           assert.ok(bandBox && Math.abs(bandBox.y) < 1 && Math.abs(bandBox.height - 72) < 1);
@@ -236,6 +252,66 @@ try {
         }
       }
       assert.deepEqual(errors, []);
+    } catch (error) {
+      const readProbe = (...args) => {
+        try {
+          return probe(...args);
+        } catch {
+          return { unavailable: true };
+        }
+      };
+      const renderer = page
+        ? await page
+            .evaluate(() => ({
+              dpr: devicePixelRatio,
+              innerWidth,
+              innerHeight,
+              viewport: visualViewport && {
+                width: visualViewport.width,
+                height: visualViewport.height,
+                scale: visualViewport.scale,
+                offsetLeft: visualViewport.offsetLeft,
+                offsetTop: visualViewport.offsetTop,
+              },
+              band: document.querySelector('.login-drag-region')?.getBoundingClientRect().toJSON(),
+            }))
+            .catch(() => ({ unavailable: true }))
+        : null;
+      const window = app && info
+        ? await app
+            .evaluate(({ BrowserWindow, screen }, id) => {
+              const window = BrowserWindow.fromId(id);
+              if (!window || window.isDestroyed()) return { unavailable: true };
+              const display = screen.getDisplayMatching(window.getBounds());
+              return {
+                bounds: window.getBounds(),
+                contentBounds: window.getContentBounds(),
+                visible: window.isVisible(),
+                focused: window.isFocused(),
+                topmost: window.isAlwaysOnTop(),
+                zoomFactor: window.webContents.getZoomFactor(),
+                display: {
+                  scaleFactor: display.scaleFactor,
+                  bounds: display.bounds,
+                  workArea: display.workArea,
+                },
+              };
+            }, info.id)
+            .catch(() => ({ unavailable: true }))
+        : null;
+      const point = scene.target?.point;
+      console.error('NATIVE_LOGIN_DIAGNOSTIC', {
+        ...scene,
+        owner: info,
+        renderer,
+        window,
+        desktop: readProbe('desktop'),
+        foreground: readProbe('foreground'),
+        nativeGeometry: info ? readProbe('geometry', info.handle, info.pid) : null,
+        hit: info && point ? readProbe('hit', info.handle, point.x, point.y) : null,
+        hittest: info && point ? readProbe('hittest', info.handle, point.x, point.y) : null,
+      });
+      throw error;
     } finally {
       if (app) await closeUiApp(app);
     }

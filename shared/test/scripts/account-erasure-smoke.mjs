@@ -558,7 +558,11 @@ try {
   }
   throw error;
 } finally {
-  if (app) await closeUiApp(app).catch((error) => console.error('ACCOUNT_ERASURE_TEARDOWN', error));
+  if (app)
+    await closeUiApp(app).catch((error) => {
+      console.error('ACCOUNT_ERASURE_TEARDOWN', error);
+      process.exitCode = 1;
+    });
   await api.close();
   await services.close();
   auth.passwords.pool.close();

@@ -36,6 +36,7 @@ export interface CaptureAdapter {
 export const speechModelName = 'Paraformer 中英 INT8 · Silero VAD · 本地';
 export class SpeechController {
   private worker?: Worker;
+  private failedWorker?: Worker;
   private ready?: Promise<void>;
   private captures = new Map<AudioSource, NativeCapture>();
   private queued = 0;
@@ -350,6 +351,7 @@ export class SpeechController {
     if (this.ready) return this.ready;
     const worker = new Worker(path.join(__dirname, 'worker.js'));
     this.worker = worker;
+    this.failedWorker = undefined;
     this.ready = new Promise<void>((resolve, reject) => {
       const timer = setTimeout(
         () => {
@@ -429,6 +431,7 @@ export class SpeechController {
           this.flushers.delete(completed);
         }
         if (m.error) {
+          this.failedWorker = worker;
           clearTimeout(timer);
           reject(Error(m.error));
           for (const pending of this.flushers.values()) pending.reject(Error(m.error));
@@ -438,8 +441,12 @@ export class SpeechController {
       });
       worker.on('error', () => {
         if (this.worker !== worker) return;
+        this.failedWorker = worker;
         clearTimeout(timer);
         reject(Error('语音识别进程异常，请检查模型后重新开始。'));
+        for (const pending of this.flushers.values())
+          pending.reject(Error('语音识别进程异常，尾段无法处理，请重新开始。'));
+        this.flushers.clear();
         this.fail('语音识别进程异常，请重新开始。', 'model');
       });
       worker.on('exit', () => {
@@ -583,6 +590,15 @@ export class SpeechController {
         const message = '音频采集未能正常停止，请重新开始。';
         this.state('error', message, 'service');
         throw Error(message);
+      }
+      if (this.worker && this.worker === this.failedWorker) {
+        // A failed worker cannot flush. Retire it after native capture stops,
+        // without blocking a restart behind a 5s/120s tail timeout.
+        const worker = this.worker;
+        this.worker = undefined;
+        this.ready = undefined;
+        this.failedWorker = undefined;
+        await worker.terminate();
       }
       if (this.worker && this.ready) {
         const id = ++this.sequence;

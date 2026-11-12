@@ -39,13 +39,17 @@ export function parseText(
       });
   }
   const questionHeaders = headers.filter((h) => h.question);
-  const minimum = questionHeaders.length ? Math.min(...questionHeaders.map((h) => h.level)) : 6;
+  const minimum = questionHeaders.reduce((level, h) => Math.min(level, h.level), 6);
   const boundaries = headers.filter((h) => h.level <= minimum || h.question);
   const starts = [...new Set([0, ...boundaries.map((h) => h.line), lines.length])];
   const items: KnowledgeItem[] = [];
+  const headerAt = new Map(headers.map((h) => [h.line, h]));
+  const stack: typeof headers = [];
+  let nextHeader = 0;
   const sectionAt = (line: number) => {
-    const stack: typeof headers = [];
-    for (const h of headers.filter((h) => h.line <= line)) {
+    // Content blocks are visited in document order; advance the hierarchy once.
+    while (nextHeader < headers.length && headers[nextHeader].line <= line) {
+      const h = headers[nextHeader++];
       while (stack.length && stack.at(-1)!.level >= h.level) stack.pop();
       stack.push(h);
     }
@@ -55,7 +59,7 @@ export function parseText(
   for (let i = 0; i < starts.length - 1; i++) {
     const start = starts[i],
       end = starts[i + 1],
-      h = headers.find((h) => h.line === start);
+      h = headerAt.get(start);
     // Group complete natural paragraphs. Fenced code remains a complete content item.
     if (!h?.question) {
       if (h && h.level <= minimum) parent = undefined;
@@ -143,8 +147,11 @@ export function searchUnits(
   signal?: AbortSignal,
 ): SearchUnit[] {
   const units: SearchUnit[] = [];
+  const parents = new Map<string, KnowledgeItem>();
+  for (const item of items)
+    if (!parents.has(item.itemId)) parents.set(item.itemId, item);
   for (const item of items) {
-    const parent = items.find((candidate) => candidate.itemId === item.parentId);
+    const parent = item.parentId ? parents.get(item.parentId) : undefined;
     const prefix =
       item.kind === 'qa'
         ? parent

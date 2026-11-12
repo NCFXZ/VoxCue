@@ -42,7 +42,10 @@ import '../../../shared/electron/preload';
 import { registerHistoryIpc } from '../../../shared/electron/ipc/history';
 import { registerChatIpc } from '../../../shared/electron/ipc/chat';
 import { registerInterviewIpc } from '../../../shared/electron/ipc/interview';
-import { registerInterviewShortcutsIpc, registerShortcutSettingsIpc } from '../../../shared/electron/ipc/interviewShortcuts';
+import {
+  registerInterviewShortcutsIpc,
+  registerShortcutSettingsIpc,
+} from '../../../shared/electron/ipc/interviewShortcuts';
 import { registerInterviewImageIpc } from '../../../shared/electron/ipc/interviewImages';
 import type { InterviewImageStore } from '../../../shared/electron/backend/interview/images';
 import { ChatServiceError } from '../../../shared/electron/backend/chat/errors';
@@ -197,12 +200,23 @@ describe('shortcut settings IPC', () => {
     },
   );
   it('keeps changes main-only and validates actions and combinations before dispatch', async () => {
-    const main = { mainFrame: {} }, help = { mainFrame: {} }, other = { mainFrame: {} };
-    const state = { revision: 1, bindings: defaultShortcuts(), conflicts: [], capturing: false, error: null };
+    const main = { mainFrame: {} },
+      help = { mainFrame: {} },
+      other = { mainFrame: {} };
+    const state = {
+      revision: 1,
+      bindings: defaultShortcuts(),
+      conflicts: [],
+      capturing: false,
+      error: null,
+    };
     const call = vi.fn(async () => ({ state }));
     registerShortcutSettingsIpc({
       authorize(event, write) {
-        if (event.senderFrame !== event.sender.mainFrame || ![main, help].includes(event.sender as any))
+        if (
+          event.senderFrame !== event.sender.mainFrame ||
+          ![main, help].includes(event.sender as any)
+        )
           throw Error('Unauthorized window');
         if (write && event.sender !== (main as any)) throw Error('Main only');
       },
@@ -211,21 +225,30 @@ describe('shortcut settings IPC', () => {
     const route = bridge.handlers.get('shortcuts:settings')!;
     const event = (sender: any) => ({ sender, senderFrame: sender.mainFrame });
     expect(await route(event(help), { op: 'status' })).toEqual({ state });
-    for (const request of [{ op: 'check' }, { op: 'reset' }, { op: 'capture', active: true },
-      { op: 'set', action: 'submit-input', accelerator: 'Control+K' }])
+    for (const request of [
+      { op: 'check' },
+      { op: 'reset' },
+      { op: 'capture', active: true },
+      { op: 'set', action: 'submit-input', accelerator: 'Control+K' },
+    ])
       expect(() => route(event(help), request)).toThrow('Main only');
     expect(() => route(event(other), { op: 'status' })).toThrow('Unauthorized');
-    expect(() => route({ sender: main, senderFrame: {} }, { op: 'status' })).toThrow('Unauthorized');
+    expect(() => route({ sender: main, senderFrame: {} }, { op: 'status' })).toThrow(
+      'Unauthorized',
+    );
     for (const request of [
-      { op: 'status', path: '/private' }, { op: 'capture', active: 'yes' },
+      { op: 'status', path: '/private' },
+      { op: 'capture', active: 'yes' },
       { op: 'set', action: 'execute', accelerator: 'Control+K' },
       { op: 'set', action: 'submit-input', accelerator: 'K' },
-    ]) expect(() => route(event(main), request)).toThrow();
+    ])
+      expect(() => route(event(main), request)).toThrow();
     expect(() => route(event(main), { op: 'status' }, {})).toThrow();
     expect(call).toHaveBeenCalledOnce();
     await route(event(main), { op: 'set', action: 'submit-input', accelerator: 'Alt+Control+K' });
     expect(call).toHaveBeenLastCalledWith(
-      { op: 'set', action: 'submit-input', accelerator: 'Control+Alt+K' }, event(main),
+      { op: 'set', action: 'submit-input', accelerator: 'Control+Alt+K' },
+      event(main),
     );
   });
 });
@@ -835,8 +858,14 @@ describe('完整面试问题通过既有 AI 接口', () => {
     const pending = call('interview:screenshot', { op: 'capture' });
     expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({ ok: false });
     lifecycle.cancel();
+    const capturesBeforeRetirement = captureScreen.mock.calls.length;
+    expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({
+      ok: false, error: { message: '正在截取图像，请稍候。' },
+    });
+    expect(captureScreen).toHaveBeenCalledTimes(capturesBeforeRetirement);
     finish({ file: { name: 'screenshot.png', bytes: new Uint8Array([1]) }, preview: 'fixture' });
     expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(await call('interview:screenshot', { op: 'capture' })).toMatchObject({ ok: true });
     await expect(
       call('interview:answer', { ...question, screenshotIds: [ids[1]] }),
     ).rejects.toThrow('Invalid');
@@ -1125,8 +1154,14 @@ describe('受控 preload 契约', () => {
     const shortcut = vi.fn();
     const stopShortcut = bridge.api!.onInterviewShortcut(shortcut);
     for (const command of [
-      'toggle-panels', 'toggle-transcript', 'toggle-microphone', 'toggle-system-audio',
-      'submit-input', 'scroll-device-up', 'scroll-device-down', 'screenshot',
+      'toggle-panels',
+      'toggle-transcript',
+      'toggle-microphone',
+      'toggle-system-audio',
+      'submit-input',
+      'scroll-device-up',
+      'scroll-device-down',
+      'screenshot',
     ])
       bridge.listeners.get('interview:shortcut')!({ sender: 'private-event' }, command);
     expect(shortcut.mock.calls).toEqual([
@@ -1163,7 +1198,13 @@ describe('受控 preload 契约', () => {
     stopConnection();
     const settingsChanged = vi.fn();
     const stopSettings = bridge.api!.onShortcutSettings(settingsChanged);
-    const settings = { revision: 1, bindings: defaultShortcuts(), conflicts: [], capturing: false, error: null };
+    const settings = {
+      revision: 1,
+      bindings: defaultShortcuts(),
+      conflicts: [],
+      capturing: false,
+      error: null,
+    };
     bridge.listeners.get('shortcuts:settings')!({ sender: 'private-event' }, settings);
     expect(settingsChanged).toHaveBeenCalledExactlyOnceWith(settings);
     stopSettings();
@@ -1217,6 +1258,23 @@ function setup(demo = false) {
   return { chat, openLink, lifecycle, call, sender };
 }
 describe('聊天 IPC 与应用层边界', () => {
+  it('coalesces text IPC and flushes the final batch before returning completion', async () => {
+    const { chat, call, sender } = setup();
+    chat.stream.mockImplementationOnce(async (_request, emit) => {
+      for (const text of ['first', ' second', ' third'])
+        emit({ id: request.id, type: 'delta', text });
+      expect(sender.send).toHaveBeenCalledTimes(1);
+      return { ...completion, answerText: 'first second third' };
+    });
+    expect(await call('chat:send', request)).toMatchObject({
+      ok: true,
+      answerText: 'first second third',
+    });
+    expect(sender.send.mock.calls).toEqual([
+      ['chat:event', { id: request.id, type: 'delta', text: 'first' }],
+      ['chat:event', { id: request.id, type: 'delta', text: ' second third' }],
+    ]);
+  });
   it('账户额度只接受主窗口主 frame 的零参数读取，不接收账户、令牌或 URL', async () => {
     const { chat, call, sender } = setup();
     expect(await call('chat:account-usage')).toEqual({ ok: true, usage: null });

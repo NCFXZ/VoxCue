@@ -280,6 +280,179 @@ function fixture(saved?: SyncSaved) {
   };
 }
 describe('cloud sync consistency and backpressure', () => {
+  it('coalesces thousand-record summaries inside the engine and flushes request/idle before returning', async () => {
+    vi.useFakeTimers();
+    const blob = new Blob(['synthetic record']);
+    const hash = await digestCloudBlob(blob);
+    const resources: CloudResource[] = Array.from({ length: 1000 }, (_, i) => ({
+      id: crypto.randomUUID(),
+      name: 'record:item' + i,
+      kind: 'history',
+      revision: 1,
+      headVersion: crypto.randomUUID(),
+      bytes: blob.size,
+      sha256: hash,
+      createdAt: 1,
+    }));
+    const preferences = defaultSyncPreferences();
+    preferences.enabled.history = true;
+    let view: SyncView | undefined;
+    let summaries = 0;
+    const engine = new CloudSyncEngine({
+      userId,
+      saved: {
+        preferences,
+        baselines: Object.fromEntries(
+          resources.map((r) => [r.name, { id: r.id, revision: 1, hash }]),
+        ),
+      },
+      list: async () =>
+        resources.map((r) => ({ key: r.name, kind: 'history', blob: async () => blob })),
+      persist: async () => {},
+      apply: async () => {
+        throw Error('No restore expected');
+      },
+      emit: (value) => {
+        view = value;
+      },
+      request: async (call) => {
+        if (call.action !== 'list') throw Error('No mutation expected');
+        const offset = call.cursor ? resources.findIndex((r) => r.id === call.cursor) : 0;
+        const counts = { profile: 0, history: resources.length * blob.size, knowledgebase: 0 };
+        return {
+          ok: true,
+          value: {
+            items: resources.slice(offset, offset + 50),
+            nextCursor: resources[offset + 50]?.id ?? null,
+            storage: {
+              currentBytes: counts,
+              reservedBytes: { profile: 0, history: 0, knowledgebase: 0 },
+              storedBytes: counts,
+              capacityBytes: 100000000,
+              knowledgeCapacityBytes: 100000000,
+            },
+          },
+        };
+      },
+    });
+    // Count the actual full-key traversal, not merely subscriber notifications.
+    const allKeys = Reflect.get(engine, 'allKeys') as () => Set<string>;
+    Reflect.set(engine, 'allKeys', () => {
+      summaries++;
+      return allKeys.call(engine);
+    });
+    try {
+      await engine.request();
+      expect(summaries).toBe(2);
+      expect(view!.busy).toBe(false);
+      expect(Object.keys(view!.marks)).toHaveLength(1000);
+      expect(Object.values(view!.marks).every((mark) => mark.status === 'synced')).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+      engine.dirty('history');
+      expect(summaries).toBe(2);
+      await engine.idle();
+      expect(summaries).toBe(3);
+      expect(Object.values(view!.marks).every((mark) => mark.status === 'unsynced')).toBe(true);
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      engine.stop();
+      vi.useRealTimers();
+    }
+  });
+  it.each([
+    [409, 'conflict'],
+    [507, 'error'],
+  ] as const)(
+    'publishes %s immediately while the next record remains in flight',
+    async (status, state) => {
+      vi.useFakeTimers();
+      const f = fixture();
+      f.put('record:first', 'history', 'first');
+      f.put('record:second', 'history', 'second');
+      let release!: () => void;
+      let entered!: () => void;
+      const blocked = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const started = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      f.setHook(async (call) => {
+        if (call.action !== 'begin') return;
+        if (f.remote.get(call.id)?.name === 'record:first')
+          return { ok: false, status, error: 'synthetic first-record failure' };
+        entered();
+        await blocked;
+      });
+      const work = f.enable('history');
+      try {
+        await started;
+        expect(f.view.marks['record:first'].status).toBe(state);
+        expect(f.view.busy).toBe(true);
+        release();
+        await work;
+        expect(f.view.marks['record:first'].status).toBe(state);
+        expect(f.view.marks['record:second'].status).toBe('synced');
+        expect(f.view.busy).toBe(false);
+        expect(vi.getTimerCount()).toBe(0);
+      } finally {
+        release();
+        await work;
+        f.engine.stop();
+        vi.useRealTimers();
+      }
+    },
+  );
+  it('publishes cancellation once, keeps idle waiting for retirement and suppresses late views', async () => {
+    vi.useFakeTimers();
+    const f = fixture();
+    f.put('profile:main', 'profile', 'synthetic profile');
+    let release!: () => void;
+    let entered!: () => void;
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    let emitted = 0;
+    f.setViewHook(() => {
+      emitted++;
+    });
+    f.setHook(async (call) => {
+      if (call.action === 'begin') {
+        entered();
+        await blocked;
+      }
+    });
+    const work = f.enable('profile');
+    try {
+      await started;
+      await vi.advanceTimersByTimeAsync(16);
+      expect(f.view.marks['profile:main'].status).toBe('syncing');
+      f.engine.stop();
+      expect(f.view.busy).toBe(false);
+      expect(f.view.marks['profile:main'].status).toBe('unsynced');
+      expect(vi.getTimerCount()).toBe(0);
+      const stoppedCount = emitted;
+      let retired = false;
+      const idle = f.engine.idle().then(() => {
+        retired = true;
+      });
+      await Promise.resolve();
+      expect(retired).toBe(false);
+      release();
+      await Promise.all([work, idle]);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(emitted).toBe(stoppedCount);
+      expect(retired).toBe(true);
+    } finally {
+      release();
+      await work;
+      f.engine.stop();
+      vi.useRealTimers();
+    }
+  });
   it.each([
     'manifest-bytes',
     'manifest-digest',
@@ -543,8 +716,10 @@ describe('cloud sync consistency and backpressure', () => {
         if (call.action === 'list') reads++;
         if (call.action === 'put') {
           expect(reads).toBe(2); // One initial snapshot and one progress read, not one per chunk.
-          expect(f.view.storage!.storedBytes.knowledgebase).toBe(3 * 1048576);
-          expect(f.view.storage!.reservedBytes.knowledgebase).toBe(3 * 1048576);
+          await vi.waitFor(() => {
+            expect(f.view.storage!.storedBytes.knowledgebase).toBe(3 * 1048576);
+            expect(f.view.storage!.reservedBytes.knowledgebase).toBe(3 * 1048576);
+          });
         }
         return undefined;
       });
@@ -674,8 +849,12 @@ describe('cloud sync consistency and backpressure', () => {
     expect(f.view.marks['base:a'].status).toBe('error');
     const activeStates: string[] = [];
     f.setHook(async (call) => {
-      if (call.action === 'remove' && f.remote.get(call.id)?.name === 'file:second')
+      if (call.action === 'remove' && f.remote.get(call.id)?.name === 'file:second') {
+        await vi.waitFor(() => {
+          expect(f.view.marks['base:a'].status).toBe('deleting');
+        });
         activeStates.push(f.view.marks['base:a'].status);
+      }
       return undefined;
     });
     await f.engine.removeCloud('file:second');
@@ -704,9 +883,11 @@ describe('cloud sync consistency and backpressure', () => {
     const observed: string[] = [];
     f.setHook(async (call) => {
       if (call.action === 'read' && f.local.has('base:a')) {
-        expect(f.view.marks['base:a'].status).toBe(f.local.has('file:a') ? 'synced' : 'syncing');
+        await vi.waitFor(() => {
+          expect(f.view.marks['base:a'].status).toBe(f.local.has('file:a') ? 'synced' : 'syncing');
+          if (f.local.has('base:b')) expect(f.view.marks['base:b'].status).toBe('syncing');
+        });
         if (!f.local.has('file:a')) observed.push('syncing');
-        if (f.local.has('base:b')) expect(f.view.marks['base:b'].status).toBe('syncing');
       }
       return undefined;
     });

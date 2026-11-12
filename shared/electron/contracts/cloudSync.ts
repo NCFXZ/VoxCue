@@ -39,6 +39,7 @@ export interface CloudManifest {
   parts: { index: number; bytes: number; sha256: string }[];
 }
 type SyncOperation =
+  | { action: 'cancel'; syncId: string }
   | { action: 'restoreImage'; id: string; bytes: Uint8Array; preview: string }
   | { action: 'list'; cursor?: string }
   | { action: 'create'; id: string; kind: SyncKind; key: string }
@@ -57,7 +58,7 @@ type SyncOperation =
   | { action: 'read'; id: string; version: string; index: number }
   | { action: 'remove'; id: string; revision: number }
   | { action: 'prune'; id: string; version: string };
-export type CloudSyncCall = SyncOperation & { userId: string };
+export type CloudSyncCall = SyncOperation & { userId: string; syncId?: string };
 export type CloudSyncResult =
   | { ok: true; value: unknown }
   | { ok: false; error: string; status: number; retryAfterSeconds?: number };
@@ -70,6 +71,8 @@ export function validCloudSyncCall(value: unknown): value is CloudSyncCall {
   const integer = (v: unknown, max: number) =>
     typeof v === 'number' && Number.isSafeInteger(v) && v >= 0 && v <= max;
   if (!uuid(row.userId)) return false;
+  if (row.syncId !== undefined && !uuid(row.syncId)) return false;
+  if (row.action === 'cancel') return uuid(row.syncId);
   if (row.action === 'list')
     return row.cursor === undefined || row.cursor === '' || uuid(row.cursor);
   if (!uuid(row.id)) return false;

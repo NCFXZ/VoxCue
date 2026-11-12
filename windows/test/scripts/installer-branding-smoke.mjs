@@ -12,7 +12,7 @@ const cache = path.resolve('.cache/electron-builder/nsis-3.0.4.1');
 const directory = (await readdir(cache, { withFileTypes: true })).find((entry) =>
   entry.isDirectory(),
 );
-assert.ok(directory, 'Prepare the pinned NSIS tools with test:installer:isolated first');
+assert.ok(directory, 'Prepare the pinned NSIS tools with installer-engine-smoke.mjs first');
 const makensis = path.join(cache, directory.name, 'Bin/makensis.exe');
 const temporary = path.join(testRoot, 'nsis-tmp');
 await mkdir(temporary);

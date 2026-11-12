@@ -110,6 +110,9 @@ try {
       const { captureInterviewScreenshot, prepareInterviewScreenshot } = require(
         app.getAppPath() + '/dist-electron/shared/electron/screenshot.js',
       );
+      const { encodeScreenshotBitmap } = require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/screenshot/host.js',
+      );
       const captureScreen = platformCapture
         ? require(app.getAppPath() + '/dist-electron/windows/electron/platform.js').windows
             .captureScreen
@@ -125,6 +128,16 @@ try {
       const wrap = (image) => ({
         isEmpty: () => image.isEmpty(),
         getSize: () => image.getSize(),
+        toBitmap() {
+          const start = performance.now();
+          const bytes = image.toBitmap();
+          events.push({
+            stage: 'bitmap-transfer',
+            ms: performance.now() - start,
+            bytes: bytes.length,
+          });
+          return bytes;
+        },
         resize(options) {
           const start = performance.now();
           const resized = image.resize(options);
@@ -222,6 +235,7 @@ try {
             covers[0],
             process.platform,
             new AbortController().signal,
+            encodeScreenshotBitmap,
             captureScreen,
           );
           const totalMs = performance.now() - start;
@@ -263,6 +277,7 @@ try {
             covers[0],
             process.platform,
             controller.signal,
+            encodeScreenshotBitmap,
             captureScreen,
           );
           controller.abort();
@@ -296,6 +311,7 @@ try {
                 covers[0],
                 process.platform,
                 new AbortController().signal,
+                encodeScreenshotBitmap,
                 captureScreen,
               );
               const image = originals.fromBuffer(Buffer.from(result.file.bytes));

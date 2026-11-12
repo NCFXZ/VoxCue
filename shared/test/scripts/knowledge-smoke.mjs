@@ -45,6 +45,7 @@ try {
   await page.getByRole('button', { name: '保存', exact: true }).press('Enter');
   let base = page.getByRole('dialog', { name: '原件管理回归', exact: true });
   await base.waitFor();
+  await base.getByText('单文件最大 20 MB，每次最多 20 个；同名文件将替换旧文件').waitFor();
   await page.mouse.move(0, 0);
   const cloud = base.locator('.sync-indicator-button').first();
   assert.equal(await cloud.getAttribute('aria-expanded'), 'false');

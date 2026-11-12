@@ -14,6 +14,8 @@ export type SpeechInferenceDevice = 'cpu' | 'cuda' | 'metal';
 export interface SpeechHardware {
   cuda: boolean;
   metal?: boolean;
+  qwenCpu?: boolean;
+  qwenCpuReason?: 'unsupported-cpu' | 'unavailable';
   reason?:
     'unsupported-gpu' | 'driver-unavailable' | 'driver-outdated' | 'unavailable' | 'platform';
 }

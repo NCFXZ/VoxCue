@@ -5,7 +5,7 @@ import { useRemoteConnection } from '../stores/remoteConnection';
 import { Button } from './ui/button';
 import { ConfirmDisconnectButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
-import { Check, Copy, Link, Loader, Refresh, Settings } from './icons';
+import { Check, Copy, Link, Loader, Refresh, Settings, X } from './icons';
 
 function openPairing() {
   const remote = useRemoteConnection.getState();
@@ -43,7 +43,7 @@ export function RemoteConnectionStatus() {
   const connected = useRemoteConnection((remote) => remote.state?.status === 'connected');
   return (
     <span className="remote-connection-status" role="status">
-      {connected && <Check size={14} />}
+      {connected ? <Check size={14} /> : <X size={14} />}
       {t(connected ? '已连接' : '未连接')}
     </span>
   );

@@ -147,6 +147,31 @@ class InstallerWindow : Form {
     Invalidate();
   }
   void UpdateProgress(){progress.Value=percent;percentage.Text=percent+"%";}
+  internal enum InstallPathIssue { None, Invalid, Redirected, NotEmpty }
+  internal static InstallPathIssue CheckInstallPath(string value,bool allowExisting,out string full) {
+    full="";
+    try {
+      if(String.IsNullOrWhiteSpace(value)||value.Length<3||value[1]!=':'||value[2]!='\\')return InstallPathIssue.Invalid;
+      full=Path.GetFullPath(value).TrimEnd(Path.DirectorySeparatorChar);
+      if(full.Length<=Path.GetPathRoot(full).Length)return InstallPathIssue.Invalid;
+      for(string current=full;current!=null;current=Path.GetDirectoryName(current)) {
+        FileAttributes attributes;
+        try {attributes=File.GetAttributes(current);}
+        catch(FileNotFoundException){continue;}
+        catch(DirectoryNotFoundException){continue;}
+        if((attributes&FileAttributes.ReparsePoint)!=0)return InstallPathIssue.Redirected;
+        if((attributes&FileAttributes.Directory)==0)return InstallPathIssue.Invalid;
+      }
+      if(!allowExisting&&Directory.Exists(full)) {
+        using(var entries=Directory.EnumerateFileSystemEntries(full).GetEnumerator())
+          if(entries.MoveNext())return InstallPathIssue.NotEmpty;
+      }
+      return InstallPathIssue.None;
+    }catch{return InstallPathIssue.Invalid;}
+  }
+  void ShowPathIssue() {
+    MessageBox.Show(this,Local("Unable to use this installation location.","无法使用此安装位置。","無法使用此安裝位置。"),"VoxCue");
+  }
   void ChoosePath() {
     if(!canChangePath||phase!="ready")return;
     using(var picker=new FolderBrowserDialog()) {
@@ -156,12 +181,21 @@ class InstallerWindow : Form {
       var selected=Path.GetFullPath(picker.SelectedPath);
       if(selected.Length>Path.GetPathRoot(selected).Length)selected=selected.TrimEnd(Path.DirectorySeparatorChar);
       if(!String.Equals(Path.GetFileName(selected),"VoxCue",StringComparison.OrdinalIgnoreCase))selected=Path.Combine(selected,"VoxCue");
-      installPath=selected;locationValue.Text=selected;locationTip.SetToolTip(locationValue,selected);
+      string checkedPath;
+      var issue=CheckInstallPath(selected,false,out checkedPath);
+      if(issue!=InstallPathIssue.None){ShowPathIssue();return;}
+      installPath=checkedPath;locationValue.Text=checkedPath;locationTip.SetToolTip(locationValue,checkedPath);
     }
   }
   void ActivatePrimary() {
     if(phase=="ready") {
       if(preview){SetPhase("installing");return;}
+      if(mode=="install") {
+        string checkedPath;
+        var issue=CheckInstallPath(installPath,!canChangePath,out checkedPath);
+        if(issue!=InstallPathIssue.None){ShowPathIssue();return;}
+        installPath=checkedPath;
+      }
       if(mode=="install"&&canChangePath&&pathFile!="") {
         try{File.WriteAllText(pathFile,installPath+"\r\n",new System.Text.UnicodeEncoding(false,false));}
         catch{MessageBox.Show(this,Local("Unable to use this installation location.","无法使用此安装位置。","無法使用此安裝位置。"),"VoxCue");return;}

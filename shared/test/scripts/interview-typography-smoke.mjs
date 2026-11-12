@@ -914,7 +914,7 @@ try {
         .height,
     ),
   }));
-  assert.equal(thumb.track, 6);
+  assert.equal(thumb.track, 8);
   await slider.fill('18');
   await transparency.fill('37');
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();

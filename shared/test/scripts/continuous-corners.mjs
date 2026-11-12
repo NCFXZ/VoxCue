@@ -336,7 +336,8 @@ export async function verifyContinuousCorners(page, name) {
                   '.ui-button:not(.button-icon),.confirm-delete,.download-button,.choice-trigger,.settings-choice,.speech-select,.history-filters input[type="search"]',
                 )) ||
               element.matches(
-                '.settings-switch,.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
+                '.settings-switch,.settings-switch > span,.frosted-slider-track,.frosted-slider-track > span,' +
+                  '.floating-toolbar,.floating-brand,.floating-controls .ui-button,' +
                   '.floating-drag-handle,.interview-ready-badge,.floating-toggle.ui-button,.interview-preview-capsule,' +
                   '.floating-composer-toolbar .ui-button,.composer-tools .composer-tool,' +
                   '.composer-tools .button-icon,.profile-overview > span,.neutral-badge,.chat-source-link,.reasoning-slider-track,' +

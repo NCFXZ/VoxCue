@@ -95,6 +95,17 @@ class WindowProbe {
     if(!ReadDesktop().interactive)throw new Exception("GUI/native input requires the owner's unlocked console; locked or unknown state refused");
   }
   static Input Key(ushort key,ushort scan,uint flags) {return new Input{type=1,value=new InputUnion{keyboard=new KeyboardInput{key=key,scan=scan,flags=flags}}};}
+  static object WindowOwnership(IntPtr handle) {
+    var root=GetAncestor(handle,2);var rootOwner=GetAncestor(handle,3);
+    uint processId,rootProcessId,rootOwnerProcessId;
+    GetWindowThreadProcessId(handle,out processId);
+    GetWindowThreadProcessId(root,out rootProcessId);
+    GetWindowThreadProcessId(rootOwner,out rootOwnerProcessId);
+    var name=new StringBuilder(256);GetClassNameW(handle,name,name.Capacity);
+    return new{handle=handle.ToInt64().ToString(),processId,windowClass=name.ToString(),
+      root=root.ToInt64().ToString(),rootProcessId,
+      rootOwner=rootOwner.ToInt64().ToString(),rootOwnerProcessId};
+  }
   static void ActivateSaveDialog(IntPtr dialog) {
     RequireDesktop();
     if(!IsWindowVisible(dialog))throw new Exception("Owned save dialog is no longer visible");
@@ -105,8 +116,10 @@ class WindowProbe {
       if(GetAncestor(GetForegroundWindow(),2)==dialog)return;
       Thread.Sleep(25);
     } while(DateTime.UtcNow<deadline);
-    uint pid;GetWindowThreadProcessId(GetForegroundWindow(),out pid);
-    throw new Exception("Owned save dialog did not acquire foreground; current process="+pid);
+    var foreground=GetForegroundWindow();uint pid;GetWindowThreadProcessId(foreground,out pid);
+    throw new Exception("Owned save dialog did not acquire foreground; current process="+pid+
+      "; OWNED_SAVE_DIALOG_DIAGNOSTIC="+new JavaScriptSerializer().Serialize(new{
+        target=WindowOwnership(dialog),foreground=WindowOwnership(foreground)}));
   }
   static void TypeSavePath(IntPtr dialog,string path) {
     RequireDesktop();

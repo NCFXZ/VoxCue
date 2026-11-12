@@ -712,6 +712,7 @@ try {
         ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '快捷键', '关于与更新'],
       );
       await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+      await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
       assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);
       for (const label of ['ChatGPT', 'GitHub Copilot']) {
         const row = settings.locator('.settings-entry').filter({ hasText: label });
@@ -1146,14 +1147,62 @@ try {
       await download.waitFor();
       await main.waitForTimeout(1100);
       await download.hover();
-      await main.waitForTimeout(100);
-      const transition = await download.locator('.download-button-cancel').evaluate((element) => ({
-        opacity: Number(getComputedStyle(element).opacity),
-        duration: getComputedStyle(element).transitionDuration,
-      }));
+      const cancel = download.locator('.download-button-cancel');
+      const transition = await cancel.evaluate(
+        (element) =>
+          new Promise((resolve, reject) => {
+            const read = () => {
+              const style = getComputedStyle(element);
+              return {
+                opacity: Number(style.opacity),
+                duration: style.transitionDuration,
+                hovered: element.closest('button')?.matches(':hover') ?? false,
+              };
+            };
+            let frame, last = read();
+            const timer = setTimeout(() => {
+              cancelAnimationFrame(frame);
+              reject(Error(
+                'Download cancel did not show intermediate opacity: ' + JSON.stringify(last),
+              ));
+            }, 20000);
+            const sample = () => {
+              last = read();
+              if (last.opacity > 0 && last.opacity < 1) {
+                clearTimeout(timer);
+                resolve(last);
+                return;
+              }
+              frame = requestAnimationFrame(sample);
+            };
+            frame = requestAnimationFrame(sample);
+          }),
+      );
       assert.ok(transition.opacity > 0 && transition.opacity < 1);
       assert.ok(transition.duration.includes('0.22s'));
-      await main.waitForTimeout(180);
+      const finalOpacity = await cancel.evaluate(async (element) => {
+        let timer;
+        try {
+          await Promise.race([
+            Promise.all(
+              element
+                .getAnimations()
+                .filter((animation) => animation instanceof CSSTransition)
+                .map((animation) => animation.finished),
+            ),
+            new Promise((_, reject) => {
+              timer = setTimeout(
+                () => reject(Error('Download cancel CSS transition did not finish')),
+                20000,
+              );
+            }),
+          ]);
+          return Number(getComputedStyle(element).opacity);
+        } finally {
+          clearTimeout(timer);
+        }
+      });
+      assert.equal(finalOpacity, 1);
       if (process.argv.includes('--preview'))
         await main.screenshot({ path: path.join(directory, 'component-download-cancel.png') });
       await main.emulateMedia({ reducedMotion: 'reduce' });

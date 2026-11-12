@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { temporaryDirectory } from '../temp';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   ComponentService,
   componentLocation,
@@ -19,6 +19,7 @@ import {
 import { qwenPackage } from '../../electron/backend/components/qwen-catalog';
 import { qwenInt8Aligner } from '../../electron/backend/components/qwen-int8-catalog';
 import { qwenWindowsRuntime } from '../../electron/backend/components/qwen-windows-runtime-catalog';
+import { componentLeaseAbsent, holdComponentLease } from '../../electron/backend/components/lease';
 const Zip = require('adm-zip');
 const digest = (data: Buffer) => createHash('sha256').update(data).digest('hex');
 async function fixture() {
@@ -73,6 +74,7 @@ describe('独立组件下载与版本缓存', () => {
       true,
     );
     expect(componentLocation('/cache', windows)).not.toBe(componentLocation('/cache', qwenPackage));
+    expect(windows.previous).toEqual([{ package: qwenPackage, preserve: true }]);
   });
   it('只安装Qwen也满足语音就绪，删除最后一个语音模型才变为缺失', async () => {
     const f = await fixture();
@@ -319,6 +321,50 @@ describe('独立组件下载与版本缓存', () => {
       expect(await readdir(f.root)).toEqual([]);
     }
   });
+  it.each(['content-length', 'oversized', 'cancel'] as const)(
+    '%s失败不等待底层取消完成，释放暂存与租约后可重试',
+    async (mode) => {
+      const f = await fixture();
+      let releaseCancel!: () => void;
+      const cancel = vi.fn(() => new Promise<void>((resolve) => { releaseCancel = resolve; }));
+      const response = new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (mode === 'oversized') controller.enqueue(new Uint8Array(f.bytes.length + 1));
+        },
+        cancel,
+      }), mode === 'content-length' ? {
+        headers: { 'content-length': String(f.bytes.length + 1) },
+      } : undefined);
+      let lease!: string;
+      f.fetcher.mockImplementationOnce(async () => {
+        const [stage] = await readdir(f.root);
+        lease = JSON.parse(await readFile(path.join(f.root, stage, '.owner.json'), 'utf8')).lease;
+        return response;
+      });
+      const service = f.service();
+      const download = service.download();
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await vi.waitFor(() => expect(f.fetcher).toHaveBeenCalledOnce());
+        if (mode === 'cancel') void service.cancel();
+        await vi.waitFor(() => expect(cancel).toHaveBeenCalledOnce());
+        const result = await Promise.race([
+          download,
+          new Promise<'blocked'>((resolve) => { timer = setTimeout(() => resolve('blocked'), 500); }),
+        ]);
+        expect(result).toHaveProperty('phase', mode === 'cancel' ? 'cancelled' : 'error');
+        expect(await readdir(f.root)).toEqual([]);
+        expect(await componentLeaseAbsent(lease)).toBe(true);
+        expect((await service.download()).phase).toBe('ready');
+      } finally {
+        clearTimeout(timer);
+        // Only the test owner can release the simulated stuck transport for cleanup.
+        releaseCancel?.();
+        await download;
+        service.dispose();
+      }
+    },
+  );
   it('取消会终止流并清理暂存，随后可重试', async () => {
     const f = await fixture();
     let started!: () => void;
@@ -337,9 +383,15 @@ describe('独立组件下载与版本缓存', () => {
     const service = f.service(),
       download = service.download();
     await ready;
+    const [stage] = await readdir(f.root);
+    const owner = JSON.parse(await readFile(path.join(f.root, stage, '.owner.json'), 'utf8'));
+    expect(owner.version).toBe(2);
+    await f.service().status();
+    expect(await readdir(f.root)).toContain(stage);
     await service.cancel();
     expect((await download).phase).toBe('cancelled');
     expect(await readdir(f.root)).toEqual([]);
+    expect(await componentLeaseAbsent(owner.lease)).toBe(true);
     expect((await service.download()).phase).toBe('ready');
   });
   it('合并并发下载，已完成组件不会被其他组件的取消移除', async () => {
@@ -551,5 +603,203 @@ describe('独立组件下载与版本缓存', () => {
     const restarted = f.service();
     expect((await restarted.download('speech')).phase).toBe('error');
     expect(await readFile(original, 'utf8')).toContain('Protected original');
+  });
+  it('暂存归属使用实际IPC租约，PID复用不阻止清理，旧格式和未知内容保持保护', async () => {
+    const f = await fixture();
+    const liveLease = randomBytes(16).toString('hex');
+    const release = await holdComponentLease(liveLease);
+    const deadLease = randomBytes(16).toString('hex');
+    const stages: string[] = [];
+    for (const owner of [
+      { kind: 'voxcue-component-stage', version: 2, lease: deadLease, pid: process.pid },
+      { kind: 'voxcue-component-stage', version: 2, lease: liveLease },
+      { kind: 'voxcue-component-stage', pid: 2147483647 },
+      { kind: 'voxcue-component-stage', version: 2, lease: '../untrusted-endpoint' },
+    ]) {
+      const directory = path.join(f.root, '.stage-speech-' + randomUUID());
+      await mkdir(directory);
+      await writeFile(path.join(directory, '.owner.json'), JSON.stringify(owner));
+      await writeFile(path.join(directory, 'partial.zip'), 'owned synthetic partial download');
+      stages.push(directory);
+    }
+    try {
+      expect(await componentLeaseAbsent(liveLease)).toBe(false);
+      await f.service().status();
+      await expect(readdir(stages[0])).rejects.toMatchObject({ code: 'ENOENT' });
+      for (const directory of stages.slice(1))
+        expect(await readFile(path.join(directory, 'partial.zip'), 'utf8')).toContain('synthetic');
+    } finally {
+      await release();
+    }
+    expect(await componentLeaseAbsent(liveLease)).toBe(true);
+    await f.service().status();
+    await expect(readdir(stages[1])).rejects.toMatchObject({ code: 'ENOENT' });
+    for (const directory of stages.slice(2)) expect(await readdir(directory)).toContain('.owner.json');
+  });
+  it.each([false, true])('后继安装完成前不发布就绪，取消=%s时保留可信前驱', async (cancel) => {
+    const f = await fixture();
+    await f.service().download();
+    const next = { ...f.pkg, version: '1.0.1', previous: [{ package: f.pkg }] };
+    let reachedGuard!: () => void;
+    const prepared = new Promise<void>((resolve) => {
+      reachedGuard = resolve;
+    });
+    let unblock!: (allowed: boolean) => void;
+    const service = new ComponentService({
+      root: f.root, packages: [next], managed: true, fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(),
+      prepareRemove: async () => {
+        reachedGuard();
+        return new Promise<boolean>((resolve) => { unblock = resolve; });
+      },
+    });
+    const install = service.download();
+    await prepared;
+    expect(service.ready('speech')).toBe(false);
+    expect(() => service.require('speech')).toThrow(/尚未就绪/);
+    expect(await readFile(path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+    const canceled = cancel ? service.cancel() : undefined;
+    unblock(true);
+    await canceled;
+    expect((await install).phase).toBe('ready');
+    if (cancel) expect(await readdir(componentLocation(f.root, f.pkg))).toContain('.voxcue-component.json');
+    else await expect(readdir(componentLocation(f.root, f.pkg))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(path.join(componentLocation(f.root, next), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+  });
+  it.each(['legacy', 'baseline', 'unknown', 'damaged', 'busy', 'throw', 'no-guard', 'undeclared', 'linked', 'current'])(
+    '前驱回收保留%s缓存，不影响新安装', async (reason) => {
+      const f = await fixture();
+      await f.service().download();
+      const directory = componentLocation(f.root, f.pkg);
+      if (reason === 'legacy')
+        await writeFile(path.join(directory, '.voxcue-component.json'), JSON.stringify({ sha256: f.pkg.sha256 }));
+      if (reason === 'unknown') await writeFile(path.join(directory, 'private.txt'), 'protected');
+      if (reason === 'damaged')
+        await writeFile(path.join(directory, 'files/speech/model.onnx'), Buffer.alloc(f.data.length));
+      if (reason === 'linked') {
+        const original = path.join(f.root, 'protected-original');
+        await rename(directory, original);
+        await symlink(original, directory, process.platform === 'win32' ? 'junction' : 'dir');
+      }
+      const next: ComponentPackage = {
+        ...f.pkg, version: reason === 'current' ? f.pkg.version : '1.0.1',
+        ...(reason === 'undeclared' ? {} : {
+          previous: [{ package: f.pkg, ...(reason === 'baseline' ? { preserve: true as const } : {}) }],
+        }),
+      };
+      if (reason === 'current') await rm(directory, { recursive: true });
+      const guard = vi.fn(async () => {
+        if (reason === 'throw') throw Error('Synthetic consumer failure');
+        return reason !== 'busy';
+      });
+      const options = {
+        root: f.root, packages: [next], managed: true, fetch: f.fetcher as typeof fetch,
+        emit: vi.fn(), ...(reason === 'no-guard' ? {} : { prepareRemove: guard }),
+      };
+      const service = new ComponentService(options);
+      expect((await service.download()).phase).toBe('ready');
+      expect(await readdir(directory)).toContain('.voxcue-component.json');
+      expect((await new ComponentService(options).status()).phase).toBe('ready');
+      expect(await readdir(directory)).toContain('.voxcue-component.json');
+      if (reason === 'unknown') expect(await readFile(path.join(directory, 'private.txt'), 'utf8')).toBe('protected');
+      if (['legacy', 'baseline', 'unknown', 'damaged', 'undeclared', 'linked', 'current'].includes(reason))
+        expect(guard).not.toHaveBeenCalled();
+    },
+  );
+  it.each(['busy', 'throw'])('安装时%s跳过的可信前驱在下次启动重试，不随状态查询反复回收', async (reason) => {
+    const f = await fixture();
+    await f.service().download();
+    const next = { ...f.pkg, version: '1.0.1', previous: [{ package: f.pkg }] };
+    const guard = vi.fn(async () => true).mockImplementationOnce(async () => {
+      if (reason === 'throw') throw Error('Synthetic consumer failure');
+      return false;
+    });
+    const options = {
+      root: f.root, packages: [next], managed: true, fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(), prepareRemove: guard,
+    };
+    const installed = new ComponentService(options);
+    expect((await installed.download()).phase).toBe('ready');
+    expect(await readdir(componentLocation(f.root, f.pkg))).toContain('.voxcue-component.json');
+    await installed.status();
+    expect(guard).toHaveBeenCalledTimes(1);
+
+    const restarted = new ComponentService(options);
+    const states = await Promise.all([restarted.status(), restarted.status()]);
+    expect(states.every((state) => state.phase === 'ready')).toBe(true);
+    await expect(readdir(componentLocation(f.root, f.pkg))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(path.join(componentLocation(f.root, next), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+    await restarted.status();
+    expect(guard).toHaveBeenCalledTimes(2);
+    expect(f.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it.each(['damaged', 'missing'])('启动时后继%s不回收可信前驱', async (reason) => {
+    const f = await fixture();
+    await f.service().download();
+    const next = { ...f.pkg, version: '1.0.1', previous: [{ package: f.pkg }] };
+    const guard = vi.fn(async () => false);
+    const options = {
+      root: f.root, packages: [next], managed: true, fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(), prepareRemove: guard,
+    };
+    expect((await new ComponentService(options).download()).phase).toBe('ready');
+    const directory = componentLocation(f.root, next);
+    if (reason === 'missing') await rm(directory, { recursive: true });
+    else await writeFile(path.join(directory, 'files/speech/model.onnx'), Buffer.alloc(f.data.length));
+    guard.mockClear().mockResolvedValue(true);
+    expect((await new ComponentService(options).status()).phase).toBe('needed');
+    expect(guard).not.toHaveBeenCalled();
+    expect(await readFile(path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+  });
+  it.each(['cancel', 'dispose'] as const)('启动回收等待消费者退出时%s保留前驱，完成前不允许使用后继', async (action) => {
+    const f = await fixture();
+    await f.service().download();
+    const next = { ...f.pkg, version: '1.0.1', previous: [{ package: f.pkg }] };
+    const options = {
+      root: f.root, packages: [next], managed: true, fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(), prepareRemove: async () => false,
+    };
+    expect((await new ComponentService(options).download()).phase).toBe('ready');
+    let reachedGuard!: () => void;
+    const prepared = new Promise<void>((resolve) => { reachedGuard = resolve; });
+    let unblock!: (allowed: boolean) => void;
+    const service = new ComponentService({
+      ...options,
+      prepareRemove: async () => {
+        reachedGuard();
+        return new Promise<boolean>((resolve) => { unblock = resolve; });
+      },
+    });
+    const checking = service.status();
+    await prepared;
+    expect(service.ready('speech')).toBe(false);
+    expect(() => service.require('speech')).toThrow(/尚未就绪/);
+    await service[action]();
+    unblock(true);
+    await checking;
+    expect(await readFile(path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+    expect(await readFile(path.join(componentLocation(f.root, next), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+  });
+  it('新包校验失败不回收已安装的可信前驱', async () => {
+    const f = await fixture();
+    await f.service().download();
+    f.fetcher.mockImplementationOnce(async () => new Response(new Uint8Array(f.bytes.length)));
+    const guard = vi.fn(async () => true);
+    const next = { ...f.pkg, version: '1.0.1', previous: [{ package: f.pkg }] };
+    const service = new ComponentService({
+      root: f.root, packages: [next], managed: true, fetch: f.fetcher as typeof fetch,
+      emit: vi.fn(), prepareRemove: guard,
+    });
+    expect((await service.download()).phase).toBe('error');
+    expect(await readFile(path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx')))
+      .toEqual(f.data);
+    await expect(readdir(componentLocation(f.root, next))).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(guard).not.toHaveBeenCalled();
   });
 });

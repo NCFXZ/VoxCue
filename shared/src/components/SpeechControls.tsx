@@ -170,7 +170,7 @@ export function SpeechControls({
                     devicesLoading || (!microphone && transcription),
                     microphone ? t('默认麦克风') : t('默认播放设备'),
                     !microphone && transcription
-                      ? t('设置为“仅转录”时不可用。')
+                      ? t('设置为“现场面试”时不可用。')
                       : devicesLoading
                         ? t('正在读取设备…')
                         : microphone && enabled

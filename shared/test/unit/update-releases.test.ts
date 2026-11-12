@@ -238,4 +238,26 @@ describe('按平台独立选择正式更新', () => {
     await expect(pending).rejects.toThrow();
     expect(cancelled).toHaveBeenCalled();
   });
+  it.each(['http', 'size'] as const)('拒绝 %s 响应不等待永不完成的传输取消', async (failure) => {
+    const cancelled = vi.fn(() => new Promise<void>(() => {}));
+    const response = new Response(
+      new ReadableStream<Uint8Array>({
+        start(controller) {
+          if (failure === 'size') controller.enqueue(new Uint8Array(128 * 1024 + 1));
+        },
+        cancel: cancelled,
+      }),
+      { status: failure === 'http' ? 403 : 200 },
+    );
+    const fixture = provider('windows-x64', async (input) =>
+      new URL(String(input)).hostname === 'api.github.com'
+        ? new Response(JSON.stringify([release('0.1.2')]))
+        : response,
+    );
+    await expect(fixture.instance.getLatestVersion()).rejects.toThrow(
+      failure === 'http' ? 'Release request failed' : 'exceeded size limit',
+    );
+    expect(cancelled).toHaveBeenCalledOnce();
+    expect(response.body!.locked).toBe(false);
+  });
 });

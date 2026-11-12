@@ -118,6 +118,26 @@ const accepted = (body: any, ids = body.events.map((e: TelemetryEvent) => e.id))
   Response.json({ schemaVersion: 2, acceptedIds: ids, rejected: [], healthAccepted: true });
 
 describe('client statistics', () => {
+  it.each(['negotiation', 'upload'])(
+    'HTTP rejection during %s preserves events and backoff without waiting for cancellation',
+    async (stage) => {
+      const cancel = vi.fn(() => new Promise<void>(() => {}));
+      const transport = vi.fn(async (url) =>
+        String(url).endsWith('/capabilities') && stage === 'upload'
+          ? capabilities()
+          : new Response(new ReadableStream({ cancel }), { status: 503 }),
+      );
+      const f = await fixture(undefined, undefined, true, { fetcher: transport });
+      f.service.activity('history_view');
+      const before = (await f.saved()).events;
+      await f.service.flush();
+      const saved = await f.saved();
+      expect(saved.events).toEqual(before);
+      expect(saved.nextAttemptAt).toBeGreaterThan(f.clock.wall);
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(transport).toHaveBeenCalledTimes(stage === 'upload' ? 2 : 1);
+    },
+  );
   it.each([131071, 131072, 131073])(
     'requires the exact negotiated %i-byte body ceiling',
     async (bodyBytes) => {

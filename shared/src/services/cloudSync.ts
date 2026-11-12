@@ -149,6 +149,8 @@ export class CloudSyncEngine {
   >();
   private storage?: CloudStorage;
   private stopped = false;
+  private emitTimer?: ReturnType<typeof setTimeout>;
+  private emitPending = false;
   private running?: Promise<void>;
   private controlPending = false;
   private controlActive = false;
@@ -186,8 +188,17 @@ export class CloudSyncEngine {
     if (this.stopped) throw new SyncFailure('同步已停止。');
     if (this.controlPending && !this.controlActive) throw new SyncYield();
   }
-  private emit() {
+  private emit(immediate = false) {
     if (this.stopped) return;
+    this.emitPending = true;
+    if (immediate) this.publish();
+    else this.emitTimer ??= setTimeout(() => this.publish(), 16);
+  }
+  private publish(stopping = false) {
+    clearTimeout(this.emitTimer);
+    this.emitTimer = undefined;
+    if (!this.emitPending || (this.stopped && !stopping)) return;
+    this.emitPending = false;
     const marks = Object.fromEntries(
       Object.entries(this.marks).map(([key, mark]) => [
         key,
@@ -206,6 +217,14 @@ export class CloudSyncEngine {
       'synced',
     ];
     const keys = this.allKeys();
+    const childrenByParent = new Map<string, string[]>();
+    for (const key of keys) {
+      const parent = this.parentKey(key);
+      if (!parent) continue;
+      const children = childrenByParent.get(parent);
+      if (children) children.push(key);
+      else childrenByParent.set(parent, [key]);
+    }
     for (const key of keys) {
       if (this.saved.baselines[key]?.suppressed) {
         marks[key] = {
@@ -220,8 +239,10 @@ export class CloudSyncEngine {
       }
       if (!key.startsWith('base:') && key !== 'profile:main' && !key.startsWith('record:'))
         continue;
-      const children = [...keys].filter((child) => this.parentKey(child) === key);
-      children.push(...(this.sources.get(key)?.dependencies ?? []));
+      const children = [
+        ...(childrenByParent.get(key) ?? []),
+        ...(this.sources.get(key)?.dependencies ?? []),
+      ];
       const states = [
         this.marks[key]?.status || 'unsynced',
         ...children.map((k) => this.marks[k]?.status || 'unsynced'),
@@ -238,13 +259,13 @@ export class CloudSyncEngine {
       preferences: structuredClone(this.saved.preferences),
       marks,
       storage: this.storage,
-      busy: !!this.running,
+      busy: !this.stopped && !!this.running,
       error: this.error,
     });
   }
   private mark(key: string, status: SyncStatus, error?: string) {
     this.marks[key] = { status, ...(error ? { error } : {}) };
-    this.emit();
+    this.emit(status === 'error' || status === 'conflict' || !!error);
   }
   private async persist() {
     this.guard();
@@ -256,17 +277,29 @@ export class CloudSyncEngine {
     if (JSON.stringify(next.preferences) !== JSON.stringify(preferences))
       throw Error('同步设置无效。');
     this.saved.preferences = next.preferences;
-    this.emit();
+    // Controls must see the new preferences before another same-frame edit merges them.
+    this.emit(true);
     await this.persist();
-    this.emit();
+    this.emit(true);
     void this.request();
   }
   stop() {
+    if (this.stopped) return;
     this.stopped = true;
     this.pending = false;
+    this.activeBase = undefined;
+    this.deleting.clear();
+    this.pausing.clear();
+    for (const [key, mark] of Object.entries(this.marks))
+      if (['syncing', 'deleting', 'pausing'].includes(mark.status))
+        this.marks[key] = { ...mark, status: 'unsynced' };
+    this.emitPending = true;
+    this.publish(true);
   }
+  /** Wait for the current worker and publish its latest view before returning. */
   async idle() {
     await this.running;
+    this.publish();
   }
   dirty(kind: SyncKind) {
     this.dataEpoch[kind]++;
@@ -276,6 +309,7 @@ export class CloudSyncEngine {
         this.marks[key] = { status: 'unsynced' };
     this.emit();
   }
+  /** Coalesced worker promises settle after their terminal view is published. */
   request(force = false): Promise<void> {
     if (this.stopped) return Promise.resolve();
     if (force) this.failed.clear();
@@ -290,16 +324,18 @@ export class CloudSyncEngine {
               this.error = undefined;
               await this.cycle();
             } catch (error) {
-              if (!this.stopped && !(error instanceof SyncYield))
+              if (!this.stopped && !(error instanceof SyncYield)) {
                 this.error = error instanceof Error ? error.message : '同步失败。';
+                this.emit(true);
+              }
             }
           }
         })
         .finally(() => {
           this.running = undefined;
-          this.emit();
+          this.emit(true);
         });
-      this.emit();
+      this.emit(true);
     }
     return this.running;
   }
@@ -858,7 +894,7 @@ export class CloudSyncEngine {
       this.controlActive = false;
       this.controlPending = false;
       this.running = undefined;
-      this.emit();
+      this.emit(true);
       if (this.pending && !this.stopped) void this.request();
     }
   }

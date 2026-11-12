@@ -4,6 +4,7 @@ import path from 'node:path';
 import { emptyUsage, type AppUsage, type TokenUsage } from '../../contracts/chat';
 export class UsageLedger {
   private queue: Promise<unknown> = Promise.resolve();
+  private closed = false;
   constructor(private directory: string) {}
   private file(account: string) {
     return path.join(this.directory, `${createHash('sha256').update(account).digest('hex')}.json`);
@@ -28,10 +29,16 @@ export class UsageLedger {
     }
   }
   async get(account: string) {
+    if (this.closed) throw Error('Usage ledger is closed');
     await this.queue;
     return (await this.read(account)).usage;
   }
+  async dispose() {
+    this.closed = true;
+    await this.queue;
+  }
   reset(account: string) {
+    if (this.closed) return Promise.reject(Error('Usage ledger is closed'));
     const operation = this.queue.then(async () => {
       const record = await this.read(account);
       const usage = emptyUsage();
@@ -47,6 +54,7 @@ export class UsageLedger {
     return operation;
   }
   add(account: string, id: string, tokens: TokenUsage) {
+    if (this.closed) return Promise.reject(Error('Usage ledger is closed'));
     const operation = this.queue.then(async () => {
       const record = await this.read(account);
       if (record.ids.includes(id)) return;

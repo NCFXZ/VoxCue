@@ -9,7 +9,9 @@ import assert from 'node:assert/strict';
 const appData = path.join(testRoot, 'application-data');
 const legacy = path.join(appData, 'ai-interview-copilot');
 const destination = path.join(appData, 'VoxCue');
+const bootstrap = path.join(testRoot, 'migration-bootstrap');
 await mkdir(legacy, { recursive: true });
+await mkdir(bootstrap);
 const baseline = path.join(testRoot, 'baseline.cjs');
 const next = path.join(testRoot, 'next.cjs');
 const entry = path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js');
@@ -43,6 +45,11 @@ const {app}=require('electron');
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
 const getPath=app.getPath.bind(app);
 app.getPath=name=>name==='appData'?${JSON.stringify(appData)}:getPath(name);
+app.setPath('userData',${JSON.stringify(bootstrap)});
+app.setPath('sessionData',${JSON.stringify(bootstrap)});
+// Keep every pre-import path owned, then remove the launcher's override so main
+// exercises the production migration rather than selecting an empty test profile.
+delete process.env.COPILOT_TEST_USER_DATA;
 // Only the catalog transport is synthetic; encrypted storage/auth session are unchanged.
 const {ChatGPTService}=require(${JSON.stringify(chat)});
 ChatGPTService.prototype.models=async()=>[{id:'fixture-model',label:'Fixture',description:'',provider:{id:'chatgpt',name:'ChatGPT',dataRecipient:'OpenAI'},reasoningEfforts:['low']}];
@@ -54,6 +61,17 @@ const env = { ...process.env, VITE_DEV_SERVER_URL: '' };
 delete env.COPILOT_TEST_USER_DATA;
 delete env.ELECTRON_RUN_AS_NODE;
 const launch = (fixture) => electron.launch({ args: [fixture], env });
+async function assertMigrationEntry(app) {
+  assert.deepEqual(
+    await app.evaluate(({ app }) => ({
+      fixtureEnabled: !!process.env.COPILOT_TEST_USER_DATA,
+      appData: app.getPath('appData'),
+      userData: app.getPath('userData'),
+      sessionData: app.getPath('sessionData'),
+    })),
+    { fixtureEnabled: false, appData, userData: destination, sessionData: destination },
+  );
+}
 let app;
 try {
   app = await launch(baseline);
@@ -172,6 +190,7 @@ try {
     );
   }
   app = await launch(next);
+  await assertMigrationEntry(app);
   page = await app.firstWindow();
   await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(
@@ -246,6 +265,7 @@ try {
   await closeUiApp(app);
   app = undefined;
   app = await launch(next);
+  await assertMigrationEntry(app);
   page = await app.firstWindow();
   await installUiAccount(app);
   page = await connectUiAccount(app, page);

@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import { REMOTE_PROTOCOL_VERSION } from '../../electron/contracts/remoteConnection';
 import type {
   RemoteClientMessage,
   RemoteInterviewSnapshot,
@@ -22,6 +23,7 @@ class Socket {
   onmessage: ((event: { data: string }) => void) | null = null;
   onclose: (() => void) | null = null;
   onerror: (() => void) | null = null;
+  deliveries = 0;
   constructor(readonly url: string) {
     Socket.all.push(this);
   }
@@ -48,6 +50,12 @@ class Socket {
     }
   }
   receive(value: unknown) {
+    if (
+      value &&
+      typeof value === 'object' &&
+      ['paired', 'snapshot'].includes((value as { type?: string }).type ?? '')
+    )
+      value = { deliveryId: `synthetic-delivery-${++this.deliveries}`, ...value };
     this.onmessage?.({ data: JSON.stringify(value) });
   }
   close() {
@@ -86,7 +94,7 @@ const latest = () => Socket.all.at(-1)!;
 const paired = (socket: Socket, value: RemoteInterviewSnapshot | null = snapshot(), sequence = 1) =>
   socket.receive({
     type: 'paired',
-    protocolVersion: 1,
+    protocolVersion: REMOTE_PROTOCOL_VERSION,
     token: resumeToken,
     sequence,
     snapshot: value,
@@ -113,7 +121,7 @@ beforeEach(() => {
     ok: true,
     status: 200,
     json: async () => ({
-      protocolVersion: 1,
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
       id: pendingId,
       code: '123456',
       expiresAt: Date.now() + 120_000,
@@ -199,7 +207,11 @@ it('discards offline edits when the PC snapshot resumes without replaying a comm
   await vi.advanceTimersByTimeAsync(1000);
   const restored = latest();
   restored.open();
-  expect(restored.sent[0]).toEqual({ type: 'resume', protocolVersion: 1, token: resumeToken });
+  expect(restored.sent[0]).toEqual({
+    type: 'resume',
+    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    token: resumeToken,
+  });
   paired(restored, snapshot({ revision: 2 }), 2);
   expect(
     restored.sent.filter(
@@ -251,7 +263,14 @@ it('resumes with a fresh snapshot and resolves the previous request before unloc
   await vi.advanceTimersByTimeAsync(1000);
   const restored = latest();
   restored.open();
-  paired(restored, snapshot({ revision: 3 }), 3);
+  paired(
+    restored,
+    snapshot({
+      revision: 3,
+      inputDraft: { text: '', revision: 3, manual: false },
+    }),
+    3,
+  );
   expect(controller.getState().status).toBe('syncing');
   expect(restored.sent.at(-1)).toEqual({ type: 'query-result', requestId: sent.command.requestId });
   staleReceive({
@@ -283,7 +302,11 @@ it('restores approval from sessionStorage without issuing the one-use POST again
   expect(refreshed.getState().canResume).toBe(true);
   await refreshed.start();
   latest().open();
-  expect(latest().sent[0]).toEqual({ type: 'authenticate', protocolVersion: 1, pendingId });
+  expect(latest().sent[0]).toEqual({
+    type: 'authenticate',
+    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    pendingId,
+  });
   expect(fetchPair).toHaveBeenCalledOnce();
   latest().receive({ type: 'pending', id: pendingId, code: '123456' });
   await vi.advanceTimersByTimeAsync(120_001);
@@ -423,8 +446,8 @@ it('lets a new QR replace stored authorization and refuses public addresses', as
   expect(fetchPair).toHaveBeenCalledTimes(calls);
 });
 
-it('takes a replacement QR during same-tab hash navigation without reusing old authorization', async () => {
-  const { controller, socket } = await connect();
+it('takes a replacement QR during same-tab hash navigation without reusing old authorization or epochs', async () => {
+  const { controller, socket } = await connect(snapshot({ sessionEpoch: 1000 }));
   controller.setDraft('Keep the local edit');
   const request = controller.sendQuestion();
   await vi.advanceTimersByTimeAsync(0);
@@ -443,6 +466,15 @@ it('takes a replacement QR during same-tab hash navigation without reusing old a
   });
   expect(storage.size).toBe(0);
   expect(socket.readyState).toBe(3);
+  await controller.start();
+  const replacement = latest();
+  replacement.open();
+  replacement.receive({ type: 'pending', id: pendingId, code: '123456' });
+  paired(replacement, snapshot({ sessionId: 'new-session', sessionEpoch: 1 }));
+  expect(controller.getState().snapshot).toMatchObject({
+    sessionId: 'new-session',
+    sessionEpoch: 1,
+  });
   await controller.start();
   expect(fetchPair).toHaveBeenCalledTimes(2);
   expect(JSON.parse(fetchPair.mock.calls[1][1].body).token).toBe('n'.repeat(43));
@@ -477,8 +509,69 @@ it('does not let a command ACK unlock a foreground sync that has not received it
   socket.receive({ type: 'result', result: { requestId: sent.command.requestId, ok: true } });
   await request;
   expect(controller.getState().status).toBe('syncing');
-  socket.receive({ type: 'snapshot', sequence: 1, snapshot: snapshot() });
+  socket.receive({
+    type: 'snapshot',
+    sequence: 1,
+    snapshot: snapshot({ inputDraft: { text: '', revision: 3, manual: false } }),
+  });
   expect(controller.getState().status).toBe('ready');
+});
+
+it('acknowledges snapshot processing only after applying state, including intentionally discarded stale frames', async () => {
+  const { controller, socket } = await connect();
+  const deliveryId = 'synthetic-current-delivery';
+  let observedApplied = false;
+  const remove = controller.subscribe(() => {
+    if (controller.getState().snapshot?.inputDraft.text === 'Applied canonical text') {
+      observedApplied = true;
+      expect(
+        socket.sent.some(
+          (event) => event.type === 'snapshot-applied' && event.deliveryId === deliveryId,
+        ),
+      ).toBe(false);
+    }
+  });
+  socket.receive({
+    type: 'snapshot',
+    sequence: 2,
+    deliveryId,
+    snapshot: snapshot({
+      revision: 2,
+      inputDraft: { text: 'Applied canonical text', revision: 2, manual: true },
+    }),
+  });
+  remove();
+  expect(observedApplied).toBe(true);
+  expect(socket.sent.at(-1)).toEqual({ type: 'snapshot-applied', sequence: 2, deliveryId });
+  socket.receive({
+    type: 'snapshot',
+    sequence: 1,
+    deliveryId: 'synthetic-stale-delivery',
+    snapshot: snapshot(),
+  });
+  expect(controller.getState().draft).toBe('Applied canonical text');
+  expect(socket.sent.at(-1)).toEqual({
+    type: 'snapshot-applied',
+    sequence: 1,
+    deliveryId: 'synthetic-stale-delivery',
+  });
+});
+
+it('rejects the previous wire protocol without acknowledging an incompatible initial snapshot', async () => {
+  const controller = create();
+  await controller.start();
+  const socket = latest();
+  socket.open();
+  socket.receive({ type: 'pending', id: pendingId, code: '123456' });
+  socket.receive({
+    type: 'paired',
+    protocolVersion: REMOTE_PROTOCOL_VERSION - 1,
+    token: resumeToken,
+    sequence: 1,
+    snapshot: snapshot(),
+  });
+  expect(controller.getState()).toMatchObject({ errorCode: 'protocol-mismatch', connected: false });
+  expect(socket.sent.some((event) => event.type === 'snapshot-applied')).toBe(false);
 });
 
 it('recovers a stale foreground socket after the sync deadline without replaying actions', async () => {
@@ -489,7 +582,11 @@ it('recovers a stale foreground socket after the sync deadline without replaying
   expect(socket.readyState).toBe(3);
   await vi.advanceTimersByTimeAsync(1000);
   latest().open();
-  expect(latest().sent[0]).toEqual({ type: 'resume', protocolVersion: 1, token: resumeToken });
+  expect(latest().sent[0]).toEqual({
+    type: 'resume',
+    protocolVersion: REMOTE_PROTOCOL_VERSION,
+    token: resumeToken,
+  });
   expect(
     latest().sent.filter(
       (entry) => entry.type === 'command' && entry.command.action !== 'set-draft',
@@ -769,6 +866,26 @@ it('drops unsynced old-epoch input even when the session ID is unchanged', async
   await vi.advanceTimersByTimeAsync(1000);
   expect(socket.sent.filter((e) => e.type === 'command')).toHaveLength(0);
 });
+
+it.each([
+  { sessionId: 'new-session', sessionEpoch: 1 },
+  { sessionId: 'session-A', sessionEpoch: 2 },
+])(
+  'accepts a new scene with a lower draft revision after acknowledging an old-scene edit: %o',
+  async (scene) => {
+    const { controller, socket } = await connect();
+    controller.setDraft('Acknowledged old-scene input');
+    await vi.advanceTimersByTimeAsync(400);
+    expect(controller.getState()).toMatchObject({ draftDirty: false, draftSyncing: false });
+    const commands = socket.sent.filter((event) => event.type === 'command').length;
+    expect(commands).toBe(1);
+    socket.receive({ type: 'snapshot', sequence: 2, snapshot: snapshot(scene) });
+    expect(controller.getState()).toMatchObject({ draft: '', draftDirty: false, status: 'ready' });
+    expect(controller.getState().snapshot).toMatchObject({ ...scene, inputDraft: { revision: 1 } });
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(socket.sent.filter((event) => event.type === 'command')).toHaveLength(commands);
+  },
+);
 
 it('does not restore residual text into an empty PC draft after scanning a new authorization QR', async () => {
   const { controller } = await connect(

@@ -1,7 +1,8 @@
 import { safeStorage, app } from 'electron';
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
+import { atomicFile } from '../atomicFile';
 import type { CredentialRecord, AuthStorage } from './service';
 export interface CredentialEncryption {
   encrypt(value: string): Buffer | Promise<Buffer>;
@@ -28,9 +29,7 @@ export function createAuthStorage(
   const credentials = path.join(directory, 'credentials.bin');
   async function atomicWrite(target: string, value: string | Buffer) {
     await mkdir(directory, { recursive: true });
-    const temporary = `${target}.${randomUUID()}.tmp`;
-    await writeFile(temporary, value, { mode: 0o600 });
-    await rename(temporary, target);
+    await atomicFile(target, value);
   }
   return {
     async hostId() {

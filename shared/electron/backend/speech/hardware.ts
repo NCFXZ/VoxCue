@@ -1,10 +1,12 @@
 import { execFile } from 'node:child_process';
+import path from 'node:path';
 import type { SpeechHardware, SpeechOptions } from '../../contracts/speech';
 import { cudaUnavailableMessage, speechSelection } from '../../contracts/speechSettings';
 
 /** Driver/device inventory only: no model download, audio permission or capture. */
 export class SpeechHardwareProbe {
   private pending?: Promise<SpeechHardware>;
+  private cpuPending?: Promise<Pick<SpeechHardware, 'qwenCpu' | 'qwenCpuReason'>>;
   constructor(
     private helper?: string,
     private platform: NodeJS.Platform = process.platform,
@@ -41,7 +43,7 @@ export class SpeechHardwareProbe {
     if (this.platform !== 'win32') return Promise.resolve({ cuda: false, reason: 'platform' });
     if (!this.helper) return Promise.resolve({ cuda: false, reason: 'unavailable' });
     if (this.pending) return this.pending;
-    const pending = new Promise<SpeechHardware>((resolve) => {
+    const cuda = new Promise<SpeechHardware>((resolve) => {
       execFile(
         this.helper!,
         ['cuda-check'],
@@ -65,21 +67,66 @@ export class SpeechHardwareProbe {
         },
       );
     });
+    const pending = Promise.all([cuda, this.cpu()]).then(([gpu, cpu]) => ({ ...gpu, ...cpu }));
     this.pending = pending;
     void pending.finally(() => {
       if (this.pending === pending) this.pending = undefined;
     });
     return pending;
   }
+  private cpu(): Promise<Pick<SpeechHardware, 'qwenCpu' | 'qwenCpuReason'>> {
+    if (this.cpuPending) return this.cpuPending;
+    const pending = new Promise<Pick<SpeechHardware, 'qwenCpu' | 'qwenCpuReason'>>((resolve) => {
+      if (!this.helper) {
+        resolve({ qwenCpu: false, qwenCpuReason: 'unavailable' });
+        return;
+      }
+      execFile(
+        path.join(path.dirname(this.helper), 'VoxCue.Cpu.exe'),
+        [],
+        { windowsHide: true, timeout: 5000, maxBuffer: 4096 },
+        (error, stdout) => {
+          try {
+            const value = JSON.parse(stdout);
+            if (!error && typeof value.qwenCpu === 'boolean') {
+              resolve(value.qwenCpu
+                ? { qwenCpu: true }
+                : { qwenCpu: false, qwenCpuReason: 'unsupported-cpu' });
+              return;
+            }
+          } catch {
+            /* The owned helper must explicitly confirm both CPU features. */
+          }
+          resolve({ qwenCpu: false, qwenCpuReason: 'unavailable' });
+        },
+      );
+    });
+    this.cpuPending = pending;
+    void pending.finally(() => {
+      if (this.cpuPending === pending) this.cpuPending = undefined;
+    });
+    return pending;
+  }
   async require(options: SpeechOptions) {
     const selected = speechSelection(options);
-    if (selected.speechModel !== 'qwen' || selected.inferenceDevice === 'cpu') return;
+    if (selected.speechModel !== 'qwen') return;
     if (selected.inferenceDevice === 'metal') {
       if (this.platform !== 'darwin' || !(await this.read()).metal)
         throw Error('Metal 推理设备不可用，请选择 CPU。');
       return;
     }
-    const hardware = await this.read();
+    let hardware: SpeechHardware | undefined;
+    if (this.platform === 'win32') {
+      hardware = selected.inferenceDevice === 'cpu'
+        ? { cuda: false, ...await this.cpu() }
+        : await this.read();
+      if (!hardware.qwenCpu)
+        throw Error(hardware.qwenCpuReason === 'unsupported-cpu'
+          ? 'Qwen 需要支持 AVX2 和 FMA 的处理器，请改用 Paraformer。'
+          : '无法确认 Qwen 所需的处理器指令集，请改用 Paraformer。');
+    }
+    if (selected.inferenceDevice === 'cpu') return;
+    hardware ??= await this.read();
     if (!hardware.cuda) throw Error(cudaUnavailableMessage(hardware));
   }
 }

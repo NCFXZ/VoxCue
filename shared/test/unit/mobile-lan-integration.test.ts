@@ -13,8 +13,11 @@ let service: RemoteConnectionService | undefined;
 let mobile: MobileConnection | undefined;
 let releaseBridge: (() => void) | undefined;
 let finishProvider: (() => void) | undefined;
+let releaseLatestDraft: (() => void) | undefined;
 const sockets: WebSocket[] = [];
 afterEach(async () => {
+  releaseLatestDraft?.();
+  releaseLatestDraft = undefined;
   mobile?.dispose();
   releaseBridge?.();
   useInterview.getState().reset();
@@ -34,6 +37,10 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
   let dropAskReply: (() => void) | undefined;
   const holdAskReply = new Promise<void>((resolve) => {
     dropAskReply = resolve;
+  });
+  let delayNextDraftSnapshot = false;
+  const heldDraftSnapshot = new Promise<void>((resolve) => {
+    releaseLatestDraft = resolve;
   });
   const execute = vi.fn(async (command: RemoteCommand, signal: AbortSignal) => {
     const result = await coordinator.dispatch(command, signal);
@@ -62,11 +69,15 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
     setItem: (key: string, value: string) => values.set(key, value),
     removeItem: (key: string) => values.delete(key),
   };
+  let observeNextSocketOpen: (() => void) | undefined;
   class BrowserSocket extends WebSocket {
     constructor(url: string) {
       super(url, { origin });
       sockets.push(this);
       this.on('error', () => {});
+      const opened = observeNextSocketOpen;
+      observeNextSocketOpen = undefined;
+      if (opened) this.once('open', opened);
     }
   }
   const browserDocument = Object.assign(new EventTarget(), { visibilityState: 'visible' });
@@ -110,6 +121,8 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
         inputState,
       })),
       publishRemoteInterview: vi.fn(async (snapshot) => {
+        if (delayNextDraftSnapshot && snapshot.inputDraft.text === 'Next shared phone draft')
+          await heldDraftSnapshot;
         if (coordinator.publish(snapshot)) service!.updateSnapshot(snapshot);
       }),
       onRemoteCommand: (callback: (command: RemoteCommand) => void) => {
@@ -154,9 +167,10 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
   await vi.waitFor(() => expect(mobile!.getState().status).toBe('approval'));
   expect(mobile.getState().snapshot).toBeNull();
   expect(mobile.getState().pairingCode).toBe(service.state().pending?.code);
-  await vi.waitFor(() => expect(browser.desktop.publishRemoteInterview).toHaveBeenCalled());
+  expect(browser.desktop.publishRemoteInterview).not.toHaveBeenCalled();
   service.approve(service.state().pending!.id);
   await vi.waitFor(() => expect(mobile!.getState().status).toBe('ready'));
+  expect(browser.desktop.publishRemoteInterview).toHaveBeenCalled();
   expect(mobile.getState().snapshot?.transcripts[0].text).toBe('Synthetic transcript');
   expect(mobile.getState().draft).toBe('Desktop transcription candidate');
   const scroll = vi.fn();
@@ -185,6 +199,7 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
   expect(useInterview.getState().answers[0].question).toBe('Phone shared question');
   await vi.waitFor(() => expect(mobile!.getState().snapshot?.inputDraft.text).toBe(''));
   expect(mobile.getState().pendingAction).toBe('sendQuestion');
+  delayNextDraftSnapshot = true;
   mobile.setDraft('Next shared phone draft');
   await vi.waitFor(() =>
     expect(useInterview.getState().inputDraft).toBe('Next shared phone draft'),
@@ -193,8 +208,20 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
     expect(mobile!.getState()).toMatchObject({ draftDirty: false, draftSyncing: false }),
   );
   const nextDraftRevision = useInterview.getState().inputDraftRevision;
+  const resumedSocketOpened = new Promise<void>((resolve) => {
+    observeNextSocketOpen = resolve;
+  });
   dropAskReply!();
   await vi.waitFor(() => expect(mobile!.getState().connected).toBe(false));
+  // The real first retry waits 1000 ms. Start the existing protocol/processing
+  // deadline after TCP opens, rather than spending it on that deliberate backoff.
+  await resumedSocketOpened;
+  await vi.waitFor(() => expect(mobile!.getState().connected).toBe(true));
+  // The draft ACK is newer than the deliberately delayed cached snapshot.
+  // Resume must keep that acknowledged text while obtaining a current snapshot.
+  expect(mobile.getState().status).toBe('syncing');
+  expect(mobile.getState().draft).toBe('Next shared phone draft');
+  releaseLatestDraft!();
   await sent;
   expect(execute.mock.calls.filter(([command]) => command.action === 'ask')).toHaveLength(1);
   expect(mobile.getState().draft).toBe('Next shared phone draft');

@@ -11,7 +11,24 @@ import {
   type ShortcutAction,
 } from '../../electron/contracts/shortcuts';
 import { Button } from './ui/button';
-import { Refresh } from './icons';
+import { Check, Refresh, X } from './icons';
+
+export function ShortcutAvailabilityStatus() {
+  const { state, loading, error } = useShortcuts();
+  const available =
+    !loading &&
+    !error &&
+    !state.error &&
+    !state.capturing &&
+    !state.conflicts.length &&
+    shortcutActions.every((action) => !!state.bindings[action]);
+  return (
+    <span className="interview-access-status" role="status">
+      {available ? <Check size={14} /> : <X size={14} />}
+      {t(available ? '快捷键可用' : '部分快捷键不可用')}
+    </span>
+  );
+}
 
 export function ShortcutSettings() {
   const mac = window.desktop?.platform === 'macos';

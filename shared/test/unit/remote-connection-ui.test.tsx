@@ -54,6 +54,8 @@ it('shows a device capsule only for an established connection and keeps the star
   expect(renderToStaticMarkup(<RemoteConnectionIndicator />)).toBe('');
   const disconnected = renderToStaticMarkup(<RemoteConnectionStatus />);
   expect(disconnected).toContain('未连接');
+  expect(disconnected).toContain('<svg');
+  expect(disconnected.indexOf('</svg>')).toBeLessThan(disconnected.indexOf('未连接'));
   expect(disconnected).not.toContain('<button');
   useRemoteConnection.setState({ state: state({ status: 'connected', clientName: 'My phone' }) });
   const badge = renderToStaticMarkup(<RemoteConnectionIndicator />);

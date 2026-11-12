@@ -114,10 +114,10 @@ it('keeps device headings primary, removes their icons, and shows the disabled r
     'disabled=""',
   );
   expect(transcription).toMatch(
-    /aria-label="播放设备"[^>]*><span[^>]*>设置为“仅转录”时不可用。<\/span>/,
+    /aria-label="播放设备"[^>]*><span[^>]*>设置为“现场面试”时不可用。<\/span>/,
   );
   expect(transcription).not.toContain('<small class="interview-input-unavailable">');
-  expect(remote).not.toContain('设置为“仅转录”时不可用。');
+  expect(remote).not.toContain('设置为“现场面试”时不可用。');
   expect(transcription).toContain('Saved microphone');
   const headings = [
     ...transcription.matchAll(/class="speech-device-heading speech-setting-label">(.*?)<\/div>/g),

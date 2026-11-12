@@ -5,7 +5,27 @@ import {
   documentAccept,
   validateFiles,
   previewDocument,
+  type LocalDocument,
 } from '../../../../shared/src/services/knowledge';
+async function legacyBackups(seed: LocalDocument[] = []) {
+  const db = await new Promise<IDBDatabase>((resolve) => {
+    const request = indexedDB.open('voxcue-original-backups', 1);
+    request.onupgradeneeded = () =>
+      request.result.createObjectStore('versions', { keyPath: 'backupId' });
+    request.onsuccess = () => resolve(request.result);
+  });
+  const values = await new Promise<any[]>((resolve, reject) => {
+    const tx = db.transaction('versions', 'readwrite');
+    const store = tx.objectStore('versions');
+    for (const doc of seed)
+      store.add({ ...doc, backupId: crypto.randomUUID(), backedUpAt: Date.now() });
+    const request = store.getAll();
+    tx.oncomplete = () => resolve(request.result);
+    tx.onerror = tx.onabort = () => reject(tx.error);
+  });
+  db.close();
+  return values;
+}
 afterEach(() => vi.unstubAllGlobals());
 describe('本地知识库', () => {
   it('文档保存、文本预览和删除独立于桌面服务，Office 原件保留', async () => {
@@ -47,16 +67,22 @@ describe('本地知识库', () => {
     ).rejects.toThrow();
     expect(await localKnowledge.listDocuments('missing')).toEqual([]);
   });
-  it('同一批次的同名文件只保留最后一份', async () => {
+  it('同一批次的同名文件整批拒绝且不覆盖现有原件', async () => {
     const id = crypto.randomUUID();
     await localKnowledge.saveBase({ id, name: '同名测试', createdAt: Date.now() });
-    await localKnowledge.importDocuments(id, [
-      new File(['第一份'], 'same.txt'),
-      new File(['第二份'], 'same.txt'),
-    ]);
+    await localKnowledge.importDocuments(id, [new File(['现有原件'], 'same.txt')]);
+    const list = vi.spyOn(localKnowledge, 'listDocuments');
+    await expect(
+      localKnowledge.importDocuments(id, [
+        new File(['第一份'], 'same.txt'),
+        new File(['第二份'], 'same.txt'),
+      ]),
+    ).rejects.toThrow('同一批次包含同名文件，请分批导入。');
+    expect(list).not.toHaveBeenCalled();
+    list.mockRestore();
     const docs = await localKnowledge.listDocuments(id);
     expect(docs).toHaveLength(1);
-    expect(await docs[0].blob.text()).toBe('第二份');
+    expect(await docs[0].blob.text()).toBe('现有原件');
     await localKnowledge.deleteBase(id);
   });
   it('限制空文件、格式和大小，整批校验后才写入', () => {
@@ -207,7 +233,7 @@ describe('本地知识库', () => {
     expect(await documents.find((doc) => doc.name === 'same.txt')!.blob.text()).toBe('new');
     await localKnowledge.deleteBase(id);
   });
-  it('同名替换保留旧原件备份，原生索引停用失败时不覆盖原件', async () => {
+  it('同名替换不新增隐藏备份，原生索引停用失败时不覆盖原件', async () => {
     const id = crypto.randomUUID();
     await localKnowledge.saveBase({ id, name: '备份', createdAt: Date.now() });
     await localKnowledge.importDocuments(id, [new File(['original-private-test'], 'same.txt')]);
@@ -222,18 +248,74 @@ describe('本地知识库', () => {
     );
     vi.stubGlobal('window', {});
     await localKnowledge.importDocuments(id, [new File(['replacement'], 'same.txt')]);
-    const db = await new Promise<IDBDatabase>((resolve) => {
-      const request = indexedDB.open('voxcue-original-backups', 1);
-      request.onsuccess = () => resolve(request.result);
-    });
-    const versions = await new Promise<any[]>((resolve) => {
-      const request = db.transaction('versions').objectStore('versions').getAll();
-      request.onsuccess = () => resolve(request.result);
-    });
-    db.close();
-    const saved = versions.filter((v) => v.baseId === id);
-    expect(saved.length).toBeGreaterThan(0);
-    expect(await saved[0].blob.text()).toBe('original-private-test');
+    expect((await legacyBackups()).filter((value) => value.baseId === id)).toEqual([]);
+    expect(await (await localKnowledge.listDocuments(id))[0].blob.text()).toBe('replacement');
     await localKnowledge.deleteBase(id);
+  });
+  it('简历替换事务失败保留旧原件，成功后仅保留当前一份', async () => {
+    vi.stubGlobal('window', {});
+    await localKnowledge.importDocuments('personal-resume', [new File(['old resume'], 'old.txt')]);
+    const previous = (await localKnowledge.listDocuments('personal-resume'))[0];
+    const put = IDBObjectStore.prototype.put;
+    const writes = vi.spyOn(IDBObjectStore.prototype, 'put').mockImplementation(function (
+      this: IDBObjectStore,
+      value,
+      key,
+    ) {
+      const result = put.call(this, value, key);
+      if (this.name === 'documents' && value.name === 'replacement.txt')
+        queueMicrotask(() => this.transaction.abort());
+      return result;
+    });
+    try {
+      await expect(
+        localKnowledge.importDocuments('personal-resume', [
+          new File(['new resume'], 'replacement.txt'),
+        ]),
+      ).rejects.toThrow('本地保存失败');
+    } finally {
+      writes.mockRestore();
+    }
+    const retained = await localKnowledge.listDocuments('personal-resume');
+    expect(retained).toHaveLength(1);
+    expect(retained[0].id).toBe(previous.id);
+    expect(await retained[0].blob.text()).toBe('old resume');
+    await localKnowledge.importDocuments('personal-resume', [
+      new File(['new resume'], 'replacement.txt'),
+    ]);
+    const current = await localKnowledge.listDocuments('personal-resume');
+    expect(current).toHaveLength(1);
+    expect(current[0].name).toBe('replacement.txt');
+    expect(await current[0].blob.text()).toBe('new resume');
+    expect((await legacyBackups()).some((value) => value.baseId === 'personal-resume')).toBe(false);
+    await expect(
+      localKnowledge.importDocuments('personal-resume', [
+        new File(['one'], 'one.txt'),
+        new File(['two'], 'two.txt'),
+      ]),
+    ).rejects.toThrow('每次只能导入一份简历');
+    expect(await localKnowledge.listDocuments('personal-resume')).toHaveLength(1);
+    await legacyBackups([previous]);
+    await localKnowledge.deleteDocument(current[0].id);
+    expect(await localKnowledge.listDocuments('personal-resume')).toEqual([]);
+    expect((await legacyBackups()).some((value) => value.baseId === 'personal-resume')).toBe(false);
+  });
+  it('显式删除仅清除对应原件或知识库的备份', async () => {
+    vi.stubGlobal('window', {});
+    const first = crypto.randomUUID(),
+      second = crypto.randomUUID();
+    for (const id of [first, second]) {
+      await localKnowledge.saveBase({ id, name: '合成备份归属', createdAt: Date.now() });
+      await localKnowledge.importDocuments(id, [new File(['current'], 'same.txt')]);
+      await legacyBackups(await localKnowledge.listDocuments(id));
+    }
+    const doc = (await localKnowledge.listDocuments(first))[0];
+    expect((await legacyBackups()).some((value) => value.id === doc.id)).toBe(true);
+    await localKnowledge.deleteDocument(doc.id);
+    expect((await legacyBackups()).some((value) => value.id === doc.id)).toBe(false);
+    expect((await legacyBackups()).some((value) => value.baseId === second)).toBe(true);
+    await localKnowledge.deleteBase(second);
+    expect((await legacyBackups()).some((value) => value.baseId === second)).toBe(false);
+    await localKnowledge.deleteBase(first);
   });
 });

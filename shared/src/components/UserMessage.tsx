@@ -1,6 +1,7 @@
 import { useLayoutEffect, useId, useRef, useState } from 'react';
 import { t } from '../i18n';
 import type { ChatMessage } from '../services/preparation';
+import { ChevronDown, ChevronUp } from './icons';
 import { Button } from './ui/button';
 
 export function UserMessage({ message }: { message: ChatMessage }) {
@@ -31,15 +32,24 @@ export function UserMessage({ message }: { message: ChatMessage }) {
         {message.content}
       </p>
       {overflow && (
-        <Button
-          variant="ghost"
-          className="user-message-toggle"
-          aria-expanded={expanded}
-          aria-controls={textId}
-          onClick={() => setExpanded((value) => !value)}
-        >
-          {t(expanded ? '收起' : '显示更多')}
-        </Button>
+        <>
+          {!expanded && (
+            <span className="user-message-ellipsis" aria-hidden="true">
+              ...
+            </span>
+          )}
+          <Button
+            variant="ghost"
+            className="user-message-toggle"
+            data-reveal-on-hover
+            aria-expanded={expanded}
+            aria-controls={textId}
+            onClick={() => setExpanded((value) => !value)}
+          >
+            {t(expanded ? '收起' : '显示更多')}
+            {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </Button>
+        </>
       )}
       {!!message.options?.attachments.length && (
         <div className="message-options">

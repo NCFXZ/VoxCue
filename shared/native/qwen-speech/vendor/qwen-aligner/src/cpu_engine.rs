@@ -900,8 +900,8 @@ fn prefill_attention_flash(
 #[target_feature(enable = "avx2,fma")]
 unsafe fn dot_qk_avx2(a: &[f32], b: &[f32]) -> f32 {
     use std::arch::x86_64::*;
-    debug_assert_eq!(a.len(), b.len());
-    debug_assert_eq!(a.len() % 8, 0);
+    assert_eq!(a.len(), b.len());
+    assert_eq!(a.len() % 8, 0);
     let mut acc = _mm256_setzero_ps();
     let n = a.len() / 8;
     for j in 0..n {
@@ -924,8 +924,8 @@ unsafe fn dot_qk_avx2(a: &[f32], b: &[f32]) -> f32 {
 #[target_feature(enable = "avx2,fma")]
 unsafe fn axpy_avx2(out: &mut [f32], w: f32, v: &[f32]) {
     use std::arch::x86_64::*;
-    debug_assert_eq!(out.len(), v.len());
-    debug_assert_eq!(out.len() % 8, 0);
+    assert_eq!(out.len(), v.len());
+    assert_eq!(out.len() % 8, 0);
     let wv = _mm256_set1_ps(w);
     let n = out.len() / 8;
     for j in 0..n {
@@ -956,7 +956,7 @@ unsafe fn conv_nhwc_direct(
     ifo: usize, ito: usize,
 ) -> [f32; 512] {
     use std::arch::x86_64::*;
-    debug_assert!(c_out <= 512);
+    assert!(c_out <= 512 && n_full <= c_out && n_full % 8 == 0);
     let mut accs = [0.0f32; 512];
     let f0 = ifo * 2;
     let t0 = ito * 2;

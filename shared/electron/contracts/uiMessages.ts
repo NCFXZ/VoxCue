@@ -14,6 +14,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   恢复默认设置: 'Restore defaults',
   快捷键重复: 'Shortcut already assigned',
   快捷键冲突或不可用: 'Shortcut conflicts or is unavailable',
+  快捷键可用: 'Shortcuts available',
+  部分快捷键不可用: 'Some shortcuts unavailable',
   '未捕获组合键，请重试': 'Shortcut not captured. Try again',
   '修改快捷键：{0}': 'Change shortcut: {0}',
   '请按快捷键…': 'Press a shortcut…',
@@ -95,8 +97,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   发送当前输入内容: 'Send current input',
   面试方式: 'Interview mode',
   远程面试: 'Remote interview',
-  仅转录: 'Transcription only',
-  '设置为“仅转录”时不可用。': 'Unavailable in Transcription only mode.',
+  现场面试: 'In-person interview',
+  '设置为“现场面试”时不可用。': 'Unavailable in in-person interview mode.',
   '麦克风已关闭，不采集声音。': 'The microphone is off. No audio is being captured.',
   '等待麦克风语音输入…': 'Waiting for microphone speech…',
   '请连接麦克风，或重新选择麦克风设备。':
@@ -117,8 +119,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '音频输入切换已取消。': 'Audio input switching was cancelled.',
   '系统音频 · 面试官': 'System audio · Interviewer',
   '麦克风 · 面试者': 'Microphone · Interviewee',
-  '仅转录需要且只使用麦克风。':
-    'Transcription only mode requires the microphone as its only audio input.',
+  '现场面试需要且只使用麦克风。':
+    'In-person interview mode requires the microphone as its only audio input.',
   '本场输入方式已锁定，请结束面试后重新设置。':
     'The input mode is locked for this interview. End the interview to change it.',
   '麦克风权限未开启，请在 macOS 隐私与安全性设置中允许 VoxCue 访问麦克风后重试。':
@@ -747,8 +749,6 @@ export const uiMessages: Readonly<Record<string, string>> = {
   'GitHub Copilot 登录超时，请重试。': 'GitHub Copilot sign-in timed out. Please try again.',
   '无法完成 GitHub Copilot 登录，请检查网络和 Copilot 权限后重试。':
     'Could not finish GitHub Copilot sign-in. Check your network and Copilot access, then try again.',
-  '已在 VoxCue 退出，未能确认系统中的 Copilot 授权移除。可在 GitHub 设置中撤销授权。':
-    'Signed out of VoxCue. System Copilot authorization removal could not be confirmed. You can revoke access in GitHub settings.',
   'Copilot 授权无效，请重新登录。': 'Copilot authorization is invalid. Sign in again.',
   'Copilot 账户权限不允许此次请求。': 'Copilot account permissions do not allow this request.',
   'Copilot 组织策略不允许此次请求。': 'Copilot organization policy does not allow this request.',
@@ -1396,8 +1396,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   文档列表: 'Document list',
   '正在保存到本地…': 'Saving locally…',
   将文件拖放到此处: 'Drop files here',
-  '单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件':
-    'Up to 20 files at a time, 20 MB each. Existing files are backed up before replacement',
+  '单文件最大 20 MB，每次最多 20 个；同名文件将替换旧文件':
+    'Up to 20 files at a time, 20 MB each. Files with the same name replace existing files',
   选择文件: 'Choose files',
   导入知识库文档: 'Import knowledge documents',
   '正在读取文档…': 'Loading documents…',
@@ -1954,6 +1954,12 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'The original is saved locally. Preview is available for TXT and Markdown files only.',
   '…预览仅显示前 100 KB。': '…Preview shows only the first 100 KB.',
   '原件备份失败，未替换文档。': 'Backup failed. The existing document was not replaced.',
+  '每次只能导入一份简历。': 'Import one resume at a time.',
+  '无法处理截图，请重试。': 'Could not process the screenshot. Please try again.',
+  '截图处理超时，请重试。': 'Screenshot processing timed out. Please try again.',
+  '原件备份删除失败，请重试。': 'Could not delete the original-file backups. Please try again.',
+  '同一批次包含同名文件，请分批导入。':
+    'This batch contains files with the same name. Import them separately.',
   '知识库引擎不可用，请在桌面应用中重试。':
     'The knowledge engine is unavailable. Try again in the desktop app.',
   模型服务: 'AI service',

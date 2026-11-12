@@ -21,7 +21,11 @@ parser.add_argument('--device', choices=['cpu', 'cuda'], default='cuda')
 parser.add_argument('--wave', type=Path)
 parser.add_argument('--require-crop', action='store_true')
 parser.add_argument('--repeat', type=int, choices=range(1, 5), default=1)
+parser.add_argument('--duration-seconds', type=int, choices=[60, 120])
+parser.add_argument('--latency', action='store_true')
 args = parser.parse_args()
+if args.duration_seconds and args.wave is None:
+    parser.error('--duration-seconds requires an authenticated --wave fixture')
 runtime = args.component / 'runtime'
 run_root = next((parent for parent in args.component.resolve().parents
                  if parent.name.startswith('voxcue-test-run-')
@@ -53,12 +57,16 @@ def wait(kind, seq=None):
             return event
     raise TimeoutError(kind)
 sequence = 0
+latency = []
 def send(op, source='system', **fields):
     global sequence
     sequence += 1
+    started = time.monotonic()
     child.stdin.write((json.dumps(dict(op=op, source=source, seq=sequence, **fields))+'\n').encode())
     child.stdin.flush()
     wait('ack', sequence)
+    if args.latency and op == 'audio' and source == 'system':
+        latency.append((time.monotonic() - started) * 1000)
 try:
     ready = wait('ready')
     assert ready['async_alignment'] is True, 'This test requires the rebuilt 0.5.3 runtime'
@@ -79,8 +87,21 @@ try:
             assert audio.getframerate() == 16000 and audio.getnchannels() == 1 and audio.getsampwidth() == 2
             pcm = audio.readframes(audio.getnframes())
         combined = (pcm + bytes(4800)) * args.repeat + bytes(32000) if args.wave else (pcm + bytes(4800))*6 + bytes(32000)
+        if args.duration_seconds:
+            desired = args.duration_seconds * 32000
+            combined = (pcm * ((desired + len(pcm) - 1) // len(pcm)))[:desired] + bytes(32000)
         for offset in range(0, len(combined), 6400):
             send('audio', audio=base64.b64encode(combined[offset:offset+6400]).decode())
+            through = offset + min(6400, len(combined) - offset)
+            if args.latency and through % 320000 == 0:
+                recent = latency[-50:]
+                partials = [event for event in all_events if event['type'] == 'partial' and event.get('session') == 'system']
+                print(json.dumps(dict(device=args.device, input_seconds=through / 32000,
+                    ack_total_ms=round(sum(recent), 2), ack_max_ms=round(max(recent), 2),
+                    processing_rtf=round(sum(recent) / 10000, 3),
+                    last_partial_ms=partials[-1].get('inference_ms') if partials else None,
+                    max_buffer_ms=max((event.get('buffer_ms', 0) for event in all_events), default=0),
+                    crops=sum(event['type'] == 'committed' for event in all_events))), flush=True)
             if offset and offset % 320000 == 0:
                 print(json.dumps(dict(device=args.device, processed_input_ms=offset//32)), flush=True)
     send('finish')

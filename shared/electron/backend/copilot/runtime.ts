@@ -7,6 +7,7 @@ import {
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { abortable } from '../cancellable';
 
 const requirePackage = createRequire(__filename);
 // The official subprocess must run from the package's physical unpacked tree.
@@ -63,12 +64,18 @@ export const isolatedSession: SessionConfig = {
 export class CopilotRuntime {
   private clientPromise?: Promise<CopilotClient>;
   private controlPromise?: Promise<CopilotSession>;
+  private clientValue?: CopilotClient;
+  private generation = 0;
+  private stopping?: Promise<void>;
   constructor(private directory: string) {}
   client() {
+    if (this.stopping) return Promise.reject(Error('Copilot runtime is stopping'));
     if (!this.clientPromise) {
-      this.clientPromise = (async () => {
+      const generation = this.generation;
+      const pending = (async () => {
         const workingDirectory = path.join(this.directory, 'workspace');
         await mkdir(workingDirectory, { recursive: true });
+        if (generation !== this.generation) throw Error('Copilot runtime stopped');
         const env = { ...process.env };
         // A login chosen in VoxCue must never inherit gh, PAT, BYOK, remote,
         // telemetry or another application's Copilot authentication/configuration.
@@ -89,50 +96,75 @@ export class CopilotRuntime {
           enableRemoteSessions: false,
           clientInfo: { applicationName: 'VoxCue', integrationName: 'VoxCue Copilot' },
         });
+        this.clientValue = client;
         try {
           await client.start();
+          if (generation !== this.generation) throw Error('Copilot runtime stopped');
           return client;
         } catch (error) {
-          await client.stop().catch(() => {});
+          await client.forceStop().catch(() => {});
+          if (this.clientValue === client) this.clientValue = undefined;
           throw error;
         }
       })().catch((error) => {
-        this.clientPromise = undefined;
+        if (this.clientPromise === pending) this.clientPromise = undefined;
         throw error;
       });
+      this.clientPromise = pending;
     }
     return this.clientPromise;
   }
   control() {
-    return (this.controlPromise ??= this.client()
-      .then((client) => client.createSession({ ...isolatedSession }))
+    if (this.stopping) return Promise.reject(Error('Copilot runtime is stopping'));
+    if (this.controlPromise) return this.controlPromise;
+    const generation = this.generation;
+    const pending = this.client()
+      .then(async (client) => {
+        if (generation !== this.generation) throw Error('Copilot runtime stopped');
+        const session = await client.createSession({ ...isolatedSession });
+        if (generation !== this.generation) {
+          await client.forceStop().catch(() => {});
+          throw Error('Copilot runtime stopped');
+        }
+        return session;
+      })
       .catch((error) => {
-        this.controlPromise = undefined;
+        if (this.controlPromise === pending) this.controlPromise = undefined;
         throw error;
-      }));
+      });
+    this.controlPromise = pending;
+    return pending;
   }
-  async stop() {
-    const client = this.clientPromise;
+  stop() {
+    if (this.stopping) return this.stopping;
+    ++this.generation;
+    const client = this.clientValue;
     const control = this.controlPromise;
     this.clientPromise = undefined;
     this.controlPromise = undefined;
-    if (client)
-      await client
-        .then(async (value) => {
-          const session = await control?.catch(() => undefined);
-          if (session) await value.deleteSession(session.sessionId).catch(() => {});
-          await value.stop();
-        })
-        .catch(() => {});
+    this.clientValue = undefined;
+    const work = (async () => {
+      if (!client) return;
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(), 5000);
+      try {
+        await abortable(
+          (async () => {
+            const session = await control?.catch(() => undefined);
+            if (session) await client.deleteSession(session.sessionId).catch(() => {});
+            await client.stop();
+          })(),
+          timeout.signal,
+        );
+      } catch {
+        await client.forceStop().catch(() => {});
+      } finally {
+        clearTimeout(timer);
+      }
+    })().finally(() => {
+      if (this.stopping === work) this.stopping = undefined;
+    });
+    this.stopping = work;
+    return work;
   }
-}
-
-export function abortable<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
-  signal.throwIfAborted();
-  return new Promise((resolve, reject) => {
-    const abort = () => reject(signal.reason ?? new Error('操作已取消。'));
-    signal.addEventListener('abort', abort, { once: true });
-    promise.then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
-    if (signal.aborted) abort();
-  });
 }

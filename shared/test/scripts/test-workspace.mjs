@@ -4,6 +4,10 @@ import os from 'node:os';
 import { pathToFileURL } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import workspace from '../../scripts/workspace.mjs';
+import {
+  assertOwnerElectronLaunch, verifySyntheticElectronPackage,
+  syntheticElectronEntry, syntheticElectronHtml,
+} from './electron-launch-policy.mjs';
 
 const temporary = fs.realpathSync(os.tmpdir());
 const prefix = 'voxcue-test-run-';
@@ -37,6 +41,34 @@ for (const name of fs.readdirSync(temporary)) {
   }
 }
 export const testRoot = fs.mkdtempSync(path.join(temporary, prefix));
+const defaultHost = workspace.platformRequire('electron');
+const macDevelopmentHost = path.join(workspace.platformRoot, '.tools/electron-dev/Electron.app/Contents/MacOS/Electron');
+const macDevelopmentLauncher = path.join(workspace.platformRoot, 'VoxCue.app/Contents/MacOS/VoxCue');
+const launchPolicy = {
+  testRoot, platformRoot: workspace.platformRoot, defaultHost,
+  developmentHosts: [
+    { path: defaultHost },
+    ...(process.platform === 'darwin' ? [
+      { path: macDevelopmentHost, identifier: 'com.voxcue.development' },
+      { path: macDevelopmentLauncher, identifier: 'com.voxcue.launcher', launcher: true },
+    ] : []),
+  ],
+  syntheticPackages: new Map(),
+  verifyDevelopmentHost(host) {
+    if (!host.identifier) return;
+    const pin = JSON.parse(fs.readFileSync(path.join(workspace.platformRoot, 'local-signing-public.json'), 'utf8'));
+    if (pin.version !== 1 || !/^[a-f0-9]{40}$/i.test(pin.sha1)) throw Error('Invalid development signing pin');
+    const app = path.resolve(host.path, '../../..');
+    execFileSync('/usr/bin/codesign', ['--verify', '--strict', '-R',
+      `identifier "${host.identifier}" and certificate leaf = H"${pin.sha1}"`, app],
+    { stdio: 'pipe', timeout: 10000 });
+  },
+};
+export { syntheticElectronEntry, syntheticElectronHtml };
+export function registerSyntheticElectronFixture(executable, profile) {
+  verifySyntheticElectronPackage(executable, profile, launchPolicy);
+  launchPolicy.syntheticPackages.set(path.resolve(executable), profile);
+}
 const children = new Set();
 let cleaned = false;
 const recordOwner = () => {
@@ -115,7 +147,10 @@ process.once('SIGTERM', () => {
 export const electron = {
   async launch(options) {
     // Fixtures declare their owned HTTP origin explicitly; ordinary UI and packages stay offline.
-    options={...options,env:{...(options.env??process.env),VOXCUE_ACCOUNT_API:options.env?.VOXCUE_ACCOUNT_API??''}};
+    options={...options,env:{...(options.env??process.env),COPILOT_TEST_USER_DATA:options.env?.COPILOT_TEST_USER_DATA||path.join(testRoot,'profile'),VOXCUE_ACCOUNT_API:options.env?.VOXCUE_ACCOUNT_API??''}};
+    if (process.platform === 'darwin' && !options.executablePath && fs.existsSync(macDevelopmentHost))
+      options = { ...options, executablePath: macDevelopmentHost };
+    assertOwnerElectronLaunch(options, launchPolicy);
     const probe=process.platform==='win32' ? (await import(pathToFileURL(path.join(workspace.platformRoot,'test/scripts/window-probe.mjs')).href)).probe : undefined;
     if(probe && !probe('desktop').interactive) throw Error('GUI verification requires an unlocked input desktop');
     const desktop = process.platform === 'darwin'

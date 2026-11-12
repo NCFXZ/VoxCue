@@ -1,0 +1,449 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+// Runs only inside the disposable, offline Windows Sandbox. It speaks Chromium
+// CDP to the shipped renderer; no main-process inspector or test entry is used.
+assert.equal(process.platform, 'win32');
+assert.equal(process.arch, 'x64');
+assert.equal(os.userInfo().username.toLowerCase(), 'wdagutilityaccount');
+const profile = path.resolve(os.homedir());
+assert.equal(profile.toLowerCase(), 'c:\\users\\wdagutilityaccount');
+assert.equal((await fs.realpath(profile)).toLowerCase(), profile.toLowerCase());
+assert.equal(process.argv.length, 4);
+const [configFile, outputFile] = process.argv.slice(2).map((file) => path.resolve(file));
+assert.equal(path.dirname(configFile), path.dirname(outputFile));
+const work = path.dirname(configFile);
+assert.equal(path.dirname(work).toLowerCase(), path.resolve(os.tmpdir()).toLowerCase());
+assert.match(path.basename(work), /^voxcue-store-[a-f0-9-]{36}$/i);
+assert.equal((await fs.realpath(work)).toLowerCase(), work.toLowerCase());
+const info = await fs.lstat(configFile);
+assert.ok(info.isFile() && !info.isSymbolicLink() && info.size <= 16384);
+await assert.rejects(fs.lstat(outputFile), { code: 'ENOENT' });
+const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
+assert.equal(path.basename(work), 'voxcue-store-' + config.nonce);
+const nsis = config.distribution === 'nsis';
+assert.ok(config.distribution === undefined || nsis, 'Unknown packaged distribution');
+if (nsis) {
+  assert.ok(['seed', 'verify'].includes(config.phase), 'Unknown NSIS persistence phase');
+  assert.ok(Number.isSafeInteger(config.expectedPid) && config.expectedPid > 0);
+  assert.equal(config.close, true, 'NSIS phases must close naturally before continuing');
+}
+const deadline = Date.now() + 120000;
+const clients = [];
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+async function poll(read, label) {
+  while (Date.now() < deadline) {
+    const value = await read();
+    if (value) return value;
+    await delay(250);
+  }
+  throw Error('Installed Store renderer did not become ready: ' + label);
+}
+async function endpoint(resource) {
+  try {
+    const response = await fetch('http://127.0.0.1:9222/json/' + resource, {
+      signal: AbortSignal.timeout(1000),
+    });
+    return response.ok ? await response.json() : undefined;
+  } catch {
+    return undefined;
+  }
+}
+async function connect(url) {
+  assert.ok(url.startsWith('ws://127.0.0.1:9222/'), 'Unexpected CDP endpoint');
+  const socket = new WebSocket(url);
+  const pending = new Map();
+  let sequence = 0;
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(Error('Renderer CDP websocket timeout')), 10000);
+    socket.addEventListener(
+      'open',
+      () => {
+        clearTimeout(timer);
+        resolve();
+      },
+      { once: true },
+    );
+    socket.addEventListener(
+      'error',
+      () => {
+        clearTimeout(timer);
+        reject(Error('Renderer CDP connection failed'));
+      },
+      { once: true },
+    );
+  });
+  socket.addEventListener('message', (message) => {
+    const value = JSON.parse(message.data);
+    const request = pending.get(value.id);
+    if (!request) return;
+    pending.delete(value.id);
+    clearTimeout(request.timer);
+    if (value.error) request.reject(Error('CDP command failed: ' + JSON.stringify(value.error)));
+    else request.resolve(value.result);
+  });
+  const send = (method, params = {}) =>
+    new Promise((resolve, reject) => {
+      const id = ++sequence;
+      const timer = setTimeout(
+        () => {
+          pending.delete(id);
+          reject(Error('CDP command timeout: ' + method));
+        },
+        Math.max(1, Math.min(30000, deadline - Date.now())),
+      );
+      pending.set(id, { resolve, reject, timer });
+      socket.send(JSON.stringify({ id, method, params }));
+    });
+  const client = {
+    send,
+    async evaluate(expression) {
+      const result = await send('Runtime.evaluate', {
+        expression,
+        awaitPromise: true,
+        returnByValue: true,
+        userGesture: true,
+      });
+      if (result.exceptionDetails)
+        throw Error(
+          'Renderer evaluation failed: ' +
+            (result.exceptionDetails.exception?.description ?? result.exceptionDetails.text),
+        );
+      return result.result.value;
+    },
+    close() {
+      for (const request of pending.values()) {
+        clearTimeout(request.timer);
+        request.reject(Error('CDP client closed'));
+      }
+      socket.close();
+    },
+  };
+  clients.push(client);
+  return client;
+}
+const appPage = path.join(config.appDirectory, 'resources/app.asar/dist/index.html').toLowerCase();
+async function renderer(login) {
+  const target = await poll(
+    async () =>
+      (await endpoint('list'))?.find((item) => {
+        if (item.type !== 'page' || !item.url.startsWith('file:')) return false;
+        const url = new URL(item.url);
+        return fileURLToPath(url).toLowerCase() === appPage && (url.hash === '#login') === login;
+      }),
+    login ? 'login page' : 'main page',
+  );
+  return connect(target.webSocketDebuggerUrl);
+}
+async function checkPersistence(main) {
+  const bytes = Array.from(
+    Buffer.from('Synthetic Sandbox original: 中文与 English remain intact.\n'),
+  );
+  const createdAt = 1700000000000;
+  const expected = {
+    profile: {
+      name: 'Sandbox persistence owner',
+      background: 'Synthetic persisted resume: TypeScript 与接口校验。',
+      jobDescription: 'Synthetic persisted job requirements.',
+      language: '简体中文',
+    },
+    history: [
+      {
+        id: 'sandbox-persistence-record',
+        title: 'Sandbox persistence record',
+        titleStatus: 'ready',
+        titleSource: 'manual',
+        startedAt: createdAt,
+        endedAt: createdAt + 30000,
+        status: 'ended',
+        mock: false,
+        transcripts: [
+          {
+            id: 'sandbox-transcript',
+            text: 'Sandbox persisted transcript：合成原文。',
+            time: '10:00',
+            final: true,
+            source: 'system',
+          },
+        ],
+        answers: [
+          {
+            id: 'sandbox-answer',
+            question: 'Sandbox persisted question',
+            content: 'Sandbox persisted answer.',
+            provider: 'chatgpt',
+            sourceTranscriptIds: ['sandbox-transcript'],
+          },
+        ],
+      },
+    ],
+    base: {
+      id: 'sandbox-persistence-base',
+      name: 'Sandbox persistence library',
+      createdAt,
+      localRevision: 'sandbox-base-v1',
+    },
+    document: {
+      id: 'sandbox-persistence-document',
+      baseId: 'sandbox-persistence-base',
+      name: 'sandbox-original.md',
+      size: bytes.length,
+      type: 'text/markdown',
+      createdAt,
+      localRevision: 'sandbox-file-v1',
+      bytes,
+    },
+    theme: 'dark',
+    language: 'zh-CN',
+  };
+  const call = (operation, input = expected) =>
+    main.evaluate(`(${operation.toString()})(${JSON.stringify(input)})`);
+  // An upgrade/restart must only read the seed written by the old process.
+  const bindings =
+    config.phase === 'verify'
+      ? config.bindings
+      : await call(async (seed) => {
+          const db = await new Promise((resolve, reject) => {
+            const request = indexedDB.open('copilot-local-documents', 1);
+            request.onupgradeneeded = () => {
+              request.result.createObjectStore('bases', { keyPath: 'id' });
+              request.result
+                .createObjectStore('documents', { keyPath: 'id' })
+                .createIndex('baseId', 'baseId');
+            };
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(Error('Synthetic document database could not open'));
+          });
+          try {
+            await new Promise((resolve, reject) => {
+              const tx = db.transaction(['bases', 'documents'], 'readwrite');
+              const { bytes, ...metadata } = seed.document;
+              tx.objectStore('bases').put(seed.base);
+              tx.objectStore('documents').put({
+                ...metadata,
+                blob: new Blob([new Uint8Array(bytes)], { type: metadata.type }),
+              });
+              tx.oncomplete = resolve;
+              tx.onerror = tx.onabort = () => reject(Error('Synthetic document write failed'));
+            });
+          } finally {
+            db.close();
+          }
+          localStorage.setItem('copilot-personal-info-v1', JSON.stringify(seed.profile));
+          localStorage.setItem('copilot-interview-history-v1', JSON.stringify(seed.history));
+          localStorage.setItem('copilot-theme', seed.theme);
+          localStorage.setItem('voxcue-language-v1', seed.language);
+          const result = await window.desktop.shortcutSettings({
+            op: 'set',
+            action: 'toggle-window',
+            accelerator: 'Control+Alt+K',
+          });
+          if (result.state.bindings['toggle-window'] !== 'Control+Alt+K' || result.state.error)
+            throw Error('Synthetic shortcut was rejected');
+          return result.state.bindings;
+        });
+  assert.equal(bindings?.['toggle-window'], 'Control+Alt+K');
+  const snapshot = () =>
+    call(async (seed) => {
+      const db = await new Promise((resolve, reject) => {
+        const request = indexedDB.open('copilot-local-documents', 1);
+        request.onsuccess = () => resolve(request.result);
+        request.onerror = () => reject(Error('Persisted document database could not open'));
+      });
+      let rows;
+      try {
+        rows = await new Promise((resolve, reject) => {
+          const tx = db.transaction(['bases', 'documents'], 'readonly');
+          const base = tx.objectStore('bases').get(seed.base.id);
+          const document = tx.objectStore('documents').get(seed.document.id);
+          tx.oncomplete = () => resolve({ base: base.result, document: document.result });
+          tx.onerror = tx.onabort = () => reject(Error('Persisted document read failed'));
+        });
+      } finally {
+        db.close();
+      }
+      if (!rows.document?.blob) throw Error('Persisted original is missing');
+      const { blob, ...metadata } = rows.document;
+      return {
+        profile: JSON.parse(localStorage.getItem('copilot-personal-info-v1')),
+        history: JSON.parse(localStorage.getItem('copilot-interview-history-v1')),
+        theme: localStorage.getItem('copilot-theme'),
+        language: localStorage.getItem('voxcue-language-v1'),
+        base: rows.base,
+        document: { ...metadata, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) },
+        bindings: (await window.desktop.shortcutSettings({ op: 'status' })).state.bindings,
+      };
+    });
+  assert.deepEqual(await snapshot(), { ...expected, bindings });
+  const previousOrigin = await main.evaluate('performance.timeOrigin');
+  await main.send('Page.reload');
+  await poll(async () => {
+    try {
+      return await main.evaluate(`performance.timeOrigin !== ${JSON.stringify(previousOrigin)} &&
+        document.readyState === 'complete' && !!document.querySelector('button[aria-label="个人信息"]')`);
+    } catch {
+      return false;
+    }
+  }, 'reloaded persisted application');
+  assert.deepEqual(await snapshot(), { ...expected, bindings });
+  assert.deepEqual(
+    await main.evaluate(`({ dark:document.documentElement.classList.contains('dark'),
+    language:document.documentElement.lang })`),
+    { dark: true, language: expected.language },
+  );
+  const click = (selector, label, text) =>
+    poll(
+      () =>
+        call(
+          ({ selector, text }) => {
+            const button = [...document.querySelectorAll(selector)].find(
+              (element) =>
+                element.getClientRects().length &&
+                !element.closest('[inert],[hidden]') &&
+                (text === undefined || element.textContent.includes(text)),
+            );
+            if (!button) return false;
+            button.click();
+            return true;
+          },
+          { selector, text },
+        ),
+      label,
+    );
+  await click('button[aria-label="个人信息"]', 'personal information');
+  await poll(
+    () =>
+      call(
+        (seed) =>
+          document.querySelector('#personal-info-panel[data-open="true"] input')?.value ===
+          seed.profile.name,
+      ),
+    'persisted personal information UI',
+  );
+  await click('#personal-info-panel details[aria-label="简历摘要"] > summary', 'resume summary');
+  await poll(
+    () =>
+      call((seed) =>
+        [...document.querySelectorAll('#personal-info-panel .profile-summary')].some(
+          (element) =>
+            element.getClientRects().length &&
+            element.textContent.includes(seed.profile.background),
+        ),
+      ),
+    'persisted resume UI',
+  );
+  await click('button[aria-label="个人信息"]', 'close personal information');
+  await click('nav button[aria-label="面试记录"]', 'interview history');
+  await poll(
+    () =>
+      call((seed) =>
+        [...document.querySelectorAll('.history-title-text')].some(
+          (element) => element.textContent === seed.history[0].title,
+        ),
+      ),
+    'persisted history list',
+  );
+  await click('.history-row-open', 'persisted history detail');
+  await poll(
+    () =>
+      call((seed) =>
+        document
+          .querySelector('.history-detail')
+          ?.innerText.includes(seed.history[0].transcripts[0].text),
+      ),
+    'persisted transcript UI',
+  );
+  await click('button[aria-label="查看回答：Sandbox persisted question"]', 'persisted answer');
+  await poll(
+    () =>
+      call((seed) =>
+        document
+          .querySelector('.record-answer-panel[data-open="true"]')
+          ?.innerText.includes(seed.history[0].answers[0].content),
+      ),
+    'persisted answer UI',
+  );
+  await click('nav button[aria-label="知识库"]', 'knowledge library');
+  await click('.knowledge-card', 'persisted library UI', expected.base.name);
+  await poll(
+    () =>
+      call((seed) =>
+        [...document.querySelectorAll('.document-row')].some(
+          (element) =>
+            element.innerText.includes(seed.document.name) &&
+            element.innerText.includes(`${seed.document.size} B`),
+        ),
+      ),
+    'persisted original metadata UI',
+  );
+  assert.deepEqual(await snapshot(), { ...expected, bindings });
+  return bindings;
+}
+try {
+  const browser = await connect(
+    (await poll(() => endpoint('version'), 'browser')).webSocketDebuggerUrl,
+  );
+  const { processInfo } = await browser.send('SystemInfo.getProcessInfo');
+  const processes = processInfo.filter((item) => item.type === 'browser');
+  assert.equal(processes.length, 1);
+  const pid = processes[0].id;
+  assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  if (nsis) assert.equal(pid, config.expectedPid, 'CDP is not the launched guest process');
+  if (config.phase !== 'verify') {
+    const login = await renderer(true);
+    await poll(
+      () => login.evaluate('typeof window.desktop?.setLocalMode === "function"'),
+      'local account API',
+    );
+    assert.deepEqual(
+      await login.evaluate(
+        '({node:typeof require,process:typeof process,platform:window.desktop.platform})',
+      ),
+      { node: 'undefined', process: 'undefined', platform: 'windows' },
+    );
+    const entered = await login.evaluate('window.desktop.setLocalMode(true)');
+    assert.equal(entered.ok, true);
+    assert.equal(entered.state.localMode, true);
+  }
+  const main = await renderer(false);
+  const update = await poll(
+    () =>
+      main.evaluate(
+        'typeof window.desktop?.updates === "function" ? window.desktop.updates({op:"status"}) : null',
+      ),
+    'updates API',
+  );
+  const states = nsis
+    ? []
+    : await main.evaluate(
+        'Promise.all([{op:"check",force:true},{op:"download"},{op:"install"}].map(call=>window.desktop.updates(call)))',
+      );
+  assert.equal(states.length, nsis ? 0 : 3);
+  for (const state of [update, ...states]) {
+    assert.equal(state.currentVersion, config.version);
+    if (nsis) continue;
+    assert.equal(state.phase, 'unavailable');
+    assert.equal(state.message, config.storeUpdateMessage);
+  }
+  const bindings = await checkPersistence(main);
+  await fs.writeFile(
+    outputFile,
+    JSON.stringify({
+      nonce: config.nonce,
+      pid,
+      version: update.currentVersion,
+      updatePhases: [update, ...states].map((state) => state.phase),
+      persistence: true,
+      bindings,
+      phase: config.phase,
+    }),
+  );
+  if (nsis) await main.evaluate('window.desktop.windowAction("close")');
+  // APPX keeps its browser alive for package-identity inspection. NSIS phases
+  // must instead finish the real save/quit handshake before upgrade or restart.
+} finally {
+  for (const client of clients) client.close();
+}

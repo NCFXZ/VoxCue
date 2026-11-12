@@ -614,6 +614,8 @@ try {
     const style = getComputedStyle(node);
     const composer = getComputedStyle(document.querySelector('.composer'));
     const text = node.querySelector('.user-message-text');
+    const toggle = node.querySelector('.user-message-toggle');
+    const ellipsis = node.querySelector('.user-message-ellipsis');
     return {
       radii: ['TopLeft', 'TopRight', 'BottomLeft', 'BottomRight'].map(
         (corner) => style[`border${corner}Radius`],
@@ -624,6 +626,12 @@ try {
       visible: text.getBoundingClientRect().height,
       limit: parseFloat(getComputedStyle(text).lineHeight) * 20,
       full: text.scrollHeight,
+      toggleLeft: toggle.getBoundingClientRect().left - text.getBoundingClientRect().left,
+      toggleBackground: getComputedStyle(toggle).backgroundColor,
+      toggleIcon: toggle.querySelector('svg[aria-hidden="true"]') !== null,
+      ellipsis: ellipsis.textContent,
+      ellipsisAboveToggle:
+        ellipsis.getBoundingClientRect().bottom <= toggle.getBoundingClientRect().top,
       attachmentOutsideClamp: !text.contains(node.querySelector('.message-options')),
       attachmentText: node.querySelector('.message-options').textContent.trim(),
     };
@@ -631,6 +639,23 @@ try {
   assert.ok(bubble.radii.every((radius) => radius === bubble.expectedRadius));
   assert.equal(bubble.shape, bubble.expectedShape);
   assert.ok(Math.abs(bubble.visible - bubble.limit) <= 0.5 && bubble.full > bubble.limit);
+  assert.ok(Math.abs(bubble.toggleLeft) <= 0.5);
+  assert.equal(bubble.toggleBackground, 'rgba(0, 0, 0, 0)');
+  assert.ok(bubble.toggleIcon && bubble.ellipsisAboveToggle);
+  assert.equal(bubble.ellipsis, '...');
+  for (const dark of [false, true]) {
+    await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
+    await toggle.hover();
+    assert.deepEqual(
+      await toggle.evaluate((node) => ({
+        left: getComputedStyle(node).paddingLeft,
+        right: getComputedStyle(node).paddingRight,
+      })),
+      { left: '12px', right: '12px' },
+    );
+  }
+  await page.evaluate(() => document.documentElement.classList.remove('dark'));
+  const collapsedIcon = await toggle.locator('svg').innerHTML();
   assert.ok(bubble.attachmentOutsideClamp);
   assert.equal(bubble.attachmentText, '附件：project.md');
   assert.equal(
@@ -685,14 +710,20 @@ try {
       await user.locator('.user-message-toggle').getAttribute('aria-expanded'),
       String(expanded),
     );
+    assert.equal(await user.locator('.user-message-ellipsis').count(), expanded ? 0 : 1);
+    assert.equal(
+      (await user.locator('.user-message-toggle svg').innerHTML()) === collapsedIcon,
+      !expanded,
+    );
     await user.locator('.chat-copy').click();
     assert.equal(await page.evaluate(() => window.copiedMessages.at(-1)), longText);
   }
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await user.locator('.user-message-toggle').click();
+  await user.locator('.user-message-toggle').focus();
+  await page.keyboard.press('Enter');
   assert.equal(await body.evaluate((node) => node.getAnimations().length), 0);
   assert.ok(Math.abs((await body.boundingBox()).height - bubble.full) <= 0.5);
-  await user.locator('.user-message-toggle').click();
+  await page.keyboard.press('Space');
   assert.ok(Math.abs((await body.boundingBox()).height - bubble.limit) <= 0.5);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await assistant.locator('.chat-copy').click();

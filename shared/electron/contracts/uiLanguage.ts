@@ -17,7 +17,6 @@ const interpolate = (text: string, values: readonly unknown[]) =>
   text.replace(/\{(\d+)\}/g, (match, index) =>
     Number(index) < values.length ? String(values[Number(index)] ?? '') : match,
   );
-const escapePattern = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const patterns = Object.entries(uiMessages)
   .filter(([source]) => /\{\d+\}/.test(source) && /\p{Script=Han}/u.test(source))
   .sort(([a], [b]) => b.length - a.length)
@@ -25,15 +24,34 @@ const patterns = Object.entries(uiMessages)
     source,
     english,
     indices: [...source.matchAll(/\{(\d+)\}/g)].map((match) => Number(match[1])),
-    pattern: new RegExp(
-      '^' +
-        source
-          .split(/\{\d+\}/)
-          .map(escapePattern)
-          .join('([\\s\\S]*?)') +
-        '$',
-    ),
+    parts: source.split(/\{\d+\}/),
   }));
+
+function captureValues(source: string, parts: string[]): string[] | undefined {
+  const prefix = parts[0],
+    suffix = parts.at(-1)!;
+  if (
+    !source.startsWith(prefix) ||
+    !source.endsWith(suffix) ||
+    source.length < prefix.length + suffix.length
+  )
+    return;
+  const captures: string[] = [];
+  const end = source.length - suffix.length;
+  let offset = prefix.length;
+  for (let i = 1; i < parts.length; i++) {
+    const next = i === parts.length - 1 ? end : source.indexOf(parts[i], offset);
+    if (
+      next < offset ||
+      next + parts[i].length > source.length ||
+      (i < parts.length - 1 && next + parts[i].length > end)
+    )
+      return;
+    captures.push(source.slice(offset, next));
+    offset = next + parts[i].length;
+  }
+  return captures;
+}
 
 /** Only call for application-owned UI copy, never for user/model content. */
 export function translateUI(
@@ -53,12 +71,15 @@ export function translateUI(
     );
   if (values) return interpolate(source, values);
   // Status and error messages received from services retain their original data.
+  // Explicit template/value calls above can contain arbitrarily long user data;
+  // reverse matching is limited to bounded, application-owned UI messages.
+  if (source.length > 16 * 1024 || !/\p{Script=Han}/u.test(source)) return source;
   for (const entry of patterns) {
-    const match = entry.pattern.exec(source);
-    if (match) {
+    const captures = captureValues(source, entry.parts);
+    if (captures) {
       const values: string[] = [];
       entry.indices.forEach((index, capture) => {
-        values[index] = match[capture + 1];
+        values[index] = captures[capture];
       });
       return interpolate(entry.english, values);
     }

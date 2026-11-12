@@ -621,7 +621,7 @@ export class MobileConnection {
         return;
       }
       try {
-        this.receive(JSON.parse(event.data));
+        this.receive(JSON.parse(event.data), socket);
       } catch {
         this.fail('invalid-response', '收到无效的电脑消息，请重新连接。');
       }
@@ -643,7 +643,12 @@ export class MobileConnection {
       return false;
     }
   }
-  private receive(value: unknown) {
+  private acknowledgeSnapshot(socket: WebSocket, sequence: number, deliveryId: string) {
+    if (socket !== this.socket || !this.active) return;
+    if (!this.send({ type: 'snapshot-applied', sequence, deliveryId }) && this.state.connected)
+      this.lost();
+  }
+  private receive(value: unknown, socket: WebSocket) {
     if (!record(value)) throw Error('Invalid message');
     if (value.type === 'error') {
       const message = text(value.error, 1000) ? value.error : '连接已失效，请重新扫码。';
@@ -691,7 +696,12 @@ export class MobileConnection {
         this.fail('protocol-mismatch', '设备页面与电脑版本不兼容，请重新打开连接页面。');
         return;
       }
-      if (!secret(value.token) || !revision(value.sequence) || !validSnapshot(value.snapshot))
+      if (
+        !secret(value.token) ||
+        !revision(value.sequence) ||
+        !secret(value.deliveryId) ||
+        !validSnapshot(value.snapshot)
+      )
         throw Error('Invalid paired');
       clearTimeout(this.handshakeTimer);
       clearTimeout(this.retryTimer);
@@ -702,16 +712,21 @@ export class MobileConnection {
       this.awaitingSync = false;
       this.recoveringDraft = !!this.draftRequest;
       this.sequence = value.sequence;
-      this.acceptSnapshot(value.snapshot, true);
+      const accepted = this.acceptSnapshot(value.snapshot, true);
       this.update({
         connected: true,
         pairingCode: null,
         canResume: true,
         error: null,
         errorCode: null,
-        status: this.settledStatus(),
+        status: accepted ? this.settledStatus() : 'syncing',
       });
       this.save();
+      this.acknowledgeSnapshot(socket, value.sequence, value.deliveryId);
+      if (!accepted) {
+        this.sync(true);
+        return;
+      }
       if (this.pendingRequest) {
         this.pendingRequest.queryDeadline = Date.now() + 20_000;
         this.queryResult();
@@ -724,30 +739,36 @@ export class MobileConnection {
     }
     if (!this.state.connected) throw Error('Not authenticated');
     if (value.type === 'snapshot') {
-      if (!revision(value.sequence) || !validSnapshot(value.snapshot))
+      if (!revision(value.sequence) || !secret(value.deliveryId) || !validSnapshot(value.snapshot))
         throw Error('Invalid snapshot');
-      if (
-        value.sequence < this.sequence ||
-        (value.sequence === this.sequence && !this.awaitingSync)
-      )
-        return;
-      if (!this.acceptSnapshot(value.snapshot, this.forceDraftSync)) return;
-      this.sequence = value.sequence;
-      const synced = this.awaitingSync;
-      if (synced) {
-        this.awaitingSync = false;
-        this.forceDraftSync = false;
-        clearTimeout(this.handshakeTimer);
+      try {
+        if (
+          value.sequence < this.sequence ||
+          (value.sequence === this.sequence && !this.awaitingSync)
+        )
+          return;
+        if (!this.acceptSnapshot(value.snapshot, this.forceDraftSync)) return;
+        this.sequence = value.sequence;
+        const synced = this.awaitingSync;
+        if (synced) {
+          this.awaitingSync = false;
+          this.forceDraftSync = false;
+          clearTimeout(this.handshakeTimer);
+        }
+        this.update({ status: this.settledStatus() });
+        if (synced && this.pendingRequest) {
+          this.pendingRequest.queryDeadline = Date.now() + 20_000;
+          this.queryResult();
+        }
+        if (synced && this.draftRequest) {
+          this.draftRequest.queryDeadline = Date.now() + 20_000;
+          this.queryDraft();
+        } else this.scheduleDraft();
+      } finally {
+        // Also acknowledge deliberately discarded stale frames: processing is
+        // complete, and the sender must be free to supply its latest snapshot.
+        this.acknowledgeSnapshot(socket, value.sequence, value.deliveryId);
       }
-      this.update({ status: this.settledStatus() });
-      if (synced && this.pendingRequest) {
-        this.pendingRequest.queryDeadline = Date.now() + 20_000;
-        this.queryResult();
-      }
-      if (synced && this.draftRequest) {
-        this.draftRequest.queryDeadline = Date.now() + 20_000;
-        this.queryDraft();
-      } else this.scheduleDraft();
     } else if (value.type === 'scroll') {
       if (
         !revision(value.scrollId) ||
@@ -809,6 +830,17 @@ export class MobileConnection {
       snapshot.sessionEpoch === previous.sessionEpoch &&
       snapshot.sessionId === previous.sessionId &&
       snapshot.revision < previous.revision
+    )
+      return false;
+    // A successful draft CAS can arrive before its replacement snapshot.
+    // Even a resumed/forced snapshot cannot undo that acknowledged revision.
+    const draft = this.draftBase;
+    if (
+      snapshot &&
+      draft &&
+      snapshot.sessionId === draft.sessionId &&
+      snapshot.sessionEpoch === draft.sessionEpoch &&
+      snapshot.inputDraft.revision < draft.revision
     )
       return false;
     this.update({ snapshot });

@@ -1,7 +1,7 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "private": true,
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
@@ -50,12 +50,10 @@
     "test:installer:artifact": "node test/scripts/installer-artifact-smoke.mjs",
     "test:store:artifact": "node test/scripts/store-artifact-smoke.mjs",
     "test:store:sandbox": "node test/scripts/store-sandbox-smoke.mjs",
-    "test:installer:isolated": "node test/scripts/portable-native-smoke.mjs --with-installer",
     "test:windows:functional": "node test/scripts/windows-suite.mjs",
     "test:windows:regression": "node test/scripts/windows-suite.mjs --windows",
     "test:presentation:native": "node test/scripts/presentation-native-smoke.mjs",
     "test:speech:adversarial": "node test/scripts/speech-adversarial-smoke.mjs",
-    "test:portable:native": "node test/scripts/portable-native-smoke.mjs",
     "test:ui:dpi": "node test/scripts/windows-suite.mjs --dpi",
     "build": "node scripts/build-audio.mjs && node scripts/build-screenshot.mjs && pnpm build:shared",
     "test:platform:native": "node test/scripts/platform-native-smoke.mjs",
@@ -64,7 +62,6 @@
     "test:interview:context": "node test/scripts/interview-context-smoke.mjs",
     "build:audio": "node scripts/build-audio.mjs",
     "test:speech:desktop": "node test/scripts/speech-desktop-smoke.mjs",
-    "test:speech:package": "node test/scripts/portable-native-smoke.mjs",
     "test:interview:workflow": "node test/scripts/interview-workflow-smoke.mjs",
     "test:interview:access": "node test/scripts/interview-access-smoke.mjs",
     "test:interview:access:native": "node test/scripts/interview-access-native.mjs",
@@ -73,7 +70,7 @@
     "package:store": "pnpm build && node scripts/package-store.mjs",
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
     "test:installer:upgrade": "node test/scripts/installer-upgrade-smoke.mjs",
-    "test:package": "node test/scripts/packaged-smoke.mjs"
+    "test:package": "pnpm build && node test/scripts/store-package-smoke.mjs"
   },
   "dependencies": {
     "adm-zip": "0.6.1",
@@ -99,6 +96,7 @@
     "remark-math": "6.0.0",
     "rehype-katex": "7.0.1",
     "sherpa-onnx-node": "1.13.8",
+    "sharp": "0.35.5",
     "tailwind-merge": "^3.0.0",
     "zustand": "^5.0.0",
     "ws": "8.22.2",
@@ -121,6 +119,7 @@
     "typescript": "^5.9.0",
     "vite": "6.4.5",
     "vitest": "4.1.12",
+    "@electron/fuses": "1.8.0",
     "@electron/packager": "20.3.0",
     "electron-builder": "26.15.3"
   },

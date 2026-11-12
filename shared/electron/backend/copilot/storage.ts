@@ -1,7 +1,7 @@
 import { app } from 'electron';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
+import { atomicFile } from '../atomicFile';
 import type { AIService, AuthSession } from '../../contracts/auth';
 import type { CopilotLoginStorage } from './auth';
 
@@ -34,9 +34,7 @@ async function readJson(file: string): Promise<any> {
 }
 async function writeJson(file: string, value: unknown) {
   await mkdir(path.dirname(file), { recursive: true });
-  const temporary = `${file}.${randomUUID()}.tmp`;
-  await writeFile(temporary, JSON.stringify(value), { mode: 0o600 });
-  await rename(temporary, file);
+  await atomicFile(file, JSON.stringify(value));
 }
 export function createServiceSelection() {
   const file = path.join(app.getPath('userData'), 'auth-data', 'service.json');

@@ -69,6 +69,40 @@ function setup(hits = [hit]) {
 afterEach(() => vi.restoreAllMocks());
 describe('准备聊天知识库显式使用边界', () => {
   const profile = { name: '', background: '已确认简历', jobDescription: '当前 JD' };
+  it('意图判断等待目录时取消，不等待迟到目录也不读取知识库', async () => {
+    const { provider, knowledge, rag } = setup();
+    const available = await provider.models();
+    let release!: () => void;
+    vi.mocked(provider.models).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          release = () => resolve(available);
+        }),
+    );
+    const controller = new AbortController();
+    let settled = false,
+      outcome: unknown;
+    const pending = rag.stream({ ...request, profile }, vi.fn(), controller.signal).then(
+      (value) => {
+        settled = true;
+        outcome = value;
+      },
+      (error) => {
+        settled = true;
+        outcome = error;
+      },
+    );
+    controller.abort();
+    try {
+      await vi.waitFor(() => expect(settled).toBe(true), { timeout: 200 });
+      expect(outcome).toMatchObject({ name: 'AbortError' });
+    } finally {
+      release();
+      await pending;
+    }
+    expect(knowledge.search).not.toHaveBeenCalled();
+    expect(provider.stream).not.toHaveBeenCalled();
+  });
   it.each(['需要生成两条', '更新技能', 'Explain matrix multiplication', 'sí', '不要使用知识库'])(
     '未明确授权不读取知识库：%s',
     async (content) => {

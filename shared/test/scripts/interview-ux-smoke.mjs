@@ -854,6 +854,7 @@ try {
   const originalDark = await page
     .locator('html')
     .evaluate((element) => element.classList.contains('dark'));
+  const accessRowLabels = ['麦克风', '系统音频', '屏幕截图', '远程连接', '快捷键'];
   const skeletonColors = [];
   try {
     for (const dark of [false, true]) {
@@ -874,6 +875,8 @@ try {
             new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
         );
         const loading = await pending.evaluate((dialog) => ({
+          height: parseFloat(getComputedStyle(dialog).height),
+          viewportHeight: visualViewport.height,
           rows: [...dialog.querySelectorAll('.interview-access-row')].map((row) => {
             const status = row.querySelector('.interview-access-status, .remote-connection-status');
             return {
@@ -918,8 +921,12 @@ try {
           })),
         }));
         assert.deepEqual(
-          loading.rows.map((row) => row.label).sort(),
-          ['麦克风', '系统音频', '屏幕截图', '远程连接'].sort(),
+          loading.rows.map((row) => row.label),
+          accessRowLabels,
+        );
+        assert.ok(
+          Math.abs(loading.height - Math.min(860, loading.viewportHeight - 48)) <= 1 / 64,
+          `The start dialog uses its preferred height within the viewport: ${JSON.stringify(loading)}`,
         );
         assert.ok(
           loading.rows.every((row) =>
@@ -992,6 +999,22 @@ try {
         await pending.locator('.interview-access[aria-busy="false"]').waitFor();
         for (const frame of frames) assertReadinessGeometry(before, frame);
         assertReadinessGeometry(before, await readinessLayout(pending));
+        const readyRows = await pending.locator('.interview-access-row').evaluateAll((rows) =>
+          rows.map((row) => ({
+            label: row.querySelector(':scope > span').textContent,
+            status: row
+              .querySelector('.interview-access-status, .remote-connection-status')
+              .textContent.trim(),
+          })),
+        );
+        assert.deepEqual(
+          readyRows.map((row) => row.label),
+          accessRowLabels,
+        );
+        assert.ok(
+          ['快捷键可用', '部分快捷键不可用'].includes(readyRows.at(-1).status),
+          JSON.stringify(readyRows),
+        );
         assert.equal(await pending.locator('.interview-access-skeleton').count(), 0);
         await pending.getByText('合成播放设备', { exact: true }).waitFor();
         await pending.getByText('合成麦克风', { exact: true }).waitFor();
@@ -1018,7 +1041,7 @@ try {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
   }
   checks.push(
-    'held readiness IPC keeps three rows and measured status/button placeholders stable, hides unconfirmed device names, and clips real sweep pixels to capsule corners in both palettes and motion preferences',
+    'held readiness IPC keeps five ordered rows and measured status/button placeholders stable, shows the checked shortcut status, fits the 860px preferred height within the viewport, hides unconfirmed device names, and clips real sweep pixels to capsule corners in both palettes and motion preferences',
   );
   await page.locator('.interview-start-trigger').click();
   const start = page.getByRole('dialog', { name: '开始面试', exact: true });

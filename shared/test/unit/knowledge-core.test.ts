@@ -38,6 +38,63 @@ async function directory() {
   return temporaryDirectory('rag-core');
 }
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
+  it('大量标题保持层级、代码块边界及父子检索关系', () => {
+    const count = 2000;
+    const source = Array.from({ length: count }, (_, index) =>
+      `# Section ${index}\n\n## Q${index}. Question?\n\nAnswer ${index}.\n\n### 追问 1：Boundary ${index}?\n\nFollow-up ${index}.\n\n\`\`\`md\n# Not a heading\n\`\`\``,
+    ).join('\n\n');
+    const parsed = parseText(source, 'synthetic', 'questions.md');
+    const qa = parsed.items.filter((item) => item.kind === 'qa');
+    expect(qa).toHaveLength(count * 2);
+    for (const index of [0, 1, count / 2, count - 1]) {
+      const root = qa[index * 2], child = qa[index * 2 + 1];
+      expect(root.section).toBe(`Section ${index} / Q${index}. Question?`);
+      expect(root.parentId).toBeUndefined();
+      expect(root.followUpIds).toEqual([child.itemId]);
+      expect(child.parentId).toBe(root.itemId);
+      expect(child.section).toBe(`Section ${index} / Q${index}. Question? / 追问 1：Boundary ${index}?`);
+      expect(child.content).toContain('```md\n# Not a heading\n```');
+    }
+    const units = searchUnits(parsed.items, embedder());
+    for (const index of [0, count / 2, count - 1]) {
+      const root = qa[index * 2], child = qa[index * 2 + 1];
+      const unit = units.find((value) => value.itemId === child.itemId)!;
+      expect(unit.rootItemId).toBe(root.itemId);
+      expect(unit.text).toContain('问题：Question?\n追问：');
+    }
+  });
+  it('替换和删除释放旧文档内存缓存，保留磁盘恢复原件及其他文档', async () => {
+    const root = await directory();
+    const core = new KnowledgeService(root, embedder());
+    const cached = core as unknown as { revisions: Map<string, unknown>; grounding?: unknown };
+    try {
+      await core.indexDocument(input('alpha', '## Q1. PID old?\n\nalpha original body.'), signal());
+      await core.indexDocument(input('beta', '## Q1. Qt stable?\n\nbeta retained body.'), signal());
+      const original = JSON.parse(await readFile(path.join(root, 'catalog.json'), 'utf8'));
+      const recovery = path.join(root, 'revisions', original.documents.alpha.revision);
+      const originalBytes = await readFile(recovery);
+      await core.search('PID old', 5, 'keyword', signal());
+      await core.search('Qt stable', 5, 'keyword', signal());
+      expect(cached.revisions.size).toBe(2);
+      for (let revision = 0; revision < 3; revision++) {
+        await core.indexDocument(input('alpha', `## Q1. PID new?\n\nalpha replacement ${revision}.`), signal());
+        const hits = await core.search('PID new', 5, 'keyword', signal());
+        expect((await core.getItem(hits[0].itemId))?.content).toContain(`replacement ${revision}`);
+        expect(cached.revisions.size).toBe(2);
+      }
+      await core.search('PID new', 5, 'hybrid', signal(), 'base-a', { rawLimit: 20, grounded: true });
+      expect(cached.grounding).toBeDefined();
+      await core.removeDocument('alpha', signal());
+      expect(cached.revisions.size).toBe(1);
+      expect(cached.grounding).toBeUndefined();
+      expect(await core.search('PID new', 5, 'keyword', signal())).toEqual([]);
+      const beta = await core.search('Qt stable', 5, 'keyword', signal());
+      expect((await core.getItem(beta[0].itemId))?.content).toContain('retained body');
+      expect(await readFile(recovery)).toEqual(originalBytes);
+    } finally {
+      await core.close();
+    }
+  });
   it('prioritizes current identity, reserves comparison sources and rejects an absent project', async () => {
     const core = new KnowledgeService(await directory(), embedder());
     try {

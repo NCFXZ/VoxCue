@@ -20,6 +20,8 @@ import { profileFormat, profileContext, ProfileAnswerStream } from './profile';
 import { verifySkillProposal } from './proposal';
 import type { UsageLedger } from './usage';
 import type { ChatGPTAccountUsage } from './accountUsage';
+import { boundedJson } from '../boundedJson';
+import { abortable } from '../cancellable';
 const apiBase = 'https://api.openai.com/v1';
 const managedBase = 'https://chatgpt.com/backend-api/codex';
 export function parseUsage(value: any): TokenUsage | null {
@@ -122,7 +124,8 @@ export class ChatGPTService implements AIChatService {
         throw networkFailure(error);
       }),
     );
-    const data = (await response.json().catch((error) => {
+    const data = (await boundedJson(response, 4 * 1024 * 1024).catch((error) => {
+      if (error instanceof SyntaxError) throw new Error('模型列表响应无效，请重试。');
       throw networkFailure(error);
     })) as any;
     if (!Array.isArray(data.models)) throw new Error('模型列表响应无效，请重试。');
@@ -166,7 +169,8 @@ export class ChatGPTService implements AIChatService {
   }
   private async run(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
     const request = validateRequest(value);
-    const models = await this.models();
+    signal.throwIfAborted();
+    const models = await abortable(this.models(), signal);
     signal.throwIfAborted();
     if (!models.some((model) => model.id === request.modelId))
       throw new Error('所选模型当前不可用，请刷新模型列表。');
@@ -177,7 +181,8 @@ export class ChatGPTService implements AIChatService {
         ?.reasoningEfforts?.includes(request.effort)
     )
       throw new Error('所选模型不支持该思考强度，请选择自动或刷新模型列表。');
-    const { account, base, headers } = await this.connection();
+    const { account, base, headers } = await abortable(this.connection(), signal);
+    signal.throwIfAborted();
     const input: Record<string, unknown>[] = buildInput(request);
     emit({ id: request.id, type: 'provider', provider: { ...chatGPTProvider } });
     // Active reasoning, searches and heartbeats can legitimately exceed three minutes.

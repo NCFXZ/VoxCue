@@ -1,7 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { createInterface } from 'node:readline';
+import { BoundedLineDecoder } from './buffer';
 import type {
   AudioSource,
   SpeechEvent,
@@ -82,6 +82,11 @@ export class QwenEngine {
     );
     // Never forward native logs, audio or transcriptions to disk/logging sinks.
     this.child.stderr.resume();
+    this.child.stdin.on('error', () => {
+      // A write callback does not consume the stream's separate error event.
+      this.reject();
+      this.child.kill();
+    });
     this.exited = new Promise((resolve) => {
       this.child.once('exit', () => {
         this.reject();
@@ -114,13 +119,35 @@ export class QwenEngine {
           };
           engine.child.once('error', failed);
           engine.child.once('exit', failed);
-          const lines = createInterface({ input: engine.child.stdout });
-          lines.on('line', (line) => {
+          const lines = new BoundedLineDecoder(800000);
+          let invalidOutput = false;
+          const outputFailed = () => {
+            if (invalidOutput) return;
+            invalidOutput = true;
+            engine.reject();
+            failed();
+            engine.child.kill();
+          };
+          const receive = (line: string) => {
             try {
               if (line.length > 200000) throw Error('Oversized Qwen result');
               const value = JSON.parse(line);
+              if (value.type === 'error' && value.code === 'unsupported-cpu') {
+                reject(Error('Qwen 需要支持 AVX2 和 FMA 的处理器，请改用 Paraformer。'));
+                outputFailed();
+                return;
+              }
+              if (value.type === 'error' && value.code === 'invalid-command') {
+                outputFailed();
+                return;
+              }
               if (value.type === 'ready') {
-                if (![500, 1000].includes(value.chunk_ms) || value.device !== device)
+                if (
+                  ![500, 1000].includes(value.chunk_ms) ||
+                  value.device !== device ||
+                  (value.alignment_device !== 'cpu' &&
+                    !(device === 'cuda' && value.alignment_device === 'cuda'))
+                )
                   throw Error('Invalid Qwen device');
                 clearTimeout(timer);
                 engine.child.removeListener('error', failed);
@@ -128,10 +155,23 @@ export class QwenEngine {
                 resolve({ chunkMs: value.chunk_ms, alignmentDevice: value.alignment_device });
               } else engine.receive(value);
             } catch {
-              engine.reject();
-              failed();
-              engine.child.kill();
+              outputFailed();
             }
+          };
+          engine.child.stdout.on('data', (chunk: Buffer) => {
+            if (invalidOutput) return;
+            try {
+              for (const line of lines.push(chunk)) {
+                if (invalidOutput) break;
+                receive(line);
+              }
+            } catch {
+              outputFailed();
+            }
+          });
+          engine.child.stdout.on('end', () => {
+            const tail = lines.finish();
+            if (!invalidOutput && tail) receive(tail);
           });
         },
       );

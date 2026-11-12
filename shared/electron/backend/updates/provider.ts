@@ -30,7 +30,7 @@ async function readText(fetcher: ReleaseFetch, url: URL, signal: AbortSignal, li
     },
   });
   if (!response.ok || Number(response.headers.get('content-length')) > limit) {
-    await response.body?.cancel().catch(() => {});
+    void response.body?.cancel().catch(() => {});
     throw Error('Release request failed or exceeded size limit');
   }
   if (!response.body) throw Error('Empty release response');
@@ -55,7 +55,8 @@ async function readText(fetcher: ReleaseFetch, url: URL, signal: AbortSignal, li
     return text + decoder.decode();
   } finally {
     signal.removeEventListener('abort', abort);
-    await reader.cancel().catch(() => {});
+    // A stalled transport cleanup must not outlive the response limit/deadline.
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

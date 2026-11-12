@@ -237,14 +237,14 @@ try {
     .locator('.speech-device-heading strong')
     .first()
     .evaluate((node) => getComputedStyle(node).color);
-  await mainSettings.getByRole('radio', { name: '仅转录', exact: true }).click();
+  await mainSettings.getByRole('radio', { name: '现场面试', exact: true }).click();
   assert.equal(
     await mainSettings.getByRole('button', { name: '播放设备', exact: true }).isDisabled(),
     true,
   );
   await mainSettings
     .getByRole('button', { name: '播放设备', exact: true })
-    .getByText('设置为“仅转录”时不可用。', { exact: true })
+    .getByText('设置为“现场面试”时不可用。', { exact: true })
     .waitFor();
   assert.equal(await mainSettings.locator('.speech-device-heading small').count(), 0);
   assert.equal(
@@ -289,7 +289,7 @@ try {
   const englishSettings = main.getByRole('dialog', { name: 'Settings', exact: true });
   const englishOutput = englishSettings.getByRole('button', { name: 'output device', exact: true });
   await englishOutput
-    .getByText('Unavailable in Transcription only mode.', { exact: true })
+    .getByText('Unavailable in in-person interview mode.', { exact: true })
     .waitFor();
   assert.ok(
     await englishOutput.evaluate((node) => {
@@ -469,9 +469,32 @@ try {
   const WebSocket = workspace.platformRequire('ws');
   phone = new WebSocket(origin.replace('http:', 'ws:') + '/connect', { origin });
   phone.on('error', () => {});
+  phone.on('message', (data) => {
+    const message = JSON.parse(data.toString());
+    if (message.type === 'paired' || message.type === 'snapshot')
+      phone.send(
+        JSON.stringify({
+          type: 'snapshot-applied',
+          sequence: message.sequence,
+          deliveryId: message.deliveryId,
+        }),
+      );
+  });
   await once(phone, 'open');
   const notice = once(phone, 'message');
-  phone.send(JSON.stringify({ type: 'authenticate', protocolVersion: 1, pendingId: pending.id }));
+  const { REMOTE_PROTOCOL_VERSION } = workspace.platformRequire(
+    path.join(
+      workspace.platformRoot,
+      'dist-electron/shared/electron/contracts/remoteConnection.js',
+    ),
+  );
+  phone.send(
+    JSON.stringify({
+      type: 'authenticate',
+      protocolVersion: REMOTE_PROTOCOL_VERSION,
+      pendingId: pending.id,
+    }),
+  );
   assert.equal(JSON.parse((await notice)[0].toString()).type, 'pending');
   await sampleHelp(true);
   await floating.evaluate(
@@ -527,13 +550,16 @@ try {
       const handle = await app.evaluate(({ BrowserWindow }) =>
         BrowserWindow.getAllWindows()
           .find((win) => win.webContents.getURL().endsWith('#interview-shortcuts'))
-          .getNativeWindowHandle().readBigUInt64LE().toString(),
+          .getNativeWindowHandle()
+          .readBigUInt64LE()
+          .toString(),
       );
-      nativePass = (ignored) => assert.equal(
-        !!(probe('window', handle, path.resolve('public/voxcue.ico')).extendedStyle & 32),
-        ignored,
-        'The owned Windows help HWND must apply its native click-through state',
-      );
+      nativePass = (ignored) =>
+        assert.equal(
+          !!(probe('window', handle, path.resolve('public/voxcue.ico')).extendedStyle & 32),
+          ignored,
+          'The owned Windows help HWND must apply its native click-through state',
+        );
     }
     await helpPage.mouse.move(await helpPage.evaluate(() => innerWidth - 1), 1);
     await app.evaluate(async () => {
@@ -566,16 +592,25 @@ try {
         );
         const bounds = helper.getBounds();
         const surface = new BrowserWindow({
-          x: bounds.x - 16, y: bounds.y - 16,
-          width: bounds.width + 32, height: bounds.height + 32,
-          frame: false, thickFrame: false, resizable: false, show: false, skipTaskbar: true,
+          x: bounds.x - 16,
+          y: bounds.y - 16,
+          width: bounds.width + 32,
+          height: bounds.height + 32,
+          frame: false,
+          thickFrame: false,
+          resizable: false,
+          show: false,
+          skipTaskbar: true,
           backgroundColor: '#285064',
           webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
         });
         globalThis.shortcutUi.hitBehind = surface;
-        await surface.loadURL('data:text/html,' + encodeURIComponent(
-          '<body style="margin:0;background:#285064;width:100vw;height:100vh">Owned help hit surface<script>window.clicks=0;document.addEventListener("click",()=>window.clicks++)</script>',
-        ));
+        await surface.loadURL(
+          'data:text/html,' +
+            encodeURIComponent(
+              '<body style="margin:0;background:#285064;width:100vw;height:100vh">Owned help hit surface<script>window.clicks=0;document.addEventListener("click",()=>window.clicks++)</script>',
+            ),
+        );
         surface.setAlwaysOnTop(true, 'normal');
         surface.showInactive();
         helper.moveTop();
@@ -583,20 +618,33 @@ try {
     ]);
     try {
       const handles = await app.evaluate(({ BrowserWindow }) => ({
-        helper: BrowserWindow.getAllWindows().find((win) =>
-          win.webContents.getURL().endsWith('#interview-shortcuts'),
-        ).getNativeWindowHandle().readBigUInt64LE().toString(),
-        behind: globalThis.shortcutUi.hitBehind.getNativeWindowHandle().readBigUInt64LE().toString(),
+        helper: BrowserWindow.getAllWindows()
+          .find((win) => win.webContents.getURL().endsWith('#interview-shortcuts'))
+          .getNativeWindowHandle()
+          .readBigUInt64LE()
+          .toString(),
+        behind: globalThis.shortcutUi.hitBehind
+          .getNativeWindowHandle()
+          .readBigUInt64LE()
+          .toString(),
       }));
-      const project = (point) => app.evaluate(({ BrowserWindow, screen }, point) => {
-        const bounds = BrowserWindow.getAllWindows().find((win) =>
-          win.webContents.getURL().endsWith('#interview-shortcuts'),
-        ).getContentBounds();
-        return screen.dipToScreenPoint({ x: Math.round(bounds.x + point.x), y: Math.round(bounds.y + point.y) });
-      }, point);
+      const project = (point) =>
+        app.evaluate(({ BrowserWindow, screen }, point) => {
+          const bounds = BrowserWindow.getAllWindows()
+            .find((win) => win.webContents.getURL().endsWith('#interview-shortcuts'))
+            .getContentBounds();
+          return screen.dipToScreenPoint({
+            x: Math.round(bounds.x + point.x),
+            y: Math.round(bounds.y + point.y),
+          });
+        }, point);
       const waitPass = async (ignored) => {
         const deadline = performance.now() + 5000;
-        while (!!(probe('window', handles.helper, path.resolve('public/voxcue.ico')).extendedStyle & 32) !== ignored) {
+        while (
+          !!(
+            probe('window', handles.helper, path.resolve('public/voxcue.ico')).extendedStyle & 32
+          ) !== ignored
+        ) {
           if (performance.now() >= deadline) throw Error('Native help hit state did not settle');
           await new Promise((resolve) => setTimeout(resolve, 25));
         }
@@ -605,15 +653,22 @@ try {
       probe('move', blank.x, blank.y);
       await waitPass(true);
       assert.equal(probe('hit', handles.behind, blank.x, blank.y).expected, true);
-      assert.equal(probe('hittest', handles.behind, blank.x, blank.y).result, 1,
-        'The pass-through target must be the owned client area, outside native resize borders');
+      assert.equal(
+        probe('hittest', handles.behind, blank.x, blank.y).result,
+        1,
+        'The pass-through target must be the owned client area, outside native resize borders',
+      );
       probe('click', handles.behind, blank.x, blank.y);
       await behind.waitForFunction(() => window.clicks === 1);
-      await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) =>
-        win.webContents.getURL().endsWith('#interview-shortcuts'),
-      ).moveTop());
+      await app.evaluate(({ BrowserWindow }) =>
+        BrowserWindow.getAllWindows()
+          .find((win) => win.webContents.getURL().endsWith('#interview-shortcuts'))
+          .moveTop(),
+      );
       const close = help.getByRole('button', { name: '关闭快捷键帮助', exact: true });
-      const point = await stableTarget(close, (box) => project({ x: box.x + box.width / 2, y: box.y + box.height / 2 }));
+      const point = await stableTarget(close, (box) =>
+        project({ x: box.x + box.width / 2, y: box.y + box.height / 2 }),
+      );
       probe('move', point.x, point.y);
       await waitPass(false);
       assert.equal(probe('hit', handles.helper, point.x, point.y).expected, true);
@@ -622,7 +677,9 @@ try {
       await closed;
       await floating.evaluate(() => window.desktop.setInterviewShortcutsOpen(true));
       help = await findHelp();
-      console.log('PASS: Windows help native click-through to an owned surface, native close button and reopen');
+      console.log(
+        'PASS: Windows help native click-through to an owned surface, native close button and reopen',
+      );
     } finally {
       await app.evaluate(() => {
         const surface = globalThis.shortcutUi.hitBehind;
@@ -891,17 +948,24 @@ try {
   await helpLabel('toggle-system-audio', '关闭系统音频', compact.width);
   await floating.locator('textarea').evaluate((input) => {
     Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set.call(
-      input, 'Synthetic question sent while fully hidden',
+      input,
+      'Synthetic question sent while fully hidden',
     );
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
-  await floating.waitForFunction(() =>
-    !document.querySelector('button[aria-label="发送面试问题"]').disabled,
-    undefined, { polling: 25 },
+  await floating.waitForFunction(
+    () => !document.querySelector('button[aria-label="发送面试问题"]').disabled,
+    undefined,
+    { polling: 25 },
   );
   await invoke('Control+Shift+Enter');
-  await floating.getByRole('article', { name: '回答：Synthetic question sent while fully hidden', exact: true }).waitFor();
-  assert.deepEqual((await nativeWindows()).map((win) => win.visible), [false, false]);
+  await floating
+    .getByRole('article', { name: '回答：Synthetic question sent while fully hidden', exact: true })
+    .waitFor();
+  assert.deepEqual(
+    (await nativeWindows()).map((win) => win.visible),
+    [false, false],
+  );
   assert.equal(
     await app.evaluate(
       () =>
@@ -1116,7 +1180,7 @@ try {
   assert.deepEqual(await keyState(), Array(9).fill(false));
   await main.locator('.interview-start-trigger').click();
   const beforeMode = await start.boundingBox();
-  await start.getByRole('radio', { name: '仅转录', exact: true }).click();
+  await start.getByRole('radio', { name: '现场面试', exact: true }).click();
   await start.locator('.interview-access[aria-busy="false"]').waitFor();
   assert.equal((await start.boundingBox()).height, beforeMode.height);
   await footerAtBottom();
@@ -1134,7 +1198,7 @@ try {
       .count(),
     0,
   );
-  assert.equal(await start.getByText('设置为“仅转录”时不可用。', { exact: true }).count(), 0);
+  assert.equal(await start.getByText('设置为“现场面试”时不可用。', { exact: true }).count(), 0);
   assert.equal(
     await start.locator('.interview-access-row').filter({ hasText: '系统音频' }).count(),
     0,
@@ -1204,7 +1268,7 @@ try {
     await activeSettings.getByRole('button', { name: '选择播放设备', exact: true }).isDisabled(),
     true,
   );
-  await activeSettings.getByText('设置为“仅转录”时不可用。', { exact: true }).waitFor();
+  await activeSettings.getByText('设置为“现场面试”时不可用。', { exact: true }).waitFor();
   assert.equal(await activeSettings.getByText('系统声音 · 播放设备', { exact: true }).count(), 0);
   await activeSettings.getByText('系统声音', { exact: true }).waitFor();
   await activeSettings.getByRole('radio', { name: '远程面试', exact: true }).click();
@@ -1217,7 +1281,7 @@ try {
     await activeSettings.getByRole('button', { name: '选择播放设备', exact: true }).isDisabled(),
     false,
   );
-  await activeSettings.getByRole('radio', { name: '仅转录', exact: true }).click();
+  await activeSettings.getByRole('radio', { name: '现场面试', exact: true }).click();
   await waitForAsync(
     microphone,
     async () => (await window.desktop.interviewState()).configuration.inputMode === 'transcription',

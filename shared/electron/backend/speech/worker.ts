@@ -88,7 +88,11 @@ parentPort!.on('message', (m) => {
         parentPort!.postMessage({ closed: m.id });
         return;
       }
-      if (failed) return;
+      if (failed) {
+        if (m.id !== undefined)
+          parentPort!.postMessage({ error: '语音服务已失败，尾段无法处理；请重新开始。' });
+        return;
+      }
       if (m.op === 'init') {
         const start = performance.now();
         qwen = m.speechModel === 'qwen';

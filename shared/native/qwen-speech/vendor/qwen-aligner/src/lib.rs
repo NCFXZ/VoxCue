@@ -17,6 +17,7 @@ pub(crate) mod raw_tensor;
 mod weights;
 mod gguf;
 pub mod backend;
+pub mod cpu_features;
 
 // The CUDA engine modules.
 #[cfg(feature = "cuda")]

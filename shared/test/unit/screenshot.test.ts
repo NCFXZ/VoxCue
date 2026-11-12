@@ -7,6 +7,7 @@ const native = vi.hoisted(() => ({
   getDisplayNearestPoint: vi.fn(),
   getAllDisplays: vi.fn(),
   getMediaAccessStatus: vi.fn(),
+  encode: vi.fn(),
 }));
 vi.mock('electron', () => ({
   desktopCapturer: { getSources: native.getSources },
@@ -18,76 +19,33 @@ vi.mock('electron', () => ({
   systemPreferences: { getMediaAccessStatus: native.getMediaAccessStatus },
 }));
 import {
-  captureInterviewScreenshot,
+  captureInterviewScreenshot as captureScreenshot,
   prepareInterviewScreenshot,
-} from '../../../shared/electron/screenshot';
+} from '../../electron/screenshot';
+const captureInterviewScreenshot = (
+  window: BrowserWindow,
+  platform: NodeJS.Platform,
+  signal: AbortSignal,
+  captureScreen?: Parameters<typeof captureScreenshot>[4],
+  displayPoint?: Parameters<typeof captureScreenshot>[5],
+) => captureScreenshot(window, platform, signal, native.encode, captureScreen, displayPoint);
 const captureFile = async (...args: Parameters<typeof captureInterviewScreenshot>) =>
   (await captureInterviewScreenshot(...args)).file;
-afterEach(() => vi.useRealTimers());
 const window = {
   isDestroyed: () => false,
   getBounds: () => ({ x: 50, y: 50, width: 1000, height: 700 }),
 } as unknown as BrowserWindow;
-const source = (display_id = '2') => {
+function source(display_id = '2') {
   const thumbnail = {
     isEmpty: vi.fn(() => false),
-    getSize: vi.fn(() => ({ width: 3840, height: 2400 })),
+    getSize: vi.fn(() => ({ width: 2, height: 2 })),
+    toBitmap: vi.fn(() => Buffer.alloc(16)),
+    toPNG: vi.fn(),
+    toJPEG: vi.fn(),
     resize: vi.fn(),
-    toPNG: vi.fn(() => Buffer.from([137, 80, 78, 71])),
-    toJPEG: vi.fn(() => Buffer.from([255, 216, 255])),
   };
-  thumbnail.resize.mockReturnValue(thumbnail);
   return { display_id, thumbnail };
-};
-it('原生枚举一直不返回时取消立即结束请求，迟到图像不会编码或发送', async () => {
-  let finish!: (sources: unknown[]) => void;
-  native.getSources.mockReturnValue(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
-  const controller = new AbortController();
-  let failure: unknown;
-  const pending = captureFile(window, 'darwin', controller.signal).catch((error) => {
-    failure = error;
-  });
-  controller.abort();
-  // The real screenshot API includes encoding/preview promises; cancellation
-  // must still settle before the next event-loop turn, without a native result.
-  await new Promise((resolve) => setImmediate(resolve));
-  expect(failure).toMatchObject({ name: 'AbortError' });
-  await pending;
-  const late = source();
-  finish([late]);
-  await Promise.resolve();
-  expect(late.thumbnail.toPNG).not.toHaveBeenCalled();
-});
-it('原生捕获挂起会在十秒内明确失败，不让面试请求永久停留', async () => {
-  vi.useFakeTimers();
-  native.getSources.mockReturnValue(new Promise(() => {}));
-  let failure: unknown;
-  const pending = captureFile(window, 'darwin', new AbortController().signal).catch((error) => {
-    failure = error;
-  });
-  await vi.advanceTimersByTimeAsync(10001);
-  expect(failure).toBeInstanceOf(Error);
-  await pending;
-});
-it('原生缩略图超过请求尺寸时仍约束实际图像尺寸', async () => {
-  const large = source(),
-    bounded = source();
-  large.thumbnail.getSize.mockReturnValue({ width: 7680, height: 4320 });
-  large.thumbnail.resize.mockReturnValue(bounded.thumbnail);
-  native.getSources.mockResolvedValue([large]);
-  await captureFile(window, 'win32', new AbortController().signal);
-  expect(large.thumbnail.resize).toHaveBeenCalledWith({
-    width: 3840,
-    height: 2160,
-    quality: 'best',
-  });
-  expect(large.thumbnail.toPNG).not.toHaveBeenCalled();
-  expect(bounded.thumbnail.toPNG).toHaveBeenCalledOnce();
-});
+}
 beforeEach(() => {
   vi.clearAllMocks();
   native.getDisplayMatching.mockReturnValue({
@@ -99,22 +57,85 @@ beforeEach(() => {
   native.getDisplayNearestPoint.mockImplementation(() => native.getDisplayMatching());
   native.getMediaAccessStatus.mockReturnValue('granted');
   native.getSources.mockResolvedValue([source()]);
+  native.encode.mockImplementation(async () => ({
+    file: { name: 'screenshot.png', bytes: new Uint8Array([137, 80, 78, 71]) },
+    preview: 'data:image/jpeg;base64,/9j/',
+  }));
 });
-it('只选择浮窗所在显示器，限制图片尺寸并返回临时附件', async () => {
+afterEach(() => vi.useRealTimers());
+it('enumeration cancellation settles immediately and never processes late frames', async () => {
+  let finish!: (value: unknown[]) => void;
+  native.getSources.mockReturnValue(
+    new Promise((resolve) => {
+      finish = resolve;
+    }),
+  );
+  const controller = new AbortController();
+  const pending = captureFile(window, 'darwin', controller.signal);
+  controller.abort();
+  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+  const late = source();
+  finish([late]);
+  await Promise.resolve();
+  expect(late.thumbnail.toBitmap).not.toHaveBeenCalled();
+  expect(native.encode).not.toHaveBeenCalled();
+});
+it('bounds a hung native enumeration to ten seconds', async () => {
+  vi.useFakeTimers();
+  native.getSources.mockReturnValue(new Promise(() => {}));
+  const pending = expect(
+    captureFile(window, 'darwin', new AbortController().signal),
+  ).rejects.toThrow('无法截取');
+  await vi.advanceTimersByTimeAsync(10001);
+  await pending;
+});
+it('selects only the interview display and transfers pixels without resizing or encoding in main', async () => {
   const other = source('1'),
     current = source('2');
   native.getSources.mockResolvedValue([other, current]);
-  const result = await captureFile(window, 'win32', new AbortController().signal);
+  expect((await captureFile(window, 'win32', new AbortController().signal)).name).toBe(
+    'screenshot.png',
+  );
   expect(native.getSources).toHaveBeenCalledWith({
     types: ['screen'],
     thumbnailSize: { width: 3840, height: 2400 },
     fetchWindowIcons: false,
   });
-  expect(result).toEqual({ name: 'screenshot.png', bytes: new Uint8Array([137, 80, 78, 71]) });
-  expect(other.thumbnail.toPNG).not.toHaveBeenCalled();
-  expect(current.thumbnail.toPNG).toHaveBeenCalledOnce();
+  expect(other.thumbnail.toBitmap).not.toHaveBeenCalled();
+  expect(current.thumbnail.toBitmap).toHaveBeenCalledOnce();
+  expect(native.encode).toHaveBeenCalledWith(
+    { width: 2, height: 2, bitmap: expect.any(ArrayBuffer) },
+    expect.any(AbortSignal),
+  );
+  for (const method of [
+    current.thumbnail.toPNG,
+    current.thumbnail.toJPEG,
+    current.thumbnail.resize,
+  ])
+    expect(method).not.toHaveBeenCalled();
 });
-it('Mac uses the toolbar anchor when the reserved transparent width overlaps another display', async () => {
+it('passes oversized native frames to the worker for dimension limiting and rejects excessive or malformed frames', async () => {
+  const image = source();
+  image.thumbnail.getSize.mockReturnValue({ width: 7680, height: 4320 });
+  image.thumbnail.toBitmap.mockReturnValue(Buffer.alloc(7680 * 4320 * 4));
+  native.getSources.mockResolvedValue([image]);
+  await captureFile(window, 'win32', new AbortController().signal);
+  expect(native.encode).toHaveBeenCalledWith(
+    expect.objectContaining({ width: 7680, height: 4320 }),
+    expect.any(AbortSignal),
+  );
+  expect(image.thumbnail.resize).not.toHaveBeenCalled();
+  image.thumbnail.getSize.mockReturnValue({ width: 16385, height: 1 });
+  await expect(captureFile(window, 'win32', new AbortController().signal)).rejects.toThrow(
+    '过大或无效',
+  );
+  image.thumbnail.getSize.mockReturnValue({ width: 2, height: 2 });
+  image.thumbnail.toBitmap.mockReturnValue(Buffer.alloc(0));
+  await expect(captureFile(window, 'win32', new AbortController().signal)).rejects.toThrow(
+    '过大或无效',
+  );
+});
+it('uses the Mac toolbar anchor when the transparent window overlaps another display', async () => {
   const wrong = source('1'),
     correct = source('2');
   native.getSources.mockResolvedValue([wrong, correct]);
@@ -123,36 +144,30 @@ it('Mac uses the toolbar anchor when the reserved transparent width overlaps ano
     size: { width: 1920, height: 1080 },
     scaleFactor: 2,
   });
-  native.getDisplayMatching.mockReturnValue({
-    id: 1,
-    size: { width: 3840, height: 2160 },
-    scaleFactor: 1,
+  await captureFile(window, 'darwin', new AbortController().signal, undefined, {
+    x: -140,
+    y: -176,
   });
-  const owner = {
-    isDestroyed: () => false,
-    getBounds: () => ({ x: -640, y: -200, width: 1000, height: 700 }),
-  } as unknown as BrowserWindow;
-  await captureFile(owner, 'darwin', new AbortController().signal, undefined, { x: -140, y: -176 });
   expect(native.getDisplayNearestPoint).toHaveBeenCalledWith({ x: -140, y: -176 });
   expect(native.getDisplayMatching).not.toHaveBeenCalled();
-  expect(correct.thumbnail.toPNG).toHaveBeenCalledOnce();
-  expect(wrong.thumbnail.toPNG).not.toHaveBeenCalled();
+  expect(correct.thumbnail.toBitmap).toHaveBeenCalledOnce();
+  expect(wrong.thumbnail.toBitmap).not.toHaveBeenCalled();
 });
-it('单屏兼容缺少显示器 ID，多屏不能静默截取其他屏幕', async () => {
+it('allows an absent display ID only when the desktop has one display', async () => {
   native.getSources.mockResolvedValue([source('')]);
   await expect(captureFile(window, 'win32', new AbortController().signal)).rejects.toThrow(
     '所在屏幕',
   );
   native.getAllDisplays.mockReturnValue([{}]);
   expect(
-    (await captureFile(window, 'win32', new AbortController().signal)).bytes.byteLength,
+    (await captureFile(window, 'win32', new AbortController().signal)).bytes.length,
   ).toBeGreaterThan(0);
 });
-it('权限、捕获异常和空截图明确失败', async () => {
+it('fails explicitly on denied permission, native errors, and empty images', async () => {
   native.getMediaAccessStatus.mockReturnValue('denied');
   await expect(captureFile(window, 'darwin', new AbortController().signal)).rejects.toThrow('允许');
   expect(native.getSources).not.toHaveBeenCalled();
-  native.getSources.mockRejectedValueOnce(Error('native failure'));
+  native.getSources.mockRejectedValueOnce(Error('private native failure'));
   await expect(captureFile(window, 'win32', new AbortController().signal)).rejects.toThrow(
     '无法截取',
   );
@@ -163,47 +178,24 @@ it('权限、捕获异常和空截图明确失败', async () => {
     '未能获取',
   );
 });
-it('大 PNG 使用有界 JPEG，空或超限编码不能发送', async () => {
-  const large = source();
-  large.thumbnail.toPNG.mockReturnValue(Buffer.alloc(8 * 1024 * 1024 + 1));
-  native.getSources.mockResolvedValue([large]);
-  expect((await captureFile(window, 'win32', new AbortController().signal)).name).toBe(
-    'screenshot.jpg',
-  );
-  large.thumbnail.toJPEG.mockReturnValue(Buffer.alloc(8 * 1024 * 1024 + 1));
-  await expect(captureFile(window, 'win32', new AbortController().signal)).rejects.toThrow(
-    '过大或无效',
-  );
-  large.thumbnail.toPNG.mockReturnValue(Buffer.alloc(0));
-  await expect(captureFile(window, 'win32', new AbortController().signal)).rejects.toThrow(
-    '过大或无效',
-  );
-});
-it('开始前取消不读取屏幕，截取中取消不编码或返回图片', async () => {
-  const controller = new AbortController();
-  controller.abort();
-  await expect(captureFile(window, 'win32', controller.signal)).rejects.toMatchObject({
+it('never reads the screen after prior cancellation and never returns a cancelled encoding', async () => {
+  const cancelled = new AbortController();
+  cancelled.abort();
+  await expect(captureFile(window, 'win32', cancelled.signal)).rejects.toMatchObject({
     name: 'AbortError',
   });
   expect(native.getSources).not.toHaveBeenCalled();
-  let finish!: (sources: unknown[]) => void;
-  native.getSources.mockImplementationOnce(
-    () =>
-      new Promise((resolve) => {
-        finish = resolve;
-      }),
-  );
-  const active = new AbortController(),
-    image = source();
-  const pending = captureFile(window, 'win32', active.signal);
-  active.abort();
-  finish([image]);
-  await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
-  expect(image.thumbnail.toPNG).not.toHaveBeenCalled();
+  const active = new AbortController();
+  native.encode.mockImplementationOnce(async () => {
+    active.abort();
+    return { file: { name: 'screenshot.png', bytes: new Uint8Array([1]) }, preview: 'synthetic' };
+  });
+  await expect(captureFile(window, 'win32', active.signal)).rejects.toMatchObject({
+    name: 'AbortError',
+  });
 });
-
 it.each(['win32', 'darwin'] as const)(
-  '在%s提前准备只枚举元数据，不读取或编码图像',
+  'prepares metadata only on %s and releases listeners',
   async (platform) => {
     const owner = Object.assign(new EventEmitter(), window) as unknown as BrowserWindow;
     const image = source();
@@ -214,13 +206,12 @@ it.each(['win32', 'darwin'] as const)(
       thumbnailSize: { width: 0, height: 0 },
       fetchWindowIcons: false,
     });
-    expect(image.thumbnail.getSize).not.toHaveBeenCalled();
-    expect(image.thumbnail.toPNG).not.toHaveBeenCalled();
-    expect(image.thumbnail.resize).not.toHaveBeenCalled();
+    expect(image.thumbnail.toBitmap).not.toHaveBeenCalled();
+    expect(native.encode).not.toHaveBeenCalled();
     expect(owner.listenerCount('closed')).toBe(0);
   },
 );
-it('Mac未授权或窗口已关闭时准备不发起屏幕枚举', async () => {
+it('does not prepare an unauthorized Mac or a closed window', async () => {
   native.getMediaAccessStatus.mockReturnValue('denied');
   await prepareInterviewScreenshot(window, 'darwin');
   await prepareInterviewScreenshot(
@@ -229,70 +220,44 @@ it('Mac未授权或窗口已关闭时准备不发起屏幕枚举', async () => {
   );
   expect(native.getSources).not.toHaveBeenCalled();
 });
-it('关闭和超时会结束准备并释放监听，准备失败不阻止实际截图', async () => {
+it('retires preparation on close or timeout and permits a later explicit capture', async () => {
   const owner = Object.assign(new EventEmitter(), window) as unknown as BrowserWindow;
-  let finish!: (value: unknown[]) => void;
-  native.getSources.mockReturnValueOnce(
-    new Promise((resolve) => {
-      finish = resolve;
-    }),
-  );
+  native.getSources.mockReturnValueOnce(new Promise(() => {}));
   const pending = prepareInterviewScreenshot(owner, 'win32');
   owner.emit('closed');
   await pending;
   expect(owner.listenerCount('closed')).toBe(0);
-  const late = source();
-  finish([late]);
-  await Promise.resolve();
-  expect(late.thumbnail.toPNG).not.toHaveBeenCalled();
   vi.useFakeTimers();
   native.getSources.mockReturnValueOnce(new Promise(() => {}));
   const timed = prepareInterviewScreenshot(owner, 'win32');
   await vi.advanceTimersByTimeAsync(10001);
   await timed;
   expect(owner.listenerCount('closed')).toBe(0);
-  native.getSources.mockResolvedValueOnce([source()]);
   expect(
     (await captureFile(window, 'win32', new AbortController().signal)).bytes.length,
   ).toBeGreaterThan(0);
 });
-it('完整截图与预览复用原生图像，每次点击仍重新获取新图', async () => {
+it('takes a fresh frame per click and uses the private encoder for native capture ports', async () => {
   const first = source(),
-    second = source(),
-    preview = source();
-  first.thumbnail.toPNG.mockReturnValue(Buffer.from([1]));
-  second.thumbnail.toPNG.mockReturnValue(Buffer.from([2]));
-  for (const image of [first, second]) image.thumbnail.resize.mockReturnValue(preview.thumbnail);
-  native.getSources.mockResolvedValueOnce([first]).mockResolvedValueOnce([second]);
-  const before = await captureInterviewScreenshot(window, 'win32', new AbortController().signal);
-  const after = await captureInterviewScreenshot(window, 'win32', new AbortController().signal);
-  expect(before.file.bytes).toEqual(new Uint8Array([1]));
-  expect(after.file.bytes).toEqual(new Uint8Array([2]));
-  expect(native.getSources).toHaveBeenCalledTimes(2);
-  expect(first.thumbnail.toPNG).toHaveBeenCalledOnce();
-  expect(second.thumbnail.toPNG).toHaveBeenCalledOnce();
-  expect(preview.thumbnail.toJPEG).toHaveBeenCalledWith(75);
-  expect(before.preview).toMatch(/^data:image\/jpeg;base64,/);
-});
-
-it('注入原生取屏端口时沿用共享编码与预览，取消后不处理迟到帧', async () => {
-  const image = source(),
-    preview = source();
-  image.thumbnail.resize.mockReturnValue(preview.thumbnail);
-  const capture = vi.fn().mockResolvedValue(image.thumbnail);
+    second = source();
+  const capture = vi
+    .fn()
+    .mockResolvedValueOnce(first.thumbnail)
+    .mockResolvedValueOnce(second.thumbnail);
   await captureInterviewScreenshot(window, 'win32', new AbortController().signal, capture);
-  expect(capture).toHaveBeenCalledOnce();
+  await captureInterviewScreenshot(window, 'win32', new AbortController().signal, capture);
   expect(native.getSources).not.toHaveBeenCalled();
-  expect(image.thumbnail.toPNG).toHaveBeenCalledOnce();
-  expect(preview.thumbnail.toJPEG).toHaveBeenCalledWith(75);
-  image.thumbnail.toPNG.mockClear();
+  expect(capture).toHaveBeenCalledTimes(2);
+  expect(native.encode).toHaveBeenCalledTimes(2);
+  expect(first.thumbnail.toBitmap).toHaveBeenCalledOnce();
+  expect(second.thumbnail.toBitmap).toHaveBeenCalledOnce();
   const controller = new AbortController();
   capture.mockImplementation(async () => {
     controller.abort();
-    return image.thumbnail;
+    return first.thumbnail;
   });
   await expect(
     captureInterviewScreenshot(window, 'win32', controller.signal, capture),
   ).rejects.toMatchObject({ name: 'AbortError' });
-  expect(image.thumbnail.toPNG).not.toHaveBeenCalled();
+  expect(first.thumbnail.toBitmap).toHaveBeenCalledOnce();
 });

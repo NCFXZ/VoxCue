@@ -1,0 +1,105 @@
+import { describe, expect, it, vi } from 'vitest';
+import { prepareChatRequest } from '../../../../shared/src/services/chat';
+import { CHAT_TEXT_LIMIT, CHAT_TURN_LIMIT } from '../../../../shared/electron/contracts/chat';
+
+const request = (turns: Parameters<typeof prepareChatRequest>[0]['turns']) => ({
+  id: 'synthetic-context',
+  modelId: 'synthetic-model',
+  webSearch: false,
+  instructions: 'instructions',
+  turns,
+});
+function attachment(name: string, size = 1) {
+  const file = new File(['x'], name);
+  // Exercise oversized metadata without allocating hundreds of MiB in the test.
+  Object.defineProperty(file, 'size', { value: size });
+  const read = vi.spyOn(file, 'arrayBuffer');
+  return { value: { name, file }, read };
+}
+
+describe('preparation attachment allocation budget', () => {
+  it('refuses an oversized complete history before reading any earlier attachment', async () => {
+    const first = attachment('first.txt', 20 * 1024 ** 2);
+    const second = attachment('second.txt', 20 * 1024 ** 2);
+    await expect(
+      prepareChatRequest(
+        request([
+          { role: 'user', content: 'old', files: [first.value] },
+          { role: 'assistant', content: 'reply' },
+          { role: 'user', content: 'new', files: [second.value] },
+        ]),
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('合计 32 MB');
+    expect(first.read).not.toHaveBeenCalled();
+    expect(second.read).not.toHaveBeenCalled();
+  });
+
+  it('checks count, turn and instruction-inclusive text limits before reading', async () => {
+    const item = attachment('small.txt');
+    for (const input of [
+      request([{ role: 'user', content: '', files: Array(21).fill(item.value) }]),
+      request(
+        Array.from({ length: CHAT_TURN_LIMIT + 1 }, () => ({
+          role: 'user' as const,
+          content: '',
+          files: [item.value],
+        })),
+      ),
+      request([{ role: 'user', content: 'x'.repeat(CHAT_TEXT_LIMIT), files: [item.value] }]),
+    ])
+      await expect(prepareChatRequest(input, new AbortController().signal)).rejects.toThrow();
+    expect(item.read).not.toHaveBeenCalled();
+  });
+
+  it('stops after an in-flight read when cancelled, without starting the next file', async () => {
+    const first = attachment('first.txt');
+    const second = attachment('second.txt');
+    let finish!: (data: ArrayBuffer) => void;
+    first.read.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve;
+        }),
+    );
+    const controller = new AbortController();
+    const pending = prepareChatRequest(
+      request([{ role: 'user', content: '', files: [first.value, second.value] }]),
+      controller.signal,
+    );
+    expect(first.read).toHaveBeenCalledOnce();
+    expect(second.read).not.toHaveBeenCalled();
+    controller.abort();
+    finish(new ArrayBuffer(1));
+    await expect(pending).rejects.toMatchObject({ name: 'AbortError' });
+    expect(second.read).not.toHaveBeenCalled();
+  });
+
+  it('preserves turn order, names and bytes within the existing budget', async () => {
+    const first = attachment('first.txt');
+    const second = attachment('second.txt');
+    const result = await prepareChatRequest(
+      request([
+        { role: 'user', content: 'old', files: [first.value] },
+        { role: 'assistant', content: 'reply' },
+        { role: 'user', content: 'new', files: [second.value] },
+      ]),
+      new AbortController().signal,
+    );
+    expect(result.turns).toEqual([
+      {
+        role: 'user',
+        content: 'old',
+        files: [{ name: 'first.txt', bytes: new Uint8Array([120]) }],
+      },
+      { role: 'assistant', content: 'reply', files: undefined },
+      {
+        role: 'user',
+        content: 'new',
+        files: [{ name: 'second.txt', bytes: new Uint8Array([120]) }],
+      },
+    ]);
+    expect(first.read).toHaveBeenCalledOnce();
+    expect(second.read).toHaveBeenCalledOnce();
+  });
+});

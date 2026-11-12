@@ -218,6 +218,15 @@ it('rejects old-session commands and a stale stop that targets a different answe
   );
 });
 
+it('keeps session epochs monotonic after the process clock moves backwards', async () => {
+  const previousEpoch = current().sessionEpoch;
+  vi.setSystemTime(previousEpoch - 100_000);
+  useInterview.setState({ sessionId: 'clock-rollback-session' });
+  await vi.advanceTimersByTimeAsync(80);
+  expect(current().sessionId).toBe('clock-rollback-session');
+  expect(current().sessionEpoch).toBeGreaterThan(previousEpoch);
+});
+
 it('consumes a versioned transcript once and rejects the same candidate after it was sent', async () => {
   receiveSpeech({
     type: 'segment',
@@ -297,28 +306,31 @@ it('keeps only the latest replacement while a publication is still in flight', a
   expect(current().answers.at(-1)?.content).toBe('update-99');
 });
 
-it('does no snapshot IPC while the feature is off and publishes the latest state when enabled', async () => {
-  useRemoteConnection.setState((state) => ({
-    state: { ...state.state!, status: 'off', revision: 2 },
-  }));
-  const publish = vi.mocked(window.desktop!.publishRemoteInterview);
-  const before = publish.mock.calls.length;
-  for (let index = 0; index < 100; index++)
-    useInterview.setState({
-      answers: [{ id: 'off-answer', question: 'Q', content: 'latest-' + index }],
-    });
-  useInterview.getState().setAutoAnswer(true);
-  await vi.advanceTimersByTimeAsync(1000);
-  expect(publish).toHaveBeenCalledTimes(before);
-  useRemoteConnection.setState((state) => ({
-    state: { ...state.state!, status: 'waiting', revision: 3 },
-  }));
-  await vi.advanceTimersByTimeAsync(80);
-  expect(publish).toHaveBeenCalledTimes(before + 1);
-  expect(current().answers.at(-1)?.content).toBe('latest-99');
-  expect(current().autoAnswer).toBe(true);
-  expect(current().autoAnswerRevision).toBeGreaterThan(1);
-});
+it.each(['off', 'waiting', 'reconnecting'] as const)(
+  'does no snapshot IPC while %s and publishes the latest state on connection',
+  async (status) => {
+    useRemoteConnection.setState((state) => ({
+      state: { ...state.state!, status, revision: 2 },
+    }));
+    const publish = vi.mocked(window.desktop!.publishRemoteInterview);
+    const before = publish.mock.calls.length;
+    for (let index = 0; index < 100; index++)
+      useInterview.setState({
+        answers: [{ id: 'off-answer', question: 'Q', content: 'latest-' + index }],
+      });
+    useInterview.getState().setAutoAnswer(true);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(publish).toHaveBeenCalledTimes(before);
+    useRemoteConnection.setState((state) => ({
+      state: { ...state.state!, status: 'connected', revision: 3 },
+    }));
+    await vi.advanceTimersByTimeAsync(80);
+    expect(publish).toHaveBeenCalledTimes(before + 1);
+    expect(current().answers.at(-1)?.content).toBe('latest-99');
+    expect(current().autoAnswer).toBe(true);
+    expect(current().autoAnswerRevision).toBeGreaterThan(1);
+  },
+);
 
 it('does not apply a delayed native microphone ACK to a different session', async () => {
   let release!: (value: unknown) => void;

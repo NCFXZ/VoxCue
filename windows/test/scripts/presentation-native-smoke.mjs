@@ -3,39 +3,13 @@ import { probe, stableTarget } from './window-probe.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { realpathSync, lstatSync, readFileSync } from 'node:fs';
-import os from 'node:os';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 
 assert.equal(process.platform, 'win32');
+assert.equal(process.argv.length, 2, 'This check uses the isolated development host only');
 assert.equal(probe('desktop').interactive, true, 'Native mouse checks require an unlocked desktop');
-const testPackage = process.argv
-  .find((arg) => arg.startsWith('--test-package='))
-  ?.slice('--test-package='.length);
-let executablePath;
-if (process.argv.includes('--installer-stage')) {
-  assert.equal(testPackage, undefined);
-  const stage = path.resolve('release/installer-stage/VoxCue-win32-x64');
-  assert.equal(realpathSync(stage), stage);
-  executablePath = path.join(stage, 'VoxCue.exe');
-}
-if (testPackage) {
-  const packageRoot = path.resolve(testPackage),
-    parent = path.dirname(path.dirname(packageRoot));
-  assert.equal(path.dirname(parent), realpathSync(os.tmpdir()));
-  assert.ok(path.basename(parent).startsWith('voxcue-test-run-'));
-  assert.ok(path.basename(path.dirname(packageRoot)).startsWith('platform-layout-'));
-  assert.equal(path.basename(packageRoot), 'VoxCue-win32-x64');
-  assert.equal(lstatSync(parent).isSymbolicLink(), false);
-  assert.equal(realpathSync(parent), parent);
-  const owner = JSON.parse(readFileSync(path.join(parent, '.voxcue-test-owner.json'), 'utf8'));
-  assert.equal(owner.kind, 'voxcue-test-run-');
-  assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0);
-  process.kill(owner.pid, 0);
-  executablePath = path.join(packageRoot, 'VoxCue.exe');
-}
 async function until(read, accept, label) {
   const end = performance.now() + 10000;
   let last;
@@ -49,13 +23,11 @@ async function until(read, accept, label) {
 const profile = path.join(testRoot, 'profile');
 await mkdir(profile);
 const app = await electron.launch({
-  ...(executablePath ? { executablePath } : {}),
-  args: executablePath ? [] : [await offlineElectronEntry()],
+  args: [await offlineElectronEntry()],
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: profile,
     VITE_DEV_SERVER_URL: '',
-    ...(executablePath ? { VOXCUE_ACCOUNT_API: '' } : {}),
   },
 });
 const cursor = probe('cursor');
@@ -658,7 +630,7 @@ try {
       forcedColorsFallback: true,
       wholeWindowOpacity: 1,
       screenPermission: 'not-required',
-      packaged: !!executablePath,
+      packaged: false,
     }),
   );
 } catch (error) {

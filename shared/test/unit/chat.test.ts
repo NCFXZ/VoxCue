@@ -59,6 +59,110 @@ function sse(events: unknown[]) {
   );
 }
 describe('原生 ChatGPT 请求与用量', () => {
+  it('预先取消的请求不读取身份或启动目录网络请求', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    const access = vi.fn(),
+      fetch = vi.fn();
+    const service = new ChatGPTService({ access, fetch, ledger: await ledger() });
+    await expect(service.stream(request, vi.fn(), controller.signal)).rejects.toBe(
+      controller.signal.reason,
+    );
+    expect(access).not.toHaveBeenCalled();
+    expect(fetch).not.toHaveBeenCalled();
+  });
+  it.each(['models', 'identity'])(
+    '等待 %s 的前置阶段也立即响应取消，不发迟到请求',
+    async (stage) => {
+      let entered!: () => void, release!: () => void;
+      const waiting = new Promise<void>((resolve) => {
+        entered = resolve;
+      });
+      const access = { account: 'synthetic', token: 'synthetic' };
+      let reads = 0;
+      const transport = vi.fn(async () => {
+        if (stage === 'models')
+          return new Promise<Response>((resolve) => {
+            release = () => resolve(Response.json(models));
+            entered();
+          });
+        return Response.json(models);
+      });
+      const service = new ChatGPTService({
+        access: async () => {
+          if (++reads === 2 && stage === 'identity')
+            return new Promise<typeof access>((resolve) => {
+              release = () => resolve(access);
+              entered();
+            });
+          return access;
+        },
+        ledger: await ledger(),
+        fetch: transport,
+      });
+      const controller = new AbortController(),
+        emit = vi.fn();
+      let settled = false,
+        outcome: unknown;
+      const pending = service.stream(request, emit, controller.signal).then(
+        (value) => {
+          settled = true;
+          outcome = value;
+        },
+        (error) => {
+          settled = true;
+          outcome = error;
+        },
+      );
+      await waiting;
+      controller.abort();
+      try {
+        await vi.waitFor(() => expect(settled).toBe(true), { timeout: 200 });
+        expect(outcome).toMatchObject({ name: 'AbortError' });
+      } finally {
+        release();
+        await pending;
+      }
+      expect(transport).toHaveBeenCalledOnce();
+      expect(emit).not.toHaveBeenCalled();
+    },
+  );
+  it('损坏的模型目录不把中文响应或账号片段带进公开错误', async () => {
+    const service = new ChatGPTService({
+      access: async () => ({ account: 'synthetic', token: 'synthetic' }),
+      ledger: await ledger(),
+      fetch: async () => new Response('{"密钥":"synthetic-secret",invalid}'),
+    });
+    const failure = await service.models().catch((error) => error);
+    expect(publicFailure(failure)).toEqual({ message: '模型列表响应无效，请重试。' });
+    expect(failure.message).not.toMatch(/synthetic|密钥|invalid/);
+  });
+  it('模型目录按实际流量设上限，拒绝超大响应并允许下次重新获取', async () => {
+    const cancel = vi.fn();
+    const transport = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          new ReadableStream({
+            pull(controller) {
+              controller.enqueue(new Uint8Array(1024 * 1024).fill(32));
+            },
+            cancel,
+          }),
+          { headers: { 'content-length': '1' } },
+        ),
+      )
+      .mockImplementationOnce(async () => Response.json(models));
+    const service = new ChatGPTService({
+      access: async () => ({ account: 'synthetic', token: 'synthetic' }),
+      ledger: await ledger(),
+      fetch: transport,
+    });
+    await expect(service.models()).rejects.toThrow();
+    expect(cancel).toHaveBeenCalledOnce();
+    expect((await service.models()).map((model) => model.id)).toEqual(['model-one', 'model-two']);
+    expect(transport).toHaveBeenCalledTimes(2);
+  });
   it.each([
     new TypeError('synthetic connection reset'),
     new DOMException('synthetic deadline', 'TimeoutError'),

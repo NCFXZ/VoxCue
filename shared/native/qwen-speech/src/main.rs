@@ -1,5 +1,6 @@
 mod alignment;
 mod engine;
+mod protocol;
 mod sentence;
 mod vad;
 use alignment::{Alignment, Completed};
@@ -298,6 +299,13 @@ impl Capture {
     }
 }
 fn main() -> anyhow::Result<()> {
+    // CUDA alignment can fall back to the CPU engine, so both Windows runtime
+    // variants require this check before loading any model or starting a lane.
+    #[cfg(target_os = "windows")]
+    if !qwen_forced_aligner_rs::cpu_features::supported() {
+        emit(json!({"type":"error","seq":null,"code":"unsupported-cpu","message":"Qwen requires AVX2 and FMA"}));
+        anyhow::bail!("Qwen requires AVX2 and FMA")
+    }
     if std::env::args().nth(1).as_deref() == Some("metal-check") {
         #[cfg(feature = "metal")]
         let available = candle_core::Device::new_metal(0).is_ok();
@@ -351,7 +359,10 @@ fn main() -> anyhow::Result<()> {
                         return;
                     }
                 }
-                _ => std::process::exit(1),
+                _ => {
+                    emit(protocol::command_error());
+                    std::process::exit(1);
+                }
             }
         }
     });
@@ -389,7 +400,13 @@ fn main() -> anyhow::Result<()> {
             Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
             Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         };
-        let command: Value = serde_json::from_slice(&bytes)?;
+        let command = match protocol::parse_command(&bytes) {
+            Ok(command) => command,
+            Err(()) => {
+                emit(protocol::command_error());
+                break;
+            }
+        };
         let seq = command["seq"].clone();
         let result = (|| -> anyhow::Result<()> {
             let source = command["source"].as_str().unwrap_or("");

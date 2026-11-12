@@ -1,15 +1,19 @@
-import { _electron as electron } from 'playwright';
+import { electron, testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-const profile = path.resolve('test/results', `interview-access-native-${Date.now()}`);
+if (process.argv.length !== 3 || process.argv[2] !== '--hardware-audio')
+  throw Error(
+    'Physical audio is opt-in: confirm the current scope, then pass only --hardware-audio.',
+  );
+const profile = path.join(testRoot, 'interview-access-native');
 await mkdir(profile, { recursive: true });
 const fixture = path.join(profile, 'main.cjs');
 await writeFile(
   fixture,
-  `const {app}=require('electron');app.setPath('userData',${JSON.stringify(profile)});app.whenReady().then(()=>{});`,
+  `const {app}=require('electron');app.setPath('userData',${JSON.stringify(profile)});app.setPath('sessionData',${JSON.stringify(profile)});app.whenReady().then(()=>{});`,
 );
-const env = { ...process.env };
+const env = { ...process.env, COPILOT_TEST_USER_DATA: profile };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [fixture], env });
 try {
@@ -49,7 +53,6 @@ try {
     report.both.ready,
     report.both.checks.every((check) => check.status === 'granted'),
   );
-  await writeFile(path.join(profile, 'result.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ profile, ...report }, null, 2));
 } finally {
   await app.close();

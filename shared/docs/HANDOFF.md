@@ -1,3 +1,7 @@
+## 2026-11-11 Windows 1.2.0 与 Mac 接续
+
+当前共享版本唯一来源为 shared/package.json 的 1.2.0，Windows Store 映射 2.2.0.0。逐条 1.1.1 → 1.2.0 变化和 Mac 回归见 [MACOS_1.2.0_HANDOFF.md](MACOS_1.2.0_HANDOFF.md)，Mac 专属实现／先验证事项见 [MACOS_1.2.0_TODO.md](MACOS_1.2.0_TODO.md)，可直接使用[接续提示词](MACOS_1.2.0_CODEX_PROMPT.md)。当前执行状态以根 PROGRESS.md 为准；以下章节为历史背景，不能据此恢复已退役的正式包测试或访问真实资料。
+
 ## 2026-10-23 Windows 0.5.7 接续（累计至0.5.8）
 
 完整的0.5.6→0.5.7变化、125个历史变更文件，以及0.5.8新增的更新操作、44px搜索框、登录按钮/面试预览和本机验收步骤见 [WINDOWS_0.5.7_HANDOFF.md](WINDOWS_0.5.7_HANDOFF.md)。当前共享版本源为0.5.8，Windows本机先执行 `pnpm sync:workspace`；Windows与回退Mac共用shared胶囊/圆形及毛玻璃，页面布局与Mac最终实现一致。历史过程说明如有冲突，以该文档0.5.8补充与AGENTS当前规则为准。
@@ -175,7 +179,7 @@ Mac 测试仅合成账户/资料/采集端口与固定公开模型/音频，必�
 
 # VoxCue 当前交接
 
-当前 Windows 入口：test:windows:functional、test:windows:regression、test:installer:isolated、test:ui:dpi。模型及安装态验证使用自有系统临时根，结束清理，不动真实资料/凭据/缓存。窗口保存与快速重新登录、异步 IPC/IndexedDB 测试等待已修正；测试结果仅到终端/对话。Mac 专属 components-smoke 的异步等待适配由 Mac 本机继续，不在 Windows 改写。
+当前 Windows 入口：test:windows:functional、test:windows:regression、test:package、test:ui:dpi。正式包验收使用禁网独立 Windows Sandbox；模型与合成资料只用自有临时目录，结束清理，不动真实资料/凭据/缓存。窗口保存与快速重新登录、异步 IPC/IndexedDB 测试等待已修正；测试结果仅到终端/对话。Mac 专属 components-smoke 的异步等待适配由 Mac 本机继续，不在 Windows 改写。
 
 > 2026-10-18 历史 Mac 主线合并记录：当时用户仅授权原样同步远端已有 Windows 文件，不在 Mac 修改其实现/配置或运行其原生测试，不上传 GitHub。源码版本 0.2.2，Windows 配置和 Copilot 专属清理留待 Windows 本机完成。以下 Windows 续作说明记录远端已合入实现。
 

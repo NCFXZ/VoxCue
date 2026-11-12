@@ -1,11 +1,33 @@
 import { execFileSync } from 'node:child_process';
-import { access, mkdir, readFile, realpath } from 'node:fs/promises';
+import { access, lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 if (process.platform !== 'win32' || path.relative(root, process.cwd()) !== '')
   throw Error('Build the Store package from the Windows workspace');
+const testArgument = process.argv[2];
+if (process.argv.length > 3 || (testArgument && !testArgument.startsWith('--test-output=')))
+  throw Error('Unexpected Store package option');
+const testOutput = testArgument?.slice('--test-output='.length);
+const output = path.resolve(testOutput ?? 'release/store');
+let testOwner;
+if (testArgument) {
+  testOwner = path.dirname(output);
+  if (!testOutput || path.basename(output) !== 'platform-layout-store-package' ||
+      path.dirname(testOwner) !== await realpath(os.tmpdir()) ||
+      !path.basename(testOwner).startsWith('voxcue-test-run-') ||
+      (await lstat(testOwner)).isSymbolicLink() || await realpath(testOwner) !== testOwner)
+    throw Error('Unsafe Store verification output');
+  const marker = path.join(testOwner, '.voxcue-test-owner.json');
+  if (!(await lstat(marker)).isFile() || await realpath(marker) !== marker)
+    throw Error('Invalid Store verification owner marker');
+  const owner = JSON.parse(await readFile(marker, 'utf8'));
+  if (owner.kind !== 'voxcue-test-run-' || !Number.isSafeInteger(owner.pid) || owner.pid <= 0)
+    throw Error('Unknown Store verification owner');
+  process.kill(owner.pid, 0);
+}
 
 // Store builds must not consume host signing inputs, even while a packaging
 // library initializes or eagerly evaluates its fallback environment variables.
@@ -23,13 +45,12 @@ if (!/^\d+\.\d+\.\d+$/.test(version) || major >= 65535 || minor > 65535 || patch
   throw Error(`Unsupported Store package version: ${version}`);
 const storeVersion = `${major + 1}.${minor}.${patch}`;
 
-const output = path.resolve('release/store');
 const resources = path.join(output, 'resources');
 const assets = path.join(resources, 'appx');
 for (const directory of [path.dirname(output), output, resources, assets]) {
   await mkdir(directory, { recursive: true });
   if (path.relative(directory, await realpath(directory)) !== '')
-    throw Error('Store output must use the release directory directly');
+    throw Error('Store output must use its owned directory directly');
 }
 
 const childOptions = { cwd: root, stdio: 'inherit', windowsHide: true };
@@ -46,9 +67,13 @@ execFileSync(
   childOptions,
 );
 execFileSync(assetBuilder, [path.resolve('../shared/public/voxcue.png'), assets], childOptions);
-execFileSync(process.execPath, ['scripts/package-portable.mjs', '--store'], childOptions);
+const stageRoot = testOwner
+  ? path.join(testOwner, 'platform-layout-store-stage')
+  : path.resolve('release/store-stage');
+execFileSync(process.execPath, ['scripts/package-portable.mjs', '--store',
+  ...(testOwner ? ['--test-output=' + stageRoot] : [])], childOptions);
 
-const stage = path.resolve('release/store-stage/VoxCue-win32-x64');
+const stage = path.join(stageRoot, 'VoxCue-win32-x64');
 if (path.relative(stage, await realpath(stage)) !== '')
   throw Error('Unexpected Store staging path');
 const file = `VoxCue-Store-${version}-x64.appx`;

@@ -15,7 +15,8 @@ export function archiveName(value: string) {
   return !name || /^(CON|PRN|AUX|NUL|COM[0-9]|LPT[0-9])(?:\.|$)/i.test(name) ? '_' + name : name;
 }
 /** Use the OS ZIP writer so a large library never accumulates in JavaScript memory. */
-export async function zipDirectory(source: string, destination: string) {
+export async function zipDirectory(source: string, destination: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   const windows = process.platform === 'win32';
   const script =
     "$ErrorActionPreference='Stop'; Add-Type -AssemblyName System.IO.Compression; Add-Type -AssemblyName System.IO.Compression.FileSystem; $source=$env:VOXCUE_ZIP_SOURCE; $zip=[System.IO.Compression.ZipFile]::Open($env:VOXCUE_ZIP_DESTINATION,[System.IO.Compression.ZipArchiveMode]::Create); try { foreach($dir in [System.IO.Directory]::EnumerateDirectories($source,'*',[System.IO.SearchOption]::AllDirectories)) { $name=$dir.Substring($source.Length+1).Replace([char]92,[char]47)+'/'; $null=$zip.CreateEntry($name) }; foreach($file in [System.IO.Directory]::EnumerateFiles($source,'*',[System.IO.SearchOption]::AllDirectories)) { $name=$file.Substring($source.Length+1).Replace([char]92,[char]47); $null=[System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip,$file,$name,[System.IO.Compression.CompressionLevel]::Optimal) } } finally { $zip.Dispose() }";
@@ -28,28 +29,51 @@ export async function zipDirectory(source: string, destination: string) {
         'powershell.exe',
       )
     : '/usr/bin/ditto';
-  await new Promise<void>((resolve, reject) => {
-    const child = spawn(
-      command,
-      windows
-        ? [
-            '-NoProfile',
-            '-NonInteractive',
-            '-EncodedCommand',
-            Buffer.from(script, 'utf16le').toString('base64'),
-          ]
-        : ['-c', '-k', '--norsrc', '--noextattr', source, destination],
-      {
-        windowsHide: true,
-        stdio: 'ignore',
-        env: { ...process.env, VOXCUE_ZIP_SOURCE: source, VOXCUE_ZIP_DESTINATION: destination },
-      },
-    );
-    child.once('error', reject);
-    child.once('exit', (code) =>
-      code === 0 ? resolve() : reject(Error('无法生成压缩包，请检查存储空间。')),
-    );
-  });
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), 5 * 60_000).unref();
+  const cancelled = signal ? AbortSignal.any([signal, deadline.signal]) : deadline.signal;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        command,
+        windows
+          ? [
+              '-NoProfile',
+              '-NonInteractive',
+              '-EncodedCommand',
+              Buffer.from(script, 'utf16le').toString('base64'),
+            ]
+          : ['-c', '-k', '--norsrc', '--noextattr', source, destination],
+        {
+          windowsHide: true,
+          stdio: 'ignore',
+          signal: cancelled,
+          killSignal: 'SIGKILL',
+          env: { ...process.env, VOXCUE_ZIP_SOURCE: source, VOXCUE_ZIP_DESTINATION: destination },
+        },
+      );
+      let failed = false;
+      child.once('error', () => {
+        failed = true;
+      });
+      // Wait for actual process shutdown before removing its source/output files.
+      child.once('close', (code) => {
+        if (!failed && code === 0 && !cancelled.aborted) resolve();
+        else
+          reject(
+            Error(
+              signal?.aborted
+                ? '导出已取消。'
+                : deadline.signal.aborted
+                  ? '生成压缩包超时，请重试。'
+                  : '无法生成压缩包，请检查存储空间或系统策略。',
+            ),
+          );
+      });
+    });
+  } finally {
+    clearTimeout(timer);
+  }
 }
 export class AccountArchive {
   private active?: {
@@ -63,6 +87,7 @@ export class AccountArchive {
     bases: Map<string, string>;
     file?: { handle: FileHandle; remaining: number };
     timer: ReturnType<typeof setTimeout>;
+    controller: AbortController;
   };
   private busy = false;
   private closed = false;
@@ -89,7 +114,10 @@ export class AccountArchive {
     this.generation++;
     const active = this.active;
     this.active = undefined;
-    if (active) clearTimeout(active.timer);
+    if (active) {
+      clearTimeout(active.timer);
+      active.controller.abort();
+    }
     return active;
   }
   private async remove(active: NonNullable<AccountArchive['active']> | undefined) {
@@ -171,6 +199,7 @@ export class AccountArchive {
           used: new Set(),
           bases: new Map(),
           timer,
+          controller: new AbortController(),
         };
         await fs.writeFile(path.join(root, '.owner'), String(process.pid), { mode: 0o600 });
         for (const folder of ['个人信息', '面试记录', '知识库'])
@@ -263,7 +292,11 @@ export class AccountArchive {
                 mode: 0o600,
               });
             }
-            await (this.ports.zip ?? zipDirectory)(images, file.slice(0, -4) + '-截图.zip');
+            await (this.ports.zip ?? zipDirectory)(
+              images,
+              file.slice(0, -4) + '-截图.zip',
+              a.controller.signal,
+            );
             await fs.rm(images, { recursive: true });
           }
         }
@@ -293,7 +326,7 @@ export class AccountArchive {
       } else if (call.action === 'finish') {
         if (a.file || a.remaining || !a.personal) throw Error('资料尚未完整导出。');
         const zip = path.join(a.root, '资料.zip');
-        await (this.ports.zip ?? zipDirectory)(path.join(a.root, 'data'), zip);
+        await (this.ports.zip ?? zipDirectory)(path.join(a.root, 'data'), zip, a.controller.signal);
         if (this.active !== a) throw Error('导出已取消或账号已变化。');
         // Existing user files are only replaced after the complete ZIP is ready.
         const temporary = a.destination + '.' + randomUUID() + '.tmp';

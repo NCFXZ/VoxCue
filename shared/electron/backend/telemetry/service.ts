@@ -473,7 +473,7 @@ export class Telemetry {
         },
       );
       if (!response.ok) {
-        await response.body?.cancel();
+        void response.body?.cancel().catch(() => {});
         const delay = [404, 405, 501].includes(response.status)
           ? 86400000
           : Math.max(60000, retryAfter(response, this.now()));
@@ -579,7 +579,7 @@ export class Telemetry {
       if ([400, 404, 405, 413, 415, 422, 501].includes(response.status)) retryMs = 86400000;
       if (!response.ok) {
         this.queue.lastFailure = 'http_' + response.status;
-        await response.body?.cancel();
+        void response.body?.cancel().catch(() => {});
         throw Error('Unavailable');
       }
       const { accepted, rejected } = receiptIds(await boundedJson(response), events);

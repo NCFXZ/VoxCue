@@ -40,6 +40,8 @@ import { useInterviewSettings } from '../stores/interviewSettings';
 import { resolveInterviewInput, type InterviewInputMode } from '../services/interviewInput';
 import { InterviewInputModeControl } from './InterviewInputModeControl';
 import { RemoteConnectionStatus } from './RemoteConnection';
+import { ShortcutAvailabilityStatus } from './ShortcutSettings';
+import { useShortcuts } from '../stores/shortcuts';
 import { useHeightTransition } from './ui/useHeightTransition';
 import { Modal } from './ui/modal';
 import { ProfileProposal } from './ProfileProposal';
@@ -430,7 +432,10 @@ export function PreparationPage({
         setInterviewKnowledgeName(selectedBase.name);
       } else setInterviewKnowledgeName('不使用知识库');
       if (!current()) return;
-      const report = await window.desktop!.checkInterviewAccess(configuration);
+      const [report] = await Promise.all([
+        window.desktop!.checkInterviewAccess(configuration),
+        useShortcuts.getState().call({ op: 'check' }),
+      ]);
       if (!current()) return;
       setAccessReport(report);
       setInterviewDevices(report.devices);
@@ -760,6 +765,17 @@ export function PreparationPage({
                               <RemoteConnectionStatus />
                             </div>
                           </li>
+                          <li>
+                            <div className="interview-access-row">
+                              <span>{t('快捷键')}</span>
+                              <AccessSkeleton className="interview-access-status-slot">
+                                <span className="interview-access-status">
+                                  <Check size={14} />
+                                  {t('快捷键可用')}
+                                </span>
+                              </AccessSkeleton>
+                            </div>
+                          </li>
                         </ul>
                       </>
                     ) : (
@@ -814,6 +830,12 @@ export function PreparationPage({
                           <div className="interview-access-row">
                             <span>{t('远程连接')}</span>
                             <RemoteConnectionStatus />
+                          </div>
+                        </li>
+                        <li>
+                          <div className="interview-access-row">
+                            <span>{t('快捷键')}</span>
+                            <ShortcutAvailabilityStatus />
                           </div>
                         </li>
                       </ul>

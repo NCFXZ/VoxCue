@@ -155,10 +155,7 @@ export function connectRemoteInterview(): () => void {
   let latest: InterviewState | undefined = useInterview.getState();
   let publishing = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const enabled = () =>
-    ['waiting', 'connected', 'reconnecting'].includes(
-      useRemoteConnection.getState().state?.status ?? '',
-    );
+  const enabled = () => useRemoteConnection.getState().state?.status === 'connected';
   const requests = new Map<string, { fingerprint: string; result: Promise<RemoteCommandResult> }>();
   const flush = () => {
     timer = undefined;
@@ -212,9 +209,17 @@ export function connectRemoteInterview(): () => void {
   });
   const unsubscribeConnection = useRemoteConnection.subscribe((connection, previous) => {
     if (connection.state?.status === previous.state?.status) return;
-    if (!enabled()) return;
+    if (!enabled()) {
+      if (timer) clearTimeout(timer);
+      timer = undefined;
+      return;
+    }
     latest = useInterview.getState();
-    if (!timer && !publishing) timer = setTimeout(flush, 80);
+    if (!publishing) {
+      if (timer) clearTimeout(timer);
+      // Let the connection's authentication reply precede its first snapshot.
+      timer = setTimeout(flush, 0);
+    }
   });
   const execute = async (command: RemoteCommand): Promise<RemoteCommandResult> => {
     const result = (ok: boolean, error?: string): RemoteCommandResult => ({

@@ -19,6 +19,8 @@ export function validateFiles(files: Pick<File, 'name' | 'size'>[]) {
     if (!file.size) throw new Error(`文件为空：${file.name}`);
     if (file.size > 20 * 1024 * 1024) throw new Error(`文件超过 20 MB：${file.name}`);
   }
+  if (new Set(files.map((file) => file.name)).size !== files.length)
+    throw new Error('同一批次包含同名文件，请分批导入。');
 }
 function openDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -86,6 +88,7 @@ export const localKnowledge: KnowledgeManagementService = {
   async deleteBase(id) {
     for (const doc of await localKnowledge.listDocuments(id))
       await deactivateOriginal(doc.id, true);
+    await deleteOriginalBackups((doc) => doc.baseId === id);
     return transaction(['bases', 'documents'], 'readwrite', (tx) => {
       tx.objectStore('bases').delete(id);
       const docs = tx.objectStore('documents');
@@ -110,6 +113,8 @@ export const localKnowledge: KnowledgeManagementService = {
   async importDocuments(baseId, files) {
     if (!files.length) return;
     validateFiles(files);
+    if (baseId === 'personal-resume' && files.length !== 1)
+      throw new Error('每次只能导入一份简历。');
     if (importing) throw new Error('资料处理中，请稍后重试。');
     importing = true;
     try {
@@ -118,7 +123,6 @@ export const localKnowledge: KnowledgeManagementService = {
         baseId === 'personal-resume'
           ? old
           : old.filter((doc) => files.some((file) => file.name === doc.name));
-      await backupOriginals(replaced);
       for (const doc of replaced) await deactivateOriginal(doc.id);
       await transaction<void>(['documents', 'bases'], 'readwrite', (tx) => {
         const write = () => {
@@ -128,6 +132,7 @@ export const localKnowledge: KnowledgeManagementService = {
           request.onsuccess = () => {
             const existing: LocalDocument[] = request.result;
             const names = new Map(existing.map((doc) => [doc.name, doc.id]));
+            if (baseId === 'personal-resume') for (const doc of existing) docs.delete(doc.id);
             for (const file of files) {
               const id = names.get(file.name) ?? crypto.randomUUID();
               names.set(file.name, id);
@@ -158,12 +163,55 @@ export const localKnowledge: KnowledgeManagementService = {
     }
   },
   async deleteDocument(id) {
+    const doc = await transaction<LocalDocument | undefined>(
+      ['documents'],
+      'readonly',
+      (tx, result) => {
+        const request = tx.objectStore('documents').get(id);
+        request.onsuccess = () => result(request.result);
+      },
+    );
+    if (doc?.baseId === 'personal-resume') return localKnowledge.deleteBase(doc.baseId);
     await deactivateOriginal(id, true);
+    await deleteOriginalBackups((doc) => doc.id === id);
     return transaction(['documents'], 'readwrite', (tx) => {
       tx.objectStore('documents').delete(id);
     });
   },
 };
+
+async function deleteOriginalBackups(matches: (doc: LocalDocument) => boolean) {
+  if (
+    typeof indexedDB.databases === 'function' &&
+    !(await indexedDB.databases()).some((database) => database.name === 'voxcue-original-backups')
+  )
+    return;
+  const db = await new Promise<IDBDatabase>((resolve, reject) => {
+    const request = indexedDB.open('voxcue-original-backups', 1);
+    request.onupgradeneeded = () =>
+      request.result.createObjectStore('versions', { keyPath: 'backupId' });
+    request.onsuccess = () => resolve(request.result);
+    request.onerror = request.onblocked = () => reject(Error('原件备份删除失败，请重试。'));
+  });
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('versions', 'readwrite');
+    const request = tx.objectStore('versions').openCursor();
+    request.onsuccess = () => {
+      const cursor = request.result;
+      if (!cursor) return;
+      if (matches(cursor.value)) cursor.delete();
+      cursor.continue();
+    };
+    tx.oncomplete = () => {
+      db.close();
+      resolve();
+    };
+    tx.onerror = tx.onabort = () => {
+      db.close();
+      reject(Error('原件备份删除失败，请重试。'));
+    };
+  });
+}
 /** Originals only. Local parser/vector/model caches are never part of cloud sync. */
 export async function syncKnowledgeSnapshot() {
   return transaction<{ bases: KnowledgeBase[]; documents: LocalDocument[] }>(
@@ -224,7 +272,6 @@ export async function restoreSyncedDocument(
 ) {
   const old = await localKnowledge.listDocuments(doc.baseId);
   const replaced = old.filter((item) => item.id === doc.id || doc.baseId === 'personal-resume');
-  await backupOriginals(replaced);
   for (const item of replaced) await deactivateOriginal(item.id);
   return transaction(
     ['documents'],
@@ -261,32 +308,4 @@ export async function previewDocument(doc: LocalDocument): Promise<string> {
     (await doc.blob.slice(0, 100000).text()) +
     (doc.size > 100000 ? '\n\n…预览仅显示前 100 KB。' : '')
   );
-}
-
-async function backupOriginals(documents: LocalDocument[]) {
-  if (!documents.length) return;
-  const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    const request = indexedDB.open('voxcue-original-backups', 1);
-    request.onupgradeneeded = () =>
-      request.result.createObjectStore('versions', { keyPath: 'backupId' });
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(Error('原件备份失败，未替换文档。'));
-  });
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction('versions', 'readwrite');
-    for (const doc of documents)
-      tx.objectStore('versions').add({
-        ...doc,
-        backupId: crypto.randomUUID(),
-        backedUpAt: Date.now(),
-      });
-    tx.oncomplete = () => {
-      db.close();
-      resolve();
-    };
-    tx.onerror = tx.onabort = () => {
-      db.close();
-      reject(Error('原件备份失败，未替换文档。'));
-    };
-  });
 }

@@ -38,9 +38,69 @@ export async function openReasoningControl(
   return popup;
 }
 export async function openModelMenu(page, triggerLabel = '聊天模型', effortLabel = '思考强度') {
+  const triggerId = await page
+    .getByRole('button', { name: triggerLabel, exact: true, includeHidden: true })
+    .getAttribute('id');
   const popup = await openReasoningControl(page, triggerLabel, effortLabel);
+  const owner = {
+    triggerId,
+    popupId: await popup.getAttribute('id'),
+  };
   await popup.getByRole('button', { name: '选择模型', exact: true }).click();
-  await popup.getByRole('menuitemradio').first().waitFor();
+  try {
+    await popup.getByRole('menuitemradio').first().waitFor();
+  } catch (error) {
+    const diagnostic = await page
+      .evaluate(async ({ triggerId, popupId }) => {
+        const trigger = triggerId ? document.getElementById(triggerId) : null;
+        const controlledId = trigger?.getAttribute('aria-controls');
+        const describe = (node) =>
+          node
+            ? {
+                role: node.getAttribute('role'),
+                label: node.getAttribute('aria-label'),
+                panel: node.querySelector('.reasoning-popup-view')?.getAttribute('data-panel'),
+                visible: node.checkVisibility({ opacityProperty: true, visibilityProperty: true }),
+                hidden: node.getAttribute('aria-hidden'),
+                inert: node.inert || !!node.closest('[inert]'),
+                menuItems: node.querySelectorAll('[role="menuitemradio"]').length,
+              }
+            : null;
+        const state = {
+          triggerId,
+          popupId,
+          controlledId,
+          sameOwner: !!controlledId && controlledId === popupId,
+          expanded: trigger?.getAttribute('aria-expanded'),
+          nativeDialogOpen: trigger?.closest('dialog')?.open,
+          owned: describe(controlledId ? document.getElementById(controlledId) : null),
+          original: describe(popupId ? document.getElementById(popupId) : null),
+        };
+        let timer;
+        try {
+          const models = await Promise.race([
+            (location.hash === '#interview'
+              ? window.desktop.interviewModels()
+              : window.desktop.chatModels(false)
+            )
+              .then((result) => ({
+                modelsOk: result.ok,
+                configuredModels: result.ok ? result.models.length : null,
+              }))
+              .catch(() => ({ modelsOk: false, configuredModels: null })),
+            new Promise((resolve) => {
+              timer = setTimeout(() => resolve({ modelsLookupTimedOut: true }), 1000);
+            }),
+          ]);
+          return { ...state, ...models };
+        } finally {
+          clearTimeout(timer);
+        }
+      }, owner)
+      .catch(() => ({ unavailable: true, ...owner }));
+    console.error('OWNED_MODEL_MENU_DIAGNOSTIC', diagnostic);
+    throw error;
+  }
   return popup;
 }
 export async function enterDemoUiAccount(app, login) {
@@ -265,7 +325,9 @@ export async function installUiAccount(app, { speech = false, components = false
         SpeechHardwareProbe.prototype.read = async () => ({
           cuda: process.platform === 'win32',
           metal: process.platform === 'darwin',
+          qwenCpu: true,
         });
+        SpeechHardwareProbe.prototype.cpu = async () => ({ qwenCpu: true });
         if (components)
           require(
             path.join(root, 'dist-electron/shared/electron/backend/speech/models.js'),

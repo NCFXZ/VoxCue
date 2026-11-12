@@ -1,6 +1,22 @@
+## 当前源码安全修复
+
+当前进入 Windows 1.2.0／Store 2.2.0.0 发行验证，清理、完整回归、修复及发布范围以根 PROGRESS.md 的最新授权为准。共享安全设计见 [安全与任务生命周期加固](../docs/SECURITY_HARDENING.md)，逐项 Mac 回归见 [1.2.0 交接](../docs/MACOS_1.2.0_HANDOFF.md)及[专属待办](../docs/MACOS_1.2.0_TODO.md)。下面历史矩阵不能覆盖现行测试隔离要求；正式包仍须 OS 隔离，不能恢复旧入口或用测试环境变量隔离产品。
+
+测试 owner 只允许已知开发宿主与 owned entry，或严格校验的 inert 安装夹具；正式包不编入产品测试标志。Windows `pnpm test:package` 先构建当前源码，再由 `store-package-smoke.mjs` 在自有临时目录打包并验收，使用独立 Windows Sandbox 账号、空 guest vault、禁网及无宿主 profile 映射。真实生产 renderer 通过 CDP／公开 preload 验证包身份和合成资料重载；同版本开发宿主另在 guest 加载最终 ASAR 验证实际 SDK、Paraformer／知识库子进程与移动资源闭包，不执行产品 main 或登录真实服务。两个 guest 检查助手均在连接／加载前核对身份和临时归属。普通开发 UI 夹具仍禁止正式凭据助手；旧 owner 正式包夹具及不可用参数已退役，不得恢复 fuses、修改包字节或加入正式包测试环境覆盖。现有格式的持久化／重载不代称历史二进制逐版本升级验收。
+
+最终 NSIS 另用 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 和 `--nsis-upgrade` 串行验收，各自启动全新禁网 guest，保护宿主安装与资料。前者安装当前 `release/installer` 原包；后者先按发行记录固定 SHA256 认证真实归档 1.1.1，使用其实际 renderer 写入合成资料并正常退出，再沿真实注册路径安装当前包。升级／重启阶段只读核对原件字节、个人资料／JD、记录、主题／语言和快捷键，不重新写入种子。每阶段必须自然关闭且无残留包内子进程，超时判失败；不注入 main、不开 inspector、不添加 DLL 或测试环境覆盖，前后复核两原件。当前安装包须通过既有 Ed25519／SHA512 认证，安装后核对最终 ASAR；原生闭包仍由 APPX guest 的原身份栅栏验证，不把这些资料验收称为 NSIS 全部原生功能覆盖。
+
+临时安全产物检查使用 `node test/scripts/security-package-smoke.mjs`，加 `--with-screenshot-worker` 可验证打包后的截图 Worker 原生依赖；签名备份恢复演练只用临时合成身份，真实离线加密备份仍由 owner 本机完成。安装目录完全缺失时可按默认注册路径修复，原生未引用的 `/D=同缺失路径` 受 Builder early `SetOutPath` 限制仍拒绝，细节见上述安全文档。
+
+本轮云同步在引擎层合并状态汇总；组件新增本地 IPC 租约与可信前驱／新归属回收策略，只用合成目录回归，不扫描真实历史缓存。手机协议 v2 加处理确认与单帧窗口，旧页面需重新打开；调时／重载先用受控 Date 验证，不修改系统时钟。`node test/scripts/store-sandbox-smoke.mjs --copilot-vault` 只在全新禁网 guest 用合成账号验证 SDK 共享槽、原全局退出影响及 VoxCue 本地退出保留 CLI 登录；只枚举 guest 凭据目标名，不读取 CredentialBlob，不触碰宿主凭据。
+
+Windows 复审的附件预检、响应取消、SDK／utility 退休与资料 writer 回归纳入现有 Vitest 入口。`node ../shared/test/scripts/quit-drain-smoke.mjs` 在解锁控制台串行验证真实 Electron 的空队列及重复退出，不加载产品 main、模型或凭据；资料删除的实际 main 绑定由 `account-erasure-smoke.mjs --synthetic-dialog` 使用固定服务端引用和合成资料验证，关闭超时也判失败。macOS 只接续共享改动的本机回归，不能用 Windows 成绩代验。
+
+以下版本矩阵保留历史发行入口，实际执行范围与平台待办以当前授权和 PROGRESS.md 为准。
+
 ## 1.1.1 Windows 接续
 
-用户确认在 Windows 本机接续，逐条变化、预期、平台差异与执行顺序见 [Windows 1.1.0 → 1.1.1 更新与测试交接](../docs/WINDOWS_1.1.1_HANDOFF.md)，编号 W001–W032。先同步本机生成清单，补齐五档调度遗漏的帮助窗／记录滚动／额度／更新专项；真实 1.1.0 profile 升级与合成安装引擎分别验证。Mac 结果不代替 Windows 原生结论。
+用户确认在 Windows 本机接续，逐条变化、预期、平台差异与执行顺序见 [Windows 1.1.0 → 1.1.1 更新与测试交接](../docs/WINDOWS_1.1.1_HANDOFF.md)，编号 W001–W032。先同步本机生成清单，补齐五档调度遗漏的帮助窗／记录滚动／额度／更新专项；Windows 正式包及安装引擎使用上文安全验包和下文合成入口，历史旧包资料升级记录不作为当前执行入口。Mac 结果不代替 Windows 原生结论。
 
 Windows 原生登录默认保留五档 DPI、浅深主题和两种尺寸；`windows-suite --windows` 将其按 DPI 拆成独立子任务，每个仍使用原 360 秒看门狗及完整行为断言。独立入口 `login-actions-native-smoke.mjs --scale=1|1.25|1.5|1.75|2` 可定向复测，无参数仍执行全部五档；通用 `windows-suite --dpi` 保留每项原 180 秒时限与全部既有组。
 
@@ -89,7 +105,7 @@ Mac 全量验证还需在 `macos/` 串行执行以下独立专项；默认功能
 
 准备聊天、面试前设置及活动面试设置均将模型与思考档位合并为一个入口。设置入口默认采用与其他下拉框一致的灰底和既有材质，模型名与档位相邻、箭头靠右；准备聊天入口继续仅悬浮显示反馈。保存忙碌状态结束后，焦点仍为空时才恢复组合入口；模型 ID 缺失时显示不可用状态并保留真实选择。定向入口为 `composer-smoke.mjs`、`ui-alignment-smoke.mjs`、`web-materials-smoke.mjs`、`ui-material-refinement-smoke.mjs`、`provider-ui-smoke.mjs` 和 `typography-smoke.mjs`；从本平台目录串行执行，核对显式支持的滑块档位、模型选择与刷新、键盘与焦点、浅深色及窄布局。本轮弹层复核范围包含 6px 公共内边距、40px 连续圆角外框、内层菜单滚动、滑块上方合并显示档位和模型的按钮，以及弹出、思考面板与模型列表切换和减少动态效果；深色模式另核对浅灰滑块头及较低亮度的填充轨道。拖动连续跟手、松手吸附和点击/键盘切换的过渡由真实鼠标/键盘及中间帧验证。Windows 的 `interview-effort-smoke.mjs` 还核对活动面试设置拖动结束后才提交档位。共享测试辅助 `openReasoningControl` 打开思考面板，`openModelMenu` 经同一按钮进入模型列表；不再查找独立的模型和思考强度按钮。能力归一化与历史自动值兼容入口为 `interview-settings.test.ts` 和 `renderer/stores/preparation.test.ts`，不修改存储格式。
 
-共享功能与 Mac 本机矩阵以当前调度器的列表为准：本平台目录运行 `node ../shared/test/scripts/functional-suite.mjs --list`，Mac 五档另运行 `node test/scripts/ui-refinement-matrix.mjs --list`；Windows 原生与 DPI 按 `windows-suite.mjs` 当前固定清单执行。保留 `language` 与 `preparation-guide` 等全部现有组。Windows临时验包使用`portable-native-smoke.mjs --with-installer`；Mac使用`package-runtimes-smoke.mjs`与`package-smoke.mjs --install-archive`验证指定`VOXCUE_TEST_RELEASE_DIR`的最终资产。发行范围以当前`PROGRESS.md`为准。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
+共享功能与 Mac 本机矩阵以当前调度器的列表为准：本平台目录运行 `node ../shared/test/scripts/functional-suite.mjs --list`，Mac 五档另运行 `node test/scripts/ui-refinement-matrix.mjs --list`；Windows 原生与 DPI 按 `windows-suite.mjs` 当前固定清单执行。保留 `language` 与 `preparation-guide` 等全部现有组。Windows 临时验包使用 `store-package-smoke.mjs` 和 `security-package-smoke.mjs`；Mac 使用 `package-runtimes-smoke.mjs` 与 `package-smoke.mjs --install-archive` 验证指定 `VOXCUE_TEST_RELEASE_DIR` 的最终资产。发行范围以当前 `PROGRESS.md` 为准。数学渲染安全检查同时覆盖原型污染、危险命令和大量未闭合分隔符。此处只维护执行入口，测试结果仅终端/对话。
 
 Mac 五档矩阵的 `--list` 只列缩放、完整功能清单及资源需求，不启动 GUI 或准备模型；`--suite=<name,...>` 配合 `--scale=<固定五档之一>` 用于修复后的定向复测，未指定时仍运行列表中的全部组和五档缩放。单独选择已审计的合成专项时沿用共享 `needsModels` 策略，默认完整矩阵及未知/真实推理专项仍校验固定模型。矩阵全程检查解锁的 owner 控制台，锁定/未知立即终止当前子进程并停止后续 GUI；原180秒超时和断言不变，普通失败或启动错误继续其余所选项并最终返回非零。
 
@@ -167,7 +183,7 @@ Mac `node test/scripts/cloud-form-lifecycle-smoke.mjs`另外验证真实React表
 
 邮箱账号专项：客户端从忽略参考导入src，以新临时SQLite和内存邮件验证；用户追加授权的独立服务端源码及完整测试范围见0.5.2接续，本轮已部署既有腾讯云0.5.2；合成测试不操作真实账号。`cloud-protocol-smoke.mjs`验证register/reset挑战隔离、真实429、旧非NFC短密码、单次refresh轮换及100→101→100MB后的分类限制。桌面入口包括cloud-account、cloud-sync、cloud-data、account-archive和account-usage-summary单元测试。实际界面为shared/test/scripts/cloud-account-smoke.mjs（Node 24）；--login-check只检查登录表单，默认检查三类同步、知识库满额时JD删改及保留本地文件的云端删除，--preview额外检查浅深主题、窄窗口、设置顺序和图标几何。使用隔离本机服务、内存邮件与合成AI/组件状态；不连接真实账户、不使用真实资料或采样硬件，也不将模型可用性替身作为推理验收。退出清理临时输出。服务端边界见[只读参考](../docs/SERVER_0.5.1_REFERENCE.md)。
 
-0.5.11 的 `chatgpt-usage-runtime` 使用仅接收不应答的本机代理和有效期内的合成令牌，要求五秒内完成官方令牌交接，防止立即拒绝代理掩盖重复强制续期。Mac 子进程的 sandbox 只允许该次自有 loopback 端口，外网继续禁止；`macos/test/scripts/chatgpt-renewal-smoke.mjs` 另做旧强制续期对照、临近过期/过期的官方续期、续期失败、重复读取、退出与迟到结果，并检查其他端口/外网被拒绝。最终 Mac ASAR 的 `package-runtimes-smoke` 复用该夹具；Windows ASAR 保留 `package-runtimes-check`。全部仅合成凭据，固定 Copilot/Codex 实际解包路径和系统凭据隔离保持。方案见 [Mac 0.5.11 交接](../docs/MACOS_0.5.11_HANDOFF.md)，Windows 本轮结果见 [验收](../docs/WINDOWS_0.5.11_VERIFICATION.md)。
+0.5.11 的 `chatgpt-usage-runtime` 使用仅接收不应答的本机代理和有效期内的合成令牌，要求五秒内完成官方令牌交接，防止立即拒绝代理掩盖重复强制续期。Mac 子进程的 sandbox 只允许该次自有 loopback 端口，外网继续禁止；`macos/test/scripts/chatgpt-renewal-smoke.mjs` 另做旧强制续期对照、临近过期/过期的官方续期、续期失败、重复读取、退出与迟到结果，并检查其他端口/外网被拒绝。最终 Mac ASAR 的 `package-runtimes-smoke` 复用该夹具。全部仅合成凭据，固定 Copilot/Codex 实际解包路径和系统凭据隔离保持。方案见 [Mac 0.5.11 交接](../docs/MACOS_0.5.11_HANDOFF.md)，Windows 历史结果见 [验收](../docs/WINDOWS_0.5.11_VERIFICATION.md)。
 
 Mac 0.5.11 的 Loader 保留 AppKit 生成的 SF Symbols 形状，使用逐段亮度动画；本地组件校验同步使用同一加载样式，Windows 圆环不变。侧栏更新专项会停留在合成安装准备态，检查浅深色、可见像素变化与减少动态效果，不执行真实更新。历史Mac 0.5.11五档矩阵为六组/共30项，0.6.0为每档十组。当前0.6.2移除已撤计费入口，并补密码、免费服务和账号注销，每档十二组、五档共60组；interview-usage继续保留在完整功能矩阵。`--screenshots=<owner临时绝对目录>`按缩放和场景分目录收集自有窗口图片，目视后由调用者核对占用并清理，默认不保存图片。GUI/原生串行，原180秒单项时限及五档缩放保持。
 
@@ -215,7 +231,7 @@ Mac的`node test/scripts/sidebar-glass-smoke.mjs --content-only`另检查32px侧
 
 先按 WINDOWS_0.5.9_HANDOFF.md 同步本机固定依赖/配置，macos/ 只读。`test:windows:functional`、`test:windows:regression`、`test:ui:dpi` 串行覆盖共享界面、本平台原生及五档缩放；旧夹具使用当前托管登录、系统强调色、账户卡悬停色和六个设置分类，保留未知错误不重试及原排版要求。额度窗口对照原生实际内容宽度，间距按 Chromium 的 1/64 CSS 像素单位核对 4px，避免分数 DPI 的浮点表示差异。
 
-`test:portable:native` 和 `test:installer:isolated` 在自有临时根构建负载并检查薄包、固定 win32-x64 SDK/运行时、真实 ASAR 代码与 unpacked 可执行路径。包内 Copilot 使用 empty stdio ping；Codex 使用临时空 file store/伪造令牌和拒绝代理，无真实 OAuth/推理。Koffi 不构建、不入包；继续拒绝模型、外平台二进制、密钥和本项目开发/测试文件。隔离安装只检查负载，不执行生产安装器。
+Windows 正式包验收使用上文 `store-package-smoke.mjs` 的独立 Sandbox；`security-package-smoke.mjs` 检查实际 fuse、ASAR 与依赖安全边界。它们不自动等同于历史包内 SDK 握手、ASR／RAG 推理或真实旧 profile 升级覆盖；各项以当前脚本断言为准，不登录真实服务。
 
 在 `windows/` 执行 `node ../shared/test/scripts/interview-screenshot-smoke.mjs --native-hits`，复用完整合成截图链路，另由 `image-save-hit-check.mjs` 检查实际 HWND 的中心/四边、HTCLIENT/no-drag、浅深色稳定图标和外部悬停；`ImageSaveDialog.cs` 仅操作精确 PID/HWND 所属系统保存对话框，以临时 profile 为默认目录，验证真实保存/取消及字节一致。真实触控板、多显示器、账户推理和物理采样另行区分，不由合成事件代验。所有产物退出清理，结果只到终端/对话。
 
@@ -366,11 +382,9 @@ pnpm test:ui:dpi
 
 版本由共享源生成 Windows 0.5.5；共享矩阵 34 项，原生矩阵 15 项，五档 DPI 每档 8 项。依赖与锁保持现有版本，macos/ 只读；下列安装包、更新、公开模型和隔离安装引擎入口继续用于本版。
 
-`node test/scripts/installer-ui-smoke.mjs profile-selection` 在实际安装器暂存 ASAR 中复用全部逐项资料检查，继续使用隔离账户与临时 userData；与包内 chat-progress、adversarial、updates 三项串行运行。
-
 ## Windows 0.5.3 本地接续入口
 
-发行前使用 `windows-suite.mjs`、`--windows` 与 `--dpi` 分别串行检查共享功能、Windows 原生和五档缩放。`interview-typography-smoke.mjs` 另阻断独立 ChatGPT SVG 文件，实际解码登录、预览和面试回答标识并保留浅深色检查；固定标识随 Renderer 内嵌，记录及包级入口同样检查解码。正式安装器用 `installer-artifact-smoke.mjs` 核对 SHA512、blockmap 和实际负载，`portable-native-smoke.mjs --installer-stage` 运行同一 ASAR，`installer-engine-smoke.mjs` 以独立 GUID 验证 0.5.1→当前版本安装/更新/卸载与资料保护，不运行真实身份的安装器。
+发行前使用 `windows-suite.mjs`、`--windows` 与 `--dpi` 分别串行检查共享功能、Windows 原生和五档缩放。`interview-typography-smoke.mjs` 另阻断独立 ChatGPT SVG 文件，实际解码登录、预览和面试回答标识并保留浅深色检查；固定标识随 Renderer 内嵌，记录专项同样检查解码。正式安装器用 `installer-artifact-smoke.mjs` 核对 SHA512、blockmap 和实际负载；`installer-engine-smoke.mjs`、`installer-upgrade-smoke.mjs` 使用独立身份和合成负载验证安装／更新／卸载，不运行真实身份的安装器，也不代替旧产品资料兼容验证。
 
 Windows 配置由共享版本源生成 0.5.3，沿用共享功能矩阵与 `windows/test/scripts/windows-suite.mjs` 的原生/五档 DPI 入口。GUI 语音夹具使用合成平台能力；实际 CUDA 探测由原生入口验证。Windows AEC 的源代码与 ASAR 夹具均经过 Recognizer/RecognitionRouter，不再替换已退到内层 Worker 的旧引擎入口。
 
@@ -440,9 +454,9 @@ Mac目录内运行 `node test/scripts/app-icon-smoke.mjs`，用临时透明合�
 
 # VoxCue 测试入口
 
-Windows 0.5.0新增`node test/scripts/echo-cancellation-smoke.mjs`，`--runtime-bundle`检查临时ASAR，`--packaged`构建并清理临时完整便携布局（不生成安装器）；均使用真实Electron Worker、固定本地AEC3 WASM与sherpa重采样，推理替身只收集DSP输出。`wasapi-packets-smoke.mjs`编译生产C#纯转换器，用合成多声道包验证混音/QPC/标志/分片解码，不实例化音频设备；`electron-output-smoke.mjs`验证Windows真实无共享文件锁、部分写入回滚、并发锁和目录身份。它们纳入Windows原生矩阵；五档DPI增加interview-ux，保留原有六组。AEC单测覆盖延迟回声、独立同时人声、0/120ms声学延迟、35ms启动差/持续时钟漂移、参考失效/缺失、四档采样率、尾段/间断及20次重连；capture-drain与speech-restart检查管道末包/prepare/QPC/旧回调。全部结果只在终端，临时资料退出清理；不采样硬件或真实屏幕。
+Windows 0.5.0新增`node test/scripts/echo-cancellation-smoke.mjs`，现保留无参数开发布局及`--runtime-bundle`临时ASAR两条路径；均使用真实开发Electron Worker、固定本地AEC3 WASM与sherpa重采样，推理替身只收集DSP输出。瘦ASAR包含`speechSettings`实际依赖的`contracts/components`，不复制无关UI／知识库。旧`--packaged`已退役并在任何启动前拒绝，不能以RunAsNode环境变量启动已加固产品；最终生产包闭包由现有`security-package-smoke.mjs`与Store Sandbox入口验证。`wasapi-packets-smoke.mjs`编译生产C#纯转换器，用合成多声道包验证混音/QPC/标志/分片解码，不实例化音频设备；`electron-output-smoke.mjs`验证Windows真实无共享文件锁、部分写入回滚、并发锁和目录身份。它们纳入Windows原生矩阵；五档DPI增加interview-ux，保留原有六组。AEC单测覆盖延迟回声、独立同时人声、0/120ms声学延迟、35ms启动差/持续时钟漂移、参考失效/缺失、四档采样率、尾段/间断及20次重连；capture-drain与speech-restart检查管道末包/prepare/QPC/旧回调。全部结果只在终端，临时资料退出清理；不采样硬件或真实屏幕。
 
-原生矩阵传入临时公开模型路径时，以及AEC `--packaged`入口，另以实际Paraformer/VAD/ONNX验证同一AEC Worker和44.1kHz/QPC失效后的连续输入、flush与退出；不使用推理替身通过该附加检查。
+原生矩阵传入临时公开模型路径时，AEC另以实际Paraformer/VAD/ONNX验证同一AEC Worker和44.1kHz/QPC失效后的连续输入、flush与退出；无参数与`--runtime-bundle`均沿用显式`VOXCUE_TEST_SPEECH_MODELS`，不使用推理替身通过该附加检查。
 
 更新：2026-10-17。用户已重新授权完整功能、面试稳定性和对抗性测试及故障修复。Liquid Glass 及其专项仍已撤回，不恢复原 test:all、test:materials、test:readability 等入口。
 
@@ -514,7 +528,7 @@ Windows 从 windows/ 运行下列已改造入口（先准备本机构建）：
 
 当前 Windows 生成配置通过根 sync:workspace 同步，依赖在 windows/ 使用冻结锁。DPI 矩阵包含 interview-typography，在 100/125/150/175/200% 下检查面试字号；功能驱动实时转发终端进度。composer 补查异步读取时切换对话与拖入提示清理，presentation-native 使用原生鼠标核对登录背景拖动及按钮禁止拖动。
 
-隔离安装态 packaged-smoke 追加 component-removal-check：真实 Worker/utilityProcess/ONNX 模型配合合成采集端口，检查使用中拒绝、删除期间阻止新任务/下载、进程退出、RAG 卸载后的模型删除、未知顶层原件/目录保护、重新下载和知识库/索引保留。它不读取真实应用缓存，不以等待固定时长替代退出/卸载与实际文件删除断言。
+`node test/scripts/components-native-smoke.mjs` 调用 `component-removal-check`：真实 Worker/utilityProcess/ONNX 模型配合合成采集端口，检查使用中拒绝、删除期间阻止新任务/下载、进程退出、RAG 卸载后的模型删除、未知顶层原件/目录保护、重新下载和知识库/索引保留。它不读取真实应用缓存，不以等待固定时长替代退出/卸载与实际文件删除断言；这是开发宿主专项，不宣称最终正式包覆盖。
 
 Windows 句柄检查使用临时 WindowProbe 的 exclusive 操作：在真实退出/卸载后、删除之前，对固定模型清单及标记逐项执行 Win32 无共享只读打开；任何占用立即失败，自身句柄立即关闭，不读取文件内容或重试占用。
 
@@ -523,13 +537,15 @@ pnpm test:windows:functional
 pnpm test:windows:regression
 pnpm test:presentation:native
 pnpm test:speech:adversarial
-pnpm test:portable:native
+node test/scripts/security-package-smoke.mjs
+node test/scripts/store-package-smoke.mjs
 pnpm test:installer:artifact
-pnpm test:installer:isolated
+node test/scripts/installer-engine-smoke.mjs
+pnpm test:installer:upgrade
 pnpm test:ui:dpi
 ```
 
-`test:portable:native -- --installer-stage` 可验证已生成的安装包暂存目录，不重复打包；临时 WAV、profile 和原生探针仍在系统临时根清理。`test:installer:artifact` 校验 NSIS 压缩数据、更新清单 SHA512、blockmap 及暂存目录与实际安装负载的文件摘要，不执行安装。生产打包使用 windows/.cache/electron-builder 保存工具依赖，不写全局构建缓存。
+`test:installer:artifact` 校验 NSIS 压缩数据、更新清单 SHA512、blockmap 及暂存目录与实际安装负载的文件摘要，不执行安装。`security-package-smoke.mjs --with-screenshot-worker` 另验证打包后的截图 Worker；临时包、profile 和探针仍在系统临时根清理。生产打包使用 windows/.cache/electron-builder 保存工具依赖，不写全局构建缓存。
 
 Windows 自绘安装窗入口为 `node test/scripts/installer-branding-smoke.mjs`，加 `--preview` 以内存图片展示安装、进度和完成状态。它编译正式界面源码及无安装内容的 NSIS 样例，串行检查简体/英文/繁体下的开始、取消、完成、静默流程、界面异常退出及引擎故障；失败须明确显示并可关闭，静默失败保留非零退出码。不运行生产安装器、不写注册表或快捷方式。界面采用主程序的表面、字号、蓝色圆角与 36px 高度，主操作为右下角常规宽度；NSIS 后台负责安装流程，跨进程窗口消息必须有界或异步，避免引擎等待完成时冻结界面。全部样例、UI 副本、探针和 NSIS 暂存使用本次系统临时根并清理。
 
@@ -539,11 +555,13 @@ functional 使用共享矩阵；regression 顺序运行平台、面试权限/思
 
 原生鼠标检查要求 Windows 保持解锁，输入桌面为 Default 且光标可读取；缩放/工作流在原生操作前复核，缩放在拖动后再次检查。屏保或锁屏导致环境失败，不能把读取失败返回的零坐标当作有效位置，也不能跳过原生尺寸/命中断言、自动解锁或更改系统屏保设置。
 
-portable 在自有系统临时根生成无模型应用，通过真实组件服务检查首次下载、首秒进度、取消、校验失败及重试，再替换应用位置并阻断模型网络请求，以原缓存验证 ASR Worker、utilityProcess、E5/LanceDB 和 PDF/DOCX。installer:isolated 在同一临时根构建 NSIS、验证安装负载/清单/blockmap，然后运行安装态与原生展示；不执行安装器、不覆盖 release、不上传。ui:dpi 仅给各独立 Electron 进程传入 100/125/150/175/200% 缩放，顺序覆盖 ui-alignment、typography、interview-typography、components-ui 和 updates-sidebar 的浅深主题、最小窗口及键盘操作，不修改系统缩放。临时资料、模型和包在成功/失败/退出时清理，截图只在内存。
+ui:dpi 仅给各独立 Electron 进程传入 100/125/150/175/200% 缩放，顺序覆盖 ui-alignment、typography、interview-typography、components-ui 和 updates-sidebar 的浅深主题、最小窗口及键盘操作，不修改系统缩放。临时资料、模型和包在成功/失败/退出时清理，截图只在内存。
 
-Windows 上述驱动将固定公开 WAV 临时下载为输入，不声明真人语音质量；临时包、profile、文档和探针同样由 test-workspace 管理。已改造的单项入口包含 platform-native、interview-access/effort/layout/workflow/context、updates-native、user-data、packaged；旧物理音频、原生权限/真实安装升级脚本仍需先核对零保留与真实环境副作用，不能直接运行。test:speech:package 由隔离便携包入口验证，避免旧脚本采样硬件或假设内嵌模型。单测仅收集 shared 和当前平台的 unit/renderer。
+Windows 上述驱动将固定公开 WAV 临时下载为输入，不声明真人语音质量；临时包、profile、文档和探针同样由 test-workspace 管理。已改造的单项入口包含 platform-native、interview-access/effort/layout/workflow/context、updates-native、user-data；旧物理音频、原生权限/真实安装升级脚本仍需先核对零保留与真实环境副作用，不能直接运行。单测仅收集 shared 和当前平台的 unit/renderer。
 
-speech-desktop 的 profile/截图/结果改为临时目录、内存和终端，默认拒绝物理采样；后续须单独确认当次硬件范围并显式传 --hardware-audio。本轮不运行该硬件入口，安装态使用上面的合成/公开音频回归。
+speech-desktop 的 profile/截图/结果改为临时目录、内存和终端，默认拒绝物理采样；后续须单独确认当次硬件范围并显式传 --hardware-audio。旧 `--packaged` 分支已退役，参数在启动前明确拒绝；生产包覆盖使用既有 Store Sandbox 入口。本轮不运行该硬件入口，安装态使用上面的合成/公开音频回归。
+
+Windows `interview-access-native.mjs` 同样只接受显式的 `--hardware-audio`，无参数或未知参数在任何设备／子进程动作前拒绝。它复用中央 owner Electron 启动守卫与解锁检查，资料／夹具仅在本轮临时目录，结果仅终端，不再写工作区 `test/results/result.json`；普通全量测试授权不包含物理设备探测，该硬件分支本轮不运行。
 
 从本机平台目录执行；依赖、构建与公开样本需已准备：
 
@@ -596,4 +614,4 @@ Mac `node test/scripts/speech-switch-smoke.mjs --download`在自有临时目录�
 语言适配定向入口：本平台运行 `node ../shared/test/scripts/language-smoke.mjs` 和 `settings-smoke.mjs`，覆盖首选系统语言、手动偏好、跨窗口、英文设置/面试/窄窗及中文键盘/主题回归。`ui-language.test.ts`检查简繁体判断、持久化失败、动态参数保留、词表键与占位符；`desktop-ipc.test.ts`验证公开语言接口。普通离线UI入口显式使用合成简体中文系统语言，语言专项可指定其他首选语言；不修改本机系统语言。`language-smoke.mjs --preview`仅向调用工具输出内存图像，不保存截图或报告。
 
 准备聊天默认搜索专项：profile-proposal、profile-store、copilot、chat 覆盖 tool_choice auto、共享提示词、多语言短回复上下文、模型知识技能无来源、实际引用校验、缺摘要的整套/主题范围及无搜索工具的如实降级。composer/profile-ui/preparation-guide检查联网开关移除、附件入口、提案与聊天引用。仅合成服务协议测试，不代表真实模型意图准确率。
-Windows `node test/scripts/portable-native-smoke.mjs --installer-stage` 另调用 `package-upgrade-data.mjs`：校验已发布 1.1.0 EXE 的固定 SHA256，提取真实负载至 owner 临时安装路径，创建合成资料后正常退出，再用最终安装暂存负载替换同一路径并重复启动。原件字节／元数据、个人信息、主题／语言、快捷键、记录／截图、列表返回位置及旧可检索索引分别核对；现有 NSIS 合成升级与安装引擎专项仍独立执行，不将其等同于资料兼容。本检查不覆盖真实安装或用户 profile，认证公共 RAG 缓存只读校验并复制到本轮临时目录。
+Windows 当前安全验包与合成 NSIS 升级不宣称等价覆盖历史真实旧包／profile 的资料兼容，也不自动覆盖旧包 SDK、ASR／RAG 推理；需要该类结论时必须另有符合正式包隔离边界的专项，不能沿用历史成绩或开发宿主结果。

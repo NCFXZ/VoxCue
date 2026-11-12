@@ -13,6 +13,13 @@ export class CloudSyncClient {
     private restoreImage?: (id: string, bytes: Uint8Array, preview: string) => Promise<void>,
   ) {}
   async call(input: CloudSyncCall): Promise<CloudSyncResult> {
+    if (input?.action === 'cancel') {
+      if (!validCloudSyncCall(input)) return { ok: false, error: '同步请求无效。', status: 400 };
+      // A failed HTTP request may already have cleared the account. Retire only
+      // this engine's original tasks, including any error body still streaming.
+      this.account.cancelTransfers(input.userId, input.syncId);
+      return { ok: true, value: { cancelled: true } };
+    }
     if (this.busy)
       return {
         ok: false,
@@ -25,6 +32,14 @@ export class CloudSyncClient {
       if (!validCloudSyncCall(input)) throw new CloudFailure('同步请求无效。', 400);
       if (input.userId !== this.account.snapshot().user?.id)
         throw new CloudFailure('账号已变化，请重新打开同步设置。', 401);
+      const api = (route: string, method = 'GET', body?: unknown, binary = false) =>
+        this.account.api(
+          route,
+          method,
+          body,
+          binary,
+          input.syncId ? { userId: input.userId, syncId: input.syncId } : undefined,
+        );
       const r = '/v1/backups/',
         u = '/v1/uploads/';
       let value: unknown;
@@ -35,19 +50,17 @@ export class CloudSyncClient {
           value = { restored: true };
           break;
         case 'list':
-          value = await this.account.api(
-            '/v1/backups' + (input.cursor ? '?cursor=' + input.cursor : ''),
-          );
+          value = await api('/v1/backups' + (input.cursor ? '?cursor=' + input.cursor : ''));
           break;
         case 'create':
-          value = await this.account.api('/v1/backups', 'POST', {
+          value = await api('/v1/backups', 'POST', {
             id: input.id,
             kind: input.kind,
             name: input.key,
           });
           break;
         case 'begin':
-          value = await this.account.api(r + input.id + '/uploads', 'POST', {
+          value = await api(r + input.id + '/uploads', 'POST', {
             requestId: input.requestId,
             bytes: input.bytes,
             sha256: input.sha256,
@@ -55,29 +68,25 @@ export class CloudSyncClient {
           });
           break;
         case 'put':
-          value = await this.account.api(
-            u + input.id + '/parts/' + input.index,
-            'PUT',
-            input.bytes,
-          );
+          value = await api(u + input.id + '/parts/' + input.index, 'PUT', input.bytes);
           break;
         case 'complete':
-          value = await this.account.api(u + input.id + '/complete', 'POST', {});
+          value = await api(u + input.id + '/complete', 'POST', {});
           break;
         case 'abort':
-          value = await this.account.api(u + input.id, 'DELETE');
+          value = await api(u + input.id, 'DELETE');
           break;
         case 'upload':
-          value = await this.account.api(u + input.id);
+          value = await api(u + input.id);
           break;
         case 'versions':
-          value = await this.account.api(r + input.id + '/versions');
+          value = await api(r + input.id + '/versions');
           break;
         case 'manifest':
-          value = await this.account.api(r + input.id + '/versions/' + input.version + '/manifest');
+          value = await api(r + input.id + '/versions/' + input.version + '/manifest');
           break;
         case 'read':
-          value = await this.account.api(
+          value = await api(
             r + input.id + '/versions/' + input.version + '/parts/' + input.index,
             'GET',
             undefined,
@@ -85,12 +94,12 @@ export class CloudSyncClient {
           );
           break;
         case 'remove':
-          value = await this.account.api(r + input.id + '/remove', 'POST', {
+          value = await api(r + input.id + '/remove', 'POST', {
             revision: input.revision,
           });
           break;
         case 'prune':
-          value = await this.account.api(r + input.id + '/versions/' + input.version, 'DELETE');
+          value = await api(r + input.id + '/versions/' + input.version, 'DELETE');
           break;
       }
       return { ok: true, value };

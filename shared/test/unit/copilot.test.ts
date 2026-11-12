@@ -76,9 +76,21 @@ describe('Copilot 浏览器授权边界', () => {
       authInfo: { type: 'user', host: 'https://github.com', login: 'Other' },
     });
     await expect(service.access()).rejects.toThrow('已变更');
-    await service.signOut();
-    expect(accounts.set).toHaveBeenCalledWith({ command: { kind: 'logout' } });
+    const cliAccount = {
+      kind: 'activeAccount',
+      authInfo: { type: 'user', host: 'https://github.com', login: 'Example' },
+    };
+    const previous = structuredClone(cliAccount);
+    accounts.get.mockResolvedValue(cliAccount);
+    accounts.set.mockImplementationOnce(async () => {
+      cliAccount.authInfo.login = '';
+      return { ok: true };
+    });
+    expect(await service.signOut()).toEqual({ warning: null });
+    expect(accounts.set).not.toHaveBeenCalled();
+    expect(cliAccount).toEqual(previous);
     expect(await service.session()).toBeNull();
+    await expect(service.access()).rejects.toThrow('请重新登录');
   });
   it('退出后不接受迟到的运行时身份检查', async () => {
     const { service, accounts } = authentication();
@@ -98,10 +110,11 @@ describe('Copilot 浏览器授权边界', () => {
       authInfo: { type: 'user', host: 'https://github.com', login: 'Example' },
     });
     await expect(pending).rejects.toThrow('账户正在变更');
+    expect(accounts.set).not.toHaveBeenCalled();
     expect(await service.session()).toBeNull();
   });
   it('退出期间及退出后的迟到本地身份读取不恢复会话', async () => {
-    const { service, accounts, read } = authentication();
+    const { service, accounts, read, write } = authentication();
     const previous = await service.signIn();
     let finishRead!: (value: AuthSession | null) => void;
     read.mockImplementationOnce(
@@ -111,20 +124,29 @@ describe('Copilot 浏览器授权边界', () => {
         }),
     );
     const pending = service.session();
-    let finishLogout!: (value: { ok: boolean }) => void;
-    accounts.set.mockImplementationOnce(
-      () =>
-        new Promise((resolve) => {
-          finishLogout = resolve;
-        }),
-    );
+    let finishLogout!: () => void;
+    const persist = write.getMockImplementation()!;
+    write.mockClear();
+    write.mockImplementationOnce(async (session) => {
+      await new Promise<void>((resolve) => {
+        finishLogout = resolve;
+      });
+      await persist(session);
+    });
     const logout = service.signOut();
-    await vi.waitFor(() => expect(accounts.set).toHaveBeenCalledOnce());
+    expect(write).toHaveBeenCalledExactlyOnceWith(null);
+    expect(accounts.set).not.toHaveBeenCalled();
     expect(await service.session()).toBeNull();
-    finishLogout({ ok: true });
-    await logout;
+    await expect(service.access()).rejects.toThrow('账户正在变更');
+    await expect(service.signIn()).rejects.toThrow('正在进行');
+    await expect(service.signOut()).rejects.toThrow('请先取消');
+    finishLogout();
+    expect(await logout).toEqual({ warning: null });
     finishRead(previous);
     expect(await pending).toBeNull();
+    expect(await service.session()).toBeNull();
+    await expect(service.access()).rejects.toThrow('请重新登录');
+    expect(accounts.set).not.toHaveBeenCalled();
   });
   it('系统加密不可用时拒绝明文回退，不创建会话', async () => {
     const { service, write, accounts } = authentication([
@@ -167,6 +189,7 @@ describe('Copilot 浏览器授权边界', () => {
     const attempt = service.signIn();
     await vi.waitFor(() => expect(accounts.login.begin).toHaveBeenCalled());
     await expect(service.signIn()).rejects.toThrow('正在进行');
+    await expect(service.signOut()).rejects.toThrow('请先取消');
     service.cancel();
     await expect(attempt).rejects.toThrow('取消');
     finish({ flowId: 'late-flow', step: { kind: 'open-url', url: authorize } });

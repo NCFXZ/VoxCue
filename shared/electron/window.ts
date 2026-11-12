@@ -108,6 +108,36 @@ export function restrictWindowNavigation(win: Pick<BrowserWindow, 'webContents'>
   win.webContents.on('will-navigate', (event) => event.preventDefault());
 }
 
+/** Keep every quit attempt behind the same retirement barrier. */
+export function guardQuitDrain(
+  target: {
+    on(event: 'will-quit', listener: (event: { preventDefault(): void }) => void): unknown;
+    quit(): void;
+  },
+  drain: () => Promise<unknown>,
+) {
+  let complete = false;
+  let pending: Promise<unknown> | undefined;
+  target.on('will-quit', (event) => {
+    if (complete) return;
+    event.preventDefault();
+    if (pending) return;
+    pending = Promise.resolve()
+      .then(drain)
+      .then(
+        () => {
+          complete = true;
+          // Electron can ignore a retry inside the prevented will-quit native turn.
+          setImmediate(() => target.quit());
+        },
+        () => {
+          // Unexpected retirement failure must not open the gate; a later quit retries.
+          pending = undefined;
+        },
+      );
+  });
+}
+
 export function whenWindowReady(win: BrowserWindow, platform: DesktopPlatform, show: () => void) {
   // BrowserWindow.webContents cannot be read from the already-closed window.
   const contents = win.webContents;

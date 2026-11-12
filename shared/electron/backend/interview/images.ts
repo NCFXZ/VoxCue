@@ -19,13 +19,19 @@ const mediaType = (bytes: Uint8Array) => {
 /** Sent images only; draft captures stay in memory. No renderer paths are accepted. */
 export class InterviewImageStore {
   private pending: Promise<unknown> = Promise.resolve();
+  private closed = false;
   constructor(private directory: string) {
     if (!path.isAbsolute(directory)) throw Error('无效的截图存储目录。');
   }
   private serial<T>(action: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(Error('Image store is closed'));
     const result = this.pending.then(action);
     this.pending = result.catch(() => {});
     return result;
+  }
+  async dispose() {
+    this.closed = true;
+    await this.pending;
   }
   private file(id: string, preview = false) {
     if (!validImageId(id)) throw Error('无效的截图引用。');

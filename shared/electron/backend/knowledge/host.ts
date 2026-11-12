@@ -21,6 +21,7 @@ export class KnowledgeHost implements KnowledgePort {
       resolve: (value: any) => void;
       reject: (error: Error) => void;
       cleanup: () => void;
+      started: () => void;
       signal: AbortSignal;
     }
   >();
@@ -48,7 +49,19 @@ export class KnowledgeHost implements KnowledgePort {
         // Keep the caller's task/byte reservation until the utility acknowledges
         // retirement. Rejecting now would let repeated cancellation bypass it.
       };
-      const timer = setTimeout(() => this.stop('知识库响应超时，请重试。', 'unavailable'), timeout);
+      let executing = call.op !== 'search';
+      const expired = () => this.stop('知识库响应超时，请重试。', 'unavailable');
+      // Retain the existing longest-operation watchdog for an unresponsive
+      // process even if it never acknowledges starting the queued search.
+      let timer = setTimeout(expired, executing ? timeout : 600000);
+      const started = () => {
+        if (executing) return;
+        executing = true;
+        clearTimeout(timer);
+        timer = setTimeout(expired, timeout);
+      };
+      // Search shares a serial process with indexing. Its execution budget must
+      // not expire while a preceding document is still being indexed.
       const cleanup = () => {
         clearTimeout(timer);
         signal.removeEventListener('abort', abort);
@@ -57,6 +70,7 @@ export class KnowledgeHost implements KnowledgePort {
         resolve: (value) => (signal.aborted ? reject(cancelled()) : resolve(value)),
         reject: (error) => reject(signal.aborted ? cancelled() : error),
         cleanup,
+        started,
         signal,
       });
       signal.addEventListener('abort', abort, { once: true });
@@ -88,6 +102,10 @@ export class KnowledgeHost implements KnowledgePort {
       }
       const p = this.pending.get(m.id);
       if (!p) return;
+      if (m.started === true) {
+        p.started();
+        return;
+      }
       this.pending.delete(m.id);
       p.cleanup();
       m.error ? p.reject(knowledgeErrorFromWire(m.error, m.errorCode)) : p.resolve(m.value);
@@ -202,10 +220,22 @@ export class KnowledgeHost implements KnowledgePort {
     const pending = this.pending;
     this.pending = new Map();
     for (const p of pending.values()) p.cleanup();
+    const settle = (error: KnowledgeError) => {
+      for (const p of pending.values()) p.reject(error);
+      pending.clear();
+    };
+    // Callers must fail within a deadline even if kill fails. The separate
+    // retirement fence still blocks new work and model removal until actual exit.
+    const timer = pending.size
+      ? setTimeout(
+          () => settle(new KnowledgeError('unavailable', '知识库进程尚未退出，请稍后重试。')),
+          10000,
+        )
+      : undefined;
     const retired = new Promise<void>((resolve) => {
       child.once('exit', () => {
-        for (const p of pending.values()) p.reject(new KnowledgeError(code, message));
-        pending.clear();
+        clearTimeout(timer);
+        settle(new KnowledgeError(code, message));
         resolve();
       });
     });
@@ -216,8 +246,8 @@ export class KnowledgeHost implements KnowledgePort {
     try {
       child.kill();
     } catch {
-      // Exit remains unconfirmed: keep reservations and block replacement.
-      // Explicit close/initialize deadlines report failure without freeing it.
+      // Exit remains unconfirmed: keep the retirement fence after callers fail.
+      // Explicit close/initialize deadlines cannot authorize replacement/removal.
     }
   }
 }

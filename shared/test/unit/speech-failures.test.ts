@@ -151,6 +151,35 @@ it('停止时 Worker 突然退出，尾段请求立即失败，不悬挂五秒�
   await pending;
   expect(await service.call({ op: 'status' })).toMatchObject({ state: 'error' });
 });
+
+it.each(['paraformer', 'qwen'] as const)(
+  '%s Worker报错后立即退休，重新开始不等待无法完成的尾段',
+  async (speechModel) => {
+    const service = controller();
+    Object.assign(service, { qwenDirectory: 'synthetic-qwen' });
+    const start = { ...begin, options: { ...begin.options, speechModel } };
+    await service.call(start);
+    runtime.mode = 'stall-flushing';
+    const old = runtime.workers[0];
+    old.emit('message', { error: 'synthetic inference failure' });
+    const restarted = service.call(start);
+    await vi.advanceTimersByTimeAsync(1);
+    await expect(restarted).resolves.toMatchObject({ state: 'running' });
+    expect(runtime.workers).toHaveLength(2);
+  },
+);
+
+it('Worker error事件在已有尾段请求时立即拒绝并退休，不等待超时', async () => {
+  const service = controller();
+  await service.call(begin);
+  runtime.mode = 'stall-flushing';
+  const stopped = expect(service.call({ op: 'stop' })).rejects.toThrow('尾段无法处理');
+  await vi.advanceTimersByTimeAsync(1);
+  runtime.workers[0].emit('error', Error('synthetic worker failure'));
+  await stopped;
+  runtime.mode = 'ready';
+  await expect(service.call(begin)).resolves.toMatchObject({ state: 'running' });
+});
 it('停止采集抛错仍清除旧回调与 Worker，下一次启动使用新实例', async () => {
   const stop = vi
     .fn()

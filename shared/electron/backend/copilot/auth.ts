@@ -1,6 +1,6 @@
 import type { CopilotSession } from '@github/copilot-sdk';
 import type { AuthSession, SignOutResult } from '../../contracts/auth';
-import { abortable } from './runtime';
+import { abortable } from '../cancellable';
 import { CopilotError } from './errors';
 
 export interface CopilotLoginStorage {
@@ -157,18 +157,11 @@ export class CopilotAuthService {
     if (this.pending || this.signingOut) throw Error('请先取消正在进行的登录。');
     this.signingOut = true;
     ++this.generation;
-    let warning: string | null = null;
     try {
-      try {
-        const control = await this.dependencies.control();
-        const result = await control.rpc.accounts.set({ command: { kind: 'logout' } });
-        if (!result.ok) throw Error();
-      } catch {
-        warning =
-          '已在 VoxCue 退出，未能确认系统中的 Copilot 授权移除。可在 GitHub 设置中撤销授权。';
-      }
+      // The official runtime's OS vault slot is shared with Copilot CLI.
+      // Disconnect only this app's metadata; a global logout would remove CLI auth.
       await this.dependencies.storage.write(null);
-      return { warning };
+      return { warning: null };
     } finally {
       this.signingOut = false;
     }

@@ -67,9 +67,9 @@ it('keeps the disabled system reason inside the runtime dropdown and disables mo
   current.changing = true;
   const html = render();
   expect(html).toMatch(
-    /aria-label="选择播放设备"[^>]*><span[^>]*>设置为“仅转录”时不可用。<\/span>/,
+    /aria-label="选择播放设备"[^>]*><span[^>]*>设置为“现场面试”时不可用。<\/span>/,
   );
-  expect(html).not.toContain('<small class="interview-input-unavailable">设置为“仅转录”时不可用。');
+  expect(html).not.toContain('<small class="interview-input-unavailable">设置为“现场面试”时不可用。');
   const choices = [...html.matchAll(/<button[^>]*role="radio"[^>]*>/g)];
   expect(choices).toHaveLength(2);
   expect(choices.every((match) => match[0].includes('disabled=""'))).toBe(true);

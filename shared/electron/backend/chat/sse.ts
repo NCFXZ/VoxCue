@@ -6,6 +6,14 @@ export async function* readEvents(body: ReadableStream<Uint8Array>, signal: Abor
   };
   signal.addEventListener('abort', cancel, { once: true });
   const decoder = new TextDecoder();
+  const parse = (payload: string) => {
+    try {
+      return JSON.parse(payload) as Record<string, any>;
+    } catch {
+      // Parser diagnostics can quote remote text, including account/input data.
+      throw new Error('服务返回的 JSON 不完整，请重试。');
+    }
+  };
   let buffer = '',
     data: string[] = [];
   function line(value: string) {
@@ -30,13 +38,13 @@ export async function* readEvents(body: ReadableStream<Uint8Array>, signal: Abor
         const payload = line(buffer.slice(0, index));
         buffer = buffer.slice(index + 1);
         if (payload === '[DONE]') return;
-        if (payload) yield JSON.parse(payload) as Record<string, any>;
+        if (payload) yield parse(payload);
       }
       if (done) {
         if (buffer) line(buffer);
         const payload = line('');
         if (payload === '[DONE]') return;
-        if (payload) yield JSON.parse(payload) as Record<string, any>;
+        if (payload) yield parse(payload);
         break;
       }
     }

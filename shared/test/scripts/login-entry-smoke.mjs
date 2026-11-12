@@ -18,6 +18,11 @@ const setPath=app.setPath.bind(app);
 const getPath=app.getPath.bind(app);
 app.getPath=name=>name==='appData'?${JSON.stringify(isolatedAppData)}:getPath(name);
 app.setPath=(name,value)=>setPath(name,['userData','sessionData'].includes(name)?${JSON.stringify(profile)}:value);
+setPath('userData',${JSON.stringify(profile)});
+setPath('sessionData',${JSON.stringify(profile)});
+// The owner launcher always supplies isolation. This case tests product entry
+// without enabling demo/auth fixtures; keep paths isolated before removing it.
+delete process.env.COPILOT_TEST_USER_DATA;
 const {ChatGPTAuthService}=require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/auth/service.js'))});
 ChatGPTAuthService.prototype.session=async()=>null;
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))});
@@ -27,7 +32,17 @@ const env = { ...process.env, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 delete env.COPILOT_TEST_USER_DATA;
 const app = await electron.launch({ args: [fixture], env });
+let firstFailure;
 try {
+  assert.deepEqual(
+    await app.evaluate(({ app }) => ({
+      fixtureEnabled: !!process.env.COPILOT_TEST_USER_DATA,
+      userData: app.getPath('userData'),
+      sessionData: app.getPath('sessionData'),
+      appData: app.getPath('appData'),
+    })),
+    { fixtureEnabled: false, userData: profile, sessionData: profile, appData: isolatedAppData },
+  );
   const page = await app.firstWindow();
   page.setDefaultTimeout(15000);
   await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
@@ -218,6 +233,14 @@ try {
       ],
     }),
   );
+} catch (error) {
+  firstFailure = error;
+  throw error;
 } finally {
-  await closeUiApp(app);
+  try {
+    await closeUiApp(app);
+  } catch (error) {
+    if (!firstFailure) throw error;
+    console.error('LOGIN_ENTRY_TEARDOWN', error);
+  }
 }

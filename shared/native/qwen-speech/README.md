@@ -12,7 +12,13 @@ VAD 静音 800ms 收尾剩余三句和尾部草稿。句末标点提交不触发
 
 CUDA 按驱动报告的总显存选择音频块：至少 4GiB 为 500ms，其余 1000ms。CPU 为 1000ms。这是触发间隔，不是出字延迟保证。CUDA 版使用 SM80 PTX，要求 Ampere 或更新的 NVIDIA GPU 与支持 CUDA 12.9 的驱动。对齐器 CUDA 加载失败会沿用 demo 的 CPU 对齐回退，状态模型名称明确标出“对齐 CPU”；ASR 不静默回退。
 
-两个 Windows 可执行文件来自同一源码：默认 CUDA 特性构建 voxcue-qwen.exe；--no-default-features 构建 voxcue-qwen-cpu.exe。CPU 程序不导入 NVIDIA DLL，适用于无 NVIDIA 驱动的设备；通用 CPU 路径需要 AVX2。运行时包含 CPU-only speech.cpp DLL、Silero 权重、CUDA 可分发 DLL 和许可证，用户无需安装 Rust、Python、WSL、Vulkan 或 CUDA Toolkit。
+两个 Windows 可执行文件来自同一源码：默认 CUDA 特性构建 voxcue-qwen.exe；--no-default-features 构建 voxcue-qwen-cpu.exe。CPU 程序不导入 NVIDIA DLL，适用于无 NVIDIA 驱动的设备；通用 CPU 路径需要 AVX2 和 FMA。运行时包含 CPU-only speech.cpp DLL、Silero 权重、CUDA 可分发 DLL 和许可证，用户无需安装 Rust、Python、WSL、Vulkan 或 CUDA Toolkit。
+
+Windows 应用另带 `VoxCue.Cpu.exe`，在 Qwen CPU/CUDA 启动前检查同一 AVX2/FMA 条件；CUDA 对齐可能回退 CPU，因此同样检查。该 helper 使用 baseline x86-64 和静态 CRT 编译，不依赖下载组件，旧组件也受应用端预检保护。检测失败明确拒绝，不转入其他模型；Paraformer 不要求这些指令。共享 native 源码也在 Windows 模型加载前及 CPU backend 入口检查，未重新构建/认证发布的既有 Runtime 资产不包含新增源码保护。
+
+从 `windows/` 执行 `node scripts/restore-rust-toolchain.mjs` 恢复固定 Rust 1.90.0 GNU 公共构建工具，再执行 `node scripts/build-audio.mjs`。恢复脚本只下载 `static.rust-lang.org` 的 rustc、rust-std、rust-mingw 和 cargo，逐件固定官方 SHA-256；工具与认证归档仅放 `windows/.tools/rust-1.90.0-gnu`，不全局安装。此版本满足 vendor 声明的 MSRV 1.75 及当前 Cargo v4 锁格式；它用于独立 helper/纯协议单元，不替代下述完整 CUDA/MSVC 构建链，也不改变应用依赖或模型。`build-audio.mjs` 将源码、共享 CPU 条件和自身构建参数纳入重建判断；打包入口将 helper 与 Audio/Screenshot 一同复制到本平台原生资源。
+
+现有公开认证缓存的长段测量入口为 `windows/` 下 `node test/scripts/qwen-latency-smoke.mjs --seconds=60 --device=cpu`，可选 120 秒及 CUDA；只接受本平台 `.cache/test-components` 和固定公开音频缓存，缺失即失败，不下载模型。测量逐文件验摘要并复制到独立系统临时目录，每十秒向终端输出 ACK/partial 耗时、RTF、最大窗口和裁剪次数，锁屏立即停止，结束清理副本。公开语料触发裁剪/静音时只能证明其实际窗口的表现，不能据此声称覆盖 120 秒无标点且未裁剪的最坏情形。
 
 构建：windows/scripts/build-qwen.ps1 接收便携工具链目录、系统临时 BuildRoot 和 CPU-only VAD import library 目录；加 -Cpu 构建 CPU 程序。Cargo.lock 固定依赖，构建不升级既有应用依赖。speech.cpp 固定 v0.8.10/a72f1bbedd50e293d5b3f4c2bf0fb44ec003227d，ggml 固定 a655cf6910770404213bc338e622cd82b08ca277；CMake 关闭 Vulkan/CUDA/OpenMP/native，使用静态 MSVC CRT，仅构建 speech 目标。
 

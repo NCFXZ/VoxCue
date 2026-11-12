@@ -43,7 +43,7 @@ function requireInterviewSources(
 ) {
   if (inputMode === 'transcription') {
     if (options.sources.length !== 1 || options.sources[0] !== 'microphone')
-      throw Error('仅转录需要且只使用麦克风。');
+      throw Error('现场面试需要且只使用麦克风。');
   } else if (!options.sources.includes('system'))
     throw Error(reconnect ? '面试需保留系统音频。' : '面试官问题来自系统音频，请启用系统音频。');
 }

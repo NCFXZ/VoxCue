@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { constants } from 'node:fs';
 import { mkdir, lstat, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import {
   hasReadySpeechModel,
   componentPresentation,
@@ -10,6 +10,7 @@ import {
 } from '../../contracts/components';
 import type { ComponentPackage, ComponentArchive } from './catalog';
 import { unpackComponentFile } from './archive';
+import { componentLeaseAbsent, holdComponentLease, validComponentLease } from './lease';
 
 export function componentLocation(root: string, pkg: ComponentPackage) {
   return path.join(root, `${pkg.id}-${pkg.version}-${pkg.sha256}`);
@@ -29,6 +30,7 @@ export function componentPaths(root: string, packages: ComponentPackage[]) {
 export class ComponentService {
   private value: ComponentState;
   private checking?: Promise<ComponentState>;
+  private checkingController?: AbortController;
   private downloading?: Promise<ComponentState>;
   private removing = false;
   private controller?: AbortController;
@@ -95,6 +97,8 @@ export class ComponentService {
     return this.checking;
   }
   private async check(id?: ComponentId) {
+    const controller = new AbortController();
+    this.checkingController = controller;
     try {
       await this.directory(this.options.root);
       await this.cleanAbandoned();
@@ -104,6 +108,7 @@ export class ComponentService {
         item.phase = 'checking';
         this.publish('checking');
         const valid = await this.verify(componentLocation(this.options.root, pkg), pkg);
+        if (valid) await this.reclaimPrevious(pkg, controller.signal);
         item.phase = valid ? 'ready' : 'pending';
         item.received = valid ? pkg.bytes : 0;
       }
@@ -111,6 +116,8 @@ export class ComponentService {
     } catch {
       this.publish('error', '无法检查本地组件缓存，请确认应用数据目录可写后重试。');
       this.checking = undefined;
+    } finally {
+      if (this.checkingController === controller) this.checkingController = undefined;
     }
     return this.state();
   }
@@ -168,11 +175,13 @@ export class ComponentService {
   }
   cancel() {
     this.controller?.abort();
+    this.checkingController?.abort();
     return this.downloading ?? Promise.resolve(this.state());
   }
   dispose() {
     this.disposed = true;
     this.controller?.abort();
+    this.checkingController?.abort();
   }
   private async run(id: ComponentId | undefined, signal: AbortSignal) {
     try {
@@ -261,7 +270,7 @@ export class ComponentService {
       return false;
     }
   }
-  private async readMarker(directory: string): Promise<{ sha256: string }> {
+  private async readMarker(directory: string): Promise<{ sha256: string; ownership?: number }> {
     const file = path.join(directory, '.voxcue-component.json');
     const info = await lstat(file);
     if (!info.isFile() || info.isSymbolicLink() || info.size > 1024)
@@ -281,10 +290,13 @@ export class ComponentService {
     const item = this.value.items.find((value) => value.id === pkg.id)!;
     const stage = path.join(this.options.root, '.stage-' + pkg.id + '-' + randomUUID());
     await this.directory(stage);
+    let releaseLease: (() => Promise<void>) | undefined;
     try {
+      const lease = randomBytes(16).toString('hex');
+      releaseLease = await holdComponentLease(lease);
       await writeFile(
         path.join(stage, '.owner.json'),
-        JSON.stringify({ kind: 'voxcue-component-stage', pid: process.pid }),
+        JSON.stringify({ kind: 'voxcue-component-stage', version: 2, lease }),
         { flag: 'wx' },
       );
       item.phase = 'downloading';
@@ -306,7 +318,7 @@ export class ComponentService {
       }
       await writeFile(
         path.join(stage, '.voxcue-component.json'),
-        JSON.stringify({ sha256: pkg.sha256 }),
+        JSON.stringify({ sha256: pkg.sha256, ownership: 1 }),
         { flag: 'wx' },
       );
       if (!(await this.verify(stage, pkg))) throw Error('Invalid installed component');
@@ -335,11 +347,49 @@ export class ComponentService {
         throw error;
       }
       if (replaced) await rm(replaced, { recursive: true, force: true });
+      await this.reclaimPrevious(pkg, signal);
       item.phase = 'ready';
       item.received = pkg.bytes;
       this.publish('downloading');
     } finally {
-      await rm(stage, { recursive: true, force: true });
+      try {
+        await rm(stage, { recursive: true, force: true });
+      } finally {
+        await releaseLease?.();
+      }
+    }
+  }
+
+  private async reclaimPrevious(pkg: ComponentPackage, signal: AbortSignal) {
+    for (const previous of pkg.previous ?? []) {
+      if (signal.aborted || this.disposed) return;
+      // Candidates come only from this build's trusted catalog. Never discover
+      // history by sweeping cache names or trusting a locally supplied manifest.
+      const old = previous.package;
+      if (previous.preserve || old.id !== pkg.id || !this.options.prepareRemove) continue;
+      const directory = path.resolve(componentLocation(this.options.root, old));
+      if (
+        path.dirname(directory) !== path.resolve(this.options.root) ||
+        this.options.packages.some(
+          (current) => path.resolve(componentLocation(this.options.root, current)) === directory,
+        )
+      ) continue;
+      try {
+        await this.directory(this.options.root);
+        const marker = await this.readMarker(directory);
+        // Old caches are never retroactively claimed. Only installs completed
+        // under this ownership policy can be reclaimed by a later successor.
+        if (
+          marker.ownership !== 1 || marker.sha256 !== old.sha256 ||
+          !(await this.knownRoot(directory)) || !(await this.verify(directory, old)) ||
+          !(await this.options.prepareRemove(old.id))
+        ) continue;
+        if (!signal.aborted && !this.disposed)
+          await rm(directory, { recursive: true });
+      } catch {
+        // Occupied, changed, unknown or protected predecessors remain in place;
+        // optional housekeeping must never invalidate the completed new install.
+      }
     }
   }
   private async downloadArchive(
@@ -375,7 +425,7 @@ export class ComponentService {
       if (!response.ok || !response.body) throw Error('Download unavailable');
       const length = response.headers.get('content-length');
       if (length !== null && Number(length) !== pkg.bytes) {
-        await response.body.cancel();
+        void response.body.cancel().catch(() => {});
         throw Error('Invalid download size');
       }
       handle = await open(file, 'wx', 0o600);
@@ -410,7 +460,8 @@ export class ComponentService {
     } finally {
       clearTimeout(idle);
       combined.removeEventListener('abort', abort);
-      await reader?.cancel().catch(() => {});
+      // A stuck transport cancellation must not retain the file or stage lease.
+      void reader?.cancel().catch(() => {});
       reader?.releaseLock();
       await handle?.close();
     }
@@ -428,16 +479,12 @@ export class ComponentService {
         const owner = JSON.parse(await readFile(file, 'utf8'));
         if (
           owner.kind !== 'voxcue-component-stage' ||
-          !Number.isSafeInteger(owner.pid) ||
-          owner.pid <= 0
+          owner.version !== 2 ||
+          !validComponentLease(owner.lease)
         )
           continue;
-        try {
-          process.kill(owner.pid, 0);
-        } catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ESRCH')
-            await rm(directory, { recursive: true, force: true });
-        }
+        if (await componentLeaseAbsent(owner.lease))
+          await rm(directory, { recursive: true, force: true });
       } catch {
         /* Unknown or occupied files remain protected. */
       }

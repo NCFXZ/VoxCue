@@ -71,6 +71,19 @@ beforeEach(async () => {
   await drain();
 });
 
+it('failed Worker rejects a later flush immediately instead of ignoring the request', async () => {
+  runtime.feed.mockRejectedValueOnce(Error('synthetic inference failure'));
+  audio('system', 2);
+  await drain();
+  expect(runtime.close).toHaveBeenCalled();
+  runtime.messages = [];
+  send({ op: 'flush', id: 3, reason: 'stop' });
+  await drain();
+  expect(runtime.messages).toEqual([
+    { error: '语音服务已失败，尾段无法处理；请重新开始。' },
+  ]);
+});
+
 it('麦克风mute边界挡住正在推理与已排队的旧文本，丢弃缓存后才ACK且系统仍可转写', async () => {
   let finish!: () => void;
   runtime.feed.mockImplementationOnce(

@@ -8,10 +8,17 @@ import type { UpdateDriver } from './service';
 import { compareVersions, releaseTarget } from './releases';
 import type { AppUpdater } from 'electron-updater';
 import { fetchPlatformUpdate, platformReleaseProvider, type ReleaseFetch } from './provider';
-import { UpdateCache, platformUpdateInfo, type PlatformUpdateInfo } from './cache';
+import {
+  UpdateCache,
+  platformUpdateInfo,
+  validatePlatformUpdate,
+  type PlatformUpdateInfo,
+} from './cache';
 
 interface DriverOptions {
   cacheDirectory?: string;
+  mapInfo?: typeof platformUpdateInfo;
+  validate?: typeof validatePlatformUpdate;
 }
 // Pinned electron-updater internals are confined to this adapter. Installation
 // still runs through its stock downloader, signature verifier and NSIS state.
@@ -34,8 +41,10 @@ export function configurePlatformUpdates(
 ): UpdateDriver {
   const lifetime = new AbortController();
   const native = updater as unknown as StockCacheAccess;
+  const validate = options.validate ?? validatePlatformUpdate;
+  const mapInfo = options.mapInfo ?? platformUpdateInfo;
   const cache = options.cacheDirectory
-    ? new UpdateCache(options.cacheDirectory, target)
+    ? new UpdateCache(options.cacheDirectory, target, validate)
     : undefined;
   let selected: PlatformUpdateInfo | undefined;
   let localComplete: PlatformUpdateInfo | undefined;
@@ -46,13 +55,14 @@ export function configurePlatformUpdates(
   let downloading: Promise<unknown> | undefined;
   let restoring: Promise<boolean> | undefined;
   let recovering: Promise<void> | undefined;
+  let installation: Promise<void> | undefined;
   let disposing: Promise<void> | undefined;
   updater.setFeedURL({
     provider: 'custom',
     updateProvider: platformReleaseProvider(target, lifetime.signal, fetcher, async () => {
       const remote = async () => {
         const { candidate, metadata } = await fetchPlatformUpdate(target, lifetime.signal, fetcher);
-        const info = platformUpdateInfo(candidate, metadata);
+        const info = validate(mapInfo(candidate, metadata), target);
         checkedAt = Date.now();
         return info;
       };
@@ -96,6 +106,7 @@ export function configurePlatformUpdates(
     }
   }
   async function complete(info: PlatformUpdateInfo, signal?: AbortSignal, verifySignature = false) {
+    info = validate(info, target);
     signal?.throwIfAborted();
     const pending = await pendingDirectory();
     const file = path.join(pending, info.selectedRelease.binary.name);
@@ -301,13 +312,26 @@ export function configurePlatformUpdates(
     },
     isAutomaticDownloadAllowed: () => !disposed && (cache?.automaticAllowed() ?? true),
     lastCheckedAt: () => (cache ? cache.lastCheckedAt() : checkedAt),
-    quitAndInstall: (silent, forceRun) => updater.quitAndInstall(silent, forceRun),
+    quitAndInstall(silent, forceRun) {
+      installation ??= (async () => {
+        const info = selected ?? cache?.info();
+        if (disposed || !info || !(await complete(info, lifetime.signal, true)))
+          throw Error('Authenticated update is unavailable or changed before installation');
+        lifetime.signal.throwIfAborted();
+        updater.quitAndInstall(silent, forceRun);
+      })().finally(() => {
+        installation = undefined;
+      });
+      return installation;
+    },
     dispose() {
       if (disposing) return disposing;
       disposed = true;
       lifetime.abort();
       disposing = (async () => {
-        const jobs = [checking, downloading, restoring].filter(Boolean) as Promise<unknown>[];
+        const jobs = [checking, downloading, restoring, installation].filter(
+          Boolean,
+        ) as Promise<unknown>[];
         const results = await Promise.allSettled(jobs);
         await recover();
         for (const result of results)

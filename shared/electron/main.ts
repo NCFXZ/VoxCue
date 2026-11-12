@@ -20,6 +20,8 @@ import {
 } from 'electron';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { migrateUserData } from './userData';
+import { encodeScreenshotBitmap } from './backend/screenshot/host';
+import { runtimeEnvironment, restrictSessionPermissions } from './runtimePolicy';
 import { packagesFor } from './backend/components/catalog';
 import { ComponentService, componentPaths } from './backend/components/service';
 import { registerComponentIpc } from './ipc/components';
@@ -94,7 +96,13 @@ import type { RemoteConnectionState } from './contracts/remoteConnection';
 import { WindowVisibility } from './windowVisibility';
 import { revealExistingInterview } from './interviewActivation';
 import { selectDesktopPlatform, desktopResources } from './platform';
-import { windowOptions, whenWindowReady, restrictWindowNavigation, loadWindowPage } from './window';
+import {
+  windowOptions,
+  whenWindowReady,
+  restrictWindowNavigation,
+  loadWindowPage,
+  guardQuitDrain,
+} from './window';
 import type { NativePresentation } from './presentation';
 import {
   isUILanguage,
@@ -121,6 +129,7 @@ let chatGPTUsage: ChatGPTAccountUsage;
 let chat: AIChatService;
 let telemetry: Telemetry | undefined;
 let telemetryClosed = false;
+let telemetryClosing = false;
 let signingIn = false;
 let cancelLoginWait: (() => void) | undefined;
 let chatIpc: ReturnType<typeof registerChatIpc> | undefined;
@@ -212,11 +221,15 @@ const desktopPlatform = {
   presentation: nativePresentation?.capabilities ?? platformPolicy.presentation,
 };
 const indexFile = path.join(app.getAppPath(), 'dist/index.html');
+const environment = runtimeEnvironment(app.isPackaged, process.env);
+app.on('session-created', (created) =>
+  restrictSessionPermissions(created, indexFile, environment.devServerUrl),
+);
 app.setName('VoxCue');
 try {
   // Resolve/migrate before any session, credential store, model cache or window is created.
   // Isolated test profiles must bypass real user data and migration entirely.
-  const isolated = process.env.COPILOT_TEST_USER_DATA;
+  const isolated = environment.userData;
   if (isolated) mkdirSync(isolated, { recursive: true });
   const directory = isolated ?? migrateUserData(app.getPath('appData'));
   app.setPath('userData', directory);
@@ -317,7 +330,7 @@ function createLoginWindow() {
   win.on('closed', () => {
     loginWindow = null;
   });
-  loadWindowPage(win, 'login', indexFile, process.env.VITE_DEV_SERVER_URL);
+  loadWindowPage(win, 'login', indexFile, environment.devServerUrl);
 }
 function publishInterviewLayout(win: BrowserWindow, bounds: Electron.Rectangle) {
   if (
@@ -663,7 +676,7 @@ function setInterviewShortcutsOpen(open: boolean): boolean {
       },
       'interview-shortcuts',
       indexFile,
-      process.env.VITE_DEV_SERVER_URL,
+      environment.devServerUrl,
     );
     notifyShortcutsOpen();
     return true;
@@ -927,7 +940,7 @@ function openInterview() {
       },
       'interview',
       indexFile,
-      process.env.VITE_DEV_SERVER_URL,
+      environment.devServerUrl,
     );
   } catch (error) {
     releaseShortcuts?.();
@@ -991,7 +1004,7 @@ function createMainWindow() {
     loginWindow?.close();
     void updates?.start();
   });
-  loadWindowPage(mainWindow, 'main', indexFile, process.env.VITE_DEV_SERVER_URL);
+  loadWindowPage(mainWindow, 'main', indexFile, environment.devServerUrl);
   mainWindow.on('closed', () => {
     clearRemoteInterview();
     void remoteConnection?.disconnect().catch(() => {});
@@ -1067,6 +1080,7 @@ function createMainWindow() {
   });
 }
 app.whenReady().then(async () => {
+  restrictSessionPermissions(session.defaultSession, indexFile, environment.devServerUrl);
   const eraseBrowser = async () => {
     await session.defaultSession.clearStorageData();
     await session.defaultSession.clearCache();
@@ -1219,8 +1233,8 @@ app.whenReady().then(async () => {
   const localModeReady = localMode.load().catch(() => {});
   let entryBusy = false;
   const accountOrigin = cloudOrigin(
-    process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
-    !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
+    environment.accountOrigin,
+    environment.allowLocalAccount === true,
   );
   const cloudAccount = new CloudAccountClient({
     origin: accountOrigin,
@@ -1231,10 +1245,7 @@ app.whenReady().then(async () => {
     root: app.getPath('userData'),
     version: app.getVersion(),
     platform: desktopPlatform.id === 'darwin' ? 'macos' : 'windows',
-    origin: cloudOrigin(
-      process.env.VOXCUE_ACCOUNT_API ?? 'https://accounts.voxcue.com.cn',
-      !app.isPackaged && process.env.VOXCUE_ACCOUNT_ALLOW_LOCAL === '1',
-    ),
+    origin: cloudOrigin(environment.accountOrigin, environment.allowLocalAccount === true),
     enabled: app.isPackaged,
     proofVault: createCredentialVault<TelemetryProofState>(
       path.join(app.getPath('userData'), 'cloud-account', 'telemetry.bin'),
@@ -1343,6 +1354,7 @@ app.whenReady().then(async () => {
           mainWindow?.destroy();
           loginWindow?.destroy();
           interviewWindow?.destroy();
+          await Promise.all([interviewImages.dispose(), ledger.dispose()]);
           auth.cancel();
           copilotAuth.cancel();
           interviewIpc?.cancel();
@@ -1381,6 +1393,7 @@ app.whenReady().then(async () => {
   handleDesktop('cloud:sync', (event, call) => {
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
       throw Error('Unauthorized window');
+    if (call?.action === 'cancel') return cloudSync.call(call);
     if (localMode.active)
       return { ok: false as const, error: '登录 VoxCue 后可使用云备份。', status: 401 };
     if (interviewActive())
@@ -1440,9 +1453,12 @@ app.whenReady().then(async () => {
     saveAutoDownload: (enabled) => saveAutoDownload(updatePreferences, enabled),
     driver:
       app.isPackaged && desktopPlatform.updateDriverFile
-        ? require(
-            path.join(app.getAppPath(), 'dist-electron', desktopPlatform.updateDriverFile),
-          ).createMacUpdateDriver()
+        ? (() => {
+            const adapter = require(
+              path.join(app.getAppPath(), 'dist-electron', desktopPlatform.updateDriverFile),
+            );
+            return (adapter.createUpdateDriver ?? adapter.createMacUpdateDriver)();
+          })()
         : createUpdateDriver(app.isPackaged, {
             cacheDirectory: path.join(app.getPath('userData'), 'updates'),
           }),
@@ -1825,11 +1841,15 @@ app.whenReady().then(async () => {
       return result.canceled ? undefined : result.filePath;
     },
   });
-  app.once('will-quit', (event) => {
-    if (!accountArchive?.hasWork()) return;
-    event.preventDefault();
-    void accountArchive.dispose().finally(() => app.quit());
-  });
+  guardQuitDrain(app, () =>
+    Promise.allSettled([
+      accountArchive?.dispose(),
+      interviewImages.dispose(),
+      ledger.dispose(),
+      codexUsageRuntime.stop(),
+      copilotRuntime.stop(),
+    ]),
+  );
   handleDesktop('account:data', (event, call) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame || erasingAccount)
@@ -1887,6 +1907,7 @@ app.whenReady().then(async () => {
         interviewWindow!,
         desktopPlatform.id,
         signal,
+        encodeScreenshotBitmap,
         desktopPlatform.captureScreen,
         desktopPlatform.id === 'darwin'
           ? interviewToolbarPoint(interviewWindow!.getBounds())
@@ -2582,8 +2603,15 @@ app.on('before-quit', (event) => {
   }
   if (telemetry && !telemetryClosed) {
     event.preventDefault();
-    telemetryClosed = true;
-    void telemetry.close().finally(() => app.quit());
+    if (telemetryClosing) return;
+    telemetryClosing = true;
+    void telemetry
+      .close()
+      .catch(() => console.error('Telemetry shutdown did not finish cleanly.'))
+      .finally(() => {
+        telemetryClosed = true;
+        app.quit();
+      });
     return;
   }
   remoteInterview?.reset();
@@ -2597,6 +2625,4 @@ app.on('before-quit', (event) => {
   interviewIpc?.cancel();
   auth?.cancel();
   copilotAuth?.cancel();
-  void codexUsageRuntime?.stop();
-  void copilotRuntime?.stop();
 });

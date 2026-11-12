@@ -1,4 +1,5 @@
 import type { AIChatService } from '../backend/chat/ports';
+import { abortable } from '../backend/cancellable';
 import { reasoningEfforts, type ChatRequest } from '../contracts/chat';
 
 const instructions = `Decide whether the user's CURRENT request explicitly asks to consult their local knowledge base.
@@ -14,6 +15,7 @@ export async function requestedKnowledgeQuery(
   request: ChatRequest,
   signal: AbortSignal,
 ): Promise<string | null> {
+  signal.throwIfAborted();
   const latest = request.turns.at(-1)!.content;
   // Large pasted documents are not a reliable place to infer an opt-in.
   if (latest.length > 60000) return null;
@@ -21,7 +23,7 @@ export async function requestedKnowledgeQuery(
     role,
     content: index === recent.length - 1 ? content : content.slice(-6000),
   }));
-  const models = await provider.models();
+  const models = await abortable(provider.models(), signal);
   signal.throwIfAborted();
   const supported = models.find((model) => model.id === request.modelId)?.reasoningEfforts;
   const effort = reasoningEfforts.find((value) => supported?.includes(value));

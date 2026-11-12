@@ -14,7 +14,8 @@ export async function boundedJson(response: Response, maximum = 16384): Promise<
     }
     return JSON.parse(Buffer.concat(parts).toString('utf8')) as unknown;
   } finally {
-    await reader.cancel().catch(() => {});
+    // A broken transport's cleanup must not hold a bounded response open.
+    void reader.cancel().catch(() => {});
     reader.releaseLock();
   }
 }

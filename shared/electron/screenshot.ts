@@ -8,6 +8,7 @@ import {
 } from 'electron';
 import type { ChatFile } from './contracts/chat';
 import type { DesktopPlatform } from './platform/types';
+import type { encodeScreenshotBitmap } from './backend/screenshot/host';
 
 // Initialize source enumeration without taking or retaining any screenshot.
 // This is best effort; an actual capture still checks permission and reports errors.
@@ -30,29 +31,43 @@ export async function prepareInterviewScreenshot(window: BrowserWindow, platform
 }
 
 // Capture only when an authenticated interview request explicitly asks for it.
-// Draft image bytes remain in main-process memory; only a small preview enters
+// Draft pixels remain in main/Worker memory; only a small preview enters
 // Renderer. Explicitly sent images are archived separately for local history.
 export async function captureInterviewScreenshot(
   window: BrowserWindow,
   platform: NodeJS.Platform,
   signal: AbortSignal,
+  encodeBitmap: typeof encodeScreenshotBitmap,
   captureScreen?: DesktopPlatform['captureScreen'],
   displayPoint?: Point,
 ): Promise<{ file: ChatFile; preview: string }> {
   const image = await captureInterviewImage(window, platform, signal, captureScreen, displayPoint);
-  const file = encodeScreenshot(image);
   signal.throwIfAborted();
   const size = image.getSize();
-  const ratio = Math.min(1, 240 / Math.max(size.width, size.height));
-  const preview = image
-    .resize({
-      width: Math.max(1, Math.round(size.width * ratio)),
-      height: Math.max(1, Math.round(size.height * ratio)),
-      quality: 'best',
-    })
-    .toJPEG(75);
+  if (
+    size.width < 1 ||
+    size.height < 1 ||
+    size.width > 16384 ||
+    size.height > 16384 ||
+    size.width * size.height > 64 * 1024 * 1024
+  )
+    throw Error('当前屏幕截图过大或无效，请调整屏幕分辨率后重试。');
+  const bitmap = image.toBitmap();
+  if (bitmap.byteLength !== size.width * size.height * 4)
+    throw Error('当前屏幕截图过大或无效，请调整屏幕分辨率后重试。');
+  const result = await encodeBitmap(
+    {
+      ...size,
+      bitmap: bitmap.buffer.slice(
+        bitmap.byteOffset,
+        bitmap.byteOffset + bitmap.byteLength,
+      ) as ArrayBuffer,
+    },
+    signal,
+  );
   signal.throwIfAborted();
-  return { file, preview: `data:image/jpeg;base64,${preview.toString('base64')}` };
+  if (window.isDestroyed()) throw new DOMException('Aborted', 'AbortError');
+  return result;
 }
 
 async function captureInterviewImage(
@@ -104,27 +119,7 @@ async function captureInterviewImage(
     image = source.thumbnail;
   }
   if (image.isEmpty()) throw Error('未能获取面试窗口所在屏幕的截图，请重试。');
-  const size = image.getSize();
-  const imageRatio = Math.min(1, 3840 / Math.max(size.width, size.height));
-  if (imageRatio < 1)
-    image = image.resize({
-      width: Math.round(size.width * imageRatio),
-      height: Math.round(size.height * imageRatio),
-      quality: 'best',
-    });
   return image;
-}
-
-function encodeScreenshot(image: NativeImage): ChatFile {
-  let bytes = image.toPNG();
-  let name = 'screenshot.png';
-  if (bytes.byteLength > 8 * 1024 * 1024) {
-    bytes = image.toJPEG(90);
-    name = 'screenshot.jpg';
-  }
-  if (!bytes.byteLength || bytes.byteLength > 8 * 1024 * 1024)
-    throw Error('当前屏幕截图过大或无效，请调整屏幕分辨率后重试。');
-  return { name, bytes: new Uint8Array(bytes) };
 }
 
 function screenSources(thumbnailSize: { width: number; height: number }, signal: AbortSignal) {

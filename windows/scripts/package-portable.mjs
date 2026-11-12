@@ -1,9 +1,12 @@
 import { packager } from '@electron/packager';
 import { createRequire } from 'node:module';
-import { readFile, cp, mkdir, writeFile } from 'node:fs/promises';
+import { readFile, cp, mkdir, readdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { existsSync, realpathSync as fsRealPath, lstatSync, readFileSync } from 'node:fs';
 import os from 'node:os';
+import fuses from '@electron/fuses';
+import { prepareVcRuntime } from './vc-runtime.mjs';
+const { flipFuses, getCurrentFuseWire, FuseVersion, FuseV1Options } = fuses;
 const root = process.cwd();
 const require = createRequire(import.meta.url);
 const yaml = createRequire(require.resolve('electron-updater/package.json'))('js-yaml');
@@ -26,7 +29,6 @@ if (testOutput) {
   const parent = path.dirname(output);
   if (
     installer ||
-    store ||
     path.dirname(parent) !== fsRealPath(os.tmpdir()) ||
     !path.basename(parent).startsWith('voxcue-test-run-') ||
     !path.basename(output).startsWith('platform-layout-') ||
@@ -41,7 +43,7 @@ if (testOutput) {
 }
 // Packager may replace only this generated output, never a user profile or arbitrary path.
 if (!testOutput && output !== path.join(root, outputName)) throw Error('Unsafe portable output');
-if ((installer || store) && existsSync(path.dirname(output))) {
+if (!testOutput && (installer || store) && existsSync(path.dirname(output))) {
   const parent = fsRealPath(path.dirname(output));
   if (path.relative(root, parent).startsWith('..') || path.isAbsolute(path.relative(root, parent)))
     throw Error('Release staging parent escapes workspace');
@@ -84,7 +86,7 @@ const paths = await packager({
   prune: false,
   asar: {
     unpackDir:
-      '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/contracts,dist-electron/windows/electron/speech}',
+      '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/backend/screenshot,dist-electron/shared/electron/contracts,dist-electron/windows/electron/speech}',
   },
   ignore: [
     /^\/node_modules(?:\/|$)/,
@@ -93,6 +95,19 @@ const paths = await packager({
   ],
   afterCopy: [
     async ({ buildPath }) => {
+      const publicKey = JSON.parse(
+        await readFile(path.join(root, 'update-public-key.json'), 'utf8'),
+      );
+      const { windowsUpdateKey } = require(
+        path.join(root, 'dist-electron/shared/electron/backend/updates/windowsManifest.js'),
+      );
+      if (publicKey.protocol !== 1) throw Error('Invalid Windows update key protocol');
+      windowsUpdateKey(publicKey.publicKey);
+      // Pin the canonical key inside the archive before its integrity hash is embedded.
+      await writeFile(
+        path.join(buildPath, 'dist-electron/windows/electron/voxcue-update.json'),
+        JSON.stringify({ ...publicKey, repository: 'NCFXZ/VoxCue-releases' }) + '\n',
+      );
       if (!(await createMobileAssets(path.join(buildPath, 'dist')).read('/')))
         throw Error('The packaged application is missing its mobile page assets.');
       await cp(path.resolve('../shared/public'), path.join(buildPath, 'public'), {
@@ -190,6 +205,7 @@ const paths = await packager({
         'ws',
         'electron-updater',
         'sherpa-onnx-node',
+        'sharp',
         'sherpa-onnx-win-x64',
         '@lancedb/lancedb',
         '@huggingface/transformers',
@@ -201,13 +217,55 @@ const paths = await packager({
         'chardet',
       ])
         await copyPackage(name);
+      // Node loads addons with an altered DLL search path. Keep the fixed CRT
+      // beside the actual LanceDB/ONNX binaries, before ASAR and unpacking.
+      const runtime = await prepareVcRuntime();
+      for (const directory of copied) {
+        const targets = [];
+        if (directory.endsWith(path.join('node_modules', '@lancedb', 'lancedb-win32-x64-msvc'))) {
+          if (!existsSync(path.join(directory, 'lancedb.win32-x64-msvc.node')))
+            throw Error('Packaged LanceDB native binding is missing');
+          targets.push(directory);
+        } else if (path.basename(directory) === 'onnxruntime-node') {
+          for (const abi of await readdir(path.join(directory, 'bin'), { withFileTypes: true })) {
+            if (!abi.isDirectory() || !/^napi-v\d+$/.test(abi.name)) continue;
+            const target = path.join(directory, 'bin', abi.name, 'win32', 'x64');
+            if (!existsSync(path.join(target, 'onnxruntime_binding.node')))
+              throw Error('Packaged ONNX native binding is missing');
+            targets.push(target);
+          }
+        }
+        for (const target of targets)
+          for (const file of runtime.files)
+            await cp(path.join(runtime.directory, file.name), path.join(target, file.name));
+      }
     },
   ],
   afterComplete: [
     async ({ buildPath }) => {
+      const executable = path.join(buildPath, 'VoxCue.exe');
+      const policy = {
+        [FuseV1Options.RunAsNode]: false,
+        [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
+        [FuseV1Options.EnableNodeCliInspectArguments]: false,
+        [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
+        [FuseV1Options.OnlyLoadAppFromAsar]: true,
+      };
+      await flipFuses(executable, { version: FuseVersion.V1, ...policy });
+      const actualFuses = await getCurrentFuseWire(executable);
+      for (const [key, enabled] of Object.entries(policy))
+        if (actualFuses[key] !== (enabled ? '1' : '0').charCodeAt(0))
+          throw Error('Packaged Windows security fuse verification failed');
       await writeFile(
         path.join(buildPath, 'resources/voxcue-components.json'),
         JSON.stringify({ schemaVersion: 1 }) + '\n',
+      );
+      const runtime = await prepareVcRuntime();
+      const licenses = path.join(buildPath, 'resources/licenses');
+      await mkdir(licenses, { recursive: true });
+      await cp(
+        path.join(runtime.directory, runtime.license.name),
+        path.join(licenses, runtime.license.name),
       );
       await mkdir(path.join(buildPath, 'resources/native'), { recursive: true });
       await cp(
@@ -217,6 +275,10 @@ const paths = await packager({
       await cp(
         path.resolve('native/bin/VoxCue.Screenshot.exe'),
         path.join(buildPath, 'resources/native/VoxCue.Screenshot.exe'),
+      );
+      await cp(
+        path.resolve('native/bin/VoxCue.Cpu.exe'),
+        path.join(buildPath, 'resources/native/VoxCue.Cpu.exe'),
       );
     },
   ],

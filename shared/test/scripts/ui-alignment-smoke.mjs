@@ -376,17 +376,43 @@ try {
   }
   await startSelectionFrames(page);
   await historyNavigation.click();
-  await page.waitForFunction(
-    ({ from, to }) => {
-      const top = document
-        .querySelector('.sidebar-selection-indicator')
-        .getBoundingClientRect().top;
-      const progress = (top - from) / (to - from);
-      return progress > 0.15 && progress < 0.85;
-    },
+  const reversalProgress = await knowledgeNavigation.evaluate(
+    (button, { from, to }) =>
+      new Promise((resolve, reject) => {
+        let frame;
+        const timer = setTimeout(() => {
+          cancelAnimationFrame(frame);
+          reject(Error('The navigation reversal did not observe an intermediate position'));
+        }, 20000);
+        const sample = () => {
+          const marker = button.closest('.sidebar')?.querySelector('.sidebar-selection-indicator');
+          if (!button.isConnected || !marker) {
+            clearTimeout(timer);
+            reject(Error('The owned navigation target was removed before reversal'));
+            return;
+          }
+          const progress = (marker.getBoundingClientRect().top - from) / (to - from);
+          // CSS shortens near-endpoint reversals; sample the middle before reversing.
+          if (progress > 0.3 && progress < 0.7) {
+            clearTimeout(timer);
+            try {
+              button.click();
+              resolve(progress);
+            } catch (error) {
+              reject(error);
+            }
+            return;
+          }
+          frame = requestAnimationFrame(sample);
+        };
+        frame = requestAnimationFrame(sample);
+      }),
     { from: knowledgeMarker.top, to: historyMarker.top },
   );
-  await knowledgeNavigation.click();
+  assert.ok(
+    reversalProgress > 0.3 && reversalProgress < 0.7,
+    'Reverse navigation fires at the measured intermediate position: ' + reversalProgress,
+  );
   await page.locator('.knowledge-page').waitFor();
   const reversalFrames = await finishSelectionFrames(page);
   assertSelectionGeometry(reversalFrames, 'Rapid navigation reversal');
@@ -411,7 +437,17 @@ try {
   assert.ok(
     Math.abs(reversing.top - historyMarker.top) > 1 &&
       Math.abs(reversing.top - knowledgeMarker.top) > 1,
-    'The reversed animation remains between its targets before settling',
+    'The reversed animation remains between its targets before settling: ' +
+      JSON.stringify({
+        reversalProgress,
+        historyTop: historyMarker.top,
+        knowledgeTop: knowledgeMarker.top,
+        leftKnowledge,
+        returned,
+        reversing,
+        prior,
+        frames: reversalFrames.slice(Math.max(0, returned - 2), returned + 3),
+      }),
   );
   await page.getByRole('button', { name: '收起侧栏', exact: true }).click();
   await settle(page);

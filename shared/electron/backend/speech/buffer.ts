@@ -55,3 +55,38 @@ export class PacketDecoder {
     return packets;
   }
 }
+
+// Bound protocol lines before decoding UTF-8 or retaining an incomplete line.
+export class BoundedLineDecoder {
+  private readonly pending: Buffer;
+  private bytes = 0;
+  constructor(private readonly limit: number) {
+    this.pending = Buffer.allocUnsafe(limit);
+  }
+  push(chunk: Buffer): string[] {
+    const lines: string[] = [];
+    let offset = 0;
+    while (offset < chunk.length) {
+      const newline = chunk.indexOf(10, offset);
+      const end = newline < 0 ? chunk.length : newline;
+      const length = end - offset;
+      if (this.bytes + length > this.limit) {
+        this.bytes = 0;
+        throw Error('Native protocol line exceeds limit');
+      }
+      if (length) {
+        chunk.copy(this.pending, this.bytes, offset, end);
+        this.bytes += length;
+      }
+      if (newline < 0) break;
+      lines.push(this.finish());
+      offset = newline + 1;
+    }
+    return lines;
+  }
+  finish() {
+    const line = this.pending.toString('utf8', 0, this.bytes).replace(/\r$/, '');
+    this.bytes = 0;
+    return line;
+  }
+}

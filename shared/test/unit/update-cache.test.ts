@@ -7,7 +7,12 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import ts from 'typescript';
 import { EventEmitter } from 'node:events';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import {
+  signedWindowsUpdate,
+  validateSignedWindowsUpdate,
+  windowsUpdatePayload,
+} from '../../electron/backend/updates/windowsManifest';
 import { AppUpdater } from 'electron-updater';
 import { DownloadedUpdateHelper } from 'electron-updater/out/DownloadedUpdateHelper';
 import { configurePlatformUpdates } from '../../../shared/electron/backend/updates/driver';
@@ -155,7 +160,10 @@ class NativeFixture extends EventEmitter {
     });
   }
 }
-function setup(fetcher?: ReleaseFetch) {
+function setup(
+  fetcher?: ReleaseFetch,
+  options: Parameters<typeof configurePlatformUpdates>[3] = {},
+) {
   const updater = new NativeFixture();
   const requests = vi.fn<ReleaseFetch>(
     fetcher ??
@@ -168,7 +176,7 @@ function setup(fetcher?: ReleaseFetch) {
     updater as unknown as AppUpdater,
     'windows-x64',
     requests,
-    { cacheDirectory: cacheDirectory() },
+    { cacheDirectory: cacheDirectory(), ...options },
   );
   return { updater, requests, driver };
 }
@@ -435,6 +443,51 @@ describe('Windows update distribution channels', () => {
 });
 
 describe('Windows stock pending cache ownership', () => {
+  it('authenticates signed feed and cached metadata, and refuses changed installers before install', async () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const pinned = Buffer.from(publicKey.export({ format: 'jwk' }).x!, 'base64url').toString(
+      'base64',
+    );
+    const signature = sign(
+      null,
+      windowsUpdatePayload({ version: metadata.version, ...metadata.files[0] }),
+      privateKey,
+    ).toString('base64');
+    const signed = { ...metadata, files: [{ ...metadata.files[0], voxcueSignature: signature }] };
+    const options = {
+      mapInfo: (candidate: releaseModule.ReleaseCandidate, value: unknown) =>
+        signedWindowsUpdate(value, candidate, pinned),
+      validate: (value: unknown, target: releaseModule.ReleaseTarget) =>
+        validateSignedWindowsUpdate(value, target, pinned),
+    };
+    const fetcher: ReleaseFetch = async (input) =>
+      new Response(
+        JSON.stringify(new URL(String(input)).hostname === 'api.github.com' ? release : signed),
+      );
+    const first = setup(fetcher, options);
+    await first.driver.checkForUpdates();
+    await writeComplete(first.updater);
+    await first.driver.dispose?.();
+    const restarted = setup(async () => {
+      throw Error('offline');
+    }, options);
+    await restarted.driver.checkForUpdates();
+    await expect(restarted.driver.restoreDownloadedUpdate?.()).resolves.toBe(true);
+    await writeFile(path.join(root, 'stock/pending', name), Buffer.alloc(payload.length));
+    await expect(restarted.driver.quitAndInstall()).rejects.toThrow('changed');
+    expect(restarted.updater.quitAndInstall).not.toHaveBeenCalled();
+    await writeComplete(restarted.updater);
+    await restarted.driver.quitAndInstall();
+    expect(restarted.updater.quitAndInstall).toHaveBeenCalledOnce();
+    await restarted.driver.dispose?.();
+    const value = await state();
+    value.info.voxcueSignature = Buffer.alloc(64).toString('base64');
+    await writeFile(path.join(cacheDirectory(), 'release-cache.json'), JSON.stringify(value));
+    const tampered = setup(fetcher, options);
+    await expect(tampered.driver.checkForUpdates()).rejects.toThrow('cache');
+    expect(tampered.requests).not.toHaveBeenCalled();
+    await tampered.driver.dispose?.();
+  });
   it('uses a newer complete installer after the hourly TTL even offline, while force still reaches the remote feed', async () => {
     const first = setup();
     await first.driver.checkForUpdates();

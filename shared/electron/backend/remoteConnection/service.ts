@@ -20,6 +20,26 @@ const MAX_SNAPSHOT = 1024 * 1024;
 const MAX_CLIENT_FRAME = 32 * 1024;
 const MAX_REQUESTS = 1024;
 const MAX_DRAFT_REQUESTS = 64;
+const SNAPSHOT_ACK_MS = 15_000;
+const peerAddress = (address: string) => address.replace(/^::ffff:/, '');
+
+export class RemoteRequestLimiter {
+  private peers = new Map<string, { since: number; count: number }>();
+
+  allow(address: string) {
+    const now = Date.now();
+    for (const [peer, window] of this.peers)
+      if (now - window.since > 10_000) this.peers.delete(peer);
+    const peer = peerAddress(address);
+    let window = this.peers.get(peer);
+    if (!window) {
+      if (this.peers.size >= 128) return false;
+      window = { since: now, count: 0 };
+      this.peers.set(peer, window);
+    }
+    return ++window.count <= 60;
+  }
+}
 const secret = () => randomBytes(32).toString('base64url');
 const identifier = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{8,100}$/.test(value);
@@ -151,12 +171,14 @@ interface CommandEntry {
 }
 interface Authorization {
   token: string;
+  address: string;
   name: string;
   resumeUntil: number;
   commands: Map<string, CommandEntry>;
   drafts: Map<string, CommandEntry>;
 }
 interface Client {
+  address: string;
   authenticated: boolean;
   alive: boolean;
   authenticating: ReturnType<typeof setTimeout>;
@@ -165,6 +187,8 @@ interface Client {
   draftCount: number;
   messagesSince: number;
   messageCount: number;
+  acknowledgementsSince: number;
+  acknowledgementCount: number;
 }
 
 export class RemoteConnectionService {
@@ -186,12 +210,20 @@ export class RemoteConnectionService {
   private active: WebSocket | null = null;
   private clients = new Map<WebSocket, Client>();
   private snapshot: RemoteInterviewSnapshot | null = null;
+  private snapshotJSON = 'null';
   private sequence = 0;
   private scrollSequence = 0;
   private generation = 0;
   private sendingSnapshot = false;
+  private snapshotRequested = false;
+  private snapshotDelivery?: {
+    socket: WebSocket;
+    sequence: number;
+    id: string;
+    timer: ReturnType<typeof setTimeout>;
+  };
   private lifecycle: Promise<unknown> = Promise.resolve();
-  private requestWindow = { since: 0, count: 0 };
+  private requestLimiter = new RemoteRequestLimiter();
 
   constructor(private options: Options) {}
 
@@ -226,6 +258,24 @@ export class RemoteConnectionService {
     server.keepAliveTimeout = 2000;
     server.maxHeadersCount = 32;
     server.maxConnections = 8;
+    const connections = new Set<import('node:net').Socket>();
+    server.on('connection', (socket) => {
+      const address = peerAddress(socket.remoteAddress ?? '');
+      const approvedAddress = this.authorization?.address;
+      // Unapproved peers cannot occupy the slot needed by an approved phone
+      // to resume while its previous socket is still present.
+      if (
+        address !== approvedAddress &&
+        [...connections].filter(
+          (connection) => peerAddress(connection.remoteAddress ?? '') !== approvedAddress,
+        ).length >= 6
+      ) {
+        socket.destroy();
+        return;
+      }
+      connections.add(socket);
+      socket.once('close', () => connections.delete(socket));
+    });
     const sockets = new WebSocketServer({
       noServer: true,
       maxPayload: MAX_CLIENT_FRAME,
@@ -237,15 +287,16 @@ export class RemoteConnectionService {
       if (
         !this.allowed(request, true) ||
         request.url !== '/connect' ||
-        sockets.clients.size >= 4 ||
-        !this.rateAllowed()
+        (sockets.clients.size >= 4 &&
+          peerAddress(request.socket.remoteAddress ?? '') !== this.authorization?.address) ||
+        !this.requestLimiter.allow(request.socket.remoteAddress ?? '')
       ) {
         socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');
         return;
       }
       try {
         sockets.handleUpgrade(request, socket, head, (client) =>
-          this.connected(client, generation),
+          this.connected(client, generation, request.socket.remoteAddress!),
         );
       } catch {
         socket.destroy();
@@ -268,7 +319,7 @@ export class RemoteConnectionService {
       });
       const port = (server.address() as { port: number }).port;
       this.origin = `http://${address}:${port}`;
-      this.requestWindow = { since: Date.now(), count: 0 };
+      this.requestLimiter = new RemoteRequestLimiter();
       this.heartbeat = setInterval(() => this.tick(), 10_000);
       this.heartbeat.unref();
       this.change({
@@ -320,6 +371,7 @@ export class RemoteConnectionService {
     this.pairingRecord = null;
     this.authorization = {
       token: secret(),
+      address: this.clients.get(socket)!.address,
       name: pending.name,
       resumeUntil: Infinity,
       commands: new Map(),
@@ -387,8 +439,13 @@ export class RemoteConnectionService {
       this.snapshot?.sessionEpoch !== value?.sessionEpoch
     ) {
       this.abortCommands();
+      // Keep aborted in-flight IDs until their handlers settle, so a late
+      // acknowledgement cannot collide with a new command using the same ID.
+      for (const cache of [this.authorization?.commands, this.authorization?.drafts])
+        if (cache) for (const [id, entry] of cache) if (entry.result) cache.delete(id);
     }
     this.snapshot = JSON.parse(serialized) as RemoteInterviewSnapshot | null;
+    this.snapshotJSON = serialized;
     this.sequence++;
     this.sendSnapshot();
   }
@@ -402,6 +459,8 @@ export class RemoteConnectionService {
     this.pending = null;
     this.active = null;
     this.sendingSnapshot = false;
+    this.clearSnapshotDelivery();
+    this.snapshotRequested = false;
     const operation = this.lifecycle.then(async () => {
       const server = this.server;
       const sockets = this.sockets;
@@ -445,12 +504,6 @@ export class RemoteConnectionService {
     );
   }
 
-  private rateAllowed() {
-    const now = Date.now();
-    if (now - this.requestWindow.since > 10_000) this.requestWindow = { since: now, count: 0 };
-    return ++this.requestWindow.count <= 60;
-  }
-
   private async request(request: IncomingMessage, response: ServerResponse) {
     const generation = this.generation;
     response.setHeader('Cache-Control', 'no-store');
@@ -468,7 +521,8 @@ export class RemoteConnectionService {
     };
     if (!this.allowed(request, request.method !== 'GET' && request.method !== 'HEAD'))
       return json(403, { error: 'forbidden' });
-    if (!this.rateAllowed()) return json(429, { error: 'rate-limited' });
+    if (!this.requestLimiter.allow(request.socket.remoteAddress!))
+      return json(429, { error: 'rate-limited' });
     if (
       (request.method === 'GET' || request.method === 'HEAD') &&
       (request.url === '/' || request.url?.startsWith('/assets/'))
@@ -552,10 +606,11 @@ export class RemoteConnectionService {
     }
   }
 
-  private connected(socket: WebSocket, generation: number) {
+  private connected(socket: WebSocket, generation: number, address: string) {
     const authenticating = setTimeout(() => this.fail(socket, '连接认证超时。'), 5000);
     authenticating.unref();
     this.clients.set(socket, {
+      address: peerAddress(address),
       authenticated: false,
       alive: true,
       authenticating,
@@ -564,6 +619,8 @@ export class RemoteConnectionService {
       draftCount: 0,
       messagesSince: Date.now(),
       messageCount: 0,
+      acknowledgementsSince: performance.now(),
+      acknowledgementCount: 0,
     });
     socket.on('error', () => {});
     socket.on('pong', () => {
@@ -609,13 +666,38 @@ export class RemoteConnectionService {
         return this.fail(socket, '连接认证失败。');
       }
       if (socket !== this.active) return this.fail(socket, '连接已失效。');
+      if (value.type === 'snapshot-applied') {
+        if (
+          !revision(value.sequence) ||
+          !identifier(value.deliveryId) ||
+          Object.keys(value).some((key) => !['type', 'sequence', 'deliveryId'].includes(key))
+        )
+          return this.fail(socket, '无效的消息。');
+        const acknowledgedAt = performance.now();
+        if (acknowledgedAt - client.acknowledgementsSince > 10_000) {
+          client.acknowledgementsSince = acknowledgedAt;
+          client.acknowledgementCount = 0;
+        }
+        if (++client.acknowledgementCount > 256) return this.fail(socket, '操作过于频繁。');
+        const delivery = this.snapshotDelivery;
+        if (
+          delivery?.socket !== socket ||
+          delivery.sequence !== value.sequence ||
+          !equalSecret(value.deliveryId, delivery.id)
+        )
+          return;
+        this.clearSnapshotDelivery();
+        if (this.snapshotRequested || delivery.sequence !== this.sequence) this.sendSnapshot();
+        return;
+      }
       if (Date.now() - client.messagesSince > 10_000) {
         client.messagesSince = Date.now();
         client.messageCount = 0;
       }
       if (++client.messageCount > 60) return this.fail(socket, '操作过于频繁。');
       if (value.type === 'sync') {
-        this.send(socket, { type: 'snapshot', sequence: this.sequence, snapshot: this.snapshot });
+        this.snapshotRequested = true;
+        this.sendSnapshot();
         return;
       }
       if (value.type === 'disconnect') {
@@ -623,6 +705,8 @@ export class RemoteConnectionService {
         this.authorization = null;
         this.active = null;
         this.sendingSnapshot = false;
+        this.clearSnapshotDelivery();
+        this.snapshotRequested = false;
         this.change({ status: 'waiting', clientName: null });
         this.send(socket, { type: 'disconnected' });
         socket.close(1000, 'Disconnected');
@@ -654,6 +738,8 @@ export class RemoteConnectionService {
       if (socket !== this.active) return;
       this.active = null;
       this.sendingSnapshot = false;
+      this.clearSnapshotDelivery();
+      this.snapshotRequested = false;
       if (this.authorization) {
         this.authorization.resumeUntil = Date.now() + RESUME_MS;
         this.change({ status: 'reconnecting' });
@@ -668,6 +754,8 @@ export class RemoteConnectionService {
     clearTimeout(client.authenticating);
     client.authenticated = true;
     authorization.resumeUntil = Infinity;
+    this.clearSnapshotDelivery();
+    this.snapshotRequested = false;
     this.active = socket;
     this.sendingSnapshot = false;
     this.change({
@@ -681,6 +769,7 @@ export class RemoteConnectionService {
       protocolVersion: REMOTE_PROTOCOL_VERSION,
       token: authorization.token,
       sequence: this.sequence,
+      deliveryId: this.beginSnapshotDelivery(socket, this.sequence),
       snapshot: this.snapshot,
     });
   }
@@ -700,6 +789,37 @@ export class RemoteConnectionService {
           result: { requestId: command.requestId, ok: false, error: 'request-conflict' },
         });
       else if (existing.result) this.send(socket, { type: 'result', result: existing.result });
+      return;
+    }
+    // Definitive refusals have no side effects and need no replay receipt.
+    // In particular, old-session traffic must not fill the new session's pool.
+    if (
+      !this.snapshot ||
+      command.sessionId !== this.snapshot.sessionId ||
+      command.sessionEpoch !== this.snapshot.sessionEpoch
+    ) {
+      this.send(socket, {
+        type: 'result',
+        result: { requestId: command.requestId, ok: false, error: 'session-changed' },
+      });
+      return;
+    }
+    const client = this.clients.get(socket)!;
+    if (Date.now() - client.commandsSince > 10_000) {
+      client.commandsSince = Date.now();
+      client.commandCount = 0;
+      client.draftCount = 0;
+    }
+    if (
+      (isDraft ? ++client.draftCount > 40 : ++client.commandCount > 20) ||
+      [...authorization.commands.values(), ...authorization.drafts.values()].filter(
+        (value) => !value.result,
+      ).length >= 4
+    ) {
+      this.send(socket, {
+        type: 'result',
+        result: { requestId: command.requestId, ok: false, error: 'command-busy' },
+      });
       return;
     }
     if (!isDraft && cache.size >= MAX_REQUESTS) {
@@ -723,33 +843,12 @@ export class RemoteConnectionService {
     const entry: CommandEntry = { fingerprint, controller: new AbortController() };
     cache.set(command.requestId, entry);
     let result: RemoteCommandResult;
-    const client = this.clients.get(socket)!;
-    if (Date.now() - client.commandsSince > 10_000) {
-      client.commandsSince = Date.now();
-      client.commandCount = 0;
-      client.draftCount = 0;
-    }
-    if (
-      (isDraft ? ++client.draftCount > 40 : ++client.commandCount > 20) ||
-      [...authorization.commands.values(), ...authorization.drafts.values()].filter(
-        (value) => !value.result,
-      ).length > 4
-    ) {
-      result = { requestId: command.requestId, ok: false, error: 'command-busy' };
-    } else if (
-      !this.snapshot ||
-      command.sessionId !== this.snapshot.sessionId ||
-      command.sessionEpoch !== this.snapshot.sessionEpoch
-    ) {
-      result = { requestId: command.requestId, ok: false, error: 'session-changed' };
-    } else {
-      try {
-        result = await this.options.onCommand(command, entry.controller.signal);
-        if (result.requestId !== command.requestId || typeof result.ok !== 'boolean')
-          throw new Error();
-      } catch {
-        result = { requestId: command.requestId, ok: false, error: 'command-failed' };
-      }
+    try {
+      result = await this.options.onCommand(command, entry.controller.signal);
+      if (result.requestId !== command.requestId || typeof result.ok !== 'boolean')
+        throw new Error();
+    } catch {
+      result = { requestId: command.requestId, ok: false, error: 'command-failed' };
     }
     if (generation !== this.generation || authorization !== this.authorization) return;
     entry.result = entry.controller.signal.aborted
@@ -766,6 +865,7 @@ export class RemoteConnectionService {
             : {}),
         };
     if (this.active) this.send(this.active, { type: 'result', result: entry.result });
+    if (entry.controller.signal.aborted) cache.delete(command.requestId);
   }
 
   private send(socket: WebSocket, message: RemoteServerMessage) {
@@ -781,19 +881,23 @@ export class RemoteConnectionService {
 
   private sendSnapshot() {
     const socket = this.active;
-    if (!socket || this.sendingSnapshot || socket.readyState !== WebSocket.OPEN) return;
+    if (
+      !socket ||
+      this.sendingSnapshot ||
+      this.snapshotDelivery ||
+      socket.readyState !== WebSocket.OPEN
+    )
+      return;
     if (socket.bufferedAmount > MAX_SNAPSHOT * 2) {
       socket.terminate();
       return;
     }
     const sequence = this.sequence;
+    this.snapshotRequested = false;
+    const deliveryId = this.beginSnapshotDelivery(socket, sequence);
     this.sendingSnapshot = true;
     socket.send(
-      JSON.stringify({
-        type: 'snapshot',
-        sequence,
-        snapshot: this.snapshot,
-      } satisfies RemoteServerMessage),
+      `{"type":"snapshot","sequence":${sequence},"deliveryId":${JSON.stringify(deliveryId)},"snapshot":${this.snapshotJSON}}`,
       (error) => {
         if (socket !== this.active) return;
         this.sendingSnapshot = false;
@@ -801,9 +905,28 @@ export class RemoteConnectionService {
           socket.terminate();
           return;
         }
-        if (sequence !== this.sequence) this.sendSnapshot();
+        if (!this.snapshotDelivery && (sequence !== this.sequence || this.snapshotRequested))
+          this.sendSnapshot();
       },
     );
+  }
+
+  private clearSnapshotDelivery() {
+    if (this.snapshotDelivery) clearTimeout(this.snapshotDelivery.timer);
+    this.snapshotDelivery = undefined;
+  }
+
+  private beginSnapshotDelivery(socket: WebSocket, sequence: number) {
+    const id = secret();
+    const timer = setTimeout(() => {
+      if (this.snapshotDelivery?.id !== id || socket !== this.active) return;
+      this.change({ error: '设备连接已中断' });
+      // Keep authorization and command receipts for the normal resume window.
+      socket.terminate();
+    }, SNAPSHOT_ACK_MS);
+    timer.unref();
+    this.snapshotDelivery = { socket, sequence, id, timer };
+    return id;
   }
 
   private fail(socket: WebSocket, error: string) {

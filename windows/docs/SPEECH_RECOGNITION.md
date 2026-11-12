@@ -95,7 +95,7 @@ pnpm build
 node test/scripts/speech-input-state-smoke.mjs
 pnpm test:speech:desktop
 pnpm test:speech:soak
-pnpm test:speech:package
+pnpm test:package
 pnpm test
 pnpm typecheck
 pnpm check:architecture

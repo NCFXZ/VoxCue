@@ -317,7 +317,7 @@ try {
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'copilot');
   await page.evaluate(() => window.desktop.signOut());
   assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
-  assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.logout), 1);
+  assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.logout), 0);
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   await installUiAccount(app);
   await page.evaluate(() => window.desktop.signInWithChatGPT());

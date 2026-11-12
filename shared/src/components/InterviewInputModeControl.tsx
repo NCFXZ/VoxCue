@@ -5,7 +5,7 @@ import { Button } from './ui/button';
 
 const choices = [
   { value: 'remote', label: '远程面试' },
-  { value: 'transcription', label: '仅转录' },
+  { value: 'transcription', label: '现场面试' },
 ] as const;
 
 export function InterviewInputModeControl({

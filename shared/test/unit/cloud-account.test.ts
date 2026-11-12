@@ -1,9 +1,10 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import {
   CloudAccountClient,
   cloudOrigin,
   type CloudVault,
 } from '../../electron/backend/cloud/client';
+import { CloudSyncClient } from '../../electron/backend/cloud/sync';
 
 const origin = 'https://accounts.example.test';
 const result = () => ({
@@ -36,6 +37,189 @@ function vault(initial: unknown = null) {
 const json = (value: unknown, status = 200, headers = {}) =>
   new Response(JSON.stringify(value), { status, headers });
 describe('independent cloud account client', () => {
+  it.each(['account', 'upload', 'download'])(
+    'oversized %s responses release both locks even if transport cancellation never settles',
+    async (kind) => {
+      const cancel = vi.fn(() => new Promise<void>(() => {}));
+      const oversized = new Response(
+        new ReadableStream<Uint8Array>({
+          start(controller) {
+            controller.enqueue(new Uint8Array((kind === 'download' ? 1048576 : 32768) + 1));
+          },
+          cancel,
+        }),
+      );
+      const transport = vi
+        .fn()
+        .mockImplementation(async () => json({ user: result().user }))
+        .mockResolvedValueOnce(json({ user: result().user }))
+        .mockResolvedValueOnce(oversized);
+      const client = new CloudAccountClient({
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: vault({ origin, credentials: result() }).port,
+        fetcher: transport,
+      });
+      expect((await client.call({ action: 'status' })).ok).toBe(true);
+      const sync = new CloudSyncClient(client);
+      const owner = {
+        userId: result().user.id,
+        syncId: '33333333-3333-4333-8333-333333333333',
+        id: result().sessionId,
+      };
+      const failed =
+        kind === 'account'
+          ? await client.call({ action: 'status' })
+          : await sync.call(
+              kind === 'upload'
+                ? { ...owner, action: 'put', index: 0, bytes: new Uint8Array([1]) }
+                : { ...owner, action: 'read', index: 0, version: result().sessionId },
+            );
+      expect(failed).toMatchObject({ ok: false, error: expect.stringContaining('过大') });
+      expect(cancel).toHaveBeenCalledOnce();
+      expect(oversized.body!.locked).toBe(false);
+      expect((await client.call({ action: 'status' })).ok).toBe(true);
+      expect(
+        (await sync.call({ action: 'list', userId: owner.userId, syncId: owner.syncId })).ok,
+      ).toBe(true);
+    },
+  );
+  it('statistics rejection does not wait for failed-response cancellation or revoke credentials', async () => {
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const client = new CloudAccountClient({
+      origin,
+      deviceLabel: 'Synthetic',
+      vault: vault({ origin, credentials: result() }).port,
+      fetcher: vi
+        .fn()
+        .mockResolvedValueOnce(json({ user: result().user }))
+        .mockResolvedValueOnce(new Response(new ReadableStream({ cancel }), { status: 503 })),
+    });
+    expect((await client.call({ action: 'status' })).ok).toBe(true);
+    await expect(
+      client.telemetryIdentity(
+        '33333333-3333-4333-8333-333333333333',
+        result().user.id,
+        new AbortController().signal,
+      ),
+    ).rejects.toThrow('Attribution unavailable');
+    expect(cancel).toHaveBeenCalledOnce();
+    expect(client.snapshot().user?.id).toBe(result().user.id);
+  });
+  it('allows a slow full chunk to finish beyond the metadata deadline', async () => {
+    vi.useFakeTimers();
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException('timed out', 'TimeoutError')),
+        milliseconds,
+      );
+      return controller.signal;
+    });
+    try {
+      const client = new CloudAccountClient({
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: vault({ origin, credentials: result() }).port,
+        fetcher: (async (_url, options) =>
+          new Promise<Response>((resolve, reject) => {
+            const timer = setTimeout(() => resolve(json({ stored: true })), 20_000);
+            options!.signal!.addEventListener(
+              'abort',
+              () => {
+                clearTimeout(timer);
+                reject(options!.signal!.reason);
+              },
+              { once: true },
+            );
+          })) as typeof fetch,
+      });
+      const uploading = client.api('/v1/uploads/synthetic/parts/0', 'PUT', new Uint8Array(1048576));
+      await vi.advanceTimersByTimeAsync(20_000);
+      await expect(uploading).resolves.toEqual({ stored: true });
+    } finally {
+      timeout.mockRestore();
+      vi.clearAllTimers();
+      vi.useRealTimers();
+    }
+  });
+  it('cancels only the matching sync engine and releases both transfer locks before logout', async () => {
+    const syncId = '33333333-3333-4333-8333-333333333333';
+    const laterSyncId = '44444444-4444-4444-8444-444444444444';
+    let signal!: AbortSignal;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const client = new CloudAccountClient({
+      origin,
+      deviceLabel: 'Synthetic',
+      vault: vault({ origin, credentials: result() }).port,
+      fetcher: (async (url, options) => {
+        if (String(url).includes('/parts/'))
+          return new Promise<Response>((_resolve, reject) => {
+            signal = options!.signal!;
+            signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+            started();
+          });
+        return json(String(url).endsWith('/account') ? { user: result().user } : {});
+      }) as typeof fetch,
+    });
+    await client.call({ action: 'status' });
+    const sync = new CloudSyncClient(client);
+    const uploading = sync.call({
+      action: 'put',
+      userId: result().user.id,
+      syncId,
+      id: result().sessionId,
+      index: 0,
+      bytes: new Uint8Array(1048576),
+    });
+    await entered;
+    expect(
+      (await sync.call({ action: 'cancel', userId: result().user.id, syncId: laterSyncId })).ok,
+    ).toBe(true);
+    expect(signal.aborted).toBe(false);
+    expect((await sync.call({ action: 'cancel', userId: result().user.id, syncId })).ok).toBe(true);
+    expect(signal.aborted).toBe(true);
+    expect((await uploading).ok).toBe(false);
+    expect(
+      (await sync.call({ action: 'list', userId: result().user.id, syncId: laterSyncId })).ok,
+    ).toBe(true);
+    expect((await client.call({ action: 'logout' })).ok).toBe(true);
+    expect(client.snapshot().user).toBeNull();
+  });
+  it('removes a cancelled queued sync request without aborting an unrelated reader', async () => {
+    let finish!: (value: Response) => void;
+    let requests = 0;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => {
+      started = resolve;
+    });
+    const client = new CloudAccountClient({
+      origin,
+      deviceLabel: 'Synthetic',
+      vault: vault({ origin, credentials: result() }).port,
+      fetcher: (async () => {
+        if (++requests > 1) return json({ quota: false });
+        return new Promise<Response>((resolve) => {
+          finish = resolve;
+          started();
+        });
+      }) as typeof fetch,
+    });
+    const reader = client.api('/v1/entitlements');
+    await entered;
+    const owner = { userId: result().user.id, syncId: '33333333-3333-4333-8333-333333333333' };
+    const queued = client.api('/v1/backups', 'GET', undefined, false, owner);
+    const cancelled = expect(queued).rejects.toThrow();
+    client.cancelTransfers(owner.userId, owner.syncId);
+    await cancelled;
+    finish(json({ quota: true }));
+    await expect(reader).resolves.toEqual({ quota: true });
+    await expect(client.api('/v1/entitlements')).resolves.toEqual({ quota: false });
+    expect(requests).toBe(2);
+  });
   it.each([401, 403, 503])(
     'statistics HTTP %i never clears the cloud session or exposes access tokens',
     async (status) => {

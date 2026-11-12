@@ -126,6 +126,7 @@ try {
   assert.equal(await settings.getByRole('button', { name: '删除账号', exact: true }).count(), 0);
   assert.equal(await settings.getByRole('button', { name: '导出资料', exact: true }).count(), 1);
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
   assert.equal(await settings.getByRole('button', { name: '连接', exact: true }).count(), 2);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.getByRole('textbox', { name: '聊天消息' }).fill('合成草稿，重启后保留');

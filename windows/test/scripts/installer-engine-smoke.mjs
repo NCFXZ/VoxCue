@@ -9,6 +9,8 @@ import {
   symlink,
   unlink,
   copyFile,
+  rm,
+  rmdir,
 } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -157,6 +159,7 @@ async function run(
     fail = false,
     choosePath = false,
     lockedPath = false,
+    verbatimArguments = false,
   } = {},
 ) {
   assert.ok((await realpath(executable)).startsWith(testRoot + path.sep));
@@ -165,7 +168,8 @@ async function run(
     windowsHide: true,
     stdio: 'ignore',
     // NSIS's special final _?= path consumes raw text, including spaces.
-    windowsVerbatimArguments: args.some((argument) => argument.startsWith('_?=')),
+    windowsVerbatimArguments:
+      verbatimArguments || args.some((argument) => argument.startsWith('_?=')),
   });
   active.add(child);
   child.once('exit', () => active.delete(child));
@@ -194,6 +198,9 @@ async function run(
             'Selected or existing path is displayed',
           );
         }
+        if (lockedPath)
+          for (const key of registryKeys)
+            assert.equal(registry('query', key).status, 0, 'Opening the installer preserves existing registration');
         if (choosePath) {
           assert.ok(browse?.enabled);
           inspect(frontend, 'button', browse.text);
@@ -374,6 +381,43 @@ try {
     assert.equal(await readFile(path.join(target, 'version.txt'), 'utf8'), version);
     await preserved();
   }
+  for (const interactive of [true, false]) {
+    // Simulate a manual removal of only this inert installation. Its own GUID
+    // registration and separate synthetic user data deliberately remain.
+    const actual = await realpath(target);
+    const relative = path.relative(await realpath(testRoot), actual);
+    assert.ok(relative && !path.isAbsolute(relative) && !relative.split(path.sep).includes('..'));
+    assert.equal(actual, path.resolve(target));
+    await rm(actual, { recursive: true });
+    for (const key of registryKeys) assert.equal(registry('query', key).status, 0);
+    if (interactive) {
+      const registration = registryKeys.map((key) => registry('query', key).stdout);
+      // NSIS consumes a raw final /D before customInit; Builder's early
+      // SetOutPath then creates it. Preserve the absent-only repair boundary.
+      await run(latestInstaller, ['/S', '--updated', '/D=' + target], {
+        fail: true,
+        verbatimArguments: true,
+      });
+      assert.equal(await realpath(target), path.resolve(target));
+      assert.deepEqual(await readdir(target), []);
+      for (const [index, key] of registryKeys.entries()) {
+        const result = registry('query', key);
+        assert.equal(result.status, 0);
+        assert.equal(result.stdout, registration[index], 'Rejected raw /D preserves its registration');
+      }
+      await preserved();
+      await rmdir(target);
+    }
+    // Node quotes an argument containing spaces. NSIS does not consume that
+    // /D at startup; our guard restores the registered path after Builder's helper.
+    await run(latestInstaller, [
+      ...(interactive ? [] : ['/S', '--updated']), '/D=' + (interactive ? ignoredTarget : target),
+    ], { interactive, lockedPath: interactive });
+    assert.equal(await readFile(path.join(target, 'version.txt'), 'utf8'), currentVersion);
+    for (const key of registryKeys) assert.equal(registry('query', key).status, 0);
+    await assert.rejects(readFile(path.join(ignoredTarget, 'version.txt')), { code: 'ENOENT' });
+    await preserved();
+  }
   const remove = await uninstaller();
   assert.ok(remove, 'An actual uninstaller must be installed');
   await run(remove, ['/S', '--updated', '--delete-app-data', '_?=' + target], { fail: true });
@@ -425,6 +469,8 @@ try {
       manualInstall: true,
       interactiveUpdate: true,
       silentUpdate: true,
+      missingDirectoryRepair: true,
+      rawMissingPathOverrideRejected: true,
       interactiveUninstall: true,
       isolatedGuid: true,
       temporaryFilesOnly: true,

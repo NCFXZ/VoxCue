@@ -119,22 +119,38 @@ export class CloudAccountClient {
   private initialized = false;
   private verified = false;
   private busy = false;
+  private transfers = new Set<{ userId: string; syncId: string; controller: AbortController }>();
   private waiting: { resolve(): void; timer: ReturnType<typeof setTimeout> }[] = [];
-  private async acquireApi() {
+  private async acquireApi(signal?: AbortSignal) {
+    signal?.throwIfAborted();
     if (!this.busy) {
       this.busy = true;
       return;
     }
     if (this.waiting.length >= 2) throw new Failure('账号服务繁忙，请稍后重试。', 503, 1);
     await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(waiter.timer);
+        signal?.removeEventListener('abort', abort);
+      };
+      const abort = () => {
+        this.waiting = this.waiting.filter((item) => item !== waiter);
+        cleanup();
+        reject(signal!.reason);
+      };
       const waiter = {
-        resolve,
+        resolve: () => {
+          cleanup();
+          resolve();
+        },
         timer: setTimeout(() => {
           this.waiting = this.waiting.filter((item) => item !== waiter);
+          cleanup();
           reject(new Failure('账号服务繁忙，请稍后重试。', 503, 1));
         }, 2000),
       };
       this.waiting.push(waiter);
+      signal?.addEventListener('abort', abort, { once: true });
     });
   }
   private release() {
@@ -188,7 +204,7 @@ export class CloudAccountClient {
       },
     );
     if (!response.ok) {
-      await response.body?.cancel();
+      void response.body?.cancel().catch(() => {});
       throw Error('Attribution unavailable');
     }
     return boundedJson(response, 8192);
@@ -210,17 +226,26 @@ export class CloudAccountClient {
     }
     this.initialized = true;
   }
-  private async request(route: string, method = 'GET', body?: unknown, token?: string) {
+  private async request(
+    route: string,
+    method = 'GET',
+    body?: unknown,
+    token?: string,
+    signal?: AbortSignal,
+  ) {
     const response = await (this.options.fetcher ?? fetch)(this.options.origin + route, {
       method,
       redirect: 'error',
-      signal: AbortSignal.timeout(12_000),
+      signal: signal
+        ? AbortSignal.any([signal, AbortSignal.timeout(12_000)])
+        : AbortSignal.timeout(12_000),
       headers: {
         ...(body === undefined ? {} : { 'content-type': 'application/json' }),
         ...(token ? { authorization: 'Bearer ' + token } : {}),
       },
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     });
+    signal?.throwIfAborted();
     if (response.status === 401 && route !== '/v1/account/delete') await this.clear();
     const reader = response.body?.getReader();
     if (!reader) {
@@ -239,7 +264,7 @@ export class CloudAccountClient {
       }
     } catch (error) {
       if (response.status === 401) await this.clear();
-      await reader.cancel().catch(() => {});
+      void reader.cancel().catch(() => {});
       throw error;
     } finally {
       reader.releaseLock();
@@ -269,6 +294,7 @@ export class CloudAccountClient {
         code,
       );
     }
+    signal?.throwIfAborted();
     return result;
   }
   private async save(value: unknown) {
@@ -287,14 +313,21 @@ export class CloudAccountClient {
     this.verified = false;
     await this.options.vault.clear();
   }
-  private async access() {
+  private async access(signal?: AbortSignal) {
+    signal?.throwIfAborted();
     if (!this.current) throw new Failure('请先登录 VoxCue 账号。', 401);
     if (this.current.expiresAt <= Date.now() + 30_000) {
       try {
         await this.save(
-          await this.request('/v1/auth/refresh', 'POST', {
-            refreshToken: this.current.refreshToken,
-          }),
+          await this.request(
+            '/v1/auth/refresh',
+            'POST',
+            {
+              refreshToken: this.current.refreshToken,
+            },
+            undefined,
+            signal,
+          ),
         );
       } catch (error) {
         if (error instanceof Failure && error.status === 401) await this.clear();
@@ -303,10 +336,10 @@ export class CloudAccountClient {
     }
     return this.current!.accessToken;
   }
-  private async authorized(route: string, method = 'GET', body?: unknown) {
-    const token = await this.access();
+  private async authorized(route: string, method = 'GET', body?: unknown, signal?: AbortSignal) {
+    const token = await this.access(signal);
     try {
-      return await this.request(route, method, body, token);
+      return await this.request(route, method, body, token, signal);
     } catch (error) {
       if (
         error instanceof Failure &&
@@ -318,21 +351,44 @@ export class CloudAccountClient {
     }
   }
   /** Main only: one transfer/rotation in flight; at most two callers wait for up to two seconds. */
-  async api(route: string, method = 'GET', body?: unknown, binary = false): Promise<unknown> {
+  cancelTransfers(userId: string, syncId: string) {
+    for (const transfer of this.transfers)
+      if (transfer.userId === userId && transfer.syncId === syncId) transfer.controller.abort();
+  }
+  async api(
+    route: string,
+    method = 'GET',
+    body?: unknown,
+    binary = false,
+    owner?: { userId: string; syncId: string },
+  ): Promise<unknown> {
     const userId = this.current?.user.id;
-    await this.acquireApi();
+    const transfer = owner && { ...owner, controller: new AbortController() };
+    const signal = transfer?.controller.signal;
+    if (transfer) this.transfers.add(transfer);
+    let acquired = false;
     try {
+      await this.acquireApi(signal);
+      acquired = true;
       await this.load();
-      if (userId && this.current?.user.id !== userId)
+      signal?.throwIfAborted();
+      if (
+        (userId && this.current?.user.id !== userId) ||
+        (owner && this.current?.user.id !== owner.userId)
+      )
         throw new Failure('账号已变化，请重新操作。', 401);
       if (!this.options.origin) throw new Failure('账号服务未配置。');
       if (!(body instanceof Uint8Array) && !binary)
-        return await this.authorized(route, method, body);
-      const token = await this.access();
+        return await this.authorized(route, method, body, signal);
+      const token = await this.access(signal);
       const response = await (this.options.fetcher ?? fetch)(this.options.origin + route, {
         method,
         redirect: 'error',
-        signal: AbortSignal.timeout(12_000),
+        // One MiB transfers must tolerate slow uplinks; explicit owner cancellation
+        // still interrupts immediately without waiting for this total deadline.
+        signal: signal
+          ? AbortSignal.any([signal, AbortSignal.timeout(120_000)])
+          : AbortSignal.timeout(120_000),
         headers: {
           authorization: 'Bearer ' + token,
           ...(body instanceof Uint8Array
@@ -344,6 +400,7 @@ export class CloudAccountClient {
         },
         ...(body instanceof Uint8Array ? { body: Buffer.from(body) } : {}),
       });
+      signal?.throwIfAborted();
       if (response.status === 401) await this.clear();
       const binaryResponse = binary && response.ok;
       const reader = response.body?.getReader();
@@ -360,7 +417,7 @@ export class CloudAccountClient {
           chunks.push(chunk.value);
         }
       } catch (error) {
-        await reader.cancel().catch(() => {});
+        void reader.cancel().catch(() => {});
         throw error;
       } finally {
         reader.releaseLock();
@@ -379,9 +436,11 @@ export class CloudAccountClient {
           Math.min(3600, Math.max(1, Number(response.headers.get('retry-after')) || 1)),
         );
       }
+      signal?.throwIfAborted();
       return binary ? new Uint8Array(result) : record(JSON.parse(result.toString()));
     } finally {
-      this.release();
+      if (transfer) this.transfers.delete(transfer);
+      if (acquired) this.release();
     }
   }
   async call(input: CloudAccountCall): Promise<CloudAccountResult> {

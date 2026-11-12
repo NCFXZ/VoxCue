@@ -5,23 +5,42 @@ import { KnowledgeError } from './errors';
 const port = process.parentPort!;
 let core: KnowledgeService;
 let active: string | undefined;
-let queue: Promise<unknown> = Promise.resolve();
+let running = false;
 const controllers = new Map<string, AbortController>();
+const queued = new Map<string, Record<string, any>>();
 port.on('message', ({ data: m }) => {
   if (m.cancel) {
     controllers.get(m.cancel)?.abort();
+    const waiting = queued.get(m.cancel);
+    if (waiting) {
+      // Release imported bytes and the queued envelope before acknowledging
+      // retirement. Cancellation must not leave an unaccounted queued document.
+      waiting.input = undefined;
+      queued.delete(m.cancel);
+      controllers.delete(m.cancel);
+      port.postMessage({ id: m.cancel, error: '知识库操作已取消。', errorCode: 'cancelled' });
+    }
     return;
   }
   if (typeof m.id !== 'string') return;
   const controller = new AbortController();
   controllers.set(m.id, controller);
-  queue = queue
-    .catch(() => {})
-    .then(async () => {
+  queued.set(m.id, m);
+  void drain();
+});
+async function drain() {
+  if (running) return;
+  running = true;
+  try {
+    while (queued.size) {
+      const [id, m] = queued.entries().next().value!;
+      queued.delete(id);
+      const controller = controllers.get(id)!;
       active = m.id;
       const signal = controller.signal;
       try {
         signal.throwIfAborted();
+        port.postMessage({ id: m.id, started: true });
         let value: unknown;
         if (m.init) {
           core = new KnowledgeService(
@@ -86,8 +105,11 @@ port.on('message', ({ data: m }) => {
         controllers.delete(m.id);
         active = undefined;
       }
-    });
-});
+    }
+  } finally {
+    running = false;
+  }
+}
 function publicError(error: unknown) {
   if (
     error instanceof Error &&

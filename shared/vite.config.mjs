@@ -82,7 +82,12 @@ export default {
       name: 'development-csp',
       apply: 'serve',
       transformIndexHtml: (html) =>
-        html.replace("script-src 'self';", "script-src 'self' 'unsafe-inline';"),
+        html
+          .replace("script-src 'self';", "script-src 'self' 'unsafe-inline';")
+          .replace(
+            "connect-src 'self';",
+            "connect-src 'self' ws://127.0.0.1:* http://127.0.0.1:*;",
+          ),
     },
   ],
   resolve: {

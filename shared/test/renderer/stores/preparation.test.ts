@@ -114,6 +114,35 @@ describe('准备聊天与个人信息', () => {
     usePreparation.getState().reset();
     expect(usePreparation.getState().attachments).toEqual([]);
   });
+  it('真实聊天在读取历史附件或发送 IPC 前拒绝超出上下文预算', async () => {
+    const chatSend = vi.fn();
+    vi.stubGlobal('window', {
+      desktop: {
+        chatSend,
+        chatAccountUsage: vi.fn().mockResolvedValue({ ok: true, usage: null }),
+      },
+    });
+    const files = ['old.txt', 'new.txt'].map((name) => {
+      const file = new File(['synthetic'], name);
+      Object.defineProperty(file, 'size', { value: 20 * 1024 ** 2 });
+      const read = vi.spyOn(file, 'arrayBuffer');
+      return { file, read, id: name, name, size: file.size };
+    });
+    usePreparation.setState({
+      messages: [{
+        id: 'old-message', role: 'user', content: '旧资料',
+        options: { modelId: chatModels[0].id, webSearch: true, attachments: [files[0]] },
+      }],
+      attachments: [files[1]],
+    });
+    useChatConnection.setState({ live: true });
+    await usePreparation.getState().send('合成上下文预算检查');
+    expect(files.map(({ read }) => read.mock.calls.length)).toEqual([0, 0]);
+    expect(chatSend).not.toHaveBeenCalled();
+    expect(usePreparation.getState().messages.at(-1)?.status).toBe('failed');
+    expect(usePreparation.getState().error).toContain('合计 32 MB');
+    expect(usePreparation.getState().streaming).toBe(false);
+  });
   it('切换对话保留消息，删除其他对话不影响当前消息或个人资料', async () => {
     const firstReply = usePreparation.getState().send('第一条对话');
     await vi.advanceTimersByTimeAsync(10000);

@@ -26,6 +26,14 @@ function chunks(text: string, contentType = 'application/octet-stream') {
   );
 }
 describe('兼容真实响应格式', () => {
+  it.each(['\n\n', ''])('损坏的 SSE JSON 不把原响应片段带进公开错误（结尾 %j）', async (ending) => {
+    const failure = await collect(
+      chunks('data: {"密钥":"synthetic-secret",invalid}' + ending, 'text/event-stream'),
+    ).catch((error) => error);
+    expect(failure).toBeInstanceOf(Error);
+    expect(failure.message).toBe('服务返回的 JSON 不完整，请重试。');
+    expect(JSON.stringify(publicFailure(failure))).not.toMatch(/synthetic|密钥|invalid/);
+  });
   it('类型标头缺失或错误时仍可解析逐字节 SSE，包括中文', async () => {
     const events = await collect(
       chunks('data: {"type":"response.output_text.delta","delta":"你好"}\r\n\r\n'),

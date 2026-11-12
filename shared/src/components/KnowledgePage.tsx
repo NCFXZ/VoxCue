@@ -223,7 +223,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             <p>
               {t('支持 PDF、Word、TXT 和 Markdown 文件')}
               <br />
-              {t('单文件最大 20 MB，每次最多 20 个；同名替换前备份旧原件')}
+              {t('单文件最大 20 MB，每次最多 20 个；同名文件将替换旧文件')}
             </p>
             <Button
               disabled={state.busy}

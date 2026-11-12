@@ -90,6 +90,21 @@ describe('interface language', () => {
     expect(translateUI('  语言\n', 'en')).toBe('  Language\n');
   });
 
+  it('matches application templates without generic punctuation captures or regex backtracking', () => {
+    expect(translateUI('任意内容：用户原文', 'en')).toBe('任意内容：用户原文');
+    expect(translateUI('Engine error: 用户原文', 'en')).toBe('Engine error: 用户原文');
+    expect(translateUI('已用 4 字节，总容量 10 字节', 'en')).toBe('4 bytes used out of 10 bytes');
+    expect(translateUI('正在重试 2/3', 'en')).toBe('Retrying 2/3');
+    expect(translateUI('密码需要8至64个字符。', 'en')).toBe(
+      'Your password must contain 8–64 characters.',
+    );
+    const repeated = '密码需要' + '至'.repeat(10_000) + '个字符X';
+    expect(translateUI(repeated, 'en')).toBe(repeated);
+    const long = '用户原文：'.repeat(20_000);
+    expect(translateUI('查看面试记录：' + long, 'en')).toBe('查看面试记录：' + long);
+    expect(translateUI('查看面试记录：{0}', 'en', [long])).toBe('View interview: ' + long);
+  });
+
   it('has English copy with matching placeholder indices', () => {
     const slots = (value: string) =>
       [...value.matchAll(/\{(\d+)\}/g)].map((match) => match[1]).sort();

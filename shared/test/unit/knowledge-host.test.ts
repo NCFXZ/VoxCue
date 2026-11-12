@@ -120,9 +120,56 @@ it('超时确认进程退出后保留 unavailable，并清除定时器和请求'
   try {
     const pending = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
     const rejected = expect(pending).rejects.toMatchObject({ code: 'unavailable' });
+    await Promise.resolve();
+    child.emit('message', { id: child.postMessage.mock.calls.at(-1)![0].id, started: true });
     await vi.advanceTimersByTimeAsync(30001);
     await rejected;
     expect((host as any).pending.size).toBe(0);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('检索在长索引后排队超过30秒不会退休进程，实际执行才启动期限', async () => {
+  const { host, child } = setup();
+  await host.initialize();
+  vi.useFakeTimers();
+  try {
+    const indexing = host.indexDocument(
+      { documentId: 'doc', baseId: 'base', name: 'a.txt', bytes: new Uint8Array([1]) },
+      new AbortController().signal,
+    );
+    const search = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
+    await Promise.resolve();
+    const indexId = child.postMessage.mock.calls[1][0].id;
+    const searchId = child.postMessage.mock.calls[2][0].id;
+    await vi.advanceTimersByTimeAsync(45000);
+    expect(child.kill).not.toHaveBeenCalled();
+    child.emit('message', { id: indexId, value: { documentId: 'doc' } });
+    child.emit('message', { id: searchId, started: true });
+    await indexing;
+    await vi.advanceTimersByTimeAsync(29999);
+    expect(child.kill).not.toHaveBeenCalled();
+    child.emit('message', { id: searchId, value: [] });
+    await expect(search).resolves.toEqual([]);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it('进程从不确认检索开始时仍有存活期限，不会永久保留请求', async () => {
+  const { host, child } = setup();
+  await host.initialize();
+  vi.useFakeTimers();
+  try {
+    const rejected = expect(
+      host.search('synthetic', 5, 'hybrid', new AbortController().signal),
+    ).rejects.toMatchObject({ code: 'unavailable' });
+    await vi.advanceTimersByTimeAsync(600001);
+    await rejected;
+    expect(child.kill).toHaveBeenCalledOnce();
     expect(vi.getTimerCount()).toBe(0);
   } finally {
     vi.useRealTimers();
@@ -201,14 +248,17 @@ it('取消保留在途请求直到 utility 确认退休，丢弃进度和迟到�
   expect((host as any).pending.size).toBe(0);
 });
 
-it('kill 未确认退出时不释放任务或启动替代进程，关闭可明确超时报错', async () => {
+it.each([false, true])('kill 未确认退出时旧请求有限失败，仍不启动替代或假称关闭 (%s)', async (throws) => {
   const { host, child } = setup();
-  child.kill.mockImplementation(() => true);
+  child.kill.mockImplementation(() => {
+    if (throws) throw Error('synthetic kill failure');
+    return false;
+  });
   await host.initialize();
   vi.useFakeTimers();
   try {
     const operation = host.search('synthetic', 5, 'hybrid', new AbortController().signal);
-    const rejected = expect(operation).rejects.toMatchObject({ code: 'closed' });
+    const rejected = expect(operation).rejects.toMatchObject({ code: 'unavailable' });
     let settled = false;
     void operation.then(
       () => {
@@ -221,14 +271,18 @@ it('kill 未确认退出时不释放任务或启动替代进程，关闭可明�
     await Promise.resolve();
     host.stop();
     const forks = native.fork.mock.calls.length;
+    const posted = child.postMessage.mock.calls.length;
     const closing = expect(host.close()).rejects.toMatchObject({ code: 'unavailable' });
     const replacement = expect(host.initialize()).rejects.toMatchObject({ code: 'unavailable' });
     await vi.advanceTimersByTimeAsync(20001);
-    await Promise.all([closing, replacement]);
-    expect(settled).toBe(false);
+    await Promise.all([rejected, closing, replacement]);
+    expect(settled).toBe(true);
     expect(native.fork).toHaveBeenCalledTimes(forks);
+    expect(child.postMessage).toHaveBeenCalledTimes(posted);
     child.emit('exit', 0);
-    await rejected;
+    setup(); // A fresh utility becomes available only after the old exit.
+    await host.initialize();
+    expect(native.fork).toHaveBeenCalledTimes(forks + 1);
     expect(vi.getTimerCount()).toBe(0);
   } finally {
     vi.useRealTimers();

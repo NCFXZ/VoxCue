@@ -1,5 +1,6 @@
 import type { AIChatService } from '../backend/chat/ports';
 import { publicFailure, ChatServiceError } from '../backend/chat/errors';
+import { batchChatEvents } from '../backend/chat/events';
 import { retryableChatError } from '../application/chatRetry';
 import type { InterviewAnswerRequest, InterviewConfiguration } from '../contracts/speech';
 import { reasoningEfforts, type ChatFile, type ChatModel } from '../contracts/chat';
@@ -29,7 +30,7 @@ export function registerInterviewIpc(d: {
   const screenshots = new Map<string, { file: ChatFile; preview: string }>();
   const clearScreenshots = () => {
     capture?.abort();
-    capture = undefined;
+    // The capture's finally releases this slot after native/Worker retirement.
     screenshots.clear();
   };
   handleDesktop('interview:screenshot', async (e, call) => {
@@ -210,6 +211,11 @@ export function registerInterviewIpc(d: {
           throw new DOMException('Aborted', 'AbortError');
         answerText = '';
         let receiving = true;
+        const events = batchChatEvents(
+          (event) => sendDesktop(e.sender, 'chat:event', event),
+          current.controller.signal,
+          () => receiving && active === current && !e.sender.isDestroyed(),
+        );
         try {
           result = await (scope?.stream ?? d.chat.stream.bind(d.chat))(
             request,
@@ -222,7 +228,7 @@ export function registerInterviewIpc(d: {
               ) {
                 if (event.type === 'delta') answerText = (answerText + event.text).slice(0, 6000);
                 if (event.type === 'delta' && event.text.trim()) metric?.first();
-                sendDesktop(e.sender, 'chat:event', event);
+                events.emit(event);
               }
             },
             current.controller.signal,
@@ -235,6 +241,7 @@ export function registerInterviewIpc(d: {
             });
           break;
         } catch (error) {
+          events.finish();
           receiving = false;
           current.controller.signal.throwIfAborted();
           if (active !== current || e.sender.isDestroyed())
@@ -264,6 +271,7 @@ export function registerInterviewIpc(d: {
             if (signal.aborted) cancel();
           });
         } finally {
+          events.finish();
           receiving = false;
         }
       }

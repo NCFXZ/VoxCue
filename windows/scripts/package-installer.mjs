@@ -4,8 +4,10 @@ import { writeFile, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import config from '../electron-builder.config.cjs';
 import { prepareInstallerUi } from './build-installer-ui.mjs';
+import { signingIdentity, signWindowsManifest } from './update-signing.mjs';
 
 const root = process.cwd();
+await signingIdentity();
 // Builder's Windows default ignores XDG_CACHE_HOME. Keep NSIS/7-Zip downloads
 // in this platform's dependency cache even without a shell activation script.
 process.env.ELECTRON_BUILDER_CACHE = path.join(root, '.cache/electron-builder');
@@ -56,6 +58,7 @@ const artifacts = await build({
   config,
   publish: 'never',
 });
+await signWindowsManifest(path.resolve(config.directories.output, 'latest.yml'));
 const metadata = await readFile(path.resolve(config.directories.output, 'latest.yml'), 'utf8');
 if (!metadata.includes('sha512:') || !artifacts.some((file) => file.endsWith('.exe')))
   throw Error('Installer or update metadata missing');

@@ -1,6 +1,7 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
-import { useCloudSync } from '../../src/stores/cloudSync';
+import { useCloudSync, readAccountSyncSaved } from '../../src/stores/cloudSync';
+import { useCloudAccount } from '../../src/stores/cloudAccount';
 import { useKnowledgeIndex } from '../../src/stores/knowledgeIndex';
 import { defaultSyncPreferences } from '../../src/services/cloudSync';
 import { digestCloudBlob, packCloudItem } from '../../src/services/cloudData';
@@ -13,6 +14,150 @@ import type {
 import type { KnowledgeCall } from '../../electron/contracts/knowledge';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it.each(['sequential', 'concurrent'])('快速配置不同同步分类时保留此前设置，即使传输状态仍在合并发布 (%s)', async (mode) => {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const values = new Map<string, string>();
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+  });
+  const empty = {
+    ok: true as const,
+    value: {
+      items: [], nextCursor: null,
+      storage: {
+        currentBytes: { profile: 0, history: 0, knowledgebase: 0 },
+        reservedBytes: { profile: 0, history: 0, knowledgebase: 0 },
+        storedBytes: { profile: 0, history: 0, knowledgebase: 0 },
+        capacityBytes: 100000000, knowledgeCapacityBytes: 100000000,
+      },
+    },
+  };
+  let release: ((result: CloudSyncResult) => void) | undefined;
+  const cloudSync = vi.fn(async (call: CloudSyncCall): Promise<CloudSyncResult> => {
+    if (call.action === 'cancel') return { ok: true, value: { cancelled: true } };
+    if (!release) return new Promise((resolve) => { release = resolve; });
+    return empty;
+  });
+  vi.stubGlobal('window', Object.assign(new EventTarget(), { desktop: { cloudSync } }));
+  // Keep IndexedDB's real immediate tasks; hold only the 16ms view coalescing clock.
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const disconnect = useCloudSync.getState().connect(userId);
+  try {
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    const operations: Promise<void>[] = [];
+    for (const kind of ['profile', 'history', 'knowledgebase'] as const) {
+      const operation = useCloudSync.getState().configure(kind, true);
+      if (mode === 'sequential') await operation;
+      else operations.push(operation);
+    }
+    await Promise.all(operations);
+    expect(useCloudSync.getState().preferences.enabled).toEqual({
+      profile: true, history: true, knowledgebase: true,
+    });
+    expect((await readAccountSyncSaved(userId)).preferences.enabled).toEqual({
+      profile: true, history: true, knowledgebase: true,
+    });
+    await vi.advanceTimersByTimeAsync(16);
+    expect(useCloudSync.getState().preferences.enabled).toEqual({
+      profile: true, history: true, knowledgebase: true,
+    });
+    release!(empty);
+    await useCloudSync.getState().refresh();
+    expect(useCloudSync.getState().preferences.enabled).toEqual({
+      profile: true, history: true, knowledgebase: true,
+    });
+  } finally {
+    release?.(empty);
+    await useCloudSync.getState().suspend();
+    disconnect();
+    vi.useRealTimers();
+  }
+});
+
+it('suspending before local sync settings load prevents a late worker from starting', async () => {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('localStorage', { getItem: () => userId });
+  const cloudSync = vi.fn();
+  vi.stubGlobal('window', Object.assign(new EventTarget(), { desktop: { cloudSync } }));
+  const disconnect = useCloudSync.getState().connect(userId);
+  try {
+    await useCloudSync.getState().suspend();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(cloudSync).not.toHaveBeenCalled();
+    expect(useCloudSync.getState().busy).toBe(false);
+  } finally {
+    disconnect();
+  }
+});
+
+it('a settings-load failure after suspension cannot replace the current notice or readiness', async () => {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const request = {} as IDBOpenDBRequest;
+  vi.stubGlobal('indexedDB', { open: () => request });
+  vi.stubGlobal('window', Object.assign(new EventTarget(), { desktop: { cloudSync: vi.fn() } }));
+  const disconnect = useCloudSync.getState().connect(userId);
+  try {
+    await useCloudSync.getState().suspend();
+    useCloudSync.setState({ error: 'current notice', ready: false });
+    request.onerror!.call(request, new Event('error'));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(useCloudSync.getState()).toMatchObject({
+      error: 'current notice',
+      ready: false,
+      busy: false,
+    });
+    expect(window.desktop!.cloudSync).not.toHaveBeenCalled();
+  } finally {
+    disconnect();
+  }
+});
+
+it('logout cancels its active sync generation before clearing the account and does not publish a late busy view', async () => {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('localStorage', { getItem: () => userId });
+  let release: ((result: CloudSyncResult) => void) | undefined;
+  let activeSyncId: string | undefined;
+  let retired = false;
+  const cloudSync = vi.fn(async (call: CloudSyncCall): Promise<CloudSyncResult> => {
+    if (call.action === 'cancel') {
+      expect(call.userId).toBe(userId);
+      expect(call.syncId).toBe(activeSyncId);
+      release!({ ok: false, status: 0, error: 'synthetic cancellation' });
+      retired = true;
+      return { ok: true, value: { cancelled: true } };
+    }
+    expect(call.action).toBe('list');
+    activeSyncId = call.syncId;
+    return new Promise((resolve) => {
+      release = resolve;
+    });
+  });
+  const cloudAccount = vi.fn(async () => {
+    expect(retired).toBe(true);
+    return { ok: true, state: { configured: true, verified: false, user: null } };
+  });
+  vi.stubGlobal(
+    'window',
+    Object.assign(new EventTarget(), { desktop: { cloudSync, cloudAccount } }),
+  );
+  const disconnect = useCloudSync.getState().connect(userId);
+  try {
+    await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    expect((await useCloudAccount.getState().call({ action: 'logout' })).ok).toBe(true);
+    expect(cloudAccount).toHaveBeenCalledTimes(1);
+    expect(useCloudSync.getState().busy).toBe(false);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    expect(useCloudSync.getState().busy).toBe(false);
+    expect(cloudSync.mock.calls.map(([call]) => call.action)).toEqual(['list', 'cancel']);
+  } finally {
+    disconnect();
+  }
+});
 
 for (const fails of [false, true])
   it(`cloud originals automatically enter the index queue; index ${fails ? 'failure preserves downloads' : 'work does not block downloads'}`, async () => {
@@ -86,6 +231,7 @@ for (const fails of [false, true])
     });
     const counts = { profile: 0, history: 0, knowledgebase: 0 };
     const cloudSync = vi.fn(async (call: CloudSyncCall) => {
+      if (call.action === 'cancel') return { ok: true, value: { cancelled: true } };
       if (call.action === 'list')
         return {
           ok: true,
@@ -201,6 +347,7 @@ for (const action of ['pause', 'remove'] as const)
         let hold = false;
         let release: (() => void) | undefined;
         const cloudSync = vi.fn(async (call: CloudSyncCall): Promise<CloudSyncResult> => {
+          if (call.action === 'cancel') return { ok: true, value: { cancelled: true } };
           expect(call.action).toBe('list');
           if (hold && call.userId === firstUser) {
             hold = false;

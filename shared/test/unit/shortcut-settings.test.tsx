@@ -13,7 +13,10 @@ import {
 } from '../../electron/contracts/shortcuts';
 import { InterviewShortcutController } from '../../electron/interviewShortcuts';
 import { readShortcuts, writeShortcuts } from '../../electron/backend/shortcutPreferences';
-import { ShortcutSettings } from '../../src/components/ShortcutSettings';
+import {
+  ShortcutAvailabilityStatus,
+  ShortcutSettings,
+} from '../../src/components/ShortcutSettings';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
 
 const ui = vi.hoisted(() => ({ value: {} as Record<string, unknown> }));
@@ -297,3 +300,48 @@ it('keeps a save error visible after recording releases native shortcuts', async
   expect(useShortcuts.getState().loading).toBe(false);
   expect(useShortcuts.getState().error).toBe('快捷键设置保存失败，请重试。');
 });
+
+it('start readiness follows checked native conflicts and disabled bindings, in both UI languages', () => {
+  vi.stubGlobal('window', {});
+  useGeneralSettings.setState({ language: 'zh-CN' });
+  let blocked = false;
+  const controller = new InterviewShortcutController(
+    { register: () => !blocked, unregister: () => {} },
+    () => {},
+    async () => {},
+  );
+  ui.value = { state: controller.check(), loading: false, error: null };
+  const render = () => renderToStaticMarkup(<ShortcutAvailabilityStatus />);
+  expect(render()).toContain('快捷键可用');
+  blocked = true;
+  ui.value.state = controller.check();
+  expect(render()).toContain('部分快捷键不可用');
+  blocked = false;
+  ui.value.state = controller.configure({ ...defaultShortcuts(), screenshot: null });
+  expect(render()).toContain('部分快捷键不可用');
+  ui.value.state = controller.configure(defaultShortcuts());
+  useGeneralSettings.setState({ language: 'en' });
+  expect(render()).toContain('Shortcuts available');
+  ui.value.state = controller.capture(true);
+  expect(render()).toContain('Some shortcuts unavailable');
+});
+
+it.each(['loading', 'error', 'state-error'])(
+  'start readiness never claims availability while shortcut state is %s',
+  (condition) => {
+    vi.stubGlobal('window', {});
+    useGeneralSettings.setState({ language: 'zh-CN' });
+    ui.value = {
+      state: {
+        revision: 1,
+        bindings: defaultShortcuts(),
+        conflicts: [],
+        capturing: false,
+        error: condition === 'state-error' ? 'synthetic unavailable preference' : null,
+      },
+      loading: condition === 'loading',
+      error: condition === 'error' ? 'synthetic unavailable IPC' : null,
+    };
+    expect(renderToStaticMarkup(<ShortcutAvailabilityStatus />)).toContain('部分快捷键不可用');
+  },
+);

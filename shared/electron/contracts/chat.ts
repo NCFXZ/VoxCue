@@ -84,6 +84,10 @@ export interface ChatTurn {
   files?: ChatFile[];
 }
 export const CHAT_TEXT_LIMIT = 200000;
+export const CHAT_TURN_LIMIT = 100;
+export const CHAT_FILE_LIMIT = 20;
+export const CHAT_FILE_BYTES_LIMIT = 20 * 1024 * 1024;
+export const CHAT_FILES_BYTES_LIMIT = 32 * 1024 * 1024;
 export interface ChatRequest {
   id: string;
   modelId: string;

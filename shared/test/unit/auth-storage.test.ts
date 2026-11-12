@@ -1,5 +1,5 @@
 import { afterEach, expect, it, vi } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import type { CredentialRecord } from '../../electron/backend/auth/service';
@@ -18,6 +18,7 @@ vi.mock('electron', () => ({
   },
 }));
 import { createAuthStorage } from '../../electron/backend/auth/storage';
+import { createCopilotLoginStorage } from '../../electron/backend/copilot/storage';
 afterEach(async () => {
   if (native.directory) await rm(native.directory, { recursive: true, force: true });
   native.directory = '';
@@ -65,3 +66,22 @@ it('keeps the default Windows/Electron encryption adapter', async () => {
   await expect(store.read()).rejects.toThrow('不可用');
   await expect(store.write(record)).rejects.toThrow('未保存');
 });
+it.each(['credentials.bin', 'copilot-session.json'])(
+  'removes only its temporary write when publishing %s fails',
+  async (target) => {
+    native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-auth-storage-'));
+    const directory = path.join(native.directory, 'auth-data');
+    await mkdir(path.join(directory, target), { recursive: true });
+    await writeFile(path.join(directory, 'unrelated.tmp'), 'preserve');
+    const write =
+      target === 'credentials.bin'
+        ? createAuthStorage('synthetic encryption', {
+            encrypt: (value) => Buffer.from('synthetic:' + value),
+            decrypt: () => '',
+          }).write(record)
+        : createCopilotLoginStorage().write(null);
+    await expect(write).rejects.toThrow();
+    expect((await readdir(directory)).sort()).toEqual([target, 'unrelated.tmp'].sort());
+    expect(await readFile(path.join(directory, 'unrelated.tmp'), 'utf8')).toBe('preserve');
+  },
+);

@@ -127,7 +127,7 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
                   source === 'system' && transcription ? 'interview-system-unavailable' : ''
                 }
                 displayLabel={
-                  source === 'system' && transcription ? t('设置为“仅转录”时不可用。') : undefined
+                  source === 'system' && transcription ? t('设置为“现场面试”时不可用。') : undefined
                 }
                 disabled={
                   loading ||

@@ -4,6 +4,7 @@ import type { SpeechServiceCall, SpeechEvent, SpeechStatus } from '../../contrac
 export class SpeechHost {
   private child?: UtilityProcess;
   private ready?: Promise<any>;
+  private retiring?: Promise<void>;
   private pending = new Map<
     string,
     { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
@@ -48,7 +49,8 @@ export class SpeechHost {
       }
     });
   }
-  private start() {
+  private start(): Promise<any> {
+    if (this.retiring) return this.waitForRetirement().then(() => this.start());
     if (this.ready) return this.ready;
     const child = utilityProcess.fork(
       this.processFile!.replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
@@ -56,6 +58,9 @@ export class SpeechHost {
       { serviceName: 'VoxCue 本地语音', stdio: 'pipe' },
     );
     this.child = child;
+    // Native dependencies may write diagnostics; drain without exposing audio or paths.
+    child.stdout?.resume();
+    child.stderr?.resume();
     child.on('message', (m) => {
       if (this.child !== child) return;
       if (m.event) this.emit(m.event);
@@ -100,30 +105,61 @@ export class SpeechHost {
   }
   stop() {
     const child = this.child;
+    if (!child) return;
     this.child = undefined;
     this.ready = undefined;
-    child?.kill();
-    for (const p of this.pending.values()) {
-      clearTimeout(p.timer);
-      p.reject(Error('语音服务已关闭。'));
+    const pending = this.pending;
+    this.pending = new Map();
+    for (const p of pending.values()) clearTimeout(p.timer);
+    const settle = (message: string) => {
+      for (const p of pending.values()) p.reject(Error(message));
+      pending.clear();
+    };
+    // A stuck OS process keeps its retirement fence, but cannot leave IPC callers hanging.
+    const timer = pending.size
+      ? setTimeout(() => settle('本地语音进程尚未退出，请稍后重试。'), 10000)
+      : undefined;
+    const retired = new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        clearTimeout(timer);
+        settle('语音服务已关闭。');
+        resolve();
+      });
+    });
+    this.retiring = retired;
+    void retired.then(() => {
+      if (this.retiring === retired) this.retiring = undefined;
+    });
+    try {
+      child.kill();
+    } catch {
+      // Do not release ownership or replace a utility whose exit is unconfirmed.
     }
-    this.pending.clear();
+  }
+  private async waitForRetirement() {
+    if (!this.retiring) return;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.retiring,
+        new Promise<never>((_resolve, reject) => {
+          timer = setTimeout(
+            () => reject(Error('本地语音进程尚未退出，请稍后重试。')),
+            10000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
   }
   async close() {
     const child = this.child;
-    if (!child) return;
-    if (this.qwenDirectory) await this.send({ close: true });
-    await new Promise<void>((resolve, reject) => {
-      const exited = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      const timer = setTimeout(() => {
-        child.removeListener('exit', exited);
-        reject(Error('本地语音进程尚未退出，请稍后重试。'));
-      }, 10000);
-      child.once('exit', exited);
-      this.stop();
-    });
+    try {
+      if (child && this.qwenDirectory) await this.send({ close: true });
+    } finally {
+      if (this.child === child) this.stop();
+      await this.waitForRetirement();
+    }
   }
 }

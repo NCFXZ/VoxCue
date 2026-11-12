@@ -13,6 +13,7 @@ export const windows: DesktopPlatform = {
     interviewIconVisibility: true,
   },
   presentationFile: 'windows/electron/presentation.js',
+  updateDriverFile: 'windows/electron/updates.js',
   appUserModelId: 'com.voxcue.desktop',
   quitOnAllWindowsClosed: true,
   captureProtectionSupported: true,

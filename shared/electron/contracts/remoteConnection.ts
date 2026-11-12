@@ -1,6 +1,6 @@
 import type { InterviewInputMode } from './speech';
 
-export const REMOTE_PROTOCOL_VERSION = 1;
+export const REMOTE_PROTOCOL_VERSION = 2;
 
 export interface RemoteConnectionState {
   presentationOwner?: 'main' | 'interview';
@@ -83,6 +83,7 @@ export type RemoteClientMessage =
   | { type: 'authenticate'; protocolVersion: typeof REMOTE_PROTOCOL_VERSION; pendingId: string }
   | { type: 'resume'; protocolVersion: typeof REMOTE_PROTOCOL_VERSION; token: string }
   | { type: 'query-result'; requestId: string }
+  | { type: 'snapshot-applied'; sequence: number; deliveryId: string }
   | { type: 'sync' }
   | { type: 'disconnect' }
   | { type: 'command'; command: RemoteCommand };
@@ -93,9 +94,15 @@ export type RemoteServerMessage =
       protocolVersion: typeof REMOTE_PROTOCOL_VERSION;
       token: string;
       sequence: number;
+      deliveryId: string;
       snapshot: RemoteInterviewSnapshot | null;
     }
-  | { type: 'snapshot'; sequence: number; snapshot: RemoteInterviewSnapshot | null }
+  | {
+      type: 'snapshot';
+      sequence: number;
+      deliveryId: string;
+      snapshot: RemoteInterviewSnapshot | null;
+    }
   | {
       type: 'scroll';
       scrollId: number;

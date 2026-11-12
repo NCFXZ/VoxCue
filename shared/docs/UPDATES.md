@@ -1,3 +1,7 @@
+## 1.2.0 Windows 更新认证
+
+Windows 独立 Ed25519 清单签名、公钥 ASAR 归属、缓存／安装重新认证及同身份备份恢复见 [安全加固](SECURITY_HARDENING.md)和[逐项交接 W01–W03](MACOS_1.2.0_HANDOFF.md#windows-专属已实现mac-仅参考)。本文后续 Windows 缓存流程继续适用，但所有缓存复用必须经过新签名验证。首次从旧客户端升级仍沿用其原有信任链，Ed25519 不替代 Authenticode 发布者身份，也不改变 Mac 既有 Sparkle 身份。
+
 ## 2026-11-05 Windows 检查缓存与安装包恢复
 
 Windows 安装版的共享更新适配器在 `%APPDATA%/VoxCue/updates/release-cache.json` 保存公开发行元数据、检查尝试/成功时刻及下载恢复日志。普通启动和手动检查共用一小时窗口，窗口内不再请求发行 API 或清单；检查失败同样保留尝试屏障并重放失败，系统时间回拨也不会立即重查。发请求前先原子记录尝试，缓存读写失败则报错并停止联网，不用内存结果假装已经持久化。
@@ -108,10 +112,10 @@ Mac DMG可供首次手动安装，但自动更新必须有arm64 ZIP；Mac清单�
 ## 验证与恢复
 
 - `pnpm test:updates`：实际主进程/IPC/preload/React/IndexedDB，外部 updater 端口为隔离夹具。覆盖检查/下载/进度/重试、非法调用者、面试阻止、取消、保存失败与成功重启后的草稿及附件恢复。
-- `node test/windows/scripts/installer-ui-smoke.mjs updates`：在上述回归后用同一合成 profile 启动实际 NSIS staging，验证安装路径变化仍保留聊天草稿、附件原始字节及正确的应用版本。账户/updater 为夹具，不访问线上服务。
+- Windows `pnpm test:package`：在自有临时目录构建当前生产 Store APPX，并在禁网、独立账号且无宿主资料映射的 Windows Sandbox 中验证真实包身份、公开 preload、持久化与重载及包内原生模块。不向正式应用注入账户／updater 夹具，不放宽 fuses。
 - `pnpm test:updates:native`：真实 NsisUpdater，经本机测试 HTTP 下载实际生成的 NSIS 安装包、拒绝损坏 SHA512、核对完整文件哈希，不安装或发布。
 - `pnpm test:installer:upgrade`：独立应用 ID、无快捷方式的合成 NSIS 应用，在有所有权标记的系统临时目录中验证两个版本间的 localStorage、IndexedDB 原件字节及设置文件保留，随后只卸载该测试安装并清理临时内容；不访问真实 VoxCue 用户资料，结果仅输出终端。
-- `node test/windows/scripts/packaged-smoke.mjs --installer-stage`：验证实际安装包所用完整目录的真实 Paraformer Worker、utilityProcess、原生组件与既有资料功能。默认命令仍验证原便携包。
-- `node test/windows/scripts/installer-ui-smoke.mjs chat-progress`：用实际打包应用及隔离合成账户/HTTP/SSE 验证公开活动、处理用时、资料确认、重试和持久恢复；不访问真实账户或用户资料。copilot和adversarial两组使用同一Windows runner传入对应名称。
+- Windows `node test/scripts/security-package-smoke.mjs`：检查实际便携包 fuses、ASAR 完整性、公钥、依赖与原生资产；不启动产品。`--with-screenshot-worker` 可另验证合成位图编码。真实 SDK 握手、Paraformer／知识库子进程与文档格式覆盖由上述 Sandbox 验包执行；不将静态检查当成功能验收。
+- 旧 owner 正式包 Playwright 入口已退役。普通 `test:chat:progress`、`test:copilot`、`test:adversarial` 等继续使用开发宿主与合成夹具；生产包没有测试标志。当前重载回归验证现有资料格式与原件保留，不代称历史发布二进制的逐版本升级验收。
 
 故障时在设置重试检查/下载/安装。已安装程序不会因下载失败被替换；本地保存失败不会关闭窗口。没有恢复旧语音实验、改变资料实现或迁移真实数据。

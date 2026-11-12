@@ -15,6 +15,21 @@ Var VoxCueDeleteData
 Var VoxCueInstallDirectory
 Var VoxCueCanChangePath
 !define VOXCUE_INSTALLER_DATA_INCLUDE "${__FILEDIR__}\installer-data.nsh"
+!ifndef BUILD_UNINSTALLER
+  !ifndef VOXCUE_INSTALLER_PREVIEW
+    !include "${__FILEDIR__}\installer-path.nsh"
+    ; This section is declared before Builder's install section, so it runs for
+    ; silent installs too, before old-version removal or application extraction.
+    !macro customHeader
+      !insertmacro VoxCueInstallDirectoryFunctions
+      Section "-VoxCueSafeDirectory"
+        StrCpy $INSTDIR $VoxCueInstallDirectory
+        Call VoxCueRequireInstallDirectory
+        Call VoxCuePrepareMissingInstallation
+      SectionEnd
+    !macroend
+  !endif
+!endif
 
 ; Only the current Windows user is supported. Reject machine installs before
 ; Builder's hidden page can elevate or select an all-users installation.
@@ -40,13 +55,28 @@ Var VoxCueCanChangePath
   ${EndIf}
   !insertmacro setInstallModePerUser
   StrCpy $VoxCueCanChangePath "true"
-  ${If} $hasPerUserInstallation == "1"
+  ${If} $perUserInstallationFolder != ""
     StrCpy $INSTDIR $perUserInstallationFolder
     StrCpy $VoxCueCanChangePath "false"
   ${EndIf}
 !macroend
 !macro customInit
   !insertmacro VoxCueCurrentUserOnly
+  !ifndef VOXCUE_INSTALLER_PREVIEW
+    StrCpy $VoxCueRegisteredDirectory ""
+    ${If} $VoxCueCanChangePath == "false"
+      System::Call 'kernel32::GetFullPathNameW(w "$INSTDIR",i ${NSIS_MAX_STRLEN},w .r0,p0)i.r1'
+      ${If} $1 != 0
+      ${AndIf} $1 < ${NSIS_MAX_STRLEN}
+        StrCpy $VoxCueRegisteredDirectory $0
+      ${EndIf}
+    ${EndIf}
+    ${If} ${Silent}
+    ${OrIf} $VoxCueCanChangePath == "false"
+      Call VoxCueRequireInstallDirectory
+    ${EndIf}
+    StrCpy $VoxCueInstallDirectory $INSTDIR
+  !endif
 !macroend
 !macro customUnInit
   !insertmacro VoxCueCurrentUserOnly
@@ -184,7 +214,7 @@ Var VoxCueCanChangePath
     ${LoopUntil} $0 == 0
     !ifndef BUILD_UNINSTALLER
       !ifndef VOXCUE_INSTALLER_PREVIEW
-        ${If} $hasPerUserInstallation != "1"
+        ${If} $VoxCueCanChangePath == "true"
           ClearErrors
           FileOpen $0 "$PLUGINSDIR\install-path.txt" r
           IfErrors voxcue_path_invalid
@@ -198,12 +228,9 @@ Var VoxCueCanChangePath
           ${OrIf} $4 >= ${NSIS_MAX_STRLEN}
             Goto voxcue_path_invalid
           ${EndIf}
-          StrCpy $1 $3
-          StrCmp $1 $INSTDIR voxcue_path_valid
-          ; Browse always selects VoxCue's own subdirectory, never a generic
-          ; parent folder that the uninstaller could later remove recursively.
-          ${GetFileName} $1 $2
-          StrCmp $2 "VoxCue" voxcue_path_valid voxcue_path_invalid
+          StrCpy $INSTDIR $3
+          Call VoxCueCheckInstallDirectory
+          IfErrors voxcue_path_invalid voxcue_path_valid
           voxcue_path_invalid:
           System::Call 'kernel32::SetEvent(p $VoxCueFailed)'
           ${Do}
@@ -216,7 +243,7 @@ Var VoxCueCanChangePath
           SetErrorLevel 2
           Quit
           voxcue_path_valid:
-          StrCpy $VoxCueInstallDirectory $1
+          StrCpy $VoxCueInstallDirectory $VoxCueCheckedDirectory
         ${EndIf}
       !endif
     !endif
@@ -232,6 +259,7 @@ Var VoxCueCanChangePath
         ; Builder's scope helper reapplies /D; restore our selected or locked
         ; directory after that helper, immediately before file installation.
         StrCpy $INSTDIR $VoxCueInstallDirectory
+        Call VoxCueRequireInstallDirectory
       !endif
     !endif
     System::Call 'kernel32::SetEvent(p $VoxCueInstalling)'

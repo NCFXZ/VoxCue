@@ -22,7 +22,8 @@ import { validateRequest, validSource, sourceKey } from '../chat/validation';
 import { profileFormat, profileContext, ProfileAnswerStream } from '../chat/profile';
 import { verifySkillProposal } from '../chat/proposal';
 import { ChatServiceError } from '../chat/errors';
-import { abortable, isolatedSession } from './runtime';
+import { isolatedSession } from './runtime';
+import { abortable } from '../cancellable';
 import { CopilotError, copilotFailure } from './errors';
 import { copilotAccountUsage } from './quota';
 

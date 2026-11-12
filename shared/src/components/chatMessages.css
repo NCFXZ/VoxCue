@@ -18,12 +18,18 @@
   max-height: var(--user-message-full-height);
 }
 
+.user-message-ellipsis {
+  display: block;
+}
+
 .user-bubble .user-message-toggle.ui-button {
   display: flex;
+  width: max-content;
   height: 28px;
   min-height: 28px;
-  margin: 8px 0 0 auto;
-  padding: 4px 10px;
+  margin: 8px 0 0;
+  padding: 4px 12px;
+  border: 0;
   font-size: var(--type-secondary);
 }
 

@@ -1,5 +1,9 @@
 import {
   CHAT_TEXT_LIMIT,
+  CHAT_TURN_LIMIT,
+  CHAT_FILE_LIMIT,
+  CHAT_FILE_BYTES_LIMIT,
+  CHAT_FILES_BYTES_LIMIT,
   reasoningEfforts,
   type ChatRequest,
   type ChatSource,
@@ -72,7 +76,7 @@ export function validateRequest(value: unknown): ChatRequest {
         !/^[\w-]{1,100}$/.test(request.knowledgeBaseId))) ||
     !Array.isArray(request.turns) ||
     !request.turns.length ||
-    request.turns.length > 100
+    request.turns.length > CHAT_TURN_LIMIT
   )
     throw new Error('聊天请求无效，请重新开始对话。');
   let bytes = 0,
@@ -91,14 +95,14 @@ export function validateRequest(value: unknown): ChatRequest {
         file.name.length > 300 ||
         !(file.bytes instanceof Uint8Array) ||
         !file.bytes.byteLength ||
-        file.bytes.byteLength > 20 * 1024 * 1024
+        file.bytes.byteLength > CHAT_FILE_BYTES_LIMIT
       )
         throw new Error('附件请求无效或超过 20 MB。');
       bytes += file.bytes.byteLength;
       files++;
     }
   }
-  if (text > CHAT_TEXT_LIMIT || bytes > 32 * 1024 * 1024 || files > 20)
+  if (text > CHAT_TEXT_LIMIT || bytes > CHAT_FILES_BYTES_LIMIT || files > CHAT_FILE_LIMIT)
     throw new Error('对话内容过多，请减少附件或开始新对话（上下文最多 20 个文件、合计 32 MB）。');
   if (request.turns.at(-1)?.role !== 'user') throw new Error('缺少用户问题。');
   return request;

@@ -24,6 +24,7 @@ export interface ComponentPackage extends ComponentArchive {
   directory: string;
   files: { path: string; bytes: number; sha256: string; mode: number }[];
   parts?: ComponentArchive[];
+  previous?: { package: ComponentPackage; preserve?: true }[];
 }
 
 // Fixed trust roots from the independently published resources. Never accept a renderer URL or remote catalog.
@@ -182,6 +183,7 @@ export function packagesFor(platform: string, arch: string) {
     ...qwenPackage,
     target,
     version: '1.0.1',
+    previous: [{ package: qwenPackage, preserve: true }],
     parts,
     files: parts.flatMap((part) => part.files),
     bytes: parts.reduce((sum, part) => sum + part.bytes, 0),

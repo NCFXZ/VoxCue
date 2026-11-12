@@ -3,6 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream } from 'node:fs';
 import {
   copyFile,
+  cp,
   lstat,
   mkdir,
   mkdtemp,
@@ -16,13 +17,30 @@ import { execFileSync, spawn } from 'node:child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
 
+// Acceptance of unmodified production packages, not an owner UI fixture.
+// Official SDKs may start against the fresh guest's empty vault. The VM has no
+// network or host profile/credential mapping; no real service login is used.
 // Certificates and package installation exist only in the disposable guest.
 // https://learn.microsoft.com/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-configure-using-wsb-file
 // https://learn.microsoft.com/windows/security/application-security/application-isolation/windows-sandbox/windows-sandbox-cli
 // https://learn.microsoft.com/powershell/module/appx/invoke-commandindesktoppackage
 assert.equal(process.platform, 'win32');
-assert.equal(process.argv.length, 2, 'This check accepts only the current Store release');
+const argument = process.argv[2];
+const copilotVault = argument === '--copilot-vault';
+const nsisTask = ['--nsis-current', '--nsis-upgrade'].includes(argument)
+  ? argument.slice(2)
+  : undefined;
+const appxArgument = argument?.startsWith('--appx=') ? argument : undefined;
+assert.ok(
+  process.argv.length === 2 ||
+    (process.argv.length === 3 &&
+      (copilotVault ||
+        nsisTask ||
+        (appxArgument?.startsWith('--appx=') && appxArgument.length > '--appx='.length))),
+  'Use the current Store release, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current or --nsis-upgrade',
+);
 const platformRoot = fileURLToPath(new URL('../../', import.meta.url));
 const repositoryRoot = path.resolve(platformRoot, '..');
 const { version } = JSON.parse(
@@ -31,7 +49,20 @@ const { version } = JSON.parse(
 assert.match(version, /^\d+\.\d+\.\d+$/);
 const [major, minor, patch] = version.split('.').map(Number);
 const packageVersion = `${major + 1}.${minor}.${patch}.0`;
-const artifact = path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
+const artifact = copilotVault
+  ? undefined
+  : nsisTask
+    ? path.join(platformRoot, 'release/installer', `VoxCue-Setup-${version}-x64.exe`)
+    : appxArgument
+      ? path.resolve(appxArgument.slice('--appx='.length))
+      : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
+const previousArtifact =
+  nsisTask === 'nsis-upgrade'
+    ? path.join(platformRoot, 'release/1.1.1/VoxCue-Setup-1.1.1-x64.exe')
+    : undefined;
+// Independently recorded in WINDOWS_1.1.1_RELEASE.md; never regenerate the baseline.
+const previousDigest = 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd';
+const label = copilotVault ? 'Copilot vault Sandbox' : nsisTask ? 'NSIS Sandbox' : 'Store Sandbox';
 const sandboxExe = path.join(process.env.WINDIR, 'System32/WindowsSandbox.exe');
 const powershell = path.join(process.env.WINDIR, 'System32/WindowsPowerShell/v1.0/powershell.exe');
 const nonce = randomUUID();
@@ -55,6 +86,8 @@ let child;
 let childError;
 let startedAt = 0;
 let originalHash;
+let previousHash;
+let hostSid;
 let failure;
 let lastStage;
 let sandboxCli;
@@ -240,10 +273,10 @@ async function ordinary(file) {
   assert.ok(info.isFile() && !info.isSymbolicLink(), 'Expected a regular file: ' + file);
   assert.equal(path.relative(file, await realpath(file)), '', 'Redirected input: ' + file);
 }
-async function hash(file) {
-  const digest = createHash('sha256');
+async function hash(file, algorithm = 'sha256', encoding = 'hex') {
+  const digest = createHash(algorithm);
   for await (const chunk of createReadStream(file)) digest.update(chunk);
-  return digest.digest('hex');
+  return digest.digest(encoding);
 }
 async function readResult(file) {
   const info = await lstat(file).catch((error) => {
@@ -256,119 +289,6 @@ async function readResult(file) {
   return data;
 }
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-// A Node inspector client reads the actual installed Electron process. No
-// production module, process.windowsStore flag, IPC handler or result is mocked.
-const inspectorClient = String.raw`
-import assert from 'node:assert/strict';
-import fs from 'node:fs/promises';
-const [configFile, work, outputFile] = process.argv.slice(2);
-const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
-let socket;
-let sequence = 0;
-let initiallyPaused = false;
-const pending = new Map();
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-const deadline = Date.now() + 120000;
-try {
-  let target;
-  while (!target) {
-    if (Date.now() > deadline) throw Error('Installed Store main-process inspector did not start');
-    try {
-      const response = await fetch('http://127.0.0.1:9229/json/list', {signal:AbortSignal.timeout(1000)});
-      if (response.ok) target = (await response.json()).find(item => item.webSocketDebuggerUrl);
-    } catch {}
-    if (!target) await delay(250);
-  }
-  assert.ok(target.webSocketDebuggerUrl.startsWith('ws://127.0.0.1:9229/'));
-  socket = new WebSocket(target.webSocketDebuggerUrl);
-  await new Promise((resolve,reject) => {
-    const timer = setTimeout(() => reject(Error('Inspector websocket timeout')),10000);
-    socket.addEventListener('open',() => {clearTimeout(timer);resolve();},{once:true});
-    socket.addEventListener('error',() => {clearTimeout(timer);reject(Error('Inspector websocket failed'));},{once:true});
-  });
-  socket.addEventListener('message',message => {
-    const value = JSON.parse(message.data);
-    if(value.method==='Debugger.paused') initiallyPaused=true;
-    if (!value.id) return;
-    const request = pending.get(value.id);
-    if (!request) return;
-    pending.delete(value.id);clearTimeout(request.timer);
-    if (value.error) request.reject(Error('Inspector command failed ['+request.label+']: '+JSON.stringify(value.error)));
-    else request.resolve(value.result);
-  });
-  const send = (method,params={},label=method) => new Promise((resolve,reject) => {
-    const timeout = Math.min(30000,deadline-Date.now());
-    if(timeout<=0){reject(Error('Inspector deadline exceeded ['+label+']: '+method));return;}
-    const id = ++sequence;
-    const timer = setTimeout(() => {pending.delete(id);reject(Error('Inspector command timeout ['+label+']: '+method));},timeout);
-    pending.set(id,{resolve,reject,timer,label});socket.send(JSON.stringify({id,method,params}));
-  });
-  const evaluate = async (expression,label,awaitPromise=true) => {
-    const value = await send('Runtime.evaluate',{expression,awaitPromise,returnByValue:true},label);
-    if (value.exceptionDetails) throw Error('Inspector evaluation failed ['+label+']: '+(value.exceptionDetails.exception?.description ?? value.exceptionDetails.text));
-    return value.result.value;
-  };
-  await send('Runtime.enable');
-  await send('Debugger.enable');
-  await send('Runtime.runIfWaitingForDebugger');
-  while(!initiallyPaused){
-    if(Date.now()>deadline)throw Error('Installed Store inspector did not reach its initial pause');
-    await delay(25);
-  }
-  // DesktopPackage activation does not inherit the launching PowerShell env.
-  // Set only owned fixture inputs before the real main module can consume them.
-  const isolatedEnvironment = {COPILOT_TEST_USER_DATA:work+'\\profile',VOXCUE_ACCOUNT_API:'',VITE_DEV_SERVER_URL:''};
-  const actualEnvironment = await evaluate('(()=>{const values='+JSON.stringify(isolatedEnvironment)+';for(const [key,value] of Object.entries(values))process.env[key]=value;delete process.env.ELECTRON_RUN_AS_NODE;return {COPILOT_TEST_USER_DATA:process.env.COPILOT_TEST_USER_DATA,VOXCUE_ACCOUNT_API:process.env.VOXCUE_ACCOUNT_API,VITE_DEV_SERVER_URL:process.env.VITE_DEV_SERVER_URL,runAsNodePresent:Object.prototype.hasOwnProperty.call(process.env,"ELECTRON_RUN_AS_NODE")}})()','initial-env',false);
-  assert.deepEqual(actualEnvironment,{...isolatedEnvironment,runAsNodePresent:false});
-  await send('Debugger.resume');
-  while(!await evaluate('typeof process === "object" && process !== null && typeof process.resourcesPath === "string" && process.resourcesPath.length > 0 && typeof process.getBuiltinModule === "function"','bootstrap')){
-    if(Date.now()>deadline)throw Error('Installed Store Electron bootstrap did not become ready');
-    await delay(250);
-  }
-  const prelude = "const req=process.getBuiltinModule('module').createRequire(process.resourcesPath+'/app.asar/package.json');const electron=req('electron');";
-  let runtime;
-  while (!runtime) {
-    if (Date.now() > deadline) throw Error('Installed Store application did not become ready');
-    const state = await evaluate('(async()=>{'+prelude+'return electron.app.isReady()?{pid:process.pid,windowsStore:process.windowsStore,packaged:electron.app.isPackaged,version:electron.app.getVersion(),userData:electron.app.getPath(\'userData\')}:null})()','app-ready');
-    if (state) runtime = state;else await delay(250);
-  }
-  assert.equal(runtime.windowsStore,true,'Actual packaged process.windowsStore must be true');
-  assert.equal(runtime.packaged,true);
-  assert.equal(runtime.version,config.version);
-  assert.equal(runtime.userData.toLowerCase(),(work+'\\profile').toLowerCase(),'Only the temporary guest profile may be used');
-  let login;
-  while (!login) {
-    if (Date.now() > deadline) throw Error('Installed Store login renderer did not load');
-    login = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().endsWith(\'#login\'));return win?await win.webContents.executeJavaScript(\'typeof window.desktop?.setLocalMode === "function"\'):false})()','login-ready');
-    if (!login) await delay(250);
-  }
-  // This is the shipped local-account entry, in a fresh guest, through its real
-  // renderer/preload/IPC authorization. No synthetic authentication helper runs.
-  const entered = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().endsWith(\'#login\'));return win.webContents.executeJavaScript(\'window.desktop.setLocalMode(true)\')})()','enter-local');
-  assert.equal(entered.ok,true);
-  assert.equal(entered.state.localMode,true);
-  let update;
-  while (!update) {
-    if (Date.now() > deadline) throw Error('Installed Store main renderer did not load');
-    update = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().startsWith(\'file:\')&&!win.webContents.getURL().endsWith(\'#login\'));if(!win)return null;return win.webContents.executeJavaScript(\'typeof window.desktop?.updates === "function" ? window.desktop.updates({op:"status"}) : null\')})()','update-status');
-    if (!update) await delay(250);
-  }
-  assert.equal(update.phase,'unavailable');
-  assert.equal(update.currentVersion,config.version);
-  assert.equal(update.message,config.storeUpdateMessage);
-  const states = await evaluate('(async()=>{'+prelude+'const win=electron.BrowserWindow.getAllWindows().find(win=>win.webContents.getURL().startsWith(\'file:\')&&!win.webContents.getURL().endsWith(\'#login\'));return win.webContents.executeJavaScript(\'Promise.all([{op:"check",force:true},{op:"download"},{op:"install"}].map(call=>window.desktop.updates(call)))\')})()','update-actions');
-  assert.equal(states.length,3);
-  for(const state of states){assert.equal(state.phase,'unavailable');assert.equal(state.currentVersion,config.version);assert.equal(state.message,config.storeUpdateMessage);}
-  const driverDisabled = await evaluate('(async()=>{'+prelude+'const driver=req(electron.app.getAppPath()+\'/dist-electron/shared/electron/backend/updates/driver.js\');return driver.createUpdateDriver(electron.app.isPackaged)===undefined&&driver.updateUnavailableReason(electron.app.isPackaged)==='+JSON.stringify(config.storeUpdateMessage)+'})()','driver');
-  assert.equal(driverDisabled,true);
-  await fs.writeFile(outputFile,JSON.stringify({nonce:config.nonce,...runtime,driverDisabled,updatePhases:[update,...states].map(state=>state.phase)}));
-  await evaluate('(()=>{'+prelude+'setTimeout(()=>electron.app.quit(),50);return true})()','quit');
-} finally {
-  for(const request of pending.values()){clearTimeout(request.timer);request.reject(Error('Inspector client closed'));}
-  socket?.close();
-}
-`;
 
 const guestScript = String.raw`
 $ErrorActionPreference = 'Stop'
@@ -387,12 +307,267 @@ function Stage($name) {
   Write-OwnedJson 'status.json' @{nonce=$config.nonce; stage=$name}
   if (Test-Path -LiteralPath (Join-Path $output 'stop')) { throw 'Host requested Sandbox shutdown' }
 }
+function Assert-GuestProfilePath($file) {
+  $current = [IO.Path]::GetFullPath($file)
+  if (-not $current.StartsWith($guestProfile + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Profile evidence escaped the guest user' }
+  while ($current -ine $guestProfile) {
+    try {
+      if (([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Redirected guest profile evidence' }
+    } catch [IO.FileNotFoundException] {} catch [IO.DirectoryNotFoundException] {}
+    $current = [IO.Path]::GetDirectoryName($current)
+  }
+}
 try {
+  Stage 'checking-guest-identity'
+  $guestIdentity = [Security.Principal.WindowsIdentity]::GetCurrent()
+  $guestSid = $guestIdentity.User.Value
+  if ($guestIdentity.Name.Split('\')[-1] -ine 'WDAGUtilityAccount' -or
+      $config.hostSid -notmatch '^S-\d+(?:-\d+)+$' -or $guestSid -eq $config.hostSid) { throw 'Native acceptance requires a separate Windows Sandbox account' }
+  $guestProfile = [IO.Path]::GetFullPath([Environment]::GetFolderPath([Environment+SpecialFolder]::UserProfile))
+  if ($guestProfile -ine 'C:\Users\WDAGUtilityAccount') { throw 'Unexpected Sandbox user profile' }
+  foreach ($directory in @('C:\', 'C:\Users', $guestProfile)) {
+    $info = Get-Item -LiteralPath $directory -Force
+    if (-not $info.PSIsContainer -or ($info.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0 -or
+        [IO.Path]::GetFullPath($info.FullName) -ine $directory) { throw 'Redirected Sandbox user profile' }
+  }
+  $result.guestSid = $guestSid
+  $result.guestProfile = $guestProfile
   New-Item -ItemType Directory -Path $work | Out-Null
   # An independent guest watchdog also shuts down if install or inspection hangs.
   $watch = '$end=(Get-Date).AddMinutes(12); while((Get-Date)-lt $end){if(Test-Path -LiteralPath "C:\VoxCueStoreOutput\stop"){break};Start-Sleep -Seconds 1};& "$env:WINDIR\System32\shutdown.exe" /s /t 0 /f'
   $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($watch))
   Start-Process -FilePath (Join-Path $PSHOME 'powershell.exe') -ArgumentList @('-NoProfile','-NonInteractive','-EncodedCommand',$encoded) -WindowStyle Hidden | Out-Null
+  if ($config.task -eq 'copilot-vault') {
+    Stage 'checking-copilot-vault'
+    $probeFile = Join-Path $work 'copilot-vault.json'
+    $inspection = New-Object Diagnostics.Process
+    $inspectionStarted = $false
+    try {
+      $inspection.StartInfo.FileName = 'C:\VoxCueStoreInput\tools\node.exe'
+      $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\probe.cjs" "C:\VoxCueStoreInput\config.json" "' + $probeFile + '" "' + $work + '"'
+      $inspection.StartInfo.WorkingDirectory = $work
+      $inspection.StartInfo.UseShellExecute = $false
+      $inspection.StartInfo.CreateNoWindow = $true
+      $inspection.StartInfo.RedirectStandardOutput = $true
+      $inspection.StartInfo.RedirectStandardError = $true
+      $inspectionStarted = $inspection.Start()
+      if (-not $inspectionStarted) { throw 'Starting Copilot vault probe failed' }
+      $stdoutTask = $inspection.StandardOutput.ReadToEndAsync()
+      $stderrTask = $inspection.StandardError.ReadToEndAsync()
+      $timedOut = -not $inspection.WaitForExit(180000)
+      if ($timedOut) {
+        $inspection.Kill()
+        if (-not $inspection.WaitForExit(10000)) { throw 'Timed-out Copilot vault probe did not exit' }
+      }
+      if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 10000)) { throw 'Copilot vault pipe capture timed out' }
+      # Drain both streams without returning runtime diagnostics or fake tokens.
+      $null = $stdoutTask.GetAwaiter().GetResult()
+      $null = $stderrTask.GetAwaiter().GetResult()
+      $result.exitCode = $inspection.ExitCode
+      if ($timedOut) { throw ('Copilot vault probe timed out (exitCode=' + $inspection.ExitCode + ')') }
+    } finally {
+      try {
+        if ($inspectionStarted -and -not $inspection.HasExited) {
+          $inspection.Kill()
+          if (-not $inspection.WaitForExit(10000)) { throw 'Copilot vault probe cleanup timed out' }
+        }
+      } finally { $inspection.Dispose() }
+    }
+    if (-not (Test-Path -LiteralPath $probeFile -PathType Leaf) -or (Get-Item -LiteralPath $probeFile).Length -gt 4096) { throw 'Sanitized Copilot vault result is missing or oversized' }
+    $probeResult = Get-Content -LiteralPath $probeFile -Encoding UTF8 -Raw | ConvertFrom-Json
+    if ($probeResult.nonce -cne $config.nonce -or $probeResult.ok -isnot [bool]) { throw 'Unexpected Copilot vault result owner or status' }
+    if (-not $probeResult.ok -or $result.exitCode -ne 0) {
+      if ($probeResult.stage -match '^[a-z0-9-]{1,80}$') { $result.probeStage = $probeResult.stage }
+      if ($probeResult.errorType -match '^[A-Za-z0-9.]{1,80}$') { $result.errorType = $probeResult.errorType }
+      throw ('Copilot vault probe failed (exitCode=' + $result.exitCode + ')')
+    }
+    foreach ($field in @('sharedSlot', 'crossLogout', 'removedCliSlot', 'preservedCliAfterVoxCueLogout', 'localSessionCleared', 'storedInVault', 'plaintext')) {
+      if ($probeResult.$field -isnot [bool]) { throw 'Invalid sanitized Copilot vault result' }
+      $result[$field] = $probeResult.$field
+    }
+    $result.task = 'copilot-vault'
+    $result.ok = $true
+    $result.stage = 'complete'
+  } elseif ($config.task -in @('nsis-current', 'nsis-upgrade')) {
+    $target = Join-Path $env:LOCALAPPDATA 'Programs\VoxCue'
+    $exe = Join-Path $target 'VoxCue.exe'
+    $profileMarker = Join-Path $env:APPDATA 'VoxCue\local-mode.json'
+    Assert-GuestProfilePath $target
+    Assert-GuestProfilePath $profileMarker
+    if ((Test-Path -LiteralPath $target) -or (Test-Path -LiteralPath $profileMarker)) { throw 'NSIS guest is not clean' }
+    function Registration {
+      # electron-builder NsisTarget includes both product name and version by default.
+      $names = @('VoxCue ' + $config.version)
+      if ($config.previous) { $names += 'VoxCue ' + $config.previous.version }
+      @(Get-ChildItem -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall' -ErrorAction SilentlyContinue |
+        Get-ItemProperty | Where-Object { $_.DisplayName -in $names })
+    }
+    if ((Registration).Count -ne 0) { throw 'VoxCue was already registered in the guest' }
+    $installers = @($config.current)
+    if ($config.task -eq 'nsis-upgrade') { $installers = @($config.previous, $config.current) }
+    foreach ($item in $installers) {
+      $source = Join-Path 'C:\VoxCueStoreInput' $item.name
+      if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha256) { throw 'Mapped NSIS checksum mismatch' }
+      Copy-Item -LiteralPath $source -Destination (Join-Path $work $item.name)
+      if ((Get-FileHash -LiteralPath (Join-Path $work $item.name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha256) { throw 'Guest NSIS copy changed' }
+    }
+    function Install-Nsis($item, $upgrade) {
+      Stage ('installing-nsis-' + $item.version)
+      Assert-GuestProfilePath $target
+      $arguments = if ($upgrade) { '/S --updated' } else { '/S /D=' + $target }
+      $installer = Start-Process -FilePath (Join-Path $work $item.name) -ArgumentList $arguments -PassThru -WindowStyle Hidden
+      try {
+        $null = $installer.Handle
+        if (-not $installer.WaitForExit(120000)) { throw 'NSIS installer did not exit naturally' }
+        if ($installer.ExitCode -ne 0) { throw ('NSIS installation failed: ' + $installer.ExitCode) }
+      } finally { $installer.Dispose() }
+      Assert-GuestProfilePath $exe
+      $registration = @(Registration)
+      if ($registration.Count -ne 1 -or $registration[0].DisplayName -cne ('VoxCue ' + $item.version) -or $registration[0].DisplayVersion -cne $item.version -or
+          $registration[0].UninstallString -cne ('"' + (Join-Path $target 'Uninstall VoxCue.exe') + '" /currentuser')) { throw 'Unexpected NSIS uninstall registration' }
+      $key = $registration[0].PSChildName
+      if ($key -notmatch '^[a-f0-9-]{36}$') { throw 'Unexpected NSIS installation identity' }
+      $location = (Get-ItemProperty -LiteralPath ('HKCU:\Software\' + $key)).InstallLocation
+      if ([IO.Path]::GetFullPath($location).TrimEnd('\') -ine $target) { throw 'NSIS installation changed directory' }
+      $info = Get-Item -LiteralPath $exe
+      if ($info.PSIsContainer -or $info.VersionInfo.ProductVersion -notmatch ('^' + [regex]::Escape($item.version) + '(?:\.0)?$')) { throw 'Installed NSIS executable version mismatch' }
+      if ($item.version -eq $config.version -and
+          (Get-FileHash -LiteralPath (Join-Path $target 'resources\app.asar') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $config.asarSha256) { throw 'Installed final ASAR differs from the accepted staging payload' }
+      return $key
+    }
+    $phases = New-Object Collections.Generic.List[string]
+    $result.nsisExitObservations = New-Object Collections.Generic.List[object]
+    function Nsis-PackagedProcesses {
+      @(Get-CimInstance Win32_Process -OperationTimeoutSec 1 | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($target + '\', [StringComparison]::OrdinalIgnoreCase) } | Sort-Object ProcessId)
+    }
+    function Nsis-ProcessMetadata($rows) {
+      @($rows | ForEach-Object {
+        $kind = 'other'
+        if ($_.Name -ieq 'copilot-runtime.exe') { $kind = 'copilot-sdk' }
+        elseif ($_.Name -ieq 'codex.exe') { $kind = 'codex-sdk' }
+        elseif ($_.CommandLine -match '(?:^|\s)--type=(renderer|gpu-process|utility|crashpad-handler)(?:\s|$)') { $kind = $Matches[1] }
+        @{pid=[int]$_.ProcessId; parentPid=[int]$_.ParentProcessId; name=$_.Name; kind=$kind;
+          relativeExe=$_.ExecutablePath.Substring($target.Length + 1); createdUtc=$_.CreationDate.ToUniversalTime().ToString('o')}
+      })
+    }
+    function Check-NsisRenderer($expectedVersion, $phase, $bindings) {
+      Stage ('checking-nsis-' + $expectedVersion + '-' + $phase)
+      Assert-GuestProfilePath $exe
+      $beforeLaunch = @(Nsis-PackagedProcesses)
+      if ($beforeLaunch.Count -ne 0) {
+        $result.nsisBeforeLaunchProcesses = @(Nsis-ProcessMetadata $beforeLaunch)
+        throw 'NSIS application had packaged processes before cold launch'
+      }
+      $launchUtc = [DateTime]::UtcNow
+      $app = Start-Process -FilePath $exe -ArgumentList '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1' -PassThru -WindowStyle Hidden
+      try {
+        $null = $app.Handle
+        $browser = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $app.Id)
+        if (-not $browser -or $browser.ExecutablePath -ine $exe -or
+            $browser.CreationDate.ToUniversalTime() -lt $launchUtc.AddSeconds(-1)) { throw 'NSIS browser process identity mismatch' }
+        $owner = Invoke-CimMethod -InputObject $browser -MethodName GetOwnerSid
+        if ($owner.ReturnValue -ne 0 -or $owner.Sid -cne $guestSid) { throw 'NSIS process escaped the guest account' }
+        $runtimeConfig = Join-Path $work 'renderer-config.json'
+        $runtimeFile = Join-Path $work ('runtime-' + $phases.Count + '.json')
+        $options = @{nonce=$config.nonce; distribution='nsis'; appDirectory=$target; version=$expectedVersion;
+          phase=$phase; bindings=$bindings; expectedPid=$app.Id; close=$true}
+        [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
+        $inspection = New-Object Diagnostics.Process
+        $inspectionStarted = $false
+        try {
+          $inspection.StartInfo.FileName = 'C:\VoxCueStoreInput\tools\node.exe'
+          $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\renderer.mjs" "' + $runtimeConfig + '" "' + $runtimeFile + '"'
+          $inspection.StartInfo.WorkingDirectory = $work
+          $inspection.StartInfo.UseShellExecute = $false
+          $inspection.StartInfo.CreateNoWindow = $true
+          $inspection.StartInfo.RedirectStandardOutput = $true
+          $inspection.StartInfo.RedirectStandardError = $true
+          $inspection.StartInfo.StandardOutputEncoding = New-Object Text.UTF8Encoding $false
+          $inspection.StartInfo.StandardErrorEncoding = New-Object Text.UTF8Encoding $false
+          $inspectionStarted = $inspection.Start()
+          if (-not $inspectionStarted) { throw 'Starting NSIS renderer inspector failed' }
+          $stdout = $inspection.StandardOutput.ReadToEndAsync()
+          $stderr = $inspection.StandardError.ReadToEndAsync()
+          if (-not $inspection.WaitForExit(180000)) { throw 'NSIS renderer inspection timed out' }
+          if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdout, $stderr), 10000)) { throw 'NSIS inspector pipe capture timed out' }
+          $null = $stdout.GetAwaiter().GetResult()
+          $diagnostic = $stderr.GetAwaiter().GetResult()
+          if ($inspection.ExitCode -ne 0) { throw ('NSIS renderer check failed: ' + $diagnostic) }
+        } finally {
+          try {
+            if ($inspectionStarted -and -not $inspection.HasExited) {
+              $inspection.Kill()
+              if (-not $inspection.WaitForExit(10000)) { throw 'NSIS inspector cleanup timed out' }
+            }
+          } finally { $inspection.Dispose() }
+        }
+        if (-not (Test-Path -LiteralPath $runtimeFile -PathType Leaf) -or (Get-Item -LiteralPath $runtimeFile).Length -gt 16384) { throw 'Missing or oversized NSIS renderer result' }
+        $runtime = Get-Content -LiteralPath $runtimeFile -Encoding UTF8 -Raw | ConvertFrom-Json
+        if ($runtime.nonce -cne $config.nonce -or $runtime.pid -ne $app.Id -or $runtime.version -cne $expectedVersion -or
+            $runtime.phase -cne $phase -or $runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Invalid NSIS renderer result' }
+        # Never kill a product process and call that a successful flush/upgrade.
+        # Main and descendants share the original 30s budget; an early main exit
+        # must not turn the first CIM snapshot into a zero-grace child assertion.
+        $quitWatch = [Diagnostics.Stopwatch]::StartNew()
+        $observation = @{version=$expectedVersion; phase=$phase; mainPid=$app.Id;
+          snapshots=(New-Object Collections.Generic.List[object]); truncated=$false}
+        $result.nsisExitObservations.Add($observation)
+        $remaining = @(Nsis-PackagedProcesses)
+        $observation.snapshots.Add(@{elapsedMs=$quitWatch.ElapsedMilliseconds; processes=@(Nsis-ProcessMetadata $remaining)})
+        $lastIdentity = ($remaining | ForEach-Object { [string]$_.ProcessId + ':' + $_.CreationDate.ToUniversalTime().ToString('o') }) -join '|'
+        $mainBudget = [Math]::Max(0, 30000 - $quitWatch.ElapsedMilliseconds)
+        if (-not $app.WaitForExit([int]$mainBudget)) { throw 'NSIS application did not exit naturally after saving' }
+        $observation.mainExitedAtMs = $quitWatch.ElapsedMilliseconds
+        if ($app.ExitCode -ne 0) { throw ('NSIS application failed during exit: ' + $app.ExitCode) }
+        while ($quitWatch.ElapsedMilliseconds -lt 30000) {
+          $remaining = @(Nsis-PackagedProcesses)
+          $identity = ($remaining | ForEach-Object { [string]$_.ProcessId + ':' + $_.CreationDate.ToUniversalTime().ToString('o') }) -join '|'
+          $observation.last = @{elapsedMs=$quitWatch.ElapsedMilliseconds; processes=@(Nsis-ProcessMetadata $remaining)}
+          if ($identity -cne $lastIdentity) {
+            if ($observation.snapshots.Count -lt 16) { $observation.snapshots.Add($observation.last) }
+            else { $observation.truncated = $true }
+            $lastIdentity = $identity
+          }
+          if ($remaining.Count -eq 0) { break }
+          $sleep = [Math]::Min(250, 30000 - $quitWatch.ElapsedMilliseconds)
+          if ($sleep -gt 0) { Start-Sleep -Milliseconds ([int]$sleep) }
+        }
+        $observation.elapsedMs = $quitWatch.ElapsedMilliseconds
+        if ($remaining.Count -ne 0 -or $quitWatch.ElapsedMilliseconds -gt 30000) { throw 'NSIS application left a running packaged subprocess after the shared 30s exit budget' }
+        Assert-GuestProfilePath $profileMarker
+        $localMode = Get-Content -LiteralPath $profileMarker -Encoding UTF8 -Raw | ConvertFrom-Json
+        if ($localMode -isnot [bool] -or -not $localMode) { throw 'NSIS backend did not use the real guest profile' }
+        $phases.Add($expectedVersion + ':' + $phase)
+        return $runtime.bindings
+      } finally { $app.Dispose() }
+    }
+    if ($config.task -eq 'nsis-upgrade') {
+      $registrationKey = Install-Nsis $config.previous $false
+      $bindings = Check-NsisRenderer $config.previous.version 'seed' $null
+      $updatedKey = Install-Nsis $config.current $true
+      if ($updatedKey -cne $registrationKey) { throw 'NSIS upgrade changed its registry identity' }
+      $bindings = Check-NsisRenderer $config.version 'verify' $bindings
+    } else {
+      $registrationKey = Install-Nsis $config.current $false
+      $bindings = Check-NsisRenderer $config.version 'seed' $null
+    }
+    $null = Check-NsisRenderer $config.version 'verify' $bindings
+    foreach ($item in $installers) {
+      if ((Get-FileHash -LiteralPath (Join-Path 'C:\VoxCueStoreInput' $item.name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha256) { throw 'Read-only NSIS source changed' }
+    }
+    $result.task = $config.task
+    $result.appVersion = $config.version
+    $result.previousVersion = if ($config.task -eq 'nsis-upgrade') { $config.previous.version } else { $null }
+    $result.phases = $phases.ToArray()
+    $result.installDirectory = $target
+    $result.userData = [IO.Path]::GetDirectoryName($profileMarker)
+    $result.registrationKey = $registrationKey
+    $result.persistence = $true
+    $result.naturalExits = $true
+    $result.sourceUnchanged = $true
+    $result.ok = $true
+    $result.stage = 'complete'
+  } else {
   Stage 'copying-package'
   $source = Join-Path 'C:\VoxCueStoreInput' $config.artifactName
   if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.sha256) { throw 'Mapped APPX checksum mismatch' }
@@ -427,9 +602,22 @@ try {
   if (-not $package -or $package.Version.ToString() -ne $config.packageVersion -or $package.Publisher -ne $config.publisher) { throw 'Installed APPX identity/version mismatch' }
   $exe = [IO.Path]::GetFullPath((Join-Path $package.InstallLocation $applications[0].Executable))
   if (-not $exe.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($exe) -ne 'VoxCue.exe') { throw 'Unexpected installed executable' }
+  $appDirectory = Split-Path -Parent $exe
+  $profileMarkers = @(
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'VoxCue\local-mode.json'),
+    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) ('Packages\' + $package.PackageFamilyName + '\LocalCache\Roaming\VoxCue\local-mode.json'))
+  )
+  foreach ($marker in $profileMarkers) {
+    Assert-GuestProfilePath $marker
+    if (Test-Path -LiteralPath $marker) { throw 'Guest local-mode preference existed before launch' }
+  }
+  $runtimeConfig = Join-Path $work 'renderer-config.json'
+  $config | Add-Member -NotePropertyName appDirectory -NotePropertyValue $appDirectory
+  [IO.File]::WriteAllText($runtimeConfig, ($config | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
   Stage 'launching-package-identity'
   Get-Command Invoke-CommandInDesktopPackage -ErrorAction Stop | Out-Null
-  Invoke-CommandInDesktopPackage -PackageFamilyName $package.PackageFamilyName -AppId $applications[0].Id -Command $exe -Args '--inspect-brk=127.0.0.1:9229' -PreventBreakaway
+  $launchUtc = [DateTime]::UtcNow
+  Invoke-CommandInDesktopPackage -PackageFamilyName $package.PackageFamilyName -AppId $applications[0].Id -Command $exe -Args '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1' -PreventBreakaway
   Stage 'checking-real-store-runtime'
   $runtimeFile = Join-Path $work 'runtime.json'
   # WinPS 5 converts native stderr into ErrorRecords; with Stop this can discard
@@ -438,7 +626,7 @@ try {
   $inspectionStarted = $false
   try {
     $inspection.StartInfo.FileName = 'C:\VoxCueStoreInput\tools\node.exe'
-    $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\inspect.mjs" "C:\VoxCueStoreInput\config.json" "' + $work + '" "' + $runtimeFile + '"'
+    $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\renderer.mjs" "' + $runtimeConfig + '" "' + $runtimeFile + '"'
     $inspection.StartInfo.WorkingDirectory = $work
     $inspection.StartInfo.UseShellExecute = $false
     $inspection.StartInfo.CreateNoWindow = $true
@@ -470,18 +658,96 @@ try {
     } finally { $inspection.Dispose() }
   }
   $runtime = Get-Content -LiteralPath $runtimeFile -Encoding UTF8 -Raw | ConvertFrom-Json
-  if ($runtime.nonce -ne $config.nonce -or -not $runtime.windowsStore -or -not $runtime.driverDisabled -or $runtime.version -ne $config.version) { throw 'Invalid installed Store runtime result' }
+  if ($runtime.nonce -ne $config.nonce -or $runtime.version -ne $config.version -or $runtime.pid -le 0) { throw 'Invalid installed Store runtime result' }
+  # Check the actual browser PID's Windows package identity without reopening
+  # the main-process inspector disabled by production fuses.
+  Add-Type -TypeDefinition @'
+using System;
+using System.Text;
+using System.Runtime.InteropServices;
+public static class PackageProcess {
+  [DllImport("kernel32.dll", SetLastError=true)] static extern IntPtr OpenProcess(uint access, bool inherit, uint pid);
+  [DllImport("kernel32.dll", CharSet=CharSet.Unicode)] static extern int GetPackageFullName(IntPtr process, ref uint length, StringBuilder name);
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  public static string Identity(uint pid) {
+    IntPtr handle=OpenProcess(0x1000, false, pid);
+    if(handle==IntPtr.Zero) throw new Exception("Browser process handle unavailable");
+    try { uint length=0; int result=GetPackageFullName(handle, ref length, null);
+      if(result!=122 || length==0) throw new Exception("Browser has no package identity");
+      var name=new StringBuilder((int)length);
+      if(GetPackageFullName(handle, ref length, name)!=0) throw new Exception("Browser package identity unavailable");
+      return name.ToString();
+    } finally { CloseHandle(handle); }
+  }
+}
+'@
+  if ([PackageProcess]::Identity([uint32]$runtime.pid) -cne $package.PackageFullName) { throw 'Browser process is not the installed Store package' }
+  # Public setLocalMode(true) writes JSON true via LocalMode constructed from
+  # app.getPath('userData'). This observes the real backend path, not a CLI flag.
+  $written = @($profileMarkers | Where-Object { Test-Path -LiteralPath $_ })
+  if ($written.Count -ne 1) { throw 'Expected exactly one newly written guest local-mode preference' }
+  $profileMarker = $written[0]
+  Assert-GuestProfilePath $profileMarker
+  $info = Get-Item -LiteralPath $profileMarker -Force
+  if ($info.PSIsContainer -or $info.Length -gt 16 -or $info.CreationTimeUtc -lt $launchUtc -or
+      $info.LastWriteTimeUtc -lt $launchUtc) { throw 'Invalid or stale guest local-mode preference' }
+  $localMode = Get-Content -LiteralPath $profileMarker -Encoding UTF8 -Raw | ConvertFrom-Json
+  if ($localMode -isnot [bool] -or $localMode -ne $true) { throw 'Backend did not persist the selected local mode' }
   if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.sha256) { throw 'Read-only source APPX changed' }
+  if ($runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Packaged renderer persistence regression failed' }
+  Stage 'checking-package-native-modules'
+  # WindowsApps executables must be exercised in the package's execution context.
+  # Keep results outside virtualized AppData; only this sanitized nonce file is mapped.
+  $nativeFile = Join-Path $output ('package-native-' + $config.nonce + '.json')
+  $nativeArgs = '"C:\VoxCueStoreInput\package-native-check.cjs" "' + $runtimeConfig + '" "' + $nativeFile + '" "' + $work + '"'
+  Invoke-CommandInDesktopPackage -PackageFamilyName $package.PackageFamilyName -AppId $applications[0].Id -Command 'C:\VoxCueStoreInput\tools\electron\electron.exe' -Args $nativeArgs -PreventBreakaway
+  $nativeDeadline = [DateTime]::UtcNow.AddSeconds(240)
+  while (-not (Test-Path -LiteralPath $nativeFile -PathType Leaf)) {
+    if ([DateTime]::UtcNow -gt $nativeDeadline) { throw 'Package native checks timed out' }
+    if (Test-Path -LiteralPath (Join-Path $output 'stop')) { throw 'Host requested Sandbox shutdown' }
+    Start-Sleep -Milliseconds 250
+  }
+  if ((Get-Item -LiteralPath $nativeFile).Length -gt 4096) { throw 'Sanitized package native result is oversized' }
+  $native = Get-Content -LiteralPath $nativeFile -Encoding UTF8 -Raw | ConvertFrom-Json
+  if ($native.nonce -cne $config.nonce -or $native.ok -isnot [bool]) { throw 'Invalid package native result owner or status' }
+  if (-not $native.ok) {
+      if ($native.phase -match '^[a-z0-9-]{1,80}$') { $result.nativePhase = $native.phase }
+      if ($native.errorType -match '^[A-Za-z0-9.]{1,80}$') { $result.errorType = $native.errorType }
+      if ($native.errorReason -match '^[a-z0-9-]{1,80}$') { $result.nativeReason = $native.errorReason }
+      if ($native.errorCode -match '^(ENOENT|EACCES|EPERM|ENOTDIR|EISDIR|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EPIPE)$') { $result.nativeCode = $native.errorCode }
+      if ($native.runtimeExitCode -is [int] -or $native.runtimeExitCode -is [long]) { $result.runtimeExitCode = $native.runtimeExitCode }
+      if ($native.knowledgeDiagnostic -match '^[a-z0-9-]{1,80}$') { $result.knowledgeDiagnostic = $native.knowledgeDiagnostic }
+      if ($native.knowledgeExitCode -is [int] -or $native.knowledgeExitCode -is [long]) { $result.knowledgeExitCode = $native.knowledgeExitCode }
+      foreach ($name in @('vcruntime140', 'vcruntime140_1', 'msvcp140', 'msvcp140_1', 'msvcp140_atomic_wait')) {
+        if ($native.msvcRuntime.$name -is [bool]) { $result[('crt_' + $name)] = $native.msvcRuntime.$name }
+      }
+      if ($native.sourceLine -is [int] -and $native.sourceLine -gt 0 -and $native.sourceLine -lt 10000) { $result.nativeLine = $native.sourceLine }
+      throw 'Packaged native regression failed'
+  }
+  foreach ($field in @('finalAsar', 'copilotRuntime', 'codexSyntheticToken', 'asrWorker', 'asrGapReset', 'speechUtility', 'knowledgeFormats', 'knowledgeModes', 'knowledgeRestart', 'knowledgeDelete', 'mobileAssets', 'screenshotWorker')) {
+    if ($native.$field -isnot [bool] -or -not $native.$field) { throw ('Missing packaged native check: ' + $field) }
+    $result[$field] = $true
+  }
+  $result.persistence = $true
+  $systemVcRuntimeAbsent = $true
+  foreach ($name in @('vcruntime140', 'vcruntime140_1', 'msvcp140', 'msvcp140_1', 'msvcp140_atomic_wait')) {
+    if ($native.msvcRuntime.$name -isnot [bool]) { throw 'Missing system CRT diagnostic' }
+    if ($native.msvcRuntime.$name) { $systemVcRuntimeAbsent = $false }
+  }
+  $result.systemVcRuntimeAbsent = $systemVcRuntimeAbsent
   $result.ok = $true
   $result.stage = 'complete'
   $result.packageVersion = $package.Version.ToString()
   $result.packageFamilyName = $package.PackageFamilyName
   $result.appVersion = $runtime.version
-  $result.windowsStore = $runtime.windowsStore
-  $result.packaged = $runtime.packaged
-  $result.driverDisabled = $runtime.driverDisabled
+  $result.windowsStore = $true
+  $result.packaged = $true
+  $result.guestSid = $guestSid
+  $result.guestProfile = $guestProfile
+  $result.userData = [IO.Path]::GetDirectoryName($profileMarker)
   $result.updatePhases = $runtime.updatePhases
   $result.sourceUnchanged = $true
+  }
 } catch {
   $result.error = $_.Exception.Message
 } finally {
@@ -497,7 +763,22 @@ try {
     path.join(root, ownerMarker),
     JSON.stringify({ kind: temporaryPrefix, pid: process.pid, nonce }),
   );
-  await ordinary(artifact);
+  if (!copilotVault) await ordinary(artifact);
+  if (!copilotVault && appxArgument) {
+    const relative = path.relative(temporary, artifact).split(path.sep);
+    assert.ok(
+      relative.length > 1 && relative[0].startsWith('voxcue-test-run-') && !relative.includes('..'),
+      'Temporary APPX must belong to a test-workspace run',
+    );
+    const ownerRoot = path.join(temporary, relative[0]);
+    assert.equal(await realpath(ownerRoot), ownerRoot, 'Redirected APPX owner');
+    const marker = path.join(ownerRoot, '.voxcue-test-owner.json');
+    await ordinary(marker);
+    const owner = JSON.parse(await readFile(marker, 'utf8'));
+    assert.equal(owner.kind, 'voxcue-test-run-');
+    assert.ok(Number.isSafeInteger(owner.pid) && owner.pid > 0, 'Unknown APPX owner');
+    process.kill(owner.pid, 0);
+  }
   await ordinary(sandboxExe);
   const cli = JSON.parse(
     ps(`
@@ -555,17 +836,19 @@ try {
   const tools = path.join(input, 'tools');
   await mkdir(tools);
   const node = path.join(platformRoot, '.tools/node-v24.19.0-win-x64/node.exe');
-  const kitRoot = path.join(platformRoot, '.cache/electron-builder/win-codesign@1.1.0');
-  const kits = (await readdir(kitRoot, { withFileTypes: true })).filter(
-    (entry) => entry.isDirectory() && /^windows-kits-bundle-10_0_26100_0-/.test(entry.name),
-  );
-  assert.equal(kits.length, 1, 'Expected the existing fixed Windows SDK tool bundle');
-  const kit = path.join(kitRoot, kits[0].name, 'x64');
-  const signTool = path.join(kit, 'signtool.exe');
-  for (const [file, publisher] of [
-    [node, 'OpenJS Foundation'],
-    [signTool, 'Microsoft Corporation'],
-  ]) {
+  const verifiedTools = [[node, 'OpenJS Foundation']];
+  let kit;
+  if (!copilotVault && !nsisTask) {
+    const kitRoot = path.join(platformRoot, '.cache/electron-builder/win-codesign@1.1.0');
+    const kits = (await readdir(kitRoot, { withFileTypes: true })).filter(
+      (entry) => entry.isDirectory() && /^windows-kits-bundle-10_0_26100_0-/.test(entry.name),
+    );
+    assert.equal(kits.length, 1, 'Expected the existing fixed Windows SDK tool bundle');
+    kit = path.join(kitRoot, kits[0].name, 'x64');
+    const signTool = path.join(kit, 'signtool.exe');
+    verifiedTools.push([signTool, 'Microsoft Corporation']);
+  }
+  for (const [file, publisher] of verifiedTools) {
     await ordinary(file);
     const signature = JSON.parse(
       ps(
@@ -580,37 +863,216 @@ try {
     assert.ok(signature.publisher.includes(publisher), 'Unexpected verification tool publisher');
   }
   await copyFile(node, path.join(tools, 'node.exe'));
-  // SignTool uses its matching SDK DLLs and side-by-side manifests.
-  for (const entry of await readdir(kit, { withFileTypes: true })) {
-    if (
-      entry.isFile() &&
-      (entry.name === 'signtool.exe' ||
-        entry.name.endsWith('.dll') ||
-        entry.name.endsWith('.manifest'))
-    ) {
-      const source = path.join(kit, entry.name);
-      await ordinary(source);
-      await copyFile(source, path.join(tools, entry.name));
+  hostSid = ps('[Security.Principal.WindowsIdentity]::GetCurrent().User.Value');
+  assert.match(hostSid, /^S-\d+(?:-\d+)+$/);
+  if (copilotVault) {
+    for (const name of ['copilot-sdk', 'copilot-sdk-win32-x64']) {
+      const manifest = path.join(platformRoot, 'node_modules/@github', name, 'package.json');
+      await ordinary(manifest);
+      assert.equal(
+        JSON.parse(await readFile(manifest, 'utf8')).version,
+        '1.0.21',
+        'Use the fixed Copilot SDK/runtime',
+      );
     }
+    const runtime = path.join(input, 'runtime');
+    await mkdir(runtime);
+    for (const name of [
+      'copilot-runtime.exe',
+      'runtime.node',
+      'dpapi.node',
+      'msal-node-runtime.node',
+      'msalruntime.dll',
+    ]) {
+      const source = path.join(
+        platformRoot,
+        'node_modules/@github/copilot-sdk-win32-x64/prebuilds/win32-x64',
+        name,
+      );
+      await ordinary(source);
+      const destination = path.join(runtime, name);
+      await copyFile(source, destination);
+      assert.equal(await hash(destination), await hash(source), 'Runtime copy changed');
+    }
+    const probe = path.join(platformRoot, 'test/scripts/copilot-vault-probe.mjs');
+    const vaultTargets = path.join(platformRoot, 'test/fixtures/CopilotVaultTargets.cs');
+    await ordinary(vaultTargets);
+    await copyFile(vaultTargets, path.join(input, 'CopilotVaultTargets.cs'));
+    await ordinary(probe);
+    const requirePlatform = createRequire(path.join(platformRoot, 'package.json'));
+    await requirePlatform('esbuild').build({
+      entryPoints: [probe],
+      outfile: path.join(input, 'probe.cjs'),
+      bundle: true,
+      platform: 'node',
+      format: 'cjs',
+      target: 'node24',
+      nodePaths: [path.join(platformRoot, 'node_modules')],
+      alias: { '@github/copilot-sdk': requirePlatform.resolve('@github/copilot-sdk') },
+      external: ['@github/copilot-sdk-*', 'koffi'],
+      legalComments: 'none',
+    });
+    await writeFile(
+      path.join(input, 'config.json'),
+      JSON.stringify({ task: 'copilot-vault', nonce, hostSid }),
+    );
+  } else if (nsisTask) {
+    const requirePlatform = createRequire(path.join(platformRoot, 'package.json'));
+    const yaml = createRequire(requirePlatform.resolve('electron-updater/package.json'))('js-yaml');
+    const metadataFile = path.join(path.dirname(artifact), 'latest.yml');
+    await ordinary(metadataFile);
+    assert.ok((await lstat(metadataFile)).size <= 128 * 1024, 'Oversized update metadata');
+    const metadata = yaml.load(await readFile(metadataFile, 'utf8'));
+    assert.equal(metadata.version, version);
+    const { signedWindowsUpdate } = requirePlatform(
+      './dist-electron/shared/electron/backend/updates/windowsManifest.js',
+    );
+    const key = JSON.parse(
+      await readFile(path.join(platformRoot, 'update-public-key.json'), 'utf8'),
+    );
+    assert.equal(key.protocol, 1);
+    const selected = signedWindowsUpdate(
+      metadata,
+      {
+        version,
+        tag: 'sandbox',
+        publishedAt: 0,
+        manifest: 'latest.yml',
+        binary: { name: path.basename(artifact), size: (await lstat(artifact)).size },
+      },
+      key.publicKey,
+    );
+    assert.equal(selected.sha512, await hash(artifact, 'sha512', 'base64'));
+    originalHash = await hash(artifact);
+    const current = { name: path.basename(artifact), version, sha256: originalHash };
+    await copyFile(artifact, path.join(input, current.name));
+    assert.equal(await hash(path.join(input, current.name)), originalHash, 'NSIS copy changed');
+    let previous;
+    if (previousArtifact) {
+      await ordinary(previousArtifact);
+      previousHash = await hash(previousArtifact);
+      assert.equal(previousHash, previousDigest, 'Protected 1.1.1 installer changed');
+      previous = { name: path.basename(previousArtifact), version: '1.1.1', sha256: previousHash };
+      await copyFile(previousArtifact, path.join(input, previous.name));
+      assert.equal(
+        await hash(path.join(input, previous.name)),
+        previousDigest,
+        'Old NSIS copy changed',
+      );
+    }
+    const archive = path.join(
+      platformRoot,
+      'release/installer-stage/VoxCue-win32-x64/resources/app.asar',
+    );
+    await ordinary(archive);
+    await writeFile(
+      path.join(input, 'config.json'),
+      JSON.stringify({
+        task: nsisTask,
+        nonce,
+        hostSid,
+        version,
+        current,
+        previous,
+        asarSha256: await hash(archive),
+      }),
+    );
+    await copyFile(
+      path.join(platformRoot, 'test/scripts/store-renderer-client.mjs'),
+      path.join(input, 'renderer.mjs'),
+    );
+  } else {
+    const requirePlatform = createRequire(path.join(platformRoot, 'package.json'));
+    const electron = await realpath(requirePlatform('electron'));
+    await ordinary(electron);
+    const expected = requirePlatform('electron/package.json').version;
+    assert.equal(expected, requirePlatform('../shared/package.json').devDependencies.electron);
+    await cp(path.dirname(electron), path.join(tools, 'electron'), {
+      recursive: true,
+      errorOnExist: true,
+      force: false,
+    });
+    assert.equal(await hash(path.join(tools, 'electron/electron.exe')), await hash(electron));
+    const { prepareModelFixtures } =
+      await import('../../../shared/test/scripts/model-fixtures.mjs');
+    const models = await prepareModelFixtures();
+    const fixtureDirectory = path.join(input, 'fixtures');
+    await mkdir(fixtureDirectory);
+    for (const [source, name] of [
+      [models.speechModels, 'speech'],
+      [models.ragModel, 'rag'],
+    ])
+      await cp(source, path.join(fixtureDirectory, name), {
+        recursive: true,
+        errorOnExist: true,
+        force: false,
+      });
+    await copyFile(
+      path.join(models.speechFixtures, 'english.wav'),
+      path.join(fixtureDirectory, 'english.wav'),
+    );
+    const fixtures = requirePlatform('../shared/test/scripts/rag-fixtures.cjs');
+    await writeFile(path.join(fixtureDirectory, 'fixture.pdf'), fixtures.pdf());
+    await writeFile(path.join(fixtureDirectory, 'fixture.docx'), await fixtures.docx());
+    await writeFile(
+      path.join(fixtureDirectory, 'legacy.doc'),
+      fixtures.doc('pkglegacydocmarker 生产 Worker 保留中文。\r尾部参数 43。\r'),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, 'encoded-gb18030.txt'),
+      Buffer.from(
+        'd6aacab6bfe2cec4b5b5b1a3b4e6cfeec4bfbeadc0faa3acb4abb8d0c6f7b7b4c0a1bfd8d6c6bbfad0b5b1dba3accafdbeddb4a6c0edbde1b9fbd3c3d3dac3e6cad4d7bcb1b8a1a3d5e2b8f6cfb5cdb3d6a7b3d6d6d0cec4bacdd3a2cec4d7cac1cfa1a3',
+        'hex',
+      ),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, 'encoded-utf16.md'),
+      Buffer.concat([
+        Buffer.from([0xff, 0xfe]),
+        Buffer.from('# pkgutf16marker\n\n生产 Worker 保留中文，尾部参数为 52。', 'utf16le'),
+      ]),
+    );
+    await copyFile(
+      path.join(platformRoot, 'test/scripts/package-native-check.cjs'),
+      path.join(input, 'package-native-check.cjs'),
+    );
+    // SignTool uses its matching SDK DLLs and side-by-side manifests.
+    for (const entry of await readdir(kit, { withFileTypes: true })) {
+      if (
+        entry.isFile() &&
+        (entry.name === 'signtool.exe' ||
+          entry.name.endsWith('.dll') ||
+          entry.name.endsWith('.manifest'))
+      ) {
+        const source = path.join(kit, entry.name);
+        await ordinary(source);
+        await copyFile(source, path.join(tools, entry.name));
+      }
+    }
+    originalHash = await hash(artifact);
+    await copyFile(artifact, path.join(input, path.basename(artifact)));
+    assert.equal(await hash(path.join(input, path.basename(artifact))), originalHash);
+    await writeFile(
+      path.join(input, 'config.json'),
+      JSON.stringify({
+        nonce,
+        hostSid,
+        version,
+        packageVersion,
+        artifactName: path.basename(artifact),
+        sha256: originalHash,
+        identityName: 'NCFX.VoxCue',
+        publisher: 'CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A',
+        storeUpdateMessage: '此版本由 Microsoft Store 提供更新。',
+        fixtureDirectory: 'C:\\VoxCueStoreInput\\fixtures',
+      }),
+    );
+    await copyFile(
+      path.join(platformRoot, 'test/scripts/store-renderer-client.mjs'),
+      path.join(input, 'renderer.mjs'),
+    );
   }
-  originalHash = await hash(artifact);
-  await copyFile(artifact, path.join(input, path.basename(artifact)));
-  assert.equal(await hash(path.join(input, path.basename(artifact))), originalHash);
-  await writeFile(
-    path.join(input, 'config.json'),
-    JSON.stringify({
-      nonce,
-      version,
-      packageVersion,
-      artifactName: path.basename(artifact),
-      sha256: originalHash,
-      identityName: 'NCFX.VoxCue',
-      publisher: 'CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A',
-      storeUpdateMessage: '此版本由 Microsoft Store 提供更新。',
-    }),
-  );
   await writeFile(path.join(input, 'guest.ps1'), '\uFEFF' + guestScript);
-  await writeFile(path.join(input, 'inspect.mjs'), inspectorClient);
   const xml = (value) =>
     String(value)
       .replaceAll('&', '&amp;')
@@ -643,7 +1105,7 @@ try {
   });
   assert.ok(child.pid, 'Sandbox process did not start');
   owned.set(child.pid, null);
-  console.log('Store Sandbox: starting isolated guest');
+  console.log(label + ': starting isolated guest');
   const deadline = Date.now() + 10 * 60 * 1000;
   while (true) {
     interrupted.signal.throwIfAborted();
@@ -653,23 +1115,107 @@ try {
     observeSandbox();
     const status = await readResult(statusFile);
     if (status && status.stage !== lastStage) {
-      console.log('Store Sandbox: ' + (lastStage = status.stage));
+      console.log(label + ': ' + (lastStage = status.stage));
     }
     const result = await readResult(resultFile);
     if (result) {
       assert.ok(ownVmId && ownRemote, 'Guest result has no verified VM and viewer ownership');
       assert.equal(result.ok, true, JSON.stringify(result));
-      assert.equal(result.packageVersion, packageVersion);
-      assert.equal(result.appVersion, version);
-      assert.equal(result.windowsStore, true);
-      assert.equal(result.driverDisabled, true);
-      assert.equal(result.sourceUnchanged, true);
-      assert.deepEqual(result.updatePhases, [
-        'unavailable',
-        'unavailable',
-        'unavailable',
-        'unavailable',
-      ]);
+      assert.match(result.guestSid, /^S-\d+(?:-\d+)+$/);
+      assert.notEqual(result.guestSid, hostSid);
+      assert.equal(result.guestProfile.toLowerCase(), 'c:\\users\\wdagutilityaccount');
+      if (copilotVault) {
+        assert.equal(result.task, 'copilot-vault');
+        assert.equal(result.exitCode, 0);
+        for (const field of [
+          'sharedSlot',
+          'crossLogout',
+          'removedCliSlot',
+          'preservedCliAfterVoxCueLogout',
+          'localSessionCleared',
+          'storedInVault',
+          'plaintext',
+        ])
+          assert.equal(typeof result[field], 'boolean', 'Invalid sanitized Copilot vault result');
+        assert.equal(result.storedInVault, true);
+        assert.equal(result.plaintext, false);
+        for (const field of [
+          'sharedSlot',
+          'crossLogout',
+          'removedCliSlot',
+          'preservedCliAfterVoxCueLogout',
+          'localSessionCleared',
+        ])
+          assert.equal(
+            result[field],
+            true,
+            'Copilot vault reproduction or local disconnect regression failed',
+          );
+      } else if (nsisTask) {
+        assert.equal(result.task, nsisTask);
+        assert.equal(result.appVersion, version);
+        assert.equal(result.previousVersion, previousArtifact ? '1.1.1' : null);
+        assert.equal(
+          result.installDirectory.toLowerCase(),
+          path.win32.join(result.guestProfile, 'AppData/Local/Programs/VoxCue').toLowerCase(),
+        );
+        assert.equal(
+          result.userData.toLowerCase(),
+          path.win32.join(result.guestProfile, 'AppData/Roaming/VoxCue').toLowerCase(),
+        );
+        assert.match(result.registrationKey, /^[a-f0-9-]{36}$/i);
+        assert.deepEqual(
+          result.phases,
+          previousArtifact
+            ? ['1.1.1:seed', version + ':verify', version + ':verify']
+            : [version + ':seed', version + ':verify'],
+        );
+        for (const field of ['persistence', 'naturalExits', 'sourceUnchanged'])
+          assert.equal(result[field], true);
+      } else {
+        assert.equal(result.packageVersion, packageVersion);
+        assert.equal(result.appVersion, version);
+        assert.equal(result.windowsStore, true);
+        assert.equal(result.packaged, true);
+        assert.match(result.packageFamilyName, /^NCFX\.VoxCue_[a-z0-9]{13}$/i);
+        const profiles = [
+          path.win32.join(result.guestProfile, 'AppData/Roaming/VoxCue'),
+          path.win32.join(
+            result.guestProfile,
+            'AppData/Local/Packages',
+            result.packageFamilyName,
+            'LocalCache/Roaming/VoxCue',
+          ),
+        ];
+        assert.ok(
+          profiles.some((candidate) => candidate.toLowerCase() === result.userData.toLowerCase()),
+          'Backend userData escaped the fixed guest profile candidates',
+        );
+        assert.equal(result.sourceUnchanged, true);
+        assert.equal(typeof result.systemVcRuntimeAbsent, 'boolean');
+        for (const field of [
+          'finalAsar',
+          'copilotRuntime',
+          'codexSyntheticToken',
+          'asrWorker',
+          'asrGapReset',
+          'speechUtility',
+          'knowledgeFormats',
+          'knowledgeModes',
+          'knowledgeRestart',
+          'knowledgeDelete',
+          'mobileAssets',
+          'screenshotWorker',
+          'persistence',
+        ])
+          assert.equal(result[field], true, 'Missing packaged regression: ' + field);
+        assert.deepEqual(result.updatePhases, [
+          'unavailable',
+          'unavailable',
+          'unavailable',
+          'unavailable',
+        ]);
+      }
       interrupted.signal.throwIfAborted();
       await requireNoStopRequest();
       console.log(JSON.stringify(result));
@@ -689,8 +1235,13 @@ try {
     if (child) {
       await stopOwnedSandbox();
     }
-    if (originalHash)
-      assert.equal(await hash(artifact), originalHash, 'Original Store APPX changed');
+    if (originalHash) assert.equal(await hash(artifact), originalHash, 'Original package changed');
+    if (previousHash)
+      assert.equal(
+        await hash(previousArtifact),
+        previousDigest,
+        'Protected 1.1.1 installer changed',
+      );
     assert.equal(path.dirname(await realpath(root)), temporary);
     assert.ok(path.basename(root).startsWith(temporaryPrefix));
     const owner = JSON.parse(await readFile(path.join(root, ownerMarker), 'utf8'));
@@ -718,5 +1269,9 @@ try {
 }
 if (failure) throw failure;
 console.log(
-  'PASS Store Sandbox: installed identity/version, real Store runtime and disabled standalone updates; guest stopped, original unchanged, temporary files cleaned',
+  copilotVault
+    ? 'PASS Copilot vault Sandbox: sanitized isolation/logout results, guest stopped and temporary files cleaned'
+    : nsisTask
+      ? 'PASS NSIS Sandbox: real installation, persisted data and natural restart; guest stopped, originals unchanged, temporary files cleaned'
+      : 'PASS Store Sandbox: installed identity/version, real Store runtime and disabled standalone updates; guest stopped, original unchanged, temporary files cleaned',
 );

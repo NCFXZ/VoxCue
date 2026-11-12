@@ -61,7 +61,7 @@ describe('引用图标的固定图片来源', () => {
       "'self'", 'data:', 'https://a.favicon.im',
     ]);
     expect(policy.match(/connect-src ([^;]+)/)![1]).toBe(
-      "'self' ws://127.0.0.1:* http://127.0.0.1:*",
+      "'self'",
     );
   });
 });

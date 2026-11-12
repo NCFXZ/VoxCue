@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SyncKind } from '../../electron/contracts/cloudSync';
-import { KNOWLEDGE_MAX_BYTES } from '../../electron/contracts/cloudSync';
+import { KNOWLEDGE_MAX_BYTES, syncKinds } from '../../electron/contracts/cloudSync';
 import {
   CloudSyncEngine,
   defaultSyncPreferences,
@@ -52,6 +52,20 @@ export async function readAccountSyncSaved(userId: string) {
 let engine: CloudSyncEngine | undefined;
 let generation = 0;
 let activeUserId: string | undefined;
+let activeSyncId: string | undefined;
+let suspendConnection: (() => void) | undefined;
+async function stopEngine() {
+  const stopped = engine;
+  const userId = activeUserId;
+  const syncId = activeSyncId;
+  suspendConnection?.();
+  stopped?.stop();
+  if (stopped && userId && syncId && window.desktop?.cloudSync) {
+    const result = await window.desktop.cloudSync({ action: 'cancel', userId, syncId });
+    if (!result.ok && result.status !== 401) throw Error(result.error);
+  }
+  await stopped?.idle();
+}
 export const useCloudSync = create<SyncStore>((set, get) => {
   async function perform(work: () => Promise<void>) {
     const epoch = generation;
@@ -68,14 +82,30 @@ export const useCloudSync = create<SyncStore>((set, get) => {
     busy: false,
     ready: false,
     async suspend() {
-      engine?.stop();
-      await engine?.idle();
+      const stopped = engine;
+      await stopEngine();
+      if (engine === stopped) set({ busy: false });
     },
     connect(userId) {
+      const retired = stopEngine().catch(() => {});
       const epoch = ++generation;
-      engine?.stop();
       engine = undefined;
       activeUserId = userId;
+      const syncId = (activeSyncId = crypto.randomUUID());
+      let suspended = false;
+      let viewTimer: ReturnType<typeof setTimeout> | undefined;
+      let pendingView: SyncView | undefined;
+      suspendConnection = () => {
+        suspended = true;
+        clearTimeout(viewTimer);
+        viewTimer = undefined;
+        pendingView = undefined;
+      };
+      const publishView = () => {
+        viewTimer = undefined;
+        if (epoch === generation && pendingView) set({ ...pendingView, ready: true });
+        pendingView = undefined;
+      };
       const unregister = registerCloudShutdown(() => get().suspend());
       set({
         preferences: defaultSyncPreferences(),
@@ -103,16 +133,17 @@ export const useCloudSync = create<SyncStore>((set, get) => {
       window.addEventListener('voxcue-local-change', changed);
       window.addEventListener('online', online);
       void syncDatabase(userId)
-        .then((saved) => {
-          if (epoch !== generation) return;
+        .then(async (saved) => {
+          await retired;
+          if (epoch !== generation || suspended) return;
           const normalized = readSyncSaved(saved);
           normalized.preferences.knowledgeLimitBytes = KNOWLEDGE_MAX_BYTES;
           engine = new CloudSyncEngine({
             userId,
             saved: normalized,
             request: async (call) => {
-              const result = await window.desktop!.cloudSync(call);
-              if (epoch === generation && !result.ok && result.status === 401)
+              const result = await window.desktop!.cloudSync({ ...call, syncId });
+              if (!suspended && epoch === generation && !result.ok && result.status === 401)
                 window.dispatchEvent(new Event('voxcue-cloud-expired'));
               return result;
             },
@@ -128,23 +159,40 @@ export const useCloudSync = create<SyncStore>((set, get) => {
             },
             persist: (value) => syncDatabase<void>(userId, value),
             emit: (view) => {
-              if (epoch === generation) set({ ...view, ready: true });
+              if (epoch !== generation || suspended) return;
+              pendingView = view;
+              // Stream intermediate states at most once per frame, but always
+              // publish control changes and completed views before the operation resolves.
+              const preferences = get().preferences;
+              const preferencesChanged =
+                preferences.knowledgeLimitBytes !== view.preferences.knowledgeLimitBytes ||
+                syncKinds.some(
+                  (kind) => preferences.enabled[kind] !== view.preferences.enabled[kind],
+                );
+              if (!view.busy || preferencesChanged) {
+                clearTimeout(viewTimer);
+                publishView();
+              } else viewTimer ??= setTimeout(publishView, 16);
             },
           });
           set({ ready: true });
           void engine.request();
         })
         .catch((error) => {
-          if (epoch === generation) set({ error: String(error), ready: true });
+          if (epoch === generation && !suspended) set({ error: String(error), ready: true });
         });
       return () => {
         unregister();
         if (epoch === generation) {
+          void stopEngine().catch(() => {});
           ++generation;
-          engine?.stop();
           engine = undefined;
           activeUserId = undefined;
+          activeSyncId = undefined;
+          suspendConnection = undefined;
         }
+        clearTimeout(viewTimer);
+        pendingView = undefined;
         clearTimeout(debounce);
         clearInterval(poll);
         window.removeEventListener('voxcue-local-change', changed);

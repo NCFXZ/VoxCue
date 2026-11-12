@@ -1,5 +1,6 @@
 import type { AIChatService } from '../backend/chat/ports';
 import { publicFailure } from '../backend/chat/errors';
+import { batchChatEvents } from '../backend/chat/events';
 import { validSource, validateRequest } from '../backend/chat/validation';
 import {
   emptyUsage,
@@ -82,6 +83,11 @@ export function registerChatIpc(dependencies: Dependencies) {
     const active = { id: (request as ChatRequest)?.id, controller };
     activeChat = active;
     pendingChats++;
+    const events = batchChatEvents(
+      (value) => sendDesktop(event.sender, 'chat:event', value),
+      controller.signal,
+      () => activeChat === active && !event.sender.isDestroyed(),
+    );
     const partial: ChatPartialResponse = {};
     let metric: ReturnType<Telemetry['answer']> | undefined;
     try {
@@ -104,7 +110,7 @@ export function registerChatIpc(dependencies: Dependencies) {
               partial.activity = value.activity;
               partial.activities = mergeActivityLog(partial.activities, value.activity);
             }
-            sendDesktop(event.sender, 'chat:event', value);
+            events.emit(value);
           }
         },
         controller.signal,
@@ -126,6 +132,7 @@ export function registerChatIpc(dependencies: Dependencies) {
         ...(Object.keys(partial).length ? { partial } : {}),
       };
     } finally {
+      events.finish();
       pendingChats--;
       if (activeChat === active) activeChat = undefined;
     }

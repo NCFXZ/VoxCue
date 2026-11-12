@@ -180,6 +180,11 @@ export class KnowledgeService implements KnowledgePort {
     signal.throwIfAborted();
     await rename(temporary, file);
     this.catalog = value;
+    // Keep recovery files on disk, but do not retain superseded document bodies in RAM.
+    const current = new Set(Object.values(value.documents).map((entry) => entry.revision));
+    for (const name of this.revisions.keys())
+      if (!current.has(name)) this.revisions.delete(name);
+    this.grounding = undefined;
   }
   indexDocument(input: DocumentInput, signal: AbortSignal) {
     return this.enqueue(signal, async () => {

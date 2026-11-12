@@ -15,7 +15,7 @@ export interface UpdateDriver {
   isAutomaticDownloadAllowed?(): boolean;
   lastCheckedAt?(): number | null;
   downloadUpdate(signal?: AbortSignal): Promise<unknown>;
-  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void;
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void | Promise<void>;
   dispose?(): void | Promise<void>;
 }
 
@@ -302,7 +302,7 @@ export class UpdateService {
       } else if (!ready) {
         this.change({ phase: 'downloaded' });
       } else {
-        this.options.driver.quitAndInstall(false, true);
+        await this.options.driver.quitAndInstall(false, true);
       }
     } catch {
       this.fail('installing');

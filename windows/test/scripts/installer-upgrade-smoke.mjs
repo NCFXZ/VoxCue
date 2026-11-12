@@ -5,6 +5,9 @@ import {
   electron,
   testRoot,
   spawnTestProcess,
+  syntheticElectronEntry,
+  syntheticElectronHtml,
+  registerSyntheticElectronFixture,
 } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile, readFile, readdir, realpath, cp, rename } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -23,16 +26,11 @@ await mkdir(project);
 await mkdir(profile);
 await writeFile(
   path.join(project, 'main.cjs'),
-  `
-const {app,BrowserWindow,ipcMain}=require('electron');
-app.setPath('userData',process.env.COPILOT_TEST_USER_DATA);
-app.whenReady().then(()=>{const win=new BrowserWindow({show:false,webPreferences:{contextIsolation:true,sandbox:true,nodeIntegration:false}});win.loadFile(require('node:path').join(__dirname,'index.html'));});
-app.on('window-all-closed',()=>app.quit());
-`,
+  syntheticElectronEntry(profile),
 );
 await writeFile(
   path.join(project, 'index.html'),
-  '<!doctype html><meta charset="utf-8"><title>Isolated NSIS upgrade test</title><p>NSIS fixture</p>',
+  syntheticElectronHtml,
 );
 // Prepackaged fixture avoids collecting the parent workspace's native dependencies.
 await cp(path.dirname(electronExecutable), stage, { recursive: true });
@@ -112,6 +110,7 @@ try {
       throw Error('Unsafe test installer');
     await run(installer, ['/S', ...(version === '0.2.0' ? ['--updated'] : []), '/D=' + target]);
     installed = true;
+    registerSyntheticElectronFixture(path.join(target, name + '.exe'), profile);
     application = await electron.launch({
       executablePath: path.join(target, name + '.exe'),
       args: [],
