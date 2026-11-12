@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process';
 import { chmod, lstat, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { privatePath, readPrivateFile } from './signing-material.mjs';
 
 // This keychain contains only our local code-signing key. Never query or modify
 // the login keychain, Safe Storage entries, userData, or Sparkle Ed25519 keys.
@@ -25,17 +26,6 @@ function run(command, args, secrets = [], options = {}) {
     throw Error(`${path.basename(command)} failed: ${message.trim()}`);
   }
   return result.stdout;
-}
-
-async function privatePath(file, isDirectory = false) {
-  const stat = await lstat(file);
-  if (
-    stat.isSymbolicLink() ||
-    (isDirectory ? !stat.isDirectory() : !stat.isFile()) ||
-    stat.uid !== process.getuid() ||
-    stat.mode & 0o077
-  )
-    throw Error(`Development signing material must be owned by this user and private: ${file}`);
 }
 
 async function certificateRecord() {
@@ -101,7 +91,7 @@ async function initializePublicPin(signing) {
 export async function loadDevelopmentSigning() {
   const signing = await localSigningCertificate();
   for (const file of [keychain, passwordFile]) await privatePath(file);
-  const password = await readFile(passwordFile, 'utf8');
+  const password = await readPrivateFile(passwordFile);
   if (!/^[a-f0-9]{64}$/.test(password)) throw Error('Invalid development keychain password file.');
   run('/usr/bin/security', ['unlock-keychain', '-p', password, keychain], [password]);
   const identities = run('/usr/bin/security', ['find-identity', '-p', 'codesigning', keychain]);
@@ -274,7 +264,10 @@ export function verifyLocalApp(app, signing, identifier, { strict = true } = {})
   ]);
 }
 
-export function signLocalCode(file, signing, identifier, { preserveMetadata = true } = {}) {
+export function signLocalCode(
+  file, signing, identifier,
+  { preserveMetadata = true, runtime = false, entitlements } = {},
+) {
   // Replace the vendor/ad-hoc requirement. Preserving it would retain its changing
   // cdhash (or Apple's vendor identity) and defeat continuity across our builds.
   run('/usr/bin/codesign', [
@@ -284,7 +277,8 @@ export function signLocalCode(file, signing, identifier, { preserveMetadata = tr
     '--keychain',
     signing.keychain,
     '--timestamp=none',
-    ...(preserveMetadata ? ['--preserve-metadata=entitlements,flags,runtime'] : ['--options', '0']),
+    ...(preserveMetadata ? ['--preserve-metadata=entitlements,flags,runtime'] : ['--options', runtime ? 'runtime' : '0']),
+    ...(entitlements ? ['--entitlements', entitlements] : []),
     ...(identifier
       ? [
           '--identifier',

@@ -1,8 +1,32 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { execFileSync } from 'node:child_process';
+import workspace from '../../scripts/workspace.mjs';
 import { testRoot } from './test-workspace.mjs';
 export async function focusUiWindow(app, page) {
   if (process.platform !== 'darwin') return;
+  const host = await app.evaluate(({ app }) => ({
+    executable: app.getPath('exe'),
+    profile: app.getPath('userData'),
+    pid: process.pid,
+    active: app.isActive(),
+  }));
+  const allowed = [
+    workspace.platformRequire('electron'),
+    path.join(workspace.platformRoot, '.tools/electron-dev/Electron.app/Contents/MacOS/Electron'),
+  ];
+  if (
+    !allowed.includes(host.executable) ||
+    !host.profile.startsWith(testRoot + path.sep) ||
+    host.pid !== app.process().pid
+  )
+    throw Error('Native focus requires this run’s verified development host and profile');
+  // Launch Services explicitly activates the already running owned development
+  // app. Newer macOS can decline an inactive app's self-activation request.
+  if (!host.active) execFileSync('/usr/bin/open', ['-a', path.resolve(host.executable, '../../..')], {
+    stdio: 'pipe',
+    timeout: 3000,
+  });
   await app.evaluate(({ app }) => app.focus({ steal: true }));
   const id = await (
     await app.browserWindow(page)
@@ -19,7 +43,22 @@ export async function focusUiWindow(app, page) {
         return;
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
-    throw Error('Owned Mac app/key window did not acquire native focus');
+    throw Error(
+      'Owned Mac app/key window did not acquire native focus: ' +
+        JSON.stringify({
+          targetId: id,
+          active: app.isActive(),
+          focusedId: BrowserWindow.getFocusedWindow()?.id,
+          dockVisible: app.dock?.isVisible(),
+          windows: BrowserWindow.getAllWindows().map((value) => ({
+            id: value.id,
+            visible: value.isVisible(),
+            minimized: value.isMinimized(),
+            focusable: value.isFocusable(),
+            focused: value.isFocused(),
+          })),
+        }),
+    );
   }, id);
   await page.waitForFunction(() => document.hasFocus());
 }

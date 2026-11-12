@@ -56,6 +56,7 @@ export async function buildQwen({
   await hashSources(path.join(workspace.sharedRoot, 'native/qwen-speech'));
   for (const file of [
     'native/qwen-mlx.rs',
+    'native/pipe-deadline.rs',
     'native/qwen-mlx.py',
     'native/qwen-mlx.lock.json',
     'scripts/assemble-qwen-mlx.py',

@@ -6,7 +6,13 @@ import type { CredentialEncryption } from '../../shared/electron/backend/auth/st
 export function createCredentialEncryption(executable: string): CredentialEncryption {
   function run(operation: 'encrypt' | 'decrypt', value: Buffer): Promise<Buffer> {
     return new Promise((resolve, reject) => {
-      const child = spawn(executable, [], { stdio: ['pipe', 'pipe', 'pipe'] });
+      const child = spawn(executable, [], {
+        stdio: ['pipe', 'pipe', 'pipe'],
+        // Security.framework selects the current OS user's Keychain. No shell,
+        // Node, DYLD, profile or authentication environment reaches this fixed
+        // legacy binary; its exact bytes/CDHash and existing ACL stay intact.
+        env: { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' },
+      });
       const output: Buffer[] = [];
       let size = 0;
       let diagnostic = '';

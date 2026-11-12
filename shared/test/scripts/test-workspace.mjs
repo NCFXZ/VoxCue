@@ -44,6 +44,9 @@ export const testRoot = fs.mkdtempSync(path.join(temporary, prefix));
 const defaultHost = workspace.platformRequire('electron');
 const macDevelopmentHost = path.join(workspace.platformRoot, '.tools/electron-dev/Electron.app/Contents/MacOS/Electron');
 const macDevelopmentLauncher = path.join(workspace.platformRoot, 'VoxCue.app/Contents/MacOS/VoxCue');
+const macSigning = process.platform === 'darwin'
+  ? await import(pathToFileURL(path.join(workspace.platformRoot, 'scripts/development-signing.mjs')).href)
+  : undefined;
 const launchPolicy = {
   testRoot, platformRoot: workspace.platformRoot, defaultHost,
   developmentHosts: [
@@ -59,9 +62,9 @@ const launchPolicy = {
     const pin = JSON.parse(fs.readFileSync(path.join(workspace.platformRoot, 'local-signing-public.json'), 'utf8'));
     if (pin.version !== 1 || !/^[a-f0-9]{40}$/i.test(pin.sha1)) throw Error('Invalid development signing pin');
     const app = path.resolve(host.path, '../../..');
-    execFileSync('/usr/bin/codesign', ['--verify', '--strict', '-R',
-      `identifier "${host.identifier}" and certificate leaf = H"${pin.sha1}"`, app],
-    { stdio: 'pipe', timeout: 10000 });
+    // Existing workspace hosts tolerate File Provider FinderInfo, exactly as
+    // prepareRuntime does; their sealed code and fixed identity are still verified.
+    macSigning.verifyLocalApp(app, pin, host.identifier, { strict: false });
   },
 };
 export { syntheticElectronEntry, syntheticElectronHtml };
@@ -71,6 +74,7 @@ export function registerSyntheticElectronFixture(executable, profile) {
 }
 const children = new Set();
 let cleaned = false;
+let stopping = false;
 const recordOwner = () => {
   if (!cleaned)
     fs.writeFileSync(
@@ -106,13 +110,14 @@ export function trackTestProcess(child) {
   }
   children.add(child);
   recordOwner();
-  child.once('exit', () => {
+  child.once('close', () => {
     children.delete(child);
     recordOwner();
   });
   return child;
 }
 export function spawnTestProcess(command, args, options) {
+  if (stopping) throw Error('The owned test run is stopping');
   // Native-only fixtures need the same fixed, signed Mac host as UI fixtures.
   // Keep packaged executables and Electron's Node-mode ABI checks untouched.
   const developmentHost = path.join(
@@ -132,20 +137,38 @@ function cleanup() {
   if (cleaned) return;
   cleaned = true;
   for (const child of children) child.kill('SIGKILL');
+  // A sent signal is not proof of exit. Keep the owner marker/profile while a
+  // child is still alive; the next run's existing orphan recovery reaps it only
+  // after both the owner and every recorded child have actually disappeared.
+  if ([...children].some(child => {
+    if (!Number.isSafeInteger(child.pid)) return true;
+    try { process.kill(child.pid, 0); return true; }
+    catch (error) { return error.code !== 'ESRCH'; }
+  })) return;
   fs.rmSync(testRoot, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }
 process.once('exit', cleanup);
-process.once('SIGINT', () => {
+async function interrupt(code) {
+  if (stopping) return;
+  stopping = true;
+  // Let a nested Node suite retire its own Electron/native children. SIGKILL
+  // of the suite itself would skip its owner cleanup and orphan those children.
+  await Promise.all([...children].map(child => new Promise(resolve => {
+    if (child.exitCode !== null || child.signalCode !== null) return resolve();
+    const finish = () => { clearTimeout(timer); child.removeListener('close', finish); resolve(); };
+    const timer = setTimeout(finish, 10000);
+    child.once('close', finish);
+    child.kill('SIGTERM');
+  })));
   cleanup();
-  process.exit(130);
-});
-process.once('SIGTERM', () => {
-  cleanup();
-  process.exit(143);
-});
+  process.exit(code);
+}
+process.once('SIGINT', () => { void interrupt(130); });
+process.once('SIGTERM', () => { void interrupt(143); });
 
 export const electron = {
   async launch(options) {
+    if (stopping) throw Error('The owned test run is stopping');
     // Fixtures declare their owned HTTP origin explicitly; ordinary UI and packages stay offline.
     options={...options,env:{...(options.env??process.env),COPILOT_TEST_USER_DATA:options.env?.COPILOT_TEST_USER_DATA||path.join(testRoot,'profile'),VOXCUE_ACCOUNT_API:options.env?.VOXCUE_ACCOUNT_API??''}};
     if (process.platform === 'darwin' && !options.executablePath && fs.existsSync(macDevelopmentHost))
@@ -231,110 +254,21 @@ require(${JSON.stringify(entry)});
         args: [...(options.args ?? []), '--force-device-scale-factor=' + scale],
       };
     }
-    // Packaged UI must never launch an account-owning runtime before synthetic ports install.
-    // Exclusive read handles block process creation without changing any release/SDK bytes.
-    let releaseCredentials=async()=>{};
-    if(process.platform==='win32' && options.executablePath && path.basename(options.executablePath).toLowerCase()==='voxcue.exe') {
-      const unpacked=path.join(path.dirname(options.executablePath),'resources/app.asar.unpacked/node_modules');
-      const files=[path.join(unpacked,'@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe'),path.join(unpacked,'@github/copilot-sdk-win32-x64/prebuilds/win32-x64/copilot-runtime.exe')];
-      if(files.some(file=>!fs.existsSync(file))) throw Error('Packaged credential runtime guard cannot resolve the pinned SDK executables');
-      if(files.length) {
-        const {holdExclusiveFiles}=await import(pathToFileURL(path.join(workspace.platformRoot,'test/scripts/window-probe.mjs')).href);
-        releaseCredentials=await holdExclusiveFiles(files);
-      }
+    // Production packages are rejected by assertOwnerElectronLaunch before
+    // this point. Only the known development launcher needs its owned entry.
+    if (desktop && options.executablePath === macDevelopmentLauncher) {
+      const { offlineElectronEntry } = await import('./offline-electron-entry.mjs');
+      options = {
+        ...options,
+        args: [await offlineElectronEntry(undefined, { deferToReady: true }),
+          ...(options.args ?? []), '--use-mock-keychain'],
+      };
     }
-    if (desktop && options.executablePath?.endsWith("/Contents/MacOS/VoxCue")) {
-      const developmentLauncher =
-        options.executablePath ===
-        path.join(workspace.platformRoot, "VoxCue.app/Contents/MacOS/VoxCue");
-      if (developmentLauncher) {
-        const { offlineElectronEntry } =
-          await import("./offline-electron-entry.mjs");
-        options = {
-          ...options,
-          args: [
-            await offlineElectronEntry(undefined, { deferToReady: true }),
-            ...(options.args ?? []),
-            "--use-mock-keychain",
-          ],
-        };
-      } else {
-        const resources = path.resolve(
-          path.dirname(options.executablePath),
-          "../Resources",
-        );
-        const unpacked = path.join(resources, "app.asar.unpacked/node_modules");
-        const files = [
-          path.join(resources, "native/VoxCue.Credentials"),
-          path.join(
-            unpacked,
-            "@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
-          ),
-          path.join(
-            unpacked,
-            "@github/copilot-sdk-darwin-arm64/prebuilds/darwin-arm64/copilot-runtime",
-          ),
-        ].map((file) => {
-          const actual = fs.realpathSync(file),
-            stat = fs.statSync(actual);
-          if (
-            !actual.startsWith(testRoot + path.sep) ||
-            !stat.isFile() ||
-            stat.uid !== process.getuid() ||
-            stat.nlink !== 1
-          )
-            throw Error(
-              "Mac execution guard requires private copies in this owned temporary run",
-            );
-          return { file: actual, mode: stat.mode & 0o777 };
-        });
-        let restored = false;
-        releaseCredentials = async () => {
-          if (restored) return;
-          restored = true;
-          for (const { file, mode } of files) {
-            try {
-              fs.chmodSync(file, mode);
-            } catch (error) {
-              if (error.code !== "ENOENT") throw error;
-            }
-          }
-        };
-        try {
-          for (const { file, mode } of files) {
-            fs.chmodSync(file, mode & ~0o111);
-            try {
-              fs.accessSync(file, fs.constants.X_OK);
-            } catch (error) {
-              if (error.code === "EACCES") continue;
-              throw error;
-            }
-            throw Error("Mac packaged credential executable remains runnable");
-          }
-        } catch (error) {
-          await releaseCredentials();
-          throw error;
-        }
-        // Only executable modes of owned copies change; signed bytes and Chromium sandbox stay intact.
-        options = {
-          ...options,
-          args: [...(options.args ?? []), "--use-mock-keychain"],
-        };
-      }
-    }
-    let app;
-    try {app = await workspace.platformRequire('playwright')._electron.launch({
+    const app = await workspace.platformRequire('playwright')._electron.launch({
       ...(process.platform === 'darwin' && fs.existsSync(executable)
-        ? { executablePath: executable }
-        : {}),
+        ? { executablePath: executable } : {}),
       ...options,
-    });} catch(error) {await releaseCredentials();throw error;}
-    app.process().once('exit',()=>{void releaseCredentials().catch(error=>console.error(error.message));});
-    const close = app.close.bind(app);
-    app.close = async (...args) => {
-      try { return await close(...args); }
-      finally { await releaseCredentials(); }
-    };
+    });
     trackTestProcess(app.process());
     if(probe || desktop) {
       const guard=setInterval(()=>{

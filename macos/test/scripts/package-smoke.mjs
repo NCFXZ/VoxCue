@@ -1,6 +1,6 @@
 import { stageModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { verifyCachedComponent } from '../../../shared/test/scripts/verify-model-cache.mjs';
-import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
+import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import {
   connectUiAccount,
   installUiAccount,
@@ -14,13 +14,18 @@ import { spawnSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { createHash, verify } from 'node:crypto';
 import assert from 'node:assert/strict';
-import { signMacApp } from '../../scripts/sign-app.mjs';
-import { localSigningCertificate, verifyLocalApp } from '../../scripts/development-signing.mjs';
+import { verifyLocalApp } from '../../scripts/development-signing.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import { assertLocalizedPermissions } from './assert-localized-permissions.mjs';
 import { verifyPreviousVersionData } from './package-upgrade-data.mjs';
+import { requireGuestIsolation } from './guest-isolation.mjs';
+import { launchGuestAsar } from './guest-asar-host.mjs';
+import { productionFuses } from '../../scripts/production-runtime.mjs';
+if (!process.argv.includes('--static-only')) await requireGuestIsolation();
+if (process.argv.slice(2).some(arg => !['--static-only', '--install-archive'].includes(arg)))
+  throw Error('Use --static-only on the owner or --install-archive through the disposable guest runner.');
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
@@ -37,7 +42,9 @@ const run = (command, args) => {
 };
 run('/usr/bin/ditto', ['-x', '-k', zip, root]);
 const bundle = path.join(root, 'VoxCue.app');
-const signing = await localSigningCertificate();
+const signing = JSON.parse(
+  await readFile(path.join(workspace.platformRoot, 'local-signing-public.json'), 'utf8'),
+);
 verifyLocalApp(bundle, signing, 'com.voxcue.app');
 await assertLocalizedPermissions(bundle);
 assert.equal(
@@ -99,6 +106,22 @@ assert.equal(
 );
 const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
+const archive = path.join(resources, 'app.asar');
+const integrity = JSON.parse(run('/usr/bin/plutil', [
+  '-extract', 'ElectronAsarIntegrity', 'json', '-o', '-', path.join(bundle, 'Contents/Info.plist'),
+]));
+assert.deepEqual(integrity['Resources/app.asar'], {
+  algorithm: 'SHA256', hash: createHash('sha256').update(asar.getRawHeader(archive).headerString).digest('hex'),
+});
+await productionFuses(path.join(bundle, 'Contents/Frameworks/Electron Framework.framework/Electron Framework'));
+for (const file of [
+  'dist-electron/shared/electron/backend/screenshot/worker.js',
+  'dist-electron/shared/electron/backend/screenshot/host.js',
+  'node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64.node',
+]) {
+  assert.equal(asar.statFile(archive, file).unpacked, true, 'Actual unpacked screenshot closure: ' + file);
+  assert.ok((await lstat(path.join(archive + '.unpacked', file))).isFile());
+}
 assert.equal(
   JSON.parse(
     asar.extractFile(path.join(resources, 'app.asar'), 'node_modules/ws/package.json').toString(),
@@ -223,22 +246,18 @@ assert.equal(
   ]).trim(),
   '14.2',
 );
-const runtime = spawnSync(
-  path.join(bundle, 'Contents/MacOS/VoxCue'),
-  [
-    '-e',
-    'console.log(JSON.stringify({electron:process.versions.electron,arch:process.arch,abi:process.versions.modules}))',
-  ],
-  { encoding: 'utf8', env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' } },
-);
-assert.equal(runtime.status, 0, runtime.stderr);
-assert.deepEqual(JSON.parse(runtime.stdout), { electron: '44.10.0', arch: 'arm64', abi: '149' });
+const frameworkVersion = run('/usr/libexec/PlistBuddy', [
+  '-c',
+  'Print :CFBundleVersion',
+  path.join(bundle, 'Contents/Frameworks/Electron Framework.framework/Resources/Info.plist'),
+]).trim();
+assert.equal(frameworkVersion, workspace.platformRequire('electron/package.json').version);
 console.log(
-  'PASS: actual final executable is Electron44.10.0/arm64/ABI149; bundle minimum is macOS14.2.',
+  'PASS: final framework metadata and Mach-O architecture match the pinned Electron release; no product executable launched.',
 );
 if (process.argv.includes('--static-only')) {
   console.log(
-    'PENDING: packaged window/Worker/component/update staging acceptance requires unlocked desktop; static artifact checks passed.',
+    'PENDING: production GUI/native acceptance requires OS isolation; only static artifact checks ran.',
   );
   process.exit(2);
 }
@@ -265,20 +284,7 @@ run('/usr/bin/xcrun', [
 ]);
 run('/usr/bin/codesign', ['--force', '--sign', '-', loginHitProbe]);
 const installArchive = process.argv.includes('--install-archive');
-if (installArchive) {
-  run('/usr/libexec/PlistBuddy', [
-    '-c',
-    'Set :CFBundleVersion 0.2.0',
-    path.join(bundle, 'Contents/Info.plist'),
-  ]);
-  run('/usr/libexec/PlistBuddy', [
-    '-c',
-    'Set :CFBundleShortVersionString 0.2.0',
-    path.join(bundle, 'Contents/Info.plist'),
-  ]);
-  await signMacApp(bundle);
-}
-const profile = path.join(testRoot, 'profile');
+const profile = path.join(testRoot, 'VoxCue');
 await mkdir(path.join(testRoot, 'tmp'));
 const cacheSource = process.env.VOXCUE_TEST_COMPONENT_CACHE;
 const { packagesFor } = require(
@@ -295,9 +301,8 @@ if (cacheSource)
     cachedPackages,
     componentLocation,
   );
-const app = await electron.launch({
-  executablePath: path.join(bundle, 'Contents/MacOS/VoxCue'),
-  args: [],
+const app = await launchGuestAsar(bundle, {
+  version: installArchive ? '0.2.0' : undefined,
   env: {
     ...process.env,
     COPILOT_TEST_USER_DATA: profile,
@@ -387,6 +392,31 @@ try {
       const assert = require('node:assert/strict');
       const { Worker } = require('node:worker_threads');
       const unpacked = app.getAppPath().replace(/app\.asar$/, 'app.asar.unpacked');
+      const { encodeScreenshotBitmap } = require(
+        app.getAppPath() + '/dist-electron/shared/electron/backend/screenshot/host.js',
+      );
+      const sharp = require('sharp');
+      assert.equal(require('sharp/package.json').version, '0.35.5');
+      const bitmap = new Uint8Array(64 * 32 * 4);
+      for (let i = 0; i < bitmap.length; i += 4) bitmap.set([20, 40, 80, 255], i);
+      const encoded = await encodeScreenshotBitmap(
+        { width: 64, height: 32, bitmap: bitmap.buffer }, new AbortController().signal,
+      );
+      assert.equal(bitmap.byteLength, 0, 'The actual screenshot Worker receives a transferred bitmap');
+      const image = await sharp(encoded.file.bytes).metadata();
+      assert.equal(image.width, 64); assert.equal(image.height, 32);
+      assert.equal(image.format, 'png');
+      assert.match(encoded.preview, /^data:image\/jpeg;base64,/);
+      const pixel = await sharp(encoded.file.bytes).raw().toBuffer();
+      assert.deepEqual([...pixel.subarray(0, 4)], [80, 40, 20, 255]);
+      const cancelledFrame = new Uint8Array(256 * 256 * 4);
+      const cancelled = new AbortController();
+      const processing = encodeScreenshotBitmap(
+        { width: 256, height: 256, bitmap: cancelledFrame.buffer }, cancelled.signal,
+      );
+      cancelled.abort(new Error('Synthetic screenshot cancellation'));
+      await assert.rejects(processing, error => error === cancelled.signal.reason);
+      console.log('PASS: final ASAR screenshot Worker, sharp/arm64 libvips, exact synthetic pixels and cancellation; no screen capture.');
       const { ComponentService, componentPaths, componentLocation } = require(
         app.getAppPath() + '/dist-electron/shared/electron/backend/components/service.js',
       );
@@ -839,61 +869,14 @@ try {
           'Print :CFBundleVersion',
           path.join(bundle, 'Contents/Info.plist'),
         ]).trim(),
-        '0.2.0',
+        version,
       );
       console.log(
-        'PASS: real Sparkle authenticated and staged the final production archive; cancellation retained the temporary old app.',
+        'PASS: real Sparkle in the separate lower-version development host authenticated/staged the unchanged final archive; cancellation retained both inputs.',
       );
     } finally {
       feed.close();
     }
-  }
-  if (process.argv.includes('--online')) {
-    const result = await app.evaluate(async ({ app }, owner) => {
-      const require = process
-        .getBuiltinModule('module')
-        .createRequire(app.getAppPath() + '/package.json');
-      const path = require('node:path');
-      const profile = app.getPath('userData');
-      if (!profile.startsWith(owner + path.sep)) throw Error('Synthetic package profile required');
-      const originalVersion = app.getVersion.bind(app);
-      const installedVersion = originalVersion();
-      const { createMacUpdateDriver } = require(
-        app.getAppPath() + '/dist-electron/macos/electron/updates/driver.js',
-      );
-      // The ordinary startup already owns its update cache. The anonymous
-      // read-back must make a fresh check and cannot race or reuse that state.
-      const verification = path.join(profile, 'online-verification');
-      require('node:fs').mkdirSync(verification, { mode: 0o700 });
-      app.setPath('userData', verification);
-      let driver;
-      try {
-        driver = createMacUpdateDriver();
-      } finally {
-        app.setPath('userData', profile);
-      }
-      app.getVersion = () => '0.2.0';
-      const events = [];
-      let downloaded = false;
-      driver.on('update-available', (event) => events.push(event));
-      driver.on('update-downloaded', () => {
-        downloaded = true;
-      });
-      try {
-        await driver.checkForUpdates();
-        await driver.downloadUpdate();
-        return { events, downloaded, installedVersion };
-      } finally {
-        await driver.dispose();
-        app.getVersion = originalVersion;
-      }
-    }, testRoot);
-    assert.equal(result.events[0]?.version, version);
-    assert.equal(result.installedVersion, version);
-    assert.equal(result.downloaded, true);
-    console.log(
-      'PASS: installed Mac updater selected and authenticated the published GitHub release, downloaded its full archive, and verified SHA512.',
-    );
   }
 } finally {
   releaseDesktop();

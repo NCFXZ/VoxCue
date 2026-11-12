@@ -67,6 +67,13 @@ export class CoreAudioCapture {
   private child?: ChildProcessWithoutNullStreams;
   private stopping = false;
   private closed = false;
+  private stopTask?: Promise<void>;
+  get retiring() {
+    return this.stopping && !!this.child && !this.closed;
+  }
+  get retired() {
+    return this.closed;
+  }
   constructor(
     private helper: string,
     private source: AudioSource,
@@ -75,6 +82,10 @@ export class CoreAudioCapture {
     private failure: (message: string) => void,
   ) {}
   start(): Promise<void> {
+    if (this.stopTask || (this.child && !this.closed))
+      return Promise.reject(Error('旧音频采集进程尚未退出，请稍后重试。'));
+    this.stopping = false;
+    this.closed = false;
     return new Promise((resolve, reject) => {
       const child = spawn(this.helper, [
         this.source,
@@ -86,19 +97,19 @@ export class CoreAudioCapture {
         lines = '',
         failed = false;
       const fail = (message: string) => {
-        if (failed || this.stopping) return;
+        if (failed || this.stopping || this.child !== child) return;
         failed = true;
         clearTimeout(timer);
         if (started) this.failure(message);
         else reject(Error(message));
-        void this.stop();
+        void this.stop().catch(() => {});
       };
       const timer = setTimeout(
         () => fail('Mac 音频启动超时，请确认系统权限提示后重新开始。'),
         100000,
       );
       child.stdout.on('data', (chunk) => {
-        if (failed) return;
+        if (failed || this.child !== child || this.closed) return;
         try {
           for (const packet of decoder.push(chunk)) this.audio(packet);
         } catch {
@@ -106,6 +117,7 @@ export class CoreAudioCapture {
         }
       });
       child.stderr.on('data', (chunk) => {
+        if (this.child !== child || this.closed) return;
         lines += chunk;
         if (lines.length > 10000) return fail('原生音频控制消息超限，采集已停止。');
         let at: number;
@@ -125,8 +137,9 @@ export class CoreAudioCapture {
         }
       });
       child.on('error', () => fail('无法启动 Mac 音频助手，请运行 pnpm build:audio。'));
+      child.stdin.on('error', () => fail('Mac 音频助手管道已关闭，请重新开始。'));
       child.on('close', () => {
-        this.closed = true;
+        if (this.child === child) this.closed = true;
       });
       child.on('exit', () => {
         clearTimeout(timer);
@@ -135,25 +148,53 @@ export class CoreAudioCapture {
       });
     });
   }
-  async stop() {
+  stop(): Promise<void> {
+    if (this.stopTask) return this.stopTask;
     this.stopping = true;
     const child = this.child;
-    if (!child) return;
-    await new Promise<void>((resolve) => {
-      if (this.closed) return resolve();
-      const timer = setTimeout(() => child.kill(), 1500);
-      const force = setTimeout(() => {
-        child.kill('SIGKILL');
-        resolve();
-      }, 2500);
-      child.once('close', () => {
-        clearTimeout(timer);
+    if (!child) return Promise.resolve();
+    if (this.closed) {
+      this.child = undefined;
+      return Promise.resolve();
+    }
+    this.stopTask = new Promise<void>((resolve, reject) => {
+      let forced = false;
+      const finish = (error?: Error) => {
+        clearTimeout(terminate);
         clearTimeout(force);
-        resolve();
-      });
-      child.stdin.on('error', () => {});
-      child.stdin.end();
+        clearTimeout(deadline);
+        child.removeListener('close', close);
+        if (error) reject(error);
+        else resolve();
+      };
+      const close = () => {
+        if (this.child === child) this.child = undefined;
+        finish(forced ? Error('Mac 音频采集被强制停止，请重新开始。') : undefined);
+      };
+      const kill = (signal: NodeJS.Signals) => {
+        forced = true;
+        // Sending a signal (including success=true) never proves process retirement.
+        try {
+          child.kill(signal);
+        } catch {
+          /* Deadline reports unconfirmed close. */
+        }
+      };
+      const terminate = setTimeout(() => kill('SIGTERM'), 1500);
+      const force = setTimeout(() => kill('SIGKILL'), 2500);
+      const deadline = setTimeout(
+        () => finish(Error('Mac 音频采集进程尚未确认退出，请稍后重试。')),
+        5000,
+      );
+      child.once('close', close);
+      try {
+        child.stdin.end();
+      } catch {
+        kill('SIGKILL');
+      }
+    }).finally(() => {
+      this.stopTask = undefined;
     });
-    this.child = undefined;
+    return this.stopTask;
   }
 }

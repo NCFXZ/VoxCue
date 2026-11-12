@@ -1,5 +1,7 @@
 # macOS 1.2.0 专属待办与逐项验收
 
+当前 Mac 实现和已迁移的安全入口见 [Mac 发行实现](MACOS_1.2.0_RELEASE.md)，接续状态见根 `PROGRESS.md`。下文保留原始要求；只有本机对应完整通过条件满足后才勾选，测试成绩仅在终端／对话。
+
 本清单面向 Mac 本机接续 1.2.0，合并 [安全加固交接的 macOS 专属事项](SECURITY_HARDENING.md#macos-专属事项)、Claude M1–M16 及 Windows 复审发现的 Mac 影响。本文在 Windows 只读核对 Mac 源码后整理，所有复选框均为待办，未宣称 Mac 已实施或通过。共享功能的逐条变化另见 [1.2.0 共享交接](MACOS_1.2.0_HANDOFF.md)，此处只规定 Mac 专属修复和本机验收，不复制另一份共享实现。
 
 ## 执行边界与顺序

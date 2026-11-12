@@ -655,7 +655,20 @@ try {
     );
   }
   await page.evaluate(() => document.documentElement.classList.remove('dark'));
-  const collapsedIcon = await toggle.locator('svg').innerHTML();
+  // Mac glyph masks receive a fresh React ID on remount. Compare the actual
+  // symbol/bitmap rather than that incidental ID; Fluent SVG markup stays exact.
+  const toggleIcon = () =>
+    user
+      .locator('.user-message-toggle svg')
+      .evaluate((node) =>
+        node.hasAttribute('data-sf-symbol')
+          ? JSON.stringify([
+              node.getAttribute('data-sf-symbol'),
+              node.querySelector('image')?.getAttribute('href'),
+            ])
+          : node.innerHTML,
+      );
+  const collapsedIcon = await toggleIcon();
   assert.ok(bubble.attachmentOutsideClamp);
   assert.equal(bubble.attachmentText, '附件：project.md');
   assert.equal(
@@ -711,10 +724,7 @@ try {
       String(expanded),
     );
     assert.equal(await user.locator('.user-message-ellipsis').count(), expanded ? 0 : 1);
-    assert.equal(
-      (await user.locator('.user-message-toggle svg').innerHTML()) === collapsedIcon,
-      !expanded,
-    );
+    assert.equal((await toggleIcon()) === collapsedIcon, !expanded);
     await user.locator('.chat-copy').click();
     assert.equal(await page.evaluate(() => window.copiedMessages.at(-1)), longText);
   }

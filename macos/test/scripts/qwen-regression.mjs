@@ -63,6 +63,7 @@ async function run(name, args, env = process.env) {
   console.log('PASS ' + name);
 }
 try {
+  await run('qwen-parent-eof-smoke', []);
   if (cacheSource)
     await stageModelFixtures(path.resolve(cacheSource), models, cachedPackages, componentLocation);
   for (const id of ['speech', 'qwen']) {
@@ -75,10 +76,8 @@ try {
   await run('qwen-native-smoke', [paths.qwenModels]);
   await run('qwen-worker-smoke', [paths.qwenModels]);
   await run('speech-switch-smoke', ['--fixture=' + fixture]);
-  await run('components-smoke', [], {
-    ...process.env,
-    VOXCUE_TEST_QWEN_MODELS: paths.qwenModels,
-  });
+  // The final ASAR component/relocation checks belong to package-guest-smoke;
+  // owner-side native/Worker/switch/removal checks keep this authenticated set.
   const removal = path.join(testRoot, 'removal-fixture.json');
   await writeFile(removal, JSON.stringify({ testRoot, root: models, component: paths.qwenModels }));
   await run('qwen-removal-smoke', [removal]);
@@ -89,4 +88,4 @@ try {
     for (const pkg of cachedPackages)
       await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);
 }
-console.log(JSON.stringify({ passed: 5, total: 5 }));
+console.log(JSON.stringify({ passed: 5, total: 5, finalAsar: 'package-guest-smoke' }));

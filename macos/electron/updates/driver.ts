@@ -18,6 +18,7 @@ import {
 import { signedMacUpdate, type SignedMacUpdate, publicUpdateKey } from './manifest';
 import { downloadArchive, verifyDownload } from './download';
 import { installFeed } from './install-feed';
+import { MacArchiveOwnership } from './archives';
 
 interface NativeInstaller {
   begin(url: string, callback: (event: { type: string; message?: string }) => void): void;
@@ -34,6 +35,7 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
   private lifetime = new AbortController();
   private readonly cache: UpdateCache;
   private readonly directory: string;
+  private readonly ownership: MacArchiveOwnership;
   private selected?: PlatformUpdateInfo;
   private update?: SignedMacUpdate;
   private archive?: string;
@@ -56,6 +58,7 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
     publicUpdateKey(publicKey);
     this.cacheDirectory = path.resolve(cacheDirectory);
     this.directory = path.join(this.cacheDirectory, 'archives');
+    this.ownership = new MacArchiveOwnership(this.cacheDirectory, publicKey);
     this.cache = new UpdateCache(this.cacheDirectory, 'macos-arm64', (value, target) => {
       const info = validatePlatformUpdate(value, target);
       const update = signedMacUpdate(value, info.selectedRelease, this.publicKey);
@@ -166,10 +169,23 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
     this.recovering ??= (async () => {
       await this.directories();
       const journal = this.cache.journal();
-      if (!journal) return;
-      // A crash after atomic publication must preserve its completed archive.
-      if (await this.recoverableComplete(journal)) await this.cache.completeDownload(journal);
-      else await this.clearIncomplete(journal, true);
+      if (journal) {
+        // A crash after atomic publication must preserve its completed archive.
+        if (await this.recoverableComplete(journal)) await this.cache.completeDownload(journal);
+        else await this.clearIncomplete(journal, true);
+      }
+      await this.ownership
+        .collect(
+          app.getVersion(),
+          (file) =>
+            this.archive === file ||
+            this.feed !== undefined ||
+            this.installing ||
+            (this.selected !== undefined && this.file(this.selected) === file) ||
+            (this.cache.journal() !== undefined && this.file(this.cache.journal()!) === file),
+          this.lifetime.signal,
+        )
+        .catch(() => {});
     })();
     return this.recovering;
   }
@@ -257,11 +273,7 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
   }
   downloadUpdate(signal?: AbortSignal) {
     if (this.downloading) return this.downloading;
-    const downloadSignal = AbortSignal.any([
-      this.lifetime.signal,
-      AbortSignal.timeout(30 * 60 * 1000),
-      ...(signal ? [signal] : []),
-    ]);
+    const downloadSignal = AbortSignal.any([this.lifetime.signal, ...(signal ? [signal] : [])]);
     this.downloading = (async () => {
       await this.recover();
       downloadSignal.throwIfAborted();
@@ -277,6 +289,7 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       }
       this.archive = undefined;
       await this.cache.beginDownload(info);
+      let progressStep: number | undefined;
       try {
         await downloadArchive(
           releaseAssetUrl(info.selectedRelease, update.url),
@@ -285,19 +298,24 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
           downloadSignal,
           (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
           (percent) => {
-            if (!this.disposed && !downloadSignal.aborted)
+            const step = Math.floor(percent);
+            if (!this.disposed && !downloadSignal.aborted && step !== progressStep) {
+              progressStep = step;
               this.emit('download-progress', { percent });
+            }
           },
         );
         downloadSignal.throwIfAborted();
         await rename(this.file(info, true), this.file(info));
         await this.cache.completeDownload(info);
+        // Cleanup bookkeeping is best effort and never invalidates an authenticated download.
+        await this.ownership.record(info).catch(() => {});
         downloadSignal.throwIfAborted();
         this.archive = this.file(info);
         this.emit('update-downloaded');
       } catch (error) {
         if (await this.recoverableComplete(info)) await this.cache.completeDownload(info);
-        else await this.clearIncomplete(info, this.disposed || downloadSignal.aborted);
+        else await this.clearIncomplete(info, this.disposed || downloadSignal.aborted || (error as Error)?.name === 'TimeoutError');
         downloadSignal.throwIfAborted();
         throw error;
       }
@@ -310,12 +328,17 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
     if (this.disposed || this.installing || !this.archive || !this.update)
       throw Error('No verified downloaded update');
     this.installing = true;
-    this.installation = this.install().catch(() => {
+    const installation = this.install().catch((error) => {
       this.installing = false;
       this.feed?.close();
       this.feed = undefined;
       if (!this.disposed) this.emit('error', new Error('Mac update installation failed'));
+      throw error;
     });
+    // The caller receives setup failure; dispose still waits for its cleanup
+    // without reporting the same already-handled installation error twice.
+    this.installation = installation.catch(() => {});
+    return installation;
   }
   private async install() {
     const update = this.authenticated(this.selected!);

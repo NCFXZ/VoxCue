@@ -196,3 +196,90 @@ it('cancels the response stream when exclusive archive creation fails and preser
   expect(cancel).toHaveBeenCalledOnce();
   expect(await readFile(file, 'utf8')).toBe('existing owner file');
 });
+
+it('allows authenticated progress beyond the old 30-minute total deadline', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+  const f = fixture();
+  const file = path.join(await temp(), 'slow.zip');
+  let source!: ReadableStreamDefaultController<Uint8Array>;
+  const progress = vi.fn();
+  const abort = new AbortController();
+  const work = downloadArchive(
+    new URL('https://github.com/fixture'),
+    file,
+    f.update,
+    abort.signal,
+    async () =>
+      new Response(
+        new ReadableStream({
+          start(controller) {
+            source = controller;
+          },
+        }),
+      ),
+    progress,
+  );
+  const result = work.then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  try {
+    for (let index = 0; index < f.bytes.length; index++) {
+      if (index) await vi.advanceTimersByTimeAsync(90_000);
+      source.enqueue(f.bytes.subarray(index, index + 1));
+      await vi.waitFor(() => expect(progress).toHaveBeenCalledTimes(index + 1));
+    }
+    source.close();
+    expect(await result).toBeUndefined();
+    expect(await readFile(file)).toEqual(f.bytes);
+    expect(vi.getTimerCount()).toBe(0);
+  } finally {
+    abort.abort();
+    await result;
+    vi.useRealTimers();
+  }
+});
+
+it.each(['connection', 'body'] as const)(
+  'bounds a stalled %s even when transport ignores abort or cancel never finishes',
+  async (mode) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const f = fixture();
+    const file = path.join(await temp(), 'stalled.zip');
+    const cancel = vi.fn(() => new Promise<void>(() => {}));
+    const progress = vi.fn();
+    const abort = new AbortController();
+    const result = downloadArchive(
+      new URL('https://github.com/fixture'),
+      file,
+      f.update,
+      abort.signal,
+      async () =>
+        mode === 'connection'
+          ? new Promise<Response>(() => {})
+          : new Response(
+              new ReadableStream({
+                start(controller) {
+                  controller.enqueue(f.bytes.subarray(0, 1));
+                },
+                cancel,
+              }),
+            ),
+      progress,
+    ).then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+    try {
+      if (mode === 'body') await vi.waitFor(() => expect(progress).toHaveBeenCalledOnce());
+      await vi.advanceTimersByTimeAsync(mode === 'connection' ? 30_001 : 120_001);
+      expect(await result).toMatchObject({ name: 'TimeoutError' });
+      if (mode === 'body') expect(cancel).toHaveBeenCalledOnce();
+      expect(vi.getTimerCount()).toBe(0);
+    } finally {
+      abort.abort();
+      await result;
+      vi.useRealTimers();
+    }
+  },
+);

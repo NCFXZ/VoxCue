@@ -24,7 +24,7 @@ function childProcess() {
 
 it.each([false, true])('bounds fragmented unterminated Qwen output before/after ready (%s)', async (ready) => {
   const child = childProcess();
-  const loading = QwenEngine.load('synthetic', 'cpu', vi.fn());
+  const loading = QwenEngine.load('synthetic', 'cpu', vi.fn(), 'synthetic/runtime/voxcue-qwen');
   const failed = ready ? undefined : expect(loading).rejects.toThrow('Qwen 启动失败');
   let engine: QwenEngine | undefined;
   if (ready) {
@@ -42,7 +42,7 @@ it.each([false, true])('bounds fragmented unterminated Qwen output before/after 
 
 it('reports an unsupported CPU capability frame before model readiness', async () => {
   const child = childProcess();
-  const rejected = expect(QwenEngine.load('synthetic', 'cpu', vi.fn())).rejects.toThrow(
+  const rejected = expect(QwenEngine.load('synthetic', 'cpu', vi.fn(), 'synthetic/runtime/voxcue-qwen')).rejects.toThrow(
     'Qwen 需要支持 AVX2 和 FMA 的处理器，请改用 Paraformer。',
   );
   child.stdout.emit('data', Buffer.from('{"type":"error","seq":null,"code":"unsupported-cpu","message":"discard native text"}\n'));
@@ -54,7 +54,7 @@ it.each([undefined, null, 'metal', 'cuda', 'CPU', { device: 'cpu' }])(
   'rejects invalid CPU alignment metadata %j before exposing ready',
   async (alignment) => {
     const child = childProcess();
-    const rejected = expect(QwenEngine.load('synthetic', 'cpu', vi.fn())).rejects.toThrow('Qwen 启动失败');
+    const rejected = expect(QwenEngine.load('synthetic', 'cpu', vi.fn(), 'synthetic/runtime/voxcue-qwen')).rejects.toThrow('Qwen 启动失败');
     child.stdout.emit('data', Buffer.from(JSON.stringify({
       type: 'ready', chunk_ms: 1000, device: 'cpu', alignment_device: alignment,
     }) + '\n'));
@@ -65,7 +65,7 @@ it.each([undefined, null, 'metal', 'cuda', 'CPU', { device: 'cpu' }])(
 
 it.each(['cpu', 'cuda'])('accepts CUDA alignment metadata %s, including the supported CPU fallback', async (alignment) => {
   const child = childProcess();
-  const loading = QwenEngine.load('synthetic', 'cuda', vi.fn());
+  const loading = QwenEngine.load('synthetic', 'cuda', vi.fn(), 'synthetic/runtime/voxcue-qwen');
   child.stdout.emit('data', Buffer.from(JSON.stringify({
     type: 'ready', chunk_ms: 500, device: 'cuda', alignment_device: alignment,
   }) + '\n'));
@@ -76,7 +76,7 @@ it.each(['cpu', 'cuda'])('accepts CUDA alignment metadata %s, including the supp
 
 it('retires the native stream on an unacknowledgeable invalid-command frame', async () => {
   const child = childProcess();
-  const loading = QwenEngine.load('synthetic', 'cpu', vi.fn());
+  const loading = QwenEngine.load('synthetic', 'cpu', vi.fn(), 'synthetic/runtime/voxcue-qwen');
   child.stdout.emit('data', Buffer.from('{"type":"ready","chunk_ms":1000,"device":"cpu","alignment_device":"cpu"}\n'));
   const { engine } = await loading;
   child.stdout.emit('data', Buffer.from('{"type":"error","seq":null,"code":"invalid-command","message":"Invalid native command frame"}\n'));
@@ -89,7 +89,7 @@ it('a broken native input pipe rejects work and retires the process without an u
   child.stdin = new Writable({
     write(_bytes, _encoding, callback) { callback(Error('synthetic EPIPE')); },
   });
-  const loading = QwenEngine.load('synthetic', 'cpu', vi.fn());
+  const loading = QwenEngine.load('synthetic', 'cpu', vi.fn(), 'synthetic/runtime/voxcue-qwen');
   child.stdout.emit('data', Buffer.from('{"type":"ready","chunk_ms":500,"device":"cpu","alignment_device":"cpu"}\n'));
   const { engine } = await loading;
   await expect(engine.feed('system', new Float32Array(160), 16000, 0)).rejects.toThrow();

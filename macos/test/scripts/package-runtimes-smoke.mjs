@@ -1,3 +1,5 @@
+import { requireGuestIsolation } from './guest-isolation.mjs';
+await requireGuestIsolation();
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
@@ -5,6 +7,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import assert from 'node:assert/strict';
+import { verifyLocalApp } from '../../scripts/development-signing.mjs';
 
 const version = workspace.platformRequire(
   path.join(workspace.platformRoot, 'package.json'),
@@ -25,6 +28,8 @@ const extracted = spawnSync(
   { encoding: 'utf8' },
 );
 assert.equal(extracted.status, 0, extracted.stderr);
+verifyLocalApp(path.join(directory, 'VoxCue.app'),
+  workspace.platformRequire(path.join(workspace.platformRoot, 'local-signing-public.json')), 'com.voxcue.app');
 const archive = path.join(directory, 'VoxCue.app/Contents/Resources/app.asar');
 const fixture = path.join(testRoot, 'packaged-runtimes.cjs');
 await writeFile(

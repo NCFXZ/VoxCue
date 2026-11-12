@@ -1,6 +1,8 @@
-import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
+import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { buildMacApp } from '../../scripts/package-app.mjs';
+import { requireGuestIsolation } from './guest-isolation.mjs';
+import { launchGuestAsar } from './guest-asar-host.mjs';
+import { verifyLocalApp } from '../../scripts/development-signing.mjs';
 import {
   connectUiAccount,
   installUiAccount,
@@ -14,12 +16,26 @@ import { readFile, mkdir, lstat, rename, access } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
+await requireGuestIsolation();
 const require = workspace.platformRequire;
 const asar = await import(require.resolve('@electron/asar'));
-const { publicKey } = JSON.parse(
-  await readFile(path.join(workspace.platformRoot, 'update-public-key.json'), 'utf8'),
+const version = require(path.join(workspace.platformRoot, 'package.json')).version;
+const release =
+  process.env.VOXCUE_TEST_RELEASE_DIR || path.join(workspace.platformRoot, 'release', version);
+const installed = path.join(testRoot, 'bundle');
+await mkdir(installed);
+execFileSync('/usr/bin/ditto', [
+  '-x',
+  '-k',
+  path.join(release, `VoxCue-${version}-arm64.zip`),
+  installed,
+]);
+const bundle = path.join(installed, 'VoxCue.app');
+verifyLocalApp(
+  bundle,
+  require(path.join(workspace.platformRoot, 'local-signing-public.json')),
+  'com.voxcue.app',
 );
-const bundle = await buildMacApp(path.join(testRoot, 'bundle'), publicKey);
 assert.equal(
   execFileSync(
     '/usr/libexec/PlistBuddy',
@@ -68,14 +84,12 @@ assert.equal(
 console.log(
   'PASS: temporary signed Mac application contains Copilot and Node CPU dependencies and excludes models and ONNX Web.',
 );
-const profile = path.join(testRoot, 'profile');
+const profile = path.join(testRoot, 'VoxCue');
 let activeBundle = bundle;
 for (const directory of ['profile', 'tmp', 'home'])
   await mkdir(path.join(testRoot, directory), { recursive: true });
 const launch = () =>
-  electron.launch({
-    executablePath: path.join(activeBundle, 'Contents/MacOS/VoxCue'),
-    args: [],
+  launchGuestAsar(activeBundle, {
     env: {
       ...process.env,
       COPILOT_TEST_USER_DATA: profile,
@@ -94,6 +108,8 @@ const { componentLocation } = require(
   path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/service.js'),
 );
 const cachedPackages = packagesFor(process.platform, process.arch).filter((pkg) => !pkg.optional);
+const qwenPackage = packagesFor(process.platform, process.arch).find(pkg => pkg.id === 'qwen');
+if (cacheSource && qwenPackage) cachedPackages.push(qwenPackage);
 if (cacheSource)
   await stageModelFixtures(
     path.resolve(cacheSource),
@@ -101,6 +117,13 @@ if (cacheSource)
     cachedPackages,
     componentLocation,
   );
+if (cacheSource && qwenPackage) {
+  const { componentPaths } = require(path.join(workspace.platformRoot,
+    'dist-electron/shared/electron/backend/components/service.js'));
+  process.env.VOXCUE_TEST_QWEN_MODELS = componentPaths(
+    path.join(profile, 'component-cache'), packagesFor(process.platform, process.arch),
+  ).qwenModels;
+}
 let application = await launch();
 let installation;
 try {
@@ -227,8 +250,7 @@ try {
       .locator('.knowledge-page')
       .getByRole('button', { name: '创建知识库', exact: true });
     await createKnowledge.first().waitFor();
-    for (const button of await createKnowledge.all())
-      assert.equal(await button.isDisabled(), true);
+    for (const button of await createKnowledge.all()) assert.equal(await button.isDisabled(), true);
     await page
       .locator('.management-container > .components-notice')
       .getByRole('button', { name: '前往设置' })
@@ -252,14 +274,17 @@ try {
     try {
       await assertDownloadButton(page, rag.locator('.download-button'));
     } catch (error) {
-      console.error('Download control at failure', await rag.locator('.download-button').evaluate(node => ({
-        className: node.className,
-        hovered: node.matches(':hover'),
-        focused: document.hasFocus(),
-        active: document.activeElement?.outerHTML,
-        bounds: node.getBoundingClientRect().toJSON(),
-        cancel: getComputedStyle(node.querySelector('.download-button-cancel')).visibility,
-      })));
+      console.error(
+        'Download control at failure',
+        await rag.locator('.download-button').evaluate((node) => ({
+          className: node.className,
+          hovered: node.matches(':hover'),
+          focused: document.hasFocus(),
+          active: document.activeElement?.outerHTML,
+          bounds: node.getBoundingClientRect().toJSON(),
+          cancel: getComputedStyle(node.querySelector('.download-button-cancel')).visibility,
+        })),
+      );
       throw error;
     } finally {
       await application.evaluate(() => globalThis.releaseComponentDownload());
@@ -483,10 +508,18 @@ try {
     'PASS: downloaded cache drives real offline E5/LanceDB searches and Paraformer Worker synthetic silence.',
   );
   await closeUiApp(application);
-  installation = JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'));
-  const initialQueue = JSON.parse(await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'));
-  assert.equal(initialQueue.attempts, 0, 'Ordinary packaged fixtures must never upload synthetic statistics');
-  assert.ok(initialQueue.events.some(event => event.data.type === 'app_ready'));
+  installation = JSON.parse(
+    await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8'),
+  );
+  const initialQueue = JSON.parse(
+    await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'),
+  );
+  assert.equal(
+    initialQueue.attempts,
+    0,
+    'Ordinary packaged fixtures must never upload synthetic statistics',
+  );
+  assert.ok(initialQueue.events.some((event) => event.data.type === 'app_ready'));
   await mkdir(path.join(testRoot, 'upgraded'));
   activeBundle = path.join(testRoot, 'upgraded/VoxCue.app');
   await rename(bundle, activeBundle);
@@ -512,14 +545,31 @@ try {
 } finally {
   await closeUiApp(application).catch(() => application.close());
 }
-assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8')), installation);
+assert.deepEqual(
+  JSON.parse(await readFile(path.join(profile, 'telemetry-installation.json'), 'utf8')),
+  installation,
+);
 const finalQueue = JSON.parse(await readFile(path.join(profile, 'telemetry-queue.json'), 'utf8'));
 assert.equal(finalQueue.attempts, 0);
-assert.ok(finalQueue.events.every(event => event.platform === 'macos' &&
-  event.version === require('./package.json').version && event.installationId === installation.installationId));
-assert.ok(new Set(finalQueue.events.filter(event => event.data.type === 'app_ready').map(event => event.runId)).size >= 2);
+assert.ok(
+  finalQueue.events.every(
+    (event) =>
+      event.platform === 'macos' &&
+      event.version === require('./package.json').version &&
+      event.installationId === installation.installationId,
+  ),
+);
+assert.ok(
+  new Set(
+    finalQueue.events
+      .filter((event) => event.data.type === 'app_ready')
+      .map((event) => event.runId),
+  ).size >= 2,
+);
 assert.doesNotMatch(JSON.stringify(finalQueue), /identityProof|userId|accessToken/);
-console.log('PASS: formal Mac package persists private v2 events, retains installation across relocation/restart and makes zero upload attempts');
+console.log(
+  'PASS: formal Mac package persists private v2 events, retains installation across relocation/restart and makes zero upload attempts',
+);
 if (cacheSource)
   for (const pkg of cachedPackages)
     await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);

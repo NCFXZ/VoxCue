@@ -31,8 +31,10 @@ const {app,BrowserWindow}=require('electron');
 app.commandLine.appendSwitch('use-mock-keychain');
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
 app.setName('VoxCue');
+app.setPath('appData',${JSON.stringify(appData)});
 app.setPath('userData',${JSON.stringify(legacy)});
 app.setPath('sessionData',${JSON.stringify(legacy)});
+delete process.env.COPILOT_TEST_USER_DATA;
 app.whenReady().then(()=>{
  const window=new BrowserWindow({width:960,height:700,webPreferences:{contextIsolation:true,sandbox:true}});
  window.loadFile(${JSON.stringify(path.join(workspace.platformRoot, 'dist/index.html'))});
@@ -46,8 +48,12 @@ await writeFile(
 const {app,safeStorage}=require('electron');
 app.commandLine.appendSwitch('use-mock-keychain');
 app.setAppPath(${JSON.stringify(workspace.platformRoot)});
-const getPath=app.getPath.bind(app);
-app.getPath=name=>name==='appData'?${JSON.stringify(appData)}:getPath(name);
+app.setPath('appData',${JSON.stringify(appData)});
+app.setPath('userData',${JSON.stringify(legacy)});
+app.setPath('sessionData',${JSON.stringify(legacy)});
+// The central owner launcher supplies its own profile flag. Remove it inside
+// this entry, after all three paths are owned and before importing real main.
+delete process.env.COPILOT_TEST_USER_DATA;
 // Exercise the production storage/migration/session with the real v10 cipher
 // and a synthetic Chromium password. Native helper identity/Keychain access is
 // checked separately by credential-upgrade-smoke in an owned temporary keychain.
@@ -181,6 +187,10 @@ try {
     );
   }
   app = await launch(next);
+  assert.deepEqual(await app.evaluate(({ app }) => ({
+    appData: app.getPath('appData'), userData: app.getPath('userData'),
+    sessionData: app.getPath('sessionData'), fixtureFlag: process.env.COPILOT_TEST_USER_DATA ?? null,
+  })), { appData, userData: destination, sessionData: destination, fixtureFlag: null });
   page = await app.firstWindow();
   await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(

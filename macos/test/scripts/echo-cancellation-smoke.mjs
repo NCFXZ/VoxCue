@@ -4,11 +4,13 @@ import { readFile, writeFile, access, mkdir, cp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
+if (process.argv.includes('--packaged'))
+  throw Error('Use the disposable guest package runner for the final ASAR audio closure.');
 if (
-  process.argv.slice(2).some((arg) => !['--packaged', '--runtime-bundle'].includes(arg)) ||
+  process.argv.slice(2).some((arg) => arg !== '--runtime-bundle') ||
   process.argv.length > 3
 )
-  throw Error('Use no option, --runtime-bundle or --packaged');
+  throw Error('Use no option or --runtime-bundle');
 let executable = workspace.platformRequire('electron');
 let runtime = workspace.platformRoot;
 if (process.argv.includes('--runtime-bundle')) {
@@ -52,16 +54,6 @@ if (process.argv.includes('--runtime-bundle')) {
       '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/macos/electron/speech}',
   });
   runtime = archive + '.unpacked';
-}
-if (process.argv.includes('--packaged')) {
-  // Build only a temporary .app; no installer, real installation or release write.
-  const { buildMacApp } = await import('../../scripts/package-app.mjs');
-  const { publicKey } = JSON.parse(
-    await readFile(path.join(runtime, 'update-public-key.json'), 'utf8'),
-  );
-  const app = await buildMacApp(path.join(testRoot, 'app'), publicKey);
-  executable = path.join(app, 'Contents/MacOS/VoxCue');
-  runtime = path.join(app, 'Contents/Resources/app.asar.unpacked');
 }
 if (process.argv.length > 2) {
   const pkg = path.join(runtime, 'node_modules/@ennuicastr/webrtcaec3.js');

@@ -67,6 +67,9 @@ try {
   await cloud.press('Escape');
   assert.equal(await cloud.getAttribute('aria-expanded'), 'false');
   assert.equal(await cloud.evaluate((button) => button === document.activeElement), true);
+  // Escape releases the live popup immediately; wait for its inert visual exit
+  // before verifying that a subsequent hover cannot open a new popup.
+  await base.locator('.sync-popover').waitFor({ state: 'detached' });
   await cloud.hover();
   await page.waitForTimeout(200);
   assert.equal(await cloud.getAttribute('aria-expanded'), 'false');

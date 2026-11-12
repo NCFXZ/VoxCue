@@ -1,3 +1,7 @@
+# 当前 macOS 1.2.0 入口
+
+Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mjs`（`pnpm test:package`），入口和显式输入见 [Mac 发行实现](../docs/MACOS_1.2.0_RELEASE.md)。Owner 仅可运行 `package-smoke.mjs --static-only` 的零产品启动静态检查，退出 2 表示动态覆盖待执行。旧 `package-temporary-smoke.mjs`、AEC `--packaged` 和产品 `--online` 调试探针已退役；下文历史命令不覆盖此边界。功能、五档缩放与 Qwen 开发态入口保持串行 GUI／原生／推理规则，最终 ASAR 覆盖另外在 guest 执行。
+
 ## 当前源码安全修复
 
 当前进入 Windows 1.2.0／Store 2.2.0.0 发行验证，清理、完整回归、修复及发布范围以根 PROGRESS.md 的最新授权为准。共享安全设计见 [安全与任务生命周期加固](../docs/SECURITY_HARDENING.md)，逐项 Mac 回归见 [1.2.0 交接](../docs/MACOS_1.2.0_HANDOFF.md)及[专属待办](../docs/MACOS_1.2.0_TODO.md)。下面历史矩阵不能覆盖现行测试隔离要求；正式包仍须 OS 隔离，不能恢复旧入口或用测试环境变量隔离产品。

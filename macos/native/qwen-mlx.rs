@@ -3,11 +3,14 @@ use base64::{engine::general_purpose::STANDARD, Engine as _};
 use qwen3_asr::StreamingOptions;
 use serde_json::{json, Value};
 use std::{
-    io::{BufRead, BufReader, Write},
+    io::BufReader,
     path::Path,
     process::{Child, ChildStdin, ChildStdout, Command, Stdio},
     sync::Mutex,
+    time::{Duration, Instant},
 };
+#[path = "pipe-deadline.rs"]
+mod pipe_deadline;
 
 pub struct State {
     source: String,
@@ -85,6 +88,7 @@ struct Process {
     output: BufReader<ChildStdout>,
     sequence: u64,
     resume_text: bool,
+    retired: bool,
 }
 fn encode(samples: &[f32]) -> String {
     let bytes: Vec<u8> = samples
@@ -99,7 +103,23 @@ impl Process {
             .parent()
             .ok_or_else(|| anyhow::anyhow!("runtime directory missing"))?
             .to_owned();
-        let mut child = Command::new(runtime.join("python/bin/python3.12"))
+        // The packaged runtime has a fixed location. Development builds do not
+        // impersonate an application bundle; production never accepts a bypass.
+        if let Some(native) = runtime
+            .parent()
+            .filter(|p| p.file_name().is_some_and(|n| n == "native"))
+        {
+            let status = Command::new(native.join("VoxCue.Integrity"))
+                .arg(std::process::id().to_string())
+                .env_clear()
+                .stdin(Stdio::null())
+                .stdout(Stdio::null())
+                .status()?;
+            if !status.success() {
+                anyhow::bail!("MLX runtime integrity verification failed");
+            }
+        }
+        let child = Command::new(runtime.join("python/bin/python3.12"))
             .args(["-I", "-B"])
             .arg(runtime.join("mlx-worker.py"))
             .arg(directory)
@@ -116,38 +136,31 @@ impl Process {
             .stdout(Stdio::piped())
             .stderr(Stdio::inherit())
             .spawn()?;
-        let input = child
-            .stdin
-            .take()
-            .ok_or_else(|| anyhow::anyhow!("MLX input missing"))?;
-        let output = BufReader::new(
-            child
-                .stdout
-                .take()
-                .ok_or_else(|| anyhow::anyhow!("MLX output missing"))?,
-        );
+        Self::from_child(child, resume_text, Duration::from_secs(180))
+    }
+    fn from_child(mut child: Child, resume_text: bool, timeout: Duration) -> anyhow::Result<Self> {
+        // Construct the owner before fallible pipe setup, so every failure
+        // takes the same kill/wait path in Drop.
+        let input = child.stdin.take().expect("piped MLX stdin");
+        let output = child.stdout.take().expect("piped MLX stdout");
         let mut process = Self {
             child,
             input,
-            output,
+            output: BufReader::new(output),
             sequence: 0,
             resume_text,
+            retired: false,
         };
-        let ready = process.read()?;
+        pipe_deadline::nonblocking(&process.input)?;
+        pipe_deadline::nonblocking(process.output.get_ref())?;
+        let ready = process.read(Instant::now() + timeout)?;
         if ready["type"] != "ready" || ready["dtype"] != "bfloat16" {
             anyhow::bail!("MLX failed to load original BF16 model");
         }
         Ok(process)
     }
-    fn read(&mut self) -> anyhow::Result<Value> {
-        use std::io::Read;
-        let mut line = Vec::new();
-        let count = (&mut self.output)
-            .take(2 * 1024 * 1024 + 1)
-            .read_until(b'\n', &mut line)?;
-        if count == 0 || count > 2 * 1024 * 1024 {
-            anyhow::bail!("MLX exited or returned an oversized response");
-        }
+    fn read(&mut self, deadline: Instant) -> anyhow::Result<Value> {
+        let line = pipe_deadline::read_line(&mut self.output, 2 * 1024 * 1024, deadline)?;
         let result: Value = serde_json::from_slice(&line)?;
         if result["type"] == "error" {
             anyhow::bail!("MLX inference failed");
@@ -155,21 +168,107 @@ impl Process {
         Ok(result)
     }
     fn request(&mut self, mut message: Value) -> anyhow::Result<Value> {
+        self.exchange(&mut message, Duration::from_secs(120))
+    }
+    fn exchange(&mut self, message: &mut Value, timeout: Duration) -> anyhow::Result<Value> {
+        if self.retired {
+            anyhow::bail!("MLX process has retired");
+        }
         self.sequence += 1;
         message["seq"] = json!(self.sequence);
-        serde_json::to_writer(&mut self.input, &message)?;
-        self.input.write_all(b"\n")?;
-        self.input.flush()?;
-        let result = self.read()?;
-        if result["type"] != "ack" || result["seq"] != self.sequence {
-            anyhow::bail!("MLX protocol mismatch");
+        let result = (|| {
+            let deadline = Instant::now() + timeout;
+            let mut bytes = serde_json::to_vec(message)?;
+            bytes.push(b'\n');
+            pipe_deadline::write_all(&mut self.input, &bytes, deadline)?;
+            let result = self.read(deadline)?;
+            if result["type"] != "ack" || result["seq"] != self.sequence {
+                anyhow::bail!("MLX protocol mismatch");
+            }
+            Ok(result)
+        })();
+        if result.is_err() {
+            self.retired = true;
+            let _ = self.child.kill();
+            let _ = self.child.wait();
         }
-        Ok(result)
+        result
     }
 }
 impl Drop for Process {
     fn drop(&mut self) {
         let _ = self.child.kill();
         let _ = self.child.wait();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn python(body: &str) -> Child {
+        Command::new("/usr/bin/python3")
+            .args(["-I", "-B", "-c", body])
+            .env_clear()
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap()
+    }
+    fn ready(body: &str) -> Process {
+        Process::from_child(python(&format!(
+            "import sys,json,time\nprint('{{\"type\":\"ready\",\"dtype\":\"bfloat16\"}}',flush=True)\n{body}"
+        )), false, Duration::from_secs(2)).unwrap()
+    }
+    #[test]
+    fn absent_or_invalid_ready_reaps_the_actual_child() {
+        for body in [
+            "import time;time.sleep(60)",
+            "print('not-json',flush=True)",
+            "print('{\"type\":\"ready\",\"dtype\":\"float32\"}',flush=True)",
+        ] {
+            let child = python(body);
+            let pid = child.id();
+            assert!(Process::from_child(child, false, Duration::from_millis(250)).is_err());
+            assert!(!Command::new("/bin/kill")
+                .args(["-0", &pid.to_string()])
+                .stderr(Stdio::null())
+                .status()
+                .unwrap()
+                .success());
+        }
+    }
+    #[test]
+    fn failed_exchanges_retire_the_session_and_reap_the_child() {
+        for body in [
+            "sys.stdin.readline();time.sleep(60)",
+            "sys.stdin.readline();print('{',end='',flush=True);time.sleep(60)",
+            "sys.stdin.readline();print('x'*(2*1024*1024+1),flush=True);time.sleep(60)",
+            "sys.stdin.readline();print('not-json',flush=True);time.sleep(60)",
+            "sys.stdin.readline();print('{\"type\":\"ack\",\"seq\":999}',flush=True);time.sleep(60)",
+            "sys.stdin.readline();print('{\"type\":\"error\"}',flush=True);time.sleep(60)",
+            "sys.stdin.readline();sys.exit(3)",
+            "time.sleep(60)",
+        ] {
+            let mut process = ready(body);
+            let started = Instant::now();
+            assert!(process.exchange(&mut json!({"op":"reset","audio":"x".repeat(1024*1024)}),
+                Duration::from_millis(150)).is_err());
+            assert!(started.elapsed() < Duration::from_secs(2));
+            assert!(process.child.try_wait().unwrap().is_some());
+            assert!(process.request(json!({"op":"reset"})).unwrap_err().to_string().contains("retired"));
+        }
+    }
+    #[test]
+    fn normal_sequence_then_manual_new_process_still_works() {
+        for _ in 0..2 {
+            let mut process = ready("for line in sys.stdin:\n m=json.loads(line);print(json.dumps(dict(type='ack',seq=m['seq'],text='synthetic')),flush=True)");
+            for _ in 0..3 {
+                assert_eq!(
+                    text(&process.request(json!({"op":"reset"})).unwrap()).unwrap(),
+                    "synthetic"
+                );
+            }
+        }
     }
 }

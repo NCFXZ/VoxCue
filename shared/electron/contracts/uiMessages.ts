@@ -258,6 +258,12 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '无法启动 Mac 音频助手，请运行 pnpm build:audio。':
     'Could not start the Mac audio helper. Run pnpm build:audio.',
   'Mac 音频采集已取消或启动失败。': 'Mac audio capture was canceled or could not start.',
+  '旧音频采集进程尚未退出，请稍后重试。':
+    'The previous audio capture process has not exited. Try again shortly.',
+  'Mac 音频助手管道已关闭，请重新开始。': 'The Mac audio helper pipe closed. Start again.',
+  'Mac 音频采集被强制停止，请重新开始。': 'Mac audio capture was forcibly stopped. Start again.',
+  'Mac 音频采集进程尚未确认退出，请稍后重试。':
+    'The Mac audio capture process has not confirmed its exit. Try again shortly.',
   '原生音频进程已退出，采集已释放；请重新开始。':
     'The native audio process exited and capture resources were released. Start again.',
   移除附件: 'Remove attachment',

@@ -158,6 +158,10 @@ try {
   releaseDesktop();
 }
 console.log(
-  JSON.stringify({ passed: outcomes.filter((item) => item.passed).length, total: outcomes.length }),
+  JSON.stringify({
+    passed: outcomes.filter((item) => item.passed).length,
+    total: outcomes.length,
+    failed: outcomes.filter((item) => !item.passed).map(({ scale, name }) => ({ scale, name })),
+  }),
 );
 if (outcomes.some((item) => !item.passed)) process.exitCode = 1;

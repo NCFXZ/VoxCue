@@ -12,6 +12,7 @@ import { buildQwen } from './build-qwen.mjs';
 import { buildCredentials } from './build-credentials.mjs';
 import { stageRuntimeDependencies } from './runtime-dependencies.mjs';
 import { localizeUsageDescriptions } from './localize-usage-descriptions.mjs';
+import { prepareProductionRuntime } from './production-runtime.mjs';
 const yaml = (await import('node:module')).createRequire(
   require.resolve('electron-updater/package.json'),
 )('js-yaml');
@@ -61,7 +62,7 @@ export async function buildMacApp(output, publicKey) {
     },
     asar: {
       unpackDir:
-        '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/contracts,dist-electron/macos/electron/speech}',
+        '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/backend/screenshot,dist-electron/shared/electron/contracts,dist-electron/macos/electron/speech}',
     },
     ignore: [
       /\.map$/,
@@ -177,6 +178,7 @@ export async function buildMacApp(output, publicKey) {
           'mammoth',
           'word-extractor',
           'chardet',
+          'sharp',
         ])
           await copyPackage(name);
       },
@@ -219,6 +221,7 @@ export async function buildMacApp(output, publicKey) {
   );
   await mkdir(path.join(resources, 'licenses'), { recursive: true });
   await cp(path.join(tools, 'LICENSE'), path.join(resources, 'licenses/Sparkle.txt'));
+  await prepareProductionRuntime(app, signing);
   // Keychain continuity uses our fixed certificate; update authenticity still uses Ed25519.
   await signMacApp(app, { signing });
   return app;

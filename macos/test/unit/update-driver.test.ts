@@ -1,8 +1,9 @@
 import { it, expect, vi, afterEach, afterAll } from 'vitest';
 import { generateKeyPairSync, sign, createHash, randomUUID } from 'node:crypto';
-import { writeFile, readFile, access, mkdir, symlink, lstat } from 'node:fs/promises';
+import { writeFile, readFile, access, mkdir, symlink, lstat, link } from 'node:fs/promises';
 import path from 'node:path';
 import { MacUpdateDriver } from '../../electron/updates/driver';
+import { MacArchiveOwnership } from '../../electron/updates/archives';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import { macUpdatePayload } from '../../electron/updates/manifest';
 import { updateInterval } from '../../../shared/electron/backend/updates/cache';
@@ -24,12 +25,11 @@ afterEach(async () => {
 afterAll(() => {
   (process as any).getSystemVersion = system;
 });
-function setup() {
+function setup(bytes = Buffer.from('archive fixture')) {
   const pair = generateKeyPairSync('ed25519');
   const publicKey = Buffer.from(pair.publicKey.export({ format: 'jwk' }).x!, 'base64url').toString(
     'base64',
   );
-  const bytes = Buffer.from('archive fixture');
   const update = {
     version: '0.2.2',
     url: 'VoxCue-0.2.2-arm64.zip',
@@ -88,7 +88,18 @@ function setup() {
     driver.on('error', () => {});
     return { driver, native, event: (type: string) => callback({ type }) };
   };
-  return { ...create(), create, cache, archive, stateFile, update, metadata, bytes, fetcher };
+  return {
+    ...create(),
+    create,
+    cache,
+    archive,
+    stateFile,
+    update,
+    metadata,
+    bytes,
+    fetcher,
+    publicKey,
+  };
 }
 it('preserves an authenticated complete archive on ordinary and repeated quit without starting native installation', async () => {
   const f = setup();
@@ -128,7 +139,7 @@ it('tampered downloaded cache cannot reach the installer and retains the current
   await f.driver.checkForUpdates();
   await f.driver.downloadUpdate();
   await writeFile(f.archive, Buffer.alloc(f.bytes.length));
-  f.driver.quitAndInstall();
+  await expect(f.driver.quitAndInstall()).rejects.toThrow('checksum');
   await vi.waitFor(() => expect(error).toHaveBeenCalledOnce());
   expect(f.native.begin).not.toHaveBeenCalled();
   expect(mocks.quit).not.toHaveBeenCalled();
@@ -431,3 +442,95 @@ it('recovers a crash after archive publication without deleting the complete sig
   expect(recovered.completed.version).toBe('0.2.2');
   expect(recovered.notBefore).toBe(0);
 });
+
+it('bounds tiny-chunk progress notifications while publishing the first bytes and 100 percent', async () => {
+  const f = setup(Buffer.alloc(4000, 0x5a));
+  mocks.fetch.mockImplementation(async (url: string) =>
+    url.endsWith('.zip')
+      ? new Response(
+          new ReadableStream({
+            start(controller) {
+              for (let offset = 0; offset < f.bytes.length; offset++)
+                controller.enqueue(f.bytes.subarray(offset, offset + 1));
+              controller.close();
+            },
+          }),
+        )
+      : f.fetcher(url),
+  );
+  const progress = vi.fn();
+  f.driver.on('download-progress', progress);
+  await f.driver.checkForUpdates();
+  await f.driver.downloadUpdate();
+  expect(progress.mock.calls.length).toBeLessThanOrEqual(101);
+  expect(progress.mock.calls[0][0].percent).toBe(100 / f.bytes.length);
+  expect(progress.mock.calls.at(-1)![0].percent).toBe(100);
+  const notifications = progress.mock.calls.length;
+  await f.driver.dispose();
+  await new Promise((resolve) => setTimeout(resolve, 50));
+  expect(progress).toHaveBeenCalledTimes(notifications);
+  expect(await readFile(f.archive)).toEqual(f.bytes);
+});
+
+it('reclaims only newly recorded authenticated archives after installation catches up', async () => {
+  const f = setup();
+  await f.driver.checkForUpdates();
+  await f.driver.downloadUpdate();
+  await f.driver.dispose();
+  const unknown = path.join(f.cache, 'archives', 'VoxCue-0.1.0-arm64.zip');
+  await writeFile(unknown, 'protected unknown recovery baseline');
+  mocks.version = f.update.version;
+  const next = f.create();
+  await next.driver.checkForUpdates();
+  await expect(access(f.archive)).rejects.toMatchObject({ code: 'ENOENT' });
+  expect(await readFile(unknown, 'utf8')).toBe('protected unknown recovery baseline');
+});
+it.each(['changed', 'link', 'unknown-record'] as const)(
+  'preserves %s archive ownership anomalies',
+  async (mode) => {
+    const f = setup();
+    await f.driver.checkForUpdates();
+    await f.driver.downloadUpdate();
+    await f.driver.dispose();
+    if (mode === 'changed') await writeFile(f.archive, Buffer.alloc(f.bytes.length));
+    else if (mode === 'link') {
+      const fs = await import('node:fs/promises');
+      await fs.rename(f.archive, f.archive + '.recovery');
+      await symlink(f.archive + '.recovery', f.archive);
+    } else
+      await writeFile(path.join(f.cache, 'archive-ownership-v1.json'), '{"version":99,"items":[]}');
+    mocks.version = f.update.version;
+    const next = f.create();
+    await next.driver.checkForUpdates();
+    expect(await lstat(f.archive)).toBeDefined();
+    if (mode === 'link') expect((await lstat(f.archive)).isSymbolicLink()).toBe(true);
+  },
+);
+it.each(['active', 'new-consumer', 'cancelled', 'hardlink'] as const)(
+  'retains an authenticated installed archive while %s and keeps its ownership record',
+  async (mode) => {
+    const f = setup();
+    await f.driver.checkForUpdates();
+    await f.driver.downloadUpdate();
+    await f.driver.dispose();
+    const ownership = new MacArchiveOwnership(f.cache, f.publicKey);
+    const cancellation = new AbortController();
+    if (mode === 'hardlink') await link(f.archive, f.archive + '.protected-recovery');
+    let probes = 0;
+    const active = () => {
+      probes++;
+      if (mode === 'cancelled') cancellation.abort();
+      return mode === 'active' || (mode === 'new-consumer' && probes > 1);
+    };
+    const work = ownership.collect(f.update.version, active, cancellation.signal);
+    if (mode === 'cancelled') await expect(work).rejects.toMatchObject({ name: 'AbortError' });
+    else await work;
+    expect(await readFile(f.archive)).toEqual(f.bytes);
+    const record = JSON.parse(
+      await readFile(path.join(f.cache, 'archive-ownership-v1.json'), 'utf8'),
+    );
+    expect(record.items).toHaveLength(1);
+    if (mode === 'hardlink')
+      expect(await readFile(f.archive + '.protected-recovery')).toEqual(f.bytes);
+  },
+);

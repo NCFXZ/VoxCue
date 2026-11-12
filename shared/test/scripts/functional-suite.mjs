@@ -13,6 +13,7 @@ const shared = [
   'login',
   'password-policy',
   'account-erasure',
+  'quit-drain',
   'copilot-login',
   'copilot-runtime',
   'chatgpt-single-login',
@@ -41,6 +42,7 @@ const shared = [
   'rag-ui',
   'rag-core',
   'knowledge-host',
+  'utility-retirement',
   'history-branding',
   'history-scroll',
   'provider-ui',
@@ -104,7 +106,7 @@ assert.ok(jobOptions.length <= 1, 'Use one --jobs=<1|2|3>');
 const selected = options.filter((value) => value !== '--list' && !value.startsWith('--jobs='));
 const names = selected.length
   ? selected
-  : [...shared, ...(process.platform === 'darwin' ? mac.filter((name) => name !== 'package') : [])];
+  : [...shared, ...(process.platform === 'darwin' ? mac.filter((name) => !['package', 'components'].includes(name)) : [])];
 for (const name of names)
   if (!shared.includes(name) && !(process.platform === 'darwin' && mac.includes(name)))
     throw Error('Unknown or unavailable suite: ' + name);
