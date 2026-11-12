@@ -2,9 +2,9 @@
 
 当前范围和待办以根 `PROGRESS.md` 为准；原始逐项要求见 `MACOS_1.2.0_TODO.md`。本文说明实现和复现入口，不保存测试成绩或运行产物。Windows 专属文件及既有 1.1.1／v1.2.0 冻结资产保持。
 
-Mac 正式资产位于[既有 1.2.0 稳定发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0)，本地只保留 macos/release/1.2.0 的 DMG／ZIP／latest-mac.yml，不进入 Git。产品源码标签为 `macos-v1.2.0`（`10ac04b`）；共享／Windows 的原 `v1.2.0` 标签保持在 `0bc1cd4`，后续夹具和文档提交不改变发行字节。
+1.2.0 基线资产位于[既有 1.2.0 稳定发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0)，本地只保留 macos/release/1.2.0 的 DMG／ZIP／latest-mac.yml，不进入 Git。产品源码标签为 `macos-v1.2.0`（`10ac04b`）；共享／Windows 的原 `v1.2.0` 标签保持在 `0bc1cd4`，后续夹具和文档提交不改变发行字节。
 
-1.2.0 原发行保留；后续凭据加固、自动重启、短音隔离、路由与界面修复作为 1.2.1 交付。当前任务包含完整回归及最终包隔离验收，范围与发行状态以 PROGRESS.md 为准。Windows 专属适配另由其本机接续。
+1.2.0 原发行保留；凭据加固、自动重启、短音隔离、路由与界面修复已作为 [Mac 1.2.1 稳定发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.1)交付，产品快照为 macos-v1.2.1／64f6105。当前任务包含完整回归及最终包隔离验收，范围与发行状态以 PROGRESS.md 为准。Windows 专属适配另由其本机接续。
 
 ## 正式运行时
 
