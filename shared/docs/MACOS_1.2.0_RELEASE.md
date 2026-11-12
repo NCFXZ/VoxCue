@@ -2,6 +2,8 @@
 
 当前范围和待办以根 `PROGRESS.md` 为准；原始逐项要求见 `MACOS_1.2.0_TODO.md`。本文说明实现和复现入口，不保存测试成绩或运行产物。Windows 专属文件及既有 1.1.1／v1.2.0 冻结资产保持。
 
+Mac 正式资产位于[既有 1.2.0 稳定发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0)，本地只保留 macos/release/1.2.0 的 DMG／ZIP／latest-mac.yml，不进入 Git。产品源码标签为 `macos-v1.2.0`（`10ac04b`）；共享／Windows 的原 `v1.2.0` 标签保持在 `0bc1cd4`，后续夹具和文档提交不改变发行字节。
+
 ## 正式运行时
 
 `package-app.mjs` 在最终签名前调用 `prepareProductionRuntime`：关闭 RunAsNode、NodeOptions、NodeCliInspect，启用 EmbeddedAsarIntegrity 与 OnlyLoadAppFromAsar；保留其余 fuse 状态。固定 Electron 版本的 V1 wire 必须唯一、完整且支持所需位，否则构建失败。Packager 生成的 `ElectronAsarIntegrity` 与实际 ASAR header 对照。
@@ -42,6 +44,8 @@ Owner 普通开发测试只允许固定签名开发宿主和自有入口／profi
 公开 CI 镜像不能直接当作安全基线：Cirrus 的 base 构建流程关闭 SIP。VM 必须从固定 OCI 摘要准备，并仅在自有恢复环境恢复 SIP；如 Apple 完整启动安全个性化需要联网，只在没有宿主共享、没有产品／测试资料的准备阶段完成，之后断网重启，实际门禁仍重新核对系统状态。不改宿主 SIP、隐私或辅助功能设置，不通过 DYLD Metal shim 或虚假硬件能力来通过正式包验收。
 
 `vm-image-source.json.preparedVM` 指向同一自有 Tart home 中、停止且开启 SIP 的临时基线，运行实例与基线必须不同。guest 先验证身份、SIP 和控制台，再核对 `en0` MAC 与 Tart 配置一致，临时指定 `192.168.248.2` 供同 guest 的私有网络配对自连接；不扫描真实设备。开发宿主的 HTTP 夹具只允许该地址与 `127.0.0.1`，所有外部以太帧仍由断开的 FD 对端丢弃。普通 UI 夹具显式固定中文语言端口，真实旧应用仅设置合成用户的语言偏好，不更改旧包字节。
+
+本轮公开隔离输入固定为 `ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd`。工具按官方来源与摘要校验后仅解包到系统临时目录：Tart 2.41.1 归档 SHA-256 `e680a734febccfce7d4e910c1f7f13fc3b00f19a181c945e2d746de3214c32c2`；Packer 1.16.2 arm64 ZIP `3d7e4df8e7e8c21bdf495c4f63ad9189e22540dc8126dee6db791aa8519e8b3a`；Tart Packer 插件 1.21.0 arm64 ZIP `4a34ca87b5403629da5ca4938e94eea5bf32805faf034a211835625b637d4e76`。临时基线与缓存结束清理，不能将 CI 工具的宽松系统设置当作正式安全结论。
 
 最终正式可执行文件按正常入口冷启动、检查无调试监听、原生 Quit 并核对本包 SDK／utility 后台为零；篡改副本不重新签名。另一个固定签名开发宿主只在 guest 中加载原封不动的最终 ASAR，消费真实 preload／renderer、SDK、N-API、KnowledgeHost、截图／语音 Worker 与原生依赖。真实归档 staging／cancel 使用未修改的实际 1.1.1 host 和最终 native updater，其 NSBundle 身份／版本是真实旧包；不靠 JS 版本覆盖、重签旧包或修改最终包恢复 inspector。
 
