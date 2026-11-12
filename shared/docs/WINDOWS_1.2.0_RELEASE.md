@@ -1,11 +1,11 @@
 # VoxCue 1.2.0 Windows 发行索引
 
-本索引随 1.2.0 源码冻结交付；公开 GitHub 安装资产和 Microsoft Store 提交状态在实际操作后补充。测试成绩只在终端／对话中报告。
+1.2.0 源码和 Windows GitHub 安装资产已交付，Microsoft Store 2.2.0.0 已提交认证。测试成绩只在终端／对话中报告。
 
 ## 版本与来源
 
 - 输入为 main `3160b6868c540ec7cc6d20cdca11bc10b19bdd0c`，应用 1.1.1。目标版本唯一来源为 `shared/package.json` 的 1.2.0，Windows Store 身份版本为 2.2.0.0。
-- 源码仅上传私有 [NCFXZ/VoxCue](https://github.com/NCFXZ/VoxCue) 的 main，冻结代码基线以 `v1.2.0` 为准；推送后补充提交号。安装资产仅上传公开 [NCFXZ/VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases)，不改历史标签或恢复基线。
+- 源码已上传私有 [NCFXZ/VoxCue](https://github.com/NCFXZ/VoxCue) 的 main，冻结代码基线 `v1.2.0` 指向 `0bc1cd4261c56598a6341adfb11aca99913e9cf9`；后续渠道记录仅补文档，不移动标签。安装资产仅上传公开 [NCFXZ/VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases)，不改历史标签或恢复基线。
 - 逐条修改、测试发现修复和 Mac 回归点见 [1.2.0 交接](MACOS_1.2.0_HANDOFF.md)，Mac 专属事项见 [独立清单](MACOS_1.2.0_TODO.md)，另有[接续提示词](MACOS_1.2.0_CODEX_PROMPT.md)和[中英发行说明](RELEASE_1.2.0.md)。
 - `macos/` 全树未修改；共享变化需要 Mac 本机同步配置、补适配及逐项测试。本版不声称已生成或验证 Mac 1.2.0 包。
 
@@ -38,7 +38,7 @@ Windows 清单使用既有独立 Ed25519 身份，不生成或轮换密钥；公
 
 ## 渠道状态与保护
 
-- GitHub v1.2.0：待创建并上传，匿名完整回读资产及核对生产选择器后记录 URL、资产 ID 与摘要。
+- [GitHub v1.2.0 · Windows](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0) 已于 2026-11-12 发布，发行 ID `442366742`。三项上传资产 ID：EXE `737528032`、blockmap `737530726`、latest.yml `737530747`，字节与摘要见上表；已匿名完整回读并认证清单及实际 EXE SHA512。生产选择器使用 Windows 1.2.0，Mac 继续使用完整稳定 1.1.1。
 - 原 v1.1.1 发行 ID `440499445` 保持；其中 Mac `latest-mac.yml`、DMG、ZIP 资产 ID 分别为 `731817285`、`731807543`、`731811058`，原字节／摘要不变。Windows-only 新版不能使 Mac 误选无 Mac 资产的发行。
-- Microsoft Store：产品 ID `9PBBVWZXMBPW`，Identity `NCFX.VoxCue`，Publisher `CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A`，PFN `NCFX.VoxCue_1syhqk59eh0f0` 保持；最终 APPX 2.2.0.0 待上传提交。认证受理、认证通过、开始发布与实际上架须分别记录，不能互相替代。
+- Microsoft Store：产品 ID `9PBBVWZXMBPW`，Identity `NCFX.VoxCue`，Publisher `CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A`，PFN `NCFX.VoxCue_1syhqk59eh0f0` 保持。2026-11-12 上传最终 APPX 2.2.0.0，服务器完成包校验并保存中英更新说明后，已提交 Submission 8（ID `1152921505702381913`）；最后观察为 `Update in certification`、`Pre-processing` 进行中，配置为认证通过后自动发布。当前并非认证通过或实际上架；已在线的仍为 Submission 7。认证受理、认证通过、开始发布与实际上架须分别记录，不能互相替代。
 - 正式包只在独立 OS 身份／可丢弃环境运行；不能在 owner 宿主用测试环境变量、产品 inspector 或改包字节冒充隔离。宿主不安装临时证书，不访问真实资料／凭据，不采样硬件或宿主屏幕。
