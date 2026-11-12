@@ -321,7 +321,17 @@ const app = await launchGuestAsar(bundle, {
 });
 try {
   const page = await app.firstWindow();
-  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  page.on('pageerror', error => console.error('Guest final renderer:', error.message));
+  try {
+    await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  } catch (error) {
+    console.error('Guest login state:', await page.evaluate(() => ({
+      url: location.href, language: window.desktop?.systemLanguage,
+      headings: [...document.querySelectorAll('h1,h2')].map(node => node.textContent),
+      text: document.body.innerText.slice(0, 2000),
+    })).catch(() => ({ unavailable: true })));
+    throw error;
+  }
   const loginWindowId = await (await app.browserWindow(page)).evaluate((window) => window.id);
   const assertNativeLoginHit = async (point, expected, label) => {
     const deadline = Date.now() + 5000;

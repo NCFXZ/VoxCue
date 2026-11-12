@@ -41,6 +41,8 @@ Owner 普通开发测试只允许固定签名开发宿主和自有入口／profi
 
 公开 CI 镜像不能直接当作安全基线：Cirrus 的 base 构建流程关闭 SIP。VM 必须从固定 OCI 摘要准备，并仅在自有恢复环境恢复 SIP；如 Apple 完整启动安全个性化需要联网，只在没有宿主共享、没有产品／测试资料的准备阶段完成，之后断网重启，实际门禁仍重新核对系统状态。不改宿主 SIP、隐私或辅助功能设置，不通过 DYLD Metal shim 或虚假硬件能力来通过正式包验收。
 
+`vm-image-source.json.preparedVM` 指向同一自有 Tart home 中、停止且开启 SIP 的临时基线，运行实例与基线必须不同。guest 先验证身份、SIP 和控制台，再核对 `en0` MAC 与 Tart 配置一致，临时指定 `192.168.248.2` 供同 guest 的私有网络配对自连接；不扫描真实设备。开发宿主的 HTTP 夹具只允许该地址与 `127.0.0.1`，所有外部以太帧仍由断开的 FD 对端丢弃。普通 UI 夹具显式固定中文语言端口，真实旧应用仅设置合成用户的语言偏好，不更改旧包字节。
+
 最终正式可执行文件按正常入口冷启动、检查无调试监听、原生 Quit 并核对本包 SDK／utility 后台为零；篡改副本不重新签名。另一个固定签名开发宿主只在 guest 中加载原封不动的最终 ASAR，消费真实 preload／renderer、SDK、N-API、KnowledgeHost、截图／语音 Worker 与原生依赖。真实归档 staging／cancel 使用未修改的实际 1.1.1 host 和最终 native updater，其 NSBundle 身份／版本是真实旧包；不靠 JS 版本覆盖、重签旧包或修改最终包恢复 inspector。
 
 历史数据验收使用受保护的实际 1.1.1 二进制生成合成资料，再替换到新归档，核对原件、设置和可检索索引；随后让未修改的新正式可执行文件从 guest 普通 OS profile 路径启动并自然退出，再验证资料。独立合成 Sparkle 入口负责坏签名、取消、commit／relaunch 与缓存恢复，不能将归档替换称为 Sparkle 安装。

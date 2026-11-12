@@ -57,6 +57,7 @@ assert.ok(
   config.state === 'stopped' || config.State === 'stopped',
   'The disposable VM must be stopped',
 );
+assert.match(config.MACAddress, /^(?:[a-f0-9]{2}:){5}[a-f0-9]{2}$/i);
 execFileSync(tart, ['set', '--cpu', '6', '--memory', '12288', vm], {
   env: toolEnvironment,
   stdio: 'inherit',
@@ -229,8 +230,14 @@ try {
 const root=${JSON.stringify(guestRoot)},mount='/Volumes/My Shared Files/voxcue-inputs';
 fs.mkdirSync(root,{mode:0o700});
 const uuid=cp.execFileSync('/usr/sbin/ioreg',['-rd1','-c','IOPlatformExpertDevice'],{encoding:'utf8'}).match(/"IOPlatformUUID"\\s*=\\s*"([A-Fa-f0-9-]+)"/)[1];
-fs.writeFileSync(root+'/context.json',JSON.stringify({version:1,root,nonce:${JSON.stringify(nonce)},guestUID:process.getuid(),guestMachineUUID:uuid,hostMachineUUID:${JSON.stringify(hostUUID)}}),{mode:0o600,flag:'wx'});
+fs.writeFileSync(root+'/context.json',JSON.stringify({version:1,root,nonce:${JSON.stringify(nonce)},guestUID:process.getuid(),guestMachineUUID:uuid,hostMachineUUID:${JSON.stringify(hostUUID)},syntheticIPv4:'192.168.248.2'}),{mode:0o600,flag:'wx'});
 cp.execFileSync('/usr/bin/ditto',['-x','-k',mount+'/repo.zip',root]);
+const check='import {requireGuestIsolation} from '+JSON.stringify(root+'/repo/macos/test/scripts/guest-isolation.mjs')+'; import {requireUnlockedDesktop} from '+JSON.stringify(root+'/repo/macos/test/scripts/desktop-session.mjs')+'; await requireGuestIsolation(); requireUnlockedDesktop();';
+cp.execFileSync('/opt/homebrew/bin/node',['--input-type=module','-e',check],{env:{...process.env,VOXCUE_TEST_GUEST_CONTEXT:root+'/context.json'},stdio:'inherit'});
+const nic=cp.execFileSync('/sbin/ifconfig',['en0'],{encoding:'utf8'});
+if(nic.match(/ether ([a-f0-9:]+)/i)?.[1].toLowerCase()!==${JSON.stringify(config.MACAddress.toLowerCase())})throw Error('Unexpected guest virtual NIC');
+cp.execFileSync('/usr/bin/sudo',['-n','/sbin/ifconfig','en0','inet','192.168.248.2','netmask','255.255.255.0','up'],{stdio:'inherit'});
+if(!require('node:os').networkInterfaces().en0?.some(item=>item.address==='192.168.248.2'))throw Error('Synthetic guest IPv4 was not assigned');
 console.log('Guest isolated input staging complete; no routed network, clipboard, audio, USB or host home.');
 `,
     300000,

@@ -40,6 +40,7 @@ export async function requireGuestIsolation() {
     context.version !== 1 ||
     !/^[a-f0-9]{32}$/.test(context.nonce ?? '') ||
     context.guestUID !== process.getuid() ||
+    context.syntheticIPv4 !== '192.168.248.2' ||
     context.root !== root ||
     !uuid ||
     context.guestMachineUUID !== uuid ||

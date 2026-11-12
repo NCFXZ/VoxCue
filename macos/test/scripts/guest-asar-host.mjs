@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
  * The untouched product executable is tested separately, without an inspector.
  */
 export async function launchGuestAsar(bundle, { env = process.env } = {}) {
-  await requireGuestIsolation();
+  const guest = await requireGuestIsolation();
   const pin = workspace.platformRequire(
     path.join(workspace.platformRoot, 'local-signing-public.json'),
   );
@@ -31,16 +31,18 @@ const path=require('node:path');
 const root=${JSON.stringify(archive)},profile=${JSON.stringify(profile)};
 require('node:fs').mkdirSync(profile,{recursive:true,mode:0o700});
 app.setAppPath(root); app.setName('VoxCue');
+// Match the ordinary offline UI fixture's explicit synthetic language port.
+app.getPreferredSystemLanguages=()=>['zh-CN'];
 app.setPath('appData',path.dirname(profile)); app.setPath('userData',profile); app.setPath('sessionData',profile);
 // Keep the production runtime policy; the appData parent itself is guest-owned.
 Object.defineProperty(app,'isPackaged',{value:true});
 Object.defineProperty(process,'resourcesPath',{value:${JSON.stringify(resources)}});
 app.getVersion=()=>require(root+'/package.json').version;
 app.commandLine.appendSwitch('use-mock-keychain');
-const allowed=input=>{try{const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);return url.protocol==='http:'&&url.hostname==='127.0.0.1';}catch{return false;}};
+const allowed=input=>{try{const url=new URL(typeof input==='string'||input instanceof URL?input:input.url);return url.protocol==='http:'&&['127.0.0.1',${JSON.stringify(guest.syntheticIPv4)}].includes(url.hostname);}catch{return false;}};
 for(const [owner,key] of [[globalThis,'fetch'],[net,'fetch'],[net,'request']]){
  const original=owner[key].bind(owner);owner[key]=(input,...args)=>{
-  if(!allowed(input))throw Error('Guest GUI transport permits only its synthetic loopback peers');
+  if(!allowed(input))throw Error('Guest GUI transport permits only its owned synthetic peers');
   return original(input,...args);
  };
 }
@@ -138,5 +140,8 @@ export async function launchLegacyGuestProduct(bundle, env, version = '1.1.1') {
       return spawn(file, ...args);
     };
   });
+  const page = await app.firstWindow();
+  await page.waitForLoadState('domcontentloaded');
+  await page.evaluate(() => localStorage.setItem('voxcue-language-v1', 'zh-CN'));
   return app;
 }
