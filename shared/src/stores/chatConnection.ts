@@ -55,7 +55,8 @@ export const useChatConnection = create<State>((set, get) => ({
     } finally {
       if (current === generation) {
         set({ loading: false });
-        if (revision === usageRevision) await get().refreshUsage();
+        // A first message can use the models while the sidebar reads the quota.
+        if (revision === usageRevision) void get().refreshUsage();
       }
     }
   },

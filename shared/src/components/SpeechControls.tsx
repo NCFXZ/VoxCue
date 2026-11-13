@@ -9,6 +9,7 @@ import { resolveReasoningEffort } from '../services/chatOptions';
 import { ModelReasoningControl } from './ReasoningEffortControl';
 import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 import { useAudioDevices } from './useAudioDevices';
+import { useAuth } from '../stores/auth';
 import { SpeechModelSettings } from './SpeechModelSettings';
 import { RemoteConnectionSettings } from './RemoteConnection';
 import type { InterviewInputMode } from '../services/interviewInput';
@@ -29,6 +30,8 @@ export function SpeechControls({
   inputMode?: InterviewInputMode;
 }) {
   const { devices, loading: devicesLoading, loaded: devicesLoaded, error } = useAudioDevices();
+  const resolved = useAuth((state) => state.resolved);
+  const authError = useAuth((state) => state.error);
   const microphoneAvailable = devices.some(
     (d) =>
       d.source === 'microphone' && (!value.options.microphone || d.id === value.options.microphone),
@@ -216,12 +219,15 @@ export function SpeechControls({
         >
           <div className="speech-setting-row">
             <span className="speech-setting-label">{t('回答模型')}</span>
-            {live ? (
+            {live || !resolved ? (
               <ModelReasoningControl
                 label={t('面试回答模型')}
                 effortLabel={t('面试回答思考强度')}
                 className="speech-select effort-model-trigger"
                 models={models}
+                onRequestModels={resolved ? undefined : useAuth.getState().ensure}
+                error={authError}
+                onRefresh={resolved ? undefined : useAuth.getState().ensure}
                 modelId={value.modelId}
                 onModelChange={selectModel}
                 effort={value.effort}

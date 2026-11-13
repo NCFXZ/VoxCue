@@ -5,6 +5,11 @@ import type { PresentationCapabilities } from '../contracts/presentation';
 export interface DesktopPlatform {
   readonly id: NodeJS.Platform;
   readonly accountFetch?: typeof fetch;
+  readonly codexLoginStatus?: (
+    executable: string,
+    options: { cwd: string; env: NodeJS.ProcessEnv },
+    signal: AbortSignal,
+  ) => Promise<'signed-in' | 'empty'>;
   readonly iconFile: string;
   readonly mainWindowOptions: Pick<
     BrowserWindowConstructorOptions,

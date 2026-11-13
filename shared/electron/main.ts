@@ -7,6 +7,14 @@ import { readAutoDownload, saveAutoDownload } from './backend/updates/preference
 import { createUpdateDriver, updateUnavailableReason } from './backend/updates/driver';
 import { registerUpdateIpc } from './ipc/updates';
 import {
+  credentialRetainedItemNames,
+  type CredentialCleanup,
+} from './contracts/credentialMaintenance';
+import {
+  maintainCredentialRecords,
+  readCredentialRecords,
+} from './application/credentialMaintenance';
+import {
   app,
   BrowserWindow,
   dialog,
@@ -29,8 +37,12 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { ManagedChatGPTAuth } from './backend/auth/managed';
+import {
+  ProviderCredentialAccess,
+  ProviderCredentialUnavailable,
+} from './backend/auth/providerCredentialAccess';
 import { createAuthStorage, type CredentialEncryption } from './backend/auth/storage';
-import { CloudAccountClient, cloudOrigin, storedCloudCredentials } from './backend/cloud/client';
+import { CloudAccountClient, cloudOrigin } from './backend/cloud/client';
 import { LocalMode } from './backend/localMode';
 import { Telemetry } from './backend/telemetry/service';
 import { registerTelemetryIpc } from './ipc/telemetry';
@@ -45,7 +57,7 @@ import { ChatGPTService } from './backend/chat/service';
 import { CodexUsageRuntime } from './backend/chat/codexUsage';
 import { ChatGPTAccountUsage } from './backend/chat/accountUsage';
 import type { AIChatService } from './backend/chat/ports';
-import type { AIService } from './contracts/auth';
+import { providerCredentialMessages, type AIService } from './contracts/auth';
 import { CopilotRuntime } from './backend/copilot/runtime';
 import { CopilotAuthService } from './backend/copilot/auth';
 import { CopilotChatService } from './backend/copilot/service';
@@ -157,6 +169,8 @@ let accountArchive: AccountArchive | undefined;
 let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
 let loginWindow: BrowserWindow | null = null;
+let loginWindowReady = false;
+let revealLoginWindow = true;
 let interviewWindow: BrowserWindow | null = null;
 let checkedMicrophone: { owner: BrowserWindow; device?: string } | undefined;
 let interviewShortcutsWindow: BrowserWindow | null = null;
@@ -305,12 +319,17 @@ function clearRemoteInterview() {
   remoteConnection?.updateSnapshot(null);
   publishRemoteState();
 }
-function createLoginWindow() {
+function createLoginWindow(visible = true) {
   if (loginWindow) {
-    loginWindow.show();
-    loginWindow.focus();
+    revealLoginWindow ||= visible;
+    if (revealLoginWindow && loginWindowReady) {
+      loginWindow.show();
+      loginWindow.focus();
+    }
     return;
   }
+  revealLoginWindow = visible;
+  loginWindowReady = false;
   clearRemoteInterview();
   void remoteConnection?.disconnect().catch(() => {});
   const win = new BrowserWindow(
@@ -319,8 +338,11 @@ function createLoginWindow() {
   loginWindow = win;
   restrictWindowNavigation(win);
   whenWindowReady(win, desktopPlatform, () => {
-    win.show();
-    mainWindow?.close();
+    loginWindowReady = true;
+    if (revealLoginWindow) {
+      win.show();
+      mainWindow?.close();
+    }
   });
   win.on('close', () => {
     cancelLoginWait?.();
@@ -329,6 +351,7 @@ function createLoginWindow() {
   });
   win.on('closed', () => {
     loginWindow = null;
+    loginWindowReady = false;
   });
   loadWindowPage(win, 'login', indexFile, environment.devServerUrl);
 }
@@ -982,6 +1005,7 @@ if (desktopPlatform.id === 'darwin' || desktopPlatform.presentationFile) {
     }
     const win = mainWindow ?? loginWindow;
     if (win && !win.isDestroyed()) {
+      if (win === loginWindow && !revealLoginWindow) return;
       if (win.isMinimized()) win.restore();
       win.show();
       win.focus();
@@ -1173,6 +1197,23 @@ app.whenReady().then(async () => {
       return null;
     }
   };
+  let finishInitialLanguage: (() => void) | undefined;
+  let failInitialLanguage: (() => void) | undefined;
+  let initialLanguageTimer: ReturnType<typeof setTimeout> | undefined;
+  // The existing login renderer owns the saved language preference. Bootstrap
+  // it invisibly before any Mac credential request, including automatic restore.
+  const initialLanguageReady = desktopPlatform.credentialEncryptionFile
+    ? new Promise<void>((resolve, reject) => {
+        const finish = (error?: Error) => {
+          clearTimeout(initialLanguageTimer);
+          finishInitialLanguage = failInitialLanguage = undefined;
+          if (error) reject(error);
+          else resolve();
+        };
+        finishInitialLanguage = () => finish();
+        failInitialLanguage = () => finish(Error('无法同步界面语言，请重试。'));
+      })
+    : Promise.resolve();
   handleDesktop('appearance:language', (event, ...args) => {
     const win = BrowserWindow.fromWebContents(event.sender);
     if (!win || ![loginWindow, mainWindow, interviewWindow].includes(win))
@@ -1180,6 +1221,7 @@ app.whenReady().then(async () => {
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     if (args.length !== 1 || !isUILanguage(args[0])) throw Error('Invalid UI language');
     uiLanguage = args[0];
+    finishInitialLanguage?.();
     for (const [window, title] of [
       [loginWindow, 'VoxCue · 登录'],
       [mainWindow, 'VoxCue'],
@@ -1216,11 +1258,14 @@ app.whenReady().then(async () => {
     path.join(app.getPath('userData'), 'chatgpt-usage'),
     undefined,
     app.getVersion(),
+    desktopPlatform.codexLoginStatus,
   );
   // Shown at most once per launch, only when the platform expects the next
   // credential request to open its one-time system authorization.
   const confirmCredentialMigration = async () => {
-    const parent = [mainWindow, loginWindow].find((win) => win && !win.isDestroyed());
+    const parent = [mainWindow, loginWindow].find(
+      (win) => win && !win.isDestroyed() && win.isVisible(),
+    );
     const options = {
       type: 'info' as const,
       title: nativeText('迁移登录信息'),
@@ -1242,7 +1287,7 @@ app.whenReady().then(async () => {
     | (CredentialEncryption & {
         maintain?(
           readable: (decrypt: (value: Buffer) => Promise<string>) => Promise<boolean>,
-        ): Promise<{ cleanup: string } | undefined>;
+        ): Promise<CredentialCleanup | undefined>;
       })
     | undefined = desktopPlatform.credentialEncryptionFile
     ? require(
@@ -1254,6 +1299,10 @@ app.whenReady().then(async () => {
           desktopPlatform.credentialExecutableName ?? 'VoxCue.Credentials',
         ),
         confirmCredentialMigration,
+        async () => {
+          await initialLanguageReady;
+          return uiLanguage;
+        },
       )
     : undefined;
   const authStorage = createAuthStorage(
@@ -1305,6 +1354,7 @@ app.whenReady().then(async () => {
     );
     return state;
   };
+  let initialAccountStatus: ReturnType<CloudAccountClient['call']> | undefined;
   handleDesktop('cloud:account', async (event, call) => {
     if (
       ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
@@ -1356,7 +1406,11 @@ app.whenReady().then(async () => {
           chatIpc?.cancelActive();
           await knowledge.close();
         }
-        const response = await cloudAccount.call(call);
+        const response = await (call?.action === 'status' &&
+        Object.keys(call).length === 1 &&
+        initialAccountStatus
+          ? initialAccountStatus
+          : cloudAccount.call(call));
         if (response.ok && response.state.user && ['login', 'register'].includes(call.action)) {
           if (localMode.active) {
             await accountArchive?.cancel();
@@ -1395,7 +1449,7 @@ app.whenReady().then(async () => {
           copilotAuth.cancel();
           interviewIpc?.cancel();
           await auth.signOut();
-          if (await copilotAuth.session()) await copilotAuth.signOut();
+          if (!copilotAuth.isPending()) await copilotAuth.signOut();
           await codexUsageRuntime.stop();
           await copilotRuntime.stop();
           await eraseLocalAccount(app.getPath('userData'), eraseBrowser);
@@ -1448,38 +1502,44 @@ app.whenReady().then(async () => {
     callbackLogo: () => readFile(resources.brandLogo),
     uiLanguage: () => uiLanguage,
   });
+  const reportCredentialMaintenance = (result: CredentialCleanup) => {
+    console.error('Keychain cleanup incomplete:', {
+      cleanup: result.cleanup,
+      removed: result.removed,
+      retained: result.retained,
+      retainedItems: result.retainedItems.map((id) => credentialRetainedItemNames[id]),
+      reason: result.reason,
+    });
+  };
   if (credentialEncryption?.maintain) {
     // Superseded Keychain copies are removed only after every stored record
     // still decrypts and parses with the current key. Any failure keeps them.
-    const recordsReadable = async (decrypt: (value: Buffer) => Promise<string>) => {
-      if (erasingAccount) return false;
-      try {
-        await authStorage.read(decrypt);
-        const session = await cloudVault.read(decrypt);
-        const proofs = await telemetryProofVault.read(decrypt);
-        if (session !== null) {
-          if (!accountOrigin) return false;
-          storedCloudCredentials(session, accountOrigin);
-        }
-        if (proofs !== null) {
-          if (!telemetry) return false;
-          await telemetry.validateStoredProofs(proofs);
-        }
-        return true;
-      } catch {
-        return false;
-      }
-    };
     setTimeout(() => {
-      void credentialEncryption.maintain!(recordsReadable)
+      void maintainCredentialRecords(
+        (readable) => credentialEncryption.maintain!(readable),
+        (decrypt) =>
+          readCredentialRecords(decrypt, {
+            erasingAccount,
+            authStorage,
+            cloudVault,
+            telemetryProofVault,
+            accountOrigin,
+            validateTelemetryProofs: telemetry
+              ? (value) => telemetry!.validateStoredProofs(value)
+              : undefined,
+          }),
+      )
         .then((result) => {
-          if (result && result.cleanup !== 'complete')
-            console.error(
-              `Keychain cleanup ${result.cleanup}; remaining copies retry next launch.`,
-            );
+          if (result && result.cleanup !== 'complete') reportCredentialMaintenance(result);
         })
         .catch(() => {
-          console.error('Keychain maintenance did not finish.');
+          reportCredentialMaintenance({
+            cleanup: 'deferred',
+            removed: 0,
+            retained: null,
+            retainedItems: [],
+            reason: 'failed',
+          });
         });
     }, 15000).unref();
   }
@@ -1493,27 +1553,35 @@ app.whenReady().then(async () => {
     ledger,
     accountUsage: chatGPTUsage,
   });
-  copilotRuntime = new CopilotRuntime(path.join(app.getPath('userData'), 'copilot-runtime'));
+  const copilotCredentials = new ProviderCredentialAccess('copilot', () => {
+    void copilotRuntime.stop().catch(() => {});
+  });
+  copilotRuntime = new CopilotRuntime(
+    path.join(app.getPath('userData'), 'copilot-runtime'),
+    copilotCredentials,
+  );
   copilotAuth = new CopilotAuthService({
+    credentialAccess: copilotCredentials,
+    retire: () => copilotRuntime.stop(true),
     credentialEncryptionLabel: desktopPlatform.credentialEncryptionLabel,
     storage: createCopilotLoginStorage(),
     control: () => copilotRuntime.control(),
     openBrowser: (url) => shell.openExternal(url),
   });
   const copilot = new CopilotChatService({
+    credentialAccess: copilotCredentials,
+    retire: () => copilotRuntime.stop(true),
     client: () => copilotRuntime.client(),
     control: () => copilotRuntime.control(),
-    access: () => copilotAuth.access(),
+    access: (signal) => copilotAuth.access(signal),
     ledger,
   });
   const selection = createServiceSelection();
-  let selectedService: AIService = 'chatgpt';
-  let selectionReady = selection.read().then((service) => {
-    selectedService = service;
-  });
+  let selectionReady = selection.ready;
   void selectionReady.catch(() => {});
-  const activeAuth = () => (selectedService === 'copilot' ? copilotAuth : auth);
-  chat = new SelectedChatService(() => (selectedService === 'copilot' ? copilot : chatGPT));
+  let disconnecting = false;
+  const activeAuth = () => (selection.service === 'copilot' ? copilotAuth : auth);
+  chat = new SelectedChatService(() => (selection.service === 'copilot' ? copilot : chatGPT));
   const requireMain = (event: Electron.IpcMainInvokeEvent) => {
     if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
   };
@@ -1628,18 +1696,38 @@ app.whenReady().then(async () => {
       entryBusy = false;
     }
   });
-  handleDesktop('auth:session', async (event) => {
+  // Electron serializes only the thrown message. Send settings a fixed notice
+  // while chat and interview errors keep their existing wording.
+  const connectionNotice = (error: unknown): never => {
+    if (error instanceof ProviderCredentialUnavailable)
+      throw Error(providerCredentialMessages[error.service][error.reason]);
+    throw error;
+  };
+  handleDesktop('auth:session', async (event, ...args) => {
     if (event.sender !== loginWindow?.webContents) requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
-    await selectionReady;
-    const session = demoSession
-      ? {
-          mode: 'demo' as const,
-          user: { id: 'local-demo', name: '本地用户', email: '' },
-          expiresAt: null,
-        }
-      : await activeAuth().session();
-    return session;
+    const [service] = args;
+    if (
+      args.length > 1 ||
+      (service !== undefined && service !== 'chatgpt' && service !== 'copilot' &&
+        service !== 'demo' && service !== 'startup')
+    )
+      throw Error('Invalid session request');
+    if (demoSession) {
+      if (service !== undefined && service !== 'demo' && service !== 'startup') return null;
+      return {
+        mode: 'demo' as const,
+        user: { id: 'local-demo', name: '本地用户', email: '' },
+        expiresAt: null,
+      };
+    }
+    if (service === 'demo') return null;
+    if (service === 'startup' && event.sender !== mainWindow?.webContents) return null;
+    if (signingIn || disconnecting) return null;
+    const session = await selection.session(service, (selected) =>
+      selected === 'copilot' ? copilotAuth.verifiedSession() : auth.session(),
+    ).catch(connectionNotice);
+    return !demoSession ? session : null;
   });
   // Entry can finish while the previous main window is still flushing its chat store.
   const finishSignedOutMain = async () => {
@@ -1666,15 +1754,15 @@ app.whenReady().then(async () => {
     }
   };
   const signIn = async (service: AIService) => {
-    if (signingIn || auth.isPending() || copilotAuth.isPending())
+    if (signingIn || disconnecting || auth.isPending() || copilotAuth.isPending())
       throw Error('已有登录操作正在进行。');
     signingIn = true;
+    selection.changing();
     try {
       demoSession = false;
       const session = await (service === 'copilot' ? copilotAuth : auth).signIn();
       if (mainWindow && !mainCloseApproved) {
-        await selection.write(service);
-        selectedService = service;
+        await selection.set(service, true);
         selectionReady = Promise.resolve();
         chatIpc?.cancelActive();
         historyJobs?.cancelAll();
@@ -1682,8 +1770,7 @@ app.whenReady().then(async () => {
       }
       if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
       await finishSignedOutMain();
-      await selection.write(service);
-      selectedService = service;
+      await selection.set(service, true);
       selectionReady = Promise.resolve();
       createMainWindow();
       return session;
@@ -1705,12 +1792,12 @@ app.whenReady().then(async () => {
   handleDesktop('auth:sign-in', async (event, ...args) => {
     requireAIWindow(event);
     if (args.length) throw Error('Invalid request');
-    return signIn('chatgpt');
+    return signIn('chatgpt').catch(connectionNotice);
   });
   handleDesktop('auth:copilot-sign-in', async (event, ...args) => {
     requireAIWindow(event);
     if (args.length) throw Error('Invalid request');
-    return signIn('copilot');
+    return signIn('copilot').catch(connectionNotice);
   });
   handleDesktop('auth:cancel', (event) => {
     requireAIWindow(event);
@@ -1746,16 +1833,28 @@ app.whenReady().then(async () => {
       return { warning: null };
     }
     interviewIpc?.cancel();
-    const result = await activeAuth().signOut();
-    await copilotRuntime.stop();
-    if (result.warning && mainWindow)
-      await dialog.showMessageBox(mainWindow, {
-        type: 'warning',
-        title: nativeText('退出登录'),
-        message: nativeText(result.warning),
-        buttons: [nativeText('确定')],
-      });
-    return result;
+    if (signingIn || disconnecting) throw Error('账户正在变更，请稍后重试。');
+    disconnecting = true;
+    selection.changing();
+    try {
+      await selectionReady;
+      await selection.set(selection.service, false);
+      const result = await activeAuth().signOut();
+      if (result.warning && mainWindow)
+        await dialog.showMessageBox(mainWindow, {
+          type: 'warning',
+          title: nativeText('退出登录'),
+          message: nativeText(result.warning),
+          buttons: [nativeText('确定')],
+        });
+      return result;
+    } finally {
+      try {
+        await copilotRuntime.stop();
+      } finally {
+        disconnecting = false;
+      }
+    }
   });
   const ragModelPath = resources.ragModel;
   knowledge = new KnowledgeHost(
@@ -1803,9 +1902,12 @@ app.whenReady().then(async () => {
     service: remoteConnection,
     coordinator: remoteInterview,
     requireOwner(event) {
-      if (erasingAccount || closingMain ||
+      if (
+        erasingAccount ||
+        closingMain ||
         ![mainWindow?.webContents, interviewWindow?.webContents].includes(event.sender) ||
-        event.senderFrame !== event.sender.mainFrame)
+        event.senderFrame !== event.sender.mainFrame
+      )
         throw Error('Unauthorized window');
     },
     requireInterview(event) {
@@ -1830,8 +1932,12 @@ app.whenReady().then(async () => {
     mac: desktopPlatform.id === 'darwin',
     authorize(event, write) {
       const win = BrowserWindow.fromWebContents(event.sender);
-      if (!win || ![mainWindow, interviewWindow, interviewShortcutsWindow].includes(win) ||
-        event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized window');
+      if (
+        !win ||
+        ![mainWindow, interviewWindow, interviewShortcutsWindow].includes(win) ||
+        event.senderFrame !== event.sender.mainFrame
+      )
+        throw Error('Unauthorized window');
       if (write) {
         requireMain(event);
         if (erasingAccount || closingMain) throw Error('Unauthorized window');
@@ -1861,8 +1967,11 @@ app.whenReady().then(async () => {
         }
         return { state: shortcutController.state() };
       }
-      return shortcutController.save(call.op === 'set' ? call.action : null,
-        call.op === 'set' ? call.accelerator : null, defaultShortcuts());
+      return shortcutController.save(
+        call.op === 'set' ? call.action : null,
+        call.op === 'set' ? call.accelerator : null,
+        defaultShortcuts(),
+      );
     },
   });
   registerInterviewShortcutsIpc({
@@ -2597,24 +2706,45 @@ app.whenReady().then(async () => {
     if (action === 'maximize') win.isMaximized() ? win.unmaximize() : win.maximize();
     if (action === 'close') win.close();
   });
+  const startupAccountStatus = desktopPlatform.credentialEncryptionFile
+    ? (initialAccountStatus = initialLanguageReady
+        .then(async () => {
+          await selectionReady;
+          await localModeReady;
+          return localMode.active
+            ? { ok: true as const, state: accountState() }
+            : cloudAccount.call({ action: 'status' });
+        })
+        .finally(() => {
+          initialAccountStatus = undefined;
+        }))
+    : undefined;
+  // Startup below reports the same failure; mark it handled even when language
+  // initialization rejects before that chain reaches the account read.
+  void startupAccountStatus?.catch(() => {});
+  if (desktopPlatform.credentialEncryptionFile) {
+    initialLanguageTimer = setTimeout(() => failInitialLanguage?.(), 10000);
+    createLoginWindow(false);
+    loginWindow?.webContents.once('render-process-gone', () => failInitialLanguage?.());
+    loginWindow?.webContents.once('did-fail-load', (_event, _code, _text, _url, mainFrame) => {
+      if (mainFrame) failInitialLanguage?.();
+    });
+    loginWindow?.once('closed', () => failInitialLanguage?.());
+  }
   void selectionReady
     .then(async () => {
+      await initialLanguageReady;
       await localModeReady;
       if (localMode.active) {
         accountState();
         telemetry?.entry('local');
         return true;
       }
-      const result = await cloudAccount.call({ action: 'status' });
+      const result = await (startupAccountStatus ?? cloudAccount.call({ action: 'status' }));
       accountState();
       if (result.ok && result.state.user && result.state.verified)
         telemetry?.entry('restore', result.state.user.createdAt);
-      return (
-        result.state.user ||
-        (!app.isPackaged && process.env.COPILOT_TEST_USER_DATA
-          ? await activeAuth().session()
-          : null)
-      );
+      return result.state.user;
     })
     .then((session) => {
       if (session) createMainWindow();

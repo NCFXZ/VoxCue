@@ -20,6 +20,8 @@ import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { AppLogo } from './AppLogo';
 import { useChatConnection } from '../stores/chatConnection';
+import { useAuth } from '../stores/auth';
+import { providerInfo } from '../services/providers';
 import { isAccountUsageLow } from '../services/accountUsageSummary';
 import { AccountUsageSummary } from './AccountUsageSummary';
 import { SidebarUpdate } from './SidebarUpdate';
@@ -50,6 +52,8 @@ export function Sidebar({
   onLogout,
 }: Props) {
   const connection = useChatConnection();
+  const checked = useAuth((state) => state.resolved || state.startupChecked);
+  const provider = useAuth((state) => state.session?.mode);
   const preparation = usePreparation();
   const sidebar = useRef<HTMLElement>(null);
   useEffect(() => {
@@ -58,9 +62,11 @@ export function Sidebar({
   }, [connection.live]);
   const lowUsage = connection.live && isAccountUsageLow(connection.usage);
   const remaining = !connection.live ? (
-    t('未连接 AI 服务')
+    t(checked ? '未连接 AI 服务' : '暂未验证连接状态')
   ) : connection.loadingUsage && !connection.usageLoaded ? (
     t('正在读取 AI 服务用量…')
+  ) : provider && provider !== 'demo' && connection.usage?.status !== 'available' ? (
+    t('{0} 已连接', [providerInfo(provider).name])
   ) : connection.usageError ? (
     t(connection.usageError)
   ) : (

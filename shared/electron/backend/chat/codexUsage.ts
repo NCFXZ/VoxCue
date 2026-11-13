@@ -3,8 +3,42 @@ import { mkdir } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { decodeJwt } from 'jose';
+import {
+  ProviderCredentialAccess,
+  ProviderCredentialUnavailable,
+  keychainFailureReason,
+} from '../auth/providerCredentialAccess';
 
 const unavailable = () => new Error('ChatGPT 服务暂不可用，请稍后重试。');
+// Codex 0.164 distinguishes a missing entry from a keyring API failure. Only
+// its fixed local storage diagnostics are consumed; never retain raw messages.
+const keyringErrors = [
+  'keyring.load error',
+  'keyring.save error',
+  'keyring.delete error',
+  'failed to load CLI auth from keyring',
+  'failed to write OAuth tokens to keyring',
+  'failed to delete auth from keyring',
+];
+function credentialFailure(value: unknown): ProviderCredentialUnavailable['reason'] | undefined {
+  if (typeof value !== 'string') return;
+  const reason = keychainFailureReason(value);
+  if (reason) return reason;
+  if (keyringErrors.some((marker) => value.includes(marker))) return 'unavailable';
+}
+// Between chunks remember only a prefix of a known marker.
+function partialKeyringError(text: string) {
+  let partial = '';
+  for (const marker of keyringErrors) {
+    for (let n = Math.min(text.length, marker.length - 1); n > partial.length; --n) {
+      if (text.endsWith(marker.slice(0, n))) {
+        partial = marker.slice(0, n);
+        break;
+      }
+    }
+  }
+  return partial;
+}
 const requirePackage = createRequire(__filename);
 // node_modules is unpacked by both platform packagers; spawn needs its real path.
 export function unpackedUsagePath(file: string) {
@@ -83,7 +117,11 @@ export interface CodexUsagePort {
 /** OAuth and account-only process. Never starts threads, tools or inference. */
 export class CodexUsageRuntime implements CodexUsagePort {
   private child?: ChildProcessWithoutNullStreams;
-  private starting?: Promise<void>;
+  private credentials = new ProviderCredentialAccess('chatgpt', () => {
+    void this.stop();
+  });
+  private startupCheck?: AbortController;
+  private checkedSignedIn = false;
   private sequence = 0;
   private generation = 0;
   private pending = new Map<
@@ -97,77 +135,152 @@ export class CodexUsageRuntime implements CodexUsagePort {
     private directory: string,
     private launch = spawn,
     private version = 'development',
+    private readonly loginStatus?: (
+      executable: string,
+      options: { cwd: string; env: NodeJS.ProcessEnv },
+      signal: AbortSignal,
+    ) => Promise<'signed-in' | 'empty'>,
   ) {}
-  private async start() {
-    if (!this.starting)
-      this.starting = (async () => {
-        const generation = this.generation;
-        const workingDirectory = path.join(this.directory, 'workspace');
-        await mkdir(workingDirectory, { recursive: true });
-        if (generation !== this.generation) throw unavailable();
-        const env = { ...process.env };
-        for (const key of Object.keys(env))
-          if (/^(?:CODEX_|OPENAI_|AZURE_OPENAI_|OTEL_)/i.test(key)) delete env[key];
-        env.CODEX_HOME = this.directory;
-        const child = this.launch(
-          codexUsageExecutable(),
-          [
-            'app-server',
-            '--listen',
-            'stdio://',
-            '-c',
-            'cli_auth_credentials_store="keyring"',
-            '-c',
-            'approval_policy="never"',
-            '-c',
-            'sandbox_mode="read-only"',
-            '-c',
-            'analytics.enabled=false',
-            '-c',
-            'otel.exporter="none"',
-          ],
-          { cwd: workingDirectory, env, stdio: 'pipe', windowsHide: true },
+  // All starts run inside the credential queue. The standalone status command
+  // can report keyring denial before app-server gets to load its AuthManager.
+  private async start(method: string, signal?: AbortSignal) {
+    if (this.child) return true;
+    const generation = this.generation;
+    const workingDirectory = path.join(this.directory, 'workspace');
+    await mkdir(workingDirectory, { recursive: true });
+    if (generation !== this.generation) throw unavailable();
+    signal?.throwIfAborted();
+    this.credentials.check();
+    const env = { ...process.env };
+    for (const key of Object.keys(env))
+      if (/^(?:CODEX_|OPENAI_|AZURE_OPENAI_|OTEL_)/i.test(key)) delete env[key];
+    env.CODEX_HOME = this.directory;
+    // These exact upstream targets emit operation outcomes, never values.
+    env.RUST_LOG = 'codex_keyring_store=trace,codex_login::auth::storage=warn';
+    env.LOG_FORMAT = 'json';
+    const executable = codexUsageExecutable();
+    if (this.loginStatus) {
+      const controller = new AbortController();
+      this.startupCheck = controller;
+      const checkSignal = signal ? AbortSignal.any([signal, controller.signal]) : controller.signal;
+      try {
+        const status = await this.loginStatus(
+          executable,
+          { cwd: workingDirectory, env },
+          checkSignal,
         );
-        this.child = child;
-        child.stdin.on('error', () => this.closed(child));
-        let buffer = '';
-        child.stdout.setEncoding('utf8');
-        child.stdout.on('data', (chunk: string) => {
-          buffer += chunk;
-          if (buffer.length > 2_000_000) {
-            child.kill();
-            return;
-          }
-          let end: number;
-          while ((end = buffer.indexOf('\n')) >= 0) {
-            const line = buffer.slice(0, end);
-            buffer = buffer.slice(end + 1);
-            try {
-              this.message(JSON.parse(line));
-            } catch {
-              child.kill();
-            }
-          }
-        });
-        // Diagnostic output can include account context. Drain it without logging.
-        child.stderr.resume();
-        child.once('error', () => this.closed(child));
-        child.once('exit', () => this.closed(child));
-        await this.call('initialize', {
-          clientInfo: { name: 'voxcue', title: 'VoxCue', version: this.version },
-          capabilities: { experimentalApi: false },
-        });
-        this.write({ method: 'initialized' });
-      })().catch(async (error) => {
-        await this.stop();
+        checkSignal.throwIfAborted();
+        if (status === 'empty' && method === 'account/read') return false;
+        this.checkedSignedIn = status === 'signed-in';
+      } catch (error) {
+        signal?.throwIfAborted();
+        if (controller.signal.aborted) throw unavailable();
+        if (error instanceof ProviderCredentialUnavailable)
+          throw this.credentials.block(error.reason);
         throw error;
+      } finally {
+        if (this.startupCheck === controller) this.startupCheck = undefined;
+      }
+    }
+    const child = this.launch(
+      executable,
+      [
+        'app-server',
+        '--listen',
+        'stdio://',
+        '-c',
+        'cli_auth_credentials_store="keyring"',
+        '-c',
+        'approval_policy="never"',
+        '-c',
+        'sandbox_mode="read-only"',
+        '-c',
+        'analytics.enabled=false',
+        '-c',
+        'otel.exporter="none"',
+      ],
+      { cwd: workingDirectory, env, stdio: 'pipe', windowsHide: true },
+    );
+    this.child = child;
+    child.stdin.on('error', () => child.kill());
+    let buffer = '';
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      if (this.child !== child || this.credentials.denied) return;
+      buffer += chunk;
+      if (buffer.length > 2_000_000) {
+        child.kill();
+        return;
+      }
+      let end: number;
+      while (this.child === child && (end = buffer.indexOf('\n')) >= 0) {
+        const line = buffer.slice(0, end);
+        buffer = buffer.slice(end + 1);
+        try {
+          this.message(JSON.parse(line));
+        } catch {
+          child.kill();
+        }
+      }
+    });
+    // Trace and warning output is newline-framed. Keep only a fixed marker
+    // prefix across chunks until the local error starts, then at most 4 KiB. A denial
+    // can follow the generic wrapper in the next chunk of the same line.
+    let diagnosticTail = '',
+      diagnostic = '';
+    const finishDiagnostic = () => {
+      const reason = credentialFailure(diagnostic);
+      diagnosticTail = diagnostic = '';
+      if (reason) this.credentials.block(reason);
+    };
+    child.stderr.setEncoding('utf8');
+    child.stderr.on('data', (chunk: string) => {
+      for (const [index, line] of chunk.split('\n').entries()) {
+        if (this.child !== child || this.credentials.denied) return;
+        if (index) finishDiagnostic();
+        if (this.credentials.denied) return;
+        if (diagnostic) diagnostic += line.slice(0, 4096 - diagnostic.length);
+        else {
+          const text = diagnosticTail + line;
+          const marker = keyringErrors.find((candidate) => text.includes(candidate));
+          if (marker) {
+            diagnostic = text.slice(text.indexOf(marker), text.indexOf(marker) + 4096);
+          } else {
+            const reason = keychainFailureReason(line);
+            if (reason) {
+              this.credentials.block(reason);
+              return;
+            }
+            diagnosticTail = partialKeyringError(text);
+          }
+        }
+      }
+    });
+    child.stderr.once('end', () => {
+      if (this.child === child && !this.credentials.denied) finishDiagnostic();
+    });
+    // Node follows a spawn error with 'close'. Drain diagnostic bytes first
+    // even when a broken input pipe or a failed spawn ends the process.
+    child.once('error', () => {});
+    // 'close' follows stdio drainage. An exit event alone can precede the
+    // local denial on stderr; restarting at that point would retry it.
+    child.once('close', () => this.closed(child));
+    try {
+      await this.call('initialize', {
+        clientInfo: { name: 'voxcue', title: 'VoxCue', version: this.version },
+        capabilities: { experimentalApi: false },
       });
-    return this.starting;
+      this.write({ method: 'initialized' });
+      return true;
+    } catch (error) {
+      if (this.child === child) await this.stop();
+      throw error;
+    }
   }
   private closed(child: ChildProcessWithoutNullStreams) {
     if (this.child !== child) return;
     this.child = undefined;
-    this.starting = undefined;
+    this.checkedSignedIn = false;
     this.loginId = undefined;
     this.completions.clear();
     for (const pending of this.pending.values()) {
@@ -187,12 +300,19 @@ export class CodexUsageRuntime implements CodexUsagePort {
       if (!pending) return;
       this.pending.delete(message.id);
       clearTimeout(pending.timer);
-      if (message.error) pending.reject(unavailable());
-      else pending.resolve(message.result);
+      if (message.error) {
+        const reason = credentialFailure(message.error.message);
+        pending.reject(reason ? this.credentials.block(reason) : unavailable());
+      } else pending.resolve(message.result);
     } else if (
       message.method === 'account/login/completed' &&
       typeof message.params?.loginId === 'string'
     ) {
+      const reason = !message.params.success && credentialFailure(message.params.error);
+      if (reason) {
+        this.credentials.block(reason);
+        return;
+      }
       if (this.completions.size >= 8) this.completions.clear();
       this.completions.set(message.params.loginId, message.params.success === true);
       for (const listener of this.listeners) listener();
@@ -206,7 +326,16 @@ export class CodexUsageRuntime implements CodexUsagePort {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(unavailable());
+        // A credential operation that stops replying may still own a system
+        // prompt. Stop this provider before the next queued RPC can run.
+        const credentialTimeout =
+          this.loginStatus &&
+          (method === 'initialize' ||
+            method === 'account/read' ||
+            method === 'getAuthStatus' ||
+            method === 'account/login/start' ||
+            method === 'account/logout');
+        reject(credentialTimeout ? this.credentials.block() : unavailable());
       }, 15000);
       this.pending.set(id, { resolve, reject, timer });
       try {
@@ -218,37 +347,50 @@ export class CodexUsageRuntime implements CodexUsagePort {
       }
     });
   }
+  private request(method: string, params?: unknown, signal?: AbortSignal) {
+    const generation = this.generation;
+    return this.credentials.run(async () => {
+      if (generation !== this.generation) throw unavailable();
+      signal?.throwIfAborted();
+      const started = await this.start(method, signal);
+      this.credentials.check();
+      signal?.throwIfAborted();
+      if (!started) return { account: null };
+      const reply = await this.call(method, params);
+      if (method === 'account/read' && this.checkedSignedIn && reply?.account === null)
+        throw this.credentials.block();
+      if (method === 'account/logout') this.checkedSignedIn = false;
+      return reply;
+    });
+  }
   async account(): Promise<UsageAccount | null> {
-    await this.start();
-    const result = await this.call('account/read', { refreshToken: false });
-    return result?.account?.type === 'chatgpt' && typeof result.account.email === 'string'
-      ? {
-          email: result.account.email.slice(0, 320),
-          planType: String(result.account.planType ?? 'unknown'),
-        }
-      : null;
+    const result = await this.request('account/read', { refreshToken: false });
+    if (result?.account === null || result?.account?.type === 'apiKey') return null;
+    if (result?.account?.type !== 'chatgpt' || typeof result.account.email !== 'string')
+      throw unavailable();
+    return {
+      email: result.account.email.slice(0, 320),
+      planType: String(result.account.planType ?? 'unknown'),
+    };
   }
   async limits() {
-    await this.start();
     // VoxCue displays usage windows, not the separate reset-credit inventory.
-    return this.call('account/rateLimits/read', { excludeResetCreditDetails: true });
+    return this.request('account/rateLimits/read', { excludeResetCreditDetails: true });
   }
   async access(): Promise<ManagedAccess> {
-    await this.start();
     // true forces a remote renewal even for a valid token. The official runtime
     // already renews credentials when needed with refreshToken: false.
     return managedAccess(
-      await this.call('getAuthStatus', { includeToken: true, refreshToken: false }),
+      await this.request('getAuthStatus', { includeToken: true, refreshToken: false }),
     );
   }
   async login(open: (url: string) => Promise<void>, signal: AbortSignal) {
     signal.throwIfAborted();
-    await this.start();
-    signal.throwIfAborted();
-    const login = await this.call('account/login/start', {
-      type: 'chatgpt',
-      useHostedLoginSuccessPage: true,
-    });
+    const login = await this.request(
+      'account/login/start',
+      { type: 'chatgpt', useHostedLoginSuccessPage: true },
+      signal,
+    );
     if (
       login?.type !== 'chatgpt' ||
       typeof login.loginId !== 'string' ||
@@ -265,6 +407,7 @@ export class CodexUsageRuntime implements CodexUsagePort {
         url.password
       )
         throw unavailable();
+      this.credentials.check();
       signal.throwIfAborted();
       await open(url.toString());
       await new Promise<void>((resolve, reject) => {
@@ -291,6 +434,7 @@ export class CodexUsageRuntime implements CodexUsagePort {
         else check();
       });
     } catch (error) {
+      this.credentials.check();
       this.cancel();
       const message = error instanceof Error ? error.message : '';
       if (
@@ -309,14 +453,16 @@ export class CodexUsageRuntime implements CodexUsagePort {
   cancel() {
     const loginId = this.loginId;
     this.loginId = undefined;
-    if (loginId) void this.call('account/login/cancel', { loginId }).catch(() => {});
+    if (loginId && !this.credentials.denied)
+      void this.call('account/login/cancel', { loginId }).catch(() => {});
   }
   async logout(ensureRunning = false) {
-    if (ensureRunning) await this.start();
-    if (this.child) await this.call('account/logout');
+    this.credentials.check();
+    if (ensureRunning || this.child) await this.request('account/logout');
   }
   async stop() {
     ++this.generation;
+    this.startupCheck?.abort();
     const child = this.child;
     if (child) {
       child.kill();
@@ -333,6 +479,6 @@ export class CodexUsageRuntime implements CodexUsagePort {
           });
         });
     }
-    this.starting = undefined;
+    this.checkedSignedIn = false;
   }
 }

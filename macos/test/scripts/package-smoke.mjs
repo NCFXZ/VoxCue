@@ -108,6 +108,16 @@ assert.equal(
 const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
 const archive = path.join(resources, 'app.asar');
+const assetManifest = JSON.parse(asar.extractFile(archive, 'dist/.vite/manifest.json'));
+const illustration = assetManifest['src/assets/interview-easter-egg.jpg'].file;
+for (const file of ['index.html', 'voxcue.png', 'voxcue-source.png', illustration]) {
+  const output = '/dist/' + file;
+  assert.ok(entries.includes(output), 'Required renderer output: ' + output);
+  assert.ok(
+    !entries.some((entry) => entry !== output && entry.replace(/ \d+(?=\.[^/]+$)/, '') === output),
+    'Unexpected numbered copy of ' + output,
+  );
+}
 const integrity = JSON.parse(run('/usr/bin/plutil', [
   '-extract', 'ElectronAsarIntegrity', 'json', '-o', '-', path.join(bundle, 'Contents/Info.plist'),
 ]));

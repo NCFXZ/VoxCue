@@ -276,10 +276,21 @@ export class ChatGPTService implements AIChatService {
           false,
         );
       };
+      let sourcesChanged = false;
+      const publishSources = () => {
+        if (!sourcesChanged) return;
+        emit({ id: request.id, type: 'sources', sources: [...sources.values()] });
+        sourcesChanged = false;
+      };
       const addSource = (value: unknown) => {
         const source = validSource(value);
         const key = source && sourceKey(source.url);
-        if (source && key && (sources.has(key) || sources.size < 300)) sources.set(key, source);
+        if (!source || !key) return;
+        const previous = sources.get(key);
+        if (!previous && sources.size >= 300) return;
+        if (previous?.url === source.url && previous.title === source.title) return;
+        sources.set(key, source);
+        sourcesChanged = true;
       };
       const collectSources = (item: any) => {
         for (const content of item?.content ?? [])
@@ -403,6 +414,7 @@ export class ChatGPTService implements AIChatService {
         if (event.type === 'response.web_search_call.completed') completedWebSearch = true;
         if (event.type === 'response.output_text.annotation.added') addSource(event.annotation);
         if (event.type === 'response.output_item.done') collectSources(event.item);
+        publishSources();
         if (['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) {
           const terminal = event.response;
           for (const [index, item] of (terminal?.output ?? []).entries()) {
@@ -447,7 +459,7 @@ export class ChatGPTService implements AIChatService {
             }
           }
           for (const item of terminal?.output ?? []) collectSources(item);
-          emit({ id: request.id, type: 'sources', sources: [...sources.values()] });
+          publishSources();
           if (event.type === 'response.failed')
             throw apiError(
               undefined,

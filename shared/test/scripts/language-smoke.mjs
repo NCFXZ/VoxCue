@@ -7,6 +7,11 @@ import { mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
+if (process.argv.includes('--bootstrap-only')) {
+  await import('./language-bootstrap-smoke.mjs');
+  process.exit(0);
+}
+
 const profile = await mkdtemp(path.join(testRoot, 'language-profile-'));
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;

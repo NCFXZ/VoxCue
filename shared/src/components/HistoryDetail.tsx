@@ -11,6 +11,7 @@ import {
 import { useHistory } from '../stores/history';
 import { SyncBadge } from './SyncBadge';
 import { useChatConnection } from '../stores/chatConnection';
+import { useAuth } from '../stores/auth';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
@@ -247,7 +248,14 @@ export function HistoryDetail({
             {record.titleStatus === 'failed' && (
               <p className="record-title-status">
                 <span>{t(record.titleError || '标题生成失败。')}</span>
-                <Button variant="ghost" onClick={() => void history.generateTitle(record.id)}>
+                <Button
+                  variant="ghost"
+                  onClick={async (event) => {
+                    const button = event.currentTarget;
+                    await useAuth.getState().ensure();
+                    if (button.isConnected) await history.generateTitle(record.id);
+                  }}
+                >
                   <Refresh size={16} />
                   {t('重试生成标题')}
                 </Button>

@@ -7,11 +7,31 @@ import { providerInfo } from '../services/providers';
 import chatGPTIcon from '../assets/chatgpt.svg?inline';
 import copilotIcon from '../assets/copilot.svg?inline';
 import { Link, LogOut, X, Loader } from './icons';
+import { uiMessages } from '../../electron/contracts/uiMessages';
+
+const connectionNotices: Readonly<Record<string, string>> = {
+  '无法读取本地登录信息，请检查应用数据后重试。': '无法读取登录信息，请重试。',
+  '无法完成 GitHub Copilot 登录，请检查网络和 Copilot 权限后重试。': 'GitHub Copilot 连接失败，请重试。',
+  'GitHub 授权地址校验失败，请重试。': 'GitHub 授权失败，请重试。',
+  'GitHub 授权回调校验失败，请重试。': 'GitHub 授权失败，请重试。',
+  '已有登录操作正在进行。': '正在登录，请稍候。',
+  '登录已取消，请重试。': '登录已取消。',
+  '已取消 ChatGPT 登录。': '登录已取消。',
+  'GitHub Copilot 授权已失效或账户已变更，请重新登录。': '请重新登录 GitHub Copilot。',
+  '未能确认 ChatGPT 授权已退出，可在官方账户设置中撤销应用授权。':
+    '无法确认已断开连接。可在 ChatGPT 账户设置中撤销授权。',
+};
+
+function connectionText(notice: string) {
+  if (Object.hasOwn(connectionNotices, notice)) return t(connectionNotices[notice]);
+  return Object.hasOwn(uiMessages, notice) ? t(notice) : t('连接操作失败，请重试。');
+}
 
 export function AIServicePanel() {
   const auth = useAuth();
   const localMode = useCloudAccount((s) => s.state.localMode);
   const connected = auth.session?.mode !== 'demo' && auth.session?.mode;
+  const notice = auth.connectionNotice || auth.error || auth.notice;
   return (
     <div className="ai-services-panel">
       <p className="settings-hint">
@@ -31,16 +51,18 @@ export function AIServicePanel() {
             <div>
               <strong>{providerInfo(service).name}</strong>
               <p className="settings-hint">
-                {connected === service ? auth.session?.user.email || t('已连接') : t('未连接')}
+                {connected === service
+                  ? auth.session?.user.email || t('已连接')
+                  : t(auth.resolved || auth.startupChecked ? '未连接' : '暂未验证连接状态')}
               </p>
             </div>
           </div>
           <div className="ai-service-actions">
             <Button
               variant="outline"
-              disabled={auth.waiting}
+              disabled={auth.waiting || auth.loading}
               onClick={() => {
-                void (connected === service ? auth.signOut() : auth.signIn(service));
+                void (connected === service ? auth.signOut() : auth.connect(service));
               }}
             >
               {auth.signingIn === service ? (
@@ -65,9 +87,9 @@ export function AIServicePanel() {
           </div>
         </div>
       ))}
-      {(auth.error || auth.notice) && (
+      {notice && (
         <p className="settings-error" role="alert">
-          {t(auth.error || auth.notice)}
+          {connectionText(notice)}
         </p>
       )}
       {connected && <UsagePanel />}

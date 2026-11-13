@@ -282,10 +282,11 @@ export async function checkMacUpdateCache(publicKey, privateKey, macUpdatePayloa
       'PASS: real Mac adapter loopback hourly/forced/failed/rollback checks, signed offline restoration, partial exit barrier/cooldown, manual retry and signature/hash/link rejection.',
     );
   } finally {
-    await host?.evaluate(() => globalThis.cacheUpdates?.dispose()).catch(() => {});
-    await host?.close().catch(() => {});
+    const closed = new Promise((resolve) => server.close(resolve));
     held?.destroy();
     server.closeAllConnections();
-    await new Promise((resolve) => server.close(resolve));
+    await host?.evaluate(() => globalThis.cacheUpdates?.dispose()).catch(() => {});
+    await host?.close().catch(() => {});
+    await closed;
   }
 }

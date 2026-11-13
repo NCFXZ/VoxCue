@@ -1,10 +1,12 @@
 import type { DesktopPlatform } from '../../shared/electron/platform/types';
 import { accountFetch } from './accountNetwork';
+import { codexLoginStatus } from './codexLoginStatus';
 
 // Apple Silicon native and packaged resource strategy.
 export const macos: DesktopPlatform = {
   id: 'darwin',
   accountFetch,
+  codexLoginStatus,
   qwenRuntimeFile: 'qwen/voxcue-qwen',
   updateDriverFile: 'macos/electron/updates/driver.js',
   iconFile: 'public/voxcue.png',

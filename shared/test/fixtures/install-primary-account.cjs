@@ -3,11 +3,7 @@
 module.exports = (root) => {
   const path = require('node:path');
   const fs = require('node:fs');
-  const { app, BrowserWindow } = require('electron');
-  const { ChatGPTAuthService } = require(
-    path.join(root, 'dist-electron/shared/electron/backend/auth/service.js'),
-  );
-  const originalSession = ChatGPTAuthService.prototype.session;
+  const { app } = require('electron');
   const { CloudAccountClient } = require(
     path.join(root, 'dist-electron/shared/electron/backend/cloud/client.js'),
   );
@@ -42,13 +38,6 @@ module.exports = (root) => {
   });
   CloudAccountClient.prototype.snapshot = state;
   CloudAccountClient.prototype.call = async function (input) {
-    if (
-      input.action === 'status' &&
-      !BrowserWindow.getAllWindows().length &&
-      ChatGPTAuthService.prototype.session !== originalSession &&
-      (await ChatGPTAuthService.prototype.session.call({}))
-    )
-      login();
     if (input.action === 'login') {
       login();
     } else if (input.action === 'logout') logout();

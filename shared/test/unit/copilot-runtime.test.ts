@@ -13,6 +13,10 @@ vi.mock('@github/copilot-sdk', () => ({
   RuntimeConnection: { forStdio: (options: unknown) => options },
 }));
 import { CopilotRuntime } from '../../electron/backend/copilot/runtime';
+import {
+  ProviderCredentialAccess,
+  ProviderCredentialUnavailable,
+} from '../../electron/backend/auth/providerCredentialAccess';
 
 const roots: string[] = [];
 const runtimes: CopilotRuntime[] = [];
@@ -118,3 +122,26 @@ it('正常关停先删除自有控制会话再停止 SDK，不强制结束', asy
     native.stop.mock.invocationCallOrder[0],
   );
 });
+
+it.each([false, true])(
+  '钥匙串拒绝直接结束自有进程，即使正常关停已经开始：%s',
+  async (alreadyStopping) => {
+    const native = client();
+    const root = await mkdtemp(path.join(os.tmpdir(), 'voxcue-copilot-runtime-'));
+    roots.push(root);
+    sdk.create.mockReturnValue(native);
+    const gate = new ProviderCredentialAccess('copilot', () => void value.stop());
+    const value = new CopilotRuntime(root, gate);
+    runtimes.push(value);
+    await value.control();
+    const closing = alreadyStopping ? value.stop() : undefined;
+    gate.block();
+    await (closing ?? value.stop());
+    expect(native.forceStop).toHaveBeenCalledTimes(1);
+    expect(native.deleteSession).not.toHaveBeenCalled();
+    expect(native.stop).not.toHaveBeenCalled();
+    await expect(value.client()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    await expect(value.control()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    expect(sdk.create).toHaveBeenCalledTimes(1);
+  },
+);

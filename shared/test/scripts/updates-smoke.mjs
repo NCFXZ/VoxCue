@@ -5,7 +5,12 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { closeUiApp, installUiAccount, focusUiWindow } from './install-ui-account.mjs';
+import {
+  closeUiApp,
+  installUiAccount,
+  focusUiWindow,
+  waitForRestoredMainWindow,
+} from './install-ui-account.mjs';
 import { assertDownloadButton, assertInitialDownloadProgress } from './assert-download-button.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { captureRequested } from './capture-requested.mjs';
@@ -73,12 +78,13 @@ await writeFile(
 delete env.ELECTRON_RUN_AS_NODE;
 let app;
 const errors = [];
-const launch = async () => {
+const launch = async ({ restore = false } = {}) => {
   app = await electron.launch({ args: [fixture], env });
-  const login = await app.firstWindow();
-  if (login.url().endsWith('#login'))
+  const entry = restore ? await waitForRestoredMainWindow(app) : await app.firstWindow();
+  if (!restore) {
+    await entry.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
     assert.equal(
-      await login.evaluate(() =>
+      await entry.evaluate(() =>
         window.desktop.updates({ op: 'install' }).then(
           () => false,
           () => true,
@@ -86,8 +92,9 @@ const launch = async () => {
       ),
       true,
     );
+  }
   await installUiAccount(app, { speech: true, components: true });
-  const page = await connectUiAccount(app, login);
+  const page = await connectUiAccount(app, entry);
   page.setDefaultTimeout(30000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
@@ -212,6 +219,11 @@ try {
     }), windowId);
     assert.deepEqual(state, { active: true, focused: true, visible: true });
   };
+  const focusCheckButton = async () => {
+    await focusUiWindow(app, page);
+    await checkButton.focus();
+    await assertFocusedWindow();
+  };
   await assertFocusedWindow();
   // Wait for the settings view snapshot to stop intercepting pointer input.
   await checkButton.hover();
@@ -316,6 +328,7 @@ try {
     [true],
     'A completed long hold bypasses the cache once; release must not issue a normal check',
   );
+  await focusCheckButton();
   const beforeKeyboard = await app.evaluate(() => globalThis.updateDriver.checks.length);
   await checkButton.press('Enter');
   await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
@@ -324,9 +337,7 @@ try {
     [false],
     'An ordinary keyboard press keeps the normal cached-check operation',
   );
-  await focusUiWindow(app, page);
-  await checkButton.focus();
-  await assertFocusedWindow();
+  await focusCheckButton();
   const beforeSpace = await app.evaluate(() => globalThis.updateDriver.checks.length);
   await page.keyboard.down('Space');
   try {
@@ -350,8 +361,7 @@ try {
     [true],
     'Repeated Space keydowns retain the original hold and release adds no check',
   );
-  await checkButton.focus();
-  await assertFocusedWindow();
+  await focusCheckButton();
   const beforeBlur = await app.evaluate(() => globalThis.updateDriver.checks.length);
   await page.keyboard.down('Space');
   try {
@@ -553,7 +563,7 @@ try {
   assert.deepEqual(JSON.parse(await readFile(path.join(profile, 'update-cleanup.json'), 'utf8')), {
     completed: true,
   }, 'Repeated quit requests wait for update cleanup to finish');
-  page = await launch();
+  page = await launch({ restore: true });
   assert.equal(
     await page.getByRole('textbox', { name: '聊天消息', exact: true }).inputValue(),
     '更新保存失败后恢复的合成草稿',

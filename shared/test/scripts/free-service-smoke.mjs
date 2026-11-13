@@ -542,7 +542,7 @@ try {
   await settings.getByRole('button', { name: '刷新账户额度', exact: true }).click();
   await main
     .locator('.user-info small')
-    .getByText('AI 服务用量暂不可用', { exact: true })
+    .getByText('ChatGPT 已连接', { exact: true })
     .waitFor();
   await settings.getByRole('button', { name: '断开连接', exact: true }).click();
   await main.locator('.user-info small').getByText('未连接 AI 服务', { exact: true }).waitFor();

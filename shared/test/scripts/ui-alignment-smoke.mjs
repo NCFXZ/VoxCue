@@ -286,11 +286,15 @@ try {
   page.on('pageerror', (error) => errors.push(error.message));
   await app.evaluate(({ ipcMain }) => {
     ipcMain.removeHandler('auth:session');
-    ipcMain.handle('auth:session', () => ({
-      mode: 'chatgpt',
-      user: { id: 'visual', name: 'Visual test', email: '' },
-      expiresAt: Date.now() + 3600000,
-    }));
+    ipcMain.handle('auth:session', (_event, service) =>
+      service === undefined || service === 'chatgpt'
+        ? {
+            mode: 'chatgpt',
+            user: { id: 'visual', name: 'Visual test', email: '' },
+            expiresAt: Date.now() + 3600000,
+          }
+        : null,
+    );
     ipcMain.removeHandler('chat:models');
     ipcMain.handle('chat:models', () => ({
       ok: true,
@@ -307,6 +311,7 @@ try {
     ipcMain.handle('chat:usage', () => ({ ok: false, error: { message: 'Visual fixture' } }));
   });
   await page.reload();
+  await connectUiAccount(app, page);
   await page
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('GPT test', { exact: true })

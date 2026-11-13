@@ -1,6 +1,7 @@
 import type { AccountUsage } from '../../contracts/accountUsage';
 import type { CodexUsagePort } from './codexUsage';
 import { chatGPTAccountUsage, chatGPTPlan } from './quota';
+import { ProviderCredentialUnavailable } from '../auth/providerCredentialAccess';
 
 export interface UsageIdentity {
   account: string;
@@ -27,7 +28,8 @@ export class ChatGPTAccountUsage {
       const result = chatGPTAccountUsage(limits);
       if (result.plan === 'unknown') result.plan = chatGPTPlan(account.planType);
       return result;
-    } catch {
+    } catch (error) {
+      if (error instanceof ProviderCredentialUnavailable) throw error;
       throw new Error('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。');
     }
   }

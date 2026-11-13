@@ -9,7 +9,6 @@ import 'katex/dist/katex.min.css';
 import {
   readableStrong,
   compactCitations,
-  citationSource,
   indexChatSources,
 } from '../services/markdown';
 import type { ChatSource } from '../../electron/contracts/chat';
@@ -60,16 +59,18 @@ function CodeBlock({ children }: { children?: ReactNode }) {
 export function MarkdownContent({
   content,
   sources = emptySources,
+  streaming = false,
 }: {
   content: string;
   sources?: readonly ChatSource[];
+  streaming?: boolean;
 }) {
   const [linkError, setLinkError] = useState(false);
   const sourceIndex = useMemo(() => indexChatSources(sources), [sources]);
   return (
     <div className="markdown-content">
       <Markdown
-        remarkPlugins={[remarkGfm, remarkMath, readableStrong, [compactCitations, sourceIndex]]}
+        remarkPlugins={[remarkGfm, remarkMath, readableStrong, [compactCitations, sourceIndex, streaming]]}
         rehypePlugins={[
           [rehypeKatex, { trust: false, strict: 'ignore', maxExpand: 1000, maxSize: 20 }],
           mathPresentation,
@@ -77,21 +78,16 @@ export function MarkdownContent({
         skipHtml
         components={{
           pre: CodeBlock,
-          a: ({ href, children }) => {
+          a: ({ href, children, node }) => {
             if (href?.startsWith('#')) return <a href={href}>{children}</a>;
             if (!href || !/^https?:\/\//i.test(href)) return <span>{children}</span>;
-            const label =
-              typeof children === 'string'
-                ? children
-                : Array.isArray(children) && children.every((child) => typeof child === 'string')
-                  ? children.join('')
-                  : '';
-            const source = citationSource(href, label, sourceIndex);
-            if (source)
+            const citation = node?.properties['data-citation'];
+            if (citation === 'confirmed' || citation === 'pending')
               return (
                 <SourceLink
                   url={href}
-                  title={source.title}
+                  title={sourceIndex.get(new URL(href).href)?.title ?? ''}
+                  showFavicon={citation === 'confirmed'}
                   inline
                   onError={() => setLinkError(true)}
                 />

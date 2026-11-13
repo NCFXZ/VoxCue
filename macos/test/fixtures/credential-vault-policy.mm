@@ -12,18 +12,28 @@
 #error A fixed canonical fixture executable path is required
 #endif
 #ifndef VOXCUE_FIXTURE_VAULT_ACCOUNT
-#define VOXCUE_FIXTURE_VAULT_ACCOUNT "VoxCue Key v8"
+#define VOXCUE_FIXTURE_VAULT_ACCOUNT "VoxCue Key v11"
 #endif
 
 static id fixtureItem;
 static SecAccessRef fixtureAccess;
 static NSUInteger fixtureItemCalls;
 static bool fixtureFailInteraction;
+static NSString *fixtureLabel = @"VoxCue 登录信息";
 
-static OSStatus fixtureAttributes(SecKeychainItemRef item, SecKeychainAttributeInfo *, SecItemClass *kind,
+static OSStatus fixtureAttributes(SecKeychainItemRef item, SecKeychainAttributeInfo *info, SecItemClass *kind,
     SecKeychainAttributeList **attributes, UInt32 *, void **data) {
   ++fixtureItemCalls;
-  if (item != (__bridge SecKeychainItemRef)fixtureItem || data || !kind || !attributes) return errSecParam;
+  if (item != (__bridge SecKeychainItemRef)fixtureItem || data || !kind || !attributes || !info) return errSecParam;
+  if (info->count == 1 && info->tag[0] == kSecLabelItemAttr) {
+    static SecKeychainAttribute value;
+    value = {kSecLabelItemAttr, (UInt32)strlen(fixtureLabel.UTF8String), (void *)fixtureLabel.UTF8String};
+    static SecKeychainAttributeList list{1, &value};
+    *kind = kSecGenericPasswordItemClass; *attributes = &list;
+    return errSecSuccess;
+  }
+  if (info->count != 2 || info->tag[0] != kSecServiceItemAttr || info->tag[1] != kSecAccountItemAttr)
+    return errSecParam;
   static char service[] = "VoxCue Credential Storage", account[] = VOXCUE_FIXTURE_VAULT_ACCOUNT;
   static SecKeychainAttribute values[] = {
     {kSecServiceItemAttr, sizeof(service) - 1, service},
@@ -87,13 +97,17 @@ static OSStatus rewriteFixtureSignature(CSSM_LIST &list, NSData *path, NSData *r
 }
 
 static OSStatus makePolicy(NSString *variant, SecAccessRef *result) {
+  NSString *name = [variant isEqual:@"own-en"] || [variant isEqual:@"label-mismatch"]
+    ? @"VoxCue Sign-in Information" : @"VoxCue 登录信息";
+  fixtureLabel = [variant isEqual:@"unknown-label"] ? @"VoxCue Unknown"
+    : [variant isEqual:@"label-mismatch"] ? @"VoxCue 登录信息" : name;
   SecTrustedApplicationRef self = NULL, foreign = NULL;
   OSStatus status = SecTrustedApplicationCreateFromPath(NULL, &self);
   if (!status) status = SecTrustedApplicationCreateFromPath("/usr/bin/true", &foreign);
   if (status) { if (self) CFRelease(self); return status; }
   id ownApplication = CFBridgingRelease(self), otherApplication = CFBridgingRelease(foreign);
   SecAccessRef raw = NULL;
-  status = SecAccessCreate(CFSTR("VoxCue 登录信息"), (__bridge CFArrayRef)@[ownApplication], &raw);
+  status = SecAccessCreate((__bridge CFStringRef)name, (__bridge CFArrayRef)@[ownApplication], &raw);
   if (status) return status;
   id access = CFBridgingRelease(raw);
   CFArrayRef list = NULL;
@@ -108,7 +122,9 @@ static OSStatus makePolicy(NSString *variant, SecAccessRef *result) {
       ([variant isEqual:@"applications-extra"] && !owner);
     NSArray *apps = [variant isEqual:@"foreign-same-path"] ? @[otherApplication]
       : extra ? @[ownApplication, otherApplication] : @[ownApplication];
-    status = SecACLSetContents(rule, (__bridge CFArrayRef)apps, CFSTR("VoxCue 登录信息"),
+    NSString *description = ([variant isEqual:@"owner-name-mismatch"] && owner) ||
+      ([variant isEqual:@"ordinary-name-mismatch"] && !owner) ? @"VoxCue Sign-in Information" : name;
+    status = SecACLSetContents(rule, (__bridge CFArrayRef)apps, (__bridge CFStringRef)description,
       (SecKeychainPromptSelector)0);
   }
   if (status) return status;
@@ -219,14 +235,19 @@ int main(int argc, const char **argv) {
     if (self) CFRelease(self);
     if (status) return 77;
     fixtureItem = [NSObject new];
-    for (NSString *variant in @[@"own", @"moved-same-identity", @"foreign-same-path", @"broad-same-path",
+    for (NSString *variant in @[@"own", @"own-en", @"label-mismatch", @"owner-name-mismatch",
+        @"ordinary-name-mismatch", @"unknown-label", @"moved-same-identity", @"foreign-same-path", @"broad-same-path",
         @"partition-extra", @"partition-foreign",
         @"applications-extra", @"owner-extra", @"partition-forged", @"partition-extra-field"]) {
       status = makePolicy(variant, &fixtureAccess);
       if (status) { fprintf(stderr, "fixture-policy-construct:%s:%d\n", variant.UTF8String, (int)status); return 92; }
+      // Existing entries follow their persisted complete policy, even when the
+      // next request's language differs. No relabeling or ACL rewrite occurs.
+      requestedVaultName = [fixtureLabel isEqual:@"VoxCue Sign-in Information"]
+        ? @"VoxCue 登录信息" : @"VoxCue Sign-in Information";
       const OSStatus checked = verifyVault(fixtureItem);
       CFRelease(fixtureAccess); fixtureAccess = NULL;
-      const bool expected = [variant isEqual:@"own"] || [variant isEqual:@"moved-same-identity"];
+      const bool expected = [variant isEqual:@"own"] || [variant isEqual:@"own-en"] || [variant isEqual:@"moved-same-identity"];
       if ((checked == errSecSuccess) != expected) {
         fprintf(stderr, "fixture-policy-unexpected:%s:%d\n", variant.UTF8String, (int)checked);
         return 93;

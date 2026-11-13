@@ -51,6 +51,40 @@ describe('Markdown 回答', () => {
     expect(unknown).toContain('<p>(<a');
     expect(unknown).toContain('</a>)</p>');
   });
+  it('生成时只将完整括号内的同域 Markdown 链接显示为无远程图标的胶囊', () => {
+    const url = 'https://docs.example.org/manual';
+    const link = '[docs.example.org](' + url + ')';
+    for (const content of ['(' + link + ')', '（' + link + '）']) {
+      const waiting = renderToStaticMarkup(<MarkdownContent content={content} streaming />);
+      expect(waiting).toContain('<p><a class="chat-source-link"');
+      expect(waiting).toContain('aria-label="docs.example.org"');
+      expect(waiting).toContain('<svg');
+      expect(waiting).toContain('</a></p>');
+      expect(waiting).not.toContain('<img');
+      const source = { title: 'Reference manual', url };
+      const known = renderToStaticMarkup(<MarkdownContent content={content} sources={[source]} streaming />);
+      expect(known).toContain('aria-label="Reference manual · docs.example.org"');
+      expect(known).toContain('src="https://a.favicon.im/docs.example.org?throw-error-on-404=true"');
+    }
+    const wwwLink = '([fishros.com](https://www.fishros.com/articles))';
+    for (const sources of [[], [{ title: 'FishROS', url: 'https://www.fishros.com/articles' }]]) {
+      const html = renderToStaticMarkup(<MarkdownContent content={wwwLink} sources={sources} streaming />);
+      expect(html).toContain('class="chat-source-label">fishros.com</span>');
+      expect(html.includes('<img')).toBe(sources.length > 0);
+    }
+    const ordinary = [link, '(' + link, '(' + link + '）', '(&#91;docs.example.org](' + url + '))',
+      '([manual](' + url + '))', '([www2.docs.example.org](' + url + '))',
+      '([docs.example.org](https://other.example.org/))',
+      '([docs.example.org](https://user:password@docs.example.org/))',
+      '([docs.example.org](file:///docs.example.org))',
+      '(`' + link + '`)', '```text\n(' + link + ')\n```',
+    ];
+    for (const content of ordinary) {
+      const html = renderToStaticMarkup(<MarkdownContent content={content} streaming />);
+      expect(html, content).not.toContain('chat-source-link');
+      expect(html, content).not.toContain('<img');
+    }
+  });
   it('来源列表保持顺序与更多入口，胶囊显示站点并保留完整无障碍标题', () => {
     const sources = Array.from({ length: 4 }, (_, index) => ({
       title: `Source ${index + 1}`,

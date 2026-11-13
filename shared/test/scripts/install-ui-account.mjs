@@ -9,7 +9,6 @@ export async function focusUiWindow(app, page) {
     executable: app.getPath('exe'),
     profile: app.getPath('userData'),
     pid: process.pid,
-    active: app.isActive(),
   }));
   const allowed = [
     workspace.platformRequire('electron'),
@@ -21,45 +20,55 @@ export async function focusUiWindow(app, page) {
     host.pid !== app.process().pid
   )
     throw Error('Native focus requires this run’s verified development host and profile');
-  // Launch Services explicitly activates the already running owned development
-  // app. Newer macOS can decline an inactive app's self-activation request.
-  if (!host.active) execFileSync('/usr/bin/open', ['-a', path.resolve(host.executable, '../../..')], {
-    stdio: 'pipe',
-    timeout: 3000,
-  });
-  await app.evaluate(({ app }) => app.focus({ steal: true }));
-  const id = await (
-    await app.browserWindow(page)
-  ).evaluate((window) => {
-    window.focus();
-    return window.id;
-  });
-  await app.evaluate(async ({ app, BrowserWindow }, id) => {
-    const deadline = Date.now() + 3000;
-    while (Date.now() < deadline) {
+  const id = await (await app.browserWindow(page)).evaluate((window) => window.id);
+  const deadline = Date.now() + 4000;
+  let focused = false;
+  while (!focused && Date.now() < deadline) {
+    // Launch Services activation is asynchronous. Raise the exact target after
+    // requesting activation, and allow another attempt if macOS changed focus.
+    if (!(await app.evaluate(({ app }) => app.isActive()))) {
+      execFileSync('/usr/bin/open', ['-a', path.resolve(host.executable, '../../..')], {
+        stdio: 'pipe',
+        timeout: 3000,
+      });
+    }
+    await page.bringToFront();
+    focused = await app.evaluate(async ({ app, BrowserWindow }, id) => {
       const window = BrowserWindow.fromId(id);
       if (!window || window.isDestroyed()) throw Error('Owned Mac focus window closed');
-      if (app.isActive() && window.isVisible() && BrowserWindow.getFocusedWindow()?.id === id)
-        return;
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    }
-    throw Error(
-      'Owned Mac app/key window did not acquire native focus: ' +
-        JSON.stringify({
-          targetId: id,
-          active: app.isActive(),
-          focusedId: BrowserWindow.getFocusedWindow()?.id,
-          dockVisible: app.dock?.isVisible(),
-          windows: BrowserWindow.getAllWindows().map((value) => ({
-            id: value.id,
-            visible: value.isVisible(),
-            minimized: value.isMinimized(),
-            focusable: value.isFocusable(),
-            focused: value.isFocused(),
-          })),
-        }),
+      if (window.isVisible() && !window.isMinimized() && window.isFocusable()) {
+        app.focus({ steal: true });
+        window.moveTop();
+        window.focus();
+      }
+      const until = Date.now() + 500;
+      do {
+        if (app.isActive() && window.isVisible() && BrowserWindow.getFocusedWindow()?.id === id)
+          return true;
+        await new Promise((resolve) => setTimeout(resolve, 25));
+      } while (Date.now() < until);
+      return false;
+    }, id);
+  }
+  if (!focused) {
+    const state = await app.evaluate(
+      ({ app, BrowserWindow }, id) => ({
+        targetId: id,
+        active: app.isActive(),
+        focusedId: BrowserWindow.getFocusedWindow()?.id,
+        dockVisible: app.dock?.isVisible(),
+        windows: BrowserWindow.getAllWindows().map((value) => ({
+          id: value.id,
+          visible: value.isVisible(),
+          minimized: value.isMinimized(),
+          focusable: value.isFocusable(),
+          focused: value.isFocused(),
+        })),
+      }),
+      id,
     );
-  }, id);
+    throw Error('Owned Mac app/key window did not acquire native focus: ' + JSON.stringify(state));
+  }
   await page.waitForFunction(() => document.hasFocus());
 }
 export async function openReasoningControl(
@@ -85,9 +94,13 @@ export async function openModelMenu(page, triggerLabel = '聊天模型', effortL
     triggerId,
     popupId: await popup.getAttribute('id'),
   };
-  await popup.getByRole('button', { name: '选择模型', exact: true }).click();
   try {
-    await popup.getByRole('menuitemradio').first().waitFor();
+    // The first click after a reload opens the model list while the provider
+    // session is restored. With a resolved session the popup opens on effort.
+    const chooseModel = popup.getByRole('button', { name: '选择模型', exact: true });
+    if (await chooseModel.count()) await chooseModel.click();
+    await popup.getByRole('menu', { name: '选择模型', exact: true })
+      .getByRole('menuitemradio').first().waitFor();
   } catch (error) {
     const diagnostic = await page
       .evaluate(async ({ triggerId, popupId }) => {
@@ -146,6 +159,21 @@ export async function enterDemoUiAccount(app, login) {
   await app.evaluate(() => globalThis.primaryAccountFixture.login());
   return login.evaluate(() => window.desktop.enterDemo());
 }
+export async function waitForRestoredMainWindow(app) {
+  const deadline = Date.now() + 15000;
+  while (Date.now() < deadline) {
+    // The offline main opens index.html without a fragment. The hidden Mac
+    // language bootstrap opens index.html#login and closes during restoration.
+    const main = app.windows().find((page) => !page.isClosed() && page.url().endsWith('/index.html'));
+    if (main) {
+      await main.getByRole('button', { name: '用户菜单', exact: true })
+        .waitFor({ timeout: Math.max(1, deadline - Date.now()) });
+      return main;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw Error('Primary account did not restore its main window');
+}
 export async function enterPrimaryUiAccount(app, login) {
   await app.evaluate(
     ({ app }, fixture) => {
@@ -180,17 +208,21 @@ export async function enterPrimaryUiAccount(app, login) {
 export async function connectUiAccount(app, login, service = 'chatgpt') {
   await login.waitForLoadState('domcontentloaded');
   const main = login.url().endsWith('#login') ? await enterPrimaryUiAccount(app, login) : login;
-  // Domain-specific tests supply their own AI service port. Account entry is
-  // always the production email form; AI is a separate connection after entry.
-  await main.evaluate(
-    (provider) =>
-      provider === 'copilot'
-        ? window.desktop.signInWithCopilot()
-        : window.desktop.signInWithChatGPT(),
-    service,
-  );
-  await main.reload();
-  await main.getByRole('button', { name: '用户菜单', exact: true }).waitFor();
+  // Exercise the same explicit provider selection as a user. This updates the
+  // renderer that owns the test without requiring a probe on the next reload.
+  await main.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await main.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const settings = main.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  const row = settings.locator('.ai-service-row').filter({
+    hasText: service === 'copilot' ? 'GitHub Copilot' : 'ChatGPT',
+  });
+  const connected = row.getByRole('button', { name: '断开连接', exact: true });
+  await row.waitFor();
+  if (!(await connected.isVisible()))
+    await row.getByRole('button', { name: '连接', exact: true }).click();
+  await connected.waitFor();
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   return main;
 }
 // Called only by Playwright in an isolated test process. No real OAuth/AI/audio.

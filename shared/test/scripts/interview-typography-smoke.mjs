@@ -1,4 +1,4 @@
-import { connectUiAccount } from './install-ui-account.mjs';
+import { connectUiAccount, waitForRestoredMainWindow } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
@@ -1216,9 +1216,9 @@ try {
   ]);
   await closeUiApp(app);
   app = await electron.launch({ args: [await offlineElectronEntry()], env });
+  const restarted = await waitForRestoredMainWindow(app);
   await installUiAccount(app, { speech: true, components: true });
-  const restartedLogin = await app.firstWindow();
-  const restarted = await connectUiAccount(app, restartedLogin);
+  await connectUiAccount(app, restarted);
   await openSettings(restarted);
   assert.equal(
     await restarted.getByRole('slider', { name: '面试字体大小', exact: true }).inputValue(),

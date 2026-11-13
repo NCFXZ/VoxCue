@@ -1,4 +1,4 @@
-import { enterDemoUiAccount, openModelMenu } from './install-ui-account.mjs';
+import { connectUiAccount, enterDemoUiAccount, openModelMenu } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -160,6 +160,8 @@ try {
         const request = JSON.parse(options.body);
         if (request.input.at(-1).content === '状态测试') {
           const encoder = new TextEncoder();
+          const citation = { url: 'https://docs.example.org/guide', title: '实时来源' };
+          const answer = '状态演示已完成\n\n([docs.example.org](https://docs.example.org/guide)) · [阅读教程](https://docs.example.org/guide)';
           const events = [
             { type: 'response.created' },
             { type: 'response.output_item.added', item: { type: 'reasoning' } },
@@ -175,8 +177,9 @@ try {
             { type: 'response.output_text.delta', delta: '{"answer":"' },
             {
               type: 'response.output_text.delta',
-              delta: JSON.stringify({ answer: '状态演示已完成', changes: {} }).slice(11),
+              delta: JSON.stringify({ answer, changes: {} }).slice(11),
             },
+            { type: 'response.output_text.annotation.added', annotation: { type: 'url_citation', ...citation } },
             {
               type: 'response.completed',
               response: { id: 'status-test', status: 'completed', output: [] },
@@ -186,6 +189,8 @@ try {
             new ReadableStream({
               async start(controller) {
                 for (const event of events) {
+                  if (event.type === 'response.output_text.annotation.added' || event.type === 'response.completed')
+                    await new Promise((resolve) => { globalThis.advanceCitationStream = resolve; });
                   controller.enqueue(encoder.encode('data: ' + JSON.stringify(event) + '\n\n'));
                   await new Promise((resolve) => setTimeout(resolve, 700));
                 }
@@ -266,11 +271,15 @@ try {
     });
     for (const channel of ['auth:session', 'chat:models', 'chat:usage', 'chat:send'])
       ipcMain.removeHandler(channel);
-    ipcMain.handle('auth:session', () => ({
-      mode: 'chatgpt',
-      user: { id: 'test', name: 'Test', email: '' },
-      expiresAt: Date.now() + 3600000,
-    }));
+    ipcMain.handle('auth:session', (_event, service) =>
+      service === undefined || service === 'chatgpt'
+        ? {
+            mode: 'chatgpt',
+            user: { id: 'test', name: 'Test', email: '' },
+            expiresAt: Date.now() + 3600000,
+          }
+        : null,
+    );
     ipcMain.handle('chat:models', async () => ({ ok: true, models: await service.models() }));
     ipcMain.handle('chat:usage', async () => ({ ok: true, usage: await service.usage() }));
     ipcMain.handle('chat:send', async (event, request) => {
@@ -300,6 +309,7 @@ try {
     ),
   );
   await page.reload();
+  await connectUiAccount(app, page);
   await page
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('Test Luna')
@@ -728,6 +738,28 @@ try {
   }
   assert.equal(await page.getByText('正在等待服务响应', { exact: true }).count(), 0);
   await page.getByText('状态演示已完成', { exact: true }).waitFor();
+  const streamingAnswer = page.locator('.chat-message.assistant').last();
+  const citation = streamingAnswer.locator('.chat-answer a.chat-source-link');
+  await citation.getByText('docs.example.org', { exact: true }).waitFor();
+  assert.equal(await citation.locator('img').count(), 0);
+  assert.equal(await streamingAnswer.locator('.chat-source-group').count(), 0);
+  assert.equal(await streamingAnswer.locator('.chat-answer a:not(.chat-source-link)').innerText(), '阅读教程');
+  const advanceStream = async () => {
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 5000;
+      while (!globalThis.advanceCitationStream) {
+        if (Date.now() >= deadline) throw Error('Expected a paused synthetic citation stream');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+      const next = globalThis.advanceCitationStream;
+      delete globalThis.advanceCitationStream;
+      next();
+    });
+  };
+  await advanceStream();
+  await streamingAnswer.locator('.chat-answer').getByRole('link', { name: '实时来源 · docs.example.org' }).waitFor();
+  await streamingAnswer.locator('.chat-source-group').getByText('docs.example.org', { exact: true }).waitFor();
+  await advanceStream();
   assert.equal(await page.locator('.chat-message.assistant').last().locator('.chat-message-time').count(), 1, 'The assistant clock appears with nonempty answer text');
   await page.locator('.progress-state-label.is-active').waitFor({ state: 'detached' });
   await page.reload();

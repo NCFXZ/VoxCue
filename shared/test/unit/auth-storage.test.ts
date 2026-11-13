@@ -18,7 +18,7 @@ vi.mock('electron', () => ({
   },
 }));
 import { createAuthStorage } from '../../electron/backend/auth/storage';
-import { createCopilotLoginStorage } from '../../electron/backend/copilot/storage';
+import { createCopilotLoginStorage, createServiceSelection } from '../../electron/backend/copilot/storage';
 afterEach(async () => {
   if (native.directory) await rm(native.directory, { recursive: true, force: true });
   native.directory = '';
@@ -105,7 +105,10 @@ it.each([
   await mkdir(directory);
   const before = JSON.stringify(invalid);
   await writeFile(path.join(directory, 'credentials.bin'), before);
-  await expect(store.read()).rejects.toThrow('无效');
+  await expect(store.read()).rejects.toMatchObject({
+    message: '本地登录信息无效，请检查应用数据。',
+    code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+  });
   expect(await readFile(path.join(directory, 'credentials.bin'), 'utf8')).toBe(before);
 });
 it.each(['credentials.bin', 'copilot-session.json'])(
@@ -127,3 +130,79 @@ it.each(['credentials.bin', 'copilot-session.json'])(
     expect(await readFile(path.join(directory, 'unrelated.tmp'), 'utf8')).toBe('preserve');
   },
 );
+
+const sessionFor = (mode: 'chatgpt' | 'copilot') => ({
+  mode, user: { id: 'synthetic', name: 'Example', email: '' }, expiresAt: null,
+});
+async function selectionFile(previous?: unknown) {
+  native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-selection-'));
+  const directory = path.join(native.directory, 'auth-data');
+  await mkdir(directory);
+  const file = path.join(directory, 'service.json');
+  if (previous !== undefined) await writeFile(file, JSON.stringify(previous));
+  return file;
+}
+
+it('fresh and explicitly disconnected installs skip startup; only explicit success enables restore', async () => {
+  const file = await selectionFile();
+  const state = createServiceSelection();
+  const verify = vi.fn(async (service: 'chatgpt' | 'copilot') => sessionFor(service));
+  expect(await state.session('startup', verify)).toBeNull();
+  expect(verify).not.toHaveBeenCalled();
+  expect(await state.session(undefined, verify)).toEqual(sessionFor('chatgpt'));
+  await expect(readFile(file)).rejects.toMatchObject({ code: 'ENOENT' });
+  await state.set('chatgpt', false);
+  const disconnected = createServiceSelection();
+  verify.mockClear();
+  expect(await disconnected.session(undefined, verify)).toBeNull();
+  expect(await disconnected.session('startup', verify)).toBeNull();
+  expect(verify).not.toHaveBeenCalled();
+  await disconnected.session('chatgpt', async () => null);
+  expect(JSON.parse(await readFile(file, 'utf8')).connected).toBe(false);
+  expect(await disconnected.session('chatgpt', verify)).toEqual(sessionFor('chatgpt'));
+  expect(await createServiceSelection().session('startup', verify)).toEqual(sessionFor('chatgpt'));
+});
+
+it.each(['chatgpt', 'copilot'] as const)('legacy %s validates only that provider once, then retires an expired selection', async (service) => {
+  const file = await selectionFile(service);
+  const state = createServiceSelection();
+  const verify = vi.fn(async () => null);
+  await Promise.all([state.session('startup', verify), state.session('startup', verify)]);
+  expect(verify).toHaveBeenCalledExactlyOnceWith(service);
+  expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 2, service, connected: false });
+  await createServiceSelection().session('startup', verify);
+  expect(verify).toHaveBeenCalledTimes(1);
+});
+
+it('temporary failure preserves the prior selection, a successful switch ignores late verification', async () => {
+  const file = await selectionFile('copilot');
+  const state = createServiceSelection();
+  const unavailable = vi.fn(async () => { throw Error('temporary'); });
+  await expect(state.session('startup', unavailable)).rejects.toThrow('temporary');
+  await expect(state.session('startup', unavailable)).rejects.toThrow('temporary');
+  expect(unavailable).toHaveBeenCalledTimes(1);
+  state.changing(); // Cancelled/failed interactive login to the other provider.
+  expect(JSON.parse(await readFile(file, 'utf8'))).toBe('copilot');
+  let finish!: (session: null) => void;
+  const slow = vi.fn(() => new Promise<null>((resolve) => { finish = resolve; }));
+  const old = state.session('startup', slow);
+  await vi.waitFor(() => expect(slow).toHaveBeenCalledExactlyOnceWith('copilot'));
+  state.changing();
+  await state.set('chatgpt', true);
+  finish(null);
+  expect(await old).toBeNull();
+  expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 2, service: 'chatgpt', connected: true });
+  const verify = vi.fn(async (provider: 'chatgpt' | 'copilot') => sessionFor(provider));
+  expect(await createServiceSelection().session('startup', verify)).toEqual(sessionFor('chatgpt'));
+  expect(verify).toHaveBeenCalledExactlyOnceWith('chatgpt');
+});
+
+it('invalid selection fails closed and an explicit successful login repairs it', async () => {
+  await selectionFile({ version: 2, service: 'copilot', connected: 'yes' });
+  const state = createServiceSelection();
+  const verify = vi.fn(async (service: 'chatgpt' | 'copilot') => sessionFor(service));
+  await expect(state.session('startup', verify)).rejects.toThrow('选择无效');
+  expect(verify).not.toHaveBeenCalled();
+  await state.set('copilot', true);
+  expect(await state.session('startup', verify)).toEqual(sessionFor('copilot'));
+});

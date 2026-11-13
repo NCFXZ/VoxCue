@@ -109,6 +109,22 @@ it('ChatGPT返回两窗显示两窗，仅周则不生成五小时卡片', () => 
   expect(html).not.toContain('5小时额度');
   expect(html).not.toContain('连接 ChatGPT 用量');
 });
+it.each(['chatgpt', 'copilot'] as const)('设置卡片与摘要都显示整数，进度保留供应商精度：%s', (provider) => {
+  fixture.mode = provider;
+  for (const [remaining, integer] of [[19, 19], [19.99, 19], [75.246, 75]]) {
+    fixture.usage = provider === 'chatgpt'
+      ? chatGPTAccountUsage({ rateLimits: { primary: { usedPercent: 100 - remaining, windowDurationMins: 300 } } })
+      : copilotAccountUsage({ snapshots: { chat: { entitlementRequests: 100, usedRequests: 100 - remaining, remainingPercentage: remaining, hasQuota: true } } });
+    const raw = fixture.usage.quotas[0].remainingPercent;
+    const card = renderToStaticMarkup(<UsagePanel />);
+    expect(raw).toBeCloseTo(remaining, 8);
+    expect(card).toContain(`class="account-quota-remaining">剩余 ${integer}%</span>`);
+    expect(card).toContain(`aria-valuenow="${raw}"`);
+    const summary = renderToStaticMarkup(<AccountUsageSummary usage={fixture.usage} mode="sidebar" />);
+    expect(summary.replace(/<[^>]*>/g, '')).toContain(`${integer}%`);
+    expect(summary).not.toMatch(/\d\.\d+%/);
+  }
+});
 it('刷新按已知窗口生成骨架：两窗两卡，仅周一卡，结构不含已用百分比', () => {
   fixture.mode = 'chatgpt';
   fixture.loading = true;

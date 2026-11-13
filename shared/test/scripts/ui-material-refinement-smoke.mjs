@@ -189,6 +189,7 @@ try {
     localStorage.setItem('voxcue-interview-background-transparency-v1', '100');
   });
   await page.reload();
+  await connectUiAccount(app, page);
   await page
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('Test Model', { exact: true })

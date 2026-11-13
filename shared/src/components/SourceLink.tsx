@@ -7,13 +7,12 @@ import './sourceLink.css';
 
 const failedIcons = new Map<string, number>();
 
-function SourceIcon({ host }: { host: string }) {
-  const src = sourceFaviconURL(host);
+function SourceIcon({ src }: { src: string | null }) {
   const [status, setStatus] = useState<'pending' | 'ready' | 'failed'>(() =>
     src && (failedIcons.get(src) ?? 0) > Date.now() ? 'failed' : 'pending',
   );
   return (
-    <span className="chat-source-icon" aria-hidden="true" data-ready={status === 'ready'}>
+    <span className="chat-source-icon" aria-hidden="true" data-ready={!!src && status === 'ready'}>
       <Globe size={11} />
       {src && status !== 'failed' && (
         <img
@@ -41,12 +40,14 @@ export function SourceLink({
   url,
   title,
   inline = false,
+  showFavicon = true,
   onOpen,
   onError,
 }: {
   url: string;
   title: string;
   inline?: boolean;
+  showFavicon?: boolean;
   onOpen?(): void;
   onError(): void;
 }) {
@@ -54,7 +55,7 @@ export function SourceLink({
   if (!host) return <span>{title || url}</span>;
   const content = (
     <>
-      <SourceIcon key={host} host={host} />
+      <SourceIcon key={host} src={showFavicon ? sourceFaviconURL(host) : null} />
       <span className="chat-source-label">{host.replace(/^www\./, '')}</span>
     </>
   );

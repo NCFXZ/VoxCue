@@ -80,7 +80,10 @@ it('does not mistake an encrypted null record for a missing credential file', as
   await vault.write(value);
   const file = path.join(native.directory, 'cloud-account/session.bin');
   await writeFile(file, 'fixture:null');
-  await expect(vault.read()).rejects.toThrow('Invalid credentials');
+  await expect(vault.read()).rejects.toMatchObject({
+    message: 'Invalid credentials',
+    code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+  });
   expect(await readFile(file, 'utf8')).toBe('fixture:null');
 });
 it('keeps maintenance reads on the noninteractive port and preserves encrypted recovery bytes', async () => {

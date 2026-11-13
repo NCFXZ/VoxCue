@@ -6,7 +6,12 @@ import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
+import {
+  installUiAccount,
+  closeUiApp,
+  focusUiWindow,
+  waitForRestoredMainWindow,
+} from './install-ui-account.mjs';
 
 const desktop =
   process.platform === 'darwin'
@@ -155,7 +160,7 @@ try {
 
   // A fresh process restores local access without any account API calls.
   app = await launch();
-  main = await app.firstWindow();
+  main = await waitForRestoredMainWindow(app);
   main.on('pageerror', (e) => errors.push(e.message));
   await main.getByRole('textbox', { name: '聊天消息' }).waitFor();
   assert.deepEqual(await app.evaluate(() => globalThis.localCloudCalls), []);
@@ -278,11 +283,9 @@ try {
 
   // Local mode can connect an AI provider, without a VoxCue account or demo mode.
   await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
-  await settings
-    .locator('.ai-service-row')
-    .first()
-    .getByRole('button', { name: '连接', exact: true })
-    .click();
+  const chatgpt = settings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
+  await chatgpt.getByRole('button', { name: '连接', exact: true }).click();
+  await chatgpt.getByRole('button', { name: '断开连接', exact: true }).waitFor();
   assert.equal((await main.evaluate(() => window.desktop.authSession())).mode, 'chatgpt');
   assert.equal(
     (await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }))).state.user,

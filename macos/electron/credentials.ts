@@ -1,15 +1,23 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { CredentialEncryption } from '../../shared/electron/backend/auth/storage';
+import {
+  credentialRetainedItemIds,
+  type CredentialCleanup,
+} from '../../shared/electron/contracts/credentialMaintenance';
+import { credentialProblemMessages } from '../../shared/electron/contracts/credentialProblems';
+export type { CredentialCleanup } from '../../shared/electron/contracts/credentialMaintenance';
 
 type Operation = 'encrypt' | 'decrypt' | 'validate' | 'probe' | 'cleanup';
-class CredentialDataError extends Error {}
+class CredentialDataError extends Error {
+  readonly code = 'VOXCUE_CREDENTIAL_INVALID_DATA';
+}
+class CredentialUnavailableError extends Error {
+  readonly code = 'VOXCUE_CREDENTIAL_UNAVAILABLE';
+}
+class CredentialTimeoutError extends Error {
+  readonly code = 'VOXCUE_CREDENTIAL_TIMEOUT';
+}
 class CredentialValidationError extends Error {}
-export type CredentialCleanup = {
-  cleanup: 'complete' | 'partial' | 'deferred';
-  removed: number;
-  retained: number;
-  reason: 'none' | 'current' | 'authorization' | 'failed';
-};
 export interface MacCredentialEncryption extends CredentialEncryption {
   /**
    * Removes superseded historical Keychain copies without any system dialog,
@@ -31,6 +39,7 @@ const cleanupReasons = new Set(['none', 'current', 'authorization', 'failed']);
 export function createCredentialEncryption(
   executable: string,
   confirmMigration?: () => Promise<boolean>,
+  language: () => 'zh-CN' | 'en' | Promise<'zh-CN' | 'en'> = () => 'zh-CN',
 ): MacCredentialEncryption {
   type Request = {
     operation: Operation;
@@ -43,12 +52,33 @@ export function createCredentialEncryption(
   let failed: Error | undefined;
   let noticeAccepted = !confirmMigration;
   const unavailable = () =>
-    Error('macOS 凭据操作未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。');
+    new CredentialUnavailableError(credentialProblemMessages.VOXCUE_CREDENTIAL_UNAVAILABLE);
   const invalid = () =>
-    Error('macOS 凭据加密助手返回无效，登录信息未更改；已停止重复请求，请重新启动 VoxCue 后重试。');
+    new CredentialUnavailableError(
+      'macOS 凭据加密助手返回无效，登录信息未更改；已停止重复请求，请重新启动 VoxCue 后重试。',
+    );
 
   function run(operation: Operation, value?: Buffer): Promise<unknown> {
+    try {
+      const selected = language();
+      return typeof selected === 'string'
+        ? runNative(operation, selected, value)
+        : Promise.resolve(selected).then((resolved) => runNative(operation, resolved, value));
+    } catch {
+      return Promise.reject(invalid());
+    }
+  }
+
+  function runNative(
+    operation: Operation,
+    requestLanguage: 'zh-CN' | 'en',
+    value?: Buffer,
+  ): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      if (requestLanguage !== 'zh-CN' && requestLanguage !== 'en') {
+        reject(invalid());
+        return;
+      }
       let child: ChildProcessWithoutNullStreams;
       try {
         child = spawn(executable, [], {
@@ -103,7 +133,7 @@ export function createCredentialEncryption(
         // The caller must finish even if a stuck helper never closes. Failure
         // latches below, so neither queued nor later background work can open
         // another authorization dialog or bypass this still-running child.
-        reject(unavailable());
+        reject(new CredentialTimeoutError(credentialProblemMessages.VOXCUE_CREDENTIAL_TIMEOUT));
         stop();
       }, 120000);
       child.stdout.on('data', (chunk: Buffer) => {
@@ -143,7 +173,7 @@ export function createCredentialEncryption(
           }
           const denied = /\(-128\)|\(-25293\)|\(-25308\)/.test(diagnostic);
           reject(
-            Error(
+            new CredentialUnavailableError(
               denied
                 ? 'macOS 钥匙串授权未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。'
                 : unavailable().message,
@@ -159,7 +189,11 @@ export function createCredentialEncryption(
         }
       });
       child.stdin.end(
-        JSON.stringify(value ? { operation, data: value.toString('base64') } : { operation }),
+        JSON.stringify({
+          operation,
+          language: requestLanguage,
+          ...(value ? { data: value.toString('base64') } : {}),
+        }),
       );
     });
   }
@@ -197,23 +231,50 @@ export function createCredentialEncryption(
     return payload(reply);
   };
   const cleanupResult = (reply: unknown): CredentialCleanup => {
-    const value = record(reply, ['cleanup', 'removed', 'retained', 'reason']);
+    const value = record(reply, ['cleanup', 'removed', 'retained', 'retainedItems', 'reason']);
     const count = (n: unknown) => Number.isInteger(n) && (n as number) >= 0 && (n as number) <= 32;
+    const aliases = value.retainedItems;
     if (
       !cleanupStates.has(value.cleanup as string) ||
       !cleanupReasons.has(value.reason as string) ||
       !count(value.removed) ||
+      !Array.isArray(aliases) ||
+      aliases.length > credentialRetainedItemIds.length ||
+      aliases.some(
+        (id: unknown) =>
+          !credentialRetainedItemIds.includes(id as (typeof credentialRetainedItemIds)[number]),
+      ) ||
+      new Set(aliases).size !== aliases.length
+    )
+      throw invalid();
+    if (value.retained === null) {
+      if (
+        value.cleanup !== 'deferred' ||
+        value.removed !== 0 ||
+        aliases.length ||
+        value.reason === 'none'
+      )
+        throw invalid();
+    } else if (
       !count(value.retained) ||
       (value.removed as number) + (value.retained as number) > 32 ||
+      (value.retained === 0
+        ? aliases.length !== 0
+        : !aliases.length || aliases.length > (value.retained as number)) ||
       (value.cleanup === 'complete'
         ? value.retained !== 0 || value.reason !== 'none'
         : value.reason === 'none' ||
-          (value.cleanup === 'partial'
-            ? value.removed === 0 || value.retained === 0
-            : value.removed !== 0))
+          value.retained === 0 ||
+          (value.cleanup === 'partial' ? value.removed === 0 : value.removed !== 0))
     )
       throw invalid();
-    return value as CredentialCleanup;
+    return {
+      cleanup: value.cleanup as CredentialCleanup['cleanup'],
+      removed: value.removed as number,
+      retained: value.retained as number | null,
+      retainedItems: aliases as CredentialCleanup['retainedItems'],
+      reason: value.reason as CredentialCleanup['reason'],
+    };
   };
 
   async function execute(request: Request): Promise<unknown> {
@@ -221,10 +282,17 @@ export function createCredentialEncryption(
       // The probe never opens a dialog. Explain the single system authorization
       // before it appears; declining keeps every entry and file untouched.
       const state = probeState(await run('probe'));
-      if (state === 'locked' || state === 'conflict') throw unavailable();
+      if (state === 'locked' || state === 'conflict') {
+        const error = Object.assign(unavailable(), {
+          code: state === 'conflict' ? 'VOXCUE_CREDENTIAL_CONFLICT' : 'VOXCUE_CREDENTIAL_LOCKED',
+        });
+        throw error;
+      }
       if (state === 'authorize') {
         if (!(await confirmMigration!()))
-          throw Error('macOS 钥匙串迁移已暂停，登录信息保持原样；请重新启动 VoxCue 后继续。');
+          throw new CredentialUnavailableError(
+            'macOS 钥匙串迁移已暂停，登录信息保持原样；请重新启动 VoxCue 后继续。',
+          );
         noticeAccepted = true;
       }
     }
@@ -250,7 +318,10 @@ export function createCredentialEncryption(
         // All stores share this instance. Re-running a request after denial or
         // partial failure would repeat system prompts. Cache only failure, never
         // a password or a successful authorization flag.
-        failed = error instanceof Error ? error : unavailable();
+        failed =
+          error instanceof CredentialUnavailableError || error instanceof CredentialTimeoutError
+            ? error
+            : unavailable();
         request.reject(failed);
         for (const pending of waiting.splice(0)) pending.reject(failed);
       })

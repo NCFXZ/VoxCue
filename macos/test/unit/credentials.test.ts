@@ -4,6 +4,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const native = vi.hoisted(() => ({ spawn: vi.fn() }));
 vi.mock('node:child_process', () => ({ spawn: native.spawn }));
 import { createCredentialEncryption } from '../../electron/credentials';
+import { credentialProblemMessages } from '../../../shared/electron/contracts/credentialProblems';
 import { translateUI } from '../../../shared/electron/contracts/uiLanguage';
 
 function englishError(error: Error) {
@@ -18,7 +19,7 @@ beforeEach(() => {
 });
 afterEach(() => vi.useRealTimers());
 
-function fixture() {
+function fixture(language?: () => 'zh-CN' | 'en' | Promise<'zh-CN' | 'en'>) {
   const children: ReturnType<typeof child>[] = [];
   function child() {
     return Object.assign(new EventEmitter(), {
@@ -34,7 +35,7 @@ function fixture() {
     children.push(value);
     return value;
   });
-  const crypto = createCredentialEncryption('/synthetic/VoxCue.Credentials');
+  const crypto = createCredentialEncryption('/synthetic/VoxCue.Credentials', undefined, language);
   const settle = () => vi.advanceTimersByTimeAsync(0);
   const reply = (index: number, value: string) => {
     children[index].stdout.emit(
@@ -50,7 +51,7 @@ function fixture() {
   return { crypto, children, settle, reply };
 }
 
-it('serializes all vault operations through actual helper close without changing the protocol', async () => {
+it('serializes all vault operations through actual helper close', async () => {
   const f = fixture();
   const pending = [
     f.crypto.encrypt('synthetic-cloud'),
@@ -71,6 +72,7 @@ it('serializes all vault operations through actual helper close without changing
   expect(native.spawn).toHaveBeenCalledTimes(2);
   expect(JSON.parse(f.children[1].stdin.end.mock.calls[0][0])).toEqual({
     operation: 'decrypt',
+    language: 'zh-CN',
     data: Buffer.from('v10-synthetic-auth').toString('base64'),
   });
   f.reply(1, 'synthetic-auth');
@@ -84,6 +86,101 @@ it('serializes all vault operations through actual helper close without changing
   ]);
   expect(vi.getTimerCount()).toBe(0);
 });
+
+it('uses the current app language for each fixed native request without forwarding arbitrary text', async () => {
+  let language: 'zh-CN' | 'en' = 'en';
+  const f = fixture(() => language);
+  const first = f.crypto.encrypt('synthetic-first');
+  const second = f.crypto.encrypt('synthetic-second');
+  await f.settle();
+  expect(JSON.parse(f.children[0].stdin.end.mock.calls[0][0])).toEqual({
+    operation: 'encrypt',
+    language: 'en',
+    data: Buffer.from('synthetic-first').toString('base64'),
+  });
+  language = 'zh-CN';
+  f.reply(0, 'cipher-first');
+  await f.settle();
+  expect(JSON.parse(f.children[1].stdin.end.mock.calls[0][0])).toEqual({
+    operation: 'encrypt',
+    language: 'zh-CN',
+    data: Buffer.from('synthetic-second').toString('base64'),
+  });
+  f.reply(1, 'cipher-second');
+  expect(await Promise.all([first, second])).toEqual([
+    Buffer.from('cipher-first'),
+    Buffer.from('cipher-second'),
+  ]);
+});
+
+it('waits for the saved app language before spawning a helper or creating a Keychain item', async () => {
+  let resolveLanguage!: (language: 'en') => void;
+  const ready = new Promise<'en'>((resolve) => {
+    resolveLanguage = resolve;
+  });
+  const f = fixture(() => ready);
+  const pending = f.crypto.encrypt('synthetic');
+  await f.settle();
+  expect(native.spawn).not.toHaveBeenCalled();
+  resolveLanguage('en');
+  await f.settle();
+  expect(JSON.parse(f.children[0].stdin.end.mock.calls[0][0]).language).toBe('en');
+  f.reply(0, 'cipher');
+  expect(await pending).toEqual(Buffer.from('cipher'));
+});
+
+it('rejects an invalid runtime language before spawning any helper and fences later work', async () => {
+  const f = fixture(() => 'arbitrary-name' as 'en');
+  await expect(f.crypto.encrypt('synthetic')).rejects.toThrow('返回无效');
+  await expect(f.crypto.decrypt(Buffer.from('synthetic'))).rejects.toThrow('返回无效');
+  expect(native.spawn).not.toHaveBeenCalled();
+});
+
+it('keeps queued and future requests fenced when saved-language initialization fails', async () => {
+  let rejectLanguage!: (error: Error) => void;
+  const ready = new Promise<'en'>((_resolve, reject) => {
+    rejectLanguage = reject;
+  });
+  const f = fixture(() => ready);
+  const pending = Promise.allSettled([
+    f.crypto.encrypt('synthetic-first'),
+    f.crypto.decrypt(Buffer.from('synthetic-second')),
+  ]);
+  rejectLanguage(Error('无法同步界面语言，请重试。'));
+  const results = await pending;
+  expect(results.every((result) => result.status === 'rejected')).toBe(true);
+  for (const result of results)
+    if (result.status === 'rejected')
+      expect(result.reason).toMatchObject({ code: 'VOXCUE_CREDENTIAL_UNAVAILABLE' });
+  await expect(f.crypto.encrypt('synthetic-later')).rejects.toThrow('重新启动');
+  expect(native.spawn).not.toHaveBeenCalled();
+});
+
+it.each(['VOXCUE_CREDENTIAL_INVALID_DATA', 'VOXCUE_CREDENTIAL_TIMEOUT'])(
+  'does not trust an asynchronous callback error carrying %s as a native classification',
+  async (code) => {
+    const f = fixture(async () => {
+      throw Object.assign(Error('private callback detail'), { code });
+    });
+    const results = await Promise.allSettled([
+      f.crypto.encrypt('synthetic-first'),
+      f.crypto.decrypt(Buffer.from('synthetic-second')),
+    ]);
+    for (const result of results) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected')
+        expect(result.reason).toMatchObject({
+          code: 'VOXCUE_CREDENTIAL_UNAVAILABLE',
+          message: credentialProblemMessages.VOXCUE_CREDENTIAL_UNAVAILABLE,
+        });
+    }
+    await expect(f.crypto.encrypt('synthetic-later')).rejects.toMatchObject({
+      code: 'VOXCUE_CREDENTIAL_UNAVAILABLE',
+      message: credentialProblemMessages.VOXCUE_CREDENTIAL_UNAVAILABLE,
+    });
+    expect(native.spawn).not.toHaveBeenCalled();
+  },
+);
 
 it.each([-128, -25293, -25308, -26275])(
   'stops the whole batch after native failure %s and never reprompts in the session',
@@ -103,8 +200,10 @@ it.each([-128, -25293, -25308, -26275])(
     const results = await failed;
     expect(results.every((value) => value.status === 'rejected')).toBe(true);
     for (const result of results)
-      if (result.status === 'rejected')
+      if (result.status === 'rejected') {
         expect(englishError(result.reason)).toContain('Restart VoxCue');
+        expect(result.reason).toMatchObject({ code: 'VOXCUE_CREDENTIAL_UNAVAILABLE' });
+      }
     expect(native.spawn).toHaveBeenCalledTimes(1);
     await expect(f.crypto.encrypt('synthetic-later-background-retry')).rejects.toThrow('重新启动');
     expect(native.spawn).toHaveBeenCalledTimes(1);
@@ -165,7 +264,13 @@ it.each(['false', 'throw', 'synchronous-close'])(
       return mode !== 'false';
     });
     await vi.advanceTimersByTimeAsync(120000);
-    expect((await failed).every((value) => value.status === 'rejected')).toBe(true);
+    for (const result of await failed) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') {
+        expect(result.reason).toMatchObject({ code: 'VOXCUE_CREDENTIAL_TIMEOUT' });
+        expect(englishError(result.reason)).toContain('Restart VoxCue');
+      }
+    }
     await expect(f.crypto.encrypt('later')).rejects.toThrow('重新启动');
     await vi.advanceTimersByTimeAsync(2000);
     expect(f.children[0].kill.mock.calls).toEqual(
@@ -266,12 +371,29 @@ function migrationFixture(confirm: () => Promise<boolean>) {
   return { ...f, crypto, answer, request };
 }
 
+it('sanitizes a failed migration confirmation and fences subsequent credential work', async () => {
+  const confirm = vi.fn(async () => {
+    throw Error('private native dialog detail');
+  });
+  const f = migrationFixture(confirm);
+  const pending = f.crypto.encrypt('synthetic');
+  const failure = pending.catch((error: unknown) => error);
+  f.answer(0, { state: 'authorize' });
+  const error = await failure;
+  expect(error).toMatchObject({ code: 'VOXCUE_CREDENTIAL_UNAVAILABLE' });
+  expect((error as Error).message).not.toContain('private');
+  expect(englishError(error as Error)).toContain('Restart VoxCue');
+  await expect(f.crypto.encrypt('synthetic-later')).rejects.toThrow('重新启动');
+  expect(confirm).toHaveBeenCalledOnce();
+  expect(native.spawn).toHaveBeenCalledTimes(1);
+});
+
 it('does not cache a ready probe as permission to skip future preflight', async () => {
   const confirm = vi.fn(async () => true);
   const f = migrationFixture(confirm);
   const pending = [f.crypto.decrypt(Buffer.from('v10-one')), f.crypto.encrypt('two')];
   await f.settle();
-  expect(f.request(0)).toEqual({ operation: 'probe' });
+  expect(f.request(0)).toEqual({ operation: 'probe', language: 'zh-CN' });
   f.answer(0, { state: 'ready' });
   await f.settle();
   expect(f.request(1).operation).toBe('decrypt');
@@ -316,6 +438,42 @@ it.each(['locked', 'conflict'])(
     expect(confirm).not.toHaveBeenCalled();
     await expect(f.crypto.encrypt('later')).rejects.toThrow('重新启动');
     expect(native.spawn).toHaveBeenCalledTimes(1);
+  },
+);
+
+it.each(['locked', 'conflict'] as const)(
+  'applies the fixed %s code only after probe close and stops queued requests',
+  async (state) => {
+    const confirm = vi.fn(async () => true);
+    const f = migrationFixture(confirm);
+    let completed = false;
+    const pending = Promise.allSettled([
+      f.crypto.decrypt(Buffer.from('v10-preserved')),
+      f.crypto.encrypt('queued-sign-in'),
+    ]).then((results) => {
+      completed = true;
+      return results;
+    });
+    f.children[0].stdout.emit('data', Buffer.from(JSON.stringify({ state })));
+    f.children[0].emit('exit', 0);
+    await f.settle();
+    expect(completed).toBe(false);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    f.children[0].emit('close', 0);
+    const code = state === 'conflict' ? 'VOXCUE_CREDENTIAL_CONFLICT' : 'VOXCUE_CREDENTIAL_LOCKED';
+    for (const result of await pending) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected') {
+        expect(result.reason).toMatchObject({ code });
+        expect(result.reason.message).toContain('重新启动');
+      }
+    }
+    await expect(f.crypto.decrypt(Buffer.from('v10-later'))).rejects.toMatchObject({ code });
+    expect(completed).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(native.spawn).toHaveBeenCalledTimes(1);
+    expect(vi.getTimerCount()).toBe(0);
   },
 );
 
@@ -366,13 +524,19 @@ it('cleans up only after a ready probe and readable records, reporting partial r
   f.answer(0, { state: 'ready' });
   await f.settle();
   expect(readable).toHaveBeenCalledTimes(1);
-  expect(f.request(1)).toEqual({ operation: 'cleanup' });
-  const partial = { cleanup: 'partial', removed: 2, retained: 1, reason: 'authorization' };
+  expect(f.request(1)).toEqual({ operation: 'cleanup', language: 'zh-CN' });
+  const partial = {
+    cleanup: 'partial',
+    removed: 2,
+    retained: 1,
+    retainedItems: ['safe-key'],
+    reason: 'authorization',
+  };
   f.answer(1, partial);
   expect(await maintained).toEqual(partial);
   const later = f.crypto.encrypt('still-usable');
   await f.settle();
-  expect(f.request(2)).toEqual({ operation: 'probe' });
+  expect(f.request(2)).toEqual({ operation: 'probe', language: 'zh-CN' });
   f.answer(2, { state: 'ready' });
   await f.settle();
   f.reply(3, 'cipher');
@@ -391,6 +555,7 @@ it('validates stored records through the dedicated non-interactive native operat
   await f.settle();
   expect(f.request(1)).toEqual({
     operation: 'validate',
+    language: 'zh-CN',
     data: Buffer.from('v10-cloud').toString('base64'),
   });
   f.reply(1, 'cloud');
@@ -398,8 +563,14 @@ it('validates stored records through the dedicated non-interactive native operat
   expect(f.request(2).operation).toBe('validate');
   f.reply(2, 'auth');
   await f.settle();
-  expect(f.request(3)).toEqual({ operation: 'cleanup' });
-  const complete = { cleanup: 'complete', removed: 3, retained: 0, reason: 'none' };
+  expect(f.request(3)).toEqual({ operation: 'cleanup', language: 'zh-CN' });
+  const complete = {
+    cleanup: 'complete',
+    removed: 3,
+    retained: 0,
+    retainedItems: [],
+    reason: 'none',
+  };
   f.answer(3, complete);
   expect(await maintained).toEqual(complete);
   expect(confirm).not.toHaveBeenCalled();
@@ -431,10 +602,12 @@ it.each(['unavailable', 'invalid'])(
 
 it('permits explicit sign-in writes after a closed native ciphertext decoding failure', async () => {
   const f = fixture();
-  const damaged = expect(f.crypto.decrypt(Buffer.from('v10-damaged'))).rejects.toThrow('重新登录');
+  const pending = f.crypto.decrypt(Buffer.from('v10-damaged'));
+  const damaged = expect(pending).rejects.toThrow('重新登录');
   f.children[0].stderr.emit('data', Buffer.from('VoxCue credential operation failed (-26275).\n'));
   f.children[0].emit('close', 80);
   await damaged;
+  await expect(pending).rejects.toMatchObject({ code: 'VOXCUE_CREDENTIAL_INVALID_DATA' });
   const restored = f.crypto.encrypt('explicit-new-sign-in');
   await f.settle();
   f.reply(1, 'new-cipher');
@@ -471,14 +644,113 @@ it.each([
   expect(native.spawn).toHaveBeenCalledTimes(1);
 });
 
+const emptyCleanup = {
+  cleanup: 'complete',
+  removed: 0,
+  retained: 0,
+  retainedItems: [],
+  reason: 'none',
+};
+
+it.each([
+  { ...emptyCleanup, removed: 3 },
+  {
+    cleanup: 'partial',
+    removed: 2,
+    retained: 3,
+    retainedItems: ['storage-key', 'safe-default'],
+    reason: 'authorization',
+  },
+  {
+    cleanup: 'deferred',
+    removed: 0,
+    retained: 2,
+    retainedItems: ['storage-key'],
+    reason: 'failed',
+  },
+  {
+    cleanup: 'deferred',
+    removed: 0,
+    retained: null,
+    retainedItems: [],
+    reason: 'current',
+  },
+])('preserves accurate cleanup counts and fixed retained identifiers in %j', async (reply) => {
+  const f = migrationFixture(async () => true);
+  const maintained = f.crypto.maintain(async () => true);
+  f.answer(0, { state: 'ready' });
+  await f.settle();
+  f.answer(1, reply);
+  expect(await maintained).toEqual(reply);
+  expect(vi.getTimerCount()).toBe(0);
+});
+
 it.each([
   { state: 'unknown' },
   { state: 'ready', extra: 1 },
-  { cleanup: 'complete', removed: -1, retained: 0, reason: 'none' },
-  { cleanup: 'complete', removed: 1, retained: 1, reason: 'none' },
-  { cleanup: 'partial', removed: 0, retained: 1, reason: 'authorization' },
-  { cleanup: 'partial', removed: 32, retained: 1, reason: 'authorization' },
-  { cleanup: 'deferred', removed: 1, retained: 1, reason: 'current' },
+  { ...emptyCleanup, removed: -1 },
+  { ...emptyCleanup, removed: 1, retained: 1, retainedItems: ['safe-key'] },
+  {
+    ...emptyCleanup,
+    cleanup: 'partial',
+    retained: 1,
+    retainedItems: ['safe-key'],
+    reason: 'authorization',
+  },
+  {
+    ...emptyCleanup,
+    cleanup: 'partial',
+    removed: 32,
+    retained: 1,
+    retainedItems: ['safe-key'],
+    reason: 'authorization',
+  },
+  {
+    ...emptyCleanup,
+    cleanup: 'deferred',
+    removed: 1,
+    retained: 1,
+    retainedItems: ['safe-key'],
+    reason: 'current',
+  },
+  { ...emptyCleanup, retainedItems: ['unknown'] },
+  {
+    cleanup: 'partial',
+    removed: 1,
+    retained: 1,
+    retainedItems: ['v8'],
+    reason: 'authorization',
+  },
+  {
+    ...emptyCleanup,
+    cleanup: 'partial',
+    removed: 1,
+    retained: 2,
+    retainedItems: ['safe-key', 'safe-key'],
+    reason: 'authorization',
+  },
+  {
+    ...emptyCleanup,
+    cleanup: 'partial',
+    removed: 1,
+    retained: 1,
+    retainedItems: ['safe-default', 'safe-key'],
+    reason: 'authorization',
+  },
+  { ...emptyCleanup, cleanup: 'partial', removed: 1, retained: 1, reason: 'authorization' },
+  { ...emptyCleanup, retainedItems: null },
+  { ...emptyCleanup, retainedItems: [1] },
+  { ...emptyCleanup, retained: null },
+  { ...emptyCleanup, cleanup: 'partial', removed: 1, retained: null, reason: 'current' },
+  {
+    ...emptyCleanup,
+    cleanup: 'deferred',
+    retained: null,
+    retainedItems: ['storage-key'],
+    reason: 'current',
+  },
+  { ...emptyCleanup, cleanup: 'deferred', removed: 1, retained: null, reason: 'current' },
+  { cleanup: 'complete', removed: 0, retained: 0, reason: 'none' },
 ])('treats malformed maintenance output %j as an invalid helper response', async (reply) => {
   const f = migrationFixture(async () => true);
   const maintained = f.crypto.maintain(async () => true);

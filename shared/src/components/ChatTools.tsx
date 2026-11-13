@@ -8,10 +8,13 @@ import { usePreparation } from '../stores/preparation';
 import { chatFileAccept } from '../services/chatOptions';
 import { ModelReasoningControl } from './ReasoningEffortControl';
 import { useChatConnection } from '../stores/chatConnection';
+import { useAuth } from '../stores/auth';
 import { useModelProvider } from './useModelProvider';
 export function ChatTools({ actions }: { actions: ReactNode }) {
   const state = usePreparation();
   const connection = useChatConnection();
+  const resolved = useAuth((state) => state.resolved);
+  const authError = useAuth((state) => state.error);
   const models = connection.models;
   const files = useRef<HTMLInputElement>(null);
   const folder = useRef<HTMLInputElement>(null);
@@ -57,13 +60,14 @@ export function ChatTools({ actions }: { actions: ReactNode }) {
           effort={state.effort}
           onEffortChange={state.setEffort}
           loading={connection.loading}
-          error={connection.error}
+          onRequestModels={resolved ? undefined : useAuth.getState().ensure}
+          error={connection.error || authError}
           onRefresh={
             connection.live
               ? () => {
                   void connection.load(true, true);
                 }
-              : undefined
+              : resolved ? undefined : useAuth.getState().ensure
           }
           className="composer-tool model-trigger effort-model-trigger"
         />

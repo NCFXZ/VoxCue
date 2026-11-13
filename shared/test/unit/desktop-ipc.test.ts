@@ -1110,6 +1110,10 @@ describe('受控 preload 契约', () => {
         'onRemoteCommand',
       ].sort(),
     );
+    for (const service of ['chatgpt', 'copilot', 'demo', 'startup'] as const) {
+      await api.authSession(service);
+      expect(bridge.invoke).toHaveBeenLastCalledWith('auth:session', service);
+    }
     await api.chatModels();
     expect(bridge.invoke).toHaveBeenLastCalledWith('chat:models', false);
     api.windowAction('close');

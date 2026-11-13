@@ -20,6 +20,7 @@ interface ModelProps {
   loading?: boolean;
   error?: string | null;
   onRefresh?(): void;
+  onRequestModels?(): Promise<void>;
   disabled?: boolean;
   busy?: boolean;
   className?: string;
@@ -35,6 +36,7 @@ export function ModelReasoningControl(selection: ModelProps) {
   const label = selection.effortLabel ?? t('思考强度');
   const className = selection.className ?? 'choice-trigger effort-model-trigger';
   const [open, setOpen] = useState(false);
+  const [requestingModels, setRequestingModels] = useState(false);
   const [panel, setPanel] = useState<'effort' | 'models'>('effort');
   const [draft, setDraft] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -54,11 +56,17 @@ export function ModelReasoningControl(selection: ModelProps) {
   const progress = levels.length > 1 ? position / (levels.length - 1) : 0;
   const previewEffort = levels[Math.round(position)];
   const current = previewEffort ? t(effortLabels[previewEffort]) : '';
-  const modelLabel = model?.label ?? t(selection.loading ? '加载模型…' : '模型不可用');
+  const loading = selection.loading || requestingModels;
+  const modelLabel =
+    model?.label ??
+    t(loading ? '加载模型…' : selection.onRequestModels ? '选择模型' : '模型不可用');
   const blocked =
-    selection.disabled || selection.loading || (!selection.models.length && !selection.onRefresh);
+    selection.disabled ||
+    (!requestingModels &&
+      !selection.onRequestModels &&
+      (selection.loading || (!selection.models.length && !selection.onRefresh)));
   // Saving locks edits without dismissing the popup or blurring its focused range.
-  const locked = blocked || selection.busy;
+  const locked = blocked || selection.busy || loading;
   const lockedNow = useRef(locked);
   lockedNow.current = locked;
   const restoreFocus = useRef(false);
@@ -146,7 +154,7 @@ export function ModelReasoningControl(selection: ModelProps) {
       ref={content}
       role="dialog"
       aria-label={label}
-      aria-busy={selection.busy || undefined}
+      aria-busy={locked || undefined}
       aria-labelledby={undefined}
       className="dropdown-content compact-tool-menu reasoning-effort-popup"
       side="top"
@@ -361,7 +369,11 @@ export function ModelReasoningControl(selection: ModelProps) {
         if (next && lockedNow.current) return;
         if (next) {
           setBoundary(trigger.current?.closest('dialog') ?? null);
-          setPanel('effort');
+          setPanel(selection.onRequestModels ? 'models' : 'effort');
+          if (selection.onRequestModels) {
+            setRequestingModels(true);
+            void selection.onRequestModels().finally(() => setRequestingModels(false));
+          }
         }
         setOpen(next);
       }}
@@ -375,7 +387,7 @@ export function ModelReasoningControl(selection: ModelProps) {
           aria-label={selection.label ?? t('聊天模型')}
           aria-haspopup="dialog"
           disabled={locked}
-          aria-busy={selection.busy || undefined}
+          aria-busy={loading || selection.busy || undefined}
           data-reveal-on-hover={selection.revealOnHover || undefined}
         >
           <span className="model-name">{modelLabel}</span>

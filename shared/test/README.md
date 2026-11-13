@@ -6,7 +6,11 @@ Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mj
 
 完整排程以 `functional-suite.mjs --list --jobs=1`、`macos/test/scripts/ui-refinement-matrix.mjs --list` 为准。另需按实际改动补原生专项：`credential-hardening-smoke.mjs`、`cloud-native-vault-smoke.mjs`、`audio-restart-smoke.mjs`、`audio-conversion-smoke.mjs`、`qwen-regression.mjs` 和 `speech-preroll-smoke.mjs --cache=<认证缓存>`。后者仅用文件 PCM 验证原短音未接纳后不串入下一句，不能将其空 ASR 算作正向过滤成功；正向 `interview-real-audio-smoke.mjs --all` 保留非空自然静音终稿与真实 ACK 断言。固定模型的识别原文不构成逐字准确率基准。
 
-Mac 当前凭据助手运行 `node test/scripts/credential-vault-smoke.mjs`，验证 v8 单一来源复制、v6／v7 迁移、后台无交互验证和真实 JS／原生串行维护；另运行 `credential-vault-policy-smoke.mjs` 核对内存真实 partition、owner／应用信任与禁交互失败围栏，两者不能代替现代系统密码框验收。先恢复精确的固定 v8 修订并构建当前代码，缺失不能重建或回退。`credential-hardening-smoke.mjs --cleanup --fixed-v5` 仅验证归档 v5，无参数仍验证 v2；边界见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。
+Mac 当前凭据助手运行 `node test/scripts/credential-vault-smoke.mjs`，验证 v11 双语创建、跨语言不改项、1.1.1 的三个正式旧名称单来源迁移与候选条目隔离、后台无交互验证和真实 JS／原生串行维护；另运行 `credential-vault-policy-smoke.mjs` 核对内存真实 partition、owner／应用信任与禁交互失败围栏，两者不能代替现代系统密码框验收。JS 单测另检查持久语言初始化前零 helper spawn、失败后队列围栏；首次隐藏登录、交叉语言与自动恢复需定向桌面及最终包复验。当前清理回复包含实际保留数量及固定旧名称 ID；枚举不完整返回未知，主进程仅记录固定元数据诊断，不增加界面或清理命令。先恢复精确的固定 v11 修订并构建当前代码，缺失不能重建或回退。`credential-hardening-smoke.mjs --cleanup --fixed-v5` 仅验证归档 v5，无参数仍验证 v2；边界见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。
+
+Mac 的 `node ../shared/test/scripts/language-smoke.mjs --bootstrap-only` 定向检查启动装配：实际 Renderer 保存应用偏好后冷启动，交叉系统语言、隐藏登录、重复启动与首次 status 并发，以及真实 10 秒语言超时／Renderer 故障后的零助手启动和迟到握手围栏。该入口在自有开发宿主与临时 profile 内复用真实主进程及 JS 凭据队列，原生调用替换为固定内存协议，不启动正式助手、不访问钥匙串；不能代替最终签名包的系统授权验收。合成主账号夹具只在首次 status 消费初始模拟会话，之后 logout／status 不自动重新登录。
+
+Mac 凭据超时专项须区分“应用请求超时／助手退出／同启动不再发请求”和“原系统授权框是否自动消失”。设计期限为 120 秒，原框仍显示时按既有 TIMEOUT 说明手动选择“拒绝”再重启，不把手动关闭记为自动撤框；不通过缩短期限、调用私有入口、锁定整个登录钥匙串或终止系统进程替代验收。相关单测检查固定 UNAVAILABLE／TIMEOUT 与云账号可信本地边界，服务端／传输同名伪码不能冒充；系统行为仍以最终签名包复验为准。本轮正常停机 VM、复用环境及用户指定合成截图按明确保留要求处理，其余临时产物照常清理，不入仓库。
 
 ## 当前源码安全修复
 
@@ -184,7 +188,7 @@ Mac `node test/scripts/cloud-accessibility-smoke.mjs --preview`覆盖浅深色�
 
 Mac `node test/scripts/account-archive-lifecycle-smoke.mjs` 使用实际Main与合成主账号，核对刷新的旧令牌、关闭主窗口、退出账号时临时归档清理，并阻塞退出端口核对离开期间拒绝创建新导出。系统ZIP单测另阻塞压缩完成后的提交，验证取消不覆盖已有目标；本专项已纳入 Mac 默认功能矩阵，完整排程见 `--list`。
 
-Mac `node test/scripts/cloud-native-vault-smoke.mjs`使用两个固定签名Electron44进程、原JS加密端口和CloudVault，以及由同源Credentials.mm构建的显式临时Keychain fixture，验证v10/0600、重启解密、锁定失败保旧密文及只撤销新会话。禁止启动正式助手，禁止网络，清除临时Keychain并核对用户搜索列表和正式助手字节未变；不接触真实登录Keychain。
+Mac `node test/scripts/cloud-native-vault-smoke.mjs` 使用三个独立的签名 Electron 44 进程，依次写入、重启读取、拒绝后再重启。生产 JS 加密端口和 CloudVault 通过具备本轮父进程身份的 v11 测试助手访问显式临时钥匙串。检查云会话与遥测证明的 `v10` 密文和 0600 权限、失败保留原密文、同次启动阻止重复调用，以及下次启动重新读取。退出时删除临时钥匙串，核对搜索列表和冻结 v1、v11 助手摘要。
 
 Mac `node test/scripts/cloud-form-lifecycle-smoke.mjs`另外验证真实React表单的busy锁/重复提交、模式清理及卸载后挑战/错误迟到隔离。只替换异步store端口和装饰图标；不导入生产main、不访问凭据或网络，也不当作原生图标/视觉验收。它是默认功能矩阵之外的独立行为专项。
 

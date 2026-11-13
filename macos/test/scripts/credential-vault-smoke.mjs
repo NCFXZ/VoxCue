@@ -11,7 +11,7 @@ import { loadDevelopmentSigning, signLocalCode } from '../../scripts/development
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import { writeCredentialFixtureSource } from './credential-fixture-source.mjs';
 
-// Fixed v8 credential helper: single-source copy, probe and non-interactive
+// Fixed v11 credential helper: single-source copy, probe and non-interactive
 // cleanup on owned temporary keychains only. The host login keychain, real
 // accounts and the production parent identity are never used for Keychain work.
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
@@ -34,7 +34,7 @@ let admin;
 try {
   const signing = await loadDevelopmentSigning();
   const parentIdentifier = 'com.voxcue.test.credentials.' + randomBytes(12).toString('hex');
-  const vaultSource = await writeCredentialFixtureSource(directory, 'vault-v8', parentIdentifier);
+  const vaultSource = await writeCredentialFixtureSource(directory, 'vault-v11', parentIdentifier);
   const hardenedSource = await writeCredentialFixtureSource(
     directory,
     'hardened',
@@ -42,7 +42,7 @@ try {
   );
   let definitions = [
     '-DVOXCUE_FIXTURE_VAULT_SOURCE=' + JSON.stringify(vaultSource),
-    '-DVOXCUE_FIXTURE_VAULT_ACCOUNT="VoxCue Key v8"',
+    '-DVOXCUE_FIXTURE_VAULT_ACCOUNT="VoxCue Key v11"',
     '-DVOXCUE_FIXTURE_HARDENED_SOURCE=' + JSON.stringify(hardenedSource),
   ];
   const compile = (source, destination, args = []) =>
@@ -77,20 +77,6 @@ try {
   sign(helper, 'com.voxcue.credentials.vault');
   const moved = path.join(directory, 'vault-moved');
   await copyFile(helper, moved);
-  const previous = new Map();
-  for (const [generation, kind] of [
-    [6, 'vault'],
-    [7, 'vault-v7'],
-  ]) {
-    const binary = path.join(directory, 'previous-v' + generation);
-    const source = await writeCredentialFixtureSource(directory, kind, parentIdentifier);
-    compile(fixture('credential-vault-probe.mm'), binary, [
-      '-UVOXCUE_FIXTURE_VAULT_SOURCE',
-      '-DVOXCUE_FIXTURE_VAULT_SOURCE=' + JSON.stringify(source),
-    ]);
-    sign(binary, 'com.voxcue.credentials.vault');
-    previous.set(generation, binary);
-  }
   // The archived v2 fixture stands for an older helper that historical entries trust.
   const old = path.join(directory, 'hardened');
   compile(fixture('credential-hardening-probe.mm'), old);
@@ -130,7 +116,7 @@ try {
   definitions = [
     ...definitions,
     '-DVOXCUE_FIXTURE_HELPERS=@{' +
-      [helper, moved, ...previous.values(), old, ...rejected]
+      [helper, moved, old, ...rejected]
         .map((file) => '@' + JSON.stringify(file) + ':@' + JSON.stringify(codeHash(file)))
         .join(',') +
       '}',
@@ -163,20 +149,27 @@ try {
     parents.spoof,
   ]);
 
-  const call = (selected, request, { binary = helper, parent = parents.formal, env } = {}) =>
-    run(
+  const call = (
+    selected,
+    request,
+    { binary = helper, parent = parents.formal, env, language = 'zh-CN', raw = false } = {},
+  ) => {
+    const result = run(
       parent,
       [binary, ...(Array.isArray(selected) ? selected : [selected])],
-      JSON.stringify(request),
+      JSON.stringify(raw || binary === old ? request : { language, ...request }),
       true,
       env ?? process.env,
     );
+    assert.doesNotMatch(result.stderr, /fixture-queried-candidate/, 'Candidate names must never be queried');
+    return result;
+  };
   const ok = (result) => {
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);
   };
   const count = (result, marker) => (result.stderr.match(new RegExp(marker, 'g')) ?? []).length;
-  const plaintext = Buffer.from('Synthetic credentials for the v8 single-source copy');
+  const plaintext = Buffer.from('Synthetic credentials for the v11 single-source copy');
   const cipher = createCipheriv(
     'aes-128-cbc',
     pbkdf2Sync('synthetic-safe-storage-password', 'saltysalt', 1003, 16, 'sha1'),
@@ -185,12 +178,12 @@ try {
   const ciphertext = Buffer.concat([Buffer.from('v10'), cipher.update(plaintext), cipher.final()]);
   const decrypt = (selected, value = ciphertext, options) =>
     call(selected, { operation: 'decrypt', data: value.toString('base64') }, options);
-  const encrypt = (selected, value = plaintext) =>
-    call(selected, { operation: 'encrypt', data: value.toString('base64') });
+  const encrypt = (selected, value = plaintext, options) =>
+    call(selected, { operation: 'encrypt', data: value.toString('base64') }, options);
   const probe = (selected) => ok(call(selected, { operation: 'probe' })).state;
   const cleanup = (selected, env) => ok(call(selected, { operation: 'cleanup' }, { env }));
-  const validate = (selected, value = ciphertext) =>
-    call(selected, { operation: 'validate', data: value.toString('base64') });
+  const validate = (selected, value = ciphertext, options) =>
+    call(selected, { operation: 'validate', data: value.toString('base64') }, options);
   const legacy = (keychain) => JSON.parse(run(admin, ['inspect', keychain]).stdout);
   const vault = (keychain) => JSON.parse(run(admin, ['vault', keychain]).stdout);
   const keychain = (name, mode) => {
@@ -200,9 +193,10 @@ try {
     if (mode) run(admin, ['seed', file, old, helper, mode]);
     return file;
   };
-  const assertOwnVault = (file) => {
+  const assertOwnVault = (file, name = 'VoxCue 登录信息') => {
     const own = vault(file);
-    assert.ok(own, 'The own v8 entry must exist');
+    assert.ok(own, 'The own v11 entry must exist');
+    assert.equal(own.label, name);
     assert.equal(own.readable, false, 'An unrelated program must not read the own entry');
     const rules = own.rules.filter(
       (rule) =>
@@ -212,7 +206,7 @@ try {
     assert.ok(rules.length >= 3);
     for (const rule of rules) {
       assert.equal(rule.applications, 1, 'Every own rule names only the current helper');
-      assert.equal(rule.description, 'VoxCue 登录信息');
+      assert.equal(rule.description, name);
     }
   };
 
@@ -230,6 +224,12 @@ try {
     { operation: 'decrypt', data: 7 },
   ])
     assert.equal(call(boundary, request).status, 79);
+  for (const language of [undefined, null, '', 'en-US', 'zh', 7, true, [], {}]) {
+    const rejectedLanguage = call(boundary, { operation: 'probe', language }, { raw: true });
+    assert.equal(rejectedLanguage.status, 79);
+    assert.equal(count(rejectedLanguage, 'fixture-item-read'), 0);
+    assert.equal(count(rejectedLanguage, 'fixture-item-delete'), 0);
+  }
   const malformed = decrypt(boundary, Buffer.from('not v10 data'));
   assert.equal(malformed.status, 80);
   assert.equal(count(malformed, 'fixture-item-read'), 0, 'Malformed input never reaches Keychain');
@@ -256,11 +256,45 @@ try {
     cleanup: 'complete',
     removed: 0,
     retained: 0,
+    retainedItems: [],
     reason: 'none',
   });
+  const originalChinese = vault(fresh);
+  assert.deepEqual(
+    Buffer.from(ok(decrypt(fresh, written, { language: 'en' })).data, 'base64'),
+    plaintext,
+  );
+  assert.deepEqual(
+    vault(fresh),
+    originalChinese,
+    'English requests do not rename or rewrite an existing Chinese item',
+  );
+
+  const english = keychain('english');
+  const englishWritten = Buffer.from(
+    ok(encrypt(english, plaintext, { language: 'en' })).data,
+    'base64',
+  );
+  assertOwnVault(english, 'VoxCue Sign-in Information');
+  const originalEnglish = vault(english);
+  assert.deepEqual(
+    Buffer.from(ok(decrypt(english, englishWritten, { language: 'zh-CN' })).data, 'base64'),
+    plaintext,
+  );
+  assert.deepEqual(
+    Buffer.from(ok(validate(english, englishWritten, { language: 'zh-CN' })).data, 'base64'),
+    plaintext,
+  );
+  assert.equal(ok(call(english, { operation: 'probe' }, { language: 'zh-CN' })).state, 'ready');
+  assert.deepEqual(
+    vault(english),
+    originalEnglish,
+    'Chinese requests do not rename or rewrite an existing English item',
+  );
 
   // Normal history: one source read, copy, then cleanup removes all three aliases.
   const normal = keychain('normal', 'normal');
+  run(admin, ['seed-candidates', normal]);
   const seeded = legacy(normal);
   assert.deepEqual(ok(validate(normal)), { validation: 'unavailable' });
   assert.equal(vault(normal), null, 'Background validation must never migrate a historical key');
@@ -283,30 +317,11 @@ try {
     cleanup: 'complete',
     removed: 3,
     retained: 0,
+    retainedItems: [],
     reason: 'none',
   });
 
-  // Both frozen vault generations are sources; later reads use v8 only.
-  for (const [revision, binary] of previous) {
-    const generation = keychain(revision === 6 ? 'generation' : 'generation-v7', 'normal');
-    ok(decrypt(generation, ciphertext, { binary }));
-    assert.equal(vault(generation), null);
-    assert.deepEqual(ok(validate(generation)), { validation: 'unavailable' });
-    assert.deepEqual(Buffer.from(ok(decrypt(generation)).data, 'base64'), plaintext);
-    assertOwnVault(generation);
-    assert.deepEqual(cleanup(generation), {
-      cleanup: 'complete',
-      removed: 4,
-      retained: 0,
-      reason: 'none',
-    });
-    assert.deepEqual(Buffer.from(ok(validate(generation)).data, 'base64'), plaintext);
-    assert.notEqual(
-      decrypt(generation, ciphertext, { binary }).status,
-      0,
-      `The archived v${revision} generation no longer has a readable old alias`,
-    );
-  }
+  run(admin, ['check-candidates', normal]);
   assert.deepEqual(legacy(normal), [null, null, null]);
   assert.equal(run(admin, ['unrelated', normal], undefined, true).status, 0);
   assertOwnVault(normal);
@@ -316,8 +331,32 @@ try {
     cleanup: 'complete',
     removed: 0,
     retained: 0,
+    retainedItems: [],
     reason: 'none',
   });
+
+  // Unreleased candidates alone are equivalent to an empty install for v11.
+  // A decrypt cannot create a substitute; a first write creates a new own key.
+  const candidates = keychain('candidates-only');
+  run(admin, ['seed-candidates', candidates]);
+  const candidateProbe = call(candidates, { operation: 'probe' });
+  assert.equal(ok(candidateProbe).state, 'ready');
+  assert.equal(count(candidateProbe, 'fixture-item-read'), 0);
+  assert.deepEqual(ok(validate(candidates)), { validation: 'unavailable' });
+  const missing = decrypt(candidates);
+  assert.equal(missing.status, 80);
+  assert.equal(count(missing, 'fixture-item-read'), 0);
+  assert.equal(vault(candidates), null);
+  assert.deepEqual(cleanup(candidates), {
+    cleanup: 'deferred', removed: 0, retained: null, retainedItems: [], reason: 'current',
+  });
+  const freshWithCandidates = Buffer.from(ok(encrypt(candidates)).data, 'base64');
+  assertOwnVault(candidates);
+  assert.deepEqual(Buffer.from(ok(validate(candidates, freshWithCandidates)).data, 'base64'), plaintext);
+  assert.deepEqual(cleanup(candidates), {
+    cleanup: 'complete', removed: 0, retained: 0, retainedItems: [], reason: 'none',
+  });
+  run(admin, ['check-candidates', candidates]);
 
   // Authorization needed: probe reports it; non-interactive calls change nothing.
   const denied = keychain('denied', 'denied');
@@ -328,7 +367,8 @@ try {
   assert.deepEqual(cleanup(denied), {
     cleanup: 'deferred',
     removed: 0,
-    retained: 0,
+    retained: null,
+    retainedItems: [],
     reason: 'current',
   });
   assert.deepEqual(legacy(denied), deniedItems);
@@ -338,11 +378,20 @@ try {
     ['legacy-only', 2],
     ['current-only', 1],
     ['different', 3],
+    ['ordered', 3], // Distinct lower-priority keys must not override the first alias.
+    ['safe-order', 2], // Without the first alias, prefer Safe Storage / VoxCue Key.
+    ['oldest-only', 1], // The final Safe Storage / VoxCue alias remains a valid source.
   ]) {
     const file = keychain(name, name);
     assert.deepEqual(Buffer.from(ok(decrypt(file)).data, 'base64'), plaintext);
     assertOwnVault(file);
-    assert.deepEqual(cleanup(file), { cleanup: 'complete', removed, retained: 0, reason: 'none' });
+    assert.deepEqual(cleanup(file), {
+      cleanup: 'complete',
+      removed,
+      retained: 0,
+      retainedItems: [],
+      reason: 'none',
+    });
     assert.deepEqual(legacy(file), [null, null, null]);
   }
   const primary = keychain('cross');
@@ -351,6 +400,36 @@ try {
   assert.equal(vault(primary), null, 'The copy stays in the source keychain');
   assertOwnVault(secondary);
   assert.deepEqual(cleanup([primary, secondary]).removed, 3);
+
+  // Simulate visibility changing after initial lookup. Existing own entries are
+  // real and force a duplicate on create. Only the read-back view changes.
+  const raceSource = keychain('race-source', 'current-only');
+  const raceWinner = keychain('race-winner', 'current-only');
+  const raceEmpty = keychain('race-empty');
+  for (const file of [raceSource, raceWinner]) ok(decrypt(file));
+  assert.equal(cleanup(raceWinner).removed, 1);
+  const race = (first, second, winner) => decrypt([first, second], ciphertext, {
+    env: { ...process.env, VOXCUE_FIXTURE_VAULT_RACE: winner },
+  });
+  const same = race(raceSource, raceEmpty, 'same');
+  assert.deepEqual(Buffer.from(ok(same).data, 'base64'), plaintext);
+  assert.equal(count(same, 'fixture-hidden-initial-item'), 1);
+  assert.equal(count(same, 'fixture-item-read'), 2);
+  const misplaced = race(raceSource, raceWinner, 'other');
+  assert.equal(misplaced.status, 80);
+  assert.equal(count(misplaced, 'fixture-other-winner'), 1);
+  assert.equal(count(misplaced, 'fixture-item-read'), 1, 'Reject the other keychain before reading its equal key');
+  assert.equal(count(misplaced, 'fixture-item-delete'), 0);
+  assert.equal(legacy(raceSource).filter(Boolean).length, 1);
+  const raceDifferent = keychain('race-different');
+  const winnerCipher = Buffer.from(ok(encrypt(raceDifferent)).data, 'base64');
+  run(admin, ['seed', raceDifferent, old, helper, 'current-only']);
+  const mismatched = race(raceDifferent, raceEmpty, 'same');
+  assert.equal(mismatched.status, 80);
+  assert.equal(count(mismatched, 'fixture-item-read'), 2);
+  assert.equal(count(mismatched, 'fixture-item-delete'), 0);
+  assert.deepEqual(Buffer.from(ok(decrypt(raceDifferent, winnerCipher)).data, 'base64'), plaintext);
+  assert.equal(legacy(raceDifferent).filter(Boolean).length, 1);
 
   // A foreign same-name entry is never read, used, replaced or cleaned around.
   run(admin, ['plant', boundary]);
@@ -362,7 +441,8 @@ try {
   assert.deepEqual(cleanup(boundary), {
     cleanup: 'deferred',
     removed: 0,
-    retained: 0,
+    retained: null,
+    retainedItems: [],
     reason: 'current',
   });
   assert.deepEqual(legacy(boundary).filter(Boolean).length, 3);
@@ -374,6 +454,7 @@ try {
     cleanup: 'partial',
     removed: 2,
     retained: 1,
+    retainedItems: ['safe-key'],
     reason: 'authorization',
   });
   assert.equal(legacy(partial).filter(Boolean).length, 1);
@@ -381,6 +462,7 @@ try {
     cleanup: 'complete',
     removed: 1,
     retained: 0,
+    retainedItems: [],
     reason: 'none',
   });
 
@@ -452,6 +534,7 @@ try {
         cleanup: 'partial',
         removed: 2,
         retained: 1,
+        retainedItems: ['safe-key'],
         reason: 'authorization',
       },
     );
@@ -465,6 +548,7 @@ try {
         cleanup: 'complete',
         removed: 1,
         retained: 0,
+        retainedItems: [],
         reason: 'none',
       },
     );
@@ -478,10 +562,10 @@ try {
   // fixed invalid input that is rejected before any Keychain access.
   const canonical = path.join(
     workspace.platformRoot,
-    '.tools/credential-helper-v8/VoxCue.Credentials',
+    '.tools/credential-helper-v11/VoxCue.Credentials',
   );
   if (await lstat(canonical).catch(() => null)) {
-    const production = path.join(directory, 'production-v8');
+    const production = path.join(directory, 'production-v11');
     await copyFile(canonical, production);
     for (const extra of [false, true]) {
       const positive = path.join(directory, 'production-parent-' + Number(extra));
@@ -489,14 +573,15 @@ try {
         '-DVOXCUE_PRODUCTION_HELPER_PATH=' + JSON.stringify(production),
         '-DVOXCUE_PRODUCTION_HELPER_HASH=' + JSON.stringify(codeHash(production)),
         '-DVOXCUE_PRODUCTION_EXTRA_ARGUMENT=' + Number(extra),
+        '-DVOXCUE_PRODUCTION_REQUEST_LANGUAGE=1',
       ]);
       sign(positive, 'com.voxcue.app');
       assert.equal(run(positive, [], '', true).status, extra ? 78 : 80);
     }
-    console.log('PASS: frozen v8 production bytes accept only the formal parent boundary.');
-  } else console.log('SKIP: frozen v8 production bytes are not prepared yet.');
+    console.log('PASS: frozen v11 production bytes accept only the formal parent boundary.');
+  } else console.log('SKIP: frozen v11 production bytes are not prepared yet.');
   console.log(
-    'PASS: v8 single-source copy, v6/v7 migration, unchanged-helper path moves, no-interaction validation, JS/native serial maintenance, conflicts, partial deletion retries and identity boundaries. Synthetic keychains only.',
+    'PASS: v11 localized item names, cross-language unchanged entries, single-source copy, three-alias migration, untouched v6–v10 candidates, keychain and key checks on concurrent creation, unchanged-helper path moves, no-interaction validation, JS/native serial maintenance, conflicts, partial deletion retries and identity boundaries. Synthetic keychains only.',
   );
 } finally {
   try {

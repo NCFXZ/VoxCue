@@ -33,8 +33,19 @@ export function createCredentialVault<T>(
     async read(decrypt: (value: Buffer) => string | Promise<string> = crypto.decrypt) {
       try {
         if ((await stat(file)).size > limit) throw Error('Invalid credentials');
-        const value: unknown = JSON.parse(await decrypt(await readFile(file)));
-        if (value === null) throw Error('Invalid credentials');
+        const plain = await decrypt(await readFile(file));
+        let value: unknown;
+        try {
+          value = JSON.parse(plain);
+        } catch {
+          throw Object.assign(Error('Invalid credentials'), {
+            code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+          });
+        }
+        if (value === null)
+          throw Object.assign(Error('Invalid credentials'), {
+            code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+          });
         return value;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;

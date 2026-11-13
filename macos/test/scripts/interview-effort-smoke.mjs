@@ -1,4 +1,8 @@
-import { closeUiApp, openModelMenu } from '../../../shared/test/scripts/install-ui-account.mjs';
+import {
+  closeUiApp,
+  connectUiAccount,
+  openModelMenu,
+} from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -125,7 +129,7 @@ const app = await electron.launch({
 });
 try {
   requireUnlockedDesktop();
-  const main = await app.firstWindow();
+  const main = await connectUiAccount(app, await app.firstWindow());
   main.setDefaultTimeout(15000);
   await main
     .getByRole('button', { name: '聊天模型', exact: true })
@@ -219,6 +223,7 @@ try {
     ),
   );
   await main.reload();
+  await connectUiAccount(app, main);
   await main
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('Test Model', { exact: true })

@@ -1,4 +1,4 @@
-import { connectUiAccount, installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { connectUiAccount, installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { mkdtemp } from 'node:fs/promises';
@@ -101,54 +101,74 @@ try {
   };
   const checkDescriptions = async () => {
     const description = guide.locator('.preparation-guide-description');
-    const active = description.locator('.is-active');
+    const defaultDescription = description.locator('[id$="-default"].is-active[aria-hidden="false"]');
+    await focusUiWindow(app, page);
     await guide.getByRole('heading').hover();
-    const defaultText = await active.innerText();
+    await defaultDescription.waitFor();
+    const defaultText = await defaultDescription.innerText();
     const row = guide.locator('.preparation-guide-actions');
     const before = await row.boundingBox();
     for (const button of await guide.getByRole('button').all()) {
+      const id = await button.getAttribute('aria-describedby');
+      assert.ok(id);
       await button.hover();
-      await page.waitForFunction(
-        (id) => document.getElementById(id)?.classList.contains('is-active'),
-        await button.getAttribute('aria-describedby'),
-      );
-      assert.equal(await active.getAttribute('id'), await button.getAttribute('aria-describedby'));
-      assert.notEqual(await active.innerText(), defaultText);
-      const fading = await description.evaluate((element) => {
-        const transitions = element
-          .getAnimations({ subtree: true })
+      // Sample the hover, its React description and its fade in the same
+      // animation frame. A mouseleave between IPC reads restores the default.
+      const sample = await page.waitForFunction((id) => {
+        const selected = document.getElementById(id);
+        const element = selected?.parentElement;
+        const target = element?.closest('.preparation-guide')?.querySelector('button:hover');
+        if (!selected || target?.getAttribute('aria-describedby') !== id || !selected.classList.contains('is-active'))
+          return false;
+        const transitions = element.getAnimations({ subtree: true })
           .filter((animation) => animation.transitionProperty === 'opacity');
         if (!transitions.length) return false;
         for (const animation of transitions) {
           animation.pause();
           animation.currentTime = Number(animation.effect.getTiming().duration) / 2;
         }
-        const visible = [...element.children].map((child) =>
-          Number(getComputedStyle(child).opacity),
-        );
+        const fading = [...element.children].some((child) => {
+          const opacity = Number(getComputedStyle(child).opacity);
+          return opacity > 0 && opacity < 1;
+        });
         for (const animation of transitions) animation.finish();
-        return visible.some((opacity) => opacity > 0 && opacity < 1);
-      });
-      assert(fading, 'subtitle changes through intermediate opacity');
-      const after = await row.boundingBox();
-      assert(Math.abs(before.y - after.y) < 1, 'subtitle does not move buttons');
+        return {
+          id: element.querySelector('.is-active').id,
+          text: selected.innerText,
+          ariaHidden: selected.getAttribute('aria-hidden'),
+          fading,
+          rowY: target.parentElement.getBoundingClientRect().y,
+        };
+      }, id);
+      const observed = await sample.jsonValue();
+      await sample.dispose();
+      assert.equal(observed.id, id);
+      assert.equal(observed.ariaHidden, 'false');
+      assert.notEqual(observed.text, defaultText);
+      assert(observed.fading, 'subtitle changes through intermediate opacity');
+      assert(Math.abs(before.y - observed.rowY) < 1, 'subtitle does not move buttons');
     }
     await guide.getByRole('heading').hover();
-    assert.equal(await active.innerText(), defaultText);
+    await defaultDescription.waitFor();
+    assert.equal(await defaultDescription.innerText(), defaultText);
     // Enter the last choice via the keyboard, without invoking its action.
     await guide.getByRole('link').focus();
     await page.keyboard.press('Shift+Tab');
     const last = guide.getByRole('button').last();
     await page.waitForFunction(
-      (id) => document.getElementById(id)?.classList.contains('is-active'),
+      (id) => document.activeElement?.getAttribute('aria-describedby') === id &&
+        document.getElementById(id)?.matches('.is-active[aria-hidden="false"]'),
       await last.getAttribute('aria-describedby'),
     );
-    assert.equal(await active.getAttribute('id'), await last.getAttribute('aria-describedby'));
     await guide.getByRole('link').focus();
-    assert.equal(await active.innerText(), defaultText);
+    await defaultDescription.waitFor();
+    assert.equal(await defaultDescription.innerText(), defaultText);
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await last.hover();
-    assert.equal(await active.evaluate((element) => getComputedStyle(element).opacity), '1');
+    await page.waitForFunction((id) => {
+      const label = document.getElementById(id);
+      return label?.matches('.is-active[aria-hidden="false"]') && getComputedStyle(label).opacity === '1';
+    }, await last.getAttribute('aria-describedby'));
     assert.equal(
       await description.evaluate((element) => element.getAnimations({ subtree: true }).length),
       0,

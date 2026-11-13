@@ -29,14 +29,15 @@ int main(int argc, const char **argv) {
     NSString *mode = @(argv[1]);
     const bool create = [mode isEqual:@"create"], seed = [mode isEqual:@"seed"];
     const bool vault = [mode isEqual:@"vault"], plant = [mode isEqual:@"plant"];
-    if (!(create || seed || vault || plant || [mode isEqual:@"inspect"] || [mode isEqual:@"delete"] ||
+    const bool seedCandidates = [mode isEqual:@"seed-candidates"], checkCandidates = [mode isEqual:@"check-candidates"];
+    if (!(create || seed || vault || plant || seedCandidates || checkCandidates || [mode isEqual:@"inspect"] || [mode isEqual:@"delete"] ||
           [mode isEqual:@"unrelated"]) ||
         argc != (seed ? 6 : 3) || !ownedFixtureKeychain(argv[2], create)) return 76;
     if (seed && (strcmp(argv[3], VOXCUE_FIXTURE_LEGACY_PATH) ||
         strcmp(argv[4], VOXCUE_FIXTURE_HARDENED_PATH) ||
         !pinnedFixtureHelper(argv[3]) || !pinnedFixtureHelper(argv[4]) ||
         ![@[@"normal", @"different", @"denied", @"partial", @"no-partition", @"cross",
-            @"legacy-only", @"current-only"] containsObject:@(argv[5])])) return 76;
+            @"legacy-only", @"current-only", @"ordered", @"safe-order", @"oldest-only"] containsObject:@(argv[5])])) return 76;
     SecKeychainSetUserInteractionAllowed(false);
     SecKeychainRef keychain = NULL;
     OSStatus status = [mode isEqual:@"create"]
@@ -50,8 +51,33 @@ int main(int argc, const char **argv) {
         NULL, NULL, NULL);
       CFRelease(keychain); return status ? 12 : 0;
     }
+    if (seedCandidates || checkCandidates) {
+      // These ignored names contain synthetic, admin-owned values distinct from
+      // the historical source. Only this fixture may inspect the values.
+      const char *service = "VoxCue Credential Storage";
+      for (int revision = 6; revision <= 10; ++revision) {
+        NSString *account = [NSString stringWithFormat:@"VoxCue Key v%d", revision];
+        NSData *value = [[NSString stringWithFormat:@"synthetic-ignored-%d", revision]
+          dataUsingEncoding:NSUTF8StringEncoding];
+        const char *name = account.UTF8String;
+        if (seedCandidates) {
+          status = SecKeychainAddGenericPassword(keychain, (UInt32)strlen(service), service,
+            (UInt32)strlen(name), name, (UInt32)value.length, value.bytes, NULL);
+        } else {
+          UInt32 size = 0;
+          void *bytes = NULL;
+          status = SecKeychainFindGenericPassword(keychain, (UInt32)strlen(service), service,
+            (UInt32)strlen(name), name, &size, &bytes, NULL);
+          if (!status && (!bytes || size != value.length || memcmp(bytes, value.bytes, size))) status = errSecDecode;
+          if (bytes) SecKeychainItemFreeContent(NULL, bytes);
+        }
+        if (status) break;
+      }
+      CFRelease(keychain);
+      return status ? 17 : 0;
+    }
     if (plant || vault) {
-      // The v6 own entry: plant a same-name foreign entry, or report its
+      // The selected own entry: plant a same-name foreign entry, or report its
       // application rules and whether this unrelated tool can read it.
       const char *service = "VoxCue Credential Storage", *account = VOXCUE_FIXTURE_VAULT_ACCOUNT;
       if (plant) {
@@ -64,8 +90,19 @@ int main(int argc, const char **argv) {
         (UInt32)strlen(account), account, NULL, NULL, &item);
       if (status == errSecItemNotFound) { fputs("null", stdout); CFRelease(keychain); return 0; }
       if (status) return 15;
+      UInt32 labelTags[] = {kSecLabelItemAttr}, labelFormats[] = {CSSM_DB_ATTRIBUTE_FORMAT_STRING};
+      SecKeychainAttributeInfo labelInfo{1, labelTags, labelFormats};
+      SecKeychainAttributeList *labelAttributes = NULL;
+      status = SecKeychainItemCopyAttributesAndData(item, &labelInfo, NULL, &labelAttributes, NULL, NULL);
+      NSString *label = nil;
+      if (!status && labelAttributes && labelAttributes->count == 1) {
+        const auto &value = labelAttributes->attr[0];
+        if (value.tag == kSecLabelItemAttr && value.data && value.length <= 256)
+          label = [[NSString alloc] initWithBytes:value.data length:value.length encoding:NSUTF8StringEncoding];
+      }
+      if (labelAttributes) SecKeychainItemFreeAttributesAndData(labelAttributes, NULL);
       SecAccessRef access = NULL; CFArrayRef entries = NULL;
-      status = SecKeychainItemCopyAccess(item, &access);
+      if (!status) status = SecKeychainItemCopyAccess(item, &access);
       if (!status) status = SecAccessCopyACLList(access, &entries);
       NSMutableArray *rules = [NSMutableArray array];
       for (CFIndex n = 0; !status && n < CFArrayGetCount(entries); ++n) {
@@ -82,7 +119,7 @@ int main(int argc, const char **argv) {
       if (data) SecKeychainItemFreeContent(NULL, data);
       if (entries) CFRelease(entries); if (access) CFRelease(access); CFRelease(item);
       if (status) return 16;
-      NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"rules":rules, @"readable":@(read == errSecSuccess)}
+      NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"rules":rules, @"label":label ?: @"", @"readable":@(read == errSecSuccess)}
         options:0 error:nil];
       fwrite(json.bytes, 1, json.length, stdout);
       CFRelease(keychain);
@@ -111,9 +148,12 @@ int main(int argc, const char **argv) {
       if (denied) { [applications removeObjectAtIndex:1]; [ids removeObjectAtIndex:1]; }
       NSData *xml = [NSPropertyListSerialization dataWithPropertyList:@{@"Partitions":ids} format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
       for (size_t index = 0; index < 3; ++index) {
-        if ((index == 0 && strcmp(argv[5], "legacy-only") == 0) ||
-            (index > 0 && strcmp(argv[5], "current-only") == 0)) continue;
-        const char *value = index == 2 && strcmp(argv[5], "different") == 0
+        if ((index == 0 && (!strcmp(argv[5], "legacy-only") || !strcmp(argv[5], "safe-order"))) ||
+            (index > 0 && !strcmp(argv[5], "current-only")) ||
+            (index < 2 && !strcmp(argv[5], "oldest-only"))) continue;
+        const bool different = (index > 0 && !strcmp(argv[5], "ordered")) ||
+          (index == 2 && (!strcmp(argv[5], "different") || !strcmp(argv[5], "safe-order")));
+        const char *value = different
           ? "synthetic-different-password" : "synthetic-safe-storage-password";
         SecAccessRef access = NULL; CFArrayRef entries = NULL;
         status = SecAccessCreate(CFSTR("Synthetic migration authorization"), (__bridge CFArrayRef)applications, &access);

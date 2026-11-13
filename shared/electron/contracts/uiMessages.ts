@@ -1,5 +1,20 @@
 // UI copy only. User documents, chat responses and system prompts are not translated.
 export const uiMessages: Readonly<Record<string, string>> = {
+  '本次启动已停止访问 ChatGPT 的系统凭据。请重新启动 VoxCue 后重试。':
+    'VoxCue has stopped accessing ChatGPT credentials for this session. Restart VoxCue to try again.',
+  '本次启动已停止访问 GitHub Copilot 的系统凭据。请重新启动 VoxCue 后重试。':
+    'VoxCue has stopped accessing GitHub Copilot credentials for this session. Restart VoxCue to try again.',
+  'ChatGPT 连接被拒绝，请重启 VoxCue 后重试。': 'ChatGPT access was denied. Restart VoxCue and try again.',
+  'ChatGPT 连接失败，请重启 VoxCue 后重试。': 'Couldn’t connect to ChatGPT. Restart VoxCue and try again.',
+  'GitHub Copilot 连接被拒绝，请重启 VoxCue 后重试。': 'GitHub Copilot access was denied. Restart VoxCue and try again.',
+  'GitHub Copilot 连接失败，请重启 VoxCue 后重试。': 'Couldn’t connect to GitHub Copilot. Restart VoxCue and try again.',
+  '无法读取登录信息，请重试。': 'Couldn’t read sign-in information. Try again.',
+  'GitHub Copilot 连接失败，请重试。': 'Couldn’t connect to GitHub Copilot. Try again.',
+  'GitHub 授权失败，请重试。': 'GitHub authorization failed. Try again.',
+  '连接操作失败，请重试。': 'Connection failed. Try again.',
+  '正在登录，请稍候。': 'Signing in. Please wait.',
+  '无法确认已断开连接。可在 ChatGPT 账户设置中撤销授权。':
+    'Couldn’t confirm disconnection. You can revoke access in your ChatGPT account settings.',
   未设置: 'Not set',
   不可用: 'Unavailable',
   '无效的快捷键。': 'Invalid shortcut.',
@@ -197,6 +212,12 @@ export const uiMessages: Readonly<Record<string, string>> = {
   'macOS 钥匙串不可用，登录信息未保存。':
     'macOS Keychain is unavailable. Sign-in information was not saved.',
   'macOS 钥匙串不可用，请稍后重试。': 'macOS Keychain is unavailable. Please try again later.',
+  'macOS 钥匙串授权等待已超时，已停止重复请求。如系统密码框仍显示，请在该框中选择“拒绝”，然后重新启动 VoxCue。':
+    'macOS Keychain authorization timed out. Repeated requests have stopped. If the system password dialog is still visible, choose “Deny” there. Restart VoxCue to try again.',
+  'macOS 钥匙串中存在冲突的 VoxCue 登录条目，已停止操作。请退出 VoxCue，在“钥匙串访问”中检查并恢复原条目后重新启动；不要删除不确定归属的条目。':
+    'Conflicting VoxCue sign-in items were found in macOS Keychain. Operations have stopped. Quit VoxCue, inspect and restore the original items in Keychain Access, then restart. Do not delete items whose ownership you are unsure about.',
+  'macOS 登录钥匙串已锁定，已停止操作。请退出 VoxCue，在“钥匙串访问”中手动解锁登录钥匙串后重新启动。VoxCue 不会收集钥匙串密码。':
+    'The macOS login Keychain is locked. Operations have stopped. Quit VoxCue, manually unlock the login Keychain in Keychain Access, then restart. VoxCue does not collect your Keychain password.',
   'macOS 钥匙串存储不可用，GitHub Copilot 登录未保存，请重试。':
     'macOS Keychain storage is unavailable. GitHub Copilot sign-in was not saved. Please try again.',
   'Windows 凭据加密不可用，登录信息未保存。':
@@ -1035,6 +1056,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   'AI 服务独立授权，用于聊天与面试回答，不影响 VoxCue 主账号和云同步。':
     'AI services use separate authorization for chat and interview answers. Your VoxCue account and cloud sync are independent.',
   已连接: 'Connected',
+  '{0} 已连接': '{0} connected',
   未连接: 'Not connected',
   '等待浏览器授权…': 'Waiting for browser authorization…',
   断开连接: 'Disconnect',

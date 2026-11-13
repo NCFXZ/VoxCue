@@ -101,6 +101,10 @@ try {
       );
     }
   }
+  await interview.getByRole('button', { name: 'End interview', exact: true }).click();
+  const closed = interview.waitForEvent('close');
+  await interview.getByRole('button', { name: 'Confirm end interview', exact: true }).click();
+  await closed;
   console.log(
     'PASS: actual interview header uses one row or 2+2 with device connected, vertically centered with its title in Chinese and English. No hardware or real account.',
   );

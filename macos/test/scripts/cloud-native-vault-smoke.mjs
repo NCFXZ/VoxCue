@@ -4,10 +4,11 @@ import { loadDevelopmentSigning, signLocalCode } from '../../scripts/development
 import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 import { mkdir, readFile, writeFile, realpath } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
+import { writeCredentialFixtureSource } from './credential-fixture-source.mjs';
 
 // Exercise the production JS encryption port + cloud vault in signed Electron,
 // using the existing test-only native source's explicit temporary Keychain.
@@ -16,13 +17,10 @@ assert.equal(process.platform, 'darwin');
 const releaseDesktop = holdDesktopAwake();
 const signing = await loadDevelopmentSigning();
 const fixtureRoot = await realpath(testRoot);
-const canonical = path.join(
-  workspace.platformRoot,
-  '.tools/credential-helper-v1/VoxCue.Credentials',
-);
-const before = createHash('sha256')
-  .update(await readFile(canonical))
-  .digest('hex');
+const canonicalHashes = () => Promise.all(['v1', 'v11'].map(async (revision) =>
+  createHash('sha256').update(await readFile(path.join(workspace.platformRoot,
+    '.tools/credential-helper-' + revision, 'VoxCue.Credentials'))).digest('hex')));
+const before = await canonicalHashes();
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 30000 });
   assert.equal(result.status, 0, result.stderr);
@@ -48,7 +46,7 @@ int main(int argc,const char **argv){@autoreleasepool{
  }}if(keychain)CFRelease(keychain);if(status!=noErr)fprintf(stderr,"OSStatus %d",(int)status);return status==noErr?0:1;
 }}`,
 );
-const compile = (source, output) => {
+const compile = (source, output, definitions = []) => {
   run('/usr/bin/xcrun', [
     'clang++',
     '-std=c++17',
@@ -58,6 +56,8 @@ const compile = (source, output) => {
     '-O2',
     '-DVOXCUE_SIGNING_SHA1="' + signing.sha1.toLowerCase() + '"',
     '-DVOXCUE_FIXTURE_ROOT=' + JSON.stringify(fixtureRoot),
+    '-I', path.join(workspace.platformRoot, 'native'),
+    ...definitions,
     source,
     '-framework',
     'Foundation',
@@ -66,12 +66,31 @@ const compile = (source, output) => {
     '-o',
     output,
   ]);
-  signLocalCode(output, signing, 'com.voxcue.credentials', { preserveMetadata: false });
 };
 const manager = path.join(fixtureRoot, 'keychain-manager');
-const helper = path.join(fixtureRoot, 'credential-probe');
+const fixture = (name) => path.join(workspace.platformRoot, 'test/fixtures', name);
+const vaultHelper = path.join(fixtureRoot, 'fixture-vault');
+const helper = path.join(fixtureRoot, 'cloud-vault-parent');
+const parentId = 'com.voxcue.test.credentials.' + randomBytes(12).toString('hex');
+const vaultSource = await writeCredentialFixtureSource(fixtureRoot, 'vault-v11', parentId);
 compile(managerSource, manager);
-compile(path.join(workspace.platformRoot, 'test/fixtures/credential-probe.mm'), helper);
+signLocalCode(manager, signing, parentId + '.manager', { preserveMetadata: false });
+compile(fixture('credential-vault-probe.mm'), vaultHelper, [
+  '-DVOXCUE_FIXTURE_VAULT_SOURCE=' + JSON.stringify(vaultSource),
+  '-DVOXCUE_FIXTURE_VAULT_ACCOUNT="VoxCue Key v11"',
+]);
+signLocalCode(vaultHelper, signing, 'com.voxcue.credentials.vault', { preserveMetadata: false, runtime: true });
+const display = spawnSync('/usr/bin/codesign', ['-d', '--verbose=4', vaultHelper], { encoding: 'utf8' });
+assert.equal(display.status, 0);
+const codeHash = display.stderr.match(/^CDHash=([a-f0-9]{40})$/m)?.[1];
+assert.ok(codeHash);
+compile(fixture('credential-hardening-parent.mm'), helper, [
+  '-DVOXCUE_REVISION=1',
+  '-DVOXCUE_FIXTURE_HELPERS=@{@' + JSON.stringify(vaultHelper) + ':@' + JSON.stringify(codeHash) + '}',
+  '-DVOXCUE_FIXTURE_BOUND_HELPER=' + JSON.stringify(vaultHelper),
+  '-DVOXCUE_FIXTURE_BOUND_KEYCHAIN=' + JSON.stringify(keychain),
+]);
+signLocalCode(helper, signing, parentId, { preserveMetadata: false, runtime: true });
 const profile = path.join(fixtureRoot, 'profile');
 await mkdir(profile);
 let ownsKeychain = false;
@@ -98,15 +117,17 @@ app.setAppPath(root);app.setPath('userData',${JSON.stringify(profile)});app.comm
 const cp=require('node:child_process'),spawn=cp.spawn;let nativeCalls=0,activeNative=0,maxNative=0;
 cp.spawn=function(executable,args,options){
  if((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue')))throw Error('Production helper forbidden in this fixture');
- if(executable===helper){assert.deepEqual(args,[]);nativeCalls++;activeNative++;maxNative=Math.max(maxNative,activeNative);const child=spawn.call(this,helper,[keychain],options);child.once('close',()=>activeNative--);return child;}
+ if(executable===helper){assert.deepEqual(args,[]);nativeCalls++;activeNative++;maxNative=Math.max(maxNative,activeNative);const child=spawn.call(this,helper,args,options);child.once('close',()=>activeNative--);return child;}
  return spawn.call(this,executable,args,options);
 };
 app.whenReady().then(async()=>{
  assert.equal(process.versions.electron,'44.10.0');
  const {createCredentialEncryption}=require(root+'/dist-electron/macos/electron/credentials.js');
  const {createCloudVault,createCredentialVault}=require(root+'/dist-electron/shared/electron/backend/cloud/vault.js');
+ const {credentialProblemMessages}=require(root+'/dist-electron/shared/electron/contracts/credentialProblems.js');
  const {CloudAccountClient}=require(root+'/dist-electron/shared/electron/backend/cloud/client.js');
- const encryption=createCredentialEncryption(helper),vault=createCloudVault(encryption),file=path.join(app.getPath('userData'),'cloud-account/session.bin');
+ const encryption=createCredentialEncryption(helper,async()=>assert.fail('Fresh or current synthetic keychain should never require migration')),
+  vault=createCloudVault(encryption),file=path.join(app.getPath('userData'),'cloud-account/session.bin');
  const parallel=await Promise.all(Array.from({length:4},()=>encryption.encrypt('Synthetic parallel credential')));
  assert.ok(parallel.every(value=>value.equals(parallel[0])));
  assert.deepEqual(await Promise.all(parallel.map(value=>encryption.decrypt(value))),Array(4).fill('Synthetic parallel credential'));
@@ -144,7 +165,7 @@ app.whenReady().then(async()=>{
  if(phase==='read'){
   const operate=mode=>{const r=cp.spawnSync(manager,[mode,keychain],{encoding:'utf8'});assert.equal(r.status,0,r.stderr);};
   operate('lock');try{
-   const failed=await client.call({action:'login',email:user.email,password:'legacy'});assert.equal(failed.ok,false);assert.match(failed.error,/无法安全保存/);assert.deepEqual(revoked,['Bearer '+'c'.repeat(43)]);assert.deepEqual(await fs.readFile(file),original);
+   const failed=await client.call({action:'login',email:user.email,password:'legacy'});assert.equal(failed.ok,false);assert.equal(failed.error,credentialProblemMessages.VOXCUE_CREDENTIAL_LOCKED);assert.deepEqual(revoked,['Bearer '+'c'.repeat(43)]);assert.deepEqual(await fs.readFile(file),original);
   }finally{operate('unlock');}
   const stoppedAt=nativeCalls;
   await assert.rejects(vault.read(),/重新启动/);
@@ -187,12 +208,7 @@ app.whenReady().then(async()=>{
   }
 }
 assert.equal(keychainList(), previousList);
-assert.equal(
-  createHash('sha256')
-    .update(await readFile(canonical))
-    .digest('hex'),
-  before,
-);
+assert.deepEqual(await canonicalHashes(), before);
 console.log(
   'PASS: temporary Keychain deleted, search list unchanged, canonical helper bytes unchanged; no real login Keychain access.',
 );

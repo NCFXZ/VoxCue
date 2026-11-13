@@ -29,9 +29,9 @@ const {CodexUsageRuntime}=require(root+'/dist-electron/shared/electron/backend/c
 CodexUsageRuntime.prototype.login=async function(open,signal){
  await open('https://auth.openai.com/oauth/authorize?client_id=synthetic-managed-client&state=synthetic&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback');
  await new Promise((resolve,reject)=>{
-  globalThis.__declineManagedLogin=()=>reject(Error('未完成 ChatGPT 授权'));
-  if(signal.aborted)reject(Error('登录已取消'));
-  else signal.addEventListener('abort',()=>reject(Error('登录已取消')),{once:true});
+  globalThis.__declineManagedLogin=()=>reject(Error('ChatGPT 登录未完成，请重试。'));
+  if(signal.aborted)reject(Error('已取消 ChatGPT 登录。'));
+  else signal.addEventListener('abort',()=>reject(Error('已取消 ChatGPT 登录。')),{once:true});
  });
 };
 CodexUsageRuntime.prototype.cancel=function(){};
@@ -119,8 +119,10 @@ try {
   const callback = new URL(authorization.searchParams.get('redirect_uri'));
   assert.equal(callback.hostname, '127.0.0.1');
   await page.getByRole('button', { name: '取消授权', exact: true }).click();
-  await ai.getByRole('button', { name: '连接', exact: true }).waitFor();
-  await page.getByRole('alert').getByText('登录已取消', { exact: false }).waitFor();
+  const alert = page.locator('.ai-services-panel').getByRole('alert');
+  await alert.filter({ hasText: /^登录已取消或超时，请重试。$/ }).waitFor();
+  assert.ok(await ai.getByRole('button', { name: '连接', exact: true }).isEnabled());
+  assert.equal(await page.evaluate(() => window.desktop.authSession('chatgpt')), null);
   await app.evaluate(() => {
     globalThis.__loginURL = '';
   });
@@ -130,16 +132,14 @@ try {
     if (address) break;
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  const deniedAuth = new URL(address);
-  const denied = new URL(deniedAuth.searchParams.get('redirect_uri'));
-  denied.search = new URLSearchParams({
-    state: deniedAuth.searchParams.get('state'),
-    error: 'access_denied',
-  }).toString();
-  assert.equal(denied.hostname, '127.0.0.1');
+  const retryAuthorization = new URL(address);
+  assert.equal(retryAuthorization.origin, authorization.origin);
+  assert.equal(retryAuthorization.searchParams.get('client_id'), 'synthetic-managed-client');
+  assert.equal(new URL(retryAuthorization.searchParams.get('redirect_uri')).hostname, '127.0.0.1');
   await app.evaluate(() => globalThis.__declineManagedLogin());
-  await page.getByRole('alert').getByText('未完成 ChatGPT 授权', { exact: false }).waitFor();
-  assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
+  await alert.filter({ hasText: /^ChatGPT 登录未完成，请重试。$/ }).waitFor();
+  assert.ok(await ai.getByRole('button', { name: '连接', exact: true }).isEnabled());
+  assert.equal(await page.evaluate(() => window.desktop.authSession('chatgpt')), null);
   // DPAPI on Windows, Chromium's synthetic Keychain on Mac. Never access a real
   // Safe Storage password merely because userData is an isolated directory.
   const nativeStorage = await app.evaluate(async ({ app, safeStorage }) => {

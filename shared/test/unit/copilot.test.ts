@@ -8,6 +8,10 @@ import { SelectedChatService } from '../../../shared/electron/application/provid
 import type { AuthSession } from '../../../shared/electron/contracts/auth';
 import type { ChatEvent, ChatRequest } from '../../../shared/electron/contracts/chat';
 import { profileFields } from '../../../shared/electron/contracts/profile';
+import {
+  ProviderCredentialAccess,
+  ProviderCredentialUnavailable,
+} from '../../electron/backend/auth/providerCredentialAccess';
 
 const authorize =
   'https://github.com/login/oauth/authorize?client_id=official-sdk&state=state&code_challenge=challenge&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback';
@@ -18,6 +22,8 @@ function authentication(
       result: { status: 'completed', host: 'https://github.com', login: 'Example' },
     },
   ],
+  credentialAccess?: ProviderCredentialAccess,
+  retire?: () => Promise<void>,
 ) {
   let saved: AuthSession | null = null;
   const accounts = {
@@ -44,10 +50,27 @@ function authentication(
     storage: { read, write },
     control: async () => ({ rpc: { accounts } }) as any,
     openBrowser,
+    credentialAccess,
+    retire,
   });
   return { service, accounts, write, read, openBrowser };
 }
 describe('Copilot 浏览器授权边界', () => {
+  it('恢复须匹配官方活动账户，空记录不启动 SDK，暂时失败不等于退出', async () => {
+    const { service, accounts } = authentication();
+    expect(await service.verifiedSession()).toBeNull();
+    expect(accounts.get).not.toHaveBeenCalled();
+    const session = await service.signIn();
+    expect(await service.verifiedSession()).toEqual(session);
+    expect(accounts.get).toHaveBeenCalledExactlyOnceWith({ query: { kind: 'activeAccount' } });
+    accounts.get.mockRejectedValueOnce(Error('offline'));
+    await expect(service.verifiedSession()).rejects.toThrow('无法检查');
+    accounts.get.mockResolvedValueOnce({
+      kind: 'activeAccount',
+      authInfo: { type: 'user', host: 'https://github.com', login: 'Changed' },
+    });
+    expect(await service.verifiedSession()).toBeNull();
+  });
   it('只打开 GitHub PKCE + 本机回调；只保存无凭据的身份元数据', async () => {
     for (const url of [
       authorize.replace('https://github.com', 'https://evil.test'),
@@ -156,6 +179,78 @@ describe('Copilot 浏览器授权边界', () => {
     expect(write).not.toHaveBeenCalled();
     expect(accounts.login.cancel).toHaveBeenCalledWith({ flowId: 'private-flow' });
   });
+  it('官方存储无法保存时停止本次启动的账号和模型读取，只保留本机断开', async () => {
+    const stop = vi.fn();
+    const gate = new ProviderCredentialAccess('copilot', stop);
+    const { service, accounts, write, openBrowser } = authentication(
+      [{ kind: 'completed', result: { status: 'needs-plaintext-consent' } }],
+      gate,
+    );
+    await expect(service.signIn()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    await expect(service.access()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    await expect(service.signIn()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    expect(accounts.login.begin).toHaveBeenCalledTimes(1);
+    expect(accounts.login.cancel).not.toHaveBeenCalled();
+    expect(openBrowser).toHaveBeenCalledTimes(1);
+    expect(accounts.get).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+    expect(stop).toHaveBeenCalledTimes(1);
+    await service.signOut();
+    expect(accounts.set).not.toHaveBeenCalled();
+    await expect(service.signIn()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+  });
+  it('并发账号核对收到钥匙串拒绝后不会发出第二个 RPC', async () => {
+    const gate = new ProviderCredentialAccess('copilot');
+    const { service, accounts } = authentication(undefined, gate);
+    await service.signIn();
+    accounts.get.mockRejectedValueOnce(Error('Keychain: errSecAuthFailed (-25293)'));
+    const attempts = await Promise.allSettled([service.access(), service.access()]);
+    for (const result of attempts) {
+      expect(result.status).toBe('rejected');
+      if (result.status === 'rejected')
+        expect(result.reason).toBeInstanceOf(ProviderCredentialUnavailable);
+    }
+    expect(accounts.get).toHaveBeenCalledTimes(1);
+    await expect(service.session()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+  });
+  it('普通浏览器取消及 HTTP 权限错误允许再次主动连接', async () => {
+    const gate = new ProviderCredentialAccess('copilot');
+    const { service, accounts, openBrowser } = authentication(undefined, gate);
+    openBrowser.mockRejectedValueOnce(Error('Browser login cancelled by user'));
+    await expect(service.signIn()).rejects.toThrow('无法完成');
+    expect(accounts.login.cancel).toHaveBeenCalledExactlyOnceWith({ flowId: 'private-flow' });
+    accounts.login.begin.mockRejectedValueOnce(
+      Object.assign(Error('Forbidden'), { statusCode: 403 }),
+    );
+    await expect(service.signIn()).rejects.toThrow('无法完成');
+    await expect(service.signIn()).resolves.toMatchObject({ mode: 'copilot' });
+    expect(gate.denied).toBe(false);
+  });
+  it('登录 RPC 的系统钥匙串错误步骤与普通 OAuth 拒绝分别处理', async () => {
+    const gate = new ProviderCredentialAccess('copilot');
+    const { service, write } = authentication(
+      [
+        { kind: 'error', message: 'OAuth authorization declined by user' },
+        { kind: 'error', message: 'Keychain: errSecUserCanceled (-128)' },
+      ],
+      gate,
+    );
+    await expect(service.signIn()).rejects.toThrow('授权未完成');
+    expect(gate.denied).toBe(false);
+    await expect(service.signIn()).rejects.toMatchObject({ reason: 'denied' });
+    expect(gate.denied).toBe(true);
+    expect(write).not.toHaveBeenCalled();
+    const unavailable = authentication(
+      [{ kind: 'completed', result: { status: 'needs-plaintext-consent' } }],
+      new ProviderCredentialAccess('copilot'),
+    );
+    await expect(unavailable.service.signIn()).rejects.toMatchObject({ reason: 'unavailable' });
+    const locked = authentication(
+      [{ kind: 'error', message: 'Keychain: errSecInteractionNotAllowed (-25308)' }],
+      new ProviderCredentialAccess('copilot'),
+    );
+    await expect(locked.service.signIn()).rejects.toMatchObject({ reason: 'unavailable' });
+  });
   it('不把运行时原始错误或凭据带入公开错误', async () => {
     const fixture = authentication();
     fixture.accounts.login.begin.mockRejectedValueOnce(
@@ -198,6 +293,34 @@ describe('Copilot 浏览器授权边界', () => {
     );
     expect(write).not.toHaveBeenCalled();
   });
+  it.each(['acknowledged', 'unconfirmed'])(
+    '取消不结算的 OAuth 轮询后仍能登录，旧流程的迟到拒绝不暂停新的登录：%s',
+    async (cancel) => {
+      const gate = new ProviderCredentialAccess('copilot');
+      const retire = vi.fn(async () => {});
+      const { service, accounts, write } = authentication(undefined, gate, retire);
+      let settle!: (value: unknown) => void;
+      accounts.login.advance.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            settle = resolve;
+          }),
+      );
+      if (cancel === 'unconfirmed')
+        accounts.login.cancel.mockRejectedValueOnce(Error('old flow closed'));
+      const first = service.signIn();
+      await vi.waitFor(() => expect(accounts.login.advance).toHaveBeenCalledOnce());
+      service.cancel();
+      await expect(first).rejects.toThrow('取消');
+      expect(accounts.login.cancel).toHaveBeenCalledExactlyOnceWith({ flowId: 'private-flow' });
+      expect(retire).toHaveBeenCalledTimes(cancel === 'unconfirmed' ? 1 : 0);
+      await expect(service.signIn()).resolves.toMatchObject({ mode: 'copilot' });
+      settle({ kind: 'completed', result: { status: 'needs-plaintext-consent' } });
+      await Promise.resolve();
+      expect(gate.denied).toBe(false);
+      expect(write).toHaveBeenCalledTimes(1);
+    },
+  );
 });
 
 const request: ChatRequest = {
@@ -210,12 +333,15 @@ const request: ChatRequest = {
 function chat(
   run: (emit: (type: string, data: any) => void) => void | Promise<void>,
   idleTimeoutMs = 5000,
+  credentialAccess?: ProviderCredentialAccess,
+  retire?: () => Promise<void>,
 ) {
   let handler: (event: any) => void = () => {};
   let eventId = 0;
   const emit = (type: string, data: any) => handler({ type, data, id: `event-${++eventId}` });
   const session = {
     sessionId: 'owned-session',
+    rpc: { quota: { refresh: vi.fn(async (): Promise<any> => ({})) } },
     on: vi.fn((callback) => {
       handler = callback;
       return () => {
@@ -263,6 +389,8 @@ function chat(
     access: async () => ({ account: 'copilot:synthetic' }),
     ledger: ledger as any,
     idleTimeoutMs,
+    credentialAccess,
+    retire,
   });
   return { service, client, session, ledger, emit };
 }
@@ -272,6 +400,83 @@ function answer(emit: (type: string, data: any) => void, content = '合成回答
   emit('session.idle', {});
 }
 describe('Copilot 服务适配与本机资料边界', () => {
+  it('超时额度 RPC 退休后释放模型队列，迟到的旧运行时权限错误不暂停新请求', async () => {
+    const timeout = new AbortController();
+    const timeoutFactory = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    try {
+      const gate = new ProviderCredentialAccess('copilot');
+      let retired!: () => void, late!: (reason: Error) => void;
+      const retire = vi.fn(
+        () =>
+          new Promise<void>((resolve) => {
+            retired = resolve;
+          }),
+      );
+      const fixture = chat(() => {}, 5000, gate, retire);
+      fixture.session.rpc.quota.refresh.mockImplementationOnce(
+        () =>
+          new Promise((_, reject) => {
+            late = reject;
+          }),
+      );
+      const read = fixture.service.accountUsage().catch((error) => error);
+      await vi.waitFor(() => expect(fixture.session.rpc.quota.refresh).toHaveBeenCalledOnce());
+      const catalog = fixture.service.models();
+      timeout.abort();
+      await vi.waitFor(() => expect(retire).toHaveBeenCalledOnce());
+      expect(fixture.client.rpc.models.list).not.toHaveBeenCalled();
+      retired();
+      await expect(read).resolves.toBeInstanceOf(Error);
+      await expect(catalog).resolves.toHaveLength(1);
+      late(Error('Keychain: errSecUserCanceled'));
+      await Promise.resolve();
+      expect(gate.denied).toBe(false);
+    } finally {
+      timeoutFactory.mockRestore();
+    }
+  });
+  it('模型 RPC 明确报告系统存储拒绝后，主动发送与后台额度查询共享暂停状态', async () => {
+    const gate = new ProviderCredentialAccess('copilot');
+    const fixture = chat(() => {}, 5000, gate);
+    fixture.client.rpc.models.list.mockRejectedValueOnce(Error('OSStatus -25308'));
+    await expect(fixture.service.models()).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    await expect(fixture.service.accountUsage()).rejects.toBeInstanceOf(
+      ProviderCredentialUnavailable,
+    );
+    await expect(
+      fixture.service.stream(request, () => {}, new AbortController().signal),
+    ).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    expect(fixture.client.rpc.models.list).toHaveBeenCalledTimes(1);
+    expect(fixture.client.createSession).not.toHaveBeenCalled();
+  });
+  it('远端会话权限错误不被当作本地钥匙串拒绝', async () => {
+    const gate = new ProviderCredentialAccess('copilot');
+    const fixture = chat(
+      (emit) =>
+        emit('session.error', {
+          errorType: 'authorization',
+          statusCode: 403,
+          message: 'Keychain: errSecAuthFailed',
+        }),
+      5000,
+      gate,
+    );
+    await expect(
+      fixture.service.stream(request, () => {}, new AbortController().signal),
+    ).rejects.toMatchObject({ detail: { status: 403, code: 'copilot_authorization' } });
+    expect(gate.denied).toBe(false);
+    await expect(fixture.service.models()).resolves.toHaveLength(1);
+  });
+  it('发送时拒绝钥匙串后不再向被终止的运行时发送清理 RPC', async () => {
+    const gate = new ProviderCredentialAccess('copilot');
+    const fixture = chat(() => {}, 5000, gate);
+    fixture.session.send.mockRejectedValueOnce(Error('Keychain: errSecUserCanceled'));
+    await expect(
+      fixture.service.stream(request, () => {}, new AbortController().signal),
+    ).rejects.toBeInstanceOf(ProviderCredentialUnavailable);
+    expect(fixture.session.abort).not.toHaveBeenCalled();
+    expect(fixture.client.deleteSession).not.toHaveBeenCalled();
+  });
   it.each([true, false])(
     '基于模型知识的技能无需搜索来源；工具能力缺失仍可回答：%s',
     async (toolsAvailable) => {

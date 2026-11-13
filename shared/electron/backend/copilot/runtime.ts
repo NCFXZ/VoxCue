@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { abortable } from '../cancellable';
+import type { ProviderCredentialAccess } from '../auth/providerCredentialAccess';
 
 const requirePackage = createRequire(__filename);
 // The official subprocess must run from the package's physical unpacked tree.
@@ -67,14 +68,20 @@ export class CopilotRuntime {
   private clientValue?: CopilotClient;
   private generation = 0;
   private stopping?: Promise<void>;
-  constructor(private directory: string) {}
+  private interruptStop?: () => void;
+  constructor(
+    private directory: string,
+    private credentialAccess?: ProviderCredentialAccess,
+  ) {}
   client() {
+    if (this.credentialAccess?.denied) return Promise.reject(this.credentialAccess.block());
     if (this.stopping) return Promise.reject(Error('Copilot runtime is stopping'));
     if (!this.clientPromise) {
       const generation = this.generation;
       const pending = (async () => {
         const workingDirectory = path.join(this.directory, 'workspace');
         await mkdir(workingDirectory, { recursive: true });
+        this.credentialAccess?.check();
         if (generation !== this.generation) throw Error('Copilot runtime stopped');
         const env = { ...process.env };
         // A login chosen in VoxCue must never inherit gh, PAT, BYOK, remote,
@@ -102,7 +109,7 @@ export class CopilotRuntime {
           if (generation !== this.generation) throw Error('Copilot runtime stopped');
           return client;
         } catch (error) {
-          await client.forceStop().catch(() => {});
+          if (!this.credentialAccess?.denied) await client.forceStop().catch(() => {});
           if (this.clientValue === client) this.clientValue = undefined;
           throw error;
         }
@@ -115,6 +122,7 @@ export class CopilotRuntime {
     return this.clientPromise;
   }
   control() {
+    if (this.credentialAccess?.denied) return Promise.reject(this.credentialAccess.block());
     if (this.stopping) return Promise.reject(Error('Copilot runtime is stopping'));
     if (this.controlPromise) return this.controlPromise;
     const generation = this.generation;
@@ -123,7 +131,7 @@ export class CopilotRuntime {
         if (generation !== this.generation) throw Error('Copilot runtime stopped');
         const session = await client.createSession({ ...isolatedSession });
         if (generation !== this.generation) {
-          await client.forceStop().catch(() => {});
+          if (!this.credentialAccess?.denied) await client.forceStop().catch(() => {});
           throw Error('Copilot runtime stopped');
         }
         return session;
@@ -135,8 +143,11 @@ export class CopilotRuntime {
     this.controlPromise = pending;
     return pending;
   }
-  stop() {
-    if (this.stopping) return this.stopping;
+  stop(force = false) {
+    if (this.stopping) {
+      if (force || this.credentialAccess?.denied) this.interruptStop?.();
+      return this.stopping;
+    }
     ++this.generation;
     const client = this.clientValue;
     const control = this.controlPromise;
@@ -145,13 +156,20 @@ export class CopilotRuntime {
     this.clientValue = undefined;
     const work = (async () => {
       if (!client) return;
+      if (force || this.credentialAccess?.denied) {
+        await client.forceStop();
+        return;
+      }
       const timeout = new AbortController();
+      this.interruptStop = () => timeout.abort();
       const timer = setTimeout(() => timeout.abort(), 5000);
       try {
         await abortable(
           (async () => {
             const session = await control?.catch(() => undefined);
+            timeout.signal.throwIfAborted();
             if (session) await client.deleteSession(session.sessionId).catch(() => {});
+            timeout.signal.throwIfAborted();
             await client.stop();
           })(),
           timeout.signal,
@@ -160,6 +178,7 @@ export class CopilotRuntime {
         await client.forceStop().catch(() => {});
       } finally {
         clearTimeout(timer);
+        this.interruptStop = undefined;
       }
     })().finally(() => {
       if (this.stopping === work) this.stopping = undefined;

@@ -1,4 +1,4 @@
-import { enterPrimaryUiAccount } from './install-ui-account.mjs';
+import { enterPrimaryUiAccount, waitForRestoredMainWindow } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
@@ -17,12 +17,29 @@ const {app,shell}=require('electron');
 const root=process.cwd();
 app.setAppPath(root);
 const {CopilotRuntime}=require(root+'/dist-electron/shared/electron/backend/copilot/runtime.js');
-const state=globalThis.copilotLoginFixture={cancelled:0,logout:0,quotaWaiters:[]};
+const state=globalThis.copilotLoginFixture={cancelled:0,logout:0,quotaWaiters:[],accountReads:0,identityReads:0,controlCalls:0,chatgptCalls:0,begun:0,sent:[],sessionCleanup:[]};
+const storage=require(root+'/dist-electron/shared/electron/backend/copilot/storage.js');
+const createStorage=storage.createCopilotLoginStorage;
+storage.createCopilotLoginStorage=()=>{
+  const port=createStorage();
+  return {...port,read:()=>{state.accountReads++;return port.read();}};
+};
+const {CodexUsageRuntime}=require(root+'/dist-electron/shared/electron/backend/chat/codexUsage.js');
+for(const name of ['account','access','limits','login']){
+  const offline=CodexUsageRuntime.prototype[name];
+  CodexUsageRuntime.prototype[name]=function(...args){state.chatgptCalls++;return offline.apply(this,args);};
+}
+CodexUsageRuntime.prototype.logout=async()=>{state.chatgptCalls++;};
 const accounts={
-  get:async()=>({kind:'activeAccount',authInfo:{type:'user',host:'https://github.com',login:'Synthetic'}}),
+  get:async()=>{
+    state.identityReads++;
+    if(process.env.VOXCUE_TEST_COPILOT_DENIED === '1')
+      throw Object.assign(Error('Synthetic keychain: errSecUserCanceled'),{code:'errSecUserCanceled'});
+    return {kind:'activeAccount',authInfo:{type:'user',host:'https://github.com',login:'Synthetic'}};
+  },
   set:async()=>{state.logout++;return {ok:true};},
   login:{
-    begin:async()=>{state.complete=null;state.begun=(state.begun??0)+1;return {flowId:'synthetic-flow',step:{kind:'open-url',url:'https://github.com/login/oauth/authorize?client_id=synthetic&state=synthetic&code_challenge=synthetic&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback'}};},
+    begin:async()=>{state.complete=null;state.begun++;return {flowId:'synthetic-flow',step:{kind:'open-url',url:'https://github.com/login/oauth/authorize?client_id=synthetic&state=synthetic&code_challenge=synthetic&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback'}};},
     advance:()=>new Promise(resolve=>{state.complete=()=>resolve({kind:'completed',result:{status:'completed',host:'https://github.com',login:'Synthetic'}});}),
     cancel:async()=>{state.cancelled++;}
   }
@@ -35,12 +52,37 @@ const quota={refresh:async()=>{
     provider:{kind:'copilot',id:'synthetic-account',label:'Synthetic'},
     observationKind:'account_snapshot',acquisitionStatus:'succeeded',quotaId:'ai_credits',unit:'ai_credits',
     quantityKind:'authoritative_budget',accessState:'allowed',capacityState:state.quotaMode==='exhausted'?'exhausted':'available',
-    budgetMetadata:{entitlement:100,consumed:state.quotaMode==='exhausted'?100:25,remainingPercentage:state.quotaMode==='exhausted'?0:75,
+    budgetMetadata:{entitlement:100,consumed:state.quotaMode==='exhausted'?100:24.754,remainingPercentage:state.quotaMode==='exhausted'?0:75.246,
       unlimited:false,resetAtEpochMs:Date.now()+7*86400000,usageAllowedWhenExhausted:false,overageAllowedWhenExhausted:false}
   }]};
 }};
-CopilotRuntime.prototype.control=async()=>({rpc:{accounts,quota}});
-CopilotRuntime.prototype.client=async()=>({rpc:{models:{list:async()=>({models:[{id:'synthetic-copilot',name:'Synthetic Copilot',vendor:'Synthetic Vendor'}]})}}});
+CopilotRuntime.prototype.control=async()=>{state.controlCalls++;return {rpc:{accounts,quota}};};
+CopilotRuntime.prototype.client=async()=>({
+  rpc:{
+    models:{list:async()=>({models:[{id:'synthetic-copilot',name:'Synthetic Copilot',vendor:'Synthetic Vendor'}]})},
+    tools:{list:async()=>({tools:[]})},
+  },
+  async createSession({model}){
+    let receive;
+    return {
+      sessionId:'cold-start',
+      on(handler){receive=handler;return ()=>{receive=undefined;};},
+      async send({prompt,responseSchema}){
+        const turns=JSON.parse(prompt.slice(prompt.indexOf('[')));
+        state.sent.push({model,question:turns.at(-1).content});
+        const answer='Synthetic Copilot reply after restart';
+        const changes=Object.fromEntries(Object.keys(responseSchema.properties.changes.properties).map(key=>[key,null]));
+        const content=JSON.stringify({answer,changes});
+        receive({type:'assistant.message_delta',data:{messageId:'reply',deltaContent:content}});
+        receive({type:'assistant.message',data:{messageId:'reply',content}});
+        receive({type:'session.idle',data:{}});
+        return 'cold-start-question';
+      },
+      async abort(){state.sessionCleanup.push(['abort',this.sessionId]);},
+    };
+  },
+  async deleteSession(id){state.sessionCleanup.push(['delete',id]);},
+});
 shell.openExternal=async url=>{state.url=url;};
 require(root+'/dist-electron/shared/electron/main.js');
 `,
@@ -55,6 +97,20 @@ const env = {
 delete env.ELECTRON_RUN_AS_NODE;
 const entry = await offlineElectronEntry(fixture);
 let app;
+const assertNoProviderReads = async () => {
+  const counts = await app.evaluate(() => {
+    const { accountReads, controlCalls, chatgptCalls, begun } = globalThis.copilotLoginFixture;
+    return { accountReads, controlCalls, chatgptCalls, begun };
+  });
+  assert.deepEqual(counts, { accountReads: 0, controlCalls: 0, chatgptCalls: 0, begun: 0 });
+};
+const openAISettings = async (page) => {
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const dialog = page.getByRole('dialog', { name: '设置', exact: true });
+  await dialog.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  return dialog;
+};
 try {
   app = await electron.launch({ args: [entry], env });
   let page = await enterPrimaryUiAccount(app, await app.firstWindow());
@@ -71,13 +127,15 @@ try {
     .getByRole('button', { name: '连接', exact: true });
   await copilot.waitFor();
   assert.equal(await page.locator('.ai-service-row').count(), 2);
+  await assertNoProviderReads();
   await copilot.click();
   await page.getByRole('button', { name: '等待浏览器授权…', exact: true }).waitFor();
   assert.equal(await chatGPT.isDisabled(), true);
   await page.getByRole('button', { name: '取消授权', exact: true }).click();
   await page.getByRole('alert').getByText('登录已取消', { exact: false }).waitFor();
   assert.equal(await copilot.isEnabled(), true);
-  assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
+  assert.equal(await page.evaluate(() => window.desktop.authSession('copilot')), null);
+  assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.chatgptCalls), 0);
   assert.ok(await app.evaluate(() => globalThis.copilotLoginFixture.cancelled > 0));
   await copilot.click();
   await page.getByRole('button', { name: '取消授权', exact: true }).waitFor();
@@ -102,6 +160,7 @@ try {
   assert.ok(models.ok);
   assert.equal(models.models[0].provider.id, 'copilot');
   assert.equal(models.models[0].id, 'synthetic-copilot');
+  assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.chatgptCalls), 0);
   // Menu tracking is outside this test; select Settings through its existing action.
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();
   const settingsMenu = main.getByRole('menuitem', { name: '设置', exact: true });
@@ -308,21 +367,77 @@ try {
     'Skeleton colors follow the appearance theme',
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  // The saved service and identity must restore without running OAuth again.
+  // A cold process checks the saved SDK account before anyone opens Settings.
+  await closeUiApp(app);
+  app = undefined;
+  app = await electron.launch({ args: [entry], env: { ...env, VOXCUE_TEST_COPILOT_DENIED: '1' } });
+  page = await waitForRestoredMainWindow(app);
+  const deniedSettings = await openAISettings(page);
+  await deniedSettings.getByRole('alert')
+    .getByText('GitHub Copilot 连接被拒绝，请重启 VoxCue 后重试。', { exact: true }).waitFor();
+  for (let i = 0; i < 2; i++)
+    await assert.rejects(() => page.evaluate(() => window.desktop.authSession('copilot')), /GitHub Copilot 连接被拒绝/);
+  assert.deepEqual(await app.evaluate(() => {
+    const {identityReads,chatgptCalls,begun,url}=globalThis.copilotLoginFixture;
+    return [identityReads,chatgptCalls,begun,url??null];
+  }), [1,0,0,null]);
   await closeUiApp(app);
   app = undefined;
   app = await electron.launch({ args: [entry], env });
-  page = await app.firstWindow();
-  await page.locator('.interview-start-trigger').waitFor();
+  page = await waitForRestoredMainWindow(app);
+  const sidebarQuota = page.locator('.sidebar .user-info .account-usage-summary');
+  await sidebarQuota.getByText('Copilot', { exact: true }).waitFor();
+  await sidebarQuota.getByText('剩余 75%', { exact: true }).waitFor();
+  assert.ok(await app.evaluate(() => globalThis.copilotLoginFixture.identityReads > 0));
+  const question = 'First Copilot message after restarting VoxCue';
+  await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill(question);
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  const reply = page.locator('.chat-message.assistant').filter({
+    has: page.getByText('Synthetic Copilot reply after restart', { exact: true }),
+  });
+  await reply.waitFor();
+  await page.getByRole('button', { name: '停止回复', exact: true }).waitFor({ state: 'detached' });
+  assert.deepEqual(await reply.locator('.message-error').allTextContents(), []);
+  assert.deepEqual(await page.locator('.chat-message.assistant .message-error').allTextContents(), []);
+  const routing = await app.evaluate(() => {
+    const { accountReads, controlCalls, chatgptCalls, url, begun, sent } = globalThis.copilotLoginFixture;
+    return { accountReads, controlCalls, chatgptCalls, url, begun, sent };
+  });
+  assert.ok(routing.accountReads > 0 && routing.controlCalls > 0);
+  assert.deepEqual(routing.sent, [{ model: 'synthetic-copilot', question }]);
+  assert.deepEqual(await app.evaluate(() => globalThis.copilotLoginFixture.sessionCleanup),
+    [['abort', 'cold-start'], ['delete', 'cold-start']]);
+  assert.equal(routing.begun, 0);
+  assert.equal(routing.url, undefined);
+  assert.equal(routing.chatgptCalls, 0);
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'copilot');
-  await page.evaluate(() => window.desktop.signOut());
+  const restored = await openAISettings(page);
+  const restoredCopilot = restored.locator('.ai-service-row').filter({ hasText: 'GitHub Copilot' });
+  await restoredCopilot.getByRole('button', { name: '断开连接', exact: true }).click();
+  await restoredCopilot.getByRole('button', { name: '连接', exact: true }).waitFor();
+  await restored.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
   assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.logout), 0);
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
+  await closeUiApp(app);
+  app = undefined;
+  app = await electron.launch({ args: [entry], env });
+  page = await waitForRestoredMainWindow(app);
+  await page.locator('.sidebar .user-info small').getByText('未连接 AI 服务', { exact: true }).waitFor();
+  await assertNoProviderReads();
   await installUiAccount(app);
-  await page.evaluate(() => window.desktop.signInWithChatGPT());
   await page.reload();
   await page.locator('.interview-start-trigger').waitFor();
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const serviceSettings = page.getByRole('dialog', { name: '设置', exact: true });
+  await serviceSettings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  const chatGPTRow = serviceSettings.locator('.ai-service-row').filter({ hasText: 'ChatGPT' });
+  const copilotReads = await app.evaluate(() => globalThis.copilotLoginFixture.accountReads);
+  await chatGPTRow.getByRole('button', { name: '连接', exact: true }).click();
+  await chatGPTRow.getByRole('button', { name: '断开连接', exact: true }).waitFor();
+  assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.accountReads), copilotReads);
+  await serviceSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'chatgpt');
   const switched = await page.evaluate(() => window.desktop.chatModels(true));
   assert.ok(switched.ok);

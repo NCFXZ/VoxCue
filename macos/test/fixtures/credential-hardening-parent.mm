@@ -23,6 +23,11 @@ int main(int argc, const char **argv) {
       if (strlen(deletion) != 1 || deletion[0] < '0' || deletion[0] > '2') return 76;
       environment[@"VOXCUE_CREDENTIAL_FAIL_DELETE_AT"] = @(deletion);
     }
+    const char *race = getenv("VOXCUE_FIXTURE_VAULT_RACE");
+    if (race) {
+      if (argc != 4 || (strcmp(race, "same") && strcmp(race, "other"))) return 76;
+      environment[@"VOXCUE_FIXTURE_VAULT_RACE"] = @(race);
+    }
     task.environment = environment;
     task.standardInput = NSFileHandle.fileHandleWithStandardInput;
     task.standardOutput = NSFileHandle.fileHandleWithStandardOutput;

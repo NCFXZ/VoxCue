@@ -1,4 +1,4 @@
-import { orderedAccountQuotas } from '../services/accountUsageSummary';
+import { orderedAccountQuotas, quotaPercentage } from '../services/accountUsageSummary';
 import { t, uiLocale } from '../i18n';
 import { useEffect, useState } from 'react';
 import type { AccountQuota, AccountUsage } from '../../electron/contracts/accountUsage';
@@ -135,9 +135,7 @@ function Quota({
           ) : value?.unlimited ? (
             t('不限量')
           ) : value?.remainingPercent !== null && value?.remainingPercent !== undefined ? (
-            t('剩余 {0}%', [
-              value.remainingPercent.toLocaleString(uiLocale(), { maximumFractionDigits: 2 }),
-            ])
+            t('剩余 {0}%', [quotaPercentage(value.remainingPercent)])
           ) : value ? (
             `${value.advisory ? t('参考可用') : t('剩余')} ${quantity(value.remaining, value.unit)}`
           ) : null}

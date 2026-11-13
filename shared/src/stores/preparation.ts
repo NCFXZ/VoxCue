@@ -18,6 +18,7 @@ import {
   type ChatAttachment,
 } from '../services/chatOptions';
 import { useChatConnection } from './chatConnection';
+import { useAuth } from './auth';
 import { streamChat, prepareChatRequest, ChatRequestError } from '../services/chat';
 import { localChats, type ChatSnapshot, type PreparationConversation } from '../services/chats';
 import type { ReasoningEffort } from '../../electron/contracts/chat';
@@ -453,11 +454,31 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       set({ error: '请先提供并确认简历摘要和职位描述摘要，再生成技能。' });
       return;
     }
+    if (useAuth.getState().waiting) return;
+    if (!useChatConnection.getState().models.length && !useAuth.getState().resolved) {
+      const before = get();
+      await useAuth.getState().ensure();
+      const current = get();
+      if (
+        current.streaming ||
+        current.activeConversation !== before.activeConversation ||
+        current.draft !== before.draft ||
+        current.attachments !== before.attachments ||
+        current.messages !== before.messages ||
+        current.info !== before.info
+      )
+        return;
+    }
     const connection = useChatConnection.getState();
     const selected =
       connection.models.find((model) => model.id === get().modelId) ?? connection.models[0];
     if (!selected) {
-      set({ error: connection.error || '正在加载模型，请稍候。' });
+      set({
+        error:
+          useAuth.getState().error ||
+          connection.error ||
+          (connection.live ? '正在加载模型，请稍候。' : '请先连接模型服务。'),
+      });
       return;
     }
     const effort = resolveReasoningEffort(selected, get().effort);

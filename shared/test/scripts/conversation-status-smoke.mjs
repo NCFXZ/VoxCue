@@ -1,5 +1,6 @@
 import { testRoot, electron } from './test-workspace.mjs';
-import { closeUiApp } from './install-ui-account.mjs';
+import { closeUiApp, connectUiAccount } from './install-ui-account.mjs';
+import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -50,10 +51,10 @@ require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))}
 );
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ args: [fixture], env });
+const app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
 
 try {
-  const page = await app.firstWindow();
+  const page = await connectUiAccount(app, await app.firstWindow());
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
@@ -85,6 +86,9 @@ try {
   await assertLoadingIcon(page, row.locator('.conversation-spinner'));
   await page.screenshot({});
   await page.getByRole('button', { name: '知识库', exact: true }).click();
+  // The view-transition callback commits navigation after the click. Complete
+  // the reply only once the conversation has actually left the foreground.
+  await page.locator('main.knowledge-page').waitFor();
   await finish();
   await row.locator('.conversation-dot.is-unread').waitFor();
   assert.equal(

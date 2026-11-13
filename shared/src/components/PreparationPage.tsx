@@ -28,6 +28,7 @@ import {
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
+import { useAuth } from '../stores/auth';
 import { ChatTools, ChatAttachments } from './ChatTools';
 import { useFollowScroll } from './useFollowScroll';
 import { defaultInterviewConfiguration, resolveInterviewConfiguration } from '../services/speech';
@@ -101,6 +102,9 @@ export function PreparationPage({
   const state = usePreparation();
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
+  const authResolved = useAuth((auth) => auth.resolved);
+  const authBusy = useAuth((auth) => auth.loading || auth.waiting);
+  const aiAction = useRef(0);
   const usageSummary = accountUsageSummaryParts(connection.usage, 'all');
   const lowUsage = connection.live && !connection.loadingUsage && usageSummary?.low;
   const interviewSettings = useInterviewSettings();
@@ -321,8 +325,9 @@ export function PreparationPage({
   };
   const startConfiguration = () => {
     const settings = useInterviewSettings.getState();
+    const { models, live } = useChatConnection.getState();
     return resolveInterviewInput(
-      resolveInterviewConfiguration(settings.configuration, connection.models, connection.live),
+      resolveInterviewConfiguration(settings.configuration, models, live),
       settings.inputMode,
     );
   };
@@ -343,9 +348,33 @@ export function PreparationPage({
     configuration.knowledgeBaseId = interviewConfiguration.knowledgeBaseId;
     setInterviewConfiguration(configuration);
   };
-  const beginInterview = () => {
-    if (!componentReady(selectedSpeechComponent)) return;
-    if (state.selectedKnowledgeBaseId && !componentReady('rag')) {
+  const readyForAI = async () => {
+    const request = ++aiAction.current;
+    const previous = usePreparation.getState();
+    await useAuth.getState().ensure();
+    const current = usePreparation.getState();
+    if (
+      request !== aiAction.current ||
+      !workspace.current ||
+      workspace.current.closest('[hidden]') ||
+      document.querySelector('dialog[open]') ||
+      current.activeConversation !== previous.activeConversation ||
+      current.info !== previous.info ||
+      current.draft !== previous.draft
+    )
+      return false;
+    const auth = useAuth.getState();
+    if (auth.waiting || auth.error) return false;
+    if (auth.resolved && !auth.session) onAISettings?.();
+    const { live, models } = useChatConnection.getState();
+    return live && models.length > 0;
+  };
+  const beginInterview = async () => {
+    if (!(await readyForAI())) return;
+    const current = usePreparation.getState();
+    if (!componentReady(speechComponent(useInterviewSettings.getState().configuration.options)))
+      return;
+    if (current.selectedKnowledgeBaseId && !componentReady('rag')) {
       setInterviewError(`请先下载并准备已选择的${componentPresentation.rag.label}，再开始面试。`);
       return;
     }
@@ -353,8 +382,8 @@ export function PreparationPage({
     setAccessReport(null);
     setCheckingAccess(true);
     const configuration = startConfiguration();
-    configuration.profile = structuredClone(state.info);
-    configuration.knowledgeBaseId = state.selectedKnowledgeBaseId;
+    configuration.profile = structuredClone(current.info);
+    configuration.knowledgeBaseId = current.selectedKnowledgeBaseId;
     setInterviewDevices([]);
     setInterviewConfiguration(configuration);
     setConfirmInterview(true);
@@ -379,8 +408,8 @@ export function PreparationPage({
     <PreparationGuide
       actions={preparationActions(state.info, state.skillsNeedUpdate)}
       step={preparationStep(state.info, state.skillsNeedUpdate)}
-      disabled={!state.chatsReady || state.streaming || connection.loading}
-      onAction={(action) => {
+      disabled={!state.chatsReady || state.streaming || connection.loading || authBusy}
+      onAction={async (action) => {
         if (action === 'profile') {
           state.dismissSkillUpdate();
           openInfo();
@@ -390,12 +419,11 @@ export function PreparationPage({
           state.dismissSkillUpdate();
           if (!speechReady || (!!state.selectedKnowledgeBaseId && !ragReady))
             onComponentSettings?.();
-          else beginInterview();
+          else await beginInterview();
           return;
         }
         if (action === 'skills') {
-          if (!connection.live) onAISettings?.();
-          else void state.generateSkills();
+          if (await readyForAI()) await usePreparation.getState().generateSkills();
           return;
         }
         state.dismissSkillUpdate();
@@ -523,9 +551,9 @@ export function PreparationPage({
               openingInterview ||
               !speechReady ||
               (!!state.selectedKnowledgeBaseId && !ragReady) ||
-              !connection.live ||
+              authBusy ||
               connection.loading ||
-              !connection.models.length
+              (authResolved && (!connection.live || !connection.models.length))
             }
             onClick={beginInterview}
           >
@@ -1010,7 +1038,11 @@ export function PreparationPage({
                         <ChatSources sources={message.sources ?? []} />
                         <div className="chat-answer">
                           {message.content ? (
-                            <MarkdownContent content={message.content} sources={message.sources} />
+                            <MarkdownContent
+                              content={message.content}
+                              sources={message.sources}
+                              streaming={message.status === 'streaming'}
+                            />
                           ) : message.status === 'failed' ? (
                             t('请求失败，未收到回答。')
                           ) : message.status === 'stopped' ? (
@@ -1037,7 +1069,9 @@ export function PreparationPage({
                                 variant="outline"
                                 className="chat-retry"
 
-                                disabled={state.streaming || !connection.models.length}
+                                disabled={
+                                  state.streaming || authBusy || (authResolved && !connection.models.length)
+                                }
                                 onClick={() => void state.retry(message.id)}
                               >
                                 <Refresh size={16} />
@@ -1078,7 +1112,7 @@ export function PreparationPage({
               </div>
             )}
             <div className="preparation-notices">
-              {(visibleError || !connection.live) && (
+              {(visibleError || (authResolved && !connection.live)) && (
                 <p
                   role={visibleError ? 'alert' : undefined}
                   className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
@@ -1160,7 +1194,8 @@ export function PreparationPage({
                               disabled={
                                 !state.chatsReady ||
                                 (!input.trim() && !state.attachments.length) ||
-                                !connection.models.length
+                                authBusy ||
+                                (authResolved && !connection.models.length)
                               }
                               aria-label={t('发送消息')}
                             >

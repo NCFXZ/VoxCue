@@ -5,7 +5,12 @@ import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { installUiAccount, enterPrimaryUiAccount, closeUiApp } from './install-ui-account.mjs';
+import {
+  installUiAccount,
+  enterPrimaryUiAccount,
+  closeUiApp,
+  waitForRestoredMainWindow,
+} from './install-ui-account.mjs';
 
 const desktop =
   process.platform === 'darwin'
@@ -189,7 +194,7 @@ try {
   assert.ok(mixed.events.length > 0);
   await closeUiApp(app);
   app = await launch();
-  const restored = await app.firstWindow();
+  const restored = await waitForRestoredMainWindow(app);
   await restored.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   const restarted = await snapshot();
   assert.equal(restarted.events.filter((e) => e.data.type === 'app_ready').length, 2);

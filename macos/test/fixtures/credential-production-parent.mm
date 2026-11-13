@@ -29,8 +29,13 @@ int main(int argc, const char **) {
     task.standardInput = input; task.standardOutput = output; task.standardError = error;
     if (![task launchAndReturnError:nil]) return 75;
     // No inherited stdin, selectable request or arbitrary child argument.
-    if (!VOXCUE_PRODUCTION_EXTRA_ARGUMENT)
+    if (!VOXCUE_PRODUCTION_EXTRA_ARGUMENT) {
+#ifdef VOXCUE_PRODUCTION_REQUEST_LANGUAGE
+      [input.fileHandleForWriting writeData:[@"{\"operation\":\"decrypt\",\"data\":\"AAAA\",\"language\":\"en\"}" dataUsingEncoding:NSUTF8StringEncoding]];
+#else
       [input.fileHandleForWriting writeData:[@"{\"operation\":\"decrypt\",\"data\":\"AAAA\"}" dataUsingEncoding:NSUTF8StringEncoding]];
+#endif
+    }
     [input.fileHandleForWriting closeFile];
     [task waitUntilExit];
     NSData *reply = [output.fileHandleForReading readDataToEndOfFile];

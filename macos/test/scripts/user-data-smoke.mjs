@@ -4,6 +4,7 @@ import {
   closeUiApp,
   connectUiAccount,
   installUiAccount,
+  waitForRestoredMainWindow,
 } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
 import path from 'node:path';
@@ -266,7 +267,7 @@ try {
   await closeUiApp(app);
   app = undefined;
   app = await launch(next);
-  page = await app.firstWindow();
+  page = await waitForRestoredMainWindow(app);
   await installUiAccount(app);
   page = await connectUiAccount(app, page);
   const reopenedSurface = page;

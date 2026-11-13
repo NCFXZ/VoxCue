@@ -8,6 +8,11 @@ import type {
 import { createHash } from 'node:crypto';
 import { boundedJson } from '../boundedJson';
 import {
+  credentialProblemCode,
+  credentialProblemMessages,
+  type CredentialProblemCode,
+} from '../../contracts/credentialProblems';
+import {
   validCloudEmail,
   normalizeCloudPassword,
   CLOUD_PASSWORD_MIN,
@@ -39,6 +44,12 @@ export class CloudFailure extends Error {
   }
 }
 const Failure = CloudFailure;
+// Created only around trusted local vault operations, never server error codes.
+class LocalCredentialFailure extends CloudFailure {
+  constructor(readonly credentialProblem: CredentialProblemCode) {
+    super(credentialProblemMessages[credentialProblem]);
+  }
+}
 const messages: Record<string, string> = {
   invalid_credentials: '邮箱或密码不正确。',
   invalid_code: '验证码无效或已过期。',
@@ -221,14 +232,21 @@ export class CloudAccountClient {
   }
   private async load() {
     if (this.initialized) return;
-    const saved = await this.options.vault.read();
+    let saved: unknown;
+    try {
+      saved = await this.options.vault.read();
+    } catch (error) {
+      const problem = credentialProblemCode(error);
+      if (problem) throw new LocalCredentialFailure(problem);
+      throw error;
+    }
     if (saved !== null && saved !== undefined) {
       try {
         this.current = storedCloudCredentials(saved, this.options.origin!);
       } catch {
         // A different historical key or damaged record must remain recoverable.
         // Only an explicit login flow below may replace it after preserving it.
-        throw new Failure('本地登录资料无法读取，请重新登录；原资料保持不变。');
+        throw new LocalCredentialFailure('VOXCUE_CREDENTIAL_INVALID_DATA');
       }
     }
     this.initialized = true;
@@ -308,8 +326,10 @@ export class CloudAccountClient {
     const next = credentials(value);
     try {
       await this.options.vault.write({ origin: this.options.origin!, credentials: next });
-    } catch {
+    } catch (error) {
       await this.request('/v1/auth/logout', 'POST', {}, next.accessToken).catch(() => {});
+      const problem = credentialProblemCode(error);
+      if (problem) throw new LocalCredentialFailure(problem);
       throw new Failure('系统无法安全保存登录状态，请稍后重试。');
     }
     this.current = next;
@@ -486,6 +506,11 @@ export class CloudAccountClient {
       try {
         await this.load();
       } catch (error) {
+        if (
+          error instanceof LocalCredentialFailure &&
+          error.credentialProblem !== 'VOXCUE_CREDENTIAL_INVALID_DATA'
+        )
+          throw error;
         if (!['code', 'login', 'register', 'reset'].includes(String(action))) throw error;
         await this.options.vault.preserve?.();
         this.current = null;

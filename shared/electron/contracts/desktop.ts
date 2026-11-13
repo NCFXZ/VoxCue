@@ -125,7 +125,7 @@ export interface DesktopAPI {
   setUILanguage(language: UILanguage): Promise<void>;
   systemAccent(): Promise<string | null>;
   onSystemAccent(callback: (color: string | null) => void): () => void;
-  authSession(): Promise<AuthSession | null>;
+  authSession(service?: AuthSession['mode'] | 'startup'): Promise<AuthSession | null>;
   signInWithChatGPT(): Promise<AuthSession>;
   signInWithCopilot(): Promise<AuthSession>;
   cancelSignIn(): Promise<void>;

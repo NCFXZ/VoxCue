@@ -78,6 +78,31 @@ const events = (items: unknown[]) =>
   items.map((item) => `data: ${JSON.stringify(item)}\n\n`).join('');
 
 describe('长响应与公开活动', () => {
+  it('在下段正文前发布已返回的来源，重复注释和最终快照不重发', async () => {
+    const first = { url: 'https://docs.example.org/guide', title: '指南' };
+    const second = { url: 'https://reference.example.org/', title: '手册' };
+    const search = { type: 'web_search_call', status: 'completed', action: { type: 'search', sources: [first] } };
+    const annotation = { type: 'url_citation', ...second };
+    const stream = events([
+      { type: 'response.output_item.done', item: search },
+      { type: 'response.output_text.delta', delta: '引用' },
+      { type: 'response.output_text.annotation.added', annotation },
+      { type: 'response.output_text.annotation.added', annotation },
+      { type: 'response.output_text.delta', delta: '。' },
+      { type: 'response.completed', response: { output: [search, { content: [{ annotations: [annotation] }] }] } },
+    ]);
+    const received: ChatEvent[] = [];
+    const result = await service(new Response(stream, { headers: { 'content-type': 'text/event-stream' } }))
+      .stream(request, event => received.push(event), new AbortController().signal);
+    const visible = received.filter(event => event.type === 'sources' || event.type === 'delta');
+    expect(visible).toEqual([
+      { id: request.id, type: 'sources', sources: [first] },
+      { id: request.id, type: 'delta', text: '引用' },
+      { id: request.id, type: 'sources', sources: [first, second] },
+      { id: request.id, type: 'delta', text: '。' },
+    ]);
+    expect(result.sources).toEqual([first, second]);
+  });
   it('持续有心跳的八分钟回答可以完成，HTTP头计时器也不会继续截断正文', async () => {
     vi.useFakeTimers();
     vi.spyOn(AbortSignal, 'timeout').mockImplementation((milliseconds) => {

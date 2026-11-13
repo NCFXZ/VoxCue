@@ -181,7 +181,7 @@ try {
               expiresAt: Date.now() + 3600000,
             }
           : null;
-      CopilotAuthService.prototype.session = async () => session();
+      CopilotAuthService.prototype.verifiedSession = async () => session();
       CopilotAuthService.prototype.signIn = async () => {
         globalThis.overviewCopilotActive = true;
         return session();

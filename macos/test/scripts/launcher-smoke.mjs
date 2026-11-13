@@ -46,23 +46,38 @@ try {
     });
     BrowserWindow.getAllWindows()[0].minimize();
   });
+  // This second launch is uninstrumented. Load main immediately, as the
+  // development launcher does, so it checks the single-instance lock before ready.
   const second = spawnTestProcess(
     executable,
-    [await offlineElectronEntry(undefined, { deferToReady: true }), '--use-mock-keychain'],
-    { env, stdio: 'ignore' },
+    [await offlineElectronEntry(), '--use-mock-keychain'],
+    { env, stdio: ['ignore', 'ignore', 'pipe'] },
   );
-  const code = await new Promise((resolve, reject) => {
+  // Capture only the owned, offline secondary process. Keep a bounded tail so
+  // its last native diagnostic survives without buffering arbitrary output.
+  let stderr = '';
+  second.stderr.setEncoding('utf8');
+  second.stderr.on('data', (text) => { stderr = (stderr + text).slice(-4096); });
+  const diagnostic = () => {
+    const message = stderr.replaceAll(process.cwd(), '<workspace>').replaceAll(testRoot, '<test>');
+    return JSON.stringify({ primaryPid: testProcess.pid, secondaryPid: second.pid,
+      code: second.exitCode, signal: second.signalCode, stderr: message });
+  };
+  const exit = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       second.kill();
-      reject(Error('Second launcher did not exit'));
+      reject(Error('Second launcher did not exit: ' + diagnostic()));
     }, 10000);
-    second.once('exit', (code) => {
+    second.once('close', (code, signal) => {
       clearTimeout(timer);
-      resolve(code);
+      resolve({ code, signal });
     });
-    second.once('error', reject);
+    second.once('error', (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
   });
-  assert.equal(code, 0);
+  assert.deepEqual(exit, { code: 0, signal: null }, 'Second launcher exit: ' + diagnostic());
   await page.waitForFunction(() => document.visibilityState === 'visible');
   assert.equal(await app.evaluate(() => globalThis.launcherRefocused), true);
   assert.equal(app.windows().length, 1);

@@ -50,7 +50,7 @@ export function accountUsageSummaryParts(
       text: showLabels ? compactQuota(value) : remaining(value),
       low: isQuotaLow(value),
       ...(inline && isQuotaLow(value)
-        ? { percent: `${percentage(value.remainingPercent!)}%` }
+        ? { percent: `${quotaPercentage(value.remainingPercent!)}%` }
         : {}),
     })),
   };
@@ -82,7 +82,7 @@ function compactQuota(quota: AccountQuota) {
     quota.state !== 'unknown' &&
     quota.remainingPercent !== null
   ) {
-    const percent = percentage(quota.remainingPercent);
+    const percent = quotaPercentage(quota.remainingPercent);
     if (quota.label === '5小时额度') return t('5小时 {0}%', [percent]);
     if (quota.label === '每周额度') return t('每周 {0}%', [percent]);
     return `${t(quota.label)} ${percent}%`;
@@ -90,14 +90,14 @@ function compactQuota(quota: AccountQuota) {
   return `${t(quota.label)} ${remaining(quota)}`;
 }
 
-function percentage(value: number) {
+export function quotaPercentage(value: number) {
   return Math.floor(value).toLocaleString(uiLocale());
 }
 
 function remaining(quota: AccountQuota) {
   if (quota.unlimited) return t('不限量');
   if (quota.state === 'unavailable' || quota.state === 'unknown') return t('用量暂不可用');
-  if (quota.remainingPercent !== null) return t('剩余 {0}%', [percentage(quota.remainingPercent)]);
+  if (quota.remainingPercent !== null) return t('剩余 {0}%', [quotaPercentage(quota.remainingPercent)]);
   if (quota.remaining === null || quota.unit === 'unknown') return t('用量暂不可用');
   const unit =
     quota.unit === 'ai_credits' ? 'AI Credits' : quota.unit === 'tokens' ? 'token' : t('次');

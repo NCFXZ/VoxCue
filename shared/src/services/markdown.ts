@@ -5,6 +5,7 @@ interface Node {
   value?: string;
   url?: string;
   children?: Node[];
+  data?: { hProperties?: Record<string, unknown> };
   position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
@@ -31,38 +32,29 @@ export function indexChatSources(sources: readonly ChatSource[]): ReadonlyMap<st
   return index;
 }
 
-export function citationSource(
-  url: string,
-  label: string,
-  sources: ReadonlyMap<string, ChatSource>,
-): ChatSource | undefined {
-  if (!sources.size) return;
-  const parsed = sourceURL(url);
-  if (!parsed) return;
-  const text = label.trim();
-  const plain = text.startsWith('(') && text.endsWith(')') ? text.slice(1, -1).trim() : text;
-  const withoutWWW = (value: string) => value.toLowerCase().replace(/^www\./, '');
-  if (withoutWWW(plain) !== withoutWWW(parsed.hostname)) return;
-  return sources.get(parsed.href);
-}
-
-// Only remove punctuation immediately wrapping a verified domain citation.
-// Stored Markdown, ordinary links and code keep their original text.
-export function compactCitations(sources: ReadonlyMap<string, ChatSource>) {
-  return (tree: Node) => {
+// Work on the parsed display tree so a temporary chip never enters stored
+// Markdown or the provider's list of sources.
+export function compactCitations(sources: ReadonlyMap<string, ChatSource>, streaming = false) {
+  return (tree: Node, file: { value: unknown }) => {
+    if (!sources.size && !streaming) return;
+    const markdown = String(file.value);
     const visit = (parent: Node) => {
       if (!parent.children || ['code', 'inlineCode', 'html'].includes(parent.type)) return;
       for (const [index, child] of parent.children.entries()) {
         if (
           child.type === 'link' &&
           child.url &&
-          child.children?.every((node) => node.type === 'text') &&
-          citationSource(
-            child.url,
-            child.children.map((node) => node.value ?? '').join(''),
-            sources,
-          )
+          child.children?.every((node) => node.type === 'text')
         ) {
+          const parsed = sourceURL(child.url);
+          if (!parsed) continue;
+          const label = child.children.map((node) => node.value ?? '').join('').trim();
+          const plain = label.startsWith('(') && label.endsWith(')')
+            ? label.slice(1, -1).trim() : label;
+          if (plain.toLowerCase().replace(/^www\./, '') !== parsed.hostname.replace(/^www\./, ''))
+            continue;
+          const confirmed = sources.has(parsed.href);
+          let citation = confirmed ? 'confirmed' : undefined;
           const before = parent.children[index - 1],
             after = parent.children[index + 1];
           if (before?.type === 'text' && after?.type === 'text') {
@@ -71,12 +63,25 @@ export function compactCitations(sources: ReadonlyMap<string, ChatSource>) {
               ['（', '）'],
             ]) {
               if (before.value?.endsWith(open) && after.value?.startsWith(close)) {
+                if (!confirmed) {
+                  const start = child.position?.start.offset, end = child.position?.end.offset;
+                  if (!streaming || plain !== label || child.url.length > 4096 ||
+                      !/^https?:\/\//i.test(child.url) || start === undefined || end === undefined ||
+                      markdown[start] !== '[' || markdown[end - 1] !== ')' ||
+                      markdown[start - 1] !== open || markdown[end] !== close) break;
+                  citation = 'pending';
+                }
                 before.value = before.value.slice(0, -1);
                 after.value = after.value.slice(1);
                 break;
               }
             }
           }
+          if (citation)
+            child.data = {
+              ...child.data,
+              hProperties: { ...child.data?.hProperties, 'data-citation': citation },
+            };
         }
         visit(child);
       }

@@ -58,7 +58,15 @@ export function createAuthStorage(
         throw error;
       }
       try {
-        const record = JSON.parse(await decrypt(value)) as CredentialRecord;
+        const plain = await decrypt(value);
+        let record: CredentialRecord;
+        try {
+          record = JSON.parse(plain) as CredentialRecord;
+        } catch {
+          throw Object.assign(new Error('本地登录信息无效，请检查应用数据。'), {
+            code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+          });
+        }
         if (
           !record ||
           typeof record !== 'object' ||
@@ -82,7 +90,9 @@ export function createAuthStorage(
             (!Array.isArray(record.grantedScopes) ||
               record.grantedScopes.some((value) => typeof value !== 'string')))
         )
-          throw new Error('本地登录信息无效，请检查应用数据。');
+          throw Object.assign(new Error('本地登录信息无效，请检查应用数据。'), {
+            code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+          });
         unreadable = false;
         return record;
       } catch (error) {

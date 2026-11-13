@@ -133,7 +133,7 @@ export function App() {
     return () => {
       active = false;
     };
-  }, [isLoginWindow, auth.session, personalDraft, transientChat]);
+  }, [isLoginWindow, signedIn, personalDraft, transientChat]);
   const [page, setPage] = useState<'preparation' | 'history' | 'knowledge'>('preparation');
   const stage = useRef<HTMLDivElement>(null);
   const requestedPage = useRef(page);
@@ -173,17 +173,11 @@ export function App() {
       window.removeEventListener('blur', update);
       document.removeEventListener('visibilitychange', update);
     };
-  }, [page, settings, auth.session?.mode]);
+  }, [page, settings, signedIn]);
   useEffect(() => {
-    void auth.load();
+    if (!isLoginWindow) void useAuth.getState().restoreOnStartup();
     void useCloudAccount.getState().load();
-  }, []);
-  useEffect(() => {
-    if (!isLoginWindow && signedIn)
-      void useChatConnection
-        .getState()
-        .load(!!auth.session && auth.session.mode !== 'demo', false, auth.session?.mode === 'demo');
-  }, [auth.session?.mode, auth.session?.user.id, signedIn, isLoginWindow]);
+  }, [isLoginWindow]);
   useEffect(() => {
     let active = true;
     const media = window.matchMedia('(prefers-color-scheme: dark)');
