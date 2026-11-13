@@ -17,7 +17,9 @@
 - 使用指南按当前语言选择中文 install/?lang=zh-CN 或英文 en/install/?lang=en；两条网站深链及显式语言覆盖均已核实，界面切换沿现有 store 订阅。
 - 本轮核对 Git 历史及拟公开文件的凭据模式；只提交源码、文档和配置，不含 .tools、签名私钥、依赖、模型、真实资料或临时结果。此前已核验的 1.2.2 凭据和清理实现一并作为当前源码快照保留，不将旧 v5 候选冒充新包。
 - 用户明确本次只上传模型，不上传历史安装包：models-v1.0.0 全部原始资产已复制，发行说明沿用原内容并把下载链接改到当前仓库，不添加原发行链接。误建的本轮 v1.2.0 镜像草稿及附件已撤回，未公开；旧仓及其原始发行不动。此前 Mac 1.2.1 本地／源码恢复基线保留。
-- 当前状态：源码及模型发行已准备，仓库改公开触发 GitHub Confirm access，需要账户本人完成现有通行密钥／验证器／密码确认；不收集凭据，不绕过验证。确认后复核匿名可见性、许可证及全部资产摘要。类型／架构／工作区／单测／共享构建与两条隔离界面入口已执行，结果仅终端／对话。
+- 公开状态已收拢：账户本人完成 GitHub 身份确认，NCFXZ/VoxCue 已正式公开；models-v1.0.0 是新仓当前唯一发行，只含原始模型／运行时与其附带元数据，不含历史安装包。匿名复核仓库、根许可证、发行正文与下载入口，模型字节／摘要及原许可保持。类型／架构／工作区／单测／共享构建与定向隔离界面入口已执行，结果仅终端／对话。
+- 用户追加界面调整已收拢：版本信息下显示 AGPL-3.0-only 及“第三方许可”链接，复用受控外链与错误重试；三处组件未就绪横幅共用 740px 最大宽度、居中和浮起表面；登录表单聚焦态使用两主题一致的柔和黑色投影，保留边框和轻微上浮。沿用键盘与辅助功能降级，定向界面回归覆盖上述行为，不增加全文弹窗或改业务流程。
+- 本轮临时下载副本、核对文件、服务端参考副本和 GUI profile 已按归属及占用检查清理；未保存测试结果、截图或真实资料。Windows 与全部原生源码及冻结助手保持任务起始指纹。
 - 兼容边界：已安装旧版仍读其内置旧仓地址，需后续正常版本升级或手动安装取得新源；旧仓保持过渡。Windows 全树只读，专属打包配置及本机验收见 W006。
 
 ## 当前仓库审计与重构
@@ -61,6 +63,7 @@
 ## 验证入口
 
 - 本轮重构：根目录 pnpm typecheck、check:architecture、check:workspace、test、build:shared；定向范围为 components、remote-connection、RAG、chat-request、interview appearance、update-driver。结果仅终端／对话，不保存报告。
+- 开源界面：在当前平台目录执行 node ../shared/test/scripts/client-update-ui-smoke.mjs、components-ui-smoke.mjs；登录聚焦态执行 cloud-account-smoke.mjs --login-check。后者通过 VOXCUE_TEST_SERVER_ROOT 指向既定未修改的服务端 0.5.3 参考提交，仅运行客户端隔离夹具，不修改或发布服务端。
 
 - 钥匙串：credential-vault-smoke.mjs 覆盖当前单来源、v6／v7 迁移和 JS／原生队列；credential-vault-policy-smoke.mjs 覆盖内存真实 partition 及禁交互失败围栏。归档 v5／v4／v2 入口及 cloud-native-vault-smoke.mjs 保留。测试源码是回归消费者，测试临时资料结束清理。
 - 正式包：package-guest-smoke.mjs；后续系统复验须重新准备独立 SIP／Gatekeeper 基线，不能用助手夹具或最终 ASAR 普通界面结果代替。

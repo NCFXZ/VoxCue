@@ -124,7 +124,8 @@ try {
   });
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
-  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  const settings = page.locator('.settings-dialog');
+  await page.getByRole('dialog', { name: '设置', exact: true }).waitFor();
   await settings.getByRole('button', { name: '关于与更新', exact: true }).click();
   const feedback = settings.getByRole('link', { name: 'GitHub 仓库', exact: true });
   assert.equal(
@@ -164,10 +165,70 @@ try {
     await app.evaluate(() => globalThis.feedbackCalls),
     Array(2).fill('https://github.com/NCFXZ/VoxCue'),
   );
+  for (const language of ['zh-CN', 'en']) {
+    const english = language === 'en';
+    await page.evaluate((value) => {
+      localStorage.setItem('voxcue-language-v1', value);
+      dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+    }, language);
+    await page.getByRole('dialog', { name: english ? 'Settings' : '设置', exact: true }).waitFor();
+    const licenseRow = settings
+      .getByText(english ? 'Open-source license' : '开源协议', { exact: true })
+      .locator('..');
+    await licenseRow.waitFor();
+    const row = await licenseRow.boundingBox();
+    const version = await settings.getByText('VoxCue', { exact: true }).locator('..').boundingBox();
+    const automatic = await settings.getByRole('switch').boundingBox();
+    assert.ok(row.y >= version.y + version.height - 1 && row.y + row.height <= automatic.y);
+    for (const [label, file, error] of [
+      [
+        'AGPL-3.0-only',
+        'LICENSE',
+        english
+          ? 'Could not open the open-source license. Please try again later.'
+          : '无法打开开源协议，请稍后重试。',
+      ],
+      [
+        english ? 'Third-party licenses' : '第三方许可',
+        'THIRD_PARTY_NOTICES.md',
+        english
+          ? 'Could not open third-party licenses. Please try again later.'
+          : '无法打开第三方许可，请稍后重试。',
+      ],
+    ]) {
+      const url = `https://github.com/NCFXZ/VoxCue/blob/main/${file}`;
+      const link = licenseRow.getByRole('link', { name: label, exact: true });
+      assert.equal(await link.getAttribute('href'), url);
+      assert.equal(await link.getAttribute('title'), null);
+      const box = await link.boundingBox();
+      assert.ok(box.x >= row.x - 1 && box.x + box.width <= row.x + row.width + 1);
+      await app.evaluate(() => {
+        globalThis.feedbackFail = true;
+      });
+      await link.focus();
+      await link.press('Enter');
+      assert.equal(
+        await link.evaluate((element) => getComputedStyle(element).textDecorationThickness),
+        '2px',
+        'Keyboard activation retains a visible link focus indicator',
+      );
+      await settings.getByRole('alert').filter({ hasText: error }).waitFor();
+      await app.evaluate(() => {
+        globalThis.feedbackFail = false;
+      });
+      await link.press('Enter');
+      await settings.getByText(error, { exact: true }).waitFor({ state: 'hidden' });
+      assert.deepEqual(await app.evaluate(() => globalThis.feedbackCalls.slice(-2)), [url, url]);
+    }
+  }
+  await page.evaluate(() => {
+    localStorage.setItem('voxcue-language-v1', 'zh-CN');
+    dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
+  });
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS sidebar/profile 240ms bidirectional animation frames, drag file card/theme/minimum/accessibility, repository link keyboard/error/retry and local external port; no production traffic',
+    'PASS sidebar/profile 240ms bidirectional animation frames, drag file card/theme/minimum/accessibility, repository and bilingual license links with keyboard/error/retry, layout and local external port; no production traffic',
   );
 } finally {
   await closeUiApp(app);

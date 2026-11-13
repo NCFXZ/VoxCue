@@ -1,6 +1,6 @@
 import { t } from '../i18n';
 import { useUpdates } from '../stores/updates';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent } from 'react';
 import githubLogo from '../assets/github.svg?inline';
 import { openChatLink } from '../services/chat';
 import { Button } from './ui/button';
@@ -11,8 +11,25 @@ import { storeUpdateMessage } from '../../electron/contracts/updates';
 
 export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } = {}) {
   const updates = useUpdates();
-  const [repositoryError, setRepositoryError] = useState<string | null>(null);
+  const [linkError, setLinkError] = useState<string | null>(null);
   const repositoryUrl = 'https://github.com/NCFXZ/VoxCue';
+  const licenseLinks = [
+    {
+      label: 'AGPL-3.0-only',
+      url: `${repositoryUrl}/blob/main/LICENSE`,
+      error: '无法打开开源协议，请稍后重试。',
+    },
+    {
+      label: '第三方许可',
+      url: `${repositoryUrl}/blob/main/THIRD_PARTY_NOTICES.md`,
+      error: '无法打开第三方许可，请稍后重试。',
+    },
+  ];
+  function openLink(event: MouseEvent<HTMLAnchorElement>, url: string, error: string) {
+    event.preventDefault();
+    setLinkError(null);
+    void openChatLink(url).catch(() => setLinkError(error));
+  }
   const state = updates.state;
   const storeManaged = state?.phase === 'unavailable' && state.message === storeUpdateMessage;
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.phase);
@@ -87,6 +104,21 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
           <span className="settings-value">{state?.currentVersion ?? '—'}</span>
         </div>
       )}
+      <div className="settings-entry">
+        <strong>{t('开源协议')}</strong>
+        <div className="updates-license-links">
+          {licenseLinks.map(({ label, url, error }) => (
+            <a
+              key={url}
+              className="updates-license-link"
+              href={url}
+              onClick={(event) => openLink(event, url, error)}
+            >
+              {t(label)}
+            </a>
+          ))}
+        </div>
+      </div>
       <div className="settings-entry">
         <div>
           <strong id="auto-download-label">{t('自动下载更新')}</strong>
@@ -185,21 +217,17 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
         <a
           className="updates-feedback"
           href={repositoryUrl}
-          onClick={(event) => {
-            event.preventDefault();
-            setRepositoryError(null);
-            void openChatLink(repositoryUrl).catch(() =>
-              setRepositoryError('无法打开 GitHub 仓库，请稍后重试。'),
-            );
-          }}
+          onClick={(event) =>
+            openLink(event, repositoryUrl, '无法打开 GitHub 仓库，请稍后重试。')
+          }
         >
           <img className="service-brand-icon" src={githubLogo} alt="" aria-hidden="true" />
           {t('GitHub 仓库')}
         </a>
       </div>
-      {repositoryError && (
+      {linkError && (
         <p className="inline-error" role="alert">
-          {t(repositoryError)}
+          {t(linkError)}
         </p>
       )}
       {(updates.error || state?.error) && (

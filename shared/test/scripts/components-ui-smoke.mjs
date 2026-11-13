@@ -119,6 +119,9 @@ try {
             width: p.width,
             chat: c.width,
             center: (n.left + n.right - c.left - c.right) / 2,
+            noticeWidth: n.width,
+            noticeWithin: n.left >= c.left && n.right <= c.right,
+            noticeOverflow: notice.scrollWidth > notice.clientWidth,
             inert: panel.inert,
             hidden: panel.getAttribute('aria-hidden'),
           };
@@ -146,6 +149,12 @@ try {
         samples.every((sample) => Math.abs(sample.center) < 1),
         'notice stays centered in chat column',
       );
+      assert.ok(
+        samples.every(
+          (sample) => sample.noticeWidth <= 740.5 && sample.noticeWithin && !sample.noticeOverflow,
+        ),
+        'notice respects the shared width limit while the personal panel changes width',
+      );
       assert.equal(samples.at(-1).inert, !open);
       assert.equal(samples.at(-1).hidden, String(!open));
       if (width === 1400 && open) await captureRequested(page, 'notice-with-personal-card');
@@ -167,6 +176,148 @@ try {
         .evaluate((el) => document.activeElement === el),
       true,
     );
+  }
+  if (!modelsOnly) {
+    const noticeSurface = async (selector, parentSelector, fillAvailable = false) => {
+      const notice = page.locator(selector);
+      await notice.waitFor();
+      await notice.evaluate(() =>
+        Promise.all(
+          document
+            .getAnimations()
+            .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+            .map((animation) => animation.finished.catch(() => {})),
+        ),
+      );
+      const geometry = await notice.evaluate((element, parentSelector) => {
+        const parent = element.closest(parentSelector);
+        const frame = parent.getBoundingClientRect();
+        const parentStyle = getComputedStyle(parent);
+        const left = frame.left + parent.clientLeft + parseFloat(parentStyle.paddingLeft);
+        const available =
+          parent.clientWidth -
+          parseFloat(parentStyle.paddingLeft) -
+          parseFloat(parentStyle.paddingRight);
+        const rect = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return {
+          width: rect.width,
+          available,
+          center: rect.left + rect.width / 2 - (left + available / 2),
+          overflow: element.scrollWidth > element.clientWidth,
+          childrenWithin: [...element.children].every((child) => {
+            const box = child.getBoundingClientRect();
+            return (
+              box.left >= rect.left &&
+              box.right <= rect.right &&
+              box.top >= rect.top &&
+              box.bottom <= rect.bottom
+            );
+          }),
+          surface: {
+            background: style.backgroundColor,
+            border: style.border,
+            radius: style.borderRadius,
+            shadow: style.boxShadow,
+          },
+        };
+      }, parentSelector);
+      assert.ok(
+        geometry.width <= Math.min(740, geometry.available) + 0.5,
+        JSON.stringify(geometry),
+      );
+      if (fillAvailable)
+        assert.ok(
+          Math.abs(geometry.width - Math.min(740, geometry.available)) < 0.5,
+          JSON.stringify(geometry),
+        );
+      assert.ok(Math.abs(geometry.center) < 1, JSON.stringify(geometry));
+      assert.ok(!geometry.overflow && geometry.childrenWithin, JSON.stringify(geometry));
+      assert.notEqual(geometry.surface.shadow, 'none', 'component notices have a raised surface');
+      return geometry.surface;
+    };
+    await page.getByRole('button', { name: '知识库', exact: true }).click();
+    await page.locator('.knowledge-page').waitFor();
+    await page.waitForFunction(async () =>
+      (await indexedDB.databases()).some((db) => db.name === 'copilot-local-documents'),
+    );
+    // Seed only this owned profile after the real page has created its database.
+    await page.evaluate(
+      () =>
+        new Promise((resolve, reject) => {
+          const request = indexedDB.open('copilot-local-documents');
+          request.onerror = () => reject(request.error);
+          request.onupgradeneeded = () => {
+            request.transaction.abort();
+            reject(Error('Knowledge page did not initialize its database'));
+          };
+          request.onsuccess = () => {
+            const database = request.result;
+            const transaction = database.transaction('bases', 'readwrite');
+            transaction.objectStore('bases').put({
+              id: 'synthetic-notice-base',
+              name: '横幅布局回归',
+              createdAt: 1,
+              localRevision: 'synthetic-notice-revision',
+            });
+            transaction.oncomplete = () => {
+              database.close();
+              resolve();
+            };
+            transaction.onerror = () => {
+              database.close();
+              reject(transaction.error);
+            };
+          };
+        }),
+    );
+    for (const colorScheme of ['light', 'dark']) {
+      await page.emulateMedia({ colorScheme });
+      await page.waitForFunction(
+        (dark) => document.documentElement.classList.contains('dark') === dark,
+        colorScheme === 'dark',
+      );
+      for (const width of [1400, 960]) {
+        await app.evaluate(
+          ({ BrowserWindow }, width) =>
+            BrowserWindow.getAllWindows()
+              .find((win) => win.isVisible())
+              .setContentSize(width, 900),
+          width,
+        );
+        await page.getByRole('button', { name: '新对话', exact: true }).click();
+        const preparation = await noticeSurface(
+          '.chat-column > .components-notice',
+          '.chat-column',
+        );
+        await page.getByRole('button', { name: '知识库', exact: true }).click();
+        const listing = await noticeSurface(
+          '.knowledge-page .management-container > .components-notice',
+          '.management-container',
+          true,
+        );
+        await page.locator('.knowledge-card').filter({ hasText: '横幅布局回归' }).click();
+        const detail = page.getByRole('dialog', { name: '横幅布局回归', exact: true });
+        await detail.waitFor();
+        const dialog = await noticeSurface(
+          '.knowledge-detail-dialog .dialog-scroll > .components-notice',
+          '.dialog-scroll',
+          true,
+        );
+        assert.deepEqual(
+          listing,
+          preparation,
+          'knowledge and preparation banners share one surface',
+        );
+        assert.deepEqual(dialog, preparation, 'dialog and preparation banners share one surface');
+        await detail.getByRole('button', { name: '关闭对话框', exact: true }).click();
+        await detail.waitFor({ state: 'detached' });
+      }
+    }
+    await page.emulateMedia({
+      colorScheme: process.argv.includes('--dark-preview') ? 'dark' : 'light',
+    });
+    await page.getByRole('button', { name: '新对话', exact: true }).click();
   }
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();

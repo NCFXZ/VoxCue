@@ -1774,6 +1774,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '启动后自动检查新版本，由你选择下载。':
     'Check for updates at startup and let you choose when to download.',
   当前版本: 'Current version',
+  开源协议: 'Open-source license',
+  第三方许可: 'Third-party licenses',
   自动下载更新: 'Download updates automatically',
   '检查中…': 'Checking…',
   '准备更新…': 'Preparing update…',
@@ -1782,6 +1784,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '更新会保留本机聊天、附件、个人资料和面试记录。':
     'Updates keep your local chats, attachments, profile and interview history.',
   '无法打开 GitHub 仓库，请稍后重试。': 'Could not open the GitHub repository. Please try again later.',
+  '无法打开开源协议，请稍后重试。': 'Could not open the open-source license. Please try again later.',
+  '无法打开第三方许可，请稍后重试。': 'Could not open third-party licenses. Please try again later.',
   'GitHub 仓库': 'GitHub repository',
   '面试进行中，可以检查和下载更新，请结束面试后再安装。':
     'You can check for and download updates during an interview. End the interview before installing.',

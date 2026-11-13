@@ -588,6 +588,36 @@ try {
         .evaluate((e) => getComputedStyle(e).boxShadow),
       'none',
     );
+    const originalDark = await page.evaluate(() =>
+      document.documentElement.classList.contains('dark'),
+    );
+    for (const dark of [false, true]) {
+      await page.evaluate(
+        (value) => document.documentElement.classList.toggle('dark', value),
+        dark,
+      );
+      const shadow = await panel.getByLabel('密码', { exact: true }).evaluate(async (element) => {
+        await Promise.all(
+          element.getAnimations().map((animation) => animation.finished.catch(() => {})),
+        );
+        return getComputedStyle(element).boxShadow;
+      });
+      const colors = shadow.match(/rgba?\([^)]+\)/g) ?? [];
+      assert.ok(colors.length > 0, 'Focused inputs retain a visible shadow in both themes');
+      for (const color of colors) {
+        const channels = color.match(/[\d.]+/g).map(Number);
+        assert.deepEqual(
+          channels.slice(0, 3),
+          [0, 0, 0],
+          'Input shadows remain black in dark mode',
+        );
+        assert.ok((channels[3] ?? 1) > 0);
+      }
+    }
+    await page.evaluate(
+      (value) => document.documentElement.classList.toggle('dark', value),
+      originalDark,
+    );
     await page.screenshot({ path: path.join(directory, 'register-light.png') });
     await captureRequested(page, 'register-light');
     await panel.getByRole('button', { name: '返回登录', exact: true }).click();

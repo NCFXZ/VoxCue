@@ -2902,7 +2902,8 @@ p {
   line-height: 1.7;
 }
 .usage-panel .account-usage-link,
-.updates-feedback {
+.updates-feedback,
+.updates-license-link {
   color: var(--accent);
   font-size: var(--type-secondary);
   line-height: 1.7;
@@ -2911,7 +2912,8 @@ p {
   white-space: nowrap;
 }
 .usage-panel .account-usage-link:hover,
-.updates-feedback:hover {
+.updates-feedback:is(:hover, :focus-visible),
+.updates-license-link:is(:hover, :focus-visible) {
   text-decoration-thickness: 2px;
 }
 .usage-panel .usage-footer {
@@ -7197,17 +7199,22 @@ small {
 }
 .components-notice {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
+  width: min(740px, 100%);
   gap: 12px;
   padding: 10px 12px;
-  margin: 0 0 12px;
+  margin: 0 auto 12px;
   border: 1px solid var(--border);
   border-radius: var(--radius-card);
   background: var(--surface);
+  box-shadow: var(--shadow-popup);
 }
 .components-notice > div {
+  flex: 1 1 280px;
   min-width: 0;
+  overflow-wrap: anywhere;
 }
 .components-notice strong {
   font-size: var(--type-body);
@@ -7220,6 +7227,7 @@ small {
 }
 .components-notice > .ui-button {
   flex-shrink: 0;
+  margin-left: auto;
   border-radius: 999px;
   corner-shape: round;
 }
@@ -7230,7 +7238,6 @@ small {
   margin: 0 auto;
   flex-shrink: 0;
   z-index: 2;
-  box-shadow: var(--shadow-popup);
 }
 .confirm-delete.is-confirming.ui-button,
 .confirm-delete.is-confirming.ui-button:hover:not(:disabled) {
@@ -8491,6 +8498,13 @@ svg.ui-loader {
   flex-shrink: 0;
   /* Align the visible mark with the Chinese glyphs, rather than their line box. */
   transform: translateY(-0.25px);
+}
+.updates-license-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px 16px;
 }
 .cloud-account-panel + .account-export-panel {
   border-top: 0;
