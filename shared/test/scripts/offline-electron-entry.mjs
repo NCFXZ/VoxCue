@@ -43,7 +43,7 @@ export async function offlineElectronEntry(
     .flatMap((pkg) => pkg.parts ?? [pkg])
     .map(
       (pkg) =>
-        'https://github.com/NCFXZ/VoxCue-releases/releases/download/' + pkg.tag + '/' + pkg.asset,
+        'https://github.com/NCFXZ/VoxCue/releases/download/' + pkg.tag + '/' + pkg.asset,
     );
   const entry = path.join(testRoot, 'offline-electron-entry.cjs');
   const body = [
@@ -118,7 +118,7 @@ export async function offlineElectronEntry(
           '});',
           "const childProcess = require('node:child_process'), originalSpawn = childProcess.spawn;",
           'childProcess.spawn = function(executable, ...args) {',
-          "  if (String(executable).endsWith('/VoxCue.Credentials')) throw Error('Ordinary GUI fixtures forbid the production credential helper');",
+          "  if ((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue'))) throw Error('Ordinary GUI fixtures forbid the production credential helper');",
           '  return originalSpawn.call(this, executable, ...args);',
           '};',
         ]

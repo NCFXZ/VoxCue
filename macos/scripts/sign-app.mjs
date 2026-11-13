@@ -2,7 +2,7 @@ import { readdir, open, mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { loadDevelopmentSigning, signLocalCode, verifyLocalApp } from './development-signing.mjs';
-import { verifyFixedHardenedCredentials } from './build-hardened-credentials.mjs';
+import { verifyFixedVaultCredentials } from './build-vault-credentials.mjs';
 // A fixed local certificate keeps Keychain's designated requirement stable.
 // Sign all Mach-O code and nested bundles from inside out, without signing model/data files.
 export async function signMacApp(
@@ -60,9 +60,9 @@ export async function signMacApp(
   }
   try {
     for (const file of [...targets, app]) {
-      if (file === path.join(app, 'Contents/Resources/native/VoxCue.Credentials')) {
+      if (file === path.join(app, 'Contents/Resources/native/VoxCue')) {
         // Preserve the standalone helper's exact CDHash across application releases.
-        await verifyFixedHardenedCredentials(file, signing);
+        await verifyFixedVaultCredentials(file, signing);
         continue;
       }
       const relative = path.relative(app, file).replaceAll(path.sep, '/');

@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import { interviewAlwaysDark } from './ui/appearance-control';
+import { interviewAlwaysDark } from '../interviewAppearance';
 import { InterviewImages } from './InterviewImages';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';

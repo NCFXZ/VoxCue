@@ -337,7 +337,7 @@ try {
       assert.equal(
         requests.filter(
           (url) =>
-            url.startsWith('https://github.com/NCFXZ/VoxCue-releases/releases/download/') &&
+            url.startsWith('https://github.com/NCFXZ/VoxCue/releases/download/') &&
             url.endsWith('/' + name),
         ).length,
         1,

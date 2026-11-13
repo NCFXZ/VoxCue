@@ -4,7 +4,7 @@ import storyMeeting from '../assets/interview-story-meeting.jpg';
 import storyDistance from '../assets/interview-story-distance.jpg';
 import storyHome from '../assets/interview-story-home.jpg';
 import easterEgg from '../assets/interview-easter-egg.jpg';
-import { interviewAlwaysDark } from './ui/appearance-control';
+import { interviewAlwaysDark } from '../interviewAppearance';
 import { MarkdownContent } from './MarkdownContent';
 import { AppLogo } from './AppLogo';
 import { ProviderIdentity } from './ProviderIdentity';

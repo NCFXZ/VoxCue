@@ -7,8 +7,19 @@ import assert from 'node:assert/strict';
 // a temporary source copy only. The canonical source is never edited.
 export async function writeCredentialFixtureSource(directory, kind, parentIdentifier) {
   assert.match(parentIdentifier, /^com\.voxcue\.test\.credentials\.[a-f0-9]{24}$/);
-  assert.ok(['legacy', 'hardened'].includes(kind));
-  const filename = kind === 'legacy' ? 'Credentials.mm' : 'CredentialsHardened.mm';
+  assert.ok(['legacy', 'hardened', 'migrating', 'vault', 'vault-v7', 'vault-v8'].includes(kind));
+  const filename =
+    kind === 'legacy'
+      ? 'Credentials.mm'
+      : kind === 'migrating'
+        ? 'CredentialsMigrating.mm'
+        : kind.startsWith('vault')
+          ? kind === 'vault-v8'
+            ? 'CredentialsVaultV8.mm'
+            : kind === 'vault-v7'
+              ? 'CredentialsVaultV7.mm'
+              : 'CredentialsVault.mm'
+          : 'CredentialsHardened.mm';
   const source = await readFile(new URL('../../native/' + filename, import.meta.url), 'utf8');
   const expected =
     kind === 'legacy'

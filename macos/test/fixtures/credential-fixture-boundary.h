@@ -28,7 +28,10 @@ static bool ownedFixtureKeychain(const char *value, bool creating = false) {
   if (!ownedFixtureRoot() || !path || ![path.stringByDeletingLastPathComponent isEqual:@VOXCUE_FIXTURE_ROOT]) return false;
   NSArray *names = @[@"normal.keychain-db", @"different.keychain-db", @"denied.keychain-db",
     @"fresh.keychain-db", @"partial.keychain-db", @"no-partition.keychain-db", @"cross.keychain-db",
-    @"cross-secondary.keychain-db", @"guard.keychain-db", @"symlink.keychain-db", @"synthetic.keychain-db"];
+    @"cross-secondary.keychain-db", @"guard.keychain-db", @"symlink.keychain-db", @"synthetic.keychain-db",
+    @"legacy-only.keychain-db", @"current-only.keychain-db", @"cleanup-0.keychain-db",
+    @"cleanup-1.keychain-db", @"invalid-cipher.keychain-db", @"generation.keychain-db",
+    @"generation-v7.keychain-db", @"adapter.keychain-db"];
   if (![names containsObject:path.lastPathComponent]) return false;
   struct stat info{};
   if (creating) return lstat(value, &info) != 0 && errno == ENOENT;

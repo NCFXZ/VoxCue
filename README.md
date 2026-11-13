@@ -4,7 +4,7 @@
 
 VoxCue 是一款 Windows / macOS 桌面面试准备助手。围绕简历和职位描述整理资料、准备面试技能，通过实时语音转写、AI 回答与面试记录辅助练习和复盘。
 
-[下载安装包：VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases)
+[GitHub 仓库](https://github.com/NCFXZ/VoxCue) · [下载安装包与本地组件](https://github.com/NCFXZ/VoxCue/releases)
 
 ## 主要功能
 
@@ -27,3 +27,19 @@ VoxCue 是一款 Windows / macOS 桌面面试准备助手。围绕简历和职�
 - **Copilot 退出**：官方 SDK 的系统凭据可能与独立 Copilot CLI 共享。VoxCue 退出只结束本应用会话，不删除共享凭据；撤销 GitHub 授权需在 GitHub 设置中操作。
 - **使用统计**：基础统计仅包含有限的操作类别、时间和数值等信息，不包含聊天或转写正文、原始文件、音频、截图或访问令牌。
 - **内容核对**：AI 生成的资料和回答可能存在错误，请核对后再保存或使用，避免将参考知识写成自己的真实经历。
+
+## 开发
+
+在本机平台目录（`macos/` 或 `windows/`）运行 `corepack pnpm install --frozen-lockfile`。安装后可在仓库根目录运行 `corepack pnpm typecheck`、`corepack pnpm test`、`corepack pnpm build:shared` 和 `corepack pnpm dev`，命令会转发至本机平台。
+
+目录、配置同步及平台边界见[工作区布局](shared/docs/WORKSPACE_LAYOUT.md)，模块职责见[架构说明](shared/docs/ARCHITECTURE.md)，验证入口见[测试说明](shared/test/README.md)。不在根或 shared 安装依赖，另一平台目录保持只读。
+
+## 许可证
+
+Copyright 2026 VoxCue contributors.
+
+VoxCue 的原创软件代码按 [GNU Affero General Public License，版本 3（AGPL-3.0-only）](LICENSE) 授权，仅适用该版本，不含“或更高版本”授权。
+
+允许商业使用、修改和分发。分发本程序或其衍生版本时，须按许可证向接收者提供对应源码；修改后的版本通过网络供用户交互时，须向这些用户提供该版本对应源码。个人本地运行、私人修改或单纯使用程序，不因此要求公开个人资料、输出内容或无关代码。程序按“原样”提供，不附带任何担保，具体权利与义务以许可证全文为准。
+
+第三方依赖、模型、系统符号、品牌标识及插画保留各自的许可证和权利，不因本仓库开源而改为 AGPL。VoxCue 名称、Logo 和用户提供的插画不在本次软件代码授权范围内。详见[第三方与素材说明](THIRD_PARTY_NOTICES.md)。

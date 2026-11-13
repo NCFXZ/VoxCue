@@ -57,5 +57,10 @@ export async function requireGuestIsolation() {
   if (sip !== 'System Integrity Protection status: enabled.' ||
       /(?:amfi_get_out_of_my_way|amfi_allow_any_signature|cs_enforcement_disable)/i.test(bootArgs))
     throw Error('Final-product acceptance requires SIP and code-signing enforcement in the guest');
+  const assessment = execFileSync('/usr/sbin/spctl', ['--status'], {
+    encoding: 'utf8', timeout: 5000,
+  }).trim();
+  if (assessment !== 'assessments enabled')
+    throw Error('Final-product acceptance requires Gatekeeper enabled in the guest');
   return context;
 }

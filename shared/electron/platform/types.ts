@@ -4,6 +4,7 @@ import type { PresentationCapabilities } from '../contracts/presentation';
 /** Native policy only. Business state, IPC and renderer code stay outside this layer. */
 export interface DesktopPlatform {
   readonly id: NodeJS.Platform;
+  readonly accountFetch?: typeof fetch;
   readonly iconFile: string;
   readonly mainWindowOptions: Pick<
     BrowserWindowConstructorOptions,
@@ -22,6 +23,7 @@ export interface DesktopPlatform {
   readonly captureProtectionSupported: boolean;
   readonly credentialEncryptionLabel: string;
   readonly credentialEncryptionFile?: string;
+  readonly credentialExecutableName?: string;
   readonly microphoneSettingsUrl?: string;
   readonly wasapiHelper?: string;
   readonly speechProcessFile?: string;

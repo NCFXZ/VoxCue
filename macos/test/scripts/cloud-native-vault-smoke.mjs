@@ -9,7 +9,7 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 
-// Exercise the unchanged JS encryption port + cloud vault in signed Electron,
+// Exercise the production JS encryption port + cloud vault in signed Electron,
 // using the existing test-only native source's explicit temporary Keychain.
 // The canonical production helper is never launched or modified.
 assert.equal(process.platform, 'darwin');
@@ -85,7 +85,7 @@ requireUnlockedDesktop();
 run(manager, ['create', keychain]);
 ownsKeychain = true;
 try {
-  for (const phase of ['write', 'read']) {
+  for (const phase of ['write', 'read', 'restart-after-denial']) {
     requireUnlockedDesktop();
     const entry = path.join(fixtureRoot, phase + '.cjs');
     await writeFile(
@@ -95,10 +95,10 @@ const {app}=require('electron');const assert=require('node:assert/strict'),path=
 const deny=()=>{throw Error('Native vault fixture forbids network')};globalThis.fetch=deny;require('electron').net.fetch=deny;for(const name of ['node:http','node:https']){require(name).request=deny;require(name).get=deny}require('node:net').Socket.prototype.connect=deny;require('node:tls').connect=deny;
 const root=${JSON.stringify(workspace.platformRoot)},helper=${JSON.stringify(helper)},keychain=${JSON.stringify(keychain)},manager=${JSON.stringify(manager)};
 app.setAppPath(root);app.setPath('userData',${JSON.stringify(profile)});app.commandLine.appendSwitch('use-mock-keychain');
-const cp=require('node:child_process'),spawn=cp.spawn;let nativeCalls=0;
+const cp=require('node:child_process'),spawn=cp.spawn;let nativeCalls=0,activeNative=0,maxNative=0;
 cp.spawn=function(executable,args,options){
- if(String(executable).endsWith('/VoxCue.Credentials'))throw Error('Production helper forbidden in this fixture');
- if(executable===helper){assert.deepEqual(args,[]);nativeCalls++;return spawn.call(this,helper,[keychain],options);}
+ if((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue')))throw Error('Production helper forbidden in this fixture');
+ if(executable===helper){assert.deepEqual(args,[]);nativeCalls++;activeNative++;maxNative=Math.max(maxNative,activeNative);const child=spawn.call(this,helper,[keychain],options);child.once('close',()=>activeNative--);return child;}
  return spawn.call(this,executable,args,options);
 };
 app.whenReady().then(async()=>{
@@ -106,7 +106,11 @@ app.whenReady().then(async()=>{
  const {createCredentialEncryption}=require(root+'/dist-electron/macos/electron/credentials.js');
  const {createCloudVault,createCredentialVault}=require(root+'/dist-electron/shared/electron/backend/cloud/vault.js');
  const {CloudAccountClient}=require(root+'/dist-electron/shared/electron/backend/cloud/client.js');
- const vault=createCloudVault(createCredentialEncryption(helper)),file=path.join(app.getPath('userData'),'cloud-account/session.bin');
+ const encryption=createCredentialEncryption(helper),vault=createCloudVault(encryption),file=path.join(app.getPath('userData'),'cloud-account/session.bin');
+ const parallel=await Promise.all(Array.from({length:4},()=>encryption.encrypt('Synthetic parallel credential')));
+ assert.ok(parallel.every(value=>value.equals(parallel[0])));
+ assert.deepEqual(await Promise.all(parallel.map(value=>encryption.decrypt(value))),Array(4).fill('Synthetic parallel credential'));
+ assert.equal(maxNative,1,'Shared credential stores must never overlap native helpers');assert.equal(activeNative,0);
  const user={id:'11111111-1111-4111-8111-111111111111',email:'native@example.test',createdAt:1};
  const credentials={user,sessionId:'22222222-2222-4222-8222-222222222222',accessToken:'a'.repeat(43),refreshToken:'b'.repeat(43),expiresAt:Date.now()+900000,refreshExpiresAt:Date.now()+86400000};
  const phase=${JSON.stringify(phase)},revoked=[];
@@ -118,7 +122,7 @@ app.whenReady().then(async()=>{
  assert.deepEqual((await vault.read()).credentials.user,user);assert.ok(nativeCalls>=2);
  const {Telemetry}=require(root+'/dist-electron/shared/electron/backend/telemetry/service.js');
  const telemetryFile=path.join(app.getPath('userData'),'cloud-account/telemetry.bin');
- const proofVault=createCredentialVault(telemetryFile,createCredentialEncryption(helper),262144);
+ const proofVault=createCredentialVault(telemetryFile,encryption,262144);
  const ttl=30*86400000,issuedAt=Math.floor(Date.now()/1000)*1000,eventUntil=issuedAt+ttl,deliverUntil=eventUntil+ttl;
  const part=value=>Buffer.from(JSON.stringify(value)).toString('base64url');
  const telemetry=new Telemetry({root:app.getPath('userData'),version:require(root+'/package.json').version,platform:'macos',enabled:true,origin:'https://native.example.test',proofVault,
@@ -142,8 +146,14 @@ app.whenReady().then(async()=>{
   operate('lock');try{
    const failed=await client.call({action:'login',email:user.email,password:'legacy'});assert.equal(failed.ok,false);assert.match(failed.error,/无法安全保存/);assert.deepEqual(revoked,['Bearer '+'c'.repeat(43)]);assert.deepEqual(await fs.readFile(file),original);
   }finally{operate('unlock');}
-  assert.deepEqual((await vault.read()).credentials.user,user);
+  const stoppedAt=nativeCalls;
+  await assert.rejects(vault.read(),/重新启动/);
+  await assert.rejects(proofVault.read(),/重新启动/);
+  assert.equal(nativeCalls,stoppedAt,'Unlocking alone must not restart background authorization requests');
+  assert.deepEqual(await fs.readFile(file),original);
  }
+ assert.equal(maxNative,1);assert.equal(activeNative,0);
+ if(phase==='restart-after-denial')console.log('PASS: new Electron process retries after denial, decrypts preserved vaults and still serializes all native calls');
  console.log('PASS: native cloud vault '+phase+', real v10/0600, signed Electron44 JS port; isolated Keychain only'+(phase==='read'?', restart decryption and locked-keychain rollback/revocation':''));app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1)});
 `,

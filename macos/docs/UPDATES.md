@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。当前0.6.9发行来源与三项资产见[Mac发行索引](../../shared/docs/MACOS_0.6.9_RELEASE.md)，执行范围见[进度](../../PROGRESS.md)；历史验包按对应版本文档理解。
+当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。已发行 Mac 1.2.1 的来源与三项资产见[Mac发行索引](../../shared/docs/MACOS_1.2.1_RELEASE.md)，执行范围见[进度](../../PROGRESS.md)；历史验包按对应版本文档理解。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
@@ -64,11 +64,11 @@ corepack pnpm test:package
 - `VoxCue-<版本>-arm64.zip`：完整应用更新包。
 - `latest-mac.yml`：版本、文件名/大小、SHA512、归档 Ed25519 签名与清单签名。
 
-按用户当次授权向公开 NCFXZ/VoxCue-releases 的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。当次发行范围以用户请求及PROGRESS为准，沿用操作前核对的Latest状态。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发布需要每次用户授权，不自动推送私有源码。打包脚本拒绝覆盖现有发行目录。
+当前更新与组件下载仓库为公开 NCFXZ/VoxCue。按用户当次授权向该仓库的指定正式 Release 追加本平台三项；只有明确需要时新建发行，已有 Windows 和旧版本资产不覆盖。先上传 DMG、ZIP，最后上传 latest-mac.yml，核对齐全后发布。当次发行范围以用户请求及PROGRESS为准，沿用操作前核对的Latest状态。两个平台按对应完整资产的最高正式数字版本选版，不依赖统一 Latest；失败明确报错。发行与源码推送按当前用户授权执行，不能从历史发行记录继承授权。打包脚本拒绝覆盖现有发行目录。
 
 ## 信任与隔离
 
-共享 Provider 只访问固定公开仓库、无令牌。Mac 清单签名认证 `voxcue-macos-update-v1`、版本、文件名、大小、SHA512、归档签名和最低系统版本的 JSON 数组；下载流有大小和时间限制，安装前重新核对文件。只有显式安装才创建短期随机 token 的 127.0.0.1 feed；Sparkle 再验归档签名并负责替换、重启，失败保留原应用。HTTPS/TLS 和 Gatekeeper 不做全局变更。
+共享 Provider 只访问固定公开 NCFXZ/VoxCue 仓库、无令牌。打包的 voxcue-update.json 与运行时校验共用 releaseRepository，保持来源一致；模型和已有签名发行可按原字节复制到新仓，清单签名不绑定仓库地址。已安装旧包仍使用其原更新地址，旧仓保持，后续升级过渡按发行范围执行。Mac 清单签名认证 `voxcue-macos-update-v1`、版本、文件名、大小、SHA512、归档签名和最低系统版本的 JSON 数组；下载流有大小和时间限制，安装前重新核对文件。只有显式安装才创建短期随机 token 的 127.0.0.1 feed；Sparkle 再验归档签名并负责替换、重启，失败保留原应用。HTTPS/TLS 和 Gatekeeper 不做全局变更。
 
 `test:updates:native` 使用独立临时密钥和旧/新应用，包含签名拒绝、取消与真实替换/重启，不使用真实资料或发行私钥。但 CFFIXED_USER_HOME 不能保证 Sparkle/Launch Services/cfprefsd 的全部偏好写入都留在临时目录；入口会清理专用测试域，严格“必要文件仅系统临时目录”的任务仍须排除它。共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手；其外部更新器是夹具，不能单独作为原生安装证明。
 

@@ -1,12 +1,12 @@
 import { app, safeStorage } from 'electron';
 import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
-import { atomicFile } from '../atomicFile';
+import { atomicFile, preserveEncryptedFile } from '../atomicFile';
 import type { CredentialEncryption } from '../auth/storage';
 import type { CloudVault } from './client';
 
-export function createCloudVault(encryption?: CredentialEncryption): CloudVault {
-  return createCredentialVault(
+export function createCloudVault(encryption?: CredentialEncryption) {
+  return createCredentialVault<Parameters<CloudVault['write']>[0]>(
     path.join(app.getPath('userData'), 'cloud-account', 'session.bin'),
     encryption,
   );
@@ -30,10 +30,12 @@ export function createCredentialVault<T>(
     },
   };
   return {
-    async read() {
+    async read(decrypt: (value: Buffer) => string | Promise<string> = crypto.decrypt) {
       try {
         if ((await stat(file)).size > limit) throw Error('Invalid credentials');
-        return JSON.parse(await crypto.decrypt(await readFile(file))) as unknown;
+        const value: unknown = JSON.parse(await decrypt(await readFile(file)));
+        if (value === null) throw Error('Invalid credentials');
+        return value;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
         throw error;
@@ -47,6 +49,9 @@ export function createCredentialVault<T>(
     },
     async clear() {
       await rm(file, { force: true });
+    },
+    async preserve() {
+      await preserveEncryptedFile(file);
     },
   };
 }

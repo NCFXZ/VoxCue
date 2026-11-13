@@ -48,10 +48,10 @@
 
 本应用自身的名称与图标保持独立，不表示 OpenAI 或 GitHub 的官方应用或背书。
 
-更新图标：`pnpm exec electron shared/scripts/update-app-icons.cjs <原图绝对路径>`，保留原图并生成 16/24/32/48/64/128/256 像素 ICO。ChatGPT 的服务图标保持独立。
+更新图标：在当前平台目录运行 `corepack pnpm exec electron ../shared/scripts/update-app-icons.cjs <原图绝对路径>`，保留原图并生成共用 PNG；仅 Windows 本机生成 16/24/32/48/64/128/256 像素 ICO。Mac 衍生图随后运行 `corepack pnpm build:icons`，不写 Windows 目录。ChatGPT 的服务图标保持独立。
 
 `shared/src/assets/voxcue.png` 与 public 的 512px PNG 字节相同，由同一脚本生成。AppLogo 通过 Vite 导入此资源，构建文件名带内容指纹；所有界面保留图片自身的透明圆角，不再用 CSS 强制裁成圆形或补白色背景。
 
-2026-10-19：用户最后提供的新PNG替换Logo源，原字节保留于`shared/public/voxcue-source.png`（SHA256 `00dad880a587b123f225be5978eac719591025d128f30bdb9b39b460000da0ef`）。界面、Windows ICO与Mac PNG/ICNS均从此源派生；本轮用户明确允许在Mac同步Windows ICO。主侧栏Logo为24px，其他使用处维持各自尺寸。Mac使用`pnpm build:icons`，仅缩放并保留新原图的圆角和透明通道及平台外留白；不再叠加前一版自绘圆角或白色底板。
+2026-10-19：用户提供的新PNG替换Logo源，原字节保留于`shared/public/voxcue-source.png`（SHA256 `00dad880a587b123f225be5978eac719591025d128f30bdb9b39b460000da0ef`）。界面、Windows ICO与Mac PNG/ICNS均从此源派生；当次跨平台图标同步授权仅属历史，当前按平台只读规则执行。主侧栏Logo为24px，其他使用处维持各自尺寸。Mac使用`pnpm build:icons`，仅缩放并保留新原图的圆角和透明通道及平台外留白；不再叠加前一版自绘圆角或白色底板。
 
 `github.svg`：GitHub官方Primer Octicons的[mark-github-16](https://github.com/primer/octicons/blob/main/icons/mark-github-16.svg)，遵循其[MIT许可](https://github.com/primer/octicons/blob/main/LICENSE)。用于关于页链接至项目公开问题反馈页面，保留原图形，浅深色以黑白展示。

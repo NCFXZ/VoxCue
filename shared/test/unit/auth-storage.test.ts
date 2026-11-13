@@ -29,7 +29,10 @@ const record = {
   clientId: 'oaiapp_fixture',
   subject: 'fixture',
   hostId: 'urn:uuid:fixture',
-} as CredentialRecord;
+  name: 'Synthetic',
+  email: 'synthetic@example.test',
+  expiresAt: 0,
+} satisfies CredentialRecord;
 it('uses the injected Mac encryption port without accessing Electron Safe Storage', async () => {
   native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-auth-storage-'));
   const encryption = {
@@ -65,6 +68,45 @@ it('keeps the default Windows/Electron encryption adapter', async () => {
   native.available.mockReturnValue(false);
   await expect(store.read()).rejects.toThrow('不可用');
   await expect(store.write(record)).rejects.toThrow('未保存');
+});
+it('uses a supplied noninteractive reader and preserves unreadable ciphertext before recovery', async () => {
+  native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-auth-storage-'));
+  const encryption = {
+    encrypt: vi.fn(async (value: string) => Buffer.from('synthetic:' + value)),
+    decrypt: vi.fn(async (value: Buffer) => value.toString().slice(10)),
+  };
+  const store = createAuthStorage('synthetic', encryption);
+  await store.write(record);
+  const quiet = vi.fn(async () => JSON.stringify(record));
+  expect(await store.read(quiet)).toEqual(record);
+  expect(quiet).toHaveBeenCalledOnce();
+  expect(encryption.decrypt).not.toHaveBeenCalled();
+  const directory = path.join(native.directory, 'auth-data');
+  const file = path.join(directory, 'credentials.bin');
+  await writeFile(file, 'synthetic:{broken');
+  await expect(store.read()).rejects.toThrow();
+  await store.write({ ...record, subject: 'recovered' });
+  const recovery = (await readdir(directory)).filter((name) => name.endsWith('.recovery'));
+  expect(recovery).toHaveLength(1);
+  expect(await readFile(path.join(directory, recovery[0]), 'utf8')).toBe('synthetic:{broken');
+  expect((await store.read())?.subject).toBe('recovered');
+});
+it.each([
+  { ...record, expiresAt: undefined },
+  { ...record, grantedScopes: [1] },
+])('rejects a parseable invalid saved record without replacing it', async (invalid) => {
+  native.directory = await mkdtemp(path.join(os.tmpdir(), 'voxcue-auth-storage-'));
+  const encryption = {
+    encrypt: async (value: string) => Buffer.from(value),
+    decrypt: async (value: Buffer) => value.toString(),
+  };
+  const store = createAuthStorage('synthetic', encryption);
+  const directory = path.join(native.directory, 'auth-data');
+  await mkdir(directory);
+  const before = JSON.stringify(invalid);
+  await writeFile(path.join(directory, 'credentials.bin'), before);
+  await expect(store.read()).rejects.toThrow('无效');
+  expect(await readFile(path.join(directory, 'credentials.bin'), 'utf8')).toBe(before);
 });
 it.each(['credentials.bin', 'copilot-session.json'])(
   'removes only its temporary write when publishing %s fails',

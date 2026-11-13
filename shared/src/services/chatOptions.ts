@@ -1,4 +1,6 @@
 import {
+  CHAT_FILE_BYTES_LIMIT,
+  CHAT_FILE_LIMIT,
   reasoningEfforts,
   type ChatModel,
   type ReasoningEffort,
@@ -61,14 +63,14 @@ export function stageAttachments(existing: ChatAttachment[], files: File[]): Cha
   for (const file of files) {
     if (!chatFileAccept.split(',').includes(`.${file.name.split('.').pop()?.toLowerCase()}`))
       throw new Error(`不支持的文件格式：${file.name}`);
-    if (!file.size || file.size > 20 * 1024 * 1024)
+    if (!file.size || file.size > CHAT_FILE_BYTES_LIMIT)
       throw new Error(`文件需为 1 字节至 20 MB：${file.name}`);
     const name = file.webkitRelativePath || file.name;
     const index = result.findIndex((item) => item.name === name);
     const attachment = { id: crypto.randomUUID(), name, size: file.size, file };
     if (index >= 0) result[index] = attachment;
     else result.push(attachment);
-    if (result.length > 20) throw new Error('每条消息最多添加 20 个文件。');
+    if (result.length > CHAT_FILE_LIMIT) throw new Error('每条消息最多添加 20 个文件。');
   }
   return result;
 }
@@ -105,7 +107,7 @@ export async function readDroppedFiles(data: DataTransfer): Promise<File[]> {
             })
           : file,
       );
-      if (files.length > 20) throw new Error('每条消息最多添加 20 个文件。');
+      if (files.length > CHAT_FILE_LIMIT) throw new Error('每条消息最多添加 20 个文件。');
     } else {
       const reader = entry.createReader();
       while (true) {

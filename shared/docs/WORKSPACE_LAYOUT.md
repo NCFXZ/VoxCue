@@ -1,86 +1,85 @@
 # VoxCue 工作区目录
 
-新增 shared/server：独立账号服务、Docker 配置、部署/备份脚本和合成后端测试，与桌面发布依赖隔离；运行状态在私有 .state 或容器数据卷，禁止进入源码。桌面共享账号契约、客户端和界面仍在 shared/electron、shared/src；详见 [账号服务](../server/README.md)。
-
-> 测试结果零保留（2026-10-17）：仅在终端/内存显示，不保存报告、日志、截图或隔离 profile。完整测试已获授权；会持久化结果的旧脚本须先改造。Mac 117 个旧占用目录及 Windows 349 个跳过目录不重试；当前 Windows 工作对 macos/ 只读。
-
-更新：2026-10-17。按用户最新授权，开发入口保留根目录，其余内容按实际用途进入 Windows、Mac 或共享目录。
+根目录提供命令入口；共享代码只维护一份，系统集成、依赖和构建产物归各平台。当前范围见根目录 [PROGRESS.md](../../PROGRESS.md)，长期规则见 [AGENTS.md](../../AGENTS.md)。历史迁移记录见 [WORKSPACE_CLEANUP.md](WORKSPACE_CLEANUP.md)，其中一次性授权不代表当前授权。
 
 ```text
 VoxCue/
-  AGENTS.md                  当前协作与目录规则
-  PROGRESS.md                当前进度与验收边界
-  README.md                  开发、产品与入口说明
-  package.json               无依赖的本机平台命令转发
-  pnpm-workspace.yaml        仅配置根命令，不自动在根目录安装依赖
-  .gitignore / .prettierrc.json / .git/
+  AGENTS.md / PROGRESS.md / README.md / README.en.md
+  package.json                 无依赖的本机平台命令转发
+  pnpm-workspace.yaml          根命令配置，不在根安装依赖
   shared/
-    src/                     唯一一份 React 展示、状态与受控服务
-    electron/                共享主进程、IPC、业务、契约、原生展示类型端口、ASR Worker
-    scripts/                 共享工具、路径解析、配置同步与根命令转发
-    test/                    通用单测、Renderer 单测、回归与夹具
-    public/                  PNG、Logo 原字节
-    local-models/            Paraformer、Silero、E5 可移植权重
-    docs/                    共享架构、产品和交接文档
-    benchmarks/rag-engines/  退役实验的私有输入与可移植缓存，不执行实验
-    package.json             共享依赖/命令声明模板，不在这里安装
-    pnpm-lock.yaml           历史共同解析基准，只读保留；现用锁在各平台目录
-    pnpm-workspace.yaml      两个平台安装策略的共同模板
-    tsconfig*.json / vite.config.mjs / vitest.config.mjs / components.json
-  windows/
-    electron/                平台策略、WASAPI、原生展示与屏幕能力
-    native/                  C# 源码与 bin/VoxCue.Audio.exe、VoxCue.Screenshot.exe
-    public/voxcue.ico         Windows 专属图标
-    scripts/                 原生构建、便携与 NSIS 打包
-    test/                    Windows 专属测试/固定夹具；旧结果只读暂留，不新增
-    docs/                    Windows 安装与原生音频说明
-    benchmarks/              退役实验的 Windows 实测结果与工件
-    node_modules/ .pnpm-store/ dist/ dist-electron/ release/
-    Start-VoxCue.cmd
-    package.platform.json    仅 Windows 命令和依赖差异
-    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig*.json vite.config.mjs
+    src/                       React 展示、状态、受控服务与界面资源
+    src/mobile/ / mobile.html  独立的局域网设备页面和入口
+    electron/
+      contracts/               DesktopAPI、IPC 和纯类型/校验工具
+      ipc/                     调用者、操作和参数校验
+      application/             业务协调与生命周期
+      backend/                 账号、云同步、组件、检索、语音等实现
+      platform/                平台接口与可信装配
+      main.ts / preload.ts     桌面装配与沙箱桥接
+    native/                    共用原生推理源码及固定第三方源码
+    scripts/                   路径、配置同步、编译和工具
+    test/                      共用单测、Renderer 测试、合成夹具与回归入口
+    public/ / local-models/     品牌原件与开发模型（缺失时使用组件下载）
+    docs/                      当前架构、功能说明及历史交接
+    package.json               共同版本、依赖和命令模板
+    pnpm-lock.yaml             历史共同解析基准；现用锁在平台目录
+    pnpm-workspace.yaml / tsconfig*.json / vite.config.mjs / vitest.config.mjs
   macos/
-    src/                     SF Symbols 映射与统一图标接口的 Mac 展示适配
-    electron/                Apple Silicon 策略、原生展示与 Core Audio 适配
-    native/                  音频/权限/启动器及图标生成源码，bin/ 为运行时组件
-    scripts/                 Mac 构建、开发宿主和启动入口生成
-    docs/                    Mac 原生音频、权限与窗口说明
-    public/                  Mac PNG/ICNS 衍生图及 sf-symbols/ 界面透明遮罩（生成）
-    VoxCue.app/              可双击本地启动入口（生成，不是分发安装包）
-    test/                    Mac 原生单测/脚本；results/ 仅余被占用的旧目录
-    recovery/                源码迁移原态、路径清单与清理审计
-    node_modules/ .pnpm-store/ .tools/ .cache/ dist/ dist-electron/
-    package.platform.json    Mac arm64 原生依赖与共享构建入口
-    package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig*.json vite.config.mjs
+    src/                       Mac 图标适配
+    electron/                  Core Audio、权限、窗口、凭据、网络和更新适配
+    native/                    本机助手源码；已冻结凭据版本必须保留
+    scripts/ / test/ / docs/    Mac 构建、回归及原生说明
+    public/                    PNG/ICNS 衍生物及 SF Symbols
+    VoxCue.app/                本地开发启动入口（生成）
+    .tools/                    受保护签名材料、固定助手和开发工具
+    recovery/ / release/       恢复与发行基线，不能当作临时文件
+    node_modules/ / .pnpm-store/ / .cache/ / dist/ / dist-electron/
+    package.platform.json      Mac 命令及依赖差异
+    package.json / pnpm-lock.yaml / pnpm-workspace.yaml / tsconfig*.json / vite.config.mjs
+  windows/
+    electron/ / native/         Windows 适配与 WASAPI 等原生实现
+    scripts/ / test/ / docs/    Windows 构建、回归及原生说明
+    public/voxcue.ico           Windows 图标
+    Start-VoxCue.cmd            既有构建启动入口
+    node_modules/ / .pnpm-store/ / dist/ / dist-electron/
+    package.platform.json      Windows 命令及依赖差异
+    package.json / pnpm-lock.yaml / pnpm-workspace.yaml / tsconfig*.json / vite.config.mjs
 ```
 
-Mac native/scripts/test 已有实际实现，不添加空的未来模块；本机原生音频、窗口生命周期与双击入口的验证见根 PROGRESS 最新节。真实账户、外接设备/真人质量和正式签名分发仍需后续验收。
+账号服务由独立的 VoxCue-server 仓库维护。桌面库内的旧 shared/server 不是当前开发或部署入口，不作为桌面清理对象；合成服务测试通过 [server-reference.mjs](../test/scripts/server-reference.mjs) 校验外部固定版本，不自动修改或部署服务端。
 
-共用设置与能力定义位于 shared/src、shared/electron/contracts/presentation.ts，展示端口为 shared/electron/presentation.ts；具体实现分别在 windows/electron/presentation.ts 和 macos/electron/presentation.ts，按平台动态装配。Windows 屏幕能力在 windows/electron/screenPermission.ts。共享 UI 改动不允许当前平台写入另一平台目录。Windows 生成配置已在本机同步，旧异平台编译输出由本机受控构建替换；macos/ 保持只读。
+## 安装与命令
 
-## 开发命令
+使用项目固定的 pnpm 11.25.0 和现有 Node.js 24 工具链。在本机平台目录安装依赖：
 
-原生 Node.js 24 LTS、固定 pnpm 11.25.0。首次安装进入本机平台目录执行 `corepack pnpm install --frozen-lockfile`。Mac 可设置 `COREPACK_HOME="$PWD/.tools/corepack"`、`ELECTRON_CACHE="$PWD/.cache/electron"`，将工具和下载缓存也保留在本平台。不要在根目录或 shared 安装依赖，不共享两平台 node_modules，也不手工拆删厂商包内部文件。
+```sh
+cd macos # Windows 本机使用 windows
+corepack pnpm install --frozen-lockfile
+```
 
-安装后根目录 `corepack pnpm check:workspace`、`check:architecture`、`typecheck`、`test`、`build`、`dev`、`start` 自动转发到本机平台，也可以直接进入平台目录执行。Windows build 包括 WASAPI；Mac build 包括 Core Audio、共享编译和本地 VoxCue.app 入口。Windows 专属构建/打包/原生回归在 Mac 上明确报错。启动 Windows 既有构建使用 windows/Start-VoxCue.cmd，不自动编译。包版本、业务实现、IPC/OAuth 与用户存储不因目录调整改变。
+不在根或 shared 安装依赖，不共享两平台 node_modules。平台工具与下载缓存也保留在本平台，不手动拆删厂商包内部文件。
 
-`shared/package.json` 声明共同依赖和命令，平台 `package.platform.json` 声明少量差异。根 `corepack pnpm sync:workspace` 只生成根与本平台入口/配置，另一平台只读报告；`sync:workspace --check --all` 可只读检查两平台漂移。共同依赖修改更新共享和本平台锁，另一平台交由其本机同步，不自动升级依赖。Windows 旧配置已在其本机同步，旧异平台编译输出由受控构建替换；macos/ 保持只读。
+安装后可在根目录运行以下命令，它们会转发到本机平台：
 
-## 编译、测试与资源
+```sh
+corepack pnpm check:workspace
+corepack pnpm check:architecture
+corepack pnpm typecheck
+corepack pnpm test
+corepack pnpm build:shared
+```
 
-TypeScript 只编译 shared 与本平台源码到本平台 dist-electron，Mac 仅有 shared/macos，Windows 应仅有 shared/windows；preload 与 main 同目录。平台按可信策略动态装配，暂存编译核对后替换本平台生成目录，禁止写另一平台。Vite 从 shared/index.html、shared/src、shared/public 构建本平台 dist，依赖按本平台 package exports/browser 条件解析。源码测试的 CommonJS require 使用本平台 NODE_PATH，生产模块依照正常 Node 层级寻找本平台 node_modules。
+build:shared 构建 Renderer 和当前平台 Electron 代码；Mac 同时生成 SF Symbols。build 追加本机原生构建，Mac 还生成开发启动入口；dev 开发运行，start 使用已有构建。原生、打包及 GUI 测试的范围和门禁见 [测试说明](../test/README.md)，不能用共享单测代替本机验收。
 
-单测只收集 shared 与当前平台的 `test/{unit,renderer}/**/*.test.{ts,tsx}`，不把另一平台的合成端口当作本机原生验收。测试结果仅显示于终端/内存；必要隔离工作目录仅建在操作系统临时目录，结束、失败或取消须清理。旧脚本中仍有持久化输出，须先改造后再获准运行；不再新增 test/results 内容，历史快照不参与收集。架构检查禁止生产导入任一平台的 test，也禁止平台专属实现互相依赖；共享 Renderer/业务边界继续保持。
+shared/package.json 是版本和共同配置的唯一来源；package.platform.json 声明差异。根 sync:workspace 只生成根与当前平台配置，另一平台只读报告。sync:workspace --check --all 只读检查全部漂移。共享依赖变更只更新当前平台安装和锁，另一平台交由其本机同步。Mac 上 Windows 全树只读，Windows 上 Mac 全树只读。
 
-开发模型完整时从 shared/local-models 读取，缺失时复用组件首次下载流程；共享 Logo 原件在 shared/public，Windows ICO/native helper 在 Windows 平台目录，Mac 原生 PNG/ICNS 衍生物在 macos/public。两平台当前打包仅复制品牌、运行依赖和各自原生助手，以 resources/voxcue-components.json 启用组件缓存，不内嵌模型；无标记的旧完整包保留 resources/models 兼容。Windows release/发行包保留，验证包仅在自有系统临时目录使用后删除，不安装或发布。
+## 编译、资源与清理边界
 
-## 迁移与恢复
+TypeScript 只编译 shared 和当前平台到本平台 dist-electron；preload 与 main 同目录。编译先进入自有系统临时目录，验证输出边界后替换本平台生成目录。Vite 从共享入口构建本平台 dist；设备页面具有独立入口和允许的依赖闭包。测试只收集 shared 与当前平台测试。
 
-- 原根 node_modules、.pnpm-store、dist、dist-electron、native/bin、release、Start-VoxCue.cmd → windows 对应目录。
-- 原 test/shared → shared/test；test/windows → windows/test；原 test/results → windows/test/results；随后按用户最新授权清除全部旧结果，测试源码保留。
-- 原 docs → shared/docs；Windows 安装/音频/权限及实测验收报告 → windows/docs。
-- 原 public PNG、local-models 权重 → shared；ICO → windows/public。
-- 退役 benchmark 私有输入留在 shared/benchmarks；Windows artifacts/results 进入 windows/benchmarks。原件、标注和历史结果字节不修改，不重启实验。
-- 当前用户补充的根规则为 AGENTS.md、PROGRESS.md、README.md 和薄命令/格式配置保留根目录。
+正式包使用受控运行依赖、本平台助手和组件标记；模型默认经固定目录、摘要和逐文件清单认证后进入用户组件缓存。无组件标记的旧完整包保留模型路径兼容。共享品牌原件、用户原件、模型权重、研究资产、签名材料及发行恢复基线不因清理而删除。
 
-精确迁移清单、源码原态、路径映射和清理记录在 macos/recovery/workspace-reorg-20261017。用户最后明确要求清除全部既有历史测试；旧报告正文保留历史事实，所引用旧 test/results/test-results 产物按清理记录视为不可用，不宣称仍有历史归档。从现在开始两平台测试结果均零保留，不因成功、失败或文档引用而例外；本次 Mac 删除 101 项旧产物，117 个被占用目录暂留，Windows 349 个此前跳过的目录不重试。固定夹具和下载缓存已分别迁至 shared/test/fixtures/speech-audio、windows/.cache/electron，源码恢复资料不混入测试历史。真实 userData、凭据、个人原件和聊天/面试记录未迁移。
+测试结果仅终端/内存；必要 profile、数据库、截图只放自有系统临时目录并在结束、失败或取消后清理。保留有效测试源码、固定合成夹具和经摘要认证的可复用公开缓存。历史明确跳过的 Mac 117 个目录及 Windows 349 个目录不重试，不遍历未知归属目录寻求清理数量。
+
+旧目录迁移、备份和已删除结果的历史引用只用于解释历史，不表示产物仍可用；准确恢复资料位于受保护的 macos/recovery。真实 userData、凭据及用户面试/聊天内容不纳入仓库重构。

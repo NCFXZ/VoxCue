@@ -106,18 +106,18 @@ export async function checkMacUpdateCache(publicKey, privateKey, macUpdatePayloa
           const url = new URL(String(input));
           if (
             url.origin === 'https://api.github.com' &&
-            url.pathname === '/repos/NCFXZ/VoxCue-releases/releases'
+            url.pathname === '/repos/NCFXZ/VoxCue/releases'
           )
             return originalFetch('http://127.0.0.1:' + port + '/releases', init);
           if (
             url.origin === 'https://github.com' &&
-            url.pathname === '/NCFXZ/VoxCue-releases/releases/download/mac-v99.0.1/latest-mac.yml'
+            url.pathname === '/NCFXZ/VoxCue/releases/download/mac-v99.0.1/latest-mac.yml'
           )
             return originalFetch('http://127.0.0.1:' + port + '/manifest', init);
           if (
             url.origin === 'https://github.com' &&
             url.pathname ===
-              '/NCFXZ/VoxCue-releases/releases/download/mac-v99.0.1/VoxCue-99.0.1-arm64.zip'
+              '/NCFXZ/VoxCue/releases/download/mac-v99.0.1/VoxCue-99.0.1-arm64.zip'
           )
             return originalFetch('http://127.0.0.1:' + port + '/archive', init);
           throw Error('Unexpected native updater URL');

@@ -14,6 +14,7 @@ import {
 import {
   compareVersions,
   releaseAssetUrl,
+  releaseRepository,
 } from '../../../shared/electron/backend/updates/releases';
 import { signedMacUpdate, type SignedMacUpdate, publicUpdateKey } from './manifest';
 import { downloadArchive, verifyDownload } from './download';
@@ -59,17 +60,16 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
     this.cacheDirectory = path.resolve(cacheDirectory);
     this.directory = path.join(this.cacheDirectory, 'archives');
     this.ownership = new MacArchiveOwnership(this.cacheDirectory, publicKey);
-    this.cache = new UpdateCache(this.cacheDirectory, 'macos-arm64', (value, target) => {
-      const info = validatePlatformUpdate(value, target);
-      const update = signedMacUpdate(value, info.selectedRelease, this.publicKey);
-      const raw = (value as { files: Array<Record<string, unknown>> }).files.find(
-        (file) => file.url === update.url,
-      )!;
-      return {
-        ...info,
-        files: [{ ...update, voxcueSignature: raw.voxcueSignature }],
-      };
-    });
+    this.cache = new UpdateCache(this.cacheDirectory, 'macos-arm64', (value, target) =>
+      this.normalizeAuthenticatedInfo(validatePlatformUpdate(value, target), value),
+    );
+  }
+  private normalizeAuthenticatedInfo(info: PlatformUpdateInfo, metadata: unknown) {
+    const update = signedMacUpdate(metadata, info.selectedRelease, this.publicKey);
+    const raw = (metadata as { files: Array<Record<string, unknown>> }).files.find(
+      (file) => file.url === update.url,
+    )!;
+    return { ...info, files: [{ ...update, voxcueSignature: raw.voxcueSignature }] };
   }
   private async directories() {
     // Only fixed children of the main-owned userData directory are writable.
@@ -214,12 +214,10 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
             this.lifetime.signal,
             (input, init) => net.fetch(input instanceof URL ? input.href : input, init),
           );
-          const selected = platformUpdateInfo(result.candidate, result.metadata);
-          const update = signedMacUpdate(result.metadata, result.candidate, this.publicKey);
-          const raw = (
-            result.metadata as unknown as { files: Array<Record<string, unknown>> }
-          ).files.find((file) => file.url === update.url)!;
-          return { ...selected, files: [{ ...update, voxcueSignature: raw.voxcueSignature }] };
+          return this.normalizeAuthenticatedInfo(
+            platformUpdateInfo(result.candidate, result.metadata),
+            result.metadata,
+          );
         }));
       const update = this.authenticated(info);
       this.lifetime.signal.throwIfAborted();
@@ -394,7 +392,7 @@ export function createMacUpdateDriver(): UpdateDriver {
   const config = JSON.parse(
     readFileSync(path.join(process.resourcesPath, 'voxcue-update.json'), 'utf8'),
   );
-  if (config.protocol !== 1 || config.repository !== 'NCFXZ/VoxCue-releases')
+  if (config.protocol !== 1 || config.repository !== releaseRepository)
     throw Error('Invalid Mac update configuration');
   publicUpdateKey(config.publicKey);
   const native = require(

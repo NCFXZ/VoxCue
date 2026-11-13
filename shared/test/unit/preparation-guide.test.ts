@@ -1,7 +1,20 @@
 import { describe, it, expect } from 'vitest';
-import { preparationStep, preparationActions } from '../../src/services/preparationGuide';
+import {
+  preparationStep,
+  preparationActions,
+  preparationGuideUrl,
+} from '../../src/services/preparationGuide';
 
 describe('preparation guide', () => {
+  it.each([
+    ['zh-CN', 'https://voxcue.com.cn/install/?lang=zh-CN'],
+    ['en', 'https://voxcue.com.cn/en/install/?lang=en'],
+  ] as const)(
+    'opens the matching website language for %s independently of browser preferences',
+    (language, url) => {
+      expect(preparationGuideUrl(language)).toBe(url);
+    },
+  );
   it('offers exactly three relevant choices without forcing a preparation sequence', () => {
     const info = { name: '', background: '', jobDescription: '' };
     const actions = (profile = info, update = false) =>

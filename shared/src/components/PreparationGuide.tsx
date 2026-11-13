@@ -1,11 +1,15 @@
 import { useId, useState } from 'react';
 import { t } from '../i18n';
 import { openChatLink } from '../services/chat';
-import type { PreparationAction, PreparationStep } from '../services/preparationGuide';
+import {
+  preparationGuideUrl,
+  type PreparationAction,
+  type PreparationStep,
+} from '../services/preparationGuide';
+import { useGeneralSettings } from '../stores/generalSettings';
 import { Button } from './ui/button';
 import { ArrowUpRight } from './icons';
 
-const guideUrl = 'https://voxcue.com.cn/install/';
 const defaults: Record<PreparationStep, string> = {
   resume: '添加简历，让面试准备更贴合你的经历。',
   job: '简历已保存。补充目标岗位，或直接开始面试。',
@@ -32,6 +36,8 @@ export function PreparationGuide({
   disabled: boolean;
   onAction(action: PreparationAction): void;
 }) {
+  const language = useGeneralSettings((state) => state.language);
+  const guideUrl = preparationGuideUrl(language);
   const [linkError, setLinkError] = useState(false);
   const [hovered, setHovered] = useState<PreparationAction>();
   const [focused, setFocused] = useState<PreparationAction>();

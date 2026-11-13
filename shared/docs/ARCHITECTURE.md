@@ -1,391 +1,75 @@
 # VoxCue 架构
 
-## 私人局域网手机连接
+本文描述当前桌面源码的职责边界。版本、实现进度及待办见 [PROGRESS.md](../../PROGRESS.md)，目录和开发命令见 [工作区布局](WORKSPACE_LAYOUT.md)。历史方案和一次性授权查 Git 或对应版本交接，不作为当前实现入口。
 
-电脑端以 opt-in 的 HTTP + WS 单接口服务提供短时扫码配对、电脑审批、断线恢复及白名单控制。网络服务仅依赖契约和注入端口；application/IPC 校验窗口、内容投影和请求归属，Renderer 复用现有 interview store 并输出有界快照，不把 DesktopAPI 暴露到网络。设备页面独立构建，只开放手机 manifest 依赖闭包；短期恢复能力按标签页保存，草稿和内容不持久化。两端共享电脑持有的版本化草稿、已发送问答和控制状态，设备键入经 CAS 写回，电脑更高版本及重连快照直接采纳，不询问冲突选择。设备公式只复用纯数学工具并输出 MathML；临时滚动事件绑定当前连接和会话，不重放。协议与生命周期见 [局域网连接接口](REMOTE_CONNECTION.md)。
+## 分层与装配
 
-## 0.6.3 客户端统计
+```text
+React components → stores / services → DesktopAPI
+                                          ↓
+                            sandbox preload → IPC
+                                               ↓
+                                          application
+                                               ↓
+                                      backend / 平台接口
+                                               ↓
+                                    Worker / 系统适配器
+```
 
-`backend/telemetry`独立管理随机安装身份、有界原子队列、面试单调时钟及匿名补传；main负责账户/窗口/语音/休眠装配，IPC仅接受固定操作信号，Renderer不得提供身份、正文或传输地址。两端共用，开发运行不采集。统计失败不进入账号/云同步错误链，旧服务端不支持时24小时退避。服务端聚合与后台未实施；完整26项口径、回执及保留边界见[统计协议](CLIENT_TELEMETRY.md)。
+- shared/src/components 负责展示；stores 管理状态、异步生命周期和迟到结果；services 调用受控桌面接口。Renderer 不访问 Node、Electron、凭据、数据库或模型实现。
+- shared/electron/contracts 是公开类型和 DesktopAPI 的唯一来源，只依赖纯类型/工具。preload 保持沙箱 CommonJS，运行时只导入 electron，其余为类型引用。
+- main.ts 装配端口、窗口、账户与生命周期；ipc 校验窗口/frame、操作白名单、参数与请求归属；application 协调语音、检索、生成、截图和本场上下文。
+- backend 实现独立服务，通过契约和注入端口交互，不反向依赖 application、IPC 或 React。耗时解析、模型推理与采集在 Worker、utilityProcess 或原生子进程完成。
+- platform 定义接口和可信平台选择；macos/electron 与 windows/electron 实现对应系统能力。系统差异不扩散成两套页面或业务流程。
 
-## 邮箱账号服务
+窗口保持 contextIsolation、sandbox 开启，nodeIntegration 关闭。取消、切换、退出和重载必须释放资源并拒绝旧任务写回；失败明确返回，真实服务不转 Mock。架构检查覆盖两平台依赖图、生产/测试隔离及 Renderer 边界。
 
-客户端本轮兼容服务端0.5.1，服务端实现、配置与部署保持只读。实际HTTP链路在临时数据库和合成账号上验收；线上连接检查不修改真实账号或资料。主账号与AI授权的产品入口分离，通用桌面测试通过独立测试端口驱动，不在正式包恢复旧AI登录入口。
+## 界面与本地状态
 
-独立部署的 shared/server 使用 Node 内置 HTTP／SQLite／crypto，分离传输、账号业务、持久化、密码计算及邮件适配。SQLite outbox 与验证码同事务入队，租约恢复、有限重试和到期清理；请求／密码计算／邮件各有独立容量限制。详细边界和部署见 [账号服务](../server/README.md)。
+两平台编译同一 shared/src 界面、主题、材质、无障碍语义和交互；Mac 使用 SF Symbols，Windows 使用 Fluent 图标。系统窗口、权限、音频、凭据和更新由适配器处理。面试实窗及预览共用 interviewAppearance 的固定深色及透明度参数；减少动态效果、减少透明度沿用统一降级。详见 [共用桌面界面](PLATFORM_UI.md)。
 
-桌面 shared/electron/backend/cloud 通过类型化 cloud:account、cloud:sync、cloud:usage IPC 提供主账号、资料同步和面试额度；令牌由主进程按服务 origin 隔离并系统加密。主账号与 AI 授权独立。useCloudUsage 为账户设置和侧栏共享额度状态，限制并发并丢弃跨账号的迟到结果。主进程云请求一次只执行一个操作，最多两个后台调用等待两秒；不重复轮换令牌，也不建立无界队列。
+准备聊天、面试、历史、知识库、账号和同步各有 store；持久化经现有服务与受控 IPC。附件数量和单文件体积取 contracts/chat 的统一限制，Renderer 预检与主进程独立校验并存。现有存储键、文件格式、IndexedDB 原件和用户数据迁移规则保持兼容。
 
-InterviewLease 将服务端实际余额与短期连接租约分别映射到单调时钟；每秒只向面试窗口推送本地倒计时，网络心跳仍按15秒串行续订，不增加逐秒请求。余额不超过5分钟时底部提示，少于1分钟显示秒数；收起模式只在提示出现/消失时调整一次底部空间，工具栏位置保持。额度或租约失效立即阻止新提问、截图和音频重启，保留确认配置以冲刷已采集的转写尾段。结束操作合并在途请求，先写本机记录再关闭，未产生文字的到期面试也保留；保存失败保持窗口及内容供重试，退出不等待网络生成标题。主窗口仅在保存确认后显示结果。永久额度不显示有限时长倒计时，仍受连接租约保护。
+面试由主进程拥有生命周期、截图引用、可信转写及上下文；Renderer 不能伪造系统音频或麦克风上下文。生成只消费当前问题、已确认配置和有界资料，成功且未取消的结果才进入上下文。停止、结束、重载和账号切换阻止旧事件复活。
 
-CloudSyncEngine 按知识库和面试记录分组处理文件，在分块之间优先同步个人信息。删除和取消使用一个有界优先操作槽，在当前分块安全结束后执行；先持久保存该项及所属文件的暂停标志，再删除云端副本或终止未完成上传。删除保留本地内容，取消还保留已完成的云端副本；编辑、轮询和重启不重新上传，用户点击“自动同步”才恢复该项。分类开关仍优先于单项恢复，冲突继续显式选择。容量在上传期间限频读取，完成及删除后校准，刷新容量只读取元数据。服务端0.4.2采用三类合计100 MB的标准配额，个人资料可超额上传且超出部分计入用量，其他两类上传后的总用量不得超过配额。激活码、永久额度与面试租约已接入，支付保持关闭。设置和界面共用源码；Mac图标仅在允许的icons.tsx与symbols.json中适配，由既有build:symbols生成资源，原生与视觉需对应平台验收。
+## AI、账号与凭据
 
-同步的本地快照在读取前绑定分类变更代次，单项开始和读取/摘要后复核；过期快照不决策上传、删除或回写“已同步”，运行中变更合并一次重跑。失败/冲突在重试冷却中保持；分组展示优先反映正在执行的同步、取消或删除，全部结束后再汇总终态错误。状态菜单点击展开，悬停不触发。
+ChatGPT 与 GitHub Copilot 使用各自受控 Provider/官方运行时端口，和 VoxCue 主账号分离。流式事件、附件、额度、取消及请求身份经既有契约传递。准备聊天按明确意图检索资料；面试采用有界重试和同题证据复用，不重建截图或混合多次尝试的正文。
 
-## 2026-10-25 当前共用界面
+backend/cloud 管理主账号、额度和资料同步，令牌按服务 origin 隔离并由主进程系统加密。同步处理本地版本、分类开关、单项暂停、取消和显式冲突选择；跨账号迟到结果不得回写。账号服务位于独立 VoxCue-server 仓库，桌面测试只读取校验后的固定服务端基线，不部署或修改服务端。
 
-Mac 已撤除原生展示适配，直接使用与 Windows 相同的 shared按钮、Radix下拉菜单、毛玻璃及页面布局；Mac图标按最新要求使用SF Symbols；不再存在原生控件/材质几何投影、macOS26启动门槛。新构建最低为 Apple Silicon/macOS 14.2，系统音频、权限、凭据、Dock/窗口生命周期与更新保留。详见 [共用桌面界面](PLATFORM_UI.md)。以下历史原生展示描述均已被此项替代，不能继续作为当前实现或测试入口。
+Mac 系统网络适配仅承接规定的账号和同源遥测请求；其他网络能力按既有端口处理。telemetry 独立管理随机安装身份和有界原子队列，失败不进入账号/同步错误链；正文、原始文件、音频、截图和令牌不进入统计。详见 [统计协议](CLIENT_TELEMETRY.md)。
 
+Mac 凭据使用固定证书和标识的冻结 v8 助手；旧 v1–v7 源码及规范字节保留。正常构建只校验复制，禁止重编、重签或隐式更换身份。主进程用有界串行队列管理 crypto/probe/validate/cleanup，拒绝、锁定、协议异常或超时停止本次启动的授权请求；预期清理延期不阻止正常登录。
 
-## 2026-10-24 RAG 本地改造
+迁移只读取一个来源，在同一钥匙串复制并读回验证；旧条目清理必须通过当前代无交互解密和本地结构检查。没有业务资料也使用既定验证门槛，不借网络令牌是否有效判断。日常加解密不扫描旧名称；清理只枚举属性并按引用删除。全程不收集或缓存 Mac 登录密码，不改写系统 partition/Integrity。坏资料保留，主动重新登录时先备份原加密文件。准确门槛、冲突和降级边界以 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md) 和 [1.2.2 交接](MACOS_1.2.2_CREDENTIAL_HANDOFF.md) 为准。
 
-单一 Local RAG、分类有限重试、请求作用域证据复用、主进程索引/开场互斥及可信追问检索共用 shared。保留原模型/索引和管理页面，唯一删除的设置界面是整个知识库分类。诊断仅测试注入；完整流程及兼容边界以 [RAG 架构](RAG_ARCHITECTURE.md) 为准，下文旧 Function 记录仅作历史。
+## 检索与文档
 
+application/rag、ragContext、ragSelection 协调生成意图、可信追问和请求作用域证据；ragQuery 只保存现用的查询规范化、检索重点与未解析指代判断。知识库管理和生成检索通过 KnowledgeHost 进入隔离进程，数据库与模型不进入 Renderer。
 
-当前跨平台 UI 以[共用桌面界面](PLATFORM_UI.md)为准：布局、业务、内部控件和材质共用；Mac图标为SF Symbols，Windows为Fluent；平台仅保留系统集成。
+固定 E5、分块、向量归一化、候选门槛、来源判断、证据预算和索引格式以 [RAG 架构](RAG_ARCHITECTURE.md) 为准。无关资料返回空证据，不以其他项目补齐；不把文档内容提升为系统指令。只有明确可用性故障允许受控回退，身份、参数、完整性和取消错误保持失败。
 
-## 面试生成重试
+原件导入、解析和索引有大小、任务预算及取消围栏。PDF、DOC/DOCX、Markdown、TXT 使用现有解析器；不执行宏或上传整库。提交使用不可变 revision 与原子 catalog，失败保留原件与恢复资料，不自动重建、vacuum 或迁移索引。详细保护见 [安全与生命周期](SECURITY_HARDENING.md)。
 
-`ipc/interview.ts` 在同一问题与配置快照内管理首次请求和最多三次额外尝试；0.5/1/2 秒的等待与实际生成共用取消信号。停止、结束及窗口生命周期取消立即释放等待，不追加请求；每次尝试结束后拒绝其迟到事件。截图沿用主进程原有引用，成功后才消费，不重新捕获；仅成功答案进入本场 AI 建议上下文。
+## 语音与组件
 
-`contracts/chat.ts` 的 `interview-retry` 事件经现有类型化 `chat:event` 通道传递次数。Renderer 沿用同一回答；新尝试首次正文替换旧正文，避免混合多次输出。`InterviewAnswerStatus` 在服务名称旁用固定字号显示重试次数、失败或停止，初次生成占位仍随气泡阅读字号变化。最终失败通过 `InterviewAnswerFailure` 在对应回答下方显示固定字号的警示卡，保留错误原因、重试入口及部分正文；所有回答警告都放在对应 article 内随回答滚动，输入框上方无固定警告。全部窗口尺寸统一紧凑排版：标题和重试按钮同排，错误原因下一行，仅占一行高度并可内部滚动。警示卡与回答气泡共用 `--radius-interview-answer` 的32px连续角，按钮沿用14px连续角，状态标签与图标分别保留胶囊和圆形。相同生成错误不再重复出现在底部通知，其他错误保持。返回最新按钮浮于输入区上方。输入、用时及工具栏状态继续固定字号，面试提示词和自定义指令内容保持。
+平台采集适配器提供系统音频/麦克风，公共协调层控制来源、设备、静音、权限、停启和尾段归属。共享 Worker 承接预处理、VAD、AEC 和识别；RecognitionRouter 管理 Paraformer/Qwen 识别器切换，保留现有模型、设备策略和有界预热。原生及 DSP 数学逻辑不由界面或配置同步改写。
 
-## Qwen Windows 与 Mac 接入
+采集、识别、模型加载各有代次和实际退出围栏。结束阶段尾段只归档，不自动触发新回答；原始音频不保存或上传。模型、断流、权限和设备错误明确上报；平台恢复策略在对应适配器内，不用另一平台单测代表本机原生表现。
 
-当前两平台Qwen组件均为1.0.1，复用原始BF16 ASR归档及固定Q8_0 Aligner。Windows第三份归档为已发布的Runtime 1.0.1，由`qwen-windows-runtime-catalog.ts`固定ZIP与逐文件摘要；Mac继续使用随应用签名的运行时，不下载Windows归档。历史1.0.0 BF16/Runtime信任根和公开资源保留；缓存路径包括组件版本与组合摘要，三份归档完整认证后才原子启用Windows新组件。
+backend/components/catalog 固定组件来源、体积、ZIP 和逐文件摘要；ComponentService 使用唯一生产入口 unpackComponentFile 流式校验解包。拒绝路径越界、链接、加密、重复/额外条目和内容不符，完整认证后才原子发布。取消清理自有暂存，删除前等待消费者退出且核对受管目录，不触碰未知内容或研究资产。adm-zip 仍有构建/夹具消费者，当前依赖声明保留，不作为生产解包入口。详见 [本地组件](COMPONENTS.md)。
 
-语音模型/推理设备的独立切换使用RecognitionRouter：原采集Worker保留AEC与连续输入，Recognizer将Paraformer/Qwen分别放在可释放的独立Worker；候选后台加载，两路当前VAD均空闲后用各路最多300ms处理后PCM预热并切换唯一事件来源。候选加载/预热失败或超时保留旧识别，暂停/结束/断流取消；等待加载不阻塞协调器的捕获串行队列。旧识别器关闭/Worker退出释放ONNX或原生进程。只改变识别配置时保留问题、草稿、1800ms截止点及排队/去重，音源或物理设备变更继续停启重连。回答模型/effort仍是当前回答原快照、后续问题新配置。
+## 局域网连接
 
-浮窗设置纵向分区、各行标签与控件对齐；选项宽度不超过240px，窄窗按可用空间收缩。读取/订阅组件状态以准确显示模型可用性。组件IPC仅为已授权面试主frame开放无额外字段的status，修改操作保持原授权。
+backend/remoteConnection/service 管理 HTTP/WebSocket、配对审批、连接和资源释放；protocol 管理共用地址、命令、秘密比较及限流校验。service 显式保留原有工具导出，线协议、阈值和错误行为保持一致。
 
-Windows 透明面试窗口预留固定原生画布，避免 HWND 移动/缩放与 Chromium 新画面提交不同步造成的闪烁和工具栏中帧位移。收放、转写开合、设置及缩放复用 `fitInterviewBounds`，只通过只读 `interview:layout` 事件及初始快照发布带修订号的可视尺寸；Renderer 先订阅并拒绝迟到快照，工具栏、面板、缩放角和状态提示共同布局。拖动保持原生画布尺寸，只平移；显示区域增大时才扩容，越界锚点按原拟合规则恢复。设置弹窗定位和限宽高依可视画布，透明余量允许鼠标穿透，已按住的滑块不切换穿透。Mac 保留原生尺寸路径，未收到固定画布布局时共享 Renderer 沿用视口尺寸。
+网络层只依赖契约和注入端口；application/IPC 校验窗口、内容投影和会话归属。设备页面独立构建，只开放其 manifest 依赖闭包，不暴露 DesktopAPI。草稿采用主机持有的版本和 CAS，断线恢复使用有界快照，不重放过期控制。配对和本地网段限制见 [局域网接口](REMOTE_CONNECTION.md)。
 
-本场窗口默认统一使用 Ctrl+Shift：H 隐藏/恢复整窗、P 收放内容、T 收放转写、M 麦克风、A 系统音频、Enter 发送、↑/↓ 滚动已连接设备问答，Ctrl+Shift+S 在可见面试窗口截图；音频与发送快捷键在整窗隐藏时仍有效，P/T 保持可见布局门控。发送使用固定 submit-input 事件，不带正文、文件或任意 IPC 参数；Renderer 直接读取 interview store 当前共享草稿，复用发送按钮的提交动作，不依赖可见布局或恢复焦点。空输入不回退旧转录，组字、生成／截图／模型忙碌及结束冲刷期间不发送，清稿使用对应版本比较，迟到完成不能清除新编辑。本地键盘事件将 Ctrl+Shift+Enter 交由全局入口，避免可见窗口重复发送。麦克风切换等待原生确认，不取消当前回答；受控 interview:input 只屏蔽麦克风输入，保持已有采集连接及识别服务；不调用 pause/stop/reconnect，系统音频继续转写。仅首次启用未连接来源时补开该来源，不重建其他采集或重载模型。快捷键默认映射可在主设置的“通用”下方“快捷键”分类修改，契约固定动作与有界组合键，组合至少包含 Ctrl／Shift／Alt 之一加一个主键，不接受单独功能键或仅系统修饰键；录入实时预览，非法／重复／系统拒绝不保存且继续录入，键盘 keydown 被系统消费时补用 keyup 校验，主进程独立保存配置并同步面试帮助及截图提示。版本 1 设置中与旧默认相同的绑定在读取时换为新默认，已有自定义或清空值保留；新保存使用版本 2，之后自定义旧组合也保持原值。检查通过临时注册探测当前系统占用，应用内重复单独识别；只报告组合键不可用，不推断占用进程。单键注册失败只停用该键，不阻止开场；结束及加载失败只释放本场已获得的注册。录入期间临时释放本功能的全局键，取消、失焦、关闭或导航后恢复，保存失败保留原配置。快捷键帮助默认打开，独立沙箱窗固定在屏幕工作区左下角，仅能读取开关/导航代次及设备已连接布尔状态、报告同代布局就绪及关闭自身；未连接设备时隐藏两项滚动说明，连接变更经单独布尔事件即时同步，不向帮助窗开放配对码或会话内容；语言、材质及透明度沿用转写偏好。两窗共用可反向的 160ms 原生显隐，不改变内容材质或位置；减少动态效果时直接切换。首次显示及重新唤起均等待原生与当前导航代次的 Renderer 布局确认，旧确认不能显示新页面。再次启动的 second-instance 路径及应用 activate 优先委派给既有面试的同一 reveal 回调，恢复隐藏／最小化并聚焦；初始化中只记录显示意图等待原有门控，不新建面试、重载页面或重置输入和面板偏好。
+## 更新、构建与验证
 
-开场 inputMode 只允许 remote / transcription，缺省按 remote；开场快照作为初值，本场经受控 setInterviewInput 可实时切换方式及软静音，ACK 后同步权威配置与 inputState 快照。transcription 的有效问题来源只允许 microphone，开场使用受控麦克风权限、设备和探测端口预检，不请求系统音频；本场切换后已连接但被屏蔽的采集可保留，包不进入相应 ASR 通道。远程设备及启用偏好独立保存，主设置切换只派生有效配置，不覆盖已保存的远程偏好；本场方式切换重置问题边界而不删除已有转写与回答。输入控制和重连等待准备前后及执行完成均校验窗口、导航和音频 intent；暂停、结束、重载或原生失败取消旧请求。语音模型与设备由 SpeechOptions 确认、主进程验证，Worker 通过固定受管组件路径加载 Rust 进程。四句缓冲及原版对齐器负责真实音频裁剪。Paraformer 与 Qwen 逻辑断句均等待连续一秒静音；Qwen 既有运行时内部仍在 800ms 暂存文字，共享适配器等待真实处理音频达到一秒及有界开口确认后再发布终稿，恢复讲话时续写同一发言。自动回答统一从最后一次已确认问题源语音结束起按已处理音频累计1800ms，分段和识别耗时包含其中，不从终稿到达后额外等待。两种引擎回传VAD静音起点，Worker确认处理进度，控制器标记各路未处理包；只有已确认问题源的 silence 终稿就绪、对应音频进度到达截止点且无待检查包才提交。识别/IPC延迟计入预算，墙钟等待不能代替静音证据；重新开口取消旧截止点，去重、忙时排队及结束保护保持。Windows具体原生进程和资源认证见 [QWEN_WINDOWS_HANDOFF.md](QWEN_WINDOWS_HANDOFF.md)。Mac平台通过可信运行时路径注入同一Worker/QwenEngine，ASR选择Metal/CPU，Mac对齐器使用Q8_0磁盘权重和原Rust CPU计算；平台硬件探测使用无模型、无音频的metal-check协议，开始与重连独立校验。Mac签名运行时属于应用原生资源，组件仅认证同一ASR/Aligner归档，平台缓存摘要独立。细节见 [QWEN_MACOS.md](QWEN_MACOS.md)。下文旧 2200ms 为历史基线，当前音频静音截止规则以此段为准。
+共享更新层提供状态、缓存与可信资产选择；Mac 驱动把网络和缓存元数据通过同一认证规范化方法处理，保留选中 release、签名和下载字段。检查、下载、安装均维持原有平台/版本、签名、摘要、路径及归属校验。Windows 更新仍由其适配器执行。完整分发边界见 [更新说明](UPDATES.md)。
 
-## Windows 0.5.0 本地回声处理
+共享版本模板和平台差异生成根与本机配置；根不安装依赖。编译与打包只包含 shared 和本平台运行闭包，冻结助手、Worker 和 ASAR 物理路径按既有规则检查。共同锁历史基准、平台锁、签名私钥、固定助手和发行恢复资产不得按“搜索不到引用”删除。
 
-Windows 0.5.3 将回环无 PCM 时的兼容静音移到 WASAPI 原生端。仅在已排空捕获缓冲、IAudioClock 的实际设备位置持续前进且 QPC/频率一致时输出静音，保留 50ms 余量；冻结、失效或时钟跳变丢弃不确定区间，不能用墙钟外推。迟到真实包与补齐范围重叠时发送间断，重新建立识别边界。麦克风不走回环补齐；共享控制器两路均不按定时器制造进度。
-
-Windows SpeechController在同一共享Worker中装配固定本地echoCancellation模块；路径仅来自平台构造器，prepare完成后才启动WASAPI。所选render端点保持完整应用混音和原系统转写，仅双音源麦克风经过固定AEC3 WASM；不改变系统设备或音量，不增加UI开关。两路GetBuffer首样本的QPC（100ns转ms）是共同单调时钟，墙钟仅供转写时间。时间戳无效/主机静音旁路滤波并保留连续重采样，不改变ASR输入采样率；参考缺失最多等待80ms后保留麦克风。48kHz/10ms重采样、有限参考队列、滤波延迟补偿、间断和停止冲刷在Windows适配器完成。
-
-原生助手停止后读完缓存，WasapiCapture等待close（含stdout末包），drainBeforeRetire保持回调有效直到两路停止，之后共享Worker flush并等待确认；退出、强制停止及DSP错误仍显式失败。开发和便携装配都包含AEC3 JS/WASM/license、sherpa和本机ONNX资源，不导入Mac模块。下方Windows旧退休顺序和未处理AEC的描述为历史基线。
-
-## 当前共享面试上下文与检索（Windows 0.3.1；Mac 本地 0.3.1）
-
-两阶段用量优化仍保持撤销，已发布 0.3.0 保留原优化行为。当前自动发送仅按明确的中文语气词/简短确认白名单判断已确认问题来源的完整终稿：忽略空白、标点与重复组合，整段无其他文字时取消本次自动提交，原始转写及手动草稿保留；混合正文及有效追问按原文提交，口头衔接词不扩入名单。自动路径读取终稿缓冲，手动路径继续允许编辑及临时稿；忙时排队、片段去重、取消与迟到保护保持，静音截止规则见上文1800ms说明。远程以系统音频为问题源，麦克风仅作面试者上下文；仅转录以麦克风为问题源，保持原始 microphone 来源，并且不把问题当作本人事实。共同映射由 contracts/speechSettings.questionSource 提供，Renderer 与主进程使用各自受控配置，未选系统事件不得混入仅转录上下文。
-
-主进程 InterviewContext 每次序列化完整保留窗口，各条直接发送 text，保持 kind、at、questionId/previousQuestionId，包含真实发言、已提交问题、AI 建议和 gap。不生成 textRef/textReferenceRule 或 historySelection，不增加摘要/分类调用。原 120 条、64000 字节、每条 6000 字及 omittedOlderEntries 边界不变；当前问题仍在最后，RAG 仅在可信连续追问时派生有界检索主题。上下文快照、场次 revision 和迟到回答保护保持，记录格式不改。
-
-KnowledgeService 每次查询执行既有串行检索，不再持有精确查询结果 LRU；revisions 和模型缓存、知识库隔离、检索排序/模式/topK、取消与模型卸载/关闭保持。用量统计/token 账本和重置由原有服务负责，不受本次撤销影响。
-
-## 独立本地组件
-
-共享 ComponentService 从固定资产下载并校验语音/RAG，按资源版本及摘要缓存到 userData/component-cache；应用版本不参与缓存键。shared 共用下载、取消/重试、状态和功能限制，主进程独立校验注册窗口主 frame，不开放 URL/路径/命令。Windows/macOS 新构建排除模型与 ONNX Web，保留 adm-zip、Node CPU 依赖和各平台原生助手；resources/voxcue-components.json 启用缓存，完整旧包仍沿原路径。开发模型完整时复用原目录，否则使用同一组件服务。Windows 锁及生成配置已在其本机同步，Mac 目录保持只读。详见[组件说明](COMPONENTS.md)。
-
-## Windows 原生展示
-
-转发退出可能带来迟到的 mouseout；共享 leave 处理重新命中事件坐标，不在可交互区域盲目开启穿透。真正的透明留白仍交给后方窗口，按下、选择、拖动和缩放锁定保持。
-
-`windows/electron/presentation.ts` 通过 NativePresentation 端口按平台策略动态装配；不静态引入 Mac 模块。适配器可提供运行时能力，主进程在创建窗口前将其布尔描述交给沙箱 preload；能力不替代窗口、主 frame 和精确参数校验。Windows 11 22H2+ 的 Acrylic 沿用材质种类，共享 CSS 提供滑杆遮罩与 60/30 浮窗曲线，不调用 setOpacity。旧系统保留参数及不透明回退；forced-colors/减少透明偏好关闭滤镜，不改注册表或系统主题。
-
-主题仅设置 VoxCue 的 nativeTheme.themeSource。面试使用 normal 置顶，显示/恢复/意外关闭置顶时重用共享 pinInterview，不定时聚焦。共用入口按窗口防止同步状态回调重入；Windows 发现 HWND 已失去置顶时先清除 Chromium 旧层级，再恢复 normal 置顶，避免缓存状态与原生窗口不一致。空白穿透使用 setIgnoreMouseEvents 的 forward，交互命中与按下/拖动锁定继续共用。主窗口隐藏并跳过任务栏，浮窗自身跳过任务栏；结束后在无新面试时恢复主窗口任务栏入口与源 ICO，不修改用户固定项。Renderer 意外退出沿用关闭释放流程并恢复主窗口。
-
-Windows 屏幕能力返回 not-required，准确表示当前捕获方式无需 Mac 式单独申请；申请及打开设置不提供虚假流程。状态查询不枚举来源或读取像素。实际捕获仍由主进程在当次显式请求中检查并报错，草稿只在内存，Renderer获得缩略图和不透明ID。0.5.9起仅显式发送的截图另行归档，读取原图也须用户点击，不在捕获或权限查询时保存。
-
-紧凑窗口的控制层在内容之后生成 no-drag 排除区，按钮本身也明确 no-drag，防止后生成的页面拖动区覆盖。Windows 浮窗移动端口以手势起始尺寸 setBounds，并补偿分数 DPI 的尺寸回读；原生像素网格决定坐标，静止鼠标不重复发原生移动。Mac 未实现此可选端口时保持原 setPosition 路径。CSS 中前缀滤镜先于标准滤镜，避免压缩后丢失有效标准声明。
-
-## 面试浮窗移动
-
-共享三条杠使用普通 no-drag 指针区域及 useInterviewWindowDrag，不再依赖会吞掉指针事件的 CSS 原生拖动。手势通过指针捕获、单帧合并和串行 IPC 发送 start/move/end；公开 DesktopAPI、preload、主进程白名单一致。interview:move 只接受当前浮窗主 frame 的单个阶段对象，拒绝坐标、其他窗口、额外字段和未知动作。位置从主进程 screen.getCursorScreenPoint 与开始时的窗口位置计算，仅改变当前浮窗位置；同一位置不重复设置，不接受 Renderer 原生参数。
-
-移动期间禁止切换鼠标穿透，结束后重新命中工具栏/面板与透明空白；命中使用窗口位置加 clientX/clientY 重建屏幕点，不直接依赖转发输入的 screenX/screenY。松开、取消、失焦、窗口关闭和重载均退休手势，收起、转写布局或缩放开始也清除旧移动状态。浮窗回归使用合成鼠标坐标，但通过真实指针捕获、preload/IPC 和 BrowserWindow 检查实际位置与尺寸，不能将其描述为物理鼠标原生操作验收。实现共用，Windows 专属目录只读；本机未进行 Windows 真机拖动验证。
-
-更新：2026-10-17。以当前代码和 PROGRESS.md 为准。
-
-## 共用界面与平台适配约定
-
-Windows 与 Mac 使用 shared/src 中同一份 React 页面、设置组件、状态和偏好校验/保存代码。Vite 从 shared 构建界面，依赖和输出分别留在当前平台；两端共用内部控件和网页材质；Mac编译时只将公共图标入口替换为SF Symbols，Windows仍用Fluent。后续通用设置只维护一个入口、参数和交互，系统能力由共享契约连接 windows/、macos/ 的具体实现，不复制两套 UI，也不把原生细节直接放入通用设置组件。
-
-用户已授权此前清单 1–10 全部共用：透明度滑杆、浮窗背景/阅读层联动、应用主题联动、屏幕权限入口、持续置顶、透明画布穿透、面试期间图标隐藏/结束恢复、用量链接对齐、紧凑窗口布局及移除蓝色焦点外圈。置顶、穿透和图标隐藏保持自动行为，仅提供只读状态，不新增开关。Windows/Mac 各自重建使用这份源码；不跨设备同步偏好值或用户数据。
-
-contracts/presentation.ts 定义纯布尔能力和全 false 的待适配缺省值。可信 DesktopPlatform 策略指定能力以及可选 presentationFile，window.ts 经 BrowserWindow additionalArguments 传给沙箱 preload；preload 只挑选五个严格等于 true 的布尔值，冻结后作为 DesktopAPI.presentation 展示元数据。它不授予任何原生权限；main 仍独立校验调用窗口、主 frame、参数和本机能力。preload 没有增加本地运行时 import，contextIsolation/sandbox 等安全设置保持。
-
-shared/electron/presentation.ts 仅定义 NativePresentation 类型端口；main 按当前平台策略动态装配 macos/electron/presentation.ts，不静态导入两平台。Mac 适配器只调用 Electron 原生展示 API，持有 Dock hide 节流计时器，接收图标和面试窗口存活查询；面试生命周期、关闭保存、授权与竞态仍由 main 协调。架构约束仅允许该适配器依赖 electron 与 type-only 类型端口，纯平台 types 仅增加对纯 PresentationCapabilities 的 type-only 引用。
-
-材质及透明度策略共用，穿透使用独立 mouse-passthrough-ui。系统集成通过平台端口接入；不复制页面或建立另一套控件。
-
-## Mac 面试窗口生命周期
-
-main 在面试浮窗 ready-to-show 中先准备/显示浮窗，再经 NativePresentation 隐藏主窗口和应用图标。Mac 适配器调用 app.dock.hide，延迟期限取最近 hide 与 show 的较晚时间加 1100ms，show 调用前及 Promise 完成后都更新时间，避免快速结束后再次面试时 hide 被忽略；回调只在面试窗口仍存活且图标可见时执行。浮窗关闭取消待执行 hide，异步 app.dock.show 完成后 main 恢复主窗口；期间新面试已打开则重新安排隐藏，退出时释放计时器且不恢复图标。恢复失败明确提示，不修改系统 Dock 偏好或固定项。背景见 [Electron Dock API](https://www.electronjs.org/docs/latest/api/dock) 与[原生转换保护说明](https://github.com/electron/electron/issues/37487)。
-
-共享 SpeechController 继续串行执行；初始化前的 Worker exit 立即拒绝加载并清除超时。失败清理先退休 epoch/回调，使用 allSettled 清理所有采集端并退休 Worker，保留首个启动故障。尾段请求可 resolve/reject，Worker 退出立即拒绝等待，超时/停止失败都标记 error 并清除旧实例；启动每次异步边界后重新检查状态，不让同步原生故障后误报 running。正常 Mac 尾包排空及 Windows 原退休顺序保持。
-
-captureInterviewScreenshot 对原生 getSources 增加十秒期限及 AbortSignal 竞争，完成/失败/取消都移除监听与计时器；挂起或迟到的原生结果不阻挡请求退休，也不编码/发送已取消图片。仍只从受控面试请求按次捕获，权限、显示器匹配、大小限制和内存隔离保持，不增加原生截图回退或权限绕过。
-
-Dock 恢复前及 show Promise 完成后均显式 setIcon(resources.icon)，避免只在启动时指定的图标被宿主默认图标覆盖。Mac 开发宿主生成器复制现有 ICNS 到包内并设置 CFBundleIconFile；缓存指纹包含图标 SHA256，图标变化时生成新宿主，保留旧运行副本。应用标识、权限说明和本地开发签名方式不变，不修改厂商 Electron、系统 Dock 或真实用户资料。
-
-统一 pinInterview 入口在 Mac 使用 floating 层级，Windows 保留 normal。Mac 浮窗在显示、恢复及置顶被意外关闭时重新应用置顶，失焦不重设层级、不调用 focus；所有桌面及全屏可见通过 setVisibleOnAllWorkspaces 配置，在 Dock 已隐藏的应用模式下跳过额外进程类型切换。重复启动优先聚焦面试浮窗。结束确认、音频释放、原生材质与 Windows 最小化流程保持。当前验证边界见测试说明及PROGRESS.md。
-
-透明的 BrowserWindow 矩形不会因网页背景不可见而自动成为鼠标空洞。Mac 在创建/重载浮窗时默认 setIgnoreMouseEvents(true, { forward: true })；FloatingInterview 根据鼠标屏幕位置与当前网页命中，保留工具栏、双面板、缩放热区及提示卡交互，其余透明画布穿透。外层容器 pointer-events:none、可见表面 auto，防止空容器占据网页命中。按下/拖动/缩放时不切换，mouseup 后释放锁再刷新；ResizeObserver 与 resize 处理布局变化，卸载释放监听并保留穿透，不轮询或抢焦点。
-
-公开契约和 preload 使用布尔型 setInterviewMousePassthrough，发送固定 interview:mouse-passthrough；共享命中逻辑仅在 presentation.interviewMousePassthrough 就绪时订阅。主进程独立验证当前平台适配器/能力、当前浮窗、主 frame、恰好一个布尔参数，只调整该浮窗并跳过重复状态。没有任意窗口/原生选项/命令或路径输入。Windows 同样由本机适配器接入，公共契约编译断言与 preload 白名单保持同步。
-
-## Mac 原生外观与界面主题
-
-App 在登录/主窗口启动及主题偏好切换时，按 presentation.nativeTheme 能力调用受限 setNativeTheme。公开契约、preload 与 appearance:theme 频道一致；主进程校验已注册登录/主窗口、主 frame、恰好一个 light/dark/system 字符串和本机适配能力，再经类型端口调用 Mac 的 Electron nativeTheme.themeSource。它只覆盖 VoxCue 本进程的原生外观；system 移除覆盖并跟随系统，不写 macOS 偏好或影响其他应用。失败在界面提示，旧 effect 的异步回执不能覆盖新状态。
-
-网页继续通过既有 copilot-theme 与媒体查询应用主题；原生外观变化后系统模式的媒体查询刷新，浮窗沿用存储/媒体事件。Mac sidebar vibrancy 材质保持，Windows 经本机适配器设置应用 nativeTheme；连续透明度仅调整网页表面，辅助功能时回退不透明。
-
-## 共用毛玻璃与图标
-
-`webMaterials.ts`在所有产品窗口启用同一材质样式；`headerCoverage`根据共享滚动内容测量工具栏覆盖。透明度固定60%，减少透明度、高对比和强制颜色模式切换为不透明表面。主题、系统强调色和面试阅读尺寸仍共用状态。
-
-图标接口由`shared/src/components/icons.tsx`定义；Windows使用Fluent，Mac通过仅限图标的Vite解析器使用`macos/src/icons.tsx`与构建时生成的SF Symbols资源。尺寸、颜色继承、SVG布局和无障碍归属保持一致；不恢复平台内容控件或材质替换。应用与Provider品牌资源保持。
-
-## Mac 屏幕权限
-
-macos/native/ScreenPermission.mm 用公开 Core Graphics 权限 API 和 Node-API 8，仅查询/申请授权，不进行捕获；请求异步运行于本进程工作线程，保持 Electron/TCC 应用身份。macos/electron/screenPermission 通过注入协调系统状态和固定设置入口，只依赖公开纯契约；架构检查拒绝其导入捕获、磁盘或业务。main 按 Mac 策略加载本平台绑定，shared IPC 校验主窗口主 frame 和三个操作白名单，preload 仅暴露不可变能力与固定调用。
-
-InterviewAccessReport 的可选 screenCapture 与 AudioSource/checks 分开，不扩展音源类型、不改变 Windows 报告。屏幕权限不足不影响 audio ready 或纯语音开场，实际截图仍须实时授权；设置面板/开场焦点返回刷新，不持久化授权、不自动启用截图。开发宿主通过暂存签名后交换，保留运行中旧宿主；Node 头文件和原生产物都在 Mac 局部缓存/目录，Windows 不写入。
-
-## 平台编译与写入隔离
-
-当前平台对另一平台目录只读，覆盖代码、配置、依赖、图标、生成结果及同步/格式化/清理脚本。共享变更保持另一平台契约，待办由其本机同步。sync-platform-manifests 只生成根与当前平台配置；根构建/格式化先检查本平台配置，不能调用旧的跨平台写入命令。
-
-Electron TypeScript 入口只含 shared/electron 与本平台 electron。平台策略通过白名单目录动态加载；main 根据所选策略的 speechProcess 路径装配同目录 access/capture，路径不来自 Renderer/IPC。原生控制器和共用 Worker 边界保持；架构检查禁止 shared 静态导入平台实现，防止 TypeScript 自动把另一平台加入输出。build-electron 在系统临时目录编译、拒绝异平台输出，核对后原地更新本平台受管文件并保留输出目录身份；写入失败使用临时备份回滚，同输出由进程锁串行保护；实际 Mac 启动回归还检查 require.cache 没有 Windows 模块。
-
-check:workspace 增加项目文件与生成目录检查。厂商依赖内部的跨平台资料、恢复档案和受保护私有历史资料保留，不手工拆删。Windows 旧配置与 dist-electron/macos 本轮只报告，留待 Windows 本机 sync:workspace、build。Mac Dock/启动器取 macos/public 的带透明边距衍生图，原件/Windows ICO 保持。
-
-## 2026-10-17 Mac 原生音频与窗口增量
-
-共用SpeechCoordinator另管理audio-test资源归属：主窗口经dictation的test/test-stop调用传递固定音源与测试令牌，后台10秒期限，事件路由仅状态/电平，测试转写不外传。显式interview:reconnect-audio仅面试主frame可调用，只改变音源/设备，保留系统来源，成功后更新confirmed.options；当前模型/资料锁定不变。取消、停止、结束与迟到重连均保护已有会话。Renderer的自动提交状态与取消本次沿用原2200ms时序，取消不改原始转写和手动草稿。
-
-macos/electron/speech 适配 Core Audio 助手，windows/electron/speech 继续适配 WASAPI；原队列/ASR Worker/冲刷控制器抽至 shared/electron/backend/speech/controller，通过小型 CaptureAdapter 注入设备枚举和采集。业务/IPC/Renderer 不导入原生助手或推理。Mac 的 drainBeforeRetire 先排空尾包，Windows 默认原退休顺序不变。主进程按平台装配开场权限检查和既有 SpeechHost，未复制业务。
-
-Mac适配器通过可信preprocessorFile向同一Worker装配echoCancellation，路径不来自Renderer/IPC；准备握手完成后才开始采集。双音源时，以所选输出设备所有应用的混音作为WebRTC AEC3参考，仅处理麦克风后送入原ASR；单音源原路保留。原生共同单调时钟与独立转写墙钟分别传递；48kHz/10ms帧、80ms等待、有界参考、缺失旁路和滤波尾段冲刷在Mac预处理器内完成，间断重置两个ASR通道。运行时错误显式停止。Mac专属固定WASM依赖随应用复制，不改变Windows依赖/处理，也不更改系统设备或音量。
-
-macos/native/AudioCapture.mm 使用输出设备专属私有 tap 与独立 HAL 麦克风，使用既有有界 PCM 协议，无视频/音频落盘。原生无锁有界队列、格式/设备/默认路由变化检查及异常显式失败；系统权限由短时零采样启动请求，不假借 screen 状态。Mac 开发宿主、用途说明、ad-hoc 签名及双击启动器均局部生成，不修改厂商 node_modules、用户资料或全局应用。
-
-Mac平台策略保留Electron窗口/Dock生命周期、系统快捷键、主题与鼠标穿透；登录、主窗与面试的应用内控件全部来自shared。输入框与返回按钮留在当前页面，取消独立前景WebContents和几何投影。材质/按钮/菜单端口、原生绘制绑定、构建生成器及专项探针已删除，详见[共用桌面界面](PLATFORM_UI.md)。
-
-## 实际目录与测试边界
-
-根目录仅保留协作、进度、README、无依赖命令转发与必要配置。共享业务、契约、测试/夹具、PNG、模型与通用文档在 shared；Windows 原生源码、测试、ICO、依赖、构建、发行和既有运行结果在 windows；Mac arm64 依赖、构建和本机运行结果在 macos。完整映射见 [WORKSPACE_LAYOUT.md](WORKSPACE_LAYOUT.md)。
-
-共同依赖/命令由 shared/package.json 声明，平台 package.platform.json 只声明差异；sync-platform-manifests 生成根/平台入口和配置。根命令按宿主系统转发，各平台有独立 node_modules、缓存、锁和输出，不建立共用依赖软链接。TypeScript paths/typeRoots 和 Vite 平台解析器从本平台找依赖，并保留 package exports/browser 条件；共享源码不导入平台 node_modules。源码单测的 CommonJS require 使用当前平台 NODE_PATH；生产编译后的目录依照正常 Node 模块解析。
-
-测试源码分别在 shared/test、windows/test、macos/test；根据 2026-10-17 用户最新指令，两平台运行结果仅在终端/内存显示，成功和失败均零保留，不再写 test/results。必要隔离工作文件仅使用操作系统临时目录，结束/失败/取消须清理；现有持久化脚本须先改造再获准运行，测试仍暂停。既有生成结果已按权限和占用情况清理，Mac 117 个被占用旧目录暂留，Windows 349 个先前明确跳过的目录不重试。源码迁移恢复资料与纯清理审计单独位于平台 recovery。单测只收集各目录 unit/renderer，排除生成结果和恢复快照。生产禁止导入任一平台 test，Windows/Mac 专属实现不得互相依赖；其余 Renderer、preload、IPC、推理/数据库边界保持。
-
-各平台 dist-electron 只镜像 shared 与本平台 Electron 源码，main/preload 关系和 sandbox 不变；Vite 输出本平台 dist。开发 desktopResources 从 shared/local-models 解析模型，PNG 原件在 shared/public，Mac 原生图标衍生物在 macos/public，Windows ICO/helper 在 windows；打包路径仍为 app/public、resources/models/native，Windows 打包补充复制共享 PNG。userData、凭据和数据键不变。
-
-Mac build 包含 Core Audio、共享编译和本地启动器；本机原生双音源、零采样预检、ASR、停止冲刷、窗口/Dock 与启动器已验证，真实账户、外接设备/真人质量与签名分发仍未验收。Windows build 保留 WASAPI 和既有 NSIS；本次不生成独立分发安装包。历史下文中旧根路径与 Mac 未实现状态以本页最新增量和 PROGRESS 为准。
-
-## 分平台正式更新与Mac arm64范围
-
-更新目标限定Windows x64及macOS Apple Silicon原生arm64；Intel/Universal Mac不在支持范围。backend/updates/releases.ts负责纯发行筛选、稳定数字版本比较及清单字段投影；provider.ts通过固定公开GitHub Releases列表API分页读取，再访问所选Release目录的本平台清单，driver.ts配置electron-updater公开custom Provider接口。不存在/releases/latest或Atom依赖，平台可独立采用不同版本/Tag；现有v0.1.1标签兼容，Tag/标题/统一Latest标记不用于版本排序。
-
-资产是显式协议：Windows要求latest.yml及VoxCue-Setup-<稳定版本>-x64.exe与对应blockmap；Mac要求latest-mac.yml及VoxCue-<稳定版本>-arm64.zip。仅已发布、非草稿、非预发布且完整uploaded资产进入候选，按版本数字排序，同版本按发布时间/Tag稳定选择。最高候选的清单版本必须与文件名一致，files中的本架构URL必须是资产原名、大小与列表一致、SHA512合法；只投影该文件与受限minimumSystemVersion，丢弃额外packages/外部URL/任意路径。下载URL始终由固定仓库、所选Tag及文件原名构造。
-
-网络读取使用更新器netSession的fetch、credentials=omit，不读取账户凭据、环境令牌或Renderer URL。每次检查45秒总期限，分页100条/最多10页，单页8MiB、清单128KiB；超限/分页或网络失败、无当前平台完整正式包、最高候选清单损坏均明确失败，不将旧版误称最新。生命周期dispose取消分页/清单读取，旧结果/事件仍受原Service守卫；原下载取消、SHA512、进度、缓存、签名与安装由原NsisUpdater/MacUpdater执行。
-
-main保留原UpdateService装配和IPC，Renderer/公开契约不变。启动检查下载、手动重启、本机保存握手、面试互斥和普通退出不安装保持；开发/便携禁用，只有受支持平台的packaged且存在app-update.yml才创建驱动。该文件继续供原生缓存/签名配置，运行时Provider覆盖全仓库Latest选择。未改打包/发布配置，未新增依赖或变更数据格式。Mac这里只完成策略/适配代码，尚无Mac安装包或真机/签名/安装验收。
-
-## 统一主线与平台边界
-
-main 为唯一长期开发入口，Windows/Mac 保留历史引用；0.2.0 按用户授权提交推送完整功能和目录整理，远端默认 Windows 保持。共享 React/Store/存储、AIChatService、application、contracts 与 IPC 各保留一份实现，没有按系统复制业务；生产源码和测试按共用/平台差异组织，上传状态见 PROGRESS。
-
-`shared/electron/platform/{types,windows,macos,index}.ts` 为无 Electron 运行时依赖的纯策略/路径解析。Windows 保留 Acrylic、ICO、AppUserModelId、全部窗口关闭后退出、现有保护支持标志、固定隐私入口、WASAPI；macOS 使用 PNG、关闭窗口后驻留及钥匙串错误标签，不配置 Windows 材质/原生程序，也不宣称相同截图保护保证。非目标系统不声明原生支持。
-
-`shared/electron/window.ts` 共用三类窗口选项、沙箱/preload、新窗口/导航限制及生产/开发 hash 入口；不持有业务状态，也不依赖 backend/application/IPC。main 在原有时点创建/加载窗口并保留授权切窗、关闭保存握手、重载取消、浮窗保护/normal置顶、中心缩放和资源释放。没有移动 userData、模型或原生文件。平台参数只从 main 注入后台；账户存储继续使用原 safeStorage 与 credentials.bin。未适配音频在 SpeechHost 创建 utilityProcess 前明确拒绝，WASAPI实现仍在原专用后端。
-
-架构检查新增平台策略不可反向依赖业务/窗口、共享窗口不可依赖业务、backend/application不可直接依赖桌面策略/窗口；现有 Renderer、contracts、preload、推理和 Provider 限制保持。平台单测验证配置、资源位置、安全入口及不支持音频不启动进程，不能替代 Mac 真机。`build:shared` 为共享编译入口；完整 `build` 仍保留Windows原生编译，Mac仅arm64依赖、采集、外观、权限及构建分发待后续授权实施。
-
-Electron 的 [窗口保护接口](https://www.electronjs.org/docs/latest/api/browser-window#winsetcontentprotectionenable-macos-windows) 不提供对所有捕获方式的相同保证；[safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage) 的系统后端不同。本轮保留已有同步加密 API，未升级 Electron 或改换凭据格式。完整本轮证据与后续边界见 CROSS_PLATFORM_REFACTOR.md。
-
-对抗测试修复补充：准备聊天所有路由同时校验主窗口和主 frame；取消先退休原生请求槽，后续旧事件/结果均丢弃，主窗口重载也执行取消，与恢复为已停止的快照一致。HTTP 非成功正文独立执行取消、空闲计时与64 KiB上限。Renderer 的 storedValues 仅为本地数据的纯校验；聊天恢复按允许字段构造状态，历史嵌套损坏保留原始存储并显示错误，读取不执行迁移或删除。pnpm overrides 仅去除未调用的 LanceDB 可选提供器及 Mammoth CLI 解析依赖；打包遵循相同排除设置，实际文本 Embedder、DOCX 解析和语音路径不变。
-
-## 账户额度
-
-当前生产 ChatGPT 登录、聊天和额度共用固定官方 Codex 0.164.0 的托管 OAuth。ManagedChatGPTAuth 通过公开 account/read、getAuthStatus（includeToken/refreshToken）向主进程取得同一有效会话；其工作区来自官方托管令牌，SIWC 的 encrypted_auth_metadata 不解码也不伪造。公开 AuthSession 仅含受限身份及过期时间，账户标识按用户/工作区稳定哈希；access/refresh 令牌、原生参数和路径不进入 Renderer。旧 SIWC 授权代码仅保留既有兼容与回归边界，生产构造器明确注入 managed；旧凭据不自动读取或移植，必要时用户正常重新登录一次。
-
-ChatGPTService 按可信原生 access 的 chatgptAccountId 选择固定 https://chatgpt.com/backend-api/codex 的模型目录及 Responses，发送同一 Bearer/ChatGPT-Account-Id。继续复用所有原有输入、SSE/JSON、资料提案、来源验证、本地工具、取消和账本处理；不借 Codex 开放线程或本机工具，不接受 Renderer 提供端点。官方运行时负责托管令牌续期和 keyring-only 存储，使用本应用专属 CODEX_HOME；不记录 stderr、不使用环境令牌/明文回退，不读取其他 Codex 安装的登录项。此适配固定于运行时0.164.0，真实账户网络兼容性仍需用户在正常授权后确认。
-
-账户额度只读取当前同一会话，核对官方快照的 accountId（若有）及读取前后身份；旧账户/退出期间的迟到结果丢弃。返回五小时/周则分别显示，缺失不补齐，读取失败不触发登录。已删除 connection_required、独立连接/取消 IPC、UI/store 状态和 usage-binding.bin 消费者；唯一授权入口是登录页，设置只提供额度刷新及官方文字链接。此前两套授权的实现描述由本段覆盖。
-
-额度与音量横条沿shared唯一布局、语义和数值更新，两端均采用胶囊轨道/填充（999px、corner-shape:round）并跟随系统强调色。聊天与面试停止按钮共用发送的实心主题色样式，业务取消不变。
-
-`contracts/accountUsage.ts` 是纯展示契约；`chat:account-usage` 仅接受主窗口主frame零参数请求。SelectedChatService/RagChatService委派当前服务的可选accountUsage能力，不以本地token账本代替。Copilot使用现有隔离控制会话的quota.refresh读取官方套餐和额度；读取前后核对同一身份，错误使用固定公开文案，原始SDK错误、提供商身份/账户标识及任意字段不出IPC。
-
-backend/copilot/quota只投影账户快照，忽略准入状态与其他提供商；权威预算可展示比例及已用，参考余额不推算消费、比例或重置。失败/缺失保留null，0/0不判耗尽；AI Credits、请求数、token与未知单位分开，不做货币/token换算。兼容快照的tokenBasedBilling不能单独证明单位为AI Credits。现有本机账本与逐回复统计继续保留，设置页已移除本应用累计计数和重置入口。Renderer以加载代际和查询版本排除旧账户迟到结果，提供刷新和官方用量入口；查询时间字段不在界面展示，数据可能有服务聚合延迟。布局和控件均在shared，两端共用，无原生展示IPC或平台分叉。
-
-## ChatGPT / GitHub Copilot 登录与模型服务
-
-ChatGPTAuthService的本地HTTP回调页由backend/auth/callbackPage纯静态模板生成，main注入共用PNG品牌资源；开发从shared/public读取，安装版从dist读取，不依赖平台原生ICO或外网。页面适配浅深色/窄屏，固定文案区分收到/无效/已使用/不存在，收到授权仅提示返回应用继续验证。请求参数与账户、授权码、令牌不进入HTML；无脚本、表单或外部字体/资源，CSP仅放行样式SHA-256及data图片，响应no-store/no-referrer/nosniff。Host/方法/路径/state/PKCE、回调一次消费与后续身份验证/凭据写入保持原流程。
-
-2026-10-24 恢复 GitHub Copilot，与 ChatGPT 共用登录页面和 AIChatService/RAG/标题队列。main 装配两套授权/模型适配器，通过 SelectedChatService 按成功登录后保存的服务选择路由，不能通过模型 ID 切换账户。service.json 缺失时沿用 ChatGPT；失败登录不覆盖选择。Copilot 公开身份保存在 copilot-session.json，OAuth 令牌仅由固定官方 SDK/原生运行时 1.0.21 的系统凭据库管理，禁止明文同意、环境令牌、gh 认证及任意命令/文件工具。运行时使用独立工作目录，禁用配置发现、技能、文件钩子和会话遥测；只开放已授权网络搜索及有界本地知识工具。SDK 仅允许 backend/copilot 适配器导入。auth:copilot-sign-in 仅接受已登记主窗口或受控测试登录窗口主 frame 的零参数调用；取消/退出释放对应流程。两端品牌按钮均由shared绘制，复用唯一布局和点击逻辑。既有凭据和用户历史保留。
-
-展示与语音恢复：ResponseProgress 在正文首次出现时折叠到“用时”，之后用户可自行展开，不随每个 chunk 重复关闭。系统问题 debounce 就绪状态在生成期间保留，回答完成后按本场状态补交；系统间断清除不完整问题，麦克风间断不影响系统缓冲。浮窗手动清空输入只覆盖当前转写版本，新系统稿到达恢复跟随；非空手动编辑保留。未引入 AEC 或修改原生采样路径。
-
-更新边界：backend/updates/driver.ts 只在 Windows 安装包存在固定 app-update.yml 时加载 electron-updater；service.ts 管理单次检查/下载/安装、版本化状态、错误及释放。IPC 仅主窗口主 frame 的 status/check/download/cancel/install 五操作，拒绝额外字段；公开契约不包含 URL、路径、凭据、发布说明 HTML 或原生下载对象。Renderer 的 services/updates、stores/updates 和 UpdatesPanel 分别负责受控调用、订阅/迟到状态过滤及展示，架构检查限定 updater 只进入更新后台，禁止其访问账户/资料/音频后台。
-
-main 装配面试活动与安装准备回调，开场预检/浮窗期间拒绝安装，installing 期间拒绝新开场。更新安装复用现有关闭请求 ID 与聊天 flush 成功确认，不提前调用 quitAndInstall；取消、失败、超时及安装错误恢复关闭保护，窗口与下载结果保留。autoInstallOnAppQuit 关闭，只有显式点击可安装。NSIS 使用独立 staging 与既有原生依赖复制布局，userData/存储格式/凭据不变。发布与验证边界见 UPDATES.md。
-
-普通聊天最新边界：services/chats.ts负责独立IndexedDB voxcue-preparation-chats v1的state/files事务，preparation store负责恢复、串行合并写入和失败重试。元数据与附件引用原子提交，Blob按ID去重；只回收新聊天库中不再被任何消息/草稿引用的附件。旧原件DB/用户路径不变，不做自动迁移。退出/关闭不删除普通聊天；面试临时会话/归档继续使用原边界。
-
-session:request-close仅向主窗口发送请求ID，Renderer先停止生成并flush本地聊天，以session:close-ready返回ID+成功布尔；主进程校验窗口/frame/字段/当前请求后才关闭，超时或失败保留窗口。事件/调用契约、preload、main、类型及桌面回归同步。未保存个人编辑/生成中仍可默认取消；保存的普通聊天无需清空确认。
-
-profile-preview与可确认profileChanges分离：后台只投影受限的部分字符串/技能正文，无代码求值或原始JSON协议；Renderer显示只读卡片。完整响应仍由原有validateChanges及技能范围及声明来源校验；预览不能确认，停止后迟到事件被请求取消语义过滤，恢复的未完成预览仍只读。
-
-ModelProvider为纯显示元数据，由实际服务适配器附在ChatModel和ChatResult中，现有main/preload类型化返回原样传递，不新增IPC或接受Renderer指定来源。通用UI通过useModelProvider/providers读取当前模型的显示名及资料接收方；缺失时用通用名称，保留旧字符串来源兼容。准备聊天先采用请求模型的来源；面试浮窗未收到来源时保持未知。两者以完成结果校准并逐回复保存，历史来源不会随选中模型变化。OAuth与真实ChatGPT服务错误仍由现有适配器负责，不引入新的提供商注册框架或模型连接。
-
-发送按钮共享send-button样式，32px主题色圆底、20px白色Fluent上箭头；主输入麦克风同为20px图标/32px热区。移除用户指定的设置说明和无引用诊断样式，保留真实错误与恢复入口。
-
-删除与用量重置使用共享原按钮确认控件。ConfirmDeleteButton/ConfirmResetButton 复用相同的三秒确认、Esc/失焦取消、目标版本校验和执行锁；首次点击不调用业务，确认后才调用各自store。UsagePanel继续由chatConnection负责重置生命周期和错误；没有新IPC或完成动画。列表/详情删除保留既有数据边界，只移除独立确认弹窗/顶部提示；侧栏采用更紧凑的确认按钮。
-
-## 个人信息重做（最新）
-
-公开 profile 契约增加可选 language、单份 customInstructions 正文及附来源的 skills；目标岗位退出活跃字段，旧 role 只兼容存储。准备聊天始终提供当前资料及严格结构化 answer/changes；主进程校验字段与总预算，Renderer 只展示通过校验的提案并在明确确认后本机保存。技能新增/改写还要求真实完成的 web_search 与实际来源匹配；摘要变化使技能提案过期。没有 AI 直接存储工具或知识库选择提案。
-
-PersonalInfoPanel 负责默认折叠的资料展示、共用弹窗编辑/取消/保存及侧栏内删除确认；展开/收起采用 details 高度/透明度动画，减少动态效果时跳过。PreparationPage 提供受可用空间约束的分隔栏拖动、双击复位和键盘调整。preparation store 继续负责请求、确认基线、取消、失败恢复和技能更新询问；AI 提案及技能更新提示仅在聊天中展示。手动修改点击保存即确认，无前后对比；旧风格写入 UI 与直接上传替换简历的入口已撤除，原件读取保留。数据格式与恢复约定见 PERSONAL_INFO.md。
-
-共享 Modal 外层负责圆角裁切，dialog-scroll 内层负责长内容滚动并给轨道上下内缩；设置的内部布局保持侧栏与内容分别滚动。浮窗字号按钮沿用同一偏好读写和同步机制，保存失败不改变字号，重试成功只清除该字号错误。
-
-知识库选择独立于 AI 资料，UI 始终发送一个 ID 或 null。RagChatService 限定单库、过滤越界结果并校验文档归属，null/undefined 跳过所有检索和模型访问。SpeechCoordinator 保存主进程确认时深拷贝的资料/选择，本场回答只能使用该副本；interview IPC 拒绝 Renderer 额外覆盖字段。契约、校验、preload 调用方与编译期/桌面回归同步。沿用全部窗口、音频与凭据边界。
-
-准备请求携带 profile 时，knowledgeIntent 在读取知识库前通过同一 AIChatService 判断明确使用意图，选择只是候选范围；无选择不调用该判断。仅对话文字参与判断，不包含资料、附件、知识库内容或工具；使用当前模型最低可用思考强度，最终回答仍使用用户设置。模型返回肯定、可核对的当前用户原文和有界查询后才进入单库RAG；默认/无效决定跳过，取消后无检索/回答写回。ChatGPT/Copilot共用该门槛，面试请求不经过准备意图判断。
-
-MarkdownContent 共用 remark-math/rehype-katex 和本地 KaTeX 字体处理聊天、面试、历史及思考摘要中的公式；渲染前兼容模型常用的反斜杠分隔符，保留代码及复制原文。trust=false、展开/尺寸上限约束数学命令；不启用HTML或远程公式资源。未完成/无效公式保留可读文本且不添加错误悬停提示，独立长公式只在自身容器横向滚动。
-
-统一字号 token 为18/15/14/12px（标题/分区/正文和控件/辅助说明），共享角色规则覆盖全部 Renderer 窗口，不因明暗或窄窗改变字号。浅深主题与窄窗口回归入口见 test:ui:typography。
-
-## 职责与依赖
-
-- shared/src/components：展示和输入；shared/src/stores：界面状态、异步生命周期、取消和跨对话归属；shared/src/services：受控桌面接口适配、本机存储、内部测试实现。
-- shared/electron/main.ts：窗口、权限、服务装配及应用生命周期；shared/electron/ipc：调用窗口校验、白名单路由和请求取消。
-- shared/electron/application/speech.ts：音源自检与面试的串行资源归属、确认配置和锁定；historyTitle.ts：后台标题队列及模型无关的 AI 接口协调。
-- shared/electron/backend/auth：系统浏览器授权和系统加密凭据；backend/chat：账户模型、Responses SSE/JSON、公开摘要、资料提案和本应用用量。
-- shared/electron/application/knowledge.ts 与 rag*.ts：索引生命周期、共享上下文与两种 RAG 编排；backend/knowledge：本地解析、E5、LanceDB、不可变 revision 和原子 catalog，耗时任务在独立 utilityProcess。
-- shared/electron/backend/speech：WASAPI 采集助手、独立 utilityProcess/Worker、本地 ASR/VAD。耗时推理不运行在 Renderer 或主进程。
-- shared/electron/contracts：DesktopAPI、频道和公开类型的唯一来源，只依赖同层纯类型或校验。preload 的运行时仅导入 electron，其他项目引用为 import type。
-
-Renderer 不访问 Node、Electron 原生模块、后台实现、凭据或模型。backend 不反向依赖 application、IPC 或 React。AIChatService 供 IPC 和标题队列使用，不建立全局服务容器。架构检查验证静态边界、运行时循环和主进程/preload 双向频道覆盖。
-
-## 聊天与面试回答
-
-chat:send 的失败结果增加可选 ChatPartialResponse，只含本请求已经收到的公开正文、公开摘要、只读 profilePreview、活动和来源，不包含 profileChanges/私有推理。IPC 在受控发送时累计受限快照，异常时与错误一并返回，解决快响应失败先于排队事件到达 Renderer 时丢失预览的竞争；成功路径仍用最终结果校准。ChatRequestError 保留错误码与快照，preparation store 在失败且未取消时补齐原对话消息，预览保持不可确认，迟到取消不写入。DesktopAPI/preload 沿用同一类型化频道，编译期明确禁止把失败快照当作提案；用户数据库版本/键不变，可选 errorCode 与预览正常持久保存。
-
-来源收集同时处理 SSE output_item.done、注解和终态；只有完成的 web_search_call 才提供检索/打开/页内查找的工具证据。sourceKey 忽略片段和明确白名单追踪参数，不忽略域名、协议、路径或有效查询。最多300个唯一真实来源，避免显示用的旧50项上限影响后续引用验证；同页引用统一采用工具实际URL/标题。多余未匹配引用移除并保留逐项警告供审阅；未声明来源的知识型技能不要求搜索，也不标注来源失败；不能按同域猜测链接或用模型自称联网代替证据。旧资料与来源不批量改写。
-
-准备聊天默认提供搜索工具，ChatGPT 的 tool_choice 使用 auto，Copilot 仅允许受控 web_search/web_fetch；模型按任务决定是否检索，不能声明未执行的搜索。两种服务共用 profileContext，技能可基于已有知识生成。只在技能标题/正文、预览与已保存条目使用 PlainTextContent 隐藏链接，聊天回答保留 Markdown 和真实引用。内部 skillScope 区分整套与指定主题，后台校验摘要依赖及变更范围；字段不进入持久化契约，旧记录可读。
-
-阶段合并复用 contracts/activity.ts：若新旧状态之间没有公开 reasoning 文本，删除旧空状态并追加最新状态；实际工具和公开说明保留。有公开思考内容才保留前一阶段。迟到完成事件不复活已替换状态；当前阶段与当前标题共用滑过高亮，结束/停止关闭，减少动画偏好同时生效。公开思考不设置语言要求，缺少摘要的提示文案移除“可以继续聊天。”，聊天权限行为保持。
-
-准备聊天通过 preparation store → chat service → preload → chat IPC → AIChatService.stream；面试回答通过 interview store → speech service → interview IPC → 同一 AI 接口。本轮新授权接入 RagChatService，唯一 Local RAG 在既有 AIChatService 之前检索本地证据；自定义知识库工具循环已删除。记录标题继续使用原始 Provider，不读取知识库。详情见 RAG_ARCHITECTURE.md。
-
-请求保留 ID、取消语义和公开进度。事件只更新发起对话，切页/新建/切换对话不取消后台回答；显式停止、删除该对话、退出或关闭释放资源。最终正文和公开摘要校准流式事件。服务失败显示错误，不静默转为 Mock；不转发私有 reasoning/encrypted_content。
-
-Responses 不再使用三分钟总时限。backend/chat/responses.ts 分别限制等待 HTTP 响应头和流静默五分钟，任何收到的数据（含 SSE 心跳）重置静默计时；持续有数据的思考/搜索不因总时长被取消。显式取消仍立即生效，静默与响应头超时有独立错误码，不把它们统一显示为网络故障。已有工具轮数/调用预算保持。合成八分钟活跃流验证客户端行为，不代表真实服务一定持续返回或不会断开。
-
-contracts/activity.ts 的 ChatActivity/mergeActivityLog 在后台和 Renderer 共用纯类型/合并规则，最多保留100条有稳定ID的公开记录；工具/摘要沿用服务端 item/part ID，阶段使用请求内顺序 ID。web_search_call 记录搜索词、读取和页内查找，状态更新补全同一动作而不覆盖已收到的细节；链接仅 HTTP(S)，剔除查询/片段和凭据。明确 phase=commentary 的公开消息单独作为活动，不混入结构化 answer/changes；普通私有 reasoning 事件仅表示正在思考。SSE/完整 JSON 的最终结果均校准公开摘要/活动，reasoning.summary 继续请求 auto。没有服务端动作时不构造步骤或命令。
-
-preparation store 记录每次准备回复的 startedAt/durationMs，成功/失败/停止均固定最终用时；ResponseProgress 负责每秒显示、时间下方分隔线及逐行公开活动。字段作为可选消息元数据沿用 voxcue-preparation-chats v1 保存，无数据库升级/迁移，旧聊天没有用时就不补造。恢复中的未完成回复沿用已保存用时并标为停止，不计入应用关闭期间。取消及跨对话事件归属保持原规则。
-
-ChatActivity 的 status/reasoning 两类记录用于准备聊天的时间线：主进程按真实事件切换阶段生成请求内顺序 ID，ReasoningSummary.entries 只投影有稳定 item/part ID 的公开文本，逐次更新原行；终态补齐同一 ID，不把旧标题挪到新状态后。完整 JSON 按 output 顺序生成 item added/done 与内容事件，与 SSE 共用相同处理链；私有推理内容不会进入活动契约。旧扁平 reasoningSummary 继续提供给其他既有调用方和旧聊天的显示降级，新版不猜测旧记录中缺失的状态顺序。所有记录仍在既有100项公开活动预算内，无额外账户调用。
-
-services/responseProgress.ts 仅从公开 Markdown 标题/独立粗体行提取主标题，代码块不参与。ResponseProgress 每个标题独立默认折叠，没有“推理摘要”通用按钮；无标题正文直接显示，不生成标题。原生 details 保留键盘操作，Fluent 细折线箭头在文字后保留布局空间，只在悬停/聚焦时出现，展开后旋转。当前思考标题的文字滑过高亮在结束/停止后关闭，prefers-reduced-motion 禁用动画。公开摘要不设置语言偏好，直接展示服务原文；不增加翻译调用，正文仍遵循已有问题和个人指令。
-
-PreparationPage 通过 useLayoutEffect 和 textarea 宽度 ResizeObserver，在用户输入、语音回填、草稿/对话恢复及窄窗折行后按当前实际行高重算高度。高度最小2行、最大11行，超过后内部滚动，缩短则收回；只修改准备聊天输入框，不影响发送/IME/语音/附件生命周期。
-
-资料按钮的 applied/dismissed 状态随后续请求历史发送本机操作说明，AI 以当前已保存 profile 为准。聊天文字不执行保存；模型结合上下文解释简短同意或拒绝，摘要未保存时先提示卡片确认。已保存摘要齐全后可生成整套技能，指定主题可单独生成，普通聊天不受阻塞。
-
-准备聊天及附件按对话在本机持久保存，未发送初始草稿离开时生成可找回的草稿对话，关闭后恢复。失败/停止只允许重试当前对话的最后回答，复用原问题/附件，不重复用户消息、不覆盖当前输入草稿。面试 AI 独立取消，不停止采集；Answer 的可选 status/error 字段兼容旧记录，不迁移存储。迟到事件及完成结果均检查取消状态。
-
-个人信息面板保留编辑草稿与保存基线；外部已确认提案更新后阻止旧稿覆盖，必须载入新资料再编辑。自定义指令为单份正文，AI 整理后等待提案确认；当前本地已移除旧回答风格状态、读取和提示词模块，不清理真实旧风格键。
-
-面试 IPC 对完整问题、模型与思考强度进行运行时校验，并核对主进程保存的开场配置。模型、设备和 effort 开场锁定；自动回答是可变的运行时选项。未知请求字段拒绝进入 AI 服务。
-
-application/interviewContext.ts 在主进程维护本场原生终稿、已校验提交问题及完成的AI建议。main 仅将面试所属 SpeechHost 事件送入上下文；Renderer 不能提交或伪造麦克风上下文。按时间记录面试官/面试者、提交问题的前序ID、AI建议和转写间断，AI建议不视作实际口述。最近120条/约64KB、每条最多6000字，省略条数明确；无额外模型总结、凭据或磁盘读写。重载/暂停保留，关闭/新场清空。IPC 在生成前拍快照、成功且未取消后保存建议，迟到/失败/不完整结果不写入；RAG 只对可信指代追问派生有界本地主题查询，生成问题与历史不变。
-
-当前共享 0.3.1 的面试主提示词由 interviewInstructions 在主进程统一提供：第一人称、专业且有逻辑的自然口语，先回应问题，再讲理由和做法；不反问、索要资料或请求确认，含糊指代结合上下文理解，只有未知条件影响结论时才简短说明假设。知识库无相关内容仍依据通用专业知识回答；个人经历以确认资料和实际发言为准，不把通用方案当成真实经历，也不把资料缺失说成面试者没做过或答不上来。默认口述约60–90秒，明确时长、篇幅或格式要求优先，肯定/致谢/收尾简短回应。代码保留语言、换行和缩进，沿用既有MarkdownContent渲染与复制；AI建议不当作实际发言，缺失转写不补造。interview IPC 第2组追加本场资料、回答语言和补充要求，补充要求不能覆盖直接作答及个人事实依据规则；截图局部不清但题意可判断时继续回答，不猜测不可见内容。仅截图模式仍不附资料/历史/RAG。第3组RAG规则按需采用相关资料，未命中继续用通用专业知识回答，保留个人事实、引用格式和完整条目边界；自定义知识库 Function Calling 已退役，设置中的知识库分类已删除，原生网络搜索保持。检索流程、预算、取消及实际服务故障保护保持，详见 RAG_ARCHITECTURE.md；准备聊天保持独立指令。已发布0.3.0不包含这些0.3.1提示词修改。
-
-准备聊天第4组主提示词在 shared/src/stores/preparation.ts，当前本地版本直接处理用户问题，信息不足先完成可确定部分，关键缺失影响结果时才简短询问；个人事实与示例/建议分开，网络来源真实引用，资料修改需确认保存，待确认提案不阻塞聊天。准备聊天按精简确认稿使用附件/网页/引用数据，不再拼接执行已保存自定义指令，字段保留供资料编辑；后台第5组资料提案协议保持；已弃用的第6组回答风格不再参与请求。第7组欢迎页自我介绍/项目经历按钮按进一步确认稿发送完整请求，未知个人事实明确占位或待补充，区分个人与团队成果；上传简历和补充缺失摘要限制更新范围，仅追加草稿，保留附件及手动发送/逐次确认。技能意图交由同一次模型请求结合上下文理解，不使用语言关键词筛选；显式首页技能任务保持摘要前置校验。搜索默认可用、调用由模型选择；旧聊天 webSearch 快照仅兼容读取，不再作为界面偏好。模型/effort 和保存/取消保护保持，不将准备聊天的澄清规则追加到面试浮窗。第8组 historyTitle.ts 按确认提示词生成一到两个主要主题的短标题，通常10–20字、最多30字，简单主题可更短，无明确主题时回退“面试记录”；这些是提示词要求，既有代码输出上限及任务生命周期保持。
-
-FloatingInterview在每个回答前直接展示已提交问题气泡；全软件去除原生title属性和按钮浮动文字，保留Modal可见标题、aria-label与焦点样式。contracts/interviewLayout为无原生依赖的共用几何工具，定义默认420×500转写、600×500回答及固定工具栏/下方透明提示空间。仅面板尺寸按比例改变，字体、控件、间距保持固定，浏览器通过视口CSS计算直接重排以展示更多内容，不使用整体transform或逐帧React状态更新。main以工具栏中心和顶部为锚点，按底角到锚点的向量投影计算尺寸，左右对称、向下扩缩；碰到工作区边缘限制扩展，不移走工具栏。相同指针位置直接跳过，原生DPI取整也不能触发重复setBounds。Renderer按帧合并最新指针意图，最多一个resize调用在途，结束先冲刷再释放；拖动期间暂时关闭面板backdrop-filter，结束恢复。左侧Expand图标，右侧水平镜像，手柄始终位于可见面板底角。Windows浮窗不使用原生整窗阴影，各可见组件保留对称局部阴影。新增只接受boolean的interview:transcript，由面试主frame调用、主进程保存可见性并收窄/恢复原生窗口，interview:state同步transcriptVisible，重载/收起保持；main/preload/DesktopAPI和编译/运行测试同步。
-
-floating-notices位于面板下方独立预留区域，显示“此窗口未隐藏”或异常时不挤压/移动面板，长提示在此区域内滚动。interview store以speechWarnings按音源保存间断提示，同源健康activity或新有效segment清除，discontinuity终稿不视作恢复；speechError与回答error分开，running只清除语音错误。截图保护提示依据既有主进程返回状态显示，开启后消失，没有扩大保护能力或迁移数据。开场只读确认的知识库独占一行，音频设备与模型/effort分别成对并排。
-
-面试输入区仅保留显式截图按钮，interview:screenshot受控IPC提供capture/remove/clear/archive四种操作，校验面试主frame及字段白名单。主进程暂存最多五张原图，捕获串行并可取消；捕获时Renderer只获取不透明ID和长边最多240px的JPEG缩略图，输入框展示可移除缩略图及数量/5。InterviewAnswerRequest只接收question及screenshotIds，不接受Renderer图片、路径、命令或屏幕源ID；ID须唯一、属于本场暂存且最多五个。显式发送先归档本次图片，保存失败保留草稿并阻止模型请求，成功后在对应问题下显示缩略图。发送不再次捕获，自动回答仅文字且不消费待发送图片。无文字的图片请求只使用固定解题指令与原图，不附转写、对话历史、个人资料或RAG。
-
-main向screenshot.ts注入平台可选的captureScreen端口。Windows适配器仅传自有窗口HWND给独立VoxCue.Screenshot.exe，用MonitorFromWindow/GetMonitorInfo及GDI单次取屏，通过有界BGRA stdout返回NativeImage；不依赖显示器顺序，不写图片文件或持续录屏。助手在独立进程采集，执行限时十秒，AbortSignal终止子进程；dev/build和portable复制路径包含该助手。没有原生端口的平台按浮窗所在显示器匹配desktopCapturer screen源；多屏无法匹配时明确报错，不静默选择其他屏幕。原图长边最多3840px、编码最多8MiB，优先PNG，过大转JPEG；权限、十秒期限、AbortSignal及窗口销毁保护保持。截图作为ChatTurn.files通过现有Provider图像接口发送，成功释放相应内存草稿，失败/停止保留供原图重试；移除后的失败回答不能静默重捕获。结束、关闭、重载清空内存暂存并取消在途捕获，迟到图像丢弃。沿用既有截图保护，不临时改变保护或隐藏窗口。
-
-使用Electron捕获的AI面试建窗时异步调用screenshot.ts的准备接口，仅枚举零缩略图屏幕源，不取得或保留截图；未获Mac屏幕权限时跳过，窗口关闭或十秒期限结束后释放监听。Windows原生端口无需准备枚举。实际点击仍重新捕获当前屏幕；原图编码和240px预览复用同一个NativeImage，避免为生成预览再次解码PNG。权限、图像质量与内存草稿的职责保持在原模块内。
-
-0.5.9的backend/interview/images.ts独立管理已发送图片，捕获适配器本身仍不访问磁盘。原始发送字节及缩略图分别保存在userData/interview-images-v1的UUID.image与UUID.preview，串行、临时文件原子写入及失败批次回收；重试按相同ID/字节幂等保存，不重新编码原图。记录仅存Answer.images的ID数组，不存base64或路径；缩略图在记录打开后按ID读取，原图只在点击时通过interview:image读取。该IPC仅接受主窗/面试主frame、有界ID和read/preview/save/remove，save与remove仅主窗可用，面试只读；save经系统保存对话框导出原始字节，Renderer不能指定写入路径或内容，拒绝路径、文件内容及符号链接。删除记录先保存元数据，再清理没有其他记录引用的原图与缩略图；文件读取失败显示明确状态，旧无图记录不迁移。共享InterviewImages将缩略图置于提问气泡内，纯图提问隐藏占位文字，标识在图片下方。查看器标题为“截图”，独立渲染在body弹层，左上标题、右上保存和关闭、图片两侧翻页；初始适应窗口显示，支持左右键翻页、滚轮/触控板锚点缩放与有界拖拽，双击复位；保存仅记录主窗的图标按钮，面试中隐藏并使用透明backdrop。Mac原生材质和控件观察body以覆盖Portal打开/关闭，不遗留遮罩及裁切。缩略图与工具栏都使用shared控件，不进行原生投影。图片不进入后续问题、RAG或TXT导出，TXT仅说明图片数量与应用内查看方式。
-
-聊天与面试共用ResponseProgress，初始等待统一展示新版“正在思考”文字动画，移除旧圆点。Local RAG将实际检索标记为knowledge/thinking并以同一ID更新开始/完成，不能当作网页读取；真实web_search/open_page仍使用实际服务活动。公开思考、活动与用时位于response-progress底部分割线上方，正文之后自动折叠且可重新展开；不显示私有推理，不伪造实际工具步骤。面试复用已有公开摘要/活动字段，不改变历史数据格式。
-
-contracts/chat.ts 的 reasoningEfforts 只含 Responses 参数有效值，不包含 Codex 客户端的 Ultra 模式。backend/chat/models.ts 对目录排序、去重并与已知模型官方范围取交集；目录缺失仅对已明确模型族使用官方能力，未知模型保持自动。GPT-6.1-Sol 的最高值为 max，参考 [官方模型文档](https://developers.openai.com/api/docs/models/gpt-6.1-sol)。旧面试设置的无效值读取为自动；参数拒绝仍保留准确错误分类，不自动短间隔重试。
-
-## 本机文档存储
-
-知识库保留创建、重命名、删除、导入/拖放、同名替换和原件管理。个人简历、聊天附件和知识库文档相互独立。IndexedDB 数据库 copilot-local-documents、版本 1、bases/documents stores 及 baseId index 保持不变。这里的 IndexedDB index 仅用于按库读取原件，不承担内容搜索。
-
-导入仅接受 PDF/DOC/DOCX/MD/TXT，扩展白名单由公开纯契约统一提供；选择/拖放发现其他扩展名时整批拒绝，并在导入前提示“不支持的文件格式：文件名”，不保存或覆盖本批原件。既有 PowerPoint/Excel 原件保留且不再自动排入索引。导入先保存原件，再异步提交本地解析/Embedding/索引，上传成功与可检索状态分开。替换先备份旧原件并持久停用旧索引，失败可重试。Renderer 经受控 IPC 与知识库 utilityProcess 通信。旧本机派生数据未删除、读取或迁移，历史记录中的未知附加字段继续原样保存，正文不受影响。
-
-DOC 限 Word 97–2003 OLE 二进制文字，不接受 RTF、HTML 或 DOCX 改后缀。`legacyDocWorker` 使用固定 `word-extractor@1.0.4` 的内部 OLE 入口提取正文、表格文字、正文文本框及脚注/尾注；不执行宏、不读取路径、不落盘，不保留分页或原排版。其 OOXML 依赖 saxes/yauzl 未使用并在安装/打包时排除。读取前校验 CFB 分配链、目录名称/类型/指针/唯一归属/深度及 FIB/CLX/PCD 等元数据，拒绝循环、共享分支、加密及库无法可靠映射的压缩字符；输入上限 20 MiB、文字上限 800 万字符，独立 Worker 限制堆内存并在 15 秒超时后终止。取消传至 Worker 并等待实际 terminate；输出流丢弃，失败保留原件并显示“DOC 解析失败。”。
-
-DOCX 在同一私有输入 Buffer 上先作 ZIP 结构、条目数量和实际解压预检，再交原 Mammoth 流程；仅支持普通单卷 stored/deflate ZIP，拒绝加密与无法安全映射的 ZIP64。最多 4096 项、单项实际输出 32 MiB、累计实际输出 64 MiB，通过 zlib 原生输出上限、实际消费长度及 CRC32 核对，不能只信 ZIP 声明大小。预检不保留全部解压结果，原 800 万字符上限保持，失败显示“DOCX 解析失败。”；这不等于 XML 对象总堆限额，也不把 Mammoth/PDF 解析宣称为可即时中断。
-
-TXT/MD 先按 BOM 或明显字节序特征处理 UTF-8、UTF-16LE/BE；严格 UTF-8 失败后，用固定 `chardet@2.1.1` 分析最多前 64 KiB，仅接受高置信度且与第二候选差距足够的 GB18030/GBK、Big5、Windows-1252，再对完整文件严格解码、校验文字与长度。无标记短文本有歧义时明确提示转 UTF-8，不静默猜测。PDF 保持文字提取，无可提取文字时提示可能为扫描件，不接 OCR。
-
-单批最多 20 文件、单文件 20 MiB；原件导入串行互斥，Renderer 索引队列只保存任务元数据并在轮到任务时读取字节。后台协调最多保留两个导入请求、合计 40 MiB，超额在排队/解析前拒绝。取消只请求终止，必须等 utility 的最终响应或实际退出才释放该任务和字节预算；取消后的成功与进度均丢弃，消息完成清理输入引用。旧进程退出未确认时不启动替代进程；关闭、模型卸载和等待替代初始化分别有 20 秒、50 秒和 10 秒的明确失败上限，未确认工作仍保留预算。既有请求归属、索引版本和检索策略保持。
-
-导入错误归属当前知识库视图，关闭/切换或手动关闭提示后清除；旧请求和排队扫描的迟到错误不得重新显示。本批不支持文件按名称去重汇总，后续批次替换旧提示。顶部提示的关闭按钮复用搜索清除样式并与多行文字整块居中；关闭提示不删除文档或真实索引失败状态。
-
-## 语音与权限
-
-设置 → 面试设置管理下场输入方式、设备、模型和 effort。开始弹窗可选择远程/仅转录并预检，主进程开始前再检查一次；仅转录时系统设置置灰并给出原因。远程系统音频进入问题缓冲、麦克风作面试者上下文；仅转录麦克风逐句进入草稿并复用自动发送。远程开场可明确不使用麦克风而跳过其权限；本场方式切换/首次补开来源先预检，后续同设备软静音不重复探测。仅转录开场必须启用麦克风；不自动替换失效设备。
-
-SpeechCoordinator 保留确认副本；开场音源自检不能抢占已确认面试，准备聊天不再提供语音输入。重载先同步保存已接收文字、释放旧服务，再使用本场配置自动开始。正常结束等待尾段；音频不保存、不上传。麦克风测试离开设置/分类或换设备时停止。
-
-Windows 权限通过 getMediaAccessStatus 与 WASAPI 无采样初始化检查；check 在 Start/读取缓冲前返回并释放。隐私入口仅接受固定 ms-settings:privacy-microphone，不暴露任意 URL/命令。原生 helper 由 build:audio 构建，模型开发目录 local-models/speech，包内 resources/models/speech。
-
-语音固定为 Paraformer 中英 INT8 CPU，公开 SpeechOptions 仅含来源及音频设备，拒绝未知字段。旧设置不再读取或保存已撤除的 ASR/计算设备选择；无磁盘数据迁移。主进程、preload 和 Renderer 不加载原生推理。
-
-backend/speech/models.ts 保留 Paraformer 固定文件列表和分块 SHA-256 校验；engine.ts/worker.ts 在独立 Worker 完成实时识别、Silero VAD、重采样与尾段冲刷。控制器继续串行停启、等待尾段、过滤旧 Worker 事件、保护两秒 PCM 队列；关闭释放 utilityProcess/Worker。面试结束期间尾段只归档，不触发新 AI 回答。
-
-本次撤除 Qwen 专用 Worker/子进程/CUDA 库、动态模型目录和性能实验入口。包内语音模型按 Paraformer 文件白名单复制；清空旧编译/便携输出后重建，防止废弃 JavaScript/DLL/权重残留。sherpa 原生 CPU 依赖及当前知识库 E5/LanceDB 仍实际使用，保留。
-
-原生助手保留 Windows 的 DATA_DISCONTINUITY 标记，不按位置跳跃自行判定丢帧。单次间断经公开 gap 事件提示，Worker reset受影响通道；旧尾段 reason=discontinuity 标记不完整，排除自动问题、模型事实和标题，导出保留标记。同一路10秒5次间断或积压/模型/设备故障仍停止。依据 [微软缓冲标记说明](https://learn.microsoft.com/en-us/windows/win32/api/audioclient/ne-audioclient-_audclnt_bufferflags)，不把一次流状态切换等同于永久故障。epoch/Worker身份和启动尝试编号阻止旧回调影响新采集。
-
-## 记录、窗口与凭据
-
-记录使用既有 copilot-interview-history-v1，关闭前同步归档。主窗口通过 storage/focus 刷新；结束后标题任务由主进程排队，关闭浮窗不取消，退出登录/应用取消。标题只取面试官转录与已提交问题，不读取麦克风回答或本地资料；失败可重试，删除不复活。导出通过主窗口受限 IPC 和原生 TXT 保存弹窗。
-
-手动重命名通过 history store → 既有本机存储服务完成，校验 1–80 字单行标题，始终读取最新记录并仅修改标题相关字段，保存失败保留原标题与输入。可选 titleSource 标记 manual/generated，旧记录无该字段仍兼容；不迁移或批量改写数据。手动保存设置 ready，自动标题成功/失败及迟到归档都不能覆盖手动标题；再次重命名仍可用，已删除记录不复活。列表按标题筛选，开始/结束日期选项按最新要求移除。
-
-共享 userData.ts 在 session/窗口创建前将旧 ai-interview-copilot 数据根原子重命名为 VoxCue，成功后旧路径消失；新旧目录均有内容、目录重定向或旧进程仍占用时停止。main 同时设置 userData/sessionData 为新根，测试覆盖根直接绕过真实迁移。所有原存储键及内部布局保持。登录为独立窗口、系统浏览器授权；凭据仅主进程管理并系统加密，刷新串行保存轮换令牌。保护继续使用既有 Electron setContentProtection，不扩大范围或保证所有软件遵守。浮窗固定置顶、收起/展开、缩放与结束确认保持现状。
-
-session:state沿用受控布尔IPC，仅主窗口主frame报告生成中、保存错误或未保存编辑，不传正文/附件/资料。main维护原生关闭确认（默认取消），批准后继续上述flush握手；普通聊天保留。显式退出登录先保存，再沿用登录窗口切换，避免重复确认。不改变userData、OAuth和既有存储键。
-
-systemAccent hook 复用既有受控系统强调色 IPC，新增 copilot-accent-color-v1 本机外观偏好（system 或六种固定 HEX 白名单），缺失/未知值默认 system，不迁移旧设置。系统事件始终更新最近系统色，自选模式使用所选色；storage 及同窗口事件同步三个 Renderer。主题明暗变化只重新校准可读文字色，原始选定色仍用于选择背景/状态点。设置保存成功后才广播，失败明确展示；不需要新增 IPC 或访问系统设置。按最新反馈删除常规页聊天快捷说明/按钮及其回调，保留现有输入框/个人信息入口。
-
-## 构建与验证
-
-基础检查：pnpm check:architecture、pnpm typecheck、pnpm test、pnpm build。相关桌面 smoke 使用独立 userData。pnpm package:portable 只打包当前运行依赖、语音/RAG 模型和 WASAPI 助手；源码清理后先清除旧输出再构建，避免 TypeScript 留下已删除模块的 JS。
-
-新电脑/全部多屏 DPI、真人长句和技术词准确率、物理热插拔/权限撤销、真实账户公开摘要和标题质量仍未完整验收。合成端口测试不能替代这些验收。
-
-## Mac 免费更新适配
-
-`DesktopPlatform.updateDriverFile` 由可信平台策略选择，仅安装版主进程动态装配 `macos/electron/updates/driver`，不引入另一平台输出。共享 UpdateService 继续负责状态、面试保护与保存握手。Mac 复用固定 GitHub 分页选版及清单投影，再由 pinned Ed25519 公钥认证清单、流式下载/校验 SHA512；实际安装时临时 loopback feed 仅提供该 ZIP 给 `VoxCue.Updater.node`。Sparkle 内部进行归档 Ed25519 校验、替换和重启。Renderer/preload 无新增 URL、路径、密钥或安装命令接口。Mac 更新模块遵守与共享更新后台相同的凭据/聊天/音频/模型隔离检查。Windows 仍使用原 electron-updater。
-
-## 共用界面细节
-
-确认删除在同一按钮内按内容展开，保持二次操作、Esc/失焦/超时取消与失败重试。图标在收起/展开时保持同一尺寸；滚动裁切由共同DOM/CSS负责，不再向原生控件发送几何或切换绘制层。
-
-面试设置固定顶部由共享Modal测量标题高度及正文覆盖量，正文可以滚入顶部后方；材质随覆盖量渐显，按钮透明度独立。面试设置明确使用透明backdrop，保留模态阻止背景操作。
-
-截图查看器的翻页圆形按钮和胶囊页码覆盖图片，记录保存与关闭同为36px区域/17px图标，保存默认无底板、悬停或键盘聚焦显示。像素滚动（含两指惯性）只平移图片，Ctrl+滚轮/捏合及行页滚轮缩放，边界/拖拽/双击复位共用；不猜测硬件型号。缩略图/原图与记录ID/保存权限仍由现有业务契约控制，界面退役没有扩大文件或截图访问能力。
-
-## 0.5.9 固定子进程的打包执行路径
-
-Copilot主进程适配器通过`copilotRuntimeConnection()`核对固定1.0.21平台包，并以官方`RuntimeConnection.forStdio`选择`app.asar.unpacked`下真实可执行文件；不让SDK自动对ASAR虚拟路径chmod，也不使用环境指定的其他CLI。邻接runtime.node和资源随本平台包保留。Codex仍由既有`unpackedUsagePath()`处理固定0.164.0别名路径。两者不扩展到Renderer、不改SDK或凭据模式。最终包新增隔离ASAR握手探针，Windows依赖复制/包级断言和实际启动须其本机完成。
-
-## 本地账户与独立资料导出
-
-登录、主窗口和设置通过`session:local-mode`受控IPC切换本地账户，公开状态只增加`localMode`标志，云用户仍为null。`backend/localMode.ts`只保存非凭据偏好，原子提交后才生效，重启/重新激活直接进入本地账户，不请求账号服务器；它与测试demo、AI授权及云端身份分离。正常账号登录后撤销本地账户，云同步仍须真实账号及既有资料归属校验。切换只允许指定窗口主frame，串行处理，返回登录先确认/保存，跨模式撤销正在导出的归档。
-
-`AccountExportPanel`与`AccountDeletionPanel`独立，设置中位于云同步之后、注销之前；本地账户隐藏云端操作和注销，仅保留信息行右侧登录按钮与导出入口；登录按钮复用已有保存/退出保护后打开初始登录窗口，设置内不再包含登录表单。取消导出不产生状态提示。`accountExport`使用原受控`account:data`分块归档，本地账户以窗口加local为任务归属、不请求云端，并检查已知尚未恢复资料；账号模式继续校验云端完整性与归属。账号注销实际保留规则不变，仅移除用户指定的两句弹窗说明。
+验证按变更执行类型、架构、相关单测、共享构建及定向界面回归；计算逻辑使用固定合成夹具对比。GUI/原生仅在当前 UID 已登录且解锁的桌面串行执行，使用明确启用的隔离入口并禁止普通 UI 夹具调用正式凭据助手。临时 profile/数据库/截图清理，测试结果只在终端和对话显示。命令和具体入口见 [测试说明](../test/README.md)。

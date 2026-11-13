@@ -2,7 +2,7 @@ import { safeStorage, app } from 'electron';
 import { mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import { atomicFile } from '../atomicFile';
+import { atomicFile, preserveEncryptedFile } from '../atomicFile';
 import type { CredentialRecord, AuthStorage } from './service';
 export interface CredentialEncryption {
   encrypt(value: string): Buffer | Promise<Buffer>;
@@ -11,7 +11,7 @@ export interface CredentialEncryption {
 export function createAuthStorage(
   credentialEncryptionLabel = '系统凭据加密',
   encryption?: CredentialEncryption,
-): AuthStorage {
+) {
   const usesElectronEncryption = !encryption;
   encryption ??= {
     encrypt(value) {
@@ -27,6 +27,7 @@ export function createAuthStorage(
   };
   const directory = path.join(app.getPath('userData'), 'auth-data');
   const credentials = path.join(directory, 'credentials.bin');
+  let unreadable = false;
   async function atomicWrite(target: string, value: string | Buffer) {
     await mkdir(directory, { recursive: true });
     await atomicFile(target, value);
@@ -47,26 +48,53 @@ export function createAuthStorage(
       await atomicWrite(file, value);
       return value;
     },
-    async read() {
+    async read(decrypt: (value: Buffer) => string | Promise<string> = encryption.decrypt) {
       let value: Buffer;
       try {
         value = await readFile(credentials);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
+        unreadable = true;
         throw error;
       }
-      const record = JSON.parse(await encryption.decrypt(value)) as CredentialRecord;
-      if (
-        record.version !== 1 ||
-        !record.clientId?.startsWith('oaiapp_') ||
-        !record.subject ||
-        !record.hostId
-      )
-        throw new Error('本地登录信息无效，请检查应用数据。');
-      return record;
+      try {
+        const record = JSON.parse(await decrypt(value)) as CredentialRecord;
+        if (
+          !record ||
+          typeof record !== 'object' ||
+          Array.isArray(record) ||
+          record.version !== 1 ||
+          typeof record.clientId !== 'string' ||
+          !record.clientId.startsWith('oaiapp_') ||
+          typeof record.subject !== 'string' ||
+          !record.subject ||
+          typeof record.hostId !== 'string' ||
+          !record.hostId ||
+          typeof record.name !== 'string' ||
+          typeof record.email !== 'string' ||
+          !Number.isFinite(record.expiresAt) ||
+          record.expiresAt < 0 ||
+          (record.accessExpiresAt !== undefined && !Number.isFinite(record.accessExpiresAt)) ||
+          [record.idToken, record.accessToken, record.refreshToken].some(
+            (value) => value !== undefined && (typeof value !== 'string' || !value),
+          ) ||
+          (record.grantedScopes !== undefined &&
+            (!Array.isArray(record.grantedScopes) ||
+              record.grantedScopes.some((value) => typeof value !== 'string')))
+        )
+          throw new Error('本地登录信息无效，请检查应用数据。');
+        unreadable = false;
+        return record;
+      } catch (error) {
+        unreadable = true;
+        throw error;
+      }
     },
     async write(record) {
-      await atomicWrite(credentials, await encryption.encrypt(JSON.stringify(record)));
+      const encrypted = await encryption.encrypt(JSON.stringify(record));
+      if (unreadable) await preserveEncryptedFile(credentials);
+      await atomicWrite(credentials, encrypted);
+      unreadable = false;
     },
-  };
+  } satisfies AuthStorage;
 }

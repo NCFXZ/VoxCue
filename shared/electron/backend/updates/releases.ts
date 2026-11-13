@@ -1,5 +1,5 @@
 export type ReleaseTarget = 'windows-x64' | 'macos-arm64';
-export const releaseRepository = 'NCFXZ/VoxCue-releases';
+export const releaseRepository = 'NCFXZ/VoxCue';
 export const releasePageSize = 100;
 export const releasePageLimit = 10;
 export const manifestByteLimit = 128 * 1024;

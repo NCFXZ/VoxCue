@@ -26,6 +26,7 @@ export interface CloudVault {
   read(): Promise<unknown>;
   write(value: { origin: string; credentials: CloudCredentials }): Promise<void>;
   clear(): Promise<void>;
+  preserve?(): Promise<void>;
 }
 export class CloudFailure extends Error {
   constructor(
@@ -94,6 +95,12 @@ function credentials(value: unknown): CloudCredentials {
     expiresAt: row.expiresAt as number,
     refreshExpiresAt: row.refreshExpiresAt as number,
   };
+}
+/** Validate saved bytes locally; expiry and server authentication are separate. */
+export function storedCloudCredentials(value: unknown, origin: string): CloudCredentials {
+  const envelope = record(value);
+  if (envelope.origin !== origin) throw new Failure('账号服务地址已变更。');
+  return credentials(envelope.credentials);
 }
 export function cloudOrigin(raw: string | undefined, allowLocal = false): string | undefined {
   if (!raw) return;
@@ -215,13 +222,13 @@ export class CloudAccountClient {
   private async load() {
     if (this.initialized) return;
     const saved = await this.options.vault.read();
-    if (saved) {
+    if (saved !== null && saved !== undefined) {
       try {
-        const envelope = record(saved);
-        if (envelope.origin !== this.options.origin) throw new Failure('账号服务地址已变更。');
-        this.current = credentials(envelope.credentials);
+        this.current = storedCloudCredentials(saved, this.options.origin!);
       } catch {
-        await this.options.vault.clear();
+        // A different historical key or damaged record must remain recoverable.
+        // Only an explicit login flow below may replace it after preserving it.
+        throw new Failure('本地登录资料无法读取，请重新登录；原资料保持不变。');
       }
     }
     this.initialized = true;
@@ -475,8 +482,16 @@ export class CloudAccountClient {
         };
       }
       if (!this.options.origin) return { ok: true, state: this.state() };
-      await this.load();
       const action = call.action;
+      try {
+        await this.load();
+      } catch (error) {
+        if (!['code', 'login', 'register', 'reset'].includes(String(action))) throw error;
+        await this.options.vault.preserve?.();
+        this.current = null;
+        this.verified = false;
+        this.initialized = true;
+      }
       if (action === 'status') {
         if (this.current) {
           this.verified = false;

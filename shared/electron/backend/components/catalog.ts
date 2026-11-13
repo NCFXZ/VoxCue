@@ -17,12 +17,7 @@ export interface ComponentPackage extends ComponentArchive {
   target: string;
   label: string;
   version: string;
-  tag: string;
-  asset: string;
-  bytes: number;
-  sha256: string;
   directory: string;
-  files: { path: string; bytes: number; sha256: string; mode: number }[];
   parts?: ComponentArchive[];
   previous?: { package: ComponentPackage; preserve?: true }[];
 }

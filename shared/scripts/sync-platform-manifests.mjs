@@ -124,6 +124,8 @@ if (process.argv.includes('--check')) {
     'PROGRESS.md',
     'README.md',
     'README.en.md',
+    'LICENSE',
+    'THIRD_PARTY_NOTICES.md',
     'package.json',
     'pnpm-workspace.yaml',
   ]);

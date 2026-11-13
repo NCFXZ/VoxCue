@@ -1,3 +1,13 @@
+## 当前发行源与开源许可
+
+源码按根 LICENSE 的 AGPL-3.0-only 授权，当前更新与组件来源统一为 [NCFXZ/VoxCue Releases](https://github.com/NCFXZ/VoxCue/releases)，客户端匿名读取公开元数据和资产。关于页的“GitHub 仓库”指向源码仓库。模型和独立运行时保留原归档及许可证，不改为 AGPL。
+
+换仓保留固定公钥、签名、摘要和本平台完整稳定资产选择；Mac 清单签名不绑定下载仓库，可复制原资产而不重签。已有旧版的地址写在其二进制内，仍使用旧 VoxCue-releases；旧仓与旧发行继续保留，后续需经正常版本升级或手动安装取得新源。仅提交新源码不会改变已安装程序。
+
+Mac 打包将根 LICENSE、THIRD_PARTY_NOTICES.md 与既有 Sparkle 许可一起保留在 resources/licenses。Windows 专属更新配置校验、打包源和许可证携带仍需 Windows 本机同步，本轮保持 Windows 全树只读。
+
+以下版本日期、旧仓链接和“私有源码”说明属于历史记录，不是当前仓库权限或新的发布授权。当前发布资产以线上完整列表和根 PROGRESS.md 为准，不能以旧候选替代正式验证包。
+
 ## 1.2.0 Windows 更新认证
 
 Windows 独立 Ed25519 清单签名、公钥 ASAR 归属、缓存／安装重新认证及同身份备份恢复见 [安全加固](SECURITY_HARDENING.md)和[逐项交接 W01–W03](MACOS_1.2.0_HANDOFF.md#windows-专属已实现mac-仅参考)。本文后续 Windows 缓存流程继续适用，但所有缓存复用必须经过新签名验证。首次从旧客户端升级仍沿用其原有信任链，Ed25519 不替代 Authenticode 发布者身份，也不改变 Mac 既有 Sparkle 身份。

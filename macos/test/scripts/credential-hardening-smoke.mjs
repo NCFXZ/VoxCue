@@ -22,7 +22,20 @@ import { writeCredentialFixtureSource } from './credential-fixture-source.mjs';
 
 if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Apple Silicon required');
-if (process.argv.length !== 2) throw Error('Credential hardening regression accepts no arguments');
+const cleanup = process.argv.includes('--cleanup');
+const fixedV5 = process.argv.includes('--fixed-v5');
+const compatible = fixedV5 || process.argv.includes('--compatible');
+const fixedV4 = process.argv.includes('--fixed-v4');
+if (
+  process.argv
+    .slice(2)
+    .some((arg) => !['--cleanup', '--fixed-v4', '--fixed-v5', '--compatible'].includes(arg)) ||
+  ((fixedV4 || compatible) && !cleanup) ||
+  (fixedV4 && compatible)
+)
+  throw Error(
+    'Use --cleanup --fixed-v5 for current compatible migration; --fixed-v4 verifies the archived revision',
+  );
 const releaseAwake = holdDesktopAwake();
 const directory = await realpath(
   await mkdtemp(path.join(tmpdir(), 'voxcue-credential-hardening-')),
@@ -48,9 +61,30 @@ try {
     'hardened',
     parentIdentifier,
   );
+  const fixtureMigrating = cleanup
+    ? await writeCredentialFixtureSource(directory, 'migrating', parentIdentifier)
+    : undefined;
+  const fixtureStable =
+    cleanup && !compatible ? path.join(directory, 'fixture-CredentialsStable.mm') : undefined;
+  if (fixtureStable)
+    await copyFile(path.join(workspace.platformRoot, 'native/CredentialsStable.mm'), fixtureStable);
+  const fixtureCompatible = compatible
+    ? path.join(directory, 'fixture-CredentialsCompatible.mm')
+    : undefined;
+  if (compatible)
+    await copyFile(
+      path.join(workspace.platformRoot, 'native/CredentialsCompatible.mm'),
+      fixtureCompatible,
+    );
   let fixtureDefinitions = [
     '-DVOXCUE_FIXTURE_LEGACY_SOURCE=' + JSON.stringify(fixtureLegacy),
     '-DVOXCUE_FIXTURE_HARDENED_SOURCE=' + JSON.stringify(fixtureHardened),
+    ...(cleanup
+      ? [
+          '-DVOXCUE_FIXTURE_MIGRATING_SOURCE=' + JSON.stringify(fixtureCompatible ?? fixtureStable),
+          '-DVOXCUE_CREDENTIAL_CLEANUP_SOURCE=' + JSON.stringify(fixtureMigrating),
+        ]
+      : []),
   ];
   const compile = (source, destination, args = []) =>
     run('/usr/bin/xcrun', [
@@ -79,11 +113,26 @@ try {
   const sign = (file, identifier, runtime = true) =>
     signLocalCode(file, signing, identifier, { preserveMetadata: false, runtime });
   const helper = path.join(directory, 'hardened');
-  compile(path.join(workspace.platformRoot, 'test/fixtures/credential-hardening-probe.mm'), helper);
-  sign(helper, 'com.voxcue.credentials.hardened');
+  const helperIdentifier = cleanup
+    ? 'com.voxcue.credentials.migrating'
+    : 'com.voxcue.credentials.hardened';
+  const currentFlags = cleanup ? ['-DVOXCUE_FIXTURE_CLEANUP=1'] : [];
+  compile(
+    path.join(workspace.platformRoot, 'test/fixtures/credential-hardening-probe.mm'),
+    helper,
+    currentFlags,
+  );
+  sign(helper, helperIdentifier);
   const old = path.join(directory, 'legacy');
-  compile(path.join(workspace.platformRoot, 'test/fixtures/credential-probe.mm'), old);
-  sign(old, 'com.voxcue.credentials', false);
+  compile(
+    path.join(
+      workspace.platformRoot,
+      'test/fixtures',
+      cleanup ? 'credential-hardening-probe.mm' : 'credential-probe.mm',
+    ),
+    old,
+  );
+  sign(old, cleanup ? 'com.voxcue.credentials.hardened' : 'com.voxcue.credentials', cleanup);
   const unsafeHelpers = new Map();
   for (const [index, entitlement] of [
     'com.apple.security.cs.allow-dyld-environment-variables',
@@ -99,7 +148,7 @@ try {
     );
     const binary = path.join(directory, 'unsafe-helper-' + index);
     await copyFile(helper, binary);
-    signLocalCode(binary, signing, 'com.voxcue.credentials.hardened', {
+    signLocalCode(binary, signing, helperIdentifier, {
       preserveMetadata: false,
       runtime: true,
       entitlements: policy,
@@ -108,14 +157,18 @@ try {
   }
   const noRuntime = path.join(directory, 'no-runtime-helper');
   await copyFile(helper, noRuntime);
-  sign(noRuntime, 'com.voxcue.credentials.hardened', false);
+  sign(noRuntime, helperIdentifier, false);
   const wrongPin = path.join(directory, 'wrong-pin-helper');
   compile(
     path.join(workspace.platformRoot, 'test/fixtures/credential-hardening-probe.mm'),
     wrongPin,
-    ['-UVOXCUE_SIGNING_SHA1', '-DVOXCUE_SIGNING_SHA1="0000000000000000000000000000000000000000"'],
+    [
+      ...currentFlags,
+      '-UVOXCUE_SIGNING_SHA1',
+      '-DVOXCUE_SIGNING_SHA1="0000000000000000000000000000000000000000"',
+    ],
   );
-  sign(wrongPin, 'com.voxcue.credentials.hardened');
+  sign(wrongPin, helperIdentifier);
   const productionV2 = await realpath(
     path.join(workspace.platformRoot, '.tools/credential-helper-v2/VoxCue.Credentials'),
   );
@@ -126,14 +179,28 @@ try {
   const productionV1Copy = path.join(directory, 'production-v1-denied');
   await copyFile(productionV2, productionV2Copy);
   await copyFile(productionV1, productionV1Copy);
+  const productionFixed =
+    fixedV4 || fixedV5
+      ? await realpath(
+          path.join(
+            workspace.platformRoot,
+            '.tools/credential-helper-v' + (fixedV5 ? '5' : '4') + '/VoxCue.Credentials',
+          ),
+        )
+      : undefined;
+  const productionCopies = [productionV1Copy, productionV2Copy];
+  if (productionFixed) {
+    const copy = path.join(directory, 'production-fixed-denied');
+    await copyFile(productionFixed, copy);
+    productionCopies.push(copy);
+  }
   const candidates = [
     old,
     helper,
     ...unsafeHelpers.values(),
     noRuntime,
     wrongPin,
-    productionV2Copy,
-    productionV1Copy,
+    ...productionCopies,
   ];
   const codeHash = (file) => {
     const hash = run('/usr/bin/codesign', ['-d', '--verbose=4', file]).stderr.match(
@@ -180,14 +247,22 @@ try {
     'runtime',
     spoof,
   ]);
-  const request = (parent, binary, keychain, operation, bytes, fail = false, env = process.env) =>
-    run(
-      parent,
-      [binary, ...(Array.isArray(keychain) ? keychain : [keychain])],
-      JSON.stringify({ operation, data: bytes.toString('base64') }),
-      fail,
-      env,
-    );
+  const request = (parent, binary, keychain, operation, bytes, fail = false, env = process.env) => {
+    const selected = Array.isArray(keychain) ? keychain : [keychain];
+    try {
+      return run(
+        parent,
+        [binary, ...selected],
+        JSON.stringify({ operation, data: bytes.toString('base64') }),
+        fail,
+        env,
+      );
+    } catch (error) {
+      throw Error(
+        `${selected.map((file) => path.basename(file)).join(',')} ${operation}: ${error.message}`,
+      );
+    }
+  };
   const plaintext = Buffer.from('Synthetic credentials for v10 hardening migration');
   const cipher = createCipheriv(
     'aes-128-cbc',
@@ -201,6 +276,14 @@ try {
     /CDHash=(\w+)/,
   )?.[1];
   assert.ok(hash);
+  // SecKeychainCreate fixtures use the legacy database: they do not carry the
+  // OS-owned modern partition layer. Real default-Keychain coverage is in the
+  // final package guest acceptance, including preservation of those records.
+  const applicationRules = (items) =>
+    items.map(
+      (entry) =>
+        entry && entry.filter((rule) => !rule.tags.includes('ACLAuthorizationPartitionID')),
+    );
   for (const mode of [
     'normal',
     'different',
@@ -209,6 +292,7 @@ try {
     'partial',
     'no-partition',
     'cross',
+    ...(cleanup ? ['legacy-only', 'current-only'] : []),
   ]) {
     const keychain = path.join(directory, mode + '.keychain-db');
     run(admin, ['create', keychain]);
@@ -224,11 +308,20 @@ try {
       selectedKeychains = [keychain, secondary];
     }
     const initial = inspect(keychain);
-    if (['normal', 'partial', 'no-partition', 'cross'].includes(mode)) {
-      assert.deepEqual(
-        decoded(request(parents[0], old, keychain, 'decrypt', ciphertext)),
-        plaintext,
-      );
+    const expectedPartition = compatible
+      ? (initial
+          .find(Boolean)
+          ?.filter((rule) => rule.subject === 0x1000c)
+          .flatMap((rule) => rule.partitions) ?? [])
+      : ['cdhash:' + hash];
+    if (
+      ['normal', 'partial', 'no-partition', 'cross', 'legacy-only', 'current-only'].includes(mode)
+    ) {
+      if (!cleanup)
+        assert.deepEqual(
+          decoded(request(parents[0], old, keychain, 'decrypt', ciphertext)),
+          plaintext,
+        );
       if (mode === 'partial') {
         const failed = request(parents[0], helper, keychain, 'encrypt', plaintext, true, {
           ...process.env,
@@ -236,30 +329,62 @@ try {
         });
         assert.notEqual(failed.status, 0);
         assert.equal(failed.stdout, '');
+        if (cleanup) assert.doesNotMatch(failed.stderr, /fixture-item-delete/);
         const halfway = inspect(keychain);
         assert.deepEqual(
           halfway[0].flatMap((rule) => rule.partitions),
-          ['cdhash:' + hash],
+          expectedPartition,
         );
-        assert.deepEqual(halfway.slice(1), initial.slice(1));
+        assert.deepEqual(
+          compatible ? applicationRules(halfway.slice(1)) : halfway.slice(1),
+          compatible ? applicationRules(initial.slice(1)) : initial.slice(1),
+        );
         assert.notEqual(request(parents[0], old, keychain, 'encrypt', plaintext, true).status, 0);
       }
-      assert.deepEqual(
-        decoded(request(parents[0], helper, selectedKeychains, 'decrypt', ciphertext)),
-        plaintext,
+      const migrated = request(parents[0], helper, selectedKeychains, 'decrypt', ciphertext);
+      assert.deepEqual(decoded(migrated), plaintext);
+      assert.equal(
+        (migrated.stderr.match(/fixture-acl-write/g) ?? []).length -
+          (migrated.stderr.match(/fixture-structural-repair/g) ?? []).length,
+        mode === 'partial'
+          ? 2
+          : mode === 'cross'
+            ? 6
+            : mode === 'legacy-only'
+              ? 2
+              : mode === 'current-only'
+                ? 1
+                : 3,
+        'Instrumentation must observe the actual one-time writes for all matching items',
       );
-      for (const entry of inspect(keychain)) {
+      const retained = inspect(keychain);
+      if (cleanup)
+        assert.deepEqual(
+          retained.slice(1),
+          [null, null],
+          'Both exact legacy aliases must be removed',
+        );
+      if (cleanup) {
+        assert.equal(
+          (migrated.stderr.match(/fixture-item-delete/g) ?? []).length,
+          mode === 'cross' ? 4 : mode === 'current-only' ? 0 : 2,
+        );
+        run(admin, ['unrelated', keychain]);
+      }
+      for (const entry of retained.filter(Boolean)) {
         assert.ok(entry);
         const partitions = entry.flatMap((rule) => rule.partitions);
-        assert.deepEqual(partitions, ['cdhash:' + hash]);
+        assert.deepEqual(partitions, expectedPartition);
         for (const rule of entry.filter((rule) => !rule.partitions.length))
           assert.equal(rule.applications, 1);
       }
       if (secondary) {
-        for (const entry of inspect(secondary))
+        const secondaryItems = inspect(secondary);
+        if (cleanup) assert.deepEqual(secondaryItems.slice(1), [null, null]);
+        for (const entry of secondaryItems.filter(Boolean))
           assert.deepEqual(
             entry.flatMap((rule) => rule.partitions),
-            ['cdhash:' + hash],
+            expectedPartition,
           );
         const denied = request(parents[0], old, secondary, 'decrypt', ciphertext, true);
         assert.notEqual(denied.status, 0);
@@ -268,14 +393,29 @@ try {
       const retired = request(parents[0], old, keychain, 'decrypt', ciphertext, true);
       assert.notEqual(retired.status, 0);
       assert.equal(retired.stdout, '');
-      assert.deepEqual(
-        decoded(request(parents[1], helper, keychain, 'decrypt', ciphertext)),
-        plaintext,
-      );
-      assert.deepEqual(
-        decoded(request(parents[1], helper, keychain, 'encrypt', plaintext)),
-        ciphertext,
-      );
+      for (let restart = 0; restart < 4; restart++) {
+        for (const operation of ['decrypt', 'encrypt']) {
+          const reopened = request(
+            parents[restart % 2],
+            helper,
+            selectedKeychains,
+            operation,
+            operation === 'decrypt' ? ciphertext : plaintext,
+          );
+          assert.deepEqual(decoded(reopened), operation === 'decrypt' ? plaintext : ciphertext);
+          assert.doesNotMatch(
+            reopened.stderr,
+            /fixture-acl-write/,
+            'A new process after completed migration must not rewrite any item ACL',
+          );
+          if (cleanup)
+            assert.doesNotMatch(
+              reopened.stderr,
+              /fixture-item-delete/,
+              'Completed cleanup must be idempotent in later processes',
+            );
+        }
+      }
       for (const parent of [...parents.slice(2), spoof]) {
         const denied = request(parent, helper, keychain, 'decrypt', ciphertext, true);
         assert.equal(denied.status, 77);
@@ -288,21 +428,138 @@ try {
       const created = inspect(keychain);
       assert.deepEqual(
         created[0].flatMap((rule) => rule.partitions),
-        ['cdhash:' + hash],
+        expectedPartition,
       );
       for (const rule of created[0].filter((rule) => !rule.partitions.length))
         assert.equal(rule.applications, 1);
-      assert.deepEqual(decoded(request(parents[1], helper, keychain, 'decrypt', fresh)), plaintext);
+      const reopened = request(parents[1], helper, keychain, 'decrypt', fresh);
+      assert.deepEqual(decoded(reopened), plaintext);
+      assert.doesNotMatch(reopened.stderr, /fixture-acl-write/);
       assert.notEqual(request(parents[0], old, keychain, 'decrypt', fresh, true).status, 0);
     } else {
       const denied = request(parents[0], helper, keychain, 'encrypt', plaintext, true);
       assert.notEqual(denied.status, 0);
       assert.equal(denied.stdout, '');
+      if (cleanup) assert.doesNotMatch(denied.stderr, /fixture-item-delete/);
       assert.deepEqual(
-        inspect(keychain),
-        initial,
-        'Failure must not change ACLs or generate/import a password',
+        compatible ? applicationRules(inspect(keychain)) : inspect(keychain),
+        compatible ? applicationRules(initial) : initial,
+        'Failure must not change application authority or generate/import a password',
       );
+    }
+  }
+  if (cleanup) {
+    for (const phase of ['cleanup-0', 'cleanup-1', 'invalid-cipher']) {
+      const keychain = path.join(directory, phase + '.keychain-db');
+      run(admin, ['create', keychain]);
+      keychains.push(keychain);
+      run(admin, ['seed', keychain, old, helper, 'normal']);
+      const brokenCipher = phase === 'invalid-cipher';
+      const failureAt = phase.endsWith('1') ? 1 : 0;
+      const failed = request(
+        parents[0],
+        helper,
+        keychain,
+        'decrypt',
+        brokenCipher ? Buffer.concat([ciphertext, Buffer.of(0)]) : ciphertext,
+        true,
+        brokenCipher
+          ? process.env
+          : { ...process.env, VOXCUE_CREDENTIAL_FAIL_DELETE_AT: String(failureAt) },
+      );
+      assert.notEqual(failed.status, 0);
+      assert.equal(failed.stdout, '');
+      const remaining = inspect(keychain);
+      assert.ok(remaining[0], 'The current retained item must survive every failure');
+      assert.equal(remaining.slice(1).filter(Boolean).length, brokenCipher ? 2 : 2 - failureAt);
+      run(admin, ['unrelated', keychain]);
+      const resumed = request(parents[1], helper, keychain, 'decrypt', ciphertext);
+      assert.deepEqual(decoded(resumed), plaintext);
+      assert.doesNotMatch(resumed.stderr, /fixture-acl-write/);
+      assert.equal(
+        (resumed.stderr.match(/fixture-item-delete/g) ?? []).length,
+        brokenCipher ? 2 : 2 - failureAt,
+      );
+      assert.deepEqual(inspect(keychain).slice(1), [null, null]);
+      run(admin, ['unrelated', keychain]);
+    }
+    const keychain = path.join(directory, 'synthetic.keychain-db');
+    run(admin, ['create', keychain]);
+    keychains.push(keychain);
+    run(admin, ['seed', keychain, old, helper, 'normal']);
+    const fixedParent = path.join(directory, 'bound-parent');
+    compile(source, fixedParent, [
+      '-DVOXCUE_REVISION=3',
+      '-DVOXCUE_FIXTURE_BOUND_HELPER=' + JSON.stringify(helper),
+      '-DVOXCUE_FIXTURE_BOUND_KEYCHAIN=' + JSON.stringify(keychain),
+    ]);
+    sign(fixedParent, parentIdentifier);
+    assert.equal(run(fixedParent, [helper], '{}', true).status, 76);
+    const records = [
+      'synthetic-cloud-session',
+      'synthetic-chatgpt-session',
+      'synthetic-telemetry-proof',
+    ];
+    const files = records.map((_, index) => path.join(directory, 'vault-' + index + '.bin'));
+    const originals = [];
+    for (const [index, record] of records.entries()) {
+      const cipher = createCipheriv(
+        'aes-128-cbc',
+        pbkdf2Sync('synthetic-safe-storage-password', 'saltysalt', 1003, 16, 'sha1'),
+        Buffer.alloc(16, ' '),
+      );
+      const bytes = Buffer.concat([Buffer.from('v10'), cipher.update(record), cipher.final()]);
+      originals.push(bytes);
+      await writeFile(files[index], bytes, { mode: 0o600 });
+    }
+    const childProcess = workspace.platformRequire('node:child_process');
+    const spawn = childProcess.spawn;
+    let active = 0,
+      peak = 0,
+      calls = 0;
+    childProcess.spawn = function (executable, args, options) {
+      assert.equal(executable, fixedParent);
+      assert.deepEqual(args, []);
+      assert.deepEqual(options.env, { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' });
+      active++;
+      calls++;
+      peak = Math.max(peak, active);
+      const child = spawn.call(this, executable, args, options);
+      child.once('close', () => active--);
+      return child;
+    };
+    try {
+      const { createCredentialEncryption } = workspace.platformRequire(
+        path.join(workspace.platformRoot, 'dist-electron/macos/electron/credentials.js'),
+      );
+      const port = createCredentialEncryption(fixedParent);
+      const loaded = await Promise.all(
+        files.map(async (file) => port.decrypt(await readFile(file))),
+      );
+      assert.deepEqual(loaded, records);
+      assert.deepEqual(inspect(keychain).slice(1), [null, null]);
+      for (const [index, file] of files.entries())
+        assert.deepEqual(await readFile(file), originals[index]);
+      const saved = await Promise.all(records.map((record) => port.encrypt(record)));
+      for (const [index, file] of files.entries()) {
+        assert.deepEqual(saved[index], originals[index]);
+        await writeFile(file, saved[index], { mode: 0o600 });
+      }
+      const restarted = createCredentialEncryption(fixedParent);
+      assert.deepEqual(
+        await Promise.all(files.map(async (file) => restarted.decrypt(await readFile(file)))),
+        records,
+      );
+      assert.equal(peak, 1);
+      assert.equal(active, 0);
+      assert.equal(calls, 9);
+      assert.notEqual(request(parents[0], old, keychain, 'decrypt', ciphertext, true).status, 0);
+      run(admin, ['unrelated', keychain]);
+      console.log(
+        'PASS: actual Mac JS port + current native cleanup preserves three legacy vaults, writes identical v10 bytes, serializes helpers and reads again after restart.',
+      );
+    } finally {
+      childProcess.spawn = spawn;
     }
   }
   const invalid = run(helper, [], '{}', true);
@@ -310,7 +567,7 @@ try {
   const guardKeychain = path.join(directory, 'guard.keychain-db');
   run(admin, ['create', guardKeychain]);
   keychains.push(guardKeychain);
-  for (const production of [productionV1Copy, productionV2Copy]) {
+  for (const production of productionCopies) {
     assert.equal(
       run(parents[0], [production, guardKeychain], '{}', true).status,
       77,
@@ -323,8 +580,9 @@ try {
       path.join(workspace.platformRoot, 'test/fixtures/credential-production-parent.mm'),
       positive,
       [
-        '-DVOXCUE_PRODUCTION_HELPER_PATH=' + JSON.stringify(productionV2),
-        '-DVOXCUE_PRODUCTION_HELPER_HASH=' + JSON.stringify(codeHash(productionV2)),
+        '-DVOXCUE_PRODUCTION_HELPER_PATH=' + JSON.stringify(productionFixed ?? productionV2),
+        '-DVOXCUE_PRODUCTION_HELPER_HASH=' +
+          JSON.stringify(codeHash(productionFixed ?? productionV2)),
         '-DVOXCUE_PRODUCTION_EXTRA_ARGUMENT=' + Number(extra),
       ],
     );
@@ -399,6 +657,14 @@ try {
     }).status,
     76,
   );
+  if (cleanup)
+    assert.equal(
+      run(parents[0], [helper, guardKeychain], '{}', true, {
+        ...process.env,
+        VOXCUE_CREDENTIAL_FAIL_DELETE_AT: '1;exec',
+      }).status,
+      76,
+    );
   assert.match(
     run('/usr/bin/csrutil', ['status']).stdout,
     /System Integrity Protection status: enabled/,
@@ -429,8 +695,12 @@ try {
   );
   await assert.rejects(readFile(marker), { code: 'ENOENT' });
   console.log(
-    'PASS: nonce-isolated credential migration fixture; unchanged v10/password, all aliases restricted to new CDHash, old fixture denied, two test-parent revisions, runtime/identity/entitlement and direct DYLD checks, partial retry and fail-closed migration, restricted fresh install. Real v1/v2 helpers reject nonce parents; the fixed formal harness sends only invalid ciphertext/arguments before Keychain access. Synthetic Keychains only.',
+    'PASS: nonce-isolated credential migration fixture; unchanged v10/password, all aliases restricted to the current helper, malformed partition records removed for compatible mode, old fixture denied, two test-parent revisions, runtime/identity/entitlement and direct DYLD checks, partial retry and fail-closed migration, restricted fresh install. Real v1/v2 helpers reject nonce parents; the fixed formal harness sends only invalid ciphertext/arguments before Keychain access. Synthetic Keychains only.',
   );
+  if (cleanup)
+    console.log(
+      'PASS: current helper cleans only validated legacy aliases after v10 roundtrip; retained current key, unrelated items, partial-delete retry, invalid-cipher no-delete, old-v2 denial and repeated new-process reads verified.',
+    );
 } finally {
   try {
     for (const keychain of keychains.reverse()) run(admin, ['delete', keychain]);

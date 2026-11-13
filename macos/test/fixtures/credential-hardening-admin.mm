@@ -5,6 +5,9 @@
 static const char *fixturePassword = "synthetic-keychain-password";
 static const char *services[] = {"VoxCue Credential Storage", "VoxCue Safe Storage", "VoxCue Safe Storage"};
 static const char *accounts[] = {"VoxCue Key", "VoxCue Key", "VoxCue"};
+#ifndef VOXCUE_FIXTURE_VAULT_ACCOUNT
+#define VOXCUE_FIXTURE_VAULT_ACCOUNT "VoxCue Key v6"
+#endif
 static NSString *hex(NSData *data) {
   NSMutableString *text = [NSMutableString string];
   for (NSUInteger index = 0; index < data.length; ++index) [text appendFormat:@"%02x", ((const uint8_t *)data.bytes)[index]];
@@ -25,12 +28,15 @@ int main(int argc, const char **argv) {
     if (argc < 3) return 76;
     NSString *mode = @(argv[1]);
     const bool create = [mode isEqual:@"create"], seed = [mode isEqual:@"seed"];
-    if (!(create || seed || [mode isEqual:@"inspect"] || [mode isEqual:@"delete"]) ||
+    const bool vault = [mode isEqual:@"vault"], plant = [mode isEqual:@"plant"];
+    if (!(create || seed || vault || plant || [mode isEqual:@"inspect"] || [mode isEqual:@"delete"] ||
+          [mode isEqual:@"unrelated"]) ||
         argc != (seed ? 6 : 3) || !ownedFixtureKeychain(argv[2], create)) return 76;
     if (seed && (strcmp(argv[3], VOXCUE_FIXTURE_LEGACY_PATH) ||
         strcmp(argv[4], VOXCUE_FIXTURE_HARDENED_PATH) ||
         !pinnedFixtureHelper(argv[3]) || !pinnedFixtureHelper(argv[4]) ||
-        ![@[@"normal", @"different", @"denied", @"partial", @"no-partition", @"cross"] containsObject:@(argv[5])])) return 76;
+        ![@[@"normal", @"different", @"denied", @"partial", @"no-partition", @"cross",
+            @"legacy-only", @"current-only"] containsObject:@(argv[5])])) return 76;
     SecKeychainSetUserInteractionAllowed(false);
     SecKeychainRef keychain = NULL;
     OSStatus status = [mode isEqual:@"create"]
@@ -39,6 +45,49 @@ int main(int argc, const char **argv) {
     if (status) { fprintf(stderr, "Keychain fixture open/create: %d\n", (int)status); return 2; }
     if ([mode isEqual:@"delete"]) { status = SecKeychainDelete(keychain); CFRelease(keychain); return status ? 3 : 0; }
     if ([mode isEqual:@"create"]) { CFRelease(keychain); return 0; }
+    if ([mode isEqual:@"unrelated"]) {
+      status = SecKeychainFindGenericPassword(keychain, 19, "VoxCue Safe Storage", 9, "Unrelated",
+        NULL, NULL, NULL);
+      CFRelease(keychain); return status ? 12 : 0;
+    }
+    if (plant || vault) {
+      // The v6 own entry: plant a same-name foreign entry, or report its
+      // application rules and whether this unrelated tool can read it.
+      const char *service = "VoxCue Credential Storage", *account = VOXCUE_FIXTURE_VAULT_ACCOUNT;
+      if (plant) {
+        status = SecKeychainAddGenericPassword(keychain, (UInt32)strlen(service), service,
+          (UInt32)strlen(account), account, 17, "synthetic-planted", NULL);
+        CFRelease(keychain); return status ? 14 : 0;
+      }
+      SecKeychainItemRef item = NULL;
+      status = SecKeychainFindGenericPassword(keychain, (UInt32)strlen(service), service,
+        (UInt32)strlen(account), account, NULL, NULL, &item);
+      if (status == errSecItemNotFound) { fputs("null", stdout); CFRelease(keychain); return 0; }
+      if (status) return 15;
+      SecAccessRef access = NULL; CFArrayRef entries = NULL;
+      status = SecKeychainItemCopyAccess(item, &access);
+      if (!status) status = SecAccessCopyACLList(access, &entries);
+      NSMutableArray *rules = [NSMutableArray array];
+      for (CFIndex n = 0; !status && n < CFArrayGetCount(entries); ++n) {
+        SecACLRef entry = (SecACLRef)CFArrayGetValueAtIndex(entries, n);
+        NSArray *tags = CFBridgingRelease(SecACLCopyAuthorizations(entry));
+        CFArrayRef apps = NULL; CFStringRef description = NULL; SecKeychainPromptSelector prompt;
+        status = SecACLCopyContents(entry, &apps, &description, &prompt);
+        if (!status) [rules addObject:@{@"tags":tags, @"applications":@(apps ? CFArrayGetCount(apps) : -1),
+          @"description":description ? (__bridge NSString *)description : @""}];
+        if (apps) CFRelease(apps); if (description) CFRelease(description);
+      }
+      UInt32 length = 0; void *data = NULL;
+      const OSStatus read = SecKeychainItemCopyContent(item, NULL, NULL, &length, &data);
+      if (data) SecKeychainItemFreeContent(NULL, data);
+      if (entries) CFRelease(entries); if (access) CFRelease(access); CFRelease(item);
+      if (status) return 16;
+      NSData *json = [NSJSONSerialization dataWithJSONObject:@{@"rules":rules, @"readable":@(read == errSecSuccess)}
+        options:0 error:nil];
+      fwrite(json.bytes, 1, json.length, stdout);
+      CFRelease(keychain);
+      return 0;
+    }
     if ([mode isEqual:@"seed"]) {
       if (argc != 6) return 4;
       status = SecKeychainUnlock(keychain, (UInt32)strlen(fixturePassword), fixturePassword, true);
@@ -62,6 +111,8 @@ int main(int argc, const char **argv) {
       if (denied) { [applications removeObjectAtIndex:1]; [ids removeObjectAtIndex:1]; }
       NSData *xml = [NSPropertyListSerialization dataWithPropertyList:@{@"Partitions":ids} format:NSPropertyListXMLFormat_v1_0 options:0 error:nil];
       for (size_t index = 0; index < 3; ++index) {
+        if ((index == 0 && strcmp(argv[5], "legacy-only") == 0) ||
+            (index > 0 && strcmp(argv[5], "current-only") == 0)) continue;
         const char *value = index == 2 && strcmp(argv[5], "different") == 0
           ? "synthetic-different-password" : "synthetic-safe-storage-password";
         SecAccessRef access = NULL; CFArrayRef entries = NULL;
@@ -94,6 +145,9 @@ int main(int argc, const char **argv) {
         if (entries) CFRelease(entries); if (access) CFRelease(access);
         if (status) { fprintf(stderr, "Seed authorized ACL: %d\n", (int)status); return 8; }
       }
+      status = SecKeychainAddGenericPassword(keychain, 19, "VoxCue Safe Storage", 9, "Unrelated",
+        15, "synthetic-other", NULL);
+      if (status) return 13;
     } else if ([mode isEqual:@"inspect"]) {
       NSMutableArray *result = [NSMutableArray array];
       for (size_t index = 0; index < 3; ++index) {
@@ -105,6 +159,17 @@ int main(int argc, const char **argv) {
         SecAccessRef access = NULL; CFArrayRef entries = NULL;
         status = SecKeychainItemCopyAccess(item, &access);
         if (!status) status = SecAccessCopyACLList(access, &entries);
+        CSSM_ACL_OWNER_PROTOTYPE_PTR owner = NULL;
+        CSSM_ACL_ENTRY_INFO_PTR raw = NULL; uint32 count = 0;
+        if (!status) status = SecAccessGetOwnerAndACL(access, &owner, &count, &raw);
+        NSMutableArray *subjects = [NSMutableArray array];
+        for (uint32 i = 0; !status && i < count; ++i) {
+          auto &entry = raw[i].EntryPublicInfo;
+          for (uint32 j = 0; j < entry.Authorization.NumberOfAuthTags; ++j)
+            if (entry.Authorization.AuthTags[j] == CSSM_ACL_AUTHORIZATION_PARTITION_ID)
+              [subjects addObject:@(entry.TypedSubject.Head ? entry.TypedSubject.Head->WordID : 0)];
+        }
+        NSUInteger subject = 0;
         NSMutableArray *rules = [NSMutableArray array];
         for (CFIndex n = 0; !status && n < CFArrayGetCount(entries); ++n) {
           SecACLRef entry = (SecACLRef)CFArrayGetValueAtIndex(entries, n);
@@ -112,6 +177,8 @@ int main(int argc, const char **argv) {
           CFArrayRef apps = NULL; CFStringRef description = NULL; SecKeychainPromptSelector prompt;
           status = SecACLCopyContents(entry, &apps, &description, &prompt);
           if (!status) [rules addObject:@{@"tags":tags, @"applications":@(apps ? CFArrayGetCount(apps) : -1),
+            @"subject":[tags containsObject:(__bridge id)kSecACLAuthorizationPartitionID] && subject < subjects.count
+              ? subjects[subject++] : @0,
             @"partitions":[tags containsObject:(__bridge id)kSecACLAuthorizationPartitionID] ? partitions((__bridge NSString *)description) ?: @[] : @[]}];
           if (apps) CFRelease(apps); if (description) CFRelease(description);
         }

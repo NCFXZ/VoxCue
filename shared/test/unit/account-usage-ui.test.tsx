@@ -40,16 +40,18 @@ it('未知额度与读取失败不显示0或耗尽；本地统计/重置已移�
     /<a[^>]+href="https:\/\/github.com\/settings\/copilot"[^>]*>查看官方用量<\/a>/,
   );
 });
-it('官方请求额度保持次数单位，明确为零时才显示剩余0%', () => {
+it.each(['zh-CN', 'en'] as const)('官方零额度保留计量与进度，不显示耗尽提示：%s', (language) => {
+  useGeneralSettings.setState({ language });
   fixture.usage = copilotAccountUsage({
     planTier: 'free',
     snapshots: { chat: { entitlementRequests: 50, usedRequests: 50, remainingPercentage: 0 } },
   });
   const html = renderToStaticMarkup(<UsagePanel />);
   expect(html).toContain('Copilot Free');
-  expect(html).toContain('额度已用尽');
-  expect(html).toContain('剩余 0%');
-  expect(html).toContain('50 次');
+  expect(html).not.toMatch(/额度已用尽|Allowance used up/);
+  expect(html).toContain(language === 'en' ? '0% remaining' : '剩余 0%');
+  expect(html).toContain('aria-valuenow="0"');
+  expect(html).toContain(language === 'en' ? '50 requests' : '50 次');
   expect(html).not.toContain('AI Credits');
   expect(html).not.toContain('quota-skeleton');
   expect(html).not.toContain('查询时间');

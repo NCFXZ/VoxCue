@@ -95,7 +95,7 @@ for (const relative of [
   'macos/local-signing-public.json',
   'macos/update-public-key.json',
   'macos/native/DmgArtwork.mm',
-  'macos/native/bin/VoxCue.Credentials',
+  'macos/native/bin/VoxCue',
   'macos/.cache/dmg-tools',
   'macos/.cache/node-api-headers',
   'macos/.tools/dmg-artwork',

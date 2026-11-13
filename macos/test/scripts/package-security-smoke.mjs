@@ -201,7 +201,7 @@ try {
   );
   // Direct launch must be protected even outside the sanitized app adapter.
   const credentials = spawnSync(
-    path.join(bundle, 'Contents/Resources/native/VoxCue.Credentials'),
+    path.join(bundle, 'Contents/Resources/native/VoxCue'),
     [],
     {
       env: { ...process.env, DYLD_INSERT_LIBRARIES: library },
@@ -231,7 +231,7 @@ app.whenReady().then(async()=>{
  process.env.DYLD_INSERT_LIBRARIES=${JSON.stringify(library)};
  process.env.NODE_OPTIONS=${JSON.stringify('--require=' + payload)};
  const {createCredentialEncryption}=require(${JSON.stringify(path.join(bundle, 'Contents/Resources/app.asar/dist-electron/macos/electron/credentials.js'))});
- await assert.rejects(createCredentialEncryption(${JSON.stringify(path.join(bundle, 'Contents/Resources/native/VoxCue.Credentials'))}).decrypt(Buffer.from('invalid')));
+ await assert.rejects(createCredentialEncryption(${JSON.stringify(path.join(bundle, 'Contents/Resources/native/VoxCue'))}).decrypt(Buffer.from('invalid')));
  assert.equal(fs.existsSync(${JSON.stringify(marker)}),false,'The actual helper launch must not inherit the injected environment');
  console.log('PASS: final ASAR credential launcher rejects inherited DYLD/Node injection with the exact fixed helper; invalid input reaches no Keychain operation.');app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1);});`,

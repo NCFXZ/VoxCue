@@ -52,7 +52,7 @@ if(process.platform==='darwin'){
  const credentials=require(path.join(root,'dist-electron/macos/electron/credentials.js'));
  credentials.createCredentialEncryption=()=>({encrypt:value=>safeStorage.encryptString(value),decrypt:value=>safeStorage.decryptString(value)});
  const childProcess=require('node:child_process'),spawn=childProcess.spawn;
- childProcess.spawn=function(executable,...args){if(String(executable).endsWith('/VoxCue.Credentials'))throw Error('Password UI fixture forbids production credential helper');return spawn.call(this,executable,...args);};
+ childProcess.spawn=function(executable,...args){if((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue')))throw Error('Password UI fixture forbids production credential helper');return spawn.call(this,executable,...args);};
 }
 const base=path.join(root,'dist-electron/shared/electron');
 for(const [module,name] of [['backend/auth/service.js','ChatGPTAuthService'],['backend/copilot/auth.js','CopilotAuthService']]) require(path.join(base,module))[name].prototype.session=async()=>null;

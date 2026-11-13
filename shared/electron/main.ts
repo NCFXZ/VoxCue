@@ -29,8 +29,8 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { ChatGPTAuthService } from './backend/auth/service';
 import { ManagedChatGPTAuth } from './backend/auth/managed';
-import { createAuthStorage } from './backend/auth/storage';
-import { CloudAccountClient, cloudOrigin } from './backend/cloud/client';
+import { createAuthStorage, type CredentialEncryption } from './backend/auth/storage';
+import { CloudAccountClient, cloudOrigin, storedCloudCredentials } from './backend/cloud/client';
 import { LocalMode } from './backend/localMode';
 import { Telemetry } from './backend/telemetry/service';
 import { registerTelemetryIpc } from './ipc/telemetry';
@@ -1217,17 +1217,55 @@ app.whenReady().then(async () => {
     undefined,
     app.getVersion(),
   );
-  const credentialEncryption = desktopPlatform.credentialEncryptionFile
+  // Shown at most once per launch, only when the platform expects the next
+  // credential request to open its one-time system authorization.
+  const confirmCredentialMigration = async () => {
+    const parent = [mainWindow, loginWindow].find((win) => win && !win.isDestroyed());
+    const options = {
+      type: 'info' as const,
+      title: nativeText('迁移登录信息'),
+      message: nativeText('VoxCue 需要迁移钥匙串中的登录信息'),
+      detail: nativeText(
+        'macOS 可能请求钥匙串授权。请仅在系统对话框中输入钥匙串密码并选择“始终允许”，以便后续正常读取。密码只由 macOS 处理，VoxCue 不会读取或保存。',
+      ),
+      buttons: [nativeText('稍后'), nativeText('继续')],
+      defaultId: 1,
+      cancelId: 0,
+      noLink: true,
+    };
+    const { response } = parent
+      ? await dialog.showMessageBox(parent, options)
+      : await dialog.showMessageBox(options);
+    return response === 1;
+  };
+  const credentialEncryption:
+    | (CredentialEncryption & {
+        maintain?(
+          readable: (decrypt: (value: Buffer) => Promise<string>) => Promise<boolean>,
+        ): Promise<{ cleanup: string } | undefined>;
+      })
+    | undefined = desktopPlatform.credentialEncryptionFile
     ? require(
         path.join(app.getAppPath(), 'dist-electron', desktopPlatform.credentialEncryptionFile),
       ).createCredentialEncryption(
         path.join(
           app.isPackaged ? process.resourcesPath : app.getAppPath(),
           app.isPackaged ? 'native' : 'native/bin',
-          'VoxCue.Credentials',
+          desktopPlatform.credentialExecutableName ?? 'VoxCue.Credentials',
         ),
+        confirmCredentialMigration,
       )
     : undefined;
+  const authStorage = createAuthStorage(
+    desktopPlatform.credentialEncryptionLabel,
+    credentialEncryption,
+  );
+  const cloudVault = createCloudVault(credentialEncryption);
+  const telemetryProofVault = createCredentialVault<TelemetryProofState>(
+    path.join(app.getPath('userData'), 'cloud-account', 'telemetry.bin'),
+    credentialEncryption,
+    262144,
+  );
   const localMode = new LocalMode(path.join(app.getPath('userData'), 'local-mode.json'));
   // An unreadable preference returns to explicit entry; it never grants access.
   const localModeReady = localMode.load().catch(() => {});
@@ -1238,7 +1276,8 @@ app.whenReady().then(async () => {
   );
   const cloudAccount = new CloudAccountClient({
     origin: accountOrigin,
-    vault: createCloudVault(credentialEncryption),
+    fetcher: desktopPlatform.accountFetch,
+    vault: cloudVault,
     deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
   });
   telemetry = new Telemetry({
@@ -1246,12 +1285,9 @@ app.whenReady().then(async () => {
     version: app.getVersion(),
     platform: desktopPlatform.id === 'darwin' ? 'macos' : 'windows',
     origin: cloudOrigin(environment.accountOrigin, environment.allowLocalAccount === true),
+    fetcher: desktopPlatform.accountFetch,
     enabled: app.isPackaged,
-    proofVault: createCredentialVault<TelemetryProofState>(
-      path.join(app.getPath('userData'), 'cloud-account', 'telemetry.bin'),
-      credentialEncryption,
-      262144,
-    ),
+    proofVault: telemetryProofVault,
     identityProvider: (installationId, userId, signal) =>
       cloudAccount.telemetryIdentity(installationId, userId, signal),
   });
@@ -1407,11 +1443,46 @@ app.whenReady().then(async () => {
   });
   auth = new ChatGPTAuthService({
     managed: new ManagedChatGPTAuth(codexUsageRuntime, (url) => shell.openExternal(url)),
-    storage: createAuthStorage(desktopPlatform.credentialEncryptionLabel, credentialEncryption),
+    storage: authStorage,
     openBrowser: (url) => shell.openExternal(url),
     callbackLogo: () => readFile(resources.brandLogo),
     uiLanguage: () => uiLanguage,
   });
+  if (credentialEncryption?.maintain) {
+    // Superseded Keychain copies are removed only after every stored record
+    // still decrypts and parses with the current key. Any failure keeps them.
+    const recordsReadable = async (decrypt: (value: Buffer) => Promise<string>) => {
+      if (erasingAccount) return false;
+      try {
+        await authStorage.read(decrypt);
+        const session = await cloudVault.read(decrypt);
+        const proofs = await telemetryProofVault.read(decrypt);
+        if (session !== null) {
+          if (!accountOrigin) return false;
+          storedCloudCredentials(session, accountOrigin);
+        }
+        if (proofs !== null) {
+          if (!telemetry) return false;
+          await telemetry.validateStoredProofs(proofs);
+        }
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    setTimeout(() => {
+      void credentialEncryption.maintain!(recordsReadable)
+        .then((result) => {
+          if (result && result.cleanup !== 'complete')
+            console.error(
+              `Keychain cleanup ${result.cleanup}; remaining copies retry next launch.`,
+            );
+        })
+        .catch(() => {
+          console.error('Keychain maintenance did not finish.');
+        });
+    }, 15000).unref();
+  }
   const ledger = new UsageLedger(path.join(app.getPath('userData'), 'chat-usage'));
   chatGPTUsage = new ChatGPTAccountUsage({
     runtime: codexUsageRuntime,

@@ -11,8 +11,8 @@ import { storeUpdateMessage } from '../../electron/contracts/updates';
 
 export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } = {}) {
   const updates = useUpdates();
-  const [feedbackError, setFeedbackError] = useState<string | null>(null);
-  const feedbackUrl = 'https://github.com/NCFXZ/VoxCue-releases/issues/new';
+  const [repositoryError, setRepositoryError] = useState<string | null>(null);
+  const repositoryUrl = 'https://github.com/NCFXZ/VoxCue';
   const state = updates.state;
   const storeManaged = state?.phase === 'unavailable' && state.message === storeUpdateMessage;
   const busy = !state || ['checking', 'downloading', 'installing'].includes(state.phase);
@@ -184,22 +184,22 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
         </div>
         <a
           className="updates-feedback"
-          href={feedbackUrl}
+          href={repositoryUrl}
           onClick={(event) => {
             event.preventDefault();
-            setFeedbackError(null);
-            void openChatLink(feedbackUrl).catch(() =>
-              setFeedbackError('无法打开反馈页面，请稍后重试。'),
+            setRepositoryError(null);
+            void openChatLink(repositoryUrl).catch(() =>
+              setRepositoryError('无法打开 GitHub 仓库，请稍后重试。'),
             );
           }}
         >
           <img className="service-brand-icon" src={githubLogo} alt="" aria-hidden="true" />
-          {t('问题反馈')}
+          {t('GitHub 仓库')}
         </a>
       </div>
-      {feedbackError && (
+      {repositoryError && (
         <p className="inline-error" role="alert">
-          {t(feedbackError)}
+          {t(repositoryError)}
         </p>
       )}
       {(updates.error || state?.error) && (

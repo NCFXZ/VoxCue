@@ -15,7 +15,7 @@ import { createRequire } from 'node:module';
 import { createHash, verify } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { verifyLocalApp } from '../../scripts/development-signing.mjs';
-import { verifyHardenedCredentials } from '../../scripts/build-hardened-credentials.mjs';
+import { verifyVaultCredentials } from '../../scripts/build-vault-credentials.mjs';
 import { dmgTools } from '../../scripts/dmg-tools.mjs';
 import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
@@ -53,11 +53,11 @@ assert.equal(
   'arm64',
 );
 const resources = path.join(bundle, 'Contents/Resources');
-const credentialHelper = path.join(resources, 'native/VoxCue.Credentials');
-verifyHardenedCredentials(credentialHelper, signing);
+const credentialHelper = path.join(resources, 'native/VoxCue');
+verifyVaultCredentials(credentialHelper, signing);
 assert.deepEqual(
   await readFile(credentialHelper),
-  await readFile(path.join(workspace.platformRoot, 'native/bin/VoxCue.Credentials')),
+  await readFile(path.join(workspace.platformRoot, 'native/bin/VoxCue')),
   'Packaging must preserve the fixed credential helper bytes and Keychain identity',
 );
 const config = JSON.parse(await readFile(path.join(resources, 'voxcue-update.json'), 'utf8'));

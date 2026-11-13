@@ -416,7 +416,7 @@ export class ComponentService {
     };
     combined.addEventListener('abort', abort, { once: true });
     try {
-      const url = `https://github.com/NCFXZ/VoxCue-releases/releases/download/${pkg.tag}/${pkg.asset}`;
+      const url = `https://github.com/NCFXZ/VoxCue/releases/download/${pkg.tag}/${pkg.asset}`;
       const response = await this.options.fetch(url, {
         signal: combined,
         credentials: 'omit',

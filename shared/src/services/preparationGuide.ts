@@ -1,7 +1,15 @@
 import type { PersonalInfo } from './preparation';
+import type { UILanguage } from '../../electron/contracts/uiLanguage';
 
 export type PreparationStep = 'resume' | 'job' | 'skills' | 'ready';
 export type PreparationAction = 'upload' | 'resume' | 'job' | 'skills' | 'profile' | 'interview';
+
+export function preparationGuideUrl(language: UILanguage) {
+  // The explicit language prevents the site's saved/browser preference from redirecting the guide.
+  return language === 'en'
+    ? 'https://voxcue.com.cn/en/install/?lang=en'
+    : 'https://voxcue.com.cn/install/?lang=zh-CN';
+}
 
 export function preparationActions(
   info: PersonalInfo,

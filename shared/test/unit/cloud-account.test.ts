@@ -2,6 +2,7 @@ import { describe, it, expect, vi } from 'vitest';
 import {
   CloudAccountClient,
   cloudOrigin,
+  storedCloudCredentials,
   type CloudVault,
 } from '../../electron/backend/cloud/client';
 import { CloudSyncClient } from '../../electron/backend/cloud/sync';
@@ -37,6 +38,78 @@ function vault(initial: unknown = null) {
 const json = (value: unknown, status = 200, headers = {}) =>
   new Response(JSON.stringify(value), { status, headers });
 describe('independent cloud account client', () => {
+  it('locally validates expired saved credentials without a network expiry decision', () => {
+    const expired = { ...result(), expiresAt: 1, refreshExpiresAt: 2 };
+    expect(storedCloudCredentials({ origin, credentials: expired }, origin)).toEqual(expired);
+    for (const invalid of [
+      {},
+      { origin, credentials: {} },
+      { origin, credentials: { ...expired, user: {} } },
+    ])
+      expect(() => storedCloudCredentials(invalid, origin)).toThrow();
+  });
+  it.each(['unreadable', 'malformed', 'scalar'])(
+    'explicit login recovers %s storage only after preserving it',
+    async (kind) => {
+      const stored = vault(kind === 'scalar' ? false : { origin, credentials: {} });
+      if (kind === 'unreadable')
+        stored.port.read = async () => {
+          throw Error('bad ciphertext');
+        };
+      const preserve = vi.fn(async () => {});
+      stored.port.preserve = preserve;
+      const clear = vi.spyOn(stored.port, 'clear');
+      const fetcher = vi.fn(async () => json(result()));
+      const client = new CloudAccountClient({
+        origin,
+        vault: stored.port,
+        deviceLabel: 'Synthetic',
+        fetcher,
+      });
+      expect((await client.call({ action: 'status' })).ok).toBe(false);
+      expect(clear).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(
+        (
+          await client.call({
+            action: 'login',
+            email: 'synthetic@example.test',
+            password: 'synthetic-password',
+          })
+        ).ok,
+      ).toBe(true);
+      expect(preserve).toHaveBeenCalledOnce();
+      expect(clear).not.toHaveBeenCalled();
+      expect(stored.read()).toMatchObject({
+        origin,
+        credentials: { sessionId: result().sessionId },
+      });
+    },
+  );
+  it('does not replace or contact the server when recovery cannot preserve the old encrypted file', async () => {
+    const stored = vault({ origin, credentials: {} });
+    stored.port.preserve = async () => {
+      throw Error('disk full');
+    };
+    const fetcher = vi.fn();
+    const client = new CloudAccountClient({
+      origin,
+      vault: stored.port,
+      deviceLabel: 'Synthetic',
+      fetcher,
+    });
+    expect(
+      (
+        await client.call({
+          action: 'login',
+          email: 'synthetic@example.test',
+          password: 'synthetic-password',
+        })
+      ).ok,
+    ).toBe(false);
+    expect(stored.read()).toEqual({ origin, credentials: {} });
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it.each(['account', 'upload', 'download'])(
     'oversized %s responses release both locks even if transport cancellation never settles',
     async (kind) => {
@@ -675,7 +748,8 @@ describe('independent cloud account client', () => {
     });
     expect((await other.call({ action: 'status' })).state.user).toBeNull();
     expect(requested).toBe(false);
-    expect(saved.read()).toBeNull();
+    // Origin isolation rejects use without destroying the original recoverable session.
+    expect(saved.read()).toMatchObject({ origin, credentials: { sessionId: result().sessionId } });
   });
   it('does not grow a call queue and never retries a refresh mutation automatically', async () => {
     let finish!: (value: Response) => void;

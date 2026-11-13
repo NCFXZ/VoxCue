@@ -215,12 +215,21 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Summarize the following {0}. For a resume, preserve experience, responsibilities, projects, technologies and results. For a job description, preserve the role, responsibilities, requirements and explicit preferences. Merge repetition while preserving factual limits and conditions. Do not present job requirements as personal experience. Propose only an update to this summary for confirmation; do not change other profile fields. If the summary changes and both the resume and job-description summaries are nonempty when this proposal is combined with my saved profile, end your reply with one question asking whether to generate relevant interview skills after I confirm and save. If I already have skills, ask whether to update them instead. Do not generate skills in this response.\n\nHere is the {0}:\n',
   '更多来源（{0}）': 'More sources ({0})',
   '支持 PDF、Word、TXT 和 Markdown 文件': 'Supports PDF, Word, TXT and Markdown files',
-  'macOS 钥匙串访问未获允许，登录信息保持原样，请允许后重试。':
-    'macOS Keychain access was denied. Sign-in information is unchanged. Allow access and try again.',
-  'macOS 凭据加密助手不可用，登录信息保持原样，请重新启动或修复应用。':
-    'The macOS credential encryption helper is unavailable. Sign-in information is unchanged. Restart or repair the app.',
-  'macOS 凭据加密助手返回无效，登录信息未更改。':
-    'The macOS credential encryption helper returned an invalid response. Sign-in information is unchanged.',
+  'macOS 钥匙串授权未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。':
+    'macOS Keychain authorization did not complete. Sign-in information is unchanged, and repeated requests have stopped. Restart VoxCue to try again.',
+  'macOS 凭据操作未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。':
+    'The macOS credential operation did not complete. Sign-in information is unchanged, and repeated requests have stopped. Restart VoxCue to try again.',
+  'macOS 凭据加密助手返回无效，登录信息未更改；已停止重复请求，请重新启动 VoxCue 后重试。':
+    'The macOS credential encryption helper returned an invalid response. Sign-in information is unchanged, and repeated requests have stopped. Restart VoxCue to try again.',
+  'macOS 凭据操作繁忙，请稍后重试。': 'macOS credential storage is busy. Please try again later.',
+  'macOS 钥匙串迁移已暂停，登录信息保持原样；请重新启动 VoxCue 后继续。':
+    'macOS Keychain migration was paused. Sign-in information is unchanged. Restart VoxCue to continue.',
+  迁移登录信息: 'Migrate Sign-in Information',
+  'VoxCue 需要迁移钥匙串中的登录信息': 'VoxCue needs to migrate sign-in information in Keychain',
+  'macOS 可能请求钥匙串授权。请仅在系统对话框中输入钥匙串密码并选择“始终允许”，以便后续正常读取。密码只由 macOS 处理，VoxCue 不会读取或保存。':
+    'macOS may request Keychain access. Enter your Keychain password only in the system dialog and choose “Always Allow” for subsequent access. Only macOS handles the password; VoxCue never reads or stores it.',
+  稍后: 'Later',
+  继续: 'Continue',
   'macOS 钥匙串': 'macOS Keychain',
   屏幕捕获已允许: 'Screen capture is allowed',
   屏幕捕获权限受系统限制: 'Screen capture is restricted by the system',
@@ -692,6 +701,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Both versions have changed. Choose which version to keep.',
   '服务器响应无效。': 'Invalid server response.',
   '登录凭据无效，请重新登录。': 'Invalid credentials. Sign in again.',
+  '本地登录资料无法读取，请重新登录；原资料保持不变。':
+    'Local sign-in information could not be read. Sign in again; the original data is unchanged.',
   '账号服务繁忙，请稍后重试。': 'Account services are busy. Please try again later.',
   '账号服务地址已变更。': 'The account service address has changed.',
   '服务器响应过大。': 'The server response is too large.',
@@ -1770,8 +1781,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   检查更新: 'Check for updates',
   '更新会保留本机聊天、附件、个人资料和面试记录。':
     'Updates keep your local chats, attachments, profile and interview history.',
-  '无法打开反馈页面，请稍后重试。': 'Could not open the feedback page. Please try again later.',
-  问题反馈: 'Send feedback',
+  '无法打开 GitHub 仓库，请稍后重试。': 'Could not open the GitHub repository. Please try again later.',
+  'GitHub 仓库': 'GitHub repository',
   '面试进行中，可以检查和下载更新，请结束面试后再安装。':
     'You can check for and download updates during an interview. End the interview before installing.',
   'Copilot 学生/教育计划': 'Copilot student/education plan',
@@ -1781,8 +1792,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '{0}天{1}小时后重置': 'Resets in {0}d {1}h',
   '{0}分钟后重置': 'Resets in {0}m',
   '{0}小时{1}分钟后重置': 'Resets in {0}h {1}m',
-  '包含额度已用尽，可继续额外用量': 'Included allowance used up. Additional usage is available.',
-  额度已用尽: 'Allowance used up',
+  可继续使用额外用量: 'Additional usage is available',
   当前账户访问受限: 'Account access restricted',
   额度暂不可用: 'Usage unavailable',
   服务返回的参考余额: 'Reference balance reported by the service',

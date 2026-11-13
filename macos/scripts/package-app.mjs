@@ -9,7 +9,7 @@ const { packager } = await import(require.resolve('@electron/packager'));
 import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
 import { buildQwen } from './build-qwen.mjs';
-import { buildHardenedCredentials } from './build-hardened-credentials.mjs';
+import { buildVaultCredentials } from './build-vault-credentials.mjs';
 import { stageRuntimeDependencies } from './runtime-dependencies.mjs';
 import { localizeUsageDescriptions } from './localize-usage-descriptions.mjs';
 import { prepareProductionRuntime } from './production-runtime.mjs';
@@ -21,6 +21,9 @@ const overrides =
 const includedDependency = (owner, dependency) => overrides[`${owner}>${dependency}`] !== '-';
 
 export async function buildMacApp(output, publicKey) {
+  const { releaseRepository } = require(
+    path.join(root, 'dist-electron/shared/electron/backend/updates/releases.js'),
+  );
   const { createMobileAssets } = require(
     path.join(root, 'dist-electron/shared/electron/backend/remoteConnection/assets.js'),
   );
@@ -28,7 +31,7 @@ export async function buildMacApp(output, publicKey) {
   // Fail before packaging if the established identity is unavailable; never rotate
   // it or fall back to ad-hoc. The separate Sparkle Ed25519 identity is unchanged.
   const signing = await loadDevelopmentSigning();
-  await buildHardenedCredentials();
+  await buildVaultCredentials();
   await buildQwen();
   const tools = await sparkleTools();
   const version = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8')).version;
@@ -202,7 +205,7 @@ export async function buildMacApp(output, publicKey) {
     'VoxCue.Audio',
     'VoxCue.ScreenPermission.node',
     'VoxCue.Updater.node',
-    'VoxCue.Credentials',
+    'VoxCue',
   ])
     await cp(path.join(root, 'native/bin', name), path.join(resources, 'native', name));
   // Only the build's authenticated canonical file set enters the application.
@@ -220,9 +223,11 @@ export async function buildMacApp(output, publicKey) {
   );
   await writeFile(
     path.join(resources, 'voxcue-update.json'),
-    JSON.stringify({ protocol: 1, repository: 'NCFXZ/VoxCue-releases', publicKey }),
+    JSON.stringify({ protocol: 1, repository: releaseRepository, publicKey }),
   );
   await mkdir(path.join(resources, 'licenses'), { recursive: true });
+  for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md'])
+    await cp(path.join(workspace.repositoryRoot, file), path.join(resources, 'licenses', file));
   await cp(path.join(tools, 'LICENSE'), path.join(resources, 'licenses/Sparkle.txt'));
   await prepareProductionRuntime(app, signing);
   // Keychain continuity uses our fixed certificate; update authenticity still uses Ed25519.

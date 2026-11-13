@@ -1,6 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { prepareChatRequest } from '../../../../shared/src/services/chat';
-import { CHAT_TEXT_LIMIT, CHAT_TURN_LIMIT } from '../../../../shared/electron/contracts/chat';
+import { readDroppedFiles, stageAttachments } from '../../../../shared/src/services/chatOptions';
+import {
+  CHAT_FILE_BYTES_LIMIT,
+  CHAT_FILE_LIMIT,
+  CHAT_TEXT_LIMIT,
+  CHAT_TURN_LIMIT,
+} from '../../../../shared/electron/contracts/chat';
 
 const request = (turns: Parameters<typeof prepareChatRequest>[0]['turns']) => ({
   id: 'synthetic-context',
@@ -16,6 +22,90 @@ function attachment(name: string, size = 1) {
   const read = vi.spyOn(file, 'arrayBuffer');
   return { value: { name, file }, read };
 }
+
+function droppedFolder(batches: File[][]): DataTransfer {
+  return {
+    items: [
+      {
+        webkitGetAsEntry: () => ({
+          name: 'folder',
+          isFile: false,
+          createReader() {
+            let batch = 0;
+            return {
+              readEntries(success: (entries: unknown[]) => void) {
+                success(
+                  (batches[batch++] ?? []).map((file) => ({
+                    name: file.name,
+                    isFile: true,
+                    file: (receive: (file: File) => void) => receive(file),
+                  })),
+                );
+              },
+            };
+          },
+        }),
+      },
+    ],
+    files: [],
+  } as unknown as DataTransfer;
+}
+
+describe('preparation attachment staging', () => {
+  it('allows replacement at the count limit and leaves staged files intact if a batch overflows', () => {
+    const files = Array.from(
+      { length: CHAT_FILE_LIMIT },
+      (_, index) => new File(['original'], `${index}.txt`),
+    );
+    const existing = stageAttachments([], files);
+    const replacement = new File(['replacement'], files[0].name);
+    const updated = stageAttachments(existing, [replacement]);
+    expect(updated).toHaveLength(CHAT_FILE_LIMIT);
+    expect(updated[0].file).toBe(replacement);
+    expect(existing[0].file).toBe(files[0]);
+    expect(() => stageAttachments(existing, [replacement, new File(['new'], 'extra.txt')])).toThrow(
+      '每条消息最多添加 20 个文件。',
+    );
+    expect(existing.map(({ file }) => file)).toEqual(files);
+  });
+
+  it('accepts the exact per-file byte limit and rejects oversized or empty replacements without data loss', () => {
+    const exact = attachment('notes.txt', CHAT_FILE_BYTES_LIMIT).value.file;
+    const existing = stageAttachments([], [exact]);
+    expect(existing[0].size).toBe(CHAT_FILE_BYTES_LIMIT);
+    for (const size of [CHAT_FILE_BYTES_LIMIT + 1, 0]) {
+      const invalid = attachment(exact.name, size).value.file;
+      expect(() => stageAttachments(existing, [invalid])).toThrow('文件需为 1 字节至 20 MB');
+    }
+    expect(existing[0].file).toBe(exact);
+  });
+
+  it('drains directory batches through the exact limit and preserves relative names and file metadata', async () => {
+    const files = Array.from(
+      { length: CHAT_FILE_LIMIT },
+      (_, index) =>
+        new File(['x'], `${index}.txt`, { type: 'text/plain', lastModified: index + 1 }),
+    );
+    const result = await readDroppedFiles(droppedFolder([files.slice(0, 7), files.slice(7)]));
+    expect(result.map(({ name }) => name)).toEqual(files.map(({ name }) => `folder/${name}`));
+    expect(result.map(({ type, lastModified }) => ({ type, lastModified }))).toEqual(
+      files.map(({ type, lastModified }) => ({ type, lastModified })),
+    );
+    expect(stageAttachments([], result)).toHaveLength(CHAT_FILE_LIMIT);
+  });
+
+  it('rejects a directory whose later batch exceeds the attachment count limit', async () => {
+    const files = Array.from(
+      { length: CHAT_FILE_LIMIT + 1 },
+      (_, index) => new File(['x'], `${index}.txt`),
+    );
+    await expect(
+      readDroppedFiles(
+        droppedFolder([files.slice(0, CHAT_FILE_LIMIT), files.slice(CHAT_FILE_LIMIT)]),
+      ),
+    ).rejects.toThrow('每条消息最多添加 20 个文件。');
+  });
+});
 
 describe('preparation attachment allocation budget', () => {
   it('refuses an oversized complete history before reading any earlier attachment', async () => {

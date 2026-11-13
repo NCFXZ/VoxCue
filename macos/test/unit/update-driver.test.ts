@@ -52,7 +52,7 @@ function setup(bytes = Buffer.from('archive fixture')) {
   const archive = path.join(cache, 'archives', update.url);
   const stateFile = path.join(cache, 'release-cache.json');
   const fetcher = async (url: string) => {
-    if (url.startsWith('https://api.github.com/repos/NCFXZ/VoxCue-releases/releases?'))
+    if (url.startsWith('https://api.github.com/repos/NCFXZ/VoxCue/releases?'))
       return new Response(
         JSON.stringify([
           {
@@ -69,7 +69,7 @@ function setup(bytes = Buffer.from('archive fixture')) {
       );
     if (url.endsWith('/latest-mac.yml')) return new Response(JSON.stringify(metadata));
     expect(url).toBe(
-      'https://github.com/NCFXZ/VoxCue-releases/releases/download/v0.2.2/' + update.url,
+      'https://github.com/NCFXZ/VoxCue/releases/download/v0.2.2/' + update.url,
     );
     return new Response(bytes);
   };
@@ -184,6 +184,24 @@ it('persists hourly checks and original success time across restart and clock ro
   now += updateInterval;
   await restart.driver.checkForUpdates();
   expect(mocks.fetch).toHaveBeenCalledTimes(6);
+});
+it('preserves the complete authenticated offer through cache reload and download', async () => {
+  const f = setup();
+  await f.driver.checkForUpdates();
+  const fresh = JSON.parse(await readFile(f.stateFile, 'utf8')).info;
+  expect(fresh.files).toEqual([
+    { ...f.update, voxcueSignature: f.metadata.files[0].voxcueSignature },
+  ]);
+  await f.driver.dispose();
+  mocks.fetch.mockClear();
+  const restart = f.create();
+  await restart.driver.checkForUpdates();
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  await restart.driver.downloadUpdate();
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  const cached = JSON.parse(await readFile(f.stateFile, 'utf8'));
+  expect(cached.completed).toEqual(fresh);
+  expect(await readFile(f.archive)).toEqual(f.bytes);
 });
 it('persists failed attempts and refuses to reuse a previous verified offer after a failed forced check', async () => {
   const f = setup();

@@ -6,6 +6,8 @@ Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mj
 
 完整排程以 `functional-suite.mjs --list --jobs=1`、`macos/test/scripts/ui-refinement-matrix.mjs --list` 为准。另需按实际改动补原生专项：`credential-hardening-smoke.mjs`、`cloud-native-vault-smoke.mjs`、`audio-restart-smoke.mjs`、`audio-conversion-smoke.mjs`、`qwen-regression.mjs` 和 `speech-preroll-smoke.mjs --cache=<认证缓存>`。后者仅用文件 PCM 验证原短音未接纳后不串入下一句，不能将其空 ASR 算作正向过滤成功；正向 `interview-real-audio-smoke.mjs --all` 保留非空自然静音终稿与真实 ACK 断言。固定模型的识别原文不构成逐字准确率基准。
 
+Mac 当前凭据助手运行 `node test/scripts/credential-vault-smoke.mjs`，验证 v8 单一来源复制、v6／v7 迁移、后台无交互验证和真实 JS／原生串行维护；另运行 `credential-vault-policy-smoke.mjs` 核对内存真实 partition、owner／应用信任与禁交互失败围栏，两者不能代替现代系统密码框验收。先恢复精确的固定 v8 修订并构建当前代码，缺失不能重建或回退。`credential-hardening-smoke.mjs --cleanup --fixed-v5` 仅验证归档 v5，无参数仍验证 v2；边界见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。
+
 ## 当前源码安全修复
 
 下文 Windows 1.2.0／Store 2.2.0.0 为既有发行基线；1.2.1 的本机接续见上方交接，清理、完整回归、修复及发布范围以根 PROGRESS.md 的最新授权为准。共享安全设计见 [安全与任务生命周期加固](../docs/SECURITY_HARDENING.md)，逐项 Mac 回归见 [1.2.0 交接](../docs/MACOS_1.2.0_HANDOFF.md)及[专属待办](../docs/MACOS_1.2.0_TODO.md)。下面历史矩阵不能覆盖现行测试隔离要求；正式包仍须 OS 隔离，不能恢复旧入口或用测试环境变量隔离产品。
@@ -176,7 +178,7 @@ Windows 正式商店包由 `pnpm package:store` 构建后执行 `pnpm test:store
 
 cloud-account、cloud-protocol、password-policy、account-erasure、telemetry-v2-http和server-connection通过客户端 `server-reference.mjs` 只读使用版本0.5.3、提交`3bceb615dbba900f669322c301fc4b5b473dfb15`的固定参考。默认检查相邻的`VoxCue-server`；它如已升级或含后续工作，设置`VOXCUE_TEST_SERVER_ROOT`指向另一个原样固定checkout，不能回退或覆盖现有仓库，旧`shared/server`也保持原样。入口核对版本、Git提交和受控文件无修改，仅由客户端夹具创建owner临时数据库、内存邮件和自有loopback，不执行后端套件，不操作生产。`server-connection-smoke.mjs`验证临时HTTP契约、未认证保护和客户端清理合成无效令牌，不发真实邮件。参考不进入客户端Git或包。通用UI夹具只在测试进程注入合成主账号和AI端口，正式包不包含夹具或旧登录界面；包内原生检查仍使用真实Worker、utilityProcess及固定公开模型。测试结果仅终端/对话，所有临时模型、截图、profile和副本退出清理。Windows结果不替代Mac原生、权限、DPI和实际账户/硬件验收。
 
-0.6.0的云GUI在main导入前启用Chromium mock Keychain，并注入safeStorage端口、拒绝启动正式VoxCue.Credentials；不能仅凭隔离userData声称隔离了Keychain。原生助手另由credential-upgrade使用专属临时Keychain验证，不读取真实账号加密项。
+0.6.0的云GUI在main导入前启用Chromium mock Keychain，并注入safeStorage端口、拒绝启动正式凭据助手（历史 VoxCue.Credentials／当前 native/VoxCue）；不能仅凭隔离userData声称隔离了Keychain。原生助手另由credential-upgrade使用专属临时Keychain验证，不读取真实账号加密项。
 
 Mac `node test/scripts/cloud-accessibility-smoke.mjs --preview`覆盖浅深色、960/1280/1600、减少动态/减少透明/高对比/forced-colors四种Chromium媒体条件和当前六类设置（144项），面试字号最大24px；不是系统辅助功能/物理Retina/多屏验收。可选预览还用自建图文背景完全覆盖后仅截取自有Mac窗口，补核原生红绿灯/侧栏；WebContents透明像素不代表原生材质实际画面。可选预览只保存本轮临时截图，45秒后清理。最终逐项记录见[Mac0.6.0验证](../docs/MACOS_0.6.0_VERIFICATION.md)。
 

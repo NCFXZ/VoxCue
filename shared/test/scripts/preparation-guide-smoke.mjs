@@ -23,6 +23,7 @@ try {
     globalThis.guideLinks = [];
     shell.openExternal = async (url) => {
       globalThis.guideLinks.push(url);
+      if (globalThis.guideLinkFail) throw Error('synthetic guide link failure');
     };
     ChatGPTService.prototype.stream = async (request, emit) => {
       globalThis.guideRequests.push(request);
@@ -155,12 +156,36 @@ try {
     await guide.getByRole('heading').hover();
     await page.emulateMedia({ reducedMotion: 'no-preference' });
   };
+  const verifyGuideLink = async (language) => {
+    const english = language === 'en';
+    const url = english
+      ? 'https://voxcue.com.cn/en/install/?lang=en'
+      : 'https://voxcue.com.cn/install/?lang=zh-CN';
+    const error = english
+      ? 'Could not open the user guide. Please try again.'
+      : '无法打开使用指南，请稍后重试。';
+    const link = guide.getByRole('link', { name: english ? 'User guide' : '使用指南', exact: true });
+    assert.equal(await link.getAttribute('href'), url);
+    await app.evaluate(() => {
+      globalThis.guideLinkFail = true;
+    });
+    await link.focus();
+    await link.press('Enter');
+    await guide.getByRole('alert').filter({ hasText: error }).waitFor();
+    await app.evaluate(() => {
+      globalThis.guideLinkFail = false;
+    });
+    await link.press('Enter');
+    await guide.getByText(error, { exact: true }).waitFor({ state: 'hidden' });
+    assert.deepEqual(await app.evaluate(() => globalThis.guideLinks.slice(-2)), [url, url]);
+  };
   await expectStep('resume');
   for (const language of ['zh-CN', 'en']) {
     await page.evaluate((value) => {
       localStorage.setItem('voxcue-language-v1', value);
       dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
     }, language);
+    await verifyGuideLink(language);
     for (const width of [1280, 960]) {
       const window = await app.browserWindow(page);
       await window.evaluate((win, width) => win.setSize(width, 800), width);
@@ -187,12 +212,6 @@ try {
           (await page.screenshot({ type: 'jpeg', quality: 65, scale: 'css' })).toString('base64'),
       );
   }
-  const link = guide.getByRole('link', { name: 'User guide', exact: true });
-  assert.equal(await link.getAttribute('href'), 'https://voxcue.com.cn/install/');
-  await link.click();
-  assert.deepEqual(await app.evaluate(() => globalThis.guideLinks), [
-    'https://voxcue.com.cn/install/',
-  ]);
   await guide.getByRole('button', { name: 'Add job description', exact: true }).click();
   const englishDraft = page.getByRole('textbox', { name: 'Chat message', exact: true });
   assert.match(await englishDraft.inputValue(), /after I confirm and save/);
@@ -203,6 +222,7 @@ try {
     dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
     document.documentElement.classList.remove('dark');
   });
+  await verifyGuideLink('zh-CN');
   await guide.getByRole('button', { name: '粘贴简历内容', exact: true }).click();
   const input = page.getByRole('textbox', { name: '聊天消息', exact: true });
   assert((await input.inputValue()).includes('以下是简历内容：'));

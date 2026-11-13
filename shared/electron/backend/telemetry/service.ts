@@ -18,6 +18,7 @@ import { atomicJson, TelemetryQueue, telemetryQueueFile } from './queue';
 import { boundedJson } from '../boundedJson';
 import {
   TelemetryProofs,
+  storedTelemetryProofs,
   type TelemetryProofVault,
   type TelemetryIdentityProvider,
 } from './identity';
@@ -82,6 +83,12 @@ export class Telemetry {
   }
   private now() {
     return Math.max(0, Math.floor((this.options.now ?? Date.now)()));
+  }
+  /** Main-only maintenance gate, using the same installation binding as normal reads. */
+  async validateStoredProofs(value: unknown) {
+    await this.ready;
+    if (!this.proofs) throw Error('Proof storage unavailable');
+    storedTelemetryProofs(value, this.options.origin ?? '', this.installation.installationId);
   }
   private mono() {
     return (this.options.monotonic ?? (() => performance.now()))();

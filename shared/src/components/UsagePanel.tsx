@@ -64,8 +64,8 @@ function Quota({
   const state =
     value?.state === 'exhausted'
       ? value.additionalUsageAllowed
-        ? '包含额度已用尽，可继续额外用量'
-        : '额度已用尽'
+        ? '可继续使用额外用量'
+        : null
       : value?.state === 'restricted'
         ? '当前账户访问受限'
         : value?.state === 'unavailable'
@@ -146,7 +146,7 @@ function Quota({
       {state && (
         <span
           className={`account-quota-state${
-            !loading && (value?.state === 'exhausted' || value?.state === 'restricted')
+            !loading && value?.state === 'restricted'
               ? ' danger-text'
               : ''
           }`}

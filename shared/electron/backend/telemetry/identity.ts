@@ -75,6 +75,31 @@ function ticket(
     throw Error('Invalid proof');
   return { id, userId, identityProof, issuedAt, eventUntil, deliverUntil };
 }
+/** Parse local attribution records without contacting the issuer or requiring live tickets. */
+export function storedTelemetryProofs(
+  value: unknown,
+  origin: string,
+  installationId?: string,
+): TelemetryProofState {
+  if (
+    !object(value) ||
+    value.schemaVersion !== 2 ||
+    value.origin !== origin ||
+    !telemetryUuid(value.installationId) ||
+    (installationId !== undefined && value.installationId !== installationId) ||
+    !Array.isArray(value.tickets) ||
+    value.tickets.length > 128
+  )
+    throw Error('Invalid proof storage');
+  const tickets = value.tickets.map((v) => {
+    if (!object(v) || !telemetryUuid(v.id) || !telemetryUuid(v.userId))
+      throw Error('Invalid proof storage');
+    return ticket(v, value.installationId as string, v.userId, v.id);
+  });
+  if (new Set(tickets.map((t) => t.id)).size !== tickets.length)
+    throw Error('Invalid proof storage');
+  return { schemaVersion: 2, origin, installationId: value.installationId, tickets };
+}
 export class TelemetryProofs {
   private tickets: Ticket[] = [];
   private available = false;
@@ -98,22 +123,11 @@ export class TelemetryProofs {
     try {
       const value = await this.options.vault.read();
       if (value !== null && value !== undefined) {
-        if (
-          !object(value) ||
-          value.schemaVersion !== 2 ||
-          value.origin !== this.options.origin ||
-          value.installationId !== this.options.installationId ||
-          !Array.isArray(value.tickets) ||
-          value.tickets.length > 128
-        )
-          throw Error('Invalid proof storage');
-        this.tickets = value.tickets.map((v) => {
-          if (!object(v) || !telemetryUuid(v.id) || !telemetryUuid(v.userId))
-            throw Error('Invalid proof storage');
-          return ticket(v, this.options.installationId, v.userId, v.id);
-        });
-        if (new Set(this.tickets.map((t) => t.id)).size !== this.tickets.length)
-          throw Error('Invalid proof storage');
+        this.tickets = storedTelemetryProofs(
+          value,
+          this.options.origin,
+          this.options.installationId,
+        ).tickets;
       }
       this.available = true;
     } catch {

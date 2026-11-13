@@ -200,9 +200,12 @@ describe('按平台独立选择正式更新', () => {
       const files = instance.resolveFiles(info);
       expect(files).toHaveLength(1);
       expect(files[0].url.href).toBe(
-        `https://github.com/NCFXZ/VoxCue-releases/releases/download/${target}-v0.1.2/${info.files[0].url}`,
+        `https://github.com/NCFXZ/VoxCue/releases/download/${target}-v0.1.2/${info.files[0].url}`,
       );
-      expect(requests).toHaveLength(2);
+      expect(requests).toEqual([
+        'https://api.github.com/repos/NCFXZ/VoxCue/releases?per_page=100&page=1',
+        `https://github.com/NCFXZ/VoxCue/releases/download/${target}-v0.1.2/${target === 'windows-x64' ? 'latest.yml' : 'latest-mac.yml'}`,
+      ]);
       expect(requests.some((url) => url.endsWith('/latest') || url.includes('.atom'))).toBe(false);
     },
   );

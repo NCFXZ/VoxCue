@@ -7,7 +7,7 @@ import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { Telemetry, telemetryRoute } from '../../electron/backend/telemetry/service';
 import { receiptIds } from '../../electron/backend/telemetry/protocol';
-import { TelemetryProofs } from '../../electron/backend/telemetry/identity';
+import { TelemetryProofs, storedTelemetryProofs } from '../../electron/backend/telemetry/identity';
 import {
   TelemetryQueue,
   queueLimit,
@@ -66,6 +66,36 @@ function grant(installationId: string, userId: string, now: number) {
 }
 const roots: string[] = [],
   services: Telemetry[] = [];
+it('validates stored attribution structure locally without rejecting expired tickets', () => {
+  const origin = 'https://accounts.example.test';
+  const installationId = randomUUID(),
+    userId = randomUUID();
+  const raw = grant(installationId, userId, Date.UTC(2025, 0, 1));
+  const state = {
+    schemaVersion: 2,
+    origin,
+    installationId,
+    tickets: [
+      {
+        id: randomUUID(),
+        userId,
+        identityProof: raw.identityProof,
+        issuedAt: raw.issuedAt,
+        eventUntil: raw.eventUntil,
+        deliverUntil: raw.deliverUntil,
+      },
+    ],
+  };
+  expect(storedTelemetryProofs(state, origin)).toEqual(state);
+  for (const invalid of [
+    {},
+    { ...state, schemaVersion: 1 },
+    { ...state, tickets: [{}] },
+    { ...state, tickets: [state.tickets[0], state.tickets[0]] },
+  ])
+    expect(() => storedTelemetryProofs(invalid, origin)).toThrow('Invalid proof storage');
+  expect(() => storedTelemetryProofs(state, origin, randomUUID())).toThrow();
+});
 afterEach(async () => {
   for (const service of services.splice(0)) await service.close();
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
@@ -118,6 +148,24 @@ const accepted = (body: any, ids = body.events.map((e: TelemetryEvent) => e.id))
   Response.json({ schemaVersion: 2, acceptedIds: ids, rejected: [], healthAccepted: true });
 
 describe('client statistics', () => {
+  it('maintenance validation checks the actual installation without fetching the issuer', async () => {
+    const fetcher = vi.fn(async () => capabilities());
+    const f = await fixture(undefined, undefined, true, { fetcher });
+    const installation = JSON.parse(
+      await readFile(path.join(f.root, 'telemetry-installation.json'), 'utf8'),
+    );
+    const state = {
+      schemaVersion: 2,
+      origin: 'https://accounts.example.test',
+      installationId: installation.installationId,
+      tickets: [],
+    };
+    await expect(f.service.validateStoredProofs(state)).resolves.toBeUndefined();
+    await expect(
+      f.service.validateStoredProofs({ ...state, installationId: randomUUID() }),
+    ).rejects.toThrow('Invalid proof storage');
+    expect(fetcher).not.toHaveBeenCalled();
+  });
   it.each(['negotiation', 'upload'])(
     'HTTP rejection during %s preserves events and backoff without waiting for cancellation',
     async (stage) => {

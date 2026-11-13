@@ -126,10 +126,10 @@ try {
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
   const settings = page.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '关于与更新', exact: true }).click();
-  const feedback = settings.getByRole('link', { name: '问题反馈', exact: true });
+  const feedback = settings.getByRole('link', { name: 'GitHub 仓库', exact: true });
   assert.equal(
     await feedback.getAttribute('href'),
-    'https://github.com/NCFXZ/VoxCue-releases/issues/new',
+    'https://github.com/NCFXZ/VoxCue',
   );
   assert.equal(await feedback.locator('img').getAttribute('aria-hidden'), 'true');
   await feedback.locator('img').evaluate((image) => image.decode());
@@ -151,23 +151,23 @@ try {
   await feedback.press('Enter');
   await settings
     .getByRole('alert')
-    .filter({ hasText: '无法打开反馈页面，请稍后重试。' })
+    .filter({ hasText: '无法打开 GitHub 仓库，请稍后重试。' })
     .waitFor();
   await app.evaluate(() => {
     globalThis.feedbackFail = false;
   });
   await feedback.press('Enter');
   await settings
-    .getByText('无法打开反馈页面，请稍后重试。', { exact: true })
+    .getByText('无法打开 GitHub 仓库，请稍后重试。', { exact: true })
     .waitFor({ state: 'hidden' });
   assert.deepEqual(
     await app.evaluate(() => globalThis.feedbackCalls),
-    Array(2).fill('https://github.com/NCFXZ/VoxCue-releases/issues/new'),
+    Array(2).fill('https://github.com/NCFXZ/VoxCue'),
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   assert.deepEqual(errors, []);
   console.log(
-    'PASS sidebar/profile 240ms bidirectional animation frames, drag file card/theme/minimum/accessibility, feedback keyboard/error/retry and local external port; no production traffic',
+    'PASS sidebar/profile 240ms bidirectional animation frames, drag file card/theme/minimum/accessibility, repository link keyboard/error/retry and local external port; no production traffic',
   );
 } finally {
   await closeUiApp(app);

@@ -62,7 +62,7 @@ if(process.platform==='darwin'){
   const childProcess=require('node:child_process');
   const spawn=childProcess.spawn;
   childProcess.spawn=function(executable,...args){
-    if(String(executable).endsWith('/VoxCue.Credentials'))throw new Error('Cloud fixture must never launch the production credential helper');
+    if((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue')))throw new Error('Cloud fixture must never launch the production credential helper');
     return spawn.call(this,executable,...args);
   };
 }

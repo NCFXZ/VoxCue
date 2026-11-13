@@ -8,10 +8,7 @@ import {
   componentLocation,
   componentPaths,
 } from '../../../shared/electron/backend/components/service';
-import {
-  unpackComponent,
-  unpackComponentFile,
-} from '../../../shared/electron/backend/components/archive';
+import { unpackComponentFile } from '../../../shared/electron/backend/components/archive';
 import {
   packagesFor,
   type ComponentPackage,
@@ -273,7 +270,7 @@ describe('独立组件下载与版本缓存', () => {
     expect(f.fetcher).not.toHaveBeenCalled();
     expect((await service.download('speech')).phase).toBe('ready');
     expect(f.fetcher).toHaveBeenCalledExactlyOnceWith(
-      'https://github.com/NCFXZ/VoxCue-releases/releases/download/models-v1.0.0/fixture.zip',
+      'https://github.com/NCFXZ/VoxCue/releases/download/models-v1.0.0/fixture.zip',
       expect.objectContaining({ credentials: 'omit' }),
     );
     f.fetcher.mockImplementation(async () => {
@@ -438,28 +435,79 @@ describe('独立组件下载与版本缓存', () => {
   });
   it('认证归档仍拒绝路径穿越、额外文件和文件内容摘要不符', async () => {
     const f = await fixture();
-    for (const mutate of [
+    const archive = path.join(f.root, 'fixture.zip');
+    await writeFile(archive, f.bytes);
+    for (const [index, mutate] of [
       (p: ComponentPackage) => (p.files[0].sha256 = '0'.repeat(64)),
       (p: ComponentPackage) => (p.files[0].path = '../protected'),
-    ]) {
+    ].entries()) {
       const pkg = structuredClone(f.pkg);
       mutate(pkg);
       await expect(
-        unpackComponent(f.bytes, pkg, path.join(f.root, 'stage'), new AbortController().signal),
+        unpackComponentFile(
+          archive,
+          pkg,
+          path.join(f.root, 'stage-' + index),
+          new AbortController().signal,
+        ),
       ).rejects.toThrow();
     }
     const zip = new Zip(f.bytes);
     zip.addFile('extra.js', Buffer.from('untrusted'));
     const data = zip.toBuffer();
+    await writeFile(archive, data);
     await expect(
-      unpackComponent(
-        data,
+      unpackComponentFile(
+        archive,
         { ...f.pkg, bytes: data.length, sha256: digest(data) },
-        path.join(f.root, 'stage'),
+        path.join(f.root, 'stage-extra'),
         new AbortController().signal,
       ),
     ).rejects.toThrow();
   });
+  it('归档与清单同时声明越界路径也不能改写目标目录外的文件', async () => {
+    const f = await fixture();
+    const protectedFile = path.join(f.root, 'protected');
+    await writeFile(protectedFile, 'original');
+    const zip = new Zip(f.bytes);
+    zip.getEntries()[0].entryName = '../protected';
+    const bytes: Buffer = zip.toBuffer();
+    const pkg = {
+      ...f.pkg,
+      bytes: bytes.length,
+      sha256: digest(bytes),
+      files: [{ ...f.pkg.files[0], path: '../protected' }],
+    };
+    const archive = path.join(f.root, 'traversal.zip');
+    await writeFile(archive, bytes);
+    await expect(
+      unpackComponentFile(archive, pkg, path.join(f.root, 'stage'), new AbortController().signal),
+    ).rejects.toThrow('Invalid ZIP file');
+    expect(await readFile(protectedFile, 'utf8')).toBe('original');
+  });
+  it.each(['encrypted', 'symlink', 'local-name'] as const)(
+    '认证过的归档仍拒绝 %s 文件元数据',
+    async (kind) => {
+      const f = await fixture();
+      const bytes = Buffer.from(f.bytes);
+      const central = bytes.readUInt32LE(bytes.length - 6);
+      if (kind === 'encrypted')
+        bytes.writeUInt16LE(bytes.readUInt16LE(central + 8) | 1, central + 8);
+      else if (kind === 'symlink') bytes.writeUInt32LE((0o120777 << 16) >>> 0, central + 38);
+      else bytes[bytes.readUInt32LE(central + 42) + 30] = 'x'.charCodeAt(0);
+      const archive = path.join(f.root, 'invalid.zip');
+      await writeFile(archive, bytes);
+      await expect(
+        unpackComponentFile(
+          archive,
+          { ...f.pkg, sha256: digest(bytes) },
+          path.join(f.root, 'stage'),
+          new AbortController().signal,
+        ),
+      ).rejects.toThrow(kind === 'local-name' ? 'Invalid ZIP filename' : 'Invalid ZIP file');
+      expect((await readdir(f.root)).sort()).toEqual(['invalid.zip']);
+    },
+  );
   it('固定平台包和缓存入口，安装完整包及开发版保留原加载方式', async () => {
     expect(packagesFor('darwin', 'arm64').map((p) => p.id)).toEqual(['speech', 'rag', 'qwen']);
     const qwen = packagesFor('darwin', 'arm64').find((pkg) => pkg.id === 'qwen')!;

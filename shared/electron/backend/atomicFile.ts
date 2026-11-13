@@ -1,4 +1,4 @@
-import { open, rename, rm } from 'node:fs/promises';
+import { open, readFile, rename, rm } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
@@ -25,4 +25,13 @@ export async function atomicFile(file: string, value: string | Buffer) {
   } finally {
     await rm(temporary, { force: true });
   }
+}
+
+/** Keep the encrypted original before an explicit recovery replaces unreadable data. */
+export async function preserveEncryptedFile(file: string) {
+  const bytes = await readFile(file).catch((error: NodeJS.ErrnoException) => {
+    if (error.code === 'ENOENT') return undefined;
+    throw error;
+  });
+  if (bytes) await atomicFile(file + '.' + randomUUID() + '.recovery', bytes);
 }

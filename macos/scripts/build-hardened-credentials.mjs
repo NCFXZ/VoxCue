@@ -1,14 +1,5 @@
 import workspace from '../../shared/scripts/workspace.mjs';
-import {
-  readFile,
-  mkdir,
-  mkdtemp,
-  rm,
-  lstat,
-  realpath,
-  open,
-  rename,
-} from 'node:fs/promises';
+import { readFile, mkdir, mkdtemp, rm, lstat, realpath, open, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
@@ -44,7 +35,7 @@ async function ownedDirectory(directory, create = false) {
   if ((await realpath(directory)) !== path.resolve(directory))
     throw Error('Redirected credential helper directory: ' + directory);
 }
-async function ownedFile(file, optional = false) {
+export async function ownedFile(file, optional = false) {
   await ownedDirectory(path.dirname(file));
   const info = await lstat(file).catch((error) => {
     if (!optional || error.code !== 'ENOENT') throw error;
@@ -109,10 +100,14 @@ export async function copyCredentialHelper(source, output) {
   }
   return output;
 }
-async function readSourceHashes() {
+export async function credentialSourceHashes(cleanup = false) {
   return Object.fromEntries(
     await Promise.all(
-      ['Credentials.mm', 'CredentialsHardened.mm'].map(async (name) => [
+      [
+        'Credentials.mm',
+        'CredentialsHardened.mm',
+        ...(cleanup ? ['CredentialsMigrating.mm'] : []),
+      ].map(async (name) => [
         name,
         digest(await readFile(path.join(workspace.platformRoot, 'native', name))),
       ]),
@@ -124,8 +119,12 @@ function execute(command, args) {
   if (result.error || result.status) throw result.error ?? Error(result.stderr);
   return result;
 }
-export function verifyHardenedCredentials(binary, signing) {
-  verifyLocalApp(binary, signing, hardenedCredentialIdentifier);
+export function verifyHardenedCredentials(
+  binary,
+  signing,
+  identifier = hardenedCredentialIdentifier,
+) {
+  verifyLocalApp(binary, signing, identifier);
   const metadata = execute('/usr/bin/codesign', ['-d', '--verbose=4', binary]);
   if (!/flags=0x[0-9a-f]+\([^\n]*\bruntime\b/.test(metadata.stderr))
     throw Error('Credential helper requires Hardened Runtime');
@@ -138,7 +137,7 @@ export async function verifyFixedHardenedCredentials(binary, signing) {
   const { record, bytes } = await readCredentialHelperCache(helperDirectory);
   if (
     record.certificate !== signing.sha256 ||
-    JSON.stringify(record.sourceHashes) !== JSON.stringify(await readSourceHashes()) ||
+    JSON.stringify(record.sourceHashes) !== JSON.stringify(await credentialSourceHashes()) ||
     record.binaryHash !== digest(bytes) ||
     record.binaryHash !== digest(await ownedFile(binary))
   )
@@ -149,7 +148,7 @@ export async function verifyFixedHardenedCredentials(binary, signing) {
 export async function buildHardenedCredentials() {
   const { record, bytes: existing } = await readCredentialHelperCache(helperDirectory);
   const signing = await localSigningCertificate();
-  const sourceHashes = await readSourceHashes();
+  const sourceHashes = await credentialSourceHashes();
   const canonical = path.join(helperDirectory, credentialFile);
   if (
     record.certificate !== signing.sha256 ||
@@ -160,12 +159,13 @@ export async function buildHardenedCredentials() {
       'Fixed hardened credential helper changed; restore its exact identity or implement a separate compatible migration.',
     );
   verifyHardenedCredentials(canonical, signing);
-  const output = path.join(workspace.platformRoot, 'native/bin', credentialFile);
-  return copyCredentialHelper(canonical, output);
+  // v2 is now a frozen predecessor; verifying it must never downgrade the
+  // production output staged by the compatible v3 cleanup builder.
+  return canonical;
 }
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   await buildHardenedCredentials();
   console.log(
-    'Prepared fixed hardened credential helper; no credential Keychain item was accessed.',
+    'Verified archived v2 credential helper without staging or credential Keychain access.',
   );
 }

@@ -4,7 +4,7 @@
 
 VoxCue is a desktop interview preparation assistant for Windows and macOS. Organize materials around your résumé and job description, prepare interview skills, and use live transcription, AI answers, and interview history to support practice and review.
 
-[Download installers from VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases)
+[GitHub repository](https://github.com/NCFXZ/VoxCue) · [Download installers and local components](https://github.com/NCFXZ/VoxCue/releases)
 
 ## Features
 
@@ -27,3 +27,19 @@ VoxCue is a desktop interview preparation assistant for Windows and macOS. Organ
 - **Copilot sign-out:** The official SDK may share system credentials with the standalone Copilot CLI. Signing out of VoxCue ends its local session without deleting shared credentials. Revoke GitHub authorization separately in GitHub settings.
 - **Usage statistics:** Basic statistics contain limited information such as action categories, timestamps, and numeric values. They exclude chat and transcript content, source files, audio, screenshots, and access tokens.
 - **Content review:** AI-generated materials and answers may contain errors. Review them before saving or using them, and avoid presenting reference knowledge as your own experience.
+
+## Development
+
+Run `corepack pnpm install --frozen-lockfile` inside the host platform directory (`macos/` or `windows/`). After installation, run `corepack pnpm typecheck`, `corepack pnpm test`, `corepack pnpm build:shared`, or `corepack pnpm dev` from the repository root; commands dispatch to the host platform.
+
+See the [workspace layout](shared/docs/WORKSPACE_LAYOUT.md), [architecture](shared/docs/ARCHITECTURE.md), and [test entry points](shared/test/README.md). Install dependencies only inside the host platform directory and keep the other platform read-only.
+
+## License
+
+Copyright 2026 VoxCue contributors.
+
+VoxCue's original software code is licensed under the [GNU Affero General Public License, version 3 only (AGPL-3.0-only)](LICENSE). No permission to use a later license version is granted.
+
+Commercial use, modification, and distribution are permitted. When distributing the program or a derivative version, provide its Corresponding Source to recipients under the license. If users interact with a modified version over a network, offer those users the Corresponding Source for that version. Local use, private modifications, or merely using the program do not by themselves require publishing personal data, output, or unrelated code. The software is provided without warranty; the full license governs the exact rights and obligations.
+
+Third-party dependencies, models, system symbols, brand assets, and illustrations retain their respective licenses and rights. They are not relicensed under AGPL by this repository. The VoxCue name, logo, and user-supplied artwork are outside this software-code license grant. See [third-party and asset notices](THIRD_PARTY_NOTICES.md).

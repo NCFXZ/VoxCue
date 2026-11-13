@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { frostedProfileAt } from './frostedProfiles';
 
+// The actual interview and both previews share one dark appearance.
+export const interviewAlwaysDark = true;
 const storageKey = 'voxcue-interview-background-transparency-v1';
 const changedEvent = 'voxcue-interview-background-transparency-changed';
 export const interviewTransparency = { minimum: 0, maximum: 100, default: 100 } as const;
