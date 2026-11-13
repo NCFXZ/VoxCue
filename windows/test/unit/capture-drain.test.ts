@@ -53,6 +53,29 @@ it('设备枚举超出输出上限后及时失败并清除启动期限', async (
   child.stderr.destroy();
 });
 
+it('only returns bounded typed WASAPI devices and accepts an empty inventory', async () => {
+  async function read(value: unknown) {
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(), stderr: new PassThrough(), kill: vi.fn(),
+    });
+    state.child = child;
+    const reading = devices('unused');
+    child.stdout.end(JSON.stringify(value));
+    child.stderr.end();
+    child.emit('close', 0);
+    return reading;
+  }
+  const device = { id: 'synthetic', name: 'Synthetic input', source: 'microphone', default: false };
+  expect(await read([])).toEqual([]);
+  expect(await read([{ ...device, extra: true }])).toEqual([device]);
+  for (const bad of [
+    {}, [null], Array(257).fill(device), [{ ...device, id: '' }], [{ ...device, id: 7 }],
+    [{ ...device, id: 'a'.repeat(513) }], [{ ...device, name: null }],
+    [{ ...device, name: 'x'.repeat(2001) }], [{ ...device, source: 'network' }],
+    [{ ...device, default: 1 }],
+  ]) await expect(read(bad)).rejects.toThrow('无法枚举 Windows 音频设备');
+});
+
 it.each([false, true])('bounds unterminated native status output before/after startup (%s)', async (started) => {
   const child: any = new EventEmitter();
   child.stdout = new EventEmitter();
@@ -138,6 +161,31 @@ it('reports a forced native termination as a failed drain instead of a successfu
   await vi.advanceTimersByTimeAsync(1500);
   await failed;
   expect(child.kill).toHaveBeenCalledOnce();
+});
+
+it('keeps ownership after a stop deadline and an exit until the native pipes close', async () => {
+  vi.useFakeTimers();
+  const child = Object.assign(new EventEmitter(), {
+    stdout: new EventEmitter(), stderr: new EventEmitter(),
+    stdin: Object.assign(new EventEmitter(), { end: vi.fn() }),
+    exitCode: null as number | null, kill: vi.fn(() => true),
+  });
+  state.child = child;
+  const capture = new WasapiCapture('unused', 'system', undefined, vi.fn(), vi.fn());
+  const starting = capture.start();
+  child.stderr.emit('data', Buffer.from('{"type":"started"}\n'));
+  await starting;
+  const stopping = capture.stop();
+  expect(capture.stop()).toBe(stopping);
+  const deadline = expect(stopping).rejects.toThrow('未能退出');
+  await vi.advanceTimersByTimeAsync(2500);
+  await deadline;
+  child.exitCode = 1;
+  child.emit('exit', 1);
+  expect(capture.retiring).toBe(true);
+  await expect(capture.start()).rejects.toThrow('尚未退出');
+  child.emit('close', 1);
+  expect(capture.retiring).toBe(false);
 });
 
 it('retains the startup deadline when forced cleanup also rejects', async () => {

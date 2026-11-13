@@ -385,7 +385,8 @@ try {
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).waitFor();
   assert.equal(await floating.getByText(/面试额度|剩余面试时长/).count(), 0);
   const usageNotice = floating.locator('.floating-usage-notice');
-  await usageNotice.getByText('ChatGPT 剩余: 5小时 19% · 每周 15%', { exact: true }).waitFor();
+  const twoLowQuotas = 'ChatGPT 剩余: 5小时 19% · 每周 15%';
+  await usageNotice.getByText(twoLowQuotas, { exact: true }).waitFor();
   await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
   await floating.locator('.floating-capture-notice').waitFor();
   for (const dark of [false, true]) {
@@ -394,15 +395,21 @@ try {
       dark,
     );
     await assertWarningColor(usageNotice, true);
-    const noticeLayout = await usageNotice.evaluate((node) => {
+    // Focusing the floating window refreshes usage and temporarily removes its
+    // notice. Read the confirmed text and its layout in the same rendered frame.
+    const noticeLayout = await (await floating.waitForFunction((expected) => {
+      const node = document.querySelector('.floating-usage-notice');
+      if (!node || node.textContent !== expected) return false;
       const range = document.createRange();
       range.selectNodeContents(node);
+      const rects = [...range.getClientRects()].filter((rect) => rect.width && rect.height);
+      if (!rects.length) return false;
       return {
-        rows: new Set([...range.getClientRects()].map((rect) => Math.round(rect.top))).size,
+        rows: new Set(rects.map((rect) => Math.round(rect.top))).size,
         right: range.getBoundingClientRect().right,
         bound: node.getBoundingClientRect().right,
       };
-    });
+    }, twoLowQuotas)).jsonValue();
     assert.equal(noticeLayout.rows, 1, 'Both floating quotas share one line');
     assert.ok(noticeLayout.right <= noticeLayout.bound, 'Both floating quotas are fully visible');
     assert.equal(

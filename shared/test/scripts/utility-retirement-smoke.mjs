@@ -55,7 +55,7 @@ app.whenReady().then(async()=>{
   await speech.close();
   const fork=utilityProcess.fork;
   utilityProcess.fork=(file,args,options)=>{
-   assert.equal(file,base+'/knowledge/process.js');
+   assert.equal(file,require('node:path').join(base,'knowledge','process.js'));
    return fork.call(utilityProcess,fixture,args,options);
   };
   const knowledge=new KnowledgeHost(${JSON.stringify(path.join(testRoot, 'knowledge'))},'synthetic-not-read');

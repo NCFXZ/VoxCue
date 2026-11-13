@@ -5,7 +5,7 @@ import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import { verifyRoundCapFrames } from './continuous-corners.mjs';
-import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
+import { assertInitialDownloadProgress, assertDownloadButton, pointAtControl } from './assert-download-button.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -259,17 +259,17 @@ try {
     available,
     '.sidebar-update-idle',
     '.sidebar-update-expanded',
-    () => available.hover(),
+    () => pointAtControl(app, available),
     true,
   );
   await morph(
     available,
     '.sidebar-update-idle',
     '.sidebar-update-expanded',
-    () => page.mouse.move(800, 100),
+    () => pointAtControl(app, available, false),
     false,
   );
-  await available.hover();
+  await pointAtControl(app, available);
   await available.locator('.sidebar-update-label').waitFor({ state: 'visible' });
   await available.focus();
   await available.evaluate(async (element) => {
@@ -286,7 +286,7 @@ try {
   await assertInitialDownloadProgress(progress, async () => {
     await sidebar.getByRole('button', { name: '下载更新', exact: true }).click();
     await phase(page, 'downloading');
-  });
+  }, { app });
   await page.locator('.breadcrumb').hover();
   await app.evaluate(() => globalThis.updateDriver.emit('download-progress', { percent: 37.8 }));
   await progress.locator('[role="progressbar"][aria-valuenow="37.8"]').waitFor();
@@ -309,23 +309,23 @@ try {
     await progress.locator('.download-ring').evaluate((el) => getComputedStyle(el).color),
     await progress.evaluate((el) => getComputedStyle(el).color),
   );
-  await assertDownloadButton(page, progress, { iconOnly: true, hoverLabel: '取消下载' });
+  await assertDownloadButton(page, progress, { app, iconOnly: true, hoverLabel: '取消下载' });
   await aligned(page);
   await morph(
     progress,
     '.download-button-progress',
     '.download-button-cancel',
-    () => progress.hover(),
+    () => pointAtControl(app, progress),
     true,
   );
   await morph(
     progress,
     '.download-button-progress',
     '.download-button-cancel',
-    () => page.mouse.move(800, 100),
+    () => pointAtControl(app, progress, false),
     false,
   );
-  await progress.hover();
+  await pointAtControl(app, progress);
   await progress.locator('.download-button-cancel').waitFor({ state: 'visible' });
   await progress.focus();
   await progress.evaluate(async (element) => {
@@ -395,17 +395,17 @@ try {
     install,
     '.sidebar-update-idle',
     '.sidebar-update-expanded',
-    () => install.hover(),
+    () => pointAtControl(app, install),
     true,
   );
   await morph(
     install,
     '.sidebar-update-idle',
     '.sidebar-update-expanded',
-    () => page.mouse.move(800, 100),
+    () => pointAtControl(app, install, false),
     false,
   );
-  await install.hover();
+  await pointAtControl(app, install);
   await install.locator('.sidebar-update-label').waitFor({ state: 'visible' });
   await install.evaluate(async (element) => {
     await Promise.all(
@@ -416,7 +416,7 @@ try {
   assert.ok(expanded.width > 36 && expanded.height === 36);
   assert.equal(await install.innerText(), '重启以更新');
   await captureRequested(page, 'restart-expanded');
-  await page.mouse.move(800, 100);
+  await pointAtControl(app, install, false);
   await aligned(page);
   await collapsedAction(page, install);
   await page.keyboard.press('Tab');

@@ -1,8 +1,9 @@
 {
   "name": "voxcue",
   "productName": "VoxCue",
-  "version": "1.2.0",
+  "version": "1.2.2",
   "private": true,
+  "license": "AGPL-3.0-only",
   "description": "VoxCue cross-platform desktop interview preparation assistant",
   "main": "dist-electron/shared/electron/main.js",
   "scripts": {

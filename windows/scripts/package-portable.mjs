@@ -85,6 +85,7 @@ const paths = await packager({
   overwrite: true,
   prune: false,
   asar: {
+    unpack: '**/dist-electron/shared/electron/backend/cancellable.js',
     unpackDir:
       '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/backend/screenshot,dist-electron/shared/electron/contracts,dist-electron/windows/electron/speech}',
   },
@@ -101,12 +102,15 @@ const paths = await packager({
       const { windowsUpdateKey } = require(
         path.join(root, 'dist-electron/shared/electron/backend/updates/windowsManifest.js'),
       );
+      const { releaseRepository } = require(
+        path.join(root, 'dist-electron/shared/electron/backend/updates/releases.js'),
+      );
       if (publicKey.protocol !== 1) throw Error('Invalid Windows update key protocol');
       windowsUpdateKey(publicKey.publicKey);
       // Pin the canonical key inside the archive before its integrity hash is embedded.
       await writeFile(
         path.join(buildPath, 'dist-electron/windows/electron/voxcue-update.json'),
-        JSON.stringify({ ...publicKey, repository: 'NCFXZ/VoxCue-releases' }) + '\n',
+        JSON.stringify({ ...publicKey, repository: releaseRepository }) + '\n',
       );
       if (!(await createMobileAssets(path.join(buildPath, 'dist')).read('/')))
         throw Error('The packaged application is missing its mobile page assets.');
@@ -263,6 +267,8 @@ const paths = await packager({
       const runtime = await prepareVcRuntime();
       const licenses = path.join(buildPath, 'resources/licenses');
       await mkdir(licenses, { recursive: true });
+      for (const file of ['LICENSE', 'THIRD_PARTY_NOTICES.md'])
+        await cp(path.resolve(root, '..', file), path.join(licenses, file));
       await cp(
         path.join(runtime.directory, runtime.license.name),
         path.join(licenses, runtime.license.name),

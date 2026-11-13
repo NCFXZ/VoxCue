@@ -3,6 +3,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { usePreparation } from '../../../shared/src/stores/preparation';
 import { useChatConnection } from '../../../shared/src/stores/chatConnection';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
+import { localChats } from '../../src/services/chats';
 import { streamChat, ChatRequestError } from '../../../shared/src/services/chat';
 import { chatGPTProvider } from '../../../shared/electron/contracts/chat';
 vi.mock('../../../shared/src/services/chat', async (importOriginal) => ({
@@ -187,6 +188,23 @@ describe('聊天附件更新需要同意', () => {
       provider: chatGPTProvider,
     });
     expect(usePreparation.getState().streaming).toBe(false);
+  });
+  it('冷启动时即使聊天仍在恢复，已保存的个人资料也可立即编辑', async () => {
+    const saved = { ...base, name: '新姓名' };
+    localStorage.setItem('copilot-personal-info-v1', JSON.stringify(saved));
+    usePreparation.setState({ chatsReady: false, info: { name: '', background: '', jobDescription: '' } });
+    let release!: () => void;
+    const pending = new Promise<null>((resolve) => { release = () => resolve(null); });
+    const chats = vi.spyOn(localChats, 'read').mockReturnValue(pending);
+    const loading = usePreparation.getState().load();
+    try {
+      expect(usePreparation.getState().info).toEqual(saved);
+      expect(usePreparation.getState().updateInfo({ language: 'English' })).toBe(true);
+    } finally {
+      release();
+      try { await loading; } finally { chats.mockRestore(); }
+    }
+    expect(usePreparation.getState().info).toEqual({ ...saved, language: 'English' });
   });
   it.each([
     JSON.stringify({ preset: 'concise', custom: '旧偏好不得追加' }),

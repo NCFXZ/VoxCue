@@ -2,6 +2,7 @@ import { app } from 'electron';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createUpdateDriver as createStockDriver } from '../../shared/electron/backend/updates/driver';
+import { releaseRepository } from '../../shared/electron/backend/updates/releases';
 import {
   signedWindowsUpdate,
   validateSignedWindowsUpdate,
@@ -19,7 +20,7 @@ export function createUpdateDriver() {
       'utf8',
     ),
   );
-  if (config.protocol !== 1 || config.repository !== 'NCFXZ/VoxCue-releases')
+  if (config.protocol !== 1 || config.repository !== releaseRepository)
     throw Error('Invalid Windows update configuration');
   windowsUpdateKey(config.publicKey);
   return createStockDriver(true, {

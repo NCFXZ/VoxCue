@@ -4,6 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const full = process.argv.includes('--full');
+const windowsPipePrefix = String.raw`\\.\pipe\voxcue-component-`;
 if (process.argv.slice(2).some((argument) => argument !== '--full'))
   throw Error('Only --full is supported');
 // Guard the entire Node test tree, including workers. The full unit matrix
@@ -19,9 +20,17 @@ const loopback = ${full};
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), net = require('node:net');
 const temporary = fs.realpathSync(os.tmpdir());
 const servers = new Set();
+const releasedPipes = new Set();
+const pipePrefix = ${JSON.stringify(windowsPipePrefix)};
+const componentPipe = value => typeof value === 'string' && value.startsWith(pipePrefix) && /^[a-f0-9]{32}$/.test(value.slice(pipePrefix.length));
 const listen = net.Server.prototype.listen;
 net.Server.prototype.listen = function(...args) {
-  const started = () => servers.add(this), stopped = () => servers.delete(this);
+  let endpoint;
+  const started = () => { servers.add(this); endpoint = this.address(); };
+  const stopped = () => {
+    servers.delete(this);
+    if (process.platform === 'win32' && componentPipe(endpoint)) releasedPipes.add(endpoint);
+  };
   this.once('listening', started); this.once('close', stopped);
   try { return listen.apply(this, args); }
   catch(error) { this.removeListener('listening', started); this.removeListener('close', stopped); throw error; }
@@ -40,8 +49,7 @@ const localTcp = (host, port) => {
 const componentIpc = value => {
   if (!loopback || typeof value !== 'string') return false;
   const registered = () => [...servers].some(server => server.listening && server.address() === value);
-  const prefix = '\\\\.\\pipe\\voxcue-component-';
-  if (process.platform === 'win32') return value.startsWith(prefix) && /^[a-f0-9]{32}$/.test(value.slice(prefix.length)) && registered();
+  if (process.platform === 'win32') return componentPipe(value) && registered();
   if (!/^vcc-[a-f0-9]{32}$/.test(path.basename(value))) return false;
   try {
     if (fs.realpathSync(path.dirname(value)) !== temporary) return false;
@@ -75,7 +83,22 @@ const socket = net.Socket.prototype, connect = socket.connect;
 socket.connect = function(...args) {
   const options = Array.isArray(args[0]) ? args[0][0] : args[0];
   const endpoint = options && typeof options === 'object' ? (typeof options.path === 'string' ? options.path : undefined) : typeof options === 'string' && !Number.isInteger(Number(options)) ? options : undefined;
-  if (endpoint !== undefined) return componentIpc(endpoint) ? connect.apply(this, args) : deny();
+  if (endpoint !== undefined) {
+    if (componentIpc(endpoint)) return connect.apply(this, args);
+    if (loopback && process.platform === 'win32' && releasedPipes.has(endpoint)) {
+      // Windows stat/open can connect to a foreign pipe. Inspect names only,
+      // including the session-qualified names visible in a Windows sandbox.
+      const name = path.win32.basename(endpoint);
+      const exists = fs.readdirSync(path.win32.dirname(endpoint)).some(entry =>
+        path.win32.basename(entry).toLowerCase() === name);
+      if (!exists) {
+        const error = Object.assign(Error('Component pipe is absent'), {code:'ENOENT'});
+        this.destroy(error);
+        return this;
+      }
+    }
+    return deny();
+  }
   const host = options && typeof options === 'object' ? options.host : args[1];
   const port = options && typeof options === 'object' ? options.port : options;
   return localTcp(host, port) ? connect.apply(this, args) : deny();
@@ -160,11 +183,14 @@ if (${full}) {
     } finally {await new Promise(resolve=>server.close(resolve));}
     assert.throws(()=>fetch(origin),/Offline regression forbids network access/);
   }
-  if (process.platform !== 'win32') {
+  {
     const { createServer } = await import('node:net');
-    const { Worker } = await import('node:worker_threads');
-    const { rm } = await import('node:fs/promises');
-    const endpoint = path.join(tmpdir(), 'vcc-'+randomBytes(16).toString('hex'));
+    const { spawn } = await import('node:child_process');
+    const { once } = await import('node:events');
+    const token = randomBytes(16).toString('hex');
+    const windows = process.platform === 'win32';
+    const endpoint = windows ? ${JSON.stringify(windowsPipePrefix)} + token : path.join(tmpdir(), 'vcc-'+token);
+    if (windows) assert.throws(()=>new Socket().connect(endpoint),/Offline regression forbids network access/);
     const server = createServer(socket=>socket.destroy());
     await new Promise((resolve,reject)=>{server.once('error',reject);server.listen(endpoint,resolve);});
     try {
@@ -179,23 +205,20 @@ if (${full}) {
       socket.once('error',error=>{socket.destroy();try{assert.equal(error.code,'ENOENT');resolve();}catch(error){reject(error);}});
       socket.connect(endpoint,()=>{socket.destroy();reject(Error('Closed IPC endpoint connected'));});
     });
-    for(const outside of [path.join(tmpdir(),'absent-parent',path.basename(endpoint)),path.join('/',path.basename(endpoint))])
+    if (!windows) for(const outside of [path.join(tmpdir(),'absent-parent',path.basename(endpoint)),path.join('/',path.basename(endpoint))])
       assert.throws(()=>new Socket().connect(outside),/Offline regression forbids network access/);
-    // A genuine same-UID socket from another worker is not this process's
-    // registered endpoint, even when its basename matches the component lease.
-    const worker = new Worker(\`
-      const {parentPort,workerData}=require('node:worker_threads');
+    // Another process now owns the exact name we just released.
+    const child = spawn(process.execPath, ['-e', \`
       const server=require('node:net').createServer(socket=>socket.destroy());
-      server.listen(workerData,()=>parentPort.postMessage('ready'));
-      parentPort.once('message',()=>server.close(()=>parentPort.postMessage('closed')));
-    \`,{eval:true,execArgv:[],workerData:endpoint});
+      server.listen(process.argv[1],()=>console.log('ready'));
+      process.stdin.resume();
+      process.stdin.once('end',()=>server.close());
+    \`, endpoint], {stdio:['pipe','pipe','inherit'],windowsHide:true});
+    const exited = once(child,'exit');
     try {
-      await new Promise((resolve,reject)=>{worker.once('message',resolve);worker.once('error',reject);});
+      await Promise.race([once(child.stdout,'data'),exited.then(()=>{throw Error('Foreign pipe listener failed');})]);
       assert.throws(()=>new Socket().connect(endpoint),/Offline regression forbids network access/);
-      const closed = new Promise((resolve,reject)=>{worker.once('message',resolve);worker.once('error',reject);});
-      worker.postMessage('close');
-      await closed;
-    } finally {await worker.terminate();await rm(endpoint,{force:true});}
+    } finally {child.stdin.end();assert.equal((await exited)[0],0);}
   }
 }
 console.log('Offline network guard verified; external transports/redirects and unowned endpoints blocked.');

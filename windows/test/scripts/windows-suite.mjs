@@ -186,7 +186,7 @@ const commands = windowsOnly
         ]);
       return [
         name === 'screenshot-performance'
-          ? ['../shared/test/scripts/screenshot-performance.mjs', '--native', '--platform']
+          ? ['../shared/test/scripts/screenshot-performance.mjs']
           : [
               name === 'rag-core'
                 ? '../shared/test/scripts/rag-core-smoke.mjs'

@@ -96,7 +96,10 @@ async function openAISettings(page) {
   return settings;
 }
 async function measureFooter(text, footerSelector) {
-  return text.evaluate((element, selector) => {
+  return text.evaluate(async (element, selector) => {
+    await Promise.all(document.getAnimations()
+      .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime))
+      .map((animation) => animation.finished.catch(() => {})));
     const footer = element.closest(selector);
     const divider = footer.previousElementSibling;
     if (!divider.matches('.settings-entry') ||
@@ -106,6 +109,8 @@ async function measureFooter(text, footerSelector) {
     const box = footer.getBoundingClientRect();
     const extent = element.getBoundingClientRect();
     const style = getComputedStyle(element);
+    // DOMRect subtraction can leave floating-point noise below one Chromium layout unit.
+    const layoutPixels = (value) => Math.round(value * 64) / 64;
     return {
       color: style.color,
       parentColor: getComputedStyle(footer.parentElement).color,
@@ -113,9 +118,9 @@ async function measureFooter(text, footerSelector) {
         fontSize: style.fontSize,
         lineHeight: style.lineHeight,
         fontWeight: style.fontWeight,
-        dividerGap: extent.top - row.bottom,
-        textInset: extent.left - row.left,
-        footerRightInset: row.right - box.right,
+        dividerGap: layoutPixels(extent.top - row.bottom),
+        textInset: layoutPixels(extent.left - row.left),
+        footerRightInset: layoutPixels(row.right - box.right),
         bottomMargin: getComputedStyle(footer).marginBottom,
       },
     };
@@ -185,6 +190,9 @@ try {
         note.matches('.updates-notes > p:only-child')));
       const about = await measureFooter(preservationNote, '.updates-footer');
       assert.deepEqual(ai.layout, about.layout, language + '/' + theme + ': footer alignment and typography');
+      assert.equal(ai.layout.dividerGap, 16);
+      assert.equal(ai.layout.textInset, 0);
+      assert.equal(ai.layout.footerRightInset, 0);
       assert.equal(ai.color, ai.parentColor);
       assert.equal(about.color, theme === 'light' ? 'rgb(96, 106, 112)' : 'rgb(150, 159, 165)');
       assert.notEqual(ai.color, about.color);

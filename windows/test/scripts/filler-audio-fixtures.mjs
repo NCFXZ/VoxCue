@@ -15,6 +15,9 @@ const cases = [
   { id: 'um', text: '嗯。嗯。', kind: 'filler' },
   { id: 'ah', text: '啊。', kind: 'filler' },
   { id: 'uh', text: '呃。呃。', kind: 'filler' },
+  { id: 'um-sustained', text: '嗯嗯嗯嗯。', rate: -4, kind: 'filler' },
+  { id: 'ah-sustained', text: '啊啊啊啊啊啊啊啊。', rate: -4, kind: 'filler' },
+  { id: 'uh-sustained', text: '额，额，额。', rate: -4, kind: 'filler' },
   { id: 'question', text: '请介绍你的项目经历。', kind: 'question' },
   { id: 'mixed', text: '嗯，请介绍你的项目经历。', kind: 'question' },
   { id: 'followup', text: '然后呢？', kind: 'question' },
@@ -45,6 +48,7 @@ try {
   $token.SetId('HKEY_LOCAL_MACHINE\\SOFTWARE\\Microsoft\\Speech_OneCore\\Voices\\Tokens\\' + $inputData.voice)
   $synth.Voice = $token
   foreach ($item in $inputData.audio) {
+    $synth.Rate = [int]$item.rate
     $stream = $null
     $format = $null
     try {

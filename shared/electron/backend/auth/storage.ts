@@ -4,6 +4,22 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { atomicFile, preserveEncryptedFile } from '../atomicFile';
 import type { CredentialRecord, AuthStorage } from './service';
+export function decryptElectronCredential(value: Buffer) {
+  try {
+    return safeStorage.decryptString(value);
+  } catch (error) {
+    // Electron distinguishes a malformed envelope from an unavailable system key.
+    if (
+      error instanceof Error &&
+      error.message ===
+        'Error while decrypting the ciphertext provided to safeStorage.decryptString. Ciphertext does not appear to be encrypted.'
+    )
+      throw Object.assign(new Error('本地登录信息无效，请检查应用数据。'), {
+        code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
+      });
+    throw error;
+  }
+}
 export interface CredentialEncryption {
   encrypt(value: string): Buffer | Promise<Buffer>;
   decrypt(value: Buffer): string | Promise<string>;
@@ -22,7 +38,7 @@ export function createAuthStorage(
     decrypt(value) {
       if (!safeStorage.isEncryptionAvailable())
         throw new Error(`${credentialEncryptionLabel}不可用，请稍后重试。`);
-      return safeStorage.decryptString(value);
+      return decryptElectronCredential(value);
     },
   };
   const directory = path.join(app.getPath('userData'), 'auth-data');

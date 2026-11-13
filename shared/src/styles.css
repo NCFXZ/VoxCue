@@ -7179,8 +7179,7 @@ small {
   font-weight: 400;
   color: var(--foreground);
 }
-.component-copy span,
-.component-ready {
+.component-copy span {
   color: var(--muted);
   font-size: var(--type-secondary);
 }

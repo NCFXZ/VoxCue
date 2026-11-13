@@ -182,7 +182,7 @@ export async function checkComponents(application) {
   await assertInitialDownloadProgress(
     rag.locator('.download-button'),
     () => rag.getByRole('button', { name: '下载', exact: true }).click(),
-    { delayMs: 500 },
+    { app: application, delayMs: 500 },
   );
   assert.equal(await speech.getByRole('button', { name: '下载', exact: true }).isDisabled(), true);
   await rag.locator('.download-button').click();
@@ -228,7 +228,7 @@ export async function checkComponents(application) {
     globalThis.ragMode = 'real';
   });
   await rag.getByRole('button', { name: '下载', exact: true }).click();
-  await assertDownloadButton(page, rag.locator('.download-button'));
+  await assertDownloadButton(page, rag.locator('.download-button'), { app: application });
   await waitForAsync(
     page,
     async () =>
@@ -277,7 +277,7 @@ export async function checkComponents(application) {
     assert.equal(
       requests.filter(
         (url) =>
-          url.startsWith('https://github.com/NCFXZ/VoxCue-releases/releases/download/') &&
+          url.startsWith('https://github.com/NCFXZ/VoxCue/releases/download/') &&
           url.endsWith('/' + name),
       ).length,
       name.includes('RAG') ? 3 : 1,

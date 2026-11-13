@@ -74,6 +74,22 @@ it('never writes a plaintext session when system encryption is unavailable', asy
   expect(await readdir(path.join(native.directory, 'cloud-account'))).toEqual([]);
   expect(native.encrypt).not.toHaveBeenCalled();
 });
+it('distinguishes a malformed native envelope from an unavailable decryption service', async () => {
+  const vault = createCloudVault();
+  const file = path.join(native.directory, 'cloud-account/session.bin');
+  native.available.mockReturnValue(true);
+  native.encrypt.mockReturnValue(Buffer.from('synthetic encrypted bytes'));
+  await vault.write(value);
+  const original = await readFile(file);
+  native.decrypt.mockImplementationOnce(() => {
+    throw Error('Error while decrypting the ciphertext provided to safeStorage.decryptString. Ciphertext does not appear to be encrypted.');
+  });
+  await expect(vault.read()).rejects.toMatchObject({ code: 'VOXCUE_CREDENTIAL_INVALID_DATA' });
+  const unavailable = Object.assign(Error('Synthetic service missing'), { code: 'ENOENT' });
+  native.decrypt.mockImplementationOnce(() => { throw unavailable; });
+  await expect(vault.read()).rejects.toBe(unavailable);
+  expect(await readFile(file)).toEqual(original);
+});
 it('does not mistake an encrypted null record for a missing credential file', async () => {
   const encryption = crypto(),
     vault = createCloudVault(encryption);

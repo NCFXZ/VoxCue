@@ -7,6 +7,7 @@ import { open, readFile, stat } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { checkPackagedRenderer } from './packaged-renderer-check.mjs';
 
 assert.equal(process.platform, 'win32');
 process.env.ELECTRON_BUILDER_CACHE = path.resolve('.cache/electron-builder');
@@ -38,6 +39,7 @@ const stage = testRelease
   ? path.join(testRelease, 'platform-layout-portable/VoxCue-win32-x64')
   : path.resolve('release/installer-stage/VoxCue-win32-x64');
 const manifest = yaml.load(await readFile(path.join(output, 'latest.yml'), 'utf8'));
+await checkPackagedRenderer(path.join(stage, 'resources/app.asar'));
 assert.equal(manifest.version, version);
 assert.equal(manifest.path, name);
 const binary = manifest.files.find((file) => file.url === name);
@@ -76,7 +78,7 @@ async function run(args, consume) {
   const timer = setTimeout(() => child.kill(), 180000);
   const code = await new Promise((resolve, reject) => {
     child.once('error', reject);
-    child.once('exit', resolve);
+    child.once('close', resolve);
   }).finally(() => clearTimeout(timer));
   assert.equal(code, 0, error || output);
   return output;
@@ -102,6 +104,9 @@ for (const file of [
   'VoxCue.exe',
   'resources/app.asar',
   'resources/app-update.yml',
+  'resources/app.asar.unpacked/dist-electron/shared/electron/backend/cancellable.js',
+  'resources/licenses/LICENSE',
+  'resources/licenses/THIRD_PARTY_NOTICES.md',
   'resources/voxcue-components.json',
   'resources/native/VoxCue.Audio.exe',
   'resources/native/VoxCue.Screenshot.exe',
@@ -114,11 +119,10 @@ for (const file of [
     bytes += data.length;
   });
   assert.equal(bytes, (await stat(path.join(stage, file))).size, file + ' payload size');
-  assert.equal(
-    hash.digest('hex'),
-    await hashFile(path.join(stage, file)),
-    file + ' differs from validated staging',
-  );
+  const reference = file.startsWith('resources/licenses/')
+    ? path.join('..', path.basename(file))
+    : path.join(stage, file);
+  assert.equal(hash.digest('hex'), await hashFile(reference), file + ' payload hash');
 }
 console.log(
   JSON.stringify({

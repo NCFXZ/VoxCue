@@ -7,9 +7,9 @@ const fsp = require('node:fs/promises');
 const os = require('node:os');
 const path = require('node:path');
 const { createRequire } = require('node:module');
-const { spawn } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
 const { Worker } = require('node:worker_threads');
-const { app, utilityProcess } = require('electron');
+const { app, safeStorage, utilityProcess } = require('electron');
 
 let phase = 'checking-guest';
 let resultFile;
@@ -90,8 +90,27 @@ function failureDetails(error) {
   )
     details.runtimeExitCode = Number(exit);
   const stack = typeof error?.stack === 'string' ? error.stack : '';
-  const line = Number(stack.match(/package-native-check\.cjs:(\d+):\d+/)?.[1]);
+  const guestStack = [error?.cause?.stack, stack].filter((item) => typeof item === 'string').join('\n');
+  const guestLine = guestStack.match(/guest-screenshot-check\.cjs:(\d+):\d+/)?.[1];
+  const line = Number(guestLine ?? stack.match(/package-native-check\.cjs:(\d+):\d+/)?.[1]);
   if (Number.isSafeInteger(line) && line > 0 && line <= 100000) details.sourceLine = line;
+  if (/^(?:background|color-[012]|cancel|overlay-(?:visible|protected))-[a-z-]+$/.test(error?.guestCaptureStep)) {
+    details.captureStep = error.guestCaptureStep;
+    const cause = error.cause ?? error;
+    if (['ERR_ASSERTION', 'ERR_BUFFER_OUT_OF_BOUNDS', 'ERR_OUT_OF_RANGE', 'ENOENT', 'EPERM', 'EACCES'].includes(cause.code))
+      details.errorReason = cause.code.toLowerCase().replaceAll('_', '-');
+    if (['hidden-cover', 'non-fullscreen-cover', 'non-topmost-cover', 'translucent-cover',
+         'wrong-cover-bounds', 'wrong-content-bounds', 'cover-lost-focus', 'guest-frame-color-mismatch'].includes(cause.message))
+      details.errorReason = cause.message;
+    if (/^ERR_FAILED \(-2\) loading /.test(cause.message)) details.errorReason = 'fixture-navigation';
+    if (/No (?:render frame|frame)|frame was disposed|Object has been destroyed/i.test(cause.message))
+      details.errorReason = 'fixture-renderer-unavailable';
+    if (/Script failed to execute/i.test(cause.message)) details.errorReason = 'fixture-script';
+    if (/无法处理截图/.test(cause.message)) details.errorReason = 'encode-failed';
+    if (/截图处理超时/.test(cause.message)) details.errorReason = 'encode-timeout';
+    if (Number.isInteger(cause.code) && cause.code >= 0 && cause.code < 256)
+      details.errorReason = 'helper-exit-' + cause.code;
+  }
   return details;
 }
 const within = (root, target) => {
@@ -224,11 +243,30 @@ async function checkSdk(load, unpacked, work) {
     throw failure.error;
   }
   report.copilotRuntime = true;
-  phase = 'codex-synthetic-token';
+  phase = 'codex-empty-keyring';
   const { CodexUsageRuntime, codexUsageExecutable } = load(
     './dist-electron/shared/electron/backend/chat/codexUsage.js',
   );
   assert.ok(within(unpacked, codexUsageExecutable()));
+  const keyringHome = path.join(work, 'codex-empty-keyring');
+  await fsp.mkdir(keyringHome);
+  const keyring = new CodexUsageRuntime(keyringHome, (binary, args, options) => {
+    assert.equal(binary, codexUsageExecutable());
+    assert.equal(options.env.CODEX_HOME, keyringHome);
+    assert.deepEqual(args.filter((arg) => arg.startsWith('cli_auth_credentials_store=')), [
+      'cli_auth_credentials_store="keyring"',
+    ]);
+    return spawn(binary, args, options);
+  });
+  try {
+    assert.equal(await keyring.account(), null);
+  } finally {
+    await keyring.stop();
+  }
+  await assert.rejects(fsp.lstat(path.join(keyringHome, 'auth.json')), { code: 'ENOENT' });
+  report.codexEmptyKeyring = true;
+
+  phase = 'codex-synthetic-token';
   const sockets = new Set();
   const proxy = require('node:net').createServer((socket) => {
     sockets.add(socket);
@@ -408,7 +446,9 @@ async function checkSpeech(load, unpacked, appDirectory, fixtures) {
     await worker.terminate();
   }
   phase = 'speech-utility';
-  const helper = path.join(appDirectory, 'resources/native/VoxCue.Audio.exe');
+  ordinary(path.join(appDirectory, 'resources/native/VoxCue.Audio.exe'));
+  ordinary(path.join(speech, '../cancellable.js'));
+  const helper = path.join(fixtures, 'SyntheticPlayback.exe');
   ordinary(helper);
   const child = utilityProcess.fork(
     path.join(unpacked, 'dist-electron/windows/electron/speech/process.js'),
@@ -441,6 +481,19 @@ async function checkSpeech(load, unpacked, appDirectory, fixtures) {
       15000,
     );
     assert.equal(status.value.state, 'idle');
+    const options = { sources: ['system'], system: 'fixture' };
+    for (const [id, op, expected] of [
+      ['start', 'start', 'running'], ['stop', 'stop', 'idle'],
+      ['restart', 'start', 'running'], ['stop-again', 'stop', 'idle'],
+    ]) {
+      const result = await messageUntil(
+        child,
+        (message) => message.id === id,
+        () => child.postMessage({ id, call: op === 'start' ? { op, options } : { op } }),
+        45000,
+      );
+      assert.equal(result.value.state, expected, id);
+    }
     await messageUntil(
       child,
       (m) => m.id === 'close',
@@ -606,6 +659,85 @@ async function checkMobile(load, archive) {
     assert.equal(await assets.read(privatePath), null);
   report.mobileAssets = true;
 }
+async function checkVault(load, seed) {
+  assert.equal(safeStorage.isEncryptionAvailable(), true);
+  const { createCloudVault, createCredentialVault } = load('./dist-electron/shared/electron/backend/cloud/vault.js');
+  const { CloudAccountClient } = load('./dist-electron/shared/electron/backend/cloud/client.js');
+  const { storedTelemetryProofs } = load('./dist-electron/shared/electron/backend/telemetry/identity.js');
+  const origin = 'https://vault.example.test';
+  const user = { id: '11111111-1111-4111-8111-111111111111', email: 'vault@example.test', createdAt: 1 };
+  const sessionId = '22222222-2222-4222-8222-222222222222';
+  const directory = path.join(app.getPath('userData'), 'cloud-account');
+  const file = path.join(directory, 'session.bin');
+  const telemetryFile = path.join(directory, 'telemetry.bin');
+  const vault = createCloudVault();
+  const proofVault = createCredentialVault(telemetryFile, undefined, 262144);
+  const issuedAt = 1700000000000, ttl = 30 * 86400000;
+  const eventUntil = issuedAt + ttl, deliverUntil = eventUntil + ttl;
+  const part = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const identityProof = [
+    part({ alg: 'HS256', typ: 'voxcue-telemetry+jwt' }),
+    part({ iss: 'voxcue-account-server', aud: 'voxcue:telemetry-attribution:v2',
+      sub: user.id, installationId: nonce, iat: issuedAt / 1000, nbf: issuedAt / 1000 - 300,
+      exp: deliverUntil / 1000, eventUntil }),
+    'a'.repeat(43),
+  ].join('.');
+  const proofs = { schemaVersion: 2, installationId: nonce, origin,
+    tickets: [{ id: sessionId, userId: user.id, issuedAt, eventUntil, deliverUntil, identityProof }] };
+  const session = { user, sessionId, expiresAt: Date.now() + 900000, refreshExpiresAt: Date.now() + ttl,
+    accessToken: 'a'.repeat(43), refreshToken: 'b'.repeat(43) };
+  const calls = [];
+  const client = (port = vault) => new CloudAccountClient({
+    origin, vault: port, deviceLabel: 'Sandbox',
+    fetcher: async (url) => {
+      calls.push(url);
+      if (url === origin + '/v1/auth/login') return Response.json(session);
+      if (url === origin + '/v1/account') return Response.json({ user });
+      throw Error('Unexpected synthetic vault route');
+    },
+  });
+  const login = { action: 'login', email: user.email, password: 'synthetic-passphrase' };
+  if (seed) {
+    assert.equal(await vault.read(), null);
+    assert.equal(await proofVault.read(), null);
+    assert.equal((await client().call(login)).ok, true);
+    await proofVault.write(proofs);
+  } else {
+    const status = await client().call({ action: 'status' });
+    assert.equal(status.ok, true);
+    assert.deepEqual(status.state.user, user);
+    assert.deepEqual(calls, [origin + '/v1/account']);
+  }
+  assert.deepEqual(storedTelemetryProofs(await proofVault.read(), origin, nonce), proofs);
+  const original = await fsp.readFile(file), originalProof = await fsp.readFile(telemetryFile);
+  assert.ok(!original.includes(Buffer.from(session.accessToken)) && !original.includes(Buffer.from(user.email)));
+  assert.ok(!originalProof.includes(Buffer.from(identityProof)));
+  assert.equal(JSON.parse(safeStorage.decryptString(original)).credentials.sessionId, sessionId);
+  if (seed) return;
+
+  // The SID, profile and persisted bytes stay real; only the unavailable system port is injected.
+  const unavailable = async () => { throw Error('Synthetic system encryption unavailable'); };
+  const denied = createCloudVault({ encrypt: unavailable, decrypt: unavailable });
+  calls.length = 0;
+  assert.equal((await client(denied).call(login)).ok, false);
+  assert.deepEqual(calls, []);
+  assert.deepEqual(await fsp.readFile(file), original);
+  assert.deepEqual((await fsp.readdir(directory)).sort(), ['session.bin', 'telemetry.bin']);
+
+  const damaged = safeStorage.encryptString('null');
+  await fsp.writeFile(file, damaged);
+  const recovering = client();
+  assert.equal((await recovering.call({ action: 'status' })).ok, false);
+  assert.deepEqual(await fsp.readFile(file), damaged);
+  assert.deepEqual((await fsp.readdir(directory)).sort(), ['session.bin', 'telemetry.bin']);
+  assert.equal((await recovering.call(login)).ok, true);
+  assert.deepEqual(calls, [origin + '/v1/auth/login']);
+  const backups = (await fsp.readdir(directory)).filter((name) => name.endsWith('.recovery'));
+  assert.equal(backups.length, 1);
+  assert.deepEqual(await fsp.readFile(path.join(directory, backups[0])), damaged);
+  assert.equal((await vault.read()).credentials.sessionId, sessionId);
+  assert.deepEqual(await fsp.readFile(telemetryFile), originalProof);
+}
 async function main() {
   assert.equal(process.platform, 'win32');
   assert.equal(process.arch, 'x64');
@@ -613,9 +745,14 @@ async function main() {
   const profile = path.resolve(os.homedir());
   assert.equal(profile.toLowerCase(), 'c:\\users\\wdagutilityaccount');
   noRedirectedAncestors(profile);
-  assert.equal(process.argv.length, 5);
+  const vaultPhase = process.argv[5];
+  if (vaultPhase === undefined) assert.equal(process.argv.length, 5);
+  else {
+    assert.equal(process.argv.length, 6);
+    assert.ok(['vault-seed', 'vault-restore'].includes(vaultPhase));
+  }
   const [configFile, outputFile, workArgument] = process.argv
-    .slice(2)
+    .slice(2, 5)
     .map((file) => path.resolve(file));
   const inputConfigFile = 'C:\\VoxCueStoreInput\\config.json';
   ordinary(inputConfigFile);
@@ -642,11 +779,11 @@ async function main() {
   );
   assert.equal(fs.existsSync(outputFile), false);
   noRedirectedAncestors(path.dirname(outputFile));
-  resultFile = outputFile;
+  if (!vaultPhase) resultFile = outputFile;
   phase = 'checking-work';
   const work = path.join(workArgument, 'package-native');
-  assert.equal(fs.existsSync(work), false);
-  fs.mkdirSync(work);
+  if (vaultPhase) noRedirectedAncestors(work);
+  else fs.mkdirSync(work);
   phase = 'checking-fixtures';
   const fixtures = path.resolve(config.fixtureDirectory);
   assert.equal(fixtures.toLowerCase(), 'c:\\voxcuestoreinput\\fixtures');
@@ -661,30 +798,41 @@ async function main() {
   const load = createRequire(archive + '/package.json');
   assert.equal(load('./package.json').version, config.version);
   app.setAppPath(archive);
-  const userData = path.join(work, 'profile');
-  fs.mkdirSync(userData);
+  const userData = path.join(work, vaultPhase ? 'vault-profile' : 'profile');
+  if (vaultPhase === 'vault-restore') noRedirectedAncestors(userData);
+  else fs.mkdirSync(userData);
   app.setPath('userData', userData);
   app.setPath('sessionData', userData);
   await app.whenReady();
+  if (vaultPhase) {
+    await checkVault(load, vaultPhase === 'vault-seed');
+    return;
+  }
   report.finalAsar = true;
+  // Separate Electron main processes use the same guest SID and dedicated vault profile.
+  for (phase of ['vault-seed', 'vault-restore']) {
+    const child = spawnSync(process.execPath, [...process.argv.slice(1), phase], {
+      stdio: 'ignore', windowsHide: true, timeout: 30000,
+    });
+    if (child.error) throw child.error;
+    assert.equal(child.status, 0);
+  }
+  report.nativeVault = true;
   await checkSdk(load, unpacked, work);
   await checkSpeech(load, unpacked, appDirectory, fixtures);
   await checkKnowledge(load, fixtures, work);
   await checkMobile(load, archive);
   phase = 'screenshot-worker';
-  const { encodeScreenshotBitmap } = load(
-    './dist-electron/shared/electron/backend/screenshot/host.js',
-  );
-  const bitmap = new ArrayBuffer(16 * 16 * 4);
-  new Uint8Array(bitmap).fill(255);
-  const image = await encodeScreenshotBitmap(
-    { width: 16, height: 16, bitmap },
-    new AbortController().signal,
-  );
-  assert.equal(image.file.name, 'screenshot.png');
-  assert.equal(Buffer.from(image.file.bytes).subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
-  assert.match(image.preview, /^data:image\/jpeg;base64,/);
+  const checkWorkers = require('./screenshot-worker-checks.cjs');
+  const workers = await checkWorkers({ runtimeRoot: archive });
+  assert.equal(workers.encodings, 23);
+  assert.equal(workers.created, workers.exited);
   report.screenshotWorker = true;
+  phase = 'screenshot-native';
+  const helper = path.join(appDirectory, 'resources/native/VoxCue.Screenshot.exe');
+  ordinary(helper);
+  await require('./guest-screenshot-check.cjs')(load, helper);
+  report.screenshotCapture = true;
   phase = 'complete';
 }
 async function writeResult(value) {
@@ -694,7 +842,7 @@ async function writeResult(value) {
 }
 main().then(
   async () => {
-    await writeResult({ nonce, ok: true, phase, ...report });
+    if (resultFile) await writeResult({ nonce, ok: true, phase, ...report });
     app.exit(0);
   },
   async (error) => {

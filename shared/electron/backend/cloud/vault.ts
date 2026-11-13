@@ -2,8 +2,11 @@ import { app, safeStorage } from 'electron';
 import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicFile, preserveEncryptedFile } from '../atomicFile';
-import type { CredentialEncryption } from '../auth/storage';
+import { decryptElectronCredential, type CredentialEncryption } from '../auth/storage';
 import type { CloudVault } from './client';
+
+const invalidCredentials = () =>
+  Object.assign(Error('Invalid credentials'), { code: 'VOXCUE_CREDENTIAL_INVALID_DATA' });
 
 export function createCloudVault(encryption?: CredentialEncryption) {
   return createCredentialVault<Parameters<CloudVault['write']>[0]>(
@@ -26,31 +29,28 @@ export function createCredentialVault<T>(
     async decrypt(value: Buffer) {
       if (!safeStorage.isEncryptionAvailable())
         throw Error('System credential encryption unavailable');
-      return safeStorage.decryptString(value);
+      return decryptElectronCredential(value);
     },
   };
   return {
     async read(decrypt: (value: Buffer) => string | Promise<string> = crypto.decrypt) {
+      let bytes: Buffer;
       try {
-        if ((await stat(file)).size > limit) throw Error('Invalid credentials');
-        const plain = await decrypt(await readFile(file));
-        let value: unknown;
-        try {
-          value = JSON.parse(plain);
-        } catch {
-          throw Object.assign(Error('Invalid credentials'), {
-            code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
-          });
-        }
-        if (value === null)
-          throw Object.assign(Error('Invalid credentials'), {
-            code: 'VOXCUE_CREDENTIAL_INVALID_DATA',
-          });
-        return value;
+        if ((await stat(file)).size > limit) throw invalidCredentials();
+        bytes = await readFile(file);
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null;
         throw error;
       }
+      const plain = await decrypt(bytes);
+      let value: unknown;
+      try {
+        value = JSON.parse(plain);
+      } catch {
+        throw invalidCredentials();
+      }
+      if (value === null) throw invalidCredentials();
+      return value;
     },
     async write(value: T) {
       await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });

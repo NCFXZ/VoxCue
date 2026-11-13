@@ -6,6 +6,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
+import { checkPackagedRenderer } from './packaged-renderer-check.mjs';
 
 assert.equal(process.platform, 'win32');
 process.env.ELECTRON_BUILDER_CACHE = path.resolve('.cache/electron-builder');
@@ -38,7 +39,7 @@ async function seven(args, limit = 32 * 1024 * 1024) {
   const timer = setTimeout(() => child.kill(), 180000);
   const code = await new Promise((resolve, reject) => {
     child.once('error', reject);
-    child.once('exit', resolve);
+    child.once('close', resolve);
   }).finally(() => clearTimeout(timer));
   assert.ok(bytes <= limit, 'Bounded Store artifact read exceeded');
   assert.equal(code, 0, error);
@@ -123,6 +124,13 @@ for (const name of [
   'app/resources/voxcue-components.json',
 ])
   assert.ok(entries.has(name), name);
+for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+  const bundled = await entry('app/resources/licenses/' + name);
+  assert.ok(bundled.equals(await readFile(path.join('..', name))), name);
+}
+const cancellation = 'dist-electron/shared/electron/backend/cancellable.js';
+const physicalCancellation = await entry('app/resources/app.asar.unpacked/' + cancellation);
+assert.ok(physicalCancellation.equals(await readFile(cancellation)), cancellation);
 assert.deepEqual(
   JSON.parse((await entry('app/resources/voxcue-components.json')).toString('utf8')),
   {
@@ -132,6 +140,7 @@ assert.deepEqual(
 
 const archive = path.join(testRoot, 'store-app.asar');
 await writeFile(archive, await entry('app/resources/app.asar', 64 * 1024 * 1024));
+await checkPackagedRenderer(archive);
 const archived = asar
   .listPackage(archive)
   .map((name) => name.replaceAll('\\', '/').replace(/^\//, ''));

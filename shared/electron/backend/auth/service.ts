@@ -2,6 +2,7 @@ import { createServer, type Server } from 'node:http';
 import { decodeJwt } from 'jose';
 import type { AuthSession, SignOutResult } from '../../contracts/auth';
 import type { UILanguage } from '../../contracts/uiLanguage';
+import { credentialProblemCode } from '../../contracts/credentialProblems';
 import { createAuthCallbackPage } from './callbackPage';
 import type { ManagedChatGPTAuth } from './managed';
 import {
@@ -197,7 +198,8 @@ export class ChatGPTAuthService {
     try {
       // An explicit new login can recover unreadable credentials. Keep the file
       // untouched until a complete, verified authorization replaces it.
-      await this.load().catch(() => {
+      await this.load().catch((error) => {
+        if (credentialProblemCode(error) !== 'VOXCUE_CREDENTIAL_INVALID_DATA') throw error;
         this.record = null;
         this.loaded = Promise.resolve();
       });

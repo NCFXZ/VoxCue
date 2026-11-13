@@ -1,7 +1,7 @@
 import { connectUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
-import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
+import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { assertInitialDownloadProgress, assertDownloadButton } from './assert-download-button.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -444,9 +444,10 @@ try {
       await assertInitialDownloadProgress(
         progress,
         () => row.getByRole('button', { name: '下载', exact: true }).click(),
-        { delayMs: 500 },
+        { app, delayMs: 500 },
       );
-      await assertDownloadButton(page, progress);
+      await focusUiWindow(app, page);
+      await assertDownloadButton(page, progress, { app });
       if (index === 0 && process.argv.includes('--preview')) {
         // Keep cancellation visible while screenshot clipping adjusts the viewport.
         await page.keyboard.press('Tab');

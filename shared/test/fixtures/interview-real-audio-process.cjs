@@ -73,7 +73,15 @@ async function play(id) {
     const wave = sherpa.readWave(item.wave, false);
     if (wave.sampleRate !== 16000 || !wave.samples.length || wave.samples.length > 60 * 16000)
       throw Error('Expected nonempty mono 16 kHz WAV no longer than 60 seconds');
-    const total = Math.ceil((5120 + wave.samples.length + 51200) / 512) * 512;
+    let samples = wave.samples;
+    if (item.kind === 'unaccepted') {
+      // A fixed 64ms non-silent fragment of the hash-pinned public recording.
+      // Keep 3.2s of trailing silence so it leaves the production 500ms pre-roll.
+      const onset = samples.findIndex((value) => Math.abs(value) >= 0.05);
+      if (onset < 0 || onset + 1024 > samples.length) throw Error('Missing short speech fixture');
+      samples = samples.subarray(onset, onset + 1024);
+    }
+    const total = Math.ceil((5120 + samples.length + 51200) / 512) * 512;
     const started = performance.now();
     for (let offset = 0; offset < total; offset += 512) {
       healthy(capture);
@@ -88,7 +96,7 @@ async function play(id) {
       const block = new Float32Array(512);
       for (let i = 0; i < block.length; i++) {
         const at = offset + i - 5120;
-        if (at >= 0 && at < wave.samples.length) block[i] = wave.samples[at];
+        if (at >= 0 && at < samples.length) block[i] = samples[at];
       }
       capture.audio({ samples: block, rate: 16000, flags: 0, timestamp: samplesSent / 16 });
       samplesSent += block.length;

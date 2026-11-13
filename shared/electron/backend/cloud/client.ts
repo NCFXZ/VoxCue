@@ -507,11 +507,11 @@ export class CloudAccountClient {
         await this.load();
       } catch (error) {
         if (
-          error instanceof LocalCredentialFailure &&
-          error.credentialProblem !== 'VOXCUE_CREDENTIAL_INVALID_DATA'
+          !(error instanceof LocalCredentialFailure) ||
+          error.credentialProblem !== 'VOXCUE_CREDENTIAL_INVALID_DATA' ||
+          !['code', 'login', 'register', 'reset'].includes(String(action))
         )
           throw error;
-        if (!['code', 'login', 'register', 'reset'].includes(String(action))) throw error;
         await this.options.vault.preserve?.();
         this.current = null;
         this.verified = false;

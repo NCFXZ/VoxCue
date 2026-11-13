@@ -31,7 +31,7 @@ const [source] = config.publish;
 if (
   source.provider !== 'github' ||
   source.owner !== 'NCFXZ' ||
-  source.repo !== 'VoxCue-releases' ||
+  source.repo !== 'VoxCue' ||
   source.private !== false
 )
   throw Error('Unexpected release source');

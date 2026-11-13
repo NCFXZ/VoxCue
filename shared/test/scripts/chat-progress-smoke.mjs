@@ -697,11 +697,13 @@ try {
   await focusUiWindow(app, page);
   await page.mouse.move(0, 0);
   await currentTitle.hover();
-  await page.waitForFunction(
-    () =>
-      getComputedStyle(document.querySelector('.reasoning-heading.is-active + .reasoning-chevron'))
-        .opacity === '1',
-  );
+  await currentTitle.locator('.reasoning-chevron').evaluate(async (node) => {
+    const deadline = performance.now() + 5000;
+    while (!node.closest('summary')?.matches(':hover') || getComputedStyle(node).opacity !== '1') {
+      if (performance.now() >= deadline) throw Error('Hovered reasoning chevron did not reach full opacity');
+      await new Promise(requestAnimationFrame);
+    }
+  });
   await currentTitle.click();
   assert.equal(await currentTitle.locator('..').getAttribute('open'), '');
   await page.emulateMedia({ reducedMotion: 'reduce' });

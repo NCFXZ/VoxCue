@@ -1,4 +1,4 @@
-import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -184,7 +184,7 @@ async function end(page) {
   ]);
 }
 try {
-  const main = await app.firstWindow();
+  const main = await connectUiAccount(app, await app.firstWindow());
   main.setDefaultTimeout(15000);
   const errors = [];
   main.on('pageerror', (e) => errors.push(e.message));

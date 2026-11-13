@@ -1,4 +1,4 @@
-import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -57,7 +57,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [fixture], env });
 
 try {
-  const page = await app.firstWindow();
+  const page = await connectUiAccount(app, await app.firstWindow());
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));

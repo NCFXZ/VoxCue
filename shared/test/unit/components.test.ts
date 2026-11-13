@@ -657,6 +657,8 @@ describe('独立组件下载与版本缓存', () => {
     const liveLease = randomBytes(16).toString('hex');
     const release = await holdComponentLease(liveLease);
     const deadLease = randomBytes(16).toString('hex');
+    const releaseDead = await holdComponentLease(deadLease);
+    await releaseDead();
     const stages: string[] = [];
     for (const owner of [
       { kind: 'voxcue-component-stage', version: 2, lease: deadLease, pid: process.pid },

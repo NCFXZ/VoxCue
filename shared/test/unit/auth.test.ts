@@ -122,6 +122,18 @@ describe('Local authentication service', () => {
     expect(read).toHaveBeenCalledTimes(2);
     expect(write).not.toHaveBeenCalled();
   });
+  it('stops explicit sign-in before opening a browser if the credential store cannot be read', async () => {
+    const failure = Object.assign(Error('Synthetic storage unavailable'), { code: 'EIO' });
+    const openBrowser = vi.fn(), write = vi.fn(), hostId = vi.fn();
+    const service = new ChatGPTAuthService({
+      storage: { read: vi.fn().mockRejectedValue(failure), write, hostId },
+      openBrowser,
+    });
+    await expect(service.signIn()).rejects.toThrow('无法完成 ChatGPT 登录，请检查网络后重试。');
+    expect(hostId).not.toHaveBeenCalled();
+    expect(openBrowser).not.toHaveBeenCalled();
+    expect(write).not.toHaveBeenCalled();
+  });
   it('validates loopback before exchange, persists issued registration and exposes no credentials', async () => {
     const data = memoryStorage();
     const network = vi.fn<typeof fetch>().mockResolvedValue(

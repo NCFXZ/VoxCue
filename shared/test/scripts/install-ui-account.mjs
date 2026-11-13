@@ -1,9 +1,15 @@
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot } from './test-workspace.mjs';
 export async function focusUiWindow(app, page) {
+  if (process.platform === 'win32') {
+    const { focusOwnedWindow } = await import(
+      pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+    );
+    return focusOwnedWindow(app, page, workspace.platformRequire('electron'));
+  }
   if (process.platform !== 'darwin') return;
   const host = await app.evaluate(({ app }) => ({
     executable: app.getPath('exe'),

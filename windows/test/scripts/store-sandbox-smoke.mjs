@@ -29,9 +29,10 @@ import { createRequire } from 'node:module';
 assert.equal(process.platform, 'win32');
 const argument = process.argv[2];
 const copilotVault = argument === '--copilot-vault';
-const nsisTask = ['--nsis-current', '--nsis-upgrade'].includes(argument)
-  ? argument.slice(2)
-  : undefined;
+const nsisTask =
+  argument === '--nsis-current' ? 'nsis-current'
+    : ['--nsis-upgrade', '--nsis-upgrade-1.1.1'].includes(argument) ? 'nsis-upgrade'
+    : undefined;
 const appxArgument = argument?.startsWith('--appx=') ? argument : undefined;
 assert.ok(
   process.argv.length === 2 ||
@@ -39,7 +40,7 @@ assert.ok(
       (copilotVault ||
         nsisTask ||
         (appxArgument?.startsWith('--appx=') && appxArgument.length > '--appx='.length))),
-  'Use the current Store release, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current or --nsis-upgrade',
+  'Use the current Store release, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current, --nsis-upgrade or --nsis-upgrade-1.1.1',
 );
 const platformRoot = fileURLToPath(new URL('../../', import.meta.url));
 const repositoryRoot = path.resolve(platformRoot, '..');
@@ -56,12 +57,16 @@ const artifact = copilotVault
     : appxArgument
       ? path.resolve(appxArgument.slice('--appx='.length))
       : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
-const previousArtifact =
-  nsisTask === 'nsis-upgrade'
-    ? path.join(platformRoot, 'release/1.1.1/VoxCue-Setup-1.1.1-x64.exe')
-    : undefined;
-// Independently recorded in WINDOWS_1.1.1_RELEASE.md; never regenerate the baseline.
-const previousDigest = 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd';
+// Compare immutable released bytes against the independent Windows release records.
+const previousVersions = {
+  '--nsis-upgrade': ['1.2.0', 'a83d1399fb2dae98cc4dfcf98924c6e571d6c17a461ca92a8292556bbcc610ae'],
+  '--nsis-upgrade-1.1.1': ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd'],
+};
+const [previousVersion, previousDigest] =
+  nsisTask === 'nsis-upgrade' ? previousVersions[argument] : [];
+const previousArtifact = previousVersion
+  ? path.join(platformRoot, 'release', previousVersion, `VoxCue-Setup-${previousVersion}-x64.exe`)
+  : undefined;
 const label = copilotVault ? 'Copilot vault Sandbox' : nsisTask ? 'NSIS Sandbox' : 'Store Sandbox';
 const sandboxExe = path.join(process.env.WINDIR, 'System32/WindowsSandbox.exe');
 const powershell = path.join(process.env.WINDIR, 'System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -278,6 +283,12 @@ async function hash(file, algorithm = 'sha256', encoding = 'hex') {
   for await (const chunk of createReadStream(file)) digest.update(chunk);
   return digest.digest(encoding);
 }
+async function licenseDigests() {
+  const digests = {};
+  for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md'])
+    digests[name] = await hash(path.join(repositoryRoot, name));
+  return digests;
+}
 async function readResult(file) {
   const info = await lstat(file).catch((error) => {
     if (error.code !== 'ENOENT') throw error;
@@ -306,6 +317,12 @@ function Stage($name) {
   $result.stage = $name
   Write-OwnedJson 'status.json' @{nonce=$config.nonce; stage=$name}
   if (Test-Path -LiteralPath (Join-Path $output 'stop')) { throw 'Host requested Sandbox shutdown' }
+}
+function Check-Licenses($directory) {
+  foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) {
+    $file = Join-Path (Join-Path $directory 'resources\licenses') $name
+    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $config.licenses.$name) { throw ('Installed license mismatch: ' + $name) }
+  }
 }
 function Assert-GuestProfilePath($file) {
   $current = [IO.Path]::GetFullPath($file)
@@ -403,6 +420,15 @@ try {
         Get-ItemProperty | Where-Object { $_.DisplayName -in $names })
     }
     if ((Registration).Count -ne 0) { throw 'VoxCue was already registered in the guest' }
+    if ($config.ragDirectory) {
+      if ($config.task -cne 'nsis-upgrade' -or $config.previous.version -cne '1.2.0' -or
+          $config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$') { throw 'Unexpected upgrade component' }
+      $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
+      Assert-GuestProfilePath $cache
+      if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
+      $null = New-Item -ItemType Directory -Path $cache -Force
+      Copy-Item -LiteralPath (Join-Path 'C:\VoxCueStoreInput' $config.ragDirectory) -Destination $cache -Recurse
+    }
     $installers = @($config.current)
     if ($config.task -eq 'nsis-upgrade') { $installers = @($config.previous, $config.current) }
     foreach ($item in $installers) {
@@ -433,6 +459,7 @@ try {
       if ($info.PSIsContainer -or $info.VersionInfo.ProductVersion -notmatch ('^' + [regex]::Escape($item.version) + '(?:\.0)?$')) { throw 'Installed NSIS executable version mismatch' }
       if ($item.version -eq $config.version -and
           (Get-FileHash -LiteralPath (Join-Path $target 'resources\app.asar') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $config.asarSha256) { throw 'Installed final ASAR differs from the accepted staging payload' }
+      if ($item.version -eq $config.version) { Check-Licenses $target }
       return $key
     }
     $phases = New-Object Collections.Generic.List[string]
@@ -471,6 +498,7 @@ try {
         $runtimeFile = Join-Path $work ('runtime-' + $phases.Count + '.json')
         $options = @{nonce=$config.nonce; distribution='nsis'; appDirectory=$target; version=$expectedVersion;
           phase=$phase; bindings=$bindings; expectedPid=$app.Id; close=$true}
+        if ($config.ragDirectory) { $options.checkRag = $true; $options.ragRevision = $result.ragRevision }
         [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
         $inspection = New-Object Diagnostics.Process
         $inspectionStarted = $false
@@ -505,6 +533,11 @@ try {
         $runtime = Get-Content -LiteralPath $runtimeFile -Encoding UTF8 -Raw | ConvertFrom-Json
         if ($runtime.nonce -cne $config.nonce -or $runtime.pid -ne $app.Id -or $runtime.version -cne $expectedVersion -or
             $runtime.phase -cne $phase -or $runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Invalid NSIS renderer result' }
+        if ($config.ragDirectory) {
+          if ($runtime.ragRevision -cnotmatch '^[a-f0-9]{64}$' -or
+              ($phase -ceq 'verify' -and $runtime.ragRevision -cne $result.ragRevision)) { throw 'Upgrade changed the seeded RAG revision' }
+          $result.ragRevision = $runtime.ragRevision
+        }
         # Never kill a product process and call that a successful flush/upgrade.
         # Main and descendants share the original 30s budget; an early main exit
         # must not turn the first CIM snapshot into a zero-grace child assertion.
@@ -603,6 +636,7 @@ try {
   $exe = [IO.Path]::GetFullPath((Join-Path $package.InstallLocation $applications[0].Executable))
   if (-not $exe.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($exe) -ne 'VoxCue.exe') { throw 'Unexpected installed executable' }
   $appDirectory = Split-Path -Parent $exe
+  Check-Licenses $appDirectory
   $profileMarkers = @(
     (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'VoxCue\local-mode.json'),
     (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) ('Packages\' + $package.PackageFamilyName + '\LocalCache\Roaming\VoxCue\local-mode.json'))
@@ -714,6 +748,7 @@ public static class PackageProcess {
       if ($native.phase -match '^[a-z0-9-]{1,80}$') { $result.nativePhase = $native.phase }
       if ($native.errorType -match '^[A-Za-z0-9.]{1,80}$') { $result.errorType = $native.errorType }
       if ($native.errorReason -match '^[a-z0-9-]{1,80}$') { $result.nativeReason = $native.errorReason }
+      if ($native.captureStep -match '^(background|color-[012]|cancel|overlay-(visible|protected))-[a-z-]{1,40}$') { $result.captureStep = $native.captureStep }
       if ($native.errorCode -match '^(ENOENT|EACCES|EPERM|ENOTDIR|EISDIR|ETIMEDOUT|ECONNREFUSED|ECONNRESET|EPIPE)$') { $result.nativeCode = $native.errorCode }
       if ($native.runtimeExitCode -is [int] -or $native.runtimeExitCode -is [long]) { $result.runtimeExitCode = $native.runtimeExitCode }
       if ($native.knowledgeDiagnostic -match '^[a-z0-9-]{1,80}$') { $result.knowledgeDiagnostic = $native.knowledgeDiagnostic }
@@ -724,7 +759,7 @@ public static class PackageProcess {
       if ($native.sourceLine -is [int] -and $native.sourceLine -gt 0 -and $native.sourceLine -lt 10000) { $result.nativeLine = $native.sourceLine }
       throw 'Packaged native regression failed'
   }
-  foreach ($field in @('finalAsar', 'copilotRuntime', 'codexSyntheticToken', 'asrWorker', 'asrGapReset', 'speechUtility', 'knowledgeFormats', 'knowledgeModes', 'knowledgeRestart', 'knowledgeDelete', 'mobileAssets', 'screenshotWorker')) {
+  foreach ($field in @('finalAsar', 'nativeVault', 'copilotRuntime', 'codexEmptyKeyring', 'codexSyntheticToken', 'asrWorker', 'asrGapReset', 'speechUtility', 'knowledgeFormats', 'knowledgeModes', 'knowledgeRestart', 'knowledgeDelete', 'mobileAssets', 'screenshotWorker', 'screenshotCapture')) {
     if ($native.$field -isnot [bool] -or -not $native.$field) { throw ('Missing packaged native check: ' + $field) }
     $result[$field] = $true
   }
@@ -948,17 +983,36 @@ try {
     await copyFile(artifact, path.join(input, current.name));
     assert.equal(await hash(path.join(input, current.name)), originalHash, 'NSIS copy changed');
     let previous;
+    let ragDirectory;
     if (previousArtifact) {
       await ordinary(previousArtifact);
       previousHash = await hash(previousArtifact);
-      assert.equal(previousHash, previousDigest, 'Protected 1.1.1 installer changed');
-      previous = { name: path.basename(previousArtifact), version: '1.1.1', sha256: previousHash };
+      assert.equal(previousHash, previousDigest, 'Protected installer changed: ' + previousVersion);
+      previous = {
+        name: path.basename(previousArtifact), version: previousVersion, sha256: previousHash,
+      };
       await copyFile(previousArtifact, path.join(input, previous.name));
       assert.equal(
         await hash(path.join(input, previous.name)),
         previousDigest,
         'Old NSIS copy changed',
       );
+      if (previousVersion === '1.2.0') {
+        const { packagesFor } = requirePlatform('./dist-electron/shared/electron/backend/components/catalog.js');
+        const { componentLocation } = requirePlatform('./dist-electron/shared/electron/backend/components/service.js');
+        const { verifyCachedComponent } = await import('../../../shared/test/scripts/verify-model-cache.mjs');
+        const rag = packagesFor('win32', 'x64').find((item) => item.id === 'rag');
+        const source = componentLocation(path.join(platformRoot, '.cache/test-components'), rag);
+        await verifyCachedComponent(source, rag);
+        const target = componentLocation(input, rag);
+        ragDirectory = path.basename(target);
+        for (const relative of ['.voxcue-component.json', ...rag.files.map((file) => 'files/' + file.path)]) {
+          const destination = path.join(target, relative);
+          await mkdir(path.dirname(destination), { recursive: true });
+          await copyFile(path.join(source, relative), destination);
+        }
+        await verifyCachedComponent(target, rag);
+      }
     }
     const archive = path.join(
       platformRoot,
@@ -974,7 +1028,9 @@ try {
         version,
         current,
         previous,
+        ragDirectory,
         asarSha256: await hash(archive),
+        licenses: await licenseDigests(),
       }),
     );
     await copyFile(
@@ -998,6 +1054,15 @@ try {
     const models = await prepareModelFixtures();
     const fixtureDirectory = path.join(input, 'fixtures');
     await mkdir(fixtureDirectory);
+    execFileSync(
+      path.join(framework, 'csc.exe'),
+      [
+        '/nologo', '/platform:x64', '/target:exe',
+        '/out:' + path.join(fixtureDirectory, 'SyntheticPlayback.exe'),
+        path.join(platformRoot, 'test/fixtures/SyntheticPlayback.cs'),
+      ],
+      { windowsHide: true, timeout: 30000, stdio: 'pipe' },
+    );
     for (const [source, name] of [
       [models.speechModels, 'speech'],
       [models.ragModel, 'rag'],
@@ -1036,6 +1101,14 @@ try {
       path.join(platformRoot, 'test/scripts/package-native-check.cjs'),
       path.join(input, 'package-native-check.cjs'),
     );
+    await copyFile(
+      path.join(platformRoot, 'test/scripts/guest-screenshot-check.cjs'),
+      path.join(input, 'guest-screenshot-check.cjs'),
+    );
+    await copyFile(
+      path.join(repositoryRoot, 'shared/test/scripts/screenshot-worker-checks.cjs'),
+      path.join(input, 'screenshot-worker-checks.cjs'),
+    );
     // SignTool uses its matching SDK DLLs and side-by-side manifests.
     for (const entry of await readdir(kit, { withFileTypes: true })) {
       if (
@@ -1061,6 +1134,7 @@ try {
         packageVersion,
         artifactName: path.basename(artifact),
         sha256: originalHash,
+        licenses: await licenseDigests(),
         identityName: 'NCFX.VoxCue',
         publisher: 'CN=CC9C4962-FFC8-44D9-A2C0-B446CBFD375A',
         storeUpdateMessage: '此版本由 Microsoft Store 提供更新。',
@@ -1154,7 +1228,8 @@ try {
       } else if (nsisTask) {
         assert.equal(result.task, nsisTask);
         assert.equal(result.appVersion, version);
-        assert.equal(result.previousVersion, previousArtifact ? '1.1.1' : null);
+        assert.equal(result.previousVersion, previousVersion ?? null);
+        if (previousVersion === '1.2.0') assert.match(result.ragRevision, /^[a-f0-9]{64}$/);
         assert.equal(
           result.installDirectory.toLowerCase(),
           path.win32.join(result.guestProfile, 'AppData/Local/Programs/VoxCue').toLowerCase(),
@@ -1167,7 +1242,7 @@ try {
         assert.deepEqual(
           result.phases,
           previousArtifact
-            ? ['1.1.1:seed', version + ':verify', version + ':verify']
+            ? [previousVersion + ':seed', version + ':verify', version + ':verify']
             : [version + ':seed', version + ':verify'],
         );
         for (const field of ['persistence', 'naturalExits', 'sourceUnchanged'])
@@ -1195,7 +1270,9 @@ try {
         assert.equal(typeof result.systemVcRuntimeAbsent, 'boolean');
         for (const field of [
           'finalAsar',
+          'nativeVault',
           'copilotRuntime',
+          'codexEmptyKeyring',
           'codexSyntheticToken',
           'asrWorker',
           'asrGapReset',
@@ -1206,6 +1283,7 @@ try {
           'knowledgeDelete',
           'mobileAssets',
           'screenshotWorker',
+          'screenshotCapture',
           'persistence',
         ])
           assert.equal(result[field], true, 'Missing packaged regression: ' + field);
@@ -1240,7 +1318,7 @@ try {
       assert.equal(
         await hash(previousArtifact),
         previousDigest,
-        'Protected 1.1.1 installer changed',
+        'Protected installer changed: ' + previousVersion,
       );
     assert.equal(path.dirname(await realpath(root)), temporary);
     assert.ok(path.basename(root).startsWith(temporaryPrefix));

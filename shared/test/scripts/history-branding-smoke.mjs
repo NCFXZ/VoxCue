@@ -1,9 +1,6 @@
-import { connectUiAccount } from './install-ui-account.mjs';
+import { closeUiApp, connectUiAccount, focusUiWindow, installUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { closeUiApp } from './install-ui-account.mjs';
-
-import { installUiAccount } from './install-ui-account.mjs';
 import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -90,11 +87,13 @@ try {
   const main = await connectUiAccount(app, login);
   main.setDefaultTimeout(15000);
   main.on('pageerror', (e) => errors.push(e.message));
-  const startViewFrames = () =>
-    main.evaluate(() => {
+  const startViewFrames = async () => {
+    await focusUiWindow(app, main);
+    await main.waitForFunction(() => !document.documentElement.dataset.viewDirection);
+    await main.evaluate(() => {
       const frames = [];
       let frame;
-      const sample = () => {
+      const sample = (time) => {
         const root = document.documentElement;
         if (root.dataset.viewDirection) {
           const read = (pseudo) => {
@@ -104,6 +103,7 @@ try {
             return { opacity: Number(style.opacity), x: matrix.m41, y: matrix.m42 };
           };
           frames.push({
+            time,
             direction: root.dataset.viewDirection,
             old: read('::view-transition-old(screen)'),
             next: read('::view-transition-new(screen)'),
@@ -116,6 +116,7 @@ try {
       frame = requestAnimationFrame(sample);
       window.historyViewFrames = { frames, stop: () => cancelAnimationFrame(frame) };
     });
+  };
   const finishViewFrames = async (direction) => {
     await main.waitForFunction(() => !document.documentElement.dataset.viewDirection);
     const frames = await main.evaluate(() => {
@@ -134,7 +135,8 @@ try {
     );
     assert.ok(
       intermediate.length > 1,
-      direction + ': both complete pages must have intermediate opacity frames',
+      direction + ': both complete pages must have intermediate opacity frames: ' +
+        JSON.stringify(frames.map(({ time, direction, old, next }) => [time, direction, old.opacity, next.opacity])),
     );
     const axis = direction === 'page' ? 'y' : 'x';
     const sign = direction === 'back' ? 1 : -1;

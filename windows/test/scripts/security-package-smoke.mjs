@@ -12,6 +12,7 @@ import {
 } from '../../../shared/test/scripts/test-workspace.mjs';
 import fuses from '@electron/fuses';
 import { prepareVcRuntime } from '../../scripts/vc-runtime.mjs';
+import { checkPackagedRenderer } from './packaged-renderer-check.mjs';
 
 const require = createRequire(import.meta.url);
 assert.ok(process.argv.slice(2).every((argument) => argument === '--with-screenshot-worker'));
@@ -53,6 +54,7 @@ for (const [option, enabled] of [
 
 const asar = await import(pathToFileURL(require.resolve('@electron/asar')).href);
 const archive = path.join(root, 'resources/app.asar');
+await checkPackagedRenderer(archive);
 const { NtExecutable, NtExecutableResource } = await import(
   pathToFileURL(createRequire(require.resolve('@electron/packager')).resolve('resedit')).href
 );
@@ -86,7 +88,7 @@ assert.deepEqual(
   ),
   {
     ...key,
-    repository: 'NCFXZ/VoxCue-releases',
+    repository: 'NCFXZ/VoxCue',
   },
 );
 await assert.rejects(readFile(path.join(root, 'resources/voxcue-update.json')), { code: 'ENOENT' });
@@ -192,6 +194,14 @@ const bindings = entries.filter((entry) =>
 assert.ok(bindings.some((file) => file.includes('/lancedb-win32-x64-msvc/')));
 assert.ok(bindings.some((file) => file.includes('/onnxruntime-node/')));
 const runtime = await prepareVcRuntime();
+for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
+  const bundled = await readFile(path.join(root, 'resources/licenses', name));
+  assert.ok(bundled.equals(await readFile(path.join('..', name))), name);
+}
+const cancellation = path.normalize('dist-electron/shared/electron/backend/cancellable.js');
+assert.equal(asar.statFile(archive, cancellation).unpacked, true);
+const physicalCancellation = await readFile(path.join(archive + '.unpacked', cancellation));
+assert.ok(physicalCancellation.equals(await readFile(cancellation)), cancellation);
 assert.equal(
   createHash('sha256')
     .update(await readFile(path.join(root, 'resources/licenses', runtime.license.name)))

@@ -1,4 +1,32 @@
 import assert from 'node:assert/strict';
+import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import workspace from '../../scripts/workspace.mjs';
+
+const windowsProbe = () => import(
+  pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+);
+
+export async function pointAtControl(app, button, hover = true, freshEntry = false) {
+  if (process.platform === 'win32') {
+    const { pointAtOwnedControl } = await windowsProbe();
+    return pointAtOwnedControl(app, button, hover, workspace.platformRequire('electron'), freshEntry);
+  }
+  return hover ? button.hover() : button.page().mouse.move(1, 1);
+}
+
+export async function holdControl(app, button) {
+  const target = await pointAtControl(app, button);
+  if (process.platform !== 'win32') {
+    const mouse = button.page().mouse;
+    await mouse.down();
+    return { check() {}, release: () => mouse.up() };
+  }
+  const { probe } = await windowsProbe();
+  const args = [target.x, target.y, target.handle, target.pid];
+  probe('down-owned', ...args);
+  return { check: () => probe('check-owned', ...args), release: () => probe('up') };
+}
 
 async function settle(button) {
   await button.evaluate(async (element) => {
@@ -19,7 +47,7 @@ async function settle(button) {
 }
 
 const clockPages = new WeakSet();
-export async function assertInitialDownloadProgress(button, start, { delayMs = 1000 } = {}) {
+export async function assertInitialDownloadProgress(button, start, { delayMs = 1000, app } = {}) {
   const page = button.page();
   await page.bringToFront();
   if (!clockPages.has(page)) {
@@ -33,7 +61,9 @@ export async function assertInitialDownloadProgress(button, start, { delayMs = 1
     const started = Promise.resolve().then(start);
     started.catch(() => {});
     await button.waitFor({ state: 'visible' });
-    await button.hover();
+    // React replaced the clicked action under the pointer. Give the new
+    // control a fresh client-area entrance while its guard clock is paused.
+    await pointAtControl(app, button, true, true);
     const initialBounds = await button.boundingBox();
     const read = () =>
       button.evaluate((element) => ({
@@ -51,14 +81,14 @@ export async function assertInitialDownloadProgress(button, start, { delayMs = 1
     assert.deepEqual(await read(), guarded);
     await page.clock.runFor(400);
     const result = await started;
-    await button.hover();
+    await pointAtControl(app, button);
     assert.deepEqual(await read(), guarded);
     await page.clock.runFor(delayMs - 401);
     await page.bringToFront();
-    await button.hover();
+    await pointAtControl(app, button);
     assert.deepEqual(await read(), guarded);
     await button.evaluate((element) => element.click());
-    await button.hover();
+    await pointAtControl(app, button);
     assert.deepEqual(await read(), guarded, 'Clicks during the guard cannot cancel');
     await page.clock.runFor(1);
     await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
@@ -96,7 +126,7 @@ export async function assertInitialDownloadProgress(button, start, { delayMs = 1
   }
 }
 
-export async function assertDownloadButton(page, button, { iconOnly = false, hoverLabel } = {}) {
+export async function assertDownloadButton(page, button, { iconOnly = false, hoverLabel, app } = {}) {
   await page.bringToFront();
   const dark = await page.evaluate(() => document.documentElement.classList.contains('dark'));
   try {
@@ -105,7 +135,7 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
         (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),
         theme,
       );
-      await page.mouse.move(1, 1);
+      await pointAtControl(app, button, false);
       await button.locator('.download-button-progress').waitFor({ state: 'visible' });
       await settle(button);
       const ring = button.locator('[role="progressbar"]');
@@ -131,20 +161,22 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
       await button.scrollIntoViewIfNeeded();
       await settle(button);
       const before = await button.boundingBox();
-      await button.hover();
+      await pointAtControl(app, button);
       await settle(button);
-      const target = await button.boundingBox();
-      await page.mouse.move(target.x + target.width / 2, target.y + target.height / 2);
+      await pointAtControl(app, button);
       await button.locator('.download-button-cancel').waitFor({ state: 'visible' });
-      await settle(button);
-      assert.equal(await button.locator('.download-button-progress').isVisible(), false);
+      // Cancel fades in immediately; progress remains visible until the outgoing
+      // transition's delayed visibility change, including on fractional DPI.
+      const progress = button.locator('.download-button-progress');
+      await progress.waitFor({ state: 'hidden' });
+      assert.equal(await progress.isVisible(), false);
       await settle(button);
       assert.equal(
         await button.locator('.download-button-cancel').innerText(),
         hoverLabel ?? (iconOnly ? '' : '取消'),
       );
       assert.equal(await button.locator('.download-button-cancel svg').count(), 1);
-      await button.hover();
+      await pointAtControl(app, button);
       await settle(button);
       const cancel = await button.evaluate((element) => {
         const probe = document.createElement('span');
@@ -187,7 +219,7 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
         else assert.equal(size.width, 36);
         assert.equal(size.height, 36);
       }
-      await page.mouse.move(1, 1);
+      await pointAtControl(app, button, false);
       await page.keyboard.press('Tab');
       await button.focus();
       assert.equal(await button.locator('.download-button-cancel').isVisible(), true);
@@ -195,6 +227,6 @@ export async function assertDownloadButton(page, button, { iconOnly = false, hov
     }
   } finally {
     await page.evaluate((dark) => document.documentElement.classList.toggle('dark', dark), dark);
-    await page.mouse.move(1, 1);
+    await pointAtControl(app, button, false);
   }
 }

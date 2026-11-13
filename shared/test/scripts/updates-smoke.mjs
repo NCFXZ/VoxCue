@@ -11,7 +11,7 @@ import {
   focusUiWindow,
   waitForRestoredMainWindow,
 } from './install-ui-account.mjs';
-import { assertDownloadButton, assertInitialDownloadProgress } from './assert-download-button.mjs';
+import { assertDownloadButton, assertInitialDownloadProgress, holdControl, pointAtControl } from './assert-download-button.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
@@ -206,18 +206,17 @@ try {
   await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
   const checkButton = settings.getByRole('button', { name: '检查更新', exact: true });
   // Losing native focus/visibility correctly cancels a product hold. Establish
-  // this owned Mac window as AppKit's active app/key window before pointerdown.
+  // the owned native window and renderer focus before pointerdown.
   await focusUiWindow(app, page);
   await page.waitForFunction(() => document.visibilityState === 'visible' && document.hasFocus());
   const windowId = await (await app.browserWindow(page)).evaluate((window) => window.id);
   const assertFocusedWindow = async () => {
-    if (process.platform !== 'darwin') return;
     const state = await app.evaluate(({ app, BrowserWindow }, id) => ({
-      active: app.isActive(),
+      ...(process.platform === 'darwin' ? { active: app.isActive() } : {}),
       focused: BrowserWindow.getFocusedWindow()?.id === id,
       visible: BrowserWindow.fromId(id)?.isVisible(),
     }), windowId);
-    assert.deepEqual(state, { active: true, focused: true, visible: true });
+    assert.deepEqual(state, { ...(process.platform === 'darwin' ? { active: true } : {}), focused: true, visible: true });
   };
   const focusCheckButton = async () => {
     await focusUiWindow(app, page);
@@ -226,9 +225,9 @@ try {
   };
   await assertFocusedWindow();
   // Wait for the settings view snapshot to stop intercepting pointer input.
-  await checkButton.hover();
+  await pointAtControl(app, checkButton);
   await page.waitForFunction(() => !document.documentElement.dataset.viewDirection);
-  const holdBox = await checkButton.evaluate(async (button) => {
+  await checkButton.evaluate(async (button) => {
     const rect = () => {
       const box = button.getBoundingClientRect();
       return { x: box.x, y: box.y, width: box.width, height: box.height };
@@ -295,17 +294,18 @@ try {
     };
     window.updateHoldAudit.sample('before-pointer-move');
   });
-  await page.mouse.move(holdBox.x + holdBox.width / 2, holdBox.y + holdBox.height / 2);
   await assertFocusedWindow();
-  await page.mouse.down();
+  const hold = await holdControl(app, checkButton);
   try {
     await page.waitForTimeout(4700);
     assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeHold);
+    hold.check();
     await waitForHeldCheck(beforeHold);
   } catch (error) {
     const renderer = await page.evaluate(() => window.updateHoldAudit.read()).catch((failure) => ({ unavailable: failure.message }));
     const native = await app.evaluate(({ app, BrowserWindow }, id) => ({
-      active: app.isActive(), focusedWindow: BrowserWindow.getFocusedWindow()?.id,
+      ...(process.platform === 'darwin' ? { active: app.isActive() } : {}),
+      focusedWindow: BrowserWindow.getFocusedWindow()?.id,
       expectedWindow: id, visible: BrowserWindow.fromId(id)?.isVisible(),
       bounds: BrowserWindow.fromId(id)?.getContentBounds(),
       checks: globalThis.updateDriver.checks,
@@ -313,7 +313,7 @@ try {
     console.error('Update mouse hold diagnostics: ' + JSON.stringify({ scale: process.env.VOXCUE_TEST_SCALE_FACTOR ?? '1', beforeHold, renderer, native }));
     throw error;
   } finally {
-    await page.mouse.up();
+    await hold.release();
     await page.evaluate(() => {
       window.updateHoldAudit.release();
       delete window.updateHoldAudit;
@@ -448,13 +448,14 @@ try {
   await assertInitialDownloadProgress(settings.locator('.download-button'), async () => {
     await settings.getByRole('button', { name: '下载更新', exact: true }).click();
     await waitPhase(page, 'downloading');
-  });
+  }, { app });
   await app.evaluate(() => globalThis.updateDriver.emit('download-progress', { percent: 37.8 }));
   await settings.getByText('正在下载更新 37%', { exact: true }).waitFor();
   await assertFeedbackAlignment(settings);
   await assertDownloadButton(
     page,
     settings.getByRole('button', { name: '更新，取消下载', exact: true }),
+    { app },
   );
   await settings.getByRole('button', { name: '更新，取消下载', exact: true }).hover();
   await settings.getByRole('button', { name: '更新，取消下载', exact: true }).click();

@@ -61,7 +61,18 @@ export function devices(helper: string): Promise<AudioDevice[]> {
       if (failed) return;
       try {
         if (code !== 0) throw Error();
-        resolve(JSON.parse(out));
+        const inventory: unknown = JSON.parse(out);
+        if (!Array.isArray(inventory) || inventory.length > 256) throw Error();
+        resolve(inventory.map((device) => {
+          if (
+            !device || typeof device.id !== 'string' || !device.id || device.id.length > 512 ||
+            typeof device.name !== 'string' || device.name.length > 2000 ||
+            (device.source !== 'system' && device.source !== 'microphone') ||
+            typeof device.default !== 'boolean'
+          ) throw Error();
+          const { id, name, source, default: isDefault } = device;
+          return { id, name, source, default: isDefault };
+        }));
       } catch {
         reject(Error('无法枚举 Windows 音频设备。'));
       }
@@ -72,6 +83,11 @@ export class WasapiCapture {
   private child?: ChildProcessWithoutNullStreams;
   private closed?: Promise<void>;
   private stopping = false;
+  private nativeClosed = false;
+  private stopTask?: Promise<void>;
+  get retiring() {
+    return this.stopping && !!this.child && !this.nativeClosed;
+  }
   constructor(
     private helper: string,
     private source: AudioSource,
@@ -80,7 +96,10 @@ export class WasapiCapture {
     private failure: (message: string) => void,
   ) {}
   start(): Promise<void> {
+    if (this.stopTask || (this.child && !this.nativeClosed))
+      return Promise.reject(Error('旧音频采集进程尚未退出，请稍后重试。'));
     this.stopping = false;
+    this.nativeClosed = false;
     return new Promise((resolve, reject) => {
       const child = spawn(
         this.helper,
@@ -91,7 +110,10 @@ export class WasapiCapture {
       // Device exit can race the EOF used to stop capture; consume EPIPE and retire it.
       child.stdin.on('error', () => child.kill());
       // exit can precede the last stdout packet. close follows all pipe data.
-      this.closed = new Promise((done) => child.once('close', () => done()));
+      this.closed = new Promise((done) => child.once('close', () => {
+        this.nativeClosed = true;
+        done();
+      }));
       const decoder = new PacketDecoder();
       const lines = new BoundedLineDecoder(16384);
       let invalidOutput = false;
@@ -153,11 +175,12 @@ export class WasapiCapture {
       });
     });
   }
-  async stop() {
+  stop(): Promise<void> {
+    if (this.stopTask) return this.stopTask;
     this.stopping = true;
     const child = this.child;
-    if (!child) return;
-    await new Promise<void>((resolve, reject) => {
+    if (!child) return Promise.resolve();
+    this.stopTask = new Promise<void>((resolve, reject) => {
       let killed: NodeJS.Timeout | undefined;
       let forced = false;
       const timer = setTimeout(() => {
@@ -173,8 +196,13 @@ export class WasapiCapture {
         else resolve();
       });
       if (child.exitCode === null) child.stdin.end();
+    }).finally(() => {
+      this.stopTask = undefined;
+      if (this.nativeClosed) {
+        this.child = undefined;
+        this.closed = undefined;
+      }
     });
-    this.child = undefined;
-    this.closed = undefined;
+    return this.stopTask;
   }
 }

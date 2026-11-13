@@ -139,18 +139,25 @@ describe('independent cloud account client', () => {
   );
   it.each(['EACCES', 'EIO', 'VOXCUE_HELPER_PROTOCOL'])(
     'does not classify arbitrary local %s failures as recoverable data errors', async (code) => {
+      const preserve = vi.fn(), write = vi.fn(), fetcher = vi.fn();
       const client = new CloudAccountClient({
         origin, deviceLabel: 'Synthetic',
         vault: {
           read: async () => { throw Object.assign(Error('private local detail'), { code }); },
-          write: vi.fn(), clear: vi.fn(),
+          write, clear: vi.fn(), preserve,
         },
-        fetcher: vi.fn(),
+        fetcher,
       });
       const response = await client.call({ action: 'status' });
       expect(response).toMatchObject({ ok: false, error: '账号服务连接失败，请检查网络或系统凭据存储。' });
       expect(response).not.toHaveProperty('credentialProblem');
       expect(JSON.stringify(response)).not.toContain('private local detail');
+      expect(await client.call({
+        action: 'login', email: result().user.email, password: 'synthetic-password',
+      })).toMatchObject({ ok: false, error: '账号服务连接失败，请检查网络或系统凭据存储。' });
+      expect(preserve).not.toHaveBeenCalled();
+      expect(fetcher).not.toHaveBeenCalled();
+      expect(write).not.toHaveBeenCalled();
     },
   );
   it('sanitizes fixed local error codes without exposing messages or invoking getters', () => {
@@ -178,7 +185,7 @@ describe('independent cloud account client', () => {
       const stored = vault(kind === 'scalar' ? false : { origin, credentials: {} });
       if (kind === 'unreadable')
         stored.port.read = async () => {
-          throw Error('bad ciphertext');
+          throw Object.assign(Error('bad ciphertext'), { code: 'VOXCUE_CREDENTIAL_INVALID_DATA' });
         };
       const preserve = vi.fn(async () => {});
       stored.port.preserve = preserve;

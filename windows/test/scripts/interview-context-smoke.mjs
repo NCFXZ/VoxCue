@@ -1,4 +1,4 @@
-import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -72,7 +72,7 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [await offlineElectronEntry(fixture)], env });
 try {
   const errors = [];
-  const main = await app.firstWindow();
+  const main = await connectUiAccount(app, await app.firstWindow());
   main.on('pageerror', (error) => errors.push(error.message));
   main.setDefaultTimeout(20000);
   await main

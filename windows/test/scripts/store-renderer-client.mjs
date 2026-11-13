@@ -3,6 +3,9 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createHash } from 'node:crypto';
 
 // Runs only inside the disposable, offline Windows Sandbox. It speaks Chromium
 // CDP to the shipped renderer; no main-process inspector or test entry is used.
@@ -138,6 +141,26 @@ async function renderer(login) {
   );
   return connect(target.webSocketDebuggerUrl);
 }
+async function checkSecondLaunch(main) {
+  const exe = path.join(profile, 'AppData/Local/Programs/VoxCue/VoxCue.exe');
+  assert.equal(path.dirname(exe).toLowerCase(), config.appDirectory.toLowerCase());
+  assert.equal((await fs.realpath(exe)).toLowerCase(), exe.toLowerCase());
+  const onlyPage = async () => {
+    const pages = (await endpoint('list'))?.filter((item) => item.type === 'page');
+    assert.equal(pages?.length, 1, 'Expected one application window');
+    assert.equal(fileURLToPath(new URL(pages[0].url)).toLowerCase(), appPage);
+    return pages[0].id;
+  };
+  const targetId = await onlyPage();
+  await main.evaluate('window.desktop.windowAction("minimize")');
+  await poll(() => main.evaluate('document.visibilityState === "hidden"'), 'minimized original window');
+  await promisify(execFile)(exe, [], { cwd: work, windowsHide: true, timeout: 15000 });
+  await poll(
+    () => main.evaluate('document.visibilityState === "visible" && document.hasFocus()'),
+    'restored and focused original window after second launch',
+  );
+  assert.equal(await onlyPage(), targetId);
+}
 async function checkPersistence(main) {
   const bytes = Array.from(
     Buffer.from('Synthetic Sandbox original: 中文与 English remain intact.\n'),
@@ -201,6 +224,54 @@ async function checkPersistence(main) {
   };
   const call = (operation, input = expected) =>
     main.evaluate(`(${operation.toString()})(${JSON.stringify(input)})`);
+  let ragRevision;
+  if (config.checkRag) {
+    assert.ok(nsis);
+    const { document } = expected;
+    const components = await main.evaluate('window.desktop.components({op:"status"})');
+    assert.equal(components.items.find((item) => item.id === 'rag')?.phase, 'ready',
+      'The installed app must authenticate the offline RAG component');
+    const knowledge = async (request) => {
+      const result = await call((request) => {
+        if (request.op === 'import') request.bytes = new Uint8Array(request.bytes);
+        return window.desktop.knowledge(request);
+      }, request);
+      assert.equal(result.ok, true, result.error);
+      return result.value;
+    };
+    const contentHash = createHash('sha256').update(Buffer.from(bytes)).digest('hex');
+    const state = await knowledge({ op: 'status' });
+    assert.equal(state.modelReady, true);
+    const existing = state.documents.find((item) => item.documentId === document.id);
+    if (config.phase === 'seed') {
+      assert.equal(existing, undefined);
+      const indexed = await knowledge({
+        op: 'import', requestId: 'sandbox-index-seed', baseId: document.baseId,
+        documentId: document.id, name: document.name, bytes,
+      });
+      assert.equal(indexed.contentHash, contentHash);
+      assert.ok(indexed.chunkCount > 0);
+    } else {
+      assert.equal(existing?.contentHash, contentHash, 'Expected the old index before any UI reload');
+      assert.match(config.ragRevision, /^[a-f0-9]{64}$/);
+    }
+    const [hit] = await knowledge({
+      op: 'search', requestId: 'sandbox-index-search', query: 'Synthetic Sandbox original',
+      baseId: document.baseId, mode: 'vector', topK: 1,
+    });
+    assert.equal(hit?.documentId, document.id);
+    assert.equal(hit.mode, 'vector');
+    assert.ok(Number.isFinite(hit.similarity));
+    assert.match(hit.revision, /^[a-f0-9]{64}$/);
+    ragRevision = hit.revision;
+    if (config.phase === 'verify') assert.equal(ragRevision, config.ragRevision);
+    const item = await knowledge({
+      op: 'item', requestId: 'sandbox-index-item', itemId: hit.itemId,
+      expected: { baseId: document.baseId, documentId: document.id, revision: ragRevision },
+    });
+    assert.equal(item?.source?.contentHash, contentHash);
+    assert.ok(item.content.includes('中文与 English remain intact.'));
+  }
   // An upgrade/restart must only read the seed written by the old process.
   const bindings =
     config.phase === 'verify'
@@ -380,7 +451,7 @@ async function checkPersistence(main) {
     'persisted original metadata UI',
   );
   assert.deepEqual(await snapshot(), { ...expected, bindings });
-  return bindings;
+  return { bindings, ragRevision };
 }
 try {
   const browser = await connect(
@@ -428,7 +499,8 @@ try {
     assert.equal(state.phase, 'unavailable');
     assert.equal(state.message, config.storeUpdateMessage);
   }
-  const bindings = await checkPersistence(main);
+  const { bindings, ragRevision } = await checkPersistence(main);
+  if (nsis && config.phase === 'verify') await checkSecondLaunch(main);
   await fs.writeFile(
     outputFile,
     JSON.stringify({
@@ -438,6 +510,7 @@ try {
       updatePhases: [update, ...states].map((state) => state.phase),
       persistence: true,
       bindings,
+      ragRevision,
       phase: config.phase,
     }),
   );

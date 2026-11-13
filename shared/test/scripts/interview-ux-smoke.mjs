@@ -1219,7 +1219,7 @@ try {
   await badge('麦克风', '有输入').waitFor();
   const interruptedBadge = badge('系统音频', '异常');
   // Interview reveal deliberately uses showInactive. A CDP hover does not
-  // establish the native key window needed for Mac's forwarded pointer state.
+  // establish native foreground ownership for forwarded pointer events.
   await focusUiWindow(app, floating);
   const hoverProbe = await interruptedBadge.evaluateHandle((node) => {
     const controller = new AbortController();
@@ -1345,6 +1345,7 @@ try {
   await badge('麦克风', '已暂停').waitFor();
   await badge('语音模型', '已暂停').waitFor();
   await geometry(floating);
+  await focusUiWindow(app, floating);
   await badge('系统音频', '异常').hover();
   const recoveryTooltip = floating.getByRole('tooltip', {
     name: '系统音频：所选音频设备已断开。',

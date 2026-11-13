@@ -18,9 +18,9 @@ Mac 凭据超时专项须区分“应用请求超时／助手退出／同启动�
 
 测试 owner 只允许已知开发宿主与 owned entry，或严格校验的 inert 安装夹具；正式包不编入产品测试标志。Windows `pnpm test:package` 先构建当前源码，再由 `store-package-smoke.mjs` 在自有临时目录打包并验收，使用独立 Windows Sandbox 账号、空 guest vault、禁网及无宿主 profile 映射。真实生产 renderer 通过 CDP／公开 preload 验证包身份和合成资料重载；同版本开发宿主另在 guest 加载最终 ASAR 验证实际 SDK、Paraformer／知识库子进程与移动资源闭包，不执行产品 main 或登录真实服务。两个 guest 检查助手均在连接／加载前核对身份和临时归属。普通开发 UI 夹具仍禁止正式凭据助手；旧 owner 正式包夹具及不可用参数已退役，不得恢复 fuses、修改包字节或加入正式包测试环境覆盖。现有格式的持久化／重载不代称历史二进制逐版本升级验收。
 
-最终 NSIS 另用 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 和 `--nsis-upgrade` 串行验收，各自启动全新禁网 guest，保护宿主安装与资料。前者安装当前 `release/installer` 原包；后者先按发行记录固定 SHA256 认证真实归档 1.1.1，使用其实际 renderer 写入合成资料并正常退出，再沿真实注册路径安装当前包。升级／重启阶段只读核对原件字节、个人资料／JD、记录、主题／语言和快捷键，不重新写入种子。每阶段必须自然关闭且无残留包内子进程，超时判失败；不注入 main、不开 inspector、不添加 DLL 或测试环境覆盖，前后复核两原件。当前安装包须通过既有 Ed25519／SHA512 认证，安装后核对最终 ASAR；原生闭包仍由 APPX guest 的原身份栅栏验证，不把这些资料验收称为 NSIS 全部原生功能覆盖。
+最终 NSIS 通过 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 验收全新安装。`--nsis-upgrade` 从正式 1.2.0 升级，`--nsis-upgrade-1.1.1` 验证旧版兼容性。三个入口串行运行，每次启动独立禁网 Sandbox。升级前按既有发行记录核对旧包的 SHA256，使用已安装旧版的 renderer 写入合成资料，正常退出后沿原注册路径安装当前包。升级和重启后核对原件字节、个人资料、职位描述、记录、主题、语言和快捷键。每阶段须自然关闭并确认所有包内子进程退出。当前安装包以固定 Ed25519 公钥及 SHA512 验证，安装后核对最终 ASAR 和许可证。APPX 的独立 Sandbox 检查加载包内原生子进程。
 
-临时安全产物检查使用 `node test/scripts/security-package-smoke.mjs`，加 `--with-screenshot-worker` 可验证打包后的截图 Worker 原生依赖；签名备份恢复演练只用临时合成身份，真实离线加密备份仍由 owner 本机完成。安装目录完全缺失时可按默认注册路径修复，原生未引用的 `/D=同缺失路径` 受 Builder early `SetOutPath` 限制仍拒绝，细节见上述安全文档。
+Windows 默认原生矩阵的 `screenshot-performance` 使用合成 4K 位图。最终 APPX 的 `pnpm test:store:sandbox` 使用已安装的 `VoxCue.Screenshot.exe` 在独立 guest 内采集自有全屏色块，验证三帧颜色、取消及受保护浮窗，并用包内 Worker 检查连续编码、失败恢复与退出。显式开发态入口为 `node ../shared/test/scripts/screenshot-performance.mjs --native --platform`。临时安全产物检查使用 `node test/scripts/security-package-smoke.mjs`，加 `--with-screenshot-worker` 可验证打包后的截图 Worker 原生依赖。签名备份恢复演练只用临时合成身份，真实离线加密备份仍由 owner 本机完成。安装目录完全缺失时可按默认注册路径修复，原生未引用的 `/D=同缺失路径` 受 Builder early `SetOutPath` 限制仍拒绝，细节见上述安全文档。
 
 本轮云同步在引擎层合并状态汇总；组件新增本地 IPC 租约与可信前驱／新归属回收策略，只用合成目录回归，不扫描真实历史缓存。手机协议 v2 加处理确认与单帧窗口，旧页面需重新打开；调时／重载先用受控 Date 验证，不修改系统时钟。`node test/scripts/store-sandbox-smoke.mjs --copilot-vault` 只在全新禁网 guest 用合成账号验证 SDK 共享槽、原全局退出影响及 VoxCue 本地退出保留 CLI 登录；只枚举 guest 凭据目标名，不读取 CredentialBlob，不触碰宿主凭据。
 
@@ -58,7 +58,7 @@ Windows 另用 `node ../shared/test/scripts/interview-shortcuts-smoke.mjs --nati
 
 新增定向入口：`legacy-doc.test.ts` 覆盖有效 OLE DOC、恶意目录图/名称及索引；`text-encoding.test.ts` 覆盖传统编码与歧义拒绝；`knowledge-host.test.ts`、`knowledge-coordinator.test.ts` 核对取消后真实任务退休与入站预算、进程退出确认、超时和模型卸载边界。`conversations-smoke.mjs` 保留删除流程并覆盖聊天阅读位置、流式回复、固定上下栏、快速切换和减少动态效果。
 
-Windows 额外真实识别入口为 `node test/scripts/interview-real-audio-smoke.mjs --model=paraformer --cache=<认证公共缓存> --cases=ack,question,mixed,followup`；再以 `--model=qwen` 串行运行。WAV 为本机 SAPI 合成，实际模型、Controller/Worker、IPC、Renderer 与发送入口保持；账户/回答端隔离。空转写不计为过滤成功，`--all` 的更短语气音也必须有非空终稿才能作为过滤证据；不能将模拟事件或无输出当成真实识别成功。
+Windows 在 `windows/` 串行运行 `node test/scripts/interview-real-audio-smoke.mjs --model=paraformer --cache=.cache/test-components --all`，再以 `--model=qwen` 运行。每个独立用例使用新的合成账号资料和面试窗口。Paraformer 的预卷用例在同一访谈中依次识别本机 SAPI 合成的问题、摘要固定的公开 WAV 中 64ms 非静音片段及原问题，核对 VAD 负例、静音处理确认、空草稿与前后首音节、尾词和全文。正向语气词用例须获得非空自然终稿、保留手动发送，正常问题须自动发送。`--all` 分别检查原短音及慢速持续发音的 `um-sustained`、`ah-sustained`、`uh-sustained`，运行完独立用例后汇总，任一失败均以非零码退出。可用 `--cases=ack,question,mixed,followup` 定向复测。
 
 Mac 在 `macos/` 串行运行 `node test/scripts/interview-real-audio-smoke.mjs --model=paraformer --cache=.cache/test-components --all`，再以 `--model=qwen --device=metal` 运行，可另验 `--device=cpu`。使用已安装中文 voice 的文件 TTS，不播放、不下载 voice；默认 `Tingting`，可传 `--voice=`。模型全摘要校验后复制到 owner 临时目录，实际 Controller/Worker、silence 终稿、真实 ACK、Renderer 自动/手动发送及记录关联均保留。五档矩阵包含 `conversations` 的延迟 scroll 通知与真实 provider delta 回归。最终 `package-smoke.mjs --install-archive` 另验 DOC/编码/Worker 取消与重开，以及真实 1.0.0 临时副本到最终新 ZIP 覆盖升级后的资料、设置、原件和旧索引；归档覆盖不等同于 Sparkle 提交重启。
 

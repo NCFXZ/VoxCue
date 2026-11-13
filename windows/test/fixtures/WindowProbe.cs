@@ -29,6 +29,7 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out NativeRect rect);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out NativeRect rect);
+  [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window,ref Point point);
   [DllImport("user32.dll")] static extern int GetSystemMetrics(int index);
   [DllImport("user32.dll")] static extern bool SetCursorPos(int x,int y);
   [DllImport("user32.dll")] static extern void mouse_event(uint flags,uint x,uint y,uint data,UIntPtr extra);
@@ -38,6 +39,7 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool IsWindowVisible(IntPtr window);
   [DllImport("user32.dll")] static extern IntPtr GetForegroundWindow();
   [DllImport("user32.dll")] static extern bool SetForegroundWindow(IntPtr window);
+  [DllImport("user32.dll")] static extern short GetAsyncKeyState(int key);
   [DllImport("user32.dll",SetLastError=true)] static extern bool PostMessageW(IntPtr window,int message,IntPtr w,IntPtr l);
   [DllImport("user32.dll")] static extern IntPtr WindowFromPoint(Point point);
   [DllImport("user32.dll")] static extern IntPtr GetAncestor(IntPtr window,uint flags);
@@ -93,6 +95,46 @@ class WindowProbe {
   }
   static void RequireDesktop() {
     if(!ReadDesktop().interactive)throw new Exception("GUI/native input requires the owner's unlocked console; locked or unknown state refused");
+  }
+  static bool OwnedCaption(IntPtr window, uint pid, Point point) {
+    uint owner;
+    if(GetWindowThreadProcessId(window,out owner)==0||owner!=pid||!IsWindowVisible(window)||
+       GetAncestor(WindowFromPoint(point),2)!=window)return false;
+    var coordinates=new IntPtr((point.Y<<16)|(point.X&0xffff));
+    return SendMessageW(window,0x84,IntPtr.Zero,coordinates).ToInt32()==2; // WM_NCHITTEST / HTCAPTION
+  }
+  static bool ActivateCaption(IntPtr window, uint pid) {
+    NativeRect rect;Point original;
+    if(!GetWindowRect(window,out rect)||!GetCursorPos(out original))return false;
+    // Hit-test in physical pixels. Electron derives HTCAPTION from its actual
+    // draggable region, excluding client controls, resize borders and overlays.
+    for(int y=rect.Top+10;y<Math.Min(rect.Top+100,rect.Bottom);y+=8) {
+      for(int i=1;i<12;i++) {
+        var point=new Point{X=rect.Left+(rect.Right-rect.Left)*i/12,Y=y};
+        if(!OwnedCaption(window,pid,point))continue;
+        RequireDesktop();
+        if((GetAsyncKeyState(1)&0x8000)!=0||(GetAsyncKeyState(2)&0x8000)!=0)return false;
+        if(!SetCursorPos(point.X,point.Y))return false;
+        try {
+          Point actual;
+          if(!GetCursorPos(out actual)||actual.X!=point.X||actual.Y!=point.Y||
+             !OwnedCaption(window,pid,actual))return false;
+          var clicks=new[]{
+            new Input{type=0,value=new InputUnion{mouse=new MouseInput{flags=2}}},
+            new Input{type=0,value=new InputUnion{mouse=new MouseInput{flags=4}}}
+          };
+          uint sent=SendInput(2,clicks,Marshal.SizeOf(typeof(Input)));
+          if(sent==1)mouse_event(4,0,0,0,UIntPtr.Zero);
+          if(sent!=2)throw new Exception("Owned caption activation input was not completed");
+          return true;
+        } finally {
+          Point current;
+          if(GetCursorPos(out current)&&current.X==point.X&&current.Y==point.Y)
+            SetCursorPos(original.X,original.Y);
+        }
+      }
+    }
+    return false;
   }
   static Input Key(ushort key,ushort scan,uint flags) {return new Input{type=1,value=new InputUnion{keyboard=new KeyboardInput{key=key,scan=scan,flags=flags}}};}
   static object WindowOwnership(IntPtr handle) {
@@ -151,7 +193,12 @@ class WindowProbe {
   }
   [STAThread] static int Main(string[] args) {
     try {
-      Console.OutputEncoding=new UTF8Encoding(false);
+      // This windowless executable communicates through redirected streams and
+      // does not have a console whose code page could be changed.
+      var output=new System.IO.StreamWriter(Console.OpenStandardOutput(),new UTF8Encoding(false));
+      output.AutoFlush=true;Console.SetOut(output);
+      var errors=new System.IO.StreamWriter(Console.OpenStandardError(),new UTF8Encoding(false));
+      errors.AutoFlush=true;Console.SetError(errors);
       SetProcessDPIAware();
       SetThreadDpiAwarenessContext(new IntPtr(-4));
       if(args[0]=="hold-file") {
@@ -250,20 +297,41 @@ class WindowProbe {
       if(args[0]=="geometry") {
         var owned=new IntPtr(long.Parse(args[1]));uint pid;
         if(GetWindowThreadProcessId(owned,out pid)==0||pid!=uint.Parse(args[2]))throw new Exception("Geometry target does not belong to the expected test process");
-        NativeRect outer,client;
-        if(!GetWindowRect(owned,out outer)||!GetClientRect(owned,out client))throw new Exception("Owned window geometry unavailable");
-        Print(new{x=outer.Left,y=outer.Top,width=outer.Right-outer.Left,height=outer.Bottom-outer.Top,clientWidth=client.Right-client.Left,clientHeight=client.Bottom-client.Top});return 0;
+        NativeRect outer,client;var origin=new Point();
+        if(!GetWindowRect(owned,out outer)||!GetClientRect(owned,out client)||!ClientToScreen(owned,ref origin))throw new Exception("Owned window geometry unavailable");
+        Print(new{x=outer.Left,y=outer.Top,width=outer.Right-outer.Left,height=outer.Bottom-outer.Top,clientX=origin.X,clientY=origin.Y,clientWidth=client.Right-client.Left,clientHeight=client.Bottom-client.Top});return 0;
       }
-      if(args[0]=="move") {
+      if(args[0]=="pointer-owned"||args[0]=="down-owned"||args[0]=="check-owned") {
+        var target=new IntPtr(long.Parse(args[3]));uint pid;Point point;
+        if(GetWindowThreadProcessId(target,out pid)==0||pid!=uint.Parse(args[4])||
+           GetForegroundWindow()!=target||!GetCursorPos(out point)||point.X!=int.Parse(args[1])||
+           point.Y!=int.Parse(args[2])||GetAncestor(WindowFromPoint(point),2)!=target)
+          throw new Exception("Native pointer must remain on its original foreground target");
+        if(args[0]=="down-owned") {
+          if((GetAsyncKeyState(1)&0x8000)!=0)throw new Exception("Mouse is already pressed");
+          mouse_event(2,0,0,0,UIntPtr.Zero);
+        } else if(args[0]=="check-owned"&&(GetAsyncKeyState(1)&0x8000)==0)throw new Exception("Native hold was released early");
+        Print(new{});return 0;
+      }
+      if(args[0]=="move"||args[0]=="hover-owned") {
         RequireDesktop();
         // Absolute SendInput uses the physical virtual desktop, including a
         // negative monitor origin. Pixel centers avoid normalization rounding.
         int x=int.Parse(args[1]),y=int.Parse(args[2]);
+        var target=args[0]=="hover-owned"?new IntPtr(long.Parse(args[3])):IntPtr.Zero;
+        Action<Point> check=point=>{
+          if(target==IntPtr.Zero)return;
+          uint owner;
+          if(GetWindowThreadProcessId(target,out owner)==0||owner!=uint.Parse(args[4])||
+             GetForegroundWindow()!=target||GetAncestor(WindowFromPoint(point),2)!=target)
+            throw new Exception("Native hover requires a hit on the foreground window of the expected process");
+        };
         int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
         if(width<2||height<1||x<left||x>=left+width||y<top||y>=top+height)throw new Exception("Native pointer target is outside the virtual desktop");
         int[] points={x==left?x+1:x-1,x};
         var moves=new Input[2];
         for(int i=0;i<moves.Length;i++) {
+          check(new Point{X=points[i],Y=y});
           moves[i]=new Input{type=0,value=new InputUnion{mouse=new MouseInput{
             x=(int)(((2L*(points[i]-left)+1)*65536)/(2L*width)),
             y=(int)(((2L*(y-top)+1)*65536)/(2L*height)),
@@ -284,12 +352,34 @@ class WindowProbe {
         RequireDesktop();
         Thread.Sleep(90);Point actual;if(!GetCursorPos(out actual))throw new Exception("Native cursor unavailable after movement");
         if(actual.X!=x||actual.Y!=y)throw new Exception("Native pointer position changed during the isolated check: expected "+x+","+y+"; actual "+actual.X+","+actual.Y);
+        check(actual);
         Print(new{});return 0;
       }
       if(args[0]=="up") {mouse_event(4,0,0,0,UIntPtr.Zero);Print(new{});return 0;}
       if(args[0]=="foreground") {
-        uint processId;GetWindowThreadProcessId(GetForegroundWindow(),out processId);
-        Print(new{processId,processName=processId==0?"none":System.Diagnostics.Process.GetProcessById((int)processId).ProcessName});return 0;
+        var foreground=GetForegroundWindow();uint processId;GetWindowThreadProcessId(foreground,out processId);
+        Print(new{handle=foreground.ToInt64().ToString(),processId,processName=processId==0?"none":System.Diagnostics.Process.GetProcessById((int)processId).ProcessName});return 0;
+      }
+      if(args[0]=="focus-owned") {
+        var target=new IntPtr(long.Parse(args[1]));uint targetPid;
+        if(GetWindowThreadProcessId(target,out targetPid)==0||targetPid!=uint.Parse(args[2])||
+           !IsWindowVisible(target)||GetAncestor(target,2)!=target)
+          throw new Exception("Focus target is not the visible top-level window of the owned Electron process");
+        bool requested=false,caption=false;
+        if(GetForegroundWindow()!=target) {
+          requested=SetForegroundWindow(target);
+          if(GetForegroundWindow()!=target) {
+            // UI Automation focuses only the already attributed HWND, without
+            // synthesizing a click or interacting with another application.
+            try { AutomationElement.FromHandle(target).SetFocus(); }
+            catch(InvalidOperationException) { /* Report native state below. */ }
+            if(args.Length==4&&args[3]=="caption"&&GetForegroundWindow()!=target)
+              caption=ActivateCaption(target,targetPid);
+          }
+        }
+        var foreground=GetForegroundWindow();uint foregroundPid;GetWindowThreadProcessId(foreground,out foregroundPid);
+        var className=new StringBuilder(128);GetClassNameW(foreground,className,className.Capacity);
+        Print(new{foregroundHandle=foreground.ToInt64().ToString(),foregroundPid,foregroundClass=className.ToString(),requested,caption});return 0;
       }
       if(args[0]=="hit") {
         var point=new Point{X=int.Parse(args[2]),Y=int.Parse(args[3])};

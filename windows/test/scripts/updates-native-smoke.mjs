@@ -241,10 +241,14 @@ try {
         globalThis.platformRequests.push(url.href);
         if (
           url.origin === 'https://api.github.com' &&
-          url.pathname === '/repos/NCFXZ/VoxCue-releases/releases'
+          url.pathname === '/repos/NCFXZ/VoxCue/releases'
         )
           return originalFetch('http://127.0.0.1:' + port + '/platform-releases', init);
-        if (url.origin === 'https://github.com' && url.pathname.endsWith('/latest.yml'))
+        if (
+          url.origin === 'https://github.com' &&
+          url.pathname.startsWith('/NCFXZ/VoxCue/releases/download/windows-native-v') &&
+          url.pathname.endsWith('/latest.yml')
+        )
           return originalFetch('http://127.0.0.1:' + port + '/platform-manifest', init);
         throw Error('Unexpected provider request');
       };
@@ -254,7 +258,7 @@ try {
       updater.httpExecutor.download = (url, destination, options) => {
         if (
           url.origin !== 'https://github.com' ||
-          !url.pathname.startsWith('/NCFXZ/VoxCue-releases/releases/download/windows-native-v')
+          !url.pathname.startsWith('/NCFXZ/VoxCue/releases/download/windows-native-v')
         )
           throw Error('Unexpected native download URL');
         globalThis.platformRequests.push(url.href);

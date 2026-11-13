@@ -1,4 +1,3 @@
-// Only binary releases go to this public repository. The source repository stays private.
 module.exports = {
   appId: 'com.voxcue.desktop',
   productName: 'VoxCue',
@@ -8,7 +7,7 @@ module.exports = {
     {
       provider: 'github',
       owner: 'NCFXZ',
-      repo: 'VoxCue-releases',
+      repo: 'VoxCue',
       private: false,
       releaseType: 'release',
     },

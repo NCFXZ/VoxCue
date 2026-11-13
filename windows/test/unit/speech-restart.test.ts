@@ -117,6 +117,23 @@ it('故障退出的旧 Worker 迟到错误不能停止新 Worker', async () => {
   expect((await service.call({ op: 'status' })).state).toBe('running');
 });
 
+it('does not replace an unretired WASAPI capture on manual reconnect', async () => {
+  const { service } = controller();
+  const start = () => service.call({ op: 'start', options: { sources: ['system'] } });
+  await start();
+  const old = state.captures[0];
+  old.stop = async () => {
+    old.retiring = true;
+    throw Error('Unconfirmed close');
+  };
+  await expect(service.call({ op: 'stop' })).rejects.toThrow('未能正常停止');
+  expect(await start()).toMatchObject({ state: 'error', error: expect.stringContaining('尚未退出') });
+  expect(state.captures).toEqual([old]);
+  old.retiring = false;
+  expect(await start()).toMatchObject({ state: 'running' });
+  expect(state.captures).toHaveLength(2);
+});
+
 it('uses the shared QPC across delayed helper startup and drains capture packets before Worker flush', async () => {
   const { service } = controller();
   await service.call({ op: 'start', options: { sources: ['system', 'microphone'] } });

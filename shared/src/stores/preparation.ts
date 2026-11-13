@@ -238,7 +238,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     if (model) set({ modelId: id, effort: resolveReasoningEffort(model, get().effort) });
   },
   async load() {
-    await get().restoreChats();
+    const chats = get().restoreChats();
     try {
       const raw = localStorage.getItem('copilot-personal-info-v1');
       if (raw) {
@@ -272,6 +272,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     } catch {
       set({ error: '本地资料读取失败，请重试。现有数据已保留。' });
     }
+    await chats;
   },
   selectProfileFields(messageId, fields) {
     set((state) => ({
