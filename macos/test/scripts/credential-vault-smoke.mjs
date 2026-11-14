@@ -39,15 +39,15 @@ try {
   const signing = await loadDevelopmentSigning();
   const parentIdentifier = 'com.voxcue.test.credentials.' + randomBytes(12).toString('hex');
   const vaultSource = await writeCredentialFixtureSource(directory, 'vault-v11', parentIdentifier);
-  const hardenedSource = await writeCredentialFixtureSource(
+  const legacySource = await writeCredentialFixtureSource(
     directory,
-    'hardened',
+    'legacy',
     parentIdentifier,
   );
   let definitions = [
     '-DVOXCUE_FIXTURE_VAULT_SOURCE=' + JSON.stringify(vaultSource),
     '-DVOXCUE_FIXTURE_VAULT_ACCOUNT="VoxCue Key v11"',
-    '-DVOXCUE_FIXTURE_HARDENED_SOURCE=' + JSON.stringify(hardenedSource),
+    '-DVOXCUE_FIXTURE_LEGACY_SOURCE=' + JSON.stringify(legacySource),
   ];
   const compile = (source, destination, args = []) =>
     run('/usr/bin/xcrun', [
@@ -81,10 +81,10 @@ try {
   sign(helper, 'com.voxcue.credentials.vault');
   const moved = path.join(directory, 'vault-moved');
   await copyFile(helper, moved);
-  // The archived v2 fixture stands for an older helper that historical entries trust.
-  const old = path.join(directory, 'hardened');
-  compile(fixture('credential-hardening-probe.mm'), old);
-  sign(old, 'com.voxcue.credentials.hardened');
+  // The published v1 helper is the sole historical migration baseline.
+  const old = path.join(directory, 'legacy-v1');
+  compile(fixture('credential-probe.mm'), old);
+  sign(old, 'com.voxcue.credentials');
   const rejected = [];
   for (const [index, entitlement] of [
     'com.apple.security.cs.allow-dyld-environment-variables',
@@ -108,7 +108,7 @@ try {
   sign(noRuntime, 'com.voxcue.credentials.vault', false);
   const wrongIdentity = path.join(directory, 'wrong-identity');
   await copyFile(helper, wrongIdentity);
-  sign(wrongIdentity, 'com.voxcue.credentials.migrating');
+  sign(wrongIdentity, 'com.voxcue.credentials.unsupported');
   rejected.push(noRuntime, wrongIdentity);
   const codeHash = (file) => {
     const hash = run('/usr/bin/codesign', ['-d', '--verbose=4', file]).stderr.match(
@@ -165,7 +165,7 @@ try {
       true,
       env ?? process.env,
     );
-    assert.doesNotMatch(result.stderr, /fixture-queried-candidate/, 'Candidate names must never be queried');
+    assert.doesNotMatch(result.stderr, /fixture-queried-unsupported/, 'Unsupported entries must never be queried');
     return result;
   };
   const ok = (result) => {
@@ -298,7 +298,7 @@ try {
 
   // Normal history: one source read, copy, then cleanup removes all three aliases.
   const normal = keychain('normal', 'normal');
-  run(admin, ['seed-candidates', normal]);
+  run(admin, ['seed-unsupported', normal]);
   const seeded = legacy(normal);
   assert.deepEqual(ok(validate(normal)), { validation: 'unavailable' });
   assert.equal(vault(normal), null, 'Background validation must never migrate a historical key');
@@ -325,7 +325,7 @@ try {
     reason: 'none',
   });
 
-  run(admin, ['check-candidates', normal]);
+  run(admin, ['check-unsupported', normal]);
   assert.deepEqual(legacy(normal), [null, null, null]);
   assert.equal(run(admin, ['unrelated', normal], undefined, true).status, 0);
   assertOwnVault(normal);
@@ -339,28 +339,28 @@ try {
     reason: 'none',
   });
 
-  // Unreleased candidates alone are equivalent to an empty install for v11.
+  // An unsupported entry alone is equivalent to an empty install for v11.
   // A decrypt cannot create a substitute; a first write creates a new own key.
-  const candidates = keychain('candidates-only');
-  run(admin, ['seed-candidates', candidates]);
-  const candidateProbe = call(candidates, { operation: 'probe' });
-  assert.equal(ok(candidateProbe).state, 'ready');
-  assert.equal(count(candidateProbe, 'fixture-item-read'), 0);
-  assert.deepEqual(ok(validate(candidates)), { validation: 'unavailable' });
-  const missing = decrypt(candidates);
+  const unsupported = keychain('unsupported-only');
+  run(admin, ['seed-unsupported', unsupported]);
+  const unsupportedProbe = call(unsupported, { operation: 'probe' });
+  assert.equal(ok(unsupportedProbe).state, 'ready');
+  assert.equal(count(unsupportedProbe, 'fixture-item-read'), 0);
+  assert.deepEqual(ok(validate(unsupported)), { validation: 'unavailable' });
+  const missing = decrypt(unsupported);
   assert.equal(missing.status, 80);
   assert.equal(count(missing, 'fixture-item-read'), 0);
-  assert.equal(vault(candidates), null);
-  assert.deepEqual(cleanup(candidates), {
+  assert.equal(vault(unsupported), null);
+  assert.deepEqual(cleanup(unsupported), {
     cleanup: 'deferred', removed: 0, retained: null, retainedItems: [], reason: 'current',
   });
-  const freshWithCandidates = Buffer.from(ok(encrypt(candidates)).data, 'base64');
-  assertOwnVault(candidates);
-  assert.deepEqual(Buffer.from(ok(validate(candidates, freshWithCandidates)).data, 'base64'), plaintext);
-  assert.deepEqual(cleanup(candidates), {
+  const freshWithUnsupported = Buffer.from(ok(encrypt(unsupported)).data, 'base64');
+  assertOwnVault(unsupported);
+  assert.deepEqual(Buffer.from(ok(validate(unsupported, freshWithUnsupported)).data, 'base64'), plaintext);
+  assert.deepEqual(cleanup(unsupported), {
     cleanup: 'complete', removed: 0, retained: 0, retainedItems: [], reason: 'none',
   });
-  run(admin, ['check-candidates', candidates]);
+  run(admin, ['check-unsupported', unsupported]);
 
   // Authorization needed: probe reports it; non-interactive calls change nothing.
   const denied = keychain('denied', 'denied');
@@ -590,7 +590,7 @@ try {
     console.log('PASS: frozen v11 production bytes accept only the formal parent boundary.');
   } else console.log('SKIP: frozen v11 production bytes are not prepared yet.');
   console.log(
-    'PASS: v11 localized item names, cross-language unchanged entries, single-source copy, three-alias migration, untouched v6–v10 candidates, keychain and key checks on concurrent creation, unchanged-helper path moves, no-interaction validation, JS/native serial maintenance, conflicts, partial deletion retries and identity boundaries. Synthetic keychains only.',
+    'PASS: v11 localized item names, cross-language unchanged entries, v1 three-alias migration, untouched unsupported entries, keychain and key checks on concurrent creation, unchanged-helper path moves, no-interaction validation, JS/native serial maintenance, conflicts, partial deletion retries and identity boundaries. Synthetic keychains only.',
   );
 } finally {
   try {

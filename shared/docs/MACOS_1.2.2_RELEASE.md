@@ -1,6 +1,6 @@
 # Mac 1.2.2 实现与验收边界
 
-版本唯一来源为 `shared/package.json`。根与 Mac 清单同步到 1.2.2，Windows 清单在其本机同步；Windows 专属目录在 Mac 保持只读。1.2.0→1.2.1 的共享与原生实现见既有发行和 Windows 交接文档，本篇补充 1.2.2。
+本文保留已发行 Mac 1.2.2 的行为与恢复边界；当前版本唯一来源为 `shared/package.json`，执行范围见根 `PROGRESS.md`。Windows 专属目录在 Mac 保持只读；未发布 Mac 中间版本的开发细节查 Git，不作为升级基线或测试入口。
 
 Mac 升级以正式 v1.1.1 为基线。最终签名包的系统验收条件见 [v11 凭据交接](MACOS_1.2.2_CREDENTIAL_HANDOFF.md)。
 
@@ -13,11 +13,11 @@ Mac 升级以正式 v1.1.1 为基线。最终签名包的系统验收条件见 [
 ## 凭据授权与兼容清理
 
 - 云账号、遥测证明和 ChatGPT 共用 Mac 凭据队列，最多 32 项，当前助手实际关闭后才执行下一项。拒绝、锁定、异常和超时终止本次启动中的自动重试；重启后重新执行正常校验。失败不保存密码、授权成功标记或替代密钥，保留原凭据文件。
-- 生产助手为固定 v11（`com.voxcue.credentials.vault`，沿用既有证书），复用冻结 v1 的 v10 加解密与 v2 代码身份检查；v1–v10 源码和规范字节保留，构建只认证复制冻结字节。
+- 生产助手为固定 v11（`com.voxcue.credentials.vault`，沿用既有证书），复用 `Credentials.mm` 的 v10 密文算法与 `CredentialsHardened.mm` 身份工具。仅保留旧正式 v1 与现用 v11 的规范字节和恢复入口；构建只认证复制 v11，不重签助手。
 - 首次升级仅按 1.1.1 的三种名称顺序选择一个旧来源，在来源钥匙串以同一密钥创建 `VoxCue Credential Storage / VoxCue Key v11` 并读回比较。新项按创建时应用语言使用“VoxCue 登录信息”或“VoxCue Sign-in Information”，申请者仍为“VoxCue”；label、owner 与普通 ACL 描述一致。已有项切换语言不改名或重新授权，历史来源首次系统授权仍可能显示旧名称。复制不删除、不调用改权接口整改旧项，正常授权接纳仍由系统处理；本代 owner 和普通 ACL 使用路径无关的严格签名 requirement 校验，并核对唯一当前真实 partition，同名冲突失败关闭。应用在合法安装位置间移动不应因旧路径记录造成归属冲突。
 - Mac 首次启动先创建原登录窗口但保持不可见，复用既有受控语言握手取得 Renderer 的持久偏好；首次账号恢复与登录 Renderer 的 status 共用同一 Promise，避免并发忙状态被当作未登录。所有原生凭据操作等待语言初始化，10 秒超时或初始化失败时本次启动拒绝凭据请求，迟到握手不恢复失败队列，不以系统语言代替已保存偏好。账号恢复后仅显示原主窗口或登录窗口；不新增可见页面、公开 IPC、偏好文件，也不直接读取 LevelDB 或凭据。
 - 未接受迁移说明前，各次前台加解密均无交互探测；ready 不缓存为授权成功，仅 authorize 提示“始终允许”。“稍后”、锁定或冲突直接停止自动重试，不自动弹解锁框。
-- 后台清理门槛使用专用无交互 validate，只读取既有 v11 项，不迁移或创建。现存资料必须通过原有本地解密与完整字段校验，遥测绑定实际 installationId，不依赖网络或令牌是否过期。通过后无交互按引用删除匹配三个正式名称的旧项，仅检查其属性。v6–v10 候选条目不查询、不读取、不删除；预期部分失败保留，不锁存凭据队列；内部诊断报告实际保留数量、固定名称与原因，未完整枚举明确为未知，不误报零项；不增加界面卡片、弹窗或清理入口。v9 扩展固定诊断回复，v10 增加双语创建，v1–v10 原件保持；正常应用升级不改助手字节。
+- 后台清理门槛使用专用无交互 validate，只读取既有 v11 项，不迁移或创建。现存资料必须通过原有本地解密与完整字段校验，遥测绑定实际 installationId，不依赖网络或令牌是否过期。通过后无交互按引用删除匹配三个正式名称的旧项，仅检查其属性；其他名称不查询、不读取、不删除。预期部分失败保留，不锁存凭据队列；内部诊断报告实际保留数量、固定名称与原因，未完整枚举明确为未知，不误报零项；不增加界面卡片、弹窗或清理入口。正常应用升级不改助手字节。
 - 原生不可重试失败／“稍后”和 120 秒超时分别使用可信本地 UNAVAILABLE／TIMEOUT 固定分类，避免云账号将授权失败误作可恢复坏资料继续联网、备份或替换；不接纳服务端／传输伪码，不新增界面布局。超时会停止本次重复请求，但不保证原 SecurityAgent 系统框自动关闭；仍显示时须先在原框选择“拒绝”，再重启。手动收尾不能算自动撤框，边界见[凭据说明](../../macos/docs/CREDENTIALS.md#超时与系统框边界)。
 - 明确的密文解码错误不再阻止用户主动重新登录；坏资料不自动删除，替换前保留加密原文件。异常旧 ChatGPT 或遥测资料不会被云账号恢复顺带重置，仍可能阻止清理。相关共享恢复行为需 Windows 本机验证。
 - 目标是正常历史升级（已解锁并选“始终允许”）一次输入，同一冻结身份及正常系统状态下后续不重复授权。普通“允许”可能两次；未比对旧项若含不同密钥会随清理删除；不承诺无缝降级。见 [凭据说明](../../macos/docs/CREDENTIALS.md)与 [v11 交接](MACOS_1.2.2_CREDENTIAL_HANDOFF.md)。最终包的一次授权、路径移动、现代 partition 与系统清理按交接条件复验，不能由旧格式夹具代替系统交互。
@@ -35,7 +35,7 @@ Mac adapter 为云账号和同源遥测提供实际 Electron 系统网络端口�
 
 ## 正式包隔离验收
 
-`package-guest-smoke.mjs` 从已停止的独立基线克隆。`guest-isolation.mjs` 同时要求 SIP 开启、没有 AMFI／签名执行绕过参数，以及 Gatekeeper `assessments enabled`。公开 CI 镜像的 SIP 和 Gatekeeper 必须在没有产品／测试账号资料的准备阶段恢复，并在正常系统重启后核验；不把恢复命令执行完成当作已生效。
+`package-guest-smoke.mjs` 从已停止的独立基线克隆，固定镜像、工具摘要与准备步骤见 [Mac guest](../../macos/docs/TEST_GUEST.md)。`guest-isolation.mjs` 同时要求 SIP 开启、没有 AMFI／签名执行绕过参数，以及 Gatekeeper `assessments enabled`；不把准备命令完成当作重启后的状态核验。
 
 仅共享白名单公开代码、依赖、模型和发行资产的只读临时输入；宿主 home、真实 Keychain、音频、USB 与剪贴板不共享。测试 guest 的外部以太帧全部丢弃，通过 vsock 控制。GUI／原生测试在当前解锁控制台串行执行。
 
@@ -48,7 +48,7 @@ Mac adapter 为云账号和同源遥测提供实际 Electron 系统网络端口�
 - `shared/test/scripts/interview-usage-offline.mjs --full`
 - `shared/test/scripts/functional-suite.mjs --jobs=1`
 - `macos/test/scripts/ui-refinement-matrix.mjs`
-- `macos/test/scripts/credential-vault-smoke.mjs`、`credential-vault-policy-smoke.mjs`、归档 v5／v2 入口及 `cloud-native-vault-smoke.mjs`
+- `macos/test/scripts/credential-vault-smoke.mjs`、`credential-vault-policy-smoke.mjs` 与 `cloud-native-vault-smoke.mjs`
 - `macos/test/scripts/audio-conversion-smoke.mjs`、`audio-restart-smoke.mjs`、`qwen-regression.mjs`、`speech-preroll-smoke.mjs` 与 `interview-real-audio-smoke.mjs --all`
 - `macos/test/scripts/package-guest-smoke.mjs`，以及最终应用的正常界面新装／升级授权验收
 

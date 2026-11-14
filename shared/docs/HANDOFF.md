@@ -1,6 +1,6 @@
-## 2026-11-11 Windows 1.2.0 与 Mac 接续
+## 当前接续
 
-当前共享版本唯一来源为 shared/package.json 的 1.2.0，Windows Store 映射 2.2.0.0。逐条 1.1.1 → 1.2.0 变化和 Mac 回归见 [MACOS_1.2.0_HANDOFF.md](MACOS_1.2.0_HANDOFF.md)，Mac 专属实现／先验证事项见 [MACOS_1.2.0_TODO.md](MACOS_1.2.0_TODO.md)，可直接使用[接续提示词](MACOS_1.2.0_CODEX_PROMPT.md)。当前执行状态以根 PROGRESS.md 为准；以下章节为历史背景，不能据此恢复已退役的正式包测试或访问真实资料。
+当前版本唯一来源为 `shared/package.json`，执行状态以根 `PROGRESS.md` 为准。Mac 当前实现见 [1.2.3 说明](MACOS_1.2.3_RELEASE.md)，正式包准备见 [隔离 guest](../../macos/docs/TEST_GUEST.md)，有效升级基线仅为已发行版本。已发布 Windows 1.2.0 的逐项共享与安全记录可查[固定 Git 历史](https://github.com/NCFXZ/VoxCue/blob/bc53d15431d0984b7d79c59c77e279e1500f03a5/shared/docs/MACOS_1.2.0_HANDOFF.md)，发行索引见 [Windows 1.2.0](WINDOWS_1.2.0_RELEASE.md)。未发布 Mac 中间版本的接续文件已退役；以下历史背景不能作为恢复测试入口或访问真实资料的授权。
 
 ## 2026-10-23 Windows 0.5.7 接续（累计至0.5.8）
 

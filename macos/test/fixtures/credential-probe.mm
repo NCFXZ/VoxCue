@@ -4,13 +4,10 @@
 #define SecKeychainOpen openFixtureKeychain
 #define VOXCUE_CREDENTIAL_FIXTURE 1
 #define main credentialMain
-#ifdef VOXCUE_FIXTURE_LEGACY_SOURCE
-#include VOXCUE_FIXTURE_LEGACY_SOURCE
-#else
-// The cloud vault consumer uses its existing signed development host, while
-// native parent-launcher tests supply a nonce-isolated source copy above.
-#include "../../native/Credentials.mm"
+#ifndef VOXCUE_FIXTURE_LEGACY_SOURCE
+#error An isolated v1 parent identity source copy is required
 #endif
+#include VOXCUE_FIXTURE_LEGACY_SOURCE
 #undef main
 
 int main(int argc, const char **argv) {

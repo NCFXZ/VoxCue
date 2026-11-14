@@ -1,6 +1,6 @@
 # Mac 安装与免费自动更新
 
-当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。Mac 1.2.1 源码恢复基线为 [macos-v1.2.1](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.1)，1.2.2 接续见[实现说明](../../shared/docs/MACOS_1.2.2_RELEASE.md)，当前线上发行与任务范围见[进度](../../PROGRESS.md)；历史验包按对应版本文档理解。
+当前源码面向 Apple Silicon arm64、macOS 14.2及以上，使用共用网页控件、SF Symbols和原生侧栏材质，不再要求Liquid Glass。固定Codex0.164.0、Copilot SDK/平台运行时1.0.21；模型与ONNX Web不内嵌，最终用户无需另装Node/Python。首次下载DMG后将VoxCue拖入Applications。应用按本平台最高完整正式资产选择更新，不依赖统一Latest；面试期间禁止安装，重启前等待保存成功，普通退出不触发安装。当前 Mac 正式源码为 [macos-v1.2.3](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.3)，已发行 1.1.1／1.2.2 用于升级兼容；未发布 Mac 中间版本不作为恢复或测试入口。当前线上发行与任务范围见[进度](../../PROGRESS.md)，最终包门禁见 [guest 准备](TEST_GUEST.md)。
 
 采用 [Sparkle](https://sparkle-project.org/documentation/) 2.10.0 的免费 Ed25519 更新签名。已发布至0.3.1的应用使用ad-hoc代码签名；2026-10-19起的源码打包流程改为复用固定本地自签名证书；0.5.5 再增加独立固定签名凭据助手，保留其代码哈希，修复仅固定应用证书仍反复要求钥匙串授权的问题。首次导入历史密码仍可能需要一次系统授权，详见[凭据与版本升级](CREDENTIALS.md)。未购买Developer ID，也未经过Apple公证。首次打开时macOS仍可能阻止运行，需用户在“系统设置 → 隐私与安全性”明确允许该应用；更新不会替用户关闭系统安全检查或移除隔离属性。现有发行资产没有自动重建。
 
@@ -40,7 +40,7 @@ Mac 元数据保留 `edSignature` 与 `voxcueSignature`，每次缓存读取重�
 
 ## 本地发行
 
-代码签名必须复用`macos/.tools/development-signing/`内的固定私密身份，并匹配`macos/local-signing-public.json`公开指纹；该目录不进入Git、安装包或上传。请自行安全备份，缺失时恢复，禁止重新生成证书代替旧身份。开发和正式构建共用证书，各自bundle ID、应用名、登录密文与Safe Storage项保持；固定凭据助手的规范副本 `macos/.tools/credential-helper-v1` 同样必须保留，不能当作普通缓存删除；首次迁移旧授权可能需要一次系统确认。保管与隔离回归入口见[固定本地签名与登录保留](MACOS_PORT.md#固定本地签名与登录保留)。
+代码签名必须复用`macos/.tools/development-signing/`内的固定私密身份，并匹配`macos/local-signing-public.json`公开指纹；该目录不进入Git、安装包或上传。请自行安全备份，缺失时恢复，禁止重新生成证书代替旧身份。开发和正式构建共用证书，各自bundle ID、应用名、登录密文与Safe Storage项保持；仅保护已发行 `credential-helper-v1` 的旧正式恢复副本与现用 `credential-helper-v11` 规范副本，不保留候选构建／测试入口。生产只认证复制 v11，缺失或错配不得重建、重签或轮换；首次迁移旧授权可能需要一次系统确认。凭据规范见 [CREDENTIALS.md](CREDENTIALS.md)。
 
 所有依赖、工具、缓存均在 `macos/`，禁止全局安装。先在当前平台按仓库入口同步配置和安装依赖；安装包不嵌入模型，独立模型资源保持原发行。执行：
 
@@ -58,6 +58,8 @@ corepack pnpm test:package
 
 发行打包必须已有 `macos/.tools/update-signing/ed25519.key`（0600）与公开 `macos/update-public-key.json`，不在打包时创建密钥。**保管并自行备份该私钥；每次更新必须使用同一私钥。** 私钥不提交 Git、不上传 GitHub、不进入应用。缺失/错配私钥时打包失败，禁止自动轮换。公钥需随源码保留，安装包 Info.plist 与运行配置均固定该公钥。
 
+签名材料检查 owner、0700／0600、普通节点、单链接与真实路径。持有人可用 `node scripts/update-key-backup.mjs --backup=/绝对私有离线路径` 创建 scrypt＋AES-GCM 加密更新身份备份，或以 `--verify=/绝对备份路径` 交互认证同一公钥；口令只在本机隐藏输入，不进入参数、环境或输出。工具拒绝覆盖与身份不符，备份不轮换密钥，验证不读取现用私钥。
+
 发行仅包含 `macos/release/<版本>/` 内三项：
 
 - `VoxCue-<版本>-arm64.dmg`：首次安装。
@@ -70,6 +72,6 @@ corepack pnpm test:package
 
 共享 Provider 只访问固定公开 NCFXZ/VoxCue 仓库、无令牌。打包的 voxcue-update.json 与运行时校验共用 releaseRepository，保持来源一致；模型和已有签名发行可按原字节复制到新仓，清单签名不绑定仓库地址。已安装旧包仍使用其原更新地址，旧仓保持，后续升级过渡按发行范围执行。Mac 清单签名认证 `voxcue-macos-update-v1`、版本、文件名、大小、SHA512、归档签名和最低系统版本的 JSON 数组；下载流有大小和时间限制，安装前重新核对文件。只有显式安装才创建短期随机 token 的 127.0.0.1 feed；Sparkle 再验归档签名并负责替换、重启，失败保留原应用。HTTPS/TLS 和 Gatekeeper 不做全局变更。
 
-`test:updates:native` 使用独立临时密钥和旧/新应用，包含签名拒绝、取消与真实替换/重启，不使用真实资料或发行私钥。但 CFFIXED_USER_HOME 不能保证 Sparkle/Launch Services/cfprefsd 的全部偏好写入都留在临时目录；入口会清理专用测试域，严格“必要文件仅系统临时目录”的任务仍须排除它。共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手；其外部更新器是夹具，不能单独作为原生安装证明。
+共享 `test:updates` 覆盖界面、IPC、面试限制与保存握手，其外部更新器是夹具，不能单独作为原生安装证明。独立合成原生更新专项使用临时密钥和旧／新测试应用，不使用真实资料或发行私钥；`CFFIXED_USER_HOME` 不能保证 Sparkle／Launch Services／cfprefsd 的全部偏好都写入临时目录，严格隔离任务应放在可丢弃 guest 内执行。
 
-`test:package` 使用现有固定公钥直接验证最终 ZIP 的 Ed25519 签名、签名元数据与 SHA512，核对应用内公钥、版本及凭据助手的固定签名和原始字节。从最终 ZIP 解压实际应用，核对最终 DMG 的相同签名副本、安装布局和 Retina 背景，确认不嵌入模型或 ONNX Web，并包含固定 Copilot/Codex 及其本平台可执行文件。明确设置 `VOXCUE_TEST_COMPONENT_CACHE` 时只读校验正式模型后复制到临时profile，再断网复用，验证登录、原生绑定、ASR Worker/utilityProcess、PDF/DOCX与离线RAG；结束删除副本并复核源模型。未设置时保留原固定公开下载分支，正式目录不得直接作为隔离Electron的组件根。最终包另启动合成主账号窗口，核对原生红绿灯、系统侧栏、共用控件、40px输入框、合成发送与胶囊标记；不恢复Liquid Glass/AppKit内容控件，Windows本机另验。`--install-archive` 将临时副本的宿主版本降为 0.2.0，让 Sparkle 准备生产 ZIP 后取消，不替换真实安装；仍可能涉及临时目录外的原生偏好，严格限定全部原生写入仅临时目录的任务须排除该选项。发布后 `--online` 用实际安装版适配器认证 GitHub 发行与清单，并下载完整 ZIP 核对 SHA512；只在该临时测试进程把版本读取模拟为旧版，不触发原生安装或发布测试版本。
+`test:package` 统一通过 [guest runner](TEST_GUEST.md) 验证最终 ZIP 的固定公钥、Ed25519、签名元数据和 SHA512，以及 DMG 内同一签名应用、布局、资源和凭据助手原字节。认证的公开组件只读复制到来宾临时 profile，再断网复用。实际正式产品正常启动／退出、独立开发宿主内的最终 ASAR 检查、1.1.1／1.2.2 资料覆盖升级与 Sparkle 认证各有不同证明范围，按该入口执行，不能改写旧包或最终产品开启调试。`--online` 产品探针已退役；发布后使用无产品启动的匿名资产与清单回读。

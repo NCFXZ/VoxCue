@@ -6,7 +6,7 @@
 
 - 输入为 main `3160b6868c540ec7cc6d20cdca11bc10b19bdd0c`，应用 1.1.1。目标版本唯一来源为 `shared/package.json` 的 1.2.0，Windows Store 身份版本为 2.2.0.0。
 - 源码已上传私有 [NCFXZ/VoxCue](https://github.com/NCFXZ/VoxCue) 的 main，冻结代码基线 `v1.2.0` 指向 `0bc1cd4261c56598a6341adfb11aca99913e9cf9`；后续渠道记录仅补文档，不移动标签。安装资产仅上传公开 [NCFXZ/VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases)，不改历史标签或恢复基线。
-- 逐条修改、测试发现修复和 Mac 回归点见 [1.2.0 交接](MACOS_1.2.0_HANDOFF.md)，Mac 专属事项见 [独立清单](MACOS_1.2.0_TODO.md)，另有[接续提示词](MACOS_1.2.0_CODEX_PROMPT.md)和[中英发行说明](RELEASE_1.2.0.md)。
+- 本次已发布 Windows 的逐条共享修改与安全修复见[固定 Git 历史中的 1.2.0 交接](https://github.com/NCFXZ/VoxCue/blob/bc53d15431d0984b7d79c59c77e279e1500f03a5/shared/docs/MACOS_1.2.0_HANDOFF.md)，另有[中英发行说明](RELEASE_1.2.0.md)。Mac 当前正式包入口见 [guest 准备](../../macos/docs/TEST_GUEST.md)，未发布 Mac 接续文件不作为当前测试或恢复入口。
 - `macos/` 全树未修改；共享变化需要 Mac 本机同步配置、补适配及逐项测试。本版不声称已生成或验证 Mac 1.2.0 包。
 
 ## 本轮测试发现的修复与清理

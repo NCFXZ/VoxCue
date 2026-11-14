@@ -1,13 +1,13 @@
 # 桌面安全与任务生命周期加固
 
-本文记录以 1.1.1 main 为输入的安全与生命周期修复。当前进入 1.2.0 发行验证，最新授权和界面范围以根 PROGRESS.md 为准；逐项共享变化见 [Mac 接续交接](MACOS_1.2.0_HANDOFF.md)，独立专属待办见 [macOS 1.2.0 清单](MACOS_1.2.0_TODO.md)。测试结果只在终端／对话报告，Windows 验证不代替 Mac 本机验收。
+本文保存已发布 Windows 1.2.0 及后续沿用的安全与生命周期边界。原始逐项共享记录见[固定 Git 历史](https://github.com/NCFXZ/VoxCue/blob/bc53d15431d0984b7d79c59c77e279e1500f03a5/shared/docs/MACOS_1.2.0_HANDOFF.md)，当前执行范围以根 PROGRESS.md 为准；Mac 当前实现见 [1.2.3 说明](MACOS_1.2.3_RELEASE.md)，正式包门禁见 [guest 准备](../../macos/docs/TEST_GUEST.md)。未发布 Mac 中间版本的接续与候选凭据专项不再作为当前入口，测试结果只在终端／对话报告。
 
 ## 正式包与更新
 
 - 正式包不读取开发页面、账号 API 或测试资料目录覆盖，不编入产品测试标志。开发页面仅允许 loopback；测试 owner 只接受已知开发宿主与 owner 目录内的入口，或经过严格校验的 inert 安装夹具。开发离线夹具仍在导入应用前设置自己的临时目录与网络边界。
 - Chromium session 默认拒绝网页权限；只允许本应用主 frame 的剪贴板写入。音频与截图仍通过受控原生端口。正式 CSP 不允许任意 loopback 连接，开发服务器按 serve 模式加入所需连接。
 - Windows 打包关闭 RunAsNode、NODE_OPTIONS 和 Node inspector，启用 ASAR 完整性与仅从 ASAR 加载，并核对生成 EXE 的实际 fuse 位。ASAR 完整性不替代外置原生组件的独立验证。
-- Windows 剩余启动边界：`NodeCliInspect` 只限制 Node inspector，不关闭 Chromium renderer CDP。隔离验包仍可显式以 `--remote-debugging-port` 启动并在合法主 frame 中调用 `window.desktop`；无参数默认不监听，第二实例参数被忽略，通常需控制首次启动或重启。Windows 同用户已可读取 profile／使用其 DPAPI 能力，本项未认定为新增 OS 提权，也不阻断当前发行；五项 fuses 不能称为防御同用户恶意程序的完整边界。Mac 的 TCC／Keychain 影响尚未复现，正式启动链与最终包测试迁移分别列入 M1／M4。[Electron CDP 启动参数](https://www.electronjs.org/docs/latest/api/command-line-switches#--remote-debugging-portport)、[Electron 44.10.0 Node inspector fuse 定义](https://raw.githubusercontent.com/electron/electron/v44.10.0/docs/tutorial/fuses.md)。
+- Windows 剩余启动边界：`NodeCliInspect` 只限制 Node inspector，不关闭 Chromium renderer CDP。隔离验包仍可显式以 `--remote-debugging-port` 启动并在合法主 frame 中调用 `window.desktop`；无参数默认不监听，第二实例参数被忽略，通常需控制首次启动或重启。Windows 同用户已可读取 profile／使用其 DPAPI 能力，本项未认定为新增 OS 提权，也不阻断当前发行；五项 fuses 不能称为防御同用户恶意程序的完整边界。Mac 正式启动链独立拒绝相关调试参数，最终包验收使用下述隔离 guest 入口。[Electron CDP 启动参数](https://www.electronjs.org/docs/latest/api/command-line-switches#--remote-debugging-portport)、[Electron 44.10.0 Node inspector fuse 定义](https://raw.githubusercontent.com/electron/electron/v44.10.0/docs/tutorial/fuses.md)。
 - Windows 的 LanceDB／ONNX 原生模块随包附带固定 x64 VC++ CRT 14.44.35211，放在相应绑定目录中，不依赖系统预装或新增全局 DLL 搜索策略。`windows/vc-runtime.json` 固定微软官方 VSIX、内嵌 redist／CAB、逐 DLL 及原许可证的 SHA-256；构建脚本仅静态提取并认证，公共源和认证缓存位于本平台 `.cache/vc-runtime`，不运行 redist 或 MSI。原微软许可保留于最终 `resources/licenses`，SDK／模型版本保持。
 - Windows NSIS 更新清单中的目标文件包含 `voxcueSignature`。Ed25519 签名采用固定数组编码与 `voxcue-windows-update-v1` 用途隔离，绑定 Windows x64、版本、文件名、大小、SHA-512 与最低系统版本。
 - 网络清单、持久缓存、恢复及安装前均重新认证；签名缺失、错误或未认证旧缓存不回退到仅摘要验证。新缓存使用独立 namespace，旧缓存不迁移为可信。NSIS 完整文件摘要、显式安装和保存握手继续使用现有实现。Store 不使用 NSIS 更新。
@@ -73,44 +73,22 @@ node scripts/update-signing.mjs --restore=X:\VoxCue-Offline\windows-update-key.e
 - macOS 全树在 Windows 只读：需其本机同步依赖声明／安装、截图 Worker 的 ASAR unpack、fuses 与正式包测试入口适配，并对共享改动补原生回归。Windows 成绩不代验 Mac。
 - 保留组件启动摘要验证、语音积压与终稿保护、已保护的旧组件恢复目录和历史信任根。用户确认 Qwen CPU 长段性能按 CPU 能力限制接受，保持现有流式算法与分段策略，不列优化待办；AVX2／FMA 安全检测及协议修复保留。Copilot 的 macOS vault 本机验证及完整原生 runtime 安全／协议修复的构建验收按对应待办处理。
 
-## macOS 专属事项
+## macOS 当前边界
 
-以下合并 Claude 的 M1–M16、既有 Mac 交接与 Windows 复审的共享影响，Mac 专属行为尚未在本机复现或实施；`macos/` 全树保持只读。编号沿用审查，重复事项不重复立项；共享修复保持单一实现，不另写一份 Mac 版本。优先完成 M4 的启动隔离收尾，再启用 M1；固定签名身份、凭据兼容、已接受的实时性策略与 Qwen 长段算法保持。
+Mac 正式包与开发宿主分开：owner 测试只接受固定开发宿主及自有入口；最终产品、ASAR 和原生闭包在 [SIP／Gatekeeper guest](../../macos/docs/TEST_GUEST.md) 内分别验收。静态验包零产品启动，不恢复正式包 RunAsNode、inspector 或旧测试参数。Windows 本机结果不代验 Mac 原生行为。
 
-### 建议在 Mac 本机实施
+正式签名前关闭 RunAsNode、NodeOptions、NodeCliInspect，开启 EmbeddedAsarIntegrity 与 OnlyLoadAppFromAsar，并对照真实 ASAR header 核验 `ElectronAsarIntegrity`。`ProductionMain.mm` 在进入 Electron Framework 前拒绝调试、伪造子进程及降低 sandbox／Web／证书安全的参数，清除 Node／DYLD／LD 注入环境，核对固定代码签名及资源封印；产品不包含 profile、Mock 或调试入口。
 
-- **M4／正式包测试入口隔离，先于 fuses。** 旧 Playwright 正式包启动已被共享 `assertOwnerElectronLaunch` 提前拒绝，不能概括为这些路径现在必然触碰真实资料。但 `macos/test/scripts/package-smoke.mjs` 在该守卫前仍用原始 `spawnSync`、`ELECTRON_RUN_AS_NODE=1` 执行正式二进制；`--static-only` 也会经过它，聚合 `package-temporary-smoke.mjs` 仍调用此入口。关闭 RunAsNode 后它可能进入产品 bootstrap，须先退役／迁移该探针，静态检查必须真正零产品启动。盘点全部直接 spawn／exec／Playwright 入口及聚合消费者，必要原生覆盖迁入不共享宿主 userData／login Keychain 的 OS 隔离环境；无用旧入口连同命令及活跃说明一起清理。正式包不编测试标志，不恢复 inspector，不以临时 profile 或临时 Keychain 文件单独冒充 OS 隔离。验收最终 `.app`／DMG／更新 ZIP、真实公开接口、合成资料持久化、SDK／Worker／组件与更新暂存；历史二进制逐版本升级须单独标明覆盖，不能用重载代替。原依赖 renderer CDP 的验包入口须随 M1 启动链收口迁移；OS 隔离本身不封闭生产 CDP 执行入口，不为测试保留相关参数，详见 Mac 专属清单 M4。
+正式代码启用 Hardened Runtime，JIT 与 library-validation 例外只给实际需要的 Electron／Copilot／Python／Qwen 宿主，不向所有子进程开放 DYLD、unsigned executable memory 或 get-task-allow。自签名证书没有 Team ID，随包库加载仍须逐进程验证。`RuntimeIntegrity.h` 由正式入口和独立 verifier 共用，MLX 会话创建前验证真实签名资源，不信任旁边可一同改写的 build.json；静态校验仍有校验与使用间的并发修改窗口。
 
-- **M1／fuses、Hardened Runtime 与最小权限。** `package-app.mjs` → `signMacApp` 默认 `preserveMetadata=false`，正式签名实际走 `signLocalCode` 的 `--options 0`。在最终签名前关闭 RunAsNode、NODE_OPTIONS、Node inspector，开启 ASAR 完整性及仅从 ASAR 加载；核对最终 Mach-O fuse 位、Info.plist 的 `ElectronAsarIntegrity` 与真实 ASAR header 摘要。Node inspector fuse 不关闭 renderer CDP；正式 `.app`／launcher 还须按 Mac 专属清单 M1 验证实际支持的 port／pipe 参数拒绝，以及首启／重启时合法主 frame 的受控能力边界，不能仅凭五项 fuse 宣称完成。正式主程序及相应辅助进程启用 runtime，按加载职责确定必要 entitlements；JIT、库验证例外须逐进程验证，不能机械给所有二进制开放 DYLD／unsigned memory／disable-library-validation。固定自签身份与 Sparkle、N-API、MLX 的实际加载兼容须在本机证明，不为通过测试关闭 Chromium sandbox。保留固定 Credentials helper 字节和 CDHash，不将通用重签循环套用到它。用自有测试副本及无敏感副作用的合成载荷验证注入拒绝、ASAR 篡改拒绝和正常原生能力；不访问真实凭据或采样麦克风／宿主屏幕。[Electron ASAR 完整性](https://www.electronjs.org/docs/latest/tutorial/asar-integrity)、[Apple Hardened Runtime](https://developer.apple.com/documentation/security/hardened-runtime)。
+现用凭据助手为冻结 v11，仅接受固定正式父身份；旧正式 v1 仅作为实际发行恢复与升级来源。`Credentials.mm` 的 v10 密文算法与 `CredentialsHardened.mm` 的身份工具仍由 v11 消费，这不构成候选助手的构建或恢复入口。规范字节、同身份恢复、来源白名单、非交互维护及最终系统授权条件见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。
 
-- **M5／截图依赖与最终包 Worker。** 在 Mac 本机同步共享直接依赖 `sharp` 的固定版本 0.35.5、Mac importer／锁及所需 arm64／libvips 依赖闭包，不升级其他依赖。`package-app.mjs` 的 unpack 需纳入 `backend/screenshot`，匹配共享 host 强制使用的 `app.asar.unpacked` 路径。最终签名包中验证真实 arm64 原生模块、连续合成位图编码、取消、Worker 退出和内存收敛；只存在依赖目录或开发环境通过不计为包内验收，不捕获真实桌面。
+截图 host／Worker、sharp 和本平台 binding／libvips 随最终 ASAR 的 unpacked 闭包分发。语音 utility 排空输出，CoreAudio 以实际 close、Worker 以实际 exit 为退休证据；未确认退出时不替换采集或删除模型。Mac adapter 的有界自动重启保留取消归属、1／2／4 秒退避与终止错误分类，不能把发送 kill 当作退休证明。
 
-- **M3／签名材料归属、权限与同身份恢复。** 现行更新密钥文件有 0600 校验，但还应在读取前核对既有父目录／文件的 owner、0700／0600、类型与重定向边界，覆盖开发签名钥匙串及其口令文件的保管路径。增加离线加密备份和恢复工具／流程，只恢复与既有固定公钥匹配的同一身份；合成密钥验证丢失、错口令、篡改、身份不匹配和禁止覆盖，真实备份由 owner 在本机交互终端完成，介质与口令分开。当前 Sparkle 签 ZIP、清单签带 `voxcue-macos-update-v1` 域的元数据，职责不同但共用信任根；不为“两层独立”拆分或轮换密钥，也不把备份描述为能防御构建机完全失陷。
+系统音频按 HAL 首选声道映射原始 stream 与局部通道对，不以零值猜活跃通道或放大所有通道；未知多声道、越界／重叠和格式变化明确失败。拒权与授权静音都可能交付零 PCM，预检不读取样本，不能凭零值增加拒权警报。设备对照只使用 guest 固定虚拟输出与自有 aggregate，不采样真实硬件。
 
-- **M7／共享语音子进程输出管道已修，Mac 补本机回归。** `shared/electron/backend/speech/host.ts` 已立即排空 stdout／stderr 并丢弃内容，不转发原生日志到终端、文件或 Renderer。Mac 用高输出合成 utility 验证初始化／消息处理无阻塞，停止／失败后旧请求有界结算，实际退出前不能重开或删除模型；补 Qwen MLX 管道断开和父进程退出链路。语音进度事件、积压预算及识别策略保持，不重复实现。
+MLX 的 ready 期限为 180 秒，命令写入与回复合用 120 秒整次交换期限；坏 JSON／序号、半行、超长、阻塞或异常退出使 Rust／Python 链退休，不复用失效会话。现有上下文、端点、积压预算、Qwen 长段算法与 CPU 性能边界保持。
 
-- **M9／MLX 协议期限与故障退休。** `qwen-mlx.rs` 的读取有 2 MiB 大小上限，但握手／请求的同步写入、flush、读取缺本地期限；按现有上层加载／请求预算协调有限期限，覆盖整次交换。保留序号、大小及协议校验，超时、半行、坏 JSON、错误序号或 Python 异常后退休 Rust／Python 整条链，确认实际退出再允许手动重新开始。Python 错误后退出属于避免复用未知推理状态的保护，不改为盲目继续；已有上层超时及失败 Worker 退休路径，不能称为“永久整场不可恢复”。以合成 Python 进程覆盖不发 ready、不回复、写阻塞、半行／超长／坏响应、异常退出和父进程消失；不修改 121 秒上下文、重算／分段策略或 CPU 长段性能，不引入自动重启。
+更新采用连接／首字节 30 秒和有效写入后的 120 秒空闲期限，持续有进展的下载不受旧总期限截断；中间进度按整数百分比合并。旧 ZIP 只在归属、版本、大小、摘要、签名及无活动消费者均确认后回收；未知遗留包、较新的待装包、链接和活动事务保留。签名材料 owner／0700／0600／普通单链接与真实路径检查、离线加密备份及同身份恢复见 [Mac 更新说明](../../macos/docs/UPDATES.md)。
 
-- **M12／慢网更新期限。** `macos/electron/updates/driver.ts` 将恢复／完整包校验／下载包在固定 30 分钟总期限内，`download.ts` 当前全量 GET、独占新建 `.partial`，没有续传。优先分别约束连接／首包和无字节进展的空闲期限，持续有有效进度的下载应允许超过原 30 分钟；如保留绝对上限，需按认证包大小及支持的慢网边界制定，不能重建同一吞吐门槛。保留大小上限、取消／退出、完整长度、SHA-512 与清单／Sparkle 签名验证、恢复 journal 和已完成包复用语义。合成慢流验证超过原总期限仍能完成、停滞及时失败、短写／截断拒绝、取消立即释放 reader／文件且旧任务不写回。最小修复不要求 Range 或增量更新；若以后另做续传，须独立覆盖实体一致性、Content-Range、服务端 200 回退及完整重验，不能直接拼接半包。
-
-- **M13／成功更新 ZIP 的受控回收。** `updates/archives` 成功包缺生命周期清理，现行 cache 仅保留一条 completed 描述。在新版本启动或受控任务结束后，仅回收能由受信元数据证明归属／版本／大小／摘要、安装版本已追上且不被 selected／archive／feed／journal／下载或安装事务占用的普通旧包。必要时为未来成功项记录明确归属，不追认历史目录；不能仅凭文件名版本或 mtime 扫删。保留已下载待安装的较新完整包、活动 partial／提交事务、未知／损坏／无认证记录的遗留文件、链接、无关资料及显式恢复基线，不退回退出即删缓存的行为。合成目录验证安装后清理、离线新版恢复、取消／退出无迟到删除、事务占用保护和失败后继续保留有效缓存；不扫描真实更新缓存。
-
-- **M14／仅合并更新下载的中间进度。** `download.ts` 每个 reader chunk 经 Mac driver、共享 UpdateService 到 IPC，没有合并。优先在 Mac 驱动的发布边界按短周期或明确百分比粒度合并；若落共享入口则保持单一实现并补两端回归。首条、完成 100% 及阶段切换及时发布，错误／取消／切换／dispose 清理待发计时器，旧下载不得迟到覆盖终态；不减少真实字节写入、摘要或签名验证。用假时钟／千块合成流核对发布次数、终态、取消与资源释放，不改现有 UI，不涉及已决定保留的音频 `audio-progress`。
-
-### Mac 验证后再决定的事项
-
-- **M6／系统音频拒权与无声诊断。** 当前原生预检调用 `capture.start(false)`，刻意不读取样本，`samplesRead:0` 不是测得全零的证据；启动 API 成功也不能代替“确有声音”的验证。Mac 本机先在隔离测试会话／受控虚拟音频中对照授权＋静音、授权＋自有合成输出、拒权＋同一输出及重新授权后手动启动，仅内存统计帧数／幅度，不启动麦克风或读取真实混音，不改宿主权限设置。无法满足隔离边界则保持未验证。正常无播放、路由或设备问题都可能产生零值，不采纳“连续严格零直接判拒权／自动停机”；验证后再决定能否沿现有错误路径提供有证据的诊断，本轮不新增提示 UI。现有会采集麦克风的 `audio-native-main.cjs` 不可直接套用。[Apple Core Audio tap 示例](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps)。
-
-- **M11／正式凭据 helper 对开发身份的信任收口。** `Credentials.mm` 允许固定证书下的 app／development 两个父标识，确实扩大同证书开发宿主的调用面，并非任意未签名程序直接可用。先用隔离合成 Keychain 验证正式父允许、开发父／错证书／伪造父拒绝的最小方案，以及开发夹具与正式凭据边界。`build-credentials.mjs` 初次签名也走 `--options 0`，还须与 M1 一并验证固定 helper 自身的 runtime／DYLD 注入防护，不能将主程序加固当作整条凭据链已闭合。该 helper 的 sourceHash／binaryHash、精确字节及 CDHash 已固定，改一行源码或重签也会触发构建拒绝或影响既有 ACL；不得为通过测试改 hash 白名单、静默重建／重签 helper、删除／重建真实条目或生成新存储密钥。若现有固定二进制无法满足防护，先明确兼容迁移方案，验证旧密文、固定身份与 ACL 连续性，再确定可实施路径；真实 helper／身份迁移不属于当前文档任务授权。
-
-- **M15／多声道下混与多输出流。** 当前按所有 buffer 声道总数求平均，16 声道仅一对同相立体声有效时，相比按该声道对下混会额外衰减约 18 dB；tap 固定 `withStream:0`，不等于覆盖设备所有流。这是源码／条件数学判断，不是全部设备均受影响的实测。先用实际转换逻辑的合成 interleaved／noninterleaved buffer 覆盖 2／8／16 声道、不同声道对、真静音、全声道信号及幅值边界；再在 Mac 已有且明确授权的虚拟多声道／多流设备中注入固定合成音，显式选择虚拟 UID，不改默认设备、不采样物理硬件／麦克风，验证第二流与非首声道对。没有合适设备则保留未验证。若在支持范围内复现，按 stream／starting channel／首选声道或 layout 建立正确映射及有界下混，不按零值猜“活跃声道”、不无条件乘声道数补音量，也不盲目切全局 mixdown 扩大采集范围；不新增专业硬件支持或 UI。[Apple stream 参数定义](https://developer.apple.com/documentation/coreaudio/catapdescription/initexcludingprocesses%3Aanddeviceuid%3Awithstream%3A?language=objc)。
-
-- **M16／并入 M1 的外置运行资源完整性验证。** Qwen 构建已有逐文件哈希，打包后也签整个 `.app`；Python、脚本和 wheel 普通文件不等于完全未被签名覆盖。Apple 的资源封印覆盖非 Mach-O 资源，但不能据此假设执行前已自动验证所有资源，也不能将新版 App 管理当唯一屏障。先用自有签名测试副本，在不重新签名的情况下篡改／替换／重定向 Python、`mlx-worker.py`、依赖及 ASAR，确认现有 OS／签名／fuses 在何处拒绝，整个测试仅使用无敏感副作用的合成载荷。如实际执行路径绕过资源检查，启动 MLX 前补绑定固定身份的静态代码／资源封印验证，或受保护 ASAR 内的最终运行资源清单；不能信任资源旁可一并改写的 `build.json` 自证。校验应覆盖实际加载闭包并在最终签名顺序下有效，测量启动开销，不在每个音频块反复整包哈希，不改模型或长段算法。静态检查仍有并发修改窗口，不声称消除所有同用户篡改；Mac 本机验证后选择最小方案。[Apple 资源签名说明](https://developer.apple.com/library/archive/technotes/tn2206/)、[静态签名与资源验证](https://developer.apple.com/documentation/security/secstaticcodecheckvalidity(_:_:_:))。
-
-### 保留的决定与既有交接
-
-- **Windows 复审共享改动的 Mac 回归**：附件预算前检／中途取消、模型目录实际字节限制／JSON 错误脱敏／云及组件等取消清理、Copilot 握手或控制会话无响应时的关停和迟到结果隔离、知识库旧内存 revision 释放及大题库层级、账号删除前图片／用量写入 drain 与重启后不重建资料、空队列与重复退出时真实 will-quit 顺序／自然结束。只用临时合成资料和隔离 SDK／Keychain；Mac 实际 SDK／utility 退出行为由本机验收，Windows 结果不代验。M15 的多声道平均衰减在 Windows WASAPI 也有相同的条件数学问题，不能用普通双声道回归推定多声道／多流已覆盖；未验证前不凭零值改增益或路由。
-- **不重新立项**：M8 的 32 槽／1.5 秒原生缓冲、Paraformer 2 秒预算、宁停不丢、错误后暂停并手动重新开始均保持；只在相关回归中确认错误、资源释放与手动恢复，不加自动重连。M9 中的 Qwen 长段重算／CPU 性能部分排除。M10 保留现有 v10 密文兼容，不迁移真实凭据、密码派生格式或 Keychain 条目。此前保留的语音进度、完整组件哈希、历史组件／备份保护、局域网边界、本地资料加密选择及第三方图标决定不因本清单重开。
-- **不追加身份体系**：M2 的购买 Developer ID／公证不是当前强制修复，不购买、不自动换证／换身份；未来若另获发行身份迁移授权，再规划 Gatekeeper、签名及凭据连续性。M3 不拆分／轮换现有更新密钥。
-- **能力边界保持真实**：`captureProtectionSupported:false` 继续作为 Mac 当前能力限制，不承诺共享屏幕中隐藏窗口，不为此移植 Windows 防捕获或新增 UI。
-- **既有 Mac 交接继续**：组件 Unix socket 租约及前驱回收重试、Copilot 本地退出与 Mac vault 的合成隔离验证，以及其余共享改动的本机回归。Copilot 验证不扩展为重写官方登录／完全隔离命名空间，不访问真实凭据。未逐项审阅的美术工具／测试文件不推定存在缺陷，也不把关键字扫描称为完整原生验收。所有测试沿用 owner 解锁控制台、合成资料／公开固定资产、临时路径归属和结束清理要求；Windows 结果不代验 Mac，结果仅终端／对话。
+保持 `captureProtectionSupported:false` 的真实能力边界，不宣称 Mac 可在屏幕共享中隐藏窗口。不自动购买 Developer ID／公证、轮换更新身份或迁移真实资料。共享附件、取消、SDK／utility 退休、账号删除和退出 drain 仍使用同一实现，在本机按当前排程回归；完整当前范围见 PROGRESS.md，未发布开发快照的逐项历史查 Git。

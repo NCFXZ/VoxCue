@@ -10,7 +10,7 @@ Mac 打包将根 LICENSE、THIRD_PARTY_NOTICES.md 与既有 Sparkle 许可一起
 
 ## 1.2.0 Windows 更新认证
 
-Windows 独立 Ed25519 清单签名、公钥 ASAR 归属、缓存／安装重新认证及同身份备份恢复见 [安全加固](SECURITY_HARDENING.md)和[逐项交接 W01–W03](MACOS_1.2.0_HANDOFF.md#windows-专属已实现mac-仅参考)。本文后续 Windows 缓存流程继续适用，但所有缓存复用必须经过新签名验证。首次从旧客户端升级仍沿用其原有信任链，Ed25519 不替代 Authenticode 发布者身份，也不改变 Mac 既有 Sparkle 身份。
+Windows 独立 Ed25519 清单签名、公钥 ASAR 归属、缓存／安装重新认证及同身份备份恢复见 [安全加固](SECURITY_HARDENING.md)和[固定 Git 历史中的逐项交接 W01–W03](https://github.com/NCFXZ/VoxCue/blob/bc53d15431d0984b7d79c59c77e279e1500f03a5/shared/docs/MACOS_1.2.0_HANDOFF.md#windows-专属已实现mac-仅参考)。本文后续 Windows 缓存流程继续适用，但所有缓存复用必须经过新签名验证。首次从旧客户端升级仍沿用其原有信任链，Ed25519 不替代 Authenticode 发布者身份，也不改变 Mac 既有 Sparkle 身份。
 
 ## 2026-11-05 Windows 检查缓存与安装包恢复
 

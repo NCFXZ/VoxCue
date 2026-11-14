@@ -4,7 +4,7 @@
 #include "credential-fixture-boundary.h"
 #define VOXCUE_CREDENTIAL_FIXTURE 1
 #define SecKeychainOpen openFixtureKeychain
-// Record attempts to enumerate a candidate alias even when no item exists.
+// Record attempts to enumerate an unsupported alias even when no item exists.
 // For a race, vary visibility across the two own-item searches while exercising
 // the real duplicate-create response, ownership checks and stored secret reads.
 static bool hideFixtureSearch;
@@ -16,8 +16,8 @@ static OSStatus recordFixtureSearch(CFTypeRef keychains, SecItemClass kind,
     const auto &field = attributes->attr[index];
     if (field.tag != kSecAccountItemAttr) continue;
     NSString *account = [[NSString alloc] initWithBytes:field.data length:field.length encoding:NSUTF8StringEncoding];
-    if ([@[@"VoxCue Key v6", @"VoxCue Key v7", @"VoxCue Key v8", @"VoxCue Key v9", @"VoxCue Key v10"]
-          containsObject:account]) fputs("fixture-queried-candidate\n", stderr);
+    if ([account isEqualToString:@VOXCUE_FIXTURE_UNSUPPORTED_ACCOUNT])
+      fputs("fixture-queried-unsupported\n", stderr);
     const char *race = getenv("VOXCUE_FIXTURE_VAULT_RACE");
     if (!race || ![account isEqualToString:@VOXCUE_FIXTURE_VAULT_ACCOUNT]) continue;
     if (!keychains || CFGetTypeID(keychains) != CFArrayGetTypeID() ||

@@ -718,7 +718,7 @@ it.each([
     cleanup: 'partial',
     removed: 1,
     retained: 1,
-    retainedItems: ['v8'],
+    retainedItems: ['unsupported-item'],
     reason: 'authorization',
   },
   {

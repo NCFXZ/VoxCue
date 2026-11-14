@@ -1,14 +1,13 @@
 # Windows 1.2.0 → 1.2.1 更新与逐项验收交接
 
-日期：2026-11-12。本文在 Mac 1.2.1 发布后编写，记录变更和 Windows 接续要求，不保存测试成绩或运行产物。下面所有复选框均为 **Windows 待执行**，Mac 验证不能代验。
+日期：2026-11-12。本文保留当时交给 Windows 的共享变更清单；未发布 Mac 开发快照不是当前升级、恢复或测试基线。下列表格属于历史接续条件，当前范围见根 PROGRESS.md 与 [Windows 1.2.3](WINDOWS_1.2.3_RELEASE.md)，Mac 验证不能代验 Windows。
 
 ## 基线与交付
 
 - Windows 1.2.0 源码基线：`v1.2.0`／`0bc1cd4261c56598a6341adfb11aca99913e9cf9`。
-- Mac 1.2.0 产品基线：`macos-v1.2.0`／`10ac04be0c9edffc37854a2849acb6c79df21c64`。两个 1.2.0 标签不是同一源码快照。
-- 本次产品快照：[`macos-v1.2.1`／`64f61050a7f37848a153e6ed90ab6ddd009d3778`](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.1)。本交接作为后续文档提交推送 main，不移动产品标签。
-- [Mac 1.2.1 稳定发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.1)为 latest，仅含 Apple Silicon 的 DMG、ZIP、`latest-mac.yml`。原 [Windows 1.2.0 发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0)保留；本次没有制作或验收 Windows 1.2.1 安装包。
-- [Mac 产品差异](https://github.com/NCFXZ/VoxCue/compare/macos-v1.2.0...macos-v1.2.1)用于核对本轮新增；[Windows 基线差异](https://github.com/NCFXZ/VoxCue/compare/v1.2.0...macos-v1.2.1)还包含此前 Mac 接续时已加入的共享测试变更，见 B 项。
+- 历史 Mac 开发快照为 [`10ac04be`](https://github.com/NCFXZ/VoxCue/tree/10ac04be0c9edffc37854a2849acb6c79df21c64) 与 [`64f61050`](https://github.com/NCFXZ/VoxCue/tree/64f61050a7f37848a153e6ed90ab6ddd009d3778)，仅用于核对源码差异，不列为正式发行或恢复入口。
+- 原 [Windows 1.2.0 发行](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.0)及其标签、资产保留。发布状态以 PROGRESS.md 为准，本文不主张发布或恢复 Mac 中间版本。
+- [Mac 历史快照差异](https://github.com/NCFXZ/VoxCue/compare/10ac04be0c9edffc37854a2849acb6c79df21c64...64f61050a7f37848a153e6ed90ab6ddd009d3778)和[相对 Windows 1.2.0 的历史差异](https://github.com/NCFXZ/VoxCue/compare/0bc1cd4261c56598a6341adfb11aca99913e9cf9...64f61050a7f37848a153e6ed90ab6ddd009d3778)保留当时共享修改的可追溯性。
 
 接续先读根 `AGENTS.md`、`PROGRESS.md` 并检查 status／diff。直接使用 main，保留后续工作；Windows 上 `macos/` 全树只读。版本唯一来源是 `shared/package.json`，不手改两平台版本、升级依赖／模型、轮换身份或迁移真实资料。
 
@@ -44,24 +43,9 @@
 | S017 | [ ] | **真实模型边界。** Mac 原短 um／ah 继续用于 S001 负向隔离，Windows 负例须经本机 VAD 确认且旧音已退出 500ms 预卷范围；新 `speech-preroll-smoke.mjs`／`speech-preroll.cjs` 为 Mac 文件回放入口。Windows 编写或复用本机文件 PCM 适配，保留 fresh 原文、首音节、真实 ACK 和尾部断言。固定模型仍可能将“经历”识为“经理”，本次未宣称修复逐字准确率。 |
 | S018 | [ ] | **固定服务端与截图路径门禁。** 客户端集成使用显式 `VOXCUE_TEST_SERVER_ROOT` 指向干净 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考，不能修改既有服务端或加载真实配置。必要截图只使用本机 os.tmpdir() 下 owned 目录；本轮因错误 /private/tmp 别名参数触发门禁时，修正运行参数而未放宽守卫。 |
 
-## Mac 专属变更：理解影响，不移植实现
+## Mac 专属行为
 
-以下条目供 Windows 核对平台边界；不要求在 Windows 执行 Mac 工具。Windows 音频、凭据、更新和签名继续由自己的适配器承担。
-
-| 编号 | 变化及边界 |
-| --- | --- |
-| M001 | `AudioRoute.h`／`AudioSamples.h` 修复多声道平均稀释和固定首流：HAL 全局首选立体声声道映射到原始 stream index 与局部声道对，只转换所选通道。未知／重叠／跨流／越界元数据明确拒绝，单流 mono／stereo 保持兼容。Windows 只按 WASAPI 格式／channel mask 核对自己的路由。 |
-| M002 | 全量测试发现读取快照到注册监听之间的初始化空隙；现在监听全部建立后重读完整快照，不一致即设备变化失败，运行中配置变化停止。新增原生转换、受控多流、真实第二 stream 及配置变更夹具；不向 Windows 复制 CoreAudio setter／私有 aggregate。 |
-| M003 | Mac M8 有界自动重启已在 adapter 显式启用，包含真实 close 退休、启动／退出 watchdog；Windows 状态及前置条件见 W004。 |
-| M004 | M6 用 SIP guest、正常系统权限 UI 和固定虚拟音频比较授权、拒权、仅重新授权音频。拒权仍可能 started 并交付推进的全零帧，与正常静音不可可靠区分；不据零值增加拒权警报或自动停止。责任链为 guest agent→实际包助手，不代称正式应用父链／物理设备。 |
-| M005 | `CredentialsHardened.mm` 独立冻结 v2 helper 复用未改的 v1 密码／v10 密文实现，验证固定正式父与 Hardened Runtime，拒绝开发父和危险注入／entitlements。v1 源码和规范字节保留，不重签覆盖。Windows 凭据实现和身份不因此改变。 |
-| M006 | v2 查找三组既有别名的全部匹配 Keychain 项，先核对原密码一致，再收紧 ACL／partition 并撤旧 CDHash；新条目同样受限。多条目迁移非原子，失败不生成替代密码或恢复旧授权，同一 v2 可重试；旧版应用可能无法再读已迁移凭据。首次可出现正常系统授权，未迁移宿主真实登录资料。 |
-| M007 | 测试发现 builder 可跟随输出 symlink／hardlink 覆写：现校验 owned／canonical／普通单链接节点，以 O_NOFOLLOW＋inode 复核读取，独占同目录 staging 后原子发布。缓存与输出重定向均拒绝；不通过放宽路径校验修复构建。 |
-| M008 | v2 冻结后删除首次 bootstrap 的自动编译／签名分支；缺少规范身份即失败并要求恢复。后续构建只核对公开证书、源码闭包和规范字节，不为检查证书解锁私钥，也不自动生成、轮换或回退 ad-hoc。 |
-| M009 | `package-installer.mjs` 对 mkdtemp 根先 realpath，修复 /var 与 /private/var 的合法别名冲突。Mac 打包器已补 W002 对应 cancellable.js 单文件展开，最终包检查真实物理 require 闭包。 |
-| M010 | 更新密钥备份增加只读 `--verify`：持有人在本机隐藏输入备份口令，认证加密副本并核对派生公钥，不读取或写回现用私钥。持有人保存的是 OneDrive 加密副本，不称物理离线介质；Windows 不复制密钥或更换既有身份。 |
-| M011 | 正式包隔离 runner 支持 `--screenshot-only` 和暂留停止实例；完整入口同样消费最终 ASAR 的真实截图 Worker。凭据夹具使用 nonce 测试父、owned 临时 Keychain 和固定生产探针无效输入，不保留任意转发正式身份 launcher。Windows 继续沿既有 Sandbox／SID／只读白名单边界。 |
-| M012 | 本轮删除未用 bootstrap／silentReset 代码及已结束的合成资料、截图、旧候选、上一环节完整 VM／工具环境。保留现用依赖、认证公开模型／音频缓存、签名私钥、原发行及恢复基线；不清理历史明确跳过目录。 |
+Mac 的当前安全、音频与更新实现见 [共享安全设计](SECURITY_HARDENING.md#macos-当前边界)，凭据只保留已发行 v1／v11 的有效恢复说明，见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。未发布中间助手的迁移与构建表格已退役，原始说明可查[固定 Git 历史](https://github.com/NCFXZ/VoxCue/blob/bc53d15431d0984b7d79c59c77e279e1500f03a5/shared/docs/WINDOWS_1.2.1_HANDOFF.md#mac-专属变更理解影响不移植实现)。Windows 不移植 CoreAudio、Keychain 或 Mac 签名实现。
 
 ## Windows 基线额外差异
 
@@ -85,11 +69,11 @@
 5. 在合成账户验证资料导出取消、保存和同名替换，校验 ZIP 精确内容；错误密码不删除，确认删除后本地／合成云端及重启状态正确，公开模型保留。原生 Save／Replace 在 owned Windows 对话框操作，不访问真实账号。
 6. 仅在前置通过后制作 Windows portable／installer／Store 资产；核对最终 ASAR 的 W002、真实 SDK／语音／知识库／截图 Worker 及本机绑定。正式包继续在独立禁网 Sandbox 运行，不重新开放产品调试或添加测试环境覆盖。
 7. 保护原 1.2.0 二进制，在隔离 guest 先用旧包写合成资料，再实际升级到新包，验证原件字节／元数据、个人资料、JD、记录、主题、语言、快捷键和可检索索引；另运行既有 1.1.1 历史升级入口。当前格式 reload、归档替换、NSIS 安装与 Store 更新必须分别说明，不混称。
-8. 验证匿名分页发行查询、完整 Windows 资产选择、签名／摘要、下载进度、取消、安装／重启及旧缓存归属。本次 Mac-only latest 应被跳过，Windows 1.2.0 正常保持无更新；分页／网络／签名错误仍明确失败，不静默回退。
-9. 测试结束核对 owned 进程、VM、挂载和文件占用后清理环境；保留认证公开缓存和恢复基线。按 Windows 当轮授权交付其资产，不能把本次 Mac-only 发行改名为 Windows 已发布。
+8. 验证匿名分页发行查询、完整 Windows 资产选择、签名／摘要、下载进度、取消、安装／重启及旧缓存归属。历史中的仅 Mac 资产候选应被跳过；分页／网络／签名错误仍明确失败，不静默回退。
+9. 测试结束核对 owned 进程、VM、挂载和文件占用后清理环境；保留认证公开缓存和恢复基线。按 Windows 当轮授权交付其资产，不能把历史开发快照称为 Windows 已发布。
 
 ## 更新选择与已知边界
 
-Windows 既有更新代码未改：`shared/electron/backend/updates/provider.ts` 匿名分页查询 `/repos/NCFXZ/VoxCue-releases/releases`，不查询 `/releases/latest`。`releases.ts` 要求同一稳定版本的 `latest.yml`、`VoxCue-Setup-<版本>-x64.exe` 及对应 `.exe.blockmap` 均完整上传，再按 Windows 版本数字选择最高项。仅有 Mac 资产的 1.2.1 被跳过；原 Windows 1.2.0 完整资产及签名保留时，已装 1.2.0 正常得到无更新。不是所有错误都回退旧版。
+Windows 既有更新代码未改：`shared/electron/backend/updates/provider.ts` 匿名分页查询 `/repos/NCFXZ/VoxCue-releases/releases`，不查询 `/releases/latest`。`releases.ts` 要求同一稳定版本的 `latest.yml`、`VoxCue-Setup-<版本>-x64.exe` 及对应 `.exe.blockmap` 均完整上传，再按 Windows 版本数字选择最高项。仅含 Mac 资产的候选被跳过；原 Windows 正式资产与签名不因此改写。不是所有错误都回退旧版。
 
 本次没有升级模型／依赖、修改数据格式、提高原生／Paraformer 积压预算、购买签名身份或增加全量加密。Windows 自动重启仍未启用；Mac 权限／HAL／Metal／Keychain／SIP 及 DMG 的结论不代表 Windows 对应实现已验收。原始安全与安装边界继续参照 [共享安全设计](SECURITY_HARDENING.md)、[Windows 1.2.0 发行索引](WINDOWS_1.2.0_RELEASE.md)及 [测试入口](../test/README.md)。

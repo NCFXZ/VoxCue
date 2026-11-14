@@ -10,6 +10,7 @@
 #ifndef VOXCUE_FIXTURE_ROOT
 #error A credential fixture must be bound to one owned temporary root
 #endif
+#define VOXCUE_FIXTURE_UNSUPPORTED_ACCOUNT "Synthetic unsupported credentials"
 static bool ownedFixtureRoot() {
   struct stat info{}; char resolved[PATH_MAX];
   return lstat(VOXCUE_FIXTURE_ROOT, &info) == 0 && S_ISDIR(info.st_mode) &&
@@ -30,7 +31,7 @@ static bool ownedFixtureKeychain(const char *value, bool creating = false) {
     @"fresh.keychain-db", @"partial.keychain-db", @"no-partition.keychain-db", @"cross.keychain-db",
     @"cross-secondary.keychain-db", @"guard.keychain-db", @"symlink.keychain-db", @"synthetic.keychain-db",
     @"legacy-only.keychain-db", @"current-only.keychain-db", @"cleanup-0.keychain-db",
-    @"cleanup-1.keychain-db", @"invalid-cipher.keychain-db", @"candidates-only.keychain-db",
+    @"cleanup-1.keychain-db", @"invalid-cipher.keychain-db", @"unsupported-only.keychain-db",
     @"ordered.keychain-db", @"safe-order.keychain-db", @"oldest-only.keychain-db",
     @"race-source.keychain-db", @"race-winner.keychain-db", @"race-empty.keychain-db",
     @"race-different.keychain-db", @"english.keychain-db", @"adapter.keychain-db"];

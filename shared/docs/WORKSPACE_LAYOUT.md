@@ -28,11 +28,11 @@ VoxCue/
   macos/
     src/                       Mac 图标适配
     electron/                  Core Audio、权限、窗口、凭据、网络和更新适配
-    native/                    本机助手源码；已冻结凭据版本必须保留
+    native/                    本机助手源码；保留现用及旧正式恢复所需代码
     scripts/ / test/ / docs/    Mac 构建、回归及原生说明
     public/                    PNG/ICNS 衍生物及 SF Symbols
     VoxCue.app/                本地开发启动入口（生成）
-    .tools/                    受保护签名材料、固定助手和开发工具
+    .tools/                    受保护签名材料、已发行 v1/v11 规范助手和开发工具
     recovery/ / release/       恢复与发行基线，不能当作临时文件
     node_modules/ / .pnpm-store/ / .cache/ / dist/ / dist-electron/
     package.platform.json      Mac 命令及依赖差异

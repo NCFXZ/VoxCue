@@ -6,7 +6,7 @@ static const char *fixturePassword = "synthetic-keychain-password";
 static const char *services[] = {"VoxCue Credential Storage", "VoxCue Safe Storage", "VoxCue Safe Storage"};
 static const char *accounts[] = {"VoxCue Key", "VoxCue Key", "VoxCue"};
 #ifndef VOXCUE_FIXTURE_VAULT_ACCOUNT
-#define VOXCUE_FIXTURE_VAULT_ACCOUNT "VoxCue Key v6"
+#error The current vault fixture account must be explicit
 #endif
 static NSString *hex(NSData *data) {
   NSMutableString *text = [NSMutableString string];
@@ -29,8 +29,8 @@ int main(int argc, const char **argv) {
     NSString *mode = @(argv[1]);
     const bool create = [mode isEqual:@"create"], seed = [mode isEqual:@"seed"];
     const bool vault = [mode isEqual:@"vault"], plant = [mode isEqual:@"plant"];
-    const bool seedCandidates = [mode isEqual:@"seed-candidates"], checkCandidates = [mode isEqual:@"check-candidates"];
-    if (!(create || seed || vault || plant || seedCandidates || checkCandidates || [mode isEqual:@"inspect"] || [mode isEqual:@"delete"] ||
+    const bool seedUnsupported = [mode isEqual:@"seed-unsupported"], checkUnsupported = [mode isEqual:@"check-unsupported"];
+    if (!(create || seed || vault || plant || seedUnsupported || checkUnsupported || [mode isEqual:@"inspect"] || [mode isEqual:@"delete"] ||
           [mode isEqual:@"unrelated"]) ||
         argc != (seed ? 6 : 3) || !ownedFixtureKeychain(argv[2], create)) return 76;
     if (seed && (strcmp(argv[3], VOXCUE_FIXTURE_LEGACY_PATH) ||
@@ -51,27 +51,22 @@ int main(int argc, const char **argv) {
         NULL, NULL, NULL);
       CFRelease(keychain); return status ? 12 : 0;
     }
-    if (seedCandidates || checkCandidates) {
-      // These ignored names contain synthetic, admin-owned values distinct from
-      // the historical source. Only this fixture may inspect the values.
+    if (seedUnsupported || checkUnsupported) {
+      // This ignored name contains a synthetic, admin-owned value distinct from
+      // the historical source. Only this fixture may inspect its value.
       const char *service = "VoxCue Credential Storage";
-      for (int revision = 6; revision <= 10; ++revision) {
-        NSString *account = [NSString stringWithFormat:@"VoxCue Key v%d", revision];
-        NSData *value = [[NSString stringWithFormat:@"synthetic-ignored-%d", revision]
-          dataUsingEncoding:NSUTF8StringEncoding];
-        const char *name = account.UTF8String;
-        if (seedCandidates) {
-          status = SecKeychainAddGenericPassword(keychain, (UInt32)strlen(service), service,
-            (UInt32)strlen(name), name, (UInt32)value.length, value.bytes, NULL);
-        } else {
-          UInt32 size = 0;
-          void *bytes = NULL;
-          status = SecKeychainFindGenericPassword(keychain, (UInt32)strlen(service), service,
-            (UInt32)strlen(name), name, &size, &bytes, NULL);
-          if (!status && (!bytes || size != value.length || memcmp(bytes, value.bytes, size))) status = errSecDecode;
-          if (bytes) SecKeychainItemFreeContent(NULL, bytes);
-        }
-        if (status) break;
+      const char *name = VOXCUE_FIXTURE_UNSUPPORTED_ACCOUNT;
+      const char *value = "synthetic-unsupported";
+      if (seedUnsupported) {
+        status = SecKeychainAddGenericPassword(keychain, (UInt32)strlen(service), service,
+          (UInt32)strlen(name), name, (UInt32)strlen(value), value, NULL);
+      } else {
+        UInt32 size = 0;
+        void *bytes = NULL;
+        status = SecKeychainFindGenericPassword(keychain, (UInt32)strlen(service), service,
+          (UInt32)strlen(name), name, &size, &bytes, NULL);
+        if (!status && (!bytes || size != strlen(value) || memcmp(bytes, value, size))) status = errSecDecode;
+        if (bytes) SecKeychainItemFreeContent(NULL, bytes);
       }
       CFRelease(keychain);
       return status ? 17 : 0;

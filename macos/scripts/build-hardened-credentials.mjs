@@ -1,15 +1,10 @@
-import workspace from '../../shared/scripts/workspace.mjs';
-import { readFile, mkdir, mkdtemp, rm, lstat, realpath, open, rename } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, rm, lstat, realpath, open, rename } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
 import path from 'node:path';
-import { localSigningCertificate, verifyLocalApp } from './development-signing.mjs';
+import { verifyLocalApp } from './development-signing.mjs';
 
-export const hardenedCredentialIdentifier = 'com.voxcue.credentials.hardened';
 export const credentialFile = 'VoxCue.Credentials';
-const digest = (value) => createHash('sha256').update(value).digest('hex');
-const helperDirectory = path.join(workspace.platformRoot, '.tools/credential-helper-v2');
 function checkOwnedNode(info, file, directory) {
   if (
     info.isSymbolicLink() ||
@@ -100,30 +95,14 @@ export async function copyCredentialHelper(source, output) {
   }
   return output;
 }
-export async function credentialSourceHashes(cleanup = false) {
-  return Object.fromEntries(
-    await Promise.all(
-      [
-        'Credentials.mm',
-        'CredentialsHardened.mm',
-        ...(cleanup ? ['CredentialsMigrating.mm'] : []),
-      ].map(async (name) => [
-        name,
-        digest(await readFile(path.join(workspace.platformRoot, 'native', name))),
-      ]),
-    ),
-  );
-}
 function execute(command, args) {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 60000 });
   if (result.error || result.status) throw result.error ?? Error(result.stderr);
   return result;
 }
-export function verifyHardenedCredentials(
-  binary,
-  signing,
-  identifier = hardenedCredentialIdentifier,
-) {
+export function verifyHardenedCredentials(binary, signing, identifier) {
+  if (typeof identifier !== 'string' || !identifier)
+    throw Error('Credential helper identifier is required');
   verifyLocalApp(binary, signing, identifier);
   const metadata = execute('/usr/bin/codesign', ['-d', '--verbose=4', binary]);
   if (!/flags=0x[0-9a-f]+\([^\n]*\bruntime\b/.test(metadata.stderr))
@@ -131,41 +110,4 @@ export function verifyHardenedCredentials(
   const entitlements = execute('/usr/bin/codesign', ['-d', '--entitlements', ':-', binary]);
   if (/<key>/.test(entitlements.stdout))
     throw Error('Credential helper must not have entitlement exceptions');
-}
-
-export async function verifyFixedHardenedCredentials(binary, signing) {
-  const { record, bytes } = await readCredentialHelperCache(helperDirectory);
-  if (
-    record.certificate !== signing.sha256 ||
-    JSON.stringify(record.sourceHashes) !== JSON.stringify(await credentialSourceHashes()) ||
-    record.binaryHash !== digest(bytes) ||
-    record.binaryHash !== digest(await ownedFile(binary))
-  )
-    throw Error('Credential helper does not match the frozen v2 identity and source closure');
-  verifyHardenedCredentials(binary, signing);
-}
-
-export async function buildHardenedCredentials() {
-  const { record, bytes: existing } = await readCredentialHelperCache(helperDirectory);
-  const signing = await localSigningCertificate();
-  const sourceHashes = await credentialSourceHashes();
-  const canonical = path.join(helperDirectory, credentialFile);
-  if (
-    record.certificate !== signing.sha256 ||
-    JSON.stringify(record.sourceHashes) !== JSON.stringify(sourceHashes) ||
-    record.binaryHash !== digest(existing)
-  )
-    throw Error(
-      'Fixed hardened credential helper changed; restore its exact identity or implement a separate compatible migration.',
-    );
-  verifyHardenedCredentials(canonical, signing);
-  // v2 is now a frozen predecessor; verifying it must never downgrade the
-  // production output staged by the compatible v3 cleanup builder.
-  return canonical;
-}
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  await buildHardenedCredentials();
-  console.log(
-    'Verified archived v2 credential helper without staging or credential Keychain access.',
-  );
 }

@@ -1,6 +1,6 @@
 # Windows 1.2.0 → 1.2.2 更新及本机验收交接
 
-**适用基线**　Windows 正式源码为 `v1.2.0`（`0bc1cd4261c56598a6341adfb11aca99913e9cf9`），目标发行标签为 `v1.2.2`，共享版本为 1.2.2。两者之间的 `macos-v1.2.0`、`macos-v1.2.1` 为 Mac 快照，Windows 从自己的 1.2.0 直接接续。下列各项均待 Windows 执行。目标标签发布后，以其指向的提交核对差异，并验收由对应 Windows 源码构建的安装包。
+**历史适用基线**　Windows 正式源码为 `v1.2.0`（`0bc1cd4261c56598a6341adfb11aca99913e9cf9`），本文记录当时接续共享版本 1.2.2 的要求；发布状态与实际标签以 PROGRESS.md 为准。中间的 Mac 开发修改可查[固定 Git 差异](https://github.com/NCFXZ/VoxCue/compare/10ac04be0c9edffc37854a2849acb6c79df21c64...64f61050a7f37848a153e6ed90ab6ddd009d3778)，不列为应用升级或恢复基线。Windows 从自己的正式版本直接接续，以其实际发行提交和安装包独立验收。
 
 Windows 本机先查 `git status --short --branch`、`git diff --name-status v1.2.0` 和未跟踪文件，保留现有工作。本次 Mac 工作区自该标签以来，`windows/` 的受版本控制文件无差异；下文明确列出的 Windows 适配须在 Windows 上实施。Windows 上保持 `macos/` 全树只读。先读 [项目规则](../../AGENTS.md)、[当前范围](../../PROGRESS.md) 和 [Windows 1.2.0 发行索引](WINDOWS_1.2.0_RELEASE.md)。
 
@@ -75,7 +75,7 @@ Windows 本机先查 `git status --short --branch`、`git diff --name-status v1.
 | Mac 变化 | Windows 对照范围 |
 | --- | --- |
 | 1.2.1 的 M001–M004 修正 HAL 多声道／多流选择和设备监听注册竞态，在 Mac 适配器启用有界自动重连。 | Windows 复核 WASAPI 声道掩码、设备变化、固定虚拟回放及自己的失败状态。共享恢复逻辑见 S004–S007。 |
-| 1.2.1 的 M005–M009 冻结凭据助手及构建身份，防止链接重定向覆盖，并修正包目录真实路径和语音依赖展开。1.2.2 的 v11 创建时按中文或英文命名，仅从 1.1.1 的三种既定名称复制一个来源；核心资料可读后才无弹窗清理，开发候选 v6–v10 及无关条目保留。 | Windows 沿用 Electron Safe Storage／DPAPI。只移植共享的坏资料保留、主动恢复与错误反馈，验证多个 Windows 凭据、账号和更新签名身份的隔离。打包展开对应 W002。 |
+| Mac 构建保护固定凭据身份，拒绝输出重定向，并核对包目录真实路径和语音依赖展开。现用 v11 创建时按中文或英文命名，仅从正式 1.1.1 的三种既定名称复制一个来源；核心资料可读后才无弹窗清理，其他无关条目保留。当前仅维护已发行 v1／v11 的恢复入口，规范见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。 | Windows 沿用 Electron Safe Storage／DPAPI。只移植共享的坏资料保留、主动恢复与错误反馈，验证多个 Windows 凭据、账号和更新签名身份的隔离。打包展开对应 W002。 |
 | Mac 的隐藏登录窗先取得应用持久语言，真实系统框由 macOS 控制；120 秒超时和未来请求退休单独处理。 | Windows 启动和账号恢复继续使用本平台路径；验证冷启动、切换语言、登录／主窗选路、保存资料与合成账号重登。真实 AI 服务系统凭据行为另外按 A05、A06 核对。 |
 | Mac 云账号与同源遥测改用 Electron 系统网络，遵循系统信任及代理，禁止 cookies、缓存、跨站重定向和 referrer。 | Windows 继续原网络适配器，核对请求端点、显式身份、取消、TLS 失败和本地资料保留。 |
 | M010–M012 完善更新公钥备份只读验证、SIP／签名执行／Gatekeeper 的 guest 门禁和归档测试边界。Mac 更新驱动复用认证过的本地归档元数据，发布源切新仓。 | Windows 使用其已固定公钥、NSIS／Store 流程及禁网 Sandbox。在完整安装包测试签名／摘要、缓存选择、取消和重启；保护用户原件、正式版本及签名恢复材料。 |

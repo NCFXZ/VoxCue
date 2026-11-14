@@ -9,8 +9,6 @@ export async function writeCredentialFixtureSource(directory, kind, parentIdenti
   assert.match(parentIdentifier, /^com\.voxcue\.test\.credentials\.[a-f0-9]{24}$/);
   const sources = {
     legacy: 'Credentials.mm',
-    hardened: 'CredentialsHardened.mm',
-    migrating: 'CredentialsMigrating.mm',
     'vault-v11': 'CredentialsVaultV11.mm',
   };
   assert.ok(Object.hasOwn(sources, kind));
