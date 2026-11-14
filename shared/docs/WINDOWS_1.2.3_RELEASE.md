@@ -81,7 +81,7 @@ Store 原地升级对新旧正式 APPX 原件分别校验完整摘要，只在�
 | latest.yml | 482 | `09e77850b65bd32bde4de8616a49dacf94f33fec744cef46073b78c83f017521` |
 | VoxCue-Store-1.2.3-x64.appx | 601719599 | `6d6fc9ae57aff3db3d66e317eb4444ddedbf9ecccf5fa60d2be270bea28d8fe4` |
 
-目标为在两个 GitHub 仓库新增 Windows `v1.2.3` 稳定发行，并向 Microsoft Store 提交 `2.2.3.0`。Mac 1.2.2 的原资产和标签保留。公开更新源的真实索引和下载摘要须在发布后回读验证；商店提交受理、认证与实际上线分别核对。
+Windows `v1.2.3` 已发布并设为两个仓库的 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。源码标签指向 `fae85ca665505b314fee784a0dddc091f337ffd5`。公开更新源已匿名回读完整安装器、blockmap、清单及签名，Mac 仍选择 1.2.2，原资产与标签保留。Microsoft Store 目标为 `2.2.3.0`，提交、认证与实际上线状态分别记录在 [当前进度](../../PROGRESS.md)，不以本地侧载代称微软正式分发。
 
 固定 Paraformer 对极短的“嗯／啊／呃”和“然后呢”可能漏识别或误识别，沿用 [1.2.2 已知限制](WINDOWS_1.2.2_RELEASE.md#已知识别限制)。空识别不计作准确率或过滤成功。合成音频和管道生命周期验证不代表物理设备拔插、真实用户语音或真实订阅账号授权均已验证。
 

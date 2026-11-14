@@ -1,6 +1,6 @@
 # VoxCue 当前进度
 
-更新于 2026-11-14。当前 Windows 目标版本为 1.2.3，应用“关于”、服务器上报、安装器和更新清单统一使用 1.2.3，Microsoft Store 包版本为 2.2.3.0。版本唯一来源为 `shared/package.json`。macOS 保持既有 1.2.2，本机不修改 `macos/`。
+更新于 2026-11-14。Windows 已发行 1.2.3，应用“关于”、服务器上报、安装器和更新清单统一使用 1.2.3；Microsoft Store 包 2.2.3.0 已提交，当前预处理中，通过认证后自动发布。版本唯一来源为 `shared/package.json`。macOS 保持既有 1.2.2，本机不修改 `macos/`。
 
 ## 当前实现
 
@@ -12,10 +12,10 @@
 - Mac 1.2.2 的凭据助手与升级边界沿用既有设计；Windows 的官方运行时完全无响应仍明确报错并允许以后重试，不声称两端系统授权窗口一致。[Mac 凭据交接](shared/docs/MACOS_1.2.2_CREDENTIAL_HANDOFF.md)
 - Mac 接续文档已区分 Windows 对齐既有能力与实际共享 Bug 修复，并列出 Mac 本机验收边界。[Mac 1.2.3 接续](shared/docs/MACOS_1.2.3_HANDOFF.md)
 
-## 当前任务与接续
+## 发行状态与接续
 
-- 验收后仅在 `main` 提交推送，向 `NCFXZ/VoxCue` 和 `NCFXZ/VoxCue-releases` 发布 Windows `v1.2.3`，匿名回读资产与摘要。发行说明只列用户可感知功能和修复，使用精简中英文；源码使用主仓标签与自动归档，不重复上传源码 ZIP。
-- Microsoft Store 已准备 Submission 10（`1152921505702404063`）草稿及中英文更新说明，尚未上传新包或提交认证。按用户要求提交 `2.2.3.0`，分别核对受理、认证与实际上线状态。
+- 已在 `main` 推送代码，两个仓库的 Windows `v1.2.3` 均为 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。源码标签为 `fae85ca665505b314fee784a0dddc091f337ffd5`，安装资产、签名、平台选择和累计文案已匿名回读。文案合并 Windows 1.2.0 到 1.2.3 的用户可见变化，中英文直接排列；源码使用主仓自动归档。
+- Microsoft Store 2.2.3.0 的 Submission 10（`1152921505702404063`）已受理，当前 Pre-processing，认证及发布尚未开始；设置为通过认证后立即发布。中英文说明使用相同累计范围。当前线上仍为 Submission 9 的 2.2.2.0。[Partner Center 状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
 - 固定 Paraformer 的极短中文识别限制保留，不更换模型或放宽断言；本机合成验证不能代称物理设备、真实语音或真实订阅授权验收。验证入口见 [客户端测试说明](shared/test/README.md)。
 
 ## 发行与恢复基线

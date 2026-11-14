@@ -29,11 +29,11 @@
 
 实现见 [云恢复](../src/services/cloudData.ts)、[原件事务](../src/services/knowledge.ts)、[索引协调](../src/stores/knowledgeIndex.ts)。回归见 [cloud-data](../test/unit/cloud-data.test.ts) 和 [knowledge-reconcile](../test/unit/knowledge-reconcile.test.ts)，包括共享旧在途状态响应的时序。
 
-### 完整英文音频恢复与就绪原因
+### 英文音频提示中英混排修复
 
 两路音频间断、输入/输出设备缺失使用完整句子翻译；暂停一路的“等待恢复”模板与内层原因分别翻译，避免恢复提示中英混排。用户自定义设备名保留原文。实现见 [uiMessages](../electron/contracts/uiMessages.ts)、[interviewReadiness](../src/services/interviewReadiness.ts) 和 [InterviewReadiness](../src/components/InterviewReadiness.tsx)。Windows 专属权限/HRESULT 文案不构成 Mac 新能力。
 
-### 保留阻止恢复的停止失败状态
+### 自动重连失败原因显示修复
 
 [共享 SpeechController](../electron/backend/speech/controller.ts) 的 `NativeCapture.stop(intent?: 'recover')` 和 `terminalError?: Error` 都为可选扩展。现有 Mac `stop()` 兼容，不要求增加 Windows 异常类型。自动恢复被旧采集停止失败阻断时，Mac 未提供已归属原生诊断就保留通用 `service` 停止失败；外层不再将其覆写为首次中断原因。
 
