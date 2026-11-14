@@ -180,7 +180,12 @@ it('never replaces a capture whose stop failed or whose close is unconfirmed', a
   f.captures[0].fail('synthetic pipe failure', true);
   await vi.advanceTimersByTimeAsync(10000);
   expect(f.captures).toHaveLength(1);
-  expect(await f.service.call({ op: 'status' })).toMatchObject({ state: 'error' });
+  expect(f.captures[0].stop).toHaveBeenCalledWith('recover');
+  expect(await f.service.call({ op: 'status' })).toMatchObject({
+    state: 'error',
+    error: '音频采集未能正常停止，请重新开始。',
+    failureSource: 'service',
+  });
 });
 
 it('uses 1/2/4 second delays, stops after three attempts, and does not reset for a brief successful open', async () => {

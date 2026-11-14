@@ -1,6 +1,6 @@
 # Windows 1.2.3 更新后的 macOS 接续
 
-本轮对应 Windows 1.2.3，商店包身份为 2.2.3.0；共享版本源 `shared/package.json` 为 1.2.3。已发行 Mac 仍为 1.2.2（`v1.2.2`），原资产与标签保留。Windows 工作期间 `macos/` 全树未修改，本文不是 Mac 原生、签名或安装验收记录。
+本文记录 Windows 1.2.3 交接时的范围，商店包身份为 2.2.3.0，共享版本源 `shared/package.json` 为 1.2.3；当时已发行 Mac 为 1.2.2（`v1.2.2`），原资产与标签保留。该 Windows 工作期间 `macos/` 全树未修改。后续 Mac 本机改动与发行入口见 [Mac 1.2.3 说明](MACOS_1.2.3_RELEASE.md)，本文不作为原生、签名或安装验收成绩。
 
 接续先读 [AGENTS.md](../../AGENTS.md)、[PROGRESS.md](../../PROGRESS.md) 并核对当前 diff。下列共享修复直接随源码进入 Mac，不要复制成第二套平台实现。
 
@@ -12,6 +12,14 @@
 | 云账号、云同步与同源遥测采用系统代理和系统证书信任 | `macos/electron/accountNetwork.ts` 已使用 Electron `net.fetch`，在 `platform.ts` 注入现有端口 | 保持已有无 cookies、无缓存/来源、拒绝重定向策略，不需要再添加该功能 |
 
 启动恢复上次 AI 服务连接、额度一致显示及生成期间查看网页来源沿用已有 1.2.2 基线，不列为本轮 Mac 新增功能。Windows 的采集尾段检查、设备 HRESULT、NSIS/APPX 及签名清单修复留在 Windows 适配层。
+
+## 相对已发行 Mac 1.2.2 的其他共享变更
+
+对比 Mac 1.2.2 提交 `ffc31e5`，Windows 1.2.2 提交 `79fc49c` 已带入以下共享变更，不能只按 Windows 1.2.3 的两个知识库 Bug 确定 Mac 验收范围：
+
+- 个人资料读取不再等待聊天恢复，冷启动时可立即编辑；这是尚未随已发行 Mac 1.2.2 交付的修复。实现见 [preparation store](../src/stores/preparation.ts)，回归见 [profile-store](../test/unit/profile-store.test.ts)。
+- 共享登录与云凭据层仅将明确损坏的记录交给重新授权流程，系统解密服务和文件读取失败保持错误并保留原件；解密服务的 `ENOENT` 不再被当作凭据文件缺失。Mac 继续使用现有平台凭据端口。回归见 [auth](../test/unit/auth.test.ts)、[cloud-account](../test/unit/cloud-account.test.ts) 和 [cloud-vault](../test/unit/cloud-vault.test.ts)。
+- 共享 HTML 移除备用 ICO 引用，组件样式移除无消费者的 `.component-ready` 选择器；不增加界面功能。Windows 1.2.3 另为共享音频解码器增加只读 `hasPartialPacket`，由 Windows 尾段校验使用，Mac 采集策略不变。
 
 ## 实际共享 Bug 修复
 
@@ -55,4 +63,4 @@ node ../shared/test/scripts/language-smoke.mjs
 - 英文与缩放：覆盖常用及分数缩放、窄窗、两路音频就绪状态和内嵌恢复原因，保留设备原名；复用知识库回归的严格位置与索引断言。
 - 原生生命周期：在自有受控夹具中验证断连恢复、手动停止/取消、旧进程未退的停止失败与错误保留；既有系统网络端口补绑定健全性核验即可。
 
-本轮没有 Mac 本机通过或新 Mac 安装包声明。完成本机验收后再依据当轮授权签名和发行，保留既有 Mac 与 Windows 正式资产及恢复原件。
+Mac 当前验收、签名和发行范围以 [PROGRESS.md](../../PROGRESS.md) 与 [Mac 1.2.3 说明](MACOS_1.2.3_RELEASE.md) 为准；本交接文档不保存测试成绩或安装包发布状态。既有 Mac 与 Windows 正式资产及恢复原件继续保留。

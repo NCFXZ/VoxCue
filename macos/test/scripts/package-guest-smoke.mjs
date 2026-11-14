@@ -6,6 +6,7 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
+import { upgradeBaselineVersions, verifiedUpgradeArchive } from './package-upgrade-baselines.mjs';
 
 const screenshotOnly = process.argv.includes('--screenshot-only');
 const retainVM = process.argv.includes('--retain-vm');
@@ -132,10 +133,11 @@ await cp(path.join(workspace.platformRoot, 'node_modules'), path.join(repo, 'mac
 console.log('Guest dependency staging complete; copying release' + (screenshotOnly ? ' for screenshot-only acceptance.' : ' and authenticated models.'));
 await copy(release, path.join(inputs, 'release'));
 if (!screenshotOnly) {
-  await copy(
-    path.join(workspace.platformRoot, 'release/1.1.1/VoxCue-1.1.1-arm64.zip'),
-    path.join(repo, 'macos/release/1.1.1/VoxCue-1.1.1-arm64.zip'),
-  );
+  for (const fromVersion of upgradeBaselineVersions)
+    await copy(
+      await verifiedUpgradeArchive(fromVersion),
+      path.join(repo, 'macos/release', fromVersion, `VoxCue-${fromVersion}-arm64.zip`),
+    );
   await copy(cache, path.join(inputs, 'components'));
 }
 // virtiofs can reject framework symlinks while traversing the shared tree.

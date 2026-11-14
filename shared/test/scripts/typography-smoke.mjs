@@ -528,6 +528,8 @@ try {
           endedAt: 6000,
           status: 'ended',
           mock: false,
+          titleStatus: 'failed',
+          titleError: '标题生成失败，可稍后重试。',
           transcripts: [
             {
               id: 't',
@@ -734,6 +736,79 @@ try {
     .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
   await inspect(page, 'record-answers-narrow-dark');
+  const titleState = await page.evaluate(() => ({
+    records: localStorage.getItem('copilot-interview-history-v1'),
+    language: localStorage.getItem('voxcue-language-v1'),
+  }));
+  try {
+    for (const [name, language, error, expected, retry] of [
+      ['zh', 'zh-CN', '标题生成失败，可稍后重试。', '标题生成失败，可稍后重试。', '重试生成标题'],
+      ['en', 'en', '标题生成失败，可稍后重试。', 'Could not generate a title. You can try again later.', 'Retry title generation'],
+      ['en-long', 'en', 'Title generation failed: ' + 'UnbrokenFailureDetail'.repeat(15),
+        'Title generation failed: ' + 'UnbrokenFailureDetail'.repeat(15), 'Retry title generation'],
+    ]) {
+      await page.evaluate(({ language, error }) => {
+        const key = 'copilot-interview-history-v1';
+        const records = JSON.parse(localStorage.getItem(key));
+        const record = records.find((item) => item.id === 'type-record');
+        record.titleStatus = 'failed';
+        record.titleError = error;
+        localStorage.setItem(key, JSON.stringify(records));
+        localStorage.setItem('voxcue-language-v1', language);
+        for (const key of ['copilot-interview-history-v1', 'voxcue-language-v1'])
+          window.dispatchEvent(new StorageEvent('storage', { key }));
+      }, { language, error });
+      const status = page.locator('.record-title-status');
+      await status.getByRole('button', { name: retry, exact: true }).waitFor();
+      await page.waitForFunction((expected) =>
+        document.querySelector('.record-title-status > span')?.textContent === expected, expected);
+      const answerCount = language === 'zh-CN' ? '1 条 AI 回答' : '1 AI answer';
+      await page.waitForFunction((expected) =>
+        document.querySelector('.record-panel-toggle > span')?.textContent === expected &&
+        document.querySelector('.record-facts')?.textContent.endsWith(expected), answerCount);
+      await page.evaluate(() => document.fonts.ready);
+      const geometry = await status.evaluate((node) => {
+        const scroll = node.closest('.record-transcript-scroll');
+        const viewport = scroll.getBoundingClientRect();
+        const panel = node.closest('.record-detail-body')
+          .querySelector('.record-answer-panel[data-open="true"]');
+        const right = Math.min(viewport.right, panel.getBoundingClientRect().left);
+        const label = node.querySelector(':scope > span');
+        const button = node.querySelector('button');
+        const range = document.createRange();
+        range.selectNodeContents(label);
+        const lines = [...range.getClientRects()].filter((rect) => rect.width > 0);
+        const bounds = [label.getBoundingClientRect(), button.getBoundingClientRect(), ...lines];
+        return {
+          contained: bounds.every((rect) => rect.left >= viewport.left - 1 &&
+            rect.right <= right + 1 && rect.top >= viewport.top - 1 &&
+            rect.bottom <= viewport.bottom + 1),
+          unobscured: [...lines, button.getBoundingClientRect()].every((rect) => {
+            const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+            return node.contains(hit);
+          }),
+          statusOverflow: node.scrollWidth > node.clientWidth + 1,
+          transcriptOverflow: scroll.scrollWidth > scroll.clientWidth + 1,
+        };
+      });
+      assert.deepEqual(geometry, {
+        contained: true, unobscured: true, statusOverflow: false, transcriptOverflow: false,
+      }, `record-title-status-${name}: full error text and retry button stay inside the unobscured transcript column`);
+      await captureRequested(page, `record-title-status-${name}-narrow-dark`);
+      checks.push({ name: `record-title-status-${name}`, geometry });
+    }
+  } finally {
+    await page.evaluate(({ records, language }) => {
+      for (const [key, value] of [
+        ['copilot-interview-history-v1', records], ['voxcue-language-v1', language],
+      ]) {
+        if (value === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, value);
+        window.dispatchEvent(new StorageEvent('storage', { key }));
+      }
+    }, titleState);
+    await page.getByRole('button', { name: '重试生成标题', exact: true }).waitFor();
+  }
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.locator('.knowledge-card').filter({ hasText: 'LongKnowledgeBaseName' }).click();
   await inspect(page, 'knowledge-documents-narrow-dark');

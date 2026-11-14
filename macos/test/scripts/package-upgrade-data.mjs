@@ -11,14 +11,13 @@ import { requireGuestIsolation } from './guest-isolation.mjs';
 import { launchGuestAsar, launchLegacyGuestProduct } from './guest-asar-host.mjs';
 import { runGuestProduct } from './guest-product.mjs';
 import { holdDesktopAwake } from './desktop-session.mjs';
+import { verifiedUpgradeArchive } from './package-upgrade-baselines.mjs';
 import { mkdir, lstat, realpath, rm, readFile, cp, rename } from 'node:fs/promises';
 import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
 import assert from 'node:assert/strict';
 
-const original = 'Synthetic 1.1.1 original: 中文与 English remain byte-for-byte intact.\n';
-const baseName = '1.1.1 覆盖升级资料';
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120000 });
   if (result.error || result.status !== 0)
@@ -61,9 +60,9 @@ async function snapshot(page) {
   });
 }
 
-async function archivedIndex(app, model, seed) {
+async function archivedIndex(app, model, seed, fromVersion) {
   return app.evaluate(
-    async ({ app }, { model, seed }) => {
+    async ({ app }, { model, seed, fromVersion }) => {
       const load = process
         .getBuiltinModule('module')
         .createRequire(app.getAppPath() + '/package.json');
@@ -82,7 +81,7 @@ async function archivedIndex(app, model, seed) {
             {
               documentId: 'upgrade-existing',
               baseId: 'upgrade-existing',
-              name: 'existing-1.1.1.md',
+              name: `existing-${fromVersion}.md`,
               bytes: Buffer.from('旧版索引 upgradeexistingmarker 保留中文正文，固定参数为 37。'),
             },
             signal,
@@ -95,7 +94,7 @@ async function archivedIndex(app, model, seed) {
           'upgrade-existing',
         );
         const hit = hits.find((item) => item.documentId === 'upgrade-existing');
-        assert.ok(hit, 'Previously indexed 1.1.1 document must remain searchable');
+        assert.ok(hit, `Previously indexed ${fromVersion} document must remain searchable`);
         const item = await host.getItem(hit.itemId);
         assert.ok(item?.content.includes('固定参数为 37'));
         return { documents: await host.listDocuments(), item };
@@ -103,7 +102,7 @@ async function archivedIndex(app, model, seed) {
         await host.close();
       }
     },
-    { model, seed },
+    { model, seed, fromVersion },
   );
 }
 
@@ -124,7 +123,7 @@ async function replaceOwnedBundle(bundle, zip) {
     if (occupied.error || occupied.signal || ![0, 1].includes(occupied.status) || occupied.stderr)
       throw Error('Cannot verify temporary upgrade application occupancy');
     if (occupied.status === 1 && !occupied.stdout) break;
-    if (Date.now() >= deadline) throw Error('Temporary 1.1.1 application is still in use');
+    if (Date.now() >= deadline) throw Error('Temporary upgrade application is still in use');
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   await rm(bundle, { recursive: true });
@@ -134,9 +133,20 @@ async function replaceOwnedBundle(bundle, zip) {
 // Covers data compatibility during an archive replacement. The independent
 // native updater suite exercises Sparkle commit/relaunch; package-smoke keeps
 // its real production archive authentication/staging/cancellation acceptance.
-export async function verifyPreviousVersionData({ zip, cache, update, nativeFile }) {
+export async function verifyPreviousVersionData({
+  zip,
+  cache,
+  update,
+  nativeFile,
+  fromVersion = '1.1.1',
+}) {
   await requireGuestIsolation();
-  const directory = path.join(testRoot, 'upgrade-from-1.1.1');
+  const previousZip = await verifiedUpgradeArchive(fromVersion);
+  const original = `Synthetic ${fromVersion} original: 中文与 English remain byte-for-byte intact.\n`;
+  const baseName = `${fromVersion} 覆盖升级资料`;
+  const background = `${fromVersion} 合成简历：TypeScript 与接口校验。`;
+  const documentName = `preserved-${fromVersion}.md`;
+  const directory = path.join(testRoot, `upgrade-from-${fromVersion}`);
   const install = path.join(directory, 'installed');
   const profile = path.join(directory, 'VoxCue');
   await mkdir(install, { recursive: true });
@@ -159,12 +169,7 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
   const components = path.join(profile, 'component-cache');
   await stageModelFixtures(path.resolve(cache), components, packages, componentLocation);
   const model = componentPaths(components, catalog).ragModel;
-  run('/usr/bin/ditto', [
-    '-x',
-    '-k',
-    path.join(workspace.platformRoot, 'release/1.1.1/VoxCue-1.1.1-arm64.zip'),
-    install,
-  ]);
+  run('/usr/bin/ditto', ['-x', '-k', previousZip, install]);
   const bundle = path.join(install, 'VoxCue.app');
   const signing = JSON.parse(
     await readFile(path.join(workspace.platformRoot, 'local-signing-public.json'), 'utf8'),
@@ -194,57 +199,83 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
     await login.reload();
     return connectUiAccount(app, login);
   };
+  async function verifyNormalStart(version, before, indexBefore) {
+    // Start an untouched product at its ordinary guest OS profile path, then
+    // inspect retained data in the separate development host. Native window
+    // startup does not establish a signed-in production account or page access.
+    const normalProfile = path.join(os.homedir(), 'Library/Application Support/VoxCue');
+    assert.equal(await lstat(normalProfile).catch(() => null), null);
+    await cp(profile, normalProfile, { recursive: true, verbatimSymlinks: true });
+    const normalEnvironment = { ...process.env };
+    for (const key of [
+      'COPILOT_TEST_USER_DATA',
+      'CFFIXED_USER_HOME',
+      'ELECTRON_RUN_AS_NODE',
+      'NODE_OPTIONS',
+    ])
+      delete normalEnvironment[key];
+    await runGuestProduct(bundle, { env: normalEnvironment });
+    await rename(profile, path.join(directory, `before-normal-start-${version}`));
+    await rename(normalProfile, profile);
+    const reopened = await launch(version);
+    assert.deepEqual(await snapshot(reopened), before);
+    assert.deepEqual(await archivedIndex(app, model, false, fromVersion), indexBefore);
+    await closeUiApp(app);
+    app = undefined;
+  }
   try {
-    const old = await launch('1.1.1');
-    // A genuine unchanged old bundle supplies Sparkle's actual NSBundle
-    // identity/version. JS version overrides cannot substitute for this.
-    const { installFeed } = workspace.platformRequire(
-      path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/install-feed.js'),
-    );
-    const feed = await installFeed(zip, update);
-    try {
-      await app.evaluate(
-        async ({ app }, { url, nativeFile }) => {
-          const require = process
-            .getBuiltinModule('module')
-            .createRequire(app.getAppPath() + '/package.json');
-          const native = require(nativeFile);
-          await new Promise((resolve, reject) => {
-            const timeout = setTimeout(() => {
-              native.cancel();
-              reject(Error('Production archive validation timed out'));
-            }, 120000);
-            native.begin(url, (event) => {
-              if (event.type === 'error') {
-                clearTimeout(timeout);
-                reject(Error(event.message));
-              } else if (event.type === 'ready') {
+    const old = await launch(fromVersion);
+    if (fromVersion === '1.1.1') {
+      // A genuine unchanged old bundle supplies Sparkle's actual NSBundle
+      // identity/version. JS version overrides cannot substitute for this.
+      const { installFeed } = workspace.platformRequire(
+        path.join(workspace.platformRoot, 'dist-electron/macos/electron/updates/install-feed.js'),
+      );
+      const feed = await installFeed(zip, update);
+      try {
+        await app.evaluate(
+          async ({ app }, { url, nativeFile }) => {
+            const require = process
+              .getBuiltinModule('module')
+              .createRequire(app.getAppPath() + '/package.json');
+            const native = require(nativeFile);
+            await new Promise((resolve, reject) => {
+              const timeout = setTimeout(() => {
                 native.cancel();
-                clearTimeout(timeout);
-                resolve();
-              } else if (event.type === 'quit') {
-                clearTimeout(timeout);
-                reject(Error('Cancelled update unexpectedly requested quit'));
-              }
+                reject(Error('Production archive validation timed out'));
+              }, 120000);
+              native.begin(url, (event) => {
+                if (event.type === 'error') {
+                  clearTimeout(timeout);
+                  reject(Error(event.message));
+                } else if (event.type === 'ready') {
+                  native.cancel();
+                  clearTimeout(timeout);
+                  resolve();
+                } else if (event.type === 'quit') {
+                  clearTimeout(timeout);
+                  reject(Error('Cancelled update unexpectedly requested quit'));
+                }
+              });
             });
-          });
-        },
-        { url: feed.url, nativeFile },
-      );
-      assert.equal(
-        run('/usr/libexec/PlistBuddy', [
-          '-c',
-          'Print :CFBundleVersion',
-          path.join(bundle, 'Contents/Info.plist'),
-        ]).trim(),
-        '1.1.1',
-      );
-      verifyLocalApp(bundle, signing, 'com.voxcue.app');
-      console.log(
-        'PASS: unchanged real 1.1.1 host and final native updater authenticated/staged the final production ZIP; cancellation retained the old signed bundle.',
-      );
-    } finally {
-      feed.close();
+          },
+          { url: feed.url, nativeFile },
+        );
+        assert.equal(
+          run('/usr/libexec/PlistBuddy', [
+            '-c',
+            'Print :CFBundleVersion',
+            path.join(bundle, 'Contents/Info.plist'),
+          ]).trim(),
+          '1.1.1',
+        );
+        verifyLocalApp(bundle, signing, 'com.voxcue.app');
+        console.log(
+          'PASS: unchanged real 1.1.1 host and final native updater authenticated/staged the final production ZIP; cancellation retained the old signed bundle.',
+        );
+      } finally {
+        feed.close();
+      }
     }
     await old.getByRole('button', { name: '个人信息', exact: true }).click();
     const panel = old.getByRole('complementary', { name: '个人信息', exact: true });
@@ -256,7 +287,7 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
     const editor = old.getByRole('dialog', { name: '编辑简历摘要', exact: true });
     await editor
       .getByLabel('内容', { exact: true })
-      .fill('1.1.1 合成简历：TypeScript 与接口校验。');
+      .fill(background);
     await editor.getByRole('button', { name: '保存', exact: true }).click();
     await old.getByRole('button', { name: '个人信息', exact: true }).click();
     await old.getByRole('button', { name: '知识库', exact: true }).click();
@@ -268,13 +299,13 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
     await old.getByRole('button', { name: '保存', exact: true }).click();
     const base = old.getByRole('dialog', { name: baseName, exact: true });
     await base.getByLabel('导入知识库文档').setInputFiles({
-      name: 'preserved-1.1.1.md',
+      name: documentName,
       mimeType: 'text/markdown',
       buffer: Buffer.from(original),
     });
     await base
       .locator('.document-row')
-      .filter({ hasText: 'preserved-1.1.1.md' })
+      .filter({ hasText: documentName })
       .getByText(/索引完成$/)
       .waitFor();
     await base.getByRole('button', { name: '关闭对话框', exact: true }).click();
@@ -289,15 +320,23 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
     const before = await snapshot(old);
     assert.equal(before.profile.name, 'Synthetic upgrade owner');
-    assert.equal(before.profile.background, '1.1.1 合成简历：TypeScript 与接口校验。');
+    assert.equal(before.profile.background, background);
     assert.equal(before.theme, 'dark');
     assert.equal(before.language, 'zh-CN');
     assert.equal(before.bases.length, 1);
     assert.equal(before.documents.length, 1);
     assert.equal(Buffer.from(before.documents[0].bytes).toString(), original);
-    const indexBefore = await archivedIndex(app, model, true);
+    const indexBefore = await archivedIndex(app, model, true, fromVersion);
     await closeUiApp(app);
     app = undefined;
+    if (fromVersion === '1.2.2') {
+      // Its hardened executable rejects inspectors. Keep its bytes and fuses
+      // intact; verify ordinary product startup separately from ASAR inspection.
+      await verifyNormalStart(fromVersion, before, indexBefore);
+      console.log(
+        `PASS: untouched published ${fromVersion} product started and quit normally; subsequent ASAR inspection confirmed the synthetic upgrade profile was preserved.`,
+      );
+    }
     await replaceOwnedBundle(bundle, zip);
     const current = await launch(
       workspace.platformRequire(path.join(workspace.platformRoot, 'package.json')).version,
@@ -308,9 +347,9 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
       'Archive upgrade must retain settings, profile and original bytes/metadata',
     );
     assert.deepEqual(
-      await archivedIndex(app, model, false),
+      await archivedIndex(app, model, false, fromVersion),
       indexBefore,
-      'The new build must read the unchanged 1.1.1 index',
+      `The new build must read the unchanged ${fromVersion} index`,
     );
     assert.equal(
       await current.evaluate(() => document.documentElement.classList.contains('dark')),
@@ -325,35 +364,17 @@ export async function verifyPreviousVersionData({ zip, cache, update, nativeFile
       before.profile.name,
     );
     console.log(
-      'PASS: published 1.1.1 → final archive replacement preserves synthetic profile, settings, original bytes/metadata and the existing searchable index.',
+      `PASS: published ${fromVersion} → final data archive replacement preserves synthetic profile, settings, original bytes/metadata and the existing searchable index; this is not Sparkle installation acceptance.`,
     );
     await closeUiApp(app);
     app = undefined;
-    // Now let the untouched new executable open these same old bytes through
-    // its ordinary OS profile path. No test flag or inspector is used. Move the
-    // profile back only after native Quit and all bundled children have exited.
-    const normalProfile = path.join(os.homedir(), 'Library/Application Support/VoxCue');
-    assert.equal(await lstat(normalProfile).catch(() => null), null);
-    await cp(profile, normalProfile, { recursive: true, verbatimSymlinks: true });
-    const normalEnvironment = { ...process.env };
-    for (const key of [
-      'COPILOT_TEST_USER_DATA',
-      'CFFIXED_USER_HOME',
-      'ELECTRON_RUN_AS_NODE',
-      'NODE_OPTIONS',
-    ])
-      delete normalEnvironment[key];
-    await runGuestProduct(bundle, { env: normalEnvironment });
-    const preserved = path.join(directory, 'before-normal-start');
-    await rename(profile, preserved);
-    await rename(normalProfile, profile);
-    const reopened = await launch(
+    await verifyNormalStart(
       workspace.platformRequire(path.join(workspace.platformRoot, 'package.json')).version,
+      before,
+      indexBefore,
     );
-    assert.deepEqual(await snapshot(reopened), before);
-    assert.deepEqual(await archivedIndex(app, model, false), indexBefore);
     console.log(
-      'PASS: untouched final product opened the synthetic 1.1.1 profile at the normal guest OS path and quit naturally without losing settings, original bytes or the searchable index.',
+      `PASS: untouched final product started and quit at the normal guest OS profile path; subsequent ASAR inspection retained the ${fromVersion} settings, original bytes and searchable index.`,
     );
   } finally {
     try {

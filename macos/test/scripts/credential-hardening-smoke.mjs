@@ -15,7 +15,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { loadDevelopmentSigning, signLocalCode } from '../../scripts/development-signing.mjs';
+import { loadDevelopmentSigning, signLocalCode as signOwnedCode } from '../../scripts/development-signing.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import { createCipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { writeCredentialFixtureSource } from './credential-fixture-source.mjs';
@@ -36,15 +36,94 @@ if (
   throw Error(
     'Use --cleanup --fixed-v5 for current compatible migration; --fixed-v4 verifies the archived revision',
   );
-const releaseAwake = holdDesktopAwake();
+const stopAwake = holdDesktopAwake();
+let awakeReleased = false;
+const releaseAwake = () => {
+  if (awakeReleased) return;
+  awakeReleased = true;
+  stopAwake();
+};
 const directory = await realpath(
   await mkdtemp(path.join(tmpdir(), 'voxcue-credential-hardening-')),
 );
 const keychains = [];
-const run = (executable, args, input, failure = false, env = process.env) => {
-  requireUnlockedDesktop();
-  const result = spawnSync(executable, args, { input, env, encoding: 'utf8', timeout: 30000 });
-  if (!failure && (result.error || result.status))
+const processGroups = new Set();
+let stopping = false;
+const signLocalCode = (...args) => {
+  if (stopping) throw Error('The owned credential fixture is stopping');
+  return signOwnedCode(...args);
+};
+const pause = (milliseconds) =>
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+const groupAlive = (pid) => {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch (error) {
+    if (error.code === 'ESRCH') return false;
+    throw error;
+  }
+};
+const signalGroup = (pid, signal) => {
+  try {
+    process.kill(-pid, signal);
+  } catch (error) {
+    if (error.code !== 'ESRCH') throw error;
+  }
+};
+const retireGroup = (pid) => {
+  if (!processGroups.has(pid)) return;
+  if (groupAlive(pid)) {
+    signalGroup(pid, 'SIGTERM');
+    const forceAt = Date.now() + 1000;
+    while (groupAlive(pid) && Date.now() < forceAt) pause(25);
+    if (groupAlive(pid)) signalGroup(pid, 'SIGKILL');
+    const deadline = Date.now() + 5000;
+    while (groupAlive(pid) && Date.now() < deadline) pause(25);
+    if (groupAlive(pid)) throw Error(`Owned credential fixture process group ${pid} did not exit`);
+  }
+  processGroups.delete(pid);
+};
+const retireGroups = async () => {
+  // Yield while asynchronous children exit so Node can reap them before the
+  // group proof. Synchronous command children have already been reaped.
+  const delay = () => new Promise((resolve) => setTimeout(resolve, 25));
+  for (const pid of processGroups) {
+    if (groupAlive(pid)) {
+      signalGroup(pid, 'SIGTERM');
+      const forceAt = Date.now() + 1000;
+      while (groupAlive(pid) && Date.now() < forceAt) await delay();
+      if (groupAlive(pid)) signalGroup(pid, 'SIGKILL');
+      const deadline = Date.now() + 5000;
+      while (groupAlive(pid) && Date.now() < deadline) await delay();
+      if (groupAlive(pid)) throw Error(`Owned credential fixture process group ${pid} did not exit`);
+    }
+    processGroups.delete(pid);
+  }
+};
+const run = (executable, args, input, failure = false, env = process.env, teardown = false) => {
+  if (stopping && !teardown) throw Error('The owned credential fixture is stopping');
+  if (teardown) {
+    assert.equal(executable, admin);
+    assert.equal(args.length, 2);
+    assert.equal(args[0], 'delete');
+    assert.ok(keychains.includes(args[1]), 'Teardown may delete only this run’s synthetic Keychain');
+  } else requireUnlockedDesktop();
+  const result = spawnSync(executable, args, {
+    input, env, encoding: 'utf8', timeout: 30000, detached: true,
+  });
+  if (Number.isSafeInteger(result.pid) && result.pid > 0) processGroups.add(result.pid);
+  const descendants = processGroups.has(result.pid) && groupAlive(result.pid);
+  retireGroup(result.pid);
+  if (result.error || result.signal || !Number.isInteger(result.status))
+    throw Error(
+      `${result.error?.message ?? `${path.basename(executable)} terminated by ${result.signal}`}\n${result.stderr?.slice(-4096) ?? ''}`,
+      { cause: result.error },
+    );
+  if ([75, 82, 83].includes(result.status))
+    throw Error(`Credential fixture failed (${result.status}): ${result.stderr}`);
+  if (descendants) throw Error(`${path.basename(executable)} left a fixture descendant running`);
+  if (!failure && result.status !== 0)
     throw result.error ?? Error(`${path.basename(executable)}: ${result.status}, ${result.stderr}`);
   return result;
 };
@@ -52,6 +131,34 @@ const lists = () =>
   execFileSync('/usr/bin/security', ['list-keychains', '-d', 'user'], { encoding: 'utf8' });
 const before = lists();
 let admin;
+let cleanupTask;
+const cleanupOwned = () =>
+  (cleanupTask ??= (async () => {
+    await retireGroups();
+    for (const keychain of keychains.reverse())
+      run(admin, ['delete', keychain], undefined, false, process.env, true);
+    assert.equal(lists(), before, 'The original Keychain search list must be unchanged');
+    await retireGroups();
+    await rm(directory, { recursive: true, force: true });
+  })());
+const interrupt = async (code) => {
+  if (stopping) return;
+  stopping = true;
+  try {
+    await cleanupOwned();
+  } catch (error) {
+    console.error('Credential fixture cleanup failed; owned directory retained:', directory, error);
+  } finally {
+    releaseAwake();
+    process.exit(code);
+  }
+};
+// Node dispatches these only after an in-flight spawnSync returns. SIGKILL
+// cannot run this cleanup; do not treat a forced runner death as clean exit.
+const onInterrupt = () => { void interrupt(130); };
+const onTerminate = () => { void interrupt(143); };
+process.once('SIGINT', onInterrupt);
+process.once('SIGTERM', onTerminate);
 try {
   const signing = await loadDevelopmentSigning();
   const parentIdentifier = 'com.voxcue.test.credentials.' + randomBytes(12).toString('hex');
@@ -64,6 +171,15 @@ try {
   const fixtureMigrating = cleanup
     ? await writeCredentialFixtureSource(directory, 'migrating', parentIdentifier)
     : undefined;
+  // Frozen includes redefine/undefine main internally. Rename only these
+  // temporary entry points so the probe can restore its interaction policy.
+  for (const file of [fixtureHardened, fixtureMigrating].filter(Boolean)) {
+    const source = await readFile(file, 'utf8');
+    const entry = 'int main(int argc, const char **argv) {';
+    const parts = source.split(entry);
+    assert.equal(parts.length, 2, 'Exactly one archived fixture entry point is required');
+    await writeFile(file, parts.join('int archivedFixtureMain(int argc, const char **argv) {'));
+  }
   const fixtureStable =
     cleanup && !compatible ? path.join(directory, 'fixture-CredentialsStable.mm') : undefined;
   if (fixtureStable)
@@ -77,6 +193,7 @@ try {
       fixtureCompatible,
     );
   let fixtureDefinitions = [
+    '-DVOXCUE_FIXTURE_CHECKED_INTERACTION=1',
     '-DVOXCUE_FIXTURE_LEGACY_SOURCE=' + JSON.stringify(fixtureLegacy),
     '-DVOXCUE_FIXTURE_HARDENED_SOURCE=' + JSON.stringify(fixtureHardened),
     ...(cleanup
@@ -516,15 +633,44 @@ try {
     const spawn = childProcess.spawn;
     let active = 0,
       peak = 0,
-      calls = 0;
+      calls = 0,
+      retirementError;
     childProcess.spawn = function (executable, args, options) {
+      if (stopping) throw Error('The owned credential fixture is stopping');
       assert.equal(executable, fixedParent);
       assert.deepEqual(args, []);
       assert.deepEqual(options.env, { PATH: '/usr/bin:/bin:/usr/sbin:/sbin' });
       active++;
       calls++;
       peak = Math.max(peak, active);
-      const child = spawn.call(this, executable, args, options);
+      const child = spawn.call(this, executable, args, { ...options, detached: true });
+      if (Number.isSafeInteger(child.pid) && child.pid > 0) processGroups.add(child.pid);
+      child.once('exit', () => {
+        try {
+          if (processGroups.has(child.pid) && groupAlive(child.pid)) {
+            retirementError ??= Error('Credential fixture parent exited before its helper');
+            signalGroup(child.pid, 'SIGKILL');
+          } else processGroups.delete(child.pid);
+        } catch (error) {
+          retirementError ??= error;
+        }
+      });
+      const end = child.stdin.end.bind(child.stdin);
+      child.stdin.end = function (input, ...rest) {
+        try {
+          const request = JSON.parse(input);
+          assert.deepEqual(Object.keys(request).sort(), ['data', 'language', 'operation']);
+          assert.equal(request.language, 'zh-CN');
+          assert.ok(['encrypt', 'decrypt'].includes(request.operation));
+          assert.equal(typeof request.data, 'string');
+          // The archived v5 fixture predates language metadata. Check the
+          // current JS request, then adapt only this owned legacy transport.
+          return end(JSON.stringify({ operation: request.operation, data: request.data }), ...rest);
+        } catch (error) {
+          if (processGroups.has(child.pid)) signalGroup(child.pid, 'SIGTERM');
+          throw error;
+        }
+      };
       child.once('close', () => active--);
       return child;
     };
@@ -553,13 +699,18 @@ try {
       assert.equal(peak, 1);
       assert.equal(active, 0);
       assert.equal(calls, 9);
+      assert.equal(retirementError, undefined);
       assert.notEqual(request(parents[0], old, keychain, 'decrypt', ciphertext, true).status, 0);
       run(admin, ['unrelated', keychain]);
       console.log(
         'PASS: actual Mac JS port + current native cleanup preserves three legacy vaults, writes identical v10 bytes, serializes helpers and reads again after restart.',
       );
     } finally {
-      childProcess.spawn = spawn;
+      try {
+        await retireGroups();
+      } finally {
+        childProcess.spawn = spawn;
+      }
     }
   }
   const invalid = run(helper, [], '{}', true);
@@ -703,10 +854,10 @@ try {
     );
 } finally {
   try {
-    for (const keychain of keychains.reverse()) run(admin, ['delete', keychain]);
-    assert.equal(lists(), before, 'The original Keychain search list must be unchanged');
+    await cleanupOwned();
   } finally {
-    await rm(directory, { recursive: true, force: true });
+    process.removeListener('SIGINT', onInterrupt);
+    process.removeListener('SIGTERM', onTerminate);
     releaseAwake();
   }
 }

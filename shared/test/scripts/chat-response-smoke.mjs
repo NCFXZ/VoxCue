@@ -504,6 +504,11 @@ try {
       const normal = await stableLinkAppearance(link, { theme, kind, hovered: false });
       if (kind === 'ordinary')
         await captureRequested(link, 'chat-link-normal-' + theme);
+      // Scrolling can update the follow control and replace markdown link nodes.
+      // Finish that render before hover resolves the current locator target.
+      await link.scrollIntoViewIfNeeded();
+      await page.evaluate(() => new Promise((resolve) =>
+        requestAnimationFrame(() => requestAnimationFrame(resolve))));
       await link.hover();
       const hovered = await stableLinkAppearance(link, {
         theme,

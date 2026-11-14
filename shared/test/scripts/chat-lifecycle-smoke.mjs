@@ -1,4 +1,4 @@
-import { connectUiAccount } from './install-ui-account.mjs';
+import { connectUiAccount, waitForRestoredMainWindow } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -10,7 +10,7 @@ const directory = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/c
 let app, page;
 const errors = [],
   checks = [];
-async function launch() {
+async function launch(restore = false) {
   app = await electron.launch({
     args: ['.'],
     env: { ...process.env, COPILOT_TEST_USER_DATA: directory, VITE_DEV_SERVER_URL: '' },
@@ -68,8 +68,10 @@ async function launch() {
       };
     };
   });
-  const login = await app.firstWindow();
-  page = await connectUiAccount(app, login);
+  // A persisted synthetic account restores main after Mac's hidden language
+  // bootstrap. Relogging through that first window would wait for a second main.
+  const entry = restore ? await waitForRestoredMainWindow(app) : await app.firstWindow();
+  page = await connectUiAccount(app, entry);
   page.setDefaultTimeout(15000);
   page.on('pageerror', (error) => errors.push(error.message));
   await page.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
@@ -194,7 +196,7 @@ try {
     .getByRole('button', { name: '重试保存聊天', exact: true })
     .waitFor({ state: 'detached' });
   await closeNormally();
-  await launch();
+  await launch(true);
   assert.equal(await input().inputValue(), '保存失败也不能丢掉的草稿');
   await page.locator('.chat-attachment').getByText('draft.txt', { exact: false }).waitFor();
   await page
@@ -225,7 +227,7 @@ try {
   await old.getByRole('button', { name: '删除对话：普通聊天需要保留', exact: true }).click();
   await old.getByRole('button', { name: '确认删除：对话：普通聊天需要保留', exact: true }).click();
   await closeNormally();
-  await launch();
+  await launch(true);
   assert.equal(
     await page.locator('.conversation-row').filter({ hasText: '普通聊天需要保留' }).count(),
     0,

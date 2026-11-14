@@ -5,6 +5,7 @@ import {
   sourceIds,
   titleQuestions,
   exportRecord,
+  answerCountLabel,
   relativeTime,
 } from '../../../shared/src/services/historyPresentation';
 import { useHistory } from '../../../shared/src/stores/history';
@@ -52,6 +53,25 @@ it('知识库名称按本场快照添加到AI标题，重试不重复添加且�
   expect(useHistory.getState().records.find((r) => r.id === 'no-kb')?.title).toBe('无知识库的面试');
 });
 describe('历史时间线、关联与持久化', () => {
+  it('回答计数在中英文界面和导出中保留0、1、2语义，英文单数准确且不计Mock', () => {
+    for (const [language, labels] of [
+      ['zh-CN', ['0 条 AI 回答', '1 条 AI 回答', '2 条 AI 回答']],
+      ['en', ['0 AI answers', '1 AI answer', '2 AI answers']],
+    ] as const) {
+      useGeneralSettings.setState({ language });
+      for (const [count, label] of labels.entries()) {
+        expect(answerCountLabel(count)).toBe(label);
+        const value = record();
+        const answer = value.answers[0];
+        value.answers = Array.from({ length: count }, (_, index) => ({
+          ...answer,
+          id: `answer-${index}`,
+        }));
+        value.answers.push({ ...answer, id: 'mock', provider: 'mock' });
+        expect(exportRecord(value).split('\r\n')[2]).toBe(`2:00 · ${label}`);
+      }
+    }
+  });
   it('准确关联系统片段，歧义旧记录和麦克风不产生假定位', () => {
     const r = record(),
       a = r.answers[0];

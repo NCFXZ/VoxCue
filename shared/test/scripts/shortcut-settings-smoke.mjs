@@ -148,7 +148,6 @@ try {
     assert.equal(await binding.innerText(), '⇧⌘');
     await main.keyboard.down('h');
     assert.equal(await binding.innerText(), '⇧⌘H');
-    await captureRequested(main, 'shortcut-command-preview');
     await main.keyboard.up('Shift');
     await main.keyboard.up('Meta');
     await main.keyboard.up('h');
@@ -158,6 +157,8 @@ try {
     assert.equal(await saved(), 'Shift+Command+H');
     assert.equal(await binding.innerText(), '⇧⌘H');
     assert.equal(await row.getByRole('alert').count(), 0);
+    // Keep optional screenshot I/O outside the held Command chord.
+    await captureRequested(main, 'shortcut-command-saved');
     await binding.click();
     await main.waitForFunction(() =>
       document.querySelector('.shortcut-binding[aria-pressed="true"]'),

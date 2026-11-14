@@ -21,6 +21,7 @@ import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import { assertLocalizedPermissions } from './assert-localized-permissions.mjs';
 import { verifyPreviousVersionData } from './package-upgrade-data.mjs';
+import { upgradeBaselineVersions } from './package-upgrade-baselines.mjs';
 import { requireGuestIsolation } from './guest-isolation.mjs';
 import { launchGuestAsar } from './guest-asar-host.mjs';
 import { productionFuses } from '../../scripts/production-runtime.mjs';
@@ -851,12 +852,14 @@ try {
 }
 
 if (installArchive) {
-  await verifyPreviousVersionData({
-    zip,
-    cache: path.join(profile, 'artifact-components'),
-    update,
-    nativeFile: path.join(resources, 'native/VoxCue.Updater.node'),
-  });
+  for (const fromVersion of upgradeBaselineVersions)
+    await verifyPreviousVersionData({
+      zip,
+      cache: path.join(profile, 'artifact-components'),
+      update,
+      nativeFile: path.join(resources, 'native/VoxCue.Updater.node'),
+      fromVersion,
+    });
 }
 
 if (cacheSource)

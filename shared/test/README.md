@@ -1,16 +1,22 @@
-# 当前 macOS 1.2.1 入口
+# 当前 macOS 1.2.3 入口
 
 Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mjs`（`pnpm test:package`），入口和显式输入见 [Mac 发行实现](../docs/MACOS_1.2.0_RELEASE.md)。Owner 仅可运行 `package-smoke.mjs --static-only` 的零产品启动静态检查，退出 2 表示动态覆盖待执行。旧 `package-temporary-smoke.mjs`、AEC `--packaged` 和产品 `--online` 调试探针已退役；下文历史命令不覆盖此边界。功能、五档缩放与 Qwen 开发态入口保持串行 GUI／原生／推理规则，最终 ASAR 覆盖另外在 guest 执行。
 
-当前范围见根 `PROGRESS.md`，Windows 逐项接续见 [1.2.1 交接](https://github.com/NCFXZ/VoxCue/blob/main/shared/docs/WINDOWS_1.2.1_HANDOFF.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考；不修改既有服务端或运行后端测试。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
+当前范围见根 `PROGRESS.md`，Windows 1.2.3 范围见[实施与发行说明](../docs/WINDOWS_1.2.3_RELEASE.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考；不修改既有服务端或运行后端测试。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
+
+宿主 Node 须符合固定服务端参考的 `>=24.19.0 <25` 要求；本轮固定使用 Node 24.22.1，与固定 Electron 44.10.0 内的 Node 版本一致，避免旧宿主 `TextDecoder` 的 Windows-1252 解码差异。此要求仅用于开发和测试环境，不改变应用依赖或解码策略。
+
+Mac guest 的 `package-smoke.mjs --install-archive` 对正式 1.1.1、1.2.2 ZIP 按固定大小与 SHA256 认证，再用对应旧 ASAR 创建合成资料，覆盖当前 ZIP 后核对资料、原件、索引与偏好。未修改的正式产品只验证在正常 guest profile 路径启动及退出，资料保留由随后独立开发宿主内的 ASAR 检查确认，不代表正式产品登录后的资料页面读取。1.1.1 原有真实旧宿主的 Sparkle 归档认证／准备／取消继续保留；数据覆盖升级不等同 Sparkle 安装／重启。
 
 完整排程以 `functional-suite.mjs --list --jobs=1`、`macos/test/scripts/ui-refinement-matrix.mjs --list` 为准。另需按实际改动补原生专项：`credential-hardening-smoke.mjs`、`cloud-native-vault-smoke.mjs`、`audio-restart-smoke.mjs`、`audio-conversion-smoke.mjs`、`qwen-regression.mjs` 和 `speech-preroll-smoke.mjs --cache=<认证缓存>`。后者仅用文件 PCM 验证原短音未接纳后不串入下一句，不能将其空 ASR 算作正向过滤成功；正向 `interview-real-audio-smoke.mjs --all` 保留非空自然静音终稿与真实 ACK 断言。固定模型的识别原文不构成逐字准确率基准。
 
 Mac 当前凭据助手运行 `node test/scripts/credential-vault-smoke.mjs`，验证 v11 双语创建、跨语言不改项、1.1.1 的三个正式旧名称单来源迁移与候选条目隔离、后台无交互验证和真实 JS／原生串行维护；另运行 `credential-vault-policy-smoke.mjs` 核对内存真实 partition、owner／应用信任与禁交互失败围栏，两者不能代替现代系统密码框验收。JS 单测另检查持久语言初始化前零 helper spawn、失败后队列围栏；首次隐藏登录、交叉语言与自动恢复需定向桌面及最终包复验。当前清理回复包含实际保留数量及固定旧名称 ID；枚举不完整返回未知，主进程仅记录固定元数据诊断，不增加界面或清理命令。先恢复精确的固定 v11 修订并构建当前代码，缺失不能重建或回退。`credential-hardening-smoke.mjs --cleanup --fixed-v5` 仅验证归档 v5，无参数仍验证 v2；边界见 [Mac 凭据说明](../../macos/docs/CREDENTIALS.md)。
 
-Mac 的 `node ../shared/test/scripts/language-smoke.mjs --bootstrap-only` 定向检查启动装配：实际 Renderer 保存应用偏好后冷启动，交叉系统语言、隐藏登录、重复启动与首次 status 并发，以及真实 10 秒语言超时／Renderer 故障后的零助手启动和迟到握手围栏。该入口在自有开发宿主与临时 profile 内复用真实主进程及 JS 凭据队列，原生调用替换为固定内存协议，不启动正式助手、不访问钥匙串；不能代替最终签名包的系统授权验收。合成主账号夹具只在首次 status 消费初始模拟会话，之后 logout／status 不自动重新登录。
+归档凭据专项的超时、信号死亡及子进程未退休必须判失败。旧 v5 在无效 partition 的拒权组合中可能等待 `SecKeychainItemSetAccess`，不能把等待当作已拒绝；冻结原件保持不变，现用产品另验 v11。取消清理须等待同步原生调用返回，`SIGKILL` 无法执行 JS 清理；异常结束后按本轮进程和临时 Keychain 的归属收尾，不盲删未知目录。
 
-Mac 凭据超时专项须区分“应用请求超时／助手退出／同启动不再发请求”和“原系统授权框是否自动消失”。设计期限为 120 秒，原框仍显示时按既有 TIMEOUT 说明手动选择“拒绝”再重启，不把手动关闭记为自动撤框；不通过缩短期限、调用私有入口、锁定整个登录钥匙串或终止系统进程替代验收。相关单测检查固定 UNAVAILABLE／TIMEOUT 与云账号可信本地边界，服务端／传输同名伪码不能冒充；系统行为仍以最终签名包复验为准。本轮正常停机 VM、复用环境及用户指定合成截图按明确保留要求处理，其余临时产物照常清理，不入仓库。
+Mac 的 `node ../shared/test/scripts/language-smoke.mjs --bootstrap-only` 定向检查启动装配：实际 Renderer 保存应用偏好后冷启动，交叉系统语言、隐藏登录、重复启动与首次 status 并发，以及真实 10 秒语言超时／Renderer 故障后的零助手启动和迟到握手围栏。该入口在自有开发宿主与临时 profile 内复用真实主进程及 JS 凭据队列，原生调用替换为固定内存协议，不启动正式助手、不访问钥匙串；不能代替最终签名包的系统授权验收。普通合成主账号夹具按自有临时 profile 的登录标记恢复会话；显式 logout 清除标记，之后 status 不自动重新登录。
+
+Mac 凭据超时专项须区分“应用请求超时／助手退出／同启动不再发请求”和“原系统授权框是否自动消失”。设计期限为 120 秒，原框仍显示时按既有 TIMEOUT 说明手动选择“拒绝”再重启，不把手动关闭记为自动撤框；不通过缩短期限、调用私有入口、锁定整个登录钥匙串或终止系统进程替代验收。相关单测检查固定 UNAVAILABLE／TIMEOUT 与云账号可信本地边界，服务端／传输同名伪码不能冒充；系统行为仍以最终签名包复验为准。本轮结束清理已停机的自建 VM、快照、临时环境和合成截图；固定签名、冻结助手及离线恢复原件继续保护，不入仓库。
 
 ## 当前源码安全修复
 

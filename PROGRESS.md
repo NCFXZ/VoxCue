@@ -1,6 +1,6 @@
 # VoxCue 当前进度
 
-更新于 2026-11-14。Windows 已发行 1.2.3，应用“关于”、服务器上报、安装器和更新清单统一使用 1.2.3；Microsoft Store 包 2.2.3.0 已提交，当前预处理中，通过认证后自动发布。版本唯一来源为 `shared/package.json`。macOS 保持既有 1.2.2，本机不修改 `macos/`。
+更新于 2026-11-14。Windows 已发行 1.2.3，应用“关于”、服务器上报、安装器和更新清单统一使用 1.2.3；Microsoft Store 2.2.3.0 已提交，通过认证后自动发布。Mac 当前目标为 1.2.3，已发行基线为 1.2.2。版本唯一来源为 `shared/package.json`。本轮在 Mac 接续验收，`windows/` 全树只读。
 
 ## 当前实现
 
@@ -11,11 +11,19 @@
 - 云端恢复返回实际落盘修订，下载索引与修复扫描使用有效后端状态合并同一文档；此前状态读取在提交后过期，缺失或失效索引仍可重建。
 - Mac 1.2.2 的凭据助手与升级边界沿用既有设计；Windows 的官方运行时完全无响应仍明确报错并允许以后重试，不声称两端系统授权窗口一致。[Mac 凭据交接](shared/docs/MACOS_1.2.2_CREDENTIAL_HANDOFF.md)
 - Mac 接续文档已区分 Windows 对齐既有能力与实际共享 Bug 修复，并列出 Mac 本机验收边界。[Mac 1.2.3 接续](shared/docs/MACOS_1.2.3_HANDOFF.md)
+- Mac 配置同步至 1.2.3，继续复用固定签名、Qwen 运行时和冻结凭据助手。升级夹具新增正式 1.2.2 ZIP 的摘要认证与 ASAR 数据兼容检查，保留 1.1.1 的既有 Sparkle 路径；普通正式产品启动／退出不代称登录后资料读取。[Mac 发行说明](shared/docs/MACOS_1.2.3_RELEASE.md)
+- 窄窗记录标题重试按钮在 AI 回答卡左侧可见列内换行，回答计数与导出摘要共用单复数文案；中英与长错误的几何／命中回归覆盖该布局。
+- 聊天生命周期夹具在进程重启时等待恢复后的主窗口，避免误登录隐藏语言窗口；补充采集停止失败原因保留断言，不改变生产功能或降低原断言。
+- 凭据归档夹具严格区分正常拒权与启动失败、信号、超时及未退休后代，确认进程退休后再清理合成资源。归档 v5 在特定无效 partition 拒权组合中的 ACL 写等待不算拒权成功，冻结原件不改；现用产品仍采用 v11。同步调用和强杀的清理边界见[测试说明](shared/test/README.md)。
 
 ## 发行状态与接续
 
-- 已在 `main` 推送代码，两个仓库的 Windows `v1.2.3` 均为 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。源码标签为 `fae85ca665505b314fee784a0dddc091f337ffd5`，安装资产、签名、平台选择和累计文案已匿名回读。文案合并 Windows 1.2.0 到 1.2.3 的用户可见变化，中英文直接排列；源码使用主仓自动归档。
-- Microsoft Store 2.2.3.0 的 Submission 10（`1152921505702404063`）已受理，当前 Pre-processing，认证及发布尚未开始；设置为通过认证后立即发布。中英文说明使用相同累计范围。当前线上仍为 Submission 9 的 2.2.2.0。[Partner Center 状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
+- [Mac 1.2.3 交接](shared/docs/MACOS_1.2.3_HANDOFF.md) 已补充相对已发 1.2.2 的完整共享范围，Mac 1.2.3 签名安装资产已生成；接续发行回读及清理。共享记录界面修复需在 Windows 本机补验，既有 Windows 安装资产不改写。
+- 按冻结锁安装临时开发环境，恢复既有固定签名和助手，最终签名包在 SIP／Gatekeeper 开启的独立 guest 内验收；仅用合成资料与认证公开模型／音频，不访问宿主真实账号或采集硬件。GUI／原生／推理保持串行，测试期间用 scoped caffeinate 保持唤醒。
+- 验收后在 `main` 提交推送，向两个 GitHub 仓库现有 `v1.2.3` 追加 macOS 三项资产并设为 latest；先上传 DMG／ZIP，最后上传 `latest-mac.yml`，匿名回读资产与摘要。Mac 源码使用主仓 `macos-v1.2.3` 标签与自动归档，既有 `v1.2.3`、Windows 资产及恢复原件保持。发行说明使用精简中英文并区分两端版本范围。
+- 结束后清除本轮下载环境、依赖、临时模型副本、工具、VM／快照、截图、日志和合成资料；固定签名及冻结助手原件不清理。清理仅针对核验归属、路径及占用的本轮生成内容。
+- Windows `v1.2.3` 已在两个 GitHub 仓库发布为 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。原标签仍指向 `fae85ca665505b314fee784a0dddc091f337ffd5`，原三项 Windows 资产与累计中英文说明保留，源码使用主仓自动归档。
+- Microsoft Store 2.2.3.0 的 Submission 10（`1152921505702404063`）已受理，交接时为 Pre-processing，设置为通过认证后立即发布；认证及实际上线仍需分别核对，交接时线上为 Submission 9 的 2.2.2.0。[Partner Center 状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
 - 固定 Paraformer 的极短中文识别限制保留，不更换模型或放宽断言；本机合成验证不能代称物理设备、真实语音或真实订阅授权验收。验证入口见 [客户端测试说明](shared/test/README.md)。
 
 ## 发行与恢复基线

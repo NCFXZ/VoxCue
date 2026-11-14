@@ -9,6 +9,9 @@ const normalized = (value: string) =>
 export function visibleAnswers(record: InterviewRecord) {
   return record.answers.filter((a) => a.provider !== 'mock');
 }
+export function answerCountLabel(count: number) {
+  return count === 1 ? t('1 条 AI 回答') : `${count}${t(' 条 AI 回答')}`;
+}
 export function sourceIds(record: InterviewRecord, answer: Answer): string[] {
   const rows = record.transcripts.filter((t) => t.source !== 'microphone');
   if (answer.sourceTranscriptIds?.length)
@@ -56,7 +59,7 @@ export function exportRecord(record: InterviewRecord): string {
   const lines = [
     record.title,
     `${date(record.startedAt)} — ${date(record.endedAt)}`,
-    t('{0} · {1} 条 AI 回答', [duration(record), visibleAnswers(record).length]),
+    `${duration(record)} · ${answerCountLabel(visibleAnswers(record).length)}`,
     '',
     t('面试转录'),
   ];

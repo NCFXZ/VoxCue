@@ -23,7 +23,11 @@ const keychains = [];
 const run = (executable, args, input, failure = false, env = process.env) => {
   requireUnlockedDesktop();
   const result = spawnSync(executable, args, { input, env, encoding: 'utf8', timeout: 30000 });
-  if (!failure && (result.error || result.status))
+  if (result.error || result.signal || !Number.isInteger(result.status))
+    throw result.error ?? Error(`${path.basename(executable)} terminated by ${result.signal}`);
+  if ([75, 82, 83].includes(result.status))
+    throw Error(`Credential fixture failed (${result.status}): ${result.stderr}`);
+  if (!failure && result.status !== 0)
     throw result.error ?? Error(`${path.basename(executable)}: ${result.status}, ${result.stderr}`);
   return result;
 };
@@ -484,7 +488,8 @@ try {
   const originalSpawn = processes.spawn;
   let active = 0,
     maximum = 0,
-    deletionFailure = false;
+    deletionFailure = false,
+    nativeFailure;
   processes.spawn = (executable, args, options) => {
     assert.equal(executable, helper);
     assert.deepEqual(args, []);
@@ -496,7 +501,10 @@ try {
       },
     });
     maximum = Math.max(maximum, ++active);
-    child.once('close', () => --active);
+    child.once('close', (code, signal) => {
+      --active;
+      if (signal || [75, 82, 83].includes(code)) nativeFailure = { code, signal };
+    });
     return child;
   };
   try {
@@ -554,6 +562,7 @@ try {
     );
     assert.equal(maximum, 1, 'Crypto and maintenance must share the actual-close queue');
     assert.equal(active, 0);
+    assert.equal(nativeFailure, undefined, 'Fixture launch/setup/signal failures are not denials');
   } finally {
     processes.spawn = originalSpawn;
   }

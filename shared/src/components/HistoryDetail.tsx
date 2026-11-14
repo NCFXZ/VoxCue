@@ -3,6 +3,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InterviewRecord } from '../services/history';
 import {
   duration,
+  answerCountLabel,
   exportRecord,
   relativeTime,
   sourceIds,
@@ -181,10 +182,7 @@ export function HistoryDetail({
             onClick={() => setShowAnswers((open) => !open)}
           >
             <PanelRight size={16} />
-            <span>
-              {answers.length}
-              {t(' 条 AI 回答')}
-            </span>
+            <span>{answerCountLabel(answers.length)}</span>
           </Button>
           <ConfirmDeleteButton
             key={record.id}
@@ -264,8 +262,7 @@ export function HistoryDetail({
             <p className="record-facts">
               {duration(record)}
               {t(' · 本地语音转录 · ')}
-              {answers.length}
-              {t(' 条 AI 回答')}
+              {answerCountLabel(answers.length)}
             </p>
             {answers.some((answer) => answer.images?.length) && (
               <section className="record-images-section" aria-label={t('面试截图')}>

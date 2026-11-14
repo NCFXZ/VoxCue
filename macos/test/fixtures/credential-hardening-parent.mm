@@ -34,6 +34,10 @@ int main(int argc, const char **argv) {
     task.standardError = NSFileHandle.fileHandleWithStandardError;
     if (![task launchAndReturnError:nil]) return 75;
     [task waitUntilExit];
+    if (task.terminationReason != NSTaskTerminationReasonExit) {
+      fprintf(stderr, "fixture-helper-signal (%d)\n", task.terminationStatus);
+      return 83;
+    }
     return task.terminationStatus;
   }
 }

@@ -1287,6 +1287,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '导出 TXT': 'Export TXT',
   'AI 回答面板': 'AI answer panel',
   '条 AI 回答': 'AI answers',
+  '1 条 AI 回答': '1 AI answer',
   '面试记录：': 'Interview: ',
   删除记录: 'Delete record',
   重命名标题: 'Rename title',
@@ -1987,7 +1988,6 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Titles must contain 1–80 characters, without line breaks or control characters.',
   '这条记录已不存在，请返回列表刷新。':
     'This record no longer exists. Return to the list and refresh.',
-  '{0} · {1} 条 AI 回答': '{0} · {1} AI answers',
   '（音频间断，可能不完整）': ' (audio interrupted, may be incomplete)',
   '（未完成）': ' (incomplete)',
   '问题：{0}': 'Question: {0}',

@@ -114,10 +114,10 @@ const {app}=require('electron');const assert=require('node:assert/strict'),path=
 const deny=()=>{throw Error('Native vault fixture forbids network')};globalThis.fetch=deny;require('electron').net.fetch=deny;for(const name of ['node:http','node:https']){require(name).request=deny;require(name).get=deny}require('node:net').Socket.prototype.connect=deny;require('node:tls').connect=deny;
 const root=${JSON.stringify(workspace.platformRoot)},helper=${JSON.stringify(helper)},keychain=${JSON.stringify(keychain)},manager=${JSON.stringify(manager)};
 app.setAppPath(root);app.setPath('userData',${JSON.stringify(profile)});app.commandLine.appendSwitch('use-mock-keychain');
-const cp=require('node:child_process'),spawn=cp.spawn;let nativeCalls=0,activeNative=0,maxNative=0;
+const cp=require('node:child_process'),spawn=cp.spawn;let nativeCalls=0,activeNative=0,maxNative=0,nativeFailure;
 cp.spawn=function(executable,args,options){
  if((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue')))throw Error('Production helper forbidden in this fixture');
- if(executable===helper){assert.deepEqual(args,[]);nativeCalls++;activeNative++;maxNative=Math.max(maxNative,activeNative);const child=spawn.call(this,helper,args,options);child.once('close',()=>activeNative--);return child;}
+ if(executable===helper){assert.deepEqual(args,[]);nativeCalls++;activeNative++;maxNative=Math.max(maxNative,activeNative);const child=spawn.call(this,helper,args,options);child.once('close',(code,signal)=>{activeNative--;if(signal||[75,82,83].includes(code))nativeFailure={code,signal};});return child;}
  return spawn.call(this,executable,args,options);
 };
 app.whenReady().then(async()=>{
@@ -174,6 +174,7 @@ app.whenReady().then(async()=>{
   assert.deepEqual(await fs.readFile(file),original);
  }
  assert.equal(maxNative,1);assert.equal(activeNative,0);
+ assert.equal(nativeFailure,undefined,'Fixture launch/setup/signal failures are not denials');
  if(phase==='restart-after-denial')console.log('PASS: new Electron process retries after denial, decrypts preserved vaults and still serializes all native calls');
  console.log('PASS: native cloud vault '+phase+', real v10/0600, signed Electron44 JS port; isolated Keychain only'+(phase==='read'?', restart decryption and locked-keychain rollback/revocation':''));app.exit(0);
 }).catch(error=>{console.error(error);app.exit(1)});
