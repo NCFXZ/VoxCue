@@ -115,6 +115,33 @@ describe('interface language', () => {
     }
   });
 
+  it('translates Windows device labels and keeps the original audio error code', () => {
+    for (const source of ['麦克风', '系统音频']) {
+      for (const selected of ['所选', '默认']) {
+        const unavailable = `${selected}${source}设备不可用，请在面试设置中重新选择。`;
+        expect(translateUI(unavailable, 'en')).not.toMatch(/\p{Script=Han}/u);
+      }
+      const code = '0x88890004';
+      const failure = `${source}不可用（${code}），请检查设备、隐私权限或默认设备变化后重新开始。`;
+      const english = translateUI(failure, 'en');
+      expect(english).not.toMatch(/\p{Script=Han}/u);
+      expect(english).toContain(code);
+    }
+    expect(translateUI('音频采集助手输出异常，采集已停止；请重新开始。', 'en')).not.toMatch(/\p{Script=Han}/u);
+    expect(translateUI('用户原文不可用', 'en')).toBe('用户原文不可用');
+  });
+
+  it('names the affected input in English when capture is interrupted or no device is found', () => {
+    for (const [source, english] of [['系统音频', 'System audio'], ['麦克风', 'Microphone input']]) {
+      const interruption = source + '发生短暂间断，转写已继续；不完整片段不会自动用于回答。';
+      const result = translateUI(interruption, 'en');
+      expect(result).toContain(english);
+      expect(result).not.toMatch(/\p{Script=Han}/u);
+    }
+    expect(translateUI('未发现播放设备。', 'en')).toBe('No output device found.');
+    expect(translateUI('未发现麦克风设备。', 'en')).toBe('No microphone found.');
+  });
+
   it('localizes the OAuth callback without exposing authorization details', () => {
     for (const language of ['en', 'zh-CN'] as const) {
       const page = createAuthCallbackPage(undefined, language);

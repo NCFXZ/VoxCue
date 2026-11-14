@@ -30,7 +30,7 @@ export function interviewReadiness(
     systemAudioMuted?: boolean;
   },
   now: number,
-): { kind: ReadinessKind; reason: string; level: number } {
+): { kind: ReadinessKind; reason: string; detail?: string; level: number } {
   const result = (kind: ReadinessKind, reason: string, level = 0) => ({ kind, reason, level });
   if (item === 'system' && state.systemAudioMuted)
     return result('off', '系统音频未启用，不采集声音。');
@@ -56,10 +56,9 @@ export function interviewReadiness(
       item === 'model'
         ? !failure || failure === 'model' || failure === 'service'
         : failure === item;
-    return result(
-      affected ? 'error' : 'paused',
-      affected ? reason : `音频链路已停止，等待恢复：${reason}`,
-    );
+    return affected
+      ? result('error', reason)
+      : { ...result('paused', '音频链路已停止，等待恢复：{0}'), detail: reason };
   }
   if (state.speech.state !== 'running') return result('paused', '转写已暂停，当前不接收音频。');
   if (item === 'model') return result('normal', '本地语音模型正常，可进行转写。');

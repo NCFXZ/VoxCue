@@ -30,6 +30,9 @@ export interface AudioPacket {
 }
 export class PacketDecoder {
   private pending = Buffer.alloc(0);
+  get hasPartialPacket() {
+    return this.pending.length !== 0;
+  }
   push(chunk: Buffer): AudioPacket[] {
     if (this.pending.length + chunk.length > 4 * 1024 * 1024)
       throw Error('Invalid audio pipe backlog');

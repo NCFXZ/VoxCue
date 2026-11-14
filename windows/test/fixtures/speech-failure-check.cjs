@@ -120,9 +120,13 @@ async function fresh() {
     stale.audio({ samples: new Float32Array(512), rate: 16000, flags: 0, timestamp: -999999 });
     assert.equal(controller.queued, 0);
     assert.equal(controller.anchors.size, 0);
-    await controller.worker.terminate();
+    const workerBeforeCrash = controller.worker;
+    const capturesBeforeCrash = ports.length;
+    await workerBeforeCrash.terminate();
     await until(() => controller.captures.size === 0, 'Worker exit left a capture');
-    assert.equal((await start()).state, 'running');
+    await until(() => controller.status.state === 'running', 'Worker exit did not recover automatically');
+    assert.notEqual(controller.worker, workerBeforeCrash);
+    assert.equal(ports.length, capturesBeforeCrash + 1);
     for (const fault of ['exit-tail', 'hang-tail']) {
       mode = fault;
       const before = performance.now();

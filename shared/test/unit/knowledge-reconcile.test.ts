@@ -129,6 +129,57 @@ it('a received file indexes immediately without waiting for later files in the l
   expect(f.maximum).toBe(1);
 });
 
+it('a library scan does not reimport a downloaded original indexed while its document read is pending', async () => {
+  const [original] = await originals('downloading', 1);
+  const f = engine();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  vi.spyOn(localKnowledge, 'listDocuments').mockImplementationOnce(async () => {
+    entered.resolve();
+    await release.promise;
+    return [original];
+  });
+  const scan = useKnowledgeIndex.getState().reconcile(original.baseId);
+  await entered.promise;
+  await useKnowledgeIndex.getState().index(original);
+  release.resolve();
+  await scan;
+  expect(f.imported.map((entry) => entry.id)).toEqual([original.id]);
+});
+
+it('a scan sharing a pre-commit status reply rechecks it before scheduling an import', async () => {
+  const [original] = await originals('stale-status', 1);
+  const f = engine();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  f.knowledge.mockImplementationOnce(async () => {
+    entered.resolve();
+    await release.promise;
+    return { ok: true, value: { documents: [], tasks: [], modelReady: true } };
+  });
+  const earlyStatus = useKnowledgeIndex.getState().refresh();
+  await entered.promise;
+  const indexing = useKnowledgeIndex.getState().index(original);
+  const listed = Promise.withResolvers<void>();
+  let scan: Promise<void>;
+  try {
+    await vi.waitFor(() => {
+      expect(f.imported).toHaveLength(1);
+      expect(useKnowledgeIndex.getState().requests[original.id]).toBeUndefined();
+    });
+    vi.spyOn(localKnowledge, 'listDocuments').mockImplementationOnce(async () => {
+      listed.resolve();
+      return [original];
+    });
+    scan = useKnowledgeIndex.getState().reconcile(original.baseId);
+    await listed.promise;
+  } finally {
+    release.resolve();
+  }
+  await Promise.all([earlyStatus, scan, indexing]);
+  expect(f.imported.map((entry) => entry.id)).toEqual([original.id]);
+});
+
 it('startup repairs missing/unavailable indexes; opening a library checks only that library', async () => {
   const a = await originals('a', 2),
     b = await originals('b', 1);

@@ -15,10 +15,11 @@ class WasapiCapture {
   static Guid AudioClientId = new Guid("1CB9AD4C-DBFA-4c32-B178-C2F568A703B2");
   static Guid CaptureClientId = new Guid("C8ADBD64-E71E-48a0-A4DE-185C395CD317");
   static Guid AudioClockId = new Guid("CD63314F-3FBA-4a1b-812C-EF96358728E7");
+  const int DeviceInvalidated = unchecked((int)0x88890004); // AUDCLNT_E_DEVICE_INVALIDATED
   static void Check(int hr) { if (hr < 0) Marshal.ThrowExceptionForHR(hr); }
   static void Release(object o) { if (o != null && Marshal.IsComObject(o)) Marshal.ReleaseComObject(o); }
   static string Id(IMMDevice device) { string id; Check(device.GetId(out id)); return id; }
-  static string Default(IMMDeviceEnumerator e, int flow) { IMMDevice d = null; try { Check(e.GetDefaultAudioEndpoint(flow, 0, out d)); return Id(d); } catch { return ""; } finally { Release(d); } }
+  static string Default(IMMDeviceEnumerator e, int flow) { IMMDevice d = null; try { Check(e.GetDefaultAudioEndpoint(flow, 0, out d)); return Id(d); } finally { Release(d); } }
   static string Name(IMMDevice d) {
     IPropertyStore store = null; PropVariant value = new PropVariant();
     try { Check(d.OpenPropertyStore(0,out store)); PropertyKey key = new PropertyKey { fmtid = new Guid("A45C254E-DF1C-4EFD-8020-67D146A850E0"), pid = 14 }; Check(store.GetValue(ref key,out value)); return value.vt == 31 ? Marshal.PtrToStringUni(value.pointer) : "Audio device"; }
@@ -28,7 +29,8 @@ class WasapiCapture {
     var list = new List<object>();
     for (int flow = 0; flow <= 1; ++flow) {
       IMMDeviceCollection c = null;
-      try { Check(e.EnumAudioEndpoints(flow,1,out c)); uint count; Check(c.GetCount(out count)); string def=Default(e,flow);
+      try { Check(e.EnumAudioEndpoints(flow,1,out c)); uint count; Check(c.GetCount(out count)); string def;
+        try { def=Default(e,flow); } catch { def=""; }
         for (uint i=0;i<count;++i) { IMMDevice d=null; try { Check(c.Item(i,out d)); string id=Id(d); list.Add(new { id=id, name=Name(d), source=flow==0?"system":"microphone", @default=id==def }); } finally { Release(d); } }
       } finally { Release(c); }
     }
@@ -147,8 +149,8 @@ class WasapiCapture {
         if(stopping && !stopped) { Check(client.Stop()); stopped=true; }
         if(!stopped && clock.ElapsedMilliseconds-lastDefaultCheck>1000) {
           lastDefaultCheck=clock.ElapsedMilliseconds;
-          uint state; Check(device.GetState(out state)); if(state!=1) throw new InvalidOperationException("Audio device disconnected; select a device and restart");
-          if(requested.Length==0 && Default(e,flow)!=selected) throw new InvalidOperationException("Default audio device changed; restart capture");
+          uint state; Check(device.GetState(out state)); if(state!=1) throw new COMException("Audio device disconnected",DeviceInvalidated);
+          if(requested.Length==0 && Default(e,flow)!=selected) throw new COMException("Default audio device changed",DeviceInvalidated);
         }
         uint packet; Check(capture.GetNextPacketSize(out packet));
         while(packet>0) {

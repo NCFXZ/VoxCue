@@ -118,7 +118,7 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         }
       })().finally(() => {
         refreshing = undefined;
-        if (version !== refreshVersion && subscriptions) return get().refresh();
+        if (version !== refreshVersion && (subscriptions || scans.size)) return get().refresh();
       });
       return refreshing;
     },
@@ -203,6 +203,8 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
           if (current && jobs.get(job.id) === job) {
             job.revision = documentRevision(current);
             await indexOriginal(current, job.requestId, job.force);
+            // A status read started before this commit cannot verify the new index.
+            if (epoch === lifetime) refreshVersion++;
             attempts.delete(job.id);
           }
         } catch (e) {
@@ -249,17 +251,9 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
       }
       const epoch = lifetime;
       const scan = (async () => {
-        await get().refresh();
-        const state = get().state;
-        if (!state || get().error || !state.modelReady) return;
         const documents = baseId
           ? await localKnowledge.listDocuments(baseId)
           : (await syncKnowledgeSnapshot()).documents;
-        const indexed = new Map(
-          state.documents
-            .filter((doc) => doc.available !== false)
-            .map((doc) => [doc.documentId, doc]),
-        );
         const groups = new Map<string, LocalDocument[]>();
         for (const doc of documents) {
           if (!isKnowledgeFileName(doc.name)) continue;
@@ -269,6 +263,16 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         }
         for (const group of groups.values()) {
           if (epoch !== lifetime) return;
+          // Other imports can finish during the IndexedDB read or a previous group.
+          await get().refresh();
+          if (epoch !== lifetime) return;
+          const state = get().state;
+          if (!state || get().error || !state.modelReady) return;
+          const indexed = new Map(
+            state.documents
+              .filter((doc) => doc.available !== false)
+              .map((doc) => [doc.documentId, doc]),
+          );
           await Promise.all(
             group
               .filter(

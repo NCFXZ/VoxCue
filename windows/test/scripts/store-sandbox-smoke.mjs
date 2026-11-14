@@ -29,18 +29,25 @@ import { createRequire } from 'node:module';
 assert.equal(process.platform, 'win32');
 const argument = process.argv[2];
 const copilotVault = argument === '--copilot-vault';
+const appxUpgrade = argument === '--appx-upgrade';
+// Published, immutable originals used before installing the current package.
+const previousVersions = new Map([
+  ['--nsis-upgrade', ['1.2.2', '8d4bce6ce60b17cecbb570814a8408263b30e8517dfec9a169d62c438362964d']],
+  ['--nsis-upgrade-1.2.0', ['1.2.0', 'a83d1399fb2dae98cc4dfcf98924c6e571d6c17a461ca92a8292556bbcc610ae']],
+  ['--nsis-upgrade-1.1.1', ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd']],
+]);
 const nsisTask =
   argument === '--nsis-current' ? 'nsis-current'
-    : ['--nsis-upgrade', '--nsis-upgrade-1.1.1'].includes(argument) ? 'nsis-upgrade'
+    : previousVersions.has(argument) ? 'nsis-upgrade'
     : undefined;
 const appxArgument = argument?.startsWith('--appx=') ? argument : undefined;
 assert.ok(
   process.argv.length === 2 ||
     (process.argv.length === 3 &&
-      (copilotVault ||
+      (copilotVault || appxUpgrade ||
         nsisTask ||
         (appxArgument?.startsWith('--appx=') && appxArgument.length > '--appx='.length))),
-  'Use the current Store release, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current, --nsis-upgrade or --nsis-upgrade-1.1.1',
+  'Use the current Store release, --appx-upgrade, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current, --nsis-upgrade, --nsis-upgrade-1.2.0 or --nsis-upgrade-1.1.1',
 );
 const platformRoot = fileURLToPath(new URL('../../', import.meta.url));
 const repositoryRoot = path.resolve(platformRoot, '..');
@@ -57,14 +64,14 @@ const artifact = copilotVault
     : appxArgument
       ? path.resolve(appxArgument.slice('--appx='.length))
       : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
-// Compare immutable released bytes against the independent Windows release records.
-const previousVersions = {
-  '--nsis-upgrade': ['1.2.0', 'a83d1399fb2dae98cc4dfcf98924c6e571d6c17a461ca92a8292556bbcc610ae'],
-  '--nsis-upgrade-1.1.1': ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd'],
-};
-const [previousVersion, previousDigest] =
-  nsisTask === 'nsis-upgrade' ? previousVersions[argument] : [];
-const previousArtifact = previousVersion
+const [previousVersion, previousDigest] = appxUpgrade
+  ? ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8']
+  : previousVersions.get(argument) ?? [];
+const checkCachedOffer = Boolean(nsisTask) && previousVersion === '1.2.2';
+const checkRagUpgrade = checkCachedOffer || previousVersion === '1.2.0';
+const previousArtifact = appxUpgrade
+  ? path.join(platformRoot, 'release/store', 'VoxCue-Store-1.2.2-x64.appx')
+  : previousVersion
   ? path.join(platformRoot, 'release', previousVersion, `VoxCue-Setup-${previousVersion}-x64.exe`)
   : undefined;
 const label = copilotVault ? 'Copilot vault Sandbox' : nsisTask ? 'NSIS Sandbox' : 'Store Sandbox';
@@ -283,6 +290,32 @@ async function hash(file, algorithm = 'sha256', encoding = 'hex') {
   for await (const chunk of createReadStream(file)) digest.update(chunk);
   return digest.digest(encoding);
 }
+async function stagePrevious() {
+  await ordinary(previousArtifact);
+  previousHash = await hash(previousArtifact);
+  assert.equal(previousHash, previousDigest, 'Protected package changed: ' + previousVersion);
+  const previous = { name: path.basename(previousArtifact), version: previousVersion, sha256: previousHash };
+  const target = path.join(input, previous.name);
+  await copyFile(previousArtifact, target);
+  assert.equal(await hash(target), previousDigest, 'Previous package copy changed');
+  return previous;
+}
+async function stageRagComponent(requirePlatform) {
+  const { packagesFor } = requirePlatform('./dist-electron/shared/electron/backend/components/catalog.js');
+  const { componentLocation } = requirePlatform('./dist-electron/shared/electron/backend/components/service.js');
+  const { verifyCachedComponent } = await import('../../../shared/test/scripts/verify-model-cache.mjs');
+  const rag = packagesFor('win32', 'x64').find((item) => item.id === 'rag');
+  const source = componentLocation(path.join(platformRoot, '.cache/test-components'), rag);
+  await verifyCachedComponent(source, rag);
+  const target = componentLocation(input, rag);
+  for (const relative of ['.voxcue-component.json', ...rag.files.map((file) => 'files/' + file.path)]) {
+    const destination = path.join(target, relative);
+    await mkdir(path.dirname(destination), { recursive: true });
+    await copyFile(path.join(source, relative), destination);
+  }
+  await verifyCachedComponent(target, rag);
+  return path.basename(target);
+}
 async function licenseDigests() {
   const digests = {};
   for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md'])
@@ -323,6 +356,14 @@ function Check-Licenses($directory) {
     $file = Join-Path (Join-Path $directory 'resources\licenses') $name
     if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $config.licenses.$name) { throw ('Installed license mismatch: ' + $name) }
   }
+}
+function Install-UpgradeRag($profileMarker) {
+  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2')) { throw 'Unexpected upgrade component' }
+  $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
+  Assert-GuestProfilePath $cache
+  if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
+  $null = New-Item -ItemType Directory -Path $cache -Force
+  Copy-Item -LiteralPath (Join-Path 'C:\VoxCueStoreInput' $config.ragDirectory) -Destination $cache -Recurse
 }
 function Assert-GuestProfilePath($file) {
   $current = [IO.Path]::GetFullPath($file)
@@ -421,13 +462,8 @@ try {
     }
     if ((Registration).Count -ne 0) { throw 'VoxCue was already registered in the guest' }
     if ($config.ragDirectory) {
-      if ($config.task -cne 'nsis-upgrade' -or $config.previous.version -cne '1.2.0' -or
-          $config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$') { throw 'Unexpected upgrade component' }
-      $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
-      Assert-GuestProfilePath $cache
-      if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
-      $null = New-Item -ItemType Directory -Path $cache -Force
-      Copy-Item -LiteralPath (Join-Path 'C:\VoxCueStoreInput' $config.ragDirectory) -Destination $cache -Recurse
+      if ($config.task -cne 'nsis-upgrade') { throw 'Unexpected NSIS upgrade component' }
+      Install-UpgradeRag $profileMarker
     }
     $installers = @($config.current)
     if ($config.task -eq 'nsis-upgrade') { $installers = @($config.previous, $config.current) }
@@ -437,6 +473,44 @@ try {
       Copy-Item -LiteralPath $source -Destination (Join-Path $work $item.name)
       if ((Get-FileHash -LiteralPath (Join-Path $work $item.name) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha256) { throw 'Guest NSIS copy changed' }
     }
+    function Nsis-InstallSnapshot($installer, $item) {
+      $rows = @(Get-CimInstance Win32_Process -OperationTimeoutSec 3)
+      $root = $rows | Where-Object { $_.ProcessId -eq $installer.Id }
+      if (-not $root -or $root.ExecutablePath -ine (Join-Path $work $item.name)) { return @{rootExited=$installer.HasExited} }
+      $owned = New-Object Collections.Generic.List[object]
+      $owned.Add($root)
+      for ($index=0; $index -lt $owned.Count -and $owned.Count -lt 16; $index++) {
+        $parent = $owned[$index]
+        foreach ($row in $rows) {
+          if ($row.ParentProcessId -eq $parent.ProcessId -and $row.CreationDate -ge $parent.CreationDate -and $owned.Count -lt 16 -and -not $owned.Contains($row)) { $owned.Add($row) }
+        }
+      }
+      $processes = @(foreach ($row in $owned) {
+        $owner = Invoke-CimMethod -InputObject $row -MethodName GetOwnerSid
+        if ($owner.ReturnValue -ne 0 -or $owner.Sid -cne $guestSid) { continue }
+        $observation = @{pid=$row.ProcessId; parentPid=$row.ParentProcessId; name=$row.Name; createdUtc=$row.CreationDate.ToUniversalTime().ToString('o');
+          cpu100ns=([uint64]$row.UserModeTime + [uint64]$row.KernelModeTime); readBytes=$row.ReadTransferCount; writtenBytes=$row.WriteTransferCount; windows=@()}
+        try {
+          $scope = [Windows.Automation.TreeScope]
+          $element = [Windows.Automation.AutomationElement]
+          $condition = New-Object Windows.Automation.PropertyCondition $element::ProcessIdProperty, ([int]$row.ProcessId)
+          foreach ($window in @($element::RootElement.FindAll($scope::Children, $condition) | Select-Object -First 3)) {
+            $labels = @(foreach ($control in @($window.FindAll($scope::Children, $condition) | Select-Object -First 16)) {
+              if ($control.Current.ControlType.ProgrammaticName -in @('ControlType.Text','ControlType.Button','ControlType.ProgressBar')) { $control.Current.Name -replace '[\x00-\x1f]',' ' }
+            })
+            $observation.windows += @((@($window.Current.Name) + $labels | ForEach-Object {
+              if ($_) { $_.Substring(0, [Math]::Min($_.Length, 120)) }
+            }) -join ' | ')
+          }
+        } catch { $observation.windowError = $_.Exception.GetType().Name }
+        $observation
+      })
+      $files = @(foreach ($relative in @('VoxCue.exe','resources\app.asar')) {
+        $file = Get-Item -LiteralPath (Join-Path $target $relative) -ErrorAction SilentlyContinue
+        if ($file) { @{name=$relative; bytes=$file.Length; changedUtc=$file.LastWriteTimeUtc.ToString('o')} }
+      })
+      return @{processes=$processes; files=$files; registeredVersions=@(Registration | ForEach-Object { $_.DisplayVersion })}
+    }
     function Install-Nsis($item, $upgrade) {
       Stage ('installing-nsis-' + $item.version)
       Assert-GuestProfilePath $target
@@ -444,7 +518,16 @@ try {
       $installer = Start-Process -FilePath (Join-Path $work $item.name) -ArgumentList $arguments -PassThru -WindowStyle Hidden
       try {
         $null = $installer.Handle
-        if (-not $installer.WaitForExit(120000)) { throw 'NSIS installer did not exit naturally' }
+        if (-not $installer.WaitForExit(120000)) {
+          $result.nsisInstallTimeout = @{version=$item.version; pid=$installer.Id; limitMs=120000; snapshots=@()}
+          try {
+            Add-Type -AssemblyName UIAutomationClient
+            $result.nsisInstallTimeout.snapshots += Nsis-InstallSnapshot $installer $item
+            Start-Sleep -Milliseconds 500
+            $result.nsisInstallTimeout.snapshots += Nsis-InstallSnapshot $installer $item
+          } catch { $result.nsisInstallTimeout.observationError = $_.Exception.GetType().Name }
+          throw 'NSIS installer did not exit naturally'
+        }
         if ($installer.ExitCode -ne 0) { throw ('NSIS installation failed: ' + $installer.ExitCode) }
       } finally { $installer.Dispose() }
       Assert-GuestProfilePath $exe
@@ -498,6 +581,7 @@ try {
         $runtimeFile = Join-Path $work ('runtime-' + $phases.Count + '.json')
         $options = @{nonce=$config.nonce; distribution='nsis'; appDirectory=$target; version=$expectedVersion;
           phase=$phase; bindings=$bindings; expectedPid=$app.Id; close=$true}
+        if ($config.checkCachedOffer) { $options.offeredVersion = $config.current.version }
         if ($config.ragDirectory) { $options.checkRag = $true; $options.ragRevision = $result.ragRevision }
         [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
         $inspection = New-Object Diagnostics.Process
@@ -576,6 +660,18 @@ try {
     }
     if ($config.task -eq 'nsis-upgrade') {
       $registrationKey = Install-Nsis $config.previous $false
+      if ($config.checkCachedOffer) {
+        # Seed only the public signed release metadata in this fresh, offline guest.
+        $userData = [IO.Path]::GetDirectoryName($profileMarker)
+        $releaseCache = Join-Path $userData 'updates\windows-ed25519-v1\release-cache.json'
+        $preferences = Join-Path $userData 'update-settings.json'
+        Assert-GuestProfilePath $releaseCache
+        Assert-GuestProfilePath $preferences
+        if ((Test-Path -LiteralPath $releaseCache) -or (Test-Path -LiteralPath $preferences)) { throw 'Expected an empty guest update profile' }
+        $null = New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($releaseCache)) -Force
+        Copy-Item -LiteralPath 'C:\VoxCueStoreInput\release-cache.json' -Destination $releaseCache
+        [IO.File]::WriteAllText($preferences, '{"schemaVersion":1,"autoDownload":false}', (New-Object Text.UTF8Encoding $false))
+      }
       $bindings = Check-NsisRenderer $config.previous.version 'seed' $null
       $updatedKey = Install-Nsis $config.current $true
       if ($updatedKey -cne $registrationKey) { throw 'NSIS upgrade changed its registry identity' }
@@ -601,23 +697,7 @@ try {
     $result.ok = $true
     $result.stage = 'complete'
   } else {
-  Stage 'copying-package'
-  $source = Join-Path 'C:\VoxCueStoreInput' $config.artifactName
-  if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.sha256) { throw 'Mapped APPX checksum mismatch' }
-  $candidate = Join-Path $work 'candidate.appx'
-  Copy-Item -LiteralPath $source -Destination $candidate
   Add-Type -AssemblyName System.IO.Compression.FileSystem
-  $zip = [IO.Compression.ZipFile]::OpenRead($candidate)
-  try {
-    $entry = $zip.GetEntry('AppxManifest.xml')
-    if (-not $entry) { throw 'APPX manifest missing' }
-    $reader = New-Object IO.StreamReader($entry.Open())
-    try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
-  } finally { $zip.Dispose() }
-  $identity = $manifest.Package.Identity
-  if ($identity.Name -ne $config.identityName -or $identity.Publisher -ne $config.publisher -or $identity.Version -ne $config.packageVersion) { throw 'Unexpected APPX identity or version' }
-  $applications = @($manifest.Package.Applications.Application)
-  if ($applications.Count -ne 1 -or $applications[0].Id -notmatch '^[A-Za-z0-9.]+$') { throw 'Unexpected APPX application' }
   if (Get-AppxPackage -Name $config.identityName) { throw 'Sandbox is not a clean package environment' }
   Stage 'signing-guest-copy'
   $cert = New-SelfSignedCertificate -Type Custom -KeyUsage DigitalSignature -KeyAlgorithm RSA -KeyLength 2048 -HashAlgorithm SHA256 -CertStoreLocation 'Cert:\CurrentUser\My' -TextExtension @('2.5.29.37={text}1.3.6.1.5.5.7.3.3','2.5.29.19={text}') -Subject $config.publisher -FriendlyName ('VoxCue Sandbox ' + $config.nonce) -NotAfter (Get-Date).AddDays(1)
@@ -625,74 +705,6 @@ try {
   Export-Certificate -Cert $cert -FilePath $cer | Out-Null
   Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\LocalMachine\Root' | Out-Null
   Import-Certificate -FilePath $cer -CertStoreLocation 'Cert:\LocalMachine\TrustedPeople' | Out-Null
-  & 'C:\VoxCueStoreInput\tools\signtool.exe' sign /fd SHA256 /sha1 $cert.Thumbprint /s My $candidate | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'Signing temporary guest APPX failed' }
-  & 'C:\VoxCueStoreInput\tools\signtool.exe' verify /pa $candidate | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw 'Guest APPX signature verification failed' }
-  Stage 'installing-appx'
-  Add-AppxPackage -Path $candidate -ErrorAction Stop
-  $package = Get-AppxPackage -Name $config.identityName
-  if (-not $package -or $package.Version.ToString() -ne $config.packageVersion -or $package.Publisher -ne $config.publisher) { throw 'Installed APPX identity/version mismatch' }
-  $exe = [IO.Path]::GetFullPath((Join-Path $package.InstallLocation $applications[0].Executable))
-  if (-not $exe.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($exe) -ne 'VoxCue.exe') { throw 'Unexpected installed executable' }
-  $appDirectory = Split-Path -Parent $exe
-  Check-Licenses $appDirectory
-  $profileMarkers = @(
-    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'VoxCue\local-mode.json'),
-    (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) ('Packages\' + $package.PackageFamilyName + '\LocalCache\Roaming\VoxCue\local-mode.json'))
-  )
-  foreach ($marker in $profileMarkers) {
-    Assert-GuestProfilePath $marker
-    if (Test-Path -LiteralPath $marker) { throw 'Guest local-mode preference existed before launch' }
-  }
-  $runtimeConfig = Join-Path $work 'renderer-config.json'
-  $config | Add-Member -NotePropertyName appDirectory -NotePropertyValue $appDirectory
-  [IO.File]::WriteAllText($runtimeConfig, ($config | ConvertTo-Json -Compress), (New-Object Text.UTF8Encoding $false))
-  Stage 'launching-package-identity'
-  Get-Command Invoke-CommandInDesktopPackage -ErrorAction Stop | Out-Null
-  $launchUtc = [DateTime]::UtcNow
-  Invoke-CommandInDesktopPackage -PackageFamilyName $package.PackageFamilyName -AppId $applications[0].Id -Command $exe -Args '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1' -PreventBreakaway
-  Stage 'checking-real-store-runtime'
-  $runtimeFile = Join-Path $work 'runtime.json'
-  # WinPS 5 converts native stderr into ErrorRecords; with Stop this can discard
-  # everything after the first stack line. Drain both native pipes concurrently.
-  $inspection = New-Object Diagnostics.Process
-  $inspectionStarted = $false
-  try {
-    $inspection.StartInfo.FileName = 'C:\VoxCueStoreInput\tools\node.exe'
-    $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\renderer.mjs" "' + $runtimeConfig + '" "' + $runtimeFile + '"'
-    $inspection.StartInfo.WorkingDirectory = $work
-    $inspection.StartInfo.UseShellExecute = $false
-    $inspection.StartInfo.CreateNoWindow = $true
-    $inspection.StartInfo.RedirectStandardOutput = $true
-    $inspection.StartInfo.RedirectStandardError = $true
-    $inspection.StartInfo.StandardOutputEncoding = New-Object Text.UTF8Encoding $false
-    $inspection.StartInfo.StandardErrorEncoding = New-Object Text.UTF8Encoding $false
-    $inspectionStarted = $inspection.Start()
-    if (-not $inspectionStarted) { throw 'Starting Store inspector failed' }
-    $stdoutTask = $inspection.StandardOutput.ReadToEndAsync()
-    $stderrTask = $inspection.StandardError.ReadToEndAsync()
-    $timedOut = -not $inspection.WaitForExit(180000)
-    if ($timedOut) {
-      $inspection.Kill()
-      if (-not $inspection.WaitForExit(10000)) { throw 'Timed-out Store inspector did not exit' }
-    }
-    if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 10000)) { throw 'Store inspector diagnostic capture timed out' }
-    $stdout = $stdoutTask.GetAwaiter().GetResult()
-    $stderr = $stderrTask.GetAwaiter().GetResult()
-    $diagnostic = ('exitCode=' + $inspection.ExitCode + [Environment]::NewLine + 'stdout:' + [Environment]::NewLine + $stdout + [Environment]::NewLine + 'stderr:' + [Environment]::NewLine + $stderr)
-    if ($timedOut) { throw ('Installed runtime verification timed out: ' + $diagnostic) }
-    if ($inspection.ExitCode -ne 0) { throw ('Installed runtime verification failed: ' + $diagnostic) }
-  } finally {
-    try {
-      if ($inspectionStarted -and -not $inspection.HasExited) {
-        $inspection.Kill()
-        if (-not $inspection.WaitForExit(10000)) { throw 'Store inspector cleanup timed out' }
-      }
-    } finally { $inspection.Dispose() }
-  }
-  $runtime = Get-Content -LiteralPath $runtimeFile -Encoding UTF8 -Raw | ConvertFrom-Json
-  if ($runtime.nonce -ne $config.nonce -or $runtime.version -ne $config.version -or $runtime.pid -le 0) { throw 'Invalid installed Store runtime result' }
   # Check the actual browser PID's Windows package identity without reopening
   # the main-process inspector disabled by production fuses.
   Add-Type -TypeDefinition @'
@@ -715,20 +727,170 @@ public static class PackageProcess {
   }
 }
 '@
-  if ([PackageProcess]::Identity([uint32]$runtime.pid) -cne $package.PackageFullName) { throw 'Browser process is not the installed Store package' }
-  # Public setLocalMode(true) writes JSON true via LocalMode constructed from
-  # app.getPath('userData'). This observes the real backend path, not a CLI flag.
-  $written = @($profileMarkers | Where-Object { Test-Path -LiteralPath $_ })
-  if ($written.Count -ne 1) { throw 'Expected exactly one newly written guest local-mode preference' }
-  $profileMarker = $written[0]
-  Assert-GuestProfilePath $profileMarker
-  $info = Get-Item -LiteralPath $profileMarker -Force
-  if ($info.PSIsContainer -or $info.Length -gt 16 -or $info.CreationTimeUtc -lt $launchUtc -or
-      $info.LastWriteTimeUtc -lt $launchUtc) { throw 'Invalid or stale guest local-mode preference' }
-  $localMode = Get-Content -LiteralPath $profileMarker -Encoding UTF8 -Raw | ConvertFrom-Json
-  if ($localMode -isnot [bool] -or $localMode -ne $true) { throw 'Backend did not persist the selected local mode' }
-  if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $config.sha256) { throw 'Read-only source APPX changed' }
-  if ($runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Packaged renderer persistence regression failed' }
+  function Invoke-StoreInspector($runtimeConfig, $runtimeFile, $closing) {
+    # WinPS 5 converts native stderr into ErrorRecords; with Stop this can discard
+    # everything after the first stack line. Drain both native pipes concurrently.
+    $inspection = New-Object Diagnostics.Process
+    $inspectionStarted = $false
+    try {
+      $inspection.StartInfo.FileName = 'C:\VoxCueStoreInput\tools\node.exe'
+      $inspection.StartInfo.Arguments = '"C:\VoxCueStoreInput\renderer.mjs" "' + $runtimeConfig + '" "' + $runtimeFile + '"'
+      if ($closing) { $inspection.StartInfo.Arguments += ' --close-store' }
+      $inspection.StartInfo.WorkingDirectory = $work
+      $inspection.StartInfo.UseShellExecute = $false
+      $inspection.StartInfo.CreateNoWindow = $true
+      $inspection.StartInfo.RedirectStandardOutput = $true
+      $inspection.StartInfo.RedirectStandardError = $true
+      $inspection.StartInfo.StandardOutputEncoding = New-Object Text.UTF8Encoding $false
+      $inspection.StartInfo.StandardErrorEncoding = New-Object Text.UTF8Encoding $false
+      $inspectionStarted = $inspection.Start()
+      if (-not $inspectionStarted) { throw 'Starting Store inspector failed' }
+      $stdoutTask = $inspection.StandardOutput.ReadToEndAsync()
+      $stderrTask = $inspection.StandardError.ReadToEndAsync()
+      $timedOut = -not $inspection.WaitForExit(180000)
+      if ($timedOut) {
+        $inspection.Kill()
+        if (-not $inspection.WaitForExit(10000)) { throw 'Timed-out Store inspector did not exit' }
+      }
+      if (-not [Threading.Tasks.Task]::WaitAll([Threading.Tasks.Task[]]@($stdoutTask, $stderrTask), 10000)) { throw 'Store inspector diagnostic capture timed out' }
+      $stdout = $stdoutTask.GetAwaiter().GetResult()
+      $stderr = $stderrTask.GetAwaiter().GetResult()
+      $diagnostic = ('exitCode=' + $inspection.ExitCode + [Environment]::NewLine + 'stdout:' + [Environment]::NewLine + $stdout + [Environment]::NewLine + 'stderr:' + [Environment]::NewLine + $stderr)
+      if ($timedOut) { throw ('Installed runtime verification timed out: ' + $diagnostic) }
+      if ($inspection.ExitCode -ne 0) { throw ('Installed runtime verification failed: ' + $diagnostic) }
+    } finally {
+      try {
+        if ($inspectionStarted -and -not $inspection.HasExited) {
+          $inspection.Kill()
+          if (-not $inspection.WaitForExit(10000)) { throw 'Store inspector cleanup timed out' }
+        }
+      } finally { $inspection.Dispose() }
+    }
+  }
+  function Check-StoreProcess($runtime, $package, $exe, $launchUtc, $runtimeConfig, $runtimeFile) {
+    $app = [Diagnostics.Process]::GetProcessById([int]$runtime.pid)
+    try {
+      $null = $app.Handle
+      if ([PackageProcess]::Identity([uint32]$runtime.pid) -cne $package.PackageFullName) { throw 'Browser process is not the installed Store package' }
+      $browser = Get-CimInstance Win32_Process -Filter ('ProcessId=' + $runtime.pid)
+      if (-not $browser -or $browser.ExecutablePath -ine $exe -or $browser.CreationDate.ToUniversalTime() -lt $launchUtc.AddSeconds(-1)) { throw 'Unexpected Store browser executable or start time' }
+      $owner = Invoke-CimMethod -InputObject $browser -MethodName GetOwnerSid
+      if ($owner.ReturnValue -ne 0 -or $owner.Sid -cne $guestSid) { throw 'Store browser is not owned by the guest account' }
+      if (-not $config.previous) { return }
+      Stage ('closing-store-' + $runtime.version)
+      Invoke-StoreInspector $runtimeConfig $runtimeFile $true
+      $quitDeadline = [DateTime]::UtcNow.AddSeconds(30)
+      if (-not $app.WaitForExit(30000)) { throw 'Store browser did not exit after saving' }
+      if ($app.ExitCode -ne 0) { throw ('Store browser failed during exit: ' + $app.ExitCode) }
+      do {
+        $remaining = @(Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and $_.ExecutablePath.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) })
+        if (-not $remaining.Count) { break }
+        if ([DateTime]::UtcNow -gt $quitDeadline) { throw 'Store package processes did not exit naturally' }
+        Start-Sleep -Milliseconds 200
+      } while ($true)
+      $result.storeExitCodes += $app.ExitCode
+    } finally { $app.Dispose() }
+  }
+  $current = @{name=$config.artifactName; sha256=$config.sha256; version=$config.version; packageVersion=$config.packageVersion}
+  $items = @($current)
+  if ($config.previous) {
+    $items = @($config.previous, $current, $current)
+    $result.storeExitCodes = @()
+  }
+  $phases = New-Object Collections.Generic.List[string]
+  for ($pass = 0; $pass -lt $items.Count; $pass++) {
+    $item = $items[$pass]
+    if ($pass -lt 2) {
+      Stage ('copying-appx-' + $item.version)
+      $source = Join-Path 'C:\VoxCueStoreInput' $item.name
+      if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.sha256) { throw 'Mapped APPX checksum mismatch' }
+      $candidate = Join-Path $work $item.name
+      Copy-Item -LiteralPath $source -Destination $candidate
+      if ((Get-FileHash -LiteralPath $candidate -Algorithm SHA256).Hash.ToLowerInvariant() -cne $item.sha256) { throw 'Guest APPX copy changed' }
+      $zip = [IO.Compression.ZipFile]::OpenRead($candidate)
+      try {
+        $entry = $zip.GetEntry('AppxManifest.xml')
+        if (-not $entry) { throw 'APPX manifest missing' }
+        $reader = New-Object IO.StreamReader($entry.Open())
+        try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+      } finally { $zip.Dispose() }
+      $identity = $manifest.Package.Identity
+      if ($identity.ProcessorArchitecture -ine 'x64' -or $identity.Name -cne $config.identityName -or $identity.Publisher -ne $config.publisher -or $identity.Version -ne $item.packageVersion) { throw 'Unexpected APPX identity or version' }
+      $applications = @($manifest.Package.Applications.Application)
+      if ($applications.Count -ne 1 -or $applications[0].Id -cne $config.identityName) { throw 'Unexpected APPX application' }
+      & 'C:\VoxCueStoreInput\tools\signtool.exe' sign /fd SHA256 /sha1 $cert.Thumbprint /s My $candidate | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw 'Signing temporary guest APPX failed' }
+      & 'C:\VoxCueStoreInput\tools\signtool.exe' verify /pa $candidate | Out-Null
+      if ($LASTEXITCODE -ne 0) { throw 'Guest APPX signature verification failed' }
+      Stage ('installing-appx-' + $item.packageVersion)
+      Add-AppxPackage -Path $candidate -ErrorAction Stop
+    }
+    $packages = @(Get-AppxPackage -Name $config.identityName)
+    if ($packages.Count -ne 1) { throw 'Expected a single installed Store package for the current account' }
+    $package = $packages[0]
+    if ($package.PackageFamilyName -cne 'NCFX.VoxCue_1syhqk59eh0f0' -or $package.Version.ToString() -cne $item.packageVersion -or
+        $package.Publisher -cne $config.publisher -or $package.Architecture.ToString() -ine 'x64') { throw 'Installed APPX identity/version mismatch' }
+    $exe = [IO.Path]::GetFullPath((Join-Path $package.InstallLocation $applications[0].Executable))
+    if (-not $exe.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($exe) -ne 'VoxCue.exe') { throw 'Unexpected installed executable' }
+    $appDirectory = Split-Path -Parent $exe
+    Check-Licenses $appDirectory
+    $profileMarkers = @(
+      (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'VoxCue\local-mode.json'),
+      (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) ('Packages\' + $package.PackageFamilyName + '\LocalCache\Roaming\VoxCue\local-mode.json'))
+    )
+    foreach ($marker in $profileMarkers) {
+      Assert-GuestProfilePath $marker
+      if ($pass -eq 0 -and (Test-Path -LiteralPath $marker)) { throw 'Guest local-mode preference existed before launch' }
+    }
+    $options = @{nonce=$config.nonce; version=$item.version; appDirectory=$appDirectory;
+      storeUpdateMessage=$config.storeUpdateMessage; fixtureDirectory=$config.fixtureDirectory}
+    if ($config.previous) {
+      $options.phase = if ($pass -eq 0) { 'seed' } else { 'verify' }
+      $options.checkRag = $true
+      if ($pass -eq 0) {
+        Install-UpgradeRag $profileMarkers[1]
+      } else {
+        if ($profileMarker -ine $profileMarkers[1] -or (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash -cne $markerHash) { throw 'Store upgrade replaced the original LocalCache preference' }
+        $options.bindings = $seedBindings
+        $options.ragRevision = $result.ragRevision
+      }
+    }
+    $runtimeConfig = Join-Path $work 'renderer-config.json'
+    $runtimeFile = Join-Path $work ('runtime-' + $pass + '.json')
+    [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
+    Stage 'launching-package-identity'
+    Get-Command Invoke-CommandInDesktopPackage -ErrorAction Stop | Out-Null
+    $launchUtc = [DateTime]::UtcNow
+    Invoke-CommandInDesktopPackage -PackageFamilyName $package.PackageFamilyName -AppId $applications[0].Id -Command $exe -Args '--remote-debugging-port=9222 --remote-debugging-address=127.0.0.1' -PreventBreakaway
+    Stage ('checking-store-' + $item.version + '-launch-' + ($pass + 1))
+    Invoke-StoreInspector $runtimeConfig $runtimeFile $false
+    if ((Get-Item -LiteralPath $runtimeFile).Length -gt 16384) { throw 'Oversized Store renderer result' }
+    $runtime = Get-Content -LiteralPath $runtimeFile -Encoding UTF8 -Raw | ConvertFrom-Json
+    if ($runtime.nonce -cne $config.nonce -or $runtime.version -cne $item.version -or $runtime.pid -le 0) { throw 'Invalid installed Store runtime result' }
+    # Public setLocalMode(true) writes JSON true via LocalMode constructed from
+    # app.getPath('userData'). This observes the real backend path, not a CLI flag.
+    $written = @($profileMarkers | Where-Object { Test-Path -LiteralPath $_ })
+    if ($written.Count -ne 1) { throw 'Expected exactly one guest local-mode preference' }
+    $profileMarker = $written[0]
+    Assert-GuestProfilePath $profileMarker
+    $info = Get-Item -LiteralPath $profileMarker -Force
+    if ($info.PSIsContainer -or $info.Length -gt 16 -or ($pass -eq 0 -and ($info.CreationTimeUtc -lt $launchUtc -or $info.LastWriteTimeUtc -lt $launchUtc))) { throw 'Invalid or stale guest local-mode preference' }
+    $localMode = Get-Content -LiteralPath $profileMarker -Encoding UTF8 -Raw | ConvertFrom-Json
+    if ($localMode -isnot [bool] -or $localMode -ne $true) { throw 'Backend did not persist the selected local mode' }
+    if ((Get-FileHash -LiteralPath $source -Algorithm SHA256).Hash.ToLowerInvariant() -ne $item.sha256) { throw 'Read-only source APPX changed' }
+    if ($runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Packaged renderer persistence regression failed' }
+    if ($config.previous) {
+      if ($profileMarker -ine $profileMarkers[1] -or $runtime.phase -cne $options.phase -or $runtime.ragRevision -cnotmatch '^[a-f0-9]{64}$') { throw 'Store upgrade profile or RAG evidence missing' }
+      if ($pass -eq 0) {
+        $seedBindings = $runtime.bindings
+        $result.ragRevision = $runtime.ragRevision
+        $markerHash = (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash
+      } elseif ($runtime.ragRevision -cne $result.ragRevision) { throw 'Store upgrade changed the old vector index' }
+      $phases.Add($item.packageVersion + '/' + $runtime.version + ':' + $runtime.phase)
+    }
+    Check-StoreProcess $runtime $package $exe $launchUtc $runtimeConfig $runtimeFile
+  }
+  if ($config.previous) { $result.storeUpgradePhases = $phases.ToArray() }
   Stage 'checking-package-native-modules'
   # WindowsApps executables must be exercised in the package's execution context.
   # Keep results outside virtualized AppData; only this sanitized nonce file is mapped.
@@ -959,61 +1121,37 @@ try {
     assert.ok((await lstat(metadataFile)).size <= 128 * 1024, 'Oversized update metadata');
     const metadata = yaml.load(await readFile(metadataFile, 'utf8'));
     assert.equal(metadata.version, version);
-    const { signedWindowsUpdate } = requirePlatform(
+    const { signedWindowsUpdate, validateSignedWindowsUpdate } = requirePlatform(
       './dist-electron/shared/electron/backend/updates/windowsManifest.js',
     );
     const key = JSON.parse(
       await readFile(path.join(platformRoot, 'update-public-key.json'), 'utf8'),
     );
     assert.equal(key.protocol, 1);
-    const selected = signedWindowsUpdate(
-      metadata,
-      {
-        version,
-        tag: 'sandbox',
-        publishedAt: 0,
-        manifest: 'latest.yml',
-        binary: { name: path.basename(artifact), size: (await lstat(artifact)).size },
-      },
-      key.publicKey,
-    );
+    const { latestPlatformRelease } = requirePlatform('./dist-electron/shared/electron/backend/updates/releases.js');
+    const assets = [];
+    for (const file of [metadataFile, artifact, artifact + '.blockmap']) {
+      await ordinary(file);
+      assets.push({ name: path.basename(file), size: (await lstat(file)).size, state: 'uploaded' });
+    }
+    const candidate = await latestPlatformRelease('windows-x64', async () => [
+      { tag_name: 'v' + version, published_at: new Date().toISOString(), draft: false, prerelease: false, assets },
+    ]);
+    const selected = signedWindowsUpdate(metadata, candidate, key.publicKey);
     assert.equal(selected.sha512, await hash(artifact, 'sha512', 'base64'));
+    if (checkCachedOffer) {
+      const { UpdateCache } = requirePlatform('./dist-electron/shared/electron/backend/updates/cache.js');
+      const cache = new UpdateCache(input, 'windows-x64', (value, target) =>
+        validateSignedWindowsUpdate(value, target, key.publicKey),
+      );
+      await cache.latest(true, async () => selected);
+    }
     originalHash = await hash(artifact);
     const current = { name: path.basename(artifact), version, sha256: originalHash };
     await copyFile(artifact, path.join(input, current.name));
     assert.equal(await hash(path.join(input, current.name)), originalHash, 'NSIS copy changed');
-    let previous;
-    let ragDirectory;
-    if (previousArtifact) {
-      await ordinary(previousArtifact);
-      previousHash = await hash(previousArtifact);
-      assert.equal(previousHash, previousDigest, 'Protected installer changed: ' + previousVersion);
-      previous = {
-        name: path.basename(previousArtifact), version: previousVersion, sha256: previousHash,
-      };
-      await copyFile(previousArtifact, path.join(input, previous.name));
-      assert.equal(
-        await hash(path.join(input, previous.name)),
-        previousDigest,
-        'Old NSIS copy changed',
-      );
-      if (previousVersion === '1.2.0') {
-        const { packagesFor } = requirePlatform('./dist-electron/shared/electron/backend/components/catalog.js');
-        const { componentLocation } = requirePlatform('./dist-electron/shared/electron/backend/components/service.js');
-        const { verifyCachedComponent } = await import('../../../shared/test/scripts/verify-model-cache.mjs');
-        const rag = packagesFor('win32', 'x64').find((item) => item.id === 'rag');
-        const source = componentLocation(path.join(platformRoot, '.cache/test-components'), rag);
-        await verifyCachedComponent(source, rag);
-        const target = componentLocation(input, rag);
-        ragDirectory = path.basename(target);
-        for (const relative of ['.voxcue-component.json', ...rag.files.map((file) => 'files/' + file.path)]) {
-          const destination = path.join(target, relative);
-          await mkdir(path.dirname(destination), { recursive: true });
-          await copyFile(path.join(source, relative), destination);
-        }
-        await verifyCachedComponent(target, rag);
-      }
-    }
+    const previous = previousArtifact ? await stagePrevious() : undefined;
+    const ragDirectory = checkRagUpgrade ? await stageRagComponent(requirePlatform) : undefined;
     const archive = path.join(
       platformRoot,
       'release/installer-stage/VoxCue-win32-x64/resources/app.asar',
@@ -1029,6 +1167,7 @@ try {
         current,
         previous,
         ragDirectory,
+        checkCachedOffer,
         asarSha256: await hash(archive),
         licenses: await licenseDigests(),
       }),
@@ -1133,6 +1272,8 @@ try {
         version,
         packageVersion,
         artifactName: path.basename(artifact),
+        previous: appxUpgrade ? { ...await stagePrevious(), packageVersion: '2.2.2.0' } : undefined,
+        ragDirectory: appxUpgrade ? await stageRagComponent(requirePlatform) : undefined,
         sha256: originalHash,
         licenses: await licenseDigests(),
         identityName: 'NCFX.VoxCue',
@@ -1229,7 +1370,7 @@ try {
         assert.equal(result.task, nsisTask);
         assert.equal(result.appVersion, version);
         assert.equal(result.previousVersion, previousVersion ?? null);
-        if (previousVersion === '1.2.0') assert.match(result.ragRevision, /^[a-f0-9]{64}$/);
+        if (checkRagUpgrade) assert.match(result.ragRevision, /^[a-f0-9]{64}$/);
         assert.equal(
           result.installDirectory.toLowerCase(),
           path.win32.join(result.guestProfile, 'AppData/Local/Programs/VoxCue').toLowerCase(),
@@ -1268,6 +1409,17 @@ try {
         );
         assert.equal(result.sourceUnchanged, true);
         assert.equal(typeof result.systemVcRuntimeAbsent, 'boolean');
+        if (appxUpgrade) {
+          assert.equal(result.packageFamilyName, 'NCFX.VoxCue_1syhqk59eh0f0');
+          assert.equal(result.userData.toLowerCase(), profiles[1].toLowerCase());
+          assert.deepEqual(result.storeExitCodes, [0, 0, 0]);
+          assert.deepEqual(result.storeUpgradePhases, [
+            '2.2.2.0/1.2.2:seed',
+            packageVersion + '/' + version + ':verify',
+            packageVersion + '/' + version + ':verify',
+          ]);
+          assert.match(result.ragRevision, /^[a-f0-9]{64}$/);
+        }
         for (const field of [
           'finalAsar',
           'nativeVault',

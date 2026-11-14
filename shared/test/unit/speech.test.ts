@@ -101,6 +101,7 @@ describe('本地语音边界和问题汇总', () => {
     p.writeFloatLE(0.25, 21);
     const d = new PacketDecoder();
     expect(d.push(p.subarray(0, 11))).toEqual([]);
+    expect(d.hasPartialPacket).toBe(true);
     expect(
       d
         .push(Buffer.concat([p.subarray(11), p]))
@@ -109,6 +110,7 @@ describe('本地语音边界和问题汇总', () => {
       { rate: 48000, time: 123.25, sample: 0.25 },
       { rate: 48000, time: 123.25, sample: 0.25 },
     ]);
+    expect(d.hasPartialPacket).toBe(false);
     expect(() => new PacketDecoder().push(Buffer.from([255, 255, 255, 255]))).toThrow();
   });
   it.each([NaN, Infinity, -Infinity])(

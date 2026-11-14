@@ -193,8 +193,7 @@ export async function applyCloudItem(
       createdAt: m.createdAt,
       blob: payload,
     };
-    await restoreSyncedDocument(document, current?.localRevision ?? null, guard);
-    restoredDocument = document;
+    restoredDocument = await restoreSyncedDocument(document, current?.localRevision ?? null, guard);
   } else if (type === 'image') {
     if (
       !metadata ||

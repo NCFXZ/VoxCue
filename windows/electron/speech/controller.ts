@@ -17,6 +17,7 @@ export class SpeechController extends SharedSpeechController {
       emit,
       {
         drainBeforeRetire: true,
+        automaticRestart: true,
         preprocessorFile: path.join(__dirname, 'echoCancellation.js'),
         devices,
         create: (helper, source, device, audio, failure) => {

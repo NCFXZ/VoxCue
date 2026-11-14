@@ -184,6 +184,42 @@ describe('知识库对抗性状态切换', () => {
     await first;
     expect(useKnowledge.getState().documents).toEqual([{ id: 'new' }]);
   });
+  it('云资料刷新期间保留可见文档与操作提示，读取失败仍保留原件', async () => {
+    const documents = [{ id: 'reading' }];
+    const pending = deferred<unknown[]>();
+    mocks.listDocuments.mockResolvedValueOnce(documents).mockReturnValueOnce(pending.promise);
+    await useKnowledge.getState().open('base');
+    useKnowledge.setState({ error: '文件超过 20 MB', errorBaseId: 'base' });
+    const refreshed = useKnowledge.getState().open('base');
+    expect(useKnowledge.getState()).toMatchObject({
+      documents, loading: false, selectedId: 'base', error: '文件超过 20 MB',
+    });
+    pending.resolve([...documents, { id: 'downloaded' }]);
+    await refreshed;
+    const updated = useKnowledge.getState().documents;
+    expect(updated.map((doc) => doc.id)).toEqual(['reading', 'downloaded']);
+    expect(useKnowledge.getState().error).toBe('文件超过 20 MB');
+    mocks.listDocuments.mockRejectedValueOnce(Error('读取失败'));
+    await useKnowledge.getState().open('base');
+    expect(useKnowledge.getState()).toMatchObject({ documents: updated, loading: false, error: '读取失败' });
+  });
+  it('同库同步读取不会使进行中的删除失去归属或覆盖删除后的结果', async () => {
+    const deletion = deferred<void>();
+    const earlierRead = deferred<unknown[]>();
+    mocks.listDocuments
+      .mockResolvedValueOnce([{ id: 'old' }])
+      .mockReturnValueOnce(earlierRead.promise)
+      .mockResolvedValueOnce([]);
+    mocks.deleteDocument.mockReturnValueOnce(deletion.promise);
+    await useKnowledge.getState().open('base');
+    const removing = useKnowledge.getState().removeDocument('old');
+    const refreshing = useKnowledge.getState().open('base');
+    deletion.resolve();
+    expect(await removing).toBe(true);
+    earlierRead.resolve([{ id: 'old' }]);
+    await refreshing;
+    expect(useKnowledge.getState()).toMatchObject({ selectedId: 'base', documents: [], busy: false });
+  });
   it('重复提交创建不会写入两个知识库', async () => {
     const pending = deferred<void>();
     mocks.saveBase.mockReturnValue(pending.promise);

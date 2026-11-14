@@ -159,6 +159,7 @@ const nativeNames = [
   'interview-context',
   'updates-native',
   'user-data',
+  'account-network',
   'telemetry-queue-native',
   'speech-adversarial',
   'speech-input-state',

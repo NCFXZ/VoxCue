@@ -322,6 +322,12 @@ try {
     host.emit({ type: 'status', status: { ...status, state: 'error', error, failureSource: 'system' } });
   });
   await assertRecovery(recovering, 'Narrow English automatic audio recovery');
+  assert.ok(
+    (await floating.locator('.interview-badge-tooltip').allTextContents()).some(
+      (text) => text.includes('Audio has stopped, waiting to recover: ' + recovering),
+    ),
+    'Unaffected devices describe the recovery reason in English too',
+  );
   await floating.getByText(interrupted, { exact: true }).waitFor();
   await app.evaluate(() => {
     const { host, status } = globalThis.languageSpeech;

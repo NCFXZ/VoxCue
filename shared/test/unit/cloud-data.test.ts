@@ -106,7 +106,9 @@ describe('cloud data restoration boundary', () => {
     );
     expect(document).toMatchObject(metadata);
     expect(await document!.blob.text()).toBe('content');
-    expect(await (await localKnowledge.listDocuments('base'))[0].blob.text()).toBe('content');
+    const [committed] = await localKnowledge.listDocuments('base');
+    expect(await committed.blob.text()).toBe('content');
+    expect(document!.localRevision).toBe(committed.localRevision);
     expect(events).toEqual(['voxcue-sync-applied', 'voxcue-sync-applied']);
     await localKnowledge.saveBase({ id: 'base', name: 'Local edit', createdAt: 1 });
     expect(events.at(-1)).toBe('voxcue-local-change');

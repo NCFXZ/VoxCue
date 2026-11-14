@@ -210,7 +210,8 @@ try {
   await base.waitFor({ state: 'detached' });
   // Exercise the real renderer stores/IPC with offline cloud bytes and synthetic
   // indexing. A held second chunk makes the intermediate library state observable.
-  await app.evaluate(({ app }) => {
+  const readingFiles = Array.from({ length: 18 }, (_, i) => 'a-0-read-' + String(i).padStart(2, '0'));
+  await app.evaluate(({ app }, readingFiles) => {
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
@@ -222,11 +223,14 @@ try {
     const { KnowledgeCoordinator } = require(path.join(root, 'application/knowledge.js'));
     const indexed = new Map(),
       imports = [];
-    let release;
+    let release, releaseOther;
     const held = new Promise((resolve) => {
       release = resolve;
     });
-    globalThis.cloudRestoreUi = { imports, release, forget: (id) => indexed.delete(id) };
+    const otherHeld = new Promise((resolve) => {
+      releaseOther = resolve;
+    });
+    globalThis.cloudRestoreUi = { imports, release, releaseOther, forget: (id) => indexed.delete(id) };
     KnowledgeHost.prototype.listDocuments = async () => [...indexed.values()];
     KnowledgeHost.prototype.indexDocument = async function (input) {
       imports.push(input.documentId);
@@ -261,8 +265,8 @@ try {
           Buffer.from(JSON.stringify({ id, name: '云端资料' + id.toUpperCase(), createdAt: 1 })),
         ),
       );
-    for (const id of ['b-2', 'a-1', 'b-1', 'a-2']) {
-      const bytes = Buffer.alloc(1048580, 65);
+    for (const id of ['b-2', 'a-1', ...readingFiles, 'b-1', 'a-2']) {
+      const bytes = Buffer.alloc(readingFiles.includes(id) ? 32 : 1048580, 65);
       blobs.set(
         'file:' + id,
         pack('file:' + id, bytes, {
@@ -288,7 +292,7 @@ try {
     }));
     CloudSyncClient.prototype.call = async (input) => {
       if (input.action === 'list') {
-        const counts = { profile: 0, history: 0, knowledgebase: 4195000 };
+        const counts = { profile: 0, history: 0, knowledgebase: resources.reduce((sum, item) => sum + item.bytes, 0) };
         return {
           ok: true,
           value: {
@@ -319,6 +323,7 @@ try {
       }
       if (input.action === 'read') {
         if (resource.name === 'file:a-2' && input.index === 1) await held;
+        if (resource.name === 'file:b-2' && input.index === 1) await otherHeld;
         return {
           ok: true,
           value: new Uint8Array(bytes.subarray(input.index * 1048576, (input.index + 1) * 1048576)),
@@ -326,7 +331,7 @@ try {
       }
       throw Error('Unexpected cloud mutation: ' + input.action);
     };
-  });
+  }, readingFiles);
   await page.evaluate(async () => {
     const userId = 'a0000000-0000-4000-8000-000000000001';
     localStorage.setItem('voxcue-sync-owner', userId);
@@ -361,20 +366,49 @@ try {
     const result = await window.desktop.knowledge({ op: 'status' });
     return result.ok && result.value.documents.some((doc) => doc.documentId === 'a-1');
   });
-  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), ['a-1']);
+  const beforeRelease = ['a-1', ...readingFiles];
+  const imported = [...beforeRelease, 'a-2', 'b-2', 'b-1'];
+  await page.locator('.knowledge-card').filter({ hasText: '云端资料A' }).click();
+  const reading = page.getByRole('dialog', { name: '云端资料A', exact: true });
+  await reading.getByText(readingFiles.at(-1) + '.txt', { exact: true }).waitFor();
+  await waitForAsync(page, async (total) => {
+    const result = await window.desktop.knowledge({ op: 'status' });
+    return result.ok && result.value.documents.length === total;
+  }, beforeRelease.length);
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), beforeRelease);
+  const scroll = reading.locator('.dialog-scroll');
+  await scroll.evaluate((node) => { node.scrollTop = (node.scrollHeight - node.clientHeight) / 2; });
+  const readingPosition = (node) => {
+    const bounds = node.getBoundingClientRect();
+    const row = document.elementFromPoint(bounds.x + bounds.width / 2, bounds.y + bounds.height / 2)
+      ?.closest('.document-row');
+    return {
+      top: node.scrollTop,
+      file: row?.querySelector('strong')?.textContent,
+      offset: row && row.getBoundingClientRect().top - bounds.top,
+    };
+  };
+  const before = await scroll.evaluate(readingPosition);
+  assert.ok(before.top > 100 && before.file, 'Read a document well below the header');
+  const row = await reading.locator('.document-row').filter({ hasText: before.file }).elementHandle();
   await app.evaluate(() => globalThis.cloudRestoreUi.release());
+  await reading.getByText('a-2.txt', { exact: true }).waitFor();
+  const sameLibrary = await scroll.evaluate(readingPosition);
+  console.log('Reading position before and after downloading into the open library', { before, sameLibrary });
+  assert.deepEqual(sameLibrary, before, 'Downloading into the open library moved the visible document');
+  await app.evaluate(() => globalThis.cloudRestoreUi.releaseOther());
+  await waitForAsync(page, async (total) => {
+    const result = await window.desktop.knowledge({ op: 'status' });
+    return result.ok && result.value.documents.length === total;
+  }, imported.length);
+  const after = await scroll.evaluate(readingPosition);
+  console.log('Reading position after downloading another library', after);
+  assert.deepEqual(after, before, 'Downloading another library moved the visible document');
+  assert.equal(await row.evaluate((node) => node.isConnected), true, 'Background refresh removed the document being read');
+  await reading.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await page.getByRole('button', { name: '云端资料A：已同步', exact: true }).waitFor();
   await page.getByRole('button', { name: '云端资料B：已同步', exact: true }).waitFor();
-  await waitForAsync(page, async () => {
-    const result = await window.desktop.knowledge({ op: 'status' });
-    return result.ok && result.value.documents.length === 4;
-  });
-  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [
-    'a-1',
-    'a-2',
-    'b-2',
-    'b-1',
-  ]);
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), imported);
   await app.evaluate(() => globalThis.cloudRestoreUi.forget('a-1'));
   await page.locator('.knowledge-card').filter({ hasText: '云端资料A' }).click();
   await page
@@ -387,27 +421,14 @@ try {
     const result = await window.desktop.knowledge({ op: 'status' });
     return result.ok && result.value.documents.some((doc) => doc.documentId === 'a-1');
   });
-  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [
-    'a-1',
-    'a-2',
-    'b-2',
-    'b-1',
-    'a-1',
-  ]);
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [...imported, 'a-1']);
   await app.evaluate(() => globalThis.cloudRestoreUi.forget('a-1'));
   await page.reload();
-  await waitForAsync(page, async () => {
+  await waitForAsync(page, async (total) => {
     const result = await window.desktop.knowledge({ op: 'status' });
-    return result.ok && result.value.documents.length === 4;
-  });
-  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [
-    'a-1',
-    'a-2',
-    'b-2',
-    'b-1',
-    'a-1',
-    'a-1',
-  ]);
+    return result.ok && result.value.documents.length === total;
+  }, imported.length);
+  assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [...imported, 'a-1', 'a-1']);
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
@@ -425,6 +446,7 @@ try {
         'base deletion confirmation',
         'removed IPC',
         'cloud library order and syncing badge',
+        'reading position during same-library and other-library downloads',
         'cloud automatic indexing',
         'open-library index repair',
         'startup index repair',

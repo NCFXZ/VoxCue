@@ -30,6 +30,7 @@ interface KnowledgeState {
 }
 const message = (error: unknown) => (error instanceof Error ? error.message : '操作失败，请重试。');
 let documentRequest = 0;
+let selectionRevision = 0;
 let basesRequest = 0;
 export const useKnowledge = create<KnowledgeState>((set, get) => ({
   bases: [],
@@ -56,16 +57,21 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     }
   },
   async open(id) {
-    useKnowledgeIndex.getState().dismissError();
     const request = ++documentRequest;
-    set({
-      selectedId: id,
-      documents: [],
-      loading: !!id,
-      error: null,
-      errorBaseId: null,
-      editorError: null,
-    });
+    // A cloud download refreshes the selected library after each restored item.
+    // Keep the current rows mounted until their replacements have been read.
+    if (id !== get().selectedId) {
+      selectionRevision++;
+      useKnowledgeIndex.getState().dismissError();
+      set({
+        selectedId: id,
+        documents: [],
+        loading: !!id,
+        error: null,
+        errorBaseId: null,
+        editorError: null,
+      });
+    }
     if (!id) return;
     try {
       const documents = await localKnowledge.listDocuments(id);
@@ -106,7 +112,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     if (get().busy) return false;
     const base = get().bases.find((b) => b.id === get().selectedId);
     if (!base) return false;
-    const request = documentRequest;
+    const selection = selectionRevision;
     set({ busy: true, editorError: null });
     try {
       await localKnowledge.saveBase({ ...base, name });
@@ -115,7 +121,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
       if (listing === basesRequest) set({ bases });
       return true;
     } catch (error) {
-      if (request === documentRequest && get().selectedId === base.id)
+      if (selection === selectionRevision && get().selectedId === base.id)
         set({ editorError: message(error) });
       return false;
     } finally {
@@ -126,15 +132,15 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     if (get().busy) return false;
     const id = get().selectedId;
     if (!id) return false;
-    const request = documentRequest;
+    const selection = selectionRevision;
     set({ busy: true, error: null, errorBaseId: null });
     try {
       await localKnowledge.deleteBase(id);
-      if (get().selectedId === id && request === documentRequest) await get().open(null);
+      if (get().selectedId === id && selection === selectionRevision) await get().open(null);
       await get().load();
       return true;
     } catch (error) {
-      if (request === documentRequest && get().selectedId === id)
+      if (selection === selectionRevision && get().selectedId === id)
         set({ error: message(error), errorBaseId: id });
       return false;
     } finally {
@@ -146,7 +152,7 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     if (!files.length) return;
     const id = get().selectedId;
     if (!id) return;
-    let request = documentRequest;
+    const selection = selectionRevision;
     set({ error: null, errorBaseId: null });
     try {
       validateFiles(files);
@@ -158,20 +164,14 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     try {
       await localKnowledge.importDocuments(id, files);
       if (files.length) recordFeature('file_import');
-      if (get().selectedId === id && request === documentRequest) {
-        const opening = get().open(id);
-        request = documentRequest;
-        await opening;
-      }
+      if (get().selectedId === id && selection === selectionRevision) await get().open(id);
       const imported = await localKnowledge.listDocuments(id);
       for (const doc of imported.filter((doc) => files.some((file) => file.name === doc.name)))
         void useKnowledgeIndex.getState().index(doc);
     } catch (error) {
-      if (get().selectedId === id && request === documentRequest) {
-        const opening = get().open(id);
-        request = documentRequest;
-        await opening;
-        if (get().selectedId === id && request === documentRequest)
+      if (get().selectedId === id && selection === selectionRevision) {
+        await get().open(id);
+        if (get().selectedId === id && selection === selectionRevision)
           set({ error: message(error), errorBaseId: id });
       }
     } finally {
@@ -181,15 +181,15 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
   async removeDocument(id) {
     if (get().busy) return false;
     const baseId = get().selectedId;
-    const request = documentRequest;
+    const selection = selectionRevision;
     set({ busy: true, error: null, errorBaseId: null });
     try {
       await localKnowledge.deleteDocument(id);
-      if (baseId && get().selectedId === baseId && request === documentRequest)
+      if (baseId && get().selectedId === baseId && selection === selectionRevision)
         await get().open(baseId);
       return true;
     } catch (error) {
-      if (request === documentRequest && get().selectedId === baseId)
+      if (selection === selectionRevision && get().selectedId === baseId)
         set({ error: message(error), errorBaseId: baseId });
       return false;
     } finally {

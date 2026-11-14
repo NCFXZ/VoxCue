@@ -86,7 +86,8 @@ it('异常只落到受影响组件，其他组件显示暂停及具体原因；�
   });
   expect(interviewReadiness('system', value, now)).toMatchObject({
     kind: 'paused',
-    reason: expect.stringContaining('麦克风连接断开'),
+    reason: '音频链路已停止，等待恢复：{0}',
+    detail: '麦克风连接断开',
   });
   expect(interviewReadiness('model', value, now).kind).toBe('paused');
   value.speech.failureSource = 'model';

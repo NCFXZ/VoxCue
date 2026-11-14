@@ -18,7 +18,8 @@ Mac 凭据超时专项须区分“应用请求超时／助手退出／同启动�
 
 测试 owner 只允许已知开发宿主与 owned entry，或严格校验的 inert 安装夹具；正式包不编入产品测试标志。Windows `pnpm test:package` 先构建当前源码，再由 `store-package-smoke.mjs` 在自有临时目录打包并验收，使用独立 Windows Sandbox 账号、空 guest vault、禁网及无宿主 profile 映射。真实生产 renderer 通过 CDP／公开 preload 验证包身份和合成资料重载；同版本开发宿主另在 guest 加载最终 ASAR 验证实际 SDK、Paraformer／知识库子进程与移动资源闭包，不执行产品 main 或登录真实服务。两个 guest 检查助手均在连接／加载前核对身份和临时归属。普通开发 UI 夹具仍禁止正式凭据助手；旧 owner 正式包夹具及不可用参数已退役，不得恢复 fuses、修改包字节或加入正式包测试环境覆盖。现有格式的持久化／重载不代称历史二进制逐版本升级验收。
 
-最终 NSIS 通过 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 验收全新安装。`--nsis-upgrade` 从正式 1.2.0 升级，`--nsis-upgrade-1.1.1` 验证旧版兼容性。三个入口串行运行，每次启动独立禁网 Sandbox。升级前按既有发行记录核对旧包的 SHA256，使用已安装旧版的 renderer 写入合成资料，正常退出后沿原注册路径安装当前包。升级和重启后核对原件字节、个人资料、职位描述、记录、主题、语言和快捷键。每阶段须自然关闭并确认所有包内子进程退出。当前安装包以固定 Ed25519 公钥及 SHA512 验证，安装后核对最终 ASAR 和许可证。APPX 的独立 Sandbox 检查加载包内原生子进程。
+最终 NSIS 通过 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 验收全新安装。`--nsis-upgrade` 从正式 1.2.2 升级，`--nsis-upgrade-1.2.0` 和 `--nsis-upgrade-1.1.1` 保留历史升级入口。各入口串行运行，每次启动独立禁网 Sandbox。升级前按发行记录核对旧包 SHA256。1.2.2 路径在空的来宾资料中写入当前版本的正式签名更新元数据，验证已安装的旧客户端报告可更新，升级并重启后验证当前客户端已是最新版本。旧版 renderer 写入合成资料并正常退出后，由 NSIS 沿原注册路径升级。升级和重启后核对原件字节、个人资料、职位描述、记录、主题、语言和快捷键。每阶段须自然关闭并确认所有包内子进程退出。当前安装包以固定 Ed25519 公钥及 SHA512 验证，安装后核对最终 ASAR 和许可证。APPX 的独立 Sandbox 检查加载包内原生子进程。
+使用 `--appx-upgrade` 在同一禁网 Sandbox 账户上从商店包 2.2.2.0 原地更新，核对同一包族的 LocalCache、原件、资料、快捷键和 RAG 索引在升级与冷启动后保留。来宾以同一临时证书签署两份副本，微软商店签发和线上分发由商店验证。
 
 Windows 默认原生矩阵的 `screenshot-performance` 使用合成 4K 位图。最终 APPX 的 `pnpm test:store:sandbox` 使用已安装的 `VoxCue.Screenshot.exe` 在独立 guest 内采集自有全屏色块，验证三帧颜色、取消及受保护浮窗，并用包内 Worker 检查连续编码、失败恢复与退出。显式开发态入口为 `node ../shared/test/scripts/screenshot-performance.mjs --native --platform`。临时安全产物检查使用 `node test/scripts/security-package-smoke.mjs`，加 `--with-screenshot-worker` 可验证打包后的截图 Worker 原生依赖。签名备份恢复演练只用临时合成身份，真实离线加密备份仍由 owner 本机完成。安装目录完全缺失时可按默认注册路径修复，原生未引用的 `/D=同缺失路径` 受 Builder early `SetOutPath` 限制仍拒绝，细节见上述安全文档。
 

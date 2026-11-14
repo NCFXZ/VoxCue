@@ -38,7 +38,7 @@ vi.mock('../../../windows/electron/speech/capture', () => ({
       public source: string,
       _device: string,
       public packet: (p: any) => void,
-      public failure: (message: string) => void,
+      public failure: (message: string, recoverable?: boolean) => void,
     ) {
       state.captures.push(this);
     }
@@ -55,6 +55,7 @@ beforeEach(() => {
 });
 afterEach(async () => {
   for (const controller of controllers.splice(0)) await controller.close();
+  vi.useRealTimers();
 });
 function controller() {
   const events: SpeechEvent[] = [];
@@ -132,6 +133,49 @@ it('does not replace an unretired WASAPI capture on manual reconnect', async () 
   old.retiring = false;
   expect(await start()).toMatchObject({ state: 'running' });
   expect(state.captures).toHaveLength(2);
+});
+
+it('retires both Windows inputs and the old Worker before rebuilding either input on 1/2/4s backoff', async () => {
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'performance'] });
+  const { service, events } = controller();
+  const options = { sources: ['system', 'microphone'] as ('system' | 'microphone')[] };
+  await service.call({ op: 'start', options });
+  const [system, mic] = state.captures;
+  let microphoneClosed!: () => void, workerExited!: () => void;
+  mic.stop = () => new Promise<void>(resolve => { microphoneClosed = resolve; });
+  const oldWorker = state.workers[0];
+  oldWorker.terminate = () => new Promise<number>(resolve => {
+    workerExited = () => { oldWorker.emit('exit', 0); resolve(0); };
+  });
+  system.failure('synthetic endpoint invalidated', true);
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(state.captures).toHaveLength(2);
+  expect(state.workers).toHaveLength(1);
+  microphoneClosed();
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(state.captures).toHaveLength(2);
+  expect(state.workers).toHaveLength(1);
+  workerExited();
+  for (const [index, delay] of [1000, 2000, 4000].entries()) {
+    if (index) state.captures.at(-1).failure('synthetic endpoint invalidated', true);
+    await vi.advanceTimersByTimeAsync(delay - 1);
+    expect(state.captures).toHaveLength((index + 1) * 2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(state.captures.slice(-2).map(capture => capture.source)).toEqual(options.sources);
+    expect(state.captures).toHaveLength((index + 2) * 2);
+    expect(state.workers).toHaveLength(index + 2);
+  }
+  const count = events.length;
+  system.failure('late', true);
+  oldWorker.emit('error', Error('late'));
+  oldWorker.emit('message', { ack: 12345 });
+  expect(events).toHaveLength(count);
+  state.captures.at(-1).failure('synthetic endpoint invalidated', true);
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(state.captures).toHaveLength(8);
+  expect(await service.call({ op: 'status' })).toMatchObject({
+    state: 'error', error: expect.stringContaining('重试上限'),
+  });
 });
 
 it('uses the shared QPC across delayed helper startup and drains capture packets before Worker flush', async () => {

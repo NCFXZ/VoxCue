@@ -68,7 +68,10 @@ export function InterviewReadiness({ device }: { device?: ReactNode }) {
           </span>
         </span>
         <span id={description} className="interview-badge-tooltip" role="tooltip">
-          {t('{0}：{1}', [t(readinessLabels[item]), t(status.reason)])}
+          {t('{0}：{1}', [
+            t(readinessLabels[item]),
+            t(status.reason, status.detail === undefined ? undefined : [t(status.detail)]),
+          ])}
         </span>
       </span>
     );

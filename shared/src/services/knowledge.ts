@@ -273,10 +273,10 @@ export async function restoreSyncedDocument(
   const old = await localKnowledge.listDocuments(doc.baseId);
   const replaced = old.filter((item) => item.id === doc.id || doc.baseId === 'personal-resume');
   for (const item of replaced) await deactivateOriginal(item.id);
-  return transaction(
+  return transaction<LocalDocument>(
     ['documents'],
     'readwrite',
-    (tx) => {
+    (tx, result) => {
       const store = tx.objectStore('documents');
       const current =
         doc.baseId === 'personal-resume'
@@ -295,7 +295,9 @@ export async function restoreSyncedDocument(
           return;
         }
         for (const item of replaced) store.delete(item.id);
-        store.put({ ...doc, localRevision: crypto.randomUUID() });
+        const committed = { ...doc, localRevision: crypto.randomUUID() };
+        store.put(committed);
+        result(committed);
       };
     },
     false,

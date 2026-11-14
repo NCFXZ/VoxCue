@@ -15,8 +15,9 @@ assert.equal(os.userInfo().username.toLowerCase(), 'wdagutilityaccount');
 const profile = path.resolve(os.homedir());
 assert.equal(profile.toLowerCase(), 'c:\\users\\wdagutilityaccount');
 assert.equal((await fs.realpath(profile)).toLowerCase(), profile.toLowerCase());
-assert.equal(process.argv.length, 4);
-const [configFile, outputFile] = process.argv.slice(2).map((file) => path.resolve(file));
+const closeStore = process.argv.length === 5 && process.argv[4] === '--close-store';
+assert.ok(process.argv.length === 4 || closeStore);
+const [configFile, outputFile] = process.argv.slice(2, 4).map((file) => path.resolve(file));
 assert.equal(path.dirname(configFile), path.dirname(outputFile));
 const work = path.dirname(configFile);
 assert.equal(path.dirname(work).toLowerCase(), path.resolve(os.tmpdir()).toLowerCase());
@@ -24,7 +25,7 @@ assert.match(path.basename(work), /^voxcue-store-[a-f0-9-]{36}$/i);
 assert.equal((await fs.realpath(work)).toLowerCase(), work.toLowerCase());
 const info = await fs.lstat(configFile);
 assert.ok(info.isFile() && !info.isSymbolicLink() && info.size <= 16384);
-await assert.rejects(fs.lstat(outputFile), { code: 'ENOENT' });
+if (!closeStore) await assert.rejects(fs.lstat(outputFile), { code: 'ENOENT' });
 const config = JSON.parse(await fs.readFile(configFile, 'utf8'));
 assert.equal(path.basename(work), 'voxcue-store-' + config.nonce);
 const nsis = config.distribution === 'nsis';
@@ -34,6 +35,7 @@ if (nsis) {
   assert.ok(Number.isSafeInteger(config.expectedPid) && config.expectedPid > 0);
   assert.equal(config.close, true, 'NSIS phases must close naturally before continuing');
 }
+if (closeStore) assert.ok(!nsis && ['seed', 'verify'].includes(config.phase));
 const deadline = Date.now() + 120000;
 const clients = [];
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -226,7 +228,7 @@ async function checkPersistence(main) {
     main.evaluate(`(${operation.toString()})(${JSON.stringify(input)})`);
   let ragRevision;
   if (config.checkRag) {
-    assert.ok(nsis);
+    assert.ok(['seed', 'verify'].includes(config.phase));
     const { document } = expected;
     const components = await main.evaluate('window.desktop.components({op:"status"})');
     assert.equal(components.items.find((item) => item.id === 'rag')?.phase, 'ready',
@@ -453,7 +455,7 @@ async function checkPersistence(main) {
   assert.deepEqual(await snapshot(), { ...expected, bindings });
   return { bindings, ragRevision };
 }
-try {
+async function inspect() {
   const browser = await connect(
     (await poll(() => endpoint('version'), 'browser')).webSocketDebuggerUrl,
   );
@@ -462,6 +464,16 @@ try {
   assert.equal(processes.length, 1);
   const pid = processes[0].id;
   assert.ok(Number.isSafeInteger(pid) && pid > 0);
+  if (closeStore) {
+    const info = await fs.lstat(outputFile);
+    assert.ok(info.isFile() && !info.isSymbolicLink() && info.size <= 16384);
+    const result = JSON.parse(await fs.readFile(outputFile, 'utf8'));
+    assert.equal(result.nonce, config.nonce);
+    assert.equal(result.version, config.version);
+    assert.equal(result.pid, pid);
+    await (await renderer(false)).evaluate('window.desktop.windowAction("close")');
+    return;
+  }
   if (nsis) assert.equal(pid, config.expectedPid, 'CDP is not the launched guest process');
   if (config.phase !== 'verify') {
     const login = await renderer(true);
@@ -480,13 +492,25 @@ try {
     assert.equal(entered.state.localMode, true);
   }
   const main = await renderer(false);
-  const update = await poll(
+  let update = await poll(
     () =>
       main.evaluate(
         'typeof window.desktop?.updates === "function" ? window.desktop.updates({op:"status"}) : null',
       ),
     'updates API',
   );
+  if (config.offeredVersion) {
+    assert.ok(nsis);
+    const previous = config.phase === 'seed';
+    update = await poll(async () => {
+      const state = await main.evaluate('window.desktop.updates({op:"status"})');
+      if (state.phase === 'error') throw Error('Installed updater rejected the signed release');
+      return state.lastCheckedAt !== null && state.phase !== 'checking' ? state : undefined;
+    }, 'installed updater consuming signed metadata');
+    assert.equal(update.autoDownload, false);
+    assert.equal(update.phase, previous ? 'available' : 'idle');
+    assert.equal(update.availableVersion, previous ? config.offeredVersion : null);
+  }
   const states = nsis
     ? []
     : await main.evaluate(
@@ -515,8 +539,9 @@ try {
     }),
   );
   if (nsis) await main.evaluate('window.desktop.windowAction("close")');
-  // APPX keeps its browser alive for package-identity inspection. NSIS phases
-  // must instead finish the real save/quit handshake before upgrade or restart.
+}
+try {
+  await inspect();
 } finally {
   for (const client of clients) client.close();
 }

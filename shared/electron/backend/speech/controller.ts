@@ -19,7 +19,8 @@ import {
 } from '../../contracts/speechSettings';
 export interface NativeCapture {
   start(): Promise<void>;
-  stop(): Promise<void>;
+  stop(intent?: 'recover'): Promise<void>;
+  readonly terminalError?: Error;
 }
 export interface CaptureAdapter {
   readonly drainBeforeRetire?: boolean;
@@ -627,7 +628,7 @@ export class SpeechController {
     this.cancelSwitch(false);
     this.state('error', message, failureSource);
     void this.enqueue(async () => {
-      await this.execute({ op: 'stop' });
+      await this.execute({ op: 'stop' }, { stopIntent: restart && current() ? 'recover' : undefined });
       if (!current()) return this.status;
       this.state('error', message, failureSource);
       if (!restart) return this.status;
@@ -657,8 +658,7 @@ export class SpeechController {
           try {
             return await this.execute(
               { op: 'start', options: options!, inputState },
-              current,
-              startup.signal,
+              { current, signal: startup.signal },
             );
           } finally {
             if (this.restartStartup === startup) this.restartStartup = undefined;
@@ -671,7 +671,8 @@ export class SpeechController {
       }, delay);
       return this.status;
     }).catch(() => {
-      if (generation === this.restartGeneration) this.state('error', message, failureSource);
+      if (generation === this.restartGeneration && (!restart || this.status.state !== 'error'))
+        this.state('error', message, failureSource);
     });
   }
   private checkStartup() {
@@ -680,8 +681,11 @@ export class SpeechController {
   }
   private async execute(
     call: SpeechServiceCall,
-    current = () => true,
-    signal?: AbortSignal,
+    { current = () => true, signal, stopIntent }: {
+      current?: () => boolean;
+      signal?: AbortSignal;
+      stopIntent?: 'recover';
+    } = {},
   ): Promise<SpeechStatus> {
     const waiting = <T>(task: Promise<T>) => (signal ? abortable(task, signal) : task);
     if (call.op === 'status') return this.status;
@@ -690,8 +694,9 @@ export class SpeechController {
     await this.inputCleanup.catch(() => {});
     if (call.op === 'pause' || call.op === 'stop') {
       if (!this.adapter.drainBeforeRetire) ++this.epoch;
+      const captures = [...this.captures];
       const stopped = await Promise.allSettled(
-        [...this.captures.values()].map(async (capture) => capture.stop()),
+        captures.map(async ([, capture]) => capture.stop(stopIntent)),
       );
       if (this.adapter.drainBeforeRetire) ++this.epoch;
       this.captures.clear();
@@ -705,8 +710,15 @@ export class SpeechController {
         this.pendingAudio.clear();
         this.processedThrough.clear();
         await worker?.terminate();
-        const message = '音频采集未能正常停止，请重新开始。';
-        this.state('error', message, 'service');
+        // An attributed native diagnostic is available only for the endpoint
+        // that actually blocked recovery. Generic stop failures stay service errors.
+        const diagnosed = stopIntent === 'recover' ? captures.find(([, capture], index) => {
+          const result = stopped[index];
+          return result.status === 'rejected' && capture.terminalError !== undefined &&
+            result.reason === capture.terminalError;
+        }) : undefined;
+        const message = diagnosed?.[1].terminalError?.message ?? '音频采集未能正常停止，请重新开始。';
+        this.state('error', message, diagnosed?.[0] ?? 'service');
         throw Error(message);
       }
       if (this.worker && this.worker === this.failedWorker) {

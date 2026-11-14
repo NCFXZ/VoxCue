@@ -407,8 +407,10 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '语音识别进程在尾段处理完成前退出，请重新开始。':
     'Speech recognition exited before processing the final audio. Restart the interview.',
   '语音识别进程已退出，采集已停止。': 'Speech recognition exited. Audio capture stopped.',
-  '{0}发生短暂间断，转写已继续；不完整片段不会自动用于回答。':
-    '{0} briefly interrupted. Transcription resumed; incomplete segments will not automatically trigger answers.',
+  '系统音频发生短暂间断，转写已继续；不完整片段不会自动用于回答。':
+    'System audio was briefly interrupted. Transcription has resumed. Incomplete segments will not trigger automatic answers.',
+  '麦克风发生短暂间断，转写已继续；不完整片段不会自动用于回答。':
+    'Microphone input was briefly interrupted. Transcription has resumed. Incomplete segments will not trigger automatic answers.',
   '音频在十秒内连续中断五次，采集已停止；请检查设备或降低负载后重新开始。':
     'Audio interrupted five times in ten seconds. Capture stopped. Check devices or reduce load and restart.',
   '识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。':
@@ -427,9 +429,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '语音尾段处理超时。': 'Final audio processing timed out.',
   '所选音频设备已不可用，请刷新设备列表。':
     'The selected audio device is unavailable. Refresh the device list.',
-  未发现: 'No ',
-  播放: 'output',
-  '设备。': ' device found.',
+  '未发现播放设备。': 'No output device found.',
+  '未发现麦克风设备。': 'No microphone found.',
   '本地回声消除初始化超时，请重新开始。':
     'Local echo cancellation initialization timed out. Restart the interview.',
   '音频采样率已变化，请重新开始采集。': 'The audio sample rate changed. Restart capture.',
@@ -627,22 +628,38 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Microphone permission is off. Allow desktop apps to access the microphone in Windows Settings.',
   '无法确认麦克风权限，请检查 Windows 麦克风隐私设置后重试。':
     'Could not confirm microphone permission. Check Windows microphone privacy settings.',
-  '{0}{1}设备不可用，请在面试设置中重新选择。':
-    '{0} {1} device unavailable. Choose another in Interview settings.',
-  '{0}可用': '{0} available',
-  '{0}访问被拒绝，请检查 Windows 隐私设置和设备权限。':
-    'Access to {0} was denied. Check Windows privacy settings and device permissions.',
-  '{0}无法初始化，请检查设备是否被独占或已断开后重新检查。':
-    'Could not initialize {0}. Check whether it is disconnected or in exclusive use, then try again.',
-  '{0}检查失败，请重新检查。': '{0} check failed. Check again.',
+  '所选麦克风设备不可用，请在面试设置中重新选择。':
+    'The selected microphone is unavailable. Choose another in Interview settings.',
+  '默认麦克风设备不可用，请在面试设置中重新选择。':
+    'The default microphone is unavailable. Choose another in Interview settings.',
+  '所选系统音频设备不可用，请在面试设置中重新选择。':
+    'The selected output device is unavailable. Choose another in Interview settings.',
+  '默认系统音频设备不可用，请在面试设置中重新选择。':
+    'The default output device is unavailable. Choose another in Interview settings.',
+  麦克风可用: 'Microphone available',
+  系统音频可用: 'System audio available',
+  '麦克风访问被拒绝，请检查 Windows 隐私设置和设备权限。':
+    'Microphone access was denied. Check Windows privacy settings and device permissions.',
+  '系统音频访问被拒绝，请检查 Windows 隐私设置和设备权限。':
+    'System audio access was denied. Check Windows privacy settings and device permissions.',
+  '麦克风无法初始化，请检查设备是否被独占或已断开后重新检查。':
+    'Could not start the microphone. Check whether it is disconnected or in exclusive use, then try again.',
+  '系统音频无法初始化，请检查设备是否被独占或已断开后重新检查。':
+    'Could not start system audio. Check whether the output device is disconnected or in exclusive use, then try again.',
+  '麦克风检查失败，请重新检查。': 'Could not check the microphone. Try again.',
+  '系统音频检查失败，请重新检查。': 'Could not check system audio. Try again.',
   '读取音频设备超时。': 'Loading audio devices timed out.',
   '音频采集助手缺失；请运行 pnpm build:audio。':
     'The audio capture helper is missing. Run pnpm build:audio.',
   '无法枚举 Windows 音频设备。': 'Could not enumerate Windows audio devices.',
   '音频设备启动超时。': 'Audio device startup timed out.',
   '音频数据包损坏，采集已停止。': 'An audio packet is damaged. Capture stopped.',
-  '{0}不可用（{1}），请检查设备、隐私权限或默认设备变化后重新开始。':
-    '{0} unavailable ({1}). Check the device, privacy permissions and default device changes, then restart.',
+  '音频采集助手输出异常，采集已停止；请重新开始。':
+    'Audio capture returned an invalid response and stopped. Try again.',
+  '麦克风不可用（{0}），请检查设备、隐私权限或默认设备变化后重新开始。':
+    'Microphone unavailable ({0}). Check the microphone, privacy permissions and default input device, then try again.',
+  '系统音频不可用（{0}），请检查设备、隐私权限或默认设备变化后重新开始。':
+    'System audio unavailable ({0}). Check the output device, privacy permissions and default output device, then try again.',
   '无法启动 Windows 音频采集助手。': 'Could not start the Windows audio capture helper.',
   '音频采集启动失败。': 'Could not start audio capture.',
   '音频设备已断开或采集进程退出，请重新开始。':
@@ -1518,9 +1535,10 @@ export const uiMessages: Readonly<Record<string, string>> = {
   待确认: 'Not confirmed',
   '请先下载并准备已选择的{0}，再开始面试。':
     'Download and prepare the selected {0} before starting the interview.',
-  '{0}{1}不可用': '{0} {1} unavailable',
-  所选: 'Selected',
-  默认: 'Default',
+  所选麦克风不可用: 'Selected microphone unavailable',
+  默认麦克风不可用: 'Default microphone unavailable',
+  所选播放设备不可用: 'Selected output device unavailable',
+  默认播放设备不可用: 'Default output device unavailable',
   播放设备: 'output device',
   '所选面试知识库已删除，请在个人信息中重新选择。':
     'The selected interview knowledge base was deleted. Choose another in Profile.',
