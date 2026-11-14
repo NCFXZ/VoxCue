@@ -1,6 +1,6 @@
 # VoxCue 1.2.2 Windows
 
-本版从 Windows 1.2.0 升级。桌面应用版本为 1.2.2，Microsoft Store 包版本为 2.2.2.0。原有 `v1.2.2` 标签对应 Mac 源码 `ffc31e5`。Windows 资产使用本次 Windows 源码构建。
+本版从 Windows 1.2.0 升级。桌面应用版本为 1.2.2，Microsoft Store 包版本为 2.2.2.0。原有 `v1.2.2` 标签对应 Mac 源码 `ffc31e5`。Windows 源码为 `79fc49c941b8a2bcdd20906a6152087e7bb0eb6b`。[Windows 源码标签](https://github.com/NCFXZ/VoxCue/tree/windows-v1.2.2)
 
 ## Windows 更新
 
@@ -18,8 +18,14 @@
 | VoxCue-Setup-1.2.2-x64.exe.blockmap | 423569 | `024ce7f43cc2ab83d8740b315ce026d25819834f5626dbb81c264dc1f2d9ecb4` |
 | latest.yml | 482 | `c35432352f4900b4ddc95e947b849287d5513fd927537dd2ef4c74775c876af7` |
 | VoxCue-Store-1.2.2-x64.appx | 601716208 | `b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8` |
+| VoxCue-1.2.2-windows-source.zip | 6372862 | `783e9bdaca3837aaba887441227157a6e01a1e6cc92232675e576dd3ffdc3734` |
 
 独立安装器的更新清单沿用原有签名公钥。EXE 未使用 Authenticode 发布者签名。Store 包沿用 `NCFX.VoxCue` 身份与产品 ID `9PBBVWZXMBPW`。
+
+## 发布渠道
+
+- 两个稳定发行页已发布相同的四项 Windows 资产，包括独立安装器、blockmap、更新清单和源码归档。原 Mac 资产及源码归档继续保留。[主仓发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.2) · [兼容仓发行页](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.2)
+- 2026-11-14，Microsoft Partner Center 已验证 APPX 2.2.2.0 并受理 Submission 9（`1152921505702401062`）。最后核对时处于 Pre-processing，认证通过后自动发布。当时在线版本仍为 Submission 8。[Partner Center](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
 
 ## 已知识别限制
 

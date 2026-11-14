@@ -1,6 +1,6 @@
 # VoxCue 当前进度
 
-更新于 2026-11-13。macOS 1.2.2 对应源码标签为 `v1.2.2`，版本以 `shared/package.json` 为准。macOS 正式升级基线为 `v1.1.1`（`e0a2a87`），Windows 正式基线为 `v1.2.0`（`0bc1cd4`）。
+更新于 2026-11-14。macOS 和 Windows 当前发行均为 1.2.2，分别对应源码标签 `v1.2.2` 与 `windows-v1.2.2`。版本以 `shared/package.json` 为准。Windows 上一正式版本为 1.2.0，macOS 的凭据升级基线为 1.1.1。
 
 ## 当前实现
 
@@ -11,7 +11,7 @@
 
 ## 发行与接续
 
-- Apple Silicon 安装包、更新 ZIP 和 `latest-mac.yml` 使用同一固定签名身份。1.2.2 对应的两个发行入口为 [VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.2) 和 [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.2)。旧发行仓另附同一源码提交的归档。Windows 1.2.0 维持其原发行。
+- Apple Silicon 安装包、更新 ZIP 和 `latest-mac.yml` 使用同一固定签名身份。两个 1.2.2 发行页均提供 Windows x64 安装器、更新文件和 Windows 源码归档。[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.2) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.2)
 - Windows 1.2.2 已同步平台配置、公开发行源及随包许可。WASAPI 手动重连等待旧采集实际关闭，设备枚举校验原生返回。主动登录仅对可确认损坏的本地资料启用密文恢复。已移除无引用的组件样式和失效图标链接。[Windows 逐项交接](shared/docs/WINDOWS_1.2.2_HANDOFF.md)
-- Windows 1.2.2 已进入渠道发布阶段。最终包包含个人资料在聊天存储恢复期间即可读取的修复；从 1.2.0 升级的隔离验收入口为 `windows/test/scripts/store-sandbox-smoke.mjs --nsis-upgrade`。七个极短语音识别探测记录为已知限制。两个 GitHub 入口及 Microsoft Store 2.2.2.0 的渠道记录见[Windows 发行索引](shared/docs/WINDOWS_1.2.2_RELEASE.md)。
+- Windows 最终包包含个人资料在聊天存储恢复期间即可读取的修复；从 1.2.0 升级的隔离验收入口为 `windows/test/scripts/store-sandbox-smoke.mjs --nsis-upgrade`。极短中文语音的识别限制已记录。Microsoft Store 2.2.2.0 已提交认证，等待微软完成审核与自动发布。[Windows 发行索引](shared/docs/WINDOWS_1.2.2_RELEASE.md)
 - 接续测试从保留的测试源码和正式发行包创建独立的合成环境，结束后清除测试专用虚拟机、资料和缓存。冻结助手、签名和恢复原件按项目规则保留。[客户端测试说明](shared/test/README.md)
