@@ -1,6 +1,6 @@
 # VoxCue 当前进度
 
-更新于 2026-11-14。Windows 已发行 1.2.3，应用“关于”、服务器上报、安装器和更新清单统一使用 1.2.3；Microsoft Store 2.2.3.0 已提交，通过认证后自动发布。Mac 当前目标为 1.2.3，已发行基线为 1.2.2。版本唯一来源为 `shared/package.json`。本轮在 Mac 接续验收，`windows/` 全树只读。
+更新于 2026-11-14。Windows、macOS 均已发行 1.2.3；Microsoft Store 2.2.3.0 已提交，通过认证后自动发布。版本唯一来源为 `shared/package.json`。本轮 Mac 接续已收尾，`windows/` 全树保持只读。
 
 ## 当前实现
 
@@ -18,11 +18,10 @@
 
 ## 发行状态与接续
 
-- [Mac 1.2.3 交接](shared/docs/MACOS_1.2.3_HANDOFF.md) 已补充相对已发 1.2.2 的完整共享范围，Mac 1.2.3 签名安装资产已生成；接续发行回读及清理。共享记录界面修复需在 Windows 本机补验，既有 Windows 安装资产不改写。
-- 按冻结锁安装临时开发环境，恢复既有固定签名和助手，最终签名包在 SIP／Gatekeeper 开启的独立 guest 内验收；仅用合成资料与认证公开模型／音频，不访问宿主真实账号或采集硬件。GUI／原生／推理保持串行，测试期间用 scoped caffeinate 保持唤醒。
-- 验收后在 `main` 提交推送，向两个 GitHub 仓库现有 `v1.2.3` 追加 macOS 三项资产并设为 latest；先上传 DMG／ZIP，最后上传 `latest-mac.yml`，匿名回读资产与摘要。Mac 源码使用主仓 `macos-v1.2.3` 标签与自动归档，既有 `v1.2.3`、Windows 资产及恢复原件保持。发行说明使用精简中英文并区分两端版本范围。
-- 结束后清除本轮下载环境、依赖、临时模型副本、工具、VM／快照、截图、日志和合成资料；固定签名及冻结助手原件不清理。清理仅针对核验归属、路径及占用的本轮生成内容。
-- Windows `v1.2.3` 已在两个 GitHub 仓库发布为 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。原标签仍指向 `fae85ca665505b314fee784a0dddc091f337ffd5`，原三项 Windows 资产与累计中英文说明保留，源码使用主仓自动归档。
+- 代码已在 `main` 推送，两个仓库的 `v1.2.3` 均为 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。新增 Mac DMG、ZIP 与 `latest-mac.yml`，保留原三项 Windows 资产；累计中英文说明按平台区分。
+- Mac 对应源码为主仓 [`macos-v1.2.3`](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.3)（`4fe22ec`）。原 `v1.2.3` 仍指向 Windows 发行提交 `fae85ca665505b314fee784a0dddc091f337ffd5`，两端源码均可从主仓标签归档获取。
+- [Mac 1.2.3 交接](shared/docs/MACOS_1.2.3_HANDOFF.md) 已补充相对已发 1.2.2 的完整共享范围。共享记录界面修复需在 Windows 本机补验，既有 Windows 安装资产不改写。
+- 本轮下载环境、依赖、临时模型副本、工具、VM／快照、截图、日志和合成资料已清除。固定签名、冻结助手、OneDrive 原件及本地正式 `macos/release/1.2.3` 保留；再次构建须按冻结锁恢复当前平台环境。签名与隔离 guest 入口见 [Mac 发行说明](shared/docs/MACOS_1.2.3_RELEASE.md)。
 - Microsoft Store 2.2.3.0 的 Submission 10（`1152921505702404063`）已受理，交接时为 Pre-processing，设置为通过认证后立即发布；认证及实际上线仍需分别核对，交接时线上为 Submission 9 的 2.2.2.0。[Partner Center 状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
 - 固定 Paraformer 的极短中文识别限制保留，不更换模型或放宽断言；本机合成验证不能代称物理设备、真实语音或真实订阅授权验收。验证入口见 [客户端测试说明](shared/test/README.md)。
 
