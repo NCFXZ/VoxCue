@@ -456,6 +456,7 @@ export async function verifyContinuousCorners(page, name) {
       if (menuStyle.overflowX !== 'hidden' || menuStyle.overflowY !== 'hidden')
         wrongMenus.push(menu.className + ': outer popup must clip its inner scrolling surface');
       const scroll = menu.querySelector(':scope > .dropdown-scroll');
+      const modelList = scroll?.querySelector('.reasoning-model-list');
       if (!scroll) wrongMenus.push(menu.className + ': popup has no owned inner scrolling surface');
       else {
         const scrollBox = scroll.getBoundingClientRect(),
@@ -467,8 +468,9 @@ export async function verifyContinuousCorners(page, name) {
           bottom: (menuBox.bottom - scrollBox.bottom) / scale,
         };
         for (const edge of ['left', 'right', 'top', 'bottom']) {
+          const frameContainsScrollbar = modelList && (edge === 'left' || edge === 'right');
           const expectedInset =
-            parseFloat(menuStyle.getPropertyValue('padding-' + edge)) +
+            (frameContainsScrollbar ? 0 : parseFloat(menuStyle.getPropertyValue('padding-' + edge))) +
             parseFloat(menuStyle.getPropertyValue('border-' + edge + '-width'));
           if (Math.abs(insets[edge] - expectedInset) > 0.6)
             wrongMenus.push(menu.className + ': inner scroll surface is not contained at ' + edge);
@@ -524,6 +526,8 @@ export async function verifyContinuousCorners(page, name) {
           wrongMenus.push(item.className + ': menu highlight must have circular capsule end caps');
         const gutters = { left: 0, right: 0 };
         for (let host = item.parentElement; host; host = host.parentElement) {
+          // The model list places its gutter inside the existing popup padding.
+          if (host === modelList) continue;
           const hostStyle = getComputedStyle(host);
           if (['auto', 'scroll'].includes(hostStyle.overflowY)) {
             const innerWidth = host.getBoundingClientRect().width / scale -

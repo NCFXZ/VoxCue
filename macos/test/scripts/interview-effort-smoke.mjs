@@ -184,6 +184,31 @@ try {
     await app.evaluate((_, id) => { globalThis.nextCatalogModel = id; }, newModel);
     await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
     await option.waitFor();
+    const alignment = await menu.evaluate(async (popup) => {
+      await Promise.all(
+        popup.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})),
+      );
+      const list = popup.querySelector('.reasoning-model-list');
+      const refresh = popup.querySelector('.reasoning-model-refresh');
+      const maxEdgeDifference = () => {
+        const footer = refresh.getBoundingClientRect();
+        return Math.max(...Array.from(list.children, (option) => {
+          const row = option.getBoundingClientRect();
+          return Math.max(Math.abs(row.left - footer.left), Math.abs(row.right - footer.right));
+        }));
+      };
+      const withScrollbar = maxEdgeDifference();
+      list.style.scrollbarWidth = 'none';
+      try {
+        return { withScrollbar, withoutGutter: maxEdgeDifference() };
+      } finally {
+        list.style.removeProperty('scrollbar-width');
+      }
+    });
+    assert.ok(
+      Object.values(alignment).every((difference) => difference < 1 / 64),
+      `${newModel}: model and refresh capsules must have the same left and right edges ${JSON.stringify(alignment)}`,
+    );
   }
   await checkRefresh(modelPopup, 'pre-interview-new-model');
   await modelPopup.locator('.reasoning-model-list').evaluate((node) => {
@@ -199,13 +224,16 @@ try {
       style = getComputedStyle(node);
     const list = node.querySelector('.reasoning-model-list'),
       rect = list.getBoundingClientRect();
+    const row = list.firstElementChild.getBoundingClientRect();
     return {
       scrolling: list.scrollHeight > list.clientHeight + 20,
       contained:
         rect.top >= outer.top + 5 &&
         rect.bottom <= outer.bottom - 5 &&
-        rect.left >= outer.left + 5 &&
-        rect.right <= outer.right - 5,
+        rect.left >= outer.left + parseFloat(style.borderLeftWidth) - 1 / 64 &&
+        rect.right <= outer.right - parseFloat(style.borderRightWidth) + 1 / 64 &&
+        row.left >= outer.left + 5 &&
+        row.right <= outer.right - 5,
       outerOverflow: style.overflowY,
       padding: parseFloat(style.paddingLeft),
       curve: style.cornerShape,

@@ -1,5 +1,6 @@
 import { codexAccess } from '../fixtures/codex-access';
 import { afterEach, expect, it, vi } from 'vitest';
+import { codexRuntimeVersion } from '../../electron/backend/chat/codexUsage';
 import { ChatGPTService } from '../../electron/backend/chat/service';
 import { CopilotChatService } from '../../electron/backend/copilot/service';
 import type { OpenAIAccess } from '../../electron/backend/chat/models';
@@ -111,6 +112,24 @@ it('honors the advertised minimum on a Codex refresh even if the server returns 
   expect((await service.models(true)).map(({ id }) => id)).toEqual(['at-minimum', 'older', 'no-minimum']);
   await expect(service.stream(request('newer'), vi.fn(), signal())).rejects.toThrow('模型当前不可用');
   expect(fetch).toHaveBeenCalledOnce();
+});
+
+it('discovers both GPT-6.2 models after updating the Codex runtime and refreshing', async () => {
+  const modelIds = ['gpt-6.2-sol', 'gpt-6.2-astra'];
+  const access = { ...codexAccess(), runtimeVersion: '0.164.0' };
+  const fetch = vi.fn<typeof globalThis.fetch>(async () => Response.json({
+    models: modelIds.map((id) => ({ ...listed(id), minimal_client_version: '0.166.0' })),
+  }));
+  const service = new ChatGPTService({ access: async () => access, ledger, fetch });
+
+  expect(await service.models()).toEqual([]);
+  access.runtimeVersion = codexRuntimeVersion;
+  expect((await service.models(true)).map(({ id }) => id)).toEqual(modelIds);
+  expect(fetch.mock.calls.map(([url]) => String(url))).toEqual(
+    ['0.164.0', codexRuntimeVersion].map((version) =>
+      `https://chatgpt.com/backend-api/codex/models?client_version=${version}`,
+    ),
+  );
 });
 
 it('keeps API-key and Codex catalog formats, accounts and auth routes distinct', async () => {

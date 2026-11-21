@@ -25,6 +25,7 @@ import os from 'node:os';
 import assert from 'node:assert/strict';
 
 const targetVersion = workspace.platformRequire('./package.json').version;
+const usesCurrentProfile = (version) => version === '1.3.1' || version === targetVersion;
 const run = (command, args) => {
   const result = spawnSync(command, args, { encoding: 'utf8', timeout: 120000 });
   if (result.error || result.status !== 0)
@@ -79,14 +80,14 @@ async function snapshot(page, version = targetVersion) {
     } finally {
       db.close();
     }
-  }, version === targetVersion);
+  }, usesCurrentProfile(version));
 }
 
 // Query the knowledge child selected by the live account, including its committed revision.
 async function checkIndex(page, document, version) {
   const marker = Buffer.from(document.bytes).toString().split(' ')[0];
   const hash = createHash('sha256').update(Buffer.from(document.bytes)).digest('hex');
-  const expectedVersion = version === targetVersion ? 'qa-linked-v3' : version === '1.2.3' ? 'qa-linked-v2' : null;
+  const expectedVersion = usesCurrentProfile(version) ? 'qa-linked-v3' : version === '1.2.3' ? 'qa-linked-v2' : null;
   await waitForAsync(page, async ({ id, expectedVersion }) => {
     // Existing index metadata is immediately readable on restart. A real search
     // also requires the separate asynchronous verification of the owned models.
@@ -244,6 +245,7 @@ export async function verifyPreviousVersionData({
   fromVersion = '1.1.1',
 }) {
   await requireGuestIsolation();
+  const currentProfile = usesCurrentProfile(fromVersion);
   const previousZip = await verifiedUpgradeArchive(fromVersion);
   const original = `upgrademacoriginal ${fromVersion} original: 中文与 English remain byte-for-byte intact.\n`;
   const baseName = `${fromVersion} 覆盖升级资料`;
@@ -252,6 +254,12 @@ export async function verifyPreviousVersionData({
   const directory = path.join(testRoot, `upgrade-from-${fromVersion}`);
   const install = path.join(directory, 'installed');
   const profile = path.join(directory, 'VoxCue');
+  const assignmentFile = path.join(profile, 'legacy-profile-assignment-v1.json');
+  const expectedAssignment = {
+    owner: currentProfile ? null : ownerHash('synthetic@example.test'),
+    files: false,
+    browser: false,
+  };
   await mkdir(install, { recursive: true });
   await mkdir(path.join(directory, 'tmp'));
   const { packagesFor } = workspace.platformRequire(
@@ -428,11 +436,19 @@ export async function verifyPreviousVersionData({
     await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
     const record = { id: 'upgrade-interview-a', title: 'Synthetic owner A interview', startedAt: 1,
       endedAt: 2, status: 'ended', transcripts: [], answers: [], mock: false };
-    await old.evaluate(async record => {
-      localStorage.setItem('copilot-interview-history-v1', JSON.stringify([record]));
-      const result = await window.desktop.shortcutSettings({ op: 'set', action: 'toggle-window', accelerator: 'Control+Alt+K' });
-      if (result.rejected || result.state.error) throw Error('Old version rejected the custom shortcut');
-    }, record);
+    if (currentProfile) {
+      await evaluateHistory(old, record => fixtureHistory.replace([record]), record);
+    } else {
+      await old.evaluate(record => localStorage.setItem('copilot-interview-history-v1', JSON.stringify([record])), record);
+    }
+    const shortcuts = [['toggle-window', 'Control+Alt+K']];
+    if (currentProfile) shortcuts.push(['toggle-shortcut-help', 'Control+Alt+J']);
+    await old.evaluate(async shortcuts => {
+      for (const [action, accelerator] of shortcuts) {
+        const result = await window.desktop.shortcutSettings({ op: 'set', action, accelerator });
+        if (result.rejected || result.state.error) throw Error('Old version rejected the custom shortcut');
+      }
+    }, shortcuts);
     const before = await snapshot(old, fromVersion);
     assert.equal(before.profile.name, 'Synthetic upgrade owner');
     assert.equal(before.profile.background, background);
@@ -443,11 +459,14 @@ export async function verifyPreviousVersionData({
     assert.equal(Buffer.from(before.documents[0].bytes).toString(), original);
     assert.deepEqual(before.records, [record]);
     assert.equal(before.bindings['toggle-window'], 'Control+Alt+K');
-    assert.equal(Object.keys(before.bindings).length, 9);
+    assert.equal(before.bindings['toggle-shortcut-help'], currentProfile ? 'Control+Alt+J' : undefined);
+    assert.equal(Object.keys(before.bindings).length, currentProfile ? 10 : 9);
     const oldOriginal = before.documents[0];
     const oldRevision = await checkIndex(old, oldOriginal, fromVersion);
     await closeUiApp(app);
     app = undefined;
+    if (currentProfile)
+      assert.deepEqual(JSON.parse(await readFile(assignmentFile, 'utf8')), expectedAssignment);
     if (fromVersion !== '1.1.1') {
       // Its hardened executable rejects inspectors. Keep its bytes and fuses
       // intact; verify ordinary product startup separately from ASAR inspection.
@@ -458,15 +477,19 @@ export async function verifyPreviousVersionData({
     }
     await replaceOwnedBundle(bundle, zip);
     let current = await launch(targetVersion);
-    const migrated = { ...before, bindings: { ...before.bindings, 'toggle-shortcut-help': 'Control+Shift+/' } };
+    const migrated = currentProfile
+      ? before
+      : { ...before, bindings: { ...before.bindings, 'toggle-shortcut-help': 'Control+Shift+/' } };
     const migratedRevision = await checkIndex(current, oldOriginal, targetVersion);
-    assert.notEqual(migratedRevision, oldRevision, 'The previous index must be rebuilt from its retained original');
+    if (currentProfile)
+      assert.equal(migratedRevision, oldRevision, 'A compatible index must retain its citation revision');
+    else
+      assert.notEqual(migratedRevision, oldRevision, 'The previous index must be rebuilt from its retained original');
     await current.getByRole('button', { name: '面试记录', exact: true }).click();
     await current.getByText(record.title, { exact: true }).waitFor();
     assert.deepEqual(await snapshot(current), migrated);
     await accountPartition(app, current, 'persist:voxcue-user-' + ownerHash('synthetic@example.test'));
-    const assignment = JSON.parse(await readFile(path.join(profile, 'legacy-profile-assignment-v1.json'), 'utf8'));
-    assert.deepEqual(assignment, { owner: ownerHash('synthetic@example.test'), files: false, browser: false });
+    assert.deepEqual(JSON.parse(await readFile(assignmentFile, 'utf8')), expectedAssignment);
     assert.equal(await current.evaluate(() => document.documentElement.classList.contains('dark')), true);
     await current.getByRole('button', { name: '新对话', exact: true }).click();
     await current.getByRole('button', { name: '个人信息', exact: true }).click();
@@ -507,7 +530,7 @@ export async function verifyPreviousVersionData({
     await closeUiApp(app);
     app = undefined;
     await verifyNormalStart(targetVersion, after, revisions);
-    console.log(`PASS: signed ${fromVersion} → ${targetVersion} archive replacement, claim, original bytes, history, custom shortcuts, rebuilt and newly imported indexes across restart. The ordinary product startup and archived application inspection run separately in the guest.`);
+    console.log(`PASS: signed ${fromVersion} → ${targetVersion} archive replacement, profile ownership, original bytes, history, custom shortcuts, retained or rebuilt indexes and new imports across restart. The ordinary product startup and archived application inspection run separately in the guest.`);
 
   } finally {
     try {

@@ -2,7 +2,7 @@
 
 Paraformer、Qwen 和 RAG 组件通过同一个 ComponentService 下载、认证、缓存和删除。Qwen 的原始 BF16 ASR、Q8_0 Aligner 与平台运行时组合以 catalog.ts、qwen-catalog.ts、qwen-int8-catalog.ts 和 qwen-windows-runtime-catalog.ts 为准；Mac 运行时随应用签名，Windows 运行时属于独立认证归档。模型和推理策略不随应用清理而改变。详细平台边界见 [Mac 接入](QWEN_MACOS.md) 和 [Windows 接入](QWEN_WINDOWS_HANDOFF.md)。
 
-ChatGPT 随应用打包官方 `@openai/codex` 及对应的原生包。Windows 平台清单固定 0.170.0，macOS 使用共享清单的 0.164.0。模型目录使用应用自有 Codex 会话和实际运行时版本。Copilot 继续使用 `@github/copilot-sdk` 1.0.21 及本平台原生包。两个提供商分别使用自己的登录、聊天和额度接口。
+ChatGPT 随应用打包官方 `@openai/codex` 及对应的原生包。Windows 平台清单固定 0.170.0，macOS 使用共享清单的 0.171.0。模型目录使用应用自有 Codex 会话和实际运行时版本。Copilot 继续使用 `@github/copilot-sdk` 1.0.21 及本平台原生包。两个提供商分别使用自己的登录、聊天和额度接口。
 
 语音和 RAG 模型独立于应用版本维护。shared/electron/backend/components 使用源码固定的发行标签、ZIP 大小、SHA-256 和逐文件清单，资源位于 NCFXZ/VoxCue 的 Releases。换仓只复制原始归档，不修改版本、摘要、逐文件清单或模型许可证；旧 VoxCue-releases 保留供已安装旧版使用。Renderer 只请求状态、下载/删除固定模型或取消下载，不提供 URL、路径、摘要、权限或命令。
 

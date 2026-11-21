@@ -4,11 +4,15 @@
 
 **2026-11-21 · macOS 1.3.1，Windows 1.3.0。** Mac 的源码、安装包与更新清单使用主仓标签 `v1.3.1`。Windows 基线为 `v1.3.0`（`669c44a`），安装版沿用 `v1.2.3`（`fae85ca`）的 Ed25519 更新身份。Microsoft Store 2.3.0.0 已提交认证。[Mac 发行入口](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.1) · [Windows 发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.0)
 
+- 当前候选为 1.3.2。先清理本机工作区并验证 macOS 功能、稳定性、界面、英文、安全和正式安装与升级。Mac GitHub 发行沿用 1.3.1 的正文并补充 GPT-6.2 Astra 和 Sol 支持说明，1.3.2 更新可用后撤下 1.3.1 的更新入口。[Mac 1.3.2 更新日志](docs/1.3.2_MACOS_UPDATE.md)
+
 - 用户可见的功能与修复见 [Mac 1.2.3 → 1.3.1 更新日志](docs/1.3.1_MACOS_UPDATE.md) 和 [Windows 1.3.0 更新日志](docs/1.3.0_WINDOWS_UPDATE.md)。Windows 1.3.0 的实现与验证入口见 [Windows 开发交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。
 - 账号服务 0.6.1 已上线。迁移云来源时可以不创建会话直接验密。注销响应丢失后，桌面端再查询结果，再按账号清理本机资料。[账号协议](shared/docs/WINDOWS_1.3.0_HANDOFF.md#独立账号服务的协议与发布依赖)
 - 开始面试按连接方式显示用量。准备聊天、实时面试和历史回答按当时的服务商显示标志。聊天标志保留原尺寸与间距，去掉灰色圆角底。已移除回答结束后的网页搜索提示。Windows 原生密钥框支持圆点遮挡与显隐，迁移和注销的密码框也支持显隐。[AI 服务与界面](shared/docs/WINDOWS_1.3.0_HANDOFF.md#ai-服务授权和模型选择)
 - Windows 安装版与商店版已完成正式 1.2.3 升级及全新安装验收，商店原生凭据输入按系统包身份复验。安装程序、差分索引和更新清单已发布至 `NCFXZ/VoxCue`。Microsoft Store Submission 11（`1152921505702467958`）已接收 x64 包、中英文各四张新版截图和各六条更新说明。提交后进入 Pre-processing，通过认证后自动发布。[验证入口](shared/docs/WINDOWS_1.3.0_HANDOFF.md#验证入口与发行前待验) · [商店提交状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
-- macOS 当前开发版本为 1.3.1，功能验收沿用桌面交接文档的 1.3.0 更新范围，界面和交互以现有 Mac 实现为准。双击 `macos/VoxCue.app` 或执行 `pnpm start` 都会打开固定签名的本机构建（`com.voxcue.app`），可使用冻结的 v11 助手。修改源码后执行 `pnpm build` 更新该应用。`pnpm dev` 单独运行热重载宿主。项目固定签名身份和冻结的 v1/v11 助手从所有者恢复目录还原，Node 24.22.1、冻结依赖及公开测试组件位于 `macos/`。
+- macOS 当前开发版本为 1.3.2。双击 `macos/VoxCue.app` 或执行 `pnpm start` 都会打开固定签名的本机构建（`com.voxcue.app`），可使用冻结的 v11 助手。修改源码后执行 `pnpm build` 更新该应用。`pnpm dev` 单独运行热重载宿主。Node 24.22.1、冻结依赖及公开测试组件位于 `macos/`。
+- macOS 开发构建和本机安装的 VoxCue 内置 Codex 0.171.0，订阅模型目录按实际运行时版本请求，并使用服务商返回的可见性、可用性和最低版本条件。已发布的 macOS v1.3.1 内置 0.164.0。回归入口为 `model-catalog.test.ts`、`codex-usage-runtime.test.ts` 和 `pnpm test:chatgpt:usage:runtime`。[运行组件](shared/docs/COMPONENTS.md)
+- 聊天、主设置和面试浮窗共用的模型菜单中，模型与「刷新模型列表」的高亮胶囊左右对齐，滚动条使用弹层边侧留白。回归入口为 `macos/test/scripts/interview-effort-smoke.mjs`。Windows 本机复验时，将 `windows/test/scripts/interview-effort-smoke.mjs` 的侧边检查同步到胶囊边缘和滚动视口边界。
 - Mac 对齐范围包括 SF Symbols（真实面试胶囊的录音波形保留动画）、AppKit 密钥输入、凭据维护、手机 HTTPS/WSS 预配、麦克风录音与转写分流、旧 Qwen 离线断句、知识库物理子进程依赖，以及损坏更新 ZIP 的同版本恢复。账号变更对照独立服务 0.6.1（`3440a25`），知识库卡片汇总本轮全部文档的索引进度，RAG 以合成原件验证功能。准备聊天、面试与历史回答、登录和设置预览统一使用透明服务商标志。开发态与正式 1.2.3 签名升级的入口见 [macOS 开发交接](docs/1.3.0_MACOS_UPDATE.md) 和 [隔离 guest 说明](macos/docs/TEST_GUEST.md)。
 
 - 资料迁移遇到已保存目标的回执时，选择来源后会继续清理旧索引等来源资料。「下一步」在等待期间显示加载图标。Mac 打包在签名前检查知识库与语音子进程的共用模块。迁移回归入口为 `account-transfer-smoke.mjs`。
@@ -44,8 +48,8 @@
 
 ## 发行状态与接续
 
-- Windows 接续以 1.3.0 为基线，逐项复核资料冲突、迁移、语音设备交接和桌面交互。本次修复包括聚焦内容区的 Home/End、两条英文运行时提示、Qwen 积压时切换加速设备以及 Core Audio 写入被信号打断后的恢复。平台差异、复测入口和实机覆盖范围见 [Windows 1.3.1 逐项交接](shared/docs/WINDOWS_1.3.1_HANDOFF.md)。
-- Mac 正式包首次安装和 1.2.3 → 1.3.1 升级使用临时隔离客机。可从固定的 Apple 恢复镜像新装，或者从指定的 Cirrus 镜像准备基线。启动后核实来宾 SIP、Gatekeeper 和签名执行状态，再运行正式包验收。客机准备、验收和清理入口见 [隔离客机说明](macos/docs/TEST_GUEST.md)。
+- Windows 接续以 1.3.0 为基线，见 [1.3.2 更新与复测](shared/docs/WINDOWS_1.3.2_HANDOFF.md)和 [1.3.1 逐项交接](shared/docs/WINDOWS_1.3.1_HANDOFF.md)。
+- Mac 正式包首次安装和 1.3.1 → 1.3.2 升级使用临时隔离客机。可从固定的 Apple 恢复镜像新装，或者从指定的 Cirrus 镜像准备基线。启动后核实来宾 SIP、Gatekeeper 和签名执行状态，再运行正式包验收。客机准备、验收和清理入口见 [隔离客机说明](macos/docs/TEST_GUEST.md)。
 - 1.3.0 已知语音识别限制已记入双端交接。语气词误转成普通词时可能触发自动回答并消耗额度，用户可关闭面试浮窗的「自动回答」，核对后手动发送。[自动提问与转写](shared/docs/WINDOWS_1.3.0_HANDOFF.md#面试设备实时识别与自动提问)
 - 历史版本 `v1.2.3` 可从[主仓发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3)和[历史分发页](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)获取，包含 Mac DMG、ZIP、`latest-mac.yml` 与三项 Windows 资产。
 - Mac 对应源码为主仓 [`macos-v1.2.3`](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.3)（`4fe22ec`）。原 `v1.2.3` 仍指向 Windows 发行提交 `fae85ca665505b314fee784a0dddc091f337ffd5`，两端源码均可从主仓标签归档获取。

@@ -30,7 +30,7 @@
   "optionalDependencies": {
     "sherpa-onnx-darwin-arm64": "1.13.8",
     "@github/copilot-sdk-darwin-arm64": "1.0.21",
-    "@openai/codex-darwin-arm64": "npm:@openai/codex@0.164.0-darwin-arm64"
+    "@openai/codex-darwin-arm64": "npm:@openai/codex@0.171.0-darwin-arm64"
   },
   "devDependencies": {
     "@electron/packager": "20.3.0"

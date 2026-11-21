@@ -40,7 +40,7 @@ function partialKeyringError(text: string) {
   return partial;
 }
 const requirePackage = createRequire(__filename);
-export const codexRuntimeVersion = process.platform === 'win32' ? '0.170.0' : '0.164.0';
+export const codexRuntimeVersion = process.platform === 'win32' ? '0.170.0' : '0.171.0';
 // node_modules is unpacked by both platform packagers; spawn needs its real path.
 export function unpackedUsagePath(file: string) {
   return file.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2');

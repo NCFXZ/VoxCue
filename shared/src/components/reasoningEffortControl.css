@@ -11,6 +11,10 @@
 .reasoning-model-list {
   scrollbar-gutter: stable both-edges;
 }
+.reasoning-effort-popup > .dropdown-scroll:has(.reasoning-model-list) {
+  /* The model scrollbar gutters use the frame beside the capsules. */
+  margin-inline: calc(-1 * var(--dropdown-inset));
+}
 .reasoning-popup-body {
   overflow: clip;
 }
@@ -31,13 +35,8 @@
 .speech-model-settings .dropdown-content.reasoning-effort-popup {
   width: var(--radix-dropdown-menu-trigger-width);
 }
-.speech-model-settings .reasoning-popup-view[data-panel='models'] {
-  container-type: inline-size;
-}
 .speech-model-settings .reasoning-model-list .model-option {
-  --option-inset: calc(var(--select-content-inset) - var(--dropdown-inset) - 1px);
-  /* Each gutter takes up half the difference between the list and panel widths. */
-  padding-inline: max(0px, calc(var(--option-inset) + 50% - 50cqi));
+  padding-inline: calc(var(--select-content-inset) - var(--dropdown-inset) - 1px);
 }
 .speech-model-settings .model-check > svg {
   width: 14px;
@@ -52,7 +51,11 @@
 }
 .reasoning-popup-view[data-panel='models'] {
   --reasoning-enter-x: 8px;
+  container-type: inline-size;
   row-gap: 0;
+}
+.reasoning-popup-view[data-panel='models'] > :not(.reasoning-model-list) {
+  margin-inline: var(--dropdown-inset);
 }
 .reasoning-popup-view[data-panel='models'] > :not(:first-child, .interview-reveal),
 .reasoning-popup-view .model-error {
@@ -234,6 +237,10 @@
     )
   );
   overflow-y: auto;
+}
+.reasoning-model-list .model-option {
+  max-inline-size: calc(100cqi - 2 * var(--dropdown-inset));
+  margin-inline: auto;
 }
 .reasoning-popup-view:has(.reasoning-model-refresh) {
   --reasoning-model-footer-height: 36px;
