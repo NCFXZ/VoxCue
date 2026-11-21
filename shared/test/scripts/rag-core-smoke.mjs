@@ -48,16 +48,27 @@ app.whenReady().then(async()=>{
  try{
   await host.initialize();
   const batchId = 'formats-batch';
-  await host.beginIndexBatch(batchId, 'smoke', ['pdf', 'docx'], signal());
+  const formatIds = ['doc', 'docx', 'pdf', 'text'];
+  await host.beginIndexBatch(batchId, 'smoke', formatIds, signal());
   const pdfPages=['Dispatch ledger for the '+config.topic, 'Packing slip '+config.marker];
   const docxText=['物品交接名册 '+config.topic, '本轮待检柜位 '+config.shelf];
+  const textMarker = 'text' + config.marker;
+  const docMarker = 'word' + config.marker;
+  await host.indexDocument({documentId:'text',baseId:'smoke',name:'fixture.txt',bytes:Buffer.from('Packing slip '+textMarker),batchId},signal());
+  await host.indexDocument({documentId:'doc',baseId:'smoke',name:'fixture.doc',bytes:fixtures.doc('物品交接名册 '+docMarker),batchId},signal());
   const pdf=await host.indexDocument({documentId:'pdf',baseId:'smoke',name:'fixture.pdf',bytes:fixtures.pdf(pdfPages),batchId},signal());
   const docx=await host.indexDocument({documentId:'docx',baseId:'smoke',name:'fixture.docx',bytes:await fixtures.docx(docxText),batchId},signal());
   assert.equal((await host.listDocuments()).length, 0);
   assert.deepEqual(await host.search(config.marker, 5, 'hybrid', signal(), 'smoke'), []);
   await host.finishIndexBatch(batchId, true, signal());
-  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), ['docx', 'pdf']);
+  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), formatIds);
   assert.equal(pdf.itemCount,2);const pdfHits=await host.search(config.marker,5,'keyword',signal());assert.equal(pdfHits[0].page,2);
+  for (const [query, documentId] of [[textMarker, 'text'], [docMarker, 'doc']]) {
+    const [hit] = await host.search(query, 5, 'keyword', signal(), 'smoke');
+    assert.equal(hit?.documentId, documentId);
+    const cited = await host.getItem(hit.itemId, signal(), {baseId:'smoke', documentId, revision:hit.revision});
+    assert.ok(cited.rootContent.includes(query));
+  }
   const cancelled = 'cancelled-formats';
   await host.beginIndexBatch(cancelled, 'smoke', ['cancelled-note', 'next-note'], signal());
   const draft = input('cancelled-note', 'Unpublished receipt '+config.replacement);
@@ -66,10 +77,11 @@ app.whenReady().then(async()=>{
   assert.equal(previous[0]?.documentId, 'pdf');
   assert.equal((await host.search(config.replacement, 5, 'keyword', signal(), 'smoke')).length, 0);
   await host.finishIndexBatch(cancelled, false, signal());
-  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), ['docx', 'pdf']);
+  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), formatIds);
   assert.equal((await host.search(config.replacement, 5, 'keyword', signal(), 'smoke')).length, 0);
-  await host.removeDocument('pdf',signal());
-  assert.ok(docx.chunkCount);await host.removeDocument('docx',signal());
+  assert.ok(docx.chunkCount);
+  for (const documentId of formatIds) await host.removeDocument(documentId, signal());
+  assert.deepEqual(await host.listDocuments(), []);
   const question='Where is the dispatch ledger for the '+config.topic+' stored?';
   const followUp='怎样复核交接凭证？';
   const receipt='逐一比对封签和名册，核对柜位 '+config.shelf+'。';

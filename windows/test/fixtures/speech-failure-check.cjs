@@ -119,7 +119,7 @@ async function fresh() {
     assert.equal((await start()).state, 'running');
     stale.audio({ samples: new Float32Array(512), rate: 16000, flags: 0, timestamp: -999999 });
     assert.equal(controller.queued, 0);
-    assert.equal(controller.anchors.size, 0);
+    assert.equal(controller.recognitionClockOffsets.size, 0);
     const workerBeforeCrash = controller.worker;
     const capturesBeforeCrash = ports.length;
     await workerBeforeCrash.terminate();

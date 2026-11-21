@@ -2041,6 +2041,28 @@ describe('cloud sync consistency and backpressure', () => {
     expect(f.local.has('file:x')).toBe(true);
     expect(await (await unpackCloudItem('file:y', f.local.get('file:y')!.blob)).payload.text()).toBe('local original');
   });
+  it('keeps reviewed local originals when library sync is disabled and re-enabled before removal commits', async () => {
+    const f = fixture(), root = 'base:folder', key = 'file:child';
+    const original = (text: string) => packCloudItem(key, text, { id: 'child', baseId: 'folder' });
+    f.put(root, 'knowledgebase', 'folder');
+    f.local.set(key, { kind: 'knowledgebase', parent: root, blob: original('first') });
+    await f.enable('knowledgebase');
+    f.remote.clear();
+    f.local.set(key, { kind: 'knowledgebase', parent: root, blob: original('edited') });
+    await f.engine.request();
+    const enabled = structuredClone(f.view.preferences);
+    const removeBatch = f.ports.removeLocalLibrary;
+    f.ports.removeLocalLibrary = async (...args) => {
+      await f.engine.configure(defaultSyncPreferences());
+      await f.engine.configure(enabled);
+      await removeBatch(...args);
+    };
+    expect(await f.engine.resolveSelected([{ key: root, side: 'cloud', version: f.view.marks[root].groupVersion! }])).toBe(false);
+    await f.engine.idle();
+    expect(f.local.has(root)).toBe(true);
+    expect(await (await unpackCloudItem(key, f.local.get(key)!.blob)).payload.text()).toBe('edited');
+    expect(f.saved.pendingLibraries).toEqual([root]);
+  });
   it('bounds full account listings for a hundred losing files in a thousand-resource account', async () => {
     const f = fixture(), root = 'base:a';
     f.put(root, 'knowledgebase', 'initial');

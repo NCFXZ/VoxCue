@@ -314,13 +314,11 @@ async function prepareMainWindowClose(purpose: SavePurpose = 'update', deletingA
   }
   if (interviewActive() || win.isDestroyed() || win.webContents.isCrashed())
     throw Error('Interview or window changed');
-  if (desktopPlatform.id === 'darwin') {
-    if (!win.isEnabled()) throw Error('Window is busy');
-    // A cloud account switch or Sparkle extraction can outlive the final save.
-    // Allow editing again only if this window's transition fails.
-    win.setEnabled(false);
-    savedInputWindow = { win, purpose };
-  }
+  if (!win.isEnabled()) throw Error('Window is busy');
+  // Keep the old window from accepting edits after its final save, including
+  // while the account changes or the installer verifies the downloaded update.
+  win.setEnabled(false);
+  savedInputWindow = { win, purpose };
   mainCloseFlushed = false;
   return new Promise<boolean>((resolve, reject) => {
     updateFlush = { resolve, reject };

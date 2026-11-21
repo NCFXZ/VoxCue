@@ -85,7 +85,7 @@ ChatGPTService.prototype.models = async (force) => {
   {id:'restricted-model',label:'Restricted Model',description:'',reasoningEfforts:['medium']},
   {id:'unknown-model',label:'Unknown Model',description:''},
   ...(globalThis.publishedModel ? [{id:globalThis.publishedModel,label:globalThis.publishedModel,description:''}] : []),
-  ...Array.from({length:16},(_,index)=>({id:'scroll-model-'+index,label:'Synthetic scrolling model '+index,description:'',reasoningEfforts:['low','high']}))
+  ...Array.from({length:globalThis.shortCatalog ? 0 : 16},(_,index)=>({id:'scroll-model-'+index,label:'Synthetic scrolling model '+index,description:'',reasoningEfforts:['low','high']}))
   ];
 };
 ChatGPTService.prototype.usage = async () => ({requests:0,inputTokens:0,outputTokens:0,totalTokens:0,updatedAt:null});
@@ -152,14 +152,80 @@ try {
   assert.notEqual(combinedTrigger.background, 'rgba(0, 0, 0, 0)');
   assert.ok(Math.abs(combinedTrigger.labelGap - 6) < 1 / 32, JSON.stringify(combinedTrigger));
   const modelPopup = await openModelMenu(main, '面试回答模型', '面试回答思考强度');
-  async function checkRefresh(menu, newModel) {
+  async function assertCatalogLayout(page, scenario) {
+    const popup = page.locator('.reasoning-effort-popup[data-state="open"]');
+    for (const [language, refresh] of [['en', 'Refresh models'], ['zh-CN', '刷新模型列表']]) {
+      await page.evaluate((language) => {
+        const key = 'voxcue-language-v1';
+        localStorage.setItem(key, language);
+        window.dispatchEvent(new StorageEvent('storage', { key }));
+      }, language);
+      await popup.getByRole('menuitem', { name: refresh, exact: true }).waitFor();
+      const layout = await popup.evaluate(async (node) => {
+        await Promise.all(
+          node.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => {})),
+        );
+        const list = node.querySelector('.reasoning-model-list');
+        const refresh = node.querySelector('.reasoning-model-refresh');
+        const root = document.documentElement;
+        const initialDark = root.classList.contains('dark');
+        const scrollTop = list.scrollTop;
+        const maxEdgeDifference = () => {
+          const footer = refresh.getBoundingClientRect();
+          return Math.max(...Array.from(list.children, (option) => {
+            const row = option.getBoundingClientRect();
+            return Math.max(Math.abs(row.left - footer.left), Math.abs(row.right - footer.right));
+          }));
+        };
+        try {
+          return [false, true].map((dark) => {
+            root.classList.toggle('dark', dark);
+            list.scrollTop = 0;
+            const before = refresh.getBoundingClientRect();
+            const withScrollbar = maxEdgeDifference();
+            list.scrollTop = list.scrollHeight;
+            const after = refresh.getBoundingClientRect();
+            const footerShift = Math.abs(before.top - after.top);
+            list.style.scrollbarWidth = 'none';
+            const withoutGutter = maxEdgeDifference();
+            list.style.removeProperty('scrollbar-width');
+            return { dark, withScrollbar, withoutGutter, footerShift };
+          });
+        } finally {
+          list.style.removeProperty('scrollbar-width');
+          list.scrollTop = scrollTop;
+          root.classList.toggle('dark', initialDark);
+        }
+      });
+      assert.ok(layout.every(row =>
+        row.withScrollbar <= 1 / 64 && row.withoutGutter <= 1 / 64 && row.footerShift <= 1 / 64,
+      ), `${scenario} (${language}): model and refresh capsules must align and refresh must stay fixed ${JSON.stringify(layout)}`);
+    }
+  }
+  async function checkRefresh(page, menu, newModel) {
+    const refresh = menu.getByRole('menuitem', { name: '刷新模型列表', exact: true });
+    const scrollingModel = menu.getByRole('menuitemradio', { name: 'Synthetic scrolling model 15', exact: true });
+    await app.evaluate(() => { globalThis.shortCatalog = true; });
+    await refresh.click();
+    await scrollingModel.waitFor({ state: 'hidden' });
+    await assertCatalogLayout(page, newModel + ' short list');
+    const options = menu.getByRole('menuitemradio');
+    await options.first().hover();
+    assert.equal(await options.first().getAttribute('data-highlighted'), '');
+    await options.first().press('ArrowDown');
+    assert.ok(await options.nth(1).evaluate(option => option === document.activeElement));
     const option = menu.getByRole('menuitemradio', { name: newModel, exact: true });
     assert.equal(await option.count(), 0);
-    await app.evaluate((_, id) => { globalThis.nextCatalogModel = id; }, newModel);
-    await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+    await app.evaluate((_, id) => {
+      globalThis.shortCatalog = false;
+      globalThis.nextCatalogModel = id;
+    }, newModel);
+    await refresh.click();
     await option.waitFor();
+    await scrollingModel.waitFor();
+    await assertCatalogLayout(page, newModel + ' long list');
   }
-  await checkRefresh(modelPopup, 'pre-interview-new-model');
+  await checkRefresh(main, modelPopup, 'pre-interview-new-model');
   await modelPopup.locator('.reasoning-model-list').evaluate((node) => {
     node.scrollTop = node.scrollHeight;
   });
@@ -173,13 +239,16 @@ try {
       style = getComputedStyle(node);
     const list = node.querySelector('.reasoning-model-list'),
       rect = list.getBoundingClientRect();
+    const row = list.firstElementChild.getBoundingClientRect();
     return {
       scrolling: list.scrollHeight > list.clientHeight + 20,
       contained:
         rect.top >= outer.top + 5 &&
         rect.bottom <= outer.bottom - 5 &&
-        rect.left >= outer.left + 5 &&
-        rect.right <= outer.right - 5,
+        rect.left >= outer.left + parseFloat(style.borderLeftWidth) - 1 / 64 &&
+        rect.right <= outer.right - parseFloat(style.borderRightWidth) + 1 / 64 &&
+        row.left >= outer.left + 5 &&
+        row.right <= outer.right - 5,
       outerOverflow: style.overflowY,
       padding: parseFloat(style.paddingLeft),
       curve: style.cornerShape,
@@ -213,6 +282,7 @@ try {
     .getByText('Test Model', { exact: true })
     .waitFor();
   const chatPopup = await openModelMenu(main);
+  await checkRefresh(main, chatPopup, 'preparation-new-model');
   assert.equal(await chatPopup.getAttribute('data-side'), 'top', 'The composer catalog opens above its bottom trigger');
   await chatPopup.getByRole('menuitemradio', { name: 'Test Model', exact: true }).click();
   const chatEffort = main.getByRole('slider', { name: '思考强度', exact: true });
@@ -366,7 +436,7 @@ try {
   const activeEffort = activeSettings.getByRole('button', { name: '面试回答模型', exact: true });
   await assertControlRows(activeSettings);
   const liveMenu = await openModelMenu(floating, '面试回答模型', '面试思考强度');
-  await checkRefresh(liveMenu, 'live-interview-new-model');
+  await checkRefresh(floating, liveMenu, 'live-interview-new-model');
   await floating.keyboard.press('Escape');
   await activeEffort.click();
   const activeSlider = activeSettings.getByRole('slider', { name: '面试思考强度', exact: true });

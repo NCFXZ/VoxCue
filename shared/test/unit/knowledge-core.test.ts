@@ -16,6 +16,7 @@ import type { OldIndexDeletion } from '../../../shared/electron/contracts/knowle
 import type { Catalog } from '../../../shared/electron/backend/knowledge/eraseLibrary';
 import { parseText, searchUnits } from '../../../shared/electron/backend/knowledge/chunks';
 import type { Embedder } from '../../../shared/electron/backend/knowledge/types';
+import type { PrepareKnowledgeDatabase } from '../../electron/platform/types';
 const fork = vi.hoisted(() => vi.fn());
 vi.mock('electron', () => ({ utilityProcess: { fork } }));
 const signal = () => new AbortController().signal;
@@ -71,7 +72,13 @@ async function markOldDocuments(root: string, ids: string[], legacyFormat = true
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
   it('replays moved-source document cleanup against an inactive mixed-version catalog', async () => {
     const userData = await directory(), root = path.join(profileDirectory(userData, 'local'), 'knowledge-v1');
-    const seed = new KnowledgeService(root, embedder()), original = input('moved', 'Synthetic moved original.');
+    const prepareDatabase: PrepareKnowledgeDatabase | undefined = process.platform === 'win32'
+      ? (await import('../../../windows/electron/knowledgePath')).prepareKnowledgeDatabase
+      : undefined;
+    const open = (databasePath?: string) =>
+      new KnowledgeService(root, embedder(), undefined, undefined, undefined, false, databasePath);
+    const lease = prepareDatabase?.(path.join(root, 'lance'));
+    const seed = open(lease?.path), original = input('moved', 'Synthetic moved original.');
     const kept = { ...input('keep', 'Retained unrelated original.'), baseId: 'another' };
     try {
       await seed.indexDocument(original, signal());
@@ -79,27 +86,37 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
       await seed.indexDocument({ ...input('retired', 'Historical original.'), baseId: 'emptied' }, signal());
       await seed.removeDocument('retired', signal());
       await seed.indexDocument(kept, signal());
-    } finally { await seed.close(); }
+    } finally {
+      try { await seed.close(); }
+      finally { lease?.release(); }
+    }
     await markOldDocuments(root, ['moved'], false);
     const prior = await readCatalog(root);
     const body = path.join(root, 'revisions', prior.documents.keep.revision);
     const expected = await readFile(body);
-    const old = new KnowledgeService(root, embedder());
+    const oldLease = prepareDatabase?.(path.join(root, 'lance'));
+    const old = open(oldLease?.path);
     try {
       await expect(old.removeDocument('moved', signal())).rejects.toMatchObject({
         code: 'unavailable', message: '旧索引清理尚未完成，请重试。',
       });
-    } finally { await old.close(); }
+    } finally {
+      try { await old.close(); }
+      finally { oldLease?.release(); }
+    }
 
     // Keep the real host, index upgrade, LanceDB and receipt cleanup. Only the Electron IPC transport is in process.
     fork.mockImplementation(() => {
-      const core = new KnowledgeService(root, embedder());
+      let core: KnowledgeService;
       const child = Object.assign(new EventEmitter(), {
         kill: () => { queueMicrotask(() => child.emit('exit', 0)); return true; },
-        postMessage: async (m: { id: string; init?: unknown; op?: string; baseId: string }) => {
+        postMessage: async (m: { id: string; init?: { databasePath?: string }; op?: string; baseId: string }) => {
           try {
             let value;
-            if (m.init) await core.initialize();
+            if (m.init) {
+              core = open(m.init.databasePath);
+              await core.initialize();
+            }
             else if (m.op === 'list') value = await core.listDocuments();
             else if (m.op === 'clean-upgraded-index') await core.cleanUpgradedIndex(signal());
             else if (m.op === 'remove-base') await core.removeBase(m.baseId, signal());
@@ -122,10 +139,10 @@ describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () =>
     const recordings = new RecordingLibrary(path.join(userData, 'recordings'));
     try {
       for (let attempt = 0; attempt < 2; attempt++)
-        await checkOrRemoveMovedProfileAssets(userData, '', recordings, receipt, removed, signal());
+        await checkOrRemoveMovedProfileAssets(userData, '', recordings, receipt, removed, signal(), prepareDatabase);
       await checkOrRemoveMovedProfileAssets(userData, '', recordings,
         { ...receipt, plan: { items: [{ key: 'base:emptied', hash: 'd'.repeat(64) }] } },
-        { ...removed, documentIds: [] }, signal());
+        { ...removed, documentIds: [] }, signal(), prepareDatabase);
       expect(Object.keys((await readCatalog(root)).documents)).toEqual(['keep']);
       for (const name of (await readdir(root)).filter(name => name.startsWith('catalog-backup-')))
         expect(Object.values((await readCatalog(root, name)).documents).every(entry => entry.document.baseId === 'another')).toBe(true);

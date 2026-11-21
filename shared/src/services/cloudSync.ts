@@ -305,6 +305,9 @@ export class CloudSyncEngine {
     if (this.stopped) throw new SyncFailure('同步已停止。');
     if (this.controlPending && !this.controlActive) throw new SyncYield();
   }
+  private syncEnabled(kind: SyncKind, epoch: number) {
+    return this.saved.preferences.enabled[kind] && epoch === this.disableEpoch[kind];
+  }
   private emit(immediate = false) {
     if (this.stopped) return;
     this.emitPending = true;
@@ -1011,7 +1014,7 @@ export class CloudSyncEngine {
     this.guard();
     const choice = selection?.side, expectedVersion = selection?.version;
     const kind = syncKindForKey(key), started = this.disableEpoch[kind];
-    const disabled = () => !this.saved.preferences.enabled[kind] || started !== this.disableEpoch[kind];
+    const disabled = () => !this.syncEnabled(kind, started);
     const guardWrite = () => {
       this.guard();
       if (disabled()) throw Error('该类同步已关闭。');
@@ -1398,18 +1401,19 @@ export class CloudSyncEngine {
       return remote ? [[key, remote.id, remote.revision, remote.headVersion, remote.sha256]] : [];
     }));
   }
-  private async removeLocalLibraryMembers(root: string, current: GroupSnapshot, keys: string[], cloudHeads: string) {
+  private async removeLocalLibraryMembers(root: string, current: GroupSnapshot, keys: string[], cloudHeads: string,
+    check: () => void) {
     const revisions = new Map(current.members.filter(entry => entry.local)
       .map(entry => [entry.key, this.sources.get(entry.key)?.localRevision ?? null]));
     const changed = () => new CloudDataConflict('资料已变化，请重新选择要保留的版本。');
     const guard = () => {
-      this.guard();
-      if (!this.saved.preferences.enabled.knowledgebase || this.sourceEpoch.knowledgebase !== this.dataEpoch.knowledgebase)
-        throw changed();
+      check();
+      if (this.sourceEpoch.knowledgebase !== this.dataEpoch.knowledgebase) throw changed();
     };
     // One final cloud snapshot guards one atomic local commit, after slow native index cleanup.
     try {
       await this.options.removeLocalLibrary(root, revisions, keys, async () => {
+        guard();
         await this.refresh();
         if (this.cloudHeads(await this.checkedGroupKeys(root)) !== cloudHeads) throw changed();
       }, guard);
@@ -1442,10 +1446,11 @@ export class CloudSyncEngine {
     this.groups.delete(root);
     if (!this.sources.has(root) && !this.remote.has(root)) delete this.marks[root];
   }
-  private async applyMember(item: GroupMember, choice: SyncChoice, owners?: readonly string[]) {
+  private async applyMember(item: GroupMember, choice: SyncChoice, check: () => void, owners?: readonly string[]) {
     const kind = syncKindForKey(choice.key);
-    if (!this.saved.preferences.enabled[kind] || this.sourceEpoch[kind] !== this.dataEpoch[kind]) return false;
+    if (this.sourceEpoch[kind] !== this.dataEpoch[kind]) return false;
     const current = await this.options.get(kind, item.key);
+    check();
     if (current) this.sources.set(item.key, current);
     else this.sources.delete(item.key);
     await this.one(item.key, { key: item.key, version: item.version, side: choice.side }, choice.key, owners);
@@ -1469,7 +1474,7 @@ export class CloudSyncEngine {
       return true;
     });
   }
-  private async resolveHistory(choice: SyncChoice, members: GroupMember[], batch: HistoryBatch) {
+  private async resolveHistory(choice: SyncChoice, members: GroupMember[], batch: HistoryBatch, check: () => void) {
     const root = choice.key, from = choice.side, to = from === 'cloud' ? 'local' : 'cloud';
     const rootMember = members.find(item => item.key === root)!;
     const images = members.filter(item => item.key !== root);
@@ -1481,10 +1486,6 @@ export class CloudSyncEngine {
         winners.delete(item.key);
       }
       return !winners.size;
-    };
-    const guardRemoval = () => {
-      this.guard();
-      if (!this.saved.preferences.enabled.history) throw Error('该类同步已关闭。');
     };
     const stillShared = (key: string) => [...this.historyGroups.owners(key, to) ?? []].some(owner => owner !== root);
     const original = (item: GroupMember) => to === 'local' ? item.storedLocal : item.storedCloud;
@@ -1516,14 +1517,14 @@ export class CloudSyncEngine {
           checkedOwners.add(owner);
         }
       }
-      if (!(await this.applyMember(image, choice, owners))) return false;
+      if (!(await this.applyMember(image, choice, check, owners))) return false;
       if (owners) {
         const fresh = await this.options.get('history', image.key);
         const after = conflictVersion((await this.readLocal(fresh)).hash, this.remote.get(image.key));
         batch.written.set(image.key, { before: batch.written.get(image.key)?.before ?? image.version, after });
       }
     }
-    if (!(await this.applyMember(rootMember, choice))) return false;
+    if (!(await this.applyMember(rootMember, choice, check))) return false;
     // Commit the reviewed record first. Its guarded transaction releases its old
     // references, so no surviving record ever points at an original removed here.
     let removalsValidUntil = 0;
@@ -1537,7 +1538,7 @@ export class CloudSyncEngine {
       if (this.historyGroups.owners(previous.key, from)?.has(root) || this.historyGroups.owners(previous.key, to)?.has(root)) return false;
       if (stillShared(previous.key)) continue;
       const remote = this.remote.get(previous.key);
-      guardRemoval();
+      check();
       if (to === 'cloud' && remote?.headVersion) {
         if (conflictVersion(previous.storedLocal, remote) !== previous.version) return false;
         await this.call({ action: 'remove', id: remote.id, revision: remote.revision });
@@ -1545,7 +1546,7 @@ export class CloudSyncEngine {
       } else if (to === 'local') {
         if (conflictVersion(previous.storedLocal, remote) !== previous.version) return false;
         const hash = previous.storedLocal ?? this.saved.pendingGroups?.[root]?.[previous.key];
-        if (hash) await this.options.removeLocal(previous.key, hash, guardRemoval, root);
+        if (hash) await this.options.removeLocal(previous.key, hash, check, root);
       }
       if (!this.historyGroups.owners(previous.key, from)?.size) {
         delete this.saved.baselines[previous.key];
@@ -1556,15 +1557,17 @@ export class CloudSyncEngine {
     await this.refresh();
     await this.loadSources('history');
     const actual = await this.checkedGroup(root);
+    check();
     if (!matchesWinners(actual)) return false;
     await this.finishGroup(root);
     batch.completed.add(root);
     return true;
   }
-  private async resolveGroup(choice: SyncChoice, batch: HistoryBatch) {
+  private async resolveGroup(choice: SyncChoice, batch: HistoryBatch, check: () => void) {
     const root = choice.key;
     const kind = syncKindForKey(root);
     const snapshot = await this.checkedGroup(root, batch.reviewed.has(root));
+    check();
     if (!snapshot || (snapshot.version !== choice.version && (kind !== 'history' || !this.reviewedHistory(root, snapshot, batch)))) return false;
     if (snapshot.members.some(({ key }) => this.saved.baselines[key]?.suppressed || this.options.moved?.keys.has(key)))
       throw Error('该类同步已关闭。');
@@ -1582,7 +1585,7 @@ export class CloudSyncEngine {
     }
     if (kind === 'history') {
       try {
-        return await this.resolveHistory(choice, snapshot.members, batch);
+        return await this.resolveHistory(choice, snapshot.members, batch, check);
       } finally {
         if (!this.stopped && this.saved.pendingGroups?.[root]) {
           await this.refresh();
@@ -1603,7 +1606,7 @@ export class CloudSyncEngine {
     let cloudBeforeRemovals: string | undefined;
     const reviewed = new Map(snapshot.members.map(item => [item.key, item]));
     for (const item of ordered) {
-      this.guard();
+      check();
       if (!winning(item) && !checkedRemovals) {
         // Transfers above can take minutes. Re-list both sides before the destructive phase.
         checkedRemovals = true;
@@ -1623,7 +1626,7 @@ export class CloudSyncEngine {
           cloudBeforeRemovals = this.cloudHeads(current.members.map(entry => entry.key));
           const keys = current.members.filter(entry => !entry.cloud && entry.local).map(entry => entry.key);
           if (kind === 'knowledgebase' && keys.length > 1) {
-            complete = await this.removeLocalLibraryMembers(root, current, keys, cloudBeforeRemovals);
+            complete = await this.removeLocalLibraryMembers(root, current, keys, cloudBeforeRemovals, check);
             break;
           }
         }
@@ -1637,7 +1640,7 @@ export class CloudSyncEngine {
           break;
         }
       }
-      if (!(await this.applyMember(item, choice))) {
+      if (!(await this.applyMember(item, choice, check))) {
         complete = false;
         break;
       }
@@ -1651,6 +1654,7 @@ export class CloudSyncEngine {
       target.delete(item.key);
     }
     if (!actual || target.size) complete = false;
+    check();
     if (complete) await this.finishGroup(root);
     return complete;
   }
@@ -1659,6 +1663,7 @@ export class CloudSyncEngine {
     const pendingKeys = new Set(this.resolving.keys());
     const scopes = new Set(this.resolving.values());
     const accepted = choices.map(choice => ({ ...choice }));
+    const epochs = { ...this.disableEpoch };
     const locks = new Map<string, string>();
     for (const { key, side, version } of accepted) {
       const group = groupRootKey(key);
@@ -1684,7 +1689,7 @@ export class CloudSyncEngine {
               error: '部分资料未能处理，请核对后重试。' };
           }
           this.emit();
-        });
+        }, epochs);
       } catch (error) {
         if (!this.stopped) {
           this.error = error instanceof Error ? error.message : '同步失败。';
@@ -1704,14 +1709,18 @@ export class CloudSyncEngine {
     this.emit(true);
     return true;
   }
-  private async resolveChoice(choice: SyncChoice, batch: HistoryBatch) {
+  private async resolveChoice(choice: SyncChoice, batch: HistoryBatch, epoch: number) {
     const { key, version } = choice;
     const kind = syncKindForKey(key);
-    if (!this.saved.preferences.enabled[kind] || !version) return false;
+    if (!this.syncEnabled(kind, epoch) || !version) return false;
+    const check = () => {
+      this.guard();
+      if (!this.syncEnabled(kind, epoch)) throw Error('该类同步已关闭。');
+    };
     if (groupRootKey(key)) {
       if (kind === 'history' ? !batch.reviewed.has(key) : this.groups.get(key)?.version !== version) return false;
       try {
-        return await this.resolveGroup(choice, batch);
+        return await this.resolveGroup(choice, batch, check);
       } catch (error) {
         this.guard();
         this.marks[key] = { ...this.marks[key], status: this.marks[key]?.status ?? 'error',
@@ -1723,6 +1732,7 @@ export class CloudSyncEngine {
     if (!key.startsWith('file:') || mark?.status !== 'conflict' || mark.conflictVersion !== version) return false;
     try {
       await this.discoverParents(new Set([key]), true);
+      check();
       if (this.crossedParents(key)) throw Error('文件标识已用于其他资料，已保留两端版本。');
     } catch (error) {
       this.guard();
@@ -1736,7 +1746,8 @@ export class CloudSyncEngine {
     if (root && this.groups.has(root)) await this.inspectGroup(root, this.groupKeys(root));
     return !result || result === 'synced' || result === 'paused';
   }
-  async resolveSelected(choices: readonly SyncChoice[], settled?: (key: string, complete: boolean) => void) {
+  async resolveSelected(choices: readonly SyncChoice[], settled?: (key: string, complete: boolean) => void,
+    epochs = { ...this.disableEpoch }) {
     const selected = new Map(choices.map(choice => [choice.key, choice]));
     let complete = true;
     await this.exclusive(async () => {
@@ -1757,7 +1768,7 @@ export class CloudSyncEngine {
         }
         for (const key of this.orderedKeys(kind, keys)) {
           this.guard();
-          const done = await this.resolveChoice(selected.get(key)!, batch);
+          const done = await this.resolveChoice(selected.get(key)!, batch, epochs[kind]);
           if (!done) complete = false;
           settled?.(key, done);
         }

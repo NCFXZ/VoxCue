@@ -14,6 +14,7 @@ const modelFree = new Set([
   'mobile-ui',
   'preparation-guide',
   'account-transfer',
+  'sync-conflict-workspace',
   'legacy-profile-upgrade',
   'api-interactive-preview',
   'recording',

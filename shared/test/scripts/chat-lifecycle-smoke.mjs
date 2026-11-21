@@ -238,7 +238,7 @@ try {
     0,
   );
   assert.equal(await page.locator('.conversation-row').count(), 3);
-  if (process.platform === 'darwin') {
+  {
     const outgoing = await app.browserWindow(page);
     await page.evaluate(() => window.desktop.updateSessionState(true));
     await app.evaluate(({ dialog }) => {
@@ -293,8 +293,7 @@ try {
     }
   });
   assert.equal(page.isClosed(), false, 'Outgoing data stays available until save finishes');
-  if (process.platform === 'darwin')
-    assert.equal(await (await app.browserWindow(page)).evaluate(win => win.isEnabled()), false);
+  assert.equal(await (await app.browserWindow(page)).evaluate(win => win.isEnabled()), false);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   await app.evaluate(() => globalThis.releaseLogoutSave());
   const login = await loginOpened;
@@ -302,10 +301,8 @@ try {
   assert.equal(await (await app.browserWindow(login)).evaluate(win => win.isEnabled()), true);
   page = await connectUiAccount(app, login);
   await page.locator('.conversation-row').filter({ hasText: '更新简历' }).waitFor();
-  if (process.platform === 'darwin') {
-    assert.equal(await (await app.browserWindow(page)).evaluate(win => win.isEnabled()), true);
-    assert.equal(await input().inputValue(), '退出后按同一账号恢复的草稿');
-  }
+  assert.equal(await (await app.browserWindow(page)).evaluate(win => win.isEnabled()), true);
+  assert.equal(await input().inputValue(), '退出后按同一账号恢复的草稿');
   checks.push(
     'explicit deletion survives restart; primary logout waits for outgoing save before reopening the account gate, then preserves remaining chat',
   );

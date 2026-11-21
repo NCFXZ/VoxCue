@@ -200,16 +200,20 @@ it('uses the shared QPC across delayed helper startup and drains capture packets
   expect(worker.messages.filter((m: any) => m.op === 'audio')).toHaveLength(count);
 });
 
-it('does not anchor transcript time to an invalid first WASAPI timestamp', async () => {
+it('preserves packet age when a valid WASAPI timestamp follows an invalid one', async () => {
+  vi.useFakeTimers({ toFake: ['Date'] });
+  const wall = Date.now();
+  const qpc = vi.spyOn(process.hrtime, 'bigint').mockReturnValue(987654571000000n);
   const { service } = controller();
-  await service.call({ op: 'start', options: { sources: ['microphone'] } });
-  const before = Date.now();
-  state.captures[0].packet({ ...packet(4), timestamp: 0 });
-  state.captures[0].packet({ ...packet(), timestamp: 987654321 });
-  state.captures[0].packet({ ...packet(), timestamp: 987654331 });
-  const audio = state.workers[0].messages.filter((m: any) => m.op === 'audio');
-  expect(audio.map((m: any) => m.captureClock)).toEqual([undefined, 987654321, 987654331]);
-  expect(audio.every((m: any) => m.timestamp >= before && m.timestamp <= Date.now() + 10)).toBe(
-    true,
-  );
+  try {
+    await service.call({ op: 'start', options: { sources: ['microphone'] } });
+    state.captures[0].packet({ ...packet(4), timestamp: 0 });
+    state.captures[0].packet({ ...packet(), timestamp: 987654321 });
+    state.captures[0].packet({ ...packet(), timestamp: 987654331 });
+    const audio = state.workers[0].messages.filter((m: any) => m.op === 'audio');
+    expect(audio.map((m: any) => m.captureClock)).toEqual([undefined, 987654321, 987654331]);
+    expect(audio.map((m: any) => m.timestamp)).toEqual([wall, wall - 250, wall - 240]);
+  } finally {
+    qpc.mockRestore();
+  }
 });

@@ -164,10 +164,15 @@ async function checkSecondLaunch(main) {
   assert.equal(await onlyPage(), targetId);
 }
 async function checkPersistence(main) {
-  const [major, minor] = config.version.split('.').map(Number);
-  const isolatedProfile = major > 1 || (major === 1 && minor >= 3);
+  const hasIsolatedProfile = (version) => {
+    const [major, minor] = version.split('.').map(Number);
+    return major > 1 || (major === 1 && minor >= 3);
+  };
+  const isolatedProfile = hasIsolatedProfile(config.version);
+  const modernSource = hasIsolatedProfile(config.sourceVersion ?? config.version);
+  const originalText = 'Synthetic Sandbox original: 中文与 English remain intact.';
   const bytes = Array.from(
-    Buffer.from('Synthetic Sandbox original: 中文与 English remain intact.\n'),
+    Buffer.from(`${originalText}\nFixture reference ${config.nonce}.\n`),
   );
   const createdAt = 1700000000000;
   const expected = {
@@ -231,9 +236,10 @@ async function checkPersistence(main) {
   async function checkIndex() {
     assert.ok(['seed', 'verify'].includes(config.phase));
     const { document } = expected;
-    const components = await main.evaluate('window.desktop.components({op:"status"})');
-    assert.equal(components.items.find((item) => item.id === 'rag')?.phase, 'ready',
-      'The installed app must authenticate the offline RAG component');
+    await poll(async () => {
+      const components = await main.evaluate('window.desktop.components({op:"status"})');
+      return components.items.find((item) => item.id === 'rag')?.phase === 'ready';
+    }, 'the installed app to authenticate the offline RAG component');
     const knowledge = async (request) => {
       const result = await call((request) => {
         if (request.op === 'import') request.bytes = new Uint8Array(request.bytes);
@@ -254,7 +260,8 @@ async function checkPersistence(main) {
       });
       assert.equal(indexed.contentHash, contentHash);
       assert.ok(indexed.chunkCount > 0);
-      if (config.version === '1.2.3') assert.equal(indexed.indexVersion, 'qa-linked-v2');
+      if (isolatedProfile) assert.equal(indexed.indexVersion, 'qa-linked-v3');
+      else if (config.version === '1.2.3') assert.equal(indexed.indexVersion, 'qa-linked-v2');
     } else {
       assert.match(config.ragRevision, /^[a-f0-9]{64}$/);
       let observed;
@@ -297,7 +304,7 @@ async function checkPersistence(main) {
       assert.equal(item.source.indexVersion, 'qa-linked-v3');
       assert.equal(item.source.revision, ragRevision);
     }
-    assert.ok(item.content.includes('中文与 English remain intact.'));
+    assert.ok(item.content.includes(originalText));
     return ragRevision;
   }
   // Index in the old process before writing the synthetic originals and reloading its UI.
@@ -306,7 +313,7 @@ async function checkPersistence(main) {
   const seededBindings =
     config.phase === 'verify'
       ? config.bindings
-      : await call(async (seed) => {
+      : await call(async ({ seed, modernSource }) => {
           const db = await new Promise((resolve, reject) => {
             const request = indexedDB.open('copilot-local-documents');
             request.onupgradeneeded = () => {
@@ -344,10 +351,18 @@ async function checkPersistence(main) {
           });
           if (result.state.bindings['toggle-window'] !== 'Control+Alt+K' || result.state.error)
             throw Error('Synthetic shortcut was rejected');
-          return result.state.bindings;
-        });
+          if (!modernSource) return result.state.bindings;
+          const help = await window.desktop.shortcutSettings({
+            op: 'set',
+            action: 'toggle-shortcut-help',
+            accelerator: 'Control+Alt+U',
+          });
+          if (help.state.bindings['toggle-shortcut-help'] !== 'Control+Alt+U' || help.state.error)
+            throw Error('Synthetic shortcut help binding was rejected');
+          return help.state.bindings;
+        }, { seed: expected, modernSource });
   // The four supported pre-1.3 packages have the same nine actions. The seed
-  // changes just toggle-window; 1.3 adds one unoccupied default on upgrade.
+  // can also customize the help shortcut in 1.3 and later.
   const legacyBindings = {
     'toggle-window': 'Control+Alt+K',
     'toggle-panels': 'Control+Shift+P',
@@ -359,11 +374,12 @@ async function checkPersistence(main) {
     'scroll-device-down': 'Control+Shift+Down',
     screenshot: 'Control+Shift+S',
   };
-  const bindings = isolatedProfile
+  const modernBindings = { ...legacyBindings, 'toggle-shortcut-help': 'Control+Alt+U' };
+  const expectedSeed = modernSource ? modernBindings : legacyBindings;
+  const bindings = !modernSource && isolatedProfile
     ? { ...legacyBindings, 'toggle-shortcut-help': 'Control+Shift+/' }
-    : legacyBindings;
-  const legacySeed = config.phase === 'verify' && !Object.hasOwn(seededBindings, 'toggle-shortcut-help');
-  assert.deepEqual(seededBindings, legacySeed ? legacyBindings : bindings, 'Unexpected seeded shortcut bindings');
+    : expectedSeed;
+  assert.deepEqual(seededBindings, expectedSeed, 'Unexpected seeded shortcut bindings');
   const snapshot = (requireCommitted = false) =>
     call(async ({ seed, requireCommitted, isolatedProfile }) => {
       const db = await new Promise((resolve, reject) => {
@@ -412,8 +428,9 @@ async function checkPersistence(main) {
       };
     }, { seed: expected, requireCommitted, isolatedProfile });
   assert.deepEqual(await snapshot(), { ...expected, bindings });
-  // First launch must rebuild the migrated original before a reload or library navigation.
-  if (config.checkRag && config.rebuildIndex) ragRevision = await checkIndex();
+  // Check the upgraded index before a reload or library navigation can reconcile it.
+  if (config.checkRag && config.phase === 'verify' && (modernSource || config.rebuildIndex))
+    ragRevision = await checkIndex();
   const previousOrigin = await main.evaluate('performance.timeOrigin');
   await main.send('Page.reload');
   await poll(async () => {
@@ -521,7 +538,8 @@ async function checkPersistence(main) {
   // IndexedDB bytes and visible original first, then assert its rebuilt index and citation.
   if (config.checkRag && config.phase === 'verify') {
     const openedRevision = await checkIndex();
-    if (config.rebuildIndex) assert.equal(openedRevision, ragRevision, 'Opening the library changed the rebuilt index');
+    if (ragRevision)
+      assert.equal(openedRevision, ragRevision, 'Opening the library changed the verified index');
     ragRevision = openedRevision;
   }
   return { bindings, ragRevision };

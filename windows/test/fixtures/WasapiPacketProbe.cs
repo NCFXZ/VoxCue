@@ -23,6 +23,28 @@ class WasapiPacketProbe {
       }
       if(next!=129) throw new Exception("Lost accepted packets");
     }
+    var brokenPipe=new IOException("Synthetic receiver closed");
+    var brokenWriter=new PacketWriter((raw,flags,qpc)=>{throw brokenPipe;});
+    brokenWriter.Add(new byte[4],0,0);
+    try { brokenWriter.Dispose(); throw new Exception("Receiver failure was lost during drain"); }
+    catch(IOException ex) { if(ex.InnerException!=brokenPipe)throw; }
+    using(var blocked=new ManualResetEvent(false))
+    using(var release=new ManualResetEvent(false)) {
+      var stalledWriter=new PacketWriter((raw,flags,qpc)=>{
+        blocked.Set();
+        if(!release.WaitOne(5000))throw new Exception("Fixture did not release the writer");
+      });
+      bool disposed=false;
+      try {
+        stalledWriter.Add(new byte[4],0,0);
+        if(!blocked.WaitOne(2000))throw new Exception("Writer did not block");
+        try { stalledWriter.Dispose(); disposed=true; throw new Exception("Blocked writer failed to report the drain deadline"); }
+        catch(COMException ex) { if(ex.ErrorCode!=unchecked((int)0x8007006F))throw; }
+      } finally {
+        release.Set();
+        if(!disposed)stalledWriter.Dispose();
+      }
+    }
     // Real endpoint progress, frozen capture clocks, invalid QPC and jumps.
     var silence=new LoopbackSilence(48000); ulong start;
     if(silence.Poll(48000,0,10000000,true,out start)!=0)throw new Exception("Initial clock");

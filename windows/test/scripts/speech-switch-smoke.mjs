@@ -71,8 +71,8 @@ const capture=require(root+'/dist-electron/windows/electron/speech/capture.js');
 // Observe the real controller's decision and its combined unacknowledged PCM at
 // that instant. The fixture never requests an expedited switch or edits its queue.
 const { SpeechController } = require(root+'/dist-electron/shared/electron/backend/speech/controller.js');
-const expedite = SpeechController.prototype.expediteDowngrade;
-SpeechController.prototype.expediteDowngrade = function() {
+const expedite = SpeechController.prototype.expediteBackloggedSwitch;
+SpeechController.prototype.expediteBackloggedSwitch = function() {
  const change = this.switching;
  const wasExpedited = change?.expedited;
  const queueMs = this.queued;
@@ -82,7 +82,7 @@ SpeechController.prototype.expediteDowngrade = function() {
 capture.devices=async()=>['system','microphone'].map(source=>({id:source,name:'Synthetic '+source,source,default:true}));
 capture.WasapiCapture=class{
  constructor(_h,source,_d,audio){this.source=source;this.audio=audio;this.offset=0;this.voiceOffset=0;stats.created++;}
- async start(){stats.started++;this.timer=setInterval(()=>{
+ async start(){stats.started++;const captureStart=Number(process.hrtime.bigint())/1e6;this.timer=setInterval(()=>{
   const samples=new Float32Array(1600),offset=this.offset;this.offset+=1600;
   if(this.generation!==generation){this.generation=generation;this.voiceOffset=0;}
   const at=this.voiceOffset;this.voiceOffset+=1600;
@@ -90,7 +90,7 @@ capture.WasapiCapture=class{
    const mic=this.source==='microphone',position=at+i-(mic?6400:0);
    samples[i]=(mic&&position>=48000?0:(mic?microphone:wave).samples[position])||0;
   }
-  stats.packets++;this.audio({samples,rate:16000,timestamp:1000+offset/16,flags:0});
+  stats.packets++;this.audio({samples,rate:16000,timestamp:captureStart+offset/16,flags:0});
  },100);}
  async stop(){if(this.timer){clearInterval(this.timer);this.timer=undefined;stats.stopped++;}}
 };
@@ -108,7 +108,7 @@ app.setPath('sessionData',${JSON.stringify(path.join(testRoot, 'profile'))});
 const {SpeechHost}=require(${JSON.stringify(path.join(root, 'dist-electron/shared/electron/backend/speech/host.js'))});
 globalThis.fetch=()=>{throw Error('No network during recognition');};require('node:net').Socket.prototype.connect=globalThis.fetch;
 app.whenReady().then(async()=>{
- const events=[];let previousModel='paraformer';
+ const events=[];let previousModel='paraformer',previousDevice='cpu';
  const host=new SpeechHost(${JSON.stringify(models.speechModels)},'synthetic',e=>events.push(e),${JSON.stringify(processFile)},${JSON.stringify(component)});
  const options={sources:['system','microphone'],speechModel:'paraformer',inferenceDevice:'cpu'};
  const wait=async(predicate)=>{const until=Date.now()+120000;while(!predicate()){
@@ -132,10 +132,14 @@ app.whenReady().then(async()=>{
    if (expedited.length) {
     assert.equal(expedited.length, 1);
     assert.equal(previousModel, 'qwen');
-    assert.equal(model, 'paraformer');
-    assert.ok(expedited[0].queueMs >= 4000);
+    if (model === 'paraformer') assert.ok(expedited[0].queueMs >= 4000);
+    else {
+     assert.equal(previousDevice, 'cpu');
+     assert.equal(device, 'cuda');
+     assert.ok(expedited[0].queueMs >= 24000);
+    }
     assert.deepEqual(gaps.map(event => event.source).sort(), [...options.sources].sort());
-    assert.ok(gaps.every(event => event.message === '转写积压，已切换轻量模型。未完成片段不会自动用于回答。'));
+    assert.ok(gaps.every(event => event.message === '转写积压，已切换到所选语音配置。未完成片段不会自动用于回答。'));
    } else {
     assert.equal(gaps.length, 0, JSON.stringify(gaps));
     for (const source of options.sources) {
@@ -162,7 +166,7 @@ app.whenReady().then(async()=>{
    assert.ok(events.slice(switched).every(event => event.type !== 'segment' || !oldIds.has(event.segment.id)), 'Retired recognizer emitted a stale segment');
    const result = expedited.length ? 'both backlog gaps at '+expedited[0].queueMs+'ms' : 'both old finals';
    console.log('PASS Windows capture/AEC kept alive; '+result+' and both new finals; '+model+' '+device);
-   previousModel=model;
+   previousModel=model;previousDevice=device;
   }
   await host.send({test:'voice',enabled:false});
   const config=${JSON.stringify(path.join(component, 'asr/config.json'))},hidden=config+'.hidden';

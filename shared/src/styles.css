@@ -8916,6 +8916,15 @@ svg[data-ui-icon] {
 .sync-problem-dialog .dialog-actions {
   margin-inline-start: auto;
   gap: 8px;
+  max-width: 100%;
+}
+.sync-problem-dialog .dialog-actions .button-outline {
+  min-width: 0;
+  white-space: normal;
+}
+.sync-problem-dialog .dialog-close-button {
+  flex-shrink: 0;
+  align-self: center;
 }
 .sync-problem-dialog :is(.selection-toggle, input[type='radio']):focus-visible {
   outline: 2px solid var(--focus);

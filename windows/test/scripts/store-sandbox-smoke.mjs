@@ -31,7 +31,8 @@ const argument = process.argv[2];
 const copilotVault = argument === '--copilot-vault';
 const appxBaselines = new Map([
   ['--appx-upgrade', ['1.2.3', '6d6fc9ae57aff3db3d66e317eb4444ddedbf9ecccf5fa60d2be270bea28d8fe4']],
-  ['--appx-upgrade-1.2.2', ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8']],
+  ['--appx-upgrade-1.2.2', ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8', 'store']],
+  ['--appx-upgrade-1.3.0', ['1.3.0', '4ff42cba5792d3460e9369614002361661f9410419992b9dffcb5d1ddfea5792', 'store']],
 ]);
 const appxUpgrade = appxBaselines.has(argument);
 // Published, immutable originals used before installing the current package.
@@ -40,6 +41,7 @@ const previousVersions = new Map([
   ['--nsis-upgrade-1.2.2', ['1.2.2', '8d4bce6ce60b17cecbb570814a8408263b30e8517dfec9a169d62c438362964d']],
   ['--nsis-upgrade-1.2.0', ['1.2.0', 'a83d1399fb2dae98cc4dfcf98924c6e571d6c17a461ca92a8292556bbcc610ae']],
   ['--nsis-upgrade-1.1.1', ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd']],
+  ['--nsis-upgrade-1.3.0', ['1.3.0', '4c1666dcc3488d58df75f69dc4a9686851564194b7dbe1271e6921c66fb1e36d', 'installer']],
 ]);
 const nsisTask =
   argument === '--nsis-current' ? 'nsis-current'
@@ -73,14 +75,26 @@ const artifact = copilotVault
     : appxArgument
       ? path.resolve(appxArgument.slice('--appx='.length))
       : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
-const [previousVersion, previousDigest] = appxBaselines.get(argument) ?? previousVersions.get(argument) ?? [];
-const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3'].includes(previousVersion);
+const [previousVersion, previousDigest, previousDirectory = previousVersion] =
+  appxBaselines.get(argument) ?? previousVersions.get(argument) ?? [];
+const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3', '1.3.0'].includes(previousVersion);
 const checkRagUpgrade = checkCachedOffer || previousVersion === '1.2.0';
-const previousArtifact = appxUpgrade
-  ? path.join(platformRoot, 'release', previousVersion === '1.2.2' ? 'store' : previousVersion, `VoxCue-Store-${previousVersion}-x64.appx`)
-  : previousVersion
-  ? path.join(platformRoot, 'release', previousVersion, `VoxCue-Setup-${previousVersion}-x64.exe`)
-  : undefined;
+let previousArtifact;
+if (previousVersion) {
+  const name = appxUpgrade ? `VoxCue-Store-${previousVersion}-x64.appx` : `VoxCue-Setup-${previousVersion}-x64.exe`;
+  const release = path.join(platformRoot, 'release');
+  const archived = path.join(release, previousVersion);
+  previousArtifact = path.join(release, previousDirectory, name);
+  for (const file of [path.join(archived, previousDirectory, name), path.join(archived, name)]) {
+    try {
+      await lstat(file);
+      previousArtifact = file;
+      break;
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+    }
+  }
+}
 const label = copilotVault ? 'Copilot vault Sandbox' : nsisTask ? 'NSIS Sandbox' : 'Store Sandbox';
 const sandboxExe = path.join(process.env.WINDIR, 'System32/WindowsSandbox.exe');
 const powershell = path.join(process.env.WINDIR, 'System32/WindowsPowerShell/v1.0/powershell.exe');
@@ -389,7 +403,7 @@ function Check-ApiKeyPaste($directory) {
   $result.apiKeyPaste = $true
 }
 function Install-UpgradeRag($profileMarker) {
-  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3')) { throw 'Unexpected upgrade component' }
+  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3','1.3.0')) { throw 'Unexpected upgrade component' }
   $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
   Assert-GuestProfilePath $cache
   if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
@@ -406,7 +420,7 @@ function Assert-GuestProfilePath($file) {
     $current = [IO.Path]::GetDirectoryName($current)
   }
 }
-function Assert-ClaimedLocalProfile($marker) {
+function Assert-LocalProfile($marker) {
   $root = [IO.Path]::GetDirectoryName($marker)
   $owner = '${createHash('sha256').update('local').digest('hex')}'
   $assignment = Join-Path $root 'legacy-profile-assignment-v1.json'
@@ -415,9 +429,10 @@ function Assert-ClaimedLocalProfile($marker) {
   $partition = Join-Path (Join-Path $root 'Partitions') ('voxcue-user-' + $owner)
   foreach ($file in @($assignment, $shortcut, $partition)) { Assert-GuestProfilePath $file }
   $claim = Get-Content -LiteralPath $assignment -Encoding UTF8 -Raw | ConvertFrom-Json
-  if ($claim.owner -cne $owner -or $claim.files -isnot [bool] -or $claim.files -or $claim.browser -isnot [bool] -or $claim.browser -or
+  $legacyOwner = if ([version]$config.previous.version -lt [version]'1.3.0') { $owner } else { $null }
+  if ($claim.owner -cne $legacyOwner -or $claim.files -isnot [bool] -or $claim.files -or $claim.browser -isnot [bool] -or $claim.browser -or
       -not (Test-Path -LiteralPath $shortcut -PathType Leaf) -or -not (Test-Path -LiteralPath $partition -PathType Container)) {
-    throw 'The claimed local account profile, settings or browser partition was not committed'
+    throw 'Unexpected legacy assignment or missing local account settings or browser partition'
   }
 }
 try {
@@ -628,12 +643,13 @@ try {
         $runtimeConfig = Join-Path $work 'renderer-config.json'
         $runtimeFile = Join-Path $work ('runtime-' + $phases.Count + '.json')
         $options = @{nonce=$config.nonce; distribution='nsis'; appDirectory=$target; version=$expectedVersion;
-          phase=$phase; bindings=$bindings; expectedPid=$app.Id; close=$true}
+          phase=$phase; sourceVersion=$config.previous.version; bindings=$bindings; expectedPid=$app.Id; close=$true}
         if ($config.checkCachedOffer) { $options.offeredVersion = $config.current.version }
         if ($config.ragDirectory) {
           $options.checkRag = $true
           $options.ragRevision = $result.ragRevision
-          $options.rebuildIndex = $phase -ceq 'verify' -and $phases.Count -eq 1 -and [version]$expectedVersion -ge [version]'1.3.0'
+          $options.rebuildIndex = $phase -ceq 'verify' -and $phases.Count -eq 1 -and
+            [version]$config.previous.version -lt [version]'1.3.0' -and [version]$expectedVersion -ge [version]'1.3.0'
         }
         [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
         $inspection = New-Object Diagnostics.Process
@@ -706,7 +722,7 @@ try {
         Assert-GuestProfilePath $profileMarker
         $localMode = Get-Content -LiteralPath $profileMarker -Encoding UTF8 -Raw | ConvertFrom-Json
         if ($localMode -isnot [bool] -or -not $localMode) { throw 'NSIS backend did not use the real guest profile' }
-        if ($config.previous -and $phase -ceq 'verify' -and [version]$expectedVersion -ge [version]'1.3.0') { Assert-ClaimedLocalProfile $profileMarker }
+        if ($config.previous -and $phase -ceq 'verify' -and [version]$expectedVersion -ge [version]'1.3.0') { Assert-LocalProfile $profileMarker }
         $phases.Add($expectedVersion + ':' + $phase)
         return $runtime.bindings
       } finally { $app.Dispose() }
@@ -717,11 +733,15 @@ try {
         # Seed only the public signed release metadata in this fresh, offline guest.
         $userData = [IO.Path]::GetDirectoryName($profileMarker)
         $releaseCache = Join-Path $userData 'updates\windows-ed25519-v1\release-cache.json'
-        $preferences = Join-Path $userData 'update-settings.json'
+        $settingsRoot = if ([version]$config.previous.version -ge [version]'1.3.0') {
+          Join-Path (Join-Path $userData 'account-profiles') '${createHash('sha256').update('local').digest('hex')}'
+        } else { $userData }
+        $preferences = Join-Path $settingsRoot 'update-settings.json'
         Assert-GuestProfilePath $releaseCache
         Assert-GuestProfilePath $preferences
         if ((Test-Path -LiteralPath $releaseCache) -or (Test-Path -LiteralPath $preferences)) { throw 'Expected an empty guest update profile' }
         $null = New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($releaseCache)) -Force
+        $null = New-Item -ItemType Directory -Path $settingsRoot -Force
         Copy-Item -LiteralPath 'C:\VoxCueStoreInput\release-cache.json' -Destination $releaseCache
         [IO.File]::WriteAllText($preferences, '{"schemaVersion":1,"autoDownload":false}', (New-Object Text.UTF8Encoding $false))
       }
@@ -910,6 +930,7 @@ public static class PackageProcess {
       storeUpdateMessage=$config.storeUpdateMessage; fixtureDirectory=$config.fixtureDirectory}
     if ($config.previous) {
       $options.phase = if ($pass -eq 0) { 'seed' } else { 'verify' }
+      $options.sourceVersion = $config.previous.version
       $options.checkRag = $true
       if ($pass -eq 0) {
         Install-UpgradeRag $profileMarkers[1]
@@ -917,7 +938,8 @@ public static class PackageProcess {
         if ($profileMarker -ine $profileMarkers[1] -or (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash -cne $markerHash) { throw 'Store upgrade replaced the original LocalCache preference' }
         $options.bindings = $seedBindings
         $options.ragRevision = $result.ragRevision
-        $options.rebuildIndex = $pass -eq 1 -and [version]$item.version -ge [version]'1.3.0'
+        $options.rebuildIndex = $pass -eq 1 -and
+          [version]$config.previous.version -lt [version]'1.3.0' -and [version]$item.version -ge [version]'1.3.0'
       }
     }
     $runtimeConfig = Join-Path $work 'renderer-config.json'
@@ -951,7 +973,7 @@ public static class PackageProcess {
         $markerHash = (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash
       } else {
         if (($runtime.ragRevision -cne $result.ragRevision) -ne $options.rebuildIndex) { throw 'Unexpected Store RAG revision across upgrade or restart' }
-        if ([version]$item.version -ge [version]'1.3.0') { Assert-ClaimedLocalProfile $profileMarker }
+        if ([version]$item.version -ge [version]'1.3.0') { Assert-LocalProfile $profileMarker }
       }
       $result.ragRevision = $runtime.ragRevision
       $phases.Add($item.packageVersion + '/' + $runtime.version + ':' + $runtime.phase)

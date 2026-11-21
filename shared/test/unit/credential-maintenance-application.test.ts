@@ -233,7 +233,7 @@ it('keeps historical keys when any account’s API key is unreadable or has a mi
   expect(await readCredentialRecords(decrypt, ports)).toBe('unavailable');
   const other = profileDirectory(native.directory, 'demo');
   await mkdir(other);
-  await symlink(path.join(root, 'auth-data'), path.join(other, 'auth-data'));
+  await symlink(path.join(root, 'auth-data'), path.join(other, 'auth-data'), 'junction');
   await key.remove('openai');
   expect(await readCredentialRecords(decrypt, ports)).toBe('unavailable');
 });

@@ -46,7 +46,8 @@
 
 ## 发行状态与接续
 
-- Windows 接续以 1.3.0 为基线，见 [1.3.2 更新与复测](shared/docs/WINDOWS_1.3.2_HANDOFF.md)和 [1.3.1 逐项交接](shared/docs/WINDOWS_1.3.1_HANDOFF.md)。
+- Windows 1.3.2 候选以正式 1.3.0 为升级基线，对应商店包身份版本 2.3.2.0。应用内置 Codex 0.171.0，账号切换和更新前锁定旧窗口输入直到草稿保存完成，保存失败后恢复编辑。关闭同步类别会使该类别尚未提交的整组冲突决定失效。验收范围见 [1.3.2 更新与复测](shared/docs/WINDOWS_1.3.2_HANDOFF.md)和 [1.3.1 逐项交接](shared/docs/WINDOWS_1.3.1_HANDOFF.md)。
+- Windows 发行前检查使用 `test:windows:functional`、`test:windows:regression`、`test:ui:dpi` 及 `store-sandbox-smoke.mjs`。安装版与商店版的覆盖升级分别使用 `--nsis-upgrade-1.3.0` 和 `--appx-upgrade-1.3.0`。GitHub 安装包与更新清单追加到主仓已有 `v1.3.2` 发行，Microsoft Store 更新说明沿用该发行正文。
 - Mac 正式包首次安装和 1.3.1 → 1.3.2 升级使用临时隔离客机。可从固定的 Apple 恢复镜像新装，或者从指定的 Cirrus 镜像准备基线。启动后核实来宾 SIP、Gatekeeper 和签名执行状态，再运行正式包验收。客机准备、验收和清理入口见 [隔离客机说明](macos/docs/TEST_GUEST.md)。
 - 1.3.0 已知语音识别限制已记入双端交接。语气词误转成普通词时可能触发自动回答并消耗额度，用户可关闭面试浮窗的「自动回答」，核对后手动发送。[自动提问与转写](shared/docs/WINDOWS_1.3.0_HANDOFF.md#面试设备实时识别与自动提问)
 - 历史版本 `v1.2.3` 可从[主仓发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3)和[历史分发页](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)获取，包含 Mac DMG、ZIP、`latest-mac.yml` 与三项 Windows 资产。

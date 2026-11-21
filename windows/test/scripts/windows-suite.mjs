@@ -36,6 +36,7 @@ if (suites[0] === '--dpi') {
     'profile-selection',
     'typography',
     'interview-typography',
+    'interview-effort',
     'interview-chrome',
     'interview-motion',
     'interview-screenshot',
@@ -87,9 +88,12 @@ if (suites[0] === '--dpi') {
         // A pending native WM_MOUSEMOVE can replace Chromium's injected hover.
         // Park the real pointer outside the controls while the isolated UI runs.
         await parkMatrixCursor();
+        const script = name === 'interview-effort'
+          ? 'test/scripts/interview-effort-smoke.mjs'
+          : '../shared/test/scripts/' + name + '-smoke.mjs';
         const child = spawnTestProcess(
           process.execPath,
-          ['../shared/test/scripts/' + name + '-smoke.mjs'],
+          [script],
           {
             env: {
               ...process.env,

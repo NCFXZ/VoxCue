@@ -34,6 +34,8 @@ const service=new RemoteConnectionService({
   mobileAssets:createMobileAssets(${JSON.stringify(path.join(workspace.platformRoot, 'dist'))}),
   onState(){},
   async onCommand(command){
+    const delay=globalThis.mobileUi.delayedCommand;
+    if(delay?.action===command.action)await delay.done;
     const result={requestId:command.requestId,ok:true};
     if(command.action==='set-draft'){
       if(command.expectedRevision!==snapshot.inputDraft.revision)return {...result,ok:false,error:'draft-conflict'};
@@ -84,6 +86,9 @@ try {
   });
   await page.getByRole('button', { name: /连接电脑|Connect computer/, exact: true }).click();
   await page.locator('.mobile-pairing-code').waitFor();
+  const waiting = page.locator('.mobile-waiting[role="status"]');
+  await waiting.getByText(/^(等待电脑允许|Waiting for approval)$/).waitFor();
+  await waiting.locator('.mobile-spinner[aria-hidden="true"]').waitFor();
   const code = (await page.locator('.mobile-pairing-code').innerText()).replace(/\s/g, '');
   assert.match(code, /^\d{6}$/);
   const desktopCode = await app.evaluate(async () => {
@@ -107,9 +112,33 @@ try {
     }
     assert.equal(await page.locator('button svg').count(), 0);
   }
-  await page.getByRole('button', { name: /更多|More/, exact: true }).click();
-  await page.locator('select').first().selectOption('en');
-  await page.getByRole('button', { name: 'Close', exact: true }).click();
+  const setLanguage = async (language, close) => {
+    await page.getByRole('button', { name: /更多|More/, exact: true }).click();
+    await page.locator('select').first().selectOption(language);
+    await page.getByRole('button', { name: close, exact: true }).click();
+  };
+  const checkPending = async (action, trigger, pending) => {
+    await app.evaluate((_, action) => {
+      let release;
+      const done = new Promise(resolve => { release = resolve; });
+      globalThis.mobileUi.delayedCommand = { action, done, release };
+    }, action);
+    await trigger.click();
+    await pending.locator('.mobile-spinner[aria-hidden="true"]').waitFor();
+    assert.equal(await pending.getAttribute('aria-busy'), 'true');
+    assert.equal(await pending.isDisabled(), true);
+    await app.evaluate(() => {
+      globalThis.mobileUi.delayedCommand.release();
+      delete globalThis.mobileUi.delayedCommand;
+    });
+  };
+  await setLanguage('zh', '关闭');
+  const mute = page.getByRole('switch', { name: '关闭麦克风', exact: true });
+  await checkPending('set-microphone', mute, mute);
+  const unmute = page.getByRole('switch', { name: '打开麦克风', exact: true });
+  await unmute.click();
+  await mute.waitFor();
+  await setLanguage('en', 'Close');
   assert.doesNotMatch(await page.locator('body').innerText(), /\p{Script=Han}/u);
   await input.fill('Shared synthetic question');
   await app.evaluate(async () => {
@@ -123,10 +152,19 @@ try {
   assert.equal(await app.evaluate(() => globalThis.mobileUi.snapshot.microphoneMuted), true);
   await page.locator('.mobile-auto-answer[aria-checked="false"]').click();
   await page.locator('.mobile-auto-answer[aria-checked="true"]').waitFor();
-  await page.getByRole('button', { name: 'Send', exact: true }).click();
-  await page.getByRole('button', { name: 'Stop answer', exact: true }).waitFor();
+  await checkPending(
+    'ask',
+    page.getByRole('button', { name: 'Send', exact: true }),
+    page.getByRole('button', { name: 'Sending…', exact: true }),
+  );
+  const stop = page.getByRole('button', { name: 'Stop answer', exact: true });
+  await stop.waitFor();
   assert.equal(await input.inputValue(), '');
-  await page.getByRole('button', { name: 'Stop answer', exact: true }).click();
+  await checkPending(
+    'stop-answer',
+    stop,
+    page.getByRole('button', { name: 'Stopping…', exact: true }),
+  );
   await page.getByText('Stopped', { exact: true }).waitFor();
   for (const [content, status] of [[opening, 'streaming'], [longMarkdown, 'completed']]) {
     await app.evaluate((_electron, { content, status }) => {
@@ -139,6 +177,29 @@ try {
   const longReply = page.locator('.mobile-markdown').last();
   await longReply.getByText('All receipts reconciled', { exact: true }).waitFor();
   assert.equal(await longReply.locator('p > strong').count(), 90);
+  const answers = page.locator('.mobile-answer-scroll');
+  await answers.press('Home');
+  await page.getByRole('button', { name: 'Back to latest', exact: true }).waitFor();
+  await app.evaluate(() => {
+    const { service, snapshot } = globalThis.mobileUi;
+    snapshot.answers.at(-1).content += '\n\nSynthetic postscript while reading.';
+    snapshot.revision++;
+    service.updateSnapshot(structuredClone(snapshot));
+  });
+  await longReply.getByText('Synthetic postscript while reading.', { exact: true }).waitFor();
+  const latest = page.getByRole('button', { name: 'New content', exact: true });
+  await latest.locator('[aria-hidden="true"]').waitFor();
+  assert.equal(await answers.evaluate(node => node.scrollTop), 0);
+  await latest.click();
+  const atEnd = () => page.waitForFunction(() => {
+    const pane = document.querySelector('.mobile-answer-scroll');
+    return pane.scrollHeight - pane.clientHeight - pane.scrollTop <= 1;
+  });
+  await atEnd();
+  await answers.press('Home');
+  await page.getByRole('button', { name: 'Back to latest', exact: true }).waitFor();
+  await answers.press('End');
+  await atEnd();
   await page.getByRole('button', { name: 'Hidden', exact: true }).click();
   assert.equal(await page.locator('.mobile-transcript-scroll').count(), 0);
   await page.getByRole('button', { name: 'Show transcript', exact: true }).click();
@@ -175,8 +236,11 @@ try {
   await page.waitForFunction(() => document.querySelector('textarea')?.value === 'Computer draft after reconnect' && !document.querySelector('textarea').disabled);
   assert.deepEqual(errors, []);
   assert.equal(await app.evaluate(() => globalThis.mobileUi.service.state().status), 'connected');
-  console.log('PASS: actual bundled mobile page, LAN pairing approval, MathML/CSP, English, shared draft, mic/auto answer/send/stop, transcript toggle, responsive controls and reconnect/reload. Chromium, not an iPhone keyboard test.');
+  console.log('PASS: bundled mobile page, LAN pairing, MathML/CSP, bilingual controls and pending feedback, shared draft, mic/auto answer/send/stop, long-answer keyboard navigation, responsive controls and reconnect/reload.');
 } finally {
-  await app.evaluate(() => globalThis.mobileUi.service.disconnect()).catch(() => {});
+  await app.evaluate(() => {
+    globalThis.mobileUi.delayedCommand?.release();
+    globalThis.mobileUi.service.disconnect();
+  }).catch(() => {});
   await closeUiApp(app);
 }

@@ -361,8 +361,28 @@ try {
     (width) => Math.abs(document.querySelector('.floating-transcript').clientWidth - width) <= 1,
     defaultWidth,
   );
+  const clockUnavailable = '本机音频时钟不可用，请重新开始采集。';
+  const clockChanged = '系统时间已变化，转写已继续。';
+  await app.evaluate((_, { error, notice }) => {
+    const { host, status } = globalThis.languageSpeech;
+    host.emit({ type: 'gap', source: 'system', message: notice });
+    host.emit({ type: 'status', status: { ...status, state: 'error', error, failureSource: 'system' } });
+  }, { error: clockUnavailable, notice: clockChanged });
+  const clockWarning = floating.locator('.floating-warning[role="status"]');
+  const clockError = floating.locator('.audio-recovery[role="alert"]');
+  await clockWarning.getByText('The system time changed. Transcription has resumed.', { exact: true }).waitFor();
+  await clockError.getByText('The local audio clock is unavailable. Restart audio capture.', { exact: true }).waitFor();
+  await audit('English capture-clock messages', floating);
   await page.evaluate(() => localStorage.setItem('voxcue-language-v1', 'zh-CN'));
   await floating.getByRole('button', { name: '面试设置', exact: true }).waitFor();
+  await clockWarning.getByText(clockChanged, { exact: true }).waitFor();
+  await clockError.getByText(clockUnavailable, { exact: true }).waitFor();
+  await app.evaluate(() => {
+    const { host, status } = globalThis.languageSpeech;
+    host.emit({ type: 'status', status });
+    host.emit({ type: 'activity', source: 'system', speaking: false, level: 0 });
+  });
+  await recoveryBanner.waitFor({ state: 'hidden' });
   await page.evaluate(() => localStorage.setItem('voxcue-language-v1', 'en'));
   await floating.getByRole('button', { name: 'Interview settings', exact: true }).waitFor();
   await floating.getByRole('button', { name: 'Interview settings', exact: true }).click();

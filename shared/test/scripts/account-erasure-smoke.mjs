@@ -240,7 +240,8 @@ try {
     const panel = body.getBoundingClientRect();
     const switches = [...body.querySelectorAll('.settings-switch')];
     const edge = switches.at(-1).getBoundingClientRect().right;
-    const deviceEdge = x => Math.round(x * devicePixelRatio);
+    // DOMRect float noise can straddle a device-pixel midpoint for one layout edge.
+    const deviceEdge = x => Math.round((Math.round(x * 64) / 64) * devicePixelRatio);
     const reservedScrollbar = parseFloat(getComputedStyle(body).getPropertyValue('--panel-scrollbar-width')) || 0;
     return {
       buttons: buttons.length,

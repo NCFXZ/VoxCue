@@ -41,5 +41,5 @@ for (let processIndex = 0; processIndex < 2; processIndex++) {
   }
 }
 console.log(
-  'PASS native WASAPI full-channel mix, common QPC, discontinuity/timestamp flags and split-pipe decoding; no hardware',
+  'PASS native WASAPI mix, QPC, packet flags, FIFO, closed receiver and bounded drain; no hardware',
 );

@@ -153,8 +153,8 @@ for (const dependency of [
 for (const [name, version] of [
   ['@github/copilot-sdk', '1.0.21'],
   ['@github/copilot-sdk-win32-x64', '1.0.21'],
-  ['@openai/codex', '0.170.0'],
-  ['@openai/codex-win32-x64', '0.170.0-win32-x64'],
+  ['@openai/codex', '0.171.0'],
+  ['@openai/codex-win32-x64', '0.171.0-win32-x64'],
   ['zod', '4.6.6'],
   ['word-extractor', '1.0.4'],
   ['chardet', '2.1.1'],

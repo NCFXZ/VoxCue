@@ -72,6 +72,7 @@ const shared = [
   'components-ui',
   'adversarial',
   'cloud-account',
+  ...(process.platform === 'win32' ? ['sync-conflict-workspace'] : []),
   'cloud-protocol',
   'free-service',
   'account-usage-overview',
