@@ -4,7 +4,7 @@
 
 **2026-11-21 · macOS 1.3.1，Windows 1.3.0。** Mac 的源码、安装包与更新清单使用主仓标签 `v1.3.1`。Windows 基线为 `v1.3.0`（`669c44a`），安装版沿用 `v1.2.3`（`fae85ca`）的 Ed25519 更新身份。Microsoft Store 2.3.0.0 已提交认证。[Mac 发行入口](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.1) · [Windows 发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.0)
 
-- 用户可见的功能列在 [Windows 更新日志](docs/1.3.0_WINDOWS_UPDATE.md)。实现方法、历史行为、逐项修复与复验入口见 [Windows 开发交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。
+- 用户可见的功能与修复见 [Mac 1.2.3 → 1.3.1 更新日志](docs/1.3.1_MACOS_UPDATE.md) 和 [Windows 1.3.0 更新日志](docs/1.3.0_WINDOWS_UPDATE.md)。Windows 1.3.0 的实现与验证入口见 [Windows 开发交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。
 - 账号服务 0.6.1 已上线。迁移云来源时可以不创建会话直接验密。注销响应丢失后，桌面端再查询结果，再按账号清理本机资料。[账号协议](shared/docs/WINDOWS_1.3.0_HANDOFF.md#独立账号服务的协议与发布依赖)
 - 开始面试按连接方式显示用量。准备聊天、实时面试和历史回答按当时的服务商显示标志。聊天标志保留原尺寸与间距，去掉灰色圆角底。已移除回答结束后的网页搜索提示。Windows 原生密钥框支持圆点遮挡与显隐，迁移和注销的密码框也支持显隐。[AI 服务与界面](shared/docs/WINDOWS_1.3.0_HANDOFF.md#ai-服务授权和模型选择)
 - Windows 安装版与商店版已完成正式 1.2.3 升级及全新安装验收，商店原生凭据输入按系统包身份复验。安装程序、差分索引和更新清单已发布至 `NCFXZ/VoxCue`。Microsoft Store Submission 11（`1152921505702467958`）已接收 x64 包、中英文各四张新版截图和各六条更新说明。提交后进入 Pre-processing，通过认证后自动发布。[验证入口](shared/docs/WINDOWS_1.3.0_HANDOFF.md#验证入口与发行前待验) · [商店提交状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
