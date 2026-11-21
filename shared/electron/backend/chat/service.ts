@@ -1,27 +1,27 @@
 import { ReasoningSummary } from './summary';
+import { prepareResponseInput, encodeAttachmentBody, noWebSearchInstructions } from './input';
+export { buildInput } from './input';
 import { mergeActivityLog, type ChatActivity } from '../../contracts/activity';
 import { chatGPTProvider } from '../../contracts/chat';
-import type {
-  ChatRequest,
-  ChatModel,
-  ChatEvent,
-  ChatSource,
-  TokenUsage,
-} from '../../contracts/chat';
+import type { ChatEvent, ChatSource, ModelProvider, TokenUsage } from '../../contracts/chat';
 import type { AIChatService } from './ports';
-import { apiError, ChatServiceError, networkFailure } from './errors';
+import { apiError, ChatServiceError, invalidatesModelCatalog, networkFailure } from './errors';
 import { validateRequest, validSource, sourceKey } from './validation';
 export { apiError, publicFailure, ChatServiceError } from './errors';
 export { validateRequest, validSource } from './validation';
 import { responseEvents, requestResponse, readErrorResponse } from './responses';
 import { responseActivity } from './activity';
-import { modelEfforts } from './models';
-import { profileFormat, profileContext, ProfileAnswerStream } from './profile';
+import { ResponseText } from './responseText';
+import { invalidCatalog, openAIModels, type OpenAIAccess, type OpenAIModel } from './models';
+import { ModelCatalog } from './modelCatalog';
+import { profileFormat, profileContext, profileSchemaInstructions, ProfileAnswerStream } from './profile';
+import { ProfilePreviews } from './profilePreviews';
 import { verifySkillProposal } from './proposal';
 import type { UsageLedger } from './usage';
 import type { ChatGPTAccountUsage } from './accountUsage';
 import { boundedJson } from '../boundedJson';
 import { abortable } from '../cancellable';
+import { ProviderCredentialUnavailable } from '../auth/providerCredentialAccess';
 const apiBase = 'https://api.openai.com/v1';
 const managedBase = 'https://chatgpt.com/backend-api/codex';
 export function parseUsage(value: any): TokenUsage | null {
@@ -38,120 +38,90 @@ export function parseUsage(value: any): TokenUsage | null {
     totalTokens: value.total_tokens,
   };
 }
-const mimeTypes: Record<string, string> = {
-  pdf: 'application/pdf',
-  doc: 'application/msword',
-  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  ppt: 'application/vnd.ms-powerpoint',
-  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  xls: 'application/vnd.ms-excel',
-  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  webp: 'image/webp',
-};
-export function buildInput(request: ChatRequest) {
-  return request.turns.map((turn) => {
-    if (!turn.files?.length) return { role: turn.role, content: turn.content };
-    const content: Record<string, string>[] = [{ type: 'input_text', text: turn.content }];
-    for (const file of turn.files) {
-      const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
-      if (['txt', 'md'].includes(extension)) {
-        const text = new TextDecoder('utf-8', { fatal: true }).decode(file.bytes);
-        if (text.length > 200000) throw new Error('文本附件内容过长，请缩短后再发送。');
-        content.push({ type: 'input_text', text: `附件 ${file.name}：\n${text}` });
-      } else {
-        const mime = mimeTypes[extension];
-        if (!mime) throw new Error('不支持的附件格式。');
-        const data = `data:${mime};base64,${Buffer.from(file.bytes).toString('base64')}`;
-        content.push(
-          mime.startsWith('image/')
-            ? { type: 'input_image', image_url: data }
-            : { type: 'input_file', filename: file.name.split(/[\\/]/).pop()!, file_data: data },
-        );
-      }
-    }
-    return { role: turn.role, content };
-  });
-}
 interface Dependencies {
-  access(): Promise<{ token: string; account: string; chatgptAccountId?: string }>;
+  access(): Promise<OpenAIAccess>;
   ledger: UsageLedger;
   idleTimeoutMs?: number;
   responseHeadersTimeoutMs?: number;
   fetch?: typeof fetch;
   accountUsage?: ChatGPTAccountUsage;
+  provider?: ModelProvider;
+  failure?: typeof apiError;
 }
 export class ChatGPTService implements AIChatService {
-  private catalog: { account: string; at: number; models: ChatModel[] } | undefined;
+  private catalog = new ModelCatalog<OpenAIModel>();
   constructor(private dependencies: Dependencies) {}
-  private async connection() {
-    const access = await this.dependencies.access();
-    const managed = !!access.chatgptAccountId;
+  invalidateModels() {
+    this.catalog.clear();
+  }
+  private async connection(signal: AbortSignal) {
+    signal.throwIfAborted();
+    const access = await abortable(this.dependencies.access(), signal).catch((error) => {
+      if (error instanceof ProviderCredentialUnavailable) this.invalidateModels();
+      else if (!signal.aborted) this.catalog.expire();
+      throw error;
+    });
+    const managed = access.kind === 'codex';
+    if (!managed && access.kind !== 'api-key')
+      throw new Error('OpenAI 授权类型无效，请重新连接模型服务。');
+    const base = managed ? managedBase : apiBase;
+    const catalogURL = new URL(`${base}/models`);
+    // Report the same native runtime version used for login and quota.
+    if (managed) catalogURL.searchParams.set('client_version', access.runtimeVersion);
     return {
       account: access.account,
-      base: managed ? managedBase : apiBase,
-      managed,
+      kind: access.kind,
+      base,
+      catalogURL: catalogURL.href,
       headers: {
         authorization: `Bearer ${access.token}`,
-        ...(managed
-          ? { 'ChatGPT-Account-Id': access.chatgptAccountId!, originator: 'voxcue' }
-          : {}),
+        ...(managed ? { 'ChatGPT-Account-Id': access.chatgptAccountId, originator: 'voxcue' } : {}),
       },
     };
   }
-  private async checked(response: Response, signal = AbortSignal.timeout(20000)) {
+  private async checked(response: Response, signal: AbortSignal) {
     if (!response.ok) {
       const body = await readErrorResponse(response, signal, this.dependencies.idleTimeoutMs);
-      throw apiError(response.status, body, response.headers.get('x-request-id') ?? undefined);
+      throw (this.dependencies.failure ?? apiError)(response.status, body, response.headers.get('x-request-id') ?? undefined);
     }
     return response;
   }
-  async models(force = false): Promise<ChatModel[]> {
-    const { account, base, headers, managed } = await this.connection();
-    if (!force && this.catalog?.account === account && Date.now() - this.catalog.at < 300000)
-      return this.catalog.models;
-    const response = await this.checked(
-      await (this.dependencies.fetch ?? fetch)(
-        `${base}/models${managed ? '?client_version=0.164.0' : ''}`,
-        {
+  async models(force = false, caller?: AbortSignal) {
+    const signal = this.catalog.signal(caller);
+    const connection = await this.connection(AbortSignal.any([signal, AbortSignal.timeout(20000)]));
+    return this.readModels(connection, force, signal);
+  }
+  private readModels(
+    {
+      account,
+      kind,
+      catalogURL,
+      headers,
+    }: Awaited<ReturnType<ChatGPTService['connection']>>,
+    force: boolean,
+    signal: AbortSignal,
+  ) {
+    return this.catalog.read(`${kind}:${account}`, force, signal, async (deadline) => {
+      const response = await this.checked(
+        await (this.dependencies.fetch ?? fetch)(catalogURL, {
           headers,
-          signal: AbortSignal.timeout(20000),
+          signal: deadline,
           redirect: 'error',
-        },
-      ).catch((error) => {
-        throw networkFailure(error);
-      }),
-    );
-    const data = (await boundedJson(response, 4 * 1024 * 1024).catch((error) => {
-      if (error instanceof SyntaxError) throw new Error('模型列表响应无效，请重试。');
-      throw networkFailure(error);
-    })) as any;
-    if (!Array.isArray(data.models)) throw new Error('模型列表响应无效，请重试。');
-    const ids = new Set<string>();
-    const models: ChatModel[] = [];
-    for (const model of data.models) {
-      if (
-        model.visibility !== 'list' ||
-        typeof model.slug !== 'string' ||
-        !/^[\w.:-]{1,160}$/.test(model.slug) ||
-        typeof model.display_name !== 'string' ||
-        ids.has(model.slug)
-      )
-        continue;
-      ids.add(model.slug);
-      models.push({
-        id: model.slug,
-        label: model.display_name.slice(0, 120),
-        description: 'ChatGPT 账户可用模型',
-        provider: { ...chatGPTProvider },
-        reasoningEfforts: modelEfforts(model),
+          cache: 'no-store',
+        }).catch((error) => {
+          throw networkFailure(error);
+        }),
+        deadline,
+      );
+      const payload = await boundedJson(response, 4 * 1024 * 1024, deadline).catch(() => {
+        if (deadline.aborted) throw deadline.reason;
+        throw invalidCatalog();
       });
-    }
-    if (!models.length) throw new Error('当前账户没有可用模型，请检查 ChatGPT 授权或套餐。');
-    this.catalog = { account, at: Date.now(), models };
-    return models;
+      const latest = await abortable(this.dependencies.access(), deadline);
+      if (latest.kind !== kind || latest.account !== account)
+        throw new Error('账户已变更，请重新刷新模型列表。');
+      return openAIModels(payload, latest, this.dependencies.provider);
+    });
   }
   async resetUsage() {
     const { account } = await this.dependencies.access();
@@ -165,26 +135,38 @@ export class ChatGPTService implements AIChatService {
     return this.dependencies.ledger.get(account);
   }
   async stream(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
-    return this.run(value, emit, signal);
+    const scope = this.catalog.signal(signal);
+    try {
+      return await this.run(value, emit, scope);
+    } catch (error) {
+      if (!scope.aborted && invalidatesModelCatalog(error)) this.catalog.expire();
+      throw error;
+    }
   }
   private async run(value: unknown, emit: (event: ChatEvent) => void, signal: AbortSignal) {
     const request = validateRequest(value);
     signal.throwIfAborted();
-    const models = await abortable(this.models(), signal);
+    const connection = await this.connection(AbortSignal.any([signal, AbortSignal.timeout(20000)]));
+    const { account, base, headers } = connection;
+    const models = await this.readModels(connection, false, signal);
     signal.throwIfAborted();
-    if (!models.some((model) => model.id === request.modelId))
-      throw new Error('所选模型当前不可用，请刷新模型列表。');
-    if (
-      request.effort &&
-      !models
-        .find((model) => model.id === request.modelId)
-        ?.reasoningEfforts?.includes(request.effort)
-    )
+    const model = models.find((item) => item.id === request.modelId);
+    if (!model) throw new Error('所选模型当前不可用，请刷新模型列表。');
+    if (request.effort && !model.reasoningEfforts?.includes(request.effort))
       throw new Error('所选模型不支持该思考强度，请选择自动或刷新模型列表。');
-    const { account, base, headers } = await abortable(this.connection(), signal);
-    signal.throwIfAborted();
-    const input: Record<string, unknown>[] = buildInput(request);
-    emit({ id: request.id, type: 'provider', provider: { ...chatGPTProvider } });
+    const { input, attachments } = prepareResponseInput(request);
+    if (
+      model.imageInput === false &&
+      input.some(
+        (turn) =>
+          Array.isArray(turn.content) && turn.content.some((part) => part.type === 'input_image'),
+      )
+    )
+      throw new Error('所选模型不支持图片输入，请移除图片或更换模型。');
+    const summaryEnabled = model.reasoningSummary && request.effort !== 'none';
+    const webSearch = request.webSearch && model.webSearch === true;
+    const provider = this.dependencies.provider ?? chatGPTProvider;
+    emit({ id: request.id, type: 'provider', provider });
     // Active reasoning, searches and heartbeats can legitimately exceed three minutes.
     // Header waiting and stream inactivity have independent, cancellable limits.
     const deadline = signal;
@@ -209,6 +191,33 @@ export class ChatGPTService implements AIChatService {
     };
     {
       deadline.throwIfAborted();
+      const json = JSON.stringify({
+        model: request.modelId,
+        instructions: request.instructions + profileContext(request) +
+          (request.webSearch && !webSearch ? noWebSearchInstructions : '') +
+          (request.profile && !model.nativeProfileFormat ? profileSchemaInstructions : ''),
+        input,
+        store: false,
+        stream: true,
+        ...(request.profile && model.nativeProfileFormat ? { text: profileFormat } : {}),
+        ...(request.effort || summaryEnabled
+          ? {
+              reasoning: {
+                ...(request.effort ? { effort: request.effort } : {}),
+                ...(summaryEnabled ? { summary: 'auto' } : {}),
+              },
+            }
+          : {}),
+        ...(webSearch
+          ? {
+              tools: [{ type: 'web_search' }],
+              tool_choice: 'auto',
+              include: ['web_search_call.action.sources'],
+            }
+          : {}),
+      });
+      const body = attachments.length ? await encodeAttachmentBody(json, attachments, deadline) : json;
+      deadline.throwIfAborted();
       const response = await this.checked(
         await requestResponse(
           this.dependencies.fetch ?? fetch,
@@ -220,34 +229,7 @@ export class ChatGPTService implements AIChatService {
               'content-type': 'application/json',
               accept: 'text/event-stream',
             },
-            body: JSON.stringify({
-              model: request.modelId,
-              instructions: request.instructions + profileContext(request),
-              input,
-              store: false,
-              stream: true,
-              ...(request.profile ? { text: profileFormat } : {}),
-              ...(request.effort ||
-              (models.find((m) => m.id === request.modelId)?.reasoningEfforts?.length &&
-                request.effort !== 'none')
-                ? {
-                    reasoning: {
-                      ...(request.effort ? { effort: request.effort } : {}),
-                      ...(models.find((m) => m.id === request.modelId)?.reasoningEfforts?.length &&
-                      request.effort !== 'none'
-                        ? { summary: 'auto' }
-                        : {}),
-                    },
-                  }
-                : {}),
-              ...(request.webSearch
-                ? {
-                    tools: [{ type: 'web_search' }],
-                    tool_choice: 'auto',
-                    include: ['web_search_call.action.sources'],
-                  }
-                : {}),
-            }),
+            body,
             redirect: 'error',
           },
           deadline,
@@ -256,9 +238,8 @@ export class ChatGPTService implements AIChatService {
         deadline,
       );
       const sources = new Map<string, ChatSource>();
-      let usage: TokenUsage | null = null,
-        completed = false,
-        warning: string | undefined;
+      let usage: TokenUsage | null = null, completed = false;
+      let warning: string | undefined;
       const streamedItems = new Map<number, Record<string, any>>();
       const commentary = new Map<number, string>();
       const publishCommentary = (index: number, item: any, text: string, completed = false) => {
@@ -315,29 +296,23 @@ export class ChatGPTService implements AIChatService {
       };
       let outputLength = 0;
       let answerText = '';
-      const profileStream = request.profile ? new ProfileAnswerStream() : undefined;
+      const streamedText = new ResponseText();
+      let profileStream = request.profile ? new ProfileAnswerStream() : undefined;
+      using previews = profileStream && new ProfilePreviews(request.id, emit, deadline);
       let refused = false;
       let lastActivity = '';
-      let lastPreview = '';
-      const receiveText = (text: string, refusal = false) => {
-        if (refusal) refused = true;
+      const receiveText = (text: string, refusal = false, publish = true) => {
+        if (refusal) {
+          refused = true;
+          previews?.reset();
+        }
         outputLength += text.length;
         if (outputLength > 1000000) throw new Error('回答过长，已停止接收。');
         const delta = profileStream && !refused ? profileStream.append(text) : text;
-        const preview = !refused ? profileStream?.preview() : undefined;
-        const previewState = JSON.stringify([preview, profileStream?.generation]);
-        if (preview && previewState !== lastPreview) {
-          lastPreview = previewState;
-          emit({
-            id: request.id,
-            type: 'profile-preview',
-            preview,
-            generation: profileStream?.generation,
-          });
-        }
+        if (!refused) previews?.update(profileStream);
         if (delta) {
           answerText += delta;
-          emit({ id: request.id, type: 'delta', text: delta });
+          if (publish) emit({ id: request.id, type: 'delta', text: delta });
         }
       };
       for await (const event of responseEvents(
@@ -353,9 +328,10 @@ export class ChatGPTService implements AIChatService {
           if (
             ['response.output_item.added', 'response.output_item.done'].includes(event.type) &&
             event.item &&
-            typeof event.item === 'object'
+            typeof event.item === 'object' &&
+            (event.type === 'response.output_item.done' || !streamedItems.get(event.output_index)?.done)
           )
-            streamedItems.set(event.output_index, { ...event.item });
+            streamedItems.set(event.output_index, { ...event.item, done: event.type === 'response.output_item.done' });
         }
         const summaryChanged = summary.receive(event);
         if (summaryChanged) emit({ id: request.id, type: 'reasoning-summary', text: summary.text });
@@ -386,7 +362,11 @@ export class ChatGPTService implements AIChatService {
               item,
               (commentary.get(event.output_index) ?? '') + event.delta,
             );
-          else receiveText(event.delta, event.type === 'response.refusal.delta');
+          else {
+            const refusal = event.type === 'response.refusal.delta';
+            receiveText(event.delta, refusal);
+            streamedText.append(event.output_index, event.content_index, refusal, event.delta);
+          }
         }
         if (
           event.type === 'response.output_item.done' &&
@@ -440,16 +420,6 @@ export class ChatGPTService implements AIChatService {
             )
           )
             completedWebSearch = true;
-          if (!outputLength) {
-            for (const content of (terminal?.output ?? [])
-              .filter((item: any) => item.phase !== 'commentary')
-              .flatMap((item: any) => item.content ?? [])) {
-              if (content.type === 'output_text' && typeof content.text === 'string')
-                receiveText(content.text);
-              if (content.type === 'refusal' && typeof content.refusal === 'string')
-                receiveText(content.refusal, true);
-            }
-          }
           usage = parseUsage(terminal?.usage);
           if (usage && typeof terminal.id === 'string') {
             try {
@@ -460,19 +430,36 @@ export class ChatGPTService implements AIChatService {
           }
           for (const item of terminal?.output ?? []) collectSources(item);
           publishSources();
+          const successful = event.type === 'response.completed' && (!terminal?.status || terminal.status === 'completed');
+          if (!outputLength || successful) {
+            const { replace, parts } = streamedText.reconcile(terminal?.output ?? [], streamedItems);
+            if (replace) {
+              // The final result replaces the visible draft in both chat and interview.
+              // Rebuild validated profile JSON without emitting the same answer twice.
+              previews?.reset();
+              if (profileStream) profileStream = new ProfileAnswerStream();
+              answerText = '';
+              outputLength = 0;
+              refused = false;
+            }
+            for (const part of parts) receiveText(part.text, part.refusal, !replace);
+          }
           if (event.type === 'response.failed')
-            throw apiError(
+            throw (this.dependencies.failure ?? apiError)(
               undefined,
               { error: terminal?.error },
               response.headers.get('x-request-id') ?? undefined,
             );
-          if (event.type === 'response.incomplete')
+          if (
+            event.type === 'response.incomplete' ||
+            (terminal?.status && terminal.status !== 'completed')
+          )
             throw new Error('回答未完成，请检查已有内容后重试。');
           completed = true;
           break;
         }
         if (event.type === 'error')
-          throw apiError(undefined, event, response.headers.get('x-request-id') ?? undefined);
+          throw (this.dependencies.failure ?? apiError)(undefined, event, response.headers.get('x-request-id') ?? undefined);
       }
       signal.throwIfAborted();
       if (!completed)
@@ -480,6 +467,7 @@ export class ChatGPTService implements AIChatService {
           code: 'connection_closed',
           message: '回答连接提前中断，已保留接收内容；用量可能尚未返回。',
         });
+      previews?.flush();
       const proposal =
         profileStream && request.profile && !refused
           ? profileStream.finish(request.profile)
@@ -495,10 +483,12 @@ export class ChatGPTService implements AIChatService {
         answerText += proposal.delta;
         emit({ id: request.id, type: 'delta', text: proposal.delta });
       }
+      if (!answerText.trim() && !Object.keys(proposal?.changes ?? {}).length)
+        throw new ChatServiceError({ code: 'empty_response', message: '未收到有效回答，请重试。' });
       if (phase) recordActivity({ id: phaseId, kind: 'status', phase, status: 'completed' });
       return {
         usage,
-        provider: { ...chatGPTProvider },
+        provider,
         sources: [...sources.values()],
         warning,
         profileChanges: proposal?.changes,

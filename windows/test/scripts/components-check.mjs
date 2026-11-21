@@ -160,7 +160,7 @@ export async function checkComponents(application) {
   for (const button of await page.getByRole('button', { name: '创建知识库', exact: false }).all())
     assert.equal(await button.isDisabled(), true);
   await page
-    .locator('.management-container > .components-notice')
+    .locator('.management-container .components-notice')
     .getByRole('button', { name: '前往设置' })
     .click();
   await settings.getByRole('heading', { name: '本地组件', exact: true }).waitFor();

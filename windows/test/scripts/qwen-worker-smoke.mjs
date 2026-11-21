@@ -68,10 +68,7 @@ if (!process.argv.includes('--node')) {
         directory: component,
         speechModel: 'qwen',
         inferenceDevice: device,
-        preprocessorFile: path.join(
-          workspace.platformRoot,
-          'dist-electron/windows/electron/speech/echoCancellation.js',
-        ),
+        legacyModels: [path.join(workspace.platformRoot, 'native/bin/silero_vad.onnx')],
       },
       (message) => message.ready,
     );
@@ -132,7 +129,7 @@ if (!process.argv.includes('--node')) {
     const close = ++sequence;
     await send({ op: 'close', id: close }, (message) => message.closed === close);
     console.log(
-      `Qwen production worker (${device}): resampling/AEC, partials, ${option === '--no-crop' ? 'short transcription' : 'sentence crop'}, silence final and native exit passed.`,
+      `Qwen production worker (${device}): raw system audio, partials, ${option === '--no-crop' ? 'short transcription' : 'sentence crop'}, silence final and native exit passed.`,
     );
   } finally {
     await worker.terminate();

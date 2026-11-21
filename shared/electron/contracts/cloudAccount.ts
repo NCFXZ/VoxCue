@@ -1,3 +1,10 @@
+import type { UILanguage } from './uiLanguage';
+
+export const userAgreementUrl: Readonly<Record<UILanguage, string>> = {
+  'zh-CN': 'https://voxcue.com.cn/user-agreement/',
+  en: 'https://voxcue.com.cn/en/user-agreement/',
+};
+
 export const CLOUD_PASSWORD_MIN = 8;
 export const CLOUD_PASSWORD_MAX = 128;
 /** Preserve spaces and symbols; reject malformed UTF-16 rather than silently replacing bytes. */
@@ -42,6 +49,11 @@ export interface CloudAccountState {
   verified: boolean;
   /** Desktop-only preference; a local session is never an authenticated cloud user. */
   localMode?: boolean;
+  /** Opaque version of importable data in this device's local-mode partition. */
+  localImportRevision?: string;
+}
+export function validLocalImportRevision(value: unknown): value is string {
+  return typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
 }
 export interface CloudSession {
   id: string;

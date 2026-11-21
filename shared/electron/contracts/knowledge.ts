@@ -1,7 +1,17 @@
 export const knowledgeDocumentAccept = '.pdf,.doc,.docx,.txt,.md';
+export const KNOWLEDGE_INDEX_VERSION = 'qa-linked-v3';
 const knowledgeExtensions = new Set(knowledgeDocumentAccept.split(',').map((ext) => ext.slice(1)));
 export const isKnowledgeFileName = (name: string) =>
   knowledgeExtensions.has(name.split('.').pop()?.toLowerCase() ?? '');
+/** The stored display name is one filesystem component, shared across local, index and transfer paths. */
+export const knowledgeFileNameLimit = 255;
+export const knowledgeBatchLimit = 20;
+export const knowledgeBatchChanged = '索引批次已撤销，请重试。';
+export const knowledgeIndexCancelled = '已取消，可重新索引。';
+export const validKnowledgeId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[\w-]{1,100}$/.test(id) && !['__proto__', 'constructor', 'prototype'].includes(id);
+export const validKnowledgeDocumentName = (name: unknown): name is string =>
+  typeof name === 'string' && !!name.trim() && name.length <= knowledgeFileNameLimit && !/[\\/\u0000-\u001f]/.test(name);
 
 export type KnowledgeMode = 'keyword' | 'vector' | 'hybrid';
 export type KnowledgePhase =
@@ -70,7 +80,12 @@ export interface KnowledgeItemExpectation {
   documentId: string;
   revision: string;
 }
+export type OldIndexDeletion =
+  | { type: 'old-index-deletion'; active: true; documentIds: string[] }
+  | { type: 'old-index-deletion'; active: false };
+export type KnowledgeEvent = KnowledgeStatus | OldIndexDeletion;
 export interface KnowledgeStatus {
+  indexVersion?: string;
   requestId?: string;
   documentId: string;
   phase: KnowledgePhase;
@@ -94,9 +109,13 @@ export type KnowledgeCall =
       name: string;
       bytes: Uint8Array;
       force?: boolean;
+      batchId?: string;
     }
+  | { op: 'begin-index-batch'; requestId: string; baseId: string; documentIds: string[] }
+  | { op: 'finish-index-batch'; requestId: string; batchId: string; commit: boolean }
   | { op: 'invalidate'; requestId: string; documentId: string }
   | { op: 'remove'; requestId: string; documentId: string }
+  | { op: 'remove-base'; requestId: string; baseId: string }
   | { op: 'cancel'; requestId: string }
   | {
       op: 'search';

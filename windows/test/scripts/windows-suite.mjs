@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { prepareModelFixtures } from '../../../shared/test/scripts/model-fixtures.mjs';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
-import { probe, holdDesktopAwake } from './window-probe.mjs';
+import { probe, holdDesktopAwake, parkMatrixCursor, restoreParkedMatrixCursor } from './window-probe.mjs';
 import { needsModels } from '../../../shared/test/scripts/suite-policy.mjs';
 import { watchTestDesktop } from '../../../shared/test/scripts/desktop-guard.mjs';
 
@@ -21,14 +21,9 @@ function requireDesktop() {
   }
 }
 function restoreCursor(cursor, interruption) {
-  if (!cursor || desktopFailure) return;
-  try {
-    requireDesktop();
-    probe('move', cursor.x, cursor.y);
-  } catch (error) {
-    console.error('Windows matrix cursor restoration stopped:', error);
-    if (!interruption) throw error;
-  }
+  if (!cursor || interruption || desktopFailure) return;
+  requireDesktop();
+  restoreParkedMatrixCursor(cursor);
 }
 const suites = process.argv.slice(2),
   windowsOnly = suites[0] === '--windows';
@@ -91,7 +86,7 @@ if (suites[0] === '--dpi') {
         requireDesktop();
         // A pending native WM_MOUSEMOVE can replace Chromium's injected hover.
         // Park the real pointer outside the controls while the isolated UI runs.
-        probe('move', 0, 0);
+        await parkMatrixCursor();
         const child = spawnTestProcess(
           process.execPath,
           ['../shared/test/scripts/' + name + '-smoke.mjs'],
@@ -151,6 +146,7 @@ if (suites[0] === '--dpi') {
 }
 const nativeNames = [
   'platform-native',
+  'api-key-field',
   'login-actions-native',
   'interview-access',
   'interview-effort',
@@ -204,7 +200,7 @@ let interruption;
 try {
   for (const args of commands) {
     requireDesktop();
-    if (nativeCursor) probe('move', 0, 0);
+    if (nativeCursor) await parkMatrixCursor();
     const child = spawnTestProcess(process.execPath, args, {
       env: {
         ...process.env,

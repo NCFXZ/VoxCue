@@ -18,7 +18,7 @@
 对比 Mac 1.2.2 提交 `ffc31e5`，Windows 1.2.2 提交 `79fc49c` 已带入以下共享变更，不能只按 Windows 1.2.3 的两个知识库 Bug 确定 Mac 验收范围：
 
 - 个人资料读取不再等待聊天恢复，冷启动时可立即编辑；这是尚未随已发行 Mac 1.2.2 交付的修复。实现见 [preparation store](../src/stores/preparation.ts)，回归见 [profile-store](../test/unit/profile-store.test.ts)。
-- 共享登录与云凭据层仅将明确损坏的记录交给重新授权流程，系统解密服务和文件读取失败保持错误并保留原件；解密服务的 `ENOENT` 不再被当作凭据文件缺失。Mac 继续使用现有平台凭据端口。回归见 [auth](../test/unit/auth.test.ts)、[cloud-account](../test/unit/cloud-account.test.ts) 和 [cloud-vault](../test/unit/cloud-vault.test.ts)。
+- 共享登录与云凭据层仅将明确损坏的记录交给重新授权流程，系统解密服务和文件读取失败保持错误并保留原件；解密服务的 `ENOENT` 不再被当作凭据文件缺失。Mac 继续使用现有平台凭据端口。回归见 [auth-storage](../test/unit/auth-storage.test.ts)、[cloud-account](../test/unit/cloud-account.test.ts) 和 [cloud-vault](../test/unit/cloud-vault.test.ts)。
 - 共享 HTML 移除备用 ICO 引用，组件样式移除无消费者的 `.component-ready` 选择器；不增加界面功能。Windows 1.2.3 另为共享音频解码器增加只读 `hasPartialPacket`，由 Windows 尾段校验使用，Mac 采集策略不变。
 
 ## 实际共享 Bug 修复

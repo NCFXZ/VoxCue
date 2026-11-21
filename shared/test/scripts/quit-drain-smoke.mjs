@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, spawnTestProcess, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { waitForRestoredMainWindow } from './install-ui-account.mjs';
 
 if (process.platform === 'win32') {
   const { probe } = await import('../../../windows/test/scripts/window-probe.mjs');
@@ -128,6 +129,13 @@ try {
   login.setDefaultTimeout(20000);
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   assert.equal(await login.evaluate(() => window.desktop.authSession()), null);
+  // SDK runtimes belong to the active profile and are created when its main window opens.
+  await login.getByRole('button', { name: '跳过登录', exact: true }).click();
+  const main = await waitForRestoredMainWindow(product);
+  const account = await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }));
+  assert.equal(account.ok, true);
+  assert.equal(account.state.localMode, true);
+  assert.equal(account.state.user, null);
   const exited = new Promise((resolve, reject) => {
     child.once('exit', resolve);
     child.once('error', reject);

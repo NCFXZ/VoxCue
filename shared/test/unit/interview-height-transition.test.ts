@@ -50,6 +50,7 @@ function fixture(height = 100, scroll = { style: { overflowAnchor: 'auto' } }) {
   const players: Array<{ height: number; cancel: ReturnType<typeof vi.fn>; finish(): void }> = [];
   const node = {
     getBoundingClientRect: () => ({ height: active?.height ?? model.height }),
+    matches: () => false, // This fixture animates sections inside a shared scroller.
     closest: () => scroll,
     animate: vi.fn((frames: Array<{ height: string }>) => {
       let resolve!: () => void, reject!: () => void;

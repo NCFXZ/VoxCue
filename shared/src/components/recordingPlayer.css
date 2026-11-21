@@ -1,0 +1,177 @@
+.record-transcript-pane {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.record-transcript-pane:has(.record-player) .record-reading-column {
+  padding-bottom: 132px;
+}
+.record-paragraph-time {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.record-player {
+  --key: 32px;
+  --gap: 6px;
+  --inset: 4px;
+  --step: calc(var(--key) + var(--gap));
+  --options-width: var(--key);
+  --motion: 340ms cubic-bezier(.22, .72, .15, 1);
+  position: absolute;
+  overflow: hidden;
+  bottom: 18px;
+  left: 18px;
+  z-index: 1;
+  box-sizing: border-box;
+  width: 42px;
+  height: 42px;
+  border: 1px solid var(--border);
+  border-radius: 21px;
+  corner-shape: round;
+  background: var(--surface);
+  color: var(--foreground);
+  box-shadow: var(--shadow-raised);
+  transition: width var(--motion), height var(--motion), left var(--motion),
+    border-radius var(--motion), corner-shape var(--motion);
+}
+.record-player[data-multiple='true'] {
+  --options-width: calc(var(--step) + var(--key));
+}
+.record-player[data-open='true'] {
+  width: calc(42px + var(--gap) + var(--options-width));
+}
+.record-player[data-expanded='true'] {
+  --inset: 12px;
+  width: min(600px, calc(100% - 32px));
+  left: max(16px, calc((100% - 600px) / 2));
+  height: 90px;
+  border-radius: var(--radius-composer);
+  corner-shape: superellipse(2);
+}
+.record-player-controls {
+  position: absolute;
+  inset: auto 0 4px;
+  height: var(--key);
+  transition: bottom var(--motion);
+}
+.record-player[data-expanded='true'] .record-player-controls {
+  bottom: 9px;
+}
+.record-player .record-player-controls .ui-button.button-icon {
+  width: var(--key);
+  min-width: var(--key);
+  height: var(--key);
+  min-height: var(--key);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  border-radius: 50%;
+  corner-shape: round;
+}
+.record-player .record-player-controls .ui-button.button-icon:hover:not(:disabled) {
+  background: var(--web-control-hover, var(--hover));
+}
+.record-player-transport, .record-player-options, .record-player-locate,
+.record-player-back, .record-player-forward {
+  position: absolute;
+  top: 0;
+}
+.record-player-transport {
+  left: var(--inset);
+  width: var(--key);
+  transition: left var(--motion);
+}
+.record-player[data-expanded='true'] .record-player-transport {
+  left: calc(50% - var(--key) / 2);
+}
+.record-player-back { right: var(--step); }
+.record-player-forward { left: var(--step); }
+.record-player-locate { left: var(--inset); }
+.record-player-options {
+  display: flex;
+  gap: var(--gap);
+  left: calc(var(--inset) + var(--step));
+  transition: left var(--motion), opacity 160ms ease, visibility 160ms;
+}
+.record-player[data-expanded='true'] .record-player-options {
+  left: calc(100% - var(--inset) - var(--options-width));
+}
+.record-player-seek {
+  position: absolute;
+  inset: 8px 15px auto;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+  font-size: var(--type-caption);
+}
+.record-player-seek .frosted-slider-control { min-width: 0; }
+.record-extra {
+  transition: opacity var(--panel-motion-duration) var(--panel-motion-easing),
+    visibility var(--panel-motion-duration);
+}
+.record-player[data-open='false'] .record-player-options,
+.record-player[data-expanded='false'] .record-extra {
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+}
+.record-clip-menu > .dropdown-scroll {
+  max-height: max(0px, calc(
+    var(--radix-dropdown-menu-content-available-height, 100dvh) / 3 - 2 * (var(--dropdown-inset) + 1px)
+  ));
+}
+.record-export-dialog {
+  -webkit-app-region: no-drag;
+}
+.record-export-dialog > .dialog-scroll {
+  display: flex;
+  flex-direction: column;
+}
+.record-export-list {
+  display: grid;
+  grid-template-rows: 1fr;
+  min-height: 0;
+  overflow: clip;
+  transition:
+    grid-template-rows var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-duration) var(--panel-motion-easing),
+    visibility 0s;
+}
+.record-export-list[inert] {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  visibility: hidden;
+  transition-delay: 0s, 0s, var(--panel-motion-duration);
+}
+.record-export-segments {
+  min-height: 0;
+  max-height: 50dvh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-inline-start: 26px;
+}
+.settings-entry.recording-preference {
+  margin-top: 8px;
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+.floating-record[aria-pressed='true'] .recording-wave {
+  color: var(--accent);
+}
+@media (prefers-reduced-motion: reduce) {
+  .record-player, .record-player-controls, .record-player-transport,
+  .record-player-options, .record-extra, .record-export-list {
+    transition: none;
+  }
+}
+.record-export-segments [data-unavailable] {
+  opacity: 0.55;
+}

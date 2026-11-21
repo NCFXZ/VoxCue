@@ -1,13 +1,14 @@
 import type { KnowledgeHit } from '../contracts/knowledge';
+import { MAX_EVIDENCE_ROOTS } from '../contracts/retrievalContext';
 import type { RagDecision } from './ragDiagnostics';
 import { isUnresolvedReference, normalizeRetrievalQuery, retrievalFocus } from './ragQuery';
 
 export const RAG_SELECTION = {
   candidates: 12,
-  evidence: 5,
+  evidence: MAX_EVIDENCE_ROOTS,
   rawLimit: 60 as const,
   semanticMinimum: 0.84,
-  version: 'local-v7-current-source-first',
+  version: 'bplus-selected-history-v1',
 };
 const generic = new Set(
   'how what does the are you your can why with and for this that which have has describe explain method project approach solution system limitations parameter parameters documented please 请问 介绍 解释 说明 原理 计算 参数 任务 资料 记录 如何 什么 一下 我的 你的 项目 方法 方案 系统 为什么 怎么 哪些 有哪些 有什么 局限 优点 缺点 问题 这个 这种 一个 进行 使用 采用 实现 以及 可以 需要 时候 通过 关于 刚才 上一 当前 追问 你们 咱们 他们 我们 当时 后来 最后 到底 多少 具体 来着 有啥 咋办 咋整 咋改 为啥 说说 讲讲 展开 不行 怎么办 怎么样 好点儿 还能 能不能 大白话 通俗点'.split(

@@ -164,10 +164,10 @@ export const useKnowledge = create<KnowledgeState>((set, get) => ({
     try {
       await localKnowledge.importDocuments(id, files);
       if (files.length) recordFeature('file_import');
-      if (get().selectedId === id && selection === selectionRevision) await get().open(id);
       const imported = await localKnowledge.listDocuments(id);
-      for (const doc of imported.filter((doc) => files.some((file) => file.name === doc.name)))
-        void useKnowledgeIndex.getState().index(doc);
+      const selected = imported.filter(doc => files.some(file => file.name === doc.name));
+      void useKnowledgeIndex.getState().indexSelection(selected);
+      if (get().selectedId === id && selection === selectionRevision) await get().open(id);
     } catch (error) {
       if (get().selectedId === id && selection === selectionRevision) {
         await get().open(id);

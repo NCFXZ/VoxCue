@@ -1,4 +1,5 @@
-import type { KnowledgeCall, KnowledgeResult, KnowledgeStatus } from './knowledge';
+import type { KnowledgeCall, KnowledgeResult, KnowledgeEvent } from './knowledge';
+import type { RecordingCall, RecordingSegment } from './recordings';
 import type { InterviewImage, InterviewImageCall } from './interviewImages';
 import type { ScreenCapturePermission, ScreenCapturePermissionAction } from './screenCapture';
 import type { PresentationCapabilities } from './presentation';
@@ -12,6 +13,7 @@ import type {
 import type { UpdateCall, UpdateState } from './updates';
 import type { ComponentCall, ComponentState } from './components';
 import type { AuthSession, SignOutResult } from './auth';
+import type { ApiConnections } from './apiConnections';
 import type { AccountUsage } from './accountUsage';
 import type { CloudAccountCall, CloudAccountResult } from './cloudAccount';
 import type { CloudSyncCall, CloudSyncResult } from './cloudSync';
@@ -78,10 +80,12 @@ export interface InterviewWindowState {
 export type WindowAction = 'minimize' | 'maximize' | 'close';
 // The complete renderer allowlist. No credentials, paths or arbitrary IPC access.
 export interface DesktopAPI {
+  apiConnections: ApiConnections;
   shortcutSettings(call: ShortcutSettingsCall): Promise<ShortcutSettingsResult>;
   onShortcutSettings(callback: (state: ShortcutSettingsState) => void): () => void;
   remoteConnection(call: RemoteConnectionCall): Promise<RemoteConnectionResult>;
   onRemoteConnection(callback: (state: RemoteConnectionState) => void): () => void;
+  waitForRemoteInterviewSlot(): Promise<void>;
   publishRemoteInterview(snapshot: RemoteInterviewSnapshot): Promise<void>;
   onRemoteCommand(callback: (command: RemoteCommand) => void): () => void;
   finishRemoteCommand(result: RemoteCommandResult): Promise<void>;
@@ -89,10 +93,14 @@ export interface DesktopAPI {
   accountData(call: AccountDataCall): Promise<AccountDataResult>;
   cloudAccount(call: CloudAccountCall): Promise<CloudAccountResult>;
   setLocalMode(enabled: boolean): Promise<CloudAccountResult>;
+  openUserAgreement(language: UILanguage): Promise<void>;
+  setLocalImportRevision(revision: string | null): Promise<void>;
   cloudSync(call: CloudSyncCall): Promise<CloudSyncResult>;
+  onCloudSyncAvailable(callback: () => void): () => void;
   readonly platform: 'macos' | 'windows' | 'unknown';
   readonly presentation: PresentationCapabilities;
   readonly systemLanguage: UILanguage;
+  readonly initialLanguage?: UILanguage;
   readonly screenCapturePermissionSupported: boolean;
   screenCapturePermission(action: ScreenCapturePermissionAction): Promise<ScreenCapturePermission>;
   updates(call: UpdateCall): Promise<UpdateState>;
@@ -100,15 +108,16 @@ export interface DesktopAPI {
   onComponentEvent(callback: (state: ComponentState) => void): () => void;
   onUpdateEvent(callback: (state: UpdateState) => void): () => void;
   knowledge(call: KnowledgeCall): Promise<KnowledgeResult>;
-  onKnowledgeEvent(callback: (event: KnowledgeStatus) => void): () => void;
+  onKnowledgeEvent(callback: (event: KnowledgeEvent) => void): () => void;
   speech(call: SpeechCall): Promise<SpeechStatus>;
   speechHardware(): Promise<SpeechHardware>;
   reconnectInterviewAudio(options?: SpeechOptions): Promise<SpeechStatus>;
+  controlInterviewSpeechSwitch(id: number, action: 'now' | 'cancel'): Promise<void>;
   setInterviewInput(state: InterviewInputState): Promise<SpeechStatus>;
   onSpeechEvent(callback: (event: SpeechEvent) => void): () => void;
   dictation(call: DictationCall): Promise<SpeechStatus>;
   onDictationEvent(callback: (event: SpeechEvent) => void): () => void;
-  interviewModels(): Promise<ServiceResult<{ models: ChatModel[] }>>;
+  interviewModels(force?: boolean): Promise<ServiceResult<{ models: ChatModel[] }>>;
   interviewAccountUsage(): Promise<ServiceResult<{ usage: AccountUsage | null }>>;
   updateInterviewModel(
     value: Pick<InterviewConfiguration, 'modelId' | 'effort'>,
@@ -119,7 +128,7 @@ export interface DesktopAPI {
   ): Promise<ServiceResult<{ screenshot?: InterviewScreenshot; images?: InterviewImage[] }>>;
   interviewImage(
     call: InterviewImageCall,
-  ): Promise<ServiceResult<{ dataUrl?: string; canceled?: boolean }>>;
+  ): Promise<ServiceResult<{ dataUrl?: string; canceled?: boolean; hash?: string; bytes?: Uint8Array<ArrayBuffer> }>>;
   interviewCancel(id: string): Promise<void>;
   setNativeTheme(theme: 'system' | 'light' | 'dark'): Promise<void>;
   setUILanguage(language: UILanguage): Promise<void>;
@@ -146,6 +155,9 @@ export interface DesktopAPI {
   generateInterviewTitle(request: InterviewTitleRequest): Promise<void>;
   onInterviewTitle(callback: (event: InterviewTitleEvent) => void): () => void;
   exportHistory(request: HistoryExportRequest): Promise<boolean>;
+  setInterviewRecording(recordId: string, enabled: boolean): Promise<boolean>;
+  recordings(call: RecordingCall): Promise<RecordingSegment[]>;
+  pendingRecordingRemovals(): Promise<string[]>;
   openInterview(configuration: InterviewConfiguration): Promise<void>;
   checkInterviewAccess(configuration: InterviewConfiguration): Promise<InterviewAccessReport>;
   openMicrophoneSettings(source?: AudioSource): Promise<void>;
@@ -180,12 +192,15 @@ type Invocation<F extends (...args: never[]) => unknown> = {
 export interface DesktopInvokeMap {
   'shortcuts:settings': Invocation<DesktopAPI['shortcutSettings']>;
   'remote:connection': Invocation<DesktopAPI['remoteConnection']>;
+  'remote:ready': Invocation<DesktopAPI['waitForRemoteInterviewSlot']>;
   'remote:publish': Invocation<DesktopAPI['publishRemoteInterview']>;
   'remote:complete': Invocation<DesktopAPI['finishRemoteCommand']>;
   'telemetry:signal': Invocation<DesktopAPI['telemetrySignal']>;
   'account:data': Invocation<DesktopAPI['accountData']>;
   'cloud:account': Invocation<DesktopAPI['cloudAccount']>;
   'session:local-mode': Invocation<DesktopAPI['setLocalMode']>;
+  'session:open-user-agreement': Invocation<DesktopAPI['openUserAgreement']>;
+  'session:local-import-revision': Invocation<DesktopAPI['setLocalImportRevision']>;
   'cloud:sync': Invocation<DesktopAPI['cloudSync']>;
   'updates:call': Invocation<DesktopAPI['updates']>;
   'components:call': Invocation<DesktopAPI['components']>;
@@ -194,9 +209,13 @@ export interface DesktopInvokeMap {
   'knowledge:call': Invocation<DesktopAPI['knowledge']>;
   'history:generate-title': Invocation<DesktopAPI['generateInterviewTitle']>;
   'history:export': Invocation<DesktopAPI['exportHistory']>;
+  'history:recordings': Invocation<DesktopAPI['recordings']>;
+  'history:pending-recording-removals': Invocation<DesktopAPI['pendingRecordingRemovals']>;
+  'interview:recording': Invocation<DesktopAPI['setInterviewRecording']>;
   'speech:call': Invocation<DesktopAPI['speech']>;
   'speech:hardware': Invocation<DesktopAPI['speechHardware']>;
   'interview:reconnect-audio': Invocation<DesktopAPI['reconnectInterviewAudio']>;
+  'interview:control-speech-switch': Invocation<DesktopAPI['controlInterviewSpeechSwitch']>;
   'interview:input': Invocation<DesktopAPI['setInterviewInput']>;
   'dictation:call': Invocation<DesktopAPI['dictation']>;
   'interview:models': Invocation<DesktopAPI['interviewModels']>;
@@ -210,6 +229,12 @@ export interface DesktopInvokeMap {
   'appearance:language': Invocation<DesktopAPI['setUILanguage']>;
   'appearance:accent': Invocation<DesktopAPI['systemAccent']>;
   'auth:session': Invocation<DesktopAPI['authSession']>;
+  'api-keys:list': Invocation<ApiConnections['list']>;
+  'api-keys:configure': Invocation<ApiConnections['configure']>;
+  'api-keys:control': Invocation<ApiConnections['control']>;
+  'api-keys:remove': Invocation<ApiConnections['remove']>;
+  'api-keys:balance': Invocation<ApiConnections['balance']>;
+  'api-keys:open': Invocation<ApiConnections['open']>;
   'auth:sign-in': Invocation<DesktopAPI['signInWithChatGPT']>;
   'auth:copilot-sign-in': Invocation<DesktopAPI['signInWithCopilot']>;
   'auth:cancel': Invocation<DesktopAPI['cancelSignIn']>;
@@ -244,6 +269,8 @@ export interface DesktopSendMap {
   'window:action': [action: WindowAction];
 }
 export interface DesktopEventMap {
+  'cloud:sync-available': [];
+  'api-keys:tab': [requestId: string, backwards: boolean];
   'shortcuts:settings': [state: ShortcutSettingsState];
   'remote:state': [state: RemoteConnectionState];
   'remote:command': [command: RemoteCommand];
@@ -254,7 +281,7 @@ export interface DesktopEventMap {
   'updates:event': [state: UpdateState];
   'components:event': [state: ComponentState];
   'session:request-close': [id: string];
-  'knowledge:event': [event: KnowledgeStatus];
+  'knowledge:event': [event: KnowledgeEvent];
   'history:title': [event: InterviewTitleEvent];
   'speech:event': [event: SpeechEvent];
   'dictation:event': [event: SpeechEvent];

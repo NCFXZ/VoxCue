@@ -2,8 +2,11 @@ import { KnowledgeService } from './service';
 import { parseDocument } from './parser';
 import { LocalEmbedder } from './embedding';
 import { KnowledgeError } from './errors';
+import { projectEvidence } from './evidence';
+import type { OldIndexDeletion } from '../../contracts/knowledge';
 const port = process.parentPort!;
 let core: KnowledgeService;
+let snapshotGeneration: number | undefined;
 let active: string | undefined;
 let running = false;
 const controllers = new Map<string, AbortController>();
@@ -38,6 +41,14 @@ async function drain() {
       const controller = controllers.get(id)!;
       active = m.id;
       const signal = controller.signal;
+      let steps = 0, lastProgress = -Infinity;
+      const deleting = (event: OldIndexDeletion) => port.postMessage({ id, event });
+      const erasureProgress = () => {
+        const now = performance.now();
+        if (signal.aborted || now - lastProgress < 1000) return;
+        lastProgress = now;
+        port.postMessage({ id: m.id, erasureProgress: ++steps });
+      };
       try {
         signal.throwIfAborted();
         port.postMessage({ id: m.id, started: true });
@@ -51,10 +62,25 @@ async function drain() {
                 port.postMessage({ id: active, event });
             },
             parseDocument,
+            undefined,
+            m.init.snapshotGeneration !== undefined,
+            m.init.databasePath,
           );
-          await core.initialize();
-        } else
+          await core.initialize(erasureProgress);
+          // Initialization pins a catalog even if its triggering lookup is cancelled before dispatch.
+          snapshotGeneration = m.init.snapshotGeneration;
+        } else {
+          if (m.snapshotGeneration !== undefined && m.snapshotGeneration !== snapshotGeneration) {
+            await core.refreshSnapshot();
+            snapshotGeneration = m.snapshotGeneration;
+          }
           switch (m.op) {
+            case 'begin-index-batch':
+              value = await core.beginIndexBatch(m.batchId, m.baseId, m.documentIds, signal);
+              break;
+            case 'finish-index-batch':
+              value = await core.finishIndexBatch(m.batchId, m.commit, signal);
+              break;
             case 'index':
               value = await core.indexDocument(m.input, signal);
               break;
@@ -63,6 +89,12 @@ async function drain() {
               break;
             case 'remove':
               value = await core.removeDocument(m.documentId, signal);
+              break;
+            case 'remove-base':
+              value = await core.removeBase(m.baseId, signal, erasureProgress, deleting);
+              break;
+            case 'clean-upgraded-index':
+              value = await core.cleanUpgradedIndex(signal, erasureProgress, deleting);
               break;
             case 'list':
               value = await core.listDocuments();
@@ -73,11 +105,14 @@ async function drain() {
             case 'item':
               value = await core.getItem(m.itemId, signal, m.expected);
               break;
+            case 'evidence': {
+              const item = await core.getItem(m.hit.itemId, signal, m.expected);
+              signal.throwIfAborted();
+              value = item ? projectEvidence(m.hit, item) : null;
+              break;
+            }
             case 'version':
               value = await core.version(m.baseId, signal);
-              break;
-            case 'prepare-query':
-              value = await core.prepareQuery(m.query, m.fallback, signal);
               break;
             case 'close':
               await core.close();
@@ -88,8 +123,9 @@ async function drain() {
             default:
               throw new KnowledgeError('invalid_request', '未知知识库操作。');
           }
+        }
         signal.throwIfAborted();
-        port.postMessage({ id: m.id, value });
+        port.postMessage({ id: m.id, value, needsIndexCleanup: core.needsIndexCleanup });
       } catch (error) {
         port.postMessage({
           id: m.id,
@@ -118,7 +154,7 @@ function publicError(error: unknown) {
     !/[A-Z]:[\\/]|Bearer|token=/i.test(error.message)
   )
     return error.message;
-  return '知识库处理失败，请重试或重新索引。';
+  return '知识库处理失败，请重试。';
 }
 process.on('SIGTERM', () => {
   for (const c of controllers.values()) c.abort();

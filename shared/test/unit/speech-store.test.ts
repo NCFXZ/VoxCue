@@ -1,8 +1,9 @@
 import { beforeEach, afterEach, it, expect, vi } from 'vitest';
 import { useInterview } from '../../../shared/src/stores/interview';
 import type { SpeechEvent } from '../../../shared/electron/contracts/speech';
-import type { ChatEvent } from '../../../shared/electron/contracts/chat';
+import { copilotProvider, type ChatEvent } from '../../../shared/electron/contracts/chat';
 import { defaultInterviewConfiguration } from '../../../shared/src/services/speech';
+import { serviceModelPreferenceKey } from '../../../shared/src/services/serviceModelPreferences';
 let emit: (e: SpeechEvent) => void;
 const realAsk = useInterview.getState().ask;
 async function advanceAudio(ms: number) {
@@ -59,15 +60,54 @@ const segment = (id: string, text: string, final: boolean) => ({
     source: 'system' as const,
     startMs: Date.now(),
     endMs: Date.now(),
-    silenceStartMs: Date.now() - 800,
+    silenceStartMs: Date.now() - 500,
     reason: 'silence' as const,
   },
 });
-it('Paraformer 从静音起点累计1800ms自动回答，800ms分段计入其中', async () => {
+it('只在本场仍要求录音时随采集恢复，手动关闭或写入失败不会自动重试', async () => {
+  const calls = vi.fn(async (_id: string, enabled: boolean) => enabled);
+  Object.assign(window.desktop!, { setInterviewRecording: calls });
+  const recover = async () => {
+    emit({ type: 'status', status: { state: 'error', model: 'test', error: 'interrupted' } });
+    emit({ type: 'recording', active: false });
+    emit({ type: 'status', status: { state: 'running', model: 'test' } });
+    await vi.advanceTimersByTimeAsync(0);
+  };
+  await useInterview.getState().setRecording(true);
+  await recover();
+  expect(calls.mock.calls.map(call => call[1])).toEqual([true, true]);
+  await useInterview.getState().setRecording(false);
+  await recover();
+  expect(calls).toHaveBeenCalledTimes(3);
+  await useInterview.getState().setRecording(true);
+  emit({ type: 'recording', active: false, error: 'disk full' });
+  await recover();
+  expect(calls).toHaveBeenCalledTimes(4);
+});
+it('首次加载Qwen时能改选轻量模型，保留自动录音意图并忽略旧启动的迟到失败', async () => {
+  useInterview.getState().reset();
+  const options = { sources: ['system' as const], speechModel: 'qwen' as const };
+  useInterview.getState().configure({ mode: 'local', options, autoRecord: true });
+  let fail!: (error: Error) => void;
+  const recording = vi.fn(async () => true);
+  Object.assign(window.desktop!, {
+    speech: vi.fn(() => new Promise((_resolve, reject) => { fail = reject; })),
+    reconnectInterviewAudio: vi.fn(async () => ({ state: 'running', model: 'Paraformer' })),
+    setInterviewRecording: recording,
+  });
+  useInterview.getState().start();
+  const light = { ...options, speechModel: 'paraformer' as const };
+  expect(await useInterview.getState().reconnectAudio(light)).toBe(true);
+  fail(Error('retired Qwen'));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(useInterview.getState()).toMatchObject({ options: light, status: 'running', recording: true, speechError: null });
+  expect(recording).toHaveBeenCalledOnce();
+});
+it('Paraformer 从静音起点累计1000ms自动回答，500ms分段计入其中', async () => {
   const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
   useInterview.getState().setAutoAnswer(true);
   emit(segment('normal', '请介绍项目', true));
-  await advanceAudio(999);
+  await advanceAudio(499);
   expect(ask).not.toHaveBeenCalled();
   await advanceAudio(1);
   expect(ask).toHaveBeenCalledWith('请介绍项目', ['normal'], []);
@@ -76,7 +116,7 @@ it('Paraformer 从静音起点累计1800ms自动回答，800ms分段计入其中
   expect(useInterview.getState().transcripts.at(-1)?.text).toBe('请介绍项目');
   ask.mockRestore();
 });
-it('Qwen 标点固定不提交，静音累计1800ms提交；恢复说话取消提交', async () => {
+it('Qwen 标点固定不提交，静音累计1000ms提交；恢复说话取消提交', async () => {
   useInterview.setState({
     options: { sources: ['system'], speechModel: 'qwen', inferenceDevice: 'cuda' },
   });
@@ -93,7 +133,7 @@ it('Qwen 标点固定不提交，静音累计1800ms提交；恢复说话取消�
   await advanceAudio(2000);
   expect(ask).not.toHaveBeenCalled();
   emit(segment('tail', '后三句。', true));
-  await advanceAudio(999);
+  await advanceAudio(499);
   expect(ask).not.toHaveBeenCalled();
   emit({ type: 'speech-start', source: 'system' });
   await advanceAudio(1000);
@@ -153,7 +193,7 @@ it('重连音频保留本场记录和回答，恢复后继续接收两路活动�
   expect(useInterview.getState().draftQuestion).toBe('新问题');
 });
 it.each(['model', 'device'] as const)(
-  '后台切换语音 %s 保留问题、回答和原1800ms截止点',
+  '后台切换语音 %s 保留问题、回答和原1000ms截止点',
   async (kind) => {
     const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
     try {
@@ -186,7 +226,7 @@ it.each(['model', 'device'] as const)(
         draftQuestion: '切换前的问题',
       });
       emit({ type: 'status', status: { state: 'running', model: 'old', switching: 'waiting' } });
-      await advanceAudio(999);
+      await advanceAudio(499);
       expect(ask).not.toHaveBeenCalled();
       finish({ state: 'running', model: 'new' });
       expect(await pending).toBe(true);
@@ -203,6 +243,44 @@ it.each(['model', 'device'] as const)(
     }
   },
 );
+it.each(['loading', 'waiting'] as const)('取消仅作用于当前切换，保留原选项和运行状态 (%s)', async phase => {
+  const options = useInterview.getState().options;
+  let confirmCancel!: () => void;
+  const control = vi.fn(async () => confirmCancel());
+  Object.assign(window.desktop!, {
+    reconnectInterviewAudio: () => new Promise(resolve => {
+      confirmCancel = () => resolve({ state: 'running', model: 'old', switchCancelled: true });
+    }),
+    controlInterviewSpeechSwitch: control,
+  });
+  const pending = useInterview.getState().reconnectAudio({ ...options, speechModel: 'qwen' });
+  emit({ type: 'status', status: { state: 'running', model: 'old', switching: phase, switchId: 5 } });
+  await useInterview.getState().controlSpeechSwitch(4, 'cancel');
+  expect(control).not.toHaveBeenCalled();
+  await useInterview.getState().controlSpeechSwitch(5, 'cancel');
+  expect(control).toHaveBeenCalledWith(5, 'cancel');
+  expect(await pending).toBe('cancelled');
+  expect(useInterview.getState()).toMatchObject({
+    options, status: 'running', switchingSpeech: false, speechSwitchError: null,
+  });
+});
+it('honours cancellation clicked before the recognizer publishes its switch ID', async () => {
+  const options = useInterview.getState().options;
+  let finish!: () => void;
+  const control = vi.fn(async () => finish());
+  Object.assign(window.desktop!, {
+    reconnectInterviewAudio: () => new Promise(resolve => {
+      finish = () => resolve({ state: 'running', model: 'old', switchCancelled: true });
+    }),
+    controlInterviewSpeechSwitch: control,
+  });
+  const pending = useInterview.getState().reconnectAudio({ ...options, speechModel: 'qwen' });
+  await useInterview.getState().controlSpeechSwitch(undefined, 'cancel');
+  expect(control).not.toHaveBeenCalled();
+  emit({ type: 'status', status: { state: 'running', model: 'old', switching: 'loading', switchId: 8 } });
+  expect(await pending).toBe('cancelled');
+  expect(control).toHaveBeenCalledExactlyOnceWith(8, 'cancel');
+});
 it('后台语音切换失败恢复原选项，仍接收语音，避免误报采集中断', async () => {
   emit(segment('saved', '保留的问题', true));
   const options = useInterview.getState().options;
@@ -244,7 +322,7 @@ it('明确回应按音频静音截止点自动提交，关闭自动回答后仍�
   useInterview.getState().setAutoAnswer(true);
   emit(segment('ack-1', '嗯', true));
   emit(segment('ack-2', '好的，谢谢。', true));
-  await advanceAudio(999);
+  await advanceAudio(499);
   expect(desktop.interviewAnswer).not.toHaveBeenCalled();
   expect(useInterview.getState().draftQuestion).toBe('嗯 好的，谢谢。');
   await advanceAudio(1);
@@ -271,7 +349,7 @@ it('明确回应按音频静音截止点自动提交，关闭自动回答后仍�
     }),
   );
 });
-it('明确有效问题在静音累计1800毫秒提交，保留无问号的提问和前置回应', async () => {
+it('明确有效问题在静音累计1000毫秒提交，保留无问号的提问和前置回应', async () => {
   const desktop = window.desktop!;
   Object.assign(desktop, {
     onChatEvent: () => () => {},
@@ -286,9 +364,9 @@ it('明确有效问题在静音累计1800毫秒提交，保留无问号的提问
   useInterview.setState({ aiEnabled: true, modelId: 'test' });
   useInterview.getState().setAutoAnswer(true);
   emit(segment('ack', '好的', true));
-  await advanceAudio(500);
+  await advanceAudio(400);
   emit(segment('question', '讲讲你的项目', true));
-  await advanceAudio(999);
+  await advanceAudio(499);
   expect(desktop.interviewAnswer).not.toHaveBeenCalled();
   await advanceAudio(1);
   expect(desktop.interviewAnswer).toHaveBeenCalledOnce();
@@ -471,7 +549,7 @@ it('临时结果原位替换，终稿冻结且去重，手动整理后消费一�
 it('短停顿后新文本阻止提前提交，暂停后不会自动触发AI', async () => {
   useInterview.getState().setAutoAnswer(true);
   emit(segment('one', '前半句', true));
-  await advanceAudio(999);
+  await advanceAudio(499);
   emit(segment('two', '后半句', false));
   await advanceAudio(2000);
   expect(useInterview.getState().answers).toHaveLength(0);
@@ -590,6 +668,8 @@ it('结束等待较慢句末识别时只保存尾段，不重新触发自动回�
 
 it('切换模型期间保留到期问题，后台成功后用新设置提交；结束后的迟到更新不回写', async () => {
   const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
+  const write = vi.spyOn(localStorage, 'setItem');
+  const models = ['next', 'late'].map((id) => ({ id, label: id, description: '', provider: copilotProvider }));
   let finish!: (value: unknown) => void;
   Object.assign(window.desktop!, {
     updateInterviewModel: vi.fn(
@@ -600,22 +680,26 @@ it('切换模型期间保留到期问题，后台成功后用新设置提交；�
     ),
   });
   useInterview.getState().setAutoAnswer(true);
-  const changing = useInterview.getState().updateModel('next', 'low');
+  const changing = useInterview.getState().updateModel('next', 'low', models);
   emit(segment('model-change', '如何设计接口', true));
   await advanceAudio(1000);
   expect(ask).not.toHaveBeenCalled();
   finish({ ok: true, modelId: 'next', effort: 'low' });
   expect(await changing).toBe(true);
+  const preference = write.mock.calls.find(([key]) => key === serviceModelPreferenceKey('interview'));
+  expect(JSON.parse(preference![1])).toMatchObject({ active: 'copilot', copilot: { modelId: 'next', effort: 'low' } });
   expect(useInterview.getState()).toMatchObject({
     modelId: 'next',
     effort: 'low',
     updatingModel: false,
   });
   expect(ask).toHaveBeenCalledWith('如何设计接口', ['model-change'], []);
-  const late = useInterview.getState().updateModel('late', 'high');
+  write.mockClear();
+  const late = useInterview.getState().updateModel('late', 'high', models);
   useInterview.getState().reset();
   finish({ ok: true, modelId: 'late', effort: 'high' });
   expect(await late).toBe(false);
+  expect(write.mock.calls.some(([key]) => key === serviceModelPreferenceKey('interview'))).toBe(false);
   expect(useInterview.getState().modelId).toBe('next');
   expect(useInterview.getState().updatingModel).toBe(false);
   ask.mockRestore();

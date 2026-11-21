@@ -1,4 +1,4 @@
-import type { AIService } from './auth';
+import type { AccountService } from './auth';
 
 export interface AccountQuota {
   id: string;
@@ -16,7 +16,7 @@ export interface AccountQuota {
   resetEstimated: boolean;
 }
 export interface AccountUsage {
-  provider: AIService;
+  provider: AccountService;
   status: 'available' | 'unavailable';
   plan:
     | 'free'

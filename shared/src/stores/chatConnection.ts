@@ -1,9 +1,12 @@
 import { create } from 'zustand';
-import type { ChatModel } from '../../electron/contracts/chat';
+import { CHAT_MODEL_CATALOG_TTL_MS, type ChatModel } from '../../electron/contracts/chat';
+import type { AIService, AuthSession } from '../../electron/contracts/auth';
+import { isApiProvider } from '../../electron/contracts/apiConnections';
 import type { AccountUsage } from '../../electron/contracts/accountUsage';
 import { chatModels } from '../services/chatOptions';
 import { failureText } from '../services/chat';
 interface State {
+  service: AIService | null;
   live: boolean;
   models: ChatModel[];
   usage: AccountUsage | null;
@@ -12,13 +15,33 @@ interface State {
   usageError: string | null;
   loadingUsage: boolean;
   usageLoaded: boolean;
-  load(live: boolean, force?: boolean, demo?: boolean): Promise<void>;
+  load(live: boolean, force?: boolean, mode?: AuthSession['mode']): Promise<void>;
   refreshUsage(scope?: 'chat' | 'interview'): Promise<void>;
   watchUsage(scope?: 'chat' | 'interview'): () => void;
 }
 let generation = 0;
 let usageRevision = 0;
+let catalogCheckedAt: number | undefined;
+
+async function readModels(force: boolean): Promise<Pick<State, 'models' | 'error'>> {
+  try {
+    if (!window.desktop) throw new Error('请在桌面应用中连接模型服务。');
+    const result = await window.desktop.chatModels(force);
+    if (!result.ok) throw new Error(failureText(result.error));
+    return {
+      models: result.models,
+      error: result.models.length ? null : '服务商的目录未返回 VoxCue 支持的对话模型。请尝试刷新模型列表。',
+    };
+  } catch (error) {
+    return {
+      models: [],
+      error: error instanceof Error ? error.message : '模型加载失败，请重试。',
+    };
+  }
+}
+
 export const useChatConnection = create<State>((set, get) => ({
+  service: null,
   live: false,
   models: [],
   usage: null,
@@ -27,14 +50,16 @@ export const useChatConnection = create<State>((set, get) => ({
   usageError: null,
   loadingUsage: false,
   usageLoaded: false,
-  async load(live, force = false, demo = false) {
+  async load(live, force = false, mode) {
     const current = ++generation;
     const revision = ++usageRevision;
+    catalogCheckedAt = undefined;
     set({ loadingUsage: false, usageLoaded: false });
     if (!live) {
       set({
+        service: null,
         live: false,
-        models: demo ? [...chatModels] : [],
+        models: mode === 'demo' ? [...chatModels] : [],
         usage: null,
         loading: false,
         error: null,
@@ -42,30 +67,50 @@ export const useChatConnection = create<State>((set, get) => ({
       });
       return;
     }
-    set({ live: true, loading: true, error: null, usageError: null, models: [], usage: null });
-    try {
-      if (!window.desktop) throw new Error('请在桌面应用中连接模型服务。');
-      const result = await window.desktop.chatModels(force);
-      if (current !== generation) return;
-      if (!result.ok) throw new Error(failureText(result.error));
-      set({ models: result.models });
-    } catch (error) {
-      if (current === generation)
-        set({ error: error instanceof Error ? error.message : '模型加载失败，请重试。' });
-    } finally {
-      if (current === generation) {
-        set({ loading: false });
-        // A first message can use the models while the sidebar reads the quota.
-        if (revision === usageRevision) void get().refreshUsage();
-      }
-    }
+    // Refreshes keep their service. A switch publishes its identity together with the empty catalog.
+    const service = mode && mode !== 'demo' ? mode : get().service;
+    set({ service, live: true, loading: true, error: null, usageError: null, models: [], usage: null });
+    const catalog = await readModels(force);
+    if (current !== generation) return;
+    catalogCheckedAt = Date.now();
+    set({ ...catalog, loading: false });
+    // A first message can use the models while the sidebar reads the quota.
+    if (revision === usageRevision) void get().refreshUsage();
   },
   watchUsage(scope = 'chat') {
-    const refresh = () => void get().refreshUsage(scope);
+    let watching = true;
+    let checkingCatalog = false;
+    const refreshCatalog = async () => {
+      if (
+        !watching ||
+        checkingCatalog ||
+        !get().live ||
+        get().loading ||
+        catalogCheckedAt === undefined ||
+        Date.now() - catalogCheckedAt < CHAT_MODEL_CATALOG_TTL_MS
+      )
+        return;
+      checkingCatalog = true;
+      const current = generation;
+      try {
+        const catalog = await readModels(true);
+        if (watching && current === generation) {
+          catalogCheckedAt = Date.now();
+          set(catalog);
+        }
+      } finally {
+        checkingCatalog = false;
+      }
+    };
+    const refresh = () => {
+      void get().refreshUsage(scope);
+      if (scope === 'chat') void refreshCatalog();
+    };
     refresh();
     const timer = window.setInterval(refresh, 60_000);
     window.addEventListener('focus', refresh);
     return () => {
+      watching = false;
       clearInterval(timer);
       window.removeEventListener('focus', refresh);
       ++usageRevision;
@@ -74,6 +119,10 @@ export const useChatConnection = create<State>((set, get) => ({
   },
   async refreshUsage(scope = 'chat') {
     if ((scope === 'chat' && !get().live) || !window.desktop || get().loadingUsage) return;
+    if (isApiProvider(get().service)) {
+      set({ usage: null, usageLoaded: true, usageError: null });
+      return;
+    }
     const current = generation;
     const revision = ++usageRevision;
     // Background reads keep the last result until success or failure replaces it.

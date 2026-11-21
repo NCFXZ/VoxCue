@@ -114,7 +114,7 @@ try {
   );
   await page.evaluate(() => {
     window.motionPlayers = [];
-    window.pausePanelMotion = true;
+    window.panelPlayback = 'inspect';
     const original = Element.prototype.animate;
     Element.prototype.animate = function (frames, options) {
       const animation = original.call(this, frames, options);
@@ -122,7 +122,15 @@ try {
         this.matches('.floating-panels,.floating-transcript,.floating-answer,.floating-notices')
       ) {
         window.motionPlayers.push(animation);
-        if (window.pausePanelMotion) animation.pause();
+        if (window.panelPlayback !== 'live') animation.pause();
+        if (window.panelPlayback === 'inspect') {
+          // Pin a deliberately sampled frame across native IPC/geometry reads.
+          // The real watchdog remains active in the stalled and live cases below.
+          const cancel = animation.cancel.bind(animation);
+          animation.cancel = () => {
+            if (animation.playState !== 'paused' || matchMedia('(prefers-reduced-motion: reduce)').matches) cancel();
+          };
+        }
       }
       return animation;
     };
@@ -169,7 +177,10 @@ try {
     );
   const finish = () =>
     page.evaluate(() => {
-      for (const a of window.motionPlayers) if (a.playState !== 'idle') a.finish();
+      for (const a of window.motionPlayers) {
+        delete a.cancel; // Restore native cancellation before releasing the sampled frame.
+        if (a.playState !== 'idle') a.finish();
+      }
       window.motionPlayers = [];
     });
   const contours = () =>
@@ -197,10 +208,21 @@ try {
     e.click();
     e.click();
   });
-  await page.waitForFunction(
-    () => document.querySelector('.floating-shell').dataset.panelMotion === 'collapse',
-  );
-  assert.equal((await nativeState()).collapsed, false);
+  const readCollapseFrame = () => page.evaluate(async () => ({
+    motion: document.querySelector('.floating-shell').dataset.panelMotion,
+    dpr: devicePixelRatio,
+    visibility: document.visibilityState,
+    players: window.motionPlayers.map((a) => ({ target: a.effect.target.className, state: a.playState })),
+    native: await window.desktop.interviewState(),
+  }));
+  await page.waitForFunction(() => window.motionPlayers.some(
+    (a) => a.effect?.target?.matches('.floating-panels') && a.playState === 'paused',
+  )).catch(async (cause) => {
+    throw Error('Expected a paused collapse frame: ' + JSON.stringify(await readCollapseFrame()), { cause });
+  });
+  const collapseFrame = await readCollapseFrame();
+  assert.equal(collapseFrame.motion, 'collapse', JSON.stringify(collapseFrame));
+  assert.equal(collapseFrame.native.collapsed, false, JSON.stringify(collapseFrame));
   assert.deepEqual(await bounds(), panelBounds, 'Native shrink must wait for the exit animation');
   await page.evaluate(() => window.motionPlayers.forEach((a) => (a.currentTime = 80)));
   const folded = await page.locator('.floating-panels').evaluate((e) => ({
@@ -408,7 +430,7 @@ try {
   assert.deepEqual(await bounds(), narrow, 'Settings preserve the prior answer-only panel size');
   await page.evaluate(() => {
     window.motionPlayers = [];
-    window.pausePanelMotion = false;
+    window.panelPlayback = 'live';
   });
   await click(toggle);
   await idle();
@@ -503,10 +525,26 @@ try {
       'Panel changes never move or resize the native canvas',
     );
   assert.deepEqual(errors, []);
-  // Closing our isolated window while its animation is pending must release it.
+  // A genuinely stalled compositor must still yield to the production watchdog.
   await page.evaluate(() => {
-    window.pausePanelMotion = true;
+    window.motionPlayers = [];
+    window.panelPlayback = 'stall';
   });
+  await click(page.locator('.floating-brand'));
+  await page.waitForFunction(() => {
+    const shell = document.querySelector('.floating-shell');
+    return shell.classList.contains('is-collapsed') && !shell.dataset.panelMotion;
+  });
+  assert.equal((await nativeState()).collapsed, true);
+  assert.ok(await page.evaluate(() => window.motionPlayers.some((a) =>
+    a.effect?.target?.matches('.floating-panels') && a.playState === 'idle',
+  )), 'The watchdog must cancel the stalled panel animation');
+  await page.evaluate(() => { window.panelPlayback = 'live'; });
+  await click(page.locator('.floating-brand'));
+  await idle();
+  assert.equal((await nativeState()).collapsed, false);
+  // Closing our isolated window while its animation is pending must release it.
+  await page.evaluate(() => { window.panelPlayback = 'stall'; });
   await click(page.locator('.floating-brand'));
   await page.waitForFunction(
     () => document.querySelector('.floating-shell').dataset.panelMotion === 'collapse',

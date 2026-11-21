@@ -14,3 +14,16 @@ export const pendingPresentation: PresentationCapabilities = Object.freeze({
   interviewMousePassthrough: false,
   interviewIconVisibility: false,
 });
+
+/** CSS pixels relative to the owning web contents. Only geometry and theme cross the bridge. */
+export interface ApiKeyField {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  dark: boolean;
+}
+export type ApiKeyPromptCommand =
+  | { action: 'layout'; field: ApiKeyField }
+  | { action: 'visibility'; visible: boolean }
+  | { action: 'submit' | 'cancel' | 'focus' };

@@ -1,19 +1,32 @@
-import { Worker } from 'node:worker_threads';
+import { isMarkedAsUntransferable, Worker } from 'node:worker_threads';
 import path from 'node:path';
 import type { EncodedScreenshot, ScreenshotFrame } from './worker';
 import type { ChatFile } from '../../contracts/chat';
 
+type CaptureFrame = Omit<ScreenshotFrame, 'bitmap'> & { bitmap: ArrayBuffer | Uint8Array };
+
+export function transferableScreenshotPixels(bitmap: CaptureFrame['bitmap']) {
+  const view = ArrayBuffer.isView(bitmap) ? bitmap : new Uint8Array(bitmap);
+  const backing = view.buffer;
+  // NativeImage.toBitmap() produces fresh pixels. Never detach a slice, a pool,
+  // shared memory or an allocation the host marks as non-transferable.
+  if (backing instanceof ArrayBuffer && view.byteOffset === 0 && view.byteLength === backing.byteLength &&
+      typeof isMarkedAsUntransferable === 'function' && !isMarkedAsUntransferable(backing)) return backing;
+  return new Uint8Array(view).buffer;
+}
+
 export function encodeScreenshotBitmap(
-  frame: ScreenshotFrame,
+  frame: CaptureFrame,
   signal: AbortSignal,
 ): Promise<{ file: ChatFile; preview: string }> {
   signal.throwIfAborted();
   return new Promise((resolve, reject) => {
+    const bitmap = transferableScreenshotPixels(frame.bitmap);
     const worker = new Worker(
       path.join(__dirname, 'worker.js').replace(/app\.asar([\\/])/, 'app.asar.unpacked$1'),
       {
-        workerData: frame,
-        transferList: [frame.bitmap],
+        workerData: { ...frame, bitmap },
+        transferList: [bitmap],
         resourceLimits: { maxOldGenerationSizeMb: 64, maxYoungGenerationSizeMb: 16 },
       },
     );

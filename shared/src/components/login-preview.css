@@ -17,9 +17,9 @@
   overflow: hidden;
   scroll-behavior: auto;
 }
-.login-preview .login-interview-preview .floating-answer .floating-scroll[data-overflow='true'] {
+.login-preview .login-interview-preview .floating-answer .floating-scroll:is([data-more-above], [data-more-below]) {
   --preview-top-fade: 0px;
-  --preview-bottom-fade: 18px;
+  --preview-bottom-fade: 0px;
   mask-image: linear-gradient(
     to bottom,
     transparent,
@@ -28,9 +28,11 @@
     transparent
   );
 }
-.login-preview .login-interview-preview .floating-answer .floating-scroll[data-scrolled='true'] {
+.login-preview .login-interview-preview .floating-answer .floating-scroll[data-more-above] {
   --preview-top-fade: 18px;
-  --preview-bottom-fade: 0px;
+}
+.login-preview .login-interview-preview .floating-answer .floating-scroll[data-more-below] {
+  --preview-bottom-fade: 18px;
 }
 .login-preview .login-interview-preview .floating-empty {
   padding: 42px 4px 12px;
@@ -44,11 +46,16 @@
   padding-top: 20px;
 }
 .login-preview .login-interview-preview .login-preview-thinking {
+  --response-status-font-size: 11px;
   margin: 0 0 8px;
   color: var(--muted);
   font-size: 11px;
 }
-.login-interview-preview[data-playing='false'] .typing-caret {
+.login-preview-thinking .chat-activity {
+  padding: 0;
+}
+.login-interview-preview[data-playing='false'] :is(.typing-caret, .progress-state-label),
+.login-interview-preview .collapse-content[data-expanded='false'] .progress-state-label {
   animation-play-state: paused;
 }
 @media (prefers-reduced-motion: reduce) {

@@ -7,8 +7,41 @@
     border-radius var(--panel-motion-duration) var(--panel-motion-easing),
     corner-shape var(--panel-motion-duration) var(--panel-motion-easing);
 }
+.reasoning-effort-popup > .dropdown-scroll:not(:has(.reasoning-model-list)),
+.reasoning-model-list {
+  scrollbar-gutter: stable both-edges;
+}
 .reasoning-popup-body {
   overflow: clip;
+}
+.reasoning-source {
+  padding: 3px var(--select-content-inset);
+  color: var(--muted);
+  font-size: var(--type-secondary);
+}
+.reasoning-toggle {
+  display: flex;
+  justify-content: center;
+  gap: 4px;
+}
+.reasoning-toggle button[aria-pressed='true'] {
+  color: var(--accent);
+  background: var(--soft);
+}
+.speech-model-settings .dropdown-content.reasoning-effort-popup {
+  width: var(--radix-dropdown-menu-trigger-width);
+}
+.speech-model-settings .reasoning-popup-view[data-panel='models'] {
+  container-type: inline-size;
+}
+.speech-model-settings .reasoning-model-list .model-option {
+  --option-inset: calc(var(--select-content-inset) - var(--dropdown-inset) - 1px);
+  /* Each gutter takes up half the difference between the list and panel widths. */
+  padding-inline: max(0px, calc(var(--option-inset) + 50% - 50cqi));
+}
+.speech-model-settings .model-check > svg {
+  width: 14px;
+  height: 14px;
 }
 .reasoning-popup-view {
   --reasoning-model-footer-height: 0px;
@@ -19,6 +52,11 @@
 }
 .reasoning-popup-view[data-panel='models'] {
   --reasoning-enter-x: 8px;
+  row-gap: 0;
+}
+.reasoning-popup-view[data-panel='models'] > :not(:first-child, .interview-reveal),
+.reasoning-popup-view .model-error {
+  margin-top: 6px;
 }
 .reasoning-popup-view[data-panel='effort'] {
   --reasoning-enter-x: -8px;

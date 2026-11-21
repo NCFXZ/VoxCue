@@ -1,12 +1,12 @@
 import {
   providerCredentialStatus,
-  type AIService,
+  type AccountService,
   type ProviderCredentialReason,
 } from '../../contracts/auth';
 
 export class ProviderCredentialUnavailable extends Error {
   constructor(
-    readonly service: AIService,
+    readonly service: AccountService,
     readonly reason: ProviderCredentialReason = 'unavailable',
   ) {
     super(providerCredentialStatus[service]);
@@ -57,7 +57,7 @@ export class ProviderCredentialAccess {
   private tail = Promise.resolve();
 
   constructor(
-    private service: AIService,
+    private service: AccountService,
     private onBlock?: () => void,
   ) {}
 

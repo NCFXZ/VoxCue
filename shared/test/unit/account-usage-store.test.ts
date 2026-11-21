@@ -1,6 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { useChatConnection } from '../../src/stores/chatConnection';
 import { copilotAccountUsage } from '../../electron/backend/copilot/quota';
+import { CHAT_MODEL_CATALOG_TTL_MS, type ChatModel } from '../../electron/contracts/chat';
+const catalog = (id: string) => ({ ok: true, models: [{ id, label: id, description: '' }] });
 afterEach(async () => {
   await useChatConnection.getState().load(false);
   vi.unstubAllGlobals();
@@ -8,7 +10,7 @@ afterEach(async () => {
 it('主账号登录但未连接AI时不提供预设模拟模型，显式测试演示才可用', async () => {
   await useChatConnection.getState().load(false);
   expect(useChatConnection.getState().models).toEqual([]);
-  await useChatConnection.getState().load(false, false, true);
+  await useChatConnection.getState().load(false, false, 'demo');
   expect(useChatConnection.getState().models.length).toBeGreaterThan(0);
 });
 it('切换/断开账户后丢弃迟到额度，不能回填上个账户数据', async () => {
@@ -34,6 +36,26 @@ it('切换/断开账户后丢弃迟到额度，不能回填上个账户数据', 
     loadingUsage: false,
     usageLoaded: false,
   });
+});
+it('reads an API model catalog without fetching a subscription quota', async () => {
+  const quota = vi.fn();
+  const models = vi.fn()
+    .mockResolvedValueOnce(catalog('model-from-api'))
+    .mockResolvedValueOnce({ ok: true, models: [] });
+  vi.stubGlobal('window', { desktop: {
+    chatModels: models,
+    chatAccountUsage: quota,
+  } });
+  await useChatConnection.getState().load(true, false, 'openai');
+  expect(useChatConnection.getState()).toMatchObject({
+    service: 'openai', live: true, usage: null, usageLoaded: true,
+    models: [{ id: 'model-from-api' }],
+  });
+  await useChatConnection.getState().load(true, true, 'openai');
+  expect(useChatConnection.getState()).toMatchObject({
+    live: true, models: [], error: '服务商的目录未返回 VoxCue 支持的对话模型。请尝试刷新模型列表。',
+  });
+  expect(quota).not.toHaveBeenCalled();
 });
 it('刷新失败清除旧数字，官方错误不伪造为0；并发刷新只发一次请求', async () => {
   const quota = copilotAccountUsage({
@@ -76,6 +98,91 @@ it('登录后自动读取额度，模型目录失败也不要求第二次连接'
   expect(useChatConnection.getState().usage).toEqual(quota);
   expect(useChatConnection.getState().loadingUsage).toBe(false);
 });
+it('用量和目录共用当前连接，目录到期后自动发现新模型', async () => {
+  vi.useFakeTimers();
+  const events = new EventTarget();
+  const quota = copilotAccountUsage({ planTier: 'free' });
+  const models = vi
+    .fn()
+    .mockResolvedValueOnce(catalog('original'))
+    .mockResolvedValue(catalog('new'));
+  vi.stubGlobal('window', {
+    desktop: { chatModels: models, chatAccountUsage: async () => ({ ok: true, usage: quota }) },
+    setInterval,
+    addEventListener: events.addEventListener.bind(events),
+    removeEventListener: events.removeEventListener.bind(events),
+  });
+  await useChatConnection.getState().load(true);
+  const stop = useChatConnection.getState().watchUsage();
+  try {
+    events.dispatchEvent(new Event('focus'));
+    await vi.advanceTimersByTimeAsync(CHAT_MODEL_CATALOG_TTL_MS - 1);
+    expect(models.mock.calls).toEqual([[false]]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(models.mock.calls).toEqual([[false], [true]]);
+    expect(useChatConnection.getState()).toMatchObject({
+      models: catalog('new').models,
+      loading: false,
+      usage: quota,
+      usageLoaded: true,
+    });
+    stop();
+    await vi.advanceTimersByTimeAsync(2 * CHAT_MODEL_CATALOG_TTL_MS);
+    expect(models).toHaveBeenCalledTimes(2);
+  } finally {
+    stop();
+    vi.useRealTimers();
+  }
+});
+
+it.each(['unmount', 'switch account', 'manual refresh'])(
+  '%s makes an older background catalog result ineligible',
+  async (action) => {
+    vi.useFakeTimers();
+    const events = new EventTarget();
+    let finish!: (value: { ok: boolean; models: ChatModel[] }) => void;
+    const models = vi
+      .fn()
+      .mockResolvedValueOnce(catalog('original'))
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            finish = resolve;
+          }),
+      )
+      .mockResolvedValue(catalog('current'));
+    vi.stubGlobal('window', {
+      desktop: { chatModels: models, chatAccountUsage: async () => ({ ok: true, usage: null }) },
+      setInterval,
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+    });
+    await useChatConnection.getState().load(true, false, 'chatgpt');
+    const stop = useChatConnection.getState().watchUsage();
+    try {
+      vi.setSystemTime(Date.now() + CHAT_MODEL_CATALOG_TTL_MS);
+      events.dispatchEvent(new Event('focus'));
+      events.dispatchEvent(new Event('focus'));
+      expect(models.mock.calls).toEqual([[false], [true]]);
+      expect(useChatConnection.getState()).toMatchObject({
+        models: catalog('original').models,
+        loading: false,
+      });
+      if (action === 'unmount') stop();
+      else if (action === 'switch account') await useChatConnection.getState().load(true, false, 'copilot');
+      else await useChatConnection.getState().load(true, true);
+      finish(catalog('late'));
+      await vi.advanceTimersByTimeAsync(0);
+      expect(useChatConnection.getState().models).toEqual(
+        catalog(action === 'unmount' ? 'original' : 'current').models,
+      );
+      expect(useChatConnection.getState().service).toBe(action === 'switch account' ? 'copilot' : 'chatgpt');
+    } finally {
+      stop();
+      vi.useRealTimers();
+    }
+  },
+);
 it('退出用量监听后，迟到的模型目录不能重新发起额度读取；新连接仍正常读取', async () => {
   const events = new EventTarget();
   let finishModels!: (value: any) => void;

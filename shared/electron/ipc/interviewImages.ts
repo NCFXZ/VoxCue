@@ -1,5 +1,6 @@
 import { handleDesktop } from './handle';
 import { validImageId } from '../backend/interview/images';
+import { validImagePreview } from '../contracts/interviewImages';
 import type { InterviewImageStore } from '../backend/interview/images';
 
 export function registerInterviewImageIpc(d: {
@@ -13,15 +14,18 @@ export function registerInterviewImageIpc(d: {
 }) {
   handleDesktop('interview:image', async (event, value, ...extra: unknown[]) => {
     d.requireReader(event);
+    const syncing = value?.op === 'syncDigest' || value?.op === 'syncBytes';
     if (
       extra.length ||
       event.senderFrame !== event.sender.mainFrame ||
       !value ||
       typeof value !== 'object' ||
-      !['read', 'preview', 'save', 'remove'].includes(value.op) ||
+      !['read', 'preview', 'save', 'remove', 'syncDigest', 'syncBytes'].includes(value.op) ||
       Object.keys(value).some(
-        (key) => !['op', value.op !== 'remove' ? 'id' : 'ids'].includes(key),
+        (key) => !['op', value.op !== 'remove' ? 'id' : 'ids'].includes(key) &&
+          !(key === 'preview' && syncing),
       ) ||
+      (syncing && value.preview !== undefined && !validImagePreview(value.preview)) ||
       (value.op !== 'remove' && !validImageId(value.id)) ||
       (value.op === 'remove' &&
         (!Array.isArray(value.ids) ||
@@ -29,8 +33,13 @@ export function registerInterviewImageIpc(d: {
           value.ids.some((id) => !validImageId(id))))
     )
       throw Error('无效的截图操作。');
-    if (value.op === 'remove' || value.op === 'save') d.requireMain(event);
+    if (value.op === 'remove' || value.op === 'save' || syncing) d.requireMain(event);
     try {
+      if (syncing) {
+        const data = await d.store.syncImage(value.id, value.preview, value.op === 'syncBytes');
+        d.requireMain(event);
+        return { ok: true, ...data };
+      }
       if (value.op === 'save') {
         const image = await d.store.original(value.id);
         d.requireMain(event);

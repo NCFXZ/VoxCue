@@ -1,6 +1,7 @@
-import { RagChatService } from './application/rag';
-import { KnowledgeHost } from './backend/knowledge/host';
-import { KnowledgeCoordinator } from './application/knowledge';
+import { createAccountProfile, waitForProfileCleanup } from './accountProfile';
+import { hasChromiumAppStorage, LegacyProfileClaim, LegacyProfileMigrationError, legacyProfileAssignmentFile } from './backend/legacyProfileClaim';
+import { eraseLegacyProfileFiles, hasLegacyProfileFiles, migrateLegacyProfileFiles } from './backend/legacyProfileFiles';
+import { eraseClaimedLegacyBrowser, migrateLegacyBrowser } from './legacyBrowserMigration';
 import { registerKnowledgeIpc } from './ipc/knowledge';
 import { UpdateService } from './backend/updates/service';
 import { readAutoDownload, saveAutoDownload } from './backend/updates/preferences';
@@ -28,6 +29,7 @@ import {
 } from 'electron';
 import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { migrateUserData } from './userData';
+import { isCloudProfileOwner, profileDirectory } from './accountProfilePaths';
 import { encodeScreenshotBitmap } from './backend/screenshot/host';
 import { runtimeEnvironment, restrictSessionPermissions } from './runtimePolicy';
 import { packagesFor } from './backend/components/catalog';
@@ -35,47 +37,46 @@ import { ComponentService, componentPaths } from './backend/components/service';
 import { registerComponentIpc } from './ipc/components';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { ChatGPTAuthService } from './backend/auth/service';
-import { ManagedChatGPTAuth } from './backend/auth/managed';
-import {
-  ProviderCredentialAccess,
-  ProviderCredentialUnavailable,
-} from './backend/auth/providerCredentialAccess';
+import { ProviderCredentialUnavailable } from './backend/auth/providerCredentialAccess';
 import { createAuthStorage, type CredentialEncryption } from './backend/auth/storage';
 import { CloudAccountClient, cloudOrigin } from './backend/cloud/client';
+import { MigrationPasswords } from './backend/cloud/migrationPasswords';
+import { migrationPasswordFileName, readMigrationPasswordRecords } from './backend/cloud/migrationPasswordRecords';
 import { LocalMode } from './backend/localMode';
 import { Telemetry } from './backend/telemetry/service';
 import { registerTelemetryIpc } from './ipc/telemetry';
 import type { TelemetryStage } from './contracts/telemetry';
 import type { CloudAccountState } from './contracts/cloudAccount';
 import { createCloudVault, createCredentialVault } from './backend/cloud/vault';
+import { AccountErasureReceipts, type ErasureReceipt } from './backend/cloud/erasureReceipts';
+import { eraseOwnerDeviceData } from './backend/cloud/eraseOwnerDeviceData';
 import type { TelemetryProofState } from './backend/telemetry/identity';
 import { CloudSyncClient } from './backend/cloud/sync';
-import { AccountArchive } from './backend/accountArchive';
+import { AccountArchive, recoverAccountExports } from './backend/accountArchive';
+import { AccountImport, AccountDataTransfers } from './backend/accountImport';
+import { ProfileImportSources } from './backend/profileImportSources';
+import { copyProfileRecordings } from './backend/profileRecordingTransfer';
+import { ProfileMoveReceipts } from './backend/profileMoveReceipt';
+import { checkOrRemoveMovedProfileAssets } from './movedProfileAssets';
+import { openProfileImportSource } from './profileImportSource';
 import { accountErasureMarker, eraseLocalAccount } from './backend/accountErasure';
-import { ChatGPTService } from './backend/chat/service';
-import { CodexUsageRuntime } from './backend/chat/codexUsage';
-import { ChatGPTAccountUsage } from './backend/chat/accountUsage';
-import type { AIChatService } from './backend/chat/ports';
 import { providerCredentialMessages, type AIService } from './contracts/auth';
-import { CopilotRuntime } from './backend/copilot/runtime';
-import { CopilotAuthService } from './backend/copilot/auth';
-import { CopilotChatService } from './backend/copilot/service';
-import { createCopilotLoginStorage, createServiceSelection } from './backend/copilot/storage';
 import { SelectedChatService } from './application/providers';
-import { UsageLedger } from './backend/chat/usage';
 import { registerChatIpc } from './ipc/chat';
+import { registerApiConnectionIpc } from './ipc/apiConnections';
+import { apiProviders, isApiProvider } from './contracts/apiConnections';
 import { registerInterviewIpc } from './ipc/interview';
 import { InterviewContext } from './application/interviewContext';
 import { checkTranscriptionAccess } from './application/transcriptionAccess';
 import { InterviewAudioIntent } from './application/interviewAudioIntent';
 import { captureInterviewScreenshot, prepareInterviewScreenshot } from './screenshot';
-import { InterviewImageStore } from './backend/interview/images';
 import { registerInterviewImageIpc } from './ipc/interviewImages';
 import { registerScreenCaptureIpc } from './ipc/screenCapture';
 import type { ScreenCaptureAccess } from './contracts/screenCapture';
 import { registerHistoryIpc } from './ipc/history';
-import { readFile, writeFile } from 'node:fs/promises';
+import { registerRecordingScheme, registerRecordings } from './ipc/recordings';
+import { RecordingLibrary } from './backend/interview/recordings';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { SpeechHost } from './backend/speech/host';
 import { SpeechHardwareProbe } from './backend/speech/hardware';
 import type {
@@ -110,12 +111,14 @@ import { revealExistingInterview } from './interviewActivation';
 import { selectDesktopPlatform, desktopResources } from './platform';
 import {
   windowOptions,
+  profilePartition,
   whenWindowReady,
   restrictWindowNavigation,
   loadWindowPage,
   guardQuitDrain,
 } from './window';
 import type { NativePresentation } from './presentation';
+import { userAgreementUrl } from './contracts/cloudAccount';
 import {
   isUILanguage,
   systemUILanguage,
@@ -131,14 +134,15 @@ import {
 const systemLanguage = systemUILanguage(app.getPreferredSystemLanguages()[0]);
 let uiLanguage: UILanguage = systemLanguage;
 const nativeText = (source: string) => translateUI(source, uiLanguage);
-let knowledge: KnowledgeHost;
-let knowledgeCoordinator: KnowledgeCoordinator;
-let auth: ChatGPTAuthService;
-let copilotAuth: CopilotAuthService;
-let copilotRuntime: CopilotRuntime;
-let codexUsageRuntime: CodexUsageRuntime;
-let chatGPTUsage: ChatGPTAccountUsage;
-let chat: AIChatService;
+let activeProfile: ReturnType<typeof createAccountProfile> | undefined;
+let retiringProfile: Promise<void> | undefined;
+let preparingProfile: { owner: string; work: Promise<void> } | undefined;
+let legacyClaim: LegacyProfileClaim | undefined;
+let profileEntryStopped = false;
+function currentProfile() {
+  if (!activeProfile) throw Error('请先登录 VoxCue 账号或选择本地账户。');
+  return activeProfile;
+}
 let telemetry: Telemetry | undefined;
 let telemetryClosed = false;
 let telemetryClosing = false;
@@ -163,8 +167,10 @@ const interviewAudioIntent = new InterviewAudioIntent();
 const interviewContext = new InterviewContext();
 let demoSession = false;
 let erasingAccount = false;
+let recoveringErasedProfile = false;
 let leavingAccount = false;
-let accountArchive: AccountArchive | undefined;
+let accountArchive: AccountDataTransfers | undefined;
+let enableRecordingPlayback: (session: Electron.Session) => void;
 
 let macQuitRequested = false;
 let mainWindow: BrowserWindow | null = null;
@@ -183,7 +189,6 @@ const surfaceRevisions = new WeakMap<BrowserWindow, number>();
 const interviewRevealCallbacks = new WeakMap<BrowserWindow, (focus: boolean) => void>();
 let releaseInterviewShortcuts: (() => void) | undefined;
 let shortcutController: InterviewShortcutController;
-let shortcutSettingsReady: Promise<void>;
 let interviewMousePassthrough = false;
 let closingMain = false;
 let sessionHasContent = false;
@@ -220,7 +225,9 @@ const resources = desktopResources(
   },
   platformPolicy,
 );
-const windowPaths = { icon: resources.icon, preload: path.join(__dirname, 'preload.js') };
+function windowPaths() {
+  return { icon: resources.icon, preload: path.join(__dirname, 'preload.js'), owner: activeProfile?.owner };
+}
 const nativePresentation: NativePresentation | undefined = platformPolicy.presentationFile
   ? require(
       path.join(app.getAppPath(), 'dist-electron', platformPolicy.presentationFile),
@@ -236,6 +243,7 @@ const desktopPlatform = {
 };
 const indexFile = path.join(app.getAppPath(), 'dist/index.html');
 const environment = runtimeEnvironment(app.isPackaged, process.env);
+let legacyBrowserPresent = false;
 app.on('session-created', (created) =>
   restrictSessionPermissions(created, indexFile, environment.devServerUrl),
 );
@@ -248,6 +256,8 @@ try {
   const directory = isolated ?? migrateUserData(app.getPath('appData'));
   app.setPath('userData', directory);
   app.setPath('sessionData', directory);
+  if (!existsSync(path.join(directory, legacyProfileAssignmentFile)))
+    legacyBrowserPresent = hasChromiumAppStorage(directory);
 } catch (error) {
   dialog.showErrorBox(
     nativeText('应用数据迁移未完成'),
@@ -260,9 +270,15 @@ if (desktopPlatform.appUserModelId && !process.windowsStore)
 function interviewActive() {
   return interviewOpening || !!interviewWindow || !!speechSessions?.configuration;
 }
+function notifyCloudSyncAvailable() {
+  if (interviewActive() || closingMain || leavingAccount || erasingAccount ||
+      !isCloudProfileOwner(activeProfile?.owner) || !mainWindow || mainWindow.isDestroyed()) return;
+  const target = mainWindow.webContents;
+  if (!target.isDestroyed() && !target.isCrashed()) sendDesktop(target, 'cloud:sync-available');
+}
 async function prepareUpdateInstall(accountLogout = false, deletingAccount = false) {
   const win = mainWindow;
-  if (!win || win.isDestroyed() || pendingMainClose || mainCloseChecking)
+  if (!win || win.isDestroyed() || win.webContents.isCrashed() || pendingMainClose || mainCloseChecking)
     throw Error('Window is not ready');
   if (sessionHasContent && !deletingAccount) {
     mainCloseChecking = true;
@@ -286,7 +302,8 @@ async function prepareUpdateInstall(accountLogout = false, deletingAccount = fal
       mainCloseChecking = false;
     }
   }
-  if (interviewActive() || win.isDestroyed()) throw Error('Interview or window changed');
+  if (interviewActive() || win.isDestroyed() || win.webContents.isCrashed())
+    throw Error('Interview or window changed');
   mainCloseFlushed = false;
   return new Promise<boolean>((resolve, reject) => {
     updateFlush = { resolve, reject };
@@ -319,7 +336,8 @@ function clearRemoteInterview() {
   remoteConnection?.updateSnapshot(null);
   publishRemoteState();
 }
-function createLoginWindow(visible = true) {
+function createLoginWindow(visible = true, afterRetirement?: Promise<void>) {
+  if (afterRetirement && loginWindow) loginWindow.destroy();
   if (loginWindow) {
     revealLoginWindow ||= visible;
     if (revealLoginWindow && loginWindowReady) {
@@ -330,30 +348,42 @@ function createLoginWindow(visible = true) {
   }
   revealLoginWindow = visible;
   loginWindowReady = false;
+  const outgoing = mainWindow;
   clearRemoteInterview();
   void remoteConnection?.disconnect().catch(() => {});
   const win = new BrowserWindow(
-    windowOptions('login', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
+    windowOptions('login', desktopPlatform, windowPaths(), uiLanguage, systemLanguage),
   );
   loginWindow = win;
   restrictWindowNavigation(win);
-  whenWindowReady(win, desktopPlatform, () => {
-    loginWindowReady = true;
-    if (revealLoginWindow) {
-      win.show();
-      mainWindow?.close();
-    }
-  });
   win.on('close', () => {
     cancelLoginWait?.();
-    auth.cancel();
-    copilotAuth?.cancel();
+    activeProfile?.auth.cancel();
+    activeProfile?.copilotAuth.cancel();
   });
   win.on('closed', () => {
     loginWindow = null;
     loginWindowReady = false;
+    if (preparingProfile && !mainWindow) {
+      legacyClaim?.cancel();
+      if (desktopPlatform.quitOnAllWindowsClosed) app.quit();
+    }
   });
-  loadWindowPage(win, 'login', indexFile, environment.devServerUrl);
+  const load = () => {
+    if (win.isDestroyed() || profileEntryStopped) return;
+    whenWindowReady(win, desktopPlatform, () => {
+      loginWindowReady = true;
+      if (revealLoginWindow) {
+        win.show();
+        if (outgoing && !outgoing.isDestroyed()) outgoing.close();
+      }
+    });
+    loadWindowPage(win, 'login', indexFile, environment.devServerUrl);
+  };
+  // Keep an empty window alive while switching accounts. Its form must not accept
+  // a login until the old renderer and profile writers have finished retiring.
+  if (afterRetirement) void afterRetirement.then(load, load);
+  else load();
 }
 function publishInterviewLayout(win: BrowserWindow, bounds: Electron.Rectangle) {
   if (
@@ -564,6 +594,17 @@ function positionInterviewShortcuts() {
     else win.setBounds(bounds, false);
   }
 }
+function whenInterviewWindowReady(win: BrowserWindow, ready: () => void) {
+  whenWindowReady(win, desktopPlatform, async () => {
+    try {
+      await desktopPlatform.prepareWindowFade?.(win);
+    } catch {
+      // A window-manager effect must never prevent access to an interview.
+      console.warn('Could not disable the native interview window transition.');
+    }
+    if (!win.isDestroyed()) ready();
+  });
+}
 function showInterviewShortcuts() {
   const win = interviewShortcutsWindow;
   if (
@@ -607,7 +648,7 @@ function setInterviewShortcutsOpen(open: boolean): boolean {
     ...windowOptions(
       'interview-shortcuts',
       desktopPlatform,
-      windowPaths,
+      windowPaths(),
       uiLanguage,
       systemLanguage,
     ),
@@ -661,7 +702,7 @@ function setInterviewShortcutsOpen(open: boolean): boolean {
     restrictWindowNavigation(win);
     win.setContentProtection(captureProtected);
     positionInterviewShortcuts();
-    whenWindowReady(win, desktopPlatform, () => {
+    whenInterviewWindowReady(win, () => {
       try {
         nativeReady = true;
         nativeSurfaceReady = true;
@@ -725,7 +766,7 @@ function openInterview() {
   interviewCloseApproved = false;
   interviewMove = undefined;
   const win = new BrowserWindow(
-    windowOptions('interview', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
+    windowOptions('interview', desktopPlatform, windowPaths(), uiLanguage, systemLanguage),
   );
   let windowReady = false;
   let nativeReady = false,
@@ -766,6 +807,7 @@ function openInterview() {
     clearRemoteInterview();
     interviewMousePassthrough = false;
     speechSessions?.releaseInterview(true);
+    notifyCloudSyncAvailable();
     updates?.refresh();
     interviewIpc?.cancel();
     interviewContext.clear();
@@ -803,6 +845,16 @@ function openInterview() {
       ready: () => windowReady,
       command: (command) => {
         if (win !== interviewWindow || win.webContents.isDestroyed()) return;
+        if (command === 'toggle-shortcut-help') {
+          if (visibility.visible) {
+            try {
+              setInterviewShortcutsOpen(!shortcutsOpen());
+            } catch {
+              dialog.showErrorBox(nativeText('快捷键'), nativeText('快捷键窗口未能打开，请重试。'));
+            }
+          }
+          return;
+        }
         if (command === 'scroll-device-up' || command === 'scroll-device-down') {
           remoteConnection?.scroll(command === 'scroll-device-up' ? 'up' : 'down');
           return;
@@ -901,7 +953,7 @@ function openInterview() {
     });
     readyTimer = setTimeout(failedWindow, 30000);
     readyTimer.unref();
-    whenWindowReady(win, desktopPlatform, () => {
+    whenInterviewWindowReady(win, () => {
       nativeReady = true;
       nativeSurfaceReady = true;
       reveal();
@@ -1019,9 +1071,10 @@ function createMainWindow() {
   mainCloseApproved = false;
   mainCloseFlushed = false;
   pendingMainClose = null;
-  mainWindow = new BrowserWindow(
-    windowOptions('main', desktopPlatform, windowPaths, uiLanguage, systemLanguage),
-  );
+  const options = windowOptions('main', desktopPlatform, windowPaths(), uiLanguage, systemLanguage);
+  // Chromium binds custom media loaders when the document navigates.
+  enableRecordingPlayback(session.fromPartition(options.webPreferences!.partition!));
+  mainWindow = new BrowserWindow(options);
   restrictWindowNavigation(mainWindow);
   whenWindowReady(mainWindow, desktopPlatform, () => {
     mainWindow?.show();
@@ -1030,6 +1083,8 @@ function createMainWindow() {
   });
   loadWindowPage(mainWindow, 'main', indexFile, environment.devServerUrl);
   mainWindow.on('closed', () => {
+    void activeProfile?.coordinator.cancelBatch().catch(() => {});
+    chatIpc?.cancelModels();
     clearRemoteInterview();
     void remoteConnection?.disconnect().catch(() => {});
     void accountArchive?.cancel().catch(() => {});
@@ -1037,17 +1092,33 @@ function createMainWindow() {
     mainWindow = null;
     if (macQuitRequested) app.quit();
   });
-  mainWindow.webContents.on('did-start-loading', () => {
+  const win = mainWindow;
+  const releasePageRequests = () => {
+    void activeProfile?.coordinator.cancelBatch().catch(() => {});
+    chatIpc?.cancelModels();
     void accountArchive?.cancel().catch(() => {});
     speechSessions?.releaseDictation();
     chatIpc?.cancelActive();
+  };
+  win.webContents.on('did-start-loading', releasePageRequests);
+  win.webContents.on('render-process-gone', () => {
+    if (win !== mainWindow || win.isDestroyed()) return;
+    releasePageRequests();
+    const closing = !!pendingMainClose && !updateFlush;
+    clearTimeout(mainCloseTimer);
+    pendingMainClose = null;
+    mainCloseApproved = mainCloseFlushed = false;
+    updateFlush?.reject(Error('Window is not ready'));
+    updateFlush = null;
+    if (closing) win.close();
   });
   mainWindow.on('close', (event) => {
-    if (updates?.state().phase === 'installing' && !mainCloseFlushed) {
+    const canSave = !win.webContents.isCrashed();
+    if (canSave && updates?.state().phase === 'installing' && !mainCloseFlushed) {
       event.preventDefault();
       return;
     }
-    if (sessionHasContent && !mainCloseApproved) {
+    if (canSave && sessionHasContent && !mainCloseApproved) {
       event.preventDefault();
       if (mainCloseChecking) return;
       mainCloseChecking = true;
@@ -1079,7 +1150,7 @@ function createMainWindow() {
         });
       return;
     }
-    if (!mainCloseFlushed) {
+    if (canSave && !mainCloseFlushed) {
       event.preventDefault();
       if (pendingMainClose) return;
       pendingMainClose = randomUUID();
@@ -1097,25 +1168,48 @@ function createMainWindow() {
     }
     speechSessions?.releaseDictation();
     chatIpc?.cancelActive();
-    auth.cancel();
-    copilotAuth?.cancel();
+    activeProfile?.auth.cancel();
+    activeProfile?.copilotAuth.cancel();
     closingMain = true;
     interviewWindow?.close();
   });
 }
+registerRecordingScheme();
 app.whenReady().then(async () => {
   restrictSessionPermissions(session.defaultSession, indexFile, environment.devServerUrl);
-  const eraseBrowser = async () => {
-    await session.defaultSession.clearStorageData();
-    await session.defaultSession.clearCache();
-    await session.defaultSession.clearAuthCache();
+  const userData = app.getPath('userData');
+  legacyClaim = new LegacyProfileClaim(userData, {
+    browserPresent: legacyBrowserPresent,
+    filesPresent: () => hasLegacyProfileFiles(userData),
+    migrateFiles: (owner, signal) => {
+      const target = session.fromPartition(profilePartition(owner)).getStoragePath();
+      return migrateLegacyProfileFiles(userData, owner, signal, !!target && hasChromiumAppStorage(target));
+    },
+    migrateBrowser: (owner, signal) =>
+      migrateLegacyBrowser(owner, { indexFile, devServerUrl: environment.devServerUrl }, signal),
+  });
+  const eraseBrowser = async (owner?: string) => {
+    const browser = owner === undefined ? session.defaultSession : session.fromPartition(profilePartition(owner));
+    await browser.clearStorageData();
+    await browser.clearCache();
+    await browser.clearAuthCache();
+    if (owner && await legacyClaim!.owns(owner)) {
+      if (hasChromiumAppStorage(userData))
+        await eraseClaimedLegacyBrowser(owner, { indexFile, devServerUrl: environment.devServerUrl });
+      await eraseLegacyProfileFiles(userData);
+    }
   };
   const erasureFile = path.join(app.getPath('userData'), accountErasureMarker);
+  let legacyUnconfirmedOwner: string | undefined;
   if (existsSync(erasureFile)) {
     try {
       const pending = JSON.parse(await readFile(erasureFile, 'utf8'));
-      if (pending.committed === true)
-        await eraseLocalAccount(app.getPath('userData'), eraseBrowser);
+      if (pending.committed === true) {
+        if (pending.owner !== undefined && !isCloudProfileOwner(pending.owner)) throw Error('账号资料归属无效。');
+        erasingAccount = true;
+        await eraseLocalAccount(app.getPath('userData'), () => eraseBrowser(pending.owner), pending.owner);
+        erasingAccount = false;
+      } else if (pending.committed === false && isCloudProfileOwner(pending.owner)) legacyUnconfirmedOwner = pending.owner;
     } catch {
       dialog.showErrorBox(
         nativeText('本机账号资料尚未清理完成'),
@@ -1125,16 +1219,20 @@ app.whenReady().then(async () => {
       return;
     }
   }
-  const shortcutFile = path.join(app.getPath('userData'), 'shortcut-settings.json');
-  shortcutController = new InterviewShortcutController(globalShortcut, (state) => {
-    for (const win of [mainWindow, interviewWindow, interviewShortcutsWindow])
-      if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
-        sendDesktop(win.webContents, 'shortcuts:settings', state);
-  }, (bindings) => writeShortcuts(shortcutFile, bindings));
-  shortcutSettingsReady = readShortcuts(shortcutFile, desktopPlatform.id === 'darwin').then(({ bindings, error }) => {
-    shortcutController.configure(bindings, error);
-  });
-  await shortcutSettingsReady;
+  async function loadNativePreferences(owner: string) {
+    const root = profileDirectory(app.getPath('userData'), owner);
+    const shortcutFile = path.join(root, 'shortcut-settings.json');
+    const { bindings, error } = await readShortcuts(shortcutFile, desktopPlatform.id === 'darwin');
+    const controller = new InterviewShortcutController(globalShortcut, (state) => {
+      if (activeProfile?.owner !== owner || controller !== shortcutController) return;
+      for (const win of [mainWindow, interviewWindow, interviewShortcutsWindow])
+        if (win && !win.isDestroyed() && !win.webContents.isDestroyed())
+          sendDesktop(win.webContents, 'shortcuts:settings', state);
+    }, (bindings) => writeShortcuts(shortcutFile, bindings));
+    shortcutController = controller;
+    controller.configure(bindings, error);
+    updates?.restoreAutoDownload(readAutoDownload(path.join(root, 'update-settings.json')));
+  }
   const speechHardware = new SpeechHardwareProbe(
     resources.audioHelper,
     desktopPlatform.id,
@@ -1156,8 +1254,8 @@ app.whenReady().then(async () => {
         if (speechSessions?.busy) return false;
         await speech?.close();
       } else {
-        if (knowledgeCoordinator?.busy || chatIpc?.isBusy()) return false;
-        await knowledge?.unloadModel();
+        if (activeProfile?.coordinator.busy || chatIpc?.isBusy()) return false;
+        await activeProfile?.knowledge.unloadModel();
       }
       return true;
     },
@@ -1254,12 +1352,6 @@ app.whenReady().then(async () => {
       if (win && !win.isDestroyed())
         sendDesktop(win.webContents, 'appearance:accent-changed', color);
   });
-  codexUsageRuntime = new CodexUsageRuntime(
-    path.join(app.getPath('userData'), 'chatgpt-usage'),
-    undefined,
-    app.getVersion(),
-    desktopPlatform.codexLoginStatus,
-  );
   // Shown at most once per launch, only when the platform expects the next
   // credential request to open its one-time system authorization.
   const confirmCredentialMigration = async () => {
@@ -1305,10 +1397,6 @@ app.whenReady().then(async () => {
         },
       )
     : undefined;
-  const authStorage = createAuthStorage(
-    desktopPlatform.credentialEncryptionLabel,
-    credentialEncryption,
-  );
   const cloudVault = createCloudVault(credentialEncryption);
   const telemetryProofVault = createCredentialVault<TelemetryProofState>(
     path.join(app.getPath('userData'), 'cloud-account', 'telemetry.bin'),
@@ -1316,6 +1404,10 @@ app.whenReady().then(async () => {
     262144,
   );
   const localMode = new LocalMode(path.join(app.getPath('userData'), 'local-mode.json'));
+  const profileImportSources = new ProfileImportSources(
+    app.getPath('userData'),
+    () => localMode.importRevision,
+  );
   // An unreadable preference returns to explicit entry; it never grants access.
   const localModeReady = localMode.load().catch(() => {});
   let entryBusy = false;
@@ -1323,11 +1415,55 @@ app.whenReady().then(async () => {
     environment.accountOrigin,
     environment.allowLocalAccount === true,
   );
+  const migrationPasswords = new MigrationPasswords((id) => createCredentialVault(
+    path.join(profileDirectory(app.getPath('userData'), 'account:' + id), migrationPasswordFileName),
+    credentialEncryption,
+  ));
+  const erasures = new AccountErasureReceipts(userData, accountOrigin,
+    file => createCredentialVault<ErasureReceipt>(file, credentialEncryption), desktopPlatform.accountFetch);
+  const eraseConfirmedProfile = async (id: string) => {
+    const owner = 'account:' + id;
+    await eraseLocalAccount(userData, () => eraseBrowser(owner), owner, { sharedSession: false, legacyMarker: false });
+    await eraseOwnerDeviceData(userData, accountOrigin!, id, credentialEncryption);
+  };
+  let blockedErasures = new Set<string>();
   const cloudAccount = new CloudAccountClient({
     origin: accountOrigin,
+    migrationPasswords,
+    erasures,
+    blockedErasureOwner: id => blockedErasures.has(id),
+    async forgetMigrationPasswordForEmail(email) {
+      const matching = (await profileImportSources.list('local')).filter(
+        (source) => source.email?.toLowerCase() === email.trim().toLowerCase(),
+      );
+      for (const source of matching) await migrationPasswords.forget(source.id.slice(8));
+    },
     fetcher: desktopPlatform.accountFetch,
     vault: cloudVault,
     deviceLabel: process.platform === 'darwin' ? 'VoxCue · Mac' : 'VoxCue · Windows',
+  });
+  let recoveringErasures: Promise<void> | undefined;
+  const recoverErasures = () => recoveringErasures ??= initialLanguageReady.then(async () => {
+    let legacyFailure: string | undefined;
+    if (legacyUnconfirmedOwner && accountOrigin) {
+      try {
+        await erasures.prepare(legacyUnconfirmedOwner.slice(8), false);
+        await rm(erasureFile, { force: true });
+      } catch { legacyFailure = legacyUnconfirmedOwner.slice(8); }
+    }
+    try {
+      blockedErasures = await erasures.recover(id => {
+        recoveringErasedProfile = true;
+        return cloudAccount.recoverErasedOwner(id, () => eraseConfirmedProfile(id));
+      });
+    } finally {
+      recoveringErasedProfile = false;
+    }
+    if (legacyFailure) blockedErasures.add(legacyFailure);
+    cloudAccount.hideBlockedErasureOwner();
+  }).catch(() => {
+    recoveringErasures = undefined;
+    throw Error('本机账号删除记录暂时无法读取，请稍后重试。');
   });
   telemetry = new Telemetry({
     root: app.getPath('userData'),
@@ -1336,6 +1472,7 @@ app.whenReady().then(async () => {
     origin: cloudOrigin(environment.accountOrigin, environment.allowLocalAccount === true),
     fetcher: desktopPlatform.accountFetch,
     enabled: app.isPackaged,
+    storageReady: recoverErasures(),
     proofVault: telemetryProofVault,
     identityProvider: (installationId, userId, signal) =>
       cloudAccount.telemetryIdentity(installationId, userId, signal),
@@ -1352,16 +1489,17 @@ app.whenReady().then(async () => {
         : { accountMode: state.localMode ? 'local' : 'signed_out' },
       freshIdentity,
     );
-    return state;
+    return state.user && localMode.importRevision
+      ? { ...state, localImportRevision: localMode.importRevision } : state;
   };
   let initialAccountStatus: ReturnType<CloudAccountClient['call']> | undefined;
   handleDesktop('cloud:account', async (event, call) => {
+    await Promise.all([localModeReady, recoverErasures()]);
     if (
       ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
       event.senderFrame !== event.sender.mainFrame
     )
       throw Error('Unauthorized window');
-    await localModeReady;
     if (erasingAccount) throw Error('账号资料正在清理。');
     if (localMode.active) {
       if (call?.action === 'status') return { ok: true as const, state: accountState() };
@@ -1373,7 +1511,7 @@ app.whenReady().then(async () => {
         };
     }
     const authenticating = ['login', 'register', 'reset'].includes(call?.action);
-    if (entryBusy && authenticating)
+    if (entryBusy || retiringProfile || preparingProfile)
       return { ok: false as const, state: accountState(), error: '使用模式正在切换，请稍候。' };
     if (leavingAccount)
       return {
@@ -1381,62 +1519,77 @@ app.whenReady().then(async () => {
         state: accountState(),
         error: '账号操作正在进行，请稍候。',
       };
-    if (call?.action === 'delete' && event.sender !== mainWindow?.webContents)
-      throw Error('Unauthorized window');
+    const previousOwner = activeProfile?.owner;
+    if (authenticating && previousOwner?.startsWith('account:'))
+      throw Error('请先退出 VoxCue 账号。');
+    if (call?.action === 'delete') {
+      requireMain(event);
+      if (!previousOwner?.startsWith('account:')) throw Error('Unauthorized window');
+    }
     const leaving =
       call?.action === 'logout' ||
       call?.action === 'delete' ||
       (call?.action === 'revoke' && cloudAccount.isCurrentSession(call.sessionId));
-    if (leaving && mainWindow) {
-      if (interviewActive())
-        return { ok: false as const, state: accountState(), error: '请先结束面试。' };
-      if (!(await prepareUpdateInstall(true, call.action === 'delete')))
-        return { ok: false as const, state: accountState(), error: '已取消退出。' };
-    }
-    if (authenticating) entryBusy = true;
+    const changingProfile = leaving || (localMode.active && ['login', 'register'].includes(call?.action));
+    if (changingProfile && (signingIn || disconnecting))
+      return { ok: false as const, state: accountState(), error: '账号操作正在进行，请稍候。' };
+    if (changingProfile && mainWindow && event.sender !== mainWindow.webContents)
+      throw Error('Unauthorized window');
+    if (authenticating || changingProfile) entryBusy = true;
     const result = await (async () => {
-      if (leaving) leavingAccount = true;
+      let succeeded = false;
       try {
+        if (changingProfile && mainWindow) {
+          if (interviewActive())
+            return { ok: false as const, state: accountState(), error: '请先结束面试。' };
+          if (!(await prepareUpdateInstall(true, call.action === 'delete')))
+            return { ok: false as const, state: accountState(), error: '已取消退出。' };
+        }
+        if (leaving) leavingAccount = true;
         if (leaving) await accountArchive?.cancel();
         if (call?.action === 'delete') {
-          // Prove persistence is writable before the irreversible server operation.
-          await writeFile(erasureFile, JSON.stringify({ committed: false }), { mode: 0o600 });
-          knowledgeCoordinator?.cancelAll();
+          activeProfile?.coordinator.cancelAll();
           historyJobs?.cancelAll();
           chatIpc?.cancelActive();
-          await knowledge.close();
+          await activeProfile?.knowledge.close();
         }
         const response = await (call?.action === 'status' &&
         Object.keys(call).length === 1 &&
         initialAccountStatus
           ? initialAccountStatus
-          : cloudAccount.call(call));
+          : cloudAccount.call(call, call.action === 'delete' ? previousOwner : undefined));
         if (response.ok && response.state.user && ['login', 'register'].includes(call.action)) {
           if (localMode.active) {
             await accountArchive?.cancel();
             await localMode.set(false);
           }
+          if (activeProfile) {
+            createLoginWindow(false);
+            mainWindow?.destroy();
+            await retireProfile();
+          }
+          await prepareProfile('account:' + response.state.user.id);
           accountState(true);
           telemetry?.entry(call.action as 'login' | 'register', response.state.user.createdAt);
+          createMainWindow();
         }
+        if (!response.state.user && previousOwner?.startsWith('account:') &&
+            !(call.action === 'delete' && response.ok)) {
+          // Retire the renderer as well as its native writers on explicit logout or expired credentials.
+          await returnToLogin();
+        }
+        succeeded = response.ok;
         return response;
       } finally {
+        if (changingProfile && !succeeded && mainWindow?.webContents === event.sender)
+          mainCloseApproved = mainCloseFlushed = false;
         if (leaving) leavingAccount = false;
-        if (authenticating) entryBusy = false;
+        if (authenticating || changingProfile) entryBusy = false;
       }
     })();
-    if (call?.action === 'delete' && !result.ok)
-      await import('node:fs/promises').then((fs) => fs.rm(erasureFile, { force: true }));
-    if (leaving && !result.ok) {
-      mainCloseApproved = false;
-      mainCloseFlushed = false;
-    }
-    if (result.ok && result.state.user && ['login', 'register'].includes(call.action))
-      createMainWindow();
     if (result.ok && call.action === 'delete') {
       erasingAccount = true;
       await telemetry?.close();
-      await writeFile(erasureFile, JSON.stringify({ committed: true }), { mode: 0o600 });
       // Retire all writers before clearing browser databases. A persisted marker retries interrupted cleanup at startup.
       setTimeout(() => {
         void (async () => {
@@ -1444,15 +1597,9 @@ app.whenReady().then(async () => {
           mainWindow?.destroy();
           loginWindow?.destroy();
           interviewWindow?.destroy();
-          await Promise.all([interviewImages.dispose(), ledger.dispose()]);
-          auth.cancel();
-          copilotAuth.cancel();
-          interviewIpc?.cancel();
-          await auth.signOut();
-          if (!copilotAuth.isPending()) await copilotAuth.signOut();
-          await codexUsageRuntime.stop();
-          await copilotRuntime.stop();
-          await eraseLocalAccount(app.getPath('userData'), eraseBrowser);
+          await waitForProfileCleanup([retireProfile(true), speech?.finishRecording()]);
+          await eraseConfirmedProfile(previousOwner!.slice(8));
+          await erasures.forget(previousOwner!.slice(8));
           app.relaunch();
           app.exit(0);
         })().catch(() => {
@@ -1464,23 +1611,13 @@ app.whenReady().then(async () => {
         });
       }, 0);
     }
-    if (
-      result.ok &&
-      !result.state.user &&
-      mainWindow &&
-      ['logout', 'revoke'].includes(call.action)
-    ) {
-      knowledgeCoordinator?.cancelAll();
-      historyJobs?.cancelAll();
-      chatIpc?.cancelActive();
-      createLoginWindow();
-    }
     return { ...result, state: accountState() };
   });
   const cloudSync = new CloudSyncClient(cloudAccount, async (id, bytes, preview) => {
-    await interviewImages.save([{ id, preview, file: { bytes, name: 'screenshot.png' } }]);
+    await currentProfile().images.save([{ id, preview, file: { bytes, name: 'screenshot.png' } }]);
   });
-  handleDesktop('cloud:sync', (event, call) => {
+  handleDesktop('cloud:sync', async (event, call) => {
+    requireMain(event);
     if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
       throw Error('Unauthorized window');
     if (call?.action === 'cancel') return cloudSync.call(call);
@@ -1491,16 +1628,13 @@ app.whenReady().then(async () => {
         ok: false as const,
         error: '面试期间暂停同步。',
         status: 503,
-        retryAfterSeconds: 10,
+        deferred: 'interview' as const,
       };
-    return cloudSync.call(call);
-  });
-  auth = new ChatGPTAuthService({
-    managed: new ManagedChatGPTAuth(codexUsageRuntime, (url) => shell.openExternal(url)),
-    storage: authStorage,
-    openBrowser: (url) => shell.openExternal(url),
-    callbackLogo: () => readFile(resources.brandLogo),
-    uiLanguage: () => uiLanguage,
+    const owner = activeProfile?.owner;
+    const result = await cloudSync.call(call);
+    if (owner && activeProfile?.owner === owner && !cloudAccount.snapshot().user && !leavingAccount)
+      await returnToLogin();
+    return result;
   });
   const reportCredentialMaintenance = (result: CredentialCleanup) => {
     console.error('Keychain cleanup incomplete:', {
@@ -1512,6 +1646,10 @@ app.whenReady().then(async () => {
     });
   };
   if (credentialEncryption?.maintain) {
+    const authStorage = createAuthStorage(
+      desktopPlatform.credentialEncryptionLabel,
+      credentialEncryption,
+    );
     // Superseded Keychain copies are removed only after every stored record
     // still decrypts and parses with the current key. Any failure keeps them.
     setTimeout(() => {
@@ -1519,6 +1657,8 @@ app.whenReady().then(async () => {
         (readable) => credentialEncryption.maintain!(readable),
         (decrypt) =>
           readCredentialRecords(decrypt, {
+            readMigrationPasswords: (key) => readMigrationPasswordRecords(app.getPath('userData'), key),
+            readErasureReceipts: key => erasures.checkRecords(key),
             erasingAccount,
             authStorage,
             cloudVault,
@@ -1543,53 +1683,105 @@ app.whenReady().then(async () => {
         });
     }, 15000).unref();
   }
-  const ledger = new UsageLedger(path.join(app.getPath('userData'), 'chat-usage'));
-  chatGPTUsage = new ChatGPTAccountUsage({
-    runtime: codexUsageRuntime,
-    identity: () => auth.usageIdentity(),
-  });
-  const chatGPT = new ChatGPTService({
-    access: () => auth.access(),
-    ledger,
-    accountUsage: chatGPTUsage,
-  });
-  const copilotCredentials = new ProviderCredentialAccess('copilot', () => {
-    void copilotRuntime.stop().catch(() => {});
-  });
-  copilotRuntime = new CopilotRuntime(
-    path.join(app.getPath('userData'), 'copilot-runtime'),
-    copilotCredentials,
-  );
-  copilotAuth = new CopilotAuthService({
-    credentialAccess: copilotCredentials,
-    retire: () => copilotRuntime.stop(true),
-    credentialEncryptionLabel: desktopPlatform.credentialEncryptionLabel,
-    storage: createCopilotLoginStorage(),
-    control: () => copilotRuntime.control(),
-    openBrowser: (url) => shell.openExternal(url),
-  });
-  const copilot = new CopilotChatService({
-    credentialAccess: copilotCredentials,
-    retire: () => copilotRuntime.stop(true),
-    client: () => copilotRuntime.client(),
-    control: () => copilotRuntime.control(),
-    access: (signal) => copilotAuth.access(signal),
-    ledger,
-  });
-  const selection = createServiceSelection();
-  let selectionReady = selection.ready;
-  void selectionReady.catch(() => {});
   let disconnecting = false;
-  const activeAuth = () => (selection.service === 'copilot' ? copilotAuth : auth);
-  chat = new SelectedChatService(() => (selection.service === 'copilot' ? copilot : chatGPT));
-  const requireMain = (event: Electron.IpcMainInvokeEvent) => {
-    if (event.sender !== mainWindow?.webContents) throw new Error('Unauthorized window');
+  const chat = new SelectedChatService(() => currentProfile().chat);
+  const invalidateModels = () => {
+    chatIpc?.cancelModels();
+    activeProfile?.invalidateModels();
   };
-  const updatePreferences = path.join(app.getPath('userData'), 'update-settings.json');
+  const expectedOwner = () => {
+    if (localMode.active) return 'local';
+    const user = cloudAccount.snapshot().user;
+    if (user) return 'account:' + user.id;
+    if (!app.isPackaged && environment.userData) return 'demo';
+    return undefined;
+  };
+  function enterProfile(owner: string) {
+    if (owner !== expectedOwner()) throw Error('账号已变化，请重新操作。');
+    if (activeProfile?.owner === owner) return;
+    if (activeProfile || mainWindow || retiringProfile) throw Error('主窗口尚未完成退出，请稍后重试。');
+    const profile = createAccountProfile(owner, {
+      root: app.getPath('userData'), version: app.getVersion(), ragModel: resources.ragModel,
+      prepareKnowledgeDatabase: platformPolicy.prepareKnowledgeDatabase,
+      codexLoginStatus: desktopPlatform.codexLoginStatus,
+      credentialLabel: desktopPlatform.credentialEncryptionLabel,
+      credentialEncryption,
+      openBrowser: (url) => shell.openExternal(url),
+      emit: (event) => {
+        if (activeProfile === profile && mainWindow && !mainWindow.isDestroyed())
+          sendDesktop(mainWindow.webContents, 'knowledge:event', event);
+      },
+      interviewActive, changing: () => signingIn || disconnecting || leavingAccount || erasingAccount,
+      requireModel: () => components.require('rag'),
+    });
+    activeProfile = profile;
+    const account = cloudAccount.snapshot();
+    if (account.user && owner === 'account:' + account.user.id)
+      profileImportSources.remember(account.user);
+  }
+  async function prepareProfile(owner: string) {
+    const check = () => {
+      if (profileEntryStopped || owner !== expectedOwner()) throw Error('账号已变化，请重新操作。');
+    };
+    check();
+    if (activeProfile?.owner === owner) return;
+    if (preparingProfile) {
+      if (preparingProfile.owner !== owner) throw Error('使用模式正在切换，请稍候。');
+      return preparingProfile.work;
+    }
+    const work = (async () => {
+      if (owner !== 'demo') await legacyClaim!.prepare(owner);
+      check();
+      await loadNativePreferences(owner);
+      check();
+      enterProfile(owner);
+    })();
+    preparingProfile = { owner, work };
+    try {
+      await work;
+    } finally {
+      preparingProfile = undefined;
+    }
+  }
+  function retireProfile(erase = false) {
+    if (retiringProfile) return retiringProfile;
+    const profile = activeProfile;
+    activeProfile = undefined;
+    updates?.restoreAutoDownload(false);
+    chatIpc?.cancelActive();
+    chatIpc?.cancelModels();
+    historyJobs?.cancelAll();
+    interviewIpc?.cancel();
+    retiringProfile = (async () => {
+      try {
+        await waitForProfileCleanup([shortcutController?.idle(), accountArchive?.cancel()]);
+      } finally {
+        await profileImportSources.drain();
+        await profile?.dispose(erase);
+      }
+    })().finally(() => { retiringProfile = undefined; });
+    return retiringProfile;
+  }
+  function returnToLogin() {
+    if (!activeProfile && loginWindow) return retiringProfile;
+    const retired = retireProfile();
+    createLoginWindow(true, retired);
+    mainWindow?.destroy();
+    interviewWindow?.destroy();
+    return retired;
+  }
+  const requireMain = (event: Electron.IpcMainInvokeEvent) => {
+    if (event.sender !== mainWindow?.webContents || !activeProfile ||
+        activeProfile.owner !== expectedOwner() || leavingAccount || erasingAccount)
+      throw new Error('Unauthorized window');
+  };
   updates = new UpdateService({
     currentVersion: app.getVersion(),
-    autoDownload: readAutoDownload(updatePreferences),
-    saveAutoDownload: (enabled) => saveAutoDownload(updatePreferences, enabled),
+    autoDownload: false,
+    saveAutoDownload: (enabled) => saveAutoDownload(
+      path.join(profileDirectory(app.getPath('userData'), currentProfile().owner), 'update-settings.json'),
+      enabled,
+    ),
     driver:
       app.isPackaged && desktopPlatform.updateDriverFile
         ? (() => {
@@ -1654,6 +1846,17 @@ app.whenReady().then(async () => {
     if (event.sender !== loginWindow?.webContents || event.senderFrame !== event.sender.mainFrame)
       throw new Error('Unauthorized window');
   };
+  handleDesktop('session:open-user-agreement', (event, language, ...extra) => {
+    requireLogin(event);
+    if (!isUILanguage(language) || extra.length) throw Error('Invalid request');
+    return shell.openExternal(userAgreementUrl[language]);
+  });
+  handleDesktop('session:local-import-revision', (event, revision, ...extra) => {
+    requireMain(event);
+    if (event.senderFrame !== event.sender.mainFrame || activeProfile?.owner !== 'local' || extra.length)
+      throw Error('Unauthorized local profile');
+    return localMode.setImportRevision(revision);
+  });
   handleDesktop('session:local-mode', async (event, enabled, ...extra) => {
     if (typeof enabled !== 'boolean' || extra.length) throw Error('Invalid local mode');
     if (enabled) requireLogin(event);
@@ -1661,16 +1864,17 @@ app.whenReady().then(async () => {
       requireMain(event);
       if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     }
-    await localModeReady;
-    if (entryBusy || leavingAccount || erasingAccount)
+    await Promise.all([localModeReady, recoverErasures()]);
+    if (entryBusy || leavingAccount || erasingAccount || signingIn || disconnecting || retiringProfile || preparingProfile)
       return { ok: false as const, state: accountState(), error: '账号操作正在进行，请稍候。' };
     entryBusy = true;
     try {
       if (enabled) {
         if (cloudAccount.snapshot().user) throw Error('请先退出 VoxCue 账号。');
-        if (auth.isPending() || copilotAuth.isPending()) throw Error('请先取消正在进行的授权。');
+        if (activeProfile?.auth.isPending() || activeProfile?.copilotAuth.isPending()) throw Error('请先取消正在进行的授权。');
         await finishSignedOutMain();
         await localMode.set(true);
+        await prepareProfile('local');
         accountState();
         telemetry?.entry('local');
         createMainWindow();
@@ -1681,12 +1885,7 @@ app.whenReady().then(async () => {
           return { ok: false as const, state: accountState(), error: '已取消返回登录。' };
         await accountArchive?.cancel();
         await localMode.set(false);
-        auth.cancel();
-        copilotAuth.cancel();
-        knowledgeCoordinator?.cancelAll();
-        historyJobs?.cancelAll();
-        chatIpc?.cancelActive();
-        createLoginWindow();
+        await returnToLogin();
       }
       return { ok: true as const, state: accountState() };
     } catch (error) {
@@ -1709,7 +1908,7 @@ app.whenReady().then(async () => {
     const [service] = args;
     if (
       args.length > 1 ||
-      (service !== undefined && service !== 'chatgpt' && service !== 'copilot' &&
+      (service !== undefined && service !== 'chatgpt' && service !== 'copilot' && !isApiProvider(service) &&
         service !== 'demo' && service !== 'startup')
     )
       throw Error('Invalid session request');
@@ -1722,11 +1921,13 @@ app.whenReady().then(async () => {
       };
     }
     if (service === 'demo') return null;
-    if (service === 'startup' && event.sender !== mainWindow?.webContents) return null;
-    if (signingIn || disconnecting) return null;
-    const session = await selection.session(service, (selected) =>
-      selected === 'copilot' ? copilotAuth.verifiedSession() : auth.session(),
-    ).catch(connectionNotice);
+    if (event.sender !== mainWindow?.webContents || !activeProfile || signingIn || disconnecting) return null;
+    const profile = currentProfile();
+    if (isApiProvider(service)) {
+      await requireAIWindow(event);
+      return signIn(service).catch(connectionNotice);
+    }
+    const session = await profile.selection.session(service, (selected) => profile.session(selected, true)).catch(connectionNotice);
     return !demoSession ? session : null;
   });
   // Entry can finish while the previous main window is still flushing its chat store.
@@ -1754,16 +1955,22 @@ app.whenReady().then(async () => {
     }
   };
   const signIn = async (service: AIService) => {
+    const profile = currentProfile();
+    const { selection, auth, copilotAuth } = profile;
     if (signingIn || disconnecting || auth.isPending() || copilotAuth.isPending())
       throw Error('已有登录操作正在进行。');
+    if (isApiProvider(service) && profile.api.busy(service)) throw Error('API 密钥操作正在进行。');
     signingIn = true;
     selection.changing();
+    invalidateModels();
     try {
       demoSession = false;
-      const session = await (service === 'copilot' ? copilotAuth : auth).signIn();
+      const session = isApiProvider(service) ? await profile.api.session(service)
+        : await (service === 'copilot' ? copilotAuth : auth).signIn();
+      if (!session) throw Error('请先配置该服务的 API 密钥。');
+      if (activeProfile !== profile) throw Error('登录已取消。');
       if (mainWindow && !mainCloseApproved) {
         await selection.set(service, true);
-        selectionReady = Promise.resolve();
         chatIpc?.cancelActive();
         historyJobs?.cancelAll();
         return session;
@@ -1771,15 +1978,17 @@ app.whenReady().then(async () => {
       if (!loginWindow || loginWindow.isDestroyed()) throw Error('登录窗口已关闭。');
       await finishSignedOutMain();
       await selection.set(service, true);
-      selectionReady = Promise.resolve();
+      if (activeProfile !== profile) throw Error('登录已取消。');
       createMainWindow();
       return session;
     } finally {
       signingIn = false;
     }
   };
-  const requireAIWindow = (event: Electron.IpcMainInvokeEvent) => {
+  const requireAIWindow = async (event: Electron.IpcMainInvokeEvent) => {
+    if (entryBusy || preparingProfile || leavingAccount || erasingAccount) throw Error('账号操作正在进行，请稍候。');
     if (event.sender === mainWindow?.webContents && event.senderFrame === event.sender.mainFrame) {
+      requireMain(event);
       if (interviewActive()) throw Error('请先结束面试再切换 AI 服务。');
       if (!cloudAccount.snapshot().user && !localMode.active && !demoSession)
         throw Error('请先登录 VoxCue 账号或选择本地账户。');
@@ -1788,27 +1997,29 @@ app.whenReady().then(async () => {
     requireLogin(event);
     if (app.isPackaged || !process.env.COPILOT_TEST_USER_DATA)
       throw Error('请在设置中连接 AI 服务。');
+    await prepareProfile('demo');
   };
   handleDesktop('auth:sign-in', async (event, ...args) => {
-    requireAIWindow(event);
+    await requireAIWindow(event);
     if (args.length) throw Error('Invalid request');
     return signIn('chatgpt').catch(connectionNotice);
   });
   handleDesktop('auth:copilot-sign-in', async (event, ...args) => {
-    requireAIWindow(event);
+    await requireAIWindow(event);
     if (args.length) throw Error('Invalid request');
     return signIn('copilot').catch(connectionNotice);
   });
-  handleDesktop('auth:cancel', (event) => {
-    requireAIWindow(event);
+  handleDesktop('auth:cancel', async (event) => {
+    await requireAIWindow(event);
     cancelLoginWait?.();
-    auth.cancel();
-    copilotAuth.cancel();
+    activeProfile?.auth.cancel();
+    activeProfile?.copilotAuth.cancel();
   });
-  handleDesktop('auth:demo', (event) => {
+  handleDesktop('auth:demo', async (event) => {
     requireLogin(event);
     if (app.isPackaged || !process.env.COPILOT_TEST_USER_DATA) throw Error('测试入口不可用。');
-    if (auth.isPending() || copilotAuth.isPending()) throw new Error('请先取消正在进行的登录。');
+    await prepareProfile('demo');
+    if (activeProfile?.auth.isPending() || activeProfile?.copilotAuth.isPending()) throw new Error('请先取消正在进行的登录。');
     demoSession = true;
     createMainWindow();
     return {
@@ -1821,7 +2032,8 @@ app.whenReady().then(async () => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     if (interviewActive()) throw Error('请先结束面试再断开 AI 服务。');
-    knowledgeCoordinator?.cancelAll();
+    const { coordinator, selection, auth, copilotAuth, copilotRuntime } = currentProfile();
+    coordinator.cancelAll();
     historyJobs?.cancelAll();
     chatIpc?.cancelActive();
     interviewCloseApproved = true;
@@ -1829,17 +2041,18 @@ app.whenReady().then(async () => {
     if (demoSession) {
       demoSession = false;
       mainCloseApproved = true;
-      createLoginWindow();
+      await returnToLogin();
       return { warning: null };
     }
     interviewIpc?.cancel();
     if (signingIn || disconnecting) throw Error('账户正在变更，请稍后重试。');
     disconnecting = true;
     selection.changing();
+    invalidateModels();
     try {
-      await selectionReady;
       await selection.set(selection.service, false);
-      const result = await activeAuth().signOut();
+      const result = isApiProvider(selection.service) ? { warning: null }
+        : await (selection.service === 'copilot' ? copilotAuth : auth).signOut();
       if (result.warning && mainWindow)
         await dialog.showMessageBox(mainWindow, {
           type: 'warning',
@@ -1856,25 +2069,31 @@ app.whenReady().then(async () => {
       }
     }
   });
-  const ragModelPath = resources.ragModel;
-  knowledge = new KnowledgeHost(
-    path.join(app.getPath('userData'), 'knowledge-v1'),
-    ragModelPath,
-    (event) => knowledgeCoordinator.progress(event),
-  );
-  knowledgeCoordinator = new KnowledgeCoordinator(
-    knowledge,
-    ragModelPath,
-    (event) => {
-      if (mainWindow && !mainWindow.isDestroyed())
-        sendDesktop(mainWindow.webContents, 'knowledge:event', event);
+  registerKnowledgeIpc({ call: (call) => currentProfile().coordinator.call(call) }, requireMain, () => components.require('rag'));
+  registerApiConnectionIpc({
+    requireMain,
+    current: () => currentProfile().api,
+    checkChange(provider, remove) {
+      const { selection } = currentProfile();
+      if (signingIn || disconnecting || preparingProfile || entryBusy) throw Error('账号操作正在进行，请稍候。');
+      if (selection.connected && selection.service === provider) {
+        if (remove) throw Error('请先断开此服务再移除密钥。');
+        if (interviewActive() || chatIpc?.isBusy())
+          throw Error('请在当前回答或面试结束后更换密钥。');
+      }
     },
-    interviewActive,
-  );
-  registerKnowledgeIpc(knowledgeCoordinator, requireMain, () => components.require('rag'));
-  const ragChat = new RagChatService(chat, knowledge, () => components.require('rag'));
+    prompt(provider, signal, field, tab) {
+      if (!mainWindow || environment.userData || !desktopPlatform.promptApiKey)
+        throw Error('当前环境不支持安全输入 API 密钥。');
+      return desktopPlatform.promptApiKey(mainWindow, nativeText(apiProviders[provider].name), uiLanguage, signal, field, tab);
+    },
+    control(command) {
+      if (mainWindow && !environment.userData) desktopPlatform.controlApiKey?.(mainWindow, command);
+    },
+    open: (url) => shell.openExternal(url),
+  });
   chatIpc = registerChatIpc({
-    chat: ragChat,
+    chat: new SelectedChatService(() => currentProfile().ragChat),
     requireMain,
     isDemo: () => demoSession,
     openLink: (url) => shell.openExternal(url),
@@ -1882,6 +2101,7 @@ app.whenReady().then(async () => {
   });
   const requireInterview = (event: Electron.IpcMainInvokeEvent) => {
     if (
+      !activeProfile || activeProfile.owner !== expectedOwner() || leavingAccount || erasingAccount ||
       event.sender !== interviewWindow?.webContents ||
       event.senderFrame !== event.sender.mainFrame
     )
@@ -1895,6 +2115,10 @@ app.whenReady().then(async () => {
   });
   remoteConnection = new RemoteConnectionService({
     mobileAssets: createMobileAssets(path.join(app.getAppPath(), 'dist')),
+    tls: {
+      directory: path.join(app.getPath('userData'), 'remote-connection-tls'),
+      decryptKey: desktopPlatform.decryptRemoteTlsKey,
+    },
     onState: publishRemoteState,
     onCommand: (command, signal) => remoteInterview!.dispatch(command, signal),
   });
@@ -1945,7 +2169,6 @@ app.whenReady().then(async () => {
     },
     async call(call, event) {
       const win = BrowserWindow.fromWebContents(event.sender)!;
-      await shortcutSettingsReady;
       if (win.isDestroyed()) throw Error('Unauthorized window');
       if (call.op !== 'status') {
         requireMain(event);
@@ -2005,12 +2228,35 @@ app.whenReady().then(async () => {
       accountState();
     },
   });
-  const interviewImages = new InterviewImageStore(
-    path.join(app.getPath('userData'), 'interview-images-v1'),
-  );
-  accountArchive = new AccountArchive({
+  const recordingLibrary = new RecordingLibrary(path.join(app.getPath('userData'), 'interview-recordings-v1'));
+  const importer = new AccountImport({
+    owner: () =>
+      !leavingAccount && !erasingAccount && activeProfile?.owner === expectedOwner()
+        ? activeProfile?.owner : undefined,
+    sources: async target => (await profileImportSources.list(target))
+      .filter(source => !blockedErasures.has(source.id.slice(8))),
+    localRevision: () => localMode.importRevision,
+    verify: (source, password, signal) =>
+      cloudAccount.verifyProfileImportOwner({ id: source.id.slice(8), email: source.email! }, password, signal),
+    open: (source, signal) => openProfileImportSource(source, signal, {
+      userData: app.getPath('userData'), indexFile, devServerUrl: environment.devServerUrl,
+    }),
+    image: (id, preview, bytes) => currentProfile().images.saveImported(id, preview, bytes),
+    recordings: (source, target, ids, signal) =>
+      copyProfileRecordings(recordingLibrary, source, target, ids, signal),
+    receipts: new ProfileMoveReceipts(app.getPath('userData')),
+    checkSource: (receipt, signal) => checkOrRemoveMovedProfileAssets(
+      app.getPath('userData'), resources.ragModel, recordingLibrary, receipt, undefined, signal, platformPolicy.prepareKnowledgeDatabase),
+    async cleanSource(receipt, removed, signal) {
+      await checkOrRemoveMovedProfileAssets(app.getPath('userData'), resources.ragModel, recordingLibrary, receipt, removed, signal, platformPolicy.prepareKnowledgeDatabase);
+      signal.throwIfAborted();
+      if (receipt.source === 'local') await localMode.movedImportRevision(removed.localRevision);
+    },
+  });
+  void recoverAccountExports().catch(() => {});
+  const archive = new AccountArchive({
     userData: app.getPath('userData'),
-    image: (id) => interviewImages.original(id),
+    image: (id) => currentProfile().images.original(id),
     async choose() {
       if (!mainWindow || mainWindow.isDestroyed()) throw Error('账号窗口已关闭。');
       const result = await dialog.showSaveDialog(mainWindow, {
@@ -2021,21 +2267,23 @@ app.whenReady().then(async () => {
       return result.canceled ? undefined : result.filePath;
     },
   });
-  guardQuitDrain(app, () =>
-    Promise.allSettled([
+  accountArchive = new AccountDataTransfers(archive, importer);
+  guardQuitDrain(app, () => {
+    profileEntryStopped = true;
+    invalidateModels();
+    return Promise.allSettled([
+      legacyClaim?.stop(),
+      preparingProfile?.work,
       accountArchive?.dispose(),
-      interviewImages.dispose(),
-      ledger.dispose(),
-      codexUsageRuntime.stop(),
-      copilotRuntime.stop(),
-    ]),
-  );
+      retireProfile(),
+    ]);
+  });
   handleDesktop('account:data', (event, call) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame || erasingAccount)
       throw Error('Unauthorized window');
     if (leavingAccount) return { ok: false as const, error: '账号正在退出，请稍候。' };
-    if (interviewActive()) return { ok: false as const, error: '请先结束面试再导出资料。' };
+    if (interviewActive()) return { ok: false as const, error: '请先结束面试再迁移或导出资料。' };
     const user = cloudAccount.snapshot().user;
     if (!user && !localMode.active)
       return { ok: false as const, error: '请先登录 VoxCue 账号或选择本地账户。' };
@@ -2045,7 +2293,7 @@ app.whenReady().then(async () => {
     );
   });
   registerInterviewImageIpc({
-    store: interviewImages,
+    get store() { return currentProfile().images; },
     requireMain,
     requireReader(event) {
       if (event.sender === mainWindow?.webContents) requireMain(event);
@@ -2073,7 +2321,7 @@ app.whenReady().then(async () => {
     },
   });
   interviewIpc = registerInterviewIpc({
-    chat: ragChat,
+    get chat() { return currentProfile().ragChat; },
     telemetry,
     requireInterview(event) {
       requireInterview(event);
@@ -2093,7 +2341,7 @@ app.whenReady().then(async () => {
           ? interviewToolbarPoint(interviewWindow!.getBounds())
           : undefined,
       ),
-    archiveImages: (images) => interviewImages.save(images),
+    archiveImages: (images) => currentProfile().images.save(images),
   });
   historyJobs = registerHistoryIpc({
     chat,
@@ -2225,9 +2473,12 @@ app.whenReady().then(async () => {
         interviewWindow &&
         !interviewWindow.isDestroyed()
       ) {
-        if (event.type === 'status' && event.status.state === 'error') {
-          interviewAudioIntent.cancel();
-          speechSessions.cancelInput();
+        if (event.type === 'status') {
+          speechSessions.observeInterviewStatus(event.status);
+          if (event.status.state === 'error') {
+            interviewAudioIntent.cancel();
+            speechSessions.cancelInput();
+          }
         }
         if (speechSessions.blocksInput(event)) return;
         if (event.type === 'status') telemetry?.speechState(event.status.state);
@@ -2238,7 +2489,7 @@ app.whenReady().then(async () => {
           event.segment.reason !== 'discontinuity'
         )
           telemetry?.transcript(event.segment.id);
-        interviewContext.event(event, questionSource(speechSessions.configuration?.inputMode));
+        interviewContext.event(event, questionSource(speechSessions.inputState?.inputMode));
         sendDesktop(interviewWindow.webContents, 'speech:event', event);
       }
     },
@@ -2247,6 +2498,18 @@ app.whenReady().then(async () => {
     resources.qwenRuntime,
   );
   speechSessions = new SpeechCoordinator(speech);
+  enableRecordingPlayback = registerRecordings({
+    requireMain,
+    requireInterview,
+    text: nativeText,
+    owner: () => {
+      if (leavingAccount || erasingAccount) return undefined;
+      if (localMode.active) return 'local';
+      const id = cloudAccount.snapshot().user?.id;
+      return id ? 'account:' + id : undefined;
+    },
+    setRecording: async prepare => !!(await speechSessions!.setRecording(prepare)).recording,
+  }, recordingLibrary);
   handleDesktop('speech:hardware', (event) => {
     if (event.sender === mainWindow?.webContents) {
       requireMain(event);
@@ -2291,6 +2554,14 @@ app.whenReady().then(async () => {
       components.require(fallback ? 'qwen' : 'speech');
     return speechSessions!.dictation(value, fallback);
   });
+  handleDesktop('interview:control-speech-switch', async (event, ...args: unknown[]) => {
+    requireInterview(event);
+    const [id, action] = args;
+    if (args.length !== 2 || typeof id !== 'number' || !Number.isSafeInteger(id) || id < 1 ||
+        (action !== 'now' && action !== 'cancel'))
+      throw Error('Invalid speech switch control');
+    await speechSessions!.controlSwitch(id, action);
+  });
   handleDesktop('interview:reconnect-audio', async (event, options) => {
     requireInterview(event);
     const validated = validateSpeech({
@@ -2303,7 +2574,7 @@ app.whenReady().then(async () => {
     if (speechSessions!.inputChanging) throw Error('音频输入正在切换，请稍候。');
     validateInterviewConfiguration({ ...confirmed, options: validated.options });
     if (validated.options.speechModel === 'qwen' && !resources.qwenModels)
-      throw Error('当前平台尚未接入 Qwen 原生推理。');
+      throw Error('当前平台不支持多语言语音识别。');
     const owner = interviewWindow!;
     const rendererRevision = surfaceRevisions.get(owner);
     const attempt = interviewAudioIntent.begin(() => {
@@ -2404,7 +2675,8 @@ app.whenReady().then(async () => {
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     const configuration = validateInterviewConfiguration(value);
     if (configuration.mode !== 'local') throw Error('请选择本地音频设备。');
-    knowledgeCoordinator.assertInterviewReady(configuration.knowledgeBaseId);
+    await currentProfile().coordinator.assertInterviewReady(configuration.knowledgeBaseId);
+    requireMain(event);
     return checkInterviewAccess(configuration);
   });
   handleDesktop('interview:microphone-settings', (event, source: unknown = 'microphone') => {
@@ -2424,6 +2696,8 @@ app.whenReady().then(async () => {
   handleDesktop('interview:open', async (event, value: unknown) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
+    if (signingIn || disconnecting) throw Error('账户正在变更，请稍后重试。');
+    if (entryBusy || leavingAccount || erasingAccount) throw Error('账号操作正在进行，请稍候。');
     if (updates?.state().phase === 'installing')
       throw Error('正在准备更新，请完成或取消更新后再开始面试。');
     if (interviewOpening) throw Error('正在检查面试设备，请稍候。');
@@ -2450,19 +2724,22 @@ app.whenReady().then(async () => {
     interviewOpening = true;
     updates?.refresh();
     try {
-      if (!demoSession && !(await activeAuth().session())) throw new Error('Please sign in first');
+      const profile = currentProfile();
+      if (!demoSession && !(await profile.selection.session(undefined, (service) => profile.session(service))))
+        throw new Error('Please sign in first');
       stage = 'model';
       if (configuration.options.speechModel === 'qwen' && !resources.qwenModels)
-        throw Error('当前平台尚未接入 Qwen 原生推理。');
+        throw Error('当前平台不支持多语言语音识别。');
       await speechHardware.require(configuration.options);
       components.require(speechComponent(configuration.options));
-      knowledgeCoordinator.assertInterviewReady(configuration.knowledgeBaseId);
+      await profile.coordinator.assertInterviewReady(configuration.knowledgeBaseId);
+      assertOpeningOwner();
       if (configuration.knowledgeBaseId) components.require('rag');
       if (!demoSession && (configuration.mode !== 'local' || !configuration.aiEnabled))
         throw Error('请先连接模型服务并选择回答模型。');
       if (configuration.aiEnabled) {
         if (demoSession) throw Error('请先连接模型服务并选择可用的回答模型。');
-        validateInterviewModel(configuration, await chat.models(false));
+        validateInterviewModel(configuration, await chat.models(false, openingAbort.signal));
       }
       if (configuration.mode === 'local') {
         if (configuration.options.speechModel !== 'qwen' && !speechModelInstalled(speechModelRoot))
@@ -2496,6 +2773,7 @@ app.whenReady().then(async () => {
       event.sender.removeListener('destroyed', abortOpening);
       event.sender.removeListener('did-start-loading', abortOpening);
       interviewOpening = false;
+      notifyCloudSyncAvailable();
       updates?.refresh();
     }
   });
@@ -2709,8 +2987,7 @@ app.whenReady().then(async () => {
   const startupAccountStatus = desktopPlatform.credentialEncryptionFile
     ? (initialAccountStatus = initialLanguageReady
         .then(async () => {
-          await selectionReady;
-          await localModeReady;
+          await Promise.all([localModeReady, recoverErasures()]);
           return localMode.active
             ? { ok: true as const, state: accountState() }
             : cloudAccount.call({ action: 'status' });
@@ -2731,54 +3008,50 @@ app.whenReady().then(async () => {
     });
     loginWindow?.once('closed', () => failInitialLanguage?.());
   }
-  void selectionReady
-    .then(async () => {
-      await initialLanguageReady;
-      await localModeReady;
-      if (localMode.active) {
-        accountState();
-        telemetry?.entry('local');
-        return true;
-      }
-      const result = await (startupAccountStatus ?? cloudAccount.call({ action: 'status' }));
+  async function restoreOwner(status?: ReturnType<CloudAccountClient['call']>) {
+    await Promise.all([localModeReady, recoverErasures()]);
+    if (localMode.active) {
       accountState();
-      if (result.ok && result.state.user && result.state.verified)
-        telemetry?.entry('restore', result.state.user.createdAt);
-      return result.state.user;
-    })
-    .then((session) => {
-      if (session) createMainWindow();
-      else createLoginWindow();
-    })
-    .catch(() => createLoginWindow());
+      telemetry?.entry('local');
+      return 'local';
+    }
+    const result = await (status ?? cloudAccount.call({ action: 'status' }));
+    accountState();
+    if (result.ok && result.state.user && result.state.verified)
+      telemetry?.entry('restore', result.state.user.createdAt);
+    return result.state.user ? 'account:' + result.state.user.id : undefined;
+  }
+  async function restoreWindow(owner?: string) {
+    if (activeProfile && activeProfile.owner !== owner) await retireProfile();
+    if (!owner) return createLoginWindow();
+    await prepareProfile(owner);
+    createMainWindow();
+  }
+  function restoreFailed(error: unknown) {
+    if (profileEntryStopped) return;
+    if (error instanceof LegacyProfileMigrationError)
+      dialog.showErrorBox(nativeText('应用数据迁移未完成'), nativeText(error.message));
+    createLoginWindow();
+  }
+  void initialLanguageReady
+    .then(() => restoreOwner(startupAccountStatus))
+    .then(restoreWindow)
+    .catch(restoreFailed);
   app.on('activate', () => {
     if (revealExistingInterview(interviewWindow, interviewRevealCallbacks)) return;
     if (BrowserWindow.getAllWindows().length !== 0) return;
     if (desktopPlatform.id !== 'darwin') return createLoginWindow();
-    void selectionReady
-      .then(async () => {
-        await localModeReady;
-        if (localMode.active) {
-          accountState();
-          telemetry?.entry('local');
-          return true;
-        }
-        const result = await cloudAccount.call({ action: 'status' });
-        accountState();
-        if (result.ok && result.state.user && result.state.verified)
-          telemetry?.entry('restore', result.state.user.createdAt);
-        return result.state.user;
+    void restoreOwner()
+      .then((owner) => {
+        if (!BrowserWindow.getAllWindows().length) return restoreWindow(owner);
       })
-      .then((session) => {
-        if (BrowserWindow.getAllWindows().length) return;
-        if (session) createMainWindow();
-        else createLoginWindow();
-      })
-      .catch(() => createLoginWindow());
+      .catch(restoreFailed);
   });
 });
 app.on('window-all-closed', () => {
-  if (erasingAccount) return;
+  // Migration and recovered erasure can close their last hidden window before
+  // the first user window exists. Explicit quit still follows before-quit.
+  if (erasingAccount || recoveringErasedProfile || preparingProfile) return;
   if (desktopPlatform.quitOnAllWindowsClosed) app.quit();
 });
 app.on('will-quit', () => releaseInterviewShortcuts?.());
@@ -2793,9 +3066,14 @@ app.on('before-quit', (event) => {
     event.preventDefault();
     if (updatesClosing) return;
     updatesClosing = true;
-    void updates
-      .dispose()
-      .catch(() => console.error('Unfinished update cleanup will retry on the next launch.'))
+    void Promise.allSettled([
+      Promise.resolve().then(() => updates?.dispose()),
+      Promise.resolve().then(() => speech?.finishRecording()),
+    ])
+      .then(([update, recording]) => {
+        if (update.status === 'rejected') console.error('Unfinished update cleanup will retry on the next launch.');
+        if (recording.status === 'rejected') console.error('Recording shutdown did not finish cleanly.');
+      })
       .finally(() => {
         updatesClosed = true;
         app.quit();
@@ -2819,11 +3097,11 @@ app.on('before-quit', (event) => {
   void remoteConnection?.disconnect().catch(() => {});
   components?.dispose();
   nativePresentation?.dispose();
-  knowledgeCoordinator?.cancelAll();
-  knowledge?.stop();
+  activeProfile?.coordinator.cancelAll();
+  activeProfile?.knowledge.stop();
   historyJobs?.cancelAll();
   speech?.stop();
   interviewIpc?.cancel();
-  auth?.cancel();
-  copilotAuth?.cancel();
+  activeProfile?.auth.cancel();
+  activeProfile?.copilotAuth.cancel();
 });

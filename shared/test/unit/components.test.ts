@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, mkdir, open, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { temporaryDirectory } from '../temp';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
@@ -50,6 +50,34 @@ async function fixture() {
   return { root, pkg, bytes, data, fetcher, service };
 }
 describe('独立组件下载与版本缓存', () => {
+  it('stops reading a valid model partway through verification and can recheck it', async () => {
+    const f = await fixture();
+    await f.service().download();
+    const file = path.join(componentLocation(f.root, f.pkg), 'files/speech/model.onnx');
+    const data = Buffer.alloc(8 * 1024 * 1024, 7);
+    await writeFile(file, data);
+    const pkg = { ...f.pkg, files: [{ ...f.pkg.files[0], bytes: data.length, sha256: digest(data) }] };
+    const service = new ComponentService({ root: f.root, packages: [pkg], managed: true, fetch, emit() {} });
+    const handle = await open(file);
+    const proto = Object.getPrototypeOf(handle) as typeof handle;
+    await handle.close();
+    const original = proto.createReadStream;
+    let read = 0;
+    const spy = vi.spyOn(proto, 'createReadStream').mockImplementation(function (this: typeof handle, options) {
+      const stream = original.call(this, options);
+      stream.on('data', chunk => {
+        read += chunk.length;
+        if (!options?.signal?.aborted) void service.cancel();
+      });
+      return stream;
+    });
+    try {
+      expect((await service.status()).phase).toBe('cancelled');
+      expect(read).toBeGreaterThan(0);
+      expect(read).toBeLessThan(data.length);
+    } finally { spy.mockRestore(); }
+    expect((await service.status()).phase).toBe('ready');
+  });
   it('Windows Q8_0升级保留原ASR和旧资源信任根，Mac不下载Windows运行时', () => {
     const windows = packagesFor('win32', 'x64').find((pkg) => pkg.id === 'qwen')!;
     const mac = packagesFor('darwin', 'arm64').find((pkg) => pkg.id === 'qwen')!;
@@ -382,7 +410,7 @@ describe('独立组件下载与版本缓存', () => {
     await ready;
     const [stage] = await readdir(f.root);
     const owner = JSON.parse(await readFile(path.join(f.root, stage, '.owner.json'), 'utf8'));
-    expect(owner.version).toBe(2);
+    expect(owner).toMatchObject({ version: 3, target: path.basename(componentLocation(f.root, f.pkg)) });
     await f.service().status();
     expect(await readdir(f.root)).toContain(stage);
     await service.cancel();
@@ -579,7 +607,12 @@ describe('独立组件下载与版本缓存', () => {
       prepareRemove: prepare,
     });
     await service.download();
+    const verify = vi.spyOn(
+      service as unknown as { verify(directory: string, pkg: ComponentPackage): Promise<boolean> },
+      'verify',
+    );
     expect((await service.remove('speech')).error).toMatch(/正在使用/);
+    expect(verify).not.toHaveBeenCalled();
     expect(service.ready('speech')).toBe(true);
     let release!: (allowed: boolean) => void;
     prepare.mockImplementation(
@@ -685,6 +718,26 @@ describe('独立组件下载与版本缓存', () => {
     await f.service().status();
     await expect(readdir(stages[1])).rejects.toMatchObject({ code: 'ENOENT' });
     for (const directory of stages.slice(2)) expect(await readdir(directory)).toContain('.owner.json');
+  });
+  it.each(['prepared', 'replacing', 'published', 'rollback'])('recovers an interrupted %s component commit', async phase => {
+    const f = await fixture();
+    await f.service().download();
+    const destination = componentLocation(f.root, f.pkg);
+    const stage = path.join(f.root, '.stage-speech-' + randomUUID());
+    await mkdir(stage);
+    await writeFile(path.join(stage, '.owner.json'), JSON.stringify({
+      kind: 'voxcue-component-stage', version: 3, lease: randomBytes(16).toString('hex'),
+      target: path.basename(destination),
+    }));
+    if (phase === 'prepared') await rename(destination, path.join(stage, 'next'));
+    else {
+      await rename(destination, path.join(stage, 'previous'));
+      if (phase !== 'rollback') await cp(path.join(stage, 'previous'),
+        phase === 'published' ? destination : path.join(stage, 'next'), { recursive: true });
+    }
+    expect((await f.service().status()).phase).toBe('ready');
+    expect(await readFile(path.join(destination, 'files/speech/model.onnx'))).toEqual(f.data);
+    await expect(readdir(stage)).rejects.toMatchObject({ code: 'ENOENT' });
   });
   it.each([false, true])('后继安装完成前不发布就绪，取消=%s时保留可信前驱', async (cancel) => {
     const f = await fixture();

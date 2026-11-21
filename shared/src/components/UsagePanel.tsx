@@ -1,6 +1,8 @@
 import { orderedAccountQuotas, quotaPercentage } from '../services/accountUsageSummary';
+import { InterviewReveal } from './InterviewReveal';
 import { t, uiLocale } from '../i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useHeightTransition } from './ui/useHeightTransition';
 import type { AccountQuota, AccountUsage } from '../../electron/contracts/accountUsage';
 import { useChatConnection } from '../stores/chatConnection';
 import { useAuth } from '../stores/auth';
@@ -141,22 +143,18 @@ function Quota({
           ) : null}
         </span>
       </div>
-      {state && (
-        <span
-          className={`account-quota-state${
-            !loading && value?.state === 'restricted'
-              ? ' danger-text'
-              : ''
-          }`}
-        >
-          {loading ? <SkeletonLine className="quota-skeleton-hint" /> : t(state)}
-        </span>
-      )}
-      {value?.unit === 'unknown' && (
-        <p>
-          {loading ? <SkeletonLine /> : t('官方未提供明确的计量单位，具体用量请查看官方页面。')}
-        </p>
-      )}
+      <InterviewReveal resizeKey={state ?? ''}>
+        {state ? (
+          <span className={`account-quota-state${!loading && value?.state === 'restricted' ? ' danger-text' : ''}`}>
+            {loading ? <SkeletonLine className="quota-skeleton-hint" /> : t(state)}
+          </span>
+        ) : null}
+      </InterviewReveal>
+      <InterviewReveal>
+        {value?.unit === 'unknown' ? (
+          <p>{loading ? <SkeletonLine /> : t('官方未提供明确的计量单位，具体用量请查看官方页面。')}</p>
+        ) : null}
+      </InterviewReveal>
       {progress &&
         (loading ? (
           <SkeletonLine className="quota-skeleton-progress" />
@@ -206,6 +204,18 @@ export function UsagePanel() {
   const copilot = session?.mode === 'copilot';
   const live = session?.mode === 'chatgpt' || copilot;
   const usage = state.usage?.provider === session?.mode ? state.usage : null;
+  const unavailable = copilot
+    ? t('账户额度暂不可用，请刷新或查看 GitHub 官方用量。')
+    : t('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。');
+  const error = state.usageError && t(state.usageError);
+  const available = usage?.status === 'available' && usage.quotas.length > 0;
+  const quotaBody = useRef<HTMLDivElement>(null);
+  const quotaView = !live ? 'disconnected'
+    : state.loadingUsage ? 'loading'
+    : available ? 'available'
+    : error === unavailable ? 'empty'
+    : 'unavailable';
+  useHeightTransition(quotaView, () => [quotaBody.current]);
   useEffect(() => {
     setNow(Date.now());
     if (state.loadingUsage || !usage?.quotas.some((quota) => quota.resetAt !== null)) return;
@@ -253,23 +263,19 @@ export function UsagePanel() {
           </Button>
         )}
       </header>
-      {!live ? (
-        <p>{t('连接模型服务后可查看账户用量。')}</p>
-      ) : state.loadingUsage ? (
-        <QuotaSkeleton usage={usage} percentage={!copilot} now={now} />
-      ) : usage?.status === 'available' && usage.quotas.length ? (
-        <div className="account-quota-list">
-          {orderedAccountQuotas(usage.quotas).map((quota, index) => (
-            <Quota key={`${quota.id}-${index}`} value={quota} now={now} />
-          ))}
-        </div>
-      ) : (
-        <p>
-          {copilot
-            ? t('账户额度暂不可用，请刷新或查看 GitHub 官方用量。')
-            : t('ChatGPT 账户额度暂不可用，请刷新或查看官方用量。')}
-        </p>
-      )}
+      <div ref={quotaBody} className="quota-body">
+        {quotaView === 'disconnected' ? (
+          <p>{t('连接模型服务后可查看账户用量。')}</p>
+        ) : quotaView === 'loading' ? (
+          <QuotaSkeleton usage={usage} percentage={!copilot} now={now} />
+        ) : available ? (
+          <div className="account-quota-list">
+            {orderedAccountQuotas(usage.quotas).map((quota, index) => (
+              <Quota key={`${quota.id}-${index}`} value={quota} now={now} />
+            ))}
+          </div>
+        ) : quotaView === 'unavailable' ? <p>{unavailable}</p> : null}
+      </div>
       {live && (
         <footer className="usage-footer">
           <div className="account-usage-note">
@@ -291,11 +297,13 @@ export function UsagePanel() {
           </a>
         </footer>
       )}
-      {live && state.usageError && (
-        <p className="usage-error" role="alert">
-          {t(state.usageError)}
-        </p>
-      )}
+      <InterviewReveal>
+        {live && error ? (
+          <p className="usage-error" role="alert">
+            {error}
+          </p>
+        ) : null}
+      </InterviewReveal>
     </section>
   );
 }

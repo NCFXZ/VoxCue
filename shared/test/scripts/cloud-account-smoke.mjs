@@ -1,8 +1,10 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { mkdir, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -109,6 +111,8 @@ try {
   );
   const panel = page.getByRole('region', { name: 'VoxCue 账号' });
   await panel.locator('form').waitFor();
+  const consent = panel.getByRole('checkbox', { name: /VoxCue 用户服务协议/u });
+  assert.equal(await consent.count(), 0, 'Sign-in does not require registration consent');
   assert.equal(
     await app.evaluate(({ ipcMain }) => ipcMain._invokeHandlers.has('cloud:usage')),
     false,
@@ -501,6 +505,8 @@ try {
     await codeCells.first().press('ArrowRight');
     assert.equal(await codeCells.nth(1).evaluate((node) => node === document.activeElement), true);
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages.at(-1).code);
+    assert.equal(await consent.isChecked(), false);
+    await consent.check();
     await panel.getByLabel('密码', { exact: true }).fill('a'.repeat(7));
     await panel.getByRole('button', { name: '创建账号', exact: true }).click();
     assert.equal(
@@ -657,12 +663,45 @@ try {
     await outbox.runOnce();
     assert.equal(messages.length, 1);
     await panel.getByLabel('邮箱验证码', { exact: true }).fill(messages[0].code);
+    const createAccount = panel.getByRole('button', { name: '创建账号', exact: true });
+    const agreement = panel.getByRole('link', { name: 'VoxCue 用户服务协议', exact: true });
+    const agreementUrl = 'https://voxcue.com.cn/user-agreement/';
+    assert.equal(await agreement.getAttribute('href'), agreementUrl);
+    await app.evaluate(({ ipcMain, shell }) => {
+      globalThis.registrationProbe = { submitted: 0, links: [] };
+      shell.openExternal = async (url) => { globalThis.registrationProbe.links.push(url); };
+      const account = ipcMain._invokeHandlers.get('cloud:account');
+      ipcMain.removeHandler('cloud:account');
+      ipcMain.handle('cloud:account', (event, call) => {
+        if (call.action === 'register') globalThis.registrationProbe.submitted++;
+        return account(event, call);
+      });
+    });
+    assert.equal(await consent.isChecked(), false);
+    assert.equal(await createAccount.isDisabled(), true);
+    async function readAgreement(checked, expectedClicks) {
+      await agreement.click();
+      await waitForAsync(app, (_electron, count) => globalThis.registrationProbe.links.length === count, expectedClicks);
+      assert.equal(await consent.isChecked(), checked, 'Reading the agreement must preserve consent');
+    }
+    await readAgreement(false, 1);
+    await panel.getByLabel('密码', { exact: true }).press('Enter');
+    await panel.locator('form').evaluate((form) => form.requestSubmit());
+    // Complete an IPC round trip after the two submission attempts.
+    await page.evaluate(() => window.desktop.cloudAccount({ action: 'status' }));
+    assert.equal(await app.evaluate(() => globalThis.registrationProbe.submitted), 0);
+    await consent.check();
+    assert.equal(await createAccount.isEnabled(), true);
+    await readAgreement(true, 2);
     const opened = app.waitForEvent('window');
-    await panel.getByRole('button', { name: '创建账号', exact: true }).click();
+    await createAccount.click();
     const main = await opened;
     main.setDefaultTimeout(20000);
     main.on('pageerror', (e) => errors.push(e.message));
     await main.getByRole('navigation', { name: '主导航' }).waitFor();
+    assert.deepEqual(await app.evaluate(() => globalThis.registrationProbe), {
+      submitted: 1, links: [agreementUrl, agreementUrl],
+    });
     const vault = await readFile(path.join(profile, 'cloud-account/session.bin'));
     assert.ok(!vault.includes(Buffer.from('synthetic@example.test')));
     const exposed = await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }));
@@ -677,7 +716,7 @@ try {
       });
       assert.deepEqual(errors, []);
     } else {
-      await main.evaluate(() => {
+      await evaluateHistory(main, async () => {
         localStorage.setItem(
           'copilot-personal-info-v1',
           JSON.stringify({
@@ -686,37 +725,34 @@ try {
             background: 'Synthetic profile',
           }),
         );
-        localStorage.setItem(
-          'copilot-interview-history-v1',
-          JSON.stringify([
-            {
-              id: 'synthetic-record',
-              title: '合成面试记录',
-              startedAt: 1,
-              endedAt: 1001,
-              status: 'ended',
-              transcripts: Array.from({ length: 100 }, (_, i) => ({
-                id: `t-${i}`,
-                text: `合成问题 ${i}：请说明项目中的接口设计、错误处理与测试方法。`,
-                time: '00:01',
-                final: true,
-                source: 'system',
-              })),
-              answers: Array.from({ length: 24 }, (_, i) => ({
-                id: `a-${i}`,
-                question: `合成问题 ${i}`,
-                content:
-                  '合成回答：按职责分离模块，限制并发和队列，检查失败路径并验证恢复。'.repeat(4),
-                status: 'completed',
-                sourceTranscriptIds: [`t-${i}`],
-                createdAt: i + 1,
-              })),
-              mock: false,
-              titleStatus: 'ready',
-              titleSource: 'manual',
-            },
-          ]),
-        );
+        await fixtureHistory.replace([
+          {
+            id: 'synthetic-record',
+            title: '合成面试记录',
+            startedAt: 1,
+            endedAt: 1001,
+            status: 'ended',
+            transcripts: Array.from({ length: 100 }, (_, i) => ({
+              id: `t-${i}`,
+              text: `合成问题 ${i}：请说明项目中的接口设计、错误处理与测试方法。`,
+              time: '00:01',
+              final: true,
+              source: 'system',
+            })),
+            answers: Array.from({ length: 24 }, (_, i) => ({
+              id: `a-${i}`,
+              question: `合成问题 ${i}`,
+              content:
+                '合成回答：按职责分离模块，限制并发和队列，检查失败路径并验证恢复。'.repeat(4),
+              status: 'completed',
+              sourceTranscriptIds: [`t-${i}`],
+              createdAt: i + 1,
+            })),
+            mock: false,
+            titleStatus: 'ready',
+            titleSource: 'manual',
+          },
+        ]);
         window.dispatchEvent(new CustomEvent('voxcue-sync-applied', { detail: 'profile' }));
       });
       await main.getByRole('button', { name: '知识库', exact: true }).click();
@@ -773,27 +809,40 @@ try {
         .filter({
           hasText: '本机资料已绑定其他 VoxCue 账号，请切回原账号后同步。',
         })
-        .evaluate((message) => {
+        .evaluate(async (message) => {
           const actions = message.closest('.cloud-sync-actions');
           if (!actions) return null;
+          // The warning wraps to its full height as soon as it mounts. Its grid
+          // track can still be opening while the buttons follow the visible height.
+          const messages = message.closest('.cloud-sync-messages');
+          const visible = messages.getBoundingClientRect();
+          const buttons = [...actions.querySelectorAll(':scope > button')];
+          const openingCenters = buttons.map(button => {
+            const rect = button.getBoundingClientRect();
+            return rect.top + rect.height / 2 - visible.top - visible.height / 2;
+          });
+          await Promise.allSettled(messages.getAnimations({ subtree: true }).map(a => a.finished));
           const text = message.getBoundingClientRect(),
-            row = actions.getBoundingClientRect();
-          const buttons = [...actions.querySelectorAll(':scope > button')].map((button) =>
-            button.getBoundingClientRect(),
-          );
+            row = actions.getBoundingClientRect(),
+            clip = message.closest('.interview-reveal-clip').getBoundingClientRect();
+          const bounds = buttons.map(button => button.getBoundingClientRect());
           return {
-            buttons: buttons.length,
-            textBefore: text.right <= buttons[0].left - 7,
+            buttons: bounds.length,
+            textBefore: text.right <= bounds[0].left - 7,
             left: text.left - row.left,
-            right: row.right - buttons.at(-1).right,
-            centers: buttons.map(
+            right: row.right - bounds.at(-1).right,
+            openingCenters,
+            centers: bounds.map(
               (button) => button.top + button.height / 2 - text.top - text.height / 2,
             ),
+            fullyVisible: text.top >= clip.top - 1 && text.bottom <= clip.bottom + 1,
             overflow: actions.scrollWidth > actions.clientWidth + 1,
           };
         });
       assert.ok(warningLayout, 'Cloud backup warning belongs to the existing action row');
       assert.equal(warningLayout.buttons, 2);
+      assert.equal(warningLayout.fullyVisible, true, JSON.stringify(warningLayout));
+      assert.ok(warningLayout.openingCenters.every(offset => Math.abs(offset) < 1), JSON.stringify(warningLayout));
       assert.equal(warningLayout.textBefore, true, JSON.stringify(warningLayout));
       assert.ok(
         Math.abs(warningLayout.left) < 1 && Math.abs(warningLayout.right) < 1,

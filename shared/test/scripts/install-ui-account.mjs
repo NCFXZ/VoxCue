@@ -162,23 +162,40 @@ export async function openModelMenu(page, triggerLabel = '聊天模型', effortL
   return popup;
 }
 export async function enterDemoUiAccount(app, login) {
-  await app.evaluate(() => globalThis.primaryAccountFixture.login());
-  return login.evaluate(() => window.desktop.enterDemo());
+  const [main] = await Promise.all([
+    app.waitForEvent('window'),
+    login.evaluate(() => window.desktop.enterDemo()),
+  ]);
+  await main.getByRole('button', { name: '用户菜单', exact: true }).waitFor();
+  return main;
 }
-export async function waitForRestoredMainWindow(app) {
+async function waitForAccountWindow(app, suffix, role, name) {
   const deadline = Date.now() + 15000;
   while (Date.now() < deadline) {
-    // The offline main opens index.html without a fragment. The hidden Mac
-    // language bootstrap opens index.html#login and closes during restoration.
-    const main = app.windows().find((page) => !page.isClosed() && page.url().endsWith('/index.html'));
-    if (main) {
-      await main.getByRole('button', { name: '用户菜单', exact: true })
+    // Hidden profile migration and language bootstrap windows use their own fragments.
+    const target = app.windows().find((page) => !page.isClosed() && page.url().endsWith(suffix));
+    if (target) {
+      await target.getByRole(role, { name, exact: true })
         .waitFor({ timeout: Math.max(1, deadline - Date.now()) });
-      return main;
+      return target;
     }
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
-  throw Error('Primary account did not restore its main window');
+  throw Error('Account window did not become ready: ' + suffix);
+}
+export function waitForRestoredMainWindow(app) {
+  return waitForAccountWindow(app, '/index.html', 'button', '用户菜单');
+}
+export async function returnToUiLogin(app, main, action) {
+  await main.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await main.getByRole('menuitem', { name: action, exact: true }).click();
+  const dialog = main.getByRole('dialog', { name: action, exact: true });
+  // The account IPC destroys its caller before profile retirement returns.
+  await Promise.all([
+    main.waitForEvent('close', { timeout: 15000 }),
+    dialog.getByRole('button', { name: action, exact: true }).click(),
+  ]);
+  return waitForAccountWindow(app, '/index.html#login', 'heading', '登录 VoxCue');
 }
 export async function enterPrimaryUiAccount(app, login) {
   await app.evaluate(
@@ -202,14 +219,10 @@ export async function enterPrimaryUiAccount(app, login) {
       (button) => button.type === 'submit' && button.textContent === '登录' && !button.disabled,
     ),
   );
-  const opened = app.waitForEvent('window');
   await login.getByLabel('邮箱', { exact: true }).fill('synthetic@example.test');
   await login.getByLabel('密码', { exact: true }).fill('Synthetic UI passphrase 2026!');
   await login.getByRole('button', { name: '登录', exact: true }).click();
-  const main = await opened;
-  await main.waitForLoadState('domcontentloaded');
-  await main.getByRole('button', { name: '用户菜单', exact: true }).waitFor();
-  return main;
+  return waitForRestoredMainWindow(app);
 }
 export async function connectUiAccount(app, login, service = 'chatgpt') {
   await login.waitForLoadState('domcontentloaded');
@@ -438,7 +451,7 @@ export async function installUiAccount(app, { speech = false, components = false
                   final: true,
                   startMs: at - 1800,
                   endMs: at,
-                  silenceStartMs: at - 800,
+                  silenceStartMs: at - 500,
                   reason: 'silence',
                 },
               });

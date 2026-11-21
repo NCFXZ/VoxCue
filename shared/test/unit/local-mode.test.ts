@@ -3,8 +3,32 @@ import * as fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { LocalMode } from '../../electron/backend/localMode';
+import { randomUUID } from 'node:crypto';
 
 describe('local access preference', () => {
+  it('persists an opaque revision across mode changes and restarts, and honors the final clear', async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-local-revision-'));
+    try {
+      const file = path.join(root, 'local-mode.json');
+      const mode = new LocalMode(file);
+      const revision = randomUUID();
+      expect(() => mode.setImportRevision(revision)).toThrow();
+      await mode.set(true);
+      expect(() => mode.setImportRevision('synthetic document text')).toThrow();
+      await mode.setImportRevision(revision);
+      await mode.set(false);
+      const restart = new LocalMode(file);
+      await restart.load();
+      expect(restart.active).toBe(false);
+      expect(restart.importRevision).toBe(revision);
+      await restart.set(true);
+      await Promise.all([restart.setImportRevision(randomUUID()), restart.setImportRevision(null)]);
+      await mode.load();
+      expect(mode.importRevision).toBeUndefined();
+    } finally {
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
   it('requires explicit entry, survives restart and can return to login without touching other data', async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-local-mode-'));
     try {

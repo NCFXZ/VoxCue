@@ -1,6 +1,7 @@
 import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
+import workspace from '../../scripts/workspace.mjs';
 
 import { mkdir, mkdtemp, writeFile, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -71,8 +72,11 @@ require(${JSON.stringify(path.resolve('dist-electron/shared/electron/main.js'))}
 );
 const env = { ...process.env, COPILOT_TEST_USER_DATA: profile, VITE_DEV_SERVER_URL: '' };
 // This regression exercises manual download/retry; automatic mode has its own suite.
+const { profileDirectory } = workspace.platformRequire('./dist-electron/shared/electron/accountProfilePaths.js');
+const accountProfile = profileDirectory(profile, 'account:a0000000-0000-4000-8000-000000000001');
+await mkdir(accountProfile, { recursive: true });
 await writeFile(
-  path.join(profile, 'update-settings.json'),
+  path.join(accountProfile, 'update-settings.json'),
   JSON.stringify({ schemaVersion: 1, autoDownload: false }),
 );
 delete env.ELECTRON_RUN_AS_NODE;

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { SyncKind } from '../../electron/contracts/cloudSync';
-import { KNOWLEDGE_MAX_BYTES, syncKinds } from '../../electron/contracts/cloudSync';
+import { syncKinds } from '../../electron/contracts/cloudSync';
 import {
   CloudSyncEngine,
   defaultSyncPreferences,
@@ -8,8 +8,13 @@ import {
   type SyncSaved,
   type SyncView,
 } from '../services/cloudSync';
-import { applyCloudItem, localCloudItems } from '../services/cloudData';
+import { applyCloudItem, localCloudItem, localCloudItems } from '../services/cloudData';
+import { movedCloudItems } from '../services/migrationSyncProtection';
+import { userError } from '../services/errors';
 import { registerCloudShutdown } from '../services/cloudLifecycle';
+import { recoverLocalHistoryImages } from '../services/history';
+import { deferHistoryImageCleanup } from '../services/historyImageRemoval';
+import { profileStorageKey } from '../services/storedValues';
 import { useKnowledgeIndex } from './knowledgeIndex';
 
 interface SyncStore extends SyncView {
@@ -93,10 +98,13 @@ export const useCloudSync = create<SyncStore>((set, get) => {
       activeUserId = userId;
       const syncId = (activeSyncId = crypto.randomUUID());
       let suspended = false;
+      let releaseHistoryImages: (() => void) | undefined;
       let viewTimer: ReturnType<typeof setTimeout> | undefined;
       let pendingView: SyncView | undefined;
       suspendConnection = () => {
         suspended = true;
+        releaseHistoryImages?.();
+        releaseHistoryImages = undefined;
         clearTimeout(viewTimer);
         viewTimer = undefined;
         pendingView = undefined;
@@ -117,8 +125,9 @@ export const useCloudSync = create<SyncStore>((set, get) => {
       });
       let debounce: ReturnType<typeof setTimeout>;
       const changed = (event: Event) => {
-        const kind = (event as CustomEvent).detail;
-        if (['profile', 'history', 'knowledgebase'].includes(kind)) engine?.dirty(kind);
+        const change = (event as CustomEvent).detail;
+        if (!change || !syncKinds.includes(change.kind) || !Array.isArray(change.keys)) return;
+        engine?.dirty(change.kind, change.keys);
         clearTimeout(debounce);
         debounce = setTimeout(() => {
           void engine?.request();
@@ -130,6 +139,12 @@ export const useCloudSync = create<SyncStore>((set, get) => {
       const online = () => {
         void engine?.request(true);
       };
+      const unsubscribeAvailable = window.desktop?.onCloudSyncAvailable?.(() => {
+        if (epoch !== generation || suspended || !engine) return;
+        // The interview window saves its final record in a separate renderer.
+        engine.dirty('history', []);
+        void engine.request();
+      });
       window.addEventListener('voxcue-local-change', changed);
       window.addEventListener('online', online);
       void syncDatabase(userId)
@@ -137,10 +152,14 @@ export const useCloudSync = create<SyncStore>((set, get) => {
           await retired;
           if (epoch !== generation || suspended) return;
           const normalized = readSyncSaved(saved);
-          normalized.preferences.knowledgeLimitBytes = KNOWLEDGE_MAX_BYTES;
+          const checkOwner = () => {
+            if (localStorage.getItem('voxcue-sync-owner') !== userId)
+              throw Error('本机资料绑定的账号与当前账号不同，请切回原账号。');
+          };
           engine = new CloudSyncEngine({
             userId,
             saved: normalized,
+            moved: movedCloudItems(userId),
             request: async (call) => {
               const result = await window.desktop!.cloudSync({ ...call, syncId });
               if (!suspended && epoch === generation && !result.ok && result.status === 401)
@@ -148,12 +167,21 @@ export const useCloudSync = create<SyncStore>((set, get) => {
               return result;
             },
             list: (kind) => {
-              if (localStorage.getItem('voxcue-sync-owner') !== userId)
-                throw Error('本机资料绑定的账号与当前账号不同，请切回原账号。');
+              checkOwner();
               return localCloudItems(kind);
             },
-            apply: async (key, blob, hash, guard) => {
-              const document = await applyCloudItem(key, blob, hash, userId, guard);
+            get: (kind, key) => {
+              checkOwner();
+              return localCloudItem(kind, key);
+            },
+            profileVersion: () => {
+              checkOwner();
+              return localStorage.getItem(profileStorageKey);
+            },
+            apply: async (key, blob, hash, guard, readMissingImage) => {
+              if (hash && key.startsWith('record:'))
+                releaseHistoryImages ??= deferHistoryImageCleanup();
+              const document = await applyCloudItem(key, blob, hash, userId, guard, readMissingImage);
               guard();
               if (document) void useKnowledgeIndex.getState().index(document);
             },
@@ -173,15 +201,22 @@ export const useCloudSync = create<SyncStore>((set, get) => {
                 clearTimeout(viewTimer);
                 publishView();
               } else viewTimer ??= setTimeout(publishView, 16);
+              // Other records in the same download can still take ownership of a removed image.
+              if (!view.busy && releaseHistoryImages) {
+                releaseHistoryImages();
+                releaseHistoryImages = undefined;
+                void perform(() => recoverLocalHistoryImages(checkOwner));
+              }
             },
           });
-          set({ ready: true });
+          set({ preferences: normalized.preferences, ready: true });
           void engine.request();
         })
         .catch((error) => {
-          if (epoch === generation && !suspended) set({ error: String(error), ready: true });
+          if (epoch === generation && !suspended) set({ error: userError(error, '同步操作失败。'), ready: false });
         });
       return () => {
+        unsubscribeAvailable?.();
         unregister();
         if (epoch === generation) {
           void stopEngine().catch(() => {});

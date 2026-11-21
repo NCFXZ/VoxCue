@@ -1,4 +1,4 @@
-import type { ComponentId } from '../../contracts/components';
+import { componentPresentation, type ComponentId } from '../../contracts/components';
 import { qwenPackage } from './qwen-catalog';
 import { qwenInt8Aligner } from './qwen-int8-catalog';
 import { qwenWindowsRuntime } from './qwen-windows-runtime-catalog';
@@ -27,7 +27,7 @@ export const componentPackages: ComponentPackage[] = [
   {
     id: 'speech',
     target: 'all',
-    label: '本地语音模型',
+    label: componentPresentation.speech.label,
     version: '1.0.0',
     tag: 'models-v1.0.0',
     asset: 'VoxCue-Models-Speech-1.0.0.zip',

@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import type { BrowserWindow } from 'electron';
 import { EventEmitter } from 'node:events';
+import { markAsUntransferable } from 'node:worker_threads';
+import { transferableScreenshotPixels } from '../../electron/backend/screenshot/host';
 const native = vi.hoisted(() => ({
   getSources: vi.fn(),
   getDisplayMatching: vi.fn(),
@@ -104,7 +106,7 @@ it('selects only the interview display and transfers pixels without resizing or 
   expect(other.thumbnail.toBitmap).not.toHaveBeenCalled();
   expect(current.thumbnail.toBitmap).toHaveBeenCalledOnce();
   expect(native.encode).toHaveBeenCalledWith(
-    { width: 2, height: 2, bitmap: expect.any(ArrayBuffer) },
+    { width: 2, height: 2, bitmap: expect.any(Uint8Array) },
     expect.any(AbortSignal),
   );
   for (const method of [
@@ -113,6 +115,25 @@ it('selects only the interview display and transfers pixels without resizing or 
     current.thumbnail.resize,
   ])
     expect(method).not.toHaveBeenCalled();
+});
+it('transfers an owned full bitmap directly and isolates partial, shared or protected buffers', async () => {
+  const own = Buffer.alloc(16, 5);
+  const sliced = Buffer.alloc(32, 22).subarray(8, 24);
+  sliced.fill(9);
+  const shared = Buffer.from(new SharedArrayBuffer(16)).fill(6);
+  const protectedPixels = Buffer.alloc(16, 7);
+  markAsUntransferable(protectedPixels.buffer);
+  for (const bytes of [own, sliced, shared, protectedPixels]) {
+    const frame = source();
+    frame.thumbnail.toBitmap.mockReturnValue(bytes as typeof own);
+    native.getSources.mockResolvedValue([frame]);
+    await captureFile(window, 'win32', new AbortController().signal);
+    const pixels = transferableScreenshotPixels(native.encode.mock.lastCall![0].bitmap);
+    expect(pixels === bytes.buffer).toBe(bytes === own);
+    const transferred = structuredClone(pixels, { transfer: [pixels] });
+    expect([...new Uint8Array(transferred)]).toEqual(Array(16).fill(bytes === own ? 5 : bytes[0]));
+    expect(bytes.byteLength).toBe(bytes === own ? 0 : 16);
+  }
 });
 it('passes oversized native frames to the worker for dimension limiting and rejects excessive or malformed frames', async () => {
   const image = source();
@@ -260,4 +281,10 @@ it('takes a fresh frame per click and uses the private encoder for native captur
     captureInterviewScreenshot(window, 'win32', controller.signal, capture),
   ).rejects.toMatchObject({ name: 'AbortError' });
   expect(first.thumbnail.toBitmap).toHaveBeenCalledOnce();
+});
+it('reports a Windows capture failure without requesting macOS screen recording permission', async () => {
+  const capture = vi.fn().mockRejectedValue(Error('synthetic helper failure'));
+  await expect(captureFile(window, 'win32', new AbortController().signal, capture))
+    .rejects.toThrow('无法截取面试窗口所在屏幕，请检查系统屏幕捕获状态后重试。');
+  expect(native.encode).not.toHaveBeenCalled();
 });

@@ -27,7 +27,7 @@ BrowserWindow.prototype.setIgnoreMouseEvents=function(ignore,...args){
  return mousePassthrough.call(this,ignore,...args);
 };
 test.keys=['Control+Shift+H','Control+Shift+P','Control+Shift+T','Control+Shift+M',
-  'Control+Shift+A','Control+Shift+Enter','Control+Shift+Up','Control+Shift+Down','Control+Shift+S'];
+  'Control+Shift+A','Control+Shift+Enter','Control+Shift+Up','Control+Shift+Down','Control+Shift+S','Control+Shift+/'];
 test.physicalKey=key=>({'Control+Shift+H':'Control+Alt+Shift+F8',
   'Control+Shift+P':'Control+Alt+Shift+F9','Control+Shift+T':'Control+Alt+Shift+F10',
   'Control+Shift+M':'Control+Alt+Shift+F11','Control+Shift+A':'Control+Alt+Shift+F5',
@@ -350,9 +350,16 @@ try {
       }
       await new Promise((resolve) => setTimeout(resolve, 20));
     }
-    throw Error('Default shortcut helper did not appear');
+    throw Error('Shortcut helper did not appear');
   };
   let help = await findHelp();
+  assert.equal(await shortcutsToggle.getAttribute('aria-pressed'), 'true');
+  const closedWithKey = helpPage.waitForEvent('close');
+  await invoke('Control+Shift+/');
+  await closedWithKey;
+  assert.equal(await shortcutsToggle.getAttribute('aria-pressed'), 'false');
+  await invoke('Control+Shift+/');
+  help = await findHelp();
   const helpLabel = async (action, label, width) => {
     await helpPage.waitForFunction(
       ({ action, label }) =>
@@ -437,7 +444,7 @@ try {
       'Connected rows must change the visible window height smoothly',
     );
     frames.forEach((frame, index) => {
-      assert.ok(Math.abs(frame.width - first.width) <= 1 / 64);
+      assert.ok(Math.abs(frame.width - first.width) <= 1 / 64, JSON.stringify({ first, frame, last }));
       assert.ok(
         Math.abs(frame.bottom - first.bottom) <= 1 / 64,
         'The compact help keeps its bottom anchor',
@@ -688,7 +695,7 @@ try {
       });
     }
   }
-  assert.deepEqual(await keyState(), Array(9).fill(true));
+  assert.deepEqual(await keyState(), Array(10).fill(true));
   await floating.waitForFunction(
     () =>
       document.querySelector('.floating-shortcuts-toggle')?.getAttribute('aria-pressed') === 'true',
@@ -716,9 +723,10 @@ try {
   assert.deepEqual(
     await help.locator('kbd:visible').allTextContents(),
     process.platform === 'darwin'
-      ? ['⌃⇧H', '⌃⇧P', '⌃⇧T', '⌃⇧M', '⌃⇧A', '⌃⇧↩', '⌃⇧S']
+      ? ['⌃⇧H', '⌃⇧/', '⌃⇧P', '⌃⇧T', '⌃⇧M', '⌃⇧A', '⌃⇧↩', '⌃⇧S']
       : [
           'Ctrl+Shift+H',
+          'Ctrl+Shift+/',
           'Ctrl+Shift+P',
           'Ctrl+Shift+T',
           'Ctrl+Shift+M',
@@ -1177,7 +1185,7 @@ try {
   await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
   await closed;
   await waitKeysReleased();
-  assert.deepEqual(await keyState(), Array(9).fill(false));
+  assert.deepEqual(await keyState(), Array(10).fill(false));
   await main.locator('.interview-start-trigger').click();
   const beforeMode = await start.boundingBox();
   await start.getByRole('radio', { name: '现场面试', exact: true }).click();
@@ -1199,10 +1207,8 @@ try {
     0,
   );
   assert.equal(await start.getByText('设置为“现场面试”时不可用。', { exact: true }).count(), 0);
-  assert.equal(
-    await start.locator('.interview-access-row').filter({ hasText: '系统音频' }).count(),
-    0,
-  );
+  await start.locator('.interview-access-row').filter({ hasText: '系统音频' })
+    .getByText('未启用', { exact: true }).waitFor();
   const microphoneWindow = app.waitForEvent('window');
   await start.getByRole('button', { name: '确认开始', exact: true }).click();
   const microphone = await microphoneWindow;
@@ -1224,7 +1230,7 @@ try {
         text: 'Synthetic microphone question',
         final: true,
         startMs: at - 1500,
-        endMs: at + 1000,
+        endMs: at + 500,
         silenceStartMs: at,
         reason: 'silence',
       },
@@ -1233,7 +1239,7 @@ try {
       type: 'audio-progress',
       source: 'microphone',
       pending: false,
-      processedThroughMs: at + 1799,
+      processedThroughMs: at + 999,
     });
   });
   await microphone
@@ -1247,7 +1253,7 @@ try {
       type: 'audio-progress',
       source: 'microphone',
       pending: false,
-      processedThroughMs: globalThis.shortcutUi.silenceAt + 1800,
+      processedThroughMs: globalThis.shortcutUi.silenceAt + 1000,
     }),
   );
   await microphone.getByText('Synthetic interview answer', { exact: true }).waitFor();
@@ -1339,7 +1345,7 @@ try {
   assert.deepEqual(await app.evaluate(() => globalThis.shortcutUi.uncaught), []);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: isolated remote/transcription configurable shortcuts, hidden microphone toggle, microphone draft/1800ms answer, disabled system settings, default screen-bottom-left help, matching toggles, native fade/reversal/reduced motion, panel preferences, opacity/language, renderer revisions and owned-window cleanup. No hardware or real credentials.',
+    'PASS: isolated remote/transcription configurable shortcuts, hidden microphone toggle, microphone draft/1000ms answer, disabled system settings, default screen-bottom-left help, matching toggles, native fade/reversal/reduced motion, panel preferences, opacity/language, renderer revisions and owned-window cleanup. No hardware or real credentials.',
   );
 } catch (error) {
   console.error(

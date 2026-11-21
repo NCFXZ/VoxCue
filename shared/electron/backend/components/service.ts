@@ -101,20 +101,23 @@ export class ComponentService {
     this.checkingController = controller;
     try {
       await this.directory(this.options.root);
-      await this.cleanAbandoned();
+      await this.cleanAbandoned(controller.signal);
       for (const pkg of this.options.packages) {
         if (!this.managed(pkg.id) || (id && pkg.id !== id)) continue;
         const item = this.value.items.find((value) => value.id === pkg.id)!;
         item.phase = 'checking';
         this.publish('checking');
-        const valid = await this.verify(componentLocation(this.options.root, pkg), pkg);
+        const valid = await this.verify(componentLocation(this.options.root, pkg), pkg, controller.signal);
         if (valid) await this.reclaimPrevious(pkg, controller.signal);
         item.phase = valid ? 'ready' : 'pending';
         item.received = valid ? pkg.bytes : 0;
       }
       this.publish(this.requiredReady() ? 'ready' : 'needed');
     } catch {
-      this.publish('error', '无法检查本地组件缓存，请确认应用数据目录可写后重试。');
+      if (controller.signal.aborted) {
+        for (const item of this.value.items) if (item.phase === 'checking') item.phase = 'pending';
+        this.publish('cancelled');
+      } else this.publish('error', '无法检查本地组件缓存，请确认应用数据目录可写后重试。');
       this.checking = undefined;
     } finally {
       if (this.checkingController === controller) this.checkingController = undefined;
@@ -142,13 +145,13 @@ export class ComponentService {
     item.phase = 'removing';
     this.publish('removing');
     const directory = componentLocation(this.options.root, pkg);
-    let message = '组件删除失败，请检查文件占用与目录权限后重试。';
     try {
       // Retire consumers only after publishing a non-ready state. New model
       // operations are rejected by their independent main-process guards.
       if (this.options.prepareRemove && !(await this.options.prepareRemove(id))) {
-        message = '组件正在使用，请结束面试、音频测试或资料处理后再删除。';
-        throw Error('Component in use');
+        item.phase = 'ready';
+        this.publish('error', '组件正在使用，请结束面试、音频测试或资料处理后再删除。');
+        return this.state();
       }
       const root = await lstat(this.options.root);
       if (
@@ -167,7 +170,7 @@ export class ComponentService {
       const intact = await this.verify(directory, pkg);
       item.phase = intact ? 'ready' : 'pending';
       item.received = intact ? pkg.bytes : 0;
-      this.publish('error', message);
+      this.publish('error', '组件删除失败，请检查文件占用与目录权限后重试。');
     } finally {
       this.removing = false;
     }
@@ -194,6 +197,7 @@ export class ComponentService {
         signal.throwIfAborted();
         await this.check(id);
       } else await this.status();
+      signal.throwIfAborted();
       for (const pkg of this.options.packages) {
         if (
           !this.managed(pkg.id) ||
@@ -226,8 +230,9 @@ export class ComponentService {
     const info = await lstat(directory);
     if (!info.isDirectory() || info.isSymbolicLink()) throw Error('Unsafe component directory');
   }
-  private async verify(directory: string, pkg: ComponentPackage) {
+  private async verify(directory: string, pkg: ComponentPackage, signal?: AbortSignal) {
     try {
+      signal?.throwIfAborted();
       const info = await lstat(directory);
       if (!info.isDirectory() || info.isSymbolicLink()) return false;
       const marker = await this.readMarker(directory);
@@ -239,6 +244,7 @@ export class ComponentService {
         if (!directoryInfo.isDirectory() || directoryInfo.isSymbolicLink())
           throw Error('Unsafe cache');
         for (const name of await readdir(folder)) {
+          signal?.throwIfAborted();
           const file = path.join(folder, name),
             rel = relative ? relative + '/' + name : name;
           const stat = await lstat(file);
@@ -255,8 +261,10 @@ export class ComponentService {
           const handle = await open(file, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
           const hash = createHash('sha256');
           try {
-            for await (const chunk of handle.createReadStream({ autoClose: false }))
+            for await (const chunk of handle.createReadStream({ autoClose: false, signal })) {
+              signal?.throwIfAborted();
               hash.update(chunk);
+            }
           } finally {
             await handle.close();
           }
@@ -267,6 +275,7 @@ export class ComponentService {
       await visit(path.join(directory, 'files'));
       return count === expected.size;
     } catch {
+      signal?.throwIfAborted();
       return false;
     }
   }
@@ -289,16 +298,21 @@ export class ComponentService {
   private async install(pkg: ComponentPackage, signal: AbortSignal) {
     const item = this.value.items.find((value) => value.id === pkg.id)!;
     const stage = path.join(this.options.root, '.stage-' + pkg.id + '-' + randomUUID());
+    const next = path.join(stage, 'next');
+    const previous = path.join(stage, 'previous');
+    const destination = componentLocation(this.options.root, pkg);
     await this.directory(stage);
     let releaseLease: (() => Promise<void>) | undefined;
+    let restorePrevious = false;
     try {
       const lease = randomBytes(16).toString('hex');
       releaseLease = await holdComponentLease(lease);
       await writeFile(
         path.join(stage, '.owner.json'),
-        JSON.stringify({ kind: 'voxcue-component-stage', version: 2, lease }),
+        JSON.stringify({ kind: 'voxcue-component-stage', version: 3, lease, target: path.basename(destination) }),
         { flag: 'wx' },
       );
+      await this.directory(next);
       item.phase = 'downloading';
       item.received = 0;
       this.publish('downloading');
@@ -312,20 +326,17 @@ export class ComponentService {
         });
         item.phase = 'verifying';
         this.publish('verifying');
-        await unpackComponentFile(archive, part, path.join(stage, 'files'), signal);
+        await unpackComponentFile(archive, part, path.join(next, 'files'), signal);
         completed += part.bytes;
         await rm(archive);
       }
       await writeFile(
-        path.join(stage, '.voxcue-component.json'),
+        path.join(next, '.voxcue-component.json'),
         JSON.stringify({ sha256: pkg.sha256, ownership: 1 }),
         { flag: 'wx' },
       );
-      if (!(await this.verify(stage, pkg))) throw Error('Invalid installed component');
+      if (!(await this.verify(next, pkg, signal))) throw Error('Invalid installed component');
       signal.throwIfAborted();
-      await rm(path.join(stage, '.owner.json'));
-      const destination = componentLocation(this.options.root, pkg);
-      let replaced: string | undefined;
       try {
         const existing = await lstat(destination);
         if (
@@ -335,25 +346,28 @@ export class ComponentService {
           (await this.readMarker(destination)).sha256 !== pkg.sha256
         )
           throw Error('Unknown cache content is protected');
-        replaced = stage + '-previous';
-        await rename(destination, replaced);
+        await rename(destination, previous);
+        restorePrevious = true;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
       }
       try {
-        await rename(stage, destination);
+        await rename(next, destination);
+        restorePrevious = false;
       } catch (error) {
-        if (replaced) await rename(replaced, destination);
+        if (restorePrevious) {
+          await rename(previous, destination);
+          restorePrevious = false;
+        }
         throw error;
       }
-      if (replaced) await rm(replaced, { recursive: true, force: true });
       await this.reclaimPrevious(pkg, signal);
       item.phase = 'ready';
       item.received = pkg.bytes;
       this.publish('downloading');
     } finally {
       try {
-        await rm(stage, { recursive: true, force: true });
+        if (!restorePrevious) await rm(stage, { recursive: true, force: true });
       } finally {
         await releaseLease?.();
       }
@@ -381,7 +395,7 @@ export class ComponentService {
         // under this ownership policy can be reclaimed by a later successor.
         if (
           marker.ownership !== 1 || marker.sha256 !== old.sha256 ||
-          !(await this.knownRoot(directory)) || !(await this.verify(directory, old)) ||
+          !(await this.knownRoot(directory)) || !(await this.verify(directory, old, signal)) ||
           !(await this.options.prepareRemove(old.id))
         ) continue;
         if (!signal.aborted && !this.disposed)
@@ -466,8 +480,28 @@ export class ComponentService {
       await handle?.close();
     }
   }
-  private async cleanAbandoned() {
+  private async recoverReplacement(stage: string, pkg: ComponentPackage | undefined, signal: AbortSignal) {
+    const previous = path.join(stage, 'previous');
+    const hasPrevious = (await readdir(stage)).includes('previous');
+    if (!pkg) return !hasPrevious;
+    if (hasPrevious && (!(await this.knownRoot(previous)) ||
+      (await this.readMarker(previous)).sha256 !== pkg.sha256)) return false;
+
+    const destination = componentLocation(this.options.root, pkg);
+    const installed = await lstat(destination).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return undefined;
+    });
+    if (installed) return !hasPrevious || this.verify(destination, pkg, signal);
+
+    const next = path.join(stage, 'next');
+    if (await this.verify(next, pkg, signal) && await this.knownRoot(next)) await rename(next, destination);
+    else if (hasPrevious) await rename(previous, destination);
+    return true;
+  }
+  private async cleanAbandoned(signal: AbortSignal) {
     for (const name of await readdir(this.options.root)) {
+      signal.throwIfAborted();
       if (!/^\.stage-(speech|qwen|rag)-[a-f0-9-]{36}$/.test(name)) continue;
       const directory = path.join(this.options.root, name);
       try {
@@ -479,13 +513,20 @@ export class ComponentService {
         const owner = JSON.parse(await readFile(file, 'utf8'));
         if (
           owner.kind !== 'voxcue-component-stage' ||
-          owner.version !== 2 ||
+          (owner.version !== 2 && owner.version !== 3) ||
           !validComponentLease(owner.lease)
         )
           continue;
-        if (await componentLeaseAbsent(owner.lease))
-          await rm(directory, { recursive: true, force: true });
+        if (!(await componentLeaseAbsent(owner.lease))) continue;
+        if (owner.version === 3) {
+          const pkg = this.options.packages.find(item =>
+            name.startsWith('.stage-' + item.id + '-') &&
+            path.basename(componentLocation(this.options.root, item)) === owner.target);
+          if (!(await this.recoverReplacement(directory, pkg, signal))) continue;
+        }
+        await rm(directory, { recursive: true, force: true });
       } catch {
+        signal.throwIfAborted();
         /* Unknown or occupied files remain protected. */
       }
     }

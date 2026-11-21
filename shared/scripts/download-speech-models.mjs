@@ -2,6 +2,7 @@ import workspace from './workspace.mjs';
 import { mkdir, readFile, writeFile, rename } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import { sileroModel, sileroLicense } from './silero-assets.mjs';
 const root = path.join(workspace.sharedRoot, 'local-models/speech');
 await mkdir(root, { recursive: true });
 const revision = '8e40c43232a1c5c66c82111efc5820d3accca11b';
@@ -29,12 +30,12 @@ for (const name of [
   'silero_vad.onnx',
 ]) {
   const url =
-    name === 'silero_vad.onnx'
-      ? 'https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx'
+    name === sileroModel.name
+      ? sileroModel.url
       : base + name;
   const expected =
-    name === 'silero_vad.onnx'
-      ? '9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6'
+    name === sileroModel.name
+      ? sileroModel.sha256
       : tree.find((x) => x.path === name)?.lfs?.oid;
   const file = path.join(root, name);
   let bytes;
@@ -57,7 +58,7 @@ for (const name of [
 }
 for (const [name, url] of Object.entries({
   'LICENSE-sherpa.txt': 'https://raw.githubusercontent.com/k2-fsa/sherpa-onnx/v1.13.8/LICENSE',
-  'LICENSE-silero.txt': 'https://raw.githubusercontent.com/snakers4/silero-vad/master/LICENSE',
+  [sileroLicense.name]: sileroLicense.url,
 })) {
   const r = await fetch(url);
   if (!r.ok) throw Error('License unavailable');

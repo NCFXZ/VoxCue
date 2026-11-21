@@ -1,5 +1,6 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
-import { useEffect, useId, useState } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import type { ChatMessage } from '../services/preparation';
 import type { ChatActivity as Activity } from '../../electron/contracts/chat';
 import { MarkdownContent } from './MarkdownContent';
@@ -21,7 +22,7 @@ export function formatDuration(milliseconds: number) {
     .join(' ');
 }
 
-function actionLabel(activity: Activity, active: boolean) {
+export function actionLabel(activity: Activity, active: boolean) {
   const done = activity.status === 'completed';
   const stopped = activity.status === 'failed' ? '失败' : !done && !active ? '未完成' : '';
   const noun =
@@ -69,7 +70,7 @@ type ProgressMessage = Pick<
   | 'startedAt'
   | 'durationMs'
 >;
-export function ResponseProgress({ message }: { message: ProgressMessage }) {
+export function ResponseProgress({ message, children }: { message: ProgressMessage; children?: ReactNode }) {
   const active = message.status === 'streaming';
   const answering = !!message.content.trim();
   const [expanded, setExpanded] = useState(!answering);
@@ -104,7 +105,10 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
   const visible = !collapsible || expanded;
   if (!elapsed && !active && !entries.length && !message.reasoningSummary?.trim()) return null;
   return (
-    <div className={`response-progress${collapsible && !expanded ? ' is-collapsed' : ''}`}>
+    <div
+      className={`response-progress${collapsible && !expanded ? ' is-collapsed' : ''}`}
+      data-has-answer={answering}
+    >
       {elapsed &&
         (collapsible ? (
           <button
@@ -130,7 +134,7 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
         inert={!visible}
       >
         {!timeline && active && (
-          <ChatActivity activity={message.activity} mock={message.mode !== 'live'} />
+          children === undefined ? <ChatActivity activity={message.activity} mock={message.mode !== 'live'} /> : children
         )}
         {!entries.some((entry) => entry.kind === 'reasoning') &&
           message.reasoningSummary?.trim() && (
@@ -206,11 +210,13 @@ export function ResponseProgress({ message }: { message: ProgressMessage }) {
             })}
           </ol>
         )}
-        {linkError && (
-          <p className="inline-error" role="alert">
-            {t(linkError)}
-          </p>
-        )}
+        <InterviewReveal>
+          {linkError ? (
+            <p className="inline-error" role="alert">
+              {t(linkError)}
+            </p>
+          ) : null}
+        </InterviewReveal>
       </div>
     </div>
   );

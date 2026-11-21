@@ -1,6 +1,6 @@
 import type { SpeechEvent, AudioSource } from '../contracts/speech';
 import type { ChatTurn } from '../contracts/chat';
-import { encodeRetrievalContext } from '../contracts/retrievalContext';
+import { encodeRetrievalContext, MAX_RETRIEVAL_HISTORY } from '../contracts/retrievalContext';
 
 interface Entry {
   id: string;
@@ -107,19 +107,15 @@ export class InterviewContext {
     };
   }
   private retrievalQuery(question: string) {
-    // Propose the bounded trusted question chain; corpus grounding decides
-    // whether it applies. No list of follow-up phrases controls admission.
     const previous: string[] = [];
-    for (let index = this.entries.length - 1; index >= 0 && previous.length < 6; index--) {
+    for (let index = this.entries.length - 1; index >= 0 && previous.length < MAX_RETRIEVAL_HISTORY; index--) {
       const entry = this.entries[index];
       if (entry.kind === 'gap') break;
-      if (
-        !['submitted_question', 'interviewer'].includes(entry.kind) ||
-        entry.text.trim() === question.trim()
-      )
-        continue;
-      if (entry.text.trim().length < 6 || entry.text === '请直接解答截图中的题目。') continue;
-      previous.unshift(entry.text);
+      if (entry.kind !== 'submitted_question' && entry.kind !== 'interviewer') continue;
+      const text = entry.text.trim();
+      // A final transcript and its submission can describe the same turn.
+      if (!text || text === (previous[0] ?? question.trim()) || text === '请直接解答截图中的题目。') continue;
+      previous.unshift(text);
     }
     return encodeRetrievalContext(question, previous);
   }

@@ -26,20 +26,37 @@ await writeFile(
 const {app,dialog}=require('electron');dialog.showErrorBox=(title,message)=>{console.error(title,message);app.exit(91);};process.on('uncaughtException',error=>{console.error(error.stack);app.exit(92);});const fs=require('node:fs/promises');const path=require('node:path');const assert=require('node:assert/strict');
 const config=require('./config.json');app.setPath('userData',path.join(config.output,'userData'));
 app.whenReady().then(async()=>{
- const {KnowledgeHost}=require(config.host);const {KnowledgeError}=require(path.join(config.root,'dist-electron/shared/electron/backend/knowledge/errors.js'));const events=[];let host=new KnowledgeHost(path.join(config.output,'knowledge'),config.model,e=>events.push(e));
+ const {KnowledgeHost}=require(config.host);const {KnowledgeError}=require(path.join(config.root,'dist-electron/shared/electron/backend/knowledge/errors.js'));const events=[];
+ const {profileDirectory}=require(path.join(config.root,'dist-electron/shared/electron/accountProfilePaths.js'));
+ const storage=path.join(profileDirectory(path.join(config.output,'userData'),'demo'),'knowledge-v1');
+ const platform=require(path.join(config.root,'dist-electron/shared/electron/platform/index.js')).selectDesktopPlatform();
+ const aliases=[];
+ const prepare=platform.prepareKnowledgeDatabase && (folder=>{
+  const lease=platform.prepareKnowledgeDatabase(folder);
+  assert.ok(lease,'Long account fixture must exercise the Windows native path');
+  aliases.push(lease.path);return lease;
+ });
+ const openHost=()=>new KnowledgeHost(storage,config.model,e=>events.push(e),prepare);
+ let host=openHost();
  const signal=()=>new AbortController().signal;const input=(id,text)=>({documentId:id,baseId:'smoke',name:id+'.md',bytes:Buffer.from(text)});
  const results=[];const fixtures=require(path.join(config.root,'../shared/test/scripts/rag-fixtures.cjs'));
  try{
-  const starting=host.initialize();host.child.stderr.on('data',d=>process.stderr.write(d));await starting;
-  const pdf=await host.indexDocument({documentId:'pdf',baseId:'smoke',name:'fixture.pdf',bytes:fixtures.pdf()},signal());
+  await host.initialize();
+  const batchId = 'formats-batch';
+  await host.beginIndexBatch(batchId, 'smoke', ['pdf', 'docx'], signal());
+  const pdf=await host.indexDocument({documentId:'pdf',baseId:'smoke',name:'fixture.pdf',bytes:fixtures.pdf(),batchId},signal());
+  const docx=await host.indexDocument({documentId:'docx',baseId:'smoke',name:'fixture.docx',bytes:await fixtures.docx(),batchId},signal());
+  assert.equal((await host.listDocuments()).length, 0);
+  await host.finishIndexBatch(batchId, true, signal());
+  assert.deepEqual((await host.listDocuments()).map(doc => doc.documentId).sort(), ['docx', 'pdf']);
   assert.equal(pdf.itemCount,2);const pdfHits=await host.search('gain',5,'keyword',signal());assert.equal(pdfHits[0].page,2);
   await host.removeDocument('pdf',signal());
-  const docx=await host.indexDocument({documentId:'docx',baseId:'smoke',name:'fixture.docx',bytes:await fixtures.docx()},signal());assert.ok(docx.chunkCount);await host.removeDocument('docx',signal());
+  assert.ok(docx.chunkCount);await host.removeDocument('docx',signal());
   const body='传感器提离采用 PID 闭环控制。 '+'The eddy current sensor uses PID feedback to control lift-off. '.repeat(150)+' tailguardxyz is retained.';
   const a=input('sensor','## Q001. How do you control sensor lift-off?\\n\\n'+body+'\\n\\n### 追问 1：怎样限幅？\\n\\n限制输出并保留完整追问。');
   const first=await host.indexDocument(a,signal());assert.ok(first.chunkCount>first.itemCount);
   const committed=await host.version('smoke',signal());assert.match(committed,/^[a-f0-9]{64}$/);
-  const prepared=await host.prepareQuery('上一题：PID 控制\\n当前追问：这种方法怎样限幅？','这种方法怎样限幅？',signal());assert.ok(prepared.includes('PID'));
+  const follow=await host.search('这种方法怎样限幅？',6,'hybrid',signal(),'smoke',{rawLimit:60,grounded:true,history:['上题说的是 PID 控制']});assert.equal(follow[0]?.documentId,'sensor');
   const childHit=(await host.search('怎样限幅',5,'hybrid',signal(),'smoke',{rawLimit:60}))[0];assert.ok(childHit.matchedItemId);assert.match(childHit.revision,/^[a-f0-9]{64}$/);
   const expected={baseId:'smoke',documentId:'sensor',revision:childHit.revision};
   const detailed=await host.getItem(childHit.itemId,signal(),expected);assert.ok(detailed.rootContent.includes('tailguardxyz'));assert.equal(detailed.source.baseId,'smoke');
@@ -55,7 +72,10 @@ app.whenReady().then(async()=>{
   const rag=new RagChatService(provider,host);
   const request={id:'native-rag',knowledgeBaseId:'smoke',modelId:'synthetic-provider',instructions:'Answer the question',webSearch:false,turns:[{role:'user',content:'How is sensor lift-off controlled?'}]};
   const completion=await rag.stream(request,()=>{},signal());assert.ok(sent.turns[0].content.includes('tailguardxyz'));assert.ok(sent.turns[0].content.includes('完整追问'));assert.equal(completion.rag.evidenceCount,1);results.push({rag:completion.rag,provider:'synthetic, no live account'});
-  await host.close();host=new KnowledgeHost(path.join(config.output,'knowledge'),config.model);
+  await host.close();
+  for(const alias of aliases)await assert.rejects(fs.lstat(alias),{code:'ENOENT'});
+  assert.ok((await fs.readdir(path.join(storage,'lance'))).some(name=>name.endsWith('.lance')));
+  host=openHost();
   assert.equal((await host.listDocuments()).length,1);
   await host.updateDocument(input('sensor','## Q001. PID sensor update?\\n\\nnewrevisionxyz replaces old parameters.'),signal());
   assert.notEqual(await host.version('smoke',signal()),committed);assert.equal(await host.getItem(childHit.itemId,signal(),expected),null);

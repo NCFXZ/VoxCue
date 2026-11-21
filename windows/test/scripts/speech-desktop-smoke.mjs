@@ -1,3 +1,4 @@
+import { evaluateHistory } from '../../../shared/test/scripts/stored-history-fixture.mjs';
 import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
@@ -192,8 +193,8 @@ try {
   );
   await page.reload();
   assert.ok(
-    await page.evaluate(() =>
-      JSON.parse(localStorage.getItem('copilot-interview-history-v1') ?? '[]').some(
+    await evaluateHistory(page, async () =>
+      (await fixtureHistory.read()).some(
         (r) => r.mock === false && r.status === 'interrupted',
       ),
     ),

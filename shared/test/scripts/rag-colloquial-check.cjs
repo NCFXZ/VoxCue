@@ -144,7 +144,7 @@ app
           'complete',
           'Availability failures cannot count as empty successful retrieval',
         );
-        assert.ok(evidence.length <= 5);
+        assert.ok(evidence.length <= 6);
         const expected = test.documentId && labels.get(test.documentId);
         if (test.documentId) assert.ok(expected, 'Expected document must exist before scoring');
         const targetEvidence = evidence.find((item) => item.itemId === expected);

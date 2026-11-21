@@ -2,7 +2,9 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { copilotAccountUsage } from '../../electron/backend/copilot/quota';
 import { chatGPTAccountUsage } from '../../electron/backend/chat/quota';
+import { apiProviderIds, type ApiProvider } from '../../electron/contracts/apiConnections';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
+import { t } from '../../src/i18n';
 beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 const fixture = vi.hoisted(() => ({
   mode: 'copilot',
@@ -22,13 +24,41 @@ vi.mock('../../src/stores/auth', () => ({
   useAuth: (select: any) => select({ session: { mode: fixture.mode, user: { id: 'synthetic' } } }),
 }));
 import { UsagePanel } from '../../src/components/UsagePanel';
-import { AccountUsageSummary } from '../../src/components/AccountUsageSummary';
+import { AccountUsageSummary, InterviewApiBillingRow } from '../../src/components/AccountUsageSummary';
 afterEach(() => {
   fixture.mode = 'copilot';
   fixture.usage = null;
   fixture.loading = false;
   fixture.error = null;
   vi.useRealTimers();
+});
+it.each(['zh-CN', 'en'] as const)('开始面试按当前 API 服务商显示计费方式：%s', language => {
+  useGeneralSettings.setState({ language });
+  const names: Record<ApiProvider, [string, string]> = {
+    openai: ['OpenAI', 'OpenAI'], anthropic: ['Claude', 'Claude'], gemini: ['Gemini', 'Gemini'],
+    qwen: ['通义千问', 'Qwen'], deepseek: ['DeepSeek', 'DeepSeek'], kimi: ['Kimi', 'Kimi'],
+    glm: ['智谱 GLM', 'Zhipu GLM'], doubao: ['豆包', 'Doubao'],
+  };
+  for (const provider of apiProviderIds) {
+    const [zh, en] = names[provider];
+    const row = renderToStaticMarkup(<InterviewApiBillingRow provider={provider} />);
+    expect(row).toBe(language === 'en'
+      ? `<div><dt>AI service usage</dt><dd>${en} API billing</dd></div>`
+      : `<div><dt>AI服务用量</dt><dd>${zh} API计费</dd></div>`);
+  }
+});
+it.each(['zh-CN', 'en'] as const)('额度错误去重并保留读屏提示与其他错误：%s', language => {
+  useGeneralSettings.setState({ language });
+  fixture.mode = 'chatgpt';
+  fixture.error = 'ChatGPT 账户额度暂不可用，请刷新或查看官方用量。';
+  const placeholder = t(fixture.error);
+  const html = renderToStaticMarkup(<UsagePanel />);
+  expect(html.split(placeholder)).toHaveLength(2);
+  expect(html).toContain('role="alert">' + placeholder + '</p>');
+  fixture.error = 'Synthetic account error';
+  const distinct = renderToStaticMarkup(<UsagePanel />);
+  expect(distinct).toContain(placeholder);
+  expect(distinct).toContain('role="alert">Synthetic account error</p>');
 });
 it('未知额度与读取失败不显示0或耗尽；本地统计/重置已移除', () => {
   fixture.error = '读取暂不可用';

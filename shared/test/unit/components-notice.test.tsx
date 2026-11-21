@@ -2,6 +2,7 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { renderToStaticMarkup } from 'react-dom/server';
 import type { ComponentState } from '../../electron/contracts/components';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
+import { componentSettingsTargets } from '../../src/services/componentSettingsTargets';
 beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 const current = vi.hoisted(() => ({ state: null as ComponentState | null }));
 vi.mock('../../src/stores/components', () => ({ useComponents: (select: any) => select(current) }));
@@ -59,6 +60,22 @@ it('缺失组件副标题包含组件名和下载入口，中英文标点正确'
     expect(html).not.toContain('Lightweight speech recognition');
     expect(html).not.toContain('Multilingual speech recognition');
   }
+});
+it('chooses only missing, listed speech alternatives and preserves explicit targets', () => {
+  const missing = state(false, false, false);
+  const general = { required: ['speech', 'rag'] as const, anySpeech: true };
+  const qwen = { required: ['qwen'] as const };
+  expect(componentSettingsTargets(missing, general)).toEqual(['speech', 'qwen', 'rag']);
+  expect(componentSettingsTargets(missing, qwen)).toEqual(['qwen']);
+  expect(componentSettingsTargets(missing, { required: ['rag'] })).toEqual(['rag']);
+  expect(componentSettingsTargets(state(true, false), qwen)).toEqual(['qwen']);
+  expect(componentSettingsTargets(state(false, true, false), general)).toEqual(['rag']);
+  const old = { ...missing, items: missing.items.filter((item) => item.id !== 'qwen') };
+  expect(componentSettingsTargets(old, { required: ['qwen', 'rag'], anySpeech: true })).toEqual(['speech', 'rag']);
+  expect(componentSettingsTargets(old, qwen)).toEqual([]);
+  expect(componentSettingsTargets(null, general)).toBeUndefined();
+  expect(componentSettingsTargets({ ...missing, phase: 'checking' }, general)).toBeUndefined();
+  expect(componentSettingsTargets(state(true, true), general)).toEqual([]);
 });
 it.each([
   [true, false],

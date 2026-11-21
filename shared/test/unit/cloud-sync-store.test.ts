@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { IDBFactory } from 'fake-indexeddb';
+import { translateUI } from '../../electron/contracts/uiLanguage';
 import { useCloudSync, readAccountSyncSaved } from '../../src/stores/cloudSync';
 import { useCloudAccount } from '../../src/stores/cloudAccount';
 import { useKnowledgeIndex } from '../../src/stores/knowledgeIndex';
@@ -14,6 +15,24 @@ import type {
 import type { KnowledgeCall } from '../../electron/contracts/knowledge';
 
 afterEach(() => vi.unstubAllGlobals());
+
+it('preserves the local migration error for display in the selected language', async () => {
+  const userId = '11111111-1111-4111-8111-111111111111';
+  const saved = new Map([['voxcue-moved-from-device-v1:' + userId, '{}']]);
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => saved.get(key) ?? null,
+    setItem: (key: string, value: string) => saved.set(key, value),
+  });
+  vi.stubGlobal('window', Object.assign(new EventTarget(), { desktop: { cloudSync: vi.fn() } }));
+  const disconnect = useCloudSync.getState().connect(userId);
+  try {
+    await vi.waitFor(() => expect(useCloudSync.getState().error).toBe('本机迁移记录无效，请检查本地资料。'));
+    expect(translateUI(useCloudSync.getState().error!, 'en')).toBe('The local migration record is invalid. Check your local data.');
+  } finally {
+    disconnect();
+  }
+});
 
 it.each(['sequential', 'concurrent'])('快速配置不同同步分类时保留此前设置，即使传输状态仍在合并发布 (%s)', async (mode) => {
   const userId = '11111111-1111-4111-8111-111111111111';
@@ -80,7 +99,7 @@ it.each(['sequential', 'concurrent'])('快速配置不同同步分类时保留�
 it('suspending before local sync settings load prevents a late worker from starting', async () => {
   const userId = '11111111-1111-4111-8111-111111111111';
   vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.stubGlobal('localStorage', { getItem: () => userId });
+  vi.stubGlobal('localStorage', { getItem: (key: string) => key === 'voxcue-sync-owner' ? userId : null });
   const cloudSync = vi.fn();
   vi.stubGlobal('window', Object.assign(new EventTarget(), { desktop: { cloudSync } }));
   const disconnect = useCloudSync.getState().connect(userId);
@@ -119,7 +138,7 @@ it('a settings-load failure after suspension cannot replace the current notice o
 it('logout cancels its active sync generation before clearing the account and does not publish a late busy view', async () => {
   const userId = '11111111-1111-4111-8111-111111111111';
   vi.stubGlobal('indexedDB', new IDBFactory());
-  vi.stubGlobal('localStorage', { getItem: () => userId });
+  vi.stubGlobal('localStorage', { getItem: (key: string) => key === 'voxcue-sync-owner' ? userId : null });
   let release: ((result: CloudSyncResult) => void) | undefined;
   let activeSyncId: string | undefined;
   let retired = false;

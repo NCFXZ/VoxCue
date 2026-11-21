@@ -1,4 +1,4 @@
-import { closeUiApp, enterPrimaryUiAccount, waitForRestoredMainWindow } from './install-ui-account.mjs';
+import { closeUiApp, enterPrimaryUiAccount, openModelMenu, returnToUiLogin, waitForRestoredMainWindow } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { mkdir, writeFile } from 'node:fs/promises';
@@ -18,8 +18,8 @@ const save=()=>fs.writeFileSync(file,JSON.stringify(state));
 const reads=globalThis.providerReads={chatgpt:0,copilot:0};
 const copilotStorage=require(root+'/dist-electron/shared/electron/backend/copilot/storage.js');
 const createCopilotStorage=copilotStorage.createCopilotLoginStorage;
-copilotStorage.createCopilotLoginStorage=()=>{
-  const port=createCopilotStorage();
+copilotStorage.createCopilotLoginStorage=(profileRoot)=>{
+  const port=createCopilotStorage(profileRoot);
   return {...port, read:()=>{reads.copilot++;return port.read();}};
 };
 const {CopilotRuntime}=require(root+'/dist-electron/shared/electron/backend/copilot/runtime.js');
@@ -64,10 +64,17 @@ const previousFetch=globalThis.fetch;
 globalThis.fetch=async(url,options)=>{
   if(!String(url).startsWith('https://chatgpt.com/backend-api/codex/'))return previousFetch(url,options);
   if(options.headers.authorization!=='Bearer synthetic-private'||options.headers['ChatGPT-Account-Id']!=='workspace')throw Error('Wrong session');
-  if(String(url).includes('/models?'))return Response.json({models:[{slug:'synthetic-single',display_name:'Synthetic single',visibility:'list'}]});
+  if(String(url).includes('/models?')){
+    state.modelReads=(state.modelReads??0)+1;
+    return Response.json({models:[
+      ...(state.futureModels?[{slug:'future-model-unknown',display_name:'Future fixture',visibility:'list'}]:[]),
+      {slug:'synthetic-single',display_name:'Synthetic single',visibility:'list',supported_reasoning_levels:['low','high'],web_search_tool_type:'text'}
+    ]});
+  }
   if(!String(url).endsWith('/responses'))throw Error('Unexpected request');
   state.chatCalls++;save();
   const request=JSON.parse(options.body);
+  state.lastModel=request.model;state.lastEffort=request.reasoning?.effort;save();
   const answer=request.text?.format?.schema?JSON.stringify({answer:'Synthetic single-login answer',changes:Object.fromEntries(Object.keys(request.text.format.schema.properties.changes.properties).map(key=>[key,null]))}):'Synthetic single-login answer';
   return new Response('data: '+JSON.stringify({type:'response.completed',response:{id:'synthetic-response-'+state.chatCalls,output:[{type:'message',content:[{type:'output_text',text:answer}]}]}})+String.fromCharCode(10,10),{headers:{'content-type':'text/event-stream'}});
 };
@@ -101,8 +108,11 @@ async function measureFooter(text, footerSelector) {
       .filter((animation) => Number.isFinite(animation.effect?.getComputedTiming().endTime))
       .map((animation) => animation.finished.catch(() => {})));
     const footer = element.closest(selector);
-    const divider = footer.previousElementSibling;
-    if (!divider.matches('.settings-entry') ||
+    const divider = selector === '.settings-error'
+      ? footer.closest('.ai-services-panel > .interview-reveal[data-open="true"]')
+        ?.previousElementSibling?.querySelector(':scope > .ai-service-row[data-settings-target="copilot"]:last-child')
+      : footer.previousElementSibling;
+    if (!divider?.matches('.settings-entry') ||
         !parseFloat(getComputedStyle(divider).borderBottomWidth))
       throw Error('Expected a settings row divider above the footer');
     const row = divider.getBoundingClientRect();
@@ -131,16 +141,14 @@ try {
   let page = await app.firstWindow();
   await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await assertNoProviderReads();
-  const localOpened = app.waitForEvent('window');
   await page.getByRole('button', {name:'跳过登录', exact:true}).click();
-  const local = await localOpened;
+  const local = await waitForRestoredMainWindow(app);
   await local.locator('.sidebar .user-info small').getByText('未连接 AI 服务', {exact:true}).waitFor();
   const localSettings = await openAISettings(local);
   assert.equal(await localSettings.locator('.ai-service-row').getByText('未连接', {exact:true}).count(), 2);
   await assertNoProviderReads();
-  const loginReturned = app.waitForEvent('window');
-  await local.evaluate(() => window.desktop.setLocalMode(false));
-  page = await loginReturned;
+  await localSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  page = await returnToUiLogin(app, local, '返回登录');
   page = await enterPrimaryUiAccount(app, page);
   await page.locator('.interview-start-trigger').waitFor();
   await assertNoProviderReads();
@@ -225,6 +233,32 @@ try {
   await settings.locator('.account-quota-remaining').getByText('剩余 19%', { exact: true }).waitFor();
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await settings.waitFor({ state: 'hidden' });
+  const models = await openModelMenu(page);
+  const modelReads = await app.evaluate(() => {
+    globalThis.singleLoginFixture.futureModels = true;
+    return globalThis.singleLoginFixture.modelReads;
+  });
+  await models.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+  await app.evaluate(async (before) => {
+    const deadline = Date.now() + 5000;
+    while (globalThis.singleLoginFixture.modelReads <= before) {
+      if (Date.now() >= deadline) throw Error('The model refresh did not reach the catalog');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    }
+  }, modelReads);
+  // Refresh keeps the modal catalog open. Its background trigger is outside the accessibility tree.
+  await models.getByRole('menuitem', { name: '刷新模型列表', exact: true }).waitFor();
+  const future = models.getByRole('menuitemradio', { name: 'Future fixture', exact: true });
+  await future.waitFor();
+  assert.equal(
+    await models.getByRole('menuitemradio', { name: 'Synthetic single', exact: true }).getAttribute('aria-checked'),
+    'true',
+  );
+  await future.click();
+  await models.getByRole('button', { name: '选择模型', exact: true }).waitFor();
+  assert.equal(await models.getByRole('slider').count(), 0);
+  await page.keyboard.press('Escape');
   const composer = page;
   await composer
     .getByRole('textbox', { name: '聊天消息', exact: true })
@@ -236,6 +270,23 @@ try {
     .waitFor();
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 1);
   assert.ok(await app.evaluate(() => globalThis.singleLoginFixture.chatCalls > 0));
+  assert.deepEqual(await app.evaluate(() => ({
+    model: globalThis.singleLoginFixture.lastModel,
+    effort: globalThis.singleLoginFixture.lastEffort ?? null,
+  })), { model: 'future-model-unknown', effort: null });
+  const effortControl = await openModelMenu(page);
+  await effortControl.getByRole('menuitemradio', { name: 'Synthetic single', exact: true }).click();
+  const slider = effortControl.getByRole('slider', { name: '思考强度' });
+  await slider.press('End');
+  await page.keyboard.press('Escape');
+  await composer.getByRole('textbox', { name: '聊天消息', exact: true }).fill('Explicit effort');
+  await composer.getByRole('button', { name: '发送消息', exact: true }).click();
+  await page.locator('.chat-message.assistant')
+    .getByText('Synthetic single-login answer', { exact: true }).nth(1).waitFor();
+  assert.deepEqual(await app.evaluate(() => ({
+    model: globalThis.singleLoginFixture.lastModel,
+    effort: globalThis.singleLoginFixture.lastEffort,
+  })), { model: 'synthetic-single', effort: 'high' });
   assert.equal(await app.evaluate(() => globalThis.providerReads.copilot), 0);
   await closeUiApp(app);
   app = undefined;
@@ -300,7 +351,8 @@ try {
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 3);
   await closeUiApp(app);
   app = undefined;
-  app = await electron.launch({args:[entry],env});
+  // An existing shortcut with the retired switch must restore the same Codex session.
+  app = await electron.launch({ args: [entry, '--voxcue-chatgpt-plan'], env });
   page = await waitForRestoredMainWindow(app);
   await page.locator('.sidebar .user-info .account-usage-summary').getByText('5小时 75%', {exact:true}).waitFor();
   assert.equal(await app.evaluate(() => globalThis.singleLoginFixture.opens), 3);
@@ -311,10 +363,7 @@ try {
   await cleanupRow.getByRole('button', {name:'连接',exact:true}).waitFor();
   await cleanupSettings.getByRole('button', {name:'关闭设置',exact:true}).click();
   assert.equal(await page.getByRole('button', { name: '用户菜单', exact: true }).isVisible(), true);
-  const loginOpened = app.waitForEvent('window');
-  await page.evaluate(() => window.desktop.cloudAccount({ action: 'logout' }));
-  page = await loginOpened;
-  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  page = await returnToUiLogin(app, page, '退出登录');
   assert.equal(await page.evaluate(() => window.desktop.authSession()), null);
   console.log(
     'PASS: fresh and local profiles leave both AIs idle; remembered ChatGPT verifies at startup, shows quota and sends without OAuth. Denial latches, failed reconnection stays disconnected, and successful reconnection restores on restart.',

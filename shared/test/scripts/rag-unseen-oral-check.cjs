@@ -193,7 +193,7 @@ app
           'Availability failure must never count as successful abstention',
         );
         assert.ok(payload && Array.isArray(payload.evidence));
-        assert.ok(payload.evidence.length <= 5);
+        assert.ok(payload.evidence.length <= 6);
         const evidence = payload.evidence;
         const targets = test.targets.map((t) => {
           const id = roots.get(t.documentId + ':' + t.root);

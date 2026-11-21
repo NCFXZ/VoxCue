@@ -5,6 +5,10 @@ import { useHistory } from '../../../../shared/src/stores/history';
 import { useChatConnection } from '../../../../shared/src/stores/chatConnection';
 import { chatModels } from '../../../../shared/src/services/chatOptions';
 import { localChats } from '../../../../shared/src/services/chats';
+import type { ChatModel } from '../../../electron/contracts/chat';
+const model = (id: string): ChatModel => ({
+  id, label: id, description: '', reasoningEfforts: ['low', 'high'],
+});
 describe('准备聊天与个人信息', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -16,8 +20,8 @@ describe('准备聊天与个人信息', () => {
       },
     });
     usePreparation.getState().reset();
-    usePreparation.setState({ conversations: [] });
-    useChatConnection.setState({ live: false, models: [...chatModels] });
+    usePreparation.setState({ conversations: [], modelId: '' });
+    useChatConnection.setState({ service: null, live: false, models: [...chatModels] });
     useHistory.setState({ records: [], error: null });
   });
   afterEach(() => {
@@ -25,7 +29,72 @@ describe('准备聊天与个人信息', () => {
     vi.useRealTimers();
     vi.unstubAllGlobals();
   });
-  it('reconciles restored automatic effort once model capabilities arrive and preserves valid choices', async () => {
+  it.each(['catalog first', 'history first'])('restores the matching legacy chat choice with %s', async order => {
+    usePreparation.setState({ chatsReady: false, modelId: '', effort: 'auto' });
+    useChatConnection.setState({ service: 'chatgpt', live: true, models: [] });
+    const read = vi.spyOn(localChats, 'read').mockResolvedValue({
+      conversations: [], activeConversation: null, draft: 'Unsaved question', attachments: [],
+      modelId: 'legacy', effort: 'high', webSearch: true,
+    });
+    try {
+      const restore = usePreparation.getState().restoreChats();
+      const models = [model('default'), model('legacy')];
+      if (order === 'catalog first') useChatConnection.setState({ models });
+      await restore;
+      if (order === 'history first') useChatConnection.setState({ models });
+      expect(usePreparation.getState()).toMatchObject({ modelId: 'legacy', effort: 'high', draft: 'Unsaved question', error: null });
+    } finally {
+      read.mockRestore();
+    }
+  });
+  it('retains service-specific choices with overlapping IDs and sends the selected service model and effort', async () => {
+    usePreparation.setState({ chatsReady: true, modelId: '', effort: 'auto' });
+    const chatgpt = [model('gpt-default'), model('shared')];
+    const copilot = [model('copilot-default'), model('shared')];
+    useChatConnection.setState({ service: 'chatgpt', live: true, models: chatgpt });
+    usePreparation.getState().setModel('shared');
+    usePreparation.getState().setEffort('high');
+    useChatConnection.setState({ service: 'copilot', models: [] });
+    useChatConnection.setState({ models: copilot });
+    expect(usePreparation.getState()).toMatchObject({ modelId: 'copilot-default', effort: 'auto' });
+    usePreparation.getState().setModel('shared');
+    usePreparation.getState().setEffort('low');
+    useChatConnection.setState({ service: 'chatgpt', models: chatgpt });
+    expect(usePreparation.getState()).toMatchObject({ modelId: 'shared', effort: 'high' });
+    useChatConnection.setState({ service: null, live: false, models: [] });
+    useChatConnection.setState({ service: 'copilot', live: true, models: copilot });
+    expect(usePreparation.getState()).toMatchObject({ modelId: 'shared', effort: 'low' });
+    const chatSend = vi.fn().mockResolvedValue({ ok: true, answerText: 'Synthetic answer' });
+    vi.stubGlobal('window', { desktop: {
+      onChatEvent: () => () => {}, chatSend, chatAccountUsage: vi.fn().mockResolvedValue({ ok: true, usage: null }),
+    } });
+    await usePreparation.getState().send('Synthetic request');
+    expect(chatSend).toHaveBeenCalledWith(expect.objectContaining({ modelId: 'shared', effort: 'low' }));
+    useChatConnection.setState({ models: [model('copilot-default')] });
+    expect(usePreparation.getState().error).toContain('所选模型当前不可用');
+    await usePreparation.getState().send('Do not silently switch models');
+    expect(chatSend).toHaveBeenCalledTimes(1);
+    usePreparation.getState().setModel('copilot-default');
+    expect(usePreparation.getState().error).toBeNull();
+  });
+  it('keeps a manual choice made before IndexedDB finishes restoring chats', async () => {
+    usePreparation.setState({ chatsReady: false, modelId: '', effort: 'auto' });
+    useChatConnection.setState({ service: 'copilot', live: true, models: [model('old'), model('chosen')] });
+    const read = vi.spyOn(localChats, 'read').mockResolvedValue({
+      conversations: [], activeConversation: null, draft: '', attachments: [],
+      modelId: 'old', effort: 'low', webSearch: true,
+    });
+    try {
+      const loading = usePreparation.getState().restoreChats();
+      usePreparation.getState().setModel('chosen');
+      usePreparation.getState().setEffort('high');
+      await loading;
+      expect(usePreparation.getState()).toMatchObject({ modelId: 'chosen', effort: 'high' });
+    } finally {
+      read.mockRestore();
+    }
+  });
+  it('preserves automatic effort and explicit choices that the catalog supports', async () => {
     useChatConnection.setState({ models: [] });
     usePreparation.setState({ chatsReady: false });
     const read = vi.spyOn(localChats, 'read').mockResolvedValue({
@@ -39,27 +108,27 @@ describe('准备聊天与个人信息', () => {
         { id: 'reasoning', label: 'Reasoning', description: '', reasoningEfforts: ['medium', 'high'] },
         { id: 'plain', label: 'Plain', description: '' },
       ] });
-      expect(usePreparation.getState().effort).toBe('medium');
+      expect(usePreparation.getState().effort).toBe('auto');
       usePreparation.getState().setEffort('high');
       useChatConnection.setState({ models: [...useChatConnection.getState().models] });
       expect(usePreparation.getState().effort).toBe('high');
       usePreparation.getState().setModel('plain');
       expect(usePreparation.getState().effort).toBe('auto');
       usePreparation.getState().setModel('reasoning');
-      expect(usePreparation.getState().effort).toBe('medium');
+      expect(usePreparation.getState().effort).toBe('auto');
       usePreparation.getState().setEffort('max');
-      expect(usePreparation.getState().effort).toBe('medium');
+      expect(usePreparation.getState().effort).toBe('auto');
     } finally {
       read.mockRestore();
     }
   });
-  it('normalizes legacy automatic effort at submission instead of omitting a supported explicit choice', async () => {
+  it('omits an explicit effort at submission when automatic is selected', async () => {
     usePreparation.setState({ modelId: chatModels[0].id, effort: 'auto' });
     const response = usePreparation.getState().send('合成档位兼容检查');
     await vi.advanceTimersByTimeAsync(10000);
     await response;
-    expect(usePreparation.getState().messages[0].options?.effort).toBe('low');
-    expect(usePreparation.getState().effort).toBe('low');
+    expect(usePreparation.getState().messages[0].options?.effort).toBeUndefined();
+    expect(usePreparation.getState().effort).toBe('auto');
   });
   it('流式聊天不写入面试记录，资料更新需确认后保存', async () => {
     const result = usePreparation.getState().send('姓名：小林\n岗位：前端工程师');

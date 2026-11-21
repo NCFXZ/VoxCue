@@ -15,7 +15,7 @@ const app = await electron.launch({ args: ['.'], env });
 try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
-  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
+  const page = await enterDemoUiAccount(app, login);
   page.setDefaultTimeout(30000);
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
@@ -50,17 +50,20 @@ try {
       ),
     },
   ]);
-  await waitForAsync(
-    page,
-    async () => {
-      const r = await window.desktop.knowledge({ op: 'status' });
-      return (
-        r.ok && r.value.documents?.length === 3 && r.value.tasks.every((t) => t.phase === 'ready')
-      );
-    },
-    undefined,
-    { timeout: 120000 },
-  );
+  const indexStatus = () => window.desktop.knowledge({ op: 'status' });
+  try {
+    await waitForAsync(page, indexStatus, undefined, {
+      timeout: 120000,
+      matches: (r) => r.ok && r.value.documents?.length === 3 && r.value.tasks.every((t) => t.phase === 'ready'),
+    });
+  } catch (error) {
+    const status = await page.evaluate(indexStatus);
+    const rows = await base.locator('.document-row').allTextContents();
+    const alerts = await page.getByRole('alert').allTextContents();
+    const components = await page.evaluate(() => window.desktop.components({ op: 'status' }));
+    console.error('Isolated import did not finish:', JSON.stringify({ status, rows, alerts, components: components.items.map(({ id, phase }) => ({ id, phase })) }));
+    throw error;
+  }
   assert.equal(await base.locator('.document-row').count(), 3);
   assert.equal(await base.getByText(/索引完成/).count(), 3);
   // The manual search/preview UI was retired. Keep real indexed retrieval

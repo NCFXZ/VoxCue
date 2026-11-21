@@ -53,7 +53,7 @@ class Socket {
     if (
       value &&
       typeof value === 'object' &&
-      ['paired', 'snapshot'].includes((value as { type?: string }).type ?? '')
+      ['paired', 'snapshot', 'snapshot-delta'].includes((value as { type?: string }).type ?? '')
     )
       value = { deliveryId: `synthetic-delivery-${++this.deliveries}`, ...value };
     this.onmessage?.({ data: JSON.stringify(value) });
@@ -153,7 +153,8 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-it('removes the pairing fragment before networking and uses only the current private origin', async () => {
+it.each([['http', 'ws'], ['https', 'wss']])('pairs and reconnects only on the same private %s origin', async (http, ws) => {
+  location.origin = http + '://192.168.1.20:32100';
   location.hash += '&endpoint=https%3A%2F%2Fexample.invalid';
   const controller = create();
   expect(location.hash).toBe('');
@@ -166,7 +167,8 @@ it('removes the pairing fragment before networking and uses only the current pri
     token: pairToken,
     name: 'Android',
   });
-  expect(latest().url).toBe('ws://192.168.1.20:32100/connect');
+  expect(fetchPair.mock.calls[0][1].redirect).toBe('error');
+  expect(latest().url).toBe(ws + '://192.168.1.20:32100/connect');
   latest().open();
   latest().receive({ type: 'pending', id: pendingId, code: '123456' });
   expect(controller.getState().status).toBe('approval');
@@ -210,6 +212,7 @@ it('discards offline edits when the PC snapshot resumes without replaying a comm
   expect(restored.sent[0]).toEqual({
     type: 'resume',
     protocolVersion: REMOTE_PROTOCOL_VERSION,
+    snapshotDelta: true,
     token: resumeToken,
   });
   paired(restored, snapshot({ revision: 2 }), 2);
@@ -305,6 +308,7 @@ it('restores approval from sessionStorage without issuing the one-use POST again
   expect(latest().sent[0]).toEqual({
     type: 'authenticate',
     protocolVersion: REMOTE_PROTOCOL_VERSION,
+    snapshotDelta: true,
     pendingId,
   });
   expect(fetchPair).toHaveBeenCalledOnce();
@@ -413,12 +417,15 @@ it('does not resend a pairing POST after a lost response and clears rejected res
 
 it('disconnects only the phone authorization, clears its ticket and stops reconnection', async () => {
   const { controller, socket } = await connect();
+  controller.setComposing(true);
+  controller.setDraft('synthetic private draft');
   const close = controller.disconnect();
   expect(socket.sent.at(-1)).toEqual({ type: 'disconnect' });
   socket.receive({ type: 'disconnected' });
   await close;
   expect(controller.getState().status).toBe('disconnected');
-  expect(controller.getState().snapshot).toBeNull();
+  controller.setComposing(false);
+  expect(controller.getState()).toMatchObject({ snapshot: null, draft: '', draftDirty: false, draftSyncing: false });
   expect(storage.size).toBe(0);
   const count = Socket.all.length;
   await vi.advanceTimersByTimeAsync(120_000);
@@ -557,6 +564,73 @@ it('acknowledges snapshot processing only after applying state, including intent
   });
 });
 
+it('applies coalesced answer increments once and preserves in-progress phone typing', async () => {
+  const first = snapshot({ answers: [{ id: 'answer', question: 'Why?', content: 'A', status: 'streaming' }] });
+  const { controller, socket } = await connect(first);
+  controller.setDraft('Local edit');
+  const delivery = {
+    type: 'snapshot-delta', baseSequence: 1, sequence: 4, deliveryId: 'answer-increment',
+    delta: { sessionId: first.sessionId, sessionEpoch: 1, baseRevision: 1, revision: 6,
+      answers: { drop: 0, length: 1, changes: [{ at: 0, id: 'answer', append: 'BC' }] } },
+  };
+  socket.receive(delivery);
+  expect(controller.getState().snapshot?.answers[0].content).toBe('ABC');
+  expect(controller.getState().draft).toBe('Local edit');
+  expect(socket.sent.at(-1)).toEqual({ type: 'snapshot-applied', sequence: 4, deliveryId: delivery.deliveryId });
+  socket.receive(delivery);
+  expect(controller.getState().snapshot?.answers[0].content).toBe('ABC');
+});
+
+it.each(['missing-base', 'wrong-session', 'invalid-row'])(
+  'requests a full replacement before releasing a rejected %s delta and resumes at the replacement',
+  async reason => {
+    const { controller, socket } = await connect();
+    const deliveryId = 'unusable-delta';
+    socket.receive({ type: 'snapshot-delta', baseSequence: reason === 'missing-base' ? 0 : 1,
+      sequence: 3, deliveryId, delta: { sessionId: reason === 'wrong-session' ? 'session-B' : 'session-A',
+        sessionEpoch: 1, baseRevision: 1, revision: 3,
+        ...(reason === 'invalid-row' ? { answers: { drop: 0, length: 1, changes: [] } } : {}),
+      },
+    });
+    expect(controller.getState()).toMatchObject({ connected: true, status: 'syncing', snapshot: { revision: 1 } });
+    expect(socket.sent.slice(-2)).toEqual([{ type: 'sync' }, { type: 'snapshot-applied', sequence: 3, deliveryId }]);
+    socket.receive({ type: 'snapshot', sequence: 3, snapshot: snapshot({ revision: 3 }) });
+    expect(controller.getState()).toMatchObject({ status: 'ready', snapshot: { revision: 3 } });
+    socket.receive({ type: 'snapshot-delta', sequence: 4, baseSequence: 3, delta: {
+      sessionId: 'session-A', sessionEpoch: 1, baseRevision: 3, revision: 4,
+      controls: { autoAnswer: true, autoAnswerRevision: 5 },
+    } });
+    expect(controller.getState().snapshot?.autoAnswer).toBe(true);
+  },
+);
+
+it('waits for a complete foreground sync even if a valid incremental frame arrives first', async () => {
+  const { controller, socket } = await connect();
+  browser.document.dispatchEvent(new Event('visibilitychange'));
+  socket.receive({ type: 'snapshot-delta', sequence: 2, baseSequence: 1, delta: {
+    sessionId: 'session-A', sessionEpoch: 1, baseRevision: 1, revision: 2, controls: { autoAnswer: true },
+  } });
+  expect(controller.getState()).toMatchObject({ status: 'syncing', snapshot: { revision: 1, autoAnswer: false } });
+  socket.receive({ type: 'snapshot', sequence: 2, snapshot: snapshot({ revision: 2, autoAnswer: true }) });
+  expect(controller.getState()).toMatchObject({ status: 'ready', snapshot: { revision: 2, autoAnswer: true } });
+});
+
+it('recovers when the first full sync predates a draft ACK and a newer revision arrives incrementally', async () => {
+  const { controller, socket } = await connect();
+  controller.setDraft('New phone draft');
+  await vi.advanceTimersByTimeAsync(400);
+  browser.document.dispatchEvent(new Event('visibilitychange'));
+  socket.receive({ type: 'snapshot', sequence: 2, snapshot: snapshot({ revision: 2 }) });
+  expect(controller.getState()).toMatchObject({ draft: 'New phone draft', status: 'syncing' });
+  const inputDraft = { text: 'New phone draft', revision: 2, manual: true };
+  const deliveryId = 'fresh-after-stale';
+  socket.receive({ type: 'snapshot-delta', baseSequence: 2, sequence: 3, deliveryId,
+    delta: { sessionId: 'session-A', sessionEpoch: 1, baseRevision: 2, revision: 3, controls: { inputDraft } } });
+  expect(socket.sent.slice(-2)).toEqual([{ type: 'sync' }, { type: 'snapshot-applied', sequence: 3, deliveryId }]);
+  socket.receive({ type: 'snapshot', sequence: 3, snapshot: snapshot({ revision: 3, inputDraft }) });
+  expect(controller.getState()).toMatchObject({ status: 'ready', draft: 'New phone draft', snapshot: { revision: 3 } });
+});
+
 it('rejects the previous wire protocol without acknowledging an incompatible initial snapshot', async () => {
   const controller = create();
   await controller.start();
@@ -585,6 +659,7 @@ it('recovers a stale foreground socket after the sync deadline without replaying
   expect(latest().sent[0]).toEqual({
     type: 'resume',
     protocolVersion: REMOTE_PROTOCOL_VERSION,
+    snapshotDelta: true,
     token: resumeToken,
   });
   expect(

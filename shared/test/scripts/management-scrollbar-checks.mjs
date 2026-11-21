@@ -1,42 +1,38 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { captureRequested } from './capture-requested.mjs';
 
 // Own synthetic IndexedDB/history only; no real documents, indexing or hardware.
 export async function checkManagementScrollbars({ app, main, directory }) {
-  await main.evaluate(async () => {
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify(
-        Array.from({ length: 24 }, (_, i) => ({
-          id: 'scroll-record-' + i,
-          title: '合成滚动面试 ' + i,
-          titleStatus: 'ready',
-          titleSource: 'manual',
-          startedAt: Date.now() - i * 60000,
-          endedAt: Date.now(),
-          status: 'ended',
-          mock: false,
-          transcripts: Array.from({ length: 60 }, (_, j) => ({
-            id: 't-' + j,
-            text: '合成转写，用于验证滚动条和固定标题的避让。',
-            source: 'system',
-            final: true,
-            time: '00:01',
-          })),
-          answers: Array.from({ length: 20 }, (_, j) => ({
-            id: 'a-' + j,
-            question: '合成问题 ' + j,
-            content: '合成回答用于检查侧栏滚动。'.repeat(15),
-            provider: 'chatgpt',
-            createdAt: Date.now(),
-            status: 'completed',
-          })),
-        })),
-      ),
-    );
+  await evaluateHistory(main, async () => {
+    await fixtureHistory.replace(Array.from({ length: 24 }, (_, i) => ({
+      id: 'scroll-record-' + i,
+      title: '合成滚动面试 ' + i,
+      titleStatus: 'ready',
+      titleSource: 'manual',
+      startedAt: Date.now() - i * 60000,
+      endedAt: Date.now(),
+      status: 'ended',
+      mock: false,
+      transcripts: Array.from({ length: 60 }, (_, j) => ({
+        id: 't-' + j,
+        text: '合成转写，用于验证滚动条和固定标题的避让。',
+        source: 'system',
+        final: true,
+        time: '00:01',
+      })),
+      answers: Array.from({ length: 20 }, (_, j) => ({
+        id: 'a-' + j,
+        question: '合成问题 ' + j,
+        content: '合成回答用于检查侧栏滚动。'.repeat(15),
+        provider: 'chatgpt',
+        createdAt: Date.now(),
+        status: 'completed',
+      })),
+    })));
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('copilot-local-documents', 1);
+      const request = indexedDB.open('copilot-local-documents');
       request.onupgradeneeded = () => {
         request.result.createObjectStore('bases', { keyPath: 'id' });
         request.result

@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { openModelMenu } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -259,8 +260,11 @@ try {
   await app.evaluate(() => {
     globalThis.failModels = true;
   });
-  await openModelMenu(page);
-  await page.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+  const catalogMenu = await openModelMenu(page);
+  await catalogMenu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+  await catalogMenu.getByRole('alert').filter({ hasText: '连接中断或请求失败，请检查网络后重试。' }).waitFor();
+  await page.keyboard.press('Escape');
+  await catalogMenu.waitFor({ state: 'hidden' });
   await page
     .locator('.preparation-workspace')
     .getByRole('button', { name: '重新加载模型', exact: true })
@@ -369,13 +373,14 @@ try {
   await previewLatest(page, 'circle-arrow-and-composer-fade');
   await message.fill('新的问题');
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
-  await page.getByRole('button', { name: '有新回复 · 返回最新', exact: true }).click();
-  assert.equal(
-    await page
-      .locator('.chat-scroll')
-      .evaluate((e) => e.scrollHeight - e.scrollTop - e.clientHeight < 48),
-    true,
-  );
+  const newReply = page.getByRole('button', { name: '有新回复 · 返回最新', exact: true });
+  await newReply.click();
+  // With normal motion, Chromium scrolls across several frames and can retarget as the reply grows.
+  await page.waitForFunction(() => {
+    const pane = document.querySelector('.chat-scroll');
+    return pane?.clientHeight > 0 && pane.scrollHeight - pane.scrollTop - pane.clientHeight <= 1;
+  }, undefined, { polling: 'raf', timeout: 5000 });
+  await page.locator('.chat-composer > .follow-latest').waitFor({ state: 'hidden' });
   await assert.rejects(
     () => page.evaluate(() => window.desktop.updateSessionState({ text: 'invalid' })),
     /Invalid session state/,
@@ -446,25 +451,19 @@ try {
     JSON.stringify(marker),
   );
   await page.screenshot({ animations: 'disabled' });
-  await page.evaluate(() => {
+  await evaluateHistory(page, async () => {
     const now = Date.now();
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify(
-        ['项目面试', '行为面试'].map((title, i) => ({
-          id: 'filter-' + i,
-          title,
-          startedAt: now - i * 86400000,
-          endedAt: now - i * 86400000 + 60000,
-          status: 'ended',
-          transcripts: [],
-          answers: [],
-          mock: false,
-          titleStatus: 'ready',
-        })),
-      ),
-    );
-    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+    await fixtureHistory.replace(['项目面试', '行为面试'].map((title, i) => ({
+      id: 'filter-' + i,
+      title,
+      startedAt: now - i * 86400000,
+      endedAt: now - i * 86400000 + 60000,
+      status: 'ended',
+      transcripts: [],
+      answers: [],
+      mock: false,
+      titleStatus: 'ready',
+    })));
   });
   await page.getByLabel('搜索标题', { exact: true }).fill('行为');
   assert.equal(await page.locator('.history-row').count(), 1);
@@ -489,27 +488,19 @@ try {
     true,
   );
   await rename.getByLabel('记录标题', { exact: true }).fill('合成的专业技术交流');
-  await page.evaluate(() => {
-    const original = Storage.prototype.setItem;
-    globalThis.restoreHistoryStorage = () => (Storage.prototype.setItem = original);
-    Storage.prototype.setItem = function (key, value) {
-      if (key === 'copilot-interview-history-v1') throw Error('Synthetic storage failure');
-      return original.call(this, key, value);
-    };
-  });
+  await evaluateHistory(page, () => fixtureHistory.failNextWrite());
   await rename.getByRole('button', { name: '保存标题', exact: true }).click();
   await rename.getByRole('alert').waitFor();
   assert.equal(
     await rename.getByLabel('记录标题', { exact: true }).inputValue(),
     '合成的专业技术交流',
   );
-  await page.evaluate(() => globalThis.restoreHistoryStorage());
   await rename.getByRole('button', { name: '保存标题', exact: true }).click();
   await page.getByRole('heading', { name: '合成的专业技术交流', exact: true }).waitFor();
   assert.equal(
-    await page.evaluate(
-      () =>
-        JSON.parse(localStorage.getItem('copilot-interview-history-v1')).find(
+    await evaluateHistory(page,
+      async () =>
+        (await fixtureHistory.read()).find(
           (record) => record.id === 'filter-0',
         ).titleSource,
     ),

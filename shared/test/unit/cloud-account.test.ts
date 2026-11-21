@@ -7,7 +7,10 @@ import {
 } from '../../electron/backend/cloud/client';
 import { CloudSyncClient } from '../../electron/backend/cloud/sync';
 import type { CloudAccountCall } from '../../electron/contracts/cloudAccount';
-import { credentialProblemCode, credentialProblemMessages } from '../../electron/contracts/credentialProblems';
+import {
+  credentialProblemCode,
+  credentialProblemMessages,
+} from '../../electron/contracts/credentialProblems';
 
 const origin = 'https://accounts.example.test';
 const result = () => ({
@@ -40,19 +43,72 @@ function vault(initial: unknown = null) {
 const json = (value: unknown, status = 200, headers = {}) =>
   new Response(JSON.stringify(value), { status, headers });
 describe('independent cloud account client', () => {
-  it.each(['VOXCUE_CREDENTIAL_CONFLICT', 'VOXCUE_CREDENTIAL_LOCKED', 'VOXCUE_CREDENTIAL_UNAVAILABLE', 'VOXCUE_CREDENTIAL_TIMEOUT'] as const)(
-    'keeps fixed local %s guidance and blocks recovery requests before network or replacement', async (code) => {
-      const read = vi.fn(async () => { throw Object.assign(Error('private native detail'), { code }); });
-      const preserve = vi.fn(), clear = vi.fn(), write = vi.fn(), fetcher = vi.fn();
+  it.each(['status', 'refresh'])(
+    'rejects a new owner returned by an existing session during %s',
+    async (operation) => {
+      const current = result();
+      if (operation === 'refresh') current.expiresAt = 1;
+      const other = {
+        ...result(),
+        user: { ...current.user, id: '33333333-3333-4333-8333-333333333333' },
+      };
+      const saved = vault({ origin, credentials: current });
+      const fetcher = vi.fn(async () =>
+        json(operation === 'refresh' ? other : { user: other.user }),
+      );
+      const account = new CloudAccountClient({
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: saved.port,
+        fetcher,
+      });
+      expect(await account.call({ action: 'status' })).toMatchObject({
+        ok: false,
+        state: { user: null },
+      });
+      expect(saved.read()).toBeNull();
+      expect(fetcher).toHaveBeenCalledTimes(1);
+    },
+  );
+  it.each([
+    'VOXCUE_CREDENTIAL_CONFLICT',
+    'VOXCUE_CREDENTIAL_LOCKED',
+    'VOXCUE_CREDENTIAL_UNAVAILABLE',
+    'VOXCUE_CREDENTIAL_TIMEOUT',
+  ] as const)(
+    'keeps fixed local %s guidance and blocks recovery requests before network or replacement',
+    async (code) => {
+      const read = vi.fn(async () => {
+        throw Object.assign(Error('private native detail'), { code });
+      });
+      const preserve = vi.fn(),
+        clear = vi.fn(),
+        write = vi.fn(),
+        fetcher = vi.fn();
       const client = new CloudAccountClient({
-        origin, deviceLabel: 'Synthetic', vault: { read, preserve, clear, write }, fetcher,
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: { read, preserve, clear, write },
+        fetcher,
       });
       const calls: CloudAccountCall[] = [
         { action: 'status' },
         { action: 'login', email: result().user.email, password: 'synthetic-password' },
         { action: 'code', email: result().user.email, purpose: 'register' },
-        { action: 'register', email: result().user.email, password: 'synthetic-password', code: '123456', challengeId: result().sessionId },
-        { action: 'reset', email: result().user.email, password: 'synthetic-password', code: '123456', challengeId: result().sessionId },
+        {
+          action: 'register',
+          email: result().user.email,
+          password: 'synthetic-password',
+          code: '123456',
+          challengeId: result().sessionId,
+        },
+        {
+          action: 'reset',
+          email: result().user.email,
+          password: 'synthetic-password',
+          code: '123456',
+          challengeId: result().sessionId,
+        },
       ];
       for (const call of calls) {
         const response = await client.call(call);
@@ -68,16 +124,31 @@ describe('independent cloud account client', () => {
   );
   it('allows explicit recovery of a fixed local data error only after preserving ciphertext', async () => {
     const saved = vault();
-    saved.port.read = async () => { throw Object.assign(Error('private bad data'), { code: 'VOXCUE_CREDENTIAL_INVALID_DATA' }); };
-    const preserve = saved.port.preserve = vi.fn(async () => {});
+    saved.port.read = async () => {
+      throw Object.assign(Error('private bad data'), { code: 'VOXCUE_CREDENTIAL_INVALID_DATA' });
+    };
+    const preserve = (saved.port.preserve = vi.fn(async () => {}));
     const fetcher = vi.fn(async () => json(result()));
-    const client = new CloudAccountClient({ origin, deviceLabel: 'Synthetic', vault: saved.port, fetcher });
+    const client = new CloudAccountClient({
+      origin,
+      deviceLabel: 'Synthetic',
+      vault: saved.port,
+      fetcher,
+    });
     expect(await client.call({ action: 'status' })).toMatchObject({
       ok: false,
       error: credentialProblemMessages.VOXCUE_CREDENTIAL_INVALID_DATA,
     });
     expect(fetcher).not.toHaveBeenCalled();
-    expect((await client.call({ action: 'login', email: result().user.email, password: 'synthetic-password' })).ok).toBe(true);
+    expect(
+      (
+        await client.call({
+          action: 'login',
+          email: result().user.email,
+          password: 'synthetic-password',
+        })
+      ).ok,
+    ).toBe(true);
     expect(preserve).toHaveBeenCalledOnce();
     expect(saved.read()).toMatchObject({ origin, credentials: { sessionId: result().sessionId } });
   });
@@ -88,8 +159,8 @@ describe('independent cloud account client', () => {
       saved.port.write = vi.fn(async () => {
         throw Object.assign(Error('private native write detail'), { code });
       });
-      const preserve = saved.port.preserve = vi.fn(async () => {});
-      const clear = saved.port.clear = vi.fn(async () => {});
+      const preserve = (saved.port.preserve = vi.fn(async () => {}));
+      const clear = (saved.port.clear = vi.fn(async () => {}));
       const calls: { route: string; authorization: string | null }[] = [];
       const client = new CloudAccountClient({
         origin,
@@ -102,12 +173,18 @@ describe('independent cloud account client', () => {
         },
       });
       const response = await client.call({
-        action: 'login', email: result().user.email, password: 'synthetic-password',
+        action: 'login',
+        email: result().user.email,
+        password: 'synthetic-password',
       });
       expect(response).toMatchObject({
-        ok: false, error: credentialProblemMessages[code], state: { user: null, verified: false },
+        ok: false,
+        error: credentialProblemMessages[code],
+        state: { user: null, verified: false },
       });
-      expect(JSON.stringify(response)).not.toMatch(/private native write detail|accessToken|refreshToken/);
+      expect(JSON.stringify(response)).not.toMatch(
+        /private native write detail|accessToken|refreshToken/,
+      );
       expect(calls).toEqual([
         { route: '/v1/auth/login', authorization: null },
         { route: '/v1/auth/logout', authorization: 'Bearer ' + result().accessToken },
@@ -118,56 +195,99 @@ describe('independent cloud account client', () => {
       expect(saved.read()).toBeNull();
     },
   );
-  it.each((['server', 'transport'] as const).flatMap((source) => [
-    'VOXCUE_CREDENTIAL_CONFLICT', 'VOXCUE_CREDENTIAL_LOCKED',
-    'VOXCUE_CREDENTIAL_UNAVAILABLE', 'VOXCUE_CREDENTIAL_TIMEOUT',
-  ].map((code) => ({ source, code }))))(
-    'does not mistake a $source $code error for a local Keychain problem', async ({ source, code }) => {
+  it.each(
+    (['server', 'transport'] as const).flatMap((source) =>
+      [
+        'VOXCUE_CREDENTIAL_CONFLICT',
+        'VOXCUE_CREDENTIAL_LOCKED',
+        'VOXCUE_CREDENTIAL_UNAVAILABLE',
+        'VOXCUE_CREDENTIAL_TIMEOUT',
+      ].map((code) => ({ source, code })),
+    ),
+  )(
+    'does not mistake a $source $code error for a local Keychain problem',
+    async ({ source, code }) => {
       const client = new CloudAccountClient({
-        origin, deviceLabel: 'Synthetic', vault: vault().port,
+        origin,
+        deviceLabel: 'Synthetic',
+        vault: vault().port,
         fetcher: async () => {
-          if (source === 'server') return json({ error: { code, message: 'private server detail' } }, 400);
+          if (source === 'server')
+            return json({ error: { code, message: 'private server detail' } }, 400);
           throw Object.assign(Error('private transport detail'), { code });
         },
       });
-      const response = await client.call({ action: 'login', email: result().user.email, password: 'synthetic-password' });
+      const response = await client.call({
+        action: 'login',
+        email: result().user.email,
+        password: 'synthetic-password',
+      });
       expect(response.ok).toBe(false);
       expect(response).not.toHaveProperty('credentialProblem');
       expect(JSON.stringify(response)).not.toMatch(/private|钥匙串/);
-      expect(response.error).not.toBe(credentialProblemMessages[code as keyof typeof credentialProblemMessages]);
+      expect(response.error).not.toBe(
+        credentialProblemMessages[code as keyof typeof credentialProblemMessages],
+      );
     },
   );
   it.each(['EACCES', 'EIO', 'VOXCUE_HELPER_PROTOCOL'])(
-    'does not classify arbitrary local %s failures as recoverable data errors', async (code) => {
-      const preserve = vi.fn(), write = vi.fn(), fetcher = vi.fn();
+    'does not classify arbitrary local %s failures as recoverable data errors',
+    async (code) => {
+      const preserve = vi.fn(),
+        write = vi.fn(),
+        fetcher = vi.fn();
       const client = new CloudAccountClient({
-        origin, deviceLabel: 'Synthetic',
+        origin,
+        deviceLabel: 'Synthetic',
         vault: {
-          read: async () => { throw Object.assign(Error('private local detail'), { code }); },
-          write, clear: vi.fn(), preserve,
+          read: async () => {
+            throw Object.assign(Error('private local detail'), { code });
+          },
+          write,
+          clear: vi.fn(),
+          preserve,
         },
         fetcher,
       });
       const response = await client.call({ action: 'status' });
-      expect(response).toMatchObject({ ok: false, error: '账号服务连接失败，请检查网络或系统凭据存储。' });
+      expect(response).toMatchObject({
+        ok: false,
+        error: '账号服务连接失败，请检查网络或系统凭据存储。',
+      });
       expect(response).not.toHaveProperty('credentialProblem');
       expect(JSON.stringify(response)).not.toContain('private local detail');
-      expect(await client.call({
-        action: 'login', email: result().user.email, password: 'synthetic-password',
-      })).toMatchObject({ ok: false, error: '账号服务连接失败，请检查网络或系统凭据存储。' });
+      expect(
+        await client.call({
+          action: 'login',
+          email: result().user.email,
+          password: 'synthetic-password',
+        }),
+      ).toMatchObject({ ok: false, error: '账号服务连接失败，请检查网络或系统凭据存储。' });
       expect(preserve).not.toHaveBeenCalled();
       expect(fetcher).not.toHaveBeenCalled();
       expect(write).not.toHaveBeenCalled();
     },
   );
   it('sanitizes fixed local error codes without exposing messages or invoking getters', () => {
-    expect(credentialProblemCode(Object.assign(Error('private'), { code: 'VOXCUE_CREDENTIAL_LOCKED' })))
-      .toBe('VOXCUE_CREDENTIAL_LOCKED');
-    const getter = vi.fn(() => { throw Error('private getter'); });
-    expect(credentialProblemCode(Object.defineProperty({}, 'code', { get: getter }))).toBeUndefined();
+    expect(
+      credentialProblemCode(Object.assign(Error('private'), { code: 'VOXCUE_CREDENTIAL_LOCKED' })),
+    ).toBe('VOXCUE_CREDENTIAL_LOCKED');
+    const getter = vi.fn(() => {
+      throw Error('private getter');
+    });
+    expect(
+      credentialProblemCode(Object.defineProperty({}, 'code', { get: getter })),
+    ).toBeUndefined();
     expect(getter).not.toHaveBeenCalled();
-    expect(credentialProblemCode(Object.create({ code: 'VOXCUE_CREDENTIAL_CONFLICT' }))).toBeUndefined();
-    expect(credentialProblemCode({ code: 'unknown', message: credentialProblemMessages.VOXCUE_CREDENTIAL_CONFLICT })).toBeUndefined();
+    expect(
+      credentialProblemCode(Object.create({ code: 'VOXCUE_CREDENTIAL_CONFLICT' })),
+    ).toBeUndefined();
+    expect(
+      credentialProblemCode({
+        code: 'unknown',
+        message: credentialProblemMessages.VOXCUE_CREDENTIAL_CONFLICT,
+      }),
+    ).toBeUndefined();
   });
   it('locally validates expired saved credentials without a network expiry decision', () => {
     const expired = { ...result(), expiresAt: 1, refreshExpiresAt: 2 };
@@ -255,7 +375,13 @@ describe('independent cloud account client', () => {
       );
       const transport = vi
         .fn()
-        .mockImplementation(async () => json({ user: result().user }))
+        .mockImplementation(async (url) =>
+          json(
+            String(url).endsWith('/backups')
+              ? { items: [], nextCursor: null }
+              : { user: result().user },
+          ),
+        )
         .mockResolvedValueOnce(json({ user: result().user }))
         .mockResolvedValueOnce(oversized);
       const client = new CloudAccountClient({
@@ -366,6 +492,7 @@ describe('independent cloud account client', () => {
             signal.addEventListener('abort', () => reject(signal.reason), { once: true });
             started();
           });
+        if (String(url).endsWith('/backups')) return json({ items: [], nextCursor: null });
         return json(String(url).endsWith('/account') ? { user: result().user } : {});
       }) as typeof fetch,
     });

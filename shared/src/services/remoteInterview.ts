@@ -4,7 +4,7 @@ import type {
   RemoteInterviewSnapshot,
 } from '../../electron/contracts/remoteConnection';
 import { questionSource } from '../../electron/contracts/speechSettings';
-import { useInterview } from '../stores/interview';
+import { appendedAnswer, useInterview } from '../stores/interview';
 import { useRemoteConnection } from '../stores/remoteConnection';
 
 type InterviewState = ReturnType<typeof useInterview.getState>;
@@ -26,7 +26,7 @@ const lastQuestionTranscript = (state: InterviewState) => {
     if (state.transcripts[index].source === source) return state.transcripts[index];
 };
 
-export function projectRemoteInterview(
+function projectControlState(
   state: InterviewState,
   revisions: Revisions,
 ): RemoteInterviewSnapshot {
@@ -39,7 +39,7 @@ export function projectRemoteInterview(
     state.reconnecting ||
     state.switchingSpeech;
   const rawDraft = state.inputDraft ?? state.draftQuestion;
-  const snapshot: RemoteInterviewSnapshot = {
+  return {
     ...revisions,
     sessionId: state.mode === 'local' ? state.sessionId : null,
     status: state.mode === 'local' ? state.status : 'idle',
@@ -68,6 +68,13 @@ export function projectRemoteInterview(
       stopAnswer: active && state.generating,
     },
   };
+}
+
+export function projectRemoteInterview(
+  state: InterviewState,
+  revisions: Revisions,
+): RemoteInterviewSnapshot {
+  const snapshot = projectControlState(state, revisions);
   if (state.mode !== 'local') return snapshot;
   // Full replacement snapshots stay bounded. Keep the newest complete rows,
   // label omitted history, and reserve room for the currently streaming answer.
@@ -142,7 +149,10 @@ const relevant = (state: InterviewState, previous: InterviewState) =>
 
 export function connectRemoteInterview(): () => void {
   const desktop = window.desktop;
-  if (!desktop?.publishRemoteInterview || !desktop.onRemoteCommand || !desktop.finishRemoteCommand)
+  if (
+    !desktop?.publishRemoteInterview || !desktop.waitForRemoteInterviewSlot ||
+    !desktop.onRemoteCommand || !desktop.finishRemoteCommand
+  )
     return () => {};
   let active = true;
   let revisions: Revisions = {
@@ -153,25 +163,42 @@ export function connectRemoteInterview(): () => void {
     pendingQuestionRevision: 1,
   };
   let latest: InterviewState | undefined = useInterview.getState();
-  let publishing = false;
+  type Publication = { epoch: number; status: InterviewState['status']; mode: InterviewState['mode'] };
+  let publishing: Publication | undefined;
+  let published: Publication | undefined;
+  const sameSessionState = (owner: Publication, state: InterviewState) =>
+    owner.epoch === revisions.sessionEpoch && owner.status === state.status && owner.mode === state.mode;
   let timer: ReturnType<typeof setTimeout> | undefined;
   const enabled = () => useRemoteConnection.getState().state?.status === 'connected';
   const requests = new Map<string, { fingerprint: string; result: Promise<RemoteCommandResult> }>();
-  const flush = () => {
+  const flush = async () => {
     timer = undefined;
-    if (!active || publishing || !latest || !enabled()) return;
-    const snapshot = projectRemoteInterview(latest, revisions);
-    latest = undefined;
-    publishing = true;
-    void desktop
-      .publishRemoteInterview(snapshot)
-      .catch(() => {
-        if (active) useRemoteConnection.setState({ error: '无法同步设备画面，请重新连接。' });
-      })
-      .finally(() => {
-        publishing = false;
+    if (!active || !latest || !enabled() || (publishing && sameSessionState(publishing, latest)))
+      return;
+    const previous = publishing ?? published;
+    const lifecycleChanged = previous && !sameSessionState(previous, latest);
+    const publication = { epoch: revisions.sessionEpoch, status: latest.status, mode: latest.mode };
+    const requestedRevision = revisions.revision;
+    publishing = publication;
+    try {
+      // Session changes must reach the command coordinator even while a phone is slow.
+      if (!lifecycleChanged) await desktop.waitForRemoteInterviewSlot();
+      if (!active || publishing !== publication || !enabled() || !latest) return;
+      const snapshot = projectRemoteInterview(latest, revisions);
+      published = { epoch: revisions.sessionEpoch, status: latest.status, mode: latest.mode };
+      latest = undefined;
+      await desktop.publishRemoteInterview(snapshot);
+    } catch {
+      if (active && publishing === publication) {
+        if (requestedRevision === revisions.revision) latest = undefined;
+        useRemoteConnection.setState({ error: '无法同步设备画面，请重新连接。' });
+      }
+    } finally {
+      if (publishing === publication) {
+        publishing = undefined;
         if (active && latest && !timer && enabled()) timer = setTimeout(flush, 80);
-      });
+      }
+    }
   };
   let observed = useInterview.getState();
   const unsubscribe = useInterview.subscribe(() => {
@@ -205,21 +232,23 @@ export function connectRemoteInterview(): () => void {
     }
     revisions.revision++;
     latest = state;
-    if (!timer && !publishing && enabled()) timer = setTimeout(flush, 80);
+    if (!timer && enabled() && (!publishing || !sameSessionState(publishing, state)))
+      timer = setTimeout(flush, 80);
   });
   const unsubscribeConnection = useRemoteConnection.subscribe((connection, previous) => {
     if (connection.state?.status === previous.state?.status) return;
     if (!enabled()) {
       if (timer) clearTimeout(timer);
       timer = undefined;
+      publishing = undefined;
       return;
     }
     latest = useInterview.getState();
-    if (!publishing) {
-      if (timer) clearTimeout(timer);
-      // Let the connection's authentication reply precede its first snapshot.
-      timer = setTimeout(flush, 0);
-    }
+    // A newly approved device needs a publication even when no store field changed.
+    revisions.revision++;
+    if (timer) clearTimeout(timer);
+    // Let the connection's authentication reply precede its first snapshot.
+    timer = setTimeout(flush, 0);
   });
   const execute = async (command: RemoteCommand): Promise<RemoteCommandResult> => {
     const result = (ok: boolean, error?: string): RemoteCommandResult => ({
@@ -236,7 +265,7 @@ export function connectRemoteInterview(): () => void {
       command.sessionEpoch !== revisions.sessionEpoch
     )
       return result(false, '面试已变化，请同步后重试。');
-    const snapshot = projectRemoteInterview(state, revisions);
+    const snapshot = projectControlState(state, revisions);
     switch (command.action) {
       case 'set-draft': {
         const draftResult = (ok: boolean, error?: string): RemoteCommandResult => ({
@@ -311,16 +340,11 @@ export function connectRemoteInterview(): () => void {
             text !== candidate(state).trim())
         )
           return result(false, '当前转录问题已变化或已发送，请同步后重试。');
-        const previousAnswers = state.answers;
         const pending =
           fromTranscript || fromSharedInput
-            ? state.submitTranscript(text, false, false)
+            ? state.submitTranscript(fromSharedInput && state.inputDraft !== null ? text : undefined)
             : state.ask(text);
-        // Both existing entry points create the answer synchronously before
-        // awaiting the provider. ACK acceptance, not the eventual AI outcome.
-        const answer = useInterview
-          .getState()
-          .answers.find((row) => !previousAnswers.some((old) => old.id === row.id));
+        const answer = appendedAnswer(state, useInterview.getState());
         void pending.catch(() => {});
         if (answer && fromSharedInput)
           useInterview.getState().setInputDraft(null, command.inputDraftRevision);
@@ -366,7 +390,7 @@ export function connectRemoteInterview(): () => void {
       if (active) void desktop.finishRemoteCommand(result).catch(() => {});
     });
   });
-  flush();
+  void flush();
   return () => {
     active = false;
     latest = undefined;

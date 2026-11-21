@@ -13,6 +13,7 @@ import {
 import fuses from '@electron/fuses';
 import { prepareVcRuntime } from '../../scripts/vc-runtime.mjs';
 import { checkPackagedRenderer } from './packaged-renderer-check.mjs';
+import { sileroModel, sileroLicense, validSileroAsset } from '../../../shared/scripts/silero-assets.mjs';
 
 const require = createRequire(import.meta.url);
 assert.ok(process.argv.slice(2).every((argument) => argument === '--with-screenshot-worker'));
@@ -152,8 +153,8 @@ for (const dependency of [
 for (const [name, version] of [
   ['@github/copilot-sdk', '1.0.21'],
   ['@github/copilot-sdk-win32-x64', '1.0.21'],
-  ['@openai/codex', '0.164.0'],
-  ['@openai/codex-win32-x64', '0.164.0-win32-x64'],
+  ['@openai/codex', '0.170.0'],
+  ['@openai/codex-win32-x64', '0.170.0-win32-x64'],
   ['zod', '4.6.6'],
   ['word-extractor', '1.0.4'],
   ['chardet', '2.1.1'],
@@ -198,6 +199,8 @@ for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
   const bundled = await readFile(path.join(root, 'resources/licenses', name));
   assert.ok(bundled.equals(await readFile(path.join('..', name))), name);
 }
+for (const [directory, asset] of [['native', sileroModel], ['licenses', sileroLicense]])
+  assert.ok(validSileroAsset(asset, await readFile(path.join(root, 'resources', directory, asset.name))), asset.name);
 const cancellation = path.normalize('dist-electron/shared/electron/backend/cancellable.js');
 assert.equal(asar.statFile(archive, cancellation).unpacked, true);
 const physicalCancellation = await readFile(path.join(archive + '.unpacked', cancellation));

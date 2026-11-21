@@ -6,6 +6,7 @@ import { existsSync, realpathSync as fsRealPath, lstatSync, readFileSync } from 
 import os from 'node:os';
 import fuses from '@electron/fuses';
 import { prepareVcRuntime } from './vc-runtime.mjs';
+import { prepareSilero } from './prepare-silero.mjs';
 const { flipFuses, getCurrentFuseWire, FuseVersion, FuseV1Options } = fuses;
 const root = process.cwd();
 const require = createRequire(import.meta.url);
@@ -68,6 +69,7 @@ const { createMobileAssets } = require(
 );
 if (!(await createMobileAssets(path.join(root, 'dist')).read('/')))
   throw Error('Bundled mobile page is missing; run the shared build first.');
+const sileroCache = await prepareSilero();
 const paths = await packager({
   icon: path.resolve('public/voxcue.ico'),
   dir: root,
@@ -85,7 +87,7 @@ const paths = await packager({
   overwrite: true,
   prune: false,
   asar: {
-    unpack: '**/dist-electron/shared/electron/backend/cancellable.js',
+    unpack: '**/dist-electron/shared/electron/backend/{atomicFile,cancellable}.js',
     unpackDir:
       '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/backend/screenshot,dist-electron/shared/electron/contracts,dist-electron/windows/electron/speech}',
   },
@@ -274,9 +276,18 @@ const paths = await packager({
         path.join(licenses, runtime.license.name),
       );
       await mkdir(path.join(buildPath, 'resources/native'), { recursive: true });
+      await prepareSilero(path.join(buildPath, 'resources/native'), licenses, [sileroCache]);
       await cp(
         path.resolve('native/bin/VoxCue.Audio.exe'),
         path.join(buildPath, 'resources/native/VoxCue.Audio.exe'),
+      );
+      await cp(
+        path.resolve('native/bin/VoxCue.WindowMotion.exe'),
+        path.join(buildPath, 'resources/native/VoxCue.WindowMotion.exe'),
+      );
+      await cp(
+        path.resolve('native/bin/VoxCue.ApiKeyPrompt.exe'),
+        path.join(buildPath, 'resources/native/VoxCue.ApiKeyPrompt.exe'),
       );
       await cp(
         path.resolve('native/bin/VoxCue.Screenshot.exe'),

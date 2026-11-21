@@ -1,3 +1,36 @@
+import { validProfile, type PersonalInfo } from '../../electron/contracts/profile';
+
+export const profileStorageKey = 'copilot-personal-info-v1';
+
+export function hasSavedProfile(info: PersonalInfo) {
+  return [info.name, info.role, info.jobDescription, info.background, info.customInstructions].some(
+    (value) => value?.trim(),
+  ) || !!(info.language?.trim() && info.language.trim() !== '简体中文') || !!info.skills?.length;
+}
+
+/** Early profiles stored custom instructions as a list. Decode without rewriting the original. */
+export function readStoredProfile(raw: string): PersonalInfo {
+  const info = JSON.parse(raw);
+  if (Array.isArray(info?.customInstructions)) {
+    const entries: unknown[] = info.customInstructions;
+    if (
+      entries.length > 10 ||
+      !entries.every(
+        (entry): entry is { title: string; content: string } =>
+          storedObject(entry) &&
+          typeof entry.title === 'string' &&
+          typeof entry.content === 'string',
+      )
+    )
+      throw Error('本地个人信息格式无效，未上传。');
+    info.customInstructions = entries
+      .map((entry) => entry.title + '\n' + entry.content)
+      .join('\n\n');
+  }
+  if (!validProfile(info)) throw Error('本地个人信息格式无效，未上传。');
+  return info;
+}
+
 // Validate data read from local stores before it reaches React. Unknown metadata
 // may be retained by callers, but never becomes application state or an action.
 export const storedObject = (value: unknown): value is Record<string, any> =>

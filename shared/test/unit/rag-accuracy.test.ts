@@ -87,7 +87,7 @@ describe('focused local evidence and calibrated selection', () => {
         buildRagContext('PID', [hit], new Map([[root.itemId, { ...root, followUps: [invalid] }]])),
       ).toThrow('身份');
   });
-  it('finds an informative candidate beyond rank five, deduplicates roots and reads no more than five', () => {
+  it('finds an informative candidate beyond rank five, deduplicates roots and reads no more than six', () => {
     const unrelated = Array.from({ length: 7 }, (_, i) => ({
       ...hit,
       itemId: 'other:' + i,
@@ -103,7 +103,7 @@ describe('focused local evidence and calibrated selection', () => {
         'PID',
         Array.from({ length: 15 }, (_, i) => ({ ...hit, itemId: 'pid:' + i })),
       ).shortlist,
-    ).toHaveLength(5);
+    ).toHaveLength(6);
   });
   it('generic project/method overlap cannot admit unrelated evidence; raw score cannot rescue it', () => {
     const generic = {

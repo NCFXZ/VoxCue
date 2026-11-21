@@ -30,8 +30,11 @@ try {
       { id: 'chatgpt', name: 'ChatGPT', dataRecipient: 'OpenAI' },
       { id: 'synthetic-other', name: '合成提供商', dataRecipient: '合成服务公司' },
     ];
-    ChatGPTService.prototype.models = async () => {
-      if (globalThis.providerModelFailure) throw Error('合成模型连接失败');
+    globalThis.providerCatalogReads = [];
+    ChatGPTService.prototype.models = async (force = false) => {
+      const failed = !!globalThis.providerModelFailure;
+      globalThis.providerCatalogReads.push({ force, failed });
+      if (failed) throw Error('合成模型连接失败');
       return providers.map((provider, i) => ({
         id: 'provider-model-' + i,
         label: i ? '其他测试模型' : '账户测试模型',
@@ -157,8 +160,14 @@ try {
   await app.evaluate(() => {
     globalThis.providerModelFailure = true;
   });
-  await openModelMenu(page);
-  await page.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+  const catalogMenu = await openModelMenu(page);
+  const beforeRefresh = await app.evaluate(() => globalThis.providerCatalogReads.length);
+  await catalogMenu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+  await catalogMenu.getByRole('alert').filter({ hasText: '合成模型连接失败' }).waitFor();
+  const failedReads = await app.evaluate((_, start) => globalThis.providerCatalogReads.slice(start), beforeRefresh);
+  assert.ok(failedReads.some(read => read.force && read.failed));
+  await page.keyboard.press('Escape');
+  await catalogMenu.waitFor({ state: 'hidden' });
   const notices = page.locator('.chat-composer > .preparation-notices');
   const reconnect = notices.getByRole('button', { name: '重新加载模型', exact: true });
   await reconnect.waitFor();
@@ -183,12 +192,15 @@ try {
   await app.evaluate(() => {
     globalThis.providerModelFailure = false;
   });
+  const beforeRetry = await app.evaluate(() => globalThis.providerCatalogReads.length);
   await reconnect.click();
   await reconnect.waitFor({ state: 'detached' });
   await page
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('其他测试模型', { exact: true })
     .waitFor();
+  const retryReads = await app.evaluate((_, start) => globalThis.providerCatalogReads.slice(start), beforeRetry);
+  assert.ok(retryReads.some(read => read.force && !read.failed));
   checks.push(
     'preparation connection error and retry stay above the composer and recover through the real UI',
   );
@@ -264,6 +276,56 @@ try {
   checks.push(
     'interview uses selected provider and send style; archived reply retains provider metadata',
   );
+  await app.evaluate(({ app }) => {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { ProfileApiConnections } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/application/apiConnections.js',
+    );
+    ProfileApiConnections.prototype.list = async () => [{ provider: 'openai' }];
+    ProfileApiConnections.prototype.chat = () => ({
+      models: async () => [{ id: 'synthetic-api-model', label: 'Synthetic API model', description: '' }],
+      usage: async () => ({ requests: 0, inputTokens: 0, outputTokens: 0, totalTokens: 0, updatedAt: null }),
+    });
+  });
+  const method = settings.getByRole('radiogroup', { name: '连接方式', exact: true });
+  const accountMethod = method.getByRole('radio', { name: '账号授权', exact: true });
+  const apiMethod = method.getByRole('radio', { name: 'API 密钥', exact: true });
+  const apiSettings = settings.getByRole('region', { name: 'API 密钥', exact: true });
+  const openAI = apiSettings.getByRole('group', { name: 'OpenAI API', exact: true });
+  async function openAISection() {
+    await openSettings();
+    await settings.getByRole('button', { name: 'AI 服务', exact: true }).click();
+  }
+  await openAISection();
+  assert.equal(await accountMethod.isChecked(), true);
+  await settings.locator('[data-settings-target="chatgpt"]').waitFor();
+  await accountMethod.press('ArrowRight');
+  await apiSettings.waitFor();
+  assert.equal(await apiMethod.isChecked(), true);
+  assert.equal(await apiMethod.evaluate(node => node === document.activeElement), true);
+  assert.equal(await settings.locator('[data-settings-target="chatgpt"]').count(), 0);
+  await apiMethod.press('Home');
+  await settings.locator('[data-settings-target="chatgpt"]').waitFor();
+  assert.equal(await apiSettings.count(), 0);
+  await apiMethod.click();
+  const apiToggle = openAI.locator('[aria-controls="api-settings-openai"]');
+  const openAIDetails = openAI.locator('#api-settings-openai');
+  await openAI.getByRole('button', { name: '启用', exact: true }).click();
+  await openAI.getByRole('button', { name: '禁用', exact: true }).waitFor();
+  await openAIDetails.getByRole('button', { name: '更换密钥', exact: true }).waitFor();
+  assert.equal(await apiToggle.getAttribute('aria-expanded'), 'true');
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await openAISection();
+  assert.equal(await apiMethod.isChecked(), true);
+  await openAI.getByRole('button', { name: '禁用', exact: true }).click();
+  await openAI.getByRole('button', { name: '启用', exact: true }).waitFor();
+  await openAI.locator('[aria-controls="api-settings-openai"][aria-expanded="false"]').waitFor();
+  assert.equal(await openAIDetails.getByRole('button', { name: '更换密钥', exact: true }).count(), 0);
+  await openAIDetails.locator('.api-service-details').waitFor({ state: 'detached' });
+  assert.equal(await openAIDetails.evaluate(panel => panel.getBoundingClientRect().height), 0);
+  assert.equal(await apiMethod.isChecked(), true);
+  assert.equal(await apiSettings.isVisible(), true);
+  checks.push('Connection method supports keyboard selection. Enabling the API opens its details. Disabling collapses its details and keeps the API tab selected.');
   assert.deepEqual(errors, []);
   await console.log(JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ directory, checks, errors }));

@@ -95,12 +95,27 @@ it('rejects internal duplicates and external conflicts without losing a working 
   f.stop();
 });
 
+it('rebinds shortcut help during the interview and releases both combinations on detach', async () => {
+  const f = setup();
+  const previous = f.callbacks.get('Control+Shift+/')!;
+  previous();
+  expect(f.command).toHaveBeenCalledWith('toggle-shortcut-help');
+  await f.controller.save('toggle-shortcut-help', 'Control+K', defaultShortcuts());
+  expect(f.callbacks.has('Control+Shift+/')).toBe(false);
+  previous();
+  expect(f.command).toHaveBeenCalledTimes(1);
+  f.callbacks.get('Control+K')!();
+  expect(f.command).toHaveBeenCalledTimes(2);
+  f.stop();
+  expect(f.callbacks.size).toBe(0);
+});
+
 it('still opens an interview when every global combination is unavailable', () => {
   const f = setup();
   for (const key of Object.values(defaultShortcuts())) if (key) f.occupied.add(key);
   expect(() => f.controller.check()).not.toThrow();
   expect(f.callbacks.size).toBe(0);
-  expect(f.controller.state().conflicts).toHaveLength(9);
+  expect(f.controller.state().conflicts).toHaveLength(Object.keys(defaultShortcuts()).length);
   f.stop();
 });
 
@@ -166,6 +181,7 @@ it('round-trips only bounded typed preferences and handles missing or corrupt fi
 
 it('normalizes physical combinations and rejects unbounded or arbitrary operations', () => {
   const held = { ctrlKey: true, altKey: false, shiftKey: true, metaKey: false };
+  expect(shortcutFromEvent({ ...held, key: '?', code: 'Slash' })).toBe('Control+Shift+/');
   expect(shortcutPreview({ ...held, key: 'Shift' })).toBe('Ctrl+Shift');
   expect(shortcutPreview({ ...held, key: 'M', code: 'KeyM' })).toBe('Ctrl+Shift+M');
   expect(shortcutPreview({ ...held, key: 'Shift' }, true)).toBe('⌃⇧');
@@ -253,6 +269,13 @@ it('updates legacy defaults while preserving customized or disabled bindings', a
     });
   }
   const customized = { ...defaultShortcuts(), 'toggle-microphone': 'Control+Alt+M' };
+  const { 'toggle-shortcut-help': helpKey, ...older } = customized;
+  await writeFile(file, JSON.stringify({ version: 2, bindings: older }));
+  expect(await readShortcuts(file, false)).toEqual({ error: null, bindings: customized });
+  await writeFile(file, JSON.stringify({ version: 2, bindings: { ...older, screenshot: 'Control+Shift+Slash' } }));
+  expect(await readShortcuts(file, false)).toEqual({
+    error: null, bindings: { ...older, screenshot: helpKey, 'toggle-shortcut-help': null },
+  });
   await writeShortcuts(file, customized);
   expect((await readShortcuts(file, false)).bindings).toEqual(customized);
 });
@@ -268,6 +291,7 @@ it('shows editable bindings and per-key conflicts without blocking the rest of s
   expect(html).toContain('Ctrl+Shift+H');
   expect(html).toContain('快捷键冲突或不可用');
   expect(html).toContain('修改快捷键：发送当前输入内容');
+  expect(html).toContain('修改快捷键：显示或隐藏快捷键说明');
   expect(html).not.toContain('截图快捷键仅在面试窗口显示时生效。');
   vi.stubGlobal('window', { desktop: { platform: 'macos' } });
   const mac = renderToStaticMarkup(<ShortcutSettings />);

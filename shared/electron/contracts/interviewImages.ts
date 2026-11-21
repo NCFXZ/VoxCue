@@ -5,7 +5,13 @@ export interface InterviewImage {
 }
 
 export type InterviewImageCall =
-  { op: 'read' | 'preview' | 'save'; id: string } | { op: 'remove'; ids: string[] };
+  | { op: 'read' | 'preview' | 'save'; id: string }
+  | { op: 'syncDigest' | 'syncBytes'; id: string; preview?: string }
+  | { op: 'remove'; ids: string[] };
+
+/** Native originals use UUIDs. Older history can also contain display-only references. */
+export const validImageId = (id: unknown): id is string =>
+  typeof id === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id);
 
 export function validImagePreview(value: unknown): value is string {
   return (

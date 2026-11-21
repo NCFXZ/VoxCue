@@ -1,3 +1,5 @@
+@import '../lib/messageMotion.css';
+
 :root {
   --mobile-viewport: 100dvh;
   --mobile-viewport-top: 0px;
@@ -93,7 +95,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:f
 .mobile-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 44px; min-width: 44px; height: 44px; padding: 0; border-radius: 50%; flex-shrink: 0; }
 .mobile-icon-button svg { display: block; flex-shrink: 0; }
 .mobile-session-notice { display: flex; align-items: center; gap: 8px; padding-inline: 12px; flex: 0 0 auto; background: var(--soft); }
-.mobile-session-notice:empty { display: none; }
+.mobile-session-reveal { flex: 0 0 auto; }
 .mobile-session-notice p { flex: 1; margin: 8px 0; font-size: 12px; }
 .mobile-session-notice button { flex-shrink: 0; margin-block: 4px; }
 .mobile-transcripts {
@@ -112,8 +114,11 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:f
 .mobile-transcripts > header button { border: 0; border-radius: 999px; padding-inline: 10px; color: var(--muted); background: transparent; font-size: 12px; }
 .mobile-transcripts.is-hidden { padding-bottom: 0; }
 .mobile-transcripts.is-expanded { flex-basis: 34%; max-height: 40%; }
-.mobile-transcript-scroll { display: flex; flex-direction: column; gap: 7px; min-height: 0; overflow: auto; overscroll-behavior: contain; }
-.mobile-transcript-row { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; max-width: 92%; font-size: 13px; }
+.mobile-transcript-scroll { display: flex; flex-direction: column; min-height: 0; overflow: auto; scrollbar-gutter: stable both-edges; overscroll-behavior: contain; }
+.mobile-transcript-scroll .mobile-omitted-transcripts { margin-bottom: 15px; }
+.mobile-transcript-row + .mobile-transcript-row { margin-top: 7px; }
+.mobile-transcript-row { display: flex; flex-direction: column; align-items: flex-start; max-width: 92%; font-size: 13px; }
+.is-expanded .mobile-transcript-row > .mobile-transcript-meta + p { margin-top: 3px; }
 .mobile-transcript-row.is-me { align-self: flex-end; align-items: flex-end; }
 .mobile-transcript-meta { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
 .mobile-transcript-meta strong { font-weight: 500; }
@@ -123,7 +128,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:f
 .is-preview .mobile-transcript-row p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .is-expanded .mobile-transcript-row { margin-bottom: 5px; font-size: var(--answer-size); }
 .is-expanded .mobile-transcript-row p { white-space: pre-wrap; }
-.mobile-transcript-row > small { display: block; color: var(--muted); }
+.mobile-truncated-transcript { display: block; margin-top: 3px; color: var(--muted); }
 .mobile-interim { color: var(--accent); }
 .mobile-answers { position: relative; display: flex; flex: 1; min-height: 0; }
 .mobile-answer-scroll { width: 100%; padding: 14px max(12px, env(safe-area-inset-right, 0px)) 18px max(12px, env(safe-area-inset-left, 0px)); overflow: auto; overscroll-behavior: contain; }
@@ -170,7 +175,7 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:f
 .mobile-auto-answer[aria-checked='true'] .mobile-toggle-dot::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .mobile-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); }
 .mobile-error { color: var(--error); font-size: 13px; overflow-wrap: anywhere; margin: 8px 0; }
-.mobile-composer > .mobile-error { max-height: 70px; overflow: auto; margin: 0 0 8px; }
+.mobile-composer .mobile-error { max-height: 70px; overflow: auto; margin: 0 0 8px; }
 .mobile-pending-question { margin: 0 0 8px; max-height: 3.2em; font-size: 12px; color: var(--muted); overflow: hidden; }
 .mobile-pending-question > span { margin-right: 6px; color: var(--accent); font-weight: 600; }
 .mobile-hint { margin-block: 8px; color: var(--muted); font-size: 12px; }

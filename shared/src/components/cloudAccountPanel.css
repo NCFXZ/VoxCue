@@ -1,10 +1,51 @@
 .cloud-account-form .cloud-account-field {
   display: grid;
-  gap: 6px;
+  --account-field-gap: 6px;
   min-width: 0;
+}
+.cloud-account-field > :not(:first-child, .interview-reveal),
+.cloud-verification > .cloud-code-row {
+  margin-block-start: var(--account-field-gap);
+}
+.selection-option.registration-consent {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 0;
+  padding: 0;
+  cursor: auto;
+  color: var(--muted);
+  font-size: var(--type-secondary);
+  line-height: 1.5;
+}
+.registration-consent input[type='checkbox'] {
+  cursor: pointer;
+}
+.login-auth-content .cloud-account-form .registration-consent label {
+  display: inline;
+  font: inherit;
+  cursor: pointer;
+}
+.registration-consent a {
+  color: var(--foreground);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.registration-consent a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+.registration-consent > .interview-reveal {
+  grid-column: 2;
+}
+.registration-consent p {
+  margin: 0;
+  padding-block-start: 4px;
 }
 .cloud-account-form .cloud-field-feedback {
   margin: 0;
+  padding-block-start: var(--account-field-gap);
   font-size: var(--type-secondary);
   font-weight: 400;
   line-height: 1.5;
@@ -30,18 +71,18 @@
   font-size: 18px;
 }
 .login-auth-content .cloud-account-form .cloud-account-field {
-  gap: 7px;
+  --account-field-gap: 7px;
 }
 .login-auth-content .cloud-account-form .cloud-field-feedback {
   padding-inline: 14px;
 }
-.login-shell .login-auth-content .cloud-account-form input {
+.login-shell .login-auth-content .cloud-account-form input:where(:not([type='checkbox'])) {
   transition:
     box-shadow 180ms ease,
     transform 180ms ease,
     background-color 180ms ease;
 }
-.login-shell .login-auth-content .cloud-account-form input:is(:focus, :focus-visible) {
+.login-shell .login-auth-content .cloud-account-form input:where(:not([type='checkbox'])):is(:focus, :focus-visible) {
   outline: none;
   background: var(--surface);
   border-color: color-mix(in srgb, var(--foreground) 16%, var(--surface));
@@ -58,7 +99,7 @@
   padding-inline: 12px;
 }
 @media (prefers-reduced-motion: reduce) {
-  .login-shell .login-auth-content .cloud-account-form input {
+  .login-shell .login-auth-content .cloud-account-form input:where(:not([type='checkbox'])) {
     transition: none;
   }
 }

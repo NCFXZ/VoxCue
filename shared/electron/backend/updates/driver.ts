@@ -1,4 +1,4 @@
-import { createReadStream, existsSync } from 'node:fs';
+import { createReadStream, existsSync, type BigIntStats } from 'node:fs';
 import { lstat, readFile, realpath, unlink } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
@@ -23,12 +23,17 @@ interface DriverOptions {
 // Pinned electron-updater internals are confined to this adapter. Installation
 // still runs through its stock downloader, signature verifier and NSIS state.
 interface StockCacheAccess {
+  readonly installerPath: string | null;
   getOrCreateDownloadHelper(): Promise<{ cacheDir: string; cacheDirForPendingUpdate: string }>;
   verifySignature(file: string): Promise<string | null>;
   httpExecutor: {
     download: (...args: any[]) => Promise<any>;
     downloadToBuffer: (...args: any[]) => Promise<any>;
   };
+}
+interface VerifiedInstaller {
+  file: string;
+  identity: string;
 }
 const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
 
@@ -48,6 +53,7 @@ export function configurePlatformUpdates(
     : undefined;
   let selected: PlatformUpdateInfo | undefined;
   let localComplete: PlatformUpdateInfo | undefined;
+  let checkedInstaller: VerifiedInstaller | false = false;
   let checkedAt: number | null = null;
   let forceNext = false;
   let disposed = false;
@@ -105,7 +111,12 @@ export function configurePlatformUpdates(
       throw error;
     }
   }
-  async function complete(info: PlatformUpdateInfo, signal?: AbortSignal, verifySignature = false) {
+  async function complete(
+    info: PlatformUpdateInfo,
+    signal?: AbortSignal,
+    verifySignature = false,
+    checked?: VerifiedInstaller | false,
+  ) {
     info = validate(info, target);
     signal?.throwIfAborted();
     const pending = await pendingDirectory();
@@ -115,21 +126,34 @@ export function configurePlatformUpdates(
       return false;
     let stat;
     try {
-      stat = await lstat(file);
+      stat = await lstat(file, { bigint: true });
     } catch (error) {
       if (absent(error)) return false;
       throw error;
     }
     if (!stat.isFile() || stat.isSymbolicLink()) throw Error('Unsafe cached update file');
-    if (stat.size !== info.selectedRelease.binary.size) return false;
+    if (stat.size !== BigInt(info.selectedRelease.binary.size)) return false;
+    const identity = (s: BigIntStats) =>
+      [file, info.sha512, s.dev, s.ino, s.size, s.birthtimeNs, s.ctimeNs, s.mtimeNs].join('\0');
+    const observed = identity(stat);
+    if (checked && checked.identity === observed && stat.ino > 0n && stat.ctimeNs > 0n) {
+      signal?.throwIfAborted();
+      return checked;
+    }
     const hash = createHash('sha512');
     for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
     signal?.throwIfAborted();
     if (hash.digest('base64') !== info.sha512) return false;
     if (verifySignature && (await native.verifySignature(file)) !== null)
       throw Error('Cached update signature verification failed');
+    if (verifySignature) {
+      const after = await lstat(file, { bigint: true }).catch(error => {
+        if (!absent(error)) throw error;
+      });
+      if (!after?.isFile() || identity(after) !== observed) throw Error('Offline update cache changed');
+    }
     signal?.throwIfAborted();
-    return true;
+    return { file, identity: observed };
   }
   async function removePartial(info: PlatformUpdateInfo) {
     const pending = await pendingDirectory();
@@ -161,7 +185,10 @@ export function configurePlatformUpdates(
       if (!journal) return;
       if (await complete(journal)) await cache!.clearJournal();
       else await clearIncomplete(journal, true);
-    })();
+    })().catch(error => {
+      recovering = undefined;
+      throw error;
+    });
     return recovering;
   }
   async function clearIncomplete(info: PlatformUpdateInfo, cooldown: boolean) {
@@ -244,23 +271,28 @@ export function configurePlatformUpdates(
     removeListener: (event, listener) => updater.removeListener(event, listener),
     checkForUpdates(force = false) {
       if (checking) return checking;
+      checkedInstaller = false;
       checking = (async () => {
         lifetime.signal.throwIfAborted();
         await recover();
         lifetime.signal.throwIfAborted();
         localComplete = undefined;
         const info = cache?.info();
+        let proof: VerifiedInstaller | false = false;
         if (
           !force &&
           target === 'windows-x64' &&
           info &&
-          compareVersions(info.version, updater.currentVersion.version) > 0 &&
-          (await complete(info, lifetime.signal, true))
-        )
-          localComplete = info;
+          compareVersions(info.version, updater.currentVersion.version) > 0
+        ) {
+          proof = await complete(info, lifetime.signal, true);
+          if (proof) localComplete = info;
+        }
         lifetime.signal.throwIfAborted();
         forceNext = force;
-        return await updater.checkForUpdates();
+        const result = await updater.checkForUpdates();
+        if (result && localComplete === selected) checkedInstaller = proof;
+        return result;
       })().finally(() => {
         checking = undefined;
         forceNext = false;
@@ -270,6 +302,7 @@ export function configurePlatformUpdates(
     },
     downloadUpdate(signal) {
       if (downloading) return downloading;
+      checkedInstaller = false;
       const combined = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
       downloading = (async () => {
         await recover();
@@ -296,12 +329,14 @@ export function configurePlatformUpdates(
     },
     restoreDownloadedUpdate(signal) {
       if (restoring) return restoring;
+      const checked = checkedInstaller;
+      checkedInstaller = false;
       restoring = (async () => {
         const combined = AbortSignal.any([lifetime.signal, ...(signal ? [signal] : [])]);
         await recover();
         combined.throwIfAborted();
         const info = selected ?? cache?.info();
-        if (target !== 'windows-x64' || !info || !(await complete(info, combined, true)))
+        if (target !== 'windows-x64' || !info || !(await complete(info, combined, true, checked)))
           return false;
         await stockDownload(combined, true);
         return true;
@@ -315,7 +350,8 @@ export function configurePlatformUpdates(
     quitAndInstall(silent, forceRun) {
       installation ??= (async () => {
         const info = selected ?? cache?.info();
-        if (disposed || !info || !(await complete(info, lifetime.signal, true)))
+        const verified = !disposed && info && (await complete(info, lifetime.signal, true));
+        if (!verified || (target === 'windows-x64' && native.installerPath !== verified.file))
           throw Error('Authenticated update is unavailable or changed before installation');
         lifetime.signal.throwIfAborted();
         updater.quitAndInstall(silent, forceRun);

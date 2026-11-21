@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { useKnowledgeIndex } from '../../../shared/src/stores/knowledgeIndex';
-import { knowledgeStatusLabel } from '../../../shared/src/services/knowledgeIndex';
-import type { KnowledgeState, KnowledgeStatus } from '../../../shared/electron/contracts/knowledge';
+import { knowledgeStatusLabel, documentIndexLabel } from '../../../shared/src/services/knowledgeIndex';
+import { KNOWLEDGE_INDEX_VERSION, type KnowledgeEvent, type KnowledgeState, type KnowledgeStatus } from '../../../shared/electron/contracts/knowledge';
 const state: KnowledgeState = {
   documents: [],
   tasks: [],
@@ -9,6 +9,99 @@ const state: KnowledgeState = {
 };
 afterEach(() => vi.unstubAllGlobals());
 describe('索引状态生命周期', () => {
+  it('shows only the current index while a completed legacy document is being upgraded', () => {
+    const legacy = { indexVersion: 'qa-linked-v2' };
+    const ready: KnowledgeStatus = { documentId: 'doc', phase: 'ready', completed: 4, total: 4 };
+    expect(documentIndexLabel(legacy, ready)).toBe('尚未索引');
+    expect(documentIndexLabel({}, undefined)).toBe('尚未索引');
+    expect(documentIndexLabel(legacy, { ...ready, phase: 'parsing', completed: 0, total: 0 })).toBe('索引中 0%');
+    expect(documentIndexLabel(legacy, { ...ready, phase: 'embedding', completed: 1 })).toBe('索引中 25%');
+    expect(documentIndexLabel(legacy, { ...ready, phase: 'failed' })).toBe('索引失败');
+    const current = { ...ready, requestId: 'this-import', indexVersion: KNOWLEDGE_INDEX_VERSION };
+    expect(documentIndexLabel(undefined, current)).toBe('尚未索引');
+    expect(documentIndexLabel(legacy, current, { requestId: 'other-import' })).toBe('尚未索引');
+    expect(documentIndexLabel(undefined, current, { requestId: 'this-import' })).toBe('索引完成');
+    expect(documentIndexLabel({ indexVersion: KNOWLEDGE_INDEX_VERSION })).toBe('索引完成');
+  });
+  it('updates only the affected file rows and keeps the current catalog for other files', async () => {
+    let emit!: (event: KnowledgeEvent) => void;
+    vi.stubGlobal('window', { desktop: {
+      knowledge: async () => ({ ok: true, value: state }),
+      onKnowledgeEvent: (listener: typeof emit) => { emit = listener; return () => {}; },
+    } });
+    const close = useKnowledgeIndex.getState().connect();
+    try {
+      await useKnowledgeIndex.getState().refresh();
+      const tasks = useKnowledgeIndex.getState().tasks;
+      const docIds = ['old-a', 'old-b'];
+      emit({ type: 'old-index-deletion', active: true, documentIds: docIds });
+      const affected = useKnowledgeIndex.getState().deletingDocumentIds;
+      expect(affected).toEqual(new Set(docIds));
+      expect(useKnowledgeIndex.getState().state).toBe(state);
+      const rowLabel = (id: string, version?: string) => documentIndexLabel(
+        version ? { indexVersion: version } : undefined, undefined, { deleting: affected?.has(id) });
+      expect(docIds.map(id => rowLabel(id, 'qa-linked-v2'))).toEqual(['正在删除旧索引…', '正在删除旧索引…']);
+      expect(rowLabel('current', KNOWLEDGE_INDEX_VERSION)).toBe('索引完成');
+      expect(rowLabel('new')).toBe('尚未索引');
+      expect(useKnowledgeIndex.getState().tasks).toBe(tasks);
+      await useKnowledgeIndex.getState().refresh();
+      expect(useKnowledgeIndex.getState().deletingDocumentIds).toBe(affected);
+      emit({ type: 'old-index-deletion', active: true, documentIds: ['old-c'] });
+      expect(useKnowledgeIndex.getState().deletingDocumentIds).toEqual(new Set(['old-c']));
+      emit({ type: 'old-index-deletion', active: true, documentIds: [] });
+      expect(useKnowledgeIndex.getState().deletingDocumentIds).toEqual(new Set());
+      emit({ type: 'old-index-deletion', active: false });
+      expect(useKnowledgeIndex.getState().deletingDocumentIds).toBeNull();
+      emit({ type: 'old-index-deletion', active: true, documentIds: docIds });
+    } finally { close(); }
+    expect(useKnowledgeIndex.getState().deletingDocumentIds).toBeNull();
+    expect(useKnowledgeIndex.getState().state).toBeNull();
+  });
+  it('重连时立即回放删除提示，上一轮未返回的状态请求不覆盖当前订阅', async () => {
+    let emit!: (event: KnowledgeEvent) => void;
+    let deleting = false;
+    const pending: Array<(snapshot: KnowledgeState) => void> = [];
+    const knowledge = vi.fn(() => {
+      if (deleting) emit({ type: 'old-index-deletion', active: true, documentIds: ['old-a', 'old-b'] });
+      return new Promise(resolve => pending.push(value => resolve({ ok: true, value })));
+    });
+    vi.stubGlobal('window', { desktop: {
+      knowledge,
+      onKnowledgeEvent: (listener: typeof emit) => { emit = listener; return () => {}; },
+    } });
+    const index = useKnowledgeIndex.getState;
+    const close = index().connect();
+    const old = index().refresh();
+    const oldListener = emit;
+    deleting = true;
+    emit({ type: 'old-index-deletion', active: true, documentIds: ['old-a'] });
+    close();
+    const reconnect = index().connect();
+    try {
+      expect(knowledge).toHaveBeenCalledTimes(2);
+      const affected = index().deletingDocumentIds;
+      expect(affected).toEqual(new Set(['old-a', 'old-b']));
+      expect(index().state).toBeNull();
+      const coldRow = (id: string) => documentIndexLabel(undefined, undefined, {
+        deleting: affected?.has(id), hasSnapshot: !!index().state,
+      });
+      expect(coldRow('old-b')).toBe('正在删除旧索引…');
+      expect(coldRow('unrelated')).toBeUndefined();
+      oldListener({ type: 'old-index-deletion', active: false });
+      expect(index().deletingDocumentIds).toBe(affected);
+      const current = index().refresh();
+      pending[0]({ ...state, modelReady: false });
+      await old;
+      expect(index().refresh()).toBe(current);
+      expect(knowledge).toHaveBeenCalledTimes(2);
+      deleting = false;
+      emit({ type: 'old-index-deletion', active: false });
+      pending[1](state);
+      await current;
+      expect(index().deletingDocumentIds).toBeNull();
+      expect(index().state).toEqual(state);
+    } finally { reconnect(); }
+  });
   it('关闭提示或切换资料视图后，旧刷新失败不重现，新刷新仍可报错', async () => {
     let fail!: (error: Error) => void;
     const knowledge = vi.fn().mockReturnValueOnce(

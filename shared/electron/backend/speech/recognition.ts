@@ -1,4 +1,5 @@
 import type { AudioSource, SpeechEvent } from '../../contracts/speech';
+import { speechSwitchCancelled } from '../../contracts/speechSettings';
 import type { RecognizerMetadata, RecognizerPort } from './recognizer';
 export type RecognizerFactory = (
   options: object,
@@ -14,6 +15,7 @@ type Slot = {
 };
 type Switch = {
   slot: Slot;
+  expedited?: boolean;
   resolve(value: RecognizerMetadata): void;
   reject(error: Error): void;
   timer: NodeJS.Timeout;
@@ -92,6 +94,7 @@ export class RecognitionRouter {
             120000,
           );
           phase('waiting');
+          if (change.expedited || !this.sources.size) this.expedite();
         })
         .catch((error) => {
           if (this.switching === change)
@@ -110,14 +113,14 @@ export class RecognitionRouter {
     this.retiring.add(closing);
     void closing.finally(() => this.retiring.delete(closing));
   }
-  cancel(message = '语音切换已取消，仍使用原配置。') {
+  cancel(message: string | Error = speechSwitchCancelled) {
     const change = this.switching;
     if (!change) return;
     this.switching = undefined;
     clearTimeout(change.timer);
     change.slot.abort.abort();
     if (change.slot.port) this.retire(change.slot.port);
-    change.reject(Error(message));
+    change.reject(typeof message === 'string' ? Error(message) : message);
   }
   private remember(source: AudioSource, samples: Float32Array, rate: number, timestamp: number) {
     const recent = this.history.get(source) ?? [];
@@ -144,13 +147,49 @@ export class RecognitionRouter {
     this.history.set(source, recent);
   }
   async feed(source: AudioSource, samples: Float32Array, rate: number, timestamp: number) {
+    const owner = this.current;
     this.sources.add(source);
     this.remember(source, samples, rate, timestamp);
-    await this.current.port!.feed(source, samples, rate, timestamp);
+    try {
+      await owner.port!.feed(source, samples, rate, timestamp);
+    } catch (error) {
+      if (this.current === owner) throw error;
+    }
+    // An expedited cutover reports a gap for the interrupted packet. Its
+    // eventual ACK or error cannot advance the replacement's silence clock.
+    if (this.current !== owner) return;
     this.audioMs += (samples.length / rate) * 1000;
     const through = this.current.port!.processedThrough(source);
     if (through !== undefined) this.progress.set(source, through);
     await this.handoff();
+  }
+  expedite(manual = false) {
+    const change = this.switching;
+    if (!change) return;
+    change.expedited = true;
+    if (!change.slot.port || change.slot.priming) return;
+    if (!change.slot.port.healthy) {
+      this.cancel('新识别器已退出，仍使用原配置。');
+      return;
+    }
+    this.history.clear();
+    for (const source of this.sources)
+      this.emit({ type: 'gap', source, message: manual
+        ? '已立即切换语音模型。未完成片段不会自动用于回答。'
+        : '转写积压，已切换轻量模型。未完成片段不会自动用于回答。' });
+    this.commit(change);
+  }
+  private commit(change: Switch) {
+    const old = this.current.port!;
+    this.retiredInference += old.inferenceMs;
+    this.current = change.slot;
+    change.slot.priming = false;
+    this.switching = undefined;
+    clearTimeout(change.timer);
+    for (const event of change.slot.events) this.emit(event);
+    change.slot.events = [];
+    change.resolve(change.slot.port!.metadata);
+    this.retire(old);
   }
   private async handoff() {
     const change = this.switching;
@@ -161,7 +200,6 @@ export class RecognitionRouter {
       return;
     }
     if (![...this.sources].every((source) => this.current.port!.canSwitch(source))) return;
-    const old = this.current;
     let timer: NodeJS.Timeout | undefined;
     let aborted: (() => void) | undefined;
     try {
@@ -181,15 +219,7 @@ export class RecognitionRouter {
         }),
       ]);
       if (this.switching !== change || this.closed) return;
-      this.retiredInference += old.port!.inferenceMs;
-      this.current = change.slot;
-      change.slot.priming = false;
-      this.switching = undefined;
-      clearTimeout(change.timer);
-      for (const event of change.slot.events) this.emit(event);
-      change.slot.events = [];
-      change.resolve(candidate.metadata);
-      this.retire(old.port!);
+      this.commit(change);
     } catch (error) {
       change.slot.priming = false;
       if (this.switching === change)

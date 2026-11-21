@@ -1,8 +1,8 @@
-import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, connectUiAccount, installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { closeUiApp, installUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { mkdir, writeFile, readFile, lstat } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 
@@ -10,6 +10,16 @@ const appData = path.join(testRoot, 'application-data');
 const legacy = path.join(appData, 'ai-interview-copilot');
 const destination = path.join(appData, 'VoxCue');
 const bootstrap = path.join(testRoot, 'migration-bootstrap');
+const history = {
+  id: 'migration-history', title: 'Migration interview', startedAt: 1, endedAt: 2,
+  status: 'ended', mock: false, transcripts: [], answers: [],
+};
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const ledgerPath = path.join('chat-usage', sha256('migration-test-provider') + '.json');
+const ledger = JSON.stringify({
+  usage: { inputTokens: 2, outputTokens: 3, totalTokens: 5, requests: 1, updatedAt: 1 },
+  ids: ['migration-response'],
+});
 await mkdir(legacy, { recursive: true });
 await mkdir(bootstrap);
 const baseline = path.join(testRoot, 'baseline.cjs');
@@ -33,7 +43,8 @@ app.setPath('userData',${JSON.stringify(legacy)});
 app.setPath('sessionData',${JSON.stringify(legacy)});
 app.whenReady().then(()=>{
  const window=new BrowserWindow({width:960,height:700,webPreferences:{contextIsolation:true,sandbox:true}});
- window.loadFile(${JSON.stringify(path.join(workspace.platformRoot, 'dist/index.html'))});
+ // Use the shipped file origin without mounting the signed-in UI over the v1 stores.
+ window.loadFile(${JSON.stringify(path.join(workspace.platformRoot, 'dist/index.html'))},{hash:'login'});
 });
 app.on('window-all-closed',()=>app.quit());
 `,
@@ -72,12 +83,50 @@ async function assertMigrationEntry(app) {
     { fixtureEnabled: false, appData, userData: destination, sessionData: destination },
   );
 }
+async function assertClaimedProfile(app, page) {
+  const account = await page.evaluate(() => window.desktop.cloudAccount({ action: 'status' }));
+  assert.equal(account.ok, true);
+  assert.equal(account.state.user?.id, 'a0000000-0000-4000-8000-000000000001');
+  const owner = sha256('account:' + account.state.user.id);
+  const partition = 'voxcue-user-' + owner;
+  const storagePath = await app.evaluate(({ BrowserWindow, session }, partition) => {
+    const main = BrowserWindow.getAllWindows().find(win => win.webContents.getURL().endsWith('/index.html'));
+    return main?.webContents.session === session.fromPartition('persist:' + partition)
+      ? main.webContents.session.getStoragePath() : null;
+  }, partition);
+  assert.ok(storagePath, 'The signed-in main window must use the claimed persistent session');
+  assert.equal(path.relative(path.join(destination, 'Partitions', partition), storagePath), '');
+  assert.deepEqual(JSON.parse(await readFile(path.join(destination, 'legacy-profile-assignment-v1.json'), 'utf8')),
+    { owner, files: false, browser: false });
+  assert.equal(await readFile(path.join(destination, 'account-profiles', owner, ledgerPath), 'utf8'), ledger);
+  const saved = await page.evaluate(async (id) => {
+    const db = await new Promise((resolve, reject) => {
+      const request = indexedDB.open('copilot-local-documents');
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      return await new Promise((resolve, reject) => {
+        const tx = db.transaction(['interviewRecords', 'interviewDirectory'], 'readonly');
+        const body = tx.objectStore('interviewRecords').get(id);
+        const summary = tx.objectStore('interviewDirectory').get(id);
+        tx.oncomplete = () => resolve({ body: body.result, title: summary.result?.title,
+          revision: summary.result?.revision, legacy: localStorage.getItem('copilot-interview-history-v1') });
+        tx.onerror = tx.onabort = () => reject(tx.error);
+      });
+    } finally { db.close(); }
+  }, history.id);
+  assert.deepEqual(saved.body, history);
+  assert.equal(saved.title, history.title);
+  assert.ok(typeof saved.revision === 'string' && saved.revision.length > 0);
+  assert.equal(saved.legacy, null);
+}
 let app;
 try {
   app = await launch(baseline);
   let page = await app.firstWindow();
   await page.waitForLoadState();
-  await page.evaluate(async () => {
+  await page.evaluate(async (history) => {
     localStorage.setItem('copilot-theme', 'dark');
     localStorage.setItem(
       'copilot-personal-info-v1',
@@ -88,7 +137,7 @@ try {
       }),
     );
     localStorage.setItem('copilot-interview-knowledge-base-v1', JSON.stringify('migration-base'));
-    localStorage.setItem('migration-history-fixture', 'history-is-preserved');
+    localStorage.setItem('copilot-interview-history-v1', JSON.stringify([history]));
     const open = (name, upgrade) =>
       new Promise((resolve, reject) => {
         const request = indexedDB.open(name, 1);
@@ -159,7 +208,7 @@ try {
     });
     await committed;
     knowledge.close();
-  });
+  }, history);
   const hostId = await app.evaluate(async ({ app }, module) => {
     const require = process
       .getBuiltinModule('module')
@@ -182,13 +231,11 @@ try {
   await app.close();
   app = undefined;
   const originalCipher = await readFile(path.join(legacy, 'auth-data/credentials.bin'));
-  for (const directory of ['component-cache/migration-fixture', 'knowledge-v1', 'chat-usage']) {
-    await mkdir(path.join(legacy, directory), { recursive: true });
-    await writeFile(
-      path.join(legacy, directory, 'migration-sentinel.bin'),
-      Buffer.from([0, 255, 128, 7]),
-    );
-  }
+  const cachedAsset = path.join('component-cache', 'migration-fixture', 'model.bin');
+  await mkdir(path.join(legacy, path.dirname(cachedAsset)), { recursive: true });
+  await writeFile(path.join(legacy, cachedAsset), Buffer.from([0, 255, 128, 7]));
+  await mkdir(path.join(legacy, path.dirname(ledgerPath)), { recursive: true });
+  await writeFile(path.join(legacy, ledgerPath), ledger);
   app = await launch(next);
   await assertMigrationEntry(app);
   page = await app.firstWindow();
@@ -213,10 +260,7 @@ try {
     await page.evaluate(() => document.documentElement.classList.contains('dark')),
     true,
   );
-  assert.equal(
-    await page.evaluate(() => localStorage.getItem('migration-history-fixture')),
-    'history-is-preserved',
-  );
+  await assertClaimedProfile(app, page);
   assert.equal(
     (await page.evaluate(() => window.desktop.authSession())).user.id,
     'synthetic-account',
@@ -234,7 +278,7 @@ try {
   const stored = await page.evaluate(async () => {
     const open = (name) =>
       new Promise((resolve, reject) => {
-        const request = indexedDB.open(name, 1);
+        const request = indexedDB.open(name);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });
@@ -253,14 +297,10 @@ try {
     return { attachment: await attachment.blob.text(), original: await original.blob.text() };
   });
   assert.deepEqual(stored, { attachment: 'migration attachment', original: 'original' });
-  for (const directory of ['component-cache/migration-fixture', 'knowledge-v1', 'chat-usage'])
-    assert.deepEqual(
-      await readFile(path.join(destination, directory, 'migration-sentinel.bin')),
-      Buffer.from([0, 255, 128, 7]),
-    );
+  assert.deepEqual(await readFile(path.join(destination, cachedAsset)), Buffer.from([0, 255, 128, 7]));
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: real Chromium profile, chat/attachment/knowledge blobs, theme, encrypted login, host identity and model/index files survive migration; legacy path is absent.',
+    'PASS: the claimed account partition contains the migrated chat, attachments, original document, committed history and usage ledger. Device cache and legacy encrypted credentials survive the directory migration.',
   );
   await closeUiApp(app);
   app = undefined;
@@ -278,6 +318,7 @@ try {
     'synthetic-account',
   );
   assert.equal(await lstat(legacy).catch(() => null), null);
+  await assertClaimedProfile(app, page);
   console.log(
     'PASS: repeated launch reuses VoxCue with no recreated legacy directory or repeat migration.',
   );

@@ -107,6 +107,9 @@ try {
   floating.setDefaultTimeout(15000);
   floating.on('pageerror', (e) => errors.push(e.message));
   await floating.locator('.floating-answer .floating-composer').waitFor();
+  const answerCard = (question) => floating.getByRole('article', { name: '回答：' + question, exact: true });
+  // Let the opening speech fixture finish before the manual question becomes the last card.
+  await answerCard('Synthetic interviewer question').getByText('结尾标记', { exact: true }).waitFor();
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('合成发送按钮状态');
   await settle(floating);
   await floating.waitForFunction(
@@ -185,9 +188,12 @@ try {
     (await material(floating.locator('.floating-capture-notice'))).filter,
     chatComposer.filter,
   );
-  await floating.getByRole('textbox', { name: '面试提问', exact: true }).fill('合成滚动验证');
+  const manualQuestion = '合成滚动验证';
+  const manualCard = answerCard(manualQuestion);
+  const bubble = manualCard.locator('.answer-bubble');
+  await editor.fill(manualQuestion);
   await click(floating.getByRole('button', { name: '发送面试问题', exact: true }));
-  await floating.locator('.answer-bubble').getByText('结尾标记', { exact: true }).waitFor();
+  await bubble.getByText('结尾标记', { exact: true }).waitFor();
   await verifyConcentricComposers(floating, 'interview with dialogue');
   const wasDark = await floating.evaluate(() =>
     document.documentElement.classList.contains('dark'),
@@ -198,7 +204,7 @@ try {
       dark,
     );
     const toolbarMaterial = await material(floating.locator('.floating-toolbar'));
-    const bubbleMaterial = await material(floating.locator('.answer-bubble'));
+    const bubbleMaterial = await material(bubble);
     assert.deepEqual(toolbarMaterial, bubbleMaterial, 'Capsule and bubbles share one material');
     assert.equal(
       await floating
@@ -234,7 +240,7 @@ try {
     );
     const composerMaterial = await material(floating.locator('.floating-composer'));
     assert.equal(composerMaterial.filter, chatComposer.filter);
-    const expected = await floating.locator('.answer-bubble').evaluate((node, dark) => {
+    const expected = await bubble.evaluate((node, dark) => {
       const probe = document.createElement('span');
       probe.style.backgroundColor = `color-mix(in srgb, var(--surface) ${dark ? 81.2 : 76.4}%, transparent)`;
       node.append(probe);
@@ -254,13 +260,17 @@ try {
   await answerScroll.evaluate((e) => {
     e.scrollTop = e.scrollHeight;
   });
-  await floating.waitForFunction(() => {
-    const last = document
-      .querySelector('.answer-bubble .markdown-content > :last-child')
-      .getBoundingClientRect();
-    const composer = document.querySelector('.floating-composer').getBoundingClientRect();
-    return last.bottom <= composer.top - 36 && last.top > 0;
-  });
+  await floating.waitForFunction((card) => {
+    const line = card.querySelector('.answer-bubble .markdown-content > :last-child');
+    if (line?.textContent !== '结尾标记') return false;
+    const scroll = card.closest('.floating-scroll');
+    const panel = scroll.closest('.floating-answer');
+    const last = line.getBoundingClientRect();
+    const composer = panel.querySelector('.floating-composer').getBoundingClientRect();
+    const header = panel.querySelector(':scope > header').getBoundingClientRect();
+    return scroll.scrollTop > 0 && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop <= 1 &&
+      last.bottom <= composer.top - 36 && last.top >= header.bottom;
+  }, await manualCard.elementHandle());
   const geometry = await floating.locator('.floating-answer').evaluate((e) => {
     const box = e.getBoundingClientRect(),
       scroll = e.querySelector('.floating-scroll');
@@ -276,20 +286,23 @@ try {
     'Scroll content fades at the top and bottom edges',
   );
 
-  await answerScroll.evaluate((scroll) => {
-    scroll.scrollTop = 0;
-    const first = scroll.firstElementChild.getBoundingClientRect();
+  await manualCard.evaluate((card) => {
+    const scroll = card.closest('.floating-scroll');
     const header = scroll.parentElement.querySelector(':scope > header').getBoundingClientRect();
-    scroll.scrollTop = first.top - header.bottom + 12;
+    scroll.scrollTop += card.getBoundingClientRect().top - header.bottom + 12;
   });
   assert.deepEqual(await material(floating.locator('.floating-answer > header')), {
     fill: 'rgba(0, 0, 0, 0)',
     filter: 'none',
   });
   await captureRequested(floating, 'interview-header-partial-overlap');
-  await answerScroll.evaluate((e) => {
-    e.scrollTop = 100;
+  const readingPosition = await manualCard.evaluate((card) => {
+    const scroll = card.closest('.floating-scroll');
+    scroll.scrollTop += card.getBoundingClientRect().top - scroll.getBoundingClientRect().top + 100;
+    const viewport = scroll.getBoundingClientRect(), box = card.getBoundingClientRect();
+    return { top: box.top - viewport.top, bottom: box.bottom - viewport.bottom };
   });
+  assert.ok(Math.abs(readingPosition.top + 100) <= 1 && readingPosition.bottom > 0, JSON.stringify(readingPosition));
   assert.deepEqual(await material(floating.locator('.floating-answer > header')), {
     fill: 'rgba(0, 0, 0, 0)',
     filter: 'none',
@@ -524,17 +537,17 @@ try {
   await cdp.send('DOM.enable');
   await cdp.send('CSS.enable');
   const assertSolidControls = async () => {
-    for (const selector of [
-      '.floating-toolbar',
-      '.floating-composer',
-      '.floating-capture-notice',
-      '.answer-bubble',
+    for (const control of [
+      floating.locator('.floating-toolbar'),
+      floating.locator('.floating-composer'),
+      floating.locator('.floating-capture-notice'),
+      bubble,
     ]) {
-      const reduced = await material(floating.locator(selector));
+      const reduced = await material(control);
       assert.equal(reduced.filter, 'none');
       assert.equal(
         reduced.fill,
-        await floating.locator(selector).evaluate((e) => {
+        await control.evaluate((e) => {
           const probe = document.createElement('span');
           probe.style.backgroundColor = 'var(--surface)';
           e.append(probe);

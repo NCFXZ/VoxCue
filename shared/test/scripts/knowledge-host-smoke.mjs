@@ -22,6 +22,11 @@ function utilityFixture() {
   require('node:module').syncBuiltinESMExports();
   const { KnowledgeService } = require(config.service);
   const { KnowledgeError } = require(config.errors);
+  KnowledgeService.prototype.indexDocument = async function (_input, signal) {
+    process.parentPort.postMessage({ fixtureStarted: 'index' });
+    await new Promise((_resolve, reject) =>
+      signal.addEventListener('abort', () => reject(signal.reason), { once: true }));
+  };
   KnowledgeService.prototype.search = async function (
     query,
     _topK,
@@ -159,8 +164,8 @@ async function runInElectron() {
     assert.equal(providerCalls, 1);
 
     const controller = new AbortController();
-    const started = message(host.child, (value) => value.fixtureStarted === 'hang');
-    const lateCancellation = message(host.child, (value) => value.errorCode === 'cancelled');
+    const started = message(host.primary.child, (value) => value.fixtureStarted === 'hang');
+    const lateCancellation = message(host.primary.child, (value) => value.errorCode === 'cancelled');
     providerCalls = 0;
     const cancelled = rag.stream(request('hang'), () => {}, controller.signal);
     const rejected = assert.rejects(cancelled, { name: 'AbortError' });
@@ -169,13 +174,13 @@ async function runInElectron() {
     await rejected;
     await lateCancellation;
     assert.equal(providerCalls, 0);
-    assert.equal(host.pending.size, 0);
+    assert.equal(host.primary.pending.size, 0);
 
     // Shorten only Host's test deadline. Hold its kill request long enough to
     // prove that neither a late reply nor kill's return retires the operation.
-    const send = host.send.bind(host);
-    host.send = (call, parent, timeout) => send(call, parent, call.query === 'late' ? 20 : timeout);
-    const oldChild = host.child;
+    const send = host.primary.send.bind(host.primary);
+    host.primary.send = (call, parent, timeout) => send(call, parent, call.query === 'late' ? 20 : timeout);
+    const oldChild = host.primary.child;
     const nativeKill = oldChild.kill.bind(oldChild);
     let requestedKill;
     const killRequested = new Promise((resolve, reject) => {
@@ -205,32 +210,32 @@ async function runInElectron() {
       await unavailable;
       assert.deepEqual(await next, []);
       assert.equal(forks, previousForks + 1);
-      assert.notEqual(host.child, oldChild);
+      assert.notEqual(host.primary.child, oldChild);
     } finally {
       oldChild.kill = nativeKill;
       if (!exited) nativeKill();
     }
-    assert.equal(host.pending.size, 0);
+    assert.equal(host.primary.pending.size, 0);
 
     // Exercise the actual 15-second Local RAG deadline, without changing it.
     providerCalls = 0;
-    const timeoutCancellation = message(host.child, (value) => value.fixtureStarted === 'hang');
-    const timeoutRetired = message(host.child, (value) => value.errorCode === 'cancelled', 20000);
+    const timeoutCancellation = message(host.primary.child, (value) => value.fixtureStarted === 'hang');
+    const timeoutRetired = message(host.primary.child, (value) => value.errorCode === 'cancelled', 20000);
     const timed = rag.stream(request('hang'), () => {}, signal());
     await timeoutCancellation;
     await timed;
     assert.equal(providerCalls, 1);
     await timeoutRetired;
-    assert.equal(host.pending.size, 0);
+    assert.equal(host.primary.pending.size, 0);
 
     for (const operation of ['stop', 'exit']) {
-      const started = message(host.child, (value) => value.fixtureStarted === 'hang');
+      const started = message(host.primary.child, (value) => value.fixtureStarted === 'hang');
       const pending = host.search('hang', 5, 'hybrid', signal());
       const rejected = assert.rejects(pending, {
         code: operation === 'stop' ? 'closed' : 'unavailable',
       });
       await started;
-      const child = host.child;
+      const child = host.primary.child;
       const exited = exit(child);
       if (operation === 'stop') host.stop();
       // Electron 44's graceful kill can deliver the utility's cancellation
@@ -239,7 +244,23 @@ async function runInElectron() {
       else process.kill(child.pid, 'SIGKILL');
       await rejected;
       await exited;
-      assert.equal(host.pending.size, 0);
+      assert.equal(host.primary.pending.size, 0);
+      host = createHost();
+      await host.initialize();
+    }
+    for (const finish of ['close', 'unloadModel']) {
+      const work = new AbortController();
+      const activeIndex = message(host.primary.child, value => value.fixtureStarted === 'index');
+      const indexing = assert.rejects(host.indexDocument({
+        documentId: 'pending', baseId: 'base', name: 'synthetic.txt', bytes: new Uint8Array([1]),
+      }, work.signal), { code: 'cancelled' });
+      await activeIndex;
+      assert.deepEqual(await host.search('next', 1, 'hybrid', signal()), []);
+      const activeRead = message(host.reader.child, value => value.fixtureStarted === 'hang');
+      const reading = assert.rejects(host.search('hang', 1, 'hybrid', work.signal), { code: 'cancelled' });
+      await activeRead;
+      work.abort();
+      await Promise.all([host[finish](), indexing, reading]);
       host = createHost();
       await host.initialize();
     }
@@ -248,6 +269,7 @@ async function runInElectron() {
       JSON.stringify({
         status: 'passed',
         realUtilityProcess: true,
+        concurrentReadDuringIndex: true,
         wireCodes: knowledgeErrorCodes,
         unknownWire: 'integrity',
         originalLocalRagTimeoutMs: 15000,

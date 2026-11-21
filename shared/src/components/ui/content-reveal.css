@@ -1,0 +1,29 @@
+.interview-reveal {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition:
+    grid-template-rows var(--panel-motion-duration, 240ms) var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)),
+    opacity var(--panel-motion-duration, 240ms) ease-in-out;
+}
+.interview-reveal[data-open='true'] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+@starting-style {
+  .interview-reveal[data-open='true']:not(.floating-progress-reveal) {
+    grid-template-rows: 0fr;
+    opacity: 0;
+  }
+}
+.interview-reveal-clip {
+  min-height: 0;
+  overflow: hidden;
+}
+.reveal-content {
+  display: flow-root;
+}
+@media (prefers-reduced-motion: reduce) {
+  .interview-reveal { transition: none; }
+}

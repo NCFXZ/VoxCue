@@ -2,6 +2,10 @@ import { createHash } from 'node:crypto';
 import type { KnowledgeItem } from '../../contracts/knowledge';
 import type { Embedder, ParsedDocument } from './types';
 export const sha = (value: string | Uint8Array) => createHash('sha256').update(value).digest('hex');
+export const knowledgeItemId = (documentId: string, page: number, line: number, content: string) =>
+  documentId + ':' + sha(page + ':' + line + ':' + content).slice(0, 24);
+const spokenQuestion =
+  /^\s*(?:↳\s*)?\*\*[A-Za-z]{0,3}-?\d{0,4}\s*[｜|]?\s*(主问|追问\s*(\d*))(?:\s*[（(][^）)\n]{0,16}[）)])?[：:]\s*\*\*\s*(\S.*)$/u;
 export function parseText(
   text: string,
   documentId: string,
@@ -19,6 +23,13 @@ export function parseText(
       continue;
     }
     if (fence) continue;
+    if (lines[i].length <= 300 && lines[i].includes('**')) {
+      const match = spokenQuestion.exec(lines[i]);
+      if (match) {
+        const [, label, number, question] = match;
+        lines[i] = (label === '主问' ? '问题' : '追问' + number) + '：' + question;
+      }
+    }
     const h = /^(#{1,6})\s+(.+)/.exec(lines[i]);
     if (h)
       headers.push({
@@ -78,8 +89,7 @@ export function parseText(
           const content = lines.slice(block, line).join('\n').trim();
           if (content.length >= 8)
             items.push({
-              itemId:
-                documentId + ':' + sha((page ?? 0) + ':' + block + ':' + content).slice(0, 24),
+              itemId: knowledgeItemId(documentId, page ?? 0, block, content),
               documentId,
               kind: 'text',
               title: h?.title ?? title,
@@ -103,7 +113,7 @@ export function parseText(
       .replace(/<a\s+[^>]*>\s*<\/a>/gi, '')
       .trim();
     if (!content || content.length < 8) continue;
-    const itemId = `${documentId}:${sha(`${page ?? 0}:${start}:${content}`).slice(0, 24)}`;
+    const itemId = knowledgeItemId(documentId, page ?? 0, start, content);
     const qa = !!h?.question;
     const item: KnowledgeItem = {
       itemId,
@@ -140,6 +150,12 @@ export interface SearchUnit {
   text: string;
   hash: string;
 }
+export function passagePrefix(item: KnowledgeItem, parent?: KnowledgeItem) {
+  if (item.kind !== 'qa') return item.title + '\n';
+  return parent
+    ? `问题：${parent.question}\n追问：${item.question}\n`
+    : `问题：${item.question}\n`;
+}
 // Full answers are stored once in item metadata. Every auxiliary search unit links back.
 export function searchUnits(
   items: KnowledgeItem[],
@@ -152,12 +168,7 @@ export function searchUnits(
     if (!parents.has(item.itemId)) parents.set(item.itemId, item);
   for (const item of items) {
     const parent = item.parentId ? parents.get(item.parentId) : undefined;
-    const prefix =
-      item.kind === 'qa'
-        ? parent
-          ? `问题：${parent.question}\n追问：${item.question}\n`
-          : `问题：${item.question}\n`
-        : `${item.title}\n`;
+    const prefix = passagePrefix(item, parent);
     const body = item.kind === 'qa' ? item.answer! : item.content;
     if (embedder.count(prefix, 'passage') > 480)
       throw Error('问题标题过长，请缩短后重试。');

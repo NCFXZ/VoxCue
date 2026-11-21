@@ -11,6 +11,7 @@ using System.Windows.Automation;
 // This probe is compiled only into an owned temporary test directory.
 class WindowProbe {
   [StructLayout(LayoutKind.Sequential)] struct Point { public int X,Y; }
+  [StructLayout(LayoutKind.Sequential)] struct LastInputInfo { public uint size,time; }
   [StructLayout(LayoutKind.Sequential)] struct NativeRect { public int Left,Top,Right,Bottom; }
   [StructLayout(LayoutKind.Sequential)] struct MouseInput { public int x,y;public uint data,flags,time;public UIntPtr extra; }
   [StructLayout(LayoutKind.Sequential)] struct KeyboardInput { public ushort key,scan;public uint flags,time;public UIntPtr extra; }
@@ -27,6 +28,7 @@ class WindowProbe {
   [DllImport("user32.dll")] static extern bool CloseDesktop(IntPtr handle);
   [DllImport("user32.dll",CharSet=CharSet.Unicode)] static extern bool GetUserObjectInformationW(IntPtr handle,int index,StringBuilder name,int bytes,out int needed);
   [DllImport("user32.dll")] static extern bool GetCursorPos(out Point point);
+  [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LastInputInfo info);
   [DllImport("user32.dll")] static extern bool GetWindowRect(IntPtr window,out NativeRect rect);
   [DllImport("user32.dll")] static extern bool GetClientRect(IntPtr window,out NativeRect rect);
   [DllImport("user32.dll")] static extern bool ClientToScreen(IntPtr window,ref Point point);
@@ -54,6 +56,21 @@ class WindowProbe {
   [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] static extern Microsoft.Win32.SafeHandles.SafeFileHandle CreateFileW(string file,uint access,uint share,IntPtr security,uint creation,uint flags,IntPtr template);
   [DllImport("dwmapi.dll")] static extern int DwmGetWindowAttribute(IntPtr window,int attribute,out int value,int bytes);
   static void Print(object value) { Console.WriteLine(new JavaScriptSerializer().Serialize(value)); }
+  static bool HoverPixelOwned(IntPtr target,uint expectedPid,Point point,string requiredPhase) {
+    uint owner,foregroundPid,hitPid;
+    bool targetPidMatches=GetWindowThreadProcessId(target,out owner)!=0 && owner==expectedPid;
+    var foreground=GetForegroundWindow();
+    var hitRoot=GetAncestor(WindowFromPoint(point),2);
+    if(targetPidMatches && foreground==target && hitRoot==target)return true;
+    if(requiredPhase==null)return false;
+    GetWindowThreadProcessId(foreground,out foregroundPid);
+    GetWindowThreadProcessId(hitRoot,out hitPid);
+    throw new Exception("Native hover requires a hit on the foreground window of the expected process: "+
+      new JavaScriptSerializer().Serialize(new { phase=requiredPhase, x=point.X, y=point.Y, targetPidMatches,
+        foregroundWindowMatches=foreground==target, foregroundPidMatches=foregroundPid==expectedPid,
+        hitRootMatches=hitRoot==target, hitRootPidMatches=hitPid==expectedPid }));
+  }
+  static int AdjacentHoverX(int x,int left) { return x==left?x+1:x-1; }
   class DesktopStatus {
     public bool interactive,cursorReadable,ownerConsole,lockWindow;
     public string inputDesktop;
@@ -95,6 +112,15 @@ class WindowProbe {
   }
   static void RequireDesktop() {
     if(!ReadDesktop().interactive)throw new Exception("GUI/native input requires the owner's unlocked console; locked or unknown state refused");
+  }
+  static uint LastInputTick() {
+    var info=new LastInputInfo{size=(uint)Marshal.SizeOf(typeof(LastInputInfo))};
+    if(!GetLastInputInfo(ref info))throw new Exception("Cannot verify input inactivity on the owner desktop");
+    return info.time;
+  }
+  static bool PointerButtonDown() {
+    foreach(int button in new[]{1,2,4,5,6})if((GetAsyncKeyState(button)&0x8000)!=0)return true;
+    return false;
   }
   static bool OwnedCaption(IntPtr window, uint pid, Point point) {
     uint owner;
@@ -293,7 +319,12 @@ class WindowProbe {
           throw;
         }
       }
-      if(args[0]=="cursor") {Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");Print(new{x=p.X,y=p.Y});return 0;}
+      if(args[0]=="cursor"||args[0]=="cursor-activity") {
+        Point p;if(!GetCursorPos(out p))throw new Exception("Native cursor unavailable; keep the Windows desktop unlocked");
+        if(args[0]=="cursor") {Print(new{x=p.X,y=p.Y});return 0;}
+        uint tick=LastInputTick();
+        Print(new{x=p.X,y=p.Y,inputTick=tick,idleMs=unchecked((uint)Environment.TickCount-tick),buttonDown=PointerButtonDown()});return 0;
+      }
       if(args[0]=="geometry") {
         var owned=new IntPtr(long.Parse(args[1]));uint pid;
         if(GetWindowThreadProcessId(owned,out pid)==0||pid!=uint.Parse(args[2]))throw new Exception("Geometry target does not belong to the expected test process");
@@ -313,25 +344,38 @@ class WindowProbe {
         } else if(args[0]=="check-owned"&&(GetAsyncKeyState(1)&0x8000)==0)throw new Exception("Native hold was released early");
         Print(new{});return 0;
       }
+      if(args[0]=="hover-candidate") {
+        RequireDesktop();
+        var target=new IntPtr(long.Parse(args[1]));uint expected=uint.Parse(args[2]),owner;
+        if(args.Length<5||args.Length>35||(args.Length-3)%2!=0)throw new Exception("Invalid hover candidates");
+        if(GetWindowThreadProcessId(target,out owner)==0||owner!=expected||GetForegroundWindow()!=target)
+          throw new Exception("Candidate selection requires the owned foreground window");
+        int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
+        for(int i=3;i<args.Length;i+=2) {
+          int x=int.Parse(args[i]),y=int.Parse(args[i+1]);
+          if(width>=2 && x>=left && x<left+width && y>=top && y<top+height &&
+             HoverPixelOwned(target,expected,new Point{X=AdjacentHoverX(x,left),Y=y},null) &&
+             HoverPixelOwned(target,expected,new Point{X=x,Y=y},null)) {
+            Print(new{index=(i-3)/2});return 0;
+          }
+        }
+        Print(new{index=-1});return 0;
+      }
       if(args[0]=="move"||args[0]=="hover-owned") {
         RequireDesktop();
         // Absolute SendInput uses the physical virtual desktop, including a
         // negative monitor origin. Pixel centers avoid normalization rounding.
         int x=int.Parse(args[1]),y=int.Parse(args[2]);
         var target=args[0]=="hover-owned"?new IntPtr(long.Parse(args[3])):IntPtr.Zero;
-        Action<Point> check=point=>{
-          if(target==IntPtr.Zero)return;
-          uint owner;
-          if(GetWindowThreadProcessId(target,out owner)==0||owner!=uint.Parse(args[4])||
-             GetForegroundWindow()!=target||GetAncestor(WindowFromPoint(point),2)!=target)
-            throw new Exception("Native hover requires a hit on the foreground window of the expected process");
+        Action<Point,string> check=(point,phase)=>{
+          if(target!=IntPtr.Zero)HoverPixelOwned(target,uint.Parse(args[4]),point,phase);
         };
         int left=GetSystemMetrics(76),top=GetSystemMetrics(77),width=GetSystemMetrics(78),height=GetSystemMetrics(79);
         if(width<2||height<1||x<left||x>=left+width||y<top||y>=top+height)throw new Exception("Native pointer target is outside the virtual desktop");
-        int[] points={x==left?x+1:x-1,x};
+        int[] points={AdjacentHoverX(x,left),x};
         var moves=new Input[2];
         for(int i=0;i<moves.Length;i++) {
-          check(new Point{X=points[i],Y=y});
+          check(new Point{X=points[i],Y=y},i==0?"before-adjacent":"before-target");
           moves[i]=new Input{type=0,value=new InputUnion{mouse=new MouseInput{
             x=(int)(((2L*(points[i]-left)+1)*65536)/(2L*width)),
             y=(int)(((2L*(y-top)+1)*65536)/(2L*height)),
@@ -339,6 +383,12 @@ class WindowProbe {
             // accelerated relative detour or overwrite its queued final event.
             flags=0xE001
           }}};
+        }
+        if(args[0]=="move"&&args.Length==7&&args[3]=="if-quiet") {
+          // Input may resume while the JavaScript caller launches this process.
+          Point current;if(!GetCursorPos(out current))throw new Exception("Native cursor unavailable before matrix movement");
+          if(current.X!=int.Parse(args[4])||current.Y!=int.Parse(args[5])||
+             PointerButtonDown()||LastInputTick()!=uint.Parse(args[6])) {Print(new{skipped=true});return 0;}
         }
         if(SendInput((uint)moves.Length,moves,Marshal.SizeOf(typeof(Input)))!=(uint)moves.Length)
           throw new Exception("Native pointer input was not accepted");
@@ -352,7 +402,7 @@ class WindowProbe {
         RequireDesktop();
         Thread.Sleep(90);Point actual;if(!GetCursorPos(out actual))throw new Exception("Native cursor unavailable after movement");
         if(actual.X!=x||actual.Y!=y)throw new Exception("Native pointer position changed during the isolated check: expected "+x+","+y+"; actual "+actual.X+","+actual.Y);
-        check(actual);
+        check(actual,"after-target");
         Print(new{});return 0;
       }
       if(args[0]=="up") {mouse_event(4,0,0,0,UIntPtr.Zero);Print(new{});return 0;}

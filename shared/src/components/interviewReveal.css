@@ -1,0 +1,20 @@
+.floating-answer-item > .floating-answer-meta {
+  min-height: var(--icon-button-size);
+}
+.floating-progress-reveal .response-progress {
+  /* The preceding provider row already supplies the gap above the progress. */
+  margin-top: 0;
+}
+/* Keep the resting 14px gap (10px after the provider + 4px before the answer)
+   outside the folding row. The other 12px make up the open progress gap of 16px. */
+.floating-progress-reveal + .answer-bubble {
+  margin-top: 4px;
+}
+.floating-progress-reveal:has(+ .answer-bubble) .response-progress {
+  margin-bottom: 12px;
+}
+.floating-failure-reveal > .interview-reveal-clip {
+  /* The card border can round one device pixel past the clip at fractional display scales. */
+  overflow: clip;
+  overflow-clip-margin: 1px;
+}

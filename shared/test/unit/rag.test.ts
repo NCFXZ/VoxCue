@@ -4,8 +4,12 @@ import {
   knowledgeErrorFromWire,
 } from '../../../shared/electron/backend/knowledge/errors';
 import { RagChatService } from '../../../shared/electron/application/rag';
+import { InterviewContext } from '../../electron/application/interviewContext';
+import { CHAT_INSTRUCTIONS_LIMIT, CHAT_TEXT_LIMIT } from '../../electron/contracts/chat';
+import { validateRequest } from '../../electron/backend/chat/validation';
 import { buildRagContext, ragInstructions } from '../../../shared/electron/application/ragContext';
 import type { KnowledgePort } from '../../../shared/electron/backend/knowledge/types';
+import { projectEvidence } from '../../../shared/electron/backend/knowledge/evidence';
 import type { AIChatService } from '../../../shared/electron/backend/chat/ports';
 import type { KnowledgeHit, KnowledgeItem } from '../../../shared/electron/contracts/knowledge';
 const request = {
@@ -43,6 +47,7 @@ function setup(hits = [hit]) {
     updateDocument: vi.fn(),
     invalidateDocument: vi.fn(),
     removeDocument: vi.fn(),
+    removeBase: vi.fn(),
     listDocuments: vi.fn(),
     search: vi.fn(async () => hits),
     getItem: vi.fn(async () => item),
@@ -67,6 +72,55 @@ function setup(hits = [hit]) {
   return { knowledge, provider, rag: new RagChatService(provider, knowledge) };
 }
 afterEach(() => vi.restoreAllMocks());
+it('把原句和最近三条可信前文分别传给检索，普通问题里的同形文本始终按原句处理', async () => {
+  const { rag, knowledge } = setup([]);
+  const context = new InterviewContext();
+  const previous = ['最早的一题', '传感器怎么选？', 'PID 呢？', '测试过吗？'];
+  for (const [i, question] of previous.entries()) context.prepare('q' + i, question);
+  const question = '回到之前那个问题，它有啥坑啊？';
+  const snapshot = context.prepare('current', question);
+  const signal = new AbortController().signal;
+  const scope = rag.beginRequest({ retrievalQuery: snapshot.retrievalQuery });
+  try {
+    await scope.stream({ ...request, turns: snapshot.turns }, vi.fn(), signal);
+    const [current, , , , , options] = vi.mocked(knowledge.search).mock.calls[0];
+    expect(current).toBe(question);
+    expect(options?.history).toEqual(previous.slice(-3));
+  } finally {
+    scope.dispose();
+  }
+  const ordinary = snapshot.retrievalQuery!;
+  await rag.stream({ ...request, turns: [{ role: 'user', content: ordinary }] }, vi.fn(), signal);
+  const [literal, , , , , options] = vi.mocked(knowledge.search).mock.calls[1];
+  expect(literal).toBe(ordinary);
+  expect(options?.history).toBeUndefined();
+});
+it.each(['excerpt', 'full-history', 'full-instructions'])('keeps a valid long request within both limits: %s', async scenario => {
+  const source = { baseId: hit.baseId!, revision: 'v1', name: hit.name, format: 'md', updatedAt: 1, contentHash: 'hash', modelVersion: 'v1' };
+  const { rag, provider, knowledge } = setup([{ ...hit, revision: 'v1', matchedItemId: item.itemId, excerpt: 'PID sensor' }]);
+  vi.mocked(knowledge.getItem).mockResolvedValue({ ...item, content: 'PID sensor'.repeat(1800), source });
+  const instructions = scenario === 'full-instructions' ? 's'.repeat(CHAT_INSTRUCTIONS_LIMIT) : request.instructions;
+  const query = request.turns[0].content;
+  const length = scenario === 'full-history' ? CHAT_TEXT_LIMIT : 196000;
+  const history = 'a'.repeat(length - instructions.length - query.length);
+  const input = { ...request, instructions, turns: [{ role: 'assistant' as const, content: history }, ...request.turns] };
+  expect(validateRequest(input)).toBe(input);
+  const result = await rag.stream(input, vi.fn(), new AbortController().signal);
+  const sent = vi.mocked(provider.stream).mock.calls[0][0];
+  expect(validateRequest(sent)).toBe(sent);
+  expect(sent.turns[0].content).toBe(history);
+  expect(result.answerText).toBe('测试流');
+  if (scenario === 'excerpt') {
+    expect(result.rag?.evidenceCount).toBe(1);
+    expect(result.localSources?.[0]?.scope).toBe('excerpt');
+    expect(sent.turns.at(-1)?.content).toContain('"content":"PID sensor"');
+  } else {
+    expect(sent.turns).toEqual(input.turns);
+    expect(result.localSources).toEqual([]);
+    expect(result.warning).toContain('未使用知识库');
+    expect(result.rag).toMatchObject({ evidenceCount: 0, contextBytes: 0 });
+  }
+});
 describe('准备聊天知识库显式使用边界', () => {
   const profile = { name: '', background: '已确认简历', jobDescription: '当前 JD' };
   it('意图判断等待目录时取消，不等待迟到目录也不读取知识库', async () => {
@@ -520,6 +574,42 @@ describe('默认 Local RAG（本地编排，模拟 Provider）', () => {
     });
     await expect(next.rag.stream(request, emit, aborted.signal)).rejects.toThrow();
     expect(emit).not.toHaveBeenCalledWith(expect.objectContaining({ text: 'late' }));
+  });
+  it('超长条目只发送同一版本中实际命中的正文，包含追问，并区分超额与零命中', () => {
+    const fact = 'PID sensor 测得的提离值为 37。';
+    const child = { ...item, itemId: 'child', parentId: item.itemId, question: '提离值？', content: fact };
+    const root = { ...item, question: '控制？', rootContent: '原文'.repeat(10000),
+      content: '原文'.repeat(10000) + '\n\n' + fact, followUpIds: ['child'], followUps: [child],
+      source: { name: hit.name, format: 'md', updatedAt: 1, contentHash: 'hash', modelVersion: '1',
+        baseId: hit.baseId, revision: 'v1' } };
+    const match = { ...hit, matchedItemId: 'child', chunkId: 'child:3', revision: 'v1',
+      excerpt: '问题：控制？\n追问：提离值？\n' + fact };
+    const items = new Map([[item.itemId, root]]);
+    const result = buildRagContext('PID sensor', [match], items);
+    expect(result.evidence).toMatchObject([{ content: fact, scope: 'excerpt', matchedItemId: 'child' }]);
+    expect(result.bytes).toBeLessThanOrEqual(48000);
+    for (const wrong of [{ revision: 'v0' }, { excerpt: 'PID sensor 其他版本的值。' }]) {
+      const omitted = buildRagContext('PID sensor', [{ ...match, ...wrong }], items);
+      expect(omitted.evidence).toEqual([]);
+      expect(JSON.parse(omitted.json).notice).toContain('命中了本地条目');
+    }
+  });
+  it('面试检索使用后台摘录且保留对版本与条目身份的检查', async () => {
+    const match = { ...hit, revision: 'r1', matchedItemId: item.itemId };
+    const source = { name: hit.name, format: 'md', updatedAt: 1, contentHash: 'hash',
+      modelVersion: '1', baseId: hit.baseId, revision: match.revision };
+    const projected = projectEvidence(match, { ...item, kind: 'text', source,
+      content: 'x'.repeat(100000) + match.excerpt });
+    const { knowledge, provider, rag } = setup([match]);
+    knowledge.getEvidenceItem = vi.fn(async () => projected);
+    await rag.stream(request, vi.fn(), new AbortController().signal);
+    expect(knowledge.getItem).not.toHaveBeenCalled();
+    expect(knowledge.getEvidenceItem).toHaveBeenCalledWith(match, expect.any(AbortSignal),
+      { baseId: hit.baseId, documentId: item.documentId, revision: 'r1' });
+    expect(vi.mocked(provider.stream).mock.calls[0][0].turns.at(-1)?.content).toContain('"content":"' + match.excerpt + '"');
+    vi.mocked(knowledge.getEvidenceItem).mockResolvedValue({ ...projected, source: { ...source, revision: 'other' } });
+    await expect(rag.stream(request, vi.fn(), new AbortController().signal)).rejects.toThrow('版本');
+    expect(provider.stream).toHaveBeenCalledTimes(1);
   });
   it('去重、预算整条省略、无关候选过滤及指令攻击保持数据身份', () => {
     const attack = {

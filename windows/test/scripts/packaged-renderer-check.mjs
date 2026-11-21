@@ -9,15 +9,24 @@ export async function checkPackagedRenderer(archive) {
   const read = (file) => asar.extractFile(archive, path.join('dist', file));
   const manifest = JSON.parse(read('.vite/manifest.json'));
   const expected = new Set(['.vite/manifest.json']);
+  const cloudWorkers = new Set();
   const pages = [];
   for (const chunk of Object.values(manifest)) {
     for (const file of [chunk.file, ...(chunk.css ?? []), ...(chunk.assets ?? [])])
       expected.add(file);
+    // Vite emits module workers beside their importer without a manifest entry.
+    if (chunk.file.endsWith('.js')) {
+      const code = await readFile(path.join('dist', chunk.file), 'utf8');
+      for (const [, worker] of code.matchAll(/\bnew URL\(\s*["'](?:\.\/)?(cloudRecordJson\.worker-[\w-]+\.js)["']\s*,\s*import\.meta\.url\s*\)/g))
+        cloudWorkers.add(path.posix.join(path.posix.dirname(chunk.file), worker));
+    }
     if (chunk.isEntry && chunk.src?.endsWith('.html')) {
       expected.add(chunk.src);
       pages.push(chunk.src);
     }
   }
+  assert.equal(cloudWorkers.size, 1, 'The built renderer must reference its cloud JSON worker');
+  for (const worker of cloudWorkers) expected.add(worker);
   assert.deepEqual(pages.sort(), ['index.html', 'mobile.html']);
   const publicRoot = path.resolve('../shared/public');
   for (const file of await readdir(publicRoot, { recursive: true, withFileTypes: true })) {

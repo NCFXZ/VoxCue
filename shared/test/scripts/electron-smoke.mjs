@@ -1,4 +1,5 @@
-import { enterDemoUiAccount } from './install-ui-account.mjs';
+import { evaluateHistory } from './stored-history-fixture.mjs';
+import { enterDemoUiAccount, installUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -28,7 +29,7 @@ try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
-  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
+  const page = await enterDemoUiAccount(app, login);
   page.setDefaultTimeout(15000);
   const errors = [];
   page.on('pageerror', (error) => {
@@ -36,6 +37,10 @@ try {
     console.error(error.message);
   });
   await page.locator('.welcome h1').waitFor();
+  assert.deepEqual(await page.evaluate(async () => ({
+    provider: (await window.desktop.authSession())?.mode,
+    account: (await window.desktop.cloudAccount({ action: 'status' })).state.user,
+  })), { provider: 'demo', account: null });
   assert.equal(await page.evaluate(() => typeof window.desktop?.windowAction), 'function');
   assert.equal(await page.evaluate(() => typeof window.require), 'undefined');
   assert.equal(await page.locator('.interview-start-trigger').isDisabled(), true);
@@ -68,7 +73,7 @@ try {
   // Existing original remains independent of generated summaries; isolated fixture only.
   await page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const r = indexedDB.open('copilot-local-documents', 1);
+      const r = indexedDB.open('copilot-local-documents');
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
     });
@@ -88,6 +93,7 @@ try {
     });
     db.close();
   });
+  await installUiAccount(app, { components: true });
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   const resumeSection = page.locator('details[aria-label="简历摘要"]');
@@ -100,7 +106,7 @@ try {
   await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
   assert.equal(await page.getByRole('button', { name: '查看示例记录', exact: true }).count(), 0);
   // Seed isolated real-shaped records; mock records remain hidden and stored.
-  await page.evaluate(() => {
+  await evaluateHistory(page, async () => {
     const records = [1, 2].map((i) => ({
       id: 'record-' + i,
       title: '回归测试问题 ' + i,
@@ -128,8 +134,7 @@ try {
       transcripts: [],
       answers: [],
     });
-    localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+    await fixtureHistory.replace(records);
   });
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
   await page.locator('.history-row').nth(1).waitFor();
@@ -223,42 +228,39 @@ try {
     .getByRole('button', { name: '确认删除：知识库：React 面试资料', exact: true })
     .click();
   await page.getByRole('heading', { name: '创建你的第一个知识库' }).waitFor();
-  await page.evaluate(() =>
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify([
-        {
-          id: 'test-record',
-          title: '测试记录',
-          startedAt: 100,
-          endedAt: 1000,
-          status: 'ended',
-          mock: false,
-          transcripts: [],
-          answers: [],
-        },
-      ]),
-    ),
-  );
-  await page.reload();
-  await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page
-    .locator('.history-row')
-    .filter({ hasText: '测试记录' })
-    .locator('.history-row-open')
-    .click({ position: { x: 16, y: 16 } });
-  await page.getByRole('button', { name: '删除记录' }).click();
-  await page.getByRole('button', { name: '确认删除：面试记录：测试记录', exact: true }).click();
-  await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
-  await page.getByRole('button', { name: '新对话', exact: true }).click();
-  await page.getByRole('button', { name: '用户菜单' }).click();
-  const [returnedLogin] = await Promise.all([
-    app.waitForEvent('window'),
-    (async () => {
-      await page.getByRole('menuitem', { name: '退出登录' }).click();
-      await page.getByRole('button', { name: '退出登录', exact: true }).click();
-    })(),
-  ]);
+  await evaluateHistory(page, async () =>
+    await fixtureHistory.replace([
+      {
+        id: 'test-record',
+        title: '测试记录',
+        startedAt: 100,
+        endedAt: 1000,
+        status: 'ended',
+        mock: false,
+        transcripts: [],
+        answers: [],
+      },
+    ]),
+);
+await page.reload();
+await page.getByRole('button', { name: '面试记录', exact: true }).click();
+await page
+  .locator('.history-row')
+  .filter({ hasText: '测试记录' })
+  .locator('.history-row-open')
+  .click({ position: { x: 16, y: 16 } });
+await page.getByRole('button', { name: '删除记录' }).click();
+await page.getByRole('button', { name: '确认删除：面试记录：测试记录', exact: true }).click();
+await page.getByRole('heading', { name: '还没有面试记录' }).waitFor();
+await page.getByRole('button', { name: '新对话', exact: true }).click();
+await page.getByRole('button', { name: '用户菜单' }).click();
+const [returnedLogin] = await Promise.all([
+  app.waitForEvent('window'),
+  (async () => {
+    await page.getByRole('menuitem', { name: '退出登录' }).click();
+    await page.getByRole('button', { name: '退出登录', exact: true }).click();
+  })(),
+]);
   await returnedLogin.getByRole('heading', { name: '登录 VoxCue' }).waitFor();
   assert.deepEqual(errors, []);
   console.log(

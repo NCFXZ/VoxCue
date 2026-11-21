@@ -1,3 +1,4 @@
+import { codexAccess } from '../fixtures/codex-access';
 import 'fake-indexeddb/auto';
 import { it, expect, vi } from 'vitest';
 import { createServer } from 'node:http';
@@ -30,12 +31,12 @@ it('HTTP 502 的半截错误正文也触发空闲超时，释放本机连接', a
   const address = server.address() as { port: number };
   const controller = new AbortController();
   const service = new ChatGPTService({
-    access: async () => ({ token: 'synthetic-not-a-credential', account: 'test' }),
+    access: async () => codexAccess('test', 'synthetic-not-a-credential'),
     ledger: {} as any,
     idleTimeoutMs: 25,
     responseHeadersTimeoutMs: 1000,
     fetch: async (url, init) =>
-      String(url).endsWith('/models')
+      new URL(String(url)).pathname.endsWith('/models')
         ? Response.json({ models: [{ slug: 'test', display_name: 'Test', visibility: 'list' }] })
         : fetch('http://127.0.0.1:' + address.port, init),
   });

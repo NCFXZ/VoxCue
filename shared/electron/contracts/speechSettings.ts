@@ -10,7 +10,7 @@ import { componentPresentation } from './components';
 export function cudaUnavailableMessage(hardware: SpeechHardware) {
   switch (hardware.reason) {
     case 'unsupported-gpu':
-      return '当前显卡不满足 Qwen 的 CUDA 要求，请选择 CPU。';
+      return '当前显卡不满足多语言语音识别的 CUDA 要求，请选择 CPU。';
     case 'driver-unavailable':
       return '未检测到可用的 NVIDIA 驱动，请选择 CPU。';
     case 'driver-outdated':
@@ -22,10 +22,12 @@ export function cudaUnavailableMessage(hardware: SpeechHardware) {
   }
 }
 
+export const speechSwitchCancelled = '语音切换已取消，仍使用原配置。';
 export const speechModelLabels = {
   paraformer: componentPresentation.speech.label,
   qwen: componentPresentation.qwen.label,
 } as const;
+export const unsupportedSpeechCpu = `${speechModelLabels.qwen}需要支持 AVX2 和 FMA 的处理器，请改用${speechModelLabels.paraformer}。`;
 export const speechCpuWarning = `${componentPresentation.qwen.label}使用 CPU 时，转写可能出现明显延迟。`;
 
 export function speechSelection(options: SpeechOptions) {
@@ -41,8 +43,8 @@ export function speechComponent(options: SpeechOptions) {
   return speechSelection(options).speechModel === 'qwen' ? ('qwen' as const) : ('speech' as const);
 }
 
-export const speechSegmentationSilenceMs = 1000;
-export const automaticAnswerSilenceMs = 1800;
+export const speechSegmentationSilenceMs = 500;
+export const automaticAnswerSilenceMs = speechSegmentationSilenceMs + 500;
 
 export function questionSource(inputMode: InterviewInputMode = 'remote'): AudioSource {
   return inputMode === 'transcription' ? 'microphone' : 'system';

@@ -12,7 +12,7 @@ import {
 
 export function interviewShortcutsBounds(area: Rectangle, compact = false): Rectangle {
   const width = Math.min(compact ? 300 : 360, Math.max(1, area.width - 32));
-  const height = Math.min(380, Math.max(1, area.height - 32));
+  const height = Math.min(412, Math.max(1, area.height - 32));
   return { x: area.x + 16, y: area.y + area.height - height - 16, width, height };
 }
 
@@ -23,7 +23,7 @@ export interface ShortcutRegistry {
 interface ShortcutSession {
   window: InterviewWindow;
   ready(): boolean;
-  command(value: InterviewShortcutCommand): void;
+  command(value: InterviewShortcutCommand | 'toggle-shortcut-help'): void;
 }
 interface InterviewWindow {
   isDestroyed(): boolean;
@@ -44,7 +44,7 @@ export function registerInterviewShortcuts({
   registry: ShortcutRegistry;
   window: InterviewWindow;
   ready(): boolean;
-  command(value: InterviewShortcutCommand): void;
+  command: ShortcutSession['command'];
   bindings?: ShortcutBindings;
   onConflicts?(conflicts: ShortcutConflict[]): void;
 }): () => void {
@@ -168,6 +168,9 @@ export class InterviewShortcutController {
     });
     this.writes = operation.catch(() => {});
     return operation;
+  }
+  async idle() {
+    await this.writes;
   }
   attach(session: ShortcutSession) {
     this.session = session;

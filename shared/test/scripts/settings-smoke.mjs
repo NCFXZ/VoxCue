@@ -3,6 +3,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { dropdownRevealGeometry } from './continuous-corners.mjs';
+import { assertSettingsHeadingGaps } from './assert-settings-heading-gaps.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -490,6 +491,7 @@ try {
       .allTextContents(),
     ['VoxCue 账号', 'AI 服务', '本地组件', '面试设置', '通用', '快捷键', '关于与更新'],
   );
+  await assertSettingsHeadingGaps(page);
   await category('VoxCue 账号').click();
   await settings.getByRole('region', { name: '云同步', exact: true }).waitFor();
   await settings.getByRole('button', { name: '立即同步', exact: true }).waitFor();

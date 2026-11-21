@@ -1,3 +1,4 @@
+import { codexAccess } from '../fixtures/codex-access';
 import { describe, expect, it, vi } from 'vitest';
 import {
   validProfile,
@@ -101,6 +102,7 @@ function core(): KnowledgePort {
     updateDocument: vi.fn(),
     invalidateDocument: vi.fn(),
     removeDocument: vi.fn(),
+    removeBase: vi.fn(),
     listDocuments: vi.fn(),
     close: vi.fn(),
     search: vi.fn(async () => [
@@ -190,12 +192,19 @@ describe('技能来源核验与可审阅提案', () => {
     transport: { streamedSources?: object[]; action?: object } = {},
   ) => {
     const service = new ChatGPTService({
-      access: async () => ({ token: 'synthetic', account: 'test' }),
+      access: async () => codexAccess('test', 'synthetic'),
       ledger: { add: async () => {} } as unknown as UsageLedger,
       fetch: async (url, options) => {
-        if (String(url).endsWith('/models'))
+        if (new URL(String(url)).pathname.endsWith('/models'))
           return Response.json({
-            models: [{ slug: 'model', display_name: 'Model', visibility: 'list' }],
+            models: [
+              {
+                slug: 'model',
+                display_name: 'Model',
+                visibility: 'list',
+                web_search_tool_type: 'text',
+              },
+            ],
           });
         const body = JSON.parse(String(options?.body));
         expect(body.tools).toEqual([{ type: 'web_search' }]);

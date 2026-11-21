@@ -28,6 +28,24 @@ function createHost(qwen?: string) {
   hosts.push(host);
   return host;
 }
+it('采集中进程消失后，替代进程的正常退出只向本场面试报告一次未收尾', async () => {
+  const previous = createChild(), next = createChild();
+  const original = next.postMessage.getMockImplementation()!;
+  next.postMessage.mockImplementation(m => {
+    if (m.call?.op === 'stop') queueMicrotask(() => next.emit('message', {
+      id: m.id, value: { state: 'idle', model: 'synthetic' },
+    }));
+    else original(m);
+  });
+  native.fork.mockReturnValueOnce(previous).mockReturnValueOnce(next);
+  const host = createHost();
+  await host.call({ op: 'status' });
+  previous.emit('message', { event: { type: 'status', status: { state: 'running', model: 'synthetic' } } });
+  previous.emit('exit', 1);
+  expect(await host.call({ op: 'status' })).not.toHaveProperty('transcriptTailIncomplete');
+  expect(await host.call({ op: 'stop' })).toMatchObject({ state: 'idle', transcriptTailIncomplete: true });
+  expect(await host.call({ op: 'stop' })).not.toHaveProperty('transcriptTailIncomplete');
+});
 it('排空两条原生输出管道，大量诊断输出不会阻塞初始化或 RPC', async () => {
   const child = Object.assign(createChild(), {
     stdout: new PassThrough({ highWaterMark: 1024 }),
@@ -114,6 +132,26 @@ it.each([false, true])('kill 失败且不退出时旧请求有限期限拒绝，
   await blocked;
   expect(native.fork).toHaveBeenCalledTimes(1);
   previous.emit('exit', 0);
+});
+it('退休录音进程时先提交尾段，收到确认再释放，退出之前不会复用', async () => {
+  const child = createChild();
+  const original = child.postMessage.getMockImplementation()!;
+  child.postMessage.mockImplementation(m => {
+    if (m.call?.directory) queueMicrotask(() => child.emit('message', { id: m.id, value: { recording: true } }));
+    else original(m);
+  });
+  native.fork.mockReturnValue(child);
+  const host = createHost();
+  await host.call({ op: 'recording', directory: 'synthetic' });
+  child.emit('message', { event: { type: 'recording', active: false, draining: true, error: 'synthetic backlog' } });
+  const finished = host.finishRecording();
+  const request = child.postMessage.mock.calls.at(-1)![0];
+  expect(request.call).toEqual({ op: 'recording' });
+  expect(child.kill).not.toHaveBeenCalled();
+  child.emit('message', { id: request.id });
+  expect(child.kill).toHaveBeenCalledTimes(1);
+  child.emit('exit', 0);
+  await finished;
 });
 it('Qwen close RPC 失败仍退休进程并等待实际退出', async () => {
   const child = createChild();

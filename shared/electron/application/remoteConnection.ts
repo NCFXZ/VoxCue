@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { REMOTE_SNAPSHOT_MAX_BYTES } from '../contracts/remoteConnection';
 import type {
   RemoteCommand,
   RemoteCommandResult,
@@ -28,7 +29,7 @@ export function validateRemoteConnectionCall(value: unknown): RemoteConnectionCa
   throw Error('Invalid remote request');
 }
 
-export function validateRemoteSnapshot(value: unknown): RemoteInterviewSnapshot {
+export function validateRemoteSnapshot(value: unknown) {
   if (
     !object(value) ||
     !keys(value, [
@@ -128,9 +129,10 @@ export function validateRemoteSnapshot(value: unknown): RemoteInterviewSnapshot 
     !revision(value.omitted.answers)
   )
     throw Error('Invalid remote limits');
-  if (Buffer.byteLength(JSON.stringify(value), 'utf8') > 1024 * 1024)
+  const serialized = JSON.stringify(value);
+  if (Buffer.byteLength(serialized, 'utf8') > REMOTE_SNAPSHOT_MAX_BYTES)
     throw Error('Remote snapshot exceeds limit');
-  return value as unknown as RemoteInterviewSnapshot;
+  return { snapshot: value as unknown as RemoteInterviewSnapshot, serialized };
 }
 
 export function validateRemoteResult(value: unknown): RemoteCommandResult {
@@ -160,9 +162,9 @@ export class RemoteInterviewCoordinator {
   publish(snapshot: RemoteInterviewSnapshot) {
     if (
       this.snapshot &&
-      snapshot.sessionId === this.snapshot.sessionId &&
-      snapshot.sessionEpoch === this.snapshot.sessionEpoch &&
-      snapshot.revision <= this.snapshot.revision
+      (snapshot.sessionEpoch < this.snapshot.sessionEpoch ||
+        (snapshot.sessionEpoch === this.snapshot.sessionEpoch &&
+          snapshot.revision <= this.snapshot.revision))
     )
       return false;
     if (

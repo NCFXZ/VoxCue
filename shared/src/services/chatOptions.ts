@@ -21,6 +21,7 @@ export const chatModels: ChatModel[] = [
 ];
 export const effortLabels: Record<ReasoningEffort | 'auto', string> = {
   auto: '自动',
+  on: '开启',
   none: '无思考',
   minimal: '极低',
   low: '轻度',
@@ -38,13 +39,14 @@ export function resolveReasoningEffort(
 ): ReasoningEffort | 'auto' {
   const supported = supportedReasoningEfforts(model);
   if (effort && effort !== 'auto' && supported.includes(effort)) return effort;
-  return supported.includes('low') ? 'low' : (supported[0] ?? 'auto');
+  return 'auto';
 }
 export interface ChatAttachment {
   id: string;
   name: string;
   size: number;
-  file: File;
+  /** Stored conversations keep the original in IndexedDB until its content is needed. */
+  file?: File;
 }
 export interface ChatRequestOptions {
   modelId: string;

@@ -1,6 +1,6 @@
 import type { KnowledgeItem } from '../../contracts/knowledge';
 import { isKnowledgeFileName } from '../../contracts/knowledge';
-import { parseText, sha } from './chunks';
+import { knowledgeItemId, parseText } from './chunks';
 import type { DocumentInput, ParsedDocument } from './types';
 import { extractLegacyDoc } from './legacyDoc';
 import { decodeKnowledgeText } from './textEncoding';
@@ -55,8 +55,7 @@ export async function parseDocument(
                 .trim();
             return {
               ...item,
-              itemId:
-                input.documentId + ':' + sha(span.page + ':' + start + ':' + content).slice(0, 24),
+              itemId: knowledgeItemId(input.documentId, span.page, start, content),
               content,
               page: span.page,
               startLine: start,

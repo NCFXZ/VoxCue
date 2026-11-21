@@ -1,6 +1,8 @@
+import { codexAccess } from '../fixtures/codex-access';
 import { describe, expect, it } from 'vitest';
 import { responseEvents } from '../../../shared/electron/backend/chat/responses';
-import { modelEfforts } from '../../../shared/electron/backend/chat/models';
+import { readEvents } from '../../../shared/electron/backend/chat/sse';
+import { advertisedEfforts } from '../../../shared/electron/backend/chat/models';
 import { apiError, publicFailure } from '../../../shared/electron/backend/chat/errors';
 import { validateRequest } from '../../../shared/electron/backend/chat/validation';
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
@@ -12,6 +14,23 @@ async function collect(response: Response) {
     events.push(event);
   return events;
 }
+
+it('reads one long SSE line across small chunks and resets at the following event', async () => {
+  const text = '合成'.repeat(80_000);
+  const raw = new TextEncoder().encode('data: ' + JSON.stringify({ text }) + '\r\n\r\ndata: {"next":true}');
+  let offset = 0;
+  const body = new ReadableStream<Uint8Array>({
+    pull(controller) {
+      if (offset === raw.length) return controller.close();
+      const chunk = raw.subarray(offset, offset + 2047);
+      offset += chunk.length;
+      controller.enqueue(chunk);
+    },
+  });
+  const events = [];
+  for await (const event of readEvents(body, new AbortController().signal)) events.push(event);
+  expect(events).toEqual([{ text }, { next: true }]);
+});
 function chunks(text: string, contentType = 'application/octet-stream') {
   const bytes = new TextEncoder().encode(text);
   let offset = 0;
@@ -40,6 +59,10 @@ describe('兼容真实响应格式', () => {
     );
     expect(events).toEqual([{ type: 'response.output_text.delta', delta: '你好' }]);
   });
+  it.each(['\n', '\r\n', '\r'])('识别以 id 开头、按 %j 分行的多行 SSE 数据', async (ending) => {
+    const body = ['id: 1', 'data: {"type":"answer",', 'data: "text":"你好"}', '', 'data: [DONE]', '', ''].join(ending);
+    expect(await collect(chunks(body))).toEqual([{ type: 'answer', text: '你好' }]);
+  });
   it('完整 JSON 回答转换为内容和 completed，保留服务端状态和用量', async () => {
     const value = {
       object: 'response',
@@ -51,7 +74,7 @@ describe('兼容真实响应格式', () => {
     const events = await collect(Response.json(value));
     expect(events).toEqual([
       { type: 'response.output_item.added', output_index: 0, item: value.output[0] },
-      { type: 'response.output_text.delta', output_index: 0, delta: '连接成功' },
+      { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: '连接成功' },
       { type: 'response.output_item.done', output_index: 0, item: value.output[0] },
       { type: 'response.completed', response: value },
     ]);
@@ -77,41 +100,11 @@ describe('兼容真实响应格式', () => {
   });
 });
 describe('effort 能力与请求', () => {
-  it('优先使用账户目录公布档位，未知模型不猜测支持范围', () => {
-    expect(
-      modelEfforts({
-        slug: 'unknown',
-        supported_reasoning_levels: [
-          { effort: 'low' },
-          { effort: 'high' },
-          { effort: 'unsupported' },
-        ],
-      }),
-    ).toEqual(['low', 'high']);
-    expect(modelEfforts({ slug: 'unknown' })).toEqual([]);
-    expect(modelEfforts({ slug: 'gpt-6-luna' })).toContain('none');
-    expect(modelEfforts({ slug: 'gpt-6.1-sol' })).not.toContain('none');
-  });
-  it('过滤目录中的无效档位并按强度排序，保留最高 max，遵守已知模型限制', () => {
-    const supported_reasoning_levels = ['ultra', 'max', 'high', 'none', 'low', 'minimal', 'max'];
-    expect(modelEfforts({ slug: 'gpt-6.1-sol', supported_reasoning_levels })).toEqual([
-      'low',
-      'high',
-      'max',
-    ]);
-    expect(modelEfforts({ slug: 'unknown', supported_reasoning_levels })).toEqual([
+  it('只保留服务端公布且协议支持的档位', () => {
+    expect(advertisedEfforts(undefined)).toEqual([]);
+    expect(advertisedEfforts(['ultra', 'max', 'high', { effort: 'none' }, 'high', null])).toEqual([
       'none',
-      'minimal',
-      'low',
       'high',
-      'max',
-    ]);
-    expect(modelEfforts({ slug: 'unknown', supported_reasoning_levels: ['ultra'] })).toEqual([]);
-    expect(modelEfforts({ slug: 'gpt-6.1-sol' })).toEqual([
-      'low',
-      'medium',
-      'high',
-      'xhigh',
       'max',
     ]);
   });
@@ -145,16 +138,24 @@ describe('effort 能力与请求', () => {
     async (effort) => {
       const recorded: unknown[] = [];
       const service = new ChatGPTService({
-        access: async () => ({ account: 'a', token: 'secret' }),
+        access: async () => codexAccess('a', 'secret'),
         ledger: {
           add: async (...args: unknown[]) => {
             recorded.push(args);
           },
         } as unknown as UsageLedger,
         fetch: async (url: any, options?: RequestInit) => {
-          if (String(url).endsWith('/models'))
+          if (new URL(String(url)).pathname.endsWith('/models'))
             return Response.json({
-              models: [{ slug: 'gpt-6.1-sol', display_name: 'Sol', visibility: 'list' }],
+              models: [
+                {
+                  slug: 'gpt-6.1-sol',
+                  display_name: 'Sol',
+                  visibility: 'list',
+                  supported_reasoning_levels: ['low', 'max'],
+                  supports_reasoning_summary_parameter: true,
+                },
+              ],
             });
           expect(JSON.parse(options!.body as string).reasoning).toEqual({
             effort,
@@ -217,10 +218,10 @@ describe('完成事件不等待连接清理', () => {
       { headers: { 'content-type': 'text/event-stream' } },
     );
     const service = new ChatGPTService({
-      access: async () => ({ account: 'test', token: 'test-only' }),
+      access: async () => codexAccess('test', 'test-only'),
       ledger: { add: async () => {} } as unknown as UsageLedger,
       fetch: async (url: any) =>
-        String(url).endsWith('/models')
+        new URL(String(url)).pathname.endsWith('/models')
           ? Response.json({
               models: [{ slug: 'gpt-6-luna', display_name: 'Luna', visibility: 'list' }],
             })

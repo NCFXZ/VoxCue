@@ -28,3 +28,19 @@ export function copilotRequest<T>(
     throw error;
   });
 }
+
+// A conversation can stop waiting for a shared runtime RPC without retiring other
+// sessions. Keep the credential gate until the RPC settles or its own deadline expires.
+export function sharedCopilotRequest<T>(
+  gate: ProviderCredentialAccess | undefined,
+  operation: () => Promise<T>,
+  caller: AbortSignal | undefined,
+  retire: (() => Promise<void>) | undefined,
+  timeoutMs: number,
+): Promise<T> {
+  const execute = async () => {
+    caller?.throwIfAborted();
+    return copilotRequest(undefined, operation, AbortSignal.timeout(timeoutMs), retire);
+  };
+  return gate?.run(execute) ?? execute();
+}

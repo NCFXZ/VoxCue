@@ -34,9 +34,10 @@ export async function checkComponentRemoval(application, page, restoreCached) {
     const base = root + '/dist-electron/shared/electron/backend/';
     const { SpeechHost } = require(base + 'speech/host.js');
     const { KnowledgeHost } = require(base + 'knowledge/host.js');
+    const { KnowledgeCoordinator } = require(root + '/dist-electron/shared/electron/application/knowledge.js');
     const { componentLocation } = require(base + 'components/service.js');
     const { packagesFor } = require(base + 'components/catalog.js');
-    globalThis.removalCheck = { speechExited: false, ragUnloaded: false };
+    globalThis.removalCheck = { speechExited: false, ragUnloaded: false, ragUnloads: 0 };
     globalThis.removalLocations = Object.fromEntries(
       packagesFor(process.platform, process.arch).map((pkg) => [
         pkg.id,
@@ -100,6 +101,11 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
         globalThis.releaseSpeechProbe = resolve;
       });
     };
+    const knowledgeCall = KnowledgeCoordinator.prototype.call;
+    KnowledgeCoordinator.prototype.call = function (input) {
+      if (input.requestId === 'removal-import') globalThis.removalCoordinator = this;
+      return knowledgeCall.call(this, input);
+    };
     const index = KnowledgeHost.prototype.indexDocument;
     KnowledgeHost.prototype.indexDocument = async function (...args) {
       globalThis.removalCheck.indexing = true;
@@ -110,7 +116,6 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
     };
     const unload = KnowledgeHost.prototype.unloadModel;
     KnowledgeHost.prototype.unloadModel = async function () {
-      if (!this.child) throw Error('Removal must unload a live ONNX consumer');
       if (globalThis.holdRagRemoval) {
         globalThis.removalCheck.ragRemoving = true;
         await new Promise((resolve) => {
@@ -118,6 +123,7 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
         });
       }
       await unload.call(this);
+      globalThis.removalCheck.ragUnloads++;
       globalThis.removalCheck.ragUnloaded = true;
       if (globalThis.holdRagRemoval)
         await new Promise((resolve) => {
@@ -125,6 +131,7 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
         });
     };
     globalThis.restoreRemovalChecks = () => {
+      globalThis.holdRagRemoval = false;
       globalThis.releaseIndex?.();
       globalThis.releaseRemoval?.();
       globalThis.releaseRagRemoval?.();
@@ -132,6 +139,8 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
       globalThis.releaseRagProbe?.();
       SpeechHost.prototype.call = call;
       SpeechHost.prototype.close = close;
+      KnowledgeCoordinator.prototype.call = knowledgeCall;
+      delete globalThis.removalCoordinator;
       KnowledgeHost.prototype.indexDocument = index;
       KnowledgeHost.prototype.unloadModel = unload;
     };
@@ -153,19 +162,36 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
     let state = await page.evaluate(() => window.desktop.components({ op: 'remove', id: 'rag' }));
     assert.match(state.error, /正在使用/);
     assert.equal(state.items.find((item) => item.id === 'rag').phase, 'ready');
+    const busyMessage = state.error;
+    const removeIdleRag = async () => {
+      const deadline = performance.now() + 30000;
+      for (;;) {
+        // A ready event refreshes the renderer's index status independently of
+        // this import. Status and reconciliation use the same coordinator.
+        await waitForAsync(application, () => !globalThis.removalCoordinator.busy,
+          undefined, { timeout: Math.max(1, deadline - performance.now()) });
+        const next = await page.evaluate(() => window.desktop.components({ op: 'remove', id: 'rag' }));
+        if (next.error !== busyMessage) return next;
+        // A new read can start between observing idle and the removal IPC.
+        assert.equal(next.items.find((item) => item.id === 'rag').phase, 'ready');
+        assert.ok(performance.now() < deadline, 'Knowledge reads did not release the RAG component');
+      }
+    };
     await application.evaluate(() => globalThis.releaseIndex());
     const imported = await page.evaluate(() => window.removalImport);
     assert.equal(imported.ok, true, imported.error);
     // Unknown top-level originals/directories must survive both deletion attempts.
     for (const directory of [false, true]) {
+      const before = await application.evaluate(() => globalThis.removalCheck.ragUnloads);
       await application.evaluate((_electron, directory) => {
         const fs = process.getBuiltinModule('fs');
         const file = globalThis.removalLocations.rag + '/protected-original';
         if (directory) fs.mkdirSync(file);
         else fs.writeFileSync(file, 'Synthetic original must survive');
       }, directory);
-      state = await page.evaluate(() => window.desktop.components({ op: 'remove', id: 'rag' }));
-      assert.ok(state.error);
+      state = await removeIdleRag();
+      assert.match(state.error, /组件删除失败/);
+      assert.equal(await application.evaluate(() => globalThis.removalCheck.ragUnloads), before + 1);
       assert.equal(state.items.find((item) => item.id === 'rag').phase, 'ready');
       await application.evaluate((_electron, directory) => {
         const fs = process.getBuiltinModule('fs');
@@ -190,14 +216,23 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
     );
     assert.equal(reloaded.ok, true, reloaded.error);
     assert.ok(reloaded.value.length);
+    // Observe the real Electron utility after vector inference. KnowledgeHost
+    // can now own a primary and a separate reader process.
+    const liveKnowledge = await application.evaluate(({ app }) => app.getAppMetrics()
+      .filter(item => item.type === 'Utility' && item.name === 'VoxCue 本地知识库')
+      .map(({ pid, creationTime }) => ({ pid, creationTime })));
+    assert.ok(liveKnowledge.length > 0, 'Vector search must run in a live knowledge utility');
     await application.evaluate(() => {
       globalThis.holdRagRemoval = true;
       globalThis.removalCheck.ragUnloaded = false;
     });
-    await page.evaluate(() => {
-      window.ragRemovalTask = window.desktop.components({ op: 'remove', id: 'rag' });
-    });
-    await waitForAsync(application, async () => globalThis.removalCheck.ragRemoving);
+    const ragRemovalTask = removeIdleRag();
+    await Promise.race([
+      waitForAsync(application, async () => globalThis.removalCheck.ragRemoving),
+      ragRemovalTask.then(state => {
+        throw Error('RAG removal completed before the unload check: ' + (state.error ?? state.phase));
+      }),
+    ]);
     const blocked = await page.evaluate(() =>
       window.desktop.knowledge({
         op: 'import',
@@ -212,10 +247,12 @@ require(${JSON.stringify(path.join(unpacked, 'dist-electron/windows/electron/spe
     assert.match(blocked.error, /知识库检索.*尚未就绪/);
     await application.evaluate(() => globalThis.releaseRagRemoval());
     await waitForAsync(application, async () => globalThis.removalCheck.ragUnloaded);
+    await waitForAsync(application, async ({ app }, previous) => !app.getAppMetrics().some(item =>
+      previous.some(old => old.pid === item.pid && old.creationTime === item.creationTime)), liveKnowledge);
     const ragFiles = await application.evaluate(() => globalThis.removalFiles.rag);
     assert.equal(probe('exclusive', ...ragFiles).exclusiveFiles, ragFiles.length);
     await application.evaluate(() => globalThis.releaseRagProbe());
-    state = await page.evaluate(() => window.ragRemovalTask);
+    state = await ragRemovalTask;
     assert.equal(state.error, null);
     assert.equal(state.items.find((item) => item.id === 'rag').phase, 'pending');
     assert.equal(await application.evaluate(() => globalThis.removalCheck.ragUnloaded), true);

@@ -32,8 +32,8 @@ export function interviewReadiness(
   now: number,
 ): { kind: ReadinessKind; reason: string; detail?: string; level: number } {
   const result = (kind: ReadinessKind, reason: string, level = 0) => ({ kind, reason, level });
-  if (item === 'system' && state.systemAudioMuted)
-    return result('off', '系统音频未启用，不采集声音。');
+  if (item === 'system' && (state.systemAudioMuted || !state.options.sources.includes(item)))
+    return result('off', '系统声音已关闭。开启麦克风时，播放声仅用于消除回声。');
   if (item === 'microphone' && state.inputMode === 'transcription' && state.microphoneMuted)
     return result('off', '麦克风已关闭，不采集声音。');
   if (item !== 'model' && !state.options.sources.includes(item))

@@ -180,7 +180,7 @@ app.whenReady().then(async()=>{
   assert.deepEqual(closed.stopped,{microphone:1,system:1});
   const pid=host.child.pid;await host.close();
   assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
-  console.log('PASS real Paraformer/AEC input gate: both nonempty prerequisites; soft mute/unmute; continuous system; runtime mode; new mic IDs; same captures/model; orderly release');
+  console.log('PASS real Paraformer raw inputs: both nonempty prerequisites; soft mute/unmute; continuous system; runtime mode; new mic IDs; same captures/model; orderly release');
   app.exit(0);
  }catch(error){
   console.error(error.stack||error.message);

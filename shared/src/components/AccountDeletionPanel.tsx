@@ -1,9 +1,11 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { Button } from './ui/button';
 import { Modal } from './ui/modal';
 import { Trash, X } from './icons';
+import { PasswordInput } from './ui/password-input';
 export function AccountDeletionPanel() {
   const { state } = useCloudAccount();
   const [busy, setBusy] = useState(false);
@@ -17,11 +19,14 @@ export function AccountDeletionPanel() {
   }, []);
   const [deleting, setDeleting] = useState(false);
   const [deletePassword, setDeletePassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
+  const passwordId = useId();
   const [acknowledged, setAcknowledged] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   async function deleteAccount() {
     if (locked.current || !acknowledged || !deletePassword) return;
     locked.current = true;
+    setPasswordVisible(false);
     setBusy(true);
     setDeleteError('');
     try {
@@ -52,6 +57,7 @@ export function AccountDeletionPanel() {
           onClick={() => {
             setDeleting(true);
             setDeletePassword('');
+            setPasswordVisible(false);
             setAcknowledged(false);
             setDeleteError('');
           }}
@@ -97,18 +103,20 @@ export function AccountDeletionPanel() {
           }
         >
           <p className="account-delete-warning">{t('云端及本机资料将永久删除，无法恢复。')}</p>
-          <label className="cloud-account-form">
-            {t('当前密码')}
-            <input
+          <div className="cloud-account-form">
+            <label htmlFor={passwordId}>{t('当前密码')}</label>
+            <PasswordInput
+              id={passwordId}
+              visible={passwordVisible}
+              onVisibilityChange={setPasswordVisible}
               aria-label={t('删除账号密码')}
-              type="password"
               autoComplete="current-password"
               maxLength={1024}
               value={deletePassword}
               disabled={busy}
               onChange={(e) => setDeletePassword(e.target.value)}
             />
-          </label>
+          </div>
           <label className="account-delete-ack">
             <input
               type="checkbox"
@@ -118,11 +126,13 @@ export function AccountDeletionPanel() {
             />
             <span>{t('我已了解，确认删除账号和资料')}</span>
           </label>
-          {deleteError && (
-            <p role="alert" className="danger-text">
-              {t(deleteError)}
-            </p>
-          )}
+          <InterviewReveal>
+            {deleteError ? (
+              <p role="alert" className="danger-text">
+                {t(deleteError)}
+              </p>
+            ) : null}
+          </InterviewReveal>
         </Modal>
       )}
     </section>

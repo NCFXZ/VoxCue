@@ -14,7 +14,7 @@ function readLanguage(): UILanguage {
     // An unavailable preference store must not prevent the login page from loading.
   }
   return typeof window !== 'undefined' && window.desktop?.systemLanguage
-    ? window.desktop.systemLanguage
+    ? window.desktop.initialLanguage ?? window.desktop.systemLanguage
     : systemUILanguage(typeof navigator === 'undefined' ? undefined : navigator.language);
 }
 

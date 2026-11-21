@@ -120,6 +120,11 @@ export class UpdateService {
     this.change({});
   }
 
+  restoreAutoDownload(enabled: boolean) {
+    this.change({ autoDownload: enabled });
+    this.maybeDownload();
+  }
+
   setAutoDownload(enabled: boolean) {
     if (this.disposed) return this.state();
     try {

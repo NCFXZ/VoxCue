@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
@@ -7,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import assert from 'node:assert/strict';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { verifyContinuousCorners, cornerShapeNames } from './continuous-corners.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import workspace from '../../scripts/workspace.mjs';
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -14,8 +16,9 @@ const profile = await mkdtemp(
   path.resolve(path.join(testRoot, 'test/results/interview-screenshot-ui-')),
 );
 const screenshotDirectory = process.argv.find((arg) => arg.startsWith('--screenshots='))?.slice(14);
+const nativeSaveHits = process.platform === 'win32' && process.argv.includes('--native-hits');
 assert.ok(
-  process.argv.slice(2).every((arg) => arg.startsWith('--screenshots=')),
+  process.argv.slice(2).every(arg => arg.startsWith('--screenshots=') || (nativeSaveHits && arg === '--native-hits')),
   'Native capture uses screenshot-performance.mjs with owned full-screen covers',
 );
 if (screenshotDirectory) await mkdir(path.resolve(screenshotDirectory), { recursive: true });
@@ -28,6 +31,7 @@ if (process.platform === 'win32') {
     fixture,
     `
 const {desktopCapturer} = require('electron');
+desktopCapturer.getSources = async () => { throw Error('Synthetic screenshot source is not installed'); };
 const platform = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/windows/electron/platform.js'))}).windows;
 platform.captureScreen = async (_window, signal) => {
   signal.throwIfAborted();
@@ -41,6 +45,14 @@ require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared
   entry = await offlineElectronEntry(fixture);
 }
 const app = await electron.launch({ args: [entry], env });
+async function checkMouseWheelZoom(page, viewer) {
+  const canvas = viewer.locator('.interview-image-canvas');
+  await canvas.hover();
+  await page.mouse.wheel(0, -100);
+  await viewer.locator('.interview-image-canvas[data-zoomed]').waitFor();
+  await page.mouse.wheel(0, 200);
+  await viewer.locator('.interview-image-canvas:not([data-zoomed])').waitFor();
+}
 const errors = [],
   checks = [];
 try {
@@ -105,6 +117,18 @@ try {
         emit({ id: request.id, type: 'delta', text: '合成未完成回答' });
         throw Error('当前模型不支持图片输入');
       }
+      if (globalThis.screenshotFixture.providerMode === 'question-motion') {
+        let answerText = '';
+        const append = text => {
+          answerText += text;
+          emit({ id: request.id, type: 'delta', text });
+        };
+        globalThis.screenshotFixture.appendReply = append;
+        append('回答第一段。');
+        await new Promise(resolve => { globalThis.screenshotFixture.finishReply = resolve; });
+        append('\n\n回答第二段。');
+        return { answerText, usage: null, sources: [] };
+      }
       const answerText = '截图回归回答 ' + globalThis.screenshotRequests.length;
       emit({ id: request.id, type: 'delta', text: answerText });
       return { answerText, usage: null, sources: [] };
@@ -131,14 +155,13 @@ try {
   assert.equal(brandBounds.height, 24);
   const logoSource = await sidebarLogo.getAttribute('src');
   await app.evaluate(({ desktopCapturer }) => {
-    const original = desktopCapturer.getSources.bind(desktopCapturer);
     globalThis.screenshotPreparation = 0;
     desktopCapturer.getSources = (options) => {
       if (options.thumbnailSize?.width === 0 && options.thumbnailSize?.height === 0) {
         globalThis.screenshotPreparation++;
         return Promise.resolve([]);
       }
-      return original(options);
+      throw Error('Unexpected screenshot before the synthetic source was installed');
     };
   });
   await main.locator('.interview-start-trigger').click();
@@ -442,9 +465,6 @@ try {
       };
     });
     assert.ok(bounds.left >= 0 && bounds.right >= 0 && bounds.gap > 0);
-    const preview = await floating.locator('.floating-composer').screenshot({});
-    if (process.argv.includes('--preview') && theme === 'light')
-      console.log('VOXCUE_PREVIEW:' + preview.toString('base64'));
   }
   await send.click();
   const multi = await waitAnswer(1);
@@ -458,6 +478,7 @@ try {
   await sentImages.first().click();
   const liveViewer = floating.getByRole('dialog', { name: '截图', exact: true });
   await liveViewer.locator('.interview-image-canvas img').waitFor();
+  await checkMouseWheelZoom(floating, liveViewer);
   const viewerCaptures = await captured();
   await liveViewer.press(shortcut);
   assert.equal(await captured(), viewerCaptures, 'Viewer keyboard input must not capture again');
@@ -544,7 +565,9 @@ try {
   });
   await camera.click();
   await floating
-    .getByText('无法截取当前屏幕，请检查屏幕录制权限后重试。', { exact: true })
+    .getByText(process.platform === 'win32'
+      ? '无法截取面试窗口所在屏幕，请检查系统屏幕捕获状态后重试。'
+      : '无法截取当前屏幕，请检查屏幕录制权限后重试。', { exact: true })
     .waitFor();
   assert.equal((await requests()).length, 3);
   assert.equal(await previews.count(), 0);
@@ -588,29 +611,65 @@ try {
   );
   assert.equal(await floating.locator('.floating-composer .interview-answer-failure').count(), 0);
   const answerScroll = floating.locator('.floating-answer .floating-scroll');
-  // Viewer focus restoration can leave this pane at the top; establish a
-  // scrollable starting point before checking that the failure card moves.
-  await answerScroll.evaluate((node) => {
-    node.scrollTop = node.scrollHeight;
-    node.dispatchEvent(new Event('scroll'));
+  const waitForAnswerEnd = (requireFollowing = false) =>
+    answerScroll.evaluate(async (pane, requireFollowing) => {
+      const deadline = performance.now() + 20000;
+      for (;;) {
+        await new Promise(requestAnimationFrame);
+        const last = pane.lastElementChild;
+        const style = getComputedStyle(pane);
+        // scrollHeight and clientHeight round independently. Compare the last
+        // answer and its bottom padding directly to the viewport in CSS pixels.
+        const viewportBottom = pane.getBoundingClientRect().bottom - parseFloat(style.borderBottomWidth);
+        const contentBottom = last && last.getBoundingClientRect().bottom + parseFloat(style.paddingBottom);
+        const gap = contentBottom === null ? null : contentBottom - viewportBottom;
+        const following = pane.dataset.followingLatest === 'true';
+        if (pane.scrollTop > 0 && (!requireFollowing || following) && gap !== null && Math.abs(gap) <= 1) return;
+        if (performance.now() >= deadline) throw Error('Answer pane did not reach the bottom: ' + JSON.stringify({
+          following, requireFollowing, gap, contentBottom, viewportBottom, scrollTop: pane.scrollTop,
+          scrollHeight: pane.scrollHeight, clientHeight: pane.clientHeight,
+        }));
+      }
+    }, requireFollowing);
+  // The progress row folds away while the failure card opens. Measure the
+  // settled layout before moving the real, keyboard-focusable answer pane.
+  await failedAnswer.locator('.floating-progress-reveal').waitFor({ state: 'detached' });
+  await failedAnswer.locator('.floating-failure-reveal[data-open="true"]').evaluate(async (node) => {
+    node.getBoundingClientRect();
+    await Promise.allSettled(node.getAnimations({ subtree: true }).map(animation => animation.finished));
   });
-  const scrollBefore = await answerScroll.evaluate((node) => ({
-    top: node.scrollTop,
-    cardTop: node.querySelector('.interview-answer-failure').getBoundingClientRect().top,
-  }));
+  const geometry = () => failureCard.evaluate((card) => {
+    const answer = card.closest('.floating-answer-item');
+    const pane = answer.closest('.floating-scroll');
+    const top = pane.getBoundingClientRect().top;
+    return {
+      scroll: pane.scrollTop,
+      answer: answer.getBoundingClientRect().top - top,
+      card: card.getBoundingClientRect().top - top,
+    };
+  });
+  await answerScroll.press('End');
+  await waitForAnswerEnd();
+  const scrollBefore = await geometry();
   const inputBefore = await input.boundingBox();
-  await answerScroll.evaluate((node) => {
-    node.scrollTop = 0;
-    node.dispatchEvent(new Event('scroll'));
-  });
-  const scrollAfter = await answerScroll.evaluate((node) => ({
-    top: node.scrollTop,
-    cardTop: node.querySelector('.interview-answer-failure').getBoundingClientRect().top,
-  }));
-  assert.ok(scrollBefore.top > scrollAfter.top);
+  await answerScroll.press('Home');
+  try {
+    await floating.waitForFunction(() => document.querySelector('.floating-answer .floating-scroll').scrollTop === 0);
+  } catch (cause) {
+    const details = await answerScroll.evaluate(pane => ({
+      top: pane.scrollTop, height: pane.clientHeight, content: pane.scrollHeight,
+      following: pane.dataset.followingLatest, paneFocused: document.activeElement === pane,
+      windowFocused: document.hasFocus(), dpr: devicePixelRatio,
+    }));
+    throw new Error('Home did not return the answer pane to the top: ' + JSON.stringify(details), { cause });
+  }
+  const scrollAfter = await geometry();
+  const travelled = scrollBefore.scroll - scrollAfter.scroll;
   assert.ok(
-    Math.abs(scrollAfter.cardTop - scrollBefore.cardTop - (scrollBefore.top - scrollAfter.top)) < 1,
-    'failure alert must move with its answer when scrolling',
+    travelled > 0 && Math.abs(scrollAfter.answer - scrollBefore.answer - travelled) < 1 &&
+      Math.abs(scrollAfter.card - scrollBefore.card - travelled) < 1,
+    'Failure alert and answer must both move by the scrolled distance: ' +
+      JSON.stringify({ scrollBefore, scrollAfter }),
   );
   assert.deepEqual(await input.boundingBox(), inputBefore);
   await failureCard
@@ -645,6 +704,143 @@ try {
   checks.push(
     'text sends do not capture; image-only send excludes history; failure alert scrolls with its answer while input stays fixed; retry reuses staged pixels',
   );
+  await app.evaluate(() => { globalThis.screenshotFixture.providerMode = 'question-motion'; });
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    await floating.emulateMedia({ reducedMotion });
+    const title = reducedMotion === 'reduce' ? '减少动态时的截图问题' : '查看这张截图并解释';
+    await input.fill(title);
+    await camera.click();
+    await waitCount(1);
+    const latest = floating.getByRole('button', { name: /返回最新回答|有新回答 · 返回最新/ });
+    if (await latest.isVisible()) await latest.click();
+    await waitForAnswerEnd(true);
+    await answerScroll.evaluate((pane, title) => {
+      const old = [...pane.querySelectorAll('.floating-question')];
+      const started = [];
+      const onStart = event => {
+        if (event.animationName === 'screen-enter') started.push(event.target);
+      };
+      pane.addEventListener('animationstart', onStart);
+      let group, keyframes, timing, children;
+      const frames = [];
+      let tick;
+      const observe = () => {
+        const latest = pane.querySelector('.floating-answer-item:last-child .floating-question');
+        if (latest?.querySelector(':scope > span')?.textContent === title) {
+          group ??= latest;
+          const animation = group.getAnimations().find(item => item.animationName === 'screen-enter');
+          const style = getComputedStyle(group);
+          if (animation && !keyframes) {
+            timing = animation.effect.getTiming();
+            keyframes = animation.effect.getKeyframes().map(frame => {
+              const transform = frame.transform.replace(/var\((--[\w-]+)\)/g,
+                (_, name) => style.getPropertyValue(name));
+              const matrix = new DOMMatrixReadOnly(transform);
+              return [matrix.m41, matrix.m42, Number(frame.opacity)];
+            });
+          }
+          children ??= [':scope > span:first-child', '.interview-image-thumbnail', '.floating-screenshot-label']
+            .map(selector => group.querySelector(selector));
+          const y = group.getBoundingClientRect().top;
+          frames.push({
+            moving: !!animation, top: pane.scrollTop, gap: pane.scrollHeight - pane.clientHeight - pane.scrollTop,
+            y: style.transform === 'none' ? 0 : new DOMMatrixReadOnly(style.transform).m42,
+            opacity: Number(style.opacity),
+            offsets: children.map(child => child?.isConnected ? child.getBoundingClientRect().top - y : null),
+          });
+        }
+        tick = requestAnimationFrame(observe);
+      };
+      tick = requestAnimationFrame(observe);
+      window.finishQuestionMotionProbe = () => {
+        cancelAnimationFrame(tick);
+        pane.removeEventListener('animationstart', onStart);
+        delete window.finishQuestionMotionProbe;
+        return {
+          frames, keyframes, duration: timing?.duration, delay: timing?.delay,
+          starts: started.length, onlyGroup: started.every(target => target === group),
+          retained: old.length > 0 && old.every(row => row.isConnected) && group?.isConnected,
+        };
+      };
+    }, title);
+    await send.click();
+    const reply = floating.locator('.floating-answer-item').last().locator('.answer-bubble');
+    await reply.getByText('回答第一段。', { exact: true }).waitFor();
+    // Deliver a later real stream delta after the question's original animation has settled.
+    await floating.waitForFunction(() => !document.querySelector('.floating-question.sent-message-enter'));
+    const samples = [];
+    for (const [addition, selector, ending] of [
+      ['', 'p', '回答第一段。'],
+      ['\n\n' + '这是会自然折行的回答文本。'.repeat(20) + '软折行尾字', 'p', '软折行尾字'],
+      ['\n\n第二段  \n换行尾字', 'p', '换行尾字'],
+      ['\n\n> 1. **引用列表尾字**', 'blockquote li strong', '引用列表尾字'],
+      ['\n\n```ts\nconst n = 1;\nconst last = 2;\n', 'pre code', 'const last = 2;'],
+      ['```\n\n|列一|列二|\n|---|---|\n|数据|表格尾字|', 'td', '表格尾字'],
+    ]) {
+      if (addition) await app.evaluate((_electron, delta) => globalThis.screenshotFixture.appendReply(delta), addition);
+      const tail = reply.locator(selector).filter({ hasText: ending }).last();
+      await tail.waitFor();
+      const geometry = await tail.evaluate((host, ending) => {
+        const walker = document.createTreeWalker(host, NodeFilter.SHOW_TEXT);
+        let text;
+        while ((text = walker.nextNode()) && !text.textContent.trimEnd().endsWith(ending)) {}
+        if (!text) throw Error('The final visible glyph is missing: ' + ending);
+        const end = text.textContent.trimEnd().length;
+        const range = document.createRange();
+        range.selectNodeContents(text);
+        const textLines = range.getClientRects().length;
+        range.setStart(text, end - 1);
+        range.setEnd(text, end);
+        const glyph = range.getBoundingClientRect();
+        const caret = host.closest('.answer-bubble').querySelector('.typing-caret');
+        const rect = caret.getBoundingClientRect();
+        return { textLines, gap: rect.left - glyph.right, overlap: Math.min(rect.bottom, glyph.bottom) - Math.max(rect.top, glyph.top),
+          minHeight: Math.min(rect.height, glyph.height), blinking: caret.getAnimations().length > 0 };
+      }, ending);
+      assert.ok(geometry.gap >= -1 && geometry.gap <= 5 && geometry.minHeight > 0 &&
+        geometry.overlap >= geometry.minHeight * 0.6, `Caret must follow ${ending}: ${JSON.stringify(geometry)}`);
+      assert.equal(geometry.blinking, reducedMotion !== 'reduce');
+      if (ending === '软折行尾字') assert.ok(geometry.textLines > 1, 'The sampled text actually wraps onto multiple rendered lines');
+      samples.push(`${selector} ${geometry.gap.toFixed(1)}px`);
+    }
+    console.log(`Interview answer caret (${reducedMotion}), final glyph gaps: ${samples.join(', ')}`);
+    await app.evaluate(() => globalThis.screenshotFixture.finishReply());
+    await reply.getByText('回答第二段。', { exact: true }).waitFor();
+    await reply.locator('.typing-caret').waitFor({ state: 'detached' });
+    const sample = await floating.evaluate(async () => {
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      return window.finishQuestionMotionProbe();
+    });
+    const { frames } = sample;
+    assert.ok(frames.length > 1 && sample.retained && sample.onlyGroup,
+      'Existing questions stay mounted and answer deltas never replay an entrance');
+    const first = frames[0], last = frames.at(-1);
+    assert.ok(frames.every(frame => frame.offsets.every((offset, i) =>
+      offset !== null && Math.abs(offset - first.offsets[i]) <= 0.75)),
+    'Text, thumbnail and screenshot label move together inside the question');
+    assert.equal(last.y, 0);
+    assert.equal(last.opacity, 1);
+    if (reducedMotion === 'reduce') {
+      assert.equal(sample.starts, 0);
+      assert.ok(frames.every(frame => !frame.moving && frame.y === 0 && frame.opacity === 1),
+        'Reduced motion shows the full question and its accessories from their first frame');
+    } else {
+      assert.equal(sample.starts, 1);
+      assert.deepEqual(sample.keyframes, [[0, 8, 0], [0, 0, 1]]);
+      assert.deepEqual([sample.duration, sample.delay], [240, 0]);
+      assert.ok(first.moving && !last.moving && frames.some(frame =>
+        frame.y > 0 && frame.opacity > 0 && frame.opacity < 1), 'The question animates from its first frame');
+      assert.ok(frames.some((frame, i) => i > 0 && frame.moving && frame.gap > 1 &&
+        frame.top > frames[i - 1].top), 'The answer pane advances partway while the question is still entering');
+    }
+  }
+  await floating.emulateMedia({ reducedMotion: null });
+  await app.evaluate(() => {
+    globalThis.screenshotFixture.providerMode = 'normal';
+    delete globalThis.screenshotFixture.finishReply;
+    delete globalThis.screenshotFixture.appendReply;
+  });
+  checks.push('new text and attached screenshot enter together across 8px and 240ms while the list follows; existing questions and streamed replies stay in place; reduced motion displays immediately');
   assert.equal(await camera.getAttribute('aria-label'), '截取图像');
   assert.equal(await send.getAttribute('aria-label'), '发送面试问题');
   assert.equal(await camera.getAttribute('title'), null);
@@ -654,7 +850,7 @@ try {
     floating.waitForEvent('close'),
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
   ]);
-  const history = await main.evaluate(() => localStorage.getItem('copilot-interview-history-v1'));
+  const history = await evaluateHistory(main, async () => JSON.stringify(await fixtureHistory.read()));
   assert.ok(history?.includes('"screenshot":"only"'));
   assert.ok(!history.match(/data:image|iVBORw0KGgo|"bytes"|"preview"|screenshotIds/));
   const imageIds = [
@@ -665,11 +861,17 @@ try {
     ),
   ];
   assert.ok(imageIds.length > 0, 'Sent screenshots remain referenced in the archived record');
-  const originals = await app.evaluate(async ({ app }, ids) => {
+  const owner = await main.evaluate(async () => 'account:' + (await window.desktop.cloudAccount({ action: 'status' })).state.user.id);
+  const imageDirectory = await app.evaluate(({ app }, owner) => {
+    const path = process.getBuiltinModule('path');
+    const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { profileDirectory } = load('./dist-electron/shared/electron/accountProfilePaths.js');
+    return path.join(profileDirectory(app.getPath('userData'), owner), 'interview-images-v1');
+  }, owner);
+  const originals = await app.evaluate(async (_electron, { folder, ids }) => {
     const fs = process.getBuiltinModule('fs/promises');
     const path = process.getBuiltinModule('path');
     const crypto = process.getBuiltinModule('crypto');
-    const folder = path.join(app.getPath('userData'), 'interview-images-v1');
     const results = [];
     for (const id of ids) {
       const bytes = await fs.readFile(path.join(folder, id + '.image'));
@@ -681,7 +883,7 @@ try {
       });
     }
     return results;
-  }, imageIds);
+  }, { folder: imageDirectory, ids: imageIds });
   assert.ok(originals.every((image) => image.preview));
   await main.getByRole('button', { name: '面试记录', exact: true }).click();
   await main
@@ -694,8 +896,9 @@ try {
   await firstImage.click();
   const viewer = main.getByRole('dialog', { name: '截图', exact: true });
   await viewer.locator('.interview-image-canvas img').waitFor();
-  const displayedOriginal = await main.evaluate(async () => {
-    const record = JSON.parse(localStorage.getItem('copilot-interview-history-v1'))[0];
+  await checkMouseWheelZoom(main, viewer);
+  const displayedOriginal = await evaluateHistory(main, async () => {
+    const record = (await fixtureHistory.read())[0];
     const reference = record.answers.find((answer) => answer.images?.length).images[0];
     const result = await window.desktop.interviewImage({ op: 'read', id: reference.id });
     return (
@@ -793,15 +996,14 @@ try {
     const bytes = await process.getBuiltinModule('fs/promises').readFile(target);
     return process.getBuiltinModule('crypto').createHash('sha256').update(bytes).digest('hex');
   }, exportPath);
-  const firstReference = await main.evaluate(
-    () =>
-      JSON.parse(localStorage.getItem('copilot-interview-history-v1'))[0].answers.find(
+  const firstReference = await evaluateHistory(main,
+    async () =>
+      (await fixtureHistory.read())[0].answers.find(
         (answer) => answer.images?.length,
       ).images[0].id,
   );
   assert.equal(exportedHash, originals.find((image) => image.id === firstReference).sha256);
-  if (process.argv.includes('--native-hits')) {
-    assert.equal(process.platform, 'win32', 'Native Windows hit checks require Windows');
+  if (nativeSaveHits) {
     const { checkImageSaveHit } = await import(
       pathToFileURL(path.resolve('test/scripts/image-save-hit-check.mjs')).href
     );
@@ -829,12 +1031,12 @@ try {
   await viewer.waitFor({ state: 'hidden' });
   // Exercise real missing/corrupt archived bytes, only in this owned profile.
   const requestsBeforeImageFailures = (await requests()).length;
-  await app.evaluate(async ({ app }, id) => {
+  await app.evaluate(async (_electron, { directory, id }) => {
     const fs = process.getBuiltinModule('fs/promises'),
       path = process.getBuiltinModule('path');
-    const file = path.join(app.getPath('userData'), 'interview-images-v1', id + '.image');
+    const file = path.join(directory, id + '.image');
     globalThis.imageReadFixture = { file, bytes: await fs.readFile(file) };
-  }, firstReference);
+  }, { directory: imageDirectory, id: firstReference });
   for (const mode of ['missing', 'corrupt']) {
     await app.evaluate(async (_electron, mode) => {
       const fs = process.getBuiltinModule('fs/promises'),
@@ -902,6 +1104,28 @@ try {
   checks.push(
     'bubble thumbnails, durable originals, live/history viewers, keyboard paging, pinch zoom, pixel pan, drag/reset, exact-byte export, cancel/error, missing/corrupt bytes, late reads and close/reopen',
   );
+  // Interrupt cleanup after the history commit, then reopen the same synthetic profile.
+  await app.evaluate(({ app }) => {
+    const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const store = load('./dist-electron/shared/electron/backend/interview/images.js').InterviewImageStore.prototype;
+    const remove = store.remove;
+    globalThis.resumeImageRemoval = () => { store.remove = remove; };
+    store.remove = async () => { throw Error('Synthetic image storage unavailable'); };
+  });
+  const removeRecord = main.locator('.record-toolbar-actions .confirm-delete');
+  await removeRecord.click();
+  await removeRecord.click();
+  await main.getByText(/部分截图清理失败/).waitFor();
+  assert.equal(await evaluateHistory(main, async () => (await fixtureHistory.read()).length), 0);
+  assert.ok((await main.evaluate(id => window.desktop.interviewImage({ op: 'read', id }), firstReference)).ok);
+  await app.evaluate(() => globalThis.resumeImageRemoval());
+  await main.reload();
+  await main.getByRole('button', { name: '面试记录', exact: true }).waitFor();
+  await waitForAsync(main, async id => !(await window.desktop.interviewImage({ op: 'read', id })).ok, firstReference);
+  const filesLeft = await app.evaluate(async (_electron, directory) =>
+    process.getBuiltinModule('fs/promises').readdir(directory), imageDirectory);
+  assert.ok(imageIds.every(id => !filesLeft.includes(id + '.image') && !filesLeft.includes(id + '.preview')));
+  checks.push('reopening after interrupted history deletion clears the remaining originals and previews');
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify(

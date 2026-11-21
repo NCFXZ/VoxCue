@@ -1,9 +1,12 @@
 import { randomBytes, randomInt } from 'node:crypto';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { IncomingMessage, Server, ServerResponse } from 'node:http';
+import type { Server as SecureServer } from 'node:https';
 import { networkInterfaces } from 'node:os';
 import { WebSocket, WebSocketServer } from 'ws';
-import { REMOTE_PROTOCOL_VERSION } from '../../contracts/remoteConnection';
+import { REMOTE_PROTOCOL_VERSION, REMOTE_SNAPSHOT_MAX_BYTES } from '../../contracts/remoteConnection';
+import { createSnapshotDelta } from '../../contracts/remoteSnapshotDelta';
 import type { MobileAssets } from './assets';
+import { remoteListener, tlsConfigurationError, type RemoteTlsConfiguration } from './tls';
 import {
   RemoteRequestLimiter,
   equalSecret,
@@ -32,7 +35,6 @@ import type {
 
 const PAIR_MS = 120_000;
 const RESUME_MS = 120_000;
-const MAX_SNAPSHOT = 1024 * 1024;
 const MAX_CLIENT_FRAME = 32 * 1024;
 const MAX_REQUESTS = 1024;
 const MAX_DRAFT_REQUESTS = 64;
@@ -43,6 +45,7 @@ interface Options {
   onState(state: RemoteConnectionState): void;
   onCommand(command: RemoteCommand, signal: AbortSignal): Promise<RemoteCommandResult>;
   mobileAssets?: MobileAssets;
+  tls?: RemoteTlsConfiguration;
 }
 interface Pending {
   id: string;
@@ -67,6 +70,8 @@ interface Authorization {
 interface Client {
   address: string;
   authenticated: boolean;
+  snapshotDelta?: boolean;
+  baseline?: { sequence: number; snapshot: RemoteInterviewSnapshot };
   alive: boolean;
   authenticating: ReturnType<typeof setTimeout>;
   commandsSince: number;
@@ -87,7 +92,7 @@ export class RemoteConnectionService {
     pending: null,
     error: null,
   };
-  private server: Server | null = null;
+  private server: Server | SecureServer | null = null;
   private sockets: WebSocketServer | null = null;
   private origin: string | null = null;
   private heartbeat: ReturnType<typeof setInterval> | null = null;
@@ -98,6 +103,8 @@ export class RemoteConnectionService {
   private clients = new Map<WebSocket, Client>();
   private snapshot: RemoteInterviewSnapshot | null = null;
   private snapshotJSON = 'null';
+  private snapshotBytes = 4;
+  private hasPaired = false;
   private sequence = 0;
   private scrollSequence = 0;
   private generation = 0;
@@ -106,10 +113,15 @@ export class RemoteConnectionService {
   private snapshotDelivery?: {
     socket: WebSocket;
     sequence: number;
+    snapshot: RemoteInterviewSnapshot | null;
     id: string;
     timer: ReturnType<typeof setTimeout>;
+    finished: Promise<void>;
+    finish(): void;
   };
   private lifecycle: Promise<unknown> = Promise.resolve();
+  private opening?: AbortController;
+  private connections = new Set<import('node:net').Socket>();
   private requestLimiter = new RemoteRequestLimiter();
 
   constructor(private options: Options) {}
@@ -124,7 +136,8 @@ export class RemoteConnectionService {
   }
 
   start(): Promise<RemoteConnectionState> {
-    const operation = this.lifecycle.then(() => this.open());
+    const generation = this.generation;
+    const operation = this.lifecycle.then(() => generation === this.generation ? this.open() : this.state());
     this.lifecycle = operation.catch(() => {});
     return operation;
   }
@@ -136,16 +149,29 @@ export class RemoteConnectionService {
       this.change({ status: 'error', error: '没有可用的私人局域网 IPv4 地址。' });
       return this.state();
     }
-    const generation = ++this.generation;
-    const server = createServer((request, response) => {
-      void this.request(request, response);
-    });
+    const generation = this.generation;
+    const opening = new AbortController();
+    this.opening = opening;
+    let transport: Awaited<ReturnType<typeof remoteListener>>;
+    try {
+      transport = await remoteListener(address, (request, response) => {
+        void this.request(request, response);
+      }, this.options.tls, opening.signal);
+    } catch {
+      if (generation === this.generation)
+        this.change({ status: 'error', addresses: [], error: tlsConfigurationError });
+      return this.state();
+    } finally {
+      this.opening = undefined;
+    }
+    if (generation !== this.generation) { transport.server.close(); return this.state(); }
+    const { server, scheme } = transport;
     server.requestTimeout = 5000;
     server.headersTimeout = 5000;
     server.keepAliveTimeout = 2000;
     server.maxHeadersCount = 32;
     server.maxConnections = 8;
-    const connections = new Set<import('node:net').Socket>();
+    const connections = this.connections;
     server.on('connection', (socket) => {
       const address = peerAddress(socket.remoteAddress ?? '');
       const approvedAddress = this.authorization?.address;
@@ -198,6 +224,7 @@ export class RemoteConnectionService {
           resolve();
         });
       });
+      if (generation !== this.generation) return this.state();
       server.on('error', () => {
         if (generation !== this.generation) return;
         void this.disconnect().then(() =>
@@ -205,7 +232,7 @@ export class RemoteConnectionService {
         );
       });
       const port = (server.address() as { port: number }).port;
-      this.origin = `http://${address}:${port}`;
+      this.origin = `${scheme}://${address}:${port}`;
       this.requestLimiter = new RemoteRequestLimiter();
       this.heartbeat = setInterval(() => this.tick(), 10_000);
       this.heartbeat.unref();
@@ -256,6 +283,10 @@ export class RemoteConnectionService {
     const socket = pending.socket;
     this.pending = null;
     this.pairingRecord = null;
+    // A different authorization must wait for a fresh desktop publication. A
+    // short reconnect uses authorize() directly and keeps its own snapshot.
+    if (this.hasPaired) this.updateSnapshot(null);
+    this.hasPaired = true;
     this.authorization = {
       token: secret(),
       address: this.clients.get(socket)!.address,
@@ -310,7 +341,18 @@ export class RemoteConnectionService {
     return true;
   }
 
-  updateSnapshot(value: RemoteInterviewSnapshot | null) {
+  async waitForSnapshotSlot(): Promise<void> {
+    let socket: WebSocket | null;
+    do {
+      socket = this.active;
+      if (socket?.readyState !== WebSocket.OPEN || !this.snapshotDelivery) return;
+      await this.snapshotDelivery.finished;
+      // A replacement phone must confirm its own pairing snapshot. A sync request
+      // on the same socket must still leave time for a newer desktop revision.
+    } while (socket !== this.active);
+  }
+
+  updateSnapshot(value: RemoteInterviewSnapshot | null, encoded?: string) {
     if (
       value &&
       this.snapshot &&
@@ -319,8 +361,9 @@ export class RemoteConnectionService {
           value.revision <= this.snapshot.revision))
     )
       return;
-    const serialized = JSON.stringify(value);
-    if (Buffer.byteLength(serialized) > MAX_SNAPSHOT) throw new Error('设备同步内容超过容量限制。');
+    const serialized = encoded ?? JSON.stringify(value);
+    const bytes = Buffer.byteLength(serialized);
+    if (bytes > REMOTE_SNAPSHOT_MAX_BYTES) throw new Error('设备同步内容超过容量限制。');
     if (
       this.snapshot?.sessionId !== value?.sessionId ||
       this.snapshot?.sessionEpoch !== value?.sessionEpoch
@@ -331,8 +374,12 @@ export class RemoteConnectionService {
       for (const cache of [this.authorization?.commands, this.authorization?.drafts])
         if (cache) for (const [id, entry] of cache) if (entry.result) cache.delete(id);
     }
-    this.snapshot = JSON.parse(serialized) as RemoteInterviewSnapshot | null;
+    // IPC transfers ownership of a validated snapshot together with its serialized form.
+    // Other publishers keep ownership of their input.
+    this.snapshot =
+      encoded === undefined && value ? (JSON.parse(serialized) as RemoteInterviewSnapshot) : value;
     this.snapshotJSON = serialized;
+    this.snapshotBytes = bytes;
     this.sequence++;
     this.sendSnapshot();
   }
@@ -340,6 +387,7 @@ export class RemoteConnectionService {
   disconnect(): Promise<void> {
     // Revoke synchronously, before waiting for any listener shutdown.
     this.generation++;
+    this.opening?.abort();
     this.abortCommands();
     this.authorization = null;
     this.pairingRecord = null;
@@ -361,6 +409,8 @@ export class RemoteConnectionService {
         socket.terminate();
       }
       this.clients.clear();
+      for (const socket of this.connections) socket.destroy();
+      this.connections.clear();
       if (sockets) await new Promise<void>((resolve) => sockets.close(() => resolve()));
       if (server?.listening)
         await new Promise<void>((resolve) => {
@@ -396,7 +446,7 @@ export class RemoteConnectionService {
     response.setHeader('Cache-Control', 'no-store');
     response.setHeader(
       'Content-Security-Policy',
-      `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' ${this.origin?.replace('http:', 'ws:')}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
+      `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self' ${this.origin?.replace(/^http/, 'ws')}; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
     );
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('Referrer-Policy', 'no-referrer');
@@ -536,6 +586,7 @@ export class RemoteConnectionService {
           !this.pending.socket
         ) {
           clearTimeout(client.authenticating);
+          client.snapshotDelta = value.snapshotDelta === true;
           this.pending.socket = socket;
           this.send(socket, { type: 'pending', id: this.pending.id, code: this.pending.code });
           return;
@@ -546,6 +597,7 @@ export class RemoteConnectionService {
           equalSecret(value.token, this.authorization.token)
         ) {
           const previous = this.active;
+          client.snapshotDelta = value.snapshotDelta === true;
           this.authorize(socket);
           if (previous && previous !== socket) previous.terminate();
           return;
@@ -573,6 +625,10 @@ export class RemoteConnectionService {
           !equalSecret(value.deliveryId, delivery.id)
         )
           return;
+        if (client.snapshotDelta)
+          client.baseline = delivery.snapshot
+            ? { sequence: delivery.sequence, snapshot: delivery.snapshot }
+            : undefined;
         this.clearSnapshotDelivery();
         if (this.snapshotRequested || delivery.sequence !== this.sequence) this.sendSnapshot();
         return;
@@ -757,7 +813,7 @@ export class RemoteConnectionService {
 
   private send(socket: WebSocket, message: RemoteServerMessage) {
     if (socket.readyState !== WebSocket.OPEN) return;
-    if (socket.bufferedAmount > MAX_SNAPSHOT * 2) {
+    if (socket.bufferedAmount > REMOTE_SNAPSHOT_MAX_BYTES * 2) {
       socket.terminate();
       return;
     }
@@ -775,16 +831,27 @@ export class RemoteConnectionService {
       socket.readyState !== WebSocket.OPEN
     )
       return;
-    if (socket.bufferedAmount > MAX_SNAPSHOT * 2) {
+    if (socket.bufferedAmount > REMOTE_SNAPSHOT_MAX_BYTES * 2) {
       socket.terminate();
       return;
     }
     const sequence = this.sequence;
-    this.snapshotRequested = false;
     const deliveryId = this.beginSnapshotDelivery(socket, sequence);
+    const baseline = this.clients.get(socket)?.baseline;
+    let message: string | undefined;
+    if (!this.snapshotRequested && this.snapshot && baseline && baseline.sequence < sequence) {
+      const delta = createSnapshotDelta(baseline.snapshot, this.snapshot);
+      if (delta) {
+        const candidate = JSON.stringify({
+          type: 'snapshot-delta', sequence, baseSequence: baseline.sequence, deliveryId, delta,
+        });
+        if (Buffer.byteLength(candidate) < this.snapshotBytes) message = candidate;
+      }
+    }
+    this.snapshotRequested = false;
     this.sendingSnapshot = true;
     socket.send(
-      `{"type":"snapshot","sequence":${sequence},"deliveryId":${JSON.stringify(deliveryId)},"snapshot":${this.snapshotJSON}}`,
+      message ?? `{"type":"snapshot","sequence":${sequence},"deliveryId":${JSON.stringify(deliveryId)},"snapshot":${this.snapshotJSON}}`,
       (error) => {
         if (socket !== this.active) return;
         this.sendingSnapshot = false;
@@ -799,8 +866,11 @@ export class RemoteConnectionService {
   }
 
   private clearSnapshotDelivery() {
-    if (this.snapshotDelivery) clearTimeout(this.snapshotDelivery.timer);
+    const delivery = this.snapshotDelivery;
+    if (!delivery) return;
+    clearTimeout(delivery.timer);
     this.snapshotDelivery = undefined;
+    delivery.finish();
   }
 
   private beginSnapshotDelivery(socket: WebSocket, sequence: number) {
@@ -812,7 +882,12 @@ export class RemoteConnectionService {
       socket.terminate();
     }, SNAPSHOT_ACK_MS);
     timer.unref();
-    this.snapshotDelivery = { socket, sequence, id, timer };
+    let finish!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const snapshot = this.clients.get(socket)?.snapshotDelta ? this.snapshot : null;
+    this.snapshotDelivery = { socket, sequence, snapshot, id, timer, finished, finish };
     return id;
   }
 

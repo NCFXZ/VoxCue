@@ -2,8 +2,27 @@
 using System;
 using System.IO;
 using System.Reflection;
+using System.Threading;
+using System.Runtime.InteropServices;
 class WasapiPacketProbe {
   static void Main() {
+    using(var waiting=new ManualResetEvent(false))
+    using(var proceed=new ManualResetEvent(false)) {
+      ulong next=0;
+      using(var queue=new PacketWriter((raw,flags,qpc)=>{
+        waiting.Set();
+        if(!proceed.WaitOne(2000) || qpc!=next++) throw new Exception("Packet order or drain");
+      })) {
+        try {
+          queue.Add(new byte[4],0,0);
+          if(!waiting.WaitOne(2000)) throw new Exception("Writer did not start");
+          for(ulong i=1;i<=128;i++)queue.Add(new byte[4],0,i);
+          try { queue.Add(new byte[4],0,129); throw new Exception("Unbounded packet queue"); }
+          catch(COMException ex) { if(ex.ErrorCode!=unchecked((int)0x8007006F))throw; }
+        } finally { proceed.Set(); }
+      }
+      if(next!=129) throw new Exception("Lost accepted packets");
+    }
     // Real endpoint progress, frozen capture clocks, invalid QPC and jumps.
     var silence=new LoopbackSilence(48000); ulong start;
     if(silence.Poll(48000,0,10000000,true,out start)!=0)throw new Exception("Initial clock");

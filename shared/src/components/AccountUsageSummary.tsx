@@ -1,7 +1,18 @@
 import type { AccountUsage } from '../../electron/contracts/accountUsage';
+import { apiProviders, type ApiProvider } from '../../electron/contracts/apiConnections';
 import { Fragment } from 'react';
 import { t } from '../i18n';
 import { accountUsageSummaryParts } from '../services/accountUsageSummary';
+
+export function InterviewApiBillingRow({ provider }: { provider: ApiProvider }) {
+  const name = t(apiProviders[provider].name).replace(/ API$/, '');
+  return (
+    <div>
+      <dt>{t('AI服务用量')}</dt>
+      <dd>{t('{0} API计费', [name])}</dd>
+    </div>
+  );
+}
 
 export function AccountUsageSummary({
   usage,

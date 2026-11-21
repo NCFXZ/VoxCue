@@ -1,5 +1,6 @@
 import {
   CHAT_TEXT_LIMIT,
+  CHAT_INSTRUCTIONS_LIMIT,
   CHAT_TURN_LIMIT,
   CHAT_FILE_LIMIT,
   CHAT_FILE_BYTES_LIMIT,
@@ -9,6 +10,7 @@ import {
   type ChatSource,
 } from '../../contracts/chat';
 import { validProfile } from '../../contracts/profile';
+import { modelId } from './models';
 export function validSource(value: any): ChatSource | null {
   if (typeof value?.url !== 'string' || value.url.length > 4096) return null;
   try {
@@ -58,12 +60,11 @@ export function validateRequest(value: unknown): ChatRequest {
     ) ||
     typeof request.id !== 'string' ||
     !/^[\w-]{1,80}$/.test(request.id) ||
-    typeof request.modelId !== 'string' ||
-    request.modelId.length > 160 ||
+    !modelId(request.modelId) ||
     typeof request.webSearch !== 'boolean' ||
     (request.effort !== undefined && !reasoningEfforts.includes(request.effort)) ||
     typeof request.instructions !== 'string' ||
-    request.instructions.length > 60000 ||
+    request.instructions.length > CHAT_INSTRUCTIONS_LIMIT ||
     (request.profile !== undefined && !validProfile(request.profile)) ||
     (request.profileTask !== undefined &&
       (request.profileTask !== 'skills' ||

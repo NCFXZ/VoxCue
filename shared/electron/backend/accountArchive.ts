@@ -4,7 +4,47 @@ import os from 'node:os';
 import { randomUUID } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { FileHandle } from 'node:fs/promises';
-import type { AccountDataCall, AccountDataResult } from '../contracts/accountData';
+import type { AccountExportCall, AccountDataResult } from '../contracts/accountData';
+import { interviewImageMediaType, validImageId } from './interview/images';
+import { copyAccountExport, recoverExportOutputs } from './accountExportOutput';
+import { holdOperationLease, operationLeaseAbsent, validLeaseToken } from './operationLease';
+
+const stagePrefix = 'voxcue-account-export-';
+
+export async function recoverAccountExports(temporary = os.tmpdir()) {
+  const parent = await fs.realpath(temporary);
+  for (const entry of await fs.readdir(parent, { withFileTypes: true })) {
+    if (!entry.isDirectory() || !entry.name.startsWith(stagePrefix)) continue;
+    const token = entry.name.slice(stagePrefix.length);
+    const legacy = /^[a-zA-Z0-9]{6}$/.test(token);
+    if (!legacy && !validLeaseToken(token)) continue;
+    const root = path.join(parent, entry.name);
+    try {
+      const stat = await fs.lstat(root);
+      if (await fs.realpath(root) !== root || (process.getuid && stat.uid !== process.getuid())) continue;
+      const marker = path.join(root, '.owner');
+      const info = await fs.lstat(marker);
+      if (!info.isFile() || info.size > 256 || info.uid !== stat.uid) continue;
+      const owner = JSON.parse(await fs.readFile(marker, 'utf8'));
+      if (!(await fs.readdir(root)).every(name =>
+        ['.owner', 'data', 'images', '资料.zip', 'moved-images'].includes(name))) continue;
+      if (legacy) {
+        const pid = typeof owner === 'number' ? owner :
+          owner?.kind === 'voxcue-account-export' && owner.stage === entry.name &&
+          Object.keys(owner).every(k => ['kind', 'stage', 'pid'].includes(k)) ? owner.pid : undefined;
+        if (!Number.isSafeInteger(pid) || pid <= 0 || pid > 0x7fffffff) continue;
+        try { process.kill(pid, 0); continue; } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ESRCH') continue;
+        }
+      } else {
+        if (owner?.version !== 2 || owner.kind !== 'voxcue-account-export' || owner.stage !== entry.name ||
+            owner.token !== token || Object.keys(owner).length !== 4 ||
+            !(await operationLeaseAbsent('account-export-stage', token))) continue;
+      }
+      await fs.rm(root, { recursive: true, force: true });
+    } catch { /* Preserve unknown, inaccessible and concurrently removed directories. */ }
+  }
+}
 
 export function archiveName(value: string) {
   let name = value
@@ -85,9 +125,11 @@ export class AccountArchive {
     personal: boolean;
     used: Set<string>;
     bases: Map<string, string>;
+    stagedImages: Map<string, string>;
     file?: { handle: FileHandle; remaining: number };
     timer: ReturnType<typeof setTimeout>;
     controller: AbortController;
+    releaseLease(): Promise<void>;
   };
   private busy = false;
   private closed = false;
@@ -95,6 +137,7 @@ export class AccountArchive {
   private cancelling = 0;
   private cleanupWork: Promise<void> = Promise.resolve();
   private idleWaiters: (() => void)[] = [];
+  private readonly outputRecovery: Promise<void>;
   constructor(
     private ports: {
       userData: string;
@@ -102,7 +145,9 @@ export class AccountArchive {
       image(id: string): Promise<{ bytes: Buffer; extension: string }>;
       zip?: typeof zipDirectory;
     },
-  ) {}
+  ) {
+    this.outputRecovery = recoverExportOutputs(ports.userData).catch(() => {});
+  }
   hasWork() {
     return this.busy || !!this.active || this.cancelling > 0;
   }
@@ -122,11 +167,15 @@ export class AccountArchive {
   }
   private async remove(active: NonNullable<AccountArchive['active']> | undefined) {
     if (!active) return;
-    await active.file?.handle.close();
-    const real = await fs.realpath(active.root);
-    if (real !== active.root || !path.basename(real).startsWith('voxcue-account-export-'))
-      throw Error('临时导出路径已变化。');
-    await fs.rm(real, { recursive: true, force: true });
+    try {
+      await active.file?.handle.close();
+      const real = await fs.realpath(active.root);
+      if (real !== active.root || !path.basename(real).startsWith(stagePrefix))
+        throw Error('临时导出路径已变化。');
+      await fs.rm(real, { recursive: true, force: true });
+    } finally {
+      await active.releaseLease();
+    }
   }
   async cancel() {
     // Invalidate before waiting: a dialog, file write or ZIP operation already
@@ -151,11 +200,11 @@ export class AccountArchive {
   private async cancelCurrent() {
     await this.remove(this.detach());
   }
-  async call(owner: string, call: AccountDataCall): Promise<AccountDataResult> {
+  async call(owner: string, call: AccountExportCall): Promise<AccountDataResult> {
     if (
       !call ||
       typeof call !== 'object' ||
-      !['begin', 'base', 'file', 'chunk', 'end', 'finish', 'cancel'].includes(call.action)
+      !['begin', 'base', 'file', 'chunk', 'stageImage', 'end', 'finish', 'cancel'].includes(call.action)
     )
       return { ok: false, error: '无效的导出请求。' };
     if (this.closed) return { ok: false, error: '资料导出已关闭。' };
@@ -179,12 +228,18 @@ export class AccountArchive {
           (!relative.startsWith('..' + path.sep) && relative !== '..' && !path.isAbsolute(relative))
         )
           throw Error('请选择应用资料目录以外的保存位置。');
-        const root = await fs.realpath(
-          await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-account-export-')),
-        );
-        if (generation !== this.generation || this.closed) {
-          await fs.rm(root, { recursive: true, force: true });
-          throw Error('导出已取消或账号已变化。');
+        const stageId = randomUUID().replaceAll('-', '');
+        const root = path.join(await fs.realpath(os.tmpdir()), stagePrefix + stageId);
+        const releaseLease = await holdOperationLease('account-export-stage', stageId);
+        try {
+          await fs.mkdir(root, { mode: 0o700 });
+          if (generation !== this.generation || this.closed) {
+            await fs.rmdir(root);
+            throw Error('导出已取消或账号已变化。');
+          }
+        } catch (error) {
+          await releaseLease();
+          throw error;
         }
         const timer = setTimeout(() => {
           if (!this.busy) void this.cancel().catch(() => {});
@@ -198,10 +253,14 @@ export class AccountArchive {
           personal: false,
           used: new Set(),
           bases: new Map(),
+          stagedImages: new Map(),
           timer,
           controller: new AbortController(),
+          releaseLease,
         };
-        await fs.writeFile(path.join(root, '.owner'), String(process.pid), { mode: 0o600 });
+        await fs.writeFile(path.join(root, '.owner'), JSON.stringify({
+          kind: 'voxcue-account-export', version: 2, stage: path.basename(root), token: stageId,
+        }), { mode: 0o600, flag: 'wx' });
         for (const folder of ['个人信息', '面试记录', '知识库'])
           await fs.mkdir(path.join(root, 'data', folder), { recursive: true, mode: 0o700 });
         if (generation !== this.generation || this.closed) throw Error('导出已取消或账号已变化。');
@@ -215,7 +274,16 @@ export class AccountArchive {
         await this.cancelCurrent();
         return { ok: true, canceled: true };
       }
-      if (call.action === 'base') {
+      if (call.action === 'stageImage') {
+        if (a.file || !validImageId(call.id) || a.stagedImages.has(call.id) || a.stagedImages.size >= 8192 ||
+          !(call.bytes instanceof Uint8Array) || call.bytes.byteLength > 8 * 1024 ** 2)
+          throw Error('截图引用无效。');
+        const extension = interviewImageMediaType(call.bytes) === 'image/png' ? 'png' : 'jpg';
+        const folder = path.join(a.root, 'moved-images');
+        await fs.mkdir(folder, { recursive: true, mode: 0o700 });
+        await fs.writeFile(path.join(folder, call.id), call.bytes, { flag: 'wx', mode: 0o600 });
+        a.stagedImages.set(call.id, extension);
+      } else if (call.action === 'base') {
         if (
           typeof call.baseId !== 'string' ||
           !call.baseId ||
@@ -286,10 +354,16 @@ export class AccountArchive {
             const images = path.join(a.root, 'images');
             await fs.mkdir(images);
             for (const [i, id] of [...new Set(call.images)].entries()) {
-              const image = await this.ports.image(id);
+              a.controller.signal.throwIfAborted();
+              const extension = a.stagedImages.get(id);
+              const image = extension
+                ? { extension, bytes: await fs.readFile(path.join(a.root, 'moved-images', id)) }
+                : await this.ports.image(id);
+              a.controller.signal.throwIfAborted();
               await fs.writeFile(path.join(images, `${i + 1}.${image.extension}`), image.bytes, {
                 flag: 'wx',
                 mode: 0o600,
+                signal: a.controller.signal,
               });
             }
             await (this.ports.zip ?? zipDirectory)(
@@ -327,15 +401,14 @@ export class AccountArchive {
         if (a.file || a.remaining || !a.personal) throw Error('资料尚未完整导出。');
         const zip = path.join(a.root, '资料.zip');
         await (this.ports.zip ?? zipDirectory)(path.join(a.root, 'data'), zip, a.controller.signal);
+        await this.outputRecovery;
+        if (await fs.realpath(path.dirname(a.destination)) !== path.dirname(a.destination)) throw Error('临时导出路径已变化。');
         if (this.active !== a) throw Error('导出已取消或账号已变化。');
-        // Existing user files are only replaced after the complete ZIP is ready.
-        const temporary = a.destination + '.' + randomUUID() + '.tmp';
         try {
-          await fs.copyFile(zip, temporary, 1);
-          if (this.active !== a) throw Error('导出已取消或账号已变化。');
-          await fs.rename(temporary, a.destination);
-        } finally {
-          await fs.rm(temporary, { force: true });
+          await fs.rename(zip, a.destination);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
+          await copyAccountExport(zip, a.destination, this.ports.userData, a.controller.signal);
         }
         await this.cancelCurrent();
         return { ok: true, saved: true };

@@ -1,5 +1,5 @@
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
-import { checkProgressMotion } from '../../../shared/test/scripts/check-progress-motion.mjs';
+import { checkHiddenDivider, checkProgressMotion } from '../../../shared/test/scripts/check-progress-motion.mjs';
 import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
@@ -181,18 +181,25 @@ try {
     const layout = await page
       .locator('.response-progress')
       .last()
-      .evaluate((root) => ({
-        border: parseFloat(getComputedStyle(root).borderBottomWidth),
-        durationBorder: parseFloat(getComputedStyle(root.firstElementChild).borderBottomWidth),
-        bottom: root.getBoundingClientRect().bottom,
-        contentBottom: root.querySelector('.response-progress-content').getBoundingClientRect()
-          .bottom,
-      }));
-    assert.ok(layout.border > 0);
+      .evaluate(async (root) => {
+        await Promise.all(root.getAnimations({ subtree: true })
+          .filter(animation => animation.effect.getTiming().iterations !== Infinity)
+          .map(animation => animation.finished.catch(() => {})));
+        const divider = getComputedStyle(root, '::after');
+        return {
+          border: parseFloat(divider.borderBottomWidth),
+          opacity: Number(divider.opacity),
+          durationBorder: parseFloat(getComputedStyle(root.firstElementChild).borderBottomWidth),
+          bottom: root.getBoundingClientRect().bottom,
+          contentBottom: root.querySelector('.response-progress-content').getBoundingClientRect().bottom,
+        };
+      });
+    assert.ok(layout.border > 0 && layout.border <= 1);
+    assert.equal(layout.opacity, 1);
     assert.equal(layout.durationBorder, 0);
     assert.ok(layout.contentBottom <= layout.bottom - layout.border);
   };
-  await checkDivider(main);
+  await checkHiddenDivider(main.locator('.response-progress').last());
   await app.evaluate(() => globalThis.layoutFinish());
   await main.getByText('合成回答正文。', { exact: true }).waitFor();
   const checkCompactDuration = async (page) => {
@@ -204,7 +211,7 @@ try {
       .evaluate(
         (root) =>
           root.getBoundingClientRect().bottom -
-          parseFloat(getComputedStyle(root).borderBottomWidth) -
+          parseFloat(getComputedStyle(root, '::after').borderBottomWidth) -
           root.querySelector('.response-duration').getBoundingClientRect().bottom,
       );
     assert.ok(gap >= 0 && gap <= 9, 'Collapsed duration must stay close to its separator');
@@ -214,7 +221,7 @@ try {
   await main.locator('.duration-toggle').last().click();
   await checkDivider(main);
   checks.push(
-    'chat initial thinking without old dot; public thought above separator before and after answer',
+    'chat thinking and public summary precede the divider, which appears with the answer',
   );
 
   await main.locator('.interview-start-trigger').click();
@@ -903,7 +910,7 @@ try {
   assert.equal(await floating.locator('.activity-dot').count(), 0);
   await app.evaluate(() => globalThis.layoutThought());
   await floating.locator('.reasoning-section summary').filter({ hasText: '分析问题' }).waitFor();
-  await checkDivider(floating);
+  await checkHiddenDivider(floating.locator('.response-progress').last());
   await app.evaluate(() => globalThis.layoutFinish());
   await floating.getByText('合成回答正文。', { exact: true }).waitFor();
   await checkCompactDuration(floating);

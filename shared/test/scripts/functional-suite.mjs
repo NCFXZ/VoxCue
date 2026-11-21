@@ -13,6 +13,8 @@ const shared = [
   'login',
   'password-policy',
   'account-erasure',
+  'account-transfer',
+  'legacy-profile-upgrade',
   'quit-drain',
   'copilot-login',
   'copilot-runtime',
@@ -46,6 +48,8 @@ const shared = [
   'history-branding',
   'history-scroll',
   'provider-ui',
+  'api-interactive-preview',
+  'recording',
   'floating',
   'interview-badge-layout',
   'interview-shortcuts',
@@ -142,22 +146,20 @@ if (options.includes('--list')) {
   const releaseDesktop = desktop?.holdDesktopAwake();
   const outcomes = [];
   const models = needsModels(names) ? await prepareModelFixtures() : null;
-  const desktopProbe =
+  const windowsDesktop =
     process.platform === 'win32' && names.some((name) => !parallelSuites.has(name))
-      ? (
-          await import(
-            pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
-          )
-        ).probe
+      ? await import(
+          pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
+        )
       : undefined;
   let desktopFailure;
   function requireDesktop() {
     if (desktopFailure) throw desktopFailure;
     try {
       desktop?.requireUnlockedDesktop();
-      if (desktopProbe)
+      if (windowsDesktop)
         assert.equal(
-          desktopProbe('desktop').interactive,
+          windowsDesktop.probe('desktop').interactive,
           true,
           'Shared GUI/native matrix requires an unlocked input desktop',
         );
@@ -173,12 +175,14 @@ if (options.includes('--list')) {
         VOXCUE_SPEECH_FIXTURE_DIR: models.speechFixtures,
       }
     : {};
-  const cursor = desktopProbe?.('cursor');
+  const cursor = windowsDesktop?.probe('cursor');
   let interruption;
   try {
     const run = async (name) => {
-      if (!parallelSuites.has(name)) requireDesktop();
-      if (!parallelSuites.has(name)) desktopProbe?.('move', 0, 0);
+      if (!parallelSuites.has(name)) {
+        requireDesktop();
+        await windowsDesktop?.parkMatrixCursor();
+      }
       const directory = shared.includes(name)
         ? path.join(workspace.sharedRoot, 'test/scripts')
         : process.platform === 'darwin' && mac.includes(name)
@@ -196,6 +200,8 @@ if (options.includes('--list')) {
             ]
           : name === 'management-scrollbars'
             ? [path.join(directory, 'cloud-account-smoke.mjs'), '--scrollbars']
+            : name === 'api-interactive-preview'
+              ? [path.join(directory, 'api-interactive-preview.mjs'), '--check-only']
             : [path.join(directory, name + '-smoke.mjs')],
         {
           cwd: workspace.platformRoot,
@@ -221,7 +227,7 @@ if (options.includes('--list')) {
       });
       child.stderr.on('data', (data) => (output += data));
       const desktopGuard =
-        !parallelSuites.has(name) && (desktop || desktopProbe)
+        !parallelSuites.has(name) && (desktop || windowsDesktop)
           ? watchTestDesktop(child, requireDesktop)
           : undefined;
       const timer = setTimeout(
@@ -260,14 +266,9 @@ if (options.includes('--list')) {
     throw error;
   } finally {
     releaseDesktop?.();
-    if (desktopProbe && cursor && !desktopFailure) {
-      try {
-        requireDesktop();
-        desktopProbe('move', cursor.x, cursor.y);
-      } catch (error) {
-        console.error('Shared matrix cursor restoration stopped:', error);
-        if (!interruption) throw error;
-      }
+    if (cursor && !interruption && !desktopFailure) {
+      requireDesktop();
+      windowsDesktop.restoreParkedMatrixCursor(cursor);
     }
   }
   console.log(

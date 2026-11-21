@@ -1,12 +1,14 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import * as fs from 'node:fs/promises';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { assertPasswordVisibility, assertPasswordClearedOnClose } from './assert-password-visibility.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { Store, Auth, Services, loadConfig, createApi, routes } from './server-reference.mjs';
 const dir = path.join(testRoot, 'account-erasure');
@@ -156,30 +158,27 @@ try {
   const main = await opened;
   main.on('pageerror', (e) => errors.push(e.message));
   await main.getByRole('button', { name: '用户菜单', exact: true }).waitFor();
-  await main.evaluate(async () => {
+  await evaluateHistory(main, async () => {
     localStorage.setItem(
       'copilot-personal-info-v1',
       JSON.stringify({ name: '合成用户', background: '合成经历', jobDescription: '合成岗位' }),
     );
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify([
-        {
-          id: 'synthetic-record',
-          title: '合成面试',
-          startedAt: 1,
-          endedAt: 2,
-          status: 'ended',
-          transcripts: [
-            { id: 't', text: '合成转录', time: '00:01', final: true, source: 'system' },
-          ],
-          answers: [],
-          mock: true,
-        },
-      ]),
-    );
+    await fixtureHistory.replace([
+      {
+        id: 'synthetic-record',
+        title: '合成面试',
+        startedAt: 1,
+        endedAt: 2,
+        status: 'ended',
+        transcripts: [
+          { id: 't', text: '合成转录', time: '00:01', final: true, source: 'system' },
+        ],
+        answers: [],
+        mock: true,
+      },
+    ]);
     await new Promise((resolve, reject) => {
-      const r = indexedDB.open('copilot-local-documents', 1);
+      const r = indexedDB.open('copilot-local-documents');
       r.onupgradeneeded = () => {
         r.result.createObjectStore('bases', { keyPath: 'id' });
         const d = r.result.createObjectStore('documents', { keyPath: 'id' });
@@ -216,6 +215,8 @@ try {
   await settings.getByRole('switch', { name: '同步知识库', exact: true }).waitFor();
   const order = await settings.evaluate((node) => ({
     sync: node.querySelector('.cloud-sync-actions').getBoundingClientRect().bottom,
+    import: node.querySelector('[aria-label="数据迁移"]').getBoundingClientRect().top,
+    importBottom: node.querySelector('[aria-label="数据迁移"]').getBoundingClientRect().bottom,
     export: node.querySelector('[aria-label="导出资料"]').getBoundingClientRect().top,
     exportBottom: node.querySelector('[aria-label="导出资料"]').getBoundingClientRect().bottom,
     remove: node.querySelector('.account-deletion-panel').getBoundingClientRect().top,
@@ -223,9 +224,10 @@ try {
   // Fractional display scales expose float32 rect noise at a shared edge.
   const layoutUnit = (value) => Math.round(value * 64);
   assert.ok(
-    layoutUnit(order.export) >= layoutUnit(order.sync) &&
+    layoutUnit(order.import) >= layoutUnit(order.sync) &&
+      layoutUnit(order.export) >= layoutUnit(order.importBottom) &&
       layoutUnit(order.remove) >= layoutUnit(order.exportBottom),
-    'Export follows cloud backup and precedes deletion: ' + JSON.stringify(order),
+    'Migration and export follow cloud backup and precede deletion: ' + JSON.stringify(order),
   );
   const syncAlignment = await settings.locator('.cloud-sync-actions').evaluate((node) => {
     const box = node.getBoundingClientRect();
@@ -235,16 +237,20 @@ try {
     const first = buttons[0],
       last = buttons.at(-1);
     const body = node.closest('.settings-content-body');
+    const panel = body.getBoundingClientRect();
     const switches = [...body.querySelectorAll('.settings-switch')];
     const edge = switches.at(-1).getBoundingClientRect().right;
+    const deviceEdge = x => Math.round(x * devicePixelRatio);
     return {
       buttons: buttons.length,
       rightGap: box.right - last.right,
       commonRight: last.right - edge,
       buttonGap: last.left - first.right,
       centers: Math.abs(first.top + first.height / 2 - last.top - last.height / 2),
-      paddingLeft: parseFloat(getComputedStyle(body).paddingLeft),
-      paddingRight: parseFloat(getComputedStyle(body).paddingRight),
+      leftInset: box.left - panel.left,
+      rightInset: panel.right - last.right,
+      drawnEdges: [deviceEdge(box.left), deviceEdge(last.right)],
+      expectedEdges: [deviceEdge(panel.left + 24), deviceEdge(panel.right - 24)],
     };
   });
   assert.equal(syncAlignment.buttons, 2);
@@ -252,12 +258,12 @@ try {
     layoutUnit(syncAlignment.rightGap) === 0 &&
       layoutUnit(syncAlignment.commonRight) === 0 &&
       layoutUnit(syncAlignment.buttonGap) === layoutUnit(8) &&
-      layoutUnit(syncAlignment.centers) === 0 &&
-      layoutUnit(syncAlignment.paddingLeft) === layoutUnit(24) &&
-      layoutUnit(syncAlignment.paddingRight) === layoutUnit(24),
+      layoutUnit(syncAlignment.centers) === 0,
     'Sync actions share the settings right edge and 24px content insets, with one aligned row and an 8px gap: ' +
       JSON.stringify(syncAlignment),
   );
+  assert.deepEqual(syncAlignment.drawnEdges, syncAlignment.expectedEdges,
+    'The two content edges must fall on the exact device pixels for 24px insets: ' + JSON.stringify(syncAlignment));
   for (const dark of [false, true]) {
     await main.evaluate((v) => document.documentElement.classList.toggle('dark', v), dark);
     await captureAccount(main, 'account-sync-' + (dark ? 'dark' : 'light'));
@@ -275,7 +281,7 @@ try {
       .getByRole('button')
       .filter({ has: main.locator('svg') })
       .count(),
-    3,
+    4,
   );
   const alignment = await modal
     .locator('.modal-footer')
@@ -398,7 +404,11 @@ try {
   await main.keyboard.press('Space');
   await main.emulateMedia({ reducedMotion: 'no-preference' });
   await captureAccount(main, 'account-delete-confirm');
-  await uiClick(modal.getByRole('button', { name: '取消', exact: true }));
+  const password = modal.getByLabel('删除账号密码', { exact: true });
+  await assertPasswordVisibility(modal, password, 'Synthetic erase pass8!');
+  assert.ok(await confirm.isDisabled(), 'A password alone must not authorize account deletion');
+  await assertPasswordClearedOnClose(modal, password, () =>
+    uiClick(modal.getByRole('button', { name: '取消', exact: true })));
   const exportPanel = settings.getByRole('region', { name: '导出资料', exact: true });
   if (macNativeDialog) {
     const { nativeSaveDialog } = await import('../../../macos/test/scripts/save-dialog.mjs');
@@ -460,7 +470,11 @@ try {
       .some((e) => e.entryName.endsWith('.txt') && e.getData().toString().includes('合成转录')),
   );
   await uiClick(settings.getByRole('button', { name: '删除账号', exact: true }));
-  await modal.getByLabel('删除账号密码', { exact: true }).fill('wrong');
+  assert.equal(await password.getAttribute('type'), 'password');
+  assert.equal(await password.inputValue(), '');
+  assert.equal(await modal.getByRole('button', { name: '显示密码', exact: true }).getAttribute('aria-pressed'), 'false');
+  assert.ok(await confirm.isDisabled());
+  await password.fill('wrong');
   await uiClick(modal.getByRole('checkbox'));
   await uiClick(confirm);
   await modal.getByRole('alert').waitFor();
@@ -470,6 +484,14 @@ try {
   assert.equal(state.state.user.id, user.id);
   await fs.mkdir(path.join(profile, 'component-cache'), { recursive: true });
   await fs.writeFile(path.join(profile, 'component-cache', 'public-synthetic-model'), 'keep');
+  const accountFolder = (id) => createHash('sha256').update('account:' + id).digest('hex');
+  const removedProfile = path.join(profile, 'account-profiles', accountFolder(user.id));
+  const otherProfile = path.join(profile, 'account-profiles', accountFolder(randomUUID()));
+  const otherFile = path.join(otherProfile, 'synthetic.txt');
+  await fs.mkdir(removedProfile, { recursive: true });
+  await fs.writeFile(path.join(removedProfile, 'synthetic.txt'), 'delete');
+  await fs.mkdir(otherProfile, { recursive: true });
+  await fs.writeFile(otherFile, 'keep');
   await modal.getByLabel('删除账号密码', { exact: true }).fill('Synthetic erase pass8!');
   const exited = once(app.process(), 'exit');
   await uiClick(confirm).catch((e) => {
@@ -484,15 +506,12 @@ try {
     user.email,
   );
   for (const target of [
-    'knowledge-v1',
-    'interview-images-v1',
-    'chat-usage',
-    'chatgpt-usage',
-    'copilot-runtime',
+    path.relative(profile, removedProfile),
     'cloud-account',
     'account-erasure.pending',
   ])
     assert.equal(await fs.stat(path.join(profile, target)).catch(() => null), null, target);
+  assert.equal(await fs.readFile(otherFile, 'utf8'), 'keep');
   assert.equal(
     await fs.readFile(path.join(profile, 'component-cache', 'public-synthetic-model'), 'utf8'),
     'keep',

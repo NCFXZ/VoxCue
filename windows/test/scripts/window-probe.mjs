@@ -36,6 +36,51 @@ export function probe(...args) {
   return JSON.parse(result.stdout);
 }
 
+const quietInputMs = 450;
+
+async function waitForQuietMatrixCursor() {
+  const deadline = performance.now() + 2500;
+  let previous, stillSince;
+  while (performance.now() < deadline) {
+    // Each sample independently checks the unlocked owner console in WindowProbe.
+    const current = probe('cursor-activity');
+    const now = performance.now();
+    if (current.buttonDown || current.x !== previous?.x || current.y !== previous?.y)
+      stillSince = now;
+    if (!current.buttonDown && current.idleMs >= quietInputMs && now - stillSince >= quietInputMs)
+      return current;
+    previous = current;
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw Error('Windows matrix cursor did not settle on the unlocked owner desktop; stopping before moving it.');
+}
+
+export async function parkMatrixCursor() {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const current = await waitForQuietMatrixCursor();
+    if (current.x === 0 && current.y === 0) return;
+    try {
+      if (!probe('move', 0, 0, 'if-quiet', current.x, current.y, current.inputTick).skipped) return;
+    } catch (error) {
+      const displaced = error.message.includes('Native pointer position changed during the isolated check: expected 0,0; actual') ||
+        error.message.includes('Injected native cursor movement was not observed before the deadline');
+      if (!displaced) throw error;
+      if (attempt === 1)
+        throw Error('Windows matrix cursor parking was interrupted again; stopping.', { cause: error });
+    }
+    if (attempt === 0)
+      console.warn('Windows matrix cursor parking was interrupted; waiting for quiet input before one retry.');
+  }
+  throw Error('Input resumed before the Windows matrix cursor could be parked; stopping.');
+}
+
+export function restoreParkedMatrixCursor(original) {
+  if (original.x === 0 && original.y === 0) return;
+  const current = probe('cursor-activity');
+  if (current.x === 0 && current.y === 0 && !current.buttonDown && current.idleMs >= quietInputMs)
+    probe('move', original.x, original.y, 'if-quiet', current.x, current.y, current.inputTick);
+}
+
 async function activateThroughOwnedCaption(app, target, pid) {
   const id = await target.evaluate((win) => win.id);
   const helper = await app.evaluateHandle(({ BrowserWindow, screen }, id) => {
@@ -164,33 +209,47 @@ export async function pointAtOwnedControl(application, locator, hover, developme
   do {
     const entering = enterFromOutside;
     enterFromOutside = false;
-    const view = await locator.evaluate((element, hover) => {
+    const view = await locator.evaluate((element) => {
       const rect = element.getBoundingClientRect();
-      const elsewhere = [{ x: innerWidth / 2, y: innerHeight / 2 }, { x: innerWidth / 3, y: innerHeight / 3 }];
-      const outside = elsewhere.find(({ x, y }) => {
-        const hit = document.elementFromPoint(x, y);
-        return hit && !element.contains(hit);
+      const x=rect.x + rect.width/2, y=rect.y + rect.height/2;
+      const visible = (points, inside) => points.filter(({x,y}) => {
+        const hit=document.elementFromPoint(x,y);
+        return hit && element.contains(hit) === inside;
       });
-      const candidates = hover ? [{ x: rect.x + rect.width / 2, y: rect.y + rect.height / 2 }] : elsewhere;
-      const point = candidates.find(({x,y}) => {
-        const hit = document.elementFromPoint(x,y);
-        return hit && element.contains(hit) === hover;
-      });
-      return { point, outside, width: innerWidth, height: innerHeight };
-    }, hover);
-    assert.ok(view.point, 'Renderer hit test could not locate a visible point on the requested side of the control');
+      const inside=visible([
+        {x,y}, {x:x-rect.width/4,y}, {x:x+rect.width/4,y},
+        {x,y:y-rect.height/4}, {x,y:y+rect.height/4},
+      ], true);
+      const outside=visible([
+        {x:rect.left-12,y}, {x:rect.right+12,y}, {x,y:rect.top-12}, {x,y:rect.bottom+12},
+        {x:innerWidth/2,y:innerHeight/2}, {x:innerWidth/3,y:innerHeight/3},
+      ], false);
+      return { inside, outside, width: innerWidth, height: innerHeight, dpr: devicePixelRatio, rect: rect.toJSON() };
+    });
     const geometry = probe('geometry', target.handle, target.pid);
-    const move = (point) => {
-      const x = geometry.clientX + Math.round(point.x * geometry.clientWidth / view.width);
-      const y = geometry.clientY + Math.round(point.y * geometry.clientHeight / view.height);
-      probe('hover-owned', x, y, target.handle, target.pid);
-      return { x, y };
+    const move = (candidates, phase) => {
+      assert.ok(candidates.length, phase + ': no visible renderer hit');
+      const physical=candidates.map(point=>({
+        x: geometry.clientX + Math.round(point.x * geometry.clientWidth / view.width),
+        y: geometry.clientY + Math.round(point.y * geometry.clientHeight / view.height),
+      }));
+      const projection = { phase, rect: view.rect, viewport: [view.width, view.height], dpr: view.dpr,
+        client: [geometry.clientX, geometry.clientY, geometry.clientWidth, geometry.clientHeight], candidates, physical };
+      try {
+        const {index}=probe('hover-candidate',target.handle,target.pid,...physical.flatMap(p=>[p.x,p.y]));
+        assert.ok(Number.isInteger(index) && index>=0 && index<physical.length, 'No candidate has both physical pixels on the owned window');
+        const {x,y}=physical[index];
+        // Recheck native ownership before and after input independently of the read-only selection.
+        probe('hover-owned',x,y,target.handle,target.pid);
+        return {x,y,point:candidates[index]};
+      } catch (cause) {
+        throw Error(cause.message + '\nOwned window projection: ' + JSON.stringify(projection), { cause });
+      }
     };
     if (entering) {
-      assert.ok(view.outside, 'Newly mounted control needs an owned off-control entry point');
-      move(view.outside);
+      move(view.outside, 'fresh-entry-outside');
     }
-    const { x, y } = move(view.point);
+    const { x, y, point } = move(hover ? view.inside : view.outside, hover ? 'hover-target' : 'leave-target');
     const state = () => locator.evaluate((element) => ({
       hovered: element.matches(':hover'), focused: document.hasFocus(),
     }));
@@ -199,7 +258,7 @@ export async function pointAtOwnedControl(application, locator, hover, developme
       // A replaced control can retain the previous node's compositor hit region.
       // Synchronize Chromium at the same verified physical pixel, never by
       // forcing a pseudo-class or dispatching a DOM event.
-      await page.mouse.move(view.point.x, view.point.y);
+      await page.mouse.move(point.x, point.y);
       last = await state();
       probe('pointer-owned', x, y, target.handle, target.pid);
     }

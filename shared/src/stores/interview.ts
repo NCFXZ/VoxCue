@@ -1,7 +1,11 @@
 import { create } from 'zustand';
+import { isApiProvider } from '../../electron/contracts/apiConnections';
+import { useShallow } from 'zustand/react/shallow';
 import type { Answer, Transcript } from '../services/contracts';
 import { mockAI, createMockSpeech } from '../services/mock';
 import { useHistory } from './history';
+import type { InterviewRecord } from '../services/history';
+import { startInterviewDraft } from '../services/interviewDraft';
 import type {
   SpeechOptions,
   SpeechStatus,
@@ -17,12 +21,14 @@ import {
   interviewAnswer,
   isAutomaticQuestionFiller,
 } from '../services/speech';
-import type { ReasoningEffort } from '../../electron/contracts/chat';
+import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
+import { rememberServiceModel } from '../services/serviceModelPreferences';
 import { recordAudioLevel, type AudioLevels } from '../services/audioLevel';
 import {
   questionSource,
   inputSources,
   sameAudioCapture,
+  speechModelLabels,
   speechSelection,
 } from '../../electron/contracts/speechSettings';
 import { validInterviewImages } from '../../electron/contracts/interviewImages';
@@ -34,6 +40,12 @@ interface InterviewState {
   speech: SpeechStatus;
   options: SpeechOptions;
   configurationLocked: boolean;
+  autoRecord?: boolean;
+  recording: boolean;
+  recordingWanted: boolean;
+  recordingBusy: boolean;
+  hadRecording: boolean;
+  setRecording(enabled: boolean): Promise<void>;
   knowledgeBaseName?: string;
   initialize(configuration: InterviewConfiguration, inputState?: InterviewInputState): void;
   pendingQuestion: string;
@@ -60,12 +72,13 @@ interface InterviewState {
   status: Status;
   autoAnswer: boolean;
   updatingModel: boolean;
-  updateModel(modelId: string, effort: ReasoningEffort | 'auto'): Promise<boolean>;
+  updateModel(modelId: string, effort: ReasoningEffort | 'auto', models?: readonly ChatModel[]): Promise<boolean>;
   audioLevels: AudioLevels;
   reconnecting: boolean;
   switchingSpeech: boolean;
   speechSwitchError: string | null;
-  reconnectAudio(options?: SpeechOptions): Promise<boolean>;
+  reconnectAudio(options?: SpeechOptions): Promise<boolean | 'cancelled'>;
+  controlSpeechSwitch(id: number | undefined, action: 'now' | 'cancel'): Promise<void>;
   inputChanging: boolean;
   setInputMode(mode: InterviewInputMode): Promise<boolean>;
   microphoneMuted: boolean;
@@ -90,27 +103,38 @@ interface InterviewState {
   sessionId: string | null;
   startedAt: number | null;
   endedAt: number | null;
-  archive(status: 'ended' | 'interrupted', preserveEmpty?: boolean): void;
+  transcriptTailIncomplete: boolean;
+  recordingError: string | null;
+  archive(status: 'ended' | 'interrupted', preserveEmpty?: boolean, unloading?: boolean): Promise<boolean>;
   start(): void;
   pause(): void;
-  end(options?: { preserveEmpty?: boolean; generateTitle?: boolean }): Promise<void>;
+  end(options?: { preserveEmpty?: boolean; generateTitle?: boolean }): Promise<boolean>;
   reset(): void;
   setAutoAnswer(enabled: boolean): void;
-  ask(question: string, sourceTranscriptIds?: string[], screenshotIds?: string[]): Promise<void>;
+  ask(question: string, sourceTranscriptIds?: string[], screenshotIds?: string[], source?: AudioSource): Promise<void>;
 }
+
+// ask() appends the new row synchronously before it waits for the provider.
+type AnswerSnapshot = Pick<InterviewState, 'sessionId' | 'answers'>;
+export function appendedAnswer(before: AnswerSnapshot, after: AnswerSnapshot) {
+  if (before.sessionId === after.sessionId) return after.answers[before.answers.length];
+}
+
 let speechController: AbortController | undefined;
 let answerController: AbortController | undefined;
 let sequence = 0;
 let startAttempt = 0;
+let cancelOnSwitchReady = false;
 let finishingSession: string | null = null;
 let endingOperation:
   | {
       sessionId: string | null;
-      promise: Promise<void>;
+      promise: Promise<boolean>;
       options: { preserveEmpty?: boolean; generateTitle?: boolean };
     }
   | undefined;
 let unsubscribeSpeech: (() => void) | undefined;
+let durableDraft: ReturnType<typeof startInterviewDraft>;
 const automaticQuestion = new AutomaticQuestionGate();
 let automaticQuestionReady = false;
 const questions = new QuestionBuffer();
@@ -225,9 +249,27 @@ async function changeInput(value: InterviewInputState, action: 'mode' | 'microph
 export const useInterview = create<InterviewState>((set, get) => ({
   mode: typeof window === 'undefined' ? 'mock' : 'local',
   inputMode: 'remote',
-  speech: { state: 'idle', model: 'Paraformer 中英 INT8 · Silero VAD · 本地' },
+  speech: { state: 'idle', model: speechModelLabels.paraformer },
   options: { sources: ['microphone', 'system'] },
   configurationLocked: false,
+  recording: false,
+  recordingWanted: false,
+  recordingBusy: false,
+  hadRecording: false,
+  async setRecording(enabled) {
+    const { sessionId, recordingBusy, speech, mode } = get();
+    if (!sessionId || recordingBusy || finishingSession || mode !== 'local' || speech.state !== 'running') return;
+    set({ recordingBusy: true, recordingWanted: enabled });
+    try {
+      const active = await window.desktop!.setInterviewRecording(sessionId, enabled);
+      if (get().sessionId === sessionId && !finishingSession && get().speech.state === 'running')
+        set({ recording: active, hadRecording: get().hadRecording || active });
+    } catch {
+      if (get().sessionId === sessionId) set({ recordingWanted: get().recording, error: '无法切换录音，请检查本地存储和音频状态。' });
+    } finally {
+      if (get().sessionId === sessionId) set({ recordingBusy: false });
+    }
+  },
   initialize(configuration, inputState) {
     if (get().configurationLocked) return;
     set({
@@ -241,6 +283,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
       inputChanging: false,
       knowledgeBaseName: configuration.knowledgeBaseName,
       configurationLocked: true,
+      autoRecord: configuration.autoRecord === true,
       screenshots: [],
       capturingScreenshot: false,
     });
@@ -289,11 +332,17 @@ export const useInterview = create<InterviewState>((set, get) => ({
       set({ error: '待提交问题超过6000字，请在输入框整理后手动发送。' });
       return false;
     }
-    const pending = state.mode === 'local' ? state.submitTranscript(text, true) : state.ask(text);
+    if (state.mode === 'local' && !input && text) {
+      // Clearing the input can select the last transcript as a fallback; it is still unedited.
+      try { questions.text(questionSource(state.inputMode)); }
+      catch (error) { set({ error: (error as Error).message }); return false; }
+    }
+    const edited = state.inputDraft !== null || !input;
+    const pending = state.mode === 'local'
+      ? state.submitTranscript(edited ? text : undefined, true)
+      : state.ask(text);
     const current = get();
-    const accepted =
-      current.sessionId === state.sessionId &&
-      current.answers.some((answer) => !state.answers.some((old) => old.id === answer.id));
+    const accepted = !!appendedAnswer(state, current);
     if (accepted) current.setInputDraft(null, state.inputDraftRevision);
     void pending;
     return accepted;
@@ -322,12 +371,15 @@ export const useInterview = create<InterviewState>((set, get) => ({
   async submitTranscript(editedQuestion, includeScreenshots = false, automatic = false) {
     try {
       const screenshotIds = includeScreenshots ? get().screenshots.map((shot) => shot.id) : [];
-      const question = automatic
-        ? questions.text(questionSource(get().inputMode))
-        : editedQuestion?.trim() ||
-          (screenshotIds.length
-            ? ''
-            : get().draftQuestion || questions.text(questionSource(get().inputMode)));
+      const source = questionSource(get().inputMode);
+      const edit = automatic ? undefined : editedQuestion?.trim();
+      let question = edit ?? '';
+      // An untouched draft can still show the last valid prefix after ASR exceeded its limit.
+      // Read the full source before accepting it. A deliberate edit has its own length check.
+      if (!question && (edit === undefined || !screenshotIds.length)) {
+        const original = questions.text(source);
+        question = automatic ? original : get().draftQuestion || get().pendingQuestion || original;
+      }
       if (
         (!question.trim() && !screenshotIds.length) ||
         get().generating ||
@@ -345,25 +397,25 @@ export const useInterview = create<InterviewState>((set, get) => ({
         await get().ask('', undefined, screenshotIds);
         return;
       }
-      automaticQuestion.cancel();
-      automaticQuestionReady = false;
       const sourceTranscriptIds = [
         ...new Set([
-          ...questions.ids(questionSource(get().inputMode)),
+          ...questions.ids(source),
           ...get()
             .transcripts.filter(
               (row) =>
-                row.source === questionSource(get().inputMode) &&
+                row.source === source &&
                 !row.final &&
                 !submittedInterim.has(row.id),
             )
             .map((row) => row.id),
         ]),
       ];
+      questions.consume(source, question);
+      automaticQuestion.cancel();
+      automaticQuestionReady = false;
       for (const row of get().transcripts)
-        if (row.source === questionSource(get().inputMode) && !row.final)
+        if (row.source === source && !row.final)
           submittedInterim.add(row.id);
-      questions.consume(questionSource(get().inputMode));
       set({ pendingQuestion: '', draftQuestion: '' });
       await get().ask(question, sourceTranscriptIds, screenshotIds);
     } catch (error) {
@@ -377,7 +429,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
   switchingSpeech: false,
   speechSwitchError: null,
   updatingModel: false,
-  async updateModel(modelId, effort) {
+  async updateModel(modelId, effort, models) {
     if (get().updatingModel || get().status === 'ended') return false;
     const session = get().sessionId;
     set({ updatingModel: true });
@@ -385,7 +437,11 @@ export const useInterview = create<InterviewState>((set, get) => ({
       const result = await window.desktop!.updateInterviewModel({ modelId, effort });
       if (get().sessionId !== session || get().status === 'ended') return false;
       if (!result.ok) throw Error(result.error.message);
-      set({ modelId: result.modelId, effort: result.effort ?? 'auto' });
+      const selection = { modelId: result.modelId, effort: result.effort ?? 'auto' };
+      const service = models?.find((model) => model.id === selection.modelId)?.provider?.id;
+      if (service === 'chatgpt' || service === 'copilot' || isApiProvider(service))
+        rememberServiceModel('interview', service, selection);
+      set(selection);
       return true;
     } finally {
       if (get().sessionId === session) {
@@ -400,18 +456,40 @@ export const useInterview = create<InterviewState>((set, get) => ({
       }
     }
   },
+  async controlSpeechSwitch(id, action) {
+    const session = get().sessionId;
+    if (!get().switchingSpeech) return;
+    if (id === undefined) {
+      if (action !== 'cancel') return;
+      id = get().speech.switchId;
+      if (id === undefined) {
+        cancelOnSwitchReady = true;
+        return;
+      }
+    }
+    if (get().speech.switchId !== id) return;
+    try {
+      await window.desktop!.controlInterviewSpeechSwitch(id, action);
+    } catch {
+      if (get().sessionId === session && get().speech.switchId === id)
+        set({ speechSwitchError: '语音切换操作失败，请重试。' });
+    }
+  },
   async reconnectAudio(options) {
+    const replacingLoad = get().speech.state === 'loading' && get().options.speechModel === 'qwen' &&
+      options?.speechModel === 'paraformer' && sameAudioCapture(get().options, options);
     if (
       get().reconnecting ||
       get().switchingSpeech ||
       get().microphoneToggling ||
       get().systemAudioToggling ||
       get().inputChanging ||
-      get().speech.state === 'loading' ||
+      (get().speech.state === 'loading' && !replacingLoad) ||
       get().status === 'ended'
     )
       return false;
-    const attempt = startAttempt,
+    const startRecording = replacingLoad && (get().status === 'idle' ? get().autoRecord : get().recordingWanted);
+    const attempt = replacingLoad ? ++startAttempt : startAttempt,
       session = get().sessionId;
     const continuous =
       !!options &&
@@ -420,12 +498,15 @@ export const useInterview = create<InterviewState>((set, get) => ({
       sameAudioCapture(get().options, options) &&
       JSON.stringify(speechSelection(get().options)) !== JSON.stringify(speechSelection(options));
     if (continuous) {
-      set({ switchingSpeech: true, speechSwitchError: null });
+      cancelOnSwitchReady = false;
+      set({ switchingSpeech: true, speechSwitchError: null,
+        speech: { ...get().speech, switching: undefined, switchId: undefined } });
       try {
         const result = await window.desktop!.reconnectInterviewAudio(options);
         if (attempt !== startAttempt || get().sessionId !== session || get().status === 'ended')
           return false;
         if (result.state !== 'running') throw Error(result.error ?? '语音切换失败，仍使用原配置。');
+        if (result.switchCancelled) return 'cancelled';
         set({ speech: result, options });
         return true;
       } catch (error) {
@@ -466,6 +547,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
         pendingQuestion: '',
         draftQuestion: '',
       });
+      if (startRecording && !get().recording) void get().setRecording(true);
       return true;
     } catch (error) {
       if (attempt === startAttempt)
@@ -564,26 +646,30 @@ export const useInterview = create<InterviewState>((set, get) => ({
   sessionId: null,
   startedAt: null,
   endedAt: null,
+  transcriptTailIncomplete: false,
+  recordingError: null,
   setAutoAnswer(enabled) {
     automaticQuestion.cancel();
     automaticQuestionReady = false;
     set({ autoAnswer: enabled });
   },
-  archive(status, preserveEmpty = false) {
+  async archive(status, preserveEmpty = false, unloading = false) {
     const state = get();
     if (
       !state.sessionId ||
       state.startedAt === null ||
-      (!preserveEmpty && !state.transcripts.length && !state.answers.length)
+      (!preserveEmpty && !state.transcriptTailIncomplete && !state.recordingError && !state.hadRecording && !state.transcripts.length && !state.answers.length)
     )
-      return;
-    useHistory.getState().save({
+      return true;
+    const record: InterviewRecord = {
       id: state.sessionId,
       title: state.knowledgeBaseName ? `「${state.knowledgeBaseName}」面试记录` : '面试记录',
       ...(state.knowledgeBaseName ? { knowledgeBaseName: state.knowledgeBaseName } : {}),
       startedAt: state.startedAt,
       endedAt: state.endedAt ?? Date.now(),
-      status,
+      status: state.transcriptTailIncomplete || state.recordingError ? 'interrupted' : status,
+      ...(state.transcriptTailIncomplete ? { transcriptTailIncomplete: true } : {}),
+      ...(state.recordingError ? { recordingError: state.recordingError } : {}),
       transcripts: structuredClone(state.transcripts),
       answers: structuredClone(
         state.answers.map((answer) =>
@@ -596,7 +682,12 @@ export const useInterview = create<InterviewState>((set, get) => ({
         ),
       ),
       mock: state.mode === 'mock',
-    });
+    };
+    const draft = durableDraft;
+    if (unloading) draft?.checkpoint(record);
+    const saved = await useHistory.getState().save(record);
+    if (!saved && status === 'ended') await draft?.keep(record);
+    return saved;
   },
   start() {
     if (finishingSession) return;
@@ -609,7 +700,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
         set({ error: '真实语音需要桌面应用。' });
         return;
       }
-      if (get().status !== 'paused') {
+      const fresh = get().status !== 'paused';
+      if (fresh) {
         get().archive(get().status === 'ended' ? 'ended' : 'interrupted');
         stop();
         questions.clear();
@@ -622,9 +714,15 @@ export const useInterview = create<InterviewState>((set, get) => ({
           reconnecting: false,
           switchingSpeech: false,
           speechSwitchError: null,
+          recording: false,
+          recordingWanted: false,
+          recordingBusy: false,
+          hadRecording: false,
           sessionId: crypto.randomUUID(),
           startedAt: Date.now(),
           endedAt: null,
+          transcriptTailIncomplete: false,
+          recordingError: null,
         });
       }
       unsubscribeSpeech?.();
@@ -703,14 +801,20 @@ export const useInterview = create<InterviewState>((set, get) => ({
           automaticQuestion.cancel();
           automaticQuestionReady = false;
         }
+        if (event.type === 'recording') {
+          set({ recording: event.active, hadRecording: get().hadRecording || event.active,
+            ...(event.error ? { error: event.error, recordingError: event.error, recordingWanted: false } : {}) });
+          return;
+        }
         if (event.type === 'status') {
+          const restartingRecording = event.status.state === 'running' && get().speech.state !== 'running' && get().recordingWanted;
           if (event.status.state !== 'running') {
             automaticQuestion.reset();
             automaticQuestionReady = false;
           }
           set({
             speech: event.status,
-            ...(event.status.state !== 'running' ? { audioLevels: {} } : {}),
+            ...(event.status.state !== 'running' ? { audioLevels: {}, recording: false } : {}),
             ...(event.status.state === 'running'
               ? { status: 'running' as const, speechError: null }
               : event.status.state === 'paused'
@@ -719,6 +823,11 @@ export const useInterview = create<InterviewState>((set, get) => ({
                   ? { status: 'paused' as const, speechError: event.status.error ?? '语音服务失败' }
                   : {}),
           });
+          if (cancelOnSwitchReady && get().switchingSpeech && event.status.switching && event.status.switchId !== undefined) {
+            cancelOnSwitchReady = false;
+            void get().controlSpeechSwitch(event.status.switchId, 'cancel');
+          }
+          if (restartingRecording && !get().recording) void get().setRecording(true);
         }
         // Only healthy events from the affected source clear its gap notice.
         // A discontinuity final belongs to the broken audio, not recovery.
@@ -738,7 +847,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
           const segment = event.segment;
           if (segment.continuationOf && submittedInterim.has(segment.continuationOf))
             submittedInterim.add(segment.id);
-          const existing = get().transcripts.find((t) => t.id === segment.id);
+          const index = get().transcripts.findIndex((t) => t.id === segment.id);
+          const existing = get().transcripts[index];
           if (existing?.final) return;
           const row = {
             ...segment,
@@ -749,6 +859,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
               ? s.transcripts.map((t) => (t.id === row.id ? row : t))
               : [...s.transcripts, row],
           }));
+          if (row.final) void durableDraft?.put(index < 0 ? get().transcripts.length - 1 : index, { transcript: row });
           // Only the confirmed question input can enter the draft and automatic-answer gate.
           if (segment.source !== questionSource(get().inputMode)) return;
           if (get().reconnecting) return;
@@ -831,6 +942,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
               : {}),
             speechError: speech.error ?? null,
           });
+          if (speech.state === 'running' && !get().recording && (fresh ? get().autoRecord : get().recordingWanted))
+            void get().setRecording(true);
         })
         .catch((error) => {
           if (attempt !== startAttempt || get().sessionId !== sessionId || get().status === 'ended')
@@ -857,6 +970,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
         sessionId: crypto.randomUUID(),
         startedAt: Date.now(),
         endedAt: null,
+        transcriptTailIncomplete: false,
+        recordingError: null,
       });
     } else set({ transcripts: completed });
     set({ status: 'running', error: null });
@@ -938,34 +1053,45 @@ export const useInterview = create<InterviewState>((set, get) => ({
           systemAudioToggling: false,
         });
         try {
-          await window.desktop?.speech({ op: 'stop' });
-        } catch (error) {
-          set({ error: (error as Error).message });
+          const stopped = await window.desktop?.speech({ op: 'stop' });
+          if (stopped?.transcriptTailIncomplete && get().sessionId === sessionId)
+            set({ transcriptTailIncomplete: true });
+          if (stopped?.recordingError && get().sessionId === sessionId)
+            set({ recordingError: stopped.recordingError, error: stopped.recordingError });
+        } catch {
+          if (get().sessionId === sessionId) set({ transcriptTailIncomplete: true });
         }
         unsubscribeSpeech?.();
         unsubscribeSpeech = undefined;
-        if (finishingSession === sessionId) finishingSession = null;
-        if (get().sessionId !== sessionId) return;
+        if (get().sessionId !== sessionId) return false;
       }
       set({ status: 'ended', generating: false, endedAt: get().endedAt ?? Date.now() });
-      get().archive('ended', policy.preserveEmpty);
+      const draft = durableDraft;
+      const saved = await get().archive('ended', policy.preserveEmpty);
+      if (draft && saved && durableDraft === draft) {
+        durableDraft = undefined;
+        await draft.close(true).catch(() => {});
+      } else await draft?.drain();
       if (get().mode === 'local')
         await window.desktop
-          ?.telemetrySignal?.({ type: 'interview_saved', saved: !useHistory.getState().error })
+          ?.telemetrySignal?.({ type: 'interview_saved', saved })
           .catch(() => {});
       const current = get();
       if (
         policy.generateTitle !== false &&
         current.mode === 'local' &&
         current.aiEnabled &&
-        current.sessionId &&
-        !useHistory.getState().error
+        current.sessionId === sessionId && current.sessionId && saved
       )
         await useHistory.getState().generateTitle(current.sessionId, current.modelId);
+      return saved;
     })();
     endingOperation = { sessionId, promise, options: policy };
     return promise.finally(() => {
-      if (endingOperation?.promise === promise) endingOperation = undefined;
+      if (endingOperation?.promise === promise) {
+        endingOperation = undefined;
+        if (finishingSession === sessionId) finishingSession = null;
+      }
     });
   },
   reset() {
@@ -997,6 +1123,12 @@ export const useInterview = create<InterviewState>((set, get) => ({
       microphoneToggling: false,
       inputChanging: false,
       sessionId: null,
+      transcriptTailIncomplete: false,
+      recordingError: null,
+      hadRecording: false,
+      recording: false,
+      recordingWanted: false,
+      recordingBusy: false,
       inputDraft: null,
       inputDraftRevision: 0,
       inputDraftComposing: false,
@@ -1013,7 +1145,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
       speech: { ...get().speech, state: 'idle' },
     });
   },
-  async ask(question, sourceTranscriptIds, screenshotIds = []) {
+  async ask(question, sourceTranscriptIds = [], screenshotIds = [], source = questionSource(get().inputMode)) {
     if (get().updatingModel || (!question.trim() && !screenshotIds.length)) return;
     if (get().status === 'ended') {
       get().reset();
@@ -1030,6 +1162,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
     const controller = new AbortController();
     answerController = controller;
     const answerId = id();
+    const answerSession = get().sessionId;
     const sentImages = get()
       .screenshots.filter((shot) => screenshotIds.includes(shot.id))
       .map((shot) => ({ ...shot }));
@@ -1041,6 +1174,7 @@ export const useInterview = create<InterviewState>((set, get) => ({
           id: answerId,
           question: question.trim() || '截图中的题目',
           sourceTranscriptIds,
+          ...(sourceTranscriptIds.length ? { questionSource: source } : {}),
           ...(screenshotMode ? { screenshot: screenshotMode } : {}),
           ...(sentImages.length ? { images: sentImages } : {}),
           createdAt: Date.now(),
@@ -1075,7 +1209,8 @@ export const useInterview = create<InterviewState>((set, get) => ({
               answer.id === answerId ? { ...answer, images: saved.images } : answer,
             ),
           }));
-          get().archive('interrupted');
+          await get().archive('interrupted');
+          controller.signal.throwIfAborted();
         }
         const provider = await interviewAnswer(
           question,
@@ -1178,6 +1313,12 @@ export const useInterview = create<InterviewState>((set, get) => ({
         ),
       }));
     } finally {
+      if (get().sessionId === answerSession) {
+        const index = get().answers.findIndex(answer => answer.id === answerId);
+        const answer = get().answers[index];
+        if (answer && answer.status !== 'streaming')
+          void durableDraft?.put(index, { answer: { ...answer, images: answer.images?.map(({ id }) => ({ id })) } });
+      }
       if (answerController === controller) {
         answerController = undefined;
         set({ generating: false });
@@ -1232,10 +1373,34 @@ export const useInterview = create<InterviewState>((set, get) => ({
       answer.screenshot === 'only' ? '' : answer.question,
       answer.sourceTranscriptIds,
       screenshotIds,
+      answer.questionSource ?? 'system',
     );
   },
 }));
 
+// The waveform samples meters directly. A level change alone should not
+// render every transcript, Markdown answer and settings control again.
+export function useInterviewPanelState() {
+  return useInterview(useShallow(({ audioLevels: _levels, ...panel }) => panel));
+}
+
+const stopInterviewCheckpoint = useInterview.subscribe((state, previous) => {
+  if (state.sessionId !== previous.sessionId) {
+    void durableDraft?.close(false).catch(() => {});
+    durableDraft = undefined;
+    if (state.mode === 'local' && state.sessionId && state.startedAt !== null) {
+      const sessionId = state.sessionId;
+      durableDraft = startInterviewDraft({
+        id: sessionId, startedAt: state.startedAt, knowledgeBaseName: state.knowledgeBaseName,
+        title: state.knowledgeBaseName ? `「${state.knowledgeBaseName}」面试记录` : '面试记录',
+      }, () => {
+        if (useInterview.getState().sessionId === sessionId && useInterview.getState().status !== 'ended')
+          useHistory.setState({ error: '记录保存失败，请检查本地存储空间。当前对话仍可查看。' });
+      });
+    }
+  }
+  if (state.hadRecording && !previous.hadRecording) void durableDraft?.put();
+});
 // The shared input follows ASR until somebody edits it. Clearing an edit only
 // suppresses that candidate; new ASR resumes autofill, matching the desktop UI.
 const stopSharedInputDraft = useInterview.subscribe((state, previous) => {
@@ -1257,4 +1422,8 @@ const stopSharedInputDraft = useInterview.subscribe((state, previous) => {
     useInterview.setState({ inputDraft: null, inputDraftRevision: state.inputDraftRevision + 1 });
   }
 });
-if (import.meta.hot) import.meta.hot.dispose(stopSharedInputDraft);
+if (import.meta.hot) import.meta.hot.dispose(() => {
+  stopSharedInputDraft();
+  stopInterviewCheckpoint();
+  void durableDraft?.close(false).catch(() => {});
+});

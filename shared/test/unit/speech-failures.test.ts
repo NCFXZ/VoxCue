@@ -23,7 +23,7 @@ vi.mock('node:worker_threads', async () => {
           }
           if (message.op === 'prepare') {
             if (runtime.mode === 'error-preparing')
-              this.emit('message', { error: 'synthetic AEC failure' });
+              this.emit('message', { error: 'synthetic input preparation failure' });
             else if (runtime.mode !== 'stall-preparing')
               this.emit('message', { prepared: message.id });
           }
@@ -37,6 +37,8 @@ vi.mock('node:worker_threads', async () => {
   };
 });
 import { SpeechController } from '../../../shared/electron/backend/speech/controller';
+import { useInterview } from '../../src/stores/interview';
+import { localHistory } from '../../src/services/history';
 const controllers: SpeechController[] = [];
 beforeEach(() => {
   vi.useFakeTimers();
@@ -49,9 +51,8 @@ afterEach(async () => {
   await Promise.allSettled(controllers.splice(0).map((controller) => controller.close()));
   vi.useRealTimers();
 });
-function controller(start = async () => {}, stop = async () => {}, preprocessorFile?: string) {
+function controller(start = async () => {}, stop = async () => {}) {
   const instance = new SpeechController('model', 'helper', () => {}, {
-    preprocessorFile,
     devices: async () => [{ id: 'mic', source: 'microphone', name: 'Synthetic', default: true }],
     create: () => ({ start, stop }),
   });
@@ -59,6 +60,41 @@ function controller(start = async () => {}, stop = async () => {}, preprocessorF
   return instance;
 }
 const begin = { op: 'start' as const, options: { sources: ['microphone' as const] } };
+it.each(['inference', 'exit'])('自动清理失效识别进程后，结束面试仍归档为尾段可能不完整（%s）', async failure => {
+  const service = controller();
+  const storage = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  });
+  vi.stubGlobal('window', { desktop: { speech: service.call.bind(service) } });
+  try {
+    await service.call(begin);
+    useInterview.setState({ mode: 'local', status: 'running', sessionId: crypto.randomUUID(),
+      startedAt: Date.now(), transcriptTailIncomplete: false });
+    if (failure === 'exit') runtime.workers[0].emit('exit', 1);
+    else runtime.workers[0].emit('message', { error: 'synthetic inference failure' });
+    await vi.advanceTimersByTimeAsync(1);
+    expect((await service.call({ op: 'status' })).state).toBe('error');
+    await useInterview.getState().end({ generateTitle: false });
+    expect(localHistory.list()[0]).toMatchObject({ status: 'interrupted', transcriptTailIncomplete: true });
+    expect(await service.call({ op: 'stop' })).not.toHaveProperty('transcriptTailIncomplete');
+    await service.call(begin);
+    expect(await service.call({ op: 'stop' })).not.toHaveProperty('transcriptTailIncomplete');
+  } finally {
+    useInterview.getState().reset();
+    vi.unstubAllGlobals();
+  }
+});
+it('重新启动后的健康 ASR 不会清掉本次面试已丢失的尾段', async () => {
+  const service = controller();
+  await service.call(begin);
+  runtime.workers[0].emit('exit', 1);
+  await vi.advanceTimersByTimeAsync(1);
+  expect((await service.call(begin)).state).toBe('running');
+  expect((await service.call({ op: 'stop' })).transcriptTailIncomplete).toBe(true);
+  expect((await service.call({ op: 'stop' })).transcriptTailIncomplete).toBeUndefined();
+});
 it('ASR Worker 在初始化前退出时立即结束加载，允许重新启动，不等待 60 秒', async () => {
   runtime.mode = 'exit-loading';
   const service = controller();
@@ -72,27 +108,27 @@ it('ASR Worker 在初始化前退出时立即结束加载，允许重新启动�
   runtime.mode = 'ready';
   expect(await service.call(begin)).toMatchObject({ state: 'running' });
 });
-it('prepares optional audio processing before opening capture, and can restart after a preparation failure', async () => {
+it('prepares recognition inputs before opening capture, and can restart after a preparation failure', async () => {
   const start = vi.fn(async () => {});
-  const service = controller(start, async () => {}, 'synthetic-trusted-adapter.js');
+  const service = controller(start);
   runtime.mode = 'error-preparing';
   const failed = service.call(begin);
   await vi.advanceTimersByTimeAsync(1);
-  expect(await failed).toMatchObject({ state: 'error', error: 'synthetic AEC failure' });
+  expect(await failed).toMatchObject({ state: 'error', error: 'synthetic input preparation failure' });
   expect(start).not.toHaveBeenCalled();
   runtime.mode = 'ready';
   expect(await service.call(begin)).toMatchObject({ state: 'running' });
   expect(start).toHaveBeenCalledTimes(1);
 });
-it('retires a stalled audio preprocessor without opening a capture device', async () => {
+it('retires a stalled recognition worker without opening a capture device', async () => {
   const start = vi.fn(async () => {});
-  const service = controller(start, async () => {}, 'synthetic-trusted-adapter.js');
+  const service = controller(start);
   runtime.mode = 'stall-preparing';
   const pending = service.call(begin);
   await vi.advanceTimersByTimeAsync(10001);
   expect(await pending).toMatchObject({
     state: 'error',
-    error: expect.stringContaining('回声消除初始化超时'),
+    error: expect.stringContaining('语音输入准备超时'),
   });
   expect(start).not.toHaveBeenCalled();
   runtime.mode = 'ready';

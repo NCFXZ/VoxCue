@@ -389,6 +389,15 @@ try {
   await usageNotice.getByText(twoLowQuotas, { exact: true }).waitFor();
   await floating.getByRole('button', { name: '关闭截图保护', exact: true }).click();
   await floating.locator('.floating-capture-notice').waitFor();
+  const settledNotices = async (count) => {
+    await floating.waitForFunction((expected) => {
+      const footer = document.querySelector('.floating-notices');
+      return footer?.querySelectorAll('.interview-reveal[data-open="true"] .floating-notice').length === expected &&
+        footer.querySelectorAll('.floating-notice').length === expected &&
+        footer.getAnimations({ subtree: true }).every(animation =>
+          !Number.isFinite(animation.effect?.getComputedTiming().endTime) || animation.playState === 'finished');
+    }, count);
+  };
   for (const dark of [false, true]) {
     await floating.evaluate(
       (value) => document.documentElement.classList.toggle('dark', value),
@@ -419,13 +428,14 @@ try {
       'auto',
       'Status notices retain the original visible scrollbar',
     );
+    await settledNotices(2);
     const statusLayout = await floating.locator('.floating-notices').evaluate((node) => ({
       clientHeight: node.clientHeight,
       scrollHeight: node.scrollHeight,
       clientWidth: node.clientWidth,
       scrollWidth: node.scrollWidth,
       gap: getComputedStyle(node).gap,
-      notices: [...node.children].map((child) => ({
+      notices: [...node.querySelectorAll('.floating-notice')].map((child) => ({
         height: child.getBoundingClientRect().height,
         border: getComputedStyle(child).borderTopWidth,
         padding: getComputedStyle(child).paddingTop,
@@ -448,9 +458,10 @@ try {
   });
   const extraNotice = floating.getByText('合成麦克风提示：请检查连接', { exact: true });
   await extraNotice.waitFor();
+  await settledNotices(3);
   const overflowLayout = await floating.locator('.floating-notices').evaluate((node) => {
     const viewport = node.getBoundingClientRect();
-    const rows = [...node.children].map((child) => child.getBoundingClientRect());
+    const rows = [...node.querySelectorAll('.floating-notice')].map((notice) => notice.getBoundingClientRect());
     const third = rows[2];
     const visibleFraction =
       Math.max(0, Math.min(third.bottom, viewport.bottom) - third.top) / third.height;
@@ -523,11 +534,12 @@ try {
       },
     };
   });
-  await floating
-    .getByRole('textbox', { name: '面试提问', exact: true })
-    .fill('Explain the synthetic project.');
-  await floating.getByRole('textbox', { name: '面试提问', exact: true }).press('Enter');
-  await floating.getByText('Synthetic interview answer', { exact: true }).waitFor();
+  const question = 'Explain the synthetic project.';
+  const questionInput = floating.getByRole('textbox', { name: '面试提问', exact: true });
+  await questionInput.fill(question);
+  await questionInput.press('Enter');
+  const submittedAnswer = floating.getByRole('article', { name: `回答：${question}`, exact: true });
+  await submittedAnswer.locator('.answer-text').getByText('Synthetic interview answer', { exact: true }).waitFor();
   await usageNotice.getByText('ChatGPT 剩余: 5小时 19% · 每周 15%', { exact: true }).waitFor();
   await captureRequested(floating, 'free-floating-both-low');
   await app.evaluate(() => {

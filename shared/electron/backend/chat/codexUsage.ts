@@ -40,6 +40,7 @@ function partialKeyringError(text: string) {
   return partial;
 }
 const requirePackage = createRequire(__filename);
+export const codexRuntimeVersion = process.platform === 'win32' ? '0.170.0' : '0.164.0';
 // node_modules is unpacked by both platform packagers; spawn needs its real path.
 export function unpackedUsagePath(file: string) {
   return file.replace(/([\\/])app\.asar([\\/])/, '$1app.asar.unpacked$2');
@@ -53,7 +54,11 @@ export function codexUsageExecutable() {
         : null;
   if (!target) throw unavailable();
   const manifest = requirePackage.resolve(`@openai/codex-${target[0]}/package.json`);
-  if (requirePackage(manifest).version !== `0.164.0-${target[0]}`) throw unavailable();
+  if (
+    requirePackage('@openai/codex/package.json').version !== codexRuntimeVersion ||
+    requirePackage(manifest).version !== `${codexRuntimeVersion}-${target[0]}`
+  )
+    throw unavailable();
   return unpackedUsagePath(
     path.join(path.dirname(manifest), 'vendor', target[1], 'bin', target[2]),
   );

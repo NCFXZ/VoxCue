@@ -3,7 +3,26 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { atomicFile, preserveEncryptedFile } from '../atomicFile';
-import type { CredentialRecord, AuthStorage } from './service';
+// Previous local records remain readable for credential maintenance and account erasure.
+export interface CredentialRecord {
+  version: 1;
+  hostId: string;
+  clientId: string;
+  subject: string;
+  name: string;
+  email: string;
+  expiresAt: number;
+  accessExpiresAt?: number;
+  idToken?: string;
+  accessToken?: string;
+  refreshToken?: string;
+  grantedScopes?: string[];
+}
+export interface AuthStorage {
+  hostId(): Promise<string>;
+  read(): Promise<CredentialRecord | null>;
+  write(record: CredentialRecord): Promise<void>;
+}
 export function decryptElectronCredential(value: Buffer) {
   try {
     return safeStorage.decryptString(value);
@@ -24,6 +43,16 @@ export interface CredentialEncryption {
   encrypt(value: string): Buffer | Promise<Buffer>;
   decrypt(value: Buffer): string | Promise<string>;
 }
+export const systemCredentialEncryption: CredentialEncryption = {
+  encrypt(value) {
+    if (!safeStorage.isEncryptionAvailable()) throw Error('System credential encryption unavailable');
+    return safeStorage.encryptString(value);
+  },
+  decrypt(value) {
+    if (!safeStorage.isEncryptionAvailable()) throw Error('System credential encryption unavailable');
+    return decryptElectronCredential(value);
+  },
+};
 export function createAuthStorage(
   credentialEncryptionLabel = '系统凭据加密',
   encryption?: CredentialEncryption,

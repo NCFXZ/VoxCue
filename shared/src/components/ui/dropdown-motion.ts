@@ -161,7 +161,7 @@ export function animateDropdownExit(
   const height = style.height;
   const opacity = style.opacity;
   const snapshot = positioner.cloneNode(true) as HTMLElement;
-  const surface = snapshot.querySelector<HTMLElement>('.dropdown-content')!;
+  const surface = snapshot.children[Array.from(positioner.children).indexOf(content)] as HTMLElement;
   snapshot.inert = true;
   snapshot.setAttribute('aria-hidden', 'true');
   snapshot.style.pointerEvents = 'none';

@@ -222,7 +222,7 @@ try {
     'PASS: real client/API transferred and committed 100000000 → 101000000 → 100000000 bytes; history/knowledge additions rejected at 100 MB while metered profile upload still succeeds.',
   );
   console.log(
-    'PASS: pinned 0.5.1 real loopback register/reset challenge separation, 60s resend throttling, NFC/spaces/Chinese/emoji, old short non-NFC hash compatibility, reset revocation and one-use refresh rotation; synthetic data only.',
+    'PASS: pinned reference server on loopback verified register/reset challenge separation, 60s resend throttling, NFC/spaces/Chinese/emoji, old short non-NFC hash compatibility, reset revocation and one-use refresh rotation; synthetic data only.',
   );
 } finally {
   await Promise.all([api.close(), outbox.stop(), services.close()]);

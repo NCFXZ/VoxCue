@@ -1,6 +1,7 @@
 import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
+import workspace from '../../scripts/workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
@@ -14,7 +15,10 @@ import assert from 'node:assert/strict';
 const profile = path.join(testRoot, 'profile');
 for (const name of ['profile', 'tmp', 'home'])
   await mkdir(path.join(testRoot, name), { recursive: true });
-const preference = path.join(profile, 'update-settings.json');
+const { profileDirectory } = workspace.platformRequire('./dist-electron/shared/electron/accountProfilePaths.js');
+const accountProfile = profileDirectory(profile, 'account:a0000000-0000-4000-8000-000000000001');
+await mkdir(accountProfile, { recursive: true });
+const preference = path.join(accountProfile, 'update-settings.json');
 await writeFile(preference, JSON.stringify({ schemaVersion: 1, autoDownload: false }));
 const fixture = path.join(testRoot, 'updates-sidebar.cjs');
 await writeFile(

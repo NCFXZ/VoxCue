@@ -1,0 +1,28 @@
+/* The follow animation owns the viewport while new lines are being laid out. */
+[data-following-latest='true'] {
+  overflow-anchor: none;
+}
+
+:root[data-view-direction],
+.sent-message-enter {
+  --view-enter-x: 0px;
+  --view-enter-y: 8px;
+}
+
+@keyframes screen-enter {
+  from {
+    opacity: 0;
+    transform: translate(var(--view-enter-x), var(--view-enter-y));
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, 0);
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .sent-message-enter {
+    animation: screen-enter var(--panel-motion-duration, 240ms)
+      var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) backwards;
+  }
+}

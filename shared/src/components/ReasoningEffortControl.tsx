@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
+import { isApiProvider } from '../../electron/contracts/apiConnections';
 import { t } from '../i18n';
 import {
   effortLabels,
@@ -8,7 +9,8 @@ import {
 } from '../services/chatOptions';
 import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
-import { Check, ChevronDown, ChevronRight, Refresh } from './icons';
+import { Check, ChevronRight, Refresh } from './icons';
+import { InterviewReveal } from './InterviewReveal';
 import './reasoningEffortControl.css';
 
 interface ModelProps {
@@ -16,7 +18,7 @@ interface ModelProps {
   modelId: string;
   onModelChange(id: string): void;
   effort: ReasoningEffort | 'auto';
-  onEffortChange(value: ReasoningEffort): void;
+  onEffortChange(value: ReasoningEffort | 'auto'): void;
   loading?: boolean;
   error?: string | null;
   onRefresh?(): void;
@@ -43,19 +45,29 @@ export function ModelReasoningControl(selection: ModelProps) {
   const pending = useRef<number | null>(null);
   const pointerStart = useRef<number | null>(null);
   const [boundary, setBoundary] = useState<HTMLDialogElement | null>(null);
+  const [side, setSide] = useState<'top' | 'bottom'>('top');
   const trigger = useRef<HTMLButtonElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const body = useRef<HTMLDivElement>(null);
   const previousHeight = useRef<number | null>(null);
   const range = useRef<HTMLInputElement>(null);
   const modelButton = useRef<HTMLButtonElement>(null);
-  const levels = supportedReasoningEfforts(model);
+  const supported = supportedReasoningEfforts(model);
+  const api = isApiProvider(model?.provider?.id);
+  const toggle = supported.includes('on');
+  const levels: (ReasoningEffort | 'auto')[] = api && supported.length ? ['auto', ...supported] : supported;
   const effort = resolveReasoningEffort(model, value);
   const index = effort === 'auto' ? 0 : Math.max(0, levels.indexOf(effort));
   const position = draft ?? index;
   const progress = levels.length > 1 ? position / (levels.length - 1) : 0;
   const previewEffort = levels[Math.round(position)];
-  const current = previewEffort ? t(effortLabels[previewEffort]) : '';
+  const effortName = (level: ReasoningEffort | 'auto') => {
+    const reported = model?.defaultReasoningEffort;
+    if (level === 'auto' && reported && supported.includes(reported))
+      return t('自动（{0}）', [t(effortLabels[reported])]);
+    return t(toggle && level === 'none' ? '关闭思考' : effortLabels[level]);
+  };
+  const current = previewEffort ? effortName(previewEffort) : '';
   const loading = selection.loading || requestingModels;
   const modelLabel =
     model?.label ??
@@ -64,7 +76,7 @@ export function ModelReasoningControl(selection: ModelProps) {
     selection.disabled ||
     (!requestingModels &&
       !selection.onRequestModels &&
-      (selection.loading || (!selection.models.length && !selection.onRefresh)));
+      !selection.models.length && !selection.onRefresh);
   // Saving locks edits without dismissing the popup or blurring its focused range.
   const locked = blocked || selection.busy || loading;
   const lockedNow = useRef(locked);
@@ -157,7 +169,7 @@ export function ModelReasoningControl(selection: ModelProps) {
       aria-busy={locked || undefined}
       aria-labelledby={undefined}
       className="dropdown-content compact-tool-menu reasoning-effort-popup"
-      side="top"
+      side={side}
       align="start"
       sideOffset={10}
       collisionBoundary={boundary ?? undefined}
@@ -185,6 +197,7 @@ export function ModelReasoningControl(selection: ModelProps) {
         <div key={panel} className="reasoning-popup-view" data-panel={panel}>
           {panel === 'models' ? (
             <>
+              {api && model?.provider && <div className="reasoning-source">{t(model.provider.name)}</div>}
               <Menu.RadioGroup
                 role="menu"
                 aria-label={t('选择模型')}
@@ -211,11 +224,11 @@ export function ModelReasoningControl(selection: ModelProps) {
                   </Menu.RadioItem>
                 ))}
               </Menu.RadioGroup>
-              {selection.error && (
+              <InterviewReveal>{selection.error && (
                 <p className="model-error" role="alert">
                   {t(selection.error)}
                 </p>
-              )}
+              )}</InterviewReveal>
               {selection.onRefresh && (
                 <Menu.Item
                   className="dropdown-item reasoning-model-refresh"
@@ -247,7 +260,17 @@ export function ModelReasoningControl(selection: ModelProps) {
                   <ChevronRight size={14} />
                 </span>
               </button>
-              {levels.length > 0 && (
+              {toggle && (
+                <div className="reasoning-toggle" role="group" aria-label={label}>
+                  {levels.map((level) => (
+                    <Button key={level} type="button" variant="ghost" disabled={locked}
+                      aria-pressed={effort === level} onClick={() => onChange(level)}>
+                      {effortName(level)}
+                    </Button>
+                  ))}
+                </div>
+              )}
+              {!toggle && levels.length > 0 && (
                 <div
                   className="reasoning-slider"
                   data-single={levels.length === 1}
@@ -368,7 +391,13 @@ export function ModelReasoningControl(selection: ModelProps) {
       onOpenChange={(next) => {
         if (next && lockedNow.current) return;
         if (next) {
-          setBoundary(trigger.current?.closest('dialog') ?? null);
+          const dialog = trigger.current?.closest('dialog') ?? null;
+          setBoundary(dialog);
+          const anchor = trigger.current?.getBoundingClientRect();
+          const bounds = dialog?.getBoundingClientRect();
+          // The scrollable catalog fits the initial side, even when only its footer fits there.
+          setSide(anchor && anchor.top - (bounds?.top ?? 0) < (bounds?.bottom ?? window.innerHeight) - anchor.bottom
+            ? 'bottom' : 'top');
           setPanel(selection.onRequestModels ? 'models' : 'effort');
           if (selection.onRequestModels) {
             setRequestingModels(true);
@@ -392,7 +421,7 @@ export function ModelReasoningControl(selection: ModelProps) {
         >
           <span className="model-name">{modelLabel}</span>
           {current && <span className="reasoning-trigger-level">{current}</span>}
-          <ChevronDown size={12} />
+          <Menu.TriggerChevron />
         </Button>
       </Menu.Trigger>
       {boundary ? popup : <Menu.Portal>{popup}</Menu.Portal>}

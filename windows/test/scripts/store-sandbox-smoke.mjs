@@ -29,10 +29,15 @@ import { createRequire } from 'node:module';
 assert.equal(process.platform, 'win32');
 const argument = process.argv[2];
 const copilotVault = argument === '--copilot-vault';
-const appxUpgrade = argument === '--appx-upgrade';
+const appxBaselines = new Map([
+  ['--appx-upgrade', ['1.2.3', '6d6fc9ae57aff3db3d66e317eb4444ddedbf9ecccf5fa60d2be270bea28d8fe4']],
+  ['--appx-upgrade-1.2.2', ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8']],
+]);
+const appxUpgrade = appxBaselines.has(argument);
 // Published, immutable originals used before installing the current package.
 const previousVersions = new Map([
-  ['--nsis-upgrade', ['1.2.2', '8d4bce6ce60b17cecbb570814a8408263b30e8517dfec9a169d62c438362964d']],
+  ['--nsis-upgrade', ['1.2.3', '94482f145a44f2f2dbfc55cfe548c1675379f7a314a0326a551b9fd17b76be87']],
+  ['--nsis-upgrade-1.2.2', ['1.2.2', '8d4bce6ce60b17cecbb570814a8408263b30e8517dfec9a169d62c438362964d']],
   ['--nsis-upgrade-1.2.0', ['1.2.0', 'a83d1399fb2dae98cc4dfcf98924c6e571d6c17a461ca92a8292556bbcc610ae']],
   ['--nsis-upgrade-1.1.1', ['1.1.1', 'cb84c1f7b22f5e613a1401dc38e201817d78dac0b214721b8fbb7d6f09998bfd']],
 ]);
@@ -47,7 +52,8 @@ assert.ok(
       (copilotVault || appxUpgrade ||
         nsisTask ||
         (appxArgument?.startsWith('--appx=') && appxArgument.length > '--appx='.length))),
-  'Use the current Store release, --appx-upgrade, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current, --nsis-upgrade, --nsis-upgrade-1.2.0 or --nsis-upgrade-1.1.1',
+  'Use the current Store release, --appx=<owned temporary current APPX>, --copilot-vault, --nsis-current, or an upgrade flag: ' +
+    [...appxBaselines.keys(), ...previousVersions.keys()].join(', '),
 );
 const platformRoot = fileURLToPath(new URL('../../', import.meta.url));
 const repositoryRoot = path.resolve(platformRoot, '..');
@@ -55,8 +61,11 @@ const { version } = JSON.parse(
   await readFile(path.join(repositoryRoot, 'shared/package.json'), 'utf8'),
 );
 assert.match(version, /^\d+\.\d+\.\d+$/);
-const [major, minor, patch] = version.split('.').map(Number);
-const packageVersion = `${major + 1}.${minor}.${patch}.0`;
+function storeVersion(appVersion) {
+  const [major, minor, patch] = appVersion.split('.').map(Number);
+  return `${major + 1}.${minor}.${patch}.0`;
+}
+const packageVersion = storeVersion(version);
 const artifact = copilotVault
   ? undefined
   : nsisTask
@@ -64,13 +73,11 @@ const artifact = copilotVault
     : appxArgument
       ? path.resolve(appxArgument.slice('--appx='.length))
       : path.join(platformRoot, 'release/store', `VoxCue-Store-${version}-x64.appx`);
-const [previousVersion, previousDigest] = appxUpgrade
-  ? ['1.2.2', 'b97c3b05c5550824c952d1a77aff02e5b110082e0b24e324c3e371926221a2e8']
-  : previousVersions.get(argument) ?? [];
-const checkCachedOffer = Boolean(nsisTask) && previousVersion === '1.2.2';
+const [previousVersion, previousDigest] = appxBaselines.get(argument) ?? previousVersions.get(argument) ?? [];
+const checkCachedOffer = Boolean(nsisTask) && ['1.2.2', '1.2.3'].includes(previousVersion);
 const checkRagUpgrade = checkCachedOffer || previousVersion === '1.2.0';
 const previousArtifact = appxUpgrade
-  ? path.join(platformRoot, 'release/store', 'VoxCue-Store-1.2.2-x64.appx')
+  ? path.join(platformRoot, 'release', previousVersion === '1.2.2' ? 'store' : previousVersion, `VoxCue-Store-${previousVersion}-x64.appx`)
   : previousVersion
   ? path.join(platformRoot, 'release', previousVersion, `VoxCue-Setup-${previousVersion}-x64.exe`)
   : undefined;
@@ -351,14 +358,38 @@ function Stage($name) {
   Write-OwnedJson 'status.json' @{nonce=$config.nonce; stage=$name}
   if (Test-Path -LiteralPath (Join-Path $output 'stop')) { throw 'Host requested Sandbox shutdown' }
 }
-function Check-Licenses($directory) {
+function Check-Licenses($directory, $expected = $config.licenses) {
   foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) {
     $file = Join-Path (Join-Path $directory 'resources\licenses') $name
-    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $config.licenses.$name) { throw ('Installed license mismatch: ' + $name) }
+    if ((Get-FileHash -LiteralPath $file -Algorithm SHA256).Hash.ToLowerInvariant() -cne $expected.$name) { throw ('Installed license mismatch: ' + $name) }
   }
 }
+function New-ApiKeyPasteProbe {
+  $probe = Join-Path $work 'ApiKeyFieldProbe.exe'
+  $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
+  & $compiler /nologo /codepage:65001 /platform:x64 /r:System.Windows.Forms.dll /r:Accessibility.dll /r:System.Drawing.dll ("/out:" + $probe) 'C:\VoxCueStoreInput\ApiKeyFieldProbe.cs' | Out-Null
+  if ($LASTEXITCODE -ne 0) { throw 'Guest password probe compilation failed' }
+  return $probe
+}
+function Check-ApiKeyPaste($directory) {
+  Stage 'checking-installed-api-key-paste'
+  $helper = Join-Path $directory 'resources\native\VoxCue.ApiKeyPrompt.exe'
+  if (-not (Test-Path -LiteralPath $helper -PathType Leaf)) { throw 'Installed password editor is missing' }
+  $probe = New-ApiKeyPasteProbe
+  $diagnostic = Join-Path $work 'paste-diagnostic.txt'
+  $paste = Start-Process -FilePath $probe -ArgumentList ('"' + $helper + '" --sandbox-paste') -WindowStyle Hidden -PassThru -RedirectStandardError $diagnostic
+  try {
+    $null = $paste.Handle
+    if (-not $paste.WaitForExit(30000)) { $paste.Kill(); throw 'Guest password paste test timed out' }
+    if ($paste.ExitCode -ne 0) {
+      $reason = @(Get-Content -LiteralPath $diagnostic | Where-Object { $_ -cmatch '^Paste probe: [A-Za-z0-9 .:-]{1,140}$' })
+      throw ('Installed password editor failed the isolated paste test: exit=' + $paste.ExitCode + ' ' + ($reason -join ' '))
+    }
+  } finally { $paste.Dispose() }
+  $result.apiKeyPaste = $true
+}
 function Install-UpgradeRag($profileMarker) {
-  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2')) { throw 'Unexpected upgrade component' }
+  if ($config.ragDirectory -cnotmatch '^rag-1\.0\.0-[a-f0-9]{64}$' -or $config.previous.version -notin @('1.2.0','1.2.2','1.2.3')) { throw 'Unexpected upgrade component' }
   $cache = Join-Path ([IO.Path]::GetDirectoryName($profileMarker)) 'component-cache'
   Assert-GuestProfilePath $cache
   if (Test-Path -LiteralPath $cache) { throw 'Upgrade fixture requires a fresh component cache' }
@@ -373,6 +404,20 @@ function Assert-GuestProfilePath($file) {
       if (([IO.File]::GetAttributes($current) -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'Redirected guest profile evidence' }
     } catch [IO.FileNotFoundException] {} catch [IO.DirectoryNotFoundException] {}
     $current = [IO.Path]::GetDirectoryName($current)
+  }
+}
+function Assert-ClaimedLocalProfile($marker) {
+  $root = [IO.Path]::GetDirectoryName($marker)
+  $owner = '${createHash('sha256').update('local').digest('hex')}'
+  $assignment = Join-Path $root 'legacy-profile-assignment-v1.json'
+  $profile = Join-Path (Join-Path $root 'account-profiles') $owner
+  $shortcut = Join-Path $profile 'shortcut-settings.json'
+  $partition = Join-Path (Join-Path $root 'Partitions') ('voxcue-user-' + $owner)
+  foreach ($file in @($assignment, $shortcut, $partition)) { Assert-GuestProfilePath $file }
+  $claim = Get-Content -LiteralPath $assignment -Encoding UTF8 -Raw | ConvertFrom-Json
+  if ($claim.owner -cne $owner -or $claim.files -isnot [bool] -or $claim.files -or $claim.browser -isnot [bool] -or $claim.browser -or
+      -not (Test-Path -LiteralPath $shortcut -PathType Leaf) -or -not (Test-Path -LiteralPath $partition -PathType Container)) {
+    throw 'The claimed local account profile, settings or browser partition was not committed'
   }
 }
 try {
@@ -542,7 +587,10 @@ try {
       if ($info.PSIsContainer -or $info.VersionInfo.ProductVersion -notmatch ('^' + [regex]::Escape($item.version) + '(?:\.0)?$')) { throw 'Installed NSIS executable version mismatch' }
       if ($item.version -eq $config.version -and
           (Get-FileHash -LiteralPath (Join-Path $target 'resources\app.asar') -Algorithm SHA256).Hash.ToLowerInvariant() -cne $config.asarSha256) { throw 'Installed final ASAR differs from the accepted staging payload' }
-      if ($item.version -eq $config.version) { Check-Licenses $target }
+      if ($item.version -eq $config.version) {
+        Check-Licenses $target
+        Check-ApiKeyPaste $target
+      }
       return $key
     }
     $phases = New-Object Collections.Generic.List[string]
@@ -582,7 +630,11 @@ try {
         $options = @{nonce=$config.nonce; distribution='nsis'; appDirectory=$target; version=$expectedVersion;
           phase=$phase; bindings=$bindings; expectedPid=$app.Id; close=$true}
         if ($config.checkCachedOffer) { $options.offeredVersion = $config.current.version }
-        if ($config.ragDirectory) { $options.checkRag = $true; $options.ragRevision = $result.ragRevision }
+        if ($config.ragDirectory) {
+          $options.checkRag = $true
+          $options.ragRevision = $result.ragRevision
+          $options.rebuildIndex = $phase -ceq 'verify' -and $phases.Count -eq 1 -and [version]$expectedVersion -ge [version]'1.3.0'
+        }
         [IO.File]::WriteAllText($runtimeConfig, ($options | ConvertTo-Json -Depth 10 -Compress), (New-Object Text.UTF8Encoding $false))
         $inspection = New-Object Diagnostics.Process
         $inspectionStarted = $false
@@ -619,7 +671,7 @@ try {
             $runtime.phase -cne $phase -or $runtime.persistence -isnot [bool] -or -not $runtime.persistence) { throw 'Invalid NSIS renderer result' }
         if ($config.ragDirectory) {
           if ($runtime.ragRevision -cnotmatch '^[a-f0-9]{64}$' -or
-              ($phase -ceq 'verify' -and $runtime.ragRevision -cne $result.ragRevision)) { throw 'Upgrade changed the seeded RAG revision' }
+              ($phase -ceq 'verify' -and (($runtime.ragRevision -cne $result.ragRevision) -ne $options.rebuildIndex))) { throw 'Unexpected RAG revision across upgrade or restart' }
           $result.ragRevision = $runtime.ragRevision
         }
         # Never kill a product process and call that a successful flush/upgrade.
@@ -654,6 +706,7 @@ try {
         Assert-GuestProfilePath $profileMarker
         $localMode = Get-Content -LiteralPath $profileMarker -Encoding UTF8 -Raw | ConvertFrom-Json
         if ($localMode -isnot [bool] -or -not $localMode) { throw 'NSIS backend did not use the real guest profile' }
+        if ($config.previous -and $phase -ceq 'verify' -and [version]$expectedVersion -ge [version]'1.3.0') { Assert-ClaimedLocalProfile $profileMarker }
         $phases.Add($expectedVersion + ':' + $phase)
         return $runtime.bindings
       } finally { $app.Dispose() }
@@ -800,6 +853,7 @@ public static class PackageProcess {
   $phases = New-Object Collections.Generic.List[string]
   for ($pass = 0; $pass -lt $items.Count; $pass++) {
     $item = $items[$pass]
+    $expectedLicenses = $config.licenses
     if ($pass -lt 2) {
       Stage ('copying-appx-' + $item.version)
       $source = Join-Path 'C:\VoxCueStoreInput' $item.name
@@ -813,6 +867,16 @@ public static class PackageProcess {
         if (-not $entry) { throw 'APPX manifest missing' }
         $reader = New-Object IO.StreamReader($entry.Open())
         try { [xml]$manifest = $reader.ReadToEnd() } finally { $reader.Dispose() }
+        # The immutable previous APPX carries the notices shipped with that release.
+        if ($config.previous -and $pass -eq 0) {
+          $expectedLicenses = @{}
+          foreach ($name in @('LICENSE', 'THIRD_PARTY_NOTICES.md')) {
+            $license = $zip.GetEntry('app/resources/licenses/' + $name)
+            if (-not $license -or $license.Length -le 0 -or $license.Length -gt 1048576) { throw ('Invalid previous APPX license: ' + $name) }
+            $stream = $license.Open()
+            try { $expectedLicenses[$name] = (Get-FileHash -InputStream $stream -Algorithm SHA256).Hash.ToLowerInvariant() } finally { $stream.Dispose() }
+          }
+        }
       } finally { $zip.Dispose() }
       $identity = $manifest.Package.Identity
       if ($identity.ProcessorArchitecture -ine 'x64' -or $identity.Name -cne $config.identityName -or $identity.Publisher -ne $config.publisher -or $identity.Version -ne $item.packageVersion) { throw 'Unexpected APPX identity or version' }
@@ -833,7 +897,7 @@ public static class PackageProcess {
     $exe = [IO.Path]::GetFullPath((Join-Path $package.InstallLocation $applications[0].Executable))
     if (-not $exe.StartsWith($package.InstallLocation + '\', [StringComparison]::OrdinalIgnoreCase) -or [IO.Path]::GetFileName($exe) -ne 'VoxCue.exe') { throw 'Unexpected installed executable' }
     $appDirectory = Split-Path -Parent $exe
-    Check-Licenses $appDirectory
+    Check-Licenses $appDirectory $expectedLicenses
     $profileMarkers = @(
       (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::ApplicationData)) 'VoxCue\local-mode.json'),
       (Join-Path ([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)) ('Packages\' + $package.PackageFamilyName + '\LocalCache\Roaming\VoxCue\local-mode.json'))
@@ -853,6 +917,7 @@ public static class PackageProcess {
         if ($profileMarker -ine $profileMarkers[1] -or (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash -cne $markerHash) { throw 'Store upgrade replaced the original LocalCache preference' }
         $options.bindings = $seedBindings
         $options.ragRevision = $result.ragRevision
+        $options.rebuildIndex = $pass -eq 1 -and [version]$item.version -ge [version]'1.3.0'
       }
     }
     $runtimeConfig = Join-Path $work 'renderer-config.json'
@@ -883,9 +948,12 @@ public static class PackageProcess {
       if ($profileMarker -ine $profileMarkers[1] -or $runtime.phase -cne $options.phase -or $runtime.ragRevision -cnotmatch '^[a-f0-9]{64}$') { throw 'Store upgrade profile or RAG evidence missing' }
       if ($pass -eq 0) {
         $seedBindings = $runtime.bindings
-        $result.ragRevision = $runtime.ragRevision
         $markerHash = (Get-FileHash -LiteralPath $profileMarker -Algorithm SHA256).Hash
-      } elseif ($runtime.ragRevision -cne $result.ragRevision) { throw 'Store upgrade changed the old vector index' }
+      } else {
+        if (($runtime.ragRevision -cne $result.ragRevision) -ne $options.rebuildIndex) { throw 'Unexpected Store RAG revision across upgrade or restart' }
+        if ([version]$item.version -ge [version]'1.3.0') { Assert-ClaimedLocalProfile $profileMarker }
+      }
+      $result.ragRevision = $runtime.ragRevision
       $phases.Add($item.packageVersion + '/' + $runtime.version + ':' + $runtime.phase)
     }
     Check-StoreProcess $runtime $package $exe $launchUtc $runtimeConfig $runtimeFile
@@ -893,6 +961,7 @@ public static class PackageProcess {
   if ($config.previous) { $result.storeUpgradePhases = $phases.ToArray() }
   Stage 'checking-package-native-modules'
   # WindowsApps executables must be exercised in the package's execution context.
+  $null = New-ApiKeyPasteProbe
   # Keep results outside virtualized AppData; only this sanitized nonce file is mapped.
   $nativeFile = Join-Path $output ('package-native-' + $config.nonce + '.json')
   $nativeArgs = '"C:\VoxCueStoreInput\package-native-check.cjs" "' + $runtimeConfig + '" "' + $nativeFile + '" "' + $work + '"'
@@ -921,7 +990,7 @@ public static class PackageProcess {
       if ($native.sourceLine -is [int] -and $native.sourceLine -gt 0 -and $native.sourceLine -lt 10000) { $result.nativeLine = $native.sourceLine }
       throw 'Packaged native regression failed'
   }
-  foreach ($field in @('finalAsar', 'nativeVault', 'copilotRuntime', 'codexEmptyKeyring', 'codexSyntheticToken', 'asrWorker', 'asrGapReset', 'speechUtility', 'knowledgeFormats', 'knowledgeModes', 'knowledgeRestart', 'knowledgeDelete', 'mobileAssets', 'screenshotWorker', 'screenshotCapture')) {
+  foreach ($field in @('finalAsar', 'apiKeyPaste', 'nativeVault', 'copilotRuntime', 'codexEmptyKeyring', 'codexSyntheticToken', 'asrWorker', 'asrGapReset', 'speechUtility', 'knowledgeFormats', 'knowledgeModes', 'knowledgeRestart', 'knowledgeDelete', 'mobileAssets', 'screenshotWorker', 'screenshotCapture')) {
     if ($native.$field -isnot [bool] -or -not $native.$field) { throw ('Missing packaged native check: ' + $field) }
     $result[$field] = $true
   }
@@ -1272,7 +1341,7 @@ try {
         version,
         packageVersion,
         artifactName: path.basename(artifact),
-        previous: appxUpgrade ? { ...await stagePrevious(), packageVersion: '2.2.2.0' } : undefined,
+        previous: appxUpgrade ? { ...await stagePrevious(), packageVersion: storeVersion(previousVersion) } : undefined,
         ragDirectory: appxUpgrade ? await stageRagComponent(requirePlatform) : undefined,
         sha256: originalHash,
         licenses: await licenseDigests(),
@@ -1286,6 +1355,11 @@ try {
       path.join(platformRoot, 'test/scripts/store-renderer-client.mjs'),
       path.join(input, 'renderer.mjs'),
     );
+  }
+  if (!copilotVault) {
+    const pasteProbe = path.join(platformRoot, 'test/fixtures/ApiKeyFieldProbe.cs');
+    await ordinary(pasteProbe);
+    await copyFile(pasteProbe, path.join(input, 'ApiKeyFieldProbe.cs'));
   }
   await writeFile(path.join(input, 'guest.ps1'), '\uFEFF' + guestScript);
   const xml = (value) =>
@@ -1339,6 +1413,7 @@ try {
       assert.match(result.guestSid, /^S-\d+(?:-\d+)+$/);
       assert.notEqual(result.guestSid, hostSid);
       assert.equal(result.guestProfile.toLowerCase(), 'c:\\users\\wdagutilityaccount');
+      if (!copilotVault) assert.equal(result.apiKeyPaste, true, 'Missing installed password paste verification');
       if (copilotVault) {
         assert.equal(result.task, 'copilot-vault');
         assert.equal(result.exitCode, 0);
@@ -1414,7 +1489,7 @@ try {
           assert.equal(result.userData.toLowerCase(), profiles[1].toLowerCase());
           assert.deepEqual(result.storeExitCodes, [0, 0, 0]);
           assert.deepEqual(result.storeUpgradePhases, [
-            '2.2.2.0/1.2.2:seed',
+            storeVersion(previousVersion) + '/' + previousVersion + ':seed',
             packageVersion + '/' + version + ':verify',
             packageVersion + '/' + version + ':verify',
           ]);

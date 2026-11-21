@@ -59,6 +59,7 @@ export function switchView(
   target: HTMLElement | null,
   update: () => void,
   direction: 'page' | 'forward' | 'back' = 'page',
+  geometry: 'shared' | 'independent' = 'shared',
 ) {
   const current = target ? (revisions.get(target) ?? 0) + 1 : 0;
   if (target) revisions.set(target, current);
@@ -71,7 +72,8 @@ export function switchView(
   }
   const root = document.documentElement;
   const previousName = target.style.viewTransitionName;
-  target.style.viewTransitionName = 'screen';
+  // Distinct names slide each list at its own size without morphing the two boxes.
+  target.style.viewTransitionName = geometry === 'independent' ? 'panel-outgoing' : 'screen';
   root.dataset.viewDirection = direction;
   const dialog = target.closest<HTMLDialogElement>('dialog.app-dialog');
   const chrome = dialog ? null : document.querySelector<HTMLElement>('.titlebar');
@@ -115,7 +117,7 @@ export function switchView(
         bottom: Math.min(before.bottom, after.bottom),
         left: Math.max(before.left, after.left),
       };
-      root.dataset.viewClip = '';
+      root.dataset.viewClip = geometry;
       root.style.setProperty('--view-clip-left', `${clip.left}px`);
       root.style.setProperty('--view-clip-top', `${clip.top}px`);
       root.style.setProperty('--view-clip-width', `${Math.max(0, clip.right - clip.left)}px`);
@@ -133,8 +135,10 @@ export function switchView(
         active?.target === target &&
         current === revisions.get(target) &&
         target.isConnected
-      )
+      ) {
+        if (geometry === 'independent') target.style.viewTransitionName = 'panel-incoming';
         updateClip?.();
+      }
     }
   });
   const entry = {

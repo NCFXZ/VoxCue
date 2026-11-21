@@ -70,11 +70,16 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
     removeItem: (key: string) => values.delete(key),
   };
   let observeNextSocketOpen: (() => void) | undefined;
+  const deliveries: Array<{ type: string; bytes: number }> = [];
   class BrowserSocket extends WebSocket {
     constructor(url: string) {
       super(url, { origin });
       sockets.push(this);
       this.on('error', () => {});
+      this.on('message', wire => {
+        const frame = wire.toString();
+        deliveries.push({ type: JSON.parse(frame).type, bytes: Buffer.byteLength(frame) });
+      });
       const opened = observeNextSocketOpen;
       observeNextSocketOpen = undefined;
       if (opened) this.once('open', opened);
@@ -120,6 +125,7 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
         model: 'Synthetic',
         inputState,
       })),
+      waitForRemoteInterviewSlot: async () => service!.waitForSnapshotSlot(),
       publishRemoteInterview: vi.fn(async (snapshot) => {
         if (delayNextDraftSnapshot && snapshot.inputDraft.text === 'Next shared phone draft')
           await heldDraftSnapshot;
@@ -235,6 +241,19 @@ it('shares versioned drafts over the real LAN bridge, preserves newer edits afte
   );
   expect(mobile.getState().pending).toBe(false);
   expect(mobile.getState().connected).toBe(true);
+
+  const longAnswer = '现有回答'.repeat(1000);
+  const updateAnswer = (content: string) => useInterview.setState(({ answers }) => ({
+    answers: answers.map((row, i) => i === 0 ? { ...row, content } : row),
+  }));
+  updateAnswer(longAnswer);
+  await vi.waitFor(() => expect(mobile!.getState().snapshot?.answers[0].content).toBe(longAnswer));
+  deliveries.length = 0;
+  updateAnswer(longAnswer + '好');
+  await vi.waitFor(() => expect(mobile!.getState().snapshot?.answers[0].content).toBe(longAnswer + '好'));
+  const frames = deliveries.filter(frame => frame.type === 'snapshot' || frame.type === 'snapshot-delta');
+  expect(frames.map(frame => frame.type)).toEqual(['snapshot-delta']);
+  expect(frames[0].bytes).toBeLessThan(Buffer.byteLength(longAnswer) / 4);
 
   await mobile.setMicrophoneMuted(true);
   await vi.waitFor(() => expect(mobile!.getState().snapshot?.microphoneMuted).toBe(true));

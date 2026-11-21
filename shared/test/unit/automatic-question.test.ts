@@ -9,7 +9,7 @@ const final = (patch: Partial<SpeechSegment> = {}): SpeechSegment => ({
   text: '请介绍项目',
   final: true,
   startMs: 0,
-  endMs: 1000,
+  endMs: 500,
   silenceStartMs: 0,
   reason: 'silence',
   ...patch,
@@ -82,17 +82,17 @@ it.each([
   expect(isAutomaticQuestionFiller(text)).toBe(false);
 });
 
-it('一秒断句计入1800ms总门槛，音频进度不足时不因墙钟等待而就绪', () => {
+it('500ms断句计入1000ms总门槛，音频进度不足时不因墙钟等待而就绪', () => {
   const gate = new AutomaticQuestionGate();
   gate.final(final());
+  gate.progress(progress(500));
+  expect(gate.ready()).toBe(false);
+  gate.progress(progress(999));
+  expect(gate.ready()).toBe(false);
   gate.progress(progress(1000));
-  expect(gate.ready()).toBe(false);
-  gate.progress(progress(1799));
-  expect(gate.ready()).toBe(false);
-  gate.progress(progress(1800));
   expect(gate.ready()).toBe(true);
 });
-it('终稿迟到仍沿用原始静音起点，不追加1000ms', () => {
+it('终稿迟到仍沿用原始静音起点，不追加500ms', () => {
   const gate = new AutomaticQuestionGate();
   gate.progress(progress(2100));
   gate.final(final());
@@ -119,7 +119,7 @@ it.each(['sentence', 'limit', 'pause', 'stop', 'discontinuity'] as const)(
     expect(gate.ready()).toBe(false);
   },
 );
-it.each([undefined, NaN, Infinity, 1001])('缺失或非法静音起点 %s 不自动发送', (silenceStartMs) => {
+it.each([undefined, NaN, Infinity, 501])('缺失或非法静音起点 %s 不自动发送', (silenceStartMs) => {
   const gate = new AutomaticQuestionGate();
   gate.progress(progress(10000));
   gate.final(final({ silenceStartMs }));
@@ -175,23 +175,71 @@ afterEach(() => {
 });
 
 it.each(['paraformer', 'qwen'] as SpeechModelId[])(
-  '%s共用1800ms截止点，终稿1.2秒就绪时只剩600ms',
+  '%s共用1000ms截止点，终稿0.9秒就绪时只剩100ms',
   async (speechModel) => {
     useInterview.setState({ options: { sources: ['system'], speechModel } });
+    receive(progress(900));
     receive({ type: 'segment', segment: final({ speechModel }) });
-    receive(progress(1200));
     await vi.advanceTimersByTimeAsync(5000); // A stalled capture cannot prove continuing silence.
     expect(ask).not.toHaveBeenCalled();
-    receive(progress(1799));
+    receive(progress(999));
     expect(ask).not.toHaveBeenCalled();
-    receive(progress(1800));
+    receive(progress(1000));
     expect(ask).toHaveBeenCalledWith('请介绍项目', ['question'], []);
     receive({ type: 'segment', segment: final({ speechModel }) });
     receive(progress(9000));
     expect(ask).toHaveBeenCalledTimes(1);
   },
 );
-it('积压中的迟到终稿等后续音频检查完毕才立即提交，不再另等1000ms', () => {
+it('超长转写保留完整来源，整理成短问题后手动提交一次', async () => {
+  ask.mockRestore();
+  const answer = vi.fn().mockResolvedValue({ ok: true, answerText: '合成回答', sources: [], usage: null });
+  Object.assign(window.desktop!, {
+    onChatEvent: () => () => {},
+    interviewCancel: vi.fn(async () => {}),
+    interviewAnswer: answer,
+  });
+  useInterview.setState({ aiEnabled: true, modelId: 'synthetic' });
+  useInterview.getState().setAutoAnswer(false);
+  const ids = Array.from({ length: 61 }, (_, index) => 'system-' + index);
+  for (const id of ids) receive({ type: 'segment', segment: final({ id, text: '问'.repeat(100) }) });
+  receive({ type: 'segment', segment: final({ id: 'mic', source: 'microphone', text: '另一音源' }) });
+  expect(useInterview.getState().submitInput()).toBe(false);
+  useInterview.getState().setInputDraft('');
+  expect(useInterview.getState().submitInput({ fallbackQuestion: '上一段显示的文字' })).toBe(false);
+  await useInterview.getState().submitTranscript(undefined, false, true);
+  await useInterview.getState().submitTranscript('长'.repeat(6001));
+  expect(useInterview.getState().answers).toHaveLength(0);
+  expect(useInterview.getState().setInputDraft('请介绍项目')).toBe(true);
+  expect(useInterview.getState().submitInput()).toBe(true);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(answer).toHaveBeenCalledTimes(1);
+  expect(useInterview.getState().answers[0]).toMatchObject({ question: '请介绍项目', sourceTranscriptIds: ids });
+  expect(useInterview.getState().transcripts).toHaveLength(62);
+  expect(useInterview.getState().submitInput()).toBe(false);
+  receive({ type: 'segment', segment: final({ id: 'next', text: '下一题' }) });
+  expect(useInterview.getState().draftQuestion).toBe('下一题');
+});
+it('长面试手动发送能立即确认接单，读取旧回答标识的次数有界', async () => {
+  ask.mockRestore();
+  Object.assign(window.desktop!, {
+    onChatEvent: () => () => {},
+    interviewCancel: vi.fn(async () => {}),
+    interviewAnswer: vi.fn(async () => ({ ok: true, answerText: '合成回答', sources: [], usage: null })),
+  });
+  let reads = 0;
+  const history = Array.from({ length: 250 }, (_, index) => ({
+    get id() { reads++; return 'old-' + index; },
+    question: 'old', content: 'old', createdAt: 1,
+  }));
+  useInterview.setState({ aiEnabled: true, modelId: 'synthetic', answers: history });
+  useInterview.getState().setInputDraft('下一题');
+  expect(useInterview.getState().submitInput()).toBe(true);
+  expect(reads).toBeLessThan(history.length * 2);
+  await vi.advanceTimersByTimeAsync(0);
+  expect(useInterview.getState().answers.at(-1)?.question).toBe('下一题');
+});
+it('积压中的迟到终稿等后续音频检查完毕才立即提交，不再另等500ms', () => {
   receive(progress(2100, true));
   receive({ type: 'segment', segment: final() });
   expect(ask).not.toHaveBeenCalled();
@@ -207,23 +255,23 @@ it('迟到有效终稿使用最终缓冲，不能被旧语气词临时稿误过�
 });
 it('排队音频内重新开口取消旧截止点，并从新一轮静音重新计算', () => {
   receive({ type: 'segment', segment: final() });
-  receive(progress(1800, true));
+  receive(progress(1000, true));
   receive({ type: 'speech-start', source: 'system' });
   receive(progress(2200));
   expect(ask).not.toHaveBeenCalled();
   receive({
     type: 'segment',
-    segment: final({ id: 'continued', text: '以及技术取舍', silenceStartMs: 2200, endMs: 3000 }),
+    segment: final({ id: 'continued', text: '以及技术取舍', silenceStartMs: 2200, endMs: 2700 }),
   });
-  receive(progress(3999));
+  receive(progress(3199));
   expect(ask).not.toHaveBeenCalled();
-  receive(progress(4000));
+  receive(progress(3200));
   expect(ask).toHaveBeenCalledWith('请介绍项目 以及技术取舍', ['question', 'continued'], []);
 });
 it('麦克风重新开口不取消系统问题，自动回答关闭和暂停仍阻止提交', () => {
   receive({ type: 'segment', segment: final() });
   receive({ type: 'speech-start', source: 'microphone' });
-  receive(progress(1800));
+  receive(progress(1000));
   expect(ask).toHaveBeenCalledTimes(1);
   receive({ type: 'segment', segment: final({ id: 'next', silenceStartMs: 3000, endMs: 3800 }) });
   useInterview.getState().setAutoAnswer(false);
@@ -239,9 +287,9 @@ it('麦克风重新开口不取消系统问题，自动回答关闭和暂停仍�
 it('上一题回答期间保存就绪问题，后续系统音频积压时不提前消费', () => {
   useInterview.setState({ generating: true });
   receive({ type: 'segment', segment: final() });
-  receive(progress(1800));
+  receive(progress(1000));
   expect(ask).not.toHaveBeenCalled();
-  receive(progress(1800, true));
+  receive(progress(1000, true));
   useInterview.setState({ generating: false });
   receive({ ...progress(5000), source: 'microphone' });
   expect(ask).not.toHaveBeenCalled();
@@ -269,8 +317,8 @@ it('上一题完成时仍有系统积压，排队问题等ACK后提交一次', a
   useInterview.setState({ aiEnabled: true, modelId: 'synthetic' });
   const first = useInterview.getState().ask('上一题');
   receive({ type: 'segment', segment: final() });
-  receive(progress(1800));
-  receive(progress(1800, true));
+  receive(progress(1000));
+  receive(progress(1000, true));
   finish({ ok: true, answerText: '上一题合成回答', sources: [], usage: null });
   await first;
   await vi.advanceTimersByTimeAsync(0);

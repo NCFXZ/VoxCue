@@ -3,6 +3,12 @@ import type { DesktopPlatform } from './platform/types';
 import { interviewCanvas, interviewLayout } from './contracts/interviewLayout';
 import { pendingPresentation } from './contracts/presentation';
 import { translateUI, type UILanguage } from './contracts/uiLanguage';
+import { profileDirectoryName } from './accountProfilePaths';
+
+/** Chromium storage and native files use the same immutable VoxCue identity. */
+export function profilePartition(owner: string) {
+  return 'persist:voxcue-user-' + profileDirectoryName(owner);
+}
 
 export type WindowRole = 'login' | 'main' | 'interview' | 'interview-shortcuts';
 const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
@@ -44,10 +50,11 @@ const roleOptions: Record<WindowRole, BrowserWindowConstructorOptions> = {
 export function windowOptions(
   role: WindowRole,
   platform: DesktopPlatform,
-  paths: { icon: string; preload: string },
+  paths: { icon: string; preload: string; owner: string | undefined },
   language: UILanguage = 'zh-CN',
   systemLanguage: UILanguage = language,
 ): BrowserWindowConstructorOptions {
+  if (role !== 'login' && !paths.owner) throw Error('请先登录 VoxCue 账号或选择本地账户。');
   return {
     ...roleOptions[role],
     title: translateUI(roleOptions[role].title ?? 'VoxCue', language),
@@ -59,6 +66,9 @@ export function windowOptions(
       : {}),
     icon: paths.icon,
     frame: false,
+    ...(platform.id === 'win32' && (role === 'interview' || role === 'interview-shortcuts')
+      ? { thickFrame: false }
+      : {}),
     ...(platform.id === 'darwin' && (role === 'main' || role === 'login')
       ? {
           frame: true,
@@ -72,6 +82,7 @@ export function windowOptions(
     show: false,
     backgroundColor: '#00000000',
     webPreferences: {
+      partition: role === 'login' ? 'persist:voxcue-login' : profilePartition(paths.owner!),
       preload: paths.preload,
       contextIsolation: true,
       nodeIntegration: false,
@@ -80,6 +91,7 @@ export function windowOptions(
       additionalArguments: [
         '--voxcue-presentation=' + JSON.stringify(platform.presentation ?? pendingPresentation),
         '--voxcue-system-language=' + systemLanguage,
+        '--voxcue-initial-language=' + language,
       ],
     },
   };

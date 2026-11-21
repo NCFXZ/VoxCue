@@ -1,5 +1,7 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
-import { useId, useState, type CSSProperties, type ReactNode } from 'react';
+import { useId, useState, type ReactNode } from 'react';
+import { RangeSlider } from './ui/range-slider';
 import {
   interviewFontSize,
   saveInterviewFontSize,
@@ -47,29 +49,8 @@ function DisplaySlider({
         <span className="display-slider-icon" aria-hidden="true">
           {startIcon}
         </span>
-        <div
-          className="frosted-slider-control"
-          style={
-            {
-              '--slider-fill': `${((value - minimum) / (maximum - minimum)) * 100}%`,
-            } as CSSProperties
-          }
-        >
-          <span className="frosted-slider-track" aria-hidden="true">
-            <span />
-          </span>
-          <input
-            id={id}
-            aria-label={name}
-            aria-valuetext={`${value}${unit}`}
-            type="range"
-            min={minimum}
-            max={maximum}
-            step={1}
-            value={value}
-            onChange={(event) => onChange(event.currentTarget.valueAsNumber)}
-          />
-        </div>
+        <RangeSlider id={id} name={name} valueText={`${value}${unit}`} value={value}
+          minimum={minimum} maximum={maximum} step={1} onChange={onChange} />
         <span className="display-slider-icon" aria-hidden="true">
           {endIcon}
         </span>
@@ -113,11 +94,11 @@ export function InterviewDisplayControls() {
         endIcon={<span className="display-opacity-icon" />}
         onChange={(value) => save(() => saveInterviewTransparency(value))}
       />
-      {error && (
-        <p className="danger-text" role="alert">
+      <InterviewReveal>{error ? (
+        <p className="interview-display-error danger-text" role="alert">
           {t(error)}
         </p>
-      )}
+      ) : null}</InterviewReveal>
     </div>
   );
 }

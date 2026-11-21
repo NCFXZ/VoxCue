@@ -6,6 +6,7 @@ import path from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { WebSocket } from 'ws';
 import { REMOTE_PROTOCOL_VERSION } from '../../electron/contracts/remoteConnection';
+import { applySnapshotDelta, createSnapshotDelta } from '../../electron/contracts/remoteSnapshotDelta';
 import { RemoteInterviewCoordinator } from '../../electron/application/remoteConnection';
 import {
   createMobileAssets,
@@ -166,7 +167,7 @@ async function socket(origin: string, acknowledge = true) {
     const message = JSON.parse(data.toString()) as RemoteServerMessage;
     messages.push(message);
     waiters.forEach((notify) => notify());
-    if (acknowledge && (message.type === 'paired' || message.type === 'snapshot'))
+    if (acknowledge && (message.type === 'paired' || message.type === 'snapshot' || message.type === 'snapshot-delta'))
       client.send(
         JSON.stringify({
           type: 'snapshot-applied',
@@ -213,7 +214,7 @@ async function socket(origin: string, acknowledge = true) {
   };
 }
 
-async function pair(service: RemoteConnectionService, origin: string, acknowledge = true) {
+async function pair(service: RemoteConnectionService, origin: string, acknowledge = true, snapshotDelta = false) {
   const invitation = service.pairing();
   const token = new URLSearchParams(new URL(invitation.url).hash.slice(1)).get('pair');
   const response = await post(origin, '/pair', { token, name: 'Temporary phone' });
@@ -225,6 +226,7 @@ async function pair(service: RemoteConnectionService, origin: string, acknowledg
     type: 'authenticate',
     protocolVersion: REMOTE_PROTOCOL_VERSION,
     pendingId: pending.id,
+    ...(snapshotDelta ? { snapshotDelta: true } : {}),
   });
   const notice = await phone.next('pending');
   expect(notice.code).toBe(pending.code);
@@ -238,6 +240,91 @@ async function pair(service: RemoteConnectionService, origin: string, acknowledg
   expect(approved.protocolVersion).toBe(REMOTE_PROTOCOL_VERSION);
   return { ...phone, token: approved.token, approved };
 }
+
+it('reconstructs bounded row windows, replacements, truncation and control edits without mutating a rejected base', () => {
+  const prior = snapshot();
+  prior.transcripts = Array.from({ length: 200 }, (_, n) => ({ ...prior.transcripts[0], id: String(n) }));
+  prior.answers = [{ id: 'answer', question: 'Question', content: '回答', status: 'streaming' }];
+  const target = structuredClone(prior);
+  target.revision++;
+  target.transcripts.shift();
+  target.transcripts[3].final = false;
+  target.transcripts.push({ ...target.transcripts[0], id: 'new' });
+  target.answers[0].content += '。';
+  target.omitted.transcripts++;
+  target.pendingQuestion = '';
+  const delta = createSnapshotDelta(prior, target)!;
+  expect(delta.transcripts).toMatchObject({ drop: 1, length: 200 });
+  expect(delta.answers?.changes).toEqual([{ at: 0, id: 'answer', append: '。' }]);
+  expect(applySnapshotDelta(prior, JSON.parse(JSON.stringify(delta)))).toEqual(target);
+  const shorter = { ...target, revision: 3, transcripts: [], answers: [{ ...target.answers[0], content: '改' }] };
+  expect(applySnapshotDelta(target, createSnapshotDelta(target, shorter))).toEqual(shorter);
+  const saved = structuredClone(prior);
+  for (const change of [
+    { baseRevision: 42 }, { sessionEpoch: 2 }, { controls: { status: 'missing' } },
+    { answers: { drop: 0, length: 1, changes: [{ at: 0, id: 'other', append: '。' }] } },
+    { answers: { drop: 0, length: 40, changes: [{ at: 39, row: prior.answers[0] }] } },
+    { transcripts: { drop: 0, length: 201, changes: [] } },
+  ]) expect(applySnapshotDelta(prior, { ...delta, ...change })).toBeNull();
+  expect(prior).toEqual(saved);
+  expect(createSnapshotDelta(target, prior)).toBeNull();
+  expect(createSnapshotDelta(prior, { ...target, sessionEpoch: 2 })).toBeNull();
+});
+
+it('applies the whole-snapshot UTF-8 limit to accumulated deltas across independent rows', () => {
+  const start = snapshot();
+  const item = { id: '', question: '', content: '答'.repeat(100_000) };
+  start.answers = ['one', 'two', 'three'].map(id => ({ ...item, id }));
+  const accepted = { ...start, revision: 2, answers: [...start.answers, { ...item, id: 'four', content: '答' }] };
+  const applied = applySnapshotDelta(start, createSnapshotDelta(start, accepted))!;
+  expect(applied).toEqual(accepted);
+  const over = { ...accepted, revision: 3, answers: [...start.answers, { ...item, id: 'four' }] };
+  expect(applySnapshotDelta(applied, createSnapshotDelta(accepted, over))).toBeNull();
+  expect(applied.answers[3].content).toBe('答');
+});
+
+it('bases deltas on the confirmed delivery and sends full snapshots on explicit sync, resume and epoch changes', async () => {
+  const { service, origin } = await start();
+  const current = snapshot();
+  current.answers = [{ id: 'a', question: 'Question', content: '答'.repeat(2000) }];
+  service.updateSnapshot(current);
+  const phone = await pair(service, origin, false, true);
+  expect(phone.approved.snapshot).toEqual(current);
+  const ack = (message: { sequence: number; deliveryId: string }) =>
+    phone.send({ type: 'snapshot-applied', sequence: message.sequence, deliveryId: message.deliveryId });
+  ack(phone.approved);
+  const advance = (revision: number) => {
+    const next = { ...current, revision, answers: [{ ...current.answers[0], content: current.answers[0].content + '文'.repeat(revision - 1) }] };
+    service.updateSnapshot(next);
+    return next;
+  };
+  const second = advance(2);
+  const first = await phone.next('snapshot-delta');
+  expect(first.baseSequence).toBe(phone.approved.sequence);
+  expect(applySnapshotDelta(current, first.delta)).toEqual(second);
+  advance(3);
+  const fourth = advance(4);
+  ack(first);
+  const latest = await phone.next('snapshot-delta');
+  expect(latest.baseSequence).toBe(first.sequence);
+  expect(applySnapshotDelta(second, latest.delta)).toEqual(fourth);
+  phone.send({ type: 'sync' });
+  ack(latest);
+  const full = await phone.next('snapshot');
+  expect(full.sequence).toBe(latest.sequence);
+  expect(full.snapshot).toEqual(fourth);
+  const refreshed = await socket(origin);
+  refreshed.send({ type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: phone.token, snapshotDelta: true });
+  const restored = await refreshed.next('paired');
+  expect(restored.snapshot).toEqual(fourth);
+  const fifth = advance(5);
+  const resumedDelta = await refreshed.next('snapshot-delta');
+  expect(resumedDelta.baseSequence).toBe(restored.sequence);
+  expect(applySnapshotDelta(fourth, resumedDelta.delta)).toEqual(fifth);
+  const replaced = { ...current, sessionEpoch: current.sessionEpoch + 1 };
+  service.updateSnapshot(replaced);
+  expect((await refreshed.next('snapshot')).snapshot).toEqual(replaced);
+});
 
 it('accepts only RFC1918 IPv4 peers and validates the command whitelist and revisions', () => {
   for (const address of [
@@ -505,7 +592,9 @@ it('allows one unprocessed large snapshot and coalesces changes until its exact 
     })),
   };
   service.updateSnapshot(initial);
+  await expect(service.waitForSnapshotSlot()).resolves.toBeUndefined();
   const phone = await pair(service, origin, false);
+  const pairedReceipt = service.waitForSnapshotSlot();
   for (let revision = 2; revision <= 51; revision++)
     service.updateSnapshot({ ...initial, revision });
   await new Promise((resolve) => setTimeout(resolve, 30));
@@ -518,6 +607,8 @@ it('allows one unprocessed large snapshot and coalesces changes until its exact 
     });
   acknowledge(phone.approved);
   const first = await phone.next('snapshot');
+  let ready = false;
+  const receipt = service.waitForSnapshotSlot()!.then(() => { ready = true; });
   expect(first.snapshot?.revision).toBe(51);
   for (let revision = 52; revision <= 71; revision++)
     service.updateSnapshot({ ...initial, revision });
@@ -525,17 +616,22 @@ it('allows one unprocessed large snapshot and coalesces changes until its exact 
   phone.send({ type: 'snapshot-applied', sequence: first.sequence, deliveryId: 'wrong-delivery' });
   await new Promise((resolve) => setTimeout(resolve, 30));
   expect(phone.messages.filter((message) => message.type === 'snapshot')).toHaveLength(0);
+  expect(ready).toBe(false);
   acknowledge(first);
   const latest = await phone.next('snapshot');
   expect(latest.snapshot?.revision).toBe(71);
   expect(latest.deliveryId).not.toBe(first.deliveryId);
   acknowledge(latest);
+  await expect(pairedReceipt).resolves.toBeUndefined();
+  await receipt;
+  expect(ready).toBe(true);
 });
 
 it('rejects receipts from a previous socket delivery and resynchronizes the same sequence with a new nonce', async () => {
   const { service, origin } = await start();
   service.updateSnapshot(snapshot());
   const phone = await pair(service, origin, false);
+  const oldSocketReceipt = service.waitForSnapshotSlot();
   const resumed = await socket(origin, false);
   resumed.send({ type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: phone.token });
   const paired = await resumed.next('paired');
@@ -562,6 +658,7 @@ it('rejects receipts from a previous socket delivery and resynchronizes the same
     sequence: synced.sequence,
     deliveryId: synced.deliveryId,
   });
+  await expect(oldSocketReceipt).resolves.toBeUndefined();
 });
 
 it('retires a stalled delivery on its watchdog and resumes without losing accepted command receipts', async () => {
@@ -574,6 +671,7 @@ it('retires a stalled delivery on its watchdog and resumes without losing accept
   const { service, origin, onCommand } = await start();
   service.updateSnapshot(snapshot());
   const phone = await pair(service, origin, false);
+  const receipt = service.waitForSnapshotSlot();
   const command = {
     requestId: 'before-snapshot-timeout',
     sessionId: 'temporary-interview',
@@ -589,6 +687,8 @@ it('retires a stalled delivery on its watchdog and resumes without losing accept
   await closed;
   await vi.waitFor(() => expect(service.state().status).toBe('reconnecting'));
   expect(service.state().error).toBe('设备连接已中断');
+  await expect(receipt).resolves.toBeUndefined();
+  await expect(service.waitForSnapshotSlot()).resolves.toBeUndefined();
   const resumed = await socket(origin);
   resumed.send({ type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: phone.token });
   await resumed.next('paired');
@@ -733,7 +833,9 @@ it('can explicitly replace a disconnected authorization with a fresh invitation 
   });
   await replacement.next('pending');
   service.approve(pending.id);
-  expect((await replacement.next('paired')).snapshot?.sessionId).toBe('temporary-interview');
+  expect((await replacement.next('paired')).snapshot).toBeNull();
+  service.updateSnapshot(snapshot(2));
+  expect((await replacement.next('snapshot')).snapshot).toEqual(snapshot(2));
   expect(service.state().clientName).toBe('Replacement phone');
 });
 
@@ -1059,7 +1161,10 @@ it('lets an authenticated phone disconnect explicitly without an unexpected-reco
   stale.send({ type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: phone.token });
   expect((await stale.next('error')).error).toContain('认证失败');
   const replacement = await pair(service, origin);
-  expect(replacement.approved.snapshot).toEqual(current);
+  expect(replacement.approved.snapshot).toBeNull();
+  const latest = { ...snapshot(2), pendingQuestion: '' };
+  service.updateSnapshot(latest);
+  expect((await replacement.next('snapshot')).snapshot).toEqual(latest);
 });
 
 it('allows the same resume authorization to replace a stale active socket during refresh', async () => {

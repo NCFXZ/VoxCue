@@ -1,3 +1,5 @@
+import { InterviewReveal } from './InterviewReveal';
+import { useHeightTransition } from './ui/useHeightTransition';
 import { t } from '../i18n';
 import { useUpdates } from '../stores/updates';
 import { useEffect, useRef, useState, type MouseEvent } from 'react';
@@ -96,6 +98,8 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
                   : state.autoDownload
                     ? '启动后自动检查并下载新版本。'
                     : '启动后自动检查新版本，由你选择下载。';
+  const notes = useRef<HTMLDivElement>(null);
+  useHeightTransition(state?.phase === 'downloading' ? 'downloading' : label, () => [notes.current]);
   return (
     <>
       {showVersion && (
@@ -206,12 +210,8 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
         </ActionTransition>
       </div>
       <div className="updates-footer settings-hint">
-        <div className="updates-notes">
-          {label && (
-            <p role="status" aria-live="polite">
-              {t(label)}
-            </p>
-          )}
+        <div ref={notes} className="updates-notes">
+          {label && <p role="status" aria-live="polite">{t(label)}</p>}
           <p>{t('更新会保留本机聊天、附件、个人资料和面试记录。')}</p>
         </div>
         <a
@@ -225,19 +225,25 @@ export function UpdatesPanel({ showVersion = true }: { showVersion?: boolean } =
           {t('GitHub 仓库')}
         </a>
       </div>
-      {linkError && (
-        <p className="inline-error" role="alert">
-          {t(linkError)}
-        </p>
-      )}
-      {(updates.error || state?.error) && (
-        <p className="inline-error" role="alert">
-          {t(updates.error || state?.error)}
-        </p>
-      )}
-      {state?.interviewActive && (
-        <p className="settings-hint">{t('面试进行中，可以检查和下载更新，请结束面试后再安装。')}</p>
-      )}
+      <InterviewReveal>
+        {linkError ? (
+          <p className="inline-error" role="alert">
+            {t(linkError)}
+          </p>
+        ) : null}
+      </InterviewReveal>
+      <InterviewReveal>
+        {(updates.error || state?.error) ? (
+          <p className="inline-error" role="alert">
+            {t(updates.error || state?.error)}
+          </p>
+        ) : null}
+      </InterviewReveal>
+      <InterviewReveal>
+        {state?.interviewActive ? (
+          <p className="settings-hint">{t('面试进行中，可以检查和下载更新，请结束面试后再安装。')}</p>
+        ) : null}
+      </InterviewReveal>
     </>
   );
 }

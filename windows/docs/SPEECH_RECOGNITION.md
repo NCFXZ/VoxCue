@@ -37,7 +37,7 @@
 - `native/WasapiCapture.cs`：.NET Framework x64 COM/PInvoke，直接 `IAudioClient` shared-mode；microphone使用eCapture，system使用eRender + AUDCLNT_STREAMFLAGS_LOOPBACK。每路独立进程、设备、混音格式、QPC和退出监视；不依赖虚拟声卡、不按应用进程抓音频。读取默认/指定设备，1秒检查断连或默认设备变化，出错停止并要求重新选择/启动，不擅自修改系统默认设备。
 - `capture.ts / buffer.ts`：限长二进制协议、半包/粘包、float样本、速率/时间戳/flags、异常和stdin EOF释放。原生侧下混单声道并转换PCM16/24/32或float32；拒绝未知格式。Node侧不阻塞原生采集等待推理。
 - `controller.ts / host.ts / process.ts`：独立utilityProcess，串行启停、模型复用、Worker与原生进程清理、两秒队列上限。超限或WASAPI不连续显式停止，不静默丢样；记录拒绝样本数和不连续次数。首包初始化标记不代表已丢失先前音频。真实采集QPC锚定墙钟，后续段时间按样本累积；不是模型词级时间戳。播放空闲时补定时零样本，供VAD收尾。
-- `engine.ts`：官方流式重采样到16k mono float32，512点帧；一个共享只读Paraformer识别器、两条独立stream与Silero实例；ASR2线程、VAD1线程。VAD阈值0.5，最短语音250ms，最短静音700ms，最长语音20s。ASR接收全部音频，保留起始前音频及尾部；不靠VAD硬切掉前250ms。终稿追加400ms模型尾部padding，刷新stream，20s强制分段。10s静音定期重建stream限制特征状态；VAD队列及时清空。
+- `engine.ts` 使用官方流式重采样生成 16 kHz 单声道 float32 音频，每帧 512 点。两路音源共用只读 Paraformer 识别器，各自持有识别流和 Silero 实例。ASR 使用 2 个线程，VAD 使用 1 个线程。VAD 检测阈值为 0.5，最短语音 250 ms，最短静音 500 ms，最长语音 20 秒。空闲时只保留 500 ms 音频，检测到开口后连同前段一起送入识别流。终稿追加 400 ms 模型补零，20 秒时强制分段。自动发送要求提问音源累计处理 1000 ms 连续静音、终稿就绪且积压清空，模型补零不计入静音进度。
 - `speech.ts` contracts / preload：面试采集允许devices/status/start/pause/stop及公开事件，开始时校验本场锁定的来源和设备；主窗口仅能枚举设备，不能调用面试采集。新增dictation接口只允许主窗口主frame、固定默认麦克风，不允许文件路径、任意IPC或凭据；登录窗口不能启动语音。
 - `interview.ts` / `SpeechControls.tsx` / `FloatingInterview.tsx`：开始确认弹窗选择本地/Mock、设备、回答方式与自动提交；进入后锁定且自动转写，面试官/面试者左右显示，可复制终稿整理，结束仍二次确认。开启ChatGPT回答会说明发送问题文字，账户模型来自既有目录，参考默认关闭；失败不回退Mock。每条回答保存实际provider。`dictation.ts` store / VoiceInputButton 管理准备聊天语音输入的启停和草稿回填。
 - history兼容：mock字段扩大为boolean，保留原键；记录页监听其他窗口的storage/focus，避免异步尾段保存后列表漏刷新。

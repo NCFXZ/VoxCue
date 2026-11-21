@@ -1,9 +1,11 @@
+import { codexAccess } from '../fixtures/codex-access';
 import { describe, expect, it, vi } from 'vitest';
 import {
   ProfileAnswerStream,
   profileInstructions,
 } from '../../../shared/electron/backend/chat/profile';
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
+import { ProfilePreviews } from '../../electron/backend/chat/profilePreviews';
 import type { UsageLedger } from '../../../shared/electron/backend/chat/usage';
 import { validateChanges } from '../../../shared/electron/contracts/profile';
 import { validateRequest } from '../../../shared/electron/backend/chat/validation';
@@ -16,6 +18,40 @@ const base = {
 };
 const changes = { name: '新姓名', jobDescription: '新的 JD', background: null };
 const answer = '**已整理**，请确认。\n```python\nprint("你好")\n```';
+it('合并资料预览，正文即时返回，取消或替换消息后不发布旧预览', async () => {
+  vi.useFakeTimers();
+  try {
+    const abort = new AbortController();
+    const emit = vi.fn();
+    const stream = new ProfileAnswerStream();
+    using previews = new ProfilePreviews('test', emit, abort.signal);
+    expect(stream.append('{"answer":"正文","changes":{"background":"')).toBe('正文');
+    for (const char of '合成进度') {
+      stream.append(char);
+      previews.update(stream);
+    }
+    await vi.advanceTimersByTimeAsync(60);
+    expect(emit).toHaveBeenCalledTimes(1);
+    expect(emit.mock.calls[0][0]).toMatchObject({ preview: { background: '合成进度' } });
+    stream.append('旧内容');
+    previews.update(stream);
+    previews.reset();
+    await vi.advanceTimersByTimeAsync(60);
+    expect(emit).toHaveBeenCalledTimes(1);
+    const next = new ProfileAnswerStream();
+    next.append('{"answer":"另一条","changes":{"name":"新名字"}}');
+    previews.update(next);
+    previews.flush();
+    expect(emit).toHaveBeenCalledTimes(2);
+    expect(emit.mock.calls[1][0]).toMatchObject({ preview: { name: '新名字' } });
+    previews.update(stream);
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(60);
+    expect(emit).toHaveBeenCalledTimes(2);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 describe('资料提案协议', () => {
   it.each([
     { background: '', jobDescription: '' },
@@ -247,10 +283,10 @@ describe('附件聊天提案原生链路', () => {
       markPreview = resolve;
     });
     const service = new ChatGPTService({
-      access: async () => ({ token: 'test-only', account: 'test' }),
+      access: async () => codexAccess('test', 'test-only'),
       ledger: { add: async () => {} } as unknown as UsageLedger,
       fetch: async (url) =>
-        String(url).endsWith('/models')
+        new URL(String(url)).pathname.endsWith('/models')
           ? Response.json({ models: [{ slug: 'test', display_name: 'Test', visibility: 'list' }] })
           : new Response(
               new ReadableStream({
@@ -309,12 +345,19 @@ describe('附件聊天提案原生链路', () => {
   });
   function service(value: unknown, inspect?: (body: any) => void) {
     return new ChatGPTService({
-      access: async () => ({ token: 'private', account: 'account' }),
+      access: async () => codexAccess('account', 'private'),
       ledger: { add: async () => {} } as unknown as UsageLedger,
       fetch: async (url: any, options?: RequestInit) => {
-        if (String(url).endsWith('/models'))
+        if (new URL(String(url)).pathname.endsWith('/models'))
           return Response.json({
-            models: [{ slug: 'test-model', display_name: 'Test', visibility: 'list' }],
+            models: [
+              {
+                slug: 'test-model',
+                display_name: 'Test',
+                visibility: 'list',
+                web_search_tool_type: 'text',
+              },
+            ],
           });
         const body = JSON.parse(options!.body as string);
         expect(body.text.format).toMatchObject({ type: 'json_schema', strict: true });

@@ -3,6 +3,7 @@ use std::{
     ptr,
 };
 type P = *mut c_void;
+pub const SILENCE_MS: i64 = 500;
 extern "C" {
     fn speech_load_params_new(p: *mut P) -> i32;
     fn speech_load_params_free(p: P);
@@ -65,7 +66,7 @@ impl Vad {
         check(unsafe { speech_request_new(v.model, &mut v.request) })?;
         // Silero hysteresis: start 0.5, end 0.35; allow brief words, retain 100ms leading context for all three thresholds.
         check(unsafe { speech_request_set_float(v.request, 39, 0.5) })?;
-        for (opt, value) in [(40, 100), (41, 800), (42, 100)] {
+        for (opt, value) in [(40, 100), (41, SILENCE_MS), (42, 100)] {
             check(unsafe { speech_request_set_int(v.request, opt, value) })?;
         }
         v.reset()?;

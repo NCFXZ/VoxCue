@@ -6,6 +6,8 @@ import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { assertSettingsHeadingGaps } from './assert-settings-heading-gaps.mjs';
+import { assertSettingsHighlight } from './assert-settings-highlight.mjs';
 import {
   installUiAccount,
   closeUiApp,
@@ -125,8 +127,9 @@ try {
   assert.equal(deletion.ok, false);
   let settings = await settingsFor(main);
   await settings
-    .getByText('尚未登录 VoxCue，资料保存在当前电脑。登录后可启用云备份。', { exact: true })
+    .getByText('资料保存在本机，登录后可迁移至 VoxCue 账号。', { exact: true })
     .waitFor();
+  await assertSettingsHeadingGaps(main, ['VoxCue 账号']);
   assert.equal(await settings.getByRole('switch').count(), 0);
   assert.equal(await settings.getByRole('button', { name: '删除账号', exact: true }).count(), 0);
   assert.equal(await settings.getByRole('button', { name: '导出资料', exact: true }).count(), 1);
@@ -199,7 +202,15 @@ try {
       },
     });
   });
+  await main.evaluate(() => localStorage.setItem('copilot-personal-info-v1',
+    JSON.stringify({ name: '本地合成用户', jobDescription: '合成岗位', background: '合成简历' })));
   await main.reload();
+  await main.getByRole('button', { name: '生成技能', exact: true }).click();
+  const aiSettings = main.getByRole('dialog', { name: '设置', exact: true });
+  for (const service of ['chatgpt', 'copilot']) {
+    await assertSettingsHighlight(aiSettings.locator(`[data-settings-target="${service}"]`));
+  }
+  await aiSettings.getByRole('button', { name: '关闭设置', exact: true }).click();
   settings = await settingsFor(main);
   const exportPanel = settings.getByRole('region', { name: '导出资料', exact: true });
   const destination = path.join(testRoot, '本机资料.zip');
@@ -225,6 +236,12 @@ try {
     ['个人信息', '面试记录', '知识库'].sort(),
   );
   assert.ok(archive.getEntry('个人信息/个人信息.txt'));
+  assert.deepEqual(await app.evaluate(() => globalThis.localCloudCalls), []);
+
+  await settings.getByRole('button', { name: '数据迁移', exact: true }).click();
+  const migration = main.getByRole('dialog', { name: '数据迁移', exact: true });
+  await migration.getByText('这台设备上没有其他可迁移的账户。', { exact: true }).waitFor();
+  await migration.getByRole('button', { name: /关闭|取消/ }).last().click();
   assert.deepEqual(await app.evaluate(() => globalThis.localCloudCalls), []);
 
   await app.evaluate(({ dialog }) => {

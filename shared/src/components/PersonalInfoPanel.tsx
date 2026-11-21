@@ -1,8 +1,10 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { SyncBadge } from './SyncBadge';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { useComponentReady } from '../stores/components';
-import { ComponentsNotice } from './ComponentsNotice';
+import type { OpenComponentSettings } from '../services/componentSettingsTargets';
+import { componentPresentation } from '../../electron/contracts/components';
 import { usePreparation } from '../stores/preparation';
 import { localKnowledge, type KnowledgeBase } from '../services/knowledge';
 import {
@@ -15,7 +17,7 @@ import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { ChoiceMenu } from './ui/choice-menu';
 import { Modal } from './ui/modal';
-import { Check, X, Edit, ChevronRight, Save, Refresh } from './icons';
+import { Check, X, Edit, ChevronRight, Save, Refresh, ArrowUpRight } from './icons';
 import { ProfileValue } from './ProfileProposal';
 import { PlainTextContent } from './PlainTextContent';
 
@@ -30,7 +32,7 @@ export function PersonalInfoPanel({
   onComponentSettings,
   resizeHandle,
 }: {
-  onComponentSettings?(): void;
+  onComponentSettings?: OpenComponentSettings;
   open: boolean;
   onDirtyChange?(dirty: boolean): void;
   onErrorChange?(error: string | null): void;
@@ -197,11 +199,13 @@ export function PersonalInfoPanel({
               onChange={(event) => setEditor({ ...editor!, text: event.target.value })}
             />
           </label>
-          {error && (
-            <p role="alert" className="danger-text">
-              {t(error)}
-            </p>
-          )}
+          <InterviewReveal resizeKey={error ?? ''}>
+            {error ? (
+              <p role="alert" className="danger-text">
+                {t(error)}
+              </p>
+            ) : null}
+          </InterviewReveal>
           <div className="dialog-footer">
             <Button
               type="button"
@@ -380,29 +384,45 @@ export function PersonalInfoPanel({
                 <ChevronRight size={16} />
               </span>
             </summary>
-            <ChoiceMenu
-              label={t('面试知识库')}
-              disabled={!ragReady}
-              value={state.selectedKnowledgeBaseId ?? ''}
-              options={[
-                { value: '', label: t('不使用知识库') },
-                ...(selectedMissing
-                  ? [{ value: state.selectedKnowledgeBaseId!, label: t('所选知识库已不可用') }]
-                  : []),
-                ...bases.map((item) => ({ value: item.id, label: item.name })),
-              ]}
-              onChange={(id) => {
-                void state.selectKnowledgeBase(id || null).then((saved) => {
-                  if (!saved) setError(usePreparation.getState().error);
-                });
-              }}
-            />
-            {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
-            {(basesError || selectedMissing) && (
-              <p role="alert" className="danger-text">
-                {t(basesError || '所选知识库已删除，请重新选择或选择不使用。')}
-              </p>
-            )}
+            <div className="profile-knowledge-controls">
+              <ChoiceMenu
+                label={t('面试知识库')}
+                disabled={!ragReady}
+                value={state.selectedKnowledgeBaseId ?? ''}
+                options={[
+                  { value: '', label: t('不使用知识库') },
+                  ...(selectedMissing
+                    ? [{ value: state.selectedKnowledgeBaseId!, label: t('所选知识库已不可用') }]
+                    : []),
+                  ...bases.map((item) => ({ value: item.id, label: item.name })),
+                ]}
+                onChange={(id) => {
+                  void state.selectKnowledgeBase(id || null).then((saved) => {
+                    if (!saved) setError(usePreparation.getState().error);
+                  });
+                }}
+              />
+              <InterviewReveal>
+                {!ragReady ? (
+                  <div className="profile-knowledge-help">
+                    <p>{t('{0}尚未就绪', [t(componentPresentation.rag.label)])}</p>
+                    {onComponentSettings && (
+                      <Button variant="ghost" onClick={() => onComponentSettings({ required: ['rag'] })}>
+                        {t('前往设置')}
+                        <ArrowUpRight size={14} />
+                      </Button>
+                    )}
+                  </div>
+                ) : null}
+              </InterviewReveal>
+              <InterviewReveal resizeKey={basesError || (selectedMissing ? 'missing' : '')}>
+                {(basesError || selectedMissing) ? (
+                  <p role="alert" className="danger-text">
+                    {t(basesError || '所选知识库已删除，请重新选择或选择不使用。')}
+                  </p>
+                ) : null}
+              </InterviewReveal>
+            </div>
           </details>
           <details className="profile-section profile-disclosure" aria-label={t('面试技能')}>
             <summary className="profile-section-heading">
@@ -452,42 +472,46 @@ export function PersonalInfoPanel({
             {!state.info.skills?.length && <p className="empty-inline">{t('尚未添加技能')}</p>}
           </details>
         </div>
-        {(dirty || conflict || (error && !editor)) && (
-          <footer className="personal-save-bar">
-            <span role="status">
-              {conflict
-                ? t('基本信息已有更新')
-                : dirty
-                  ? t('基本信息有未保存修改')
-                  : t('AI 更新需在提案中确认')}
-            </span>
-            {error && (
-              <p role="alert" className="danger-text">
-                {t(error)}
-              </p>
-            )}
-            <div>
-              {(dirty || conflict) && (
-                <Button
-                  variant="ghost"
-                  onClick={() => {
-                    const next = basicInfo(state.info);
-                    base.current = next;
-                    setBasic(next);
-                    setError(null);
-                  }}
-                >
-                  {conflict ? <Refresh size={16} /> : <X size={16} />}
-                  {conflict ? t('载入最新资料') : t('取消')}
+        <InterviewReveal className="personal-save-notice">
+          {(dirty || conflict || (error && !editor)) ? (
+            <footer className="personal-save-bar">
+              <span role="status">
+                {conflict
+                  ? t('基本信息已有更新')
+                  : dirty
+                    ? t('基本信息有未保存修改')
+                    : t('AI 更新需在提案中确认')}
+              </span>
+              <InterviewReveal resizeKey={error ?? ''}>
+                {error ? (
+                  <p role="alert" className="danger-text">
+                    {t(error)}
+                  </p>
+                ) : null}
+              </InterviewReveal>
+              <div className="personal-save-actions">
+                {(dirty || conflict) && (
+                  <Button
+                    variant="ghost"
+                    onClick={() => {
+                      const next = basicInfo(state.info);
+                      base.current = next;
+                      setBasic(next);
+                      setError(null);
+                    }}
+                  >
+                    {conflict ? <Refresh size={16} /> : <X size={16} />}
+                    {conflict ? t('载入最新资料') : t('取消')}
+                  </Button>
+                )}
+                <Button form="personal-info-form" type="submit" disabled={!dirty || conflict}>
+                  <Save size={16} />
+                  {t('保存')}
                 </Button>
-              )}
-              <Button form="personal-info-form" type="submit" disabled={!dirty || conflict}>
-                <Save size={16} />
-                {t('保存')}
-              </Button>
-            </div>
-          </footer>
-        )}
+              </div>
+            </footer>
+          ) : null}
+        </InterviewReveal>
       </aside>
       {renderEditor()}
     </>

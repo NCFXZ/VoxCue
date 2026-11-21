@@ -7,7 +7,7 @@ import {
   type ProviderCredentialAccess,
 } from '../auth/providerCredentialAccess';
 import { CopilotError } from './errors';
-import { copilotRequest } from './requests';
+import { copilotRequest, sharedCopilotRequest } from './requests';
 
 export interface CopilotLoginStorage {
   read(): Promise<AuthSession | null>;
@@ -95,7 +95,7 @@ export class CopilotAuthService {
       const generation = this.generation;
       const session = await this.session();
       if (!session) return null;
-      const identity = await copilotRequest(
+      const readIdentity = sharedCopilotRequest(
         this.dependencies.credentialAccess,
         async () => {
           if (generation !== this.generation || this.pending || this.signingOut)
@@ -106,7 +106,9 @@ export class CopilotAuthService {
         },
         signal,
         this.dependencies.retire,
+        20000,
       );
+      const identity = await (signal ? abortable(readIdentity, signal) : readIdentity);
       if (generation !== this.generation || this.pending || this.signingOut)
         throw new CopilotError('账户正在变更，请稍后重试。');
       if (identity.kind !== 'activeAccount')

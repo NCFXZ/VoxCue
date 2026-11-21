@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { authentication } from '../services/auth';
+import { startServiceModelSwitch } from '../services/serviceModelPreferences';
 import { useChatConnection } from './chatConnection';
 import {
   providerCredentialMessages,
@@ -42,7 +43,7 @@ export const useAuth = create<AuthState>((set, get) => {
     set({ session, resolved: true, error: null, connectionNotice: null });
     await useChatConnection
       .getState()
-      .load(!!session && session.mode !== 'demo', false, session?.mode === 'demo');
+      .load(!!session && session.mode !== 'demo', false, session?.mode);
   };
   return {
     session: null,
@@ -97,6 +98,8 @@ export const useAuth = create<AuthState>((set, get) => {
           set({ signingIn: service });
           session = await authentication.signIn(service);
         }
+        if (session && session.mode !== 'demo' && session.mode !== get().session?.mode)
+          startServiceModelSwitch(session.mode);
         await applySession(session);
       } catch (error) {
         set(failure(error));

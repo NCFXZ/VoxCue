@@ -10,6 +10,7 @@ it('uses native Mac key symbols while retaining the shared bindings', () => {
   const html = renderToStaticMarkup(<InterviewShortcutHelp deviceConnected onClose={() => {}} />);
   expect([...html.matchAll(/<kbd>(.*?)<\/kbd>/g)].map((match) => match[1])).toEqual([
     '⌃⇧H',
+    '⌃⇧/',
     '⌃⇧P',
     '⌃⇧T',
     '⌃⇧M',
@@ -27,6 +28,7 @@ it('shows the interview controls in a named, non-modal help region', () => {
   const keys = [...common.matchAll(/<kbd>(.*?)<\/kbd>/g)].map((match) => match[1]);
   expect(keys).toEqual([
     'Ctrl+Shift+H',
+    'Ctrl+Shift+/',
     'Ctrl+Shift+P',
     'Ctrl+Shift+T',
     'Ctrl+Shift+M',
@@ -68,12 +70,12 @@ it('shows only the action that the current window, panel and audio state can per
     );
     expect(
       [...html.matchAll(/<span class="floating-shortcut-action-label">(.*?)<\/span>/g)]
-        .slice(0, 5)
+        .slice(0, 6)
         .map((match) => match[1]),
     ).toEqual(
       enabled
-        ? ['隐藏面试窗口', '收起面试面板', '收起转写面板', '关闭麦克风', '关闭系统音频']
-        : ['显示面试窗口', '展开面试面板', '展开转写面板', '打开麦克风', '打开系统音频'],
+        ? ['隐藏面试窗口', '隐藏快捷键说明', '收起面试面板', '收起转写面板', '关闭麦克风', '关闭系统音频']
+        : ['显示面试窗口', '隐藏快捷键说明', '展开面试面板', '展开转写面板', '打开麦克风', '打开系统音频'],
     );
     expect(html).not.toContain('或');
   }

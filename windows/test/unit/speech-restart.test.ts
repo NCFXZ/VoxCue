@@ -182,9 +182,7 @@ it('uses the shared QPC across delayed helper startup and drains capture packets
   const { service } = controller();
   await service.call({ op: 'start', options: { sources: ['system', 'microphone'] } });
   const worker = state.workers[0];
-  expect(worker.messages.find((m: any) => m.op === 'init').preprocessorFile).toMatch(
-    /[\\/]windows[\\/]electron[\\/]speech[\\/]echoCancellation\.js$/,
-  );
+  expect(worker.messages.find((m: any) => m.op === 'init')).not.toHaveProperty('preprocessorFile');
   expect(worker.messages.find((m: any) => m.op === 'prepare').sources).toEqual([
     'system',
     'microphone',

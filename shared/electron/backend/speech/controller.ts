@@ -11,18 +11,27 @@ import type {
   InterviewInputState,
 } from '../../contracts/speech';
 import type { AudioPacket } from './buffer';
+import { InterviewRecording, recordingBacklog } from './recording';
+import { loadAudioPreprocessor, type AudioPreprocessor } from './preprocessor';
+import { RecordingChannel } from './recordingChannel';
 import {
   inputSources,
   inputSourceEnabled,
+  questionSource,
   sameAudioCapture,
+  speechModelLabels,
+  speechSwitchCancelled,
   speechSelection,
 } from '../../contracts/speechSettings';
 export interface NativeCapture {
   start(): Promise<void>;
   stop(intent?: 'recover'): Promise<void>;
   readonly terminalError?: Error;
+  readonly retiring?: boolean;
 }
 export interface CaptureAdapter {
+  /** Current time in the native packet timestamp domain, in milliseconds. */
+  captureClockNow?(): number;
   readonly drainBeforeRetire?: boolean;
   readonly automaticRestart?: boolean;
   readonly preprocessorFile?: string;
@@ -36,15 +45,26 @@ export interface CaptureAdapter {
     failure: (message: string, recoverable?: boolean) => void,
   ): NativeCapture;
 }
-export const speechModelName = 'Paraformer 中英 INT8 · Silero VAD · 本地';
+export const speechModelName = speechModelLabels.paraformer;
+const echoFailure = '本地回声消除或语音推理失败，采集已停止；请重新开始。';
+const recordingFailure = '录音写入失败，请检查可用空间。';
 export class SpeechController {
+  private recording?: InterviewRecording;
+  private recordingDrain = Promise.resolve();
+  private recordingError?: string;
+  private interviewDsp?: AudioPreprocessor;
+  private recordingChannels = new Map<AudioSource, RecordingChannel>();
+  private recordingStop?: { at: number; drained(): void };
+  private inputResumeClock = new Map<AudioSource, number>();
   private worker?: Worker;
   private failedWorker?: Worker;
+  private unflushedTail = false;
   private ready?: Promise<void>;
   private loadingTimer?: ReturnType<typeof setTimeout>;
   private captures = new Map<AudioSource, NativeCapture>();
   private queued = 0;
   private pendingAudio = new Map<number, { source: AudioSource; ms: number }>();
+  private pendingBySource = { system: 0, microphone: 0 };
   private drainingQwenQueue = false;
   private processedThrough = new Map<AudioSource, number>();
   private maxQueue = 0;
@@ -56,6 +76,7 @@ export class SpeechController {
   private anchors = new Map<AudioSource, { native: number; wall: number }>();
   private status: SpeechStatus = { state: 'idle', model: speechModelName };
   private serial = Promise.resolve();
+  private recoveryDrain?: Promise<PromiseSettledResult<void>[]>;
   private restartGeneration = 0;
   private restartTimer?: ReturnType<typeof setTimeout>;
   private restartStartup?: AbortController;
@@ -86,6 +107,7 @@ export class SpeechController {
     selection: ReturnType<typeof speechSelection>;
     options: SpeechOptions;
     phase: 'loading' | 'waiting';
+    expedited?: boolean;
     resolve(status: SpeechStatus): void;
     reject(error: Error): void;
   };
@@ -97,7 +119,14 @@ export class SpeechController {
     private qwenDirectory?: string,
   ) {}
   call(call: SpeechServiceCall): Promise<SpeechStatus> {
-    if (this.closed && call.op !== 'status') return Promise.reject(Error('语音服务已关闭。'));
+    if (call.op === 'status') {
+      // A WASAPI helper can report a terminal fault in its final stderr bytes.
+      // Let the bounded native drain settle before reporting which input needs attention.
+      if (this.recoveryDrain && [...this.captures.values()].some(capture => capture.terminalError))
+        return this.recoveryDrain.then(() => this.status);
+      return Promise.resolve(this.status);
+    }
+    if (this.closed) return Promise.reject(Error('语音服务已关闭。'));
     if (call.op === 'start' || call.op === 'stop' || call.op === 'pause') {
       this.cancelRestart();
       if (call.op === 'start') {
@@ -111,6 +140,15 @@ export class SpeechController {
       return this.cancelInputState();
     }
     if (call.op === 'switch-recognizer') return this.switchRecognizer(call.options);
+    if (call.op === 'control-switch') {
+      const change = this.switching;
+      if (change?.id === call.id && (call.action === 'cancel' || change.phase === 'waiting')) {
+        this.worker?.postMessage(call.action === 'cancel'
+          ? { op: 'cancel-switch', manual: true }
+          : { op: 'expedite-switch', manual: true });
+      }
+      return Promise.resolve(this.status);
+    }
     if (call.op === 'cancel-switch') {
       if (this.switching) this.cancelRestart();
       this.cancelSwitch();
@@ -120,6 +158,19 @@ export class SpeechController {
       this.cancelSwitch(false);
       void this.cancelInputState().catch(() => {});
     }
+    if (call.op === 'stop') return this.enqueue(async () => {
+      try {
+        const status = await this.execute(call);
+        return {
+          ...status,
+          ...(this.unflushedTail ? { transcriptTailIncomplete: true as const } : {}),
+          ...(this.recordingError ? { recordingError: this.recordingError } : {}),
+        };
+      } finally {
+        this.unflushedTail = false;
+        this.recordingError = undefined;
+      }
+    });
     return this.enqueue(() => this.execute(call));
   }
   private enqueue(action: () => Promise<SpeechStatus>) {
@@ -151,13 +202,13 @@ export class SpeechController {
       state,
       model:
         this.selection.speechModel === 'qwen'
-          ? `Qwen3-ASR 0.6B · ${this.selection.inferenceDevice === 'metal' ? 'Metal' : this.selection.inferenceDevice.toUpperCase()}${this.alignmentDevice === 'cpu' && this.selection.inferenceDevice !== 'cpu' ? ' · 对齐 CPU' : ''} · 本地`
+          ? `${speechModelLabels.qwen} · ${this.selection.inferenceDevice === 'metal' ? 'Metal' : this.selection.inferenceDevice.toUpperCase()}${this.alignmentDevice === 'cpu' && this.selection.inferenceDevice !== 'cpu' ? ' · 对齐 CPU' : ''} · 本地`
           : speechModelName,
       ...this.selection,
       ...(this.chunkMs ? { chunkMs: this.chunkMs } : {}),
       ...(error ? { error } : {}),
       ...(failureSource ? { failureSource } : {}),
-      ...(this.switching ? { switching: this.switching.phase } : {}),
+      ...(this.switching ? { switching: this.switching.phase, switchId: this.switching.id } : {}),
       ...(this.managedInput ? { inputState: { ...this.inputState } } : {}),
     };
     this.emit({ type: 'status', status: this.status });
@@ -172,9 +223,9 @@ export class SpeechController {
     // different model under the old confirmed selection.
     if (!publish) this.reloadAfterStop = true;
     this.worker?.postMessage({ op: 'cancel-switch' });
-    change.reject(Error('语音切换已取消，仍使用原配置。'));
+    change.reject(Error(speechSwitchCancelled));
     if (publish) this.state(this.status.state);
-    else this.status = { ...this.status, switching: undefined };
+    else this.status = { ...this.status, switching: undefined, switchId: undefined };
   }
   private switchRecognizer(options: SpeechOptions): Promise<SpeechStatus> {
     if (
@@ -190,7 +241,7 @@ export class SpeechController {
     this.cancelRestart();
     const selection = speechSelection(options);
     if (selection.speechModel === 'qwen' && !this.qwenDirectory)
-      return Promise.reject(Error('当前平台尚未接入 Qwen 原生推理。'));
+      return Promise.reject(Error('当前平台不支持多语言语音识别。'));
     if (JSON.stringify(selection) === JSON.stringify(this.selection))
       return Promise.resolve(this.status);
     return new Promise((resolve, reject) => {
@@ -211,9 +262,22 @@ export class SpeechController {
           ...selection,
           directory: selection.speechModel === 'qwen' ? this.qwenDirectory : this.model,
           runtimeFile: this.adapter.qwenRuntime,
+          legacyModels: [path.join(path.dirname(this.helper), 'silero_vad.onnx'), path.join(this.model, 'silero_vad.onnx')],
         },
       });
+      this.expediteDowngrade();
     });
+  }
+  private expediteDowngrade() {
+    const change = this.switching;
+    // Four seconds of combined unacknowledged PCM is already two seconds
+    // behind on a dual-input interview. Only expedite an explicit downgrade.
+    if (
+      this.queued < 4000 || !change || change.expedited ||
+      this.selection.speechModel !== 'qwen' || change.selection.speechModel !== 'paraformer'
+    ) return;
+    change.expedited = true;
+    this.worker!.postMessage({ op: 'expedite-switch' });
   }
   private inputEnabled(source: AudioSource) {
     return !this.blockedInput.has(source) && inputSourceEnabled(this.inputState, source);
@@ -284,6 +348,7 @@ export class SpeechController {
       return Promise.resolve(this.state(this.status.state));
     }
     this.blockedInput = new Set(changed);
+    this.endRecordingSources(changed);
     return new Promise<SpeechStatus>((resolve, reject) => {
       const change = {
         previous,
@@ -322,10 +387,18 @@ export class SpeechController {
           await this.inputBoundary(change.worker, state, changed);
         }
         if (!active()) return;
+        if (changed.includes('microphone') || change.added.size) {
+          this.interviewDsp?.start([...this.captures.keys()]);
+          this.recordingChannels.delete('microphone');
+        }
         this.inputState = state;
         this.managedInput = true;
         this.options = { ...this.options!, sources: inputSources(state) };
-        for (const source of changed) this.processedThrough.delete(source);
+        for (const source of changed) {
+          this.processedThrough.delete(source);
+          if (!inputSourceEnabled(previous, source) && inputSourceEnabled(state, source))
+            this.inputResumeClock.set(source, this.adapter.captureClockNow?.() ?? Date.now());
+        }
         this.changingInput = undefined;
         this.blockedInput.clear();
         resolve(this.state(this.status.state));
@@ -359,31 +432,45 @@ export class SpeechController {
     });
     return this.inputCleanup.then(() => this.status);
   }
-  private capture(source: AudioSource, options: SpeechOptions, epoch: number): NativeCapture {
+  private capture(source: AudioSource, options: SpeechOptions, epoch: number, levelsOnly = false): NativeCapture {
+    let sumSquares = 0;
+    let sampleCount = 0;
     const capture = this.adapter.create(
       this.helper,
       source,
       options[source],
       (p) => {
         if (epoch !== this.epoch || this.captures.get(source) !== capture) return;
+        if (levelsOnly) {
+          for (const value of p.samples) sumSquares += value * value;
+          sampleCount += p.samples.length;
+          if (sampleCount >= p.rate * 0.08) {
+            const level = Math.min(1, Math.sqrt(sumSquares / sampleCount));
+            this.emit({ type: 'activity', source, level, speaking: false });
+            sumSquares = sampleCount = 0;
+          }
+          return;
+        }
         const validClock = !(p.flags & 4) && Number.isFinite(p.timestamp);
         let anchor = this.anchors.get(source);
         if (!anchor && validClock) {
           anchor = { native: p.timestamp, wall: Date.now() };
           this.anchors.set(source, anchor);
         }
-        this.audio(
-          source,
-          p.samples,
-          p.rate,
-          p.flags,
-          validClock ? anchor!.wall + p.timestamp - anchor!.native : Date.now(),
-          validClock ? p.timestamp : undefined,
-        );
+        try {
+          this.audio(
+            source, p.samples, p.rate, p.flags,
+            validClock ? anchor!.wall + p.timestamp - anchor!.native : Date.now(),
+            validClock ? p.timestamp : undefined,
+          );
+        } catch (error) {
+          if (!this.interviewDsp) throw error;
+          this.fail(echoFailure);
+        }
       },
       (message, recoverable) => {
         if (epoch === this.epoch && this.captures.get(source) === capture)
-          this.fail(message, source, recoverable);
+          this.fail(message, source, !levelsOnly && recoverable);
       },
     );
     return capture;
@@ -410,7 +497,7 @@ export class SpeechController {
           this.alignmentDevice = m.alignmentDevice;
           resolve();
         }
-        if (m.event) {
+        if (m.event && this.failedWorker !== worker) {
           const source = m.event.type === 'segment' ? m.event.segment.source : m.event.source;
           if (!source || this.inputEnabled(source)) this.emit(m.event);
         }
@@ -437,24 +524,29 @@ export class SpeechController {
         }
         if (change && m.switchError === change.id) {
           this.switching = undefined;
-          this.state('running');
-          change.reject(Error(m.message));
+          const status = this.state('running');
+          if (m.userCancelled) change.resolve({ ...status, switchCancelled: true });
+          else change.reject(Error(m.message));
         }
         if (m.ack) {
           const packet = this.pendingAudio.get(m.ack);
           if (!packet) return;
           this.lastProgress = performance.now();
           this.pendingAudio.delete(m.ack);
+          this.pendingBySource[packet.source]--;
           this.queued = this.pendingAudio.size ? Math.max(0, this.queued - packet.ms) : 0;
           if (!this.pendingAudio.size) this.drainingQwenQueue = false;
           for (const source of ['microphone', 'system'] as const) {
             const through = m.progress?.[source];
-            if (typeof through === 'number' && Number.isFinite(through))
-              this.processedThrough.set(
-                source,
-                Math.max(this.processedThrough.get(source) ?? -Infinity, through),
-              );
-            if (source === packet.source || through !== undefined) this.progress(source);
+            const previous = this.processedThrough.get(source) ?? -Infinity;
+            const advanced = Number.isFinite(through) && through > previous;
+            if (advanced) this.processedThrough.set(source, through);
+            // While an interview source is backlogged it cannot authorize a question.
+            // Keep the exact clock internally and publish the empty transition immediately.
+            const update = advanced && (!this.managedInput || !this.pendingBySource[source] ||
+              Math.floor(through / 100) > Math.floor(previous / 100));
+            if (update || (source === packet.source && !this.pendingBySource[source]))
+              this.progress(source);
           }
           if (m.ack % 100 === 0)
             this.emit({
@@ -511,21 +603,26 @@ export class SpeechController {
         directory: this.selection.speechModel === 'qwen' ? this.qwenDirectory : this.model,
         ...this.selection,
         runtimeFile: this.adapter.qwenRuntime,
-        ...(this.adapter.preprocessorFile
-          ? { preprocessorFile: this.adapter.preprocessorFile }
-          : {}),
+        legacyModels: [path.join(path.dirname(this.helper), 'silero_vad.onnx'), path.join(this.model, 'silero_vad.onnx')],
       });
     });
     return this.ready;
   }
   private progress(source: AudioSource) {
-    if (!this.inputEnabled(source)) return;
+    if (!this.inputEnabled(source) ||
+      (this.managedInput && source !== questionSource(this.inputState.inputMode))) return;
     this.emit({
       type: 'audio-progress',
       source,
-      pending: [...this.pendingAudio.values()].some((packet) => packet.source === source),
+      pending: this.pendingBySource[source] > 0,
       processedThroughMs: this.processedThrough.get(source),
     });
+  }
+  private clearAudioQueue() {
+    this.queued = 0;
+    this.pendingAudio.clear();
+    this.pendingBySource = { system: 0, microphone: 0 };
+    this.processedThrough.clear();
   }
   private audio(
     source: AudioSource,
@@ -535,14 +632,20 @@ export class SpeechController {
     timestamp = Date.now(),
     captureClock?: number,
   ) {
-    if (!this.inputEnabled(source)) return;
+    const enabled = this.inputEnabled(source);
+    const reference = source === 'system' && this.inputEnabled('microphone') ? this.interviewDsp : undefined;
+    if (!enabled && !reference) return;
     if (flags & 1) {
       this.discontinuities++;
       const now = Date.now();
       const gaps = [...(this.recentGaps.get(source) ?? []).filter((at) => now - at < 10000), now];
       this.recentGaps.set(source, gaps);
-      this.worker?.postMessage({ op: 'gap', source });
-      this.emit({
+      const affected = this.interviewDsp?.discontinuity(source) ?? [source];
+      this.endRecordingSources(affected);
+      for (const lane of affected) {
+        if (this.inputEnabled(lane)) this.worker?.postMessage({ op: 'gap', source: lane });
+      }
+      if (enabled) this.emit({
         type: 'gap',
         source,
         message: `${source === 'system' ? '系统音频' : '麦克风'}发生短暂间断，转写已继续；不完整片段不会自动用于回答。`,
@@ -556,10 +659,42 @@ export class SpeechController {
         return;
       }
     }
+    // AEC can retain raw input while aligning the endpoints. Give it its own
+    // buffer when the same capture will be transferred to the recognizer.
+    reference?.feed(source, enabled ? samples.slice() : samples, rate, timestamp, captureClock);
+    if (!enabled) return;
+    const resumeClock = this.inputResumeClock.get(source);
+    if (resumeClock !== undefined && (this.recording || this.interviewDsp)) {
+      if (captureClock === undefined) return;
+      const packetStart = this.adapter.captureClockNow ? captureClock : timestamp;
+      const skip = Math.max(0, Math.ceil(((resumeClock - packetStart) * rate) / 1000));
+      if (skip >= samples.length) return;
+      this.inputResumeClock.delete(source);
+      // The worker takes ownership of the backing buffer as well as the view.
+      if (skip) samples = samples.slice(skip);
+      timestamp += (skip * 1000) / rate;
+      captureClock += (skip * 1000) / rate;
+    }
+    if (this.interviewDsp && source === 'microphone') {
+      this.interviewDsp.feed(source, samples, rate, timestamp, captureClock);
+      return;
+    }
+    this.recordAudio(source, samples, rate, timestamp);
+    this.sendToRecognizer(source, samples, rate, timestamp, captureClock);
+  }
+  private sendToRecognizer(
+    source: AudioSource,
+    samples: Float32Array,
+    rate: number,
+    timestamp: number,
+    captureClock?: number,
+  ) {
+    if (!this.worker || this.worker === this.failedWorker) return;
     const ms = (samples.length / rate) * 1000;
     const limit = this.selection.speechModel === 'qwen' || this.drainingQwenQueue ? 30000 : 2000;
     if (this.queued + ms > limit) {
       this.droppedSamples += samples.length;
+      this.unflushedTail = true;
       this.emit({
         type: 'metrics',
         queueMs: this.queued,
@@ -570,10 +705,16 @@ export class SpeechController {
         audioMs: 0,
         inferenceMs: 0,
       });
+      // Re-running an overloaded Qwen or flushing its entire backlog can
+      // monopolize the machine for minutes. The recording has its own drain.
+      const overloadedQwen = this.selection.speechModel === 'qwen';
+      if (overloadedQwen) this.failedWorker = this.worker;
       this.fail(
-        '识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。',
-        'service',
-        true,
+        overloadedQwen
+          ? '多语言语音识别的转写积压已达上限，采集已停止。未完成的转写可能缺失，可切换到轻量语音识别继续面试。'
+          : '识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。',
+        overloadedQwen ? 'model' : 'service',
+        !overloadedQwen,
       );
       return;
     }
@@ -581,9 +722,10 @@ export class SpeechController {
     this.maxQueue = Math.max(this.maxQueue, this.queued);
     const sequence = ++this.sequence;
     this.pendingAudio.set(sequence, { source, ms });
+    this.expediteDowngrade();
     // Publish the backlog before the worker can emit a final. A final decoded
     // from old audio is insufficient while newer system audio is unchecked.
-    this.progress(source);
+    if (++this.pendingBySource[source] === 1) this.progress(source);
     this.worker?.postMessage(
       {
         op: 'audio',
@@ -604,6 +746,9 @@ export class SpeechController {
     recoverable = false,
   ) {
     if (this.status.state === 'error') return;
+    const interruptedCapture = this.status.state === 'running' && this.captures.size > 0;
+    if (interruptedCapture && (this.worker ? this.worker === this.failedWorker : failureSource === 'model'))
+      this.unflushedTail = true;
     const generation = this.restartGeneration;
     const current = () => generation === this.restartGeneration && !this.closed && this.wanted;
     const restart = !!(
@@ -628,7 +773,12 @@ export class SpeechController {
     this.cancelSwitch(false);
     this.state('error', message, failureSource);
     void this.enqueue(async () => {
-      await this.execute({ op: 'stop' }, { stopIntent: restart && current() ? 'recover' : undefined });
+      try {
+        await this.execute({ op: 'stop' }, { stopIntent: restart && current() ? 'recover' : undefined });
+      } catch (error) {
+        if (interruptedCapture) this.unflushedTail = true;
+        throw error;
+      }
       if (!current()) return this.status;
       this.state('error', message, failureSource);
       if (!restart) return this.status;
@@ -675,9 +825,70 @@ export class SpeechController {
         this.state('error', message, failureSource);
     });
   }
-  private checkStartup() {
-    if (!this.worker || this.status.state === 'error')
+  private checkStartup(requireWorker = true) {
+    if ((requireWorker && !this.worker) || this.status.state === 'error')
       throw Error(this.status.error || '语音识别进程已退出，请重新开始。');
+  }
+  private recordAudio(
+    source: AudioSource,
+    samples: Float32Array,
+    rate: number,
+    timestamp: number,
+  ) {
+    if (!this.recording) return;
+    try {
+      const stop = this.recordingStop;
+      const count = stop
+        ? Math.max(0, Math.ceil(((stop.at - timestamp) * rate) / 1000))
+        : samples.length;
+      const skip = Math.max(0, Math.ceil(((this.recording.startedAt - timestamp) * rate) / 1000));
+      const chunk = samples.subarray(skip, count);
+      if (chunk.length) {
+        const start = timestamp + skip * 1000 / rate;
+        let channel = this.recordingChannels.get(source);
+        if (channel?.rate !== rate) {
+          channel = new RecordingChannel(source, rate);
+          this.recordingChannels.set(source, channel);
+        }
+        this.recording.append(source, channel.process(chunk), rate, start);
+      }
+      if (source === 'microphone' && count <= samples.length) stop?.drained();
+    } catch (error) {
+      void this.finishRecording(error);
+    }
+  }
+  private endRecordingSources(sources: AudioSource[]) {
+    try {
+      for (const source of sources) {
+        this.recording?.endSource(source);
+        this.recordingChannels.delete(source);
+      }
+    } catch (error) {
+      void this.finishRecording(error);
+    }
+  }
+  private finishRecording(cause?: unknown) {
+    const writer = this.recording;
+    if (!writer) return this.recordingDrain;
+    this.recording = undefined;
+    this.recordingChannels.clear();
+    const stop = this.recordingStop;
+    stop?.drained();
+    this.recordingStop = undefined;
+    const error = cause instanceof Error && cause.message === recordingBacklog ? recordingBacklog :
+      cause === undefined ? undefined : recordingFailure;
+    this.recordingDrain = writer.close(stop?.at).then(
+      () => this.emit({ type: 'recording', active: false }),
+      () => {
+        this.recordingError = recordingFailure;
+        this.emit({ type: 'recording', active: false, error: recordingFailure });
+      },
+    );
+    if (error) {
+      this.recordingError = error;
+      this.emit({ type: 'recording', active: false, draining: true, error });
+    }
+    return this.recordingDrain;
   }
   private async execute(
     call: SpeechServiceCall,
@@ -688,28 +899,65 @@ export class SpeechController {
     } = {},
   ): Promise<SpeechStatus> {
     const waiting = <T>(task: Promise<T>) => (signal ? abortable(task, signal) : task);
-    if (call.op === 'status') return this.status;
+    if (call.op === 'recording') {
+      if (!call.directory) {
+        if (this.recording && this.interviewDsp && this.inputEnabled('microphone')) {
+          // Let delayed AEC output reach the cut without resetting its learned echo path.
+          await new Promise<void>(resolve => {
+            const timer = setTimeout(resolve, 150);
+            this.recordingStop = { at: Date.now(), drained() { clearTimeout(timer); resolve(); } };
+          });
+        }
+        await this.finishRecording();
+      } else if (!this.recording) {
+        if (!this.managedInput || this.status.state !== 'running') throw Error('请先开始本地语音面试。');
+        await this.recordingDrain;
+        const writer = new InterviewRecording(call.directory, Date.now(), () => {
+          void this.finishRecording(recordingFailure);
+        });
+        this.recording = writer;
+        try {
+          await writer.ready;
+        } catch {
+          this.recording = undefined;
+          this.recordingChannels.clear();
+          throw Error(recordingFailure);
+        }
+        if (this.recording === writer) this.emit({ type: 'recording', active: true });
+      }
+      return { ...this.status, recording: !!this.recording };
+    }
     if (call.op === 'devices')
       return { ...this.status, devices: await this.adapter.devices(this.helper) };
     await this.inputCleanup.catch(() => {});
     if (call.op === 'pause' || call.op === 'stop') {
       if (!this.adapter.drainBeforeRetire) ++this.epoch;
       const captures = [...this.captures];
-      const stopped = await Promise.allSettled(
+      const draining = Promise.allSettled(
         captures.map(async ([, capture]) => capture.stop(stopIntent)),
       );
+      if (stopIntent === 'recover' && this.adapter.drainBeforeRetire) this.recoveryDrain = draining;
+      const stopped = await draining;
+      this.recoveryDrain = undefined;
+      let dspFailed = false;
+      try {
+        this.interviewDsp?.flush();
+      } catch {
+        dspFailed = true;
+      } finally {
+        this.interviewDsp?.close();
+        this.interviewDsp = undefined;
+      }
+      const recordingDrain = this.finishRecording();
       if (this.adapter.drainBeforeRetire) ++this.epoch;
       this.captures.clear();
       this.anchors.clear();
       this.recentGaps.clear();
-      if (stopped.some((result) => result.status === 'rejected')) {
+      if (dspFailed || stopped.some((result) => result.status === 'rejected')) {
         const worker = this.worker;
         this.worker = undefined;
         this.ready = undefined;
-        this.queued = 0;
-        this.pendingAudio.clear();
-        this.processedThrough.clear();
-        await worker?.terminate();
+        this.clearAudioQueue();
         // An attributed native diagnostic is available only for the endpoint
         // that actually blocked recovery. Generic stop failures stay service errors.
         const diagnosed = stopIntent === 'recover' ? captures.find(([, capture], index) => {
@@ -717,63 +965,71 @@ export class SpeechController {
           return result.status === 'rejected' && capture.terminalError !== undefined &&
             result.reason === capture.terminalError;
         }) : undefined;
-        const message = diagnosed?.[1].terminalError?.message ?? '音频采集未能正常停止，请重新开始。';
+        const message = diagnosed?.[1].terminalError?.message ??
+          (dspFailed ? echoFailure : '音频采集未能正常停止，请重新开始。');
+        // Status queries waiting on native close must see its final diagnostic even on slow disks.
         this.state('error', message, diagnosed?.[0] ?? 'service');
+        try {
+          await worker?.terminate();
+        } finally {
+          await recordingDrain;
+        }
         throw Error(message);
       }
-      if (this.worker && this.worker === this.failedWorker) {
-        // A failed worker cannot flush. Retire it after native capture stops,
-        // without blocking a restart behind a 5s/120s tail timeout.
-        const worker = this.worker;
-        this.worker = undefined;
-        this.ready = undefined;
-        this.failedWorker = undefined;
-        await worker.terminate();
-      }
-      if (this.worker && this.ready) {
-        const id = ++this.sequence;
-        try {
-          await new Promise<void>((resolve, reject) => {
-            const timer = setTimeout(
-              () => {
-                this.flushers.delete(id);
-                reject(Error('语音尾段处理超时。'));
-              },
-              this.selection.speechModel === 'qwen' ? 120000 : 5000,
-            );
-            this.flushers.set(id, {
-              resolve: () => {
-                clearTimeout(timer);
-                resolve();
-              },
-              reject: (error) => {
-                clearTimeout(timer);
-                reject(error);
-              },
-            });
-            this.worker!.postMessage({ op: 'flush', id, reason: call.op });
-          });
-        } catch (error) {
+      try {
+        if (this.worker && this.worker === this.failedWorker) {
+          // An overloaded worker can retire as soon as native capture has stopped.
           const worker = this.worker;
           this.worker = undefined;
           this.ready = undefined;
-          this.queued = 0;
-          this.pendingAudio.clear();
-          this.processedThrough.clear();
-          await worker?.terminate();
-          this.state('error', (error as Error).message);
-          throw error;
+          this.failedWorker = undefined;
+          await worker.terminate();
         }
+        if (this.worker && this.ready) {
+          const id = ++this.sequence;
+          try {
+            await new Promise<void>((resolve, reject) => {
+              const timer = setTimeout(
+                () => {
+                  this.flushers.delete(id);
+                  reject(Error('语音尾段处理超时。'));
+                },
+                this.selection.speechModel === 'qwen' ? 120000 : 5000,
+              );
+              this.flushers.set(id, {
+                resolve: () => {
+                  clearTimeout(timer);
+                  resolve();
+                },
+                reject: (error) => {
+                  clearTimeout(timer);
+                  reject(error);
+                },
+              });
+              this.worker!.postMessage({ op: 'flush', id, reason: call.op });
+            });
+          } catch (error) {
+            const worker = this.worker;
+            this.worker = undefined;
+            this.ready = undefined;
+            this.clearAudioQueue();
+            await worker?.terminate();
+            this.state('error', (error as Error).message);
+            throw error;
+          }
+        }
+        this.clearAudioQueue();
+        this.drainingQwenQueue = false;
+        if (this.reloadAfterStop) await this.retireWorker();
+      } finally {
+        // Returning from stop makes the history and its recordings available.
+        await recordingDrain;
       }
-      this.queued = 0;
-      this.pendingAudio.clear();
-      this.drainingQwenQueue = false;
-      this.processedThrough.clear();
-      if (this.reloadAfterStop) await this.retireWorker();
       return this.state(call.op === 'pause' ? 'paused' : 'idle');
     }
     if (call.op !== 'start') throw Error('Invalid speech operation');
     if (this.captures.size) return this.status;
+    this.inputResumeClock.clear();
     this.managedInput = !!call.inputState;
     this.inputState = call.inputState
       ? { ...call.inputState }
@@ -785,7 +1041,7 @@ export class SpeechController {
     this.drainingQwenQueue = false;
     const selection = speechSelection(call.options);
     if (selection.speechModel === 'qwen' && !this.qwenDirectory)
-      throw Error('当前平台尚未接入 Qwen 原生推理。');
+      throw Error('当前平台不支持多语言语音识别。');
     if (JSON.stringify(selection) !== JSON.stringify(this.selection)) await this.retireWorker();
     this.selection = selection;
     const available = await waiting(this.adapter.devices(this.helper));
@@ -800,17 +1056,17 @@ export class SpeechController {
     this.state('loading');
     let startupFailure: SpeechStatus['failureSource'] = 'model';
     try {
-      await waiting(this.load());
-      if (!current()) throw Error('音频自动恢复已取消。');
-      this.checkStartup();
-      {
+      if (!call.levelsOnly) {
+        await waiting(this.load());
+        if (!current()) throw Error('音频自动恢复已取消。');
+        this.checkStartup();
         startupFailure = 'service';
         const id = ++this.sequence;
         await waiting(
           new Promise<void>((resolve, reject) => {
             const timer = setTimeout(() => {
               this.flushers.delete(id);
-              reject(Error('本地回声消除初始化超时，请重新开始。'));
+              reject(Error('语音输入准备超时，请重新开始。'));
             }, 10000);
             this.flushers.set(id, {
               resolve: () => {
@@ -834,29 +1090,73 @@ export class SpeechController {
         if (!current()) throw Error('音频自动恢复已取消。');
       }
       const epoch = ++this.epoch;
-      for (const source of call.options.sources) {
-        startupFailure = source;
-        const capture = this.capture(source, call.options, epoch);
-        this.captures.set(source, capture);
-        await waiting(capture.start());
+      let sources = call.options.sources;
+      let missingReference = false;
+      if (this.managedInput && !call.levelsOnly && this.adapter.preprocessorFile) {
+        this.interviewDsp = await loadAudioPreprocessor(
+          this.adapter.preprocessorFile,
+          (source, samples, rate, timestamp, recognitionSamples = samples) => {
+            if (source !== 'microphone' || !this.inputEnabled(source)) return;
+            this.recordAudio(source, samples, rate, timestamp);
+            this.sendToRecognizer(source, recognitionSamples.slice(), rate, timestamp);
+          },
+          () => this.fail(echoFailure),
+          signal,
+        );
         if (!current()) throw Error('音频自动恢复已取消。');
-        this.checkStartup();
+        if (sources.includes('microphone')) {
+          // Establish the reference before the first mic packet, even when
+          // playback is not a public input to this interview.
+          const playback = available.some(device =>
+            device.source === 'system' && (!call.options.system || device.id === call.options.system));
+          if (playback) sources = ['system', 'microphone'];
+          else missingReference = true;
+        }
+        this.interviewDsp.start(sources);
+      }
+      for (const source of sources) {
+        startupFailure = source;
+        const capture = this.capture(source, call.options, epoch, call.levelsOnly);
+        this.captures.set(source, capture);
+        try {
+          await waiting(capture.start());
+        } catch (error) {
+          // An in-person interview can still use its mic without a loopback endpoint.
+          if (source !== 'system' || call.options.sources.includes(source) || !current()) throw error;
+          try {
+            await capture.stop();
+          } catch (stopError) {
+            // A denied optional endpoint may exit nonzero. Only continue if
+            // its adapter confirms it no longer owns a retiring native process.
+            if (capture.retiring !== false) throw stopError;
+          }
+          this.captures.delete(source);
+          this.anchors.delete(source);
+          this.interviewDsp!.start(call.options.sources);
+          missingReference = true;
+        }
+        if (!current()) throw Error('音频自动恢复已取消。');
+        this.checkStartup(!call.levelsOnly);
       }
       // Native adapters own silence: Windows loopback uses its advancing
       // endpoint clock. Wall time alone cannot establish processed silence.
       this.options = structuredClone(call.options);
       this.runningSince = performance.now();
       this.lastProgress = 0;
-      return this.state('running');
+      const status = this.state('running');
+      if (missingReference) this.emit({
+        type: 'gap', source: 'microphone', message: '系统播放参考不可用，麦克风无法消除扬声器回声。',
+      });
+      return status;
     } catch (error) {
       // Retire callbacks first. A second cleanup failure must not hide the
       // original startup error or leave this controller stuck with captures.
       ++this.epoch;
+      this.interviewDsp?.close();
+      this.interviewDsp = undefined;
       const captures = [...this.captures.values()];
       this.captures.clear();
-      this.queued = 0;
-      this.pendingAudio.clear();
-      this.processedThrough.clear();
+      this.clearAudioQueue();
       this.anchors.clear();
       this.recentGaps.clear();
       this.ready = undefined;
@@ -910,8 +1210,7 @@ export class SpeechController {
     }
     this.worker = undefined;
     this.ready = undefined;
-    this.pendingAudio.clear();
-    this.processedThrough.clear();
+    this.clearAudioQueue();
     this.chunkMs = undefined;
     this.alignmentDevice = undefined;
     await worker.terminate();

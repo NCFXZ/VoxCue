@@ -45,6 +45,11 @@
   white-space: nowrap;
 }
 
+.chat-source-group .inline-error {
+  display: inline-block;
+  max-width: 100%;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .user-bubble > .user-message-text {
     transition: none;

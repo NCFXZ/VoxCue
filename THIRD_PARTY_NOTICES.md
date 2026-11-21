@@ -34,16 +34,19 @@ Examples include Apache-2.0 notices for the Paraformer/sherpa and Qwen resources
 
 - Fluent UI System Icons used by the Windows interface are from [Microsoft's icon project](https://github.com/microsoft/fluentui-system-icons), under its [MIT license](https://github.com/microsoft/fluentui-system-icons/blob/main/LICENSE).
 - `shared/src/assets/copilot.svg` and `github.svg` use [Primer Octicons](https://github.com/primer/octicons), under its [MIT license](https://github.com/primer/octicons/blob/main/LICENSE). The notices and permission text for these icon projects are reproduced below.
+- The Claude, Gemini, Qwen, DeepSeek, Kimi, Zhipu and Doubao SVGs in `shared/src/assets/ai` come from [LobeHub Icons](https://github.com/lobehub/lobe-icons/tree/9752d967494e48d8f83f2808feb2b0207bf70997/packages/static-svg/icons), under its [MIT license](https://github.com/lobehub/lobe-icons/blob/9752d967494e48d8f83f2808feb2b0207bf70997/LICENSE). The brand marks belong to their respective owners.
 - Mac SF Symbols are obtained from AppKit on the build machine for the Mac interface. They remain subject to [Apple's SF Symbols terms](https://developer.apple.com/sf-symbols/); generated symbol assets are not part of the repository's AGPL grant.
 - The OpenAI/ChatGPT mark identifies the connected service. OpenAI owns those marks; their use is governed by [OpenAI's brand guidelines](https://openai.com/brand/), not this project's software license. GitHub and other third-party names and marks likewise remain with their owners. VoxCue does not imply their endorsement.
 - The VoxCue name, source logo, and derived brand images are outside the software-code license grant. No trademark license is granted by publishing this repository.
 - User-supplied artwork, including `shared/src/assets/interview-easter-egg.jpg`, is outside the software-code license grant. The three generated story illustrations and asset provenance are described in [the asset README](shared/src/assets/README.md); publication does not expand third-party or reference-image rights.
 
-### MIT notices for Fluent UI System Icons and Primer Octicons
+### MIT notices for Fluent UI System Icons, Primer Octicons and LobeHub Icons
 
 Fluent UI System Icons: Copyright (c) 2020 Microsoft Corporation.
 
 Primer Octicons: Copyright (c) 2026 GitHub Inc.
+
+LobeHub Icons: Copyright (c) 2023 LobeHub
 
 ```text
 MIT License

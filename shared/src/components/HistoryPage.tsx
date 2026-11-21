@@ -1,3 +1,4 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t, uiLocale } from '../i18n';
 import { SyncBadge } from './SyncBadge';
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -5,13 +6,16 @@ import { History, ChevronDown, X } from './icons';
 import { Button } from './ui/button';
 import { HistoryDetail } from './HistoryDetail';
 import { useHistory } from '../stores/history';
-import { historyStorageKey, type InterviewRecord } from '../services/history';
+import { subscribeHistoryChanges, type InterviewRecord } from '../services/history';
 import { recordFeature } from '../services/telemetry';
 import { switchView } from './ui/switchView';
 export function HistoryPage() {
-  const { records: allRecords, error, load, remove } = useHistory();
+  const { records: allRecords, error, load, remove, getRecord } = useHistory();
   const records = allRecords.filter((record) => !record.mock);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selected, setSelected] = useState<InterviewRecord | null>(null);
+  const selectedId = selected?.id;
+  const loadedRevision = useRef<string | undefined>(undefined);
+  const selectedRevision = allRecords.find(record => record.id === selectedId)?.revision;
   const requestedSelection = useRef<string | null>(null);
   const deletingRecord = useRef<InterviewRecord | null>(null);
   const view = useRef<HTMLDivElement>(null);
@@ -23,16 +27,20 @@ export function HistoryPage() {
     if (node) node.scrollTop = listScrollTop.current;
   }, []);
   const searchInput = useRef<HTMLInputElement>(null);
-  const select = (id: string | null) => {
+  const select = async (id: string | null) => {
     if (requestedSelection.current === id) return;
     if (id && listScroll.current) listScrollTop.current = listScroll.current.scrollTop;
     requestedSelection.current = id;
+    const record = id ? await getRecord(id) : null;
+    if (!view.current || requestedSelection.current !== id) return;
+    if (id && !record) { requestedSelection.current = null; return; }
     if (id) recordFeature('history_view');
     switchView(
       view.current,
       () => {
         deletingRecord.current = null;
-        setSelectedId(id);
+        loadedRevision.current = allRecords.find(row => row.id === id)?.revision;
+        setSelected(record ?? null);
       },
       id ? 'forward' : 'back',
     );
@@ -41,9 +49,22 @@ export function HistoryPage() {
   const filtered = records.filter((record) =>
     record.title.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()),
   );
-  const selected =
-    records.find((record) => record.id === selectedId) ??
-    (deletingRecord.current?.id === selectedId ? deletingRecord.current : undefined);
+  useEffect(() => {
+    if (!selectedId || deletingRecord.current || loadedRevision.current === selectedRevision) return;
+    let active = true;
+    if (selectedRevision === undefined) {
+      requestedSelection.current = null;
+      setSelected(null);
+    } else {
+      void getRecord(selectedId).then((record) => {
+        if (active && record && requestedSelection.current === selectedId) {
+          loadedRevision.current = selectedRevision;
+          setSelected(record);
+        }
+      });
+    }
+    return () => { active = false; };
+  }, [selectedRevision, selectedId, getRecord]);
   const removeSelected = async () => {
     if (!selected) return false;
     const record = selected;
@@ -57,13 +78,12 @@ export function HistoryPage() {
   };
   useEffect(() => {
     load();
-    const changed = (event: StorageEvent) => {
-      if (event.key === historyStorageKey) load();
-    };
-    window.addEventListener('storage', changed);
+    void useHistory.getState().recoverDrafts();
+    void useHistory.getState().recoverRecordings();
+    const unsubscribe = subscribeHistoryChanges(load);
     window.addEventListener('focus', load);
     return () => {
-      window.removeEventListener('storage', changed);
+      unsubscribe();
       window.removeEventListener('focus', load);
     };
   }, [load]);
@@ -125,11 +145,13 @@ export function HistoryPage() {
                   </span>
                 </div>
               )}
-              {error && (
-                <p role="alert" className="inline-error">
-                  {t(error)}
-                </p>
-              )}
+              <InterviewReveal resizeKey={error ?? ''}>
+                {error ? (
+                  <p role="alert" className="inline-error">
+                    {t(error)}
+                  </p>
+                ) : null}
+              </InterviewReveal>
               {records.length === 0 ? (
                 <div className="management-empty">
                   <History size={36} />
@@ -172,7 +194,7 @@ export function HistoryPage() {
                             {t(' 分')}{' '}
                             {Math.floor(Math.max(0, record.endedAt - record.startedAt) / 1000) % 60}{' '}
                             {t('秒 ·')}{' '}
-                            {record.answers.filter((answer) => answer.provider !== 'mock').length}{' '}
+                            {record.answerCount}{' '}
                             {t('个回答')}
                           </p>
                         </div>

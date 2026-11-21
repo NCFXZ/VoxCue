@@ -2,20 +2,29 @@
 // encrypted_content are never forwarded to the renderer.
 export class ReasoningSummary {
   private parts = new Map<string, string>();
+  private joined: string | undefined = '';
   get entries() {
     return [...this.parts].map(([id, text]) => ({ id, text }));
   }
   get text() {
-    return [...this.parts.values()].filter(Boolean).join('\n\n');
+    return this.joined ??= [...this.parts.values()].filter(Boolean).join('\n\n');
   }
   receive(event: any): boolean {
-    const before = this.text;
+    let before: string | undefined;
     const put = (key: string, value: unknown, append = false) => {
       if (typeof value !== 'string' || value.length > 100000 || key.length > 250) return;
       if (!this.parts.has(key) && this.parts.size >= 100) return;
-      const next = append ? (this.parts.get(key) ?? '') + value : value;
-      if (next.length + this.text.length - (this.parts.get(key)?.length ?? 0) <= 100000)
-        this.parts.set(key, next);
+      const previous = this.parts.get(key) ?? '';
+      const next = append ? previous + value : value;
+      if (next !== previous) {
+        const length = this.text.length;
+        const separator = length > previous.length
+          ? (Number(Boolean(next)) - Number(Boolean(previous))) * 2 : 0;
+        if (length - previous.length + next.length + separator > 100000) return;
+        before ??= this.text;
+        this.joined = undefined;
+      }
+      this.parts.set(key, next);
     };
     if (
       [
@@ -57,6 +66,6 @@ export class ReasoningSummary {
     if (['response.completed', 'response.failed', 'response.incomplete'].includes(event.type)) {
       for (const item of event.response?.output ?? []) receiveItem(item);
     }
-    return this.text !== before;
+    return before !== undefined && this.text !== before;
   }
 }

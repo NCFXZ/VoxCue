@@ -12,8 +12,13 @@ import {
   type MutableRefObject,
 } from 'react';
 import { animateDropdownEnter, animateDropdownExit } from './dropdown-motion';
+import { ChevronDown } from '../icons';
 
 export * from '@radix-ui/react-dropdown-menu';
+
+export function TriggerChevron() {
+  return <ChevronDown size={14} />;
+}
 
 // Module state belongs to this renderer, so another window keeps its own menus.
 let activeMenu: { id: symbol; close(): void } | undefined;

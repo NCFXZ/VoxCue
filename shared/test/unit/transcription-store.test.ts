@@ -21,7 +21,7 @@ function say(id: string, text: string, patch: Partial<SpeechSegment> = {}) {
       text,
       final: true,
       startMs: 0,
-      endMs: 1000,
+      endMs: 500,
       silenceStartMs: 0,
       reason: 'silence',
       ...patch,
@@ -182,7 +182,7 @@ it('cancels a ready automatic system question immediately while native mute conf
   );
   const modelChange = useInterview.getState().updateModel('synthetic-model', 'auto');
   say('queued-system-question', 'Question waiting for the model update', { source: 'system' });
-  await progress(1800, 'system');
+  await progress(1000, 'system');
   expect(ask).not.toHaveBeenCalled();
   let inputReady!: (status: SpeechStatus) => void;
   vi.mocked(window.desktop!.setInterviewInput).mockImplementationOnce(
@@ -215,21 +215,21 @@ it('麦克风临时稿与终稿立即进入草稿，保留物理来源，不接�
   expect(useInterview.getState().transcripts).toMatchObject([{ id: 'mic', source: 'microphone' }]);
   expect(useInterview.getState().speechWarnings).toEqual({});
 });
-it('沿用1800ms音频截止、恢复讲话取消截止及多个终稿合并，不额外按墙钟发送', async () => {
+it('沿用1000ms音频截止、恢复讲话取消截止及多个终稿合并，不额外按墙钟发送', async () => {
   const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
   say('a', '第一部分');
   await vi.advanceTimersByTimeAsync(10000);
   expect(ask).not.toHaveBeenCalled();
-  await progress(1800, 'system');
+  await progress(1000, 'system');
   expect(ask).not.toHaveBeenCalled();
-  await progress(1799);
+  await progress(999);
   emit({ type: 'speech-start', source: 'microphone' });
-  await progress(1800);
+  await progress(1000);
   expect(ask).not.toHaveBeenCalled();
-  say('b', '第二部分', { startMs: 2000, endMs: 3000, silenceStartMs: 2000 });
-  await progress(3800, 'microphone', true);
+  say('b', '第二部分', { startMs: 2000, endMs: 2500, silenceStartMs: 2000 });
+  await progress(3000, 'microphone', true);
   expect(ask).not.toHaveBeenCalled();
-  await progress(3800);
+  await progress(3000);
   expect(ask).toHaveBeenCalledExactlyOnceWith('第一部分 第二部分', ['a', 'b'], []);
   await progress(5000);
   say('b', '重复终稿');
@@ -238,7 +238,7 @@ it('沿用1800ms音频截止、恢复讲话取消截止及多个终稿合并，�
 it('语气词自动过滤保留原文和手动发送能力，已提交临时稿不因迟到终稿重复提交', async () => {
   const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
   say('filler', '嗯');
-  await progress(1800);
+  await progress(1000);
   expect(ask).not.toHaveBeenCalled();
   expect(useInterview.getState().draftQuestion).toBe('嗯');
   await useInterview.getState().submitTranscript();
@@ -299,7 +299,7 @@ it('远程麦克风软静音不会屏蔽系统问题或重置已累计的自动�
   await vi.advanceTimersByTimeAsync(0);
   const ask = vi.spyOn(useInterview.getState(), 'ask').mockResolvedValue();
   say('system', '远程问题', { source: 'system' });
-  await progress(1700, 'system');
+  await progress(999, 'system');
   let finish!: (status: SpeechStatus) => void;
   vi.mocked(window.desktop!.setInterviewInput).mockImplementationOnce(
     () =>
@@ -308,7 +308,7 @@ it('远程麦克风软静音不会屏蔽系统问题或重置已累计的自动�
       }),
   );
   const pending = useInterview.getState().toggleMicrophone();
-  await progress(1800, 'system');
+  await progress(1000, 'system');
   expect(ask).toHaveBeenCalledExactlyOnceWith('远程问题', ['system'], []);
   finish({ ...running, inputState: { inputMode: 'remote', microphoneMuted: true } });
   expect(await pending).toBe(true);
@@ -388,15 +388,15 @@ it('运行中切换问题来源保留转写和回答，旧临时稿与静音截�
   say('remote', '远程新句', {
     source: 'system',
     startMs: 9000,
-    endMs: 10000,
+    endMs: 9500,
     silenceStartMs: 9000,
   });
-  await progress(10800, 'system');
+  await progress(10000, 'system');
   expect(ask).toHaveBeenCalledExactlyOnceWith('远程新句', ['remote'], []);
   expect(await useInterview.getState().setInputMode('transcription')).toBe(true);
-  say('new-mic', '仅转录新句', { startMs: 11000, endMs: 12000, silenceStartMs: 11000 });
+  say('new-mic', '仅转录新句', { startMs: 11000, endMs: 11500, silenceStartMs: 11000 });
   expect(useInterview.getState().draftQuestion).toBe('仅转录新句');
-  await progress(12800);
+  await progress(12000);
   expect(ask).toHaveBeenLastCalledWith('仅转录新句', ['new-mic'], []);
   expect(window.desktop!.reconnectInterviewAudio).not.toHaveBeenCalled();
 });

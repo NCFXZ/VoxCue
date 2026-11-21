@@ -218,9 +218,19 @@ export function boundaryViolations(graph) {
         file.startsWith('src/mobile/') &&
         target.startsWith('src/') &&
         !target.startsWith('src/mobile/') &&
-        !['src/components/useFollowScroll.ts', 'src/services/math.ts'].includes(target)
+        !['src/components/useFollowScroll.ts', 'src/services/math.ts', 'src/lib/useStreamingMarkdown.ts'].includes(target) &&
+        !(file === 'src/mobile/App.tsx' && ['src/lib/messageMotion.ts', 'src/components/ui/content-reveal.tsx'].includes(target))
       )
-        fail('手机页面不得依赖桌面状态、服务或界面；只复用纯滚动和公式工具');
+        fail('手机页面只可复用独立的滚动、公式、Markdown 刷新和动效工具');
+      if (file === 'src/components/ui/content-reveal.tsx' &&
+          !['react', 'src/components/ui/useHeightTransition.ts', 'src/components/ui/content-reveal.css'].includes(target))
+        fail('桌面和手机共用的展开动效仅依赖 React、尺寸过渡和自身样式');
+      if (file === 'src/components/ui/useHeightTransition.ts' && target !== 'react')
+        fail('共用尺寸过渡只依赖 React 和浏览器原生动画接口');
+      if (file === 'src/lib/useStreamingMarkdown.ts' && target !== 'react')
+        fail('桌面和手机共用的 Markdown 刷新工具只依赖 React');
+      if (file === 'src/lib/messageMotion.ts')
+        fail('桌面和手机共用的消息入场工具只使用浏览器原生动画接口');
       if (/^src\/(?:stores|services)\//.test(file) && /^src\/components\//.test(target))
         fail('状态和服务不得依赖展示组件');
       if (file.startsWith('electron/') && target.startsWith('src/'))
@@ -262,7 +272,7 @@ export function boundaryViolations(graph) {
         !(
           file === 'electron/platform/types.ts' &&
           edge.typeOnly &&
-          target === 'electron/contracts/presentation.ts'
+          ['electron/contracts/presentation.ts', 'electron/backend/knowledge/types.ts'].includes(target)
         )
       )
         fail('平台策略不得依赖业务、IPC 或窗口生命周期');

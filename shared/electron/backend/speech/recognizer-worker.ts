@@ -4,6 +4,15 @@ import { QwenEngine } from './qwen';
 let engine: SpeechEngine | QwenEngine;
 let messages = Promise.resolve();
 parentPort!.on('message', (m) => {
+  // A retired Qwen process may be stuck in an audio request. Closing its input
+  // pipe interrupts that request without waiting behind it in the audio queue.
+  if (m.op === 'close' && engine instanceof QwenEngine) {
+    void engine.close().then(
+      () => parentPort!.postMessage({ id: m.id }),
+      () => parentPort!.postMessage({ id: m.id, error: '语音识别器释放失败。' }),
+    );
+    return;
+  }
   messages = messages.then(async () => {
     try {
       let value: unknown;
@@ -14,6 +23,7 @@ parentPort!.on('message', (m) => {
             m.inferenceDevice,
             (event) => parentPort!.postMessage({ event }),
             m.runtimeFile,
+            m.legacyModels,
           );
           engine = loaded.engine;
           value = { chunkMs: loaded.chunkMs, alignmentDevice: loaded.alignmentDevice };
@@ -21,9 +31,7 @@ parentPort!.on('message', (m) => {
           engine = new SpeechEngine(m.directory, (event) => parentPort!.postMessage({ event }));
           value = {};
         }
-      } else if (m.op === 'close') {
-        if (engine instanceof QwenEngine) await engine.close();
-      } else {
+      } else if (m.op !== 'close') {
         if (m.op === 'audio') await engine.feed(m.source, m.samples, m.rate, m.timestamp);
         else if (m.op === 'gap') await engine.discontinuity(m.source);
         else if (m.op === 'discard') await engine.discard(m.source);

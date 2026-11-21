@@ -1,9 +1,20 @@
 import { CloudAccountClient, CloudFailure } from './client';
 import {
   validCloudSyncCall,
+  validCloudResourceName,
   type CloudSyncCall,
   type CloudSyncResult,
 } from '../../contracts/cloudSync';
+
+// Preserve unknown resources for export completeness checks without exposing private labels.
+function publicResource(resource: unknown) {
+  return resource &&
+    typeof resource === 'object' &&
+    'name' in resource &&
+    !validCloudResourceName(resource.name)
+    ? { ...resource, name: '' }
+    : resource;
+}
 
 /** Narrow IPC-to-HTTP adapter. Credentials and URLs never cross the preload. */
 export class CloudSyncClient {
@@ -51,6 +62,8 @@ export class CloudSyncClient {
           break;
         case 'list':
           value = await api('/v1/backups' + (input.cursor ? '?cursor=' + input.cursor : ''));
+          if (value && typeof value === 'object' && 'items' in value && Array.isArray(value.items))
+            value = { ...value, items: value.items.map(publicResource) };
           break;
         case 'create':
           value = await api('/v1/backups', 'POST', {
@@ -58,6 +71,7 @@ export class CloudSyncClient {
             kind: input.kind,
             name: input.key,
           });
+          value = publicResource(value);
           break;
         case 'begin':
           value = await api(r + input.id + '/uploads', 'POST', {

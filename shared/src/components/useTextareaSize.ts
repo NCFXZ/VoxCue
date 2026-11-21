@@ -10,6 +10,7 @@ export function useTextareaSize(value: string, minRows = 2, maxRows = 11) {
     const view = element.ownerDocument.defaultView;
     if (!view) return;
     const measure = () => {
+      if (!element.getClientRects().length) return;
       const line = parseFloat(view.getComputedStyle(element).lineHeight);
       if (!Number.isFinite(line)) return;
       element.style.height = 'auto';

@@ -110,6 +110,9 @@ describe('长期模块边界', () => {
     ['shared/src/mobile/bad.ts', 'shared/src/stores/interview.ts'],
     ['shared/src/mobile/bad.ts', 'shared/src/services/desktop.ts'],
     ['shared/src/mobile/bad.tsx', 'shared/src/components/MarkdownContent.tsx'],
+    ['shared/src/mobile/App.tsx', 'shared/src/components/InterviewReveal.tsx'],
+    ['shared/src/components/ui/content-reveal.tsx', 'shared/src/stores/interview.ts'],
+    ['shared/src/components/ui/useHeightTransition.ts', 'shared/src/services/desktop.ts'],
     ['shared/src/services/bad.ts', 'node:fs'],
     ['macos/src/bad.tsx', 'node:fs'],
     ['macos/src/bad.tsx', 'shared/electron/backend/auth/storage.ts'],
@@ -189,6 +192,17 @@ describe('长期模块边界', () => {
         ]),
       ),
     ).toEqual([]);
+  });
+  it('平台声明可引用知识库端口的类型，运行时依赖和知识后台反向依赖仍被拒绝', () => {
+    const platform = 'shared/electron/platform/types.ts';
+    const port = 'shared/electron/backend/knowledge/types.ts';
+    const host = 'shared/electron/backend/knowledge/host.ts';
+    const check = (file: string, target: string, typeOnly: boolean) =>
+      boundaryViolations(new Map([[file, [{ target, line: 1, typeOnly }]]]));
+    expect(check(platform, port, true)).toEqual([]);
+    expect(check(platform, port, false)).not.toEqual([]);
+    expect(check(platform, host, true)).not.toEqual([]);
+    expect(check(host, platform, true)).not.toEqual([]);
   });
   it('新知识后台可使用已授权 LanceDB/本地推理，旧 SQLite 方案仍拒绝', () => {
     for (const target of [

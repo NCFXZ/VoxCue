@@ -3,7 +3,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 
 /** Publish only fully written data; callers serialize writes to the same destination. */
-export async function atomicFile(file: string, value: string | Buffer) {
+export async function atomicFile(file: string, value: string | Buffer, signal?: AbortSignal) {
   const temporary = file + '.' + randomUUID() + '.tmp';
   try {
     const handle = await open(temporary, 'wx', 0o600);
@@ -13,6 +13,7 @@ export async function atomicFile(file: string, value: string | Buffer) {
     } finally {
       await handle.close();
     }
+    signal?.throwIfAborted();
     await rename(temporary, file);
     if (process.platform !== 'win32') {
       const directory = await open(path.dirname(file), 'r');

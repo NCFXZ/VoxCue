@@ -55,16 +55,7 @@ export async function captureInterviewScreenshot(
   const bitmap = image.toBitmap();
   if (bitmap.byteLength !== size.width * size.height * 4)
     throw Error('当前屏幕截图过大或无效，请调整屏幕分辨率后重试。');
-  const result = await encodeBitmap(
-    {
-      ...size,
-      bitmap: bitmap.buffer.slice(
-        bitmap.byteOffset,
-        bitmap.byteOffset + bitmap.byteLength,
-      ) as ArrayBuffer,
-    },
-    signal,
-  );
+  const result = await encodeBitmap({ ...size, bitmap }, signal);
   signal.throwIfAborted();
   if (window.isDestroyed()) throw new DOMException('Aborted', 'AbortError');
   return result;
@@ -87,7 +78,9 @@ async function captureInterviewImage(
       image = await captureScreen(window, signal);
     } catch (error) {
       signal.throwIfAborted();
-      throw Error('无法截取当前屏幕，请检查屏幕录制权限后重试。', { cause: error });
+      throw Error(platform === 'win32'
+        ? '无法截取面试窗口所在屏幕，请检查系统屏幕捕获状态后重试。'
+        : '无法截取当前屏幕，请检查屏幕录制权限后重试。', { cause: error });
     }
     signal.throwIfAborted();
     if (window.isDestroyed()) throw new DOMException('Aborted', 'AbortError');

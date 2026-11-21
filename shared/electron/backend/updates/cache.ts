@@ -86,6 +86,7 @@ const validTime = (value: unknown): value is number =>
 export class UpdateCache {
   private state: CacheState;
   private fault?: Error;
+  private retryRead = false;
   private saving = Promise.resolve();
   private checking?: Promise<PlatformUpdateInfo>;
   readonly file: string;
@@ -105,6 +106,12 @@ export class UpdateCache {
       checkedAt: null,
       notBefore: 0,
     };
+    this.readState();
+  }
+  private readState() {
+    const { target } = this;
+    this.retryRead = false;
+    this.fault = undefined;
     try {
       try {
         const directory = lstatSync(this.directory);
@@ -138,8 +145,11 @@ export class UpdateCache {
         ...(value.completed ? { completed: this.validate(value.completed, target) } : {}),
       };
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT')
+      const code = (error as NodeJS.ErrnoException).code;
+      if (code !== 'ENOENT') {
         this.fault = Error('Update cache is unavailable or invalid');
+        this.retryRead = code === 'EBUSY' || code === 'EPERM' || code === 'EACCES' || code === 'EAGAIN';
+      }
     }
   }
   private save(state = this.state) {
@@ -193,6 +203,10 @@ export class UpdateCache {
     return this.state.info && this.validate(this.state.info, this.target);
   }
   journal() {
+    if (this.retryRead) {
+      this.readState();
+      if (this.fault) throw this.fault;
+    }
     return this.state.download && this.validate(this.state.download, this.target);
   }
   completed() {
@@ -216,7 +230,9 @@ export class UpdateCache {
     await this.save();
   }
   async clearJournal() {
+    const state = { ...this.state };
+    delete state.download;
+    await this.save(state);
     delete this.state.download;
-    await this.save();
   }
 }

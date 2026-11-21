@@ -262,19 +262,43 @@ try {
       };
       const renderer = page
         ? await page
-            .evaluate(() => ({
-              dpr: devicePixelRatio,
-              innerWidth,
-              innerHeight,
-              viewport: visualViewport && {
-                width: visualViewport.width,
-                height: visualViewport.height,
-                scale: visualViewport.scale,
-                offsetLeft: visualViewport.offsetLeft,
-                offsetTop: visualViewport.offsetTop,
-              },
-              band: document.querySelector('.login-drag-region')?.getBoundingClientRect().toJSON(),
-            }))
+            .evaluate((relative) => {
+              const describe = (element) => ({
+                tag: element.tagName,
+                classes: element.getAttribute('class'),
+                region: getComputedStyle(element).getPropertyValue('-webkit-app-region'),
+                box: element.getBoundingClientRect().toJSON(),
+              });
+              const stack = relative ? document.elementsFromPoint(relative.x, relative.y) : [];
+              // Chromium's native draggable map can also include an inert or clipped child
+              // which does not participate in the renderer's pointer hit stack.
+              const dragRects = relative ? [...document.querySelectorAll('.login-page *')].filter(element => {
+                const box = element.getBoundingClientRect();
+                return relative.x >= box.left && relative.x < box.right &&
+                  relative.y >= box.top && relative.y < box.bottom &&
+                  ['drag', 'no-drag'].includes(getComputedStyle(element).getPropertyValue('-webkit-app-region'));
+              }) : [];
+              return {
+                dpr: devicePixelRatio,
+                innerWidth,
+                innerHeight,
+                viewport: visualViewport && {
+                  width: visualViewport.width,
+                  height: visualViewport.height,
+                  scale: visualViewport.scale,
+                  offsetLeft: visualViewport.offsetLeft,
+                  offsetTop: visualViewport.offsetTop,
+                },
+                band: document.querySelector('.login-drag-region')?.getBoundingClientRect().toJSON(),
+                relative,
+                stack: stack.map(describe),
+                dragRects: dragRects.map(describe),
+                preview: document.querySelector('.login-preview-content')?.getBoundingClientRect().toJSON(),
+              };
+            }, scene.target ? {
+              x: scene.target.dip.x - scene.target.contentBounds.x,
+              y: scene.target.dip.y - scene.target.contentBounds.y,
+            } : null)
             .catch(() => ({ unavailable: true }))
         : null;
       const window = app && info
@@ -300,7 +324,7 @@ try {
             .catch(() => ({ unavailable: true }))
         : null;
       const point = scene.target?.point;
-      console.error('NATIVE_LOGIN_DIAGNOSTIC', {
+      console.error('NATIVE_LOGIN_DIAGNOSTIC', JSON.stringify({
         ...scene,
         owner: info,
         renderer,
@@ -310,7 +334,7 @@ try {
         nativeGeometry: info ? readProbe('geometry', info.handle, info.pid) : null,
         hit: info && point ? readProbe('hit', info.handle, point.x, point.y) : null,
         hittest: info && point ? readProbe('hittest', info.handle, point.x, point.y) : null,
-      });
+      }));
       throw error;
     } finally {
       if (app) await closeUiApp(app);

@@ -1,14 +1,17 @@
-import { t } from '../i18n';
+import { t, uiLocale } from '../i18n';
+import { InterviewReveal } from './InterviewReveal';
 import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { CloudAccountCall } from '../../electron/contracts/cloudAccount';
 import { Button } from './ui/button';
 import { useCloudAccount } from '../stores/cloudAccount';
-import { LogOut } from './icons';
+import { LogOut, Person } from './icons';
 import { VerificationCodeInput } from './VerificationCodeInput';
+import { PasswordInput } from './ui/password-input';
 import './cloudAccountPanel.css';
 import {
   validCloudEmail,
   normalizeCloudPassword,
+  userAgreementUrl,
   CLOUD_PASSWORD_MIN,
   CLOUD_PASSWORD_MAX,
 } from '../../electron/contracts/cloudAccount';
@@ -25,11 +28,16 @@ export function CloudAccountPanel({
   onModeChange?(mode: Mode): void;
 }) {
   const codeId = useId();
+  const consentId = useId();
+  const language = uiLocale();
   const emailId = useId(),
     passwordId = useId();
   const { state, loaded } = useCloudAccount();
   const [busy, setBusy] = useState(false);
   const [mode, setMode] = useState<Mode>('login');
+  const [acceptedAgreement, setAcceptedAgreement] = useState(false);
+  const [agreementLinkFailed, setAgreementLinkFailed] = useState(false);
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [email, setEmail] = useState(''),
     [password, setPassword] = useState(''),
     [code, setCode] = useState('');
@@ -51,6 +59,8 @@ export function CloudAccountPanel({
       return;
     }
     locked.current = true;
+    if (call.action === 'login' || call.action === 'register' || call.action === 'reset')
+      setPasswordVisible(false);
     setBusy(true);
     setError('');
     setMessage('');
@@ -83,6 +93,7 @@ export function CloudAccountPanel({
       }
       if (result.message) setMessage(result.message);
       if (call.action === 'login' || call.action === 'register' || call.action === 'reset') {
+        setAcceptedAgreement(false);
         setPassword('');
         setCode('');
         setChallenge(undefined);
@@ -131,6 +142,9 @@ export function CloudAccountPanel({
   }, []);
   function changeMode(next: Mode) {
     setMode(next);
+    setAcceptedAgreement(false);
+    setAgreementLinkFailed(false);
+    setPasswordVisible(false);
     onModeChange?.(next);
     setPassword('');
     setCode('');
@@ -142,6 +156,7 @@ export function CloudAccountPanel({
   function submit(event: FormEvent) {
     event.preventDefault();
     if (busy || locked.current || Date.now() < blockedUntil) return;
+    if (mode === 'register' && !acceptedAgreement) return;
     setMessage('');
     setError('');
     if (!validCloudEmail(email)) {
@@ -193,22 +208,20 @@ export function CloudAccountPanel({
     now < blockedUntil ? `请在${Math.ceil((blockedUntil - now) / 1000)}秒后重试。` : '';
   const feedback = (
     <>
-      {displayError && (
-        <p className="danger-text" role="alert">
-          {t(displayError)}
-          {retryHint && ` ${t(retryHint)}`}
-        </p>
-      )}
-      {message && (
-        <p className="settings-hint" role="status">
-          {t(message)}
-        </p>
-      )}
-      {!displayError && retryHint && (
-        <p className="settings-hint" role="status">
-          {t(retryHint)}
-        </p>
-      )}
+      <InterviewReveal resizeKey={`${displayError}:${!!retryHint}`}>
+        {displayError ? (
+          <p className="danger-text" role="alert">
+            {t(displayError)}
+            {retryHint && ` ${t(retryHint)}`}
+          </p>
+        ) : null}
+      </InterviewReveal>
+      <InterviewReveal>
+        {message ? <p className="settings-hint" role="status">{t(message)}</p> : null}
+      </InterviewReveal>
+      <InterviewReveal>
+        {!displayError && retryHint ? <p className="settings-hint" role="status">{t(retryHint)}</p> : null}
+      </InterviewReveal>
     </>
   );
   function fieldFeedback(field: Field) {
@@ -219,15 +232,17 @@ export function CloudAccountPanel({
       field === 'password' && mode !== 'login' ? t('不少于{0}个字符', [CLOUD_PASSWORD_MIN]) : '';
     const retry = feedbackField === field ? retryHint : '';
     if (!fieldError && !configurationError && !fieldMessage && !hint && !retry) return null;
+    const text = t(fieldError || configurationError || fieldMessage) || hint;
     return (
       <p
+        key={`${text}:${!!retry}`}
         id={`${field === 'email' ? emailId : field === 'password' ? passwordId : codeId}-feedback`}
         className={`cloud-field-feedback ${fieldError || configurationError ? 'danger-text' : 'settings-hint'}`}
         role={
           fieldError || configurationError ? 'alert' : fieldMessage || retry ? 'status' : undefined
         }
       >
-        {t(fieldError || configurationError || fieldMessage) || hint}
+        {text}
         {retry && ` ${t(retry)}`}
       </p>
     );
@@ -242,9 +257,7 @@ export function CloudAccountPanel({
         <p role="status" className="settings-hint">
           {t('正在读取账号状态…')}
         </p>
-      ) : !state.configured && !entry && !state.localMode ? (
-        <p className="settings-hint">{t('无法连接账号服务，请检查配置后重新打开应用。')}</p>
-      ) : state.user ? (
+      ) : !state.configured && !entry && !state.localMode ? null : state.user ? (
         <>
           <div className="settings-entry">
             <div>
@@ -269,7 +282,7 @@ export function CloudAccountPanel({
           <div>
             <strong>{t('本地账户')}</strong>
             <p className="settings-hint">
-              {t('尚未登录 VoxCue，资料保存在当前电脑。登录后可启用云备份。')}
+              {t('资料保存在本机，登录后可迁移至 VoxCue 账号。')}
             </p>
           </div>
           <Button
@@ -278,6 +291,7 @@ export function CloudAccountPanel({
             disabled={busy}
             onClick={() => void changeLocalMode(false)}
           >
+            <Person size={16} />
             {t('登录')}
           </Button>
         </div>
@@ -325,15 +339,16 @@ export function CloudAccountPanel({
                   setMessage('');
                 }}
               />
-              {emailFeedback}
+              <InterviewReveal resizeKey={emailFeedback?.key ?? ''}>{emailFeedback}</InterviewReveal>
             </div>
             <div className="cloud-account-field">
               <label htmlFor={passwordId}>{mode === 'reset' ? t('新密码') : t('密码')}</label>
-              <input
-                ref={passwordInput}
+              <PasswordInput
                 id={passwordId}
+                inputRef={passwordInput}
                 name="password"
-                type="password"
+                visible={passwordVisible}
+                onVisibilityChange={setPasswordVisible}
                 autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
                 placeholder={t('输入密码')}
                 minLength={mode === 'login' ? 1 : CLOUD_PASSWORD_MIN}
@@ -348,7 +363,7 @@ export function CloudAccountPanel({
                   setError('');
                 }}
               />
-              {passwordFeedback}
+              <InterviewReveal resizeKey={passwordFeedback?.key ?? ''}>{passwordFeedback}</InterviewReveal>
             </div>
             {mode !== 'login' && (
               <>
@@ -381,11 +396,49 @@ export function CloudAccountPanel({
                       {resendSeconds > 0 ? t('{0}秒后重发', [resendSeconds]) : t('获取验证码')}
                     </Button>
                   </div>
-                  {codeFeedback}
+                  <InterviewReveal resizeKey={codeFeedback?.key ?? ''}>{codeFeedback}</InterviewReveal>
                 </div>
               </>
             )}
-            <Button type="submit" disabled={blocked || (mode !== 'login' && !challenge)}>
+            {mode === 'register' && (
+              <div className="registration-consent selection-option">
+                <input
+                  id={consentId}
+                  type="checkbox"
+                  required
+                  checked={acceptedAgreement}
+                  disabled={busy}
+                  aria-labelledby={`${consentId}-text`}
+                  onChange={(event) => setAcceptedAgreement(event.currentTarget.checked)}
+                />
+                <span id={`${consentId}-text`}>
+                  <label htmlFor={consentId}>{t('我已阅读并同意')}</label>
+                  {' '}
+                  <a
+                    href={userAgreementUrl[language]}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => {
+                      if (!window.desktop) return;
+                      event.preventDefault();
+                      setAgreementLinkFailed(false);
+                      void window.desktop.openUserAgreement(language).catch(() => {
+                        if (alive.current) setAgreementLinkFailed(true);
+                      });
+                    }}
+                  >
+                    {t('VoxCue 用户服务协议')}
+                  </a>{language === 'en' ? '.' : '。'}
+                </span>
+                <InterviewReveal>
+                  {agreementLinkFailed ? <p role="alert" className="danger-text">{t('无法打开链接。')}</p> : null}
+                </InterviewReveal>
+              </div>
+            )}
+            <Button
+              type="submit"
+              disabled={blocked || (mode !== 'login' && !challenge) || (mode === 'register' && !acceptedAgreement)}
+            >
               {busy
                 ? t('处理中…')
                 : mode === 'login'

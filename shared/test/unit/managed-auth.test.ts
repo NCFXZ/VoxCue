@@ -1,9 +1,8 @@
 import { expect, it, vi } from 'vitest';
-import { ManagedChatGPTAuth } from '../../electron/backend/auth/managed';
 import { ChatGPTAuthService } from '../../electron/backend/auth/service';
 import { ChatGPTService } from '../../electron/backend/chat/service';
 import { ChatGPTAccountUsage } from '../../electron/backend/chat/accountUsage';
-import type { CodexUsagePort } from '../../electron/backend/chat/codexUsage';
+import { codexRuntimeVersion, type CodexUsagePort } from '../../electron/backend/chat/codexUsage';
 
 function fixture() {
   let active = false;
@@ -40,10 +39,7 @@ function fixture() {
     }),
     stop: vi.fn(async () => {}),
   };
-  const storage = { hostId: vi.fn(), read: vi.fn(), write: vi.fn() };
-  const managed = new ManagedChatGPTAuth(runtime, open);
-  const auth = new ChatGPTAuthService({ managed, storage, openBrowser: vi.fn() });
-  return { auth, runtime, open, storage };
+  return { auth: new ChatGPTAuthService(runtime, open), runtime, open };
 }
 it('一次官方登录同时用于聊天、附件和额度，不读取旧凭据或公开令牌', async () => {
   const f = fixture();
@@ -62,7 +58,7 @@ it('一次官方登录同时用于聊天、附件和额度，不读取旧凭据�
       authorization: 'Bearer synthetic-private',
       'ChatGPT-Account-Id': 'workspace',
     });
-    if (String(url).endsWith('/models?client_version=0.164.0'))
+    if (String(url).endsWith(`/models?client_version=${codexRuntimeVersion}`))
       return Response.json({
         models: [{ slug: 'synthetic', display_name: 'Synthetic', visibility: 'list' }],
       });
@@ -135,7 +131,6 @@ it('一次官方登录同时用于聊天、附件和额度，不读取旧凭据�
   expect((await usage.read()).quotas.map((q) => q.label)).toEqual(['5小时额度', '每周额度']);
   expect(f.open).toHaveBeenCalledOnce();
   expect(f.runtime.login).toHaveBeenCalledOnce();
-  for (const method of Object.values(f.storage)) expect(method).not.toHaveBeenCalled();
   await f.auth.signOut();
   expect(await f.auth.session()).toBeNull();
   expect(f.runtime.logout).toHaveBeenCalledOnce();

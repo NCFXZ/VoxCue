@@ -1,4 +1,5 @@
-import { readFile, writeFile, rename, unlink, stat } from 'node:fs/promises';
+import { mkdir, readFile, writeFile, rename, unlink, stat } from 'node:fs/promises';
+import path from 'node:path';
 import {
   defaultShortcuts,
   shortcutActions,
@@ -16,7 +17,11 @@ export async function readShortcuts(
     if (source.length > 8192) throw Error('Oversized shortcut settings');
     const value = JSON.parse(source);
     if (value?.version !== 1 && value?.version !== 2) throw Error('Invalid shortcut version');
-    const bindings = validateShortcutBindings(value.bindings, mac);
+    const missingHelp = value.bindings && !Object.hasOwn(value.bindings, 'toggle-shortcut-help');
+    const bindings = validateShortcutBindings(
+      missingHelp ? { ...value.bindings, 'toggle-shortcut-help': null } : value.bindings,
+      mac,
+    );
     if (value.version === 1) {
       const defaults = defaultShortcuts();
       for (const action of shortcutActions) {
@@ -29,6 +34,9 @@ export async function readShortcuts(
         if (bindings[action] === previous) bindings[action] = defaults[action];
       }
     }
+    const helpKey = defaultShortcuts()['toggle-shortcut-help'];
+    if (missingHelp && !Object.values(bindings).includes(helpKey))
+      bindings['toggle-shortcut-help'] = helpKey;
     return { bindings, error: null };
   } catch (error) {
     return {
@@ -43,6 +51,7 @@ export async function readShortcuts(
 export async function writeShortcuts(file: string, bindings: ShortcutBindings) {
   const temporary = file + '.tmp';
   try {
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
     await writeFile(temporary, JSON.stringify({ version: 2, bindings }), { mode: 0o600 });
     await rename(temporary, file);
   } catch {

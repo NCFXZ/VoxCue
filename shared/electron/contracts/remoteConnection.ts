@@ -1,6 +1,7 @@
 import type { InterviewInputMode } from './speech';
 
 export const REMOTE_PROTOCOL_VERSION = 2;
+export const REMOTE_SNAPSHOT_MAX_BYTES = 1024 * 1024;
 
 export interface RemoteConnectionState {
   presentationOwner?: 'main' | 'interview';
@@ -79,9 +80,28 @@ export interface RemoteCommandResult {
   answerId?: string;
   inputDraftRevision?: number;
 }
+type RowChange<Row> =
+  | { at: number; row: Row }
+  | { at: number; id: string; append: string };
+export interface RemoteRowDelta<Row> {
+  drop: number;
+  length: number;
+  changes: RowChange<Row>[];
+}
+export type RemoteSnapshotControls = Omit<RemoteInterviewSnapshot,
+  'sessionId' | 'sessionEpoch' | 'revision' | 'transcripts' | 'answers'>;
+export interface RemoteSnapshotDelta {
+  sessionId: string;
+  sessionEpoch: number;
+  baseRevision: number;
+  revision: number;
+  controls?: Partial<RemoteSnapshotControls>;
+  transcripts?: RemoteRowDelta<RemoteInterviewSnapshot['transcripts'][number]>;
+  answers?: RemoteRowDelta<RemoteInterviewSnapshot['answers'][number]>;
+}
 export type RemoteClientMessage =
-  | { type: 'authenticate'; protocolVersion: typeof REMOTE_PROTOCOL_VERSION; pendingId: string }
-  | { type: 'resume'; protocolVersion: typeof REMOTE_PROTOCOL_VERSION; token: string }
+  | { type: 'authenticate'; protocolVersion: typeof REMOTE_PROTOCOL_VERSION; pendingId: string; snapshotDelta?: true }
+  | { type: 'resume'; protocolVersion: typeof REMOTE_PROTOCOL_VERSION; token: string; snapshotDelta?: true }
   | { type: 'query-result'; requestId: string }
   | { type: 'snapshot-applied'; sequence: number; deliveryId: string }
   | { type: 'sync' }
@@ -102,6 +122,13 @@ export type RemoteServerMessage =
       sequence: number;
       deliveryId: string;
       snapshot: RemoteInterviewSnapshot | null;
+    }
+  | {
+      type: 'snapshot-delta';
+      baseSequence: number;
+      sequence: number;
+      deliveryId: string;
+      delta: RemoteSnapshotDelta;
     }
   | {
       type: 'scroll';

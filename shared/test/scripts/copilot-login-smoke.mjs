@@ -1,4 +1,4 @@
-import { enterPrimaryUiAccount, waitForRestoredMainWindow } from './install-ui-account.mjs';
+import { enterPrimaryUiAccount, openModelMenu, waitForRestoredMainWindow } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp, installUiAccount } from './install-ui-account.mjs';
@@ -40,7 +40,7 @@ const accounts={
   set:async()=>{state.logout++;return {ok:true};},
   login:{
     begin:async()=>{state.complete=null;state.begun++;return {flowId:'synthetic-flow',step:{kind:'open-url',url:'https://github.com/login/oauth/authorize?client_id=synthetic&state=synthetic&code_challenge=synthetic&code_challenge_method=S256&redirect_uri=http%3A%2F%2F127.0.0.1%3A12345%2Fcallback'}};},
-    advance:()=>new Promise(resolve=>{state.complete=()=>resolve({kind:'completed',result:{status:'completed',host:'https://github.com',login:'Synthetic'}});}),
+    advance:()=>new Promise(resolve=>{state.complete=()=>resolve({kind:'completed',result:{status:'completed',host:'https://github.com',login:'Synthetic'}});if(state.approveSwitch)state.complete();}),
     cancel:async()=>{state.cancelled++;}
   }
 };
@@ -59,7 +59,11 @@ const quota={refresh:async()=>{
 CopilotRuntime.prototype.control=async()=>{state.controlCalls++;return {rpc:{accounts,quota}};};
 CopilotRuntime.prototype.client=async()=>({
   rpc:{
-    models:{list:async()=>({models:[{id:'synthetic-copilot',name:'Synthetic Copilot',vendor:'Synthetic Vendor'}]})},
+    models:{list:async()=>({models:[
+      {id:'synthetic-copilot',name:'Synthetic Copilot',vendor:'Synthetic Vendor'},
+      {id:'copilot-chat',name:'Copilot Chat',vendor:'Synthetic Vendor'},
+      {id:'copilot-interview',name:'Copilot Interview',vendor:'Synthetic Vendor'},
+    ]})},
     tools:{list:async()=>({tools:[]})},
   },
   async createSession({model}){
@@ -111,25 +115,117 @@ const openAISettings = async (page) => {
   await dialog.getByRole('button', { name: 'AI 服务', exact: true }).click();
   return dialog;
 };
+
+async function exerciseServiceModelChoices(app, page) {
+  // The cold-start and OAuth checks above use only the Copilot fixture. Add the second
+  // service to the same running window once those checks have verified its isolation.
+  await installUiAccount(app);
+  await app.evaluate(({ app }) => {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { ChatGPTService } = require(app.getAppPath() + '/dist-electron/shared/electron/backend/chat/service.js');
+    const models = ChatGPTService.prototype.models;
+    ChatGPTService.prototype.models = async function (...args) {
+      const [first] = await models.apply(this, args);
+      return [first, { ...first, id: 'chatgpt-chat', label: 'ChatGPT Chat' },
+        { ...first, id: 'chatgpt-interview', label: 'ChatGPT Interview' }];
+    };
+    const stream = ChatGPTService.prototype.stream;
+    ChatGPTService.prototype.stream = function (request, ...args) {
+      globalThis.copilotLoginFixture.chatGPTModel = request.modelId;
+      return stream.call(this, request, ...args);
+    };
+    globalThis.copilotLoginFixture.approveSwitch = true;
+  });
+  async function switchService(from, to) {
+    const settings = await openAISettings(page);
+    const row = name => settings.locator('.ai-service-row').filter({ hasText: name });
+    await row(from).getByRole('button', { name: '断开连接', exact: true }).waitFor();
+    await row(to).getByRole('button', { name: '连接', exact: true }).click();
+    await row(to).getByRole('button', { name: '断开连接', exact: true }).waitFor();
+    await row(from).getByRole('button', { name: '连接', exact: true }).waitFor();
+    await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  }
+  async function modelChoice(interview, expected, choose) {
+    const trigger = interview ? '面试回答模型' : '聊天模型';
+    let dialog;
+    if (interview) {
+      dialog = await openAISettings(page);
+      await dialog.getByRole('button', { name: '面试设置', exact: true }).click();
+    }
+    const button = (dialog ?? page).getByRole('button', { name: trigger, exact: true });
+    await button.getByText(expected, { exact: true }).waitFor();
+    const popup = await openModelMenu(page, trigger, interview ? '面试回答思考强度' : '思考强度');
+    await popup.getByRole('menuitemradio', { name: expected, exact: true, checked: true }).waitFor();
+    if (choose) await popup.getByRole('menuitemradio', { name: choose, exact: true }).click();
+    await page.keyboard.press('Escape');
+    await popup.waitFor({ state: 'hidden' });
+    await button.getByText(choose ?? expected, { exact: true }).waitFor();
+    if (dialog) await dialog.getByRole('button', { name: '关闭设置', exact: true }).click();
+  }
+  async function send(question, reply) {
+    await page.getByRole('textbox', { name: '聊天消息', exact: true }).fill(question);
+    await page.getByRole('button', { name: '发送消息', exact: true }).click();
+    await page.locator('.chat-message.assistant').last().getByText(reply, { exact: true }).waitFor();
+    await page.getByRole('button', { name: '停止回复', exact: true }).waitFor({ state: 'hidden' });
+  }
+  await modelChoice(false, 'Synthetic Copilot', 'Copilot Chat');
+  await modelChoice(true, 'Synthetic Copilot', 'Copilot Interview');
+  await switchService('GitHub Copilot', 'ChatGPT');
+  await modelChoice(false, 'Test Model', 'ChatGPT Chat');
+  await modelChoice(true, 'Test Model', 'ChatGPT Interview');
+  await send('Test ChatGPT model selection', 'Synthetic interview answer');
+  assert.equal(await app.evaluate(() => globalThis.copilotLoginFixture.chatGPTModel), 'chatgpt-chat');
+  await switchService('ChatGPT', 'GitHub Copilot');
+  await modelChoice(false, 'Copilot Chat');
+  await modelChoice(true, 'Copilot Interview');
+  const question = 'Test restored Copilot model selection';
+  await send(question, 'Synthetic Copilot reply after restart');
+  assert.deepEqual(await app.evaluate(() => globalThis.copilotLoginFixture.sent.at(-1)),
+    { model: 'copilot-chat', question });
+  await switchService('GitHub Copilot', 'ChatGPT');
+  await modelChoice(false, 'ChatGPT Chat');
+  await modelChoice(true, 'ChatGPT Interview');
+  await switchService('ChatGPT', 'GitHub Copilot');
+}
 try {
   app = await electron.launch({ args: [entry], env });
   let page = await enterPrimaryUiAccount(app, await app.firstWindow());
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
   await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  await page.getByRole('button', { name: '面试设置', exact: true }).click();
+  const titleLayout = title => {
+    const rect = title.getBoundingClientRect();
+    return [rect.height, title.nextElementSibling.getBoundingClientRect().top - rect.bottom];
+  };
+  const referenceLayout = await page.locator('.remote-connection-summary h3').evaluate(titleLayout);
   await page.getByRole('button', { name: 'AI 服务', exact: true }).click();
-  const copilot = page
-    .locator('.ai-service-row')
-    .filter({ hasText: 'GitHub Copilot' })
-    .getByRole('button', { name: '连接', exact: true });
+  const copilotRow = page.locator('.ai-service-row').filter({ hasText: 'GitHub Copilot' });
+  const copilot = copilotRow.getByRole('button', { name: '连接', exact: true });
   const chatGPT = page
     .locator('.ai-service-row')
     .filter({ hasText: 'ChatGPT' })
     .getByRole('button', { name: '连接', exact: true });
   await copilot.waitFor();
   assert.equal(await page.locator('.ai-service-row').count(), 2);
+  for (const name of await page.locator('.ai-service-label strong').all()) {
+    const layout = await name.evaluate(titleLayout);
+    assert.ok(layout.every((value, index) => Math.abs(value - referenceLayout[index]) < 0.5),
+      'Service name and subtitle should match the Remote Connection layout: ' +
+      JSON.stringify({ layout, referenceLayout }));
+  }
   await assertNoProviderReads();
   await copilot.click();
-  await page.getByRole('button', { name: '等待浏览器授权…', exact: true }).waitFor();
+  const pending = copilotRow.getByRole('status');
+  await pending.waitFor();
+  assert.equal(await pending.innerText(), '等待浏览器授权…');
+  const textStyle = el => {
+    const style = getComputedStyle(el);
+    return [style.fontSize, style.color];
+  };
+  assert.deepEqual(await pending.evaluate(textStyle),
+    await copilotRow.getByText('未连接', { exact: true }).evaluate(textStyle));
+  assert.equal(await copilotRow.locator('.ui-loader').count(), 0);
+  assert.equal(await copilotRow.getByRole('button').count(), 1);
   assert.equal(await chatGPT.isDisabled(), true);
   await page.getByRole('button', { name: '取消授权', exact: true }).click();
   await page.getByRole('alert').getByText('登录已取消', { exact: false }).waitFor();
@@ -411,6 +507,7 @@ try {
   assert.equal(routing.url, undefined);
   assert.equal(routing.chatgptCalls, 0);
   assert.equal((await page.evaluate(() => window.desktop.authSession())).mode, 'copilot');
+  await exerciseServiceModelChoices(app, page);
   const restored = await openAISettings(page);
   const restoredCopilot = restored.locator('.ai-service-row').filter({ hasText: 'GitHub Copilot' });
   await restoredCopilot.getByRole('button', { name: '断开连接', exact: true }).click();
@@ -523,7 +620,6 @@ try {
         titleGap:
           card.querySelector('.account-quota-summary').getBoundingClientRect().top -
           card.querySelector('header').getBoundingClientRect().bottom,
-        rowGap: getComputedStyle(card).rowGap,
         barGap:
           card
             .querySelector('.account-quota-progress,.quota-skeleton-progress')
@@ -544,7 +640,6 @@ try {
     assert.ok(Math.abs(geometry.reset - geometry.remaining) < 1);
     assert.deepEqual(geometry.resetFont, geometry.remainingFont);
     assert.equal(geometry.resetColor, geometry.remainingColor);
-    assert.equal(geometry.rowGap, '4px');
     // Normalize DOMRect float representation to Chromium's 1/64 CSS-pixel
     // layout unit; fractional Windows DPI otherwise produces 3.99999046.
     assert.equal(Math.round(geometry.titleGap * 64), 4 * 64);

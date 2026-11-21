@@ -1,5 +1,10 @@
 import { useEffect, useState, type RefObject } from 'react';
 
+const questionStart = 100;
+const thinkingStart = 1000;
+const answerStart = 1400;
+const finish = 3500;
+
 // Play the website hero's transcript → thinking → answer once per login opening.
 export function useLoginPreviewPlayback(enabled: boolean, scene: RefObject<HTMLDivElement | null>) {
   const [elapsed, setElapsed] = useState(0);
@@ -10,31 +15,29 @@ export function useLoginPreviewPlayback(enabled: boolean, scene: RefObject<HTMLD
     let frame = 0;
     let previous = 0;
     let time = 0;
-    let painted = -Infinity;
     let visible = false;
     const tick = (now: number) => {
       frame = 0;
-      if (previous) time = Math.min(3500, time + now - previous);
+      if (previous) time = Math.min(finish, time + now - previous);
       previous = now;
-      if (time === 3500) {
+      if (time === finish) {
         setElapsed(time);
         node.dataset.playing = 'false';
         return;
       }
-      if (now - painted >= 32) {
-        setElapsed(time);
-        painted = now;
-      }
+      // Follow the display's frame rate while text grows. The still phases
+      // retain a single value, including while the thinking label animates in CSS.
+      setElapsed(time < questionStart ? 0 : time >= thinkingStart && time < answerStart ? thinkingStart : time);
       frame = requestAnimationFrame(tick);
     };
     const schedule = () => {
       cancelAnimationFrame(frame);
       frame = 0;
       previous = 0;
-      if (motion.matches) time = 3500;
-      const playing = time < 3500 && visible && !document.hidden;
+      if (motion.matches) time = finish;
+      const playing = time < finish && visible && !document.hidden;
       node.dataset.playing = String(playing);
-      if (time === 3500) setElapsed(time);
+      if (time === finish) setElapsed(time);
       else if (playing) frame = requestAnimationFrame(tick);
     };
     const observer = new IntersectionObserver(([entry]) => {
@@ -54,15 +57,16 @@ export function useLoginPreviewPlayback(enabled: boolean, scene: RefObject<HTMLD
     };
   }, [enabled, scene]);
   return {
-    elapsed,
+    questionProgress: Math.max(0, Math.min(1, (elapsed - questionStart) / (thinkingStart - questionStart))),
+    answerProgress: Math.max(0, Math.min(1, (elapsed - answerStart) / (finish - answerStart))),
     phase:
-      elapsed < 100
+      elapsed < questionStart
         ? 'ready'
-        : elapsed < 1000
+        : elapsed < thinkingStart
           ? 'question'
-          : elapsed < 1400
+          : elapsed < answerStart
             ? 'thinking'
-            : elapsed < 3500
+            : elapsed < finish
               ? 'answering'
               : 'complete',
   };

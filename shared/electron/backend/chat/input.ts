@@ -1,0 +1,156 @@
+import { setImmediate as yieldToIO } from 'node:timers/promises';
+import type { ChatFile, ChatRequest } from '../../contracts/chat';
+
+export const noWebSearchInstructions = '\n本次请求未提供联网检索工具。需要实时资料时请如实说明。';
+
+const mimeTypes: Record<string, string> = {
+  pdf: 'application/pdf',
+  doc: 'application/msword',
+  docx: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  ppt: 'application/vnd.ms-powerpoint',
+  pptx: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+  xls: 'application/vnd.ms-excel',
+  xlsx: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  png: 'image/png',
+  jpg: 'image/jpeg',
+  jpeg: 'image/jpeg',
+  webp: 'image/webp',
+};
+function textPrefix(name: string) { return `附件 ${name}：\n`; }
+function checkTextLength(length: number) {
+  if (length > 200000) throw new Error('文本附件内容过长，请缩短后再发送。');
+}
+function inlineText(file: ChatFile) {
+  const text = new TextDecoder('utf-8', { fatal: true }).decode(file.bytes);
+  checkTextLength(text.length);
+  return textPrefix(file.name) + text;
+}
+function mapInput<T extends string | number>(
+  request: ChatRequest,
+  binary: (file: ChatFile, mime: string) => T,
+  textAttachment: (file: ChatFile) => string | T = inlineText,
+) {
+  return request.turns.map((turn) => {
+    if (!turn.files?.length) return { role: turn.role, content: turn.content };
+    const content: Record<string, string | T>[] = [{ type: 'input_text', text: turn.content }];
+    for (const file of turn.files) {
+      const extension = file.name.split('.').pop()?.toLowerCase() ?? '';
+      if (['txt', 'md'].includes(extension)) {
+        content.push({ type: 'input_text', text: textAttachment(file) });
+      } else {
+        const mime = mimeTypes[extension];
+        if (!mime) throw new Error('不支持的附件格式。');
+        const data = binary(file, mime);
+        content.push(
+          mime.startsWith('image/')
+            ? { type: 'input_image', image_url: data }
+            : { type: 'input_file', filename: file.name.split(/[\\/]/).pop()!, file_data: data },
+        );
+      }
+    }
+    return { role: turn.role, content };
+  });
+}
+
+export function buildInput(request: ChatRequest) {
+  return mapInput(
+    request,
+    (file, mime) =>
+      `data:${mime};base64,${Buffer.from(file.bytes).toString('base64')}`,
+  );
+}
+
+interface Attachment {
+  bytes: Uint8Array;
+  mime: string;
+  textName?: string;
+  // A provider may wrap historical text as a JSON string inside the message.
+  quotedProperty?: string;
+}
+export function prepareResponseInput(request: ChatRequest) {
+  const attachments: Attachment[] = [];
+  // A control character can expand to six JSON bytes, or seven inside quoted history.
+  const estimatedSize = request.turns.reduce(
+    (total, turn) =>
+      total + (turn.files ?? []).reduce((bytes, file) =>
+        bytes + file.bytes.length * (/(?:^|\.)(?:txt|md)$/i.test(file.name) ? 7 : 1), 0),
+    0,
+  );
+  const defer = (file: ChatFile, mime: string, textName?: string) =>
+    attachments.push({ bytes: file.bytes, mime, textName }) - 1;
+  const input =
+    estimatedSize < 4 * 1024 * 1024
+      ? buildInput(request)
+      : mapInput(request, defer, file => defer(file, 'text/plain', file.name));
+  return { input, attachments };
+}
+
+// Multiples of three keep Base64 padding at the end, even for a subarray.
+export async function* base64Chunks(bytes: Uint8Array, signal: AbortSignal) {
+  const block = 192 * 1024;
+  signal.throwIfAborted();
+  for (let offset = 0; offset < bytes.length; offset += block) {
+    const raw = Buffer.from(bytes.buffer, bytes.byteOffset + offset, Math.min(block, bytes.length - offset));
+    yield raw.toString('base64');
+    await yieldToIO();
+    signal.throwIfAborted();
+  }
+}
+
+const escapedText = (value: string): string => JSON.stringify(value).slice(1, -1);
+
+async function appendText(pieces: BlobPart[], file: Attachment, signal: AbortSignal) {
+  const decoder = new TextDecoder('utf-8', { fatal: true });
+  const quoted = file.quotedProperty;
+  if (quoted) pieces.push(escapedText('{' + JSON.stringify(quoted) + ':"'));
+  const append = (text: string) => {
+    const escaped = escapedText(text);
+    pieces.push(new Blob([quoted ? escapedText(escaped) : escaped]));
+  };
+  append(textPrefix(file.textName!));
+  const block = 32 * 1024;
+  let length = 0;
+  for (let start = 0; start < file.bytes.length; start += block) {
+    signal.throwIfAborted();
+    const end = Math.min(start + block, file.bytes.length);
+    const text = decoder.decode(file.bytes.subarray(start, end), { stream: end < file.bytes.length });
+    length += text.length;
+    checkTextLength(length);
+    append(text);
+    await yieldToIO();
+  }
+  if (quoted) pieces.push(escapedText('"}'));
+}
+
+export async function encodeAttachmentBody(
+  json: string,
+  attachments: Attachment[],
+  signal: AbortSignal,
+  format: 'responses' | 'compatible' | 'claude' = 'responses',
+) {
+  const pieces: BlobPart[] = [];
+  // Placeholders are numeric fields generated by the corresponding provider adapter.
+  const slots = format === 'claude' ? /("(?:data|text)":)(\d+)(?=[,}])/g
+    : format === 'compatible' ? /("(?:url|text)":)(\d+)(?=[,}])/g
+    : /("(?:file_data|image_url|text)":)(\d+)(?=[,}])/g;
+  let start = 0,
+    index = 0;
+  for (const match of json.matchAll(slots)) {
+    const file = attachments[index];
+    if (!file || Number(match[2]) !== index) throw Error('附件请求无效。');
+    index++;
+    pieces.push(json.slice(start, match.index + match[1].length), '"');
+    start = match.index + match[0].length;
+    if (file.textName !== undefined) {
+      await appendText(pieces, file, signal);
+    } else {
+      if (format !== 'claude') pieces.push('data:', file.mime, ';base64,');
+      for await (const chunk of base64Chunks(file.bytes, signal)) pieces.push(new Blob([chunk]));
+    }
+    pieces.push('"');
+  }
+  signal.throwIfAborted();
+  if (index !== attachments.length) throw Error('附件请求无效。');
+  pieces.push(json.slice(start));
+  return new Blob(pieces, { type: 'application/json' });
+}

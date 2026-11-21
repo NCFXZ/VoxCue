@@ -89,7 +89,11 @@ describe('本地语音边界和问题汇总', () => {
     expect([...b.take(2)]).toEqual([1, 2]);
     b.push(new Float32Array([4, 5, 6]));
     expect(() => b.push(new Float32Array([7]))).toThrow();
-    expect([...b.take(4)]).toEqual([3, 4, 5, 6]);
+    const frame = b.take(3, 4);
+    expect([...frame]).toEqual([3, 4, 5, 0]);
+    expect([...b.take(1)]).toEqual([6]);
+    b.push(new Float32Array([7, 8, 9, 10]));
+    expect([...frame]).toEqual([3, 4, 5, 0]);
   });
   it('半包、粘包和时间戳解码一致，拒绝超大包', () => {
     const p = Buffer.alloc(25);

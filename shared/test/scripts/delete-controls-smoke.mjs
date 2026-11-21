@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -126,6 +127,7 @@ try {
     KnowledgeHost.prototype.listDocuments = async () => [];
     KnowledgeHost.prototype.invalidateDocument = async () => null;
     KnowledgeHost.prototype.removeDocument = async () => null;
+    KnowledgeHost.prototype.removeBase = async () => null;
   });
   const login = await app.firstWindow();
   const page = await connectUiAccount(app, login);
@@ -136,7 +138,7 @@ try {
   await waitForAsync(page, async () =>
     (await indexedDB.databases()).some(({ name }) => name === 'copilot-local-documents'),
   );
-  await page.evaluate(async () => {
+  await evaluateHistory(page, async () => {
     localStorage.setItem(
       'copilot-personal-info-v1',
       JSON.stringify({
@@ -155,23 +157,20 @@ try {
       }),
     );
     localStorage.setItem('copilot-interview-knowledge-base-v1', JSON.stringify('delete-base-1'));
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify([
-        {
-          id: 'delete-record',
-          title: '合成面试记录',
-          startedAt: 1000,
-          endedAt: 5000,
-          status: 'ended',
-          mock: false,
-          transcripts: [],
-          answers: [],
-        },
-      ]),
-    );
+    await fixtureHistory.replace([
+      {
+        id: 'delete-record',
+        title: '合成面试记录',
+        startedAt: 1000,
+        endedAt: 5000,
+        status: 'ended',
+        mock: false,
+        transcripts: [],
+        answers: [],
+      },
+    ]);
     const db = await new Promise((resolve, reject) => {
-      const r = indexedDB.open('copilot-local-documents', 1);
+      const r = indexedDB.open('copilot-local-documents');
       r.onsuccess = () => resolve(r.result);
       r.onerror = () => reject(r.error);
     });

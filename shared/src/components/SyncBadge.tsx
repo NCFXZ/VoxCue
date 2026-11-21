@@ -4,10 +4,9 @@ import { createPortal } from 'react-dom';
 import { useCloudSync } from '../stores/cloudSync';
 import { useCloudAccount } from '../stores/cloudAccount';
 import {
-  Cloud,
   CloudDone,
   CloudSync,
-  CloudOff,
+  CloudOffline,
   CloudError,
   X,
   Refresh,
@@ -16,11 +15,13 @@ import {
 } from './icons';
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
+import { InterviewReveal } from './InterviewReveal';
 import { animateDropdownEnter, animateDropdownExit } from './ui/dropdown-motion';
-import type { SyncStatus } from '../services/cloudSync';
+import { syncKindForKey, type SyncStatus } from '../services/cloudSync';
 
 const labels: Record<SyncStatus, string> = {
   unsynced: '未同步',
+  checking: '待核对同步状态',
   synced: '已同步',
   syncing: '正在同步',
   deleting: '正在删除',
@@ -31,6 +32,7 @@ const labels: Record<SyncStatus, string> = {
 };
 export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; label?: string }) {
   const mark = useCloudSync((s) => s.marks[itemKey]);
+  const categoryOff = useCloudSync((s) => s.ready && !s.preferences.enabled[syncKindForKey(itemKey)]);
   const localMode = useCloudAccount((s) => s.state.localMode);
   const [acting, setActing] = useState(false);
   const status = mark?.status || 'unsynced';
@@ -140,16 +142,16 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
       setActing(false);
     }
   };
+  const badgeStatus = categoryOff && (status === 'unsynced' || status === 'checking' || status === 'synced')
+    ? 'off' : status;
   const Icon =
-    status === 'synced'
+    badgeStatus === 'synced'
       ? CloudDone
-      : status === 'syncing' || status === 'deleting' || status === 'pausing'
+      : badgeStatus === 'checking' || badgeStatus === 'syncing' || badgeStatus === 'deleting' || badgeStatus === 'pausing'
         ? CloudSync
-        : status === 'paused'
-          ? CloudOff
-          : status === 'error' || status === 'conflict'
-            ? CloudError
-            : Cloud;
+        : badgeStatus === 'error' || badgeStatus === 'conflict'
+          ? CloudError
+          : CloudOffline;
   if (localMode) return null;
   return (
     <span className={`sync-indicator sync-${status}`} onClick={(e) => e.stopPropagation()}>
@@ -179,8 +181,10 @@ export function SyncBadge({ itemKey, label = '此数据' }: { itemKey: string; l
               aria-label={t('{0}同步状态', [t(label)])}
             >
               <div className="dropdown-scroll sync-popover-body">
-                <strong>{t(labels[status])}</strong>
-                {mark?.error && <span>{t(mark.error)}</span>}
+                <strong>{t(badgeStatus === 'off' ? '同步已关闭' : labels[status])}</strong>
+                <InterviewReveal resizeKey={mark?.error || ''}>
+                  {mark?.error && <span className="sync-error-detail" role="status">{t(mark.error)}</span>}
+                </InterviewReveal>
                 {status === 'unsynced' && (
                   <span>{t('在「设置 → VoxCue 账号」中开启对应同步。')}</span>
                 )}

@@ -30,9 +30,13 @@ export interface ChatModel {
   description: string;
   provider?: ModelProvider;
   reasoningEfforts?: ReasoningEffort[];
+  /** Catalog metadata only. Auto leaves the effort unset on requests. */
+  defaultReasoningEffort?: ReasoningEffort;
 }
+export const CHAT_MODEL_CATALOG_TTL_MS = 300_000;
 export const reasoningEfforts = [
   'none',
+  'on',
   'minimal',
   'low',
   'medium',
@@ -84,6 +88,7 @@ export interface ChatTurn {
   files?: ChatFile[];
 }
 export const CHAT_TEXT_LIMIT = 200000;
+export const CHAT_INSTRUCTIONS_LIMIT = 60000;
 export const CHAT_TURN_LIMIT = 100;
 export const CHAT_FILE_LIMIT = 20;
 export const CHAT_FILE_BYTES_LIMIT = 20 * 1024 * 1024;

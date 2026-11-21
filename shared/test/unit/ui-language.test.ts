@@ -1,7 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { isUILanguage, systemUILanguage, translateUI } from '../../electron/contracts/uiLanguage';
 import { uiMessages } from '../../electron/contracts/uiMessages';
-import { createAuthCallbackPage } from '../../electron/backend/auth/callbackPage';
 import fs from 'node:fs';
 import path from 'node:path';
 import ts from 'typescript';
@@ -12,6 +11,23 @@ afterEach(() => {
 });
 
 describe('interface language', () => {
+  it('translates independent response warnings without changing unknown multiline text', () => {
+    const provider = '回答已接收，但本机用量保存失败。';
+    const retrieval = '对话已接近长度上限，本次回答未使用知识库资料。';
+    const warning = [provider, retrieval].join('\n');
+    const lines = translateUI(warning, 'en').split('\n');
+    expect(lines).toEqual([uiMessages[provider], uiMessages[retrieval]]);
+    expect(lines.join(' ')).not.toMatch(/\p{Script=Han}/u);
+    expect(translateUI(warning, 'zh-CN')).toBe(warning);
+    const unknown = provider + '\n' + '用户原文';
+    expect(translateUI(unknown, 'en')).toBe(unknown);
+  });
+  it('uses the settings names in CPU diagnostics and multilingual recognition status', () => {
+    expect(translateUI('无法确认多语言语音识别所需的处理器指令集，请改用轻量语音识别。', 'en'))
+      .toBe('Could not verify the CPU instructions required for Multilingual speech recognition. Switch to Lightweight speech recognition.');
+    expect(translateUI('多语言语音识别 · CUDA · 对齐 CPU · 本地', 'en'))
+      .toBe('Multilingual speech recognition · CUDA · CPU alignment · Local');
+  });
   it('provides translations for literal UI keys used by renderers and native dialogs', () => {
     const files: string[] = [];
     const visitDirectory = (directory: string) => {
@@ -24,7 +40,6 @@ describe('interface language', () => {
     visitDirectory(path.resolve('../shared/src'));
     files.push(
       path.resolve('../shared/electron/main.ts'),
-      path.resolve('../shared/electron/backend/auth/callbackPage.ts'),
     );
     const missing: string[] = [];
     for (const file of files) {
@@ -140,18 +155,6 @@ describe('interface language', () => {
     }
     expect(translateUI('未发现播放设备。', 'en')).toBe('No output device found.');
     expect(translateUI('未发现麦克风设备。', 'en')).toBe('No microphone found.');
-  });
-
-  it('localizes the OAuth callback without exposing authorization details', () => {
-    for (const language of ['en', 'zh-CN'] as const) {
-      const page = createAuthCallbackPage(undefined, language);
-      for (const state of ['received', 'invalid', 'used', 'not-found'] as const) {
-        const html = page.render(state);
-        expect(html).toContain(`lang="${language}"`);
-        if (language === 'en') expect(html).not.toMatch(/\p{Script=Han}/u);
-        expect(page.headers['Content-Security-Policy']).toContain("default-src 'none'");
-      }
-    }
   });
 
   it('keeps an explicit preference across restarts and system language changes', async () => {

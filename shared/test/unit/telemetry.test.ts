@@ -8,6 +8,8 @@ import { once } from 'node:events';
 import { Telemetry, telemetryRoute } from '../../electron/backend/telemetry/service';
 import { receiptIds } from '../../electron/backend/telemetry/protocol';
 import { TelemetryProofs, storedTelemetryProofs } from '../../electron/backend/telemetry/identity';
+import { eraseOwnerDeviceData } from '../../electron/backend/cloud/eraseOwnerDeviceData';
+import { createCredentialVault } from '../../electron/backend/cloud/vault';
 import {
   TelemetryQueue,
   queueLimit,
@@ -66,6 +68,35 @@ function grant(installationId: string, userId: string, now: number) {
 }
 const roots: string[] = [],
   services: Telemetry[] = [];
+it('removes the erased owner from mixed queues and proof storage without modifying unrelated sessions or anonymous events', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'voxcue-telemetry-owner-'));
+  roots.push(root);
+  const a = randomUUID(), b = randomUUID(), installationId = randomUUID(), origin = 'https://accounts.example.test';
+  const crypto = { encrypt: (s: string) => Buffer.from(s).reverse(), decrypt: (b: Buffer) => Buffer.from(b).reverse().toString() };
+  const makeTicket = (userId: string) => {
+    const { issuedAt, eventUntil, deliverUntil, identityProof } = grant(installationId, userId, Date.now());
+    return { id: randomUUID(), userId, issuedAt, eventUntil, deliverUntil, identityProof };
+  };
+  const first = makeTicket(a), other = makeTicket(b);
+  const file = path.join(root, 'cloud-account', 'telemetry.bin'), vault = createCredentialVault(file, crypto);
+  await vault.write({ schemaVersion: 2, installationId, origin, tickets: [first, other] });
+  const session = path.join(root, 'cloud-account', 'session.bin');
+  await createCredentialVault(session, crypto).write({ origin, credentials: {
+    user: { id: b, email: 'synthetic@example.test', createdAt: 1 }, sessionId: randomUUID(),
+    accessToken: 'a'.repeat(43), refreshToken: 'b'.repeat(43), expiresAt: 2, refreshExpiresAt: 3,
+  } });
+  const unchanged = await readFile(session);
+  const queue = path.join(root, telemetryQueueFile);
+  const events = [{ accountMode: 'local' }, { identityRef: first.id }, { identityRef: other.id }];
+  await writeFile(queue, JSON.stringify({ schemaVersion: 2, events, active: events[1], sequence: 7 }));
+  await eraseOwnerDeviceData(root, origin, a, crypto);
+  expect(await vault.read()).toEqual({ schemaVersion: 2, installationId, origin, tickets: [other] });
+  expect(JSON.parse(await readFile(queue, 'utf8'))).toEqual({ schemaVersion: 2, events: [events[0], events[2]], sequence: 7 });
+  expect(await readFile(session)).toEqual(unchanged);
+  const preserved = await Promise.all([readFile(file), readFile(queue)]);
+  await eraseOwnerDeviceData(root, origin, a, crypto);
+  expect(await Promise.all([readFile(file), readFile(queue)])).toEqual(preserved);
+});
 it('validates stored attribution structure locally without rejecting expired tickets', () => {
   const origin = 'https://accounts.example.test';
   const installationId = randomUUID(),

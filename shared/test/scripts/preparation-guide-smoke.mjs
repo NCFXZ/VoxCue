@@ -298,6 +298,51 @@ try {
   await expectStep('ready');
   await page.reload();
   await expectStep('ready');
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  const aiCategory = settings.getByRole('button', { name: 'AI 服务', exact: true });
+  const closeSettings = settings.getByRole('button', { name: '关闭设置', exact: true });
+  await aiCategory.click();
+  const chatgpt = settings.locator('[data-settings-target="chatgpt"]');
+  await chatgpt.getByRole('button', { name: '断开连接', exact: true }).click();
+  await chatgpt.getByRole('button', { name: '连接', exact: true }).waitFor();
+  await closeSettings.click();
+  for (const launch of [page.locator('.interview-start-trigger'), guide.getByRole('button', { name: '开始面试', exact: true })]) {
+    await launch.click();
+    await chatgpt.getByRole('button', { name: '连接', exact: true }).waitFor();
+    assert.equal(await aiCategory.getAttribute('aria-current'), 'page');
+    await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.equal(await settings.locator('[data-location-highlight]').count(), 0);
+    assert.equal(await start.count(), 0);
+    await closeSettings.click();
+  }
+  await connectUiAccount(app, page);
+  const catalog = await page.evaluate(() => window.desktop.components({ op: 'status' }));
+  const mainWindow = await app.browserWindow(page);
+  let revision = catalog.revision;
+  const publishCatalog = (state) => mainWindow.evaluate(
+    (win, next) => win.webContents.send('components:event', next),
+    { ...state, revision: ++revision },
+  );
+  const missingNotice = page.getByRole('complementary', { name: '本地组件提示', exact: true });
+  for (const hasQwen of [true, false]) {
+    await publishCatalog({
+      ...catalog, phase: 'needed',
+      items: catalog.items.filter((item) => hasQwen || item.id !== 'qwen').map((item) =>
+        item.id === 'rag' ? item : { ...item, phase: 'pending', received: 0 }),
+    });
+    await missingNotice.waitFor();
+    await guide.getByRole('button', { name: '开始面试', exact: true }).click();
+    await settings.locator('[data-settings-target="speech"][data-location-highlight]').waitFor();
+    const highlighted = await settings.locator('[data-settings-target][data-location-highlight]')
+      .evaluateAll((rows) => rows.map((row) => row.dataset.settingsTarget).sort());
+    assert.deepEqual(highlighted, hasQwen ? ['qwen', 'speech'] : ['speech']);
+    await closeSettings.click();
+    await publishCatalog(catalog);
+    await missingNotice.waitFor({ state: 'hidden' });
+  }
+  await mainWindow.dispose();
   await page.evaluate(() => {
     localStorage.setItem('voxcue-language-v1', 'en');
     dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));

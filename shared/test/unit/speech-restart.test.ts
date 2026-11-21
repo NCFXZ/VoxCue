@@ -384,3 +384,16 @@ it('ignores retired capture callbacks after an explicit replacement', async () =
   expect(f.captures).toHaveLength(2);
   expect(await f.service.call({ op: 'status' })).toMatchObject({ state: 'running' });
 });
+
+it('previews native levels without loading a recognizer and drops packets after stop', async () => {
+  const { service, captures, events } = fixture();
+  expect((await service.call({ ...begin, levelsOnly: true })).state).toBe('running');
+  expect(runtime.workers).toHaveLength(0);
+  const packet = { samples: new Float32Array(1600).fill(0.25), rate: 16000 };
+  captures[0].audio(packet);
+  expect(events.at(-1)).toEqual({ type: 'activity', source: 'system', speaking: false, level: 0.25 });
+  await service.call({ op: 'stop' });
+  const count = events.length;
+  captures[0].audio(packet);
+  expect(events).toHaveLength(count);
+});

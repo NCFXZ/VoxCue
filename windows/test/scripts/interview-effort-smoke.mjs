@@ -58,7 +58,7 @@ ipcMain.handle = (channel, listener) => handle(channel, channel === 'interview:u
   : listener);
 const {ChatGPTAuthService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/auth/service.js'))});
 const {ChatGPTService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))});
-const {modelEfforts} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/models.js'))});
+const {advertisedEfforts} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/models.js'))});
 const {SpeechHost} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/host.js'))});
 const {ComponentService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/components/service.js'))});
 // Keep this controls/IPC regression independent of installed model caches. The
@@ -74,15 +74,17 @@ ComponentService.prototype.ready = () => true;
 require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/models.js'))}).speechModelInstalled = () => true;
 require(${JSON.stringify(path.resolve('test/fixtures/interview-access-fixture.cjs'))})(${JSON.stringify(path.resolve('dist-electron/windows/electron/speech/access.js'))});
 ChatGPTAuthService.prototype.session = async () => ({mode:'chatgpt', user:{id:'fixture',name:'Test',email:''},expiresAt:Date.now()+3600000});
-ChatGPTService.prototype.models = async () => {
+ChatGPTService.prototype.models = async (force) => {
   if (globalThis.failNextModelRead) {
     globalThis.failNextModelRead = false;
     throw Error('Synthetic model lookup failed');
   }
+  if (force && globalThis.nextCatalogModel) globalThis.publishedModel = globalThis.nextCatalogModel;
   return [
-  {id:'test-model',label:'Test Model',description:'',reasoningEfforts:modelEfforts({slug:'gpt-6.1-sol',supported_reasoning_levels:['ultra','max','xhigh','high','medium','low']})},
+  {id:'test-model',label:'Test Model',description:'',reasoningEfforts:advertisedEfforts(['ultra','max','xhigh','high','medium','low'])},
   {id:'restricted-model',label:'Restricted Model',description:'',reasoningEfforts:['medium']},
   {id:'unknown-model',label:'Unknown Model',description:''},
+  ...(globalThis.publishedModel ? [{id:globalThis.publishedModel,label:globalThis.publishedModel,description:''}] : []),
   ...Array.from({length:16},(_,index)=>({id:'scroll-model-'+index,label:'Synthetic scrolling model '+index,description:'',reasoningEfforts:['low','high']}))
   ];
 };
@@ -150,6 +152,14 @@ try {
   assert.notEqual(combinedTrigger.background, 'rgba(0, 0, 0, 0)');
   assert.ok(Math.abs(combinedTrigger.labelGap - 6) < 1 / 32, JSON.stringify(combinedTrigger));
   const modelPopup = await openModelMenu(main, '面试回答模型', '面试回答思考强度');
+  async function checkRefresh(menu, newModel) {
+    const option = menu.getByRole('menuitemradio', { name: newModel, exact: true });
+    assert.equal(await option.count(), 0);
+    await app.evaluate((_, id) => { globalThis.nextCatalogModel = id; }, newModel);
+    await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+    await option.waitFor();
+  }
+  await checkRefresh(modelPopup, 'pre-interview-new-model');
   await modelPopup.locator('.reasoning-model-list').evaluate((node) => {
     node.scrollTop = node.scrollHeight;
   });
@@ -202,7 +212,9 @@ try {
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('Test Model', { exact: true })
     .waitFor();
-  await main.getByRole('button', { name: '聊天模型', exact: true }).click();
+  const chatPopup = await openModelMenu(main);
+  assert.equal(await chatPopup.getAttribute('data-side'), 'top', 'The composer catalog opens above its bottom trigger');
+  await chatPopup.getByRole('menuitemradio', { name: 'Test Model', exact: true }).click();
   const chatEffort = main.getByRole('slider', { name: '思考强度', exact: true });
   assert.equal(await chatEffort.getAttribute('min'), '0');
   assert.equal(await chatEffort.getAttribute('max'), '4');
@@ -257,8 +269,21 @@ try {
     await slider.press('Escape');
   };
   const selectModel = async (label) => {
-    await openModelMenu(main, '面试回答模型', '面试回答思考强度');
-    await dialog.getByRole('menuitemradio', { name: label, exact: true }).click();
+    if (label === 'Test Model') {
+      await effort.evaluate(button => {
+        const pane = button.closest('.settings-content-body');
+        const header = button.closest('.settings-content').querySelector('.settings-content-heading');
+        pane.scrollTop += button.getBoundingClientRect().top - header.getBoundingClientRect().bottom - 4;
+      });
+    }
+    const menu = await openModelMenu(main, '面试回答模型', '面试回答思考强度');
+    if (label === 'Test Model') {
+      await menu.locator('.reasoning-model-list').evaluate(list => {
+        if (list.clientHeight < list.firstElementChild.clientHeight) throw Error('No complete model option fits');
+      });
+      assert.equal(await menu.getAttribute('data-side'), 'bottom', 'The catalog opens below a high settings trigger');
+    }
+    await menu.getByRole('menuitemradio', { name: label, exact: true }).click();
     await main.keyboard.press('Escape');
   };
   await selectEffort('高');
@@ -340,6 +365,9 @@ try {
   const activeSettings = floating.getByRole('dialog', { name: '面试设置', exact: true });
   const activeEffort = activeSettings.getByRole('button', { name: '面试回答模型', exact: true });
   await assertControlRows(activeSettings);
+  const liveMenu = await openModelMenu(floating, '面试回答模型', '面试思考强度');
+  await checkRefresh(liveMenu, 'live-interview-new-model');
+  await floating.keyboard.press('Escape');
   await activeEffort.click();
   const activeSlider = activeSettings.getByRole('slider', { name: '面试思考强度', exact: true });
   await activeSlider.evaluate(async (node) => {

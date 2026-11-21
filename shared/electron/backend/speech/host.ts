@@ -1,10 +1,14 @@
 import { utilityProcess, type UtilityProcess } from 'electron';
 import { randomUUID } from 'node:crypto';
 import type { SpeechServiceCall, SpeechEvent, SpeechStatus } from '../../contracts/speech';
+import { speechModelLabels } from '../../contracts/speechSettings';
 export class SpeechHost {
   private child?: UtilityProcess;
   private ready?: Promise<any>;
   private retiring?: Promise<void>;
+  private recordingChild?: UtilityProcess;
+  private closingRecording?: Promise<void>;
+  private lostCaptureTail = false;
   private pending = new Map<
     string,
     { resolve: (v: any) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }
@@ -61,8 +65,19 @@ export class SpeechHost {
     // Native dependencies may write diagnostics; drain without exposing audio or paths.
     child.stdout?.resume();
     child.stderr?.resume();
+    let model: string = speechModelLabels.paraformer;
+    let capturing = false;
     child.on('message', (m) => {
       if (this.child !== child) return;
+      if (m.event?.type === 'status') {
+        const status = m.event.status;
+        model = status.model;
+        if (status.state === 'running') {
+          capturing = true;
+        } else if (status.state === 'idle' || status.state === 'paused') capturing = false;
+      }
+      if (m.event?.type === 'recording')
+        this.recordingChild = m.event.active || m.event.draining ? child : undefined;
       if (m.event) this.emit(m.event);
       const p = this.pending.get(m.id);
       if (p) {
@@ -73,7 +88,9 @@ export class SpeechHost {
     });
     child.on('exit', () => {
       if (this.child !== child) return;
+      if (capturing) this.lostCaptureTail = true;
       this.child = undefined;
+      this.recordingChild = undefined;
       this.ready = undefined;
       for (const p of this.pending.values()) {
         clearTimeout(p.timer);
@@ -84,7 +101,7 @@ export class SpeechHost {
         type: 'status',
         status: {
           state: 'error',
-          model: 'Paraformer · Silero',
+          model,
           error: '语音服务已退出，采集已释放；请重新开始。',
         },
       });
@@ -101,9 +118,17 @@ export class SpeechHost {
   async call(call: SpeechServiceCall): Promise<SpeechStatus> {
     if (!this.helper || !this.processFile) throw Error('当前系统尚未支持本地音频采集。');
     await this.start();
-    return this.send({ call });
+    if (call.op === 'recording' && call.directory) this.recordingChild = this.child;
+    if (call.op !== 'stop') return this.send({ call });
+    try {
+      const result: SpeechStatus = await this.send({ call });
+      return this.lostCaptureTail ? { ...result, transcriptTailIncomplete: true } : result;
+    } finally {
+      this.lostCaptureTail = false;
+    }
   }
   stop() {
+    this.lostCaptureTail = false;
     const child = this.child;
     if (!child) return;
     this.child = undefined;
@@ -130,11 +155,36 @@ export class SpeechHost {
     void retired.then(() => {
       if (this.retiring === retired) this.retiring = undefined;
     });
-    try {
-      child.kill();
-    } catch {
-      // Do not release ownership or replace a utility whose exit is unconfirmed.
+    const kill = () => {
+      try { child.kill(); } catch { /* Ownership is released only by actual exit. */ }
+    };
+    if (this.recordingChild !== child) {
+      kill();
+      return;
     }
+    // Window teardown can race the renderer's normal end/flush. Give the old
+    // utility a bounded opportunity to commit its final mixing window.
+    this.recordingChild = undefined;
+    this.closingRecording = retired;
+    const id = randomUUID();
+    const finish = () => {
+      clearTimeout(deadline);
+      child.removeListener('message', acknowledge);
+      kill();
+    };
+    const acknowledge = (message: { id?: string }) => { if (message.id === id) finish(); };
+    const deadline = setTimeout(finish, 1500);
+    child.on('message', acknowledge);
+    void retired.then(() => {
+      clearTimeout(deadline);
+      child.removeListener('message', acknowledge);
+      if (this.closingRecording === retired) this.closingRecording = undefined;
+    });
+    try { child.postMessage({ id, call: { op: 'recording' } }); } catch { finish(); }
+  }
+  async finishRecording() {
+    if (this.recordingChild) this.stop();
+    if (this.closingRecording) await this.waitForRetirement();
   }
   private async waitForRetirement() {
     if (!this.retiring) return;

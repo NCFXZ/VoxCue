@@ -114,6 +114,14 @@ try {
       name: register ? '创建账号' : '重置密码',
       exact: true,
     });
+    const consent = page.getByRole('checkbox', { name: /VoxCue 用户服务协议/u });
+    if (register) {
+      assert.equal(await consent.isChecked(), false);
+      assert.equal(await submit.isDisabled(), true);
+      await consent.check();
+    } else {
+      assert.equal(await consent.count(), 0, 'Password reset does not require registration consent');
+    }
     for (const invalid of ['K7!vQ#p', 'e\u0301'.repeat(7), '😀'.repeat(129)]) {
       await input.fill(invalid);
       await submit.click();

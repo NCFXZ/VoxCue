@@ -1,3 +1,4 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { useState } from 'react';
 import type { ChatSource } from '../../electron/contracts/chat';
@@ -34,11 +35,13 @@ export function ChatSources({ sources }: { sources: ChatSource[] }) {
           <div className="chat-sources">{links(sources.slice(3))}</div>
         </details>
       )}
-      {error && (
-        <small className="inline-error" role="alert">
-          {t('无法打开来源链接。')}
-        </small>
-      )}
+      <InterviewReveal>
+        {error ? (
+          <small className="inline-error" role="alert">
+            {t('无法打开来源链接。')}
+          </small>
+        ) : null}
+      </InterviewReveal>
     </div>
   );
 }

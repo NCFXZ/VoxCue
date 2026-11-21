@@ -1,10 +1,12 @@
 import { openReasoningControl } from './install-ui-account.mjs';
 import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
+import { readStoredChatFixture } from './stored-chat-fixture.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
-import { dropdownRevealGeometry } from './continuous-corners.mjs';
+import { cornerShapeNames, dropdownRevealGeometry } from './continuous-corners.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -19,7 +21,7 @@ try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
-  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
+  const page = await enterDemoUiAccount(app, login);
   page.setDefaultTimeout(15000);
   const errors = [];
   const send = page.getByRole('button', { name: '发送消息', exact: true });
@@ -302,6 +304,7 @@ try {
   };
   const thumb = reasoning.locator('.reasoning-slider-thumb');
   const rangeBox = await effort.boundingBox();
+  await effort.press('Home');
   const initialThumb = await thumb.boundingBox();
   const startX = rangeBox.x + initialThumb.width / 2;
   const travel = rangeBox.width - initialThumb.width;
@@ -497,9 +500,41 @@ try {
   await writeFile(path.join(folder, 'jd.txt'), '岗位描述');
   await page.getByLabel('添加聊天文件夹', { exact: true }).setInputFiles(folder);
   await page.locator('.chat-attachment').getByText('context/jd.txt', { exact: false }).waitFor();
-  await page.getByRole('button', { name: '移除附件 context/jd.txt', exact: true }).click();
+  const removeAttachment = page.getByRole('button', { name: '移除附件 context/jd.txt', exact: true });
+  const removeShape = await removeAttachment.evaluate((button) => {
+    const { width, height } = button.getBoundingClientRect();
+    const style = getComputedStyle(button);
+    const radii = ['TopLeft', 'TopRight', 'BottomRight', 'BottomLeft'].map((corner) => {
+      const radius = style[`border${corner}Radius`];
+      return radius.endsWith('%') ? (parseFloat(radius) / 100) * width : parseFloat(radius);
+    });
+    const card = button.closest('.chat-attachment');
+    const previousWidth = card.style.maxWidth;
+    card.style.maxWidth = '180px';
+    const narrow = button.getBoundingClientRect();
+    const cardBounds = card.getBoundingClientRect();
+    card.style.maxWidth = previousWidth;
+    return {
+      width, height, radii, shape: style.cornerShape,
+      narrow: { width: narrow.width, height: narrow.height, fits: narrow.right <= cardBounds.right },
+    };
+  });
+  assert.ok(Math.abs(removeShape.width - 32) < 1 / 32, JSON.stringify(removeShape));
+  assert.ok(Math.abs(removeShape.width - removeShape.height) < 1 / 32, JSON.stringify(removeShape));
+  assert.deepEqual(removeShape.narrow, { width: removeShape.width, height: removeShape.height, fits: true });
+  assert.ok(removeShape.radii.every((radius) => radius >= removeShape.width / 2));
+  assert.equal(cornerShapeNames(removeShape.shape), 'round');
+  await removeAttachment.click();
   assert.equal(await page.locator('.chat-attachment').count(), 3);
-  await page.getByRole('button', { name: '确认删除：附件：context/jd.txt', exact: true }).click();
+  const confirmRemove = page.getByRole('button', { name: '确认删除：附件：context/jd.txt', exact: true });
+  const confirmFits = await confirmRemove.evaluate(async (button) => {
+    await Promise.all(button.getAnimations({ subtree: true }).map((animation) => animation.finished));
+    const bounds = button.getBoundingClientRect();
+    const label = button.querySelector('.confirm-delete-confirm').getBoundingClientRect();
+    return bounds.width > bounds.height && label.left >= bounds.left && label.right <= bounds.right;
+  });
+  assert.ok(confirmFits, 'The expanded confirmation label fits inside its button');
+  await confirmRemove.click();
   assert.equal(await page.locator('.chat-attachment').count(), 2);
   await page.screenshot({});
   await page.getByRole('button', { name: '发送消息', exact: true }).click();
@@ -751,25 +786,10 @@ try {
     await page.locator('.chat-message.user').last().locator('.user-message-toggle').count(),
     0,
   );
-  await page.waitForFunction(async () => {
-    const db = await new Promise((resolve) => {
-      const request = indexedDB.open('voxcue-preparation-chats', 1);
-      request.onsuccess = () => resolve(request.result);
-    });
-    try {
-      const saved = await new Promise((resolve) => {
-        const request = db.transaction('state').objectStore('state').get('current');
-        request.onsuccess = () => resolve(request.result);
-      });
-      return (
-        saved?.conversations.find((item) => item.id === saved.activeConversation)?.messages.at(-1)
-          ?.status === 'stopped'
-      );
-    } finally {
-      db.close();
-    }
+  const stopped = await waitForAsync(page, readStoredChatFixture, undefined, {
+    matches: saved => saved?.conversations.find(c => c.id === saved.activeConversation)?.messages.at(-1)?.status === 'stopped',
   });
-  const legacy = await page.evaluate(async () => {
+  const legacy = await page.evaluate(async (id) => {
     const db = await new Promise((resolve) => {
       const request = indexedDB.open('voxcue-preparation-chats', 1);
       request.onsuccess = () => resolve(request.result);
@@ -778,13 +798,11 @@ try {
       return await new Promise((resolve, reject) => {
         const transaction = db.transaction('state', 'readwrite');
         const store = transaction.objectStore('state');
-        const request = store.get('current');
+        const request = store.get(['conversation', id]);
         let result;
         request.onsuccess = () => {
           const saved = request.result;
-          const messages = saved.conversations.find(
-            (item) => item.id === saved.activeConversation,
-          ).messages;
+          const messages = saved.messages;
           const day = new Date();
           day.setDate(day.getDate() - 1);
           day.setHours(11, 12, 0, 0);
@@ -797,7 +815,7 @@ try {
             modelId: messages[0].options.modelId,
             effort: messages[0].options.effort,
           };
-          store.put(saved, 'current');
+          store.put(saved, ['conversation', id]);
         };
         transaction.oncomplete = () => resolve(result);
         transaction.onerror = () => reject(transaction.error);
@@ -805,7 +823,7 @@ try {
     } finally {
       db.close();
     }
-  });
+  }, stopped.activeConversation);
   assert.equal(
     legacy.modelId,
     'mock-reasoning',

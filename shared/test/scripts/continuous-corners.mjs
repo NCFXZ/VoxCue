@@ -306,7 +306,7 @@ export async function verifyContinuousCorners(page, name) {
           link &&
           !link.matches(':disabled,[disabled],[aria-disabled="true"]');
         const expectedCursor =
-          !pseudo && element.matches('.personal-resize-handle')
+          !pseudo && element.matches('.panel-resize-handle')
             ? 'col-resize'
             : clickableLink
               ? 'pointer'
@@ -522,27 +522,26 @@ export async function verifyContinuousCorners(page, name) {
           sides.some((side) => itemStyle.getPropertyValue('corner-' + side + '-shape') !== round)
         )
           wrongMenus.push(item.className + ': menu highlight must have circular capsule end caps');
-        // A scrollbar occupies inline-end space, not additional menu padding.
-        let gutter = 0;
+        const gutters = { left: 0, right: 0 };
         for (let host = item.parentElement; host; host = host.parentElement) {
           const hostStyle = getComputedStyle(host);
-          if (
-            ['auto', 'scroll'].includes(hostStyle.overflowY) &&
-            host.scrollHeight > host.clientHeight
-          ) {
-            gutter += Math.max(
-              0,
-              host.getBoundingClientRect().width / scale -
-                host.clientWidth -
-                parseFloat(hostStyle.borderLeftWidth) -
-                parseFloat(hostStyle.borderRightWidth),
-            );
+          if (['auto', 'scroll'].includes(hostStyle.overflowY)) {
+            const innerWidth = host.getBoundingClientRect().width / scale -
+              parseFloat(hostStyle.borderLeftWidth) - parseFloat(hostStyle.borderRightWidth);
+            // clientWidth is integer CSS pixels and excludes even an unused stable gutter.
+            const gutter = Math.max(0, Math.round(innerWidth) - host.clientWidth);
+            if (hostStyle.scrollbarGutter.includes('both-edges')) {
+              gutters.left += gutter / 2;
+              gutters.right += gutter / 2;
+            } else {
+              gutters[hostStyle.direction === 'rtl' ? 'left' : 'right'] += gutter;
+            }
           }
           if (host === menu) break;
         }
         const insets = {
-          left: (itemBox.left - menuBox.left) / scale,
-          right: (menuBox.right - itemBox.right) / scale - gutter,
+          left: (itemBox.left - menuBox.left) / scale - gutters.left,
+          right: (menuBox.right - itemBox.right) / scale - gutters.right,
         };
         for (const edge of ['left', 'right']) {
           const border = parseFloat(menuStyle.getPropertyValue('border-' + edge + '-width'));
@@ -675,15 +674,24 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
             y: ((py + 0.5) * clip.height) / size.height,
           };
         });
-        const colors = mapped.map(({ px, py }) => [
-          ...bytes.subarray((py * size.width + px) * 4, (py * size.width + px) * 4 + 3),
+        const readPixel = (px, py) => {
+          if (px < 0 || px >= size.width || py < 0 || py >= size.height) return null;
+          const offset = (py * size.width + px) * 4;
+          return [...bytes.subarray(offset, offset + 3)];
+        };
+        const colors = mapped.map(({ px, py }) => readPixel(px, py));
+        // Capture adjacent physical pixels from this very frame for failure diagnostics.
+        const neighbors = mapped.map(({ px, py }) => [
+          readPixel(px - 1, py), readPixel(px + 1, py), readPixel(px, py - 1), readPixel(px, py + 1),
         ]);
-        return { colors, mapped, size, bitmapBytes: bytes.length, scaleFactors };
+        return { colors, neighbors, mapped, size, bitmapBytes: bytes.length, scaleFactors };
       },
       { windowId, clip, points },
     );
   };
   const difference = (a, b) => Math.max(...a.map((channel, index) => Math.abs(channel - b[index])));
+  const deviceEdges = (rect, dpi) =>
+    ['left', 'top', 'right', 'bottom'].map((edge) => Math.round(rect[edge] * dpi));
   const paintState = (item) =>
     item.evaluate((node) => ({
       background: getComputedStyle(node).backgroundColor,
@@ -888,7 +896,7 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
       let circularRaster, circularRect;
       try {
         circularRect = await page.evaluate(
-          ({ referenceId, box }) => {
+          ({ referenceId, itemRect }) => {
             const reference = document.createElement('div');
             reference.id = referenceId;
             reference.popover = 'manual';
@@ -897,20 +905,36 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
             reference.style.cssText =
               'position:fixed!important;inset:auto!important;margin:0!important;' +
               'border:0!important;padding:0!important;box-sizing:border-box!important;' +
-              `left:${box.x}px!important;top:${box.y}px!important;` +
-              `width:${box.width}px!important;height:${box.height}px!important;` +
+              'width:auto!important;height:auto!important;' +
               'border-radius:999px!important;corner-shape:round!important;' +
               'background:rgb(217,32,217)!important;opacity:1!important;' +
               'box-shadow:none!important;filter:none!important;backdrop-filter:none!important;' +
               'transform:none!important;animation:none!important;transition:none!important;' +
               'pointer-events:none!important;';
+            // Resolve the four absolute edges independently. Rounding a copied width
+            // before adding it to a fractional left can move the far edge by a pixel.
+            const edges = ['left', 'top', 'right', 'bottom'];
+            const placeEdge = (edge, coordinate) => {
+              const value = edge === 'right' || edge === 'bottom'
+                ? `calc(100% - ${coordinate}px)` : coordinate + 'px';
+              reference.style.setProperty(edge, value, 'important');
+            };
+            for (const edge of edges) placeEdge(edge, itemRect[edge]);
             document.body.append(reference);
-            // An inert manual popover shares the native pixel phase but escapes
-            // every actual menu ancestor's overflow/corner clipping.
+            // The top layer escapes all menu ancestor clips. If its layout grid
+            // straddles a half-device-pixel tie, select the adjacent layout unit
+            // on the item's side. Both CSS geometry and device edges are checked below.
             reference.showPopover();
+            const initial = reference.getBoundingClientRect();
+            for (const edge of edges) {
+              const target = Math.round(itemRect[edge] * devicePixelRatio);
+              const current = Math.round(initial[edge] * devicePixelRatio);
+              if (target !== current)
+                placeEdge(edge, itemRect[edge] + Math.sign(target - current) / 64);
+            }
             return reference.getBoundingClientRect().toJSON();
           },
-          { referenceId, box },
+          { referenceId, itemRect: before.rect },
         );
         for (const key of ['x', 'y', 'width', 'height'])
           assert.ok(
@@ -919,6 +943,11 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
               ': independent round reference must keep the exact item rect: ' +
               JSON.stringify({ box, circularRect }),
           );
+        assert.deepEqual(
+          deviceEdges(circularRect, before.dpi), deviceEdges(before.rect, before.dpi),
+          name + ': reference and item device edges must match before hover: ' +
+            JSON.stringify({ dpi: before.dpi, item: before.rect, reference: circularRect }),
+        );
         await paintedFrames();
         circularRaster = await sample(clip, [...points, ...outside]);
       } finally {
@@ -975,6 +1004,11 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
             ': hover must preserve the reference raster phase: ' +
             JSON.stringify({ actual: after.rect, circularRect }),
         );
+      assert.deepEqual(
+        deviceEdges(after.rect, after.dpi), deviceEdges(circularRect, before.dpi),
+        name + ': hover must preserve all four reference device edges: ' +
+          JSON.stringify({ dpi: after.dpi, item: after.rect, reference: circularRect }),
+      );
       const highlightedRaster = await sample(clip, [...points, ...outside]);
       const highlighted = highlightedRaster.colors;
       assert.deepEqual(
@@ -1010,51 +1044,27 @@ export async function verifyMenuCapsulePixels(page, app, menu, name) {
       // Near-edge antialiasing depends on the native pixel phase. Compare each
       // cap with the independently round reference at that exact output pixel,
       // rather than requiring its coverage to match a solid center pixel.
-      for (let index = 1; index < points.length; index++)
-        assert.ok(
-          difference(highlighted[index], circularRaster.colors[index]) <= 28,
-          name +
-            ': ' +
-            edge +
-            ' ' +
-            points[index].corner +
-            ' capsule cap was clipped at ' +
-            JSON.stringify({
-              point: points[index],
-              pixel: highlighted[index],
-              reference: circularRaster.colors[index],
-              solidReference: reference,
-              mapped: highlightedRaster.mapped[index],
-              mappedInset:
-                radius -
-                Math.hypot(
-                  radius -
-                    (points[index].corner === 'left'
-                      ? highlightedRaster.mapped[index].x - offsetX
-                      : box.width - (highlightedRaster.mapped[index].x - offsetX)),
-                  radius -
-                    (edge === 'top'
-                      ? highlightedRaster.mapped[index].y - offsetY
-                      : box.height - (highlightedRaster.mapped[index].y - offsetY)),
-                ),
-              clip,
-              offset: { x: offsetX, y: offsetY },
-              before,
-              after,
-              referenceRect: circularRect,
-              image: {
-                size: highlightedRaster.size,
-                bitmapBytes: highlightedRaster.bitmapBytes,
-                scaleFactors: highlightedRaster.scaleFactors,
-              },
-              referenceImage: {
-                size: circularRaster.size,
-                bitmapBytes: circularRaster.bitmapBytes,
-                scaleFactors: circularRaster.scaleFactors,
-                mapped: circularRaster.mapped[index],
-              },
-            }),
-        );
+      for (let index = 1; index < points.length; index++) {
+        const delta = difference(highlighted[index], circularRaster.colors[index]);
+        if (delta <= 28) continue;
+        const mapped = highlightedRaster.mapped[index];
+        const viewportPoint = { x: clip.x + mapped.x, y: clip.y + mapped.y };
+        const hit = await item.evaluate((node, { x, y }) => {
+          const target = document.elementFromPoint(x, y);
+          const wrapper = node.closest('[data-radix-popper-content-wrapper]');
+          return { item: node.contains(target), target: target?.className, wrapperTransform: wrapper && getComputedStyle(wrapper).transform };
+        }, viewportPoint);
+        const rect = ({ x, y, width, height }) => [x, y, width, height];
+        assert.fail(name + ': ' + edge + ' ' + points[index].corner + ' capsule pixel mismatch: ' +
+          JSON.stringify({
+            delta, actual: highlighted[index], reference: circularRaster.colors[index],
+            baseline: baseline[index], solid: reference, point: points[index], mapped,
+            viewportPoint, hit, dpi: after.dpi, clip: rect(clip), bitmap: highlightedRaster.size,
+            actualRect: rect(after.rect), referenceRect: rect(circularRect), menuRect: rect(after.menuRect),
+            ancestorClips: after.ancestors.map(a => [a.className, rect(a.rect), a.overflow, a.radius]),
+            neighborsLeftRightUpDown: { actual: highlightedRaster.neighbors[index], reference: circularRaster.neighbors[index] },
+          }));
+      }
       for (const pixel of circularRaster.colors.slice(points.length))
         assert.ok(
           difference(pixel, circularRaster.colors[0]) > 80,
@@ -1150,61 +1160,4 @@ export async function verifyCornerRendering(page, app) {
   } finally {
     await page.locator(selector).evaluate((probe) => probe.remove());
   }
-}
-
-export async function verifyCallbackCorners(app) {
-  const fixtures = await app.evaluate(({ app }) => {
-    const require = process
-      .getBuiltinModule('module')
-      .createRequire(app.getAppPath() + '/package.json');
-    const { createAuthCallbackPage } = require(
-      app.getAppPath() + '/dist-electron/shared/electron/backend/auth/callbackPage.js',
-    );
-    const logo = require('node:fs').readFileSync(app.getAppPath() + '/../shared/public/voxcue.png');
-    const callback = createAuthCallbackPage(logo);
-    return ['received', 'invalid', 'used', 'not-found'].map((state) => ({
-      state,
-      html: callback.render(state),
-    }));
-  });
-  const opened = app.waitForEvent('window');
-  await app.evaluate(async ({ BrowserWindow }, html) => {
-    const window = new BrowserWindow({
-      show: false,
-      width: 980,
-      height: 800,
-      webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
-    });
-    await window.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-  }, fixtures[0].html);
-  const page = await opened;
-  const window = await app.browserWindow(page);
-  const checks = [];
-  try {
-    for (const width of [980, 360]) {
-      await window.evaluate((window, width) => window.setSize(width, 800), width);
-      for (const { state, html } of fixtures) {
-        await page.goto('data:text/html;charset=utf-8,' + encodeURIComponent(html));
-        for (const theme of ['light', 'dark']) {
-          await page.emulateMedia({ colorScheme: theme });
-          const name = `callback-${state}-${width}-${theme}`;
-          const corners = await verifyContinuousCorners(page, name);
-          const contained = await page.locator('.card').evaluate((card) => {
-            const bounds = card.getBoundingClientRect();
-            return (
-              bounds.left >= 0 &&
-              bounds.right <= innerWidth &&
-              document.documentElement.scrollWidth <= innerWidth
-            );
-          });
-          assert.equal(contained, true, name);
-          await page.screenshot({ animations: 'disabled' });
-          checks.push({ name, corners });
-        }
-      }
-    }
-  } finally {
-    await page.close();
-  }
-  return checks;
 }

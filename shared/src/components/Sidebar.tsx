@@ -7,12 +7,10 @@ import {
   MessageCirclePlus,
   History,
   Database,
-  ChevronsUpDown,
   Settings,
   LogOut,
   PanelLeftClose,
   PanelLeftOpen,
-  Loader,
   Refresh,
   X,
 } from './icons';
@@ -25,14 +23,26 @@ import { providerInfo } from '../services/providers';
 import { isAccountUsageLow } from '../services/accountUsageSummary';
 import { AccountUsageSummary } from './AccountUsageSummary';
 import { SidebarUpdate } from './SidebarUpdate';
+import { InterviewReveal } from './InterviewReveal';
 import { SelectionLabel } from './SelectionLabel';
 import { SidebarSelectionIndicator } from './SidebarSelectionIndicator';
+function ConversationDot({ streaming, unread }: { streaming: boolean; unread?: boolean }) {
+  return (
+    <span className="conversation-indicator" aria-hidden="true">
+      <span
+        className="conversation-dot"
+        data-state={streaming ? 'streaming' : unread ? 'unread' : 'read'}
+      />
+    </span>
+  );
+}
+
 interface Props {
   userName: string;
   accountLabel: string;
   localMode?: boolean;
   page: 'preparation' | 'history' | 'knowledge';
-  onNavigate(page: 'preparation' | 'history' | 'knowledge'): void;
+  onNavigate(page: 'preparation' | 'history' | 'knowledge', prepare?: () => void): void;
   collapsed: boolean;
   onCollapse(): void;
   onNew(): void;
@@ -131,56 +141,46 @@ export function Sidebar({
           {preparation.conversations
             .slice()
             .reverse()
-            .map((conversation) => (
-              <div
-                key={conversation.id}
-                className={`conversation-row ${preparation.activeConversation === conversation.id && page === 'preparation' ? 'active' : ''}`}
-              >
-                <button
-                  className="conversation"
-                  aria-current={
-                    preparation.activeConversation === conversation.id && page === 'preparation'
-                      ? 'page'
-                      : undefined
-                  }
-                  aria-label={`${conversation.title}${conversation.messages.some((m) => m.status === 'streaming') ? t('，正在回复') : conversation.unread ? t('，回复完成，尚未查看') : ''}${!conversation.messages.length ? t('，未发送草稿') : ''}`}
-                  onClick={() => {
-                    preparation.selectConversation(conversation.id);
-                    onNavigate('preparation');
-                  }}
+            .map((conversation) => {
+              const streaming = conversation.messages.some((message) => message.status === 'streaming');
+              return (
+                <div
+                  key={conversation.id}
+                  className={`conversation-row ${preparation.activeConversation === conversation.id && page === 'preparation' ? 'active' : ''}`}
                 >
-                  <span className="conversation-indicator" aria-hidden="true">
-                    {conversation.messages.some((message) => message.status === 'streaming') ? (
-                      <span className="conversation-spinner">
-                        <Loader size={14} />
-                      </span>
-                    ) : (
-                      <span
-                        className={`conversation-dot ${conversation.unread ? 'is-unread' : ''}`}
-                      />
-                    )}
-                  </span>
-                  <span>
-                    {conversation.title}
-                    {!conversation.messages.length && <small>{t(' · 草稿')}</small>}
-                  </span>
-                </button>
-                <ConfirmDeleteButton
-                  iconOnly
-                  compact
-                  className="conversation-delete"
-                  target={t('对话：') + conversation.title}
-                  revision={conversation.id + ':' + conversation.title}
-                  active={!collapsed}
-                  aria-label={t('删除对话：') + conversation.title}
-                  onConfirm={() => {
-                    const active = preparation.activeConversation === conversation.id;
-                    preparation.deleteConversation(conversation.id);
-                    if (active) onNavigate('preparation');
-                  }}
-                />
-              </div>
-            ))}
+                  <button
+                    className="conversation"
+                    aria-current={
+                      preparation.activeConversation === conversation.id && page === 'preparation'
+                        ? 'page'
+                        : undefined
+                    }
+                    aria-label={`${conversation.title}${streaming ? t('，正在回复') : conversation.unread ? t('，回复完成，尚未查看') : ''}${!conversation.messages.length ? t('，未发送草稿') : ''}`}
+                    onClick={() => onNavigate('preparation', () => preparation.selectConversation(conversation.id))}
+                  >
+                    <ConversationDot streaming={streaming} unread={conversation.unread} />
+                    <span>
+                      {conversation.title}
+                      {!conversation.messages.length && <small>{t(' · 草稿')}</small>}
+                    </span>
+                  </button>
+                  <ConfirmDeleteButton
+                    iconOnly
+                    compact
+                    className="conversation-delete"
+                    target={t('对话：') + conversation.title}
+                    revision={conversation.id + ':' + conversation.title}
+                    active={!collapsed}
+                    aria-label={t('删除对话：') + conversation.title}
+                    onConfirm={() => {
+                      const active = preparation.activeConversation === conversation.id;
+                      preparation.deleteConversation(conversation.id);
+                      if (active) onNavigate('preparation');
+                    }}
+                  />
+                </div>
+              );
+            })}
         </div>
       )}
       <div className="sidebar-bottom">
@@ -188,12 +188,12 @@ export function Sidebar({
           <div className="sidebar-status-row">
             <SidebarUpdate />
           </div>
-          {!collapsed && connection.error && (
+          <InterviewReveal className="sidebar-retry-reveal">{!collapsed && connection.error && (
             <button className="status-retry" onClick={() => void connection.load(true, true)}>
               <Refresh size={14} />
               {t('重新加载模型')}
             </button>
-          )}
+          )}</InterviewReveal>
         </div>
         <DropdownMenu.Root>
           <DropdownMenu.Trigger asChild>
@@ -203,7 +203,7 @@ export function Sidebar({
                 <strong title={accountLabel}>{accountLabel}</strong>
                 <small className={lowUsage ? 'account-usage-low' : undefined}>{remaining}</small>
               </span>
-              <ChevronsUpDown size={15} />
+              <DropdownMenu.TriggerChevron />
             </button>
           </DropdownMenu.Trigger>
           <DropdownMenu.Portal>

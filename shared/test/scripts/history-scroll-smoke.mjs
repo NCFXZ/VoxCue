@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -20,28 +21,23 @@ try {
   const main = await connectUiAccount(app, await app.firstWindow());
   main.setDefaultTimeout(15000);
   main.on('pageerror', (error) => errors.push(error.message));
-  await main.evaluate(() => {
+  await evaluateHistory(main, async () => {
     const now = Date.now();
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify(
-        Array.from({ length: 60 }, (_, index) => ({
-          id: 'scroll-fixture-' + index,
-          title:
-            'Scroll fixture ' +
-            (index < 30 ? 'group-a ' : 'group-b ') +
-            String(index).padStart(2, '0'),
-          titleStatus: 'ready',
-          titleSource: 'manual',
-          startedAt: now - (index + 1) * 86400000,
-          endedAt: now - (index + 1) * 86400000 + 60000,
-          status: 'ended',
-          mock: false,
-          transcripts: [],
-          answers: [],
-        })),
-      ),
-    );
+    await fixtureHistory.replace(Array.from({ length: 60 }, (_, index) => ({
+      id: 'scroll-fixture-' + index,
+      title:
+        'Scroll fixture ' +
+        (index < 30 ? 'group-a ' : 'group-b ') +
+        String(index).padStart(2, '0'),
+      titleStatus: 'ready',
+      titleSource: 'manual',
+      startedAt: now - (index + 1) * 86400000,
+      endedAt: now - (index + 1) * 86400000 + 60000,
+      status: 'ended',
+      mock: false,
+      transcripts: [],
+      answers: [],
+    })));
   });
   await main.getByRole('button', { name: '面试记录', exact: true }).click();
   const list = main.locator('.history-page .management-scroll');

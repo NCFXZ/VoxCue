@@ -74,6 +74,13 @@ export function translateUI(
   // Explicit template/value calls above can contain arbitrarily long user data;
   // reverse matching is limited to bounded, application-owned UI messages.
   if (source.length > 16 * 1024 || !/\p{Script=Han}/u.test(source)) return source;
+  // A response can carry several independent application notices. Only split
+  // a block when every line is known copy, preserving arbitrary provider text.
+  if (source.includes('\n')) {
+    const lines = source.split('\n');
+    if (lines.every(line => Object.hasOwn(uiMessages, line)))
+      return lines.map(line => uiMessages[line]).join('\n');
+  }
   for (const entry of patterns) {
     const captures = captureValues(source, entry.parts);
     if (captures) {

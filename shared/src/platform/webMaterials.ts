@@ -6,6 +6,7 @@ export function installWebMaterials() {
   const root = document.documentElement;
   let frame = 0;
   const measured = new Set<Element>();
+  const scrollbarWidths = new WeakMap<Element, number>();
   const setProperty = (element: HTMLElement, name: string, value: string) => {
     if (element.style.getPropertyValue(name) !== value) element.style.setProperty(name, value);
   };
@@ -40,7 +41,7 @@ export function installWebMaterials() {
         setProperty(
           workspace,
           '--page-scrollbar-width',
-          Math.max(0, scroll.offsetWidth - scroll.clientWidth) + 'px',
+          (scrollbarWidths.get(scroll) ?? 0) + 'px',
         );
       }
     }
@@ -60,7 +61,7 @@ export function installWebMaterials() {
       setProperty(
         panel,
         '--panel-scrollbar-width',
-        Math.max(0, scroll.offsetWidth - scroll.clientWidth) + 'px',
+        (scrollbarWidths.get(scroll) ?? 0) + 'px',
       );
       setProperty(
         panel,
@@ -72,9 +73,8 @@ export function installWebMaterials() {
       '.floating-panels .floating-panel, .interview-preview-scene .floating-panel',
     )) {
       const header = panel.querySelector<HTMLElement>(':scope > header')!;
-      const recovery = panel.querySelector<HTMLElement>(':scope > .floating-audio-recovery');
       const composer = panel.querySelector<HTMLElement>(':scope > .floating-composer');
-      for (const node of [panel, header, recovery, composer]) {
+      for (const node of [panel, header, composer]) {
         if (!node) continue;
         current.add(node);
         if (!measured.has(node)) resize.observe(node);
@@ -82,22 +82,12 @@ export function installWebMaterials() {
       if (!panel.clientHeight) continue;
       // Chromium snaps borders to device pixels at fractional display scales.
       setProperty(panel, '--floating-panel-border-width', getComputedStyle(panel).borderLeftWidth);
-      const scroll = panel.querySelector<HTMLElement>(':scope > .floating-scroll')!;
-      const following =
-        !!panel.closest('.floating-panels') &&
-        scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 1;
       setProperty(panel, '--floating-header-height', header.getBoundingClientRect().height + 'px');
-      setProperty(
-        panel,
-        '--floating-recovery-height',
-        (recovery?.getBoundingClientRect().height ?? 0) + 'px',
-      );
       setProperty(
         panel,
         '--floating-composer-height',
         (composer?.getBoundingClientRect().height ?? 0) + 'px',
       );
-      if (following) scroll.scrollTop = scroll.scrollHeight;
     }
     for (const node of measured) if (!current.has(node)) resize.unobserve(node);
     measured.clear();
@@ -110,7 +100,20 @@ export function installWebMaterials() {
         refresh();
       });
   };
-  const resize = new ResizeObserver(schedule);
+  const resize = new ResizeObserver(entries => {
+    for (const entry of entries) {
+      const scroll = entry.target;
+      if (!scroll.matches('.management-scroll, .personal-panel-scroll, .record-answer-scroll, .settings-content-body')) continue;
+      // offsetWidth and clientWidth round separately to whole CSS pixels. The
+      // occupied gutter is a whole number of device pixels, including at 175% DPI.
+      const style = getComputedStyle(scroll);
+      const edges = parseFloat(style.paddingLeft) + parseFloat(style.paddingRight) +
+        parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+      const gutter = entry.borderBoxSize[0].inlineSize - entry.contentBoxSize[0].inlineSize - edges;
+      scrollbarWidths.set(scroll, Math.max(0, Math.round(gutter * devicePixelRatio)) / devicePixelRatio);
+    }
+    schedule();
+  });
   const scope = new MutationObserver(schedule);
   scope.observe(root, { attributes: true, attributeFilter: ['class'] });
   const content = new MutationObserver(schedule);

@@ -30,11 +30,16 @@ export function registerRemoteConnectionIpc(options: {
     const pairing = call.op === 'start' || call.op === 'pair' ? service.pairing() : undefined;
     return { state: viewState(service.state()), ...(pairing ? { pairing } : {}) };
   });
+  handleDesktop('remote:ready', (event, ...args: unknown[]) => {
+    requireInterview(event);
+    if (args.length) throw Error('Invalid remote request');
+    return service.waitForSnapshotSlot();
+  });
   handleDesktop('remote:publish', (event, ...args: unknown[]) => {
     requireInterview(event);
     if (args.length !== 1) throw Error('Invalid remote snapshot');
-    const snapshot = validateRemoteSnapshot(args[0]);
-    if (coordinator.publish(snapshot)) service.updateSnapshot(snapshot);
+    const { snapshot, serialized } = validateRemoteSnapshot(args[0]);
+    if (coordinator.publish(snapshot)) service.updateSnapshot(snapshot, serialized);
   });
   handleDesktop('remote:complete', (event, ...args: unknown[]) => {
     requireInterview(event);

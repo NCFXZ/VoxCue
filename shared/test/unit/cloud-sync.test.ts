@@ -12,6 +12,7 @@ import {
   unpackCloudItem,
   type LocalSyncItem,
 } from '../../src/services/cloudData';
+import { movedCloudItems, movedProfileHash, recordMovedCloudItems } from '../../src/services/migrationSyncProtection';
 import {
   validCloudSyncCall,
   type CloudResource,
@@ -32,8 +33,8 @@ it('refreshing capacity only reads cloud metadata, without starting an upload or
   await f.engine.refreshStorage();
   expect(f.calls.map((call) => call.action)).toEqual(['list']);
 });
-function fixture(saved?: SyncSaved) {
-  const local = new Map<string, { kind: SyncKind; blob: Blob; parent?: string }>();
+function fixture(saved?: SyncSaved, moved?: ReturnType<typeof movedCloudItems>) {
+  const local = new Map<string, { kind: SyncKind; blob: Blob; parent?: string; localRevision?: string; digest?: LocalSyncItem['digest']; read?: () => Promise<Blob> }>();
   const remote = new Map<string, CloudResource & { blob: Blob }>();
   const uploads = new Map<
     string,
@@ -50,6 +51,7 @@ function fixture(saved?: SyncSaved) {
   const calls: CloudSyncCall[] = [];
   const applied: string[] = [];
   let stored: SyncSaved | undefined = saved;
+  const persist = vi.fn(async (value: SyncSaved) => { stored = structuredClone(value); });
   let view: SyncView = { preferences: defaultSyncPreferences(), marks: {}, busy: false };
   let hook: ((c: CloudSyncCall) => Promise<CloudSyncResult | undefined>) | undefined;
   let listHook: ((kind: SyncKind) => void) | undefined;
@@ -80,6 +82,12 @@ function fixture(saved?: SyncSaved) {
   const ports: ConstructorParameters<typeof CloudSyncEngine>[0] = {
     userId,
     saved,
+    moved,
+    profileVersion: () => local.get('profile:main')?.blob ?? null,
+    get: async (kind, key) => {
+      const item = local.get(key);
+      if (item?.kind === kind) return { key, kind, parent: item.parent, localRevision: item.localRevision, digest: item.digest, blob: item.read ?? (async () => item.blob) };
+    },
     list: async (kind) => {
       const items = [...local]
         .filter(([, i]) => i.kind === kind)
@@ -87,7 +95,9 @@ function fixture(saved?: SyncSaved) {
           key,
           kind,
           parent: i.parent,
-          blob: async () => i.blob,
+          localRevision: i.localRevision,
+          digest: i.digest,
+          blob: i.read ?? (async () => i.blob),
         }));
       listHook?.(kind);
       return items;
@@ -103,9 +113,7 @@ function fixture(saved?: SyncSaved) {
         blob,
       });
     },
-    persist: async (value) => {
-      stored = structuredClone(value);
-    },
+    persist,
     emit: (value) => {
       view = value;
       viewHook?.(value);
@@ -229,6 +237,7 @@ function fixture(saved?: SyncSaved) {
   };
   let engine = new CloudSyncEngine(ports);
   return {
+    ports,
     get engine() {
       return engine;
     },
@@ -242,6 +251,7 @@ function fixture(saved?: SyncSaved) {
     local,
     remote,
     calls,
+    persist,
     applied,
     uploads,
     get view() {
@@ -280,6 +290,271 @@ function fixture(saved?: SyncSaved) {
   };
 }
 describe('cloud sync consistency and backpressure', () => {
+  it('rechecks an old image after pending remote records, including a failed restore and restart', async () => {
+    const f = fixture(), id = crypto.randomUUID(), image = 'image:' + id, record = 'record:next';
+    f.put(image, 'history', 'synthetic image bytes');
+    await f.enable('history');
+    const stored = [...f.remote.values()].find(r => r.name === image)!;
+    f.local.delete(image);
+    const recordBlob = new Blob(['synthetic next record']);
+    const remoteId = crypto.randomUUID();
+    f.remote.set(remoteId, { ...stored, id: remoteId, name: record, headVersion: crypto.randomUUID(),
+      blob: recordBlob, bytes: recordBlob.size, sha256: await digestCloudBlob(recordBlob) });
+    const get = f.ports.get;
+    f.ports.get = async (kind, key) => {
+      const entry = await get(kind, key);
+      return entry && key === record ? { ...entry, dependencies: [image] } : entry;
+    };
+    let fail = true;
+    f.ports.apply = async (key, blob, _expected, _guard, readMissingImage) => {
+      expect(key).toBe(record);
+      if (fail) throw Error('synthetic interrupted transfer');
+      const recovered = await readMissingImage!(id);
+      expect(await recovered!.text()).toBe('synthetic image bytes');
+      f.local.set(image, { kind: 'history', blob: recovered! });
+      f.local.set(record, { kind: 'history', blob });
+    };
+    f.restart();
+    await f.engine.request();
+    expect(f.view.marks[record].status).toBe('error');
+    expect(f.remote.get(stored.id)?.headVersion).toBe(stored.headVersion);
+    fail = false;
+    f.restart();
+    await f.engine.request();
+    expect(f.view.marks[record].status).toBe('synced');
+    expect(f.view.marks[image].status).toBe('synced');
+    expect(f.calls.filter(call => call.action === 'remove')).toHaveLength(0);
+  });
+  it('resumes cleanup after an acknowledged upload and never deletes the current head', async () => {
+    const f = fixture(), key = 'profile:main';
+    f.put(key, 'profile', 'first');
+    await f.enable('profile');
+    const resource = [...f.remote.values()][0], oldVersion = resource.headVersion!, oldRevision = resource.revision;
+    let fail = true;
+    f.setHook(async call => {
+      if (call.action === 'versions') return fail ? { ok: false, status: 503, error: 'offline' } :
+        { ok: true, value: { items: [
+          { id: oldVersion, revision: oldRevision }, { id: resource.headVersion, revision: resource.revision },
+          { id: crypto.randomUUID(), revision: resource.revision + 1 },
+        ] } };
+      if (call.action === 'prune') return { ok: true, value: {} };
+    });
+    f.put(key, 'profile', 'second');
+    await f.engine.request();
+    expect(f.saved.baselines[key].cleanupPending).toBe(true);
+    f.restart();
+    fail = false;
+    f.calls.length = 0;
+    await f.engine.request();
+    expect(f.calls.filter(c => c.action === 'prune').map(c => c.version)).toEqual([oldVersion]);
+    expect(f.saved.baselines[key].cleanupPending).toBeUndefined();
+    expect(f.view.marks[key].status).toBe('synced');
+  });
+  it('checks the profile once and leaves unchanged baselines on disk during an idle poll', async () => {
+    const f = fixture();
+    f.put('profile:main', 'profile', 'synthetic profile');
+    for (let n = 0; n < 12; n++) f.put('record:r' + n, 'history', 'record ' + n);
+    await f.enable('profile', 'history');
+    const lists = vi.fn();
+    f.setListHook(lists);
+    f.persist.mockClear();
+    await f.engine.request();
+    expect(lists.mock.calls.map(([kind]) => kind)).toEqual(['profile', 'history']);
+    expect(f.persist).not.toHaveBeenCalled();
+    expect(f.view.marks['record:r11'].status).toBe('synced');
+  });
+  it('reads image bytes only on upload and refuses a revision that no longer identifies them', async () => {
+    const f = fixture();
+    const key = 'image:' + crypto.randomUUID();
+    const blob = new Blob(['first']);
+    const digest = vi.fn(async () => digestCloudBlob(blob));
+    const read = vi.fn(async () => blob);
+    f.local.set(key, { kind: 'history', blob, digest, read });
+    await f.enable('history');
+    expect(read).toHaveBeenCalledTimes(1);
+    digest.mockClear();
+    await f.engine.request(true);
+    expect(digest).toHaveBeenCalledTimes(1);
+    expect(read).toHaveBeenCalledTimes(1);
+    expect(f.view.marks[key].status).toBe('synced');
+    digest.mockImplementation(async () => digestCloudBlob(new Blob(['replacement'])));
+    f.calls.length = 0;
+    await f.engine.request(true);
+    expect(f.view.marks[key].status).toBe('conflict');
+    expect(f.calls.some(c => c.action === 'begin')).toBe(false);
+  });
+  it('skips unchanged interview bodies on periodic sync and reads an edited revision', async () => {
+    const f = fixture(), blob = new Blob(['initial record']);
+    const read = vi.fn(async () => blob);
+    const key = 'record:synthetic';
+    const item = { kind: 'history' as const, blob, localRevision: crypto.randomUUID(), read };
+    f.local.set(key, item);
+    await f.enable('history');
+    expect(read).toHaveBeenCalledTimes(1);
+    await f.engine.request(true);
+    expect(read).toHaveBeenCalledTimes(1);
+    item.localRevision = crypto.randomUUID();
+    read.mockResolvedValue(new Blob(['edited record']));
+    await f.engine.request(true);
+    expect(read).toHaveBeenCalledTimes(2);
+    expect(f.view.marks[key].status).toBe('synced');
+  });
+  it('keeps moved records in the cloud and syncs only visible profile fields on this device', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    try {
+      const undo = recordMovedCloudItems('account:' + userId, ['record:original'], ['name']);
+      expect(movedCloudItems('another-account').fields.size).toBe(0);
+      undo();
+      expect(storage.size).toBe(0);
+      const moved = movedCloudItems(userId);
+      const f = fixture(undefined, moved);
+      const key = 'profile:main';
+      const profile = (name: string, background: string) =>
+        packCloudItem(key, JSON.stringify({ name, background, jobDescription: '' }));
+      const put = (name: string, background: string) => f.local.set(key, { kind: 'profile', blob: profile(name, background) });
+      put('源姓名', '原摘要');
+      f.put('record:original', 'history', 'record from source');
+      await f.enable('profile', 'history');
+      const remote = [...f.remote.values()].find((r) => r.name === key)!;
+      const initial = remote.revision;
+      recordMovedCloudItems(userId, ['record:original'], ['name']);
+      Object.assign(moved, movedCloudItems(userId));
+      put('', '原摘要');
+      f.local.delete('record:original');
+      f.restart();
+      f.calls.length = 0;
+      await f.engine.request(true);
+      expect(remote.revision).toBe(initial);
+      expect(f.calls.some((c) => ['remove', 'complete'].includes(c.action))).toBe(false);
+      expect(f.local.has('record:original')).toBe(false);
+      put('', '修改未迁移字段');
+      await f.engine.request(true);
+      const read = async (blob: Blob) => JSON.parse(await (await unpackCloudItem(key, blob)).payload.text());
+      expect(await read(remote.blob)).toMatchObject({ name: '源姓名', background: '修改未迁移字段' });
+      const updated = profile('其他设备的新姓名', '其他设备的新摘要');
+      Object.assign(remote, { revision: remote.revision + 1, headVersion: crypto.randomUUID(), blob: updated,
+        bytes: updated.size, sha256: await digestCloudBlob(updated) });
+      await f.engine.request(true);
+      expect(await read(f.local.get(key)!.blob)).toMatchObject({ name: '', background: '其他设备的新摘要' });
+      expect(await read(remote.blob)).toMatchObject({ name: '其他设备的新姓名' });
+      expect(f.local.has('record:original')).toBe(false);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it('pulls visible remote edits on the first automatic sync after a partial move and again after restart', async () => {
+    const storage = new Map<string, string>();
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => storage.set(key, value),
+      removeItem: (key: string) => storage.delete(key),
+    });
+    try {
+      const moved = movedCloudItems(userId);
+      const f = fixture(undefined, moved);
+      const key = 'profile:main';
+      const profile = (name: string, background: string) => JSON.stringify({ name, background, jobDescription: '' });
+      const local = (raw: string) => f.local.set(key, { kind: 'profile', blob: packCloudItem(key, raw) });
+      const original = profile('Migrated', 'Original');
+      const visible = profile('', 'Original');
+      local(original);
+      await f.enable('profile');
+      const remote = [...f.remote.values()][0];
+      recordMovedCloudItems(userId, [], ['name'], {
+        before: await movedProfileHash(original), after: await movedProfileHash(visible),
+      });
+      local(visible);
+      for (const updated of ['First remote edit', 'Second remote edit']) {
+        const blob = packCloudItem(key, profile(updated + ' hidden', updated));
+        Object.assign(remote, {
+          revision: remote.revision + 1, headVersion: crypto.randomUUID(), blob,
+          bytes: blob.size, sha256: await digestCloudBlob(blob),
+        });
+        Object.assign(moved, movedCloudItems(userId));
+        f.restart();
+        f.calls.length = 0;
+        await f.engine.request(true);
+        expect(f.view.marks[key].status).toBe('synced');
+        expect(await (await unpackCloudItem(key, f.local.get(key)!.blob)).payload.text()).toBe(profile('', updated));
+        expect(f.calls.some(c => ['begin', 'complete', 'remove'].includes(c.action))).toBe(false);
+      }
+      // Genuine concurrent edits of a visible field still need the user's decision.
+      local(profile('', 'Unsynced local edit'));
+      const other = packCloudItem(key, profile('Still hidden', 'Concurrent remote edit'));
+      Object.assign(remote, {
+        revision: remote.revision + 1, headVersion: crypto.randomUUID(), blob: other,
+        bytes: other.size, sha256: await digestCloudBlob(other),
+      });
+      await f.engine.request(true);
+      expect(f.view.marks[key].status).toBe('conflict');
+      expect(await (await unpackCloudItem(key, f.local.get(key)!.blob)).payload.text())
+        .toBe(profile('', 'Unsynced local edit'));
+      await f.engine.resolve(key, 'cloud');
+      expect(await (await unpackCloudItem(key, f.local.get(key)!.blob)).payload.text())
+        .toBe(profile('', 'Concurrent remote edit'));
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+  it.each(['history', 'knowledgebase'] as const)(
+    'preserves unrelated %s badges before, during and after a concurrent edit',
+    async (kind) => {
+      const f = fixture();
+      const library = kind === 'knowledgebase';
+      const key = (id: string) => (library ? 'file:' : 'record:') + id;
+      const edit = (id: string, content: string) => {
+        f.put(key(id), kind, content, library ? 'base:' + id : undefined);
+        f.engine.dirty(kind, library ? [key(id), 'base:' + id] : [key(id)]);
+      };
+      for (const id of ['a', 'b', 'c']) {
+        if (library) f.put('base:' + id, kind, id);
+        edit(id, id);
+      }
+      await f.enable(kind);
+      const unaffected: string[] = [];
+      f.setViewHook(({ marks }) => {
+        unaffected.push(marks[key('c')].status);
+        if (library) unaffected.push(marks['base:c'].status);
+      });
+      edit('a', 'updated A');
+      await f.engine.idle();
+      expect(f.view.marks[key('a')].status).toBe('unsynced');
+      expect(f.view.marks[key('b')].status).toBe('synced');
+      if (library) expect(f.view.marks['base:a'].status).toBe('unsynced');
+      let observed = false;
+      f.setHook(async (call) => {
+        if (call.action !== 'begin' || f.remote.get(call.id)?.name !== key('a')) return;
+        edit('b', 'updated B');
+        await vi.waitFor(() => {
+          expect(f.view.marks[key('a')].status).toBe('syncing');
+          expect(f.view.marks[key('b')].status).toBe('unsynced');
+          if (library) expect(f.view.marks['base:a'].status).toBe('syncing');
+        });
+        observed = true;
+      });
+      await f.engine.request();
+      expect(observed).toBe(true);
+      expect(new Set(unaffected)).toEqual(new Set(['synced']));
+      expect(Object.values(f.view.marks).every((mark) => mark.status === 'synced')).toBe(true);
+      f.engine.stop();
+    },
+  );
+  it('keeps saved records awaiting verification until the first listing returns', async () => {
+    const f = fixture();
+    f.put('record:a', 'history', 'a');
+    await f.enable('history');
+    f.restart();
+    const work = f.engine.request();
+    expect(f.view.marks['record:a'].status).toBe('checking');
+    await work;
+    expect(f.view.marks['record:a'].status).toBe('synced');
+    f.engine.stop();
+  });
   it('coalesces thousand-record summaries inside the engine and flushes request/idle before returning', async () => {
     vi.useFakeTimers();
     const blob = new Blob(['synthetic record']);
@@ -308,6 +583,7 @@ describe('cloud sync consistency and backpressure', () => {
       },
       list: async () =>
         resources.map((r) => ({ key: r.name, kind: 'history', blob: async () => blob })),
+      get: async () => { throw Error('No restore expected'); },
       persist: async () => {},
       apply: async () => {
         throw Error('No restore expected');
@@ -601,6 +877,30 @@ describe('cloud sync consistency and backpressure', () => {
     for (const index of [0, 1, 2])
       expect(f.calls.filter((c) => c.action === 'put' && c.index === index)).toHaveLength(1);
   });
+  it('releases interrupted uploads for deleted originals before using the shared slots again', async () => {
+    const f = fixture();
+    for (let index = 0; index < 4; index++) f.put('record:' + index, 'history', 'record');
+    f.setHook(async (call) => call.action === 'put' ? { ok: false, status: 0, error: 'offline' } : undefined);
+    await f.enable('profile', 'history');
+    expect(Object.keys(f.saved.uploads!)).toHaveLength(4);
+    f.local.clear();
+    f.put('profile:main', 'profile', 'new profile');
+    // One resource was already removed remotely. Another lost its begin acknowledgement.
+    const missing = [...f.remote.values()].find((r) => r.name === 'record:0')!;
+    f.remote.delete(missing.id);
+    delete f.saved.uploads!['record:1'].id;
+    f.restart();
+    f.setHook(async (call) => call.action === 'abort' ? { ok: false, status: 0, error: 'offline' } : undefined);
+    await f.engine.request();
+    expect(Object.keys(f.saved.uploads!)).toHaveLength(4);
+    f.setHook(undefined);
+    f.calls.length = 0;
+    await f.engine.request(true);
+    expect(f.calls.filter((call) => call.action === 'abort')).toHaveLength(4);
+    expect([...f.uploads.values()].every((upload) => upload.complete)).toBe(true);
+    expect(f.saved.uploads).toEqual({});
+    expect(f.view.marks['profile:main'].status).toBe('synced');
+  });
   it('uses three-way comparison and preserves remote deletion until explicit resume', () => {
     const b = { id: userId, revision: 1, hash: 'base' };
     expect(decideSync('same', 'same')).toBe('same');
@@ -881,6 +1181,8 @@ describe('cloud sync consistency and backpressure', () => {
     f.local.clear();
     f.restart(true);
     const observed: string[] = [];
+    const lists = vi.fn();
+    f.setListHook(lists);
     f.setHook(async (call) => {
       if (call.action === 'read' && f.local.has('base:a')) {
         await vi.waitFor(() => {
@@ -893,6 +1195,7 @@ describe('cloud sync consistency and backpressure', () => {
     });
     await f.engine.request();
     expect(observed.length).toBeGreaterThan(0);
+    expect(lists.mock.calls.map(([kind]) => kind)).toEqual(['knowledgebase']);
     expect(f.applied).toEqual(['base:a', 'file:a', 'base:b', 'file:b']);
     expect(f.saved.baselines['file:a'].parent).toBe('base:a');
     expect(f.saved.baselines['file:b'].parent).toBe('base:b');
@@ -1084,12 +1387,35 @@ describe('cloud sync consistency and backpressure', () => {
     expect(f.applied).toEqual([]);
     expect(f.view.marks['profile:main'].status).toBe('error');
   });
-  it('honors server retry-after globally instead of hammering every queued item', async () => {
+  it('resumes an interview-deferred upload from its last chunk and discovers the newly archived record', async () => {
+    const f = fixture();
+    await f.enable('history');
+    f.put('record:manual', 'history', 'keep local');
+    await f.engine.pause('record:manual');
+    f.put('record:partial', 'history', new Uint8Array(1048577));
+    f.setHook(async call => call.action === 'put' && call.index === 1
+      ? { ok: false, status: 503, deferred: 'interview', error: '面试期间暂停同步。' }
+      : undefined);
+    await f.engine.request();
+    expect(f.view.error).toBeUndefined();
+    expect(f.view.marks['record:partial'].status).toBe('checking');
+    const partialUploadId = f.saved.uploads?.['record:partial']?.id;
+    expect(partialUploadId).toBeTruthy();
+    f.put('record:finished', 'history', 'archived by the interview window');
+    f.setHook(undefined);
+    f.calls.length = 0;
+    await f.engine.request();
+    expect(f.calls.flatMap(call => call.action === 'put' && call.id === partialUploadId ? [call.index] : [])).toEqual([1]);
+    expect(f.view.marks['record:partial'].status).toBe('synced');
+    expect(f.view.marks['record:finished'].status).toBe('synced');
+    expect(f.view.marks['record:manual'].status).toBe('paused');
+  });
+  it.each([429, 503])('honors server %i retry-after globally instead of hammering every queued item', async status => {
     const f = fixture();
     for (let i = 0; i < 100; i++) f.put('file:d' + i, 'knowledgebase', 'file');
     f.setHook(async (c) =>
       c.action === 'begin'
-        ? { ok: false, status: 429, error: 'rate limited', retryAfterSeconds: 300 }
+        ? { ok: false, status, error: 'rate limited', retryAfterSeconds: 300 }
         : undefined,
     );
     await f.enable('knowledgebase');

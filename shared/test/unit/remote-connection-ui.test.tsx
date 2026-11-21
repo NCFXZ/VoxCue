@@ -140,6 +140,7 @@ it('renders interview device interruption inline without activating a recovery m
   const render = () => renderToStaticMarkup(<RemoteConnectionRecovery onSettings={() => {}} />);
   const html = render();
   expect(html).toContain('class="audio-recovery" role="alert"');
+  expect(html).toContain('aria-label="关闭提示"');
   expect(html).toContain('设备连接已中断');
   expect(html).toContain('电脑继续转录和回答。设备恢复网络后可重新连接。');
   expect(html).toContain('重新连接设备');

@@ -16,18 +16,62 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [await offlineElectronEntry()], env });
 try {
   await installUiAccount(app, { components: true });
-  await app.evaluate(({ app }) => {
+  const indexVersion = await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
-    const { KnowledgeHost } = require(
-      app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
-    );
+    const root = app.getAppPath() + '/dist-electron/shared/electron/';
+    const { KnowledgeHost } = require(root + 'backend/knowledge/host.js');
+    const { KnowledgeCoordinator } = require(root + 'application/knowledge.js');
+    const { KNOWLEDGE_INDEX_VERSION } = require(root + 'contracts/knowledge.js');
+    const indexed = new Map(), imports = [];
+    let batch;
+    const publish = (host, documents) => {
+      // All staged entries become readable before the first completion event.
+      for (const doc of documents) indexed.set(doc.documentId, doc);
+      for (const doc of documents) host.progress({
+        documentId: doc.documentId, indexVersion: doc.indexVersion, phase: 'ready', completed: 1, total: 1,
+      });
+    };
+    globalThis.cloudRestoreUi = { imports, forget: (id) => indexed.delete(id) };
     KnowledgeHost.prototype.initialize = async () => {};
-    KnowledgeHost.prototype.listDocuments = async () => [];
-    KnowledgeHost.prototype.indexDocument = async ({ documentId }) => ({ documentId });
-    KnowledgeHost.prototype.invalidateDocument = async () => null;
-    KnowledgeHost.prototype.removeDocument = async () => null;
+    KnowledgeHost.prototype.listDocuments = async () => [...indexed.values()];
+    KnowledgeHost.prototype.beginIndexBatch = async (id) => {
+      if (batch) throw Error('Synthetic index batch already active');
+      batch = { id, documents: [] };
+    };
+    KnowledgeHost.prototype.finishIndexBatch = async function (id, commit) {
+      if (id !== batch?.id) {
+        if (commit) throw Error('Unknown synthetic index batch');
+        return;
+      }
+      const { documents } = batch;
+      batch = undefined;
+      if (commit) publish(this, documents);
+    };
+    KnowledgeHost.prototype.indexDocument = async function ({ documentId, baseId, name, batchId }) {
+      if (batchId !== batch?.id) throw Error('Unexpected synthetic index batch');
+      imports.push(documentId);
+      const document = { documentId, baseId, name, available: true, indexVersion: KNOWLEDGE_INDEX_VERSION };
+      if (batch) batch.documents.push(document);
+      else publish(this, [document]);
+      return document;
+    };
+    KnowledgeHost.prototype.invalidateDocument = async (id) => {
+      const doc = indexed.get(id);
+      if (doc) indexed.set(id, { ...doc, available: false });
+      return null;
+    };
+    KnowledgeHost.prototype.removeDocument = async (id) => { indexed.delete(id); };
+    KnowledgeHost.prototype.removeBase = async (baseId) => {
+      for (const doc of indexed.values()) if (doc.baseId === baseId) indexed.delete(doc.documentId);
+    };
+    const call = KnowledgeCoordinator.prototype.call;
+    KnowledgeCoordinator.prototype.call = async function (input) {
+      const result = await call.call(this, input);
+      return input.op === 'status' ? { ...result, modelReady: true } : result;
+    };
+    return KNOWLEDGE_INDEX_VERSION;
   });
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
@@ -113,7 +157,7 @@ try {
       page,
       async (expected) => {
         const db = await new Promise((resolve) => {
-          const r = indexedDB.open('copilot-local-documents', 1);
+          const r = indexedDB.open('copilot-local-documents');
           r.onsuccess = () => resolve(r.result);
         });
         const docs = await new Promise((resolve) => {
@@ -185,7 +229,7 @@ try {
   await base.locator('.document-row').filter({ hasText: 'document.pdf' }).waitFor();
   const bytes = await page.evaluate(async () => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('copilot-local-documents', 1);
+      const request = indexedDB.open('copilot-local-documents');
       request.onsuccess = () => resolve(request.result);
       request.onerror = () => reject(request.error);
     });
@@ -219,10 +263,6 @@ try {
       crypto = require('node:crypto');
     const root = path.join(app.getAppPath(), 'dist-electron/shared/electron');
     const { CloudSyncClient } = require(path.join(root, 'backend/cloud/sync.js'));
-    const { KnowledgeHost } = require(path.join(root, 'backend/knowledge/host.js'));
-    const { KnowledgeCoordinator } = require(path.join(root, 'application/knowledge.js'));
-    const indexed = new Map(),
-      imports = [];
     let release, releaseOther;
     const held = new Promise((resolve) => {
       release = resolve;
@@ -230,25 +270,8 @@ try {
     const otherHeld = new Promise((resolve) => {
       releaseOther = resolve;
     });
-    globalThis.cloudRestoreUi = { imports, release, releaseOther, forget: (id) => indexed.delete(id) };
-    KnowledgeHost.prototype.listDocuments = async () => [...indexed.values()];
-    KnowledgeHost.prototype.indexDocument = async function (input) {
-      imports.push(input.documentId);
-      const document = {
-        documentId: input.documentId,
-        baseId: input.baseId,
-        name: input.name,
-        available: true,
-      };
-      indexed.set(input.documentId, document);
-      this.progress({ documentId: input.documentId, phase: 'ready', completed: 1, total: 1 });
-      return document;
-    };
-    const call = KnowledgeCoordinator.prototype.call;
-    KnowledgeCoordinator.prototype.call = async function (input) {
-      const result = await call.call(this, input);
-      return input.op === 'status' ? { ...result, modelReady: true } : result;
-    };
+    globalThis.cloudRestoreUi.imports.length = 0;
+    Object.assign(globalThis.cloudRestoreUi, { release, releaseOther });
     const pack = (key, bytes, metadata) => {
       const header = Buffer.from(JSON.stringify({ v: 1, key, ...(metadata ? { metadata } : {}) }));
       const prefix = Buffer.alloc(8);
@@ -362,10 +385,11 @@ try {
   await page.getByRole('button', { name: '知识库', exact: true }).click();
   await page.getByRole('button', { name: '云端资料A：正在同步', exact: true }).waitFor();
   assert.equal(await page.locator('.knowledge-card').filter({ hasText: '云端资料B' }).count(), 0);
-  await waitForAsync(page, async () => {
+  await waitForAsync(page, async (version) => {
     const result = await window.desktop.knowledge({ op: 'status' });
-    return result.ok && result.value.documents.some((doc) => doc.documentId === 'a-1');
-  });
+    return result.ok && result.value.documents.some((doc) =>
+      doc.documentId === 'a-1' && doc.available && doc.indexVersion === version);
+  }, indexVersion);
   const beforeRelease = ['a-1', ...readingFiles];
   const imported = [...beforeRelease, 'a-2', 'b-2', 'b-1'];
   await page.locator('.knowledge-card').filter({ hasText: '云端资料A' }).click();
@@ -417,10 +441,11 @@ try {
     .filter({ hasText: 'a-1.txt' })
     .getByText('索引完成', { exact: false })
     .waitFor();
-  await waitForAsync(page, async () => {
+  await waitForAsync(page, async (version) => {
     const result = await window.desktop.knowledge({ op: 'status' });
-    return result.ok && result.value.documents.some((doc) => doc.documentId === 'a-1');
-  });
+    return result.ok && result.value.documents.some((doc) =>
+      doc.documentId === 'a-1' && doc.available && doc.indexVersion === version);
+  }, indexVersion);
   assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [...imported, 'a-1']);
   await app.evaluate(() => globalThis.cloudRestoreUi.forget('a-1'));
   await page.reload();
@@ -429,6 +454,15 @@ try {
     return result.ok && result.value.documents.length === total;
   }, imported.length);
   assert.deepEqual(await app.evaluate(() => globalThis.cloudRestoreUi.imports), [...imported, 'a-1', 'a-1']);
+  await page.getByRole('button', { name: '知识库', exact: true }).click();
+  await page.getByRole('button', { name: '云端资料B：已同步', exact: true }).waitFor();
+  await page.locator('.knowledge-card').filter({ hasText: '云端资料A' }).click();
+  await page.getByRole('button', { name: '重命名', exact: true }).click();
+  await page.getByLabel('知识库名称', { exact: true }).fill('已编辑的资料A');
+  await page.getByRole('button', { name: '保存', exact: true }).click();
+  const renamed = page.getByRole('dialog', { name: '已编辑的资料A', exact: true });
+  await renamed.getByRole('button', { name: '已编辑的资料A：未同步', exact: true }).waitFor();
+  assert.equal(await page.locator('.knowledge-card-wrap .sync-indicator-button[aria-label="云端资料B：已同步"]').count(), 1);
   assert.deepEqual(errors, []);
   console.log(
     JSON.stringify({
@@ -446,6 +480,7 @@ try {
         'base deletion confirmation',
         'removed IPC',
         'cloud library order and syncing badge',
+        'editing one library preserves the other library sync badge',
         'reading position during same-library and other-library downloads',
         'cloud automatic indexing',
         'open-library index repair',

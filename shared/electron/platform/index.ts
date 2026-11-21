@@ -31,7 +31,7 @@ interface ResourceEnvironment {
   packaged: boolean;
 }
 
-/** Development installs own their runtime; portable weights and PNGs stay shared. */
+/** Development installs own their runtime and share model weights. */
 export function desktopResources(environment: ResourceEnvironment, platform: DesktopPlatform) {
   const { appPath, resourcesPath, packaged } = environment;
   const sharedPath = path.resolve(appPath, '../shared');
@@ -40,13 +40,6 @@ export function desktopResources(environment: ResourceEnvironment, platform: Des
     : path.join(sharedPath, 'local-models');
   return {
     icon: path.join(appPath, platform.iconFile),
-    // Browser branding always uses the shared PNG, including Windows whose
-    // native window icon is ICO. Vite copies this file into packaged dist/.
-    brandLogo: path.join(
-      packaged ? appPath : sharedPath,
-      packaged ? 'dist' : 'public',
-      'voxcue.png',
-    ),
     speechModels: path.join(modelRoot, 'speech'),
     qwenModels: undefined as string | undefined,
     qwenRuntime: platform.qwenRuntimeFile

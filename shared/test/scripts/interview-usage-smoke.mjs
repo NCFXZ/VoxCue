@@ -2,6 +2,7 @@ import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { assertSmoothFollow } from './assert-follow-latest.mjs';
 import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
@@ -49,7 +50,7 @@ try {
           50,
         );
       globalThis.usageSpeechStart = () => this.emit({ type: 'speech-start', source: 'system' });
-      globalThis.usageTranscript = (id, text, source = 'system', elapsedSilence = 800) => {
+      globalThis.usageTranscript = (id, text, source = 'system', elapsedSilence = 500) => {
         const at = Date.now();
         this.emit({ type: 'audio-progress', source, pending: true, processedThroughMs: at });
         this.emit({
@@ -60,7 +61,7 @@ try {
             source,
             final: true,
             startMs: at - elapsedSilence - 1000,
-            endMs: at - elapsedSilence + 800,
+            endMs: at - elapsedSilence + 500,
             silenceStartMs: at - elapsedSilence,
             reason: 'silence',
           },
@@ -124,7 +125,7 @@ try {
       (expected) => document.querySelector('[aria-label="面试提问"]').value === expected,
       expected,
     );
-    await new Promise((resolve) => setTimeout(resolve, 1300));
+    await new Promise((resolve) => setTimeout(resolve, 1000));
     assert.equal(
       (await requests()).length,
       0,
@@ -144,22 +145,22 @@ try {
     await completed(++count);
     const request = (await requests()).at(-1);
     assert.equal(request.turns.at(-1).content, phrase);
-    assert.ok(request.receivedAt - sentAt >= 1000 && request.receivedAt - sentAt < 5000);
+    assert.ok(request.receivedAt - sentAt >= 500 && request.receivedAt - sentAt < 5000);
     assert.equal(await question.inputValue(), '');
   }
-  // Delayed final decoding consumes the same 1800ms audio silence budget.
+  // Delayed final decoding consumes the same 1000ms audio silence budget.
   let lateAt = await app.evaluate(() =>
-    globalThis.usageTranscript('late-1200', '终稿延迟测试一', 'system', 1200),
+    globalThis.usageTranscript('late-900', '终稿延迟测试一', 'system', 900),
   );
   await completed(++count);
   let delay = (await requests()).at(-1).receivedAt - lateAt;
-  assert.ok(delay >= 600 && delay < 1400, '1200ms elapsed silence leaves about 600ms');
+  assert.ok(delay >= 100 && delay < 900, '900ms elapsed silence leaves about 100ms');
   lateAt = await app.evaluate(() =>
     globalThis.usageTranscript('late-2100', '终稿延迟测试二', 'system', 2100),
   );
   await completed(++count);
   delay = (await requests()).at(-1).receivedAt - lateAt;
-  assert.ok(delay < 900, 'expired silence budget adds no 1000ms wait');
+  assert.ok(delay < 500, 'expired silence budget adds no 500ms wait');
   await app.evaluate(() => {
     globalThis.usagePending = true;
   });
@@ -192,7 +193,7 @@ try {
   await completed(++count);
   const second = (await requests()).at(-1);
   assert.equal(second.turns.at(-1).content, longQuestion.trim());
-  assert.ok(second.receivedAt - sentAt >= 1000 && second.receivedAt - sentAt < 5000);
+  assert.ok(second.receivedAt - sentAt >= 500 && second.receivedAt - sentAt < 5000);
   const actual = await app.evaluate(() => globalThis.usageAnswer);
   await transcript('actual', actual, 'microphone');
   const followUp = '呃就是刚刚那个项目为啥没选Redis';
@@ -219,6 +220,8 @@ try {
   // Build a longer actual IPC conversation without waiting for synthetic
   // speech at every turn. Manual submission still uses the production store,
   // main context and provider boundary; all data remains in this temp profile.
+  const automaticSend = floating.getByRole('button', { name: '静音后自动提交完整问题', exact: true });
+  await automaticSend.click();
   const hiddenCorrection = '呃咱换一套走SQLite这边吧，归档库独立部署';
   for (let index = 0; index < 14; index++) {
     const topic = index < 2 ? '项目A' : '项目B';
@@ -241,6 +244,7 @@ try {
       'microphone',
     );
   }
+  await automaticSend.click();
   const completeHistory = (request) => {
     const data = JSON.parse(request.turns[0].content.split('\n').slice(1).join('\n'));
     assert.deepEqual(Object.keys(data).sort(), ['omittedOlderEntries', 'timeline']);
@@ -278,6 +282,14 @@ try {
     assert.ok(request.instructions.includes('60–90秒'));
     assert.equal(request.webSearch, false);
   }
+  await floating.emulateMedia({ reducedMotion: 'no-preference' });
+  for (const pane of ['.floating-transcript', '.floating-answer']) {
+    const scroller = floating.locator(pane + ' .floating-scroll');
+    await scroller.evaluate((node) => {
+      node.scrollTop = (node.scrollHeight - node.clientHeight) / 3;
+    });
+    await assertSmoothFollow(scroller, floating.locator(pane + ' > .follow-latest'));
+  }
   await floating.getByRole('button', { name: '结束面试', exact: true }).click();
   await Promise.all([
     floating.waitForEvent('close'),
@@ -285,7 +297,7 @@ try {
   ]);
   assert.deepEqual(errors, []);
   console.log(
-    'PASS: offline desktop IPC, pure filler auto-send filtering without provider requests, retained originals and manual send, effective short follow-ups, 1800ms audio silence deadline including delayed finals, backlog/resumption guards, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
+    'PASS: offline desktop IPC, pure filler auto-send filtering without provider requests, retained originals and manual send, effective short follow-ups, 1000ms audio silence deadline including delayed finals, backlog/resumption guards, repeated literal text, actual/AI identities, oral corrections and complete retained history across topics and follow-ups; no textRef or historySelection; model, effort and answer length preserved. Synthetic account/audio/provider only.',
   );
 } finally {
   await closeUiApp(app);

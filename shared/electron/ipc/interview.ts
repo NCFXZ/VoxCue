@@ -27,6 +27,7 @@ export function registerInterviewIpc(d: {
 }) {
   let active: { id: string; controller: AbortController } | undefined;
   let capture: AbortController | undefined;
+  let catalogRequests = new AbortController();
   const screenshots = new Map<string, { file: ChatFile; preview: string }>();
   const clearScreenshots = () => {
     capture?.abort();
@@ -96,10 +97,17 @@ export function registerInterviewIpc(d: {
       if (capture === controller) capture = undefined;
     }
   });
-  handleDesktop('interview:models', async (e) => {
+  handleDesktop('interview:models', async (e, force: unknown = false, ...extra) => {
     d.requireInterview(e);
+    if (!e.senderFrame || e.senderFrame !== e.sender.mainFrame) throw Error('Unauthorized frame');
+    if (typeof force !== 'boolean' || extra.length) throw Error('Invalid request');
+    if (d.isDemo() || !d.configuration()?.aiEnabled) return { ok: true, models: [] };
     try {
-      return { ok: true, models: d.isDemo() ? [] : await d.chat.models(false) };
+      const signal = catalogRequests.signal;
+      const models = await d.chat.models(force, signal);
+      signal.throwIfAborted();
+      d.requireInterview(e);
+      return { ok: true, models: d.configuration()?.aiEnabled ? models : [] };
     } catch (error) {
       return { ok: false, error: publicFailure(error) };
     }
@@ -122,7 +130,9 @@ export function registerInterviewIpc(d: {
     const configuration = d.configuration();
     try {
       if (!configuration?.aiEnabled || d.isDemo()) throw Error('请先连接模型服务。');
-      const models = await d.chat.models(false);
+      const signal = catalogRequests.signal;
+      const models = await d.chat.models(false, signal);
+      signal.throwIfAborted();
       d.requireInterview(e);
       if (!d.configuration()) throw Error('面试已结束。');
       // Each answer already owns a request/configuration snapshot. Updating
@@ -297,6 +307,8 @@ export function registerInterviewIpc(d: {
   return {
     cancel: () => {
       active?.controller.abort();
+      catalogRequests.abort();
+      catalogRequests = new AbortController();
       clearScreenshots();
     },
   };

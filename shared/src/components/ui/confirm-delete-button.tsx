@@ -1,12 +1,13 @@
 import { t } from '../../i18n';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { Button, type ButtonProps } from './button';
-import { Trash, Loader, Link } from '../icons';
+import { Trash, Loader, LinkOff } from '../icons';
 
 interface Props extends Omit<ButtonProps, 'onClick' | 'children' | 'variant' | 'size'> {
   target: string;
   label?: string;
   iconOnly?: boolean;
+  iconSize?: number;
   compact?: boolean;
   fixedWidth?: boolean;
   active?: boolean;
@@ -22,6 +23,7 @@ function ConfirmActionButton({
   icon: Icon,
   label = action,
   iconOnly = false,
+  iconSize,
   compact = false,
   fixedWidth = false,
   active = true,
@@ -92,7 +94,11 @@ function ConfirmActionButton({
         className={`confirm-delete ${className} ${compact ? 'is-compact' : ''} ${armed ? 'is-confirming' : ''}`}
         style={{
           ...props.style,
-          width: fixedWidth ? '100%' : armed ? widths.confirm : widths.idle,
+          width: fixedWidth
+            ? '100%'
+            : armed
+              ? widths.confirm
+              : `var(--confirm-idle-width, ${widths.idle}px)`,
         }}
         variant={armed ? 'destructive' : 'dangerGhost'}
         size={iconOnly && !armed ? 'icon' : 'default'}
@@ -145,11 +151,11 @@ function ConfirmActionButton({
         }}
       >
         <span ref={idleContent} className="confirm-delete-idle" aria-hidden="true">
-          <Icon size={iconOnly && !compact ? 17 : 14} />
+          <Icon size={iconSize ?? (iconOnly && !compact ? 17 : 14)} />
           {!iconOnly && <span>{t(label)}</span>}
         </span>
         <span ref={confirmContent} className="confirm-delete-confirm" aria-hidden="true">
-          {busy ? <Loader size={14} /> : <Icon size={14} />}
+          {busy ? <Loader size={iconSize ?? 14} /> : <Icon size={iconSize ?? 14} />}
           <span>{t(busy ? `${action}中…` : `确认${action}`)}</span>
         </span>
       </Button>
@@ -169,5 +175,5 @@ export function ConfirmDeleteButton(props: Props) {
 }
 
 export function ConfirmDisconnectButton(props: Props) {
-  return <ConfirmActionButton {...props} action="断开连接" icon={Link} />;
+  return <ConfirmActionButton {...props} action="断开连接" icon={LinkOff} />;
 }

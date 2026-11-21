@@ -8,6 +8,7 @@ import { mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { abortable } from '../cancellable';
+import { installCopilotAttachmentEncoder } from './attachments';
 import type { ProviderCredentialAccess } from '../auth/providerCredentialAccess';
 
 const requirePackage = createRequire(__filename);
@@ -89,6 +90,7 @@ export class CopilotRuntime {
         for (const key of Object.keys(env))
           if (/^(?:COPILOT_|GITHUB_|GH_|OTEL_)/i.test(key)) delete env[key];
         env.GH_CONFIG_DIR = path.join(this.directory, 'gh-unused');
+        installCopilotAttachmentEncoder();
         const client = new CopilotClient({
           connection: copilotRuntimeConnection(),
           // SDK 1.0.21 forces COPILOT_DISABLE_KEYTAR=1 in empty mode,

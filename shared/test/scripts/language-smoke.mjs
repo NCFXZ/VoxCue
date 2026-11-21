@@ -430,8 +430,58 @@ for (const [preferred, expected] of [
       .waitFor();
     assert.equal(await login.evaluate(() => document.documentElement.lang), expected);
     assert.equal(await login.evaluate(() => localStorage.getItem('voxcue-language-v1')), null);
-    if (expected === 'en')
-      assert.doesNotMatch(await login.locator('body').innerText(), /\p{Script=Han}/u);
+    const english = expected === 'en';
+    if (english) assert.doesNotMatch(await login.locator('body').innerText(), /\p{Script=Han}/u);
+    await login.getByRole('button', { name: english ? 'Sign up' : '注册', exact: true }).click();
+    await instance.evaluate(({ shell }) => {
+      globalThis.requestedAgreementUrls = [];
+      shell.openExternal = async (requested) => { globalThis.requestedAgreementUrls.push(requested); };
+    });
+    const agreement = login.locator('.registration-consent');
+    await agreement.getByRole('checkbox').waitFor();
+    assert.equal(await agreement.getByRole('link').count(), 1);
+    const textStyles = await agreement.locator('label, a').evaluateAll((parts) =>
+      parts.map((part) => {
+        const { fontSize, fontWeight } = getComputedStyle(part);
+        return [fontSize, fontWeight];
+      }),
+    );
+    assert.deepEqual(textStyles[0], textStyles[1], 'The consent sentence should use one type size and weight');
+    const languages = [expected];
+    if (preferred === 'zh-Hans-CN' || preferred === 'en-GB') languages.push(english ? 'zh-CN' : 'en');
+    const requested = [];
+    for (const language of languages) {
+      const switched = language !== expected;
+      if (switched) {
+        await agreement.getByRole('checkbox').check();
+        await login.evaluate((language) => {
+          const key = 'voxcue-language-v1', oldValue = localStorage.getItem(key);
+          localStorage.setItem(key, language);
+          window.dispatchEvent(new StorageEvent('storage', { key, oldValue, newValue: language, storageArea: localStorage }));
+        }, language);
+        await login.waitForFunction((language) => document.documentElement.lang === language, language);
+      }
+      const en = language === 'en';
+      const title = en ? 'VoxCue Terms of Service' : 'VoxCue 用户服务协议';
+      const sentence = en ? 'I have read and agree to the VoxCue Terms of Service.' : '我已阅读并同意 VoxCue 用户服务协议。';
+      const consent = agreement.getByRole('checkbox', { name: title });
+      await consent.waitFor();
+      assert.equal((await agreement.textContent()).trim(), sentence);
+      assert.equal(await consent.isChecked(), switched);
+      const link = agreement.getByRole('link', { name: title, exact: true });
+      assert.equal(await link.evaluate((node) => getComputedStyle(node).textDecorationLine), 'underline');
+      const url = `https://voxcue.com.cn/${en ? 'en/' : ''}user-agreement/`;
+      assert.equal(await link.getAttribute('href'), url);
+      requested.push(url);
+      await link.click();
+      await waitForAsync(instance, (_electron, count) => globalThis.requestedAgreementUrls.length >= count, requested.length);
+      assert.deepEqual(await instance.evaluate(() => globalThis.requestedAgreementUrls), requested);
+      assert.equal(await consent.isChecked(), switched);
+    }
+    if (preferred === 'fr-FR') {
+      await assert.rejects(login.evaluate(() => window.desktop.openUserAgreement('fr-FR')), /Invalid request/);
+      assert.deepEqual(await instance.evaluate(() => globalThis.requestedAgreementUrls), requested);
+    }
   } finally {
     await closeUiApp(instance);
   }

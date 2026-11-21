@@ -42,10 +42,21 @@ try {
   const settings = main.getByRole('dialog', { name: '设置', exact: true });
   await settings.getByRole('button', { name: '快捷键', exact: true }).click();
   assert.deepEqual(
-    (await settings.locator('.shortcut-setting-row strong').allTextContents()).slice(0, 3),
-    ['显示或隐藏面试窗口', '展开或收起面试面板', '展开或收起转写面板'],
+    (await settings.locator('.shortcut-setting-row strong').allTextContents()).slice(0, 4),
+    ['显示或隐藏面试窗口', '显示或隐藏快捷键说明', '展开或收起面试面板', '展开或收起转写面板'],
   );
   await captureRequested(main, 'shortcut-settings');
+  const helpBinding = settings.getByRole('button', { name: '修改快捷键：显示或隐藏快捷键说明' });
+  for (const [chord, label] of [
+    ['Control+Shift+k', mac ? '⌃⇧K' : 'Ctrl+Shift+K'],
+    ['Control+Shift+Slash', mac ? '⌃⇧/' : 'Ctrl+Shift+/'],
+  ]) {
+    await helpBinding.click();
+    await main.locator('.shortcut-binding[aria-pressed="true"]').waitFor();
+    await main.keyboard.press(chord);
+    await main.locator('.shortcut-binding[aria-pressed="true"]').waitFor({ state: 'detached' });
+    await helpBinding.getByText(label, { exact: true }).waitFor();
+  }
   const binding = settings.getByRole('button', {
     name: '修改快捷键：打开或关闭麦克风',
     exact: true,

@@ -75,7 +75,11 @@ try {
     const { KnowledgeHost } = require(
       app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/host.js',
     );
-    KnowledgeHost.prototype.listDocuments = async () => [];
+    const { KNOWLEDGE_INDEX_VERSION } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/contracts/knowledge.js',
+    );
+    const documents = new Map();
+    KnowledgeHost.prototype.listDocuments = async () => [...documents.values()];
     KnowledgeHost.prototype.indexDocument = async function (input) {
       globalThis.refinementDocument = input.documentId;
       this.progress({
@@ -86,13 +90,16 @@ try {
       });
       return await new Promise((resolve) => {
         globalThis.finishRefinementIndex = () => {
+          const document = { documentId: input.documentId, baseId: input.baseId, indexVersion: KNOWLEDGE_INDEX_VERSION };
+          documents.set(document.documentId, document);
           this.progress({
             documentId: input.documentId,
             phase: 'ready',
+            indexVersion: KNOWLEDGE_INDEX_VERSION,
             completed: 4,
             total: 4,
           });
-          resolve({ documentId: input.documentId });
+          resolve(document);
         };
       });
     };
@@ -377,7 +384,10 @@ try {
     mimeType: 'text/plain',
     buffer: Buffer.from('Synthetic input only'),
   });
-  await base.locator('.document-row').getByText('索引中 25%', { exact: false }).waitFor();
+  const importedRow = base.locator('.document-row').filter({
+    has: page.getByText('synthetic.txt', { exact: true }),
+  });
+  await importedRow.getByText('索引中 25%', { exact: false }).waitFor();
   const after = await zone.evaluate((e) => ({
     display: getComputedStyle(e).display,
     padding: getComputedStyle(e).padding,
@@ -387,11 +397,11 @@ try {
   assert.equal(after.padding, before.padding);
   assert.ok(Math.abs(after.height - before.height) < 0.5);
   assert.equal(
-    await base.locator('.document-details > p').first().innerText(),
+    await importedRow.locator('.document-status').innerText(),
     '20 B · 索引中 25%',
   );
   await app.evaluate(() => globalThis.finishRefinementIndex());
-  await base.locator('.document-row').getByText('索引完成', { exact: false }).waitFor();
+  await importedRow.getByText('20 B · 索引完成', { exact: true }).waitFor();
   // Exercise a genuinely overflowing dialog at both scroll extremes. The frame
   // clips its internal scrollbar, whose track avoids the rounded corners.
   await base.evaluate((dialog) => {

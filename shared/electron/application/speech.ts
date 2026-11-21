@@ -12,7 +12,7 @@ import type {
 import { validateSpeech } from '../backend/speech/validation';
 import { reasoningEfforts, type ChatModel } from '../contracts/chat';
 import { validProfile } from '../contracts/profile';
-import { sameAudioCapture, speechSelection, inputSources } from '../contracts/speechSettings';
+import { sameAudioCapture, speechModelLabels, speechSelection, inputSources } from '../contracts/speechSettings';
 
 export function validateInterviewInput(value: unknown): InterviewInputState {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -60,6 +60,7 @@ export function validateInterviewConfiguration(value: unknown): InterviewConfigu
           'options',
           'aiEnabled',
           'autoAnswer',
+          'autoRecord',
           'modelId',
           'effort',
           'profile',
@@ -71,6 +72,7 @@ export function validateInterviewConfiguration(value: unknown): InterviewConfigu
     (v.inputMode !== undefined && !['remote', 'transcription'].includes(v.inputMode)) ||
     typeof v.aiEnabled !== 'boolean' ||
     typeof v.autoAnswer !== 'boolean' ||
+    (v.autoRecord !== undefined && typeof v.autoRecord !== 'boolean') ||
     typeof v.modelId !== 'string' ||
     v.modelId.length > 200 ||
     (v.effort !== undefined && v.effort !== 'auto' && !reasoningEfforts.includes(v.effort)) ||
@@ -98,6 +100,7 @@ export function validateInterviewConfiguration(value: unknown): InterviewConfigu
     modelId: v.aiEnabled ? v.modelId : '',
     effort: v.aiEnabled ? (v.effort ?? 'auto') : 'auto',
     autoAnswer: v.autoAnswer,
+    ...(v.autoRecord ? { autoRecord: true } : {}),
     ...(v.profile ? { profile: structuredClone(v.profile) } : {}),
     ...(v.knowledgeBaseId !== undefined ? { knowledgeBaseId: v.knowledgeBaseId } : {}),
     ...(v.knowledgeBaseId && v.knowledgeBaseName
@@ -119,7 +122,7 @@ interface SpeechPort {
 }
 const idle = (): SpeechStatus => ({
   state: 'idle',
-  model: 'Paraformer 中英 INT8 · Silero VAD · 本地',
+  model: speechModelLabels.paraformer,
 });
 // One native pipeline, with explicit ownership. Main-window dictation can never
 // change an interview's devices, and confirming an interview flushes dictation first.
@@ -133,6 +136,9 @@ export class SpeechCoordinator {
   private dictationIntent = 0;
   private pending = 0;
   private running = false;
+  private captured = false;
+  private interviewLoss: Pick<SpeechStatus, 'transcriptTailIncomplete' | 'recordingError'> = {};
+  private startingInterview?: SpeechOptions;
   private reconnectAttempt = 0;
   private testId?: string;
   private testTimer?: ReturnType<typeof setTimeout>;
@@ -146,6 +152,10 @@ export class SpeechCoordinator {
   }
   get inputState() {
     return this.currentInput && { ...this.currentInput };
+  }
+  observeInterviewStatus(status: SpeechStatus) {
+    this.running = status.state === 'running';
+    if (this.running && this.confirmed) this.captured = true;
   }
   get inputChanging() {
     return !!this.inputOperation;
@@ -257,12 +267,33 @@ export class SpeechCoordinator {
       this.target = 'interview';
     });
   }
+  private async startInterview(options: SpeechOptions, inputState?: InterviewInputState) {
+    this.startingInterview = options;
+    const session = this.confirmed;
+    try {
+      const status = await this.port.call({ op: 'start', options, inputState });
+      if (session === this.confirmed && status.state === 'running') this.captured = true;
+      return status;
+    } finally {
+      this.startingInterview = undefined;
+    }
+  }
+  async controlSwitch(id: number, action: 'now' | 'cancel') {
+    if (this.confirmed?.mode !== 'local' || !this.running || this.target !== 'interview') return;
+    await this.port.call({ op: 'control-switch', id, action });
+  }
   reconnect(value?: SpeechOptions) {
     if (this.inputChanging) throw Error('音频输入正在切换，请稍候。');
     const call = value === undefined ? undefined : validateSpeech({ op: 'start', options: value });
     if (call?.op === 'start')
       requireInterviewSources(call.options, this.confirmed?.inputMode, true);
     const attempt = ++this.reconnectAttempt;
+    // A first Qwen load holds the serial start operation. Release its host
+    // before queuing the user's lighter replacement; capture has not started.
+    const interruptLoad = !this.running && this.startingInterview?.speechModel === 'qwen' &&
+      call?.op === 'start' && speechSelection(call.options).speechModel === 'paraformer' &&
+      sameAudioCapture(this.startingInterview, call.options);
+    if (interruptLoad) this.port.stop();
     return this.serialize(async () => {
       if (!this.confirmed || this.confirmed.mode !== 'local') throw Error('请先开始本地语音面试。');
       const configuration = this.confirmed;
@@ -292,16 +323,22 @@ export class SpeechCoordinator {
           options,
         };
       }
-      try {
-        await this.port.call({ op: 'stop' });
-      } catch {
-        /* Retire a failed native host before reconnecting. */
+      if (!interruptLoad) {
+        try {
+          const stopped = await this.port.call({ op: 'stop' });
+          if (this.confirmed === configuration) {
+            if (stopped.transcriptTailIncomplete) this.interviewLoss.transcriptTailIncomplete = true;
+            if (stopped.recordingError) this.interviewLoss.recordingError = stopped.recordingError;
+          }
+        } catch {
+          if (this.confirmed === configuration && this.captured) this.interviewLoss.transcriptTailIncomplete = true;
+        }
+        this.port.stop();
       }
-      this.port.stop();
       if (this.confirmed !== configuration || attempt !== this.reconnectAttempt)
         return { status: idle() };
       this.target = 'interview';
-      const status = await this.port.call({ op: 'start', options, inputState });
+      const status = await this.startInterview(options, inputState);
       if (this.confirmed !== configuration || attempt !== this.reconnectAttempt) {
         this.port.stop();
         return { status: idle() };
@@ -317,8 +354,16 @@ export class SpeechCoordinator {
       const status = await result.change;
       if (this.confirmed !== result.configuration || attempt !== this.reconnectAttempt)
         return idle();
-      if (status.state === 'running') result.configuration.options = result.options;
+      if (status.state === 'running' && !status.switchCancelled) result.configuration.options = result.options;
       return status;
+    });
+  }
+  setRecording(prepare?: () => string) {
+    const configuration = this.confirmed;
+    return this.serialize(async () => {
+      if (!configuration || configuration !== this.confirmed || configuration.mode !== 'local' ||
+          !this.running || this.target !== 'interview') throw Error('请先开始本地语音面试。');
+      return this.port.call({ op: 'recording', directory: prepare?.() });
     });
   }
   interview(value: unknown) {
@@ -343,40 +388,45 @@ export class SpeechCoordinator {
           (call.options.inferenceDevice ?? 'cuda') !== (options.inferenceDevice ?? 'cuda')
         )
           throw Error('本场面试设置已锁定，请结束面试后重新设置。');
-        const status = await this.port.call({
-          op: 'start',
-          options: structuredClone(options),
-          inputState: this.inputState,
-        });
+        const attempt = this.reconnectAttempt;
+        const status = await this.startInterview(structuredClone(options), this.inputState);
+        if (attempt !== this.reconnectAttempt || configuration !== this.confirmed) return idle();
         this.currentInput = status.inputState ?? this.currentInput;
         this.running = status.state === 'running';
         return status;
       }
       if (configuration.mode === 'mock') return idle();
-      return this.port.call(call);
+      try {
+        const status = await this.port.call(call);
+        return call.op === 'stop' && this.confirmed === configuration ? { ...this.interviewLoss, ...status } : status;
+      } catch (error) {
+        if (call.op === 'pause' && this.confirmed === configuration && this.captured)
+          this.interviewLoss.transcriptTailIncomplete = true;
+        throw error;
+      }
     });
   }
   dictation(value: unknown, fallback?: Pick<SpeechOptions, 'speechModel' | 'inferenceDevice'>) {
     const call = value as DictationCall;
-    if (!call || !['start', 'stop', 'status', 'test', 'test-stop'].includes(call.op))
+    if (!call || !['start', 'stop', 'status', 'test', 'preview', 'test-stop'].includes(call.op))
       throw Error('无效的语音输入操作。');
+    const monitor = call.op === 'test' || call.op === 'preview';
     if (
-      (call.op === 'test' || call.op === 'test-stop') &&
+      (monitor || call.op === 'test-stop') &&
       (typeof call.id !== 'string' || !/^[\w-]{1,100}$/.test(call.id))
     )
       throw Error('无效的音频测试。');
     if (call.op === 'test-stop' && this.testId !== call.id) return Promise.resolve(idle());
-    const starting = call.op === 'start' || call.op === 'test';
+    if (call.op === 'preview' && (this.confirmed || this.target === 'dictation'))
+      throw Error('音频设备正在使用中。');
+    const starting = call.op === 'start' || monitor;
     const options = starting
       ? validateSpeech({
           op: 'start',
           options:
-            call.op === 'test'
-              ? call.options
-              : {
-                  sources: ['microphone'],
-                  microphone: call.microphone,
-                },
+            call.op === 'start'
+              ? { sources: ['microphone'], microphone: call.microphone }
+              : call.options,
         })
       : undefined;
     // Prefer the lightweight Paraformer for dictation and preflight. The trusted
@@ -384,12 +434,12 @@ export class SpeechCoordinator {
     if (options?.op === 'start') {
       delete options.options.speechModel;
       delete options.options.inferenceDevice;
-      Object.assign(options.options, fallback);
+      if (call.op !== 'preview') Object.assign(options.options, fallback);
     }
     const intent = call.op === 'status' ? this.dictationIntent : ++this.dictationIntent;
     if (call.op !== 'status') {
       this.clearTest();
-      if (call.op === 'test') this.testId = call.id;
+      if (monitor) this.testId = call.id;
       if (call.op === 'stop' || call.op === 'test-stop') this.cancelDictationStart();
     }
     return this.serialize(async () => {
@@ -401,16 +451,17 @@ export class SpeechCoordinator {
           this.port.stop();
         }
         if (intent !== this.dictationIntent) return idle();
-        this.target = call.op === 'test' ? 'audio-test' : 'dictation';
+        this.target = monitor ? 'audio-test' : 'dictation';
         const attempt = ++this.dictationAttempt;
         this.startingDictation = true;
         try {
           const status = await this.port.call({
             op: 'start',
+            ...(call.op === 'preview' ? { levelsOnly: true } : {}),
             options: options?.op === 'start' ? options.options : { sources: ['microphone'] },
           });
           if (attempt !== this.dictationAttempt) return idle();
-          if (call.op === 'test' && status.state !== 'running') {
+          if (monitor && status.state !== 'running') {
             this.clearTest();
             this.port.stop();
             this.target = undefined;
@@ -466,6 +517,8 @@ export class SpeechCoordinator {
     ++this.reconnectAttempt;
     this.running = false;
     if (close) {
+      this.interviewLoss = {};
+      this.captured = false;
       this.confirmed = undefined;
       this.currentInput = undefined;
     }

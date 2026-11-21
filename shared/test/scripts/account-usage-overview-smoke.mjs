@@ -287,11 +287,17 @@ try {
     .click();
   await main.locator('.user-info small').getByText('未连接 AI 服务', { exact: true }).waitFor();
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
-  assert.equal(await main.locator('.interview-start-trigger').isDisabled(), true);
   await capture(
-    { id: 'disconnected', label: '未连接（开始面试不可用）', group: '异常与连接' },
+    { id: 'disconnected', label: '未连接（开始面试时打开 AI 服务）', group: '异常与连接' },
     main.locator('.user-info small'),
   );
+  await main.locator('.interview-start-trigger').click();
+  await settings.getByRole('heading', { name: 'AI 服务', exact: true }).waitFor();
+  for (const provider of ['chatgpt', 'copilot']) {
+    await settings.locator(`[data-settings-target="${provider}"]`)
+      .getByRole('button', { name: '连接', exact: true }).waitFor();
+  }
+  assert.equal(await dialog().count(), 0, 'An account without an AI connection cannot enter the interview');
   assert.equal(records.length, 34);
   assert.deepEqual(errors, []);
   if (output) await writeFile(path.join(output, 'cases.json'), JSON.stringify(records, null, 2));

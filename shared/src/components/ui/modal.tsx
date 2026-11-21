@@ -1,5 +1,5 @@
 import { t } from '../../i18n';
-import { useLayoutEffect, useRef, type ReactNode, type KeyboardEventHandler } from 'react';
+import { useLayoutEffect, useRef, type ReactNode, type KeyboardEventHandler, type Ref } from 'react';
 import { headerCoverage } from '../../platform/chromeGeometry';
 import { X, Trash } from '../icons';
 import { Button } from './button';
@@ -24,6 +24,7 @@ export function Modal({
   overlayHeader = false,
   onKeyDown,
   footer,
+  contentRef,
   backdrop = 'viewport',
 }: {
   title: string;
@@ -43,6 +44,7 @@ export function Modal({
   overlayHeader?: boolean;
   onKeyDown?: KeyboardEventHandler<HTMLDialogElement>;
   footer?: ReactNode;
+  contentRef?: Ref<HTMLDivElement>;
   backdrop?: 'viewport' | 'transparent';
 }) {
   const ref = useRef<HTMLDialogElement>(null);
@@ -84,13 +86,14 @@ export function Modal({
         'data-scrollable',
         /^(auto|scroll)$/.test(overflow) && scroll.scrollHeight > scroll.clientHeight,
       );
+      const gutter = `${Math.max(0, scroll.offsetWidth - scroll.clientWidth)}px`;
+      if (dialog.style.getPropertyValue('--dialog-scrollbar-width') !== gutter)
+        dialog.style.setProperty('--dialog-scrollbar-width', gutter);
       if (!overlayHeader || !heading) return;
       const rect = heading.getBoundingClientRect();
-      dialog.style.setProperty(
-        '--dialog-scrollbar-width',
-        `${Math.max(0, scroll.offsetWidth - scroll.clientWidth)}px`,
-      );
-      const opacity = headerCoverage(dialog, rect, '.dialog-scroll > *');
+      // At fractional scale the first row and header can meet a fraction of a
+      // device pixel apart. The material starts only after the content scrolls.
+      const opacity = scroll.scrollTop > 0 ? headerCoverage(scroll, rect, ':scope > *') : 0;
       for (const [name, value] of [
         ['--dialog-header-height', rect.height + 'px'],
         ['--dialog-header-opacity', String(opacity)],
@@ -187,7 +190,7 @@ export function Modal({
       }}
     >
       {fixedHeader && heading}
-      <div className="dialog-scroll">
+      <div className="dialog-scroll" ref={contentRef}>
         {!fixedHeader && heading}
         {children}
       </div>

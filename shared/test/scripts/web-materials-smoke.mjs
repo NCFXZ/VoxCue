@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { openModelMenu } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import {
@@ -439,7 +440,7 @@ try {
   );
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page.evaluate(() => {
+  await evaluateHistory(page, async () => {
     const records = ['项目讨论', '自我介绍'].map((title, i) => ({
       id: 'synthetic-search-' + i,
       title,
@@ -451,8 +452,7 @@ try {
       transcripts: [],
       answers: [],
     }));
-    localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+    await fixtureHistory.replace(records);
   });
   await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 2);
   const search = page.getByRole('searchbox', { name: '搜索标题' });
@@ -494,7 +494,7 @@ try {
     assert.equal(await clear.count(), 0);
     await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 2);
   }
-  await page.evaluate(() => {
+  await evaluateHistory(page, async () => {
     const records = Array.from({ length: 32 }, (_, i) => ({
       id: 'synthetic-scroll-' + i,
       title: '合成面试记录 ' + (i + 1),
@@ -515,8 +515,7 @@ try {
         createdAt: Date.now(),
       })),
     }));
-    localStorage.setItem('copilot-interview-history-v1', JSON.stringify(records));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+    await fixtureHistory.replace(records);
   });
   await page.waitForFunction(() => document.querySelectorAll('.history-row').length === 32);
   await page.locator('.management-scroll').evaluate((node) => {

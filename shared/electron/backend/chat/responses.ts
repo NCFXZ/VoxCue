@@ -1,6 +1,8 @@
 import { readEvents } from './sse';
 import { ChatServiceError, networkFailure } from './errors';
 
+const eventStreamPrefix = /^(?:(?:data|event|id|retry):|:)/;
+
 // Error bodies are untrusted streams too: headers alone do not finish a request.
 export async function readErrorResponse(
   response: Response,
@@ -131,7 +133,7 @@ export async function* responseEvents(
   try {
     while (
       prefix.trimStart().length < 16 &&
-      !/^(?:[{<]|data:|event:|:)/.test(prefix.trimStart()) &&
+      !/^[{<]/.test(prefix.trimStart()) && !eventStreamPrefix.test(prefix.trimStart()) &&
       bytes < 4096
     ) {
       signal.throwIfAborted();
@@ -165,7 +167,7 @@ export async function* responseEvents(
       },
     });
     if (
-      /^(?:data:|event:|:)/.test(first) ||
+      eventStreamPrefix.test(first) ||
       response.headers.get('content-type')?.toLowerCase().includes('text/event-stream')
     ) {
       handedOff = true;
@@ -215,15 +217,17 @@ export async function* responseEvents(
         throw new Error('服务返回了非预期的 JSON，未收到有效回答。');
       for (const [output_index, output] of value.output.entries()) {
         yield { type: 'response.output_item.added', output_index, item: output };
-        for (const content of output.content ?? []) {
+        const message = !output.type || output.type === 'message';
+        for (const [content_index, content] of (message ? output.content ?? [] : []).entries()) {
           if (content.type === 'output_text' && typeof content.text === 'string')
             yield {
               type: 'response.output_text.delta',
               delta: content.text,
               output_index,
+              content_index,
             };
           if (content.type === 'refusal' && typeof content.refusal === 'string')
-            yield { type: 'response.refusal.delta', delta: content.refusal };
+            yield { type: 'response.refusal.delta', delta: content.refusal, output_index, content_index };
         }
         yield { type: 'response.output_item.done', output_index, item: output };
       }

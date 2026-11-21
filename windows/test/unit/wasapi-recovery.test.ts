@@ -6,6 +6,7 @@ import { SpeechController } from '../../electron/speech/controller';
 
 const sources = ['system', 'microphone'] as const;
 const children: ReturnType<typeof helper>[] = [];
+const received: number[] = [];
 let service: SpeechController | undefined;
 let autoClose = false;
 
@@ -42,7 +43,12 @@ vi.mock('node:child_process', () => ({
 }));
 vi.mock('node:worker_threads', () => ({
   Worker: class extends EventEmitter {
-    postMessage({ op, id }: { op: string; id: number }) {
+    postMessage({ op, id, samples, sequence }: { op: string; id: number; samples?: Float32Array; sequence?: number }) {
+      if (op === 'audio') {
+        received.push(...samples!);
+        queueMicrotask(() => this.emit('message', { ack: sequence }));
+        return;
+      }
       const replies: Record<string, object> = {
         init: { ready: true }, prepare: { prepared: id }, flush: { flushed: id }, close: { closed: id },
       };
@@ -67,11 +73,58 @@ afterEach(async () => {
   await service?.close();
   service = undefined;
   children.length = 0;
+  received.length = 0;
   autoClose = false;
   vi.useRealTimers();
 });
 
 const invalidated = '{"type":"error","code":"0x88890004"}';
+function pcm(sample: number) {
+  const bytes = Buffer.alloc(25);
+  bytes.writeUInt32LE(21);
+  bytes[4] = 1;
+  bytes.writeUInt32LE(48000, 5);
+  bytes.writeFloatLE(sample, 21);
+  return bytes;
+}
+it('delivers complete PCM before and after the recovery stop starts, then reports the device gap', async () => {
+  const { service, events } = await start(['system']);
+  const child = children[0];
+  child.stdout.write(pcm(0.25));
+  child.stderr.write(invalidated + '\n');
+  child.stdout.write(pcm(0.5));
+  const tail = pcm(0.75);
+  child.stdout.write(tail.subarray(0, 12));
+  await vi.advanceTimersByTimeAsync(0);
+  expect(child.stdin.end).toHaveBeenCalledOnce();
+  child.stdout.write(Buffer.concat([tail.subarray(12), pcm(1).subarray(0, 20)]));
+  child.close(1);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(received).toEqual([0.25, 0.5, 0.75]);
+  expect(events.filter(event => event.type === 'gap').map(event => event.source)).toEqual(['system']);
+  expect(await service.call({ op: 'status' })).toMatchObject({ state: 'running' });
+});
+it.each([
+  { retiring: false, overload: false }, { retiring: true, overload: false },
+  { retiring: false, overload: true }, { retiring: true, overload: true },
+])('a terminal tail error stops recovery (retiring=$retiring, overload=$overload)', async ({ retiring, overload }) => {
+  const { service, events } = await start(['system']);
+  const child = children[0];
+  child.stderr.write(invalidated + '\n');
+  if (retiring) await vi.advanceTimersByTimeAsync(0);
+  if (overload) child.stderr.write('{"type":"error","code":"0x8007006F"}\n');
+  else child.stdout.write(Buffer.alloc(4));
+  child.stdout.write(pcm(0.75));
+  child.close(1);
+  await vi.advanceTimersByTimeAsync(1000);
+  expect(await service.call({ op: 'status' })).toMatchObject({
+    state: 'error', failureSource: 'system',
+    error: expect.stringContaining(overload ? '音频输出积压已达上限' : '音频数据包损坏'),
+  });
+  expect(children).toHaveLength(1);
+  expect(received).toEqual([]);
+  expect(events.filter(event => event.type === 'gap')).toHaveLength(0);
+});
 it.each([
   { diagnostic: invalidated, code: 1 },
   { diagnostic: '{"type":"error","code":"0x80070005"}', code: 1, terminal: '0x80070005' },

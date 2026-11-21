@@ -22,13 +22,13 @@ export function resolveInterviewConfiguration(
   models: ChatModel[],
   live: boolean,
 ): InterviewConfiguration {
-  const model = models.find((m) => m.id === saved.modelId) ?? models[0];
+  const model = saved.modelId ? models.find((m) => m.id === saved.modelId) : models[0];
   const effort = resolveReasoningEffort(model, saved.effort);
   return {
     ...structuredClone(saved),
     mode: live ? 'local' : 'mock',
     aiEnabled: live,
-    modelId: live ? (model?.id ?? '') : '',
+    modelId: live ? (model?.id ?? saved.modelId) : '',
     effort: live ? effort : 'auto',
     autoAnswer: true,
   };
@@ -39,6 +39,10 @@ export function isAutomaticQuestionFiller(text: string) {
   return /^(?:嗯|呃|额|唔|啊|哦|噢|喔|诶|欸|哎|唉|好的|对的|是的|明白|了解|好|对|行)+$/u.test(
     words,
   );
+}
+function checkedQuestion(text: string) {
+  if (text.length > 6000) throw Error('待提交问题超过6000字，请在输入框整理后手动发送。');
+  return text;
 }
 // Aggregate final segments for automatic submission. Interim text is available
 // separately as a draft and enters AI only on explicit manual submission.
@@ -57,11 +61,10 @@ export class QuestionBuffer {
       .filter((s) => s.source === source)
       .map((s) => s.text)
       .join(' ');
-    if (text.length > 6000) throw Error('待提交问题超过6000字，请在输入框整理后手动发送。');
-    return text;
+    return checkedQuestion(text);
   }
-  consume(source: AudioSource) {
-    const text = this.text(source);
+  consume(source: AudioSource, submitted?: string) {
+    const text = submitted === undefined ? this.text(source) : checkedQuestion(submitted);
     this.pending = this.pending.filter((s) => s.source !== source);
     return text;
   }

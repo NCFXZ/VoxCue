@@ -2,7 +2,7 @@ import { afterEach, expect, it, vi } from 'vitest';
 import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import type { CredentialRecord } from '../../electron/backend/auth/service';
+import type { CredentialRecord } from '../../electron/backend/auth/storage';
 const native = vi.hoisted(() => ({
   directory: '',
   available: vi.fn(),
@@ -161,17 +161,6 @@ it('fresh and explicitly disconnected installs skip startup; only explicit succe
   expect(JSON.parse(await readFile(file, 'utf8')).connected).toBe(false);
   expect(await disconnected.session('chatgpt', verify)).toEqual(sessionFor('chatgpt'));
   expect(await createServiceSelection().session('startup', verify)).toEqual(sessionFor('chatgpt'));
-});
-
-it.each(['chatgpt', 'copilot'] as const)('legacy %s validates only that provider once, then retires an expired selection', async (service) => {
-  const file = await selectionFile(service);
-  const state = createServiceSelection();
-  const verify = vi.fn(async () => null);
-  await Promise.all([state.session('startup', verify), state.session('startup', verify)]);
-  expect(verify).toHaveBeenCalledExactlyOnceWith(service);
-  expect(JSON.parse(await readFile(file, 'utf8'))).toEqual({ version: 2, service, connected: false });
-  await createServiceSelection().session('startup', verify);
-  expect(verify).toHaveBeenCalledTimes(1);
 });
 
 it('temporary failure preserves the prior selection, a successful switch ignores late verification', async () => {

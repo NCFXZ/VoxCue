@@ -4,6 +4,10 @@
   --web-material-opacity: calc((0.6 + var(--frosted-opacity-light, 0.5) * 0.4) * 100%);
   --web-material-fill: color-mix(in srgb, var(--surface) var(--web-material-opacity), transparent);
   --web-material-filter: blur(24px) saturate(125%);
+  /* Each zero-offset shadow backs the blurred pixels with the theme surface,
+     so sharp details don't show through a partially transparent backdrop. */
+  --web-dropdown-filter: var(--web-material-filter) drop-shadow(0 0 0 var(--surface))
+    drop-shadow(0 0 0 var(--surface));
   --interview-chrome-surface: var(--surface);
   --interview-chrome-fill: color-mix(
     in srgb,
@@ -40,7 +44,7 @@
   color: var(--foreground);
   background: rgba(128, 128, 128, 0.2);
 }
-.web-materials :is(.account-quota-progress, .audio-meter-track) > span {
+.web-materials .account-quota-progress > span {
   background: var(--system-accent);
 }
 :root.web-materials :is(.ui-button, .choice-trigger, .settings-choice, .speech-select) {
@@ -95,7 +99,7 @@
   :is(.management-page, .settings-dialog, .personal-panel, .app-dialog, .record-toolbar-actions)
   button.ui-button:not(.button-icon):not(.confirm-delete):not(.action-transition *):not(
     [aria-haspopup='menu']
-  ):not([role='switch']) {
+  ):not(.effort-model-trigger):not([role='switch']) {
   padding-inline: 20px;
 }
 .web-materials .floating-drag-handle {
@@ -139,10 +143,15 @@
 }
 .web-materials .dropdown-content {
   background: var(--web-material-fill);
+  -webkit-backdrop-filter: var(--web-dropdown-filter);
+  backdrop-filter: var(--web-dropdown-filter);
+}
+.web-materials .record-player {
+  background: var(--web-material-fill);
   -webkit-backdrop-filter: var(--web-material-filter);
   backdrop-filter: var(--web-material-filter);
 }
-.web-materials :is(.chat-composer .composer, .floating-composer, .follow-latest.ui-button),
+.web-materials :is(.chat-composer .composer, .floating-composer, .audio-recovery, .follow-latest.ui-button),
 :root.web-materials .floating-toolbar {
   background: var(--web-material-fill);
   -webkit-backdrop-filter: var(--web-material-filter);
@@ -150,7 +159,7 @@
   border-color: color-mix(in srgb, var(--foreground) 12%, transparent);
   box-shadow: var(--shadow-raised);
 }
-:root.web-materials .floating-notices > div {
+:root.web-materials .floating-notice {
   /* Standalone notices keep their original combined material. */
   background:
     linear-gradient(var(--web-material-fill), var(--web-material-fill)),
@@ -220,6 +229,7 @@
   :is(.floating-shell, .interview-preview-shell)
   :is(.floating-panel, .floating-toolbar) {
   --web-material-filter: none;
+  --web-dropdown-filter: none;
 }
 .web-materials
   :is(.preparation-workspace, .management-page, .history-detail)
@@ -251,6 +261,9 @@
 }
 .web-materials :is(.personal-panel, .record-answer-panel) > header::before {
   opacity: var(--panel-header-opacity, 0);
+}
+.web-materials .record-answer-panel > header::before {
+  right: calc(0px - var(--panel-scrollbar-width, 0px));
 }
 /* Keep the existing first-row spacing while allowing content to pass behind the header. */
 .web-materials :is(.personal-panel-scroll, .record-answer-scroll) {
@@ -310,7 +323,7 @@
   border-bottom: 0;
   background: transparent;
 }
-.web-materials .floating-notices > div {
+.web-materials .floating-notice {
   border-color: transparent;
   -webkit-backdrop-filter: var(--web-material-filter);
   backdrop-filter: var(--web-material-filter);
@@ -321,7 +334,7 @@
 .web-materials .interview-preview-scene:not(.login-interview-preview) .floating-panel {
   position: relative;
 }
-.web-materials :is(.floating-panels, .interview-preview-shell) .floating-composer {
+.web-materials :is(.floating-panels, .interview-preview-shell) :is(.floating-composer, .audio-recovery) {
   background: var(--interview-chrome-fill);
 }
 .web-materials .floating-chrome-base {
@@ -369,19 +382,18 @@
   right: 0;
   z-index: 2;
   display: flow-root;
+  pointer-events: none;
 }
 .web-materials .floating-panels .floating-scroll {
   --floating-top-fade: 36px;
   position: absolute;
   inset: 0;
   padding-top: calc(
-    var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px) +
-      var(--floating-top-fade)
+    var(--floating-header-height, 56px) + var(--floating-top-fade)
   );
   padding-bottom: calc(var(--floating-composer-height, 0px) + 42px);
   scroll-padding-top: calc(
-    var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px) +
-      var(--floating-top-fade)
+    var(--floating-header-height, 56px) + var(--floating-top-fade)
   );
   scroll-padding-bottom: calc(var(--floating-composer-height, 0px) + 34px);
   /* Fade content below the transparent header; the backdrop itself stays visible. */
@@ -394,7 +406,7 @@
   );
 }
 .web-materials .floating-panels .floating-scroll::-webkit-scrollbar-track {
-  margin-top: calc(var(--floating-header-height, 56px) + var(--floating-recovery-height, 0px));
+  margin-top: var(--floating-header-height, 56px);
 }
 .web-materials .floating-panels .floating-composer {
   position: absolute;
@@ -446,16 +458,17 @@
     :is(.floating-toolbar, .transcript-item > p, .floating-question, .answer-bubble) {
     --web-material-fill: var(--surface);
     --web-material-filter: none;
+    --web-dropdown-filter: none;
     --interview-chrome-surface: var(--surface);
     --interview-chrome-fill: var(--surface);
   }
   :root.web-materials .floating-toolbar,
-  :root.web-materials .floating-notices > div {
+  :root.web-materials .floating-notice {
     background: var(--surface);
   }
 }
 :root.web-materials[data-frosted-transparency='0'] .floating-toolbar,
-:root.web-materials[data-frosted-transparency='0'] .floating-notices > div {
+:root.web-materials[data-frosted-transparency='0'] .floating-notice {
   background: var(--surface);
 }
 :root.web-materials[data-frosted-transparency='0'],
@@ -465,6 +478,7 @@
   :is(.floating-toolbar, .transcript-item > p, .floating-question, .answer-bubble) {
   --web-material-fill: var(--surface);
   --web-material-filter: none;
+  --web-dropdown-filter: none;
   --interview-chrome-surface: var(--surface);
   --interview-chrome-fill: var(--surface);
 }

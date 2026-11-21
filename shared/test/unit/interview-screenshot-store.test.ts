@@ -178,7 +178,7 @@ it('已发送图在实时回答中保留缩略图，归档仅写ID；未发送�
   await useInterview.getState().captureScreenshot();
   await useInterview.getState().captureScreenshot();
   await useInterview.getState().ask('只发送第一张', undefined, ['shot-1']);
-  useInterview.getState().archive('ended');
+  await useInterview.getState().archive('ended');
   const saved = JSON.parse(raw!)[0];
   expect(saved.answers[0].images).toEqual([{ id: 'shot-1' }]);
   expect(JSON.stringify(saved)).not.toMatch(/data:image|preview|bytes|shot-2/);

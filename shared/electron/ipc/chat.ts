@@ -19,7 +19,7 @@ interface Dependencies {
   openLink(url: string): Promise<void>;
   telemetry?: Pick<Telemetry, 'activity' | 'answer'>;
 }
-// IPC owns sender checks and the single active native chat request. Business
+// IPC owns sender checks and the lifetime of each native chat request. Business
 // orchestration has no Electron dependency and can be tested independently.
 export function registerChatIpc(dependencies: Dependencies) {
   const { chat } = dependencies;
@@ -28,18 +28,27 @@ export function registerChatIpc(dependencies: Dependencies) {
     if (!event.senderFrame || event.senderFrame !== event.sender.mainFrame)
       throw Error('Unauthorized frame');
   };
-  let activeChat: { id: string; controller: AbortController } | undefined;
-  let pendingChats = 0;
+  const activeChats = new Map<
+    string, { sender: Electron.WebContents; controller: AbortController }
+  >();
+  let resettingUsage = false;
+  let catalogRequests = new AbortController();
   const cancelActive = () => {
-    const previous = activeChat;
-    activeChat = undefined;
-    previous?.controller.abort();
+    for (const { controller } of activeChats.values()) controller.abort();
   };
-  handleDesktop('chat:models', async (event, force: unknown) => {
+  const cancelModels = () => {
+    catalogRequests.abort();
+    catalogRequests = new AbortController();
+  };
+  handleDesktop('chat:models', async (event, force: unknown = false, ...extra) => {
     requireMain(event);
+    if (typeof force !== 'boolean' || extra.length) throw Error('Invalid request');
     if (dependencies.isDemo()) return { ok: true, models: [] };
     try {
-      return { ok: true, models: await chat.models(force === true) };
+      const signal = catalogRequests.signal;
+      const models = await chat.models(force, signal);
+      signal.throwIfAborted();
+      return { ok: true, models };
     } catch (error) {
       return { ok: false, error: publicFailure(error) };
     }
@@ -66,39 +75,50 @@ export function registerChatIpc(dependencies: Dependencies) {
   handleDesktop('chat:usage-reset', async (event) => {
     requireMain(event);
     if (dependencies.isDemo()) return { ok: true, usage: emptyUsage() };
-    if (activeChat)
+    if (activeChats.size)
       return { ok: false, error: { message: '请等待当前回答完成或停止后重置用量。' } };
+    if (resettingUsage) return { ok: false, error: { message: '用量正在重置，请稍后重试。' } };
+    resettingUsage = true;
     try {
       return { ok: true, usage: await chat.resetUsage() };
     } catch (error) {
       return { ok: false, error: publicFailure(error) };
+    } finally {
+      resettingUsage = false;
     }
   });
   handleDesktop('chat:send', async (event, request: unknown): Promise<ChatResult> => {
     requireMain(event);
     if (dependencies.isDemo())
       return { ok: false, error: { message: '请先登录模型服务后调用真实模型。' } };
-    if (activeChat) return { ok: false, error: { message: '请等待当前回答完成或停止后重试。' } };
+    let validated: ChatRequest;
+    try {
+      validated = validateRequest(request);
+    } catch (error) {
+      return { ok: false, error: publicFailure(error) };
+    }
+    if (resettingUsage) return { ok: false, error: { message: '用量正在重置，请稍后重试。' } };
+    if (activeChats.has(validated.id))
+      return { ok: false, error: { message: '此请求已发送，请等待回答完成。' } };
     const controller = new AbortController();
-    const active = { id: (request as ChatRequest)?.id, controller };
-    activeChat = active;
-    pendingChats++;
+    const active = { sender: event.sender, controller };
+    activeChats.set(validated.id, active);
+    const current = () => activeChats.get(validated.id) === active && !event.sender.isDestroyed();
     const events = batchChatEvents(
       (value) => sendDesktop(event.sender, 'chat:event', value),
       controller.signal,
-      () => activeChat === active && !event.sender.isDestroyed(),
+      current,
     );
     const partial: ChatPartialResponse = {};
     let metric: ReturnType<Telemetry['answer']> | undefined;
     try {
       controller.signal.throwIfAborted();
-      const validated = validateRequest(request);
       dependencies.telemetry?.activity('chat_send');
       metric = dependencies.telemetry?.answer('chat');
       const result = await chat.stream(
         validated,
         (value) => {
-          if (activeChat === active && !controller.signal.aborted && !event.sender.isDestroyed()) {
+          if (value.id === validated.id && !controller.signal.aborted && current()) {
             if (value.type === 'delta' && value.text.trim()) metric?.first();
             if (value.type === 'delta')
               partial.answerText = ((partial.answerText ?? '') + value.text).slice(0, 1000000);
@@ -132,14 +152,17 @@ export function registerChatIpc(dependencies: Dependencies) {
         ...(Object.keys(partial).length ? { partial } : {}),
       };
     } finally {
-      events.finish();
-      pendingChats--;
-      if (activeChat === active) activeChat = undefined;
+      try {
+        events.finish();
+      } finally {
+        activeChats.delete(validated.id);
+      }
     }
   });
   handleDesktop('chat:cancel', (event, id: unknown) => {
     requireMain(event);
-    if (typeof id === 'string' && activeChat?.id === id) cancelActive();
+    const active = typeof id === 'string' ? activeChats.get(id) : undefined;
+    if (active?.sender === event.sender) active.controller.abort();
   });
   handleDesktop('chat:open-link', async (event, value: unknown) => {
     requireMain(event);
@@ -147,5 +170,5 @@ export function registerChatIpc(dependencies: Dependencies) {
     if (!source) throw new Error('无效的链接。');
     await dependencies.openLink(source.url);
   });
-  return { cancelActive, isBusy: () => pendingChats > 0 };
+  return { cancelActive, cancelModels, isBusy: () => activeChats.size > 0 || resettingUsage };
 }

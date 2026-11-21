@@ -6,6 +6,7 @@ using System.Text;
 using System.Threading;
 using System.Diagnostics;
 using System.Collections.Generic;
+using System.Collections.Concurrent;
 using System.Runtime.InteropServices;
 using System.Web.Script.Serialization;
 
@@ -141,42 +142,47 @@ class WasapiCapture {
       }
       var silence=new LoopbackSilence(wave.rate);
       var output=new BinaryWriter(Console.OpenStandardOutput()); var clock=Stopwatch.StartNew();
-      Check(client.Start()); Status(new { type="started", source=source, rate=wave.rate, channels=wave.channels, bits=wave.bits, floating=floating });
       long lastDefaultCheck=0; bool havePosition=false,stopped=false;
-      while(true) {
-        // Stop new capture first, then drain every already captured packet.
-        // stdout closes only after this tail has reached the parent process.
-        if(stopping && !stopped) { Check(client.Stop()); stopped=true; }
-        if(!stopped && clock.ElapsedMilliseconds-lastDefaultCheck>1000) {
-          lastDefaultCheck=clock.ElapsedMilliseconds;
-          uint state; Check(device.GetState(out state)); if(state!=1) throw new COMException("Audio device disconnected",DeviceInvalidated);
-          if(requested.Length==0 && Default(e,flow)!=selected) throw new COMException("Default audio device changed",DeviceInvalidated);
-        }
-        uint packet; Check(capture.GetNextPacketSize(out packet));
-        while(packet>0) {
-          IntPtr data; uint frames,flags; ulong position,qpc; Check(capture.GetBuffer(out data,out frames,out flags,out position,out qpc));
-          try {
-            if(frames>192000) throw new InvalidOperationException("Invalid WASAPI packet length");
-            byte[] raw=new byte[checked((int)frames*wave.blockAlign)]; if((flags&2)==0) Marshal.Copy(data,raw,0,raw.Length);
-            if(silence.Packet(qpc,frames,flags))flags|=1;
-            WritePacket(output,wave,floating,raw,flags,qpc,ref havePosition);
-          } finally { Check(capture.ReleaseBuffer(frames)); }
-          Check(capture.GetNextPacketSize(out packet));
-        }
-        if(stopped) break;
-        if(audioClock!=null && clockFrequency>0) {
-          ulong position,clockQpc,startQpc;
-          int hr=audioClock.GetPosition(out position,out clockQpc);
-          // A packet may arrive while the clock query is in flight. Give real
-          // PCM priority before publishing any inferred silent interval.
-          Check(capture.GetNextPacketSize(out packet));
-          if(packet==0) {
-            int silenceFrames=silence.Poll(clockFrequency,position,clockQpc,hr==0,out startQpc);
-            if(silenceFrames>0)
-              WritePacket(output,wave,floating,new byte[silenceFrames*wave.blockAlign],2,startQpc,ref havePosition);
+      using(var writer=new PacketWriter((raw,flags,qpc)=>WritePacket(output,wave,floating,raw,flags,qpc,ref havePosition))) {
+        Check(client.Start()); Status(new { type="started", source=source, rate=wave.rate, channels=wave.channels, bits=wave.bits, floating=floating });
+        while(true) {
+          writer.CheckError();
+          // Stop new capture first, then drain every already captured packet.
+          // stdout closes only after this tail has reached the parent process.
+          if(stopping && !stopped) { Check(client.Stop()); stopped=true; }
+          if(!stopped && clock.ElapsedMilliseconds-lastDefaultCheck>1000) {
+            lastDefaultCheck=clock.ElapsedMilliseconds;
+            uint state; Check(device.GetState(out state)); if(state!=1) throw new COMException("Audio device disconnected",DeviceInvalidated);
+            if(requested.Length==0 && Default(e,flow)!=selected) throw new COMException("Default audio device changed",DeviceInvalidated);
           }
+          uint packet; Check(capture.GetNextPacketSize(out packet));
+          while(packet>0) {
+            IntPtr data; uint frames,flags; ulong position,qpc; Check(capture.GetBuffer(out data,out frames,out flags,out position,out qpc));
+            byte[] raw;
+            try {
+              if(frames>192000) throw new InvalidOperationException("Invalid WASAPI packet length");
+              raw=new byte[checked((int)frames*wave.blockAlign)]; if((flags&2)==0) Marshal.Copy(data,raw,0,raw.Length);
+            } finally { Check(capture.ReleaseBuffer(frames)); }
+            if(silence.Packet(qpc,frames,flags))flags|=1;
+            writer.Add(raw,flags,qpc);
+            if(stopping && !stopped) { Check(client.Stop()); stopped=true; }
+            Check(capture.GetNextPacketSize(out packet));
+          }
+          if(stopped) break;
+          if(audioClock!=null && clockFrequency>0) {
+            ulong position,clockQpc,startQpc;
+            int hr=audioClock.GetPosition(out position,out clockQpc);
+            // A packet may arrive while the clock query is in flight. Give real
+            // PCM priority before publishing any inferred silent interval.
+            Check(capture.GetNextPacketSize(out packet));
+            if(packet==0) {
+              int silenceFrames=silence.Poll(clockFrequency,position,clockQpc,hr==0,out startQpc);
+              if(silenceFrames>0)
+                writer.Add(new byte[silenceFrames*wave.blockAlign],2,startQpc);
+            }
+          }
+          Thread.Sleep(5);
         }
-        Thread.Sleep(5);
       }
       Status(new {type="stopped",source=source});
     } finally { if(client!=null) try {client.Stop();} catch {} Release(audioClock); Release(capture); Release(client); Release(device); if(format!=IntPtr.Zero) Marshal.FreeCoTaskMem(format); }
@@ -213,6 +219,42 @@ class WasapiCapture {
     [PreserveSig] int GetFrequency(out ulong frequency);
     [PreserveSig] int GetPosition(out ulong position,out ulong qpc);
     [PreserveSig] int GetCharacteristics(out uint characteristics);
+  }
+}
+
+// The capture thread only copies and publishes. Slow stdout can never hold a
+// device buffer. Count both queued bytes and the packet currently being written.
+sealed class PacketWriter : IDisposable {
+  struct Packet { public byte[] raw; public uint flags; public ulong qpc; }
+  readonly BlockingCollection<Packet> packets=new BlockingCollection<Packet>(128);
+  readonly Thread worker;
+  volatile Exception failure;
+  int bytes;
+  public PacketWriter(Action<byte[],uint,ulong> write) {
+    worker=new Thread(delegate() {
+      try {
+        foreach(var packet in packets.GetConsumingEnumerable()) {
+          write(packet.raw,packet.flags,packet.qpc);
+          Interlocked.Add(ref bytes,-packet.raw.Length);
+        }
+      } catch(Exception ex) { failure=ex; }
+    });
+    worker.IsBackground=true;
+    worker.Start();
+  }
+  public void CheckError() { if(failure!=null) throw new IOException("Audio pipe write failed",failure); }
+  public void Add(byte[] raw,uint flags,ulong qpc) {
+    CheckError();
+    if(Interlocked.Add(ref bytes,raw.Length)<=32*1024*1024 &&
+       packets.TryAdd(new Packet { raw=raw,flags=flags,qpc=qpc })) return;
+    Interlocked.Add(ref bytes,-raw.Length);
+    throw new COMException("Audio pipe backlog exceeded",unchecked((int)0x8007006F));
+  }
+  public void Dispose() {
+    packets.CompleteAdding();
+    if(!worker.Join(1200)) throw new COMException("Audio pipe drain timed out",unchecked((int)0x8007006F));
+    packets.Dispose();
+    CheckError();
   }
 }
 

@@ -1,3 +1,4 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t, uiLocale } from '../i18n';
 import { SyncBadge } from './SyncBadge';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
@@ -19,19 +20,19 @@ import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
 import { useKnowledge } from '../stores/knowledge';
 import { documentAccept } from '../services/knowledge';
-import { knowledgeStatusLabel } from '../services/knowledgeIndex';
+import { documentIndexLabel, knowledgeStatusLabel } from '../services/knowledgeIndex';
 import { useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
-export function KnowledgePage({ onComponentSettings }: { onComponentSettings?(): void }) {
+import type { OpenComponentSettings } from '../services/componentSettingsTargets';
+export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: OpenComponentSettings }) {
   const ragReady = useComponentReady('rag');
   const state = useKnowledge();
   const index = useKnowledgeIndex();
   useEffect(() => index.connect(), []);
-  const phase = (id: string) => {
-    const status = index.tasks[id];
-    if (status) return t(knowledgeStatusLabel(status));
-    const doc = index.state?.documents.find((doc) => doc.documentId === id);
-    return t(doc ? (doc.available === false ? '索引已停用' : '索引完成') : '尚未索引');
+  const documents = new Map(index.state?.documents.map(doc => [doc.documentId, doc]));
+  const cardStatus = (baseId: string) => {
+    const task = !index.deletingDocumentIds && index.currentProgress(baseId);
+    return t(task ? knowledgeStatusLabel(task) : '本地资料');
   };
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');
@@ -62,12 +63,14 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
       </header>
       <div className="management-scroll">
         <div className="management-container">
-          {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
-          {state.error && state.errorBaseId === null && !base && !editing && (
-            <p role="alert" className="inline-error">
-              {t(state.error)}
-            </p>
-          )}
+          <ComponentsNotice only="rag" onSettings={onComponentSettings} />
+          <InterviewReveal resizeKey={state.error ?? ''}>
+            {state.error && state.errorBaseId === null && !base && !editing ? (
+              <p role="alert" className="inline-error">
+                {t(state.error)}
+              </p>
+            ) : null}
+          </InterviewReveal>
           {!state.bases.length ? (
             <div className="management-empty">
               <Database size={36} />
@@ -104,7 +107,7 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                       {new Date(item.createdAt).toLocaleDateString(uiLocale())}
                     </p>
                     <span className="card-footer">
-                      {t('本地资料')}
+                      {cardStatus(item.id)}
                       <ChevronRight size={14} />
                     </span>
                   </button>
@@ -165,39 +168,43 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             </>
           }
         >
-          {state.error && state.errorBaseId === base.id && (
-            <div role="alert" className="inline-error knowledge-inline-error">
-              <span>{t(state.error)}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="history-search-clear"
-                aria-label={t('关闭错误提示')}
-                data-reveal-on-hover
-                onClick={state.dismissError}
-              >
-                <X size={14} />
-              </Button>
-            </div>
-          )}
-          {index.error && (
-            <div role="alert" className="inline-error knowledge-inline-error">
-              <span>{t(index.error)}</span>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="history-search-clear"
-                aria-label={t('关闭错误提示')}
-                data-reveal-on-hover
-                onClick={index.dismissError}
-              >
-                <X size={14} />
-              </Button>
-            </div>
-          )}
-          {!ragReady && <ComponentsNotice only="rag" onSettings={onComponentSettings} />}
+          <InterviewReveal resizeKey={state.error ?? ''}>
+            {state.error && state.errorBaseId === base.id ? (
+              <div role="alert" className="inline-error knowledge-inline-error">
+                <span>{t(state.error)}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="history-search-clear"
+                  aria-label={t('关闭错误提示')}
+                  data-reveal-on-hover
+                  onClick={state.dismissError}
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+            ) : null}
+          </InterviewReveal>
+          <InterviewReveal resizeKey={index.error ?? ''}>
+            {index.error ? (
+              <div role="alert" className="inline-error knowledge-inline-error">
+                <span>{t(index.error)}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="history-search-clear"
+                  aria-label={t('关闭错误提示')}
+                  data-reveal-on-hover
+                  onClick={index.dismissError}
+                >
+                  <X size={14} />
+                </Button>
+              </div>
+            ) : null}
+          </InterviewReveal>
+          <ComponentsNotice only="rag" onSettings={onComponentSettings} />
           <h3 className="dialog-section-title">
             {t('文档列表 ')}
             <span>{state.documents.length}</span>
@@ -255,24 +262,26 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
             ) : (
               state.documents.map((doc) => {
                 const task = index.tasks[doc.id];
-                const error = task?.phase === 'failed' ? task.error : undefined;
+                const deleting = index.deletingDocumentIds?.has(doc.id);
+                const label = documentIndexLabel(documents.get(doc.id), task, {
+                  requestId: index.requests[doc.id], deleting, hasSnapshot: !!index.state,
+                });
+                const error = !deleting && task?.phase === 'failed' ? task.error : undefined;
                 return (
                   <div className="document-row" key={doc.id}>
                     <FileText size={18} />
                     <div className="document-details">
                       <strong>{doc.name}</strong>
-                      <p
-                        className={error ? 'document-status' : undefined}
-                        role={error ? 'alert' : undefined}
-                      >
+                      <div className="document-status">
                         <span className="document-status-prefix">
                           {doc.size < 1024 ? `${doc.size} B` : `${Math.ceil(doc.size / 1024)} KB`}
-                          {' · '}
-                          {phase(doc.id)}
+                          {label && ' · ' + t(label)}
                           {error ? ': ' : ''}
                         </span>
-                        {error && <span className="document-status-message">{t(error)}</span>}
-                      </p>
+                        <InterviewReveal resizeKey={error ?? ''}>
+                          {error ? <span className="document-status-message" role="alert">{t(error)}</span> : null}
+                        </InterviewReveal>
+                      </div>
                     </div>
                     <div className="document-actions">
                       <SyncBadge itemKey={'file:' + doc.id} label={doc.name} />
@@ -327,11 +336,13 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?():
                 onChange={(event) => setName(event.target.value)}
               />
             </label>
-            {state.editorError && (
-              <p role="alert" className="inline-error">
-                {t(state.editorError)}
-              </p>
-            )}
+            <InterviewReveal resizeKey={state.editorError ?? ''}>
+              {state.editorError ? (
+                <p role="alert" className="inline-error">
+                  {t(state.editorError)}
+                </p>
+              ) : null}
+            </InterviewReveal>
             <div className="dialog-footer">
               <Button
                 type="button"

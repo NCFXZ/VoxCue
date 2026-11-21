@@ -61,10 +61,10 @@ describe('remote renderer boundary', () => {
       { op: 'execute', command: 'x' },
     ])
       expect(() => validateRemoteConnectionCall(value)).toThrow('Invalid remote');
-    expect(validateRemoteSnapshot(snapshot())).toEqual(snapshot());
+    expect(validateRemoteSnapshot(snapshot())).toEqual({ snapshot: snapshot(), serialized: JSON.stringify(snapshot()) });
     for (const truncated of [true, false]) {
       const value = { ...snapshot(), inputDraft: { ...snapshot().inputDraft, truncated } };
-      expect(validateRemoteSnapshot(value)).toEqual(value);
+      expect(validateRemoteSnapshot(value).snapshot).toEqual(value);
     }
     for (const value of [
       { ...snapshot(), account: 'private' },
@@ -118,6 +118,7 @@ describe('remote renderer boundary', () => {
       })),
       pairing: vi.fn(() => ({ url: 'http://192.168.1.2:1234/#pair=synthetic', expiresAt: 123 })),
       updateSnapshot: vi.fn(),
+      waitForSnapshotSlot: vi.fn(),
     };
     const coordinator = new RemoteInterviewCoordinator(() => true);
     const main = { mainFrame: {} },
@@ -150,6 +151,11 @@ describe('remote renderer boundary', () => {
       state: { status: 'error', error: 'No private network' },
     });
     expect(service.pairing.mock.calls.length).toBe(beforeFailure);
+    const ready = bridge.handlers.get('remote:ready')!;
+    expect(() => ready(event(main))).toThrow('Unauthorized');
+    expect(() => ready(event(owner), 'extra')).toThrow('Invalid remote request');
+    ready(event(owner));
+    expect(service.waitForSnapshotSlot).toHaveBeenCalledOnce();
     const publish = bridge.handlers.get('remote:publish')!;
     expect(() => publish(event(main), snapshot())).toThrow('Unauthorized');
     publish(event(owner), snapshot());

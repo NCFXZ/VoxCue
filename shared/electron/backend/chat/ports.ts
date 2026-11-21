@@ -14,7 +14,7 @@ export interface ChatRequestScope {
 export interface AIChatService {
   /** Main-process-only options; never accepted from Renderer or sent to a provider. */
   beginRequest?(options?: { retrievalQuery?: string; references?: boolean }): ChatRequestScope;
-  models(force?: boolean): Promise<ChatModel[]>;
+  models(force?: boolean, signal?: AbortSignal): Promise<ChatModel[]>;
   accountUsage?(): Promise<AccountUsage | null>;
   usage(): Promise<AppUsage>;
   resetUsage(): Promise<AppUsage>;

@@ -7,6 +7,8 @@ import { createRequire } from 'node:module';
 import { runInNewContext } from 'node:vm';
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { checkPackagedRenderer } from './packaged-renderer-check.mjs';
+import { checkKnowledgeProcessClosure } from './knowledge-process-closure.mjs';
+import { sileroModel, sileroLicense, validSileroAsset } from '../../../shared/scripts/silero-assets.mjs';
 
 assert.equal(process.platform, 'win32');
 process.env.ELECTRON_BUILDER_CACHE = path.resolve('.cache/electron-builder');
@@ -55,6 +57,7 @@ assert.equal(new Set(paths).size, paths.length, 'Duplicate APPX entries');
 for (const name of paths)
   assert.ok(!/^(?:\/|[A-Za-z]:)|(?:^|\/)\.\.(?:\/|$)/.test(name), 'Unsafe APPX entry: ' + name);
 const entries = new Set(paths);
+checkKnowledgeProcessClosure((file) => entries.has('app/resources/app.asar.unpacked/' + file));
 async function entry(name, limit) {
   assert.ok(entries.has(name), 'Missing APPX entry: ' + name);
   return seven(['e', '-so', '-bd', artifact, name], limit);
@@ -121,6 +124,8 @@ for (const name of [
   'app/VoxCue.exe',
   'app/resources/native/VoxCue.Audio.exe',
   'app/resources/native/VoxCue.Screenshot.exe',
+  'app/resources/native/VoxCue.WindowMotion.exe',
+  'app/resources/native/VoxCue.ApiKeyPrompt.exe',
   'app/resources/voxcue-components.json',
 ])
   assert.ok(entries.has(name), name);
@@ -128,9 +133,14 @@ for (const name of ['LICENSE', 'THIRD_PARTY_NOTICES.md']) {
   const bundled = await entry('app/resources/licenses/' + name);
   assert.ok(bundled.equals(await readFile(path.join('..', name))), name);
 }
-const cancellation = 'dist-electron/shared/electron/backend/cancellable.js';
-const physicalCancellation = await entry('app/resources/app.asar.unpacked/' + cancellation);
-assert.ok(physicalCancellation.equals(await readFile(cancellation)), cancellation);
+const sileroPath = 'app/resources/native/' + sileroModel.name;
+assert.ok(validSileroAsset(sileroModel, await entry(sileroPath)), sileroModel.name);
+assert.ok(validSileroAsset(sileroLicense, await entry('app/resources/licenses/' + sileroLicense.name)), sileroLicense.name);
+for (const name of ['cancellable', 'atomicFile']) {
+  const file = 'dist-electron/shared/electron/backend/' + name + '.js';
+  const physical = await entry('app/resources/app.asar.unpacked/' + file);
+  assert.ok(physical.equals(await readFile(file)), file);
+}
 assert.deepEqual(
   JSON.parse((await entry('app/resources/voxcue-components.json')).toString('utf8')),
   {
@@ -154,8 +164,8 @@ assert.ok(
   'Foreign platform files',
 );
 assert.ok(
-  !allPaths.some((name) => /\.(?:onnx|safetensors|gguf)$/i.test(name)),
-  'Model weights stay external',
+  !allPaths.some((name) => name !== sileroPath && /\.(?:onnx|safetensors|gguf)$/i.test(name)),
+  'Only the verified endpoint model belongs in the application',
 );
 assert.ok(
   !allPaths.some((name) =>
@@ -197,7 +207,12 @@ function loadArchived(name) {
     exports: module.exports,
     module,
     require: (request) => {
-      assert.ok(request.startsWith('.'), 'Window policy must use only pure packaged modules');
+      // Chromium partitions use the same hashed owner name as native profile directories.
+      if (name === 'dist-electron/shared/electron/accountProfilePaths.js') {
+        if (request === 'node:crypto') return { createHash };
+        if (request === 'node:path') return { join: path.join };
+      }
+      assert.ok(request.startsWith('.'), 'Unexpected window-policy import: ' + request);
       const resolved = path.posix.normalize(
         path.posix.join(path.posix.dirname(name), request + '.js'),
       );
@@ -208,12 +223,15 @@ function loadArchived(name) {
   return module.exports;
 }
 const windowPolicy = loadArchived('dist-electron/shared/electron/window.js');
+const owner = 'account:00000000-0000-4000-8000-000000000001';
+const ownerPartition = 'persist:voxcue-user-' + createHash('sha256').update(owner).digest('hex');
 for (const role of ['login', 'main', 'interview']) {
   const options = windowPolicy.windowOptions(
     role,
     { id: 'win32', mainWindowOptions: {} },
-    { icon: 'owned.ico', preload: 'owned-preload.js' },
+    { icon: 'owned.ico', preload: 'owned-preload.js', owner },
   );
+  assert.equal(options.webPreferences.partition, role === 'login' ? 'persist:voxcue-login' : ownerPartition, role);
   assert.equal(options.webPreferences.contextIsolation, true, role);
   assert.equal(options.webPreferences.sandbox, true, role);
   assert.equal(options.webPreferences.nodeIntegration, false, role);
@@ -289,7 +307,7 @@ const demo = runInNewContext('(' + callback + ')', {
   process: { env: { COPILOT_TEST_USER_DATA: testRoot } },
   requireLogin() {},
 });
-assert.throws(
+await assert.rejects(
   () => demo({}),
   /测试入口不可用/,
   'Formal Store package refuses the test login entry',

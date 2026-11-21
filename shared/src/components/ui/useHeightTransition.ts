@@ -2,10 +2,9 @@ import { useEffect, useLayoutEffect, useRef } from 'react';
 
 type Track = { height: number; animation?: Animation; release?(): void };
 
-// Each surface keeps its outer frame; only the sections whose natural height
-// changes expand or contract, using the same timing as the existing tabs.
+// Animate changes in the targets' natural heights using the shared panel timing.
 export function useHeightTransition(
-  key: string,
+  key: unknown,
   targets: () => Array<HTMLElement | null | undefined>,
 ) {
   const tracks = useRef(new Map<HTMLElement, Track>());
@@ -28,11 +27,14 @@ export function useHeightTransition(
         cancel(track);
         tracks.current.delete(node);
       }
-    for (const node of nodes) {
+    // Read all final bounds before pinning any parent to its starting height.
+    const sizes = Array.from(nodes, (node) => {
       const old = tracks.current.get(node);
       const from = old?.animation ? node.getBoundingClientRect().height : old?.height;
       if (old) cancel(old);
-      const height = node.getBoundingClientRect().height;
+      return { node, from, height: node.getBoundingClientRect().height };
+    });
+    for (const { node, from, height } of sizes) {
       const track: Track = { height };
       tracks.current.set(node, track);
       if (
@@ -41,7 +43,9 @@ export function useHeightTransition(
         matchMedia('(prefers-reduced-motion: reduce)').matches
       )
         continue;
-      const scroll = node.closest<HTMLElement>('.dialog-scroll, .settings-content-body');
+      const scroll = node.matches('dialog')
+        ? node.querySelector<HTMLElement>(':scope > .dialog-scroll')
+        : node.closest<HTMLElement>('.dialog-scroll, .settings-content-body');
       if (scroll) {
         const anchor = anchors.current.get(scroll) ?? {
           count: 0,
@@ -98,4 +102,14 @@ export function useHeightTransition(
       tracks.current.clear();
     };
   }, []);
+
+  // A disclosure can change both its contents and its containing dialog. Capture
+  // their visible sizes before cancelling either animation or changing the layout.
+  return () => {
+    for (const [node, track] of tracks.current) track.height = node.getBoundingClientRect().height;
+    for (const track of tracks.current.values()) {
+      cancel(track);
+      track.animation = undefined;
+    }
+  };
 }

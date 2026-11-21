@@ -12,6 +12,8 @@ export async function readCredentialRecords(
     authStorage: CredentialReader;
     cloudVault: CredentialReader;
     telemetryProofVault: CredentialReader;
+    readMigrationPasswords(decrypt: DecryptCredential): Promise<boolean>;
+    readErasureReceipts?(decrypt: DecryptCredential): Promise<boolean>;
     accountOrigin: string | undefined;
     validateTelemetryProofs?: (value: unknown) => Promise<void>;
   },
@@ -21,6 +23,8 @@ export async function readCredentialRecords(
     const credentials = await ports.authStorage.read(decrypt);
     const session = await ports.cloudVault.read(decrypt);
     const proofs = await ports.telemetryProofVault.read(decrypt);
+    const hasMigrationPasswords = await ports.readMigrationPasswords(decrypt);
+    const hasErasureReceipts = await ports.readErasureReceipts?.(decrypt);
     if (session !== null) {
       if (!ports.accountOrigin) return 'unavailable';
       storedCloudCredentials(session, ports.accountOrigin);
@@ -29,7 +33,9 @@ export async function readCredentialRecords(
       if (!ports.validateTelemetryProofs) return 'unavailable';
       await ports.validateTelemetryProofs(proofs);
     }
-    return credentials === null && session === null && proofs === null ? 'empty' : 'readable';
+    return credentials === null && session === null && proofs === null && !hasMigrationPasswords && !hasErasureReceipts
+      ? 'empty'
+      : 'readable';
   } catch {
     return 'unavailable';
   }

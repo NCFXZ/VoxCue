@@ -2,6 +2,8 @@ import { connectUiAccount } from './install-ui-account.mjs';
 import { cornerShapeNames } from './continuous-corners.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
+import { readStoredChatFixture } from './stored-chat-fixture.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -673,22 +675,9 @@ try {
   await capture('compact-fields-narrow');
   assert.equal(await proposal().evaluate((node) => node.scrollWidth <= node.clientWidth + 1), true);
   await mainWindow.evaluate((window) => window.setSize(1280, 1000));
-  await page.waitForFunction(async () => {
-    const db = await new Promise((resolve) => {
-      const r = indexedDB.open('voxcue-preparation-chats', 1);
-      r.onsuccess = () => resolve(r.result);
-    });
-    try {
-      const state = await new Promise((resolve) => {
-        const r = db.transaction('state').objectStore('state').get('current');
-        r.onsuccess = () => resolve(r.result);
-      });
-      return state?.conversations.some((c) =>
-        c.messages.some((m) => JSON.stringify(m.selectedProfileFields) === '["background"]'),
-      );
-    } finally {
-      db.close();
-    }
+  await waitForAsync(page, readStoredChatFixture, undefined, {
+    matches: state => state?.conversations.some(c =>
+      c.messages.some(m => JSON.stringify(m.selectedProfileFields) === '["background"]')),
   });
   await page.reload();
   await save().waitFor();

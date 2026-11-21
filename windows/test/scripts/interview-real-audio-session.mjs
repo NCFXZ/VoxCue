@@ -1,3 +1,4 @@
+import { evaluateHistory } from '../../../shared/test/scripts/stored-history-fixture.mjs';
 import assert from 'node:assert/strict';
 import { lstat, mkdir, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
@@ -139,25 +140,23 @@ try {
     window.desktop.onSpeechEvent((event) => window.realAudioEvents.push(event));
   });
   const readyDeadline = Date.now() + 240000;
-  while (
-    !(await app.evaluate(() =>
-      globalThis.realAudio.events.some(
-        (event) => event.type === 'status' && event.status.state === 'running',
-      ),
-    ))
-  ) {
+  let status;
+  for (;;) {
+    // The preparation dialog starts a levels-only preview in a previous child.
+    // Only the current managed interview capture reports its confirmed input state.
+    status = await app.evaluate(() =>
+      globalThis.realAudio.events.findLast((event) => event.type === 'status')?.status);
+    if (status?.state === 'running' && status.inputState?.inputMode === 'remote') break;
     assert.deepEqual(await app.evaluate(() => globalThis.realAudio.failures), []);
-    assert.ok(Date.now() < readyDeadline, 'The real ASR pipeline must finish loading');
+    assert.ok(Date.now() < readyDeadline, 'The managed interview ASR capture must finish loading');
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
-  const status = await app.evaluate(
-    () =>
-      globalThis.realAudio.events.findLast(
-        (event) => event.type === 'status' && event.status.state === 'running',
-      )?.status,
-  );
   assert.equal(status?.speechModel, model);
+  assert.equal(status.inputState.microphoneMuted, true);
   if (model === 'qwen') assert.equal(status.inferenceDevice, 'cpu');
+  await floating.waitForFunction(() => window.realAudioEvents.some((event) =>
+    event.type === 'audio-progress' && event.source === 'system' && !event.pending &&
+    Number.isFinite(event.processedThroughMs)));
   let count = 0;
   let freshQuestion;
   const completed = async (expected) => {
@@ -181,7 +180,6 @@ try {
     const audit = await app.evaluate(
       (_electron, from) => ({
         events: globalThis.realAudio.events.slice(from),
-        requests: globalThis.realAudio.requests,
         failures: globalThis.realAudio.failures,
       }),
       from,
@@ -199,11 +197,35 @@ try {
           event.type === 'segment' && event.segment.source === 'system' && event.segment.final,
       )
       .map((event) => event.segment);
+    const last = finals.findLast((segment) => segment.reason === 'silence');
+    const deadline = last ? last.silenceStartMs + 1000 : undefined;
+    const through = audit.events.findLast((event) =>
+      event.type === 'audio-progress' && event.source === 'system' && !event.pending &&
+      Number.isFinite(event.processedThroughMs))?.processedThroughMs;
+    if (through !== undefined)
+      await floating.waitForFunction((through) => window.realAudioEvents.some((event) =>
+        event.type === 'audio-progress' && event.source === 'system' && !event.pending &&
+        event.processedThroughMs >= through), through);
+    // The renderer may have started answering on that pulse while the main
+    // process is still preparing the provider call. Wait for the send control
+    // to return after any in-flight answer before counting actual requests.
+    await floating.getByRole('button', { name: '发送面试问题', exact: true }).waitFor();
+    const automaticQuestions = await app.evaluate((_electron, previous) =>
+      globalThis.realAudio.requests.slice(previous).map(({ request }) => request.turns.at(-1).content),
+    count);
     console.log(
       JSON.stringify({
         model,
         id: item.id,
+        inputText: item.text,
+        waveSha256: item.sha256,
+        speechStarts: audit.events.filter((event) => event.type === 'speech-start' && event.source === 'system').length,
         recognizedFinals: finals.map(({ text, reason }) => ({ text, reason })),
+        processedThroughMs: through ?? null,
+        automaticGateMs: deadline ?? null,
+        reachedAutomaticGate: Number.isFinite(deadline) ? through >= deadline : null,
+        providerRequestsBeforeManual: automaticQuestions.length,
+        automaticQuestions,
       }),
     );
     if (item.kind === 'unaccepted') {
@@ -232,8 +254,9 @@ try {
       'Empty ASR output or a forced stop final is not a filtering pass',
     );
     const text = finals.map((segment) => segment.text).join(' ');
-    const last = finals.findLast((segment) => segment.reason === 'silence');
-    const deadline = last.silenceStartMs + 1800;
+    const endpointMs = last.endMs - last.silenceStartMs;
+    assert.ok(endpointMs >= 500 && endpointMs < 532,
+      `Expected a 500 ms endpoint within one 32 ms VAD frame, observed ${endpointMs} ms`);
     assert.ok(Number.isFinite(deadline));
     assert.ok(
       audit.events.some(
@@ -243,7 +266,7 @@ try {
           !event.pending &&
           event.processedThroughMs >= deadline,
       ),
-      'Real processed audio must cross the 1800 ms gate',
+      'Real processed audio must cross the 1000 ms gate',
     );
     await floating.waitForFunction(
       (deadline) =>
@@ -313,6 +336,7 @@ try {
       kind: item.kind,
       text,
       sourceTranscriptIds: [...new Set(finals.map((segment) => segment.id))],
+      endpointMs,
       automaticRequests: item.kind === 'filler' ? 0 : 1,
       manualRequests: item.kind === 'filler' ? 1 : 0,
       maxQueueMs: played.maxQueueMs,
@@ -323,8 +347,8 @@ try {
     floating.waitForEvent('close'),
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
   ]);
-  const record = await page.evaluate(
-    () => JSON.parse(localStorage.getItem('copilot-interview-history-v1'))[0],
+  const record = await evaluateHistory(page,
+    async () => (await fixtureHistory.read())[0],
   );
   assert.equal(record.answers.length, count);
   assert.equal(record.mock, false);

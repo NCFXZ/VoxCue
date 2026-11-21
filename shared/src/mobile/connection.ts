@@ -1,4 +1,6 @@
 import { REMOTE_PROTOCOL_VERSION } from '../../electron/contracts/remoteConnection';
+import { record, revision, text, validRemoteSnapshot as validSnapshot } from '../../electron/contracts/remoteSnapshotValidation';
+import { applySnapshotDelta } from '../../electron/contracts/remoteSnapshotDelta';
 import type {
   RemoteClientMessage,
   RemoteCommand,
@@ -21,6 +23,8 @@ type Action = 'sendQuestion' | 'microphone' | 'autoAnswer' | 'stopAnswer';
 export interface MobileConnectionState {
   status: MobileConnectionStatus;
   snapshot: RemoteInterviewSnapshot | null;
+  /** Absolute answer count at the most recent authoritative restore in this connection. */
+  restoredAnswerCount?: number;
   pairingCode: string | null;
   deviceName: string | null;
   draft: string;
@@ -73,12 +77,6 @@ interface PendingDraft {
 const STORAGE_KEY = 'voxcue-mobile-lan-v1';
 const RESUME_MS = 120_000;
 const ACK_MS = 5_000;
-const record = (value: unknown): value is Record<string, unknown> =>
-  !!value && typeof value === 'object' && !Array.isArray(value);
-const text = (value: unknown, maximum: number): value is string =>
-  typeof value === 'string' && value.length <= maximum;
-const revision = (value: unknown): value is number =>
-  Number.isSafeInteger(value) && (value as number) >= 0;
 const secret = (value: unknown): value is string =>
   typeof value === 'string' && /^[A-Za-z0-9_-]{8,100}$/.test(value);
 const action = (value: unknown): value is Action =>
@@ -89,7 +87,7 @@ function privateOrigin(value: string): string | null {
     const url = new URL(value);
     const parts = url.hostname.split('.');
     if (
-      url.protocol !== 'http:' ||
+      (url.protocol !== 'http:' && url.protocol !== 'https:') ||
       url.username ||
       url.password ||
       parts.length !== 4 ||
@@ -105,65 +103,6 @@ function privateOrigin(value: string): string | null {
   } catch {
     return null;
   }
-}
-
-function validSnapshot(value: unknown): value is RemoteInterviewSnapshot | null {
-  if (value === null) return true;
-  if (
-    !record(value) ||
-    !(value.sessionId === null || text(value.sessionId, 128)) ||
-    !revision(value.sessionEpoch) ||
-    !revision(value.revision) ||
-    !revision(value.micRevision) ||
-    !revision(value.autoAnswerRevision) ||
-    !revision(value.pendingQuestionRevision) ||
-    !record(value.inputDraft) ||
-    !text(value.inputDraft.text, 6000) ||
-    !revision(value.inputDraft.revision) ||
-    typeof value.inputDraft.manual !== 'boolean' ||
-    (value.inputDraft.truncated !== undefined && typeof value.inputDraft.truncated !== 'boolean') ||
-    !text(value.pendingQuestion, 6000) ||
-    !['idle', 'running', 'paused', 'ended'].includes(value.status as string) ||
-    !['remote', 'transcription'].includes(value.inputMode as string) ||
-    !['generating', 'aiEnabled', 'microphoneMuted', 'microphoneToggling', 'autoAnswer'].every(
-      (key) => typeof value[key] === 'boolean',
-    ) ||
-    !record(value.capabilities) ||
-    !['sendQuestion', 'setMicrophone', 'setAutoAnswer', 'stopAnswer'].every(
-      (key) => typeof (value.capabilities as Record<string, unknown>)[key] === 'boolean',
-    ) ||
-    !record(value.omitted) ||
-    !revision(value.omitted.transcripts) ||
-    !revision(value.omitted.answers) ||
-    !Array.isArray(value.transcripts) ||
-    value.transcripts.length > 200 ||
-    !Array.isArray(value.answers) ||
-    value.answers.length > 40
-  )
-    return false;
-  return (
-    value.transcripts.every(
-      (row) =>
-        record(row) &&
-        text(row.id, 128) &&
-        text(row.text, 16000) &&
-        text(row.time, 128) &&
-        typeof row.final === 'boolean' &&
-        (row.source === undefined || ['microphone', 'system'].includes(row.source as string)) &&
-        (row.textTruncated === undefined || typeof row.textTruncated === 'boolean'),
-    ) &&
-    value.answers.every(
-      (row) =>
-        record(row) &&
-        text(row.id, 128) &&
-        text(row.question, 6000) &&
-        text(row.content, 128000) &&
-        (row.error === undefined || text(row.error, 2000)) &&
-        (row.status === undefined ||
-          ['streaming', 'completed', 'stopped', 'failed'].includes(row.status as string)) &&
-        (row.contentTruncated === undefined || typeof row.contentTruncated === 'boolean'),
-    )
-  );
 }
 
 /** Browser-only LAN client. Storage contains scoped, revocable pairing capabilities,
@@ -206,6 +145,7 @@ export class MobileConnection {
   private active = false;
   private suspended = false;
   private awaitingSync = false;
+  private awaitingFirstPublication = true;
   private generation = 0;
   private reconnectAttempt = 0;
   private reconnectDeadline = 0;
@@ -269,15 +209,11 @@ export class MobileConnection {
     this.stopSocket();
     this.clearTimers();
     this.awaitingSync = false;
-    this.composing = false;
-    this.deferredDraft = null;
-    this.deferredDraftForce = false;
     this.resumeToken = null;
     this.pendingPair = null;
     this.pendingRequest?.resolve?.();
     this.pendingRequest = null;
-    this.releaseDraft(false);
-    this.draftBase = null;
+    this.resetSessionDraft();
     this.lastScrollId = 0;
     this.clearSaved();
     this.reconnectAttempt = this.reconnectDeadline = 0;
@@ -518,6 +454,7 @@ export class MobileConnection {
         }),
         cache: 'no-store',
         credentials: 'omit',
+        redirect: 'error',
         referrerPolicy: 'no-referrer',
         signal: abort.signal,
       });
@@ -589,7 +526,7 @@ export class MobileConnection {
     }
     let socket: WebSocket;
     try {
-      socket = new window.WebSocket(this.origin.replace(/^http:/, 'ws:') + '/connect');
+      socket = new window.WebSocket(this.origin.replace(/^http/, 'ws') + '/connect');
     } catch {
       this.fail('connection-timeout', '无法建立局域网连接，请检查网络后重试。', false);
       return;
@@ -606,11 +543,12 @@ export class MobileConnection {
       if (this.socket !== socket || !this.active) return;
       this.send(
         this.resumeToken
-          ? { type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: this.resumeToken }
+          ? { type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: this.resumeToken, snapshotDelta: true }
           : {
               type: 'authenticate',
               protocolVersion: REMOTE_PROTOCOL_VERSION,
               pendingId: this.pendingPair!.id,
+              snapshotDelta: true,
             },
       );
     };
@@ -712,6 +650,7 @@ export class MobileConnection {
       this.awaitingSync = false;
       this.recoveringDraft = !!this.draftRequest;
       this.sequence = value.sequence;
+      this.awaitingFirstPublication = true;
       const accepted = this.acceptSnapshot(value.snapshot, true);
       this.update({
         connected: true,
@@ -738,16 +677,42 @@ export class MobileConnection {
       return;
     }
     if (!this.state.connected) throw Error('Not authenticated');
-    if (value.type === 'snapshot') {
-      if (!revision(value.sequence) || !secret(value.deliveryId) || !validSnapshot(value.snapshot))
+    if (value.type === 'snapshot' || value.type === 'snapshot-delta') {
+      const incremental = value.type === 'snapshot-delta';
+      if (!revision(value.sequence) || !secret(value.deliveryId))
         throw Error('Invalid snapshot');
+      let snapshot: RemoteInterviewSnapshot | null = null;
+      if (!incremental) {
+        if (!validSnapshot(value.snapshot)) throw Error('Invalid snapshot');
+        snapshot = value.snapshot;
+      }
       try {
         if (
           value.sequence < this.sequence ||
-          (value.sequence === this.sequence && !this.awaitingSync)
+          (value.sequence === this.sequence && (incremental || !this.awaitingSync))
         )
           return;
-        if (!this.acceptSnapshot(value.snapshot, this.forceDraftSync)) return;
+        if (incremental) {
+          if (this.awaitingSync) {
+            // A previous full response may still precede a draft revision already
+            // confirmed by a command. Ask for this newer revision in full.
+            this.send({ type: 'sync' });
+            return;
+          }
+          if (value.baseSequence !== this.sequence || !this.state.snapshot) {
+            this.sync();
+            return;
+          }
+          snapshot = applySnapshotDelta(this.state.snapshot, value.delta);
+          if (!snapshot) {
+            this.sync();
+            return;
+          }
+        }
+        if (!this.acceptSnapshot(snapshot, this.forceDraftSync)) {
+          if (incremental) this.sync();
+          return;
+        }
         this.sequence = value.sequence;
         const synced = this.awaitingSync;
         if (synced) {
@@ -843,7 +808,14 @@ export class MobileConnection {
       snapshot.inputDraft.revision < draft.revision
     )
       return false;
-    this.update({ snapshot });
+    // A pairing reply can contain a cached view. The first publication from the
+    // desktop, explicit resyncs and new sessions establish the live append boundary.
+    const restored = this.awaitingFirstPublication || this.awaitingSync ||
+      snapshot?.sessionId !== previous?.sessionId || snapshot?.sessionEpoch !== previous?.sessionEpoch;
+    if (this.state.connected) this.awaitingFirstPublication = false;
+    this.update({ snapshot, ...(restored && {
+      restoredAnswerCount: snapshot ? snapshot.omitted.answers + snapshot.answers.length : undefined,
+    }) });
     if (snapshot?.sessionId)
       this.acceptSharedDraft(
         {
@@ -979,6 +951,15 @@ export class MobileConnection {
       this.queueDraftQuery(ACK_MS);
     else if (this.state.connected) this.lost();
     return completion;
+  }
+  private resetSessionDraft() {
+    this.releaseDraft(false);
+    this.draftBase = null;
+    this.adoptedDraftKey = '';
+    this.forceDraftSync = false;
+    this.composing = false;
+    this.deferredDraft = null;
+    this.deferredDraftForce = false;
   }
   private releaseDraft(ok: boolean) {
     const request = this.draftRequest;
@@ -1381,12 +1362,15 @@ export class MobileConnection {
     this.pairToken = null;
     this.pendingRequest?.resolve?.();
     this.pendingRequest = null;
-    this.releaseDraft(false);
+    this.resetSessionDraft();
     this.clearSaved();
     this.socket = null;
     this.update({
       status: 'disconnected',
       snapshot: null,
+      draft: '',
+      draftDirty: false,
+      draftSyncing: false,
       connected: false,
       pending: false,
       pendingAction: null,

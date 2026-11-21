@@ -1,3 +1,4 @@
+import { InterviewReveal } from './InterviewReveal';
 import { useId, useState } from 'react';
 import { t } from '../i18n';
 import { openChatLink } from '../services/chat';
@@ -97,11 +98,13 @@ export function PreparationGuide({
         {t('使用指南')}
         <ArrowUpRight size={14} aria-hidden="true" />
       </a>
-      {linkError && (
-        <p className="inline-error" role="alert">
-          {t('无法打开使用指南，请稍后重试。')}
-        </p>
-      )}
+      <InterviewReveal>
+        {linkError ? (
+          <p className="inline-error" role="alert">
+            {t('无法打开使用指南，请稍后重试。')}
+          </p>
+        ) : null}
+      </InterviewReveal>
     </section>
   );
 }

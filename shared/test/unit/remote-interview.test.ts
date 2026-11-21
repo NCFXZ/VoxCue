@@ -64,6 +64,7 @@ beforeEach(async () => {
         model: 'synthetic',
         inputState,
       })),
+      waitForRemoteInterviewSlot: vi.fn(async () => {}),
       publishRemoteInterview: vi.fn(async (snapshot) => {
         snapshots.push(snapshot);
       }),
@@ -279,6 +280,94 @@ it('coalesces fast answer changes and never publishes after disposal', async () 
   useInterview.setState({ autoAnswer: true });
   await vi.advanceTimersByTimeAsync(1000);
   expect(snapshots).toHaveLength(before + 1);
+});
+
+it('projects just the latest state once the phone has room, and checks commands against current settings while waiting', async () => {
+  let release!: () => void;
+  const ready = vi.mocked(window.desktop!.waitForRemoteInterviewSlot);
+  ready.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+  const count = snapshots.length;
+  for (let index = 0; index < 10; index++) {
+    useInterview.setState({ answers: [{ id: 'held', question: 'Q', content: 'update-' + index }] });
+    await vi.advanceTimersByTimeAsync(100);
+  }
+  useInterview.setState({ aiEnabled: false });
+  command({ requestId: 'ask-while-waiting', action: 'ask', text: 'Synthetic' } as RemoteCommand);
+  await settle();
+  expect(completed).toHaveBeenCalledWith(expect.objectContaining({ requestId: 'ask-while-waiting', ok: false }));
+  expect(answers).not.toHaveBeenCalled();
+  expect(snapshots).toHaveLength(count);
+  release();
+  await settle();
+  expect(snapshots).toHaveLength(count + 1);
+  expect(current().answers.at(-1)?.content).toBe('update-9');
+  expect(current().capabilities.sendQuestion).toBe(false);
+});
+
+it('publishes a new session or ended status during an old receipt wait and ignores its late completion', async () => {
+  let release!: () => void;
+  vi.mocked(window.desktop!.waitForRemoteInterviewSlot).mockImplementationOnce(
+    () => new Promise<void>((resolve) => { release = resolve; }),
+  );
+  const old = current();
+  useInterview.setState({ generating: true });
+  await vi.advanceTimersByTimeAsync(100);
+  useInterview.setState({ status: 'ended' });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(current().status).toBe('ended');
+  useInterview.setState({ sessionId: 'next-session', status: 'running' });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(current().sessionEpoch).toBeGreaterThan(old.sessionEpoch);
+  expect(current().sessionId).toBe('next-session');
+  const latest = current();
+  release();
+  await settle();
+  expect(current()).toBe(latest);
+});
+
+it('recovers from a receipt check error on the next change and ignores a wait after disposal', async () => {
+  const ready = vi.mocked(window.desktop!.waitForRemoteInterviewSlot);
+  const count = snapshots.length;
+  ready.mockRejectedValueOnce(Error('synthetic IPC failure'));
+  useInterview.setState({ pendingQuestion: 'new text' });
+  const start = ready.mock.calls.length;
+  await vi.advanceTimersByTimeAsync(500);
+  expect(ready).toHaveBeenCalledTimes(start + 1);
+  expect(snapshots).toHaveLength(count);
+  expect(useRemoteConnection.getState().error).toContain('无法同步');
+  useInterview.setState({ pendingQuestion: 'retry text' });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(current().pendingQuestion).toBe('retry text');
+  let release!: () => void;
+  ready.mockImplementationOnce(() => new Promise<void>((resolve) => { release = resolve; }));
+  useInterview.setState({ generating: true });
+  await vi.advanceTimersByTimeAsync(100);
+  dispose?.();
+  dispose = undefined;
+  release();
+  await vi.advanceTimersByTimeAsync(500);
+  expect(snapshots).toHaveLength(count + 1);
+});
+
+it('publishes changes made offline after reconnect and ignores a late wait from the old connection', async () => {
+  let release!: () => void;
+  vi.mocked(window.desktop!.waitForRemoteInterviewSlot).mockImplementationOnce(
+    () => new Promise<void>((resolve) => { release = resolve; }),
+  );
+  useInterview.setState({ pendingQuestion: 'before disconnect' });
+  await vi.advanceTimersByTimeAsync(100);
+  const count = snapshots.length;
+  const paired = useRemoteConnection.getState().state!;
+  useRemoteConnection.setState({ state: { ...paired, status: 'reconnecting' } });
+  useInterview.setState({ pendingQuestion: 'offline change' });
+  await vi.advanceTimersByTimeAsync(100);
+  expect(snapshots).toHaveLength(count);
+  useRemoteConnection.setState({ state: paired });
+  await settle();
+  expect(current().pendingQuestion).toBe('offline change');
+  release();
+  await vi.advanceTimersByTimeAsync(100);
+  expect(snapshots).toHaveLength(count + 1);
 });
 
 it('keeps only the latest replacement while a publication is still in flight', async () => {

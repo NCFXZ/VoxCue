@@ -1,7 +1,8 @@
 .app-dialog[open],
 .app-dialog[open]:not([data-backdrop='transparent'])::backdrop {
+  /* Release the opacity layer after entry so menus can blur across the dialog edge. */
   animation: modal-fade-in var(--panel-motion-duration, 240ms)
-    var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) both;
+    var(--panel-motion-easing, cubic-bezier(0.2, 0, 0, 1)) backwards;
 }
 
 .app-dialog[data-modal-exit],

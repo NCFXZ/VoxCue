@@ -1,5 +1,6 @@
+import { codexAccess } from '../fixtures/codex-access';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -9,10 +10,6 @@ import {
   validSource,
 } from '../../../shared/electron/backend/chat/service';
 import { UsageLedger } from '../../../shared/electron/backend/chat/usage';
-import {
-  ChatGPTAuthService,
-  type CredentialRecord,
-} from '../../../shared/electron/backend/auth/service';
 
 const directories: string[] = [];
 afterEach(async () => {
@@ -34,7 +31,7 @@ const request = {
 };
 const models = {
   models: [
-    { slug: 'model-one', display_name: 'First', visibility: 'list' },
+    { slug: 'model-one', display_name: 'First', visibility: 'list', web_search_tool_type: 'text' },
     { slug: 'hidden', display_name: 'Hidden', visibility: 'hidden' },
     { slug: 'model-two', display_name: 'Second', visibility: 'list' },
   ],
@@ -59,6 +56,115 @@ function sse(events: unknown[]) {
   );
 }
 describe('原生 ChatGPT 请求与用量', () => {
+  it('旧账本的长 ID 压缩后仍可去重，与普通 ID 独立，重置后迟到事件不重复计数', async () => {
+    const usage = await ledger();
+    const tokens = { inputTokens: 1, outputTokens: 1, totalTokens: 2 };
+    await usage.add('a', 'short', tokens);
+    const directory = directories.at(-1)!;
+    const [name] = await readdir(directory);
+    const file = path.join(directory, name);
+    const old = JSON.parse(await readFile(file, 'utf8'));
+    const id = 'r'.repeat(4096);
+    old.ids = [id];
+    await writeFile(file, JSON.stringify(old));
+    await usage.add('a', id, tokens);
+    expect(await usage.get('a')).toEqual(old.usage);
+    const { ids } = JSON.parse(await readFile(file, 'utf8'));
+    expect(ids[0].sha256).toMatch(/^[a-f0-9]{64}$/);
+    const reopen = new UsageLedger(directory);
+    await reopen.add('a', ids[0].sha256, tokens);
+    await reopen.add('a', id, tokens);
+    await reopen.add('a', id + 'x', tokens);
+    expect(await reopen.get('a')).toMatchObject({ requests: 3, totalTokens: 6 });
+    await reopen.reset('a');
+    await reopen.add('a', id, tokens);
+    expect(await reopen.get('a')).toMatchObject({ requests: 0, totalTokens: 0 });
+  });
+  it('Responses 大文本附件可取消且保留完整请求字节', async () => {
+    const text = '合成文本\n'.repeat(23000);
+    const files = Array.from({ length: 3 }, (_, index) => ({
+      name: index + '.txt', bytes: Buffer.from(text),
+    }));
+    const input = { ...request, webSearch: false, turns: [{ role: 'user' as const, content: '资料', files }] };
+    const expected = JSON.stringify({
+      model: input.modelId, instructions: input.instructions,
+      input: [{ role: 'user', content: [{ type: 'input_text', text: '资料' },
+        ...files.map(file => ({ type: 'input_text', text: '附件 ' + file.name + '：\n' + text }))] }],
+      store: false, stream: true,
+    });
+    const transport = vi.fn<typeof fetch>(async (url, options) => {
+      if (!String(url).endsWith('/responses')) return Response.json(models);
+      expect(options?.body instanceof Blob).toBe(true);
+      expect(Buffer.from(await (options!.body as Blob).arrayBuffer()).equals(Buffer.from(expected))).toBe(true);
+      return sse([{ type: 'response.output_text.delta', delta: 'ok' },
+        { type: 'response.completed', response: { id: 'synthetic' } }]);
+    });
+    const service = new ChatGPTService({ access: async () => codexAccess(), fetch: transport, ledger: await ledger() });
+    const cancel = new AbortController();
+    await expect(service.stream(input, event => {
+      if (event.type === 'provider') setImmediate(() => cancel.abort());
+    }, cancel.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(transport).toHaveBeenCalledTimes(1);
+    await expect(service.stream(input, vi.fn(), new AbortController().signal)).resolves.toMatchObject({ answerText: 'ok' });
+  });
+  it('大附件分段后仍是完整 JSON，保持内容转义、多轮顺序、字节偏移和末尾填充', async () => {
+    const source = new Uint8Array(4 * 1024 * 1024 + 10);
+    for (let i = 0; i < source.length; i++) source[i] = i % 251;
+    const bytes = source.subarray(7, -1);
+    const marker = '转义 "image_url":0，换行\n和反斜线\\';
+    const filename = '测试"一".pdf';
+    const transport = vi.fn(async (url: string | URL | Request, options?: RequestInit) => {
+      if (String(url).endsWith('/responses')) {
+        expect(options?.body).toBeInstanceOf(Blob);
+        const wire = new Request(url, options);
+        expect(wire.headers.get('content-type')).toBe('application/json');
+        const json = await wire.text();
+        expect(Buffer.byteLength(json)).toBe((options!.body as Blob).size);
+        expect(JSON.parse(json)).toMatchObject({ instructions: marker, input: [
+          { role: 'user', content: [
+            { type: 'input_text', text: marker },
+            { type: 'input_file', filename, file_data: 'data:application/pdf;base64,' + Buffer.from(bytes).toString('base64') },
+          ] },
+          { role: 'assistant', content: 'ok' },
+          { role: 'user', content: [
+            { type: 'input_text', text: '附件' },
+            { type: 'input_text', text: '附件 注.txt：\n' + marker },
+            { type: 'input_image', image_url: 'data:image/png;base64,/wI=' },
+          ] },
+        ] });
+        return sse([{ type: 'response.output_text.delta', delta: 'ok' },
+          { type: 'response.completed', response: { id: 'synthetic' } }]);
+      }
+      return Response.json(models);
+    });
+    const service = new ChatGPTService({
+      access: async () => codexAccess(), fetch: transport, ledger: await ledger(),
+    });
+    const result = await service.stream({ ...request, instructions: marker, turns: [
+      { role: 'user', content: marker, files: [{ name: filename, bytes }] },
+      { role: 'assistant', content: 'ok' },
+      { role: 'user', content: '附件', files: [
+        { name: '注.txt', bytes: new TextEncoder().encode(marker) },
+        { name: 'image.png', bytes: new Uint8Array([255, 2]) },
+      ] },
+    ] }, vi.fn(), new AbortController().signal);
+    expect(result.answerText).toBe('ok');
+  });
+  it('大附件编码期间取消不会发起回答请求', async () => {
+    const controller = new AbortController();
+    const transport = vi.fn(async () => Response.json(models));
+    const service = new ChatGPTService({
+      access: async () => codexAccess(), fetch: transport, ledger: await ledger(),
+    });
+    const stop = Error('synthetic cancellation');
+    const pending = service.stream({ ...request, turns: [
+      { ...request.turns[0], files: [{ name: 'file.pdf', bytes: new Uint8Array(8 * 1024 * 1024) }] },
+    ] }, (event) => {
+      if (event.type === 'provider') setImmediate(() => controller.abort(stop));
+    }, controller.signal);
+    await expect(pending).rejects.toBe(stop);
+    expect(transport).toHaveBeenCalledTimes(1);
+  });
   it('预先取消的请求不读取身份或启动目录网络请求', async () => {
     const controller = new AbortController();
     controller.abort();
@@ -78,7 +184,7 @@ describe('原生 ChatGPT 请求与用量', () => {
       const waiting = new Promise<void>((resolve) => {
         entered = resolve;
       });
-      const access = { account: 'synthetic', token: 'synthetic' };
+      const access = codexAccess('synthetic', 'synthetic');
       let reads = 0;
       const transport = vi.fn(async () => {
         if (stage === 'models')
@@ -129,12 +235,15 @@ describe('原生 ChatGPT 请求与用量', () => {
   );
   it('损坏的模型目录不把中文响应或账号片段带进公开错误', async () => {
     const service = new ChatGPTService({
-      access: async () => ({ account: 'synthetic', token: 'synthetic' }),
+      access: async () => codexAccess('synthetic', 'synthetic'),
       ledger: await ledger(),
       fetch: async () => new Response('{"密钥":"synthetic-secret",invalid}'),
     });
     const failure = await service.models().catch((error) => error);
-    expect(publicFailure(failure)).toEqual({ message: '模型列表响应无效，请重试。' });
+    expect(publicFailure(failure)).toEqual({
+      message: '模型列表响应无效，请重试。',
+      code: 'invalid_model_catalog',
+    });
     expect(failure.message).not.toMatch(/synthetic|密钥|invalid/);
   });
   it('模型目录按实际流量设上限，拒绝超大响应并允许下次重新获取', async () => {
@@ -154,7 +263,7 @@ describe('原生 ChatGPT 请求与用量', () => {
       )
       .mockImplementationOnce(async () => Response.json(models));
     const service = new ChatGPTService({
-      access: async () => ({ account: 'synthetic', token: 'synthetic' }),
+      access: async () => codexAccess('synthetic', 'synthetic'),
       ledger: await ledger(),
       fetch: transport,
     });
@@ -168,7 +277,7 @@ describe('原生 ChatGPT 请求与用量', () => {
     new DOMException('synthetic deadline', 'TimeoutError'),
   ])('模型目录的受控网络故障也保留分类', async (error) => {
     const service = new ChatGPTService({
-      access: async () => ({ account: 'synthetic', token: 'synthetic' }),
+      access: async () => codexAccess('synthetic', 'synthetic'),
       ledger: await ledger(),
       fetch: vi.fn().mockRejectedValue(error),
     });
@@ -182,7 +291,7 @@ describe('原生 ChatGPT 请求与用量', () => {
   it('使用账户模型顺序、完整上下文和实际搜索工具，保留来源与服务端用量', async () => {
     const usage = await ledger();
     const transport = vi.fn(async (url: any, options?: RequestInit) => {
-      if (String(url).endsWith('/models')) return Response.json(models);
+      if (new URL(String(url)).pathname.endsWith('/models')) return Response.json(models);
       const body = JSON.parse(options!.body as string);
       expect(body).toMatchObject({
         model: 'model-one',
@@ -217,7 +326,7 @@ describe('原生 ChatGPT 请求与用量', () => {
       ]);
     });
     const service = new ChatGPTService({
-      access: async () => ({ token: 'secret', account: 'account' }),
+      access: async () => codexAccess('account', 'secret'),
       ledger: usage,
       fetch: transport,
     });
@@ -255,10 +364,10 @@ describe('原生 ChatGPT 请求与用量', () => {
   });
   it('关闭搜索不发送工具；未收到 completed 的断流不视作成功', async () => {
     const service = new ChatGPTService({
-      access: async () => ({ token: 'secret', account: 'account' }),
+      access: async () => codexAccess('account', 'secret'),
       ledger: await ledger(),
       fetch: vi.fn(async (url: any, options?: RequestInit) => {
-        if (String(url).endsWith('/models')) return Response.json(models);
+        if (new URL(String(url)).pathname.endsWith('/models')) return Response.json(models);
         expect(JSON.parse(options!.body as string)).not.toHaveProperty('tools');
         return sse([{ type: 'response.output_text.delta', delta: '部分内容' }]);
       }),
@@ -273,11 +382,11 @@ describe('原生 ChatGPT 请求与用量', () => {
   });
   it('额度失败保留安全诊断信息，不泄露服务端原始错误', async () => {
     const service = new ChatGPTService({
-      access: async () => ({ token: 'secret', account: 'account' }),
+      access: async () => codexAccess('account', 'secret'),
       ledger: await ledger(),
       fetch: async () =>
         Response.json(
-          { error: { code: 'subscription_sharing_usage_limit_exceeded', message: 'secret' } },
+          { error: { code: 'rate_limit_exceeded', message: 'secret' } },
           { status: 429, headers: { 'x-request-id': 'req-123' } },
         ),
     });
@@ -288,7 +397,7 @@ describe('原生 ChatGPT 请求与用量', () => {
       expect(publicFailure(error)).toMatchObject({
         status: 429,
         requestId: 'req-123',
-        code: 'subscription_sharing_usage_limit_exceeded',
+        code: 'rate_limit_exceeded',
       });
       expect(JSON.stringify(publicFailure(error))).not.toContain('secret');
     }
@@ -297,10 +406,10 @@ describe('原生 ChatGPT 请求与用量', () => {
   it('停止请求和 incomplete 事件不会标记完成；返回的失败用量仍被记账', async () => {
     const usage = await ledger();
     const service = new ChatGPTService({
-      access: async () => ({ token: 'secret', account: 'account' }),
+      access: async () => codexAccess('account', 'secret'),
       ledger: usage,
       fetch: async (url: any) =>
-        String(url).endsWith('/models')
+        new URL(String(url)).pathname.endsWith('/models')
           ? Response.json(models)
           : sse([
               {
@@ -323,64 +432,6 @@ describe('原生 ChatGPT 请求与用量', () => {
     expect((await usage.get('account')).totalTokens).toBe(10);
   });
 });
-describe('原生授权续期', () => {
-  function setup(transport: typeof fetch) {
-    let record: CredentialRecord = {
-      version: 1,
-      hostId: 'host',
-      clientId: 'issued-client',
-      subject: 'user',
-      name: 'User',
-      email: '',
-      expiresAt: 0,
-      accessExpiresAt: 1,
-      accessToken: 'old-access',
-      refreshToken: 'old-refresh',
-      idToken: 'identity',
-      grantedScopes: ['chatgpt.tokens.use.direct'],
-    };
-    const auth = new ChatGPTAuthService({
-      storage: {
-        hostId: async () => 'host',
-        read: async () => record,
-        write: async (value) => {
-          record = value;
-        },
-      },
-      openBrowser: async () => {},
-      fetch: transport,
-    });
-    return { auth, record: () => record };
-  }
-  it('并发请求只轮换一次，使用已签发 client_id，保存新凭据', async () => {
-    const transport = vi.fn(async (_url: any, options?: RequestInit) => {
-      const body = options!.body as URLSearchParams;
-      expect(body.get('client_id')).toBe('issued-client');
-      expect(body.get('resource')).toBe('https://api.openai.com/v1');
-      expect(body.has('scope')).toBe(false);
-      return Response.json({
-        access_token: 'new-access',
-        refresh_token: 'new-refresh',
-        expires_in: 3600,
-      });
-    });
-    const { auth, record } = setup(transport);
-    const values = await Promise.all([auth.access(), auth.access()]);
-    expect(transport).toHaveBeenCalledTimes(1);
-    expect(values.map((value) => value.token)).toEqual(['new-access', 'new-access']);
-    expect(record().refreshToken).toBe('new-refresh');
-    expect(JSON.stringify(await auth.session())).not.toContain('new-access');
-  });
-  it('invalid grant 清除授权，临时服务失败保留凭据', async () => {
-    const invalid = setup(async () => Response.json({ error: 'invalid_grant' }, { status: 400 }));
-    await expect(invalid.auth.access()).rejects.toThrow('失效');
-    expect(await invalid.auth.session()).toBeNull();
-    const temporary = setup(async () => new Response('', { status: 503 }));
-    await expect(temporary.auth.access()).rejects.toThrow('暂时不可用');
-    expect(temporary.record().refreshToken).toBe('old-refresh');
-  });
-});
-
 describe('本地用量重置', () => {
   it('按账户持久化清零，保留其他账户及旧响应去重信息', async () => {
     const usage = await ledger();

@@ -27,6 +27,7 @@ vi.mock('node:worker_threads', async () => {
   };
 });
 import { SpeechController } from '../../electron/backend/speech/controller';
+import { SpeechCoordinator } from '../../electron/application/speech';
 let controller: SpeechController;
 let events: SpeechEvent[];
 const captures = new Map<AudioSource, (packet: AudioPacket) => void>();
@@ -64,6 +65,25 @@ const ack = (message: any, system?: number, microphone?: number) =>
     ms: message.ms,
     progress: { system, microphone },
   });
+
+it('轻量模型溢出实际丢包后，重连仍向历史报告转写不完整，下一场恢复正常', async () => {
+  await controller.call({ op: 'stop' });
+  const sessions = new SpeechCoordinator({ call: call => controller.call(call), stop() {} });
+  const options = { sources: ['system' as const] };
+  const configuration = { mode: 'local', options, aiEnabled: false, autoAnswer: false, modelId: '' };
+  await sessions.confirm(configuration);
+  await sessions.interview({ op: 'start', options });
+  for (let i = 0; i < 10; i++) captures.get('system')!(packet());
+  expect(events.some(e => e.type === 'metrics' && e.droppedSamples > 0)).toBe(false);
+  captures.get('system')!(packet());
+  expect(events).toContainEqual(expect.objectContaining({ type: 'metrics', droppedSamples: 3200 }));
+  await sessions.reconnect();
+  expect((await sessions.interview({ op: 'stop' })).transcriptTailIncomplete).toBe(true);
+  sessions.releaseInterview(true);
+  await sessions.confirm(configuration);
+  await sessions.interview({ op: 'start', options });
+  expect((await sessions.interview({ op: 'stop' })).transcriptTailIncomplete).toBeUndefined();
+});
 
 it('采集先标记积压，处理完本音源所有包后才允许使用其静音进度', () => {
   captures.get('system')!(packet());
@@ -125,8 +145,14 @@ it('热切换不重建采集或清空进度，收到交接确认才更新当前�
     state: 'running',
     speechModel: 'paraformer',
     switching: 'loading',
+    switchId: stage.id,
   });
+  await controller.call({ op: 'control-switch', id: stage.id, action: 'now' });
+  await controller.call({ op: 'control-switch', id: stage.id + 1, action: 'cancel' });
+  expect(runtime.messages.at(-1)).toBe(stage);
   runtime.workers.at(-1).emit('message', { switchPhase: stage.id, phase: 'waiting' });
+  await controller.call({ op: 'control-switch', id: stage.id, action: 'now' });
+  expect(runtime.messages.at(-1)).toEqual({ op: 'expedite-switch', manual: true });
   captures.get('system')!(packet());
   expect(last('system')).toMatchObject({ pending: true, processedThroughMs: 1800 });
   expect(captures.get('system')).toBe(oldCapture);
@@ -141,6 +167,21 @@ it('热切换不重建采集或清空进度，收到交接确认才更新当前�
     chunkMs: 1000,
   });
   expect((await controller.call({ op: 'status' })).switching).toBeUndefined();
+});
+it.each(['loading', 'waiting'] as const)('手动取消只在识别器确认后完成，保留当前模型 (%s)', async phase => {
+  Object.assign(controller, { qwenDirectory: 'synthetic-qwen' });
+  const pending = controller.call({ op: 'switch-recognizer', options: {
+    sources: ['system', 'microphone'], speechModel: 'qwen', inferenceDevice: 'cpu',
+  } });
+  const { id } = runtime.messages.find(m => m.op === 'stage-recognizer');
+  const worker = runtime.workers.at(-1);
+  worker.emit('message', { switchPhase: id, phase });
+  await controller.call({ op: 'control-switch', id, action: 'cancel' });
+  expect(runtime.messages.at(-1)).toEqual({ op: 'cancel-switch', manual: true });
+  expect((await controller.call({ op: 'status' })).switchId).toBe(id);
+  worker.emit('message', { switchError: id, userCancelled: true });
+  expect(await pending).toMatchObject({ state: 'running', speechModel: 'paraformer', switchCancelled: true });
+  expect((await controller.call({ op: 'status' })).switchId).toBeUndefined();
 });
 it('候选失败保持原语音状态，暂停立即取消未完成的设备切换并忽略迟到确认', async () => {
   Object.assign(controller, { qwenDirectory: 'synthetic-qwen' });
@@ -187,6 +228,30 @@ async function selectModel(speechModel: 'qwen' | 'paraformer') {
   runtime.workers.at(-1).emit('message', { switched: stage.id, chunkMs: 1000 });
   await pending;
 }
+it.each([5, 25])('积压可在用户选择轻量模型前后出现，只请求一次快速交接 (%s)', async count => {
+  await selectModel('qwen');
+  for (let i = 0; i < count; i++) captures.get('system')!(packet());
+  const switching = controller.call({ op: 'switch-recognizer', options: { sources: ['system', 'microphone'] } });
+  for (let i = 0; i < 25; i++) captures.get('system')!(packet());
+  expect(runtime.messages.filter(m => m.op === 'expedite-switch')).toHaveLength(1);
+  expect(events.filter(e => e.type === 'audio-progress')).toHaveLength(1);
+  const stage = runtime.messages.filter(m => m.op === 'stage-recognizer').at(-1);
+  runtime.workers.at(-1).emit('message', { switched: stage.id });
+  expect((await switching).speechModel).toBe('paraformer');
+});
+it('超过Qwen上限后释放旧模型，跳过积压冲刷与自动重启，可重新启动轻量模型', async () => {
+  await selectModel('qwen');
+  Object.assign((controller as any).adapter, { automaticRestart: true });
+  const old = runtime.workers.at(-1);
+  for (let i = 0; i <= 150; i++) captures.get('system')!(packet());
+  await vi.advanceTimersByTimeAsync(10000);
+  expect(await controller.call({ op: 'status' })).toMatchObject({ state: 'error', failureSource: 'model' });
+  expect(runtime.messages.some(m => m.op === 'flush')).toBe(false);
+  expect(runtime.workers.at(-1)).toBe(old);
+  expect(await controller.call({ op: 'start', options: { sources: ['system'] } }))
+    .toMatchObject({ state: 'running', speechModel: 'paraformer' });
+  expect(runtime.workers.at(-1)).not.toBe(old);
+});
 it('Qwen切回Paraformer不把继承积压误判为新模型超载，排空后恢复2秒上限', async () => {
   await selectModel('qwen');
   for (let i = 0; i < 15; i++) captures.get('system')!(packet());

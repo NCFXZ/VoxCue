@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { IDBFactory } from 'fake-indexeddb';
-import { localKnowledge } from '../../src/services/knowledge';
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
+import { localKnowledge, documentRevision, restoreSyncedBase, restoreSyncedDocument } from '../../src/services/knowledge';
+import { markBaseRemoval } from '../../src/services/knowledgeIndex';
+import { KNOWLEDGE_INDEX_VERSION } from '../../electron/contracts/knowledge';
 import { useKnowledgeIndex } from '../../src/stores/knowledgeIndex';
 import { useKnowledge } from '../../src/stores/knowledge';
 import type {
@@ -11,6 +13,12 @@ import type {
 
 beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
+  const values = new Map<string, string>();
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => values.get(key) ?? null,
+    setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
+  });
   vi.stubGlobal('window', { dispatchEvent: () => true });
   useKnowledgeIndex.setState({ state: null, tasks: {}, requests: {}, error: null });
 });
@@ -50,6 +58,7 @@ function engine() {
       const document = {
         documentId: call.documentId,
         baseId: call.baseId,
+        indexVersion: KNOWLEDGE_INDEX_VERSION,
         available: true,
       } as KnowledgeDocument;
       indexed.set(call.documentId, document);
@@ -89,15 +98,129 @@ function engine() {
 it('80 imports and duplicate requests stay serial and preserve every original', async () => {
   const docs = await originals('bulk', 80);
   const f = engine();
+  const list = vi.spyOn(localKnowledge, 'listDocuments');
+  const read = vi.spyOn(IDBObjectStore.prototype, 'get');
   const work = docs.flatMap((doc) => [
     useKnowledgeIndex.getState().index(doc),
     useKnowledgeIndex.getState().index(doc),
   ]);
   await Promise.all(work);
+  expect(list).not.toHaveBeenCalled();
+  expect(read.mock.calls.map(([id]) => id)).toEqual(docs.map(doc => doc.id));
   await useKnowledgeIndex.getState().refresh();
   expect(f.maximum).toBe(1);
   expect(f.imported).toHaveLength(80);
   expect(new Set(f.imported.map((doc) => doc.id)).size).toBe(80);
+});
+
+it.each(['document', 'library'])('a pending file read cannot index after %s deletion', async (mode) => {
+  const [doc] = await originals('delete-during-read', 1);
+  const f = engine();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  vi.spyOn(Blob.prototype, 'arrayBuffer').mockImplementationOnce(async () => {
+    entered.resolve();
+    await release.promise;
+    return new ArrayBuffer(4);
+  });
+  const work = useKnowledgeIndex.getState().index(doc);
+  await entered.promise;
+  try {
+    if (mode === 'document') await localKnowledge.deleteDocument(doc.id);
+    else await localKnowledge.deleteBase(doc.baseId);
+  } finally {
+    release.resolve();
+  }
+  await work;
+  const removals = f.knowledge.mock.calls.map(([call]) => call).filter(call => call.op.startsWith('remove'));
+  expect(removals).toEqual([mode === 'document'
+    ? { op: 'remove', requestId: expect.any(String), documentId: doc.id }
+    : { op: 'remove-base', requestId: expect.any(String), baseId: doc.baseId }]);
+  expect(f.imported).toEqual([]);
+  expect(await localKnowledge.listDocuments(doc.baseId)).toEqual([]);
+});
+
+it('retries an interrupted native deletion on startup without reindexing pending originals or removing other libraries', async () => {
+  const [one] = await originals('pending', 2);
+  const [keep] = await originals('retained', 1);
+  const f = engine();
+  f.knowledge.mockRejectedValueOnce(Error('simulated lost reply after index removal'));
+  await expect(localKnowledge.deleteBase(one.baseId)).rejects.toThrow('lost reply');
+  const [target] = (await localKnowledge.listBases()).filter(base => base.id === one.baseId);
+  await expect(localKnowledge.importDocuments(one.baseId, [new File(['new'], 'after-failure.txt')])).rejects.toThrow('正在删除');
+  await expect(localKnowledge.saveBase({ ...target, name: 'renamed' })).rejects.toThrow('正在删除');
+  await expect(restoreSyncedBase({ ...target, name: 'from cloud' }, documentRevision(target))).rejects.toThrow('正在删除');
+  await expect(restoreSyncedDocument({ ...one, id: 'new-cloud-doc' }, null)).rejects.toThrow('正在删除');
+  await localKnowledge.importDocuments(keep.baseId, [new File(['other'], 'other.txt')]);
+  expect(await localKnowledge.listDocuments(one.baseId)).toHaveLength(2);
+  await useKnowledgeIndex.getState().index(one);
+  expect(f.imported).toEqual([]);
+  await useKnowledgeIndex.getState().reconcile();
+  expect(new Set(f.imported.map(row => row.id))).toEqual(new Set((await localKnowledge.listDocuments(keep.baseId)).map(row => row.id)));
+  const disconnect = useKnowledgeIndex.getState().connect();
+  try {
+    await vi.waitFor(async () => expect(await localKnowledge.listDocuments(one.baseId)).toEqual([]));
+    expect((await localKnowledge.listBases()).map(base => base.id)).toEqual(['retained']);
+    const removals = f.knowledge.mock.calls.map(([call]) => call).filter(call => call.op === 'remove-base');
+    expect(removals.map(call => call.baseId)).toEqual(['pending', 'pending']);
+  } finally { disconnect(); }
+});
+
+it('checks the deletion intent again inside the cloud restore write transaction', async () => {
+  const [doc] = await originals('during-commit', 1);
+  const beginDeletion = () => markBaseRemoval(doc.baseId, true);
+  await expect(restoreSyncedDocument({ ...doc, name: 'changed.txt' }, documentRevision(doc), beginDeletion))
+    .rejects.toThrow('正在删除');
+  expect((await localKnowledge.listDocuments(doc.baseId))[0].name).toBe(doc.name);
+});
+
+it('keeps a same-name cloud original that arrived after the local import checked its replacement targets', async () => {
+  const base = 'cross-write';
+  await originals(base, 0);
+  const entered = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  const list = localKnowledge.listDocuments;
+  vi.spyOn(localKnowledge, 'listDocuments').mockImplementationOnce(async id => {
+    const snapshot = await list(id);
+    entered.resolve();
+    await release.promise;
+    return snapshot;
+  });
+  const file = new File(['incoming local content'], 'same.md');
+  const local = expect(localKnowledge.importDocuments(base, [file])).rejects.toThrow('文件已更改');
+  try {
+    await entered.promise;
+    const cloud = new File(['incoming cloud content'], file.name);
+    await restoreSyncedDocument({ id: 'remote-file', baseId: base, name: cloud.name, blob: cloud,
+      size: cloud.size, type: cloud.type, createdAt: 1 }, null);
+  } finally { release.resolve(); }
+  await local;
+  const stored = await list(base);
+  expect(stored.map(doc => doc.id)).toEqual(['remote-file']);
+  await expect(stored[0].blob.text()).resolves.toBe('incoming cloud content');
+});
+
+it('blocks indexing an original arriving while its library deletion is pending', async () => {
+  const [doc] = await originals('removing-library', 1);
+  const f = engine();
+  const entered = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
+  f.knowledge.mockImplementationOnce(async () => {
+    entered.resolve();
+    await release.promise;
+    return { ok: true, value: null };
+  });
+  const removing = localKnowledge.deleteBase(doc.baseId);
+  await entered.promise;
+  try {
+    await expect(localKnowledge.importDocuments(doc.baseId, [new File(['late'], 'late.txt')])).rejects.toThrow('正在删除');
+    expect((await localKnowledge.listDocuments(doc.baseId)).map(d => d.name)).toEqual([doc.name]);
+    await useKnowledgeIndex.getState().index(doc);
+  } finally {
+    release.resolve();
+    await removing;
+  }
+  expect(f.imported).toEqual([]);
+  expect(await localKnowledge.listDocuments(doc.baseId)).toEqual([]);
 });
 
 it('interleaved requests finish every queued file in the active library before the next library', async () => {
@@ -187,11 +310,13 @@ it('startup repairs missing/unavailable indexes; opening a library checks only t
   f.indexed.set(a[0].id, {
     documentId: a[0].id,
     baseId: 'a',
+    indexVersion: KNOWLEDGE_INDEX_VERSION,
     available: true,
   } as KnowledgeDocument);
   f.indexed.set(a[1].id, {
     documentId: a[1].id,
     baseId: 'a',
+    indexVersion: KNOWLEDGE_INDEX_VERSION,
     available: false,
   } as KnowledgeDocument);
   const scan = useKnowledgeIndex.getState().reconcile();
@@ -207,6 +332,50 @@ it('startup repairs missing/unavailable indexes; opening a library checks only t
   expect(f.imported.some((doc) => doc.text === 'late b')).toBe(false);
   await useKnowledgeIndex.getState().reconcile('a');
   expect(f.imported).toHaveLength(3);
+});
+
+it('waits for native cleanup, then rebuilds surviving originals once from the clean catalog', async () => {
+  const [old, mixed] = await originals('upgrade', 2);
+  const [legacy] = await originals('other-upgrade', 1);
+  const f = engine();
+  for (const [doc, version] of [[old, 'qa-linked-v2'], [mixed, KNOWLEDGE_INDEX_VERSION], [legacy, undefined]] as const)
+    f.indexed.set(doc.id, { documentId: doc.id, baseId: doc.baseId, indexVersion: version, available: true } as KnowledgeDocument);
+  f.indexed.set('missing-original', { documentId: 'missing-original', baseId: 'lost', indexVersion: 'qa-linked-v2' } as KnowledgeDocument);
+  const cleaning = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  f.knowledge.mockImplementationOnce(async call => {
+    expect(call.op).toBe('status');
+    cleaning.resolve();
+    await release.promise;
+    f.indexed.clear();
+    return { ok: true, value: { documents: [], tasks: [], modelReady: true } };
+  });
+  const scan = useKnowledgeIndex.getState().reconcile();
+  await cleaning.promise;
+  expect(f.knowledge.mock.calls.map(([call]) => call.op)).toEqual(['status']);
+  release.resolve();
+  await scan;
+  await useKnowledgeIndex.getState().reconcile();
+  expect(f.imported.map(doc => doc.id).sort()).toEqual([old.id, mixed.id, legacy.id].sort());
+  expect(f.indexed.has('missing-original')).toBe(false);
+  expect(await (await localKnowledge.listDocuments(old.baseId)).find(doc => doc.id === old.id)!.blob.text()).toMatch(/^original /);
+});
+it('does not import after native cleanup fails or returns an unclean catalog', async () => {
+  const [doc] = await originals('old', 1);
+  const f = engine();
+  await useKnowledgeIndex.getState().refresh();
+  const error = '旧索引清理尚未完成，请重试。';
+  f.knowledge.mockImplementationOnce(async () => ({
+    ok: true, value: { documents: [], tasks: [], modelReady: true, error },
+  }));
+  await useKnowledgeIndex.getState().reconcile();
+  expect(useKnowledgeIndex.getState().error).toBe(error);
+  useKnowledgeIndex.getState().dismissError();
+  f.knowledge.mockRejectedValueOnce(Error(error));
+  await useKnowledgeIndex.getState().reconcile();
+  expect(useKnowledgeIndex.getState().state).toBeNull();
+  f.indexed.set(doc.id, { documentId: doc.id, baseId: doc.baseId, indexVersion: 'qa-linked-v2' } as KnowledgeDocument);
+  await useKnowledgeIndex.getState().reconcile();
+  expect(f.knowledge.mock.calls.every(([call]) => call.op === 'status')).toBe(true);
 });
 
 it('queued deletions are skipped and replacements use their latest committed bytes', async () => {

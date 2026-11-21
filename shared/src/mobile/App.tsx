@@ -1,6 +1,7 @@
+import { ContentReveal as InterviewReveal } from '../components/ui/content-reveal';
 import {
   memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
-  type ChangeEvent, type ComponentProps, type ReactNode,
+  type ChangeEvent, type ComponentProps,
 } from 'react';
 import Markdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -9,6 +10,8 @@ import rehypeKatex from 'rehype-katex';
 import { normalizeMath, mathPresentation } from '../services/math';
 import type { MobileConnection } from './connection';
 import { useFollowScroll } from '../components/useFollowScroll';
+import { useStreamingMarkdown } from '../lib/useStreamingMarkdown';
+import { playSentMessageEnter } from '../lib/messageMotion';
 import { mobileError, mobileText, readMobilePreferences, saveMobilePreferences, type MobilePreferences } from './copy';
 
 const statusLabels = {
@@ -102,7 +105,11 @@ const markdownComponents: Components = {
   th: ({ children }) => <th>{children}</th>,
   td: ({ children }) => <td>{children}</td>,
 };
-const AnswerContent = memo(function AnswerContent({ content }: { content: string }) {
+const AnswerContent = memo(function AnswerContent({ content, streaming }: { content: string; streaming: boolean }) {
+  const visible = useStreamingMarkdown(content, streaming);
+  return <MobileMarkdown content={visible} />;
+});
+const MobileMarkdown = memo(function MobileMarkdown({ content }: { content: string }) {
   return (
     <div className="mobile-markdown">
       <Markdown
@@ -180,9 +187,25 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
   const snapshot = state.snapshot;
   const identity = `${snapshot?.sessionId ?? 'waiting'}:${snapshot?.sessionEpoch ?? 0}`;
   const answers = useFollowScroll(snapshot?.answers, identity);
+  const previousQuestions = useRef(snapshot);
+  useLayoutEffect(() => {
+    const before = previousQuestions.current;
+    previousQuestions.current = snapshot;
+    if (before === snapshot || !state.connected || document.hidden || !snapshot?.sessionId ||
+        state.restoredAnswerCount === undefined) return;
+    const previousCount = before && snapshot.sessionId === before.sessionId && snapshot.sessionEpoch === before.sessionEpoch
+      ? before.omitted.answers + before.answers.length : 0;
+    // Reappearing rows from a resized, bounded history have the same absolute index.
+    const first = Math.max(0, Math.max(previousCount, state.restoredAnswerCount) - snapshot.omitted.answers);
+    for (let i = first; i < snapshot.answers.length; i++) {
+      const id = snapshot.answers[i].id;
+      playSentMessageEnter(answers.scrollProps.ref.current?.querySelector<HTMLElement>(`[data-question-id="${CSS.escape(id)}"]`));
+    }
+  }, [snapshot, state.connected, state.restoredAnswerCount, answers.scrollProps.ref]);
   const transcripts = useFollowScroll(snapshot?.transcripts, identity);
   const ready = state.connected && state.status === 'ready';
   const canConnect = state.hasPairingLink || state.canResume;
+  const showConnectPrompt = ['idle', 'disconnected', 'error'].includes(state.status);
   const workspace = !!(state.connected || snapshot || state.draft);
   const pending = state.pending || !!state.pendingAction;
   const fromTranscript = !state.draft.trim() && !state.draftDirty && !snapshot?.inputDraft.manual && !!snapshot?.pendingQuestion.trim();
@@ -231,11 +254,12 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
       {text(scroll.hasNew ? '有新内容' : '回到最新')}<span aria-hidden="true"> ↓</span>
     </button>
   );
-  let sessionNotice: ReactNode = null;
+  let sessionNotice: string | null = null;
   if (snapshot?.status === 'ended') sessionNotice = text('面试已结束。内容仍可阅读。');
   else if (!snapshot?.sessionId && state.connected) sessionNotice = text('等待电脑开始面试。');
   else if (!ready && state.status !== 'syncing') sessionNotice = text('离线时可阅读内容。恢复连接后，输入以电脑端为准。');
   else if (ready && snapshot?.status === 'paused') sessionNotice = text('电脑已暂停转录。');
+  const canRetry = !ready && canConnect && !['connecting', 'reconnecting', 'syncing', 'approval', 'pairing'].includes(state.status);
   return (
     <div className={shellClass}>
       <header className="mobile-topbar">
@@ -256,12 +280,14 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
                 <strong className="mobile-pairing-code" aria-label={text('配对码')}>{state.pairingCode}</strong>
               </>
             ) : <p>{text('让设备与电脑连接同一 Wi-Fi。')}</p>}
-            {error && <p className="mobile-error" role="alert">{error}</p>}
-            {['idle', 'disconnected', 'error'].includes(state.status) ? (
-              canConnect
-                ? <button className="mobile-primary mobile-connect" onClick={() => void connection.start()}>{text(state.canResume && !state.hasPairingLink ? '恢复连接' : '连接电脑')}</button>
-                : <p className="mobile-hint">{text('无法连接时，请回到电脑刷新二维码并重新扫码。')}</p>
-            ) : (
+            <InterviewReveal resizeKey={error ?? ''}>{error ? <p className="mobile-error" role="alert">{error}</p> : null}</InterviewReveal>
+            {showConnectPrompt && canConnect && (
+              <button className="mobile-primary mobile-connect" onClick={() => void connection.start()}>{text(state.canResume && !state.hasPairingLink ? '恢复连接' : '连接电脑')}</button>
+            )}
+            <InterviewReveal>{showConnectPrompt && !canConnect ? (
+              <p className="mobile-hint">{text('无法连接时，请回到电脑刷新二维码并重新扫码。')}</p>
+            ) : null}</InterviewReveal>
+            {!showConnectPrompt && (
               <p className="mobile-waiting" role="status"><span className="mobile-spinner" aria-hidden="true" />{text(statusLabels[state.status])}</p>
             )}
             <p className="mobile-hint">{text('仅在可信的私人网络中使用。')}</p>
@@ -270,12 +296,12 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
         </main>
       ) : (
         <>
-          <div className="mobile-session-notice">
-            {sessionNotice && <p role="status">{sessionNotice}</p>}
-            {!ready && canConnect && !['connecting', 'reconnecting', 'syncing', 'approval', 'pairing'].includes(state.status) && (
-              <button onClick={() => void connection.retry()}>{text('重新连接')}</button>
-            )}
-          </div>
+          <InterviewReveal className="mobile-session-reveal" resizeKey={`${sessionNotice ?? ''}:${canRetry}`}>{sessionNotice || canRetry ? (
+            <div className="mobile-session-notice">
+              {sessionNotice && <p role="status">{sessionNotice}</p>}
+              {canRetry && <button onClick={() => void connection.retry()}>{text('重新连接')}</button>}
+            </div>
+          ) : null}</InterviewReveal>
           <section className={`mobile-transcripts is-${preferences.transcript}`} aria-label={text('转录')}>
             <header>
               <h2>{text('转录')}</h2>
@@ -287,14 +313,16 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
             {preferences.transcript !== 'hidden' && (
               <>
                 <div className="mobile-transcript-scroll" {...transcripts.scrollProps} tabIndex={0}>
-                  {!!snapshot?.omitted.transcripts && preferences.transcript === 'expanded' && <p className="mobile-hint">{text('较早的内容请在电脑端查看。')}</p>}
+                  <InterviewReveal>{snapshot?.omitted.transcripts && preferences.transcript === 'expanded'
+                    ? <p className="mobile-hint mobile-omitted-transcripts">{text('较早的内容请在电脑端查看。')}</p> : null}</InterviewReveal>
                   {!snapshot?.transcripts.length && <p className="mobile-hint">{text('等待语音输入…')}</p>}
                   {(preferences.transcript === 'preview' ? snapshot?.transcripts.slice(-3) : snapshot?.transcripts)?.map((row) => (
                     <article className={`mobile-transcript-row${row.source === 'microphone' ? ' is-me' : ''}`} key={row.id}>
                       <div className="mobile-transcript-meta"><strong>{text(row.source === 'microphone' ? snapshot?.inputMode === 'transcription' ? '麦克风' : '我' : '对方')}</strong>
                         {preferences.transcript === 'expanded' && <time>{row.time}</time>}</div>
                       <p>{row.text}{!row.final && <span className="mobile-interim" aria-label={text('正在转录…')}>…</span>}</p>
-                      {row.textTruncated && preferences.transcript === 'expanded' && <small>{text('本段内容已截短，完整内容请在电脑端查看。')}</small>}
+                      <InterviewReveal>{row.textTruncated && preferences.transcript === 'expanded'
+                        ? <small className="mobile-truncated-transcript">{text('本段内容已截短，完整内容请在电脑端查看。')}</small> : null}</InterviewReveal>
                     </article>
                   ))}
                 </div>
@@ -304,18 +332,18 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
           </section>
           <section className="mobile-answers" aria-label={text('问题与回答')}>
             <div className="mobile-answer-scroll" {...answers.scrollProps} tabIndex={0}>
-              {!!snapshot?.omitted.answers && <p className="mobile-hint">{text('较早的内容请在电脑端查看。')}</p>}
+              <InterviewReveal>{snapshot?.omitted.answers ? <p className="mobile-hint">{text('较早的内容请在电脑端查看。')}</p> : null}</InterviewReveal>
               {!snapshot?.answers.length && (
                 <div className="mobile-empty"><h2>{text('尚无问题与回答。')}</h2><p>{text('转录会显示在上方，也可以输入问题。')}</p></div>
               )}
               {snapshot?.answers.map((answer) => (
-                <article className="mobile-answer-turn" key={answer.id}>
-                  <div className="mobile-question-bubble"><h2>{answer.question}</h2></div>
-                  <div className="mobile-answer-bubble"><AnswerContent content={answer.content} />
-                  {answer.contentTruncated && <p className="mobile-hint">{text('本段内容已截短，完整内容请在电脑端查看。')}</p>}
+                <article className="mobile-answer-turn" key={`${identity}:${answer.id}`}>
+                  <div className="mobile-question-bubble" data-question-id={answer.id}><h2>{answer.question}</h2></div>
+                  <div className="mobile-answer-bubble"><AnswerContent content={answer.content} streaming={answer.status === 'streaming'} />
+                  <InterviewReveal>{answer.contentTruncated ? <p className="mobile-hint">{text('本段内容已截短，完整内容请在电脑端查看。')}</p> : null}</InterviewReveal>
                   {answer.status === 'streaming' && <p className="mobile-answer-status" role="status">{text('正在生成…')}</p>}
                   {answer.status === 'stopped' && <p className="mobile-answer-status">{text('已停止')}</p>}
-                  {answer.status === 'failed' && <p className="mobile-error" role="alert">{text('回答失败')}{answer.error ? ` · ${mobileError(null, answer.error, preferences.language)}` : ''}</p>}
+                  <InterviewReveal resizeKey={`${preferences.language}:${answer.error ?? ''}`}>{answer.status === 'failed' ? <p className="mobile-error" role="alert">{text('回答失败')}{answer.error ? ` · ${mobileError(null, answer.error, preferences.language)}` : ''}</p> : null}</InterviewReveal>
                   </div>
                 </article>
               ))}
@@ -323,8 +351,8 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
             {followButton(answers)}
           </section>
           <footer className="mobile-composer">
-            {error && <p className="mobile-error" role="alert">{error}</p>}
-            {draftTruncated && <p className="mobile-error" role="alert">{text('电脑输入超过 6000 字符，请编辑后再发送。')}</p>}
+            <InterviewReveal resizeKey={error ?? ''}>{error ? <p className="mobile-error" role="alert">{error}</p> : null}</InterviewReveal>
+            <InterviewReveal>{draftTruncated ? <p className="mobile-error" role="alert">{text('电脑输入超过 6000 字符，请编辑后再发送。')}</p> : null}</InterviewReveal>
             {fromTranscript && snapshot && <p className="mobile-pending-question"><span>{text('最新待提问转录')}</span>{snapshot.pendingQuestion}</p>}
             <form onSubmit={(event) => { event.preventDefault(); if (ready && !pending && !state.draftSyncing && !draftTruncated && snapshot?.status === 'running' && snapshot.capabilities.sendQuestion) void connection.sendQuestion(fromTranscript); }}>
               <textarea

@@ -83,8 +83,8 @@ describe('模拟面试生命周期', () => {
   it('结束后保存完整快照，新对话不会更改结束时间或创建重复记录', async () => {
     useInterview.getState().start();
     await vi.advanceTimersByTimeAsync(10000);
-    useInterview.getState().end();
-    const record = useHistory.getState().records[0];
+    await useInterview.getState().end();
+    const record = (await useHistory.getState().getRecord(useHistory.getState().records[0].id))!;
     expect(record.mock).toBe(true);
     expect(record.answers[0].content.length).toBeGreaterThan(100);
     await vi.advanceTimersByTimeAsync(5000);

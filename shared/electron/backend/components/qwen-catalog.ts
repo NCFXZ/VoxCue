@@ -1,9 +1,10 @@
 import type { ComponentPackage } from './catalog';
+import { componentPresentation } from '../../contracts/components';
 export const qwenPackage: ComponentPackage = {
   id: 'qwen',
   optional: true,
   target: 'windows-x64',
-  label: 'Qwen3-ASR 0.6B 本地语音模型',
+  label: componentPresentation.qwen.label,
   version: '1.0.0',
   tag: 'models-v1.0.0',
   asset: 'VoxCue-Qwen-ASR-1.0.0.zip',

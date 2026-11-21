@@ -134,7 +134,7 @@ it('admits exactly 500ms history plus the onset frame once, with matching audio 
   ]);
   expect(f.streams[0].inputFinished).toHaveBeenCalledOnce();
   expect(f.finals()).toMatchObject([
-    { segment: { startMs: 1140, endMs: 1736, silenceStartMs: 736, reason: 'silence' } },
+    { segment: { startMs: 1140, endMs: 1736, silenceStartMs: 1236, reason: 'silence' } },
   ]);
   expect(f.engine.processedThrough('system')).toBe(1736);
 });

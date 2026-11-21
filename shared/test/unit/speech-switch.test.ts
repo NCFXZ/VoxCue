@@ -102,6 +102,59 @@ it('后台加载不阻塞旧识别，两路都停顿后原子交接，只转发�
   await s.feed();
   expect(s.old.feed).toHaveBeenCalledTimes(3);
 });
+it('新模型就绪后取消会释放候选模型，下一包语音仍由原模型处理', async () => {
+  const s = await setup();
+  s.old.idle.system = false;
+  const pending = s.switching();
+  s.load();
+  await s.feed();
+  expect(s.phases).toEqual(['loading', 'waiting']);
+  const reason = Error('cancelled by user');
+  s.router.cancel(reason);
+  await expect(pending).rejects.toBe(reason);
+  await s.feed();
+  expect(s.candidate.close).toHaveBeenCalledOnce();
+  expect(s.candidate.feed).not.toHaveBeenCalled();
+  expect(s.old.close).not.toHaveBeenCalled();
+  expect(s.old.feed).toHaveBeenCalledTimes(2);
+});
+it('两路输入都关闭时，候选就绪即可交接，无需等待下一包音频', async () => {
+  const s = await setup();
+  s.router.prepare([]);
+  const switching = s.switching();
+  s.load();
+  await switching;
+  expect(s.old.close).toHaveBeenCalledOnce();
+  expect(s.events).toEqual([]);
+});
+it.each([false, true])('积压降级可在候选就绪前后请求，旧推理一直无响应也能切换 (%s)', async (alreadyReady) => {
+  const s = await setup();
+  let interrupt!: (error: Error) => void;
+  s.old.feed.mockImplementationOnce(() => new Promise((_resolve, reject) => { interrupt = reject; }));
+  s.old.close.mockImplementationOnce(async () => { interrupt(Error('retired')); });
+  s.old.idle.system = false;
+  const audio = s.feed();
+  const switching = s.switching();
+  if (alreadyReady) {
+    s.load();
+    await Promise.resolve();
+    await Promise.resolve();
+  }
+  s.router.expedite();
+  if (!alreadyReady) {
+    expect(s.old.close).not.toHaveBeenCalled();
+    s.load();
+  }
+  await switching;
+  await audio;
+  expect(s.old.close).toHaveBeenCalledOnce();
+  expect(s.router.processedThrough('system')).toBeUndefined();
+  expect(s.events).toContainEqual(expect.objectContaining({ type: 'gap', source: 'system' }));
+  s.old.emit({ type: 'speech-start', source: 'system' });
+  expect(s.events.some(event => event.type === 'speech-start')).toBe(false);
+  await s.feed();
+  expect(s.candidate.feed).toHaveBeenCalledOnce();
+});
 it('交接缓存仅含最后300ms的处理后PCM，切片后的时间戳连续，长包也有界', async () => {
   const s = await setup();
   await s.router.feed(

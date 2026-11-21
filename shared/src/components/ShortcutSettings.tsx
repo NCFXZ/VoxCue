@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { useShortcuts } from '../stores/shortcuts';
 import {
@@ -245,11 +246,13 @@ export function ShortcutSettings() {
           <div className="shortcut-setting-row" key={action}>
             <div>
               <strong>{t(shortcutLabels[action])}</strong>
-              {message && (
-                <p className="danger-text" role="alert">
-                  {t(message)}
-                </p>
-              )}
+              <InterviewReveal resizeKey={message ?? ''}>
+                {message ? (
+                  <p className="danger-text" role="alert">
+                    {t(message)}
+                  </p>
+                ) : null}
+              </InterviewReveal>
             </div>
             <Button
               variant="outline"
@@ -282,11 +285,13 @@ export function ShortcutSettings() {
           </div>
         );
       })}
-      {(error || state.error) && (
-        <p className="danger-text" role="alert">
-          {t(error || state.error)}
-        </p>
-      )}
+      <InterviewReveal>
+        {(error || state.error) ? (
+          <p className="danger-text" role="alert">
+            {t(error || state.error)}
+          </p>
+        ) : null}
+      </InterviewReveal>
       <div className="shortcut-settings-actions">
         <Button
           variant="ghost"

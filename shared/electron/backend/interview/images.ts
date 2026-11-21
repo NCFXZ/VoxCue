@@ -1,25 +1,27 @@
 import { constants } from 'node:fs';
 import { mkdir, lstat, open, rename, unlink } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ChatFile } from '../../contracts/chat';
 import type { InterviewImage } from '../../contracts/interviewImages';
-import { validImagePreview } from '../../contracts/interviewImages';
+import { validImageId, validImagePreview } from '../../contracts/interviewImages';
+import { packCloudItem } from '../../contracts/restoreData';
+export { validImageId } from '../../contracts/interviewImages';
 
 const maximumBytes = 8 * 1024 * 1024;
-export const validImageId = (id: unknown): id is string =>
-  typeof id === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/.test(id);
 const mediaType = (bytes: Uint8Array) => {
   if (Buffer.from(bytes.subarray(0, 8)).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])))
     return 'image/png';
   if (bytes[0] === 255 && bytes[1] === 216 && bytes[2] === 255) return 'image/jpeg';
   throw Error('截图文件无效。');
 };
+export { mediaType as interviewImageMediaType };
 
 /** Sent images only; draft captures stay in memory. No renderer paths are accepted. */
 export class InterviewImageStore {
   private pending: Promise<unknown> = Promise.resolve();
   private closed = false;
+  private readonly syncDigests = new Map<string, { version: string; hash: string }>();
   constructor(private directory: string) {
     if (!path.isAbsolute(directory)) throw Error('无效的截图存储目录。');
   }
@@ -32,6 +34,7 @@ export class InterviewImageStore {
   async dispose() {
     this.closed = true;
     await this.pending;
+    this.syncDigests.clear();
   }
   private file(id: string, preview = false) {
     if (!validImageId(id)) throw Error('无效的截图引用。');
@@ -84,6 +87,23 @@ export class InterviewImageStore {
     }
   }
   save(images: { id: string; preview: string; file: ChatFile }[]): Promise<InterviewImage[]> {
+    return this.store(images);
+  }
+  async saveImported(id: string, preview: string, bytes: Uint8Array) {
+    const created: string[] = [];
+    await this.store([{ id, preview, file: { bytes, name: 'screenshot.png' } }], created);
+    return () =>
+      this.serial(async () => {
+        for (const file of created)
+          await unlink(file).catch((error: NodeJS.ErrnoException) => {
+            if (error.code !== 'ENOENT') throw error;
+          });
+      });
+  }
+  private store(
+    images: { id: string; preview: string; file: ChatFile }[],
+    added?: string[],
+  ): Promise<InterviewImage[]> {
     return this.serial(async () => {
       if (
         !images.length ||
@@ -133,11 +153,51 @@ export class InterviewImageStore {
             created.push(previewFile);
           }
         }
+        added?.push(...created);
         return images.map(({ id, preview }) => ({ id, preview }));
       } catch (error) {
         await Promise.all(created.map((file) => unlink(file).catch(() => {})));
         throw error;
       }
+    });
+  }
+  private async fileVersion(file: string, limit: number) {
+    const info = await lstat(file, { bigint: true });
+    if (!info.isFile() || info.size <= 0n || info.size > BigInt(limit)) throw Error('截图文件无效。');
+    return [info.dev, info.ino, info.birthtimeNs, info.ctimeNs, info.mtimeNs, info.size].join(':');
+  }
+  importVersion(id: string) {
+    return this.serial(async () => {
+      await this.root();
+      const original = await this.fileVersion(this.file(id), maximumBytes);
+      const preview = await this.fileVersion(this.file(id, true), 128 * 1024).catch(error => {
+        if (error.code !== 'ENOENT') throw error;
+        return 'missing';
+      });
+      return original + '/' + preview;
+    });
+  }
+  syncImage(id: string, embeddedPreview: string | undefined, includeBytes: boolean) {
+    return this.serial(async () => {
+      if (embeddedPreview !== undefined && !validImagePreview(embeddedPreview)) throw Error('截图缩略图无效。');
+      await this.root();
+      const originalFile = this.file(id), previewFile = this.file(id, true);
+      const previewIdentity = embeddedPreview === undefined ? undefined :
+        createHash('sha256').update(embeddedPreview).digest('hex');
+      const version = async () => (await this.fileVersion(originalFile, maximumBytes)) + '/' +
+        (previewIdentity ?? await this.fileVersion(previewFile, 128 * 1024));
+      const before = await version();
+      const cached = this.syncDigests.get(id);
+      if (!includeBytes && cached?.version === before) return { hash: cached.hash };
+      const bytes = await this.bytes(id);
+      const preview = embeddedPreview ?? (await this.readBytes(previewFile, 128 * 1024)).toString('utf8');
+      if (!validImagePreview(preview) || before !== await version()) throw Error('截图资料已变化，请重试。');
+      const header = Buffer.from(await packCloudItem('image:' + id, '', { id, preview, type: mediaType(bytes) }).arrayBuffer());
+      const hash = createHash('sha256').update(header).update(bytes).digest('hex');
+      if (!this.syncDigests.has(id) && this.syncDigests.size >= 4096)
+        this.syncDigests.delete(this.syncDigests.keys().next().value!);
+      this.syncDigests.set(id, { version: before, hash });
+      return includeBytes ? { hash, bytes: Buffer.concat([header, bytes]) } : { hash };
     });
   }
   original(id: string): Promise<{ bytes: Buffer; extension: 'png' | 'jpg' }> {
@@ -169,11 +229,36 @@ export class InterviewImageStore {
         if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
         throw error;
       }
-      for (const id of new Set(ids))
+      let failure: NodeJS.ErrnoException | undefined;
+      for (const id of new Set(ids)) {
+        this.syncDigests.delete(id);
         for (const preview of [false, true])
           await unlink(this.file(id, preview)).catch((error: NodeJS.ErrnoException) => {
-            if (error.code !== 'ENOENT') throw error;
+            if (error.code !== 'ENOENT') failure ??= error;
           });
+      }
+      if (failure) throw failure;
+    });
+  }
+  async checkOrRemoveMoved(id: string, hash: string, previewHash: string | null, remove: boolean) {
+    await this.serial(async () => {
+      const files: string[] = [];
+      for (const [preview, expected] of [[false, hash], [true, previewHash]] as const) {
+        const file = this.file(id, preview);
+        try {
+          await this.root();
+          const bytes = await this.readBytes(file, preview ? 128 * 1024 : maximumBytes);
+          if (createHash('sha256').update(bytes).digest('hex') !== expected)
+            throw Error('来源资料已改变，请重新选择。');
+          files.push(file);
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+        }
+      }
+      if (remove) {
+        this.syncDigests.delete(id);
+        for (const file of files) await unlink(file);
+      }
     });
   }
 }

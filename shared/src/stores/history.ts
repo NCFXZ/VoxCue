@@ -1,137 +1,134 @@
 import { create } from 'zustand';
-import { localHistory, type InterviewRecord } from '../services/history';
+import { historyRepository, recoverLocalHistoryImages, type HistorySummary, type InterviewRecord } from '../services/history';
 import type { InterviewTitleEvent } from '../../electron/contracts/history';
+import { HistoryRemovalError, recoverHistoryRecordings, removeHistoryRecord } from '../services/historyRecordingRemoval';
+import { recoverInterviewDrafts } from '../services/interviewDraft';
 import { titleQuestions } from '../services/historyPresentation';
 import { useChatConnection } from './chatConnection';
 interface HistoryState {
-  records: InterviewRecord[];
+  records: HistorySummary[];
   error: string | null;
-  load(): void;
-  save(record: InterviewRecord): void;
+  load(): Promise<void>;
+  getRecord(id: string): Promise<InterviewRecord | undefined>;
+  recoverRecordings(): Promise<void>;
+  recoverDrafts(): Promise<void>;
+  save(record: InterviewRecord): Promise<boolean>;
   remove(id: string): Promise<boolean>;
-  rename(id: string, title: string): boolean;
+  rename(id: string, title: string): Promise<boolean>;
   generateTitle(id: string, modelId?: string): Promise<void>;
-  applyTitle(event: InterviewTitleEvent): void;
+  applyTitle(event: InterviewTitleEvent): Promise<void>;
 }
 const generating = new Set<string>();
-export const useHistory = create<HistoryState>((set) => ({
+let loadRevision = 0;
+let recoveringDrafts: Promise<void> | undefined;
+const imageCleanupError = '面试记录已删除，但部分截图清理失败，请稍后重试。';
+async function retryImageCleanup() {
+  try {
+    await recoverLocalHistoryImages();
+    if (useHistory.getState().error === imageCleanupError) useHistory.setState({ error: null });
+  } catch {
+    useHistory.setState({ error: imageCleanupError });
+  }
+}
+export const useHistory = create<HistoryState>((set, get) => ({
   records: [],
   error: null,
   async generateTitle(id, modelId) {
     if (generating.has(id) || !window.desktop?.generateInterviewTitle) return;
+    const model = modelId || useChatConnection.getState().models[0]?.id;
+    if (!model) return;
+    generating.add(id);
     let record: InterviewRecord | undefined;
     try {
-      record = localHistory.list().find((r) => r.id === id);
+      record = await historyRepository.updateTitle(id, (current) => {
+        if (current.mock || current.titleStatus === 'ready' || !titleQuestions(current).length) return;
+        return { ...current, titleStatus: 'pending', titleError: undefined };
+      });
     } catch {
       set({ error: '无法读取本地记录，原始数据已保留。' });
-      return;
     }
-    if (!record || record.mock || record.titleStatus === 'ready') return;
-    const questions = titleQuestions(record);
-    const model = modelId || useChatConnection.getState().models[0]?.id;
-    if (!questions.length || !model) return;
-    generating.add(id);
+    if (!record) { generating.delete(id); return; }
+    await get().load();
     try {
-      localHistory.save({ ...record, titleStatus: 'pending', titleError: undefined });
-      set({ records: localHistory.list() });
-      await window.desktop.generateInterviewTitle({ recordId: id, modelId: model, questions });
+      await window.desktop.generateInterviewTitle({ recordId: id, modelId: model, questions: titleQuestions(record) });
     } catch {
-      generating.delete(id);
-      try {
-        const current = localHistory.list().find((r) => r.id === id);
-        if (current && current.titleSource !== 'manual' && current.titleStatus !== 'ready') {
-          localHistory.save({
-            ...current,
-            titleStatus: 'failed',
-            titleError: '标题生成失败，可稍后重试。',
-          });
-          set({ records: localHistory.list() });
-        }
-      } catch {
-        set({ error: '标题状态保存失败，原始面试记录已保留。' });
-      }
+      await get().applyTitle({ recordId: id, error: '标题生成失败，可稍后重试。' });
     }
   },
-  applyTitle(event) {
+  async applyTitle(event) {
     generating.delete(event.recordId);
     try {
-      const record = localHistory.list().find((r) => r.id === event.recordId);
-      if (!record || record.titleSource === 'manual' || record.titleStatus === 'ready') return;
-      localHistory.save({
-        ...record,
-        ...(event.title
+      const updated = await historyRepository.updateTitle(event.recordId, (record) => {
+        if (record.titleSource === 'manual' || record.titleStatus === 'ready') return;
+        return event.title
           ? {
-              title: record.knowledgeBaseName
-                ? `「${record.knowledgeBaseName}」${event.title}`
-                : event.title,
-              titleSource: 'generated' as const,
-              titleStatus: 'ready' as const,
-              titleError: undefined,
+              ...record, title: record.knowledgeBaseName ? `「${record.knowledgeBaseName}」${event.title}` : event.title,
+              titleSource: 'generated', titleStatus: 'ready', titleError: undefined,
             }
-          : {
-              titleStatus: 'failed' as const,
-              titleError: event.error || '标题生成失败，可稍后重试。',
-            }),
+          : { ...record, titleStatus: 'failed', titleError: event.error || '标题生成失败，可稍后重试。' };
       });
-      set({ records: localHistory.list() });
+      if (updated) await get().load();
     } catch {
       set({ error: '标题保存失败，原始面试记录已保留。' });
     }
   },
-  load() {
+  async load() {
+    const revision = ++loadRevision;
     try {
-      set({ records: localHistory.list(), error: null });
+      const records = await historyRepository.summaries();
+      if (revision === loadRevision) set({ records, error: null });
     } catch {
-      set({ error: '无法读取本地记录，原始数据已保留。' });
+      if (revision === loadRevision) set({ error: '无法读取本地记录，原始数据已保留。' });
     }
   },
-  save(record) {
+  async getRecord(id) {
+    try { return await historyRepository.get(id); }
+    catch { set({ error: '无法读取本地记录，原始数据已保留。' }); }
+  },
+  recoverDrafts() {
+    return recoveringDrafts ??= recoverInterviewDrafts().then(async (changed) => {
+      if (changed) await get().load();
+    }).catch(() => {
+      set({ error: '无法读取本地记录，原始数据已保留。' });
+    }).finally(() => { recoveringDrafts = undefined; });
+  },
+  async recoverRecordings() {
+    try { await recoverHistoryRecordings(); }
+    catch (error) {
+      set({ error: error instanceof HistoryRemovalError ? error.message : '无法读取本地录音。' });
+    }
+    await retryImageCleanup();
+  },
+  async save(record) {
     try {
-      localHistory.save(record);
-      set({ records: localHistory.list(), error: null });
+      await historyRepository.save(record);
+      await get().load();
+      return true;
     } catch {
       set({ error: '记录保存失败，请检查本地存储空间。当前对话仍可查看。' });
+      return false;
     }
   },
   async remove(id) {
     try {
-      const removed = localHistory.list().find((record) => record.id === id);
-      localHistory.remove(id);
-      generating.delete(id);
-      const records = localHistory.list();
-      set({ records, error: null });
-      const retained = new Set(
-        records.flatMap((record) =>
-          record.answers.flatMap((answer) => answer.images?.map((image) => image.id) ?? []),
-        ),
-      );
-      const ids = [
-        ...new Set(
-          removed?.answers.flatMap((answer) => answer.images?.map((image) => image.id) ?? []) ?? [],
-        ),
-      ].filter((id) => !retained.has(id));
-      try {
-        for (let offset = 0; offset < ids.length; offset += 100) {
-          const result = await window.desktop?.interviewImage({
-            op: 'remove',
-            ids: ids.slice(offset, offset + 100),
-          });
-          if (!result?.ok) throw Error('Image cleanup failed');
-        }
-      } catch {
-        set({ error: '面试记录已删除，但部分截图清理失败，请稍后重试。' });
+      if (await historyRepository.summary(id)) {
+        const cleanupWarning = await removeHistoryRecord(id);
+        generating.delete(id);
+        await get().load();
+        if (cleanupWarning) set({ error: cleanupWarning });
       }
+      await retryImageCleanup();
       return true;
-    } catch {
-      set({ error: '删除失败，本地记录未更改。' });
+    } catch (error) {
+      set({ error: error instanceof HistoryRemovalError ? error.message : '删除失败，本地记录未更改。' });
       return false;
     }
   },
-  rename(id, title) {
+  async rename(id, title) {
     try {
-      localHistory.rename(id, title);
+      await historyRepository.rename(id, title);
       generating.delete(id);
-      set({ records: localHistory.list(), error: null });
+      await get().load();
       return true;
     } catch (error) {
       set({

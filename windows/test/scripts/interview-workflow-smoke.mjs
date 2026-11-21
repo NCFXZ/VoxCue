@@ -5,7 +5,6 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { probe } from './window-probe.mjs';
-import { waitForAsync } from '../../../shared/test/scripts/wait-for-async.mjs';
 function requireDesktop() {
   assert.equal(
     probe('desktop').interactive,
@@ -30,6 +29,16 @@ await writeFile(
   `
 const {app} = require('electron');
 app.setAppPath(${JSON.stringify(process.cwd())});
+// The isolated profile exercises a configured interview without downloading models.
+const {ComponentService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/components/service.js'))});
+const componentState = ComponentService.prototype.state;
+ComponentService.prototype.state = function () {
+  const state = componentState.call(this);
+  return {...state, phase:'ready', error:null, items:state.items.map(item => ({...item, phase:'ready', received:item.bytes}))};
+};
+ComponentService.prototype.status = async function () { return this.state(); };
+ComponentService.prototype.ready = () => true;
+require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/speech/models.js'))}).speechModelInstalled = () => true;
 const {ChatGPTAuthService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/auth/service.js'))});
 const {ChatGPTService} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/backend/chat/service.js'))});
 const {interviewInstructions} = require(${JSON.stringify(path.resolve('dist-electron/shared/electron/application/interviewContext.js'))});
@@ -91,7 +100,7 @@ const bases = [
 async function seed(page) {
   await page.evaluate(async (items) => {
     const db = await new Promise((resolve, reject) => {
-      const request = indexedDB.open('copilot-local-documents', 1);
+      const request = indexedDB.open('copilot-local-documents');
       request.onupgradeneeded = () => {
         const database = request.result;
         database.createObjectStore('bases', { keyPath: 'id' });
@@ -225,35 +234,9 @@ try {
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   await main.locator('.interview-start-trigger').click();
   const audioCheck = main.getByRole('dialog', { name: '开始面试', exact: true });
-  const testStarted = Date.now();
-  await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).click();
-  await audioCheck.getByRole('button', { name: '停止麦克风测试', exact: true }).waitFor();
-  assert.equal(
-    await audioCheck.getByRole('button', { name: '确认开始', exact: true }).isDisabled(),
-    true,
-  );
-  await main.waitForFunction(
-    () => Number(document.querySelector('[role="meter"]').getAttribute('aria-valuenow')) > 50,
-  );
-  const meter = await audioCheck
-    .getByRole('meter', { name: '麦克风电平', exact: true })
-    .boundingBox();
-  assert.ok(meter.width > 0, 'Inline meter is visible');
-  await main.screenshot({ animations: 'disabled' });
-  const micCalls = await app.evaluate(() => globalThis.speechCalls);
-  assert.deepEqual(micCalls.at(-1).options, { sources: ['microphone'], microphone: 'fixture-mic' });
-  await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
-  assert.ok(Date.now() - testStarted >= 9000, 'Ten-second self-test is not retired early');
-  assert.equal(await app.evaluate(() => globalThis.speechCalls.at(-1).op), 'stop');
-  await audioCheck.getByRole('button', { name: '测试麦克风', exact: true }).click();
-  await audioCheck.getByRole('button', { name: '停止麦克风测试', exact: true }).waitFor();
+  await audioCheck.locator('.interview-access[aria-busy="false"] .interview-access-status').first().waitFor();
+  assert.equal(await audioCheck.locator('.interview-access-list button').count(), 0);
   await audioCheck.getByRole('button', { name: '取消', exact: true }).click();
-  await waitForAsync(main, async () => {
-    const state = await window.desktop.dictation({ op: 'status' });
-    return state.state === 'idle';
-  });
-  assert.equal(await app.evaluate(() => globalThis.speechCalls.at(-1).op), 'stop');
-  check('开场行内真实活动电平、十秒上限、测试中禁止确认及关闭释放');
   await app.evaluate(() => {
     globalThis.microphoneDenied = true;
   });
@@ -325,7 +308,7 @@ try {
   await summary.getByText('Test Model', { exact: true }).waitFor();
   await summary.getByText('高', { exact: true }).waitFor();
   assert.equal(await confirmation.getByText(/确认后自动转写，请先取得参与者同意/).count(), 0);
-  await confirmation.getByText('音频本机处理，不保存。 回答资料发至 OpenAI。', { exact: true }).waitFor();
+  await confirmation.getByText('本场面试默认不录音。 回答资料发至 OpenAI。', { exact: true }).waitFor();
   assert.equal(
     await confirmation.getByRole('button', { name: '前往面试设置', exact: true }).count(),
     0,
@@ -689,11 +672,22 @@ try {
   assert.deepEqual(errors, []);
   await console.log(JSON.stringify({ checks, errors }, null, 2));
   console.log(JSON.stringify({ passed: checks.length, profile, checks }, null, 2));
+} catch (error) {
+  console.error('Interview workflow stopped after', checks.map(({ name }) => name), error);
+  throw error;
 } finally {
-  probe('up');
-  probe('move', cursorBefore.x, cursorBefore.y);
-  await app.evaluate(({ BrowserWindow }) => {
-    for (const win of BrowserWindow.getAllWindows()) win.destroy();
-  });
-  await closeUiApp(app);
+  try {
+    probe('up');
+    const cursor = probe('cursor');
+    if (cursor.x !== cursorBefore.x || cursor.y !== cursorBefore.y)
+      probe('move', cursorBefore.x, cursorBefore.y);
+  } finally {
+    try {
+      await app.evaluate(({ BrowserWindow }) => {
+        for (const win of BrowserWindow.getAllWindows()) win.destroy();
+      });
+    } finally {
+      await closeUiApp(app);
+    }
+  }
 }

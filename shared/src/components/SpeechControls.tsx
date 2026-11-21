@@ -1,8 +1,7 @@
 import { t } from '../i18n';
-import { useEffect } from 'react';
 import * as Menu from './ui/dropdown-menu';
 import { Button } from './ui/button';
-import { Check, ChevronDown } from './icons';
+import { Check } from './icons';
 import type { AudioSource, InterviewConfiguration } from '../../electron/contracts/speech';
 import type { ChatModel } from '../../electron/contracts/chat';
 import { resolveReasoningEffort } from '../services/chatOptions';
@@ -11,6 +10,7 @@ import { ScreenCaptureSettings } from './ScreenCaptureSettings';
 import { useAudioDevices } from './useAudioDevices';
 import { useAuth } from '../stores/auth';
 import { SpeechModelSettings } from './SpeechModelSettings';
+import { InterviewReveal } from './InterviewReveal';
 import { RemoteConnectionSettings } from './RemoteConnection';
 import type { InterviewInputMode } from '../services/interviewInput';
 
@@ -20,6 +20,9 @@ export function SpeechControls({
   busy,
   models,
   live,
+  modelLoading,
+  modelError,
+  refreshModels,
   inputMode = 'remote',
 }: {
   value: InterviewConfiguration;
@@ -27,6 +30,9 @@ export function SpeechControls({
   busy: boolean;
   models: ChatModel[];
   live: boolean;
+  modelLoading?: boolean;
+  modelError?: string | null;
+  refreshModels?(): void;
   inputMode?: InterviewInputMode;
 }) {
   const { devices, loading: devicesLoading, loaded: devicesLoaded, error } = useAudioDevices();
@@ -37,10 +43,6 @@ export function SpeechControls({
       d.source === 'microphone' && (!value.options.microphone || d.id === value.options.microphone),
   );
   const model = models.find((m) => m.id === value.modelId);
-  useEffect(() => {
-    const effort = resolveReasoningEffort(model, value.effort);
-    if (value.aiEnabled && model && effort !== value.effort) onChange({ ...value, effort });
-  }, [value, model, onChange]);
   const change = (patch: Partial<InterviewConfiguration>) => {
     const next = { ...value, ...patch };
     onChange(next);
@@ -75,7 +77,7 @@ export function SpeechControls({
             aria-label={t(label)}
           >
             <span title={selectedLabel}>{selectedLabel}</span>
-            <ChevronDown size={12} />
+            <Menu.TriggerChevron />
           </Button>
         </Menu.Trigger>
         {/* Native <dialog> is in the top layer; keep menus inside it. */}
@@ -103,18 +105,6 @@ export function SpeechControls({
       </Menu.Root>
     );
   };
-  useEffect(() => {
-    if (!live || !models.length) return;
-    const selected = models.find((m) => m.id === value.modelId) ?? models[0];
-    if (!value.aiEnabled || selected.id !== value.modelId)
-      onChange({
-        ...value,
-        mode: 'local',
-        aiEnabled: true,
-        modelId: selected.id,
-        effort: resolveReasoningEffort(selected, value.effort),
-      });
-  }, [live, models, value, onChange]);
   return (
     <div className="speech-controls">
       {
@@ -187,7 +177,7 @@ export function SpeechControls({
                           : undefined,
                     !microphone && transcription,
                   )}
-                  {microphone && enabled && (error || (devicesLoaded && !microphoneAvailable)) && (
+                  <InterviewReveal className="speech-device-feedback">{microphone && enabled && (error || (devicesLoaded && !microphoneAvailable)) && (
                     <small className="speech-device-error" role="alert">
                       {t(
                         error ||
@@ -196,10 +186,20 @@ export function SpeechControls({
                             : '请连接麦克风，或选择“不使用麦克风”。'),
                       )}
                     </small>
-                  )}
+                  )}</InterviewReveal>
                 </div>
               );
             })}
+          </div>
+          <div className="settings-entry recording-preference">
+            <div>
+              <strong id="auto-record-label">{t('面试时自动录音')}</strong>
+              <p id="auto-record-description">{t('录音仅保存在本机，不会上传至云端。')}</p>
+            </div>
+            <button type="button" className="settings-switch" role="switch"
+              aria-labelledby="auto-record-label" aria-describedby="auto-record-description"
+              aria-checked={!!value.autoRecord} disabled={busy}
+              onClick={() => change({ autoRecord: !value.autoRecord })}><span /></button>
           </div>
         </section>
       }
@@ -226,8 +226,9 @@ export function SpeechControls({
                 className="speech-select effort-model-trigger"
                 models={models}
                 onRequestModels={resolved ? undefined : useAuth.getState().ensure}
-                error={authError}
-                onRefresh={resolved ? undefined : useAuth.getState().ensure}
+                loading={modelLoading}
+                error={modelError || authError}
+                onRefresh={live ? refreshModels : resolved ? undefined : useAuth.getState().ensure}
                 modelId={value.modelId}
                 onModelChange={selectModel}
                 effort={value.effort}
@@ -238,13 +239,14 @@ export function SpeechControls({
               <span className="speech-current-answer">{t('请先连接模型服务')}</span>
             )}
           </div>
+          <InterviewReveal className="speech-answer-model-error">{live && models.length > 0 && value.modelId && !model && (
+            <small role="alert" className="danger-text">{t('所选模型当前不可用，请重新选择模型。')}</small>
+          )}</InterviewReveal>
         </SpeechModelSettings>
+        <InterviewReveal className="speech-controls-error">{error && (
+          <small role="alert" className="danger-text">{t(error)}</small>
+        )}</InterviewReveal>
       </section>
-      {error && (
-        <small role="alert" className="danger-text">
-          {t(error)}
-        </small>
-      )}
     </div>
   );
 }

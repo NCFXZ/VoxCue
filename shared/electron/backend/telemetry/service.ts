@@ -71,13 +71,14 @@ export class Telemetry {
       fetcher?: typeof fetch;
       proofVault?: TelemetryProofVault;
       identityProvider?: TelemetryIdentityProvider;
+      storageReady?: Promise<void>;
       now?: () => number;
       monotonic?: () => number;
     },
   ) {
     this.enabled = options.enabled !== false;
     this.queue = new TelemetryQueue(path.join(options.root, telemetryQueueFile));
-    this.ready = this.initialize().catch(() => {
+    this.ready = (options.storageReady ? options.storageReady.then(() => this.initialize()) : this.initialize()).catch(() => {
       this.enabled = false;
     });
   }

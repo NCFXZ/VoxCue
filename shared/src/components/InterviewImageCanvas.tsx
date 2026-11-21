@@ -9,6 +9,23 @@ import {
   type ImageTransform,
 } from '../services/imageViewport';
 
+function discreteWheel(event: WheelEvent, pixelRatio: number) {
+  const { wheelDeltaY, momentum } = event as WheelEvent & { wheelDeltaY?: number; momentum?: boolean };
+  if (momentum || event.deltaX !== 0 || !wheelDeltaY || wheelDeltaY * event.deltaY >= 0) return false;
+  // Blink reports native notches in units of 120, sometimes scaled to CSS pixels.
+  // Its legacy DOM field is an integer even on fractional-DPI displays.
+  const matches = (unit: number) => {
+    const count = Math.round(Math.abs(wheelDeltaY) / unit);
+    return count >= 1 && Math.abs(Math.abs(wheelDeltaY) - count * unit) < 1;
+  };
+  if (matches(120) || matches(120 / pixelRatio)) return true;
+  if (window.desktop?.platform !== 'windows') return false;
+  // Windows also sends fractional notches. Chromium converts each selected
+  // system scroll line to 100/3 pixels while retaining its independent tick count.
+  const linesPerNotch = Math.abs(event.deltaY / wheelDeltaY) * 120 / (100 / 3);
+  return Math.round(linesPerNotch) >= 1 && Math.abs(linesPerNotch - Math.round(linesPerNotch)) < 0.001;
+}
+
 export function InterviewImageCanvas({
   src,
   alt,
@@ -46,15 +63,17 @@ export function InterviewImageCanvas({
     const resize = new ResizeObserver(measure.current);
     resize.observe(element);
     measure.current();
+    let lastPan = -Infinity;
     const wheel = (event: WheelEvent) => {
       event.preventDefault();
       if (!Number.isFinite(event.deltaX) || !Number.isFinite(event.deltaY)) return;
       const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? element.clientHeight : 1;
       const deltaX = event.deltaX * unit;
       const deltaY = event.deltaY * unit;
-      // Chromium reports trackpad pinch as ctrl+wheel. Ordinary pixel scroll
-      // (including two-finger momentum) pans; line/page wheels retain zoom.
-      if (event.ctrlKey || event.deltaMode !== 0) {
+      // A continuous two-finger pan can pass through a notch-sized delta.
+      // Keep the rest of that gesture, including momentum, in pan mode.
+      const notched = event.timeStamp - lastPan > 180 && discreteWheel(event, window.devicePixelRatio);
+      if (event.ctrlKey || event.deltaMode !== 0 || notched) {
         const delta = deltaY || deltaX;
         if (!delta) return;
         const rect = element.getBoundingClientRect();
@@ -71,6 +90,7 @@ export function InterviewImageCanvas({
           ),
         );
       } else {
+        lastPan = event.timeStamp;
         apply(
           boundImage(
             {
@@ -98,7 +118,7 @@ export function InterviewImageCanvas({
       ref={canvas}
       className="interview-image-canvas"
       tabIndex={0}
-      aria-label={t('截图，两指滑动平移，捏合或 Ctrl 加滚轮缩放，鼠标拖拽，双击复位')}
+      aria-label={t('截图，两指滑动平移，捏合或鼠标滚轮缩放，鼠标拖拽，双击复位')}
       data-zoomed={view.scale > 1 ? '' : undefined}
       data-dragging={dragging ? '' : undefined}
       onDoubleClick={() => apply(initialImageTransform)}

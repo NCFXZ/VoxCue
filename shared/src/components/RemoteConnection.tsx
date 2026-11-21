@@ -1,8 +1,10 @@
+import { InterviewReveal } from './InterviewReveal';
 import { useEffect, useMemo, useState } from 'react';
 import qrcode from 'qrcode-generator';
 import { t } from '../i18n';
 import { useRemoteConnection } from '../stores/remoteConnection';
 import { Button } from './ui/button';
+import { InterviewNotice } from './InterviewNotice';
 import { ConfirmDisconnectButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
 import { Check, Copy, Link, Loader, Refresh, Settings, X } from './icons';
@@ -68,15 +70,15 @@ export function RemoteConnectionIndicator() {
   );
 }
 
-export function RemoteConnectionRecovery({ onSettings }: { onSettings(): void }) {
+export function RemoteConnectionRecovery({ onSettings, container }: {
+  onSettings(): void;
+  container?: HTMLElement | null;
+}) {
   const { state, interrupted, loading } = useRemoteConnection();
-  if (!interrupted || !state || state.status === 'connected' || state.status === 'off') return null;
+  const visible = interrupted && state && state.status !== 'connected' && state.status !== 'off';
   return (
-    <div className="audio-recovery" role="alert">
-      <div>
-        <strong>{t('设备连接已中断')}</strong>
-        <p>{t('电脑继续转录和回答。设备恢复网络后可重新连接。')}</p>
-      </div>
+    <InterviewNotice noticeKey={visible ? 'interrupted' : null} container={container} title={t('设备连接已中断')}
+      description={t('电脑继续转录和回答。设备恢复网络后可重新连接。')}>
       <Button variant="outline" disabled={loading} onClick={openPairing}>
         <Refresh size={15} />
         {t(loading ? '连接中…' : '重新连接设备')}
@@ -85,7 +87,7 @@ export function RemoteConnectionRecovery({ onSettings }: { onSettings(): void })
         <Settings size={15} />
         {t('设置')}
       </Button>
-    </div>
+    </InterviewNotice>
   );
 }
 
@@ -93,7 +95,7 @@ export function RemoteConnectionSettings({ disabled = false }: { disabled?: bool
   const { state, loading, error, disconnect } = useRemoteConnection();
   const connected = state?.status === 'connected';
   return (
-    <section className="speech-settings-section remote-connection-settings">
+    <section className="speech-settings-section remote-connection-settings" data-settings-target="remote-connection">
       <div className="speech-setting-row">
         <div className="remote-connection-summary">
           <h3 className="speech-setting-label">{t('远程连接')}</h3>
@@ -122,7 +124,7 @@ export function RemoteConnectionSettings({ disabled = false }: { disabled?: bool
           )}
         </div>
       </div>
-      {error && <p className="danger-text" role="alert">{t(error)}</p>}
+      <InterviewReveal resizeKey={t(error)}>{error ? <p className="danger-text" role="alert">{t(error)}</p> : null}</InterviewReveal>
     </section>
   );
 }
@@ -167,6 +169,7 @@ function PairingContent() {
     return () => window.clearInterval(timer);
   }, [pairing?.url, pairing?.expiresAt]);
   const expired = !!pairing && pairing.expiresAt <= now;
+  const pairingError = t(error || state?.error || (copyError ? '复制失败，请手动选择连接网址。' : ''));
   return (
     <>
       <div className="remote-pairing-visual" aria-busy={loading}>
@@ -178,13 +181,13 @@ function PairingContent() {
             <span>{t(loading ? '正在准备连接…' : expired ? '二维码已过期' : '尚未生成二维码')}</span>
           </div>
         )}
-        {pairing && !expired && (
+        <InterviewReveal>{pairing && !expired ? (
           <p className="remote-pairing-expiry" role="status" aria-live="off">
             {t('二维码将在 {0} 秒后过期', [Math.max(0, Math.ceil((pairing.expiresAt - now) / 1000))])}
           </p>
-        )}
+        ) : null}</InterviewReveal>
       </div>
-      {pairing && !expired && (
+      <InterviewReveal>{pairing && !expired ? (
         <label className="remote-pairing-address">
           <span>{t('连接网址')}</span>
           <div>
@@ -207,12 +210,12 @@ function PairingContent() {
             </Button>
           </div>
         </label>
-      )}
-      {(error || state?.error || copyError) && (
+      ) : null}</InterviewReveal>
+      <InterviewReveal resizeKey={pairingError}>{pairingError ? (
         <p className="danger-text" role="alert">
-          {t(error || state?.error || '复制失败，请手动选择连接网址。')}
+          {pairingError}
         </p>
-      )}
+      ) : null}</InterviewReveal>
       <div className="remote-pairing-refresh">
         <Button variant="outline" disabled={loading} onClick={openPairing}>
           <Refresh size={16} />
@@ -291,7 +294,7 @@ export function RemoteConnectionDialogs({
         <p>{t('请确认设备上的配对码与下方一致。')}</p>
         <strong className="remote-approval-code">{pending.code}</strong>
         <p>{t('允许后，设备可查看本场转录和回答，并发送问题、控制麦克风与自动回答。')}</p>
-        {error && <p className="danger-text" role="alert">{t(error)}</p>}
+        <InterviewReveal resizeKey={t(error)}>{error ? <p className="danger-text" role="alert">{t(error)}</p> : null}</InterviewReveal>
       </Modal>
     );
   }

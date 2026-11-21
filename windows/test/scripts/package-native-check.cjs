@@ -82,6 +82,8 @@ function failureDetails(error) {
     }
   if (details.errorReason === 'unclassified' && code)
     details.errorReason = code.toLowerCase().replaceAll('_', '-');
+  if (phase === 'checking-installed-api-key-paste' && /^Paste probe: [A-Za-z0-9 .:-]{1,140}$/.test(message))
+    details.errorReason = message.slice(12).toLowerCase().replace(/[^a-z0-9]+/g, '-').slice(0, 80);
   const exit = message.match(/CLI server exited (?:unexpectedly )?with code (-?\d+)/)?.[1];
   if (
     exit !== undefined &&
@@ -339,6 +341,20 @@ async function checkSdk(load, unpacked, work) {
   }
 }
 async function checkSpeech(load, unpacked, appDirectory, fixtures) {
+  phase = 'recording-aec';
+  const { createAudioPreprocessor } = load(path.join(unpacked, 'dist-electron/windows/electron/speech/echoCancellation.js'));
+  const tail = [];
+  const aec = await createAudioPreprocessor((source, samples) => {
+    if (source === 'microphone') tail.push(...samples);
+  }, () => { throw Error('Packaged recording AEC failed'); });
+  try {
+    aec.start(['system', 'microphone']);
+    const mic = Float32Array.from({ length: 967 }, (_, i) => 0.1 * Math.sin(i / 9));
+    aec.feed('system', new Float32Array(mic.length), 48000, 1000, 20);
+    aec.feed('microphone', mic, 48000, 1000, 20);
+    aec.flush();
+    assert.deepEqual(Float32Array.from(tail), mic);
+  } finally { aec.close(); }
   phase = 'asr-worker';
   const speech = path.join(unpacked, 'dist-electron/shared/electron/backend/speech');
   const model = path.join(fixtures, 'speech');
@@ -370,15 +386,7 @@ async function checkSpeech(load, unpacked, appDirectory, fixtures) {
     await messageUntil(
       worker,
       (m) => m.ready,
-      () =>
-        worker.postMessage({
-          op: 'init',
-          directory: model,
-          preprocessorFile: path.join(
-            unpacked,
-            'dist-electron/windows/electron/speech/echoCancellation.js',
-          ),
-        }),
+      () => worker.postMessage({ op: 'init', directory: model }),
       45000,
     );
     await messageUntil(
@@ -517,9 +525,10 @@ async function checkKnowledge(load, fixtures, work) {
     ),
   );
   const { KnowledgeHost } = load('./dist-electron/shared/electron/backend/knowledge/host.js');
+  const { prepareKnowledgeDatabase } = load('./dist-electron/shared/electron/platform/index.js').selectDesktopPlatform();
   const directory = path.join(work, 'knowledge');
   const model = path.join(fixtures, 'rag');
-  let host = new KnowledgeHost(directory, model);
+  let host = new KnowledgeHost(directory, model, undefined, prepareKnowledgeDatabase);
   const signal = () => new AbortController().signal;
   const encoded = [
     {
@@ -618,7 +627,7 @@ async function checkKnowledge(load, fixtures, work) {
     report.knowledgeModes = true;
     phase = 'knowledge-restart';
     await host.close();
-    host = new KnowledgeHost(directory, model);
+    host = new KnowledgeHost(directory, model, undefined, prepareKnowledgeDatabase);
     assert.deepEqual(
       (await host.listDocuments()).map((item) => item.documentId).sort(),
       ['sensor', 'pdf', 'docx', ...encoded.map((item) => item.documentId)].sort(),
@@ -809,6 +818,21 @@ async function main() {
     return;
   }
   report.finalAsar = true;
+  phase = 'checking-installed-api-key-paste';
+  const pasteProbe = path.join(workArgument, 'ApiKeyFieldProbe.exe');
+  const editor = path.join(appDirectory, 'resources/native/VoxCue.ApiKeyPrompt.exe');
+  ordinary(pasteProbe);
+  ordinary(editor);
+  const paste = spawnSync(pasteProbe, [editor, '--sandbox-store-paste'], {
+    windowsHide: true, encoding: 'utf8', timeout: 30000, maxBuffer: 4096,
+  });
+  if (paste.error) throw paste.error;
+  if (paste.status !== 0) {
+    const reason = paste.stderr.split(/\r?\n/).find(line => /^Paste probe: [A-Za-z0-9 .:-]{1,140}$/.test(line));
+    throw Error(reason ?? 'Store password paste probe failed');
+  }
+  assert.ok(paste.stdout.startsWith('Isolated WM_PASTE,'));
+  report.apiKeyPaste = true;
   // Separate Electron main processes use the same guest SID and dedicated vault profile.
   for (phase of ['vault-seed', 'vault-restore']) {
     const child = spawnSync(process.execPath, [...process.argv.slice(1), phase], {

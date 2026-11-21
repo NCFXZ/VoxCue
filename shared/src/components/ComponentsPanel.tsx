@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import { InterviewReveal } from './InterviewReveal';
 import { useRef } from 'react';
 import { useComponents } from '../stores/components';
 import { Button } from './ui/button';
@@ -35,7 +36,7 @@ export function ComponentsPanel() {
       item.phase === 'checking' ? (settled.current.get(item.id) ?? 'pending') : item.phase;
     const blocked = busy || state?.phase === 'checking' || item.phase === 'checking';
     return (
-      <div className="component-row" key={item.id} data-component-id={item.id}>
+      <div className="component-row" key={item.id} data-component-id={item.id} data-settings-target={item.id}>
         <div className="component-copy">
           <span className="component-model-name">{t(label)}</span>
           <span>{t(modelInfo[item.id].description)}</span>
@@ -130,17 +131,19 @@ export function ComponentsPanel() {
           {knowledgeModels.map((item) => renderItem(item))}
         </section>
       )}
-      {(error || state?.error) && (
-        <p className="inline-error" role="alert">
-          {t(error || state?.error)}
-        </p>
-      )}
-      {error && (
-        <Button variant="ghost" onClick={() => void run({ op: 'status' })}>
-          <Refresh size={16} />
-          {t('重新检查')}
-        </Button>
-      )}
+      <InterviewReveal resizeKey={error ? `retry:${error}` : state?.error ?? ''}>
+        {error || state?.error ? (
+          <>
+            <p className="inline-error" role="alert">{t(error || state?.error)}</p>
+            {error && (
+              <Button variant="ghost" onClick={() => void run({ op: 'status' })}>
+                <Refresh size={16} />
+                {t('重新检查')}
+              </Button>
+            )}
+          </>
+        ) : null}
+      </InterviewReveal>
     </section>
   );
 }

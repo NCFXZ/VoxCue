@@ -1,8 +1,13 @@
+import { InterviewReveal } from './InterviewReveal';
+import { useInterviewAudioPreview } from './InterviewAudioPreview';
 import { t, uiLocale } from '../i18n';
-import { componentPresentation } from '../../electron/contracts/components';
+import { isApiProvider } from '../../electron/contracts/apiConnections';
+import { hasReadySpeechModel, type ComponentId } from '../../electron/contracts/components';
 import { useTextareaSize } from './useTextareaSize';
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import { componentReady, useComponentReady } from '../stores/components';
+import { playSentMessageEnter } from '../lib/messageMotion';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { componentReady, useComponentReady, useComponents } from '../stores/components';
+import type { OpenComponentSettings } from '../services/componentSettingsTargets';
 import { userError } from '../services/errors';
 import {
   speechComponent,
@@ -10,16 +15,15 @@ import {
   speechSelection,
 } from '../../electron/contracts/speechSettings';
 import { ComponentsNotice } from './ComponentsNotice';
-import { AudioCheck } from './AudioCheck';
+import { LocalImportNotice } from './LocalImportNotice';
+import { HomeNoticeSlot } from './SettingsNotice';
 import {
   ArrowUp,
-  Check,
   MessageSquare,
   Square,
   X,
   Person,
   Play,
-  Monitor,
   Settings,
   Refresh,
   Save,
@@ -40,69 +44,46 @@ import type {
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { resolveInterviewInput, type InterviewInputMode } from '../services/interviewInput';
 import { InterviewInputModeControl } from './InterviewInputModeControl';
-import { RemoteConnectionStatus } from './RemoteConnection';
-import { ShortcutAvailabilityStatus } from './ShortcutSettings';
+import { AccessSkeleton, InterviewAccessList } from './InterviewAccessList';
 import { useShortcuts } from '../stores/shortcuts';
 import { useHeightTransition } from './ui/useHeightTransition';
 import { Modal } from './ui/modal';
-import { ProfileProposal } from './ProfileProposal';
+import { PanelResizeHandle } from './ui/PanelResizeHandle';
+import { PreparationMessage } from './PreparationMessage';
 import { PreparationGuide } from './PreparationGuide';
 import { preparationActions, preparationStep } from '../services/preparationGuide';
-import { MarkdownContent } from './MarkdownContent';
 import { PersonalInfoPanel } from './PersonalInfoPanel';
 import { FollowLatestButton } from './FollowLatestButton';
 import { localKnowledge } from '../services/knowledge';
-import { ProviderIdentity } from './ProviderIdentity';
-import { ResponseProgress } from './ResponseProgress';
-import { ChatSources } from './ChatSources';
-import { UserMessage } from './UserMessage';
-import { ChatMessageActions } from './ChatMessageActions';
 import { readDroppedFiles, effortLabels } from '../services/chatOptions';
 import { useChatConnection } from '../stores/chatConnection';
 import { accountUsageSummaryParts } from '../services/accountUsageSummary';
-import { AccountUsageSummary } from './AccountUsageSummary';
+import { AccountUsageSummary, InterviewApiBillingRow } from './AccountUsageSummary';
 import { useModelProvider } from './useModelProvider';
 import './preparation-notices.css';
 import './chatMessages.css';
-const audioAccessLabels = {
-  granted: '可用',
-  denied: '未授权',
-  unavailable: '设备不可用',
-  error: '检查失败',
-};
 const inferenceDeviceLabels = { cpu: 'CPU', cuda: 'CUDA', metal: 'Metal' } as const;
-const screenAccessLabels = {
-  granted: '可用',
-  'not-required': '无需单独授权',
-  'not-determined': '未授权',
-  denied: '未授权',
-  restricted: '受限制',
-  unknown: '待确认',
-  error: '检查失败',
-};
-function AccessSkeleton({ children, className }: { children: ReactNode; className: string }) {
-  return (
-    <span className={`interview-access-skeleton-slot ${className}`} aria-hidden="true">
-      <span className="interview-access-skeleton-content">{children}</span>
-      <span className="quota-skeleton-line interview-access-skeleton" />
-    </span>
-  );
-}
 export function PreparationPage({
+  visible,
+  onImportSettings,
   onComponentSettings,
   onSpeechSettings,
   onAISettings,
   onDraftChange,
 }: {
-  onComponentSettings?(): void;
+  visible: boolean;
+  onImportSettings?(): void;
+  onComponentSettings?: OpenComponentSettings;
   onSpeechSettings?(): void;
-  onAISettings?(): void;
+  onAISettings?(locateProviders: boolean): void;
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
   const authResolved = useAuth((auth) => auth.resolved);
+  const checkAiBeforeComponents = useAuth((auth) =>
+    !auth.session && !auth.error && (auth.resolved || auth.startupChecked));
   const authBusy = useAuth((auth) => auth.loading || auth.waiting);
   const aiAction = useRef(0);
   const usageSummary = accountUsageSummaryParts(connection.usage, 'all');
@@ -122,25 +103,56 @@ export function PreparationPage({
   const setInput = state.setDraft;
   const inputRef = useTextareaSize(input);
   const composerArea = useRef<HTMLDivElement>(null);
+  const notices = useRef<HTMLDivElement>(null);
   const workspace = useRef<HTMLElement>(null);
-  const previousConversation = useRef(state.activeConversation);
-  const conversationMotionReady = useRef(state.chatsReady);
-  useLayoutEffect(() => {
-    const changed = previousConversation.current !== state.activeConversation;
-    previousConversation.current = state.activeConversation;
-    if (!conversationMotionReady.current) {
-      conversationMotionReady.current = state.chatsReady;
+  const measureComposerSpace = () => {
+    const area = composerArea.current;
+    const column = area?.closest<HTMLElement>('.chat-column');
+    if (!area?.clientHeight || !column) return;
+    const noticeHeight = notices.current?.getBoundingClientRect().height ?? 0;
+    column.style.setProperty('--chat-notice-space', noticeHeight ? `${noticeHeight + 12}px` : '0px');
+    column.style.setProperty('--chat-composer-height', `${area.getBoundingClientRect().height}px`);
+  };
+  const [sentMessage, setSentMessage] = useState<{ conversation: string; id: string } | null>(null);
+  useLayoutEffect(() => usePreparation.subscribe((current, previous) => {
+    if (current.activeConversation !== previous.activeConversation) {
+      setSentMessage(null);
       return;
     }
-    if (!changed || !state.chatsReady) return;
-    const content = workspace.current?.querySelector<HTMLElement>('.chat-thread, .welcome');
+    // Only a new send appends a user message and a streaming answer together.
+    if (!current.activeConversation || !current.chatsReady || previous.streaming || !current.streaming ||
+        current.messages.length !== previous.messages.length + 2) return;
+    const user = current.messages.at(-2);
+    const answer = current.messages.at(-1);
+    if (user?.role === 'user' && answer?.role === 'assistant' && answer.status === 'streaming')
+      setSentMessage({ conversation: current.activeConversation, id: user.id });
+  }), []);
+  useLayoutEffect(() => {
+    if (!sentMessage || sentMessage.conversation !== state.activeConversation) return;
+    playSentMessageEnter(workspace.current?.querySelector<HTMLElement>(
+      `.chat-message.user[data-message-id="${CSS.escape(sentMessage.id)}"]`,
+    ));
+  }, [sentMessage, state.activeConversation]);
+  const previousConversationIds = useRef(conversationIds);
+  const previousView = useRef({ visible, ready: state.chatsReady, id: state.activeConversation });
+  useLayoutEffect(() => {
+    const previous = previousView.current;
+    previousView.current = { visible, ready: state.chatsReady, id: state.activeConversation };
+    if (!visible || !state.chatsReady) return;
+    // Set the destination's layout and reading position before its first visible frame.
+    measureComposerSpace();
+    chatScroll.restorePosition();
+    if (!previous.visible || !previous.ready || previous.id === state.activeConversation ||
+        (state.activeConversation && !previousConversationIds.current.includes(state.activeConversation)) ||
+        workspace.current?.closest<HTMLElement>('.page-stage')?.style.viewTransitionName) return;
+    const content = workspace.current?.querySelector<HTMLElement>('.chat-scroll, .welcome');
     const preference = matchMedia('(prefers-reduced-motion: reduce)');
     if (!content?.getClientRects().length || preference.matches) return;
     const style = getComputedStyle(content);
     const value = style.getPropertyValue('--panel-motion-duration').trim();
     const duration = parseFloat(value) * (value.endsWith('ms') ? 1 : 1000);
     if (!Number.isFinite(duration) || duration <= 0) return;
-    // Animate only the conversation, leaving the toolbar, notice and composer fixed.
+    // Moving the viewport leaves the long thread's scrollable range unchanged.
     const animation = content.animate(
       [
         { opacity: 0, transform: 'translateY(8px)' },
@@ -158,7 +170,10 @@ export function PreparationPage({
     preference.addEventListener('change', reduce);
     void animation.finished.then(clear, () => {});
     return clear;
-  }, [state.activeConversation, state.chatsReady]);
+  }, [visible, state.activeConversation, state.chatsReady]);
+  useLayoutEffect(() => {
+    previousConversationIds.current = conversationIds;
+  }, [conversationIds]);
   const [startActionWidth, setStartActionWidth] = useState<number>();
   useLayoutEffect(() => {
     const button = workspace.current?.querySelector<HTMLButtonElement>('.interview-start-trigger');
@@ -173,56 +188,36 @@ export function PreparationPage({
     const area = composerArea.current!;
     const column = area.closest<HTMLElement>('.chat-column')!;
     let frame = 0;
-    let notice: Element | null = null;
     const update = () => {
-      column.style.setProperty(
-        '--chat-notice-space',
-        notice ? `${notice.getBoundingClientRect().height + 12}px` : '0px',
-      );
-      column.style.setProperty(
-        '--chat-composer-height',
-        `${area.getBoundingClientRect().height}px`,
-      );
+      measureComposerSpace();
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(chatScroll.syncLayout);
     };
     const resize = new ResizeObserver(update);
     resize.observe(area);
-    // Keep the notice fixed while the chat scroller extends behind the toolbar.
-    // Its measured space protects the first message and adapts to wrapped copy.
-    const locateNotice = () => {
-      const next = column.querySelector(':scope > .components-notice');
-      if (next === notice) return;
-      if (notice) resize.unobserve(notice);
-      notice = next;
-      if (notice) resize.observe(notice);
-      update();
-    };
-    const changes = new MutationObserver(locateNotice);
-    changes.observe(column, { childList: true, subtree: true });
-    locateNotice();
+    if (notices.current) resize.observe(notices.current);
     update();
     return () => {
       cancelAnimationFrame(frame);
       resize.disconnect();
-      changes.disconnect();
       column.style.removeProperty('--chat-composer-height');
       column.style.removeProperty('--chat-notice-space');
     };
   }, []);
   const [confirmInterview, setConfirmInterview] = useState(false);
   const [openingInterview, setOpeningInterview] = useState(false);
-  const [testingAudio, setTestingAudio] = useState(false);
   const [interviewError, setInterviewError] = useState<string | null>(null);
   const [interviewDevices, setInterviewDevices] = useState<AudioDevice[]>([]);
   const [accessReport, setAccessReport] = useState<InterviewAccessReport | null>(null);
-  const screenAccess = accessReport?.screenCapture;
-  const screenReady = screenAccess && ['granted', 'not-required'].includes(screenAccess.status);
   const [checkingAccess, setCheckingAccess] = useState(false);
   const accessAttempt = useRef(0);
   const [interviewConfiguration, setInterviewConfiguration] = useState(
     defaultInterviewConfiguration,
   );
+  const previewEnabled = confirmInterview && !checkingAccess && !openingInterview && !interviewError;
+  const canPreview = (source: 'microphone' | 'system') => previewEnabled &&
+    !!accessReport?.checks.some(check => check.source === source && check.status === 'granted');
+  const preview = useInterviewAudioPreview(canPreview('microphone'), canPreview('system'), interviewConfiguration.options);
   const audioSummary = useRef<HTMLDListElement>(null);
   const accessChecks = useRef<HTMLDivElement>(null);
   useHeightTransition(
@@ -230,10 +225,10 @@ export function PreparationPage({
     () => [audioSummary.current, accessChecks.current],
   );
   const interviewSpeech = speechSelection(interviewConfiguration.options);
+  const interviewModel = connection.models.find((model) => model.id === interviewConfiguration.modelId);
   const interviewProvider = useModelProvider(interviewConfiguration.modelId);
   const [infoOpen, setInfoOpen] = useState(false);
   const [panelWidth, setPanelWidth] = useState(380);
-  const [resizingInfo, setResizingInfo] = useState(false);
   const layoutRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const layout = layoutRef.current;
@@ -248,25 +243,6 @@ export function PreparationPage({
     measure();
     return () => resize.disconnect();
   }, [panelWidth]);
-  const resizeInfo = useRef<{ x: number; width: number } | null>(null);
-  const resizePanel = (width: number) => {
-    const maximum = Math.min(640, Math.max(300, (layoutRef.current?.clientWidth ?? 960) - 280));
-    setPanelWidth(Math.round(Math.max(300, Math.min(maximum, width))));
-  };
-  useEffect(() => {
-    const finish = () => {
-      resizeInfo.current = null;
-      setResizingInfo(false);
-    };
-    window.addEventListener('blur', finish);
-    return () => window.removeEventListener('blur', finish);
-  }, []);
-  useEffect(() => {
-    if (!infoOpen) {
-      resizeInfo.current = null;
-      setResizingInfo(false);
-    }
-  }, [infoOpen]);
   const [profileError, setProfileError] = useState<string | null>(null);
   const visibleError =
     state.chatStorageError ||
@@ -332,7 +308,7 @@ export function PreparationPage({
     );
   };
   const changeInputMode = (inputMode: InterviewInputMode) => {
-    if (openingInterview || testingAudio || inputMode === interviewSettings.inputMode) return;
+    if (openingInterview || inputMode === interviewSettings.inputMode) return;
     const settings = useInterviewSettings.getState();
     settings.setInputMode(inputMode);
     if (useInterviewSettings.getState().inputMode !== inputMode) {
@@ -348,7 +324,7 @@ export function PreparationPage({
     configuration.knowledgeBaseId = interviewConfiguration.knowledgeBaseId;
     setInterviewConfiguration(configuration);
   };
-  const readyForAI = async () => {
+  const readyForAI = async (action: 'interview' | 'skills') => {
     const request = ++aiAction.current;
     const previous = usePreparation.getState();
     await useAuth.getState().ensure();
@@ -365,17 +341,26 @@ export function PreparationPage({
       return false;
     const auth = useAuth.getState();
     if (auth.waiting || auth.error) return false;
-    if (auth.resolved && !auth.session) onAISettings?.();
+    if (auth.resolved && !auth.session) {
+      onAISettings?.(action === 'skills');
+      return false;
+    }
     const { live, models } = useChatConnection.getState();
     return live && models.length > 0;
   };
   const beginInterview = async () => {
-    if (!(await readyForAI())) return;
+    if (!(await readyForAI('interview'))) return;
     const current = usePreparation.getState();
-    if (!componentReady(speechComponent(useInterviewSettings.getState().configuration.options)))
-      return;
-    if (current.selectedKnowledgeBaseId && !componentReady('rag')) {
-      setInterviewError(`请先下载并准备已选择的${componentPresentation.rag.label}，再开始面试。`);
+    const selectedSpeech = speechComponent(useInterviewSettings.getState().configuration.options);
+    const missing: ComponentId[] = [];
+    if (!componentReady(selectedSpeech)) missing.push(selectedSpeech);
+    if (current.selectedKnowledgeBaseId && !componentReady('rag')) missing.push('rag');
+    if (missing.length) {
+      const catalog = useComponents.getState().state;
+      onComponentSettings?.({
+        required: missing,
+        anySpeech: !catalog || catalog.phase === 'checking' || !hasReadySpeechModel(catalog),
+      });
       return;
     }
     setInterviewError(null);
@@ -417,13 +402,11 @@ export function PreparationPage({
         }
         if (action === 'interview') {
           state.dismissSkillUpdate();
-          if (!speechReady || (!!state.selectedKnowledgeBaseId && !ragReady))
-            onComponentSettings?.();
-          else await beginInterview();
+          await beginInterview();
           return;
         }
         if (action === 'skills') {
-          if (await readyForAI()) await usePreparation.getState().generateSkills();
+          if (await readyForAI('skills')) await usePreparation.getState().generateSkills();
           return;
         }
         state.dismissSkillUpdate();
@@ -444,12 +427,12 @@ export function PreparationPage({
       }}
     />
   );
-  const checkAccess = async (configuration: InterviewConfiguration) => {
+  const checkAccess = async (configuration: InterviewConfiguration, startError?: string) => {
     const attempt = ++accessAttempt.current;
     const current = () => attempt === accessAttempt.current;
     setCheckingAccess(true);
     setAccessReport(null);
-    setInterviewError(null);
+    setInterviewError(startError ?? null);
     try {
       if (configuration.knowledgeBaseId) {
         const selectedBase = (await localKnowledge.listBases()).find(
@@ -469,9 +452,7 @@ export function PreparationPage({
       setInterviewDevices(report.devices);
     } catch (error) {
       if (current())
-        setInterviewError(
-          error instanceof Error ? error.message : '无法检查面试权限，请重新检查。',
-        );
+        setInterviewError(startError ?? userError(error, '无法检查面试权限，请重新检查。'));
     } finally {
       queueMicrotask(() => {
         if (current()) setCheckingAccess(false);
@@ -492,6 +473,8 @@ export function PreparationPage({
   }, [
     confirmInterview,
     interviewSettings.inputMode,
+    interviewSettings.configuration.modelId,
+    interviewSettings.configuration.effort,
     connection.live,
     connection.loading,
     connection.models,
@@ -549,11 +532,11 @@ export function PreparationPage({
             disabled={
               !window.desktop ||
               openingInterview ||
-              !speechReady ||
-              (!!state.selectedKnowledgeBaseId && !ragReady) ||
               authBusy ||
               connection.loading ||
-              (authResolved && (!connection.live || !connection.models.length))
+              (!checkAiBeforeComponents &&
+                (!speechReady || (!!state.selectedKnowledgeBaseId && !ragReady) ||
+                  (authResolved && (!connection.live || !connection.models.length))))
             }
             onClick={beginInterview}
           >
@@ -570,7 +553,7 @@ export function PreparationPage({
           footer={
             <>
               <p className="interview-start-description">
-                {t('音频本机处理，不保存。')}
+                {interviewConfiguration.autoRecord ? t('本场面试将自动录音，仅保存在本机。') : t('本场面试默认不录音。')}
                 {interviewConfiguration.mode === 'local' &&
                   interviewConfiguration.aiEnabled &&
                   t(' 回答资料发至 {0}。', [interviewProvider.dataRecipient])}
@@ -593,18 +576,19 @@ export function PreparationPage({
                   style={{ width: startActionWidth, paddingInline: 8 }}
                   disabled={
                     openingInterview ||
-                    testingAudio ||
                     checkingAccess ||
+                    !!interviewError ||
                     !accessReport?.ready ||
                     !speechReady ||
                     (!!state.selectedKnowledgeBaseId && !ragReady) ||
                     !connection.live ||
-                    !interviewConfiguration.modelId
+                    !interviewModel
                   }
                   onClick={async () => {
                     if (!window.desktop || openingInterview) return;
                     setOpeningInterview(true);
                     try {
+                      await preview.stop.current();
                       await window.desktop.openInterview({
                         ...interviewConfiguration,
                         ...(interviewConfiguration.knowledgeBaseId
@@ -613,8 +597,7 @@ export function PreparationPage({
                       });
                       setConfirmInterview(false);
                     } catch (error) {
-                      setAccessReport(null);
-                      setInterviewError(userError(error, '面试窗口打开失败，请重试。'));
+                      await checkAccess(interviewConfiguration, userError(error, '面试窗口打开失败，请重试。'));
                     } finally {
                       setOpeningInterview(false);
                     }
@@ -636,7 +619,7 @@ export function PreparationPage({
           <InterviewInputModeControl
             value={interviewSettings.inputMode}
             onChange={changeInputMode}
-            disabled={openingInterview || testingAudio}
+            disabled={openingInterview}
           />
           <div className="interview-start-content">
             <div className="interview-start-summary" role="group" aria-label={t('当前面试设置')}>
@@ -647,22 +630,26 @@ export function PreparationPage({
                     {state.selectedKnowledgeBaseId ? interviewKnowledgeName : t('不使用知识库')}
                   </dd>
                 </div>
-                <div>
-                  <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
-                  <dd className={lowUsage ? 'account-usage-low' : undefined}>
-                    {!connection.live ? (
-                      t('未连接 AI 服务')
-                    ) : connection.loadingUsage ? (
-                      t('正在读取…')
-                    ) : (
-                      <AccountUsageSummary
-                        usage={connection.usage}
-                        showHeading={false}
-                        mode="all"
-                      />
-                    )}
-                  </dd>
-                </div>
+                {connection.live && !connection.loadingUsage && isApiProvider(connection.service) ? (
+                  <InterviewApiBillingRow provider={connection.service} />
+                ) : (
+                  <div>
+                    <dt>{connection.live && usageSummary ? usageSummary.title : t('AI 服务用量')}</dt>
+                    <dd className={lowUsage ? 'account-usage-low' : undefined}>
+                      {!connection.live ? (
+                        t('未连接 AI 服务')
+                      ) : connection.loadingUsage ? (
+                        t('正在读取…')
+                      ) : (
+                        <AccountUsageSummary
+                          usage={connection.usage}
+                          showHeading={false}
+                          mode="all"
+                        />
+                      )}
+                    </dd>
+                  </div>
+                )}
               </dl>
               <dl ref={audioSummary} className="interview-start-summary-group">
                 {interviewConfiguration.inputMode !== 'transcription' && (
@@ -699,9 +686,7 @@ export function PreparationPage({
                   <dd>
                     <span className="interview-start-summary-value">
                       {interviewConfiguration.aiEnabled
-                        ? (connection.models.find(
-                            (model) => model.id === interviewConfiguration.modelId,
-                          )?.label ?? interviewConfiguration.modelId)
+                        ? (interviewModel?.label ?? t('模型不可用'))
                         : t('未选择模型')}
                     </span>
                     <span
@@ -735,152 +720,29 @@ export function PreparationPage({
               aria-label={t('权限与设备检查')}
               aria-busy={checkingAccess}
             >
-              <h3>{t('设备与权限')}</h3>
-              <div ref={accessChecks} className="interview-access-checks">
-                <AudioCheck
-                  key={`audio-check-${accessAttempt.current}`}
-                  options={interviewConfiguration.options}
-                  disabled={openingInterview || checkingAccess}
-                  onBusyChange={setTestingAudio}
-                >
-                  {({ button, result }) =>
-                    checkingAccess ? (
-                      <>
-                        <p className="sr-only" role="status">
-                          {t('正在检查权限与音频设备…')}
-                        </p>
-                        <ul className="interview-access-list" aria-hidden="true">
-                          {interviewConfiguration.options.sources.map((source) => (
-                            <li key={source}>
-                              <div className="interview-access-row">
-                                <span>{source === 'microphone' ? t('麦克风') : t('系统音频')}</span>
-                                <div className="interview-access-controls">
-                                  <AccessSkeleton className="interview-access-status-slot">
-                                    <span className="interview-access-status">
-                                      <Check size={14} />
-                                      {t(audioAccessLabels.granted)}
-                                    </span>
-                                  </AccessSkeleton>
-                                  <AccessSkeleton className="interview-access-test-slot">
-                                    {button(source, false)}
-                                  </AccessSkeleton>
-                                </div>
-                              </div>
-                            </li>
-                          ))}
-                          {window.desktop?.screenCapturePermissionSupported && (
-                            <li aria-label={t('屏幕捕获权限检查')}>
-                              <div className="interview-access-row">
-                                <span>{t('屏幕截图')}</span>
-                                <AccessSkeleton className="interview-access-status-slot">
-                                  <span className="interview-access-status">
-                                    <Check size={14} />
-                                    {t(
-                                      screenAccessLabels[
-                                        window.desktop.platform === 'windows'
-                                          ? 'not-required'
-                                          : 'granted'
-                                      ],
-                                    )}
-                                  </span>
-                                </AccessSkeleton>
-                              </div>
-                            </li>
-                          )}
-                          <li>
-                            <div className="interview-access-row">
-                              <span>{t('远程连接')}</span>
-                              <RemoteConnectionStatus />
-                            </div>
-                          </li>
-                          <li>
-                            <div className="interview-access-row">
-                              <span>{t('快捷键')}</span>
-                              <AccessSkeleton className="interview-access-status-slot">
-                                <span className="interview-access-status">
-                                  <Check size={14} />
-                                  {t('快捷键可用')}
-                                </span>
-                              </AccessSkeleton>
-                            </div>
-                          </li>
-                        </ul>
-                      </>
-                    ) : (
-                      <ul className="interview-access-list">
-                        {accessReport?.checks.map((check) => (
-                          <li key={check.source}>
-                            <div className="interview-access-row">
-                              <span>
-                                {check.source === 'microphone' ? t('麦克风') : t('系统音频')}
-                              </span>
-                              <div className="interview-access-controls">
-                                <span
-                                  className={`interview-access-status ${check.status === 'granted' ? '' : 'danger-text'}`}
-                                >
-                                  {check.status === 'granted' ? (
-                                    <Check size={14} />
-                                  ) : (
-                                    <X size={14} />
-                                  )}
-                                  {t(audioAccessLabels[check.status])}
-                                </span>
-                                {button(check.source, check.status === 'granted')}
-                              </div>
-                            </div>
-                            {result(check.source)}
-                            {check.status !== 'granted' && (
-                              <p className="interview-access-detail danger-text">
-                                {t(check.message)}
-                              </p>
-                            )}
-                          </li>
-                        ))}
-                        {screenAccess && (
-                          <li aria-label={t('屏幕捕获权限检查')}>
-                            <div className="interview-access-row">
-                              <span>{t('屏幕截图')}</span>
-                              <span className="interview-access-status">
-                                {screenReady ? <Check size={14} /> : <Monitor size={14} />}
-                                {t(screenAccessLabels[screenAccess.status])}
-                              </span>
-                            </div>
-                            {!screenReady && (
-                              <p className="interview-access-detail">
-                                {['error', 'unknown', 'restricted'].includes(screenAccess.status) &&
-                                  `${t(screenAccess.message)} `}
-                                {t('可继续纯语音面试，截图需授权。')}
-                              </p>
-                            )}
-                          </li>
-                        )}
-                        <li>
-                          <div className="interview-access-row">
-                            <span>{t('远程连接')}</span>
-                            <RemoteConnectionStatus />
-                          </div>
-                        </li>
-                        <li>
-                          <div className="interview-access-row">
-                            <span>{t('快捷键')}</span>
-                            <ShortcutAvailabilityStatus />
-                          </div>
-                        </li>
-                      </ul>
-                    )
-                  }
-                </AudioCheck>
-              </div>
-              <div className="interview-access-actions">
+              <div className="interview-access-heading">
+                <h3>{t('设备与权限')}</h3>
                 <Button
                   variant="ghost"
                   style={{ width: startActionWidth, paddingInline: 8 }}
-                  disabled={openingInterview || checkingAccess || testingAudio}
+                  disabled={openingInterview || checkingAccess}
                   onClick={() => void checkAccess(interviewConfiguration)}
                 >
                   <Refresh size={16} />
                   {t('重新检查')}
                 </Button>
+              </div>
+              <div ref={accessChecks} className="interview-access-checks">
+                <InterviewAccessList
+                  checking={checkingAccess}
+                  sources={interviewConfiguration.options.sources}
+                  report={accessReport}
+                />
+              </div>
+              <InterviewReveal resizeKey={preview.error ?? ''}>
+                {preview.error ? <p className="interview-access-detail danger-text" role="alert">{t(preview.error)}</p> : null}
+              </InterviewReveal>
+              <InterviewReveal>
                 {!checkingAccess &&
                   accessReport?.checks.some(
                     (check) =>
@@ -888,7 +750,8 @@ export function PreparationPage({
                       (window.desktop?.platform === 'macos' &&
                         check.source === 'system' &&
                         check.status !== 'granted'),
-                  ) && (
+                  ) ? (
+                  <div className="interview-access-actions">
                     <Button
                       variant="outline"
                       onClick={() =>
@@ -909,25 +772,35 @@ export function PreparationPage({
                         ? t('打开音频权限设置')
                         : t('打开麦克风权限设置')}
                     </Button>
-                  )}
-              </div>
+                  </div>
+                ) : null}
+              </InterviewReveal>
             </section>
-            {interviewSettings.error && (
-              <p role="alert" className="danger-text">
-                {t(interviewSettings.error)}
-              </p>
-            )}
-            {interviewError && (
-              <p role="alert" className="danger-text">
-                {t(interviewError)}
-              </p>
-            )}
+            <InterviewReveal resizeKey={interviewSettings.error ?? ''}>
+              {interviewSettings.error ? (
+                <p role="alert" className="danger-text">
+                  {t(interviewSettings.error)}
+                </p>
+              ) : null}
+            </InterviewReveal>
+            <InterviewReveal>
+              {connection.live && !connection.loading && connection.models.length > 0 && !interviewModel ? (
+                <p role="alert" className="danger-text">{t('所选模型当前不可用，请重新选择模型。')}</p>
+              ) : null}
+            </InterviewReveal>
+            <InterviewReveal resizeKey={interviewError ?? ''}>
+              {interviewError ? (
+                <p role="alert" className="danger-text">
+                  {t(interviewError)}
+                </p>
+              ) : null}
+            </InterviewReveal>
           </div>
         </Modal>
       )}
       <div
         ref={layoutRef}
-        className={`preparation-layout${infoOpen ? ' has-personal-info' : ''}${resizingInfo ? ' is-resizing-info' : ''}`}
+        className={`preparation-layout${infoOpen ? ' has-personal-info' : ''}`}
       >
         <div
           className="chat-column"
@@ -986,11 +859,18 @@ export function PreparationPage({
               </div>
             </div>
           )}
-          <ComponentsNotice
-            onSettings={onComponentSettings}
-            onPerformanceSettings={onSpeechSettings}
-            speechOptions={interviewSettings.configuration.options}
-          />
+          <div ref={notices} className="chat-settings-notices">
+            <HomeNoticeSlot>
+              <LocalImportNotice onSettings={onImportSettings} />
+            </HomeNoticeSlot>
+            <HomeNoticeSlot>
+              <ComponentsNotice
+                onSettings={onComponentSettings}
+                onPerformanceSettings={onSpeechSettings}
+                speechOptions={interviewSettings.configuration.options}
+              />
+            </HomeNoticeSlot>
+          </div>
           {state.messages.length ? (
             <div
               className="chat-scroll"
@@ -1000,88 +880,24 @@ export function PreparationPage({
             >
               <div className="chat-thread">
                 {state.messages.map((message, index) => (
-                  <article key={message.id} className={`chat-message ${message.role}`}>
-                    {message.role === 'user' ? (
-                      <>
-                        <UserMessage message={message} />
-                        <ChatMessageActions
-                          message={message}
-                          timestamp={
-                            message.startedAt ??
-                            (state.messages[index + 1]?.role === 'assistant'
-                              ? state.messages[index + 1].startedAt
-                              : undefined)
-                          }
-                          copied={copied}
-                          onCopied={setCopied}
-                        />
-                      </>
-                    ) : (
-                      <>
-                        <div className="answer-label">
-                          <ProviderIdentity
-                            provider={
-                              message.provider ?? (message.mode === 'live' ? 'unknown' : 'mock')
-                            }
-                            detail={
-                              message.status === 'failed'
-                                ? message.errorCode?.startsWith('skill_')
-                                  ? t('提案校验失败')
-                                  : t('回答未完成')
-                                : message.status === 'stopped'
-                                  ? t('已停止')
-                                  : undefined
-                            }
-                          />
-                        </div>
-                        <ResponseProgress message={message} />
-                        <ChatSources sources={message.sources ?? []} />
-                        <div className="chat-answer">
-                          {message.content ? (
-                            <MarkdownContent
-                              content={message.content}
-                              sources={message.sources}
-                              streaming={message.status === 'streaming'}
-                            />
-                          ) : message.status === 'failed' ? (
-                            t('请求失败，未收到回答。')
-                          ) : message.status === 'stopped' ? (
-                            t('已停止回复。')
-                          ) : message.status === 'completed' ? (
-                            t('服务未返回文本内容。')
-                          ) : null}
-                        </div>
-                        <ProfileProposal message={message} />
-                        {message.error && (
-                          <p className="message-error" role="alert">
-                            {t(message.error)}
-                          </p>
-                        )}
-                        <ChatMessageActions
-                          message={message}
-                          timestamp={message.startedAt}
-                          copied={copied}
-                          onCopied={setCopied}
-                        >
-                          {['failed', 'stopped'].includes(message.status ?? '') &&
-                            message.id === state.messages.at(-1)?.id && (
-                              <Button
-                                variant="outline"
-                                className="chat-retry"
-
-                                disabled={
-                                  state.streaming || authBusy || (authResolved && !connection.models.length)
-                                }
-                                onClick={() => void state.retry(message.id)}
-                              >
-                                <Refresh size={16} />
-                                {t('重试回答')}
-                              </Button>
-                            )}
-                        </ChatMessageActions>
-                      </>
-                    )}
-                  </article>
+                  <PreparationMessage
+                    key={message.id}
+                    message={message}
+                    timestamp={
+                      message.startedAt ??
+                      (message.role === 'user' && state.messages[index + 1]?.role === 'assistant'
+                        ? state.messages[index + 1].startedAt
+                        : undefined)
+                    }
+                    copied={copied === message.id ? copied : null}
+                    onCopied={setCopied}
+                    retryDisabled={
+                      index === state.messages.length - 1 && ['failed', 'stopped'].includes(message.status ?? '')
+                        ? state.streaming || authBusy || (authResolved && !connection.models.length)
+                        : undefined
+                    }
+                    onRetry={state.retry}
+                  />
                 ))}
               </div>
             </div>
@@ -1112,36 +928,42 @@ export function PreparationPage({
               </div>
             )}
             <div className="preparation-notices">
-              {(visibleError || (authResolved && !connection.live)) && (
-                <p
-                  role={visibleError ? 'alert' : undefined}
-                  className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
-                >
-                  {t(visibleError || '请先连接模型服务。')}
-                </p>
-              )}
-              {connection.error && (
-                <Button
-                  variant="outline"
-                  disabled={connection.loading}
-                  onClick={() => void connection.load(true, true)}
-                >
-                  <Refresh size={16} />
-                  {t('重新加载模型')}
-                </Button>
-              )}
-              {state.chatStorageError && (
-                <Button
-                  variant="outline"
-                  onClick={() => {
-                    if (state.chatsReady) void state.flushChats();
-                    else void state.restoreChats();
-                  }}
-                >
-                  {state.chatsReady ? <Save size={16} /> : <Refresh size={16} />}
-                  {state.chatsReady ? t('重试保存聊天') : t('重新读取聊天')}
-                </Button>
-              )}
+              <InterviewReveal resizeKey={visibleError || 'offline'}>
+                {(visibleError || (authResolved && !connection.live)) ? (
+                  <p
+                    role={visibleError ? 'alert' : undefined}
+                    className={`simulation-disclaimer ${visibleError ? 'danger-text' : ''}`}
+                  >
+                    {t(visibleError || '请先连接模型服务。')}
+                  </p>
+                ) : null}
+              </InterviewReveal>
+              <InterviewReveal>
+                {connection.error ? (
+                  <Button
+                    variant="outline"
+                    disabled={connection.loading}
+                    onClick={() => void connection.load(true, true)}
+                  >
+                    <Refresh size={16} />
+                    {t('重新加载模型')}
+                  </Button>
+                ) : null}
+              </InterviewReveal>
+              <InterviewReveal>
+                {state.chatStorageError ? (
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      if (state.chatsReady) void state.flushChats();
+                      else void state.restoreChats();
+                    }}
+                  >
+                    {state.chatsReady ? <Save size={16} /> : <Refresh size={16} />}
+                    {state.chatsReady ? t('重试保存聊天') : t('重新读取聊天')}
+                  </Button>
+                ) : null}
+              </InterviewReveal>
             </div>
             <>
               <form
@@ -1178,16 +1000,21 @@ export function PreparationPage({
                         <div className="composer-actions">
                           {state.streaming ? (
                             <Button
+                              key="stop"
                               className="send-button"
                               type="button"
                               size="icon"
                               aria-label={t('停止回复')}
-                              onClick={state.stop}
+                              onClick={(event) => {
+                                event.preventDefault();
+                                state.stop();
+                              }}
                             >
                               <Square size={18} />
                             </Button>
                           ) : (
                             <Button
+                              key="send"
                               className="send-button"
                               size="icon"
                               type="submit"
@@ -1214,54 +1041,13 @@ export function PreparationPage({
         <PersonalInfoPanel
           resizeHandle={
             infoOpen && (
-              <div
-                className="personal-resize-handle"
-                role="separator"
-                aria-label={t('调整个人信息宽度')}
-                aria-orientation="vertical"
-                tabIndex={0}
-                aria-valuenow={panelWidth}
-                aria-valuemin={300}
-                aria-valuemax={640}
-                onDoubleClick={() => setPanelWidth(380)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Home') {
-                    event.preventDefault();
-                    setPanelWidth(380);
-                  }
-                  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
-                    event.preventDefault();
-                    resizePanel(panelWidth + (event.key === 'ArrowLeft' ? 20 : -20));
-                  }
-                }}
-                onPointerDown={(event) => {
-                  if (event.button !== 0) return;
-                  event.preventDefault();
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                  resizeInfo.current = {
-                    x: event.clientX,
-                    width: event.currentTarget.parentElement!.getBoundingClientRect().width,
-                  };
-                  setResizingInfo(true);
-                }}
-                onPointerMove={(event) => {
-                  const start = resizeInfo.current;
-                  if (start) resizePanel(start.width + start.x - event.clientX);
-                }}
-                onPointerUp={(event) => {
-                  resizeInfo.current = null;
-                  setResizingInfo(false);
-                  if (event.currentTarget.hasPointerCapture(event.pointerId))
-                    event.currentTarget.releasePointerCapture(event.pointerId);
-                }}
-                onPointerCancel={() => {
-                  resizeInfo.current = null;
-                  setResizingInfo(false);
-                }}
-                onLostPointerCapture={() => {
-                  resizeInfo.current = null;
-                  setResizingInfo(false);
-                }}
+              <PanelResizeHandle
+                layoutRef={layoutRef}
+                label={t('调整个人信息宽度')}
+                controls="personal-info-panel"
+                draggingClassName="is-resizing-info"
+                onResize={setPanelWidth}
+                onReset={() => setPanelWidth(380)}
               />
             )
           }

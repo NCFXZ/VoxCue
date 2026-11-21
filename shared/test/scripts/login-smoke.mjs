@@ -1,6 +1,5 @@
 import { openModelMenu } from './install-ui-account.mjs';
 import { enterPrimaryUiAccount, installUiAccount } from './install-ui-account.mjs';
-import { enterDemoUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import workspace from '../../scripts/workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';

@@ -8,9 +8,9 @@ it('anchors help to the active screen work area, independently of panel dimensio
   const screen = { x: -1920, y: 120, width: 1920, height: 1040 };
   expect(interviewShortcutsBounds(screen)).toEqual({
     x: -1904,
-    y: 764,
+    y: 732,
     width: 360,
-    height: 380,
+    height: 412,
   });
   expect(interviewShortcutsBounds({ x: 20, y: 30, width: 300, height: 200 })).toEqual({
     x: 36,
@@ -20,9 +20,9 @@ it('anchors help to the active screen work area, independently of panel dimensio
   });
   expect(interviewShortcutsBounds(screen, true)).toEqual({
     x: -1904,
-    y: 764,
+    y: 732,
     width: 300,
-    height: 380,
+    height: 412,
   });
 });
 
@@ -72,6 +72,7 @@ describe('interview global shortcut ownership', () => {
     const dispose = fixture.start();
     expect([...fixture.callbacks.keys()]).toEqual([
       'Control+Shift+H',
+      'Control+Shift+/',
       'Control+Shift+P',
       'Control+Shift+T',
       'Control+Shift+M',
@@ -119,6 +120,7 @@ describe('interview global shortcut ownership', () => {
     expect(fixture.command).not.toHaveBeenCalled();
     expect(fixture.registry.unregister.mock.calls).toEqual([
       ['Control+Shift+H'],
+      ['Control+Shift+/'],
       ['Control+Shift+P'],
       ['Control+Shift+T'],
       ['Control+Shift+M'],

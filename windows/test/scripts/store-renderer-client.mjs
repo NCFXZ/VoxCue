@@ -137,7 +137,7 @@ async function renderer(login) {
       (await endpoint('list'))?.find((item) => {
         if (item.type !== 'page' || !item.url.startsWith('file:')) return false;
         const url = new URL(item.url);
-        return fileURLToPath(url).toLowerCase() === appPage && (url.hash === '#login') === login;
+        return fileURLToPath(url).toLowerCase() === appPage && url.hash === (login ? '#login' : '');
       }),
     login ? 'login page' : 'main page',
   );
@@ -164,6 +164,8 @@ async function checkSecondLaunch(main) {
   assert.equal(await onlyPage(), targetId);
 }
 async function checkPersistence(main) {
+  const [major, minor] = config.version.split('.').map(Number);
+  const isolatedProfile = major > 1 || (major === 1 && minor >= 3);
   const bytes = Array.from(
     Buffer.from('Synthetic Sandbox original: 中文与 English remain intact.\n'),
   );
@@ -226,8 +228,7 @@ async function checkPersistence(main) {
   };
   const call = (operation, input = expected) =>
     main.evaluate(`(${operation.toString()})(${JSON.stringify(input)})`);
-  let ragRevision;
-  if (config.checkRag) {
+  async function checkIndex() {
     assert.ok(['seed', 'verify'].includes(config.phase));
     const { document } = expected;
     const components = await main.evaluate('window.desktop.components({op:"status"})');
@@ -253,9 +254,26 @@ async function checkPersistence(main) {
       });
       assert.equal(indexed.contentHash, contentHash);
       assert.ok(indexed.chunkCount > 0);
+      if (config.version === '1.2.3') assert.equal(indexed.indexVersion, 'qa-linked-v2');
     } else {
-      assert.equal(existing?.contentHash, contentHash, 'Expected the old index before any UI reload');
       assert.match(config.ragRevision, /^[a-f0-9]{64}$/);
+      let observed;
+      const current = isolatedProfile ? await poll(async () => {
+        const status = await knowledge({ op: 'status' });
+        if (status.error) throw Error(status.error);
+        const indexed = status.documents.find((item) => item.documentId === document.id);
+        const task = status.tasks.find((item) => item.documentId === document.id);
+        observed = { modelReady: status.modelReady, indexVersion: indexed?.indexVersion ?? null,
+          available: indexed?.available ?? null, phase: task?.phase ?? null };
+        if (task?.phase === 'failed') throw Error(task.error || 'Reindexing the migrated original failed');
+        return indexed?.indexVersion === 'qa-linked-v3' && indexed.available === true && indexed;
+      }, 'the installed app to index the migrated original in qa-linked-v3').catch(error => {
+        throw Error(error.message + ' (last index state ' + JSON.stringify(observed) + ')');
+      }) : existing;
+      assert.equal(current?.contentHash, contentHash);
+      assert.equal(current.baseId, document.baseId);
+      assert.equal(current.name, document.name);
+      assert.ok(current.chunkCount > 0);
     }
     const [hit] = await knowledge({
       op: 'search', requestId: 'sandbox-index-search', query: 'Synthetic Sandbox original',
@@ -265,22 +283,32 @@ async function checkPersistence(main) {
     assert.equal(hit.mode, 'vector');
     assert.ok(Number.isFinite(hit.similarity));
     assert.match(hit.revision, /^[a-f0-9]{64}$/);
-    ragRevision = hit.revision;
-    if (config.phase === 'verify') assert.equal(ragRevision, config.ragRevision);
+    const ragRevision = hit.revision;
+    if (config.phase === 'verify') {
+      if (config.rebuildIndex) assert.notEqual(ragRevision, config.ragRevision);
+      else assert.equal(ragRevision, config.ragRevision);
+    }
     const item = await knowledge({
       op: 'item', requestId: 'sandbox-index-item', itemId: hit.itemId,
       expected: { baseId: document.baseId, documentId: document.id, revision: ragRevision },
     });
     assert.equal(item?.source?.contentHash, contentHash);
+    if (isolatedProfile) {
+      assert.equal(item.source.indexVersion, 'qa-linked-v3');
+      assert.equal(item.source.revision, ragRevision);
+    }
     assert.ok(item.content.includes('中文与 English remain intact.'));
+    return ragRevision;
   }
+  // Index in the old process before writing the synthetic originals and reloading its UI.
+  let ragRevision = config.checkRag && config.phase === 'seed' ? await checkIndex() : undefined;
   // An upgrade/restart must only read the seed written by the old process.
-  const bindings =
+  const seededBindings =
     config.phase === 'verify'
       ? config.bindings
       : await call(async (seed) => {
           const db = await new Promise((resolve, reject) => {
-            const request = indexedDB.open('copilot-local-documents', 1);
+            const request = indexedDB.open('copilot-local-documents');
             request.onupgradeneeded = () => {
               request.result.createObjectStore('bases', { keyPath: 'id' });
               request.result
@@ -318,39 +346,74 @@ async function checkPersistence(main) {
             throw Error('Synthetic shortcut was rejected');
           return result.state.bindings;
         });
-  assert.equal(bindings?.['toggle-window'], 'Control+Alt+K');
-  const snapshot = () =>
-    call(async (seed) => {
+  // The four supported pre-1.3 packages have the same nine actions. The seed
+  // changes just toggle-window; 1.3 adds one unoccupied default on upgrade.
+  const legacyBindings = {
+    'toggle-window': 'Control+Alt+K',
+    'toggle-panels': 'Control+Shift+P',
+    'toggle-transcript': 'Control+Shift+T',
+    'toggle-microphone': 'Control+Shift+M',
+    'toggle-system-audio': 'Control+Shift+A',
+    'submit-input': 'Control+Shift+Enter',
+    'scroll-device-up': 'Control+Shift+Up',
+    'scroll-device-down': 'Control+Shift+Down',
+    screenshot: 'Control+Shift+S',
+  };
+  const bindings = isolatedProfile
+    ? { ...legacyBindings, 'toggle-shortcut-help': 'Control+Shift+/' }
+    : legacyBindings;
+  const legacySeed = config.phase === 'verify' && !Object.hasOwn(seededBindings, 'toggle-shortcut-help');
+  assert.deepEqual(seededBindings, legacySeed ? legacyBindings : bindings, 'Unexpected seeded shortcut bindings');
+  const snapshot = (requireCommitted = false) =>
+    call(async ({ seed, requireCommitted, isolatedProfile }) => {
       const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open('copilot-local-documents', 1);
+        const request = indexedDB.open('copilot-local-documents');
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(Error('Persisted document database could not open'));
       });
       let rows;
       try {
         rows = await new Promise((resolve, reject) => {
-          const tx = db.transaction(['bases', 'documents'], 'readonly');
+          const modernHistory = db.objectStoreNames.contains('interviewRecords');
+          if (isolatedProfile && requireCommitted && !modernHistory) {
+            reject(Error('The installed account partition has no committed history store'));
+            return;
+          }
+          const stores = modernHistory ? ['bases', 'documents', 'interviewRecords', 'interviewDirectory'] : ['bases', 'documents'];
+          const tx = db.transaction(stores, 'readonly');
           const base = tx.objectStore('bases').get(seed.base.id);
           const document = tx.objectStore('documents').get(seed.document.id);
-          tx.oncomplete = () => resolve({ base: base.result, document: document.result });
+          const history = modernHistory ? tx.objectStore('interviewRecords').getAll() : undefined;
+          const directory = modernHistory ? tx.objectStore('interviewDirectory').get(seed.history[0].id) : undefined;
+          tx.oncomplete = () => resolve({
+            base: base.result, document: document.result, summary: directory?.result,
+            history: modernHistory && (requireCommitted || history.result.length) ? history.result
+              : JSON.parse(localStorage.getItem('copilot-interview-history-v1')),
+          });
           tx.onerror = tx.onabort = () => reject(Error('Persisted document read failed'));
         });
       } finally {
         db.close();
       }
+      if (isolatedProfile && requireCommitted && (
+        localStorage.getItem('copilot-interview-history-v1') !== null ||
+        rows.summary?.title !== seed.history[0].title || rows.summary?.answerCount !== seed.history[0].answers.length ||
+        !rows.summary?.revision)) throw Error('The migrated history directory or legacy cleanup is incomplete');
       if (!rows.document?.blob) throw Error('Persisted original is missing');
       const { blob, ...metadata } = rows.document;
       return {
         profile: JSON.parse(localStorage.getItem('copilot-personal-info-v1')),
-        history: JSON.parse(localStorage.getItem('copilot-interview-history-v1')),
+        history: rows.history,
         theme: localStorage.getItem('copilot-theme'),
         language: localStorage.getItem('voxcue-language-v1'),
         base: rows.base,
         document: { ...metadata, bytes: Array.from(new Uint8Array(await blob.arrayBuffer())) },
         bindings: (await window.desktop.shortcutSettings({ op: 'status' })).state.bindings,
       };
-    });
+    }, { seed: expected, requireCommitted, isolatedProfile });
   assert.deepEqual(await snapshot(), { ...expected, bindings });
+  // First launch must rebuild the migrated original before a reload or library navigation.
+  if (config.checkRag && config.rebuildIndex) ragRevision = await checkIndex();
   const previousOrigin = await main.evaluate('performance.timeOrigin');
   await main.send('Page.reload');
   await poll(async () => {
@@ -439,6 +502,7 @@ async function checkPersistence(main) {
       ),
     'persisted answer UI',
   );
+  assert.deepEqual(await snapshot(true), { ...expected, bindings });
   await click('nav button[aria-label="知识库"]', 'knowledge library');
   await click('.knowledge-card', 'persisted library UI', expected.base.name);
   await poll(
@@ -453,6 +517,13 @@ async function checkPersistence(main) {
     'persisted original metadata UI',
   );
   assert.deepEqual(await snapshot(), { ...expected, bindings });
+  // Opening this library calls the real renderer reconciliation path. Test the migrated
+  // IndexedDB bytes and visible original first, then assert its rebuilt index and citation.
+  if (config.checkRag && config.phase === 'verify') {
+    const openedRevision = await checkIndex();
+    if (config.rebuildIndex) assert.equal(openedRevision, ragRevision, 'Opening the library changed the rebuilt index');
+    ragRevision = openedRevision;
+  }
   return { bindings, ragRevision };
 }
 async function inspect() {

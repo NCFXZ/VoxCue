@@ -14,10 +14,12 @@ import {
   CHAT_FILES_BYTES_LIMIT,
 } from '../../electron/contracts/chat';
 
-/** Check the complete context before allocating attachment buffers for IPC. */
+type RequestFile = { name: string } & ({ file: File } | { size: number; readFile(): Promise<File> });
+
+/** Check the complete context before reading stored originals or allocating IPC buffers. */
 export async function prepareChatRequest(
   request: Omit<ChatRequest, 'turns'> & {
-    turns: Array<Omit<ChatTurn, 'files'> & { files?: Array<{ name: string; file: File }> }>;
+    turns: Array<Omit<ChatTurn, 'files'> & { files?: RequestFile[] }>;
   },
   signal: AbortSignal,
 ): Promise<ChatRequest> {
@@ -30,14 +32,14 @@ export async function prepareChatRequest(
   for (const turn of request.turns) {
     text += turn.content.length;
     for (const attachment of turn.files ?? []) {
+      const size = 'file' in attachment ? attachment.file.size : attachment.size;
       if (
         !attachment.name ||
         attachment.name.length > 300 ||
-        !attachment.file.size ||
-        attachment.file.size > CHAT_FILE_BYTES_LIMIT
+        !Number.isSafeInteger(size) || size <= 0 || size > CHAT_FILE_BYTES_LIMIT
       )
         throw Error('附件请求无效或超过 20 MB。');
-      bytes += attachment.file.size;
+      bytes += size;
       files++;
     }
   }
@@ -48,7 +50,11 @@ export async function prepareChatRequest(
     const attachments: NonNullable<ChatTurn['files']> = [];
     for (const attachment of turn.files ?? []) {
       signal.throwIfAborted();
-      const data = await attachment.file.arrayBuffer();
+      const file = 'file' in attachment ? attachment.file : await attachment.readFile();
+      if ('size' in attachment && file.size !== attachment.size)
+        throw Error('聊天附件无法读取，原数据已保留。');
+      signal.throwIfAborted();
+      const data = await file.arrayBuffer();
       signal.throwIfAborted();
       attachments.push({ name: attachment.name, bytes: new Uint8Array(data) });
     }

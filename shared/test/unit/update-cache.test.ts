@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, unlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import { lstatSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -129,6 +129,9 @@ class NativeFixture extends EventEmitter {
   }
   getOrCreateDownloadHelper() {
     return Promise.resolve(this.helper);
+  }
+  get installerPath() {
+    return this.helper.file;
   }
   verifySignature(file: string) {
     return this.verified(file);
@@ -477,6 +480,9 @@ describe('Windows stock pending cache ownership', () => {
     await expect(restarted.driver.quitAndInstall()).rejects.toThrow('changed');
     expect(restarted.updater.quitAndInstall).not.toHaveBeenCalled();
     await writeComplete(restarted.updater);
+    vi.spyOn(restarted.updater.helper, 'file', 'get').mockReturnValueOnce(path.join(root, 'other.exe'));
+    await expect(restarted.driver.quitAndInstall()).rejects.toThrow('changed');
+    expect(restarted.updater.quitAndInstall).not.toHaveBeenCalled();
     await restarted.driver.quitAndInstall();
     expect(restarted.updater.quitAndInstall).toHaveBeenCalledOnce();
     await restarted.driver.dispose?.();
@@ -529,15 +535,35 @@ describe('Windows stock pending cache ownership', () => {
     await restarted.driver.checkForUpdates();
     expect(restarted.requests).not.toHaveBeenCalled();
     expect(restarted.driver.lastCheckedAt?.()).toBe(now - 1000);
-    restarted.updater.verified.mockClear();
+    expect(restarted.updater.verified).toHaveBeenCalledOnce();
     await expect(restarted.driver.restoreDownloadedUpdate?.()).resolves.toBe(true);
     expect(restarted.updater.verified).toHaveBeenCalledOnce();
     expect(restarted.updater.installerRestored).toBe(true);
     expect(restarted.updater.helper.file).toBe(path.join(root, 'stock', 'pending', name));
     expect(restarted.updater.task).not.toHaveBeenCalled();
     expect(restarted.updater.httpExecutor.download).not.toHaveBeenCalled();
+    await restarted.driver.quitAndInstall();
+    expect(restarted.updater.verified).toHaveBeenCalledTimes(2);
+    expect(restarted.updater.quitAndInstall).toHaveBeenCalledOnce();
     await restarted.driver.dispose?.();
     expect(await readFile(path.join(root, 'stock', 'pending', name))).toEqual(payload);
+  });
+  it('rechecks the signer when the checked file has been replaced by a byte-identical copy', async () => {
+    const first = setup();
+    await first.driver.checkForUpdates();
+    await writeComplete(first.updater);
+    await first.driver.dispose?.();
+    const next = setup();
+    await next.driver.checkForUpdates();
+    expect(next.updater.verified).toHaveBeenCalledOnce();
+    const file = path.join(root, 'stock', 'pending', name);
+    await rename(file, file + '.old');
+    await writeFile(file, payload);
+    next.updater.signature = 'rejected by the signature verifier';
+    await expect(next.driver.restoreDownloadedUpdate?.()).rejects.toThrow('signature');
+    expect(next.updater.verified).toHaveBeenCalledTimes(2);
+    expect(next.updater.installerRestored).toBe(false);
+    await next.driver.dispose?.();
   });
   it('does not restore missing/incomplete/tampered files or a failed signature, and never downloads during restore', async () => {
     const fixture = setup();
@@ -593,6 +619,36 @@ describe('Windows stock pending cache ownership', () => {
     expect(restarted.requests).toHaveBeenCalledTimes(2);
     expect(restarted.driver.isAutomaticDownloadAllowed?.()).toBe(true);
     await restarted.driver.dispose?.();
+  });
+  it.each(['journal', 'pending directory'] as const)('retries a temporarily busy %s without restarting or skipping recovery', async busy => {
+    const saved = new UpdateCache(cacheDirectory(), 'windows-x64');
+    await saved.latest(false, async () => info);
+    await saved.beginDownload(info);
+    const locked = Object.assign(Error('synthetic sharing violation'), { code: 'EBUSY' });
+    if (busy === 'journal') {
+      const occupied = () => { throw locked; };
+      vi.mocked(lstatSync).mockImplementationOnce(occupied).mockImplementationOnce(occupied);
+    }
+    const fresh = setup();
+    if (busy === 'pending directory')
+      vi.spyOn(fresh.updater, 'getOrCreateDownloadHelper').mockRejectedValueOnce(locked);
+    await expect(fresh.driver.checkForUpdates()).rejects.toThrow();
+    expect((await state()).download).toBeDefined();
+    await fresh.driver.checkForUpdates();
+    expect((await state()).download).toBeUndefined();
+    expect(fresh.requests).not.toHaveBeenCalled();
+    await fresh.driver.dispose?.();
+  });
+  it('keeps an unfinished journal available in memory and on disk if its removal cannot be saved', async () => {
+    const cache = new UpdateCache(cacheDirectory(), 'windows-x64');
+    await cache.beginDownload(info);
+    vi.mocked(atomicFile).mockRejectedValueOnce(Error('synthetic busy disk'));
+    await expect(cache.clearJournal()).rejects.toThrow('busy disk');
+    expect(cache.journal()).toEqual(info);
+    expect((await state()).download).toEqual(info);
+    await cache.clearJournal();
+    expect(cache.journal()).toBeUndefined();
+    expect((await state()).download).toBeUndefined();
   });
   it('cancels an active stock transfer on exit, removes only its partial, and persists cooldown across a clean restart', async () => {
     const fixture = setup();

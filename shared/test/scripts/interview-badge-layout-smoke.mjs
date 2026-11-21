@@ -28,7 +28,7 @@ try {
   await installUiAccount(app, { components: true });
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
-  const [main] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
+  const main = await enterDemoUiAccount(app, login);
   const [interview] = await Promise.all([
     app.waitForEvent('window'),
     main.evaluate(() =>

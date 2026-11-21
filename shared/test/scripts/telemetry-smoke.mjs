@@ -9,6 +9,7 @@ import {
   installUiAccount,
   enterPrimaryUiAccount,
   closeUiApp,
+  returnToUiLogin,
   waitForRestoredMainWindow,
 } from './install-ui-account.mjs';
 
@@ -89,9 +90,8 @@ try {
     () => login.evaluate(() => window.desktop.telemetrySignal({ type: 'ready', text: 'private' })),
     /Invalid telemetry/,
   );
-  const opened = app.waitForEvent('window');
   await login.getByRole('button', { name: '跳过登录', exact: true }).click();
-  let main = await opened;
+  let main = await waitForRestoredMainWindow(app);
   main.on('pageerror', (e) => errors.push(e.message));
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await assert.rejects(
@@ -162,9 +162,7 @@ try {
   assert.equal(interview[0].data.activeMs, 125000);
   assert.ok(interview[0].data.manualQuestionCount >= 1);
   assert.ok(interview[0].data.answerCount >= 1);
-  const returned = app.waitForEvent('window');
-  await main.evaluate(() => window.desktop.setLocalMode(false));
-  const originalLogin = await returned;
+  const originalLogin = await returnToUiLogin(app, main, '返回登录');
   main = await enterPrimaryUiAccount(app, originalLogin);
   await main.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await main.getByRole('button', { name: '面试记录', exact: true }).click();

@@ -102,8 +102,11 @@ require('node:module').syncBuiltinESMExports();
   worker.on('message', m => {if(m.event)events.push(m.event);if(m.error)throw Error(m.error);listener?.(m);});
   worker.on('error', error=>{throw error;});
   const send = (m, key, value=true) => new Promise(resolve=>{listener=reply=>{if(reply[key]===value){listener=undefined;resolve();}};worker.postMessage(m);});
+  const {createAudioPreprocessor} = require(path.join(runtime,'dist-electron/windows/electron/speech/echoCancellation.js'));
+  const recorded = [];
+  const aec = await createAudioPreprocessor((source,samples,rate)=>recorded.push({source,samples,rate}),()=>{throw Error('Recording AEC failed');});
   try {
-    await send({op:'init',directory:'synthetic-not-read',preprocessorFile:path.join(runtime,'dist-electron/windows/electron/speech/echoCancellation.js')},'ready');
+    await send({op:'init',directory:'synthetic-not-read'},'ready');
     await send({op:'prepare',sources:['system','microphone'],id:1},'prepared',1);
     await send({op:'audio',source:'system',samples:new Float32Array(960),rate:48000,timestamp:1000,captureClock:0,sequence:2,ms:20},'ack',2);
     const samples=Float32Array.from({length:967},(_,i)=>Math.sin(i/9)*0.1);
@@ -111,37 +114,53 @@ require('node:module').syncBuiltinESMExports();
     await send({op:'flush',id:4,reason:'stop'},'flushed',4);
     const output=Float32Array.from(events.filter(e=>e.source==='microphone').flatMap(e=>Array.from(e.samples)));
     assert.deepEqual(output,samples);
+    aec.start(['system','microphone']);
+    aec.feed('system',new Float32Array(960),48000,1000,0);
+    aec.feed('microphone',samples,48000,1000,0);
+    aec.flush();
+    const tail=Float32Array.from(recorded.filter(e=>e.source==='microphone').flatMap(e=>Array.from(e.samples)));
+    assert.deepEqual(tail,samples);
     const before=events.length;
     await send({op:'prepare',sources:['system','microphone'],id:5},'prepared',5);
     await send({op:'audio',source:'system',samples:new Float32Array(960),rate:48000,timestamp:2000,captureClock:1000,sequence:6,ms:20},'ack',6);
-    await send({op:'audio',source:'microphone',samples:new Float32Array(883).fill(0.1),rate:44100,timestamp:2000,captureClock:1000,sequence:7,ms:20},'ack',7);
+    const mic=new Float32Array(883).fill(0.1);
+    await send({op:'audio',source:'microphone',samples:mic,rate:44100,timestamp:2000,captureClock:1000,sequence:7,ms:20},'ack',7);
     await send({op:'flush',id:8,reason:'stop'},'flushed',8);
-    const resampled=events.slice(before).filter(e=>e.source==='microphone').flatMap(e=>Array.from(e.samples));
+    const raw=events.slice(before).filter(e=>e.source==='microphone');
+    assert.equal(raw.length,1);
+    assert.equal(raw[0].rate,44100);
+    assert.deepEqual(raw[0].samples,mic);
+    recorded.length=0;
+    aec.start(['system','microphone']);
+    aec.feed('system',new Float32Array(960),48000,2000,1000);
+    aec.feed('microphone',mic,44100,2000,1000);
+    aec.flush();
+    const resampled=recorded.filter(e=>e.source==='microphone').flatMap(e=>Array.from(e.samples));
     assert.ok(Math.abs(resampled.length-Math.ceil(883*48000/44100))<=1);
     assert.ok(resampled.every(Number.isFinite));
-    console.log(JSON.stringify({status:'passed',realElectronWorker:true,localWasm:true,tailSamples:output.length,resamplerOutputSamples:resampled.length,network:false,hardwareCapture:false}));
-  } finally {clearTimeout(timeout);await worker.terminate();}
+    console.log(JSON.stringify({status:'passed',realElectronWorker:true,localWasm:true,tailSamples:tail.length,resamplerOutputSamples:resampled.length,network:false,hardwareCapture:false}));
+  } finally {aec.close();clearTimeout(timeout);await worker.terminate();}
   if (process.env.VOXCUE_TEST_SPEECH_MODELS) {
     const real = new Worker('globalThis.fetch=()=>{throw Error("No network");};require("node:net").Socket.prototype.connect=globalThis.fetch;require(require("node:worker_threads").workerData.entry);', {
       eval:true, workerData:{entry:path.join(runtime,'dist-electron/shared/electron/backend/speech/worker.js')}
     });
     try {
       await new Promise((resolve,reject)=>{
-        const timeout=setTimeout(()=>reject(Error('Real AEC/ONNX worker timeout')),30000);
+        const timeout=setTimeout(()=>reject(Error('Real ONNX worker timeout')),30000);
         real.once('error',reject);
         real.on('message',m=>{
           if(m.error){clearTimeout(timeout);reject(Error(m.error));}
           if(m.ready) real.postMessage({op:'prepare',sources:['system','microphone'],id:10});
           if(m.prepared===10) real.postMessage({op:'audio',source:'system',samples:new Float32Array(4800),rate:48000,timestamp:1000,captureClock:10,sequence:11,ms:100});
           if(m.ack===11) real.postMessage({op:'audio',source:'microphone',samples:new Float32Array(4410),rate:44100,timestamp:1000,captureClock:10,sequence:12,ms:100});
-          // Missing QPC must retain the 48k ASR input rate after resampling.
+          // Raw microphone packets retain their device rate with or without QPC.
           if(m.ack===12) real.postMessage({op:'audio',source:'microphone',samples:new Float32Array(4410),rate:44100,timestamp:1100,sequence:13,ms:100});
           if(m.ack===13) {assert.ok(m.audioMs>=200);real.postMessage({op:'flush',id:14,reason:'stop'});}
           if(m.flushed===14){clearTimeout(timeout);resolve();}
         });
-        real.postMessage({op:'init',directory:process.env.VOXCUE_TEST_SPEECH_MODELS,preprocessorFile:path.join(runtime,'dist-electron/windows/electron/speech/echoCancellation.js')});
+        real.postMessage({op:'init',directory:process.env.VOXCUE_TEST_SPEECH_MODELS});
       });
-      console.log('PASS actual AEC WASM + Paraformer/VAD/ONNX in Electron Worker, 44.1kHz and invalid QPC, flush and exit');
+      console.log('PASS Paraformer/VAD/ONNX in Electron Worker, raw 44.1kHz and invalid QPC, flush and exit');
     } finally {await real.terminate();}
   }
 })().catch(error=>{console.error(error);process.exitCode=1;});

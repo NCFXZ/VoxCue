@@ -47,6 +47,9 @@ export class EchoCancellation implements AudioPreprocessor {
   private emitted = 0;
   private lastMic?: Frame;
   private lastActive = false;
+  private echoOnly = false;
+  private echoEstablished = false;
+  private nearHoldSamples = 0;
   private readonly latency: number;
   constructor(
     private module: Module,
@@ -150,8 +153,7 @@ export class EchoCancellation implements AudioPreprocessor {
   private frames(source: AudioSource, lane: Lane, partial = false) {
     while (lane.buffer.length >= frameSize || (partial && lane.buffer.length)) {
       const length = Math.min(frameSize, lane.buffer.length);
-      const samples = new Float32Array(frameSize);
-      samples.set(lane.buffer.take(length));
+      const samples = lane.buffer.take(length, frameSize);
       const elapsed = (lane.output / rate) * 1000;
       const frame = {
         samples,
@@ -212,9 +214,21 @@ export class EchoCancellation implements AudioPreprocessor {
         : Math.min(frameSize, mic.length + (mic.length < frameSize ? this.latency : 0));
       const skip = Math.min(this.skip, valid);
       this.skip -= skip;
-      const samples = (active ? output[0] : original).subarray(skip, valid);
-      if (samples.length)
-        this.consume('microphone', samples, rate, mic.wall + ((skip - this.latency) / rate) * 1000);
+      const raw = original.subarray(skip, valid);
+      const samples = active ? output[0].subarray(skip, valid) : raw;
+      if (raw.length) {
+        // Only a trusted playback reference can exclude a mic frame from ASR.
+        // Use AEC's time-aligned residual to distinguish loudspeaker-only
+        // frames from a local voice. Keep the raw voice and the original clock.
+        if (!active) {
+          this.echoEstablished = false;
+          this.nearHoldSamples = 0;
+        }
+        this.echoOnly = active && this.isPlaybackEcho(raw, samples, mic.clock - this.lastSignal);
+        const recognition = this.echoOnly ? new Float32Array(raw.length) : raw;
+        const timestamp = mic.wall + ((skip - this.latency) / rate) * 1000;
+        this.consume('microphone', samples, rate, timestamp, recognition);
+      }
       this.emitted += samples.length;
       this.lastMic = mic;
       this.lastActive = active;
@@ -232,6 +246,34 @@ export class EchoCancellation implements AudioPreprocessor {
         },
         Math.max(1, waitMs - (performance.now() - this.capture[0].queued)),
       );
+  }
+
+  private isPlaybackEcho(raw: Float32Array, residual: Float32Array, sincePlaybackMs: number) {
+    let inputEnergy = 0;
+    let residualEnergy = 0;
+    let cross = 0;
+    for (let i = 0; i < raw.length; i++) {
+      inputEnergy += raw[i] * raw[i];
+      residualEnergy += residual[i] * residual[i];
+      cross += raw[i] * residual[i];
+    }
+    // Protect a quiet local syllable through brief peaks in the soundtrack.
+    // Allow the room echo to decay before treating a gap as evidence of local speech.
+    const minVoiceEnergy = raw.length * 0.003 ** 2;
+    const nearDominant =
+      residualEnergy > inputEnergy * 0.55 &&
+      residualEnergy > minVoiceEnergy &&
+      cross > 0 && cross * cross > 0.65 * inputEnergy * residualEnergy;
+    if (this.echoEstablished && sincePlaybackMs >= 80 && nearDominant) {
+      this.nearHoldSamples = rate * 0.2;
+    } else {
+      this.nearHoldSamples = Math.max(0, this.nearHoldSamples - raw.length);
+    }
+    // Enter only after strong cancellation. Hysteresis prevents a sequence of
+    // slightly louder residual frames from reopening a speaker-only passage.
+    const echo = residualEnergy < inputEnergy * (this.echoOnly ? 0.12 : 0.05);
+    if (echo && inputEnergy > minVoiceEnergy) this.echoEstablished = true;
+    return this.nearHoldSamples === 0 && echo;
   }
 
   flush() {
@@ -282,6 +324,9 @@ export class EchoCancellation implements AudioPreprocessor {
     this.skip = this.emitted = 0;
     this.lastMic = undefined;
     this.lastActive = false;
+    this.echoOnly = false;
+    this.echoEstablished = false;
+    this.nearHoldSamples = 0;
   }
 }
 

@@ -125,7 +125,7 @@ describe('CUDA availability and independent CPU inference', () => {
     native.execFile.mockImplementation((_file, _args, _options, done) => done(Error('missing'), ''));
     await expect(new SpeechHardwareProbe('C:/app/VoxCue.Audio.exe', 'win32').require({
       sources: ['system'], speechModel: 'qwen', inferenceDevice: 'cpu',
-    })).rejects.toThrow('无法确认 Qwen 所需的处理器指令集');
+    })).rejects.toThrow('无法确认多语言语音识别所需的处理器指令集');
     expect(native.execFile).toHaveBeenCalledExactlyOnceWith(
       path.join('C:/app', 'VoxCue.Cpu.exe'), [],
       { windowsHide: true, timeout: 5000, maxBuffer: 4096 }, expect.any(Function),

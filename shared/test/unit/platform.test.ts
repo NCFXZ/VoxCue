@@ -6,6 +6,7 @@ import { windows as windowsPolicy } from '../../../windows/electron/platform';
 import { macos as macosPolicy } from '../../../macos/electron/platform';
 import {
   windowOptions,
+  profilePartition,
   restrictWindowNavigation,
   loadWindowPage,
   whenWindowReady,
@@ -15,10 +16,23 @@ const native = vi.hoisted(() => ({ fork: vi.fn() }));
 vi.mock('electron', () => ({ utilityProcess: { fork: native.fork } }));
 import { SpeechHost } from '../../../shared/electron/backend/speech/host';
 
-const paths = { icon: '/application/icon', preload: '/application/preload.js' };
+const paths = { icon: '/application/icon', preload: '/application/preload.js', owner: 'local' };
 const environment = { appPath: '/application', resourcesPath: '/resources', packaged: false };
 
 describe('桌面平台边界', () => {
+  it('keeps accounts, local mode and login in separate persistent browser sessions', () => {
+    const partition = (role: Parameters<typeof windowOptions>[0], owner?: string) =>
+      windowOptions(role, windowsPolicy, { ...paths, owner }).webPreferences!.partition;
+    const a = 'account:a0000000-0000-4000-8000-000000000001';
+    const b = 'account:a0000000-0000-4000-8000-000000000002';
+    expect(new Set([partition('main', a), partition('main', b), partition('main', 'local'),
+      partition('main', 'demo'), partition('login', a)]).size).toBe(5);
+    expect(partition('main', a)).toMatch(/^persist:/);
+    expect(partition('interview', a)).toBe(partition('main', a));
+    expect(partition('interview-shortcuts', a)).toBe(partition('main', a));
+    expect(partition('login', b)).toBe(partition('login'));
+    expect(() => partition('main')).toThrow();
+  });
   it('gives shortcut help a sandboxed transparent frameless window on either platform', () => {
     for (const platform of [windowsPolicy, macosPolicy]) {
       expect(windowOptions('interview-shortcuts', platform, paths)).toMatchObject({
@@ -47,6 +61,11 @@ describe('桌面平台边界', () => {
     win.emit('ready-to-show');
     win.webContents.emit('did-finish-load');
     expect(show).toHaveBeenCalledTimes(1);
+  });
+  it('disables Windows frame animations for both fading interview windows', () => {
+    for (const role of ['interview', 'interview-shortcuts'] as const)
+      expect(windowOptions(role, windowsPolicy, paths).thickFrame).toBe(false);
+    expect(windowOptions('main', windowsPolicy, paths).thickFrame).toBeUndefined();
   });
   it('Mac 仍等待原生首帧；已关闭的窗口不再显示', () => {
     const win = Object.assign(new EventEmitter(), {
@@ -109,6 +128,7 @@ describe('桌面平台边界', () => {
   it.each(['login', 'main', 'interview'] as const)('%s 窗口始终使用沙箱和同一 preload', (role) => {
     const options = windowOptions(role, windowsPolicy, paths);
     expect(options.webPreferences).toEqual({
+      partition: role === 'login' ? 'persist:voxcue-login' : profilePartition(paths.owner),
       zoomFactor: 1,
       preload: paths.preload,
       contextIsolation: true,
@@ -117,6 +137,7 @@ describe('桌面平台边界', () => {
       additionalArguments: [
         '--voxcue-presentation=' + JSON.stringify(windowsPolicy.presentation),
         '--voxcue-system-language=zh-CN',
+        '--voxcue-initial-language=zh-CN',
       ],
     });
     expect(options.icon).toBe(paths.icon);
@@ -187,7 +208,6 @@ describe('桌面平台边界', () => {
   it('开发资源分离共享模型与平台运行时，不涉及用户数据路径', () => {
     const windows = windowsPolicy;
     const dev = desktopResources(environment, windows);
-    expect(dev.brandLogo).toBe(path.resolve(environment.appPath, '../shared/public/voxcue.png'));
     expect(dev.screenPermission).toBeUndefined();
     expect(dev.icon).toBe(path.join(environment.appPath, 'public/voxcue.ico'));
     expect(dev.audioHelper).toBe(path.join(environment.appPath, 'native/bin/VoxCue.Audio.exe'));
@@ -204,7 +224,6 @@ describe('桌面平台边界', () => {
     expect(macDev.icon).toBe(path.join(environment.appPath, 'public/voxcue.png'));
     expect(macDev.speechModels).toBe(dev.speechModels);
     const packaged = desktopResources({ ...environment, packaged: true }, windows);
-    expect(packaged.brandLogo).toBe(path.join(environment.appPath, 'dist/voxcue.png'));
     expect(packaged.audioHelper).toBe(
       path.join(environment.resourcesPath, 'native/VoxCue.Audio.exe'),
     );

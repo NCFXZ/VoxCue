@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { AIChatService } from '../backend/chat/ports';
+import { modelId } from '../backend/chat/models';
 import type { InterviewTitleEvent, InterviewTitleRequest } from '../contracts/history';
 
 export function validateTitleRequest(value: unknown): InterviewTitleRequest {
@@ -8,8 +9,7 @@ export function validateTitleRequest(value: unknown): InterviewTitleRequest {
     !v ||
     typeof v.recordId !== 'string' ||
     !/^[\w-]{1,100}$/.test(v.recordId) ||
-    typeof v.modelId !== 'string' ||
-    !/^[\w.:-]{1,160}$/.test(v.modelId) ||
+    !modelId(v.modelId) ||
     !Array.isArray(v.questions) ||
     !v.questions.length ||
     v.questions.length > 24 ||
@@ -43,7 +43,7 @@ export class HistoryTitleJobs {
     const run = async () => {
       if (job.controller.signal.aborted) return;
       try {
-        const models = await this.chat.models(false);
+        const models = await this.chat.models(false, job.controller.signal);
         job.controller.signal.throwIfAborted();
         const model = models.find((m) => m.id === request.modelId);
         if (!model) throw Error('回答模型已不可用，请刷新模型后重试标题生成。');

@@ -383,7 +383,7 @@ fn main() -> anyhow::Result<()> {
         Path::new(&root).join("runtime/silero-vad.gguf")
     };
     emit(
-        json!({"type":"ready","device":selected,"asr_backend":engine.backend(),"alignment_device":alignment_device,"async_alignment":true,"chunk_ms":(chunk*1000.)as u64,"vram_bytes":vram,"load_ms":start.elapsed().as_millis()}),
+        json!({"type":"ready","device":selected,"asr_backend":engine.backend(),"alignment_device":alignment_device,"async_alignment":true,"chunk_ms":(chunk*1000.)as u64,"vad_silence_ms":vad::SILENCE_MS,"vram_bytes":vram,"load_ms":start.elapsed().as_millis()}),
     );
     // Independent recurrent VAD/ASR states for the two existing capture sources;
     // the expensive, immutable model weights are shared by both streams.

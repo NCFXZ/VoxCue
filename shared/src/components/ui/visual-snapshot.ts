@@ -4,6 +4,12 @@ export function prepareVisualSnapshot(nodes: Element[]) {
   const prefix = `visual-exit-${crypto.randomUUID()}-`;
   const resources = new Map<string, string>();
   for (const node of nodes) {
+    // A closing dialog may have been dismissed while its password was revealed.
+    if (node instanceof HTMLInputElement && (node.type === 'password' || node.hasAttribute('data-password-input'))) {
+      node.type = 'password';
+      node.removeAttribute('value');
+      node.value = '';
+    }
     const id = node.getAttribute('id');
     node.removeAttribute('id');
     if (id && node.namespaceURI === 'http://www.w3.org/2000/svg') {

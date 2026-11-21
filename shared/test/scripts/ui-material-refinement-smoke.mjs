@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { cornerShapeNames } from './continuous-corners.mjs';
 import assert from 'node:assert/strict';
@@ -258,7 +259,7 @@ try {
   await library.getByRole('button', { name: '关闭对话框', exact: true }).click();
 
   await page.getByRole('button', { name: '面试记录', exact: true }).click();
-  await page.evaluate(() => {
+  await evaluateHistory(page, async () => {
     const start = Date.now() - 600000;
     const record = {
       id: 'material-history',
@@ -278,8 +279,7 @@ try {
       })),
       answers: [],
     };
-    localStorage.setItem('copilot-interview-history-v1', JSON.stringify([record]));
-    window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+    await fixtureHistory.replace([record]);
   });
   await page.locator('.history-row').waitFor();
   // The page's live controls mount before its view-transition snapshot retires.

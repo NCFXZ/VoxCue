@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -8,6 +8,11 @@ import {
 } from '../../electron/application/credentialMaintenance';
 import type { CredentialCleanup } from '../../electron/contracts/credentialMaintenance';
 import { storedTelemetryProofs } from '../../electron/backend/telemetry/identity';
+import { profileDirectory } from '../../electron/accountProfilePaths';
+import {
+  migrationPasswordFileName,
+  readMigrationPasswordRecords,
+} from '../../electron/backend/cloud/migrationPasswordRecords';
 
 const native = vi.hoisted(() => ({ directory: '' }));
 vi.mock('electron', () => ({ app: { getPath: () => native.directory }, safeStorage: {} }));
@@ -67,6 +72,8 @@ function storedReaders() {
       path.join(native.directory, 'cloud-account/telemetry.bin'),
       crypto,
     ),
+    readMigrationPasswords: (decrypt: (value: Buffer) => Promise<string>) =>
+      readMigrationPasswordRecords(native.directory, decrypt),
     accountOrigin: origin,
     validateTelemetryProofs: async (value: unknown) => {
       storedTelemetryProofs(value, origin, '00000000-0000-4000-8000-000000000001');
@@ -75,7 +82,7 @@ function storedReaders() {
   return { ports, decrypt: crypto.decrypt };
 }
 
-it('classifies only three genuinely missing credential files as empty and still allows successful cleanup', async () => {
+it('classifies an installation with no retained credential records as empty and allows successful cleanup', async () => {
   const { ports, decrypt } = storedReaders();
   const read = () => readCredentialRecords(decrypt, ports);
   expect(await read()).toBe('empty');
@@ -122,6 +129,55 @@ it('continues to report known retained aliases and counts even when no local rec
   const f = fixture(retained);
   expect(await maintainCredentialRecords(f.maintain, async () => 'empty')).toEqual(retained);
   expect(f.cleanup).toHaveBeenCalledOnce();
+});
+
+it('checks every profile migration verifier with the candidate key and retains old keys on a wrong owner, malformed content or inaccessible file', async () => {
+  const { ports, decrypt } = storedReaders();
+  const ids = ['11111111-1111-4111-8111-111111111111', '22222222-2222-4222-8222-222222222222'];
+  const stored = ids.map((id, index) => ({
+    version: 1,
+    id,
+    email: `synthetic-${index}@example.test`,
+    origin: ports.accountOrigin,
+    salt: 'a'.repeat(32),
+    digest: 'b'.repeat(64),
+    failures: 0,
+    retryAt: 0,
+  }));
+  const files = ids.map((id) =>
+    path.join(profileDirectory(native.directory, 'account:' + id), migrationPasswordFileName),
+  );
+  const encode = (object: unknown) => Buffer.from('synthetic:' + JSON.stringify(object));
+  for (const [i, file] of files.entries()) {
+    await mkdir(path.dirname(file), { recursive: true });
+    await writeFile(file, encode(stored[i]));
+  }
+  const candidate = vi.fn(decrypt);
+  expect(await readCredentialRecords(candidate, ports)).toBe('readable');
+  expect(candidate).toHaveBeenCalledTimes(2);
+  for (const invalid of [
+    stored[0],
+    { ...stored[1], digest: 'broken' },
+    { ...stored[1], origin: 'unsafe' },
+    { ...stored[1], id: [ids[1]] },
+  ]) {
+    await writeFile(files[1], encode(invalid));
+    const f = fixture(retained);
+    expect(
+      await maintainCredentialRecords(f.maintain, () => readCredentialRecords(candidate, ports)),
+    ).toBeUndefined();
+    expect(f.cleanup).not.toHaveBeenCalled();
+    expect(await readFile(files[1])).toEqual(encode(invalid));
+  }
+  await writeFile(files[1], encode(stored[1]));
+  expect(
+    await readCredentialRecords(async () => {
+      throw Error('candidate cannot decrypt');
+    }, ports),
+  ).toBe('unavailable');
+  const redirected = path.join(native.directory, 'account-profiles', 'c'.repeat(64));
+  await symlink(path.dirname(files[0]), redirected, 'junction');
+  expect(await readCredentialRecords(candidate, ports)).toBe('unavailable');
 });
 
 it.each(['readable', 'unavailable'] as const)(

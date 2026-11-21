@@ -1,3 +1,4 @@
+import { codexAccess } from '../fixtures/codex-access';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
 import { requestResponse } from '../../../shared/electron/backend/chat/responses';
@@ -5,6 +6,7 @@ import { publicFailure } from '../../../shared/electron/backend/chat/errors';
 import { responseActivity } from '../../../shared/electron/backend/chat/activity';
 import { mergeActivityLog } from '../../../shared/electron/contracts/activity';
 import type { ChatEvent } from '../../../shared/electron/contracts/chat';
+import type { PersonalInfo } from '../../../shared/electron/contracts/profile';
 import type { UsageLedger } from '../../../shared/electron/backend/chat/usage';
 import { reasoningSections } from '../../../shared/src/services/responseProgress';
 
@@ -63,11 +65,11 @@ const request = {
 };
 function service(response: Response, options: { idleTimeoutMs?: number } = {}) {
   return new ChatGPTService({
-    access: async () => ({ account: 'fixture', token: 'fixture-only' }),
+    access: async () => codexAccess('fixture', 'fixture-only'),
     ledger: { add: async () => {} } as unknown as UsageLedger,
     ...options,
     fetch: async (url) =>
-      String(url).endsWith('/models')
+      new URL(String(url)).pathname.endsWith('/models')
         ? Response.json({
             models: [{ slug: request.modelId, display_name: 'Test', visibility: 'list' }],
           })
@@ -78,6 +80,89 @@ const events = (items: unknown[]) =>
   items.map((item) => `data: ${JSON.stringify(item)}\n\n`).join('');
 
 describe('长响应与公开活动', () => {
+  const answer = (items: unknown[], output: unknown[], profile?: PersonalInfo) => {
+    const received: ChatEvent[] = [];
+    const body = events([...items, { type: 'response.completed', response: { output } }]);
+    const result = service(new Response(body)).stream({ ...request, profile }, event => received.push(event), new AbortController().signal);
+    return { result, received };
+  };
+  const message = (...parts: string[]) => ({
+    type: 'message', content: parts.map(text => ({ type: 'output_text', text })),
+  });
+  it('按完成事件补发缺少的后缀和后续内容段，保留拒答', async () => {
+    const { result, received } = answer([
+      { type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: '前' },
+    ], [message('前半段', '后半段'), { type: 'message', content: [{ type: 'refusal', refusal: '拒答' }] }]);
+    expect((await result).answerText).toBe('前半段后半段拒答');
+    expect(received.filter(e => e.type === 'delta').map(e => e.text)).toEqual(['前', '半段', '后半段', '拒答']);
+  });
+  it('相邻内容段的增量均可核对时，按终态顺序补回中间缺失的正文', async () => {
+    const { result } = answer([
+      { type: 'response.output_text.delta', output_index: 1, content_index: 0, delta: '甲' },
+      { type: 'response.output_text.delta', output_index: 1, content_index: 1, delta: '乙' },
+    ], [message('开头'), message('甲一', '乙二')]);
+    expect((await result).answerText).toBe('开头甲一乙二');
+  });
+  it('到终态才识别出的进度段从最终回答中排除', async () => {
+    const items = [{ type: 'response.output_text.delta', output_index: 0, content_index: 0, delta: '分析中' }];
+    const commentary = { ...message('分析中'), phase: 'commentary' };
+    expect((await answer(items, [commentary, message('正式答复')]).result).answerText).toBe('正式答复');
+    await expect(answer(items, [commentary]).result).rejects.toThrow('未收到有效回答');
+  });
+  it('省略位置索引的旧服务按文字前缀补齐，不复制已发正文', async () => {
+    const { result, received } = answer([{ type: 'response.output_text.delta', delta: '零一' }], [message('零', '一二')]);
+    expect((await result).answerText).toBe('零一二');
+    expect(received.filter(e => e.type === 'delta').map(e => e.text)).toEqual(['零一', '二']);
+  });
+  it('终态省略工具项时，仅以同一消息 ID 或唯一的已知工具前缀对齐', async () => {
+    const tool = { type: 'response.output_item.done', output_index: 0, item: { type: 'web_search_call', id: 'search' } };
+    const delta = { type: 'response.output_text.delta', output_index: 1, delta: '正文' };
+    const final = { ...message('正文补齐'), id: 'answer' };
+    expect((await answer([tool, delta], [final]).result).answerText).toBe('正文补齐');
+    const start = { type: 'response.output_item.added', output_index: 4, item: { type: 'message', id: 'answer' } };
+    expect((await answer([start, { ...delta, output_index: 4 }], [
+      { type: 'reasoning', id: 'summary' }, final,
+    ]).result).answerText).toBe('正文补齐');
+    await expect(answer([delta], [final]).result).rejects.toThrow('回答未完整返回');
+    await expect(answer([tool, { ...start, output_index: 1 }, delta], [
+      { ...final, id: 'different' },
+    ]).result).rejects.toThrow('回答未完整返回');
+  });
+  it('多段交错、含重复文字时，按各段的位置及各自的增量匹配终态', async () => {
+    const items = [[0, '重'], [1, '重'], [0, '甲'], [1, '乙']].map(([content_index, delta]) =>
+      ({ type: 'response.output_text.delta', output_index: 0, content_index, delta }));
+    expect((await answer(items, [message('重甲!', '重乙。')]).result).answerText).toBe('重甲!重乙。');
+  });
+  it('完整拒答仅在 item.done 出现，完成事件只有元数据时也能补齐', async () => {
+    const items = [
+      { type: 'response.refusal.delta', output_index: 1, content_index: 0, delta: '不能' },
+      { type: 'response.output_item.done', output_index: 1, item: {
+        type: 'message', id: 'm', content: [{ type: 'refusal', refusal: '不能回答' }],
+      } },
+      { type: 'response.output_item.added', output_index: 1, item: { type: 'message', id: 'm', content: [] } },
+    ];
+    const { result, received } = answer(items, []);
+    expect((await result).answerText).toBe('不能回答');
+    expect(received.filter(e => e.type === 'delta').map(e => e.text)).toEqual(['不能', '回答']);
+  });
+  it('缺少尾部的资料提案用完整 JSON 验证，保留原先支持的仅有字段变更的回复', async () => {
+    const profile = { name: '旧姓名', jobDescription: '', background: '' };
+    const raw = JSON.stringify({ answer: '', changes: { name: '新姓名' } });
+    const { result } = answer([{ type: 'response.output_text.delta', delta: raw.slice(0, 18) }], [message(raw)], profile);
+    expect(await result).toMatchObject({ answerText: '', profileChanges: { name: '新姓名' } });
+  });
+  it('完成事件与已发内容矛盾时返回错误并保留已有内容', async () => {
+    const { result, received } = answer([{ type: 'response.output_text.delta', delta: '旧答' }], [message('新答')]);
+    await expect(result).rejects.toThrow('回答未完整返回');
+    expect(received.filter(e => e.type === 'delta').map(e => e.text)).toEqual(['旧答']);
+  });
+  it.each([
+    [{ type: 'reasoning', summary: [{ type: 'summary_text', text: '摘要' }] }],
+    [message(' \t')],
+    [{ ...message('进度'), phase: 'commentary' }],
+  ])('只有摘要、进度或空白不作为成功回答', async output => {
+    await expect(answer([], [output]).result).rejects.toThrow('未收到有效回答');
+  });
   it('在下段正文前发布已返回的来源，重复注释和最终快照不重发', async () => {
     const first = { url: 'https://docs.example.org/guide', title: '指南' };
     const second = { url: 'https://reference.example.org/', title: '手册' };

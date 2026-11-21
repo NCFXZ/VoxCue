@@ -1,3 +1,4 @@
+import { evaluateHistory } from '../../../shared/test/scripts/stored-history-fixture.mjs';
 import { connectUiAccount } from '../../../shared/test/scripts/install-ui-account.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -7,12 +8,104 @@ import { installUiAccount, closeUiApp } from '../../../shared/test/scripts/insta
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
 
 const selected = process.argv.find((arg) => arg.startsWith('--scale='))?.slice(8);
+const syncOnly = process.argv.includes('--sync-popover');
 const scales = selected ? [selected] : ['1', '1.25', '1.5', '1.75', '2'];
 assert.ok(scales.every((scale) => ['1', '1.25', '1.5', '1.75', '2'].includes(scale)));
 const preview = process.argv.includes('--preview');
 if (preview && !process.stdin.isTTY)
   throw Error('Temporary preview requires an interactive terminal');
 const checks = [];
+async function checkSyncPopover(app, page) {
+  await app.evaluate(({ app }) => {
+    const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { CloudSyncClient } = load('./dist-electron/shared/electron/backend/cloud/sync.js');
+    globalThis.fixtureSyncError = '暂时无法同步这条面试记录，请稍后重试。';
+    CloudSyncClient.prototype.call = async input => {
+      if (input.action === 'list') {
+        const empty = { profile: 0, history: 0, knowledgebase: 0 };
+        return { ok: true, value: { items: [], nextCursor: null, storage: {
+          currentBytes: empty, reservedBytes: empty, storedBytes: empty,
+          capacityBytes: 100000000, knowledgeCapacityBytes: 100000000,
+        } } };
+      }
+      if (input.action === 'create' && input.key === 'record:scrollbar-fixture')
+        return { ok: false, status: 500, error: globalThis.fixtureSyncError };
+      throw Error('Unexpected synthetic sync request: ' + input.action);
+    };
+  });
+  await page.getByRole('button', { name: '用户菜单', exact: true }).click();
+  await page.getByRole('menuitem', { name: '设置', exact: true }).click();
+  const settings = page.getByRole('dialog', { name: '设置', exact: true });
+  await settings.getByRole('button', { name: 'VoxCue 账号', exact: true }).click();
+  await settings.getByRole('switch', { name: '同步面试记录', exact: true }).click();
+  await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
+  const badge = page.locator('.history-row-wrap').getByRole('button', { name: /：同步失败$/ });
+  await badge.waitFor();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const popup = page.locator('.sync-popover:not([data-menu-outro])');
+  const sample = async opening => {
+    await page.evaluate(opening => {
+      window.syncMotionSample = (async () => {
+        const frames = [];
+        let seen = false;
+        const stop = performance.now() + 5000;
+        while (performance.now() < stop) {
+          await new Promise(requestAnimationFrame);
+          const menu = document.querySelector(opening ? '.sync-popover:not([data-menu-outro])' : '.sync-popover[data-menu-outro]');
+          if (!menu) {
+            if (seen && !opening) return frames;
+            continue;
+          }
+          seen = true;
+          const body = menu.querySelector('.sync-popover-body');
+          const box = menu.getBoundingClientRect(), frame = menu.parentElement.getBoundingClientRect();
+          const overflow = body.scrollHeight - body.clientHeight;
+          frames.push({ height: box.height, left: box.left, width: box.width, target: frame.height,
+            overflow, thumb: ['auto', 'scroll'].includes(getComputedStyle(body).overflowY) && overflow > 1 });
+          if (opening && !menu.hasAttribute('data-menu-height-motion')) return frames;
+        }
+        throw Error('Did not observe the real sync popup ' + (opening ? 'opening' : 'closing'));
+      })();
+    }, opening);
+    await badge.press(opening ? 'Enter' : 'Escape');
+    const frames = await page.evaluate(async () => {
+      const frames = await window.syncMotionSample;
+      delete window.syncMotionSample;
+      return frames;
+    });
+    const to = frames.at(-1);
+    const middle = frames.filter(frame => frame.height > 3 && frame.height < frame.target - 2);
+    assert.ok(middle.length > 1, 'Expected intermediate popup heights');
+    assert.ok(frames.every(frame => Math.abs(frame.left - to.left) <= 1 && Math.abs(frame.width - to.width) <= 1),
+      'Sync popup stays anchored horizontally throughout its original animation');
+    return { to, middle, flash: frames.filter(frame => frame.thumb) };
+  };
+  const opened = await sample(true), closed = await sample(false);
+  console.log('Short sync error', { openFramesWithScrollbar: opened.flash.length,
+    closedFramesWithScrollbar: closed.flash.length, settledOverflow: opened.to.overflow,
+    maxOpeningOverflow: Math.max(...opened.middle.map(frame => frame.overflow)) });
+  assert.equal(opened.flash.length + closed.flash.length, 0,
+    'A short history sync failure must never need a scrollbar while the surface opens or closes');
+  await badge.press('Enter');
+  await popup.getByRole('button', { name: '重试同步' }).waitFor();
+  const longMessage = '受限网络暂时不能完成云端同步。'.repeat(400);
+  await app.evaluate((_electron, error) => { globalThis.fixtureSyncError = error; }, longMessage);
+  await popup.getByRole('button', { name: '重试同步' }).click();
+  await popup.getByText(longMessage, { exact: true }).waitFor({ state: 'attached' });
+  await page.keyboard.press('Escape');
+  await page.locator('.sync-popover').waitFor({ state: 'detached' });
+  await sample(true);
+  const long = await popup.locator('.sync-popover-body').evaluate(body => {
+    const rect = body.parentElement.getBoundingClientRect();
+    body.scrollTop = body.scrollHeight;
+    return { top: rect.top, bottom: rect.bottom, viewport: innerHeight, scrolled: body.scrollTop,
+      reachable: body.querySelector('.sync-popover-actions').getBoundingClientRect().bottom <= body.getBoundingClientRect().bottom + 1 };
+  });
+  assert.ok(long.scrolled > 100 && long.reachable && long.top >= 0 && long.bottom <= long.viewport + 1,
+    'A genuinely long error scrolls to its retry button within the viewport: ' + JSON.stringify(long));
+  await page.keyboard.press('Escape');
+  await page.locator('.sync-popover').waitFor({ state: 'detached' });
+}
 for (const scale of scales) {
   const profile = path.join(testRoot, 'profile-' + scale);
   await mkdir(profile);
@@ -31,7 +124,7 @@ for (const scale of scales) {
     if (preview) await login.evaluate(() => localStorage.setItem('copilot-theme', 'dark'));
     const page = await connectUiAccount(app, login);
     await page.getByRole('button', { name: '面试记录', exact: true }).click();
-    await page.evaluate(() => {
+    await evaluateHistory(page, async () => {
       const record = {
         id: 'scrollbar-fixture',
         title: '合成面试记录：滚动条与固定工具栏边界',
@@ -59,9 +152,12 @@ for (const scale of scales) {
           },
         ],
       };
-      localStorage.setItem('copilot-interview-history-v1', JSON.stringify([record]));
-      window.dispatchEvent(new StorageEvent('storage', { key: 'copilot-interview-history-v1' }));
+      await fixtureHistory.replace([record]);
     });
+    if (syncOnly || scale === '1.25') {
+      await checkSyncPopover(app, page);
+      if (syncOnly) continue;
+    }
     await page
       .locator('.history-row')
       .locator('.history-row-open')
@@ -225,7 +321,7 @@ for (const scale of scales) {
           assert.ok(await scroll.evaluate((node) => node.scrollTop > 0));
           const after = await page.locator('.record-detail-toolbar').boundingBox();
           assert.deepEqual(after, toolbar, 'Toolbar stays fixed while transcript scrolls');
-          const exportButton = page.getByRole('button', { name: '导出 TXT', exact: true });
+          const exportButton = page.getByRole('button', { name: '导出转写', exact: true });
           assert.equal(
             await exportButton.evaluate((node) => {
               const rect = node.getBoundingClientRect();
@@ -270,9 +366,10 @@ console.log(
     status: 'passed',
     checks: checks.length,
     scales,
-    nativeThumbPixels: true,
-    fixedHeader: true,
-    exportHit: true,
+    syncPopover: syncOnly || scales.includes('1.25'),
+    nativeThumbPixels: !syncOnly,
+    fixedHeader: !syncOnly,
+    exportHit: !syncOnly,
   }),
 );
 if (preview) {

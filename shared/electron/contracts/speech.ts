@@ -53,6 +53,7 @@ export interface InterviewConfiguration {
   modelId: string;
   effort: ReasoningEffort | 'auto';
   autoAnswer: boolean;
+  autoRecord?: boolean;
   profile?: PersonalInfo;
   knowledgeBaseId?: string | null;
   knowledgeBaseName?: string;
@@ -60,7 +61,7 @@ export interface InterviewConfiguration {
 export type DictationCall =
   | { op: 'start'; microphone?: string }
   | { op: 'stop' | 'status' }
-  | { op: 'test'; id: string; options: SpeechOptions }
+  | { op: 'test' | 'preview'; id: string; options: SpeechOptions }
   | { op: 'test-stop'; id: string };
 export type InterviewScreenshotMode = 'attach' | 'only';
 export interface InterviewScreenshot {
@@ -81,21 +82,31 @@ export type SpeechCall =
 // Only the authenticated main-process interview coordinator can create these.
 export type SpeechServiceCall =
   | Exclude<SpeechCall, { op: 'start' }>
-  | { op: 'start'; options: SpeechOptions; inputState?: InterviewInputState }
+  | { op: 'start'; options: SpeechOptions; inputState?: InterviewInputState; levelsOnly?: boolean }
   | { op: 'set-input-state'; state: InterviewInputState }
   | { op: 'cancel-input-state' }
   | { op: 'switch-recognizer'; options: SpeechOptions }
-  | { op: 'cancel-switch' };
+  | { op: 'control-switch'; id: number; action: 'now' | 'cancel' }
+  | { op: 'cancel-switch' }
+  | { op: 'recording'; directory?: string };
 export interface SpeechStatus {
   state: 'idle' | 'loading' | 'running' | 'paused' | 'error';
   model: string;
   error?: string;
   failureSource?: 'model' | 'service' | AudioSource;
   devices?: AudioDevice[];
+  recording?: boolean;
   speechModel?: SpeechModelId;
   inferenceDevice?: SpeechInferenceDevice;
   chunkMs?: number;
   switching?: 'loading' | 'waiting';
+  switchId?: number;
+  /** Only on the switch request's reply after an explicit cancellation. */
+  switchCancelled?: true;
+  /** One-shot stop reply when the recognizer could not flush the current tail. */
+  transcriptTailIncomplete?: true;
+  /** Recording failed independently of recognition during this interview. */
+  recordingError?: string;
   inputState?: InterviewInputState;
 }
 export interface SpeechSegment {
@@ -113,6 +124,7 @@ export interface SpeechSegment {
   silenceStartMs?: number;
 }
 export type SpeechEvent =
+  | { type: 'recording'; active: boolean; draining?: true; error?: string }
   | { type: 'speech-start'; source: AudioSource }
   | {
       type: 'audio-progress';

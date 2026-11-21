@@ -1,3 +1,4 @@
+import { evaluateHistory } from './stored-history-fixture.mjs';
 import { openModelMenu, openReasoningControl } from './install-ui-account.mjs';
 import { connectUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
@@ -11,7 +12,6 @@ import { captureRequested } from './capture-requested.mjs';
 import {
   verifyContinuousCorners,
   verifyCornerRendering,
-  verifyCallbackCorners,
 } from './continuous-corners.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
@@ -166,18 +166,16 @@ const inspectMath = async (page, selector, name) => {
     );
   console.log('Inspect math: ' + name);
 };
-const inspect = async (page, name) => {
-  await page.waitForFunction(
+const waitForSettledLayout = (page) =>
+  page.waitForFunction(
     () =>
       !document.documentElement.dataset.viewDirection &&
-      document
-        .getAnimations()
-        .every(
-          (animation) =>
-            animation.effect?.getTiming().iterations === Infinity ||
-            animation.playState !== 'running',
-        ),
+      document.getAnimations().every(
+        animation => animation.effect?.getTiming().iterations === Infinity || animation.playState !== 'running',
+      ),
   );
+const inspect = async (page, name) => {
+  await waitForSettledLayout(page);
   const corners = await verifyContinuousCorners(page, name);
   if (name === 'login-light')
     console.log(JSON.stringify({ cornerRendering: await verifyCornerRendering(page, app) }));
@@ -508,7 +506,7 @@ try {
   page.setDefaultTimeout(15000);
   page.on('pageerror', (e) => errors.push(e.message));
   await page.locator('.welcome h1').waitFor();
-  await page.evaluate(() => {
+  await evaluateHistory(page, async () => {
     localStorage.setItem(
       'copilot-personal-info-v1',
       JSON.stringify({
@@ -518,42 +516,39 @@ try {
         customInstructions: '自然口语，先给结论，再说明理由。',
       }),
     );
-    localStorage.setItem(
-      'copilot-interview-history-v1',
-      JSON.stringify([
-        {
-          id: 'type-record',
-          title: '接口设计与输入校验',
-          startedAt: 1000,
-          endedAt: 6000,
-          status: 'ended',
-          mock: false,
-          titleStatus: 'failed',
-          titleError: '标题生成失败，可稍后重试。',
-          transcripts: [
-            {
-              id: 't',
-              source: 'system',
-              text: '你如何校验外部输入？',
-              time: '00:01',
-              startMs: 1000,
-              endMs: 2000,
-              final: true,
-            },
-          ],
-          answers: [
-            {
-              id: 'a',
-              question: '你如何校验外部输入？',
-              content:
-                '我会先明确边界，再校验类型、长度和允许值。\n\n### 实现要点\n\n对不合法的输入返回明确错误。',
-              provider: 'chatgpt',
-              createdAt: 2000,
-            },
-          ],
-        },
-      ]),
-    );
+    await fixtureHistory.replace([
+      {
+        id: 'type-record',
+        title: '接口设计与输入校验',
+        startedAt: 1000,
+        endedAt: 6000,
+        status: 'ended',
+        mock: false,
+        titleStatus: 'failed',
+        titleError: '标题生成失败，可稍后重试。',
+        transcripts: [
+          {
+            id: 't',
+            source: 'system',
+            text: '你如何校验外部输入？',
+            time: '00:01',
+            startMs: 1000,
+            endMs: 2000,
+            final: true,
+          },
+        ],
+        answers: [
+          {
+            id: 'a',
+            question: '你如何校验外部输入？',
+            content:
+              '我会先明确边界，再校验类型、长度和允许值。\n\n### 实现要点\n\n对不合法的输入返回明确错误。',
+            provider: 'chatgpt',
+            createdAt: 2000,
+          },
+        ],
+      },
+    ]);
   });
   await page.reload();
   const info = page.getByRole('button', { name: '个人信息', exact: true });
@@ -736,8 +731,8 @@ try {
     .click({ position: { x: 16, y: 16 } });
   await page.getByRole('button', { name: 'AI 回答面板', exact: true }).click();
   await inspect(page, 'record-answers-narrow-dark');
-  const titleState = await page.evaluate(() => ({
-    records: localStorage.getItem('copilot-interview-history-v1'),
+  const titleState = await evaluateHistory(page, async () => ({
+    records: await fixtureHistory.read(),
     language: localStorage.getItem('voxcue-language-v1'),
   }));
   try {
@@ -747,16 +742,14 @@ try {
       ['en-long', 'en', 'Title generation failed: ' + 'UnbrokenFailureDetail'.repeat(15),
         'Title generation failed: ' + 'UnbrokenFailureDetail'.repeat(15), 'Retry title generation'],
     ]) {
-      await page.evaluate(({ language, error }) => {
-        const key = 'copilot-interview-history-v1';
-        const records = JSON.parse(localStorage.getItem(key));
+      await evaluateHistory(page, async ({ language, error }) => {
+        const records = await fixtureHistory.read();
         const record = records.find((item) => item.id === 'type-record');
         record.titleStatus = 'failed';
         record.titleError = error;
-        localStorage.setItem(key, JSON.stringify(records));
+        await fixtureHistory.replace(records);
         localStorage.setItem('voxcue-language-v1', language);
-        for (const key of ['copilot-interview-history-v1', 'voxcue-language-v1'])
-          window.dispatchEvent(new StorageEvent('storage', { key }));
+        window.dispatchEvent(new StorageEvent('storage', { key: 'voxcue-language-v1' }));
       }, { language, error });
       const status = page.locator('.record-title-status');
       await status.getByRole('button', { name: retry, exact: true }).waitFor();
@@ -767,6 +760,8 @@ try {
         document.querySelector('.record-panel-toggle > span')?.textContent === expected &&
         document.querySelector('.record-facts')?.textContent.endsWith(expected), answerCount);
       await page.evaluate(() => document.fonts.ready);
+      // Replacing a short error with wrapped text animates the clipping container's height.
+      await waitForSettledLayout(page);
       const geometry = await status.evaluate((node) => {
         const scroll = node.closest('.record-transcript-scroll');
         const viewport = scroll.getBoundingClientRect();
@@ -779,33 +774,32 @@ try {
         range.selectNodeContents(label);
         const lines = [...range.getClientRects()].filter((rect) => rect.width > 0);
         const bounds = [label.getBoundingClientRect(), button.getBoundingClientRect(), ...lines];
+        const coveredBy = [...lines, button.getBoundingClientRect()].flatMap((rect) => {
+          const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+          return node.contains(hit) ? [] : [hit ? hit.tagName + '.' + hit.className : 'outside viewport'];
+        });
         return {
           contained: bounds.every((rect) => rect.left >= viewport.left - 1 &&
             rect.right <= right + 1 && rect.top >= viewport.top - 1 &&
             rect.bottom <= viewport.bottom + 1),
-          unobscured: [...lines, button.getBoundingClientRect()].every((rect) => {
-            const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
-            return node.contains(hit);
-          }),
+          coveredBy,
           statusOverflow: node.scrollWidth > node.clientWidth + 1,
           transcriptOverflow: scroll.scrollWidth > scroll.clientWidth + 1,
         };
       });
       assert.deepEqual(geometry, {
-        contained: true, unobscured: true, statusOverflow: false, transcriptOverflow: false,
+        contained: true, coveredBy: [], statusOverflow: false, transcriptOverflow: false,
       }, `record-title-status-${name}: full error text and retry button stay inside the unobscured transcript column`);
       await captureRequested(page, `record-title-status-${name}-narrow-dark`);
       checks.push({ name: `record-title-status-${name}`, geometry });
     }
   } finally {
-    await page.evaluate(({ records, language }) => {
-      for (const [key, value] of [
-        ['copilot-interview-history-v1', records], ['voxcue-language-v1', language],
-      ]) {
-        if (value === null) localStorage.removeItem(key);
-        else localStorage.setItem(key, value);
-        window.dispatchEvent(new StorageEvent('storage', { key }));
-      }
+    await evaluateHistory(page, async ({ records, language }) => {
+      await fixtureHistory.replace(records);
+      const key = 'voxcue-language-v1';
+      if (language === null) localStorage.removeItem(key);
+      else localStorage.setItem(key, language);
+      window.dispatchEvent(new StorageEvent('storage', { key }));
     }, titleState);
     await page.getByRole('button', { name: '重试生成标题', exact: true }).waitFor();
   }
@@ -862,12 +856,10 @@ try {
     floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
   ]);
   assert.deepEqual(errors, []);
-  const callbacks = await verifyCallbackCorners(app);
   await console.log(
     JSON.stringify(
       {
         checks: checks.map(({ name, geometry, corners }) => ({ name, geometry, corners })),
-        callbacks,
         errors,
         scope: 'Isolated synthetic account/audio/AI; actual Electron UI and computed typography',
       },
@@ -876,7 +868,7 @@ try {
     ),
   );
   console.log(
-    JSON.stringify({ directory, states: checks.length, callbacks: callbacks.length, errors }),
+    JSON.stringify({ directory, states: checks.length, errors }),
   );
 } catch (error) {
   console.error('Owned UI diagnostic', {

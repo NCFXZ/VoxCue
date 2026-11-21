@@ -2,7 +2,7 @@
 
 Mac 正式包动态测试必须使用 `macos/test/scripts/package-guest-smoke.mjs`（`pnpm test:package`），固定工具、镜像、显式输入、SIP／Gatekeeper 和收尾门禁见 [Mac guest 准备](../../macos/docs/TEST_GUEST.md)。Owner 仅可运行 `package-smoke.mjs --static-only` 的零产品启动静态检查，退出 2 表示动态覆盖待执行。旧 `package-temporary-smoke.mjs`、AEC `--packaged` 和产品 `--online` 调试探针已退役；下文历史命令不覆盖此边界。功能、五档缩放与 Qwen 开发态入口保持串行 GUI／原生／推理规则，最终 ASAR 覆盖另外在 guest 执行。
 
-当前范围见根 `PROGRESS.md`，Windows 1.2.3 范围见[实施与发行说明](../docs/WINDOWS_1.2.3_RELEASE.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考；不修改既有服务端或运行后端测试。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
+当前范围见根 `PROGRESS.md`，Windows 1.2.3 范围见[实施与发行说明](../docs/WINDOWS_1.2.3_RELEASE.md)。客户端集成须以 `VOXCUE_TEST_SERVER_ROOT` 指向干净的服务端 0.5.3／`3bceb615dbba900f669322c301fc4b5b473dfb15` 参考。另以同一变量指定 0.6.1 参考，在 Windows 目录运行 `node ../shared/test/scripts/account-erasure-receipt-smoke.mjs`，覆盖来源账号无会话验密及注销回执。两套参考均使用临时合成资料与回环服务。UI 矩阵导出截图须位于 `os.tmpdir()` 内的自有目录，普通回归不导出图片。
 
 宿主 Node 须符合固定服务端参考的 `>=24.19.0 <25` 要求；本轮固定使用 Node 24.22.1，与固定 Electron 44.10.0 内的 Node 版本一致，避免旧宿主 `TextDecoder` 的 Windows-1252 解码差异。此要求仅用于开发和测试环境，不改变应用依赖或解码策略。
 
@@ -22,8 +22,8 @@ Mac 凭据超时专项须区分“应用请求超时／助手退出／同启动�
 
 测试 owner 只允许已知开发宿主与 owned entry，或严格校验的 inert 安装夹具；正式包不编入产品测试标志。Windows `pnpm test:package` 先构建当前源码，再由 `store-package-smoke.mjs` 在自有临时目录打包并验收，使用独立 Windows Sandbox 账号、空 guest vault、禁网及无宿主 profile 映射。真实生产 renderer 通过 CDP／公开 preload 验证包身份和合成资料重载；同版本开发宿主另在 guest 加载最终 ASAR 验证实际 SDK、Paraformer／知识库子进程与移动资源闭包，不执行产品 main 或登录真实服务。两个 guest 检查助手均在连接／加载前核对身份和临时归属。普通开发 UI 夹具仍禁止正式凭据助手；旧 owner 正式包夹具及不可用参数已退役，不得恢复 fuses、修改包字节或加入正式包测试环境覆盖。现有格式的持久化／重载不代称历史二进制逐版本升级验收。
 
-最终 NSIS 通过 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 验收全新安装。`--nsis-upgrade` 从正式 1.2.2 升级，`--nsis-upgrade-1.2.0` 和 `--nsis-upgrade-1.1.1` 保留历史升级入口。各入口串行运行，每次启动独立禁网 Sandbox。升级前按发行记录核对旧包 SHA256。1.2.2 路径在空的来宾资料中写入当前版本的正式签名更新元数据，验证已安装的旧客户端报告可更新，升级并重启后验证当前客户端已是最新版本。旧版 renderer 写入合成资料并正常退出后，由 NSIS 沿原注册路径升级。升级和重启后核对原件字节、个人资料、职位描述、记录、主题、语言和快捷键。每阶段须自然关闭并确认所有包内子进程退出。当前安装包以固定 Ed25519 公钥及 SHA512 验证，安装后核对最终 ASAR 和许可证。APPX 的独立 Sandbox 检查加载包内原生子进程。
-使用 `--appx-upgrade` 在同一禁网 Sandbox 账户上从商店包 2.2.2.0 原地更新，核对同一包族的 LocalCache、原件、资料、快捷键和 RAG 索引在升级与冷启动后保留。来宾以同一临时证书签署两份副本，微软商店签发和线上分发由商店验证。
+最终 NSIS 通过 `node test/scripts/store-sandbox-smoke.mjs --nsis-current` 验收全新安装。`--nsis-upgrade` 从正式 1.2.3 升级，`--nsis-upgrade-1.2.2`、`--nsis-upgrade-1.2.0` 和 `--nsis-upgrade-1.1.1` 保留历史升级入口。各入口串行运行，每次启动独立禁网 Sandbox。升级前按发行记录核对旧包 SHA256。1.2.3 和 1.2.2 路径在空的来宾资料中写入当前版本的正式签名更新元数据，验证已安装的旧客户端报告可更新，升级并重启后验证当前客户端已是最新版本。旧版 renderer 写入合成资料并正常退出后，由 NSIS 沿原注册路径升级。升级和重启后核对原件字节、个人资料、职位描述、记录、主题、语言和快捷键。每阶段须自然关闭并确认所有包内子进程退出。当前安装包以固定 Ed25519 公钥及 SHA512 验证，安装后核对最终 ASAR 和许可证。APPX 的独立 Sandbox 检查加载包内原生子进程。
+使用 `--appx-upgrade` 在同一禁网 Sandbox 账户上从正式 1.2.3 的商店包 2.2.3.0 原地更新（对照 2.2.2.0 时使用 `--appx-upgrade-1.2.2`），核对同一包族的 LocalCache、原件、资料、快捷键和 RAG 索引在升级与冷启动后保留。来宾以同一临时证书签署两份副本，微软商店签发和线上分发由商店验证。
 
 Windows 默认原生矩阵的 `screenshot-performance` 使用合成 4K 位图。最终 APPX 的 `pnpm test:store:sandbox` 使用已安装的 `VoxCue.Screenshot.exe` 在独立 guest 内采集自有全屏色块，验证三帧颜色、取消及受保护浮窗，并用包内 Worker 检查连续编码、失败恢复与退出。显式开发态入口为 `node ../shared/test/scripts/screenshot-performance.mjs --native --platform`。临时安全产物检查使用 `node test/scripts/security-package-smoke.mjs`，加 `--with-screenshot-worker` 可验证打包后的截图 Worker 原生依赖。签名备份恢复演练只用临时合成身份，真实离线加密备份仍由 owner 本机完成。安装目录完全缺失时可按默认注册路径修复，原生未引用的 `/D=同缺失路径` 受 Builder early `SetOutPath` 限制仍拒绝，细节见上述安全文档。
 
@@ -100,6 +100,8 @@ Mac 全量验证还需在 `macos/` 串行执行以下独立专项；默认功能
 
 技能选择保留原生复选框语义、键盘操作、原尺寸和圆角，框内勾选与取消均有绘入/退回过渡，半选横线沿用相同双向反馈。`profile-selection-smoke.mjs` 检查选中、取消和半选的真实中间帧及减少动态效果，不以最终静态样式代替动画检查。
 
+面试录音验证在当前平台目录运行 `pnpm test interview-recording speech-input-state speech-host`。解锁后运行 `node ../shared/test/scripts/recording-smoke.mjs`，覆盖合成音频、工具栏分段启停、历史回放、转写跟随和本地 WAV 导出。
+
 主页面、设置分类及面试记录列表/详情共用 `ui/switchView.ts` 和 `page-motion.css`。浏览器 View Transition 快照承载淡出/淡入，记录详情前进向左、返回向右；不挂载旧页面的交互副本，准备页继续保留挂载，侧栏保持静止。过渡舞台与快照组保留页面底色和边界，快速切换及减少动态效果沿统一入口处理。`history-branding-smoke.mjs` 检查页面与记录前进/返回的中间帧、侧栏边界及减少动态效果；设置分类行为与布局由 `settings-smoke.mjs` 和 `typography-smoke.mjs` 复核。
 
 主侧栏的主导航与聊天记录共用同一根选中竖条：有条标签之间以共享非线性缓动滑动，进入无条状态时淡出，从无条状态进入有条标签时淡入。主导航与设置分类标签在普通/粗体视觉层间交叉淡化，保留一份真实标签及原有键盘语义，视觉层不参与可访问性。展开侧栏统一为 230px，跨 1100px 窗口宽度时保持不变，收起保持 68px。`ui-alignment-smoke.mjs`、`settings-smoke.mjs` 和 `typography-smoke.mjs` 定向复核侧栏宽度、标签、选中状态及减少动态效果。
@@ -114,7 +116,7 @@ Mac 全量验证还需在 `macos/` 串行执行以下独立专项；默认功能
 
 提案阅读弹层 `proposal-reader` 核对顶部关闭按钮与左侧标题距外框均为 24px。关闭按钮右侧内距按 24px 减去实测滚动条槽宽补偿，保留顶部材质对滚动条的避让。
 
-活动面试与设置分类共用横向设置行，音频、回答模型/档位、语音模型/设备及显示滑块均为左名称、右控件，控件列同宽，窄窗允许标签自然换行。语音切换的加载/等待状态与“语音识别”分组标题并排，保留原文及 `role=status`，长英文可换行；CPU 警告保留原有 alert。`ui-alignment-smoke.mjs`、`typography-smoke.mjs`、Windows `interview-effort-smoke.mjs` 和 `interview-ux-smoke.mjs` 复核七行列宽/中心、长模型名、列表滚动、状态位置及保存交互。
+活动面试与设置分类共用横向设置行，音频、回答模型/档位、语音模型/设备及显示滑块均为左名称、右控件，控件列同宽，窄窗允许标签自然换行。语音切换的加载/等待状态位于推理设备下方，与切换按钮垂直居中，保留 `role=status`，长文可换行，两种按钮状态同宽；CPU 警告保留原有 alert。`ui-alignment-smoke.mjs`、`typography-smoke.mjs`、Windows `interview-effort-smoke.mjs` 和 `interview-ux-smoke.mjs` 复核七行列宽/中心、长模型名、列表滚动、状态位置及保存交互。
 
 活动面试保存模型/档位时保留组合弹层与滑块焦点，以独立保存状态阻止重复提交，失败回滚；不会因短暂保存而关闭。Windows `interview-effort-smoke.mjs` 覆盖延迟保存、保存中键盘/指针操作、失败、Escape 和外部点击。云备份全局同步状态及警告与“立即同步”“刷新容量”同一行垂直居中，文字左侧自然折行；条目冲突保留各自操作。`cloud-account-smoke.mjs` 在固定服务端参考与合成账户下核对警告同行的实际几何，不访问真实账户。
 
@@ -157,6 +159,8 @@ Mac接续另运行`macos/test/scripts/telemetry-queue-native-smoke.mjs`验证POS
 本平台目录运行`node ../shared/test/scripts/local-mode-smoke.mjs`：隔离合成账户/AI/存储端口，验证登录/跳过同尺寸、未登录云权限隔离、本机选择与草稿重启保留、返回登录、独立AI、真实临时三目录ZIP及取消、设置内精简本地账户信息/登录按钮、打开初始登录窗口再完成账号登录、取消导出无提示、同步/导出/注销顺序和容量摘要右对齐。Mac入口自行检查解锁控制台，GUI串行，临时产物退出清理；不以合成端口宣称真实账号或硬件验收。`local-mode.test.ts`验证原子持久化、损坏/失败和并发切换，desktop-ipc/contract验证新公开通道。
 
 `account-erasure-smoke.mjs`沿用原隔离固定服务端参考；导出在账号设置独立操作，删除弹窗仅保留删除保护。旧版文字/模态框布局按对应历史版本理解。
+
+`node ../shared/test/scripts/account-transfer-smoke.mjs` 使用固定服务端参考和同机两个合成账号，覆盖本地免密迁移、按账号关闭提醒、设置项定位和来源密码验证。它检查勾选变化后的分类标记、按分类确认替换、已选原件的本机清理，以及取消或提交失败后来源资料仍可用。迁移后，在目标账号回放录音、打开知识库，并在来源账号同步新记录，核对已迁出记录的云端版本。另一个全新设备目录验证迁移列表不包含其他设备的账户。
 
 # 当前0.6.2验证入口（最新用户范围）
 
@@ -441,7 +445,7 @@ Mac的`qwen-native-smoke.mjs <临时已认证组件>`使用原BF16 ASR、Q8_0或
 
 语音包边界单测增加 NaN/正负无穷采样拒绝，阻止损坏数据进入重采样与识别。浮窗专项检查实际置顶状态及原生同步事件不会递归调用置顶；Windows 展示端口另覆盖丢失层级后的缓存重置和正常置顶时不做多余重置。20 轮面试及四次重载仍检查窗口退出、主窗口恢复和预热后的内存增长。
 
-界面矩阵沿用“通用”名称、统一 8px 控件圆角及按音频静音累计1800ms、800ms分段计入其中的提交规则。ui-alignment 同时检查个人信息标签距标题分割线至少 16px、模型/思考强度同组，以及长名称、窄聊天列下发送按钮对齐；五档 DPI 复用相同检查。ChoiceMenu 按最近的原生 dialog 计算避让边界，组件界面专项将带 CPU 提示的模型控件滚到弹窗底边，检查菜单翻转后四边仍保留 8px 间距。组件原生专项使用完整有效的面试配置验证缺模型阻止开场，并以组件 ID 定位分组后的下载项，保留实际下载认证、取消、进程退出和独占句柄检查。
+界面矩阵沿用“通用”名称、统一 8px 控件圆角及按音频静音累计1000ms、500ms分段计入其中的提交规则。ui-alignment 同时检查个人信息标签距标题分割线至少 16px、模型/思考强度同组，以及长名称、窄聊天列下发送按钮对齐；五档 DPI 复用相同检查。ChoiceMenu 按最近的原生 dialog 计算避让边界，组件界面专项将带 CPU 提示的模型控件滚到弹窗底边，检查菜单翻转后四边仍保留 8px 间距。组件原生专项使用完整有效的面试配置验证缺模型阻止开场，并以组件 ID 定位分组后的下载项，保留实际下载认证、取消、进程退出和独占句柄检查。
 
 `windows/test/scripts/qwen-native-smoke.py <component> --device cpu --wave <固定合成 WAV>` 也执行真实 CPU 识别，检查中间稿、静音终稿和退出；省略 WAV 的 CPU 模式只覆盖加载及静音。CUDA 模式可用 `--require-crop` 检查四句裁剪，终端仅输出处理音频时长、最大窗口、裁剪次数等摘要。输入及 CUDA 缓存只放自有系统临时目录，结束清理，不采样物理设备。
 
@@ -454,10 +458,6 @@ interview-ux检查设置在常规0/50/100及浅深色下均不透明、无背景
 ## 分层面试预览与图标比例（2026-10-19）
 
 interview-ux-smoke检查24px/18px侧栏品牌、常规尺寸且随文字缩放的公共图标、开场说明位于操作分割线上方且无前往面试设置按钮。浮窗设置无完成/应用按钮；透明backdrop外围像素不变，面板在常规0–100及浅深色下保持不透明、向下阴影生效、dialog存在时原生穿透为false，首次点击面试区域仅关闭而不误触结束。预览与实际面试在相同滑块位置使用相同背景/阅读层，独立面试偏好沿用旧版60/30曲线。开场双音源测试和设置页无麦克风测试仍覆盖。interview-typography覆盖12–24字号与0–100效果位置、浅深色/窄屏、预览输入框及即时保存；Mac icons检查实际alpha边界/图文比例，typography检查36px控件及窄窗口。仅临时合成账户/资料/音频端口与离线响应，不采样硬件或保存测试结果；用户要求的合成截图可指定输出目录交付。
-
-## 授权回调页面（2026-10-19）
-
-auth既有loopback合成登录测试检查收到/无效/重复回调的HTML与HTTP状态、固定内嵌Logo、CSP/no-store/no-referrer/nosniff，以及页面无脚本、外部请求、授权参数或令牌；收到回调不显示未经验证的登录成功。platform检查开发共用PNG与安装版dist路径，避免Windows原生ICO误用于网页。真实账户、浏览器官方授权、原登录密文与系统钥匙串不参与；必要视觉检查使用独立临时浏览器profile和合成页面，只截取页面内存，不保存截图或报告。
 
 ## Mac 固定本地签名（2026-10-19）
 
@@ -525,7 +525,7 @@ Windows 0.3.1 沿用完整离线单测、typecheck/build/check:architecture/chec
 
 ui-refinement 还检查五类分区快速切换反转、编辑 Escape/焦点返回/保存失败保留草稿与重试、分隔栏方向键/Home/上下限/取消及失焦/窄窗口、长弹窗内部滚动及圆角轨道内缩。加 `--preview-dialog` 仅向终端输出内存图片，供工具直接显示，不写图片文件。Windows `node test/scripts/windows-suite.mjs --dpi` 包含 ui-refinement，可在其后指定专项名。settings、knowledge、chat-response、delete-controls、ui-ux、updates-sidebar 的桌面宿主同样在应用导入前阻断网络，资料折叠与编辑弹窗断言沿用当前实现。
 
-`typography-smoke.mjs` 通过 `continuous-corners.mjs` 检查每个实际页面的可见圆角、菜单及选中伪元素，并核对文本输入的I形及其他区域的默认箭头光标；已展开菜单核对与其aria-labelledby关联触发框的四角半径和曲线一致；授权返回页覆盖四种状态、宽窄布局和浅深色。切换圆弧基线时核对半径、尺寸及阴影数值不变，圆形和胶囊Switch分别保留各自轮廓。内存像素比较覆盖多档半径的连续角/圆弧差异、子内容裁切、外阴影及圆形控件；使用同图色块作颜色基准以兼容显示色彩配置。该检查核对四次超椭圆G3目标样式的原生渲染，不宣称Chromium的贝塞尔近似路径严格满足G3。可用既有VOXCUE_TEST_SCALE_FACTOR=1/1.25/1.5/1.75/2逐进程串行复核，不改系统缩放；图片只在内存、结果不落盘。`ui-ux-smoke.mjs --preview-latest`仅在终端展示输入区渐隐、圆形箭头和输出三点的内存图片。
+`typography-smoke.mjs` 通过 `continuous-corners.mjs` 检查每个实际页面的可见圆角、菜单及选中伪元素，并核对文本输入的I形及其他区域的默认箭头光标；已展开菜单核对与其aria-labelledby关联触发框的四角半径和曲线一致。切换圆弧基线时核对半径、尺寸及阴影数值不变，圆形和胶囊Switch分别保留各自轮廓。内存像素比较覆盖多档半径的连续角/圆弧差异、子内容裁切、外阴影及圆形控件；使用同图色块作颜色基准以兼容显示色彩配置。该检查核对四次超椭圆G3目标样式的原生渲染，不宣称Chromium的贝塞尔近似路径严格满足G3。可用既有VOXCUE_TEST_SCALE_FACTOR=1/1.25/1.5/1.75/2逐进程串行复核，不改系统缩放；图片只在内存、结果不落盘。`ui-ux-smoke.mjs --preview-latest`仅在终端展示输入区渐隐、圆形箭头和输出三点的内存图片。
 
 ui-alignment 的聊天工具栏矩阵覆盖主窗口与个人信息的多组宽度、浅深色、长模型名、最多两行的控件排布，以及模型/思考同组、语音/发送对齐、32px尺寸和菜单操作；网络搜索仅在“＋”菜单勾选，外侧无独立按钮，重新打开菜单保留状态。加 `--preview-composer` 只输出内存图片。Windows 可用 `node test/scripts/windows-suite.mjs --dpi ui-alignment` 串行检查五档缩放，不改系统设置。
 
@@ -616,7 +616,7 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 
 ## 源码与边界
 
-共用面试体验入口为`node ../shared/test/scripts/interview-ux-smoke.mjs`：隔离合成账户、组件下载替身、音频端口及模型响应，覆盖原组件提示、资料标记、权限行内分路10秒自检/仅电平事件、静音800ms收尾、音频静音累计1800ms自动回答（包含800ms分段）、延迟终稿与音频积压/重新开口保护、原地音频恢复、音频/模型即时设置及回答中变更后仅影响下一题、独立显示滑块及浅深色/较小浮窗。`interview-typography-smoke.mjs`覆盖字号/背景滑块边界、键盘、存储失败、重载/重启与跨窗口同步、文字图标缩放及原生100%缩放；`updates-sidebar-smoke.mjs`检查靠左更新图标及下载/安装交互。默认不保存截图；只有用户要求交付时传`--screenshots=<明确交付目录>`，其余临时文件退出删除。共享单测覆盖后台测试期限/令牌、资源独占、音频重连竞争、模型/effort验证、知识库名前缀与手动标题保护，以及preload契约。Mac测试不代表Windows原生已验收。
+共用面试体验入口为`node ../shared/test/scripts/interview-ux-smoke.mjs`：隔离合成账户、组件下载替身、音频端口及模型响应，覆盖原组件提示、资料标记、设备权限预检与手动复查、静音500ms收尾、音频静音累计1000ms自动回答（包含500ms分段）、延迟终稿与音频积压/重新开口保护、原地音频恢复、音频/模型即时设置及回答中变更后仅影响下一题、独立显示滑块及浅深色/较小浮窗。`interview-typography-smoke.mjs`覆盖字号/背景滑块边界、键盘、存储失败、重载/重启与跨窗口同步、文字图标缩放及原生100%缩放；`updates-sidebar-smoke.mjs`检查靠左更新图标及下载/安装交互。默认不保存截图；只有用户要求交付时传`--screenshots=<明确交付目录>`，其余临时文件退出删除。共享单测覆盖后台测试期限/令牌、资源独占、音频重连竞争、模型/effort验证、知识库名前缀与手动标题保护，以及preload契约。Mac测试不代表Windows原生已验收。
 
 设备自动枚举单测`audio-devices.test.ts`覆盖打开/焦点/设备通知/可见性/定时、并发合并、错误恢复及卸载后的迟到结果。`interview-ux-smoke.mjs`追加主/浮窗设备自动更新、无刷新按钮、白色滑块与两端图标、透明度预览、无电平尾部状态及固定底部说明，按用户要求可交付0/75透明度对照截图。`interview-typography-smoke.mjs`沿用键盘/范围/跨窗口/存储失败与窄窗口验证，并检查预览透明度随偏好改变。
 
@@ -624,7 +624,7 @@ ui-alignment 与 typography 使用独立合成账户/模型/语音状态，检�
 
 ## 识别器后台切换与设置排版（2026-10-20）
 
-speech-switch/speech-progress/speech-host/speech-session/speech-store覆盖后台加载期间持续处理、双路空闲交接、300ms PCM及时间戳边界、候选预热事件隔离、失败/超时保留旧配置、暂停/结束取消、迟到保护、原问题和1800ms截止点、回答模型独立更新。desktop-ipc限定浮窗组件status只读。interview-ux覆盖切换中回答设置仍可编辑、失败回退、原回答快照，以及960/620/440宽度的浅深色横向标签/控件和窄屏单列；截图可仅内存预览，结果不落盘。
+speech-switch/speech-progress/speech-host/speech-session/speech-store覆盖后台加载期间持续处理、双路空闲交接、300ms PCM及时间戳边界、候选预热事件隔离、失败/超时保留旧配置、暂停/结束取消、迟到保护、原问题和1000ms截止点、回答模型独立更新。desktop-ipc限定浮窗组件status只读。interview-ux覆盖切换中回答设置仍可编辑、失败回退、原回答快照，以及960/620/440宽度的浅深色横向标签/控件和窄屏单列；截图可仅内存预览，结果不落盘。
 
 Mac `node test/scripts/speech-switch-smoke.mjs --download`在自有临时目录通过生产ComponentService下载/认证固定公开Paraformer、原始Qwen ASR与当前Q8_0 Aligner，使用44.1kHz合成音频、实际AEC/utilityProcess/两层Worker/原生识别器验证模型与Metal/CPU交接和释放。不是硬件采集或真人质量测试，不读真实账户/模型缓存；临时文件退出清理。Windows专属夹具及本机原生验收仍留待Windows接续。
 

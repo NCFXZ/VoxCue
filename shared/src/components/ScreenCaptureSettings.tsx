@@ -1,3 +1,4 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type {
@@ -111,11 +112,13 @@ export function ScreenCaptureSettings({ disabled }: { disabled: boolean }) {
           </div>
         )}
       </div>
-      {(error || permission?.status === 'error' || permission?.status === 'unknown') && (
-        <p role="alert" className="danger-text">
-          {t(error || permission?.message)}
-        </p>
-      )}
+      <InterviewReveal resizeKey={error || permission?.message || ''}>
+        {(error || permission?.status === 'error' || permission?.status === 'unknown') ? (
+          <p role="alert" className="danger-text">
+            {t(error || permission?.message)}
+          </p>
+        ) : null}
+      </InterviewReveal>
     </section>
   );
 }

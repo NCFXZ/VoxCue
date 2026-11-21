@@ -5,6 +5,9 @@ const current = vi.hoisted(() => ({
   inputMode: 'remote' as 'remote' | 'transcription',
   muted: false,
   changing: false,
+  requesting: false,
+  loadingQwen: false,
+  switching: undefined as 'loading' | 'waiting' | undefined,
 }));
 vi.mock('../../src/stores/interview', () => {
   const state = () => ({
@@ -16,21 +19,22 @@ vi.mock('../../src/stores/interview', () => {
       sources: ['microphone', 'system'],
       microphone: 'saved-mic',
       system: 'saved-output',
-      speechModel: 'paraformer',
+      speechModel: current.loadingQwen ? 'qwen' : 'paraformer',
       inferenceDevice: 'cpu',
     },
     modelId: '',
     effort: 'auto',
     reconnecting: false,
     updatingModel: false,
-    switchingSpeech: false,
-    speech: { state: 'running', model: 'Synthetic' },
+    switchingSpeech: current.requesting || !!current.switching,
+    speech: { state: current.loadingQwen ? 'loading' : 'running', model: 'Synthetic',
+      switching: current.switching, switchId: current.switching ? 7 : undefined },
     status: 'running',
     speechSwitchError: null,
     setInputMode: vi.fn(async () => true),
     toggleMicrophone: vi.fn(async () => true),
   });
-  return { useInterview: Object.assign(() => state(), { getState: state }) };
+  return { useInterview: Object.assign((select: (s: ReturnType<typeof state>) => unknown) => select(state()), { getState: state }), useInterviewPanelState: state };
 });
 vi.mock('../../src/components/useAudioDevices', () => ({
   useAudioDevices: () => ({
@@ -44,15 +48,50 @@ vi.mock('../../src/components/useAudioDevices', () => ({
 }));
 vi.mock('../../src/stores/components', () => ({ useComponentReady: () => true }));
 import { InterviewSettingsPanel } from '../../src/components/InterviewSettingsPanel';
+import { InterviewAudioRecovery } from '../../src/components/InterviewAudioRecovery';
 beforeEach(() => {
   current.inputMode = 'remote';
   current.muted = false;
   current.changing = false;
+  current.requesting = false;
+  current.loadingQwen = false;
+  current.switching = undefined;
   useGeneralSettings.setState({ language: 'zh-CN' });
   vi.stubGlobal('window', { desktop: { platform: 'windows' } });
 });
 afterEach(() => vi.unstubAllGlobals());
 const render = () => renderToStaticMarkup(<InterviewSettingsPanel onClose={() => {}} />);
+it('renders both actions with the loading message before the worker acknowledges the request', () => {
+  current.requesting = true;
+  for (const html of [render(), renderToStaticMarkup(<InterviewAudioRecovery onSettings={() => {}} />)]) {
+    expect(html).toContain('原配置继续转写');
+    expect(html).toContain('ui-loader');
+    expect(html).toContain('取消切换');
+  }
+});
+it.each(['loading', 'waiting'] as const)('设置与面试提示都显示当前阶段可用的切换操作 (%s)', phase => {
+  current.switching = phase;
+  const notice = renderToStaticMarkup(<InterviewAudioRecovery onSettings={() => {}} />);
+  expect(notice).toContain('aria-label="关闭提示"');
+  for (const html of [render(), notice]) {
+    const buttons = html.match(/<button\b[^>]*>[\s\S]*?<\/button>/g) ?? [];
+    const now = buttons.find(button => button.includes(phase === 'loading' ? '加载中' : '立即切换'));
+    const cancel = buttons.find(button => button.includes('取消切换'));
+    expect(now).toContain('<svg');
+    expect(cancel).toContain('<svg');
+    expect(now?.includes('disabled=""')).toBe(phase === 'loading');
+    expect(now?.includes('ui-loader')).toBe(phase === 'loading');
+    expect(cancel).not.toContain('disabled=""');
+  }
+});
+it('allows the model picker during the initial Qwen load while capture devices stay locked', () => {
+  current.loadingQwen = true;
+  const buttons = render().match(/<button\b[^>]*>/g) ?? [];
+  const model = buttons.find(button => button.includes('aria-label="语音识别模型"'));
+  expect(model).toBeDefined();
+  expect(model).not.toContain('disabled=');
+  expect(buttons.find(button => button.includes('aria-label="选择麦克风"'))).toContain('disabled=');
+});
 it('keeps the same mode control at runtime and displays soft-muted remote microphone state', () => {
   current.muted = true;
   const html = render();

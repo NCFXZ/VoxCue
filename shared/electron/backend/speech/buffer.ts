@@ -9,14 +9,22 @@ export class SampleBuffer {
   push(samples: Float32Array) {
     if (this.length + samples.length > this.capacity)
       throw Error('音频缓存已满；请停止并降低识别负载。');
-    for (let i = 0; i < samples.length; i++)
-      this.data[(this.head + this.length + i) % this.capacity] = samples[i];
+    const tail = (this.head + this.length) % this.capacity;
+    if (tail + samples.length <= this.capacity) this.data.set(samples, tail);
+    else {
+      const first = this.capacity - tail;
+      this.data.set(samples.subarray(0, first), tail);
+      this.data.set(samples.subarray(first));
+    }
     this.length += samples.length;
   }
-  take(count: number) {
+  take(count: number, paddedLength = count) {
     if (count > this.length) throw Error('Insufficient samples');
-    const result = new Float32Array(count);
-    for (let i = 0; i < count; i++) result[i] = this.data[(this.head + i) % this.capacity];
+    if (paddedLength < count) throw RangeError('Frame is too small');
+    const result = new Float32Array(paddedLength);
+    const first = Math.min(count, this.capacity - this.head);
+    result.set(this.data.subarray(this.head, this.head + first));
+    if (first < count) result.set(this.data.subarray(0, count - first), first);
     this.head = (this.head + count) % this.capacity;
     this.length -= count;
     return result;

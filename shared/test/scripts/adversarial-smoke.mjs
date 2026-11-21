@@ -1,5 +1,6 @@
 import { connectUiAccount } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
+import { readStoredChatFixture } from './stored-chat-fixture.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
@@ -59,25 +60,9 @@ try {
     .getByText('Synthetic saved partial', { exact: true })
     .waitFor();
   // Wait for the real IndexedDB commit, not an arbitrary sleep.
-  await waitForAsync(page, async () => {
-    const db = await new Promise((resolve) => {
-      const r = indexedDB.open('voxcue-preparation-chats', 1);
-      r.onsuccess = () => resolve(r.result);
-    });
-    try {
-      const r = db.transaction('state').objectStore('state').get('current');
-      return await new Promise(
-        (resolve) =>
-          (r.onsuccess = () =>
-            resolve(
-              r.result?.conversations.some((c) =>
-                c.messages.some((m) => m.content === 'Synthetic saved partial'),
-              ),
-            )),
-      );
-    } finally {
-      db.close();
-    }
+  await waitForAsync(page, readStoredChatFixture, undefined, {
+    matches: saved => saved?.conversations.some(c =>
+      c.messages.some(m => m.content === 'Synthetic saved partial')),
   });
   await page.reload();
   await ready();

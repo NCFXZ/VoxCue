@@ -6,6 +6,23 @@ import { useGeneralSettings } from '../../src/stores/generalSettings';
 import { ChatSources } from '../../src/components/ChatSources';
 beforeEach(() => useGeneralSettings.setState({ language: 'zh-CN' }));
 describe('Markdown 回答', () => {
+  it('生成中的光标落在最终可见行内，复制及静态正文保持原样', () => {
+    const caret = '<span class="typing-caret" aria-hidden="true"></span>';
+    const cases = [
+      ['第一段\n\n第二段  \n末行', `末行${caret}</p>`],
+      ['> 1. **末字**', `末字${caret}</strong>`],
+      ['[外链](https://example.org)', `外链</a>${caret}</p>`],
+      ['|甲|乙|\n|---|---|\n|丙|丁|', `丁${caret}</td>`],
+      ['```ts\nconst n = 1;\n```', `const n = 1;${caret}\n</code>`],
+    ];
+    for (const [content, tail] of cases) {
+      const live = renderToStaticMarkup(<MarkdownContent content={content} showCaret />);
+      const ordinary = renderToStaticMarkup(<MarkdownContent content={content} streaming />);
+      expect(live.split(caret)).toHaveLength(2);
+      expect(live).toContain(tail);
+      expect(live.replace(caret, '')).toBe(ordinary);
+    }
+  });
   it('只把已知来源的同域标签渲染为紧凑来源胶囊，去掉相邻显示括号', () => {
     const source = { title: 'CUDA Programming Guide', url: 'https://docs.nvidia.com/cuda/' };
     const content = '说明（[docs.nvidia.com](https://docs.nvidia.com/cuda/)）。';

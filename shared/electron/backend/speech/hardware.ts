@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import path from 'node:path';
 import type { SpeechHardware, SpeechOptions } from '../../contracts/speech';
-import { cudaUnavailableMessage, speechSelection } from '../../contracts/speechSettings';
+import { cudaUnavailableMessage, speechSelection, unsupportedSpeechCpu } from '../../contracts/speechSettings';
 
 /** Driver/device inventory only: no model download, audio permission or capture. */
 export class SpeechHardwareProbe {
@@ -122,8 +122,8 @@ export class SpeechHardwareProbe {
         : await this.read();
       if (!hardware.qwenCpu)
         throw Error(hardware.qwenCpuReason === 'unsupported-cpu'
-          ? 'Qwen 需要支持 AVX2 和 FMA 的处理器，请改用 Paraformer。'
-          : '无法确认 Qwen 所需的处理器指令集，请改用 Paraformer。');
+          ? unsupportedSpeechCpu
+          : '无法确认多语言语音识别所需的处理器指令集，请改用轻量语音识别。');
     }
     if (selected.inferenceDevice === 'cpu') return;
     hardware ??= await this.read();

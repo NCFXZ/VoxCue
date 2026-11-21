@@ -1,8 +1,8 @@
-import { app, safeStorage } from 'electron';
+import { app } from 'electron';
 import { mkdir, readFile, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicFile, preserveEncryptedFile } from '../atomicFile';
-import { decryptElectronCredential, type CredentialEncryption } from '../auth/storage';
+import { systemCredentialEncryption, type CredentialEncryption } from '../auth/storage';
 import type { CloudVault } from './client';
 
 const invalidCredentials = () =>
@@ -20,18 +20,7 @@ export function createCredentialVault<T>(
   encryption?: CredentialEncryption,
   limit = 16384,
 ) {
-  const crypto = encryption ?? {
-    async encrypt(value: string) {
-      if (!safeStorage.isEncryptionAvailable())
-        throw Error('System credential encryption unavailable');
-      return safeStorage.encryptString(value);
-    },
-    async decrypt(value: Buffer) {
-      if (!safeStorage.isEncryptionAvailable())
-        throw Error('System credential encryption unavailable');
-      return decryptElectronCredential(value);
-    },
-  };
+  const crypto = encryption ?? systemCredentialEncryption;
   return {
     async read(decrypt: (value: Buffer) => string | Promise<string> = crypto.decrypt) {
       let bytes: Buffer;

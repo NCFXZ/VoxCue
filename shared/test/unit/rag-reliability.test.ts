@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { Hash } from 'node:crypto';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import path from 'node:path';
 import { temporaryDirectory } from '../temp';
@@ -45,6 +46,7 @@ function fixture() {
     updateDocument: vi.fn(),
     invalidateDocument: vi.fn(),
     removeDocument: vi.fn(),
+    removeBase: vi.fn(),
     listDocuments: vi.fn(async () => []),
     close: vi.fn(),
     version: vi.fn(async () => version),
@@ -84,6 +86,27 @@ function fixture() {
 }
 const signal = () => new AbortController().signal;
 describe('Local RAG reliability', () => {
+  it('hashes attachment bytes only for versioned retries, and detects changed bytes', async () => {
+    const f = fixture();
+    const bytes = new Uint8Array([1, 2]);
+    const input = { ...request, turns: [{ ...request.turns[0], files: [{ name: 'sample.png', bytes }] }] };
+    const update = vi.spyOn(Hash.prototype, 'update');
+    const scope = f.rag.beginRequest();
+    try {
+      await f.rag.stream(input, vi.fn(), signal());
+      expect(update.mock.calls.some(([data]) => data === bytes)).toBe(false);
+      await scope.stream(input, vi.fn(), signal());
+      expect(update.mock.calls.some(([data]) => data === bytes)).toBe(true);
+      await scope.stream(input, vi.fn(), signal());
+      expect(f.knowledge.search).toHaveBeenCalledTimes(2);
+      bytes[0]++;
+      await scope.stream(input, vi.fn(), signal());
+      expect(f.knowledge.search).toHaveBeenCalledTimes(3);
+    } finally {
+      update.mockRestore();
+      scope.dispose();
+    }
+  });
   it.each([undefined, null])(
     'missing base %s skips every knowledge and model access',
     async (base) => {
@@ -191,11 +214,13 @@ describe('Local RAG reliability', () => {
         }),
     );
     const pending = coordinator.call(call);
-    expect(() => coordinator.assertInterviewReady('base')).toThrow('索引');
-    expect(() => coordinator.assertInterviewReady(null)).not.toThrow();
+    await expect(coordinator.assertInterviewReady('base')).rejects.toThrow('索引');
+    vi.mocked(f.knowledge.listDocuments).mockResolvedValue([{ baseId: 'base', available: true } as never]);
+    await expect(coordinator.assertInterviewReady('base')).resolves.toBeUndefined();
+    await expect(coordinator.assertInterviewReady(null)).resolves.toBeUndefined();
     finish();
     await pending;
-    expect(() => coordinator.assertInterviewReady('base')).not.toThrow();
+    await expect(coordinator.assertInterviewReady('base')).resolves.toBeUndefined();
   });
 });
 describe('bounded classified generation retries', () => {

@@ -1,6 +1,9 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { interviewAlwaysDark } from '../interviewAppearance';
-import { InterviewImages } from './InterviewImages';
+import { FloatingAnswer } from './FloatingAnswer';
+import { FloatingTranscripts } from './FloatingTranscripts';
+import type { Answer } from '../services/contracts';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from 'react';
 import { flushSync } from 'react-dom';
 import type { InterviewCanvasLayout } from '../../electron/contracts/desktop';
@@ -9,31 +12,28 @@ import {
   ChevronDown,
   ShieldCheck,
   ShieldOff,
+  PrivateWindow,
+  VisibleWindow,
   Square,
   Expand,
   MessageSquare,
   Volume2,
   DragGrip,
-  Copy,
-  Check,
   Screenshot,
   Loader,
   X,
-  Refresh,
   AudioLines,
   Sparkles,
   Settings,
   Keyboard,
 } from './icons';
 import { Button } from './ui/button';
-import { useInterview } from '../stores/interview';
+import { appendedAnswer, useInterview, useInterviewPanelState } from '../stores/interview';
 import { useComponents } from '../stores/components';
 import { useHistory } from '../stores/history';
 import { AppLogo } from './AppLogo';
 import { useFollowScroll } from './useFollowScroll';
 import { FollowLatestButton } from './FollowLatestButton';
-import { MarkdownContent } from './MarkdownContent';
-import { ResponseProgress } from './ResponseProgress';
 import { InterviewAudioRecovery } from './InterviewAudioRecovery';
 import {
   RemoteConnectionDialogs,
@@ -41,13 +41,14 @@ import {
   RemoteConnectionRecovery,
 } from './RemoteConnection';
 import { InterviewSettingsPanel } from './InterviewSettingsPanel';
+import type { SettingsTarget } from './ui/useSettingsTarget';
 import { InterviewReadiness } from './InterviewReadiness';
+import { RecordingWave } from './RecordingWave';
 import { InterviewChromeBase } from './InterviewChromeBase';
 import { interviewLayout } from '../../electron/contracts/interviewLayout';
-import { ProviderIdentity } from './ProviderIdentity';
-import { InterviewAnswerFailure, InterviewAnswerStatus } from './InterviewAnswerStatus';
 import { providerInfo } from '../services/providers';
 import { useInterviewWindowDrag } from './useInterviewWindowDrag';
+import { playSentMessageEnter } from '../lib/messageMotion';
 import { useInterviewPanelMotion } from './useInterviewPanelMotion';
 import { useInterviewRendererReady } from './useInterviewRendererReady';
 import { useInterviewFontSize } from '../interviewTypography';
@@ -59,7 +60,7 @@ import { accountUsageSummary, isAccountUsageLow } from '../services/accountUsage
 export function FloatingInterview() {
   useEffect(() => useComponents.getState().connect(), []);
   const fontSize = useInterviewFontSize();
-  const state = useInterview();
+  const state = useInterviewPanelState();
   const connection = useChatConnection();
   const usageEnabled = state.aiEnabled && state.status !== 'ended';
   const lowUsage = usageEnabled && !connection.loadingUsage && isAccountUsageLow(connection.usage);
@@ -100,6 +101,7 @@ export function FloatingInterview() {
   const noticeError =
     error || saveError || (state.error !== failedAnswer?.error ? state.error : null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTargets, setSettingsTargets] = useState<SettingsTarget[]>();
   const settingsChanging = useRef(false);
   const settingsCanvasRequested = useRef(false);
   const remoteCanvasRequested = useRef(false);
@@ -107,6 +109,7 @@ export function FloatingInterview() {
   const settingsCanvasQueue = useRef<Promise<void>>(Promise.resolve());
   const windowDrag = useInterviewWindowDrag(() => setError('无法移动面试窗口。'));
   const [showTranscript, setShowTranscript] = useState(true);
+  const [noticeContainer, setNoticeContainer] = useState<HTMLDivElement | null>(null);
   const [collapsed, setCollapsed] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [shortcutsBusy, setShortcutsBusy] = useState(false);
@@ -121,9 +124,36 @@ export function FloatingInterview() {
   const [ending, setEnding] = useState(false);
   const [copied, setCopied] = useState<string | null>(null);
   const [copyError, setCopyError] = useState<string | null>(null);
+  const copyAnswer = useCallback(async (answer: Answer) => {
+    try {
+      await navigator.clipboard.writeText(answer.content);
+      setCopied(answer.id);
+      setCopyError(null);
+    } catch {
+      setCopyError(answer.id);
+    }
+  }, []);
   const [resizing, setResizing] = useState(false);
   const transcriptScroll = useFollowScroll(state.transcripts);
   const answerScroll = useFollowScroll(state.answers);
+  const sentQuestions = useRef(new Set<string>());
+  useLayoutEffect(() => {
+    const sent = sentQuestions.current;
+    sent.clear();
+    if (!windowReady || collapsed) return;
+    return useInterview.subscribe((next, before) => {
+      if (next.sessionId !== before.sessionId) sent.clear();
+      const row = appendedAnswer(before, next);
+      if (row?.status === 'streaming' && !document.hidden) sent.add(row.id);
+    });
+  }, [windowReady, collapsed]);
+  useLayoutEffect(() => {
+    const sent = sentQuestions.current;
+    for (const id of sent) {
+      playSentMessageEnter(answerScroll.scrollProps.ref.current?.querySelector<HTMLElement>(`[data-question-id="${CSS.escape(id)}"]`));
+    }
+    sent.clear();
+  }, [state.answers, answerScroll.scrollProps.ref]);
   const resizeReady = useRef<Promise<void>>(Promise.resolve());
   const resizeFrame = useRef(0);
   const resizeMove = useRef<Promise<void>>(Promise.resolve());
@@ -241,7 +271,7 @@ export function FloatingInterview() {
     const desktop = window.desktop;
     if (!desktop?.presentation?.interviewMousePassthrough) return;
     const surfaces =
-      '.floating-toolbar, .floating-panel, .floating-resize, .floating-notices > div, dialog[open]';
+      '.floating-toolbar, .floating-panel, .floating-resize, .floating-notice, dialog[open]';
     let disposed = false;
     let ignored: boolean | undefined;
     let pointer: { x: number; y: number; buttons: number } | undefined;
@@ -421,9 +451,9 @@ export function FloatingInterview() {
     const archive = () => {
       const current = useInterview.getState();
       if (current.sessionId && current.status !== 'ended') {
-        // beforeunload cannot await IPC. Save the received text synchronously;
-        // explicit End still awaits the native tail flush before saving.
-        if (current.mode === 'local') current.archive('interrupted');
+        // Start the draft transaction in this callback while the document can
+        // still submit writes. Explicit End also waits for the native audio tail.
+        if (current.mode === 'local') void current.archive('interrupted', false, true);
         void current.end();
       }
     };
@@ -474,7 +504,7 @@ export function FloatingInterview() {
       throw error;
     }
   }, []);
-  async function changeSettings(open: boolean) {
+  async function changeSettings(open: boolean, target?: SettingsTarget) {
     if (
       settingsChanging.current ||
       panelMotion.busy.current ||
@@ -494,7 +524,10 @@ export function FloatingInterview() {
       }
       settingsCanvasRequested.current = open;
       await syncSettingsCanvas();
-      if (open) setSettingsOpen(true);
+      if (open) {
+        setSettingsTargets(target ? [target] : undefined);
+        setSettingsOpen(true);
+      }
     } catch {
       settingsCanvasRequested.current = previous;
       if (!open) setSettingsOpen(true);
@@ -507,8 +540,7 @@ export function FloatingInterview() {
     if (ending) return;
     setEnding(true);
     try {
-      await state.end();
-      if (!useHistory.getState().error) window.desktop?.confirmInterviewEnd();
+      if (await state.end()) window.desktop?.confirmInterviewEnd();
     } finally {
       setEnding(false);
     }
@@ -658,7 +690,16 @@ export function FloatingInterview() {
                 void toggleCapture();
               }}
             >
-              {protectedWindow ? <ShieldCheck size={18} /> : <ShieldOff size={18} />}
+              {window.desktop?.platform === 'windows' ? (
+                protectedWindow ? <PrivateWindow size={20} /> : <VisibleWindow size={20} />
+              ) : protectedWindow ? <ShieldCheck size={18} /> : <ShieldOff size={18} />}
+            </Button>
+            <Button variant="ghost" size="icon" className="floating-record"
+              aria-label={state.recording ? t('停止录音') : t('开始录音')}
+              aria-pressed={state.recording}
+              disabled={state.recordingBusy || state.mode !== 'local' || state.speech.state !== 'running' || ending}
+              onClick={() => void state.setRecording(!state.recording)}>
+              <RecordingWave active={state.recording} />
             </Button>
             <Button
               className={`floating-end ${confirmEnd ? 'is-confirming' : ''}`}
@@ -703,10 +744,7 @@ export function FloatingInterview() {
               </div>
               <InterviewReadiness device={<RemoteConnectionIndicator />} />
             </header>
-            <div className="floating-audio-recovery">
-              <InterviewAudioRecovery onSettings={() => void changeSettings(true)} />
-              <RemoteConnectionRecovery onSettings={() => void changeSettings(true)} />
-            </div>
+            <div className="floating-audio-recovery" ref={showTranscript ? setNoticeContainer : undefined} />
             <div
               className="floating-scroll"
               {...transcriptScroll.scrollProps}
@@ -732,32 +770,7 @@ export function FloatingInterview() {
                   )}
                 </div>
               )}
-              {state.transcripts.map((transcript) => (
-                <article
-                  className={`transcript-item ${transcript.source === 'microphone' && state.inputMode !== 'transcription' ? 'interviewee' : 'interviewer'}`}
-                  key={transcript.id}
-                >
-                  <div className="transcript-meta">
-                    <strong>
-                      {transcript.source
-                        ? transcript.source === 'system'
-                          ? t('面试官')
-                          : t(state.inputMode === 'transcription' ? '麦克风' : '面试者')
-                        : t('面试官')}
-                    </strong>
-                    <time>{transcript.time}</time>
-                  </div>
-                  <p>
-                    {transcript.text}
-                    {!transcript.final && state.status === 'running' && (
-                      <span className="typing-caret" />
-                    )}
-                  </p>
-                  {transcript.reason === 'discontinuity' && (
-                    <small className="transcript-gap">{t('音频间断，片段可能不完整')}</small>
-                  )}
-                </article>
-              ))}
+              <FloatingTranscripts transcripts={state.transcripts} inputMode={state.inputMode} running={state.status === 'running'} />
             </div>
             {!transcriptScroll.following && (
               <FollowLatestButton
@@ -800,14 +813,7 @@ export function FloatingInterview() {
                 </Button>
               </div>
             </header>
-            <div className="floating-audio-recovery">
-              {!showTranscript && (
-                <>
-                  <InterviewAudioRecovery onSettings={() => void changeSettings(true)} />
-                  <RemoteConnectionRecovery onSettings={() => void changeSettings(true)} />
-                </>
-              )}
-            </div>
+            <div className="floating-audio-recovery" ref={showTranscript ? undefined : setNoticeContainer} />
             <div
               className="floating-scroll"
               {...answerScroll.scrollProps}
@@ -830,102 +836,18 @@ export function FloatingInterview() {
                   </span>
                 </div>
               )}
-              {state.answers.map((a) => (
-                <article
-                  key={a.id}
-                  className="floating-answer-item"
-                  aria-label={t(`回答：${a.question}`)}
-                >
-                  <div
-                    className={`floating-question${a.images?.length ? ' has-images' : ''}`}
-                    aria-label={t('面试问题')}
-                  >
-                    {a.screenshot !== 'only' && <span>{a.question}</span>}
-                    <InterviewImages images={a.images} inInterview />
-                    {a.screenshot && (
-                      <span className="floating-screenshot-label">
-                        <Screenshot size={14} />
-                        {a.screenshot === 'only' ? t('截图提问') : t('附截图')}
-                      </span>
-                    )}
-                  </div>
-                  <div className="floating-answer-meta">
-                    <div className="interview-answer-identity">
-                      <span className="provider-identity">
-                        <ProviderIdentity provider={a.provider ?? 'unknown'} />
-                      </span>
-                      <InterviewAnswerStatus answer={a} />
-                    </div>
-                    {a.content && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t('复制面试回答')}
-                        onClick={async () => {
-                          try {
-                            await navigator.clipboard.writeText(a.content);
-                            setCopied(a.id);
-                            setCopyError(null);
-                          } catch {
-                            setCopyError(a.id);
-                          }
-                        }}
-                      >
-                        {copied === a.id ? <Check size={14} /> : <Copy size={14} />}
-                      </Button>
-                    )}
-                  </div>
-                  <ResponseProgress
-                    message={{
-                      content: a.content,
-                      status: a.status ?? 'completed',
-                      mode: a.provider === 'mock' ? 'mock' : 'live',
-                      activity: a.activity,
-                      reasoningSummary: a.reasoningSummary,
-                      startedAt: a.createdAt,
-                    }}
-                  />
-                  {(a.content || (!a.retry && a.status !== 'failed' && a.status !== 'stopped')) && (
-                    <div className="answer-text answer-bubble">
-                      {a.content ? (
-                        <MarkdownContent content={a.content} />
-                      ) : state.generating && a.id === state.answers.at(-1)?.id ? (
-                        <span className="answer-pending">{t('正在生成回答…')}</span>
-                      ) : (
-                        t('未收到回答。')
-                      )}
-                      {state.generating && a.id === state.answers.at(-1)?.id && (
-                        <span className="typing-caret" />
-                      )}
-                    </div>
-                  )}
-                  {a.status === 'failed' && (
-                    <InterviewAnswerFailure
-                      answer={a}
-                      disabled={state.generating}
-                      live={a.id === failedAnswer?.id}
-                      onRetry={() => void state.retryAnswer(a.id)}
-                    />
-                  )}
-                  {a.status === 'stopped' && (
-                    <div className="floating-answer-actions">
-                      <Button
-                        variant="outline"
-                        className="interview-answer-retry"
-                        disabled={state.generating}
-                        onClick={() => void state.retryAnswer(a.id)}
-                      >
-                        <Refresh size={16} />
-                        {t('重试面试回答')}
-                      </Button>
-                    </div>
-                  )}
-                  {(copied === a.id || copyError === a.id) && (
-                    <small role="status">
-                      {copyError === a.id ? t('复制失败，请选择文字后复制。') : t('已复制回答')}
-                    </small>
-                  )}
-                </article>
+              {state.answers.map((answer) => (
+                <FloatingAnswer
+                  key={answer.id}
+                  answer={answer}
+                  copied={copied === answer.id}
+                  copyError={copyError === answer.id}
+                  pending={state.generating && answer.id === state.answers.at(-1)?.id}
+                  retryDisabled={state.generating && (answer.status === 'failed' || answer.status === 'stopped')}
+                  latestFailure={answer.id === failedAnswer?.id}
+                  onCopy={copyAnswer}
+                  onRetry={state.retryAnswer}
+                />
               ))}
             </div>
             <FollowLatestButton
@@ -1097,30 +1019,39 @@ export function FloatingInterview() {
         )}
         {!collapsed && (
           <footer className="floating-notices" aria-label={t('面试状态提示')}>
-            {lowUsage && (
-              <div className="floating-warning floating-usage-notice" role="status">
+            <InterviewReveal>{lowUsage ? (
+              <div className="floating-notice floating-warning floating-usage-notice" role="status">
                 {accountUsageSummary(connection.usage)}
               </div>
-            )}
-            {!collapsed && !protectedWindow && (
-              <div className="floating-warning floating-capture-notice" role="status">
+            ) : null}</InterviewReveal>
+            <InterviewReveal>{!protectedWindow ? (
+              <div className="floating-notice floating-warning floating-capture-notice" role="status">
                 {t('此窗口未隐藏')}
               </div>
-            )}
-            {noticeError && (
-              <div className="floating-error" role="alert">
+            ) : null}</InterviewReveal>
+            <InterviewReveal resizeKey={t(noticeError)}>{noticeError ? (
+              <div className="floating-notice floating-error" role="alert">
                 {t(noticeError)}
               </div>
-            )}
-            {Object.entries(state.speechWarnings).map(([source, message]) => (
-              <div key={source} className="floating-warning" role="status">
-                {t(message)}
-              </div>
+            ) : null}</InterviewReveal>
+            {(['microphone', 'system'] as const).map(source => (
+              <InterviewReveal key={source} resizeKey={t(state.speechWarnings[source])}>{state.speechWarnings[source] ? (
+                <div className="floating-notice floating-warning" role="status">
+                  {t(state.speechWarnings[source])}
+                </div>
+              ) : null}</InterviewReveal>
             ))}
           </footer>
         )}
       </div>
-      {settingsOpen && <InterviewSettingsPanel onClose={() => void changeSettings(false)} />}
+      <InterviewAudioRecovery container={noticeContainer} onSettings={() => {
+        const source = state.speech.failureSource;
+        const target = source === 'model' ? 'speech-model'
+          : source === 'microphone' || source === 'system' ? source : 'audio-devices';
+        void changeSettings(true, target);
+      }} />
+      <RemoteConnectionRecovery container={noticeContainer} onSettings={() => void changeSettings(true, 'remote-connection')} />
+      {settingsOpen && <InterviewSettingsPanel targets={settingsTargets} onClose={() => void changeSettings(false)} />}
       <RemoteConnectionDialogs onVisibilityChange={changeRemoteCanvas} />
     </div>
   );

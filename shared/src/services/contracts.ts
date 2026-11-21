@@ -25,6 +25,7 @@ export interface Answer {
   status?: 'streaming' | 'completed' | 'stopped' | 'failed';
   error?: string;
   sourceTranscriptIds?: string[];
+  questionSource?: import('../../electron/contracts/speech').AudioSource;
   createdAt?: number;
   reasoningSummary?: string;
   activity?: import('../../electron/contracts/chat').ChatActivity;

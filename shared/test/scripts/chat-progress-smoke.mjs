@@ -1,6 +1,8 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { checkProgressMotion } from './check-progress-motion.mjs';
+import { waitForAsync } from './wait-for-async.mjs';
+import { readStoredChatFixture } from './stored-chat-fixture.mjs';
+import { checkAnswerDivider, checkFirstStatusPosition, checkHiddenDivider, checkProgressMotion } from './check-progress-motion.mjs';
 
 import { mkdir, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
@@ -56,9 +58,16 @@ try {
     globalThis.progressRequests = [];
     const attempts = new Map();
     const native = new ChatGPTService({
-      access: async () => ({ account: 'synthetic', token: 'synthetic-only' }),
+      access: async () => ({ kind: 'codex', runtimeVersion: '1.2.3', chatgptAccountId: 'fixture', account: 'synthetic', token: 'synthetic-only' }),
       ledger: new UsageLedger(require('node:path').join(app.getPath('userData'), 'fixture-usage')),
-      fetch: async (_url, init) => {
+      fetch: async (url, init) => {
+        if (new URL(url).pathname.endsWith('/models'))
+          return Response.json({
+            models: [{
+              slug: 'test-model', display_name: 'Test Model', visibility: 'list',
+              supported_reasoning_levels: ['low', 'high'], web_search_tool_type: 'text',
+            }],
+          });
         const body = JSON.parse(init.body);
         const prompt = body.input.at(-1).content;
         attempts.set(prompt, (attempts.get(prompt) ?? 0) + 1);
@@ -173,6 +182,12 @@ try {
           new ReadableStream({
             start(controller) {
               globalThis.progressController = controller;
+              const split = text.indexOf(answer) + 2;
+              globalThis.startAnswer = () => {
+                controller.enqueue(encode({ type: 'response.output_item.added', output_index: 4,
+                  item: { ...terminal.output.at(-1), content: [] } }));
+                controller.enqueue(encode({ type: 'response.output_text.delta', output_index: 4, delta: text.slice(0, split) }));
+              };
               globalThis.finishProgress = () => {
                 terminal.output.unshift({
                   id: 'reason',
@@ -186,14 +201,7 @@ try {
                   summary: [{ type: 'summary_text', text: '**核对资料**\n\n整理公开来源。' }],
                 });
                 controller.enqueue(
-                  encode({
-                    type: 'response.output_item.added',
-                    output_index: 4,
-                    item: { ...terminal.output.at(-1), content: [] },
-                  }),
-                );
-                controller.enqueue(
-                  encode({ type: 'response.output_text.delta', output_index: 4, delta: text }),
+                  encode({ type: 'response.output_text.delta', output_index: 4, delta: text.slice(split) }),
                 );
                 controller.enqueue(encode({ type: 'response.completed', response: terminal }));
                 controller.close();
@@ -268,7 +276,12 @@ try {
                   delta: '**核对资料**\n\n整理公开来源。',
                 },
               ];
-              for (const event of publicEvents) controller.enqueue(encode(event));
+              const publish = events => events.forEach(event => controller.enqueue(encode(event)));
+              if (prompt === '进度测试') {
+                globalThis.startWaiting = () => publish(publicEvents.slice(0, 1));
+                globalThis.startProcessing = () => publish(publicEvents.slice(1, 2));
+                globalThis.continueProgress = () => publish(publicEvents.slice(2));
+              } else publish(publicEvents);
             },
           }),
           { headers: { 'content-type': 'text/event-stream' } },
@@ -482,33 +495,15 @@ try {
   // Profile localStorage is synchronous; the conversation is a separate async
   // IndexedDB transaction. Verify its committed proposal before a hard reload
   // bypasses the application's normal close/save handshake.
-  await page.waitForFunction(
-    async (contents) => {
-      const db = await new Promise((resolve, reject) => {
-        const request = indexedDB.open('voxcue-preparation-chats', 1);
-        request.onsuccess = () => resolve(request.result);
-        request.onerror = () => reject(request.error);
-      });
-      try {
-        const saved = await new Promise((resolve, reject) => {
-          const tx = db.transaction('state', 'readonly');
-          const request = tx.objectStore('state').get('current');
-          tx.oncomplete = () => resolve(request.result);
-          tx.onerror = tx.onabort = () => reject(tx.error);
-        });
-        const conversation = saved?.conversations.find((c) => c.id === saved.activeConversation);
-        const message = conversation?.messages.filter((m) => m.role === 'assistant').at(-1);
-        return (
-          message?.applied === true &&
-          JSON.stringify(message.changes?.skills?.map((skill) => skill.content)) ===
-            JSON.stringify(contents)
-        );
-      } finally {
-        db.close();
-      }
+  await waitForAsync(page, readStoredChatFixture, undefined, {
+    matches: saved => {
+      const conversation = saved?.conversations.find(c => c.id === saved.activeConversation);
+      const message = conversation?.messages.filter(m => m.role === 'assistant').at(-1);
+      return message?.applied === true &&
+        JSON.stringify(message.changes?.skills?.map(skill => skill.content)) ===
+        JSON.stringify(unverifiedSaved.skills.map(skill => skill.content));
     },
-    unverifiedSaved.skills.map((skill) => skill.content),
-  );
+  });
   await page.reload();
   await latest().getByText('已保存所选资料', { exact: true }).waitFor();
   assert.equal(await latest().locator('.proposal-warning').count(), 0);
@@ -540,6 +535,11 @@ try {
   await latest()
     .getByText(/^正在思考 /)
     .waitFor();
+  await waitForAsync(app, () => typeof globalThis.startProcessing === 'function');
+  await checkFirstStatusPosition(latest(),
+    () => app.evaluate(() => globalThis.startProcessing()),
+    () => app.evaluate(() => globalThis.startWaiting()));
+  await app.evaluate(() => globalThis.continueProgress());
   const firstTitle = latest().locator('.reasoning-section summary').filter({ hasText: '梳理问题' });
   const currentTitle = latest()
     .locator('.reasoning-section summary')
@@ -660,7 +660,6 @@ try {
     .locator('.response-progress')
     .evaluate((root) => ({
       first: root.firstElementChild.className,
-      border: getComputedStyle(root).borderBottomWidth,
       durationBorder: getComputedStyle(root.firstElementChild).borderBottomWidth,
       rows: [...root.querySelectorAll('.response-steps > li')].map((node) => ({
         kind: node.dataset.kind,
@@ -670,7 +669,7 @@ try {
       durationInSummary: !!root.querySelector('summary .response-duration'),
     }));
   assert.equal(layout.first, 'response-duration');
-  assert.ok(parseFloat(layout.border) > 0 && parseFloat(layout.border) <= 1);
+  await checkHiddenDivider(latest().locator('.response-progress'));
   assert.equal(layout.durationInSummary, false);
   assert.equal(parseFloat(layout.durationBorder), 0);
   const firstIndex = layout.rows.findIndex((row) => row.text.includes('梳理问题'));
@@ -725,8 +724,11 @@ try {
   await page.evaluate(() => {
     Date.now = () => window.progressEpoch + 333000;
   });
+  const divider = latest().locator('.response-progress');
+  await checkAnswerDivider(divider, () => app.evaluate(() => globalThis.startAnswer()));
   await app.evaluate(() => globalThis.finishProgress());
   await latest().getByText('用时 5 分钟 33 秒', { exact: true }).waitFor();
+  assert.equal(await divider.evaluate(node => getComputedStyle(node, '::after').opacity), '1');
   assert.equal(await latest().locator('.duration-toggle').getAttribute('aria-expanded'), 'false');
   await latest().locator('.response-progress-content').waitFor({ state: 'hidden' });
   await checkProgressMotion(page, latest().locator('.response-progress'));

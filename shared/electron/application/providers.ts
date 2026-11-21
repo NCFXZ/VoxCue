@@ -4,8 +4,8 @@ import type { ChatEvent, ChatRequest } from '../contracts/chat';
 /** Select once per request; model IDs never determine the authentication route. */
 export class SelectedChatService implements AIChatService {
   constructor(private selected: () => AIChatService) {}
-  models(force?: boolean) {
-    return this.selected().models(force);
+  models(force?: boolean, signal?: AbortSignal) {
+    return this.selected().models(force, signal);
   }
   usage() {
     return this.selected().usage();

@@ -1,9 +1,11 @@
 import 'fake-indexeddb/auto';
+import { IDBFactory } from 'fake-indexeddb';
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { usePreparation } from '../../../shared/src/stores/preparation';
 import { useChatConnection } from '../../../shared/src/stores/chatConnection';
 import { useGeneralSettings } from '../../src/stores/generalSettings';
-import { localChats } from '../../src/services/chats';
+import { localChats, openChatDatabase, transferStoredChats } from '../../src/services/chats';
+import { recoverConfirmations } from '../../src/services/profileConfirmations';
 import { streamChat, ChatRequestError } from '../../../shared/src/services/chat';
 import { chatGPTProvider } from '../../../shared/electron/contracts/chat';
 vi.mock('../../../shared/src/services/chat', async (importOriginal) => ({
@@ -42,6 +44,7 @@ beforeEach(() => {
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => values.get(key),
     setItem: (key: string, value: string) => values.set(key, value),
+    removeItem: (key: string) => values.delete(key),
   });
   usePreparation.getState().reset();
   usePreparation.setState({
@@ -51,6 +54,7 @@ beforeEach(() => {
     resume: null,
     selectedKnowledgeBaseId: null,
     skillsNeedUpdate: false,
+    modelId: '',
   });
   useChatConnection.setState({
     live: true,
@@ -70,6 +74,201 @@ afterEach(() => {
   usePreparation.getState().reset();
   vi.unstubAllGlobals();
   vi.clearAllMocks();
+});
+it.each(['affected', 'healthy-0'])('isolates a missing historical attachment with %s initially selected and retries after its original returns', async activeConversation => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const state = usePreparation.getState;
+  usePreparation.setState({ chatsReady: false });
+  const file = new File(['synthetic notes'], 'notes.txt');
+  const attachment = { id: 'lost', name: file.name, size: file.size, file };
+  const source = {
+    id: 'affected', title: '旧会话', draft: '保留草稿',
+    messages: [{ id: 'old-message', role: 'user' as const, content: '原始问题',
+      options: { modelId: 'test', webSearch: true, attachments: [attachment] } }],
+  };
+  const others = Array.from({ length: 64 }, (_, i) => ({
+    id: 'healthy-' + i, title: '正常会话', messages: [], attachments: [{ ...attachment, id: 'file-' + i }],
+  }));
+  const healthy = others[0];
+  await localChats.write({ conversations: [source, ...others], activeConversation, draft: '', attachments: [],
+    modelId: 'test', effort: 'auto', webSearch: true });
+  const db = await openChatDatabase();
+  const originals = (change: (store: IDBObjectStore) => void) => new Promise<void>((resolve, reject) => {
+    const tx = db.transaction('files', 'readwrite');
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    change(tx.objectStore('files'));
+  });
+  const gets = vi.spyOn(IDBObjectStore.prototype, 'get');
+  const all = vi.spyOn(IDBObjectStore.prototype, 'getAll');
+  try {
+    await originals(store => store.delete(attachment.id));
+    await state().restoreChats();
+    if (activeConversation === healthy.id) {
+      expect(state()).toMatchObject({ chatsReady: true, activeConversation: healthy.id, chatStorageError: null, error: null });
+      state().selectConversation(source.id);
+    }
+    await vi.waitFor(() => expect(state().error).toContain('聊天附件无法读取'));
+    expect(state()).toMatchObject({ chatsReady: true, chatStorageError: null, draft: '保留草稿' });
+    expect(gets.mock.contexts.filter(s => s.name === 'files')).toHaveLength(0);
+    expect(all.mock.contexts.filter(s => s.name === 'files')).toHaveLength(0);
+    await state().send('继续');
+    expect(state().messages).toHaveLength(1);
+    expect(vi.mocked(streamChat)).not.toHaveBeenCalled();
+    state().selectConversation(healthy.id);
+    await state().send('正常提问');
+    expect(state().messages.at(-1)?.status).toBe('completed');
+    expect(vi.mocked(streamChat).mock.calls[0][0].turns[0].files?.[0].bytes)
+      .toEqual(new Uint8Array(await file.arrayBuffer()));
+    expect(gets.mock.calls.filter((_, i) => gets.mock.contexts[i].name === 'files').map(([key]) => key))
+      .toEqual(['file-0']);
+    expect(await state().flushChats()).toBe(true);
+    const saved = await transferStoredChats(db);
+    expect(saved?.conversations[0]).toMatchObject({ draft: '保留草稿', messages: [
+      { content: '原始问题', options: { attachments: [{ id: attachment.id }] } },
+    ] });
+    state().selectConversation(source.id);
+    state().selectConversation(healthy.id);
+    await vi.waitFor(() => expect(state().error).toBeNull());
+    state().selectConversation(source.id);
+    await vi.waitFor(() => expect(state().error).toContain('聊天附件无法读取'));
+    await originals(store => store.put({ id: attachment.id, blob: file, lastModified: file.lastModified }));
+    state().selectConversation(source.id);
+    await vi.waitFor(() => expect(state().error).toBeNull());
+    await state().send('继续');
+    expect(state().messages.at(-1)?.status).toBe('completed');
+    expect(vi.mocked(streamChat)).toHaveBeenCalledTimes(2);
+    state().deleteConversation(source.id);
+    expect(await state().flushChats()).toBe(true);
+    expect((await localChats.read())?.conversations.some(c => c.id === source.id)).toBe(false);
+  } finally {
+    all.mockRestore();
+    gets.mockRestore();
+    db.close();
+    usePreparation.setState({ chatsReady: false });
+  }
+});
+it('合并连续输入，在切换会话和关闭时立即保存最新内容', async () => {
+  vi.useFakeTimers();
+  const write = vi.spyOn(localChats, 'write').mockResolvedValue();
+  try {
+    usePreparation.setState({ chatsReady: true, conversations: [{ id: 'saved', title: '旧会话', messages: [] }] });
+    usePreparation.getState().setDraft('a');
+    usePreparation.getState().setDraft('ab');
+    expect(write).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(400);
+    expect(write).toHaveBeenCalledTimes(1);
+    expect(write.mock.calls[0][0].draft).toBe('ab');
+    usePreparation.getState().setDraft('abc');
+    usePreparation.getState().selectConversation('saved');
+    expect(write).toHaveBeenCalledTimes(2);
+    expect(write.mock.calls[1][0].conversations.some(c => c.draft === 'abc')).toBe(true);
+    usePreparation.getState().setDraft('关窗时的草稿');
+    expect(await usePreparation.getState().flushChats()).toBe(true);
+    expect(write.mock.calls.at(-1)![0].draft).toBe('关窗时的草稿');
+    write.mockClear();
+    usePreparation.getState().setModel('test');
+    expect(write).toHaveBeenCalledTimes(1);
+    await usePreparation.getState().flushChats();
+    write.mockClear();
+    usePreparation.getState().setEffort('auto');
+    expect(write).toHaveBeenCalledTimes(1);
+    await usePreparation.getState().flushChats();
+  } finally {
+    usePreparation.setState({ chatsReady: false });
+    write.mockRestore();
+    vi.useRealTimers();
+  }
+});
+it('聊天写盘失败后重载，从本账号的确认记录恢复勾选项并写回原会话', async () => {
+  const state = () => usePreparation.getState();
+  const proposal = { id: 'proposal', role: 'assistant' as const, content: '合成提案',
+    status: 'completed' as const, changes: { name: '新姓名', background: '新背景' }, profileBase: base };
+  const other = { id: 'second', title: '另一会话', messages: [proposal] };
+  const original = { id: 'first', title: '确认的会话', messages: [proposal] };
+  usePreparation.setState({ chatsReady: true, activeConversation: original.id,
+    conversations: [original, other], messages: original.messages });
+  try {
+    await state().flushChats();
+    state().selectProfileFields(proposal.id, ['name']);
+    const write = vi.spyOn(localChats, 'write').mockRejectedValue(Error('storage full'));
+    expect(state().updateInfo({}, proposal.id)).toBe(true);
+    expect(write).toHaveBeenCalled();
+    expect(await state().flushChats()).toBe(false);
+    expect((await localChats.read())!.conversations[0].messages[0].applied).toBeUndefined();
+    write.mockRestore();
+    // A fresh renderer reads the previously committed chat; the profile is already durable.
+    usePreparation.setState({ chatsReady: false, activeConversation: null, conversations: [], messages: [] });
+    await state().restoreChats();
+    expect(state().messages[0]).toMatchObject({ applied: true, appliedProfileFields: ['name'] });
+    expect(state().conversations.find(c => c.id === other.id)!.messages[0].applied).toBeUndefined();
+    expect(await state().flushChats()).toBe(true);
+    expect((await localChats.read())!.conversations[0].messages[0].applied).toBe(true);
+    expect(localStorage.getItem('voxcue-pending-profile-confirmations-v1')).toBeUndefined();
+  } finally {
+    vi.restoreAllMocks();
+    usePreparation.setState({ chatsReady: false });
+  }
+});
+it('确认回执写入失败时保留旧资料，可直接重试', async () => {
+  await usePreparation.getState().send('修改资料');
+  const message = usePreparation.getState().messages.at(-1)!;
+  const write = localStorage.setItem.bind(localStorage);
+  const failing = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+    if (key === 'voxcue-pending-profile-confirmations-v1') throw Error('quota');
+    write(key, value);
+  });
+  try {
+    expect(usePreparation.getState().updateInfo({}, message.id)).toBe(false);
+    expect(localStorage.getItem('copilot-personal-info-v1')).toBeUndefined();
+    expect(usePreparation.getState().messages.at(-1)?.applied).toBeUndefined();
+  } finally {
+    failing.mockRestore();
+  }
+  expect(usePreparation.getState().updateInfo({}, message.id)).toBe(true);
+});
+it('逐次截取确认期间的已落盘状态，恢复不误认未写资料，不复活被移除的消息', async () => {
+  const state = () => usePreparation.getState();
+  await state().send('修改姓名');
+  const owner = state().conversations.find(c => c.id === state().activeConversation)!;
+  const proposal = owner.messages.at(-1)!;
+  const snapshots: Storage[] = [];
+  const values = new Map<string, string>();
+  const write = localStorage.setItem.bind(localStorage);
+  const capture = vi.spyOn(localStorage, 'setItem').mockImplementation((key, value) => {
+    write(key, value);
+    values.set(key, value);
+    const copy = new Map(values);
+    snapshots.push({ getItem: (name: string) => copy.get(name) ?? null } as Storage);
+  });
+  try {
+    expect(state().updateInfo({}, proposal.id)).toBe(true);
+    expect(snapshots.map(storage => !!recoverConfirmations(storage, [owner])[0].messages.at(-1)?.applied))
+      .toEqual([false, true, true]);
+    expect(recoverConfirmations(snapshots[1], [{ ...owner, messages: [] }])[0].messages).toEqual([]);
+    const stale = { ...proposal, dismissed: true };
+    expect(recoverConfirmations(snapshots[1], [{ ...owner, messages: [stale] }])[0].messages[0]).toEqual(stale);
+  } finally {
+    capture.mockRestore();
+  }
+});
+it('回执损坏时普通聊天仍可恢复、编辑并写盘', async () => {
+  const state = () => usePreparation.getState();
+  usePreparation.setState({ chatsReady: true, conversations: [] });
+  try {
+    state().setDraft('新草稿');
+    expect(await state().flushChats()).toBe(true);
+    localStorage.setItem('voxcue-pending-profile-confirmations-v1', '{');
+    usePreparation.setState({ chatsReady: false, conversations: [], draft: '' });
+    await state().restoreChats();
+    expect(state().chatsReady).toBe(true);
+    expect(state().draft).toBe('新草稿');
+    state().setDraft('下一份草稿');
+    expect(await state().flushChats()).toBe(true);
+    expect((await localChats.read())!.draft).toBe('下一份草稿');
+  } finally {
+    usePreparation.setState({ chatsReady: false });
+  }
 });
 it.each(['button', 'reject', 'stale'])(
   '来源未核验提案先保留，明确操作才保存，警告不丢失：%s',
@@ -173,6 +372,19 @@ describe('聊天附件更新需要同意', () => {
     });
     usePreparation.getState().setModel('new');
     expect(usePreparation.getState().messages.at(-1)?.provider).toEqual(provider);
+  });
+  it('目录刷新保留有效选择，模型下架后必须重新选定才发送', async () => {
+    const current = { id: 'test', label: 'Renamed', description: '' };
+    const next = { id: 'future', label: 'Future', description: '' };
+    useChatConnection.setState({ models: [next, current] });
+    expect(usePreparation.getState().modelId).toBe(current.id);
+    useChatConnection.setState({ models: [next] });
+    await usePreparation.getState().send('旧模型已下架');
+    expect(usePreparation.getState().error).toContain('请重新选择模型');
+    expect(vi.mocked(streamChat)).not.toHaveBeenCalled();
+    usePreparation.getState().setModel(next.id);
+    await usePreparation.getState().send('明确选择新模型');
+    expect(vi.mocked(streamChat).mock.calls[0]?.[0]).toMatchObject({ modelId: next.id });
   });
   it('最终正文补齐尚未送达的 IPC 增量，完成后结束活动状态', async () => {
     vi.mocked(streamChat).mockImplementation(async (_request, emit) => {
@@ -950,4 +1162,93 @@ it('失败与手动停止不会标成已完成未读', async () => {
   usePreparation.getState().stop();
   await sending;
   expect(usePreparation.getState().conversations[0].unread).not.toBe(true);
+});
+
+it('并行回复按会话更新，停止后立即重试不会被旧回调覆盖', async () => {
+  const state = usePreparation.getState;
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  usePreparation.setState({ chatsReady: false });
+  await state().restoreChats();
+  const finish: Array<(text: string) => void> = [];
+  const chat = vi.mocked(streamChat).mockImplementation(() => new Promise(resolve => {
+    finish.push(answerText => resolve({ ok: true, sources: [], usage: null, answerText }));
+  }));
+  const first = state().send('会话甲的问题');
+  await vi.waitFor(() => expect(finish).toHaveLength(1));
+  const a = state().activeConversation!;
+  state().reset(true);
+  expect(state()).toMatchObject({ streaming: false, anyStreaming: true });
+  const second = state().send('会话乙的问题');
+  await vi.waitFor(() => expect(finish).toHaveLength(2));
+  const b = state().activeConversation!;
+  expect(chat.mock.calls.map(([request]) => request.turns.map(turn => turn.content)))
+    .toEqual([['会话甲的问题'], ['会话乙的问题']]);
+  state().setDraft('乙的下一条');
+  state().selectConversation(a);
+  state().setDraft('甲的下一条');
+  chat.mock.calls[1][1]({ type: 'delta', id: chat.mock.calls[1][0].id, text: '乙的中间回复' });
+  expect(state().messages.at(-1)?.content).toBe('');
+  await state().send('同一会话重复发送');
+  expect(chat).toHaveBeenCalledTimes(2);
+  state().stop();
+  expect(chat.mock.calls.map(([, , signal]) => signal.aborted)).toEqual([true, false]);
+  expect(state()).toMatchObject({ streaming: false, anyStreaming: true, draft: '甲的下一条' });
+  const retry = state().retry(state().messages.at(-1)!.id);
+  await vi.waitFor(() => expect(finish).toHaveLength(3));
+  chat.mock.calls[0][1]({ type: 'delta', id: chat.mock.calls[0][0].id, text: '迟到的旧回复' });
+  finish[0]('旧终态');
+  await first;
+  finish[1]('乙完成');
+  await second;
+  expect(state()).toMatchObject({ activeConversation: a, streaming: true, anyStreaming: true });
+  expect(state().messages.at(-1)).toMatchObject({ status: 'streaming', content: '' });
+  expect(state().conversations.find(c => c.id === b)).toMatchObject({ unread: true, draft: '乙的下一条' });
+  finish[2]('甲重试完成');
+  await retry;
+  expect(state()).toMatchObject({ streaming: false, anyStreaming: false, draft: '甲的下一条' });
+  expect(state().messages.at(-1)?.content).toBe('甲重试完成');
+  expect(await state().flushChats()).toBe(true);
+  const restored = await localChats.read();
+  expect(restored?.activeConversation).toBe(a);
+  expect(restored?.conversations.map(c => [c.id, c.draft, c.messages.at(-1)?.content, c.unread === true])).toEqual([
+    [a, '甲的下一条', '甲重试完成', false], [b, '乙的下一条', '乙完成', true],
+  ]);
+  state().selectConversation(b);
+  expect(state().messages.at(-1)).toMatchObject({ status: 'completed', content: '乙完成' });
+});
+
+it('关闭所有会话会取消后台回复，并作废仍在校验附件的发送', async () => {
+  const state = usePreparation.getState;
+  const finish: Array<() => void> = [];
+  const chat = vi.mocked(streamChat).mockImplementation(() => new Promise(resolve => {
+    finish.push(() => resolve({ ok: true, sources: [], usage: null, answerText: '迟到的结果' }));
+  }));
+  const first = state().send('第一条');
+  await vi.waitFor(() => expect(finish).toHaveLength(1));
+  const firstId = state().activeConversation!;
+  state().reset(true);
+  const second = state().send('第二条');
+  await vi.waitFor(() => expect(finish).toHaveLength(2));
+  state().reset(true);
+  const third = state().send('第三条');
+  await vi.waitFor(() => expect(finish).toHaveLength(3));
+  state().deleteConversation(firstId);
+  expect(chat.mock.calls.map(([, , signal]) => signal.aborted)).toEqual([true, false, false]);
+  state().reset(true);
+  let release!: () => void;
+  const check = vi.spyOn(localChats, 'checkFiles').mockReturnValueOnce(new Promise<void>(resolve => { release = resolve; }));
+  try {
+    const pending = state().send('仍在校验');
+    state().stopAll();
+    expect(chat.mock.calls.every(([, , signal]) => signal.aborted)).toBe(true);
+    release();
+    for (const done of finish) done();
+    await Promise.all([first, second, third, pending]);
+    expect(chat).toHaveBeenCalledTimes(3);
+    expect(state()).toMatchObject({ streaming: false, anyStreaming: false, activeConversation: null });
+    expect(state().conversations.map(c => c.messages.at(-1)?.status)).toEqual(['stopped', 'stopped']);
+    expect(state().conversations.some(c => c.id === firstId)).toBe(false);
+  } finally {
+    check.mockRestore();
+  }
 });

@@ -1,11 +1,14 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import { exportAccountData } from '../services/accountExport';
 import { Button } from './ui/button';
 import { Export } from './icons';
+import { AccountMigrationPanel } from './AccountMigrationPanel';
 
 export function AccountExportPanel() {
   const [busy, setBusy] = useState(false);
+  const [importBusy, setImportBusy] = useState(false);
   const [message, setMessage] = useState('');
   const [error, setError] = useState('');
   const alive = useRef(true),
@@ -34,27 +37,34 @@ export function AccountExportPanel() {
     }
   }
   return (
-    <section className="account-export-panel" aria-label={t('导出资料')}>
-      <div className="settings-entry">
-        <div>
-          <strong>{t('导出资料')}</strong>
-          <p className="settings-hint">{t('导出个人信息、面试记录和知识库。')}</p>
+    <>
+      <AccountMigrationPanel disabled={busy} onBusy={setImportBusy} />
+      <section className="account-export-panel" aria-label={t('导出资料')}>
+        <div className="settings-entry">
+          <div>
+            <strong>{t('导出资料')}</strong>
+            <p className="settings-hint">{t('导出个人信息、面试记录和知识库。')}</p>
+          </div>
+          <Button variant="outline" disabled={busy || importBusy} onClick={() => void exportData()}>
+            <Export size={16} />
+            {busy ? t('正在导出…') : t('导出资料')}
+          </Button>
         </div>
-        <Button variant="outline" disabled={busy} onClick={() => void exportData()}>
-          <Export size={16} />
-          {busy ? t('正在导出…') : t('导出资料')}
-        </Button>
-      </div>
-      {message && (
-        <p role="status" className="settings-hint">
-          {t(message)}
-        </p>
-      )}
-      {error && (
-        <p role="alert" className="danger-text">
-          {t(error)}
-        </p>
-      )}
-    </section>
+        <InterviewReveal>
+          {message ? (
+            <p role="status" className="settings-hint">
+              {t(message)}
+            </p>
+          ) : null}
+        </InterviewReveal>
+        <InterviewReveal>
+          {error ? (
+            <p role="alert" className="danger-text">
+              {t(error)}
+            </p>
+          ) : null}
+        </InterviewReveal>
+      </section>
+    </>
   );
 }

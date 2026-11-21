@@ -131,12 +131,15 @@ export class WasapiCapture {
       let failed = false;
       let audioDamaged = false;
       let exitTimer: ReturnType<typeof setTimeout> | undefined;
+      // Device errors arrive on stderr while complete PCM may still be in stdout.
+      const terminalFailure = () => failed && this.fault !== 'recoverable';
       const fail = (message: string, recoverable = false) => {
         if (this.child !== child || this.stopping === 'stop') return;
         const fault = recoverable ? 'recoverable' : Error(message);
-        if (this.stopping === 'recover') {
-          // Both endpoints can fail together. Keep the second endpoint's own
-          // diagnosis during teardown, without dispatching another restart.
+        if (this.stopping === 'recover' || (failed && this.fault === 'recoverable')) {
+          // A terminal fault on either pipe supersedes a device loss even
+          // before the controller starts retiring the two endpoints.
+          failed = true;
           if (!this.terminalError) this.fault = fault;
           return;
         }
@@ -159,7 +162,7 @@ export class WasapiCapture {
         if (!this.nativeClosed) child.kill();
       };
       const control = (line: string) => {
-        if (!line || this.stopping === 'stop' || (failed && this.stopping !== 'recover')) return;
+        if (!line || this.stopping === 'stop' || terminalFailure()) return;
         let status;
         try {
           status = JSON.parse(line);
@@ -174,6 +177,7 @@ export class WasapiCapture {
         } else if (status?.type === 'error') {
           const code = hresult(status.code);
           if (!code) return invalid();
+          if (code === '0x8007006F') return fail('音频输出积压已达上限，采集已停止。请重新开始。');
           const message = `${this.source === 'system' ? '系统音频' : '麦克风'}不可用（${code}），请检查设备、隐私权限或默认设备变化后重新开始。`;
           fail(message, retryableDeviceErrors.has(code));
         } else invalid();
@@ -185,7 +189,7 @@ export class WasapiCapture {
         child.kill();
       };
       child.stdout.on('data', (b) => {
-        if (failed || audioDamaged || this.child !== child || this.nativeClosed) return;
+        if (terminalFailure() || audioDamaged || this.child !== child || this.nativeClosed) return;
         try {
           for (const p of decoder.push(b)) this.audio(p);
         } catch {
@@ -194,7 +198,7 @@ export class WasapiCapture {
       });
       child.stderr.on('data', (b) => {
         if (this.child !== child || this.nativeClosed) return;
-        if (failed && this.stopping !== 'recover') return;
+        if (terminalFailure()) return;
         try {
           for (const line of lines.push(b)) control(line);
         } catch {

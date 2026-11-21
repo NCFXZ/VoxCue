@@ -1,4 +1,4 @@
-import { connectUiAccount, enterDemoUiAccount, openModelMenu } from './install-ui-account.mjs';
+import { connectUiAccount, enterPrimaryUiAccount, openModelMenu } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
@@ -122,7 +122,7 @@ try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await login.waitForFunction(() => document.visibilityState === 'visible');
-  const [page] = await Promise.all([app.waitForEvent('window'), enterDemoUiAccount(app, login)]);
+  const page = await enterPrimaryUiAccount(app, login);
   page.setDefaultTimeout(15000);
   assert.equal(
     await page.evaluate(() => new Promise((resolve) => {
@@ -150,18 +150,21 @@ try {
     const { ChatGPTService, publicFailure, UsageLedger } = globalThis.chatTestModules;
     let responseCount = 0;
     const service = new ChatGPTService({
-      access: async () => ({ account: 'test', token: 'test-only' }),
+      access: async () => ({ kind: 'codex', runtimeVersion: '1.2.3', chatgptAccountId: 'fixture', account: 'test', token: 'test-only' }),
       ledger: new UsageLedger(profile + '/usage'),
       fetch: async (url, options) => {
-        if (url.endsWith('/models'))
+        if (new URL(url).pathname.endsWith('/models'))
           return Response.json({
-            models: [{ slug: 'gpt-6-luna', display_name: 'Test Luna', visibility: 'list' }],
+            models: [{
+              slug: 'gpt-6-luna', display_name: 'Test Luna', visibility: 'list',
+              supported_reasoning_levels: ['low', 'medium'], web_search_tool_type: 'text',
+            }],
           });
         const request = JSON.parse(options.body);
         if (request.input.at(-1).content === '状态测试') {
           const encoder = new TextEncoder();
           const citation = { url: 'https://docs.example.org/guide', title: '实时来源' };
-          const answer = '状态演示已完成\n\n([docs.example.org](https://docs.example.org/guide)) · [阅读教程](https://docs.example.org/guide)';
+          const answer = '状态演示已完成\n\n([docs.example.org](https://docs.example.org/guide)) · [阅读教程](https://docs.example.org/guide)\n\n| 资料 |\n| --- |\n| ([docs.example.org](https://docs.example.org/guide)) |';
           const events = [
             { type: 'response.created' },
             { type: 'response.output_item.added', item: { type: 'reasoning' } },
@@ -177,9 +180,15 @@ try {
             { type: 'response.output_text.delta', delta: '{"answer":"' },
             {
               type: 'response.output_text.delta',
-              delta: JSON.stringify({ answer, changes: {} }).slice(11),
+              delta: JSON.stringify(answer).slice(1, -1),
             },
             { type: 'response.output_text.annotation.added', annotation: { type: 'url_citation', ...citation } },
+            { type: 'response.output_text.delta', delta: '\\n\\n追加第一段' },
+            { type: 'response.output_text.delta', delta: '，追加第二段' },
+            { type: 'response.output_text.annotation.added', annotation: {
+              type: 'url_citation', url: 'https://extra.example.org/another', title: '后续来源',
+            } },
+            { type: 'response.output_text.delta', delta: '，追加第三段","changes":{}}' },
             {
               type: 'response.completed',
               response: { id: 'status-test', status: 'completed', output: [] },
@@ -189,7 +198,8 @@ try {
             new ReadableStream({
               async start(controller) {
                 for (const event of events) {
-                  if (event.type === 'response.output_text.annotation.added' || event.type === 'response.completed')
+                  if (event.annotation?.title === citation.title ||
+                      event.delta?.startsWith('\\n\\n追加') || event.type === 'response.completed')
                     await new Promise((resolve) => { globalThis.advanceCitationStream = resolve; });
                   controller.enqueue(encoder.encode('data: ' + JSON.stringify(event) + '\n\n'));
                   await new Promise((resolve) => setTimeout(resolve, 700));
@@ -204,7 +214,7 @@ try {
           return new Response('<html>upstream error</html>', {
             headers: { 'content-type': 'text/html' },
           });
-        if (request.reasoning?.effort !== 'low') throw new Error('Effort not transmitted');
+        if (request.reasoning?.effort !== undefined) throw new Error('An effort was sent in automatic mode');
         const markdown =
           '**JSON 回答已显示**\n\n**已核实的 JD。**下面说明\n\n- **岗位名称： **产品测试工程师。\n- **岗位类别： **开发类。\n\n```python\nprint("Hello")\n```\n\n|字段|内容|\n|---|---|\n|姓名|示例|';
         const text =
@@ -745,7 +755,7 @@ try {
   await page.getByText('状态演示已完成', { exact: true }).waitFor();
   const streamingAnswer = page.locator('.chat-message.assistant').last();
   const citation = streamingAnswer.locator('.chat-answer a.chat-source-link');
-  await citation.getByText('docs.example.org', { exact: true }).waitFor();
+  await citation.first().getByText('docs.example.org', { exact: true }).waitFor();
   assert.equal(await citation.locator('img').count(), 0);
   assert.equal(await streamingAnswer.locator('.chat-source-group').count(), 0);
   assert.equal(await streamingAnswer.locator('.chat-answer a:not(.chat-source-link)').innerText(), '阅读教程');
@@ -762,11 +772,47 @@ try {
     });
   };
   await advanceStream();
-  await streamingAnswer.locator('.chat-answer').getByRole('link', { name: '实时来源 · docs.example.org' }).waitFor();
+  await streamingAnswer.locator('.chat-answer').getByRole('link', { name: '实时来源 · docs.example.org' }).first().waitFor();
   await streamingAnswer.locator('.chat-source-group').getByText('docs.example.org', { exact: true }).waitFor();
+  const answerBody = streamingAnswer.locator('.chat-answer');
+  const readyIcons = answerBody.locator('.chat-source-icon[data-ready="true"] img');
+  await readyIcons.nth(1).waitFor();
+  const iconWatch = await answerBody.evaluateHandle(element => {
+    const images = Array.from(element.querySelectorAll('.chat-source-icon img'));
+    const watch = { images, fallbackFrames: 0, frame: 0 };
+    const sample = () => {
+      if (images.some(image => !image.isConnected || image.parentElement.dataset.ready !== 'true'))
+        watch.fallbackFrames++;
+      watch.frame = requestAnimationFrame(sample);
+    };
+    sample();
+    return watch;
+  });
+  const countIconRequests = () => app.evaluate(() =>
+    globalThis.faviconRequests.filter(({ url }) => url.includes('/docs.example.org?')).length);
+  const initialRequests = await countIconRequests();
+  await advanceStream();
+  await answerBody.getByText(/追加第三段/).waitFor();
+  const checkIcons = async () => {
+    const state = await answerBody.evaluate((element, watch) => {
+      const images = [...element.querySelectorAll('.chat-source-icon img')];
+      return {
+        retained: images.length === watch.images.length && images.every((image, i) => image === watch.images[i]),
+        ready: images.every(image => image.complete && image.naturalWidth > 0 && image.parentElement.dataset.ready === 'true'),
+        fallbackFrames: watch.fallbackFrames,
+      };
+    }, iconWatch);
+    const repeatedRequests = await countIconRequests() - initialRequests;
+    console.log('Streamed citation icons:', { ...state, repeatedRequests });
+    assert.deepEqual({ ...state, repeatedRequests }, { retained: true, ready: true, fallbackFrames: 0, repeatedRequests: 0 });
+  };
+  await checkIcons();
   await advanceStream();
   assert.equal(await page.locator('.chat-message.assistant').last().locator('.chat-message-time').count(), 1, 'The assistant clock appears with nonempty answer text');
   await page.locator('.progress-state-label.is-active').waitFor({ state: 'detached' });
+  await checkIcons();
+  await iconWatch.evaluate(watch => cancelAnimationFrame(watch.frame));
+  await iconWatch.dispose();
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');

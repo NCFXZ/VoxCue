@@ -1,3 +1,4 @@
+import { codexAccess } from '../fixtures/codex-access';
 import { expect, it } from 'vitest';
 import { ReasoningSummary } from '../../../shared/electron/backend/chat/summary';
 import { ChatGPTService } from '../../../shared/electron/backend/chat/service';
@@ -90,17 +91,39 @@ it('完整 JSON 的终态摘要可以直接补齐；拒绝无界文本和无效�
   });
   expect(summary.text).toBe('最终摘要');
 });
+it('完整公开摘要计入段间空行，正文和重复终态保持原摘要', () => {
+  const summary = new ReasoningSummary();
+  const put = (index: number, text: string) => summary.receive({
+    type: 'response.reasoning_summary_text.done', item_id: 'r', summary_index: index, text,
+  });
+  expect(put(0, 'a'.repeat(99997))).toBe(true);
+  expect(put(1, 'bb')).toBe(false);
+  expect(put(1, 'b')).toBe(true);
+  expect(summary.text).toHaveLength(100000);
+  expect(summary.receive({ type: 'response.output_text.delta', delta: '正文' })).toBe(false);
+  expect(put(1, 'b')).toBe(false);
+  expect(put(0, '')).toBe(true);
+  expect(summary.text).toBe('b');
+});
 it.each([undefined, 'xhigh'] as const)(
   'GPT-6.1-Sol 思考强度 %s 时显式请求公开摘要，空摘要不替换为私有推理',
   async (effort) => {
     const events: ChatEvent[] = [];
     const service = new ChatGPTService({
-      access: async () => ({ account: 'fixture', token: 'test-only' }),
+      access: async () => codexAccess('fixture', 'test-only'),
       ledger: {} as UsageLedger,
       fetch: async (url, options) => {
-        if (String(url).endsWith('/models'))
+        if (new URL(String(url)).pathname.endsWith('/models'))
           return Response.json({
-            models: [{ slug: 'gpt-6.1-sol', display_name: 'GPT-6.1-Sol', visibility: 'list' }],
+            models: [
+              {
+                slug: 'gpt-6.1-sol',
+                display_name: 'GPT-6.1-Sol',
+                visibility: 'list',
+                supported_reasoning_levels: ['xhigh'],
+                supports_reasoning_summary_parameter: true,
+              },
+            ],
           });
         expect(JSON.parse(options!.body as string).reasoning).toEqual({
           ...(effort ? { effort } : {}),
@@ -159,10 +182,10 @@ it.each(['sse', 'json'])('原生服务通过 %s 转发摘要、校准最终结�
   };
   const events: ChatEvent[] = [];
   const service = new ChatGPTService({
-    access: async () => ({ account: 'fixture', token: 'test-only' }),
+    access: async () => codexAccess('fixture', 'test-only'),
     ledger: {} as UsageLedger,
     fetch: async (url, options) => {
-      if (String(url).endsWith('/models'))
+      if (new URL(String(url)).pathname.endsWith('/models'))
         return Response.json({
           models: [
             {
@@ -170,6 +193,7 @@ it.each(['sse', 'json'])('原生服务通过 %s 转发摘要、校准最终结�
               display_name: 'Summary Test',
               visibility: 'list',
               supported_reasoning_levels: ['low'],
+              supports_reasoning_summary_parameter: true,
             },
           ],
         });

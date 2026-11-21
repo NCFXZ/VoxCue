@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import { useEffect, useRef } from 'react';
+import { Fragment, useEffect, useLayoutEffect, useRef } from 'react';
 import storyMeeting from '../assets/interview-story-meeting.jpg';
 import storyDistance from '../assets/interview-story-distance.jpg';
 import storyHome from '../assets/interview-story-home.jpg';
@@ -7,12 +7,16 @@ import easterEgg from '../assets/interview-easter-egg.jpg';
 import { interviewAlwaysDark } from '../interviewAppearance';
 import { MarkdownContent } from './MarkdownContent';
 import { AppLogo } from './AppLogo';
+import { RecordingWave } from './RecordingWave';
 import { ProviderIdentity } from './ProviderIdentity';
 import { InterviewChromeBase } from './InterviewChromeBase';
 import { installPreviewScroll } from './ui/preview-scroll';
 import { installPreviewTranscript } from './ui/preview-transcript';
 import { interviewPanelAnimation } from './ui/interview-panel-animation';
 import { useLoginPreviewPlayback } from './ui/useLoginPreviewPlayback';
+import { useFollowScroll } from './useFollowScroll';
+import { playSentMessageEnter } from '../lib/messageMotion';
+import { ChatActivity } from './ChatActivity';
 import './login-preview.css';
 import {
   ArrowUp,
@@ -22,6 +26,7 @@ import {
   MessageSquare,
   Settings,
   ShieldCheck,
+  PrivateWindow,
   Sparkles,
   Screenshot,
   Volume2,
@@ -40,8 +45,8 @@ export function InterviewPreview({
   const background = useRef<HTMLDivElement>(null);
   const toggle = useRef<HTMLButtonElement>(null);
   const scene = useRef<HTMLDivElement>(null);
-  const answerScroll = useRef<HTMLDivElement>(null);
-  const { elapsed, phase } = useLoginPreviewPlayback(compact, scene);
+  const questionBubble = useRef<HTMLDivElement>(null);
+  const { questionProgress, answerProgress, phase } = useLoginPreviewPlayback(compact, scene);
   const question = compact
     ? t('在 Qt 实时数据监控项目中，你是如何保证界面流畅的？')
     : t('请介绍一个你负责过的项目。');
@@ -56,22 +61,42 @@ export function InterviewPreview({
         t('最后用实际负载观察队列长度和界面响应，定位阻塞点，再调整刷新频率和批量大小。'),
       ]
     : [];
-  let remaining = Math.floor(((elapsed - 1400) / 2100) * paragraphs.join('').length);
-  const revealed = paragraphs.map((paragraph) => {
-    const text = phase === 'complete' ? paragraph : paragraph.slice(0, Math.max(0, remaining));
+  let remaining = Math.floor(answerProgress * paragraphs.join('').length);
+  const answer = paragraphs.map((paragraph) => {
+    const text = paragraph.slice(0, Math.max(0, remaining));
     remaining -= paragraph.length;
     return text;
-  });
-  const activeParagraph = revealed.reduce((active, text, index) => (text ? index : active), 0);
+  }).filter(Boolean).join('\n\n');
+  const transcript = compact && phase === 'question'
+    ? question.slice(0, Math.max(1, Math.floor(questionProgress * question.length)))
+    : question;
+  const submitted = compact && phase !== 'ready' && phase !== 'question';
+  const questionFollow = useFollowScroll(compact ? transcript : undefined);
+  const answerFollow = useFollowScroll(compact ? answer : undefined);
+  const answerScroll = answerFollow.scrollProps.ref;
+  const AnswerGroup = compact ? 'article' : Fragment;
   const TranscriptControl = compact ? 'span' : 'button';
-  useEffect(() => {
+  useLayoutEffect(() => {
+    if (submitted && scene.current?.dataset.playing === 'true')
+      playSentMessageEnter(questionBubble.current);
+  }, [submitted]);
+  useLayoutEffect(() => {
     if (!compact || !answerScroll.current) return;
     const node = answerScroll.current;
-    // Keep the final lines visible after the one-shot answer finishes.
-    node.scrollTop = phase === 'answering' || phase === 'complete' ? node.scrollHeight : 0;
-    node.dataset.overflow = String(node.scrollHeight > node.clientHeight);
-    node.dataset.scrolled = String(node.scrollTop > 0);
-  }, [compact, elapsed, phase]);
+    const updateEdges = () => {
+      node.toggleAttribute('data-more-above', node.scrollTop > 1);
+      node.toggleAttribute('data-more-below', node.scrollHeight - node.clientHeight - node.scrollTop > 1);
+    };
+    const size = new ResizeObserver(updateEdges);
+    size.observe(node);
+    if (node.firstElementChild) size.observe(node.firstElementChild);
+    node.addEventListener('scroll', updateEdges, { passive: true });
+    updateEdges();
+    return () => {
+      size.disconnect();
+      node.removeEventListener('scroll', updateEdges);
+    };
+  }, [compact, submitted, answerScroll]);
   useEffect(() => {
     const node = background.current;
     if (!node || compact) return;
@@ -328,7 +353,10 @@ export function InterviewPreview({
               <Settings size={19} />
             </span>
             <span className="interview-preview-icon" data-interview-preview-button>
-              <ShieldCheck size={18} />
+              {window.desktop?.platform === 'windows' ? <PrivateWindow size={20} /> : <ShieldCheck size={18} />}
+            </span>
+            <span className="interview-preview-icon" data-interview-preview-button>
+              <RecordingWave />
             </span>
             <span className="interview-preview-icon danger-text" data-interview-preview-button>
               <Square size={17} />
@@ -346,7 +374,7 @@ export function InterviewPreview({
                 {t('转写')}
               </h2>
             </header>
-            <div className="floating-scroll">
+            <div className="floating-scroll" {...(compact ? questionFollow.scrollProps : {})}>
               {compact && phase === 'ready' ? (
                 <div className="floating-empty">
                   <Volume2 size={26} />
@@ -360,12 +388,7 @@ export function InterviewPreview({
                     <time>{compact ? '00:03' : '14:18'}</time>
                   </div>
                   <p className="interview-font-sample">
-                    {compact && phase === 'question'
-                      ? question.slice(
-                          0,
-                          Math.max(1, Math.floor(((elapsed - 100) / 900) * question.length)),
-                        )
-                      : question}
+                    {transcript}
                     {compact && phase === 'question' && <span className="typing-caret" />}
                   </p>
                 </article>
@@ -402,48 +425,45 @@ export function InterviewPreview({
                 {t('转写')}
               </TranscriptControl>
             </header>
-            <div className="floating-scroll" ref={answerScroll}>
+            <div className="floating-scroll" {...(compact ? answerFollow.scrollProps : {})}>
               {compact && (phase === 'ready' || phase === 'question') ? (
                 <div className="floating-empty answer-empty">
                   <p>{t('模型服务回答已启用。')}</p>
                   <span>{t('直接发送下方实时转写，或输入新的问题。')}</span>
                 </div>
               ) : (
-                <>
-                  <div className="floating-question interview-font-sample">{question}</div>
+                <AnswerGroup>
+                  <div className="floating-question interview-font-sample" ref={questionBubble}>{question}</div>
                   <div className="floating-answer-meta">
                     <span className="provider-identity">
                       <ProviderIdentity provider="chatgpt" />
                     </span>
                     {(!compact || phase === 'complete') && <Copy size={14} />}
                   </div>
-                  {compact && phase === 'thinking' && (
-                    <p className="login-preview-thinking">{t('正在思考')}</p>
+                  {compact && (
+                    <div className="collapse-content" data-expanded={phase === 'thinking'}
+                      aria-hidden={phase !== 'thinking'}>
+                      {phase !== 'complete' && (
+                        <div className="login-preview-thinking"><ChatActivity mock={false} /></div>
+                      )}
+                    </div>
                   )}
                   <div className="answer-text answer-bubble interview-font-sample">
                     {compact ? (
-                      phase === 'thinking' ? (
+                      !answer ? (
                         <>
                           <span className="answer-pending">{t('正在生成回答…')}</span>
-                          <span className="typing-caret" />
+                          <span className="typing-caret" aria-hidden="true" />
                         </>
                       ) : (
-                        <div className="markdown-content">
-                          {revealed.map((paragraph, index) => (
-                            <p key={index} hidden={!paragraph && index !== activeParagraph}>
-                              {paragraph}
-                              {phase === 'answering' && index === activeParagraph && (
-                                <span className="typing-caret" />
-                              )}
-                            </p>
-                          ))}
-                        </div>
+                        <MarkdownContent content={answer} paceUpdates={phase === 'answering'}
+                          showCaret={phase === 'answering'} />
                       )
                     ) : (
                       <MarkdownContent content={t('先说明**项目目标**，再介绍你的工作和结果。')} />
                     )}
                   </div>
-                </>
+                </AnswerGroup>
               )}
             </div>
             <div className="floating-composer">

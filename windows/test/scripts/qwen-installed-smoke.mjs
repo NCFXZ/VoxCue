@@ -10,6 +10,10 @@ import { probe } from './window-probe.mjs';
 // Explicit authorization is required. Never discover installed user data or
 // call a mutating component service against the source cache.
 assert.equal(process.platform, 'win32');
+const requireUnlocked = () => assert.equal(
+  probe('desktop').interactive, true, 'Native inference requires the unlocked owner console',
+);
+requireUnlocked();
 assert.ok(process.env.VOXCUE_TEST_COMPONENT_CACHE, 'Specify an authorized model cache');
 assert.ok(process.env.VOXCUE_PYTHON, 'Specify the development Python executable');
 const compiled = path.join(
@@ -34,13 +38,29 @@ console.log('PASS installed Qwen: fixed catalog verified; isolated copy, no mode
 const { corpus } = await prepareQwenAudio();
 const wave = corpus.find((item) => item.id === 'sample1').audio;
 const run = async (file, args) => {
+  requireUnlocked();
   const child = spawnTestProcess(file, args, { stdio: 'inherit', windowsHide: true });
   const timer = setTimeout(() => child.kill(), 600000);
-  const code = await new Promise((resolve, reject) => {
-    child.once('error', reject);
-    child.once('exit', resolve);
-  }).finally(() => clearTimeout(timer));
-  assert.equal(code, 0, args[0]);
+  let desktopFailure;
+  const monitor = setInterval(() => {
+    try {
+      requireUnlocked();
+    } catch (error) {
+      desktopFailure = error;
+      child.kill();
+    }
+  }, 1000);
+  try {
+    const code = await new Promise((resolve, reject) => {
+      child.once('error', reject);
+      child.once('exit', resolve);
+    });
+    if (desktopFailure) throw desktopFailure;
+    assert.equal(code, 0, args[0]);
+  } finally {
+    clearInterval(monitor);
+    clearTimeout(timer);
+  }
 };
 for (const device of ['cpu', 'cuda']) {
   await run(process.env.VOXCUE_PYTHON, [

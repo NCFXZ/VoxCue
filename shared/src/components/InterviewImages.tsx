@@ -1,5 +1,6 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { validImagePreview, type InterviewImage } from '../../electron/contracts/interviewImages';
 import { Modal } from './ui/modal';
@@ -11,33 +12,48 @@ function Thumbnail({
   image,
   index,
   onOpen,
+  lazyPreview,
 }: {
   image: InterviewImage;
   index: number;
   onOpen(): void;
+  lazyPreview: boolean;
 }) {
   const [preview, setPreview] = useState(image.preview);
   const [failed, setFailed] = useState(false);
+  const thumbnail = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     let active = true;
     setPreview(image.preview);
     setFailed(false);
-    if (!image.preview)
-      void (async () => {
-        try {
-          const result = await window.desktop?.interviewImage({ op: 'preview', id: image.id });
-          if (!result?.ok || !validImagePreview(result.dataUrl)) throw Error('No preview');
-          if (active) setPreview(result.dataUrl);
-        } catch {
-          if (active) setFailed(true);
-        }
-      })();
+    const load = async () => {
+      try {
+        const result = await window.desktop?.interviewImage({ op: 'preview', id: image.id });
+        if (!result?.ok || !validImagePreview(result.dataUrl)) throw Error('No preview');
+        if (active) setPreview(result.dataUrl);
+      } catch {
+        if (active) setFailed(true);
+      }
+    };
+    let observer: IntersectionObserver | undefined;
+    if (!image.preview) {
+      if (lazyPreview && thumbnail.current && typeof IntersectionObserver !== 'undefined') {
+        observer = new IntersectionObserver(entries => {
+          if (!active || !entries.some(entry => entry.isIntersecting)) return;
+          observer?.disconnect();
+          void load();
+        }, { rootMargin: '240px' });
+        observer.observe(thumbnail.current);
+      } else void load();
+    }
     return () => {
       active = false;
+      observer?.disconnect();
     };
-  }, [image.id, image.preview]);
+  }, [image.id, image.preview, lazyPreview]);
   return (
     <button
+      ref={thumbnail}
       type="button"
       className="interview-image-thumbnail"
       aria-label={t(`查看截图 ${index + 1} 原图`)}
@@ -60,9 +76,11 @@ function Thumbnail({
 export function InterviewImages({
   images,
   inInterview = false,
+  lazyPreviews = false,
 }: {
   images?: InterviewImage[];
   inInterview?: boolean;
+  lazyPreviews?: boolean;
 }) {
   const [selected, setSelected] = useState<number | null>(null);
   const [loaded, setLoaded] = useState<{ id: string; dataUrl: string } | null>(null);
@@ -115,7 +133,7 @@ export function InterviewImages({
     <>
       <div className="interview-images" role="group" aria-label={t('已发送截图')}>
         {images.map((image, index) => (
-          <Thumbnail key={image.id} image={image} index={index} onOpen={() => setSelected(index)} />
+          <Thumbnail key={image.id} image={image} index={index} onOpen={() => setSelected(index)} lazyPreview={lazyPreviews} />
         ))}
       </div>
       {image &&
@@ -210,11 +228,11 @@ export function InterviewImages({
                 </p>
               )}
             </div>
-            {saveError?.id === image.id && (
+            <InterviewReveal resizeKey={t(saveError?.message)}>{saveError?.id === image.id ? (
               <p role="alert" className="danger-text">
                 {t(saveError.message)}
               </p>
-            )}
+            ) : null}</InterviewReveal>
           </Modal>,
           document.body,
         )}

@@ -23,7 +23,7 @@ export async function requestedKnowledgeQuery(
     role,
     content: index === recent.length - 1 ? content : content.slice(-6000),
   }));
-  const models = await abortable(provider.models(), signal);
+  const models = await abortable(provider.models(false, signal), signal);
   signal.throwIfAborted();
   const supported = models.find((model) => model.id === request.modelId)?.reasoningEfforts;
   const effort = reasoningEfforts.find((value) => supported?.includes(value));

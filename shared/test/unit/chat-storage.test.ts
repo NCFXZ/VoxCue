@@ -1,6 +1,157 @@
 import 'fake-indexeddb/auto';
+import { IDBFactory } from 'fake-indexeddb';
 import { expect, it, vi } from 'vitest';
-import { localChats, type ChatSnapshot } from '../../../shared/src/services/chats';
+import { localChats, openChatDatabase, transferStoredChats, type ChatSnapshot } from '../../../shared/src/services/chats';
+
+it('连续重载和迁移均保留尚未写入主目录的新会话、消息、附件和多行草稿', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const view = new EventTarget();
+  vi.stubGlobal('window', view);
+  const base: ChatSnapshot = {
+    activeConversation: 'first', conversations: [{ id: 'first', title: '原聊天', messages: [] }],
+    attachments: [], draft: '', modelId: '', effort: 'auto', webSearch: true,
+  };
+  const file = new File(['resume contents'], 'resume.txt');
+  const attachment = { id: 'draft-file', name: file.name, size: file.size, file };
+  try {
+    await localChats.write(base);
+    let prior: ChatSnapshot | null = null;
+    let next = base;
+    const reload = () => ({ snapshot: next, previous: prior?.conversations });
+    prior = (await localChats.read(reload))!;
+    next = { ...prior, activeConversation: 'second', draft: '第一行\n第二行', attachments: [attachment],
+      conversations: [...prior.conversations, { id: 'second', title: '新聊天', draft: '第一行\n第二行',
+        attachments: [attachment], messages: [{ id: 'user', role: 'user', content: '保留消息' }] }] };
+    view.dispatchEvent(new Event('pagehide'));
+    prior = (await localChats.read(reload))!;
+    expect(await (await localChats.readFile(prior.attachments[0])).text()).toBe('resume contents');
+    next = { ...prior, activeConversation: 'first', draft: '', attachments: [],
+      conversations: [{ ...prior.conversations[0], draft: '' }, prior.conversations[1]] };
+    view.dispatchEvent(new Event('pagehide'));
+    const db = await openChatDatabase();
+    try {
+      const transfer = await transferStoredChats(db);
+      expect(transfer?.conversations[1]).toMatchObject({
+        id: 'second', draft: '第一行\n第二行', messages: [{ content: '保留消息' }], attachments: [{ id: 'draft-file' }],
+      });
+    } finally { db.close(); }
+    prior = (await localChats.read())!;
+    await localChats.write(prior, prior.conversations);
+    expect((await localChats.read())?.conversations[1]).toMatchObject({
+      draft: '第一行\n第二行', messages: [{ content: '保留消息' }], attachments: [{ name: 'resume.txt' }],
+    });
+  } finally {
+    view.dispatchEvent(new Event('pagehide'));
+    vi.unstubAllGlobals();
+  }
+});
+
+it.each(['before-directory-read', 'after-delete-request'])('reloading a metadata-only draft preserves its original against an older write at %s', async phase => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const view = new EventTarget();
+  vi.stubGlobal('window', view);
+  const file = new File(['my notes'], 'notes.txt');
+  const attachment = { id: 'notes-file', name: file.name, size: file.size, file };
+  const base: ChatSnapshot = { activeConversation: null, draft: '旧稿', attachments: [attachment],
+    conversations: [], modelId: '', effort: 'auto', webSearch: true };
+  const remove = IDBObjectStore.prototype.delete;
+  const deletes = vi.spyOn(IDBObjectStore.prototype, 'delete');
+  try {
+    await localChats.write(base);
+    let latest = base;
+    const restored = (await localChats.read(() => ({ snapshot: latest, writing: true })))!;
+    latest = { ...restored, draft: '刚粘贴的草稿' };
+    expect(latest.attachments[0].file).toBeUndefined();
+    deletes.mockImplementation(function (key) {
+      const request = remove.call(this, key);
+      if (phase === 'after-delete-request' && this.name === 'files' && key === attachment.id)
+        view.dispatchEvent(new Event('pagehide'));
+      return request;
+    });
+    const older = localChats.write({ ...base, attachments: [], draft: '' });
+    if (phase === 'before-directory-read') view.dispatchEvent(new Event('pagehide'));
+    await older;
+    const recovered = (await localChats.read())!;
+    expect(recovered.draft).toBe('刚粘贴的草稿');
+    expect(await (await localChats.readFile(recovered.attachments[0])).text()).toBe('my notes');
+  } finally {
+    deletes.mockRestore();
+    view.dispatchEvent(new Event('pagehide'));
+    vi.unstubAllGlobals();
+  }
+});
+
+it('editing a restored draft across reloads preserves every attachment reference in an unrelated damaged conversation', async () => {
+  vi.stubGlobal('indexedDB', new IDBFactory());
+  const view = new EventTarget();
+  vi.stubGlobal('window', view);
+  const attachment = (id: string) => {
+    const file = new File([id], id + '.txt');
+    return { id, name: file.name, size: file.size, file };
+  };
+  const lost = attachment('missing'), shared = attachment('shared'), replacement = attachment('new');
+  const initial: ChatSnapshot = {
+    activeConversation: 'current', draft: '旧稿', attachments: [shared], modelId: '', effort: 'auto', webSearch: true,
+    conversations: [
+      { id: 'current', title: 'Current', draft: '旧稿', messages: [], attachments: [shared] },
+      { id: 'damaged', title: 'Damaged', messages: [{ id: 'old', role: 'user', content: '保留历史正文',
+        options: { modelId: '', webSearch: true, attachments: [lost, shared] } }] },
+    ],
+  };
+  try {
+    await localChats.write(initial);
+    const db = await openChatDatabase();
+    const tx = db.transaction('files', 'readwrite');
+    tx.objectStore('files').delete(lost.id);
+    await new Promise<void>((resolve, reject) => { tx.oncomplete = () => resolve(); tx.onerror = () => reject(tx.error); });
+    let previous: ChatSnapshot | null = null;
+    let next = initial;
+    const checkpoint = () => ({ snapshot: next, previous: previous?.conversations });
+    for (const draft of ['清空附件', '重新添加']) {
+      previous = (await localChats.read(checkpoint))!;
+      const files = draft === '清空附件' ? [] : [replacement];
+      next = { ...previous, draft, attachments: files, conversations: previous.conversations.map(c =>
+        c.id === 'current' ? { ...c, draft, attachments: files } : c) };
+      view.dispatchEvent(new Event('pagehide'));
+    }
+    const restored = (await localChats.read())!;
+    await localChats.write(restored, restored.conversations);
+    const migrated = await transferStoredChats(db);
+    db.close();
+    expect(migrated?.conversations[1]).toMatchObject({ id: 'damaged', messages: [
+      { content: '保留历史正文', options: { attachments: [{ id: lost.id }, { id: shared.id }] } },
+    ] });
+    expect(await (await localChats.readFile(restored.attachments[0])).text()).toBe(replacement.id);
+    const [absent, present] = restored.conversations[1].messages[0].options!.attachments;
+    await expect(localChats.readFile(absent)).rejects.toThrow('聊天附件无法读取');
+    expect(await (await localChats.readFile(present)).text()).toBe(shared.id);
+  } finally {
+    view.dispatchEvent(new Event('pagehide'));
+    vi.unstubAllGlobals();
+  }
+});
+
+it('旧版整份聊天在首次保存时完整转存，随后只写改动的会话', async () => {
+  const conversations = ['old', 'edited', 'other'].map(id => ({
+    id, title: id, messages: [{ id: id + '-m', role: 'user' as const, content: '保留 ' + id }],
+  }));
+  const db = await openChatDatabase();
+  const tx = db.transaction('state', 'readwrite');
+  tx.objectStore('state').put({ version: 1, conversations, attachments: [], draft: '',
+    activeConversation: 'edited', modelId: 'test', effort: 'auto', webSearch: true }, 'current');
+  await new Promise<void>((resolve) => { tx.oncomplete = () => resolve(); });
+  db.close();
+  const legacy = (await localChats.read())!;
+  await localChats.write(legacy, legacy.conversations);
+  const next = { ...legacy, conversations: legacy.conversations.map(c =>
+    c.id === 'edited' ? { ...c, draft: 'new draft' } : c) };
+  const put = vi.spyOn(IDBObjectStore.prototype, 'put');
+  try {
+    await localChats.write(next, legacy.conversations);
+    expect(put.mock.calls.map(call => call[1])).toEqual([['conversation', 'edited'], 'current']);
+    expect((await localChats.read())?.conversations).toEqual(next.conversations);
+  } finally { put.mockRestore(); }
+});
 
 it('来源未核验提案及问题在确认前后均完整恢复', async () => {
   const message = {
@@ -104,7 +255,7 @@ it('聊天、草稿与附件恢复；同一附件只保存一次；删除仅回�
   await localChats.write({ ...snapshot, draft: '最新草稿' });
   expect(put.mock.contexts.filter((store) => store.name === 'files')).toHaveLength(1);
   const restored = (await localChats.read())!;
-  expect(await restored.conversations[0].messages[0].options!.attachments[0].file.text()).toBe(
+  expect(await (await localChats.readFile(restored.conversations[0].messages[0].options!.attachments[0])).text()).toBe(
     '正文',
   );
   expect(restored.conversations[0].messages[1]).toMatchObject({
@@ -123,6 +274,24 @@ it('聊天、草稿与附件恢复；同一附件只保存一次；删除仅回�
   });
   expect(restored.draft).toBe('最新草稿');
   expect(restored.conversations[0].messages[1].profileGeneration).toBeUndefined();
+  const directoryDb = await openChatDatabase();
+  try {
+    const transaction = directoryDb.transaction('state', 'readwrite');
+    const store = transaction.objectStore('state');
+    const get = store.get('current');
+    let original: unknown;
+    get.onsuccess = () => {
+      original = get.result;
+      store.put({ ...get.result, index: [{ id: 'c', files: [] }] }, 'current');
+    };
+    await new Promise<void>(resolve => { transaction.oncomplete = () => resolve(); });
+    await expect(localChats.read()).rejects.toThrow('聊天目录');
+    const fix = directoryDb.transaction('state', 'readwrite');
+    fix.objectStore('state').put(original, 'current');
+    await new Promise<void>(resolve => { fix.oncomplete = () => resolve(); });
+  } finally {
+    directoryDb.close();
+  }
   // A failing metadata write aborts the whole transaction and leaves the last version.
   put.mockRestore();
   const nativePut = IDBObjectStore.prototype.put;

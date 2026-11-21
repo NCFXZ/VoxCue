@@ -1,5 +1,7 @@
+import { InterviewReveal } from './InterviewReveal';
 import { t } from '../i18n';
 import { useId, useState } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Button } from './ui/button';
 import { Modal } from './ui/modal';
 import type { ChatMessage } from '../services/preparation';
@@ -51,7 +53,9 @@ export function ProfileValue({
   );
 }
 export function ProfileProposal({ message }: { message: ChatMessage }) {
-  const state = usePreparation();
+  const state = usePreparation(useShallow(({ info, selectSkillIds, selectProfileFields, dismissProfile, updateInfo }) =>
+    ({ info, selectSkillIds, selectProfileFields, dismissProfile, updateInfo }),
+  ));
   const [reading, setReading] = useState<{ field: ProfileField; skillId?: string } | null>(null);
   const [skillsExpanded, setSkillsExpanded] = useState<boolean>();
   const skillsId = useId();
@@ -177,6 +181,11 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
     : undefined;
   const readingTitle =
     readingSkill?.skill.title ?? (reading ? t(profileLabels[reading.field]) : '');
+  const saveNote = stale
+    ? t('资料已变化，请重新生成提案后保存。')
+    : !chosen
+      ? t('请选择要保存的内容')
+      : t('未选中的内容保持不变');
   const heading = message.applied
     ? '已保存所选资料'
     : message.dismissed
@@ -339,34 +348,32 @@ export function ProfileProposal({ message }: { message: ChatMessage }) {
       </div>
       {pending ? (
         <footer className="proposal-footer">
-          <div className="proposal-footer-note">
-            <span>
-              {stale
-                ? t('资料已变化，请重新生成提案后保存。')
-                : !chosen
-                  ? t('请选择要保存的内容')
-                  : t('未选中的内容保持不变')}
-            </span>
-          </div>
-          <div className="profile-proposal-actions">
-            <Button variant="ghost" onClick={() => state.dismissProfile(message.id)}>
-              <History size={16} />
-              {t('保留原资料')}
-            </Button>
-            <Button
-              variant="outline"
-              disabled={!!stale || !chosen}
-              onClick={() => state.updateInfo(message.changes!, message.id)}
-            >
-              <Check size={16} />
-              {t('保存所选')}
-            </Button>
-          </div>
-          {message.error && (
-            <div className="danger-text" role="alert">
-              {t(message.error)}
+          <div className="proposal-footer-main">
+            <InterviewReveal className="proposal-footer-note" resizeKey={saveNote}>
+              <span>{saveNote}</span>
+            </InterviewReveal>
+            <div className="profile-proposal-actions">
+              <Button variant="ghost" onClick={() => state.dismissProfile(message.id)}>
+                <History size={16} />
+                {t('保留原资料')}
+              </Button>
+              <Button
+                variant="outline"
+                disabled={!!stale || !chosen}
+                onClick={() => state.updateInfo(message.changes!, message.id)}
+              >
+                <Check size={16} />
+                {t('保存所选')}
+              </Button>
             </div>
-          )}
+          </div>
+          <InterviewReveal resizeKey={message.error ?? ''}>
+            {message.error ? (
+              <div className="danger-text" role="alert">
+                {t(message.error)}
+              </div>
+            ) : null}
+          </InterviewReveal>
         </footer>
       ) : (
         <div className="proposal-footer-note proposal-result">

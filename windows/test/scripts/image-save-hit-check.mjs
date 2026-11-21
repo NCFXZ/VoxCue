@@ -148,6 +148,8 @@ export async function checkImageSaveHit(app, page, viewer) {
             ...options,
             defaultPath: target,
           });
+          if (!result.canceled && process.getBuiltinModule('path').relative(target, result.filePath) !== '')
+            throw Error('The native fixture requires its own temporary PNG destination');
           globalThis.imageRealSaveResult = { canceled: result.canceled };
           return result;
         } catch (error) {

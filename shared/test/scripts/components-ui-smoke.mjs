@@ -8,6 +8,11 @@ import path from 'node:path';
 import assert from 'node:assert/strict';
 import { captureRequested } from './capture-requested.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
+import { assertSettingsHeadingGaps } from './assert-settings-heading-gaps.mjs';
+import {
+  assertSettingsHighlight,
+  assertLocationHighlightMotion,
+} from './assert-settings-highlight.mjs';
 
 for (const name of ['profile', 'tmp', 'home'])
   await mkdir(path.join(testRoot, name), { recursive: true });
@@ -91,13 +96,177 @@ try {
     colorScheme: process.argv.includes('--dark-preview') ? 'dark' : 'light',
   });
   page.on('pageerror', (error) => errors.push(error.message));
-  await page.locator('.chat-column > .components-notice').waitFor();
+  const homeNotice = '.chat-settings-notices .components-notice[aria-label="本地组件提示"]';
+  await page.locator(homeNotice).waitFor();
+  await page.waitForFunction((selector) => {
+    const notice = document.querySelector(selector);
+    return notice && !notice.hasAttribute('data-menu-height-motion');
+  }, homeNotice);
+  const initialItems = await app.evaluate(() => globalThis.uiComponents.value.items);
+  for (const reducedMotion of ['no-preference', 'reduce']) {
+    await page.emulateMedia({ reducedMotion });
+    for (const show of [false, true]) {
+      await page.evaluate(({ selector, show }) => {
+        const samples = [];
+        const started = performance.now();
+        window.homeNoticeMotion = new Promise((resolve) => {
+          function sample() {
+            const surface = document.querySelector(selector);
+            const outro = surface?.hasAttribute('data-menu-outro');
+            const moving = surface?.hasAttribute('data-menu-height-motion');
+            samples.push({
+              height: surface?.getBoundingClientRect().height ?? 0,
+              moving: !!moving,
+              outro: !!outro,
+              interactiveExit: outro && (!surface.closest('[inert]') || surface.getAttribute('aria-hidden') !== 'true'),
+            });
+            if ((!moving && !outro && !!surface === show) || performance.now() - started > 5000)
+              resolve(samples);
+            else requestAnimationFrame(sample);
+          }
+          sample();
+        });
+      }, { selector: homeNotice, show });
+      await app.evaluate((_electron, { show, initialItems }) => {
+        const service = globalThis.uiComponents;
+        for (const item of service.value.items) {
+          const original = initialItems.find((original) => original.id === item.id);
+          item.phase = show ? original.phase : 'ready';
+          item.received = show ? original.received : item.bytes;
+        }
+        service.publish(show ? 'needed' : 'ready');
+      }, { show, initialItems });
+      const samples = await page.evaluate(() => window.homeNoticeMotion);
+      const last = samples.at(-1);
+      assert.equal(last.height > 0, show);
+      assert.ok(!last.moving && !last.outro);
+      assert.ok(samples.every((sample) => !sample.interactiveExit));
+      const animated = reducedMotion !== 'reduce';
+      assert.equal(samples.some((sample) => sample.moving), animated);
+      assert.equal(samples.some((sample) => sample.outro), animated && !show);
+      if (animated) {
+        const fullHeight = Math.max(samples[0].height, last.height);
+        assert.ok(samples.some(({ height }) => height > 2 && height < fullHeight - 1),
+          'the home notice must visibly expand or collapse between its endpoints');
+      }
+    }
+  }
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  // A generic speech notice offers either ASR component, including when knowledge is also missing.
+  for (const ragReady of [false, true]) {
+    await app.evaluate((_electron, ready) => {
+      const service = globalThis.uiComponents;
+      const rag = service.value.items.find((item) => item.id === 'rag');
+      rag.phase = ready ? 'ready' : 'pending';
+      rag.received = ready ? rag.bytes : 0;
+      service.publish('needed');
+    }, ragReady);
+    const notice = page.locator(homeNotice);
+    await notice.getByText(ragReady ? '语音识别组件未下载' : /语音识别.*知识库检索|知识库检索.*语音识别/, { exact: false }).waitFor();
+    await notice.getByRole('button', { name: '前往设置', exact: true }).click();
+    const destination = page.getByRole('dialog', { name: '设置', exact: true });
+    await destination.locator('[data-settings-target="speech"][data-location-highlight]').waitFor();
+    const highlighted = await destination.locator('[data-settings-target][data-location-highlight]')
+      .evaluateAll((rows) => rows.map((row) => row.dataset.settingsTarget).sort());
+    assert.deepEqual(highlighted, ragReady ? ['qwen', 'speech'] : ['qwen', 'rag', 'speech']);
+    await assertSettingsHighlight(destination.locator('[data-settings-target="speech"]'));
+    await destination.getByRole('button', { name: '关闭设置', exact: true }).click();
+  }
+  await app.evaluate((_electron, original) => {
+    const service = globalThis.uiComponents;
+    const rag = service.value.items.find((item) => item.id === 'rag');
+    rag.phase = original.phase;
+    rag.received = original.received;
+    service.publish('needed');
+  }, initialItems.find((item) => item.id === 'rag'));
   if (modelsOnly)
     await app.evaluate(({ BrowserWindow }) =>
       BrowserWindow.getAllWindows()
         .find((win) => win.isVisible())
         .setContentSize(1000, 900),
     );
+  await page.getByRole('button', { name: '知识库', exact: true }).click();
+  const locateRag = page
+    .locator('.knowledge-page .components-notice')
+    .getByRole('button', { name: '前往设置', exact: true });
+  await locateRag.press('Enter');
+  await assertSettingsHighlight(page.locator('[data-settings-target="rag"]'), { keyboard: true });
+  assert.equal(await page.locator('.component-row[data-location-highlight]:not([data-settings-target="rag"])').count(), 0);
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await page.getByRole('button', { name: '新对话', exact: true }).click();
+  const profileToggle = page.getByRole('button', { name: '个人信息', exact: true });
+  await profileToggle.click();
+  const disclosure = page.locator('.personal-panel details[aria-label="面试知识库"]');
+  await disclosure.locator(':scope > summary').click();
+  const separator = page.getByRole('separator', { name: '调整个人信息宽度' });
+  for (const panelWidth of [380, 300]) {
+    if (panelWidth === 300) {
+      for (let step = 0; step < 4; step++) await separator.press('ArrowRight');
+      await page.emulateMedia({ reducedMotion: 'reduce' });
+    }
+    await page.waitForFunction(
+      (width) => Math.abs(document.querySelector('.personal-panel').getBoundingClientRect().width - width) <= 1,
+      panelWidth,
+    );
+    const help = disclosure.locator('.profile-knowledge-help');
+    await help.scrollIntoViewIfNeeded();
+    // The disclosure chevron briefly extends beyond the heading as it rotates.
+    await disclosure.evaluate((group) =>
+      Promise.all(group.getAnimations({ subtree: true })
+        .filter((animation) => animation.effect?.getTiming().iterations !== Infinity)
+        .map((animation) => animation.finished.catch(() => {}))),
+    );
+    const layout = await help.evaluate((help) => {
+      const group = help.closest('details');
+      const choice = group.querySelector('button[aria-label="面试知识库"]').getBoundingClientRect();
+      const text = help.querySelector('p');
+      const copy = document.createRange();
+      copy.selectNodeContents(text);
+      const lines = [...copy.getClientRects()].filter((r) => r.width && r.height);
+      const bounds = help.getBoundingClientRect();
+      const action = help.querySelector('button').getBoundingClientRect();
+      const scroll = group.closest('.personal-panel-scroll');
+      const scrollLeft = scroll.getBoundingClientRect().left + scroll.clientLeft;
+      const section = group.getBoundingClientRect();
+      const clipped = [choice, bounds, action, ...lines].some((rect) =>
+        rect.left < Math.max(section.left, scrollLeft) - 1 ||
+        rect.right > Math.min(section.right, scrollLeft + scroll.clientWidth) + 1,
+      );
+      const widths = Object.fromEntries(
+        Object.entries({ help, group, scroll, controls: help.parentElement }).map(([name, el]) => [
+          name, { client: el.clientWidth, scroll: el.scrollWidth },
+        ]),
+      );
+      const inside = (r) =>
+        r.left >= bounds.left - 1 &&
+        r.right <= bounds.right + 1 &&
+        r.top >= bounds.top - 1 &&
+        r.bottom <= bounds.bottom + 1;
+      return {
+        gap: bounds.top - choice.bottom,
+        inside: inside(action) && lines.length > 0 && lines.every(inside),
+        separate: lines.every(
+          (r) => r.right <= action.left - 1 || r.left >= action.right + 1 ||
+            r.bottom <= action.top - 1 || r.top >= action.bottom + 1,
+        ),
+        overflows: clipped || Object.values(widths).some((w) => w.scroll > w.client + 1),
+        widths,
+      };
+    });
+    assert.ok(
+      layout.gap >= 11.5 && layout.inside && layout.separate && !layout.overflows,
+      JSON.stringify({ panelWidth, ...layout }),
+    );
+    await help.getByRole('button', { name: '前往设置', exact: true }).click();
+    const ragRow = page.locator('[data-settings-target="rag"]');
+    await assertLocationHighlightMotion(ragRow, panelWidth === 300);
+    assert.ok(await ragRow.evaluate((node) => node.contains(document.activeElement)));
+    await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  }
+  await separator.press('Home');
+  await disclosure.locator(':scope > summary').click();
+  await profileToggle.click();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
   for (const width of modelsOnly ? [] : [1400, 1080, 960]) {
     await app.evaluate(
       ({ BrowserWindow }, width) =>
@@ -287,12 +456,12 @@ try {
         );
         await page.getByRole('button', { name: '新对话', exact: true }).click();
         const preparation = await noticeSurface(
-          '.chat-column > .components-notice',
+          homeNotice,
           '.chat-column',
         );
         await page.getByRole('button', { name: '知识库', exact: true }).click();
         const listing = await noticeSurface(
-          '.knowledge-page .management-container > .components-notice',
+          '.knowledge-page .management-container .components-notice',
           '.management-container',
           true,
         );
@@ -300,7 +469,7 @@ try {
         const detail = page.getByRole('dialog', { name: '横幅布局回归', exact: true });
         await detail.waitFor();
         const dialog = await noticeSurface(
-          '.knowledge-detail-dialog .dialog-scroll > .components-notice',
+          '.knowledge-detail-dialog .dialog-scroll .components-notice',
           '.dialog-scroll',
           true,
         );
@@ -330,6 +499,7 @@ try {
     .getByRole('navigation', { name: '设置分类' })
     .getByRole('button', { name: '本地组件', exact: true })
     .click();
+  if (!modelsOnly) await assertSettingsHeadingGaps(page, ['本地组件']);
   const rows = settings.locator('.component-row');
   const speechGroup = settings.getByRole('region', { name: '语音识别组件', exact: true });
   const knowledgeGroup = settings.getByRole('region', { name: '知识库检索组件', exact: true });
@@ -351,22 +521,12 @@ try {
           .map((animation) => animation.finished),
       );
     });
-    const panelGap = await settings.evaluate(
-      (dialog) =>
-        dialog.querySelector('.components-panel').getBoundingClientRect().top -
-        dialog.querySelector('.settings-content-heading').getBoundingClientRect().bottom,
-    );
-    // Blink layout uses 1/64 CSS px; fractional Windows DPI introduces float32
-    // noise when the two DOMRect coordinates are subtracted.
-    assert.equal(
-      await settings
-        .locator('.components-panel')
-        .evaluate((panel) => getComputedStyle(panel).marginTop),
-      '16px',
-    );
+    const panelGap = await settings.evaluate(dialog =>
+      dialog.querySelector('.components-panel').getBoundingClientRect().top -
+      dialog.querySelector('#settings-category-title').getBoundingClientRect().bottom);
     assert.ok(
-      Math.round(panelGap * 64) >= 16 * 64,
-      `Component card must clear the heading separator: ${panelGap}px`,
+      Math.abs(panelGap - 26) <= 1,
+      `Expected 26 CSS px from the category title to the component card, measured ${panelGap}px`,
     );
     for (let index = 0; index < rowCount; index++) {
       const row = rows.nth(index),
@@ -737,11 +897,11 @@ try {
     assert.ok(
       await modelSettings
         .locator('.speech-model-notices')
-        .evaluate(
-          (notice) =>
-            notice.getBoundingClientRect().top >=
-            notice.previousElementSibling.getBoundingClientRect().bottom,
-        ),
+        .evaluate((notice) => {
+          const deviceRow = notice.closest('.speech-recognition-settings')
+            .querySelector('[data-settings-target="speech-device"]');
+          return notice.getBoundingClientRect().top >= deviceRow.getBoundingClientRect().bottom;
+        }),
     );
   if (['win32', 'darwin'].includes(process.platform)) {
     await device.click();
@@ -1002,6 +1162,31 @@ try {
       .getByRole('button', { name: '前往设置', exact: true })
       .click();
     await modelSettings.waitFor();
+    await page.waitForFunction(() => {
+      const control = document.activeElement?.closest('[data-settings-target]');
+      const region = control?.closest('[data-settings-highlight-group][data-location-highlight]');
+      if (!region || control.dataset.settingsTarget !== 'speech-model') return false;
+      const rect = region.getBoundingClientRect();
+      const area = region.closest('.settings-content-body').getBoundingClientRect();
+      return rect.top >= area.top - 1 && rect.bottom <= area.bottom + 1;
+    });
+    const recognition = modelSettings.getByRole('group', { name: '语音识别', exact: true });
+    await assertSettingsHighlight(recognition);
+    assert.ok(await recognition.evaluate(region => {
+      const box = region.getBoundingClientRect();
+      const style = getComputedStyle(region);
+      const children = [
+        region.querySelector('[data-settings-target="speech-model"]'),
+        region.querySelector('[data-settings-target="speech-device"]'),
+        region.querySelector('.speech-model-notices'),
+      ];
+      return style.borderTopStyle === 'solid' && parseFloat(style.borderTopWidth) > 0 &&
+        style.borderBottomStyle === 'solid' && parseFloat(style.borderBottomWidth) > 0 &&
+        children.every(child => child && child.getBoundingClientRect().height > 0 &&
+          child.getBoundingClientRect().top >= box.top && child.getBoundingClientRect().bottom <= box.bottom) &&
+        !region.querySelector('[data-location-highlight]');
+    }), 'Both speech selectors and the CPU notice share a single highlight from divider to divider');
+    await page.waitForFunction(() => !document.querySelector('[data-location-highlight]'));
     assert.equal(
       await settings
         .getByRole('navigation', { name: '设置分类' })

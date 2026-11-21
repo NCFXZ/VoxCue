@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  GroundingProfile,
-  interleaveSources,
-  type GroundDocument,
+  GroundingIndex, cleanGroundingQuery, isGroundingFollowUp, selectHistory, unitVector,
 } from '../../electron/backend/knowledge/grounding';
 import {
   encodeRetrievalContext,
@@ -12,130 +10,56 @@ import { InterviewContext } from '../../electron/application/interviewContext';
 import { buildRagContext } from '../../electron/application/ragContext';
 import type { KnowledgeHit, KnowledgeItem } from '../../electron/contracts/knowledge';
 
-const document = (id: string, headings: string[]): GroundDocument => ({
-  id,
-  title: id + '.md',
-  items: headings.map((title, i) => ({
-    itemId: id + ':' + i,
-    documentId: id,
-    title,
-    section: '',
-    kind: 'qa',
-    content: title + '\n' + title,
-    followUpIds: [],
-  })),
-});
-describe('corpus-owned retrieval scopes', () => {
-  it('uses document identity across free heading prose and does not learn names from cross mentions', () => {
-    const profile = new GroundingProfile(
-      [
-        document('first', ['请介绍白瓷项目的方案？', '在白瓷项目里得到什么结果？']),
-        {
-          ...document('second', ['玄鹭项目怎么做？', '能说说玄鹭项目的验证吗？']),
-          items: document('second', ['玄鹭项目怎么做？', '能说说玄鹭项目的验证吗？']).items.map(
-            (i) => ({ ...i, content: i.content + '结果不属于白瓷。' }),
-          ),
-        },
-        document('technical', ['JWT签名验证是什么？', '如何验证JWT退出？']),
-        document('other', ['布隆过滤器如何工作？', '如何验证布隆过滤器？']),
-      ],
-      [],
-    );
-    expect(profile.mentions('白瓷后续如何处理？')).toEqual(['first']);
-    expect(profile.mentions('比较白瓷跟玄鹭')).toEqual(['first', 'second']);
-    expect(profile.mentions('怎么验证一下？')).toEqual([]);
-    expect(profile.isProject('technical')).toBe(false);
+function vector(first: number, second = 0) {
+  const v = Array<number>(384).fill(0);
+  v[0] = first; v[1] = second;
+  v[2] = Math.sqrt(Math.max(0, 1 - first * first - second * second));
+  return unitVector(v);
+}
+
+describe('interview retrieval ranking', () => {
+  it('cleans spoken fillers and repairs spaced English terms without modifying follow-up cues', () => {
+    expect(cleanGroundingQuery('嗯，我想问一下，P I D 的 C 加加 实现')).toBe('PID 的 C++ 实现');
+    expect(cleanGroundingQuery('这个东西')).toBe('这个东西');
+    expect(cleanGroundingQuery('R O S 二的定位')).toBe('ROS2的定位');
+    expect(isGroundingFollowUp('回到较早的恢复策略，这一步具体如何验证？')).toBe(true);
+    expect(isGroundingFollowUp('边界，怎么测？')).toBe(true);
+    expect(isGroundingFollowUp('请描述采样设备出现故障时的诊断流程')).toBe(false);
   });
-  it('keeps close names distinct instead of borrowing a shared prefix', () => {
-    const profile = new GroundingProfile(
-      [
-        document('a', ['海棠北项目方案？', '海棠北项目结果？']),
-        document('b', ['海棠南项目方案？', '海棠南项目结果？']),
-      ],
-      [],
-    );
-    expect(profile.mentions('海棠北有多少人？')).toEqual(['a']);
-    expect(profile.mentions('海棠另一个版本')).toEqual([]);
+
+  it('chooses one prior question, applying the 0.06 preference only without a return cue', () => {
+    const current = { text: 'current', vector: vector(1) };
+    const recent = [{ text: 'latest', vector: vector(0.90) }, { text: 'older', vector: vector(0.95) }];
+    expect(selectHistory('那怎么验证？', current, recent)?.text).toBe('latest');
+    expect(selectHistory('回到之前那个问题', current, recent)?.text).toBe('older');
+    const tied = { ...recent[1], text: 'oldest' };
+    expect(selectHistory('之前那个问题', current, [recent[1], tied])).toBe(recent[1]);
   });
-  it('isolates named projects that share one physical source document', () => {
-    const mixed = document('mixed', ['海棠北项目如何上传？', '海棠南项目如何上传？']);
-    mixed.items[0].content = '## 海棠北项目如何上传？\n海棠北采用断点续传。';
-    mixed.items[1].content = '## 海棠南项目如何上传？\n海棠南采用完整上传。';
-    const profile = new GroundingProfile(
-      [mixed, document('reference', ['如何验证上传？', '上传的校验方法？'])],
-      [],
-    );
-    expect(profile.restrictRoots('海棠北怎么恢复？', [], ['mixed'])).toEqual(['mixed:0']);
-    expect(profile.restrictRoots('那恢复呢？', ['海棠南项目如何上传？'], ['mixed'])).toEqual([
-      'mixed:1',
-    ]);
-    expect(profile.restrictRoots('比较海棠北和海棠南', [], ['mixed'])).toEqual([
-      'mixed:0',
-      'mixed:1',
-    ]);
-    expect(profile.restrictRoots('海棠别的项目呢？', [], ['mixed'])).toEqual([]);
-  });
-  it('does not let a project consume the identity of a shared technical subject', () => {
-    const tech = document('technical', ['PID控制如何工作？', 'PID控制有什么局限？']);
-    const project = document('project', ['白瓷项目如何使用PID？', '白瓷项目PID结果如何？']);
-    const profile = new GroundingProfile([tech, project], []);
-    expect(profile.mentions('PID的实现')).toEqual(['technical']);
-    expect(profile.mentions('白瓷项目呢？')).toEqual(['project']);
-  });
-  it('keeps a heading-owned identifier when another body merely mentions it', () => {
-    const owner = document('owner', ['DeltaChannel如何传输？', '重连确认有哪些状态？']);
-    const other = document('other', ['NebulaStore如何落盘？', 'NebulaStore如何恢复？']);
-    other.items[0].content += '\n也可给DeltaChannel提供数据。';
-    const profile = new GroundingProfile([owner, other], []);
-    expect(profile.subjects('DeltaChannel现在怎么处理？')).toEqual(['owner']);
-    expect(profile.subjects('DeltaChannel如何传输，NebulaStore如何恢复？')).toEqual([
-      'owner',
-      'other',
-    ]);
-  });
-  it('retains both requested project clauses and the latest correction subject', () => {
-    const profile = new GroundingProfile(
-      [
-        document('a', ['枫蓝项目怎么部署？', '枫蓝项目如何恢复？']),
-        document('b', ['玄涧项目怎么部署？', '玄涧项目如何恢复？']),
-      ],
-      [],
-    );
-    expect(profile.subjects('枫蓝如何部署，玄涧如何恢复？')).toEqual(['a', 'b']);
-    expect(profile.subjects('先放下枫蓝，玄涧接着介绍。')).toEqual(['b']);
-    expect(profile.unknownProject('不是枫蓝，现在问OrionEdge项目。')).toBe(true);
-    expect(profile.unknownProject('枫蓝讲过了，瑛琬项目呢？')).toBe(true);
-    expect(profile.unknownProject('枫蓝项目如何恢复？')).toBe(false);
-    expect(profile.unknownProject('这个项目如何恢复？')).toBe(false);
-    expect(profile.unknownProject('依据枫蓝的资料，给出该项目的参数。')).toBe(false);
-  });
-  it('checks a current subject against headings rather than generic answer prose', () => {
-    const profile = new GroundingProfile(
-      [
-        document('a', ['几何压缩如何编码？', '几何压缩怎么恢复？']),
-        document('b', ['顺序分片如何传输？', '顺序分片怎么确认？']),
-      ],
-      [],
-    );
-    expect(profile.identifies('现在讨论几何压缩的边界', 'a')).toBe(true);
-    expect(profile.identifies('那后面呢，再详细一点', 'a')).toBe(false);
-  });
-  it('reserves early candidate slots for every source under a dominant source', () => {
+
+  it('combines independent best dense and BM25 slices per root and adds exactly one full prior score', async () => {
+    const slice = (root: string, id: string, text: string, v: Float32Array) => ({
+      documentId: 'synthetic', rootItemId: root, itemId: id, chunkId: id + '-0', text, vector: v,
+    });
     const rows = [
-      ...Array.from({ length: 60 }, (_, i) => ({ source: 'a', value: i })),
-      { source: 'b', value: 100 },
-      { source: 'c', value: 200 },
-      { source: 'b', value: 101 },
+      slice('a', 'a', 'needle', vector(0.3, 0.1)),
+      slice('a', 'child', 'body', vector(0.90, 0.3)),
+      slice('b', 'b', 'previous', vector(0.93, 0.35)),
+      slice('c', 'c', 'prior', vector(0.1, 0.99)),
     ];
-    const selected = interleaveSources(rows, (r) => r.source);
-    expect(selected.slice(0, 3).map((r) => r.source)).toEqual(['a', 'b', 'c']);
-    expect(selected.filter((r) => r.source === 'a').map((r) => r.value)).toEqual(
-      Array.from({ length: 60 }, (_, i) => i),
-    );
-    expect(new Set(selected).size).toBe(rows.length);
-    expect(interleaveSources([], String)).toEqual([]);
+    const read = async function* () { yield* rows; };
+    const signal = new AbortController().signal;
+    const index = await GroundingIndex.load(read, signal);
+    const current = { text: 'needle needle', vector: vector(1) }, prior = { text: 'prior', vector: vector(0, 1) };
+    const base = await index.rank(read, current, undefined, signal);
+    expect(base.map(v => v.row.itemId)).toEqual(['child', 'b', 'c']);
+    expect(base[0].cosine).toBeCloseTo(0.90, 6);
+    expect(base[0].score).toBeCloseTo(0.95, 6);
+    const combined = await index.rank(read, current, prior, signal);
+    expect(combined.map(v => v.row.rootItemId)).toEqual(['b', 'a', 'c']);
+    expect(combined.map(v => v.score)).toEqual([expect.closeTo(1.28, 6), expect.closeTo(1.25, 6), expect.closeTo(1.14, 6)]);
   });
 });
+
 describe('trusted thread proposals', () => {
   it('preserves several colloquial follow-ups without inspecting their vocabulary', () => {
     const context = new InterviewContext();
@@ -145,7 +69,7 @@ describe('trusted thread proposals', () => {
     context.answer(prior, '虚构的新项目，并非实际发言');
     const snapshot = context.prepare('c', '重来一回也不会乱么？');
     const decoded = readRetrievalContext(snapshot.retrievalQuery!);
-    expect(decoded?.previous).toEqual(['请讲讲分片重传和文件校验。', '一半没了怎么办？']);
+    expect(decoded?.previous).toEqual(['请讲讲分片重传和文件校验。', '一半没了怎么办？', '再往后呢？']);
     expect(snapshot.turns.at(-1)?.content).toBe('重来一回也不会乱么？');
     expect(snapshot.retrievalQuery).not.toContain('虚构');
     context.event({ type: 'gap', source: 'system', message: 'missing' });
@@ -156,13 +80,15 @@ describe('trusted thread proposals', () => {
       '当前问题'.repeat(100),
       Array.from({ length: 10 }, (_, i) => i + '前文'.repeat(100)),
     )!;
-    expect(value.length).toBeLessThanOrEqual(1000);
-    expect(readRetrievalContext(value)?.previous.length).toBeLessThanOrEqual(6);
+    expect(readRetrievalContext(value)?.previous.map(text => text.length)).toEqual([200, 200, 200]);
+    expect(readRetrievalContext(value)?.previous.map(text => text[0])).toEqual(['7', '8', '9']);
     expect(readRetrievalContext('ordinary question')).toBeUndefined();
     expect(
       readRetrievalContext('VoxCue retrieval context v2\n{"current":"q","previous":[1]}'),
     ).toBeUndefined();
-    expect(encodeRetrievalContext('字'.repeat(701), ['主题'])).toBeUndefined();
+    const long = '字'.repeat(6000);
+    expect(readRetrievalContext(encodeRetrievalContext(long, ['主题'])!)).toEqual({ current: long, previous: ['主题'] });
+    expect(encodeRetrievalContext(long + '字', ['主题'])).toBeUndefined();
   });
 });
 describe('bounded root dependency bundles', () => {

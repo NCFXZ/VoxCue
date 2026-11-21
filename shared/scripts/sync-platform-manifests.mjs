@@ -120,6 +120,7 @@ if (process.argv.includes('--check')) {
     'windows',
     'macos',
     'shared',
+    'docs',
     'AGENTS.md',
     'PROGRESS.md',
     'README.md',

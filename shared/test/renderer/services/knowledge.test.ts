@@ -1,7 +1,9 @@
 import 'fake-indexeddb/auto';
+import { IDBFactory } from 'fake-indexeddb';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   localKnowledge,
+  openDocumentsDatabase,
   documentAccept,
   validateFiles,
   previewDocument,
@@ -9,7 +11,7 @@ import {
 } from '../../../../shared/src/services/knowledge';
 async function legacyBackups(seed: LocalDocument[] = []) {
   const db = await new Promise<IDBDatabase>((resolve) => {
-    const request = indexedDB.open('voxcue-original-backups', 1);
+    const request = indexedDB.open('voxcue-original-backups');
     request.onupgradeneeded = () =>
       request.result.createObjectStore('versions', { keyPath: 'backupId' });
     request.onsuccess = () => resolve(request.result);
@@ -158,10 +160,7 @@ describe('本地知识库', () => {
     const id = crypto.randomUUID();
     await localKnowledge.saveBase({ id, name: '忽略格式', createdAt: Date.now() });
     await localKnowledge.importDocuments(id, [new File(['old original'], 'same.txt')]);
-    const db = await new Promise<IDBDatabase>((resolve) => {
-      const request = indexedDB.open('copilot-local-documents', 1);
-      request.onsuccess = () => resolve(request.result);
-    });
+    const db = await openDocumentsDatabase(true);
     await new Promise<void>((resolve, reject) => {
       const tx = db.transaction('documents', 'readwrite');
       for (const name of ['slides.pptx', 'sheet.xls'])
@@ -317,5 +316,45 @@ describe('本地知识库', () => {
     await localKnowledge.deleteBase(second);
     expect((await legacyBackups()).some((value) => value.baseId === second)).toBe(false);
     await localKnowledge.deleteBase(first);
+  });
+  it('升级旧备份库后只按所选文档或知识库的主键删除，旧窗口占用时可以重试', async () => {
+    vi.stubGlobal('indexedDB', new IDBFactory());
+    vi.stubGlobal('window', {});
+    const base = { id: 'selected', name: 'Synthetic', createdAt: 1 };
+    await localKnowledge.saveBase(base);
+    await localKnowledge.importDocuments(base.id, [new File(['one'], 'one.txt'), new File(['two'], 'two.txt')]);
+    const [one, two] = await localKnowledge.listDocuments(base.id);
+    await legacyBackups([one, one, two, ...Array.from({ length: 997 }, (_, index) => ({
+      ...two, id: 'other-' + index, baseId: 'unrelated',
+    }))]);
+    const old = await new Promise<IDBDatabase>((resolve, reject) => {
+      const request = indexedDB.open('voxcue-original-backups', 1);
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    try {
+      await expect(localKnowledge.deleteDocument(one.id)).rejects.toThrow('原件备份删除失败');
+      expect(await localKnowledge.listDocuments(base.id)).toHaveLength(2);
+    } finally { old.close(); }
+    const step = IDBCursor.prototype.continue;
+    const visited: string[] = [];
+    const cursor = vi.spyOn(IDBCursor.prototype, 'continue').mockImplementation(function (this: IDBCursor, key) {
+      const source = this.source;
+      if (source instanceof IDBIndex && source.objectStore.name === 'versions') {
+        expect(this).not.toBeInstanceOf(IDBCursorWithValue);
+        visited.push(source.name);
+      } else if (source instanceof IDBObjectStore && source.name === 'versions') throw Error('全表扫描');
+      return step.call(this, key);
+    });
+    try {
+      await localKnowledge.deleteDocument(one.id);
+      expect(visited).toEqual(['id', 'id']);
+      await localKnowledge.deleteBase(base.id);
+      expect(visited).toEqual(['id', 'id', 'baseId']);
+    } finally { cursor.mockRestore(); }
+    const remaining = await legacyBackups();
+    expect(remaining).toHaveLength(997);
+    expect(remaining.every(doc => doc.baseId === 'unrelated')).toBe(true);
+    expect(await remaining[0].blob.text()).toBe(await two.blob.text());
   });
 });

@@ -16,6 +16,8 @@ export class SpeechController extends SharedSpeechController {
       helper,
       emit,
       {
+        // WASAPI timestamps and libuv's Windows high-resolution clock both use QPC.
+        captureClockNow: () => Number(process.hrtime.bigint()) / 1e6,
         drainBeforeRetire: true,
         automaticRestart: true,
         preprocessorFile: path.join(__dirname, 'echoCancellation.js'),

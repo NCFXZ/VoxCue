@@ -3,11 +3,12 @@ import { mkdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { atomicFile } from '../atomicFile';
 import type { AIService, AuthSession } from '../../contracts/auth';
+import { isApiProvider } from '../../contracts/apiConnections';
 import type { CopilotLoginStorage } from './auth';
 
 // Identity and selection only. OAuth tokens stay in the official runtime's OS vault.
-export function createCopilotLoginStorage(): CopilotLoginStorage {
-  const file = path.join(app.getPath('userData'), 'auth-data', 'copilot-session.json');
+export function createCopilotLoginStorage(root = app.getPath('userData')): CopilotLoginStorage {
+  const file = path.join(root, 'auth-data', 'copilot-session.json');
   return {
     async read() {
       const value = await readJson(file);
@@ -36,12 +37,13 @@ async function writeJson(file: string, value: unknown) {
   await mkdir(path.dirname(file), { recursive: true });
   await atomicFile(file, JSON.stringify(value));
 }
-export function createServiceSelection() {
-  const file = path.join(app.getPath('userData'), 'auth-data', 'service.json');
+export function createServiceSelection(root = app.getPath('userData')) {
+  const file = path.join(root, 'auth-data', 'service.json');
   type Selection = { service: AIService; connected: boolean | null };
   let value: Selection = { service: 'chatgpt', connected: null };
   let revision = 0;
   let repaired = false;
+  let closed = false;
   let pendingSave = Promise.resolve();
   let query: Promise<AuthSession | null> | undefined;
   const ready = readJson(file).then((stored) => {
@@ -50,12 +52,13 @@ export function createServiceSelection() {
     // They left it behind on logout, so an actual provider check is still needed.
     if (stored === 'chatgpt' || stored === 'copilot') value = { service: stored, connected: true };
     else if (
-      stored.version === 2 && (stored.service === 'chatgpt' || stored.service === 'copilot') &&
+      stored.version === 2 && (stored.service === 'chatgpt' || stored.service === 'copilot' || isApiProvider(stored.service)) &&
       typeof stored.connected === 'boolean'
     ) value = { service: stored.service, connected: stored.connected };
     else throw Error('模型服务选择无效，请重新登录。');
   });
   const save = async (service: AIService, connected: boolean) => {
+    if (closed) throw Error('账号已变化，请重新操作。');
     const current = ++revision;
     const job = pendingSave.catch(() => {}).then(() => writeJson(file, { version: 2, service, connected }));
     pendingSave = job;
@@ -67,10 +70,17 @@ export function createServiceSelection() {
   return {
     ready,
     get service() { return value.service; },
+    get connected() { return value.connected; },
     // Retire any late provider result before starting an explicit change.
     changing() {
       revision++;
       query = undefined;
+    },
+    dispose() {
+      closed = true;
+      revision++;
+      query = undefined;
+      return pendingSave.catch(() => {});
     },
     async set(service: AIService, connected: boolean) {
       await ready.catch(() => {}); // An explicit choice can repair invalid metadata.
@@ -84,7 +94,7 @@ export function createServiceSelection() {
       const current = revision;
       await ready.catch((error) => { if (!repaired) throw error; });
       await pendingSave;
-      if (current !== revision) return null;
+      if (closed || current !== revision) return null;
       const { service, connected } = value;
       if (mode === 'startup' && !connected) return null;
       if (mode === undefined && connected === false) return null;

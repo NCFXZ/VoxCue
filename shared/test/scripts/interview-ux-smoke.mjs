@@ -1,4 +1,4 @@
-import { connectUiAccount, openModelMenu } from './install-ui-account.mjs';
+import { connectUiAccount, openModelMenu, openReasoningControl } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
+import { assertSettingsHighlight } from './assert-settings-highlight.mjs';
 
 const nativeProbe =
   process.platform === 'win32'
@@ -150,10 +151,6 @@ async function readinessLayout(dialog, untilReady = false) {
           ),
         ),
       ),
-      tests: [...element.querySelectorAll('.interview-access-row')]
-        .map((row) => row.querySelector('.interview-access-test-slot, button'))
-        .filter(Boolean)
-        .map(rect),
       devices: [...element.querySelectorAll('.interview-start-summary-group > div')]
         .filter((row) =>
           ['系统音频 · 面试官', '麦克风 · 面试者'].includes(row.querySelector('dt').textContent),
@@ -185,7 +182,7 @@ function assertReadinessGeometry(before, after) {
   };
   for (const key of ['dialog', 'summary', 'access', 'list', 'footer'])
     same(before[key], after[key], key);
-  for (const key of ['rows', 'devices', 'statuses', 'tests']) {
+  for (const key of ['rows', 'devices', 'statuses']) {
     assert.equal(after[key].length, before[key].length);
     after[key].forEach((rect, index) => same(before[key][index], rect, `${key}[${index}]`));
   }
@@ -493,7 +490,7 @@ async function geometry(page) {
     return {
       overflow: [
         ...document.querySelectorAll(
-          '.audio-check,.audio-input-meters,.audio-recovery,.interview-settings-dialog,.audio-device-editor',
+          '.audio-recovery,.interview-settings-dialog,.audio-device-editor',
         ),
       ]
         .filter(visible)
@@ -615,9 +612,11 @@ try {
       if (call.op === 'cancel-input-state') return { ...this.uxStatus, inputState: this.uxInput };
       if (call.op === 'switch-recognizer') {
         const previous = this.uxStatus;
-        this.emit({ type: 'status', status: { ...previous, switching: 'loading' } });
+        const switchId = (this.uxSwitchId ?? 0) + 1;
+        this.uxSwitchId = switchId;
+        this.emit({ type: 'status', status: { ...previous, switchId, switching: 'loading' } });
         globalThis.uxSpeechWait = () =>
-          this.emit({ type: 'status', status: { ...previous, switching: 'waiting' } });
+          this.emit({ type: 'status', status: { ...previous, switchId, switching: 'waiting' } });
         if (globalThis.uxHoldSpeech)
           await new Promise((resolve) => {
             globalThis.uxSpeechFinish = resolve;
@@ -716,6 +715,8 @@ try {
     .getByLabel('本地组件提示', { exact: true })
     .getByRole('button', { name: '前往设置', exact: true })
     .click();
+  await page.waitForFunction(() =>
+    document.activeElement?.closest('[data-location-highlight]')?.getAttribute('data-settings-target') === 'speech');
   await page
     .locator('.component-row[data-component-id="speech"]')
     .getByRole('button', { name: '下载', exact: true })
@@ -925,7 +926,7 @@ try {
           accessRowLabels,
         );
         assert.ok(
-          Math.abs(loading.height - Math.min(860, loading.viewportHeight - 48)) <= 1 / 64,
+          Math.abs(loading.height - Math.min(780, loading.viewportHeight - 32)) <= 1 / 64,
           `The start dialog uses its preferred height within the viewport: ${JSON.stringify(loading)}`,
         );
         assert.ok(
@@ -987,10 +988,6 @@ try {
             page,
             pending.locator('.interview-access-status-slot > .quota-skeleton-line').first(),
           );
-          await assertSkeletonClip(
-            page,
-            pending.locator('.interview-access-test-slot > .quota-skeleton-line').first(),
-          );
         }
         const before = await readinessLayout(pending);
         const settling = readinessLayout(pending, true);
@@ -1041,47 +1038,12 @@ try {
     await page.emulateMedia({ reducedMotion: 'no-preference' });
   }
   checks.push(
-    'held readiness IPC keeps five ordered rows and measured status/button placeholders stable, shows the checked shortcut status, fits the 860px preferred height within the viewport, hides unconfirmed device names, and clips real sweep pixels to capsule corners in both palettes and motion preferences',
+    'held readiness IPC keeps ordered checks and measured status placeholders stable, fits the compact dialog within the viewport, hides unconfirmed device names, and clips real sweep pixels to capsule corners in both palettes and motion preferences',
   );
   await page.locator('.interview-start-trigger').click();
   const start = page.getByRole('dialog', { name: '开始面试', exact: true });
-  await page.evaluate(() => {
-    globalThis.uxTestEvents = [];
-    globalThis.uxRemoveListener = window.desktop.onDictationEvent((event) =>
-      globalThis.uxTestEvents.push(event),
-    );
-  });
-  await start.getByRole('button', { name: '测试系统声音', exact: true }).click();
-  await start.getByRole('button', { name: '停止系统声音测试' }).waitFor();
-  await app.evaluate(() =>
-    globalThis.uxHost.emit({
-      type: 'segment',
-      segment: {
-        id: 'test-private',
-        source: 'system',
-        text: '此测试转写不得进入资料或面试',
-        final: true,
-        startMs: Date.now(),
-        endMs: Date.now(),
-        silenceStartMs: Date.now() - 800,
-        reason: 'silence',
-      },
-    }),
-  );
-  await start.getByRole('meter', { name: '系统声音电平', exact: true }).waitFor();
-  assert.equal(
-    await start.getByRole('button', { name: '停止系统声音测试', exact: true }).innerText(),
-    '停止',
-  );
-  await start.getByRole('meter', { name: '系统声音电平', exact: true }).evaluate(
-    (e) =>
-      new Promise((resolve) => {
-        const check = () =>
-          Number(e.getAttribute('aria-valuenow')) > 0 ? resolve() : requestAnimationFrame(check);
-        check();
-      }),
-  );
-  assert.ok(await start.getByRole('button', { name: '确认开始', exact: true }).isDisabled());
+  await start.locator('.interview-access[aria-busy="false"] .interview-access-status').first().waitFor();
+  assert.equal(await start.locator('.interview-access-list button').count(), 0);
   assert.ok(
     await start.getByRole('button', { name: '确认开始', exact: true }).evaluate((element) => {
       const r = element.getBoundingClientRect();
@@ -1101,57 +1063,9 @@ try {
           e.querySelector('.interview-start-actions').getBoundingClientRect().top,
       ),
   );
-  await capture(page, '04-audio-check');
-  await start.getByRole('button', { name: '测试系统声音', exact: true }).waitFor();
-  assert.equal(await start.locator('.audio-check-inline').count(), 0);
-  await start.getByRole('button', { name: '测试麦克风', exact: true }).click();
-  await start.getByRole('meter', { name: '麦克风电平', exact: true }).waitFor();
-  await start.getByRole('button', { name: '停止麦克风测试', exact: true }).click();
-  await start.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
-  const testEvents = await page.evaluate(() => {
-    globalThis.uxRemoveListener();
-    return globalThis.uxTestEvents.map((e) => e.type);
-  });
-  assert.ok(testEvents.includes('activity'));
-  assert.ok(!testEvents.includes('segment'));
-  await start.getByRole('button', { name: '测试麦克风', exact: true }).click();
-  await start.getByRole('meter', { name: '麦克风电平', exact: true }).waitFor();
-  await app.evaluate(() =>
-    globalThis.uxHost.emit({
-      type: 'status',
-      status: { state: 'error', model: 'Synthetic', error: '合成音频检查失败' },
-    }),
-  );
-  await start.getByRole('alert').filter({ hasText: '合成音频检查失败' }).waitFor();
-  await start.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
-  await waitForAsync(app, () => globalThis.uxHost.uxStatus.state === 'idle');
-  await app.evaluate(() => {
-    globalThis.uxHoldAccess = true;
-  });
-  try {
-    await start.getByRole('button', { name: '重新检查', exact: true }).click();
-    await waitForAsync(app, () => typeof globalThis.uxReleaseAccess === 'function');
-    await start.locator('.interview-access[aria-busy="true"]').waitFor();
-    assert.equal(
-      await start.getByText('合成音频检查失败', { exact: true }).count(),
-      0,
-      'A new readiness attempt clears the previous audio-test error while loading',
-    );
-  } finally {
-    await app.evaluate(() => globalThis.uxReleaseAccess?.());
-  }
-  await start.locator('.interview-access[aria-busy="false"]').waitFor();
-  await start.getByRole('button', { name: '测试麦克风', exact: true }).waitFor();
-  assert.equal(
-    await start.getByText('合成音频检查失败', { exact: true }).count(),
-    0,
-    'The previous audio-test error must not return after a fresh readiness check',
-  );
-  assert.equal(
-    await start.getByRole('button', { name: '确认开始', exact: true }).isEnabled(),
-    true,
-  );
-  checks.push('10-second dual-source test, activity-only routing, release before interview');
+  await start.getByRole('button', { name: '重新检查', exact: true }).click();
+  await start.locator('.interview-access[aria-busy="false"] .interview-access-status').first().waitFor();
+  assert.ok(await start.getByRole('button', { name: '确认开始', exact: true }).isEnabled());
 
   // Observe from creation: production deduplicates unchanged native states.
   // A late observer can miss an already-enabled passthrough state entirely.
@@ -1307,7 +1221,8 @@ try {
   checks.push(
     'compact status uses actual source activity with animated decay, source-specific warning tooltip, disabled/paused states and reduced-motion support',
   );
-  await app.evaluate(() =>
+  await app.evaluate(() => {
+    const at = Date.now();
     globalThis.uxHost.emit({
       type: 'segment',
       segment: {
@@ -1315,19 +1230,24 @@ try {
         source: 'system',
         text: '请介绍一个你负责过的项目。',
         final: true,
-        startMs: Date.now(),
-        endMs: Date.now(),
-        silenceStartMs: Date.now() - 800,
+        startMs: at - 1500,
+        endMs: at,
+        silenceStartMs: at - 500,
         reason: 'silence',
       },
-    }),
-  );
+    });
+  });
   assert.equal(await floating.getByRole('button', { name: '取消本次', exact: true }).count(), 0);
   assert.equal(await floating.getByText('待提交问题', { exact: true }).count(), 0);
   assert.equal(await floating.locator('.floating-composer-options').getByRole('status').count(), 0);
   await floating
     .getByText('我会先确认问题和边界，再结合已知事实说明实现方法。', { exact: true })
     .waitFor();
+  const transcriptLayout = () => floating.locator('.floating-transcript .floating-scroll').evaluate(scroll => {
+    const style = getComputedStyle(scroll);
+    return [scroll.clientHeight, style.paddingTop, style.scrollPaddingTop];
+  });
+  const layoutBeforeNotice = await transcriptLayout();
   await app.evaluate(() => {
     clearInterval(globalThis.uxLevels);
     globalThis.uxHost.emit({
@@ -1341,6 +1261,16 @@ try {
     });
   });
   await floating.getByRole('button', { name: '重新连接音频', exact: true }).waitFor();
+  assert.deepEqual(await transcriptLayout(), layoutBeforeNotice);
+  const noticeMaterial = await floating.locator('.floating-transcript .audio-recovery').evaluate(card => {
+    const composer = document.querySelector('.floating-answer .floating-composer');
+    const material = element => {
+      const style = getComputedStyle(element);
+      return [style.backgroundColor, style.backdropFilter, style.borderRadius, style.cornerShape];
+    };
+    return { card: material(card), composer: material(composer) };
+  });
+  assert.deepEqual(noticeMaterial.card, noticeMaterial.composer);
   await badge('系统音频', '异常').waitFor();
   await badge('麦克风', '已暂停').waitFor();
   await badge('语音模型', '已暂停').waitFor();
@@ -1402,6 +1332,22 @@ try {
       JSON.stringify(tooltipLayer));
   checks.push('the hovered source warning paints above the overlapping audio recovery card');
   await capture(floating, '06-audio-recovery');
+  await floating.locator('.audio-recovery').getByRole('button', { name: '设置', exact: true }).click();
+  const recoverySettings = floating.getByRole('dialog', { name: '面试设置', exact: true });
+  const audioRegion = recoverySettings.locator('.interview-audio-settings');
+  await floating.waitForFunction(() =>
+    document.activeElement?.closest('[data-settings-target]')?.getAttribute('data-settings-target') === 'system' &&
+    document.activeElement.closest('.interview-audio-settings')?.hasAttribute('data-location-highlight'));
+  await assertSettingsHighlight(audioRegion);
+  assert.ok(await audioRegion.evaluate(region => {
+    const remote = region.nextElementSibling;
+    return getComputedStyle(region).borderBlockStartStyle === 'solid' &&
+      getComputedStyle(region).borderBlockEndStyle === 'solid' &&
+      remote.matches('[data-settings-target="remote-connection"]') &&
+      Math.abs(remote.getBoundingClientRect().top - region.getBoundingClientRect().bottom) < 1 &&
+      getComputedStyle(remote).borderBlockEndStyle === 'solid';
+  }), 'Audio and remote recovery sections must meet at the shared divider');
+  await recoverySettings.getByRole('button', { name: '关闭对话框', exact: true }).click();
   await floating.getByRole('button', { name: '重新连接音频', exact: true }).click();
   await badge('语音模型', '正常').waitFor();
   assert.ok(
@@ -1575,27 +1521,32 @@ try {
   await devices.getByRole('button', { name: '语音识别模型', exact: true }).click();
   await floating.getByRole('menuitemradio', { name: '多语言语音识别', exact: true }).click();
   await devices.getByRole('status').filter({ hasText: '原配置继续转写' }).waitFor();
-  const checkSpeechStatusHeading = async () => {
-    const layout = await devices.locator('.speech-model-status').evaluate((status) => {
-      const heading = status.closest('.speech-model-heading');
-      const frame = heading.getBoundingClientRect();
+  const checkSpeechSwitchRow = async () => {
+    const layout = await devices.locator('.speech-model-status').evaluate(async (status) => {
+      // The row has its full layout height while the opening grid still clips it.
+      // Wait for that grid only, as the loading icon animates continuously.
+      const reveal = status.closest('.interview-reveal');
+      await Promise.all(reveal.getAnimations().map(animation => animation.finished));
+      const row = status.closest('.interview-switch-row');
+      const actions = row.querySelector('.interview-switch-actions');
+      const button = actions.querySelector('button').getBoundingClientRect();
+      const picker = row.closest('section').querySelector('[aria-label="语音推理设备"]').getBoundingClientRect();
       const text = status.getBoundingClientRect();
-      const row = heading.nextElementSibling.getBoundingClientRect();
+      const region = status.closest('[data-settings-highlight-group]');
       return {
-        role: status.getAttribute('role'),
-        aligned: Math.abs(text.left - frame.left) <= 1 / 64,
-        above: text.bottom <= row.top,
-        redundantTitle: heading.querySelector('h4') !== null,
-        overflow: heading.scrollWidth > heading.clientWidth,
+        aligned: Math.abs((text.top + text.bottom) / 2 - (button.top + button.bottom) / 2) <= 1,
+        gap: button.top - picker.bottom,
+        overflow: row.scrollWidth > row.clientWidth,
+        width: button.width,
+        insideSpeechRegion: !!region && getComputedStyle(region).borderBlockEndStyle === 'solid' &&
+          region.contains(row.closest('section').querySelector('[data-settings-target="speech-device"]')) &&
+          region.getBoundingClientRect().bottom >= row.getBoundingClientRect().bottom,
       };
     });
-    assert.equal(layout.role, 'status');
-    assert.ok(
-      layout.aligned && layout.above && !layout.redundantTitle && !layout.overflow,
-      JSON.stringify(layout),
-    );
+    assert.ok(layout.aligned && layout.gap > 0 && !layout.overflow && layout.insideSpeechRegion, JSON.stringify(layout));
+    return layout.width;
   };
-  await checkSpeechStatusHeading();
+  const loadingWidth = await checkSpeechSwitchRow();
   assert.equal(
     await devices.getByRole('button', { name: '语音识别模型', exact: true }).isDisabled(),
     true,
@@ -1611,7 +1562,14 @@ try {
   await waitForAsync(app, () => typeof globalThis.uxSpeechWait === 'function');
   await app.evaluate(() => globalThis.uxSpeechWait());
   await devices.getByRole('status').filter({ hasText: '等待语音停顿' }).waitFor();
-  await checkSpeechStatusHeading();
+  assert.equal(await checkSpeechSwitchRow(), loadingWidth);
+  const currentEffort = await openReasoningControl(floating, '面试回答模型', '面试思考强度');
+  await currentEffort.getByRole('slider', { name: '面试思考强度' }).press('End');
+  await waitForAsync(
+    floating,
+    async () => (await window.desktop.interviewState()).configuration.effort === 'high',
+  );
+  await floating.keyboard.press('Escape');
   await openModelMenu(floating, '面试回答模型', '面试思考强度');
   await floating.getByRole('menuitemradio', { name: '验证模型', exact: true }).click();
   await waitForAsync(
@@ -1939,6 +1897,9 @@ try {
     }),
   );
 } finally {
-  if (nativeProbe && originalCursor) nativeProbe('move', originalCursor.x, originalCursor.y);
-  await closeUiApp(app);
+  try {
+    if (nativeProbe && originalCursor) nativeProbe('move', originalCursor.x, originalCursor.y);
+  } finally {
+    await closeUiApp(app);
+  }
 }

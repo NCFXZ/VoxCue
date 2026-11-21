@@ -12,27 +12,56 @@ export function visibleAnswers(record: InterviewRecord) {
 export function answerCountLabel(count: number) {
   return count === 1 ? t('1 条 AI 回答') : `${count}${t(' 条 AI 回答')}`;
 }
-export function sourceIds(record: InterviewRecord, answer: Answer): string[] {
-  const rows = record.transcripts.filter((t) => t.source !== 'microphone');
-  if (answer.sourceTranscriptIds?.length)
-    return answer.sourceTranscriptIds.filter((id) => rows.some((t) => t.id === id));
-  const question = normalized(answer.question);
-  if (!question) return [];
-  const matches: string[][] = [];
+export function answerSourceLookup(record: InterviewRecord) {
+  const byId = new Map(record.transcripts.map(row => [row.id, row]));
+  let legacyRows: { id: string; text: string }[] | undefined;
+  let matches: Map<string, string[] | null> | undefined;
+  return (answer: Answer): string[] => {
+    if (answer.sourceTranscriptIds !== undefined) {
+      const ids = answer.sourceTranscriptIds;
+      if (!ids.length) return [];
+      // Older onsite answers still have explicit IDs. Only infer the mic when the entire
+      // question agrees with those IDs; never infer from unrelated microphone text.
+      const legacyMic = !answer.questionSource && ids.every(id => byId.get(id)?.source === 'microphone') &&
+        normalized(ids.map(id => byId.get(id)!.text).join('')) === normalized(answer.question);
+      const source = answer.questionSource ?? (legacyMic ? 'microphone' : 'system');
+      return ids.filter(id => byId.has(id) && (byId.get(id)!.source ?? 'system') === source);
+    }
+    const question = normalized(answer.question);
+    if (!question) return [];
+    legacyRows ??= record.transcripts.filter(row => row.source !== 'microphone')
+      .map(row => ({ id: row.id, text: normalized(row.text) }));
+    if (!matches) {
+      const questions = record.answers.filter(a => a.sourceTranscriptIds === undefined)
+        .map(a => normalized(a.question));
+      matches = matchLegacyQuestions(legacyRows, [...questions, question]);
+    } else if (!matches.has(question)) {
+      // Callers can also ask about a question outside the saved record.
+      matches.set(question, matchLegacyQuestions(legacyRows, [question]).get(question) ?? null);
+    }
+    return [...(matches.get(question) ?? [])];
+  };
+}
+function matchLegacyQuestions(rows: { id: string; text: string }[], questions: string[]) {
+  const matches = new Map<string, string[] | null>();
+  let longest = 0;
+  for (const question of questions) {
+    if (!question) continue;
+    matches.set(question, null);
+    longest = Math.max(longest, question.length);
+  }
   for (let i = 0; i < rows.length; i++) {
     let text = '';
-    const ids: string[] = [];
     for (let j = i; j < Math.min(i + 6, rows.length); j++) {
-      text += normalized(rows[j].text);
-      ids.push(rows[j].id);
-      if (text === question) {
-        matches.push([...ids]);
-        break;
-      }
-      if (text.length >= question.length) break;
+      if (!rows[j].text) continue;
+      text += rows[j].text;
+      const previous = matches.get(text);
+      if (previous === null) matches.set(text, rows.slice(i, j + 1).map(row => row.id));
+      else if (previous?.length) matches.set(text, []);
+      if (text.length >= longest) break;
     }
   }
-  return matches.length === 1 ? matches[0] : [];
+  return matches;
 }
 export function relativeTime(record: InterviewRecord, row: Transcript): string {
   if (!Number.isFinite(row.startMs)) return row.time || '—';

@@ -579,7 +579,7 @@ try {
       .locator('.chat-message.assistant')
       .getByText('Synthetic interview answer', { exact: true })
       .waitFor();
-    await page.waitForFunction(() => !document.querySelector('.conversation-spinner'));
+    await page.waitForFunction(() => !document.querySelector('.conversation-dot[data-state="streaming"]'));
     const frames = await finishSelectionFrames(page);
     mountedConversations.push(frames);
     assertSelectionFade(frames, 0, 1, title + ': new row appears');

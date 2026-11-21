@@ -70,6 +70,50 @@ try {
       { polling: 16, timeout: 12000 },
     );
   await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await page.addInitScript(() => {
+    const probe = window.loginPreviewMotion = { entrances: [], moved: false, folded: false, followed: false };
+    document.addEventListener('animationstart', event => {
+      if (event.animationName !== 'screen-enter' || !event.target.closest('.login-interview-preview')) return;
+      const target = event.target;
+      const animation = target.getAnimations().find(item => item.animationName === event.animationName);
+      const style = getComputedStyle(target);
+      const timing = animation.effect.getTiming();
+      const keyframes = animation.effect.getKeyframes().map(frame => {
+        const transform = frame.transform.replace(/var\((--[\w-]+)\)/g,
+          (_, name) => style.getPropertyValue(name));
+        const matrix = new DOMMatrixReadOnly(transform);
+        return [matrix.m41, matrix.m42, Number(frame.opacity)];
+      });
+      probe.entrances.push({ bubble: target.matches('.floating-question'), keyframes,
+        duration: timing.duration, delay: timing.delay, easing: style.animationTimingFunction });
+    });
+    let lastTop, lastBottom;
+    const read = () => {
+      const scene = document.querySelector('.login-interview-preview');
+      const pane = scene?.querySelector('.floating-answer .floating-scroll');
+      if (pane?.clientHeight) {
+        const bubble = pane.querySelector('.floating-question');
+        if (bubble) {
+          const style = getComputedStyle(bubble);
+          if (style.transform !== 'none') {
+            const y = new DOMMatrixReadOnly(style.transform).m42;
+            if (y > 0 && y < 8 && style.opacity > 0 && style.opacity < 1) probe.moved = true;
+          }
+        }
+        const fold = pane.querySelector('.collapse-content[data-expanded="false"]');
+        if (fold && Number(getComputedStyle(fold).opacity) > 0 &&
+          Number(getComputedStyle(fold).opacity) < 1 && fold.getBoundingClientRect().height > 0) probe.folded = true;
+        const top = pane.scrollTop, bottom = pane.scrollHeight - pane.clientHeight;
+        if (top > lastTop && bottom === lastBottom && top < bottom - 1 &&
+          pane.hasAttribute('data-more-above') && pane.hasAttribute('data-more-below')) probe.followed = true;
+        lastTop = top;
+        lastBottom = bottom;
+        if (scene.dataset.previewPhase === 'complete' && bottom - top <= 1) return;
+      }
+      requestAnimationFrame(read);
+    };
+    requestAnimationFrame(read);
+  });
   // Open a fresh page under an explicit motion preference so the one-shot
   // sequence is observed from its start, independent of attachment timing.
   await page.reload();
@@ -78,11 +122,13 @@ try {
   assert.ok((await preview.locator('.transcript-item > p').innerText()).trim().length > 0);
   await waitForPhase('thinking');
   assert.equal(await preview.locator('.login-preview-thinking').innerText(), '正在思考');
+  assert.equal(await preview.locator('.login-preview-thinking .is-active').evaluate(
+    node => getComputedStyle(node).animationName), 'reasoning-title-shine');
   await waitForPhase('answering');
   await page.waitForFunction(
     () =>
-      (document.querySelector('.login-interview-preview .answer-bubble')?.textContent.trim()
-        .length ?? 0) > 0,
+      window.loginPreviewMotion.folded &&
+      !!document.querySelector('.login-interview-preview .answer-bubble .markdown-content p .typing-caret'),
     undefined,
     { polling: 16 },
   );
@@ -115,11 +161,20 @@ try {
     undefined,
     { polling: 16 },
   );
-  const followingGap = await preview
-    .locator('.floating-answer .floating-scroll')
-    .evaluate((node) => node.scrollHeight - node.clientHeight - node.scrollTop);
-  assert.ok(Math.abs(followingGap) <= 1, 'Typing follows the latest answer text');
   await waitForPhase('complete');
+  const waitForBottom = () => page.waitForFunction(() => {
+    const node = document.querySelector('.login-interview-preview .floating-answer .floating-scroll');
+    return node?.scrollTop > 0 && node.hasAttribute('data-more-above') && !node.hasAttribute('data-more-below') &&
+      Math.abs(node.scrollHeight - node.clientHeight - node.scrollTop) <= 1;
+  });
+  await waitForBottom();
+  const motion = await page.evaluate(() => window.loginPreviewMotion);
+  assert.deepEqual(motion.entrances, [{ bubble: true, keyframes: [[0, 8, 0], [0, 0, 1]],
+    duration: 240, delay: 0, easing: 'cubic-bezier(0.2, 0, 0, 1)' }]);
+  assert.ok(motion.moved, 'Only the sent question fades and moves through an intermediate frame');
+  assert.ok(motion.folded, 'The thinking label shrinks and fades when the answer arrives');
+  assert.ok(motion.followed, 'The viewport approaches a stationary tail through intermediate scroll positions');
+  assert.equal(await preview.locator('.answer-bubble .typing-caret').count(), 0);
   const completeAnswer = await preview.locator('.answer-bubble').textContent();
   assert.ok(completeAnswer.length > partialAnswer.length, 'Answer text is progressively revealed');
   assert.equal(await preview.locator('.answer-bubble .markdown-content > p').count(), 3);
@@ -129,10 +184,23 @@ try {
     return {
       bottomGap: node.scrollHeight - node.clientHeight - node.scrollTop,
       withinPanel: bounds.top >= panel.top && bounds.bottom <= panel.bottom,
+      height: node.scrollHeight,
+      fade: [getComputedStyle(node).getPropertyValue('--preview-top-fade').trim(),
+        getComputedStyle(node).getPropertyValue('--preview-bottom-fade').trim()],
     };
   });
   assert.ok(reading.withinPanel, 'Animated answer stays inside its panel');
   assert.ok(Math.abs(reading.bottomGap) <= 1, 'Completed answer stays on its final lines');
+  assert.deepEqual(reading.fade, ['18px', '0px'], 'Only the cropped upper edge is faded at the bottom');
+  // Change the decorative panel width after playback stops and verify the rewrapped tail.
+  const panel = preview.locator('.floating-answer');
+  await panel.evaluate(node => node.style.setProperty('width', '82%'));
+  await page.waitForFunction(height =>
+    document.querySelector('.login-interview-preview .floating-answer .floating-scroll').scrollHeight > height,
+    reading.height);
+  await waitForBottom();
+  await panel.evaluate(node => node.style.removeProperty('width'));
+  await waitForBottom();
   assert.equal(await page.locator('.login-preview-content').evaluate((node) => node.inert), true);
   assert.equal(
     await preview.evaluate((node) =>
@@ -179,6 +247,23 @@ try {
   assert.equal(await preview.getAttribute('data-preview-phase'), 'complete');
   assert.equal(await preview.getAttribute('data-playing'), 'false');
   assert.equal(await preview.textContent(), completedPreview, 'Completed playback never loops');
+  const password = page.locator('input[name="password"]');
+  const reveal = page.getByRole('button', { name: '显示密码', exact: true });
+  const conceal = page.getByRole('button', { name: '隐藏密码', exact: true });
+  assert.equal(await password.getAttribute('type'), 'password');
+  await password.fill('synthetic-preview');
+  const feedback = await page.getByRole('alert').allTextContents();
+  await password.press('Tab');
+  assert.equal(await reveal.evaluate((button) => button === document.activeElement), true);
+  await page.keyboard.press('Space');
+  assert.equal(await password.getAttribute('type'), 'text');
+  assert.equal(await password.inputValue(), 'synthetic-preview');
+  assert.equal(await conceal.getAttribute('aria-pressed'), 'true');
+  await conceal.press('Enter');
+  assert.equal(await password.getAttribute('type'), 'password');
+  assert.equal(await password.inputValue(), 'synthetic-preview');
+  assert.deepEqual(await page.getByRole('alert').allTextContents(), feedback);
+  await reveal.click();
   for (const [button, title] of [
     ['注册', '创建账号'],
     ['返回登录', '登录 VoxCue'],
@@ -187,6 +272,9 @@ try {
   ]) {
     await page.getByRole('button', { name: button, exact: true }).click();
     await page.getByRole('heading', { name: title, exact: true }).waitFor();
+    assert.equal(await password.getAttribute('type'), 'password');
+    assert.equal(await password.inputValue(), '');
+    assert.equal(await reveal.getAttribute('aria-pressed'), 'false');
     assert.equal(await preview.getAttribute('data-preview-phase'), 'complete');
     assert.equal(await preview.getAttribute('data-playing'), 'false');
     assert.equal(await preview.textContent(), completedPreview, 'Auth mode changes do not replay');
@@ -204,6 +292,8 @@ try {
   await page.waitForTimeout(350);
   assert.equal(await preview.textContent(), reducedAnswer, 'Reduced motion shows a stable answer');
   assert.equal(await preview.locator('.typing-caret:visible').count(), 0);
+  await waitForBottom();
+  assert.equal(await page.evaluate(() => window.loginPreviewMotion.entrances.length), 0);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await page.waitForTimeout(350);
   assert.equal(await preview.getAttribute('data-preview-phase'), 'complete');

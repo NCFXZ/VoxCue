@@ -2,7 +2,7 @@ import { t } from '../i18n';
 import { useEffect, useRef, useState } from 'react';
 import type { SpeechOptions } from '../../electron/contracts/speech';
 import type { ChatModel, ReasoningEffort } from '../../electron/contracts/chat';
-import { useInterview } from '../stores/interview';
+import { useInterview, useInterviewPanelState } from '../stores/interview';
 import { InterviewDisplayControls } from './InterviewDisplayControls';
 import { resolveReasoningEffort } from '../services/chatOptions';
 import { ModelReasoningControl } from './ReasoningEffortControl';
@@ -10,20 +10,28 @@ import { ChoiceMenu } from './ui/choice-menu';
 import { Modal } from './ui/modal';
 import { useAudioDevices } from './useAudioDevices';
 import { SpeechModelSettings } from './SpeechModelSettings';
+import { SpeechSwitchActions, switchDescription } from './SpeechSwitchActions';
+import { InterviewReveal } from './InterviewReveal';
 import { InterviewInputModeControl } from './InterviewInputModeControl';
 import { useHeightTransition } from './ui/useHeightTransition';
 import type { InterviewInputMode } from '../../electron/contracts/speech';
 import { RemoteConnectionSettings } from './RemoteConnection';
+import { useSettingsTarget, type SettingsTarget } from './ui/useSettingsTarget';
 
-export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
-  const state = useInterview();
+export function InterviewSettingsPanel({ onClose, targets }: { onClose(): void; targets?: readonly SettingsTarget[] }) {
+  const content = useRef<HTMLDivElement>(null);
+  useSettingsTarget(content, targets);
+  const state = useInterviewPanelState();
   const [options, setOptions] = useState<SpeechOptions>(() => structuredClone(state.options));
   const { devices, loading, error: devicesError } = useAudioDevices();
   const [models, setModels] = useState<ChatModel[]>([]);
   const [modelId, setModelId] = useState(state.modelId);
   const [effort, setEffort] = useState<ReasoningEffort | 'auto'>(state.effort);
   const [modelLoading, setModelLoading] = useState(true);
+  const [catalogRefresh, setCatalogRefresh] = useState(0);
+  const [modelError, setModelError] = useState('');
   const [error, setError] = useState('');
+  const settingsError = t(error || modelError || state.speechSwitchError || devicesError);
   const busy = state.reconnecting || state.updatingModel || state.inputChanging;
   const audioBusy =
     busy || state.switchingSpeech || state.microphoneToggling || state.systemAudioToggling;
@@ -42,15 +50,22 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
   }, [state.options, state.switchingSpeech, state.reconnecting]);
   useEffect(() => {
     let disposed = false;
+    setModelLoading(true);
+    setModelError('');
     void window
-      .desktop!.interviewModels()
+      .desktop!.interviewModels(catalogRefresh > 0)
       .then((result) => {
         if (disposed) return;
         if (!result.ok) throw Error(result.error.message);
         setModels(result.models);
+        const current = useInterview.getState();
+        if (current.aiEnabled && !result.models.some((model) => model.id === current.modelId))
+          setModelError('所选模型当前不可用，请重新选择模型。');
       })
-      .catch(() => {
-        if (!disposed) setError('无法读取回答模型，请稍后重试。');
+      .catch((cause) => {
+        if (disposed) return;
+        setModels([]);
+        setModelError(cause instanceof Error ? cause.message : '无法读取回答模型，请稍后重试。');
       })
       .finally(() => {
         if (!disposed) setModelLoading(false);
@@ -58,7 +73,7 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
     return () => {
       disposed = true;
     };
-  }, []);
+  }, [catalogRefresh]);
   const changeAudio = async (next: SpeechOptions) => {
     if (
       useInterview.getState().microphoneToggling ||
@@ -81,7 +96,8 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
     setModelId(id);
     setEffort(nextEffort);
     try {
-      if (!(await state.updateModel(id, nextEffort))) throw Error('模型设置未能保存，请重试。');
+      if (!(await state.updateModel(id, nextEffort, models))) throw Error('模型设置未能保存，请重试。');
+      setModelError('');
     } catch (e) {
       const confirmed = useInterview.getState();
       setModelId(confirmed.modelId);
@@ -96,6 +112,7 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
       overlayHeader
       backdrop="transparent"
       className="interview-settings-dialog"
+      contentRef={content}
       onClose={onClose}
     >
       <InterviewInputModeControl
@@ -103,24 +120,23 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         onChange={(mode) => void changeInputMode(mode)}
         disabled={audioBusy || state.speech.state === 'loading' || state.status === 'ended'}
       />
-      <section ref={audioSection} className="interview-settings-section">
+      <section ref={audioSection} className="interview-settings-section interview-audio-settings" data-settings-highlight-group>
         <h3>{t('音频设置')}</h3>
-        <div className="audio-device-editor">
+        <div className="audio-device-editor" data-settings-target="audio-devices">
           {(['system', 'microphone'] as const).map((source) => (
-            <label className="speech-setting-row" key={source}>
-              <span className="speech-setting-label">
-                {source === 'system' ? t('系统声音') : t('麦克风')}
-                {source === 'microphone' && transcription && state.microphoneMuted && (
+            <label className="speech-setting-row" key={source} data-settings-target={source}>
+              <div className="interview-device-label">
+                <span className="speech-setting-label">{source === 'system' ? t('系统声音') : t('麦克风')}</span>
+                <InterviewReveal>{source === 'microphone' && transcription && state.microphoneMuted ? (
                   <small className="interview-input-unavailable">
                     {t('麦克风已关闭，不采集声音。')}
                   </small>
-                )}
-                {source === 'system' && !transcription && state.systemAudioMuted && (
+                ) : source === 'system' && !transcription && state.systemAudioMuted ? (
                   <small className="interview-input-unavailable">
-                    {t('系统音频未启用，不采集声音。')}
+                    {t('系统声音已关闭。开启麦克风时，播放声仅用于消除回声。')}
                   </small>
-                )}
-              </span>
+                ) : null}</InterviewReveal>
+              </div>
               <ChoiceMenu
                 label={source === 'system' ? t('选择播放设备') : t('选择麦克风')}
                 className={
@@ -182,13 +198,25 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         </div>
       </section>
       <RemoteConnectionSettings />
-      <section className="interview-settings-section">
+      <section className="interview-settings-section interview-model-settings">
         <h3>{t('模型设置')}</h3>
         <SpeechModelSettings
           options={options}
           disabled={audioBusy || state.speech.state === 'loading'}
-          switching={state.switchingSpeech ? (state.speech.switching ?? 'loading') : undefined}
+          allowParaformer={!audioBusy && state.speech.state === 'loading' && state.options.speechModel === 'qwen'}
           onChange={(next) => void changeAudio(next)}
+          switchStatus={
+            <InterviewReveal>{state.switchingSpeech ? (
+              <div className="interview-switch-row">
+                <p className="speech-model-status" role="status">
+                  {switchDescription(state.speech.switching ?? 'loading')}
+                </p>
+                <div className="interview-switch-actions">
+                  <SpeechSwitchActions phase={state.speech.switching ?? 'loading'} id={state.speech.switchId} />
+                </div>
+              </div>
+            ) : null}</InterviewReveal>
+          }
         >
           <div className="speech-setting-row">
             <span className="speech-setting-label">{t('回答模型')}</span>
@@ -199,9 +227,11 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
               modelId={modelId}
               models={models}
               effort={effort}
-              disabled={modelLoading || state.reconnecting}
+              disabled={!state.aiEnabled || state.reconnecting}
               busy={state.updatingModel}
               loading={modelLoading}
+              error={modelError}
+              onRefresh={() => setCatalogRefresh(value => value + 1)}
               onModelChange={(id) =>
                 void changeModel(
                   id,
@@ -220,11 +250,11 @@ export function InterviewSettingsPanel({ onClose }: { onClose(): void }) {
         <h3>{t('显示设置')}</h3>
         <InterviewDisplayControls />
       </section>
-      {(error || state.speechSwitchError || devicesError) && (
+      <InterviewReveal resizeKey={settingsError}>{settingsError ? (
         <p className="danger-text" role="alert">
-          {t(error || state.speechSwitchError || devicesError)}
+          {settingsError}
         </p>
-      )}
+      ) : null}</InterviewReveal>
     </Modal>
   );
 }

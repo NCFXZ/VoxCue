@@ -1,5 +1,5 @@
 import { t } from '../i18n';
-import { useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import { CloudAccountPanel } from './CloudAccountPanel';
 import { useCloudAccount } from '../stores/cloudAccount';
 import { AccountDeletionPanel } from './AccountDeletionPanel';
@@ -17,7 +17,6 @@ import {
   Sun,
   X,
   Check,
-  ChevronsUpDown,
   Person,
   Download,
   Keyboard,
@@ -32,12 +31,16 @@ import { ComponentsPanel } from './ComponentsPanel';
 import { SpeechControls } from './SpeechControls';
 import { InterviewInputModeControl } from './InterviewInputModeControl';
 import { InterviewFontSettings } from './InterviewFontSettings';
+import { InterviewReveal } from './InterviewReveal';
 import { useInterviewSettings } from '../stores/interviewSettings';
 import { useGeneralSettings } from '../stores/generalSettings';
 import { useChatConnection } from '../stores/chatConnection';
 import { version } from '../../package.json';
 import { pendingPresentation } from '../../electron/contracts/presentation';
 import { ShortcutSettings } from './ShortcutSettings';
+import { useSettingsTarget, type SettingsTarget } from './ui/useSettingsTarget';
+import { useComponents } from '../stores/components';
+import { componentSettingsTargets, type ComponentSettingsRequest } from '../services/componentSettingsTargets';
 
 export type Theme = 'light' | 'dark' | 'system';
 const categories = [
@@ -50,6 +53,7 @@ const categories = [
   { id: 'about', label: '关于与更新', Icon: CircleHelp },
 ] as const;
 export type SettingsCategory = (typeof categories)[number]['id'] | 'updates';
+export type SettingsDestination = SettingsTarget[] | ComponentSettingsRequest;
 const themes = [
   { value: 'light', label: '浅色', Icon: Sun },
   { value: 'dark', label: '深色', Icon: Moon },
@@ -65,11 +69,13 @@ export function SettingsDialog({
   onThemeChange,
   onClose,
   initialCategory = 'account',
+  initialTargets,
 }: {
   theme: Theme;
   onThemeChange(theme: Theme): void;
   onClose(): void;
   initialCategory?: SettingsCategory;
+  initialTargets?: SettingsDestination;
 }) {
   const [category, setCategory] = useState<Exclude<SettingsCategory, 'updates'>>(
     initialCategory === 'updates' ? 'about' : initialCategory,
@@ -81,6 +87,15 @@ export function SettingsDialog({
   const cloudUser = useCloudAccount((state) => state.state.user);
   const selectedTheme = themes.find((item) => item.value === theme)!;
   const content = useRef<HTMLElement>(null);
+  const [targets, setTargets] = useState(initialTargets);
+  const componentRequest = Array.isArray(targets) ? undefined : targets;
+  const catalog = useComponents((store) => componentRequest ? store.state : null);
+  useLayoutEffect(() => {
+    if (!componentRequest) return;
+    const rows = componentSettingsTargets(catalog, componentRequest);
+    if (rows) setTargets(rows);
+  }, [catalog, componentRequest]);
+  useSettingsTarget(content, Array.isArray(targets) ? targets : undefined);
   const interviewContent = useRef<HTMLDivElement>(null);
   useHeightTransition(`${category}:${interview.inputMode}`, () => [
     interviewContent.current?.querySelector<HTMLElement>(
@@ -113,7 +128,10 @@ export function SettingsDialog({
                 aria-current={category === id ? 'page' : undefined}
                 aria-controls="settings-content"
                 onClick={() => {
-                  if (category !== id) switchView(content.current, () => setCategory(id));
+                  if (category !== id) {
+                    setTargets(undefined);
+                    switchView(content.current, () => setCategory(id));
+                  }
                 }}
               >
                 <Icon size={18} />
@@ -148,7 +166,7 @@ export function SettingsDialog({
                       >
                         <selectedTheme.Icon size={18} />
                         <span className="settings-choice-label">{t(selectedTheme.label)}</span>
-                        <ChevronsUpDown size={14} />
+                        <DropdownMenu.TriggerChevron />
                       </button>
                     </DropdownMenu.Trigger>
                     {/* Keep the menu inside the native dialog's top layer. */}
@@ -192,7 +210,7 @@ export function SettingsDialog({
                         <span className="settings-choice-label">
                           {languages.find((item) => item.value === general.language)!.label}
                         </span>
-                        <ChevronsUpDown size={14} />
+                        <DropdownMenu.TriggerChevron />
                       </button>
                     </DropdownMenu.Trigger>
                     <DropdownMenu.Content
@@ -223,11 +241,11 @@ export function SettingsDialog({
                     </DropdownMenu.Content>
                   </DropdownMenu.Root>
                 </div>
-                {general.error && (
+                <InterviewReveal>{general.error && (
                   <p role="alert" className="danger-text">
                     {t(general.error)}
                   </p>
-                )}
+                )}</InterviewReveal>
               </>
             )}
             {category === 'account' && (
@@ -257,13 +275,16 @@ export function SettingsDialog({
                     busy={false}
                     models={connection.models}
                     live={connection.live}
+                    modelLoading={connection.loading}
+                    modelError={connection.error}
+                    refreshModels={() => void connection.load(true, true)}
                   />
                 </div>
-                {interview.error && (
+                <InterviewReveal>{interview.error && (
                   <p role="alert" className="danger-text">
                     {t(interview.error)}
                   </p>
-                )}
+                )}</InterviewReveal>
                 <InterviewFontSettings />
               </>
             )}

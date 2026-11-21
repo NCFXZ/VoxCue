@@ -16,10 +16,14 @@ import { useComponents, useComponentReady } from './stores/components';
 import { useUpdates } from './stores/updates';
 import { LoginPage } from './components/LoginPage';
 import { useChatConnection } from './stores/chatConnection';
+import { watchInterviewModel } from './stores/interviewSettings';
 import { useHistory } from './stores/history';
-import { SettingsDialog, type Theme, type SettingsCategory } from './components/SettingsDialog';
+import { SettingsDialog, type Theme, type SettingsCategory, type SettingsDestination } from './components/SettingsDialog';
 import { signalTelemetry, recordFeature } from './services/telemetry';
 import { switchView } from './components/ui/switchView';
+import { observeLocalImportRevision, refreshLocalImportRevision } from './services/localImportRevision';
+import type { SettingsTarget } from './components/ui/useSettingsTarget';
+import type { OpenComponentSettings } from './services/componentSettingsTargets';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
   return value === 'light' || value === 'dark' ? value : 'system';
@@ -32,19 +36,34 @@ export function App() {
   }, [isLoginWindow]);
   const [theme, setTheme] = useState<Theme>(initialTheme);
   const [collapsed, setCollapsed] = useState(false);
-  const [settings, setSettings] = useState(false);
-  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>('account');
-  const openComponentSettings = () => {
-    setSettingsCategory('components');
-    setSettings(true);
+  const [settings, setSettings] = useState<{ category: SettingsCategory; targets: SettingsDestination } | null>(null);
+  const openSettings = (category: SettingsCategory, ...targets: SettingsTarget[]) => {
+    setSettings({ category, targets });
   };
+  const openComponentSettings: OpenComponentSettings = (request) =>
+    setSettings({ category: 'components', targets: request });
   const [personalDraft, setPersonalDraft] = useState(false);
   const [sessionStateError, setSessionStateError] = useState<string | null>(null);
   const [appearanceError, setAppearanceError] = useState<string | null>(null);
   const auth = useAuth();
   const account = useCloudAccount();
+  useEffect(() => {
+    if (!isLoginWindow && account.state.localMode)
+      return observeLocalImportRevision(() => setSessionStateError('无法检查本地账户中的资料。'));
+  }, [isLoginWindow, account.state.localMode]);
   const signedIn =
     !!account.state.user || !!account.state.localMode || auth.session?.mode === 'demo';
+  useEffect(() => {
+    if (!isLoginWindow && signedIn) return watchInterviewModel();
+  }, [isLoginWindow, signedIn]);
+  useEffect(() => {
+    if (isLoginWindow || !signedIn) return;
+    const recoverDrafts = () => { void useHistory.getState().recoverDrafts(); };
+    recoverDrafts();
+    void useHistory.getState().recoverRecordings();
+    window.addEventListener('focus', recoverDrafts);
+    return () => window.removeEventListener('focus', recoverDrafts);
+  }, [isLoginWindow, signedIn]);
   const ragReady = useComponentReady('rag');
   useEffect(() => {
     if (isLoginWindow || !signedIn) return;
@@ -58,7 +77,7 @@ export function App() {
     if (account.loaded) signalTelemetry({ type: 'ready' });
   }, [account.loaded]);
   useEffect(() => {
-    if (account.loaded && !signedIn) setSettings(false);
+    if (account.loaded && !signedIn) setSettings(null);
   }, [account.loaded, signedIn]);
   useEffect(() => {
     const expired = () => {
@@ -106,16 +125,20 @@ export function App() {
       window.removeEventListener('voxcue-sync-applied', applied);
     };
   }, [isLoginWindow]);
-  const transientChat = usePreparation((state) => state.streaming || !!state.chatStorageError);
+  const transientChat = usePreparation((state) => state.anyStreaming || !!state.chatStorageError);
   useEffect(() => {
     if (isLoginWindow) return;
     return window.desktop?.onSessionCloseRequested((id) => {
       const state = usePreparation.getState();
-      state.stop();
+      state.stopAll();
       void state
         .restoreChats()
         .then(() => state.flushChats())
-        .then((saved) => window.desktop?.finishSessionClose(id, saved))
+        .then(async (saved) => {
+          if (saved && useCloudAccount.getState().state.localMode)
+            await refreshLocalImportRevision().catch(() => setSessionStateError('无法检查本地账户中的资料。'));
+          return window.desktop?.finishSessionClose(id, saved);
+        })
         .catch(() => setSessionStateError('聊天尚未保存，窗口已保留，请重试。'));
     });
   }, [isLoginWindow]);
@@ -140,11 +163,19 @@ export function App() {
   useEffect(() => {
     requestedPage.current = page;
   }, [page]);
-  const navigate = (next: typeof page) => {
-    if (next !== requestedPage.current) {
-      requestedPage.current = next;
-      switchView(stage.current, () => setPage(next));
+  const navigate = (next: typeof page, prepare?: () => void) => {
+    if (next === requestedPage.current) {
+      if (!prepare) return;
+      if (page === next && !stage.current?.style.viewTransitionName) {
+        prepare();
+        return;
+      }
     }
+    requestedPage.current = next;
+    switchView(stage.current, () => {
+      prepare?.();
+      setPage(next);
+    });
   };
   useEffect(() => {
     if (isLoginWindow) return;
@@ -223,31 +254,29 @@ export function App() {
               }
               localMode={account.state.localMode}
               page={page}
-              onNavigate={(next) => {
+              onNavigate={(next, prepare) => {
                 if (next === 'history') recordFeature('history_view');
                 if (next === 'knowledge') recordFeature('knowledge_view');
-                navigate(next);
+                navigate(next, prepare);
               }}
               collapsed={collapsed}
               onCollapse={() => setCollapsed(!collapsed)}
-              onNew={() => {
-                usePreparation.getState().reset(true);
-                navigate('preparation');
-              }}
-              onSettings={() => {
-                setSettingsCategory('account');
-                setSettings(true);
-              }}
+              onNew={() => navigate('preparation', () => usePreparation.getState().reset(true))}
+              onSettings={() => openSettings('account')}
               onLogout={async () => {
-                usePreparation.getState().stop();
+                usePreparation.getState().stopAll();
                 if (!(await usePreparation.getState().flushChats())) return;
                 try {
                   const account = useCloudAccount.getState();
+                  if (!account.state.user && !account.state.localMode && auth.session?.mode === 'demo') {
+                    await auth.signOut();
+                    return;
+                  }
                   const result = account.state.localMode
                     ? await account.setLocalMode(false)
                     : await account.call({ action: 'logout' });
                   if (result.ok) {
-                    setSettings(false);
+                    setSettings(null);
                     setPage('preparation');
                   } else setSessionStateError(result.error);
                 } catch {
@@ -258,16 +287,13 @@ export function App() {
             <div className="page-stage" ref={stage}>
               <div className="preparation-route" hidden={page !== 'preparation'}>
                 <PreparationPage
+                  visible={page === 'preparation'}
                   onDraftChange={setPersonalDraft}
                   onComponentSettings={openComponentSettings}
-                  onAISettings={() => {
-                    setSettingsCategory('ai');
-                    setSettings(true);
-                  }}
-                  onSpeechSettings={() => {
-                    setSettingsCategory('interview');
-                    setSettings(true);
-                  }}
+                  onAISettings={(locateProviders) =>
+                    locateProviders ? openSettings('ai', 'chatgpt', 'copilot') : openSettings('ai')}
+                  onSpeechSettings={() => openSettings('interview', 'speech-device', 'speech-model')}
+                  onImportSettings={() => openSettings('account', 'account-migration')}
                 />
               </div>
               {page === 'history' && <HistoryPage />}
@@ -286,11 +312,12 @@ export function App() {
       )}
       {settings && signedIn && (
         <SettingsDialog
-          initialCategory={settingsCategory}
+          initialCategory={settings.category}
+          initialTargets={settings.targets}
           theme={theme}
           onThemeChange={setTheme}
           onClose={() => {
-            setSettings(false);
+            setSettings(null);
           }}
         />
       )}

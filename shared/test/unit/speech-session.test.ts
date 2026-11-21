@@ -27,6 +27,25 @@ const transcriptionConfiguration = (): InterviewConfiguration => ({
   inputMode: 'transcription',
   options: { sources: ['microphone'], microphone: 'selected-mic' },
 });
+it.each(['reported', 'rejected'])('重连后保留前一条管线的未完整转写，下一场不继承（%s）', async reason => {
+  const { coordinator, port } = setup();
+  const configuration = transcriptionConfiguration();
+  await coordinator.confirm(configuration);
+  await coordinator.interview({ op: 'start', options: configuration.options });
+  if (reason === 'reported') port.call.mockResolvedValueOnce({
+    state: 'idle', model: 'test', transcriptTailIncomplete: true, recordingError: 'synthetic disk error',
+  } as Awaited<ReturnType<typeof port.call>>);
+  else port.call.mockRejectedValueOnce(Error('synthetic drain failure'));
+  expect((await coordinator.reconnect()).state).toBe('running');
+  await coordinator.reconnect();
+  const end = await coordinator.interview({ op: 'stop' });
+  expect(end.transcriptTailIncomplete).toBe(true);
+  expect(end.recordingError).toBe(reason === 'reported' ? 'synthetic disk error' : undefined);
+  coordinator.releaseInterview(true);
+  await coordinator.confirm(configuration);
+  await coordinator.interview({ op: 'start', options: configuration.options });
+  expect(await coordinator.interview({ op: 'stop' })).not.toHaveProperty('transcriptTailIncomplete');
+});
 it('输入方式缺省兼容远程，只有仅转录允许单麦且初始不能无麦', () => {
   const legacy = defaultInterviewConfiguration();
   delete legacy.inputMode;
@@ -254,6 +273,34 @@ it('后台语音切换不阻塞暂停和结束，迟到成功不能写入确认�
     coordinator.releaseInterview(true);
   }
 });
+it('Qwen 首次加载卡住时，切回 Paraformer 先释放旧服务再启动轻量模型', async () => {
+  const { coordinator, port } = setup();
+  const options = { sources: ['system' as const], speechModel: 'qwen' as const, inferenceDevice: 'cpu' as const };
+  await coordinator.confirm({ ...defaultInterviewConfiguration(), options });
+  let release!: () => void;
+  port.call.mockImplementationOnce(() => new Promise(resolve => {
+    release = () => resolve({ state: 'idle', model: 'retired' });
+  }));
+  const starting = coordinator.interview({ op: 'start', options });
+  await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+  port.stop.mockClear().mockImplementationOnce(release);
+  const next = { ...options, speechModel: 'paraformer' as const };
+  await expect(coordinator.reconnect(next)).resolves.toMatchObject({ state: 'running' });
+  await expect(starting).resolves.toMatchObject({ state: 'idle' });
+  expect(port.stop).toHaveBeenCalledOnce();
+  expect(port.call.mock.calls.map(([call]) => call.op)).toEqual(['start', 'start']);
+  expect(coordinator.configuration!.options).toEqual(next);
+});
+it('后台积压已停机时，从设置切换模型会重新连接采集', async () => {
+  const { coordinator, port } = setup();
+  const options = { sources: ['system' as const], speechModel: 'qwen' as const };
+  await coordinator.confirm({ ...defaultInterviewConfiguration(), options });
+  await coordinator.interview({ op: 'start', options });
+  coordinator.observeInterviewStatus({ state: 'error', model: 'Qwen', failureSource: 'model' });
+  await coordinator.reconnect({ ...options, speechModel: 'paraformer' });
+  expect(port.call.mock.calls.map(([call]) => call.op)).toEqual(['start', 'stop', 'start']);
+  expect(coordinator.configuration!.options.speechModel).toBe('paraformer');
+});
 it('双音源自检限时10秒，过期停止令牌不影响新的采集', async () => {
   vi.useFakeTimers();
   const { coordinator, port } = setup();
@@ -282,6 +329,24 @@ it('双音源自检限时10秒，过期停止令牌不影响新的采集', async
     await coordinator.dictation({ op: 'test-stop', id: 'test-1' });
     expect(port.call).toHaveBeenCalledTimes(count);
     expect(coordinator.target).toBe('dictation');
+  } finally {
+    coordinator.releaseDictation();
+    vi.useRealTimers();
+  }
+});
+it('keeps a level-only preview until its owner releases it', async () => {
+  vi.useFakeTimers();
+  const { coordinator, port } = setup();
+  const options = { sources: ['microphone', 'system'] };
+  try {
+    await coordinator.dictation({ op: 'preview', id: 'dialog', options });
+    expect(port.call).toHaveBeenLastCalledWith({ op: 'start', levelsOnly: true, options });
+    await vi.advanceTimersByTimeAsync(30000);
+    await coordinator.dictation({ op: 'test-stop', id: 'old-dialog' });
+    expect(coordinator.target).toBe('audio-test');
+    await coordinator.dictation({ op: 'test-stop', id: 'dialog' });
+    expect(port.call).toHaveBeenLastCalledWith({ op: 'stop' });
+    expect(coordinator.target).toBeUndefined();
   } finally {
     coordinator.releaseDictation();
     vi.useRealTimers();

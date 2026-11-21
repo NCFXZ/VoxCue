@@ -163,6 +163,7 @@ export async function offlineElectronEntry(
           "app.setPath('userData',process.env.COPILOT_TEST_USER_DATA);",
           "app.setPath('sessionData',process.env.COPILOT_TEST_USER_DATA);",
           "app.commandLine.appendSwitch('use-mock-keychain');",
+          'require(' + JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/ipc/recordings.js')) + ').registerRecordingScheme();',
           'app.whenReady().then(()=>{',
           body,
           '});',

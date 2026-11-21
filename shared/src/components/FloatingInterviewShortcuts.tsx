@@ -1,3 +1,4 @@
+import { InterviewReveal } from './InterviewReveal';
 import { useEffect, useRef, useState } from 'react';
 import { t } from '../i18n';
 import { InterviewShortcutHelp } from './InterviewShortcutHelp';
@@ -94,7 +95,7 @@ export function FloatingInterviewShortcuts() {
           onClose={close}
         />
       )}
-      {error && <p role="alert">{t(error)}</p>}
+      <InterviewReveal>{error ? <p className="floating-shortcuts-error" role="alert">{t(error)}</p> : null}</InterviewReveal>
     </div>
   );
 }

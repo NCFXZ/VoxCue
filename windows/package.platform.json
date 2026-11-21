@@ -9,8 +9,10 @@
     "test:presentation:native": "node test/scripts/presentation-native-smoke.mjs",
     "test:speech:adversarial": "node test/scripts/speech-adversarial-smoke.mjs",
     "test:ui:dpi": "node test/scripts/windows-suite.mjs --dpi",
-    "dev": "node scripts/build-screenshot.mjs && node ../shared/scripts/dev.mjs",
-    "build": "node scripts/build-audio.mjs && node scripts/build-screenshot.mjs && pnpm build:shared",
+    "postinstall": "node scripts/prepare-silero.mjs --optional-download",
+    "dev": "node scripts/prepare-silero.mjs --cache-only && node scripts/build-window-helpers.mjs && node ../shared/scripts/dev.mjs",
+    "start": "node scripts/prepare-silero.mjs --cache-only && electron .",
+    "build": "node scripts/prepare-silero.mjs --optional-download && node scripts/build-audio.mjs && node scripts/build-window-helpers.mjs && pnpm build:shared",
     "test:platform:native": "node test/scripts/platform-native-smoke.mjs",
     "test:interview:layout": "node test/scripts/interview-layout-smoke.mjs",
     "test:interview:effort": "node test/scripts/interview-effort-smoke.mjs",
@@ -28,6 +30,7 @@
     "test:package": "pnpm build && node test/scripts/store-package-smoke.mjs"
   },
   "dependencies": {
+    "@openai/codex": "0.170.0",
     "@ennuicastr/webrtcaec3.js": "0.3.0"
   },
   "devDependencies": {
@@ -38,6 +41,6 @@
   "optionalDependencies": {
     "sherpa-onnx-win-x64": "1.13.8",
     "@github/copilot-sdk-win32-x64": "1.0.21",
-    "@openai/codex-win32-x64": "npm:@openai/codex@0.164.0-win32-x64"
+    "@openai/codex-win32-x64": "npm:@openai/codex@0.170.0-win32-x64"
   }
 }

@@ -4,6 +4,8 @@ import type { InterviewConfiguration } from '../../electron/contracts/speech';
 import { reasoningEfforts } from '../../electron/contracts/chat';
 import type { ComponentState } from '../../electron/contracts/components';
 import type { InterviewInputMode } from '../services/interviewInput';
+import { rememberServiceModel, resolveServiceModel, serviceModelPreferenceKey } from '../services/serviceModelPreferences';
+import { useChatConnection } from './chatConnection';
 
 const settingsKey = 'copilot-interview-settings-v1';
 const inputModeKey = 'copilot-interview-input-mode-v1';
@@ -22,6 +24,7 @@ function readSettings(): InterviewConfiguration {
     const value = JSON.parse(raw);
     return {
       ...initial,
+      autoRecord: value.autoRecord === true,
       options: {
         sources: value.microphoneEnabled === false ? ['system'] : ['microphone', 'system'],
         microphone: typeof value.microphone === 'string' ? value.microphone : undefined,
@@ -65,6 +68,7 @@ export const useInterviewSettings = create<{
       localStorage.setItem(
         settingsKey,
         JSON.stringify({
+          ...(configuration.autoRecord ? { autoRecord: true } : {}),
           microphoneEnabled: configuration.options.sources.includes('microphone'),
           microphone: configuration.options.microphone,
           system: configuration.options.system,
@@ -78,6 +82,14 @@ export const useInterviewSettings = create<{
           effort: configuration.effort,
         }),
       );
+      const { service, models } = useChatConnection.getState();
+      const previous = get().configuration;
+      if (
+        service &&
+        (configuration.modelId !== previous.modelId || configuration.effort !== previous.effort) &&
+        models.some((model) => model.id === configuration.modelId)
+      )
+        rememberServiceModel('interview', service, { modelId: configuration.modelId, effort: configuration.effort });
       set({ configuration, error: null });
     } catch {
       set({ error: '面试设置保存失败，请检查本地存储空间。' });
@@ -103,3 +115,26 @@ export const useInterviewSettings = create<{
       });
   },
 }));
+
+export function watchInterviewModel() {
+  const reconcile = () => {
+    const { service, models, live, loading } = useChatConnection.getState();
+    if (!live || loading || !service || !models.length) return;
+    const { configuration, update } = useInterviewSettings.getState();
+    const next = resolveServiceModel('interview', service, models, configuration);
+    if (next && (!configuration.aiEnabled || configuration.modelId !== next.modelId || configuration.effort !== next.effort))
+      update({ ...configuration, ...next, mode: 'local', aiEnabled: true });
+  };
+  const changed = (event: StorageEvent) => {
+    if (event.key === serviceModelPreferenceKey('interview')) reconcile();
+  };
+  const unsubscribe = useChatConnection.subscribe((current, previous) => {
+    if (current.models !== previous.models || current.service !== previous.service) reconcile();
+  });
+  window.addEventListener('storage', changed);
+  reconcile();
+  return () => {
+    unsubscribe();
+    window.removeEventListener('storage', changed);
+  };
+}

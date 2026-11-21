@@ -2,7 +2,11 @@ import { validImagePreview } from './interviewImages';
 export type SyncKind = 'profile' | 'history' | 'knowledgebase';
 export const syncKinds: SyncKind[] = ['profile', 'history', 'knowledgebase'];
 export const CLOUD_CHUNK_BYTES = 1048576;
+export const CLOUD_ITEM_MAX_BYTES = 64 * CLOUD_CHUNK_BYTES;
+export const CLOUD_MAX_ITEMS = 4096;
 export const KNOWLEDGE_MAX_BYTES = 100_000_000;
+export const validCloudResourceName = (key: unknown): key is string =>
+  typeof key === 'string' && /^(?:profile|resume|base|file|record|image):[\w-]{1,100}$/.test(key);
 export interface CloudResource {
   id: string;
   kind: SyncKind;
@@ -61,7 +65,7 @@ type SyncOperation =
 export type CloudSyncCall = SyncOperation & { userId: string; syncId?: string };
 export type CloudSyncResult =
   | { ok: true; value: unknown }
-  | { ok: false; error: string; status: number; retryAfterSeconds?: number };
+  | { ok: false; error: string; status: number; retryAfterSeconds?: number; deferred?: 'interview' };
 
 export function validCloudSyncCall(value: unknown): value is CloudSyncCall {
   if (!value || typeof value !== 'object') return false;
@@ -93,13 +97,12 @@ export function validCloudSyncCall(value: unknown): value is CloudSyncCall {
             : /^(record|image):/.test(String(row.key))
               ? 'history'
               : 'knowledgebase') &&
-        typeof row.key === 'string' &&
-        /^(?:profile|resume|base|file|record|image):[\w-]{1,100}$/.test(row.key)
+        validCloudResourceName(row.key)
       );
     case 'begin':
       return (
         uuid(row.requestId) &&
-        integer(row.bytes, 64 * 1024 ** 2) &&
+        integer(row.bytes, CLOUD_ITEM_MAX_BYTES) &&
         Number(row.bytes) > 0 &&
         typeof row.sha256 === 'string' &&
         /^[a-f0-9]{64}$/.test(row.sha256) &&

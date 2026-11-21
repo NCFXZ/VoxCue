@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+import * as fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
 import type { AudioPacket } from '../../electron/backend/speech/buffer';
 import type {
   AudioSource,
@@ -19,8 +22,8 @@ vi.mock('node:worker_threads', async () => {
         super();
         runtime.workers.push(this);
       }
-      postMessage(message: any) {
-        runtime.messages.push(message);
+      postMessage(message: any, transfer?: ArrayBuffer[]) {
+        runtime.messages.push(transfer ? structuredClone(message, { transfer }) : message);
         queueMicrotask(() => {
           if (message.op === 'init') this.emit('message', { ready: true });
           if (message.op === 'prepare') this.emit('message', { prepared: message.id });
@@ -37,7 +40,10 @@ vi.mock('node:worker_threads', async () => {
     },
   };
 });
-import { SpeechController } from '../../electron/backend/speech/controller';
+import { SpeechController, type CaptureAdapter } from '../../electron/backend/speech/controller';
+import { RecordingChannel } from '../../electron/backend/speech/recordingChannel';
+import { RecordingVoiceFilter } from '../../electron/backend/speech/recordingVoiceFilter';
+import * as preprocessing from '../../electron/backend/speech/preprocessor';
 
 type Capture = {
   audio(packet: AudioPacket): void;
@@ -45,12 +51,34 @@ type Capture = {
   stop: ReturnType<typeof vi.fn>;
 };
 let controller: SpeechController;
+let adapter: CaptureAdapter;
 let events: SpeechEvent[];
 const captures = new Map<AudioSource, Capture>();
 const remote: InterviewInputState = { inputMode: 'remote', microphoneMuted: false };
 const transcription: InterviewInputState = { inputMode: 'transcription', microphoneMuted: false };
 const packet = () => ({ samples: new Float32Array(1600), rate: 16000, timestamp: 0, flags: 0 });
 const turn = () => Promise.resolve().then(() => Promise.resolve());
+
+it('双路积压时只发布提问音源的合并进度，首包与最后一次 ACK 立即通知', async () => {
+  await start();
+  const worker = runtime.workers[0];
+  for (let i = 0; i < 50; i++)
+    for (const source of ['microphone', 'system'] as const)
+      captures.get(source)!.audio({ ...packet(), samples: new Float32Array(160) });
+  const progress = () => events.filter(event => event.type === 'audio-progress');
+  expect(progress()).toMatchObject([{ source: 'system', pending: true }]);
+  const audio = runtime.messages.filter(message => message.op === 'audio');
+  for (const [i, message] of audio.entries()) {
+    worker.emit('message', {
+      ack: message.sequence, progress: { [message.source]: (Math.floor(i / 2) + 1) * 10 },
+    });
+    if (i < audio.length - 1) expect(progress().at(-1)).toMatchObject({ pending: true });
+  }
+  expect(progress().at(-1)).toMatchObject({ source: 'system', pending: false, processedThroughMs: 500 });
+  expect(progress().length).toBeLessThan(10);
+  expect(progress().every(event => event.source === 'system')).toBe(true);
+});
+
 async function start(state = remote, sources: AudioSource[] = ['microphone', 'system']) {
   return controller.call({
     op: 'start',
@@ -65,30 +93,288 @@ beforeEach(() => {
   runtime.acknowledge = true;
   captures.clear();
   events = [];
-  controller = new SpeechController(
-    'synthetic-model',
-    'synthetic-helper',
-    (event) => events.push(event),
-    {
-      devices: async () =>
-        ['microphone', 'system'].map((source) => ({
-          id: source,
-          name: source,
-          source: source as AudioSource,
-          default: true,
-        })),
-      create: (_helper, source, _device, audio) => {
-        const capture = { audio, start: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
-        captures.set(source, capture);
-        return capture;
-      },
+  adapter = {
+    devices: async () =>
+      ['microphone', 'system'].map((source) => ({
+        id: source,
+        name: source,
+        source: source as AudioSource,
+        default: true,
+      })),
+    create: (_helper, source, _device, audio) => {
+      const capture = { audio, start: vi.fn(async () => {}), stop: vi.fn(async () => {}) };
+      captures.set(source, capture);
+      return capture;
     },
-  );
+  };
+  controller = new SpeechController('synthetic-model', 'synthetic-helper', (event) => events.push(event), adapter);
 });
 afterEach(async () => {
   runtime.acknowledge = true;
   await controller.close();
+  vi.restoreAllMocks();
   vi.useRealTimers();
+});
+
+it.each([false, true])('麦克风转写等待回声判定并保留本人原声，结束录音只截取 WAV 尾段（系统静音 %s）', async systemAudioMuted => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-tail-'));
+  Object.assign(adapter, { preprocessorFile: 'synthetic' });
+  let release!: () => void;
+  let reference!: Float32Array;
+  const configure = vi.fn();
+  vi.spyOn(preprocessing, 'loadAudioPreprocessor').mockImplementation(async (_file, consume) => ({
+    start: configure, close() {}, flush() {}, discontinuity: source => [source],
+    feed(source, samples, rate, timestamp) {
+      if (source === 'system') {
+        reference = samples;
+      } else {
+        release = () => consume(source, samples.map((value, i) => value - (reference[i] ?? 0)), rate, timestamp, samples);
+      }
+    },
+  }));
+  try {
+    await start({ ...remote, systemAudioMuted });
+    await controller.call({ op: 'recording', directory });
+    // A loud reference triggers recording headroom protection even in the first packet.
+    const playback = Float32Array.from({ length: 160 }, (_, i) => 0.75 * Math.sin(i / 5));
+    const savedSystem = new RecordingChannel('system', 16000).process(playback);
+    expect(savedSystem).not.toEqual(playback);
+    const microphone = Float32Array.from({ length: 320 }, (_, i) => 0.1 * Math.sin(i / 3) + (playback[i] ?? 0));
+    captures.get('system')!.audio({ ...packet(), samples: playback.slice() });
+    captures.get('microphone')!.audio({ ...packet(), samples: microphone.slice() });
+    expect(reference).toEqual(playback);
+    const audio = () => runtime.messages.filter(m => m.op === 'audio').map(m => [m.source, m.samples]);
+    const expectedAudio = systemAudioMuted ? [['microphone', microphone]] :
+      [['system', playback], ['microphone', microphone]];
+    expect(audio()).toEqual(systemAudioMuted ? [] : [['system', playback]]);
+    vi.advanceTimersByTime(10);
+    const stop = controller.call({ op: 'recording' });
+    await turn();
+    release();
+    await stop;
+    expect(audio()).toEqual(expectedAudio);
+    const [file] = await fs.readdir(directory);
+    const wav = await fs.readFile(path.join(directory, file));
+    expect(wav.length).toBe(44 + 160 * 2);
+    const near = microphone.subarray(0, 160).map((value, i) => value - playback[i]);
+    const filtered = new RecordingVoiceFilter(16000).process(near);
+    const expectedPcm = Array.from(filtered, (value, i) =>
+      Math.round(32767 * Math.fround(value + (systemAudioMuted ? 0 : savedSystem[i]))));
+    expect(Array.from(filtered, (_, i) => wav.readInt16LE(44 + 2 * i))).toEqual(expectedPcm);
+    expect(configure).toHaveBeenCalledTimes(1);
+  } finally {
+    await controller.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+it('现场面试无法打开可选的播放参考时提示原因，继续使用麦克风', async () => {
+  Object.assign(adapter, { preprocessorFile: 'synthetic' });
+  const configure = vi.fn();
+  vi.spyOn(preprocessing, 'loadAudioPreprocessor').mockImplementation(async (_file, consume) => ({
+    start: configure, feed(source, samples, rate, timestamp) { consume(source, samples, rate, timestamp); },
+    close() {}, flush() {}, discontinuity: source => [source],
+  }));
+  const create = adapter.create;
+  adapter.create = (...args) => {
+    const capture = create(...args);
+    if (args[1] === 'system') capture.start = async () => { throw Error('reference unavailable'); };
+    return capture;
+  };
+  expect((await start(transcription, ['microphone'])).state).toBe('running');
+  expect(configure).toHaveBeenLastCalledWith(['microphone']);
+  expect(events).toContainEqual({ type: 'gap', source: 'microphone', message: '系统播放参考不可用，麦克风无法消除扬声器回声。' });
+  captures.get('microphone')!.audio(packet());
+  expect(runtime.messages.filter(m => m.op === 'audio').map(m => m.source)).toEqual(['microphone']);
+});
+
+it('录音只接收本场已启用的音源，暂停封口且新采集不继承旧文件', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-input-'));
+  try {
+    await start();
+    expect(await fs.readdir(directory)).toEqual([]);
+    expect(await controller.call({ op: 'recording', directory })).toMatchObject({ recording: true });
+    await controller.call({ op: 'set-input-state', state: { ...remote, microphoneMuted: true } });
+    captures.get('microphone')!.audio({ ...packet(), samples: new Float32Array(1600).fill(0.75) });
+    captures.get('system')!.audio({ ...packet(), samples: new Float32Array(1600).fill(0.25) });
+    await controller.call({ op: 'pause' });
+    const [file] = await fs.readdir(directory);
+    const wav = await fs.readFile(path.join(directory, file));
+    expect(wav.readInt16LE(44)).toBe(8192);
+    expect(events.filter(e => e.type === 'recording').map(e => e.active)).toEqual([true, false]);
+    await expect(controller.call({ op: 'recording', directory })).rejects.toThrow();
+    await start();
+    await controller.call({ op: 'stop' });
+    expect(await fs.readdir(directory)).toEqual([file]);
+  } finally { await fs.rm(directory, { recursive: true, force: true }); }
+});
+
+it('磁盘写入等待期间转写继续收包，结束录音等到已接收的样本全部写完', async () => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-backpressure-'));
+  let resume!: () => void;
+  const gate = new Promise<void>(resolve => { resume = resolve; });
+  try {
+    await start();
+    await controller.call({ op: 'recording', directory });
+    const [name] = await fs.readdir(directory);
+    const file = path.join(directory, name);
+    const probe = await fs.open(file, 'r');
+    const handle = Object.getPrototypeOf(probe);
+    await probe.close();
+    let entered!: () => void;
+    const waiting = new Promise<void>(resolve => { entered = resolve; });
+    const truncate = handle.truncate;
+    vi.spyOn(handle, 'truncate').mockImplementationOnce(async function(this: fs.FileHandle, ...args) {
+      entered();
+      await gate;
+      return truncate.apply(this, args);
+    });
+    const send = (timestamp: number, frames: number) => captures.get('system')!.audio({
+      ...packet(), timestamp, samples: new Float32Array(frames).fill(0.25),
+    });
+    send(0, 32000);
+    await waiting;
+    const first = runtime.messages.find(m => m.op === 'audio');
+    runtime.workers[0].emit('message', { ack: first.sequence });
+    vi.advanceTimersByTime(2000);
+    send(2000, 160);
+    expect(runtime.messages.filter(m => m.op === 'audio').map(m => m.samples.length)).toEqual([32000, 160]);
+    const stop = controller.call({ op: 'recording' });
+    await turn();
+    expect(events.filter(e => e.type === 'recording').map(e => e.active)).toEqual([true]);
+    resume();
+    await stop;
+    const [finished] = await fs.readdir(directory);
+    expect(name).toBe(finished + '.pending');
+    expect((await fs.stat(path.join(directory, finished))).size).toBe(44 + (32000 + 160) * 2);
+  } finally {
+    resume();
+    await controller.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(['microphone', 'system'] as const)('保存 WAV 时平衡较弱的 %s，并保留同时说话的两路声音', async quietSource => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-balance-'));
+  const rate = 16000;
+  const tones = { microphone: 500, system: 900 };
+  try {
+    await start();
+    await controller.call({ op: 'recording', directory });
+    // Two seconds per voice, two seconds of overlap, then background noise and silence.
+    for (let ms = 0; ms < 7000; ms += 20) {
+      for (const source of ['microphone', 'system'] as const) {
+        const talking = source === 'microphone' ? ms < 2000 || ms >= 4000 : ms >= 2000;
+        const voiceLevel = source === quietSource ? 0.03 : 0.48;
+        let level = talking ? voiceLevel : 0;
+        if (ms >= 6000) level = ms < 6500 ? 0.0004 : 0;
+        // A loud transient follows the settled overlap, before the noise-floor check.
+        if (ms === 5500) level = 0.98;
+        const samples = Float32Array.from({ length: rate / 50 }, (_, i) =>
+          level * Math.sin(2 * Math.PI * tones[source] * i / rate));
+        const original = ms === 5500 ? samples.slice() : undefined;
+        captures.get(source)!.audio({ rate, timestamp: 10000 + ms, flags: 0, samples });
+        const frame = runtime.messages.at(-1);
+        if (original) expect(frame.samples).toEqual(original);
+        runtime.workers[0].emit('message', { ack: frame.sequence });
+      }
+      vi.advanceTimersByTime(20);
+    }
+    await controller.call({ op: 'recording' });
+    const [file] = await fs.readdir(directory);
+    const wav = await fs.readFile(path.join(directory, file));
+    expect(wav.readUInt32LE(40)).toBe(7 * rate * 2);
+    // Measure each tone independently, including when both share the same PCM samples.
+    const amplitude = (source: AudioSource, from: number, seconds = 0.5) => {
+      let sine = 0, cosine = 0;
+      const first = Math.round(from * rate), length = Math.round(seconds * rate);
+      for (let i = first; i < first + length; i++) {
+        const sample = wav.readInt16LE(44 + i * 2) / 32767;
+        const phase = 2 * Math.PI * tones[source] * i / rate;
+        sine += sample * Math.sin(phase);
+        cosine += sample * Math.cos(phase);
+      }
+      return 2 * Math.hypot(sine, cosine) / length;
+    };
+    for (const together of [false, true]) {
+      const mic = amplitude('microphone', together ? 5 : 1.5);
+      const system = amplitude('system', together ? 5 : 3.5);
+      // The original 16:1 imbalance drops below 4:1 in either direction.
+      expect(Math.max(mic, system) / Math.min(mic, system)).toBeLessThan(4);
+      expect(Math.min(mic, system)).toBeGreaterThan(0.03);
+    }
+    const burst = Array.from({ length: rate / 50 }, (_, i) => wav.readInt16LE(44 + (5.5 * rate + i) * 2));
+    expect(burst.some((v, i) => Math.abs(v) === 32767 && v === burst[i - 1])).toBe(false);
+    expect(amplitude('microphone', 6)).toBeLessThan(0.002);
+    const systemVoiceLevel = quietSource === 'system' ? 0.03 : 0.48;
+    const systemGain = amplitude('system', 5.85, 0.15) / systemVoiceLevel;
+    const quietDetail = amplitude('system', 6) / (systemGain * 0.0004);
+    expect(quietDetail).toBeGreaterThan(0.9);
+    expect(quietDetail).toBeLessThan(1.1);
+    expect(wav.subarray(44 + Math.round(6.9 * rate) * 2).every(byte => byte === 0)).toBe(true);
+  } finally {
+    await controller.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
+it.each(['native', 'anchored'])('双路录音跟随各自开关，重新开启时丢弃静音期间积压的采样 (%s)', async (clock) => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-mute-'));
+  try {
+    const captureTime = () => 123456 + Number(process.hrtime.bigint()) / 1e6;
+    if (clock === 'native') adapter.captureClockNow = captureTime;
+    await start();
+    await controller.call({ op: 'recording', directory });
+    const origin = captureTime();
+    const send = (source: AudioSource, at: number, duration = 10, flags = 0) => {
+      captures.get(source)!.audio({
+        rate: 16000, timestamp: origin + at, flags,
+        samples: new Float32Array(duration * 16).fill(source === 'microphone' ? 0.25 : 0.5),
+      });
+    };
+    const mute = (microphoneMuted: boolean, systemAudioMuted: boolean) =>
+      controller.call({ op: 'set-input-state', state: { ...remote, microphoneMuted, systemAudioMuted } });
+    send('microphone', 0);
+    send('system', 0);
+    vi.advanceTimersByTime(10);
+    await mute(false, true);
+    send('microphone', 10);
+    send('system', 10);
+    vi.advanceTimersByTime(10);
+    await mute(true, true);
+    send('microphone', 20);
+    send('system', 20);
+    vi.advanceTimersByTime(10);
+    await mute(true, false);
+    send('system', 20, 3, 4); // The device could not timestamp this buffered packet.
+    send('system', 23, 2);
+    send('system', 25); // Straddles the system unmute at 30 ms.
+    send('system', 35, 5);
+    vi.advanceTimersByTime(10);
+    await mute(false, false);
+    send('microphone', 30, 5);
+    send('microphone', 35); // Straddles the microphone unmute at 40 ms.
+    send('microphone', 45, 5);
+    send('system', 40);
+    vi.advanceTimersByTime(10);
+    await controller.call({ op: 'recording' });
+
+    const [file] = await fs.readdir(directory);
+    const wav = await fs.readFile(path.join(directory, file));
+    const mic = new Float32Array(800);
+    const filteredMic = (length: number) =>
+      new RecordingVoiceFilter(16000).process(new Float32Array(length).fill(0.25));
+    mic.set(filteredMic(320), 0);
+    mic.set(filteredMic(160), 640);
+    expect(wav.readUInt32LE(40)).toBe(mic.length * 2);
+    const actual = Array.from(mic, (_, i) => wav.readInt16LE(44 + i * 2));
+    const expected = Array.from(mic, (sample, i) =>
+      Math.round(Math.fround(sample + (i < 160 || i >= 480 ? 0.5 : 0)) * 32767));
+    expect(actual).toEqual(expected);
+  } finally {
+    await controller.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
 });
 
 it('软静音保留采集与模型，立即挡住迟到麦克风文本，系统音频与进度不受影响', async () => {

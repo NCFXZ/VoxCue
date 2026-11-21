@@ -1,4 +1,5 @@
 import { t } from '../i18n';
+import { apiProviders, isApiProvider } from '../../electron/contracts/apiConnections';
 import {
   chatGPTProvider,
   copilotProvider,
@@ -15,6 +16,10 @@ const unknownProvider: ModelProvider = {
 export function providerInfo(value?: ModelProvider | string): ModelProvider {
   if (value === 'chatgpt') return chatGPTProvider;
   if (value === 'copilot') return copilotProvider;
+  if (isApiProvider(value)) {
+    const provider = apiProviders[value];
+    return { id: value, name: t(provider.name), dataRecipient: t(provider.recipient) };
+  }
   if (value === 'mock')
     return { id: 'mock', name: t('未连接服务'), dataRecipient: t('模型服务提供商') };
   if (typeof value === 'string' && value !== 'unknown' && value.trim() && value.length <= 120)
@@ -25,11 +30,12 @@ export function providerInfo(value?: ModelProvider | string): ModelProvider {
     [value.id, value.name, value.dataRecipient].every(
       (field) => typeof field === 'string' && field.trim() && field.length <= 120,
     )
-  )
+  ) {
+    const api = isApiProvider(value.id) ? apiProviders[value.id] : undefined;
     return {
       id: value.id,
-      name: value.name,
-      dataRecipient: value.dataRecipient,
+      name: api ? t(api.name) : value.name,
+      dataRecipient: api ? t(api.recipient) : value.dataRecipient,
       ...(typeof value.modelName === 'string' && value.modelName.length <= 120
         ? { modelName: value.modelName }
         : {}),
@@ -37,6 +43,7 @@ export function providerInfo(value?: ModelProvider | string): ModelProvider {
         ? { modelVendor: value.modelVendor }
         : {}),
     };
+  }
   return {
     ...unknownProvider,
     name: t(unknownProvider.name),

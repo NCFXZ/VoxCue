@@ -1,11 +1,11 @@
+@import '../../lib/messageMotion.css';
+
 :root {
   view-transition-name: none;
 }
 :root[data-view-direction] {
   --view-exit-x: 0px;
-  --view-enter-x: 0px;
   --view-exit-y: -8px;
-  --view-enter-y: 8px;
 }
 :root[data-view-direction='forward'] {
   --view-exit-x: -32px;
@@ -19,25 +19,33 @@
   --view-exit-y: 0px;
   --view-enter-y: 0px;
 }
-::view-transition-group(screen) {
+::view-transition-group(screen),
+::view-transition-group(panel-outgoing),
+::view-transition-group(panel-incoming) {
   overflow: clip;
-  background: var(--surface);
   border-radius: var(--view-radius, 0px);
   corner-shape: var(--view-curve, round);
   animation-duration: var(--panel-motion-duration, 240ms);
   animation-timing-function: var(--panel-motion-easing);
 }
+::view-transition-group(screen) {
+  background: var(--surface);
+}
 ::view-transition-old(screen),
-::view-transition-new(screen) {
+::view-transition-new(screen),
+::view-transition-old(panel-outgoing),
+::view-transition-new(panel-incoming) {
   mix-blend-mode: normal;
   animation-duration: var(--panel-motion-duration, 240ms);
   animation-timing-function: var(--panel-motion-easing);
   animation-fill-mode: both;
 }
-::view-transition-old(screen) {
+::view-transition-old(screen),
+::view-transition-old(panel-outgoing) {
   animation-name: screen-exit;
 }
-::view-transition-new(screen) {
+::view-transition-new(screen),
+::view-transition-new(panel-incoming) {
   animation-name: screen-enter;
 }
 @keyframes screen-exit {
@@ -48,16 +56,6 @@
   to {
     opacity: 0;
     transform: translate(var(--view-exit-x), var(--view-exit-y));
-  }
-}
-@keyframes screen-enter {
-  from {
-    opacity: 0;
-    transform: translate(var(--view-enter-x), var(--view-enter-y));
-  }
-  to {
-    opacity: 1;
-    transform: translate(0, 0);
   }
 }
 .page-stage {
@@ -71,7 +69,7 @@
 ::view-transition {
   pointer-events: none;
 }
-:root[data-view-clip]::view-transition {
+:root[data-view-clip='shared']::view-transition {
   inset: var(--view-clip-top) auto auto var(--view-clip-left);
   width: var(--view-clip-width);
   height: var(--view-clip-height);
@@ -79,10 +77,19 @@
   border-radius: var(--view-clip-radius);
   corner-shape: var(--view-curve, round);
 }
-:root[data-view-clip]::view-transition-group(screen) {
+:root[data-view-clip='shared']::view-transition-group(screen) {
   translate: calc(-1 * var(--view-clip-left)) calc(-1 * var(--view-clip-top));
 }
-::view-transition-group(screen) {
+/* Keep the snapshots in viewport coordinates through the handoff to the live lists. */
+:root[data-view-clip='independent']::view-transition {
+  clip-path: inset(
+    var(--view-clip-top) calc(100% - var(--view-clip-left) - var(--view-clip-width))
+    calc(100% - var(--view-clip-top) - var(--view-clip-height)) var(--view-clip-left)
+    round var(--view-clip-radius)
+  );
+}
+::view-transition-group(screen),
+::view-transition-group(panel-incoming) {
   pointer-events: auto;
 }
 ::view-transition-group(window-chrome) {
@@ -104,7 +111,11 @@
 @media (prefers-reduced-motion: reduce) {
   ::view-transition-group(screen),
   ::view-transition-old(screen),
-  ::view-transition-new(screen) {
+  ::view-transition-new(screen),
+  ::view-transition-group(panel-outgoing),
+  ::view-transition-group(panel-incoming),
+  ::view-transition-old(panel-outgoing),
+  ::view-transition-new(panel-incoming) {
     animation: none;
   }
 }

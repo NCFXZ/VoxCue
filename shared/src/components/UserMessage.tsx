@@ -12,6 +12,7 @@ export function UserMessage({ message }: { message: ChatMessage }) {
   useLayoutEffect(() => {
     const node = text.current!;
     const measure = () => {
+      if (!node.getClientRects().length) return;
       const fullHeight = node.scrollHeight;
       const collapsedHeight = parseFloat(getComputedStyle(node).lineHeight) * 20;
       node.style.setProperty('--user-message-full-height', `${fullHeight}px`);

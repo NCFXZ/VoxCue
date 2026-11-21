@@ -1,5 +1,6 @@
 export const shortcutLabels = {
   'toggle-window': '显示或隐藏面试窗口',
+  'toggle-shortcut-help': '显示或隐藏快捷键说明',
   'toggle-panels': '展开或收起面试面板',
   'toggle-transcript': '展开或收起转写面板',
   'toggle-microphone': '打开或关闭麦克风',
@@ -25,6 +26,7 @@ export interface InterviewShortcutStatus {
   systemAudioMuted: boolean;
 }
 export function interviewShortcutLabel(action: ShortcutAction, state: InterviewShortcutStatus) {
+  if (action === 'toggle-shortcut-help') return '隐藏快捷键说明';
   const labels = interviewToggleLabels[action];
   if (!labels) return shortcutLabels[action];
   switch (action) {
@@ -89,6 +91,7 @@ export function validateShortcutCall(value: unknown, mac = false): ShortcutSetti
 export function defaultShortcuts(): ShortcutBindings {
   return {
     'toggle-window': 'Control+Shift+H',
+    'toggle-shortcut-help': 'Control+Shift+/',
     'toggle-panels': 'Control+Shift+P',
     'toggle-transcript': 'Control+Shift+T',
     'toggle-microphone': 'Control+Shift+M',
@@ -110,10 +113,11 @@ export function normalizeShortcut(value: unknown, mac = false): string | null {
   if (value === null) return null;
   if (typeof value !== 'string' || value.length > 80) throw Error('无效的快捷键。');
   const parts = value.split('+');
-  const key = parts.pop()!;
+  const storedKey = parts.pop()!;
+  const key = storedKey === 'Slash' ? '/' : storedKey;
   const allowedModifiers = mac ? macModifiers : modifiers;
   if (
-    !/^(?:[A-Z0-9]|F(?:[1-9]|1\d|2[0-4])|Enter|Space|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Escape|Minus|Plus|Comma|Period|Slash|Semicolon|Quote|BracketLeft|BracketRight|Backslash)$/.test(
+    !/^(?:[A-Z0-9/]|F(?:[1-9]|1\d|2[0-4])|Enter|Space|Tab|Backspace|Delete|Insert|Home|End|PageUp|PageDown|Up|Down|Left|Right|Escape|Minus|Plus|Comma|Period|Semicolon|Quote|BracketLeft|BracketRight|Backslash)$/.test(
       key,
     ) ||
     parts.some((part) => !allowedModifiers.includes(part)) ||
@@ -217,7 +221,7 @@ function shortcutAccelerator(
     '+': 'Plus',
     ',': 'Comma',
     '.': 'Period',
-    '/': 'Slash',
+    '?': '/',
     ';': 'Semicolon',
     "'": 'Quote',
     '[': 'BracketLeft',
@@ -233,7 +237,7 @@ function shortcutAccelerator(
       ? (physical[1] ?? physical[2])
       : /^[A-Za-z0-9]$/.test(event.key)
         ? event.key.toUpperCase()
-        : (aliases[event.key] ?? event.key);
+        : event.code === 'Slash' ? '/' : (aliases[event.key] ?? event.key);
   return [
     ...(event.ctrlKey ? ['Control'] : []),
     ...(event.altKey ? ['Alt'] : []),

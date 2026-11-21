@@ -1,9 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
+import dns from 'node:dns/promises';
+import os from 'node:os';
 import {
   CopilotAuthService,
   copilotAuthorizationUrl,
 } from '../../../shared/electron/backend/copilot/auth';
 import { CopilotChatService } from '../../../shared/electron/backend/copilot/service';
+import { webPermission } from '../../electron/backend/copilot/webPermission';
 import { SelectedChatService } from '../../../shared/electron/application/providers';
 import type { AuthSession } from '../../../shared/electron/contracts/auth';
 import type { ChatEvent, ChatRequest } from '../../../shared/electron/contracts/chat';
@@ -400,9 +403,133 @@ function answer(emit: (type: string, data: any) => void, content = '合成回答
   emit('session.idle', {});
 }
 describe('Copilot 服务适配与本机资料边界', () => {
+  it('checks both DNS results and literal addresses against current connected networks', async () => {
+    const interfaces = vi.spyOn(os, 'networkInterfaces').mockReturnValue({});
+    const delayed = Promise.withResolvers<{ address: string; family: number }[]>();
+    const lookup = vi.spyOn(dns, 'lookup').mockReturnValue(delayed.promise);
+    const permit = webPermission(true, new AbortController().signal);
+    const check = async (url: string, redirectedFrom?: string) => (await permit(
+      { kind: 'url', url, intention: 'fixture', redirectedFrom }, { sessionId: 'fixture' },
+    )).kind;
+    function nic(address: string, cidr: string | null): os.NetworkInterfaceInfo {
+      const info = { address, cidr, internal: false, mac: '', netmask: '' };
+      return address.includes(':') ? { ...info, family: 'IPv6', scopeid: 0 } : { ...info, family: 'IPv4' };
+    }
+    try {
+      const changing = check('https://[2606:4700:1::1]', 'https://origin.example');
+      await vi.waitFor(() => expect(lookup).toHaveBeenCalledOnce());
+      interfaces.mockReturnValue({ fixture: [
+        nic('2606:4700:1::9', '2606:4700:1::9/64'), nic('11.21.31.41', '11.21.31.41/24'),
+        nic('12.21.31.41', '12.21.31.41/0'), nic('2606:4700:2::7', '2606:4700:2::7/1'),
+        nic('13.21.31.41', null), nic('14.21.31.41', '14.21.31.41/99'),
+      ] });
+      delayed.resolve([{ address: '8.8.8.8', family: 4 }]);
+      expect(await changing).toBe('reject');
+      for (const host of ['11.21.31.41', '11.21.31.99', '12.21.31.41', '13.21.31.41', '14.21.31.41',
+        '[2606:4700:1::9]', '[2606:4700:1::a]', '[2606:4700:2::7]'])
+        expect(await check('https://' + host)).toBe('reject');
+      for (const host of ['11.21.32.99', '12.21.31.42', '14.21.31.42', '[2606:4700:2::1]'])
+        expect(await check('https://' + host)).toBe('approve-once');
+      lookup.mockResolvedValue([{ address: '11.21.31.64', family: 4 }]);
+      expect(await check('https://fixture.example')).toBe('reject');
+      interfaces.mockImplementation(() => { throw Error('interfaces unavailable'); });
+      expect(await check('https://8.8.8.8')).toBe('reject');
+    } finally {
+      delayed.resolve([]);
+      lookup.mockRestore();
+      interfaces.mockRestore();
+    }
+  });
+  it('retains DNS capacity until the OS resolver finishes even when permission has timed out', async () => {
+    const interfaces = vi.spyOn(os, 'networkInterfaces').mockReturnValue({});
+    const slow = Promise.withResolvers<{ address: string; family: number }[]>();
+    const lookup = vi.spyOn(dns, 'lookup').mockReturnValue(slow.promise);
+    const timeout = new AbortController();
+    const clock = vi.spyOn(AbortSignal, 'timeout').mockReturnValueOnce(timeout.signal).mockReturnValueOnce(timeout.signal);
+    const permit = webPermission(true, new AbortController().signal);
+    const check = (host: string) => permit({ kind: 'url', url: 'https://' + host, intention: 'test' }, { sessionId: 'fixture' });
+    try {
+      const first = check('one.example'), second = check('two.example');
+      expect(lookup).toHaveBeenCalledTimes(2);
+      timeout.abort();
+      await expect(Promise.all([first, second])).resolves.toEqual([{ kind: 'reject' }, { kind: 'reject' }]);
+      lookup.mockResolvedValue([{ address: '8.8.8.8', family: 4 }]);
+      expect(await check('three.example')).toEqual({ kind: 'reject' });
+      expect(lookup).toHaveBeenCalledTimes(2);
+      slow.resolve([{ address: '8.8.8.8', family: 4 }]);
+      await slow.promise;
+      expect(await check('three.example')).toEqual({ kind: 'approve-once' });
+      expect(lookup).toHaveBeenCalledTimes(3);
+    } finally {
+      slow.resolve([]);
+      clock.mockRestore();
+      lookup.mockRestore();
+      interfaces.mockRestore();
+    }
+  });
+  it('only approves active web tools for public destinations and rechecks both ends of redirects', async () => {
+    const interfaces = vi.spyOn(os, 'networkInterfaces').mockReturnValue({});
+    const lookup = vi.spyOn(dns, 'lookup').mockResolvedValue([{ address: '8.8.8.8', family: 4 }]);
+    const controller = new AbortController();
+    const fixture = chat(() => {});
+    const pending = fixture.service.stream({ ...request, webSearch: true }, () => {}, controller.signal);
+    try {
+      await vi.waitFor(() => expect(fixture.session.send).toHaveBeenCalledOnce());
+      const permit = fixture.client.createSession.mock.calls[0][0].onPermissionRequest;
+      const check = async (url: string, extra = {}) => (await permit({ kind: 'url', url, ...extra })).kind;
+      for (const url of ['https://127.0.0.1', 'http://[::1]', 'http://[::ffff:192.168.0.1]',
+        'https://localhost.', 'https://printer.local', 'https://printer', 'https://user:pass@site.example',
+        'https://[2001:db8::1]', 'http://0.0.0.0', 'file:///sample.txt'])
+        expect(await check(url)).toBe('reject');
+      expect(await check('https://site.example', { managedApprovalRequired: true })).toBe('reject');
+      expect(await check('https://site.example', { requestSandboxBypass: true })).toBe('reject');
+      expect(lookup).not.toHaveBeenCalled();
+      expect(await check('https://site.example', { redirectedFrom: 'https://origin.example' })).toBe('approve-once');
+      expect(await check('https://[2606:4700:4700::1111]')).toBe('approve-once');
+      expect(await check('https://site.example', { redirectedFrom: 'http://localhost' })).toBe('reject');
+      lookup.mockResolvedValueOnce([{ address: '8.8.8.8', family: 4 }, { address: 'fd00::1', family: 6 }]);
+      expect(await check('https://mixed.example', { redirectedFrom: 'https://origin.example' })).toBe('reject');
+      lookup.mockRejectedValueOnce(Error('unavailable'));
+      expect(await check('https://unknown.example')).toBe('reject');
+      const late = Promise.withResolvers<{ address: string; family: number }[]>();
+      lookup.mockReturnValueOnce(late.promise);
+      const lateDecision = check('https://late.example');
+      answer(fixture.emit);
+      await pending;
+      late.resolve([{ address: '8.8.8.8', family: 4 }]);
+      expect(await lateDecision).toBe('reject');
+      expect(await check('https://site.example')).toBe('reject');
+    } finally {
+      controller.abort();
+      await pending.catch(() => {});
+      lookup.mockRestore();
+      interfaces.mockRestore();
+    }
+  });
+  it('preserves binary attachment bytes and can cancel their encoding before SDK send', async () => {
+    const bytes = new Uint8Array(2 * 1024 * 1024 + 4).fill(123).subarray(1);
+    const input = { ...request, turns: [{ ...request.turns[0], files: [{ name: 'fixture.png', bytes }] }] };
+    const first = chat(answer);
+    await first.service.stream(input, () => {}, new AbortController().signal);
+    expect(first.session.send.mock.calls[0][0].attachments[0].data === Buffer.from(bytes).toString('base64')).toBe(true);
+    const next = chat(answer);
+    const cancel = new AbortController();
+    const subscribe = next.session.on.getMockImplementation()!;
+    next.session.on.mockImplementationOnce(callback => {
+      setImmediate(() => cancel.abort());
+      return subscribe(callback);
+    });
+    await expect(next.service.stream(input, () => {}, cancel.signal)).rejects.toBeDefined();
+    expect(next.session.send).not.toHaveBeenCalled();
+  });
   it('超时额度 RPC 退休后释放模型队列，迟到的旧运行时权限错误不暂停新请求', async () => {
     const timeout = new AbortController();
-    const timeoutFactory = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(timeout.signal);
+    const realTimeout = AbortSignal.timeout;
+    const timeoutFactory = vi
+      .spyOn(AbortSignal, 'timeout')
+      .mockImplementation((milliseconds) =>
+        milliseconds === 15000 ? timeout.signal : realTimeout(milliseconds),
+      );
     try {
       const gate = new ProviderCredentialAccess('copilot');
       let retired!: () => void, late!: (reason: Error) => void;
@@ -629,6 +756,49 @@ describe('Copilot 服务适配与本机资料边界', () => {
     await expect(
       timeout.service.stream(request, () => {}, new AbortController().signal),
     ).rejects.toThrow('长时间未返回数据');
+  });
+  it('一个会话在创建时被取消、另一个被模型拒绝，均不停止仍在回答的会话', async () => {
+    const retire = vi.fn(async () => {});
+    const live = chat(() => {}, 5000, new ProviderCredentialAccess('copilot'), retire);
+    const cancelled = chat(() => {});
+    const denied = chat(() => {});
+    cancelled.session.sessionId = 'cancelled-session';
+    denied.session.sessionId = 'denied-session';
+    const creating = Promise.withResolvers<typeof cancelled.session>();
+    live.client.createSession.mockResolvedValueOnce(live.session)
+      .mockReturnValueOnce(creating.promise).mockResolvedValueOnce(denied.session);
+    const received: ChatEvent[] = [];
+    const controller = new AbortController();
+    const active = live.service.stream(request, value => received.push(value), controller.signal);
+    try {
+      await vi.waitFor(() => expect(live.session.send).toHaveBeenCalledOnce());
+      const stop = new AbortController();
+      const second = live.service.stream({ ...request, id: 'cancel' }, () => {}, stop.signal);
+      await vi.waitFor(() => expect(live.client.createSession).toHaveBeenCalledTimes(2));
+      stop.abort();
+      await expect(second).rejects.toBeDefined();
+      expect(retire).not.toHaveBeenCalled();
+      creating.resolve(cancelled.session);
+      await vi.waitFor(() => expect(live.client.deleteSession).toHaveBeenCalledWith('cancelled-session'));
+      expect(cancelled.session.send).not.toHaveBeenCalled();
+
+      const third = live.service.stream({ ...request, id: 'denied' }, () => {}, controller.signal);
+      await vi.waitFor(() => expect(denied.session.send).toHaveBeenCalledOnce());
+      denied.emit('session.error', { errorType: 'authorization' });
+      await expect(third).rejects.toMatchObject({ detail: { status: 403 } });
+      expect(live.session.abort).not.toHaveBeenCalled();
+      answer(live.emit, 'still active');
+      await expect(active).resolves.toMatchObject({ answerText: 'still active' });
+      expect(received.every(event => event.id === request.id)).toBe(true);
+      expect(live.client.rpc.models.list).toHaveBeenCalledTimes(1);
+      await live.service.models();
+      expect(live.client.rpc.models.list).toHaveBeenCalledTimes(2);
+      expect(retire).not.toHaveBeenCalled();
+    } finally {
+      creating.resolve(cancelled.session);
+      controller.abort();
+      await active.catch(() => {});
+    }
   });
   it('模型/服务选择不能通过另一个模型 ID 串到 ChatGPT', async () => {
     const first = { ...chat(() => {}).service, models: vi.fn(async () => []) } as any;

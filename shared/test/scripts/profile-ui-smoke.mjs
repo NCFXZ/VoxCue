@@ -110,8 +110,10 @@ try {
     const { KnowledgeError } = require(
       app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/errors.js',
     );
+    const { projectEvidence } = require(
+      app.getAppPath() + '/dist-electron/shared/electron/backend/knowledge/evidence.js',
+    );
     KnowledgeHost.prototype.version = async () => 'synthetic-profile-v1';
-    KnowledgeHost.prototype.prepareQuery = async (query) => query;
     globalThis.profileRequests = [];
     globalThis.profileSearches = [];
     globalThis.failSkills = true;
@@ -127,7 +129,8 @@ try {
         {
           itemId: 'chosen-item',
           documentId: 'chosen-document',
-          baseId,
+          baseId: globalThis.profileChosenBase,
+          revision: 'chosen-revision',
           name: 'chosen.md',
           title: query,
           excerpt: query,
@@ -140,6 +143,7 @@ try {
           itemId: 'other-item',
           documentId: 'other-document',
           baseId: 'other-base',
+          revision: 'other-revision',
           name: 'other.md',
           title: query,
           excerpt: 'private-other-base',
@@ -150,15 +154,26 @@ try {
         },
       ];
     };
-    KnowledgeHost.prototype.getItem = async (itemId) => ({
-      itemId,
-      documentId: itemId === 'chosen-item' ? 'chosen-document' : 'other-document',
-      kind: 'text',
-      title: 'TypeScript',
-      content: itemId === 'chosen-item' ? 'chosen-evidence' : 'private-other-base',
-      followUpIds: [],
-      section: '',
-    });
+    KnowledgeHost.prototype.getEvidenceItem = async (hit, signal, expected) => {
+      signal.throwIfAborted();
+      if (!['chosen-item', 'other-item'].includes(hit.itemId)) return null;
+      const chosen = hit.itemId === 'chosen-item';
+      const documentId = chosen ? 'chosen-document' : 'other-document';
+      const baseId = chosen ? globalThis.profileChosenBase : 'other-base';
+      const revision = chosen ? 'chosen-revision' : 'other-revision';
+      if (expected?.baseId !== baseId || expected.documentId !== documentId || expected.revision !== revision)
+        throw new KnowledgeError('integrity', 'Synthetic evidence identity mismatch');
+      return projectEvidence(hit, {
+        itemId: hit.itemId,
+        documentId,
+        source: { baseId, revision },
+        kind: 'text',
+        title: 'TypeScript',
+        content: chosen ? 'chosen-evidence' : 'private-other-base',
+        followUpIds: [],
+        section: '',
+      });
+    };
     ChatGPTService.prototype.stream = async function (request, emit) {
       if (request.id.startsWith('history-title-'))
         return { answerText: '合成面试记录', usage: null, sources: [] };
@@ -361,6 +376,7 @@ try {
   const chosen = await page.evaluate(() =>
     JSON.parse(localStorage.getItem('copilot-interview-knowledge-base-v1')),
   );
+  await app.evaluate((_, baseId) => { globalThis.profileChosenBase = baseId; }, chosen);
   assert.equal(await panel.getByText('官方题库', { exact: false }).count(), 0);
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   await page.getByLabel('添加聊天文件', { exact: true }).setInputFiles({

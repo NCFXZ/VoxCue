@@ -2,6 +2,8 @@ import { componentPresentation } from '../../electron/contracts/components';
 import { create } from 'zustand';
 import { t } from '../i18n';
 import { localChanged } from '../services/localChanges';
+import { profileStorageKey, readStoredProfile } from '../services/storedValues';
+import { acknowledgeConfirmations, confirmedMessage, recoverConfirmations, saveConfirmedProfile } from '../services/profileConfirmations';
 import { recordFeature } from '../services/telemetry';
 import { componentReady } from './components';
 import { mergeActivityLog } from '../../electron/contracts/activity';
@@ -18,6 +20,7 @@ import {
   type ChatAttachment,
 } from '../services/chatOptions';
 import { useChatConnection } from './chatConnection';
+import { rememberServiceModel, resolveServiceModel } from '../services/serviceModelPreferences';
 import { useAuth } from './auth';
 import { streamChat, prepareChatRequest, ChatRequestError } from '../services/chat';
 import { localChats, type ChatSnapshot, type PreparationConversation } from '../services/chats';
@@ -33,11 +36,16 @@ import {
   mergeSelectedSkills,
 } from '../../electron/contracts/profile';
 const emptyInfo: PersonalInfo = { name: '', jobDescription: '', background: '' };
-let controller: AbortController | undefined;
-let controllerConversation: string | null = null;
+const requests = new Map<string, AbortController>();
+// A pending attachment/auth check belongs to the original editor, even if the user navigates back.
+let inputRevision = 0;
+let sessionRevision = 0;
 let restoringChats: Promise<void> | undefined;
 let savingChats: Promise<void> | undefined;
 let pendingChats: ChatSnapshot | undefined;
+let savedConversations: PreparationConversation[] | undefined;
+let chatSaveTimer: ReturnType<typeof setTimeout> | undefined;
+let flushAfterWrite = false;
 interface PreparationState {
   conversations: PreparationConversation[];
   chatsReady: boolean;
@@ -60,6 +68,7 @@ interface PreparationState {
   setDraft(value: string): void;
   resume: LocalDocument | null;
   streaming: boolean;
+  anyStreaming: boolean;
   error: string | null;
   attachments: ChatAttachment[];
   modelId: string;
@@ -72,7 +81,8 @@ interface PreparationState {
   send(prompt: string, retryId?: string, task?: 'skills'): Promise<void>;
   retry(id: string): Promise<void>;
   reset(preserveReply?: boolean): void;
-  stop(): void;
+  stop(id?: string | null): void;
+  stopAll(): void;
   selectProfileFields(messageId: string, fields: ProfileField[]): void;
   selectSkillIds(messageId: string, ids: string[]): void;
   updateInfo(info: Partial<PersonalInfo>, messageId?: string): boolean;
@@ -88,16 +98,26 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     if (restoringChats) return restoringChats;
     restoringChats = (async () => {
       try {
-        const saved = await localChats.read();
+        const saved = await localChats.read(() => {
+          if (!get().chatsReady || (!pendingChats && !savingChats && !get().chatStorageError)) return;
+          const snapshot = chatSnapshot(get());
+          clearTimeout(chatSaveTimer);
+          pendingChats = undefined;
+          return { snapshot, previous: savedConversations, writing: !!savingChats };
+        });
+        savedConversations = saved?.conversations;
+        let confirmationError: string | undefined;
+        try {
+          if (saved) saved.conversations = recoverConfirmations(localStorage, saved.conversations);
+        } catch {
+          confirmationError = '资料确认记录无法读取。';
+        }
         const active = saved?.conversations.find((c) => c.id === saved.activeConversation);
-        const models = useChatConnection.getState().models;
-        const model = saved && (models.find((entry) => entry.id === saved.modelId) ?? models[0]);
+        const state = get();
         set({
           ...(saved
             ? {
                 conversations: saved.conversations,
-                modelId: model?.id ?? saved.modelId,
-                effort: model ? resolveReasoningEffort(model, saved.effort) : saved.effort,
                 skillsNeedUpdate: saved.skillsNeedUpdate ?? false,
                 activeConversation: active?.id ?? null,
                 messages: active?.messages ?? [],
@@ -105,9 +125,13 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 attachments: active?.attachments ?? saved.attachments,
               }
             : {}),
+          ...chatSelection(saved ?? state, state.error),
+          ...(confirmationError ? { error: confirmationError } : {}),
           chatsReady: true,
           chatStorageError: null,
         });
+        if (saved && !confirmationError) checkSelectedFiles();
+        if (saved && saved.conversations !== savedConversations) queueChats(get(), true);
       } catch (error) {
         set({
           chatStorageError:
@@ -124,8 +148,11 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   async flushChats() {
     if (restoringChats) await restoringChats;
     if (!get().chatsReady) return false;
-    queueChats(get());
-    while (savingChats) await savingChats;
+    queueChats(get(), true);
+    while (savingChats) {
+      await savingChats;
+      if (pendingChats) saveQueuedChats();
+    }
     return !get().chatStorageError;
   },
   viewing: false,
@@ -148,9 +175,12 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   },
   selectConversation(id) {
     const conversation = get().conversations.find((item) => item.id === id);
-    if (!conversation || get().activeConversation === id) return;
+    if (!conversation) return;
+    if (get().activeConversation === id) { checkSelectedFiles(); return; }
+    inputRevision++;
     set((state) => ({
       activeConversation: id,
+      streaming: requests.has(id),
       messages: conversation.messages,
       draft: conversation.draft ?? '',
       attachments: conversation.attachments ?? [],
@@ -172,11 +202,14 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           : []),
       ],
     }));
+    checkSelectedFiles();
+    if (get().chatsReady) saveQueuedChats();
   },
   deleteConversation(id) {
-    if (id === controllerConversation) get().stop();
-    if (get().activeConversation === id) get().reset(id !== controllerConversation);
+    get().stop(id);
+    if (get().activeConversation === id) get().reset(true);
     set((state) => ({ conversations: state.conversations.filter((item) => item.id !== id) }));
+    if (get().chatsReady) saveQueuedChats();
   },
   info: emptyInfo,
   selectedKnowledgeBaseId: null,
@@ -213,18 +246,24 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   messages: [],
   resume: null,
   streaming: false,
+  anyStreaming: false,
   error: null,
   attachments: [],
-  modelId: 'mock-general',
-  effort: 'low',
+  modelId: '',
+  effort: 'auto',
   setEffort(effort) {
-    const models = useChatConnection.getState().models;
-    const model = models.find((entry) => entry.id === get().modelId) ?? models[0];
-    set({ effort: resolveReasoningEffort(model, effort) });
+    const { models, service } = useChatConnection.getState();
+    const model = models.find((entry) => entry.id === get().modelId);
+    if (!model) return;
+    const selection = { modelId: model.id, effort: resolveReasoningEffort(model, effort) };
+    if (service) rememberServiceModel('chat', service, selection);
+    set(selection);
+    if (get().chatsReady) queueChats(get(), true);
   },
   addAttachments(files) {
     try {
       set({ attachments: stageAttachments(get().attachments, files), error: null });
+      if (get().chatsReady) saveQueuedChats();
       if (files.length) recordFeature('file_import');
     } catch (error) {
       set({ error: error instanceof Error ? error.message : '添加文件失败。' });
@@ -232,35 +271,24 @@ export const usePreparation = create<PreparationState>((set, get) => ({
   },
   removeAttachment(id) {
     set((state) => ({ attachments: state.attachments.filter((item) => item.id !== id) }));
+    if (get().error === '聊天附件无法读取，原数据已保留。') checkSelectedFiles();
+    if (get().chatsReady) saveQueuedChats();
   },
   setModel(id) {
-    const model = useChatConnection.getState().models.find((entry) => entry.id === id);
-    if (model) set({ modelId: id, effort: resolveReasoningEffort(model, get().effort) });
+    const { models, service } = useChatConnection.getState();
+    const model = models.find((entry) => entry.id === id);
+    if (!model) return;
+    const state = get();
+    const selection = { modelId: id, effort: resolveReasoningEffort(model, state.effort) };
+    if (service) rememberServiceModel('chat', service, selection);
+    set({ ...selection, error: state.error === unavailableModel ? null : state.error });
+    if (get().chatsReady) queueChats(get(), true);
   },
   async load() {
     const chats = get().restoreChats();
     try {
-      const raw = localStorage.getItem('copilot-personal-info-v1');
-      if (raw) {
-        const info = JSON.parse(raw);
-        // Read old instruction lists as one document; never rewrite storage on load.
-        if (Array.isArray(info.customInstructions)) {
-          const entries = info.customInstructions;
-          if (
-            entries.length > 10 ||
-            !Array.from(entries).every(
-              (entry: any) =>
-                entry && typeof entry.title === 'string' && typeof entry.content === 'string',
-            )
-          )
-            throw new Error();
-          info.customInstructions = entries
-            .map((entry: any) => `${entry.title}\n${entry.content}`)
-            .join('\n\n');
-        }
-        if (!validProfile(info)) throw new Error();
-        set({ info });
-      }
+      const raw = localStorage.getItem(profileStorageKey);
+      if (raw) set({ info: readStoredProfile(raw) });
       const selection = localStorage.getItem('copilot-interview-knowledge-base-v1');
       if (selection) {
         const id = JSON.parse(selection);
@@ -368,9 +396,18 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       }
       const merged = { ...get().info, ...info };
       if (!validProfile(merged)) throw new Error('个人信息格式无效或内容过长。');
-      localStorage.setItem('copilot-personal-info-v1', JSON.stringify(merged));
+      const owner = get().activeConversation;
+      if (owner && messageId && savedFields) {
+        const durable = savedConversations?.find(conversation => conversation.id === owner)
+          ?.messages.some(message => message.id === messageId && message.status === 'completed');
+        saveConfirmedProfile(localStorage, JSON.stringify(merged), {
+          conversation: owner, message: messageId, fields: savedFields,
+          ...(savedFields.includes('skills') ? { skills: savedSkillIds } : {}),
+          ...(!durable ? { proposal: get().messages.find(message => message.id === messageId) } : {}),
+        });
+      } else localStorage.setItem(profileStorageKey, JSON.stringify(merged));
       recordFeature('profile_edit');
-      localChanged('profile');
+      localChanged('profile', ['profile:main']);
       set((state) => ({
         info: merged,
         skillsNeedUpdate:
@@ -383,20 +420,12 @@ export const usePreparation = create<PreparationState>((set, get) => ({
               : state.skillsNeedUpdate,
         error: null,
         messages: state.messages.map((message) =>
-          message.id === messageId
-            ? {
-                ...message,
-                applied: true,
-                selectedProfileFields: savedFields,
-                appliedProfileFields: savedFields,
-                ...(savedFields?.includes('skills')
-                  ? { selectedSkillIds: savedSkillIds, appliedSkillIds: savedSkillIds }
-                  : {}),
-                error: undefined,
-              }
+          message.id === messageId && savedFields
+            ? confirmedMessage(message, savedFields, savedSkillIds)
             : message,
         ),
       }));
+      if (messageId && get().chatsReady) saveQueuedChats();
       return true;
     } catch (error) {
       set({
@@ -432,7 +461,10 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     await get().send('', id);
   },
   async send(prompt, retryId, task) {
+    const revision = inputRevision;
+    const session = sessionRevision;
     if (restoringChats) await restoringChats;
+    if (revision !== inputRevision) return;
     const retryIndex = retryId ? get().messages.findIndex((m) => m.id === retryId) : -1;
     const retryMessage = get().messages[retryIndex];
     const retryUser = retryIndex > 0 ? get().messages[retryIndex - 1] : undefined;
@@ -456,29 +488,34 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       return;
     }
     if (useAuth.getState().waiting) return;
-    if (!useChatConnection.getState().models.length && !useAuth.getState().resolved) {
-      const before = get();
-      await useAuth.getState().ensure();
-      const current = get();
-      if (
-        current.streaming ||
-        current.activeConversation !== before.activeConversation ||
-        current.draft !== before.draft ||
-        current.attachments !== before.attachments ||
-        current.messages !== before.messages ||
-        current.info !== before.info
-      )
+    const before = get();
+    const inputIsCurrent = () => revision === inputRevision && sameInput(before, get());
+    const filesReady = localChats.checkFiles(before.messages,
+      skillTask ? [] : (retryUser?.options?.attachments ?? before.attachments));
+    if (filesReady) {
+      try { await filesReady; } catch (error) {
+        if (inputIsCurrent()) set({ error: error instanceof Error ? error.message : '聊天附件无法读取，原数据已保留。' });
         return;
+      }
+      if (!inputIsCurrent() || useAuth.getState().waiting) return;
+    }
+    if (!useChatConnection.getState().models.length && !useAuth.getState().resolved) {
+      await useAuth.getState().ensure();
+      if (!inputIsCurrent()) return;
     }
     const connection = useChatConnection.getState();
-    const selected =
-      connection.models.find((model) => model.id === get().modelId) ?? connection.models[0];
+    const modelId = get().modelId;
+    const selected = connection.models.find((model) => model.id === modelId);
     if (!selected) {
       set({
         error:
           useAuth.getState().error ||
           connection.error ||
-          (connection.live ? '正在加载模型，请稍候。' : '请先连接模型服务。'),
+          (!connection.live
+            ? '请先连接模型服务。'
+            : connection.loading
+              ? '正在加载模型，请稍候。'
+              : unavailableModel),
       });
       return;
     }
@@ -507,31 +544,32 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       }));
     }
     const owner = get().activeConversation!;
+    const current = new AbortController();
+    const id = crypto.randomUUID();
+    requests.set(owner, current);
     // Route every event to its originating conversation, even after navigation.
     const update = (
       change: Partial<PreparationState> | ((state: PreparationState) => Partial<PreparationState>),
     ) =>
       set((state) => {
+        if (requests.get(owner) !== current) return state;
         const messages =
           state.activeConversation === owner
             ? state.messages
             : state.conversations.find((c) => c.id === owner)?.messages;
-        if (!messages) return {};
+        if (!messages) return state;
         const patch = typeof change === 'function' ? change({ ...state, messages }) : change;
+        const previous = messages.find((message) => message.id === id);
         if (patch.messages)
           patch.messages = patch.messages.map((message) =>
             message.id === id &&
             message.startedAt !== undefined &&
-            messages.find((previous) => previous.id === id)?.status !== 'stopped'
+            previous?.status !== 'stopped'
               ? { ...message, durationMs: Math.max(0, Date.now() - message.startedAt) }
               : message,
           );
-        const completed = patch.messages?.some(
-          (message) =>
-            message.role === 'assistant' &&
-            message.status === 'completed' &&
-            messages.find((previous) => previous.id === message.id)?.status === 'streaming',
-        );
+        const completed = previous?.status === 'streaming' &&
+          patch.messages?.some((message) => message.id === id && message.status === 'completed');
         const unread = completed && !(state.viewing && state.activeConversation === owner);
         if (state.activeConversation === owner)
           return {
@@ -544,43 +582,20 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 }
               : {}),
           };
-        const {
-          messages: nextMessages,
-          error: _error,
-          attachments: _attachments,
-          ...shared
-        } = patch;
+        const nextMessages = patch.messages;
+        if (!nextMessages) return state;
         return {
-          ...shared,
-          conversations: nextMessages
-            ? state.conversations.map((c) =>
-                c.id === owner
-                  ? { ...c, messages: nextMessages, ...(unread ? { unread: true } : {}) }
-                  : c,
-              )
-            : state.conversations,
+          conversations: state.conversations.map((c) =>
+            c.id === owner ? { ...c, messages: nextMessages, ...(unread ? { unread: true } : {}) } : c,
+          ),
         };
       });
-    const current = new AbortController();
-    controllerConversation = owner;
-    controller = current;
-    const id = crypto.randomUUID();
-    update((state) => ({
+    const turnsToSend: ChatMessage[] = retryUser
+      ? [...before.messages.slice(0, -2), { ...retryUser, options }]
+      : [...before.messages, { id: crypto.randomUUID(), role: 'user', content: text, options, startedAt: Date.now() }];
+    update({
       messages: [
-        ...(retryId
-          ? state.messages.slice(0, -1).map((m) => (m.id === retryUser?.id ? { ...m, options } : m))
-          : state.messages),
-        ...(!retryId
-          ? [
-              {
-                id: crypto.randomUUID(),
-                role: 'user' as const,
-                content: text,
-                options,
-                startedAt: Date.now(),
-              },
-            ]
-          : []),
+        ...turnsToSend,
         {
           id,
           role: 'assistant',
@@ -596,17 +611,16 @@ export const usePreparation = create<PreparationState>((set, get) => ({
         },
       ],
       streaming: true,
+      anyStreaming: true,
       error: null,
-      attachments: retryId || skillTask ? get().attachments : [],
+      attachments: retryId || skillTask ? before.attachments : [],
       ...(!retryId && !task ? { draft: '' } : {}),
-    }));
+    });
+    if (get().chatsReady) saveQueuedChats();
     try {
       if (connection.live) {
-        const turns = get()
-          .messages.filter(
-            (message) =>
-              message.id !== id && (message.role === 'user' || message.status === 'completed'),
-          )
+        const turns = turnsToSend
+          .filter((message) => message.role === 'user' || message.status === 'completed')
           .map((message) => ({
             role: message.role,
             content:
@@ -622,10 +636,9 @@ export const usePreparation = create<PreparationState>((set, get) => ({
                 : ''),
             files:
               message.role === 'user'
-                ? (message.options?.attachments ?? []).map((item) => ({
-                    name: item.name,
-                    file: item.file,
-                  }))
+                ? (message.options?.attachments ?? []).map(item => item.file
+                    ? { name: item.name, file: item.file }
+                    : { name: item.name, size: item.size, readFile: () => localChats.readFile(item) })
                 : undefined,
           }));
         const request = await prepareChatRequest(
@@ -638,7 +651,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
             profile: (({ role: _legacyRole, ...active }) => active)(profileBase),
             ...(skillTask ? { profileTask: 'skills' as const } : {}),
             // Selection is only a candidate; main checks explicit user intent before retrieval.
-            knowledgeBaseId: get().selectedKnowledgeBaseId,
+            knowledgeBaseId: before.selectedKnowledgeBaseId,
             instructions: `你是 VoxCue，帮助用户准备面试：改善简历表达、梳理项目经历、准备回答和整理资料。使用 Markdown，跟随用户当前对话语言；用于面试口述的稿件（如自我介绍、示例回答）默认使用面试语言，用户另有要求时从其要求。表达专业自然、条理清楚，不重复。
 
 直接处理当前问题。信息不足时先完成能确定的部分，只有关键信息缺失、会明显影响结果时才简短询问。
@@ -746,7 +759,7 @@ export const usePreparation = create<PreparationState>((set, get) => ({
       } else {
         await mockPreparation.streamReply(
           text,
-          get().info,
+          profileBase,
           (chunk) => {
             if (!current.signal.aborted)
               update((state) => ({
@@ -799,34 +812,25 @@ export const usePreparation = create<PreparationState>((set, get) => ({
         ),
       }));
     } finally {
-      if (controller === current) update({ streaming: false });
-      if (connection.live) void useChatConnection.getState().refreshUsage();
+      if (requests.get(owner) === current) {
+        requests.delete(owner);
+        set({ anyStreaming: requests.size > 0, ...(get().activeConversation === owner ? { streaming: false } : {}) });
+        if (get().chatsReady) saveQueuedChats();
+      }
+      if (connection.live && sessionRevision === session) void useChatConnection.getState().refreshUsage();
     }
   },
-  stop() {
-    controller?.abort();
-    const mark = (messages: ChatMessage[]) =>
-      messages.map((message) =>
-        message.status === 'streaming'
-          ? {
-              ...message,
-              status: 'stopped' as const,
-              ...(message.startedAt !== undefined
-                ? { durationMs: Math.max(0, Date.now() - message.startedAt) }
-                : {}),
-            }
-          : message,
-      );
-    set((state) => ({
-      streaming: false,
-      messages:
-        state.activeConversation === controllerConversation ? mark(state.messages) : state.messages,
-      conversations: state.conversations.map((c) =>
-        c.id === controllerConversation ? { ...c, messages: mark(c.messages) } : c,
-      ),
-    }));
+  stop(id = get().activeConversation) {
+    if (id === get().activeConversation) inputRevision++;
+    if (id) stopRequests([id]);
+  },
+  stopAll() {
+    sessionRevision++;
+    inputRevision++;
+    stopRequests([...requests.keys()]);
   },
   reset(preserveReply = false) {
+    inputRevision++;
     if (!preserveReply) get().stop();
     set((state) => ({
       ...(!state.activeConversation &&
@@ -846,11 +850,13 @@ export const usePreparation = create<PreparationState>((set, get) => ({
           }
         : {}),
       activeConversation: null,
+      streaming: false,
       messages: [],
       draft: '',
       attachments: [],
       error: null,
     }));
+    if (get().chatsReady) saveQueuedChats();
   },
   async removeResume() {
     const doc = get().resume;
@@ -865,14 +871,74 @@ export const usePreparation = create<PreparationState>((set, get) => ({
     }
   },
 }));
+function stopRequests(ids: string[]) {
+  const stopped = new Map<string, AbortController>();
+  for (const id of ids) {
+    const request = requests.get(id);
+    if (!request) continue;
+    stopped.set(id, request);
+    requests.delete(id);
+  }
+  if (!stopped.size) return;
+  const now = Date.now();
+  usePreparation.setState((state) => {
+    let messages = state.messages;
+    const conversations = state.conversations.map((conversation) => {
+      if (!stopped.has(conversation.id)) return conversation;
+      const active = conversation.id === state.activeConversation;
+      const next = (active ? state.messages : conversation.messages).map((message) =>
+        message.status === 'streaming' ? {
+          ...message, status: 'stopped' as const,
+          ...(message.startedAt !== undefined ? { durationMs: Math.max(0, now - message.startedAt) } : {}),
+        } : message,
+      );
+      if (active) messages = next;
+      return { ...conversation, messages: next };
+    });
+    return {
+      conversations, messages, anyStreaming: requests.size > 0,
+      streaming: state.activeConversation !== null && requests.has(state.activeConversation),
+    };
+  });
+  for (const request of stopped.values()) request.abort();
+  if (usePreparation.getState().chatsReady) saveQueuedChats();
+}
+const unavailableModel = '所选模型当前不可用，请重新选择模型。';
+function chatSelection(
+  { modelId, effort }: Pick<PreparationState, 'modelId' | 'effort'>,
+  error: string | null,
+) {
+  const { models, service } = useChatConnection.getState();
+  if (!models.length) return { modelId, effort, error };
+  if (service) {
+    const selection = resolveServiceModel('chat', service, models, { modelId, effort });
+    if (selection) return { ...selection, error: error === unavailableModel ? null : error };
+    // A stale global snapshot may name a different, still-listed model. No model is
+    // selected until the user replaces the unavailable choice for this service.
+    if (models.some(model => model.id === modelId)) modelId = '';
+  } else {
+    const model = modelId ? models.find(entry => entry.id === modelId) : models[0];
+    if (model) return {
+      modelId: model.id, effort: resolveReasoningEffort(model, effort),
+      error: error === unavailableModel ? null : error,
+    };
+  }
+  return { modelId, effort, error: unavailableModel };
+}
 useChatConnection.subscribe((connection, previous) => {
-  if (connection.models === previous.models || !connection.models.length) return;
+  if (connection.models === previous.models && connection.service === previous.service) return;
   const state = usePreparation.getState();
-  const model =
-    connection.models.find((entry) => entry.id === state.modelId) ?? connection.models[0];
-  const effort = resolveReasoningEffort(model, state.effort);
-  if (state.modelId !== model.id || state.effort !== effort)
-    usePreparation.setState({ modelId: model.id, effort });
+  if (!connection.models.length) {
+    if (previous.service !== connection.service && state.error === unavailableModel)
+      usePreparation.setState({ error: null });
+    return;
+  }
+  // On startup the old unscoped preference may still be in IndexedDB. Do not
+  // record the first catalog item before the legacy selection has been read.
+  if (connection.service && !state.chatsReady) return;
+  const selected = chatSelection(state, state.error);
+  if (state.modelId !== selected.modelId || state.effort !== selected.effort || state.error !== selected.error)
+    usePreparation.setState(selected);
 });
 // Keep the active conversation snapshot in sync without duplicating File objects.
 usePreparation.subscribe((state, previous) => {
@@ -910,8 +976,25 @@ usePreparation.subscribe((state, previous) => {
     queueChats(state);
 });
 
-function queueChats(state: PreparationState) {
-  pendingChats = {
+function sameInput(before: PreparationState, current: PreparationState) {
+  return !current.streaming && current.activeConversation === before.activeConversation &&
+    current.draft === before.draft && current.attachments === before.attachments &&
+    current.messages === before.messages && current.info === before.info;
+}
+function checkSelectedFiles() {
+  const state = usePreparation.getState();
+  const clear = () => {
+    if (sameInput(state, usePreparation.getState()) && usePreparation.getState().error === '聊天附件无法读取，原数据已保留。')
+      usePreparation.setState({ error: null });
+  };
+  const pending = localChats.checkFiles(state.messages, state.attachments);
+  if (!pending) return clear();
+  void pending.then(clear, error => {
+    if (sameInput(state, usePreparation.getState())) usePreparation.setState({ error: error instanceof Error ? error.message : '聊天附件无法读取，原数据已保留。' });
+  });
+}
+function chatSnapshot(state: PreparationState): ChatSnapshot {
+  return {
     conversations: state.conversations,
     activeConversation: state.activeConversation,
     draft: state.draft,
@@ -922,23 +1005,40 @@ function queueChats(state: PreparationState) {
     webSearch: true,
     skillsNeedUpdate: state.skillsNeedUpdate,
   };
-  if (savingChats) return;
-  savingChats = (async () => {
-    while (pendingChats) {
-      const snapshot = pendingChats;
-      pendingChats = undefined;
-      try {
-        await localChats.write(snapshot);
-        usePreparation.setState({ chatStorageError: null });
-      } catch (error) {
-        pendingChats = undefined;
-        usePreparation.setState({
-          chatStorageError: error instanceof Error ? error.message : '聊天保存失败，请重试。',
-        });
-      }
+}
+function queueChats(state: PreparationState, immediate = false) {
+  pendingChats = chatSnapshot(state);
+  if (immediate) saveQueuedChats();
+  else chatSaveTimer ??= setTimeout(saveQueuedChats, 350);
+}
+function saveQueuedChats() {
+  clearTimeout(chatSaveTimer);
+  chatSaveTimer = undefined;
+  if (!pendingChats) return;
+  if (savingChats) {
+    flushAfterWrite = true;
+    return;
+  }
+  const snapshot = pendingChats;
+  const storage = globalThis.localStorage;
+  pendingChats = undefined;
+  savingChats = localChats.write(snapshot, savedConversations).then(() => {
+    savedConversations = snapshot.conversations;
+    try {
+      if (storage) acknowledgeConfirmations(storage, snapshot.conversations, usePreparation.getState().conversations);
+    } catch {
+      usePreparation.setState({ error: '资料确认记录无法读取。' });
     }
-  })().finally(() => {
+    usePreparation.setState({ chatStorageError: null });
+  }).catch((error) => {
+    usePreparation.setState({
+      chatStorageError: error instanceof Error ? error.message : '聊天保存失败，请重试。',
+    });
+  }).finally(() => {
     savingChats = undefined;
-    if (pendingChats) queueChats(usePreparation.getState());
+    if (flushAfterWrite) {
+      flushAfterWrite = false;
+      saveQueuedChats();
+    }
   });
 }

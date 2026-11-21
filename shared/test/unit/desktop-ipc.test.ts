@@ -1,4 +1,5 @@
 import { registerKnowledgeIpc } from '../../../shared/electron/ipc/knowledge';
+import { registerApiConnectionIpc } from '../../../shared/electron/ipc/apiConnections';
 import { registerUpdateIpc } from '../../../shared/electron/ipc/updates';
 import { registerComponentIpc } from '../../../shared/electron/ipc/components';
 import type { ComponentService } from '../../../shared/electron/backend/components/service';
@@ -116,6 +117,7 @@ describe('归档截图 IPC', () => {
       floating = { mainFrame: {} };
     const store = {
       read: vi.fn(async () => 'data:image/png;base64,eA=='),
+      syncImage: vi.fn(async () => ({ hash: '1'.repeat(64) })),
       preview: vi.fn(async () => 'data:image/jpeg;base64,eA=='),
       original: vi.fn(async () => ({ bytes: Buffer.from('original'), extension: 'png' as const })),
       remove: vi.fn(async () => {}),
@@ -137,6 +139,8 @@ describe('归档截图 IPC', () => {
     const id = '11111111-1111-4111-8111-111111111111';
     expect(await route(mainEvent, { op: 'preview', id })).toMatchObject({ ok: true });
     expect(await route(floatingEvent, { op: 'read', id })).toMatchObject({ ok: true });
+    expect(await route(mainEvent, { op: 'syncDigest', id })).toEqual({ ok: true, hash: '1'.repeat(64) });
+    await expect(route(floatingEvent, { op: 'syncBytes', id })).rejects.toThrow('Main only');
     await expect(route(floatingEvent, { op: 'save', id })).rejects.toThrow('Main only');
     expect(saveFile).not.toHaveBeenCalled();
     expect(await route(mainEvent, { op: 'save', id })).toEqual({ ok: true, canceled: false });
@@ -156,6 +160,8 @@ describe('归档截图 IPC', () => {
       { op: 'read', id, path: '/private/image.png' },
       { op: 'save', id, path: '/private/image.png' },
       { op: 'save', id, bytes: new Uint8Array([1]) },
+      { op: 'syncDigest', id, preview: 'invalid' },
+      { op: 'syncBytes', id, hash: '1'.repeat(64) },
       { op: 'remove', ids: Array(101).fill(id) },
       { op: 'write', id },
     ])
@@ -179,6 +185,94 @@ beforeEach(() => {
   bridge.send.mockClear();
   bridge.listeners.clear();
   bridge.handlers.clear();
+});
+
+const field = { x: 220, y: 180, height: 36, width: 280, dark: true };
+const dialogId = '11111111-2222-4333-8444-555555555555';
+describe('API key IPC boundary', () => {
+  it('allows only the main window’s main frame, connection metadata and preset provider links', async () => {
+    const main = { mainFrame: {}, once: vi.fn(), off: vi.fn() };
+    const owner = { sender: main, senderFrame: main.mainFrame };
+    const other = { mainFrame: {} };
+    const service = {
+      list: vi.fn(async () => []),
+      configure: vi.fn(async () => true),
+      remove: vi.fn(async () => {}),
+      balance: vi.fn(async () => []),
+    };
+    const open = vi.fn(async () => {});
+    const checkChange = vi.fn();
+    const control = vi.fn();
+    registerApiConnectionIpc({
+      requireMain(event) {
+        if (!Object.is(event.sender, main)) throw Error('Main only');
+      },
+      current: () => service,
+      checkChange,
+      control,
+      open,
+      prompt: vi.fn(async () => null),
+    });
+    const operations = {
+      list: [],
+      configure: [{ provider: 'qwen' }, dialogId, field],
+      control: [dialogId, { action: 'submit' }],
+      remove: ['openai'],
+      balance: ['deepseek'],
+      open: ['openai', 'keys'],
+    };
+    expect(Object.keys(bridge.api!.apiConnections).sort()).toEqual([...Object.keys(operations), 'onTab'].sort());
+    const call = async (op: string, event: unknown, ...args: unknown[]) =>
+      bridge.handlers.get('api-keys:' + op)!(event, ...args);
+    for (const [op, args] of Object.entries(operations)) {
+      const foreign = { sender: other, senderFrame: other.mainFrame };
+      await expect(call(op, foreign, ...args)).rejects.toThrow('Main only');
+      await expect(call(op, { sender: main, senderFrame: {} }, ...args)).rejects.toThrow();
+      await expect(call(op, owner, ...args, 'extra')).rejects.toThrow();
+    }
+    for (const config of [
+      { provider: 'unknown' },
+      { provider: 'openai', key: 'synthetic' },
+      { provider: 'qwen', baseUrl: 'https://example.test' },
+      { provider: 'qwen', region: 'tokyo' },
+    ]) await expect(call('configure', owner, config, dialogId, field)).rejects.toThrow();
+    await expect(call('configure', owner, { provider: 'kimi' }, dialogId, { ...field, width: NaN })).rejects.toThrow();
+    await expect(call('control', owner, dialogId, { action: 'submit', key: 'synthetic' })).rejects.toThrow();
+    await expect(call('control', owner, dialogId, { action: 'visibility', visible: 'yes' })).rejects.toThrow();
+    for (const op of ['remove', 'balance']) {
+      await expect(call(op, owner, 'unknown')).rejects.toThrow();
+    }
+    await expect(call('open', owner, 'openai', 'https://example.test')).rejects.toThrow();
+    await expect(call('open', owner, 'unknown', 'billing')).rejects.toThrow();
+    for (const operation of [...Object.values(service), checkChange, open]) {
+      expect(operation).not.toHaveBeenCalled();
+    }
+
+    for (const [op, args] of Object.entries(operations)) await call(op, owner, ...args);
+    expect(service.configure).toHaveBeenCalledWith(
+      { provider: 'qwen', region: 'beijing' },
+      expect.any(Function),
+      expect.any(Function),
+      expect.any(AbortSignal),
+    );
+    expect(checkChange.mock.calls).toEqual([['qwen', false], ['openai', true]]);
+    expect(service.balance).toHaveBeenCalledWith('deepseek');
+    await call('open', owner, 'gemini', 'billing');
+    const waiting = Promise.withResolvers<boolean>();
+    service.configure.mockImplementationOnce(() => waiting.promise);
+    const configuring = call('configure', owner, ...operations.configure);
+    await call('control', owner, '00000000-2222-4333-8444-555555555555', { action: 'submit' });
+    expect(control).not.toHaveBeenCalled();
+    await call('control', owner, dialogId, { action: 'focus' });
+    expect(control).toHaveBeenCalledWith({ action: 'focus' });
+    await call('control', owner, dialogId, { action: 'cancel' });
+    waiting.resolve(false);
+    expect(await configuring).toBe(false);
+    expect(open.mock.calls).toEqual([
+      ['https://platform.openai.com/api-keys'],
+      ['https://aistudio.google.com/billing'],
+    ]);
+  });
 });
 
 describe('shortcut settings IPC', () => {
@@ -564,6 +658,37 @@ describe('完整面试问题通过既有 AI 接口', () => {
     configuration.aiEnabled = false;
     finish({ provider: 'chatgpt', status: 'available', quotas: [], queriedAt: 0 });
     expect(await pending).toEqual({ ok: true, usage: null });
+  });
+  it('面试模型菜单手动刷新直达目录，结束面试后丢弃迟到结果', async () => {
+    const { call, chat, sender, lifecycle } = interviewSetup();
+    await call('interview:models');
+    expect(chat.models).toHaveBeenCalledWith(false, expect.any(AbortSignal));
+    const read = bridge.handlers.get('interview:models')!;
+    await expect(read({ sender, senderFrame: {} }, true)).rejects.toThrow('Unauthorized frame');
+    await expect(call('interview:models', 'true')).rejects.toThrow('Invalid');
+    await expect(call('interview:models', true, 'extra')).rejects.toThrow('Invalid');
+    const stale = Promise.withResolvers<{ id: string; label: string; description: string }[]>();
+    chat.models.mockImplementationOnce(() => stale.promise);
+    const pending = call('interview:models', true);
+    expect(chat.models).toHaveBeenLastCalledWith(true, expect.any(AbortSignal));
+    lifecycle.cancel();
+    stale.resolve([{ id: 'late', label: 'Late', description: '' }]);
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    const disabled = interviewSetup(false, { ...defaultInterviewConfiguration(), aiEnabled: false });
+    expect(await disabled.call('interview:models', true)).toEqual({ ok: true, models: [] });
+    expect(disabled.chat.models).not.toHaveBeenCalled();
+  });
+  it('面试窗口重载时取消用于切换模型的目录读取，迟到的数据不能写回', async () => {
+    const configuration = { ...defaultInterviewConfiguration(), aiEnabled: true, modelId: 'test' };
+    const { call, chat, lifecycle } = interviewSetup(false, configuration);
+    const stale = Promise.withResolvers<{ id: string; label: string; description: string }[]>();
+    chat.models.mockImplementationOnce(() => stale.promise);
+    const pending = call('interview:update-model', { modelId: 'late', effort: 'auto' });
+    lifecycle.cancel();
+    stale.resolve([{ id: 'late', label: 'Late', description: '' }]);
+    expect(await pending).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(configuration.modelId).toBe('test');
+    expect(chat.models).toHaveBeenCalledWith(false, expect.objectContaining({ aborted: true }));
   });
   it('失败后最多自动重试三次，复用问题快照并丢弃旧尝试的迟到事件', async () => {
     vi.useFakeTimers();
@@ -1006,6 +1131,7 @@ describe('受控 preload 契约', () => {
     const api = bridge.api!;
     const calls: Array<[keyof DesktopAPI, string, unknown[]]> = [
       ['remoteConnection', 'remote:connection', [{ op: 'status' }]],
+      ['waitForRemoteInterviewSlot', 'remote:ready', []],
       ['publishRemoteInterview', 'remote:publish', [{ sessionId: 'synthetic-session' }]],
       ['finishRemoteCommand', 'remote:complete', [{ requestId: 'request-id', ok: true }]],
       ['accountData', 'account:data', [{ action: 'begin', files: 1 }]],
@@ -1016,6 +1142,10 @@ describe('受控 preload 契约', () => {
       ['speech', 'speech:call', [{ op: 'status' }]],
       ['speechHardware', 'speech:hardware', []],
       ['reconnectInterviewAudio', 'interview:reconnect-audio', [{ sources: ['system'] }]],
+      ['controlInterviewSpeechSwitch', 'interview:control-speech-switch', [7, 'cancel']],
+      ['recordings', 'history:recordings', [{ op: 'list', recordId: '00000000-0000-0000-0000-000000000001' }]],
+      ['pendingRecordingRemovals', 'history:pending-recording-removals', []],
+      ['setInterviewRecording', 'interview:recording', ['00000000-0000-0000-0000-000000000001', true]],
       [
         'setInterviewInput',
         'interview:input',
@@ -1028,7 +1158,7 @@ describe('受控 preload 契约', () => {
         [{ recordId: 'r', modelId: 'test', questions: ['why'] }],
       ],
       ['exportHistory', 'history:export', [{ title: 'title', text: 'text' }]],
-      ['interviewModels', 'interview:models', []],
+      ['interviewModels', 'interview:models', [true]],
       ['interviewAccountUsage', 'interview:account-usage', []],
       ['updateInterviewModel', 'interview:update-model', [{ modelId: 'test', effort: 'auto' }]],
       ['interviewAnswer', 'interview:answer', [{ id: 'q', question: 'why', modelId: 'model' }]],
@@ -1040,7 +1170,9 @@ describe('受控 preload 契约', () => {
       ['systemAccent', 'appearance:accent', []],
       ['authSession', 'auth:session', []],
       ['cloudAccount', 'cloud:account', [{ action: 'status' }]],
+      ['openUserAgreement', 'session:open-user-agreement', ['en']],
       ['setLocalMode', 'session:local-mode', [true]],
+      ['setLocalImportRevision', 'session:local-import-revision', [null]],
       ['telemetrySignal', 'telemetry:signal', [{ type: 'ready' }]],
       [
         'cloudSync',
@@ -1083,9 +1215,11 @@ describe('受控 preload 契约', () => {
     expect(Object.keys(api).sort()).toEqual(
       [
         ...calls.map(([method]) => method),
+        'apiConnections',
         'windowAction',
         'platform',
         'systemLanguage',
+        'initialLanguage',
         'presentation',
         'screenCapturePermissionSupported',
         'confirmInterviewEnd',
@@ -1103,6 +1237,7 @@ describe('受控 preload 契约', () => {
         'onDictationEvent',
         'onSystemAccent',
         'onInterviewEndRequested',
+        'onCloudSyncAvailable',
         'onSessionCloseRequested',
         'onUpdateEvent',
         'onComponentEvent',
@@ -1110,12 +1245,17 @@ describe('受控 preload 契约', () => {
         'onRemoteCommand',
       ].sort(),
     );
-    for (const service of ['chatgpt', 'copilot', 'demo', 'startup'] as const) {
+    expect(Object.keys(api.apiConnections).sort()).toEqual(['balance', 'configure', 'control', 'list', 'onTab', 'open', 'remove']);
+    await api.apiConnections.configure({ provider: 'qwen', region: 'beijing' }, dialogId, field);
+    expect(bridge.invoke).toHaveBeenLastCalledWith('api-keys:configure', { provider: 'qwen', region: 'beijing' }, dialogId, field);
+    for (const service of ['chatgpt', 'copilot', 'deepseek', 'demo', 'startup'] as const) {
       await api.authSession(service);
       expect(bridge.invoke).toHaveBeenLastCalledWith('auth:session', service);
     }
     await api.chatModels();
     expect(bridge.invoke).toHaveBeenLastCalledWith('chat:models', false);
+    await api.interviewModels();
+    expect(bridge.invoke).toHaveBeenLastCalledWith('interview:models', false);
     api.windowAction('close');
     api.confirmInterviewEnd();
     api.setInterviewMousePassthrough(true);
@@ -1214,6 +1354,11 @@ describe('受控 preload 契约', () => {
     stopSettings();
     const stopAccent = bridge.api!.onSystemAccent(accent);
     const stopEnd = bridge.api!.onInterviewEndRequested(end);
+    const syncAvailable = vi.fn();
+    const stopSyncAvailable = bridge.api!.onCloudSyncAvailable(syncAvailable);
+    bridge.listeners.get('cloud:sync-available')!({ sender: 'private-event' });
+    expect(syncAvailable).toHaveBeenCalledExactlyOnceWith();
+    stopSyncAvailable();
     const closing = vi.fn();
     const stopClosing = bridge.api!.onSessionCloseRequested(closing);
     bridge.listeners.get('session:request-close')!({ sender: 'private-event' }, 'close-id');
@@ -1262,6 +1407,16 @@ function setup(demo = false) {
   return { chat, openLink, lifecycle, call, sender };
 }
 describe('聊天 IPC 与应用层边界', () => {
+  it('准备页模型目录仅接受可选布尔刷新参数', async () => {
+    const { chat, call } = setup();
+    await expect(call('chat:models', 'true')).rejects.toThrow('Invalid request');
+    await expect(call('chat:models', true, {})).rejects.toThrow('Invalid request');
+    expect(chat.models).not.toHaveBeenCalled();
+    for (const args of [[], [false], [true]]) {
+      expect(await call('chat:models', ...args)).toMatchObject({ ok: true });
+      expect(chat.models).toHaveBeenLastCalledWith(args[0] ?? false, expect.any(AbortSignal));
+    }
+  });
   it('coalesces text IPC and flushes the final batch before returning completion', async () => {
     const { chat, call, sender } = setup();
     chat.stream.mockImplementationOnce(async (_request, emit) => {
@@ -1313,50 +1468,62 @@ describe('聊天 IPC 与应用层边界', () => {
     expect(await call('chat:send', request)).toMatchObject({ ok: false });
     for (const method of Object.values(chat)) expect(method).not.toHaveBeenCalled();
   });
-  it('保持单请求、请求 ID 取消、重置用量互斥和关闭取消，旧事件不再传出', async () => {
+  it('同一窗口并行发送，按请求投递事件、保留部分回答和取消，重置等待全部结算', async () => {
     const { chat, call, lifecycle, sender } = setup();
-    let pending!: { signal: AbortSignal; emit: Parameters<AIChatService['stream']>[1] };
-    chat.stream.mockImplementationOnce(async (_request, emit, signal) => {
-      pending = { signal, emit };
-      return new Promise((_resolve, reject) =>
-        signal.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), {
-          once: true,
-        }),
-      );
-    });
+    const a = Promise.withResolvers<ChatCompletion>();
+    const b = Promise.withResolvers<ChatCompletion>();
+    chat.stream.mockReturnValueOnce(a.promise).mockReturnValueOnce(b.promise);
     const first = call('chat:send', request);
+    const second = call('chat:send', { ...request, id: 'other' });
+    const [, emitA, signalA] = chat.stream.mock.calls[0];
+    const [, emitB, signalB] = chat.stream.mock.calls[1];
     expect(lifecycle.isBusy()).toBe(true);
-    expect(await call('chat:send', { ...request, id: 'other' })).toMatchObject({ ok: false });
+    expect(await call('chat:send', request)).toMatchObject({ ok: false });
+    expect(chat.stream).toHaveBeenCalledTimes(2);
     expect(await call('chat:usage-reset')).toMatchObject({ ok: false });
     expect(chat.resetUsage).not.toHaveBeenCalled();
-    call('chat:cancel', 'other');
-    expect(pending.signal.aborted).toBe(false);
-    pending.emit({ id: request.id, type: 'delta', text: 'before' });
-    expect(sender.send).toHaveBeenCalledTimes(1);
+    call('chat:cancel', 'missing');
+    emitA({ id: 'other', type: 'delta', text: 'misrouted' });
+    emitA({ id: request.id, type: 'delta', text: 'before' });
+    emitB({ id: 'other', type: 'delta', text: 'other answer' });
     call('chat:cancel', request.id);
-    expect(lifecycle.isBusy()).toBe(true);
-    expect(pending.signal.aborted).toBe(true);
-    pending.emit({ id: request.id, type: 'delta', text: 'late' });
-    expect(sender.send).toHaveBeenCalledTimes(1);
-    expect(await first).toMatchObject({ ok: false, error: { code: 'cancelled' } });
-    expect(lifecycle.isBusy()).toBe(false);
-    expect(await call('chat:send', { ...request, id: 'next' })).toMatchObject({
-      ok: true,
-      answerText: 'answer',
+    expect(signalA.aborted).toBe(true);
+    expect(signalB.aborted).toBe(false);
+    emitA({ id: request.id, type: 'delta', text: 'late' });
+    b.resolve({ ...completion, answerText: 'other answer' });
+    expect(await second).toMatchObject({ ok: true, answerText: 'other answer' });
+    expect(await call('chat:usage-reset')).toMatchObject({ ok: false });
+    a.resolve(completion);
+    expect(await first).toMatchObject({
+      ok: false, error: { code: 'cancelled' }, partial: { answerText: 'before' },
     });
-    chat.stream.mockImplementationOnce(
-      async (_request, _emit, signal) =>
-        new Promise((_resolve, reject) =>
-          signal.addEventListener(
-            'abort',
-            () => reject(new DOMException('Aborted', 'AbortError')),
-            { once: true },
-          ),
-        ),
+    expect(sender.send.mock.calls).toEqual([
+      ['chat:event', { id: request.id, type: 'delta', text: 'before' }],
+      ['chat:event', { id: 'other', type: 'delta', text: 'other answer' }],
+    ]);
+    expect(lifecycle.isBusy()).toBe(false);
+    const reset = Promise.withResolvers<ReturnType<typeof emptyUsage>>();
+    chat.resetUsage.mockReturnValueOnce(reset.promise);
+    const resetting = call('chat:usage-reset');
+    expect(await call('chat:send', request)).toMatchObject({ ok: false });
+    expect(await call('chat:usage-reset')).toMatchObject({ ok: false });
+    reset.resolve(emptyUsage());
+    expect(await resetting).toMatchObject({ ok: true });
+    expect(await call('chat:send', request)).toMatchObject({ ok: true });
+  });
+  it('窗口关闭时取消全部在途请求', async () => {
+    const { chat, call, lifecycle } = setup();
+    chat.stream.mockImplementation(async (_request, _emit, signal) =>
+      new Promise((_resolve, reject) =>
+        signal.addEventListener('abort', () => reject(signal.reason), { once: true }),
+      ),
     );
-    const closing = call('chat:send', request);
+    const first = call('chat:send', request);
+    const second = call('chat:send', { ...request, id: 'other' });
     lifecycle.cancelActive();
-    expect(await closing).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    for (const result of await Promise.all([first, second]))
+      expect(result).toMatchObject({ ok: false, error: { code: 'cancelled' } });
+    expect(lifecycle.isBusy()).toBe(false);
   });
   it('非法请求不进入 Provider，失败释放请求槽并保持安全错误', async () => {
     const { chat, call } = setup();

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { sileroModel, sileroLicense } from '../../../shared/scripts/silero-assets.mjs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createReadStream, realpathSync, lstatSync, readFileSync } from 'node:fs';
@@ -8,6 +9,7 @@ import { createHash } from 'node:crypto';
 import { gunzipSync, inflateRawSync } from 'node:zlib';
 import { spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import { checkPackagedRenderer } from './packaged-renderer-check.mjs';
+import { checkKnowledgeProcessClosure } from './knowledge-process-closure.mjs';
 
 assert.equal(process.platform, 'win32');
 process.env.ELECTRON_BUILDER_CACHE = path.resolve('.cache/electron-builder');
@@ -85,6 +87,8 @@ async function run(args, consume) {
 }
 await run(['t', '-bd', installer]);
 const listing = await run(['l', '-slt', installer]);
+const files = new Set([...listing.matchAll(/^Path = (.+)\r?$/gm)].map(([, name]) => name.trim().replaceAll('\\', '/')));
+checkKnowledgeProcessClosure((file) => files.has('resources/app.asar.unpacked/' + file));
 // Builder's bundled 7za detects the embedded 7z stream directly inside NSIS.
 assert.match(listing, /^Type = 7z\r?$/m);
 assert.ok(Number(listing.match(/^Offset = (\d+)\r?$/m)?.[1]) > 0);
@@ -105,11 +109,16 @@ for (const file of [
   'resources/app.asar',
   'resources/app-update.yml',
   'resources/app.asar.unpacked/dist-electron/shared/electron/backend/cancellable.js',
+  'resources/app.asar.unpacked/dist-electron/shared/electron/backend/atomicFile.js',
   'resources/licenses/LICENSE',
   'resources/licenses/THIRD_PARTY_NOTICES.md',
+  'resources/licenses/' + sileroLicense.name,
   'resources/voxcue-components.json',
   'resources/native/VoxCue.Audio.exe',
+  'resources/native/' + sileroModel.name,
   'resources/native/VoxCue.Screenshot.exe',
+  'resources/native/VoxCue.WindowMotion.exe',
+  'resources/native/VoxCue.ApiKeyPrompt.exe',
 ]) {
   const hash = createHash('sha256');
   let bytes = 0;
@@ -119,6 +128,12 @@ for (const file of [
     bytes += data.length;
   });
   assert.equal(bytes, (await stat(path.join(stage, file))).size, file + ' payload size');
+  const silero = [sileroModel, sileroLicense].find((asset) => path.basename(file) === asset.name);
+  if (silero) {
+    assert.equal(bytes, silero.bytes, file);
+    assert.equal(hash.digest('hex'), silero.sha256, file);
+    continue;
+  }
   const reference = file.startsWith('resources/licenses/')
     ? path.join('..', path.basename(file))
     : path.join(stage, file);
