@@ -51,7 +51,7 @@ guest 还需在 `/opt/homebrew/bin/node` 准备与当前测试环境一致的 No
 node test/scripts/package-guest-smoke.mjs
 ```
 
-完整入口先认证 `package-upgrade-baselines.mjs` 中的正式 1.1.1、1.2.2、1.2.3 和 1.3.1 arm64 ZIP，再复制到规范 `macos/release/<版本>/` 输入位置。1.1.1 使用旧 v1 助手，其余使用 v11。1.3.1 是 1.3.2 升级的直接前序版本，验证兼容索引和引用版本在升级后保留。
+完整入口从 `macos/release/<版本>/` 读取正式 1.1.1、1.2.2、1.2.3 和 1.3.1 arm64 ZIP，按 `package-upgrade-baselines.mjs` 固定的摘要认证后复制到客机。1.1.1 使用旧 v1 助手，其余使用 v11。GitHub 上已撤下 1.3.1，请使用保存的正式归档。1.3.1 是 1.3.2 的直接前序版本，用于验证兼容索引、引用版本和原账号分区的保留。
 
 单独复测安装与覆盖升级时可传 `--install-only`。它执行正式安装包检查和四个归档版本的升级用例，并使用包内 Qwen 程序对合成音频做 CPU 转写。客机报告支持 Metal 时也执行 Metal 转写；缺少该能力时终端单列待验。镜像、来宾保护和临时资料校验与完整入口相同。
 
