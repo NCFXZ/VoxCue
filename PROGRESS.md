@@ -2,12 +2,12 @@
 
 ## 当前开发进度
 
-**2026-11-21 · Windows 1.3.0 发行验收中。** Windows 以正式 `v1.2.3`（`fae85ca`）为基线，macOS 以 `macos-v1.2.3`（`4fe22ec`）为基线。Windows 安装版沿用原 Ed25519 更新身份，GitHub 发行目标为 `NCFXZ/VoxCue` 的 `v1.3.0`，Microsoft Store x64 的包版本为 `2.3.0.0`。
+**2026-11-21 · Windows 1.3.0 已在 GitHub 发布，Microsoft Store 2.3.0.0 已提交认证。** Windows 源码标签为 `v1.3.0`（`669c44a`），安装版沿用 `v1.2.3`（`fae85ca`）的 Ed25519 更新身份。macOS 当前正式版为 `macos-v1.2.3`（`4fe22ec`），接续工作见下方交接。[GitHub 发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.3.0)
 
 - 用户可见的功能列在 [Windows 更新日志](docs/1.3.0_WINDOWS_UPDATE.md)。实现方法、历史行为、逐项修复与复验入口见 [Windows 开发交接](shared/docs/WINDOWS_1.3.0_HANDOFF.md)。
 - 账号服务 0.6.1 已上线。迁移云来源时可以不创建会话直接验密。注销响应丢失后，桌面端再查询结果，再按账号清理本机资料。[账号协议](shared/docs/WINDOWS_1.3.0_HANDOFF.md#独立账号服务的协议与发布依赖)
 - 开始面试按连接方式显示用量。准备聊天、实时面试和历史回答按当时的服务商显示标志。聊天标志保留原尺寸与间距，去掉灰色圆角底。已移除回答结束后的网页搜索提示。Windows 原生密钥框支持圆点遮挡与显隐，迁移和注销的密码框也支持显隐。[AI 服务与界面](shared/docs/WINDOWS_1.3.0_HANDOFF.md#ai-服务授权和模型选择)
-- Windows 安装版与商店版已完成正式 1.2.3 升级及全新安装验收，商店原生凭据输入按系统包身份复验。发行接续为核对 GitHub 可下载资产，提交商店安装包、中英文实机截图和更新说明。[验证入口](shared/docs/WINDOWS_1.3.0_HANDOFF.md#验证入口与发行前待验)
+- Windows 安装版与商店版已完成正式 1.2.3 升级及全新安装验收，商店原生凭据输入按系统包身份复验。安装程序、差分索引和更新清单已发布至 `NCFXZ/VoxCue`。Microsoft Store Submission 11（`1152921505702467958`）已接收 x64 包、中英文各四张新版截图和各六条更新说明。提交后进入 Pre-processing，通过认证后自动发布。[验证入口](shared/docs/WINDOWS_1.3.0_HANDOFF.md#验证入口与发行前待验) · [商店提交状态](https://partner.microsoft.com/en-us/dashboard/products/9PBBVWZXMBPW/overview)
 - macOS 接续需在本机同步平台清单、补齐 SF Symbols、原生密钥输入与钥匙串、音频分流、旧 Qwen 组件、手机证书和更新 ZIP 恢复。用户可见效果与 Windows 逐项对齐，再从正式 Mac 1.2.3 升级验收。[macOS 开发交接](docs/1.3.0_MACOS_UPDATE.md)
 
 ## 1.2.3 已有实现
@@ -28,8 +28,8 @@
 
 ## 发行状态与接续
 
-- 1.3.0 的发布说明需注明自动回答依据识别文字过滤语气词。语音模型误转成普通词时可能自动发题并消耗额度；可在面试浮窗关闭自动回答，核对草稿后手动发送。此项作为已知限制随版本说明，两条发行渠道仍需完成其余验收。
-- 代码已在 `main` 推送，两个仓库的 `v1.2.3` 均为 Latest：[VoxCue](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3) · [VoxCue-releases](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)。新增 Mac DMG、ZIP 与 `latest-mac.yml`，保留原三项 Windows 资产；累计中英文说明按平台区分。
+- 1.3.0 已知语音识别限制已记入双端交接。语气词误转成普通词时可能触发自动回答并消耗额度，用户可关闭面试浮窗的「自动回答」，核对后手动发送。[自动提问与转写](shared/docs/WINDOWS_1.3.0_HANDOFF.md#面试设备实时识别与自动提问)
+- 历史版本 `v1.2.3` 可从[主仓发行页](https://github.com/NCFXZ/VoxCue/releases/tag/v1.2.3)和[历史分发页](https://github.com/NCFXZ/VoxCue-releases/releases/tag/v1.2.3)获取，包含 Mac DMG、ZIP、`latest-mac.yml` 与三项 Windows 资产。
 - Mac 对应源码为主仓 [`macos-v1.2.3`](https://github.com/NCFXZ/VoxCue/tree/macos-v1.2.3)（`4fe22ec`）。原 `v1.2.3` 仍指向 Windows 发行提交 `fae85ca665505b314fee784a0dddc091f337ffd5`，两端源码均可从主仓标签归档获取。
 - [Mac 1.2.3 交接](shared/docs/MACOS_1.2.3_HANDOFF.md) 已补充相对已发 1.2.2 的完整共享范围。共享记录界面修复需在 Windows 本机补验，既有 Windows 安装资产不改写。
 - 未发布 Mac 中间版本与凭据候选已清理，当前入口仅保留 v1／v11；已发布 GitHub 发行、标签和安装资产不改。仍有效的 guest 准备与门禁迁入 [当前验收说明](macos/docs/TEST_GUEST.md)，历史开发细节查 Git。
