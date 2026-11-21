@@ -253,7 +253,7 @@ export function SettingsDialog({
                 <CloudAccountPanel showTitle={false} />
                 {cloudUser && (
                   <section aria-label={t('云同步')}>
-                    <SyncSettingsPanel />
+                    <SyncSettingsPanel key={cloudUser.id} />
                   </section>
                 )}
                 <AccountExportPanel />

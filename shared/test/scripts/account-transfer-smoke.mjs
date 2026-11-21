@@ -7,12 +7,16 @@ import { writeFile } from 'node:fs/promises';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { closeUiApp } from './install-ui-account.mjs';
+import { closeUiApp, focusUiWindow } from './install-ui-account.mjs';
 import { assertSettingsHighlight } from './assert-settings-highlight.mjs';
+import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { assertMenuBackdrop } from './assert-menu-backdrop.mjs';
 import { assertPasswordVisibility, assertPasswordClearedOnClose } from './assert-password-visibility.mjs';
 import { captureRequested } from './capture-requested.mjs';
-import { Store, Auth, Services, loadConfig, createApi, routes } from './server-reference.mjs';
+const server061 = process.argv.includes('--server-0.6.1');
+const { Store, Auth, Services, loadConfig, createApi, routes } = server061
+  ? await import('./server-061-reference.mjs')
+  : await import('./server-reference.mjs');
 
 const config = loadConfig({
   AUTH_KEY: 'ab'.repeat(32),
@@ -23,6 +27,11 @@ const store = new Store(config.database);
 const auth = new Auth(store, config, true);
 const services = new Services(auth);
 const api = createApi(auth, () => {}, routes(services));
+const authResponses = [];
+api.server.on('request', (request, response) => {
+  if (request.url === '/v1/auth/login' || request.url === '/v1/auth/verify-password')
+    response.once('finish', () => authResponses.push([request.url, response.statusCode]));
+});
 const users = ['a', 'b', 'c'].map((name) => ({
   id: randomUUID(),
   email: 'source-' + name + '@example.test',
@@ -36,6 +45,8 @@ const samplePng =
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGNgaDgAAAHEAUFzHAXEAAAAAElFTkSuQmCC';
 const recordingStart = 1700000000000;
 const migrationSubtitle = '迁移后，本机来源账户的所选资料将被删除，云端副本保留。';
+const incompleteCleanup = '目标资料已保存，来源资料清理未完成。请重新选择此来源后重试。';
+const recoveredCleanup = '上次迁移的来源资料已清理。';
 let app;
 let serverClosed = false;
 
@@ -57,6 +68,18 @@ async function launch(device) {
         ');',
       'KnowledgeHost.prototype.listDocuments = async () => [];',
       'KnowledgeHost.prototype.indexDocument = async ({ documentId }) => ({ documentId });',
+      'const { ProfileMoveReceipts } = require(' + JSON.stringify(path.join(base, 'backend/profileMoveReceipt.js')) + ');',
+      'const read = ProfileMoveReceipts.prototype.read;',
+      'ProfileMoveReceipts.prototype.read = async function (...args) {',
+      '  if (globalThis.receiptReadGate) { globalThis.receiptReadGate.calls++; await globalThis.receiptReadGate.promise; }',
+      '  if (globalThis.failNextReceiptRead) { globalThis.failNextReceiptRead = false; throw Object.assign(new Error("Synthetic receipt read failure"), { code: "EIO" }); }',
+      '  return read.apply(this, args);',
+      '};',
+      'const clear = ProfileMoveReceipts.prototype.clear;',
+      'ProfileMoveReceipts.prototype.clear = function (...args) {',
+      '  if (globalThis.failReceiptRemoval > 0) { globalThis.failReceiptRemoval--; throw new Error("Synthetic receipt removal failure"); }',
+      '  return clear.apply(this, args);',
+      '};',
       'require(' + JSON.stringify(path.join(base, 'main.js')) + ');',
     ].join('\n'),
   );
@@ -73,13 +96,18 @@ async function launch(device) {
   return app.firstWindow();
 }
 async function login(page, user) {
-  const opened = app.waitForEvent('window');
+  await page.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  await focusUiWindow(app, page);
   if (user) {
     await page.getByLabel('邮箱', { exact: true }).fill(user.email);
-    await page.getByLabel('密码', { exact: true }).fill(user.password);
-    await page.getByRole('button', { name: '登录', exact: true }).click();
-  } else await page.getByRole('button', { name: '跳过登录' }).click();
-  const main = await opened;
+    const password = page.getByLabel('密码', { exact: true });
+    await password.fill(user.password);
+    assert.ok(await password.evaluate((element, expected) => element.value === expected, user.password));
+  }
+  const [main] = await Promise.all([
+    app.waitForEvent('window'),
+    page.getByRole('button', { name: user ? '登录' : '跳过登录', exact: true }).click(),
+  ]);
   await main.getByRole('navigation', { name: '主导航' }).waitFor();
   return main;
 }
@@ -239,6 +267,61 @@ async function migration(page) {
   await modal.waitFor();
   assert.equal(await modal.locator('.dialog-subtitle').innerText(), migrationSubtitle);
   return modal;
+}
+async function assertDialogError(modal, message) {
+  const alert = modal.getByRole('alert').filter({ hasText: message });
+  await alert.waitFor();
+  assert.equal(await alert.innerText(), message);
+  await modal.evaluate(dialog => Promise.allSettled(dialog.getAnimations({ subtree: true })
+    .filter(a => a.effect?.getTiming().iterations !== Infinity).map(a => a.finished)));
+  for (const text of [alert, modal.locator('.dialog-subtitle')]) {
+    const layout = await text.evaluate(el => {
+      const bounds = el.getBoundingClientRect();
+      const dialog = el.closest('dialog').getBoundingClientRect();
+      return { size: getComputedStyle(el).fontSize, visible: bounds.width > 0 && bounds.height > 0 &&
+        bounds.left >= dialog.left && bounds.right <= dialog.right &&
+        bounds.top >= dialog.top && bounds.bottom <= dialog.bottom };
+    });
+    assert.deepEqual(layout, { size: '12px', visible: true });
+  }
+}
+async function closeErrorWithHeaderButton(modal) {
+  const page = modal.page();
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  const probe = await modal.evaluateHandle(dialog => {
+    function measure(surface) {
+      return ['.danger-text', '.dialog-subtitle'].map(selector => {
+        const el = surface.querySelector(selector);
+        if (!el) return null;
+        const style = getComputedStyle(el);
+        const text = document.createRange();
+        text.selectNodeContents(el);
+        return { font: style.fontSize, lineHeight: style.lineHeight,
+          width: el.getBoundingClientRect().width,
+          lines: [...text.getClientRects()].map(rect => [rect.width, rect.height]) };
+      });
+    }
+    const before = measure(dialog), frames = [];
+    let handle;
+    function sample() {
+      const exit = document.querySelector('.account-migration-dialog[data-modal-exit]:popover-open');
+      if (exit && Number(getComputedStyle(exit).opacity) > 0) frames.push(measure(exit));
+      handle = requestAnimationFrame(sample);
+    }
+    sample();
+    return { before, frames, stop: () => cancelAnimationFrame(handle) };
+  });
+  try {
+    await modal.getByRole('button', { name: '关闭对话框', exact: true }).click();
+    await modal.waitFor({ state: 'hidden' });
+    await page.waitForFunction(() => !document.querySelector('.account-migration-dialog[data-modal-exit]'));
+    const { before, frames } = await probe.evaluate(p => ({ before: p.before, frames: p.frames }));
+    assert.ok(frames.length > 1, 'The closing dialog must be sampled during its fade');
+    for (const frame of frames) assert.deepEqual(frame, before, 'Error and subtitle typography must remain stable as the dialog closes');
+  } finally {
+    await probe.evaluate(p => p.stop());
+    await probe.dispose();
+  }
 }
 async function checkSourceMenu(page, sources) {
   const modal = await migration(page);
@@ -461,11 +544,55 @@ try {
   });
   await importRow.getByRole('button').waitFor();
   await assertSettingsHighlight(importRow);
-  let modal = await select(main, '本地账户', a);
+  let modal = await migration(main);
+  await modal.getByRole('button', { name: '来源账号', exact: true }).waitFor();
+  const next = modal.getByRole('button', { name: '下一步', exact: true });
+  const buttonSize = () => next.evaluate(button => [button.offsetWidth, button.offsetHeight]);
+  const idleSize = await buttonSize();
+  await app.evaluate(() => {
+    globalThis.receiptReadGate = { ...Promise.withResolvers(), calls: 0 };
+    globalThis.failNextReceiptRead = true;
+  });
+  try {
+    await next.click();
+    await assertLoadingIcon(main, next.locator('.update-spinner'));
+    assert.equal(await next.getAttribute('aria-busy'), 'true');
+    assert.ok(await next.isDisabled());
+    assert.deepEqual(await buttonSize(), idleSize);
+    await next.evaluate(button => button.click());
+  } finally {
+    const calls = await app.evaluate(() => {
+      const gate = globalThis.receiptReadGate;
+      gate.resolve();
+      delete globalThis.receiptReadGate;
+      return gate.calls;
+    });
+    assert.equal(calls, 1);
+  }
+  await assertDialogError(modal, '资料迁移失败，请重试。');
+  assert.ok(await next.isEnabled());
+  assert.equal(await next.getAttribute('aria-busy'), null);
+  assert.equal(await next.locator('.update-spinner').count(), 0);
+  assert.deepEqual(await buttonSize(), idleSize);
+  await closeErrorWithHeaderButton(modal);
+  modal = await select(main, '本地账户', a);
   await modal.getByRole('button', { name: '展开个人信息', exact: true }).click();
   await modal.getByRole('checkbox', { name: '简历摘要', exact: true }).uncheck();
-  await confirm(main, modal);
+  await app.evaluate(() => { globalThis.failReceiptRemoval = 2; });
+  await modal.getByRole('button', { name: '确认迁移', exact: true }).click();
+  await assertDialogError(modal, incompleteCleanup);
   assert.deepEqual(await contents(main), { name: 'local-only', background: '', records: ['local-only'] });
+  await modal.getByRole('button', { name: '取消', exact: true }).click();
+  modal = await migration(main);
+  assert.equal(await modal.getByRole('button', { name: '来源账号', exact: true }).innerText(), '本地账户');
+  await modal.getByRole('button', { name: '下一步', exact: true }).click();
+  await assertDialogError(modal, incompleteCleanup);
+  await modal.getByRole('button', { name: '下一步', exact: true }).click();
+  await modal.getByRole('status').filter({ hasText: recoveredCleanup }).waitFor();
+  await modal.getByRole('button', { name: '展开个人信息', exact: true }).click();
+  assert.ok(await modal.getByRole('checkbox', { name: '简历摘要', exact: true }).isChecked());
+  assert.equal(await modal.getByRole('checkbox', { name: '姓名', exact: true }).count(), 0);
+  await modal.getByRole('button', { name: '取消', exact: true }).click();
   await localNotice(main).waitFor({ state: 'detached' });
   await seed(main, 'private-a', recordedId, screenshotId, 'Synthetic background');
   await seedMedia(a);
@@ -555,6 +682,7 @@ try {
   assert.equal(await source.inputValue(), '');
   assert.equal(await modal.getByRole('button', { name: '显示密码', exact: true }).getAttribute('aria-pressed'), 'false');
   assert.ok(await modal.getByRole('button', { name: '验证密码', exact: true }).isDisabled());
+  const requestCount = authResponses.length;
   await source.fill(b.password);
   await modal.getByRole('button', { name: '验证密码' }).click();
   await modal.getByRole('alert').waitFor();
@@ -562,6 +690,13 @@ try {
   await source.fill(a.password);
   await modal.getByRole('button', { name: '验证密码' }).click();
   await modal.getByRole('button', { name: '确认迁移', exact: true }).waitFor();
+  if (server061) {
+    assert.deepEqual(authResponses.slice(requestCount), [
+      ['/v1/auth/verify-password', 401],
+      ['/v1/auth/verify-password', 200],
+    ]);
+    assert.equal(store.sessions(a.id, Date.now()).length, 0);
+  }
   assert.deepEqual(await contents(main), originalB);
   assert.equal(await modal.locator('.dialog-subtitle').innerText(), migrationSubtitle);
   await modal.getByRole('checkbox', { name: /个人信息.*部分冲突/ }).waitFor();
@@ -720,8 +855,17 @@ try {
   assert.equal((await contents(main)).name, null);
   await offline.locator('input[type=password]').fill(a.password);
   await offline.getByRole('button', { name: '验证密码' }).click();
-  await confirm(main, offline);
+  await app.evaluate(() => { globalThis.failReceiptRemoval = 1; });
+  await offline.getByRole('button', { name: '确认迁移', exact: true }).click();
+  await assertDialogError(offline, incompleteCleanup);
   assert.deepEqual(await contents(main), { name: 'offline-source', background: '', records: ['offline-source'] });
+  await offline.getByRole('button', { name: '取消', exact: true }).click();
+  const recovered = await select(main, a, '本地账户');
+  await recovered.locator('input[type=password]').fill(a.password);
+  await recovered.getByRole('button', { name: '验证密码' }).click();
+  await recovered.getByRole('status').filter({ hasText: recoveredCleanup }).waitFor();
+  assert.equal(await recovered.getByRole('button', { name: '确认迁移', exact: true }).count(), 0);
+  await recovered.getByRole('button', { name: '关闭', exact: true }).click();
   const movedOffline = await select(main, a, '本地账户');
   await movedOffline.locator('input[type=password]').fill(a.password);
   await movedOffline.getByRole('button', { name: '验证密码' }).click();
@@ -729,9 +873,10 @@ try {
   assert.ok(await movedOffline.getByRole('button', { name: '确认迁移', exact: true }).isDisabled());
   await movedOffline.getByRole('button', { name: '取消', exact: true }).click();
   console.log(
-    'PASS account isolation, local and password-protected moves, selective source removal, cancellation and failed commit, conflict groups, original documents and recordings, preserved cloud versions after sync, and offline migration',
+    'PASS account isolation, password-protected and offline moves, selective source removal, cleanup failure and recovery with or without remaining items, error and subtitle typography throughout dismissal, conflict groups, original documents and recordings, and preserved cloud versions',
   );
 } catch (error) {
+  console.error('Synthetic authentication HTTP responses', authResponses);
   if (app)
     for (const page of app.windows())
       console.error(

@@ -411,7 +411,7 @@ try {
     await failure
       .locator('.interview-answer-failure-reason')
       .evaluate((node) => getComputedStyle(node).fontSize),
-    '14px',
+    '12px',
   );
   assert.equal(await page.locator('.floating-composer .interview-answer-failure').count(), 0);
   await verifyContinuousCorners(page, 'interview exhausted retry');

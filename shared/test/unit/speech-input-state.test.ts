@@ -318,6 +318,61 @@ it.each(['microphone', 'system'] as const)('保存 WAV 时平衡较弱的 %s，�
   }
 });
 
+it.each([30 * 60_000, -30 * 60_000])('采集跨墙钟跳变后保留录音并用实际采集时刻转写 (%i ms)', async jump => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-clock-'));
+  let host = 4000;
+  adapter.captureClockNow = () => host;
+  let through: number | undefined;
+  const send = (at: number, level: number) => {
+    const first = runtime.messages.length;
+    captures.get('system')!.audio({
+      rate: 16000, timestamp: at, flags: 0, samples: new Float32Array(1600).fill(level),
+    });
+    // Both model engines anchor each new stream and advance by decoded samples.
+    for (const message of runtime.messages.slice(first)) {
+      if (message.op === 'gap') through = undefined;
+      if (message.op !== 'audio') continue;
+      through = (through ?? message.timestamp) + 100;
+      runtime.workers[0].emit('message', { ack: message.sequence, progress: { system: through } });
+    }
+  };
+  const lastProgress = () => events.filter(event => event.type === 'audio-progress').at(-1);
+  try {
+    await start({ ...remote, microphoneMuted: true }, ['system']);
+    send(host, 0.1);
+    vi.setSystemTime(Date.now() + jump);
+    host += 200;
+    const startWall = Date.now();
+    await controller.call({ op: 'recording', directory });
+    host += 100;
+    vi.advanceTimersByTime(100);
+    send(host - 200, 0.9); // Queued before the click.
+    send(host - 100, 0.25);
+    expect(lastProgress()).toMatchObject({ pending: false, processedThroughMs: startWall + 100 });
+
+    // The wall clock changes again while the same WAV is open.
+    vi.setSystemTime(Date.now() - jump);
+    const secondWall = Date.now();
+    host += 100;
+    vi.advanceTimersByTime(100);
+    send(host - 100, 0.5);
+    expect(lastProgress()).toMatchObject({ pending: false, processedThroughMs: secondWall + 100 });
+    expect(events.filter(event => event.type === 'gap')).toHaveLength(2);
+    await controller.call({ op: 'recording' });
+    const [file] = await fs.readdir(directory);
+    const wav = await fs.readFile(path.join(directory, file));
+    expect(wav.readUInt32LE(40)).toBe(3200 * 2);
+    const pcm = Array.from({ length: 3200 }, (_, i) => wav.readInt16LE(44 + i * 2));
+    const channel = new RecordingChannel('system', 16000);
+    const expected = [0.25, 0.5].flatMap(level =>
+      Array.from(channel.process(new Float32Array(1600).fill(level)), value => Math.round(value * 32767)));
+    expect(pcm).toEqual(expected);
+  } finally {
+    await controller.close();
+    await fs.rm(directory, { recursive: true, force: true });
+  }
+});
+
 it.each(['native', 'anchored'])('双路录音跟随各自开关，重新开启时丢弃静音期间积压的采样 (%s)', async (clock) => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'voxcue-recording-mute-'));
   try {
@@ -375,6 +430,18 @@ it.each(['native', 'anchored'])('双路录音跟随各自开关，重新开启�
     await controller.close();
     await fs.rm(directory, { recursive: true, force: true });
   }
+});
+
+it('原生时钟不可用时回滚解除静音，继续屏蔽麦克风', async () => {
+  const muted = { ...remote, microphoneMuted: true };
+  await start();
+  await controller.call({ op: 'set-input-state', state: muted });
+  adapter.captureClockNow = () => { throw Error('Synthetic unavailable clock'); };
+  await expect(controller.call({ op: 'set-input-state', state: remote })).rejects.toThrow('unavailable clock');
+  await turn();
+  expect(await controller.call({ op: 'status' })).toMatchObject({ inputState: muted });
+  captures.get('microphone')!.audio(packet());
+  expect(runtime.messages.some(message => message.op === 'audio')).toBe(false);
 });
 
 it('软静音保留采集与模型，立即挡住迟到麦克风文本，系统音频与进度不受影响', async () => {

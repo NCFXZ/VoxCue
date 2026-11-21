@@ -4,6 +4,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import workspace from '../../scripts/workspace.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
+import { opening, longMarkdown } from '../fixtures/long-markdown.mjs';
 
 // An owned browser host loads the actual built page over the production LAN
 // service. Only this fixture's origin is reachable; no desktop account or audio
@@ -98,6 +99,14 @@ try {
   await page.waitForFunction(() => document.querySelector('textarea')?.value === 'Computer draft');
   assert.equal(await page.locator('.mobile-markdown math').count(), 2);
   assert.equal(await page.locator('.katex-error').count(), 0);
+  if (process.platform === 'darwin') {
+    for (const name of ['more', 'microphone', 'send', 'radio']) {
+      const icon = page.locator(`[data-mobile-symbol="${name}"]`).first();
+      const mask = await icon.evaluate(element => getComputedStyle(element).maskImage);
+      assert.match(mask, /^url\("http:\/\/[^"]+\/assets\/[\w-]+\.png"\)$/);
+    }
+    assert.equal(await page.locator('button svg').count(), 0);
+  }
   await page.getByRole('button', { name: /更多|More/, exact: true }).click();
   await page.locator('select').first().selectOption('en');
   await page.getByRole('button', { name: 'Close', exact: true }).click();
@@ -119,6 +128,17 @@ try {
   assert.equal(await input.inputValue(), '');
   await page.getByRole('button', { name: 'Stop answer', exact: true }).click();
   await page.getByText('Stopped', { exact: true }).waitFor();
+  for (const [content, status] of [[opening, 'streaming'], [longMarkdown, 'completed']]) {
+    await app.evaluate((_electron, { content, status }) => {
+      const { service, snapshot } = globalThis.mobileUi;
+      Object.assign(snapshot.answers.at(-1), { content, status });
+      snapshot.revision++;
+      service.updateSnapshot(structuredClone(snapshot));
+    }, { content, status });
+  }
+  const longReply = page.locator('.mobile-markdown').last();
+  await longReply.getByText('All receipts reconciled', { exact: true }).waitFor();
+  assert.equal(await longReply.locator('p > strong').count(), 90);
   await page.getByRole('button', { name: 'Hidden', exact: true }).click();
   assert.equal(await page.locator('.mobile-transcript-scroll').count(), 0);
   await page.getByRole('button', { name: 'Show transcript', exact: true }).click();

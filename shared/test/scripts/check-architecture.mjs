@@ -166,7 +166,8 @@ export function boundaryViolations(graph) {
   const violations = [];
   for (const [physicalFile, edges] of graph) {
     const file = logicalPath(physicalFile);
-    if (/^(?:macos|windows)\/src\//.test(physicalFile) && physicalFile !== 'macos/src/icons.tsx')
+    if (/^(?:macos|windows)\/src\//.test(physicalFile) &&
+        !['macos/src/icons.tsx', 'macos/src/mobile/MobileIcon.tsx'].includes(physicalFile))
       violations.push(
         `${physicalFile}: 界面必须唯一保留在 shared/src，不得恢复平台控件或材质替换层`,
       );
@@ -176,9 +177,13 @@ export function boundaryViolations(graph) {
         violations.push(`${physicalFile}:${edge.line} → ${edge.target}: ${reason}`);
       if (
         physicalFile === 'macos/src/icons.tsx' &&
-        !['react', 'macos/src/symbols.json'].includes(edge.target)
+        !['react', 'macos/src/symbols.json', 'macos/src/control-symbols.css'].includes(edge.target)
       )
-        fail('Mac图标适配仅允许React与本平台SF Symbols清单，不得恢复控件或材质');
+        fail('Mac 图标适配仅可使用 React、系统符号清单和符号样式');
+      if (physicalFile === 'macos/src/mobile/MobileIcon.tsx' &&
+          edge.target !== 'macos/src/mobile/symbols.css' &&
+          !(edge.typeOnly && edge.target === 'shared/src/mobile/MobileIcon.tsx'))
+        fail('Mac 手机图标仅可使用本平台符号样式和共享图标名称类型');
       if (
         /^(?:macos|windows)\/electron\/screenPermission\.ts$/.test(physicalFile) &&
         (!edge.typeOnly || !edge.target.startsWith('shared/electron/contracts/'))

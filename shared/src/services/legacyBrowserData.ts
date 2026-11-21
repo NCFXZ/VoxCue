@@ -4,7 +4,7 @@ import { openOriginalBackups, originalBackupsDatabase as backupDB } from './orig
 import { assertLibrariesWritable } from './knowledgeIndex';
 import type { LocalDocument } from './knowledgeTypes';
 import { historyRepository, historyStorageKey, readExistingHistory, readHistorySnapshot } from './history';
-import { profileStorageKey, readStoredProfile, storedObject } from './storedValues';
+import { legacyProfileModificationKey, profileStorageKey, readStoredProfile, storedObject } from './storedValues';
 import { mergeLegacySyncSaved, type SyncSaved } from './cloudSync';
 import { validProfile } from '../../electron/contracts/profile';
 import { knowledgeFileNameLimit } from '../../electron/contracts/knowledge';
@@ -222,7 +222,7 @@ export async function eraseLegacyBrowserData(owner: string) {
       deletion.onblocked = deletion.onerror = () => reject(invalid());
     });
   }
-  for (const key of [profileStorageKey, historyStorageKey, ...preferences])
+  for (const key of [profileStorageKey, legacyProfileModificationKey, historyStorageKey, ...preferences])
     localStorage.removeItem(key);
   if (account && localStorage.getItem('voxcue-sync-owner') === account)
     localStorage.removeItem('voxcue-sync-owner');

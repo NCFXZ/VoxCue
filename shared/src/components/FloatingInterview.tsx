@@ -10,10 +10,8 @@ import type { InterviewCanvasLayout } from '../../electron/contracts/desktop';
 import {
   ArrowUp,
   ChevronDown,
-  ShieldCheck,
-  ShieldOff,
-  PrivateWindow,
-  VisibleWindow,
+  Eye,
+  EyeOff,
   Square,
   Expand,
   MessageSquare,
@@ -690,9 +688,7 @@ export function FloatingInterview() {
                 void toggleCapture();
               }}
             >
-              {window.desktop?.platform === 'windows' ? (
-                protectedWindow ? <PrivateWindow size={20} /> : <VisibleWindow size={20} />
-              ) : protectedWindow ? <ShieldCheck size={18} /> : <ShieldOff size={18} />}
+              {protectedWindow ? <EyeOff size={20} /> : <Eye size={20} />}
             </Button>
             <Button variant="ghost" size="icon" className="floating-record"
               aria-label={state.recording ? t('停止录音') : t('开始录音')}

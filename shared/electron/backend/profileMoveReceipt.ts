@@ -1,7 +1,8 @@
 import { lstat, mkdir, readFile, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { profileDirectory, profileDirectoryName } from '../accountProfilePaths';
-import type { SourceRemovalPlan } from '../contracts/accountData';
+import { withinImportItemLimit, type SourceRemovalPlan } from '../contracts/accountData';
+import { CLOUD_RECORD_MAX_IMAGES } from '../contracts/cloudSync';
 import { profileFields } from '../contracts/profile';
 import { recordingRecordId } from '../contracts/recordings';
 import { maxRestoreItems, validRestoreKey } from '../contracts/restoreData';
@@ -20,7 +21,7 @@ export function validRemovalPlan(plan: SourceRemovalPlan) {
   if (
     !Array.isArray(plan?.items) ||
     !plan.items.length ||
-    plan.items.length > maxRestoreItems ||
+    !withinImportItemLimit(plan.items, item => item?.key) ||
     new Set(plan.items.map((i) => i?.key)).size !== plan.items.length
   )
     return false;
@@ -37,7 +38,7 @@ export function validRemovalPlan(plan: SourceRemovalPlan) {
       (i.imageIds === undefined ||
         (i.key.startsWith('record:') &&
           Array.isArray(i.imageIds) &&
-          i.imageIds.length <= 512 &&
+          i.imageIds.length <= CLOUD_RECORD_MAX_IMAGES &&
           i.imageIds.every(recordingRecordId) &&
           new Set(i.imageIds).size === i.imageIds.length)),
   );

@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { assertPlainProviderLogo } from './assert-provider-logo.mjs';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { writeFile } from 'node:fs/promises';
@@ -74,8 +75,8 @@ async function runPreview() {
     const icons = new Map();
     async function source(image) {
       await image.waitFor();
-      return image.evaluate(async node => {
-        await node.decode();
+      await assertPlainProviderLogo(image);
+      return image.evaluate(node => {
         const rect = node.getBoundingClientRect();
         if (!node.naturalWidth || rect.width < 1 || rect.height < 1) throw Error('Provider image is not visible');
         return node.currentSrc;

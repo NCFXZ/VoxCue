@@ -22,6 +22,14 @@ describe('interface language', () => {
     const unknown = provider + '\n' + '用户原文';
     expect(translateUI(unknown, 'en')).toBe(unknown);
   });
+  it('translates capture clock errors and recovery notices from the speech service', () => {
+    expect(translateUI('本机音频时钟不可用，请重新开始采集。', 'en')).toBe(
+      'The local audio clock is unavailable. Restart audio capture.',
+    );
+    expect(translateUI('系统时间已变化，转写已继续。', 'en')).toBe(
+      'The system time changed. Transcription has resumed.',
+    );
+  });
   it('uses the settings names in CPU diagnostics and multilingual recognition status', () => {
     expect(translateUI('无法确认多语言语音识别所需的处理器指令集，请改用轻量语音识别。', 'en'))
       .toBe('Could not verify the CPU instructions required for Multilingual speech recognition. Switch to Lightweight speech recognition.');

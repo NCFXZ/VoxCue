@@ -163,11 +163,14 @@ try {
       assert.ok(Math.abs(restored.width - both.width) <= 1 && Math.abs(restored.x - both.x) <= 1);
       await floating.getByRole('button', { name: '收起面试窗口', exact: true }).click();
       await floating.getByRole('button', { name: '展开面试窗口', exact: true }).waitFor();
-      assertAnchor(await nativeBounds(), both, 'Collapse');
-      assert.ok(Math.abs((await nativeBounds()).height - 72) <= 1);
+      await floating.waitForFunction(async () => {
+        const state = await window.desktop.interviewState();
+        return state.collapsed && state.layout?.height === 72 && !document.querySelector('.floating-shell').dataset.panelMotion;
+      });
+      assert.deepEqual(await nativeBounds(), restored, 'The 72-DIP capsule retains the native panel surface');
       await floating.getByRole('button', { name: '展开面试窗口', exact: true }).click();
       await floating.getByRole('button', { name: '收起面试窗口', exact: true }).waitFor();
-      assertAnchor(await nativeBounds(), both, 'Expand');
+      assert.deepEqual(await nativeBounds(), restored, 'Expanding the panels retains the same native surface');
       await floating.getByRole('button', { name: '结束面试', exact: true }).click();
       await floating.getByRole('button', { name: '确认结束面试', exact: true }).click();
     } catch (error) {

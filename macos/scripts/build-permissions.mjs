@@ -11,37 +11,20 @@ await mkdir(path.join(root, 'native/bin'), { recursive: true });
 const installedHeaders = path.resolve(path.dirname(process.execPath), '../include/node');
 for (const name of ['node_api.h', 'node_api_types.h', 'js_native_api.h', 'js_native_api_types.h'])
   await copyFile(path.join(installedHeaders, name), path.join(headers, name));
-const output = path.join(root, 'native/bin/VoxCue.ScreenPermission.node');
-for (const [command, args] of [
-  [
-    '/usr/bin/xcrun',
-    [
-      'clang++',
-      '-std=c++17',
-      '-DNAPI_VERSION=8',
-      '-bundle',
-      '-undefined',
-      'dynamic_lookup',
-      '-arch',
-      'arm64',
-      '-mmacosx-version-min=14.2',
-      '-O2',
-      '-I',
-      headers,
-      path.join(root, 'native/ScreenPermission.mm'),
-      '-framework',
-      'CoreGraphics',
-      '-o',
-      output,
-    ],
-  ],
-  [
-    '/usr/bin/codesign',
-    ['--force', '--sign', '-', '--identifier', 'com.voxcue.screen-permission', output],
-  ],
+for (const [name, framework, identifier] of [
+  ['ScreenPermission', 'CoreGraphics', 'screen-permission'],
+  ['SecureInput', 'AppKit', 'secure-input'],
 ]) {
-  const result = spawnSync(command, args, { stdio: 'inherit' });
-  if (result.error) throw result.error;
-  if (result.status) throw Error(`${command} failed (${result.status}).`);
+  const output = path.join(root, 'native/bin/VoxCue.' + name + '.node');
+  for (const [command, args] of [
+    ['/usr/bin/xcrun', ['clang++', '-fobjc-arc', '-std=c++17', '-DNAPI_VERSION=8', '-bundle',
+      '-undefined', 'dynamic_lookup', '-arch', 'arm64', '-mmacosx-version-min=14.2', '-O2',
+      '-I', headers, path.join(root, 'native', name + '.mm'), '-framework', framework, '-o', output]],
+    ['/usr/bin/codesign', ['--force', '--sign', '-', '--identifier', 'com.voxcue.' + identifier, output]],
+  ]) {
+    const result = spawnSync(command, args, { stdio: 'inherit' });
+    if (result.error) throw result.error;
+    if (result.status !== 0) throw Error(command + ' failed (' + result.status + ').');
+  }
 }
-console.log('Built local arm64 screen permission binding (Node-API 8, no image capture).');
+console.log('Built arm64 screen permission and AppKit secure input bindings.');

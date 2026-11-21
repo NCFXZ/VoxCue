@@ -12,7 +12,7 @@ import type {
   SourceRemovalResult,
 } from './contracts/accountData';
 import { validMoveKey, validRemovalPlan } from './backend/profileMoveReceipt';
-import { validImportDocument } from './contracts/accountData';
+import { validImportDocument, validImportEnvelopeSize, validImportItemSize, validImportRecordTitle, withinImportItemLimit } from './contracts/accountData';
 import {
   maxRestoreItems,
   packCloudItem,
@@ -123,6 +123,7 @@ export async function openProfileImportSource(owner: string, signal: AbortSignal
     if (!Array.isArray(rows) || rows.length > maxRestoreItems) throw invalid();
     const indexByKey = new Map<string, number>();
     const imageVersions = new Map<string, string>();
+    const recordSizes = new Map<number, number>();
     const items: AccountImportItem[] = [];
     let total = 0;
     for (const row of rows) {
@@ -137,9 +138,8 @@ export async function openProfileImportSource(owner: string, signal: AbortSignal
         if (version) imageVersions.set(row.key, version);
       }
       if (
-        !Number.isSafeInteger(size) ||
-        (size < 8 && !(row.key.startsWith('image:') && size === 0)) ||
-        size > 64 * 1024 ** 2 ||
+        !validImportItemSize(row.key, size, row.recordTitle, row.recordLibraryName) ||
+        ((row.recordTitle !== undefined || row.recordLibraryName !== undefined) && !validImportRecordTitle(row.key, row.recordTitle, row.recordLibraryName)) ||
         (total += size) > restoreLimit
       )
         throw invalid();
@@ -158,7 +158,8 @@ export async function openProfileImportSource(owner: string, signal: AbortSignal
         size,
         ...(row.imageIds?.length ? { imageIds: row.imageIds } : {}),
         ...(row.document && validImportDocument(row.key, row.document) ? { document: row.document } : {}),
-        ...(row.key.startsWith('record:') && typeof row.recordTitle === 'string' && row.recordTitle.length <= 80 ? { recordTitle: row.recordTitle } : {}),
+        ...(row.recordTitle !== undefined ? { recordTitle: row.recordTitle } : {}),
+        ...(row.recordLibraryName !== undefined ? { recordLibraryName: row.recordLibraryName } : {}),
       });
     }
     async function selectedImage(key: string, index: number) {
@@ -181,6 +182,21 @@ export async function openProfileImportSource(owner: string, signal: AbortSignal
         if (index === undefined || !key.startsWith('image:')) throw invalid();
         return (await selectedImage(key, index)).size;
       },
+      async recordSize(key: string) {
+        check();
+        const index = indexByKey.get(key);
+        if (index === undefined || items[index].size !== 0 || items[index].recordTitle === undefined) throw invalid();
+        const cached = recordSizes.get(index);
+        if (cached !== undefined) return cached;
+        const size = await bounded(inspect('source.recordSize(' + index + ')'));
+        if (!validImportEnvelopeSize(size)) throw invalid();
+        if (!recordSizes.has(index)) {
+          if (total + size > restoreLimit) throw invalid();
+          total += size;
+          recordSizes.set(index, size);
+        } else if (size !== recordSizes.get(index)) throw invalid();
+        return size;
+      },
       async itemDigest(key: string) {
         const index = indexByKey.get(key);
         if (index === undefined || (!items[index].document && items[index].recordTitle === undefined)) throw invalid();
@@ -199,7 +215,7 @@ export async function openProfileImportSource(owner: string, signal: AbortSignal
         return preview && createHash('sha256').update(preview).digest('hex');
       },
       async planRemoval(keys: string[]) {
-        if (!keys.length || keys.length > maxRestoreItems || !keys.every(validMoveKey))
+        if (!keys.length || !withinImportItemLimit(keys, key => key) || !keys.every(validMoveKey))
           throw invalid();
         const plan = (await bounded(
           inspect('source.planRemoval(' + JSON.stringify(keys) + ')'),
@@ -241,8 +257,9 @@ export async function openProfileImportSource(owner: string, signal: AbortSignal
           check();
           return new Uint8Array(bytes);
         }
-        if (offset >= items[index].size) throw invalid();
-        const length = Math.min(restoreChunkSize, items[index].size - offset);
+        const size = recordSizes.get(index) ?? items[index].size;
+        if (offset >= size) throw invalid();
+        const length = Math.min(restoreChunkSize, size - offset);
         const encoded = await bounded(inspect('source.read(' + index + ',' + offset + ')'));
         if (typeof encoded !== 'string' || encoded.length !== 4 * Math.ceil(length / 3))
           throw invalid();

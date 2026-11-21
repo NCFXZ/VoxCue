@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import workspace from '../../scripts/workspace.mjs';
+import { focusUiWindow } from './install-ui-account.mjs';
 
 const windowsProbe = () => import(
   pathToFileURL(path.join(workspace.platformRoot, 'test/scripts/window-probe.mjs')).href
@@ -12,7 +13,21 @@ export async function pointAtControl(app, button, hover = true, freshEntry = fal
     const { pointAtOwnedControl } = await windowsProbe();
     return pointAtOwnedControl(app, button, hover, workspace.platformRequire('electron'), freshEntry);
   }
-  return hover ? button.hover() : button.page().mouse.move(1, 1);
+  const page = button.page();
+  const until = performance.now() + 3000;
+  let state;
+  do {
+    if (app && !(await page.evaluate(() => document.hasFocus()))) await focusUiWindow(app, page);
+    if (!hover || freshEntry) await page.mouse.move(1, 1);
+    if (hover) await button.hover();
+    state = await button.evaluate(element => ({
+      hovered: element.matches(':hover'), focused: document.hasFocus(),
+    }));
+    if (state.hovered === hover && (!app || state.focused)) return;
+    freshEntry = true;
+  } while (performance.now() < until);
+  throw Error('The owned download control did not receive the expected pointer state: ' +
+    JSON.stringify({ hover, ...state }));
 }
 
 export async function holdControl(app, button) {
@@ -47,13 +62,16 @@ async function settle(button) {
 }
 
 const clockPages = new WeakSet();
-export async function assertInitialDownloadProgress(button, start, { delayMs = 1000, app } = {}) {
-  const page = button.page();
-  await page.bringToFront();
+export async function installInteractionClock(page) {
   if (!clockPages.has(page)) {
     await page.clock.install();
     clockPages.add(page);
   }
+}
+export async function assertInitialDownloadProgress(button, start, { delayMs = 1000, app } = {}) {
+  const page = button.page();
+  await page.bringToFront();
+  await installInteractionClock(page);
   // Freeze before mounting the control. Locator/animation work must not consume
   // its cancellation guard; inspect 0, 400, the last guarded ms and its boundary.
   await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));

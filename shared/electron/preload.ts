@@ -128,7 +128,7 @@ const desktop: DesktopAPI = {
   chatCancel: (id) => invoke('chat:cancel', id),
   chatOpenLink: (url) => invoke('chat:open-link', url),
   onChatEvent: (callback) => subscribe('chat:event', callback),
-  openInterview: (configuration) => invoke('interview:open', configuration),
+  openInterview: (...args) => invoke('interview:open', ...args),
   checkInterviewAccess: (configuration) => invoke('interview:check-access', configuration),
   openMicrophoneSettings: (source) =>
     source === undefined

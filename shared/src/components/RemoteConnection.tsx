@@ -7,7 +7,7 @@ import { Button } from './ui/button';
 import { InterviewNotice } from './InterviewNotice';
 import { ConfirmDisconnectButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
-import { Check, Copy, Link, Loader, Refresh, Settings, X } from './icons';
+import { Check, Copy, Link, LinkOff, Loader, Refresh, Settings, X } from './icons';
 
 function openPairing() {
   const remote = useRemoteConnection.getState();
@@ -91,6 +91,17 @@ export function RemoteConnectionRecovery({ onSettings, container }: {
   );
 }
 
+function CloseDeviceConnection({ disabled = false }: { disabled?: boolean }) {
+  const { state, loading, disconnect } = useRemoteConnection();
+  if (state?.status !== 'waiting' && state?.status !== 'reconnecting') return null;
+  return (
+    <Button variant="ghost" disabled={loading || disabled} onClick={() => void disconnect()}>
+      <LinkOff size={16} />
+      {t('关闭设备连接')}
+    </Button>
+  );
+}
+
 export function RemoteConnectionSettings({ disabled = false }: { disabled?: boolean }) {
   const { state, loading, error, disconnect } = useRemoteConnection();
   const connected = state?.status === 'connected';
@@ -104,6 +115,7 @@ export function RemoteConnectionSettings({ disabled = false }: { disabled?: bool
           </p>
         </div>
         <div className="remote-connection-actions">
+          <CloseDeviceConnection disabled={disabled} />
           {connected ? (
             <ConfirmDisconnectButton
               iconOnly={false}
@@ -217,6 +229,7 @@ function PairingContent() {
         </p>
       ) : null}</InterviewReveal>
       <div className="remote-pairing-refresh">
+        <CloseDeviceConnection />
         <Button variant="outline" disabled={loading} onClick={openPairing}>
           <Refresh size={16} />
           {t('刷新二维码')}
@@ -281,6 +294,7 @@ export function RemoteConnectionDialogs({
         onClose={() => void reject(pending.id)}
         footer={
           <div className="remote-approval-actions">
+            <CloseDeviceConnection />
             <Button variant="ghost" disabled={loading} onClick={() => void reject(pending.id)}>
               {t('拒绝')}
             </Button>

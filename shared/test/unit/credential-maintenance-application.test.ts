@@ -1,3 +1,4 @@
+import { ApiCredentialStore, readApiKeyRecords } from '../../electron/backend/api/credentials';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -74,6 +75,7 @@ function storedReaders() {
     ),
     readMigrationPasswords: (decrypt: (value: Buffer) => Promise<string>) =>
       readMigrationPasswordRecords(native.directory, decrypt),
+    readApiKeys: (key: (value: Buffer) => Promise<string>) => readApiKeyRecords(native.directory, key),
     accountOrigin: origin,
     validateTelemetryProofs: async (value: unknown) => {
       storedTelemetryProofs(value, origin, '00000000-0000-4000-8000-000000000001');
@@ -216,4 +218,22 @@ it('does not hide native failures or attempt another maintenance request', async
     'helper failure',
   );
   expect(maintain).toHaveBeenCalledOnce();
+});
+
+it('keeps historical keys when any account’s API key is unreadable or has a mismatched destination', async () => {
+  const { ports, decrypt } = storedReaders();
+  const root = profileDirectory(native.directory, 'local');
+  const key = new ApiCredentialStore(root, { encrypt: text => Buffer.from('synthetic:' + text), decrypt });
+  await key.save('openai', { key: 'synthetic-api-key' });
+  expect(await readCredentialRecords(decrypt, ports)).toBe('readable');
+  const file = path.join(root, 'auth-data/api-keys/openai.json');
+  const envelope = JSON.parse(await readFile(file, 'utf8'));
+  envelope.ciphertext = Buffer.from('synthetic:' + JSON.stringify({config: {provider: 'deepseek'}, key: 'test'})).toString('base64');
+  await writeFile(file, JSON.stringify(envelope));
+  expect(await readCredentialRecords(decrypt, ports)).toBe('unavailable');
+  const other = profileDirectory(native.directory, 'demo');
+  await mkdir(other);
+  await symlink(path.join(root, 'auth-data'), path.join(other, 'auth-data'));
+  await key.remove('openai');
+  expect(await readCredentialRecords(decrypt, ports)).toBe('unavailable');
 });

@@ -51,6 +51,19 @@ function fixture(language?: () => 'zh-CN' | 'en' | Promise<'zh-CN' | 'en'>) {
   return { crypto, children, settle, reply };
 }
 
+it('directs the hot reload host to the local app without starting the helper or inspecting records', async () => {
+  const port = createCredentialEncryption('/synthetic/VoxCue', undefined, undefined, false);
+  const reason = credentialProblemMessages.VOXCUE_CREDENTIAL_SIGNED_APP_REQUIRED;
+  expect(port.unavailableReason).toBe(reason);
+  expect(translateUI(reason, 'en')).toContain('Open VoxCue.app in the project’s macos folder');
+  for (const op of [() => port.encrypt('synthetic'), () => port.decrypt(Buffer.alloc(1))])
+    await expect(op()).rejects.toMatchObject({ message: reason, code: 'VOXCUE_CREDENTIAL_SIGNED_APP_REQUIRED' });
+  const readRecords = vi.fn();
+  await expect(port.maintain(readRecords)).resolves.toBeUndefined();
+  expect(readRecords).not.toHaveBeenCalled();
+  expect(native.spawn).not.toHaveBeenCalled();
+});
+
 it('serializes all vault operations through actual helper close', async () => {
   const f = fixture();
   const pending = [

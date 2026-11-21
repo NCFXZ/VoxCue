@@ -34,6 +34,8 @@ function fixture() {
 describe('owner-side Electron launch isolation', () => {
   it('rejects product executables regardless of name, inspector availability or environment', () => {
     const { root, host, profile, policy } = fixture();
+    const entry = path.join(root, 'offline-electron-entry.cjs');
+    writeFileSync(entry, '// inert isolated fixture');
     for (const name of ['VoxCue.exe', 'renamed-electron.exe', 'VoxCue.app/Contents/MacOS/VoxCue']) {
       const binary = path.join(root, name);
       expect(() =>
@@ -42,6 +44,9 @@ describe('owner-side Electron launch isolation', () => {
           policy,
         ),
       ).toThrow(/require OS isolation/);
+      expect(() => assertOwnerElectronLaunch({
+        executablePath: binary, args: [entry], env: { COPILOT_TEST_USER_DATA: profile },
+      }, policy)).toThrow(/require OS isolation/);
     }
     expect(() =>
       assertOwnerElectronLaunch({ executablePath: host, args: [policy.platformRoot] }, policy),

@@ -1,9 +1,11 @@
-import { mkdir, open, rm } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readdir, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
   apiProviderIds, isApiProvider, parseApiConnectionConfig,
   type ApiConnectionConfig, type ApiProvider,
 } from '../../contracts/apiConnections';
+import { storedProfileDirectories } from '../storedProfileDirectories';
 import { atomicFile } from '../atomicFile';
 import { systemCredentialEncryption, type CredentialEncryption } from '../auth/storage';
 import type { ApiCredential } from './types';
@@ -35,14 +37,15 @@ export class ApiCredentialStore {
 
   private async envelope(provider: ApiProvider) {
     this.lifetime.signal.throwIfAborted();
-    const handle = await open(this.file(provider), 'r').catch((error: NodeJS.ErrnoException) => {
+    const handle = await open(this.file(provider), constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0)).catch((error: NodeJS.ErrnoException) => {
       if (error.code === 'ENOENT') return null;
       throw error;
     });
     if (!handle) return null;
     let contents: string;
     try {
-      if ((await handle.stat()).size > limit) throw new InvalidApiCredential();
+      const stat = await handle.stat();
+      if (!stat.isFile() || stat.size > limit) throw new InvalidApiCredential();
       contents = await handle.readFile('utf8');
     } finally {
       await handle.close();
@@ -72,11 +75,11 @@ export class ApiCredentialStore {
     return entries.flatMap((entry) => entry ? [entry] : []);
   }
 
-  async read(provider: ApiProvider): Promise<ApiCredential | null> {
+  async read(provider: ApiProvider, decrypt = (value: Buffer) => this.encryption.decrypt(value)): Promise<ApiCredential | null> {
     await this.writes;
     const entry = await this.envelope(provider);
     if (!entry) return null;
-    const decrypted = await this.encryption.decrypt(Buffer.from(entry.ciphertext, 'base64'));
+    const decrypted = await decrypt(Buffer.from(entry.ciphertext, 'base64'));
     this.lifetime.signal.throwIfAborted();
     let data;
     try { data = JSON.parse(decrypted); } catch { throw new InvalidApiCredential(); }
@@ -122,4 +125,31 @@ export class ApiCredentialStore {
     this.lifetime.abort();
     return this.writes;
   }
+}
+
+// Verify inactive accounts as well as the current one before retiring a historical system key.
+export async function readApiKeyRecords(root: string, decrypt: (value: Buffer) => Promise<string>) {
+  let found = false;
+  for await (const profile of storedProfileDirectories(root)) {
+    const directory = path.join(profile, 'auth-data', 'api-keys');
+    for (const candidate of [path.dirname(directory), directory]) {
+      const stat = await lstat(candidate).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== 'ENOENT') throw error;
+      });
+      if (stat && (!stat.isDirectory() || await realpath(candidate) !== candidate))
+        throw new InvalidApiCredential();
+    }
+    const files = await readdir(directory, { withFileTypes: true }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'ENOENT') throw error;
+      return [];
+    });
+    const store = new ApiCredentialStore(profile);
+    for (const file of files) {
+      const provider = apiProviderIds.find(id => file.name === id + '.json');
+      if (!file.isFile() || !provider || !(await store.read(provider, decrypt)))
+        throw new InvalidApiCredential();
+      found = true;
+    }
+  }
+  return found;
 }

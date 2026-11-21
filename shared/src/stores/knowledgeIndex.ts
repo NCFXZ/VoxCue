@@ -2,7 +2,7 @@ import { create } from 'zustand';
 import type { KnowledgeState, KnowledgeStatus } from '../../electron/contracts/knowledge';
 import { isKnowledgeFileName, KNOWLEDGE_INDEX_VERSION, knowledgeBatchChanged, knowledgeBatchLimit, knowledgeIndexCancelled } from '../../electron/contracts/knowledge';
 import type { LocalDocument } from '../services/knowledgeTypes';
-import { knowledgeCall, indexOriginal, hasKnowledgeEngine, pendingBaseRemovals } from '../services/knowledgeIndex';
+import { knowledgeCall, indexOriginal, hasKnowledgeEngine, pendingBaseRemovals, documentIndexFraction } from '../services/knowledgeIndex';
 import { localKnowledge, readKnowledgeOriginal, syncKnowledgeSnapshot, documentRevision, recoverKnowledgeBaseRemovals } from '../services/knowledge';
 import { componentReady } from './components';
 interface IndexState {
@@ -12,11 +12,12 @@ interface IndexState {
   requests: Record<string, string>;
   error: string | null;
   dismissError(): void;
-  currentProgress(baseId: string): KnowledgeStatus | undefined;
+  libraryProgress: Readonly<Record<string, number>>;
   refresh(): Promise<void>;
   connect(): () => void;
   index(doc: LocalDocument, force?: boolean, selection?: string): Promise<void>;
-  indexSelection(documents: LocalDocument[]): Promise<void>;
+  indexSelection(documents: LocalDocument[], force?: boolean): Promise<void>;
+  restoreBatch(): { add(doc: LocalDocument): void; flush(discard?: boolean): void };
   reconcile(baseId?: string, errorEpoch?: number): Promise<void>;
 }
 const message = (e: unknown) => (e instanceof Error ? e.message : '知识库操作失败。');
@@ -33,7 +34,7 @@ interface IndexJob {
   selection?: string;
   run(batchId?: string): Promise<boolean>;
   fail(error: unknown): void;
-  complete(): Promise<void>;
+  complete(refresh?: boolean): Promise<void>;
   finish(): void;
 }
 let subscriptions = 0,
@@ -42,6 +43,31 @@ let subscriptions = 0,
 let unsubscribe: (() => void) | undefined;
 export const useKnowledgeIndex = create<IndexState>((set, get) => {
   const jobs = new Map<string, IndexJob>();
+  const heldSelections = new Set<string>();
+  // Keep completed members until the last job in their library settles. Only
+  // fractions and document IDs survive each file's turn, never its original bytes.
+  const batches = new Map<string, { fractions: Map<string, number>; sum: number; pending: number }>();
+  function progressFor(baseId: string, documentId: string, fraction: number) {
+    const batch = batches.get(baseId);
+    const previous = get().libraryProgress;
+    if (!batch) return previous;
+    batch.sum += fraction - (batch.fractions.get(documentId) ?? 0);
+    batch.fractions.set(documentId, fraction);
+    // Full embedding/staging is not a completed index until its write commits.
+    const percent = Math.max(0, Math.min(99, Math.floor(batch.sum * 100 / batch.fractions.size)));
+    if (previous[baseId] === percent) return previous;
+    return { ...previous, [baseId]: percent };
+  }
+  function finishProgress(baseId: string) {
+    const batch = batches.get(baseId);
+    if (batch && --batch.pending === 0) {
+      batches.delete(baseId);
+      const next = { ...get().libraryProgress };
+      delete next[baseId];
+      return next;
+    }
+    return get().libraryProgress;
+  }
   const attempts = new Map<string, { revision: string | null; until: number }>();
   const scans = new Map<string, Promise<void>>();
   let worker: Promise<void> | undefined;
@@ -59,7 +85,7 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
     total: 0,
   });
   function nextJob() {
-    const pending = [...jobs.values()].filter((job) => !job.started);
+    const pending = [...jobs.values()].filter(job => !job.started && !(job.selection && heldSelections.has(job.selection)));
     const sameBase = pending.find((job) => job.baseId === activeBase);
     return sameBase ?? pending[0];
   }
@@ -136,17 +162,11 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
     deletingDocumentIds: null,
     tasks: {},
     requests: {},
+    libraryProgress: {},
     error: null,
     dismissError() {
       errorVersion++;
       set({ error: null });
-    },
-    currentProgress(baseId) {
-      if (baseId !== activeBase) return;
-      const { tasks } = get();
-      if (active && processing(tasks[active.id])) return tasks[active.id];
-      for (const job of jobs.values())
-        if (job.baseId === baseId && processing(tasks[job.id])) return tasks[job.id];
     },
     refresh() {
       if (!hasKnowledgeEngine()) return Promise.resolve();
@@ -218,7 +238,9 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
             if (status.requestId && (processing(status) || !!job))
               requests[status.documentId] = status.requestId;
             else delete requests[status.documentId];
-            return { tasks: { ...s.tasks, [status.documentId]: status }, requests };
+            const libraryProgress = job && status.requestId === job.requestId
+              ? progressFor(job.baseId, job.id, documentIndexFraction(status)) : s.libraryProgress;
+            return { tasks: { ...s.tasks, [status.documentId]: status }, requests, libraryProgress };
           });
           if (['ready', 'failed', 'cancelled'].includes(status.phase)) void get().refresh();
         });
@@ -236,24 +258,54 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
           unsubscribe = undefined;
           for (const job of jobs.values()) job.finish();
           jobs.clear();
+          batches.clear();
           scans.clear();
           attempts.clear();
           const requestId = activeBatch ?? active?.requestId;
           if (requestId) void knowledgeCall({ op: 'cancel', requestId }).catch(() => {});
-          set({ state: null, tasks: {}, requests: {}, deletingDocumentIds: null, error: null });
+          set({ state: null, tasks: {}, requests: {}, libraryProgress: {}, deletingDocumentIds: null, error: null });
         }
       };
     },
-    async indexSelection(documents) {
+    async indexSelection(documents, force = false) {
       const selection = crypto.randomUUID();
-      await Promise.all(documents.map(doc => get().index(doc, false, selection)));
+      await Promise.all(documents.map(doc => get().index(doc, force, selection)));
+    },
+    restoreBatch() {
+      // Register each committed original in the ordinary queue immediately, so an
+      // overlapping reconciliation sees it. Release work one library / 20 files at a time.
+      let selection: string | undefined, baseId: string | undefined, count = 0;
+      const flush = (discard = false) => {
+        if (!selection) return;
+        heldSelections.delete(selection);
+        if (discard) {
+          for (const job of jobs.values())
+            if (job.selection === selection && !job.started) void job.complete(false);
+        }
+        selection = undefined;
+        count = 0;
+        pump();
+      };
+      return {
+        add(doc) {
+          if (baseId !== doc.baseId) flush();
+          if (!selection) {
+            baseId = doc.baseId;
+            selection = crypto.randomUUID();
+            heldSelections.add(selection);
+          }
+          void get().index(doc, false, selection);
+          if (++count === knowledgeBatchLimit) flush();
+        },
+        flush,
+      };
     },
     index(doc, force = false, selection) {
       if (!isKnowledgeFileName(doc.name)) return Promise.resolve();
       if (!hasKnowledgeEngine() || !componentReady('rag')) return Promise.resolve();
       const revision = documentRevision(doc);
       const existing = jobs.get(doc.id);
-      if (existing && (!existing.started || existing.revision === revision)) {
+      if (existing && existing.baseId === doc.baseId && (!existing.started || existing.revision === revision)) {
         existing.revision = revision;
         existing.force ||= force;
         if (!existing.started && selection) existing.selection = selection;
@@ -277,10 +329,18 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         run, fail, complete,
         finish: resolve,
       };
+      if (existing && existing.baseId !== doc.baseId) {
+        set({ libraryProgress: finishProgress(existing.baseId) });
+        if (!existing.started) void done.then(existing.finish);
+      }
+      const batch = batches.get(doc.baseId) ?? { fractions: new Map<string, number>(), sum: 0, pending: 0 };
+      if (existing?.baseId !== doc.baseId) ++batch.pending;
+      batches.set(doc.baseId, batch);
       jobs.set(doc.id, job);
       set((s) => ({
         requests: { ...s.requests, [doc.id]: job.requestId },
         tasks: { ...s.tasks, [doc.id]: queued(job) },
+        libraryProgress: progressFor(job.baseId, job.id, 0),
         error: null,
       }));
       const epoch = lifetime;
@@ -304,6 +364,11 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
           );
           // A status read started before this commit cannot verify the new index.
           if (epoch === lifetime) refreshVersion++;
+          const phase = get().tasks[job.id]?.phase;
+          if (sent && epoch === lifetime && jobs.get(job.id) === job && phase !== 'cancelled' && phase !== 'failed') {
+            const progress = progressFor(job.baseId, job.id, 1);
+            if (progress !== get().libraryProgress) set({ libraryProgress: progress });
+          }
           attempts.delete(job.id);
           return !!sent;
         } finally {
@@ -317,13 +382,14 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
         if (attempts.size > 256) attempts.delete(attempts.keys().next().value!);
         if (jobs.get(job.id) === job)
           set((s) => ({
+            libraryProgress: progressFor(job.baseId, job.id, 0),
             tasks: {
               ...s.tasks,
               [job.id]: { ...queued(job), phase: cancelled ? 'cancelled' : 'failed', error: message(e) },
             },
           }));
       }
-      async function complete() {
+      async function complete(refresh = true) {
         if (jobs.get(job.id) === job) {
           jobs.delete(job.id);
           set((s) => {
@@ -331,10 +397,10 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
               tasks = { ...s.tasks };
             delete requests[job.id];
             if (tasks[job.id]?.phase === 'queued') delete tasks[job.id];
-            return { requests, tasks };
+            return { requests, tasks, libraryProgress: finishProgress(job.baseId) };
           });
         }
-        if (epoch === lifetime && !jobs.size) await get().refresh();
+        if (refresh && epoch === lifetime && !jobs.size) await get().refresh();
         resolve();
       }
       pump();
@@ -344,19 +410,21 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
       if (!hasKnowledgeEngine() || !componentReady('rag')) return Promise.resolve();
       const key = baseId ?? '*';
       if (scans.has(key)) return scans.get(key)!;
+      const epoch = lifetime;
       if (baseId && scans.has('*')) {
         const follow = scans.get('*')!.then(() => {
+          if (epoch !== lifetime) return;
           if (scans.get(key) === follow) scans.delete(key);
           return get().reconcile(baseId, errorEpoch);
         });
         scans.set(key, follow);
         return follow;
       }
-      const epoch = lifetime;
       const scan = (async () => {
         const documents = baseId
           ? await localKnowledge.listDocuments(baseId)
           : (await syncKnowledgeSnapshot()).documents;
+        if (epoch !== lifetime) return;
         const groups = new Map<string, LocalDocument[]>();
         const deleting = new Set(pendingBaseRemovals());
         for (const doc of documents) {
@@ -365,29 +433,26 @@ export const useKnowledgeIndex = create<IndexState>((set, get) => {
           group.push(doc);
           groups.set(doc.baseId, group);
         }
+        let indexed: Map<string, string> | undefined;
         for (const group of groups.values()) {
           if (epoch !== lifetime) return;
-          // Other imports can finish during the IndexedDB read or a previous group.
-          await get().refresh();
-          if (epoch !== lifetime) return;
-          const state = get().state;
-          if (!state?.modelReady || state.error || get().error || get().deletingDocumentIds ||
-              state.documents.some(doc => doc.indexVersion !== KNOWLEDGE_INDEX_VERSION)) return;
-          const indexed = new Map(
-            state.documents
-              .filter((doc) => doc.available !== false)
-              .map((doc) => [doc.documentId, doc]),
-          );
-          await Promise.all(
-            group
-              .filter(
-                (doc) =>
-                  indexed.get(doc.id)?.baseId !== doc.baseId &&
-                  !processing(get().tasks[doc.id]) &&
-                  !get().requests[doc.id],
-              )
-              .map(doc => get().index(doc)),
-          );
+          if (!indexed) {
+            // Recheck after asynchronous reads or writes; settled groups share this snapshot.
+            await get().refresh();
+            if (epoch !== lifetime) return;
+            const state = get().state;
+            if (!state?.modelReady || state.error || get().error || get().deletingDocumentIds ||
+                state.documents.some(doc => doc.indexVersion !== KNOWLEDGE_INDEX_VERSION)) return;
+            indexed = new Map(state.documents.filter(doc => doc.available !== false)
+              .map(doc => [doc.documentId, doc.baseId]));
+          }
+          const catalog = indexed;
+          const missing = group.filter(doc => catalog.get(doc.id) !== doc.baseId &&
+            !processing(get().tasks[doc.id]) && !get().requests[doc.id]);
+          if (missing.length) {
+            await get().indexSelection(missing);
+            indexed = undefined;
+          }
         }
         if (!baseId && !groups.size) await get().refresh();
       })()

@@ -76,6 +76,25 @@ it('uses the existing two step confirmation control for disconnecting', () => {
   expect(html).not.toContain('删除');
 });
 
+it('offers listener shutdown in settings, during pairing and approval, and throughout reconnect', () => {
+  const settings = () => renderToStaticMarkup(<RemoteConnectionSettings />);
+  const dialogs = () => renderToStaticMarkup(<RemoteConnectionDialogs />);
+  expect(settings()).not.toContain('关闭设备连接');
+  for (const status of ['waiting', 'reconnecting'] as const) {
+    useRemoteConnection.setState({ state: state({ status }), dialogOpen: true });
+    expect(settings()).toContain('关闭设备连接');
+    expect(dialogs()).toContain('关闭设备连接');
+  }
+  useRemoteConnection.setState({
+    state: state({ status: 'waiting', pending: { id: 'temporary', name: 'Device', code: '123456' } }),
+  });
+  expect(dialogs()).toContain('关闭设备连接');
+  expect(dialogs()).toContain('拒绝');
+  useRemoteConnection.setState({ state: state({ status: 'connected' }) });
+  expect(settings()).not.toContain('关闭设备连接');
+  expect(settings()).toContain('确认断开连接');
+});
+
 it('renders pairing locally with a selectable URL and a guide, without external image requests', () => {
   const url = 'http://192.168.1.2:41000/#pair=synthetic-pairing';
   useRemoteConnection.setState({

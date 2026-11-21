@@ -1,0 +1,37 @@
+/* Emit files for the mobile entry's manifest. Its CSP permits same-origin images. */
+[data-mobile-symbol] {
+  display: inline-block;
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  vertical-align: middle;
+  background: currentColor;
+  mask: var(--sf-mask) center / contain no-repeat;
+}
+[data-mobile-symbol='more'] { --sf-mask: url('../../public/sf-symbols/Ellipsis.png?no-inline'); }
+[data-mobile-symbol='close'] { --sf-mask: url('../../public/sf-symbols/X.png?no-inline'); }
+[data-mobile-symbol='microphone'] { --sf-mask: url('../../public/sf-symbols/AudioLines.png?no-inline'); }
+[data-mobile-symbol='muted'] { --sf-mask: url('../../public/sf-symbols/MutedMicrophone.png?no-inline'); }
+[data-mobile-symbol='send'] { --sf-mask: url('../../public/sf-symbols/ArrowUp.png?no-inline'); }
+[data-mobile-symbol='stop'] { --sf-mask: url('../../public/sf-symbols/Square.png?no-inline'); }
+[data-mobile-symbol='down'] { --sf-mask: url('../../public/sf-symbols/DownArrow.png?no-inline'); width: 16px; height: 16px; }
+.mobile-spinner[data-mobile-symbol='loading'] {
+  --sf-mask: url('../../public/sf-symbols/Loader.png?no-inline');
+  border: 0;
+  border-radius: 0;
+  color: var(--accent);
+}
+[data-mobile-symbol^='radio'] { width: 13px; height: 13px; --sf-mask: url('../../public/sf-symbols/EmptyCircle.png?no-inline'); }
+[data-mobile-symbol='radio-on'] { --sf-mask: url('../../public/sf-symbols/SelectedCircle.png?no-inline'); }
+.mobile-settings .mobile-setting-row { position: relative; }
+.mobile-settings .mobile-setting-row select { appearance: none; padding-inline-end: 32px; }
+.mobile-settings .mobile-setting-row::after {
+  content: '';
+  position: absolute;
+  inset-inline-end: 12px;
+  width: 14px;
+  height: 14px;
+  pointer-events: none;
+  background: currentColor;
+  mask: url('../../public/sf-symbols/ChevronDown.png?no-inline') center / contain no-repeat;
+}

@@ -5,6 +5,8 @@ export const REMOTE_SNAPSHOT_MAX_BYTES = 1024 * 1024;
 
 export interface RemoteConnectionState {
   presentationOwner?: 'main' | 'interview';
+  /** Identifies the approval shown on the desktop; stable across same-device reconnects. */
+  approvalRevision?: number;
   status: 'off' | 'waiting' | 'connected' | 'reconnecting' | 'error';
   revision: number;
   addresses: string[];

@@ -5,9 +5,9 @@ import path from 'node:path';
 // System permission prompts follow macOS's language, independently of the UI preference.
 export const englishUsageDescriptions = {
   NSMicrophoneUsageDescription:
-    'VoxCue transcribes microphone audio locally when you start voice input or an interview. Audio is not saved or uploaded.',
+    'VoxCue transcribes microphone audio locally when you start voice input or an interview. Audio is saved on this Mac only when interview recording is enabled and is never uploaded.',
   NSAudioCaptureUsageDescription:
-    'VoxCue transcribes system audio locally when you start an interview. Audio is not saved or uploaded.',
+    'VoxCue transcribes system audio locally when you start an interview. Audio is saved on this Mac only when interview recording is enabled and is never uploaded.',
   NSScreenCaptureUsageDescription:
     'VoxCue captures the current screen only when you click Screenshot. The image is held temporarily and used for an answer only after you click Send. VoxCue does not continuously record your screen.',
 };

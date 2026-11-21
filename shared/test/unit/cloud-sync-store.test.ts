@@ -167,6 +167,9 @@ it('logout cancels its active sync generation before clearing the account and do
   const disconnect = useCloudSync.getState().connect(userId);
   try {
     await vi.waitFor(() => expect(release).toBeTypeOf('function'));
+    expect(useCloudSync.getState().submitResolutions('another-account', [
+      { key: 'profile:main', side: 'cloud', version: 'old-choice' },
+    ])).toBe(false);
     expect((await useCloudAccount.getState().call({ action: 'logout' })).ok).toBe(true);
     expect(cloudAccount).toHaveBeenCalledTimes(1);
     expect(useCloudSync.getState().busy).toBe(false);
@@ -178,8 +181,9 @@ it('logout cancels its active sync generation before clearing the account and do
   }
 });
 
-for (const fails of [false, true])
-  it(`cloud originals automatically enter the index queue; index ${fails ? 'failure preserves downloads' : 'work does not block downloads'}`, async () => {
+it.each([
+  { fails: false, count: 2 }, { fails: true, count: 2 }, { fails: false, count: 100 },
+])('restores and indexes $count cloud documents, preserving every original on indexing failure=$fails', async ({ fails, count }) => {
     const userId = '11111111-1111-4111-8111-111111111111';
     const values = new Map([['voxcue-sync-owner', userId]]);
     vi.stubGlobal('indexedDB', new IDBFactory());
@@ -187,12 +191,13 @@ for (const fails of [false, true])
       getItem: (key: string) => values.get(key) ?? null,
       setItem: (key: string, value: string) => values.set(key, value),
     });
+    const names = Array.from({ length: count }, (_, i) => 'doc-' + String(i).padStart(3, '0'));
     const blobs = new Map([
       [
         'base:base',
         packCloudItem('base:base', JSON.stringify({ id: 'base', name: 'Synthetic', createdAt: 1 })),
       ],
-      ...['one', 'two'].map(
+      ...names.map(
         (id) =>
           [
             'file:' + id,
@@ -248,15 +253,20 @@ for (const fails of [false, true])
       }
       return { ok: true, value: { documents: [], tasks: [], modelReady: true } };
     });
+    // On the large restore the indexer is faster than the network. Each original
+    // crosses an event-loop turn before the next one can enter the queue.
+    if (count === 100) release();
     const counts = { profile: 0, history: 0, knowledgebase: 0 };
     const cloudSync = vi.fn(async (call: CloudSyncCall) => {
       if (call.action === 'cancel') return { ok: true, value: { cancelled: true } };
-      if (call.action === 'list')
+      if (call.action === 'list') {
+        const offset = call.cursor ? remote.findIndex(entry => entry.id === call.cursor) + 1 : 0;
+        const page = remote.slice(offset, offset + 50);
         return {
           ok: true,
           value: {
-            items: remote,
-            nextCursor: null,
+            items: page,
+            nextCursor: offset + page.length < remote.length ? page.at(-1)!.id : null,
             storage: {
               currentBytes: counts,
               reservedBytes: counts,
@@ -266,6 +276,7 @@ for (const fails of [false, true])
             },
           },
         };
+      }
       const item = remote.find((resource) => resource.id === call.id)!;
       const blob = blobs.get(item.name)!;
       if (call.action === 'manifest')
@@ -278,8 +289,10 @@ for (const fails of [false, true])
             parts: [{ index: 0, bytes: blob.size, sha256: item.sha256 }],
           },
         };
-      if (call.action === 'read')
+      if (call.action === 'read') {
+        if (count === 100) await new Promise(resolve => setTimeout(resolve, 1));
         return { ok: true, value: new Uint8Array(await blob.arrayBuffer()) };
+      }
       throw Error('Unexpected cloud write: ' + call.action);
     });
     vi.stubGlobal(
@@ -308,18 +321,21 @@ for (const fails of [false, true])
       await vi.waitFor(() => {
         expect(useCloudSync.getState().marks['base:base']?.status).toBe('synced');
         expect(useCloudSync.getState().busy).toBe(false);
-        expect(knowledge.mock.calls.filter(([call]) => call.op === 'import')).toHaveLength(1);
-        expect(Object.keys(useKnowledgeIndex.getState().requests)).toHaveLength(3);
-      });
-      expect(Object.keys(useKnowledgeIndex.getState().requests).sort()).toEqual([
-        'one',
-        'resume',
-        'two',
-      ]);
+        if (count === 2) {
+          expect(knowledge.mock.calls.filter(([call]) => call.op === 'import')).toHaveLength(1);
+          expect(Object.keys(useKnowledgeIndex.getState().requests).sort()).toEqual([...names, 'resume']);
+        }
+      }, { timeout: 5000 });
       release();
-      await vi.waitFor(() => expect(useKnowledgeIndex.getState().requests).toEqual({}));
-      expect(knowledge.mock.calls.filter(([call]) => call.op === 'import')).toHaveLength(3);
-      expect((await localKnowledge.listDocuments('base')).length).toBe(2);
+      await vi.waitFor(() => expect(useKnowledgeIndex.getState().requests).toEqual({}), { timeout: 5000 });
+      expect(knowledge.mock.calls.filter(([call]) => call.op === 'import')).toHaveLength(count + 1);
+      const batches = knowledge.mock.calls.map(([call]) => call).filter(call => call.op === 'begin-index-batch');
+      expect(batches).toHaveLength(Math.ceil(count / 20));
+      expect(batches.every(call => call.baseId === 'base' && call.documentIds.length <= 20)).toBe(true);
+      expect(batches.flatMap(call => call.documentIds).sort()).toEqual(names);
+      if (!fails) expect(knowledge.mock.calls.map(([call]) => call)
+        .filter(call => call.op === 'finish-index-batch' && call.commit)).toHaveLength(batches.length);
+      expect((await localKnowledge.listDocuments('base')).length).toBe(count);
       expect(useCloudSync.getState().marks['base:base'].status).toBe('synced');
       if (fails) {
         await useKnowledgeIndex.getState().reconcile('base');

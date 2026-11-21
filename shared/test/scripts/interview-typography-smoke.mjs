@@ -1,4 +1,6 @@
+import { assertSystemSymbol } from './assert-system-symbol.mjs';
 import { connectUiAccount, waitForRestoredMainWindow } from './install-ui-account.mjs';
+import { assertPlainProviderLogo } from './assert-provider-logo.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { installUiAccount, closeUiApp, focusUiWindow } from './install-ui-account.mjs';
@@ -202,7 +204,7 @@ try {
   await login.reload();
   const checkBrandImage = async (target, selector) => {
     const image = target.locator(selector).first();
-    await image.evaluate(async (image) => image.decode());
+    await assertPlainProviderLogo(image);
     assert.equal(
       await image.evaluate((image) => image.naturalWidth > 0 && image.naturalHeight > 0),
       true,
@@ -228,6 +230,9 @@ try {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
   await openSettings();
   const settings = page.getByRole('region', { name: '面试界面', exact: true });
+  const previewProtection = settings.getByRole('img', { name: '截图保护已开启', exact: true });
+  await previewProtection.waitFor();
+  if (process.platform === 'darwin') await assertSystemSymbol(previewProtection, 'EyeOff', 'eye.slash', 20);
   const background = settings.getByRole('region', { name: '预览背景，可上下滚动', exact: true });
   await background.scrollIntoViewIfNeeded();
   const hint = await background.evaluate(async (node) => {

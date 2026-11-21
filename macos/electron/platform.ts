@@ -1,4 +1,6 @@
 import type { DesktopPlatform } from '../../shared/electron/platform/types';
+import { controlApiKey, promptApiKey } from './apiKeyPrompt';
+import { createRemoteTls } from './remoteTls';
 import { accountFetch } from './accountNetwork';
 import { codexLoginStatus } from './codexLoginStatus';
 
@@ -6,6 +8,9 @@ import { codexLoginStatus } from './codexLoginStatus';
 export const macos: DesktopPlatform = {
   id: 'darwin',
   accountFetch,
+  createRemoteTls,
+  controlApiKey,
+  promptApiKey,
   codexLoginStatus,
   qwenRuntimeFile: 'qwen/voxcue-qwen',
   updateDriverFile: 'macos/electron/updates/driver.js',

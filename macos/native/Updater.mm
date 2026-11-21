@@ -14,9 +14,13 @@
 @property(nonatomic) BOOL cancelled;
 - (void)emit:(NSString *)type error:(NSError *)error;
 - (void)cancel;
+- (BOOL)blocksNewSession;
 @end
 
 @implementation VoxCueUpdater
+- (BOOL)blocksNewSession {
+  return _updater.sessionInProgress || (_committed && !_failed);
+}
 - (void)emit:(NSString *)type error:(NSError *)error {
   if (!_callback) return;
   NSDictionary *event = error ? @{ @"type": type, @"message": error.localizedDescription } : @{ @"type": type };
@@ -74,7 +78,7 @@ static napi_value begin(napi_env env, napi_callback_info info) {
   NSURL *url = [NSURL URLWithString:feed];
   NSRegularExpression *pattern = [NSRegularExpression regularExpressionWithPattern:@"^/[a-f0-9]{64}/appcast\\.xml$" options:0 error:nil];
   if (![url.scheme isEqual:@"http"] || ![url.host isEqual:@"127.0.0.1"] || !url.port || url.user || url.password || url.query || url.fragment || [pattern numberOfMatchesInString:url.path options:0 range:NSMakeRange(0, url.path.length)] != 1) return fail(env, "Invalid local update feed");
-  if (current.updater.sessionInProgress || current.committed) return fail(env, "Update already in progress");
+  if ([current blocksNewSession]) return fail(env, "Update already in progress");
   releaseCurrent();
   current = [VoxCueUpdater new]; current.feed = feed;
   napi_value resource; napi_create_string_utf8(env, "VoxCueUpdater", NAPI_AUTO_LENGTH, &resource);

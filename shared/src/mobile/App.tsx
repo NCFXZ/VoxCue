@@ -1,3 +1,4 @@
+import { MobileIcon } from './MobileIcon';
 import { ContentReveal as InterviewReveal } from '../components/ui/content-reveal';
 import {
   memo, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore,
@@ -69,18 +70,6 @@ export function useMobileViewport() {
       cancelAnimationFrame(frame);
     };
   }, []);
-}
-
-function MobileIcon({ name }: { name: 'more' | 'close' | 'microphone' | 'muted' | 'send' | 'stop' }) {
-  return (
-    <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
-      {name === 'more' ? <><circle cx="5" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none" /><circle cx="19" cy="12" r="1.5" fill="currentColor" stroke="none" /></> :
-        name === 'close' ? <path d="m6 6 12 12M18 6 6 18" /> :
-          name === 'send' ? <path d="M12 19V5m-6 6 6-6 6 6" /> :
-            name === 'stop' ? <rect x="6" y="6" width="12" height="12" rx="2" fill="currentColor" stroke="none" /> :
-              <><path d="M8.5 10.5V6a3.5 3.5 0 0 1 7 0v4.5a3.5 3.5 0 0 1-7 0ZM5 10.5a7 7 0 0 0 14 0M12 17.5V21M8.5 21h7" />{name === 'muted' && <path d="m3 3 18 18" />}</>}
-    </svg>
-  );
 }
 
 const markdownPlugins = [remarkGfm, remarkMath];
@@ -251,7 +240,7 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
   const shellClass = `mobile-app theme-${preferences.theme} font-${preferences.font}`;
   const followButton = (scroll: typeof answers) => !scroll.following && (
     <button className="mobile-follow" onClick={scroll.scrollToLatest}>
-      {text(scroll.hasNew ? '有新内容' : '回到最新')}<span aria-hidden="true"> ↓</span>
+      {text(scroll.hasNew ? '有新内容' : '回到最新')}<MobileIcon name="down" />
     </button>
   );
   let sessionNotice: string | null = null;
@@ -288,7 +277,7 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
               <p className="mobile-hint">{text('无法连接时，请回到电脑刷新二维码并重新扫码。')}</p>
             ) : null}</InterviewReveal>
             {!showConnectPrompt && (
-              <p className="mobile-waiting" role="status"><span className="mobile-spinner" aria-hidden="true" />{text(statusLabels[state.status])}</p>
+              <p className="mobile-waiting" role="status"><MobileIcon name="loading" />{text(statusLabels[state.status])}</p>
             )}
             <p className="mobile-hint">{text('仅在可信的私人网络中使用。')}</p>
             <p className="mobile-hint">{text('连接网址只用于本次配对，刷新此页可能需要重新扫码。')}</p>
@@ -371,16 +360,16 @@ export function MobileApp({ connection }: { connection: MobileConnection }) {
               />
               <div className="mobile-composer-toolbar">
                 <button type="button" className="mobile-auto-answer" role="switch" aria-checked={!!snapshot?.autoAnswer} aria-busy={state.pendingAction === 'autoAnswer'} disabled={!ready || pending || !snapshot?.capabilities.setAutoAnswer} onClick={() => void connection.setAutoAnswer(!snapshot!.autoAnswer)}>
-                  <span className="mobile-toggle-dot" aria-hidden="true" />{text('自动回答')}<span>{text(state.pendingAction === 'autoAnswer' ? '确认中…' : snapshot?.autoAnswer ? '开' : '关')}</span>
+                  <MobileIcon name={snapshot?.autoAnswer ? 'radio-on' : 'radio'} />{text('自动回答')}<span>{text(state.pendingAction === 'autoAnswer' ? '确认中…' : snapshot?.autoAnswer ? '开' : '关')}</span>
                 </button>
                 <div className="mobile-composer-actions">
                   <button type="button" className="mobile-icon-button mobile-microphone" aria-label={text(snapshot?.microphoneMuted ? '打开麦克风' : '关闭麦克风')} role="switch" aria-checked={!!snapshot && !snapshot.microphoneMuted} aria-busy={state.pendingAction === 'microphone'} disabled={!ready || pending || !snapshot?.capabilities.setMicrophone} onClick={() => void connection.setMicrophoneMuted(!snapshot!.microphoneMuted)}>
-                    {state.pendingAction === 'microphone' ? <span className="mobile-spinner" aria-hidden="true" /> : <MobileIcon name={snapshot?.microphoneMuted ? 'muted' : 'microphone'} />}
+                    {state.pendingAction === 'microphone' ? <MobileIcon name="loading" /> : <MobileIcon name={snapshot?.microphoneMuted ? 'muted' : 'microphone'} />}
                   </button>
                   {snapshot?.generating ? (
-                    <button type="button" className="mobile-icon-button mobile-primary" aria-label={text(state.pendingAction === 'stopAnswer' ? '停止中…' : '停止生成')} aria-busy={state.pendingAction === 'stopAnswer'} disabled={!ready || pending || !snapshot.capabilities.stopAnswer} onClick={() => void connection.stopAnswer()}>{state.pendingAction === 'stopAnswer' ? <span className="mobile-spinner" aria-hidden="true" /> : <MobileIcon name="stop" />}</button>
+                    <button type="button" className="mobile-icon-button mobile-primary" aria-label={text(state.pendingAction === 'stopAnswer' ? '停止中…' : '停止生成')} aria-busy={state.pendingAction === 'stopAnswer'} disabled={!ready || pending || !snapshot.capabilities.stopAnswer} onClick={() => void connection.stopAnswer()}>{state.pendingAction === 'stopAnswer' ? <MobileIcon name="loading" /> : <MobileIcon name="stop" />}</button>
                   ) : (
-                    <button type="submit" className="mobile-icon-button mobile-primary" aria-label={text(state.pendingAction === 'sendQuestion' ? '发送中…' : fromTranscript ? '发送最新转录' : '发送')} aria-busy={state.pendingAction === 'sendQuestion'} disabled={!ready || pending || state.draftSyncing || draftTruncated || snapshot?.status !== 'running' || !snapshot.capabilities.sendQuestion || (!state.draft.trim() && !fromTranscript)}>{state.pendingAction === 'sendQuestion' ? <span className="mobile-spinner" aria-hidden="true" /> : <MobileIcon name="send" />}</button>
+                    <button type="submit" className="mobile-icon-button mobile-primary" aria-label={text(state.pendingAction === 'sendQuestion' ? '发送中…' : fromTranscript ? '发送最新转录' : '发送')} aria-busy={state.pendingAction === 'sendQuestion'} disabled={!ready || pending || state.draftSyncing || draftTruncated || snapshot?.status !== 'running' || !snapshot.capabilities.sendQuestion || (!state.draft.trim() && !fromTranscript)}>{state.pendingAction === 'sendQuestion' ? <MobileIcon name="loading" /> : <MobileIcon name="send" />}</button>
                   )}
                 </div>
               </div>

@@ -104,10 +104,10 @@ try {
     'Logout must reach held account port',
   );
   assert.equal(await stat(task.root).catch(() => null), null);
-  assert.equal(
-    (await main.evaluate(() => window.desktop.accountData({ action: 'begin', files: 1 }))).ok,
-    false,
-    'An account leaving cannot create another archive',
+  await assert.rejects(
+    main.evaluate(() => window.desktop.accountData({ action: 'begin', files: 1 })),
+    /Error invoking remote method 'account:data': Error: Unauthorized window/,
+    'The main-window ownership guard rejects archive IPC during logout',
   );
   const login = app.waitForEvent('window');
   await app.evaluate(() => globalThis.releaseArchiveLogout());

@@ -9,6 +9,13 @@
     />
     <link rel="icon" type="image/png" href="./voxcue.png" />
     <title>VoxCue</title>
+    <style>
+      /* Applied before the first paint and retained when React takes over. */
+      .startup-title {
+        font: 600 var(--type-title, 18px) / var(--line-body, 1.75) system-ui;
+        font-synthesis: none;
+      }
+    </style>
   </head>
   <body>
     <div id="root">
@@ -16,7 +23,8 @@
         role="status"
         aria-label="正在启动 VoxCue"
         style="
-          height: 100vh;
+          position: fixed;
+          inset: 0;
           display: flex;
           flex-direction: column;
           align-items: center;
@@ -24,12 +32,10 @@
           gap: 16px;
           background: #f5f6f7;
           color: #24282b;
-          font: 600 24px system-ui;
         "
       >
-        <img src="./voxcue.png" alt="" width="88" height="88" style="border-radius: 22px" /><strong
-          >VoxCue</strong
-        >
+        <img src="./voxcue.png" alt="" width="88" height="88" />
+        <strong class="startup-title">VoxCue</strong>
       </div>
     </div>
     <script type="module" src="/src/entry.ts"></script>

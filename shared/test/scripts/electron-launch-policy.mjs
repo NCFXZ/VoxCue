@@ -3,7 +3,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 
 export const packagedGuiIsolationMessage =
-  'Production package GUI tests require OS isolation. Owner-side Electron tests accept only a known development host with an owned entry, or a verified inert installation fixture. Use Windows Sandbox renderer CDP; test environment variables and inspector fuses are not profile isolation.';
+  'Production package GUI tests require OS isolation. Owner-side Electron tests accept only a known development host with an owned entry, or a verified inert installation fixture. Run packaged tests in the platform guest.';
 
 export const syntheticElectronHtml =
   '<!doctype html><meta charset="utf-8"><title>Isolated NSIS upgrade test</title><p>NSIS fixture</p>';
@@ -117,6 +117,6 @@ export function assertOwnerElectronLaunch(options, policy) {
     throw Error('Electron profile must belong to this temporary run');
   if (ownedEntry) ownedPath(policy.testRoot, first, fs.lstatSync(first).isDirectory());
   if (ownedProfile) ownedProfileDestination(policy.testRoot, options.env.COPILOT_TEST_USER_DATA);
-  if (!(ownedEntry || (ownedProfile && (developmentRoot || host.launcher))))
+  if (!(ownedEntry || (ownedProfile && developmentRoot)))
     throw Error('Development Electron requires this run’s owned entry/profile');
 }

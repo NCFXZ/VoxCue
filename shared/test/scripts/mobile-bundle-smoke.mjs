@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { request } from 'node:http';
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import workspace from '../../scripts/workspace.mjs';
 
 const { platformRoot, platformRequire } = workspace;
@@ -49,17 +50,42 @@ try {
   assert.equal(page.body.toString(), html);
   assert.match(page.headers['content-security-policy'], /script-src 'self'/);
   assert.match(page.headers['content-security-policy'], /style-src 'self'/);
+  assert.match(page.headers['content-security-policy'], /img-src 'self';/);
   assert.ok(page.headers['content-security-policy'].includes(origin.replace('http:', 'ws:')));
   assert.ok(!page.headers['content-security-policy'].includes('unsafe-inline'));
   assert.equal(page.headers['referrer-policy'], 'no-referrer');
   assert.equal(page.headers['cache-control'], 'no-store');
   assert.equal((await get(origin, '/', 'HEAD')).body.length, 0);
+  const nativeGlyphs = new Set();
   for (const reference of references) {
     const response = await get(origin, reference);
     assert.equal(response.status, 200, reference);
     assert.equal(response.headers['x-content-type-options'], 'nosniff');
+    if (process.platform === 'darwin' && reference.endsWith('.css')) {
+      const css = response.body.toString();
+      if (!css.includes('[data-mobile-symbol')) continue;
+      const images = [...css.matchAll(/url\(["']?([^"')]+\.png)["']?\)/g)];
+      for (const [, source] of images) {
+        const url = new URL(source, origin + reference);
+        assert.equal(url.origin, origin);
+        const image = await get(origin, url.pathname);
+        assert.equal(image.status, 200, url.pathname);
+        assert.equal(image.headers['content-type'], 'image/png');
+        const name = path.basename(url.pathname).split('-')[0];
+        const native = await readFile(path.join(platformRoot, 'public/sf-symbols', name + '.png'));
+        assert.deepEqual(image.body, native, name);
+        nativeGlyphs.add(name);
+      }
+    }
   }
-  for (const denied of ['/index.html', '/.vite/manifest.json', '/package.json', '/assets/%2e%2e/package.json'])
+  if (process.platform === 'darwin') {
+    assert.deepEqual([...nativeGlyphs].sort(), ['ArrowUp', 'AudioLines', 'ChevronDown', 'DownArrow', 'Ellipsis', 'EmptyCircle', 'Loader', 'MutedMicrophone', 'SelectedCircle', 'Square', 'X']);
+    const manifest = JSON.parse(await readFile(path.join(platformRoot, 'dist/.vite/manifest.json'), 'utf8'));
+    const person = manifest['../macos/public/sf-symbols/Person.png'];
+    assert.ok(person?.file, 'The desktop has its own bundled profile icon');
+    assert.equal((await get(origin, '/' + person.file)).status, 404);
+  }
+  for (const denied of ['/index.html', '/.vite/manifest.json', '/package.json', '/assets/%2e%2e/package.json', '/sf-symbols/Person.png'])
     assert.equal((await get(origin, denied)).status, 404, denied);
   assert.equal((await get(origin, '/', 'GET', { Origin: 'https://example.invalid' })).status, 403);
   assert.equal(service.state().status, 'waiting', 'Loading the page must not bypass phone approval');

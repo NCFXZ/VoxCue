@@ -20,6 +20,14 @@ export function knowledgeStatusLabel(status: KnowledgeStatus): string {
   return `索引中 ${percent}%`;
 }
 
+// Parsing has no counter. By the write phase all the file's embeddings are prepared,
+// even though the separate disk commit can still fail or be cancelled.
+export function documentIndexFraction(status: KnowledgeStatus): number {
+  if (status.phase === 'ready' || status.phase === 'indexing') return 1;
+  if (status.phase !== 'embedding' || status.total <= 0) return 0;
+  return Math.min(1, Math.max(0, status.completed / status.total));
+}
+
 export function documentIndexLabel(doc?: Pick<KnowledgeDocument, 'indexVersion' | 'available'>, task?: KnowledgeStatus,
   { requestId, deleting = false, hasSnapshot = true }: { requestId?: string; deleting?: boolean; hasSnapshot?: boolean } = {}) {
   if (deleting) return '正在删除旧索引…';

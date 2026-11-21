@@ -63,6 +63,19 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it('previews record conflicts from the target directory and reads only the selected matching body', async () => {
+  await historyRepository.save({ ...sourceRecord, title: 'Local title' });
+  await historyRepository.save({ ...sourceRecord, id: 'unrelated' });
+  vi.spyOn(historyRepository, 'list').mockRejectedValue(Error('Unexpected full history read'));
+  const bodies = vi.spyOn(historyRepository, 'get');
+  const payload: ImportPayload = { type: 'record', record: sourceRecord, images: [] };
+  const plan = await buildImportPlan([payload], guard);
+  expect(plan.entries[0].conflict).toBe(true);
+  expect(bodies).not.toHaveBeenCalled();
+  await prepareImportWrites(plan, ['record:interview'], guard);
+  expect(bodies.mock.calls.map(([id]) => id)).toEqual(['interview']);
+});
+
 it.each([false, true])('迁移覆盖记录时只在目标历史成功提交后清理原截图，写入中止=%s', async (abort) => {
   const id = '00000000-0000-4000-8000-000000000123';
   const previous = { ...sourceRecord, answers: [{ id: 'a', question: '', content: '', images: [{ id }] }] };

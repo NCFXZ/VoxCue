@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
 import { validateDocxArchive } from '../../electron/backend/knowledge/docxArchive';
@@ -21,10 +22,11 @@ const directory = (bytes: Buffer) => bytes.readUInt32LE(bytes.length - 6);
 
 describe('DOCX ZIP 实际解压限额', () => {
   it('普通 Word 文档继续由 Mammoth 提取，原字节不变', async () => {
-    const bytes: Buffer = await fixtures.docx();
+    const title = `装运单 ${randomUUID()}`;
+    const bytes: Buffer = await fixtures.docx([title]);
     const before = Buffer.from(bytes);
     validateDocxArchive(bytes);
-    expect((await parseDocument(input(bytes))).text).toContain('中文 DOCX sensor feedback.');
+    expect((await parseDocument(input(bytes))).text).toContain(title);
     expect(bytes).toEqual(before);
   });
 

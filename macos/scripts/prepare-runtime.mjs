@@ -58,9 +58,9 @@ export async function prepareRuntime() {
         CFBundleDisplayName: 'VoxCue',
         CFBundleIconFile: 'voxcue.icns',
         NSMicrophoneUsageDescription:
-          'VoxCue 在你开始语音输入或面试后在本机转写麦克风，不保存或上传音频。',
+          'VoxCue 在你开始语音输入或面试后在本机转写麦克风，仅在你启用面试录音时将音频保存在本机，不上传音频。',
         NSAudioCaptureUsageDescription:
-          'VoxCue 在你开始面试后在本机转写系统音频，不保存或上传音频。',
+          'VoxCue 在你开始面试后在本机转写系统音频，仅在你启用面试录音时将音频保存在本机，不上传音频。',
         NSScreenCaptureUsageDescription:
           'VoxCue 仅在你点击截图按钮时捕获当前屏幕，图像暂存，点击发送后才用于回答，不持续录屏。',
       })) {

@@ -20,7 +20,7 @@ import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { Modal } from './ui/modal';
 import { useKnowledge } from '../stores/knowledge';
 import { documentAccept } from '../services/knowledge';
-import { documentIndexLabel, knowledgeStatusLabel } from '../services/knowledgeIndex';
+import { documentIndexLabel } from '../services/knowledgeIndex';
 import { useComponentReady } from '../stores/components';
 import { ComponentsNotice } from './ComponentsNotice';
 import type { OpenComponentSettings } from '../services/componentSettingsTargets';
@@ -31,8 +31,8 @@ export function KnowledgePage({ onComponentSettings }: { onComponentSettings?: O
   useEffect(() => index.connect(), []);
   const documents = new Map(index.state?.documents.map(doc => [doc.documentId, doc]));
   const cardStatus = (baseId: string) => {
-    const task = !index.deletingDocumentIds && index.currentProgress(baseId);
-    return t(task ? knowledgeStatusLabel(task) : '本地资料');
+    const percent = index.libraryProgress[baseId];
+    return typeof percent === 'number' ? t('索引总进度 {0}%', [percent]) : t('本地资料');
   };
   const fileInput = useRef<HTMLInputElement>(null);
   const [name, setName] = useState('');

@@ -13,13 +13,53 @@ const maxSamples = Math.floor((0xffffffff - 36) / 2); // RIFF's 32-bit chunk len
 const clockTolerance = recordingRate * 0.002;
 interface RecordingInput {
   rate: number;
-  resampler?: {
-    resample(samples: Float32Array): Float32Array;
-    flush(samples: Float32Array): Float32Array;
-  };
+  resampler?: RecordingResampler;
   packetEnd: number;
   expected: number;
   next: number;
+}
+
+// The native filter uses a different floating-point kernel across call boundaries.
+// Feed it fixed 10 ms blocks so device packet sizes cannot change quantized WAV samples.
+class RecordingResampler {
+  private readonly converter: {
+    resample(samples: Float32Array): Float32Array;
+    flush(samples: Float32Array): Float32Array;
+  };
+  private readonly frame: Float32Array;
+  private used = 0;
+  constructor(rate: number) {
+    this.converter = new (require('sherpa-onnx-node').LinearResampler)(rate, recordingRate);
+    this.frame = new Float32Array(Math.max(1, Math.round(rate / 100)));
+  }
+  resample(samples: Float32Array) {
+    if (!this.used && samples.length === this.frame.length) return this.converter.resample(samples);
+    const frames: Float32Array[] = [];
+    let total = 0;
+    for (let at = 0; at < samples.length;) {
+      const count = Math.min(this.frame.length - this.used, samples.length - at);
+      this.frame.set(samples.subarray(at, at + count), this.used);
+      this.used += count;
+      at += count;
+      if (this.used === this.frame.length) {
+        const output = this.converter.resample(this.frame);
+        frames.push(output);
+        total += output.length;
+        this.used = 0;
+      }
+    }
+    if (frames.length === 1) return frames[0];
+    const result = new Float32Array(total);
+    let offset = 0;
+    for (const output of frames) {
+      result.set(output, offset);
+      offset += output.length;
+    }
+    return result;
+  }
+  flush() {
+    return this.converter.flush(this.frame.subarray(0, this.used));
+  }
 }
 
 function header(samples: number) {
@@ -39,10 +79,11 @@ function header(samples: number) {
   return buf;
 }
 
-// Runs in the speech utility. Both inputs use the ASR wall-clock anchors.
+// Packet positions and recording boundaries use the same capture clock.
 // A short mixing window absorbs independent delivery of the two endpoints.
 export class InterviewRecording {
   readonly startedAt: number;
+  readonly captureStartedAt: number;
   private currentFile: string;
   get file() { return this.currentFile; }
   readonly ready: Promise<void>;
@@ -58,9 +99,13 @@ export class InterviewRecording {
   private committed = 0;
   private through = 0;
 
-  constructor(directory: string, now = Date.now(), private readonly onFailure?: () => void) {
+  constructor(
+    directory: string, now = Date.now(), private readonly onFailure?: () => void,
+    private readonly captureClock?: () => number,
+  ) {
     this.currentFile = path.join(directory, now + '-' + randomUUID() + '.wav' + pendingRecordingSuffix);
     this.startedAt = now;
+    this.captureStartedAt = captureClock?.() ?? now;
     this.ready = this.initialize();
     this.pending = this.ready.catch(error => { this.failure = error; });
   }
@@ -112,7 +157,7 @@ export class InterviewRecording {
     this.queue(packet.byteLength, () => this.appendPacket(source, packet, rate, timestamp));
   }
   private async appendPacket(source: AudioSource, samples: Float32Array, rate: number, timestamp: number) {
-    const position = ((timestamp - this.startedAt) * recordingRate) / 1000;
+    const position = ((timestamp - this.captureStartedAt) * recordingRate) / 1000;
     let input = this.inputs.get(source);
     if (!input || input.rate !== rate || Math.abs(position - input.packetEnd) > clockTolerance) {
       await this.finishSource(source);
@@ -121,7 +166,7 @@ export class InterviewRecording {
         // The same band-limited streaming converter used by local recognition.
         // Load only in the recording process and only when conversion is needed.
         resampler: rate === recordingRate ? undefined :
-          new (require('sherpa-onnx-node').LinearResampler)(rate, recordingRate),
+          new RecordingResampler(rate),
       };
       this.inputs.set(source, input);
     }
@@ -152,7 +197,7 @@ export class InterviewRecording {
   private async finishSource(source: AudioSource) {
     const input = this.inputs.get(source);
     this.inputs.delete(source);
-    if (input?.resampler) await this.mix(source, input.resampler.flush(new Float32Array()), input.next);
+    if (input?.resampler) await this.mix(source, input.resampler.flush(), input.next);
   }
   private async mix(source: AudioSource, samples: Float32Array, start: number) {
     const end = start + samples.length;
@@ -208,7 +253,7 @@ export class InterviewRecording {
     await this.write(header(until), 0);
     this.committed = until;
   }
-  close(now = Date.now()) {
+  close(now = this.captureClock?.() ?? Date.now()) {
     return this.closing ??= this.finish(now);
   }
   private async finish(now: number) {
@@ -217,7 +262,7 @@ export class InterviewRecording {
     try {
       await this.drain();
       for (const source of this.inputs.keys()) await this.finishSource(source);
-      const elapsed = Math.max(0, Math.round(((now - this.startedAt) * recordingRate) / 1000));
+      const elapsed = Math.max(0, Math.round(((now - this.captureStartedAt) * recordingRate) / 1000));
       await this.flush(Math.min(maxSamples, Math.max(this.through, elapsed)));
       publish = true;
     } catch (error) {

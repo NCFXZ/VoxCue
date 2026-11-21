@@ -218,16 +218,43 @@ it('候选失败保持原语音状态，暂停立即取消未完成的设备切�
   });
 });
 
-async function selectModel(speechModel: 'qwen' | 'paraformer') {
+async function selectModel(speechModel: 'qwen' | 'paraformer', inferenceDevice: 'cpu' | 'metal' = 'cpu') {
   Object.assign(controller, { qwenDirectory: 'synthetic-qwen' });
   const pending = controller.call({
     op: 'switch-recognizer',
-    options: { sources: ['system', 'microphone'], speechModel, inferenceDevice: 'cpu' },
+    options: { sources: ['system', 'microphone'], speechModel, inferenceDevice },
   });
   const stage = runtime.messages.filter((m) => m.op === 'stage-recognizer').at(-1);
   runtime.workers.at(-1).emit('message', { switched: stage.id, chunkMs: 1000 });
   await pending;
 }
+it.each(['metal', 'cuda', 'cpu'] as const)('keeps an ordinary switch natural and expedites only a busy CPU-to-GPU handoff (%s)', async target => {
+  await selectModel('qwen', target === 'cpu' ? 'metal' : 'cpu');
+  const switching = controller.call({ op: 'switch-recognizer', options: {
+    sources: ['system', 'microphone'], speechModel: 'qwen', inferenceDevice: target,
+  } });
+  const fast = () => runtime.messages.filter(m => m.op === 'expedite-switch');
+  for (let i = 0; i < 119; ++i) captures.get('system')!(packet());
+  expect(fast()).toHaveLength(0);
+  for (let i = 0; i < 3; ++i) captures.get('system')!(packet());
+  expect(fast()).toHaveLength(target === 'cpu' ? 0 : 1);
+  const stage = runtime.messages.filter(m => m.op === 'stage-recognizer').at(-1);
+  runtime.workers.at(-1).emit('message', { switched: stage.id });
+  expect(await switching).toMatchObject({ state: 'running', inferenceDevice: target });
+});
+it('drops the interrupted recognition clock after a worker gap and waits for new progress', () => {
+  const capture = captures.get('system')!;
+  const audio = () => runtime.messages.filter(m => m.op === 'audio').at(-1);
+  capture(packet());
+  ack(audio(), 1500);
+  capture(packet());
+  runtime.workers.at(-1).emit('message', { event: { type: 'gap', source: 'system', message: 'gap' } });
+  ack(audio());
+  expect(last('system')).toMatchObject({ pending: false, processedThroughMs: undefined });
+  capture(packet());
+  ack(audio(), 1750);
+  expect(last('system')).toMatchObject({ pending: false, processedThroughMs: 1750 });
+});
 it.each([5, 25])('积压可在用户选择轻量模型前后出现，只请求一次快速交接 (%s)', async count => {
   await selectModel('qwen');
   for (let i = 0; i < count; i++) captures.get('system')!(packet());

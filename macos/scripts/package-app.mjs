@@ -9,6 +9,7 @@ const require = workspace.platformRequire;
 const { packager } = await import(require.resolve('@electron/packager'));
 import { signMacApp } from './sign-app.mjs';
 import { loadDevelopmentSigning } from './development-signing.mjs';
+import { prepareSilero } from './prepare-silero.mjs';
 import { buildQwen } from './build-qwen.mjs';
 import { buildVaultCredentials } from './build-vault-credentials.mjs';
 import { stageRuntimeDependencies } from './runtime-dependencies.mjs';
@@ -101,8 +102,8 @@ export async function buildMacApp(output, publicKey) {
     prune: false,
     extendInfo: {
       LSMinimumSystemVersion: '14.2',
-      NSMicrophoneUsageDescription: 'VoxCue 在本机转写麦克风，不保存或上传音频。',
-      NSAudioCaptureUsageDescription: 'VoxCue 在本机转写系统音频，不保存或上传音频。',
+      NSMicrophoneUsageDescription: 'VoxCue 在本机转写麦克风，仅在你启用面试录音时将音频保存在本机，不上传音频。',
+      NSAudioCaptureUsageDescription: 'VoxCue 在本机转写系统音频，仅在你启用面试录音时将音频保存在本机，不上传音频。',
       NSScreenCaptureUsageDescription: 'VoxCue 仅在你点击截图按钮时捕获当前屏幕，不持续录屏。',
       SUPublicEDKey: publicKey,
       SUEnableAutomaticChecks: false,
@@ -111,9 +112,9 @@ export async function buildMacApp(output, publicKey) {
       NSAppTransportSecurity: { NSAllowsLocalNetworking: true },
     },
     asar: {
-      // The utility entry runs from the physical unpacked speech directory.
-      // Its shared cancellation dependency must resolve outside ASAR too.
-      unpack: '**/dist-electron/shared/electron/backend/cancellable.js',
+      // ASAR matches file globs against absolute build paths. Match the basenames
+      // so the launcher's hidden staging directory cannot exclude these worker imports.
+      unpack: '{cancellable,atomicFile}.js',
       unpackDir:
         '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/shared/electron/backend/knowledge,dist-electron/shared/electron/backend/screenshot,dist-electron/shared/electron/contracts,dist-electron/macos/electron/speech}',
     },
@@ -254,6 +255,9 @@ export async function buildMacApp(output, publicKey) {
   const app = path.join(paths[0], 'VoxCue.app');
   const contents = path.join(app, 'Contents');
   const resources = path.join(contents, 'Resources');
+  const backend = path.join(resources, 'app.asar.unpacked/dist-electron/shared/electron/backend');
+  createRequire(path.join(backend, 'knowledge/indexBatch.js')).resolve('../atomicFile');
+  createRequire(path.join(backend, 'speech/controller.js')).resolve('../cancellable');
   await localizeUsageDescriptions(app);
   await cp(
     path.join(tools, 'Sparkle.framework'),
@@ -261,9 +265,12 @@ export async function buildMacApp(output, publicKey) {
     { recursive: true, verbatimSymlinks: true },
   );
   await mkdir(path.join(resources, 'native'), { recursive: true });
+  await prepareSilero(path.join(resources, 'native'), path.join(resources, 'licenses'));
   for (const name of [
     'VoxCue.Audio',
+    'VoxCue.AudioClock.node',
     'VoxCue.ScreenPermission.node',
+    'VoxCue.SecureInput.node',
     'VoxCue.Updater.node',
     'VoxCue',
   ])

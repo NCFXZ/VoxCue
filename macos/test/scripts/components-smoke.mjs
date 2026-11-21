@@ -360,6 +360,7 @@ try {
     );
   }
   const searches = await page.evaluate(async () => {
+    const marker = 'packing' + crypto.randomUUID().replaceAll('-', '');
     const indexed = await window.desktop.knowledge({
       op: 'import',
       requestId: 'index-probe',
@@ -367,7 +368,7 @@ try {
       baseId: 'fixture',
       name: 'fixture.md',
       bytes: new TextEncoder().encode(
-        '## Q001. PID control\n\nPID feedback controls sensor lift-off and output is limited to 2.',
+        `## Packing station\n\nThe sample named ${marker} uses a violet tray at the packing station.`,
       ),
     });
     if (!indexed.ok) throw Error(indexed.error);
@@ -376,13 +377,13 @@ try {
       const result = await window.desktop.knowledge({
         op: 'search',
         requestId: 'search-' + mode,
-        query: 'PID sensor control',
+        query: marker + ' packing station',
         topK: 3,
         mode,
         baseId: 'fixture',
       });
       if (!result.ok || !Array.isArray(result.value)) throw Error('Synthetic RAG search failed');
-      counts.push(result.value.length);
+      counts.push(result.value.filter(hit => hit.documentId === 'fixture').length);
     }
     return counts;
   });

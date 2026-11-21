@@ -11,7 +11,7 @@ import type {
   SourceRemovalResult,
 } from '../contracts/accountData';
 import { validImagePreview } from '../contracts/interviewImages';
-import { validImportDocument } from '../contracts/accountData';
+import { validImportDocument, validImportEnvelopeSize, validImportItemSize, validImportRecordTitle, withinImportItemLimit } from '../contracts/accountData';
 import { recordingRecordId } from '../contracts/recordings';
 import { normalizeCloudPassword, validLocalImportRevision } from '../contracts/cloudAccount';
 import {
@@ -34,6 +34,7 @@ type Rollback = () => Promise<void>;
 export interface ProfileImportReader {
   items: AccountImportItem[];
   imageSize?(key: string): Promise<number>;
+  recordSize?(key: string): Promise<number>;
   itemDigest?(key: string): Promise<string>;
   read(key: string, offset: number): Promise<Uint8Array>;
   planRemoval(keys: string[]): Promise<SourceRemovalPlan>;
@@ -50,15 +51,22 @@ type Active = {
   readerController?: AbortController;
   timer: ReturnType<typeof setTimeout>;
   items: Map<string, AccountImportItem>;
+  totalBytes: number;
   images: Map<string, Rollback>;
   movedImages: MovedImage[];
   undoRecordings?: Rollback & { copied: MovedClip[] };
   removal?: SourceRemovalPlan;
+  recovered?: { localRevision: string | null };
   preparing?: boolean;
   committing?: boolean;
 };
 const invalid = () => Error('迁移已取消或账号已变化。');
 const badData = () => Error('来源账号的本机资料无效或不完整。');
+const sourceChanged = (error: unknown) =>
+  error instanceof Error && error.message === '来源资料已改变，请重新选择。';
+const cleanupFailure = (error: unknown) => sourceChanged(error)
+  ? error
+  : Error('目标资料已保存，来源资料清理未完成。请重新选择此来源后重试。');
 const allowedFields = {
   listImportSources: [],
   openImport: ['sourceId'],
@@ -103,7 +111,10 @@ function validRequest(call: AccountImportCall) {
       return validRestoreKey(call.key) && (call.key === 'resume:main' || /^(file|record):/.test(call.key));
     case 'prepareImportCommit':
       return (
-        uniqueIds(call.keys, validMoveKey) &&
+        Array.isArray(call.keys) &&
+        withinImportItemLimit(call.keys, key => key) &&
+        Array.from(call.keys).every(validMoveKey) &&
+        new Set(call.keys).size === call.keys.length &&
         call.keys.length > 0 &&
         uniqueIds(
           call.recordIds,
@@ -125,13 +136,11 @@ function validateItems(items: AccountImportItem[]) {
       !validRestoreKey(item.key) ||
       manifest.has(item.key) ||
       (item.document !== undefined && (!validImportDocument(item.key, item.document) || item.document.size >= item.size)) ||
-      (item.recordTitle !== undefined && (!item.key.startsWith('record:') ||
-        typeof item.recordTitle !== 'string' || item.recordTitle.length > 80 || /[\u0000-\u001f\u007f]/.test(item.recordTitle))) ||
+      ((item.recordTitle !== undefined || item.recordLibraryName !== undefined) &&
+        !validImportRecordTitle(item.key, item.recordTitle, item.recordLibraryName)) ||
       (item.imageIds !== undefined &&
         (!item.key.startsWith('record:') || !uniqueIds(item.imageIds, id => typeof id === 'string' && validRestoreKey('image:' + id)))) ||
-      !Number.isSafeInteger(item.size) ||
-      (item.size < 8 && !(item.key.startsWith('image:') && item.size === 0)) ||
-      item.size > 64 * 1024 ** 2 ||
+      !validImportItemSize(item.key, item.size, item.recordTitle, item.recordLibraryName) ||
       (total += item.size) > restoreLimit
     )
       throw badData();
@@ -140,7 +149,7 @@ function validateItems(items: AccountImportItem[]) {
   for (const item of manifest.values())
     if (item.imageIds?.some(id => !manifest.has('image:' + id) ||
       (!recordingRecordId(id) && manifest.get('image:' + id)!.size !== 0))) throw badData();
-  return manifest;
+  return { manifest, total };
 }
 export class AccountImport {
   private active?: Active;
@@ -258,7 +267,11 @@ export class AccountImport {
     };
     if (call.action === 'listImportSources' || call.action === 'openImport') {
       if (this.active) throw Error('已有资料正在迁移。');
-      const sources = await this.ports.sources(target);
+      let sources = await this.ports.sources(target);
+      // Clearing the last local revision may succeed before the receipt is retired.
+      if (isCloudProfileOwner(target) && !sources.some(s => s.id === 'local') &&
+          await this.ports.receipts.read(target, 'local'))
+        sources = [{ id: 'local' }, ...sources];
       guard();
       if (call.action === 'listImportSources') return { ok: true, sources };
       const source = sources.find((item) => item.id === call.sourceId && item.id !== target);
@@ -270,6 +283,7 @@ export class AccountImport {
         source,
         token,
         items: new Map(),
+        totalBytes: 0,
         images: new Map(),
         movedImages: [],
         timer: setTimeout(() => void this.cancel().catch(() => {}), 15 * 60_000).unref(),
@@ -309,8 +323,7 @@ export class AccountImport {
           ...(result.localRevision ? { localRevision: result.localRevision } : {}),
         };
       } catch (error) {
-        if (error instanceof Error && error.message === '来源资料已改变，请重新选择。') throw error;
-        throw Error('目标资料已保存，来源资料清理未完成。请重新选择此来源后重试。');
+        throw cleanupFailure(error);
       } finally {
         // A positive acknowledgement confirms the destination transaction, even if cleanup failed.
         await this.close(true);
@@ -323,29 +336,43 @@ export class AccountImport {
         guard();
         a.readerController = new AbortController();
         const readerSignal = AbortSignal.any([signal, a.readerController.signal]);
-        let reader = await this.ports.open(a.source.id, readerSignal);
+        const receipt = await this.ports.receipts.read(target, a.source.id);
+        guard();
+        let reader: ProfileImportReader | undefined;
         try {
-          guard();
-          const receipt = await this.ports.receipts.read(target, a.source.id);
+          reader = await this.ports.open(a.source.id, readerSignal);
           guard();
           if (receipt) {
-            await this.finishMove(receipt, reader, signal);
+            const { localRevision } = await this.finishMove(receipt, reader, signal);
+            a.recovered = { localRevision };
             await reader.close();
+            reader = undefined;
             guard();
             reader = await this.ports.open(a.source.id, readerSignal);
             guard();
           }
-          a.items = validateItems(reader.items);
+          const { manifest, total } = validateItems(reader.items);
+          a.items = manifest;
+          a.totalBytes = total;
           a.reader = reader;
         } catch (e) {
-          await reader.close();
+          await reader?.close();
+          if (receipt && !a.recovered) throw cleanupFailure(e);
           throw e;
         }
       }
-      return { ok: true, items: [...a.items.values()] };
+      return { ok: true, items: [...a.items.values()],
+        ...(a.recovered && { recoveredMove: true, ...(a.recovered.localRevision && { localRevision: a.recovered.localRevision }) }) };
     }
     const reader = a.reader;
     if (!reader) throw invalid();
+    const resolveRecordSize = async (item: AccountImportItem) => {
+      const size = await reader.recordSize?.(item.key);
+      guard();
+      if (!validImportEnvelopeSize(size) || a.totalBytes + size > restoreLimit) throw badData();
+      a.totalBytes += size;
+      a.items.set(item.key, { ...item, size });
+    };
     const read = async (key: string, offset: number) => {
       const item = a.items.get(key);
       if (!item || !Number.isSafeInteger(offset) || offset < 0 || offset >= item.size)
@@ -360,7 +387,13 @@ export class AccountImport {
         throw badData();
       return bytes;
     };
-    if (call.action === 'readImport') return { ok: true, bytes: await read(call.key, call.offset) };
+    if (call.action === 'readImport') {
+      const item = a.items.get(call.key);
+      if (call.offset === 0 && item?.size === 0 && item.recordTitle !== undefined)
+        await resolveRecordSize(item);
+      const bytes = await read(call.key, call.offset);
+      return { ok: true, bytes, ...(call.offset === 0 && { size: a.items.get(call.key)!.size }) };
+    }
     if (call.action === 'digestImportItem') {
       const item = a.items.get(call.key);
       if (!item || (!item.document && item.recordTitle === undefined) || !reader.itemDigest) throw badData();
@@ -382,6 +415,7 @@ export class AccountImport {
     for (const id of call.recordIds) {
       const record = a.items.get('record:' + id);
       if (!record) throw badData();
+      if (record.size === 0) await resolveRecordSize(record);
       for (const image of record.imageIds ?? []) images.add(image);
     }
     if (images.size !== call.imageIds.length || call.imageIds.some((id) => !images.has(id)))
@@ -406,15 +440,15 @@ export class AccountImport {
         throw badData();
     }
     a.removal = plan;
-    let total = [...a.items.values()].reduce((sum, row) => sum + row.size, 0);
     for (const id of images) {
       guard();
       const key = 'image:' + id, item = a.items.get(key)!;
       if (item.size === 0) {
         const size = await reader.imageSize?.(key);
         if (size === undefined || !Number.isSafeInteger(size) || size < 8 ||
-            size > 8 * 1024 ** 2 + 132 * 1024 + 8 || (total += size) > restoreLimit) throw badData();
+            size > 8 * 1024 ** 2 + 132 * 1024 + 8 || a.totalBytes + size > restoreLimit) throw badData();
         guard();
+        a.totalBytes += size;
         a.items.set(key, { ...item, size });
       }
       await this.restoreImage(a, id, read, guard);
@@ -439,7 +473,7 @@ export class AccountImport {
       removed = await reader.removeSelected(receipt.plan);
     } catch (error) {
       // The source renderer checks all selected content before deleting anything.
-      if (error instanceof Error && error.message === '来源资料已改变，请重新选择。')
+      if (sourceChanged(error))
         await this.ports.receipts.clear(receipt.target, receipt.source);
       throw error;
     }

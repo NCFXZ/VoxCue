@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBObjectStore, IDBIndex } from 'fake-indexeddb';
-import { historyRepository } from '../../src/services/history';
+import { historyRepository, historyStorageKey } from '../../src/services/history';
+import { buildImportPlan, prepareImportWrites } from '../../src/services/accountImportPlan';
 import {
   applyCloudItem,
   CloudDataConflict,
@@ -9,7 +10,9 @@ import {
   digestCloudBlob,
   localCloudItem,
   localCloudItems,
+  removeLocalSyncItem,
   packCloudItem,
+  unpackCloudItem,
 } from '../../src/services/cloudData';
 import {
   localKnowledge,
@@ -33,6 +36,96 @@ describe('cloud data restoration boundary', () => {
     vi.stubGlobal('window', { dispatchEvent: () => true });
   });
   afterEach(() => vi.unstubAllGlobals());
+  it('removes only the reviewed profile and résumé, rejecting late edits and cross-library ownership', async () => {
+    values.set(profileKey, JSON.stringify({ name: 'Sample', jobDescription: '', background: '' }));
+    await localKnowledge.importDocuments('personal-resume', [new File(['CV'], 'resume.txt')]);
+    const hash = async (key: string) => digestCloudBlob(await (await localCloudItem('profile', key))!.blob());
+    const resume = await hash('resume:main');
+    const profile = await hash('profile:main');
+    await expect(removeLocalSyncItem('resume:main', resume, () => {}, 'base:other')).rejects.toThrow(CloudDataConflict);
+    await expect(removeLocalSyncItem('profile:main', profile, () => {
+      values.set(profileKey, JSON.stringify({ name: 'Newer', jobDescription: '', background: '' }));
+    }, 'profile:main')).rejects.toThrow(CloudDataConflict);
+    await removeLocalSyncItem('resume:main', resume, () => {}, 'profile:main');
+    expect(await localKnowledge.listDocuments('personal-resume')).toHaveLength(0);
+    expect(JSON.parse(values.get(profileKey)!)).toHaveProperty('name', 'Newer');
+    await removeLocalSyncItem('profile:main', await hash('profile:main'), () => {}, 'profile:main');
+    expect(values.has(profileKey)).toBe(false);
+  });
+
+  it('replaces a manual interview title only on explicit version selection and keeps a shared screenshot intact', async () => {
+    const shot = crypto.randomUUID();
+    const record = { id: 'first', title: 'Local title', titleSource: 'manual' as const,
+      startedAt: 1, endedAt: 2, status: 'ended' as const, mock: false, transcripts: [],
+      answers: [{ id: 'a', question: 'Q', content: 'A', images: [{ id: shot }] }] };
+    await historyRepository.save(record);
+    await historyRepository.save({ ...record, id: 'second' });
+    const key = 'record:first';
+    const hash = await digestCloudBlob(await (await localCloudItem('history', key))!.blob());
+    const incoming = packCloudItem(key, JSON.stringify({ ...record, title: 'Cloud title', answers: [] }));
+    const imageHash = 'a'.repeat(64);
+    const restoreImage = vi.fn();
+    vi.stubGlobal('window', { dispatchEvent: () => true, desktop: {
+      interviewImage: async () => ({ ok: true, hash: imageHash }), cloudSync: restoreImage,
+    } });
+    const imageKey = 'image:' + shot;
+    const cloudImage = packCloudItem(imageKey, 'bytes', { id: shot, preview: 'data:image/png;base64,AAAA' });
+    await expect(applyCloudItem(imageKey, cloudImage, imageHash, 'test', () => {}, undefined, key))
+      .rejects.toThrow(CloudDataConflict);
+    expect(restoreImage).not.toHaveBeenCalled();
+    restoreImage.mockResolvedValue({ ok: true });
+    await applyCloudItem(imageKey, cloudImage, imageHash, 'test', () => {}, undefined, key, [key, 'record:second']);
+    expect(restoreImage).toHaveBeenCalledOnce();
+    await historyRepository.save({ ...record, id: 'late' });
+    await expect(applyCloudItem(imageKey, cloudImage, imageHash, 'test', () => {}, undefined, key, [key, 'record:second']))
+      .rejects.toThrow(CloudDataConflict);
+    expect(restoreImage).toHaveBeenCalledOnce();
+    await applyCloudItem(key, incoming, hash, 'test', () => {}, undefined, key);
+    expect(await historyRepository.get('first')).toMatchObject({ title: 'Cloud title', answers: [] });
+    const remaining = await historyRepository.get('second');
+    expect(remaining).toEqual({ ...record, id: 'second' });
+    await expect(removeLocalSyncItem(imageKey, imageHash, () => {}, key)).rejects.toThrow(CloudDataConflict);
+    await expect(removeLocalSyncItem(key, hash, () => {}, key)).rejects.toThrow(CloudDataConflict);
+    await removeLocalSyncItem(key, await digestCloudBlob(incoming), () => {}, key);
+    expect(await historyRepository.get('first')).toBeUndefined();
+    expect(await historyRepository.get('second')).toEqual(remaining);
+  });
+
+  it('omits legacy local modification metadata from document sync hashes', async () => {
+    const metadata = { id: 'legacy', baseId: 'books', name: 'Book.txt', size: 1, type: 'text/plain', createdAt: 1 };
+    const [source] = await localCloudItems('knowledgebase', { bases: [], documents: [
+      { ...metadata, modifiedAt: 345, localRevision: crypto.randomUUID(), blob: new Blob(['x']) },
+    ] });
+    expect((await unpackCloudItem(source.key, await source.blob())).metadata).toEqual(metadata);
+  });
+
+  it.each([
+    ['file:migrated', 'books', 'knowledgebase'],
+    ['resume:main', 'personal-resume', 'profile'],
+  ] as const)('keeps the cloud digest of migrated %s after an IndexedDB restore', async (key, baseId, kind) => {
+    if (kind === 'knowledgebase') await localKnowledge.saveBase({ id: baseId, name: 'Books', createdAt: 1 });
+    // The account import manifest wrote type before size, unlike a local file import.
+    const metadata = { id: 'migrated', baseId, name: 'sample.txt', type: 'text/plain', size: 1, createdAt: 1 };
+    const incoming = packCloudItem(key, 'x', metadata);
+    const restored = await applyCloudItem(key, incoming);
+    expect(restored?.localRevision).toBeTruthy();
+    const local = await localCloudItem(kind, key);
+    expect(await digestCloudBlob(await local!.blob())).toBe(await digestCloudBlob(incoming));
+  });
+
+  it('writes a newly migrated original in the same wire format as a local import', async () => {
+    const document = { id: 'cv', baseId: 'personal-resume', name: 'cv.txt', type: 'text/plain', size: 1, createdAt: 1 };
+    const key = 'resume:main', blob = new Blob(['x']);
+    const plan = await buildImportPlan([{
+      type: 'original', key, document, digest: () => digestCloudBlob(blob), read: async () => blob,
+    }], () => {});
+    const writes = await prepareImportWrites(plan, [key], () => {});
+    await writes.commit();
+    const local = await localCloudItem('profile', key);
+    const { metadata } = await unpackCloudItem(key, await local!.blob());
+    expect(Object.keys(metadata)).toEqual(['id', 'baseId', 'name', 'size', 'type', 'createdAt']);
+  });
+
   it('round-trips a formerly over-limit history envelope and checks every referenced screenshot before committing', async () => {
     const ids = Array.from({ length: 513 }, () => crypto.randomUUID());
     const answers = ids.map((id, index) => ({

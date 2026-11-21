@@ -215,7 +215,12 @@ try {
   assert.equal(await input().inputValue(), '保存失败也不能丢掉的草稿');
   await send().click();
   await send().waitFor();
-  assert.deepEqual(await app.evaluate(() => globalThis.requests.at(-1).fileBytes?.[0]), [
+  assert.deepEqual(await app.evaluate(async () => {
+    const deadline = Date.now() + 5000;
+    while (!globalThis.requests.length && Date.now() < deadline)
+      await new Promise(resolve => setTimeout(resolve, 20));
+    return globalThis.requests.at(-1)?.fileBytes?.[0];
+  }), [
     ...Buffer.from('draft attachment'),
   ]);
   checks.push(
@@ -233,6 +238,32 @@ try {
     0,
   );
   assert.equal(await page.locator('.conversation-row').count(), 3);
+  if (process.platform === 'darwin') {
+    const outgoing = await app.browserWindow(page);
+    await page.evaluate(() => window.desktop.updateSessionState(true));
+    await app.evaluate(({ dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 0 });
+    });
+    assert.equal((await page.evaluate(() => window.desktop.cloudAccount({ action: 'logout' }))).ok, false);
+    assert.equal(await outgoing.evaluate((win) => win.isEnabled()), true, 'Cancelled logout permits edits');
+    await app.evaluate(({ app, BrowserWindow, dialog }) => {
+      dialog.showMessageBox = async () => ({ response: 1 });
+      const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+      const client = require('./dist-electron/shared/electron/backend/cloud/client.js').CloudAccountClient.prototype;
+      const call = client.call;
+      client.call = async function (input) {
+        if (input.action !== 'logout') return call.call(this, input);
+        client.call = call;
+        const main = BrowserWindow.getAllWindows().find(win => !win.webContents.getURL().endsWith('#login'));
+        globalThis.logoutTransportEnabled = main.isEnabled();
+        return { ok: false, state: this.snapshot(), error: 'synthetic logout failure' };
+      };
+    });
+    assert.equal((await page.evaluate(() => window.desktop.cloudAccount({ action: 'logout' }))).ok, false);
+    assert.equal(await app.evaluate(() => globalThis.logoutTransportEnabled), false, 'The saved window stays locked during logout');
+    assert.equal(await outgoing.evaluate((win) => win.isEnabled()), true, 'Failed logout restores input');
+    await input().fill('退出后按同一账号恢复的草稿');
+  }
   await app.evaluate(({ BrowserWindow }) => {
     const contents = BrowserWindow.getAllWindows().find(
       (win) => !win.webContents.getURL().includes('#login'),
@@ -262,12 +293,19 @@ try {
     }
   });
   assert.equal(page.isClosed(), false, 'Outgoing data stays available until save finishes');
+  if (process.platform === 'darwin')
+    assert.equal(await (await app.browserWindow(page)).evaluate(win => win.isEnabled()), false);
   assert.equal(await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().length), 1);
   await app.evaluate(() => globalThis.releaseLogoutSave());
   const login = await loginOpened;
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
+  assert.equal(await (await app.browserWindow(login)).evaluate(win => win.isEnabled()), true);
   page = await connectUiAccount(app, login);
   await page.locator('.conversation-row').filter({ hasText: '更新简历' }).waitFor();
+  if (process.platform === 'darwin') {
+    assert.equal(await (await app.browserWindow(page)).evaluate(win => win.isEnabled()), true);
+    assert.equal(await input().inputValue(), '退出后按同一账号恢复的草稿');
+  }
   checks.push(
     'explicit deletion survives restart; primary logout waits for outgoing save before reopening the account gate, then preserves remaining chat',
   );

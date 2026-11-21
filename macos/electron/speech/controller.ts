@@ -10,6 +10,8 @@ export class SpeechController extends SharedSpeechController {
     qwenDirectory?: string,
     qwenRuntime?: string,
   ) {
+    const clockFile = path.join(path.dirname(helper), 'VoxCue.AudioClock.node');
+    let readClock: (() => number) | undefined;
     const captures = new Set<CoreAudioCapture>();
     super(
       model,
@@ -18,6 +20,11 @@ export class SpeechController extends SharedSpeechController {
       {
         drainBeforeRetire: true,
         automaticRestart: true,
+        // CoreAudio packet mHostTime and recording/mute boundaries share this clock.
+        captureClockNow: () => {
+          readClock ??= require(clockFile) as () => number;
+          return readClock();
+        },
         qwenRuntime,
         preprocessorFile: path.join(__dirname, 'echoCancellation.js'),
         devices,

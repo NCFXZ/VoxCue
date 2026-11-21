@@ -1,4 +1,17 @@
 import { validKnowledgeDocumentName } from './knowledge';
+import { profileFields } from './profile';
+import { maxRestoreItems } from './restoreData';
+
+/** Each selected profile field comes from the same source manifest item. */
+export function withinImportItemLimit<T>(rows: readonly T[], getKey: (row: T) => unknown) {
+  if (rows.length <= maxRestoreItems) return true;
+  if (rows.length > maxRestoreItems + profileFields.length) return false;
+  const fields = rows.filter(row => {
+    const key = getKey(row);
+    return typeof key === 'string' && key.startsWith('profile:');
+  });
+  return rows.length - fields.length + Number(fields.length > 0) <= maxRestoreItems;
+}
 /** Main chooses every filesystem path. Renderer sends bounded original-file chunks only. */
 export interface ImportDocumentInfo {
   id: string;
@@ -18,12 +31,29 @@ export function validImportDocument(key: string, info: ImportDocumentInfo): bool
 }
 export interface AccountImportItem {
   key: string;
-  /** Zero for an image whose bounded envelope is materialized only when selected. */
+  /** Images and records with preview titles can defer envelope sizing until needed. */
   size: number;
   /** Immutable screenshot references of an interview in the unlocked source snapshot. */
   imageIds?: string[];
   document?: ImportDocumentInfo;
   recordTitle?: string;
+  /** Present for generated titles longer than 80 characters, including the library prefix. */
+  recordLibraryName?: string;
+}
+export function validImportRecordTitle(key: string, title: unknown, libraryName?: unknown): title is string {
+  if (!key.startsWith('record:') || typeof title !== 'string' || title.length > 142 || /[\u0000-\u001f\u007f]/.test(title)) return false;
+  if (title.length <= 80) return libraryName === undefined;
+  if (typeof libraryName !== 'string' || !libraryName.trim() || libraryName.length > 60) return false;
+  const prefix = '「' + libraryName + '」';
+  const caption = title.slice(prefix.length);
+  return title.startsWith(prefix) && !!caption.trim() && caption.length <= 80 && !/[<>`]/.test(caption);
+}
+export function validImportEnvelopeSize(size: unknown): size is number {
+  return typeof size === 'number' && Number.isSafeInteger(size) && size >= 8 && size <= 64 * 1024 ** 2;
+}
+export function validImportItemSize(key: string, size: unknown, title?: unknown, libraryName?: unknown): size is number {
+  return validImportEnvelopeSize(size) ||
+    (size === 0 && (key.startsWith('image:') || validImportRecordTitle(key, title, libraryName)));
 }
 export interface AccountImportSource {
   id: string;
@@ -78,9 +108,12 @@ export type AccountDataResult =
       requiresPassword?: boolean;
       sourceEmail?: string;
       localRevision?: string;
+      recoveredMove?: true;
       items?: AccountImportItem[];
       sources?: AccountImportSource[];
       bytes?: Uint8Array;
+      /** Total validated envelope length on its first chunk. */
+      size?: number;
       digest?: string;
     }
   | { ok: false; error: string };

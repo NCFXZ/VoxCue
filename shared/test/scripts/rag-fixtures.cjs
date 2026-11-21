@@ -28,7 +28,7 @@ exports.pdf = (pages = ['PID sensor feedback controls lift-off.', 'The synthetic
     .join('')}trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(content);
 };
-exports.docx = async () => {
+exports.docx = async (paragraphs = ['中文 DOCX sensor feedback.', 'Second paragraph is retained.']) => {
   const { createRequire } = require('node:module');
   const req = createRequire(projectRequire.resolve('mammoth'));
   const Zip = req('jszip');
@@ -39,7 +39,10 @@ exports.docx = async () => {
   );
   zip.file(
     'word/document.xml',
-    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>中文 DOCX sensor feedback.</w:t></w:r></w:p><w:p><w:r><w:t>Second paragraph is retained.</w:t></w:r></w:p></w:body></w:document>',
+    '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>' +
+      paragraphs.map(text => '<w:p><w:r><w:t>' +
+        text.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;') +
+        '</w:t></w:r></w:p>').join('') + '</w:body></w:document>',
   );
   return zip.generateAsync({ type: 'nodebuffer' });
 };

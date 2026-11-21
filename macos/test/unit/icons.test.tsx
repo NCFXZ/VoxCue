@@ -14,7 +14,10 @@ describe.skipIf(process.platform !== 'darwin')('Mac SF Symbols 的共享界面�
     const source = readFileSync(path.resolve('../shared/src/components/icons.tsx'), 'utf8');
     const names = [...source.matchAll(/export const (\w+) = /g)].map((item) => item[1]).sort();
     expect(Object.keys(icons).sort()).toEqual(names);
-    expect(Object.keys(symbols).sort()).toEqual(names);
+    const controlMasks = ['src/control-symbols.css', 'src/mobile/symbols.css'].flatMap(file =>
+      [...readFileSync(file, 'utf8').matchAll(/sf-symbols\/(\w+)\.png/g)].map(match => match[1]),
+    );
+    expect(Object.keys(symbols).sort()).toEqual([...new Set([...names, ...controlMasks])].sort());
     for (const Icon of Object.values(icons)) {
       const html = renderToStaticMarkup(<Icon size={18} />);
       expect(html).toContain('aria-hidden="true"');
@@ -54,6 +57,9 @@ describe.skipIf(process.platform !== 'darwin')('Mac SF Symbols 的共享界面�
       plugin.resolveId('./icons.tsx', path.join(root, 'shared/src/components/Sidebar.tsx')),
     ).toBe(mac);
     expect(plugin.resolveId('./icons', path.join(root, 'macos/src/other.tsx'))).toBeNull();
+    expect(plugin.resolveId('./MobileIcon', path.join(root, 'shared/src/mobile/App.tsx'))).toBe(
+      path.join(root, 'macos/src/mobile/MobileIcon.tsx'),
+    );
     expect(
       plugin.resolveId(
         '@fluentui/react-icons',

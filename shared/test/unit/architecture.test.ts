@@ -67,8 +67,17 @@ describe('长期模块边界', () => {
       new Map([['macos/src/icons.tsx', [{ target, line: 1, typeOnly: false }]]]);
     expect(boundaryViolations(graph('react'))).toEqual([]);
     expect(boundaryViolations(graph('macos/src/symbols.json'))).toEqual([]);
+    expect(boundaryViolations(graph('macos/src/control-symbols.css'))).toEqual([]);
     for (const target of ['electron', 'node:fs', 'shared/src/components/ui/button.tsx'])
       expect(boundaryViolations(graph(target))).not.toEqual([]);
+  });
+  it('Mac 手机符号适配仅导入共享图标类型与符号样式', () => {
+    const graph = (target: string, typeOnly = false) =>
+      new Map([['macos/src/mobile/MobileIcon.tsx', [{ target, line: 1, typeOnly }]]]);
+    expect(boundaryViolations(graph('shared/src/mobile/MobileIcon.tsx', true))).toEqual([]);
+    expect(boundaryViolations(graph('macos/src/mobile/symbols.css'))).toEqual([]);
+    expect(boundaryViolations(graph('shared/src/mobile/MobileIcon.tsx'))).not.toEqual([]);
+    expect(boundaryViolations(graph('electron'))).not.toEqual([]);
   });
   it('区分 type-only、重导出、动态 import 和 CommonJS require', () => {
     const edges = dependencies(

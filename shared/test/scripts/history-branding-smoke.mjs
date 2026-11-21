@@ -1,4 +1,5 @@
 import { evaluateHistory, waitForHistory } from './stored-history-fixture.mjs';
+import { assertPlainProviderLogo } from './assert-provider-logo.mjs';
 import { closeUiApp, connectUiAccount, focusUiWindow, installUiAccount } from './install-ui-account.mjs';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
@@ -94,6 +95,18 @@ try {
       return call.call(this, input);
     };
   });
+  // Capture the actual HTML placeholder before the renderer replaces it.
+  await login.addInitScript(() => {
+    const observer = new MutationObserver(() => {
+      const title = document.querySelector('#root > [role="status"] > .startup-title');
+      if (!title) return;
+      const css = getComputedStyle(title);
+      window.initialStartupTitle = [css.fontFamily, css.fontSize, css.fontWeight, css.lineHeight,
+        title.getBoundingClientRect().width];
+      observer.disconnect();
+    });
+    observer.observe(document, { childList: true, subtree: true });
+  });
   await login.reload();
   await login.locator('.startup-screen .app-logo').waitFor();
   const startup = await login.locator('.startup-screen').evaluate((element) => ({
@@ -105,6 +118,17 @@ try {
   assert.equal(startup.shadow, 'none');
   assert.ok(startup.filter.startsWith('drop-shadow('));
   assert.equal(startup.animation, 'startup-title-sweep');
+  const titleMetrics = await login.locator('.startup-screen .startup-title').evaluate((title) => {
+    const css = getComputedStyle(title);
+    return {
+      first: window.initialStartupTitle,
+      rendered: [css.fontFamily, css.fontSize, css.fontWeight, css.lineHeight,
+        title.getBoundingClientRect().width],
+    };
+  });
+  assert.equal(titleMetrics.rendered[1], '18px');
+  assert.equal(titleMetrics.rendered[2], '600');
+  assert.deepEqual(titleMetrics.first, titleMetrics.rendered, 'Startup typography changed after first paint');
   assert.equal(startup.indicators, 0);
   await login.emulateMedia({ reducedMotion: 'reduce' });
   assert.equal(
@@ -476,10 +500,8 @@ try {
   assert.ok(Math.abs(afterAnswerClick.leftScroll - beforeAnswerClick.leftScroll) <= 1);
   assert.equal(await selectedAnswer.locator('.markdown-content').innerText(), '核对数据序号。');
   checks.push('a visible answer with a shared question prefix scrolls to the header without moving its source transcript');
-  await main
-    .locator('.record-answer-content .provider-avatar img')
-    .first()
-    .evaluate(async (image) => image.decode());
+  const historyLogo = main.locator('.record-answer-content .provider-avatar img').first();
+  await assertPlainProviderLogo(historyLogo);
   assert.equal(
     await main.locator('.record-answer-content .markdown-content strong').innerText(),
     '项目概况',
@@ -579,6 +601,7 @@ try {
   assert.equal(await readFile(output, 'utf8'), exported);
   checks.push('native TXT export with BOM and cancellation');
   await main.evaluate(() => document.documentElement.classList.add('dark'));
+  await assertPlainProviderLogo(historyLogo);
   await viewAnswer.click();
   await selectedAnswer.locator('xpath=self::*[@data-location-highlight]').waitFor();
   const darkAnswerColor = await selectedAnswer.evaluate(row => getComputedStyle(row, '::before').backgroundColor);

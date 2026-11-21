@@ -7,7 +7,9 @@ const processors: AudioPreprocessor[] = [];
 async function processor() {
   const packets: { source: AudioSource; samples: Float32Array; rate: number; time: number }[] = [];
   const failure = vi.fn();
-  const dsp = await createAudioPreprocessor((source, samples, rate, time) => {
+  const recognition: Float32Array[] = [];
+  const dsp = await createAudioPreprocessor((source, samples, rate, time, asr = samples) => {
+    if (source === 'microphone') recognition.push(asr.slice());
     packets.push({ source, samples: samples.slice(), rate, time });
   }, failure);
   processors.push(dsp);
@@ -21,7 +23,7 @@ async function processor() {
     }
     return result;
   };
-  return { dsp, packets, failure, audio };
+  return { dsp, packets, failure, audio, recognition };
 }
 afterEach(() => {
   for (const dsp of processors.splice(0)) dsp.close();
@@ -45,7 +47,7 @@ function waveform(length: number) {
 }
 
 it('suppresses delayed whole-system playback while retaining an independent simultaneous voice', async () => {
-  const { dsp, audio } = await processor();
+  const { dsp, audio, recognition } = await processor();
   const rate = 48000,
     length = rate * 15;
   const system = waveform(length),
@@ -90,6 +92,13 @@ it('suppresses delayed whole-system playback while retaining an independent simu
     result += output[i] ** 2;
     cross += near[i] * output[i];
   }
+  const asr = Float32Array.from(recognition.flatMap(chunk => Array.from(chunk)));
+  expect(asr.length).toBe(mic.length);
+  // Every ASR sample must be either the exact aligned raw microphone or silence.
+  // The recording residual is verified independently below.
+  expect(asr.every((value, i) => value === 0 || value === mic[i])).toBe(true);
+  const speakerOnly = asr.subarray(5 * rate, 7 * rate);
+  expect(speakerOnly.filter(value => value === 0).length / speakerOnly.length).toBeGreaterThan(0.95);
   const erle = 10 * Math.log10(echo / residual);
   const gain = cross / voice,
     correlation = cross / Math.sqrt(voice * result);

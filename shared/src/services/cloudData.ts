@@ -1,5 +1,5 @@
 import { validProfile, type PersonalInfo } from '../../electron/contracts/profile';
-import { CLOUD_ITEM_MAX_BYTES, CLOUD_MAX_ITEMS, type SyncKind } from '../../electron/contracts/cloudSync';
+import { CLOUD_ITEM_MAX_BYTES, CLOUD_RECORD_MAX_IMAGES, type SyncKind } from '../../electron/contracts/cloudSync';
 import {
   validHistoryRecord,
   historyRepository,
@@ -10,18 +10,21 @@ import { CloudDataConflict, localChanged } from './localChanges';
 import { SyncYield } from './cloudLifecycle';
 export { CloudDataConflict } from './localChanges';
 import { commitWithHistoryImages, historyImageIds, restoreHistoryImage } from './historyImageRemoval';
-import { hasSavedProfile, profileStorageKey, readStoredProfile } from './storedValues';
+import { removeHistoryRecord } from './historyRecordingRemoval';
+import { hasSavedProfile, legacyProfileModificationKey, profileStorageKey, readStoredProfile } from './storedValues';
 import {
   localKnowledge,
   readKnowledgeOriginal,
   syncKnowledgeSnapshot,
   restoreSyncedBase,
   restoreSyncedDocument,
+  removeSyncedKnowledgeOriginal,
   validateFiles,
   documentRevision,
 } from './knowledge';
 import type { KnowledgeBase, LocalDocument } from './knowledgeTypes';
 import { validImagePreview } from '../../electron/contracts/interviewImages';
+import { validImportRecordTitle, type ImportDocumentInfo } from '../../electron/contracts/accountData';
 import { validKnowledgeDocumentName } from '../../electron/contracts/knowledge';
 import { packCloudItem } from '../../electron/contracts/restoreData';
 export { packCloudItem } from '../../electron/contracts/restoreData';
@@ -89,22 +92,13 @@ function jsonItem(key: string, kind: SyncKind, value: unknown): LocalSyncItem {
 function cloudRecord(key: string, value: unknown) {
   if (!validHistoryRecord(value) || !id(value.id) || key !== 'record:' + value.id)
     throw Error('云端面试记录无效。');
-  if (/[\u0000-\u001f\u007f]/.test(value.title)) throw Error('云端面试标题无效。');
-  if (value.title.length > 80) {
-    // Desktop prepends the selected library after validating the generated title itself.
-    const name = value.knowledgeBaseName;
-    const prefix = '「' + name + '」';
-    const caption = value.title.slice(prefix.length);
-    if (value.titleSource !== 'generated' || !name?.trim() || name.length > 60 ||
-        !value.title.startsWith(prefix) || !caption.trim() || caption.length > 80 || /[<>`]/.test(caption))
-      throw Error('云端面试标题无效。');
-  }
+  if (!validImportRecordTitle(key, value.title, value.title.length > 80 && value.titleSource === 'generated' ? value.knowledgeBaseName : undefined))
+    throw Error('云端面试标题无效。');
   const images = [...new Set(historyImageIds(value))];
-  // The record itself and every referenced original must fit in the same account resource list.
-  if (images.length >= CLOUD_MAX_ITEMS) throw Error('单条记录的截图超过同步保护上限，本地记录已保留。');
+  if (images.length > CLOUD_RECORD_MAX_IMAGES) throw Error('单条记录的截图超过同步保护上限，本地记录已保留。');
   return { type: 'record' as const, record: value, images };
 }
-function packRecord(key: string, record: InterviewRecord) {
+export function packRecord(key: string, record: InterviewRecord) {
   cloudRecord(key, record);
   const blob = packCloudItem(key, JSON.stringify(record));
   if (blob.size > CLOUD_ITEM_MAX_BYTES) throw Error('单项同步数据超过64 MiB。');
@@ -200,7 +194,8 @@ export async function localCloudItems(
 }
 function baseItem(base: KnowledgeBase): LocalSyncItem {
   const { id, name, createdAt } = base;
-  return { ...jsonItem('base:' + id, 'knowledgebase', { id, name, createdAt }), localRevision: documentRevision(base) };
+  return { ...jsonItem('base:' + id, 'knowledgebase', { id, name, createdAt }),
+    localRevision: documentRevision(base) };
 }
 export async function localCloudItem(kind: SyncKind, key: string): Promise<LocalSyncItem | undefined> {
   if (kind === 'history') {
@@ -223,8 +218,12 @@ export async function localCloudItem(kind: SyncKind, key: string): Promise<Local
     if (doc && doc.baseId !== 'personal-resume') return fileItem(doc);
   }
 }
+const documentFields = new Set(['id', 'baseId', 'name', 'size', 'type', 'createdAt']);
+function documentMetadata(doc: ImportDocumentInfo): ImportDocumentInfo {
+  // The cloud digest covers JSON key order. Retain the order of validated wire fields on restore.
+  return Object.fromEntries(Object.entries(doc).filter(([key]) => documentFields.has(key))) as ImportDocumentInfo;
+}
 function fileItem(doc: LocalDocument): LocalSyncItem {
-  const { blob, localRevision: _revision, ...metadata } = doc;
   const resume = doc.baseId === 'personal-resume';
   const key = resume ? 'resume:main' : 'file:' + doc.id;
   return {
@@ -232,7 +231,7 @@ function fileItem(doc: LocalDocument): LocalSyncItem {
     kind: resume ? 'profile' : 'knowledgebase',
     parent: resume ? 'profile:main' : 'base:' + doc.baseId,
     localRevision: documentRevision(doc),
-    blob: async () => packCloudItem(key, blob, metadata),
+    blob: async () => packCloudItem(key, doc.blob, documentMetadata(doc)),
   };
 }
 type DecodedItem =
@@ -275,16 +274,7 @@ export async function decodeCloudItem(key: string, blob: Blob): Promise<DecodedI
     )
       throw Error('云端文件元数据无效。');
     validateFiles([{ name: m.name, size: payload.size }]);
-    const document: LocalDocument = {
-      id: m.id,
-      baseId: m.baseId,
-      name: m.name,
-      size: m.size,
-      type: m.type,
-      createdAt: m.createdAt,
-      blob: payload,
-    };
-    return { type, document };
+    return { type, document: { ...documentMetadata(m), blob: payload } };
   } else if (type === 'image') {
     if (
       !metadata ||
@@ -333,6 +323,52 @@ async function writeCloudImage(item: Extract<DecodedItem, { type: 'image' }>, us
   guard();
 }
 
+const localConflict = () => new CloudDataConflict('同步期间本地数据已有修改，已保留两端版本。');
+
+export async function removeLocalSyncItem(key: string, expectedHash: string, guard: () => void, root: string) {
+  guard();
+  const [kind, itemId, extra] = key.split(':');
+  if (!id(itemId) || extra !== undefined) throw Error('同步条目标识无效。');
+  if (kind === 'image') {
+    // Replacing/removing the owning record journals orphan cleanup. A shared image stays
+    // live until the last reference is removed, including references added in another window.
+    if (!/^record:[\w-]{1,100}$/.test(root) || (await historyRepository.imageOwners(itemId)).length)
+      throw localConflict();
+    guard();
+    return;
+  }
+  if (kind === 'record') {
+    if (root !== key) throw localConflict();
+    const before = await historyRepository.get(itemId);
+    if (!before || await digestCloudBlob(await recordCloudItem(before).blob()) !== expectedHash) throw localConflict();
+    await commitWithHistoryImages(async () => {
+      const pending = await removeHistoryRecord(itemId, { expected: before, guard, notify: false });
+      if (pending) throw Error(pending);
+    });
+  } else if (key === 'profile:main') {
+    if (root !== key) throw localConflict();
+    const raw = localStorage.getItem(profileStorageKey);
+    if (!raw || await digestCloudBlob(await jsonItem(key, 'profile', readStoredProfile(raw)).blob()) !== expectedHash)
+      throw localConflict();
+    guard();
+    if (localStorage.getItem(profileStorageKey) !== raw) throw localConflict();
+    localStorage.removeItem(profileStorageKey);
+    localStorage.removeItem(legacyProfileModificationKey);
+  } else if (kind === 'file' || kind === 'base' || (kind === 'resume' && key === 'resume:main')) {
+    const resume = kind === 'resume';
+    const source = await localCloudItem(resume ? 'profile' : 'knowledgebase', key);
+    if (!source?.localRevision || (source.parent ?? key) !== root) throw localConflict();
+    const blob = await source.blob();
+    if (await digestCloudBlob(blob) !== expectedHash) throw localConflict();
+    const baseId = resume ? 'personal-resume' : root.slice('base:'.length);
+    const originalId = resume ? (await unpackCloudItem(key, blob)).metadata.id : itemId;
+    if (!id(originalId) || !id(baseId) || (!resume && baseId === 'personal-resume'))
+      throw Error('同步条目标识无效。');
+    await removeSyncedKnowledgeOriginal(kind, originalId, baseId, source.localRevision, guard);
+  } else throw Error('同步条目标识无效。');
+  window.dispatchEvent(new CustomEvent('voxcue-sync-applied', { detail: kind }));
+}
+
 export async function applyCloudItem(
   key: string,
   blob: Blob,
@@ -340,6 +376,8 @@ export async function applyCloudItem(
   userId?: string,
   guard = () => {},
   readMissingImage?: (id: string) => Promise<Blob | undefined>,
+  groupKey?: string,
+  reviewedImageOwners?: readonly string[],
 ) {
   const item = await decodeCloudItem(key, blob);
   let restoredDocument: LocalDocument | undefined;
@@ -363,7 +401,16 @@ export async function applyCloudItem(
       guard,
     );
   } else if (item.type === 'image') {
-    await restoreHistoryImage(item.id, () => writeCloudImage(item, userId, guard));
+    await restoreHistoryImage(item.id, async () => {
+      if (groupKey) {
+        const current = await localCloudItem('history', key);
+        if ((await current?.digest?.()) !== expectedHash) throw localConflict();
+        const owners = new Set(reviewedImageOwners ?? [groupKey]);
+        if ((await historyRepository.imageOwners(item.id)).some(owner => !owners.has('record:' + owner)))
+          throw localConflict();
+      }
+      await writeCloudImage(item, userId, guard);
+    });
   } else if (item.type === 'profile') {
     const before = localStorage.getItem(profileStorageKey);
     await assertCurrent();
@@ -392,7 +439,8 @@ export async function applyCloudItem(
       const currentHash = before ? await digestCloudBlob(await recordCloudItem(before).blob()) : undefined;
       if (currentHash !== expectedHash)
         throw new CloudDataConflict('同步期间本地数据已有修改，已保留两端版本。');
-      const restored = await historyRepository.save(item.record, { expected: before ?? null, guard, notify: false });
+      const restored = await historyRepository.save(item.record, { expected: before ?? null, guard, notify: false,
+        replaceTitle: groupKey === key });
       if (restored !== item.record && JSON.stringify(restored) !== JSON.stringify(item.record))
         localChanged('history', [key]);
     });

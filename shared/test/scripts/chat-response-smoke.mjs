@@ -3,6 +3,7 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { longMarkdown } from '../fixtures/long-markdown.mjs';
 
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -161,6 +162,13 @@ try {
             }],
           });
         const request = JSON.parse(options.body);
+        if (request.input.at(-1).content === '长回答复核') {
+          const text = request.text?.format?.type === 'json_schema'
+            ? JSON.stringify({ answer: globalThis.longMarkdownFixture, changes: {} })
+            : globalThis.longMarkdownFixture;
+          return Response.json({ object: 'response', id: 'long-markdown', status: 'completed',
+            output: [{ type: 'message', content: [{ type: 'output_text', text }] }] });
+        }
         if (request.input.at(-1).content === '状态测试') {
           const encoder = new TextEncoder();
           const citation = { url: 'https://docs.example.org/guide', title: '实时来源' };
@@ -813,6 +821,13 @@ try {
   await checkIcons();
   await iconWatch.evaluate(watch => cancelAnimationFrame(watch.frame));
   await iconWatch.dispose();
+  await app.evaluate((_electron, text) => { globalThis.longMarkdownFixture = text; }, longMarkdown);
+  await page.getByRole('textbox', { name: '聊天消息' }).fill('长回答复核');
+  await page.getByRole('button', { name: '发送消息', exact: true }).click();
+  const longReply = page.locator('.chat-message.assistant').last();
+  await longReply.locator('td strong').filter({ hasText: /^All receipts reconciled$/ }).waitFor();
+  await longReply.getByRole('button', { name: '复制', exact: true }).click();
+  assert.equal(await page.evaluate(() => window.testCopiedCode), longMarkdown);
   await page.reload();
   await page.getByRole('button', { name: '个人信息', exact: true }).click();
   assert.equal(await page.getByLabel('姓名', { exact: true }).inputValue(), '新姓名');

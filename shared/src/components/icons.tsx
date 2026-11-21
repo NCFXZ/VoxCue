@@ -1,4 +1,5 @@
 import type { ComponentType, CSSProperties } from 'react';
+import { RecordingWaveIcon } from './RecordingWaveIcon';
 import {
   Mic24Regular,
   SpinnerIos20Regular,
@@ -26,8 +27,6 @@ import {
   Play24Regular,
   Pause24Regular,
   MyLocation24Regular,
-  Window20Regular,
-  WindowInprivate20Regular,
   ArrowMinimize24Regular,
   SkipBack1024Regular,
   SkipForward1024Regular,
@@ -47,7 +46,6 @@ import {
   Delete24Regular,
   ChevronUp24Regular,
   ShieldCheckmark24Regular,
-  ShieldDismiss24Regular,
   ArrowMaximize24Regular,
   Person24Regular,
   ReOrderDotsVertical24Regular,
@@ -140,9 +138,8 @@ export const MessageSquare = icon(Chat24Regular);
 
 export const Play = icon(Play24Regular);
 export const Pause = icon(Pause24Regular);
+export const Recording = RecordingWaveIcon;
 export const Locate = icon(MyLocation24Regular);
-export const VisibleWindow = icon(Window20Regular);
-export const PrivateWindow = icon(WindowInprivate20Regular);
 export const Minimize = icon(ArrowMinimize24Regular);
 export const BackTen = icon(SkipBack1024Regular);
 export const ForwardTen = icon(SkipForward1024Regular);
@@ -162,7 +159,6 @@ export const Plus = icon(Add24Regular);
 export const Trash = icon(Delete24Regular);
 export const ChevronUp = icon(ChevronUp24Regular);
 export const ShieldCheck = icon(ShieldCheckmark24Regular);
-export const ShieldOff = icon(ShieldDismiss24Regular);
 export const Expand = icon(ArrowMaximize24Regular);
 export const Person = icon(Person24Regular);
 export const Screenshot = icon(Screenshot24Regular);

@@ -19,6 +19,7 @@ class CredentialTimeoutError extends Error {
 }
 class CredentialValidationError extends Error {}
 export interface MacCredentialEncryption extends CredentialEncryption {
+  readonly unavailableReason?: string;
   /**
    * Removes superseded historical Keychain copies without any system dialog,
    * only after `readable` confirms every stored record decrypts with the current key.
@@ -40,7 +41,14 @@ export function createCredentialEncryption(
   executable: string,
   confirmMigration?: () => Promise<boolean>,
   language: () => 'zh-CN' | 'en' | Promise<'zh-CN' | 'en'> = () => 'zh-CN',
+  packaged = true,
 ): MacCredentialEncryption {
+  if (!packaged) {
+    const code = 'VOXCUE_CREDENTIAL_SIGNED_APP_REQUIRED';
+    const unavailableReason = credentialProblemMessages[code];
+    const reject = async (): Promise<never> => { throw Object.assign(Error(unavailableReason), { code }); };
+    return { unavailableReason, encrypt: reject, decrypt: reject, maintain: async () => undefined };
+  }
   type Request = {
     operation: Operation;
     value?: Buffer;

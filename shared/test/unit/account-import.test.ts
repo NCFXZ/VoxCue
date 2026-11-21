@@ -221,6 +221,45 @@ async function fixture() {
     },
   };
 }
+it('resolves a selected record size on its first chunk and charges the size only once', async () => {
+  const f = await fixture();
+  const key = 'record:' + f.recordId;
+  const recordBytes = 16;
+  f.reader.items = [{ key, size: 0, recordTitle: 'Synthetic' }];
+  // Leave room for exactly the one record. The synthetic filler has no body and must never be read.
+  for (let i = 0; i < 8; i++) f.reader.items.push({
+    key: 'file:budget-' + i, size: 64 * 1024 ** 2 - (i === 0 ? recordBytes : 0),
+  });
+  f.reader.recordSize = vi.fn(async () => recordBytes);
+  f.reader.read = vi.fn(async (_, offset) => new Uint8Array(recordBytes - offset));
+  const token = await f.begin('local');
+  await f.call({ action: 'unlockImport', token });
+  const read = (offset: number) => f.call({ action: 'readImport', token, key, offset });
+  await expect(read(1)).rejects.toThrow();
+  expect(f.reader.recordSize).not.toHaveBeenCalled();
+  expect((await read(0)).size).toBe(recordBytes);
+  expect((await read(0)).size).toBe(recordBytes);
+  expect((await read(1)).bytes?.length).toBe(recordBytes - 1);
+  await expect(read(recordBytes)).rejects.toThrow();
+  expect(f.reader.recordSize).toHaveBeenCalledTimes(1);
+});
+
+it('rejects deferred record bytes over the remaining budget both on read and direct prepare', async () => {
+  const f = await fixture();
+  const key = 'record:' + f.recordId;
+  f.reader.items = [{ key, size: 0, recordTitle: 'Synthetic' },
+    ...Array.from({ length: 8 }, (_, i) => ({ key: 'file:budget-' + i, size: 64 * 1024 ** 2 }))];
+  f.reader.recordSize = vi.fn(async () => 128);
+  f.reader.read = vi.fn();
+  const token = await f.begin('local');
+  await f.call({ action: 'unlockImport', token });
+  await expect(f.call({ action: 'readImport', token, key, offset: 0 })).rejects.toThrow('无效');
+  await expect(f.call({ action: 'prepareImportCommit', token, keys: [key],
+    recordIds: [f.recordId], imageIds: [] })).rejects.toThrow('无效');
+  expect(f.reader.read).not.toHaveBeenCalled();
+  expect(f.reader.planRemoval).not.toHaveBeenCalled();
+});
+
 it('keeps a damaged interview in its source while allowing an unrelated profile field to move', async () => {
   const f = await fixture();
   f.reader.items.find(item => item.key === f.key)!.size = 0;
@@ -466,10 +505,38 @@ it('persists the selected fingerprints on cleanup failure and resumes only after
     f.call({ action: 'unlockImport', token: next, password: 'wrong-pass' }),
   ).rejects.toThrow();
   expect(f.reader.removeSelected).toHaveBeenCalledTimes(1);
-  await f.call({ action: 'unlockImport', token: next, password: bob.id + '-pass' });
+  expect(await f.call({ action: 'unlockImport', token: next, password: bob.id + '-pass' })).toMatchObject({ recoveredMove: true });
   expect(f.reader.removeSelected).toHaveBeenCalledTimes(2);
   expect(await f.receipts.read(destination, source)).toBeUndefined();
   await f.call({ action: 'closeImport', token: next });
+});
+
+it('recovers a partially cleared local source even after its last revision disappeared', async () => {
+  const f = await fixture();
+  const token = await f.begin('local');
+  await f.call({ action: 'unlockImport', token });
+  await f.call({ action: 'prepareImportCommit', token, keys: ['profile:name'], recordIds: [], imageIds: [] });
+  const committed = {
+    ok: false, error: '目标资料已保存，来源资料清理未完成。请重新选择此来源后重试。',
+  };
+  // The last source original and revision are already gone. Only retiring the receipt failed.
+  const retire = vi.spyOn(f.receipts, 'clear');
+  const busy = Object.assign(Error('fixture path must not leave the migration boundary'), { code: 'EBUSY' });
+  retire.mockRejectedValueOnce(busy).mockRejectedValueOnce(busy);
+  expect(await f.importer.call('main', { action: 'closeImport', token, committed: true })).toEqual(committed);
+  vi.spyOn(f.accounts, 'list').mockResolvedValue([{ id: source, email: bob.email }]);
+  expect((await f.call({ action: 'listImportSources' })).sources).toContainEqual({ id: 'local' });
+  const retry = await f.begin('local');
+  expect(await f.importer.call('main', { action: 'unlockImport', token: retry })).toEqual(committed);
+  expect(await f.receipts.read(destination, 'local')).toBeDefined();
+  f.reader.items = [];
+  expect(await f.call({ action: 'unlockImport', token: retry })).toEqual({ ok: true, items: [], recoveredMove: true });
+  expect(await f.call({ action: 'unlockImport', token: retry })).toEqual({ ok: true, items: [], recoveredMove: true });
+  expect(f.reader.planRemoval).toHaveBeenCalledTimes(1);
+  expect(retire).toHaveBeenCalledTimes(3);
+  expect(await f.receipts.read(destination, 'local')).toBeUndefined();
+  await f.call({ action: 'closeImport', token: retry });
+  expect((await f.call({ action: 'listImportSources' })).sources).toEqual([{ id: source, email: bob.email }]);
 });
 
 it('preserves new source data and releases a stale cleanup receipt for a fresh selection', async () => {
@@ -516,19 +583,18 @@ it('keeps the source interview when a new recording appears after the transfer w
 it('rejects a stale source after cancellation and ignores directory metadata claiming another account', async () => {
   const f = await fixture();
   const token = await f.begin('local');
-  let release!: () => void;
-  const started = vi.fn();
+  const started = Promise.withResolvers<void>();
+  const release = Promise.withResolvers<void>();
   f.open.mockImplementationOnce(async () => {
-    started();
-    await new Promise<void>((resolve) => {
-      release = resolve;
-    });
+    started.resolve();
+    await release.promise;
     return f.reader;
   });
   const opening = f.call({ action: 'unlockImport', token });
-  expect(started).toHaveBeenCalledOnce();
+  await started.promise;
+  expect(f.open).toHaveBeenCalledOnce();
   const cancelled = f.importer.cancel();
-  release();
+  release.resolve();
   await expect(opening).rejects.toThrow();
   await cancelled;
   expect(f.reader.close).toHaveBeenCalledOnce();

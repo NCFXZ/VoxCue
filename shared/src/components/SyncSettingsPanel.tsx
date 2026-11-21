@@ -1,22 +1,21 @@
 import { InterviewReveal } from './InterviewReveal';
-import { useRef } from 'react';
-import { useHeightTransition } from './ui/useHeightTransition';
+import { useEffect, useState } from 'react';
 import { t } from '../i18n';
+import { useCloudAccount } from '../stores/cloudAccount';
 import { useCloudSync } from '../stores/cloudSync';
+import { syncItemsWithStatus } from '../services/cloudSync';
 import { Button } from './ui/button';
-import { SyncBadge } from './SyncBadge';
+import { SyncProblemDialog } from './SyncProblemDialog';
 import { CloudStorageSummary } from './CloudStorageSummary';
-import { CloudSync, Refresh } from './icons';
+import { CloudError, CloudSync, Refresh } from './icons';
 
 export function SyncSettingsPanel() {
   const state = useCloudSync();
-  const problems = Object.entries(state.marks)
-    .filter(([, mark]) => mark.status === 'conflict' || mark.status === 'error');
-  const problemList = useRef<HTMLDivElement>(null);
-  useHeightTransition(
-    problems.map(([key, mark]) => `${key}:${mark.status}:${mark.error ?? ''}`).join('\n'),
-    () => [problemList.current],
-  );
+  const owner = useCloudAccount(account => account.state.user?.id);
+  const [show, setShow] = useState<'conflict' | 'error'>();
+  useEffect(() => setShow(undefined), [owner]);
+  const conflicts = syncItemsWithStatus(state.marks, 'conflict');
+  const failures = syncItemsWithStatus(state.marks, 'error');
   return (
     <>
       <CloudStorageSummary />
@@ -74,17 +73,34 @@ export function SyncSettingsPanel() {
           {t('刷新容量')}
         </Button>
       </div>
-      <div ref={problemList}>
-        {problems.map(([key, mark]) => (
-          <div className="settings-entry cloud-sync-item" key={key}>
-            <div>
-              <strong>{key.startsWith('profile:') ? t('个人信息') : t('同步条目')}</strong>
-              <p className="settings-hint">{t(mark.error || '两端都有修改，请选择要保留的版本。')}</p>
-            </div>
-            <SyncBadge itemKey={key} />
+      {conflicts.length > 0 && (
+        <div className="settings-entry sync-problem-entry" data-settings-target="sync-conflicts">
+          <div>
+            <strong>{t('资料冲突')}</strong>
+            <p className="settings-hint">{t('有 {0} 条资料在本地与云端存在冲突。', [conflicts.length])}</p>
           </div>
-        ))}
-      </div>
+          <Button variant="outline" aria-haspopup="dialog" onClick={() => setShow('conflict')}>
+            <CloudError size={16} />
+            {t('查看冲突')}
+          </Button>
+        </div>
+      )}
+      {failures.length > 0 && (
+        <div className="settings-entry sync-problem-entry">
+          <div>
+            <strong>{t('同步失败')}</strong>
+            <p className="settings-hint">{t('有 {0} 条资料未能同步。', [failures.length])}</p>
+          </div>
+          <Button variant="outline" aria-haspopup="dialog" onClick={() => setShow('error')}>
+            <CloudError size={16} />
+            {t('查看错误')}
+          </Button>
+        </div>
+      )}
+      {show && (
+        <SyncProblemDialog key={owner + '/' + show} mode={show}
+          problems={show === 'conflict' ? conflicts : failures} busy={state.busy} onClose={() => setShow(undefined)} />
+      )}
     </>
   );
 }

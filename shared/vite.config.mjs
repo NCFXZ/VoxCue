@@ -38,6 +38,9 @@ export default {
             resolveId(source, importer) {
               if (!importer || !source.startsWith('.')) return null;
               const resolved = path.resolve(path.dirname(importer), source);
+              const mobile = path.join(sharedRoot, 'src/mobile/MobileIcon');
+              if (resolved === mobile || resolved === mobile + '.tsx')
+                return path.join(platformRoot, 'src/mobile/MobileIcon.tsx');
               const icons = path.join(sharedRoot, 'src/components/icons');
               // Only artwork differs. Controls, materials and pages stay shared.
               return resolved === icons || resolved === icons + '.tsx'

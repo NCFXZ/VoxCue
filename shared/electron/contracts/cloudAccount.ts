@@ -45,6 +45,8 @@ export interface CloudUser {
 }
 export interface CloudAccountState {
   configured: boolean;
+  /** A fixed, localizable reason this host cannot use account credentials. */
+  signInUnavailable?: string;
   user: CloudUser | null;
   verified: boolean;
   /** Desktop-only preference; a local session is never an authenticated cloud user. */

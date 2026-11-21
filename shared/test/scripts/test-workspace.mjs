@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url';
 import { spawn, execFileSync } from 'node:child_process';
 import workspace from '../../scripts/workspace.mjs';
 import {
-  assertOwnerElectronLaunch, verifySyntheticElectronPackage,
+  assertOwnerElectronLaunch, packagedGuiIsolationMessage, verifySyntheticElectronPackage,
   syntheticElectronEntry, syntheticElectronHtml,
 } from './electron-launch-policy.mjs';
 
@@ -43,7 +43,6 @@ for (const name of fs.readdirSync(temporary)) {
 export const testRoot = fs.mkdtempSync(path.join(temporary, prefix));
 const defaultHost = workspace.platformRequire('electron');
 const macDevelopmentHost = path.join(workspace.platformRoot, '.tools/electron-dev/Electron.app/Contents/MacOS/Electron');
-const macDevelopmentLauncher = path.join(workspace.platformRoot, 'VoxCue.app/Contents/MacOS/VoxCue');
 const macSigning = process.platform === 'darwin'
   ? await import(pathToFileURL(path.join(workspace.platformRoot, 'scripts/development-signing.mjs')).href)
   : undefined;
@@ -53,7 +52,6 @@ const launchPolicy = {
     { path: defaultHost },
     ...(process.platform === 'darwin' ? [
       { path: macDevelopmentHost, identifier: 'com.voxcue.development' },
-      { path: macDevelopmentLauncher, identifier: 'com.voxcue.launcher', launcher: true },
     ] : []),
   ],
   syntheticPackages: new Map(),
@@ -118,6 +116,13 @@ export function trackTestProcess(child) {
 }
 export function spawnTestProcess(command, args, options) {
   if (stopping) throw Error('The owned test run is stopping');
+  if (process.platform === 'darwin' && command.includes(path.sep)) {
+    const product = path.join(workspace.platformRoot, 'VoxCue.app/Contents/MacOS/VoxCue');
+    const target = path.resolve(options?.cwd ?? process.cwd(), command);
+    if (target === product ||
+        (fs.existsSync(product) && fs.existsSync(target) && fs.realpathSync(target) === fs.realpathSync(product)))
+      throw Error(packagedGuiIsolationMessage);
+  }
   // Native-only fixtures need the same fixed, signed Mac host as UI fixtures.
   // Keep packaged executables and Electron's Node-mode ABI checks untouched.
   const developmentHost = path.join(
@@ -252,16 +257,6 @@ require(${JSON.stringify(entry)});
       options = {
         ...options,
         args: [...(options.args ?? []), '--force-device-scale-factor=' + scale],
-      };
-    }
-    // Production packages are rejected by assertOwnerElectronLaunch before
-    // this point. Only the known development launcher needs its owned entry.
-    if (desktop && options.executablePath === macDevelopmentLauncher) {
-      const { offlineElectronEntry } = await import('./offline-electron-entry.mjs');
-      options = {
-        ...options,
-        args: [await offlineElectronEntry(undefined, { deferToReady: true }),
-          ...(options.args ?? []), '--use-mock-keychain'],
       };
     }
     const app = await workspace.platformRequire('playwright')._electron.launch({

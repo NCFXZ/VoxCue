@@ -7,7 +7,6 @@ import easterEgg from '../assets/interview-easter-egg.jpg';
 import { interviewAlwaysDark } from '../interviewAppearance';
 import { MarkdownContent } from './MarkdownContent';
 import { AppLogo } from './AppLogo';
-import { RecordingWave } from './RecordingWave';
 import { ProviderIdentity } from './ProviderIdentity';
 import { InterviewChromeBase } from './InterviewChromeBase';
 import { installPreviewScroll } from './ui/preview-scroll';
@@ -25,8 +24,8 @@ import {
   Copy,
   MessageSquare,
   Settings,
-  ShieldCheck,
-  PrivateWindow,
+  Recording,
+  EyeOff,
   Sparkles,
   Screenshot,
   Volume2,
@@ -352,11 +351,11 @@ export function InterviewPreview({
             <span className="interview-preview-icon" data-interview-preview-button>
               <Settings size={19} />
             </span>
-            <span className="interview-preview-icon" data-interview-preview-button>
-              {window.desktop?.platform === 'windows' ? <PrivateWindow size={20} /> : <ShieldCheck size={18} />}
+            <span className="interview-preview-icon" data-interview-preview-button role="img" aria-label={t('截图保护已开启')}>
+              <EyeOff size={20} />
             </span>
             <span className="interview-preview-icon" data-interview-preview-button>
-              <RecordingWave />
+              <Recording />
             </span>
             <span className="interview-preview-icon danger-text" data-interview-preview-button>
               <Square size={17} />

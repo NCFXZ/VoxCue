@@ -221,8 +221,9 @@ try {
           );
           const read = () => {
             const style = getComputedStyle(node, pseudo);
-            return { opacity: Number(style.opacity), clip: style.clipPath,
-              color: pseudo === '::after' ? style.backgroundColor : style.borderBottomColor,
+            const masked = style.maskImage !== 'none';
+            return { opacity: Number(style.opacity), clip: style.clipPath, masked,
+              color: masked || pseudo === '::after' ? style.backgroundColor : style.borderBottomColor,
               checked: node.checked, border: getComputedStyle(node).borderTopColor };
           };
           const directions = [];
@@ -248,6 +249,7 @@ try {
       );
       assert.equal(motion.radius, '6px');
       for (const { from, middle, to } of motion.directions) {
+        if (process.platform === 'darwin') assert.ok(to.masked, 'macOS uses its symbol mask for the glyph');
         assert.equal(to.color, motion.accent, 'The glyph uses the current theme accent');
         if (to.checked) {
           const alpha = Number(to.border.match(/(?:,\s*|\/\s*)([\d.]+)\s*\)$/)?.[1]);

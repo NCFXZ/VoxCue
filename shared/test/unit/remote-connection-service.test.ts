@@ -520,6 +520,20 @@ it('expires and rejects invitations without silently replacing an approved devic
   expect(() => service.approve(pending.id)).toThrow('失效');
 });
 
+it('closes the idle listener after an invitation expires without a paired device', async () => {
+  let now = Date.now();
+  vi.spyOn(Date, 'now').mockImplementation(() => now);
+  const { service, origin } = await start();
+  const invitation = service.pairing();
+  now = invitation.expiresAt + 1;
+  const token = new URLSearchParams(new URL(invitation.url).hash.slice(1)).get('pair');
+  expect((await post(origin, '/pair', { token, name: 'Temporary phone' })).status).toBe(401);
+  expect(service.state().status).toBe('waiting');
+  await service.disconnect();
+  expect(service.state()).toMatchObject({ status: 'off', pending: null, addresses: [] });
+  await expect(rawGet(origin, '/')).rejects.toThrow();
+});
+
 it('deduplicates accepted operations, rejects changed reuse and fences stale sessions', async () => {
   const { service, origin, onCommand } = await start();
   service.updateSnapshot(snapshot());
@@ -808,6 +822,45 @@ it('keeps an accepted operation running over a short disconnect and never repeat
   finish({ requestId: command.requestId, ok: true });
   expect((await resumed.next('result')).result.ok).toBe(true);
   expect(handler).toHaveBeenCalledOnce();
+});
+
+it('shares a new interview only with the approval shown at confirmation, including a same-device reconnect', async () => {
+  const { service, origin } = await start();
+  const phone = await pair(service, origin);
+  const shown = service.state().approvalRevision;
+  expect(shown).toBeGreaterThan(0);
+  await service.confirmInterviewDevice(shown);
+  expect(service.state().status).toBe('connected');
+
+  phone.client.terminate();
+  await vi.waitFor(() => expect(service.state().status).toBe('reconnecting'));
+  const whileDisconnected = service.state().approvalRevision;
+  expect(whileDisconnected).toBeUndefined();
+
+  // A user who saw this same device may still start while its connection recovers.
+  await service.confirmInterviewDevice(shown);
+  expect(service.state().status).toBe('reconnecting');
+  const restored = await socket(origin);
+  restored.send({ type: 'resume', protocolVersion: REMOTE_PROTOCOL_VERSION, token: phone.token });
+  await restored.next('paired');
+  expect(service.state().approvalRevision).toBe(shown);
+
+  // If the user confirmed while it was absent, even a completed reconnect before launch is excluded.
+  await service.confirmInterviewDevice(whileDisconnected);
+  expect(service.state()).toMatchObject({ status: 'off', clientName: null, addresses: [] });
+  expect(service.state().approvalRevision).toBeUndefined();
+});
+
+it('requires fresh consent if a different device was approved after the start dialog was seen', async () => {
+  const { service, origin } = await start();
+  const first = await pair(service, origin);
+  const shown = service.state().approvalRevision;
+  first.client.terminate();
+  await vi.waitFor(() => expect(service.state().status).toBe('reconnecting'));
+  await pair(service, origin);
+  expect(service.state().approvalRevision).not.toBe(shown);
+  await service.confirmInterviewDevice(shown);
+  expect(service.state().status).toBe('off');
 });
 
 it('can explicitly replace a disconnected authorization with a fresh invitation during the resume window', async () => {

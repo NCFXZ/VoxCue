@@ -60,6 +60,7 @@ interface CommandEntry {
   result?: RemoteCommandResult;
 }
 interface Authorization {
+  revision: number;
   token: string;
   address: string;
   name: string;
@@ -127,7 +128,14 @@ export class RemoteConnectionService {
   constructor(private options: Options) {}
 
   state(): RemoteConnectionState {
-    return structuredClone(this.current);
+    const state = structuredClone(this.current);
+    if (this.active && this.authorization) state.approvalRevision = this.authorization.revision;
+    return state;
+  }
+
+  async confirmInterviewDevice(approvedRevision?: number): Promise<void> {
+    if (this.authorization && this.authorization.revision !== approvedRevision)
+      await this.disconnect();
   }
 
   private change(patch: Partial<Omit<RemoteConnectionState, 'revision'>>) {
@@ -288,6 +296,7 @@ export class RemoteConnectionService {
     if (this.hasPaired) this.updateSnapshot(null);
     this.hasPaired = true;
     this.authorization = {
+      revision: this.current.revision + 1,
       token: secret(),
       address: this.clients.get(socket)!.address,
       name: pending.name,

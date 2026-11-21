@@ -19,13 +19,14 @@ function fixture(kill = () => true) {
   native.spawn.mockReturnValue(child);
   const audio = vi.fn();
   const failure = vi.fn();
-  const capture = new CoreAudioCapture('synthetic', 'system', undefined, audio, failure);
+  const audioLost = vi.fn();
+  const capture = new CoreAudioCapture('synthetic', 'system', undefined, audio, failure, audioLost);
   const ready = async (value = capture) => {
     const start = value.start();
     child.stderr.emit('data', Buffer.from('{"type":"started"}\n'));
     await start;
   };
-  return { child, capture, audio, failure, ready };
+  return { child, capture, audio, failure, audioLost, ready };
 }
 it('shares stop work, drains audio after exit and requires actual close', async () => {
   const f = fixture();
@@ -121,6 +122,7 @@ it.each([
   await f.capture.stop();
   expect(f.failure).toHaveBeenCalledOnce();
   expect(f.failure.mock.calls[0][1]).toBe(false);
+  expect(f.audioLost).toHaveBeenCalledTimes(code === 'device-changed-or-backpressure' ? 1 : 0);
 });
 
 it('does not retry an ambiguous EPIPE that precedes permission output', async () => {
@@ -168,4 +170,37 @@ it('reports a running exit with unclosed pipes without permitting an automatic r
   f.child.emit('close', 1);
   await f.capture.stop();
   expect(vi.getTimerCount()).toBe(0);
+});
+
+it('drains a fragmented final packet after a route change before permitting recovery', async () => {
+  const f = fixture();
+  await f.ready();
+  const packet = Buffer.alloc(25);
+  packet.writeUInt32LE(21);
+  packet[4] = 1;
+  packet.writeUInt32LE(16000, 5);
+  packet.writeFloatLE(0.25, 21);
+  f.child.stdout.emit('data', packet.subarray(0, 10));
+  f.child.stderr.emit('data', Buffer.from('{"type":"error","code":"device-changed"}\n'));
+  expect(f.failure).toHaveBeenCalledWith(expect.any(String), true);
+  const recovery = f.capture.stop('recover');
+  f.child.stdout.emit('data', packet.subarray(10));
+  f.child.emit('close', 1);
+  await recovery;
+  expect(f.audio.mock.calls[0][0].samples[0]).toBe(0.25);
+  expect(f.audioLost).not.toHaveBeenCalled();
+  expect(f.capture.retired).toBe(true);
+});
+
+it.each(['truncated-pcm', 'late-diagnostic'])('blocks automatic restart after %s during drain', async kind => {
+  const f = fixture();
+  await f.ready();
+  const recovery = f.capture.stop('recover');
+  if (kind === 'truncated-pcm') f.child.stdout.emit('data', Buffer.of(21, 0));
+  else f.child.stderr.emit('data', Buffer.from('{"type":"error","code":"drain-failed"}'));
+  f.child.emit('close', 1);
+  await expect(recovery).rejects.toBe(f.capture.terminalError);
+  expect(f.capture.terminalError).toBeInstanceOf(Error);
+  expect(f.audioLost).toHaveBeenCalledOnce();
+  expect(f.capture.retired).toBe(true);
 });

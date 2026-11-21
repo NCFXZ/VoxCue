@@ -7,7 +7,7 @@ import {
 } from '../../electron/contracts/profile';
 import { useKnowledgeIndex } from '../stores/knowledgeIndex';
 import { digestCloudBlob, digestImportRecord, type decodeCloudItem } from './cloudData';
-import { historyRepository, type InterviewRecord } from './history';
+import { historyRepository, type HistorySummary, type InterviewRecord } from './history';
 import { sameValue } from './storedEqual';
 import {
   documentRevision,
@@ -39,10 +39,11 @@ type Original = {
 };
 type Choice =
   | { type: 'field'; field: Field; source: PersonalInfo; previous: PersonalInfo }
-  | { type: 'record'; source: InterviewRecord; previous?: InterviewRecord; images: string[] }
-  | { type: 'recordPreview'; summary: DeferredRecord; previous?: InterviewRecord }
+  | { type: 'recordPreview'; summary: DeferredRecord; previous?: HistorySummary }
   | { type: 'base'; source: KnowledgeBase; previous?: KnowledgeBase; files: Original[] }
   | { type: 'resume'; file: Original };
+type PreparedChoice = Exclude<Choice, { type: 'recordPreview' }> |
+  { type: 'record'; source: InterviewRecord; previous?: InterviewRecord; images: string[] };
 export interface ImportPlan {
   entries: ImportPreviewEntry[];
   choices: ReadonlyMap<string, Choice>;
@@ -104,7 +105,11 @@ async function planOriginal(
     previous.size === source.size &&
     (await digestCloudBlob(previous.blob)) === (await digest());
   return {
-    next: { ...source, id },
+    // Match the wire field order of a newly imported local document.
+    next: {
+      id, baseId: source.baseId, name: source.name,
+      size: source.size, type: source.type, createdAt: source.createdAt,
+    },
     read,
     previous,
     changed: !identical,
@@ -128,7 +133,7 @@ export async function buildImportPlan(
       : { bases: [], documents: [] },
   );
   const records = new Map(
-    (payloads.some((item) => item.type === 'record' || item.type === 'recordPreview') ? await historyRepository.list() : []).map((record) => [
+    (payloads.some((item) => item.type === 'record' || item.type === 'recordPreview') ? await historyRepository.summaries() : []).map((record) => [
       record.id,
       record,
     ]),
@@ -187,22 +192,20 @@ export async function buildImportPlan(
           { type: 'field', field, source: item.profile, previous: profile },
         );
       }
-    } else if (item.type === 'recordPreview') {
-      const previous = records.get(item.id);
-      const conflict = !!previous && (previous.title !== item.title || await digestImportRecord(previous) !== await item.digest());
-      add({ key: 'record:' + item.id, group: 'interviews', title: item.title, conflict },
-        { type: 'recordPreview', summary: item, previous });
-    } else if (item.type === 'record') {
-      const previous = records.get(item.record.id);
-      add(
-        {
-          key: 'record:' + item.record.id,
-          group: 'interviews',
-          title: item.record.title,
-          conflict: !!previous && !sameValue(previous, item.record),
-        },
-        { type: 'record', source: item.record, previous, images: item.images },
-      );
+    } else if (item.type === 'recordPreview' || item.type === 'record') {
+      const summary: DeferredRecord = item.type === 'recordPreview' ? item : {
+        type: 'recordPreview', id: item.record.id, title: item.record.title, images: item.images,
+        digest: () => digestImportRecord(item.record), read: async () => item.record,
+      };
+      const previous = records.get(summary.id);
+      let conflict = !!previous;
+      if (previous && previous.title === summary.title) {
+        const record = await historyRepository.get(previous.id, previous.revision);
+        if (!record) throw stale();
+        conflict = await digestImportRecord(record) !== await summary.digest();
+      }
+      add({ key: 'record:' + summary.id, group: 'interviews', title: summary.title, conflict },
+        { type: 'recordPreview', summary, previous });
     } else if (item.type === 'base') {
       if (item.base.id === resumeBase) throw invalid();
       const previous = target.bases.get(item.base.id);
@@ -223,7 +226,7 @@ export async function buildImportPlan(
 }
 
 /** The previous localStorage values remain available until the IndexedDB transaction commits. */
-function publishText(choices: Choice[]) {
+function publishText(choices: PreparedChoice[]) {
   const writes = new Map<string, string>();
   const fields = choices.filter((choice) => choice.type === 'field');
   if (fields.length) {
@@ -268,14 +271,16 @@ export async function prepareImportWrites(
 ) {
   guard();
   if (!keys.length || keys.length !== new Set(keys).size) throw invalid();
-  const selected: Choice[] = [];
+  const selected: PreparedChoice[] = [];
   for (const key of keys) {
     const item = plan.choices.get(key);
     if (!item) throw invalid();
     if (item.type === 'recordPreview') {
+      const previous = item.previous && await historyRepository.get(item.previous.id, item.previous.revision);
+      if (item.previous && !previous) throw stale();
       const record = await item.summary.read();
       guard();
-      selected.push({ type: 'record', source: record, previous: item.previous, images: item.summary.images });
+      selected.push({ type: 'record', source: record, previous, images: item.summary.images });
     } else selected.push(item);
   }
   const records = selected.filter((choice) => choice.type === 'record');
@@ -356,16 +361,13 @@ export async function prepareImportWrites(
         } catch {
           return;
         }
-        for (const doc of added) void useKnowledgeIndex.getState().index(doc, true);
+        void useKnowledgeIndex.getState().indexSelection(added, true);
       } catch (error) {
         if (invalidated.length) {
           guard();
           const current = indexKnowledge(await syncKnowledgeSnapshot());
           guard();
-          for (const id of invalidated) {
-            const doc = current.byId.get(id);
-            if (doc) void useKnowledgeIndex.getState().index(doc, true);
-          }
+          void useKnowledgeIndex.getState().indexSelection(invalidated.flatMap(id => current.byId.get(id) ?? []), true);
         }
         throw error;
       } finally { release(); }

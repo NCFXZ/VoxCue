@@ -4,11 +4,15 @@
 
 ## 固定公开输入
 
-工具仅从官方来源下载，先核对摘要，再解包到本轮自有系统临时根；不全局安装，不升级固定版本。公开镜像固定为：
+工具仅从官方来源下载，先核对摘要，再解包到本轮自有系统临时根。宿主工具仅在该目录运行并沿用固定版本。来宾可使用以下固定 Cirrus 镜像：
 
 ```text
 ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd
 ```
+
+另一条路径是使用 Apple 官方目录中 `VirtualMac2,1` 的 [macOS 27.2.1 恢复镜像](https://updates.cdn-apple.com/2026FallFCS/c202a724-db7e-4d56-917b-110aa0226507/UniversalMac_27.2.1_26B131_Restore.ipsw)。将原名 IPSW 保存在 owner 临时根，使用 Tart 的 `create --from-ipsw` 调用 Apple 安装器，在新建的基线上安装系统。该文件为 25,595,954,706 字节，SHA-256 为 `233e85a09887579d47d0b195e7db72be7f204261059c6946f719acf6b300814f`。runner 在克隆前独立核对文件，启动后核对 guest build 为 `26B131`。
+
+macOS 27 宿主可使用 Tart 首启预配建立仅在来宾使用的临时管理员与自动登录。预配阶段使用仅宿主可达的网络，安装 Apple 签名 CLTools、固定 Node 和普通用户的 Tart vsock agent。随后重启核实 SIP、Gatekeeper 和工具版本，关机后再交给断网验收入口。
 
 | 工具 | 固定版本与归档 | SHA-256 |
 | --- | --- | --- |
@@ -25,7 +29,7 @@ guest 还需在 `/opt/homebrew/bin/node` 准备与当前测试环境一致的 No
 准备完成的基线必须停止，运行实例另行克隆。runner 不接管已有活跃用户 VM。当前协议要求：
 
 - `VOXCUE_TEST_TART_HOME` 的父目录为自有、真实且无重定向的临时根，其中 `.owner.json` 的 `kind` 为 `voxcue-macos-120`，`uid` 为当前 UID；该值是 runner 的既有归属协议，不是应用版本。
-- 同目录的 `vm-image-source.json` 保存上述固定 `reference` 和 `preparedVM`。准备实例名符合 `voxcue[\w-]+-base`，运行实例名符合 `voxcue[\w-]+`，两者不同且初始均停止。
+- 同目录的 `vm-image-source.json` 保存上述完整 OCI 引用或 Apple 恢复镜像 URL 作为 `reference`，并记录 `preparedVM`。准备实例名符合 `voxcue[\w-]+-base`，运行实例名符合 `voxcue[\w-]+`，两者不同且初始均停止。
 - 实际 guest 必须是 hypervisor 来宾，机器 UUID 与宿主不同；自有上下文的 UID、nonce、根路径和 guest UUID 一致，目录 `0700`、上下文普通单链接文件 `0600`。
 - `csrutil status` 必须为 `System Integrity Protection status: enabled.`，`spctl --status` 必须为 `assessments enabled`，启动参数不得含 AMFI／签名执行绕过项。命令执行结束不能代替重启后的状态核验。
 
@@ -47,7 +51,15 @@ guest 还需在 `/opt/homebrew/bin/node` 准备与当前测试环境一致的 No
 node test/scripts/package-guest-smoke.mjs
 ```
 
-完整入口先认证 `package-upgrade-baselines.mjs` 中的正式 1.1.1、1.2.2 arm64 ZIP，再复制到规范 `macos/release/<版本>/` 输入位置。它们分别代表旧 v1 和现用 v11 的应用基线。未发布中间应用和凭据候选不进入当前升级排程。
+完整入口先认证 `package-upgrade-baselines.mjs` 中的正式 1.1.1、1.2.2 和 1.2.3 arm64 ZIP，再复制到规范 `macos/release/<版本>/` 输入位置。1.1.1 使用旧 v1 助手，后两个版本使用 v11。1.2.3 是本次升级的直接前序版本。
+
+单独复测安装与覆盖升级时可传 `--install-only`。它执行正式安装包检查和三个归档版本的升级用例，并使用包内 Qwen 程序对合成音频做 CPU 转写。客机报告支持 Metal 时也执行 Metal 转写；缺少该能力时终端单列待验。镜像、来宾保护和临时资料校验与完整入口相同。
+
+单独复测包内运行时时可传 `--runtime-only`。它在干净客机中用系统复制工具将只读 DMG 内的应用安装到 `/Applications/VoxCue.app`，通过 LaunchServices 两次启动并正常退出，随后检查 Copilot/Codex 的离线握手、合成截图的编码与 Worker 回收、已校验组件的就绪状态及推理。复制时保留原有的隔离标记。
+
+需要在同一个干净客机串行复测以上两组时，同时传 `--install-only --runtime-only`。每组使用独立产品资料，结束时汇总失败项。
+
+仅复测升级可传 `--upgrades-only`。先检查最终安装包及历史 ZIP 的签名或摘要，再从最新的旧版开始验证三条路径。重跑某一个旧版时可附加 `--from=1.2.3`，版本必须在固定摘要清单中。
 
 runner 仅分享白名单公开代码、依赖、模型和发行资产的只读临时输入；宿主 home、真实 Keychain、私有签名材料、账号、剪贴板、音频和 USB 均不共享。源依赖的编号副本只有在规范同名项存在时才跳过；代码通过普通归档在 guest 本地恢复，避免 virtiofs framework 链接问题。
 

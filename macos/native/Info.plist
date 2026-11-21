@@ -3,6 +3,6 @@
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>com.voxcue.audio</string>
 <key>CFBundleName</key><string>VoxCue Audio</string>
-<key>NSMicrophoneUsageDescription</key><string>VoxCue 在你开始语音输入或面试后在本机转写麦克风，不保存或上传音频。</string>
-<key>NSAudioCaptureUsageDescription</key><string>VoxCue 在你开始面试后在本机转写所选播放设备的系统音频，不保存或上传音频。</string>
+<key>NSMicrophoneUsageDescription</key><string>VoxCue 在你开始语音输入或面试后在本机转写麦克风，仅在你启用面试录音时将音频保存在本机，不上传音频。</string>
+<key>NSAudioCaptureUsageDescription</key><string>VoxCue 在你开始面试后在本机转写所选播放设备的系统音频，仅在你启用面试录音时将音频保存在本机，不上传音频。</string>
 </dict></plist>

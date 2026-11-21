@@ -106,6 +106,7 @@ it('keeps a failed file retryable and indexes the healthy originals after a part
     const bad = originals.find(doc => doc.name === 'short.md')!;
     expect(f.events.filter(event => event.documentId === bad.id).at(-1)?.phase).toBe('failed');
     expect(f.events.filter(event => event.phase === 'ready')).toHaveLength(2);
+    expect(useKnowledgeIndex.getState().libraryProgress).toEqual({});
   } finally { f.disconnect(); await f.core.close(); }
 }, 20_000);
 
@@ -127,6 +128,7 @@ it('withdraws unpublished documents on owner disconnect while a later file is be
     expect(f.calls.filter(op => op === 'import')).toHaveLength(1);
     expect(await f.core.listDocuments()).toEqual([]);
     f.disconnect();
+    expect(useKnowledgeIndex.getState().libraryProgress).toEqual({});
     f.coordinator.cancelAll();
     release.resolve();
     await work;
@@ -153,6 +155,7 @@ it('respects explicit cancellation of one already staged request when replaying 
     };
     await useKnowledgeIndex.getState().indexSelection(docs);
     expect(cancelled).toBe(true);
+    expect(useKnowledgeIndex.getState().libraryProgress).toEqual({});
     expect((await f.core.listDocuments()).map(doc => doc.documentId)).toEqual([docs[1].id]);
     expect(await localKnowledge.listDocuments(f.baseId)).toHaveLength(2);
     expect(f.events.filter(e => e.phase === 'ready').map(e => e.documentId)).toEqual([docs[1].id]);

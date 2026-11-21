@@ -43,6 +43,7 @@ export interface CaptureAdapter {
     device: string | undefined,
     audio: (packet: AudioPacket) => void,
     failure: (message: string, recoverable?: boolean) => void,
+    audioLost: () => void,
   ): NativeCapture;
 }
 export const speechModelName = speechModelLabels.paraformer;
@@ -61,9 +62,11 @@ export class SpeechController {
   private unflushedTail = false;
   private ready?: Promise<void>;
   private loadingTimer?: ReturnType<typeof setTimeout>;
+  private idleModelTimer?: ReturnType<typeof setTimeout>;
   private captures = new Map<AudioSource, NativeCapture>();
   private queued = 0;
-  private pendingAudio = new Map<number, { source: AudioSource; ms: number }>();
+  private pendingAudio = new Map<number, { source: AudioSource; ms: number; clockChanged: boolean }>();
+  private recognitionClockOffsets = new Map<AudioSource, number>();
   private pendingBySource = { system: 0, microphone: 0 };
   private drainingQwenQueue = false;
   private processedThrough = new Map<AudioSource, number>();
@@ -73,7 +76,6 @@ export class SpeechController {
   private recentGaps = new Map<AudioSource, number[]>();
   private droppedSamples = 0;
   private flushers = new Map<number, { resolve(): void; reject(error: Error): void }>();
-  private anchors = new Map<AudioSource, { native: number; wall: number }>();
   private status: SpeechStatus = { state: 'idle', model: speechModelName };
   private serial = Promise.resolve();
   private recoveryDrain?: Promise<PromiseSettledResult<void>[]>;
@@ -265,17 +267,20 @@ export class SpeechController {
           legacyModels: [path.join(path.dirname(this.helper), 'silero_vad.onnx'), path.join(this.model, 'silero_vad.onnx')],
         },
       });
-      this.expediteDowngrade();
+      this.expediteBackloggedSwitch();
     });
   }
-  private expediteDowngrade() {
+  private expediteBackloggedSwitch() {
     const change = this.switching;
-    // Four seconds of combined unacknowledged PCM is already two seconds
-    // behind on a dual-input interview. Only expedite an explicit downgrade.
-    if (
-      this.queued < 4000 || !change || change.expedited ||
-      this.selection.speechModel !== 'qwen' || change.selection.speechModel !== 'paraformer'
-    ) return;
+    if (!change || change.expedited || this.selection.speechModel !== 'qwen') return;
+    if (change.selection.speechModel === 'paraformer') {
+      if (this.queued < 4000) return;
+    } else {
+      // Let ordinary device switches finish the current utterance. Near the 30s
+      // limit, a ready GPU can take over before the overloaded CPU stops capture.
+      if (this.selection.inferenceDevice !== 'cpu' || change.selection.inferenceDevice === 'cpu' ||
+        this.queued < 24000) return;
+    }
     change.expedited = true;
     this.worker!.postMessage({ op: 'expedite-switch' });
   }
@@ -391,14 +396,15 @@ export class SpeechController {
           this.interviewDsp?.start([...this.captures.keys()]);
           this.recordingChannels.delete('microphone');
         }
+        const resumed = changed.filter(source => !inputSourceEnabled(previous, source) && inputSourceEnabled(state, source));
+        if (resumed.length) {
+          const cutoff = this.adapter.captureClockNow?.() ?? Date.now();
+          for (const source of resumed) this.inputResumeClock.set(source, cutoff);
+        }
         this.inputState = state;
         this.managedInput = true;
         this.options = { ...this.options!, sources: inputSources(state) };
-        for (const source of changed) {
-          this.processedThrough.delete(source);
-          if (!inputSourceEnabled(previous, source) && inputSourceEnabled(state, source))
-            this.inputResumeClock.set(source, this.adapter.captureClockNow?.() ?? Date.now());
-        }
+        for (const source of changed) this.processedThrough.delete(source);
         this.changingInput = undefined;
         this.blockedInput.clear();
         resolve(this.state(this.status.state));
@@ -419,7 +425,6 @@ export class SpeechController {
     this.inputCleanup = (async () => {
       for (const [source, capture] of change.added) {
         if (this.captures.get(source) === capture) this.captures.delete(source);
-        this.anchors.delete(source);
         await capture.stop();
       }
       if (change.worker && change.worker === this.worker)
@@ -433,6 +438,7 @@ export class SpeechController {
     return this.inputCleanup.then(() => this.status);
   }
   private capture(source: AudioSource, options: SpeechOptions, epoch: number, levelsOnly = false): NativeCapture {
+    let wallOffset: number | undefined;
     let sumSquares = 0;
     let sampleCount = 0;
     const capture = this.adapter.create(
@@ -452,15 +458,15 @@ export class SpeechController {
           return;
         }
         const validClock = !(p.flags & 4) && Number.isFinite(p.timestamp);
-        let anchor = this.anchors.get(source);
-        if (!anchor && validClock) {
-          anchor = { native: p.timestamp, wall: Date.now() };
-          this.anchors.set(source, anchor);
-        }
         try {
+          let timestamp = p.timestamp;
+          if (!validClock) timestamp = this.adapter.captureClockNow?.() ?? Date.now();
+          else if (!this.adapter.captureClockNow) {
+            wallOffset ??= Date.now() - timestamp;
+            timestamp += wallOffset;
+          }
           this.audio(
-            source, p.samples, p.rate, p.flags,
-            validClock ? anchor!.wall + p.timestamp - anchor!.native : Date.now(),
+            source, p.samples, p.rate, p.flags, timestamp,
             validClock ? p.timestamp : undefined,
           );
         } catch (error) {
@@ -471,6 +477,10 @@ export class SpeechController {
       (message, recoverable) => {
         if (epoch === this.epoch && this.captures.get(source) === capture)
           this.fail(message, source, !levelsOnly && recoverable);
+      },
+      () => {
+        if (!levelsOnly && epoch === this.epoch && this.captures.get(source) === capture && this.inputEnabled(source))
+          this.unflushedTail = true;
       },
     );
     return capture;
@@ -499,6 +509,7 @@ export class SpeechController {
         }
         if (m.event && this.failedWorker !== worker) {
           const source = m.event.type === 'segment' ? m.event.segment.source : m.event.source;
+          if (m.event.type === 'gap' && source) this.processedThrough.delete(source);
           if (!source || this.inputEnabled(source)) this.emit(m.event);
         }
         const change = this.switching;
@@ -536,6 +547,7 @@ export class SpeechController {
           this.pendingBySource[packet.source]--;
           this.queued = this.pendingAudio.size ? Math.max(0, this.queued - packet.ms) : 0;
           if (!this.pendingAudio.size) this.drainingQwenQueue = false;
+          if (packet.clockChanged) this.processedThrough.delete(packet.source);
           for (const source of ['microphone', 'system'] as const) {
             const through = m.progress?.[source];
             const previous = this.processedThrough.get(source) ?? -Infinity;
@@ -623,6 +635,7 @@ export class SpeechController {
     this.pendingAudio.clear();
     this.pendingBySource = { system: 0, microphone: 0 };
     this.processedThrough.clear();
+    this.recognitionClockOffsets.clear();
   }
   private audio(
     source: AudioSource,
@@ -637,7 +650,7 @@ export class SpeechController {
     if (!enabled && !reference) return;
     if (flags & 1) {
       this.discontinuities++;
-      const now = Date.now();
+      const now = performance.now();
       const gaps = [...(this.recentGaps.get(source) ?? []).filter((at) => now - at < 10000), now];
       this.recentGaps.set(source, gaps);
       const affected = this.interviewDsp?.discontinuity(source) ?? [source];
@@ -718,11 +731,32 @@ export class SpeechController {
       );
       return;
     }
+    // Preserve the age of queued or echo-delayed samples across sleep and clock changes.
+    let clockChanged = false;
+    if (this.adapter.captureClockNow) {
+      let offset: number;
+      try {
+        offset = Date.now() - this.adapter.captureClockNow();
+      } catch {
+        this.fail('本机音频时钟不可用，请重新开始采集。');
+        return;
+      }
+      const previous = this.recognitionClockOffsets.get(source);
+      // Both recognizers time a stream by counting samples from its first packet.
+      // Start a new stream after a wall-clock step without disturbing the recorder.
+      clockChanged = previous !== undefined && Math.abs(offset - previous) > 100;
+      if (previous === undefined || clockChanged) this.recognitionClockOffsets.set(source, offset);
+      if (clockChanged) {
+        this.worker.postMessage({ op: 'gap', source });
+        this.emit({ type: 'gap', source, message: '系统时间已变化，转写已继续。' });
+      }
+      timestamp += offset;
+    }
     this.queued += ms;
     this.maxQueue = Math.max(this.maxQueue, this.queued);
     const sequence = ++this.sequence;
-    this.pendingAudio.set(sequence, { source, ms });
-    this.expediteDowngrade();
+    this.pendingAudio.set(sequence, { source, ms, clockChanged });
+    this.expediteBackloggedSwitch();
     // Publish the backlog before the worker can emit a final. A final decoded
     // from old audio is insufficient while newer system audio is unchecked.
     if (++this.pendingBySource[source] === 1) this.progress(source);
@@ -841,7 +875,7 @@ export class SpeechController {
       const count = stop
         ? Math.max(0, Math.ceil(((stop.at - timestamp) * rate) / 1000))
         : samples.length;
-      const skip = Math.max(0, Math.ceil(((this.recording.startedAt - timestamp) * rate) / 1000));
+      const skip = Math.max(0, Math.ceil(((this.recording.captureStartedAt - timestamp) * rate) / 1000));
       const chunk = samples.subarray(skip, count);
       if (chunk.length) {
         const start = timestamp + skip * 1000 / rate;
@@ -905,7 +939,10 @@ export class SpeechController {
           // Let delayed AEC output reach the cut without resetting its learned echo path.
           await new Promise<void>(resolve => {
             const timer = setTimeout(resolve, 150);
-            this.recordingStop = { at: Date.now(), drained() { clearTimeout(timer); resolve(); } };
+            this.recordingStop = {
+              at: this.adapter.captureClockNow?.() ?? Date.now(),
+              drained() { clearTimeout(timer); resolve(); },
+            };
           });
         }
         await this.finishRecording();
@@ -914,7 +951,7 @@ export class SpeechController {
         await this.recordingDrain;
         const writer = new InterviewRecording(call.directory, Date.now(), () => {
           void this.finishRecording(recordingFailure);
-        });
+        }, this.adapter.captureClockNow);
         this.recording = writer;
         try {
           await writer.ready;
@@ -951,7 +988,6 @@ export class SpeechController {
       const recordingDrain = this.finishRecording();
       if (this.adapter.drainBeforeRetire) ++this.epoch;
       this.captures.clear();
-      this.anchors.clear();
       this.recentGaps.clear();
       if (dspFailed || stopped.some((result) => result.status === 'rejected')) {
         const worker = this.worker;
@@ -1025,6 +1061,18 @@ export class SpeechController {
         // Returning from stop makes the history and its recordings available.
         await recordingDrain;
       }
+      if (call.op === 'stop' && !this.managedInput && this.worker && !this.closed) {
+        // Dictation and device tests can reuse the model briefly after their final flush.
+        const epoch = this.epoch;
+        clearTimeout(this.idleModelTimer);
+        this.idleModelTimer = setTimeout(() => {
+          void this.enqueue(async () => {
+            if (this.epoch === epoch && !this.closed) await this.retireWorker();
+            return this.status;
+          });
+        }, 30_000);
+        this.idleModelTimer.unref();
+      }
       return this.state(call.op === 'pause' ? 'paused' : 'idle');
     }
     if (call.op !== 'start') throw Error('Invalid speech operation');
@@ -1053,6 +1101,7 @@ export class SpeechController {
       if (!available.some((d) => d.source === source))
         throw Error('未发现' + (source === 'system' ? '播放' : '麦克风') + '设备。');
     }
+    clearTimeout(this.idleModelTimer);
     this.state('loading');
     let startupFailure: SpeechStatus['failureSource'] = 'model';
     try {
@@ -1131,7 +1180,6 @@ export class SpeechController {
             if (capture.retiring !== false) throw stopError;
           }
           this.captures.delete(source);
-          this.anchors.delete(source);
           this.interviewDsp!.start(call.options.sources);
           missingReference = true;
         }
@@ -1157,7 +1205,6 @@ export class SpeechController {
       const captures = [...this.captures.values()];
       this.captures.clear();
       this.clearAudioQueue();
-      this.anchors.clear();
       this.recentGaps.clear();
       this.ready = undefined;
       clearTimeout(this.loadingTimer);
@@ -1186,6 +1233,7 @@ export class SpeechController {
     }
   }
   private async retireWorker() {
+    clearTimeout(this.idleModelTimer);
     this.reloadAfterStop = false;
     this.drainingQwenQueue = false;
     const worker = this.worker;

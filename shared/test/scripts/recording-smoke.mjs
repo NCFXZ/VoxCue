@@ -1,10 +1,11 @@
 import { evaluateHistory } from './stored-history-fixture.mjs';
+import { assertSystemSymbol } from './assert-system-symbol.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
 import { mkdir, readFile, readdir } from 'node:fs/promises';
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { closeUiApp, connectUiAccount, installUiAccount } from './install-ui-account.mjs';
+import { closeUiApp, connectUiAccount, focusUiWindow, installUiAccount } from './install-ui-account.mjs';
 import { holdControl } from './assert-download-button.mjs';
 import { assertMenuBackdrop } from './assert-menu-backdrop.mjs';
 import { captureRequested } from './capture-requested.mjs';
@@ -79,15 +80,19 @@ try {
     }
     return frames;
   });
-  if (process.platform === 'win32') {
-    const protectedButton = floating.getByRole('button', { name: '关闭截图保护', exact: true, pressed: true });
-    const visibleButton = floating.getByRole('button', { name: '开启截图保护', exact: true, pressed: false });
-    const original = await protectedButton.locator('svg path').getAttribute('d');
-    await protectedButton.click();
-    assert.notEqual(await visibleButton.locator('svg path').getAttribute('d'), original);
-    await visibleButton.click();
-    assert.equal(await protectedButton.locator('svg path').getAttribute('d'), original);
-  }
+  const protectedButton = floating.getByRole('button', { name: '关闭截图保护', exact: true, pressed: true });
+  const visibleButton = floating.getByRole('button', { name: '开启截图保护', exact: true, pressed: false });
+  const protectionIcon = (button) => process.platform === 'darwin'
+    ? button.locator('svg').getAttribute('data-sf-symbol')
+    : button.locator('svg path').getAttribute('d');
+  const original = await protectionIcon(protectedButton);
+  if (process.platform === 'darwin') await assertSystemSymbol(protectedButton, 'EyeOff', 'eye.slash', 20);
+  await protectedButton.click();
+  const unprotected = await protectionIcon(visibleButton);
+  assert.notEqual(unprotected, original);
+  if (process.platform === 'darwin') await assertSystemSymbol(visibleButton, 'Eye', 'eye', 20);
+  await visibleButton.click();
+  assert.equal(await protectionIcon(protectedButton), original);
   await floating.emulateMedia({ reducedMotion: 'no-preference' });
   const moving = await sampleWave();
   assert.ok(moving.some((frame, i) => i && frame.x < moving[i - 1].x), 'Wave travels left between samples');
@@ -192,11 +197,18 @@ try {
     assert.equal(material.player[1].includes('blur('), frosted);
   };
   await checkMaterial(true);
-  await player.hover();
+  await focusUiWindow(app, main);
+  await main.waitForFunction(() => document.getAnimations().every(animation =>
+    animation.effect?.getTiming().iterations === Infinity || animation.playState !== 'running'));
+  await player.hover({ position: { x: 20, y: 20 } });
   const expandButton = player.getByRole('button', { name: '展开播放器' });
-  const clipIcon = player.getByRole('button', { name: '选择录音' }).locator('svg path');
+  const clipIcon = player.getByRole('button', { name: '选择录音' }).locator('svg');
+  const assertClipIcon = async () => {
+    if (process.platform === 'darwin') assert.equal(await clipIcon.getAttribute('data-sf-symbol'), 'waveform');
+    else assert.equal(await clipIcon.locator('path').getAttribute('d'), still[0].shape);
+  };
   await expandButton.waitFor();
-  assert.equal(await clipIcon.getAttribute('d'), still[0].shape);
+  await assertClipIcon();
   await main.waitForFunction(() => document.querySelector('.record-player').offsetWidth === 118);
   const metrics = await player.evaluate(el => {
     const play = el.querySelector('.record-player-transport > button:not(.record-extra)');
@@ -216,7 +228,7 @@ try {
   assert.equal(await player.evaluate(el => getComputedStyle(el).borderTopLeftRadius),
     await player.evaluate(el => getComputedStyle(el).getPropertyValue('--radius-composer').trim()));
   assert.equal(await player.locator('.frosted-slider-control input').count(), 1);
-  assert.equal(await clipIcon.getAttribute('d'), still[0].shape);
+  await assertClipIcon();
   await checkMaterial(true);
   await main.evaluate(() => document.documentElement.classList.toggle('dark'));
   await checkMaterial(true);
@@ -240,6 +252,7 @@ try {
     throw Error('Recording did not start or synchronize: ' + JSON.stringify(media), { cause });
   });
   const locate = player.getByRole('button', { name: '定位到当前位置' });
+  if (process.platform === 'darwin') await assertSystemSymbol(locate, 'Locate', 'scope', 18);
   const rows = main.locator('.record-transcript-row');
   const tints = await main.evaluate(() => {
     const probe = document.createElement('span');
@@ -336,6 +349,9 @@ try {
     return link && getComputedStyle(link.closest('.record-transcript-row')).backgroundColor === 'rgba(0, 0, 0, 0)';
   });
   await main.getByRole('button', { name: '定位到原问题' }).click();
+  // The link scrolls to the transcript before its highlight begins. A click
+  // during that scroll can move the row away from the pointer.
+  await main.locator('.record-transcript-row[data-location-highlight]').waitFor();
   await rows.nth(3).locator('.record-paragraph-time').click();
   await main.waitForFunction(located => {
     const row = document.querySelector('.record-transcript-row[data-location-highlight].is-playing:hover');
@@ -367,6 +383,14 @@ try {
   const submit = selection.getByRole('button', { name: '导出录音', exact: true });
   assert.equal(await selection.getByRole('checkbox').count(), 3);
   assert.equal(await all.isChecked(), true);
+  if (process.platform === 'darwin') {
+    const marks = await all.evaluate(input => ['::before', '::after'].map(pseudo => {
+      const style = getComputedStyle(input, pseudo);
+      return [style.maskImage, style.borderTopWidth];
+    }));
+    assert.ok(marks.every(([mask, border]) => mask.startsWith('url(') && border === '0px'));
+    assert.notEqual(marks[0][0], marks[1][0]);
+  }
   assert.equal(await toggle.getAttribute('aria-expanded'), 'true');
   assert.equal(await toggle.getAttribute('aria-controls'), await list.getAttribute('id'));
   await toggle.hover();

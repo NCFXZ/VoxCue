@@ -1,7 +1,8 @@
 import { constants } from 'node:fs';
-import { lstat, open, readdir, realpath } from 'node:fs/promises';
+import { lstat, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { profileDirectoryName } from '../../accountProfilePaths';
+import { storedProfileDirectories } from '../storedProfileDirectories';
 import { cloudOrigin } from './client';
 import { validMigrationVerifier } from './migrationPasswords';
 
@@ -13,17 +14,8 @@ export async function readMigrationPasswordRecords(
   userData: string,
   decrypt: (ciphertext: Buffer) => Promise<string>,
 ): Promise<boolean> {
-  const root = path.join(await realpath(userData), 'account-profiles');
-  const base = await lstat(root).catch((error: NodeJS.ErrnoException) => {
-    if (error.code !== 'ENOENT') throw error;
-  });
-  if (!base) return false;
-  if (!base.isDirectory() || (await realpath(root)) !== root) throw invalid();
   let found = false;
-  for (const entry of await readdir(root, { withFileTypes: true })) {
-    if (!/^[0-9a-f]{64}$/.test(entry.name)) continue;
-    const directory = path.join(root, entry.name);
-    if (!entry.isDirectory() || (await realpath(directory)) !== directory) throw invalid();
+  for await (const directory of storedProfileDirectories(userData)) {
     const file = path.join(directory, migrationPasswordFileName);
     const stat = await lstat(file).catch((error: NodeJS.ErrnoException) => {
       if (error.code !== 'ENOENT') throw error;
@@ -58,7 +50,7 @@ export async function readMigrationPasswordRecords(
       !validMigrationVerifier(value) ||
       typeof value.id !== 'string' ||
       cloudOrigin(value.origin, true) !== value.origin ||
-      profileDirectoryName('account:' + value.id) !== entry.name
+      profileDirectoryName('account:' + value.id) !== path.basename(directory)
     )
       throw invalid();
     found = true;

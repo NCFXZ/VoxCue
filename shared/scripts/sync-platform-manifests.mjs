@@ -26,7 +26,7 @@ for (const platform of ['windows', 'macos']) {
       paths: { '@/*': ['../shared/src/*'], '*': ['node_modules/@types/*', 'node_modules/*'] },
       typeRoots: ['node_modules/@types', 'node_modules'],
     },
-    include: ['../shared/src', ...(platform === 'macos' ? ['src/icons.tsx'] : [])],
+    include: ['../shared/src', ...(platform === 'macos' ? ['src/icons.tsx', 'src/mobile/MobileIcon.tsx'] : [])],
   };
   const electron = {
     extends: '../shared/tsconfig.electron.json',

@@ -14,6 +14,7 @@ import { createHash } from 'node:crypto';
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import path from 'node:path';
 import os from 'node:os';
+import { prepareSilero } from './prepare-silero.mjs';
 import workspace from '../../shared/scripts/workspace.mjs';
 import { loadDevelopmentSigning, signLocalCode, verifyLocalApp } from './development-signing.mjs';
 
@@ -39,6 +40,7 @@ export async function buildQwen({
   if (process.platform !== 'darwin' || process.arch !== 'arm64')
     throw Error('Apple Silicon required');
   const signing = await loadDevelopmentSigning();
+  await prepareSilero();
   const native = path.join(workspace.platformRoot, 'native/bin/qwen');
   const digest = createHash('sha256');
   async function hashSources(directory) {

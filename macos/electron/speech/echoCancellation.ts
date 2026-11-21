@@ -30,6 +30,8 @@ interface Lane {
   output: number;
   drift: number;
   wallDrift: number;
+  trusted: boolean;
+  packetTrusted: boolean;
 }
 
 export class EchoCancellation implements AudioPreprocessor {
@@ -45,6 +47,9 @@ export class EchoCancellation implements AudioPreprocessor {
   private emitted = 0;
   private lastMic?: Frame;
   private lastActive = false;
+  private echoOnly = false;
+  private echoEstablished = false;
+  private nearHoldSamples = 0;
   private readonly latency: number;
   constructor(
     private module: Module,
@@ -123,11 +128,18 @@ export class EchoCancellation implements AudioPreprocessor {
         output: 0,
         drift: 0,
         wallDrift: 0,
+        trusted: captureClock !== undefined,
+        packetTrusted: captureClock !== undefined,
       };
       this.lanes.set(source, lane);
     }
     if (lane.rate !== inputRate) throw Error('Echo cancellation input rate changed');
-    // Both native Mac sources use mach_absolute_time. Keep that shared clock for
+    // Packets without a host timestamp cannot align separate devices.
+    // Keep the resampler and output rate continuous, but bypass untrusted frames.
+    // A partial frame touching either untrusted packet remains untrusted.
+    lane.packetTrusted = captureClock !== undefined;
+    lane.trusted = lane.buffer.length ? lane.trusted && lane.packetTrusted : lane.packetTrusted;
+    // Both Core Audio sources report host time in milliseconds. Keep that shared clock for
     // reference alignment; the separate wall clock remains the transcript time.
     const elapsed = (lane.input / lane.rate) * 1000;
     lane.drift = captureClock === undefined ? lane.drift : captureClock - lane.clock - elapsed;
@@ -141,19 +153,23 @@ export class EchoCancellation implements AudioPreprocessor {
   private frames(source: AudioSource, lane: Lane, partial = false) {
     while (lane.buffer.length >= frameSize || (partial && lane.buffer.length)) {
       const length = Math.min(frameSize, lane.buffer.length);
-      const samples = new Float32Array(frameSize);
-      samples.set(lane.buffer.take(length));
+      const samples = lane.buffer.take(length, frameSize);
       const elapsed = (lane.output / rate) * 1000;
       const frame = {
         samples,
         length,
-        clock: lane.clock + elapsed + lane.drift,
+        clock: lane.trusted ? lane.clock + elapsed + lane.drift : NaN,
         wall: lane.wall + elapsed + lane.wallDrift,
         queued: performance.now(),
       };
       lane.output += length;
+      lane.trusted = lane.packetTrusted;
       if (source === 'system') {
-        this.render.push(frame);
+        if (Number.isFinite(frame.clock)) this.render.push(frame);
+        else {
+          this.render = [];
+          this.lastRender = this.lastSignal = -Infinity;
+        }
         // Reference history only; original system audio has already reached ASR.
         while (this.render.length > 100) this.render.shift();
       } else this.capture.push(frame);
@@ -198,9 +214,21 @@ export class EchoCancellation implements AudioPreprocessor {
         : Math.min(frameSize, mic.length + (mic.length < frameSize ? this.latency : 0));
       const skip = Math.min(this.skip, valid);
       this.skip -= skip;
-      const samples = (active ? output[0] : original).subarray(skip, valid);
-      if (samples.length)
-        this.consume('microphone', samples, rate, mic.wall + ((skip - this.latency) / rate) * 1000);
+      const raw = original.subarray(skip, valid);
+      const samples = active ? output[0].subarray(skip, valid) : raw;
+      if (raw.length) {
+        // Only a trusted playback reference can exclude a mic frame from ASR.
+        // Use AEC's time-aligned residual to distinguish loudspeaker-only
+        // frames from a local voice. Keep the raw voice and the original clock.
+        if (!active) {
+          this.echoEstablished = false;
+          this.nearHoldSamples = 0;
+        }
+        this.echoOnly = active && this.isPlaybackEcho(raw, samples, mic.clock - this.lastSignal);
+        const recognition = this.echoOnly ? new Float32Array(raw.length) : raw;
+        const timestamp = mic.wall + ((skip - this.latency) / rate) * 1000;
+        this.consume('microphone', samples, rate, timestamp, recognition);
+      }
       this.emitted += samples.length;
       this.lastMic = mic;
       this.lastActive = active;
@@ -218,6 +246,34 @@ export class EchoCancellation implements AudioPreprocessor {
         },
         Math.max(1, waitMs - (performance.now() - this.capture[0].queued)),
       );
+  }
+
+  private isPlaybackEcho(raw: Float32Array, residual: Float32Array, sincePlaybackMs: number) {
+    let inputEnergy = 0;
+    let residualEnergy = 0;
+    let cross = 0;
+    for (let i = 0; i < raw.length; i++) {
+      inputEnergy += raw[i] * raw[i];
+      residualEnergy += residual[i] * residual[i];
+      cross += raw[i] * residual[i];
+    }
+    // Protect a quiet local syllable through brief peaks in the soundtrack.
+    // Allow the room echo to decay before treating a gap as evidence of local speech.
+    const minVoiceEnergy = raw.length * 0.003 ** 2;
+    const nearDominant =
+      residualEnergy > inputEnergy * 0.55 &&
+      residualEnergy > minVoiceEnergy &&
+      cross > 0 && cross * cross > 0.65 * inputEnergy * residualEnergy;
+    if (this.echoEstablished && sincePlaybackMs >= 80 && nearDominant) {
+      this.nearHoldSamples = rate * 0.2;
+    } else {
+      this.nearHoldSamples = Math.max(0, this.nearHoldSamples - raw.length);
+    }
+    // Enter only after strong cancellation. Hysteresis prevents a sequence of
+    // slightly louder residual frames from reopening a speaker-only passage.
+    const echo = residualEnergy < inputEnergy * (this.echoOnly ? 0.12 : 0.05);
+    if (echo && inputEnergy > minVoiceEnergy) this.echoEstablished = true;
+    return this.nearHoldSamples === 0 && echo;
   }
 
   flush() {
@@ -268,6 +324,9 @@ export class EchoCancellation implements AudioPreprocessor {
     this.skip = this.emitted = 0;
     this.lastMic = undefined;
     this.lastActive = false;
+    this.echoOnly = false;
+    this.echoEstablished = false;
+    this.nearHoldSamples = 0;
   }
 }
 

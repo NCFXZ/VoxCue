@@ -6,15 +6,17 @@ import {
   defaultSyncPreferences,
   readSyncSaved,
   type SyncSaved,
+  type SyncChoice,
   type SyncView,
 } from '../services/cloudSync';
-import { applyCloudItem, localCloudItem, localCloudItems } from '../services/cloudData';
+import { applyCloudItem, localCloudItem, localCloudItems, removeLocalSyncItem } from '../services/cloudData';
 import { movedCloudItems } from '../services/migrationSyncProtection';
 import { userError } from '../services/errors';
 import { registerCloudShutdown } from '../services/cloudLifecycle';
 import { recoverLocalHistoryImages } from '../services/history';
 import { deferHistoryImageCleanup } from '../services/historyImageRemoval';
 import { profileStorageKey } from '../services/storedValues';
+import { removeSyncedLibraryOriginals } from '../services/knowledge';
 import { useKnowledgeIndex } from './knowledgeIndex';
 
 interface SyncStore extends SyncView {
@@ -27,7 +29,7 @@ interface SyncStore extends SyncView {
   remove(key: string): Promise<boolean>;
   pause(key: string): Promise<void>;
   resume(key: string): Promise<void>;
-  resolve(key: string, choice: 'local' | 'cloud'): Promise<void>;
+  submitResolutions(owner: string, choices: readonly SyncChoice[]): boolean;
 }
 async function syncDatabase<T>(userId: string, value?: SyncSaved): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
@@ -98,11 +100,13 @@ export const useCloudSync = create<SyncStore>((set, get) => {
       activeUserId = userId;
       const syncId = (activeSyncId = crypto.randomUUID());
       let suspended = false;
+      const restoredIndexes = useKnowledgeIndex.getState().restoreBatch();
       let releaseHistoryImages: (() => void) | undefined;
       let viewTimer: ReturnType<typeof setTimeout> | undefined;
       let pendingView: SyncView | undefined;
       suspendConnection = () => {
         suspended = true;
+        restoredIndexes.flush(true);
         releaseHistoryImages?.();
         releaseHistoryImages = undefined;
         clearTimeout(viewTimer);
@@ -178,16 +182,35 @@ export const useCloudSync = create<SyncStore>((set, get) => {
               checkOwner();
               return localStorage.getItem(profileStorageKey);
             },
-            apply: async (key, blob, hash, guard, readMissingImage) => {
+            removeLocal: (key, hash, guard, root) => {
+              if (key.startsWith('record:')) releaseHistoryImages ??= deferHistoryImageCleanup();
+              return removeLocalSyncItem(key, hash, () => { guard(); checkOwner(); }, root);
+            },
+            removeLocalLibrary: async (root, revisions, keys, recheckCloud, guard) => {
+              const check = () => { guard(); checkOwner(); };
+              try {
+                await removeSyncedLibraryOriginals(root, revisions, keys, recheckCloud, check);
+              } catch (error) {
+                if (epoch === generation && !suspended && localStorage.getItem('voxcue-sync-owner') === userId)
+                  void useKnowledgeIndex.getState().reconcile(root.slice(5));
+                throw error;
+              }
+              check();
+              window.dispatchEvent(new CustomEvent('voxcue-sync-applied', { detail: 'base' }));
+            },
+            apply: async (key, blob, hash, guard, readMissingImage, root, reviewedImageOwners) => {
+              const check = () => { guard(); checkOwner(); };
+              check();
               if (hash && key.startsWith('record:'))
                 releaseHistoryImages ??= deferHistoryImageCleanup();
-              const document = await applyCloudItem(key, blob, hash, userId, guard, readMissingImage);
-              guard();
-              if (document) void useKnowledgeIndex.getState().index(document);
+              const document = await applyCloudItem(key, blob, hash, userId, check, readMissingImage, root, reviewedImageOwners);
+              check();
+              if (document) restoredIndexes.add(document);
             },
             persist: (value) => syncDatabase<void>(userId, value),
             emit: (view) => {
               if (epoch !== generation || suspended) return;
+              if (!view.busy) restoredIndexes.flush();
               pendingView = view;
               // Stream intermediate states at most once per frame, but always
               // publish control changes and completed views before the operation resolves.
@@ -286,10 +309,8 @@ export const useCloudSync = create<SyncStore>((set, get) => {
         await engine.pause(key);
       });
     },
-    async resolve(key, choice) {
-      await perform(async () => {
-        await engine?.resolve(key, choice);
-      });
+    submitResolutions(owner, choices) {
+      return activeUserId === owner && !!engine?.submitResolutions(choices);
     },
   };
 });

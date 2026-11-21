@@ -1,3 +1,4 @@
+import { assertSystemSymbol } from './assert-system-symbol.mjs';
 import { captureRequested } from './capture-requested.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -42,6 +43,11 @@ const path = require('node:path');
 const root = ${JSON.stringify(workspace.platformRoot)};
 const {CloudAccountClient} = require(path.join(root, 'dist-electron/shared/electron/backend/cloud/client.js'));
 const original = CloudAccountClient.prototype.call;
+const snapshot = CloudAccountClient.prototype.snapshot;
+CloudAccountClient.prototype.snapshot = function () {
+  const state = snapshot.call(this);
+  return globalThis.unavailableCredentials ? { ...state, signInUnavailable: globalThis.unavailableCredentials } : state;
+};
 globalThis.localCloudCalls = [];
 CloudAccountClient.prototype.call = function(call) { globalThis.localCloudCalls.push(call.action); return original.call(this, call); };
 require(path.join(root, 'dist-electron/shared/electron/main.js'));
@@ -100,6 +106,10 @@ try {
   }
   // Skipping does not submit or validate the email/password form.
   await login.getByLabel('邮箱', { exact: true }).fill('invalid');
+  const startupCalls = await app.evaluate(() => globalThis.localCloudCalls);
+  // The main and renderer startup reads may share an in-flight result.
+  assert.ok(startupCalls.length >= 1 && startupCalls.length <= 2);
+  assert.deepEqual([...new Set(startupCalls)], ['status']);
   const opened = app.waitForEvent('window');
   await login.getByRole('button', { name: '跳过登录', exact: true }).click();
   let main = await opened;
@@ -111,7 +121,7 @@ try {
   assert.equal(local.state.user, null);
   assert.equal(local.state.localMode, true);
   assert.equal(local.state.verified, false);
-  assert.deepEqual(await app.evaluate(() => globalThis.localCloudCalls), ['status', 'status']);
+  assert.deepEqual(await app.evaluate(() => globalThis.localCloudCalls), startupCalls);
   await assert.rejects(
     () => main.evaluate(() => window.desktop.setLocalMode(true)),
     /Unauthorized/,
@@ -130,6 +140,35 @@ try {
     .getByText('资料保存在本机，登录后可迁移至 VoxCue 账号。', { exact: true })
     .waitFor();
   await assertSettingsHeadingGaps(main, ['VoxCue 账号']);
+  if (process.platform === 'darwin') {
+    const accountPanel = settings.locator('.cloud-account-panel');
+    const accountSubtitle = accountPanel.getByText('资料保存在本机，登录后可迁移至 VoxCue 账号。', { exact: true });
+    const unavailable = await app.evaluate(({ app }) => {
+      const load = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+      const { credentialProblemMessages } = load(app.getAppPath() + '/dist-electron/shared/electron/contracts/credentialProblems.js');
+      globalThis.unavailableCredentials = credentialProblemMessages.VOXCUE_CREDENTIAL_SIGNED_APP_REQUIRED;
+      return globalThis.unavailableCredentials;
+    });
+    await main.evaluate(() => window.dispatchEvent(new Event('voxcue-cloud-expired')));
+    const configurationError = accountPanel.getByRole('alert').filter({ hasText: unavailable });
+    for (const text of [accountSubtitle, configurationError]) {
+      await text.waitFor({ state: 'visible' });
+      const style = await text.evaluate(node => {
+        const range = document.createRange();
+        range.selectNodeContents(node);
+        const content = range.getBoundingClientRect();
+        const box = node.closest('dialog').getBoundingClientRect();
+        return { font: getComputedStyle(node).fontSize, inside: content.height > 0 &&
+          content.top >= box.top && content.bottom <= box.bottom && content.left >= box.left && content.right <= box.right };
+      });
+      assert.deepEqual(style, { font: '12px', inside: true });
+    }
+    await app.evaluate(() => { delete globalThis.unavailableCredentials; });
+    await main.evaluate(() => window.dispatchEvent(new Event('voxcue-cloud-expired')));
+    await configurationError.waitFor({ state: 'detached' });
+    await assertSystemSymbol(settings.getByRole('navigation', { name: '设置分类' }).getByRole('button', { name: 'VoxCue 账号', exact: true }), 'Person', 'person.crop.circle', 18);
+    await assertSystemSymbol(settings.getByRole('button', { name: '登录', exact: true }), 'Person', 'person.crop.circle', 16);
+  }
   assert.equal(await settings.getByRole('switch').count(), 0);
   assert.equal(await settings.getByRole('button', { name: '删除账号', exact: true }).count(), 0);
   assert.equal(await settings.getByRole('button', { name: '导出资料', exact: true }).count(), 1);

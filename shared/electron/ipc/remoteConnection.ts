@@ -12,6 +12,7 @@ import { handleDesktop } from './handle';
 export function registerRemoteConnectionIpc(options: {
   service: RemoteConnectionService;
   coordinator: RemoteInterviewCoordinator;
+  beforeStart?(): void;
   requireOwner(event: IpcMainInvokeEvent): void;
   requireInterview(event: IpcMainInvokeEvent): void;
   viewState(state: RemoteConnectionState): RemoteConnectionState;
@@ -22,6 +23,7 @@ export function registerRemoteConnectionIpc(options: {
     if (args.length !== 1) throw Error('Invalid remote request');
     const call = validateRemoteConnectionCall(args[0]);
     if (call.op === 'start') {
+      options.beforeStart?.();
       const state = await service.start();
       if (state.status === 'error') return { state: viewState(state) };
     } else if (call.op === 'disconnect') await service.disconnect();

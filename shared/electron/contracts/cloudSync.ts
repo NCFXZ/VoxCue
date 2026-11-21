@@ -4,6 +4,8 @@ export const syncKinds: SyncKind[] = ['profile', 'history', 'knowledgebase'];
 export const CLOUD_CHUNK_BYTES = 1048576;
 export const CLOUD_ITEM_MAX_BYTES = 64 * CLOUD_CHUNK_BYTES;
 export const CLOUD_MAX_ITEMS = 4096;
+// A record and its screenshot originals share the same account resource budget.
+export const CLOUD_RECORD_MAX_IMAGES = CLOUD_MAX_ITEMS - 1;
 export const KNOWLEDGE_MAX_BYTES = 100_000_000;
 export const validCloudResourceName = (key: unknown): key is string =>
   typeof key === 'string' && /^(?:profile|resume|base|file|record|image):[\w-]{1,100}$/.test(key);

@@ -61,6 +61,34 @@ beforeEach(() => {
 });
 afterEach(() => vi.unstubAllGlobals());
 
+it('scrolls the focused pane with Home and End while respecting focus inside a child control', () => {
+  const { scroll, node, settle } = setup();
+  const press = (key: string, target: unknown = node) => {
+    const preventDefault = vi.fn();
+    scroll.scrollProps.onKeyDown({ key, currentTarget: node, target, preventDefault } as unknown as KeyboardEvent);
+    return preventDefault;
+  };
+  expect(press('Home')).toHaveBeenCalledOnce();
+  node.scrollHeight = 1200;
+  scroll.syncLayout();
+  settle();
+  expect(node.scrollTop).toBe(0);
+  expect(press('End', {})).not.toHaveBeenCalled();
+  expect(node.scrollTop).toBe(0);
+  expect(press('End')).toHaveBeenCalledOnce();
+  expect(node.scrollTop).toBe(900);
+  node.scrollHeight = 1300;
+  scroll.syncLayout();
+  settle();
+  expect(node.scrollTop).toBe(1000);
+  node.scrollHeight = node.clientHeight;
+  press('Home');
+  node.scrollHeight += 120;
+  scroll.syncLayout();
+  settle();
+  expect(node.scrollTop).toBe(120);
+});
+
 it('pauses following before a touch scroll and resumes only after returning to latest', () => {
   const { scroll, node, advance, settle } = setup();
   expect(node.scrollTop).toBe(600);

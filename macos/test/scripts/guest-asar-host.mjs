@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 /** The final ASAR/renderer/native closure in a known development host, in the VM only.
  * The untouched product executable is tested separately, without an inspector.
  */
-export async function launchGuestAsar(bundle, { env = process.env } = {}) {
+export async function launchGuestAsar(bundle, { env = process.env, upgradeAccounts = false } = {}) {
   const guest = await requireGuestIsolation();
   const pin = workspace.platformRequire(
     path.join(workspace.platformRoot, 'local-signing-public.json'),
@@ -48,12 +48,16 @@ for(const [owner,key] of [[globalThis,'fetch'],[net,'fetch'],[net,'request']]){
 }
 const cp=require('node:child_process'),spawn=cp.spawn;
 cp.spawn=(file,...args)=>{
- if(/(?:VoxCue\\.Credentials|\\/codex|\\/copilot-runtime)$/.test(String(file)))throw Error('Ordinary GUI fixtures forbid credential-owning subprocesses');
+ if(['VoxCue','VoxCue.Credentials','codex','copilot-runtime'].includes(path.basename(String(file))))throw Error('Ordinary GUI fixtures forbid credential-owning subprocesses');
  return spawn(file,...args);
 };
 require(root+'/dist-electron/macos/electron/credentials.js').createCredentialEncryption=()=>({
  encrypt:async value=>safeStorage.encryptString(value),decrypt:async value=>safeStorage.decryptString(value)
 });
+const fixturePlatform=require(root+'/dist-electron/macos/electron/platform.js').macos;
+fixturePlatform.promptApiKey=fixturePlatform.controlApiKey=fixturePlatform.createRemoteTls=undefined;
+${upgradeAccounts ? 'require(' + JSON.stringify(path.join(workspace.sharedRoot, 'test/fixtures/install-primary-account.cjs')) +
+  ')(root,{secondAccount:true});' : ''}
 const {CodexUsageRuntime}=require(root+'/dist-electron/shared/electron/backend/chat/codexUsage.js');
 CodexUsageRuntime.prototype.account=async()=>null;
 CodexUsageRuntime.prototype.limits=async()=>({});
@@ -135,13 +139,13 @@ export async function launchLegacyGuestProduct(bundle, env, version = '1.1.1') {
   await app.evaluate(() => {
     const cp = process.getBuiltinModule('child_process'), spawn = cp.spawn;
     cp.spawn = (file, ...args) => {
-      if (/(?:VoxCue\.Credentials|\/codex|\/copilot-runtime)$/.test(String(file)))
+      if (String(file).split('/').pop() === 'VoxCue' || /(?:VoxCue\.Credentials|\/codex|\/copilot-runtime)$/.test(String(file)))
         throw Error('Ordinary migration GUI forbids credential-owning subprocesses');
       return spawn(file, ...args);
     };
   });
   const page = await app.firstWindow();
-  await page.waitForLoadState('domcontentloaded');
+  await page.waitForURL('**/index.html#login', { waitUntil: 'domcontentloaded' });
   await page.evaluate(() => localStorage.setItem('voxcue-language-v1', 'zh-CN'));
   return app;
 }

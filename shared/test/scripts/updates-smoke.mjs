@@ -12,7 +12,7 @@ import {
   focusUiWindow,
   waitForRestoredMainWindow,
 } from './install-ui-account.mjs';
-import { assertDownloadButton, assertInitialDownloadProgress, holdControl, pointAtControl } from './assert-download-button.mjs';
+import { assertDownloadButton, assertInitialDownloadProgress, holdControl, installInteractionClock, pointAtControl } from './assert-download-button.mjs';
 import { assertLoadingIcon } from './assert-loading-icon.mjs';
 import { captureRequested } from './capture-requested.mjs';
 
@@ -48,6 +48,7 @@ driver.downloadUpdate = signal => new Promise((resolve, reject) => {
   signal?.addEventListener('abort', () => reject(new DOMException('cancelled', 'AbortError')), {once:true});
 });
 driver.quitAndInstall = () => {
+  if (driver.holdInstall) { driver.preparingInstall = true; return; }
   require('node:fs').writeFileSync(require('node:path').join(app.getPath('userData'), 'installed.json'), JSON.stringify({saved:true}));
   app.quit();
 };
@@ -299,11 +300,19 @@ try {
     window.updateHoldAudit.sample('before-pointer-move');
   });
   await assertFocusedWindow();
+  // Keep the actual pointer/keyboard and main-process update call. Run the
+  // renderer hold deadline deterministically while the owned window is active.
+  await installInteractionClock(page);
+  const freezeHoldClock = async () => {
+    await page.clock.pauseAt(new Date((await page.evaluate(() => Date.now())) + 1000));
+  };
+  await freezeHoldClock();
   const hold = await holdControl(app, checkButton);
   try {
-    await page.waitForTimeout(4700);
+    await page.clock.fastForward(4999);
     assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeHold);
     hold.check();
+    await page.clock.fastForward(1);
     await waitForHeldCheck(beforeHold);
   } catch (error) {
     const renderer = await page.evaluate(() => window.updateHoldAudit.read()).catch((failure) => ({ unavailable: failure.message }));
@@ -318,6 +327,7 @@ try {
     throw error;
   } finally {
     await hold.release();
+    await page.clock.resume();
     await page.evaluate(() => {
       window.updateHoldAudit.release();
       delete window.updateHoldAudit;
@@ -343,19 +353,22 @@ try {
   );
   await focusCheckButton();
   const beforeSpace = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  await freezeHoldClock();
   await page.keyboard.down('Space');
   try {
-    await page.waitForTimeout(4700);
+    await page.clock.fastForward(4999);
     assert.equal(await app.evaluate(() => globalThis.updateDriver.checks.length), beforeSpace);
     assert.equal(await checkButton.evaluate((button) => document.activeElement === button), true);
     // A second down while held is a real repeated keydown. It must neither
     // restart the original deadline nor submit another check after it fires.
     await page.keyboard.down('Space');
+    await page.clock.fastForward(1);
     await waitForHeldCheck(beforeSpace);
     await settings.getByText('当前已是最新版本。', { exact: true }).waitFor();
     await page.keyboard.down('Space');
   } finally {
     await page.keyboard.up('Space');
+    await page.clock.resume();
   }
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -367,11 +380,12 @@ try {
   );
   await focusCheckButton();
   const beforeBlur = await app.evaluate(() => globalThis.updateDriver.checks.length);
+  await freezeHoldClock();
   await page.keyboard.down('Space');
   try {
     await page.keyboard.press('Tab');
     assert.equal(await checkButton.evaluate((button) => document.activeElement === button), false);
-    await page.waitForTimeout(5100);
+    await page.clock.fastForward(5100);
     assert.equal(
       await app.evaluate(() => globalThis.updateDriver.checks.length),
       beforeBlur,
@@ -379,6 +393,7 @@ try {
     );
   } finally {
     await page.keyboard.up('Space');
+    await page.clock.resume();
   }
   await page.evaluate(
     () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
@@ -552,6 +567,26 @@ try {
     .waitFor();
   assert.equal(page.isClosed(), false);
   await page.evaluate(() => window.restoreUpdateWrites());
+  if (process.platform === 'darwin') {
+    const main = await app.browserWindow(page);
+    assert.equal(await main.evaluate((win) => win.isEnabled()), true, 'Save failure restores input');
+    await app.evaluate(() => { globalThis.updateDriver.holdInstall = true; });
+    await settings.getByRole('button', { name: '重启并更新', exact: true }).click();
+    await app.evaluate(async () => {
+      const deadline = Date.now() + 5000;
+      while (!globalThis.updateDriver.preparingInstall) {
+        if (Date.now() >= deadline) throw Error('The installer did not receive the saved session');
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    });
+    assert.equal(await main.evaluate((win) => win.isEnabled()), false, 'No edits after the final save');
+    await app.evaluate(() => {
+      globalThis.updateDriver.holdInstall = false;
+      globalThis.updateDriver.emit('error', Error('synthetic install failure'));
+    });
+    await waitPhase(page, 'downloaded');
+    assert.equal(await main.evaluate((win) => win.isEnabled()), true, 'Installer failure restores input');
+  }
   for (const theme of ['light', 'dark']) {
     await page.evaluate(
       (theme) => document.documentElement.classList.toggle('dark', theme === 'dark'),

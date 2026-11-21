@@ -173,6 +173,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   向上滚动设备内容: 'Scroll device content up',
   向下滚动设备内容: 'Scroll device content down',
   远程连接: 'Remote connection',
+  关闭设备连接: 'Turn off device connection',
   '另一台设备查看实时转录和问答，并控制麦克风与自动回答。':
     'View live transcripts and Q&A on another device, and control the microphone and automatic answers.',
   连接设备: 'Connect device',
@@ -224,6 +225,12 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Could not read the device connection status. Please try again.',
   '无法同步设备画面，请重新连接。': 'Could not sync the device display. Please reconnect.',
   '没有可用的私人局域网 IPv4 地址。': 'No private local network IPv4 address is available.',
+  '设备连接证书': 'Device connection certificate',
+  '导入设备连接证书…': 'Import Device Connection Certificate…',
+  '请先关闭设备连接，再导入证书。': 'Disconnect the device connection before importing a certificate.',
+  '证书已导入。再次开启设备连接时将使用 HTTPS。': 'Certificate imported. Start the device connection to use HTTPS.',
+  '导入失败，请检查证书、证书密码和当前局域网地址。': 'Import failed. Check the certificate, its password and your private network address.',
+  '请先完成证书导入。': 'Finish importing the certificate first.',
   '设备连接证书配置无效，请检查证书、私钥和当前局域网地址。': 'The device connection certificate configuration is invalid. Check the certificate, private key, and current local network address.',
   '局域网连接服务已停止，请重试。': 'The local connection service has stopped. Please try again.',
   '无法启动局域网连接服务，请检查网络后重试。':
@@ -384,6 +391,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '支持 PDF、Word、TXT 和 Markdown 文件': 'Supports PDF, Word, TXT and Markdown files',
   'macOS 钥匙串授权未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。':
     'macOS Keychain authorization did not complete. Sign-in information is unchanged, and repeated requests have stopped. Restart VoxCue to try again.',
+  '热重载模式无法访问 VoxCue 钥匙串。请打开项目 macos 目录中的 VoxCue.app 以使用账号或密钥。':
+    'Hot reload cannot access the VoxCue keychain. Open VoxCue.app in the project’s macos folder to sign in or use saved keys.',
   'macOS 凭据操作未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。':
     'The macOS credential operation did not complete. Sign-in information is unchanged, and repeated requests have stopped. Restart VoxCue to try again.',
   'macOS 凭据加密助手返回无效，登录信息未更改；已停止重复请求，请重新启动 VoxCue 后重试。':
@@ -575,10 +584,12 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '识别积压超过安全上限，采集已停止；请降低负载或切换推理设备后重试。':
     'Recognition backlog exceeded the safety limit. Capture stopped. Reduce load or switch processing devices.',
   '语音识别进程已退出，请重新开始。': 'Speech recognition exited. Restart the interview.',
-  '转写积压，已切换轻量模型。未完成片段不会自动用于回答。':
-    'Transcription fell behind and switched to the lighter model. Incomplete segments are excluded from automatic answers.',
+  '转写积压，已切换到所选语音配置。未完成片段不会自动用于回答。':
+    'Transcription fell behind and switched to your selected recognition settings. Incomplete segments are excluded from automatic answers.',
   '多语言语音识别的转写积压已达上限，采集已停止。未完成的转写可能缺失，可切换到轻量语音识别继续面试。':
     'Capture stopped because the transcription queue for Multilingual speech recognition filled up. Unfinished text may be missing. Switch to Lightweight speech recognition to continue the interview.',
+  '本机音频时钟不可用，请重新开始采集。': 'The local audio clock is unavailable. Restart audio capture.',
+  '系统时间已变化，转写已继续。': 'The system time changed. Transcription has resumed.',
   '音频已中断，正在自动重新连接…': 'Audio interrupted. Reconnecting automatically…',
   '所选音频设备的采样格式或首选声道布局暂不受支持，请检查设备设置或选择其他设备。':
     'The selected audio device format or preferred channel layout is not supported. Check its settings or choose another device.',
@@ -831,6 +842,8 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '音频采集启动失败。': 'Could not start audio capture.',
   '音频设备已断开或采集进程退出，请重新开始。':
     'The audio device disconnected or capture process exited. Restart the interview.',
+  '音频设备或采样率已变化，请检查设备后重新连接。':
+    'The audio device or sample rate changed. Check the device and reconnect.',
   '音频采集进程未能退出。': 'The audio capture process did not exit.',
   '音频采集未能正常结束，末尾音频可能不完整。':
     'Audio capture did not end correctly. The final audio may be incomplete.',
@@ -1172,6 +1185,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '永久删除账号、云端及本机资料。': 'Permanently delete your account, cloud data and local data.',
   '删除 VoxCue 账号': 'Delete VoxCue account',
   取消: 'Cancel',
+  关闭: 'Close',
   '正在删除…': 'Deleting…',
   永久删除账号: 'Delete account permanently',
   '云端及本机资料将永久删除，无法恢复。':
@@ -1217,6 +1231,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
     'Signed in, but offline migration could not be set up on this device. Check system credential storage and sign in again.',
   '读取中…': 'Loading…',
   '资料已迁移。': 'Your data has been migrated.',
+  '上次迁移的来源资料已清理。': 'The source data selected in the previous transfer has been removed.',
   '资料迁移失败，请重试。': 'Could not migrate the data. Please try again.',
   '请在桌面应用中迁移资料。': 'Migrate data from the desktop app.',
   '请登录 VoxCue 或选择本地账户后迁移。': 'Sign in to VoxCue or open the local account before migrating data.',
@@ -1423,6 +1438,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   面试设置: 'Interview settings',
   关闭截图保护: 'Turn off capture protection',
   开启截图保护: 'Turn on capture protection',
+  截图保护已开启: 'Capture protection is on',
   确认结束面试: 'Confirm end interview',
   结束面试: 'End interview',
   确认结束: 'Confirm end',
@@ -1672,6 +1688,7 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '正在写入索引…': 'Writing index…',
   已取消: 'Canceled',
   '索引中 {0}%': 'Indexing {0}%',
+  '索引总进度 {0}%': 'Overall indexing progress {0}%',
   索引已停用: 'Indexing disabled',
   尚未索引: 'Not indexed',
   创建知识库: 'Create knowledge base',
@@ -2010,12 +2027,37 @@ export const uiMessages: Readonly<Record<string, string>> = {
   '在「设置 → VoxCue 账号」中开启对应同步。':
     'Enable the relevant sync option in Settings → VoxCue account.',
   保留本地版本: 'Keep local version',
+  保留云端版本: 'Keep cloud version',
+  云端: 'Cloud',
+  本地: 'Local',
+  '云端没有这份资料，选择云端会移除本地副本。': 'There is no cloud copy. Choosing Cloud will remove the local copy.',
+  '本地没有这份资料，选择本地会移除云端副本。': 'There is no local copy. Choosing Local will remove the cloud copy.',
+  '此截图也用于其他面试记录，已保留两端版本。': 'This screenshot is shared with other interview records. Both versions have been kept.',
+  '面试截图随记录一起处理。': 'Interview screenshots are included with this record.',
+  '简历原件随个人信息一起处理。': 'The original résumé is included with your profile.',
+  '所选版本会替换整个知识库。': 'The selected version will replace the entire knowledge base.',
+  '此处只处理这个文件。可前往设置选择整个知识库的版本。': 'This choice applies to this file. Open settings to choose a version for the entire knowledge base.',
+  全选云端: 'Select all cloud versions',
+  全选本地: 'Select all local versions',
+  '选择需要保留的资料。': 'Choose which versions to keep.',
+  保留所选版本: 'Keep selected versions',
+  '资料已变化，请重新选择要保留的版本。': 'The data has changed. Choose the versions to keep again.',
+  '部分资料未能处理，请核对后重试。': 'Some items could not be resolved. Review them and try again.',
+  '未能提交所选版本，请核对后重试。': 'Your choices could not be submitted. Review them and try again.',
   使用云端版本: 'Use cloud version',
   重试同步: 'Retry sync',
   '同步{0}': 'Sync {0}',
   立即同步: 'Sync now',
   刷新容量: 'Refresh storage',
   '正在同步…': 'Syncing…',
+  资料冲突: 'Data conflicts',
+  查看冲突: 'View conflicts',
+  知识库文件: 'Knowledge file',
+  '有 {0} 条资料在本地与云端存在冲突。': 'Conflicts between local and cloud versions: {0}.',
+  '有 {0} 条资料未能同步。': 'Items that could not sync: {0}.',
+  选择版本: 'Choose version',
+  查看错误: 'View error',
+  '当前没有待处理的同步条目。': 'There are no sync issues to resolve.',
   同步条目: 'Sync items',
   '两端都有修改，请选择要保留的版本。': 'Both versions have changed. Choose which version to keep.',
   最小化: 'Minimize',

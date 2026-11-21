@@ -4,7 +4,7 @@ import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { CloudAccountCall } from '../../electron/contracts/cloudAccount';
 import { Button } from './ui/button';
 import { useCloudAccount } from '../stores/cloudAccount';
-import { LogOut, Person } from './icons';
+import { Person, LogOut } from './icons';
 import { VerificationCodeInput } from './VerificationCodeInput';
 import { PasswordInput } from './ui/password-input';
 import './cloudAccountPanel.css';
@@ -155,7 +155,7 @@ export function CloudAccountPanel({
   }
   function submit(event: FormEvent) {
     event.preventDefault();
-    if (busy || locked.current || Date.now() < blockedUntil) return;
+    if (busy || state.signInUnavailable || locked.current || Date.now() < blockedUntil) return;
     if (mode === 'register' && !acceptedAgreement) return;
     setMessage('');
     setError('');
@@ -200,10 +200,11 @@ export function CloudAccountPanel({
       setError('验证码不正确。');
     }
   }
-  const blocked = busy || now < blockedUntil || !state.configured;
+  const fieldsDisabled = busy || !!state.signInUnavailable;
+  const blocked = fieldsDisabled || now < blockedUntil || !state.configured;
   const resendSeconds = Math.max(0, Math.ceil((resendAt - now) / 1000));
   const displayError =
-    error || (loaded && !state.configured ? '无法连接账号服务，请检查配置后重新打开应用。' : '');
+    error || state.signInUnavailable || (loaded && !state.configured ? '无法连接账号服务，请检查配置后重新打开应用。' : '');
   const retryHint =
     now < blockedUntil ? `请在${Math.ceil((blockedUntil - now) / 1000)}秒后重试。` : '';
   const feedback = (
@@ -310,7 +311,7 @@ export function CloudAccountPanel({
                 maxLength={254}
                 required
                 value={email}
-                disabled={busy}
+                disabled={fieldsDisabled}
                 aria-invalid={(feedbackField === 'email' && !!error) || undefined}
                 aria-describedby={emailFeedback ? `${emailId}-feedback` : undefined}
                 onBlur={(event) => {
@@ -355,7 +356,7 @@ export function CloudAccountPanel({
                 maxLength={1024}
                 required
                 value={password}
-                disabled={busy}
+                disabled={fieldsDisabled}
                 aria-invalid={(feedbackField === 'password' && !!error) || undefined}
                 aria-describedby={passwordFeedback ? `${passwordId}-feedback` : undefined}
                 onChange={(event) => {
@@ -373,7 +374,7 @@ export function CloudAccountPanel({
                     <VerificationCodeInput
                       id={codeId}
                       value={code}
-                      disabled={busy}
+                      disabled={fieldsDisabled}
                       invalid={feedbackField === 'code' && !!error}
                       describedBy={codeFeedback ? `${codeId}-feedback` : undefined}
                       onChange={(value) => {

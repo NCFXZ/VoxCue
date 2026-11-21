@@ -200,6 +200,29 @@ app.whenReady().then(async()=>{
     if (desktopGuard.failure) throw desktopGuard.failure;
     assert.equal(code, 0, phase);
   }
+  if (process.argv.includes('--server-061')) {
+    const { verifyAccountErasureReceipts } = await import('../../../shared/test/scripts/account-erasure-receipt-smoke.mjs');
+    const { createCredentialEncryption } = workspace.platformRequire(
+      path.join(workspace.platformRoot, 'dist-electron/macos/electron/credentials.js'));
+    const port = createCredentialEncryption(helper, async () => assert.fail('Unexpected migration prompt'));
+    let decryptions = 0;
+    await verifyAccountErasureReceipts({
+      async encrypt(value) {
+        requireUnlockedDesktop();
+        const bytes = await port.encrypt(value);
+        assert.equal(bytes.subarray(0, 3).toString(), 'v10');
+        return bytes;
+      },
+      async decrypt(bytes) {
+        requireUnlockedDesktop();
+        assert.equal(bytes.subarray(0, 3).toString(), 'v10');
+        ++decryptions;
+        return port.decrypt(bytes);
+      },
+    });
+    assert.ok(decryptions > 0);
+    console.log('PASS: server 0.6.1 lost-acknowledgement recovery uses the v11 test helper and its dedicated Keychain.');
+  }
 } finally {
   try {
     cleanupKeychain();

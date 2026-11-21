@@ -18,6 +18,10 @@ for (const file of [
   'macos/electron/speech/capture.ts',
   'shared/electron/backend/speech/controller.ts',
   'shared/electron/backend/speech/buffer.ts',
+  'shared/electron/backend/speech/preprocessor.ts',
+  'shared/electron/backend/speech/recording.ts',
+  'shared/electron/backend/speech/recordingChannel.ts',
+  'shared/electron/backend/speech/recordingVoiceFilter.ts',
   'shared/electron/backend/cancellable.ts',
   'shared/electron/contracts/speechSettings.ts',
   'shared/electron/contracts/components.ts',
@@ -62,9 +66,8 @@ if(process.argv[2]==='devices'){
 const mode=Buffer.from(process.argv[3]||'','base64').toString();
 const first=mode==='once'&&!fs.existsSync(${JSON.stringify(marker)});
 if(first)fs.writeFileSync(${JSON.stringify(marker)},'owned',{flag:'wx',mode:0o600});
-let sequence=0;
 const packet=()=>{
- const b=Buffer.alloc(4+17+160*4);b.writeUInt32LE(b.length-4);b[4]=1;b.writeUInt32LE(16000,5);b.writeDoubleLE(sequence++*10,9);b.writeUInt32LE(0,17);
+ const b=Buffer.alloc(4+17+160*4);b.writeUInt32LE(b.length-4);b[4]=1;b.writeUInt32LE(16000,5);b.writeDoubleLE(Number(process.hrtime.bigint())/1e6,9);b.writeUInt32LE(0,17);
  process.stdout.write(b);
 };
 process.stderr.write('{"type":"started"}\\n');
@@ -105,6 +108,7 @@ function fixture() {
   const controller = new SpeechController('owned-synthetic-model', helper, (event) =>
     events.push(event),
   );
+  controller.adapter.captureClockNow = () => Number(process.hrtime.bigint()) / 1e6;
   controllers.push(controller);
   return { controller, events };
 }

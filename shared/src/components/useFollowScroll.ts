@@ -252,6 +252,27 @@ export function useFollowScroll(
       onTouchEnd: () => { touchY.current = null; },
       onTouchCancel: () => { touchY.current = null; },
       onKeyDown: (event: React.KeyboardEvent) => {
+        if (
+          event.target === event.currentTarget && !event.defaultPrevented &&
+          !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey &&
+          (event.key === 'Home' || event.key === 'End')
+        ) {
+          const node = ref.current;
+          if (!node?.clientHeight) return;
+          // macOS can route Home/End to the document even when this nested pane has focus.
+          event.preventDefault();
+          cancelMotion();
+          const position = current.current;
+          position.following = event.key === 'End' || node.scrollHeight <= node.clientHeight;
+          writeTop(node, position, position.following ? node.scrollHeight : 0);
+          position.top = node.scrollTop;
+          setFollowing(position.following);
+          if (position.following) {
+            position.hasNew = false;
+            setHasNew(false);
+          }
+          return;
+        }
         if (['ArrowUp', 'PageUp', 'Home'].includes(event.key) || (event.key === ' ' && event.shiftKey) ||
           (frame.current !== null && ['ArrowDown', 'PageDown', 'End', ' '].includes(event.key)))
           pauseFollowing();

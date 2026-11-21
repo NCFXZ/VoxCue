@@ -6,11 +6,17 @@ import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
 import { installUiAccount, closeUiApp } from './install-ui-account.mjs';
 import { captureRequested } from './capture-requested.mjs';
+import { opening, ending, longMarkdown } from '../fixtures/long-markdown.mjs';
 const fixture = path.join(testRoot, 'motion-entry.cjs');
 await writeFile(
   fixture,
   `
-const {ipcMain,globalShortcut}=require('electron');
+const {BrowserWindow,ipcMain,globalShortcut}=require('electron');
+const ignoreMouse=BrowserWindow.prototype.setIgnoreMouseEvents;
+BrowserWindow.prototype.setIgnoreMouseEvents=function(ignore,...args){
+  if(this.webContents.getURL().endsWith('#interview')) globalThis.motionMouseIgnored=ignore;
+  return ignoreMouse.call(this,ignore,...args);
+};
 // Keep the owner's running application shortcuts untouched in this isolated fixture.
 const shortcutKey=key=>({'Control+H':'Control+Alt+Shift+F8','Control+F':'Control+Alt+Shift+F9','Control+T':'Control+Alt+Shift+F10','Control+M':'Control+Alt+Shift+F11'}[key]??key);
 const registerShortcut=globalShortcut.register.bind(globalShortcut);
@@ -197,6 +203,73 @@ try {
     );
   const originalContours = await contours();
   for (const contour of originalContours) assert.equal(contour.clip, 'none');
+  const startToolbarFrames = async () => {
+    if (process.platform !== 'darwin') return;
+    await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((w) =>
+        w.webContents.getURL().endsWith('#interview'),
+      );
+      globalThis.toolbarFrames = [];
+      globalThis.toolbarPhase = 'baseline';
+      win.webContents.beginFrameSubscription((image) => {
+        if (globalThis.toolbarFrames.length >= 120 && globalThis.toolbarPhase !== 'settled') return;
+        const size = image.getSize(),
+          bytes = image.toBitmap({ scaleFactor: 1 });
+        const scale = Math.sqrt(bytes.length / (size.width * size.height * 4));
+        const width = Math.round(size.width * scale);
+        const nativeScale = width / win.getContentBounds().width;
+        const offset = (Math.round(30 * nativeScale) * width + Math.floor(width / 2)) * 4;
+        globalThis.toolbarFrames.push({
+          phase: globalThis.toolbarPhase,
+          image: size,
+          native: win.getBounds(),
+          toolbarAlpha: bytes[offset + 3],
+          cornerAlpha: bytes[3],
+        });
+      });
+      win.webContents.invalidate();
+      const deadline = Date.now() + 2000;
+      while (!globalThis.toolbarFrames.length && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      if (!globalThis.toolbarFrames.length)
+        throw Error('The compositor subscription did not become ready');
+      globalThis.toolbarPhase = 'transition';
+    });
+  };
+  const assertToolbarFrames = async expected => {
+    if (process.platform !== 'darwin') return;
+    await page.evaluate(
+      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
+    );
+    const frames = await app.evaluate(async ({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows().find((w) =>
+        w.webContents.getURL().endsWith('#interview'),
+      );
+      globalThis.toolbarPhase = 'settled';
+      win.webContents.invalidate();
+      const deadline = Date.now() + 2000;
+      while (
+        !globalThis.toolbarFrames.some((frame) => frame.phase === 'settled') &&
+        Date.now() < deadline
+      )
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      win.webContents.endFrameSubscription();
+      return globalThis.toolbarFrames;
+    });
+    assert.ok(frames.length > 0, 'The native surface must present a compositor frame');
+    assert.ok(
+      frames.some((frame) => frame.phase === 'settled'),
+      'The logical layout change must present a final compositor frame',
+    );
+    assert.ok(frames.every(frame => frame.native.x === expected.x && frame.native.y === expected.y &&
+      frame.native.width === expected.width && frame.native.height === expected.height),
+      'The native surface and toolbar anchor must remain stationary throughout the toggle');
+    assert.ok(
+      frames.every((frame) => frame.toolbarAlpha > 0),
+      'The toolbar must remain painted: ' + JSON.stringify(frames),
+    );
+    assert.ok(frames.every(frame => frame.cornerAlpha === 0), 'The transparent canvas must never flash opaque');
+  };
   const panelBounds = await bounds();
   await assert.rejects(main.evaluate(() => window.desktop.setInterviewSettingsOpen(true)));
   await assert.rejects(
@@ -233,11 +306,30 @@ try {
   assert.equal(folded.clip, 'none', 'Motion must not add a circular clip over continuous corners');
   assert.deepEqual(await contours(), originalContours);
   await captureRequested(page, 'whole-panels-folding', { animations: 'allow' });
+  await startToolbarFrames();
   await finish();
   await idle();
   assert.equal((await nativeState()).collapsed, true);
   assert.ok((await bounds()).height < panelBounds.height);
+  if (process.platform === 'darwin')
+    assert.deepEqual(await nativeBounds(), originalNativeBounds, 'Collapsing the capsule must retain the native compositor surface');
+  await assertToolbarFrames(originalNativeBounds);
   const collapsedBounds = await bounds();
+  if (process.platform === 'darwin') {
+    const toolbar = await page.locator('.floating-brand').boundingBox();
+    const move = async (x, y, expected) => {
+      await page.mouse.move(x, y);
+      await app.evaluate(async (_, expected) => {
+        const deadline = Date.now() + 2000;
+        while (globalThis.motionMouseIgnored !== expected && Date.now() < deadline)
+          await new Promise(resolve => setTimeout(resolve, 10));
+        if (globalThis.motionMouseIgnored !== expected) throw Error('Unexpected native mouse passthrough: ' + expected);
+      }, expected);
+    };
+    await move(toolbar.x + toolbar.width / 2, toolbar.y + toolbar.height / 2, false);
+    await move(originalNativeBounds.width / 2, collapsedBounds.height + 30, true);
+    await move(toolbar.x + toolbar.width / 2, toolbar.y + toolbar.height / 2, false);
+  }
   const minimumBounds = await minimumSettingsBounds(collapsedBounds, false);
   const settings = page.getByRole('dialog', { name: '面试设置', exact: true });
   await click(page.getByRole('button', { name: '面试设置', exact: true }));
@@ -273,6 +365,7 @@ try {
   await page.waitForFunction(() => !document.querySelector('[data-modal-exit]'));
   await page.waitForFunction(() => document.querySelector('.floating-viewport').clientHeight < 100);
   assert.deepEqual(await bounds(), collapsedBounds, 'Closing settings restores the folded canvas');
+  await startToolbarFrames();
   await click(page.locator('.floating-brand'));
   await page.waitForFunction(() =>
     window.motionPlayers.some((a) => a.effect?.target?.matches('.floating-panels')),
@@ -286,6 +379,7 @@ try {
     await page.getByRole('textbox', { name: '面试提问', exact: true }).inputValue(),
     '动画期间保留的草稿',
   );
+  await assertToolbarFrames(originalNativeBounds);
   const toggle = page.getByRole('button', { name: '转写面板', exact: true });
   const nativeBeforeTranscript = await nativeBounds();
   await click(toggle);
@@ -302,36 +396,7 @@ try {
   );
   assert.deepEqual(await contours(), originalContours);
   await captureRequested(page, 'transcript-closing', { animations: 'allow' });
-  if (process.platform === 'darwin')
-    await app.evaluate(async ({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows().find((w) =>
-        w.webContents.getURL().endsWith('#interview'),
-      );
-      globalThis.transcriptResizeFrames = [];
-      globalThis.transcriptFramePhase = 'baseline';
-      win.webContents.beginFrameSubscription((image) => {
-        if (globalThis.transcriptResizeFrames.length >= 60) return;
-        const size = image.getSize(),
-          bytes = image.toBitmap({ scaleFactor: 1 });
-        const scale = Math.sqrt(bytes.length / (size.width * size.height * 4));
-        const width = Math.round(size.width * scale);
-        const nativeScale = width / win.getContentBounds().width;
-        const offset = (Math.round(30 * nativeScale) * width + Math.floor(width / 2)) * 4;
-        globalThis.transcriptResizeFrames.push({
-          phase: globalThis.transcriptFramePhase,
-          image: size,
-          native: win.getBounds(),
-          toolbarAlpha: bytes[offset + 3],
-        });
-      });
-      win.webContents.invalidate();
-      const deadline = Date.now() + 2000;
-      while (!globalThis.transcriptResizeFrames.length && Date.now() < deadline)
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      if (!globalThis.transcriptResizeFrames.length)
-        throw Error('The compositor subscription did not become ready');
-      globalThis.transcriptFramePhase = 'transition';
-    });
+  await startToolbarFrames();
   await finish();
   await idle();
   assert.equal((await nativeState()).transcriptVisible, false);
@@ -343,35 +408,7 @@ try {
       nativeBeforeTranscript,
       'Mac transcript hiding must retain the native surface',
     );
-  if (process.platform === 'darwin') {
-    await page.evaluate(
-      () => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))),
-    );
-    const frames = await app.evaluate(async ({ BrowserWindow }) => {
-      const win = BrowserWindow.getAllWindows().find((w) =>
-        w.webContents.getURL().endsWith('#interview'),
-      );
-      globalThis.transcriptFramePhase = 'settled';
-      win.webContents.invalidate();
-      const deadline = Date.now() + 2000;
-      while (
-        !globalThis.transcriptResizeFrames.some((frame) => frame.phase === 'settled') &&
-        Date.now() < deadline
-      )
-        await new Promise((resolve) => setTimeout(resolve, 10));
-      win.webContents.endFrameSubscription();
-      return globalThis.transcriptResizeFrames;
-    });
-    assert.ok(frames.length > 0, 'The native transcript resize must present a compositor frame');
-    assert.ok(
-      frames.some((frame) => frame.phase === 'settled'),
-      'The logical transcript toggle must present a final compositor frame',
-    );
-    assert.ok(
-      frames.every((frame) => frame.toolbarAlpha > 0),
-      'The toolbar must remain painted: ' + JSON.stringify(frames),
-    );
-  }
+  await assertToolbarFrames(nativeBeforeTranscript);
   assert.ok(narrow.width < panelBounds.width);
   assert.ok(Math.abs(narrow.x + narrow.width / 2 - panelBounds.x - panelBounds.width / 2) <= 1);
   await seed(19, 2);
@@ -543,6 +580,51 @@ try {
   await click(page.locator('.floating-brand'));
   await idle();
   assert.equal((await nativeState()).collapsed, false);
+  // Exercise live IPC, durable transcript writes and the memoized reader at a long-session size.
+  const longCount = 2000;
+  const existingRows = await scroller.locator('.transcript-item').count();
+  for (let offset = 0; offset < longCount; offset += 100) {
+    await seed(100 + offset, 100);
+    await page.waitForFunction(expected =>
+      document.querySelectorAll('.floating-transcript .transcript-item').length === expected,
+    existingRows + offset + 100);
+  }
+  await scroller.evaluate(node => { node.scrollTop = 140; });
+  await page.waitForFunction(() => document.querySelector('.floating-transcript .floating-scroll').dataset.followingLatest === 'false');
+  const first = scroller.locator('.transcript-item').first();
+  await first.evaluate(row => {
+    const text = row.querySelector('p');
+    const probe = window.motionRowProbe = { row, text, changes: 0 };
+    probe.observer = new MutationObserver(records => { probe.changes += records.length; });
+    probe.observer.observe(text, { characterData: true, childList: true, subtree: true });
+  });
+  await seed(2100, 1);
+  await page.getByText('第2100条合成转写，仅用于动画和滚动验证。', { exact: true }).waitFor({ state: 'attached' });
+  await app.evaluate(({ app }, [opening, ending]) => {
+    const require = process.getBuiltinModule('module').createRequire(app.getAppPath() + '/package.json');
+    const { ChatGPTService } = require(app.getAppPath() + '/dist-electron/shared/electron/backend/chat/service.js');
+    ChatGPTService.prototype.stream = async (request, emit) => {
+      for (const text of [opening, ending]) emit({ id: request.id, type: 'delta', text });
+      return { answerText: opening + ending, usage: null, sources: [] };
+    };
+  }, [opening, ending]);
+  await page.getByRole('textbox', { name: '面试提问', exact: true }).fill('长转写后的独立合成提问');
+  await click(page.getByRole('button', { name: '发送面试问题', exact: true }));
+  const longReply = page.locator('.floating-answer-item').last();
+  await longReply.getByText('All receipts reconciled', { exact: true }).waitFor();
+  await page.evaluate(() => { navigator.clipboard.writeText = async text => { window.motionCopied = text; }; });
+  await click(longReply.getByRole('button', { name: '复制面试回答', exact: true }));
+  assert.equal(await page.evaluate(() => window.motionCopied), longMarkdown);
+  await main.evaluate(() => localStorage.setItem('voxcue-language-v1', 'en'));
+  await first.getByText('Interviewer', { exact: true }).waitFor({ state: 'attached' });
+  assert.ok(await first.evaluate(row => {
+    const probe = window.motionRowProbe;
+    probe.observer.disconnect();
+    return probe.row === row && probe.text === row.querySelector('p') && !probe.changes;
+  }), 'Appending a transcript, answering and relabeling speakers preserve existing transcript bodies');
+  assert.equal(await scroller.evaluate(node => node.scrollTop), 140);
+  await main.evaluate(() => localStorage.setItem('voxcue-language-v1', 'zh-CN'));
+  await first.getByText('面试官', { exact: true }).waitFor({ state: 'attached' });
   // Closing our isolated window while its animation is pending must release it.
   await page.evaluate(() => { window.panelPlayback = 'stall'; });
   await click(page.locator('.floating-brand'));

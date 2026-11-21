@@ -129,6 +129,8 @@ it('两路输入都关闭时，候选就绪即可交接，无需等待下一包�
 });
 it.each([false, true])('积压降级可在候选就绪前后请求，旧推理一直无响应也能切换 (%s)', async (alreadyReady) => {
   const s = await setup();
+  await s.feed();
+  expect(s.router.processedThrough('system')).toBe(1100);
   let interrupt!: (error: Error) => void;
   s.old.feed.mockImplementationOnce(() => new Promise((_resolve, reject) => { interrupt = reject; }));
   s.old.close.mockImplementationOnce(async () => { interrupt(Error('retired')); });

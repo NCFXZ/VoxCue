@@ -13,6 +13,8 @@ export async function readCredentialRecords(
     cloudVault: CredentialReader;
     telemetryProofVault: CredentialReader;
     readMigrationPasswords(decrypt: DecryptCredential): Promise<boolean>;
+    readApiKeys(decrypt: DecryptCredential): Promise<boolean>;
+    readTlsIdentity?(decrypt: DecryptCredential): Promise<boolean>;
     readErasureReceipts?(decrypt: DecryptCredential): Promise<boolean>;
     accountOrigin: string | undefined;
     validateTelemetryProofs?: (value: unknown) => Promise<void>;
@@ -24,6 +26,8 @@ export async function readCredentialRecords(
     const session = await ports.cloudVault.read(decrypt);
     const proofs = await ports.telemetryProofVault.read(decrypt);
     const hasMigrationPasswords = await ports.readMigrationPasswords(decrypt);
+    const hasApiKeys = await ports.readApiKeys(decrypt);
+    const hasTlsIdentity = await ports.readTlsIdentity?.(decrypt);
     const hasErasureReceipts = await ports.readErasureReceipts?.(decrypt);
     if (session !== null) {
       if (!ports.accountOrigin) return 'unavailable';
@@ -33,7 +37,7 @@ export async function readCredentialRecords(
       if (!ports.validateTelemetryProofs) return 'unavailable';
       await ports.validateTelemetryProofs(proofs);
     }
-    return credentials === null && session === null && proofs === null && !hasMigrationPasswords && !hasErasureReceipts
+    return credentials === null && session === null && proofs === null && !hasMigrationPasswords && !hasApiKeys && !hasTlsIdentity && !hasErasureReceipts
       ? 'empty'
       : 'readable';
   } catch {

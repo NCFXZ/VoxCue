@@ -9,7 +9,7 @@ Mac 已撤除原生展示适配，直接使用与 Windows 相同的 shared按钮
 
 ## 双击启动
 
-在 macos 文件夹中双击 VoxCue.app。它使用项目图标，直接打开已有本地构建，不弹终端、不自动编译或下载。重复打开会恢复并聚焦已有窗口。请保留此 app 在 macos 目录内；可将它拖到 Dock 固定引用，不要把它当作独立安装包移到其他目录。
+双击项目中的 `macos/VoxCue.app` 或执行 `pnpm start`，都将打开同一个本机签名应用（`com.voxcue.app`）。项目入口指向 `~/Library/Developer/VoxCue/` 中当前检出目录的最新构建，以免文件同步服务改写包内元数据。可以将项目入口拖到 Dock，重复打开会聚焦已有窗口。修改源码后运行 `pnpm build` 更新此入口。正在运行的版本可正常退出，再次双击即使用新构建。后续构建会清理已退出的旧副本。
 
 初次准备依赖先进入 macos，将包管理器和 Electron 下载缓存也留在本目录：
 
@@ -26,7 +26,7 @@ cd ..
 ```sh
 corepack pnpm build
 corepack pnpm start
-# 仅重建启动入口
+# 使用已编译的资源重建本机签名 App
 corepack pnpm build:launcher
 # 实际设备与窗口验证（会请求系统音频/麦克风权限）
 corepack pnpm test:audio:native
@@ -52,17 +52,19 @@ macos/native/ScreenPermission.mm 为 Node-API 8 绑定，在 Electron 自身身�
 
 macos/native/AudioCapture.mm 使用 Core Audio。系统音频是绑定所选输出设备的私有 process tap；麦克风使用所选输入设备的 HAL IOProc。仅聚合 tap，不把双向物理设备的麦克风混入系统音源；不改变默认设备、采样率、硬件音量或播放静音状态。两个音源各自输出已有 Float32 PCM 包协议，经 utilityProcess 送入唯一共用 Paraformer/Silero Worker，没有新增推理后端。
 
-同时采集系统与麦克风时，Mac在该Worker的ASR之前自动启用软件消回声：@ennuicastr/webrtcaec3.js固定0.3.0，JS/WASM和许可证在本机随包加载。参考是所选输出设备全部应用的混音，系统转写保留原流；麦克风重采样到48kHz并以10ms帧处理。使用两路原生共同单调时钟，参考最多等待80ms；参考缺失时旁路保留麦克风，单音源听写不处理。停止/暂停排空滤波延迟与最后短帧，间断重置两路边界；准备或处理失败显式停止，不靠播放静音、改音量或文字去重掩盖问题。合成测试不等于真实房间、外放音量及双方同时说话的质量验收。
+面试采集控制器在本机加载固定的 WebRTC AEC3 0.3.0。所选输出设备的播放声为参考，即使系统转写静音也可供麦克风消回声。麦克风重采样至 48 kHz，按 10 ms 分帧，使用两路的 Core Audio 主机时钟对齐，最多等待参考 80 ms。录音取得可靠参考下的残差，转写取得同时间轴的原声或纯外放对应的等长静音。缺少可靠参考时保留原声。独立听写保留原采样率。暂停与停止时排空滤波延迟和最后短帧。
 
-采集只在明确语音/面试操作后开始；不录制视频、不保存或上传采集音频。设备 UID 持久选择失效时明确失败，不改默认；设备、默认路由或采样率变化、非法格式和积压均停止并报错。当前支持 HAL 的小端 Float32/Float64 与有符号 Int16/Int32 紧密 PCM，按通道转单声道。无锁单生产者/单消费者原生队列同时受 32 包和 1.5 秒限制；原有 ASR 两秒队列门槛保持。Mac 停止时先停止 IOProc、排空已收到尾包，再退休回调并冲刷 ASR；Windows 原有退休时机保持。
+用户打开面试准备后可预览获准设备的电平。启用面试录音时，应用把单声道 16 kHz WAV 保存于当前账户本机目录。采集音频不上传。系统设备或默认路由变化时，控制器排空旧助手的两条管道，再有界重试。权限、损坏的 PCM 与队列背压会保留具体故障。HAL 支持小端 Float32/Float64 与有符号 Int16/Int32 紧密 PCM，按通道转单声道。无锁单生产者/单消费者队列上限为 32 包或 1.5 秒。写线程只复制有效包头与样本，再归还槽位。旧 Qwen 的 500 ms 静音检测可使用随应用分发、按大小与 SHA-256 校验的 Silero ONNX，安装该模型时可单独使用多语言识别组件。
 
 Apple 没有公开的系统音频授权状态查询。按照[官方 Core Audio taps 文档](https://developer.apple.com/documentation/coreaudio/capturing-system-audio-with-core-audio-taps)，首次从 tap 聚合设备启动时系统才询问授权。Mac 检查因此短暂启动零采样 IOProc 后立即释放，用于请求授权和验证原生初始化结果；它不读取缓冲、不返回音频、不加载 ASR，不拿 screen 或 microphone 的状态替代系统音源。真正的音源可用性还依赖后续采集帧和运行错误。禁用麦克风时不请求其权限。
 
-macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Electron 宿主副本；厂商 node_modules 不修改。开发宿主、启动器与后续正式应用共用固定本地自签名证书，不等同 Developer ID 分发签名或公证。正常系统权限由用户决定，应用不修改 TCC 数据库或自动开启权限。
+macos/.tools/electron-dev 是带 VoxCue 名称和明确用途说明的本地 Electron 宿主副本；厂商 node_modules 不修改。热重载宿主与封装后的应用共用固定本地自签名证书，不等同 Developer ID 分发签名或公证。正常系统权限由用户决定，应用不修改 TCC 数据库或自动开启权限。
 
 0.6.7 的开发宿主与正式应用在签名前共用 `localize-usage-descriptions.mjs` 生成权限用途的 `InfoPlist.strings`；简体中文取自原 Info.plist，英文作为其他系统语言的回退。系统权限面板按 macOS 语言选择，不受应用内手动界面语言影响；启动器只负责 exec 到开发宿主。
 
 ## 固定本地签名与登录保留
+
+本机构建将当前前端、主进程和原生组件一起封装并签名，云账号和密钥可直接通过 `macos/VoxCue.app` 使用。冻结的 v11 助手在访问钥匙串前校验父进程的产品标识 `com.voxcue.app`、固定证书与 Hardened Runtime。`pnpm dev` 使用独立的 `com.voxcue.development` 热重载宿主，供本地账户和界面调试使用。
 
 2026-10-19起，源码的开发和正式打包入口复用同一证书；已发布的旧安装包仍保留原ad-hoc签名。公开指纹在`macos/local-signing-public.json`，身份与口令仅保存在被Git忽略的`macos/.tools/development-signing/`专用钥匙串目录，目录0700、文件0600，私钥不可导出。构建只解锁此专用钥匙串，按证书指纹与原bundle ID签名并核对资源，不修改登录钥匙串的现有项或ACL，也不将自签名证书加入系统信任。Sparkle既有Ed25519密钥及公钥不变。
 

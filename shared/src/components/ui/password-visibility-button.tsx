@@ -1,6 +1,5 @@
 import { forwardRef, type ButtonHTMLAttributes } from 'react';
-import * as icons from '../icons';
-import { t } from '../../i18n';
+import { Eye, EyeOff } from '../icons';
 import './password-visibility-button.css';
 
 type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'children'> & {
@@ -10,7 +9,7 @@ type Props = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'type' | 'children'> 
 
 export const PasswordVisibilityButton = forwardRef<HTMLButtonElement, Props>(
   ({ visible, label, className, ...props }, ref) => {
-    const Icon = icons[visible ? 'EyeOff' : 'Eye'];
+    const Icon = visible ? EyeOff : Eye;
     return (
       <button
         {...props}
@@ -20,7 +19,7 @@ export const PasswordVisibilityButton = forwardRef<HTMLButtonElement, Props>(
         aria-label={label}
         aria-pressed={visible}
       >
-        {Icon ? <Icon size={18} /> : t(visible ? '隐藏' : '显示')}
+        <Icon size={18} />
       </button>
     );
   },

@@ -267,8 +267,12 @@ export function configurePlatformUpdates(
     set allowPrerelease(value) {
       updater.allowPrerelease = value;
     },
-    on: (event, listener) => updater.on(event, listener),
-    removeListener: (event, listener) => updater.removeListener(event, listener),
+    on(event, listener) {
+      if (event !== 'download-invalidated') updater.on(event, listener);
+    },
+    removeListener(event, listener) {
+      if (event !== 'download-invalidated') updater.removeListener(event, listener);
+    },
     checkForUpdates(force = false) {
       if (checking) return checking;
       checkedInstaller = false;

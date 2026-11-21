@@ -183,8 +183,8 @@ async function waitForAccountWindow(app, suffix, role, name) {
   }
   throw Error('Account window did not become ready: ' + suffix);
 }
-export function waitForRestoredMainWindow(app) {
-  return waitForAccountWindow(app, '/index.html', 'button', '用户菜单');
+export function waitForRestoredMainWindow(app, menuLabel = '用户菜单') {
+  return waitForAccountWindow(app, '/index.html', 'button', menuLabel);
 }
 export async function returnToUiLogin(app, main, action) {
   await main.getByRole('button', { name: '用户菜单', exact: true }).click();

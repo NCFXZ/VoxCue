@@ -1,5 +1,5 @@
-import type { AccountDataCall } from '../../electron/contracts/accountData';
-import { validImportDocument } from '../../electron/contracts/accountData';
+import type { AccountDataCall, AccountImportItem } from '../../electron/contracts/accountData';
+import { validImportDocument, validImportEnvelopeSize, validImportItemSize, validImportRecordTitle } from '../../electron/contracts/accountData';
 import {
   maxRestoreItems,
   restoreChunkSize,
@@ -62,11 +62,13 @@ export async function openAccountImport(sourceId: string) {
       : {}),
     requiresPassword: sourceId !== 'local',
   });
-  session = { selection };
+  session = { selection, localRevision: sourceId === 'local'
+    ? useCloudAccount.getState().state.localImportRevision ?? selection.localRevision
+    : undefined };
   return selection;
 }
 export type AccountImport = Awaited<ReturnType<typeof openAccountImport>>;
-let session: { selection: AccountImport; plan?: ImportPlan; busy?: boolean } | undefined;
+let session: { selection: AccountImport; localRevision?: string; plan?: ImportPlan; busy?: boolean } | undefined;
 const canceled = () => Error('迁移已取消或账号已变化。');
 const invalid = () => Error('迁移资料无效。');
 function guardSession(selection: AccountImport, active: () => boolean) {
@@ -78,14 +80,18 @@ export async function closeAccountImport(token: string, committed = false) {
   if (session?.selection.token === token) session = undefined;
   return request({ action: 'closeImport', token, committed });
 }
-async function readItem(token: string, key: string, size: number, guard: () => void) {
-  if (!Number.isSafeInteger(size) || size < 8 || size > 64 * 1024 ** 2)
-    throw Error('迁移资料无效。');
+async function readItem(token: string, key: string, size: number, guard: () => void, resolveSize?: (size: number) => void) {
   const chunks: Blob[] = [];
-  for (let offset = 0; offset < size;) {
+  let offset = 0;
+  do {
     guard();
-    const { bytes } = await request({ action: 'readImport', token, key, offset });
+    const { bytes, size: reportedSize } = await request({ action: 'readImport', token, key, offset });
     guard();
+    if (size === 0) {
+      if (!resolveSize || !validImportEnvelopeSize(reportedSize)) throw invalid();
+      resolveSize(reportedSize);
+      size = reportedSize;
+    } else if (reportedSize !== undefined && reportedSize !== size) throw invalid();
     if (
       !ArrayBuffer.isView(bytes) ||
       bytes.BYTES_PER_ELEMENT !== 1 ||
@@ -95,7 +101,7 @@ async function readItem(token: string, key: string, size: number, guard: () => v
       throw Error('迁移资料无效。');
     chunks.push(new Blob([new Uint8Array(bytes)]));
     offset += bytes.length;
-  }
+  } while (offset < size);
   return decodeCloudItem(key, new Blob(chunks));
 }
 
@@ -110,30 +116,32 @@ export async function previewAccountImport(
   state.busy = true;
   state.plan = undefined;
   try {
-    const plan = await loadPlan(selection, password, guard);
+    const unlocked = await request({ action: 'unlockImport', token: selection.token, password });
+    guard();
+    if (unlocked.recoveredMove) {
+      updateLocalRevision(selection.target, state.localRevision, unlocked.localRevision);
+      state.localRevision = unlocked.localRevision;
+    }
+    const plan = await loadPlan(selection, unlocked.items, guard);
     guard();
     state.plan = plan;
-    return plan.entries.map((entry) => ({ ...entry }));
+    return { entries: plan.entries.map((entry) => ({ ...entry })), recoveredMove: unlocked.recoveredMove === true };
   } finally {
     state.busy = false;
   }
 }
-async function loadPlan(selection: AccountImport, password: string | undefined, guard: () => void) {
-  const { items } = await request({ action: 'unlockImport', token: selection.token, password });
-  guard();
+async function loadPlan(selection: AccountImport, items: AccountImportItem[] | undefined, guard: () => void) {
   if (!Array.isArray(items) || items.length > maxRestoreItems) throw invalid();
   const keys = new Set<string>(),
     images = new Set<string>(),
     references = new Set<string>();
   const source: ImportPayload[] = [];
   let total = 0;
-  for (const { key, size, document, recordTitle, imageIds } of items) {
+  for (const { key, size, document, recordTitle, recordLibraryName, imageIds } of items) {
     if (
       !validRestoreKey(key) ||
       keys.has(key) ||
-      !Number.isSafeInteger(size) ||
-      (size < 8 && !(key.startsWith('image:') && size === 0)) ||
-      size > 64 * 1024 ** 2 ||
+      !validImportItemSize(key, size, recordTitle, recordLibraryName) ||
       (total += size) > restoreLimit
     )
       throw invalid();
@@ -164,15 +172,21 @@ async function loadPlan(selection: AccountImport, password: string | undefined, 
       });
       continue;
     }
-    if (recordTitle !== undefined) {
-      if (!key.startsWith('record:') || typeof recordTitle !== 'string' || recordTitle.length > 80) throw invalid();
+    if (recordTitle !== undefined || recordLibraryName !== undefined) {
+      if (!validImportRecordTitle(key, recordTitle, recordLibraryName)) throw invalid();
       const ids = imageIds ?? [];
       ids.forEach(id => references.add(id));
+      let recordSize = size;
       source.push({
         type: 'recordPreview', id: key.slice(7), title: recordTitle, images: ids, digest,
         read: async () => {
-          const item = await readItem(selection.token, key, size, guard);
+          const item = await readItem(selection.token, key, recordSize, guard, resolved => {
+            if (total + resolved > restoreLimit) throw invalid();
+            total += resolved;
+            recordSize = resolved;
+          });
           if (item.type !== 'record' || item.record.title !== recordTitle ||
+              (recordLibraryName !== undefined && item.record.knowledgeBaseName !== recordLibraryName) ||
               item.images.length !== ids.length || item.images.some(id => !ids.includes(id))) throw invalid();
           return item.record;
         },
@@ -261,16 +275,19 @@ export async function restoreAccountImport(
         useCloudAccount.setState((state) => ({ revision: state.revision + 1 }));
     }
   }
-  if (selection.localRevision && owner() === selection.target) {
-    if (remainingLocalRevision) markLocalImportHandled(remainingLocalRevision);
-    useCloudAccount.setState(({ state }) => state.localImportRevision === selection.localRevision
-      ? { state: { ...state, localImportRevision: remainingLocalRevision } }
-      : {});
-  }
+  updateLocalRevision(selection.target, state.localRevision, remainingLocalRevision);
   if (owner() === selection.target && keys.some(key => key.startsWith('record:'))) {
     // The import is durable. Any failed removals remain in the target's journal for retry.
     await recoverLocalHistoryImages(() => {
       if (owner() !== selection.target) throw Error('迁移已取消或账号已变化。');
     }).catch(() => {});
   }
+}
+
+function updateLocalRevision(target: string, previous: string | undefined, next: string | undefined) {
+  if (!previous || owner() !== target) return;
+  if (next) markLocalImportHandled(next);
+  useCloudAccount.setState(({ state }) => state.localImportRevision === previous
+    ? { state: { ...state, localImportRevision: next } }
+    : {});
 }

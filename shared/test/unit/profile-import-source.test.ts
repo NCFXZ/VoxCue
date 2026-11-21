@@ -116,6 +116,27 @@ it('loads only the requested partition without a preload, restricts offsets, and
   expect(browser.destroyed).toHaveBeenCalledTimes(1);
 });
 
+it('resolves a deferred record by its source index once and bounds every following chunk', async () => {
+  browser.execute.mockResolvedValueOnce([{ key: 'record:r', recordTitle: 'Synthetic', size: 0 }]);
+  const reader = await openProfileImportSource('local', new AbortController().signal, {
+    userData: os.tmpdir(), indexFile: path.join(os.tmpdir(), 'index.html'),
+  });
+  try {
+    expect(browser.execute).toHaveBeenCalledTimes(1);
+    await expect(reader.read('record:r', 0)).rejects.toThrow();
+    browser.execute.mockResolvedValueOnce(64 * 1024 ** 2 + 1);
+    await expect(reader.recordSize('record:r')).rejects.toThrow();
+    browser.execute.mockResolvedValueOnce(8);
+    expect(await reader.recordSize('record:r')).toBe(8);
+    expect(browser.execute.mock.lastCall![0]).toContain('source.recordSize(0)');
+    expect(await reader.recordSize('record:r')).toBe(8);
+    browser.execute.mockResolvedValueOnce(Buffer.from('document').toString('base64'));
+    expect(Buffer.from(await reader.read('record:r', 0)).toString()).toBe('document');
+    await expect(reader.read('record:r', 8)).rejects.toThrow();
+    expect(browser.execute).toHaveBeenCalledTimes(4);
+  } finally { await reader.close(); }
+});
+
 it.each(['missing', 'corrupt', 'replaced', 'complete'])('defers a %s screenshot until its interview is selected', async mode => {
   const id = crypto.randomUUID(), key = 'image:' + id;
   const rows = [{ key: 'profile:main', size: 8 }, { key: 'record:r', size: 40, imageIds: [id] }, { key, size: 0 }];

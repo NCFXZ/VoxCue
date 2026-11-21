@@ -51,9 +51,10 @@ int main(int argc, const char *argv[]) {
       }),
     );
     for (const [key, value] of Object.entries(localized)) {
-      if (language === 'zh-Hans' || language === 'zh-CN')
-        assert.equal(value, original[key], 'Chinese permission copy must remain unchanged');
-      else {
+      if (language === 'zh-Hans' || language === 'zh-CN') {
+        assert.equal(value, original[key]);
+        if (key !== 'NSScreenCaptureUsageDescription') assert.match(value, /启用面试录音.*本机.*不上传/);
+      } else {
         assert.ok(
           value.length > 40 && !/\p{Script=Han}/u.test(value),
           `${language}: ${key} must use English`,
@@ -62,7 +63,7 @@ int main(int argc, const char *argv[]) {
           value,
           key === 'NSScreenCaptureUsageDescription'
             ? /only.*Screenshot.*only.*Send/
-            : /locally.*not saved or uploaded/,
+            : /locally.*saved on this Mac only when interview recording is enabled.*never uploaded/,
         );
       }
     }

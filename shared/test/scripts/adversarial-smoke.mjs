@@ -162,8 +162,7 @@ try {
     'persisted extra action/runtime keys do not replace send or streaming state; normal UI send succeeds',
   );
   assert.deepEqual(errors, []);
-  await console.log(JSON.stringify({ packaged, checks, errors }, null, 2));
-  console.log(JSON.stringify({ profile, packaged, checks, errors }));
+  console.log(JSON.stringify({ packaged, checks, errors }, null, 2));
 } finally {
   await closeUiApp(app);
 }

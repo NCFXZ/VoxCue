@@ -1,3 +1,4 @@
+import { readApiKeyRecords } from './backend/api/credentials';
 import { createAccountProfile, waitForProfileCleanup } from './accountProfile';
 import { hasChromiumAppStorage, LegacyProfileClaim, LegacyProfileMigrationError, legacyProfileAssignmentFile } from './backend/legacyProfileClaim';
 import { eraseLegacyProfileFiles, hasLegacyProfileFiles, migrateLegacyProfileFiles } from './backend/legacyProfileFiles';
@@ -195,6 +196,8 @@ let sessionHasContent = false;
 let mainCloseApproved = false;
 let mainCloseChecking = false;
 let mainCloseFlushed = false;
+type SavePurpose = 'update' | 'account';
+let savedInputWindow: { win: BrowserWindow; purpose: SavePurpose } | undefined;
 let pendingMainClose: string | null = null;
 let mainCloseTimer: ReturnType<typeof setTimeout> | undefined;
 let captureProtected = true;
@@ -276,8 +279,15 @@ function notifyCloudSyncAvailable() {
   const target = mainWindow.webContents;
   if (!target.isDestroyed() && !target.isCrashed()) sendDesktop(target, 'cloud:sync-available');
 }
-async function prepareUpdateInstall(accountLogout = false, deletingAccount = false) {
+function restoreWindowInput(purpose: SavePurpose) {
+  if (savedInputWindow?.purpose !== purpose) return;
+  const { win } = savedInputWindow;
+  savedInputWindow = undefined;
+  if (!win.isDestroyed()) win.setEnabled(true);
+}
+async function prepareMainWindowClose(purpose: SavePurpose = 'update', deletingAccount = false) {
   const win = mainWindow;
+  const accountLogout = purpose === 'account';
   if (!win || win.isDestroyed() || win.webContents.isCrashed() || pendingMainClose || mainCloseChecking)
     throw Error('Window is not ready');
   if (sessionHasContent && !deletingAccount) {
@@ -304,6 +314,13 @@ async function prepareUpdateInstall(accountLogout = false, deletingAccount = fal
   }
   if (interviewActive() || win.isDestroyed() || win.webContents.isCrashed())
     throw Error('Interview or window changed');
+  if (desktopPlatform.id === 'darwin') {
+    if (!win.isEnabled()) throw Error('Window is busy');
+    // A cloud account switch or Sparkle extraction can outlive the final save.
+    // Allow editing again only if this window's transition fails.
+    win.setEnabled(false);
+    savedInputWindow = { win, purpose };
+  }
   mainCloseFlushed = false;
   return new Promise<boolean>((resolve, reject) => {
     updateFlush = { resolve, reject };
@@ -460,13 +477,17 @@ function sizeInterview(scale: number, anchor?: Electron.Rectangle) {
   }
   if (nativePresentation?.reserveTranscriptCanvas) {
     publishInterviewLayout(win, bounds);
-    if (!interviewCollapsed) {
-      // Reserve only this scale's two-panel width on Mac, not a display-sized
-      // canvas. Transcript toggles retain the native surface and toolbar anchor.
-      const expanded = fitInterviewBounds(anchor, area, interviewScale, true);
-      if (expanded.width > bounds.width)
-        bounds = { ...bounds, x: expanded.x, width: expanded.width };
-    }
+    // Resizing a transparent NSWindow replaces its compositor surface. Keep
+    // the panel-sized surface through both toolbar and transcript transitions.
+    const expanded = fitInterviewBounds(anchor, area, interviewScale, true);
+    const panelHeight = interviewCollapsed && !interviewTranscriptVisible
+      ? fitInterviewBounds(anchor, area, interviewScale, false).height : expanded.height;
+    bounds = {
+      ...bounds,
+      x: expanded.width > bounds.width ? expanded.x : bounds.x,
+      width: Math.max(bounds.width, expanded.width),
+      height: Math.max(bounds.height, panelHeight),
+    };
   }
   // Windows fractional DPI can round a requested DIP to a different DIP when
   // read back. Compare the last request as well, without ignoring user moves.
@@ -1083,6 +1104,7 @@ function createMainWindow() {
   });
   loadWindowPage(mainWindow, 'main', indexFile, environment.devServerUrl);
   mainWindow.on('closed', () => {
+    if (savedInputWindow?.win === win) savedInputWindow = undefined;
     void activeProfile?.coordinator.cancelBatch().catch(() => {});
     chatIpc?.cancelModels();
     clearRemoteInterview();
@@ -1275,18 +1297,7 @@ app.whenReady().then(async () => {
         throw Error('Unauthorized window');
     },
   );
-  void components.status();
   nativePresentation?.initialize();
-  if (desktopPlatform.id === 'darwin') {
-    Menu.setApplicationMenu(
-      Menu.buildFromTemplate([
-        { role: 'appMenu' },
-        { role: 'fileMenu' },
-        { role: 'editMenu' },
-        { role: 'windowMenu' },
-      ]),
-    );
-  }
   const systemAccent = () => {
     try {
       const color = systemPreferences.getAccentColor();
@@ -1318,7 +1329,9 @@ app.whenReady().then(async () => {
       throw Error('Unauthorized window');
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     if (args.length !== 1 || !isUILanguage(args[0])) throw Error('Invalid UI language');
+    const changedLanguage = uiLanguage !== args[0];
     uiLanguage = args[0];
+    if (changedLanguage) updateMacMenu();
     finishInitialLanguage?.();
     for (const [window, title] of [
       [loginWindow, 'VoxCue · 登录'],
@@ -1377,6 +1390,7 @@ app.whenReady().then(async () => {
   };
   const credentialEncryption:
     | (CredentialEncryption & {
+        readonly unavailableReason?: string;
         maintain?(
           readable: (decrypt: (value: Buffer) => Promise<string>) => Promise<boolean>,
         ): Promise<CredentialCleanup | undefined>;
@@ -1395,8 +1409,54 @@ app.whenReady().then(async () => {
           await initialLanguageReady;
           return uiLanguage;
         },
+        app.isPackaged,
       )
     : undefined;
+  const tlsDirectory = path.join(userData, 'remote-connection-tls');
+  const localTls = !environment.userData && credentialEncryption && !credentialEncryption.unavailableReason
+    ? desktopPlatform.createRemoteTls?.(tlsDirectory, credentialEncryption) : undefined;
+  let importingCertificate = false;
+  async function importCertificate() {
+    const owner = mainWindow;
+    if (!owner || !localTls || !remoteConnection || importingCertificate) return;
+    const english = uiLanguage === 'en';
+    const title = nativeText('设备连接证书');
+    if (!['off', 'error'].includes(remoteConnection.state().status)) {
+      await dialog.showMessageBox(owner, { type: 'info', title,
+        message: nativeText('请先关闭设备连接，再导入证书。') });
+      return;
+    }
+    importingCertificate = true;
+    const profile = activeProfile;
+    const checkOwner = () => {
+      if (owner.isDestroyed() || owner !== mainWindow || profile !== activeProfile || leavingAccount || erasingAccount || closingMain)
+        throw Error('Certificate import cancelled');
+    };
+    try {
+      await remoteConnection.disconnect();
+      checkOwner();
+      const imported = await localTls.configure(owner, english, checkOwner);
+      checkOwner();
+      if (imported) await dialog.showMessageBox(owner, { type: 'info', title,
+        message: nativeText('证书已导入。再次开启设备连接时将使用 HTTPS。') });
+    } catch {
+      if (!owner.isDestroyed() && owner === mainWindow)
+        await dialog.showMessageBox(owner, { type: 'error', title, message: nativeText('导入失败，请检查证书、证书密码和当前局域网地址。') });
+    } finally { importingCertificate = false; }
+  }
+  function updateMacMenu() {
+    if (desktopPlatform.id !== 'darwin') return;
+    Menu.setApplicationMenu(Menu.buildFromTemplate([
+      { role: 'appMenu' },
+      localTls ? { role: 'fileMenu', submenu: [
+        { label: nativeText('导入设备连接证书…'),
+          click: () => { void importCertificate(); } },
+        { type: 'separator' }, { role: 'close' },
+      ] } : { role: 'fileMenu' },
+      { role: 'editMenu' }, { role: 'windowMenu' },
+    ]));
+  }
+  updateMacMenu();
   const cloudVault = createCloudVault(credentialEncryption);
   const telemetryProofVault = createCredentialVault<TelemetryProofState>(
     path.join(app.getPath('userData'), 'cloud-account', 'telemetry.bin'),
@@ -1444,6 +1504,7 @@ app.whenReady().then(async () => {
   });
   let recoveringErasures: Promise<void> | undefined;
   const recoverErasures = () => recoveringErasures ??= initialLanguageReady.then(async () => {
+    if (credentialEncryption?.unavailableReason) return;
     let legacyFailure: string | undefined;
     if (legacyUnconfirmedOwner && accountOrigin) {
       try {
@@ -1483,6 +1544,7 @@ app.whenReady().then(async () => {
     const state = localMode.active
       ? { ...cloudAccount.snapshot(), user: null, verified: false, localMode: true }
       : cloudAccount.snapshot();
+    if (credentialEncryption?.unavailableReason) state.signInUnavailable = credentialEncryption.unavailableReason;
     telemetry?.setIdentity(
       state.user
         ? { accountMode: 'account', userId: state.user.id }
@@ -1492,14 +1554,24 @@ app.whenReady().then(async () => {
     return state.user && localMode.importRevision
       ? { ...state, localImportRevision: localMode.importRevision } : state;
   };
+  const currentAccountStatus = (): ReturnType<CloudAccountClient['call']> =>
+    localMode.active || credentialEncryption?.unavailableReason
+      ? Promise.resolve({ ok: true as const, state: accountState() })
+      : cloudAccount.call({ action: 'status' });
   let initialAccountStatus: ReturnType<CloudAccountClient['call']> | undefined;
+  const restoredWindowStatus = new WeakMap<Electron.WebContents, { owner: string; verifiedAt: number }>();
   handleDesktop('cloud:account', async (event, call) => {
+    const checkCaller = () => {
+      if (![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
+          event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized window');
+    };
+    checkCaller();
     await Promise.all([localModeReady, recoverErasures()]);
-    if (
-      ![mainWindow?.webContents, loginWindow?.webContents].includes(event.sender) ||
-      event.senderFrame !== event.sender.mainFrame
-    )
-      throw Error('Unauthorized window');
+    checkCaller();
+    if (credentialEncryption?.unavailableReason) {
+      if (call?.action === 'status' && Object.keys(call).length === 1) return currentAccountStatus();
+      return { ok: false as const, state: accountState(), error: credentialEncryption.unavailableReason };
+    }
     if (erasingAccount) throw Error('账号资料正在清理。');
     if (localMode.active) {
       if (call?.action === 'status') return { ok: true as const, state: accountState() };
@@ -1520,6 +1592,16 @@ app.whenReady().then(async () => {
         error: '账号操作正在进行，请稍候。',
       };
     const previousOwner = activeProfile?.owner;
+    const startup = restoredWindowStatus.get(event.sender);
+    if (startup) {
+      // Only the first account call in this restored window may reuse its fresh verification.
+      restoredWindowStatus.delete(event.sender);
+      const current = cloudAccount.snapshot();
+      if (call?.action === 'status' && Object.keys(call).length === 1 && event.sender === mainWindow?.webContents &&
+          current.verified && current.user && previousOwner === startup.owner && startup.owner === 'account:' + current.user.id &&
+          performance.now() - startup.verifiedAt <= 12_000)
+        return { ok: true as const, state: accountState() };
+    }
     if (authenticating && previousOwner?.startsWith('account:'))
       throw Error('请先退出 VoxCue 账号。');
     if (call?.action === 'delete') {
@@ -1542,7 +1624,7 @@ app.whenReady().then(async () => {
         if (changingProfile && mainWindow) {
           if (interviewActive())
             return { ok: false as const, state: accountState(), error: '请先结束面试。' };
-          if (!(await prepareUpdateInstall(true, call.action === 'delete')))
+          if (!(await prepareMainWindowClose('account', call.action === 'delete')))
             return { ok: false as const, state: accountState(), error: '已取消退出。' };
         }
         if (leaving) leavingAccount = true;
@@ -1581,8 +1663,10 @@ app.whenReady().then(async () => {
         succeeded = response.ok;
         return response;
       } finally {
-        if (changingProfile && !succeeded && mainWindow?.webContents === event.sender)
+        if (changingProfile && !succeeded && mainWindow?.webContents === event.sender) {
           mainCloseApproved = mainCloseFlushed = false;
+          restoreWindowInput('account');
+        }
         if (leaving) leavingAccount = false;
         if (authenticating || changingProfile) entryBusy = false;
       }
@@ -1645,7 +1729,7 @@ app.whenReady().then(async () => {
       reason: result.reason,
     });
   };
-  if (credentialEncryption?.maintain) {
+  if (credentialEncryption?.maintain && !credentialEncryption.unavailableReason) {
     const authStorage = createAuthStorage(
       desktopPlatform.credentialEncryptionLabel,
       credentialEncryption,
@@ -1658,6 +1742,8 @@ app.whenReady().then(async () => {
         (decrypt) =>
           readCredentialRecords(decrypt, {
             readMigrationPasswords: (key) => readMigrationPasswordRecords(app.getPath('userData'), key),
+            readApiKeys: key => readApiKeyRecords(userData, key),
+            readTlsIdentity: localTls?.checkRecords,
             readErasureReceipts: key => erasures.checkRecords(key),
             erasingAccount,
             authStorage,
@@ -1795,11 +1881,12 @@ app.whenReady().then(async () => {
           }),
     unavailableReason: updateUnavailableReason(app.isPackaged),
     isInterviewActive: interviewActive,
-    prepareInstall: prepareUpdateInstall,
+    prepareInstall: prepareMainWindowClose,
     emit(state) {
       if (updateWasInstalling && state.phase !== 'installing') {
         mainCloseFlushed = false;
         mainCloseApproved = false;
+        restoreWindowInput('update');
       }
       updateWasInstalling = state.phase === 'installing';
       if (mainWindow && !mainWindow.isDestroyed())
@@ -1881,7 +1968,7 @@ app.whenReady().then(async () => {
       } else {
         if (!localMode.active) throw Error('当前不是本地账户模式。');
         if (interviewActive()) throw Error('请先结束面试。');
-        if (!(await prepareUpdateInstall(true)))
+        if (!(await prepareMainWindowClose('account')))
           return { ok: false as const, state: accountState(), error: '已取消返回登录。' };
         await accountArchive?.cancel();
         await localMode.set(false);
@@ -1889,7 +1976,10 @@ app.whenReady().then(async () => {
       }
       return { ok: true as const, state: accountState() };
     } catch (error) {
-      if (!enabled) mainCloseApproved = mainCloseFlushed = false;
+      if (!enabled) {
+        mainCloseApproved = mainCloseFlushed = false;
+        restoreWindowInput('account');
+      }
       throw error;
     } finally {
       entryBusy = false;
@@ -2074,6 +2164,7 @@ app.whenReady().then(async () => {
     requireMain,
     current: () => currentProfile().api,
     checkChange(provider, remove) {
+      if (credentialEncryption?.unavailableReason) throw Error(credentialEncryption.unavailableReason);
       const { selection } = currentProfile();
       if (signingIn || disconnecting || preparingProfile || entryBusy) throw Error('账号操作正在进行，请稍候。');
       if (selection.connected && selection.service === provider) {
@@ -2115,8 +2206,8 @@ app.whenReady().then(async () => {
   });
   remoteConnection = new RemoteConnectionService({
     mobileAssets: createMobileAssets(path.join(app.getAppPath(), 'dist')),
-    tls: {
-      directory: path.join(app.getPath('userData'), 'remote-connection-tls'),
+    tls: localTls?.configuration ?? {
+      directory: tlsDirectory,
       decryptKey: desktopPlatform.decryptRemoteTlsKey,
     },
     onState: publishRemoteState,
@@ -2125,6 +2216,9 @@ app.whenReady().then(async () => {
   registerRemoteConnectionIpc({
     service: remoteConnection,
     coordinator: remoteInterview,
+    beforeStart() {
+      if (importingCertificate) throw Error(nativeText('请先完成证书导入。'));
+    },
     requireOwner(event) {
       if (
         erasingAccount ||
@@ -2693,7 +2787,7 @@ app.whenReady().then(async () => {
     if (!url) throw Error('Invalid request');
     return shell.openExternal(url);
   });
-  handleDesktop('interview:open', async (event, value: unknown) => {
+  handleDesktop('interview:open', async (event, value: unknown, approvedDeviceRevision?: number, ...extra: unknown[]) => {
     requireMain(event);
     if (event.senderFrame !== event.sender.mainFrame) throw Error('Unauthorized frame');
     if (signingIn || disconnecting) throw Error('账户正在变更，请稍后重试。');
@@ -2702,6 +2796,9 @@ app.whenReady().then(async () => {
       throw Error('正在准备更新，请完成或取消更新后再开始面试。');
     if (interviewOpening) throw Error('正在检查面试设备，请稍候。');
     const configuration = validateInterviewConfiguration(value);
+    if (extra.length || (approvedDeviceRevision !== undefined &&
+        (!Number.isSafeInteger(approvedDeviceRevision) || approvedDeviceRevision <= 0)))
+      throw Error('Invalid device approval');
     if (interviewWindow) {
       openInterview();
       return;
@@ -2760,6 +2857,9 @@ app.whenReady().then(async () => {
       await speechSessions!.confirm(configuration);
       try {
         stage = 'window';
+        assertOpeningOwner();
+        // Bind sharing to the device the user actually saw when confirming, before the first frame.
+        await remoteConnection?.confirmInterviewDevice(approvedDeviceRevision);
         assertOpeningOwner();
         openInterview();
       } catch (error) {
@@ -2988,9 +3088,7 @@ app.whenReady().then(async () => {
     ? (initialAccountStatus = initialLanguageReady
         .then(async () => {
           await Promise.all([localModeReady, recoverErasures()]);
-          return localMode.active
-            ? { ok: true as const, state: accountState() }
-            : cloudAccount.call({ action: 'status' });
+          return currentAccountStatus();
         })
         .finally(() => {
           initialAccountStatus = undefined;
@@ -3008,24 +3106,29 @@ app.whenReady().then(async () => {
     });
     loginWindow?.once('closed', () => failInitialLanguage?.());
   }
-  async function restoreOwner(status?: ReturnType<CloudAccountClient['call']>) {
+  async function restoreOwner(status?: ReturnType<CloudAccountClient['call']>): Promise<{ owner?: string; verifiedAt?: number }> {
     await Promise.all([localModeReady, recoverErasures()]);
     if (localMode.active) {
       accountState();
       telemetry?.entry('local');
-      return 'local';
+      return { owner: 'local' };
     }
-    const result = await (status ?? cloudAccount.call({ action: 'status' }));
+    const result = await (status ?? currentAccountStatus());
     accountState();
-    if (result.ok && result.state.user && result.state.verified)
+    if (result.ok && result.state.user && result.state.verified) {
       telemetry?.entry('restore', result.state.user.createdAt);
-    return result.state.user ? 'account:' + result.state.user.id : undefined;
+      return { owner: 'account:' + result.state.user.id, verifiedAt: performance.now() };
+    }
+    return { owner: result.state.user ? 'account:' + result.state.user.id : undefined };
   }
-  async function restoreWindow(owner?: string) {
+  async function restoreWindow({ owner, verifiedAt }: Awaited<ReturnType<typeof restoreOwner>>) {
     if (activeProfile && activeProfile.owner !== owner) await retireProfile();
     if (!owner) return createLoginWindow();
     await prepareProfile(owner);
+    const previous = mainWindow;
     createMainWindow();
+    if (!previous && mainWindow && verifiedAt !== undefined)
+      restoredWindowStatus.set(mainWindow.webContents, { owner, verifiedAt });
   }
   function restoreFailed(error: unknown) {
     if (profileEntryStopped) return;

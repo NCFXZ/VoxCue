@@ -158,7 +158,7 @@ export interface DesktopAPI {
   setInterviewRecording(recordId: string, enabled: boolean): Promise<boolean>;
   recordings(call: RecordingCall): Promise<RecordingSegment[]>;
   pendingRecordingRemovals(): Promise<string[]>;
-  openInterview(configuration: InterviewConfiguration): Promise<void>;
+  openInterview(configuration: InterviewConfiguration, approvedDeviceRevision?: number): Promise<void>;
   checkInterviewAccess(configuration: InterviewConfiguration): Promise<InterviewAccessReport>;
   openMicrophoneSettings(source?: AudioSource): Promise<void>;
   interviewState(): Promise<InterviewWindowState>;

@@ -1,4 +1,5 @@
 import { captureRequested } from '../../../shared/test/scripts/capture-requested.mjs';
+import { assertSystemSymbol } from '../../../shared/test/scripts/assert-system-symbol.mjs';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -11,14 +12,16 @@ import {
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/icons-native-')));
-const symbols = JSON.parse(await readFile('src/symbols.json', 'utf8'));
+const symbols = JSON.parse(await readFile('public/sf-symbols/resolved.json', 'utf8'));
+const requested = JSON.parse(await readFile('src/symbols.json', 'utf8'));
+assert.deepEqual(Object.keys(symbols).sort(), Object.keys(requested).sort());
 const env = { ...process.env, COPILOT_TEST_USER_DATA: output, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: ['.'], env });
 const checks = [],
   errors = [];
 let glyphExtents;
-const verifyIcons = async (page, minimum) => {
+const verifyIcons = async (page, minimum, liveInterview = false) => {
   await page.waitForFunction(() =>
     document
       .getAnimations()
@@ -28,7 +31,14 @@ const verifyIcons = async (page, minimum) => {
           animation.playState !== 'running',
       ),
   );
-  const icons = await page.locator('svg').evaluateAll((elements) =>
+  if (liveInterview) {
+    const recording = page.locator('.floating-toolbar button.floating-record > svg.recording-wave');
+    assert.equal(await recording.count(), 1);
+    assert.equal(await recording.locator('path').count(), 1);
+  }
+  const icons = await page.locator(liveInterview
+    ? 'svg:not(.floating-toolbar button.floating-record > svg.recording-wave)'
+    : 'svg').evaluateAll((elements) =>
     elements.map((element) => ({
       name: element.getAttribute('data-sf-symbol'),
       mask: !!element.querySelector('mask image'),
@@ -87,6 +97,7 @@ try {
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
   await verifyIcons(login, 4);
+  assert.equal(await login.locator('.login-interview-preview .floating-toolbar [data-sf-symbol="waveform"]').count(), 1);
   await login.screenshot({ animations: 'disabled' });
   const assets = await app.evaluate(({ nativeImage, app }, symbols) => {
     if (!app.getPath('userData').includes('/test/results/icons-native-'))
@@ -192,6 +203,7 @@ try {
   await surface.getByRole('textbox', { name: '聊天消息', exact: true }).waitFor();
   await surface.waitForFunction(() => !document.querySelector('[aria-label="聊天消息"]').disabled);
   await verifyIcons(page, 10);
+  await assertSystemSymbol(page.getByRole('button', { name: '个人信息', exact: true }), 'Person', 'person.crop.circle', 15);
   await page.screenshot({ animations: 'disabled' });
   await captureRequested(page, 'mac-sf-main');
   await page.getByRole('button', { name: '用户菜单', exact: true }).click();
@@ -223,12 +235,17 @@ try {
   checks.push('重置、刷新和软件更新分别使用不同的图形，更新设置入口与操作按钮一致');
   await settings.getByRole('button', { name: '面试设置', exact: true }).click();
   await settings.getByRole('slider', { name: '面试字体大小', exact: true }).waitFor();
+  assert.equal(await settings.locator('.interview-preview-shell .floating-toolbar [data-sf-symbol="waveform"]').count(), 1);
   assert.equal(
     await settings.getByRole('slider', { name: '面试背景透明度', exact: true }).count(),
     1,
   );
   assert.equal(await settings.locator('.display-slider-icon').count(), 4);
   assert.equal(await settings.locator('.display-opacity-icon').count(), 2);
+  const opacityMasks = await settings.locator('.display-opacity-icon').evaluateAll(elements =>
+    elements.map(element => getComputedStyle(element).maskImage));
+  assert.ok(opacityMasks.every(mask => mask.startsWith('url(')));
+  assert.equal(new Set(opacityMasks).size, 2);
   await settings.getByRole('button', { name: '关闭设置', exact: true }).click();
   checks.push('主界面/设置含菜单、导航、主题、输入和关闭图标均为 SF Symbols，浅深主题继承颜色');
   await page.getByRole('button', { name: '开始面试', exact: true }).click();
@@ -239,7 +256,7 @@ try {
   const floating = await floatingOpened;
   floating.on('pageerror', (error) => errors.push(error.message));
   await floating.getByRole('textbox', { name: '面试提问', exact: true }).waitFor();
-  await verifyIcons(floating, 10);
+  await verifyIcons(floating, 10, true);
   assert.equal(
     await floating
       .getByRole('button', { name: '面试设置', exact: true })
@@ -256,7 +273,7 @@ try {
   await floating.screenshot({ animations: 'disabled' });
   await floating.emulateMedia({ colorScheme: 'dark' });
   await floating.waitForFunction(() => document.documentElement.classList.contains('dark'));
-  await verifyIcons(floating, 10);
+  await verifyIcons(floating, 10, true);
   await floating.screenshot({ animations: 'disabled' });
   const closed = floating.waitForEvent('close');
   await floating.evaluate(() => window.desktop.confirmInterviewEnd());

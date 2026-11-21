@@ -95,7 +95,7 @@ class Capture {
     std::atomic<size_t> head{0}, tail{0}, queuedFrames{0};
     std::mutex wakeMutex; std::condition_variable changed;
     std::thread writer;
-    std::atomic<bool> stopping{false}, failed{false};
+    std::atomic<bool> stopping{false}, failed{false}, routeChanged{false};
     bool finished = false;
     std::chrono::steady_clock::time_point stopAt;
     AudioObjectID device = 0, tap = 0, aggregate = 0;
@@ -108,7 +108,7 @@ class Capture {
     struct Listener { AudioObjectID object; AudioObjectPropertyAddress key; };
     std::vector<Listener> listeners;
     static OSStatus deviceChanged(AudioObjectID, UInt32, const AudioObjectPropertyAddress *, void *context) {
-        static_cast<Capture *>(context)->failed = true; return noErr;
+        static_cast<Capture *>(context)->routeChanged = true; return noErr;
     }
     OSStatus listen(AudioObjectID object, AudioObjectPropertyAddress key) {
         OSStatus status = AudioObjectAddPropertyListener(object, &key, deviceChanged, this);
@@ -164,7 +164,7 @@ class Capture {
         return noErr;
     }
     void receive(const AudioBufferList *input, const AudioTimeStamp *time) {
-        if (stopping || failed || !input || !input->mNumberBuffers) return;
+        if (stopping || failed || routeChanged || !input || !input->mNumberBuffers) return;
         if (outputRoute && input->mNumberBuffers > 256) { failed = true; return; }
         const auto shape = voxcue::audio::inspectBuffers(input, format, maxFrames);
         if (!shape.valid) { failed = true; return; }
@@ -174,7 +174,9 @@ class Capture {
         if (writeIndex - head.load(std::memory_order_acquire) == slots || (queuedFrames.load(std::memory_order_relaxed) + frames) / format.mSampleRate > 1.5) { failed = true; return; }
         auto &packet = packets[writeIndex % slots];
         uint32_t length = uint32_t(17 + frames * 4), rate = uint32_t(format.mSampleRate), flags = 0;
-        double timestamp = double((time->mFlags & kAudioTimeStampHostTimeValid) ? time->mHostTime : mach_absolute_time()) * timebase.numer / timebase.denom / 1e6;
+        const bool validHostTime = time && (time->mFlags & kAudioTimeStampHostTimeValid);
+        if (!validHostTime) flags |= 4;
+        double timestamp = double(validHostTime ? time->mHostTime : mach_absolute_time()) * timebase.numer / timebase.denom / 1e6;
         if (previousEnd >= 0 && std::abs(timestamp - previousEnd) > 100) flags |= 1;
         previousEnd = timestamp + frames * 1000 / format.mSampleRate;
         memcpy(packet.bytes.data(), &length, 4); packet.bytes[4] = 1;
@@ -196,7 +198,10 @@ class Capture {
                 changed.wait_for(lock, std::chrono::milliseconds(20), [&]{ return head.load() != tail.load() || stopping || failed; });
                 const size_t readIndex = head.load(std::memory_order_relaxed);
                 if (readIndex == tail.load(std::memory_order_acquire)) { if (stopping) return; continue; }
-                packet = packets[readIndex % slots];
+                const auto &queued = packets[readIndex % slots];
+                packet.size = queued.size;
+                packet.frames = queued.frames;
+                memcpy(packet.bytes.data(), queued.bytes.data(), queued.size);
                 queuedFrames.fetch_sub(packet.frames, std::memory_order_relaxed);
                 head.store(readIndex + 1, std::memory_order_release);
             }
@@ -205,6 +210,7 @@ class Capture {
                 if (stopping && std::chrono::steady_clock::now() - stopAt > std::chrono::seconds(1)) { failed = true; break; }
                 pollfd output{STDOUT_FILENO, POLLOUT, 0};
                 int ready = poll(&output, 1, 100);
+                if (ready < 0 && errno == EINTR) continue;
                 if (ready < 0 || (ready && (output.revents & (POLLERR|POLLHUP)))) { failed = true; break; }
                 if (!ready) continue;
                 ssize_t written = write(STDOUT_FILENO, packet.bytes.data()+offset, packet.size-offset);
@@ -259,7 +265,8 @@ public:
         if (collect) { fcntl(STDOUT_FILENO, F_SETFL, fcntl(STDOUT_FILENO, F_GETFL) | O_NONBLOCK); writer = std::thread([this]{ writePackets(); }); }
         return AudioDeviceStart(device, io);
     }
-    bool healthy() { return !failed; }
+    bool healthy() { return !failed && !routeChanged; }
+    NSString *errorCode() { return failed ? @"device-changed-or-backpressure" : @"device-changed"; }
     bool finish() {
         if (finished) return !failed;
         finished = true;
@@ -298,14 +305,14 @@ int main(int argc, const char *argv[]) {
         if (!uid || [uid rangeOfCharacterFromSet:[NSCharacterSet characterSetWithRange:NSMakeRange(0, 1)]].location != NSNotFound) return failure(@"invalid-request");
         Capture capture;
         OSStatus status = capture.initialize(microphone, uid);
-        if (status || !capture.healthy()) return failure(!capture.healthy() ? @"device-changed-or-backpressure" : status == kAudioHardwareBadDeviceError ? @"device-unavailable" : status == kAudioHardwareUnsupportedOperationError ? @"unsupported-audio-format-or-layout" : @"initialize-failed", status);
+        if (status || !capture.healthy()) return failure(!capture.healthy() ? capture.errorCode() : status == kAudioHardwareBadDeviceError ? @"device-unavailable" : status == kAudioHardwareUnsupportedOperationError ? @"unsupported-audio-format-or-layout" : @"initialize-failed", status);
         if (microphone && !microphoneAllowed()) return failure(@"permission-denied");
         // Core Audio has no public system-audio permission query. The explicit
         // user preflight starts/stops a no-op IOProc to request authorization;
         // it never reads, returns or feeds any sample buffers to ASR.
         status = capture.start(!check);
         if (status) return failure(status == kAudioDevicePermissionsError ? @"permission-denied" : @"start-failed", status);
-        if (check) { if (!capture.finish()) return failure(@"device-changed-or-backpressure"); json(NSFileHandle.fileHandleWithStandardOutput, @{@"ok":@YES, @"samplesRead":@0}); return 0; }
+        if (check) { if (!capture.finish() || !capture.healthy()) return failure(capture.errorCode()); json(NSFileHandle.fileHandleWithStandardOutput, @{@"ok":@YES, @"samplesRead":@0}); return 0; }
         json(NSFileHandle.fileHandleWithStandardError, @{@"type":@"started"});
         auto permissionChecked = std::chrono::steady_clock::now();
         while (capture.healthy()) {
@@ -316,6 +323,7 @@ int main(int argc, const char *argv[]) {
             pollfd input{STDIN_FILENO, POLLIN, 0};
             if (poll(&input, 1, 50) > 0 && (input.revents & (POLLIN|POLLHUP))) { char byte; if (read(STDIN_FILENO, &byte, 1) <= 0) return capture.finish() ? 0 : failure(@"drain-failed"); }
         }
-        return failure(@"device-changed-or-backpressure");
+        capture.finish();
+        return failure(capture.errorCode());
     }
 }

@@ -1212,6 +1212,9 @@ describe('受控 preload 契约', () => {
       await (api[method] as (...args: unknown[]) => unknown)(...args);
       expect(bridge.invoke).toHaveBeenLastCalledWith(channel, ...args);
     }
+    const configuration = defaultInterviewConfiguration();
+    await api.openInterview(configuration, 17);
+    expect(bridge.invoke).toHaveBeenLastCalledWith('interview:open', configuration, 17);
     expect(Object.keys(api).sort()).toEqual(
       [
         ...calls.map(([method]) => method),

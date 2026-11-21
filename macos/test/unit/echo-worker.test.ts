@@ -7,7 +7,7 @@ afterEach(async () => {
   await Promise.all(workers.splice(0).map((worker) => worker.terminate()));
 });
 
-it('loads the actual optional AEC in the shared worker, drains tails before flush, and resets both ASR lanes on a gap', async () => {
+it('recognizes both original capture packets before flush and resets only the interrupted ASR lane', async () => {
   const root = path.resolve('..');
   const worker = new Worker(
     `
@@ -16,13 +16,11 @@ it('loads the actual optional AEC in the shared worker, drains tails before flus
     require.extensions['.ts'] = (module, file) => module._compile(ts.transpileModule(fs.readFileSync(file, 'utf8'), {
       compilerOptions: {module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true}
     }).outputText, file);
-    // Replace inference alone: audio preprocessing, worker protocol and lifecycle
-    // are production code. No model, account, audio device or transport is used.
+    // Observe the ASR input at the production worker's model boundary.
     require.cache[workerData.engine] = {exports: {Recognizer: class {
-      static async load(_options, emit) { return new this(emit); }
+      static async load(_options, emit) {return new this(emit);}
       audioMs = 0; inferenceMs = 0;
-      metadata = {}; healthy = true;
-      progress = new Map();
+      metadata = {}; healthy = true; progress = new Map();
       constructor(emit) {this.emit = emit;}
       feed(source, samples, rate, timestamp) {this.progress.set(source, timestamp); this.emit({test:'audio', source, samples, rate, timestamp});}
       processedThrough(source) {return this.progress.get(source);}
@@ -73,17 +71,17 @@ it('loads the actual optional AEC in the shared worker, drains tails before flus
     {
       op: 'init',
       directory: 'synthetic-not-read',
-      preprocessorFile: path.join(root, 'macos/electron/speech/echoCancellation.ts'),
     },
     (m) => m.ready,
   );
   await send({ op: 'prepare', id: 1, sources: ['system', 'microphone'] }, (m) => m.prepared === 1);
-  const input = Float32Array.from({ length: 967 }, (_, i) => Math.sin(i / 9) * 0.1);
+  const system = Float32Array.from({ length: 967 }, (_, i) => Math.sin(i / 9) * 0.1);
+  const mic = Float32Array.from({ length: 883 }, (_, i) => Math.cos(i / 13) * 0.02);
   await send(
     {
       op: 'audio',
       source: 'system',
-      samples: new Float32Array(967),
+      samples: system,
       rate: 48000,
       timestamp: 1000,
       captureClock: 10,
@@ -96,8 +94,8 @@ it('loads the actual optional AEC in the shared worker, drains tails before flus
     {
       op: 'audio',
       source: 'microphone',
-      samples: input,
-      rate: 48000,
+      samples: mic,
+      rate: 44100,
       timestamp: 1000,
       captureClock: 10,
       sequence: 3,
@@ -105,23 +103,15 @@ it('loads the actual optional AEC in the shared worker, drains tails before flus
     },
     (m) => m.ack === 3,
   );
+  const audio = messages.map(m => m.event).filter(e => e?.test === 'audio');
+  expect(audio).toEqual([
+    { test: 'audio', source: 'system', samples: system, rate: 48000, timestamp: 1000 },
+    { test: 'audio', source: 'microphone', samples: mic, rate: 44100, timestamp: 1000 },
+  ]);
   await send({ op: 'flush', id: 4, reason: 'pause' }, (m) => m.flushed === 4);
-  expect(messages.find((m) => m.ack === 3)?.progress).toEqual({
-    system: expect.any(Number),
-    microphone: expect.any(Number),
-  });
-  const audio = messages
-    .filter((m) => m.event?.test === 'audio' && m.event.source === 'microphone')
-    .flatMap((m) => Array.from(m.event.samples));
-  expect(Float32Array.from(audio)).toEqual(input);
   expect(messages.at(-2)?.event).toEqual({ test: 'flush', reason: 'pause' });
   await send({ op: 'prepare', id: 5, sources: ['system', 'microphone'] }, (m) => m.prepared === 5);
-  const gap = wait((m) => m.event?.test === 'gap' && m.event.source === 'microphone');
   worker.postMessage({ op: 'gap', source: 'system' });
-  await gap;
-  expect(messages.filter((m) => m.event?.test === 'gap').map((m) => m.event.source)).toEqual([
-    'system',
-    'microphone',
-  ]);
   await send({ op: 'flush', id: 6, reason: 'stop' }, (m) => m.flushed === 6);
+  expect(messages.filter((m) => m.event?.test === 'gap').map((m) => m.event.source)).toEqual(['system']);
 }, 10000);

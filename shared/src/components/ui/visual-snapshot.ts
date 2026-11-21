@@ -17,6 +17,9 @@ export function prepareVisualSnapshot(nodes: Element[]) {
       resources.set(id, replacement);
       node.setAttribute('id', replacement);
     }
+    // These roles also control layout. Keep their styling when the live semantics are removed.
+    const role = node.getAttribute('role');
+    if (role === 'alert' || role === 'switch') node.setAttribute('data-visual-role', role);
     for (const name of ['role', 'name', 'autofocus']) node.removeAttribute(name);
   }
   for (const node of nodes) {

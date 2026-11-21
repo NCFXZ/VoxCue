@@ -99,7 +99,7 @@
   :is(.management-page, .settings-dialog, .personal-panel, .app-dialog, .record-toolbar-actions)
   button.ui-button:not(.button-icon):not(.confirm-delete):not(.action-transition *):not(
     [aria-haspopup='menu']
-  ):not(.effort-model-trigger):not([role='switch']) {
+  ):not(.effort-model-trigger):not([role='switch'], [data-visual-role='switch']) {
   padding-inline: 20px;
 }
 .web-materials .floating-drag-handle {

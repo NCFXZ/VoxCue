@@ -116,7 +116,6 @@ async function sequence(short) {
   try {
     await send({
       op: 'init', directory: config.models, speechModel: 'paraformer', inferenceDevice: 'cpu',
-      preprocessorFile: path.join(platformRoot, 'dist-electron/macos/electron/speech/echoCancellation.js'),
       sources: ['system'],
     }, (message) => message.ready);
     const prepared = ++nextId;
@@ -144,7 +143,7 @@ async function sequence(short) {
     assert(/项目(?:经历|经理)$/u.test(text), 'The question tail must survive the unchanged silence endpoint');
     for (const segment of finals) {
       assert(Number.isFinite(segment.silenceStartMs));
-      assert(through >= segment.silenceStartMs + 1800);
+      assert(through >= segment.silenceStartMs + 1000);
     }
     return text;
   } finally {

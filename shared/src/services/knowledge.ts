@@ -1,9 +1,9 @@
 import { assertLibrariesWritable, deactivateOriginal, holdOriginalReplacements, removeIndexedOriginals, hasKnowledgeEngine, knowledgeCall, markBaseRemoval, pendingBaseRemovals } from './knowledgeIndex';
 import { CloudDataConflict, localChanged } from './localChanges';
-import { applyHistoryChanges, historyChanged, historyRepository, historyStoreNames, type HistoryChange, type InterviewRecord } from './history';
+import { applyHistoryChanges, historyChanged, historyRepository, historyStoreNames, type HistoryChange, type HistorySummary } from './history';
 import { sameValue } from './storedEqual';
 import { openOriginalBackups, originalBackupsDatabase } from './originalBackups';
-import { isKnowledgeFileName, knowledgeBatchLimit, knowledgeDocumentAccept, validKnowledgeDocumentName } from '../../electron/contracts/knowledge';
+import { isKnowledgeFileName, knowledgeBatchLimit, knowledgeDocumentAccept, validKnowledgeDocumentName, validKnowledgeId } from '../../electron/contracts/knowledge';
 import { maxRestoreItems } from '../../electron/contracts/restoreData';
 import type { KnowledgeBase, LocalDocument, KnowledgeManagementService } from './knowledgeTypes';
 import { openDocumentsDatabase, hasDocumentsDatabase } from './documentsDatabase';
@@ -77,6 +77,22 @@ export function readKnowledgeOriginal(store: 'bases' | 'documents', id: string) 
   return transaction<LocalDocument | KnowledgeBase | undefined>([store], 'readonly', (tx, result) => {
     const request = tx.objectStore(store).get(id);
     request.onsuccess = () => result(request.result);
+  });
+}
+export function readKnowledgeDocumentNames(ids: readonly string[]) {
+  type Name = Pick<LocalDocument, 'id' | 'baseId' | 'name'>;
+  return transaction<Name[]>(['documents'], 'readonly', (tx, result) => {
+    const names: Name[] = [];
+    result(names);
+    const store = tx.objectStore('documents');
+    for (const id of ids) {
+      const request = store.get(id);
+      request.onsuccess = () => {
+        const doc: LocalDocument | undefined = request.result;
+        if (doc && doc.baseId !== 'personal-resume')
+          names.push({ id: doc.id, baseId: doc.baseId, name: doc.name });
+      };
+    }
   });
 }
 export const localKnowledge: KnowledgeManagementService = {
@@ -277,12 +293,12 @@ export function documentRevision(value: KnowledgeBase | LocalDocument | undefine
   if (!value) return null;
   return (
     value.localRevision ??
-    JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'blob')))
+    JSON.stringify(Object.fromEntries(Object.entries(value).filter(([key]) => key !== 'blob' && key !== 'modifiedAt')))
   );
 }
 
 type OriginalsSnapshot = { bases: KnowledgeBase[]; documents: LocalDocument[] };
-type ImportedHistory = { changes: HistoryChange[]; expectedRecords?: InterviewRecord[] };
+type ImportedHistory = { changes: HistoryChange[]; expectedDirectory?: HistorySummary[] };
 
 /** Publish synchronous stores after all original writes were accepted, and undo them on abort. */
 async function updateMigrationOriginals<T>(
@@ -315,13 +331,18 @@ async function updateMigrationOriginals<T>(
           if (!history) docStore.count().onsuccess = commitText;
           else {
             const apply = () => applyHistoryChanges(tx, history.changes, commitText, abort);
-            if (history.expectedRecords) {
+            if (history.expectedDirectory) {
               // New references in another interview can protect a screenshot selected for removal.
-              const read = tx.objectStore(historyStoreNames[0]).getAll();
+              const expected = history.expectedDirectory;
+              const read = tx.objectStore(historyStoreNames[1]).getAll();
               read.onsuccess = () => {
-                const byId = new Map(read.result.map((record: InterviewRecord) => [record.id, record]));
-                if (byId.size !== history.expectedRecords!.length ||
-                    history.expectedRecords!.some(record => !sameValue(record, byId.get(record.id))))
+                const byId = new Map(read.result.map((row: HistorySummary) => [row.id, row]));
+                if (byId.size !== expected.length || expected.some(row => {
+                  const current = byId.get(row.id);
+                  // Legacy source rows gain their first directory revision during this move.
+                  return !current || (row.revision && current.revision !== row.revision) ||
+                    !sameValue(current.imageIds, row.imageIds);
+                }))
                   abort(Error('来源资料已改变，请重新选择。'));
                 else apply();
               };
@@ -379,6 +400,89 @@ export async function removeMovedOriginals(
     for (const id of documentIds) docs.delete(id);
   }, publish, () => {}, true, history, !!(baseIds.size || documentIds.size));
 }
+/** Keep all reviewed originals together until the last cloud check and one IndexedDB commit. */
+export async function removeSyncedLibraryOriginals(root: string, revisions: ReadonlyMap<string, string | null>,
+  keys: string[], recheckCloud: () => Promise<void>, guard: () => void) {
+  const baseId = root.slice(5);
+  const conflict = () => new CloudDataConflict('同步期间本地数据已有修改，已保留两端版本。');
+  const removeBase = keys.includes(root);
+  const files = keys.filter(key => key !== root);
+  if (!root.startsWith('base:') || !validKnowledgeId(baseId) || baseId === 'personal-resume' ||
+      new Set(keys).size !== keys.length || keys.some(key => !revisions.get(key)) ||
+      files.some(key => !key.startsWith('file:') || !validKnowledgeId(key.slice(5))) ||
+      (removeBase && revisions.size !== keys.length)) throw conflict();
+  const check = (commit: boolean) => transaction<void>(['bases', 'documents'], commit ? 'readwrite' : 'readonly',
+    (tx, _, abort) => {
+      const bases = tx.objectStore('bases'), documents = tx.objectStore('documents');
+      const base = bases.get(baseId);
+      const members = documents.index('baseId').getAll(baseId);
+      members.onsuccess = () => {
+        try {
+          guard();
+          assertLibrariesWritable([baseId]);
+          const docs: LocalDocument[] = members.result;
+          if (docs.length + (base.result ? 1 : 0) !== revisions.size ||
+              (base.result && revisions.get(root) !== documentRevision(base.result)) ||
+              docs.some(doc => revisions.get('file:' + doc.id) !== documentRevision(doc))) throw conflict();
+          if (commit) {
+            for (const file of files) documents.delete(file.slice(5));
+            if (removeBase) bases.delete(baseId);
+          }
+        } catch (error) { abort(error); }
+      };
+    });
+  await check(false);
+  const release = holdOriginalReplacements(files.map(key => key.slice(5)));
+  try {
+    if (removeBase && hasKnowledgeEngine()) {
+      guard();
+      await knowledgeCall({ op: 'remove-base', baseId, requestId: crypto.randomUUID() });
+    } else for (const key of files) {
+      guard();
+      await deactivateOriginal(key.slice(5), true);
+    }
+    await recheckCloud();
+    await check(true);
+  } finally { release(); }
+}
+/** A cloud version can omit a local original. Only remove the reviewed revision.
+ * A library row is removed last, once its reviewed documents have been removed. */
+export async function removeSyncedKnowledgeOriginal(
+  kind: 'base' | 'file' | 'resume', id: string, baseId: string, expectedRevision: string, guard: () => void,
+) {
+  const base = kind === 'base';
+  const changed = () => new CloudDataConflict('同步期间本地数据已有修改，已保留两端版本。');
+  const verify = (original: KnowledgeBase | LocalDocument | undefined, count: number) => {
+    guard();
+    assertLibrariesWritable([baseId]);
+    if (!original || (kind === 'resume') !== (baseId === 'personal-resume') ||
+        (kind === 'resume' && count !== 1) || documentRevision(original) !== expectedRevision ||
+        (base ? (id !== baseId || count !== 0) : (!('baseId' in original) || original.baseId !== baseId)))
+      throw changed();
+  };
+  const checkOriginal = (remove: boolean) => transaction<void>(
+    ['documents', 'bases'], remove ? 'readwrite' : 'readonly', (tx, _, abort) => {
+      const docs = tx.objectStore('documents');
+      const store = base ? tx.objectStore('bases') : docs;
+      const children = base || kind === 'resume' ? docs.index('baseId').count(baseId) : undefined;
+      const current = store.get(id);
+      current.onsuccess = () => {
+        try {
+          verify(current.result, children?.result ?? 0);
+          if (remove) store.delete(id);
+        } catch (error) { abort(error); }
+      };
+    },
+  );
+  await removeIndexedOriginals(base ? { baseId } : { documentId: id }, async () => {
+    await checkOriginal(false);
+    guard();
+    if (!base) await deactivateOriginal(id, true);
+    else if (hasKnowledgeEngine()) await knowledgeCall({ op: 'remove-base', baseId, requestId: crypto.randomUUID() });
+    await checkOriginal(true);
+  });
+}
+
 export async function restoreSyncedBase(
   base: KnowledgeBase,
   expectedRevision: string | null,

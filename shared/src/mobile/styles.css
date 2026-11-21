@@ -174,11 +174,12 @@ button:focus-visible, textarea:focus-visible, select:focus-visible, [tabindex]:f
 .mobile-toggle-dot { display: inline-grid; place-items: center; width: 11px; height: 11px; border: 1px solid currentColor; border-radius: 50%; flex-shrink: 0; }
 .mobile-auto-answer[aria-checked='true'] .mobile-toggle-dot::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
 .mobile-primary { border-color: var(--accent-fill); background: var(--accent-fill); color: var(--on-accent); }
-.mobile-error { color: var(--error); font-size: 13px; overflow-wrap: anywhere; margin: 8px 0; }
+.mobile-error { color: var(--error); overflow-wrap: anywhere; margin: 8px 0; }
 .mobile-composer .mobile-error { max-height: 70px; overflow: auto; margin: 0 0 8px; }
 .mobile-pending-question { margin: 0 0 8px; max-height: 3.2em; font-size: 12px; color: var(--muted); overflow: hidden; }
 .mobile-pending-question > span { margin-right: 6px; color: var(--accent); font-weight: 600; }
-.mobile-hint { margin-block: 8px; color: var(--muted); font-size: 12px; }
+.mobile-error, .mobile-hint { font-size: 12px; }
+.mobile-hint { margin-block: 8px; color: var(--muted); }
 .mobile-empty { padding: 32px 12px; text-align: center; color: var(--muted); }
 .mobile-empty h2 { font-size: 16px; font-weight: 500; }
 .mobile-empty p { font-size: 13px; }

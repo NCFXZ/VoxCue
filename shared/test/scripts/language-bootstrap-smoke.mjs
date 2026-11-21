@@ -1,6 +1,6 @@
 import { testRoot, electron } from './test-workspace.mjs';
 import { offlineElectronEntry } from './offline-electron-entry.mjs';
-import { closeUiApp } from './install-ui-account.mjs';
+import { closeUiApp, waitForRestoredMainWindow } from './install-ui-account.mjs';
 import { waitForAsync } from './wait-for-async.mjs';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import path from 'node:path';
@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 if (process.platform !== 'darwin') throw Error('Credential language bootstrap is Mac-only');
 const directory = await mkdtemp(path.join(testRoot, 'language-bootstrap-'));
 let app;
-async function launch(profile, preferred, holdLanguage, testCredentials = false) {
+async function launch(profile, preferred, holdLanguage, testCredentials = false, firstStatusOffline = false) {
   const fixture = path.join(directory, 'bootstrap.cjs');
   await writeFile(fixture, `
 const {app, BrowserWindow, ipcMain}=require('electron');
@@ -17,7 +17,7 @@ const {EventEmitter}=require('node:events');
 const root=process.cwd();
 const state=globalThis.languageBootstrap={
   seen:[], forwarded:[], shown:[], native:[], unhandled:[], statusCalls:0,
-  busyResults:0, active:false, cloudReleased:false, cryptoOutcome:null,
+  busyResults:0, componentChecks:0, active:false, cloudReleased:false, cryptoOutcome:null,
   holdLanguage:${JSON.stringify(holdLanguage)}, pendingLanguage:[]
 };
 process.on('unhandledRejection',error=>state.unhandled.push(String(error?.message??error)));
@@ -67,15 +67,32 @@ credentials.createCredentialEncryption=(file,confirm,language)=>{
   return crypto;
 };
 const {CloudAccountClient}=require(root+'/dist-electron/shared/electron/backend/cloud/client.js');
+const {ComponentService}=require(root+'/dist-electron/shared/electron/backend/components/service.js');
+const componentStatus=ComponentService.prototype.status;
+ComponentService.prototype.status=function(...args){state.componentChecks++;return componentStatus.apply(this,args);};
 const user={id:'a0000000-0000-4000-8000-000000000001',email:'synthetic@example.test',createdAt:1};
 const snapshot=()=>({configured:true,verified:state.cloudReleased,user:state.cloudReleased?user:null});
 CloudAccountClient.prototype.snapshot=snapshot;
+// The restored synthetic session also owns an empty backup catalog. Its normal
+// background read must not masquerade as a new /v1/account verification.
+CloudAccountClient.prototype.api=async function(route,method,_body,_binary,owner){
+  if(route!=='/v1/backups'||method!=='GET'||owner?.userId!==user.id||!state.cloudReleased)
+    throw Error('Unexpected synthetic backup action');
+  const zero={profile:0,history:0,knowledgebase:0};
+  return {items:[],nextCursor:null,storage:{currentBytes:zero,reservedBytes:zero,storedBytes:zero,
+    capacityBytes:100000000,knowledgeCapacityBytes:100000000}};
+};
 CloudAccountClient.prototype.call=async function(input){
   if(input.action!=='status')throw Error('Unexpected synthetic account action');
   state.statusCalls++;
   if(state.active){state.busyResults++;return {ok:false,state:snapshot(),error:'Synthetic busy'};}
   state.active=true;
-  try{await cloudGate;return {ok:true,state:snapshot()};}finally{state.active=false;}
+  try{
+    await cloudGate;
+    if(${JSON.stringify(firstStatusOffline)}&&state.statusCalls===1)
+      return {ok:false,state:{...snapshot(),verified:false},error:'Synthetic offline restore'};
+    return {ok:true,state:snapshot()};
+  }finally{state.active=false;}
 };
 require(root+'/dist-electron/shared/electron/main.js');
 `);
@@ -120,25 +137,44 @@ try {
     assert.deepEqual(await app.evaluate(() => ({
       languages: [...new Set(globalThis.languageBootstrap.native.map((request) => request.language))],
       busy: globalThis.languageBootstrap.busyResults,
+      componentChecks: globalThis.languageBootstrap.componentChecks,
       shown: globalThis.languageBootstrap.shown,
-    })), { languages: [saved], busy: 0, shown: [] });
-    const mainCreated = app.waitForEvent('window');
+    })), { languages: [saved], busy: 0, componentChecks: 0, shown: [] });
+    const restoreStarted = performance.now();
     await app.evaluate(() => globalThis.languageBootstrap.releaseCloud());
-    const main = await mainCreated;
+    const main = await waitForRestoredMainWindow(app, saved === 'en' ? 'User menu' : '用户菜单');
     await main.locator('.interview-start-trigger').waitFor();
     await waitForAsync(app, ({ BrowserWindow }) => {
       const windows = BrowserWindow.getAllWindows();
       return windows.length === 1 && windows[0].isVisible();
     });
+    const visibleMs = Math.round(performance.now() - restoreStarted);
+    await main.locator('button.user-button').click({ timeout: 12000 });
+    await main.getByRole('menu').waitFor({ timeout: 12000 });
+    console.log('Verified restore to visible window / responding user menu (ms):',
+      visibleMs, Math.round(performance.now() - restoreStarted));
+    await main.keyboard.press('Escape');
     assert.equal(await main.evaluate(() => document.documentElement.lang), saved);
+    await waitForAsync(app, () => globalThis.languageBootstrap.componentChecks > 0);
     assert.deepEqual(await app.evaluate(() => ({
       loginShown: globalThis.languageBootstrap.shown.some((url) => url.endsWith('#login')),
       busy: globalThis.languageBootstrap.busyResults,
       unhandled: globalThis.languageBootstrap.unhandled,
-    })), { loginShown: false, busy: 0, unhandled: [] });
+      statusCalls: globalThis.languageBootstrap.statusCalls,
+    })), { loginShown: false, busy: 0, unhandled: [], statusCalls: 1 });
+    await main.evaluate(() => window.desktop.cloudAccount({ action: 'status' }));
+    assert.equal(await app.evaluate(() => globalThis.languageBootstrap.statusCalls), 2);
     await stop();
     console.log('Bootstrap cross-language restore:', preferred, '->', saved);
   }
+
+  await launch(path.join(directory, 'offline-restore'), 'en-GB', false, false, true);
+  await waitForAsync(app, () => globalThis.languageBootstrap.statusCalls === 1);
+  await app.evaluate(() => globalThis.languageBootstrap.releaseCloud());
+  const retryPage = await waitForRestoredMainWindow(app, 'User menu');
+  await retryPage.locator('.interview-start-trigger').waitFor();
+  assert.equal(await app.evaluate(() => globalThis.languageBootstrap.statusCalls), 2);
+  await stop();
 
   for (const failure of ['timeout', 'renderer']) {
     const page = await launch(path.join(directory, failure), 'en-GB', true, true);

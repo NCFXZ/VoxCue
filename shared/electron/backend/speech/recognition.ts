@@ -173,10 +173,11 @@ export class RecognitionRouter {
       return;
     }
     this.history.clear();
+    this.progress.clear();
     for (const source of this.sources)
       this.emit({ type: 'gap', source, message: manual
         ? '已立即切换语音模型。未完成片段不会自动用于回答。'
-        : '转写积压，已切换轻量模型。未完成片段不会自动用于回答。' });
+        : '转写积压，已切换到所选语音配置。未完成片段不会自动用于回答。' });
     this.commit(change);
   }
   private commit(change: Switch) {

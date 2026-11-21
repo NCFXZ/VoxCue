@@ -1,6 +1,7 @@
 import { validProfile, type PersonalInfo } from '../../electron/contracts/profile';
 
 export const profileStorageKey = 'copilot-personal-info-v1';
+export const legacyProfileModificationKey = 'voxcue-profile-modification-v1';
 
 export function hasSavedProfile(info: PersonalInfo) {
   return [info.name, info.role, info.jobDescription, info.background, info.customInstructions].some(

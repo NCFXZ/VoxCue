@@ -1,10 +1,11 @@
-import { useLayoutEffect, type RefObject } from 'react';
+import { createContext, useLayoutEffect, type RefObject } from 'react';
 import type { ComponentId } from '../../../electron/contracts/components';
 import { highlightLocation } from './locationHighlight';
 
 export type SettingsTarget =
   | ComponentId
   | 'account-migration'
+  | 'sync-conflicts'
   | 'chatgpt'
   | 'copilot'
   | 'speech-model'
@@ -13,6 +14,8 @@ export type SettingsTarget =
   | 'system'
   | 'audio-devices'
   | 'remote-connection';
+
+export const ConflictSettingsContext = createContext<(() => void) | null>(null);
 
 /** Some targets, such as model downloads, appear after the catalog has loaded. */
 export function useSettingsTarget(

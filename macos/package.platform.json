@@ -1,7 +1,8 @@
 {
   "scripts": {
     "postinstall": "install-electron",
-    "build": "pnpm build:audio && pnpm build:permissions && pnpm build:qwen && pnpm build:shared && pnpm build:launcher",
+    "build": "pnpm build:app-inputs && pnpm build:launcher",
+    "build:app-inputs": "pnpm build:icons && pnpm build:audio && pnpm build:permissions && pnpm build:updater && pnpm build:shared",
     "build:audio": "node scripts/build-audio.mjs",
     "start": "node scripts/launch.mjs",
     "dev": "node scripts/launch.mjs --dev",
@@ -13,7 +14,7 @@
     "build:permissions": "node scripts/build-permissions.mjs",
     "test:screen-permission": "node test/scripts/screen-permission-smoke.mjs",
     "build:updater": "node scripts/build-updater.mjs",
-    "package:installer": "pnpm build && pnpm build:updater && node scripts/package-installer.mjs",
+    "package:installer": "pnpm build:app-inputs && node scripts/package-installer.mjs",
     "test:updates:native": "node test/scripts/updates-native-smoke.mjs",
     "test:package": "node test/scripts/package-guest-smoke.mjs",
     "build:qwen": "node scripts/build-qwen.mjs",

@@ -1348,6 +1348,7 @@ try {
       getComputedStyle(remote).borderBlockEndStyle === 'solid';
   }), 'Audio and remote recovery sections must meet at the shared divider');
   await recoverySettings.getByRole('button', { name: '关闭对话框', exact: true }).click();
+  await floating.locator('.interview-settings-dialog').waitFor({ state: 'detached' });
   await floating.getByRole('button', { name: '重新连接音频', exact: true }).click();
   await badge('语音模型', '正常').waitFor();
   assert.ok(
@@ -1394,20 +1395,21 @@ try {
       }),
     );
   };
-  const moveToBlankCorner = async () => {
-    await floating.mouse.move(2, 2);
+  const moveOwnedPointer = async (x, y, ignored) => {
+    await floating.mouse.move(x, y);
     if (process.platform === 'darwin') {
       // Native forwarding can replay the stationary OS cursor after a CDP move.
       // Supply this fixture's viewport input directly; hit testing, preload/IPC
       // and the real BrowserWindow passthrough call remain under test.
-      await floating.evaluate(() =>
+      await floating.evaluate(({ x, y }) =>
         window.dispatchEvent(
-          new MouseEvent('mousemove', { clientX: 2, clientY: 2, bubbles: true }),
-        ),
+          new MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true }),
+        ), { x, y },
       );
     }
-    await waitNativePassthrough(true);
+    await waitNativePassthrough(ignored);
   };
+  const moveToBlankCorner = () => moveOwnedPointer(2, 2, true);
   if (passthrough) {
     if (nativeProbe) {
       // CDP mouse movement leaves the Windows cursor unchanged. The production
@@ -1425,8 +1427,30 @@ try {
     }
     await moveToBlankCorner();
   }
-  await floating.getByRole('button', { name: '面试设置', exact: true }).click();
+  const floatingSettings = floating.getByRole('button', { name: '面试设置', exact: true });
+  await floatingSettings.evaluate(button => {
+    window.uxSettingsClicks = [];
+    button.addEventListener('click', () => window.uxSettingsClicks.push({
+      focused: document.hasFocus(), exit: !!document.querySelector('[data-modal-exit]'),
+      shell: document.querySelector('.floating-shell')?.className,
+    }), { once: true });
+  });
+  if (passthrough && process.platform === 'darwin') {
+    const box = await floatingSettings.boundingBox();
+    assert.ok(box);
+    await moveOwnedPointer(box.x + box.width / 2, box.y + box.height / 2, false);
+  }
+  await floatingSettings.click();
   const devices = floating.getByRole('dialog', { name: '面试设置', exact: true });
+  try { await devices.waitFor(); } catch (error) {
+    console.error('Settings opening after native passthrough:', await floating.evaluate(async () => ({
+      clicks: window.uxSettingsClicks, state: await window.desktop.interviewState(),
+      dialogs: [...document.querySelectorAll('dialog')].map(dialog => [dialog.open, dialog.getAttribute('aria-label')]),
+      alerts: [...document.querySelectorAll('[role="alert"]')].map(alert => alert.textContent),
+      focused: document.hasFocus(), active: document.activeElement?.getAttribute('aria-label'),
+    })));
+    throw error;
+  }
   await settingsLayout(devices);
   assert.equal(
     await floating.evaluate(() => typeof window.desktop.setInterviewSettingsMaterial),

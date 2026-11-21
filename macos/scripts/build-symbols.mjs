@@ -20,8 +20,8 @@ const expected = createHash('sha256')
   .update(release())
   .digest('hex');
 const existing = await Promise.all(
-  Object.keys(symbols).map((key) =>
-    access(path.join(output, key + '.png')).then(
+  [...Object.keys(symbols).map(key => key + '.png'), 'resolved.json'].map((file) =>
+    access(path.join(output, file)).then(
       () => true,
       () => false,
     ),

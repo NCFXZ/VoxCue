@@ -54,8 +54,12 @@ try {
     );
     const result = await target.evaluate(() => {
       const root = document.querySelector('dialog[open]') ?? document.body;
-      const visible = (el) =>
-        !!el.getClientRects().length && getComputedStyle(el).visibility !== 'hidden';
+      const visible = (el) => {
+        if (!el.checkVisibility({ opacityProperty: true, visibilityProperty: true, contentVisibilityAuto: true }))
+          return false;
+        const closed = el.closest('details:not([open])');
+        return !closed || closed === el || !!closed.querySelector(':scope > summary')?.contains(el);
+      };
       const leaks = [];
       const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
       for (let node; (node = walker.nextNode());) {
@@ -212,6 +216,10 @@ try {
   await page.locator('.page-toolbar').getByText('Interview preparation', { exact: true }).waitFor();
   await page.getByRole('button', { name: 'Profile', exact: true }).click();
   await audit('Personal information');
+  const knowledgeDisclosure = page.locator('.personal-panel details[aria-label="Interview knowledge base"] > summary');
+  await knowledgeDisclosure.click();
+  await audit('Expanded profile knowledge selector');
+  await knowledgeDisclosure.click();
   await page.keyboard.press('Escape');
   await page.getByRole('button', { name: 'Start interview', exact: true }).click();
   await audit('Start interview');

@@ -39,7 +39,7 @@ async function recoverPending() {
   if (failure) throw failure;
 }
 
-export async function removeHistoryRecord(recordId: string) {
+export async function removeHistoryRecord(recordId: string, options?: Parameters<typeof historyRepository.remove>[1]) {
   const desktop = window.desktop;
   if (inProgress.has(recordId)) throw new HistoryRemovalError('面试记录正在处理，请稍后重试。');
   inProgress.add(recordId);
@@ -51,8 +51,9 @@ export async function removeHistoryRecord(recordId: string) {
           ? error.message : preserved);
       }
     }
+    options?.guard?.();
     if (!recordingRecordId(recordId) || !desktop?.recordings) {
-      await historyRepository.remove(recordId);
+      await historyRepository.remove(recordId, options);
       return;
     }
     try {
@@ -61,10 +62,11 @@ export async function removeHistoryRecord(recordId: string) {
       throw new HistoryRemovalError('无法准备删除录音，面试记录已保留。请重试。');
     }
     try {
-      await historyRepository.remove(recordId);
-    } catch {
+      await historyRepository.remove(recordId, options);
+    } catch (error) {
       try { await desktop.recordings({ recordId, op: 'restore-remove' }); }
       catch { throw new HistoryRemovalError(restorePending); }
+      if (options) throw error;
       throw new HistoryRemovalError(preserved);
     }
     try { await desktop.recordings({ recordId, op: 'finish-remove' }); }

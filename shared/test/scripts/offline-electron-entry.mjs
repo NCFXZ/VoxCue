@@ -10,7 +10,6 @@ export async function offlineElectronEntry(
   {
     loopbackPort,
     componentDownloads = false,
-    deferToReady = false,
     preferredLanguages = ['zh-CN'],
   } = {},
 ) {
@@ -25,7 +24,6 @@ export async function offlineElectronEntry(
     (loopbackPort !== undefined &&
       (!Number.isInteger(loopbackPort) || loopbackPort < 1 || loopbackPort > 65535)) ||
     typeof componentDownloads !== 'boolean' ||
-    typeof deferToReady !== 'boolean' ||
     (!fixture && (loopbackPort !== undefined || componentDownloads))
   )
     throw Error('Network fixtures require an owned entry and an explicit transport');
@@ -116,6 +114,9 @@ export async function offlineElectronEntry(
           "  encrypt: async value => require('electron').safeStorage.encryptString(value),",
           "  decrypt: async value => require('electron').safeStorage.decryptString(value),",
           '});',
+          'const fixturePlatform = require(' + JSON.stringify(path.join(workspace.platformRoot,
+            'dist-electron/macos/electron/platform.js')) + ').macos;',
+          'fixturePlatform.promptApiKey = fixturePlatform.controlApiKey = fixturePlatform.createRemoteTls = undefined;',
           "const childProcess = require('node:child_process'), originalSpawn = childProcess.spawn;",
           'childProcess.spawn = function(executable, ...args) {',
           "  if ((String(executable).endsWith('/VoxCue.Credentials') || String(executable).endsWith('/native/VoxCue') || String(executable).endsWith('/native/bin/VoxCue'))) throw Error('Ordinary GUI fixtures forbid the production credential helper');",
@@ -154,21 +155,6 @@ export async function offlineElectronEntry(
       ) +
       ');',
   ].join('\n');
-  await writeFile(
-    entry,
-    deferToReady
-      ? [
-          "const {app}=require('electron');",
-          "if(!process.env.COPILOT_TEST_USER_DATA)throw Error('Owned launcher profile required');",
-          "app.setPath('userData',process.env.COPILOT_TEST_USER_DATA);",
-          "app.setPath('sessionData',process.env.COPILOT_TEST_USER_DATA);",
-          "app.commandLine.appendSwitch('use-mock-keychain');",
-          'require(' + JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/ipc/recordings.js')) + ').registerRecordingScheme();',
-          'app.whenReady().then(()=>{',
-          body,
-          '});',
-        ].join('\n')
-      : body,
-  );
+  await writeFile(entry, body);
   return entry;
 }

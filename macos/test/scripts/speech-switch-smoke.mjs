@@ -108,13 +108,14 @@ port.on=(name,listener)=>on(name,value=>{
  listener(value);
 });
 const capture=require(root+'/dist-electron/macos/electron/speech/capture.js');
+const clock=require(root+'/native/bin/VoxCue.AudioClock.node');
 capture.devices=async()=>['system','microphone'].map(source=>({id:source,name:'Synthetic '+source,source,default:true}));
 capture.CoreAudioCapture=class{
  constructor(_h,source,_d,audio){this.source=source;this.audio=audio;this.offset=0;stats.created++;}
- async start(){stats.started++;this.timer=setInterval(()=>{
+ async start(){stats.started++;const origin=clock();this.timer=setInterval(()=>{
   const samples=new Float32Array(4410),offset=this.offset;this.offset+=4410;
   if(voice&&this.source==='system')for(let i=0;i<samples.length;i++)samples[i]=wave.samples[(offset+i)%(wave.samples.length+88200)]||0;
-  stats.packets++;this.audio({samples,rate:44100,timestamp:1000+offset/44.1,flags:0});
+  stats.packets++;this.audio({samples,rate:44100,timestamp:origin+offset/44.1,flags:0});
  },100);}
  async stop(){if(this.timer){clearInterval(this.timer);this.timer=undefined;stats.stopped++;}}
 };
@@ -132,18 +133,19 @@ const {SpeechHost}=require(${JSON.stringify(path.join(root, 'dist-electron/share
 globalThis.fetch=()=>{throw Error('Recognition smoke forbids network');};require('node:net').Socket.prototype.connect=globalThis.fetch;
 app.whenReady().then(async()=>{
  const events=[];
- const host=new SpeechHost(${JSON.stringify(paths.speechModels)},'synthetic',event=>events.push(event),${JSON.stringify(processFile)},${JSON.stringify(paths.qwenModels)},${JSON.stringify(path.join(root, 'native/bin/qwen/voxcue-qwen'))});
+ const host=new SpeechHost(${JSON.stringify(paths.speechModels)},${JSON.stringify(path.join(root, 'native/bin/synthetic-capture'))},event=>events.push(event),${JSON.stringify(processFile)},${JSON.stringify(paths.qwenModels)},${JSON.stringify(path.join(root, 'native/bin/qwen/voxcue-qwen'))});
  const options={sources:['system','microphone'],speechModel:'paraformer',inferenceDevice:'cpu'};
  const wait=async(predicate)=>{const until=Date.now()+120000;while(!predicate()){
   const error=events.find(e=>e.type==='status'&&e.status.state==='error');if(error)throw Error(JSON.stringify(error));
   if(Date.now()>until)throw Error('Synthetic streaming deadline exceeded');await new Promise(r=>setTimeout(r,50));
  }};
  try{
-  assert.equal((await host.call({op:'start',options})).state,'running');
+  assert.equal((await host.call({op:'start',options,inputState:{inputMode:'remote',microphoneMuted:false}})).state,'running');
   await host.send({test:'voice',enabled:true});
   for(const [model,device] of [['qwen','metal'],['paraformer','cpu'],['qwen','cpu'],['qwen','metal'],['paraformer','cpu'],['qwen','metal']]){
    const onset=events.length;
    await wait(()=>events.slice(onset).some(e=>e.type==='speech-start'));
+   const previous=await host.call({op:'status'});
    const before=await host.send({test:'stats'}),mark=events.length;
    const next={...options,speechModel:model,inferenceDevice:device};
    const at=Date.now(),status=await host.call({op:'switch-recognizer',options:next});
@@ -151,10 +153,17 @@ app.whenReady().then(async()=>{
    assert.equal(status.state,'running');assert.equal(status.inferenceDevice,device);
    assert.equal(after.created,2);assert.equal(after.started,2);assert.equal(after.stopped,0);
    assert.ok(after.packets>before.packets);
-   assert.ok(events.slice(mark).some(e=>e.type==='segment'&&e.segment.final),'Old recognizer must finalize the speech preceding handoff');
+   const handoff=events.slice(mark),oldFinal=handoff.some(e=>e.type==='segment'&&e.segment.final);
+   if(!oldFinal){
+    assert.equal(previous.speechModel,'qwen');assert.equal(previous.inferenceDevice,'cpu');
+    assert.equal(model,'qwen');assert.equal(device,'metal');
+    const gaps=handoff.filter(e=>e.type==='gap'&&e.message.includes('转写积压'));
+    assert.deepEqual(gaps.map(e=>e.source).sort(),['microphone','system'],
+     'An overloaded CPU handoff must explicitly interrupt both sources before GPU recognition resumes');
+   }
    const newMark=events.length;
    await wait(()=>events.slice(newMark).some(e=>e.type==='segment'&&e.segment.final&&(e.segment.speechModel||'paraformer')===model));
-   console.log('PASS: continuous capture/AEC, old final and new streaming final; '+model+' '+device+'; switch '+(Date.now()-at)+'ms');
+   console.log('PASS: continuous capture/AEC, '+(oldFinal?'old final':'explicit overload gap')+' and new streaming final; '+model+' '+device+'; switch '+(Date.now()-at)+'ms');
   }
   await host.send({test:'voice',enabled:false});
   const config=${JSON.stringify(path.join(paths.qwenModels, 'asr/config.json'))},hidden=config+'.synthetic-hidden';
@@ -174,7 +183,11 @@ app.whenReady().then(async()=>{
   assert.equal((await host.send({test:'stats'})).stopped,2);
   const pid=host.child.pid;await host.close();assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
   console.log('PASS: cancel during load, no duplicate final, captures and utilityProcess released.');app.exit(0);
- }catch(error){console.error(error);await host.close().catch(()=>{});app.exit(1);}
+ }catch(error){
+  console.error(error);
+  console.error('Recent synthetic recognition events:', JSON.stringify(events.filter(e=>e.type==='status'||e.type==='gap'||e.type==='switch').slice(-8)));
+  await host.close().catch(()=>{});app.exit(1);
+ }
 });
 `,
   );

@@ -18,6 +18,7 @@
   },
   "include": [
     "../shared/src",
-    "src/icons.tsx"
+    "src/icons.tsx",
+    "src/mobile/MobileIcon.tsx"
   ]
 }

@@ -1,9 +1,7 @@
-import type { SourceRemovalPlan, SourceRemovalResult } from '../../electron/contracts/accountData';
+import { withinImportItemLimit, type SourceRemovalPlan, type SourceRemovalResult } from '../../electron/contracts/accountData';
 import { profileFields, type PersonalInfo } from '../../electron/contracts/profile';
-import { maxRestoreItems, validRestoreKey } from '../../electron/contracts/restoreData';
+import { validRestoreKey } from '../../electron/contracts/restoreData';
 import { digestCloudBlob } from './cloudData';
-import { readExistingHistory } from './history';
-import { sameValue } from './storedEqual';
 import { recoverInterviewDrafts } from './interviewDraft';
 import { documentRevision, removeMovedOriginals } from './knowledge';
 import { localRevision } from './localImportRevision';
@@ -29,7 +27,7 @@ export async function planSourceRemoval(
   if (
     !Array.isArray(keys) ||
     !keys.length ||
-    keys.length > maxRestoreItems ||
+    !withinImportItemLimit(keys, key => key) ||
     new Set(keys).size !== keys.length
   )
     throw invalid();
@@ -52,11 +50,11 @@ export async function planSourceRemoval(
     if (!validRestoreKey(key) || !(key === 'resume:main' || /^(?:record|base):/.test(key)))
       throw invalid();
     const entry = entries.get(key);
-    if (!entry?.blob) {
+    if (!entry) {
       if (!allowAbsent) throw invalid();
       continue;
     }
-    const row: Row = { key, hash: await digestCloudBlob(entry.blob) };
+    const row: Row = { key, hash: await digestCloudBlob(await source.blobFor(entry)) };
     if (key === 'resume:main') {
       if (!resumeDoc) throw invalid();
       row.documentId = resumeDoc.id;
@@ -72,7 +70,7 @@ export async function planSourceRemoval(
       hash: await digestCloudBlob(entry.blob!),
     });
   }
-  if (items.length > maxRestoreItems + profileFields.length) throw invalid();
+  if (!withinImportItemLimit(items, row => row.key)) throw invalid();
   return { items };
 }
 
@@ -84,7 +82,7 @@ export async function removeSourceSelection(
   if (owner !== 'local' && !/^account:[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(owner))
     throw invalid();
   const rows = new Map<string, Row>();
-  if (!Array.isArray(plan?.items) || plan.items.length > maxRestoreItems + profileFields.length)
+  if (!Array.isArray(plan?.items) || !withinImportItemLimit(plan.items, row => row?.key))
     throw invalid();
   for (const row of plan.items) {
     if (
@@ -140,15 +138,12 @@ export async function removeSourceSelection(
       docIds.add(id);
     }
   }
-  if (recordIds.size) {
-    await recoverInterviewDrafts(recordIds);
-    if (!sameValue(source.history, await readExistingHistory())) throw stale();
+  if (recordIds.size) await recoverInterviewDrafts(recordIds);
+  const changes = [];
+  for (const summary of source.history.rows) {
+    if (recordIds.has(summary.id)) changes.push({ id: summary.id, previous: await source.history.read(summary) });
+    else for (const id of summary.imageIds) images.delete(id);
   }
-  const records = source.history;
-  const remaining = records.filter((record) => !recordIds.has(record.id));
-  for (const record of remaining)
-    for (const answer of record.answers)
-      for (const image of answer.images ?? []) images.delete(image.id);
   const writes = new Map<string, string>();
 
   if (source.profile && movedFields.length) {
@@ -219,8 +214,8 @@ export async function removeSourceSelection(
     },
     publish,
     recordIds.size ? {
-      expectedRecords: records,
-      changes: records.filter(record => recordIds.has(record.id)).map(record => ({ id: record.id, previous: record })),
+      expectedDirectory: source.history.rows,
+      changes,
     } : undefined,
   );
   return {

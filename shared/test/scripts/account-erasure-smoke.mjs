@@ -241,6 +241,7 @@ try {
     const switches = [...body.querySelectorAll('.settings-switch')];
     const edge = switches.at(-1).getBoundingClientRect().right;
     const deviceEdge = x => Math.round(x * devicePixelRatio);
+    const reservedScrollbar = parseFloat(getComputedStyle(body).getPropertyValue('--panel-scrollbar-width')) || 0;
     return {
       buttons: buttons.length,
       rightGap: box.right - last.right,
@@ -250,7 +251,8 @@ try {
       leftInset: box.left - panel.left,
       rightInset: panel.right - last.right,
       drawnEdges: [deviceEdge(box.left), deviceEdge(last.right)],
-      expectedEdges: [deviceEdge(panel.left + 24), deviceEdge(panel.right - 24)],
+      expectedEdges: [deviceEdge(panel.left + body.clientLeft + 24),
+        deviceEdge(panel.left + body.clientLeft + body.clientWidth - Math.max(0, 24 - reservedScrollbar))],
     };
   });
   assert.equal(syncAlignment.buttons, 2);
@@ -347,7 +349,7 @@ try {
         return {
           opacity: Number(style.opacity),
           clip: style.clipPath,
-          color: style.borderBottomColor,
+          color: style.maskImage === 'none' ? style.borderBottomColor : style.backgroundColor,
         };
       };
       const directions = [];
@@ -435,18 +437,24 @@ try {
     await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
     await nativeDialog(false);
   } else {
-    await app.evaluate(({ dialog }, zip) => {
-      let n = 0;
-      dialog.showSaveDialog = async () =>
-        ++n === 1 ? { canceled: true } : { canceled: false, filePath: zip };
-    }, zip);
-    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
+    const exportButton = exportPanel.getByRole('button', { name: '导出资料', exact: true });
+    if (process.platform === 'darwin' && !syntheticDialog) {
+      const { nativeSaveDialog } = await import('../../../macos/test/scripts/save-dialog.mjs');
+      await uiClick(exportButton);
+      await nativeSaveDialog(app, { cancel: true, target: zip });
+    } else {
+      await app.evaluate(({ dialog }) => { dialog.showSaveDialog = async () => ({ canceled: true }); });
+      await uiClick(exportButton);
+    }
     await main.waitForFunction(
       () => !document.querySelector('.account-export-panel button')?.disabled,
     );
     assert.equal(await exportPanel.getByRole('status').count(), 0);
     assert.ok(store.user(user.email));
-    await uiClick(exportPanel.getByRole('button', { name: '导出资料', exact: true }));
+    await app.evaluate(({ dialog }, filePath) => {
+      dialog.showSaveDialog = async () => ({ canceled: false, filePath });
+    }, zip);
+    await uiClick(exportButton);
   }
   await exportPanel.getByRole('status').filter({ hasText: '资料已导出' }).waitFor();
   assert.ok((await fs.stat(zip)).size > 100);
@@ -550,9 +558,8 @@ try {
   assert.deepEqual(errors, []);
   console.log(
     'PASS account renderer/API: account + sync layout, disclosed closure record, ' +
-      (syntheticDialog || (process.platform !== 'win32' && !macNativeDialog)
-        ? 'synthetic save-dialog port (native remains pending)'
-        : 'native save cancel and selected path') +
+      (syntheticDialog ? 'synthetic save-dialog port' : process.platform === 'darwin' && !macNativeDialog
+        ? 'native save cancel, synthetic selected path' : 'native save cancel and selected path') +
       ', exact archive contents, wrong-password protection, confirmed local/cloud erasure, browser data absent after restart and public model preservation.',
   );
 } catch (error) {

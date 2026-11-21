@@ -57,16 +57,26 @@ export async function checkOrRemoveMovedProfileAssets(
       await images.dispose();
     }
   }
+  if (!removed) return;
+  const bases = receipt.plan.items.filter(item => item.key.startsWith('base:'));
+  const resume = receipt.plan.items.find(item => item.key === 'resume:main')?.documentId;
+  const removeResume = !!resume && removed.documentIds.includes(resume);
   const index = path.join(root, 'knowledge-v1');
-  if (
-    removed?.documentIds.length &&
-    (await existsAtExpectedPath(path.join(index, 'catalog.json')))
-  ) {
-    const host = new KnowledgeHost(index, model, undefined, prepareKnowledgeDatabase);
-    try {
-      for (const id of removed.documentIds) await host.removeDocument(id, signal);
-    } finally {
-      await host.close();
+  if ((!bases.length && !removeResume) || !(await existsAtExpectedPath(index))) return;
+  const host = new KnowledgeHost(index, model, undefined, prepareKnowledgeDatabase);
+  try {
+    // A moved library can have searchable recovery versions even after its last original is gone.
+    for (const item of bases) {
+      signal.throwIfAborted();
+      await host.removeBase(item.key.slice(5), signal);
     }
+    if (removeResume) {
+      const documents = await host.listDocuments();
+      if (host.indexCleanupError) throw Error(host.indexCleanupError);
+      if (documents.some(doc => doc.documentId === resume && doc.baseId === 'personal-resume'))
+        await host.removeDocument(resume, signal);
+    }
+  } finally {
+    await host.close();
   }
 }

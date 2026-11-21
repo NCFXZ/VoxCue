@@ -15,6 +15,8 @@ const legacy = path.join(appData, 'ai-interview-copilot');
 const destination = path.join(appData, 'VoxCue');
 await mkdir(legacy, { recursive: true });
 const baseline = path.join(testRoot, 'baseline.cjs');
+const legacyPage = path.join(testRoot, 'legacy.html');
+await writeFile(legacyPage, '<!doctype html><title>Legacy profile fixture</title>');
 const next = path.join(testRoot, 'next.cjs');
 const entry = path.join(workspace.platformRoot, 'dist-electron/shared/electron/main.js');
 const storage = path.join(
@@ -38,7 +40,7 @@ app.setPath('sessionData',${JSON.stringify(legacy)});
 delete process.env.COPILOT_TEST_USER_DATA;
 app.whenReady().then(()=>{
  const window=new BrowserWindow({width:960,height:700,webPreferences:{contextIsolation:true,sandbox:true}});
- window.loadFile(${JSON.stringify(path.join(workspace.platformRoot, 'dist/index.html'))});
+ window.loadFile(${JSON.stringify(legacyPage)});
 });
 app.on('window-all-closed',()=>app.quit());
 `,
@@ -217,7 +219,8 @@ try {
   );
   assert.equal(
     await page.evaluate(() => localStorage.getItem('migration-history-fixture')),
-    'history-is-preserved',
+    null,
+    'Only supported legacy preferences migrate to the active profile',
   );
   assert.equal(
     (await page.evaluate(() => window.desktop.authSession())).user.id,
@@ -236,7 +239,7 @@ try {
   const stored = await page.evaluate(async () => {
     const open = (name) =>
       new Promise((resolve, reject) => {
-        const request = indexedDB.open(name, 1);
+        const request = indexedDB.open(name);
         request.onsuccess = () => resolve(request.result);
         request.onerror = () => reject(request.error);
       });

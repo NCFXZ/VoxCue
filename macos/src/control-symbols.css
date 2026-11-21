@@ -1,0 +1,30 @@
+/* Keep shared control sizing, focus and motion. Render their glyphs with AppKit masks. */
+:root :is(.display-opacity-icon, .profile-empty-circle, .toggle-dot),
+:root .follow-latest-dots > span {
+  border: 0;
+  border-radius: 0;
+  background: currentColor;
+  mask: var(--sf-mask) center / contain no-repeat;
+}
+:root .display-opacity-icon { --sf-mask: url('../public/sf-symbols/TransparentLayers.png'); }
+:root .display-opacity-icon.is-opaque { --sf-mask: url('../public/sf-symbols/OpaqueLayers.png'); }
+:root :is(.profile-empty-circle, .toggle-dot) { --sf-mask: url('../public/sf-symbols/EmptyCircle.png'); }
+:root [aria-pressed='true'] .toggle-dot { --sf-mask: url('../public/sf-symbols/SelectedCircle.png'); }
+:root .follow-latest-dots > span { --sf-mask: url('../public/sf-symbols/SolidCircle.png'); }
+:root .display-opacity-icon::before,
+:root .display-opacity-icon::after,
+:root [aria-pressed='true'] .toggle-dot::after { content: none; }
+
+:root :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']::before,
+:root :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']::after {
+  width: 14px;
+  height: 14px;
+  border: 0;
+  border-radius: 0;
+  transform: translate(-50%, -50%);
+  background: var(--checkbox-mark, var(--accent));
+  mask: url('../public/sf-symbols/Check.png') center / contain no-repeat;
+}
+:root :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']::after {
+  mask-image: url('../public/sf-symbols/Minus.png');
+}

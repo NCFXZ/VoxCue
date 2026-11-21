@@ -3,6 +3,7 @@ export interface KnowledgeBase {
   id: string;
   name: string;
   createdAt: number;
+  modifiedAt?: number;
   localRevision?: string;
 }
 export interface LocalDocument {
@@ -12,6 +13,7 @@ export interface LocalDocument {
   size: number;
   type: string;
   createdAt: number;
+  modifiedAt?: number;
   blob: Blob;
   localRevision?: string;
 }

@@ -1,7 +1,7 @@
 import { app, net } from 'electron';
 import { EventEmitter } from 'node:events';
-import { readFileSync } from 'node:fs';
-import { lstat, mkdir, realpath, rename, unlink } from 'node:fs/promises';
+import { readFileSync, type Stats } from 'node:fs';
+import { link, lstat, mkdir, realpath, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import type { UpdateDriver } from '../../../shared/electron/backend/updates/service';
 import { fetchPlatformUpdate } from '../../../shared/electron/backend/updates/provider';
@@ -17,7 +17,7 @@ import {
   releaseRepository,
 } from '../../../shared/electron/backend/updates/releases';
 import { signedMacUpdate, type SignedMacUpdate, publicUpdateKey } from './manifest';
-import { downloadArchive, verifyDownload } from './download';
+import { CorruptArchive, downloadArchive, sameArchiveVersion, verifyDownload } from './download';
 import { installFeed } from './install-feed';
 import { MacArchiveOwnership } from './archives';
 
@@ -27,6 +27,7 @@ interface NativeInstaller {
   cancel(): void;
 }
 const absent = (error: unknown) => (error as NodeJS.ErrnoException).code === 'ENOENT';
+type VerifiedArchive = { info: PlatformUpdateInfo; stat: Stats };
 
 export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
   autoDownload = false;
@@ -40,6 +41,7 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
   private selected?: PlatformUpdateInfo;
   private update?: SignedMacUpdate;
   private archive?: string;
+  private checkedArchive?: VerifiedArchive;
   private feed?: Awaited<ReturnType<typeof installFeed>>;
   private committed = false;
   private installing = false;
@@ -108,62 +110,42 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       throw Error('Update requires a newer macOS');
     return update;
   }
-  private async complete(info: PlatformUpdateInfo, signal?: AbortSignal) {
+  private async complete(info: PlatformUpdateInfo, signal?: AbortSignal, verified?: VerifiedArchive) {
     signal?.throwIfAborted();
     await this.directories();
     const update = this.authenticated(info);
     try {
-      await verifyDownload(this.file(info), update, signal);
-      return true;
+      const file = this.file(info);
+      if (verified && verified.info.path === update.url && verified.info.sha512 === update.sha512 &&
+          verified.stat.size === update.size && sameArchiveVersion(verified.stat, await lstat(file)))
+        return verified.stat;
+      return await verifyDownload(file, update, signal);
     } catch (error) {
       if (absent(error)) return false;
+      if (error instanceof CorruptArchive && await this.ownership.discardCorrupt(info, error.observed, signal))
+        return false;
       throw error;
     }
   }
   private async removePartial(info: PlatformUpdateInfo) {
     await this.directories();
-    for (const partial of [true, false]) {
-      const file = this.file(info, partial);
-      try {
-        const stat = await lstat(file);
-        if (!stat.isFile() || stat.isSymbolicLink()) throw Error('Unsafe partial Mac update');
-        await unlink(file);
-      } catch (error) {
-        if (!absent(error)) throw error;
-      }
+    const file = this.file(info, true);
+    const stat = await lstat(file).catch((error: unknown) => {
+      if (absent(error)) return undefined;
+      throw error;
+    });
+    if (!stat) return;
+    if (!stat.isFile() || stat.nlink > 2 || stat.uid !== process.getuid!() || stat.mode & 0o077)
+      throw Error('Unsafe partial Mac update');
+    if (stat.nlink === 2) {
+      const final = await lstat(this.file(info));
+      if (final.dev !== stat.dev || final.ino !== stat.ino) throw Error('Unsafe linked partial Mac update');
     }
+    await unlink(file);
   }
-  private async clearIncomplete(info: PlatformUpdateInfo, cooldown: boolean) {
-    let failure: unknown;
-    if (cooldown) {
-      try {
-        await this.cache.deferAutomaticDownload();
-      } catch (error) {
-        failure = error;
-      }
-    }
-    try {
-      await this.removePartial(info);
-    } catch (error) {
-      failure ??= error;
-    }
-    // Retain the durable journal if either persistence or cleanup failed.
-    if (failure) throw failure;
+  private async clearIncomplete(cooldown: boolean) {
+    if (cooldown) await this.cache.deferAutomaticDownload();
     await this.cache.clearJournal();
-  }
-  private async recoverableComplete(info: PlatformUpdateInfo) {
-    try {
-      return await this.complete(info);
-    } catch (error) {
-      const stat = await lstat(this.file(info)).catch((error) => {
-        if (!absent(error)) throw error;
-        return undefined;
-      });
-      // Only an incomplete ordinary file may be removed. A redirected or
-      // unexpected node remains untouched with its durable journal intact.
-      if (stat && (!stat.isFile() || stat.isSymbolicLink())) throw error;
-      return false;
-    }
   }
   private recover() {
     this.recovering ??= (async () => {
@@ -171,8 +153,12 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       const journal = this.cache.journal();
       if (journal) {
         // A crash after atomic publication must preserve its completed archive.
-        if (await this.recoverableComplete(journal)) await this.cache.completeDownload(journal);
-        else await this.clearIncomplete(journal, true);
+        await this.removePartial(journal);
+        const stat = await this.complete(journal, this.lifetime.signal);
+        if (stat) {
+          await this.cache.completeDownload(journal);
+          this.checkedArchive = { info: journal, stat };
+        } else await this.clearIncomplete(true);
       }
       await this.ownership
         .collect(
@@ -186,7 +172,10 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
           this.lifetime.signal,
         )
         .catch(() => {});
-    })();
+    })().catch((error) => {
+      this.recovering = undefined;
+      throw error;
+    });
     return this.recovering;
   }
   checkForUpdates(force = false) {
@@ -196,18 +185,20 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       this.selected = undefined;
       this.update = undefined;
       this.archive = undefined;
+      this.checkedArchive = undefined;
       await this.recover();
       this.lifetime.signal.throwIfAborted();
       const completed = this.cache.completed();
-      const local =
-        !force &&
-        completed &&
-        compareVersions(completed.version, app.getVersion()) > 0 &&
-        (await this.complete(completed, this.lifetime.signal))
-          ? completed
-          : undefined;
+      let localInfo: PlatformUpdateInfo | undefined;
+      if (!force && completed && compareVersions(completed.version, app.getVersion()) > 0) {
+        const stat = await this.complete(completed, this.lifetime.signal, this.checkedArchive);
+        if (stat) {
+          this.checkedArchive = { info: completed, stat };
+          localInfo = completed;
+        }
+      }
       const info =
-        local ??
+        localInfo ??
         (await this.cache.latest(force, async () => {
           const result = await fetchPlatformUpdate(
             'macos-arm64',
@@ -254,10 +245,12 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       await this.recover();
       combined.throwIfAborted();
       const info = this.selected;
+      const checked = this.checkedArchive;
+      this.checkedArchive = undefined;
       if (
         !info ||
         compareVersions(info.version, app.getVersion()) <= 0 ||
-        !(await this.complete(info, combined))
+        !(await this.complete(info, combined, checked))
       )
         return false;
       combined.throwIfAborted();
@@ -286,10 +279,16 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
         return;
       }
       this.archive = undefined;
+      try {
+        await lstat(this.file(info, true));
+        throw Error('Unowned partial Mac update');
+      } catch (error) {
+        if (!absent(error)) throw error;
+      }
       await this.cache.beginDownload(info);
       let progressStep: number | undefined;
       try {
-        await downloadArchive(
+        const verified = await downloadArchive(
           releaseAssetUrl(info.selectedRelease, update.url),
           this.file(info, true),
           update,
@@ -304,16 +303,24 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
           },
         );
         downloadSignal.throwIfAborted();
-        await rename(this.file(info, true), this.file(info));
-        await this.cache.completeDownload(info);
+        // Publish without replacing an unrelated file that arrived during the download.
+        await link(this.file(info, true), this.file(info));
+        await unlink(this.file(info, true));
         // Cleanup bookkeeping is best effort and never invalidates an authenticated download.
-        await this.ownership.record(info).catch(() => {});
+        await this.ownership.record(info, verified).catch(() => {});
+        await this.cache.completeDownload(info);
         downloadSignal.throwIfAborted();
         this.archive = this.file(info);
         this.emit('update-downloaded');
       } catch (error) {
-        if (await this.recoverableComplete(info)) await this.cache.completeDownload(info);
-        else await this.clearIncomplete(info, this.disposed || downloadSignal.aborted || (error as Error)?.name === 'TimeoutError');
+        if ((error as NodeJS.ErrnoException).code === 'EEXIST' &&
+            (error as NodeJS.ErrnoException).syscall === 'open') {
+          await this.cache.clearJournal();
+          throw error;
+        }
+        await this.removePartial(info);
+        if (await this.complete(info)) await this.cache.completeDownload(info);
+        else await this.clearIncomplete(this.disposed || downloadSignal.aborted || (error as Error)?.name === 'TimeoutError');
         downloadSignal.throwIfAborted();
         throw error;
       }
@@ -322,15 +329,19 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
     });
     return this.downloading;
   }
+  private failInstall(message: string) {
+    this.installing = false;
+    this.committed = false;
+    this.feed?.close();
+    this.feed = undefined;
+    if (!this.disposed) this.emit('error', new Error(message));
+  }
   quitAndInstall() {
     if (this.disposed || this.installing || !this.archive || !this.update)
       throw Error('No verified downloaded update');
     this.installing = true;
     const installation = this.install().catch((error) => {
-      this.installing = false;
-      this.feed?.close();
-      this.feed = undefined;
-      if (!this.disposed) this.emit('error', new Error('Mac update installation failed'));
+      this.failInstall('Mac update installation failed');
       throw error;
     });
     // The caller receives setup failure; dispose still waits for its cleanup
@@ -341,27 +352,31 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
   private async install() {
     const update = this.authenticated(this.selected!);
     await this.directories();
-    await verifyDownload(this.archive!, update, this.lifetime.signal);
+    try {
+      await verifyDownload(this.archive!, update, this.lifetime.signal);
+    } catch (error) {
+      if (absent(error) || error instanceof CorruptArchive) {
+        this.archive = undefined;
+        this.emit('download-invalidated');
+      }
+      throw error;
+    }
     this.lifetime.signal.throwIfAborted();
-    this.feed = await installFeed(this.archive!, update);
+    const feed = await installFeed(this.archive!, update);
+    this.feed = feed;
     this.lifetime.signal.throwIfAborted();
-    this.native.begin(this.feed.url, (event) => {
+    this.native.begin(feed.url, (event) => {
+      if (this.feed !== feed) return;
       if (event.type === 'ready' && !this.disposed) {
         this.committed = true;
         try {
           this.native.commit();
         } catch {
-          this.committed = false;
-          this.installing = false;
-          this.emit('error', new Error('Mac update commit failed'));
+          this.failInstall('Mac update commit failed');
         }
       } else if (event.type === 'quit' && this.committed) app.quit();
       else if (event.type === 'error' && !this.disposed) {
-        this.committed = false;
-        this.installing = false;
-        this.feed?.close();
-        this.feed = undefined;
-        this.emit('error', new Error('Mac update installation failed'));
+        this.failInstall('Mac update installation failed');
       }
     });
   }
@@ -377,7 +392,6 @@ export class MacUpdateDriver extends EventEmitter implements UpdateDriver {
       const results = await Promise.allSettled(jobs);
       this.feed?.close();
       this.feed = undefined;
-      await this.recover();
       for (const result of results)
         if (result.status === 'rejected' && result.reason?.name !== 'AbortError')
           throw result.reason;

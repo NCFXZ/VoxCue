@@ -4,7 +4,7 @@ import { writeFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 import { testRoot, electron } from '../../../shared/test/scripts/test-workspace.mjs';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
-import { closeUiApp } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { closeUiApp, focusUiWindow } from '../../../shared/test/scripts/install-ui-account.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 
@@ -159,6 +159,7 @@ try {
         assert.equal(await button(name).isDisabled(), false);
         const point = await stableTarget(button(name));
         await hitPoint(point.normalized, true, name);
+        if (!(await ownedWindow()).focused) await focusUiWindow(app, page);
         assert.deepEqual(await ownedWindow(), {
           id: windowId, visible: true, focused: true, alwaysOnTop: false,
         });

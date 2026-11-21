@@ -1191,22 +1191,12 @@ p {
   color: var(--muted);
   margin-left: 4px;
 }
-.ai-avatar {
+.provider-avatar {
   display: grid;
   place-items: center;
-  background: #e9f2ed;
-  color: #638173;
+  color: var(--foreground);
   width: 25px;
   height: 25px;
-  border-radius: 12px;
-}
-.dark .ai-avatar {
-  background: #2b4035;
-  color: #a4c1b0;
-}
-.provider-avatar {
-  background: var(--selected);
-  color: var(--foreground);
 }
 .app-logo {
   display: block;
@@ -1233,13 +1223,6 @@ p {
 .provider-avatar img {
   width: 18px;
   height: 18px;
-}
-.dark .provider-avatar {
-  background: var(--selected);
-}
-.answer-label .provider-avatar {
-  background: transparent;
-  border-radius: 0;
 }
 .answer-text {
   font-size: var(--type-body);
@@ -1422,7 +1405,6 @@ p {
   padding: 12px 15px;
   border: 1px solid var(--danger-border);
   border-radius: var(--radius-control);
-  font-size: var(--type-body);
   color: var(--danger);
   background: var(--danger-soft);
   margin-bottom: 18px;
@@ -2291,7 +2273,6 @@ p {
   margin: 8px 0 0;
   max-height: 1.6em;
   overflow-y: auto;
-  font-size: var(--type-body);
   line-height: 1.6;
   user-select: text;
 }
@@ -2853,7 +2834,6 @@ p {
   border: 1px solid var(--border);
   background: var(--surface);
   color: #b04b3b;
-  font-size: var(--type-body);
   border-radius: 20px;
 }
 @media (max-width: 1050px) {
@@ -3255,7 +3235,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
     transition: none;
   }
 }
-:is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox'] {
+:is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio']) {
   appearance: none;
   position: relative;
   display: inline-block;
@@ -3273,19 +3253,19 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
     border-color 160ms ease 80ms,
     transform 140ms ease;
 }
-:is(.profile-field-choice, .account-delete-ack, .selection-option):hover input[type='checkbox'] {
+:is(.profile-field-choice, .account-delete-ack, .selection-option):hover input:is([type='checkbox'], [type='radio']) {
   border-color: var(--checkbox-accent, var(--accent));
 }
 :is(.profile-field-choice, .account-delete-ack, .selection-option)
-  input[type='checkbox']:is(:checked, :indeterminate) {
+  input:is([type='checkbox'], [type='radio']):is(:checked, [type='checkbox']:indeterminate) {
   border-color: color-mix(in srgb, var(--checkbox-accent, var(--accent)) 65%, transparent);
   background: var(--checkbox-fill, color-mix(in srgb, var(--accent) 12%, transparent));
   transition-delay: 0ms;
 }
-:is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']:active {
+:is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio']):active {
   transform: scale(0.92);
 }
-:is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']:focus-visible {
+:is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio']):focus-visible {
   outline: 2px solid color-mix(in srgb, var(--checkbox-accent, var(--accent)) 40%, transparent);
   outline-offset: 3px;
 }
@@ -3327,20 +3307,48 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
   opacity: 1;
   clip-path: inset(0 0 0 0);
 }
+.selection-option input[type='radio'],
+.selection-option input[type='radio']::before {
+  corner-shape: round;
+}
+.selection-option input[type='radio'] {
+  border-radius: 50%;
+}
+.selection-option input[type='radio']::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  border-radius: inherit;
+  background: var(--checkbox-mark, var(--accent));
+  opacity: 0;
+  transform: scale(0);
+  transition: transform var(--panel-motion-duration) var(--panel-motion-easing),
+    opacity var(--panel-motion-duration) var(--panel-motion-easing);
+}
+.selection-option input[type='radio']:checked::before {
+  opacity: 1;
+  transform: scale(1);
+}
+@media (forced-colors: active) {
+  .selection-option input[type='radio']::before {
+    forced-color-adjust: none;
+    background: Highlight;
+  }
+}
 @media (prefers-reduced-motion: reduce) {
-  :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox'],
-  :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']::before,
-  :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']::after {
+  :is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio']),
+  :is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio'])::before,
+  :is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio'])::after {
     transition: none;
   }
 }
 @media (prefers-reduced-transparency: reduce), (prefers-contrast: more), (forced-colors: active) {
   :is(.profile-field-choice, .account-delete-ack, .selection-option)
-    input[type='checkbox']:is(:checked, :indeterminate) {
+    input:is([type='checkbox'], [type='radio']):is(:checked, [type='checkbox']:indeterminate) {
     border-color: var(--checkbox-accent, var(--accent));
     background: var(--surface);
   }
-  :is(.profile-field-choice, .account-delete-ack, .selection-option) input[type='checkbox']:focus-visible {
+  :is(.profile-field-choice, .account-delete-ack, .selection-option) input:is([type='checkbox'], [type='radio']):focus-visible {
     outline-color: var(--checkbox-accent, var(--accent));
   }
 }
@@ -4158,6 +4166,7 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
 .remote-connection-actions,
 .remote-approval-actions {
   display: flex;
+  flex-wrap: wrap;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
@@ -4227,6 +4236,8 @@ article.account-quota > .interview-reveal :is(.account-quota-state, p) {
 }
 .remote-pairing-refresh {
   display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: center;
   margin-top: 16px;
 }
@@ -5547,7 +5558,7 @@ details[open] > summary > .disclosure-chevron {
   align-items: center;
   min-width: 0;
   gap: 8px;
-  font-size: var(--type-body);
+  font-size: var(--type-secondary);
   color: var(--muted);
   margin-top: 10px;
 }
@@ -5570,11 +5581,9 @@ details[open] > summary > .disclosure-chevron {
 }
 .record-export-error {
   padding: 0 var(--page-gutter) 12px;
-  font-size: var(--type-body);
 }
 .record-history-error {
   margin: 0 0 12px;
-  font-size: var(--type-body);
 }
 .startup-screen {
   display: flex;
@@ -5588,10 +5597,6 @@ details[open] > summary > .disclosure-chevron {
 .startup-screen .app-logo {
   box-shadow: none;
   filter: drop-shadow(0 2px 6px rgb(24 35 40 / 6%));
-}
-.startup-screen strong {
-  font-size: var(--type-title);
-  font-weight: 600;
 }
 .startup-title {
   --startup-title-highlight: color-mix(in srgb, var(--foreground) 45%, var(--surface));
@@ -5842,7 +5847,6 @@ details[open] > summary > .disclosure-chevron {
 }
 
 .message-error {
-  font-size: var(--type-body);
   color: var(--danger);
   margin: 10px 0;
   line-height: 1.7;
@@ -6784,6 +6788,13 @@ h4,
   font-weight: 400;
   line-height: var(--line-body);
 }
+[role='alert'],
+[data-visual-role='alert'],
+.settings-error,
+.interview-answer-failure-reason,
+.sync-error-detail {
+  font-size: var(--type-secondary);
+}
 .section-help,
 .profile-section .section-help,
 .dialog-subtitle,
@@ -7444,15 +7455,15 @@ small {
   animation: update-spin 1s linear infinite;
 }
 /* Keep the Mac SF Symbol stationary while its spokes brighten in sequence. */
-:root svg[data-sf-symbol='progress.indicator'] {
+:root svg[data-sf-icon='Loader'] {
   animation: none;
 }
 :is(.update-spinner, .download-ring.is-indeterminate):has(
-  > svg[data-sf-symbol='progress.indicator']
+  > svg[data-sf-icon='Loader']
 ) {
   animation: none;
 }
-.download-ring > svg[data-sf-symbol='progress.indicator'] {
+.download-ring > svg[data-sf-icon='Loader'] {
   transform: none;
 }
 .macos-loading-sweep {
@@ -8378,6 +8389,17 @@ svg[data-ui-icon] {
 .sync-popover-actions > .ui-button {
   min-width: max-content;
 }
+.sync-popover-actions[data-conflict] {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.sync-popover-actions[data-conflict] > .ui-button {
+  min-width: 0;
+  white-space: normal;
+}
+.sync-popover-actions > .sync-conflict-settings {
+  grid-column: 1 / -1;
+}
 .sync-popover[data-menu-height-motion] .confirm-delete {
   transition: none;
 }
@@ -8648,7 +8670,8 @@ svg[data-ui-icon] {
 .ai-services-panel .settings-entry > .interview-input-segmented {
   min-width: min(100%, var(--settings-control-width));
 }
-.api-service-disclosure {
+.api-service-disclosure,
+.sync-version-group .selection-toggle {
   display: inline-flex;
   align-items: center;
   padding: 0;
@@ -8854,19 +8877,98 @@ svg[data-ui-icon] {
   margin: 0;
 }
 .cloud-sync-messages p + p { margin-block-start: 4px; }
-.cloud-sync-item > div {
+.cloud-sync-actions + .sync-problem-entry {
+  margin-top: 8px;
+}
+.settings-content-body > section:has(> .sync-problem-entry) + .account-migration-panel {
+  border-top: 0;
+  margin-top: 0;
+}
+.sync-problem-list {
+  list-style: none;
+  padding: 0;
+  margin: 4px 0 0;
+}
+.sync-problem-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding-block: 8px;
+  overflow-wrap: anywhere;
+}
+.sync-problem-list .settings-hint {
+  margin: 3px 0 0;
+}
+.sync-problem-dialog.wide {
+  width: 560px;
+}
+.sync-problem-dialog .modal-footer {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
-  min-width: 0;
+  justify-content: flex-end;
 }
-.cloud-sync-item strong,
-.cloud-sync-item > .sync-indicator {
-  flex-shrink: 0;
+.sync-problem-dialog .dialog-heading {
+  flex-wrap: wrap;
 }
-.cloud-sync-item .settings-hint {
+.sync-problem-dialog .dialog-actions {
+  margin-inline-start: auto;
+  gap: 8px;
+}
+.sync-problem-dialog :is(.selection-toggle, input[type='radio']):focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+.sync-version-group {
+  padding-block: 6px;
+}
+.sync-version-group + .sync-version-group {
+  border-top: 1px solid var(--border);
+}
+.sync-version-group h3 { margin: 0; }
+.sync-version-group h3 .selection-toggle {
+  padding: 4px 6px;
+  gap: 6px;
+  min-height: 30px;
+  font-weight: 600;
+  font-size: var(--type-body);
+}
+.sync-version-group .migration-group-items {
+  padding-inline: 6px;
+}
+.sync-version-group .settings-hint {
+  margin: 4px 0;
+}
+.sync-version-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.sync-version-list li {
+  display: grid;
+  gap: 4px;
+  padding-block: 6px;
+  overflow-wrap: anywhere;
+}
+.sync-version-choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 24px;
   min-width: 0;
   margin: 0;
+  padding: 0;
+  border: 0;
+}
+.sync-version-choice .selection-option {
+  min-width: 0;
+  gap: 6px;
+  min-height: 28px;
+  padding: 3px 0;
+  font-size: var(--type-secondary);
+  line-height: var(--line-secondary);
 }
 .settings-about-updates {
   display: grid;

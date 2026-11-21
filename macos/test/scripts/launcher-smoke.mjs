@@ -3,27 +3,62 @@ import {
   electron,
   spawnTestProcess,
 } from '../../../shared/test/scripts/test-workspace.mjs';
-import { mkdir, mkdtemp } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath } from 'node:fs/promises';
 
 import path from 'node:path';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { offlineElectronEntry } from '../../../shared/test/scripts/offline-electron-entry.mjs';
+import workspace from '../../../shared/scripts/workspace.mjs';
+import { verifyLocalApp } from '../../scripts/development-signing.mjs';
+import { verifyFixedVaultCredentials } from '../../scripts/build-vault-credentials.mjs';
+import { productionFuses } from '../../scripts/production-runtime.mjs';
+import { prepareRuntime } from '../../scripts/prepare-runtime.mjs';
 
 await mkdir(path.join(testRoot, 'test/results'), { recursive: true });
 const output = await mkdtemp(path.resolve(path.join(testRoot, 'test/results/launcher-native-')));
-const executable = path.resolve('VoxCue.app/Contents/MacOS/VoxCue');
-assert.equal(
-  execFileSync(
-    '/usr/libexec/PlistBuddy',
-    ['-c', 'Print :LSMinimumSystemVersion', path.resolve('VoxCue.app/Contents/Info.plist')],
-    { encoding: 'utf8' },
-  ).trim(),
-  '14.2',
-);
+const bundle = path.resolve('VoxCue.app');
+const mode = process.argv.slice(2);
+if (mode.length > 1 || mode.some(arg => !['--static-only', '--host-only'].includes(arg)))
+  throw Error('Use either --static-only, --host-only, or no argument.');
+if (!process.argv.includes('--host-only')) {
+  const pin = JSON.parse(await readFile('local-signing-public.json', 'utf8'));
+  const version = JSON.parse(await readFile(path.join(workspace.sharedRoot, 'package.json'), 'utf8')).version;
+  verifyLocalApp(bundle, pin, 'com.voxcue.app');
+  const signature = spawnSync('/usr/bin/codesign', ['-d', '--verbose=4', bundle], { encoding: 'utf8' });
+  assert.equal(signature.status, 0);
+  assert.match(signature.stderr, /flags=.*\bruntime\b/);
+  await productionFuses(path.join(bundle, 'Contents/Frameworks/Electron Framework.framework/Electron Framework'));
+  const info = JSON.parse(execFileSync('/usr/bin/plutil', [
+    '-convert', 'json', '-o', '-', path.join(bundle, 'Contents/Info.plist'),
+  ]));
+  assert.equal(info.CFBundleExecutable, 'VoxCue');
+  assert.equal(info.CFBundleIdentifier, 'com.voxcue.app');
+  assert.equal(info.CFBundleShortVersionString, version);
+  assert.equal(info.LSMinimumSystemVersion, '14.2');
+  // The workspace entry may link to the local bundle. Inside it the fixed
+  // helper still requires canonical, non-redirected directories and file.
+  const resources = path.join(await realpath(bundle), 'Contents/Resources');
+  await verifyFixedVaultCredentials(path.join(resources, 'native/VoxCue'), pin);
+  const archive = path.join(resources, 'app.asar');
+  const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
+  const manifest = JSON.parse(asar.extractFile(archive, 'package.json'));
+  assert.equal(manifest.version, version);
+  assert.equal(manifest.main, 'dist-electron/shared/electron/main.js');
+  assert.ok(asar.statFile(archive, manifest.main).size > 0);
+  assert.deepEqual(info.ElectronAsarIntegrity['Resources/app.asar'], {
+    algorithm: 'SHA256',
+    hash: createHash('sha256').update(asar.getRawHeader(archive).headerString).digest('hex'),
+  });
+  console.log('PASS product entry, fixed signature, frozen v11 helper, version and sealed ASAR.');
+}
+if (process.argv.includes('--static-only')) process.exit(0);
+const { executable } = await prepareRuntime();
 const env = { ...process.env, COPILOT_TEST_USER_DATA: output, VITE_DEV_SERVER_URL: '' };
 delete env.ELECTRON_RUN_AS_NODE;
-const app = await electron.launch({ executablePath: executable, args: [], env });
+const entry = await offlineElectronEntry();
+const app = await electron.launch({ executablePath: executable, args: [entry], env });
 const testProcess = app.process();
 try {
   const page = await app.firstWindow();
@@ -46,11 +81,10 @@ try {
     });
     BrowserWindow.getAllWindows()[0].minimize();
   });
-  // This second launch is uninstrumented. Load main immediately, as the
-  // development launcher does, so it checks the single-instance lock before ready.
+  // Both processes use this run's isolated profile and development host.
   const second = spawnTestProcess(
     executable,
-    [await offlineElectronEntry(), '--use-mock-keychain'],
+    [entry, '--use-mock-keychain'],
     { env, stdio: ['ignore', 'ignore', 'pipe'] },
   );
   // Capture only the owned, offline secondary process. Keep a bounded tail so
@@ -88,7 +122,7 @@ try {
         status: 'passed',
         application,
         secondLaunchFocusedExistingWindow: true,
-        noTerminalOrBuildOnLaunch: true,
+        host: 'offline-development',
       },
       null,
       2,

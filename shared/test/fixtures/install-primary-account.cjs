@@ -1,6 +1,6 @@
 // Offline UI fixture only. Real account/storage boundaries are exercised
 // by cloud-account-smoke and the cloud unit suites with their actual transports.
-module.exports = (root) => {
+module.exports = (root, { secondAccount = false } = {}) => {
   const path = require('node:path');
   const fs = require('node:fs');
   const { app } = require('electron');
@@ -25,21 +25,25 @@ module.exports = (root) => {
     email: 'synthetic@example.test',
     createdAt: 1,
   };
-  const login = () => {
+  const other = { ...user, id: 'b0000000-0000-4000-8000-000000000002', email: 'other@example.test' };
+  const login = (email = user.email) => {
+    if (secondAccount && ![user.email, other.email].includes(email)) throw Error('Unknown synthetic account');
     fs.mkdirSync(path.dirname(marker()), { recursive: true });
-    fs.writeFileSync(marker(), '{}');
+    fs.writeFileSync(marker(), JSON.stringify(secondAccount && email === other.email ? { id: other.id } : {}));
   };
   const logout = () => fs.rmSync(marker(), { force: true });
   globalThis.primaryAccountFixture = { login, logout };
   const state = () => ({
     configured: true,
-    user: fs.existsSync(marker()) ? user : null,
+    user: fs.existsSync(marker())
+      ? (secondAccount && JSON.parse(fs.readFileSync(marker(), 'utf8')).id === other.id ? other : user)
+      : null,
     verified: fs.existsSync(marker()),
   });
   CloudAccountClient.prototype.snapshot = state;
   CloudAccountClient.prototype.call = async function (input) {
     if (input.action === 'login') {
-      login();
+      login(input.email);
     } else if (input.action === 'logout') logout();
     else if (input.action !== 'status')
       throw Error('Unexpected synthetic account operation: ' + input.action);

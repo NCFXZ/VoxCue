@@ -274,8 +274,12 @@ export async function checkMacUpdateCache(publicKey, privateKey, macUpdatePayloa
         }
       }, mode);
       const before = { ...counts };
-      assert.equal((await start(mode)).phase, 'error');
+      assert.equal((await start(mode)).phase, mode === 'archive' ? 'available' : 'error');
       assert.deepEqual(counts, before);
+      if (mode === 'archive') {
+        assert.equal((await host.evaluate(() => globalThis.cacheUpdates.download())).phase, 'downloaded');
+        assert.deepEqual(counts, { ...before, archives: before.archives + 1 });
+      }
       await dispose();
     }
     console.log(

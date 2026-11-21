@@ -4,11 +4,20 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import assert from 'node:assert/strict';
 import { createInterface } from 'node:readline';
+import { requireGuestIsolation } from './guest-isolation.mjs';
+import { verifyLocalApp } from '../../scripts/development-signing.mjs';
 
 const component = process.argv[2];
 if (!component || !path.isAbsolute(component))
   throw Error('Pass an isolated, verified Qwen component directory');
-const runtime = path.join(workspace.platformRoot, 'native/bin/qwen/voxcue-qwen');
+const guestBundle = process.argv[3];
+let runtime = path.join(workspace.platformRoot, 'native/bin/qwen/voxcue-qwen');
+if (guestBundle) {
+  await requireGuestIsolation();
+  assert.ok(path.isAbsolute(guestBundle) && path.basename(guestBundle) === 'VoxCue.app');
+  verifyLocalApp(guestBundle, workspace.platformRequire(path.join(workspace.platformRoot, 'local-signing-public.json')), 'com.voxcue.app');
+  runtime = path.join(guestBundle, 'Contents/Resources/native/qwen/voxcue-qwen');
+}
 async function run(file, args) {
   const child = spawnTestProcess(file, args, { stdio: ['ignore', 'pipe', 'pipe'] });
   let output = '';
@@ -23,7 +32,10 @@ async function run(file, args) {
   );
   return output;
 }
-assert.equal(JSON.parse(await run(runtime, ['metal-check'])).metal, true);
+const { metal } = JSON.parse(await run(runtime, ['metal-check']));
+assert.equal(typeof metal, 'boolean');
+if (!guestBundle) assert.equal(metal, true);
+if (!metal) console.log('PENDING: the guest exposes no Metal device; checking packaged CPU inference.');
 const sentence =
   'The first project improved our customer service. We tested the new system with synthetic examples. Our team reviewed the results carefully. The next release will include better search. We also improved the user interface. Finally we checked that every process stopped correctly. ';
 await run('/usr/bin/say', [
@@ -55,7 +67,7 @@ while (offset + 8 <= wave.length) {
   offset += 8 + size + (size % 2);
 }
 assert.ok(pcm?.length);
-for (const device of ['metal', 'cpu']) {
+for (const device of metal ? ['metal', 'cpu'] : ['cpu']) {
   const child = spawnTestProcess(runtime, [component, device], {
     stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env, RAYON_NUM_THREADS: '4' },
@@ -110,6 +122,7 @@ for (const device of ['metal', 'cpu']) {
     assert.equal(ready.alignment_device, 'cpu');
     assert.equal(ready.chunk_ms, device === 'metal' ? 500 : 1000);
     assert.equal(ready.async_alignment, true);
+    assert.equal(ready.vad_silence_ms, 500);
     assert.equal(ready.asr_backend, device === 'metal' ? 'mlx' : 'rust');
     await send('start');
     await send('start', 'microphone');

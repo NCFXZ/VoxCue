@@ -7,7 +7,7 @@ import {
   closeUiApp,
 } from '../../../shared/test/scripts/install-ui-account.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
-import { readFile, mkdir, lstat } from 'node:fs/promises';
+import { readFile, readdir, mkdir, lstat } from 'node:fs/promises';
 import { createReadStream } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -21,13 +21,15 @@ import { dmgLayout, withMountedDmg } from '../../scripts/dmg.mjs';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
 import { assertLocalizedPermissions } from './assert-localized-permissions.mjs';
 import { verifyPreviousVersionData } from './package-upgrade-data.mjs';
-import { upgradeBaselineVersions } from './package-upgrade-baselines.mjs';
+import { upgradeBaselinesFor } from './package-upgrade-baselines.mjs';
 import { requireGuestIsolation } from './guest-isolation.mjs';
 import { launchGuestAsar } from './guest-asar-host.mjs';
 import { productionFuses } from '../../scripts/production-runtime.mjs';
 if (!process.argv.includes('--static-only')) await requireGuestIsolation();
-if (process.argv.slice(2).some(arg => !['--static-only', '--install-archive'].includes(arg)))
-  throw Error('Use --static-only on the owner or --install-archive through the disposable guest runner.');
+const upgradeVersions = upgradeBaselinesFor(process.argv.slice(2));
+if (process.argv.slice(2).some(arg => !arg.startsWith('--from=') &&
+    !['--static-only', '--install-archive', '--upgrades-only'].includes(arg)))
+  throw Error('Use --static-only on the owner or run installation and upgrades through the disposable guest runner.');
 const require = createRequire(import.meta.url);
 const version = JSON.parse(
   await readFile(path.join(workspace.platformRoot, 'package.json'), 'utf8'),
@@ -54,6 +56,11 @@ assert.equal(
   'arm64',
 );
 const resources = path.join(bundle, 'Contents/Resources');
+assert.equal(run('/usr/bin/lipo', ['-archs', path.join(resources, 'native/VoxCue.AudioClock.node')]).trim(), 'arm64');
+const { sileroModel, sileroLicense, validSileroAsset } = await import('../../../shared/scripts/silero-assets.mjs');
+for (const [directory, asset] of [['native', sileroModel], ['licenses', sileroLicense]]) {
+  assert.ok(validSileroAsset(asset, await readFile(path.join(resources, directory, asset.name))), asset.name);
+}
 const credentialHelper = path.join(resources, 'native/VoxCue');
 verifyVaultCredentials(credentialHelper, signing);
 assert.deepEqual(
@@ -110,6 +117,14 @@ const asar = await import(workspace.platformRequire.resolve('@electron/asar'));
 const entries = asar.listPackage(path.join(resources, 'app.asar'));
 const archive = path.join(resources, 'app.asar');
 const assetManifest = JSON.parse(asar.extractFile(archive, 'dist/.vite/manifest.json'));
+const rendererFiles = await readdir(path.join(workspace.platformRoot, 'dist'), { recursive: true, withFileTypes: true });
+for (const file of rendererFiles.filter((entry) => entry.isFile())) {
+  const disk = path.join(file.parentPath, file.name);
+  const relative = path.relative(workspace.platformRoot, disk);
+  assert.ok(asar.extractFile(archive, relative).equals(await readFile(disk)), 'Packaged renderer differs: ' + relative);
+}
+assert.ok(Object.values(assetManifest).some((chunk) => chunk.isEntry && chunk.src === 'mobile.html'));
+assert.ok(entries.some((file) => /^\/dist\/assets\/cloudRecordJson\.worker-[\w-]+\.js$/.test(file)));
 const illustration = assetManifest['src/assets/interview-easter-egg.jpg'].file;
 for (const file of ['index.html', 'voxcue.png', 'voxcue-source.png', illustration]) {
   const output = '/dist/' + file;
@@ -129,6 +144,7 @@ await productionFuses(path.join(bundle, 'Contents/Frameworks/Electron Framework.
 for (const file of [
   'dist-electron/shared/electron/backend/speech/controller.js',
   'dist-electron/shared/electron/backend/cancellable.js',
+  'dist-electron/shared/electron/backend/atomicFile.js',
   'dist-electron/shared/electron/backend/screenshot/worker.js',
   'dist-electron/shared/electron/backend/screenshot/host.js',
   'node_modules/@img/sharp-darwin-arm64/lib/sharp-darwin-arm64-0.35.5.node',
@@ -144,6 +160,23 @@ assert.equal(
   path.join(archive + '.unpacked', 'dist-electron/shared/electron/backend/cancellable.js'),
   'The physical speech utility controller must resolve its shared cancellation dependency',
 );
+const visitedKnowledgeFiles = new Set();
+async function verifyKnowledgeImports(relative) {
+  if (visitedKnowledgeFiles.has(relative)) return;
+  visitedKnowledgeFiles.add(relative);
+  const physical = path.join(archive + '.unpacked', relative);
+  assert.equal(asar.statFile(archive, relative).unpacked, true, relative);
+  const source = await readFile(physical);
+  assert.ok(source.equals(await readFile(path.join(workspace.platformRoot, relative))), relative);
+  const resolve = createRequire(physical).resolve;
+  for (const [, specifier] of source.toString().matchAll(/\brequire\(["'](\.[^"']+)["']\)/g)) {
+    const dependency = path.relative(archive + '.unpacked', resolve(specifier));
+    assert.ok(dependency.startsWith('dist-electron/'), dependency);
+    await verifyKnowledgeImports(dependency);
+  }
+}
+await verifyKnowledgeImports('dist-electron/shared/electron/backend/knowledge/process.js');
+assert.ok(visitedKnowledgeFiles.has('dist-electron/shared/electron/backend/atomicFile.js'));
 assert.equal(
   JSON.parse(
     asar.extractFile(path.join(resources, 'app.asar'), 'node_modules/ws/package.json').toString(),
@@ -284,6 +317,12 @@ if (process.argv.includes('--static-only')) {
   process.exit(2);
 }
 const releaseDesktop = holdDesktopAwake();
+const cacheSource = process.env.VOXCUE_TEST_COMPONENT_CACHE;
+if (process.argv.includes('--upgrades-only')) {
+  assert.ok(cacheSource && path.isAbsolute(cacheSource));
+  await checkUpgrades(cacheSource);
+  process.exit(0);
+}
 const loginHitProbe = path.join(testRoot, 'login-hit-probe.node');
 run('/usr/bin/xcrun', [
   'clang++',
@@ -308,7 +347,6 @@ run('/usr/bin/codesign', ['--force', '--sign', '-', loginHitProbe]);
 const installArchive = process.argv.includes('--install-archive');
 const profile = path.join(testRoot, 'VoxCue');
 await mkdir(path.join(testRoot, 'tmp'));
-const cacheSource = process.env.VOXCUE_TEST_COMPONENT_CACHE;
 const { packagesFor } = require(
   path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/catalog.js'),
 );
@@ -490,10 +528,6 @@ try {
           worker.postMessage({
             op: 'init',
             directory: model,
-            preprocessorFile: path.join(
-              unpacked,
-              'dist-electron/macos/electron/speech/echoCancellation.js',
-            ),
           });
         });
       } finally {
@@ -550,13 +584,14 @@ try {
       try {
         await knowledge.initialize();
         const signal = new AbortController().signal;
+        const marker = 'sorting' + require('node:crypto').randomUUID().replaceAll('-', '');
         await knowledge.indexDocument(
           {
             documentId: 'fixture',
             baseId: 'fixture',
             name: 'fixture.md',
             bytes: Buffer.from(
-              '## Q001. PID lift-off control?\n\nPID feedback controls sensor lift-off and output is limited to 2.',
+              `## Sorting station\n\nThe sample named ${marker} belongs on the violet tray at the sorting station.`,
             ),
           },
           signal,
@@ -629,7 +664,8 @@ try {
         };
         await checkEncodedRetrieval();
         for (const mode of ['keyword', 'vector', 'hybrid'])
-          assert.ok((await knowledge.search('PID sensor control', 3, mode, signal)).length);
+          assert.ok((await knowledge.search(marker + ' sorting station', 3, mode, signal))
+            .some(hit => hit.documentId === 'fixture'));
         await knowledge.close();
         knowledge = new KnowledgeHost(directory, models.ragModel);
         assert.deepEqual(
@@ -641,6 +677,9 @@ try {
       } finally {
         await knowledge.close();
       }
+      const { SpeechController } = require(path.join(unpacked, 'dist-electron/macos/electron/speech/controller.js'));
+      const captureClock = new SpeechController(model, path.join(process.resourcesPath, 'native/VoxCue.Audio'), () => {}).adapter.captureClockNow;
+      assert.ok(captureClock() > 0 && Number.isFinite(captureClock()), 'Packaged unmute clock must load without opening a device');
       const binding = require(
         path.join(process.resourcesPath, 'native/VoxCue.ScreenPermission.node'),
       );
@@ -851,17 +890,40 @@ try {
   await closeUiApp(app);
 }
 
-if (installArchive) {
-  for (const fromVersion of upgradeBaselineVersions)
-    await verifyPreviousVersionData({
-      zip,
-      cache: path.join(profile, 'artifact-components'),
-      update,
-      nativeFile: path.join(resources, 'native/VoxCue.Updater.node'),
-      fromVersion,
-    });
-}
-
 if (cacheSource)
   for (const pkg of cachedPackages)
     await verifyCachedComponent(componentLocation(path.resolve(cacheSource), pkg), pkg);
+
+if (installArchive && cacheSource) {
+  const qwen = packagesFor(process.platform, process.arch).find(pkg => pkg.id === 'qwen');
+  assert.ok(qwen, 'Packaged Mac Qwen component is missing from the catalog');
+  const modelRoot = path.join(testRoot, 'qwen-component');
+  await stageModelFixtures(path.resolve(cacheSource), modelRoot, [qwen], componentLocation);
+  const model = path.join(componentLocation(modelRoot, qwen), 'files', qwen.directory);
+  const check = spawnSync(process.execPath, [
+    path.join(workspace.platformRoot, 'test/scripts/qwen-native-smoke.mjs'), model, bundle,
+  ], { stdio: 'inherit', timeout: 12 * 60_000 });
+  if (check.error) throw check.error;
+  assert.equal(check.status, 0, 'Final signed Qwen runtime must transcribe synthetic audio');
+}
+
+if (installArchive) await checkUpgrades(path.join(profile, 'artifact-components'));
+
+async function checkUpgrades(cache) {
+  const failures = [];
+  for (const fromVersion of upgradeVersions) {
+    try {
+      await verifyPreviousVersionData({
+        zip,
+        cache,
+        update,
+        nativeFile: path.join(resources, 'native/VoxCue.Updater.node'),
+        fromVersion,
+      });
+    } catch (error) {
+      console.error(`FAIL: archived ${fromVersion} upgrade:`, error);
+      failures.push(error);
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Archived upgrade acceptance failed');
+}

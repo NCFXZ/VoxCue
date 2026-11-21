@@ -1,150 +1,116 @@
 import workspace from '../../shared/scripts/workspace.mjs';
-import { mkdir, writeFile, readFile, copyFile, mkdtemp, lstat, rm, rmdir } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
-import path from 'node:path';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { lstat, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rename, rm, rmdir, symlink, unlink } from 'node:fs/promises';
 import os from 'node:os';
-import { prepareRuntime } from './prepare-runtime.mjs';
-import { loadDevelopmentSigning, signLocalCode, verifyLocalApp } from './development-signing.mjs';
-if (path.resolve(process.cwd()) !== workspace.platformRoot)
-  throw Error('Run from the macos installation.');
-if (process.platform !== 'darwin' || process.arch !== 'arm64')
-  throw Error('Apple Silicon required.');
-await prepareRuntime();
-const signing = await loadDevelopmentSigning();
-// Build a fresh bundle so Finder metadata on the existing launcher cannot invalidate signing.
-const stage = await mkdtemp(path.join(os.tmpdir(), 'voxcue-launcher-build-'));
-let preserveBackup = false;
-try {
-  const bundle = path.join(stage, 'VoxCue.app');
-  const contents = path.join(bundle, 'Contents');
-  await mkdir(path.join(contents, 'MacOS'), { recursive: true });
-  await mkdir(path.join(contents, 'Resources'), { recursive: true });
-  const run = (command, args) => {
-    const result = spawnSync(command, args, { stdio: ['ignore', 'pipe', 'inherit'] });
-    if (result.error) throw result.error;
-    if (result.status) throw Error(`${command} failed (${result.status})`);
-  };
-  await copyFile('public/voxcue.icns', path.join(contents, 'Resources/voxcue.icns'));
-  const version = JSON.parse(await readFile('../shared/package.json', 'utf8')).version;
-  await writeFile(
-    path.join(contents, 'Info.plist'),
-    `<?xml version="1.0" encoding="UTF-8"?>
-  <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-  <plist version="1.0"><dict>
-  <key>CFBundleIdentifier</key><string>com.voxcue.launcher</string>
-  <key>CFBundleName</key><string>VoxCue</string>
-  <key>CFBundleDisplayName</key><string>VoxCue</string>
-  <key>CFBundleExecutable</key><string>VoxCue</string>
-  <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleIconFile</key><string>voxcue.icns</string>
-  <key>CFBundleVersion</key><string>${version}</string>
-  <key>CFBundleShortVersionString</key><string>${version}</string>
-  <key>LSMinimumSystemVersion</key><string>14.2</string>
-  <key>NSMicrophoneUsageDescription</key><string>VoxCue 在本机转写麦克风，不保存或上传音频。</string>
-  <key>NSAudioCaptureUsageDescription</key><string>VoxCue 在本机转写系统音频，不保存或上传音频。</string>
-  <key>NSScreenCaptureUsageDescription</key><string>VoxCue 仅在你点击截图按钮时捕获当前屏幕，图像暂存，点击发送后才用于回答，不持续录屏。</string>
-  </dict></plist>\n`,
-  );
-  run('/usr/bin/xcrun', [
-    'clang++',
-    '-std=c++17',
-    '-fobjc-arc',
-    '-O2',
-    '-arch',
-    'arm64',
-    '-mmacosx-version-min=14.2',
-    'native/Launcher.mm',
-    '-framework',
-    'Foundation',
-    '-o',
-    path.join(contents, 'MacOS/VoxCue'),
-  ]);
-  signLocalCode(bundle, signing, 'com.voxcue.launcher');
-  verifyLocalApp(bundle, signing, 'com.voxcue.launcher');
-  const target = path.resolve('VoxCue.app');
-  const previous = path.join(stage, 'previous');
-  const files = [
-    'Contents/Info.plist',
-    'Contents/MacOS/VoxCue',
-    'Contents/Resources/voxcue.icns',
-    'Contents/_CodeSignature/CodeResources',
-  ];
-  const existing = await lstat(target).catch((error) => {
+import path from 'node:path';
+import { localSigningCertificate, verifyLocalApp } from './development-signing.mjs';
+import { buildMacApp } from './package-app.mjs';
+
+const root = await realpath(workspace.platformRoot);
+if (await realpath(process.cwd()) !== root || process.platform !== 'darwin' || process.arch !== 'arm64')
+  throw Error('Run from the macos installation on Apple Silicon.');
+const entry = path.join(root, 'VoxCue.app');
+const tools = path.join(root, '.tools');
+const checkout = createHash('sha256').update(root).digest('hex').slice(0, 16);
+const local = path.join(os.homedir(), 'Library/Developer/VoxCue', checkout);
+const priorLayout = path.join(local, 'VoxCue.app');
+const buildName = /^app-[a-zA-Z0-9]{6}$/;
+const pin = await localSigningCertificate();
+const { protocol, publicKey } = JSON.parse(await readFile(path.join(root, 'update-public-key.json'), 'utf8'));
+if (protocol !== 1 || !/^[A-Za-z0-9+/]{43}=$/.test(publicKey))
+  throw Error('Missing or invalid pinned update public key.');
+
+function unused(bundle) {
+  const result = spawnSync('/usr/sbin/lsof', ['-t', '+D', bundle], { encoding: 'utf8' });
+  return !result.error && result.status === 1 && !result.stdout.trim() && !result.stderr.trim();
+}
+
+async function existingEntry() {
+  const info = await lstat(entry).catch((error) => {
     if (error.code !== 'ENOENT') throw error;
   });
-  if (existing) {
-    if (!existing.isDirectory() || existing.isSymbolicLink())
-      throw Error('Unexpected launcher target');
-    const plist = await readFile(path.join(target, 'Contents/Info.plist'), 'utf8');
-    if (!/<key>CFBundleIdentifier<\/key>\s*<string>com\.voxcue\.launcher<\/string>/.test(plist))
-      throw Error('Existing app is not the generated development launcher');
-    const occupied = spawnSync('/usr/sbin/lsof', ['-t', '+D', target], { encoding: 'utf8' });
-    if (occupied.error || occupied.stdout.trim())
-      throw Error('Close the development launcher before rebuilding it');
-    for (const file of files) {
-      let current = target;
-      for (const part of file.split('/')) {
-        current = path.join(current, part);
-        if ((await lstat(current)).isSymbolicLink())
-          throw Error('Launcher contains a redirected managed path');
-      }
-      if (!(await lstat(path.join(target, file))).isFile())
-        throw Error('Invalid managed launcher file');
-      await mkdir(path.dirname(path.join(previous, file)), { recursive: true });
-      await copyFile(path.join(target, file), path.join(previous, file));
-    }
+  if (!info) return;
+  if (info.isSymbolicLink()) {
+    const target = await readlink(entry);
+    const relative = path.relative(local, target).split(path.sep);
+    if (target !== priorLayout && !(relative.length === 2 && buildName.test(relative[0]) &&
+        relative[1] === 'VoxCue.app' && path.join(local, ...relative) === target))
+      throw Error('Unexpected VoxCue.app link: ' + entry);
+    return 'link';
   }
+  if (!info.isDirectory()) throw Error('Unexpected file at ' + entry);
+  verifyLocalApp(entry, pin, 'com.voxcue.launcher', { strict: false });
+  if (!unused(entry)) throw Error('Close the old launcher before replacing it.');
+  return 'launcher';
+}
+
+async function retire(bundle) {
   try {
-    // Keep the bundle/directory identities so File Provider cannot resurrect the
-    // old directory as a numbered app while a same-named directory replaces it.
-    for (const file of files) {
-      await mkdir(path.dirname(path.join(target, file)), { recursive: true });
-      await writeFile(path.join(target, file), await readFile(path.join(bundle, file)), {
-        mode: (await lstat(path.join(bundle, file))).mode & 0o777,
-      });
-    }
-    // File Provider can reattach Finder metadata when the app enters the workspace.
-    // This is our generated launcher only; quarantine/provenance are never removed.
-    // The provider can attach it between a presence check and verification.
-    // Bound retries to this freshly generated bundle; never clear security attributes.
-    for (let attempt = 0; ; attempt++) {
-      const metadata = spawnSync('/usr/bin/xattr', ['-d', 'com.apple.FinderInfo', target]);
-      if (metadata.error) throw metadata.error;
-      try {
-        verifyLocalApp(target, signing, 'com.voxcue.launcher');
-        break;
-      } catch (error) {
-        if (attempt === 4 || !/resource fork|Finder information|detritus/.test(error.message))
-          throw error;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 150));
-    }
+    if (await realpath(bundle) !== bundle || (await lstat(bundle)).uid !== process.getuid()) return;
+    verifyLocalApp(bundle, pin, 'com.voxcue.app');
+    if (!unused(bundle)) return;
+    await rm(bundle, { recursive: true });
+    if (bundle !== priorLayout) await rmdir(path.dirname(bundle));
   } catch (error) {
-    try {
-      if (existing) {
-        for (const file of files)
-          await writeFile(path.join(target, file), await readFile(path.join(previous, file)));
-      } else {
-        for (const file of files) await rm(path.join(target, file), { force: true });
-        for (const directory of [
-          'Contents/_CodeSignature',
-          'Contents/Resources',
-          'Contents/MacOS',
-          'Contents',
-          '',
-        ])
-          await rmdir(path.join(target, directory));
+    if (error.code !== 'ENOENT') console.warn('Retained previous local build: ' + bundle);
+  }
+}
+
+await mkdir(tools, { recursive: true });
+await mkdir(local, { recursive: true, mode: 0o700 });
+if (await realpath(local) !== local || (await lstat(local)).uid !== process.getuid())
+  throw Error('Unexpected local build directory: ' + local);
+const lock = path.join(local, 'build.lock');
+// shlock reclaims the lock of an exited build.
+execFileSync('/usr/bin/shlock', ['-p', String(process.pid), '-f', lock]);
+let stage, next, linkStage, published = false;
+try {
+  await existingEntry();
+  // Keep signed resources outside File Provider. Each running version retains its
+  // real path while a rebuild atomically updates the single link in the checkout.
+  stage = await mkdtemp(path.join(local, '.build-'));
+  const app = await buildMacApp(path.join(stage, 'bundle'), publicKey);
+  next = await mkdtemp(path.join(local, 'app-'));
+  const target = path.join(next, 'VoxCue.app');
+  await rename(app, target);
+  verifyLocalApp(target, pin, 'com.voxcue.app');
+
+  const existing = await existingEntry();
+  linkStage = await mkdtemp(path.join(tools, 'local-entry-'));
+  const link = path.join(linkStage, 'new.app');
+  const previous = path.join(linkStage, 'previous');
+  await symlink(target, link);
+  verifyLocalApp(link, pin, 'com.voxcue.app');
+  if (existing === 'launcher') await rename(entry, previous);
+  try {
+    await rename(link, entry);
+    published = true;
+  } catch (error) {
+    if (existing === 'launcher') {
+      try {
+        await rename(previous, entry);
+      } catch (rollback) {
+        const retained = linkStage;
+        linkStage = undefined;
+        throw new AggregateError([error, rollback], 'Previous launcher retained at ' + retained);
       }
-    } catch (rollback) {
-      preserveBackup = true;
-      throw new AggregateError(
-        [error, rollback],
-        'Launcher rollback failed; backup retained at ' + stage,
-      );
     }
     throw error;
   }
-  console.log('Created macos/VoxCue.app. Double-click it to open the existing local build.');
+  console.log('Created macos/VoxCue.app (com.voxcue.app).');
+  await retire(priorLayout);
+  for (const item of await readdir(local, { withFileTypes: true })) {
+    const folder = path.join(local, item.name);
+    if (item.isDirectory() && buildName.test(item.name) && folder !== next)
+      await retire(path.join(folder, 'VoxCue.app'));
+  }
 } finally {
-  if (!preserveBackup) await rm(stage, { recursive: true, force: true });
+  try {
+    if (stage) await rm(stage, { recursive: true, force: true });
+    if (!published && next) await rm(next, { recursive: true, force: true });
+    if (linkStage) await rm(linkStage, { recursive: true, force: true });
+  } finally {
+    await unlink(lock);
+  }
 }

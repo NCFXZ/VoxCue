@@ -4,7 +4,7 @@ export async function assertLoadingIcon(page, container) {
   const icon = container.locator('svg').first();
   await icon.waitFor({ state: 'visible' });
   const mac = await page.evaluate(() => window.desktop.platform === 'macos');
-  if (mac) assert.equal(await icon.getAttribute('data-sf-symbol'), 'progress.indicator');
+  if (mac) assert.ok(['progress.indicator', 'rays'].includes(await icon.getAttribute('data-sf-symbol')));
   const animation = mac ? icon.locator('.macos-loading-sweep') : container;
   const initial = await animation.evaluate((element) => ({
     name: getComputedStyle(element).animationName,

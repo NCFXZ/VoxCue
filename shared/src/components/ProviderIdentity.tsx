@@ -14,7 +14,7 @@ export function ProviderIdentity({
   const name = info.id === 'unknown' ? t('服务来源未记录') : info.name;
   return (
     <>
-      <span className="ai-avatar provider-avatar">
+      <span className="provider-avatar">
         <ProviderIcon provider={info.id} />
       </span>
       <strong className="provider-name">{name}</strong>

@@ -1087,7 +1087,7 @@ try {
             y: owner.y + 24,
           }).workArea;
           const width = Math.min(300, Math.max(1, area.width - 32));
-          const height = Math.min(380, Math.max(1, area.height - 32));
+          const height = Math.min(412, Math.max(1, area.height - 32));
           return { x: area.x + 16, y: area.y + area.height - height - 16, width, height };
         })
       : bounds.help;

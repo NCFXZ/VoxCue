@@ -11,7 +11,7 @@ import {
   type ImportPreviewEntry,
   type AccountImport,
 } from '../services/accountImport';
-import { ArrowRightLeft, ChevronRight, ShieldCheck, X } from './icons';
+import { ArrowRightLeft, ChevronRight, Loader, ShieldCheck, X } from './icons';
 import { AccountMigrationConflicts, AccountMigrationSelection } from './AccountMigrationSelection';
 import { ChoiceMenu } from './ui/choice-menu';
 import { Button } from './ui/button';
@@ -47,6 +47,7 @@ export function AccountMigrationPanel({
   const [confirmReplacement, setConfirmReplacement] = useState(false);
   const [sources, setSources] = useState<ReturnType<typeof migrationSourceOptions>>([]);
   const [entries, setEntries] = useState<ImportPreviewEntry[]>([]);
+  const [recoveredMove, setRecoveredMove] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
@@ -58,6 +59,8 @@ export function AccountMigrationPanel({
   const passwordInput = useRef<HTMLInputElement>(null);
   const content = useRef<HTMLDivElement>(null);
   const choice = sources.find((source) => source.value === sourceId);
+  const loadingNext = step === 'source' && busy && !!choice;
+  const finishedRecovery = step === 'items' && recoveredMove && entries.length === 0;
   const conflicts = entries.filter((entry) => entry.conflict && selected.has(entry.key));
   const alive = useRef(true);
   const pending = useRef<AccountImport | null>(null);
@@ -119,10 +122,11 @@ export function AccountMigrationPanel({
     }
   }
   async function preview(session: AccountImport, secret?: string) {
-    const data = await previewAccountImport(session, secret, () => alive.current);
+    const result = await previewAccountImport(session, secret, () => alive.current);
     if (alive.current) {
-      setEntries(data);
-      setSelected(new Set(data.map((entry) => entry.key)));
+      setRecoveredMove(result.recoveredMove);
+      setEntries(result.entries);
+      setSelected(new Set(result.entries.map((entry) => entry.key)));
       setStep('items');
     }
   }
@@ -159,6 +163,7 @@ export function AccountMigrationPanel({
     }
   }
   function clearChoices() {
+    setRecoveredMove(false);
     setEntries([]);
     setSelected(new Set());
     setConfirmReplacement(false);
@@ -260,11 +265,11 @@ export function AccountMigrationPanel({
             <>
               <Button variant="outline" disabled={busy} onClick={dismiss}>
                 <X size={16} />
-                {t('取消')}
+                {t(finishedRecovery ? '关闭' : '取消')}
               </Button>
               {step === 'source' && (
-                <Button disabled={busy || !choice} onClick={() => void choose()}>
-                  <ChevronRight size={16} />
+                <Button disabled={busy || !choice} aria-busy={loadingNext || undefined} onClick={() => void choose()}>
+                  {loadingNext ? <span className="update-spinner"><Loader size={16} /></span> : <ChevronRight size={16} />}
                   {t('下一步')}
                 </Button>
               )}
@@ -274,7 +279,7 @@ export function AccountMigrationPanel({
                   {busy ? t('正在验证…') : t('验证密码')}
                 </Button>
               )}
-              {step === 'items' && (
+              {step === 'items' && !finishedRecovery && (
                 <Button disabled={busy || !selected.size} onClick={() => void migrate(false)}>
                   <ArrowRightLeft size={16} />
                   {busy ? t('正在迁移…') : t('确认迁移')}
@@ -293,7 +298,10 @@ export function AccountMigrationPanel({
                   value={sourceId}
                   options={sources}
                   disabled={busy}
-                  onChange={setSourceId}
+                  onChange={(value) => {
+                    setError('');
+                    setSourceId(value);
+                  }}
                 />
               </div>
             ) : (
@@ -327,6 +335,9 @@ export function AccountMigrationPanel({
               </div>
             </form>
           )}
+          {step === 'items' && recoveredMove && (
+            <p role="status" className="settings-hint">{t('上次迁移的来源资料已清理。')}</p>
+          )}
           {step === 'items' &&
             (entries.length ? (
               <AccountMigrationSelection
@@ -335,9 +346,9 @@ export function AccountMigrationPanel({
                 onSelect={toggleItems}
                 disabled={busy}
               />
-            ) : (
+            ) : !recoveredMove ? (
               <p>{t('这个账户在本机没有可迁移的资料。')}</p>
-            ))}
+            ) : null)}
           <InterviewReveal resizeKey={error}>
             {error && (step !== 'source' || sources.length > 0) ? (
               <p role="alert" className="danger-text">

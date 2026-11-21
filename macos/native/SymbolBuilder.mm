@@ -10,11 +10,19 @@ int main(int argc, const char *argv[]) {
         NSData *data = [NSData dataWithContentsOfFile:@(argv[1])];
         NSDictionary *symbols = data ? [NSJSONSerialization JSONObjectWithData:data options:0 error:&error] : nil;
         if (![symbols isKindOfClass:[NSDictionary class]]) return 1;
+        NSMutableDictionary *resolved = [NSMutableDictionary dictionary];
         for (NSString *key in [[symbols allKeys] sortedArrayUsingSelector:@selector(compare:)]) {
             NSString *name = symbols[key];
             if (![name isKindOfClass:[NSString class]]) return 1;
             NSImage *symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
+            // Sonoma predates these two glyphs. Use its native equivalents for builds on 14.x.
+            if (!symbol) {
+                if ([key isEqualToString:@"LinkOff"]) name = @"cable.connector.slash";
+                if ([key isEqualToString:@"Loader"]) name = @"rays";
+                symbol = [NSImage imageWithSystemSymbolName:name accessibilityDescription:nil];
+            }
             if (!symbol) { fprintf(stderr, "Unavailable SF Symbol: %s\n", [name UTF8String]); return 1; }
+            resolved[key] = name;
             BOOL fontDecrease = [key isEqualToString:@"FontDecrease"];
             BOOL fontIncrease = [key isEqualToString:@"FontIncrease"];
             BOOL fontAdjustment = fontDecrease || fontIncrease;
@@ -52,6 +60,8 @@ int main(int argc, const char *argv[]) {
             NSString *file = [@(argv[2]) stringByAppendingPathComponent:[key stringByAppendingString:@".png"]];
             if (!png || ![png writeToFile:file options:NSDataWritingAtomic error:&error]) return 1;
         }
+        NSData *names = [NSJSONSerialization dataWithJSONObject:resolved options:NSJSONWritingSortedKeys error:&error];
+        if (![names writeToFile:[@(argv[2]) stringByAppendingPathComponent:@"resolved.json"] atomically:YES]) return 1;
         printf("Generated %lu Mac SF Symbols from AppKit (192px alpha masks).\n", (unsigned long)[symbols count]);
     }
     return 0;

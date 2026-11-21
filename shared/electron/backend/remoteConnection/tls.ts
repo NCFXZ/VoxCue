@@ -7,11 +7,12 @@ import path from 'node:path';
 
 export interface RemoteTlsConfiguration {
   directory: string;
+  loadIdentity?: (ciphertext: Buffer, address: string, signal?: AbortSignal) => Promise<{ cert: string; key: Buffer }>;
   decryptKey?: (ciphertext: Buffer, signal?: AbortSignal) => Promise<{ certificateHashes: string[]; pfx: Buffer }>;
 }
 export const tlsConfigurationError = '设备连接证书配置无效，请检查证书、私钥和当前局域网地址。';
 
-async function fixedFile(directory: string, name: string, limit = 128 * 1024) {
+export async function readTlsFile(directory: string, name: string, limit = 128 * 1024) {
   const file = path.join(directory, name);
   const original = await lstat(file);
   if (!original.isFile() || await realpath(file) !== file) throw Error(tlsConfigurationError);
@@ -32,6 +33,20 @@ async function fixedFile(directory: string, name: string, limit = 128 * 1024) {
   } finally { await handle.close(); }
 }
 
+export async function requireRemoteTls(marker: string) {
+  const existing = await lstat(marker).catch((error: NodeJS.ErrnoException) => {
+    if (error.code !== 'ENOENT') throw error;
+  });
+  if (existing && !existing.isFile()) throw Error(tlsConfigurationError);
+  if (!existing) {
+    const handle = await open(marker, 'wx', 0o600).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== 'EEXIST') throw error;
+    });
+    if (handle) await handle.close();
+    if (!(await lstat(marker)).isFile()) throw Error(tlsConfigurationError);
+  }
+}
+
 export async function remoteListener(address: string, listener: RequestListener, config?: RemoteTlsConfiguration, signal?: AbortSignal) {
   if (!config) return { scheme: 'http', server: httpServer(listener) };
   const directory = path.join(await realpath(path.dirname(config.directory)), path.basename(config.directory));
@@ -45,26 +60,28 @@ export async function remoteListener(address: string, listener: RequestListener,
     if (await lstat(marker).catch(missing)) throw Error(tlsConfigurationError);
     return { scheme: 'http', server: httpServer(listener) };
   }
-  if (!config.decryptKey) throw Error(tlsConfigurationError);
+  if (!config.decryptKey && !config.loadIdentity) throw Error(tlsConfigurationError);
   // Remember even an incomplete legacy installation before looking inside it.
-  const existing = await lstat(marker).catch(missing);
-  if (existing && !existing.isFile()) throw Error(tlsConfigurationError);
-  if (!existing) {
-    const handle = await open(marker, 'wx', 0o600).catch((error: NodeJS.ErrnoException) => {
-      if (error.code !== 'EEXIST') throw error;
-    });
-    if (handle) await handle.close();
-    if (!(await lstat(marker)).isFile()) throw Error(tlsConfigurationError);
-  }
+  await requireRemoteTls(marker);
   if (!folder.isDirectory() || await realpath(directory) !== directory)
     throw Error(tlsConfigurationError);
+  if (config.loadIdentity) {
+    const encrypted = await readTlsFile(directory, 'identity.keychain', 256 * 1024);
+    signal?.throwIfAborted();
+    const { cert, key } = await config.loadIdentity(encrypted, address, signal);
+    try {
+      signal?.throwIfAborted();
+      return { scheme: 'https', server: httpsServer({ cert, key, minVersion: 'TLSv1.2', handshakeTimeout: 5000 }, listener) };
+    } finally { key.fill(0); }
+  }
+  if (!config.decryptKey) throw Error(tlsConfigurationError);
   // New installations publish PEM, a NUL delimiter and DPAPI bytes as one atomic file.
   // Old installations have a raw DPAPI file and a detached PEM.
-  const identity = await fixedFile(directory, 'private-key.dpapi', 256 * 1024);
+  const identity = await readTlsFile(directory, 'private-key.dpapi', 256 * 1024);
   const bundled = identity[0] === 0x2d;
   const split = bundled ? identity.indexOf(0) : -1;
   if (bundled && (split < 1 || split >= 128 * 1024 || split === identity.length - 1)) throw Error(tlsConfigurationError);
-  const pem = (bundled ? identity.subarray(0, split) : await fixedFile(directory, 'certificate.pem')).toString('ascii').trim();
+  const pem = (bundled ? identity.subarray(0, split) : await readTlsFile(directory, 'certificate.pem')).toString('ascii').trim();
   const blocks = pem.match(/-----BEGIN CERTIFICATE-----[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----/g);
   if (!blocks || blocks.join('').replace(/\s/g, '') !== pem.replace(/\s/g, '')) throw Error(tlsConfigurationError);
   const chain = blocks.map(block => new X509Certificate(block));

@@ -48,7 +48,9 @@ let calls: AccountDataCall[];
 let closed: boolean | undefined;
 let crossAccount: boolean;
 let failClose: boolean;
+let recoveredRevision: string | null | undefined;
 let afterRead: (() => void) | undefined;
+let deferredSize: (actual: number) => number | undefined;
 let storage: Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
 beforeEach(() => {
@@ -57,7 +59,9 @@ beforeEach(() => {
   closed = undefined;
   crossAccount = false;
   failClose = false;
+  recoveredRevision = undefined;
   afterRead = undefined;
+  deferredSize = actual => actual;
   sourceItems = new Map([
     ['profile:main', packCloudItem('profile:main', JSON.stringify(profile))],
     ['record:record-1', packCloudItem('record:record-1', JSON.stringify(record))],
@@ -126,6 +130,9 @@ beforeEach(() => {
               unlocked = true;
               return {
                 ok: true,
+                ...(recoveredRevision !== undefined && {
+                  recoveredMove: true, localRevision: recoveredRevision ?? undefined,
+                }),
                 items: [...sourceItems].map(([key, blob]) => ({ key, size: blob.size, ...descriptions.get(key) })),
               };
             case 'readImport': {
@@ -135,7 +142,8 @@ beforeEach(() => {
                 await blob.slice(call.offset, call.offset + 1048576).arrayBuffer(),
               );
               afterRead?.();
-              return { ok: true, bytes };
+              return { ok: true, bytes, ...(call.offset === 0 && descriptions.get(call.key)?.size === 0
+                ? { size: deferredSize(blob.size) } : {}) };
             }
             case 'digestImportItem': {
               const item = await decodeCloudItem(call.key, sourceItems.get(call.key)!);
@@ -160,17 +168,23 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
-it('preserves old library-prefixed generated titles through cloud reading and cross-account migration', async () => {
+it.each([true, false])('preserves library-prefixed titles with both migration manifests, deferred=%s', async (deferred) => {
   const key = 'record:' + record.id, name = '库'.repeat(60);
   const generated = { ...record, knowledgeBaseName: name, titleSource: 'generated' as const,
     title: '「' + name + '」' + '题'.repeat(80) };
   await historyRepository.save(generated);
   const reader = await createProfileImportReader();
-  expect(reader.items.find(item => item.key === key)).not.toHaveProperty('recordTitle');
+  const manifest = reader.items.find(item => item.key === key)!;
+  expect(manifest).toMatchObject({ size: 0, recordTitle: generated.title, recordLibraryName: name });
   vi.stubGlobal('indexedDB', new IDBFactory());
   sourceItems.clear();
   sourceItems.set(key, packCloudItem(key, JSON.stringify(generated)));
-  await run();
+  if (deferred) descriptions.set(key, manifest);
+  const selection = await openAccountImport('local');
+  const { entries } = await previewAccountImport(selection, undefined, () => true);
+  expect(entries).toMatchObject([{ key, title: generated.title }]);
+  if (deferred) expect(calls.some(call => call.action === 'readImport')).toBe(false);
+  await restoreAccountImport(selection, [key], [], () => true);
   expect(await historyRepository.get(record.id)).toEqual(generated);
   await expect(historyRepository.rename(record.id, generated.title)).rejects.toThrow();
   for (const change of [{ titleSource: 'manual' }, { knowledgeBaseName: '另一库' }, { title: generated.title + '长' }]) {
@@ -185,7 +199,7 @@ it('previews large originals and interview titles without transferring their bod
   descriptions.set(key, { document });
   descriptions.set('record:record-1', { recordTitle: record.title });
   const session = await openAccountImport('local');
-  const entries = await previewAccountImport(session, undefined, () => true);
+  const { entries } = await previewAccountImport(session, undefined, () => true);
   expect(entries.map(e => e.key)).toEqual(expect.arrayContaining(['record:record-1', 'base:base-1']));
   const reads = () => calls.filter(c => c.action === 'readImport').map(c => c.key);
   expect(reads()).not.toContain(key);
@@ -203,7 +217,7 @@ it('compares a matching interview by stable digest before transferring only the 
   descriptions.set(key, { recordTitle: record.title });
   await historyRepository.save({ ...record, endedAt: 3 });
   const selection = await openAccountImport('local');
-  const entries = await previewAccountImport(selection, undefined, () => true);
+  const { entries } = await previewAccountImport(selection, undefined, () => true);
   expect(entries.find(e => e.key === key)?.conflict).toBe(true);
   expect(calls.some(c => c.action === 'digestImportItem' && c.key === key)).toBe(true);
   expect(calls.some(c => c.action === 'readImport' && c.key === key)).toBe(false);
@@ -211,9 +225,45 @@ it('compares a matching interview by stable digest before transferring only the 
   expect((await historyRepository.list())[0].endedAt).toBe(2);
 });
 
+it('transfers a record whose envelope size was omitted from the preview', async () => {
+  const key = 'record:record-1';
+  descriptions.set(key, { recordTitle: record.title, size: 0 });
+  const selection = await openAccountImport('local');
+  await previewAccountImport(selection, undefined, () => true);
+  expect(calls.some(c => c.action === 'readImport' && c.key === key)).toBe(false);
+  await restoreAccountImport(selection, [key], [], () => true);
+  expect(await historyRepository.get(record.id)).toEqual(record);
+});
+
+it.each([undefined, 7, 64 * 1024 ** 2 + 1])('rejects an invalid deferred record envelope size of %s', async size => {
+  const key = 'record:record-1';
+  descriptions.set(key, { recordTitle: record.title, size: 0 });
+  deferredSize = () => size;
+  const selection = await openAccountImport('local');
+  await previewAccountImport(selection, undefined, () => true);
+  await expect(restoreAccountImport(selection, [key], [], () => true)).rejects.toThrow('迁移资料无效');
+  expect(calls.some(c => c.action === 'prepareImportCommit')).toBe(false);
+});
+
+it('counts the first deferred record chunk against the other source envelopes', async () => {
+  const key = 'record:record-1', blob = sourceItems.get(key)!;
+  sourceItems.clear();
+  sourceItems.set(key, blob);
+  descriptions.set(key, { recordTitle: record.title, size: 0 });
+  for (let i = 0; i < 8; i++) {
+    const filler = 'record:budget-' + i;
+    sourceItems.set(filler, new Blob());
+    descriptions.set(filler, { recordTitle: 'Budget', size: 64 * 1024 ** 2 });
+  }
+  const selection = await openAccountImport('local');
+  await previewAccountImport(selection, undefined, () => true);
+  await expect(restoreAccountImport(selection, [key], [], () => true)).rejects.toThrow('迁移资料无效');
+  expect(calls.some(c => c.action === 'prepareImportCommit')).toBe(false);
+});
+
 async function run(password?: string) {
   const selection = await openAccountImport(crossAccount ? 'account:source' : 'local');
-  const entries = await previewAccountImport(selection, password, () => true).catch(
+  const { entries } = await previewAccountImport(selection, password, () => true).catch(
     async (error) => {
       await closeAccountImport(selection.token);
       throw error;
@@ -272,7 +322,7 @@ it('does not request data or write anything until the source password is accepte
 
 it('rejects a repeated commit without closing the first operation or publishing twice', async () => {
   const selection = await openAccountImport('local');
-  const entries = await previewAccountImport(selection, undefined, () => true);
+  const { entries } = await previewAccountImport(selection, undefined, () => true);
   const keys = entries.map((entry) => entry.key);
   const first = restoreAccountImport(selection, keys, [], () => true);
   await expect(restoreAccountImport(selection, keys, [], () => true)).rejects.toThrow(
@@ -286,7 +336,7 @@ it('rejects a repeated commit without closing the first operation or publishing 
 it('binds confirmation to the original preview and omits native media from a personal-field-only import', async () => {
   values.set(profileKey, JSON.stringify({ ...profile, name: 'Current name' }));
   const session = await openAccountImport('local');
-  const entries = await previewAccountImport(session, undefined, () => true);
+  const { entries } = await previewAccountImport(session, undefined, () => true);
   const name = entries.find((entry) => entry.group === 'profile' && entry.conflict)!;
   expect(name).toBeDefined();
   name.conflict = false;
@@ -342,6 +392,28 @@ it('keeps the local reminder until the matching import finishes closing', async 
   expect(values.get('voxcue-handled-local-import-v1')).toBe('4350e4aa-bec7-47c3-b45a-62768637be60');
   expect(useCloudAccount.getState().state.localImportRevision).toBe(values.get('voxcue-handled-local-import-v1'));
 });
+
+it.each([null, 'd96355b5-c6a6-42d9-9299-ff679b04a970'])(
+  'reflects the remaining local revision after retrying source cleanup (%s)', async (remaining) => {
+    const previous = '08065f1e-f3a3-4899-816d-f1866071ead5';
+    useCloudAccount.setState(({ state }) => ({ state: { ...state, localImportRevision: previous } }));
+    recoveredRevision = remaining;
+    if (!remaining) sourceItems.clear();
+    const selection = await openAccountImport('local');
+    const preview = await previewAccountImport(selection, undefined, () => true);
+    expect(preview.recoveredMove).toBe(true);
+    expect(preview.entries.length > 0).toBe(Boolean(remaining));
+    expect(useCloudAccount.getState().state.localImportRevision).toBe(remaining ?? undefined);
+    expect(calls.some(call => call.action === 'prepareImportCommit')).toBe(false);
+    if (remaining) {
+      expect(values.get('voxcue-handled-local-import-v1')).toBe(remaining);
+      await restoreAccountImport(selection, [preview.entries[0].key], [], () => true);
+      expect(useCloudAccount.getState().state.localImportRevision).toBe('4350e4aa-bec7-47c3-b45a-62768637be60');
+    } else {
+      await closeAccountImport(selection.token);
+    }
+  },
+);
 
 it('aborts the originals transaction and restores the previous profile if history exceeds quota', async () => {
   const existing = JSON.stringify({ ...profile, name: 'Current user' });

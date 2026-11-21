@@ -16,14 +16,14 @@ delete env.ELECTRON_RUN_AS_NODE;
 const app = await electron.launch({ args: [await offlineElectronEntry()], env });
 try {
   await installUiAccount(app, { components: true });
-  const indexVersion = await app.evaluate(({ app }) => {
+  const { indexVersion, batchLimit } = await app.evaluate(({ app }) => {
     const require = process
       .getBuiltinModule('module')
       .createRequire(app.getAppPath() + '/package.json');
     const root = app.getAppPath() + '/dist-electron/shared/electron/';
     const { KnowledgeHost } = require(root + 'backend/knowledge/host.js');
     const { KnowledgeCoordinator } = require(root + 'application/knowledge.js');
-    const { KNOWLEDGE_INDEX_VERSION } = require(root + 'contracts/knowledge.js');
+    const { KNOWLEDGE_INDEX_VERSION, knowledgeBatchLimit } = require(root + 'contracts/knowledge.js');
     const indexed = new Map(), imports = [];
     let batch;
     const publish = (host, documents) => {
@@ -52,6 +52,11 @@ try {
     KnowledgeHost.prototype.indexDocument = async function ({ documentId, baseId, name, batchId }) {
       if (batchId !== batch?.id) throw Error('Unexpected synthetic index batch');
       imports.push(documentId);
+      if (globalThis.cloudRestoreUi.holdNext) {
+        globalThis.cloudRestoreUi.holdNext = false;
+        this.progress({ documentId, phase: 'embedding', completed: 1, total: 2 });
+        await new Promise(resolve => { globalThis.cloudRestoreUi.resume = resolve; });
+      }
       const document = { documentId, baseId, name, available: true, indexVersion: KNOWLEDGE_INDEX_VERSION };
       if (batch) batch.documents.push(document);
       else publish(this, [document]);
@@ -71,7 +76,7 @@ try {
       const result = await call.call(this, input);
       return input.op === 'status' ? { ...result, modelReady: true } : result;
     };
-    return KNOWLEDGE_INDEX_VERSION;
+    return { indexVersion: KNOWLEDGE_INDEX_VERSION, batchLimit: knowledgeBatchLimit };
   });
   const login = await app.firstWindow();
   await login.getByRole('heading', { name: '登录 VoxCue', exact: true }).waitFor();
@@ -170,7 +175,13 @@ try {
       text,
     );
   };
+  await app.evaluate(() => { globalThis.cloudRestoreUi.holdNext = true; });
   await upload('第一版');
+  const cardFooter = page.locator('.knowledge-card').filter({ hasText: '原件管理回归' }).locator('.card-footer');
+  await base.getByText(/索引中 50%$/).waitFor();
+  await cardFooter.filter({ hasText: '索引总进度 25%' }).waitFor({ state: 'attached' });
+  await app.evaluate(() => globalThis.cloudRestoreUi.resume());
+  await cardFooter.filter({ hasText: '本地资料' }).waitFor({ state: 'attached' });
   await upload('第二版');
   const note = () => base.locator('.document-row').filter({ hasText: 'note.md' });
   if (process.argv.some(argument => argument.startsWith('--screenshots='))) {
@@ -254,7 +265,7 @@ try {
   await base.waitFor({ state: 'detached' });
   // Exercise the real renderer stores/IPC with offline cloud bytes and synthetic
   // indexing. A held second chunk makes the intermediate library state observable.
-  const readingFiles = Array.from({ length: 18 }, (_, i) => 'a-0-read-' + String(i).padStart(2, '0'));
+  const readingFiles = Array.from({ length: batchLimit - 1 }, (_, i) => 'a-0-read-' + String(i).padStart(2, '0'));
   await app.evaluate(({ app }, readingFiles) => {
     const require = process
       .getBuiltinModule('module')

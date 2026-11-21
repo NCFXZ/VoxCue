@@ -2,7 +2,7 @@ import type { UpdateState } from '../../contracts/updates';
 
 // Only the native adapter owns electron-updater, release URLs and downloaded paths.
 type UpdateDriverEvent =
-  'update-available' | 'update-not-available' | 'download-progress' | 'update-downloaded' | 'error';
+  'update-available' | 'update-not-available' | 'download-progress' | 'update-downloaded' | 'download-invalidated' | 'error';
 export interface UpdateDriver {
   autoDownload: boolean;
   autoInstallOnAppQuit: boolean;
@@ -104,6 +104,10 @@ export class UpdateService {
     this.listen('update-downloaded', () => {
       if (this.value.phase === 'downloading' && !this.downloadController?.signal.aborted)
         this.change({ phase: 'downloaded', progress: 100, error: null });
+    });
+    this.listen('download-invalidated', () => {
+      if (this.value.phase === 'installing')
+        this.change({ phase: 'available', progress: null, error: '更新下载或校验失败，请重试下载。' });
     });
     this.listen('error', () => {
       if (this.value.phase === 'downloading' && this.downloadController?.signal.aborted) return;
@@ -310,7 +314,7 @@ export class UpdateService {
         await this.options.driver.quitAndInstall(false, true);
       }
     } catch {
-      this.fail('installing');
+      if (this.state().phase === 'installing') this.fail('installing');
     }
     return this.state();
   }

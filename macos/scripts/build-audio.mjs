@@ -8,6 +8,7 @@ if (process.platform !== 'darwin' || process.arch !== 'arm64')
   throw Error('Mac audio requires Apple Silicon.');
 mkdirSync('native/bin', { recursive: true });
 const binary = path.resolve('native/bin/VoxCue.Audio');
+const clock = path.resolve('native/bin/VoxCue.AudioClock.node');
 for (const [command, args] of [
   [
     'xcrun',
@@ -32,6 +33,10 @@ for (const [command, args] of [
     ],
   ],
   ['codesign', ['--force', '--sign', '-', '--identifier', 'com.voxcue.audio', binary]],
+  ['xcrun', ['clang++', '-std=c++17', '-DNAPI_VERSION=8', '-bundle', '-undefined', 'dynamic_lookup',
+    '-arch', 'arm64', '-mmacosx-version-min=14.2', '-O2', '-I', path.resolve(path.dirname(process.execPath), '../include/node'),
+    'native/AudioClock.cpp', '-framework', 'CoreAudio', '-o', clock]],
+  ['codesign', ['--force', '--sign', '-', '--identifier', 'com.voxcue.audio-clock', clock]],
 ]) {
   const result = spawnSync(command, args, { stdio: 'inherit' });
   if (result.error) throw result.error;

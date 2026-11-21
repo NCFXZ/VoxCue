@@ -4,18 +4,36 @@ import { open, lstat } from 'node:fs/promises';
 import type { SignedMacUpdate } from './manifest';
 import type { ReleaseFetch } from '../../../shared/electron/backend/updates/provider';
 import { abortable } from '../../../shared/electron/backend/cancellable';
+import type { Stats } from 'node:fs';
+
+export class CorruptArchive extends Error {
+  constructor(message: string, readonly observed: Stats) {
+    super(message);
+  }
+}
+
+export function sameArchiveVersion(observed: Stats, current: Stats) {
+  return current.isFile() && current.nlink === 1 && current.uid === observed.uid &&
+    current.dev === observed.dev && current.ino === observed.ino && current.size === observed.size &&
+    current.ctimeMs === observed.ctimeMs && current.mtimeMs === observed.mtimeMs;
+}
 
 export async function verifyDownload(file: string, update: SignedMacUpdate, signal?: AbortSignal) {
   signal?.throwIfAborted();
   if (update.size > 2 * 1024 ** 3) throw Error('Update archive too large');
   const stat = await lstat(file);
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size !== update.size)
+  if (!stat.isFile() || stat.isSymbolicLink() || stat.uid !== process.getuid!() || stat.nlink !== 1)
     throw Error('Invalid update archive');
+  if (stat.size !== update.size) throw new CorruptArchive('Invalid update archive size', stat);
   const hash = createHash('sha512');
   for await (const chunk of createReadStream(file, { signal })) hash.update(chunk);
   signal?.throwIfAborted();
+  const after = await lstat(file);
+  if (!sameArchiveVersion(stat, after))
+    throw Error('Update archive changed during verification');
   if (!timingSafeEqual(hash.digest(), Buffer.from(update.sha512, 'base64')))
-    throw Error('Update archive checksum mismatch');
+    throw new CorruptArchive('Update archive checksum mismatch', stat);
+  return stat;
 }
 
 export async function downloadArchive(
@@ -99,7 +117,7 @@ export async function downloadArchive(
       reader.releaseLock();
       await output.close();
     }
-    await verifyDownload(file, update, signal);
+    return await verifyDownload(file, update, signal);
   } finally {
     clearTimeout(timer!);
   }

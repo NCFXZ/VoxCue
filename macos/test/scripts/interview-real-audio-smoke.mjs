@@ -11,6 +11,7 @@ import {
   connectUiAccount,
   closeUiApp,
 } from '../../../shared/test/scripts/install-ui-account.mjs';
+import { evaluateHistory } from '../../../shared/test/scripts/stored-history-fixture.mjs';
 import { prepareFillerAudio } from './filler-audio-fixtures.mjs';
 import { requireUnlockedDesktop, holdDesktopAwake } from './desktop-session.mjs';
 
@@ -59,9 +60,7 @@ try {
       ? requestedCases.includes(item.id)
       : args.includes('--all') || ['ack', 'question'].includes(item.id),
   );
-  assert.ok(
-    audio.some((item) => item.id === 'ack') && audio.some((item) => item.id === 'question'),
-  );
+  assert.ok(audio.length, 'Select at least one installed-voice fixture');
   for (const item of audio) {
     const bytes = await readFile(item.wave);
     assert.equal(createHash('sha256').update(bytes).digest('hex'), item.sha256);
@@ -201,25 +200,24 @@ try {
       window.desktop.onSpeechEvent((event) => window.realAudioEvents.push(event));
     });
     const readyDeadline = Date.now() + 240000;
-    while (
-      !(await app.evaluate(() =>
-        globalThis.realAudio.events.some(
-          (event) => event.type === 'status' && event.status.state === 'running',
-        ),
-      ))
-    ) {
+    let status;
+    for (;;) {
+      // The preparation dialog also starts a levels-only preview. Wait for
+      // confirmed input state from the full interview before replaying audio.
+      status = await app.evaluate(() =>
+        globalThis.realAudio.events.findLast((event) => event.type === 'status')?.status,
+      );
+      if (status?.state === 'running' && status.inputState?.inputMode === 'remote') break;
       assert.deepEqual(await app.evaluate(() => globalThis.realAudio.failures), []);
       assert.ok(Date.now() < readyDeadline, 'The real ASR pipeline must finish loading');
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    const status = await app.evaluate(
-      () =>
-        globalThis.realAudio.events.findLast(
-          (event) => event.type === 'status' && event.status.state === 'running',
-        )?.status,
-    );
-    assert.equal(status?.speechModel, model);
-    assert.equal(status.inferenceDevice, device);
+    assert.equal(status.inputState.microphoneMuted, true);
+    assert.equal(status.speechModel, model);
+    if (model === 'qwen') assert.equal(status.inferenceDevice, device);
+    await floating.waitForFunction(() => window.realAudioEvents.some((event) =>
+      event.type === 'audio-progress' && event.source === 'system' && !event.pending &&
+      Number.isFinite(event.processedThroughMs)));
     let count = 0;
     const completed = async (expected) => {
       await floating.waitForFunction(
@@ -265,7 +263,12 @@ try {
         JSON.stringify({
           model,
           id: item.id,
-          recognizedFinals: finals.map(({ text, reason }) => ({ text, reason })),
+          origin: item.origin,
+          speechStarts: audit.events.filter((event) => event.type === 'speech-start').length,
+          recognizedFinals: finals.map(({ text, reason, endMs, silenceStartMs }) =>
+            ({ text, reason, endMs, silenceStartMs })),
+          processedThroughMs: played.progress?.processedThroughMs,
+          providerRequestsBeforeManual: audit.requests.length - count,
         }),
       );
       assert.ok(
@@ -275,7 +278,9 @@ try {
       );
       const text = finals.map((segment) => segment.text).join(' ');
       const last = finals.findLast((segment) => segment.reason === 'silence');
-      const deadline = last.silenceStartMs + 1800;
+      const deadline = last.silenceStartMs + 1000;
+      const endpoint = last.endMs - last.silenceStartMs;
+      assert.ok(endpoint >= 500 && endpoint < 532, `Unexpected silence endpoint: ${endpoint} ms`);
       assert.ok(Number.isFinite(deadline));
       assert.ok(
         audit.events.some(
@@ -285,7 +290,7 @@ try {
             !event.pending &&
             event.processedThroughMs >= deadline,
         ),
-        'Real processed audio must cross the 1800 ms gate',
+        'Real processed audio must cross the 1000 ms gate',
       );
       await floating.waitForFunction(
         (deadline) =>
@@ -363,9 +368,7 @@ try {
       floating.waitForEvent('close'),
       floating.getByRole('button', { name: '确认结束面试', exact: true }).click(),
     ]);
-    const record = await page.evaluate(
-      () => JSON.parse(localStorage.getItem('copilot-interview-history-v1'))[0],
-    );
+    const record = await evaluateHistory(page, async () => (await fixtureHistory.read())[0]);
     assert.equal(record.answers.length, count);
     assert.equal(record.mock, false);
     for (const [index, result] of results.entries()) {

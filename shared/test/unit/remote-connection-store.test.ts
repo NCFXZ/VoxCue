@@ -64,9 +64,12 @@ it('keeps the QR transient and clears it after connection or explicit disconnect
   await useRemoteConnection.getState().start();
   expect(call).toHaveBeenLastCalledWith({ op: 'start' });
   expect(useRemoteConnection.getState().pairing?.expiresAt).toBe(1000);
+  useRemoteConnection.getState().setDialogOpen(true);
   call.mockResolvedValueOnce({ state: state(2, 'off') });
   await useRemoteConnection.getState().disconnect();
+  expect(call).toHaveBeenLastCalledWith({ op: 'disconnect' });
   expect(useRemoteConnection.getState().pairing).toBeNull();
+  expect(useRemoteConnection.getState().dialogOpen).toBe(false);
 });
 
 it('surfaces failures, releases the loading guard and retries with the requested pairing operation', async () => {

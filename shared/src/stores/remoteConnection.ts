@@ -24,16 +24,18 @@ interface RemoteConnectionStore {
 
 export const useRemoteConnection = create<RemoteConnectionStore>((set, get) => {
   const receive = (state: RemoteConnectionState) => {
-    if (get().state && state.revision < get().state!.revision) return false;
+    const previous = get().state;
+    if (previous && state.revision < previous.revision) return false;
     set({
       state,
       error: state.error,
       interrupted: ['off', 'connected'].includes(state.status)
         ? false
         : state.status === 'reconnecting' ||
-          (state.status === 'error' && get().state?.status === 'connected') ||
+          (state.status === 'error' && previous?.status === 'connected') ||
           get().interrupted,
       ...(['off', 'connected'].includes(state.status) ? { pairing: null } : {}),
+      ...(state.status === 'off' && previous && previous.status !== 'off' ? { dialogOpen: false } : {}),
     });
     return true;
   };

@@ -8,6 +8,17 @@ export interface DesktopPlatform {
   readonly id: NodeJS.Platform;
   readonly prepareKnowledgeDatabase?: PrepareKnowledgeDatabase;
   readonly accountFetch?: typeof fetch;
+  readonly createRemoteTls?: (directory: string, vault: {
+    encrypt(value: string): Buffer | Promise<Buffer>;
+    decrypt(value: Buffer): string | Promise<string>;
+  }) => {
+    configuration: {
+      directory: string;
+      loadIdentity(ciphertext: Buffer, address: string, signal?: AbortSignal): Promise<{ cert: string; key: Buffer }>;
+    };
+    configure(owner: BrowserWindow, english: boolean, checkOwner: () => void): Promise<boolean>;
+    checkRecords(decrypt: (value: Buffer) => Promise<string>): Promise<boolean>;
+  };
   readonly decryptRemoteTlsKey?: (ciphertext: Buffer, signal?: AbortSignal) => Promise<{ certificateHashes: string[]; pfx: Buffer }>;
   readonly codexLoginStatus?: (
     executable: string,

@@ -1,6 +1,8 @@
 // Fixed local storage failure messages for existing error responses. Raw native,
 // transport and filesystem errors must never become renderer-facing messages.
 export const credentialProblemMessages = {
+  VOXCUE_CREDENTIAL_SIGNED_APP_REQUIRED:
+    '热重载模式无法访问 VoxCue 钥匙串。请打开项目 macos 目录中的 VoxCue.app 以使用账号或密钥。',
   VOXCUE_CREDENTIAL_UNAVAILABLE:
     'macOS 凭据操作未完成，登录信息保持原样；已停止重复请求，请重新启动 VoxCue 后重试。',
   VOXCUE_CREDENTIAL_TIMEOUT:

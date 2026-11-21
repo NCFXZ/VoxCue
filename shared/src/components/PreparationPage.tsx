@@ -16,6 +16,7 @@ import {
 } from '../../electron/contracts/speechSettings';
 import { ComponentsNotice } from './ComponentsNotice';
 import { LocalImportNotice } from './LocalImportNotice';
+import { SyncConflictNotice } from './SyncConflictNotice';
 import { HomeNoticeSlot } from './SettingsNotice';
 import {
   ArrowUp,
@@ -32,6 +33,7 @@ import {
 import { Button } from './ui/button';
 import { ConfirmDeleteButton } from './ui/confirm-delete-button';
 import { usePreparation } from '../stores/preparation';
+import { useRemoteConnection } from '../stores/remoteConnection';
 import { useAuth } from '../stores/auth';
 import { ChatTools, ChatAttachments } from './ChatTools';
 import { useFollowScroll } from './useFollowScroll';
@@ -79,6 +81,7 @@ export function PreparationPage({
   onDraftChange?(dirty: boolean): void;
 }) {
   const state = usePreparation();
+  const approvedDeviceRevision = useRemoteConnection(remote => remote.state?.approvalRevision);
   const ragReady = useComponentReady('rag');
   const connection = useChatConnection();
   const authResolved = useAuth((auth) => auth.resolved);
@@ -594,7 +597,7 @@ export function PreparationPage({
                         ...(interviewConfiguration.knowledgeBaseId
                           ? { knowledgeBaseName: interviewKnowledgeName }
                           : {}),
-                      });
+                      }, approvedDeviceRevision);
                       setConfirmInterview(false);
                     } catch (error) {
                       await checkAccess(interviewConfiguration, userError(error, '面试窗口打开失败，请重试。'));
@@ -860,6 +863,9 @@ export function PreparationPage({
             </div>
           )}
           <div ref={notices} className="chat-settings-notices">
+            <HomeNoticeSlot>
+              <SyncConflictNotice />
+            </HomeNoticeSlot>
             <HomeNoticeSlot>
               <LocalImportNotice onSettings={onImportSettings} />
             </HomeNoticeSlot>

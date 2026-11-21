@@ -1,12 +1,14 @@
 import { it, expect, vi, afterEach, afterAll } from 'vitest';
 import { generateKeyPairSync, sign, createHash, randomUUID } from 'node:crypto';
-import { writeFile, readFile, access, mkdir, symlink, lstat, link } from 'node:fs/promises';
+import { writeFile, readFile, access, mkdir, symlink, lstat, link, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { MacUpdateDriver } from '../../electron/updates/driver';
+import * as archiveDownload from '../../electron/updates/download';
 import { MacArchiveOwnership } from '../../electron/updates/archives';
 import { testRoot } from '../../../shared/test/scripts/test-workspace.mjs';
 import { macUpdatePayload } from '../../electron/updates/manifest';
 import { updateInterval } from '../../../shared/electron/backend/updates/cache';
+import { UpdateService } from '../../../shared/electron/backend/updates/service';
 const mocks = vi.hoisted(() => ({ fetch: vi.fn(), quit: vi.fn(), version: '0.2.1' }));
 vi.mock('electron', () => ({
   app: { getVersion: () => mocks.version, quit: mocks.quit },
@@ -144,6 +146,24 @@ it('tampered downloaded cache cannot reach the installer and retains the current
   expect(f.native.begin).not.toHaveBeenCalled();
   expect(mocks.quit).not.toHaveBeenCalled();
 });
+it.each(['missing', 'corrupt'])('offers a fresh download in the same session when the ZIP is %s before install', async (mode) => {
+  const f = setup();
+  const service = new UpdateService({
+    currentVersion: mocks.version, autoDownload: false, driver: f.driver,
+    isInterviewActive: () => false, prepareInstall: async () => true, emit: () => {},
+  });
+  try {
+    await service.start();
+    expect((await service.download()).phase).toBe('downloaded');
+    if (mode === 'missing') await unlink(f.archive);
+    else await writeFile(f.archive, Buffer.alloc(f.bytes.length));
+    expect(await service.install()).toMatchObject({ phase: 'available', progress: null, availableVersion: f.update.version });
+    expect(f.native.begin).not.toHaveBeenCalled();
+    expect((await service.download()).phase).toBe('downloaded');
+    expect(await readFile(f.archive)).toEqual(f.bytes);
+    expect(mocks.fetch.mock.calls.filter(([url]) => String(url).endsWith('.zip'))).toHaveLength(2);
+  } finally { await service.dispose(); }
+});
 it('same-version/downgrade offers do not download or start native installation', async () => {
   const f = setup();
   mocks.version = '0.2.3';
@@ -166,6 +186,30 @@ it('native rejection keeps the app running and surfaces a failure', async () => 
   expect(error).toHaveBeenCalledOnce();
   expect(mocks.quit).not.toHaveBeenCalled();
   expect(f.native.commit).not.toHaveBeenCalled();
+});
+it.each(['begin', 'commit'] as const)('closes the old feed and retries after synchronous native %s failure', async (stage) => {
+  const f = setup();
+  const failed = vi.fn();
+  f.driver.on('error', failed);
+  f.native[stage].mockImplementationOnce(() => { throw Error('synthetic native failure'); });
+  await f.driver.checkForUpdates();
+  await f.driver.downloadUpdate();
+  if (stage === 'begin') await expect(f.driver.quitAndInstall()).rejects.toThrow('synthetic');
+  else {
+    await f.driver.quitAndInstall();
+    f.event('ready');
+  }
+  const [oldFeed, oldCallback] = f.native.begin.mock.calls[0];
+  expect(failed).toHaveBeenCalledOnce();
+  await expect(fetch(oldFeed)).rejects.toThrow();
+  await f.driver.quitAndInstall();
+  oldCallback({ type: 'error' });
+  const response = await fetch(f.native.begin.mock.calls[1][0]);
+  expect(await response.text()).toContain('<sparkle:version>');
+  f.event('ready');
+  f.event('quit');
+  expect(mocks.quit).toHaveBeenCalledOnce();
+  expect(failed).toHaveBeenCalledOnce();
 });
 it('persists hourly checks and original success time across restart and clock rollback, while force performs one real check', async () => {
   const f = setup();
@@ -227,13 +271,27 @@ it('restores a complete newer archive after the TTL with auto-download disabled 
   mocks.fetch.mockRejectedValue(Error('offline'));
   const restart = f.create();
   restart.driver.autoDownload = false;
+  const verify = vi.spyOn(archiveDownload, 'verifyDownload');
   await restart.driver.checkForUpdates();
   expect(await restart.driver.restoreDownloadedUpdate()).toBe(true);
+  expect(verify).toHaveBeenCalledTimes(1);
   expect(mocks.fetch).not.toHaveBeenCalled();
   expect(restart.native.begin).not.toHaveBeenCalled();
   expect(restart.driver.lastCheckedAt()).toBe(1_800_000_000_000);
   await expect(restart.driver.checkForUpdates(true)).rejects.toThrow('offline');
   expect(mocks.fetch).toHaveBeenCalledOnce();
+});
+it('rechecks a cached archive replaced between startup verification and restore', async () => {
+  const f = setup();
+  await f.driver.checkForUpdates();
+  await f.driver.downloadUpdate();
+  await f.driver.dispose();
+  const restart = f.create();
+  await restart.driver.checkForUpdates();
+  await writeFile(f.archive, Buffer.alloc(f.bytes.length, 42));
+  const verify = vi.spyOn(archiveDownload, 'verifyDownload');
+  expect(await restart.driver.restoreDownloadedUpdate()).toBe(false);
+  expect(verify).toHaveBeenCalledOnce();
 });
 it('a complete installed version does not block a new hourly remote check', async () => {
   const f = setup();
@@ -250,7 +308,7 @@ it('a complete installed version does not block a new hourly remote check', asyn
   expect(mocks.fetch).toHaveBeenCalledTimes(2);
   expect(await restart.driver.restoreDownloadedUpdate()).toBe(false);
 });
-it.each(['signature', 'platform', 'key', 'json', 'size', 'hash', 'link'])(
+it.each(['signature', 'platform', 'key', 'json', 'replacement', 'link'])(
   'rejects %s cache tampering before network or native installation',
   async (mode) => {
     const f = setup();
@@ -263,8 +321,10 @@ it.each(['signature', 'platform', 'key', 'json', 'size', 'hash', 'link'])(
       state.completed.files[0].voxcueSignature = Buffer.alloc(64).toString('base64');
     if (mode === 'platform') state.target = 'windows-x64';
     if (mode === 'key') key = Buffer.alloc(32).toString('base64');
-    if (mode === 'size') await writeFile(f.archive, 'short');
-    if (mode === 'hash') await writeFile(f.archive, Buffer.alloc(f.bytes.length));
+    if (mode === 'replacement') {
+      await (await import('node:fs/promises')).rename(f.archive, f.archive + '.original');
+      await writeFile(f.archive, 'foreign file');
+    }
     if (mode === 'link') {
       const fs = await import('node:fs/promises');
       await fs.rename(f.archive, f.archive + '.original');
@@ -274,10 +334,28 @@ it.each(['signature', 'platform', 'key', 'json', 'size', 'hash', 'link'])(
     mocks.fetch.mockClear();
     const restart = f.create(key);
     await expect(restart.driver.checkForUpdates()).rejects.toThrow();
+    if (mode === 'replacement') expect(await readFile(f.archive, 'utf8')).toBe('foreign file');
     expect(mocks.fetch).not.toHaveBeenCalled();
     expect(restart.native.begin).not.toHaveBeenCalled();
   },
 );
+it.each(['size', 'digest'])('downloads the same version after %s damage to the owned ZIP', async (mode) => {
+  const f = setup();
+  await f.driver.checkForUpdates();
+  await f.driver.downloadUpdate();
+  await f.driver.dispose();
+  await writeFile(f.archive, mode === 'size' ? 'short' : Buffer.alloc(f.bytes.length));
+  const restart = f.create();
+  mocks.fetch.mockClear();
+  await restart.driver.checkForUpdates();
+  expect(await restart.driver.restoreDownloadedUpdate()).toBe(false);
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  await restart.driver.downloadUpdate();
+  expect(mocks.fetch).toHaveBeenCalledOnce();
+  expect(await readFile(f.archive)).toEqual(f.bytes);
+  expect(await restart.driver.restoreDownloadedUpdate()).toBe(true);
+  expect(restart.native.begin).not.toHaveBeenCalled();
+});
 it('aborting a stream waits for cancellation, removes its owned partial, retains unrelated files, and persists automatic cooldown', async () => {
   const f = setup();
   await f.driver.checkForUpdates();
@@ -322,7 +400,7 @@ it('a crash journal cleans only its partial and imposes a fresh cooldown on rest
   const state = JSON.parse(await readFile(f.stateFile, 'utf8'));
   state.download = state.info;
   await writeFile(f.stateFile, JSON.stringify(state));
-  await writeFile(f.archive + '.partial', 'unfinished');
+  await writeFile(f.archive + '.partial', 'unfinished', { mode: 0o600 });
   const restart = f.create();
   await restart.driver.checkForUpdates();
   await expect(access(f.archive + '.partial')).rejects.toThrow();
@@ -384,7 +462,7 @@ it('cleans ordinary checksum failures durably without imposing an interruption c
   expect(state.notBefore).toBe(0);
   expect(f.create().driver.isAutomaticDownloadAllowed()).toBe(true);
 });
-it('cleans an interrupted journal even when its final ordinary file has an invalid size or digest', async () => {
+it('preserves a foreign final file and the journal if it appears during an interrupted download', async () => {
   const f = setup();
   await f.driver.checkForUpdates();
   const controller = new AbortController();
@@ -402,12 +480,11 @@ it('cleans an interrupted journal even when its final ordinary file has an inval
   await vi.waitFor(async () => expect((await readFile(f.archive + '.partial')).length).toBe(1));
   await writeFile(f.archive, 'incomplete final');
   controller.abort();
-  expect((await outcome).name).toBe('AbortError');
+  expect((await outcome).message).toMatch(/archive size/);
   await expect(access(f.archive + '.partial')).rejects.toThrow();
-  await expect(access(f.archive)).rejects.toThrow();
+  expect(await readFile(f.archive, 'utf8')).toBe('incomplete final');
   const state = JSON.parse(await readFile(f.stateFile, 'utf8'));
-  expect(state.download).toBeUndefined();
-  expect(state.notBefore).toBeGreaterThan(Date.now());
+  expect(state.download.version).toBe(f.update.version);
 });
 
 it('disposal aborts an active release read and persists its failed-attempt limit without late availability', async () => {
@@ -441,7 +518,7 @@ it('aborted local restoration does not start native installation or discard a co
   expect(await readFile(f.archive)).toEqual(f.bytes);
 });
 
-it('recovers a crash after archive publication without deleting the complete signed download or imposing cooldown', async () => {
+it.each([false, true])('verifies a crash-published archive once across check and restore (forced: %s)', async (force) => {
   const f = setup();
   await f.driver.checkForUpdates();
   await f.driver.dispose();
@@ -451,14 +528,45 @@ it('recovers a crash after archive publication without deleting the complete sig
   await writeFile(f.archive, f.bytes);
   mocks.fetch.mockClear();
   const restart = f.create();
-  await restart.driver.checkForUpdates();
+  const verify = vi.spyOn(archiveDownload, 'verifyDownload');
+  await restart.driver.checkForUpdates(force);
   expect(await restart.driver.restoreDownloadedUpdate()).toBe(true);
-  expect(mocks.fetch).not.toHaveBeenCalled();
+  expect(verify).toHaveBeenCalledTimes(1);
+  expect(mocks.fetch).toHaveBeenCalledTimes(force ? 2 : 0);
   expect(await readFile(f.archive)).toEqual(f.bytes);
   const recovered = JSON.parse(await readFile(f.stateFile, 'utf8'));
   expect(recovered.download).toBeUndefined();
   expect(recovered.completed.version).toBe('0.2.2');
   expect(recovered.notBefore).toBe(0);
+});
+
+it('quits during journal verification without rereading the ZIP and resumes recovery next launch', async () => {
+  const f = setup();
+  await f.driver.checkForUpdates();
+  await f.driver.dispose();
+  const state = JSON.parse(await readFile(f.stateFile, 'utf8'));
+  await writeFile(f.stateFile, JSON.stringify({ ...state, download: state.info }));
+  await writeFile(f.archive, f.bytes);
+  const original = archiveDownload.verifyDownload;
+  const verifying = Promise.withResolvers<void>();
+  const resume = Promise.withResolvers<void>();
+  const verify = vi.spyOn(archiveDownload, 'verifyDownload').mockImplementationOnce(async (...args) => {
+    verifying.resolve();
+    await resume.promise;
+    return original(...args);
+  });
+  const restart = f.create().driver;
+  const check = restart.checkForUpdates().catch((error: Error) => error.name);
+  await verifying.promise;
+  const quit = restart.dispose();
+  resume.resolve();
+  expect(await check).toBe('AbortError');
+  await quit;
+  expect(verify).toHaveBeenCalledTimes(1);
+  expect(JSON.parse(await readFile(f.stateFile, 'utf8')).download.version).toBe(f.update.version);
+  const next = f.create().driver;
+  await next.checkForUpdates();
+  expect(await next.restoreDownloadedUpdate()).toBe(true);
 });
 
 it('bounds tiny-chunk progress notifications while publishing the first bytes and 100 percent', async () => {

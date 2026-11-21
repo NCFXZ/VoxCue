@@ -19,7 +19,9 @@ const waves = Object.fromEntries(
     ),
   ]),
 );
+const captureClockNow = () => Number(process.hrtime.bigint()) / 1e6;
 const adapter = {
+  captureClockNow,
   drainBeforeRetire: process.platform === 'darwin',
   devices: async () =>
     ['system', 'microphone'].map((source) => ({
@@ -42,7 +44,7 @@ const adapter = {
             if (pos < wave.samples.length) samples[i] = wave.samples[pos];
           }
           offset += 512;
-          audio({ samples, rate: 16000, flags: 0, timestamp: Date.now() });
+          audio({ samples, rate: 16000, flags: 0, timestamp: captureClockNow() });
         }, 32);
       },
       stop: async () => {
@@ -51,7 +53,7 @@ const adapter = {
           samples: new Float32Array(160),
           rate: 16000,
           flags: 0,
-          timestamp: Date.now(),
+          timestamp: captureClockNow(),
         });
       },
     };

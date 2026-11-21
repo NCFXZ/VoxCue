@@ -11,7 +11,7 @@ if (
   process.argv.length > 3
 )
   throw Error('Use no option or --runtime-bundle');
-let executable = workspace.platformRequire('electron');
+const executable = workspace.platformRequire('electron');
 let runtime = workspace.platformRoot;
 if (process.argv.includes('--runtime-bundle')) {
   // Focused ASAR layout, without copying unrelated document/RAG/UI dependencies.
@@ -23,17 +23,14 @@ if (process.argv.includes('--runtime-bundle')) {
     '{"name":"voxcue-audio-layout","version":"0.0.0"}',
   );
   for (const file of [
-    'shared/electron/backend/speech/worker.js',
-    'shared/electron/backend/speech/recognizer.js',
-    'shared/electron/backend/speech/recognition.js',
-    'shared/electron/backend/speech/engine.js',
-    'shared/electron/backend/speech/qwen.js',
-    'shared/electron/backend/speech/buffer.js',
-    'macos/electron/speech/echoCancellation.js',
+    'shared/electron/backend/speech',
+    'shared/electron/backend/cancellable.js',
+    'shared/electron/contracts',
+    'macos/electron/speech',
   ]) {
     const destination = path.join(input, 'dist-electron', file);
     await mkdir(path.dirname(destination), { recursive: true });
-    await cp(path.join(runtime, 'dist-electron', file), destination);
+    await cp(path.join(runtime, 'dist-electron', file), destination, { recursive: true });
   }
   for (const name of [
     '@ennuicastr/webrtcaec3.js',
@@ -51,7 +48,7 @@ if (process.argv.includes('--runtime-bundle')) {
   const archive = path.join(testRoot, 'app.asar');
   await createPackageWithOptions(input, archive, {
     unpackDir:
-      '{node_modules,dist-electron/shared/electron/backend/speech,dist-electron/macos/electron/speech}',
+      '{node_modules,dist-electron}',
   });
   runtime = archive + '.unpacked';
 }
@@ -62,66 +59,88 @@ if (process.argv.length > 2) {
   assert.match(await readFile(path.join(pkg, 'license.js'), 'utf8'), /The WebRTC project authors/);
   await access(path.join(pkg, 'dist/webrtcaec3-0.3.0.wasm'));
 }
-const entry = path.join(testRoot, 'echo-runtime.cjs');
-await writeFile(
-  entry,
-  `
-const assert = require('node:assert/strict');
-const path = require('node:path');
-const {Worker} = require('node:worker_threads');
-const runtime = process.argv[2];
-const deny = () => {throw Error('Audio smoke forbids network');};
-globalThis.fetch = deny;
-for (const name of ['node:http','node:https']) {
-  const transport = require(name);
-  transport.request = transport.get = deny;
+// Exercise production controller, Worker transport, AEC and resampler together.
+// Substitute only the capture device and inference so no model or hardware is needed.
+async function runAudio() {
+  const assert = require('node:assert/strict');
+  const path = require('node:path');
+  const threads = require('node:worker_threads');
+  const runtime = process.argv[2];
+  const deny = () => { throw Error('Audio smoke forbids network'); };
+  globalThis.fetch = deny;
+  for (const name of ['node:http', 'node:https']) {
+    const transport = require(name);
+    transport.request = transport.get = deny;
+  }
+  require('node:net').Socket.prototype.connect = deny;
+  require('node:tls').connect = deny;
+  function observeInference() {
+    const { workerData } = require('node:worker_threads');
+    globalThis.fetch = () => { throw Error('Audio smoke forbids network'); };
+    require('node:net').Socket.prototype.connect = globalThis.fetch;
+    require.cache[workerData.recognizer] = { exports: { Recognizer: class {
+      static async load(_options, emit) { return new this(emit); }
+      constructor(emit) { this.emit = emit; }
+      healthy = true;
+      metadata = {};
+      inferenceMs = 0;
+      progress = new Map();
+      feed(source, samples, rate, timestamp) {
+        this.progress.set(source, timestamp);
+        this.emit({ type: 'test-audio', source, samples, rate, timestamp });
+      }
+      processedThrough(source) { return this.progress.get(source); }
+      canSwitch() { return true; }
+      async close() { this.healthy = false; }
+      discontinuity() {}
+      flush() {}
+    } } };
+    require(workerData.entry);
+  }
+  const Worker = threads.Worker;
+  threads.Worker = class extends Worker {
+    constructor(entry) {
+      assert.equal(path.basename(entry), 'worker.js');
+      super('(' + observeInference.toString() + ')()', { eval: true, workerData: {
+        entry, recognizer: path.join(path.dirname(entry), 'recognizer.js'),
+      } });
+    }
+  };
+  const { SpeechController } = require(path.join(runtime, 'dist-electron/macos/electron/speech/controller.js'));
+  const sources = ['system', 'microphone'];
+  for (const rate of [48000, 44100]) {
+    const events = [];
+    const devices = sources.map(source => ({ source, id: source, name: source, default: true }));
+    const capture = new Map();
+    const controller = new SpeechController('synthetic', 'synthetic', event => events.push(event));
+    controller.adapter.captureClockNow = () => 1000;
+    controller.adapter.devices = async () => devices;
+    controller.adapter.create = (_helper, source, _device, feed) => {
+      capture.set(source, feed);
+      return { start: async () => {}, stop: async () => {} };
+    };
+    try {
+      const started = await controller.call({ op: 'start', options: { sources },
+        inputState: { inputMode: 'remote', microphoneMuted: false } });
+      assert.equal(started.state, 'running', started.error);
+      const raw = Float32Array.from({ length: rate === 48000 ? 967 : 883 }, (_, i) => Math.sin(i / 9) * 0.1);
+      capture.get('system')({ samples: new Float32Array(960), rate: 48000, timestamp: 1000, flags: 0 });
+      capture.get('microphone')({ samples: raw.slice(), rate, timestamp: 1000, flags: 0 });
+      await controller.call({ op: 'pause' });
+      const microphone = events.filter(e => e.type === 'test-audio' && e.source === 'microphone');
+      assert.ok(microphone.length && microphone.every(e => e.rate === 48000));
+      const output = Float32Array.from(microphone.flatMap(e => Array.from(e.samples)));
+      if (rate === 48000) assert.deepEqual(output, raw);
+      else {
+        assert.ok(Math.abs(output.length - Math.ceil(raw.length * 48000 / rate)) <= 1);
+        assert.ok(output.every(Number.isFinite));
+      }
+    } finally { await controller.close(); }
+  }
+  console.log('PASS: Mac capture controller loaded local AEC, preserved the short tail and resampled 44.1 kHz before recognition.');
 }
-require('node:net').Socket.prototype.connect = deny;
-require('node:tls').connect = deny;
-require('node:module').syncBuiltinESMExports();
-(async () => {
-  const worker = new Worker(\
-    'const {parentPort,workerData}=require("node:worker_threads");' +
-    'globalThis.fetch=()=>{throw Error("No network");};' +
-    'require("node:net").Socket.prototype.connect=globalThis.fetch;' +
-    'require.cache[workerData.engine]={exports:{Recognizer:class {' +
-    'static async load(_o,emit){return new this(emit);}' +
-    'audioMs=0;inferenceMs=0;metadata={};healthy=true;constructor(emit){this.emit=emit;}' +
-    'feed(source,samples,rate,timestamp){this.emit({source,samples,rate,timestamp});}' +
-    'processedThrough(){}canSwitch(){return true;}async close(){}discontinuity(){}flush(){}}}};' +
-    'require(workerData.entry);',
-    {eval:true,workerData:{
-      engine:path.join(runtime,'dist-electron/shared/electron/backend/speech/recognizer.js'),
-      entry:path.join(runtime,'dist-electron/shared/electron/backend/speech/worker.js')
-    }});
-  const events = [];
-  let listener;
-  const timeout = setTimeout(()=>{console.error('Audio worker timeout');process.exit(1);},10000);
-  worker.on('message', m => {if(m.event)events.push(m.event);if(m.error)throw Error(m.error);listener?.(m);});
-  worker.on('error', error=>{throw error;});
-  const send = (m, key, value=true) => new Promise(resolve=>{listener=reply=>{if(reply[key]===value){listener=undefined;resolve();}};worker.postMessage(m);});
-  try {
-    await send({op:'init',directory:'synthetic-not-read',preprocessorFile:path.join(runtime,'dist-electron/macos/electron/speech/echoCancellation.js')},'ready');
-    await send({op:'prepare',sources:['system','microphone'],id:1},'prepared',1);
-    await send({op:'audio',source:'system',samples:new Float32Array(960),rate:48000,timestamp:1000,captureClock:0,sequence:2,ms:20},'ack',2);
-    const samples=Float32Array.from({length:967},(_,i)=>Math.sin(i/9)*0.1);
-    await send({op:'audio',source:'microphone',samples,rate:48000,timestamp:1000,captureClock:0,sequence:3,ms:20},'ack',3);
-    await send({op:'flush',id:4,reason:'stop'},'flushed',4);
-    const output=Float32Array.from(events.filter(e=>e.source==='microphone').flatMap(e=>Array.from(e.samples)));
-    assert.deepEqual(output,samples);
-    const before=events.length;
-    await send({op:'prepare',sources:['system','microphone'],id:5},'prepared',5);
-    await send({op:'audio',source:'system',samples:new Float32Array(960),rate:48000,timestamp:2000,captureClock:1000,sequence:6,ms:20},'ack',6);
-    await send({op:'audio',source:'microphone',samples:new Float32Array(883).fill(0.1),rate:44100,timestamp:2000,captureClock:1000,sequence:7,ms:20},'ack',7);
-    await send({op:'flush',id:8,reason:'stop'},'flushed',8);
-    const resampled=events.slice(before).filter(e=>e.source==='microphone').flatMap(e=>Array.from(e.samples));
-    assert.ok(Math.abs(resampled.length-Math.ceil(883*48000/44100))<=1);
-    assert.ok(resampled.every(Number.isFinite));
-    console.log(JSON.stringify({status:'passed',realElectronWorker:true,localWasm:true,tailSamples:output.length,resamplerOutputSamples:resampled.length,network:false,hardwareCapture:false}));
-  } finally {clearTimeout(timeout);await worker.terminate();}
-})().catch(error=>{console.error(error);process.exitCode=1;});
-`,
-);
+const entry = path.join(testRoot, 'echo-runtime.cjs');
+await writeFile(entry, '(' + runAudio.toString() + ')().catch(e => { console.error(e); process.exitCode = 1; });');
 const child = spawnTestProcess(executable, [entry, runtime], {
   stdio: 'inherit',
   env: { ...process.env, ELECTRON_RUN_AS_NODE: '1', NODE_PATH: path.join(runtime, 'node_modules') },

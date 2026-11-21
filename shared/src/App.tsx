@@ -22,14 +22,13 @@ import { SettingsDialog, type Theme, type SettingsCategory, type SettingsDestina
 import { signalTelemetry, recordFeature } from './services/telemetry';
 import { switchView } from './components/ui/switchView';
 import { observeLocalImportRevision, refreshLocalImportRevision } from './services/localImportRevision';
-import type { SettingsTarget } from './components/ui/useSettingsTarget';
+import { ConflictSettingsContext, type SettingsTarget } from './components/ui/useSettingsTarget';
 import type { OpenComponentSettings } from './services/componentSettingsTargets';
 function initialTheme(): Theme {
   const value = localStorage.getItem('copilot-theme');
   return value === 'light' || value === 'dark' ? value : 'system';
 }
 export function App() {
-  useEffect(() => useComponents.getState().connect(), []);
   const isLoginWindow = location.hash === '#login';
   useEffect(() => {
     if (!isLoginWindow) return useUpdates.getState().connect();
@@ -53,6 +52,11 @@ export function App() {
   }, [isLoginWindow, account.state.localMode]);
   const signedIn =
     !!account.state.user || !!account.state.localMode || auth.session?.mode === 'demo';
+  useEffect(() => {
+    // Model integrity checks can read several gigabytes. Start them for the first
+    // model-consuming UI; the hidden language window and login form need none.
+    if (!isLoginWindow && signedIn) return useComponents.getState().connect();
+  }, [isLoginWindow, signedIn]);
   useEffect(() => {
     if (!isLoginWindow && signedIn) return watchInterviewModel();
   }, [isLoginWindow, signedIn]);
@@ -245,7 +249,7 @@ export function App() {
         ) : isLoginWindow || !signedIn ? (
           <LoginPage />
         ) : (
-          <>
+          <ConflictSettingsContext.Provider value={() => openSettings('account', 'sync-conflicts')}>
             <Sidebar
               userName={account.state.user?.email.split('@')[0] || t('本地用户')}
               accountLabel={
@@ -301,7 +305,7 @@ export function App() {
                 <KnowledgePage onComponentSettings={openComponentSettings} />
               )}
             </div>
-          </>
+          </ConflictSettingsContext.Provider>
         )}
       </div>
       {!showLogin && <TitleBar />}

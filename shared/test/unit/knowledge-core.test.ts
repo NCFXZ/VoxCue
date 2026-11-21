@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { EventEmitter } from 'node:events';
 import { existsSync } from 'node:fs';
 import { lstat, readFile, readdir, rename, writeFile } from 'node:fs/promises';
 import fs from 'node:fs/promises';
@@ -7,10 +8,16 @@ import { temporaryDirectory } from '../temp';
 import path from 'node:path';
 import * as lance from '@lancedb/lancedb';
 import { KnowledgeService } from '../../../shared/electron/backend/knowledge/service';
+import { checkOrRemoveMovedProfileAssets } from '../../electron/movedProfileAssets';
+import { RecordingLibrary } from '../../electron/backend/interview/recordings';
+import { profileDirectory } from '../../electron/accountProfilePaths';
+import type { ProfileMoveReceipt } from '../../electron/backend/profileMoveReceipt';
 import type { OldIndexDeletion } from '../../../shared/electron/contracts/knowledge';
 import type { Catalog } from '../../../shared/electron/backend/knowledge/eraseLibrary';
 import { parseText, searchUnits } from '../../../shared/electron/backend/knowledge/chunks';
 import type { Embedder } from '../../../shared/electron/backend/knowledge/types';
+const fork = vi.hoisted(() => vi.fn());
+vi.mock('electron', () => ({ utilityProcess: { fork } }));
 const signal = () => new AbortController().signal;
 const deletionEvents = (...documentIds: string[]): OldIndexDeletion[] => [
   { type: 'old-index-deletion', active: true, documentIds }, { type: 'old-index-deletion', active: false },
@@ -62,6 +69,70 @@ async function markOldDocuments(root: string, ids: string[], legacyFormat = true
 }
 
 describe('LanceDB 正式知识核心（真实 DB、合成测试向量）', () => {
+  it('replays moved-source document cleanup against an inactive mixed-version catalog', async () => {
+    const userData = await directory(), root = path.join(profileDirectory(userData, 'local'), 'knowledge-v1');
+    const seed = new KnowledgeService(root, embedder()), original = input('moved', 'Synthetic moved original.');
+    const kept = { ...input('keep', 'Retained unrelated original.'), baseId: 'another' };
+    try {
+      await seed.indexDocument(original, signal());
+      await seed.indexDocument(input('recent', 'Current-format selected original.'), signal());
+      await seed.indexDocument({ ...input('retired', 'Historical original.'), baseId: 'emptied' }, signal());
+      await seed.removeDocument('retired', signal());
+      await seed.indexDocument(kept, signal());
+    } finally { await seed.close(); }
+    await markOldDocuments(root, ['moved'], false);
+    const prior = await readCatalog(root);
+    const body = path.join(root, 'revisions', prior.documents.keep.revision);
+    const expected = await readFile(body);
+    const old = new KnowledgeService(root, embedder());
+    try {
+      await expect(old.removeDocument('moved', signal())).rejects.toMatchObject({
+        code: 'unavailable', message: '旧索引清理尚未完成，请重试。',
+      });
+    } finally { await old.close(); }
+
+    // Keep the real host, index upgrade, LanceDB and receipt cleanup. Only the Electron IPC transport is in process.
+    fork.mockImplementation(() => {
+      const core = new KnowledgeService(root, embedder());
+      const child = Object.assign(new EventEmitter(), {
+        kill: () => { queueMicrotask(() => child.emit('exit', 0)); return true; },
+        postMessage: async (m: { id: string; init?: unknown; op?: string; baseId: string }) => {
+          try {
+            let value;
+            if (m.init) await core.initialize();
+            else if (m.op === 'list') value = await core.listDocuments();
+            else if (m.op === 'clean-upgraded-index') await core.cleanUpgradedIndex(signal());
+            else if (m.op === 'remove-base') await core.removeBase(m.baseId, signal());
+            else if (m.op === 'close') await core.close();
+            else throw Error('Unexpected migration index operation');
+            child.emit('message', { id: m.id, value, needsIndexCleanup: core.needsIndexCleanup });
+          } catch (error) {
+            child.emit('message', { id: m.id, error: String(error) });
+          }
+        },
+      });
+      return child;
+    });
+    const receipt: ProfileMoveReceipt = { version: 1, target: 'account:11111111-1111-4111-8111-111111111111',
+      source: 'local', clips: [], images: [],
+      plan: { items: [{ key: 'base:base-a', hash: 'a'.repeat(64) },
+        { key: 'file:moved', baseId: 'base-a', hash: 'b'.repeat(64) },
+        { key: 'file:recent', baseId: 'base-a', hash: 'c'.repeat(64) }] } };
+    const removed = { documentIds: ['moved', 'recent'], imageIds: [], recordIds: [], localRevision: null };
+    const recordings = new RecordingLibrary(path.join(userData, 'recordings'));
+    try {
+      for (let attempt = 0; attempt < 2; attempt++)
+        await checkOrRemoveMovedProfileAssets(userData, '', recordings, receipt, removed, signal());
+      await checkOrRemoveMovedProfileAssets(userData, '', recordings,
+        { ...receipt, plan: { items: [{ key: 'base:emptied', hash: 'd'.repeat(64) }] } },
+        { ...removed, documentIds: [] }, signal());
+      expect(Object.keys((await readCatalog(root)).documents)).toEqual(['keep']);
+      for (const name of (await readdir(root)).filter(name => name.startsWith('catalog-backup-')))
+        expect(Object.values((await readCatalog(root, name)).documents).every(entry => entry.document.baseId === 'another')).toBe(true);
+      expect(await readdir(path.join(root, 'revisions'))).toEqual([prior.documents.keep.revision]);
+      expect(await readFile(body)).toEqual(expected);
+    } finally { fork.mockReset(); }
+  }, 30000);
   it('cleans every legacy revision before ordinary indexing, resumes cleanup on reopen and re-encodes even unchanged originals', async () => {
     const root = await directory();
     const steady = input('steady', '# Stable heading\nUnchanged original paragraph.');

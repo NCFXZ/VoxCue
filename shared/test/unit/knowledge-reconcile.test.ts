@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb';
-import { localKnowledge, documentRevision, restoreSyncedBase, restoreSyncedDocument } from '../../src/services/knowledge';
-import { markBaseRemoval } from '../../src/services/knowledgeIndex';
+import { localKnowledge, documentRevision, removeSyncedLibraryOriginals, restoreSyncedBase, restoreSyncedDocument } from '../../src/services/knowledge';
+import { knowledgeStatusLabel, markBaseRemoval } from '../../src/services/knowledgeIndex';
+import { digestCloudBlob, localCloudItem, removeLocalSyncItem } from '../../src/services/cloudData';
 import { KNOWLEDGE_INDEX_VERSION } from '../../electron/contracts/knowledge';
 import { useKnowledgeIndex } from '../../src/stores/knowledgeIndex';
 import { useKnowledge } from '../../src/stores/knowledge';
+import { buildImportPlan, prepareImportWrites } from '../../src/services/accountImportPlan';
 import type {
   KnowledgeCall,
   KnowledgeDocument,
@@ -44,7 +46,7 @@ function engine() {
   const imported: { id: string; text: string }[] = [];
   let active = 0,
     maximum = 0;
-  let beforeImport: (() => Promise<void>) | undefined;
+  let beforeImport: ((call: Extract<KnowledgeCall, { op: 'import' }>) => Promise<void>) | undefined;
   let listener: ((status: KnowledgeStatus) => void) | undefined;
   const knowledge = vi.fn(async (call: KnowledgeCall) => {
     if (call.op === 'status')
@@ -53,7 +55,7 @@ function engine() {
     active++;
     maximum = Math.max(maximum, active);
     try {
-      await beforeImport?.();
+      await beforeImport?.(call);
       imported.push({ id: call.documentId, text: new TextDecoder().decode(call.bytes) });
       const document = {
         documentId: call.documentId,
@@ -95,6 +97,18 @@ function engine() {
   };
 }
 
+it('checks a fully indexed startup catalog once across all libraries', async () => {
+  const f = engine();
+  for (let i = 0; i < 24; i++) {
+    for (const doc of await originals('startup-' + i, 3))
+      f.indexed.set(doc.id, { documentId: doc.id, baseId: doc.baseId, available: true,
+        indexVersion: KNOWLEDGE_INDEX_VERSION } as KnowledgeDocument);
+  }
+  await useKnowledgeIndex.getState().reconcile();
+  expect(f.imported).toHaveLength(0);
+  expect(f.knowledge.mock.calls.filter(([call]) => call.op === 'status')).toHaveLength(1);
+});
+
 it('80 imports and duplicate requests stay serial and preserve every original', async () => {
   const docs = await originals('bulk', 80);
   const f = engine();
@@ -111,6 +125,68 @@ it('80 imports and duplicate requests stay serial and preserve every original', 
   expect(f.maximum).toBe(1);
   expect(f.imported).toHaveLength(80);
   expect(new Set(f.imported.map((doc) => doc.id)).size).toBe(80);
+});
+
+it('publishes a hundred documents from a committed account migration in five library batches', async () => {
+  const f = engine();
+  const base = { id: 'migration', createdAt: 1, name: 'Migration' };
+  const documents = Array.from({ length: 100 }, (_, i) => {
+    const blob = new Blob(['synthetic ' + i]);
+    return { id: 'm' + i, baseId: base.id, name: i + '.txt', createdAt: 1, size: blob.size, type: 'text/plain', blob };
+  });
+  const plan = await buildImportPlan([{ type: 'base', base }, ...documents.map(document => ({ type: 'file' as const, document }))], () => {});
+  const writes = await prepareImportWrites(plan, ['base:' + base.id], () => {});
+  await writes.commit();
+  await vi.waitFor(() => expect(Object.keys(useKnowledgeIndex.getState().requests)).toHaveLength(0));
+  const calls = f.knowledge.mock.calls.map(([call]) => call);
+  expect(calls.filter(call => call.op === 'finish-index-batch' && call.commit)).toHaveLength(5);
+  expect(calls.filter(call => call.op === 'import' && call.batchId && call.force)).toHaveLength(100);
+  expect(f.imported).toHaveLength(100);
+});
+
+it.each(['rebuild', 'selection'])('aggregates the whole %s until its final write and isolates queued libraries', async mode => {
+  const docs = await originals('alpha', 2), [other] = await originals('beta', 1);
+  const f = engine(), store = useKnowledgeIndex.getState;
+  const close = store().connect();
+  const turns = Array.from({ length: 3 }, () => ({ started: Promise.withResolvers<string>(), release: Promise.withResolvers<void>() }));
+  let turn = 0;
+  f.before(async call => {
+    const gate = turns[turn++];
+    gate.started.resolve(call.documentId);
+    await gate.release.promise;
+  });
+  const send = (id: string, phase: KnowledgeStatus['phase'], completed: number, total: number) =>
+    f.emit({ documentId: id, requestId: store().requests[id], phase, completed, total });
+  const work = mode === 'rebuild' ? store().reconcile('alpha') : store().indexSelection(docs);
+  let queued: Promise<void> | undefined;
+  try {
+    const first = await turns[0].started.promise;
+    queued = store().index(other);
+    send(first, 'embedding', 1, 2);
+    expect(store().libraryProgress).toEqual({ alpha: 25, beta: 0 });
+    expect(knowledgeStatusLabel(store().tasks[first])).toBe('索引中 50%');
+    send(first, 'indexing', 0, 2);
+    expect(store().libraryProgress.alpha).toBe(50);
+    expect(knowledgeStatusLabel(store().tasks[first])).toBe('正在写入索引…');
+    turns[0].release.resolve();
+    const second = await turns[1].started.promise;
+    send(second, 'embedding', 1, 2);
+    expect(store().libraryProgress).toEqual({ alpha: 75, beta: 0 });
+    f.emit({ documentId: second, requestId: 'retired', phase: 'ready', completed: 1, total: 1 });
+    expect(store().libraryProgress.alpha).toBe(75);
+    send(second, 'indexing', 0, 2);
+    expect(store().libraryProgress.alpha).toBe(99);
+    turns[1].release.resolve();
+    await turns[2].started.promise;
+    expect(store().libraryProgress).toEqual({ beta: 0 });
+    send(other.id, 'embedding', 1, 4);
+    expect(store().libraryProgress.beta).toBe(25);
+  } finally {
+    for (const gate of turns) gate.release.resolve();
+    await Promise.all([work, queued]);
+    close();
+  }
+  expect(store().libraryProgress).toEqual({});
 });
 
 it.each(['document', 'library'])('a pending file read cannot index after %s deletion', async (mode) => {
@@ -172,6 +248,53 @@ it('checks the deletion intent again inside the cloud restore write transaction'
   await expect(restoreSyncedDocument({ ...doc, name: 'changed.txt' }, documentRevision(doc), beginDeletion))
     .rejects.toThrow('正在删除');
   expect((await localKnowledge.listDocuments(doc.baseId))[0].name).toBe(doc.name);
+});
+
+it('removes only reviewed originals and refuses a nonempty library or an edit during index cleanup', async () => {
+  const [doc] = await originals('selected-library', 1);
+  const [untouched] = await originals('another-library', 1);
+  const file = 'file:' + doc.id, base = 'base:' + doc.baseId;
+  const hash = async (key: string) => digestCloudBlob(await (await localCloudItem('knowledgebase', key))!.blob());
+  const originalHash = await hash(file), baseHash = await hash(base);
+  const f = engine();
+  const guard = () => {};
+  await expect(removeLocalSyncItem(base, baseHash, guard, base)).rejects.toThrow('本地数据已有修改');
+  await expect(removeLocalSyncItem(file, '0'.repeat(64), guard, base)).rejects.toThrow('本地数据已有修改');
+  expect(f.knowledge).not.toHaveBeenCalled();
+  f.knowledge.mockImplementationOnce(async () => {
+    await restoreSyncedDocument({ ...doc, name: 'changed.md' }, documentRevision(doc));
+    return { ok: true, value: null };
+  });
+  await expect(removeLocalSyncItem(file, originalHash, guard, base)).rejects.toThrow('本地数据已有修改');
+  expect((await localKnowledge.listDocuments(doc.baseId))[0].name).toBe('changed.md');
+  await removeLocalSyncItem(file, await hash(file), guard, base);
+  await removeLocalSyncItem(base, baseHash, guard, base);
+  expect((await localKnowledge.listBases()).map(b => b.id)).toEqual([untouched.baseId]);
+  expect((await localKnowledge.listDocuments(untouched.baseId)).map(d => d.id)).toEqual([untouched.id]);
+});
+
+it('commits only reviewed library removals together and aborts them all on a late local edit', async () => {
+  const docs = await originals('group', 3), root = 'base:group';
+  const [other] = await originals('elsewhere', 1);
+  const keys = docs.slice(0, 2).map(doc => 'file:' + doc.id);
+  const capture = async () => new Map([
+    [root, documentRevision((await localKnowledge.listBases()).find(b => b.id === 'group'))] as const,
+    ...(await localKnowledge.listDocuments('group')).map(doc => ['file:' + doc.id, documentRevision(doc)] as const),
+  ]);
+  const check = vi.fn(async () => {
+    await restoreSyncedDocument({ ...docs[1], name: 'updated.txt' }, documentRevision(docs[1]));
+  });
+  await expect(removeSyncedLibraryOriginals(root, await capture(), keys, check, () => {})).rejects.toThrow('本地数据已有修改');
+  expect(check).toHaveBeenCalledOnce();
+  expect(await localKnowledge.listDocuments('group')).toHaveLength(3);
+  let active = true;
+  await expect(removeSyncedLibraryOriginals(root, await capture(), keys, async () => { active = false; }, () => {
+    if (!active) throw Error('account changed');
+  })).rejects.toThrow('account changed');
+  expect(await localKnowledge.listDocuments('group')).toHaveLength(3);
+  await removeSyncedLibraryOriginals(root, await capture(), keys, async () => {}, () => {});
+  expect((await localKnowledge.listDocuments('group')).map(doc => doc.id)).toEqual([docs[2].id]);
+  expect((await localKnowledge.listDocuments('elsewhere')).map(doc => doc.id)).toEqual([other.id]);
 });
 
 it('keeps a same-name cloud original that arrived after the local import checked its replacement targets', async () => {
@@ -569,6 +692,26 @@ it('a queued old-library check keeps its error scope after the library is closed
   expect(read).toHaveBeenCalledWith('old-library');
   expect(f.imported).toHaveLength(1);
   expect(useKnowledgeIndex.getState().error).toBeNull();
+});
+
+it('a retired startup scan cannot schedule a waiting library in the next connection', async () => {
+  const [doc] = await originals('retired-owner', 1);
+  const f = engine();
+  const started = Promise.withResolvers<void>(), release = Promise.withResolvers<void>();
+  f.before(async () => { started.resolve(); await release.promise; });
+  const store = useKnowledgeIndex.getState;
+  const disconnect = store().connect();
+  const global = store().reconcile();
+  await started.promise;
+  const queued = store().reconcile(doc.baseId);
+  disconnect();
+  const next = store().connect();
+  const reads = vi.spyOn(localKnowledge, 'listDocuments');
+  try {
+    release.resolve();
+    await Promise.all([global, queued]);
+    expect(reads).not.toHaveBeenCalled();
+  } finally { next(); }
 });
 
 it('a replacement during an active import gets one subsequent job with current bytes', async () => {

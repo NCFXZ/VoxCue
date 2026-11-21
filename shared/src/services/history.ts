@@ -134,10 +134,10 @@ export function createHistoryService(
   const list = () => readHistorySnapshot(storage.getItem(key));
   return {
     list,
-    save(record) {
+    save(record, preserveTitle = true) {
       const records = list();
       const previous = records.find((item) => item.id === record.id);
-      record = keepTitle(record, previous);
+      if (preserveTitle) record = keepTitle(record, previous);
       if (!validHistoryRecord(record)) throw new Error('历史记录数据无法读取');
       const next = [record, ...records.filter(item => item.id !== record.id)];
       if (previous) stageHistoryImages(storage, previous, record);
@@ -196,6 +196,7 @@ export type HistorySummary = Omit<InterviewRecord, 'answers' | 'transcripts'> & 
   imageIds: string[];
   embeddedPreviewIds?: string[];
   revision: string;
+  modifiedAt?: number;
 };
 export type HistoryChange = { id: string; previous?: InterviewRecord; next?: InterviewRecord };
 
@@ -302,7 +303,7 @@ async function mergeRows(db: IDBDatabase, rows: InterviewRecord[], verifyLegacy?
           readRequest(records.get(row.id)), readRequest(directory.get(row.id)),
         ]);
         if (!sameValue(saved, row) || typeof summary?.revision !== 'string' ||
-            !sameValue(summary, directoryEntry(row, summary.revision))) throw invalid();
+            !sameValue(summary, { ...directoryEntry(row, summary.revision), modifiedAt: summary.modifiedAt })) throw invalid();
       }
       const raw = localStorage.getItem(key);
       if (raw !== null && raw !== verifyLegacy) throw Error('迁移期间本地资料已更改，请重试。');
@@ -321,6 +322,64 @@ async function withHistoryDatabase<T>(work: (db: IDBDatabase) => Promise<T>) {
     }
     return await work(db);
   } finally { db.close(); }
+}
+
+/** Read-only migration manifest. Keep the original legacy snapshot until the move is committed. */
+export async function readImportHistory() {
+  const previous = readHistorySnapshot(localStorage.getItem(key));
+  const legacy = new Map(previous.map(row => [row.id, row]));
+  if (legacy.size !== previous.length) throw invalid();
+  let rows: HistorySummary[] = [];
+  if (typeof indexedDB !== 'undefined' && await hasDocumentsDatabase()) {
+    const db = await openDocumentsDatabase(true);
+    try {
+      if (db.objectStoreNames.contains(historyStoreNames[0])) {
+        rows = await readStore(db, 'readonly', async tx => {
+          const records = tx.objectStore(historyStoreNames[0]);
+          const summaries: HistorySummary[] = await readRequest(tx.objectStore(historyStoreNames[1]).getAll());
+          if (summaries.length !== await readRequest(records.count())) throw invalid();
+          for (const summary of summaries) {
+            const old = legacy.get(summary.id);
+            if (!old) continue;
+            if (!sameValue(old, await readRequest(records.get(summary.id))))
+              throw Error('新旧面试记录内容不一致，原始记录已保留。');
+            legacy.delete(summary.id);
+          }
+          return summaries;
+        });
+      }
+    } finally { db.close(); }
+  }
+  for (const row of legacy.values()) rows.push(directoryEntry(row, ''));
+  async function withCurrentRecord<T>(summary: HistorySummary, select: (load: () => Promise<InterviewRecord>) => Promise<T>) {
+    const old = legacy.get(summary.id);
+    if (old) return select(async () => old);
+    const db = await openDocumentsDatabase(true);
+    try {
+      return await readStore(db, 'readonly', async tx => {
+        const current = await readRequest(tx.objectStore(historyStoreNames[1]).get(summary.id));
+        if (!current || current.revision !== summary.revision) throw Error('来源资料已改变，请重新选择。');
+        return select(async () => checkedRecord(await readRequest(tx.objectStore(historyStoreNames[0]).get(summary.id))));
+      });
+    } finally { db.close(); }
+  }
+  let previews: { summary: HistorySummary; byId: Map<string, string> } | undefined;
+  return {
+    rows: byDate(rows),
+    read: (summary: HistorySummary) => withCurrentRecord(summary, load => load()),
+    preview(summary: HistorySummary, id: string) {
+      return withCurrentRecord(summary, async load => {
+        if (previews?.summary !== summary) {
+          const byId = new Map<string, string>();
+          for (const answer of (await load()).answers)
+            for (const image of answer.images ?? [])
+              if (image.preview) byId.set(image.id, image.preview);
+          previews = { summary, byId };
+        }
+        return previews.byId.get(id);
+      });
+    },
+  };
 }
 
 // Read a source partition without opening it for upgrade or removing the previous format.
@@ -384,7 +443,7 @@ async function changeOne(id: string, change: Change, options: SaveOptions = {}, 
     if (remove || next) {
       changed = !sameValue(current, next);
       if (changed) {
-        if (next) store.save(next);
+        if (next) store.save(next, false);
         else store.remove(id);
       }
     }
@@ -437,6 +496,12 @@ export const historyRepository = {
     }
     return withHistoryDatabase(db => readStore(db, 'readonly', tx => readRequest(tx.objectStore(historyStoreNames[1]).get(id))));
   },
+  async imageOwners(id: string): Promise<string[]> {
+    if (typeof indexedDB === 'undefined')
+      return localHistory.list().filter(record => historyImageIds(record).includes(id)).map(record => record.id);
+    return withHistoryDatabase(db => readStore(db, 'readonly', async tx =>
+      (await readRequest(tx.objectStore(historyStoreNames[1]).index('imageIds').getAllKeys(id))).map(String)));
+  },
   async imageReference(id: string): Promise<{ id: string; preview?: string } | undefined> {
     function reference(row: InterviewRecord) {
       let found: { id: string; preview?: string } | undefined;
@@ -463,8 +528,8 @@ export const historyRepository = {
       return found;
     }));
   },
-  async save(record: InterviewRecord, options?: SaveOptions): Promise<InterviewRecord> {
-    return (await changeOne(record.id, current => keepTitle(record, current), options))!;
+  async save(record: InterviewRecord, options?: SaveOptions & { replaceTitle?: boolean }): Promise<InterviewRecord> {
+    return (await changeOne(record.id, current => options?.replaceTitle ? record : keepTitle(record, current), options))!;
   },
   updateTitle(id: string, change: (current: InterviewRecord) => InterviewRecord | undefined) {
     return changeOne(id, current => current ? change(current) : undefined);
@@ -477,7 +542,7 @@ export const historyRepository = {
       return { ...current, title, titleStatus: 'ready', titleSource: 'manual', titleError: undefined };
     });
   },
-  async remove(id: string) { await changeOne(id, () => undefined, {}, true); },
+  async remove(id: string, options?: SaveOptions) { await changeOne(id, () => undefined, options, true); },
   async mergeMissing(rows: InterviewRecord[]) {
     if (typeof indexedDB === 'undefined') {
       const existing = new Set(localHistory.list().map(row => row.id));

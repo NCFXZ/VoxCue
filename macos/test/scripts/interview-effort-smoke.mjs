@@ -71,7 +71,7 @@ ipcMain.handle = (channel, listener) => handle(channel, channel === 'interview:u
   : listener);
 const {ChatGPTAuthService} = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/auth/service.js'))});
 const {ChatGPTService} = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/chat/service.js'))});
-const {modelEfforts} = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/chat/models.js'))});
+const {advertisedEfforts} = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/chat/models.js'))});
 const {SpeechHost} = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/speech/host.js'))});
 const {ComponentService} = require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components/service.js'))});
 // Keep this controls/IPC regression independent of installed model caches. The
@@ -98,15 +98,17 @@ const {ScreenPermission}=require(${JSON.stringify(path.join(workspace.platformRo
 ScreenPermission.prototype.call=async()=>({status:'granted',message:'Synthetic screenshot permission'});
 require(${JSON.stringify(path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/speech/hardware.js'))}).SpeechHardwareProbe.prototype.read=async()=>({cuda:false,metal:true});
 ChatGPTAuthService.prototype.session = async () => ({mode:'chatgpt', user:{id:'fixture',name:'Test',email:''},expiresAt:Date.now()+3600000});
-ChatGPTService.prototype.models = async () => {
+ChatGPTService.prototype.models = async (force) => {
   if (globalThis.failNextModelRead) {
     globalThis.failNextModelRead = false;
     throw Error('Synthetic model lookup failed');
   }
+  if (force && globalThis.nextCatalogModel) globalThis.publishedModel = globalThis.nextCatalogModel;
   return [
-  {id:'test-model',label:'Test Model',description:'',reasoningEfforts:modelEfforts({slug:'gpt-6.1-sol',supported_reasoning_levels:['ultra','max','xhigh','high','medium','low']})},
+  {id:'test-model',label:'Test Model',description:'',reasoningEfforts:advertisedEfforts(['ultra','max','xhigh','high','medium','low'])},
   {id:'restricted-model',label:'Restricted Model',description:'',reasoningEfforts:['medium']},
   {id:'unknown-model',label:'Unknown Model',description:''},
+  ...(globalThis.publishedModel ? [{id:globalThis.publishedModel,label:globalThis.publishedModel,description:''}] : []),
   ...Array.from({length:16},(_,index)=>({id:'scroll-model-'+index,label:'Synthetic scrolling model '+index,description:'',reasoningEfforts:['low','high']}))
   ];
 };
@@ -176,6 +178,14 @@ try {
   assert.notEqual(combinedTrigger.background, 'rgba(0, 0, 0, 0)');
   assert.ok(Math.abs(combinedTrigger.labelGap - 6) < 1 / 32, JSON.stringify(combinedTrigger));
   const modelPopup = await openModelMenu(main, '面试回答模型', '面试回答思考强度');
+  async function checkRefresh(menu, newModel) {
+    const option = menu.getByRole('menuitemradio', { name: newModel, exact: true });
+    assert.equal(await option.count(), 0);
+    await app.evaluate((_, id) => { globalThis.nextCatalogModel = id; }, newModel);
+    await menu.getByRole('menuitem', { name: '刷新模型列表', exact: true }).click();
+    await option.waitFor();
+  }
+  await checkRefresh(modelPopup, 'pre-interview-new-model');
   await modelPopup.locator('.reasoning-model-list').evaluate((node) => {
     node.scrollTop = node.scrollHeight;
   });
@@ -228,7 +238,10 @@ try {
     .getByRole('button', { name: '聊天模型', exact: true })
     .getByText('Test Model', { exact: true })
     .waitFor();
-  await main.getByRole('button', { name: '聊天模型', exact: true }).click();
+  const chatPopup = await openModelMenu(main);
+  await checkRefresh(chatPopup, 'preparation-new-model');
+  assert.equal(await chatPopup.getAttribute('data-side'), 'top');
+  await chatPopup.getByRole('menuitemradio', { name: 'Test Model', exact: true }).click();
   const chatEffort = main.getByRole('slider', { name: '思考强度', exact: true });
   assert.equal(await chatEffort.getAttribute('min'), '0');
   assert.equal(await chatEffort.getAttribute('max'), '4');
@@ -368,6 +381,9 @@ try {
   await activeSettings.getByRole('heading', { name: '面试设置', exact: true }).waitFor();
   const activeEffort = activeSettings.getByRole('button', { name: '面试回答模型', exact: true });
   await assertControlRows(activeSettings);
+  const liveMenu = await openModelMenu(floating, '面试回答模型', '面试思考强度');
+  await checkRefresh(liveMenu, 'live-interview-new-model');
+  await floating.keyboard.press('Escape');
   await activeEffort.click();
   const activeSlider = activeSettings.getByRole('slider', { name: '面试思考强度', exact: true });
   await activeSlider.evaluate(async (node) => {

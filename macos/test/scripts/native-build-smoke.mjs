@@ -102,23 +102,23 @@ run('/usr/bin/xcrun', [
   '-o',
   binding,
 ]);
-const launcher = path.join(testRoot, 'VoxCue');
-run('/usr/bin/xcrun', [
-  ...common,
-  '-fobjc-arc',
-  'native/Launcher.mm',
-  '-framework',
-  'Foundation',
-  '-o',
-  launcher,
-]);
-for (const file of [audio, binding, launcher]) {
+const clock = path.join(testRoot, 'VoxCue.AudioClock.node');
+run('/usr/bin/xcrun', [...common, '-DNAPI_VERSION=8', '-bundle', '-undefined', 'dynamic_lookup',
+  '-I', path.join(root, '.cache/node-api-headers'), 'native/AudioClock.cpp', '-framework', 'CoreAudio', '-o', clock]);
+for (const file of [audio, binding, clock]) {
   assert.match(run('/usr/bin/otool', ['-l', file]), /\bminos 14\.2\b/);
   run('/usr/bin/codesign', ['--force', '--sign', '-', file]);
   run('/usr/bin/codesign', ['--verify', '--strict', file]);
   if (!run('/usr/bin/file', [file]).includes('arm64'))
     throw Error('Unexpected native architecture');
 }
+// Bracket the binding with the kernel's sleep-excluding clock, without starting a capture.
+const uptime = () => Number(run('/usr/bin/python3', ['-c',
+  'import time; print(time.clock_gettime_ns(time.CLOCK_UPTIME_RAW) / 1e6)']));
+const before = uptime();
+const boundary = Number(run(workspace.platformRequire('electron'), ['-e', `console.log(require(${JSON.stringify(clock)})())`],
+  { ...process.env, ELECTRON_RUN_AS_NODE: '1' }));
+assert.ok(before <= boundary && boundary <= uptime(), 'Unmute must use the Core Audio host clock');
 const code = `const binding=require(${JSON.stringify(binding)});if(typeof binding.preflight()!=='boolean')throw Error('Invalid Node-API response');console.log('Node-API 8 preflight ABI loaded; no permission request or pixel capture');`;
 console.log(
   run(workspace.platformRequire('electron'), ['-e', code], {
@@ -127,5 +127,5 @@ console.log(
   }).trim(),
 );
 console.log(
-  'Core Audio, screen-permission binding and launcher compiled/verified in temporary storage; running production binaries were not overwritten.',
+  'Core Audio and screen-permission binding compiled/verified in temporary storage; running production binaries were not overwritten.',
 );

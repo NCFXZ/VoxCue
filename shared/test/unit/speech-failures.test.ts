@@ -36,7 +36,8 @@ vi.mock('node:worker_threads', async () => {
     },
   };
 });
-import { SpeechController } from '../../../shared/electron/backend/speech/controller';
+import { SpeechController, type CaptureAdapter } from '../../../shared/electron/backend/speech/controller';
+import { SpeechCoordinator } from '../../electron/application/speech';
 import { useInterview } from '../../src/stores/interview';
 import { localHistory } from '../../src/services/history';
 const controllers: SpeechController[] = [];
@@ -51,17 +52,46 @@ afterEach(async () => {
   await Promise.allSettled(controllers.splice(0).map((controller) => controller.close()));
   vi.useRealTimers();
 });
-function controller(start = async () => {}, stop = async () => {}) {
+function controller(start = async () => {}, stop = async () => {},
+  create: CaptureAdapter['create'] = () => ({ start, stop })) {
   const instance = new SpeechController('model', 'helper', () => {}, {
     devices: async () => [{ id: 'mic', source: 'microphone', name: 'Synthetic', default: true }],
-    create: () => ({ start, stop }),
+    create,
   });
   controllers.push(instance);
   return instance;
 }
 const begin = { op: 'start' as const, options: { sources: ['microphone' as const] } };
-it.each(['inference', 'exit'])('自动清理失效识别进程后，结束面试仍归档为尾段可能不完整（%s）', async failure => {
+it.each(['dictation', 'audio-test'])('空闲后回收 %s 模型，连续听写复用 Worker', async kind => {
   const service = controller();
+  const sessions = new SpeechCoordinator({ call: call => service.call(call), stop: () => {} });
+  if (kind === 'audio-test') {
+    await sessions.dictation({ op: 'test', id: 'audio-test', options: begin.options });
+    await vi.advanceTimersByTimeAsync(10_000);
+  } else {
+    await sessions.dictation({ op: 'start' });
+    await sessions.dictation({ op: 'stop' });
+  }
+  expect(sessions.busy).toBe(false);
+  const retire = vi.spyOn(runtime.workers[0], 'terminate');
+  await vi.advanceTimersByTimeAsync(29_999);
+  expect(retire).not.toHaveBeenCalled();
+  await sessions.dictation({ op: 'start' });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(retire).not.toHaveBeenCalled();
+  expect(runtime.workers).toHaveLength(1);
+  await sessions.dictation({ op: 'stop' });
+  await vi.advanceTimersByTimeAsync(30_000);
+  expect(retire).toHaveBeenCalledOnce();
+  await sessions.dictation({ op: 'start' });
+  expect(runtime.workers).toHaveLength(2);
+});
+it.each(['inference', 'exit', 'capture-overflow'])('采集或识别失败后，结束面试仍归档为尾段可能不完整（%s）', async failure => {
+  let overflow!: () => void;
+  const service = controller(undefined, undefined, (_helper, _source, _device, _audio, fail, lost) => {
+    overflow = () => { lost(); fail('synthetic capture overflow', false); };
+    return { start: async () => {}, stop: async () => {} };
+  });
   const storage = new Map<string, string>();
   vi.stubGlobal('localStorage', {
     getItem: (key: string) => storage.get(key) ?? null,
@@ -73,6 +103,7 @@ it.each(['inference', 'exit'])('自动清理失效识别进程后，结束面试
     useInterview.setState({ mode: 'local', status: 'running', sessionId: crypto.randomUUID(),
       startedAt: Date.now(), transcriptTailIncomplete: false });
     if (failure === 'exit') runtime.workers[0].emit('exit', 1);
+    else if (failure === 'capture-overflow') overflow();
     else runtime.workers[0].emit('message', { error: 'synthetic inference failure' });
     await vi.advanceTimersByTimeAsync(1);
     expect((await service.call({ op: 'status' })).state).toBe('error');

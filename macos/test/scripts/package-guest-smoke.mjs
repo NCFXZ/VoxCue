@@ -1,17 +1,25 @@
 import { testRoot, spawnTestProcess } from '../../../shared/test/scripts/test-workspace.mjs';
 import workspace from '../../../shared/scripts/workspace.mjs';
 import { cp, mkdir, readFile, writeFile, realpath, readlink, lstat } from 'node:fs/promises';
+import { createReadStream } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import path from 'node:path';
+import os from 'node:os';
 import assert from 'node:assert/strict';
 import { holdDesktopAwake, requireUnlockedDesktop } from './desktop-session.mjs';
-import { upgradeBaselineVersions, verifiedUpgradeArchive } from './package-upgrade-baselines.mjs';
+import { upgradeBaselinesFor, verifiedUpgradeArchive } from './package-upgrade-baselines.mjs';
 
 const screenshotOnly = process.argv.includes('--screenshot-only');
+const installOnly = process.argv.includes('--install-only');
+const runtimeOnly = process.argv.includes('--runtime-only');
+const upgradesOnly = process.argv.includes('--upgrades-only');
 const retainVM = process.argv.includes('--retain-vm');
-if (process.argv.slice(2).some(arg => !['--screenshot-only', '--retain-vm'].includes(arg)))
-  throw Error('Use --screenshot-only for the targeted regression; --retain-vm keeps its stopped isolated environment.');
+const upgradeVersions = upgradeBaselinesFor(process.argv.slice(2));
+if ((screenshotOnly && (installOnly || runtimeOnly || upgradesOnly)) || (upgradesOnly && (runtimeOnly || installOnly)) ||
+    process.argv.slice(2).some(arg => !arg.startsWith('--from=') &&
+      !['--screenshot-only', '--install-only', '--runtime-only', '--upgrades-only', '--retain-vm'].includes(arg)))
+  throw Error('Use the package guest checks documented in TEST_GUEST.md.');
 // The VM is provisioned separately from an authenticated public image. It must
 // be disposable and stopped; this runner never attaches an existing live user VM.
 const tart = process.env.VOXCUE_TEST_TART;
@@ -27,10 +35,25 @@ if (
     'Use explicit disposable Tart VM, release and authenticated component cache inputs.',
   );
 const ownerRoot = path.dirname(home);
-const owner = JSON.parse(await readFile(path.join(ownerRoot, '.owner.json'), 'utf8'));
+const temporaryRoots = [await realpath(os.tmpdir()), '/private/tmp'];
+assert.ok(temporaryRoots.some(root => ownerRoot.startsWith(root + path.sep)),
+  'The guest must use a dedicated temporary root');
+for (const folder of [ownerRoot, home]) {
+  const info = await lstat(folder);
+  assert.ok(info.isDirectory() && info.uid === process.getuid() &&
+    !(info.mode & 0o022) && await realpath(folder) === folder, 'Unsafe guest directory');
+}
+assert.equal((await lstat(ownerRoot)).mode & 0o777, 0o700, 'Guest root must be private');
+async function ownedRecord(name) {
+  const file = path.join(ownerRoot, name);
+  const info = await lstat(file);
+  assert.ok(info.isFile() && info.uid === process.getuid() && info.nlink === 1 &&
+    !(info.mode & 0o022) && info.size <= 4096, 'Unsafe guest ownership or image record');
+  return JSON.parse(await readFile(file, 'utf8'));
+}
+const owner = await ownedRecord('.owner.json');
 assert.equal(owner.kind, 'voxcue-macos-120');
 assert.equal(owner.uid, process.getuid());
-assert.equal(await realpath(ownerRoot), ownerRoot);
 const toolEnvironment = {
   PATH: process.env.PATH,
   TMPDIR: process.env.TMPDIR,
@@ -38,8 +61,21 @@ const toolEnvironment = {
   TART_HOME: home,
   TART_NO_AUTO_PRUNE: '1',
 };
-const source = JSON.parse(await readFile(path.join(ownerRoot, 'vm-image-source.json'), 'utf8'));
-assert.match(source.reference, /^ghcr\.io\/cirruslabs\/macos-tahoe-base@sha256:[a-f0-9]{64}$/);
+const source = await ownedRecord('vm-image-source.json');
+const cirrusImage = 'ghcr.io/cirruslabs/macos-tahoe-base@sha256:65c3133a633fda8753cf1f71f2d55727792d534a2125b0032466563dcc8e58fd';
+const appleImage = 'https://updates.cdn-apple.com/2026FallFCS/c202a724-db7e-4d56-917b-110aa0226507/UniversalMac_27.2.1_26B131_Restore.ipsw';
+if (source.reference === appleImage) {
+  const ipsw = path.join(ownerRoot, path.basename(new URL(appleImage).pathname));
+  const info = await lstat(ipsw);
+  assert.ok(info.isFile() && info.uid === process.getuid() && info.nlink === 1 &&
+    info.size === 25595954706 && !(info.mode & 0o022), 'Expected the owned Apple restore image');
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(ipsw, { highWaterMark: 4 * 1024 * 1024 })) hash.update(chunk);
+  assert.equal(hash.digest('hex'), '233e85a09887579d47d0b195e7db72be7f204261059c6946f719acf6b300814f',
+    'Apple restore image differs from the authenticated release');
+} else {
+  assert.equal(source.reference, cirrusImage, 'Guest image must match the pinned release source');
+}
 assert.match(source.preparedVM ?? '', /^voxcue[\w-]+-base$/,
   'Prepare a stopped SIP-enabled baseline from the pinned public image first');
 assert.notEqual(vm, source.preparedVM, 'The disposable run must not delete its preparation baseline');
@@ -84,6 +120,8 @@ async function copy(source, destination) {
 for (const relative of [
   'shared/package.json',
   'shared/scripts',
+  'shared/src/services',
+  'shared/electron/contracts',
   'shared/test/scripts',
   'shared/test/fixtures',
   'macos/scripts',
@@ -132,13 +170,23 @@ await cp(path.join(workspace.platformRoot, 'node_modules'), path.join(repo, 'mac
 });
 console.log('Guest dependency staging complete; copying release' + (screenshotOnly ? ' for screenshot-only acceptance.' : ' and authenticated models.'));
 await copy(release, path.join(inputs, 'release'));
-if (!screenshotOnly) {
-  for (const fromVersion of upgradeBaselineVersions)
+if (!screenshotOnly && (!runtimeOnly || installOnly)) {
+  for (const fromVersion of upgradeVersions)
     await copy(
       await verifiedUpgradeArchive(fromVersion),
-      path.join(repo, 'macos/release', fromVersion, `VoxCue-${fromVersion}-arm64.zip`),
+      path.join(inputs, 'previous', fromVersion, `VoxCue-${fromVersion}-arm64.zip`),
     );
-  await copy(cache, path.join(inputs, 'components'));
+}
+const modelsInput = path.join(inputs, 'components');
+if (upgradesOnly) {
+  const output = path.join(workspace.platformRoot, 'dist-electron/shared/electron/backend/components');
+  const { packagesFor } = workspace.platformRequire(path.join(output, 'catalog.js'));
+  const { componentLocation } = workspace.platformRequire(path.join(output, 'service.js'));
+  const rag = packagesFor(process.platform, process.arch).find(item => item.id === 'rag');
+  assert.ok(rag, 'Archived knowledge checks require the RAG package');
+  await copy(componentLocation(cache, rag), componentLocation(modelsInput, rag));
+} else if (!screenshotOnly) {
+  await copy(cache, modelsInput);
 }
 // virtiofs can reject framework symlinks while traversing the shared tree.
 // Transfer one regular archive and restore its links on the guest's local disk.
@@ -239,10 +287,19 @@ try {
   await guest(
     `const fs=require('node:fs'),cp=require('node:child_process');
 const root=${JSON.stringify(guestRoot)},mount='/Volumes/My Shared Files/voxcue-inputs';
+if (${source.reference === appleImage} && cp.execFileSync('/usr/bin/sw_vers',['-buildVersion'],{encoding:'utf8'}).trim()!=='26B131')
+  throw Error('The booted guest does not match the verified Apple restore build');
 fs.mkdirSync(root,{mode:0o700,recursive:true});
 const uuid=cp.execFileSync('/usr/sbin/ioreg',['-rd1','-c','IOPlatformExpertDevice'],{encoding:'utf8'}).match(/"IOPlatformUUID"\\s*=\\s*"([A-Fa-f0-9-]+)"/)[1];
 fs.writeFileSync(root+'/context.json',JSON.stringify({version:1,root,nonce:${JSON.stringify(nonce)},guestUID:process.getuid(),guestMachineUUID:uuid,hostMachineUUID:${JSON.stringify(hostUUID)},syntheticIPv4:'192.168.248.2'}),{mode:0o600,flag:'wx'});
 cp.execFileSync('/usr/bin/ditto',['-x','-k',mount+'/repo.zip',root]);
+// The published ZIPs are already compressed. Copy their original bytes to the
+// local guest disk and recheck their pins there before extraction.
+for(const version of ${JSON.stringify(!screenshotOnly && (!runtimeOnly || installOnly) ? upgradeVersions : [])}) {
+  const dir=root+'/repo/macos/release/'+version, name='VoxCue-'+version+'-arm64.zip';
+  fs.mkdirSync(dir,{recursive:true});
+  fs.copyFileSync(mount+'/previous/'+version+'/'+name,dir+'/'+name,fs.constants.COPYFILE_EXCL);
+}
 const check='import {requireGuestIsolation} from '+JSON.stringify(root+'/repo/macos/test/scripts/guest-isolation.mjs')+'; import {requireUnlockedDesktop} from '+JSON.stringify(root+'/repo/macos/test/scripts/desktop-session.mjs')+'; await requireGuestIsolation(); requireUnlockedDesktop();';
 cp.execFileSync('/opt/homebrew/bin/node',['--input-type=module','-e',check],{env:{...process.env,VOXCUE_TEST_GUEST_CONTEXT:root+'/context.json'},stdio:'inherit'});
 const nic=cp.execFileSync('/sbin/ifconfig',['en0'],{encoding:'utf8'});
@@ -253,13 +310,27 @@ console.log('Guest isolated input staging complete; no routed network, clipboard
 `,
     300000,
   );
-  for (const [name, args] of screenshotOnly ? [['package-screenshot-smoke.mjs', []]] : [
-    ['package-security-smoke.mjs', []],
-    ['package-runtimes-smoke.mjs', []],
-    ['package-smoke.mjs', ['--install-archive']],
-    ['components-smoke.mjs', []],
-  ])
-    await guest(
+  const installation = ['package-smoke.mjs', ['--install-archive']];
+  const checks = screenshotOnly ? [['package-screenshot-smoke.mjs', []]]
+    : upgradesOnly ? [['package-smoke.mjs', ['--upgrades-only', ...process.argv.slice(2).filter(arg => arg.startsWith('--from='))]]]
+    : runtimeOnly ? [
+      ['package-dmg-install.mjs', []],
+      ['package-runtimes-smoke.mjs', []],
+      ['package-screenshot-smoke.mjs', []],
+      ['components-smoke.mjs', []],
+      ...(installOnly ? [installation] : []),
+    ]
+    : installOnly ? [installation] : [
+      ['package-dmg-install.mjs', []],
+      ['package-security-smoke.mjs', []],
+      ['package-runtimes-smoke.mjs', []],
+      installation,
+      ['components-smoke.mjs', []],
+    ];
+  const failures = [];
+  for (const [name, args] of checks) {
+    try {
+      await guest(
       `const cp=require('node:child_process');
 const root=${JSON.stringify(guestRoot)},mount='/Volumes/My Shared Files/voxcue-inputs';
 const env={...process.env,VOXCUE_TEST_GUEST_CONTEXT:root+'/context.json',VOXCUE_TEST_RELEASE_DIR:mount+'/release',VOXCUE_TEST_COMPONENT_CACHE:mount+'/components'};
@@ -267,7 +338,16 @@ const result=cp.spawnSync(process.execPath,[root+'/repo/macos/test/scripts/'+${J
 if(result.error)throw result.error;process.exitCode=result.status??1;
 `,
       1260000,
-    );
+      );
+    } catch (error) {
+      requireUnlockedDesktop();
+      if (boot.exitCode !== null || boot.signalCode !== null) throw error;
+      // Independent product fixtures use separate owner profiles. Preserve
+      // each failure without letting an early assertion hide later coverage.
+      failures.push(new Error(name, { cause: error }));
+    }
+  }
+  if (failures.length) throw new AggregateError(failures, 'Guest acceptance failed');
 } finally {
   try {
     try {
@@ -294,6 +374,10 @@ if(result.error)throw result.error;process.exitCode=result.status??1;
   }
 }
 console.log(
-  'PASS: disposable guest ' + (screenshotOnly ? 'final-ASAR screenshot regression' : 'final-product and final-ASAR acceptance') +
+  'PASS: disposable guest ' + (screenshotOnly ? 'final-ASAR screenshot regression' :
+    upgradesOnly ? 'archived-version upgrades' :
+    runtimeOnly ? 'DMG installation, packaged AI runtimes, screenshot worker and components' +
+      (installOnly ? ', including archived-version upgrades' : '') :
+    installOnly ? 'installation and archived-version upgrades' : 'final-product and final-ASAR acceptance') +
   (retainVM ? ' completed; retained guest is stopped for subsequent isolated checks.' : ' completed; guest inputs and profiles removed.'),
 );

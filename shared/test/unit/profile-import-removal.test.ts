@@ -1,6 +1,9 @@
-import { IDBFactory, IDBKeyRange } from 'fake-indexeddb';
+import { IDBFactory, IDBKeyRange, IDBObjectStore } from 'fake-indexeddb';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { createProfileImportReader } from '../../src/services/profileImportReader';
+import { captureImportSource, createProfileImportReader } from '../../src/services/profileImportReader';
+import { planSourceRemoval } from '../../src/services/profileImportRemoval';
+import { validRemovalPlan } from '../../electron/backend/profileMoveReceipt';
+import { maxRestoreItems } from '../../electron/contracts/restoreData';
 import { historyRepository, type InterviewRecord } from '../../src/services/history';
 import { localKnowledge, openDocumentsDatabase } from '../../src/services/knowledge';
 import { localRevision } from '../../src/services/localImportRevision';
@@ -9,6 +12,20 @@ import { profileStorageKey } from '../../src/services/storedValues';
 import { recoverInterviewDrafts, startInterviewDraft } from '../../src/services/interviewDraft';
 
 const owner = 'account:' + crypto.randomUUID();
+it('counts all selected profile fields as one source item at the migration limit', async () => {
+  const source = await captureImportSource();
+  source.profile = JSON.stringify({ name: 'Example', background: 'Example', jobDescription: '' });
+  const blob = new Blob(['fixture']);
+  source.entries.push({ key: 'base:library', blob });
+  for (let index = 0; index < maxRestoreItems - 2; index++)
+    source.entries.push({ key: 'file:' + index, parent: 'base:library', blob });
+  const keys = ['profile:name', 'profile:background', 'base:library'];
+  const plan = await planSourceRemoval(source, keys);
+  expect(plan.items).toHaveLength(maxRestoreItems + 1);
+  expect(validRemovalPlan(plan)).toBe(true);
+  plan.items.push({ key: 'record:extra', hash: plan.items[0].hash });
+  expect(validRemovalPlan(plan)).toBe(false);
+});
 const profile = { name: 'Synthetic', background: 'Keep me', jobDescription: 'Example' };
 const base = { id: 'library', name: 'Library', createdAt: 1 };
 const record = (id: string, images: string[]): InterviewRecord => ({
@@ -21,6 +38,64 @@ const record = (id: string, images: string[]): InterviewRecord => ({
   transcripts: [],
   answers: [{ id: 'answer', question: 'Q', content: 'A', images: images.map((id) => ({ id })) }],
 });
+it('accepts a migration receipt for every screenshot of a supported interview', async () => {
+  const source = record(crypto.randomUUID(), []);
+  const ids = Array.from({ length: 4095 }, () => crypto.randomUUID());
+  source.answers = ids.map(id => ({ id, question: 'Q', content: 'A', images: [{ id }] }));
+  localStorage.setItem('copilot-interview-history-v1', JSON.stringify([source]));
+  const reader = await createProfileImportReader();
+  const key = 'record:' + source.id;
+  expect(reader.items.find(item => item.key === key)?.imageIds).toEqual(ids);
+  const plan = await reader.planRemoval([key]);
+  expect(plan.items[0].imageIds).toEqual(ids);
+  expect(validRemovalPlan(plan)).toBe(true);
+  plan.items[0].imageIds!.push(crypto.randomUUID());
+  expect(validRemovalPlan(plan)).toBe(false);
+});
+it('previews the source directory without loading record bodies and guards deferred reads by revision', async () => {
+  await historyRepository.save(record('first', []));
+  await historyRepository.save(record('second', []));
+  const bodies: unknown[] = [];
+  const get = IDBObjectStore.prototype.get;
+  vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(function (this: IDBObjectStore, key) {
+    if (this.name === 'interviewRecords') bodies.push(key);
+    return get.call(this, key);
+  });
+  const getAll = IDBObjectStore.prototype.getAll;
+  vi.spyOn(IDBObjectStore.prototype, 'getAll').mockImplementation(function (this: IDBObjectStore, ...args) {
+    if (this.name === 'interviewRecords') throw Error('Unexpected full history read');
+    return getAll.apply(this, args);
+  });
+  const reader = await createProfileImportReader();
+  expect(bodies).toEqual([]);
+  const first = reader.items.findIndex(item => item.key === 'record:first');
+  expect(reader.items[first].size).toBe(0);
+  expect(await reader.recordSize(first)).toBeGreaterThan(8);
+  expect(bodies).toEqual(['first']);
+  await historyRepository.rename('second', 'Edited after preview');
+  const second = reader.items.findIndex(item => item.key === 'record:second');
+  await expect(reader.recordSize(second)).rejects.toThrow('来源资料已改变');
+});
+it('reads one body for a run of embedded screenshot previews and rejects a changed interview', async () => {
+  const ids = Array.from({ length: 40 }, () => crypto.randomUUID());
+  const original = record('embedded', ids);
+  const preview = 'data:image/png;base64,iVBORw0KGgo=';
+  original.answers = ids.map(id => ({ id, question: 'Q', content: 'A', images: [{ id, preview }] }));
+  await historyRepository.save(original);
+  const reader = await createProfileImportReader();
+  const images = reader.items.flatMap((item, index) => item.key.startsWith('image:') ? [index] : []);
+  expect(images).toHaveLength(ids.length);
+  let bodies = 0;
+  const get = IDBObjectStore.prototype.get;
+  vi.spyOn(IDBObjectStore.prototype, 'get').mockImplementation(function (this: IDBObjectStore, key) {
+    if (this.name === 'interviewRecords') bodies++;
+    return get.call(this, key);
+  });
+  for (const index of images) expect(await reader.preview(index)).toBe(preview);
+  expect(bodies).toBe(1);
+  await historyRepository.rename(original.id, 'Edited during preview');
+  await expect(reader.preview(images[0])).rejects.toThrow('来源资料已改变');
+});
 let values: Map<string, string>;
 beforeEach(() => {
   values = new Map();
@@ -32,7 +107,7 @@ beforeEach(() => {
   vi.stubGlobal('indexedDB', new IDBFactory());
   vi.stubGlobal('window', new EventTarget());
 });
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it('retains newly recovered interview rows when a migration receipt describes an older snapshot', async () => {
   vi.stubGlobal('IDBKeyRange', IDBKeyRange);
